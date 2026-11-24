@@ -1844,12 +1844,15 @@ let execute_post t ~epoch req =
                    for_modal = None;
                    result;
                  })
-        | Cmd.Post_keeper_turn_interrupt { keeper; _ } ->
+        | Cmd.Post_keeper_turn_interrupt { keeper; target } ->
             let result =
               post_and_decode t ~path ~body
                 ~decode:Wire_fleet.decode_turn_interrupt_response
             in
-            Some (Msg.Reply_turn_interrupt { keeper; result })
+            Ui_bus.publish_stream_receipt t.bus
+              (Msg.Http_reply
+                 { epoch; reply = Msg.Reply_turn_interrupt { keeper; target; result } });
+            None
         | Cmd.Post_board_create _ ->
             let result = post_ack t ~path ~body in
             Some
@@ -2175,8 +2178,11 @@ let execute_post_stream t ~epoch req =
                 | Some held when held >= seq -> ()
                 | Some _ | None -> Atomic.set last_seq (Some seq))
           in
-          let publish_chunk chunk =
-            Ui_bus.publish_stream t.bus
+          let publish_chunk ?(receipt = false) chunk =
+            let publish =
+              if receipt then Ui_bus.publish_stream_receipt else Ui_bus.publish_stream
+            in
+            publish t.bus
               (Msg.Chat_stream_chunk
                  {
                    epoch;
@@ -2217,7 +2223,7 @@ let execute_post_stream t ~epoch req =
                         ((Wire_fleet.Chunk_turn_done _ | Wire_fleet.Chunk_error _)
                          as chunk) ->
                         Atomic.set terminal_seen true;
-                        publish_chunk chunk
+                        publish_chunk ~receipt:true chunk
                     | Ok
                         (( Wire_fleet.Chunk_run_started _
                          | Wire_fleet.Chunk_runtime_attempt_started _
@@ -2270,7 +2276,7 @@ let execute_post_stream t ~epoch req =
             run_chat_stream_result (fun () ->
                 run submitted_to ~reattaches:0 ~since_seq:request.since_seq)
           in
-          Ui_bus.publish_stream t.bus
+          Ui_bus.publish_stream_receipt t.bus
             (Msg.Chat_stream_done
                {
                  epoch;

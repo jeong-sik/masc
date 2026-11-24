@@ -176,6 +176,9 @@ type get_request =
   | Get_addon_package_preview of { manifest_path : string }
   | Get_connector_names of { connector : string; scope : string }
 
+type keeper_turn_interrupt_target =
+  [ `Turn_token of string | `Operation_id of string ]
+
 type post_request =
   | Post_ask_answer of {
       keeper : string;
@@ -236,7 +239,7 @@ type post_request =
   | Post_tui_preference of Wire_config.tui_preference_change
   | Post_keeper_turn_interrupt of {
       keeper : string;
-      target : [ `Turn_token of string | `Operation_id of string ];
+      target : keeper_turn_interrupt_target;
     }
   | Post_board_create of {
       title : string;

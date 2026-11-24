@@ -879,34 +879,35 @@ let live_chat_phase ~(model : Model.t) ~keeper =
   let active_tx_opt = Drafts.active_tx_for_keeper ~keeper model.drafts in
   let queued_count = Drafts.queued_count_for_keeper ~keeper model.drafts in
   let active_turn_opt = Fleet_store.active_turn_for ~keeper model.fleet in
-  let is_interrupting =
-    (match buf_opt with
-    | Some b -> b.active && b.interrupting
-    | None -> false)
-    || (match active_tx_opt with
-       | Some { state = Drafts.Interrupting; _ } -> true
-       | Some
-           {
-             state =
-               ( Drafts.Queued
-               | Drafts.Sending
-               | Drafts.Pending_processing
-               | Drafts.Confirming_delivery
-               | Drafts.Delivered
-               | Drafts.No_operation_record
-               | Drafts.Failed_retryable _ );
-             _;
-           }
-       | None ->
-           false)
-    ||
-    match active_turn_opt with
-    | Some turn ->
-        Fleet_store.is_turn_interrupting ~keeper
-          ~interrupt_token:turn.interrupt_token model.fleet
-    | None -> false
+  let local_interrupting =
+    match buf_opt with
+    | Some b when b.active -> b.interrupting
+    | Some _ | None -> (
+        match active_tx_opt with
+        | Some { state = Drafts.Interrupting; _ } -> true
+        | Some
+            {
+              state =
+                ( Drafts.Queued
+                | Drafts.Sending
+                | Drafts.Pending_processing
+                | Drafts.Confirming_delivery
+                | Drafts.Delivered
+                | Drafts.No_operation_record
+                | Drafts.Failed_retryable _ );
+              _;
+            }
+        | None ->
+            false)
   in
-  if is_interrupting then Phase_interrupting
+  let observed_interrupting =
+    Option.exists
+      (fun (turn : Wire_fleet.active_turn) ->
+        Fleet_store.is_turn_interrupting ~keeper
+          ~interrupt_token:turn.interrupt_token model.fleet)
+      active_turn_opt
+  in
+  if local_interrupting || observed_interrupting then Phase_interrupting
   else
     match buf_opt with
     | Some b when b.active -> (
@@ -1107,6 +1108,83 @@ let is_phase_interruptible = function
   | Phase_failed _ ->
       false
 
+let interrupt_target_pending ~(model : Model.t) ~keeper = function
+  | `Turn_token interrupt_token ->
+      Fleet_store.is_turn_interrupting ~keeper ~interrupt_token model.fleet
+  | `Operation_id operation_id ->
+      Fleet_store.is_operation_interrupting ~keeper ~operation_id model.fleet
+      || Drafts.is_operation_interrupting ~keeper ~operation_id model.drafts
+
+let local_interrupt_target ~(model : Model.t) ~keeper
+    : Cmd.keeper_turn_interrupt_target option =
+  let operation ~request_id operation_id =
+    Some (`Operation_id (Option.value operation_id ~default:request_id))
+  in
+  match Fleet_store.String_map.find_opt keeper model.fleet.chat_streams with
+  | Some buf when buf.active -> operation ~request_id:buf.request_id buf.operation_id
+  | Some _ | None -> (
+      match Drafts.active_tx_for_keeper ~keeper model.drafts with
+      | Some
+          {
+            state = (Drafts.Pending_processing | Drafts.Interrupting);
+            request_id;
+            operation_id;
+            _;
+          }
+      | Some
+          {
+            state = Drafts.Sending;
+            mode = (Drafts.Mode_direct | Drafts.Mode_steer);
+            request_id;
+            operation_id;
+            _;
+          } ->
+          operation ~request_id operation_id
+      | Some { state = Drafts.Sending; mode = Drafts.Mode_follow_up; _ }
+      | Some
+          {
+            state =
+              ( Drafts.Queued
+              | Drafts.Confirming_delivery
+              | Drafts.Delivered
+              | Drafts.No_operation_record
+              | Drafts.Failed_retryable _ );
+            _;
+          }
+      | None -> None)
+
+let escape_interrupt_target ~(model : Model.t) ~keeper =
+  match Fleet_store.active_turn_for ~keeper model.fleet with
+  | Some turn when not (Wire_fleet.equal_turn_lane turn.lane Wire_fleet.Lane_chat) ->
+      None
+  | active_turn -> (
+      match local_interrupt_target ~model ~keeper with
+      | Some target when not (interrupt_target_pending ~model ~keeper target) ->
+          Some target
+      | Some _ -> None
+      | None ->
+          if Drafts.has_active_tx_for ~keeper model.drafts
+             || not (is_phase_interruptible (live_chat_phase ~model ~keeper))
+          then None
+          else
+            Option.map
+              (fun (turn : Wire_fleet.active_turn) -> `Turn_token turn.interrupt_token)
+              active_turn)
+
+let explicit_interrupt_target ~model ~keeper
+    (active_turn : Wire_fleet.active_turn option) =
+  match active_turn with
+  | Some turn when Wire_fleet.equal_turn_lane turn.lane Wire_fleet.Lane_maintenance ->
+      None
+  | Some turn ->
+      let observed_target = `Turn_token turn.interrupt_token in
+      if Wire_fleet.equal_turn_lane turn.lane Wire_fleet.Lane_chat then
+        Some
+          (Option.value (local_interrupt_target ~model ~keeper)
+             ~default:observed_target)
+      else Some observed_target
+  | None -> local_interrupt_target ~model ~keeper
+
 type stream_projection = {
   buf : Fleet_store.chat_stream_buffer;
   show_thinking : bool;
@@ -1216,7 +1294,7 @@ let project_transcript ~(model : Model.t) ~keeper =
           in
           if
             (not show_thinking) && (not show_tools) && (not show_text)
-            && Option.is_none show_error
+            && (not show_waiting) && Option.is_none show_error
           then None
           else
             Some
@@ -1248,6 +1326,7 @@ let project_transcript ~(model : Model.t) ~keeper =
     | Drafts.Confirming_delivery
     | Drafts.Interrupting
     | Drafts.Delivered
+    | Drafts.No_operation_record
     | Drafts.Failed_retryable _ ->
         false
   in

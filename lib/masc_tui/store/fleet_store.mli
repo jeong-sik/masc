@@ -246,11 +246,13 @@ val apply_chat_stream_chunk :
     signals explicit execution start ([Chunk_run_started] /
     [Chunk_accepted { state = Running }]). *)
 
-val mark_chat_stream_interrupting :
-  keeper:string -> request_id:string -> interrupting:bool -> t -> t
+val set_operation_interrupting :
+  keeper:string -> operation_id:string -> interrupting:bool -> t -> t
+
+val is_operation_interrupting : keeper:string -> operation_id:string -> t -> bool
 
 val mark_turn_interrupting : keeper:string -> interrupt_token:string -> t -> t
-val clear_turn_interrupting : keeper:string -> t -> t
+val clear_turn_interrupting : keeper:string -> interrupt_token:string -> t -> t
 val is_turn_interrupting : keeper:string -> interrupt_token:string -> t -> bool
 
 val clear_inactive_chat_stream_error : keeper:string -> t -> t

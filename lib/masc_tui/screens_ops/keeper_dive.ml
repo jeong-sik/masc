@@ -3468,22 +3468,15 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
           (Glyph.to_utf8 Glyph.Prompt_caret)
           name
     in
-    let has_running_turn = Chat_transcript.is_phase_interruptible chat_phase in
+    let has_running_turn =
+      Option.is_some (Chat_transcript.escape_interrupt_target ~model ~keeper:name)
+    in
     let can_explicit_interrupt =
-      match chat_phase with
-      | Chat_transcript.Phase_turn_running { turn; _ } ->
-          not (Wire_fleet.equal_turn_lane turn.lane Wire_fleet.Lane_maintenance)
-      | Chat_transcript.Phase_idle
-      | Chat_transcript.Phase_sending
-      | Chat_transcript.Phase_queued _
-      | Chat_transcript.Phase_awaiting_turn
-      | Chat_transcript.Phase_thinking
-      | Chat_transcript.Phase_tool_running _
-      | Chat_transcript.Phase_streaming
-      | Chat_transcript.Phase_confirming
-      | Chat_transcript.Phase_interrupting
-      | Chat_transcript.Phase_failed _ ->
-          false
+      let turn = Fleet_store.active_turn_for ~keeper:name model.fleet in
+      match Chat_transcript.explicit_interrupt_target ~model ~keeper:name turn with
+      | Some target ->
+          not (Chat_transcript.interrupt_target_pending ~model ~keeper:name target)
+      | None -> false
     in
     let memory_diagram_open =
       Nav.equal_keeper_tab tab Nav.Keeper_memory

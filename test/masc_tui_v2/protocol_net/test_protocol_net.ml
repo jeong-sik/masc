@@ -1378,6 +1378,27 @@ let test_ui_bus () =
   | _ -> Alcotest.fail "unexpected Ui_bus drain ordering or values");
   Alcotest.(check bool) "bus empty after drain" true (Ui_bus.is_empty bus)
 
+let test_ui_bus_preserves_ordered_receipts () =
+  let bus =
+    Ui_bus.create ~stream_capacity:2 ~key_equal:String.equal ~key_hash:Hashtbl.hash ()
+  in
+  Ui_bus.publish_stream bus "lost delta";
+  Ui_bus.publish_stream_receipt bus "interrupt acknowledged";
+  Ui_bus.publish_stream_receipt bus "chat ended";
+  Ui_bus.publish_stream bus "next turn started";
+  Ui_bus.publish_stream bus "next turn delta";
+  (match Ui_bus.drain_up_to ~max_items:2 bus with
+  | [ Ui_bus.Stream_gap 1; Ui_bus.Stream_event "interrupt acknowledged" ] -> ()
+  | _ -> Alcotest.fail "a displaced receipt is delivered after the real gap");
+  match Ui_bus.drain bus with
+  | [
+      Ui_bus.Stream_event "chat ended";
+      Ui_bus.Stream_event "next turn started";
+      Ui_bus.Stream_event "next turn delta";
+    ] ->
+      ()
+  | _ -> Alcotest.fail "a displaced completion must precede the next turn"
+
 (* 10. Sse_hub (GET-only streams, backoff reset) + Http_client (CTL header sanitization, 409 sha256) *)
 let test_sse_hub_and_http_client () =
   let ok_desired =
@@ -5570,6 +5591,8 @@ let () =
       ( "net"
       , [
           Alcotest.test_case "ui_bus_coalesce_and_512_gap" `Quick test_ui_bus;
+          Alcotest.test_case "ui_bus retains final receipts through overflow" `Quick
+            test_ui_bus_preserves_ordered_receipts;
           Alcotest.test_case "ui_bus_concurrent_no_lost_wakeup" `Quick
             test_ui_bus_concurrent_no_lost_wakeup;
           Alcotest.test_case "sse_hub_diff_and_http_409" `Quick

@@ -10561,7 +10561,10 @@ let test_reopen_keeper_queue_and_reconcile () =
     (tx_state (exact Running detached) = Drafts.Pending_processing);
   Alcotest.(check bool) "a delayed queue read cannot rewind processing" true
     (tx_state (exact Queued running) = Drafts.Pending_processing);
-  let interrupting = { running with drafts = Drafts.mark_interrupting ~now:t1 ~request_id:tx.request_id running.drafts } in
+  let interrupting =
+    { running with drafts = Drafts.set_operation_interrupting ~now:t1 ~keeper:"alpha"
+        ~operation_id:tx.request_id ~interrupting:true running.drafts }
+  in
   Alcotest.(check bool) "a running or queued read preserves a pending interrupt" true
     (tx_state (exact Queued (exact Running interrupting)) = Drafts.Interrupting);
   let settled = exact Succeeded running in
@@ -15742,6 +15745,39 @@ let test_active_turn_preview_visibility_and_queued_followup () =
       { m0 with drafts = Drafts.insert_text "go on" m0.drafts }
       Keymap.Submit_followup
   in
+  let m_sending_esc, sending_esc_cmds =
+    Update.step ~now:t0
+      { m1 with drafts = Drafts.set_focus false m1.drafts }
+      (Msg.Key_event (key Keymap.Input.Escape))
+  in
+  Alcotest.(check bool) "Esc leaves chat before the follow-up is accepted" true
+    (Option.is_none (Model.active_dive m_sending_esc));
+  Alcotest.(check bool) "Esc before acceptance sends no turn interrupt" false
+    (List.exists
+       (function
+         | Cmd.Http_post { req = Cmd.Post_keeper_turn_interrupt _; _ } -> true
+         | _ -> false)
+       (Cmd.flatten sending_esc_cmds));
+  let sending_maintenance =
+    {
+      m1 with
+      drafts = Drafts.set_focus false m1.drafts;
+      fleet =
+        Fleet_store.apply_turns ~observed_at:t0
+          [ turn_row_of { active_turn_no_tail with lane = Wire_fleet.Lane_maintenance } ]
+          m1.fleet;
+    }
+  in
+  let _, maintenance_cmds =
+    Update.step ~now:t0 sending_maintenance (Msg.Key_event (char_key ~ctrl:true "x"))
+  in
+  Alcotest.(check bool) "a sending follow-up cannot make a maintenance turn interruptible"
+    false
+    (List.exists
+       (function
+         | Cmd.Http_post { req = Cmd.Post_keeper_turn_interrupt _; _ } -> true
+         | _ -> false)
+       (Cmd.flatten maintenance_cmds));
   let tx_q =
     match Drafts.active_tx_for_keeper ~keeper m1.drafts with
     | Some tx -> tx
@@ -15795,39 +15831,10 @@ let test_active_turn_preview_visibility_and_queued_followup () =
          | Cmd.Http_post { req = Cmd.Post_keeper_turn_interrupt _; _ } -> true
          | _ -> false)
        (Cmd.flatten cmds_m2_esc));
-  let sections2 = Chat_transcript.project_transcript ~model:m2 ~keeper in
-  (match sections2 with
-  | [
-      Chat_transcript.Section_history _;
-      Chat_transcript.Section_active_turn _;
-      Chat_transcript.Section_pending [ { tx; error_only = false } ];
-    ] ->
-      Alcotest.(check bool) "queued follow-up stays Drafts.Queued" true
-        (Drafts.equal_tx_state tx.state Drafts.Queued)
-  | _ ->
-      Alcotest.fail
-        "expected [Section_history; Section_active_turn; Section_pending]");
-  (* 2b. Once a follow-up is promoted to Pending_processing (Accepted_running),
-     it moves ahead of Section_active_turn so prompt stays above turn output. *)
-  let m2_promoted =
-    {
-      m2 with
-      drafts =
-        Drafts.mark_accepted ~now:t1 ~request_id:tx_q.request_id
-          ~operation_id:(Some tx_q.request_id) m2.drafts;
-    }
-  in
-  (match Chat_transcript.project_transcript ~model:m2_promoted ~keeper with
-  | [
-      Chat_transcript.Section_history _;
-      Chat_transcript.Section_pending [ { tx; error_only = false } ];
-      Chat_transcript.Section_active_turn _;
-    ] ->
-      Alcotest.(check bool) "promoted follow-up sits ahead of active turn" true
-        (Drafts.equal_tx_state tx.state Drafts.Pending_processing)
-  | _ ->
-      Alcotest.fail
-        "expected promoted follow-up before Section_active_turn");
+  Alcotest.(check bool) "Esc preserves the queued follow-up" true
+    (match Drafts.active_tx_for_keeper ~keeper m2_esc.drafts with
+    | Some tx -> Drafts.equal_tx_state tx.state Drafts.Queued
+    | None -> false);
   (* 2c. An inactive stale stream (active = false) does not suppress Section_active_turn. *)
   let m2_stale_stream =
     let stale_buf : Fleet_store.chat_stream_buffer =
@@ -15837,7 +15844,6 @@ let test_active_turn_preview_visibility_and_queued_followup () =
         turn_ref = None;
         run_started = true;
         interrupting = false;
-        prior_msg_ids = Fleet_store.String_set.empty;
         text = "Earlier unpersisted reply";
         text_ownership = Cut_reply.fresh_ownership;
         thinking = "";
@@ -15867,36 +15873,6 @@ let test_active_turn_preview_visibility_and_queued_followup () =
          | Chat_transcript.Section_stream _ ->
              false)
        (Chat_transcript.project_transcript ~model:m2_stale_stream ~keeper));
-  (* 3. Row budget stays exact when text_tail transitions from empty to non-empty. *)
-  let rows_no_tail =
-    Chat_transcript.count_transcript_rows ~model:m2 ~keeper ~width:80
-  in
-  let turn_with_tail =
-    {
-      active_turn_no_tail with
-      preview =
-        Some
-          {
-            active_preview_waiting with
-            activity = Wire_fleet.Preview_streaming;
-            text_tail = "Updating fixture max-context values";
-          };
-    }
-  in
-  let m2_tail =
-    {
-      m2 with
-      fleet =
-        Fleet_store.apply_turns ~observed_at:t1
-          [ turn_row_of turn_with_tail ]
-          m2.fleet;
-    }
-  in
-  let rows_with_tail =
-    Chat_transcript.count_transcript_rows ~model:m2_tail ~keeper ~width:80
-  in
-  Alcotest.(check int) "non-empty preview text_tail adds exactly 1 transcript row"
-    (rows_no_tail + 1) rows_with_tail;
   (* 4. Ctrl+X interrupts the running autonomous turn without corrupting the
      queued follow-up tx, enters Phase_interrupting, and deduplicates repeats. *)
   let m_unfocused = { m2 with drafts = Drafts.set_focus false m2.drafts } in
@@ -16054,25 +16030,6 @@ let test_active_turn_preview_visibility_and_queued_followup () =
          | Cmd.Http_get { req = Cmd.Get_keeper_turns; _ } -> true
          | _ -> false)
        (Cmd.flatten cmds_sse_other));
-  (* 7. Preview_failed detail summary extracts last failure without leaking runtime_id. *)
-  let failed_turn =
-    {
-      active_turn_no_tail with
-      preview =
-        Some
-          {
-            active_preview_waiting with
-            activity = Wire_fleet.Preview_failed;
-            status_text =
-              "ollama-secret-rt · provider attempt failed · last failure: timeout\n30s";
-          };
-    }
-  in
-  let failed_en =
-    Say.resolve Say.Lang_en (Chat_transcript.active_turn_detail_summary failed_turn)
-  in
-  Alcotest.(check string) "Preview_failed strips runtime_id and normalizes failure detail"
-    "auto · Attempt failed · timeout 30s" failed_en;
   (* 8. Submitting while busy preserves a prior unpersisted stream buffer (tools/text)
      instead of wiping it with start_chat_stream. *)
   let prior_tool_buf : Fleet_store.chat_stream_buffer =
@@ -16082,7 +16039,6 @@ let test_active_turn_preview_visibility_and_queued_followup () =
       turn_ref = None;
       run_started = true;
       interrupting = false;
-      prior_msg_ids = Fleet_store.String_set.empty;
       text = "Prior streamed answer";
       text_ownership = Cut_reply.fresh_ownership;
       thinking = "";
@@ -16124,13 +16080,9 @@ let test_active_turn_preview_visibility_and_queued_followup () =
   Alcotest.(check int)
     "submitting while busy preserves prior stream tool cards"
     1 (List.length kept_buf.tools);
-  (* 9. Active stream after completed tools (before text deltas) sets show_waiting
-     and accounts for +1 row in count_transcript_rows. *)
+  (* Completed tools leave the active stream waiting for the response. *)
   let tool_done_active : Fleet_store.chat_stream_buffer =
     { prior_tool_buf with text = ""; active = true; ended = false }
-  in
-  let tool_done_inactive : Fleet_store.chat_stream_buffer =
-    { tool_done_active with active = false; ended = true }
   in
   let m_stream_wait =
     {
@@ -16145,18 +16097,6 @@ let test_active_turn_preview_visibility_and_queued_followup () =
         };
     }
   in
-  let m_stream_idle =
-    {
-      m_stream_wait with
-      fleet =
-        {
-          m_stream_wait.fleet with
-          chat_streams =
-            Fleet_store.String_map.add keeper tool_done_inactive
-              m_stream_wait.fleet.chat_streams;
-        };
-    }
-  in
   Alcotest.(check bool) "active stream with completed tools sets show_waiting = true"
     true
     (List.exists
@@ -16167,9 +16107,6 @@ let test_active_turn_preview_visibility_and_queued_followup () =
          | Chat_transcript.Section_pending _ ->
              false)
        (Chat_transcript.project_transcript ~model:m_stream_wait ~keeper));
-  Alcotest.(check int) "show_waiting adds exactly 1 row to count_transcript_rows"
-    (Chat_transcript.count_transcript_rows ~model:m_stream_idle ~keeper ~width:80 + 1)
-    (Chat_transcript.count_transcript_rows ~model:m_stream_wait ~keeper ~width:80);
   (* 10. Accepted_running emits Get_keeper_turns for live preview during wait. *)
   let _, cmds_acc_run =
     Update.step ~now:t1 m1
@@ -16184,7 +16121,7 @@ let test_active_turn_preview_visibility_and_queued_followup () =
                {
                  operation_id = tx_q.request_id;
                  queued_count = 0;
-                 state = Wire_fleet.Accepted_running;
+                 state = Keeper_chat_operation.State_name.Running;
                  interactive_outcome = None;
                  control_token = None;
                };
@@ -16196,7 +16133,25 @@ let test_active_turn_preview_visibility_and_queued_followup () =
          | Cmd.Http_get { req = Cmd.Get_keeper_turns; _ } -> true
          | _ -> false)
        (Cmd.flatten cmds_acc_run));
-  (* 11. Reply_turn_interrupt with paused=true clears Phase_interrupting cleanly. *)
+  let m_orphan_modal =
+    {
+      m0 with
+      nav =
+        {
+          m0.nav with
+          overlay = Some (Nav.Inline_action Nav.Board_new_post);
+        };
+      inline_modal = None;
+    }
+  in
+  let m_escaped, _ =
+    Update.step ~now:t1 m_orphan_modal (Msg.Key_event (key Keymap.Input.Escape))
+  in
+  Alcotest.(check bool) "Esc closes orphaned Inline_action overlay" true
+    (Option.is_none m_escaped.nav.overlay)
+
+let test_interrupt_reply_and_stream_completion_are_request_scoped () =
+  let keeper = "alpha-leader" in
   let m_chat_run =
     let base = Model.initial ~cols:120 ~rows:36 () in
     let base =
@@ -16233,7 +16188,7 @@ let test_active_turn_preview_visibility_and_queued_followup () =
                  {
                    operation_id = tx_s.request_id;
                    queued_count = 0;
-                   state = Wire_fleet.Accepted_running;
+                   state = Keeper_chat_operation.State_name.Running;
                    interactive_outcome = None;
                    control_token = None;
                  };
@@ -16241,40 +16196,59 @@ let test_active_turn_preview_visibility_and_queued_followup () =
     in
     m_acc
   in
-  let m_esc_int, _ =
+  let m_esc_int, interrupt_cmds =
     Update.step ~now:t1 m_chat_run (Msg.Key_event (key Keymap.Input.Escape))
   in
-  Alcotest.(check bool) "Esc on running chat turn enters Phase_interrupting" true
-    (Chat_transcript.equal_live_chat_phase
-       (Chat_transcript.live_chat_phase ~model:m_esc_int ~keeper)
-       Chat_transcript.Phase_interrupting);
-  let m_paused, _ =
-    Update.step ~now:t1 m_esc_int
-      (Msg.Http_reply
-         {
-           epoch = m_esc_int.epoch;
-           reply =
-             Msg.Reply_turn_interrupt
-               {
-                 keeper;
-                 result =
-                   Ok
-                     {
-                       signalled = false;
-                       paused = true;
-                       chat_control_token = None;
-                       reason = Some "admission_paused";
-                     };
-               };
-         })
+  let target =
+    match List.find_map
+      (function
+        | Cmd.Http_post { req = Cmd.Post_keeper_turn_interrupt { target; _ }; _ } ->
+            Some target
+        | _ -> None)
+      (Cmd.flatten interrupt_cmds)
+    with
+    | Some target -> target
+    | None -> Alcotest.fail "expected an operation interrupt"
   in
-  Alcotest.(check bool) "Reply_turn_interrupt paused=true clears Phase_interrupting"
-    false
-    (Chat_transcript.equal_live_chat_phase
-       (Chat_transcript.live_chat_phase ~model:m_paused ~keeper)
-       Chat_transcript.Phase_interrupting);
-  (* 12. Turn_idle reply and bounded Tick rechecks unstick Drafts.Interrupting. *)
-  let m_turn_idle, cmds_idle =
+  let stream model =
+    Fleet_store.String_map.find keeper model.Model.fleet.chat_streams
+  in
+  let request_id = (stream m_esc_int).request_id in
+  Alcotest.(check bool) "Esc targets this chat operation" true
+    (match target with
+    | `Operation_id id -> String.equal id request_id
+    | `Turn_token _ -> false);
+  Alcotest.(check bool) "Esc marks the operation as interrupting" true
+    (stream m_esc_int).interrupting;
+  let reply_to target result model =
+    Update.step ~now:t2 model
+      (Msg.Http_reply
+         { epoch = model.Model.epoch; reply = Msg.Reply_turn_interrupt { keeper; target; result } })
+  in
+  let m_late_reply, _ =
+    reply_to (`Operation_id "earlier-operation")
+      (Error (Msg.Transport (Health.Other_io "connection closed"))) m_esc_int
+  in
+  Alcotest.(check bool) "an earlier POST error leaves this operation interrupting"
+    true (stream m_late_reply).interrupting;
+  let m_paused, _ =
+    reply_to target
+      (Ok
+         {
+           signalled = false;
+           paused = true;
+           chat_control_token = None;
+           reason = Some "paused_pending_admission";
+         })
+      m_esc_int
+  in
+  Alcotest.(check bool) "the matching pause receipt releases the interrupt"
+    false (stream m_paused).interrupting;
+  Alcotest.(check bool) "a pause receipt preserves the accepted draft" true
+    (match Drafts.active_tx_for_keeper ~keeper m_paused.drafts with
+    | Some tx -> Drafts.equal_tx_state tx.state Drafts.Pending_processing
+    | None -> false);
+  let m_idle, _ =
     Update.step ~now:t2 m_esc_int
       (Msg.Http_reply
          {
@@ -16291,50 +16265,126 @@ let test_active_turn_preview_visibility_and_queued_followup () =
                   ]);
          })
   in
-  Alcotest.(check bool) "Reply_keeper_turns Turn_idle clears Phase_interrupting"
+  Alcotest.(check bool) "an idle Owner observation cannot close this chat stream"
+    false (stream m_idle).ended;
+  Alcotest.(check bool) "the draft awaits completion of its own stream" true
+    (match Drafts.active_tx_for_keeper ~keeper m_idle.drafts with
+    | Some tx -> Drafts.equal_tx_state tx.state Drafts.Interrupting
+    | None -> false);
+  let m_delta, _ =
+    Update.step ~now:t2 m_idle
+      (Msg.Chat_stream_chunk
+         {
+           epoch = m_idle.epoch;
+           keeper;
+           request_id;
+           is_btw = false;
+           chunk =
+             Wire_fleet.Chunk_text_delta
+               {
+                 operation_id = Some request_id;
+                 delta = "response in transit";
+                 owner = Wire_chat_journal.Unobserved_scope None;
+               };
+         })
+  in
+  Alcotest.(check string) "the stream still admits this operation's in-flight data"
+    "response in transit" (stream m_delta).text;
+  let m_completed, completion_cmds =
+    Update.step ~now:t2 m_delta
+      (Msg.Chat_stream_done
+         { epoch = m_delta.epoch; keeper; request_id; is_btw = false; result = Ok () })
+  in
+  Alcotest.(check bool) "the matching stream completion clears the interrupt"
+    false (stream m_completed).interrupting;
+  Alcotest.(check bool) "the matching stream completion reconciles the draft" true
+    (match Drafts.active_tx_for_keeper ~keeper m_completed.drafts with
+    | Some tx -> Drafts.equal_tx_state tx.state Drafts.Confirming_delivery
+    | None -> false);
+  Alcotest.(check bool) "the completion requests persisted chat history" true
+    (List.exists
+       (function
+         | Cmd.Http_get { req = Cmd.Get_chat_history { keeper = name; _ }; _ } ->
+             String.equal name keeper
+         | _ -> false)
+       (Cmd.flatten completion_cmds));
+  let escaped, cmds =
+    Update.step ~now:t2 m_esc_int (Msg.Key_event (key Keymap.Input.Escape))
+  in
+  Alcotest.(check bool) "Esc already awaiting an interrupt leaves chat" true
+    (Option.is_none (Model.active_dive escaped));
+  Alcotest.(check bool) "leaving an interrupting chat sends no second interrupt"
     false
+    (List.exists
+       (function
+         | Cmd.Http_post { req = Cmd.Post_keeper_turn_interrupt _; _ } -> true
+         | _ -> false)
+       (Cmd.flatten cmds));
+  let m_submitted, _ =
+    Update.execute_action ~now:t2
+      { m_esc_int with drafts = Drafts.insert_text "next request" m_esc_int.drafts }
+      Keymap.Submit_followup
+  in
+  let new_request_id =
+    match List.find_opt
+      (fun (tx : Drafts.pending_message) -> not (String.equal tx.request_id request_id))
+      (Drafts.pending_txs_for_keeper ~keeper m_submitted.drafts)
+    with
+    | Some tx -> tx.request_id
+    | None -> Alcotest.fail "missing second request"
+  in
+  let m_second_running, _ =
+    Update.step ~now:t2 m_submitted
+      (Msg.Chat_stream_chunk
+         {
+           epoch = m_submitted.epoch;
+           keeper;
+           request_id = new_request_id;
+           is_btw = false;
+           chunk =
+             Wire_fleet.Chunk_accepted
+               {
+                 operation_id = new_request_id;
+                 queued_count = 0;
+                 state = Keeper_chat_operation.State_name.Running;
+                 interactive_outcome = None;
+                 control_token = Some "newer-control";
+               };
+         })
+  in
+  let m_second_interrupt, second_cmds =
+    Update.step ~now:t2 m_second_running (Msg.Key_event (char_key ~ctrl:true "x"))
+  in
+  Alcotest.(check bool) "the new local stream supplies the running phase"
+    true
     (Chat_transcript.equal_live_chat_phase
-       (Chat_transcript.live_chat_phase ~model:m_turn_idle ~keeper)
-       Chat_transcript.Phase_interrupting);
-  Alcotest.(check bool) "Reply_keeper_turns Turn_idle fetches Get_chat_history"
+       (Chat_transcript.live_chat_phase ~model:m_second_running ~keeper)
+       Chat_transcript.Phase_awaiting_turn);
+  Alcotest.(check bool) "an earlier pending interruption cannot block the current target"
     true
     (List.exists
        (function
-         | Cmd.Http_get { req = Cmd.Get_chat_history { keeper = k; _ }; _ }
-           when String.equal k keeper ->
-             true
+         | Cmd.Http_post
+             { req = Cmd.Post_keeper_turn_interrupt { target = `Operation_id id; _ }; _ } ->
+             String.equal id new_request_id
          | _ -> false)
-       (Cmd.flatten cmds_idle));
-  let step_tick sec m =
-    let ts = Clock.Mono.of_ns (Int64.mul (Int64.of_int sec) 1_000_000_000L) in
-    Update.step ~now:ts m (Msg.Tick { wall_unix = float_of_int sec })
+       (Cmd.flatten second_cmds));
+  let m_after_old_receipt, _ =
+    reply_to target
+      (Ok
+         {
+           signalled = false;
+           paused = false;
+           chat_control_token = Some "older-control";
+           reason = Some "operation_not_current";
+         })
+      m_second_interrupt
   in
-  let m_tk1, _ = step_tick 6 m_esc_int in
-  let m_tk2, _ = step_tick 10 m_tk1 in
-  let m_tk3, _ = step_tick 14 m_tk2 in
-  let m_tk4, _ = step_tick 18 m_tk3 in
-  Alcotest.(check bool) "Bounded Tick rechecks unstick Drafts.Interrupting"
-    false
-    (Chat_transcript.equal_live_chat_phase
-       (Chat_transcript.live_chat_phase ~model:m_tk4 ~keeper)
-       Chat_transcript.Phase_interrupting);
-  (* 13. Esc closes an orphaned Inline_action overlay when inline_modal = None. *)
-  let m_orphan_modal =
-    {
-      m0 with
-      nav =
-        {
-          m0.nav with
-          overlay = Some (Nav.Inline_action Nav.Board_new_post);
-        };
-      inline_modal = None;
-    }
-  in
-  let m_escaped, _ =
-    Update.step ~now:t1 m_orphan_modal (Msg.Key_event (key Keymap.Input.Escape))
-  in
-  Alcotest.(check bool) "Esc closes orphaned Inline_action overlay" true
-    (Option.is_none m_escaped.nav.overlay)
+  Alcotest.(check bool) "the older result leaves the new stream interrupting"
+    true (stream m_after_old_receipt).interrupting;
+  Alcotest.(check (option string)) "the older result cannot replace the new control token"
+    (Some "newer-control")
+    (Fleet_store.chat_control_token_for ~keeper m_after_old_receipt.fleet)
 
 let () =
   Alcotest.run "masc_tui_store"
@@ -16520,5 +16570,7 @@ let () =
           Alcotest.test_case
             "Active turn preview visibility, queued follow-up separation, interrupt & Dive SSE refresh"
             `Quick test_active_turn_preview_visibility_and_queued_followup;
+          Alcotest.test_case "interrupt receipts and completion follow their own request"
+            `Quick test_interrupt_reply_and_stream_completion_are_request_scoped;
         ] );
     ]

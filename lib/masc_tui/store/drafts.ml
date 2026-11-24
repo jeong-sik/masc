@@ -636,35 +636,39 @@ let mark_confirming ~now ~request_id t =
         })
     t
 
-let mark_interrupting ~now ~request_id t =
-  update_tx ~request_id
-    (fun m ->
-      match m.state with
-      | Sending | Pending_processing ->
-          { m with state = Interrupting; updated_at = now }
-      | Queued
-      | Confirming_delivery
-      | Interrupting
-      | Delivered
-      | No_operation_record
-      | Failed_retryable _ ->
-          m)
-    t
+let matches_operation ~keeper ~operation_id (m : pending_message) =
+  String.equal m.keeper keeper
+  && (String.equal m.request_id operation_id
+     || Option.equal String.equal m.operation_id (Some operation_id))
 
-let clear_interrupting ~now ~request_id t =
-  update_tx ~request_id
-    (fun m ->
-      match m.state with
-      | Interrupting -> { m with state = Pending_processing; updated_at = now }
-      | Queued
-      | Sending
-      | Pending_processing
-      | Confirming_delivery
-      | Delivered
-      | No_operation_record
-      | Failed_retryable _ ->
-          m)
-    t
+let set_operation_interrupting ~now ~keeper ~operation_id ~interrupting t =
+  let pending_txs =
+    List.map
+      (fun (m : pending_message) ->
+        if matches_operation ~keeper ~operation_id m then
+          match interrupting, m.state with
+          | true, (Sending | Pending_processing) ->
+              { m with state = Interrupting; updated_at = now }
+          | false, Interrupting ->
+              let state =
+                if Option.is_some m.operation_id then Pending_processing
+                else Sending
+              in
+              { m with state; updated_at = now }
+          | false, (Sending | Pending_processing)
+          | true, Interrupting
+          | _, (Queued | Confirming_delivery | Delivered | No_operation_record | Failed_retryable _) ->
+              m
+        else m)
+      t.pending_txs
+  in
+  { t with pending_txs }
+
+let is_operation_interrupting ~keeper ~operation_id t =
+  List.exists
+    (fun (m : pending_message) ->
+      equal_tx_state m.state Interrupting && matches_operation ~keeper ~operation_id m)
+    t.pending_txs
 
 let downgrade_mode_to_follow_up ~request_id t =
   update_tx ~request_id

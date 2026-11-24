@@ -82,6 +82,20 @@ val is_phase_interruptible : live_chat_phase -> bool
 (** True when {!live_chat_phase} represents an actively executing turn that the
     operator can interrupt. *)
 
+val interrupt_target_pending :
+  model:Model.t -> keeper:string -> Cmd.keeper_turn_interrupt_target -> bool
+
+val escape_interrupt_target :
+  model:Model.t -> keeper:string -> Cmd.keeper_turn_interrupt_target option
+(** The target Esc is allowed to interrupt from the Keeper chat dive.
+    [None] leaves Esc available for navigation. *)
+
+val explicit_interrupt_target :
+  model:Model.t ->
+  keeper:string ->
+  Wire_fleet.active_turn option ->
+  Cmd.keeper_turn_interrupt_target option
+
 type stream_projection = {
   buf : Fleet_store.chat_stream_buffer;
   show_thinking : bool;

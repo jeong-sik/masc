@@ -1284,12 +1284,25 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
             chat_scroll_offset;
           })
 
-let mark_chat_stream_interrupting ~keeper ~request_id ~interrupting t =
+let active_stream_for_operation ~keeper ~operation_id t =
   match String_map.find_opt keeper t.chat_streams with
-  | Some b when String.equal b.request_id request_id && b.active ->
+  | Some b as found
+    when b.active
+         && (String.equal b.request_id operation_id
+            || Option.equal String.equal b.operation_id (Some operation_id)) ->
+      found
+  | Some _ | None -> None
+
+let set_operation_interrupting ~keeper ~operation_id ~interrupting t =
+  match active_stream_for_operation ~keeper ~operation_id t with
+  | Some b ->
       let next = { b with interrupting } in
       { t with chat_streams = String_map.add keeper next t.chat_streams }
-  | Some _ | None -> t
+  | None -> t
+
+let is_operation_interrupting ~keeper ~operation_id t =
+  Option.exists (fun b -> b.interrupting)
+    (active_stream_for_operation ~keeper ~operation_id t)
 
 let mark_turn_interrupting ~keeper ~interrupt_token t =
   {
@@ -1298,17 +1311,19 @@ let mark_turn_interrupting ~keeper ~interrupt_token t =
       String_map.add keeper interrupt_token t.interrupting_turn_tokens;
   }
 
-let clear_turn_interrupting ~keeper t =
-  {
-    t with
-    interrupting_turn_tokens =
-      String_map.remove keeper t.interrupting_turn_tokens;
-  }
-
 let is_turn_interrupting ~keeper ~interrupt_token t =
   match String_map.find_opt keeper t.interrupting_turn_tokens with
   | Some tok -> String.equal tok interrupt_token
   | None -> false
+
+let clear_turn_interrupting ~keeper ~interrupt_token t =
+  if is_turn_interrupting ~keeper ~interrupt_token t then
+    {
+      t with
+      interrupting_turn_tokens =
+        String_map.remove keeper t.interrupting_turn_tokens;
+    }
+  else t
 
 let clear_inactive_chat_stream_error ~keeper t =
   match String_map.find_opt keeper t.chat_streams with

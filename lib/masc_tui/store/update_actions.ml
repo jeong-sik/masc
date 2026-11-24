@@ -1297,6 +1297,30 @@ let board_recovery_keeper (m : Model.t) =
 let set_board_recovery (m : Model.t) board_recovery =
   { m with knowledge = { m.knowledge with board_recovery } }
 
+let request_keeper_interrupt ~now ~keeper ~target (m : Model.t) =
+  let fleet, drafts =
+    match target with
+    | `Turn_token interrupt_token ->
+        (Fleet_store.mark_turn_interrupting ~keeper ~interrupt_token m.fleet, m.drafts)
+    | `Operation_id operation_id ->
+        ( Fleet_store.set_operation_interrupting ~keeper ~operation_id
+            ~interrupting:true m.fleet
+        , Drafts.set_operation_interrupting ~now ~keeper ~operation_id
+            ~interrupting:true m.drafts )
+  in
+  ( Model.with_toast ~now ~level:Model.Toast_warning
+      (Say.make
+         ~ko:("키퍼 턴 중단 요청 전송: " ^ keeper)
+         ~en:("Interrupt requested for keeper turn: " ^ keeper))
+      { m with fleet; drafts }
+  , [
+      Cmd.Http_post
+        {
+          epoch = m.epoch;
+          req = Cmd.Post_keeper_turn_interrupt { keeper; target };
+        };
+    ] )
+
 let rec execute_slash ~now (m : Model.t) cmd =
   match cmd with
   | Slash.Pulse -> Update_nav.switch_workspace m Nav.Pulse
@@ -2439,86 +2463,8 @@ and execute_action ~now (m : Model.t) action =
               let active_chat_interrupt =
                 match Model.active_dive m with
                 | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_chat }) ->
-                    let phase = Chat_transcript.live_chat_phase ~model:m ~keeper:name in
-                    if not (Chat_transcript.is_phase_interruptible phase) then None
-                    else
-                      let active_stream_opt =
-                        match
-                          Fleet_store.String_map.find_opt name m.fleet.chat_streams
-                        with
-                        | Some s when s.active && not s.interrupting -> Some s
-                        | Some _ | None -> None
-                      in
-                      let interruptible_tx_opt =
-                        match Drafts.active_tx_for_keeper ~keeper:name m.drafts with
-                        | Some ({ state = Drafts.Sending | Drafts.Pending_processing; _ } as tx) ->
-                            Some tx
-                        | Some
-                            {
-                              state =
-                                ( Drafts.Queued
-                                | Drafts.Confirming_delivery
-                                | Drafts.Interrupting
-                                | Drafts.Delivered
-                                | Drafts.No_operation_record | Drafts.Failed_retryable _ );
-                              _;
-                            }
-                        | None ->
-                            None
-                      in
-                      let mark_ui_interrupting stream_opt tx_opt =
-                        let fleet =
-                          match stream_opt with
-                          | Some (s : Fleet_store.chat_stream_buffer) ->
-                              Fleet_store.mark_chat_stream_interrupting
-                                ~keeper:name ~request_id:s.request_id
-                                ~interrupting:true m.fleet
-                          | None -> m.fleet
-                        in
-                        let drafts =
-                          match tx_opt with
-                          | Some (tx : Drafts.pending_message) ->
-                              Drafts.mark_interrupting ~now
-                                ~request_id:tx.request_id m.drafts
-                          | None -> m.drafts
-                        in
-                        (fleet, drafts)
-                      in
-                      (match
-                         Fleet_store.active_turn_for ~keeper:name m.fleet
-                       , active_stream_opt
-                       , interruptible_tx_opt
-                       with
-                      | Some turn, stream_opt, tx_opt ->
-                          let fleet, drafts =
-                            mark_ui_interrupting stream_opt tx_opt
-                          in
-                          let fleet =
-                            Fleet_store.mark_turn_interrupting ~keeper:name
-                              ~interrupt_token:turn.interrupt_token fleet
-                          in
-                          Some
-                            ( name
-                            , `Turn_token turn.interrupt_token
-                            , fleet
-                            , drafts )
-                      | None, Some s, tx_opt ->
-                          let op_id =
-                            Option.value s.operation_id ~default:s.request_id
-                          in
-                          let fleet, drafts =
-                            mark_ui_interrupting (Some s) tx_opt
-                          in
-                          Some (name, `Operation_id op_id, fleet, drafts)
-                      | None, None, Some tx ->
-                          let op_id =
-                            Option.value tx.operation_id ~default:tx.request_id
-                          in
-                          let fleet, drafts =
-                            mark_ui_interrupting None (Some tx)
-                          in
-                          Some (name, `Operation_id op_id, fleet, drafts)
-                      | None, None, None -> None)
+                    Option.map (fun target -> (name, target))
+                      (Chat_transcript.escape_interrupt_target ~model:m ~keeper:name)
                 | Some
                     ( Nav.Dive_keeper
                         {
@@ -2541,20 +2487,8 @@ and execute_action ~now (m : Model.t) action =
                     None
               in
               match active_chat_interrupt with
-              | Some (keeper, target, fleet, drafts) ->
-                  ( Model.with_toast ~now ~level:Model.Toast_warning
-                      (Say.make
-                         ~ko:("키퍼 턴 중단 요청 전송: " ^ keeper)
-                         ~en:("Interrupt requested for keeper turn: " ^ keeper))
-                      { m with fleet; drafts }
-                  , [
-                      Cmd.Http_post
-                        {
-                          epoch = m.epoch;
-                          req =
-                            Cmd.Post_keeper_turn_interrupt { keeper; target };
-                        };
-                    ] )
+              | Some (keeper, target) ->
+                  request_keeper_interrupt ~now ~keeper ~target m
               | None -> (
                   match m.nav.dive_stack with
                   | top :: rest -> (
@@ -6276,53 +6210,36 @@ and execute_action ~now (m : Model.t) action =
             Update_nav.resolve_target_keeper m
       in
       match keeper_opt with
-      | None -> (m, [])
-      | Some keeper -> (
-          match Fleet_store.active_turn_for ~keeper m.fleet with
-          | Some turn
-            when Fleet_store.is_turn_interrupting ~keeper
-                   ~interrupt_token:turn.interrupt_token m.fleet ->
+      | None ->
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make ~ko:"중단할 대상 키퍼가 선택되지 않았습니다"
+                 ~en:"No target keeper selected to interrupt")
+              m
+          , [] )
+      | Some keeper ->
+          let active_turn = Fleet_store.active_turn_for ~keeper m.fleet in
+          (match Chat_transcript.explicit_interrupt_target ~model:m ~keeper active_turn with
+          | Some target when Chat_transcript.interrupt_target_pending ~model:m ~keeper target ->
               ( Model.with_toast ~now ~level:Model.Toast_info
                   (Say.make
                      ~ko:("이미 중단 요청을 전송했습니다: " ^ keeper)
                      ~en:("Interrupt already requested for " ^ keeper))
                   m
               , [] )
-          | Some turn
-            when Wire_fleet.equal_turn_lane turn.lane
-                   Wire_fleet.Lane_maintenance ->
-              ( Model.with_toast ~now ~level:Model.Toast_info
-                  (Say.make
-                     ~ko:("점검 턴은 중단할 수 없습니다: " ^ keeper)
-                     ~en:("Maintenance turn cannot be interrupted: " ^ keeper))
-                  m
-              , [] )
-          | Some turn ->
-              let fleet =
-                Fleet_store.mark_turn_interrupting ~keeper
-                  ~interrupt_token:turn.interrupt_token m.fleet
-              in
-              ( Model.with_toast ~now ~level:Model.Toast_warning
-                  (Say.make
-                     ~ko:("키퍼 턴 중단 요청 전송: " ^ keeper)
-                     ~en:("Interrupt requested for keeper turn: " ^ keeper))
-                  { m with fleet }
-              , [
-                  Cmd.Http_post
-                    {
-                      epoch = m.epoch;
-                      req =
-                        Cmd.Post_keeper_turn_interrupt
-                          { keeper; target = `Turn_token turn.interrupt_token };
-                    };
-                ] )
+          | Some target -> request_keeper_interrupt ~now ~keeper ~target m
           | None ->
-              ( Model.with_toast ~now ~level:Model.Toast_info
-                  (Say.make
-                     ~ko:("진행 중인 턴이 없습니다: " ^ keeper)
-                     ~en:("No active turn running for " ^ keeper))
-                  m
-              , [] )))
+              let detail =
+                match active_turn with
+                | Some _ ->
+                    Say.make
+                      ~ko:("점검 턴은 중단할 수 없습니다: " ^ keeper)
+                      ~en:("Maintenance turn cannot be interrupted: " ^ keeper)
+                | None ->
+                    Say.make
+                      ~ko:("진행 중인 턴이 없습니다: " ^ keeper)
+                      ~en:("No active turn running for " ^ keeper)
+              in
+              (Model.with_toast ~now ~level:Model.Toast_info detail m, [])))
   | Keymap.Quit_app -> (
       let is_armed =
         match m.quit_armed_at with

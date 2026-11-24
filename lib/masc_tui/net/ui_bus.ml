@@ -18,6 +18,8 @@ type ('snap_key, 'snap) snap_slot = {
   mutable value : 'snap;
 }
 
+type 'ev stream_entry = Event of 'ev | Receipt of 'ev
+
 type ('snap_key, 'snap, 'ev) t = {
   mu : Stdlib.Mutex.t;
   key_equal : 'snap_key -> 'snap_key -> bool;
@@ -27,10 +29,11 @@ type ('snap_key, 'snap, 'ev) t = {
   snap_buckets : (int, ('snap_key, 'snap) snap_slot list) Hashtbl.t;
   snap_order : ('snap_key, 'snap) snap_slot Queue.t;
   mutable snap_count : int;
-  ring : 'ev option array;
+  ring : 'ev stream_entry option array;
   ring_cap : int;
   mutable ring_head : int;
   mutable ring_len : int;
+  retained_receipts : 'ev Queue.t;
   mutable pending_gap : int;
   mutable total_coalesced_snapshots : int;
   mutable total_dropped_stream_events : int;
@@ -52,6 +55,7 @@ let create ?(stream_capacity = default_stream_capacity) ~key_equal ~key_hash
     ring_cap;
     ring_head = 0;
     ring_len = 0;
+    retained_receipts = Queue.create ();
     pending_gap = 0;
     total_coalesced_snapshots = 0;
     total_dropped_stream_events = 0;
@@ -100,24 +104,30 @@ let publish_snapshot t ~key value =
   in
   fire_wake t should_wake
 
-let publish_stream t ev =
+let publish_stream_entry t entry =
   let should_wake =
     Stdlib.Mutex.protect t.mu (fun () ->
         if t.ring_len < t.ring_cap then begin
           let tail = (t.ring_head + t.ring_len) mod t.ring_cap in
-          t.ring.(tail) <- Some ev;
+          t.ring.(tail) <- Some entry;
           t.ring_len <- t.ring_len + 1
         end
         else begin
-          (* Ring full: evict oldest entry, record exact gap, write newest at tail. *)
-          t.ring.(t.ring_head) <- Some ev;
-          t.ring_head <- (t.ring_head + 1) mod t.ring_cap;
-          t.pending_gap <- t.pending_gap + 1;
-          t.total_dropped_stream_events <- t.total_dropped_stream_events + 1
+          (match t.ring.(t.ring_head) with
+          | Some (Receipt ev) -> Queue.add ev t.retained_receipts
+          | Some (Event _) ->
+              t.pending_gap <- t.pending_gap + 1;
+              t.total_dropped_stream_events <- t.total_dropped_stream_events + 1
+          | None -> ());
+          t.ring.(t.ring_head) <- Some entry;
+          t.ring_head <- (t.ring_head + 1) mod t.ring_cap
         end;
         latch_wake_locked t)
   in
   fire_wake t should_wake
+
+let publish_stream t ev = publish_stream_entry t (Event ev)
+let publish_stream_receipt t ev = publish_stream_entry t (Receipt ev)
 
 let pop_one_snapshot_locked t =
   match Queue.take_opt t.snap_order with
@@ -142,14 +152,23 @@ let pop_one_stream_locked t =
     t.pending_gap <- 0;
     Some (Stream_gap gap)
   end
-  else if t.ring_len > 0 then begin
-    let entry = t.ring.(t.ring_head) in
-    t.ring.(t.ring_head) <- None;
-    t.ring_head <- (t.ring_head + 1) mod t.ring_cap;
-    t.ring_len <- t.ring_len - 1;
-    match entry with Some ev -> Some (Stream_event ev) | None -> None
-  end
-  else None
+  else
+    (* Displaced receipts were older than every event still in the ring. *)
+    match Queue.take_opt t.retained_receipts with
+    | Some ev -> Some (Stream_event ev)
+    | None when t.ring_len > 0 ->
+        let entry = t.ring.(t.ring_head) in
+        t.ring.(t.ring_head) <- None;
+        t.ring_head <- (t.ring_head + 1) mod t.ring_cap;
+        t.ring_len <- t.ring_len - 1;
+        (match entry with
+        | Some (Event ev | Receipt ev) -> Some (Stream_event ev)
+        | None -> None)
+    | None -> None
+
+let has_pending_locked t =
+  t.snap_count > 0 || t.pending_gap > 0 || t.ring_len > 0
+  || not (Queue.is_empty t.retained_receipts)
 
 let drain_up_to ~max_items t =
   if max_items <= 0 then []
@@ -167,9 +186,7 @@ let drain_up_to ~max_items t =
                   | None -> List.rev acc)
           in
           let drained = loop max_items [] in
-          let more =
-            t.snap_count > 0 || t.pending_gap > 0 || t.ring_len > 0
-          in
+          let more = has_pending_locked t in
           t.wake_pending <- false;
           let should_wake = if more then latch_wake_locked t else false in
           (drained, should_wake))
@@ -200,14 +217,13 @@ let drain t =
       List.rev !acc)
 
 let is_empty t =
-  Stdlib.Mutex.protect t.mu (fun () ->
-      t.snap_count = 0 && t.pending_gap = 0 && t.ring_len = 0)
+  Stdlib.Mutex.protect t.mu (fun () -> not (has_pending_locked t))
 
 let stats t =
   Stdlib.Mutex.protect t.mu (fun () ->
       {
         queued_snapshots = t.snap_count;
-        queued_stream_events = t.ring_len;
+        queued_stream_events = t.ring_len + Queue.length t.retained_receipts;
         pending_gap = t.pending_gap;
         total_coalesced_snapshots = t.total_coalesced_snapshots;
         total_dropped_stream_events = t.total_dropped_stream_events;

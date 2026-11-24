@@ -540,7 +540,10 @@ let render_evolution_view ~grid ~(rect : Rect.t) ~(theme : Theme.t)
           let bottom = Rect.bottom rect in
           let events = Knowledge_store.filtered_memory_activity_events ~keeper k in
           let filtering = not (String.equal (String.trim k.filter_query) "") in
-          if !y < bottom && (filtering || stale || act.undecodable_lines > 0) then begin
+          let show_journal_limit = act.journal_lines = act.limit && rect.h > 1 in
+          if !y < bottom
+             && (filtering || stale || act.undecodable_lines > 0 || show_journal_limit)
+          then begin
             let stale_s =
               if stale then " " ^ Glyph.to_utf8 Glyph.Transport_stale else ""
             in

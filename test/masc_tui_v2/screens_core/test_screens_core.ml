@@ -2956,6 +2956,37 @@ let test_setup_key_inline_modal_masks_secret () =
   assert_not_contains ~label:"setup_key_raw_secret_never_rendered"
     ~needle:"sk-SUPER-SECRET-TOKEN-999" txt
 
+let test_memory_activity_journal_window () =
+  let keeper = "alpha" in
+  let event : Wire_knowledge.memory_activity_event =
+    { identity = "event-1"; recorded_at_unix = 1.; revision = 1;
+      kind = Activity_created; before = [];
+      after = [ { memory_id = "fact-1"; claim = Some "visible claim" } ]; reason = None }
+  in
+  let render ~journal_lines ~rows =
+    let model = Model.initial ~lang:Say.Lang_en () in
+    let activity : Wire_knowledge.keeper_memory_activity =
+      { keeper; limit = 3; journal_lines; undecodable_lines = 0; events = [ event ]; notes = [] }
+    in
+    let knowledge = model.knowledge
+      |> Knowledge_store.set_memory_view_mode Knowledge_store.View_evolution
+      |> Knowledge_store.set_keeper_memory_activity ~keeper (obs activity)
+    in
+    let grid = Cell_grid.create ~cols:80 ~rows in
+    Memory_explorer.render_keeper_memory ~grid ~rect:(Rect.make ~x:0 ~y:0 ~w:80 ~h:rows)
+      ~theme:Theme.default ~bp:Layout.Compact ~model:{ model with knowledge } ~keeper
+      ~focused:true ~diff_scroll:0;
+    grid_all_text grid
+  in
+  let bounded = render ~journal_lines:3 ~rows:5 in
+  assert_contains ~label:"the latest journal window reached the request limit"
+    ~needle:"3/3 journal lines" bounded;
+  assert_contains ~label:"the selected event remains visible" ~needle:"visible claim" bounded;
+  assert_not_contains ~label:"a shorter successful read needs no coverage header"
+    ~needle:"journal lines" (render ~journal_lines:2 ~rows:5);
+  assert_contains ~label:"a single available body row still shows the selected event"
+    ~needle:"visible claim" (render ~journal_lines:3 ~rows:2)
+
 let test_memory_diff_viewport_skip_multi_row_selection () =
   let skip = Masc_tui_screens_core.Memory_explorer.diff_viewport_skip in
   (* Selected 3-row block [30..32] starts past avail_h=12 when scroll=15:
@@ -3780,6 +3811,8 @@ let () =
         ] );
       ( "memory_explorer",
         [
+          Alcotest.test_case "bounded journal activity preserves coverage and selection"
+            `Quick test_memory_activity_journal_window;
           Alcotest.test_case
             "diff_viewport_skip keeps multi-row selection inside visible slice"
             `Quick test_memory_diff_viewport_skip_multi_row_selection;

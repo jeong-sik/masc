@@ -1,4 +1,4 @@
-import { Either, Schema } from 'effect'
+import { Either, ParseResult, Schema } from 'effect'
 
 // Mirror of Keeper_turn_pulse.recent_turns_json (lib/keeper/keeper_turn_pulse.ml):
 // half-hour slots, newest first, a slot with no turn left out. A slot counts
@@ -45,9 +45,12 @@ export type KeeperTurnPulseReading =
 export function readKeeperTurnPulse(raw: unknown): KeeperTurnPulseReading {
   if (raw === null || raw === undefined) return { state: 'absent' }
   const decoded = Schema.decodeUnknownEither(KeeperTurnPulseSchema, { onExcessProperty: 'error' })(raw)
-  return Either.isRight(decoded)
-    ? { state: 'reported', pulse: decoded.right }
-    : { state: 'invalid', reason: 'turn pulse does not match the server shape' }
+  if (Either.isRight(decoded)) return { state: 'reported', pulse: decoded.right }
+  const [first] = ParseResult.ArrayFormatter.formatErrorSync(decoded.left)
+  return {
+    state: 'invalid',
+    reason: first === undefined ? 'turn pulse does not decode' : `${['recent_turns', ...first.path].join('.')}: ${first.message}`,
+  }
 }
 
 export const CADENCE_WINDOW_HOURS = [6, 24] as const

@@ -39,6 +39,12 @@ describe('readKeeperTurnPulse', () => {
     }).state).toBe('invalid')
     expect(readKeeperTurnPulse({ ...base, slots: [], extra: 1 }).state).toBe('invalid')
   })
+
+  it('names where an invalid pulse went wrong', () => {
+    const reading = readKeeperTurnPulse({ known_since: now, slots: [slot(current, { ok: -1 })] })
+    if (reading.state !== 'invalid') throw new Error(`expected invalid, got ${reading.state}`)
+    expect(reading.reason.startsWith('recent_turns.slots.0.ok')).toBe(true)
+  })
 })
 
 describe('cadenceWindow', () => {

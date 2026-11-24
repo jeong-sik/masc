@@ -114,6 +114,16 @@ type inline_action_kind =
   | Github_token_form of string
   | Code_finder_form
   | Code_search_form
+  | Runtime_lane_create
+  | Runtime_lane_edit of {
+      lane_id : string;
+      exact_output : bool;
+      opened_revision : string option;
+    }
+  | Runtime_lane_delete of {
+      lane_id : string;
+      opened_revision : string option;
+    }
 
 type system_gate_kind =
   | Micro_viewport

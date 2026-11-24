@@ -218,6 +218,21 @@ type post_request =
       previous_runtime_id : string option;
     }
   | Post_runtime_default_route of { runtime_id : string }
+  | Post_runtime_lane_create of {
+      lane_id : string;
+      kind : Wire_runtime.lane_kind;
+      runtime_ids : string list;
+    }
+  | Post_runtime_lane_update of {
+      lane_id : string;
+      kind : Wire_runtime.lane_kind;
+      runtime_ids : string list;
+      expected_source_revision : string option;
+    }
+  | Post_runtime_lane_delete of {
+      lane_id : string;
+      expected_source_revision : string option;
+    }
   | Post_setup_account_key of {
       integration_id : string;
       key : string;
@@ -554,7 +569,11 @@ let post_request_path = function
       Wire_knowledge.keeper_memory_act_path ~keeper
   | Post_fusion_launch { keeper; _ } -> Wire_runtime.fusion_launch_path ~keeper
   | Post_runtime_assignment _ -> Wire_runtime.runtime_assignment_path
-  | Post_runtime_default_route _ -> Wire_runtime.runtime_routing_path
+  | Post_runtime_default_route _
+  | Post_runtime_lane_create _
+  | Post_runtime_lane_update _
+  | Post_runtime_lane_delete _ ->
+      Wire_runtime.runtime_routing_path
   | Post_setup_account_key _ -> Wire_runtime.setup_credential_path
   | Post_setup_login_start _ -> Wire_runtime.setup_accounts_login_path
   | Post_sandbox_probe _ -> Wire_infra.infra_sandboxes_probe_path
@@ -612,6 +631,15 @@ let post_request_body = function
         ~source_revision ~previous_runtime_id ()
   | Post_runtime_default_route { runtime_id } ->
       Wire_runtime.encode_runtime_default_route ~runtime_id
+  | Post_runtime_lane_create { lane_id; kind; runtime_ids } ->
+      Wire_runtime.encode_runtime_lane_create ~lane_id ~kind ~runtime_ids
+  | Post_runtime_lane_update
+      { lane_id; kind; runtime_ids; expected_source_revision } ->
+      Wire_runtime.encode_runtime_lane_update ~lane_id ~kind ~runtime_ids
+        ?expected_source_revision ()
+  | Post_runtime_lane_delete { lane_id; expected_source_revision } ->
+      Wire_runtime.encode_runtime_lane_delete ~lane_id
+        ?expected_source_revision ()
   | Post_setup_account_key { integration_id; key; source_revision } ->
       Wire_runtime.encode_setup_credential ~provider_id:integration_id
         ~secret:key ~source_revision

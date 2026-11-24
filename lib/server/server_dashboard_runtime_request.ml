@@ -75,8 +75,9 @@ type runtime_route_body =
   | Runtime_route_runtime_id of runtime_route_lane * string option
   | Runtime_route_runtime_ids of runtime_route_lane * string list
   | Runtime_route_named_lane_set_if_revision of string * string list * string
+  | Runtime_route_media_failover_set_if_revision of string list * string
   | Runtime_route_lane_created of string * string list
-  | Runtime_route_lane_removed of string
+  | Runtime_route_lane_removed of string * string option
   | Runtime_route_lane_renamed of string * string
   | Runtime_route_exact_slot_appended of Runtime.exact_lane * string
   | Runtime_route_exact_slot_dropped of Runtime.exact_lane * string
@@ -154,6 +155,14 @@ let required_string_array_field json name =
   | None -> Error (name ^ " required")
 ;;
 
+let expected_source_revision json =
+  match Json_util.assoc_member_opt "expected_source_revision" json with
+  | None -> Ok None
+  | Some (`String revision) when String_util.is_lowercase_sha256_hex revision ->
+    Ok (Some revision)
+  | Some _ -> Error "expected_source_revision must be lowercase SHA-256 hex"
+;;
+
 let parse_set_route_body json lane =
   match parse_runtime_route_lane lane with
   | Error _ as err -> err
@@ -163,18 +172,27 @@ let parse_set_route_body json lane =
        (match required_string_array_field json "runtime_ids" with
         | Error _ as err -> err
         | Ok runtime_ids ->
-          (match Json_util.assoc_member_opt "expected_source_revision" json with
-           | None -> Ok (Runtime_route_runtime_ids (parsed_lane, runtime_ids))
-           | Some (`String revision) when String_util.is_lowercase_sha256_hex revision ->
+          (match expected_source_revision json with
+           | Ok None -> Ok (Runtime_route_runtime_ids (parsed_lane, runtime_ids))
+           | Ok (Some revision) ->
              Ok (Runtime_route_named_lane_set_if_revision (lane_id, runtime_ids, revision))
-           | Some _ -> Error "expected_source_revision must be lowercase SHA-256 hex"))
-     | Runtime_media_failover | Runtime_exact_lane _ ->
+           | Error _ as err -> err))
+     | Runtime_media_failover ->
+       let open Result.Syntax in
+       let* runtime_ids = required_string_array_field json "runtime_ids" in
+       let* revision = expected_source_revision json in
+       (match revision with
+        | Some revision -> Ok (Runtime_route_media_failover_set_if_revision (runtime_ids, revision))
+        | None -> Ok (Runtime_route_runtime_ids (parsed_lane, runtime_ids)))
+     | Runtime_exact_lane _ ->
        (match required_string_array_field json "runtime_ids" with
         | Error _ as err -> err
         | Ok runtime_ids -> Ok (Runtime_route_runtime_ids (parsed_lane, runtime_ids)))
      | Runtime_default ->
        (match optional_string_field json "runtime_id" with
         | Error _ as err -> err
+        | Ok None when Option.is_some (Json_util.assoc_member_opt "runtime_ids" json) ->
+          Error "default runtime_id required"
         | Ok runtime_id -> Ok (Runtime_route_runtime_id (parsed_lane, runtime_id))))
 
 (* A new lane's name must not read as one of the other routes this endpoint
@@ -211,9 +229,11 @@ let parse_rename_route_body json lane =
     Error (Printf.sprintf "%S names another route, not a lane" lane)
   | Error _ as err -> err
 
-let parse_remove_route_body lane =
+let parse_remove_route_body json lane =
   match parse_runtime_route_lane lane with
-  | Ok (Runtime_named_lane lane_id) -> Ok (Runtime_route_lane_removed lane_id)
+  | Ok (Runtime_named_lane lane_id) ->
+    expected_source_revision json
+    |> Result.map (fun revision -> Runtime_route_lane_removed (lane_id, revision))
   | Ok (Runtime_default | Runtime_media_failover | Runtime_exact_lane _) ->
     Error (Printf.sprintf "%S names another route, not a lane" lane)
   | Error _ as err -> err
@@ -264,7 +284,7 @@ let parse_runtime_route_body body_str =
        | Ok _, (Error _ as err) -> err
        | Ok lane, Ok Lane_set -> parse_set_route_body json lane
        | Ok lane, Ok Lane_create -> parse_create_route_body json lane
-       | Ok lane, Ok Lane_remove -> parse_remove_route_body lane
+       | Ok lane, Ok Lane_remove -> parse_remove_route_body json lane
        | Ok lane, Ok Lane_rename -> parse_rename_route_body json lane
        | Ok lane, Ok Lane_append -> parse_append_route_body json lane
        | Ok lane, Ok Lane_drop ->

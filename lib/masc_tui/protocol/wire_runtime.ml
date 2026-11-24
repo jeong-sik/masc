@@ -3529,6 +3529,120 @@ let encode_runtime_assignment ~keeper_name ~runtime_id ~source_revision
 let encode_runtime_default_route ~runtime_id =
   `Assoc [ ("lane", `String "default"); ("runtime_id", `String runtime_id) ]
 
+type lane_kind =
+  | Lane_failover
+  | Lane_exact_output
+
+let equal_lane_kind a b =
+  match a, b with
+  | Lane_failover, Lane_failover | Lane_exact_output, Lane_exact_output -> true
+  | Lane_failover, Lane_exact_output | Lane_exact_output, Lane_failover -> false
+
+let lane_kind_of_string raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "failover" -> Some Lane_failover
+  | "exact_output" -> Some Lane_exact_output
+  | _ -> None
+
+let lane_kind_to_string = function
+  | Lane_failover -> "failover"
+  | Lane_exact_output -> "exact_output"
+
+let known_exact_lane_ids =
+  [
+    "librarian_exact";
+    "hitl_auto_judge";
+    "board_attention_exact";
+    "verifier_exact";
+    "candle_appraiser";
+    "librarian_memory";
+    "workspace_memory_curator";
+  ]
+
+let is_known_exact_lane_id id =
+  List.exists (String.equal (String.trim id)) known_exact_lane_ids
+
+let is_lowercase_sha256_hex s =
+  String.length s = 64
+  && String.for_all
+       (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false)
+       s
+
+let parse_candidate_runtime_ids raw =
+  let len = String.length raw in
+  let is_sep = function ',' | ';' | '\n' | '\r' -> true | _ -> false in
+  let rec loop acc start i =
+    if i >= len then
+      let piece = String.trim (String.sub raw start (len - start)) in
+      List.rev (if String.equal piece "" then acc else piece :: acc)
+    else if is_sep raw.[i] then
+      let piece = String.trim (String.sub raw start (i - start)) in
+      let acc = if String.equal piece "" then acc else piece :: acc in
+      loop acc (i + 1) (i + 1)
+    else loop acc start (i + 1)
+  in
+  loop [] 0 0
+
+let exact_route_name lane_id =
+  let trimmed = String.trim lane_id in
+  if String.starts_with ~prefix:"exact/" trimmed then trimmed
+  else "exact/" ^ trimmed
+
+let encode_runtime_lane_create ~lane_id ~kind ~runtime_ids =
+  let ids_json = `List (List.map (fun s -> `String s) runtime_ids) in
+  match kind with
+  | Lane_failover ->
+      `Assoc
+        [
+          ("lane", `String (String.trim lane_id));
+          ("action", `String "create");
+          ("runtime_ids", ids_json);
+        ]
+  | Lane_exact_output ->
+      `Assoc
+        [
+          ("lane", `String (exact_route_name lane_id));
+          ("action", `String "set");
+          ("runtime_ids", ids_json);
+        ]
+
+let encode_runtime_lane_update ~lane_id ~kind ~runtime_ids
+    ?expected_source_revision () =
+  let ids_json = `List (List.map (fun s -> `String s) runtime_ids) in
+  match kind with
+  | Lane_failover ->
+      let rev_field =
+        match expected_source_revision with
+        | Some rev when is_lowercase_sha256_hex rev ->
+            [ ("expected_source_revision", `String rev) ]
+        | Some _ | None -> []
+      in
+      `Assoc
+        ([
+           ("lane", `String (String.trim lane_id));
+           ("action", `String "set");
+           ("runtime_ids", ids_json);
+         ]
+        @ rev_field)
+  | Lane_exact_output ->
+      `Assoc
+        [
+          ("lane", `String (exact_route_name lane_id));
+          ("action", `String "set");
+          ("runtime_ids", ids_json);
+        ]
+
+let encode_runtime_lane_delete ~lane_id ?expected_source_revision () =
+  let rev_field =
+    match expected_source_revision with
+    | Some rev when is_lowercase_sha256_hex rev ->
+        [ ("expected_source_revision", `String rev) ]
+    | Some _ | None -> []
+  in
+  `Assoc
+    ([ ("lane", `String (String.trim lane_id)); ("action", `String "remove") ]
+    @ rev_field)
+
 type setup_integration = {
   id : string;
   display_name : string;

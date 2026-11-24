@@ -85,6 +85,7 @@ type action =
   | Toggle_memory_chart
   | Open_external_editor
   | Interrupt_turn
+  | Delete_selected
   | Quit_app
 
 type scope =
@@ -244,6 +245,7 @@ let action_tag = function
   | Open_external_editor -> 66
   | Interrupt_turn -> 67
   | Quit_app -> 68
+  | Delete_selected -> 69
 
 let equal_action a b =
   if not (Int.equal (action_tag a) (action_tag b)) then false
@@ -317,6 +319,7 @@ let equal_action a b =
     | Toggle_memory_chart, Toggle_memory_chart
     | Open_external_editor, Open_external_editor
     | Interrupt_turn, Interrupt_turn
+    | Delete_selected, Delete_selected
     | Quit_app, Quit_app ->
         true
     | ( Switch_workspace _
@@ -386,6 +389,7 @@ let equal_action a b =
       | Toggle_memory_chart
       | Open_external_editor
       | Interrupt_turn
+      | Delete_selected
       | Quit_app ),
       _ ->
         false
@@ -758,7 +762,7 @@ let bindings : binding list =
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Create_new ~key_display:"n"
         ~hint_label:(Say.make ~ko:"새로 만들기" ~en:"New")
-        ~help_desc:(Say.make ~ko:"새 항목 생성 / 하네스 거절 재정의 / 검색 다음 일치" ~en:"Create new item / Harness reject overrule / Next match")
+        ~help_desc:(Say.make ~ko:"새 항목·레인 생성 / 하네스 거절 재정의 / 검색 다음 일치" ~en:"Create new item or lane / Harness reject overrule / Next match")
         ~footer_priority:0 (bare_char 'n');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Refresh ~key_display:"r"
@@ -871,8 +875,13 @@ let bindings : binding list =
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Edit_or_export ~key_display:"e"
         ~hint_label:(Say.make ~ko:"편집/증거" ~en:"Edit/Evidence")
-        ~help_desc:(Say.make ~ko:"위키 편집 / 산출물 내보내기 / 퓨전 보드 증거 열기 / 키퍼 설정 편집 / 기억 변천 보기" ~en:"Edit wiki, export artifact, open Fusion board evidence, edit keeper config, or Memory Evolution view")
+        ~help_desc:(Say.make ~ko:"레인 후보 편집 / 위키 편집 / 산출물 내보내기 / 퓨전 보드 증거 / 키퍼 설정 / 기억 변천" ~en:"Edit lane candidates, wiki, or keeper config / export artifact / Fusion evidence / Memory Evolution")
         ~footer_priority:0 (bare_char 'e');
+      bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
+        ~action:Delete_selected ~key_display:"d"
+        ~hint_label:(Say.make ~ko:"삭제" ~en:"Delete")
+        ~help_desc:(Say.make ~ko:"선택 레인 삭제 확인 모달 열기" ~en:"Open delete confirmation modal for selected lane")
+        ~footer_priority:0 (bare_char 'd');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Configure_provider_key ~key_display:"K"
         ~hint_label:(Say.make ~ko:"API/PAT 키" ~en:"API/PAT Key")
@@ -1471,6 +1480,7 @@ let palette_commands ~lang =
           | Toggle_memory_chart
           | Open_external_editor
           | Interrupt_turn
+          | Delete_selected
           | Quit_app ->
               true
         in

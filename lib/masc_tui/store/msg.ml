@@ -374,6 +374,11 @@ type http_reply =
       runtime_id : string;
       result : (unit, http_error) result;
     }
+  | Reply_runtime_lane_mutation of {
+      lane_id : string;
+      operation : [ `Create | `Update | `Delete ];
+      result : (unit, http_error) result;
+    }
   | Reply_setup_account_key of {
       integration_id : string;
       result : (unit, http_error) result;

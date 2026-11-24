@@ -885,6 +885,35 @@ val encode_runtime_assignment :
 
 val encode_runtime_default_route : runtime_id:string -> Yojson.Safe.t
 
+type lane_kind =
+  | Lane_failover
+  | Lane_exact_output
+
+val equal_lane_kind : lane_kind -> lane_kind -> bool
+val lane_kind_of_string : string -> lane_kind option
+val lane_kind_to_string : lane_kind -> string
+val known_exact_lane_ids : string list
+val is_known_exact_lane_id : string -> bool
+val is_lowercase_sha256_hex : string -> bool
+val parse_candidate_runtime_ids : string -> string list
+
+val encode_runtime_lane_create :
+  lane_id:string ->
+  kind:lane_kind ->
+  runtime_ids:string list ->
+  Yojson.Safe.t
+
+val encode_runtime_lane_update :
+  lane_id:string ->
+  kind:lane_kind ->
+  runtime_ids:string list ->
+  ?expected_source_revision:string ->
+  unit ->
+  Yojson.Safe.t
+
+val encode_runtime_lane_delete :
+  lane_id:string -> ?expected_source_revision:string -> unit -> Yojson.Safe.t
+
 type setup_integration = {
   id : string;
   display_name : string;

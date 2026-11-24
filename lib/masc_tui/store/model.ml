@@ -1683,6 +1683,59 @@ let inline_modal_for kind =
             secret = false;
           };
         ]
+    | Nav.Runtime_lane_create ->
+        [
+          {
+            key = "lane_id";
+            label = Say.make ~ko:"레인 ID" ~en:"Lane ID";
+            value = "";
+            required = true;
+            secret = false;
+          };
+          {
+            key = "lane_kind";
+            label =
+              Say.make ~ko:"종류 (failover|exact_output)"
+                ~en:"Kind (failover|exact_output)";
+            value = "failover";
+            required = true;
+            secret = false;
+          };
+          {
+            key = "lane_candidates";
+            label =
+              Say.make ~ko:"후보 런타임 ID (쉼표/줄바꿈)"
+                ~en:"Candidate runtime IDs (comma/line)";
+            value = "";
+            required = true;
+            secret = false;
+          };
+        ]
+    | Nav.Runtime_lane_edit _ ->
+        [
+          {
+            key = "lane_candidates";
+            label =
+              Say.make ~ko:"후보 런타임 ID 순서 (쉼표/줄바꿈)"
+                ~en:"Candidate runtime IDs order (comma/line)";
+            value = "";
+            required = true;
+            secret = false;
+          };
+        ]
+    | Nav.Runtime_lane_delete { lane_id; _ } ->
+        [
+          {
+            key = "confirm_lane_id";
+            label =
+              Say.make
+                ~ko:(Printf.sprintf "삭제 확인 ('%s' 입력)" lane_id)
+                ~en:(Printf.sprintf "Confirm delete (type '%s')" lane_id);
+            value = "";
+            required = true;
+            secret = false;
+          };
+        ]
   in
   let active_field =
     match kind with
@@ -1702,7 +1755,10 @@ let inline_modal_for kind =
     | Nav.Board_comment _
     | Nav.Github_token_form _
     | Nav.Code_finder_form
-    | Nav.Code_search_form ->
+    | Nav.Code_search_form
+    | Nav.Runtime_lane_create
+    | Nav.Runtime_lane_edit _
+    | Nav.Runtime_lane_delete _ ->
         0
   in
   { kind; fields; active_field; submitting = false; error = None }
@@ -1746,6 +1802,26 @@ let modal_field_help ~key =
         (Say.make
            ~ko:"런타임/레인 ID (키퍼 배정 해제 시 비움)"
            ~en:"Runtime or lane ID (leave blank to clear assignment)")
+  | "lane_id" ->
+      Some
+        (Say.make
+           ~ko:"페일오버 레인 이름 또는 exact ID (verifier_exact, librarian_exact 등)"
+           ~en:"Failover lane name or exact lane ID (verifier_exact, librarian_exact, ...)")
+  | "lane_kind" ->
+      Some
+        (Say.make
+           ~ko:"허용: failover | exact_output ([←→] 전환)"
+           ~en:"Allowed: failover | exact_output ([←→] cycle)")
+  | "lane_candidates" ->
+      Some
+        (Say.make
+           ~ko:"페일오버 순서대로 쉼표·세미콜론·줄바꿈 구분 입력"
+           ~en:"Ordered failover candidate runtime IDs (comma, semicolon, or newline)")
+  | "confirm_lane_id" ->
+      Some
+        (Say.make
+           ~ko:"레인 ID를 정확히 입력하고 Enter (CAS 리비전 검증 후 삭제)"
+           ~en:"Type exact lane ID + Enter to delete (CAS revision verified)")
   | "setup_key_integration" ->
       Some
         (Say.make

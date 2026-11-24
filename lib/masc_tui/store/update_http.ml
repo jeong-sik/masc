@@ -998,7 +998,10 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Board_new_post
         | Nav.Code_finder_form
         | Nav.Code_search_form
-        | Nav.Github_token_form _ ->
+        | Nav.Github_token_form _
+        | Nav.Runtime_lane_create
+        | Nav.Runtime_lane_edit _
+        | Nav.Runtime_lane_delete _ ->
             false
       in
       let matches_modal =
@@ -1076,7 +1079,10 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Board_new_post
             | Nav.Code_finder_form
             | Nav.Code_search_form
-            | Nav.Github_token_form _ ->
+            | Nav.Github_token_form _
+            | Nav.Runtime_lane_create
+            | Nav.Runtime_lane_edit _
+            | Nav.Runtime_lane_delete _ ->
                 modal)
           m.inline_modal
       in
@@ -2334,6 +2340,178 @@ let apply_http_reply ~now (m : Model.t) reply =
       ( Model.with_toast ~now ~level:Model.Toast_error
           (Msg.http_error_summary err) next
       , cmds )
+  | Msg.Reply_runtime_lane_mutation { lane_id; operation; result = Ok () } ->
+      let is_op expected =
+        match (operation, expected) with
+        | `Create, `Create | `Update, `Update | `Delete, `Delete -> true
+        | (`Create | `Update | `Delete), (`Create | `Update | `Delete) -> false
+      in
+      let matches_lane_modal = function
+        | Nav.Runtime_lane_create -> is_op `Create
+        | Nav.Runtime_lane_edit { lane_id = mid; _ } ->
+            is_op `Update && String.equal mid lane_id
+        | Nav.Runtime_lane_delete { lane_id = mid; _ } ->
+            is_op `Delete && String.equal mid lane_id
+        | Nav.Btw_query
+        | Nav.Gate_reject _
+        | Nav.Verification_reject _
+        | Nav.Harness_overrule _
+        | Nav.Task_cancel _
+        | Nav.Goal_drop _
+        | Nav.Schedule_form
+        | Nav.Connector_form
+        | Nav.Repo_add_form
+        | Nav.Board_new_post
+        | Nav.Board_comment _
+        | Nav.Github_token_form _
+        | Nav.Code_finder_form
+        | Nav.Code_search_form ->
+            false
+      in
+      let close_modal =
+        match m.inline_modal with
+        | Some modal -> modal.submitting && matches_lane_modal modal.kind
+        | None -> false
+      in
+      let dive_stack, dive_return_stack =
+        if is_op `Delete then
+          match m.nav.dive_stack with
+          | top :: rest
+            when Nav.equal_dive top (Nav.Dive_infra (Nav.Lane_dive lane_id)) ->
+              let return_rest =
+                match m.nav.dive_return_stack with
+                | _ :: r -> r
+                | [] -> []
+              in
+              (rest, return_rest)
+          | _ :: _ | [] -> (m.nav.dive_stack, m.nav.dive_return_stack)
+        else (m.nav.dive_stack, m.nav.dive_return_stack)
+      in
+      let nav =
+        let nav0 = { m.nav with dive_stack; dive_return_stack } in
+        if not close_modal then nav0
+        else
+          match nav0.overlay with
+          | Some (Nav.Inline_action k) when matches_lane_modal k ->
+              { nav0 with overlay = nav0.return_overlay; return_overlay = None }
+          | Some
+              ( Nav.Inline_action _
+              | Nav.Palette
+              | Nav.Settings _
+              | Nav.Incidents
+              | Nav.Queue_context _
+              | Nav.Ask_answer
+              | Nav.Help
+              | Nav.System_gate _ )
+          | None ->
+              nav0
+      in
+      let inline_modal = if close_modal then None else m.inline_modal in
+      let toast_msg =
+        match operation with
+        | `Create ->
+            Say.make
+              ~ko:("레인 생성 완료: " ^ lane_id)
+              ~en:("Lane created: " ^ lane_id)
+        | `Update ->
+            Say.make
+              ~ko:("레인 후보 업데이트 완료: " ^ lane_id)
+              ~en:("Lane updated: " ^ lane_id)
+        | `Delete ->
+            Say.make
+              ~ko:("레인 삭제 완료: " ^ lane_id)
+              ~en:("Lane deleted: " ^ lane_id)
+      in
+      let next =
+        { m with nav; inline_modal }
+        |> Model.with_toast ~now ~level:Model.Toast_success toast_msg
+      in
+      ( next
+      , [
+          Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_runtime_resolved };
+          Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_runtime_config_raw };
+          Cmd.Http_get
+            { epoch = m.epoch; req = Cmd.Get_runtime_probe { force = false } };
+        ] )
+  | Msg.Reply_runtime_lane_mutation { lane_id; operation; result = Error err } ->
+      let is_op expected =
+        match (operation, expected) with
+        | `Create, `Create | `Update, `Update | `Delete, `Delete -> true
+        | (`Create | `Update | `Delete), (`Create | `Update | `Delete) -> false
+      in
+      let matches_lane_modal = function
+        | Nav.Runtime_lane_create -> is_op `Create
+        | Nav.Runtime_lane_edit { lane_id = mid; _ } ->
+            is_op `Update && String.equal mid lane_id
+        | Nav.Runtime_lane_delete { lane_id = mid; _ } ->
+            is_op `Delete && String.equal mid lane_id
+        | Nav.Btw_query
+        | Nav.Gate_reject _
+        | Nav.Verification_reject _
+        | Nav.Harness_overrule _
+        | Nav.Task_cancel _
+        | Nav.Goal_drop _
+        | Nav.Schedule_form
+        | Nav.Connector_form
+        | Nav.Repo_add_form
+        | Nav.Board_new_post
+        | Nav.Board_comment _
+        | Nav.Github_token_form _
+        | Nav.Code_finder_form
+        | Nav.Code_search_form ->
+            false
+      in
+      let is_conflict =
+        match err with
+        | Msg.Http_error { status = 409; _ } -> true
+        | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+        | Msg.Decode_error _ ->
+            false
+      in
+      let detail =
+        if is_conflict then
+          "Revision conflict (409): runtime.toml changed; refresh and retry ("
+          ^ Msg.http_error_detail err ^ ")"
+        else Msg.http_error_detail err
+      in
+      let inline_modal =
+        Option.map
+          (fun (modal : Model.inline_modal_state) ->
+            if modal.submitting && matches_lane_modal modal.kind then
+              { modal with submitting = false; error = Some detail }
+            else modal)
+          m.inline_modal
+      in
+      let ctx_say =
+        match operation with
+        | `Create ->
+            Say.make
+              ~ko:("레인 생성: " ^ lane_id)
+              ~en:("Create lane: " ^ lane_id)
+        | `Update ->
+            Say.make
+              ~ko:("레인 편집: " ^ lane_id)
+              ~en:("Edit lane: " ^ lane_id)
+        | `Delete ->
+            Say.make
+              ~ko:("레인 삭제: " ^ lane_id)
+              ~en:("Delete lane: " ^ lane_id)
+      in
+      let next, inc_cmds =
+        record_http_incident ~now ~source:(Health.Source_runtime "lanes")
+          ~context:ctx_say err { m with inline_modal }
+      in
+      let refresh_cmds =
+        if is_conflict then
+          [
+            Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_runtime_config_raw };
+            Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_runtime_resolved };
+          ]
+        else []
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , inc_cmds @ refresh_cmds )
   | Msg.Reply_setup_account_key { integration_id; result = Ok () } ->
       let next =
         Model.with_toast ~now ~level:Model.Toast_success
@@ -2939,7 +3117,10 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
-            | Nav.Code_search_form ->
+            | Nav.Code_search_form
+            | Nav.Runtime_lane_create
+            | Nav.Runtime_lane_edit _
+            | Nav.Runtime_lane_delete _ ->
                 false)
         | Some
             (( Nav.Btw_query
@@ -2954,7 +3135,10 @@ let apply_http_reply ~now (m : Model.t) reply =
              | Nav.Board_comment _
              | Nav.Github_token_form _
              | Nav.Code_finder_form
-             | Nav.Code_search_form ) as kind) ->
+             | Nav.Code_search_form
+             | Nav.Runtime_lane_create
+             | Nav.Runtime_lane_edit _
+             | Nav.Runtime_lane_delete _ ) as kind) ->
             Nav.equal_inline_action_kind modal.kind kind
       in
       let close_inline_modal =
@@ -3036,7 +3220,10 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
-            | Nav.Code_search_form ->
+            | Nav.Code_search_form
+            | Nav.Runtime_lane_create
+            | Nav.Runtime_lane_edit _
+            | Nav.Runtime_lane_delete _ ->
                 false)
         | Some
             (( Nav.Btw_query
@@ -3051,7 +3238,10 @@ let apply_http_reply ~now (m : Model.t) reply =
              | Nav.Board_comment _
              | Nav.Github_token_form _
              | Nav.Code_finder_form
-             | Nav.Code_search_form ) as kind) ->
+             | Nav.Code_search_form
+             | Nav.Runtime_lane_create
+             | Nav.Runtime_lane_edit _
+             | Nav.Runtime_lane_delete _ ) as kind) ->
             Nav.equal_inline_action_kind modal.kind kind
       in
       let inline_modal =

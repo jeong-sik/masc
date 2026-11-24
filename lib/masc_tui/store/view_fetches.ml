@@ -562,6 +562,9 @@ let fetches_for_dive ~force (m : Model.t) =
                (needs_fetch ~force m.runtime.runtime_resolved)
                Cmd.Get_runtime_resolved
           |> add_if
+               (needs_fetch ~force m.runtime.runtime_config_raw)
+               Cmd.Get_runtime_config_raw
+          |> add_if
                (needs_fetch ~force m.runtime.runtime_probe)
                (Cmd.Get_runtime_probe { force = false })
       | Nav.Incident_dive _ | Nav.Log_detail_dive _ -> []

@@ -1784,6 +1784,9 @@ let test_verifier_regressions () =
         | Cmd.Post_fusion_launch _
         | Cmd.Post_runtime_assignment _
         | Cmd.Post_runtime_default_route _
+        | Cmd.Post_runtime_lane_create _
+        | Cmd.Post_runtime_lane_update _
+        | Cmd.Post_runtime_lane_delete _
         | Cmd.Post_setup_account_key _
         | Cmd.Post_setup_login_start _
         | Cmd.Post_sandbox_probe _
@@ -16885,6 +16888,434 @@ let test_lazy_keeper_context_fetches_and_sidebar_workspace_discovery () =
   Alcotest.(check bool) "Palette '저장소' finds Repos & Changes" true
     (palette_has_target "저장소" (Nav.Menu_infra Nav.Infra_repos_changes))
 
+let test_runtime_lane_crud_requests_and_cas () =
+  (* 1. Keymap SSOT: zero collisions across all scopes with Delete_selected on 'd' *)
+  Alcotest.(check int) "Keymap has zero collisions" 0
+    (List.length (Keymap.collisions ()));
+  (* 2. Wire_runtime candidate parsing & exact JSON wire contracts *)
+  Alcotest.(check (list string)) "parse_candidate_runtime_ids trims & splits"
+    [ "rt-a"; "rt-b"; "rt-c" ]
+    (Wire_runtime.parse_candidate_runtime_ids " rt-a , rt-b ;\n rt-c , ");
+  let rev1 = String.make 64 'a' in
+  let rev2 = String.make 64 'b' in
+  let create_req =
+    Cmd.Post_runtime_lane_create
+      {
+        lane_id = "coder";
+        kind = Wire_runtime.Lane_failover;
+        runtime_ids = [ "rt-a"; "rt-b" ];
+      }
+  in
+  Alcotest.(check string) "lane create path" "/api/v1/runtime/config/routing"
+    (Cmd.post_request_path create_req);
+  Alcotest.(check string) "failover lane create JSON"
+    {|{"lane":"coder","action":"create","runtime_ids":["rt-a","rt-b"]}|}
+    (Yojson.Safe.to_string (Cmd.post_request_body create_req));
+  let exact_create_req =
+    Cmd.Post_runtime_lane_create
+      {
+        lane_id = "verifier_exact";
+        kind = Wire_runtime.Lane_exact_output;
+        runtime_ids = [ "rt-a" ];
+      }
+  in
+  Alcotest.(check string) "exact lane create JSON uses exact/ prefix & action=set"
+    {|{"lane":"exact/verifier_exact","action":"set","runtime_ids":["rt-a"]}|}
+    (Yojson.Safe.to_string (Cmd.post_request_body exact_create_req));
+  let update_req =
+    Cmd.Post_runtime_lane_update
+      {
+        lane_id = "coder";
+        kind = Wire_runtime.Lane_failover;
+        runtime_ids = [ "rt-b"; "rt-a" ];
+        expected_source_revision = Some rev1;
+      }
+  in
+  Alcotest.(check string) "lane update path" "/api/v1/runtime/config/routing"
+    (Cmd.post_request_path update_req);
+  Alcotest.(check string) "failover lane update JSON includes CAS revision"
+    (Printf.sprintf
+       {|{"lane":"coder","action":"set","runtime_ids":["rt-b","rt-a"],"expected_source_revision":"%s"}|}
+       rev1)
+    (Yojson.Safe.to_string (Cmd.post_request_body update_req));
+  let delete_req =
+    Cmd.Post_runtime_lane_delete
+      { lane_id = "coder"; expected_source_revision = Some rev1 }
+  in
+  Alcotest.(check string) "lane delete path" "/api/v1/runtime/config/routing"
+    (Cmd.post_request_path delete_req);
+  Alcotest.(check string) "failover lane delete JSON includes CAS revision"
+    (Printf.sprintf
+       {|{"lane":"coder","action":"remove","expected_source_revision":"%s"}|}
+       rev1)
+    (Yojson.Safe.to_string (Cmd.post_request_body delete_req));
+  (* 3. Store state setup on 5 Runtime > Failover Lanes *)
+  let m0 = Model.initial () in
+  let m_lanes0 =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Runtime; sidebar_focused = false };
+      runtime = Runtime_store.set_tab Nav.Runtime_failover_lanes m0.runtime;
+    }
+  in
+  let snap : Wire_runtime.runtime_resolved_snapshot =
+    {
+      generated_at_iso = "2026-11-24T00:00:00Z";
+      config_path = Some "/tmp/runtime.toml";
+      default_route = Some "rt-a";
+      lanes =
+        [
+          { id = "default"; declared = false; runtime_ids = [ "rt-a" ] };
+          { id = "coder"; declared = true; runtime_ids = [ "rt-a"; "rt-b" ] };
+          {
+            id = "exact/verifier_exact";
+            declared = true;
+            runtime_ids = [ "rt-a" ];
+          };
+        ];
+      runtimes =
+        [
+          {
+            id = "rt-a";
+            provider_id = "p1";
+            provider = "anthropic";
+            model = Some "claude";
+            declared_reasoning_effort = None;
+            transport = None;
+            is_default = true;
+          };
+          {
+            id = "rt-b";
+            provider_id = "p2";
+            provider = "openai";
+            model = Some "gpt";
+            declared_reasoning_effort = None;
+            transport = None;
+            is_default = false;
+          };
+        ];
+      usage_windows = None;
+    }
+  in
+  let m_lanes1, _ =
+    Update.step ~now:t0 m_lanes0
+      (Msg.Http_reply
+         { epoch = m_lanes0.epoch; reply = Msg.Reply_runtime_resolved (Ok snap) })
+  in
+  let m_lanes, _ =
+    Update.step ~now:t0 m_lanes1
+      (Msg.Http_reply
+         {
+           epoch = m_lanes1.epoch;
+           reply =
+             Msg.Reply_runtime_config_raw
+               (Ok { Wire_runtime.source_revision = rev1; assignments = [] });
+         })
+  in
+  let set_modal_fields pairs (m : Model.t) =
+    match m.inline_modal with
+    | None -> Alcotest.fail "expected inline_modal to be open"
+    | Some st ->
+        let fields =
+          List.map
+            (fun (f : Model.modal_form_field) ->
+              match List.assoc_opt f.key pairs with
+              | Some v -> { f with value = v }
+              | None -> f)
+            st.fields
+        in
+        { m with inline_modal = Some { st with fields } }
+  in
+  (* 4. [n] opens Runtime_lane_create & emits Post_runtime_lane_create *)
+  let m_create_open, _ =
+    Update.step ~now:t0 m_lanes (Msg.Key_event (char_key "n"))
+  in
+  (match m_create_open.nav.overlay with
+  | Some (Nav.Inline_action Nav.Runtime_lane_create) -> ()
+  | _ -> Alcotest.fail "[n] on Runtime_failover_lanes must open Runtime_lane_create");
+  let m_create_bad =
+    set_modal_fields
+      [
+        ("lane_id", "default");
+        ("lane_kind", "failover");
+        ("lane_candidates", "rt-a");
+      ]
+      m_create_open
+  in
+  let m_create_bad_res, bad_create_cmds =
+    Update.step ~now:t0 m_create_bad (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check int) "reserved failover lane emits no HTTP command" 0
+    (List.length (Cmd.flatten bad_create_cmds));
+  Alcotest.(check bool) "reserved failover lane records modal error" true
+    (match m_create_bad_res.inline_modal with
+    | Some { error = Some _; submitting = false; _ } -> true
+    | _ -> false);
+  let m_create_ok =
+    set_modal_fields
+      [
+        ("lane_id", "review");
+        ("lane_kind", "failover");
+        ("lane_candidates", "rt-a, rt-b");
+      ]
+      m_create_open
+  in
+  let _, create_cmds =
+    Update.step ~now:t0 m_create_ok (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool) "valid failover create emits Post_runtime_lane_create" true
+    (List.exists
+       (function
+         | Cmd.Http_post
+             {
+               req =
+                 Cmd.Post_runtime_lane_create
+                   {
+                     lane_id = "review";
+                     kind = Wire_runtime.Lane_failover;
+                     runtime_ids = [ "rt-a"; "rt-b" ];
+                   };
+               _;
+             } ->
+             true
+         | _ -> false)
+       (Cmd.flatten create_cmds));
+  (* Tab to lane_kind, press Right to cycle failover -> exact_output *)
+  let m_kind_tab, _ =
+    Update.step ~now:t0 m_create_open (Msg.Key_event (key Keymap.Input.Tab))
+  in
+  let m_kind_cycled, _ =
+    Update.step ~now:t0 m_kind_tab (Msg.Key_event (key Keymap.Input.Right))
+  in
+  let m_exact_filled =
+    set_modal_fields
+      [ ("lane_id", "exact/verifier_exact"); ("lane_candidates", "rt-b") ]
+      m_kind_cycled
+  in
+  let _, exact_cmds =
+    Update.step ~now:t0 m_exact_filled (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool) "cycled exact_output emits normalized bare_id" true
+    (List.exists
+       (function
+         | Cmd.Http_post
+             {
+               req =
+                 Cmd.Post_runtime_lane_create
+                   {
+                     lane_id = "verifier_exact";
+                     kind = Wire_runtime.Lane_exact_output;
+                     runtime_ids = [ "rt-b" ];
+                   };
+               _;
+             } ->
+             true
+         | _ -> false)
+       (Cmd.flatten exact_cmds));
+  (* 5. [d] on synthesized default lane refuses; move down to declared 'coder' lane *)
+  let m_del_default, del_default_cmds =
+    Update.step ~now:t0 m_lanes (Msg.Key_event (char_key "d"))
+  in
+  Alcotest.(check bool) "[d] on default lane does not open delete modal" true
+    (Option.is_none m_del_default.nav.overlay && Cmd.flatten del_default_cmds = []);
+  let m_edit_default, edit_default_cmds =
+    Update.step ~now:t0 m_lanes (Msg.Key_event (char_key "e"))
+  in
+  Alcotest.(check bool) "[e] on default route skips the candidate editor" true
+    (Option.is_none m_edit_default.inline_modal && Cmd.flatten edit_default_cmds = []);
+  let m_coder_unobserved, _ =
+    Update.step ~now:t0 m_lanes1 (Msg.Key_event (key Keymap.Input.Down))
+  in
+  let m_edit_unobserved, _ =
+    Update.step ~now:t0 m_coder_unobserved (Msg.Key_event (char_key "e"))
+  in
+  let _, edit_unobserved_cmds =
+    Update.step ~now:t0 m_edit_unobserved (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool) "a named edit without source revision refreshes without writing" true
+    (match Cmd.flatten edit_unobserved_cmds with
+     | [ Cmd.Http_get { req = Cmd.Get_runtime_config_raw; _ } ] -> true
+     | _ -> false);
+  let m_coder, _ =
+    Update.step ~now:t0 m_lanes (Msg.Key_event (key Keymap.Input.Down))
+  in
+  (* 6. [e] opens Runtime_lane_edit seeded with current order + CAS revision *)
+  let m_edit_open, _ =
+    Update.step ~now:t0 m_coder (Msg.Key_event (char_key "e"))
+  in
+  (match m_edit_open.inline_modal with
+  | Some
+      ({
+         kind =
+           Nav.Runtime_lane_edit
+             { lane_id = "coder"; exact_output = false; opened_revision = Some r };
+         _;
+       } as st) ->
+      Alcotest.(check string) "opened_revision captured" rev1 r;
+      Alcotest.(check string) "candidates seeded" "rt-a, rt-b"
+        (Model.modal_field_value ~key:"lane_candidates" st)
+  | _ -> Alcotest.fail "[e] on selected lane must open seeded Runtime_lane_edit");
+  (* CAS drift refusal if newer raw revision arrives while editing *)
+  let m_edit_drifted, _ =
+    Update.step ~now:t1 m_edit_open
+      (Msg.Http_reply
+         {
+           epoch = m_edit_open.epoch;
+           reply =
+             Msg.Reply_runtime_config_raw
+               (Ok { Wire_runtime.source_revision = rev2; assignments = [] });
+         })
+  in
+  let m_edit_drifted_res, drifted_cmds =
+    Update.step ~now:t1 m_edit_drifted (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check int) "CAS revision drift blocks update POST" 0
+    (List.length (Cmd.flatten drifted_cmds));
+  Alcotest.(check bool) "CAS drift sets modal error" true
+    (match m_edit_drifted_res.inline_modal with
+    | Some { error = Some _; submitting = false; _ } -> true
+    | _ -> false);
+  (* Valid edit emits Post_runtime_lane_update with CAS revision *)
+  let m_edit_reordered =
+    set_modal_fields [ ("lane_candidates", "rt-b, rt-a") ] m_edit_open
+  in
+  let m_edit_submitting, edit_cmds =
+    Update.step ~now:t1 m_edit_reordered (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool) "edit submits Post_runtime_lane_update with CAS" true
+    (List.exists
+       (function
+         | Cmd.Http_post
+             {
+               req =
+                 Cmd.Post_runtime_lane_update
+                   {
+                     lane_id = "coder";
+                     kind = Wire_runtime.Lane_failover;
+                     runtime_ids = [ "rt-b"; "rt-a" ];
+                     expected_source_revision = Some r;
+                   };
+               _;
+             }
+           when String.equal r rev1 ->
+             true
+         | _ -> false)
+       (Cmd.flatten edit_cmds));
+  (* 409 Conflict reply keeps modal open with error and triggers raw+resolved refresh *)
+  let m_conflict, conflict_cmds =
+    Update.step ~now:t2 m_edit_submitting
+      (Msg.Http_reply
+         {
+           epoch = m_edit_submitting.epoch;
+           reply =
+             Msg.Reply_runtime_lane_mutation
+               {
+                 lane_id = "coder";
+                 operation = `Update;
+                 result =
+                   Error
+                     (Msg.Http_error
+                        { status = 409; body = "stale revision"; api_error = None });
+               };
+         })
+  in
+  Alcotest.(check bool) "409 keeps modal open & clears submitting" true
+    (match m_conflict.inline_modal with
+    | Some { submitting = false; error = Some _; _ } -> true
+    | _ -> false);
+  Alcotest.(check bool) "409 refreshes Get_runtime_config_raw" true
+    (List.exists
+       (function
+         | Cmd.Http_get { req = Cmd.Get_runtime_config_raw; _ } -> true
+         | _ -> false)
+       (Cmd.flatten conflict_cmds));
+  (* 7. Lane_dive fetches Get_runtime_config_raw, supports [a], and [d] pops dive on success *)
+  let m_dive =
+    {
+      m_coder with
+      nav =
+        {
+          m_coder.nav with
+          dive_stack = [ Nav.Dive_infra (Nav.Lane_dive "coder") ];
+        };
+    }
+  in
+  let dive_fetches =
+    Cmd.flatten (View_fetches.fetches_for_current_view ~force:true m_dive)
+  in
+  Alcotest.(check bool) "Lane_dive fetches Get_runtime_config_raw" true
+    (List.exists
+       (function
+         | Cmd.Http_get { req = Cmd.Get_runtime_config_raw; _ } -> true
+         | _ -> false)
+       dive_fetches);
+  let m_assign_from_dive, _ =
+    Update.step ~now:t1 m_dive (Msg.Key_event (char_key "a"))
+  in
+  Alcotest.(check bool) "[a] in Lane_dive keeps Form_runtime_assign accessible" true
+    (match m_assign_from_dive.inline_modal with
+    | Some { fields = { key = "assign_keeper"; _ } :: _; _ } -> true
+    | _ -> false);
+  let m_del_open, _ =
+    Update.step ~now:t1 m_dive (Msg.Key_event (char_key "d"))
+  in
+  (match m_del_open.nav.overlay with
+  | Some (Nav.Inline_action (Nav.Runtime_lane_delete { lane_id = "coder"; _ })) -> ()
+  | _ -> Alcotest.fail "[d] in Lane_dive must open Runtime_lane_delete");
+  let m_del_wrong =
+    set_modal_fields [ ("confirm_lane_id", "wrong") ] m_del_open
+  in
+  let _, del_wrong_cmds =
+    Update.step ~now:t1 m_del_wrong (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check int) "wrong delete confirmation emits no POST" 0
+    (List.length (Cmd.flatten del_wrong_cmds));
+  let m_del_ok =
+    set_modal_fields [ ("confirm_lane_id", "coder") ] m_del_open
+  in
+  let m_del_submitting, del_cmds =
+    Update.step ~now:t1 m_del_ok (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool) "confirmed delete emits Post_runtime_lane_delete with CAS" true
+    (List.exists
+       (function
+         | Cmd.Http_post
+             {
+               req =
+                 Cmd.Post_runtime_lane_delete
+                   { lane_id = "coder"; expected_source_revision = Some r };
+               _;
+             }
+           when String.equal r rev1 ->
+             true
+         | _ -> false)
+       (Cmd.flatten del_cmds));
+  let m_deleted, deleted_cmds =
+    Update.step ~now:t2 m_del_submitting
+      (Msg.Http_reply
+         {
+           epoch = m_del_submitting.epoch;
+           reply =
+             Msg.Reply_runtime_lane_mutation
+               { lane_id = "coder"; operation = `Delete; result = Ok () };
+         })
+  in
+  Alcotest.(check bool) "delete Ok closes modal and pops Lane_dive" true
+    (Option.is_none m_deleted.inline_modal
+    && Option.is_none m_deleted.nav.overlay
+    && m_deleted.nav.dive_stack = []);
+  Alcotest.(check bool) "delete Ok refreshes runtime_resolved and raw config" true
+    (List.exists
+       (function
+         | Cmd.Http_get { req = Cmd.Get_runtime_resolved; _ } -> true
+         | _ -> false)
+       (Cmd.flatten deleted_cmds)
+    && List.exists
+         (function
+           | Cmd.Http_get { req = Cmd.Get_runtime_config_raw; _ } -> true
+           | _ -> false)
+         (Cmd.flatten deleted_cmds))
+
 let () =
   Alcotest.run "masc_tui_store"
     [
@@ -16892,6 +17323,11 @@ let () =
       , [
           Alcotest.test_case "Timeout_detail KO/EN formatting, retryable & Update/Update_http parity"
             `Quick test_timeout_detail_retryable_and_update_parity;
+        ] );
+      ( "runtime_lane_crud"
+      , [
+          Alcotest.test_case "create/edit/delete requests, CAS checks & Lane_dive pop"
+            `Quick test_runtime_lane_crud_requests_and_cas;
         ] );
       ("Board recovery", [Alcotest.test_case "recover the viewed keeper and exact quarantine generation" `Quick test_keeper_board_quarantine_recovery]);
       ("exact chat lookup", [Alcotest.test_case "retain and dismiss scoped absent operations" `Quick test_exact_operation_absence_recovery]);

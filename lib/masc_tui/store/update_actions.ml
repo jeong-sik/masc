@@ -899,6 +899,126 @@ let open_fusion_launch_modal (m : Model.t) =
       };
     ]
 
+let runtime_config_revision_opt (m : Model.t) : string option =
+  Option.map
+    (fun (meta : Wire_runtime.runtime_config_raw_meta) -> meta.source_revision)
+    (Observed.to_option m.runtime.runtime_config_raw)
+
+let find_resolved_lane (m : Model.t) (lane_id : string) :
+    Wire_runtime.failover_lane option =
+  match Observed.to_option m.runtime.runtime_resolved with
+  | Some snap ->
+      List.find_opt
+        (fun (l : Wire_runtime.failover_lane) -> String.equal l.id lane_id)
+        snap.lanes
+  | None -> None
+
+let selected_lane_for_crud (m : Model.t) : Wire_runtime.failover_lane option =
+  match Model.active_dive m with
+  | Some (Nav.Dive_infra (Nav.Lane_dive lane_id)) ->
+      find_resolved_lane m lane_id
+  | Some
+      ( Nav.Dive_infra
+          ( Nav.Sandbox_dive _
+          | Nav.Incident_dive _
+          | Nav.Runtime_trace_dive _
+          | Nav.Log_detail_dive _ )
+      | Nav.Dive_keeper _
+      | Nav.Dive_work _
+      | Nav.Dive_knowledge _
+      | Nav.Dive_runtime _ ) ->
+      None
+  | None ->
+      if
+        Nav.equal_workspace m.nav.workspace Nav.Runtime
+        && Nav.equal_runtime_tab m.runtime.active_tab Nav.Runtime_failover_lanes
+      then Runtime_store.selected_lane m.runtime
+      else None
+
+let open_runtime_lane_create_modal (m : Model.t) =
+  let m1, cmds1 = Update_nav.open_inline_modal m Nav.Runtime_lane_create in
+  let rev_cmds =
+    match runtime_config_revision_opt m1 with
+    | Some _ -> []
+    | None ->
+        [ Cmd.Http_get { epoch = m1.epoch; req = Cmd.Get_runtime_config_raw } ]
+  in
+  (m1, cmds1 @ rev_cmds)
+
+let open_runtime_lane_edit_modal ~now (m : Model.t)
+    (lane : Wire_runtime.failover_lane) =
+  if String.equal lane.id "default" then
+    ( Model.with_toast ~now ~level:Model.Toast_info
+        (Say.make ~ko:"기본 라우트는 런타임 설정에서 변경하세요"
+           ~en:"Change the default route in Runtime Settings")
+        m
+    , [] )
+  else (
+  let exact_output, bare_id =
+    if String.starts_with ~prefix:"exact/" lane.id then
+      (true, String.sub lane.id 6 (String.length lane.id - 6))
+    else (false, lane.id)
+  in
+  let opened_revision = runtime_config_revision_opt m in
+  let kind =
+    Nav.Runtime_lane_edit { lane_id = bare_id; exact_output; opened_revision }
+  in
+  let modal0 = Model.inline_modal_for kind in
+  let seeded = String.concat ", " lane.runtime_ids in
+  let fields =
+    List.map
+      (fun (f : Model.modal_form_field) ->
+        if String.equal f.key "lane_candidates" then { f with value = seeded }
+        else f)
+      modal0.fields
+  in
+  let modal = { modal0 with fields } in
+  let nav =
+    {
+      m.nav with
+      overlay = Some (Nav.Inline_action kind);
+      return_overlay = None;
+      filter_focused = false;
+      sidebar_focused = false;
+      modal_edit_cursor = String.length (Model.modal_active_field_value modal);
+    }
+  in
+  let drafts = Drafts.set_focus false m.drafts in
+  let config = Config_store.cancel_edit_field m.config in
+  let rev_cmds =
+    match opened_revision with
+    | Some _ -> []
+    | None ->
+        [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_runtime_config_raw } ]
+  in
+  ({ m with nav; drafts; config; inline_modal = Some modal; ask_modal = None }, rev_cmds))
+
+let open_runtime_lane_delete_modal ~now (m : Model.t)
+    (lane : Wire_runtime.failover_lane) =
+  if
+    (not lane.declared)
+    || String.equal lane.id "default"
+    || String.equal lane.id "media_failover"
+    || String.starts_with ~prefix:"exact/" lane.id
+  then
+    ( Model.with_toast ~now ~level:Model.Toast_warning
+        (Say.make
+           ~ko:"선언된 페일오버 레인만 삭제할 수 있습니다 (합성·예약 레인은 삭제 불가)"
+           ~en:"Only declared failover lanes can be deleted (synthesized/reserved routes cannot be removed)")
+        m
+    , [] )
+  else
+    let opened_revision = runtime_config_revision_opt m in
+    let kind = Nav.Runtime_lane_delete { lane_id = lane.id; opened_revision } in
+    let m1, cmds1 = Update_nav.open_inline_modal m kind in
+    let rev_cmds =
+      match opened_revision with
+      | Some _ -> []
+      | None ->
+          [ Cmd.Http_get { epoch = m1.epoch; req = Cmd.Get_runtime_config_raw } ]
+    in
+    (m1, cmds1 @ rev_cmds)
+
 let open_harness_overrule_for_selected ~verdict ~now (m : Model.t) =
   Update_nav.open_harness_overrule_for_context ~verdict ~now m
 
@@ -1856,7 +1976,10 @@ and execute_action ~now (m : Model.t) action =
                     | Nav.Board_comment _
                     | Nav.Github_token_form _
                     | Nav.Code_finder_form
-                    | Nav.Code_search_form )
+                    | Nav.Code_search_form
+                    | Nav.Runtime_lane_create
+                    | Nav.Runtime_lane_edit _
+                    | Nav.Runtime_lane_delete _ )
                   , _ ) ->
                     true
               in
@@ -2057,7 +2180,10 @@ and execute_action ~now (m : Model.t) action =
                | Nav.Board_comment _
                | Nav.Github_token_form _
                | Nav.Code_finder_form
-               | Nav.Code_search_form )) ->
+               | Nav.Code_search_form
+               | Nav.Runtime_lane_create
+               | Nav.Runtime_lane_edit _
+               | Nav.Runtime_lane_delete _ )) ->
             Update_nav.submit_inline_modal ~now m
         | Some Nav.Ask_answer -> (
             match m.ask_modal with
@@ -2321,7 +2447,10 @@ and execute_action ~now (m : Model.t) action =
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
-            | Nav.Code_search_form ->
+            | Nav.Code_search_form
+            | Nav.Runtime_lane_create
+            | Nav.Runtime_lane_edit _
+            | Nav.Runtime_lane_delete _ ->
                 m.drafts
           in
           let closed =
@@ -3177,6 +3306,8 @@ and execute_action ~now (m : Model.t) action =
                       (String.trim m.knowledge.artifact_search_query)
                       "") ->
               step_artifact_search ~now ~delta:1 m
+          | Some (Nav.Dive_infra (Nav.Lane_dive _)) ->
+              open_runtime_lane_create_modal m
           | Some
               ( Nav.Dive_keeper _
               | Nav.Dive_work _
@@ -3186,7 +3317,11 @@ and execute_action ~now (m : Model.t) action =
                   | Nav.Wiki_dive _
                   | Nav.Memory_diff_dive _ )
               | Nav.Dive_runtime _
-              | Nav.Dive_infra _ ) ->
+              | Nav.Dive_infra
+                  ( Nav.Sandbox_dive _
+                  | Nav.Incident_dive _
+                  | Nav.Runtime_trace_dive _
+                  | Nav.Log_detail_dive _ ) ) ->
               (m, [])
           | None -> (
               match m.nav.workspace with
@@ -3277,9 +3412,10 @@ and execute_action ~now (m : Model.t) action =
               | Nav.Runtime -> (
                   match m.runtime.active_tab with
                   | Nav.Runtime_connectors -> open_connector_form_populated m
+                  | Nav.Runtime_failover_lanes ->
+                      open_runtime_lane_create_modal m
                   | Nav.Runtime_quotas_credits
                   | Nav.Runtime_efficiency_spend
-                  | Nav.Runtime_failover_lanes
                   | Nav.Runtime_fusion
                   | Nav.Runtime_tools_usage
                   | Nav.Runtime_addons_browser ->
@@ -3553,7 +3689,10 @@ and execute_action ~now (m : Model.t) action =
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_finder_form
-                | Nav.Code_search_form )
+                | Nav.Code_search_form
+                | Nav.Runtime_lane_create
+                | Nav.Runtime_lane_edit _
+                | Nav.Runtime_lane_delete _ )
             | Nav.Ask_answer
             | Nav.Help
             | Nav.System_gate
@@ -5262,6 +5401,12 @@ and execute_action ~now (m : Model.t) action =
               | None -> ""
             in
             open_runtime_assign_modal m ~keeper_default:name ~runtime_default ()
+        | Some (Nav.Dive_infra (Nav.Lane_dive lane_id)) ->
+            let keeper_default =
+              Option.value (Update_nav.resolve_target_keeper m) ~default:""
+            in
+            open_runtime_assign_modal m ~keeper_default ~runtime_default:lane_id
+              ()
         | Some
             ( Nav.Dive_work (Nav.Task_dive _)
             | Nav.Dive_keeper
@@ -5278,7 +5423,11 @@ and execute_action ~now (m : Model.t) action =
                 }
             | Nav.Dive_knowledge _
             | Nav.Dive_runtime _
-            | Nav.Dive_infra _ ) ->
+            | Nav.Dive_infra
+                ( Nav.Sandbox_dive _
+                | Nav.Incident_dive _
+                | Nav.Runtime_trace_dive _
+                | Nav.Log_detail_dive _ ) ) ->
             (m, [])
         | None -> (
             match m.nav.workspace with
@@ -5557,6 +5706,15 @@ and execute_action ~now (m : Model.t) action =
                            ~en:"No linked board evidence for this fusion run")
                         m
                     , [] ))
+            | Some (Nav.Dive_infra (Nav.Lane_dive lane_id)) -> (
+                match find_resolved_lane m lane_id with
+                | Some lane -> open_runtime_lane_edit_modal ~now m lane
+                | None ->
+                    ( Model.with_toast ~now ~level:Model.Toast_warning
+                        (Say.make ~ko:("레인을 찾을 수 없습니다: " ^ lane_id)
+                           ~en:("Lane not found: " ^ lane_id))
+                        m
+                    , [] ))
             | Some
                 ( Nav.Dive_knowledge
                     ( Nav.Thread_dive _
@@ -5575,7 +5733,11 @@ and execute_action ~now (m : Model.t) action =
                     }
                 | Nav.Dive_work _
                 | Nav.Dive_runtime (Nav.Tool_dive _)
-                | Nav.Dive_infra _ ) ->
+                | Nav.Dive_infra
+                    ( Nav.Sandbox_dive _
+                    | Nav.Incident_dive _
+                    | Nav.Runtime_trace_dive _
+                    | Nav.Log_detail_dive _ ) ) ->
                 (m, [])
             | None ->
                 if
@@ -5652,6 +5814,19 @@ and execute_action ~now (m : Model.t) action =
                             ] )
                       | None -> (m, []))
                   | None -> (m, []))
+                else if
+                  Nav.equal_workspace m.nav.workspace Nav.Runtime
+                  && Nav.equal_runtime_tab m.runtime.active_tab
+                       Nav.Runtime_failover_lanes
+                then (
+                  match Runtime_store.selected_lane m.runtime with
+                  | Some lane -> open_runtime_lane_edit_modal ~now m lane
+                  | None ->
+                      ( Model.with_toast ~now ~level:Model.Toast_info
+                          (Say.make ~ko:"편집할 레인을 선택하세요"
+                             ~en:"Select a lane to edit")
+                          m
+                      , [] ))
                 else (m, [])))
   | Keymap.Configure_provider_key -> (
       match active_keeper_for_tab Nav.Keeper_identity m with
@@ -6247,6 +6422,12 @@ and execute_action ~now (m : Model.t) action =
                       ~en:("No active turn running for " ^ keeper)
               in
               (Model.with_toast ~now ~level:Model.Toast_info detail m, [])))
+  | Keymap.Delete_selected -> (
+      if Option.is_some m.nav.overlay || Model.sidebar_has_focus m then (m, [])
+      else
+        match selected_lane_for_crud m with
+        | Some lane -> open_runtime_lane_delete_modal ~now m lane
+        | None -> (m, []))
   | Keymap.Quit_app -> (
       let is_armed =
         match m.quit_armed_at with

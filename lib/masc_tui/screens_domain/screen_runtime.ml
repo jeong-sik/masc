@@ -2390,8 +2390,9 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
       (H.card_spec ~focused:(Model.pane_focused model 0)
          ~hotkey:
            (Say.resolve lang
-              (Say.make ~ko:"[Enter] 상세 · [f] 퓨전"
-                 ~en:"[Enter] Dive · [f] Fusion"))
+              (Say.make
+                 ~ko:"[n] 생성 · [e] 편집 · [d] 삭제 · [a] 배정 · [f] 퓨전"
+                 ~en:"[n] New · [e] Edit · [d] Del · [a] Assign · [f] Fusion"))
          (Say.resolve lang
             (Say.make ~ko:"페일오버 캐스케이드" ~en:"Failover Cascade")))
   in

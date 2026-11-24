@@ -1776,6 +1776,32 @@ let test_lane_set_revision_refuses_an_intervening_write () =
       (Fs_compat.load_file path);
     (match write (revision ()) [ "openai.small" ] with
      | Ok _ -> ()
+     | Error error -> Alcotest.fail (Runtime.lane_set_error_to_string error));
+    let lane_id = "unassigned-remove-check" in
+    (match Runtime.create_runtime_lane ~runtime_config_path:path ~lane_id
+             ~runtime_ids:[ "openai.gpt" ] () with
+     | Ok _ -> ()
+     | Error detail -> Alcotest.fail detail);
+    let selected_revision = revision () in
+    (match write selected_revision [ "openai.gpt" ] with
+     | Ok _ -> ()
+     | Error error -> Alcotest.fail (Runtime.lane_set_error_to_string error));
+    let latest_revision = revision () in
+    let latest_source = Fs_compat.load_file path in
+    let remove expected_source_revision =
+      Runtime.remove_runtime_lane_if_revision ~runtime_config_path:path
+        ~expected_source_revision ~lane_id ()
+    in
+    (match remove selected_revision with
+     | Error (Runtime.Lane_set_revision_conflict { expected; observed }) ->
+       Alcotest.(check string) "stale delete expected revision" selected_revision expected;
+       Alcotest.(check string) "stale delete observed revision" latest_revision observed
+     | Error (Runtime.Lane_set_invalid message) -> Alcotest.fail message
+     | Ok _ -> Alcotest.fail "stale delete wrote the file");
+    Alcotest.(check string) "stale delete preserves intervening source" latest_source
+      (Fs_compat.load_file path);
+    (match remove latest_revision with
+     | Ok _ -> ()
      | Error error -> Alcotest.fail (Runtime.lane_set_error_to_string error)))
 ;;
 

@@ -218,6 +218,9 @@ let timeout_sec_for_post : Cmd.post_request -> float = function
   | Cmd.Post_verification_verdict _
   | Cmd.Post_runtime_assignment _
   | Cmd.Post_runtime_default_route _
+  | Cmd.Post_runtime_lane_create _
+  | Cmd.Post_runtime_lane_update _
+  | Cmd.Post_runtime_lane_delete _
   | Cmd.Post_setup_account_key _
   | Cmd.Post_tui_preference _
   | Cmd.Post_keeper_turn_interrupt _
@@ -2146,6 +2149,21 @@ let execute_post t ~epoch req =
         | Cmd.Post_runtime_default_route { runtime_id } ->
             let result = post_ack t ~path ~body in
             Some (Msg.Reply_runtime_routing { runtime_id; result })
+        | Cmd.Post_runtime_lane_create { lane_id; _ } ->
+            let result = post_ack t ~path ~body in
+            Some
+              (Msg.Reply_runtime_lane_mutation
+                 { lane_id; operation = `Create; result })
+        | Cmd.Post_runtime_lane_update { lane_id; _ } ->
+            let result = post_ack t ~path ~body in
+            Some
+              (Msg.Reply_runtime_lane_mutation
+                 { lane_id; operation = `Update; result })
+        | Cmd.Post_runtime_lane_delete { lane_id; _ } ->
+            let result = post_ack t ~path ~body in
+            Some
+              (Msg.Reply_runtime_lane_mutation
+                 { lane_id; operation = `Delete; result })
         | Cmd.Post_setup_account_key { integration_id; _ } ->
             let result = post_ack t ~path ~body in
             Some (Msg.Reply_setup_account_key { integration_id; result })

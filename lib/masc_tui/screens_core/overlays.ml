@@ -3458,7 +3458,10 @@ let classify_inline_form (modal : Model.inline_modal_state) : inline_form_kind =
     | Nav.Board_comment _
     | Nav.Github_token_form _
     | Nav.Code_finder_form
-    | Nav.Code_search_form ) as std ->
+    | Nav.Code_search_form
+    | Nav.Runtime_lane_create
+    | Nav.Runtime_lane_edit _
+    | Nav.Runtime_lane_delete _ ) as std ->
       Form_standard std
 
 let inline_action_title ~lang ~(modal : Model.inline_modal_state) _kind =
@@ -3533,6 +3536,20 @@ let inline_action_title ~lang ~(modal : Model.inline_modal_state) _kind =
       Say.resolve lang (Say.make ~ko:"코드 파일 퍼지 검색" ~en:"Fuzzy File Finder")
   | Form_standard Nav.Code_search_form ->
       Say.resolve lang (Say.make ~ko:"워크스페이스 코드 검색 (rg)" ~en:"Workspace Code Search")
+  | Form_standard Nav.Runtime_lane_create ->
+      Say.resolve lang
+        (Say.make ~ko:"새 런타임 레인 생성" ~en:"Create Runtime Lane")
+  | Form_standard (Nav.Runtime_lane_edit { lane_id; exact_output; _ }) ->
+      let prefix = if exact_output then "exact/" else "" in
+      Say.resolve lang
+        (Say.make
+           ~ko:(Printf.sprintf "레인 후보 편집 · %s%s" prefix lane_id)
+           ~en:(Printf.sprintf "Edit Lane Candidates · %s%s" prefix lane_id))
+  | Form_standard (Nav.Runtime_lane_delete { lane_id; _ }) ->
+      Say.resolve lang
+        (Say.make
+           ~ko:("레인 삭제 확인 · " ^ lane_id)
+           ~en:("Delete Runtime Lane · " ^ lane_id))
 
 let form_of_inline_modal (modal : Model.inline_modal_state) =
   let fields =
@@ -3588,7 +3605,10 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     | Nav.Board_new_post
     | Nav.Board_comment _
     | Nav.Github_token_form _
-    | Nav.Code_search_form ->
+    | Nav.Code_search_form
+    | Nav.Runtime_lane_create
+    | Nav.Runtime_lane_edit _
+    | Nav.Runtime_lane_delete _ ->
         Int.max 7 (List.length modal.fields + 6 + if has_focused_help then 1 else 0)
   in
   let h = Int.min (Int.max 0 (rect.h - 2)) desired_h in
@@ -3631,7 +3651,10 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       | Nav.Board_comment _
       | Nav.Github_token_form _
       | Nav.Code_finder_form
-      | Nav.Code_search_form ->
+      | Nav.Code_search_form
+      | Nav.Runtime_lane_create
+      | Nav.Runtime_lane_edit _
+      | Nav.Runtime_lane_delete _ ->
           Say.resolve lang
             (Say.make ~ko:"[Tab] 필드 · [Enter] 제출 · [Esc] 취소"
                ~en:"[Tab] Field · [Enter] Submit · [Esc] Cancel")
@@ -3776,7 +3799,10 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       | Nav.Board_comment _
       | Nav.Github_token_form _
       | Nav.Code_finder_form
-      | Nav.Code_search_form ->
+      | Nav.Code_search_form
+      | Nav.Runtime_lane_create
+      | Nav.Runtime_lane_edit _
+      | Nav.Runtime_lane_delete _ ->
           let status_rows =
             if modal.submitting || Option.is_some modal.error then 1 else 0
           in
@@ -3784,7 +3810,11 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             match classify_inline_form modal with
             | Form_standard Nav.Code_finder_form ->
                 Int.max 0 (Int.min 7 (inner.h - status_rows - 4))
-            | Form_standard Nav.Connector_form | Form_fusion_launch ->
+            | Form_standard
+                ( Nav.Connector_form
+                | Nav.Runtime_lane_create
+                | Nav.Runtime_lane_edit _ )
+            | Form_fusion_launch ->
                 if inner.h - status_rows >= 6 then 1 else 0
             | Form_board_goal_proposal
             | Form_goal_confirmation_proof
@@ -3805,7 +3835,8 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 | Nav.Board_new_post
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
-                | Nav.Code_search_form ) ->
+                | Nav.Code_search_form
+                | Nav.Runtime_lane_delete _ ) ->
                 0
           in
           let form_r =
@@ -3894,6 +3925,26 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                   (Cell_grid.put_text ~clip:er grid ~x:er.x ~y:er.y
                      ~style:whisper_st
                      (Grapheme.truncate_to_width ~max_width:er.w hint))
+            | Form_standard (Nav.Runtime_lane_create | Nav.Runtime_lane_edit _) ->
+                let rts = Runtime_store.runtime_options model.runtime in
+                let hint =
+                  if rts = [] then
+                    Say.resolve lang
+                      (Say.make ~ko:"가용 런타임 목록 로딩 중..."
+                         ~en:"Available runtimes loading...")
+                  else
+                    let sample =
+                      rts
+                      |> List.filteri (fun i _ -> i < 5)
+                      |> List.map (fun (r : Wire_runtime.runtime_option) -> r.id)
+                      |> String.concat ", "
+                    in
+                    "Runtimes: " ^ sample
+                in
+                ignore
+                  (Cell_grid.put_text ~clip:er grid ~x:er.x ~y:er.y
+                     ~style:whisper_st
+                     (Grapheme.truncate_to_width ~max_width:er.w hint))
             | Form_board_goal_proposal
             | Form_goal_confirmation_proof
             | Form_memory_act
@@ -3913,7 +3964,8 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 | Nav.Board_new_post
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
-                | Nav.Code_search_form ) ->
+                | Nav.Code_search_form
+                | Nav.Runtime_lane_delete _ ) ->
                 ()
           end;
           if status_rows = 1 then begin
@@ -4233,6 +4285,7 @@ let compact_help_group ~lang (grp : Keymap.help_group) : Keymap.help_group =
         | Keymap.Toggle_memory_chart
         | Keymap.Open_external_editor
         | Keymap.Interrupt_turn
+        | Keymap.Delete_selected
         | Keymap.Quit_app ->
             Some e)
       grp.entries

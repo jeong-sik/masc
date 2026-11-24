@@ -4,6 +4,7 @@ import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   authSession,
+  bumpSessionEpoch,
   extractDeviceCode,
   extractOAuthUrl,
   releaseAllViewStreams,
@@ -362,6 +363,101 @@ candidates = ["safe.model"]
     applyBtn.click()
     await flushUi(20)
     expect(rawSaveCalls).toBe(0)
+  })
+
+  it('saves only the lane source previewed in this session after refreshes and late responses', async () => {
+    let source = { path: '/first/runtime.toml', source_revision: 'a'.repeat(64), source_text: SAMPLE_RUNTIME_TOML }
+    const saves: unknown[] = []
+    const previewResponses: ((response: Response) => void)[] = []
+    const pendingReads: ((response: Response) => void)[] = []
+    let delayRead = false
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/api/v1/runtime/config/raw/preview') {
+        return new Promise<Response>((resolve) => { previewResponses.push(resolve) })
+      }
+      if (url === '/api/v1/runtime/config/raw') {
+        if (init?.method === 'POST') {
+          saves.push(JSON.parse(String(init.body)))
+          return jsonResponse({ ok: true })
+        }
+        if (delayRead) return new Promise<Response>((resolve) => { pendingReads.push(resolve) })
+        return jsonResponse(source)
+      }
+      if (url === '/api/v1/runtime/resolved') {
+        return jsonResponse({ default_route: 'coding', lanes: [], runtimes: [], assignments: [] })
+      }
+      if (url.startsWith('/api/v1/dashboard/runtime-probe')) {
+        return jsonResponse({ probe: { providers: [] } })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    const button = (text: string) => {
+      const found = [...container.querySelectorAll('button')].find((item) => item.textContent?.includes(text))
+      if (!found) throw new Error(`Missing button: ${text}`)
+      return found
+    }
+    const editor = () => {
+      const edit = container.querySelector<HTMLButtonElement>('[data-lane-row="failover:coding"] button')
+      if (!edit || edit.disabled) throw new Error('Lane editor is not ready')
+      edit.click()
+    }
+    const requestPreview = async () => {
+      button('Diff 미리보기').click()
+      await vi.waitFor(() => expect(previewResponses).toHaveLength(1))
+      return previewResponses.shift()!
+    }
+    const diff = () => container.querySelector('[data-testid="lane-diff-preview"]')
+    const valid = () => jsonResponse({ can_save: true })
+    const finishCurrentPreview = async () => {
+      const respond = await requestPreview()
+      respond(valid())
+      await vi.waitFor(() => expect(diff()).not.toBeNull())
+    }
+    render(html`<${RuntimeWorkspace} subroute="lanes" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await vi.waitFor(editor)
+    await vi.waitFor(() => expect(button('Diff 미리보기')).toBeTruthy())
+    await finishCurrentPreview()
+    const oldApply = button('변경 적용')
+    const old = source
+    source = { path: '/next/runtime.toml', source_revision: 'b'.repeat(64), source_text: SAMPLE_RUNTIME_TOML + '# independent edit\n' }
+    button('강제 프로브').click()
+    await vi.waitFor(() => expect(container.textContent).toContain(source.source_revision.slice(0, 12)))
+    oldApply.click()
+    await flushUi()
+    expect(saves).toEqual([])
+    expect(diff()).toBeNull()
+
+    // A preview started before a new read, and a slower superseded read, both finish last.
+    const finishPreview = await requestPreview()
+    delayRead = true
+    button('강제 프로브').click()
+    await vi.waitFor(() => expect(pendingReads).toHaveLength(1))
+    delayRead = false
+    button('강제 프로브').click()
+    await vi.waitFor(() => expect(container.textContent).toContain(source.source_revision.slice(0, 12)))
+    pendingReads.shift()!(jsonResponse(old))
+    finishPreview(valid())
+    await flushUi()
+    expect(diff()).toBeNull()
+    expect(container.textContent).toContain(source.source_revision.slice(0, 12))
+
+    await finishCurrentPreview()
+    const oldSessionApply = button('변경 적용')
+    bumpSessionEpoch()
+    oldSessionApply.click()
+    expect(saves).toEqual([])
+    await vi.waitFor(() => expect(diff()).toBeNull())
+    await vi.waitFor(editor)
+    await vi.waitFor(() => expect(button('Diff 미리보기')).toBeTruthy())
+    await finishCurrentPreview()
+    button('변경 적용').click()
+    await vi.waitFor(() => expect(saves).toEqual([{
+      source_text: expect.stringContaining('# independent edit'),
+      expected_source_path: source.path,
+      expected_source_revision: source.source_revision,
+    }]))
   })
 
   it('(B) Chat 3-block toggles (Alt+T Thinking, Tools summary/full/hidden, Memory & Autonomous hidden/shown) render structured collapsible cards', async () => {

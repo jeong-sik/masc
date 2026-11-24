@@ -14,12 +14,15 @@
  */
 
 import { html } from 'htm/preact'
-import { useEffect, useMemo, useState } from 'preact/hooks'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import {
   apiGet,
   apiMutate,
+  currentSessionEpoch,
   formatObserved,
+  isEpochCurrent,
   resourceCache,
+  sessionEpoch,
 } from '../../core'
 import { DataTable, VirtualList, type DataTableColumn } from '../../components/primitives'
 import { KeeperBadge } from '../../components/keeper-badge'
@@ -50,6 +53,18 @@ import {
 } from './types'
 
 type LanesMode = 'failover' | 'exact' | 'fusion'
+
+interface LaneConfigSource {
+  readonly sourceText: string
+  readonly sourceRevision: string
+  readonly sourcePath: string
+  readonly epoch: number
+  readonly signal: AbortSignal
+}
+
+function isCurrentLaneSource(source: LaneConfigSource): boolean {
+  return !source.signal.aborted && isEpochCurrent(source.epoch)
+}
 
 interface ProbePartitionRow extends RuntimeProbeProviderRow {
   readonly scopeBand: 'active_lane' | 'outside_lane'
@@ -112,11 +127,10 @@ export function LanesTab(props: WorkspaceViewProps) {
   const [assignKeeper, setAssignKeeper] = useState('')
   const [assignRuntime, setAssignRuntime] = useState('')
   const [sourceRevision, setSourceRevision] = useState<string | null>(null)
-  const [rawConfig, setRawConfig] = useState<{
-    readonly sourceText: string
-    readonly sourceRevision: string
-    readonly sourcePath: string
-  } | null>(null)
+  const [rawConfig, setRawConfig] = useState<LaneConfigSource | null>(null)
+  const sourceRead = useRef<AbortController | null>(null)
+  const previewRequest = useRef<AbortController | null>(null)
+  const epoch = sessionEpoch.value
 
   // Visual Runtime Lane CRUD state (/api/v1/runtime/config/raw + /raw/preview)
   const [laneEditor, setLaneEditor] = useState<{
@@ -132,13 +146,12 @@ export function LanesTab(props: WorkspaceViewProps) {
     readonly id: string
   } | null>(null)
   const [lanePreview, setLanePreview] = useState<{
+    readonly source: LaneConfigSource
     readonly nextToml: string
     readonly diff: string
     readonly canSave: boolean
     readonly runtimeValidation: string | null
     readonly validationIssues: readonly string[]
-    readonly expectedSourceRevision: string
-    readonly expectedSourcePath: string
     readonly label: string
   } | null>(null)
   const [laneCasConflict, setLaneCasConflict] = useState<string | null>(null)
@@ -163,6 +176,12 @@ export function LanesTab(props: WorkspaceViewProps) {
   const exactObs = resourceCache.observe<ExactLaneRunsPayload>(exactKey).value
   const fusionObs = resourceCache.observe<FusionRunsPayload>('runtime:fusion-runs').value
 
+  const discardLanePreview = () => {
+    previewRequest.current?.abort()
+    setLanePreview(null)
+    setBusy((action) => action === 'lane-preview' ? null : action)
+  }
+
   const loadFailover = (forceProbe = false, reason: 'mount' | 'manual' = 'mount') => {
     void resourceCache.fetch<RuntimeResolvedPayload>(
       'runtime:resolved',
@@ -177,11 +196,19 @@ export function LanesTab(props: WorkspaceViewProps) {
       ),
       { ttlMs: 20_000, topics: ['runtime_probe'], reason: forceProbe ? 'manual' : reason },
     )
+    sourceRead.current?.abort()
+    const read = new AbortController()
+    sourceRead.current = read
+    const readEpoch = currentSessionEpoch()
+    discardLanePreview()
+    setRawConfig(null)
+    setBusy((action) => action === 'lane-apply' ? null : action)
     void apiGet<{
       readonly source_revision?: string
       readonly source_text?: string
       readonly path?: string
-    }>('/api/v1/runtime/config/raw').then((res) => {
+    }>('/api/v1/runtime/config/raw', { signal: read.signal }).then((res) => {
+      if (read.signal.aborted || !isEpochCurrent(readEpoch)) return
       if (res.ok && typeof res.value.source_revision === 'string') {
         setSourceRevision(res.value.source_revision)
         if (typeof res.value.source_text === 'string' && typeof res.value.path === 'string') {
@@ -189,6 +216,8 @@ export function LanesTab(props: WorkspaceViewProps) {
             sourceText: res.value.source_text,
             sourceRevision: res.value.source_revision,
             sourcePath: res.value.path,
+            epoch: readEpoch,
+            signal: read.signal,
           })
         }
       }
@@ -218,10 +247,20 @@ export function LanesTab(props: WorkspaceViewProps) {
   }
 
   useEffect(() => {
+    setSourceRevision(null)
+    setLaneEditor(null)
+    setLaneDeleteConfirm(null)
+    return () => {
+      sourceRead.current?.abort()
+      previewRequest.current?.abort()
+    }
+  }, [epoch])
+
+  useEffect(() => {
     if (mode === 'failover') loadFailover(false, 'mount')
     else if (mode === 'exact') loadExact('mount')
     else loadFusion('mount')
-  }, [mode, runKindFilter, currentCursor])
+  }, [mode, runKindFilter, currentCursor, epoch])
 
   const resolvedData = resolvedObs.kind === 'value' ? resolvedObs.data : null
   const probeData = probeObs.kind === 'value' ? probeObs.data : null
@@ -381,10 +420,13 @@ export function LanesTab(props: WorkspaceViewProps) {
 
   const previewProposedLaneToml = async (nextToml: string, label: string) => {
     const snapshot = rawConfig
-    if (!snapshot) {
+    if (!snapshot || !isCurrentLaneSource(snapshot)) {
       setBanner({ kind: 'err', text: 'runtime.toml 원본을 불러오지 못해 미리보기를 실행할 수 없습니다.' })
       return
     }
+    discardLanePreview()
+    const request = new AbortController()
+    previewRequest.current = request
     setBusy('lane-preview')
     setBanner(null)
     setLaneCasConflict(null)
@@ -400,7 +442,8 @@ export function LanesTab(props: WorkspaceViewProps) {
           readonly message?: string
         }[]
       }
-    }>('POST', '/api/v1/runtime/config/raw/preview', { source_text: nextToml })
+    }>('POST', '/api/v1/runtime/config/raw/preview', { source_text: nextToml }, { signal: request.signal })
+    if (request.signal.aborted || !isCurrentLaneSource(snapshot)) return
     setBusy(null)
     if (!res.ok) {
       setBanner({ kind: 'err', text: `레인 검증 미리보기 실패: ${res.error.message}` })
@@ -421,6 +464,7 @@ export function LanesTab(props: WorkspaceViewProps) {
       .filter(Boolean)
     const diff = buildLaneUnifiedDiff(snapshot.sourceText, nextToml, snapshot.sourcePath)
     setLanePreview({
+      source: snapshot,
       nextToml,
       diff,
       canSave: res.value.can_save === true,
@@ -428,8 +472,6 @@ export function LanesTab(props: WorkspaceViewProps) {
         ? res.value.runtime_validation.trim()
         : null,
       validationIssues,
-      expectedSourceRevision: snapshot.sourceRevision,
-      expectedSourcePath: snapshot.sourcePath,
       label,
     })
   }
@@ -475,15 +517,16 @@ export function LanesTab(props: WorkspaceViewProps) {
   }
 
   const handleApplyLanePreview = async () => {
-    if (!lanePreview || !lanePreview.canSave) return
+    if (!lanePreview?.canSave || !isCurrentLaneSource(lanePreview.source)) return
     setBusy('lane-apply')
     setBanner(null)
     setLaneCasConflict(null)
     const res = await apiMutate<unknown>('POST', '/api/v1/runtime/config/raw', {
       source_text: lanePreview.nextToml,
-      expected_source_revision: lanePreview.expectedSourceRevision,
-      expected_source_path: lanePreview.expectedSourcePath,
+      expected_source_revision: lanePreview.source.sourceRevision,
+      expected_source_path: lanePreview.source.sourcePath,
     })
+    if (!isCurrentLaneSource(lanePreview.source)) return
     setBusy(null)
     if (!res.ok) {
       if (res.error.kind === 'conflict_cas') {
@@ -494,7 +537,7 @@ export function LanesTab(props: WorkspaceViewProps) {
       return
     }
     setBanner({ kind: 'ok', text: `레인 변경(${lanePreview.label})이 runtime.toml에 CAS 저장되었습니다.` })
-    setLanePreview(null)
+    discardLanePreview()
     setLaneEditor(null)
     setLaneDeleteConfirm(null)
     loadFailover(false, 'manual')
@@ -797,7 +840,7 @@ export function LanesTab(props: WorkspaceViewProps) {
                 disabled=${!rawConfig}
                 onClick=${() => {
                   setLaneDeleteConfirm(null)
-                  setLanePreview(null)
+                  discardLanePreview()
                   setLaneEditor({
                     mode: 'create',
                     kind: 'failover',
@@ -820,7 +863,7 @@ export function LanesTab(props: WorkspaceViewProps) {
                   class="btn-primary"
                   onClick=${() => {
                     setLaneCasConflict(null)
-                    setLanePreview(null)
+                    discardLanePreview()
                     loadFailover(false, 'manual')
                   }}
                 >
@@ -870,7 +913,7 @@ export function LanesTab(props: WorkspaceViewProps) {
                             disabled=${!rawConfig}
                             onClick=${() => {
                               setLaneDeleteConfirm(null)
-                              setLanePreview(null)
+                              discardLanePreview()
                               setLaneEditor({
                                 mode: 'edit',
                                 kind: lane.kind,
@@ -890,7 +933,7 @@ export function LanesTab(props: WorkspaceViewProps) {
                             style=${{ color: 'var(--err-fg)' }}
                             onClick=${() => {
                               setLaneEditor(null)
-                              setLanePreview(null)
+                              discardLanePreview()
                               setLaneDeleteConfirm({ kind: lane.kind, id: lane.id })
                             }}
                           >
@@ -920,7 +963,7 @@ export function LanesTab(props: WorkspaceViewProps) {
                   <strong style=${{ fontSize: 'var(--fs-13)' }}>
                     ${laneEditor.mode === 'create' ? '새 레인 생성' : `레인 편집 · ${laneEditor.id}`}
                   </strong>
-                  <button type="button" class="btn-ghost" onClick=${() => { setLaneEditor(null); setLanePreview(null) }}>닫기</button>
+                  <button type="button" class="btn-ghost" onClick=${() => { setLaneEditor(null); discardLanePreview() }}>닫기</button>
                 </div>
 
                 <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 'var(--sp-2)' }}>
@@ -933,7 +976,7 @@ export function LanesTab(props: WorkspaceViewProps) {
                       onChange=${(e: Event) => {
                         const kind = (e.target as HTMLSelectElement).value as EditableLaneKind
                         setLaneEditor((cur) => (cur ? { ...cur, kind } : null))
-                        setLanePreview(null)
+                        discardLanePreview()
                       }}
                       style=${{ padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
                     >
@@ -954,7 +997,7 @@ export function LanesTab(props: WorkspaceViewProps) {
                       onInput=${(e: Event) => {
                         const id = (e.target as HTMLInputElement).value
                         setLaneEditor((cur) => (cur ? { ...cur, id } : null))
-                        setLanePreview(null)
+                        discardLanePreview()
                       }}
                       class="mono"
                       style=${{ padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
@@ -971,7 +1014,7 @@ export function LanesTab(props: WorkspaceViewProps) {
                         onInput=${(e: Event) => {
                           const maxOutputTokens = (e.target as HTMLInputElement).value
                           setLaneEditor((cur) => (cur ? { ...cur, maxOutputTokens } : null))
-                          setLanePreview(null)
+                          discardLanePreview()
                         }}
                         class="mono tnum"
                         style=${{ padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
@@ -995,7 +1038,7 @@ export function LanesTab(props: WorkspaceViewProps) {
                           disabled=${idx === 0}
                           onClick=${() => {
                             setLaneEditor((cur) => (cur ? { ...cur, candidates: reorderCandidate(cur.candidates, idx, 'up') } : null))
-                            setLanePreview(null)
+                            discardLanePreview()
                           }}
                         >
                           ↑
@@ -1007,7 +1050,7 @@ export function LanesTab(props: WorkspaceViewProps) {
                           disabled=${idx === laneEditor.candidates.length - 1}
                           onClick=${() => {
                             setLaneEditor((cur) => (cur ? { ...cur, candidates: reorderCandidate(cur.candidates, idx, 'down') } : null))
-                            setLanePreview(null)
+                            discardLanePreview()
                           }}
                         >
                           ↓
@@ -1019,7 +1062,7 @@ export function LanesTab(props: WorkspaceViewProps) {
                           style=${{ color: 'var(--err-fg)' }}
                           onClick=${() => {
                             setLaneEditor((cur) => (cur ? { ...cur, candidates: cur.candidates.filter((_, i) => i !== idx) } : null))
-                            setLanePreview(null)
+                            discardLanePreview()
                           }}
                         >
                           ×
@@ -1056,7 +1099,7 @@ export function LanesTab(props: WorkspaceViewProps) {
                           if (cur.candidates.includes(next)) return { ...cur, newCandidate: '' }
                           return { ...cur, candidates: [...cur.candidates, next], newCandidate: '' }
                         })
-                        setLanePreview(null)
+                        discardLanePreview()
                       }}
                     >
                       + 후보 추가
@@ -1121,7 +1164,7 @@ export function LanesTab(props: WorkspaceViewProps) {
                 <div class="wka-h">
                   <strong style=${{ fontSize: 'var(--fs-12)' }}>Unified Diff 미리보기 · ${lanePreview.label}</strong>
                   <div style=${{ display: 'flex', gap: 'var(--sp-2)' }}>
-                    <button type="button" class="btn-ghost" onClick=${() => setLanePreview(null)}>취소</button>
+                    <button type="button" class="btn-ghost" onClick=${() => discardLanePreview()}>취소</button>
                     <button
                       type="button"
                       class="btn-primary"

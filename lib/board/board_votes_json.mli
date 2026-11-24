@@ -22,6 +22,10 @@ val log_loaded :
     warn naming the partial load: accepted rows stay in the store while
     the outcome is [Error]. *)
 
+val replace_loaded_posts : store -> post list -> unit
+(** Replace the posts model and its origin/hot indexes with a complete read.
+    Caller holds the state lock. *)
+
 val load_persisted_posts : store -> (int, string * exn) result
 (** Explicit startup/quiescent reload under persist then state locks. Success
     requires a physically valid initialization guard and a complete Present

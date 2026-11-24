@@ -516,9 +516,21 @@ let notify_post_creation (creation : Board.post_creation) =
       (Board.Post_publication_failure.after_commit creation
          (Board.Post_publication_failure.Raised exn))
 
+(* task-4036: a posts refusal caused by another writer moving the file is
+   cleared by one fresh read before the operation; it never refuses forever.
+   Called only at operation entry, outside every Board lock. *)
+let reobserved_backend () =
+  let store = backend () in
+  (match Board.reobserve_posts store with
+   | Ok () -> ()
+   | Error error ->
+     Log.BoardLog.warn "board posts source stays unavailable after reobservation: %s"
+       (Board_types.show_board_error error));
+  store
+
 let resolve_post_dispatch_context () =
   try
-    let store = backend () in
+    let store = reobserved_backend () in
     let lookup = recipient_lookup () in
     Ok (store, lookup)
   with
@@ -810,7 +822,7 @@ let get_comments ~reader ~post_id =
   read_comments ~reader ~post_id |> Result.map_error Board.board_error_of_read_error
 
 let require_persisted_sources_readable () =
-  let store = backend () in
+  let store = reobserved_backend () in
       Board.with_persist_lock store (fun () ->
         let open Result.Syntax in
         let* () = Board.require_posts_source_readable store in
@@ -824,7 +836,7 @@ let get_post_and_comments_unchecked ~post_id =
       |> Result.map_error Board.board_error_of_read_error
 
 let get_post_and_comments ~reader ~post_id =
-  let store = backend () in
+  let store = reobserved_backend () in
   match Board.observe_post_and_comments store ~post_id
         |> Result.map_error Board.board_error_of_read_error with
   | Ok (post, observation) ->
@@ -856,7 +868,7 @@ let log_signal_skip ~op ~read ~id detail =
 
 let add_comment_with_unresolved ~reader ~post_id ~author ~content ?parent_id
     ?(ttl_hours = Board.Limits.default_ttl_hours) () =
-  let store = backend () in
+  let store = reobserved_backend () in
       (match
          Board.add_comment_with_audience store ~reader ~lookup:(recipient_lookup ())
            ~post_id ~author ~content ?parent_id ~ttl_hours ()

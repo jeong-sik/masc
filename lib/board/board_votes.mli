@@ -48,6 +48,10 @@ val reload_votes : store -> (int, board_error) result
     pending. Unknown writes and interrupted model publication remain fail-stop
     and require a fresh store. *)
 
+val reobserve_posts : store -> (unit, board_error) result
+(** See {!Board_store_load.reobserve_posts}. Call outside persistence before a
+    Board operation so a stale posts observation does not refuse it. *)
+
 (** {1 Voting} *)
 
 val current_vote_for_post :

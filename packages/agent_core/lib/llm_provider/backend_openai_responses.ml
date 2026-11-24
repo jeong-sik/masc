@@ -453,8 +453,6 @@ let response_text_config_of_config (config : Provider_config.t) =
   | None -> None
 ;;
 
-let capabilities_of_config = Backend_openai_request.capabilities_of_config
-
 (* OpenAI Responses explicit prompt-cache breakpoint marker (GPT-5.6 / 6 / 6.2).
    Always emit ["mode": "explicit"] (never empty [{}]) and omit ["ttl"] so the
    breakpoint inherits the default 30m lifetime rather than triggering 2.5x 12h
@@ -630,7 +628,7 @@ let degrade_image_messages_with
 ;;
 
 let project_history ?(tools_present = false) config messages =
-  let caps = capabilities_of_config config in
+  let caps = Input_budget.capabilities_of_config config in
   let messages, _documents_degraded =
     Api_common.degrade_document_messages
       ~wire_form:Api_common.Document_input_file_part
@@ -667,7 +665,7 @@ let build_request_artifact
       ()
   =
   let tools = Backend_openai_request.effective_tools config tools in
-  let caps = capabilities_of_config config in
+  let caps = Input_budget.capabilities_of_config config in
   let projected_messages =
     match project_history ~tools_present:(tools <> []) config messages with
     | Error error ->

@@ -1315,56 +1315,20 @@ let test_codex_session_budget_and_acp_antigravity_quota_refusal () =
       (Masc.Fusion_official_client.Antigravity_failure
          (Runtime_antigravity.Turn_failed "unexpected syntax error"))
   in
-  let acp_quota =
-    mk_exec "kimi_acp.k3"
-      (Masc.Fusion_official_client.Acp_failure
-         (Runtime_acp_client.Rpc_error
-            { method_name = "session/prompt"
-            ; code = -32000
-            ; message = "exceeded_current_quota_error"
-            ; data = None
-            }))
+  let acp runtime ?(code = -32000) ?data message =
+    mk_exec runtime (Masc.Fusion_official_client.Acp_failure
+      (Runtime_acp_client.rpc_error ~method_name:"session/prompt" ~code ~message ~data))
   in
-  let acp_rate =
-    mk_exec "vibe_acp.mistral"
-      (Masc.Fusion_official_client.Acp_failure
-         (Runtime_acp_client.Rpc_error
-            { method_name = "session/prompt"
-            ; code = -32000
-            ; message = "HTTP 429 Too Many Requests"
-            ; data = None
-            }))
-  in
+  let provider_code value = `Assoc [ "code", `String value ] in
+  let acp_quota = acp "kimi_acp.k3" ~data:(provider_code "exceeded_current_quota_error") "quota" in
+  let acp_rate = acp "vibe_acp.mistral" ~code:429 "Too Many Requests" in
   let acp_overflow =
-    mk_exec "vibe_acp.mistral"
-      (Masc.Fusion_official_client.Acp_failure
-         (Runtime_acp_client.Rpc_error
-            { method_name = "session/prompt"
-            ; code = -32000
-            ; message = "context_length_exceeded: prompt exceeds model window"
-            ; data = None
-            }))
+    acp "vibe_acp.mistral" ~data:(provider_code "context_length_exceeded") "prompt exceeds model window"
   in
   let acp_prose_overflow =
-    mk_exec "vibe_acp.mistral"
-      (Masc.Fusion_official_client.Acp_failure
-         (Runtime_acp_client.Rpc_error
-            { method_name = "session/prompt"
-            ; code = -32000
-            ; message = "prompt exceeds maximum context length"
-            ; data = None
-            }))
+    acp "vibe_acp.mistral" ~code:(-32602) "invalid parameter quoting context_length_exceeded"
   in
-  let acp_other =
-    mk_exec "vibe_acp.mistral"
-      (Masc.Fusion_official_client.Acp_failure
-         (Runtime_acp_client.Rpc_error
-            { method_name = "session/prompt"
-            ; code = -32603
-            ; message = "internal decode error"
-            ; data = None
-            }))
-  in
+  let acp_other = acp "vibe_acp.mistral" ~code:(-32603) "prior error: exceeded_current_quota_error" in
   check bool "Codex Session_budget_exceeded rests binding" true
     (Cli_oneshot.refused_for_binding_rest codex_session_budget);
   check bool "Codex Usage_limit_exceeded rests binding" true
@@ -1390,24 +1354,10 @@ let test_codex_session_budget_and_acp_antigravity_quota_refusal () =
   (* Precedence regression (#354 P1 #1): TPM/quota messages carrying overflow substrings
      rest the binding and NEVER authorize input shrinking. *)
   let acp_tpm_large =
-    mk_exec "vibe_acp.mistral"
-      (Masc.Fusion_official_client.Acp_failure
-         (Runtime_acp_client.Rpc_error
-            { method_name = "session/prompt"
-            ; code = 429
-            ; message = "Rate limit reached on tokens per min (TPM): Request too large for TPM limit"
-            ; data = None
-            }))
+    acp "vibe_acp.mistral" ~code:429 "Rate limit reached on tokens per min (TPM): Request too large for TPM limit"
   in
   let acp_quota_max =
-    mk_exec "kimi_acp.k3"
-      (Masc.Fusion_official_client.Acp_failure
-         (Runtime_acp_client.Rpc_error
-            { method_name = "session/prompt"
-            ; code = -32000
-            ; message = "quota_exceeded: usage exceeds the maximum allowed"
-            ; data = None
-            }))
+    acp "kimi_acp.k3" ~data:(provider_code "quota_exceeded") "usage exceeds the maximum allowed"
   in
   check bool "ACP 429 TPM 'Request too large' rests binding" true
     (Cli_oneshot.refused_for_binding_rest acp_tpm_large);

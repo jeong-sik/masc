@@ -325,9 +325,8 @@ type structured_refusal =
 
 (* Machine-readable structured provider error signals parsed from JSON error
    fields (code, type, status, metadata.error_type, details[].reason, and
-   nested OpenRouter metadata.raw JSON). [messages] carries error.message
-   solely for Anthropic's documented HTTP 400 credit/usage-limit refusal
-   matcher (which emits no distinct billing code). *)
+   nested OpenRouter metadata.raw JSON). [messages] supplies the diagnostic
+   text attached after classification. *)
 type error_signals =
   { codes : string list
   ; types : string list
@@ -416,23 +415,20 @@ let parse_protobuf_duration_seconds (raw : string) : float option =
     else None)
 ;;
 
+let retry_info_delay fields =
+  match Option.bind (List.assoc_opt "@type" fields) json_string_opt with
+  | Some ("type.googleapis.com/google.rpc.RetryInfo" | "google.rpc.RetryInfo") ->
+    Option.bind (List.assoc_opt "retryDelay" fields) (function
+      | `String raw -> parse_protobuf_duration_seconds raw
+      | _ -> None)
+  | Some _ | None -> None
+;;
+
 let retry_info_in_details fields =
   match List.assoc_opt "details" fields with
   | Some (`List items) ->
-    List.find_map
-      (function
-        | `Assoc df ->
-          (match Option.bind (List.assoc_opt "@type" df) json_string_opt with
-           | Some ("type.googleapis.com/google.rpc.RetryInfo" | "google.rpc.RetryInfo") ->
-             Option.bind (List.assoc_opt "retryDelay" df) (function
-               | `String raw -> parse_protobuf_duration_seconds raw
-               | `Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null ->
-                 None)
-           | Some _ | None -> None)
-        | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None)
-      items
-  | Some (`Assoc _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
-  | None -> None
+    List.find_map (function `Assoc fields -> retry_info_delay fields | _ -> None) items
+  | _ -> None
 ;;
 
 (* Precedence within an object: numeric retry_after -> numeric retryAfter ->
@@ -443,7 +439,10 @@ let retry_after_in_fields fields =
   | None ->
     (match Option.bind (List.assoc_opt "retryAfter" fields) json_number_opt with
      | Some _ as v -> v
-     | None -> retry_info_in_details fields)
+     | None ->
+       (match retry_info_delay fields with
+        | Some _ as delay -> delay
+        | None -> retry_info_in_details fields))
 ;;
 
 let metadata_raw_of_fields fields =
@@ -937,48 +936,6 @@ let signals_indicate_provider_unavailable (s : error_signals) =
   || List.exists is_structured_unavailable_token s.detail_reasons
 ;;
 
-let contains_substring_ci ~haystack ~needle =
-  let h_len = String.length haystack in
-  let n_len = String.length needle in
-  if n_len = 0
-  then true
-  else if n_len > h_len
-  then false
-  else (
-    let h = String.lowercase_ascii haystack in
-    let n = String.lowercase_ascii needle in
-    let rec scan idx =
-      if idx > h_len - n_len
-      then false
-      else if String.sub h idx n_len = n
-      then true
-      else scan (idx + 1)
-    in
-    scan 0)
-;;
-
-(* Anthropic reports credit exhaustion and workspace API usage-limit
-   refusals on HTTP 400 with [error.type = "invalid_request_error"] and no
-   dedicated billing code (only the canonical refusal message). Classify those
-   exact documented billing/usage-limit messages on HTTP 400 as
-   [Structured_account_quota] so multi-account lanes rest exhausted Claude API
-   accounts instead of hammering them on every turn. *)
-let is_anthropic_400_account_quota_message msg =
-  let needles =
-    [ "credit balance is too low"
-    ; "reached your specified api usage limits"
-    ; "reached your api usage limit"
-    ; "insufficient credit balance"
-    ; "workspace spend limit"
-    ]
-  in
-  List.exists (fun needle -> contains_substring_ci ~haystack:msg ~needle) needles
-;;
-
-let signals_indicate_anthropic_400_account_quota (s : error_signals) ~message =
-  List.exists is_anthropic_400_account_quota_message (message :: s.messages)
-;;
-
 let structured_refusal_of_signals_with
       ~indicates_overflow
       ~indicates_quota
@@ -992,9 +949,7 @@ let structured_refusal_of_signals_with
   | 400 | 422 ->
     if indicates_overflow signals
     then Some (Structured_context_overflow { message; limit = signals.n_ctx })
-    else if
-      indicates_quota signals
-      || (status = 400 && signals_indicate_anthropic_400_account_quota signals ~message)
+    else if indicates_quota signals
     then Some (Structured_account_quota { message; retry_after })
     else None
   | 402 -> Some (Structured_account_quota { message; retry_after })
@@ -1140,15 +1095,23 @@ let classify_structured_json
       (json : Yojson.Safe.t)
   : signal_refusal option
   =
-  let signals = signals_of_json json in
+  (* An ACP data array can split the status, provider refusal, and retry
+     evidence into separate objects. Classify the covered fields together. *)
+  let objects = match json with
+    | `List items -> List.take 8 items
+    | other -> [ other ]
+  in
+  let signals =
+    List.fold_left (fun acc obj -> merge_signals acc (signals_of_json obj)) empty_signals objects
+  in
   let effective_status =
     match refusal_http_status_opt http_status with
-    | Some _ as s -> s
-    | None -> http_status_of_json json
+    | Some _ as status -> status
+    | None -> List.find_map http_status_of_json objects
   in
   let effective_retry =
-    match retry_after_of_json json with
-    | Some _ as r -> r
+    match List.find_map retry_after_of_json objects with
+    | Some _ as retry -> retry
     | None -> Option.bind retry_after usable_retry_after
   in
   classify_structured_signals

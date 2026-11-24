@@ -38,7 +38,7 @@ let field key = Yojson.Safe.Util.member key
 let test_hybrid provider model () =
   with_catalog (fun () ->
     let disabled = config ~enable_thinking:false provider model in
-    let caps = Backend_openai_request.capabilities_of_config disabled in
+    let caps = Input_budget.capabilities_of_config disabled in
     Alcotest.(check bool) "exact binding declares toggle" true
       (caps.thinking_control_format = Capabilities.Thinking_object_only);
     Alcotest.(check bool) "explicit disable admitted" true
@@ -69,7 +69,7 @@ let test_hybrid provider model () =
 let test_no_toggle provider model () =
   with_catalog (fun () ->
     let disabled = config ~enable_thinking:false ~preserve_thinking:true provider model in
-    let caps = Backend_openai_request.capabilities_of_config disabled in
+    let caps = Input_budget.capabilities_of_config disabled in
     Alcotest.(check bool) "no disable capability fabricated" true
       (caps.thinking_control_format = Capabilities.No_thinking_control);
     Alcotest.(check bool) "preserve does not authorize disable" true
@@ -92,7 +92,7 @@ let test_nonreasoning_default_omits_thinking model () =
     List.iter (fun kind ->
       let config = Provider_config.make ~kind ~provider_id:"glm" ~model_id:model
           ~base_url:"https://api.z.ai/api/paas/v4" ~max_tokens:128 () in
-      let caps = Backend_openai_request.capabilities_of_config config in
+      let caps = Input_budget.capabilities_of_config config in
       Alcotest.(check bool) "catalog declares no reasoning" false caps.supports_reasoning;
       let serialized = Result.bind (Complete_common.validate_all config) (fun () ->
         Complete_common.serialize_http_request ~stream:false ~config
@@ -118,7 +118,7 @@ let test_openai_compat_explicit_enable model expected () =
         ~base_url:"https://api.z.ai/api/paas/v4" ~request_path:"/chat/completions"
         ~max_tokens:128 ~enable_thinking:true ()
     in
-    let caps = Backend_openai_request.capabilities_of_config config in
+    let caps = Input_budget.capabilities_of_config config in
     Alcotest.(check bool) "row declares no toggle wire" true
       (caps.thinking_control_format = Capabilities.No_thinking_control);
     Alcotest.(check bool) "explicit enable admission follows supports_reasoning" true
@@ -131,7 +131,7 @@ let test_native_binding model can_disable () =
       Provider_config.make ~kind:Glm ~model_id:model
         ~base_url:"https://api.z.ai/api/paas/v4" ~enable_thinking:false ()
     in
-    let caps = Backend_openai_request.capabilities_of_config disabled in
+    let caps = Input_budget.capabilities_of_config disabled in
     Alcotest.(check bool) "anonymous native binding uses exact declaration" can_disable
       (caps.thinking_control_format = Capabilities.Thinking_object_only);
     Alcotest.(check bool) "anonymous native disable admission" can_disable

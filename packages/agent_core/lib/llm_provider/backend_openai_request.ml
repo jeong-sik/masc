@@ -214,8 +214,6 @@ let response_format_of_config (config : Provider_config.t) =
   | None -> None
 ;;
 
-let capabilities_of_config = Input_budget.capabilities_of_config
-
 (* Output-token ceiling and receipt resolution live in {!Input_budget}
    so pre-flight admission, request serializers, and MASC window signals
    share one pure computation; this wrapper adds the serialization-time
@@ -245,7 +243,7 @@ let output_token_receipt ~envelope (config : Provider_config.t) =
 let should_emit_tool_choice (config : Provider_config.t) =
   match config.tool_choice with
   | Some (Any | Tool _) -> true
-  | Some (Auto | None_) | None -> (capabilities_of_config config).supports_tool_choice
+  | Some (Auto | None_) | None -> (Input_budget.capabilities_of_config config).supports_tool_choice
 ;;
 
 (* ── Pre-System_context explicit prompt-cache breakpoints ── *)
@@ -417,7 +415,7 @@ let build_request_assoc_artifact
   =
   let tools = effective_tools config tools in
   let dialect = Reasoning_dialect.for_provider_config config in
-  let caps = capabilities_of_config config in
+  let caps = Input_budget.capabilities_of_config config in
   let replay_capability =
     match Reasoning_dialect.replay_capability_for_provider_config
             ~tools_present:(tools <> []) config with

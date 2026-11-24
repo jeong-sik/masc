@@ -1162,7 +1162,7 @@ let build_request_payload
     | Completion { output_token_receipt; stream } ->
       let prompt_caching_active =
         config.cache_system_prompt
-        && (Backend_openai_request.capabilities_of_config config)
+        && (Input_budget.capabilities_of_config config)
              .supports_prompt_caching
       in
       let effective_msgs_json, top_level_cache_control =

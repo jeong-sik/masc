@@ -244,7 +244,7 @@ type signal_refusal =
     negative [?retry_after] delays are rejected to [None].
     - On HTTP [400] / [422], delegates directly to {!structured_refusal_of_signals}
       so HTTP {!classify_error} and status-qualified signal classification share
-      one precedence table ([overflow > quota], plus Anthropic 400 billing parity).
+      one precedence table ([overflow > quota]).
     - On HTTP [413], returns {!Signal_request_body_too_large} (preserving parity
       with {!classify_error}'s [Request_body_refused_by_provider] instead of
       fabricating a context-window overflow).
@@ -266,7 +266,8 @@ val classify_structured_signals
     [400..599] takes precedence over JSON status fields (non-refusal values
     such as [200] or negative JSON-RPC codes fall back to
     {!http_status_of_json}); JSON [retry_after] takes precedence over
-    caller-supplied [?retry_after]. *)
+    caller-supplied [?retry_after]. A top-level array combines evidence from
+    its first eight entries, including a separate Google RetryInfo object. *)
 val classify_structured_json
   :  ?http_status:int
   -> ?retry_after:float

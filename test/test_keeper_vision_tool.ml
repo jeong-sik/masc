@@ -3134,29 +3134,16 @@ let test_acp_failure_advances_timeout_standing_and_exception_handling () =
   assert (can_advance (F.Acp_failure (Acp.Timeout { stage = "prompt"; timeout_s = 30.0 })));
   assert (can_advance (F.Acp_failure (Acp.Process_exited { detail = "exited 1"; stderr_tail = "" })));
   assert (can_advance (F.Acp_failure Acp.Client_closed));
-  List.iter
-    (fun message ->
-       assert
-         (can_advance
-            (F.Acp_failure
-               (Acp.Rpc_error { method_name = "session/prompt"; code = -32000; message; data = None }))))
-    [ "HTTP 429 rate limit exceeded"
-    ; "exceeded_current_quota_error"
-    ; "HTTP 401 unauthorized"
-    ; "HTTP 403 forbidden"
-    ; "HTTP 503 service unavailable"
-    ; "context_length_exceeded"
-    ];
-  assert
-    (not
-       (can_advance
-          (F.Acp_failure
-             (Acp.Rpc_error { method_name = "session/prompt"; code = -32000; message = "permission denied"; data = None }))));
-  assert
-    (not
-       (can_advance
-          (F.Acp_failure
-             (Acp.Rpc_error { method_name = "session/prompt"; code = -32602; message = "invalid json params"; data = None }))));
+  let acp ?(code = -32000) ?data message =
+    F.Acp_failure (Acp.rpc_error ~method_name:"session/prompt" ~code ~message ~data)
+  in
+  List.iter (fun status -> assert (can_advance (acp ~code:status "provider refused request")))
+    [ 429; 401; 403; 503 ];
+  List.iter (fun code ->
+    assert (can_advance (acp ~data:(`Assoc [ "code", `String code ]) "provider refused request"));
+    assert (not (can_advance (acp ~code:(-32602) ("prior error: " ^ code)))))
+    [ "exceeded_current_quota_error"; "context_length_exceeded" ];
+  assert (not (can_advance (acp "permission denied")));
   (* P1 #9b: TimeoutError observes uniform standing & advances; ordinary exceptions log/format Printexc; Sys.Break re-raises *)
   with_temp_runtime_toml vision_output_limit_runtime_toml (fun () ->
     let calls = ref [] in

@@ -4240,7 +4240,7 @@ let capability_of_runtime (rt : t) : runtime_capability =
     match rt.execution with
     (* These adapters report typed context-window overflow errors
        (Runtime_claude_code.Context_window_exceeded / Runtime_codex_app_server.Context_window_exceeded /
-       Runtime_acp_client.is_context_overflow_rpc_error). *)
+       Runtime_acp_client.Rpc_error with Retry.Signal_context_overflow). *)
     | Runtime_execution.Claude_code _
     | Runtime_execution.Codex_app_server _
     | Runtime_execution.Acp _ ->

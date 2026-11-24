@@ -77,9 +77,9 @@ val render_mermaid_fallback :
   string list * string option
 (** Render [chart] via {!Mermaid.render_adaptive} bounded to [max_width]
     (automatically retrying horizontal [LR]/[RL] flowcharts as [TD] on
-    [Too_wide]). If Mermaid still refuses the source, returns wrapped raw
-    Mermaid source lines paired with a concise diagnostic note instead of
-    raising. *)
+    [Too_wide]). If Mermaid cannot render a current snapshot, show its fact and
+    metadata at the available width. For a lineage diagram, return its wrapped
+    Mermaid source and diagnostic. *)
 
 val render_tree_lines :
   ?tz_offset_sec:int ->

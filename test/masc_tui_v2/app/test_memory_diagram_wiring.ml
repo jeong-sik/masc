@@ -1670,6 +1670,13 @@ let test_all_subviews_and_orphan_fact_snapshot () =
               check string "snapshot graphics format" "Pele Mermaid" format_label
           | Diagram_text _ -> fail "expected a graphical snapshot")
         [ Knowledge_store.Diagram_pele_card; Diagram_formation_tree ];
+      let narrow_lines, note =
+        Memory_diagram.render_mermaid_fallback ~ko:false ~max_width:24
+          ~kind:Knowledge_store.Diagram_pele_card chart
+      in
+      check bool "narrow Mermaid fallback displays the fact without source markup" true
+        (Option.is_some note && List.mem "m-orphan" narrow_lines
+         && List.for_all (fun line -> Grapheme.display_width line <= 24) narrow_lines);
       let no_pele _ = fail "forced text must not call Pele" in
       List.iter (fun mode ->
           match render ~kind:Knowledge_store.Diagram_formation_tree ~mode no_pele with

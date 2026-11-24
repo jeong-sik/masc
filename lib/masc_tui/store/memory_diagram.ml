@@ -169,10 +169,17 @@ let render_mermaid_fallback ?tz_offset_sec ~ko ?now ~max_width ~kind chart =
   let src = mermaid_source ?tz_offset_sec ~ko ?now ~kind chart in
   match Mermaid.render_adaptive ~cols src with
   | Ok rows -> (rows, None)
-  | Error failure ->
-      let note = mermaid_failure_note ~ko failure in
-      let raw_lines = Knowledge_store.wrap_lines ~max_width:cols src in
-      (raw_lines, Some note)
+  | Error failure -> (
+      match chart with
+      | Memory_lineage.Current_snapshot snapshot ->
+          let note =
+            if ko then "현재 스냅샷을 텍스트로 표시합니다"
+            else "Showing the current snapshot as text"
+          in
+          (Memory_lineage.snapshot_lines ?tz_offset_sec ~ko ?now ~max_width:cols snapshot, Some note)
+      | Memory_lineage.Lineage _ ->
+          let raw_lines = Knowledge_store.wrap_lines ~max_width:cols src in
+          (raw_lines, Some (mermaid_failure_note ~ko failure)))
 
 let render_tree_lines ?tz_offset_sec ~ko ?now ?keeper_name ~max_width chart =
   match chart with

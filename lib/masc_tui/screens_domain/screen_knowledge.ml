@@ -2578,46 +2578,30 @@ let draw_temporal_memory_diff ~is_dive ~(model : Model.t) ~grid ~cache
          | None ->
              Say.resolve lang
                (Say.make ~ko:"월드 기억 Diff 상세" ~en:"World Memory Diff Dive"))
-      , Say.resolve lang
-          (Say.make ~ko:"[↑↓] 스크롤 · [Enter] 전문 · [M] 차트 · [Esc] 뒤로"
-             ~en:"[↑↓] Scroll · [Enter] Read · [M] Chart · [Esc] Back") )
+      , Some
+          (Say.resolve lang
+             (Say.make ~ko:"[↑↓] 스크롤 · [M] 차트 · [Esc] 뒤로"
+                ~en:"[↑↓] Scroll · [M] Chart · [Esc] Back")) )
     else
     match k.memory_diff_keeper with
-    | Some kp ->
-        let diagram_open =
-          match k.memory_diagram with
-          | Some d ->
-              Knowledge_store.memory_diagram_matches_scope ~keeper_opt:(Some kp)
-                d
-          | None -> false
-        in
-        let hk =
-          if diagram_open then
-            Say.resolve lang
-              (Say.make ~ko:"[v] Pele/Mermaid/Tree · [y] 복사 · [Esc] 닫기"
-                 ~en:"[v] Pele/Mermaid/Tree · [y] Copy · [Esc] Close")
-          else
-            Say.resolve lang
-              (Say.make ~ko:"[Enter] 전문 · [.] Pele/Mermaid · [Ctrl+O] 형성 트리"
-                 ~en:"[Enter] Read · [.] Pele/Mermaid · [Ctrl+O] Tree")
-        in
+    | Some _ ->
         ( Say.resolve lang
-            (Say.make ~ko:"키퍼 기억 탐색기 · 차트"
-               ~en:"Keeper Memory Explorer & Charts")
-        , hk )
+            (Say.make ~ko:"키퍼 기억 탐색기" ~en:"Keeper Memory Explorer")
+        , None )
     | None ->
         ( Say.resolve lang
             (Say.make ~ko:"시간축 메모리 Diff 스크러버"
                ~en:"Temporal Memory Diff Scrubber")
-        , Say.resolve lang
-            (Say.make ~ko:"[w] 창 · [m] 범위 · [M] 흐름/총량"
-               ~en:"[w] Window · [m] Scope · [M] Flow/Net") )
+        , Some
+            (Say.resolve lang
+               (Say.make ~ko:"[w] 창 · [m] 범위 · [M] 흐름/총량"
+                  ~en:"[w] Window · [m] Scope · [M] Flow/Net")) )
   in
   let inner =
     Card.draw ~cache grid ~rect ~theme
       (H.card_spec ~focused
          ~subtitle:(Printf.sprintf "%s · %s" scope_str win_str)
-         ~hotkey title)
+         ?hotkey title)
   in
   let content = H.pad_content ~bp inner in
   if Rect.is_empty content then ()

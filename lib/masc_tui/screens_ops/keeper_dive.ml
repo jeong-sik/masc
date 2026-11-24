@@ -1393,7 +1393,22 @@ let render_memory_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t
           Update_nav.keeper_memory_subview_lines ~width:content.w ~name
             model.knowledge
         in
-        let max_skip = Int.max 0 (List.length lines - content.h) in
+        let line_count = List.length lines in
+        let chart_rows =
+          if
+            Knowledge_store.equal_keeper_memory_subview
+              model.knowledge.keeper_memory_subview Knowledge_store.Kmem_health
+          then
+            (* Charts use the rows left after the scrollable diagnostics. *)
+            let chart_space, _ =
+              Rect.split_v content ~top_h:(Int.max 0 (content.h - line_count))
+            in
+            Masc_tui_screens_core.Memory_explorer.render_keeper_health_charts
+              ~grid ~rect:chart_space ~theme ~model ~keeper:name
+          else 0
+        in
+        let _, content = Rect.split_v content ~top_h:chart_rows in
+        let max_skip = Int.max 0 (line_count - content.h) in
         let skip =
           Int.min max_skip (Int.max 0 model.nav.dive_scroll_offset)
         in
@@ -3411,16 +3426,9 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
           not (Chat_transcript.interrupt_target_pending ~model ~keeper:name target)
       | None -> false
     in
-    let memory_diagram_open =
-      Nav.equal_keeper_tab tab Nav.Keeper_memory
-      &&
-      match model.knowledge.memory_diagram with
-      | Some d ->
-          Knowledge_store.memory_diagram_matches_scope ~keeper_opt:(Some name) d
-      | None -> false
-    in
     let hotkey =
-      if embedded then
+      if Nav.equal_keeper_tab tab Nav.Keeper_memory then None
+      else if embedded then
         if Nav.equal_keeper_tab tab Nav.Keeper_config then
           if Model.is_keeper_config_active model then
             Some
@@ -3432,16 +3440,6 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
               (Ops_common.say model
                  ~ko:"[Tab] 설정 편집 · [Enter] 상세 · [z] 확대"
                  ~en:"[Tab] Edit Config · [Enter] Dive · [z] Zoom")
-        else if memory_diagram_open then
-          Some
-            (Ops_common.say model
-               ~ko:"[v] Pele/Mermaid/Tree · [y] 복사 · [Esc] 닫기"
-               ~en:"[v] Pele/Mermaid/Tree · [y] Copy · [Esc] Close")
-        else if Nav.equal_keeper_tab tab Nav.Keeper_memory then
-          Some
-            (Ops_common.say model
-               ~ko:"[v] 하위뷰 · [Enter] 전문 · [.] Pele/Mermaid · [Ctrl+O] 형성 트리"
-               ~en:"[v] Sub-view · [Enter] Read · [.] Pele/Mermaid · [Ctrl+O] Tree")
         else if Nav.equal_keeper_tab tab Nav.Keeper_logs then
           Some
             (Ops_common.say model
@@ -3461,16 +3459,6 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
           (Ops_common.say model
              ~ko:"[←→] 값 변경 · [Enter] 편집 · [d] Diff · [Ctrl+S] 저장 · [[ ]] 탭 · [Esc] 목록"
              ~en:"[←→] Cycle · [Enter] Edit · [d] Diff · [Ctrl+S] Save · [[ ]] Tabs · [Esc] Fleet")
-      else if memory_diagram_open then
-        Some
-          (Ops_common.say model
-             ~ko:"[v] Pele/Mermaid/Tree · [y] 복사 · [Esc] 닫기"
-             ~en:"[v] Pele/Mermaid/Tree · [y] Copy · [Esc] Close")
-      else if Nav.equal_keeper_tab tab Nav.Keeper_memory then
-        Some
-          (Ops_common.say model
-             ~ko:"[v] 하위뷰 · [Enter] 전문 · [.] Pele/Mermaid · [Ctrl+O] 형성 트리"
-             ~en:"[v] Sub-view · [Enter] Read · [.] Pele/Mermaid · [Ctrl+O] Tree")
       else if Nav.equal_keeper_tab tab Nav.Keeper_logs then
         Some
           (Ops_common.say model

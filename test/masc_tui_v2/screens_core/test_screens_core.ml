@@ -1899,23 +1899,19 @@ let test_v25_chrome_margins_and_keycaps () =
       false
       (Color.equal c.style.bg (Color.of_rgb theme.selection_bg))
   done;
-  (* Quiet Footer: surface_2 keycaps + italic whisper right status hint, zero middle-dot spam *)
+  (* The footer uses elevated keycaps. *)
   let footer_y = 39 in
   let keycap_bg = Color.of_rgb theme.surface_2 in
   let keycap_runs = ref 0 in
   let in_cap = ref false in
-  let has_italic_hint = ref false in
   for x = 0 to 139 do
     let c = Cell_grid.get g_wide ~x ~y:footer_y in
     let is_cap = Color.equal c.style.bg keycap_bg in
     if is_cap && not !in_cap then incr keycap_runs;
-    in_cap := is_cap;
-    if Attr.has c.style.attrs Attr.italic then has_italic_hint := true
+    in_cap := is_cap
   done;
   Alcotest.(check bool) "footer has elevated keycaps (1..14)" true
     (!keycap_runs >= 1 && !keycap_runs <= 14);
-  Alcotest.(check bool) "footer has Tier-4 italic status hint on Wide" true
-    !has_italic_hint;
   (* P3: Top-rail HH:MM clock uses Tier-4 italic Typography.whisper *)
   let has_italic_clock = ref false in
   for x = 120 to 139 do
@@ -2960,6 +2956,73 @@ let test_setup_key_inline_modal_masks_secret () =
   assert_not_contains ~label:"setup_key_raw_secret_never_rendered"
     ~needle:"sk-SUPER-SECRET-TOKEN-999" txt
 
+let test_memory_activity_journal_window () =
+  let keeper = "alpha" in
+  let event : Wire_knowledge.memory_activity_event =
+    { identity = "event-1"; recorded_at_unix = 1.; revision = 1;
+      kind = Activity_created; before = [];
+      after = [ { memory_id = "fact-1"; claim = Some "visible claim" } ]; reason = None }
+  in
+  let render ~journal_lines ~rows =
+    let model = Model.initial ~lang:Say.Lang_en () in
+    let activity : Wire_knowledge.keeper_memory_activity =
+      { keeper; limit = 3; journal_lines; undecodable_lines = 0; events = [ event ]; notes = [] }
+    in
+    let knowledge = model.knowledge
+      |> Knowledge_store.set_memory_view_mode Knowledge_store.View_evolution
+      |> Knowledge_store.set_keeper_memory_activity ~keeper (obs activity)
+    in
+    let grid = Cell_grid.create ~cols:80 ~rows in
+    Memory_explorer.render_keeper_memory ~grid ~rect:(Rect.make ~x:0 ~y:0 ~w:80 ~h:rows)
+      ~theme:Theme.default ~bp:Layout.Compact ~model:{ model with knowledge } ~keeper
+      ~focused:true ~diff_scroll:0;
+    grid_all_text grid
+  in
+  let bounded = render ~journal_lines:3 ~rows:5 in
+  assert_contains ~label:"the latest journal window reached the request limit"
+    ~needle:"3/3 journal lines" bounded;
+  assert_contains ~label:"the selected event remains visible" ~needle:"visible claim" bounded;
+  assert_not_contains ~label:"a shorter successful read needs no coverage header"
+    ~needle:"journal lines" (render ~journal_lines:2 ~rows:5);
+  assert_contains ~label:"a single available body row still shows the selected event"
+    ~needle:"visible claim" (render ~journal_lines:3 ~rows:2)
+
+let test_memory_health_os_read_errors () =
+  let keeper = "alpha" in
+  let health_lines result =
+    let model = Model.initial () in
+    let knowledge = model.knowledge |> Knowledge_store.set_keeper_memory_subview Kmem_health in
+    let reply = Msg.Reply_keeper_memory_os_internals { keeper; result } in
+    let model, _ =
+      Update.step ~now:Clock.Mono.zero { model with knowledge }
+        (Msg.Http_reply { epoch = model.epoch; reply })
+    in
+    Update_nav.keeper_memory_subview_lines ~width:120 ~name:keeper model.knowledge
+    |> String.concat "\n"
+  in
+  let wire = Yojson.Safe.from_string {|{
+    "keeper":"alpha",
+    "compaction":{"present":false,"epoch_count":0,"archived_turns_count":0,"anchor_bytes":0,"read_error":"bad anchor"},
+    "canonical_turns":{"present":false,"turn_count":0,"read_error":"bad turn log"},
+    "memory_digest":{"present":false},
+    "librarian_molt":{"writer_kind":"resting","available_acts":[]}
+  }|} in
+  let internals =
+    match Wire_knowledge.decode_memory_os_internals wire with
+    | Ok value -> value
+    | Error reason -> Alcotest.fail reason
+  in
+  let failed_sources = health_lines (Ok internals) in
+  assert_contains ~label:"compaction read failure" ~needle:"bad anchor" failed_sources;
+  assert_contains ~label:"canonical turns read failure" ~needle:"bad turn log" failed_sources;
+  let absent_sources = health_lines (Ok { internals with
+    compaction = { internals.compaction with read_error = None };
+    canonical_turns = { internals.canonical_turns with read_error = None } }) in
+  assert_contains ~label:"confirmed empty compaction" ~needle:"cmp:none" absent_sources;
+  assert_contains ~label:"confirmed empty turns" ~needle:"turns:none" absent_sources;
+  assert_contains ~label:"failed request carries its own reason" ~needle:"malformed OS response"
+    (health_lines (Error (Msg.Decode_error "malformed OS response")))
+
 let test_memory_diff_viewport_skip_multi_row_selection () =
   let skip = Masc_tui_screens_core.Memory_explorer.diff_viewport_skip in
   (* Selected 3-row block [30..32] starts past avail_h=12 when scroll=15:
@@ -3784,6 +3847,10 @@ let () =
         ] );
       ( "memory_explorer",
         [
+          Alcotest.test_case "bounded journal activity preserves coverage and selection"
+            `Quick test_memory_activity_journal_window;
+          Alcotest.test_case "Memory Health distinguishes read failures from missing history"
+            `Quick test_memory_health_os_read_errors;
           Alcotest.test_case
             "diff_viewport_skip keeps multi-row selection inside visible slice"
             `Quick test_memory_diff_viewport_skip_multi_row_selection;

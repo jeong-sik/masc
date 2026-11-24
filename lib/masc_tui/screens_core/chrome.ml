@@ -218,7 +218,6 @@ let render_top_rail grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
       || Layout.equal_breakpoint breakpoint Layout.Micro
     in
     let wide = Layout.equal_breakpoint breakpoint Layout.Wide in
-    let standard_or_wide = not compact in
     let is_micro = Layout.equal_breakpoint breakpoint Layout.Micro in
     let sep_style = Typography.whisper ~bg ~italic:false theme in
     let sep =
@@ -357,35 +356,21 @@ let render_top_rail grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
     in
     (* Build right-aligned telemetry items in display order (left-to-right),
        each tagged with drop priority (higher number drops first if narrow). *)
-    let fresh_glyph, fresh_label, fresh_tone =
-      Render_util.freshness_pill ~model ~compact
-    in
-    let is_live =
-      match (fresh_tone, Model.active_view_ssot_mode model) with
-      | Theme.Status_ok, Model.Live_sse { freshness; _ } ->
-          Health.is_transport_live freshness
-      | ( Theme.Status_ok,
-          (Model.Synced_snapshot _ | Model.Snapshot_only _) )
-      | ( ( Theme.Status_active | Theme.Status_attention
-          | Theme.Status_critical | Theme.Status_ai | Theme.Status_historical ),
-          ( Model.Live_sse _
-          | Model.Synced_snapshot _
-          | Model.Snapshot_only _ ) ) ->
-          false
-    in
-    let fresh_item =
+    let freshness_item ~compact =
+      let glyph, label, tone = Render_util.freshness_pill ~model ~compact in
       let segments =
-        if is_live then
-          [
-            ( Glyph.to_utf8 fresh_glyph,
-              Typography.status ~bg ~bold:true theme Theme.Status_ok );
-            (" " ^ fresh_label, Typography.structure ~bg theme);
-          ]
-        else
-          [
-            ( Printf.sprintf "%s %s" (Glyph.to_utf8 fresh_glyph) fresh_label,
-              Typography.status ~bg ~bold:true theme fresh_tone );
-          ]
+        match tone with
+        | Theme.Status_ok ->
+            [
+              (Glyph.to_utf8 glyph, Typography.status ~bg ~bold:true theme tone);
+              (" " ^ label, Typography.structure ~bg theme);
+            ]
+        | Theme.Status_active | Theme.Status_attention | Theme.Status_critical
+        | Theme.Status_ai | Theme.Status_historical ->
+            [
+              ( Printf.sprintf "%s %s" (Glyph.to_utf8 glyph) label,
+                Typography.status ~bg ~bold:true theme tone );
+            ]
       in
       { priority = 1; segments }
     in
@@ -406,65 +391,19 @@ let render_top_rail grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           }
       else None
     in
-    let fleet_item =
-      if standard_or_wide then
-        let hero = Model.pulse_hero_metrics model in
-        if hero.total_keepers > 0 then
-          Some
-            {
-              priority = 5;
-              segments =
-                [
-                  ( Printf.sprintf "%d/%d" hero.running_keepers
-                      hero.total_keepers,
-                    Typography.primary ~bg theme );
-                ];
-            }
-        else None
-      else None
-    in
     let inc_count = Incidents.active_count model.incidents in
     let inc_badge =
-      let st =
-        if inc_count > 0 then
-          Typography.status ~bg ~bold:true theme Theme.Status_historical
-        else Typography.whisper ~bg ~italic:false theme
-      in
-      let txt =
-        if inc_count > 0 then
+      if inc_count > 0 then
+        let label =
           if rect.w < 148 then Printf.sprintf "[I]%d" inc_count
           else Printf.sprintf "[I] Inc(%d)" inc_count
-        else if rect.w < 148 then "[I]"
-        else "[I] Inc"
-      in
-      Some
-        {
-          priority = (if inc_count > 0 then 2 else 4);
-          segments = [ (txt, st) ];
-        }
-    in
-    let qctx_badge =
-      if not is_micro then
+        in
         Some
           {
-            priority = 5;
+            priority = 2;
             segments =
               [
-                ( (if rect.w < 156 then "[^T]" else "[^T] Q/Ctx"),
-                  Typography.whisper ~bg ~italic:false theme );
-              ];
-          }
-      else None
-    in
-    let cfg_badge =
-      if not is_micro then
-        Some
-          {
-            priority = 4;
-            segments =
-              [
-                ( (if rect.w < 152 then "[,]" else "[,] Cfg"),
-                  Typography.whisper ~bg ~italic:false theme );
+                (label, Typography.status ~bg ~bold:true theme Theme.Status_historical);
               ];
           }
       else None
@@ -502,14 +441,21 @@ let render_top_rail grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
             }
       | None -> None
     in
+    let max_right_w = Int.max 0 (Rect.right rect - 1 - tabs_end_x - 1) in
+    let fresh_item = freshness_item ~compact in
+    let attention_width =
+      match attn_item with Some item -> rail_item_width item + sep_w | None -> 0
+    in
+    let fresh_item =
+      if not compact && rail_item_width fresh_item + attention_width > max_right_w
+      then freshness_item ~compact:true
+      else fresh_item
+    in
     let raw_items =
       [
         attn_item;
         Some fresh_item;
-        fleet_item;
         inc_badge;
-        qctx_badge;
-        cfg_badge;
         help_badge;
         ws_item;
         clock_item;
@@ -524,7 +470,6 @@ let render_top_rail grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
       in
       loop 0 xs
     in
-    let max_right_w = Int.max 0 (Rect.right rect - 1 - tabs_end_x - 1) in
     let rec drop_lowest_priority xs =
       if measure_items xs <= max_right_w then xs
       else
@@ -1338,14 +1283,7 @@ let footer_right_status_hint ~(model : Model.t) =
         | Nav.Help
         | Nav.System_gate Nav.Media_viewer ) ->
         Say.resolve lang (Say.make ~ko:"Esc 돌아가기" ~en:"Esc return")
-    | None -> (
-        let ssot_hint = Render_util.footer_ssot_hint ~model in
-        match workspace_basename model with
-        | Some ws when Grapheme.display_width ssot_hint <= 20 ->
-            Printf.sprintf "%s %s %s" ssot_hint
-              (Glyph.to_utf8 Glyph.Separator_dot)
-              (Grapheme.truncate_to_width ~max_width:12 ws)
-        | Some _ | None -> ssot_hint)
+    | None -> ""
 
 let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
     ~breakpoint ~composer_folded =
@@ -1363,7 +1301,7 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
     let x = ref (rect.x + 1) in
     let right_edge = Rect.right rect - 1 in
     let avail_w = Int.max 0 (right_edge - !x) in
-    (* Right-aligned Tier-4 italic connection/context hint on Wide/Standard *)
+    (* Right-aligned hint for the active overlay or filter. *)
     let right_hint =
       if (not compact) && rect.w >= 100 then footer_right_status_hint ~model
       else ""
@@ -1417,9 +1355,7 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
     let hints_right_limit = Int.max !x (right_edge - right_hint_reserve) in
     let remaining_w = Int.max 0 (hints_right_limit - !x) in
     let scope_chain = Model.focus_scope_chain model in
-    (* Allow Wide/Standard terminals to use their full footer width instead of
-       dropping Tab and overlay discovery keys behind an artificial 7-pair cap. *)
-    let max_pairs = if compact then 6 else 14 in
+    let max_pairs = if compact || Option.is_none model.nav.overlay then 6 else 14 in
     let pair_gap = if compact && rect.w < 84 then 1 else 2 in
     let candidates =
       let mk key ko en action : Keymap.footer_hint =
@@ -1672,10 +1608,15 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
             let is_confirm =
               Keymap.equal_action h.action Keymap.Confirm_selected
             in
+            let repeats_menu =
+              Option.is_none model.nav.overlay
+              && Keymap.equal_action h.action Keymap.Toggle_sidebar
+            in
             let shown =
               (show_tab_hint || not is_pane_cycle)
               && (show_overlay_confirm_hint || not is_confirm)
               && (not is_dup_approval)
+              && not repeats_menu
               && (show_sub_tab_hint || not is_sub_tab)
               && (show_esc_hint || not is_esc)
             in
@@ -1694,6 +1635,8 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
               match enter_hint with
               | Update_nav.Enter_hint_hidden -> None
               | Update_nav.Enter_hint_dive -> Some h
+              | Update_nav.Enter_hint_memory_reading ->
+                  Some (relabel h ~ko:"전문" ~en:"Read")
               | Update_nav.Enter_hint_dos_screen ->
                   Some (relabel h ~ko:"DOS 화면" ~en:"DOS screen")
               | Update_nav.Enter_hint_edit_field ->

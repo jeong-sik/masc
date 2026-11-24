@@ -84,7 +84,7 @@ All shortcuts come from `lib/masc_tui/keymap/keymap.ml`; VT100 control aliases
 | `←` / `→` | Unfocused | Spatial pane movement ONLY: move between Left Navigation Sidebar ↔ Pane 0 ↔ Pane 1 across every workspace and dive (never cycles sub-tabs; inside text inputs moves cursor; in Settings Tree collapses/expands categories; in Settings Inspector / Keeper Config cycles enum/bool/numeric values) |
 | `[` / `]` (or `Alt+[` / `Alt+]`) | Unfocused / Overlay / Global | Cycle sub-tabs ONLY (Workspaces, 9-tab Keeper Dive or Keepers split right pane, Settings tabs, Queue/Context drawer, and multi-question Ask modal) |
 | `↑` / `↓` or `j` / `k` | Unfocused / Overlay | Move list selection or scroll Keeper Chat |
-| `PgUp` / `PgDn`, `Home` (`g`) / `End` (`G`) | Unfocused / Overlay / Composer (`PgUp`/`PgDn`) | Page scroll or jump to top / bottom (`PgUp`/`PgDn` also scroll Keeper Chat or the active background view while the bottom composer stays focused with your draft untouched; `g` is overridden on Memory screens — World Memory, `Memory_diff_dive`, and `Keeper_memory` — to toggle the Memory Flow Braille chart `Flow ▲/▼` vs `Net Total`, and on `Infra → Code` to cycle Git views; use `Home` to jump to top) |
+| `PgUp` / `PgDn`, `Home` (`g`) / `End` (`G`) | Unfocused / Overlay / Composer (`PgUp`/`PgDn`) | Scroll by page or jump to the top or bottom. With the composer focused, `PgUp`/`PgDn` scroll the active view while preserving the draft. In `Infra → Code`, `g` cycles Git views and `Home` jumps to the top. |
 | `Tab` / `Shift+Tab` | Unfocused / Overlay | Cycle active focus panes on multi-pane views (including `Goal_dive` Linked Tasks ↔ Verifier Runs and `Task_dive` Description ↔ Verification; omitted on single-pane views and narrow layouts; cycles tabs in Queue/Context, questions in multi-question Ask modal, selection in Palette, or Tree / Inspector in Settings) |
 | `Enter` | Unfocused | Open the **Ask Answer Modal** on pending Asks (`Pulse` / `Work → Inbox`), toggle OAuth on `Keeper → Identity`, 1-hop Dive into selected entity (Keeper, Goal, Task, Verification, Board Thread, Wiki, Artifact, Memory Diff, Fusion Run, Tool Detail, Lane, Sandbox, Runtime Trace, Log Detail), dive from `Goal_dive` Linked Tasks / Verifier Runs directly into `Task_dive` / `Verification_dive` (or from `Task_dive` Verification into `Verification_dive`), or expand/open files, catalog packages, Facts Tree categories, Provider Input Parts, and Tool Results |
 | `Space` | Unfocused / Overlay | Strictly safe local view/expand/selection toggle — **never sends a network POST** (Work > Goals phase filter All/Active/Verifying/Held/Closed, Board succession chain expand/collapse, Tasks status chip, Addons & Browser Clients/Tabs subfocus, Failover external probes, log level filter, Keeper Chat turn details, multi-select Ask choice toggle, local bool toggle in Settings/Keeper Config; dry-run diff is explicit `d`, Keeper Identity OAuth toggle is `a` / `Enter`) |
@@ -392,9 +392,8 @@ or `c` straight into Chat), the top sub-tab bar syncs to all **9 Keeper tabs**
 3. **Tool Calls**: per-Keeper `/tool-stats` summary, `/tool-calls` table,
    unfolded `Json_tree` payload viewer, and lazy `Enter` `/tool-result` fetch.
 4. **Memory**: `[v]` cycles 4 per-Keeper sub-views — **Diff & Flow** (scoped
-   Temporal Diff `[w]`, **Memory Flow** Braille chart where `[g]` toggles
-   `Flow ▲/▼` vs `Net Total`, overriding the global `Home` / jump-to-top binding
-   on `Keeper_memory` and `Memory_diff_dive`; use `Home` to jump to top,
+   Temporal Diff `[w]`, **Memory Flow** Braille chart where `[M]` toggles
+   between `Flow ▲/▼` and `Net Total`,
    **Retrieval Heat** stacked bar, Librarian recovery `[a]`/`[A]`), **Health**
    (`/api/v1/dashboard/keeper-memory-health?keeper=<name>`), **Facts Tree**
    (`/api/v1/keepers/:name/memory-facts` with `Enter` category expand/collapse),
@@ -599,9 +598,11 @@ Settings `,`), you can set `keeper.group` directly in the creation form.
   when a writer is stopped.
 - **Per-Keeper**: open **`4` Keepers → select Keeper → `Enter` → Memory** tab
   (`[ ]`, or focus the right split pane with `Tab` and switch to **Memory**).
-  View that Keeper's scoped diff, **Memory Flow** Braille chart (`g` toggles
-  `Flow ▲/▼` / `Net Total`), **Retrieval Heat** stacked bar (`HOT` / `WARM` /
-  `COLD` / `0x` hits), and per-Keeper Librarian recovery.
+  Browse changes and facts in the explorer, and press `Enter` to read the
+  selected record. Period Diff shows the **Memory Flow** chart (`M` switches
+  between Flow and Net Total) and **Retrieval Heat**. Press `v` to reach
+  **Health** for Memory OS diagnostics. It charts age and count when the pane
+  has room.
 - **Pele / Mermaid / Formation Tree Diagrams** (in **`3` Knowledge → Memory**
   with a Keeper selected, or **`4` Keepers → Keeper → Memory**, across all
   keeper-scoped subviews — `Diff/Flow`, `Facts Tree`, `Journal`, `Health`,

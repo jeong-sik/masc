@@ -541,7 +541,7 @@ let test_structured_refusal_classification () =
    | _ -> fail "expected Structured_account_quota for explicit BILLING_DISABLED detail reason")
 ;;
 
-let test_zai_glm_error_codes_ssot_parity () =
+let test_zai_glm_error_codes_require_glm_codec () =
   let module Glm = Llm_provider.Backend_glm in
   let quota_codes =
     [ "1113"; "1308"; "1309"; "1310"; "1311"; "1313"; "1314"
@@ -555,12 +555,15 @@ let test_zai_glm_error_codes_ssot_parity () =
        check bool (Printf.sprintf "Backend_glm.is_context_overflow_code %s" code) false
          (Glm.is_context_overflow_code code);
        let body = Printf.sprintf {|{"error":{"code":%S,"message":"quota exhausted"}}|} code in
-       (* The GLM codec reads the code ([Complete_common.provider_refusal]);
-          the provider-neutral HTTP tables do not, since the same digits from
-          another provider mean something else. *)
-       match Retry.classify_structured_refusal ~retry_after_header:None ~status:429 ~body with
+       (match Glm.check_glm_error body with
+        | Some { error_class = Some Glm.Glm_quota_exceeded; _ } -> ()
+        | Some _ | None -> failf "GLM codec must read Z.AI code %s as quota" code);
+       (match Retry.classify_structured_refusal ~retry_after_header:None ~status:429 ~body with
+        | None -> ()
+        | Some _ -> failf "Z.AI code %s read by the provider-neutral HTTP tables" code);
+       match Retry.classify_structured_json (Yojson.Safe.from_string body) with
        | None -> ()
-       | Some _ -> failf "Z.AI code %s read by the provider-neutral HTTP tables" code)
+       | Some _ -> failf "Z.AI code %s read by the shared structured classifier" code)
     quota_codes;
   check bool "Backend_glm.is_context_overflow_code 1261" true
     (Glm.is_context_overflow_code "1261");
@@ -573,6 +576,17 @@ let test_zai_glm_error_codes_ssot_parity () =
    with
    | None -> ()
    | Some _ -> fail "Z.AI code 1261 read by the provider-neutral HTTP tables");
+  (match
+     Glm.check_glm_error {|{"error":{"code":"1261","message":"Prompt exceeds max length"}}|}
+   with
+   | Some { error_class = Some Glm.Glm_context_overflow; _ } -> ()
+   | Some _ | None -> fail "GLM codec must read Z.AI code 1261 as context overflow");
+  (match
+     Retry.classify_structured_json
+       (Yojson.Safe.from_string {|{"error":{"code":"1261","message":"Prompt exceeds max length"}}|})
+   with
+   | None -> ()
+   | Some _ -> fail "Z.AI code 1261 read by the shared structured classifier");
   List.iter
     (fun code ->
        check bool (Printf.sprintf "non-quota transient Z.AI code %s" code) false
@@ -751,16 +765,20 @@ let test_structured_json_signals_and_status_optional_ssot () =
    with
    | Some (Retry.Signal_provider_unavailable { message = "down" }) -> ()
    | _ -> fail "negative JSON-RPC caller status must not shadow JSON status 503");
-  (* 8. P3: trimmed GLM code, depth boundary, non-object JSON, fallback_message *)
-  check bool "trimmed Z.AI quota code 1113 recognized" true
-    (Retry.signals_indicate_account_quota
-       { Retry.codes = [ " 1113 " ]
-       ; types = []
-       ; statuses = []
-       ; detail_reasons = []
-       ; messages = []
-       ; n_ctx = None
-       });
+  (* Trim codes before applying the shared table. *)
+  let code_signals code =
+    { Retry.codes = [ code ]
+    ; types = []
+    ; statuses = []
+    ; detail_reasons = []
+    ; messages = []
+    ; n_ctx = None
+    }
+  in
+  check bool "trimmed insufficient_quota recognized" true
+    (Retry.signals_indicate_account_quota (code_signals " insufficient_quota "));
+  check bool "unscoped Z.AI code 1113 leaves quota unclassified" false
+    (Retry.signals_indicate_account_quota (code_signals " 1113 "));
   check (option int) "non-object JSON returns None status" None
     (Retry.http_status_of_json (`List [ `Int 429 ]));
   (match Retry.classify_structured_json ~fallback_message:"fb" (`Assoc [ "code", `Int 401 ]) with
@@ -997,8 +1015,8 @@ let () =
     "Retry"
     [ ( "classify"
       , [ test_case "http status mapping" `Quick test_classify_error
-        ; test_case "Z.AI GLM 14 error codes SSOT parity" `Quick
-            test_zai_glm_error_codes_ssot_parity
+        ; test_case "Z.AI numeric error codes require the GLM codec" `Quick
+            test_zai_glm_error_codes_require_glm_codec
         ; test_case "HTTP 400 quota requires structured evidence" `Quick
             test_http_400_requires_structured_quota_evidence
         ; test_case "structured JSON signals and status-optional SSOT" `Quick

@@ -3224,6 +3224,50 @@ let rec execute t = function
                                  Error (Msg.Transport (Health.Other_io detail));
                              };
                        })))
+  | Cmd.Open_dos_screen { epoch } when Epoch.equal (Atomic.get t.stream_epoch) epoch ->
+      fork_safe t (fun () ->
+          let endpoint = current_endpoint t in
+          let result =
+            match Http_client.get_raw ~io:t.io ~clock:t.clock endpoint
+                    ~path:"/api/v1/play/screen.png" with
+            | Error err -> Error (msg_error_of_http err)
+            | Ok png when not (String.starts_with ~prefix:"\137PNG\r\n\026\n" png) ->
+                Error (Msg.Decode_error "DOS screen response is not PNG")
+            | Ok png ->
+                (match run_cancellable_systhread ~closed:t.closed (fun ~cancelled ->
+                     let cancelled () =
+                       cancelled () || not (Epoch.equal (Atomic.get t.stream_epoch) epoch)
+                     in
+                     let remove path = try Sys.remove path with Sys_error _ -> () in
+                     try
+                       let path, channel =
+                         Filename.open_temp_file ~mode:[ Open_binary ] "masc-dos-" ".png"
+                       in
+                       let opened =
+                         try
+                           Fun.protect ~finally:(fun () -> close_out_noerr channel)
+                             (fun () -> output_string channel png; flush channel);
+                           open_url_sync ~cancelled path
+                         with Sys_error detail -> Error detail
+                       in
+                       match opened with
+                       | Ok () -> Ok path
+                       | Error detail -> remove path; Error detail
+                     with Sys_error detail -> Error detail) with
+                 | None -> Error (Msg.Transport (Health.Other_io "DOS screen opening cancelled"))
+                 | Some (Error detail) -> Error (Msg.Transport (Health.Other_io detail))
+                 | Some (Ok path) ->
+                     Eio.Switch.on_release t.sw (fun () ->
+                         try Sys.remove path with Sys_error _ -> ());
+                     Ok ())
+          in
+          Ui_bus.publish_stream t.bus
+            (Msg.Http_reply
+               { epoch;
+                 reply = Msg.Reply_action_ack
+                   { label = Say.make ~ko:"DOS 화면 열기" ~en:"Open DOS screen";
+                     ack_scope = Msg.Ack_toast_only; for_modal = None; result } }))
+  | Cmd.Open_dos_screen _ -> ()
   | Cmd.Open_external_url url ->
       if is_safe_external_url url then
         fork_safe t (fun () ->

@@ -1393,6 +1393,12 @@ let selected_addon_instance t =
   let items = filtered_addon_instances t in
   List.nth_opt items (clamp_index (List.length items) t.addon_selected_index)
 
+let selected_live_dos_screen t =
+  match selected_addon_instance t with
+  | Some { addon_id = "dos-machine"; runtime_presence = Addon_live;
+           phase = (Addon_attached | Addon_observing); _ } -> true
+  | Some _ | None -> false
+
 let filtered_browser_clients t =
   let items =
     match Observed.to_option t.browser_lane with

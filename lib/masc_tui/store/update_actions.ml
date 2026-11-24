@@ -3162,6 +3162,7 @@ and execute_action ~now (m : Model.t) action =
                   | Cmd.Cancel_memory_diagram
                   | Cmd.Fetch_artifact_and_copy _
                   | Cmd.Export_artifact _
+                  | Cmd.Open_dos_screen _
                   | Cmd.Open_external_url _
                   | Cmd.Open_editor_escape_hatch _
                   | Cmd.Start_local_server

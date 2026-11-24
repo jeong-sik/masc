@@ -3140,6 +3140,9 @@ let enter_plan (m : Model.t) : enter_plan =
                         };
                     ]
               | Some (Wire_runtime.Catalog_issue _) | None -> Enter_noop)
+          | Nav.Runtime_addons_browser
+            when m.nav.pane_index = 0 && Runtime_store.selected_live_dos_screen m.runtime ->
+              Enter_dispatch [ Cmd.Open_dos_screen { epoch = m.epoch } ]
           | Nav.Runtime_connectors | Nav.Runtime_addons_browser -> Enter_noop)
       | Nav.Infra -> (
           match m.infra.active_tab with

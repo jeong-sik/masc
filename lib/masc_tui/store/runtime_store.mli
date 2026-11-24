@@ -390,6 +390,7 @@ val filtered_browser_tabs : t -> Wire_runtime.browser_tab_row list
 val selected_lane : t -> Wire_runtime.failover_lane option
 val selected_connector : t -> Wire_runtime.connector_row option
 val selected_addon_instance : t -> Wire_runtime.addon_instance option
+val selected_live_dos_screen : t -> bool
 val selected_browser_client : t -> Wire_runtime.browser_client_row option
 val selected_browser_tab : t -> Wire_runtime.browser_tab_row option
 val runtime_options : t -> Wire_runtime.runtime_option list

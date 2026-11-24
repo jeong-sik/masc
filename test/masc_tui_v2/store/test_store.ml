@@ -248,7 +248,7 @@ let has_get_health cmds =
       | Cmd.Update_workspace_guard _
       | Cmd.Voice_cmd _
       | Cmd.Copy_clipboard _
-      | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_external_url _
+      | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
       | Cmd.Open_editor_escape_hatch _
       | Cmd.Start_local_server
       | Cmd.Restart_tui
@@ -268,7 +268,7 @@ let has_sync_streams cmds =
       | Cmd.Update_workspace_guard _
       | Cmd.Voice_cmd _
       | Cmd.Copy_clipboard _
-      | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_external_url _
+      | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
       | Cmd.Open_editor_escape_hatch _
       | Cmd.Start_local_server
       | Cmd.Restart_tui
@@ -289,7 +289,7 @@ let has_quit cmds =
       | Cmd.Update_workspace_guard _
       | Cmd.Voice_cmd _
       | Cmd.Copy_clipboard _
-      | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_external_url _
+      | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
       | Cmd.Open_editor_escape_hatch _
       | Cmd.Start_local_server
       | Cmd.Restart_tui ->
@@ -488,7 +488,7 @@ let test_three_channel_separation () =
         | Cmd.Update_workspace_guard _
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
-        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_external_url _
+        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
@@ -521,7 +521,7 @@ let test_three_channel_separation () =
         | Cmd.Update_workspace_guard _
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
-        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_external_url _
+        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
@@ -995,7 +995,7 @@ let test_workspace_mismatch_recovery () =
         | Cmd.Sync_streams _
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
-        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_external_url _
+        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
@@ -1389,7 +1389,7 @@ let test_verifier_regressions () =
         | Cmd.Update_workspace_guard _
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
-        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_external_url _
+        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
@@ -1660,7 +1660,7 @@ let test_verifier_regressions () =
     | Cmd.Update_workspace_guard _
     | Cmd.Voice_cmd _
     | Cmd.Copy_clipboard _
-    | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_external_url _
+    | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
     | Cmd.Open_editor_escape_hatch _
     | Cmd.Start_local_server
     | Cmd.Restart_tui
@@ -1776,7 +1776,7 @@ let test_verifier_regressions () =
     | Cmd.Update_workspace_guard _
     | Cmd.Voice_cmd _
     | Cmd.Copy_clipboard _
-    | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_external_url _
+    | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
     | Cmd.Open_editor_escape_hatch _
     | Cmd.Start_local_server
     | Cmd.Restart_tui
@@ -1876,7 +1876,7 @@ let test_verifier_regressions () =
         | Cmd.Update_workspace_guard _
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
-        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_external_url _
+        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
@@ -2007,7 +2007,7 @@ let test_round1_settings_and_overlay_transitions () =
         | Cmd.Update_workspace_guard _
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
-        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_external_url _
+        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
@@ -2111,7 +2111,7 @@ let test_round2_store_regressions () =
         | Cmd.Update_workspace_guard _
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
-        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_external_url _
+        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
@@ -2407,7 +2407,7 @@ let test_v25_data_pipeline_and_settings_2pane () =
         | Cmd.Batch _ | Cmd.Http_post _ | Cmd.Http_put _
         | Cmd.Http_post_stream _ | Cmd.Sync_streams _
         | Cmd.Update_workspace_guard _ | Cmd.Voice_cmd _
-        | Cmd.Copy_clipboard _ | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_external_url _
+        | Cmd.Copy_clipboard _ | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _ | Cmd.Start_local_server
         | Cmd.Restart_tui | Cmd.Quit _ ->
             false)
@@ -2795,7 +2795,7 @@ let test_v25_data_pipeline_and_settings_2pane () =
         | Cmd.Batch _ | Cmd.Http_post _ | Cmd.Http_put _
         | Cmd.Http_post_stream _ | Cmd.Sync_streams _
         | Cmd.Update_workspace_guard _ | Cmd.Voice_cmd _
-        | Cmd.Copy_clipboard _ | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_external_url _
+        | Cmd.Copy_clipboard _ | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _ | Cmd.Start_local_server
         | Cmd.Restart_tui | Cmd.Quit _ ->
             false)
@@ -3456,7 +3456,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
         | Cmd.Update_workspace_guard _ | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _ | Cmd.Render_memory_diagram _
         | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _
-        | Cmd.Export_artifact _ | Cmd.Open_external_url _
+        | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _ | Cmd.Start_local_server
         | Cmd.Restart_tui | Cmd.Quit _ ->
             None)
@@ -5899,7 +5899,7 @@ let test_p1_work_inbox_ask_approval_sync () =
         | Cmd.Update_workspace_guard _
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
-        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_external_url _
+        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
@@ -5940,7 +5940,7 @@ let test_p1_work_inbox_ask_approval_sync () =
         | Cmd.Sync_streams _
         | Cmd.Update_workspace_guard _
         | Cmd.Voice_cmd _
-        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_external_url _
+        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
@@ -8284,7 +8284,7 @@ let test_failure_is_asked_again_for_a_new_question () =
         | Cmd.Update_workspace_guard _ | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _ | Cmd.Render_memory_diagram _
         | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _
-        | Cmd.Export_artifact _ | Cmd.Open_external_url _
+        | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _ | Cmd.Start_local_server
         | Cmd.Restart_tui | Cmd.Quit _ ->
             false)

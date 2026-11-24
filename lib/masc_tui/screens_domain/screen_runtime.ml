@@ -4635,6 +4635,10 @@ let render_addons_browser ~(model : Model.t) ~cache ~(rect : Rect.t)
             Say.resolve lang
               (Say.make ~ko:"[Enter] 열기/미리보기 · [Tab] 좌/우 · [p] 런타임 복귀"
                  ~en:"[Enter] Open/Preview · [Tab] Pane · [p] Runtime view")
+          else if Model.pane_focused model 0 && Runtime_store.selected_live_dos_screen rt then
+            Say.resolve lang
+              (Say.make ~ko:"[Enter] DOS 화면 · [p] 카탈로그 · [Tab] 좌/우"
+                 ~en:"[Enter] DOS screen · [p] Catalog · [Tab] Pane")
           else
             Say.resolve lang
               (Say.make ~ko:"[p] 카탈로그 · [Tab] 좌/우 · [Space] 클라/탭 · [t] 탭"

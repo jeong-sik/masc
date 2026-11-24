@@ -16776,12 +16776,8 @@ let test_lazy_keeper_context_fetches_and_sidebar_workspace_discovery () =
     let m_pal =
       {
         base with
-        nav =
-          {
-            base.nav with
-            overlay = Some Nav.Palette;
-            palette_query = query;
-          };
+        nav = { base.nav with overlay = Some Nav.Palette };
+        palette = { base.palette with query };
       }
     in
     List.exists

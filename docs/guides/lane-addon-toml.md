@@ -52,7 +52,7 @@ Dashboard의 **New TOML / Edit TOML**과 Keeper의 선언 편집 도구도 같�
 그 폴더는 저장소의 `addons/<이름>/` 아래 `.toml`·`.json`·`.py` 파일과 `Dockerfile`을 같은 바이트로
 담아야 한다. 서버는 폴더가 이 빌드가 가진 파일과 같을 때만 선언을 받는다.
 
-`masc exact-addon-setup --base-path <base-path>`가 네 폴더를 쓰고, 각 manifest가 적은 Docker 이미지를
+`masc exact-addon-setup --base-path <base-path>`가 그 폴더를 쓰고, 각 manifest가 적은 Docker 이미지를
 만든다. `scripts/install-local-build.sh`는 설치 끝에 이 명령을 부른다.
 `--declared`를 주면 workspace의 선언이 `package`로 부르는 package만 설치한다. 선언은 서버와 같은 규칙으로
 읽고, 폴더가 아직 없어도 이름은 센다. 릴리스 설치(`scripts/install.sh`)는 설치마다 이렇게 부른다.
@@ -179,8 +179,7 @@ sources = []
 선택한 출력 검사가 있으면 **모든 export 도구**에 지원되는 `outputSchema`가 있어야
 장착할 수 있다. 임의 JSON Schema 전체 지원을 뜻하지 않는다. Hook 변경은 설치
 revision과 worker 교체에 반영된다. 이 선택은 LLM을 호출하거나 모델 route를 바꾸지
-않는다. 브라우저 실행기와 모델 Hook의 분리 진행은
-[#44150](https://github.com/jeong-sik/masc/issues/44150)에서 추적한다.
+않는다.
 
 ## LLM Exact Output 선택
 
@@ -413,7 +412,6 @@ max_output_tokens = 8192
 - `cli_slots` 의 runtime 은 binding 에 `max-concurrent` 를 적는다. CLI slot 하나는 이 기계에서 뜨는 프로세스라서, lane 은 적힌 수만큼만 띄운다. 없으면 로드가 거절된다.
 - add-on lane 은 필수가 아니다. `enabled = false` 로 꺼도 서버는 시작하고, 그 lane 은 `Exact_lane_off` 로 답한다.
 - `runtime.toml` 은 설치 선언보다 먼저 읽힌다. 그래서 선언에 없는 이름의 표도 로드된다. 선언된 출력에 표가 없으면 그 lane 은 `Exact_lane_unconfigured` 로 답한다.
-- TUI Lanes 목록의 패키지 행은 출력마다 상태를 보여 준다: bound(slot 이 있음), unbound(표가 없음), off, 그리고 패키지가 선언하지 않은 이름의 표. `[ / ]` 로 출력을 고르고 `e` 를 누르면 그 출력의 표가 runtime.toml 편집기에서 열린다. 표가 아직 없으면 그렇다고 알려 주고, 거기서 `e` 로 표를 더한다.
 - 계정을 제거하면 이 표의 slot 도 함께 빠지고, 켜진 lane 을 비우는 제거는 거절된다. prompt preset 도 이 표를 저장하고 되돌린다.
 
 ### host 에게 요청하기
@@ -448,7 +446,7 @@ host가 호출하지 않는다.
   digest에 포함되므로 같은 ID로 schema를 바꿀 수 없다. 권한 철회는 보관한 답을 지우지
   않고 전달만 거절한다. 권한 복구 후에는 원래 답을 현재 baseline과 원래 부분 구조로
   다시 검사하며, 결과가 불확실했던 호출은 재전송하지 않는다.
-- 지금 host 가 아는 종류는 `exact_output`, `read_records`, `read_file`, `read_result`, `ask`, `withdraw_ask` 다. 모르는 종류가 하나라도 있거나, 같은 `request_id` 가 두 번 나오면 그 목록 전체를 읽지 않고 instance 에 `listing_refused` 를 보인다.
+- 지금 host 가 아는 종류는 `exact_output`, `read_records`, `read_file`, `read_result`, `ask`, `withdraw_ask`, `web_search` 다. 모르는 종류가 하나라도 있거나, 같은 `request_id` 가 두 번 나오면 그 목록 전체를 읽지 않고 instance 에 `listing_refused` 를 보인다.
 - host 는 다섯 사건에만 묻고 시계로 묻지 않는다. 지금 걸린 사건은 넷이다: worker 초기화가 끝났을 때, 그 instance 의 action 이 끝난 receipt 를 남겼을 때, 그 설치의 add-on lane 표가 바뀌어 게시됐을 때, 설치 질문에 운영자가 답했을 때. 선언이 바뀌면 worker 가 다시 떠서 첫 사건이 된다.
 - 한 주기는 목록을 받아 순서대로 처리한다. host 가 이미 최종 결과를 가진 요청은 모델을 부르지 않고 그 결과를 준다. 없으면 한 번 시도하고, 결과가 최종이면 준다. 최종이 아니면 다음 사건까지 기다린다. 목록의 요청이 모두 끝난 뒤, 결과를 준 목록이면 다시 목록을 받고 아무것도 주지 않은 목록이면 끝난다. 끝나면 관측을 한 번 한다.
 - `exact_output` 요청은 걷는 자리 옆에서 실행한다. 실행 중인 exact 요청이 설치 선언의 `max_exact_in_flight` 개면 하나가 끝날 때까지 다음 요청으로 가지 않는다. 1이면 요청마다 끝나기를 기다린다. 그 밖의 요청은 걷는 자리에서 처리한다.

@@ -9,24 +9,6 @@ status: reference
 
 MASC (Multi-Agent Shared Context)는 OCaml 5.x / Eio 기반 MCP 서버로, 여러 Keeper/MCP client가 동일 workspace에서 Goal, Task, Board, Schedule을 통해 작업하고 현재 실행 상태를 관찰·조정할 수 있게 한다. Keeper turn과 dashboard/operator visibility를 제공하며 MCP JSON-RPC 프로토콜을 통해 주요 AI IDE/CLI와 통합된다.
 
-## Snapshot Metadata
-
-The size/count rows below are an inventory snapshot and should be recalculated
-before being used as evidence.
-
-| 항목 | 값 |
-|------|-----|
-| Language | OCaml 5.x (Eio-native, effect-based concurrency) |
-| LOC (lib, `.ml` + `.mli`) | 994,693 |
-| LOC (test, `.ml` + `.mli`) | 1,036,706 |
-| OCaml modules under `lib/` (`.ml`) | 2,085 |
-| `.mli` interfaces under `lib/` | 2,006 |
-| MCP tool modules (`lib/**/tool_*.ml`) | 117 |
-| Test files (`test/*.ml`, top level) | 1,744 |
-| Executables | 18 public (`masc`, `masc-stdio`, `masc-cost`, `masc-trace`, `masc-tui`, `masc-fusion-run`, `masc-checkpoint-purge`, `masc-exec-shim`, `masc-exec-ssh-bootstrap`, `masc-keeper-capability-probe`, `masc-lane-cli-probe`, `masc-deployment-preflight-helper`, `masc-msx-addon-worker`, `masc-dos-addon-worker`, `masc-candle-grant`, `masc-native-addon-launcher`, `masc-browser-addon-worker`, `masc-antigravity-path-hook`) + 5 internal (`public_tool_manifest`, `keeper_store_layout_manifest`, `gen_board_tool_registry`, `lane_fusion_container_probe`, `masc_tui_keys_doc_cli`) |
-
-숫자는 2026-10-17 (v0.58.0) 기준. `git ls-files` 로 추적 파일만 세고, 실행 파일은 `bin/dune` 의 `(executable ...)` stanza 에서 `public_name` 유무로 나눴다.
-
 ## Layer Diagram
 
 ```mermaid
@@ -53,14 +35,13 @@ graph TB
 |------|-------|-------------|--------|
 | `00-glossary.md` | Glossary | 용어 정의, 약어 목록 | Draft |
 | `01-system-overview.md` | System Overview | 문제 정의, 배포 모델, 기술 스택, sub-library 의존성 | Draft |
-| `02-types-and-invariants.md` | Types and Invariants | 핵심 타입 정의, 상태 전이, 불변식 | Draft |
 | `03-workspace-state.md` | Workspace State | Workspace 경계, 상태 소유권, 원자적 변경 계약, Goal/Task 생명주기, 관측과 운영자 pause 기록 | Draft |
 | `04-turn-lifecycle.md` | Turn Lifecycle | Keeper turn 시작/종료, heartbeat/polling/waiting, direct msg, FSM, receipt | Draft |
-| `05-keeper-agent.md` | Keeper Engine | 자율 에이전트 루프, succession, context 관리 | Draft |
+| `05-keeper-agent.md` | Keeper Engine | 자율 에이전트 루프, context 관리 | Draft |
 | `09-server-transport.md` | Server and Transport | HTTP transport, SSE, JSON-RPC dispatch, routing | Draft |
 | `10-dashboard.md` | Dashboard | Web UI, API endpoints, SSE real-time updates | Draft |
 | `11-board.md` | Board System | Posts, comments, votes, filesystem/JSONL backend | Draft |
-| `12-memory-systems.md` | Memory Systems | Memory OS fact store, Shared Wiki, Workspace Memory ledger/briefing, context budget | Draft |
+| `12-memory-systems.md` | Memory Systems | Memory OS fact store, Shared Wiki, Workspace Memory ledger/briefing, context delivery evidence | Draft |
 | `13-agent-core.md` | agent core Integration | agent core Agent SDK bridge, runtime config, completion authority/evaluator, event bus, boundary rules | Active |
 | `14-configuration.md` | Configuration | env, profile, prompt, runtime 설정 | Draft |
 | `15-testing.md` | Testing | 검증 계층, contract suites, fixture/manual 분리 | Draft |
@@ -100,7 +81,6 @@ graph TB
 | Prefix | Subsystem | Declared in |
 |--------|-----------|-------------|
 | `INV-SYS` | System overview | `01-system-overview.md` |
-| `INV-TYPE` | Types and invariants | `02-types-and-invariants.md` |
 | `INV-WORKSPACE` | Workspace lifecycle | `03-workspace-state.md` |
 | `INV-TURN` | Turn lifecycle | `04-turn-lifecycle.md` |
 | `INV-KEEPER` | Keeper engine | `05-keeper-agent.md` |

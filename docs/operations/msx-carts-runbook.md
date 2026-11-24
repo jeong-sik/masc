@@ -9,14 +9,11 @@ The MSX Add-on worker owns the inventory. Its named volume is mounted at
 `/state`, and the images sit in `/state/.masc/msx/carts/`. `masc_msx_meta` with
 `include_inventory=true` lists them as `inventory.carts`. A Keeper passes one
 of those names (with or without `.rom`) as `cart` to `masc_msx_load`; a path is
-refused. The TUI's MSX screen opens with a load menu over the same list.
+refused.
 
 The volume starts empty and nothing in the install or the server fills it. An
 operator places the files in the Add-on's volume, following "Provision or
 transfer state" in [MSX and DOS Add-on state](../guides/machine-addon-state.md).
-The load menu says "no cartridges yet" for an empty volume, and "cartridge list
-unavailable" with the reason when the Add-on cannot be reached. Those are
-different faults: the first needs files, the second needs the Add-on looked at.
 
 The C-BIOS ROMs the machine boots from are separate. The worker takes them from
 the `roms_dir` argument, else from `MSX_ROMS`, else from
@@ -140,10 +137,7 @@ Use named checkpoints for persistence; the input ledger alone is not a save.
 
 ## Checkpoints
 
-In the TUI game view, **F6** saves the `quick` checkpoint and **F7** restores
-it. The result remains visible above the game image. F7 on a volume where
-**F6** has not saved yet is refused with the reason, and the terminal stays
-usable. Keepers can use
+Keepers use
 `masc_msx_save {"slot":"campaign"}` and
 `masc_msx_restore {"slot":"campaign"}` for named checkpoints. Names contain
 1–64 letters, digits, underscores or hyphens. `masc_msx_save` without a slot
@@ -163,8 +157,7 @@ ending is supported. Keep a checkpoint before experimenting with later stages.
 
 ## Multi-disk games
 
-When the game requests another disk, press **F8** in the TUI, select the
-requested `.dsk`, then press Return in the game if requested. Keepers use
+When the game requests another disk, Keepers use
 `masc_msx_change_disk {"disk":"game-b.dsk"}`. This preserves CPU, RAM and
 frame count; it does not reload or reboot the game.
 

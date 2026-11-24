@@ -39,8 +39,8 @@ failure just because a keeper uses the Docker backend.
   `Keeper_sandbox_shell_ir_target` or `Keeper_sandbox_read_runner`.
 - Status, list, operator, and sandbox-status surfaces must read effective
   keeper meta via `Keeper_meta_store.read_effective_meta*`, not raw persisted
-  JSON, before displaying `sandbox_profile`, `network_mode`, `tool_access`, or
-  sandbox live state. Persisted runtime JSON intentionally omits TOML-owned
+  JSON, before displaying `sandbox_profile`, `network_mode`, or sandbox live
+  state. Persisted runtime JSON intentionally omits TOML-owned
   fields, so a raw read returns the decoder's placeholder profile (`docker`)
   whatever profile the keeper TOML declares.
 - Runtime/provider attribution for status surfaces must come from explicit

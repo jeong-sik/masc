@@ -17,35 +17,23 @@ Keeper 하나에 Jira 나 Notion 같은 서비스를 붙이면, 그 서비스의
 
 | | 서비스 | 준비 |
 |---|---|---|
-| **바로 됨** | 69개 — Atlassian, Linear, Notion, Sentry, Stripe, Algolia, CircleCI, DeepL, Postman, Sanity … | 없음 (Enter 치면 브라우저 즉시 연결) |
-| **앱을 먼저** | Slack, GitHub, Figma, Google 8개, Zendesk 등 | 각 서비스에서 앱 하나 (`A` 또는 `a` 키로 설정) |
+| **바로 됨** | 69개 — Atlassian, Linear, Notion, Sentry, Stripe, Algolia, CircleCI, DeepL, Postman, Sanity … | 없음 |
+| **앱을 먼저** | Slack, Figma, Google 8개, Zendesk 등 | 각 서비스에서 앱 하나 |
 
 갈리는 이유는 하나입니다. 앞쪽은 masc 가 필요할 때 스스로 클라이언트를 등록할 수
 있고, 뒤쪽은 그 창구를 안 열어 둡니다. masc 는 로그인할 때마다 그때 서버가 받는
 callback 주소로 클라이언트를 새로 등록합니다. 그래서 서버 base URL 을 바꿔도 예전
 주소로 등록된 클라이언트 때문에 로그인이 막히지 않습니다. Google 은 아예 안 하고, Figma 는 열어는
-뒀는데 아무나 쓰면 403 을 냅니다. 미등록 상태에서 Enter 를 누르면 상단 안내가
-표시되며, `A` 또는 `a` 키를 누르면 TUI 앱 등록 폼(Client ID, Client Secret, Scopes)이
-열립니다.
+뒀는데 아무나 쓰면 403 을 냅니다.
+
+GitHub 은 어느 쪽도 아닙니다. 그 Keeper 의 GitHub CLI 가 이미 가진 토큰으로
+붙습니다. 그러니 먼저 `masc keeper-github login --keeper <이름>` 으로 Keeper 를
+로그인시킵니다.
 
 ## 바로 되는 것
 
-**TUI**
-
-```
-Keepers → 키퍼 고르고 → 오른쪽 pane 에서 [ 또는 ] 로 서비스 탭
-화살표로 서비스 고르고 → enter
-```
-
-브라우저가 열립니다. 안 열리면 화면에 주소가 그대로 찍혀 있습니다. 승인하고
-돌아오면 탭이 알아서 바뀝니다 — 새로고침 안 눌러도 됩니다.
-
-숫자 `1`~`9` 는 앞쪽 아홉 개로 바로 뛰는 단축키입니다. 열 번째부터는 화살표로만
-닿습니다.
-
-**대시보드**
-
-Keeper 화면의 `업무 서비스 연결` 에서 `연결` 을 누릅니다.
+대시보드 Keeper 화면의 `업무 서비스 연결` 에서 `연결` 을 누릅니다. 새 브라우저
+탭에 서비스의 동의 화면이 열립니다. 안 열리면 패널에 링크가 나옵니다.
 
 ## 앱을 먼저 만들어야 하는 것
 
@@ -68,10 +56,6 @@ Keeper 화면의 `업무 서비스 연결` 에서 `연결` 을 누릅니다.
 하나 만들고 어느 한 곳에 넣으면 Gmail·Drive·Docs·Sheets·Slides·Calendar·Chat·
 Contacts 가 다 그걸 읽습니다. 클라이언트는 원래 서비스가 아니라 인증 서버에 속하는
 것이고, 여덟 개가 같은 `accounts.google.com` 을 쓰기 때문입니다.
-
-**Slack 과 GitHub 은 한 가지가 더 필요합니다.** masc 는 만료 시각과 refresh token 이
-없는 응답을 거절합니다. Slack 은 앱의 token rotation 을, GitHub 은 token expiration 을
-켜 두세요. 안 켜면 승인까지는 되고 마지막 교환에서 막힙니다.
 
 ### 순서
 
@@ -100,13 +84,11 @@ Google 과 Figma 는 http 로컬 주소를 받는지 문서에 안 나옵니다.
 
 1. `api.slack.com/apps` 에서 앱을 만듭니다.
 2. OAuth & Permissions → Redirect URLs 에 위 콜백 주소를 넣습니다.
-3. **Token Rotation 을 켭니다.** masc 는 만료 시각도 refresh token 도 없는 응답을
-   거절하므로, 이걸 안 켜면 동의까지는 되고 마지막 교환에서 막힙니다.
-4. 필요한 User Token Scopes 를 지정합니다.
-5. Basic Information 에서 Client ID 와 Client Secret 을 복사합니다.
-6. 대시보드 → 그 Keeper → `업무 서비스 연결` → Slack 줄의 `내 앱 쓰기` 에 넣고
+3. 필요한 User Token Scopes 를 지정합니다.
+4. Basic Information 에서 Client ID 와 Client Secret 을 복사합니다.
+5. 대시보드 → 그 Keeper → `업무 서비스 연결` → Slack 줄의 `내 앱 쓰기` 에 넣고
    저장합니다.
-7. Slack 을 눌러 연결합니다.
+6. Slack 을 눌러 연결합니다.
 
 **2. Figma**
 
@@ -116,12 +98,7 @@ Google 과 Figma 는 http 로컬 주소를 받는지 문서에 안 나옵니다.
 4. `내 앱 쓰기` 에 넣고 저장합니다.
 5. Figma 를 눌러 연결합니다.
 
-**3. GitHub**
-
-Slack 과 같습니다. OAuth App 을 만들고, 콜백을 넣고, **token expiration 을 켠 다음**
-id 와 secret 을 저장합니다.
-
-**4. Google — 여덟 개가 앱 하나**
+**3. Google — 여덟 개가 앱 하나**
 
 1. Google Cloud Console 에서 프로젝트를 고르고 APIs & Services → Credentials 로
    갑니다.
@@ -138,7 +115,7 @@ id 와 secret 을 저장합니다.
 가 됩니다. 서비스가 이름을 겹쳐 써도 섞이지 않습니다.
 
 도구 목록은 붙는 순간 한 번 받아 옵니다. 그 뒤로는 자동으로 안 봅니다 — 서비스가
-도구를 늘렸으면 `R` (대시보드는 `도구 새로고침`) 을 누르세요.
+도구를 늘렸으면 대시보드에서 `도구 새로고침` 을 누르세요.
 
 토큰은 만료 전에 알아서 갱신합니다. 선언에 적힌 여유 시간만큼 미리 바꿉니다.
 
@@ -147,28 +124,32 @@ id 와 secret 을 저장합니다.
 
 ## 서비스 떼어내기
 
-Keeper 상세 화면의 서비스 탭에서 `D` 를 두 번 누릅니다. 첫 번째 누름은 커서가
-놓인 줄을 무장하고 그렇다고 알립니다. 같은 줄에서 두 번째로 누르면 떼어냅니다.
-그러면 화면이 무엇을 지웠는지, 그리고 서비스에 남은 토큰을 폐기해 달라고 했는지를
-말합니다. 이 둘은 다른 사실입니다.
+admin 토큰으로 `POST /api/v1/keepers/oauth/disconnect` 를 보냅니다. 본문은
+`{"keeper":"<keeper>","provider":"<서비스 id>"}` 입니다. 대시보드 패널에는
+떼어내기 버튼이 없습니다. 응답은 무엇을 지웠는지, 그리고 서비스에 남은 토큰을
+폐기해 달라고 했는지를 말합니다. 이 둘은 다른 사실입니다.
 
 - **저장된 토큰.** refresh 토큰 파일 엔트리와 access 토큰·만료 env 엔트리를
   지우고, 그 Keeper·서비스의 도구 카탈로그도 함께 지웁니다. 다음 턴부터 그
   도구를 건네받지 않습니다.
 - **공급자 revoke.** 서비스가 폐기 엔드포인트를 공개했으면 masc 이 refresh 토큰을
-  그리로 best effort 로 보냅니다. `revoke: taken` 은 서비스가 답했다는 뜻이고,
-  `revoke: failed` 는 거절했거나 닿지 못했다는 뜻이며 로컬 삭제는 그대로입니다.
-  `revoke: not offered` 는 서비스가 폐기 엔드포인트를 공개하지 않았다는 뜻이라,
-  여기서는 사라졌지만 서비스는 만료되거나 그쪽 설정에서 폐기할 때까지 이 토큰을
-  계속 받아들일 수 있습니다.
+  그리로 best effort 로 보냅니다. 결과는 응답의 `revocation.kind` 에 있습니다.
+  `revoked` 는 서비스가 답했다는 뜻입니다. `failed` 는 거절했거나 닿지 못했다는
+  뜻이며 로컬 삭제는 그대로입니다. `not_published` 는 보낼 곳이나 보낼 것이
+  없었다는 뜻입니다. 서비스가 폐기 엔드포인트를 공개하지 않았거나 masc 가 가진
+  refresh 토큰이 없었습니다. 여기서는 사라졌지만 서비스는 만료되거나 그쪽
+  설정에서 폐기할 때까지 이 토큰을 계속 받아들일 수 있습니다. `not_sent` 는
+  토큰을 발급받은 클라이언트를 masc 가 알아내지 못해 요청을 보내지 않았다는
+  뜻입니다.
 
 로컬 삭제와 서비스 쪽 폐기는 같은 일이 아닙니다. 떼어내기는 항상 지우지만,
-서비스에는 *부탁*만 할 수 있습니다. 화면이 `failed` 나 `not offered` 라고 하고
-지금 서비스가 토큰을 잊어야 한다면, 서비스 계정 설정에서 직접 폐기하세요.
+서비스에는 *부탁*만 할 수 있습니다. 응답이 `failed`, `not_published`, `not_sent`
+중 하나이고 지금 서비스가 토큰을 잊어야 한다면, 서비스 계정 설정에서 직접
+폐기하세요.
 
-떼어내기는 스위치와 다릅니다. 스위치(`T`)는 그 Keeper 에게 서비스를 꺼 두고 토큰은
-남기므로, 나중에 `T` 로 다시 켜면 동의 없이 돌아옵니다. 떼어내기는 토큰을 잊고,
-다시 붙이려면 새로 동의해야 합니다.
+떼어내기는 스위치와 다릅니다. 스위치(대시보드의 `끄기` / `켜기`)는 그 Keeper 에게
+서비스를 꺼 두고 토큰은 남기므로, 다시 켤 때 새로 동의하지 않아도 됩니다.
+떼어내기는 토큰을 잊고, 다시 붙이려면 새로 동의해야 합니다.
 
 ## 안 될 때
 
@@ -180,7 +161,7 @@ Keeper 상세 화면의 서비스 탭에서 `D` 를 두 번 누릅니다. 첫 �
 | `publishes no S256` | 이 서버는 PKCE 를 안 씀 | 붙일 수 없음 |
 | `could not find out where authorization lives` | 서비스가 안내 문서를 안 냄 | 주소가 맞는지 확인 |
 | `the provider refused the exchange` | 서비스가 거절함 | 뒤에 붙은 서비스 쪽 이유를 읽기 |
-| `returned no refresh token` | 토큰 회전이 꺼진 앱 | 앱 설정에서 켜기 |
+| `returned no refresh token` | 실패가 아니라 경고. 서비스는 붙었지만 토큰이 만료되고 갱신할 수 없음 | 만료되면 다시 붙이기 |
 | `callback echoed a state this exchange did not send` | 승인 창을 너무 오래 두었거나 서버가 재시작됨 | 다시 누르기 |
 
 ## 어디에 저장되나

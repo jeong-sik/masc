@@ -7,7 +7,6 @@
 ## SSOT documents
 
 - **[`SPEC.md`](SPEC.md)** — canonical design system specification covering `dashboard/`(Preact). Token taxonomy (Raw/Semantic/Role), canonical vocabulary, theme matrix, ARIA pattern catalog, governance.
-- **[`patterns/a11y/`](patterns/a11y/)** — ARIA pattern catalog: `region` · `list` · `tablist` · `radiogroup` · `log` · `dialog`. Each file has JSX examples, keyboard contracts, screen reader expectations.
 
 새 token / 컴포넌트 패턴 / 테마 추가는 SPEC.md 갱신이 선행되어야 합니다.
 
@@ -49,13 +48,13 @@ MASC is **bilingual Korean/English** under the hood — titles, goals and some c
 
 ## Sources used
 
-- **`tokens/source.ts`** — single source of truth for design-system tokens (raw + semantic + themes). Codegen via `pnpm tokens:build` emits 4 artifacts (preview / Tailwind v4 / Preact TS / DTCG JSON). See `tokens/build.ts`.
-- **`source_styles/`** — generated `tokens.generated.css` (preview surface) plus reference copies of zone-specific stylesheets:
+- **`tokens/source.ts`** — single source of truth for design-system tokens (raw + semantic + themes). Codegen via `pnpm tokens:build` emits 3 artifacts (`source_styles/tokens.generated.css` / Tailwind v4 `@theme` / DTCG JSON). See `tokens/build.ts`.
+- **`source_styles/`** — generated `tokens.generated.css` plus reference copies of zone-specific stylesheets:
   - `primitives.css` — chip, pill, bar, spark, kv-row, btn variants, elevation helpers, status surfaces, animations
   - `layout.css` — the 3-col × 7-row cockpit grid
   - `sidebar.css` · `ticker.css` · `kpi.css` · `lifeline.css` · `center.css` · `swimlanes.css` · `deck.css` · `drawer.css` · `rail.css` — zone-specific styles
   - `code.css` · `layers.css` — code mode + stacked overlays
-  - The preview-local hand-written `tokens.css` was replaced in Wave 2 by `source_styles/tokens.generated.css` (note: `dashboard/src/styles/tokens.css` and `dashboard/src/styles/keeper-v2/colors_and_type.css` remain active in the live Preact app; see `dashboard/CSS-ARCHITECTURE.md`).
+- **Live app styles** — the Preact app also loads `dashboard/src/styles/tokens.css` and `dashboard/src/styles/keeper-v2/colors_and_type.css`; see `dashboard/CSS-ARCHITECTURE.md`.
 - **Synthetic seed data only** — repository previews must not embed `.masc/` records, keeper prompts, provider model names, decision logs, auth material, trajectories, or operator transcripts.
 - No Figma provided.
 - No slide template provided — `slides/` is omitted per instructions.
@@ -192,8 +191,7 @@ touching component CSS.
 ```
 
 **Raw tier** — palette anchors. Defined in `tokens/source.ts` (the SSOT)
-and emitted to every surface via `pnpm tokens:build` (preview, Tailwind,
-Preact). Treat as private-ish: prefer the semantic alias unless
+and emitted via `pnpm tokens:build`. Treat as private-ish: prefer the semantic alias unless
 you genuinely need a literal palette pick.
 
 **Semantic tier** — meaning over hex. The full alias matrix:
@@ -221,19 +219,10 @@ aliases. Migrating a component from raw to semantic is a one-line swap.
 
 ### Theming
 
-The system is **dark-by-design**. A `[data-theme="light"]` override
-exists as foundation infrastructure for future surfaces but the dark
-brass aesthetic remains the canonical look.
-
-The override only redefines the **semantic** alias values. Raw tokens
-(`--bg-0`, `--brass-1`) keep their dark values. A component still using
-raw tokens stays dark in light mode — this is intentional. Migration is
-gradual: swap component CSS from raw to semantic and the theme starts
-working for that component.
-
-`@media (prefers-color-scheme: light)` is honored only when no explicit
-`data-theme` is set, so a user's chosen theme is never overridden by OS
-preference.
+The system is **dark-by-design**. The default (no `data-theme` attribute)
+is dark. `ThemeSwitch` (`dashboard/src/components/theme-switch.ts`) cycles
+default dark, StyleSeed, and Paper by setting `data-theme` on the document
+root. See [SPEC §4](SPEC.md#4-theme-matrix).
 
 ---
 
@@ -269,7 +258,7 @@ If new icons are genuinely needed (they usually aren't), **use Lucide at 12–14
 │   ├─ source.ts                      ← SSOT: raw + semantic + themes
 │   ├─ build.ts                       ← codegen driver (`pnpm tokens:build`)
 │   └─ build/tokens.json              ← generated DTCG 2025.10
-├─ source_styles/                     ← preview surface stylesheets
+├─ source_styles/                     ← generated tokens + zone stylesheets
 │   ├─ tokens.generated.css           ← @generated, do not edit
 │   ├─ primitives.css  layout.css
 │   ├─ sidebar.css  ticker.css  kpi.css  lifeline.css
@@ -277,7 +266,7 @@ If new icons are genuinely needed (they usually aren't), **use Lucide at 12–14
 │   ├─ rail.css    code.css     layers.css
 ```
 
-The preview-local `colors_and_type.css` in `design-system/` was removed in Wave 2 (#11250) — the preview surface consumes `source_styles/tokens.generated.css` directly (while the live Preact dashboard also loads `dashboard/src/styles/tokens.css` and `dashboard/src/styles/keeper-v2/colors_and_type.css`). Sibling generated artifacts live in their consuming surfaces:
+The sibling generated artifact lives in its consuming surface:
 
 - `dashboard/src/styles/tokens.generated.css` (Tailwind v4 `@theme`)
 

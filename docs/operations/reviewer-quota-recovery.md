@@ -35,7 +35,7 @@ For an existing workspace:
    [runtime.lanes.reviewer-failover]
    candidates = [
      "codex_subscription.codex-gpt-6-1-sol-high",
-     "glm-coding.glm-5-3",
+     "glm-coding.glm-5-4",
      "antigravity_subscription.antigravity-gemini-3-8-flash-high",
    ]
    ```

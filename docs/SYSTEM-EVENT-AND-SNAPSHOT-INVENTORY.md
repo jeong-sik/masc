@@ -206,10 +206,10 @@ Source of accepted event names on the dashboard side: `dashboard/src/types/sse.t
 
 | Family | Event names |
 | --- | --- |
-| Workspace / workspace | `agent_bound`, `agent_unbound`, `broadcast`, `task_update` |
+| Workspace / workspace | `broadcast` |
 | Board and notification compatibility | `board_post`, `masc/board_post`, `board_comment`, `masc/board_comment`, `board_delete`, `masc/board_delete`, `post_created`, `comment_added`, `post_voted`, `comment_voted` |
-| Keeper direct SSE | `keeper_heartbeat`, `keeper_handoff`, `masc/keeper_handoff`, `keeper_phase_changed`, `keeper_composite_changed`, `keeper_tool_call`, `masc/keeper_tool_call`, `keeper_tool_call_evidence_committed`, `keeper_turn_complete`, `masc/keeper_turn_complete` |
-| Gate / HITL | `client_input_approved`, `client_input_rejected`, `client_input_updated`, `approval:pending`, `approval:resolved` |
+| Keeper direct SSE | `keeper_heartbeat`, `keeper_phase_changed`, `keeper_composite_changed`, `keeper_tool_call`, `masc/keeper_tool_call`, `keeper_tool_call_evidence_committed`, `keeper_turn_complete`, `masc/keeper_turn_complete` |
+| Gate / HITL | `approval:pending`, `approval:resolved` |
 | agent core bridge | `agent_core:masc:keeper:lifecycle`, `agent_core:agent_started`, `agent_core:agent_completed`, `agent_core:tool_called`, `agent_core:tool_completed`, `agent_core:turn_started`, `agent_core:turn_completed`, `agent_core:masc:harness:verdict_recorded`, `agent_core:masc:harness:handoff` |
 | Server-push snapshots | `project_snapshot`, `execution_snapshot`, `operator_snapshot`, `operator_digest`, `transport_health_snapshot` |
 
@@ -222,9 +222,6 @@ Domain publishers emit typed `Agent_core.Event_bus.Custom` payloads and
 | --- | --- |
 | `masc:board_post` | board post created |
 | `masc:keeper:lifecycle` | keeper lifecycle update |
-| `masc:institution_episode` | institution episode recorded |
-| `masc:harness:verdict_recorded` | harness verdict persisted |
-| `masc:harness:handoff` | harness handoff observation |
 
 ## Representative Messages
 

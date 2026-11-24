@@ -78,10 +78,7 @@ generic Gate mode:
 - `Always_allow`: dispatch immediately after objective invariants pass;
 - `Auto_judge`: the configured LLM returns approve/deny/require-human with
   rationale and provenance;
-- `Manual`: persist a nonblocking HITL request and return `Deferred`;
-- `Yolo`: operator-persisted bypass mode (`.masc/gate/`) that dispatches
-  registered tool effects immediately while recording explicit `yolo` mode
-  provenance in the receipt.
+- `Manual`: persist a nonblocking HITL request and return `Deferred`.
 
 There is no separate effect-request domain object, fixed risk class,
 privileged floor, product-specific exemption, or hidden authorization
@@ -97,8 +94,8 @@ The Keeper remains free to perform unrelated work while a request is pending.
 
 Long-running Tool, Connector, Scheduler, and Fusion activity becomes a Job.
 Keepers also own isolated Docker jobs (`keeper_job_start`, `keeper_job_status`,
-`keeper_job_output`, `keeper_job_cancel`, `keeper_job_list`) stored under
-`.masc/keepers/<name>/jobs/`.
+`keeper_job_result`, `keeper_job_cancel`) journaled under
+`.masc/keeper_msg_requests/owned_jobs/<job_id>`.
 Submitting a Job returns its durable handle, and owned-job waits yield back to
 the lane. Completion or failure appends a typed stimulus to the origin lane.
 Polling is allowed when the external system has no callback, but polling state

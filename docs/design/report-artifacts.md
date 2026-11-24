@@ -257,125 +257,11 @@ its listed revision or changing credentials retires its request ownership.
 External references checked 2026-10-19 KST. These references establish the
 interaction and browser primitives; the checks above establish MASC behavior.
 
-## Terminal artifact library
-
-`/artifacts` (alias `/reports`) opens the existing authenticated report inventory
-without sending a Keeper message. The command palette also finds it under
-Artifacts / Resources. Published reports use workspace read authority and exact
-revision, byte count, UTF-8 and digest checks used by Resources; MCP resources
-remain a separate typed authority.
-
-The library uses the full terminal width by default: Enter opens the selected
-reading and Esc returns to the list. `w` selects side-by-side browsing on wide
-terminals. `f` cycles all resources, all artifacts, Markdown and HTML. `t` toggles
-the local publication day captured at the keypress; the displayed date stays
-fixed across midnight until toggled again. A refresh applies that same filter to
-new metadata. Today means published or revised, not human-confirmed.
-
-In an open report, `P` enables or revokes external sharing for the entire
-artifact, including every revision. After an enabled state has been read back,
-the detail shows its fixed-revision public link and `Y` sends that link through
-OSC 52. The link uses the TUI's explicitly configured `MASC_HTTP_BASE_URL`;
-an absent or invalid origin, local or wildcard literal, and noncanonical
-numeric host are reported instead. A
-configured origin is not proof of external reachability, and terminal support
-for OSC 52 is not confirmed. `o` still opens the local Dashboard, and `y`
-copies the report's source rather than its link.
-Each share change retires the previous observation and any in-flight report
-read. After a confirmed response or conflict, a fresh read checks the sharing
-state; `R` rereads the exact open revision. If a change's result is unconfirmed,
-the server may still apply it, so `P` and `Y` are disabled for that artifact.
-The TUI records the original operation in a local journal tied to the workspace
-and artifact, including across restarts. With the same workspace and report
-open, `U` inspects the pending request. Once its direction and preconditions are
-visible, `!` explicitly retries that same operation: this can apply the original
-change. After a confirmed receipt or conflict is recorded as settled, a fresh
-read is required. If this session already observed the original request but its
-journal record disappears, `U` offers the remembered request for inspection;
-`!` first restores that exact intent durably, provided no different request is
-pending for the artifact. The retry may apply the original change. Preserve the
-journal: after restart, a missing record is indistinguishable from first use.
-An inaccessible, invalid or unstable journal does not confirm the result. Do
-not replay an uncertain request after replacing a workspace store at the same
-paths. A failed body read does not prevent revoking a previously observed
-shared report.
-
-List selection, search, cursor navigation and read requests all use the same
-filtered inventory. Filtering out an open or pending document retires its read
-owner; a late reply cannot restore it. The retained inventory still contains all
-sources so another filter can reach them. A fixed older report revision stays
-readable while its artifact remains in the selected inventory.
-
-The reader starts with compact report metadata. `i` expands its URI, type and
-size; `v` changes document/source presentation and `y` copies the selected
-original text part through the existing OSC 52 path. These display changes do
-not mutate source bytes or request another revision. HTML document mode uses a
-standards-parsed, inert terminal reading: headings, paragraphs, lists, tables
-and preformatted text. Original mode keeps the HTML syntax. Body search reads
-exactly the same terminal projection as drawing. HTML whitespace is interpreted
-only in document mode; copied bytes remain the original response.
-
-HTML image declarations retain their original content-part number, including
-multiple images inside one part and nested/table images. Image data URIs
-are passed unchanged to the existing off-thread image decoder/converter only
-when selected for preview. Their bodies are percent-decoded once before optional
-base64 decoding; literal plus signs remain plus signs, and URI fragments are not
-part of the decoded bytes. The complete original URI stays retained. External
-URLs, file paths and non-image data remain explicitly unavailable; selecting
-them does not authorize a fetch.
-Inline SVG roots are serialized from the parsed HTML tree with element and
-attribute namespaces preserved, then offered to the existing offline SVG
-renderer on selection. This serialization is separate from the unchanged
-original HTML source. Renderer validation still rejects scripts, event
-handlers, foreign content, embedded images and external href references;
-canvas remains unavailable. Browser CSS layout is not evaluated.
-Base64 SVG resource parts and SVG image data URIs retain their declared
-format through off-thread decoding and use this same offline renderer.
-Retained attachments preserve the original image format separately from the
-encoded wire blob's MIME, and verify wire size and digest before rendering.
-Other declared image formats keep the existing image converter path.
-
-Selected Resources images, generated/retained chat images and staged composer
-attachments use pixel graphics
-when the terminal supports them. A truecolour or 256-colour terminal without
-those graphics protocols receives a colour character-cell preview instead.
-PNG-to-RGBA decoding runs in the same acquisition worker with an aspect-preserving
-grid fitted to the captured body box. Alpha is retained for the existing mosaic
-renderer and colours go through the terminal palette projection. Temporary
-decoder files belong to one attempt and are removed on success and failure.
-The owner applies the existing generation, resource-reading and physical
-workspace checks before painting either representation. A smaller terminal at
-completion refuses the old grid and asks to reopen it; any key dismisses the
-preview. Missing decoders and unsupported colour capabilities leave a visible
-refusal with the original reading intact. Staged attachments decode their
-captured local payload in the same worker without a peer request or verified
-server identity; previewing leaves the original encoded attachment intact.
-Their result still belongs to the original generation, view, Keeper, workspace
-authority and exact staged attachment object. Losing peer confirmation alone
-does not withdraw a local draft; replacement or removal of its attachment does.
-Selected local file paths use the same background pixel/colour-cell presenter.
-Their owner is the original local workspace epoch, so peer reconfirmation alone
-does not withdraw them. Local files and staged attachments opened through the
-Resources composer do not borrow that surface's unrelated document reading;
-only peer Resource images require the original resource response. The worker reads the chosen file once, preserves its
-source, and converts the captured bytes through the existing image converters.
-This is the file observed by the worker, not a retained file-revision guarantee.
-Explicit HTTP(S) image URLs keep their existing browser/download behavior.
-Browser layout and copied source bytes are unchanged.
-Acquisition progress is a temporary footer observation of the pending read,
-bound to its generation, view, Keeper, workspace and original resource reading.
-It disappears when that read completes or loses ownership; it is not appended
-to conversation history. Actual acquisition and presentation failures still
-leave their existing notices.
-Scripts, metadata, templates, embedded frames and explicit hidden subtrees do
-not contribute reading/image candidates. This reading does not execute CSS or
-JavaScript, and does not reproduce a browser's page layout.
-
 ## Shared revision confirmation
 
 An explicit check belongs to the workspace and the exact artifact ID, revision
-and body SHA-256. Dashboard and TUI can read the same record even when their
-authenticated actor names differ. Opening a body, previewing an image and
+and body SHA-256. Every client reads the same record even when authenticated
+actor names differ. Opening a body, previewing an image and
 refreshing today's inventory never write a check. A new revision starts without
 a check even when its body is byte-identical to an older revision.
 
@@ -386,7 +272,7 @@ unavailable or corrupt storage must remain unknown. `POST` accepts `id`,
 authoritatively absent record). Reading requires `CanReadState`; changing the
 workspace-wide confirmation requires `CanAdmin`. Both return private, no-store
 HTTP responses. The actor comes from authentication, not JSON.
-The terminal also supplies `expected_workspace` with canonical base/runtime
+A request may carry `expected_workspace` with canonical base/runtime
 roots. The server validates and removes this envelope before strict operation
 decoding, refusing mismatched roots before store dispatch. Dashboard requests
 without this optional binding retain their existing contract.
@@ -454,23 +340,3 @@ Successful, conflicting and failed writes all require an authoritative reread;
 the controls never optimistically confirm or automatically retry. Retiring the
 credential epoch or selected revision retires the local write owner, even when
 the server may already have committed its request.
-
-The TUI library independently reads this inventory on entry and explicit
-refresh. Published report rows and the selected fixed revision show the shared
-confirmation state; a checked or explicitly unchecked record retains its actor
-and time. The list header shows today's unchecked current revisions and the last
-successful check-query time. These observations do not write a confirmation.
-Pending or failed refreshes, partial inventories, mismatched body digests and
-unconfirmed workspace identity leave the current confirmation/count unknown.
-Report inventory failure does not hide MCP resources, and MCP failure does not
-invalidate an otherwise complete report count. Superseded or withdrawn check
-responses cannot restore an older observation. In the list or reader, `c`
-explicitly checks or unchecks that selected exact report revision. A pending
-change leaves confirmation/count unknown and does not affect source bytes.
-The request carries the observed change ID, a captured credential and workspace
-binding; it is sent once without credential replacement or automatic write retry.
-Success, conflict and uncertain transport all require a fresh shared-state read.
-An earlier read cannot certify a still-pending write, and its cached observation
-is retired again on settlement. Workspace withdrawal retires the local write
-owner even if the server may already have committed. Live cross-client and
-installed terminal verification remain separate evidence.

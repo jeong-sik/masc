@@ -272,12 +272,6 @@ endpoint registry and display the server's last shim/dispatch observations.
 An empty registry and an unreadable registry are different states. Reading
 settings does not connect to the endpoint or establish current readiness.
 
-In the native TUI, `e` edits `remote_endpoint` along with the other Keeper
-settings. The Sandbox `s` shortcut retains an explicitly selected registered
-endpoint or chooses the only registered endpoint, and selects inherited
-networking in the same revision-checked save. With multiple endpoints, choose
-one explicitly through `e`; `d` and `m` clear the SSH endpoint in their save.
-
 Repo checkout materialization is not inferred from the host filesystem. Until
 the typed inventory in masc#31460 lands, provision required checkouts through
 an explicit operator-approved repository workflow.
@@ -386,7 +380,6 @@ sentence saying so is not.
 | `remote_ssh_read_failed` | A remote read command exited nonzero. | Inspect the returned exit/stderr and remote path. |
 | `remote_ssh_read_signaled` | A remote read command died by signal. | Inspect remote resource/kill evidence. |
 | `remote_ssh_read_stopped` | A remote read command reported a stopped status. | Treat as an execution anomaly and inspect the endpoint. |
-| `remote_ssh_read_internal_error` | SSH profile reached Docker-only read code. | Treat as a routing regression; do not retry through Docker. |
 
 When reporting an incident, include timestamp, endpoint, keeper, exact error,
 MASC source revision, shim probe/version, retryability, and observed recovery.
@@ -441,27 +434,16 @@ Four things this costs, none of them obvious from the CLI's help:
 
 ## Watching Keeper commands and output
 
-In the MASC TUI, open a Keeper (`Right` from the Keepers list) and press `[`
-once from Info to reach the Terminal tab. It follows the Keeper's redacted
-command lines and stdout/stderr as they arrive, over the Server-Sent Events
-stream `GET /api/v1/dashboard/execute-output/<keeper>`, and
-`k`, `PgUp` or `Home` holds the screen still while you read back (`End` follows
-again). The tab works the same for Docker, microVM and `remote_ssh` Keepers,
-because all of them stream through the same server-side ring. It reads that
-ring over HTTP, so it is not a PTY: nothing typed in the TUI reaches the
-command. The stream needs a connection that stays open: a proxy between the TUI
-and the server that buffers responses can hold the rows back, and the server
-sends `x-accel-buffering: no` for the proxies that honour it. A pipeline with a
-file redirect, or another shape the dispatcher chains without streaming, shows
-its output when the command ends rather than line by line.
-
-`l` opens the logs view instead. Its Execute section
-shows the most recently observed command summaries and stdout/stderr, newest
-first, at the TUI's normal cadence. Each row carries the stream and Task
-identifiers. In either view a failed read is shown as unavailable, and a
-missing earlier sequence means the in-memory server history has already been
-truncated. The command summary omits shell operators and environment
-assignments; it is an audit aid, not an exact command to copy and rerun.
+The server streams a Keeper's redacted command lines and stdout/stderr as they
+arrive, over the Server-Sent Events stream
+`GET /api/v1/dashboard/execute-output/<keeper>`. Docker, microVM and
+`remote_ssh` Keepers all stream through the same server-side ring. The stream
+needs a connection that stays open: a proxy that buffers responses can hold the
+rows back, and the server sends `x-accel-buffering: no` for the proxies that
+honour it. A pipeline with a file redirect, or another shape the dispatcher
+chains without streaming, shows its output when the command ends rather than
+line by line. A missing earlier sequence means the in-memory server history
+has already been truncated.
 
 For a terminal tail of several Keepers, from a MASC checkout use:
 
@@ -479,7 +461,7 @@ reconnect reads a new snapshot and may show retained lines again. A disconnect
 or an unknown result is not proof that a remote command did or did not run;
 inspect its effects before deciding whether to execute it again.
 The current output routes use HTTP/1.1; the separate HTTP/2 gateway does not
-serve them. The TUI and terminal client use HTTP/1.1 for these reads.
+serve them. The terminal client uses HTTP/1.1 for these reads.
 
 ## Endpoint observations
 

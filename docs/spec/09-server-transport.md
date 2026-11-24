@@ -9,7 +9,6 @@ status: reference
 | Status | Draft |
 | Team | Server |
 | Maps to | `lib/server/`, `lib/sse.ml`, `lib/transport.ml`, `lib/http_server_eio.ml`, `lib/mcp_server_eio*.ml`, `bin/main_eio.ml`, `bin/main_stdio_eio.ml` |
-| Dependencies | 02-types-and-invariants |
 | Modules | `lib/server/` and the files in Maps to are the inventory SSOT |
 | LOC | Derived from the source tree, not duplicated here |
 
@@ -107,26 +106,13 @@ type t = Http | Grpc | Ws | Local
 ```
 
 `MASC_AGENT_TRANSPORT` 로 값을 정하고 기본은 `Local` 이다. **그런데 값을 바꿔도
-에이전트가 서버에 닿는 경로는 달라지지 않는다.** 코드 전체에서 이 값을 읽는
-곳은 한 군데이고, 하는 일은 로그 한 줄이다.
+에이전트가 서버에 닿는 경로는 달라지지 않는다.** 에이전트 실행 쪽은 값이
+`Local` 이 아닐 때 로그 한 줄만 남긴다(`lib/runtime/runtime_agent.ml`).
 
-```ocaml
-(* lib/runtime/runtime_agent.ml:1101 *)
-(match config.transport with
- | Masc_grpc_transport.Local -> ()
- | t ->
-   Log.Runtime_agent.info "%s: transport=%s"
-     config.name (Masc_grpc_transport.to_string t));
-```
-
-`grpc` 로 두면 서버 부팅 때 keeper heartbeat 클라이언트가 생기는 효과는 있다
-(`server_runtime_bootstrap.ml`). 그 외 에이전트 트래픽은 값과 무관하게 같은
-경로로 간다.
-
-이 절은 전에 "선택 순서" 를 세 단계로 적어놓고 1번을 `~transport` 파라미터라고
-했는데, 코드에 있는 그 이름의 파라미터는 `Llm_provider.Llm_transport.t` 로
-**에이전트가 LLM 과 말하는 방식**이다. 여기 `Masc_grpc_transport.t`
-(**에이전트가 masc 서버와 말하는 방식**) 와는 타입이 다르다.
+`grpc` 로 두면 서버 부팅 때 gRPC keeper client 가 생기고
+(`server_runtime_bootstrap.ml`), Keeper heartbeat fiber 가 그 client 로 돈다
+(`lib/server/keeper_grpc_heartbeat.ml`). 그 외 에이전트 트래픽은 값과 무관하게
+같은 경로로 간다.
 
 배선 여부와 방향은 #30370 에서 다룬다.
 
@@ -177,6 +163,8 @@ MCP는 JSON-RPC 2.0 위에 구축된다. 모든 요청은 동일한 구조를 �
 
 ### 4.2 표준 JSON-RPC 에러 코드
 
+코드와 기본 문구는 `lib/mcp_error_code.ml` 이 정한다.
+
 | Code | 이름 | 설명 |
 |------|------|------|
 | -32700 | Parse Error | JSON 파싱 실패 |
@@ -184,10 +172,15 @@ MCP는 JSON-RPC 2.0 위에 구축된다. 모든 요청은 동일한 구조를 �
 | -32601 | Method Not Found | 존재하지 않는 메서드 |
 | -32602 | Invalid Params | 유효하지 않은 파라미터 |
 | -32603 | Internal Error | 서버 내부 오류 |
-| -32000 | Server Error | 범용 서버 오류 |
-| -32001 | Not Initialized | 서버 미초기화 |
-| -32002 | Task Not Found | Task ID 없음 |
-| -32003 | Permission Denied | 권한 부족 |
+| -32001 | `Auth_error` | Unauthorized |
+| -32002 | `Not_ready` | 서버가 아직 준비되지 않음 |
+| -32003 | `Provider_timeout` | upstream provider timeout |
+| -32004 | `Tool_dispatch_failure` | 도구 디스패치 실패 |
+| -32005 | `Backpressure_shed` | backpressure 로 끊음. `Last-Event-ID` 로 이어받는다 |
+| -32006 | `Session_evicted` | 서버 정책으로 세션 evict |
+| -32007 | `Insufficient_scope` | scope 부족 |
+| -32020 | `Header_mismatch` | 헤더 불일치 (MCP 2026-07-28 지정) |
+| -32022 | `Unsupported_protocol_version` | 지원하지 않는 protocol version (MCP 2026-07-28 지정) |
 
 ### 4.3 MCP Protocol Version
 
@@ -200,16 +193,7 @@ MCP는 JSON-RPC 2.0 위에 구축된다. 모든 요청은 동일한 구조를 �
 
 ### 4.4 MCP Session Management
 
-HTTP MCP 세션은 `Mcp-Session-Id` 헤더로 식별된다. 세션 ID는 `Mcp_session.generate()`로 UUID-like 문자열을 생성한다.
-
-```
-mcp_session_record = {
-  id: string;
-  agent_name: string option;
-  created_at: float;
-  last_seen: float;
-}
-```
+HTTP MCP 세션은 `Mcp-Session-Id` 헤더로 식별된다. 세션 ID는 `Mcp_session.generate()`가 `mcp_<ts>_<pid>_<rand>` 꼴로 만든다. 세션 레코드는 `Session.McpSessionStore.mcp_session`(`lib/session.mli`)이다.
 
 세션 생명주기:
 
@@ -226,6 +210,7 @@ type tool_profile =
   | Full              (* /mcp - 전체 도구 *)
   | Managed_agent     (* /mcp/managed - 제한된 도구 세트 *)
   | Operator_remote   (* /mcp/operator - operator 전용 도구 *)
+  | Seat              (* /mcp/play - catalog 권한이 CanPlayMachine 인 도구 *)
 ```
 
 동일 session ID로 다른 profile의 엔드포인트에 접근하면 `409 Conflict`를 반환한다 (`validate_mcp_session_profile`).
@@ -240,7 +225,7 @@ type tool_profile =
 
 SSE는 per-session `Eio.Stream.t` mailbox 패턴으로 구현된다:
 
-1. SSE 연결 시 `Sse.register`가 session당 `Eio.Stream.t`(capacity=1024)를 생성한다.
+1. SSE 연결 시 `Sse.register`가 session당 `Eio.Stream.t`를 생성한다. capacity 는 `MASC_SSE_STREAM_CAPACITY`(기본 256, 8~1024)다.
 2. `broadcast`는 registry의 읽기 스냅샷을 잡고, 각 client의 stream에 이벤트를 push한다.
 3. 각 SSE connection fiber는 `Sse.pop`으로 자기 stream을 drain하며, transport writer에 write한다.
 4. broadcast 중 global write-lock을 잡지 않으므로, 느린 client가 다른 client의 broadcast를 지연시키지 않는다.
@@ -255,17 +240,24 @@ SSE fiber --> loop: Sse.pop session_id --> send_raw to HTTP body writer
 
 ### 5.2 Session Kind
 
-SSE 세션은 두 종류로 분류된다:
+SSE 세션은 세 종류로 분류된다(`Sse.session_kind`):
 
 | Kind | 대상 | 수신 이벤트 |
 |------|------|-----------|
 | `Observer` | Dashboard, 읽기 전용 뷰어 | dashboard snapshot |
-| `Agent stream` | MCP 에이전트 연결 | heartbeat, task event |
+| `Agent_stream` | MCP 에이전트 연결 | heartbeat, task event |
+| `Presence` | presence 스트림 | presence 이벤트. replay buffer 에 넣지 않는다 |
 
 `broadcast_to` 함수로 대상을 지정할 수 있다:
 
 ```ocaml
-type broadcast_target = All | Observers | Presence_only
+type broadcast_target =
+  | All
+  | Observers
+  | Runtime_observers of runtime_authority
+  | Scoped_runtime_observers of observer_scope
+  | Presence_only
+  | Runtime_presence of runtime_authority
 ```
 
 `broadcast json`은 `broadcast_to All json`과 동일하다 (하위 호환).
@@ -289,8 +281,8 @@ data: {"jsonrpc":"2.0","method":"notifications/message","params":{...}}
 
 MCP Spec에서 MUST인 event replay를 지원한다:
 
-- 최근 100개 이벤트를 ring buffer에 저장 (`event_buffer`, 300초 TTL)
-- 클라이언트가 `Last-Event-Id` 헤더로 마지막 수신 ID를 전달하면, `get_events_after`로 누락분을 replay
+- 최근 이벤트를 replay buffer(`event_buffer`)에 둔다. 크기는 `MASC_SSE_REPLAY_BUFFER_SIZE`(기본 1000, 50~1000), TTL 은 300초다
+- 클라이언트가 `Last-Event-Id` 헤더로 마지막 수신 ID를 전달하면, `Sse.replay_after_for_session`으로 누락분을 replay
 
 ### 5.5 Connection Guard
 
@@ -437,17 +429,17 @@ credential 을 확인하므로 다른 요청처럼 센다
 | Method | Path | Handler | 설명 |
 |--------|------|---------|------|
 | POST | `/mcp` | `handle_post_mcp ~profile:Full` | MCP JSON-RPC (전체 도구) |
-| GET | `/mcp` | `handle_get_mcp` | SSE 스트림 (Agent stream) |
+| GET | `/mcp` | `handle_get_mcp` | SSE 스트림. 기본은 `Agent_stream`, query `sse_kind=observer` 또는 `presence` 로 종류를 고른다 |
 | DELETE | `/mcp` | `handle_delete_mcp` | MCP 세션 종료 |
 | POST | `/mcp/managed` | `handle_post_mcp ~profile:Managed_agent` | 관리 에이전트 MCP |
-| GET | `/mcp/managed` | `handle_get_mcp` | 관리 에이전트 SSE |
 | DELETE | `/mcp/managed` | `handle_delete_mcp ~profile:Managed_agent` | 관리 에이전트 세션 종료 |
 | POST | `/mcp/operator` | `handle_post_mcp ~profile:Operator_remote` | Operator MCP |
 | GET | `/mcp/operator` | `handle_get_operator_mcp` | Operator SSE |
 | DELETE | `/mcp/operator` | `handle_delete_mcp ~profile:Operator_remote` | Operator 세션 종료 |
-| GET | `/sse` | `sse_simple_handler` | 단순 SSE (Observer) |
-| GET | `/ws` | `websocket_discovery_json` | WebSocket discovery JSON (`enabled`, `ws_url`) |
-| OPTIONS | `*` | `options_handler` | CORS preflight |
+| POST | `/mcp/play` | `handle_post_mcp ~profile:Seat` | Seat MCP. GET 은 없다(405) |
+| DELETE | `/mcp/play` | `handle_delete_mcp ~profile:Seat` | Seat 세션 종료 |
+| GET | `/ws` | `websocket_handler` | `Upgrade: websocket` 이면 업그레이드, 아니면 discovery JSON (`enabled`, `ws_url`) |
+| OPTIONS | `*` | `options_handler` | CORS preflight. `Server_http_ingress` 가 라우팅 전에 답한다 |
 
 ### 6.2 REST API 라우트 (server_routes_http 조립)
 
@@ -460,7 +452,7 @@ credential 을 확인하므로 다른 요청처럼 센다
 |------|--------|------|----------|
 | Frontend | `/`, `/health` | `_frontend` | `GET /health`, `GET /.well-known/agent.json` |
 | Dashboard | `/api/v1/dashboard/*` | `_dashboard` | `GET /api/v1/dashboard/shell` |
-| Workspace | `/api/v1/status`, `/api/v1/tasks`, `/api/v1/agents`, `/api/v1/messages` | `_workspace` | `GET /api/v1/status` |
+| Workspace | `/api/v1/workspace/*`, `/api/v1/git/*` | `_workspace` | `GET /api/v1/workspace/tree` |
 | Provider Runs | `/api/v1/providers`, `/api/v1/models/*` | `_provider_runs` | `GET /api/v1/providers` |
 | Runtime | `/api/v1/runtime/*` | `_dashboard` / `_activity` | `GET /api/v1/runtime/resolved` |
 | Activity | `/api/v1/activity/*` | `_activity` | `GET /api/v1/activity/events` |
@@ -493,16 +485,16 @@ credential 을 확인하므로 다른 요청처럼 센다
   workspace_secret.hash     -- workspace-level secret (SHA256 해시)
   initial_admin        -- 최초 admin agent 이름
   agents/
-    claude-code.json   -- credential JSON (agent_name, token_hash, admin, expires_at)
+    claude-code.json   -- credential JSON (agent_name, token(SHA-256 해시), role, created_at, expires_at)
     codex.json
 ```
 
 ### 7.2 인증 흐름
 
-1. **토큰 생성**: agent 이름과 admin 여부를 바탕으로 raw token과 credential을 만든다. raw token은 한 번만 반환, 서버는 SHA256 해시만 저장한다.
-2. **요청 인증**: `Authorization: Bearer <raw_token>` 헤더로 전달. 서버가 해시 비교. 인메모리 토큰 인덱스에 없는 토큰이 들어오면 `.masc/auth/agents/` 디렉토리를 즉시 재로드(live reload)하여 외부 CLI(`masc-mcp login` 등)가 발급한 신규 토큰을 서버 재시작 없이 수용한다.
+1. **토큰 생성**: agent 이름과 role 을 바탕으로 raw token과 credential을 만든다. raw token은 한 번만 반환, 서버는 SHA256 해시만 저장한다.
+2. **요청 인증**: `Authorization: Bearer <raw_token>` 헤더로 전달. 서버가 해시 비교. 인메모리 토큰 인덱스에 없는 토큰이 들어오면 `.masc/auth/agents/` 디렉토리를 즉시 재로드(live reload)하여 외부 CLI(`masc login` 등)가 발급한 신규 토큰을 서버 재시작 없이 수용한다.
 3. **저장소 가용성**: `.masc/auth/` 또는 credential 스토어를 읽을 수 없는 I/O 장애는 `401 Unauthorized`로 위장하지 않고 `503 Service Unavailable`을 반환해 일시적 저장소 오류와 잘못된 자격 증명을 구분한다.
-4. **만료 검사**: `expires_at` ISO 문자열 비교 (`now > exp_str`).
+4. **만료 검사**: `expires_at` 을 RFC 3339 시각으로 읽어 현재 시각과 비교한다 (`Types_auth.Credential_expiry.is_expired`).
 
 ### 7.3 인증 계층
 
@@ -519,12 +511,11 @@ credential 을 확인하므로 다른 요청처럼 센다
 
 | Role | 권한 범위 |
 |------|----------|
-| `Admin` | 모든 작업 (auth enable/disable, tool grant/revoke 포함) |
+| `Admin` | 모든 작업 (auth enable/disable 포함) |
 | `Worker` | 도구 호출, broadcast, task claim/complete |
-| `Player` | 머신/게임 레인 조작 (`CanPlayMachine`, `CanBroadcast`) |
-| `Observer` | 읽기 전용 (status, messages 조회) |
+| `Player` | 머신/게임 레인 조작 (`CanPlayMachine` 하나) |
 
-도구 인증은 per-tool required-permission 매핑을 사용하지 않는다. 알려진 내부 도구와 `masc_*` 도구는 `CanBroadcast` 이상을 요구하고, unknown external 도구명은 거부한다. 이 동작은 fail-closed 고정값이며 환경변수로 완화할 수 없다.
+도구 호출은 `Tool_catalog` 에 등록된 도구별 `required_permission` 을 요구한다. 등록되지 않은 도구 이름은 접두사와 상관없이 거부한다 (`Auth.authorize_tool_for_role`).
 
 ### 7.5 Admin 인증
 
@@ -557,7 +548,7 @@ Access-Control-Allow-Credentials: true
 ```
 
 HTTP/1.1과 HTTP/2 모두 MCP 경로(`/mcp`, `/mcp/managed`,
-`/mcp/operator`, `/sse`, `POST /`)에서 같은 typed request authority를 기준으로
+`/mcp/operator`, `/mcp/play`, `/sse`, `POST /`)에서 같은 typed request authority를 기준으로
 Origin을 비교한다. `Origin`은 `get_multi`로 정확히 한 필드만 허용하고, path,
 query, fragment, trailing bytes 없이 HTTP(S) serialized-origin 문법 전체를
 소비한다. scheme/host/effective-port가 모두 같아야 `Same_origin`이며,
@@ -610,12 +601,12 @@ cloudflared 는 origin 에 HTTP/2 를 TLS 로만 보낸다. `service: https://12
 
 1. `GET /ws`로 `enabled`, `ws_url`, `session_count`를 discovery
 2. 실제 연결은 같은 HTTP 리스너의 `GET /ws`로 HTTP 101 upgrade. token 이 필요한 workspace 에서는 업그레이드 요청에 `Authorization: Bearer` 를 싣는다
-2. WebSocket 연결 성공 후 `Sse.subscribe_external`로 broadcast 이벤트 수신 등록
-3. 인바운드 메시지: JSON-RPC 요청으로 디스패치 (현재 `on_message` callback, 기본값은 log & ignore)
-4. Ping/Pong 자동 처리
-5. 연결 종료 시 `cleanup_session`이 SSE 구독 해제 + 세션 제거
+3. WebSocket 연결 성공 후 `Sse.subscribe_external`로 broadcast 이벤트 수신 등록
+4. 인바운드 메시지: 부팅 때 `set_inbound_message_handler`로 등록한 dispatcher 가 받는다. 등록 전에 온 메시지는 경고 로그만 남긴다
+5. Ping/Pong 자동 처리
+6. 연결 종료 시 `cleanup_session`이 SSE 구독 해제 + 세션 제거
 
-WebSocket 세션은 `ws-{timestamp_ms}-{counter}` 형식 ID를 사용한다. SHA1은 httpun-ws 핸드셰이크에 Digestif.SHA1을 사용한다.
+WebSocket 세션은 `ws-{timestamp_ms}-{counter}` 형식 ID를 사용한다.
 
 ---
 
@@ -632,16 +623,14 @@ WebSocket 세션은 `ws-{timestamp_ms}-{counter}` 형식 ID를 사용한다. SHA
 ### 10.2 Service 정의
 
 ```
-Service: masc.workspace collaboration.v1.MascWorkspace
+Service: masc.workspace.v1.MascWorkspace
 
 RPCs:
-  Join(JoinRequest) -> JoinResponse            // Unary
-  Leave(LeaveRequest) -> LeaveResponse          // Unary
-  Heartbeat(HeartbeatPing) -> HeartbeatAck      // Unary
-  CallTool(ToolCallRequest) -> ToolCallResponse // Unary
-  Broadcast(BroadcastRequest) -> BroadcastResponse // Unary
-  Subscribe(SubscribeRequest) -> stream Event   // Server streaming
-  GetStatus(Empty) -> StatusResponse            // Unary
+  Heartbeat(stream HeartbeatPing) -> stream HeartbeatAck // Bidirectional streaming
+  Subscribe(SubscribeRequest) -> stream Event       // Server streaming
+  ToolCall(ToolCallRequest) -> ToolCallResponse     // Unary
+  Broadcast(BroadcastRequest) -> BroadcastResponse  // Unary
+  GetStatus(StatusRequest) -> StatusResponse        // Unary
 ```
 
 ### 10.3 Wire Format
@@ -670,7 +659,7 @@ Protobuf 바이너리를 gRPC 프레이밍으로 전송. 타입은 `proto/masc_w
 type transport_mode = Framed | LineDelimited
 ```
 
-stdin의 첫 바이트를 읽어 Content-Length 프레이밍 여부를 판단한다:
+stdin의 첫 줄을 읽어 Content-Length 프레이밍 여부를 판단한다:
 - `Content-Length:` 로 시작: `Framed` 모드 (표준 MCP)
 - 그 외: `LineDelimited` 모드 (한 줄 = 한 JSON-RPC 메시지)
 
@@ -740,10 +729,10 @@ sequenceDiagram
     alt Rate limited
         T-->>C: 429 Too Many Requests
     end
-    T->>S: register(session_id, ~push, ~last_event_id)
-    S-->>T: (client_id, event_stream, evicted_opt)
+    T->>S: register(~auth, session_id, ~last_event_id)
+    S-->>T: (client_id, delivery_stream, evicted_opt)
     T-->>C: 200 OK (Transfer-Encoding: chunked, Content-Type: text/event-stream)
-    T->>T: Event replay (get_events_after last_id)
+    T->>T: Event replay (replay_after_for_session last_id)
     T-->>C: Replayed events
 
     loop SSE Connection
@@ -765,10 +754,10 @@ sequenceDiagram
 
 1. `init_runtime_context`: Eio 환경(clock, net, proc_mgr, fs) 추출
 2. `create_server_state`: 서버 상태 생성 (Workspace config, Eio context 설정)
-3. `bootstrap_server_state`: 단일 루트 `<base-path>/.masc` Workspace 초기화, Chain bootstrap, Tool registry warm-up, 단일 루트 `.masc` JSONL pruning
-4. `bootstrap_keepers`: Keeper 에이전트 부트스트랩
-6. `start_background_maintenance`: 주기적 cleanup fiber 시작
-7. HTTP 서버 listen 시작
+3. `bootstrap_server_state_blocking`: 단일 루트 `<base-path>/.masc` Workspace 초기화(`Workspace.init`), SSE broadcast callback 연결
+4. `claim_and_start_keeper_persistence`: Keeper loop 시작(`Server_bootstrap_loops.start_keeper_loops`)
+5. `start_background_maintenance`: 주기적 cleanup fiber 시작
+6. HTTP 서버 listen 시작
 
 ### 14.1 Graceful Shutdown
 
@@ -778,12 +767,8 @@ sequenceDiagram
 2. `Shutdown_hooks.run_all()` 실행 (orchestrator 취소, SSE 닫기 등)
 3. `Board_dispatch.flush()` (dirty 데이터 저장)
 4. `close_all_sse_connections()`
-5. `Eio.Switch.fail sw Shutdown` -> Switch 종료
-6. 5초 타임아웃 후 강제 종료 (별도 Thread)
-
-### 14.2 Port Bind Retry
-
-포트 사용 중(`EADDRINUSE`)이면 exponential backoff로 최대 5회 재시도한다 (`2^attempt` 초, 최대 30초).
+5. `Graceful_shutdown` 예외로 switch 를 끝내 남은 background fiber 를 취소한다
+6. `force_timeout_s`(기본 10초)가 지나면 별도 Thread 의 watchdog 이 exit code 124 로 강제 종료한다 (`Shutdown.start_process_deadline_watchdog`)
 
 ---
 
@@ -847,7 +832,7 @@ sequenceDiagram
 
 ## 17. Invariants
 
-**INV-SERVER-001**: HTTP/1.1 서버는 항상 활성. H2와 gRPC는 opt-in(`MASC_USE_H2=auto|1`, `MASC_GRPC_ENABLED=1`)이고, WS는 default-on이며 `MASC_WS_ENABLED=0`일 때만 비활성화된다.
+**INV-SERVER-001**: cleartext 리스너는 기본(`MASC_USE_H2=auto`)으로 HTTP/1.1과 h2c를 함께 받는다. `1`/`h2_only`는 HTTP/2만, `0`/`h1_only`는 HTTP/1.1만 받는다. gRPC는 `MASC_GRPC_ENABLED=1`일 때만 뜨고, WS는 default-on이며 `MASC_WS_ENABLED=0`일 때만 비활성화된다.
 
 **INV-SERVER-002**: 모든 MCP POST 요청은 `initialize`/`ping` 제외 `Mcp-Session-Id` 헤더 필수. 없으면 `validate_session_requirement`가 거부한다.
 
@@ -857,7 +842,7 @@ sequenceDiagram
 
 **INV-SERVER-005**: SSE broadcast는 registry에 global write-lock을 잡지 않는다. Read snapshot -> per-client stream add -> external subscriber notify 순서.
 
-**INV-SERVER-006**: `Sse.register`가 `max_clients` (200) 도달 시 oldest client를 evict한다. 신규 client 등록은 항상 성공한다.
+**INV-SERVER-006**: `Sse.register`가 `max_clients` (200) 도달 시 oldest client를 evict하고 새 client를 받는다. 토큰·세션 검증에 실패한 등록은 `registration_error`로 거절한다.
 
 **INV-SERVER-007**: SSE event ID는 `Atomic.fetch_and_add`로 단조 증가한다. 동일 ID가 두 번 발급되지 않는다.
 
@@ -867,7 +852,7 @@ sequenceDiagram
 
 **INV-SERVER-010**: WebSocket/gRPC는 `Sse.subscribe_external`로 broadcast를 수신한다. SSE 레지스트리와 독립적인 세션 관리를 유지하면서 이벤트 통합은 external subscriber hook으로 달성한다.
 
-**INV-SERVER-011**: SIGTERM/SIGINT 수신 시 5초 내 graceful shutdown. 타임아웃 초과 시 `exit 1`. Shutdown notification이 모든 SSE 클라이언트에 broadcast된 후 종료한다.
+**INV-SERVER-011**: SIGTERM/SIGINT 수신 시 `force_timeout_s`(기본 10초) 안에 graceful shutdown을 마친다. 넘기면 exit code 124로 끝낸다. Shutdown notification이 모든 SSE 클라이언트에 broadcast된 후 종료한다.
 
 **INV-SERVER-012**: Admin 전용 HTTP 경로는 workspace auth enabled·`require_token=true`와 유효한 저장된 bearer credential의 `CanAdmin` 권한을 요구한다. `MASC_ADMIN_TOKEN` 미설정은 이 검증을 해제하지 않는다.
 
@@ -885,13 +870,12 @@ sequenceDiagram
 | `mcp_server_eio_call_tool.ml` | 도구 호출 래퍼 |
 | `mcp_server_eio_tool_profile.ml` | Profile별 도구 필터링 |
 | `mcp_server_eio_resource.ml` | MCP Resource/Prompt 핸들러 |
-| `server_routes_http_routes_dashboard.ml` | 대시보드 라우트 |
-| `server_routes_http_routes_keeper_gate.ml` | Keeper Gate 대시보드 라우트 |
 | `sse.ml` | SSE event registry + broadcast |
-| `keeper_event_bridge.ml` | Agent Core Event_bus -> SSE 이벤트 브릿지 |
+| `keeper/keeper_event_bridge.ml` | Agent Core Event_bus -> SSE 이벤트 브릿지 |
 | `transport.ml` | 프로토콜 바인딩 추상화 + OpenAPI 생성 |
 | `http_server_eio.ml` | httpun-eio 래퍼 (Router, Compression) |
-| `auth.ml` | 인증/인가 코어 |
+| `auth/auth.ml` | 인증/인가 코어 |
+| `server_utils.ml` | 공용 유틸리티 |
 
 ### 18.2 Server Sub-library (lib/server/)
 
@@ -903,13 +887,14 @@ sequenceDiagram
 | `server_mcp_transport_http_conn.ml` | SSE 연결 registry + rate limiter |
 | `server_mcp_transport_http_headers.ml` | HTTP 헤더 유틸리티 |
 | `server_mcp_transport_http_protocol.ml` | 프로토콜 버전/세션 유효성 |
-| `server_h2_gateway.ml` | HTTP/2 게이트웨이 (전체 라우팅) |
-| `server_h2_gateway_routes_extra.ml` | H2 추가 라우트 |
+| `server_h2_gateway.ml` | HTTP/2 연결 어댑터 |
+| `server_http_ingress.ml` | HTTP/1.1·HTTP/2 공용 입구 |
 | `server_mcp_transport_ws.ml` | WebSocket 트랜스포트 |
 | `server_auth.ml` | HTTP 레벨 인증/권한 |
 | `server_routes_http.ml` | 라우트 조립 진입점 |
+| `server_routes_http_routes_dashboard.ml` | 대시보드 라우트 |
+| `server_routes_http_routes_keeper_gate.ml` | Keeper Gate 대시보드 라우트 |
 | `server_dashboard_http.ml` | Dashboard API 핸들러 |
-| `server_utils.ml` | 공용 유틸리티 |
 
 ### 18.3 gRPC
 
@@ -919,7 +904,7 @@ sequenceDiagram
 | `lib/server/masc_grpc_service.ml` | gRPC 서비스 핸들러 |
 | `lib/server/masc_grpc_server.ml` | gRPC 서버 시작 |
 | `lib/server/masc_grpc_client.ml` | gRPC 클라이언트 |
-| `lib/config/masc_grpc_transport.ml` | 트랜스포트 선택 로직 |
+| `lib/config/masc_grpc_transport.ml` | transport 값 정의 (§3.1) |
 
 ---
 
@@ -930,8 +915,6 @@ sequenceDiagram
 | MCP Specification | https://modelcontextprotocol.io/specification |
 | httpun-eio | https://github.com/anmonteiro/httpun |
 | h2-eio | https://github.com/anmonteiro/ocaml-h2 |
-| httpun-ws | https://github.com/anmonteiro/httpun-ws |
 | grpc-direct | `workspace/yousleepwhen/grpc-direct` |
 | Cloudflare Tunnel | `docs/spec/01-system-overview.md` |
 | README quickstart | `README.md#start-here` |
-| 02-types-and-invariants | `docs/spec/02-types-and-invariants.md` |

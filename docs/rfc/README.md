@@ -32,14 +32,6 @@ related: []                        # 직접 참조하는 현재 RFC slug. 없으
 |---|---|
 | `Draft` | 작성 중. 본문/PR 변경 가능. 구현 시작 전 또는 spec 합의 미완. |
 | `Active` | spec 머지 완료, 구현이 진행 중인 RFC. 일부 Phase 가 main 에 들어갔으나 전체 closeout 미완. |
-| `Implemented` | 모든 Phase 가 main 에 머지 완료. 명시적 `docs(rfc): ... closeout` commit 또는 본문 *Implementation summary* 섹션이 있어야 한다. |
-| `Superseded` | 다른 RFC 가 이 자리를 대신한다. `superseded_by` 에 그 slug 를 적는다 — 비워두면 읽는 사람이 대신할 것을 찾을 데가 없다. |
-| `Dropped` | 하지 않기로 했다. 본문에 왜인지 적는다. 대신할 것이 없으므로 `superseded_by` 는 비운다. |
-
-`Dropped` 가 있어야 하는 이유: 이 값이 없으면 포기한 RFC 가 `Draft` 로 남는다.
-`Draft` 는 "아직 안 썼다" 이고 포기는 "안 쓴다" 인데, 인덱스에서 둘이 같은
-글자로 보인다. 2026-08-25 에 그 혼동으로 계획 하나가 잘못 쓰였다 — 살아있는
-RFC 를 죽은 것으로 읽었고, 되돌리는 데 한 라운드가 들었다.
 
 ## RFC 목록
 

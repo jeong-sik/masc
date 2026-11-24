@@ -568,7 +568,7 @@ Keeper의 `sandbox_image`로 지정합니다.
 ## 초기 프롬프트·skills·Keeper
 
 기본 설치는 **자동 시작하지 않는 Keeper `imp` 1명**과 내장 스킬
-`browser-lanes`, `browser-live-follow-read`, `browser-navigate-read`,
+`browser-lanes`, `browser-live-follow-read`,
 `diagram-in-chat`, `evidence-review`, `frontend-change`, `lane-addon-author`,
 `observe-act-verify`, `prior-art`, `root-cause-first`, `skill-authoring`,
 `verify-before-claiming-done`, `work-intake`를 준비합니다.
@@ -682,7 +682,7 @@ Goal 등)은 정리할 때까지 비어 있거나 오류를 반환합니다.
 `Release` workflow는 네 native target을 모두 필수로 빌드하고, checksum을
 사용하는 `file://` 설치 → config seed → 설치된 서버 health → 대시보드 검증을
 수행합니다. Linux는 OCaml 개발 환경이 없는 새 Ubuntu container에서도 같은
-설치를 실행합니다. TUI와 browser host의 `--help`로 동적 로더가 동작하는지도 확인합니다.
+설치를 실행합니다. TUI의 `--help`로 동적 로더가 동작하는지도 확인합니다.
 Linux native runner에서는 설치된 실행 파일로 새 Keeper를 생성하고 로컬 모델
 fixture가 요청한 도구를 실제 Docker에서 실행하는 첫 턴 검증도 수행합니다.
 ToolResult가 다음 모델 요청으로 돌아오고 host 파일과 durable checkpoint가

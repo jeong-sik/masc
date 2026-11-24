@@ -159,14 +159,9 @@ curl -fsS -X POST -H "Authorization: Bearer $TOKEN" \
   "http://127.0.0.1:8935/api/v1/keepers/$KEEPER/directive"
 ```
 
-The nonce is the lane's durable owner generation and fences concurrent
-operators. Read it from the typed trajectory projection instead of guessing. A
-stale value fails closed and reports the current value in the error
-(`expected 0, actual 1`) — refresh the projection and retry once with the same
-stable operation ID; do not brute-force. A `committed` response with
-`projection=committed_followup_failed` still lifts the pause; the follow-up
-failure is a separate projection concern and was observed to leave the lane
-cycling normally.
+A `committed` response with `projection=committed_followup_failed` still lifts
+the pause; the follow-up failure is a separate projection concern and was
+observed to leave the lane cycling normally.
 
 Known open item: user-block base64 images are outside both rules (garnet carries
 2.46MB of PNG payload, 77% of its checkpoint — #25542); an image rule needs

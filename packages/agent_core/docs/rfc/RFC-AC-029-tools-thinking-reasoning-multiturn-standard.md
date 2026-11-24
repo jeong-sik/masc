@@ -5,7 +5,7 @@
 | Status | Draft |
 | Author | jeong-sik (audit: adversarial multi-agent sweep, 2026-06-29) |
 | Created | 2026-06-29 |
-| Target | `agent_sdk` (agent_core) — `lib/llm_provider/`, `lib/api_*.ml` and `lib/streaming.ml` (removed 2026-07-21; see `lib/llm_provider/`), `lib/*tool*.ml`, `docs/design/provider-reasoning-dialects.md` |
+| Target | `agent_sdk` (agent_core) — `lib/llm_provider/`, `lib/*tool*.ml`, `docs/design/provider-reasoning-dialects.md` |
 | Keystone dependency | RFC-AC-023 (capability axis reshape) — the GLM/MiniMax dialect work lands there; see §5 |
 | Supplements | RFC-AC-018 (catalog externalization), RFC-AC-025 (forced-tool-use enforcement boundary) |
 | Boundary | agent_core exposes typed provider facts; MASC consumes them. agent_core MUST NOT depend on MASC. See §6 |
@@ -158,7 +158,7 @@ Full per-finding verify reasoning and source URLs: audit artifact `wf_ad6e7c0c-a
 표준을 사람의 선의에 맡기지 않는다. 메커니즘:
 
 1. **Compiler** — S1.3/S1.4/S6.1/S7.1은 closed sum + exhaustive match로 표현. 새 variant/format이 컴파일을 깨야 한다. S2.1 also needs a uniqueness gate while duplicate builders remain. (`_ -> ...` catch-all 추가는 CLAUDE.md 워크어라운드 체크리스트 4번에 걸린다.)
-2. **CI grep gate** — S1.1/S2.2/S3.1: classifier 함수 밖의 model-name `String.starts_with`/raw threshold literal/`is_glm_request` 패턴을 거부하는 grep 단계를 `.github/workflows/ci.yml`에 추가. Grep은 우회 가능한 regression backstop일 뿐이며, durable proof는 raw model string matching이 parse boundary 밖에서 필요 없거나 표현 불가능해지는 typed family/capability classifier다. S2.2 raw budget-threshold drift is checked by `scripts/check-reasoning-effort-ssot.sh` (`Reasoning Effort SSOT Gate`). S1.1/S3.1 gates remain required follow-ups.
+2. **CI grep gate** — S1.1/S2.2/S3.1: classifier 함수 밖의 model-name `String.starts_with`/raw threshold literal/`is_glm_request` 패턴을 거부하는 grep 단계를 `.github/workflows/ci.yml`에 추가. Grep은 우회 가능한 regression backstop일 뿐이며, durable proof는 raw model string matching이 parse boundary 밖에서 필요 없거나 표현 불가능해지는 typed family/capability classifier다. S1.1/S2.2/S3.1 gates remain required follow-ups.
 3. **Non-vacuous test** — S5.2/S6.2/S8.1/S9.3: revert 시 red 되는 테스트. (예: `supports_tool_choice=false`인 GLM 요청 body에 `tool_choice`가 없음을 단언; unknown JSON Schema `type`가 permissive wildcard로 돌아가면 `test_schema_validation_unknown_type_fails_closed`가 실패.)
 4. **Workaround-signature gate (planned)** — §5의 remediation을 그 workaround twin으로 구현하는 PR은 a future repo-versioned RFC gate에 걸려 거부돼야 한다. This RFC does **not** check in `scripts/ci/pr-rfc-check.sh`; until that lands, this rule is Advisory/reviewer-enforced. counter-as-fix / string-classifier 보강 / N-of-M / cap-cooldown-dedup-repair 금지.
 
@@ -181,7 +181,7 @@ RFC 컬럼: **RFC** = dialect/capability *type shape* 변경 또는 N-of-M resha
    the record shape.
 
 ### 미뤄도 안전 (latent, 현재 배포 모델 트리거 없음) — typed cleanup으로 batch
-- `D2-budget-to-effort-triplicated`, `D5-anthropic-thinkmode-hardcoded-prefix-table`, `D4-provider-preset-stale-numeric-limits` (SSOT/hardcode 부채; 현재 값이 일치해 active break 없음 — catalog-field RFC로 fold). D2's raw threshold-literal regression surface is now guarded by `scripts/check-reasoning-effort-ssot.sh`; provider-specific alias cleanup remains separate.
+- `D2-budget-to-effort-triplicated`, `D5-anthropic-thinkmode-hardcoded-prefix-table`, `D4-provider-preset-stale-numeric-limits` (SSOT/hardcode 부채; 현재 값이 일치해 active break 없음 — catalog-field RFC로 fold).
 - **Partially closed before this RFC update (do not redo wholesale)**: `D3-finalize` already has the `block_kind` conversion, explicit `Unknown_block` handling, and typed `SSEUnknownEventType`/parse-error propagation in `Complete_stream_acc`; keep only the residual policy/test work listed above.
 - **Closed before this RFC update (do not redo)**: `D-TOOLS-1` and `D-TOOLS-8` were removed with the entire recovery module; no provider-gated text-to-tool fallback remains. The standalone `D3-tool-pair-silent-drop` repair/filter module was also deleted. `D-TOOLS-6` now delegates through the typed agent-tool path, and `D-TOOLS-9` rejects unknown harness schema types. These rows remain historical evidence, not open backlog.
 - **Direct, RFC 불필요, 저위험 (언제든)**: `D4-test-only-normalize-effort-wrapper` should be narrowed to any truly dead wrapper only; keep `Reasoning_dialect.normalize_effort_value`, which is a live backend dependency required by S2.2. Also: `D7-anthropic-prefix-list-literal-duplicates`(dedupe), `D8-manifest-precedence` 문서/테스트, Kimi visibility 사실.
@@ -196,9 +196,7 @@ telemetry gate나 lenient repair를 추가하지 말고, `Text` → `ToolUse` �
 
 ## 6. Boundary note (agent_core ↔ MASC)
 
-경계는 대체로 올바르다: MASC는 `Llm_provider.Capabilities`를 typed로 직접 소비하고(`runtime_wire_overlay.ml: agent_capabilities_of_llm_capabilities`가 agent_core variant를 verbatim 통과) model 이름 string-match로 reasoning을 결정하지 않는다. OAS는 MASC를 모른다.
-
-단 하나의 경계 부채(MASC측, 정보용): `masc lib/runtime/runtime_schema.ml`이 자체 `thinking_control_format`를 **재선언(5/8 variant, `Thinking_object_adaptive`/`Thinking_object_only`/`Ollama_think` 누락)** 한다. parse는 unknown에서 fail-closed(silent 아님)지만, OAS에 새 variant가 추가돼도 MASC 컴파일이 깨지지 않아 drift 무방비다. 게다가 그 필드는 wire 경로에서 읽히지 않아 운영자 TOML 설정이 inert no-op(의도-침묵)이다. **P2 SSOT 부채(데이터 경로는 안전).** 해결: 필드 삭제(agent_core catalog가 단일 SSOT) 또는 agent_core variant 집합에 대한 exhaustive drift 테스트. 이는 agent_core 변경이 아니라 MASC 후속 작업이며, 본 RFC의 S9.1을 경계 너머로 확장한 사례로 기록한다. Tracking issue: [jeong-sik/masc#22654](https://github.com/jeong-sik/masc/issues/22654).
+경계는 대체로 올바르다: MASC는 `Llm_provider.Capabilities`를 typed로 직접 소비하고 model 이름 string-match로 reasoning을 결정하지 않는다. OAS는 MASC를 모른다.
 
 ## 7. Relationships
 - **RFC-AC-023** (capability axis reshape) — GLM/MiniMax dialect 작업과 model×transport two-record가 여기 land. 본 RFC는 그 작업이 만족해야 할 표준을 정의한다.
@@ -266,10 +264,8 @@ Official documents reread on 2026-10-24:
   full content block list; Chat replay preserves reasoning and tool-call fields.
 
 This establishes a replay requirement, not proof that the current catalog,
-parser and serializer satisfy it for every named model. #27924 remains open for
-model/protocol-specific conformance fixtures that carry these fields through
-production parse → history → request paths. The OpenAI phase portion is already
-implemented and must not be repeated as unfinished work.
+parser and serializer satisfy it for every named model. The OpenAI phase portion
+is already implemented and must not be repeated as unfinished work.
 
 The inline carrier repair #45772 and native Chat activation #45859 are merged.
 Original scalar content has a typed wire witness across sync/SSE, persistence,
@@ -289,5 +285,5 @@ from #46035. The current decoder preserves content-only reasoning; the shipped
 
 The 2026-10-25 binding run covered 42 selected cases on its executed source, not
 vendor HTTP or a full Agent restart. Chat tool-choice support and exact M2
-Responses availability still need endpoint evidence. These residuals keep #27924 open; they are not missing sync/SSE
-implementations to recreate.
+Responses availability still need endpoint evidence. These residuals are not
+missing sync/SSE implementations to recreate.

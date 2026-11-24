@@ -132,38 +132,15 @@ leaves that attribution `not_established`. A full comparison across runtimes,
 long-running server restarts and isolated Memory/W treatments needs
 additional experiments.
 
-## Read the same observations in TUI
+## The compact view
 
 Each save also writes a compact `view.json`, identifying the authoritative
 `report.json` by path and SHA-256. It carries the binary and harness identity,
 timeline, W counts, Memory readiness, replies and raw semantic probabilities with the actual judge model. Missing W remains unknown;
 recorded capture, successful operation and semantic judgment are distinct.
 
-Publish that selected view through the existing Admin artifact API and open
-`/measurement <artifact-sha256>` in the matching candidate TUI. For example,
-using an authenticated HTTP client, POST the raw UTF-8 `view.json` bytes to
-`/api/v1/artifacts`; use the returned content SHA rather than the full report's
-SHA. The reader verifies the envelope's bytes and digest, then decodes the
-temporal view schema. Selecting another artifact or leaving the view rejects late
-responses through the existing ownership/generation checks.
-
-The left pane identifies source and limits; the right pane shows each message
-and lane restart with its turn, operation, W, original reply and judgments.
-`report.md` remains a readable file view. None of these views become scheduling
-or history-retirement authority. The blob is a selected immutable copy; retain
-the original private report and raw directory independently.
-
-## Validate the harness boundary
-
-```bash
-python3 -m unittest discover -s scripts/tests -p test_keeper_temporal_continuity.py -v
-pyright --outputjson scripts/harness/workload/keeper_temporal_continuity.py scripts/tests/test_keeper_temporal_continuity.py
-ruff check scripts/harness/workload/keeper_temporal_continuity.py scripts/tests/test_keeper_temporal_continuity.py
-```
-
-These are HTTP/MCP fixture tests of the collector and judge protocol. They do not
-execute real models. Retain real-run output separately under `artifacts/` and
-select private-data-free evidence intentionally before publication.
+`report.md` is a readable file view. Neither view is a scheduling or
+history-retirement authority.
 
 ## Prior-art boundaries
 

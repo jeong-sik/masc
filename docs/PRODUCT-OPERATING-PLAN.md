@@ -71,8 +71,8 @@ repository labels and the SSOT.
 
 | Axis | Cardinality | Values |
 |------|-------------|--------|
-| `kind` | exactly one | `defect` `gap` `capability` `erosion` `inquiry` `refactor` `test` `docs` |
-| `area` | exactly one | `turn` `continuity` `collab` `goal-task` `verification` `tools` `runtime` `transport` `dashboard` `connector` `observability` `persistence` `ci` `keeper` |
+| `kind` | exactly one | `defect` `gap` `capability` `erosion` `inquiry` |
+| `area` | exactly one | `turn` `continuity` `collab` `goal-task` `verification` `tools` `runtime` `transport` `dashboard` `connector` `observability` `persistence` `ci` |
 | `impact` | exactly one | `breaks-continuity` `breaks-collab` `blinds-operator` `degrades` `internal` |
 | `root` | zero or more | `ssot` `silent` `string` `variant` `boundary` `telemetry` `det` `ndt` |
 | `must-do` | flag | `true` when the product promise is broken right now |
@@ -141,7 +141,7 @@ Each PR should link at least one issue and state which promise it affects:
 - `0.y.z` releases stabilize the current promise only
 - `1.0.0` stays reserved until the front-door promise is trustworthy without release-truth caveats
 - do not tag with open `must-do` issues
-- do not tag if version truth is broken across `dune-project`, `masc.opam`, `ROADMAP.md`, and `CHANGELOG.md`
+- do not tag if version truth is broken across `dune-project`, `masc.opam`, and `CHANGELOG.md`
 
 ## 6-8 Week Tracks
 

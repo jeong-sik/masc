@@ -30,7 +30,7 @@ The key distinction is:
 | `<base_path>/.masc/config/runtime.toml` | startup env seeding for `MASC_KEEPER_*` and WebSearch knobs | server bootstrap before env-backed consumers initialize | none | `boot_static` | values are recorded in a process-local boot override store; edits require restart |
 | `<resolved-config-root>/keepers/*.toml` | declarative keeper profile defaults | keeper create/up, explicit keeper operations, supervisor reconcile | next supervisor sweep or next keeper create/up | `sweep_dynamic` | running keepers re-sync declarative fields; no standalone file watcher |
 | `<resolved-config-root>/lane-addons/*.toml` | declarative observer installations | independent Lane configuration Pulse | startup, existing maintenance cadence, and owned worker cleanup | `maintenance_dynamic` | malformed declarations preserve their applied installations; complete removal detaches the owned worker and preserves history |
-| `<resolved-config-root>/runtime.toml` | runtime catalog: providers, models (`preserve-thinking`, `thinking-support`, ...), bindings, lanes | server bootstrap (`Runtime.init_default_*`); `POST /api/v1/runtime/setup/resume` (CanAdmin); a committed write through `POST /api/v1/runtime/config/raw`, `/config/routing`, or `/config/assignment` | process restart, the setup resume request, or a committed write | `boot_static` | a hand edit to a model row is not read by a running server until restart or the resume request (2026-11-06, #49298); the resume request re-reads the file and replaces the loaded catalog; a committed write publishes the text it wrote; invalid TOML blocks the runtime load; `runtime.json` is retired |
+| `<resolved-config-root>/runtime.toml` | runtime catalog: providers, models (`preserve-thinking`, `thinking-support`, ...), bindings, lanes | server bootstrap (`Runtime.init_default_*`); `POST /api/v1/runtime/setup/resume` (CanAdmin); a committed write through `POST /api/v1/runtime/config/raw`, `/config/routing`, or `/config/assignment` | process restart, the setup resume request, or a committed write | `boot_static` | a hand edit to a model row is not read by a running server until restart or the resume request (2026-11-06, #49298); the resume request re-reads the file and replaces the loaded catalog; a committed write publishes the text it wrote; invalid TOML blocks the runtime load |
 | `<resolved-config-root>/runtime.toml` `[fusion]` | fusion policy | `masc_fusion` handler (`Fusion_config_loader.load`) | next `masc_fusion` request | `request_dynamic` | invalid TOML blocks the fusion policy load |
 | `<resolved-config-root>/candle.toml` | explicit Candle payout policy and portrait accessory prices | each Candle request (`Candle_config.load`) | next request | `request_dynamic` | no file means off; enabling requires the complete [payout policy](guides/candle-payout-policy.md), including nonempty grade amounts and matching criteria, explicit sharing/tie/deduction rounding policies and half_life; optional `shop.prices_milli` entries use canonical Item ids, and omitted prices stay Unpriced; empty, incomplete, unreadable, malformed, unknown-key or overflowing policies disable Candle with a reason without stopping the server |
 
@@ -126,9 +126,7 @@ Operational meaning:
   `masc_fusion` handler time. Fusion edits therefore take effect on the next
   `masc_fusion` request, including `staged_judge_group_size`, and invalid
   `[fusion]` config fails that request closed.
-- `max_concurrent_panels` and `max_concurrent_judges` are retired. They never
-  controlled execution and must be removed from authored TOML; configured
-  model identities define the exact Fusion fan-out set.
+- Configured model identities define the exact Fusion fan-out set.
 - `[maintenance]` is also read from this file, by
   `Server_maintenance_toml_config.resolve_retention_days` at each JSONL
   prune. Retention edits therefore take effect on the next prune without a

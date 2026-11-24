@@ -291,8 +291,8 @@ section's keeper mapping and default. The fallback endpoint resolves the same
 keeper against its own mapping, so an ElevenLabs id is not reused for an OpenAI
 voice when both endpoints declare their voice vocabulary.
 
-Endpoint keeper mappings are edited in the file. The setup pane preserves
-them when updating an endpoint and shows them in its configuration response.
+Endpoint keeper mappings are edited in the file. A setup save preserves
+them when updating an endpoint.
 
 `--agent` is the check for a mapping. `say` answers a name it does not have by
 speaking in another voice and exiting 0, so the audio cannot show that a
@@ -582,20 +582,6 @@ A configuring surface can set it, which is the point of it living here:
 through `POST /api/v1/voice/setup` — the same revision-guarded writer every
 other voice change goes through. The TUI reads it when it starts.
 
-It sends from whichever editor holds the draft. Measured with `masc_tui` on the
-workspace from [Talking to imp, measured](#talking-to-imp-measured), `imp`
-booted, the `rec` stand-in speaking `말을 마치면 바로 보내지는지 봅니다.`, keys
-`2`, Enter on `imp`, `m`, `Ctrl-Y`:
-
-| | |
-|---|---|
-| the transcript appears | 10.1s after `Ctrl-Y` |
-| `▶ YOU 말을 마치면 바로 보내지는지 봅니다.` in the chat | the same redraw — nothing pressed |
-| imp's first reply on screen | 41.3s after `Ctrl-Y` |
-
-From the composer row under any other surface (`i`, then `Ctrl-Y`) it sends the
-same way, and the chat pane comes forward as it does for Enter.
-
 `[voice.tts]` and `[voice.stt]` are optional. Absent, the speak and transcribe
 paths refuse by name before any endpoint is asked. Every endpoint that is asked
 for a model — every kind except `macos_say` — must have one: its own `model`, or
@@ -624,7 +610,7 @@ capture after a change is what refuses, and each says so in its own words:
 | Path | Refusal |
 |---|---|
 | speak, transcribe | `voice config load failed: <reason>` |
-| capture (TUI `Ctrl-Y`, `keeper_voice_listen`) | `voice config is invalid, so no capture was started: <reason>` |
+| capture (TUI Push-to-Talk, `keeper_voice_listen`) | `voice config is invalid, so no capture was started: <reason>` |
 | `keeper_voice_speak` | `<reason>` itself, as the tool's error `message`, from the one read that decided the Gate route. The Gate is not asked to review a speak that cannot reach a provider |
 | `GET /api/v1/voice/config` | 500 carrying the reason, at any time |
 
@@ -794,7 +780,7 @@ it agrees with sox to six decimal places on a finished file.
 
 ### What a capture answers
 
-Every capture — `Ctrl-Y` in the TUI and `keeper_voice_listen` — returns one
+Every capture — Push-to-Talk in the TUI and `keeper_voice_listen` — returns one
 JSON object whose `status` is one of three words, spelled in
 `Voice_bridge.capture_status` and read back by `capture_outcome_of_json`:
 
@@ -811,99 +797,8 @@ silence.
 
 ## TUI
 
-`Ctrl-Y` in a focused composer row starts a capture, and pressing it again
-stops one, keeping what was said up to that point -- the usual reason to stop
-is that the sentence is finished and the trailing-silence wait is two seconds
-away. `Esc` discards the recording instead, which is the only place in the
-capture path where the operator says what they want rather than the levels
-inferring it; after speech the result is `discarded`, so the transcript says a
-sentence was thrown away rather than that nothing was heard. Either key before
-any speech aborts and yields `no_audio`, so reaching for the wrong one costs
-nothing. The transcript is appended to the
-draft, not sent. A meter runs in the prompt while it records, because a
-dead input device and a quiet room both end as an empty draft and nothing else
-separates them.
-
-The binding is a control code because every printable key in a focused row is
-draft text.
-
-The chat pane binds the same keys, and its help sheet (`…?`) lists `Ctrl-Y`
-and `Ctrl-A`.
-
-On macOS the terminal claims Ctrl-Y for itself as the delayed-suspend key
-(`stty -a` shows `dsusp = ^Y`). The TUI turns that off while it owns the
-terminal and gives it back on exit and around Ctrl-Z, the same way it takes
-Ctrl-V and Ctrl-O.
-
-### One sentence into the chat, measured
-
-`masc_tui` on a workspace whose only STT endpoint is `whisper_cli`, in a
-120×40 pty, with `rec` and `play` replaced by scripts. The `rec` stand-in wrote
-0.8s of room noise, then a 2.0s `say -v Yuna` sentence at real-time rate, then
-room noise until stopped, and `play` only recorded its arguments. Keys: `2`,
-Enter on `imp`, `m`, `Ctrl-Y`.
-
-| What happened | When |
-|---|---|
-| `play -qn synth 0.15 sine 880` | as `Ctrl-Y` landed |
-| `rec` started | same second |
-| the prompt's meter | `-63 dB` on room noise, `-26 dB` on the sentence, `^Y send · Esc discard` beside it |
-| `rec` stopped | after 5.1–5.2s of audio: the sentence ended at 2.8s and the trailing-silence wait is 2.0s |
-| `play -qn synth 0.15 sine 440` | as it stopped |
-| `> 마이크로 보낸 새 질문입니다.` in the draft, and `voice: 마이크로 보낸 새 질문입니다.` in the footer | 19.0s, 10.0s and 10.0s after `Ctrl-Y`, three runs |
-
-The sentence came back as spoken. It stays a draft until Enter, unless
-`send_on_stop` is on.
-
-### Speaking without touching the keyboard
-
-`Ctrl-Y` records one sentence and appends the transcript to the draft. The
-mode that lets a conversation run is a different key:
-
-| Key | What it does |
-|---|---|
-| `Ctrl-Y` | start a capture; press again to stop and keep what was said |
-| `Ctrl-A` | continuous mode on/off — after each capture settles, the next one starts |
-| `Esc` | discard a running capture (the draft keeps what was there before) |
-
-Continuous mode measures the room's noise floor **once** when it turns on,
-which is what keeps the gap between sentences short enough to speak across; it
-measures again if the mode is turned off and on in a different room. Silence
-re-arms too, so a pause longer than the trailing-silence window does not end
-the mode. Only the key that started it ends it.
-
-Both are control codes rather than letters because every printable key in a
-focused composer row is draft text.
-
-That still leaves an Enter per sentence. `[voice.stt] send_on_stop` removes
-it: ending a capture hands the draft to the same send path Enter uses. Off by
-default, and described under Configuration above.
-
-### A conversation left running, measured
-
-`Ctrl-A` in imp's chat pane with `send_on_stop` on, the `rec` stand-in saying
-`연속 모드에서 두 번째 문장입니다.` (2.4s after 0.8s of room noise) every time it
-was started, for 60s, then `Ctrl-A` again:
-
-| | |
-|---|---|
-| the noise-floor probe | 0.5s, once, before the first capture |
-| captures in 60s | 6, each stopped after 5.5–5.6s of audio |
-| from one capture's start to the next | 10.5s, 11.6s, 11.3s, 12.9s, 11.5s |
-| the first sentence | sent at once; imp's turn took 32s |
-| the two sentences said during that turn | held in the TUI as one `NEXT 1`, joined by a newline, and sent as one message when the turn ended |
-| the three said during the next turn | held as `NEXT 1` behind it |
-| the second `Ctrl-A` | ended the mode after the capture in progress; no capture started after it |
-
-A message held behind a running turn is in the TUI, not at the server — the
-chat pane says `1 message waiting in this TUI; not sent to the server yet`.
-Closing the TUI drops it: the three sentences above were not sent and were not
-there when the TUI was opened again. The first `q` says so before the second
-one quits, count first:
-
-```
-q: 1 unsent message is dropped if you press again to quit, or any other key to stay
-```
+Push-to-Talk keys and playback are in
+[TUI-GUIDE.md](TUI-GUIDE.md#themes-language-and-voice).
 
 ## External devices
 
@@ -990,8 +885,8 @@ masc voice-verify --audio probe.wav
 
 ### What a working workstation answered
 
-Measured 2026-09-12 on one workstation (M3 Max, macOS) with
-`scripts/whisper-server.sh start` running:
+Measured 2026-09-12 on one workstation (M3 Max, macOS) with a local whisper
+server running:
 
 ```
 tts
@@ -1225,55 +1120,10 @@ variable holding the provider's key — never a value, because `runtime.toml`
 is committed. It carries no address and no command path: a route cannot check
 where one points, so the read uses the kind's own destination.
 
-## Setting voice up from the TUI
+### What a setup save does
 
-`p` until the pane strip reaches voice, then `e`.
-
-The pane itself reads two routes. `/api/v1/voice/config` is public and answers
-whether things load; `/api/v1/voice/setup` is admin-gated and names each
-endpoint, so the pane lists them by id, kind and address. A chain that has
-quietly gone dead looks healthy in the first and is visible in the second.
-
-### The questions
-
-| Step | Asked when |
-|---|---|
-| side | always — speech out or speech in |
-| provider | always |
-| name | always — how the entry is addressed later |
-| address | not for ElevenLabs, which carries its own, and not for a command |
-| credential variable | not for an MCP tool, and not for a command |
-| model | always except `say`, which takes a voice instead |
-| voice | speech out only |
-| review | always |
-
-Each side offers a command kind first: `say` for speech out, `whisper-cli` for
-speech in. They lead because they are the two entries with no address and no
-key to arrange — what they cost is whether the command is on the machine. The
-wizard leaves the command path unset so each runs the name it is normally
-installed under; pointing one at a binary `PATH` does not carry is an edit to
-`runtime.toml`.
-
-For `whisper-cli` the model is the **path of the ggml file it loads**, not a
-name a provider looks up. The two readings cannot share one string, which is
-why the model is written on the endpoint rather than on the section.
-
-`enter` moves forward, `up` moves back, `esc` leaves without writing. The side
-and the provider walk on `←` / `→` / space, because both are closed sets;
-everything else is typed. `ctrl-u` clears a field.
-
-Two blanks are real answers rather than unfinished ones:
-
-- **a blank credential variable** sends no Authorization header, which is what a
-  local server that never asked for one answers 200 to;
-- **a blank address** offers the addresses a local server usually listens on, as
-  starting points. The wizard cannot tell what is running on a port — the probe
-  decides that.
-
-### What saving does
-
-The save carries the revision the pane read. A wizard left open while something
-else wrote is told its read went stale rather than overwriting that writer.
+The save carries the revision that was read. A save decided on a revision the
+file has since left is refused (409) rather than overwriting that writer.
 
 Where the voice lands depends on what the section already holds. A voice name is
 provider vocabulary -- `say` takes `Yuna`, ElevenLabs a 20-character id -- so it
@@ -1283,23 +1133,14 @@ which leaves the existing default readable by the endpoints that fall back to
 it. An endpoint keeper mapping under `voice.tts.endpoints.agent_voices`
 overrides that endpoint default (see "Which voice a keeper speaks in" above).
 
-On success the pane reloads, and for speech out every configured endpoint is
-asked to say one sentence. Each answer is shown, **including the refusals** —
-that is the part a fallback chain hides by stopping at the first endpoint that
-answers.
-
-Speech in is not probed there: transcription needs audio the pane does not have.
-Use `masc voice-verify --audio FILE`, and see above for making a file.
-
 ### What it will not do
 
-The wizard does not install or start anything. It registers an address and
-checks whether something answers on it; for a command kind it registers the
-name and the probe is what reports whether that command is there. Starting a
+A setup save does not install or start anything. It registers an address; for
+a command kind it registers the name. Starting a
 local STT/TTS server remains an external step using that server's own command.
 
 ### Verification and voice bridge checks
 
-- Wizard question order, session state, key routing, and `[voice]` TOML save/load round-trips are covered by `test/voice_wizard/test_voice_wizard.ml`, `test/voice_wizard_session/test_voice_wizard_session.ml`, `test/voice_setup/test_voice_setup.ml`, and `test/voice_setup_routes/test_voice_setup_routes.ml`.
+- Wizard question order and `[voice]` TOML save/load round-trips are covered by `test/voice_wizard/test_voice_wizard.ml`, `test/voice_setup/test_voice_setup.ml`, and `test/voice_setup_routes/test_voice_setup_routes.ml`.
 - Voice bridge state and transport behavior (`lib/voice_bridge_core/voice_bridge_core.mli`, `lib/voice_bridge_core/voice_bridge_transport.mli`) are covered by `test/test_voice_bridge_error.ml`, `test/test_voice_bridge_watched_work.ml`, and `test/test_env_config_voice_bridge_timeouts.ml`.
 

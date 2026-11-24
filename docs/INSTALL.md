@@ -618,7 +618,7 @@ image for MASC development, not part of a regular install.
 ## Initial prompts, skills, and Keepers
 
 The default installation prepares **one Keeper, `imp`, that does not start on its own** and the
-built-in skills `browser-lanes`, `browser-live-follow-read`, `browser-navigate-read`,
+built-in skills `browser-lanes`, `browser-live-follow-read`,
 `diagram-in-chat`, `evidence-review`, `frontend-change`, `lane-addon-author`,
 `observe-act-verify`, `prior-art`, `root-cause-first`, `skill-authoring`,
 `verify-before-claiming-done`, and `work-intake`.
@@ -748,8 +748,8 @@ The `Release` workflow builds all four native targets as required jobs and
 runs a checksum-verified `file://` install → config seed → installed server
 health → dashboard verification. On Linux it runs the same install in a fresh
 Ubuntu container without an OCaml development environment as well. It also
-confirms that the dynamic loader works by running `--help` on the TUI and the
-browser host. On the Linux native runner it also runs a first-turn
+confirms that the dynamic loader works by running `--help` on the TUI. On the
+Linux native runner it also runs a first-turn
 verification: it creates a new Keeper with the installed executables and runs
 the tool a local model fixture requested in real Docker. It passes only if
 the ToolResult comes back in the next model request and the host files match

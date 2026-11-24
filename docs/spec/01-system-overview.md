@@ -103,13 +103,13 @@ MASC는 최상위 public library(`masc`)와 `lib/` 아래의 도메인별 내부
 | `lib/goal/`, `lib/candle*/` | Goal phase 상태 기계, 측정값, Candle 원장 및 정산 |
 | `lib/lane_addon/`, `lib/msx_lane/`, `lib/dos_lane/`, `lib/browser_lane/` | Lane Add-on 호스트, MSX/DOS 공유 머신 레인, Browser 레인 |
 | `lib/operator/` | Operator 제어 및 관측 표면 |
-| `lib/server/masc_grpc_server.ml`, `lib/server/masc_grpc_service.ml` | gRPC transport (`MascCoord` 서비스) |
+| `lib/server/masc_grpc_server.ml`, `lib/server/masc_grpc_service.ml` | gRPC transport (`MascWorkspace` 서비스) |
 | `lib/voice/` | Voice/TTS 브리지 |
 | `lib/` (root 및 기타 하위 디렉터리) | Tool dispatch, types, Memory OS, Wiki, Schedule, Fusion 등 |
 
 ## 6. Executable Inventory
 
-공개 실행 파일 (`bin/dune`의 `public_name` 기준 24종):
+공개 실행 파일 (`bin/dune`의 `public_name` 기준):
 
 | Executable | Public Name | Entry Point | 역할 |
 |------------|-------------|-------------|------|
@@ -125,13 +125,15 @@ MASC는 최상위 public library(`masc`)와 `lib/` 아래의 도메인별 내부
 | `keeper_capability_probe_cli` | `masc-keeper-capability-probe` | `bin/keeper_capability_probe_cli.ml` | Keeper 런타임 역량 프로브. |
 | `masc_lane_cli_probe` | `masc-lane-cli-probe` | `bin/masc_lane_cli_probe.ml` | 공식 CLI 레인 가용성 프로브. |
 | `deployment_preflight_helper` | `masc-deployment-preflight-helper` | `bin/deployment_preflight_helper.ml` | 배포 사전 점검 헬퍼. |
+| `masc_antigravity_path_hook` | `masc-antigravity-path-hook` | `bin/masc_antigravity_path_hook.ml` | Antigravity(`agy`) 읽기 hook. 허용한 경로 밖의 파일 읽기를 tool error로 돌려준다. |
+| `masc_acp_probe` | `masc-acp-probe` | `bin/masc_acp_probe.ml` | ACP v1 runtime(Antigravity·Kimi Code·Mistral Vibe)에 실제 세션을 열어 확인하는 프로브. |
 | `masc_msx_addon_worker` | `masc-msx-addon-worker` | `bin/masc_msx_addon_worker.ml` | MSX 공유 머신 Add-on worker. |
 | `masc_dos_addon_worker` | `masc-dos-addon-worker` | `bin/masc_dos_addon_worker.ml` | DOS 공유 머신 Add-on worker. |
 | `masc_candle_grant` | `masc-candle-grant` | `bin/masc_candle_grant.ml` | Goal 밖에서 Keeper에게 Candle을 선물하는 운영자 CLI. 원장에 한 줄을 더하고 영수증을 출력한다. |
 | `masc_native_addon_launcher` | `masc-native-addon-launcher` | `bin/masc_native_addon_launcher.ml` | native Add-on worker를 인스턴스 ID와 비공개 slot 디렉터리를 잡고 실행하는 런처. |
 | `masc_browser_addon_worker` | `masc-browser-addon-worker` | `bin/masc_browser_addon_worker.ml` | Browser Lane Add-on worker. 한 번에 browser 출처 하나만 맡는다. |
 
-내부용 실행 파일 (`public_name` 없음, 빌드 산출물로 직접 실행, 4종):
+내부용 실행 파일 (`public_name` 없음, 빌드 산출물로 직접 실행):
 
 | Executable | Entry Point | 역할 |
 |------------|-------------|------|

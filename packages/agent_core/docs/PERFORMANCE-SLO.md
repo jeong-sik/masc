@@ -60,20 +60,11 @@ this document **must** be calibrated against the in-process
 When you run the bench, append a row here and update the targets
 table above if the new baseline is materially different.
 
-## Boundary with masc
-
-`masc` adds an *operator-visible* SLO on top of these provider
-SLOs: `ttft_to_client_ms ≈ ttft_ms + transport_overhead_ms` where
-`transport_overhead_ms` is the `masc`-side time from first SSE
-chunk arrival to flush-to-client (typically < 5 ms).  That
-composition lives in `docs/PERFORMANCE-SLO.md` at the repository root and
-is intentionally *not* coupled to this agent_core-side document.
-
 ## References
 
-- RFC-AC-020 — TTFT instrumentation in `Streaming_summary` (Active)
-- RFC-AC-019 — Stream-lifetime telemetry aggregation (Active)
-- `lib/llm_provider/complete.ml` — capture site (`first_token_at_ref`,
+- RFC-AC-020 — TTFT instrumentation in `Streaming_summary`
+- RFC-AC-019 — Stream-lifetime telemetry aggregation
+- `lib/llm_provider/complete_stream.ml` — capture site (`first_token_at_ref`,
   `first_event_at_ref`)
 - `lib/llm_provider/streaming.ml` — typed predicate
   (`sse_event_is_first_token_signal`)

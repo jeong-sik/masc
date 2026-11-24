@@ -144,7 +144,7 @@ Downstream repos that vendor or depend on `agent_sdk` are responsible for their 
 ### 5.3 Versioning
 
 - Variant removal is breaking on the `Event_bus.Custom("telemetry_event", json)` consumer schema. Bump minor version (`0.194.0`).
-- Release-please (RFC-AC-010) entry: `feat!: replace per-chunk Streaming_chunk_n with Streaming_summary (RFC-AC-019)`.
+- Release-please entry: `feat!: replace per-chunk Streaming_chunk_n with Streaming_summary (RFC-AC-019)`.
 
 ## 6. Verification
 

@@ -35,9 +35,8 @@ value are three ways of saying unset and yield the default.
 
 The runtime param sits above both file planes and is where an operator changes
 the policy without a restart: the gateway client reads it before every step, so
-a change decides the next inbound message. The TUI reaches it at Config → `p` →
-params, which draws the three named values as a picker (`user_only:<id>` is
-typed, since it carries an id). Clearing the override returns to whatever env
+a change decides the next inbound message. `POST /api/v1/runtime/params/set`
+writes it. Clearing the override returns to whatever env
 and `runtime.toml` resolved to at startup, not to the hardcoded baseline.
 Changes persist in `.masc/runtime_params.json` and are recorded in
 `.masc/param_audit.jsonl`.
@@ -98,9 +97,8 @@ Bindings work like every other connector:
 3. Start the server. Without the grant it boots normally and this connector
    alone stays down, with the reason in the log and in the connector's `error`
    field.
-4. Bind a conversation to a Keeper. In the TUI: the **Connectors** surface,
-   `b` opens the bind form and `u` unbinds. In the dashboard:
-   **Connectors → iMessage → Quick Bind**. Both write the same file.
+4. Bind a conversation to a Keeper. In the dashboard:
+   **Connectors → iMessage → Quick Bind**.
 
 The channel id is the conversation's `chat_identifier`. For a one-to-one chat
 that is the other party's phone number or email address.
@@ -122,7 +120,7 @@ cannot be discovered from masc — see #30596.
 
 #### Checking that it works
 
-`GET /api/v1/gate/connectors`, or the same fields in the TUI and the dashboard:
+`GET /api/v1/gate/connectors` reports these fields:
 
 | Field | Healthy |
 |---|---|

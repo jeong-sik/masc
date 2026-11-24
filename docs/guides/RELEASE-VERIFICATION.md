@@ -23,7 +23,7 @@ This document defines the split integrated into `release-candidate.yml` and
 
 
 Existing suites are evidence inputs, not a complete selection manifest. Examples
-include `test_tui_keeper_chat_live.ml`, `test_keeper_chat_delivery_identity.ml`,
+include `test_keeper_chat_delivery_identity.ml`,
 `test_keeper_chat_operation_http.ml` and `test_keeper_turn_driver_failover.ml`.
 Inspect their actual assertions before
 selecting them; names and a green status cannot establish missing coverage.

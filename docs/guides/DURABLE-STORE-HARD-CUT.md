@@ -48,11 +48,6 @@ store order, after the reports of the stores before it, whatever N is.
 `first refusal` is one example, not an inventory of every affected file.
 `on refusal` describes what the running server does with such a row.
 
-The `memory OS current snapshot` scan also reports `pending recovery` for a
-readable publication receipt. That receipt is current state, not a refusal: the
-compatible owner finishes the publication; the deployment audit refuses until
-a later scan confirms that recovery is complete.
-
 ## Fresh state
 
 A build reads only the stored format it writes. State in an earlier format is
@@ -119,36 +114,6 @@ traces its most recent turn records name, so the next sweep after a Keeper's
 turn records are deleted removes that Keeper's raw traces. Carried-front
 recovery and request observation start from the turn records that remain.
 
-### Keeper turn boundaries
-
-The log is `.masc/keepers/<keeper>/turn-boundaries.jsonl`. The first refusal
-names the Keeper and line. Librarian positions count lines of this log, and a
-deleted log starts again at line 1. Delete these with the log:
-
-- `librarian-progress.json`, `librarian-official-progress.json`,
-  `librarian-external-read.json` and `librarian-continuity.json` next to the
-  log.
-- `.masc/config/keepers/<keeper>.librarian-range-commit.json` and
-  `<keeper>.librarian-unread.json`.
-- The Keeper's Librarian history scope. These are the `<scope digest>/`
-  directories under `.masc/lane-addons/` whose
-  `keeper-librarian-history-fences` records name the Keeper as
-  `physical_owner.keeper_id`. Delete that digest from `tool-request-owners`,
-  `tool-request-bodies`, `tool-request-owners-settled`,
-  `keeper-librarian-history-fences` and
-  `keeper-librarian-history-resolutions`. A history original left behind
-  checks its saved position against the new log and stops that Keeper's
-  Librarian.
-
-Then run `validate-stores` again. It names the Librarian gate scopes whose
-parent history is gone. Delete what its `fresh state` lines name.
-
-Turns the Librarian had not committed before the cut never reach Memory. The
-next round takes the first cut point the new log records as its starting
-position. The Keeper's unfinished Librarian requests are dropped. The external
-evidence log is read again from its start. Memory files under
-`.masc/config/keepers/` stay.
-
 ### Official-client turn fragments
 
 The files are `.masc/traces/<trace>/history.jsonl` and
@@ -179,36 +144,17 @@ separate fresh base path keeps the old workspace and its ledgers intact.
 
 ### Lane Add-on tool request owners
 
-Librarian original executions and absorption gates are owner records under
+Completion review, Goal proof review, Candle appraisal and media reading
+originals are owner records under
 `.masc/lane-addons/tool-request-owners/<scope digest>/` with request bodies
 under `.masc/lane-addons/tool-request-bodies/<scope digest>/`. The check
-decodes each record with its body and the consumer's payload decoder, and
-follows parent, retry, partition and replacement links inside the scope. It does
-not run Memory parts discovery, publication recovery or a provider. Discovery
-reads a scope as a whole and fails it on one record it cannot read, so the
-`fresh state` line names the scope's owner records, request bodies, history
-fences and history resolutions that exist. A scope that no consumer of the
-build reads is refused the same way.
-
-A Librarian original's consumer also reads the original's Exact record and
-proof file. The check reads them as that consumer does, on the files the
-exact-request check below leaves. When the consumer would stop on them, the
-original is refused (`consumer Exact reads of the original`). Its `fresh state`
-line names, for every scope of the original's owner, the owner records, request
-bodies, settled originals, history fences and history resolutions that exist.
-When no record of the original is left, the line also names its proof file. A
-member of a Closing or Closed admission closure and a fenced history original
-are read by no consumer, so neither is refused. A body refusal
-(`Request_body_refused`) passes without a record, except for an admission
-original whose record the exact-request check deletes: admission reads the
-size evidence of that refusal through the record, and without it the part and
-every later candidate of that Keeper wait. A proof file that names another
-store root stops this check as it stops the exact-request check. Delete the
-exact-request lines and these lines together: once both files are gone, the
-next check passes two kinds of original it refused. A Dispatch_pending original that
-lost its finished record looks like one the host never ran. An admission
-original the host ended with the body refusal looks like one the worker
-refused before the host.
+decodes each record with its body and the consumer's payload decoder. It does
+not run a provider. Discovery reads a scope as a whole and fails it on one
+record it cannot read, so the `fresh state` line names the scope's owner
+records and request bodies that exist. A scope that no consumer of the build
+reads is refused the same way, unless it is a retired scope
+`Server_tool_request_consumer` names; a record of a retired scope passes when
+its body restores.
 
 ### Lane Add-on exact requests
 
@@ -251,9 +197,8 @@ unterminated is left alone and reported.
 
 A Goal store path that cannot be read, including a dangling link, reports
 `inspect_path`; the path, its link target and its mount are where to look. Observed nonregular Goal paths report `nonregular` and
-`mirror_nonregular`. These values appear in `.masc/goal-verification-runs.jsonl`
-and in the task context of `.masc/keepers/<keeper>/turn-boundaries.jsonl`.
-Dashboard and TUI clients read them, so they are updated with the server. An
+`mirror_nonregular`. These values appear in `.masc/goal-verification-runs.jsonl`.
+The Dashboard reads them, so it is updated with the server. An
 older build does not read them; installing one is its own fresh state.
 
 ### Execution journals

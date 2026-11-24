@@ -26,7 +26,6 @@ Truth fields:
 
 - `effective_base_path`
 - `effective_masc_root`
-- `cwd_masc_root`
 - `roots_diverge`
 - `strict_mode_requested`
 - `startup_rejected`
@@ -129,11 +128,9 @@ loopback. The browser approval form asks for an existing MASC
 bearer once to bind the OAuth grant to that bearer’s agent identity. The
 bootstrap bearer is not stored in OAuth state.
 
-For the Agent-Code MCP server, the local startup path maintains a private
-non-expiring worker bearer at
-`$BASE_PATH/.masc/auth/agent-code-mcp-client.token`. Manual `login` is still useful
-when bootstrapping or rotating the bearer; export the printed value as
-`MASC_TOKEN` in the shell that starts Agent-Code:
+For the Agent-Code MCP server, `login` writes a private non-expiring worker
+bearer to `$BASE_PATH/.masc/auth/agent-code-mcp-client.token`. Export the
+printed value as `MASC_TOKEN` in the shell that starts Agent-Code:
 
 ```bash
 BASE_PATH="${MASC_BASE_PATH:-/path/to/base}"
@@ -238,8 +235,8 @@ neither ships one nor repairs `~/.agent-code/config.toml` on startup.
 > **MASC is MCP-client-agnostic.** The server holds no list of "known" clients
 > and does not derive env-var names from `--agent`. The operator names the env
 > var with `--client-env <VAR>` and chooses the lifetime with `--no-expiry`.
-> The conventions below are recommendations for the local wrapper script
-> (`~/me/scripts/mcp-sync.sh`), not server policy.
+> The conventions below are recommendations for a local wrapper script, not
+> server policy.
 
 Each local MCP client must mint its own worker identity so its bearer is
 distinct from the Agent-Code bearer. Pick a per-client env var name (e.g.
@@ -321,17 +318,16 @@ eval "$(./_build/default/bin/main_eio.exe login \
 The command prints the raw bearer once, writes the matching private raw-token
 file under the live auth root, and includes a dashboard URL.
 
-If login JSON says `dashboard_dev_token: available=yes`, the browser dashboard
-automatically bootstraps a `dashboard` Worker credential from:
+On a loopback bind without HTTP strict auth, the browser dashboard
+automatically bootstraps a `dashboard` Admin credential from:
 
 ```bash
 TOKEN="$(curl -sS http://127.0.0.1:8935/api/v1/dashboard/dev-token | jq -r '.token')"
 printf 'token=%s\n' "$TOKEN"
 ```
 
-This endpoint is loopback-only and disabled when HTTP strict auth is enabled.
-It is suitable for dashboard reads and Worker-authorized operations, not the
-admin-only keeper lifecycle actions covered by this runbook.
+This endpoint answers 404 on a non-loopback bind or when HTTP strict auth is
+enabled.
 
 If you do not have that path, the reliable local fallback is to seed the auth store directly.
 
@@ -403,7 +399,7 @@ http://127.0.0.1:8935/dashboard?agent=agent-code-tool-matrix&token=<raw-token>
 ```
 
 Do not paste the dev-token into this admin URL. The loopback dashboard obtains
-its Worker credential directly and binds it to the exact `dashboard` actor.
+its credential directly and binds it to the exact `dashboard` actor.
 
 You can verify the session with:
 
@@ -495,7 +491,7 @@ mv "$BASE_PATH/.masc/auth/config.json.bak" "$BASE_PATH/.masc/auth/config.json"
 rm -f "$BASE_PATH/.masc/auth/agents/agent-code-tool-matrix.json"
 ```
 
-The automatic dev-token is a persistent `dashboard` Worker credential and is
+The automatic dev-token is a persistent `dashboard` Admin credential and is
 independent of the explicit admin credential created by this runbook.
 
 ## 11. Known Failure Modes
@@ -508,7 +504,7 @@ independent of the explicit admin credential created by this runbook.
   your bearer is valid but not admin
 - `agent-code cannot CanAdmin` or `agent-code-mcp-client is role=worker`:
   the request is authenticated with a worker bearer; rerun login JSON and switch to an admin bearer
-- HTTP `503 Service Unavailable` (`auth_cred_store_unreadable` / `auth_Bootstrap_failed`):
+- HTTP `503 Service Unavailable`:
   a credential file under `.masc/auth/agents` could not be read due to transient I/O or descriptor pressure (`EMFILE`/`ENFILE`) rather than a token mismatch (`401`)
 - `{"error":"not found"}` on keeper boot/shutdown:
   you may still be running an older server build without the fixed route classifier

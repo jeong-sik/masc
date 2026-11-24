@@ -30,7 +30,6 @@ Threshold:
 | MCP `initialize` | PASS |
 | MCP `tools/list` tool count | > 0 |
 | `masc_status` read path | PASS |
-| dashboard `mission` read path | PASS |
 | dashboard `project-snapshot` read path | PASS |
 
 ## Gate 2: Keeper Turn Evidence Chain
@@ -66,7 +65,6 @@ Default thresholds:
 | checkpoint coverage for successful provider turns | 100% |
 | provider attempt closure | 100% |
 | event-bus correlation coverage | 100% |
-| memory-injection coverage | 100% |
 | tool-log coverage when tools are used | 100% |
 | timestamp parse coverage | 100% |
 | missing linked artifacts | 0 |

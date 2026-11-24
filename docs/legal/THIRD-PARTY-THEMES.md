@@ -1,8 +1,7 @@
 # 번들된 색 스킴의 출처
 
-masc TUI 는 색 스킴 54개를 함께 배포한다. 전부 `config/themes/` 의 TOML 파일이고,
-바이너리에 함께 구워져 나간다. 읽는 사람이 `<base>/.masc/config/themes/` 나
-`<base>/config/themes/` 에 같은 형식으로 자기 것을 두면 같은 이름을 덮어쓴다. 그중 `default-dark`, `default-light`, `dungeon-gold`, `norton`, `msx`,
+masc 는 색 스킴 54개를 함께 배포한다. 전부 `config/themes/` 의 TOML 파일이고,
+바이너리에 함께 구워져 나간다. 그중 `default-dark`, `default-light`, `dungeon-gold`, `norton`, `msx`,
 `pc-tools`, `msc`, `cyber`, `vaporwave`, `toxic`, `ultraviolet`, `glacier`,
 `bloodmoon`, `arcade`, 그리고 아래 절의 레트로 프리셋 4개(`norton-commander`,
 `msx-retro`, `pc-tools-vintage`, `cga-classic`)는 masc 자체 것이고,
@@ -13,10 +12,6 @@ masc TUI 는 색 스킴 54개를 함께 배포한다. 전부 `config/themes/` �
 `norton-commander`, `msx-retro`, `pc-tools-vintage`, `cga-classic` 은 tinted-theming
 값이 아니라 클래식 UI(노턴 커맨더, MSX, PC Tools/Turbo Vision, CGA)의 디자인을
 masc 가 직접 base16 으로 옮긴 것이라 다른 사람의 라이선스 조항이 붙지 않는다.
-번들 전에 `test_tui_theme_contrast` 의 가독성 계약을 독립 계측(python3 이식판,
-상수는 masc_tui_color.ml 에서 그대로)으로 통과시켰다. 계측 원문은 git 이 무시하는
-`artifacts/` 아래 실행 산출물이라 저장소에는 남지 않고, 지속하는 증거는 계약
-테스트 쪽이다.
 
 ## 값을 어디서 가져왔나
 
@@ -135,12 +130,6 @@ Pro 의 라이선스 문구도 `Monokai Pro extensions` 로 범위가 그쪽에 
 
 ## 여기 없는 것
 
-### 그릴 수 없어서 뺀 것
-
-대부분은 라이선스 문제가 아니라 masc 가 제대로 못 그려서 빠졌다. 2026-08-28 에
-50개를 재서 12개를 뺐고, 뺀 이유와 측정값은 `bin/masc_tui_theme_catalog.ml` 맨 위
-주석에 있다.
-
 ### 조건이 걸려서 뺀 것 — `material-palenight`
 
 한 번 넣었다가 뺐다. 값 자체는 Nate Peterson 의 base16 이식본이고 tinted-theming
@@ -155,7 +144,7 @@ MIT 로 온다. 문제는 그 위쪽이다.
   기대는 자리에 서지 않는다.
 
 색 목록 자체가 저작물인지는 다투어질 여지가 있고, 하위 이식본에는 MIT 표시가
-붙어 있다. 그래도 뺀다. 남은 37개는 다툴 것 없는 허가가 있고, 하나를 지키자고
+붙어 있다. 그래도 뺀다. 남은 36개는 다툴 것 없는 허가가 있고, 하나를 지키자고
 그 자리에 설 이유가 없다.
 
 다시 넣으려면 원본 저장소에 허가가 다시 생겼는지부터 확인한다.
@@ -163,7 +152,5 @@ MIT 로 온다. 문제는 그 위쪽이다.
 ## 스킴을 추가할 때
 
 1. `tinted-theming/schemes` 의 `base16/<이름>.yaml` 에서 값을 받는다. 손으로 적지 않는다.
-2. `bin/masc_tui_theme_catalog.ml` 에 넣고 `test_tui_theme_contrast` 를 돌린다.
-   떨어지면 넣지 않고, 측정값을 그 파일 주석에 적는다.
-3. **이 문서의 표에 줄을 추가한다.** 카탈로그에 이름이 있는데 여기 없으면
+2. **이 문서의 표에 줄을 추가한다.** `config/themes/` 에 파일이 있는데 여기 없으면
    masc 가 남의 것을 싣고 이름을 안 밝히는 상태가 된다.

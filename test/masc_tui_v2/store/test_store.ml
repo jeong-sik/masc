@@ -11857,6 +11857,61 @@ let test_ux_batch2_modals_settings_overlays () =
     (Drafts.draft_for ~keeper:"beta" m_mention_sent.drafts).text;
   Alcotest.(check string) "UX-13 @beta hi clears alpha's composer text" ""
     (Drafts.draft_for ~keeper:"alpha" m_mention_sent.drafts).text;
+  (* Mentioning the Keeper whose composer holds the text: the sent text must not
+     come back into the composer. *)
+  let m_self_mention =
+    {
+      m_fleet with
+      drafts =
+        m_fleet.drafts
+        |> Drafts.set_active_keeper "alpha"
+        |> Drafts.set_focus true
+        |> Drafts.set_current_text "@alpha hi";
+    }
+  in
+  let m_self_sent, _ = step m_self_mention (key Keymap.Input.Enter) in
+  Alcotest.(check bool) "UX-13 @alpha hi from alpha queues body hi for alpha" true
+    (List.exists
+       (fun (tx : Drafts.pending_message) ->
+         String.equal tx.keeper "alpha" && String.equal tx.body "hi")
+       m_self_sent.drafts.pending_txs);
+  Alcotest.(check string) "UX-13 @alpha hi from alpha empties alpha's composer" ""
+    (Drafts.draft_for ~keeper:"alpha" m_self_sent.drafts).text;
+  (* Nested mention: beta's earlier draft goes back into beta's own slot, not
+     into gamma's, and the message reaches gamma. *)
+  let k_gamma = grouped_keeper ~group:"org-a" "gamma" in
+  let m_fleet3 =
+    {
+      m_fleet with
+      fleet =
+        Fleet_store.apply_keepers ~observed_at:t0 [ k_alpha; k_beta; k_gamma ]
+          m_fleet.fleet;
+    }
+  in
+  let m_nested_mention =
+    {
+      m_fleet3 with
+      drafts =
+        m_fleet3.drafts
+        |> Drafts.set_active_keeper "beta"
+        |> Drafts.set_current_text "beta draft"
+        |> Drafts.set_active_keeper "alpha"
+        |> Drafts.set_focus true
+        |> Drafts.set_current_text "@beta @gamma hi";
+    }
+  in
+  let m_nested_sent, _ = step m_nested_mention (key Keymap.Input.Enter) in
+  Alcotest.(check bool) "UX-13 @beta @gamma hi queues body hi for gamma" true
+    (List.exists
+       (fun (tx : Drafts.pending_message) ->
+         String.equal tx.keeper "gamma" && String.equal tx.body "hi")
+       m_nested_sent.drafts.pending_txs);
+  Alcotest.(check string)
+    "UX-13 @beta @gamma hi keeps beta's earlier draft in beta's slot"
+    "beta draft"
+    (Drafts.draft_for ~keeper:"beta" m_nested_sent.drafts).text;
+  Alcotest.(check string) "UX-13 @beta @gamma hi leaves gamma's slot empty" ""
+    (Drafts.draft_for ~keeper:"gamma" m_nested_sent.drafts).text;
 
   (* UX-14: Inline modal field help lookup populated *)
   Alcotest.(check bool) "UX-14 modal_field_help returns help for memory_act" true

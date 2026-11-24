@@ -1552,11 +1552,16 @@ and submit_composer ~now ~mode (m : Model.t) =
             (* [@keeper msg] sends [rest] through the mentioned Keeper's
                composer slot. That slot may already hold an unsent draft the
                operator typed earlier; the submission consumes the slot, so
-               the earlier draft is put back once [rest] has left. *)
-            let prior = Drafts.draft_for ~keeper:mentioned_keeper m.drafts in
+               the earlier draft is put back once [rest] has left. The earlier
+               draft is read after the current slot is cleared, so mentioning
+               the Keeper whose composer holds the text does not bring the
+               sent text back. *)
+            let drafts_cleared = Drafts.clear_current_draft m.drafts in
+            let prior =
+              Drafts.draft_for ~keeper:mentioned_keeper drafts_cleared
+            in
             let drafts_switched =
-              m.drafts
-              |> Drafts.clear_current_draft
+              drafts_cleared
               |> Drafts.set_active_keeper mentioned_keeper
               |> Drafts.set_current_text rest
             in
@@ -1564,14 +1569,28 @@ and submit_composer ~now ~mode (m : Model.t) =
               submit_composer ~now ~mode { m with drafts = drafts_switched }
             in
             let consumed =
-              String.equal (Drafts.current_draft sent.drafts).text ""
+              String.equal
+                (Drafts.draft_for ~keeper:mentioned_keeper sent.drafts).text ""
             in
             match (String.equal prior.text "", consumed) with
             | true, (true | false) | false, false -> (sent, cmds)
             | false, true ->
-                let drafts =
+                let restore_into_current drafts =
                   Drafts.set_current_text_and_cursor ~text:prior.text
-                    ~cursor:prior.cursor sent.drafts
+                    ~cursor:prior.cursor drafts
+                in
+                let drafts =
+                  match sent.drafts.Drafts.active_keeper with
+                  | Some target when not (String.equal target mentioned_keeper)
+                    ->
+                      (* A nested [@a @b msg] moved the target on to [b]: the
+                         earlier draft goes back into [a]'s own slot and [b]
+                         stays the target. *)
+                      sent.drafts
+                      |> Drafts.set_active_keeper mentioned_keeper
+                      |> restore_into_current
+                      |> Drafts.set_active_keeper target
+                  | Some _ | None -> restore_into_current sent.drafts
                 in
                 ({ sent with drafts }, cmds))
         | None ->

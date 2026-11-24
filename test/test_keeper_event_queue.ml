@@ -218,6 +218,78 @@ let stage_transfer ~base_path ~from_keeper ~to_keeper ~source ~operation_id =
      Alcotest.fail
        (Masc.Keeper_registry_event_queue.transfer_pending_error_to_string detail))
 
+let test_transition_outbox_resume ~(source : Keeper_event_queue.stimulus) =
+  let module Recovery = Masc.Keeper_event_queue_recovery in
+  let module Fence = Masc.Keeper_shutdown_intake_fence in
+  let base_path = temp_dir "transition-outbox-resume" in
+  Fun.protect ~finally:(fun () -> rm_rf base_path) (fun () ->
+    let from_keeper = "resume-source" in
+    let blocked_target = "resume-blocked" in
+    let healthy_target = "resume-healthy" in
+    let stage index to_keeper =
+      let source = { source with post_id = Printf.sprintf "resume-post-%d" index } in
+      stage_transfer ~base_path ~from_keeper ~to_keeper ~source
+        ~operation_id:(Printf.sprintf "resume-operation-%d" index);
+      source
+    in
+    let blocked_count = 64 in
+    for index = 1 to blocked_count do
+      ignore (stage index blocked_target : Keeper_event_queue.stimulus)
+    done;
+    let healthy = stage (blocked_count + 1) healthy_target in
+    let pending_ids () =
+      load_queue_state ~base_path ~keeper_name:from_keeper
+      |> Keeper_event_queue_state.transition_outbox
+      |> List.map (fun (entry : Keeper_event_queue_state.outbox_entry) ->
+        entry.receipt.transition_id)
+    in
+    let blocked_ids = List.take blocked_count (pending_ids ()) in
+    let healthy_received () =
+      registry_snapshot ~base_path healthy_target
+      |> Keeper_event_queue.to_list
+      |> List.exists (Keeper_event_queue.stimulus_identity_equal healthy)
+    in
+    let operation_id = Masc.Keeper_shutdown_types.Operation_id.generate () in
+    (match Fence.begin_shutdown ~base_path ~keeper_name:blocked_target ~operation_id with
+     | Fence.Reserved _ -> ()
+     | Fence.Already_reserved _ -> Alcotest.fail "fresh target is already shutdown-fenced");
+    Fun.protect
+      ~finally:(fun () ->
+        ignore
+          (Fence.rollback_shutdown ~base_path ~keeper_name:blocked_target ~operation_id
+           : Fence.rollback_result))
+      (fun () ->
+         with_strict_executor (fun () ->
+           let budget =
+             match Recovery.owner_budget ~max_owners:3 with
+             | Ok budget -> budget
+             | Error error -> Alcotest.fail (Recovery.owner_budget_error_to_string error)
+           in
+           let sweep cursor = Recovery.project_discovered_bounded ~base_path ~budget ~cursor in
+           let first = sweep Recovery.initial_sweep_cursor in
+           Alcotest.(check int)
+             "first sweep reports target shutdown" 1 first.report.shutdown_reserved;
+           Alcotest.(check int)
+             "first sweep retains all transitions at the entry limit"
+             (blocked_count + 1) (List.length (pending_ids ()));
+           Alcotest.(check bool)
+             "healthy transfer has not reached its target" false (healthy_received ());
+           let second = sweep first.next_cursor in
+           Alcotest.(check int)
+             "second sweep converges the unvisited transfer" 1 second.report.converged;
+           Alcotest.(check (list string))
+             "blocked transitions retain their exact ids and order"
+             blocked_ids (pending_ids ());
+           Alcotest.(check bool)
+             "healthy target received the exact stimulus" true (healthy_received ())));
+    with_strict_executor (fun () ->
+      match Recovery.project_owner_result ~base_path ~keeper_name:from_keeper with
+      | Ok Recovery.Transition_converged ->
+        Alcotest.(check (list string)) "blocked transfers converge after rollback" [] (pending_ids ())
+      | Ok _ -> Alcotest.fail "expected the blocked transfers to converge"
+      | Error error -> Alcotest.fail (Recovery.projection_error_to_string error)))
+;;
+
 let test_async_transition_page ~source =
   let module Supervisor = Server_transition_outbox_recovery in
   let module Recovery = Masc.Keeper_event_queue_recovery in
@@ -1091,6 +1163,7 @@ let () =
     { post_id = "p1"; urgency = Normal; arrived_at = 0.0; payload = board_payload () }
   in
   test_async_transition_page ~source:board_stim;
+  test_transition_outbox_resume ~source:board_stim;
   (* P0-6: a blocked Transfer_accepted head (target shutdown-fenced) must not
      HoL-starve independent trailing outbox transfers, while still surfacing the
      head error and converging cleanly once the target fence rolls back. *)

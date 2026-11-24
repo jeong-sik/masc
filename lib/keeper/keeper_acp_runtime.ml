@@ -924,6 +924,7 @@ let acquire_persistent_entry
 (* ── SSE stream projection ────────────────────────────────────────────────── *)
 
 let should_fence_tool_call_started
+      ?(server_isolation = Acp.Shared_or_multi_server)
       ~native_posture
       ~mcp_server_name
       ~allowed_tool_names
@@ -931,12 +932,14 @@ let should_fence_tool_call_started
   =
   (* Pinned MASC MCP tools report their own exact effect boundary via
      Host.dynamic_tools, and MASC-managed lazy MCP schema reads are read-only
-     metadata lookups. Any foreign/unpinned MCP call or posture-disallowed
-     native CLI tool fences same-turn retry. *)
+     metadata lookups. Any foreign/unpinned MCP call, unqualified
+     Implicit_mcp_kind call under Shared_or_multi_server isolation, or
+     posture-disallowed native CLI tool fences same-turn retry. *)
   match identity with
   | (Acp.Mcp_tool _ | Acp.Managed_mcp_schema_read _) as mcp_or_schema ->
     not
       (Acp.should_allow_tool_call
+         ~server_isolation
          ~policy:(Acp.Allow_masc_mcp_only { mcp_server_name; allowed_tool_names })
          mcp_or_schema)
   | Acp.Native_tool { kind; _ } ->
@@ -999,6 +1002,7 @@ let native_observation_of_acp ~tool_call_id ~title ~name : Runtime_native_tools.
 
 let make_stream_projection
       ~driver
+      ~server_isolation
       ~keeper_name
       ~raw_trace_run
       ~model
@@ -1314,6 +1318,7 @@ let make_stream_projection
     | Acp.Tool_call_started { tool_call_id; title; kind = _; status = _; raw_input; identity } ->
       observe_activity ();
       if should_fence_tool_call_started
+           ~server_isolation
            ~native_posture
            ~mcp_server_name
            ~allowed_tool_names
@@ -1329,6 +1334,7 @@ let make_stream_projection
       (match identity with
        | Some id ->
          if should_fence_tool_call_started
+              ~server_isolation
               ~native_posture
               ~mcp_server_name
               ~allowed_tool_names
@@ -2522,6 +2528,7 @@ let run_without_lifecycle
       let stream =
         make_stream_projection
           ~driver:config.driver
+          ~server_isolation:(Acp.mcp_server_isolation entry.client)
           ~keeper_name
           ~raw_trace_run
           ~model:effective_model
@@ -3442,6 +3449,7 @@ module For_testing = struct
   let compact_once_for_overflow = compact_once_for_overflow
 
   let project_stream_for_testing
+        ?(server_isolation = Acp.Shared_or_multi_server)
         ?on_effect_attempted
         ?on_native_action
         ?on_native_tool_completion
@@ -3467,6 +3475,7 @@ module For_testing = struct
     let stream =
       make_stream_projection
         ~driver
+        ~server_isolation
         ~keeper_name:"test-keeper"
         ~raw_trace_run:None
         ~model

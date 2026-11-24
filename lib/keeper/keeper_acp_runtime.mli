@@ -127,7 +127,8 @@ module For_testing : sig
     -> bool
 
   val should_fence_tool_call_started
-    :  native_posture:Runtime_native_tools.posture
+    :  ?server_isolation:Runtime_acp_client.mcp_server_isolation
+    -> native_posture:Runtime_native_tools.posture
     -> mcp_server_name:string
     -> allowed_tool_names:string list
     -> Runtime_acp_client.tool_call_identity
@@ -186,7 +187,8 @@ module For_testing : sig
     -> unit
 
   val project_stream_for_testing
-    :  ?on_effect_attempted:(unit -> unit)
+    :  ?server_isolation:Runtime_acp_client.mcp_server_isolation
+    -> ?on_effect_attempted:(unit -> unit)
     -> ?on_native_action:
          (official_turn:int
           -> identity:Runtime_native_tools.action_identity

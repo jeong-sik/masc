@@ -555,7 +555,7 @@ let test_build_argv_and_strict_permission_posture () =
       { mcp_server_name = "masc"; allowed_tool_names }
   in
   let allow = Runtime_acp_client.For_testing.should_allow_permission in
-  (* Driver-scoped positive MASC MCP identities *)
+  (* Driver-scoped explicit-server positive MASC MCP identities *)
   List.iter
     (fun (driver, title, kind) ->
        check bool ("allows pinned MASC MCP tool " ^ title) true
@@ -564,10 +564,28 @@ let test_build_argv_and_strict_permission_posture () =
     ; Runtime_acp_client.Kimi_code, "mcp__masc__masc_probe_ping", Some Runtime_acp_client.Tool_other
     ; Runtime_acp_client.Mistral_vibe, "mcp_masc.masc_probe_ping", Some Runtime_acp_client.Tool_other
     ; Runtime_acp_client.Mistral_vibe, "masc_masc_probe_ping", Some Runtime_acp_client.Tool_other
-    ; Runtime_acp_client.Antigravity, "keeper_skill", Some Runtime_acp_client.Tool_vendor_mcp
-    ; Runtime_acp_client.Antigravity, "masc_probe_ping", Some Runtime_acp_client.Tool_vendor_mcp
     ; Runtime_acp_client.Antigravity, "mcp_masc_masc_probe_ping", Some Runtime_acp_client.Tool_other
     ];
+  (* Unqualified Tool_vendor_mcp fails closed without Single_pinned_server proof
+     and succeeds ONLY when Single_pinned_server isolation is proven. *)
+  List.iter
+    (fun tool_name ->
+       check bool ("unqualified Tool_vendor_mcp " ^ tool_name ^ " fails closed without isolation proof")
+         false
+         (allow ~driver:Antigravity ~policy:mcp_only ~title:tool_name ~kind:(Some Tool_vendor_mcp));
+       let id =
+         Runtime_acp_client.For_testing.classify_tool_call_json
+           ~driver:Antigravity
+           ~mcp_server_name:"masc"
+           (`Assoc [ "title", `String tool_name; "kind", `String "mcp" ])
+       in
+       check bool ("unqualified Tool_vendor_mcp " ^ tool_name ^ " allowed under Single_pinned_server")
+         true
+         (Runtime_acp_client.should_allow_tool_call
+            ~server_isolation:(Runtime_acp_client.Single_pinned_server "masc")
+            ~policy:mcp_only
+            id))
+    [ "keeper_skill"; "masc_probe_ping" ];
   (* Dotted tool name under Antigravity Mcp_underscore_prefix must NOT be shadowed by Vibe Mcp_dot_prefix *)
   let dotted_policy =
     Runtime_acp_client.Allow_masc_mcp_only
@@ -2408,12 +2426,27 @@ let test_keeper_typed_tool_call_effect_fencing () =
   let native_unknown =
     Runtime_acp_client.Native_tool { name = Some "mystery_tool"; kind = None; locations = [] }
   in
-  (* Pinned MASC MCP calls and managed schema reads NEVER falsely fence retry *)
+  (* Pinned MASC MCP calls and managed schema reads NEVER falsely fence retry;
+     Implicit_mcp_kind is accepted ONLY under Single_pinned_server isolation
+     and fails closed (fences retry) under default Shared_or_multi_server. *)
   List.iter
     (fun posture ->
        check bool "pinned MASC MCP call does not falsely fence retry" false
          (fence ~native_posture:posture pinned_agy_mcp);
-       check bool "pinned implicit-kind MASC MCP call does not falsely fence retry" false
+       check bool "pinned implicit-kind MASC MCP call stays unfenced under Single_pinned_server"
+         false
+         (fence
+            ~server_isolation:(Runtime_acp_client.Single_pinned_server "masc")
+            ~native_posture:posture
+            pinned_implicit_mcp);
+       check bool "pinned implicit-kind call fences when Single_pinned_server names a different server"
+         true
+         (fence
+            ~server_isolation:(Runtime_acp_client.Single_pinned_server "other")
+            ~native_posture:posture
+            pinned_implicit_mcp);
+       check bool "unqualified implicit-kind MCP call fences under default Shared_or_multi_server"
+         true
          (fence ~native_posture:posture pinned_implicit_mcp);
        check bool "pinned managed MCP schema read does not falsely fence retry" false
          (fence ~native_posture:posture pinned_schema);
@@ -4669,6 +4702,235 @@ for line in sys.stdin:
     (fenced_before_uncorrelated + 1) !none_fenced
 ;;
 
+let test_implicit_mcp_kind_multi_server_isolation () =
+  (* 1. Pure should_allow_tool_call fails closed by default on Implicit_mcp_kind.
+        Use [keeper_skill] (NOT starting with "masc_") so Mistral_vibe does NOT
+        match Server_underscore_prefix and genuinely reaches Implicit_mcp_kind. *)
+  let policy =
+    Runtime_acp_client.Allow_masc_mcp_only
+      { mcp_server_name = "masc"
+      ; allowed_tool_names = [ "masc_probe_ping"; "keeper_skill" ]
+      }
+  in
+  let read_and_mcp =
+    Runtime_acp_client.Allow_read_and_masc_mcp
+      { mcp_server_name = "masc"
+      ; allowed_tool_names = [ "masc_probe_ping"; "keeper_skill" ]
+      }
+  in
+  let implicit_id =
+    Runtime_acp_client.Mcp_tool
+      { server = Runtime_acp_client.Implicit_mcp_kind
+      ; tool_name = "keeper_skill"
+      }
+  in
+  check bool "Implicit_mcp_kind denied by default (Shared_or_multi_server)" false
+    (Runtime_acp_client.should_allow_tool_call ~policy implicit_id);
+  check bool "Implicit_mcp_kind denied under Allow_read_and_masc_mcp by default" false
+    (Runtime_acp_client.should_allow_tool_call ~policy:read_and_mcp implicit_id);
+  check bool "Implicit_mcp_kind allowed under matching Single_pinned_server when pinned" true
+    (Runtime_acp_client.should_allow_tool_call
+       ~server_isolation:(Runtime_acp_client.Single_pinned_server "masc")
+       ~policy
+       implicit_id);
+  check bool "Implicit_mcp_kind denied when Single_pinned_server names a different server" false
+    (Runtime_acp_client.should_allow_tool_call
+       ~server_isolation:(Runtime_acp_client.Single_pinned_server "other")
+       ~policy
+       implicit_id);
+  (* Verify Mistral_vibe omits Implicit_vendor_mcp_kind so bare "keeper_skill" + kind="mcp"
+     classifies directly as Native_tool (never hidden from native audit) and is denied. *)
+  let vibe_bare_mcp_id =
+    Runtime_acp_client.For_testing.classify_tool_call_json
+      ~driver:Mistral_vibe
+      ~mcp_server_name:"masc"
+      (`Assoc [ "title", `String "keeper_skill"; "kind", `String "mcp" ])
+  in
+  (match vibe_bare_mcp_id with
+   | Runtime_acp_client.Native_tool
+       { name = Some "keeper_skill"; kind = Some Runtime_acp_client.Tool_vendor_mcp; _ } -> ()
+   | _ -> fail "expected Mistral_vibe bare keeper_skill + kind=mcp to classify as Native_tool");
+  check bool "unqualified Tool_vendor_mcp denied on Mistral_vibe (Shared_or_multi_server)" false
+    (Runtime_acp_client.For_testing.should_allow_permission
+       ~driver:Mistral_vibe
+       ~policy
+       ~title:"keeper_skill"
+       ~kind:(Some Tool_vendor_mcp));
+  check bool "unqualified Tool_vendor_mcp fails closed on Antigravity without live Single_pinned_server proof"
+    false
+    (Runtime_acp_client.For_testing.should_allow_permission
+       ~driver:Antigravity
+       ~policy
+       ~title:"keeper_skill"
+       ~kind:(Some Tool_vendor_mcp));
+  let agy_implicit_id =
+    Runtime_acp_client.For_testing.classify_tool_call_json
+      ~driver:Antigravity
+      ~mcp_server_name:"masc"
+      (`Assoc [ "title", `String "keeper_skill"; "kind", `String "mcp" ])
+  in
+  check bool "unqualified Tool_vendor_mcp allowed on Antigravity when matching Single_pinned_server is proven"
+    true
+    (Runtime_acp_client.should_allow_tool_call
+       ~server_isolation:(Runtime_acp_client.Single_pinned_server "masc")
+       ~policy
+       agy_implicit_id);
+  (* 2. Cross-driver prefix paired with kind="mcp" (Tool_vendor_mcp) is rejected
+        BEFORE Implicit_vendor_mcp_kind, classifying as Native_tool rather than
+        Implicit_mcp_kind. *)
+  let agy_cross_driver_id =
+    Runtime_acp_client.For_testing.classify_tool_call_json
+      ~driver:Antigravity
+      ~mcp_server_name:"masc"
+      (`Assoc
+         [ "title", `String "mcp__masc__masc_probe_ping"
+         ; "kind", `String "mcp"
+         ])
+  in
+  (match agy_cross_driver_id with
+   | Runtime_acp_client.Native_tool { kind = Some Runtime_acp_client.Tool_vendor_mcp; _ } -> ()
+   | _ -> fail "cross-driver mcp__ prefix with kind=mcp must not fall through to Implicit_mcp_kind");
+  check bool "cross-driver mcp__ prefix with kind=mcp denied even under Single_pinned_server" false
+    (Runtime_acp_client.should_allow_tool_call
+       ~server_isolation:(Runtime_acp_client.Single_pinned_server "masc")
+       ~policy
+       agy_cross_driver_id);
+  (* 3. End-to-end live client isolation SSOT across three real client configurations:
+        - Mistral_vibe (Session_new_http_mcp) -> Shared_or_multi_server: rejects 2001 (keeper_skill kind=mcp), allows 2002 (mcp_masc.masc_probe_ping)
+        - Antigravity WITHOUT ~mcp_server -> Shared_or_multi_server: rejects 2001 and 2002
+        - Antigravity WITH ~mcp_server (isolated --gemini-dir/config/mcp_config.json) -> Single_pinned_server: allows 2001, rejects cross-driver 2002 *)
+  let tmp = Filename.temp_dir ~perms:0o700 "acp-implicit-iso-" "" in
+  let perm_log = Filename.concat tmp "perms.json" in
+  let mock_script = Filename.concat tmp "mock_iso.py" in
+  let script_body =
+    Printf.sprintf
+      {|#!/usr/bin/env python3
+import json, sys
+
+def send(obj):
+    sys.stdout.write(json.dumps(obj) + "\n")
+    sys.stdout.flush()
+
+outcomes = {}
+pending_prompt = None
+opts = [
+    {"optionId": "allow_once_id", "name": "Allow once", "kind": "allow_once"},
+    {"optionId": "reject_once_id", "name": "Reject once", "kind": "reject_once"},
+]
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    msg = json.loads(line)
+    method = msg.get("method")
+    mid = msg.get("id")
+    if method == "initialize":
+        send({"jsonrpc": "2.0", "id": mid, "result": {
+            "protocolVersion": 1,
+            "agentCapabilities": {"promptCapabilities": {"image": False}}
+        }})
+    elif method == "session/new":
+        send({"jsonrpc": "2.0", "id": mid, "result": {"sessionId": "sess-iso"}})
+    elif method == "session/prompt":
+        pending_prompt = mid
+        # 2001: unqualified kind="mcp" (tool name does NOT start with "masc_") -> genuinely reaches Implicit_mcp_kind!
+        send({"jsonrpc": "2.0", "id": 2001, "method": "session/request_permission", "params": {
+            "sessionId": "sess-iso",
+            "toolCall": {"toolCallId": "tc-imp", "title": "keeper_skill", "kind": "mcp"},
+            "options": opts
+        }})
+        # 2002: explicit server-qualified mcp_masc.masc_probe_ping -> allowed on Mistral_vibe, cross-driver rejected on Antigravity
+        send({"jsonrpc": "2.0", "id": 2002, "method": "session/request_permission", "params": {
+            "sessionId": "sess-iso",
+            "toolCall": {"toolCallId": "tc-exp", "title": "mcp_masc.masc_probe_ping", "kind": "other"},
+            "options": opts
+        }})
+    else:
+        if mid in (2001, 2002):
+            outcomes[str(mid)] = msg.get("result", {}).get("outcome", {})
+            if len(outcomes) == 2 and pending_prompt is not None:
+                with open(%S, "w") as f:
+                    json.dump(outcomes, f)
+                send({"jsonrpc": "2.0", "id": pending_prompt, "result": {"stopReason": "end_turn"}})
+                pending_prompt = None
+|}
+      perm_log
+  in
+  Out_channel.with_open_text mock_script (fun oc -> output_string oc script_body);
+  let run_case ~driver ?mcp_server ~expected_iso ~expect_2001 ~expect_2002 ~label () =
+    Eio_main.run (fun env ->
+      let clock = Eio.Stdenv.clock env in
+      let proc_mgr =
+        Runtime_acp_client.foreground_process_mgr ~clock ~grace_seconds:1.0 ()
+      in
+      let cfg =
+        { (Runtime_acp_client.default_config ~driver ~cwd:tmp) with
+          cli_path = "python3"
+        ; args = [ mock_script ]
+        }
+      in
+      Eio.Switch.run (fun sw ->
+        let client =
+          match Runtime_acp_client.start ~sw ~proc_mgr ~clock ~config:cfg ?mcp_server () with
+          | Ok c -> c
+          | Error err -> failf "%s start failed: %s" label (Runtime_acp_client.error_to_string err)
+        in
+        Fun.protect ~finally:(fun () -> Runtime_acp_client.close client) (fun () ->
+          check bool (label ^ " live client mcp_server_isolation") true
+            (Runtime_acp_client.equal_mcp_server_isolation
+               expected_iso
+               (Runtime_acp_client.mcp_server_isolation client));
+          let sess =
+            match Runtime_acp_client.new_session client ~cwd:tmp () with
+            | Ok s -> s
+            | Error err -> failf "%s new_session failed: %s" label (Runtime_acp_client.error_to_string err)
+          in
+          (match
+             Runtime_acp_client.prompt
+               client
+               ~session_id:sess.session_id
+               ~blocks:[ Runtime_acp_client.Text_block "iso check" ]
+               ~permission_policy:policy
+               ()
+           with
+           | Ok _ -> ()
+           | Error err -> failf "%s prompt failed: %s" label (Runtime_acp_client.error_to_string err));
+          let outcomes = Yojson.Safe.from_file perm_log in
+          let option_of id =
+            Yojson.Safe.Util.(outcomes |> member id |> member "optionId" |> to_string)
+          in
+          check string (label ^ " unqualified keeper_skill kind=mcp") expect_2001 (option_of "2001");
+          check string (label ^ " mcp_masc.masc_probe_ping") expect_2002 (option_of "2002"))))
+  in
+  Fun.protect ~finally:(fun () -> rm_rf tmp) (fun () ->
+    run_case
+      ~driver:Mistral_vibe
+      ~expected_iso:Runtime_acp_client.Shared_or_multi_server
+      ~expect_2001:"reject_once_id"
+      ~expect_2002:"allow_once_id"
+      ~label:"Mistral_vibe"
+      ();
+    run_case
+      ~driver:Antigravity
+      ~expected_iso:Runtime_acp_client.Shared_or_multi_server
+      ~expect_2001:"reject_once_id"
+      ~expect_2002:"reject_once_id"
+      ~label:"Antigravity without ~mcp_server"
+      ();
+    let masc_srv : Runtime_acp_client.mcp_http_server =
+      { name = "masc"; url = "http://127.0.0.1:1/mcp"; headers = [] }
+    in
+    run_case
+      ~driver:Antigravity
+      ~mcp_server:masc_srv
+      ~expected_iso:(Runtime_acp_client.Single_pinned_server "masc")
+      ~expect_2001:"allow_once_id"
+      ~expect_2002:"reject_once_id"
+      ~label:"Antigravity with isolated ~mcp_server"
+      ())
+;;
+
 let () =
   run "runtime_acp_client"
     [ "profiles", [ test_case "closed driver profiles" `Quick test_driver_profiles ]
@@ -4724,6 +4986,8 @@ let () =
             `Quick test_layer4_stream_projection_sse_framing_native_tools_and_zero_usage
         ; test_case "Tool_call_updated monotonic escalation re-evaluates effect fence"
             `Quick test_tool_call_update_escalation_re_evaluates_effect_fence
+        ; test_case "Implicit_mcp_kind multi-MCP server isolation & cross-driver kind=mcp fail-closed"
+            `Quick test_implicit_mcp_kind_multi_server_isolation
         ] )
     ; ( "wire"
       , [ test_case "session update & usage parsing" `Quick test_parse_wire_updates_and_usage

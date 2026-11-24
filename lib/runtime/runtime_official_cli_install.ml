@@ -51,11 +51,14 @@ let path_directories () =
 let install_dir_variable = function
   | Codex -> Some "CODEX_INSTALL_DIR"
   | Mistral_vibe | Kimi_code -> Some "UV_TOOL_BIN_DIR"
-  | Claude | Antigravity | Muse_code -> None
+  | Muse_code -> Some "MUSE_INSTALL_DIR"
+  | Claude | Antigravity -> None
 
 (* Where the vendor installer writes the client: the client's install
    directory variable when it is set, else ~/.local/bin (and ~/.cargo/bin for
-   uv-installed ACP clients such as vibe-acp and kimi). *)
+   uv-installed ACP clients such as vibe-acp and kimi). The Codex and Muse Code
+   installers write only to their variable's directory when it is set, so no
+   other directory is searched then. *)
 let vendor_directories client =
   let explicit =
     match Option.bind (install_dir_variable client) Env_config_core.raw_value_opt with
@@ -77,7 +80,7 @@ let vendor_directories client =
     | None -> []
   in
   match client, explicit with
-  | Codex, _ :: _ -> explicit
+  | (Codex | Muse_code), _ :: _ -> explicit
   | (Codex | Claude | Antigravity | Mistral_vibe | Kimi_code | Muse_code), _ ->
     explicit @ home_fallbacks
 ;;

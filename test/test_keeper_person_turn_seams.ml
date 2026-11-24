@@ -1073,7 +1073,7 @@ value = "op-unused"
 
 [models.first]
 api-name = "first-model"
-max-context = 16384
+max-context = 200000
 tools-support = true
 streaming = true
 

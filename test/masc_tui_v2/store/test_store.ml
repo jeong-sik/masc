@@ -19474,6 +19474,7 @@ let () =
                   base_path = "/tmp/ws";
                   masc_root = "/tmp/ws/.masc";
                   workspace_sha256 = Some "abc";
+                  instance_id = Some "inst-1";
                 }
               in
               let m_ws =
@@ -19543,7 +19544,7 @@ let () =
               Alcotest.(check int) "gate_snapshot populates pending" 1
                 (List.length (Work_store.gate_pending_list m1.work));
               (* /gate mode + del-rule + approve-always + retry + keeper-mode *)
-              let run_slash m cmd_str =
+              let run_slash (m : Model.t) cmd_str =
                 let m_d =
                   {
                     m with

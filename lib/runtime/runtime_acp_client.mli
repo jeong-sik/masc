@@ -151,11 +151,6 @@ type driver_profile =
   ; effort_config_id : string option
       (** ACP config option id that carries reasoning effort. [None] when the
           client takes effort only as a process setting ([muse acp]). *)
-  ; enforces_native_none : bool
-      (** Whether refusing [session/request_permission] keeps every native
-          tool off. [false] when the client runs some tools without asking
-          (the [muse acp] read tool), so posture [none] runs at the [read]
-          floor ({!Runtime_native_tools.degrade_on_admission}). *)
   }
 
 val profile_of_driver : driver -> driver_profile
@@ -540,8 +535,10 @@ val start
     without requiring a global [Eio_context]. When [native_posture] is
     supplied, Antigravity [settings.json] enforces posture-specific write,
     command, and [cwd] read denies and Kimi suppresses [--skills-dir] under
-    [Native_none]. A driver that cannot enforce [Native_none] is refused
-    with [Invalid_config] before its process starts. *)
+    [Native_none]. [muse acp] is started with [-c run.toolset] naming the
+    tools [native_posture] allows and the tools of [mcp_server]; the host
+    runs some native tools without a permission request, so refusing requests
+    could not keep them off. *)
 
 val driver : t -> driver
 val mcp_server_isolation : t -> mcp_server_isolation
@@ -666,6 +663,7 @@ module For_testing : sig
 
   val build_argv
     :  ?native_posture:Runtime_native_tools.posture
+    -> ?mcp_server_name:string
     -> config
     -> temp_gemini_dir:string option
     -> string list

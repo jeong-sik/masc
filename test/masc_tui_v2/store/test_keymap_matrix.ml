@@ -3950,6 +3950,7 @@ let test_pillar2_scroll_bounds_all_surfaces () =
   let big_facts =
     List.init 220 (fun i : Wire_knowledge.memory_fact_entry ->
         {
+          event_order = None;
           added_at_rev = Some 2;
           memory_id = Printf.sprintf "fact-%03d" i;
           category = "verified";
@@ -3995,6 +3996,7 @@ let test_pillar2_scroll_bounds_all_surfaces () =
                 journal_failures_in_window = 0;
                 journal_quarantines_in_window = 0;
                 undecodable_journal_lines = 0;
+                history_coverage = None;
               };
             revisions = [];
             added = big_facts;
@@ -4005,7 +4007,9 @@ let test_pillar2_scroll_bounds_all_surfaces () =
                 {
                   memory_id = "inv-1";
                   text = "Invalidated stale premise";
-                  at_rev = 2;
+                  event_order = None;
+                  at_rev = Some 2;
+                  at_unix = None;
                   missing_premise_ids = [ "prem-secret-99" ];
                 };
               ];

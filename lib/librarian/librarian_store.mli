@@ -177,7 +177,7 @@ val commit_molt
   -> Librarian_plan.t
   -> committed
 
-(** Finite-storage log checkpoint compaction: flushes historical removals from
+(** Finite-storage log checkpoint compaction: flushes fact changes and historical removals from
     the live [.memory-log.jsonl] into the cold archive sidecar
     ([.memory-archive.jsonl]) and atomically rewrites the live log to a single
     [Checkpoint] baseline line preserving the exact current snapshot, revision,

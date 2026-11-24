@@ -329,8 +329,7 @@ let selected_memory ~claim ~use =
   let id=Masc.Keeper_memory_os_types.memory_id fact in
   `Assoc ["id",`String id;"use",`String use;"current",`Assoc
     ["store",`String "current_memory_snapshot";"memory_id",`String id;
-     "current_fact",Masc.Keeper_memory_os_types.fact_to_json fact;
-     "direct_admission_witness_count",`Int 1;"successor_witness_count",`Int 0]]
+     "current_fact",Masc.Keeper_memory_os_types.fact_to_json fact]]
 let selection_receipt receipt =
   `Assoc ["status",`String "completed";"purpose",`String "E17 production approval";
     "selection_id",`String receipt;"selected",`List [selected_memory ~claim:"Two approvals required" ~use:"current_decision"];

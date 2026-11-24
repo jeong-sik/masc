@@ -165,14 +165,17 @@ let append ~path ~at_end line =
        Error (Write_failed { path; detail = Fs_compat.private_jsonl_append_error_to_string error }))
 ;;
 
-let rewrite_compacted ~path line =
+let rewrite_compacted ~path ~at_end line =
   let row = Yojson.Safe.to_string (Codec.to_json line) ^ "\n" in
   let dir = Filename.dirname path in
   match Fs_compat.mkdir_p dir with
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception exn -> Error (Directory_unavailable { path = dir; detail = Printexc.to_string exn })
   | () ->
-    (match Fs_compat.save_file_atomic_strict path row with
-     | Ok () -> Ok { new_end = String.length row; at = 0 }
+    (match Fs_compat.rewrite_private_file_durable_locked_result path (fun original ->
+       let actual = String.length original in
+       if actual <> at_end then None, Error (End_moved { expected = at_end; actual })
+       else Some row, Ok { new_end = String.length row; at = 0 }) with
+     | Ok outcome -> outcome
      | Error detail -> Error (Write_failed { path; detail }))
 ;;

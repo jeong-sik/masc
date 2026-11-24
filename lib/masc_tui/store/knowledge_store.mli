@@ -500,6 +500,8 @@ val filtered_memory_claims : t -> Wire_knowledge.world_claim list
 val filtered_librarian_writers : t -> Wire_knowledge.librarian_writer_row list
 val memory_left_rows : t -> memory_left_row list
 val selected_memory_left_row : t -> memory_left_row option
+val memory_change_time : rev:int option -> at:float option -> string
+
 val memory_diff_matches_filter : t -> string -> bool
 
 val health_row_for_keeper :

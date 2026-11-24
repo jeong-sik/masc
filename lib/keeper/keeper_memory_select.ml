@@ -84,8 +84,6 @@ let collect ~config ~meta ~keepers_dir =
                    [ "store", `String "current_memory_snapshot"
                    ; "memory_id", `String id
                    ; "current_fact", Memory.fact_to_json fact
-                   ; "direct_admission_witnesses", `List []
-                   ; "successor_witnesses", `List []
                    ; ( "provenance_guidance"
                      , `String
                          "Historical observations and lineage are lookup provenance, not additional current claims." )
@@ -293,8 +291,6 @@ let handle ?turn_ref ~clock ~config ~(meta : Keeper_meta_contract.keeper_meta) ~
                          [ "store", `String "current_memory_snapshot"
                          ; "memory_id", `String choice.id
                          ; "current_fact", Memory.fact_to_json fact
-                         ; "direct_admission_witness_count", `Int 0
-                         ; "successor_witness_count", `Int 0
                          ]
                    in
                    selected :=

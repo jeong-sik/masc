@@ -103,8 +103,9 @@ val append
   -> (appended, append_error) result
 
 (** Atomically replace the commit log with a single compacted checkpoint
-    baseline line so future scans read only post-checkpoint commits. *)
+    baseline line if the held end offset is still current, so future scans read only post-checkpoint commits. *)
 val rewrite_compacted
   :  path:string
+  -> at_end:int
   -> Librarian_log.line
   -> (appended, append_error) result

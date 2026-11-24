@@ -558,6 +558,7 @@ let make_rich_model ~lang ~cols ~rows =
   in
   let fact_added : Wire_knowledge.memory_fact_entry =
     {
+      event_order = None;
       added_at_rev = Some 3828;
       memory_id = "mem-101";
       category = "constraint";
@@ -619,6 +620,7 @@ let make_rich_model ~lang ~cols ~rows =
                 journal_failures_in_window = 0;
                 journal_quarantines_in_window = 0;
                 undecodable_journal_lines = 0;
+                history_coverage = None;
               };
             revisions =
               [
@@ -636,7 +638,10 @@ let make_rich_model ~lang ~cols ~rows =
               [
                 {
                   relation = Wire_knowledge.Revision;
-                  at_rev = 3827;
+                  after_source = None;
+                  event_order = None;
+                  at_rev = Some 3827;
+                  at_unix = None;
                   before = fact_before;
                   after = fact_after;
                 };
@@ -647,8 +652,10 @@ let make_rich_model ~lang ~cols ~rows =
                   memory_id = "mem-099";
                   category = "fact";
                   text = "Legacy serve binding active";
-                  removed_at_rev = 3825;
-                  removed_by = "librarian";
+                  event_order = None;
+                  removed_at_rev = Some 3825;
+                  at_unix = None;
+                  removed_by = Some "librarian";
                   drop_reason = Some "superseded";
                 };
               ];
@@ -657,7 +664,9 @@ let make_rich_model ~lang ~cols ~rows =
                 {
                   memory_id = "mem-098";
                   text = "Stale premise fact";
-                  at_rev = 3826;
+                  event_order = None;
+                  at_rev = Some 3826;
+                  at_unix = None;
                   missing_premise_ids = [ "mem-010" ];
                 };
               ];

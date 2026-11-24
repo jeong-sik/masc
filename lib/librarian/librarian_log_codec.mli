@@ -80,3 +80,8 @@ val removal_to_json : Librarian_effects.removal -> Yojson.Safe.t
 val removal_of_json
   :  Yojson.Safe.t
   -> (Librarian_effects.removal, Keeper_memory_os_types.wire_error) result
+
+
+val removed_of_json :
+  Yojson.Safe.t ->
+  (Keeper_memory_os_types.fact * Librarian_effects.removal, Keeper_memory_os_types.wire_error) result

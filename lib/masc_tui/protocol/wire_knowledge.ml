@@ -1369,6 +1369,7 @@ type memory_revision_tick = {
 }
 
 type memory_fact_entry = {
+  event_order : int option;
   added_at_rev : int option;
   memory_id : string;
   category : string;
@@ -1381,28 +1382,49 @@ type memory_fact_entry = {
   heat : memory_heat;
 }
 
+type successor_body_source = Same_commit | Held_before | Current_snapshot | Archived_fact
+
 type memory_updated_fact = {
+  event_order : int option;
   relation : modification_relation;
-  at_rev : int;
+  at_rev : int option;
+  at_unix : float option;
   before : memory_fact_entry;
   after : memory_fact_entry;
+  after_source : successor_body_source option;
 }
 
 type memory_retracted_fact = {
+  event_order : int option;
   memory_id : string;
   category : string;
   text : string;
-  removed_at_rev : int;
-  removed_by : string;
+  removed_at_rev : int option;
+  at_unix : float option;
+  removed_by : string option;
   drop_reason : string option;
 }
 
 type memory_invalidated_fact = {
+  event_order : int option;
   memory_id : string;
   text : string;
-  at_rev : int;
+  at_rev : int option;
+  at_unix : float option;
   missing_premise_ids : string list;
 }
+
+type keeper_history_coverage =
+  | Complete_history
+  | Partial_history of
+      { missing_sequences : (int * int) list
+      ; unsequenced_in_window : int
+      ; unplaced_in_revision_range : int
+      ; unreadable_lines : int
+      ; unresolved_successors : int
+      ; snapshot_ahead : bool
+      ; snapshot_behind : bool
+      }
 
 type keeper_diff_counts = {
   total_facts_now : int;
@@ -1413,6 +1435,7 @@ type keeper_diff_counts = {
   journal_failures_in_window : int;
   journal_quarantines_in_window : int;
   undecodable_journal_lines : int;
+  history_coverage : keeper_history_coverage option;
 }
 
 type keeper_writer_status =
@@ -1810,6 +1833,7 @@ let decode_revision_tick json =
   Ok { rev; at_unix; source; added; removed; invalidated }
 
 let decode_fact_entry json =
+  let* event_order = optional_int_field json "order" in
   let* added_at_rev = optional_int_field json "added_at_rev" in
   let* memory_id = required_nonblank_string json "memory_id" in
   let* category = required_nonblank_string json "category" in
@@ -1826,6 +1850,7 @@ let decode_fact_entry json =
   let* heat = decode_enum ~field:"heat" memory_heat_of_string json in
   Ok
     {
+      event_order;
       added_at_rev;
       memory_id;
       category;
@@ -1838,30 +1863,71 @@ let decode_fact_entry json =
       heat;
     }
 
+let event_coordinates json key =
+  let* revision = optional_int_field json key in
+  let* at = optional_finite_float json "at_unix" in
+  match revision, at with
+  | Some rev, _ when rev < 0 -> Error ("negative revision in " ^ key)
+  | None, None -> Error ("missing revision and event time in " ^ key)
+  | Some _, _ | None, Some _ -> Ok (revision, at)
+
 let decode_updated_fact json =
   let* relation = decode_enum ~field:"relation" relation_of_string json in
-  let* at_rev = required_nonnegative_int_field json "at_rev" in
+  let* event_order = optional_int_field json "order" in
+  let* at_rev, at_unix = event_coordinates json "at_rev" in
   let* before_obj = required_object_field json "before" in
   let* before = decode_fact_entry before_obj in
   let* after_obj = required_object_field json "after" in
   let* after = decode_fact_entry after_obj in
-  Ok { relation; at_rev; before; after }
+  let* source = optional_nonblank_string json "after_source" in
+  let* after_source = match source with
+    | None -> Ok None | Some "same_commit" -> Ok (Some Same_commit)
+    | Some "held_before" -> Ok (Some Held_before) | Some "current_snapshot" -> Ok (Some Current_snapshot)
+    | Some "archived_fact" -> Ok (Some Archived_fact) | Some other -> Error ("unknown successor source: " ^ other)
+  in
+  Ok { event_order; relation; at_rev; at_unix; before; after; after_source }
 
 let decode_retracted_fact json =
   let* memory_id = required_nonblank_string json "memory_id" in
   let* category = required_nonblank_string json "category" in
   let* text = required_string_field json "text" in
-  let* removed_at_rev = required_nonnegative_int_field json "removed_at_rev" in
-  let* removed_by = required_nonblank_string json "removed_by" in
+  let* event_order = optional_int_field json "order" in
+  let* removed_at_rev, at_unix = event_coordinates json "removed_at_rev" in
+  let* removed_by = optional_nonblank_string json "removed_by" in
   let* drop_reason = optional_nonblank_string json "drop_reason" in
-  Ok { memory_id; category; text; removed_at_rev; removed_by; drop_reason }
+  Ok { event_order; memory_id; category; text; removed_at_rev; at_unix; removed_by; drop_reason }
 
 let decode_invalidated_fact json =
   let* memory_id = required_nonblank_string json "memory_id" in
   let* text = required_string_field json "text" in
-  let* at_rev = required_nonnegative_int_field json "at_rev" in
+  let* event_order = optional_int_field json "order" in
+  let* at_rev, at_unix = event_coordinates json "at_rev" in
   let* missing_premise_ids = required_string_list json "missing_premise_ids" in
-  Ok { memory_id; text; at_rev; missing_premise_ids }
+  Ok { event_order; memory_id; text; at_rev; at_unix; missing_premise_ids }
+
+let decode_keeper_history_coverage data =
+  let* object_ = optional_object_field data "coverage" in
+  match object_ with
+  | None -> Ok None
+  | Some obj ->
+    let* state = required_nonblank_string obj "status" in
+    (match state with
+     | "complete" -> Ok (Some Complete_history)
+     | "partial" ->
+       let* gaps = required_list_field obj "missing_sequences" in
+       let* missing_sequences = decode_list "missing_sequences" (fun json ->
+         let* first = required_nonnegative_int_field json "first" in
+         let* last = required_nonnegative_int_field json "last" in
+         if first < 1 || last < first then Error "invalid missing sequence range" else Ok (first, last)) gaps in
+       let* unsequenced_in_window = required_nonnegative_int_field obj "unsequenced_in_window" in
+       let* unplaced_in_revision_range = required_nonnegative_int_field obj "unplaced_in_revision_range" in
+       let* unreadable_lines = required_nonnegative_int_field obj "unreadable_lines" in
+       let* unresolved_successors = required_nonnegative_int_field obj "unresolved_successors" in
+       let* snapshot_ahead = required_bool_field obj "snapshot_ahead" in
+       let* snapshot_behind = required_bool_field obj "snapshot_behind" in
+       Ok (Some (Partial_history { missing_sequences; unsequenced_in_window; unplaced_in_revision_range;
+                                   unreadable_lines; unresolved_successors; snapshot_ahead; snapshot_behind }))
+     | other -> Error ("unknown keeper history coverage: " ^ other))
 
 let decode_keeper_writer_status json =
   let* kind = required_nonblank_string json "kind" in
@@ -1940,6 +2006,7 @@ let decode_memory_diff json =
           required_nonnegative_int_field counts_obj
             "journal_quarantines_in_window"
         in
+        let* history_coverage = decode_keeper_history_coverage body in
         let* undecodable_journal_lines =
           required_nonnegative_int_field counts_obj "undecodable_journal_lines"
         in
@@ -1980,6 +2047,7 @@ let decode_memory_diff json =
                    journal_failures_in_window;
                    journal_quarantines_in_window;
                    undecodable_journal_lines;
+                   history_coverage;
                  };
                revisions;
                added;

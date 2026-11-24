@@ -77,6 +77,31 @@ type cause =
       ; archived_entries : int
       }
 
+let memory_source (cause : cause) : Keeper_memory_os_current_types.source =
+  let non_empty text fallback =
+    let trimmed = String.trim text in
+    if String.equal trimmed "" then fallback else trimmed
+  in
+  match cause with
+  | Direct { write = Librarian_direct.Retract _; trace; _ } ->
+    { kind = Explicit_retract; trace_id = non_empty trace "explicit_retract" }
+  | Direct
+      { write = Librarian_direct.(Remember _ | Supersede _); trace; _ } ->
+    { kind = Explicit_write; trace_id = non_empty trace "explicit_write" }
+  | Read { trace; _ } ->
+    { kind = Librarian; trace_id = non_empty trace "librarian_read" }
+  | Make_room { trace; _ } ->
+    { kind = Librarian; trace_id = non_empty trace "librarian_make_room" }
+  | Molt_and_synthesize { trace; _ } ->
+    { kind = Librarian; trace_id = non_empty trace "librarian_molt" }
+  | Adopt { by; _ } ->
+    { kind = Librarian; trace_id = non_empty by "adopt" }
+  | Skip _ ->
+    { kind = Librarian; trace_id = "skip" }
+  | Checkpoint _ ->
+    { kind = Librarian; trace_id = "checkpoint" }
+;;
+
 type commit =
   { seq : int
   ; at : float

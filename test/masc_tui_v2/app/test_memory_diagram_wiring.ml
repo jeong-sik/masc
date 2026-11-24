@@ -1198,6 +1198,7 @@ let test_visibility_enter_refresh_and_resize () =
                 journal_failures_in_window = 0;
                 journal_quarantines_in_window = 0;
                 undecodable_journal_lines = 0;
+                history_coverage = None;
               };
             revisions = [];
             added = [];

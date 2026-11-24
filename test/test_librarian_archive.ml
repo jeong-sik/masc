@@ -188,6 +188,77 @@ let test_lines_that_do_not_decode_are_counted () =
     (archive_text place ~current:(memory state))
 ;;
 
+let test_memory_diff_through_compaction () =
+  let module Diff = Masc.Librarian_history_diff in
+  let place = started_place () in
+  let state = after_two_removals place in
+  let current = memory state in
+  let store = match state.state with
+    | Idle { store; _ } -> store
+    | Asking _ | Resting _ | Refused_at_bottom _ | Stopped _ -> fail "fixture did not settle" in
+  let revision = (Store.memory store).revision in
+  let path = log_path place in
+  let read () = match Archive.history path with
+    | Ok h -> h | Error e -> fail (Private_jsonl_scan.error_to_string e) in
+  let project range = Diff.project ~range ~current ~revision (read ()) in
+  let time = Diff.Time (200., 205.) in
+  let before = project time in
+  let links d = List.filter_map (function
+    | (p : Diff.position), Diff.Updated u -> Some (p.seq, p.revision, p.at, Types.memory_id u.before,
+                                                    Types.memory_id u.after, u.body_source)
+    | _, (Diff.Removed _ | Diff.Added _ | Diff.Successor_unavailable _) -> None) d.Diff.events in
+  let initial_links = links before in
+  check int "live fixture has a direct replacement" 1 (List.length initial_links);
+  let raw = In_channel.with_open_bin path In_channel.input_all in
+  (match Store.compact_log store ~at:206. with Ok _ -> () | Error _ -> fail "compact_log failed");
+  let cold = project time in
+  check bool "same ordered events and source coordinates before and after molt" true
+    (before.events = cold.events && before.ticks = cold.ticks && cold.gaps = []);
+  let checkpoint = In_channel.with_open_bin path In_channel.input_all in
+  Out_channel.with_open_bin path (fun oc -> output_string oc raw);
+  check bool "publish-before-rewrite overlap counts each sequence once" true ((project time).events = before.events);
+  Out_channel.with_open_bin path (fun oc -> output_string oc checkpoint);
+  let last = match Log_store.read_tail path with
+    | Ok (Written { last; _ }) -> last
+    | Ok Nothing_written | Error _ -> fail "missing fixture tail" in
+  check bool "stale checkpoint cannot replace a longer live log" true
+    (match Log_store.rewrite_compacted ~path ~at_end:0 last with
+     | Error (End_moved _) -> true
+     | Ok _ | Error (Directory_unavailable _ | Write_failed _) -> false);
+  check string "newer log bytes survive the refused rewrite" checkpoint (In_channel.with_open_bin path In_channel.input_all);
+  let archive_path = Log_store.archive_path_of_log_path path in
+  let c = List.find (fun (c : Masc.Librarian_memory_change.t) -> c.at = 205.) (read ()).changes in
+  let old, removal = List.hd c.removed in
+  let c2 = { c with seq = c.seq + 1; revision = c.revision + 1; at = c.at } in
+  let repeated = { (read ()) with unsequenced = []; changes = [c; c2] } in
+  let repeat = Diff.project ~range:time ~current ~revision repeated in
+  check bool "two committed occurrences may have the same IDs and the same time" true
+    (List.map (fun (seq, _, _, _, _, _) -> seq) (links repeat) = [ Some c.seq; Some c2.seq ]);
+  let unknown = id_of_claim "unretained successor" in
+  let missing = { c with added = []; removed = [old, Superseded_by unknown] } in
+  let incomplete = Diff.project ~range:time ~current ~revision { repeated with changes = [missing] } in
+  check bool "missing successor body retains the proved direct ID" true
+    (List.exists (function _, Diff.Successor_unavailable { successor_id; _ } -> successor_id = unknown
+                 | _, (Diff.Removed _ | Diff.Added _ | Diff.Updated _) -> false) incomplete.events);
+  (* The historical sidecar has no source or revision. Its direct target ID
+     and time are attested even when the later log only contains a checkpoint. *)
+  Out_channel.with_open_bin archive_path (fun oc ->
+    output_string oc (Yojson.Safe.to_string (`Assoc [ "fact", Types.fact_to_json old
+      ; "removal", Masc.Librarian_log_codec.removal_to_json removal; "at", `Float c.at; "line_at", `Int c.line_at ]) ^ "\n"));
+  let historical = project time in
+  check bool "legacy link has event time and current successor with unknown revision" true
+    (links historical = [None, None, 205., Types.memory_id old, id_of_claim new_owner, Diff.Current_snapshot]);
+  check bool "missing original sequences visible" true (historical.gaps <> []);
+  check bool "revision filter never guesses a revision for an old timestamp" true
+    ((project (Diff.Revisions (c.revision, c.revision))).events = []);
+  Out_channel.with_open_gen [ Open_wronly; Open_append; Open_binary ] 0o600 archive_path
+    (fun oc -> output_string oc "damaged\n");
+  check int "partial archive reports unreadable rows" 1 (read ()).unreadable;
+  Out_channel.with_open_gen [ Open_wronly; Open_append; Open_binary ] 0o600 archive_path
+    (fun oc -> output_string oc "{");
+  check int "an incomplete cold record counts separately" 2 (read ()).unreadable
+;;
+
 let test_compact_log_preserves_promotions_across_reboot_and_archive_read () =
   let place = started_place () in
   let state = after_two_removals place in
@@ -309,7 +380,8 @@ let test_eio_concurrent_compact_log_and_archive_read () =
 let () =
   run "librarian_archive"
     [ ( "left"
-      , [ test_case "what left and why" `Quick test_what_left_and_why
+      , [ test_case "ordered memory changes before and after molt" `Quick test_memory_diff_through_compaction
+        ; test_case "what left and why" `Quick test_what_left_and_why
         ; test_case "a fact added again" `Quick test_a_fact_added_again_is_not_left
         ; test_case "a fact the snapshot holds" `Quick test_a_fact_the_snapshot_holds_is_not_left
         ; test_case "lines that do not decode" `Quick test_lines_that_do_not_decode_are_counted

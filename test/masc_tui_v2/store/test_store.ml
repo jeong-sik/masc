@@ -2178,6 +2178,7 @@ let test_round2_store_regressions () =
                 journal_failures_in_window = 0;
                 journal_quarantines_in_window = 0;
                 undecodable_journal_lines = 0;
+                history_coverage = None;
               };
             revisions = [];
             added = [];
@@ -5314,11 +5315,13 @@ let test_nav_fix6_work_inbox_filter_and_split_pane_clamping () =
                 journal_failures_in_window = 0;
                 journal_quarantines_in_window = 0;
                 undecodable_journal_lines = 0;
+                history_coverage = None;
               };
             revisions = [];
             added =
               [
                 {
+                  event_order = None;
                   added_at_rev = Some 1;
                   memory_id = "mem-1";
                   category = "fact";
@@ -7830,11 +7833,13 @@ let test_memory_explorer_store_fetches_reading_and_sse () =
                 journal_failures_in_window = 0;
                 journal_quarantines_in_window = 0;
                 undecodable_journal_lines = 0;
+                history_coverage = None;
               };
             revisions = [];
             added =
               [
                 {
+                  event_order = None;
                   added_at_rev = Some 5;
                   memory_id = "md-1";
                   category = "fact";
@@ -8037,11 +8042,13 @@ let test_memory_explorer_store_fetches_reading_and_sse () =
                 journal_failures_in_window = 0;
                 journal_quarantines_in_window = 0;
                 undecodable_journal_lines = 0;
+                history_coverage = None;
               };
             revisions = [];
             added =
               [
                 {
+                  event_order = None;
                   added_at_rev = Some 4;
                   memory_id = "md-1";
                   category = "fact";
@@ -8054,6 +8061,7 @@ let test_memory_explorer_store_fetches_reading_and_sse () =
                   heat = Wire_knowledge.Heat_hot;
                 };
                 {
+                  event_order = None;
                   added_at_rev = Some 5;
                   memory_id = "md-2";
                   category = "fact";

@@ -3,6 +3,8 @@ module Log = Librarian_log
 module Log_store = Librarian_log_store
 module Codec = Librarian_log_codec
 module By_id = Map.Make (String)
+module By_seq = Map.Make (Int)
+module Change = Librarian_memory_change
 
 type left =
   { fact : Types.fact
@@ -16,10 +18,16 @@ type t =
   ; unreadable : int
   }
 
+type history =
+  { unsequenced : left list
+  ; changes : Change.t list
+  ; unreadable : int
+  ; live_lines : int
+  }
+
 type seen =
   { gone : (int * left) By_id.t
   ; removals : int
-  ; unreadable : int
   }
 
 let left_to_json (entry : left) =
@@ -49,54 +57,39 @@ let left_of_json = function
 ;;
 
 let record_left seen (entry : left) =
-  { seen with
-    gone = By_id.add (Types.memory_id entry.fact) (seen.removals, entry) seen.gone
+  { gone = By_id.add (Types.memory_id entry.fact) (seen.removals, entry) seen.gone
   ; removals = seen.removals + 1
   }
 ;;
 
-let after_commit seen ~line_at (commit : Log.commit) =
-  let seen =
-    List.fold_left
-      (fun seen (fact, removal) ->
-         record_left seen { fact; removal; at = commit.at; line_at })
-      seen
-      commit.effects.removed
-  in
-  { seen with
-    gone =
-      List.fold_left
-        (fun gone fact -> By_id.remove (Types.memory_id fact) gone)
-        seen.gone
-        commit.effects.added
-  }
+let after_change seen (c : Change.t) =
+  let seen = List.fold_left
+      (fun seen (fact, removal) -> record_left seen { fact; removal; at = c.at; line_at = c.line_at })
+      seen c.removed in
+  { seen with gone = List.fold_left (fun gone fact -> By_id.remove (Types.memory_id fact) gone)
+                       seen.gone c.added }
 ;;
 
-let fold_cold_archive archive_path init =
-  if not (Sys.file_exists archive_path)
-  then Ok init
-  else
-    Private_jsonl_scan.fold archive_path ~rows_per_read:128 ~init ~f:(fun seen ~at:(_ : int) row ->
-      match Yojson.Safe.from_string row with
-      | exception Yojson.Json_error (_ : string) -> { seen with unreadable = seen.unreadable + 1 }
-      | json ->
-        (match left_of_json json with
-         | Ok entry -> record_left seen entry
-         | Error (_ : Types.wire_error) -> { seen with unreadable = seen.unreadable + 1 }))
+let left_of_history (history : history) ~current =
+  let initial = { gone = By_id.empty; removals = 0 } in
+  let seen = List.fold_left record_left initial history.unsequenced in
+  let seen = List.fold_left after_change seen history.changes in
+  let gone = List.fold_left (fun gone fact -> By_id.remove (Types.memory_id fact) gone) seen.gone current in
+  let ordered = By_id.bindings gone |> List.map snd |> List.sort (fun (a, _) (b, _) -> Int.compare a b) in
+  { left = List.map snd ordered; unreadable = history.unreadable }
 ;;
 
-let write_cold_archive ~archive_path entries =
+let write_history ~archive_path (history : history) =
   let dir = Filename.dirname archive_path in
   match Fs_compat.mkdir_p dir with
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception exn -> Error (Printexc.to_string exn)
   | () ->
-    let body =
-      entries
-      |> List.map (fun entry -> Yojson.Safe.to_string (left_to_json entry) ^ "\n")
-      |> String.concat ""
-    in
-    Fs_compat.save_file_atomic_strict archive_path body
+    let buf = Buffer.create 4096 in
+    let write json = Buffer.add_string buf (Yojson.Safe.to_string json); Buffer.add_char buf '\n' in
+    List.iter (fun old -> write (left_to_json old)) history.unsequenced;
+    List.iter (fun c -> write (Change.to_json c)) history.changes;
+    Fs_compat.save_file_atomic_strict archive_path (Buffer.contents buf)
 ;;
 
 type lock_entry =
@@ -144,43 +137,68 @@ let with_path_lock ~log_path f =
   Fun.protect ~finally:release (fun () -> Cross_context_mutex.with_lock entry.mu f)
 ;;
 
-let read_unlocked path ~current =
-  let archive_path = Log_store.archive_path_of_log_path path in
-  (* Read the live commit log FIRST, then the cold archive sidecar. Because
-     [compact_log] atomically writes the cold archive BEFORE atomically
-     rewriting the live log to a single Checkpoint line, reading live-first
-     and replaying live commits over cold entries guarantees zero dropped
-     removals even under concurrent cross-process compaction. *)
-  let collect_live (commits_rev, unreadable) ({ at; line } : Log_store.scanned) =
-    match line with
-    | Error (_ : Log_store.undecodable) -> commits_rev, unreadable + 1
-    | Ok (Started _) -> commits_rev, unreadable
-    | Ok (Committed commit) -> (at, commit) :: commits_rev, unreadable
+let history_unlocked path =
+  let open Result.Syntax in
+  (* A checkpoint publishes the archive first. Capturing live before cold
+     therefore sees either copy of every committed sequence, including when
+     another process is between the two atomic renames. *)
+  let* live, unreadable, live_lines =
+    Log_store.fold path ~init:([], 0, 0) ~f:(fun (changes, bad, count) row ->
+      match row.Log_store.line with
+      | Ok (Log.Started _) -> changes, bad, count + 1
+      | Ok (Committed commit) -> Change.of_commit ~line_at:row.at commit :: changes, bad, count + 1
+      | Error _ -> changes, bad + 1, count + 1)
   in
-  match Log_store.fold path ~init:([], 0) ~f:collect_live with
-  | Error _ as error -> error
-  | Ok (live_commits_rev, live_unreadable) ->
-    let initial = { gone = By_id.empty; removals = 0; unreadable = live_unreadable } in
-    (match fold_cold_archive archive_path initial with
-     | Error _ as error -> error
-     | Ok after_cold ->
-       let { gone; unreadable; removals = (_ : int) } =
-         List.fold_left
-           (fun seen (line_at, commit) -> after_commit seen ~line_at commit)
-           after_cold
-           (List.rev live_commits_rev)
-       in
-       let gone =
-         List.fold_left (fun gone fact -> By_id.remove (Types.memory_id fact) gone) gone current
-       in
-       let in_order =
-         List.sort
-           (fun (a, (_ : left)) (b, (_ : left)) -> Int.compare a b)
-           (List.map snd (By_id.bindings gone))
-       in
-       Ok { left = List.map snd in_order; unreadable })
+  let cold = Log_store.archive_path_of_log_path path in
+  let add_change (events, bad) (c : Change.t) =
+    match By_seq.find_opt c.seq events with
+    | None -> By_seq.add c.seq (Some c) events, bad
+    | Some (Some prior) when { prior with line_at = c.line_at } = c -> events, bad
+    | Some (Some _) -> By_seq.add c.seq None events, bad + 1
+    | Some None -> events, bad
+  in
+  let* old, (events, bad) =
+    Private_jsonl_scan.fold cold ~rows_per_read:128 ~init:([], (By_seq.empty, unreadable))
+      ~f:(fun (old, (events, bad)) ~at:_ raw ->
+        match Yojson.Safe.from_string raw with
+        | exception Yojson.Json_error _ -> old, (events, bad + 1)
+        | `Assoc fields as json when List.mem_assoc "seq" fields ->
+          (match Change.of_json json with
+           | Ok c -> old, add_change (events, bad) c
+           | Error _ -> old, (events, bad + 1))
+        | json ->
+          (match left_of_json json with
+           | Ok left -> left :: old, (events, bad)
+           | Error _ -> old, (events, bad + 1)))
+  in
+  (* A live append may have a pending fragment. The atomically published
+     cold file always ends at a row boundary, so a cold fragment is lost evidence. *)
+  let* bad =
+    match Fs_compat.read_private_jsonl_tail_locked_result cold ~max_bytes:1 with
+    | Fs_compat.Private_file_failed err
+    | Private_file_failed_with_cleanup_failure { error = err; _ } ->
+      Error (Private_jsonl_scan.Read_failed { path = cold; detail = Fs_compat.Private_jsonl_tail.error_to_string err })
+    | Private_file_succeeded tail | Private_file_succeeded_with_cleanup_failure { value = tail; _ } ->
+      (match tail with
+       | Fs_compat.Private_jsonl_tail.Tail_present { incomplete_tail = true; _ } -> Ok (bad + 1)
+       | Tail_missing | Tail_present { incomplete_tail = false; _ } -> Ok bad)
+  in
+  let events, unreadable = List.fold_left add_change (events, bad) live in
+  let changes = By_seq.bindings events |> List.filter_map snd in
+  (* A pre-change writer could have published the old removal sidecar while
+     the corresponding live log was still visible. Only suppress an exact
+     removal occurrence. Repeated changes to a fact at other times survive. *)
+  let known = Hashtbl.create 16 in
+  List.iter (fun (c : Change.t) ->
+    List.iter (fun (fact, removal) -> Hashtbl.replace known (Types.memory_id fact, removal, c.at) ())
+      c.removed) changes;
+  let unsequenced = List.rev old |> List.filter (fun (e : left) ->
+    not (Hashtbl.mem known (Types.memory_id e.fact, e.removal, e.at))) in
+  Ok { unsequenced; changes; unreadable; live_lines }
 ;;
 
+let history path = with_path_lock ~log_path:path (fun () -> history_unlocked path)
+
 let read path ~current =
-  with_path_lock ~log_path:path (fun () -> read_unlocked path ~current)
+  Result.map (fun history -> left_of_history history ~current) (history path)
 ;;

@@ -1,11 +1,6 @@
-(** The facts that left a Keeper's Memory, read from its cold compacted
-    archive sidecar (if present) plus the post-checkpoint tail of its commit
-    log ([<keeper>.memory-log.jsonl]).
-
-    After {!Librarian_store.compact_log} checkpoints the commit log, reading
-    the archive avoids O(all-history) byte-0 scans of the live log: cold
-    removals are served from [<keeper>.memory-archive.jsonl] and only commits
-    after the latest [Checkpoint] baseline are folded from the live log. *)
+(** Fact changes in the compacted archive and live commit log. The chronological
+    projection powers the diff. The historical-search projection shows only the
+    last removal of each fact that is still absent from current Memory. *)
 
 open Keeper_memory_os_types
 
@@ -25,15 +20,23 @@ type t =
     commit-log path across domains/fibers in this process. *)
 val with_path_lock : log_path:string -> (unit -> 'a) -> 'a
 
-(** Same as {!read} when the caller already holds {!with_path_lock} for [path]. *)
-val read_unlocked : string -> current:fact list -> (t, Private_jsonl_scan.error) result
+(** Old sidecars record a removal and its time. New sidecars store the exact
+    sequence, revision, source and added/removed facts of each commit. A
+    conflicting sequence is excluded and counted as unreadable. *)
+type history =
+  { unsequenced : left list
+  ; changes : Librarian_memory_change.t list
+  ; unreadable : int
+  ; live_lines : int
+  }
+
+val history_unlocked : string -> (history, Private_jsonl_scan.error) result
+val history : string -> (history, Private_jsonl_scan.error) result
+val left_of_history : history -> current:fact list -> t
+val write_history : archive_path:string -> history -> (unit, string) result
 
 (** [current] is the Memory the snapshot holds now. Reads the live commit log
     first and then the cold compacted archive (if present), replaying the live
     log on top of cold entries so concurrent log compaction can never drop an
     entry in the gap between archive write and log rewrite. *)
 val read : string -> current:fact list -> (t, Private_jsonl_scan.error) result
-
-(** Atomically persist compacted cold archive entries to [archive_path]
-    (one JSON object per line). *)
-val write_cold_archive : archive_path:string -> left list -> (unit, string) result

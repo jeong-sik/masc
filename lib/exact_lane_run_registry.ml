@@ -439,7 +439,14 @@ module Payload = struct
       | Some value -> payload_source_of_yojson value
       | None -> Error "missing field input"
     in
-    match Lane_run_identity.of_id lane_key with
+    let historical_lane =
+      match lane_key with
+      (* The curator recorded this key before the closed lane identity was
+         introduced. It is only readable in the historical registry. *)
+      | "workspace_curator_exact" -> Some Lane_run_identity.Workspace_memory_curator
+      | key -> Lane_run_identity.of_id key
+    in
+    match historical_lane with
     | Some standalone when Option.is_none (lane_of_run_lane standalone) ->
       Ok (Some (Lane_run_identity.to_id standalone))
     | Some _ -> Ok None

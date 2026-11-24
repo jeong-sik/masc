@@ -935,11 +935,10 @@ let test_replay_removes_payload_files_no_row_names () =
   remove_if_exists path
 ;;
 
-(* A registration row of this store version, naming [lane]. *)
-let registration_row lane =
+let registration_row lane_key =
   Printf.sprintf
     {|{"event":"register","id":"exact-lane-pin","started_at":30.0,"registration":{"lane":%S,"actor":"keeper-a","input":{"kind":"file","bytes":20,"sha256":"4f8c3b7d2a1e9f6c5b0a8d7e6f5c4b3a2918273645546372819a0b1c2d3e4f50"}}}|}
-    (Standalone_lane.to_id lane)
+    lane_key
 ;;
 
 (* Verifier reviews have their own registries, and neither the Librarian's
@@ -981,14 +980,26 @@ let test_the_registry_refuses_unrecorded_lanes () =
       ( = )
   in
   check report_t "a Board row is read and kept" (1, 0, 0, 0, 1)
-    (inspect_rows (registration_row Standalone_lane.Board_attention ^ "\n"));
+    (inspect_rows (registration_row (Standalone_lane.to_id Standalone_lane.Board_attention) ^ "\n"));
   List.iter
     (fun retired_lane ->
        let label = Standalone_lane.to_id retired_lane ^ " retired pair is counted without malformed" in
        check report_t label (2, 0, 1, 1, 0)
          (inspect_rows
-            (registration_row retired_lane ^ "\n" ^ completion_row "exact-lane-pin" ^ "\n")))
+            (registration_row (Standalone_lane.to_id retired_lane) ^ "\n"
+             ^ completion_row "exact-lane-pin" ^ "\n")))
     Standalone_lane.[ Verifier; Librarian_memory; Workspace_memory_curator ];
+  let old_curator_rows =
+    registration_row "workspace_curator_exact" ^ "\n" ^ completion_row "exact-lane-pin" ^ "\n"
+  in
+  check report_t "the historic curator key resolves only as a retired pair" (2, 0, 1, 1, 0)
+    (inspect_rows old_curator_rows);
+  let all_retired_path = fresh_log_path "exact-lane-historical-curator-" in
+  Fun.protect ~finally:(fun () -> remove_if_exists all_retired_path) (fun () ->
+    Fs_compat.save_file all_retired_path old_curator_rows;
+    ignore (R.cut_replay_log ~execute:true all_retired_path);
+    check string "compaction keeps the original historical key and complete row"
+      old_curator_rows (In_channel.with_open_bin all_retired_path In_channel.input_all));
   let unknown_lane_row =
     {|{"event":"register","id":"unknown-pin","started_at":30.0,"registration":{"lane":"unknown_legacy_lane","actor":"keeper-a","input":{"kind":"row","value":"x"}}}|}
   in

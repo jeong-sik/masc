@@ -1,11 +1,7 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, it, expect } from 'vitest'
 import { source, type TokenBase, type Tier, type Kind } from './source'
-
-// source.ts is the design-system token SSOT consumed by build.ts (codegen
-// driver) to emit the @generated artifacts. The codegen does no
-// validation — a malformed name or unknown tier/kind would emit silently
-// and surface only as broken CSS at runtime. These tests guard the data
-// integrity build.ts relies on.
 
 const RAW: readonly TokenBase[] = source.raw
 const SEMANTIC: readonly TokenBase[] = source.semantic
@@ -16,15 +12,10 @@ const VALID_KINDS: ReadonlySet<Kind> = new Set<Kind>([
   'color', 'dimension', 'typography', 'duration', 'easing', 'shadow', 'number',
 ])
 
-// Two names are emitted by both a raw literal and a role re-point: the role
-// layer redirects status colors through the semantic var so theme switching
-// flows through --err / --warn (raw provides the literal fallback). This is
-// intentional; any OTHER duplicate is an accidental last-wins collision.
-const KNOWN_ROLE_OVER_RAW = new Set(['bad-light', 'warn-bright'])
+const HEX_LITERAL = /#[0-9a-f]{3,8}\b/i
 
-describe('design-system token SSOT (source.ts) integrity', () => {
+describe('single OKLCH design-system token SSOT (source.ts)', () => {
   it('every token name is a valid CSS custom-property ident', () => {
-    // codegen emits `--${name}`; a space or brace here silently breaks CSS
     const bad = ALL.filter((t) => !/^[a-z0-9_-]+$/i.test(t.name)).map((t) => t.name)
     expect(bad).toEqual([])
   })
@@ -36,20 +27,52 @@ describe('design-system token SSOT (source.ts) integrity', () => {
     expect(badKind).toEqual([])
   })
 
-  it('emits no accidental duplicate names beyond the documented role-over-raw re-points', () => {
+  it('emits zero duplicate token names', () => {
     const counts = new Map<string, number>()
     for (const t of ALL) counts.set(t.name, (counts.get(t.name) ?? 0) + 1)
-    const unexpectedDupes = [...counts.entries()]
-      .filter(([name, c]) => c > 1 && !KNOWN_ROLE_OVER_RAW.has(name))
-      .map(([name]) => name)
-    expect(unexpectedDupes).toEqual([])
+    const dupes = [...counts.entries()].filter(([, c]) => c > 1).map(([name]) => name)
+    expect(dupes).toEqual([])
   })
 
-  it('defines the mobile operator hit target as a semantic spacing role', () => {
-    expect(SEMANTIC.find((token) => token.name === 'mobile-touch-target-min')).toMatchObject({
-      value: 'calc(var(--grid-unit) * 5)',
-      tier: 'role',
-      kind: 'dimension',
-    })
+  it('contains zero raw hex literals across raw, semantic, themes, and emitted tokens.generated.css', () => {
+    const themeTokens = source.themes.flatMap((th) => th.tokens)
+    const bad = [...ALL, ...themeTokens]
+      .filter((tok) => HEX_LITERAL.test(tok.value))
+      .map((tok) => `${tok.name}=${tok.value}`)
+    expect(bad).toEqual([])
+
+    const generated = readFileSync(resolve(process.cwd(), 'src/styles/tokens.generated.css'), 'utf8')
+    expect(HEX_LITERAL.test(generated)).toBe(false)
+  })
+
+  it('pins the Tempered Slate dark, Warm Archival Paper light, and static High-Contrast presets', () => {
+    const byName = new Map(ALL.map((tok) => [tok.name, tok.value]))
+    expect(byName.get('bg-0')).toBe('oklch(0.145 0.005 70)')
+    expect(byName.get('bg-4')).toBe('oklch(0.270 0.005 70)')
+    expect(byName.get('cta-bg')).toBe('oklch(0.920 0.010 80)')
+    expect(byName.get('focus')).toBe('oklch(0.720 0.110 245)')
+    expect(byName.get('brass-1')).toBe('oklch(0.770 0.135 74)')
+    expect(byName.get('warn')).toBe('oklch(0.830 0.150 95)')
+    expect(byName.get('err-fg')).toBe('oklch(0.730 0.160 24)')
+
+    const light = source.themes.find((th) => th.id === 'light')
+    expect(light?.selector).toBe('[data-theme="light"]')
+    expect(light?.tokens.find((tok) => tok.name === 'bg-0')?.value).toBe('oklch(0.975 0.005 75)')
+    expect(light?.tokens.find((tok) => tok.name === 'fg-1')?.value).toBe('oklch(0.200 0.010 70)')
+
+    const hcDark = source.themes.find((th) => th.id === 'high-contrast-dark')
+    expect(hcDark?.selector).toBe(':root[data-contrast="high"]')
+    expect(hcDark?.media).toBe('(prefers-contrast: more)')
+  })
+
+  it('defines the 4px 6-step spacing scale and 44px mobile touch target', () => {
+    const byName = new Map(ALL.map((tok) => [tok.name, tok.value]))
+    expect(byName.get('sp-1')).toBe('4px')
+    expect(byName.get('sp-2')).toBe('8px')
+    expect(byName.get('sp-3')).toBe('12px')
+    expect(byName.get('sp-4')).toBe('16px')
+    expect(byName.get('sp-5')).toBe('24px')
+    expect(byName.get('sp-6')).toBe('32px')
+    expect(byName.get('mobile-touch-target-min')).toBe('44px')
   })
 })

@@ -26,8 +26,8 @@ let to_json c =
 ;;
 
 let fingerprint c =
-  Digestif.SHA256.digest_string (Yojson.Safe.to_string (to_json { c with line_at = 0 }))
-  |> Digestif.SHA256.to_raw_string
+  Agent_core_sha256.(digest_string (Yojson.Safe.to_string (to_json { c with line_at = 0 }))
+                    |> to_raw_string)
 ;;
 
 let same_event a b =

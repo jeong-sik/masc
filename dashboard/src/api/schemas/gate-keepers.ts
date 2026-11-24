@@ -50,57 +50,16 @@ const RecentTurnsWireSchema = Schema.Struct({
   slots: Schema.Array(RecentTurnsSlotWireSchema),
 })
 
-// The context observation every detailed row carries, from
-// lib/keeper/keeper_context_observation_projection.ml. A measured turn fills
-// the numbers and names its turn; otherwise the numbers are null and a
-// not-observed record says which stage had no measurement. This consumer does
-// not interpret it.
-const ContextNotObservedReasonWireSchema = Schema.Literal(
-  'context_measurement_missing',
-  'turn_record_undecodable',
-  'turn_record_read_failed',
-  'turn_record_without_usage',
-  'turn_record_trace_mismatch',
-  'conversation_cumulative_usage',
-  'turn_total_usage',
-  'usage_scope_unavailable',
-  'context_tokens_exceed_window',
-  'context_input_estimate',
-  'input_provenance_unavailable',
+// Any JSON value. Unlike Schema.Unknown it rejects a missing key, which reads
+// as undefined.
+const UninterpretedJsonSchema = Schema.Union(
+  Schema.Null,
+  Schema.Boolean,
+  Schema.Number,
+  Schema.String,
+  Schema.Array(Schema.Unknown),
+  Schema.Record({ key: Schema.String, value: Schema.Unknown }),
 )
-
-const ContextUsageScopeWireSchema = Schema.Literal(
-  'per_request', 'turn_total', 'conversation_cumulative', 'unavailable',
-)
-
-const ContextProvenanceWireSchema = Schema.Literal('measured', 'estimated', 'unavailable')
-
-const ContextSourceWireSchema = Schema.NullOr(Schema.Literal('turn_record'))
-
-const ContextNotObservedWireSchema = Schema.Struct({
-  kind: Schema.Literal('not_observed'),
-  reason: ContextNotObservedReasonWireSchema,
-  usage_scope: Schema.optional(ContextUsageScopeWireSchema),
-  raw_input_tokens: Schema.optional(Schema.Int),
-  context_window: Schema.optional(Schema.Int),
-})
-
-const ContextObservationWireSchema = Schema.Struct({
-  source: ContextSourceWireSchema,
-  context_ratio: Schema.NullOr(Schema.Number),
-  context_tokens: Schema.NullOr(Schema.Int),
-  context_max: Schema.NullOr(Schema.Int),
-  provenance: ContextProvenanceWireSchema,
-  estimated_context_ratio: Schema.NullOr(Schema.Number),
-  metrics_unavailable: Schema.NullOr(ContextNotObservedWireSchema),
-  metrics_unavailable_reason: Schema.NullOr(ContextNotObservedReasonWireSchema),
-  // Only a measured turn sends these.
-  observed_at: Schema.optional(Schema.NonEmptyString),
-  turn_ref: Schema.optional(Schema.NonEmptyString),
-  absolute_turn: Schema.optional(Schema.Int),
-  request_body_bytes: Schema.optional(Schema.NullOr(Schema.Int)),
-  usage_scope: Schema.optional(ContextUsageScopeWireSchema),
-})
 
 // Mirror of the healthy row built by keeper_list_row_json in
 // lib/keeper/keeper_tool_surface_ops.ml; phase/health/paused/next_action
@@ -134,15 +93,20 @@ const GateKeeperWireSchema = Schema.Struct({
   runtime_id: Schema.NonEmptyString,
   created_at: Schema.NonEmptyString,
   updated_at: Schema.NonEmptyString,
-  context_ratio: Schema.NullOr(Schema.Number),
-  context_tokens: Schema.NullOr(Schema.Int),
-  context_max: Schema.NullOr(Schema.Int),
-  context_source: ContextSourceWireSchema,
-  context_provenance: ContextProvenanceWireSchema,
-  estimated_context_ratio: Schema.NullOr(Schema.Number),
-  context_metrics_unavailable: Schema.NullOr(ContextNotObservedWireSchema),
-  context_metrics_unavailable_reason: Schema.NullOr(ContextNotObservedReasonWireSchema),
-  context: ContextObservationWireSchema,
+  // The context observation every detailed row carries
+  // (lib/keeper/keeper_context_observation_projection.ml `context_fields`).
+  // This consumer does not interpret it, so the keys must be present but
+  // their values are not checked: a reason string the server adds must not
+  // fail the whole roster.
+  context_ratio: UninterpretedJsonSchema,
+  context_tokens: UninterpretedJsonSchema,
+  context_max: UninterpretedJsonSchema,
+  context_source: UninterpretedJsonSchema,
+  context_provenance: UninterpretedJsonSchema,
+  estimated_context_ratio: UninterpretedJsonSchema,
+  context_metrics_unavailable: UninterpretedJsonSchema,
+  context_metrics_unavailable_reason: UninterpretedJsonSchema,
+  context: UninterpretedJsonSchema,
 })
 
 const GateKeeperDirectoryIssueWireSchema = Schema.Struct({
@@ -206,11 +170,6 @@ const GateKeepersWireSchema = Schema.Struct({
   total: Schema.NonNegativeInt,
   limit: Schema.NonNegativeInt,
   truncated: Schema.Boolean,
-  // A `fresh=true` read and a read of one Keeper (`name=`) skip the list
-  // cache and say so; the read of one Keeper also echoes its name
-  // (lib/keeper/keeper_tool_surface.ml).
-  name: Schema.optional(Schema.NonEmptyString),
-  projection_cache_bypassed: Schema.optional(Schema.Literal(true)),
 })
 
 type GateKeeperEntryWire = Schema.Schema.Type<

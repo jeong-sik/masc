@@ -201,14 +201,9 @@ describe('decodeGateKeepers', () => {
     expectDrift({ count: 1, keepers: [wire], ...listingWire(1) })
   })
 
-  it('decodes the answer to a read of one Keeper', () => {
-    const data = Effect.runSync(decodeGateKeepers({
-      projection_cache_bypassed: true,
-      count: 1,
-      keepers: [keeperWire()],
-      ...listingWire(1),
-      name: 'planner',
-    }))
+  it('decodes a row whose context names a reason this decoder has not seen', () => {
+    const wire = { ...keeperWire(), context_metrics_unavailable_reason: 'a_reason_added_later' }
+    const data = Effect.runSync(decodeGateKeepers({ count: 1, keepers: [wire], ...listingWire(1) }))
 
     expect(data.keepers).toEqual([{ name: 'planner', status: 'running' }])
   })

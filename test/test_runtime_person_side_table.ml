@@ -128,7 +128,7 @@ is-non-interactive = true
 
 [models.first]
 api-name = "first-model"
-max-context = 4096
+max-context = 200000
 tools-support = true
 streaming = true
 

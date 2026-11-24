@@ -194,9 +194,9 @@ export function MemoryTab(_props: WorkspaceViewProps) {
       sortable: true,
       sortValue: (r) => r.claim,
       cell: (r) => html`
-        <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)', minWidth: 0 }}>
+        <div class="kn-stack-1">
           <span>${r.claim}</span>
-          <span class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
+          <span class="mono kn-sub-id">
             ${r.claimId}${r.category ? ` · ${r.category}` : ''}${r.scope ? ` · ${r.scope}` : ''}
           </span>
         </div>
@@ -270,7 +270,7 @@ export function MemoryTab(_props: WorkspaceViewProps) {
       cell: (r) => r.snapshotFault
         ? html`<span class="kn-badge kn-badge--err">Fault: ${r.snapshotFault}</span>`
         : r.snapshotSha
-          ? html`<span class="mono" style=${{ fontSize: 'var(--fs-11)' }}>${r.snapshotSha.slice(0, 12)}… (${formatBytes(r.snapshotBytes)})</span>`
+          ? html`<span class="mono kn-sub-id">${r.snapshotSha.slice(0, 12)}… (${formatBytes(r.snapshotBytes)})</span>`
           : html`<span class="dtable-absent">없음</span>`,
     },
     {
@@ -280,8 +280,7 @@ export function MemoryTab(_props: WorkspaceViewProps) {
         <div class="kn-actions">
           <button
             type="button"
-            class="btn-ghost"
-            style=${{ padding: 'var(--sp-1) var(--sp-2)' }}
+            class="btn-ghost kn-btn-compact"
             disabled=${actBusy !== null}
             onClick=${() => void executeRecoveryAct(r.keeper, 'resume')}
           >
@@ -290,8 +289,7 @@ export function MemoryTab(_props: WorkspaceViewProps) {
           ${r.snapshotSha && html`
             <button
               type="button"
-              class="kn-btn-warn"
-              style=${{ padding: 'var(--sp-1) var(--sp-2)' }}
+              class="kn-btn-warn kn-btn-compact"
               disabled=${actBusy !== null}
               onClick=${() => void executeRecoveryAct(r.keeper, 'adopt', { observed: r.snapshotSha! })}
             >
@@ -300,8 +298,7 @@ export function MemoryTab(_props: WorkspaceViewProps) {
           `}
           <button
             type="button"
-            class="btn-ghost"
-            style=${{ padding: 'var(--sp-1) var(--sp-2)' }}
+            class="btn-ghost kn-btn-compact"
             onClick=${() => {
               setActKeeper(r.keeper)
               setActKind(r.snapshotSha ? 'adopt' : 'restart_reading')
@@ -335,7 +332,7 @@ export function MemoryTab(_props: WorkspaceViewProps) {
                 : 'Legacy Ledger'}
           </span>
           ${world?.ledgerSha256 && html`
-            <span class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
+            <span class="mono kn-sub-id">
               sha256:${world.ledgerSha256.slice(0, 12)}
             </span>
           `}
@@ -377,13 +374,13 @@ export function MemoryTab(_props: WorkspaceViewProps) {
           </div>
           <div class="ov-kpi">
             <div class="ov-kpi-k">Window Diff (${activeWin})</div>
-            <div class="ov-kpi-v" style=${{ fontSize: 'var(--fs-14)' }}>
+            <div class="ov-kpi-v kn-kpi-compact">
               ${diffData ? `+${diffData.counts.added} / ~${diffData.counts.updated} / -${diffData.counts.retracted}` : '없음'}
             </div>
           </div>
           <div class="ov-kpi">
             <div class="ov-kpi-k">Retrieval Heat (H/W/C/0x)</div>
-            <div class="ov-kpi-v" style=${{ fontSize: 'var(--fs-14)' }}>
+            <div class="ov-kpi-v kn-kpi-compact">
               ${diffData
                 ? `${diffData.retrievalHeat.hot}/${diffData.retrievalHeat.warm}/${diffData.retrievalHeat.cold}/${diffData.retrievalHeat.neverRetrieved}`
                 : '없음'}
@@ -392,7 +389,7 @@ export function MemoryTab(_props: WorkspaceViewProps) {
           ${world.worldMvcc && html`
             <div class="ov-kpi">
               <div class="ov-kpi-k">MVCC Rev / Edges</div>
-              <div class="ov-kpi-v" style=${{ fontSize: 'var(--fs-14)' }}>
+              <div class="ov-kpi-v kn-kpi-compact">
                 r${world.worldMvcc.digestRevision ?? '없음'} · ${world.worldMvcc.edgesCount}
               </div>
             </div>
@@ -402,7 +399,7 @@ export function MemoryTab(_props: WorkspaceViewProps) {
         <${UPlotChart}
           id="world-memory-flow"
           title=${`Memory Flow (Added ▲ / Retracted ▼ vs Net Total · ${activeWin})`}
-          subtitle=${html`<span class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>scope=world · window=${activeWin}</span>`}
+          subtitle=${html`<span class="mono kn-sub-id">scope=world · window=${activeWin}</span>`}
           data=${flowChartData}
           series=${MEMORY_FLOW_SERIES}
           height=${210}
@@ -426,7 +423,7 @@ export function MemoryTab(_props: WorkspaceViewProps) {
           </div>
           ${world.briefing.error && html`<div class="kn-notice kn-notice--err">${world.briefing.error}</div>`}
           ${world.briefing.text
-            ? html`<div style=${{ fontSize: 'var(--fs-13)', whiteSpace: 'pre-wrap' }}>${world.briefing.text}</div>`
+            ? html`<div class="kn-body-pre">${world.briefing.text}</div>`
             : html`<span class="dtable-absent">World Briefing 본문이 아직 생성되지 않았습니다.</span>`}
         </section>
 
@@ -463,7 +460,7 @@ export function MemoryTab(_props: WorkspaceViewProps) {
             ${world.activeConflicts.length === 0
               ? html`<span class="dtable-absent">활성 메모리 충돌이 없습니다 (0).</span>`
               : world.activeConflicts.map((cf) => html`
-                  <div key=${cf.conflictId} class="kn-section" style=${{ background: 'var(--bg-1)' }}>
+                  <div key=${cf.conflictId} class="kn-section kn-surface-alt">
                     <div class="kn-section-head">
                       <strong>${cf.description || cf.conflictId}</strong>
                       <span class="kn-badge kn-badge--warn">경합 주장 ${cf.memberCount}건</span>
@@ -475,7 +472,7 @@ export function MemoryTab(_props: WorkspaceViewProps) {
                             <${KeeperBadge} id=${cc.keeperId} size="sm" />
                             <span class="kn-badge">${cc.storeKind}</span>
                           </div>
-                          <div style=${{ fontSize: 'var(--fs-13)' }}>${cc.claim ?? '(원문 미해석)'}</div>
+                          <div class="kn-body-md">${cc.claim ?? '(원문 미해석)'}</div>
                           <div class="kn-row-meta mono">
                             <span>sha:${cc.claimSha256.slice(0, 10)}</span>
                             ${cc.path && html`<span>${cc.path}</span>`}
@@ -544,8 +541,7 @@ export function MemoryTab(_props: WorkspaceViewProps) {
 
             ${actKeeper && html`
               <form
-                class="kn-section"
-                style=${{ background: 'var(--bg-1)', borderColor: 'var(--line-2)' }}
+                class="kn-section kn-recovery-box"
                 onSubmit=${(e: Event) => {
                   e.preventDefault()
                   void executeRecoveryAct(actKeeper, actKind)
@@ -555,7 +551,7 @@ export function MemoryTab(_props: WorkspaceViewProps) {
                   <strong>Recovery Act — ${actKeeper} (POST /api/v1/keepers/${actKeeper}/memory/act)</strong>
                   <button type="button" class="btn-ghost" onClick=${() => setActKeeper(null)}>닫기</button>
                 </div>
-                <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 'var(--sp-2)' }}>
+                <div class="kn-grid-auto">
                   <select
                     class="kn-select"
                     value=${actKind}

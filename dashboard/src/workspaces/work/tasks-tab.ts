@@ -8,13 +8,13 @@
  *   Goal-link (`POST /api/v1/tasks/:id/link-goal` — strictly goalless tasks only per `constitution.xml`),
  *   Cancel (`POST /api/v1/dashboard/tasks/cancel`), Delete (`POST /api/v1/dashboard/tasks/delete`).
  * - Cursor-paginated Task History Timeline (`GET /api/v1/dashboard/tasks/history/page?task_id=&limit=20[&cursor=]`,
- *   handling `409 task_history_source_changed` cleanly per `#36`).
+ *   with per-effect `AbortController` race guard and explicit `409 task_history_source_changed` handling).
  * - Scheduled Automation view & create (`GET /api/v1/dashboard/scheduled-automation?active_only=true`,
  *   `POST /api/v1/tools/masc_schedule_create`, `POST /api/v1/tools/masc_schedule_cancel`).
  */
 
 import { html } from 'htm/preact'
-import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { markViewSynced } from '../../core/observer'
 import { resourceCache } from '../../core/resource-cache'
 import { apiGet, apiMutate } from '../../core/transport'
@@ -34,6 +34,7 @@ import {
   formatRelativeTime,
   isRecord,
   readWorkspacePrecondition,
+  toExpectedWorkspaceBody,
   type GoalItem,
   type ScheduleProjection,
   type ScheduleRow,
@@ -130,12 +131,13 @@ export function TasksTab(props: WorkspaceViewProps) {
   const [busyAction, setBusyAction] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<{ kind: 'ok' | 'err' | 'warn'; message: string } | null>(null)
 
-  // Cursor-paginated Task History Timeline (`#36`)
+  // Cursor-paginated Task History Timeline (`#36`) with AbortController race guard
   const [historyEvents, setHistoryEvents] = useState<TaskHistoryPageData['events']>([])
   const [historyNextCursor, setHistoryNextCursor] = useState<string | null>(null)
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyError, setHistoryError] = useState<string | null>(null)
   const [historySourceChanged, setHistorySourceChanged] = useState(false)
+  const historyAbortRef = useRef<AbortController | null>(null)
 
   const loadTasksAndSchedules = useCallback(async (reason: 'mount' | 'manual' = 'mount') => {
     setLoading(true)
@@ -227,8 +229,17 @@ export function TasksTab(props: WorkspaceViewProps) {
     return bundle.schedules.rows.find((s) => s.scheduleId === selectedScheduleId) ?? null
   }, [bundle.schedules, selectedScheduleId])
 
-  // Load cursor-paginated history page (requires BOTH `task_id` and positive `limit` per `#36`)
-  const loadHistoryPage = useCallback(async (taskId: string, cursor: string | null, append: boolean) => {
+  const loadHistoryPage = useCallback(async (
+    taskId: string,
+    cursor: string | null,
+    append: boolean,
+    externalSignal?: AbortSignal,
+  ) => {
+    historyAbortRef.current?.abort()
+    const controller = new AbortController()
+    historyAbortRef.current = controller
+    const signal = externalSignal ?? controller.signal
+
     setHistoryLoading(true)
     setHistoryError(null)
     setHistorySourceChanged(false)
@@ -237,7 +248,8 @@ export function TasksTab(props: WorkspaceViewProps) {
       limit: '20',
     })
     if (cursor) params.set('cursor', cursor)
-    const res = await apiGet<TaskHistoryPageData>(`/api/v1/dashboard/tasks/history/page?${params.toString()}`)
+    const res = await apiGet<TaskHistoryPageData>(`/api/v1/dashboard/tasks/history/page?${params.toString()}`, { signal })
+    if (signal.aborted) return
     setHistoryLoading(false)
     if (!res.ok) {
       if (res.error.kind === 'conflict_cas' || res.error.status === 409 || res.error.code === 'task_history_source_changed') {
@@ -255,10 +267,16 @@ export function TasksTab(props: WorkspaceViewProps) {
 
   useEffect(() => {
     if (chip !== 'schedules' && selectedTask) {
+      const controller = new AbortController()
       setHistoryEvents([])
       setHistoryNextCursor(null)
-      void loadHistoryPage(selectedTask.id, null, false)
+      void loadHistoryPage(selectedTask.id, null, false, controller.signal)
+      return () => {
+        controller.abort()
+      }
     }
+    historyAbortRef.current?.abort()
+    return undefined
   }, [chip, selectedTask?.id, loadHistoryPage])
 
   const handleCreateTask = async (e: Event) => {
@@ -332,7 +350,7 @@ export function TasksTab(props: WorkspaceViewProps) {
     const res = await apiMutate<unknown>(
       'POST',
       `/api/v1/tasks/${encodeURIComponent(task.id)}/link-goal`,
-      { goal_id: targetGoalId, expected_workspace: wsRes.value },
+      { goal_id: targetGoalId, expected_workspace: toExpectedWorkspaceBody(wsRes.value) },
     )
     setBusyAction(null)
     if (!res.ok) {
@@ -356,7 +374,7 @@ export function TasksTab(props: WorkspaceViewProps) {
     }
     const body: Record<string, unknown> = {
       task_id: task.id,
-      expected_workspace: wsRes.value,
+      expected_workspace: toExpectedWorkspaceBody(wsRes.value),
     }
     if (cancelReason.trim()) body.reason = cancelReason.trim()
     const res = await apiMutate<unknown>('POST', '/api/v1/dashboard/tasks/cancel', body)
@@ -447,7 +465,7 @@ export function TasksTab(props: WorkspaceViewProps) {
   ]
 
   const masterPane = html`
-    <div style=${{ display: 'flex', flexDirection: 'column', height: '100%', minWidth: 0 }}>
+    <div class="wk-pane-col">
       <div class="wk-pane-head">
         <h2 class="wk-pane-title">
           ${chip === 'schedules' ? 'Scheduled Automation' : 'Tasks'}
@@ -460,7 +478,7 @@ export function TasksTab(props: WorkspaceViewProps) {
         </div>
       </div>
 
-      <div style=${{ padding: 'var(--sp-2) var(--sp-3)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', borderBottom: '1px solid var(--line-1)' }}>
+      <div class="wk-filter-bar">
         <div class="wk-chips" role="group" aria-label="태스크 상태 필터">
           ${chipItems.map((c) => html`
             <button
@@ -487,7 +505,7 @@ export function TasksTab(props: WorkspaceViewProps) {
       </div>
 
       ${showCreateTask && chip !== 'schedules' && html`
-        <form class="wk-form" style=${{ margin: 'var(--sp-2)' }} onSubmit=${handleCreateTask}>
+        <form class="wk-form wk-inset" onSubmit=${handleCreateTask}>
           <div class="wk-section-title">새 태스크 추가 (masc_add_task)</div>
           <div class="wk-field">
             <label for="new-task-title">제목</label>
@@ -518,7 +536,7 @@ export function TasksTab(props: WorkspaceViewProps) {
       `}
 
       ${showCreateSchedule && chip === 'schedules' && html`
-        <form class="wk-form" style=${{ margin: 'var(--sp-2)' }} onSubmit=${handleCreateSchedule}>
+        <form class="wk-form wk-inset" onSubmit=${handleCreateSchedule}>
           <div class="wk-section-title">예약 자동화 생성 (POST /api/v1/tools/masc_schedule_create)</div>
           <div class="wk-form-grid">
             <div class="wk-field">
@@ -556,7 +574,7 @@ export function TasksTab(props: WorkspaceViewProps) {
         </form>
       `}
 
-      ${loadError && html`<div class="wk-notice wk-notice--err" style=${{ margin: 'var(--sp-2)' }} role="alert">${loadError}</div>`}
+      ${loadError && html`<div class="wk-notice wk-notice--err wk-inset" role="alert">${loadError}</div>`}
 
       ${chip === 'schedules'
         ? bundle.schedules.state === 'unavailable'
@@ -629,9 +647,9 @@ export function TasksTab(props: WorkspaceViewProps) {
           <div class="wk-detail-pad">
             ${feedback && html`<div class=${`wk-notice wk-notice--${feedback.kind}`} role="status">${feedback.message}</div>`}
             <div class="wk-section-head">
-              <div>
-                <div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>${selectedSchedule.scheduleId}</div>
-                <h2 style=${{ margin: 'var(--sp-1) 0 0', fontSize: 'var(--fs-16)' }}>${selectedSchedule.summary ?? '예약 자동화'}</h2>
+              <div class="wk-min-w-0">
+                <div class="mono wk-sub-id">${selectedSchedule.scheduleId}</div>
+                <h2 class="wk-heading">${selectedSchedule.summary ?? '예약 자동화'}</h2>
               </div>
               <span class="wk-badge wk-badge--info">${selectedSchedule.status}</span>
             </div>
@@ -676,9 +694,9 @@ export function TasksTab(props: WorkspaceViewProps) {
             <div class="wk-detail-pad">
               ${feedback && html`<div class=${`wk-notice wk-notice--${feedback.kind}`} role="status">${feedback.message}</div>`}
               <div class="wk-section-head">
-                <div style=${{ minWidth: 0 }}>
-                  <div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>${selectedTask.id}</div>
-                  <h2 style=${{ margin: 'var(--sp-1) 0 0', fontSize: 'var(--fs-16)' }}>${selectedTask.title}</h2>
+                <div class="wk-min-w-0">
+                  <div class="mono wk-sub-id">${selectedTask.id}</div>
+                  <h2 class="wk-heading">${selectedTask.title}</h2>
                 </div>
                 <span class=${`wk-badge wk-badge--${taskStatusTone(selectedTask.status)}`}>${selectedTask.status}</span>
               </div>
@@ -695,8 +713,7 @@ export function TasksTab(props: WorkspaceViewProps) {
                       ? html`
                           <button
                             type="button"
-                            class="btn-ghost"
-                            style=${{ padding: 'var(--sp-1) var(--sp-2)' }}
+                            class="btn-ghost wk-btn-compact"
                             onClick=${() => props.onNavigate(`/work/goals/${encodeURIComponent(selectedTask.goalId!)}`)}
                           >
                             ${selectedTask.goalId} →
@@ -718,7 +735,7 @@ export function TasksTab(props: WorkspaceViewProps) {
               ${selectedTask.description && html`
                 <section class="wk-section">
                   <h3 class="wk-section-title">설명</h3>
-                  <div style=${{ fontSize: 'var(--fs-13)', whiteSpace: 'pre-wrap' }}>${selectedTask.description}</div>
+                  <div class="wk-body-pre">${selectedTask.description}</div>
                 </section>
               `}
 
@@ -758,11 +775,10 @@ export function TasksTab(props: WorkspaceViewProps) {
                 </div>
 
                 ${selectedTask.status !== 'Done' && selectedTask.status !== 'Cancelled' && html`
-                  <div style=${{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-2)', marginTop: 'var(--sp-2)' }}>
+                  <div class="wk-row-wrap wk-mt-2">
                     <input
                       type="text"
-                      class="wk-input"
-                      style=${{ flex: '1 1 180px' }}
+                      class="wk-input wk-flex-input"
                       placeholder="취소 사유 (선택)"
                       value=${cancelReason}
                       onInput=${(e: Event) => setCancelReason((e.target as HTMLInputElement).value)}
@@ -777,7 +793,7 @@ export function TasksTab(props: WorkspaceViewProps) {
                   </div>
                 `}
                 ${(selectedTask.status === 'Done' || selectedTask.status === 'Cancelled') && html`
-                  <div class="wk-actions" style=${{ marginTop: 'var(--sp-1)' }}>
+                  <div class="wk-actions wk-mt-1">
                     <button type="button" class="wk-btn-danger" disabled=${busyAction !== null} onClick=${() => void handleDeleteTask(selectedTask)}>
                       Delete Task
                     </button>
@@ -789,10 +805,9 @@ export function TasksTab(props: WorkspaceViewProps) {
                 <h3 class="wk-section-title">Goal 연결 (set_task_goal — goalless 태스크 전용)</h3>
                 ${linkCheck.ok
                   ? html`
-                      <div style=${{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-2)' }}>
+                      <div class="wk-row-wrap">
                         <select
-                          class="wk-select"
-                          style=${{ flex: '1 1 200px' }}
+                          class="wk-select wk-flex-input"
                           value=${linkGoalId}
                           onChange=${(e: Event) => setLinkGoalId((e.target as HTMLSelectElement).value)}
                           aria-label="연결할 Goal 선택"
@@ -847,7 +862,7 @@ export function TasksTab(props: WorkspaceViewProps) {
                           ${historyEvents.map((ev, idx) => html`
                             <li key=${`${ev.source}-${ev.offset}-${idx}`} class="wk-timeline-item">
                               <div class="wk-row-top">
-                                <span class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
+                                <span class="mono wk-sub-id">
                                   ${ev.source} · offset ${ev.offset}
                                 </span>
                               </div>

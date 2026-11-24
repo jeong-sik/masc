@@ -21,7 +21,7 @@ vi.mock('uplot', () => {
   }
   return { default: MockUPlot }
 })
-import { resetAuthStateForTests } from '../../core/auth'
+import { authSession, resetAuthStateForTests } from '../../core/auth'
 import { resetObserverStateForTests } from '../../core/observer'
 import { resourceCache } from '../../core/resource-cache'
 import { resetTimeWindowForTests, setTimeWindow } from '../../core/time-window'
@@ -51,6 +51,20 @@ async function flushUi(rounds = 6): Promise<void> {
   }
 }
 
+function setMultiAccountSessionForTest(): void {
+  authSession.value = {
+    kind: 'multi_account_signed_in',
+    mode: 'multi_account',
+    accountId: 'acc-1',
+    email: 'operator@example.com',
+    displayName: 'Operator',
+    role: 'admin',
+    csrfToken: 'csrf-tok-1',
+    authMethods: { google: true, github: false, dev_token: false },
+    workspaceId: 'default',
+  }
+}
+
 describe('workspaces/knowledge', () => {
   let container: HTMLDivElement
   const origFetch = globalThis.fetch
@@ -60,6 +74,23 @@ describe('workspaces/knowledge', () => {
     resetObserverStateForTests()
     resetTimeWindowForTests('24h')
     resourceCache.clearAll()
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(480)
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(600)
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(480)
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(600)
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      width: 600,
+      height: 480,
+      top: 0,
+      left: 0,
+      bottom: 480,
+      right: 600,
+      x: 0,
+      y: 0,
+      toJSON() {
+        return {}
+      },
+    } as DOMRect)
     container = document.createElement('div')
     document.body.appendChild(container)
   })
@@ -172,6 +203,144 @@ describe('workspaces/knowledge', () => {
     fireBtn.click()
     await flushUi()
     expect(reactCalls).toEqual([{ target_type: 'post', target_id: 'post-0', emoji: '🔥' }])
+  })
+
+  it('Board routes to GET /api/v1/dashboard/board in multi_account_signed_in mode with 0 calls to single-user /api/v1/board*', async () => {
+    setMultiAccountSessionForTest()
+    const fetchedUrls: string[] = []
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      fetchedUrls.push(url)
+      if (url.startsWith('/api/v1/dashboard/board')) {
+        return jsonResponse({
+          posts: [
+            {
+              id: 'ma-post-1',
+              title: 'Multi-Account Design Sync',
+              body: 'Read-only bridge payload',
+              author: 'sangsu',
+              hearth: 'architecture',
+              post_kind: 'direct',
+              votes_up: 3,
+              votes_down: 0,
+              comment_count: 1,
+              created_at: '2026-11-24T05:00:00Z',
+            },
+          ],
+        })
+      }
+      return jsonResponse({ error: 'unexpected route' }, 404)
+    }) as typeof fetch
+
+    render(
+      html`<${KnowledgeWorkspace} subroute="board" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+      container,
+    )
+    await flushUi()
+
+    expect(fetchedUrls.some((u) => u.startsWith('/api/v1/dashboard/board'))).toBe(true)
+    // Zero 404 calls to unmounted single-user routes
+    expect(fetchedUrls.some((u) => u.startsWith('/api/v1/board'))).toBe(false)
+    expect(container.textContent).toContain('Multi-Account Design Sync')
+    expect(container.textContent).toContain('#architecture')
+    expect(container.textContent).toContain('/api/v1/dashboard/board')
+  })
+
+  it('Wiki aborts stale detail fetch on rapid selection switch so an earlier slow response never overwrites current selection', async () => {
+    let resolveSlowA!: (resp: Response) => void
+    const abortedSignals: string[] = []
+
+    const makePageEnvelope = (slug: string, title: string, body: string) => ({
+      schema_version: 1,
+      instance_id: 'inst-1',
+      generated_at_unix: 1732430000,
+      data: {
+        page: slug,
+        slug,
+        file: `${slug}.md`,
+        frontmatter: {
+          title,
+          summary: `${slug} summary`,
+          source: 'observation',
+          author: 'librarian',
+          created: '2026-11-20T00:00:00Z',
+          updated: '2026-11-24T05:00:00Z',
+          revision: 1,
+          tags: [],
+        },
+        sha256: `sha-${slug}`,
+        body_markdown: body,
+        outgoing_links: [],
+        backlinks: [],
+        sources: { references: [], hearsay: [] },
+        lint_findings: [],
+      },
+    })
+
+    globalThis.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/wiki?')) {
+        return Promise.resolve(jsonResponse({
+          schema_version: 1,
+          instance_id: 'inst-1',
+          generated_at_unix: 1732430000,
+          data: {
+            pages_total: 2,
+            pages_readable: 2,
+            pages_unreadable: 0,
+            pages: [
+              {
+                slug: 'page-a', file: 'page-a.md', title: 'Page A', summary: '', source: 'observation',
+                author: 'librarian', created: '2026-11-20T00:00:00Z', updated: '2026-11-24T05:00:00Z',
+                revision: 1, tags: [], backlink_count: 0, outgoing_link_count: 0, sources_count: 0, hearsay_count: 0, sha256: 'sha-a',
+              },
+              {
+                slug: 'page-b', file: 'page-b.md', title: 'Page B', summary: '', source: 'observation',
+                author: 'librarian', created: '2026-11-20T00:00:00Z', updated: '2026-11-24T05:01:00Z',
+                revision: 1, tags: [], backlink_count: 0, outgoing_link_count: 0, sources_count: 0, hearsay_count: 0, sha256: 'sha-b',
+              },
+            ],
+            unreadable_pages: [],
+            tags: [],
+            sources: { observation: 2 },
+            lint: { total_findings: 0, counts: {}, log_hole_suppressed: false, orphans: [], duplicate_title_candidates: [], findings: [] },
+          },
+        }))
+      }
+      if (url === '/api/v1/wiki/page-a') {
+        init?.signal?.addEventListener('abort', () => abortedSignals.push('page-a'))
+        return new Promise<Response>((resolve) => {
+          resolveSlowA = resolve
+        })
+      }
+      if (url === '/api/v1/wiki/page-b') {
+        return Promise.resolve(jsonResponse(makePageEnvelope('page-b', 'Page B', 'Fresh Body B')))
+      }
+      return Promise.resolve(jsonResponse({}))
+    }) as typeof fetch
+
+    render(
+      html`<${KnowledgeWorkspace} subroute="wiki" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+      container,
+    )
+    await flushUi(4)
+
+    // Switch immediately to Page B while Page A request is still pending
+    const pageBBtn = [...container.querySelectorAll('button.kn-row-btn')].find((b) =>
+      b.textContent?.includes('Page B'),
+    ) as HTMLButtonElement
+    expect(pageBBtn).toBeDefined()
+    pageBBtn.click()
+    await flushUi(4)
+
+    expect(abortedSignals).toContain('page-a')
+    expect(container.textContent).toContain('Fresh Body B')
+
+    // Late resolution of Page A must NOT overwrite Page B
+    resolveSlowA(jsonResponse(makePageEnvelope('page-a', 'Page A', 'STALE BODY A')))
+    await flushUi(4)
+    expect(container.textContent).toContain('Fresh Body B')
+    expect(container.textContent).not.toContain('STALE BODY A')
   })
 
   it('Librarian Wiki sanitizes Markdown XSS and recovers from PUT 409 conflict_cas with reload-and-diff', async () => {

@@ -1,4 +1,4 @@
-/* MASC Dashboard — `2 Work` Workspace (100% OKLCH SSOT tokens, 4px spacing scale, zero raw hex, min-width: 0) */
+/* MASC Dashboard — `2 Work` Workspace (100% OKLCH SSOT tokens, 4px spacing scale, 0 raw hex, 0 inline style=) */
 
 .wk-root {
   display: flex;
@@ -74,6 +74,165 @@
   display: flex;
   flex-direction: column;
   gap: var(--sp-4);
+}
+
+.wk-pane-col {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+}
+
+.wk-pane-grow {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+.wk-inbox-shell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  height: 100%;
+  min-width: 0;
+}
+
+.wk-filter-bar {
+  padding: var(--sp-2) var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  border-bottom: 1px solid var(--line-1);
+  min-width: 0;
+}
+
+.wk-inset {
+  margin: var(--sp-2);
+}
+
+.wk-min-w-0 {
+  min-width: 0;
+}
+
+.wk-sub-id {
+  font-size: var(--fs-11);
+  color: var(--fg-3);
+}
+
+.wk-heading {
+  margin: var(--sp-1) 0 0;
+  font-size: var(--fs-16);
+  font-weight: 600;
+  color: var(--fg-1);
+}
+
+.wk-body-pre {
+  font-size: var(--fs-13);
+  white-space: pre-wrap;
+}
+
+.wk-muted-sm {
+  font-size: var(--fs-12);
+  color: var(--fg-2);
+}
+
+.wk-caption-inline {
+  margin-left: var(--sp-2);
+  font-size: var(--fs-12);
+  color: var(--fg-3);
+}
+
+.wk-stack-1 {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.wk-stack-2 {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.wk-row-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  align-items: center;
+  min-width: 0;
+}
+
+.wk-mt-1 {
+  margin-top: var(--sp-1);
+}
+
+.wk-mt-2 {
+  margin-top: var(--sp-2);
+}
+
+.wk-flex-input {
+  flex: 1 1 200px;
+}
+
+.wk-btn-compact {
+  padding: var(--sp-1) var(--sp-2);
+}
+
+.wk-check-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-12);
+  color: var(--fg-2);
+}
+
+.wk-linked-row {
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-sm);
+}
+
+.wk-subcard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-sm);
+  background: var(--bg-1);
+  min-width: 0;
+}
+
+.wk-diag-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-1);
+  background: var(--bg-1);
+  min-width: 0;
+}
+
+.wk-diag-main {
+  min-width: 0;
+  flex: 1 1 260px;
+}
+
+.wk-diag-title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.wk-diag-hint {
+  font-size: var(--fs-12);
+  color: var(--fg-2);
+  margin-top: var(--sp-1);
 }
 
 .wk-toolbar {
@@ -199,7 +358,7 @@
 
 .wk-row-btn[data-selected="true"] {
   background: var(--bg-4);
-  box-shadow: inset 3px 0 0 var(--focus);
+  box-shadow: inset var(--sp-1) 0 0 var(--focus);
 }
 
 .wk-row-top {
@@ -244,47 +403,13 @@
   color: var(--fg-2);
 }
 
-.wk-badge--ok {
-  background: var(--ok-soft);
-  border-color: var(--ok-border);
-  color: var(--ok-fg);
-}
-
-.wk-badge--info {
-  background: var(--info-soft);
-  border-color: var(--info-border);
-  color: var(--info-fg);
-}
-
-.wk-badge--warn {
-  background: var(--warn-soft);
-  border-color: var(--warn-border);
-  color: var(--warn-fg);
-}
-
-.wk-badge--err {
-  background: var(--err-soft);
-  border-color: var(--err-border);
-  color: var(--err-fg);
-}
-
-.wk-badge--stalled {
-  background: var(--stalled-soft);
-  border-color: var(--stalled-border);
-  color: var(--stalled-fg);
-}
-
-.wk-badge--brass {
-  background: var(--brass-soft);
-  border-color: var(--brass-border);
-  color: var(--brass-fg);
-}
-
-.wk-badge--idle {
-  background: var(--idle-soft);
-  border-color: var(--idle-border);
-  color: var(--idle-fg);
-}
+.wk-badge--ok { background: var(--ok-soft); border-color: var(--ok-border); color: var(--ok-fg); }
+.wk-badge--info { background: var(--info-soft); border-color: var(--info-border); color: var(--info-fg); }
+.wk-badge--warn { background: var(--warn-soft); border-color: var(--warn-border); color: var(--warn-fg); }
+.wk-badge--err { background: var(--err-soft); border-color: var(--err-border); color: var(--err-fg); }
+.wk-badge--stalled { background: var(--stalled-soft); border-color: var(--stalled-border); color: var(--stalled-fg); }
+.wk-badge--brass { background: var(--brass-soft); border-color: var(--brass-border); color: var(--brass-fg); }
+.wk-badge--idle { background: var(--idle-soft); border-color: var(--idle-border); color: var(--idle-fg); }
 
 .wk-section {
   display: flex;
@@ -409,23 +534,10 @@
   font-size: var(--fs-12);
 }
 
-.wk-notice--err {
-  border-color: var(--err-border);
-  background: var(--err-soft);
-  color: var(--err-fg);
-}
-
-.wk-notice--ok {
-  border-color: var(--ok-border);
-  background: var(--ok-soft);
-  color: var(--ok-fg);
-}
-
-.wk-notice--warn {
-  border-color: var(--warn-border);
-  background: var(--warn-soft);
-  color: var(--warn-fg);
-}
+.wk-notice--err { border-color: var(--err-border); background: var(--err-soft); color: var(--err-fg); }
+.wk-notice--ok { border-color: var(--ok-border); background: var(--ok-soft); color: var(--ok-fg); }
+.wk-notice--warn { border-color: var(--warn-border); background: var(--warn-soft); color: var(--warn-fg); }
+.wk-notice--info { border-color: var(--info-border); background: var(--info-soft); color: var(--info-fg); }
 
 .wk-kv-grid {
   display: grid;
@@ -458,17 +570,29 @@
   text-overflow: ellipsis;
 }
 
-.wk-gauge-track {
-  height: var(--sp-2);
+/* Native <progress> half-life decay gauge (zero inline width style) */
+.wk-gauge {
+  appearance: none;
   width: 100%;
+  height: var(--sp-2);
   border-radius: var(--radius-pill);
-  background: var(--bg-0);
   border: 1px solid var(--line-1);
+  background: var(--bg-0);
   overflow: hidden;
+  accent-color: var(--brass-1);
 }
 
-.wk-gauge-fill {
-  height: 100%;
+.wk-gauge::-webkit-progress-bar {
+  background: var(--bg-0);
+  border-radius: var(--radius-pill);
+}
+
+.wk-gauge::-webkit-progress-value {
+  background: var(--brass-1);
+  border-radius: var(--radius-pill);
+}
+
+.wk-gauge::-moz-progress-bar {
   background: var(--brass-1);
   border-radius: var(--radius-pill);
 }

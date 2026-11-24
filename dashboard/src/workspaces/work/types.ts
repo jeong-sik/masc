@@ -3,6 +3,9 @@
  *
  * Constitution invariants enforced here:
  * - Strict closed-sum `GoalPhase` decoder rejects any Goal object carrying a legacy `status` field.
+ * - Strict `decodeGoalConfirmation()` reads `verification.completion.state === 'proof_proven'` ->
+ *   `verdict.{request_id, verification_run_id, criterion.revision, authority.actor, evidence, recorded_at}`
+ *   + `raw.inspection_operator_id` + server `runtime_instance_id` from `/health?full=1`, failing closed.
  * - Strict closed-sum `TaskStatus` with accurate mutually-consistent filter counts
  *   (`active = Claimed + InProgress`, eliminating contradictory active vs in_progress metrics).
  * - Goalless tasks may link to a Goal once; already-linked tasks are refused (`Already_assigned`).
@@ -12,6 +15,7 @@
 
 import type { ComponentChildren } from 'preact'
 import { ok, err, type Result } from '../../lib/result'
+import { authSession } from '../../core/auth'
 import { apiGet, apiMutate, type ApiError } from '../../core/transport'
 import { resourceCache, type Observed } from '../../core/resource-cache'
 
@@ -39,9 +43,19 @@ export function normalizeWorkSubroute(raw: string): WorkSubroute {
   return 'goals'
 }
 
+export function isMultiAccountSession(): boolean {
+  return authSession.value.kind === 'multi_account_signed_in'
+}
+
 export interface ExpectedWorkspace {
   readonly base_path: string
   readonly masc_root: string
+}
+
+export interface WorkspacePreconditionSnapshot {
+  readonly base_path: string
+  readonly masc_root: string
+  readonly runtime_instance_id: string | null
 }
 
 // ── Safe Type Guards ──────────────────────────────────────────────────────
@@ -110,17 +124,38 @@ export function formatRelativeTime(tsInput: number | string | null | undefined, 
 
 // ── Workspace Precondition & MCP Tool Helper (Core Transport Only) ────────
 
+function extractRuntimeInstanceId(health: Record<string, unknown>): string | null {
+  const candidates: Record<string, unknown>[] = []
+  if (isRecord(health.build)) candidates.push(health.build)
+  if (isRecord(health.startup)) candidates.push(health.startup)
+  candidates.push(health)
+  for (const obj of candidates) {
+    const rid = asNonEmptyString(obj.runtime_instance_id) ?? asNonEmptyString(obj.instance_id)
+    if (rid) return rid
+  }
+  return null
+}
+
+/**
+ * Reads `GET /health?full=1` to obtain authoritative `expected_workspace`
+ * (`effective_base_path`, `effective_masc_root`) and `runtime_instance_id`
+ * matching `lib/masc_tui/protocol/wire_common.ml:521-525`.
+ */
 export async function readWorkspacePrecondition(
   signal?: AbortSignal,
-): Promise<Result<ExpectedWorkspace, ApiError>> {
-  const obs = await resourceCache.fetch<ExpectedWorkspace>(
+): Promise<Result<WorkspacePreconditionSnapshot, ApiError>> {
+  const obs = await resourceCache.fetch<WorkspacePreconditionSnapshot>(
     'work:workspace-precondition',
     async (s) => {
       const res = await apiGet<Record<string, unknown>>('/health?full=1', { signal: signal ?? s })
       if (!res.ok) return res
       const paths = isRecord(res.value.paths) ? res.value.paths : null
-      const basePath = paths ? asNonEmptyString(paths.effective_base_path) : null
-      const mascRoot = paths ? asNonEmptyString(paths.effective_masc_root) : null
+      const basePath = paths
+        ? (asNonEmptyString(paths.effective_base_path) ?? asNonEmptyString(paths.base_path))
+        : null
+      const mascRoot = paths
+        ? (asNonEmptyString(paths.effective_masc_root) ?? asNonEmptyString(paths.masc_root))
+        : null
       if (!basePath || !mascRoot) {
         return err({
           kind: 'decode',
@@ -130,7 +165,11 @@ export async function readWorkspacePrecondition(
           retryable: false,
         })
       }
-      return ok({ base_path: basePath, masc_root: mascRoot })
+      return ok({
+        base_path: basePath,
+        masc_root: mascRoot,
+        runtime_instance_id: extractRuntimeInstanceId(res.value),
+      })
     },
     { ttlMs: 30_000, topics: ['workspace', 'config'] },
   )
@@ -143,6 +182,10 @@ export async function readWorkspacePrecondition(
     message: '작업 공간 경로를 확인할 수 없습니다.',
     retryable: true,
   })
+}
+
+export function toExpectedWorkspaceBody(snap: WorkspacePreconditionSnapshot): ExpectedWorkspace {
+  return { base_path: snap.base_path, masc_root: snap.masc_root }
 }
 
 let mcpSeq = 1
@@ -177,7 +220,6 @@ export async function callMcpToolViaCore(
   })
   if (!res.ok) return res
 
-  // Handle standard JSON-RPC response OR SSE-framed text returned by /mcp
   let rpcObj: Record<string, unknown> | null = null
   if (isRecord(res.value)) {
     rpcObj = res.value
@@ -584,12 +626,97 @@ export interface GoalConfirmationEvidence {
   readonly criterionRevision: string
   readonly requestId: string
   readonly verificationRunId: string
+  readonly authorityKind: 'system_llm_agent' | 'human_operator'
   readonly actor: string
   readonly evidence: string
   readonly recordedAt: string
   readonly inspectionOperatorId: string
   readonly runtimeInstanceId: string
   readonly workspace: ExpectedWorkspace
+}
+
+/**
+ * Strictly decodes `GET /api/v1/goals/confirmation` matching `lib/goal/goal_verification.ml:80-125,212-222`
+ * and `lib/server/server_routes_http_routes_verification.ml:170-216`:
+ * - Requires non-empty `runtimeInstanceId` from `/health?full=1` (never fabricates `'runtime'`).
+ * - Requires `verification.completion.state === 'proof_proven'` (rejects `stale_criterion`, `proof_refuted`, etc.).
+ * - Reads proof identity strictly from `verification.completion.verdict` (`request_id`, `verification_run_id`,
+ *   `criterion.revision`, `authority.{kind, actor}`, `evidence`, `recorded_at`) + `inspection_operator_id`.
+ */
+export function decodeGoalConfirmation(
+  raw: unknown,
+  expectedGoalId: string,
+  ws: WorkspacePreconditionSnapshot,
+): Result<GoalConfirmationEvidence, string> {
+  if (!ws.runtime_instance_id) {
+    return err('서버 /health?full=1 응답에서 runtime_instance_id를 확인하지 못해 완료 확정을 진행할 수 없습니다.')
+  }
+  if (!isRecord(raw)) {
+    return err('목표 완료 확인 응답이 JSON 객체가 아닙니다.')
+  }
+  const inspectionOperatorId = asNonEmptyString(raw.inspection_operator_id)
+  if (!inspectionOperatorId) {
+    return err('증거를 조회한 운영자 식별자(inspection_operator_id)가 응답에 없습니다.')
+  }
+  const goalObj = isRecord(raw.goal) ? raw.goal : null
+  if (!goalObj || goalObj.id !== expectedGoalId || !asNonEmptyString(goalObj.phase)) {
+    return err('목표 완료 확인 응답의 goal 식별자가 일치하지 않습니다.')
+  }
+  const verif = isRecord(raw.verification) ? raw.verification : null
+  if (!verif || verif.goal_id !== expectedGoalId || !isRecord(verif.completion)) {
+    return err('목표 완료 확인 응답의 verification 레코드가 유효하지 않습니다.')
+  }
+  const completion = verif.completion
+  if (completion.state === 'stale_criterion') {
+    return err('Verifier 증명이 이전 기준(stale_criterion)에 대한 기록입니다. 현재 기준으로 다시 검증해야 합니다.')
+  }
+  if (completion.state === 'proof_refuted') {
+    return err('Verifier 판정이 반증(proof_refuted) 상태이므로 완료 확정할 수 없습니다.')
+  }
+  if (completion.state !== 'proof_proven') {
+    return err(`완료 확정 가능한 증명 상태(proof_proven)가 아닙니다: ${String(completion.state ?? 'unknown')}`)
+  }
+  const verdict = isRecord(completion.verdict) ? completion.verdict : null
+  if (!verdict) {
+    return err('proof_proven 상태에 verdict 객체가 누락되었습니다.')
+  }
+  if (verdict.outcome !== 'proven' || verdict.reason !== null) {
+    return err('verdict outcome이 proven(reason=null)이 아닙니다.')
+  }
+  const requestId = asNonEmptyString(verdict.request_id)
+  const verificationRunId = asNonEmptyString(verdict.verification_run_id)
+  const evidence = asNonEmptyString(verdict.evidence)
+  const recordedAt = asNonEmptyString(verdict.recorded_at)
+  const criterion = isRecord(verdict.criterion) ? verdict.criterion : null
+  const criterionRevision = criterion ? asNonEmptyString(criterion.revision) : null
+  const authority = isRecord(verdict.authority) ? verdict.authority : null
+  const authorityKind =
+    authority && (authority.kind === 'system_llm_agent' || authority.kind === 'human_operator')
+      ? authority.kind
+      : null
+  const actor = authority ? asNonEmptyString(authority.actor) : null
+
+  if (!requestId || !verificationRunId || !criterionRevision || !evidence || !recordedAt || !authorityKind || !actor) {
+    return err('Verifier verdict 필수 필드(request_id, verification_run_id, criterion.revision, authority.actor, evidence, recorded_at)가 누락되었습니다.')
+  }
+  if (typeof goalObj.criterion_revision === 'string' && goalObj.criterion_revision !== criterionRevision) {
+    return err('Goal criterion_revision과 Verifier 증명 criterion.revision이 일치하지 않습니다.')
+  }
+
+  return ok({
+    goalId: expectedGoalId,
+    phase: String(goalObj.phase),
+    criterionRevision,
+    requestId,
+    verificationRunId,
+    authorityKind,
+    actor,
+    evidence,
+    recordedAt,
+    inspectionOperatorId,
+    runtimeInstanceId: ws.runtime_instance_id,
+    workspace: toExpectedWorkspaceBody(ws),
+  })
 }
 
 export interface VerificationRequestItem {
@@ -702,10 +829,6 @@ export interface TaskFilterCounts {
   readonly cancelled: number
 }
 
-/**
- * Reconciles chip counts directly from canonical task statuses so `Active`
- * ALWAYS equals `Claimed + InProgress` (fixing `#7`'s contradictory `0 active` vs `71 in_progress`).
- */
 export function computeTaskFilterCounts(tasks: readonly TaskItem[]): TaskFilterCounts {
   let active = 0
   let awaitingVerify = 0
@@ -756,11 +879,6 @@ export function filterTasksByChip(tasks: readonly TaskItem[], chip: TaskFilterCh
   }
 }
 
-/**
- * Enforces `docs/constitution.xml` `<goal_link>` rule:
- * goalless non-terminal tasks may be linked once via `set_task_goal`;
- * tasks already linked to a Goal are rejected with `Already_assigned`.
- */
 export function checkTaskGoalLinkable(
   task: TaskItem,
 ): Result<true, 'Already_assigned' | 'Task_finished'> {
@@ -880,11 +998,6 @@ export type InboxEntry =
 
 // ── 4. Candle Ledger & Decimal-String Milli Parsers (`#36`) ───────────────
 
-/**
- * Safely parses a Candle milli amount that may arrive as either a decimal string
- * (`supply.*_milli`, `decayed_milli` per `#36`) OR a JS number (`balance_milli`).
- * Returns `null` for absent/malformed values (NEVER coerces missing to 0!).
- */
 export function parseCandleMilli(raw: unknown): number | null {
   if (typeof raw === 'number') {
     return Number.isFinite(raw) ? raw : null
@@ -898,10 +1011,6 @@ export function parseCandleMilli(raw: unknown): number | null {
   return null
 }
 
-/**
- * Formats milli-Candles into human Candles (`1000 milli = 1.000 Candle`).
- * Explicitly distinguishes absent (`null` -> `"없음"`) from zero (`0` -> `"0.000"`).
- */
 export function formatMilliCandles(raw: unknown): string {
   const milli = parseCandleMilli(raw)
   if (milli === null) return '없음'
@@ -1090,10 +1199,6 @@ export interface CandleTrendSeries {
   readonly decayedSupply: number[]
 }
 
-/**
- * Builds chronological issuance vs exponentially-decayed supply series (in Candles)
- * from ledger events and half-life policy.
- */
 export function buildCandleTrendSeries(ledger: CandleLedgerData): CandleTrendSeries {
   const ordered = [...ledger.recentEvents].sort((a, b) => a.atUnix - b.atUnix || a.seq - b.seq)
   if (ordered.length === 0) {
@@ -1133,7 +1238,6 @@ export function buildCandleTrendSeries(ledger: CandleLedgerData): CandleTrendSer
       decayedMilli = Math.max(0, decayedMilli - totalMilli)
     }
 
-    // Deduplicate identical unix timestamps so uPlot x-axis stays strictly monotonic
     const lastIdx = timestamps.length - 1
     if (lastIdx >= 0 && timestamps[lastIdx] === ev.atUnix) {
       cumulativeIssued[lastIdx] = Number((cumIssuedMilli / 1000).toFixed(3))

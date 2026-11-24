@@ -7,7 +7,7 @@
  */
 
 import { html } from 'htm/preact'
-import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { markViewSnapshot } from '../../core/observer'
 import { resourceCache } from '../../core/resource-cache'
 import { apiGet } from '../../core/transport'
@@ -46,6 +46,7 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
   const [docLoading, setDocLoading] = useState(false)
   const [docError, setDocError] = useState<string | null>(null)
   const [copyNotice, setCopyNotice] = useState<string | null>(null)
+  const docAbortRef = useRef<AbortController | null>(null)
 
   const loadList = useCallback(async (reason: 'mount' | 'manual' = 'mount') => {
     setLoading(true)
@@ -95,11 +96,12 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
     void loadList('mount')
   }, [loadList])
 
-  const loadDocument = useCallback(async (id: string, revision: number | null) => {
+  const loadDocument = useCallback(async (id: string, revision: number | null, signal?: AbortSignal) => {
     setDocLoading(true)
     setDocError(null)
     const revQuery = revision !== null ? `?revision=${revision}` : ''
-    const res = await apiGet<unknown>(`/api/v1/published-artifacts/${encodeURIComponent(id)}${revQuery}`)
+    const res = await apiGet<unknown>(`/api/v1/published-artifacts/${encodeURIComponent(id)}${revQuery}`, { signal })
+    if (signal?.aborted) return
     setDocLoading(false)
     if (!res.ok) {
       setDocError(res.error.message)
@@ -131,14 +133,22 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
         })
       }
     }
+    if (signal?.aborted) return
     setDoc({ artifact, content, revisions })
   }, [])
 
   useEffect(() => {
-    if (selectedId) {
-      void loadDocument(selectedId, selectedRevision)
-    } else {
+    docAbortRef.current?.abort()
+    if (!selectedId) {
       setDoc(null)
+      setDocLoading(false)
+      return
+    }
+    const ctrl = new AbortController()
+    docAbortRef.current = ctrl
+    void loadDocument(selectedId, selectedRevision, ctrl.signal)
+    return () => {
+      ctrl.abort()
     }
   }, [selectedId, selectedRevision, loadDocument])
 
@@ -179,13 +189,13 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
   }
 
   const masterPane = html`
-    <div style=${{ display: 'flex', flexDirection: 'column', height: '100%', minWidth: 0 }}>
+    <div class="kn-pane-col">
       <div class="kn-pane-head">
         <h2 class="kn-pane-title">Artifacts <span class="kn-chip-count">(${filtered.length})</span></h2>
         <button type="button" class="btn-ghost" onClick=${() => void loadList('manual')}>새로고침</button>
       </div>
 
-      <div style=${{ padding: 'var(--sp-2) var(--sp-3)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', borderBottom: '1px solid var(--line-1)' }}>
+      <div class="kn-filter-bar">
         <div class="kn-chips" role="group" aria-label="아티팩트 형식 필터">
           <button type="button" class="kn-chip" aria-pressed=${formatFilter === 'all'} onClick=${() => setFormatFilter('all')}>
             All <span class="kn-chip-count">${bundle.artifacts.length}</span>
@@ -207,9 +217,9 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
         />
       </div>
 
-      ${loadError && html`<div class="kn-notice kn-notice--err" style=${{ margin: 'var(--sp-2)' }} role="alert">${loadError}</div>`}
+      ${loadError && html`<div class="kn-notice kn-notice--err kn-inset" role="alert">${loadError}</div>`}
       ${bundle.diagnostics.length > 0 && html`
-        <div class="kn-notice kn-notice--warn" style=${{ margin: 'var(--sp-2)' }}>
+        <div class="kn-notice kn-notice--warn kn-inset">
           읽기 진단 경고 ${bundle.diagnostics.length}건
         </div>
       `}
@@ -257,7 +267,7 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
     ? html`
         <div class="kn-detail-pad">
           <div class="kn-section-head">
-            <div style=${{ minWidth: 0 }}>
+            <div class="kn-min-w-0">
               <div class="kn-row-meta">
                 <span class="mono">${doc.artifact.id}</span>
                 <span class=${`kn-badge ${doc.artifact.format === 'html' ? 'kn-badge--info' : 'kn-badge--ok'}`}>
@@ -266,9 +276,9 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
                 <span class="mono tnum">rev ${doc.artifact.revision}</span>
                 <span class="tnum">${formatBytes(doc.artifact.bytes)}</span>
               </div>
-              <h2 style=${{ margin: '4px 0 0', fontSize: 'var(--fs-16)' }}>${doc.artifact.title}</h2>
+              <h2 class="kn-heading">${doc.artifact.title}</h2>
               ${doc.artifact.summary && html`
-                <p style=${{ margin: '4px 0 0', fontSize: 'var(--fs-13)', color: 'var(--fg-2)' }}>${doc.artifact.summary}</p>
+                <p class="kn-subcopy">${doc.artifact.summary}</p>
               `}
             </div>
             <div class="kn-actions">
@@ -298,12 +308,12 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
               SHA-256: ${doc.artifact.sha256 || '없음'}
             </span>
             ${doc.artifact.goalId && html`
-              <button type="button" class="btn-ghost" style=${{ padding: 'var(--sp-1) var(--sp-2)' }} onClick=${() => props.onNavigate(`/work/goals/${encodeURIComponent(doc.artifact.goalId!)}`)}>
+              <button type="button" class="btn-ghost kn-btn-compact" onClick=${() => props.onNavigate(`/work/goals/${encodeURIComponent(doc.artifact.goalId!)}`)}>
                 Goal: ${doc.artifact.goalId} →
               </button>
             `}
             ${doc.artifact.taskId && html`
-              <button type="button" class="btn-ghost" style=${{ padding: 'var(--sp-1) var(--sp-2)' }} onClick=${() => props.onNavigate(`/work/tasks/${encodeURIComponent(doc.artifact.taskId!)}`)}>
+              <button type="button" class="btn-ghost kn-btn-compact" onClick=${() => props.onNavigate(`/work/tasks/${encodeURIComponent(doc.artifact.taskId!)}`)}>
                 Task: ${doc.artifact.taskId} →
               </button>
             `}
@@ -332,8 +342,7 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
               `
             : html`
                 <article
-                  class="markdown-content"
-                  style=${{ padding: 'var(--sp-3)', border: '1px solid var(--line-1)', borderRadius: 'var(--radius-md)', background: 'var(--bg-2)' }}
+                  class="markdown-content kn-md-panel"
                   dangerouslySetInnerHTML=${{ __html: renderSanitizedMarkdown(doc.content) }}
                 />
               `}

@@ -37,7 +37,6 @@ import {
 } from '../config/navigation'
 import { ObservatoryFilterBar } from './common/observatory-filter-bar'
 import type { LucideIcon } from 'lucide-preact'
-import { ExternalLink } from 'lucide-preact'
 import { ScrollToTopButton } from './common/scroll-to-top'
 import { CopyIdButton } from './common/copy-id-button'
 import { formatElapsedCompact } from '../lib/format-time'
@@ -47,11 +46,6 @@ import { Bug } from 'lucide-preact'
 import { ringFocusClasses } from './common/ring'
 import { Breadcrumb, type BreadcrumbItem } from './common/breadcrumb'
 import { RouteLink } from './common/route-link'
-import {
-  isWidgetSoloRoute,
-  WidgetSoloBar,
-  widgetSoloUrlForRoute,
-} from './widget-solo'
 import { keepersNotRunning } from './fleet-health-panel'
 import { ShieldAlert } from 'lucide-preact'
 
@@ -72,14 +66,10 @@ const LazyKeeperDetailPage = lazy(async () => ({ default: (await import('./keepe
 const LazyBoardSurface = lazy(async () => ({ default: (await import('./board/board-surface')).BoardSurface }))
 const LazyScheduleSurface = lazy(async () => ({ default: (await import('./schedule/schedule-surface')).ScheduleSurface }))
 const LazyWork = lazy(async () => ({ default: (await import('./work')).Work }))
-const LazyOperations = lazy(async () => ({ default: (await import('./operations-panel')).OperationsPanel }))
 const LazyConnectors = lazy(async () => ({ default: (await import('./connector-status')).ConnectorStatusPanel }))
-const LazyLabSurface = lazy(async () => ({ default: (await import('./lab')).Lab }))
 const LazyLogViewer = lazy(async () => ({ default: (await import('./logs')).LogViewer }))
-const LazyIdeShell = lazy(async () => ({ default: (await import('./ide/ide-shell')).IdeShell }))
 const LazySettingsSurface = lazy(async () => ({ default: (await import('./settings-surface')).SettingsSurface }))
 const LazyApprovals = lazy(async () => ({ default: (await import('./approvals/approvals-surface')).ApprovalsSurface }))
-const LazyRegistrySurface = lazy(async () => ({ default: (await import('./registry/registry-surface')).RegistrySurface }))
 const LazyFusionSurface = lazy(async () => ({ default: (await import('./fusion/fusion-surface')).FusionSurface }))
 
 function lazyTabFallback(label: string) {
@@ -848,15 +838,11 @@ export const TAB_SURFACE: Readonly<
   overview: { label: 'Overview', Component: LazyOverview },
   monitoring: { label: 'Monitor', Component: LazyStatus },
   keepers: { label: 'Keepers', Component: LazyKeeperDetailPage },
-  registry: { label: 'Registry', Component: LazyRegistrySurface },
   board: { label: 'Board', Component: LazyBoardSurface },
   schedule: { label: 'Schedule', Component: LazyScheduleSurface },
   fusion: { label: 'Fusion', Component: LazyFusionSurface },
-  command: { label: 'Command', Component: LazyOperations },
   connectors: { label: 'Connectors', Component: LazyConnectors },
   workspace: { label: 'Work', Component: LazyWork },
-  lab: { label: 'Lab', Component: LazyLabSurface },
-  code: { label: 'Code IDE', Component: LazyIdeShell },
   logs: { label: 'System Logs', Component: LazyLogViewer },
   settings: { label: 'Settings', Component: LazySettingsSurface },
   approvals: { label: 'Approvals', Component: LazyApprovals },
@@ -1038,15 +1024,11 @@ const SURFACE_LEAD_SOURCE: Record<TabId, 'own' | 'none' | 'shell'> = {
   overview: 'own',
   monitoring: 'own',
   keepers: 'own',
-  registry: 'shell',
   board: 'none',
   schedule: 'own',
   fusion: 'own',
-  command: 'own',
   connectors: 'own',
   workspace: 'own',
-  lab: 'own',
-  code: 'shell',
   logs: 'own',
   settings: 'own',
   approvals: 'own',
@@ -1060,14 +1042,10 @@ function SurfaceLead() {
   const currentTab = route.value.tab
   const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === currentTab)
   const currentSection = currentSectionForRoute(route.value)
-  const soloUrl = widgetSoloUrlForRoute(route.value)
 
   const description = currentSection?.description ?? currentView?.description ?? null
   const title = currentSection?.label ?? currentView?.label ?? 'Home'
   const shareUrl = currentSectionShareUrl()
-  // Only surface a trail when the operator has drilled into a section —
-  // otherwise the crumb would be \"Connectors\" right above a \"Connectors\"
-  // title, pure duplication.
   const trail = currentSection !== null
     ? deriveBreadcrumbTrail(currentView?.label ?? null, currentSection.label, currentTab)
     : []
@@ -1094,17 +1072,6 @@ function SurfaceLead() {
               size=${14}
             />`
           : null}
-        <a
-          href=${soloUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          class=${`v2-shell-action v2-mobile-operator-target inline-flex size-7 items-center justify-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
-          title="Open this surface in a solo view"
-          aria-label="Open this surface in a solo view"
-          data-testid="dashboard-widget-solo-link"
-        >
-          <${ExternalLink} size=${14} aria-hidden="true" />
-        </a>
       </div>
       ${description ? html`<p class="m-0 max-w-[72rem] text-xs leading-[var(--lh-body)] text-[var(--color-fg-muted)]">${description}</p>` : null}
     </div>
@@ -1119,9 +1086,7 @@ export function DashboardMain() {
   }
 
   const routeLabel = dashboardRouteBoundaryKey(route.value)
-  const soloMode = isWidgetSoloRoute(route.value)
-  const immersiveSurface =
-    route.value.tab === 'code' || route.value.tab === 'keepers' || route.value.tab === 'schedule'
+  const immersiveSurface = route.value.tab === 'keepers' || route.value.tab === 'schedule'
   const keeperDetailRoute = isKeeperDetailDashboardRoute(route.value)
   const renderSurfaceLead = shouldRenderSurfaceLead(route.value)
   const warmingBanner = namespaceTruthInitializing.value ? html`
@@ -1131,27 +1096,6 @@ export function DashboardMain() {
       Server data warming; this view will refresh automatically.
     </div>
   ` : null
-
-  if (soloMode) {
-    const soloBodyClass = route.value.tab === 'code'
-      ? 'min-h-0 flex-1 overflow-hidden'
-      : 'min-h-0 flex-1 overflow-y-auto p-3 max-[520px]:p-2'
-
-    return html`
-      <div class="v2-shell-surface grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] bg-[var(--color-bg-page)]">
-        <${WidgetSoloBar} routeState=${route.value} />
-        <${ObservatoryFilterBar} />
-        <div class=${soloBodyClass}>
-          ${warmingBanner}
-          <${ErrorBoundary} key=${routeLabel} label=${routeLabel || 'dashboard'}>
-            <div class=${route.value.tab === 'code' ? 'h-full min-h-0 overflow-hidden' : 'animate-in fade-in slide-in-from-bottom-2 duration-[var(--t-slow)] fill-mode-both'}>
-              <${TabContent} />
-            </div>
-          <//>
-        </div>
-      </div>
-    `
-  }
 
   if (immersiveSurface || keeperDetailRoute) {
     return html`

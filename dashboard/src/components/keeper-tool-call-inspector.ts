@@ -23,11 +23,6 @@ import { ringFocusClasses } from './common/ring'
 import { coverageGapDisplay, sourceHealthClass, freshnessText } from './common/source-health'
 import { StatusChip, type StatusChipTone } from './common/status-chip'
 import {
-  openIdeContextRouteLink,
-  routeLinksForContext,
-  type IdeContextRouteLink,
-} from './ide/ide-context-lens'
-import {
   isKeeperToolActivityEvent,
   isKeeperToolEvidenceCommittedEvent,
   sseEventMatchesKeeper,
@@ -88,29 +83,15 @@ function tryPrettyJson(s: string): string | null {
 
 /** Pure: the route links one recorded row earns. Exported so tests can pin
     which target_kind values promote a Code link without rendering the row. */
-export function toolCallRouteLinks(entry: ToolCallEntry): ReadonlyArray<IdeContextRouteLink> {
-  const radius = entry.action_radius
-  const filePath = radius?.target_kind === 'path'
-    ? radius.target_path ?? radius.observed_paths?.[0]
-    : undefined
-  const goalId = entry.goal_ids?.[0]
-  const taskId = entry.task_id
-  const sessionId = entry.session_id
-  if (filePath === undefined && goalId === undefined && taskId === undefined && sessionId === undefined) {
-    return []
-  }
-  const links = routeLinksForContext({
-    filePath,
-    goalId,
-    taskId,
-    sessionId,
-    surface: 'Tool',
-    label: entry.tool,
-    sourceId: `tool:${entry.keeper}:${entry.ts}:${entry.tool}`,
-    keeperId: entry.keeper,
-    telemetry: sessionId !== undefined,
-  })
-  return links.some(link => link.label !== 'Keeper') ? links : []
+export interface ToolCallRouteLink {
+  readonly id: string
+  readonly label: string
+  readonly evidence: string
+  readonly params?: Record<string, string>
+}
+
+export function toolCallRouteLinks(_entry: ToolCallEntry): ReadonlyArray<ToolCallRouteLink> {
+  return []
 }
 
 // ── Composition tree grouping ───────────────────────────
@@ -797,18 +778,14 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
                 ${routeLinks.map(link => link.evidence).join(' · ')}
               </span>
               <div class="flex shrink-0 flex-wrap justify-end gap-1">
-                ${routeLinks.map(link => html`
-                  <button
+                ${routeLinks.map((link: { id: string; label: string; evidence: string }) => html`
+                  <span
                     key=${link.id}
-                    type="button"
-                    data-testid=${link.label === 'Code' ? 'keeper-tool-code-link' : undefined}
-                    class=${`keeper-tool-route-link rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-3xs font-semibold text-[var(--color-accent-fg)] hover:border-[var(--color-accent-border)] hover:bg-[var(--color-bg-hover)] ${ringFocusClasses()} v2-monitoring-action`}
+                    class="keeper-tool-route-link rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-3xs font-semibold text-[var(--color-fg-muted)]"
                     title=${link.evidence}
-                    aria-label=${`Open ${link.evidence}`}
-                    onClick=${() => openIdeContextRouteLink(link)}
                   >
                     ${link.label}
-                  </button>
+                  </span>
                 `)}
               </div>
             </div>

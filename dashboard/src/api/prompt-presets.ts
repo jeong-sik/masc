@@ -1,4 +1,4 @@
-import { Schema } from 'effect'
+import { Schema } from '../lib/wire-schema'
 import { ApiRequestError, get, postControlPlane } from './core'
 import { errorToString } from '../lib/format-string'
 

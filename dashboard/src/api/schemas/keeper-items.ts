@@ -1,4 +1,5 @@
-import { Either, Schema } from 'effect'
+import { Either } from '../../lib/result'
+import { Schema } from '../../lib/wire-schema'
 import { isCandleAmount, isCandleAccountRevision } from '../../lib/candle-observation'
 import { EQUIPMENT_IDS } from './keeper-portrait'
 

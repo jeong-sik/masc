@@ -24,7 +24,6 @@ const SURFACES = [
   { tab: 'overview', label: '개요', icon: 'grid' },
   'sep',
   { tab: 'keepers', label: 'Keepers', icon: 'users' },
-  { tab: 'registry', label: '레지스트리', icon: 'layers' },
   { tab: 'monitoring', label: 'Monitor', icon: 'monitor' },
   'sep',
   { tab: 'workspace', label: '작업', icon: 'target' },
@@ -35,11 +34,7 @@ const SURFACES = [
   { tab: 'fusion', label: 'Fusion', icon: 'fusion' },
   { tab: 'logs', label: '로그', icon: 'logs' },
   'sep',
-  { tab: 'code', label: 'IDE', icon: 'code' },
   { tab: 'connectors', label: '커넥터', icon: 'plug' },
-  'sep',
-  { tab: 'command', label: '명령', icon: 'term' },
-  { tab: 'lab', label: 'Lab', icon: 'flask' },
 ] as const satisfies readonly NavEntry[]
 
 export interface NavBadges {

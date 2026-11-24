@@ -2,7 +2,7 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { signal } from '@preact/signals'
 import { act } from '@testing-library/preact'
-import { Effect } from 'effect'
+import { err, ok } from '../lib/result'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ApiCore from '../api/core'
 import { TRANSPORT_RETRY_BASE_MS } from '../config/constants'
@@ -201,15 +201,18 @@ async function loadComponentWithApi(api: {
   vi.doMock('../api/gate-keepers', async () => {
     const { DashboardTransportError } = await import('../api/effect-http')
     return {
-      fetchGateKeepers: () => Effect.tryPromise({
-        try: api.fetchGateKeepers,
-        catch: cause => new DashboardTransportError({
-          method: 'GET',
-          path: '/api/v1/gate/keepers',
-          message: cause instanceof Error ? cause.message : String(cause),
-          cause,
-        }),
-      }),
+      fetchGateKeepers: async () => {
+        try {
+          return ok(await api.fetchGateKeepers())
+        } catch (cause) {
+          return err(new DashboardTransportError({
+            method: 'GET',
+            path: '/api/v1/gate/keepers',
+            message: cause instanceof Error ? cause.message : String(cause),
+            cause,
+          }))
+        }
+      },
     }
   })
   vi.doMock('../sse', () => ({

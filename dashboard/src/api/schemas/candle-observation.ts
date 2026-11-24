@@ -1,4 +1,4 @@
-import { Schema } from 'effect'
+import { Schema } from '../../lib/wire-schema'
 import { isCandleAccountRevision, isCandleObservation, type CandleObservation } from '../../lib/candle-observation'
 export * from '../../lib/candle-observation'
 

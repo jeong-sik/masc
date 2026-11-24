@@ -14,7 +14,7 @@ A planning view, not a release promise. The operating model behind it
 |---|---|---|
 | Front door | The TUI and the MCP workspace | What a user meets first, and what a release must not break |
 | Supporting | Keepers, sandboxes, the Gate | Advanced paths; behaviour depends on runtime and configuration |
-| Maintained | Dashboard | Kept building, type-checked, and truthful. New operator features land in the TUI first |
+| Maintained | Dashboard | Kept building, type-checked, and truthful under the Proposal A+ 6-Trunk Renewal (#54554); IDE shell and Lab diagnostics surfaces retired |
 | Deferred | Extraction, cluster mode, broad architecture cleanup | Visible, not scheduled |
 
 ## Release train
@@ -48,9 +48,10 @@ Open `must-do` issues, grouped. Numbers are issues.
 
 ## Next
 
-- TUI: every operator action reachable without the dashboard. The two screens
-  that exist only in the dashboard (the IDE shell, the Lab diagnostics) are
-  not on the TUI path; whether they move or retire is open.
+- TUI: every operator action reachable without the dashboard. The two former
+  dashboard-only screens (the IDE shell and the top-level Lab diagnostics
+  surface) have been explicitly retired as part of the Dashboard Renewal (#54554);
+  active tool, memory, and repository inspection live inside the 6-trunk IA.
 - microVM backends beyond `apple_container`: `microsandbox` boot,
   `nerdctl_kata` measured on a Linux host, `network_mode = "policy"` on more
   than one backend.

@@ -1,4 +1,4 @@
-import { Schema } from 'effect'
+import { Schema } from '../lib/wire-schema'
 import { get } from './core'
 
 const text = Schema.NonEmptyString

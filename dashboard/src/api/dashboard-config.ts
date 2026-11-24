@@ -1,7 +1,6 @@
-import { Effect } from 'effect'
-
 import {
-  DashboardHttp,
+  defaultDashboardHttp,
+  type DashboardHttpService,
   type DashboardTransportError,
 } from './effect-http'
 import {
@@ -9,6 +8,7 @@ import {
   type DashboardConfig,
   type DashboardConfigSchemaDriftError,
 } from './schemas/dashboard-config'
+import type { Result } from '../lib/result'
 
 export type {
   ConfigEntry,
@@ -26,14 +26,11 @@ export type DashboardConfigError =
 
 const DASHBOARD_CONFIG_PATH = '/api/v1/dashboard/config'
 
-export function fetchDashboardConfig(): Effect.Effect<
-  DashboardConfig,
-  DashboardConfigError,
-  DashboardHttp
-> {
-  return Effect.gen(function*() {
-    const http = yield* DashboardHttp
-    const raw = yield* http.getUnknown(DASHBOARD_CONFIG_PATH)
-    return yield* decodeDashboardConfig(raw)
-  })
+export async function fetchDashboardConfig(
+  http: DashboardHttpService = defaultDashboardHttp,
+  signal?: AbortSignal,
+): Promise<Result<DashboardConfig, DashboardConfigError>> {
+  const raw = await http.getUnknown(DASHBOARD_CONFIG_PATH, signal)
+  if (!raw.ok) return raw
+  return decodeDashboardConfig(raw.value)
 }

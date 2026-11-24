@@ -1,4 +1,4 @@
-import { getStaticTOMLValue, parseTOML } from 'toml-eslint-parser'
+import { getStaticTOMLValue, parseTOML } from './toml-lite'
 import type { StandaloneLaneSnapshotRow } from '../api/dashboard-standalone-lanes'
 import { isRecord } from './type-guards'
 import { setRuntimeTomlKey } from './runtime-toml-config'

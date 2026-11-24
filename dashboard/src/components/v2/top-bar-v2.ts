@@ -10,8 +10,6 @@ import { navigate, route } from '../../router'
 import { executionLoaded, keepers, serverStatus, shellCounts, shellRuntimeResolution } from '../../store'
 import { activeKeeperName } from '../../keeper-state'
 import { gateData } from '../gate-signals'
-import { CopilotDockTopBarButton, type CopilotDockApi } from '../copilot-dock'
-import { TweaksPanelToggle } from '../tweaks-panel'
 import { StatusDot } from './primitives-v2'
 import { surfaceLabel } from './nav-rail-v2'
 import { configuredCountSourceLabel, keeperRowLooksRunning, resolveRuntimeCounts, runtimeCountSourceLabel } from '../../runtime-counts'
@@ -271,7 +269,7 @@ export function AttentionIndicatorV2() {
   `
 }
 
-export function TopBarV2({ dock }: { dock: CopilotDockApi }) {
+export function TopBarV2() {
   const tab = route.value.tab
   const shellKeeperFiberCount = serverStatus.value?.project !== 'initializing'
     && typeof shellCounts.value?.keepers === 'number'
@@ -336,15 +334,13 @@ export function TopBarV2({ dock }: { dock: CopilotDockApi }) {
         <button class="v2-statchip" onClick=${() => navigate('schedule')} title="예약 자동화 큐">
           ${'◷'} 예약
         </button>
-        <${CopilotDockTopBarButton} dock=${dock} />
       </div>
-      ${/* Operational/safety status cluster (review P1: keep operator chrome). */ ''}
+      ${/* Operational/safety status cluster. */ ''}
       <div class="v2-top-ops" role="group" aria-label="연결과 운영 도구">
         <${TransportBeacon} />
         <${ErrorCounterBadge} />
         <${AuthStatus} />
         <${BuildIdentityBadge} />
-        <${TweaksPanelToggle} />
       </div>
     </div>
   `

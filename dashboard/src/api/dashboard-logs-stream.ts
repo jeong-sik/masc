@@ -1,4 +1,3 @@
-import { Effect } from 'effect'
 import { logsPath, type LogsRequest } from './dashboard-logs'
 import { decodeLogsStreamFrame, type LogsStreamFrame } from './schemas/logs'
 import { QueryStreamProtocolError, readQueryObservationStream } from './query-observation-stream'
@@ -12,8 +11,8 @@ export async function readDashboardLogsStream(
   onFrame: (frame: LogsStreamFrame) => void, onActivity?: () => void,
 ): Promise<void> {
   await readQueryObservationStream(logsPath(request, true), observerInstance, signal, wire => {
-    const decoded = Effect.runSync(Effect.either(decodeLogsStreamFrame(wire)))
-    if (decoded._tag === 'Left') throw decoded.left
-    return decoded.right
+    const decoded = decodeLogsStreamFrame(wire)
+    if (!decoded.ok) throw decoded.error
+    return decoded.value
   }, onFrame, onActivity)
 }

@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { unwrapResult, unwrapResultError } from '../../lib/result'
 import { describe, expect, it } from 'vitest'
 
 import { decodeLogsData, LogsSchemaDriftError } from './logs'
@@ -62,7 +62,7 @@ function currentWire(entries: readonly Record<string, unknown>[] = []) {
 }
 
 function expectDrift(value: unknown): LogsSchemaDriftError {
-  const error = Effect.runSync(Effect.flip(decodeLogsData(value)))
+  const error = unwrapResultError(decodeLogsData(value))
   expect(error).toBeInstanceOf(LogsSchemaDriftError)
   expect(error.message).toContain('logs schema drift')
   return error
@@ -70,7 +70,7 @@ function expectDrift(value: unknown): LogsSchemaDriftError {
 
 describe('decodeLogsData', () => {
   it('strictly decodes the empty current response', () => {
-    const data = Effect.runSync(decodeLogsData(currentWire()))
+    const data = unwrapResult(decodeLogsData(currentWire()))
 
     expect(data.total).toBe(0)
     expect(data.entries).toEqual([])
@@ -78,7 +78,7 @@ describe('decodeLogsData', () => {
   })
 
   it('maps wire absence to product values once', () => {
-    const data = Effect.runSync(
+    const data = unwrapResult(
       decodeLogsData(currentWire([currentEntry()])),
     )
 
@@ -97,7 +97,7 @@ describe('decodeLogsData', () => {
   })
 
   it('keeps current closed variants and structured details', () => {
-    const data = Effect.runSync(decodeLogsData(currentWire([
+    const data = unwrapResult(decodeLogsData(currentWire([
       currentEntry({
         keeper_name: 'reviewer',
         turn_id: 7,
@@ -115,7 +115,7 @@ describe('decodeLogsData', () => {
 
   it('reads the category filter echo as a list of selectors', () => {
     const wire = currentWire()
-    const data = Effect.runSync(decodeLogsData({
+    const data = unwrapResult(decodeLogsData({
       ...wire,
       query: {
         ...wire.query,
@@ -174,7 +174,7 @@ describe('decodeLogsData', () => {
   // pin both directions of that contract.
   it('carries the ring live-window bounds through to LogsData', () => {
     const entries = [currentEntry({ seq: 81_225 })]
-    const data = Effect.runSync(decodeLogsData({
+    const data = unwrapResult(decodeLogsData({
       ...currentWire(entries),
       ring: { start_seq: 31_225, total: 81_225, dropped_before: true },
     }))

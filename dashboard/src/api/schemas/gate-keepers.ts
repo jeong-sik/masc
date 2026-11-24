@@ -4,7 +4,8 @@ import { readKeeperBoardAddress } from '../../lib/board-address'
 import { RuntimeLaneObservationSchema } from '../../lib/keeper-runtime-walk'
 import { KeeperTurnPulseSchema } from '../../lib/keeper-turn-pulse'
 import { KEEPER_ACTIVATION_MODES } from '../../lib/keeper-activation-mode'
-import { Data, Effect, ParseResult, Schema } from 'effect'
+import { TaggedError, ok, err, type Result } from '../../lib/result'
+import { ParseResult, Schema } from '../../lib/wire-schema'
 
 const KeeperMetaWireSchema = Schema.Struct({
   name: Schema.NonEmptyString,
@@ -237,13 +238,13 @@ export interface GateKeepersData {
   readonly listing: KeeperListing
 }
 
-export class GateKeepersSchemaDriftError extends Data.TaggedError(
+export class GateKeepersSchemaDriftError extends TaggedError(
   'GateKeepersSchemaDriftError',
 )<{
   readonly domain: 'gate-keepers'
   readonly issues: ReadonlyArray<ParseResult.ArrayFormatterIssue>
   readonly message: string
-}> {}
+}>() {}
 
 function schemaDriftError(
   error: ParseResult.ParseError,
@@ -304,12 +305,10 @@ const STRICT_PARSE_OPTIONS = {
 
 export function decodeGateKeepers(
   data: unknown,
-): Effect.Effect<GateKeepersData, GateKeepersSchemaDriftError> {
-  return Schema.decodeUnknown(
+): Result<GateKeepersData, GateKeepersSchemaDriftError> {
+  const decoded = Schema.decodeUnknownResult(
     GateKeepersValidatedWireSchema,
     STRICT_PARSE_OPTIONS,
-  )(data).pipe(
-    Effect.map(toGateKeepersData),
-    Effect.mapError(schemaDriftError),
-  )
+  )(data)
+  return decoded.ok ? ok(toGateKeepersData(decoded.value)) : err(schemaDriftError(decoded.error))
 }

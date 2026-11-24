@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { DashboardScheduledAutomationRequest } from '../../api'
 import type { KeeperLifecycleEvent } from '../../api/keeper'
-import type { CompositeObservation, SwimlaneSegment } from '../fsm-hub-types'
+import type { CompositeObservation, SwimlaneSegment } from '../../lib/keeper-fsm-labels'
 import {
   serverDecisionStages,
   serverRuntimeStates,

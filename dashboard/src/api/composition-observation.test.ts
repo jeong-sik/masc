@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { sha256 } from '@noble/hashes/sha2.js'
-import { bytesToHex } from '@noble/hashes/utils.js'
-import { fromByteArray } from 'base64-js'
+import { createHash } from 'node:crypto'
+
+const sha256 = (bytes: Uint8Array): Uint8Array => createHash('sha256').update(bytes).digest()
+const bytesToHex = (bytes: Uint8Array): string => Buffer.from(bytes).toString('hex')
+const fromByteArray = (bytes: Uint8Array): string => Buffer.from(bytes).toString('base64')
 import { asyncRequestSourceKey, fetchAsyncRequestStatus, fetchOriginalToolResult } from './composition-observation'
 
 const encoder = new TextEncoder()

@@ -9,7 +9,6 @@ import { render } from 'preact'
 import { waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChatBlock, KeeperConversationEntry } from '../../types'
-import * as shikiHighlighter from '../common/shiki-highlighter'
 import { ChatTranscript } from './primitives'
 
 function entry(
@@ -94,19 +93,9 @@ describe('ChatCodeBlock Shiki highlighting', () => {
       value: originalClipboard,
     })
   })
-
-  it('falls back to the escaped HTML when Shiki fails', async () => {
-    vi.spyOn(shikiHighlighter, 'highlightCodeHtml').mockRejectedValueOnce(new Error('unsupported language'))
-
-    render(renderBlocks([{ t: 'code', cap: 'weirdlang', html: 'a &lt; b', source: 'a < b' }]), container)
-
-    const code = container.querySelector('[data-chat-block="code"]')
-    await waitFor(() => expect(code?.classList.contains('chat-block-code-fallback')).toBe(true))
-    expect(code?.textContent).toContain('a < b')
-  })
 })
 
-describe('ChatMermaidBlock diagram rendering', () => {
+describe('ChatMermaidBlock fallback rendering', () => {
   let container: HTMLDivElement
 
   beforeEach(() => {
@@ -119,28 +108,11 @@ describe('ChatMermaidBlock diagram rendering', () => {
     container.remove()
   })
 
-  it('renders a mermaid block as SVG', async () => {
+  it('renders mermaid blocks safely as monospace code without mermaid bundle', async () => {
     render(renderBlocks([{ t: 'mermaid', source: 'graph TD; A-->B;', caption: 'flow' }]), container)
 
-    const block = container.querySelector('[data-chat-block="mermaid"]')
+    const block = container.querySelector('[data-chat-block="code"]')
     expect(block).not.toBeNull()
-    expect(block?.textContent).toContain('flow')
-
-    // happy-dom + DOMPurify strip the root <svg> tag in tests, but the rendered
-    // diagram text survives inside the figure body.
-    await waitFor(() => expect(block?.textContent).toContain('graph TD'))
-  })
-
-  it('falls back to a code block when mermaid rendering errors', async () => {
-    const { default: mermaid } = await import('mermaid')
-    vi.mocked(mermaid.render).mockRejectedValueOnce(new Error('parse error'))
-
-    render(renderBlocks([{ t: 'mermaid', source: 'invalid diagram', caption: 'broken' }]), container)
-
-    await waitFor(() => expect(container.querySelector('[data-chat-block="mermaid"]')).toBeNull())
-    const code = container.querySelector('[data-chat-block="code"]')
-    expect(code).not.toBeNull()
-    expect(code?.textContent).toContain('invalid diagram')
-    expect(code?.textContent).toContain('mermaid')
+    expect(block?.textContent).toContain('graph TD')
   })
 })

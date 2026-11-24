@@ -1,11 +1,6 @@
-import { Effect, Option } from 'effect'
 import { describe, expect, it } from 'vitest'
-
-import {
-  DashboardHttp,
-  DashboardTransportError,
-  type DashboardHttpService,
-} from './effect-http'
+import { Option, err, ok } from '../lib/result'
+import { DashboardTransportError } from './effect-http'
 import {
   fetchTransportHealth,
   TransportHealthSchemaDriftError,
@@ -26,54 +21,41 @@ const initializingWire = {
   },
 } as const
 
-function runWithHttp<A, E>(
-  program: Effect.Effect<A, E, DashboardHttp>,
-  http: DashboardHttpService,
-): Effect.Effect<A, E> {
-  return program.pipe(Effect.provideService(DashboardHttp, http))
-}
-
 describe('fetchTransportHealth', () => {
-  it('decodes the unknown HTTP payload before exposing a domain value', () => {
-    const result = Effect.runSync(
-      runWithHttp(fetchTransportHealth(), {
-        getUnknown: () => Effect.succeed(initializingWire),
-      }),
-    )
+  it('decodes the unknown HTTP payload before exposing a domain value', async () => {
+    const res = await fetchTransportHealth({
+      getUnknown: async () => ok(initializingWire),
+    })
 
-    expect('status' in result && result.status).toBe('initializing')
-    expect(Option.isNone(result.projection_diagnostics.last_success_at)).toBe(
-      true,
-    )
+    expect(res.ok).toBe(true)
+    if (!res.ok) return
+    expect('status' in res.value && res.value.status).toBe('initializing')
+    expect(Option.isNone(res.value.projection_diagnostics.last_success_at)).toBe(true)
   })
 
-  it('preserves a transport failure as a typed error', () => {
+  it('preserves a transport failure as a typed error', async () => {
     const transportError = new DashboardTransportError({
       method: 'GET',
       path: '/api/v1/dashboard/transport-health',
       message: 'network unavailable',
       cause: new Error('network unavailable'),
     })
-    const error = Effect.runSync(
-      Effect.flip(
-        runWithHttp(fetchTransportHealth(), {
-          getUnknown: () => Effect.fail(transportError),
-        }),
-      ),
-    )
+    const res = await fetchTransportHealth({
+      getUnknown: async () => err(transportError),
+    })
 
-    expect(error).toBe(transportError)
+    expect(res.ok).toBe(false)
+    if (res.ok) return
+    expect(res.error).toBe(transportError)
   })
 
-  it('maps an invalid HTTP payload to schema drift', () => {
-    const error = Effect.runSync(
-      Effect.flip(
-        runWithHttp(fetchTransportHealth(), {
-          getUnknown: () => Effect.succeed({ status: 'ready' }),
-        }),
-      ),
-    )
+  it('maps an invalid HTTP payload to schema drift', async () => {
+    const res = await fetchTransportHealth({
+      getUnknown: async () => ok({ status: 'ready' }),
+    })
 
-    expect(error).toBeInstanceOf(TransportHealthSchemaDriftError)
+    expect(res.ok).toBe(false)
+    if (res.ok) return
+    expect(res.error).toBeInstanceOf(TransportHealthSchemaDriftError)
   })
 })

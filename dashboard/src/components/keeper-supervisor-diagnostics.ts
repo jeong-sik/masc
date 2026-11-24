@@ -7,7 +7,7 @@ import { signal } from '@preact/signals'
 import { formatTimeAgo } from '../lib/format-time'
 import { FilterChips } from './common/filter-chips'
 import { PanelCard } from './common/panel-card'
-import { failureReasonLabel } from './fsm-hub-types'
+import { failureReasonLabel } from '../lib/keeper-fsm-labels'
 import {
   groupCrashCohorts,
   filterCrashLog,

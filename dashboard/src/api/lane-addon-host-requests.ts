@@ -1,4 +1,5 @@
-import { Either, Schema } from 'effect'
+import { Either } from '../lib/result'
+import { Schema } from '../lib/wire-schema'
 
 const text = Schema.NonEmptyString
 const wait = Schema.Union(

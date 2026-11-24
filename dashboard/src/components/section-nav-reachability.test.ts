@@ -19,13 +19,11 @@ import { html } from 'htm/preact'
 import { route } from '../router'
 import { visibleSectionItemsForTab } from '../config/navigation'
 import type { TabId } from '../types'
-import { Lab } from './lab'
 import { Work } from './work'
 
 afterEach(cleanup)
 
 const SURFACES: Array<{ tab: TabId, name: string, landing: string, Surface: unknown }> = [
-  { tab: 'lab', name: 'Lab', landing: 'tools', Surface: Lab },
   { tab: 'workspace', name: 'Work', landing: 'work', Surface: Work },
 ]
 
@@ -69,7 +67,6 @@ for (const { tab, name, landing, Surface } of SURFACES) {
 describe('sections that #27547 left unreachable', () => {
   const ORPHANS: Array<[TabId, string, string, unknown]> = [
     ['workspace', 'verification', 'work', Work],
-    ['lab', 'keeper-memory-health', 'tools', Lab],
   ]
 
   for (const [tab, section, landing, Surface] of ORPHANS) {

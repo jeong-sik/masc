@@ -35,30 +35,21 @@ function keeper(name: string): Keeper {
   return { name, status: 'idle' } as Keeper
 }
 
-// Registry hosts a keeper roster that drills into the shared detail page. If the
-// return route were not tab-aware, opening a keeper from Registry would strand
-// the operator on Monitoring — the route they did not come from.
 describe('detail route is anchored to the route it was opened from', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-  })
-
-  it('keeps registry as the host tab when opening a keeper', () => {
-    mocks.route.value = { tab: 'registry', params: {}, postId: null }
-    openKeeperDetail(keeper('alpha'))
-    expect(mocks.navigate).toHaveBeenCalledWith('registry', { keeper: 'alpha' })
-  })
-
-  it('returns to registry, without the keeper param, on close', () => {
-    mocks.route.value = { tab: 'registry', params: { keeper: 'alpha' }, postId: null }
-    closeKeeperDetail()
-    expect(mocks.navigate).toHaveBeenCalledWith('registry', {})
   })
 
   it('still anchors the keepers tab', () => {
     mocks.route.value = { tab: 'keepers', params: {}, postId: null }
     openKeeperDetail(keeper('beta'))
     expect(mocks.navigate).toHaveBeenCalledWith('keepers', { keeper: 'beta' })
+  })
+
+  it('returns to keepers, without the keeper param, on close', () => {
+    mocks.route.value = { tab: 'keepers', params: { keeper: 'beta' }, postId: null }
+    closeKeeperDetail()
+    expect(mocks.navigate).toHaveBeenCalledWith('keepers', {})
   })
 
   it('falls back to the monitoring agent directory from unrelated tabs', () => {

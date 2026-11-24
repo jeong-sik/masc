@@ -1,4 +1,4 @@
-import { Schema } from 'effect'
+import { Schema } from '../../lib/wire-schema'
 
 // Prompt_registry.authoring_issue_json owns the required wire report.
 // Only [] reports a clean catalog; missing or malformed diagnostics are errors.

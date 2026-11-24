@@ -1,7 +1,6 @@
-import { Effect } from 'effect'
-
 import {
-  DashboardHttp,
+  defaultDashboardHttp,
+  type DashboardHttpService,
   type DashboardTransportError,
 } from './effect-http'
 import {
@@ -9,6 +8,7 @@ import {
   type GateKeepersData,
   type GateKeepersSchemaDriftError,
 } from './schemas/gate-keepers'
+import type { Result } from '../lib/result'
 
 export type {
   GateKeeper,
@@ -25,20 +25,13 @@ export type GateKeepersError =
   | DashboardTransportError
   | GateKeepersSchemaDriftError
 
-// No limit parameter: the route clamps to its own bound and reports `total` /
-// `truncated`, so asking for a number here only re-introduces a second cap the
-// UI would have to keep in sync. masc#29077 — the hardcoded 50 hid 79 of 129
-// keepers, including every keeper that had a live channel binding.
 const GATE_KEEPERS_PATH = '/api/v1/gate/keepers?detailed=true'
 
-export function fetchGateKeepers(): Effect.Effect<
-  GateKeepersData,
-  GateKeepersError,
-  DashboardHttp
-> {
-  return Effect.gen(function*() {
-    const http = yield* DashboardHttp
-    const raw = yield* http.getUnknown(GATE_KEEPERS_PATH)
-    return yield* decodeGateKeepers(raw)
-  })
+export async function fetchGateKeepers(
+  http: DashboardHttpService = defaultDashboardHttp,
+  signal?: AbortSignal,
+): Promise<Result<GateKeepersData, GateKeepersError>> {
+  const raw = await http.getUnknown(GATE_KEEPERS_PATH, signal)
+  if (!raw.ok) return raw
+  return decodeGateKeepers(raw.value)
 }

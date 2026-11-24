@@ -234,28 +234,11 @@ describe('FleetHealthPanel', () => {
     expect(runtimePill?.classList.contains('ok')).toBe(false)
   })
 
-  it('renders TelemetryUnified alone for view=event-log', () => {
-    setRoute('event-log')
-    render(html`<${FleetHealthPanel} />`)
-
-    expect(screen.getByTestId('telemetry-unified')).toBeTruthy()
-    expect(screen.queryByTestId('tool-quality-panel')).toBeNull()
-  })
-
-  it('renders FleetTelemetryPanel for view=comparison', () => {
-    setRoute('comparison')
-    render(html`<${FleetHealthPanel} />`)
-
-    expect(screen.getByTestId('fleet-telemetry-panel')).toBeTruthy()
-    expect(screen.queryByTestId('telemetry-unified')).toBeNull()
-  })
-
   it('renders ToolQualityPanel alone for view=tool-quality', () => {
     setRoute('tool-quality')
     render(html`<${FleetHealthPanel} />`)
 
     expect(screen.getByTestId('tool-quality-panel')).toBeTruthy()
-    expect(screen.queryByTestId('telemetry-unified')).toBeNull()
   })
 
   it('renders GateMonitor for view=gate', () => {
@@ -263,15 +246,12 @@ describe('FleetHealthPanel', () => {
     render(html`<${FleetHealthPanel} />`)
 
     expect(screen.getByTestId('gate-monitor')).toBeTruthy()
-    expect(screen.queryByTestId('telemetry-unified')).toBeNull()
   })
 
-  it('renders FilterChips with all 7 view options', () => {
+  it('renders FilterChips with all 5 active view options', () => {
     render(html`<${FleetHealthPanel} />`)
 
     expect(screen.getByText('Operations')).toBeTruthy()
-    expect(screen.getByText('Evidence Log')).toBeTruthy()
-    expect(screen.getByText('Keeper 비교')).toBeTruthy()
     expect(screen.getAllByText('Tool Quality').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Gate').length).toBeGreaterThan(0)
     expect(screen.getByText('Attribution')).toBeTruthy()

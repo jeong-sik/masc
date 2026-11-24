@@ -12,9 +12,9 @@ export function routeWantsRefreshTarget(
     case 'board':
       return routeState.tab === 'board' || (routeState.tab === 'workspace' && routeState.params.section === 'board')
     case 'operator':
-      return routeState.tab === 'command' && routeState.params.view !== 'inspector'
+      return false
     case 'activity':
-      return routeState.tab === 'monitoring' && routeState.params.section === 'observatory'
+      return false
     case 'fusion':
       // The fusion run-status panel only mounts on the top-level fusion surface,
       // so its registry refetch is scoped to that route.
@@ -23,11 +23,7 @@ export function routeWantsRefreshTarget(
       return (routeState.tab === 'monitoring' && routeState.params.section === 'internal-agents')
         || (routeState.tab === 'workspace' && routeState.params.section === 'verification')
     case 'ide':
-      // The IDE workspace store is an app-lifetime singleton, so its live push
-      // refresh must be scoped to the code surface — otherwise a keeper editing
-      // files would refetch the workspace tree/diff while the user is on another
-      // tab. Off-tab, the singleton simply holds its last snapshot.
-      return routeState.tab === 'code'
+      return false
   }
 }
 

@@ -1,7 +1,7 @@
 // Goal creation state and the request's workspace-bound outcome.
 
 import { signal } from '@preact/signals'
-import { v4 as randomUuid } from 'uuid'
+import { randomUuid } from '../../lib/uuid'
 import { currentDashboardActor, getStoredToken, getStoredTokenMeta } from '../../api/core'
 import { callMcpToolAtIdentity, mcpCallFailureDisposition, mcpStructuredContentFromError } from '../../api/mcp'
 import { artifactWorkspaceBody, captureArtifactWorkspace, type ArtifactWorkspace } from '../../api/published-artifacts'

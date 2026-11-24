@@ -47,7 +47,16 @@ import {
   railWidth,
 } from './keeper-workspace/keeper-workspace-pane-resize'
 import { ringFocusClasses } from './common/ring'
-import { tweaksRosterOpen, tweaksCtxOpen } from './tweaks-panel'
+import { persistentSignal } from '../lib/persistent-signal'
+
+const rosterPaneOpen = persistentSignal<boolean>({
+  key: 'masc:keeper-roster-open',
+  defaultValue: true,
+})
+const ctxPaneOpen = persistentSignal<boolean>({
+  key: 'masc:keeper-ctx-open',
+  defaultValue: true,
+})
 
 const CLOSE_BUTTON_FOCUS_CLASS = ringFocusClasses({
   tone: 'accent-medium',
@@ -180,13 +189,13 @@ const KeeperDetailContent = memo(function KeeperDetailContent({
   // the full tabbed KeeperDetailBody (FSM / 진단 / 정체성 / 설정 / 디버그).
   const [detailOpen, setDetailOpen] = useState(false)
   const [configOverlayKeeper, setConfigOverlayKeeper] = useState<string | null>(null)
-  const rosterOpen = tweaksRosterOpen.value
+  const rosterOpen = rosterPaneOpen.value
   const setRosterOpen = (v: boolean | ((prev: boolean) => boolean)) => {
-    tweaksRosterOpen.value = typeof v === 'function' ? v(tweaksRosterOpen.value) : v
+    rosterPaneOpen.value = typeof v === 'function' ? v(rosterPaneOpen.value) : v
   }
-  const railOpen = tweaksCtxOpen.value
+  const railOpen = ctxPaneOpen.value
   const setRailOpen = (v: boolean | ((prev: boolean) => boolean)) => {
-    tweaksCtxOpen.value = typeof v === 'function' ? v(tweaksCtxOpen.value) : v
+    ctxPaneOpen.value = typeof v === 'function' ? v(ctxPaneOpen.value) : v
   }
   const isMobile = useMatchMedia(KW_MOBILE_QUERY)
   // <=1180px drops the rail column entirely (keeper-workspace.css), so the right

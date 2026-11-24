@@ -7,7 +7,7 @@ import { isImeComposing } from '../lib/keyboard'
 
 import { html } from 'htm/preact'
 import { useEffect, useLayoutEffect, useMemo, useState } from 'preact/hooks'
-import { Option } from 'effect'
+import { Option } from '../lib/result'
 import {
   SETTINGS_ROUTE_SECTION_IDS,
   type SettingsRouteSectionId,
@@ -28,7 +28,7 @@ import {
 import {
   type LogEntry,
 } from '../api/dashboard-logs'
-import { dashboardRuntime, type DashboardHttp } from '../api/effect-http'
+import { defaultDashboardHttp } from '../api/effect-http'
 import {
   patchRuntimeLane,
   patchRuntimeMediaFailover,
@@ -64,13 +64,18 @@ import { runtimeTomlSessionFor } from '../lib/runtime-toml-session'
 import { declaredRuntimeLaneCandidates, declaredRuntimeLanes } from '../lib/runtime-toml-config'
 import { runtimeTomlSourceGeneration } from '../lib/runtime-toml-source-generation'
 import { PromptRegistryPanel } from './tools/prompt-registry-panel'
-import { ThemeSwitch } from './theme-switch'
 import { StatusChip } from './common/status-chip'
 import { showToast } from './common/toast'
 import { Checkbox } from './common/checkbox'
 import { ActionButton } from './common/button'
 import { logDisplayKind } from './log-classification'
-import { tweaksDensity, type Density } from './tweaks-panel'
+import { persistentSignal } from '../lib/persistent-signal'
+
+type Density = 'compact' | 'regular' | 'spacious'
+const displayDensity = persistentSignal<Density>({
+  key: 'masc:display-density',
+  defaultValue: 'regular',
+})
 import {
   NOTIFY_EVENT_KINDS,
   NOTIFY_EVENT_LABELS,
@@ -84,7 +89,7 @@ import {
 } from '../notifications'
 import type { ComponentChildren } from 'preact'
 import { errorToString } from '../lib/format-string'
-import { createEffectResource } from '../lib/effect-resource'
+import { createAsyncResource } from '../lib/effect-resource'
 import { remoteFailure, remoteInitial, remotePrevious, remoteSuccess, type RemoteData } from '../lib/remote-data'
 import {
   runtimeCatalogDeclaredSpec,
@@ -99,11 +104,10 @@ type SectionId = SettingsRouteSectionId
 type LogFilter = 'all' | 'tool' | 'success' | 'failure'
 type SettingsControlKind = 'live-read' | 'live-write' | 'browser-local' | 'unsupported'
 
-const settingsConfigResource = createEffectResource<
-  DashboardHttp,
+const settingsConfigResource = createAsyncResource<
   DashboardConfigError,
   DashboardConfig
->(dashboardRuntime)
+>()
 type RuntimeSelectOption = {
   readonly id: string
   readonly label: string
@@ -1493,7 +1497,7 @@ export function SettingsSurface() {
   // Server config projection — used by Paths, MCP and Notifications.
   useEffect(() => {
     settingsConfigResource.reset()
-    void settingsConfigResource.load(fetchDashboardConfig())
+    void settingsConfigResource.load(signal => fetchDashboardConfig(defaultDashboardHttp, signal))
     return () => {
       settingsConfigResource.cancel()
       settingsConfigResource.reset()
@@ -1626,10 +1630,10 @@ export function SettingsSurface() {
   }
 
   // display
-  const density = tweaksDensity.value
+  const density = displayDensity.value
   const setDensity = (next: string) => {
     if ((DISPLAY_DENSITY_OPTIONS as string[]).includes(next)) {
-      tweaksDensity.value = next as Density
+      displayDensity.value = next as Density
     }
   }
   const cur = SET_SECTIONS.find(s => s[0] === sec) ?? SET_SECTIONS[0]!
@@ -2105,8 +2109,17 @@ export function SettingsSurface() {
                 <span>display shell</span>
                 <span class="mono">${density}</span>
               </div>
-              <${SetRow} label="Theme" hint="Live color palette — Dark / StyleSeed / Paper">
-                <${ThemeSwitch} />
+              <${SetRow} label="Theme" hint="Live color palette — Dark / Light">
+                <div class="set-tg-control">
+                  <${SetSeg}
+                    value=${document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'}
+                    options=${['dark', 'light']}
+                    onChange=${(next: string) => {
+                      if (next === 'light') document.documentElement.dataset.theme = 'light'
+                      else delete document.documentElement.dataset.theme
+                    }}
+                  />
+                </div>
               <//>
               <${SetRow} label="Density" hint="Live list/card spacing on the dashboard shell">
                 <div class="set-tg-control">

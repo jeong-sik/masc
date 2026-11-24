@@ -1,6 +1,6 @@
 // MASC Dashboard — MCP 2026-07-28 over Streamable HTTP
 
-import { v4 as randomUuid } from 'uuid'
+import { randomUuid } from '../lib/uuid'
 import {
   ApiRequestError,
   apiRequestErrorFromResponse,

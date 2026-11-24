@@ -7,8 +7,8 @@ import { waitFor } from '@testing-library/preact'
 
 
 import { agents, executionLoaded, keepers } from '../../store'
-import { navigate, route } from '../../router'
-import { AgentsUnified } from '../agents-unified'
+import { acceptedExecutionWorkspace } from '../../execution-workspace-authority'
+import { navigate } from '../../router'
 import { gateResource } from '../gate-signals'
 import { dashboardFullHealthResource } from '../dashboard-full-health-state'
 import { AttentionIndicatorV2 } from './top-bar-v2'
@@ -47,6 +47,12 @@ describe('AttentionIndicatorV2 backend health', () => {
     document.body.appendChild(container)
     gateResource.reset(readyGate)
     dashboardFullHealthResource.reset()
+    acceptedExecutionWorkspace.value = Object.freeze({
+      epoch: 'topbar-health-A',
+      workspaceRoot: '/workspace-A',
+      connectionGeneration: 1,
+      observerInstanceId: 'topbar-instance-A',
+    })
     keepers.value = []
     agents.value = []
     executionLoaded.value = false
@@ -58,6 +64,7 @@ describe('AttentionIndicatorV2 backend health', () => {
     container.remove()
     gateResource.reset()
     dashboardFullHealthResource.reset()
+    acceptedExecutionWorkspace.value = null
     vi.unstubAllGlobals()
   })
 
@@ -149,42 +156,6 @@ describe('AttentionIndicatorV2 backend health', () => {
       expect(chip?.classList.contains('bad')).toBe(true)
       expect(chip?.getAttribute('title')).toBe('Gate refresh failed')
     })
-  })
-
-  it('opens the matching Keeper roster from each attention cause and lets the operator clear it', async () => {
-    keepers.value = [
-      { name: 'needs-input', status: 'offline', needs_attention: true, registered: false, keepalive_running: false },
-      { name: 'failed-keeper', status: 'offline', lifecycle_phase: 'Crashed', registered: false, keepalive_running: false },
-      { name: 'inactive-keeper', status: 'offline', registered: false, keepalive_running: false },
-      { name: 'healthy-keeper', status: 'running' },
-    ]
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
-      JSON.stringify(healthResponse(false, 'ok')),
-      { status: 200, headers: { 'Content-Type': 'application/json' } },
-    )))
-    await act(async () => {
-      render(html`<${AttentionIndicatorV2} /><${AgentsUnified} />`, container)
-    })
-    const chooseCause = async (label: string) => {
-      await act(async () => { container.querySelector<HTMLButtonElement>('.attn-wrap .v2-statchip')?.click() })
-      const item = Array.from(container.querySelectorAll<HTMLButtonElement>('.attn-row'))
-        .find(button => button.textContent?.includes(label))
-      expect(item).toBeDefined()
-      await act(async () => { item?.click() })
-    }
-    const rosterNames = () => Array.from(container.querySelectorAll('.fl-roster .fl-name b')).map(node => node.textContent)
-
-    expect(rosterNames()).toEqual(['healthy-keeper'])
-    await chooseCause('주의')
-    expect(route.value.params).toMatchObject({ section: 'agents', view: 'keepers', filter: 'attention' })
-    expect(rosterNames()).toEqual(['needs-input'])
-    expect(container.querySelector('[aria-haspopup="menu"]')?.getAttribute('aria-expanded')).toBe('false')
-    await chooseCause('실패한 Keeper')
-    expect(route.value.params.filter).toBe('failures')
-    expect(rosterNames()).toEqual(['failed-keeper'])
-    await act(async () => { container.querySelector<HTMLButtonElement>('.fl-route-filter button')?.click() })
-    expect(route.value.params.filter).toBeUndefined()
-    expect(rosterNames()).toEqual(['healthy-keeper'])
   })
 
   it('opens attention causes from the keyboard and restores focus on dismissal', async () => {

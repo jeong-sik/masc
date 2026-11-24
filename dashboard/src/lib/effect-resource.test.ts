@@ -1,28 +1,17 @@
-import { Data, Effect, Option } from 'effect'
 import { describe, expect, it } from 'vitest'
+import { Option, TaggedError, err, ok } from './result'
+import { createAsyncResource } from './effect-resource'
 
-import {
-  createEffectResource,
-  type EffectRunner,
-} from './effect-resource'
-
-class TestError extends Data.TaggedError('TestError')<{
+class TestError extends TaggedError('TestError')<{
   readonly message: string
-}> {}
+}>() {}
 
-const runner: EffectRunner<never> = {
-  runPromiseExit: (effect, options) =>
-    Effect.runPromiseExit(effect, options),
-}
-
-describe('createEffectResource', () => {
+describe('createAsyncResource', () => {
   it('keeps the previous value in a typed failure state', async () => {
-    const resource = createEffectResource<never, TestError, number>(runner)
+    const resource = createAsyncResource<TestError, number>()
 
-    await resource.load(Effect.succeed(7))
-    await resource.load(
-      Effect.fail(new TestError({ message: 'transport unavailable' })),
-    )
+    await resource.load(async () => ok(7))
+    await resource.load(async () => err(new TestError({ message: 'transport unavailable' })))
 
     const state = resource.state.value
     expect(state._tag).toBe('Failure')
@@ -31,13 +20,13 @@ describe('createEffectResource', () => {
     expect(Option.getOrThrow(state.previous)).toBe(7)
   })
 
-  it('interrupts an older request and ignores its completion', async () => {
-    const resource = createEffectResource<never, TestError, number>(runner)
+  it('aborts an older request and ignores its completion', async () => {
+    const resource = createAsyncResource<TestError, number>()
     let firstRequestAborted = false
 
-    const first = Effect.tryPromise({
-      try: signal =>
-        new Promise<number>((_resolve, reject) => {
+    const firstLoad = resource.load(
+      signal =>
+        new Promise((_resolve, reject) => {
           signal.addEventListener(
             'abort',
             () => {
@@ -47,23 +36,21 @@ describe('createEffectResource', () => {
             { once: true },
           )
         }),
-      catch: () => new TestError({ message: 'first request failed' }),
-    })
-
-    const firstLoad = resource.load(first)
-    const secondLoad = resource.load(Effect.succeed(11))
+    )
+    const secondLoad = resource.load(async () => ok(11))
     await Promise.all([firstLoad, secondLoad])
 
     expect(firstRequestAborted).toBe(true)
     expect(resource.state.value).toEqual({ _tag: 'Success', value: 11 })
   })
 
-  it('cancels the active fiber and returns to Initial without a value', async () => {
-    const resource = createEffectResource<never, TestError, number>(runner)
+  it('cancels the active request and returns to Initial without a value', async () => {
+    const resource = createAsyncResource<TestError, number>()
     let requestAborted = false
-    const pending = Effect.tryPromise({
-      try: signal =>
-        new Promise<number>((_resolve, reject) => {
+
+    const load = resource.load(
+      signal =>
+        new Promise((_resolve, reject) => {
           signal.addEventListener(
             'abort',
             () => {
@@ -73,10 +60,7 @@ describe('createEffectResource', () => {
             { once: true },
           )
         }),
-      catch: () => new TestError({ message: 'request failed' }),
-    })
-
-    const load = resource.load(pending)
+    )
     resource.cancel()
     await load
 

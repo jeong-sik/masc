@@ -28,53 +28,31 @@ export type DashboardSurfaceIcon =
   | 'overview'
   | 'monitoring'
   | 'keepers'
-  | 'registry'
   | 'board'
   | 'schedule'
   | 'fusion'
-  | 'command'
   | 'connectors'
   | 'workspace'
-  | 'lab'
-  | 'code'
   | 'logs'
   | 'settings'
   | 'approvals'
 
 type SurfaceSectionId =
-  // monitoring
-  | 'observatory'
-  | 'agents'
   | 'internal-agents'
   | 'runtime'
-  | 'fleet-health'   // Phase 1: absorbs telemetry + fleet + tool-quality + Gate monitoring
-  | 'transport-health' // Hidden support route for transport diagnostics; linked from Runtime.
-  | 'journey' // Hidden execution-flow drill-down.
+  | 'fleet-health'
+  | 'transport-health'
   | 'lane-addons'
   | 'lane-inventory'
-  | 'lanes' // Lane · Queue — 실행 타임라인 + 대기 큐.
-  | 'skills' // SKILL.md catalog keepers load at turn start, with usage.
-  // command
-  | 'operations'     // Phase 1+6: absorbs intervene + Gate + inspector (Phase 7: connectors split out)
-  // connectors (top-level surface for server-owned channel gateways)
-  // Per-connector sub-tabs (discord/imessage/slack/telegram) were merged into
-  // connector-status on 2026-04-30; selection happens inside the page via
-  // ConnectorOverviewStrip rather than top-level navigation.
-  | 'connector-status'      // all connectors with internal connector picker
-  // workspace
-  | 'work'           // Goal/job breakdown surface
+  | 'lanes'
+  | 'skills'
+  | 'connector-status'
+  | 'work'
   | 'board'
-  | 'sub-boards'     // Phase 2: SubBoard named spaces within the board
-  | 'planning'       // Phase 1: absorbs goals
-  | 'repositories'   // Multi-repository cockpit and keeper access mapping
-  | 'verification'   // Contract follow-up (#7531): Mission detail verification table
+  | 'sub-boards'
+  | 'repositories'
+  | 'verification'
   | 'artifacts'
-  // lab
-  | 'tools'
-  | 'harness'
-  | 'keeper-memory-health'
-  // code (Stage 5 IDE plane — shell only in PR-1, 4-pane content in PR-2+)
-  | 'ide-shell'
 
 export type NonHomeTabId = Exclude<TabId, 'overview' | 'logs'>
 
@@ -106,14 +84,9 @@ export interface DashboardSectionNavItem {
   hidden?: boolean
 }
 
-// Order mirrors the v2 nav rail: 개요 · Keepers · 레지스트리 · Monitor · 작업 ·
-// Gate · 예약 · 보드 · Fusion · 로그 · IDE · 커넥터 · 명령 · Lab · 설정. Settings
-// stays pinned in the rail footer, so it renders outside the main list even
-// though it closes this set.
 export const V2_PRIMARY_SURFACE_IDS: ReadonlyArray<SurfaceId> = [
   'overview',
   'keepers',
-  'registry',
   'monitoring',
   'workspace',
   'approvals',
@@ -121,10 +94,7 @@ export const V2_PRIMARY_SURFACE_IDS: ReadonlyArray<SurfaceId> = [
   'board',
   'fusion',
   'logs',
-  'code',
   'connectors',
-  'command',
-  'lab',
   'settings',
 ]
 
@@ -137,7 +107,6 @@ const SECTIONLESS_SURFACE_IDS: ReadonlySet<TabId> = new Set([
   'logs',
   'settings',
   'keepers',
-  'registry',
   'board',
   'schedule',
   'approvals',
@@ -161,9 +130,9 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     id: 'monitoring',
     label: 'Monitor',
     icon: 'monitoring',
-    description: 'Keeper operations, tools, runtime, and evidence',
+    description: 'Tools, runtime, lanes, and transport diagnostics',
     defaultTab: 'monitoring',
-    defaultParams: { section: 'agents' },
+    defaultParams: { section: 'runtime' },
     tabs: ['monitoring'],
   },
   {
@@ -173,14 +142,6 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     description: 'Dedicated keeper roster, conversation, and context workspace',
     defaultTab: 'keepers',
     tabs: ['keepers'],
-  },
-  {
-    id: 'registry',
-    label: 'Registry',
-    icon: 'registry',
-    description: 'Keeper instances, instructions, and runtime bindings',
-    defaultTab: 'registry',
-    tabs: ['registry'],
   },
   {
     id: 'board',
@@ -215,15 +176,6 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     tabs: ['fusion'],
   },
   {
-    id: 'command',
-    label: 'Command',
-    icon: 'command',
-    description: 'Interventions, keeper messages, and questions',
-    defaultTab: 'command',
-    defaultParams: { section: 'operations' },
-    tabs: ['command'],
-  },
-  {
     id: 'connectors',
     label: 'Connectors',
     icon: 'connectors',
@@ -236,34 +188,16 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     id: 'workspace',
     label: 'Work',
     icon: 'workspace',
-    description: 'Work goals, planning, repositories, and verification',
+    description: 'Work goals, repositories, artifacts, and verification',
     defaultTab: 'workspace',
     defaultParams: { section: 'work' },
     tabs: ['workspace'],
   },
   {
-    id: 'lab',
-    label: 'Lab',
-    icon: 'lab',
-    description: 'Tool diagnostics and experiment control',
-    defaultTab: 'lab',
-    defaultParams: { section: 'tools' },
-    tabs: ['lab'],
-  },
-  {
-    id: 'code',
-    label: 'IDE',
-    icon: 'code',
-    description: 'Keeper collaboration IDE shell',
-    defaultTab: 'code',
-    defaultParams: { section: 'ide-shell' },
-    tabs: ['code'],
-  },
-  {
     id: 'settings',
     label: 'Settings',
     icon: 'settings',
-    description: 'Operator console for keeper-v2 configuration',
+    description: 'Operator console for MASC configuration',
     defaultTab: 'settings',
     tabs: ['settings'],
   },
@@ -302,17 +236,14 @@ export const PRIMARY_DASHBOARD_NAV_ITEMS: DashboardNavItem[] =
   })
 
 export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavItem[]> = {
-  // Sectionless surface (single tab, no sub-sections) but still a NonHomeTabId
-  // key — the Record is exhaustive over the union, so the empty entry is required.
   approvals: [],
   fusion: [],
-  registry: [],
   monitoring: [
     {
-      id: 'agents',
-      label: 'Keeper Fleet',
-      description: 'Live and configured keeper roster.',
-      params: { section: 'agents' },
+      id: 'runtime',
+      label: 'Runtime',
+      description: 'Runtime lane health.',
+      params: { section: 'runtime' },
     },
     {
       id: 'internal-agents',
@@ -325,18 +256,6 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: 'Tool Monitor',
       description: 'Tool quality and Gate signals.',
       params: { section: 'fleet-health' },
-    },
-    {
-      id: 'runtime',
-      label: 'Runtime',
-      description: 'Runtime lane health.',
-      params: { section: 'runtime' },
-    },
-    {
-      id: 'observatory',
-      label: 'Observatory',
-      description: 'Activity and runtime evidence.',
-      params: { section: 'observatory' },
     },
     {
       id: 'skills',
@@ -369,25 +288,10 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       params: { section: 'transport-health' },
       hidden: true,
     },
-    {
-      id: 'journey',
-      label: 'Journey Map',
-      description: 'Execution-flow drill-down.',
-      params: { section: 'journey' },
-      hidden: true,
-    },
   ],
   keepers: [],
   board: [],
   schedule: [],
-  command: [
-    {
-      id: 'operations',
-      label: 'Actions',
-      description: 'Broadcasts, keeper messages, questions, and server configuration.',
-      params: { section: 'operations' },
-    },
-  ],
   connectors: [
     {
       id: 'connector-status',
@@ -424,12 +328,6 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       hidden: true,
     },
     {
-      id: 'planning',
-      label: 'Plans & Goals',
-      description: 'Goal tree and task kanban.',
-      params: { section: 'planning' },
-    },
-    {
       id: 'repositories',
       label: 'Repositories',
       description: 'Registered repos, branches, and keeper access scope.',
@@ -440,34 +338,6 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: 'Verification',
       description: 'Cross-agent verification requests, completion contracts, and evidence.',
       params: { section: 'verification' },
-    },
-  ],
-  lab: [
-    {
-      id: 'tools',
-      label: 'Tools',
-      description: 'Registered MCP tools across servers.',
-      params: { section: 'tools' },
-    },
-    {
-      id: 'harness',
-      label: 'Safety Harness',
-      description: 'Evaluation model, pre-handoff state, and generation handoff monitoring.',
-      params: { section: 'harness' },
-    },
-    {
-      id: 'keeper-memory-health',
-      label: '키퍼 메모리 상태',
-      description: 'Per-keeper ordinary/source snapshots, Vision ingest failures, deltas, and cadence.',
-      params: { section: 'keeper-memory-health' },
-    },
-  ],
-  code: [
-    {
-      id: 'ide-shell',
-      label: 'Code IDE',
-      description: 'Keeper collaboration code-review IDE shell.',
-      params: { section: 'ide-shell' },
     },
   ],
   settings: [],
@@ -493,8 +363,6 @@ export function visibleSectionItemsForTab(tabId: TabId): DashboardSectionNavItem
 export function normalizeRouteParams(tabId: TabId, params: Record<string, string>): Record<string, string> {
   const next = { ...params }
   if (tabId !== 'approvals') delete next.approval
-  // Target identity only belongs to these receiver surfaces. Ordinary
-  // navigation must not carry an old Lane selection into an unrelated screen.
   if (tabId !== 'monitoring' || !['runtime', 'lane-addons', 'internal-agents'].includes(next.section ?? '')) delete next.lane_target
 
   if (tabId === 'settings') {
@@ -517,9 +385,7 @@ export function normalizeRouteParams(tabId: TabId, params: Record<string, string
     next.section = defaultParamsForTab(tabId).section ?? ''
   }
 
-  if (!(tabId === 'code' && next.section === 'ide-shell')) {
-    delete next.surface
-  }
+  delete next.surface
 
   if (tabId === 'connectors' && !isKnownConnectorId(next.connector)) {
     delete next.connector
@@ -527,11 +393,8 @@ export function normalizeRouteParams(tabId: TabId, params: Record<string, string
   delete next.operation
   delete next.run_id
 
-  // Sections that use the `view` sub-param for internal navigation.
-  // For all other sections, `view` is meaningless and must not leak in from prior navigation.
   const SECTIONS_WITH_VIEW = new Set([
-    'fleet-health', 'runtime', 'agents', 'observatory',
-    'repositories', 'operations', 'ide-shell', 'planning',
+    'fleet-health', 'runtime', 'repositories',
   ])
   if (!next.section || !SECTIONS_WITH_VIEW.has(next.section)) {
     delete next.view

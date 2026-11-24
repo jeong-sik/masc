@@ -1,11 +1,6 @@
-import { Effect } from 'effect'
 import { describe, expect, it } from 'vitest'
-
-import {
-  DashboardHttp,
-  DashboardTransportError,
-  type DashboardHttpService,
-} from './effect-http'
+import { err, ok } from '../lib/result'
+import { DashboardTransportError } from './effect-http'
 import {
   fetchGateKeepers,
   GateKeepersSchemaDriftError,
@@ -65,83 +60,73 @@ const currentWire = {
   truncated: false,
 } as const
 
-function runWithHttp<A, E>(
-  program: Effect.Effect<A, E, DashboardHttp>,
-  http: DashboardHttpService,
-): Effect.Effect<A, E> {
-  return program.pipe(Effect.provideService(DashboardHttp, http))
-}
-
 describe('fetchGateKeepers', () => {
-  it('fetches and decodes unknown data at the typed endpoint boundary', () => {
-    const data = Effect.runSync(runWithHttp(fetchGateKeepers(), {
-      getUnknown: path => {
+  it('fetches and decodes unknown data at the typed endpoint boundary', async () => {
+    const res = await fetchGateKeepers({
+      getUnknown: async path => {
         expect(path).toBe('/api/v1/gate/keepers?detailed=true')
-        return Effect.succeed(currentWire)
+        return ok(currentWire)
       },
-    }))
+    })
 
-    expect(data.keepers[0]?.name).toBe('planner')
-    expect(data.listing).toEqual({ total: 1, limit: 200, truncated: false })
+    expect(res.ok).toBe(true)
+    if (!res.ok) return
+    expect(res.value.keepers[0]?.name).toBe('planner')
+    expect(res.value.listing).toEqual({ total: 1, limit: 200, truncated: false })
   })
 
-  it('does not pin a limit — the route bounds itself and reports the bound', () => {
-    // masc#29077: a limit hardcoded here was a second cap the UI had to keep in
-    // sync with the route, and it lost that race (50 vs a 200 clamp).
-    Effect.runSync(runWithHttp(fetchGateKeepers(), {
-      getUnknown: path => {
+  it('does not pin a limit — the route bounds itself and reports the bound', async () => {
+    await fetchGateKeepers({
+      getUnknown: async path => {
         expect(path).not.toContain('limit=')
-        return Effect.succeed(currentWire)
+        return ok(currentWire)
       },
-    }))
+    })
   })
 
-  it('carries the truncation verdict through to the product value', () => {
+  it('carries the truncation verdict through to the product value', async () => {
     const truncatedWire = { ...currentWire, total: 129, limit: 50, truncated: true }
-    const data = Effect.runSync(runWithHttp(fetchGateKeepers(), {
-      getUnknown: () => Effect.succeed(truncatedWire),
-    }))
+    const res = await fetchGateKeepers({
+      getUnknown: async () => ok(truncatedWire),
+    })
 
-    expect(data.listing.truncated).toBe(true)
-    expect(data.listing.total).toBe(129)
-    // The rows are the page, not the directory. A consumer that reads
-    // keepers.length as the keeper count is the bug this field exists for.
-    expect(data.keepers.length).toBe(1)
+    expect(res.ok).toBe(true)
+    if (!res.ok) return
+    expect(res.value.listing.truncated).toBe(true)
+    expect(res.value.listing.total).toBe(129)
+    expect(res.value.keepers.length).toBe(1)
   })
 
-  it('rejects a response that omits the listing fields', () => {
-    // Strict decoding, so a server that stops sending them is drift rather
-    // than a silent downgrade to the old "count is all there is" shape.
+  it('rejects a response that omits the listing fields', async () => {
     const { total: _total, ...withoutTotal } = currentWire
-    const error = Effect.runSync(Effect.flip(runWithHttp(
-      fetchGateKeepers(),
-      { getUnknown: () => Effect.succeed(withoutTotal) },
-    )))
+    const res = await fetchGateKeepers({ getUnknown: async () => ok(withoutTotal) })
 
-    expect(error).toBeInstanceOf(GateKeepersSchemaDriftError)
+    expect(res.ok).toBe(false)
+    if (res.ok) return
+    expect(res.error).toBeInstanceOf(GateKeepersSchemaDriftError)
   })
 
-  it('preserves transport failures as typed values', () => {
+  it('preserves transport failures as typed values', async () => {
     const transportError = new DashboardTransportError({
       method: 'GET',
       path: '/api/v1/gate/keepers?detailed=true',
       message: 'offline',
       cause: new Error('offline'),
     })
-    const error = Effect.runSync(Effect.flip(runWithHttp(
-      fetchGateKeepers(),
-      { getUnknown: () => Effect.fail(transportError) },
-    )))
+    const res = await fetchGateKeepers({ getUnknown: async () => err(transportError) })
 
-    expect(error).toBe(transportError)
+    expect(res.ok).toBe(false)
+    if (res.ok) return
+    expect(res.error).toBe(transportError)
   })
 
-  it('preserves schema drift as a typed endpoint error', () => {
-    const error = Effect.runSync(Effect.flip(runWithHttp(
-      fetchGateKeepers(),
-      { getUnknown: () => Effect.succeed({ candle: { status: 'off' }, count: 1, keepers: [] }) },
-    )))
+  it('preserves schema drift as a typed endpoint error', async () => {
+    const res = await fetchGateKeepers({
+      getUnknown: async () => ok({ candle: { status: 'off' }, count: 1, keepers: [] }),
+    })
 
-    expect(error).toBeInstanceOf(GateKeepersSchemaDriftError)
+    expect(res.ok).toBe(false)
+    if (res.ok) return
+    expect(res.error).toBeInstanceOf(GateKeepersSchemaDriftError)
   })
 })

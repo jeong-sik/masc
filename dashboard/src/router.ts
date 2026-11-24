@@ -4,13 +4,9 @@
 import { signal } from '@preact/signals'
 import type { RouteState, TabId } from './types'
 import { VALID_TABS } from './types'
-import { normalizeRouteParams, sectionItemsForTab } from './config/navigation'
-import { cockpitTargetForParams, normalizeCockpitMode } from './cockpit-entrypoints'
+import { normalizeRouteParams } from './config/navigation'
 
 const DEFAULT_ROUTE: RouteState = { tab: 'overview', params: {}, postId: null }
-const VALID_COMMAND_SECTIONS = new Set(
-  sectionItemsForTab('command').map(item => item.params.section),
-)
 
 function isTabId(v: string | null | undefined): v is TabId {
   return !!v && VALID_TABS.includes(v as TabId)
@@ -35,21 +31,6 @@ function parseParams(raw: string | undefined): Record<string, string> {
   return params
 }
 
-function routeForCockpitMode(params: Record<string, string>): RouteState | null {
-  const redirect = cockpitTargetForParams(params)
-  if (!redirect) return null
-
-  const nextParams = { ...params, ...(redirect.params ?? {}) }
-  return canonicalRoute(redirect.tab, nextParams)
-}
-
-function shouldApplyCockpitModeRoute(segments: string[], params: Record<string, string>): boolean {
-  if (!normalizeCockpitMode(params.mode ?? params.plane)) return false
-  if (segments.length === 0) return true
-  if (segments.length === 1 && isTabId(segments[0]) && !params.section) return true
-  return false
-}
-
 function canonicalRoute(tab: TabId, params: Record<string, string>): RouteState {
   return { tab, params: normalizeRouteParams(tab, params), postId: null }
 }
@@ -65,28 +46,11 @@ function parseSegments(
   segments: string[],
   params: Record<string, string>,
 ): RouteState {
-  if (shouldApplyCockpitModeRoute(segments, params)) {
-    const cockpitModeRoute = routeForCockpitMode(params)
-    if (cockpitModeRoute) return cockpitModeRoute
-  }
-
-  if (segments[0] === 'command' && segments[1]) {
-    const nextParams = { ...params }
-    const second = segments[1]
-    if (!VALID_COMMAND_SECTIONS.has(second)) {
-      console.warn('[router] unknown command section, falling back to operations', second)
-      nextParams.section = 'operations'
-    } else {
-      nextParams.section = second
-    }
-    return canonicalRoute('command', nextParams)
-  }
-
   if (
-    (segments[0] === 'monitoring' || segments[0] === 'workspace' || segments[0] === 'lab' || segments[0] === 'code')
+    (segments[0] === 'monitoring' || segments[0] === 'workspace')
     && segments[1]
   ) {
-    const tab = segments[0] as 'monitoring' | 'workspace' | 'lab' | 'code'
+    const tab = segments[0] as 'monitoring' | 'workspace'
     const nextParams = { ...params, section: segments[1] }
     return canonicalRoute(tab, nextParams)
   }

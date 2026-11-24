@@ -5,7 +5,7 @@ import type { VNode } from 'preact'
 import { signal } from '@preact/signals'
 import { useEffect, useMemo } from 'preact/hooks'
 import { ChevronDown, ChevronRight, RefreshCw } from 'lucide-preact'
-import { Effect, Option } from 'effect'
+import { Option, ok } from '../lib/result'
 import {
   fetchLogs,
   type LogCategory,
@@ -15,16 +15,16 @@ import {
   type LogsError,
   type LogsRequest,
 } from '../api/dashboard-logs'
-import { dashboardRuntime, type DashboardHttp } from '../api/effect-http'
+import { defaultDashboardHttp } from '../api/effect-http'
 import { VirtualList } from './common/virtual-list'
-import { asRecord, asNullableString, mergeRouteRecord, hasRouteContext, type MutableRouteContext } from './common/normalize'
+import { asRecord, asNullableString } from './common/normalize'
 import { TextInput } from './common/input'
 import { Select } from './common/select'
 import { Checkbox } from './common/checkbox'
 import { LogFilter } from './common/log-filter'
 import { RouteLink } from './common/route-link'
 import { KeeperBadge } from './keeper-badge'
-import { createEffectResource } from '../lib/effect-resource'
+import { createAsyncResource } from '../lib/effect-resource'
 import { remoteLoading, remotePrevious, remoteSuccess } from '../lib/remote-data'
 import { toolCategory } from './tool-call-shared'
 import { StatusChip } from './common/status-chip'
@@ -35,11 +35,6 @@ import {
   type LogDisplayKind,
   logKindCategories,
 } from './log-classification'
-import {
-  openIdeContextRouteLink,
-  routeLinksForContext,
-  type IdeContextRouteLink,
-} from './ide/ide-context-lens'
 interface LogData extends LogsData {
   readonly pagedOlder: boolean
   readonly noMoreOlder: boolean
@@ -63,9 +58,7 @@ export interface LogWindowSummary {
   topModules: LogModuleCount[]
 }
 
-const logResource = createEffectResource<DashboardHttp, LogsError, LogData>(
-  dashboardRuntime,
-)
+const logResource = createAsyncResource<LogsError, LogData>()
 const nativeLogError = signal<LogsStreamError | null>(null)
 let liveLogRevision = 0
 const levelFilter = signal<LogLevel>('INFO')
@@ -396,27 +389,8 @@ export function summarizeLogWindow(
   }
 }
 
-export function logRouteLinks(entry: LogEntry): ReadonlyArray<IdeContextRouteLink> {
-  const details = entryDetails(entry)
-  const failureEnvelopeRecord = asRecord(details?.failure_envelope)
-  const context: MutableRouteContext = {}
-  mergeRouteRecord(context, asRecord(details?.context))
-  mergeRouteRecord(context, asRecord(details?.evidence_ref))
-  mergeRouteRecord(context, asRecord(failureEnvelopeRecord?.evidence_ref))
-  mergeRouteRecord(context, asRecord(details?.tool_args))
-  mergeRouteRecord(context, asRecord(details?.input))
-  mergeRouteRecord(context, details, true)
-  if (!hasRouteContext(context)) return []
-  return routeLinksForContext({
-    ...context,
-    surface: 'Log',
-    label: entry.module || entry.message,
-    sourceId: `log:${entry.seq}`,
-    telemetry: context.logId !== undefined
-      || context.sessionId !== undefined
-      || context.operationId !== undefined
-      || context.workerRunId !== undefined,
-  })
+export function logRouteLinks(_entry: LogEntry): ReadonlyArray<{ id: string; label: string; evidence: string }> {
+  return []
 }
 
 function renderLogMessage(entry: LogEntry): string {
@@ -507,37 +481,39 @@ async function loadLogs(mode: LoadMode = 'reset'): Promise<void> {
   if (mode !== 'reset' && state._tag === 'Loading') return
 
   const current = Option.getOrUndefined(remotePrevious(state))
-
   const request = baseLogsRequest()
-  let program: Effect.Effect<LogData, LogsError, DashboardHttp>
+
   switch (mode) {
     case 'reset': {
       const revision = liveLogRevision
-      program = fetchLogs(request).pipe(Effect.map(response => {
+      await logResource.load(async signal => {
+        const res = await fetchLogs(request, defaultDashboardHttp, signal)
+        if (!res.ok) return res
         const latest = Option.getOrUndefined(remotePrevious(logResource.state.peek()))
-        if (latest !== undefined && revision !== liveLogRevision) return latest
-        const reset = resetLogData(response)
-        return latest !== undefined && latest.ring.total > response.ring.total
-          ? mergeDeltaLogData(reset, latest) : reset
-      }))
-      break
+        if (latest !== undefined && revision !== liveLogRevision) return ok(latest)
+        const reset = resetLogData(res.value)
+        return ok(
+          latest !== undefined && latest.ring.total > res.value.ring.total
+            ? mergeDeltaLogData(reset, latest)
+            : reset,
+        )
+      })
+      return
     }
     case 'older': {
       if (current === undefined) return
       const beforeSeq = Option.getOrUndefined(oldestLogSeq(current.entries))
       if (beforeSeq === undefined || beforeSeq <= 0 || current.noMoreOlder) return
       const revision = liveLogRevision
-      program = fetchLogs({ ...request, beforeSeq }).pipe(
-        Effect.map(response => {
-          const latest = Option.getOrElse(remotePrevious(logResource.state.peek()), () => current)
-          return revision === liveLogRevision ? mergeOlderLogData(latest, response) : latest
-        }),
-      )
-      break
+      await logResource.load(async signal => {
+        const res = await fetchLogs({ ...request, beforeSeq }, defaultDashboardHttp, signal)
+        if (!res.ok) return res
+        const latest = Option.getOrElse(remotePrevious(logResource.state.peek()), () => current)
+        return ok(revision === liveLogRevision ? mergeOlderLogData(latest, res.value) : latest)
+      })
+      return
     }
   }
-
-  await logResource.load(program)
 }
 
 export function loadOlder(): Promise<void> {
@@ -711,27 +687,12 @@ function renderLogRow(entry: LogEntry) {
   const diagnosticCause = failure?.cause_code ?? logDiagnosticCause(entry)
   const sourceClass = sourceTone(source)
   const renderedMessage = renderLogMessage(entry)
-  const routeLinks = logRouteLinks(entry)
   const category = entry.category === null ? undefined : categoryLabel(entry.category)
   const displayKind = logDisplayKind(entry)
   const severity = logSeverity(entry)
   const identity = keeperLabel(entry, details)
   const isExpanded = expandedLogSeq.value === entry.seq
-  const routeLinkButtons = routeLinks.length > 0
-    ? html`
-      ${routeLinks.map(link => html`
-        <button
-          key=${link.id}
-          type="button"
-          data-testid=${link.label === 'Code' ? 'logs-code-link' : undefined}
-          class="logs-route-link"
-          title=${link.evidence}
-          aria-label=${`Open ${link.evidence}`}
-          onClick=${() => openIdeContextRouteLink(link)}
-        >${link.label}</button>
-      `)}
-    `
-    : null
+  const routeLinkButtons = null
   const diagnosticChip = failure
     ? html`<${StatusChip} tone="bad" uppercase=${false}>${failure.cause_code}</${StatusChip}>`
     : null

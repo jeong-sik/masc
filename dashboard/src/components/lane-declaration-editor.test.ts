@@ -14,7 +14,6 @@ import { Status } from './status'
 import { navigate } from '../router'
 import { hydrateExecutionSnapshot, invalidateExecutionSnapshotGeneration } from '../store'
 import { resetLaneDeclarationSessionsForTesting } from '../lib/lane-declaration-sessions'
-vi.mock('./agents-unified', () => ({ AgentsUnified: () => html`<p>Fixture agents route</p>` }))
 let epochSequence = 0
 let epoch = ''
 let generation = 0

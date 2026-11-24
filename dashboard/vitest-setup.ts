@@ -93,36 +93,6 @@ vi.mock('lucide-preact', async (importOriginal) => {
   })
 })
 
-// Mock Shiki to avoid heavy loading during happy-dom tests
-vi.mock('shiki', () => {
-  function escapeHtml(str: string): string {
-    return str
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-  }
-  return {
-    createHighlighter: vi.fn().mockResolvedValue({
-      getLoadedLanguages: vi.fn().mockReturnValue([]),
-      loadLanguage: vi.fn().mockResolvedValue(undefined),
-      codeToHtml: vi.fn((code: string) => `<pre class="shiki"><code>${escapeHtml(code)}</code></pre>`)
-    })
-  }
-})
-
-// Mock Mermaid to avoid heavyweight parsing/rendering during happy-dom tests.
-const mermaidMock = {
-  initialize: vi.fn(),
-  render: vi.fn(async (_id: string, source: string) => ({
-    svg: `<svg><text>${source}</text></svg>`,
-  })),
-}
-vi.mock('mermaid', () => ({
-  default: mermaidMock,
-  ...mermaidMock,
-}))
-
 // Block real network requests in tests. Tests that intentionally need
 // fetch must install an explicit mock (vi.fn() or msw).
 vi.stubGlobal(

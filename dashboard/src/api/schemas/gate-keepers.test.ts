@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { unwrapResult, unwrapResultError } from '../../lib/result'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -92,7 +92,7 @@ function issueWire(name = 'broken') {
 }
 
 function expectDrift(value: unknown): GateKeepersSchemaDriftError {
-  const error = Effect.runSync(Effect.flip(decodeGateKeepers(value)))
+  const error = unwrapResultError(decodeGateKeepers(value))
   expect(error).toBeInstanceOf(GateKeepersSchemaDriftError)
   expect(error.message).toContain('gate-keepers schema drift')
   return error
@@ -105,7 +105,7 @@ const listingWire = (total: number) => ({ total, limit: 200, truncated: false })
 
 describe('decodeGateKeepers', () => {
   it('decodes the current detailed wire shape into concrete product values', () => {
-    const data = Effect.runSync(decodeGateKeepers({
+    const data = unwrapResult(decodeGateKeepers({
       candle: { status: 'off' },
       count: 1,
       keepers: [keeperWire()],
@@ -123,7 +123,7 @@ describe('decodeGateKeepers', () => {
   })
 
   it('accepts the administrator Candle decay basis beside the Candle summary', () => {
-    const data = Effect.runSync(decodeGateKeepers({
+    const data = unwrapResult(decodeGateKeepers({
       candle: { status: 'off' },
       candle_decay: null,
       count: 1,
@@ -186,7 +186,7 @@ describe('decodeGateKeepers', () => {
       },
     }
 
-    const data = Effect.runSync(decodeGateKeepers({
+    const data = unwrapResult(decodeGateKeepers({
       count: 3,
       keepers: [measured, estimated, keeperWire()],
       ...listingWire(3),
@@ -203,13 +203,13 @@ describe('decodeGateKeepers', () => {
 
   it('decodes a row whose context names a reason this decoder has not seen', () => {
     const wire = { ...keeperWire(), context_metrics_unavailable_reason: 'a_reason_added_later' }
-    const data = Effect.runSync(decodeGateKeepers({ count: 1, keepers: [wire], ...listingWire(1) }))
+    const data = unwrapResult(decodeGateKeepers({ count: 1, keepers: [wire], ...listingWire(1) }))
 
     expect(data.keepers).toEqual([{ name: 'planner', status: 'running' }])
   })
 
   it('decodes a turn pulse whose slots are named objects', () => {
-    const data = Effect.runSync(decodeGateKeepers({
+    const data = unwrapResult(decodeGateKeepers({
       count: 1,
       keepers: [{
         ...keeperWire(),
@@ -237,7 +237,7 @@ describe('decodeGateKeepers', () => {
   it('decodes currency-free shared discovery for healthy and directory-error rows', () => {
     const { candle_balance_milli: _healthyBalance, candle_account_revision: _healthyRevision, ...healthy } = keeperWire()
     const { candle_balance_milli: _issueBalance, candle_account_revision: _issueRevision, ...issue } = issueWire()
-    const data = Effect.runSync(decodeGateKeepers({
+    const data = unwrapResult(decodeGateKeepers({
       count: 2,
       keepers: [healthy, issue],
       ...listingWire(2),
@@ -257,7 +257,7 @@ describe('decodeGateKeepers', () => {
       created_at: healthy.created_at, updated_at: healthy.updated_at, activation_mode: 'manual' }
     for (const row of [healthy, issue, retained]) {
       for (const revision of [undefined, null, 'a'.repeat(64)]) {
-        expect(() => Effect.runSync(decodeGateKeepers({
+        expect(() => unwrapResult(decodeGateKeepers({
           candle: { status: 'off' }, count: 1, ...listingWire(1),
           keepers: [{ ...row, candle_account_revision: revision }],
         }))).not.toThrow()
@@ -282,7 +282,7 @@ describe('decodeGateKeepers', () => {
       { state: 'unavailable', reason: 'metadata_absent' },
       { state: 'unavailable', reason: 'effective_metadata_unread' },
     ]) {
-      const data = Effect.runSync(decodeGateKeepers({
+      const data = unwrapResult(decodeGateKeepers({
         count: 3, ...listingWire(3),
         keepers: [healthy, issue, retained].map(row => ({ ...row, board_address })),
       }))
@@ -299,7 +299,7 @@ describe('decodeGateKeepers', () => {
       { state: 'observed', turn, evidence: { failures: [], terminal: { kind: 'not_observed' } }, error: null },
       { state: 'unreadable', turn: null, evidence: null, error: 'runtime.lane_evidence' },
     ]) {
-      const data = Effect.runSync(decodeGateKeepers({
+      const data = unwrapResult(decodeGateKeepers({
         count: 1, ...listingWire(1),
         keepers: [{ ...keeperWire(), runtime_lane_observation,
           last_failure: { cause: 'provider', at_unix: null } }],
@@ -328,7 +328,7 @@ describe('decodeGateKeepers', () => {
   })
 
   it('accepts the roster current failure without changing the compact product values', () => {
-    const data = Effect.runSync(decodeGateKeepers({
+    const data = unwrapResult(decodeGateKeepers({
       candle: { status: 'off' },
       count: 1,
       keepers: [{
@@ -343,7 +343,7 @@ describe('decodeGateKeepers', () => {
 
   it('keeps lifecycle controls readable when only the Candle observation is malformed', () => {
     for (const [candle, balance] of [[undefined, undefined], [null, 123], [{ status: 'off' }, '1']]) {
-      const data = Effect.runSync(decodeGateKeepers({
+      const data = unwrapResult(decodeGateKeepers({
         candle, count: 1,
         keepers: [{ ...keeperWire(), candle_balance_milli: balance }],
         ...listingWire(1),
@@ -358,7 +358,7 @@ describe('decodeGateKeepers', () => {
     const issue = issueWire()
     const persisted = { ...issueWire('persisted'), meta: keeperWire('persisted').meta,
       created_at: '2026-08-12T00:00:00Z', updated_at: '2026-08-12T00:01:00Z', activation_mode: 'on_demand' }
-    const data = Effect.runSync(decodeGateKeepers({
+    const data = unwrapResult(decodeGateKeepers({
       candle: { status: 'ready', issued_milli: '0', burned_milli: '0', circulating_milli: '0' }, count: 3,
       keepers: [keeperWire(), issue, persisted].map(row => ({ ...row, candle_balance_milli: '0', candle_account_revision: revision })),
       ...listingWire(3),
@@ -374,7 +374,7 @@ describe('decodeGateKeepers', () => {
   it('accepts a nonempty sandbox name this consumer does not interpret', () => {
     const wire = keeperWire()
     wire.meta.sandbox_profile = 'uninterpreted-sandbox'
-    const data = Effect.runSync(decodeGateKeepers({
+    const data = unwrapResult(decodeGateKeepers({
       candle: { status: 'off' },
       count: 1, keepers: [wire], ...listingWire(1),
     }))
@@ -406,7 +406,7 @@ describe('decodeGateKeepers', () => {
   })
 
   it('separates producer-declared error rows from usable keepers once', () => {
-    const data = Effect.runSync(decodeGateKeepers({
+    const data = unwrapResult(decodeGateKeepers({
       candle: { status: 'off' },
       count: 2,
       keepers: [keeperWire(), issueWire()],
@@ -423,7 +423,7 @@ describe('decodeGateKeepers', () => {
   it('accepts a directory issue that retains persisted keeper metadata', () => {
     const row = issueWire('broken')
     const meta = keeperWire('broken').meta
-    const data = Effect.runSync(decodeGateKeepers({
+    const data = unwrapResult(decodeGateKeepers({
       candle: { status: 'off' },
       count: 1,
       keepers: [{
@@ -447,7 +447,7 @@ describe('decodeGateKeepers', () => {
   })
 
   it('accepts an explicit empty directory', () => {
-    expect(Effect.runSync(decodeGateKeepers({
+    expect(unwrapResult(decodeGateKeepers({
       candle: { status: 'off' },
       count: 0,
       keepers: [],
@@ -518,7 +518,7 @@ describe('decodeGateKeepers', () => {
   })
 
   it('retains producer-declared Portrait unavailability in a readable Gate roster', () => {
-    const data = Effect.runSync(decodeGateKeepers({
+    const data = unwrapResult(decodeGateKeepers({
       candle: { status: 'off' }, count: 1,
       keepers: [{ ...keeperWire(), portrait: { state: 'unavailable', reason: 'ledger unreadable' } }],
       ...listingWire(1),

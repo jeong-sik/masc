@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { Effect, Option } from 'effect'
+import { Option, unwrapResult, unwrapResultError } from '../../lib/result'
 import {
   decodeTransportHealthData,
   isTransportHealthReady,
@@ -118,13 +118,13 @@ const currentWire = {
 }
 
 function expectDrift(value: unknown): void {
-  const error = Effect.runSync(Effect.flip(decodeTransportHealthData(value)))
+  const error = unwrapResultError(decodeTransportHealthData(value))
   expect(error).toBeInstanceOf(TransportHealthSchemaDriftError)
   expect(error.message).toContain('transport-health schema drift')
 }
 
 function parseReady(value: unknown): TransportHealthData {
-  const snapshot = Effect.runSync(decodeTransportHealthData(value))
+  const snapshot = unwrapResult(decodeTransportHealthData(value))
   if (!isTransportHealthReady(snapshot)) {
     throw new Error('expected ready transport-health snapshot')
   }
@@ -160,7 +160,7 @@ describe('decodeTransportHealthData', () => {
   })
 
   it('decodes the exact initializing cache envelope', () => {
-    const result = Effect.runSync(decodeTransportHealthData({
+    const result = unwrapResult(decodeTransportHealthData({
       status: 'initializing',
       generated_at: '2024-01-01T00:00:00Z',
       message: 'Transport health data is warming up.',

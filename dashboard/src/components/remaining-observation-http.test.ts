@@ -4,11 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { clearStoredToken, setStoredToken } from '../api/core'
 import { acceptedExecutionWorkspace } from '../execution-workspace-authority'
 import { publishDashboardObservationChange, publishDashboardObservationRecovery } from '../lib/observation-refresh'
-import { resetDashboardSessionActorForTests, setCanonicalDashboardActor } from '../lib/dashboard-session-actor'
+import { resetDashboardSessionActorForTests } from '../lib/dashboard-session-actor'
 import { route } from '../router'
 import { OverviewRuntimeStats } from './overview/runtime-stats'
-import { ArtifactsSurface } from './published-artifacts/artifacts-surface'
-import { ArtifactDraftSessionProvider } from './published-artifacts/artifact-draft-session'
 import { DashboardHealthStrip } from './dashboard-shell'
 
 // Ancillary resources are independent of the HTTP callbacks under test.
@@ -31,10 +29,6 @@ const usageAnswer = () => Response.json({ config_path: null, default_route: null
     providers: [{ id: 'account', display_name: 'Account' }], state: 'reported', windows: [{ limit_id: null,
       window: { kind: 'provider_label', label: 'A-only-usage' }, utilization: { unit: 'usd', value: 7.5, limit: 20 },
       resets_at: null, observed_at: 1100, source: 'fixture', role: 'gates_model_calls' }] }] })
-const artifactAnswer = () => Response.json({ artifacts: [{ id: `artifact-${'a'.repeat(32)}`, revision: 1,
-  title: 'A-only-artifact', summary: '', format: 'markdown', author: 'author', created_at: '2026-11-10T00:00:00Z',
-  task_id: null, goal_id: null, body: { _blob: { sha256: 'a'.repeat(64), bytes: 1, mime: 'text/markdown', preview: '' } },
-  url: '/dashboard/#/workspace?section=artifacts' }], diagnostics: [] })
 function probeAnswer() {
   return Response.json({ generated_at: '2026-11-10T00:00:00Z', refreshed_at_unix: 1,
     cache_ttl_sec: 1, cache_age_sec: 0, cache_hit: false, refresh_state: 'fresh', probe: {
@@ -67,7 +61,6 @@ afterEach(async () => {
   vi.unstubAllGlobals()
   vi.useRealTimers()
 })
-function mountArtifacts() { return render(html`<${ArtifactDraftSessionProvider}><${ArtifactsSurface} /><//>`) }
 function recover(topic: 'runtime_resolved' | 'published_artifacts' | 'runtime_probe') {
   publishDashboardObservationChange({ topic })
   window.dispatchEvent(new Event('focus'))
@@ -112,35 +105,6 @@ describe('remaining custom observation actual HTTP', () => {
     await act(async () => { reads[0]!.finish(usageAnswer()) })
     await settle()
     expect(view.container.textContent).not.toContain('A-only-usage')
-  })
-
-  it.each([401, 403])('does not let the artifact catalog500 hide confirmation inventory HTTP %i', async status => {
-    const fetch = vi.fn(async (path: string) => refused(path === '/api/v1/published-artifacts' ? 500 : status))
-    vi.stubGlobal('fetch', fetch)
-    mountArtifacts()
-    await settle()
-    recover('published_artifacts')
-    await act(async () => { await vi.advanceTimersByTimeAsync(300_000) })
-    expect(fetch).toHaveBeenCalledTimes(2)
-  })
-
-  it('withdraws artifact catalog rows on actor replacement before the new read fails', async () => {
-    let actor = 'A'
-    const pending: Array<(response: Response) => void> = []
-    const fetch = vi.fn(async (path: string) => actor === 'B'
-      ? new Promise<Response>(resolve => { pending.push(resolve) })
-      : path === '/api/v1/published-artifacts' ? artifactAnswer() : Response.json({ checks: [], diagnostics: [] }))
-    vi.stubGlobal('fetch', fetch)
-    const view = mountArtifacts()
-    await settle()
-    expect(view.container.textContent).toContain('A-only-artifact')
-    actor = 'B'
-    await act(async () => { setCanonicalDashboardActor('actor-B') })
-    expect(view.container.textContent).not.toContain('A-only-artifact')
-    await settle()
-    await act(async () => { for (const finish of pending) finish(refused(403)) })
-    await settle()
-    expect(view.container.textContent).not.toContain('A-only-artifact')
   })
 
   it('withdraws the old runtime probe chip before a replacement owner read settles', async () => {

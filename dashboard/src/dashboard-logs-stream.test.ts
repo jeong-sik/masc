@@ -1,5 +1,4 @@
 import { confirmRuntimeTestWorkspace, RUNTIME_TEST_OBSERVER_INSTANCE } from './lib/runtime-workspace.test-fixture'
-import { Effect } from 'effect'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiRequestError, clearStoredToken, setStoredToken } from './api/core'
 import { decodeLogsStreamFrame, type LogsStreamFrame } from './api/schemas/logs'
@@ -16,7 +15,11 @@ import { publishDashboardObservationRecovery } from './lib/observation-refresh'
 
 const disposers: Array<() => void> = []
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve() }
-const frame = (seqs: readonly number[], reset = true) => Effect.runSync(decodeLogsStreamFrame(logStreamWire(seqs, reset)))
+const frame = (seqs: readonly number[], reset = true) => {
+  const res = decodeLogsStreamFrame(logStreamWire(seqs, reset))
+  if (!res.ok) throw res.error
+  return res.value
+}
 beforeEach(confirmRuntimeTestWorkspace)
 afterEach(() => {
   for (const dispose of disposers.splice(0)) dispose()

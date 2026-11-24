@@ -1,4 +1,5 @@
-import { Data, Effect, ParseResult, Schema } from 'effect'
+import { TaggedError, ok, err, type Result } from '../../lib/result'
+import { ParseResult, Schema } from '../../lib/wire-schema'
 
 const NonNegativeNumberSchema = Schema.JsonNumber.pipe(Schema.nonNegative())
 const NonNegativeIntegerSchema = Schema.NonNegativeInt
@@ -214,13 +215,13 @@ export function isTransportHealthReady(
   return !('status' in snapshot)
 }
 
-export class TransportHealthSchemaDriftError extends Data.TaggedError(
+export class TransportHealthSchemaDriftError extends TaggedError(
   'TransportHealthSchemaDriftError',
 )<{
   readonly domain: 'transport-health'
   readonly issues: ReadonlyArray<ParseResult.ArrayFormatterIssue>
   readonly message: string
-}> {}
+}>() {}
 
 function schemaDriftError(
   error: ParseResult.ParseError,
@@ -246,9 +247,10 @@ const STRICT_PARSE_OPTIONS = {
 
 export function decodeTransportHealthData(
   data: unknown,
-): Effect.Effect<TransportHealthSnapshot, TransportHealthSchemaDriftError> {
-  return Schema.decodeUnknown(
+): Result<TransportHealthSnapshot, TransportHealthSchemaDriftError> {
+  const decoded = Schema.decodeUnknownResult(
     TransportHealthSnapshotSchema,
     STRICT_PARSE_OPTIONS,
-  )(data).pipe(Effect.mapError(schemaDriftError))
+  )(data)
+  return decoded.ok ? ok(decoded.value) : err(schemaDriftError(decoded.error))
 }

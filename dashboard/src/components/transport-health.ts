@@ -1,12 +1,12 @@
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
-import { Option } from 'effect'
+import { Option } from '../lib/result'
 import { lastEvent } from '../sse'
 import type { SSEEvent } from '../types'
 import { FetchScheduler } from '../lib/fetch-scheduler'
 import { SECONDS_PER_MINUTE, SECONDS_PER_HOUR } from '../lib/format-time'
-import { createEffectResource } from '../lib/effect-resource'
+import { createAsyncResource } from '../lib/effect-resource'
 import {
   decodeTransportHealthData,
   fetchTransportHealth,
@@ -17,7 +17,7 @@ import {
   type TransportHealthError,
   type TransportHealthSnapshot,
 } from '../api/transport-health'
-import { dashboardRuntime, type DashboardHttp } from '../api/effect-http'
+import { defaultDashboardHttp } from '../api/effect-http'
 import { TextInput } from './common/input'
 import { StatusDot } from './common/status-dot'
 import { CopyIdButton } from './common/copy-id-button'
@@ -41,11 +41,10 @@ type PracticalCase = {
   live: (data: TransportHealthData) => string
 }
 
-const transportHealthResource = createEffectResource<
-  DashboardHttp,
+const transportHealthResource = createAsyncResource<
   TransportHealthError,
   TransportHealthSnapshot
->(dashboardRuntime)
+>()
 
 // Module-scoped search state for the hot-sessions list (stale-filter-carryover
 // bug guard: must be cleared in resetTransportHealthState).
@@ -80,7 +79,7 @@ export function resetTransportHealthState(): void {
 
 /** Hydrate transport health from a server-push payload — zero HTTP fetch. */
 export function hydrateTransportHealthFromSSE(data: unknown): void {
-  void transportHealthResource.load(decodeTransportHealthData(data))
+  void transportHealthResource.load(async () => decodeTransportHealthData(data))
 }
 
 const PRACTICAL_CASES: PracticalCase[] = [
@@ -119,7 +118,7 @@ const PRACTICAL_CASES: PracticalCase[] = [
 ]
 
 function refreshTransportHealth(): Promise<void> {
-  return transportHealthResource.load(fetchTransportHealth())
+  return transportHealthResource.load(signal => fetchTransportHealth(defaultDashboardHttp, signal))
 }
 
 export function shouldRefreshFromEvent(event: SSEEvent): boolean {

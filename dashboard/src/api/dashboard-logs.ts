@@ -1,7 +1,6 @@
-import { Effect } from 'effect'
-
 import {
-  DashboardHttp,
+  defaultDashboardHttp,
+  type DashboardHttpService,
   type DashboardTransportError,
 } from './effect-http'
 import {
@@ -12,6 +11,7 @@ import {
   type LogsData,
   type LogsSchemaDriftError,
 } from './schemas/logs'
+import type { Result } from '../lib/result'
 
 export type { LogCategory, LogEntry, LogLevel, LogsData } from './schemas/logs'
 export { decodeLogsData, LogsSchemaDriftError } from './schemas/logs'
@@ -51,12 +51,12 @@ export function logsPath(request: LogsRequest, stream = false): string {
   return `/api/v1/dashboard/logs${stream ? '/stream' : ''}${query === '' ? '' : `?${query}`}`
 }
 
-export function fetchLogs(
+export async function fetchLogs(
   request: LogsRequest = {},
-): Effect.Effect<LogsData, LogsError, DashboardHttp> {
-  return Effect.gen(function*() {
-    const http = yield* DashboardHttp
-    const raw = yield* http.getUnknown(logsPath(request))
-    return yield* decodeLogsData(raw)
-  })
+  http: DashboardHttpService = defaultDashboardHttp,
+  signal?: AbortSignal,
+): Promise<Result<LogsData, LogsError>> {
+  const raw = await http.getUnknown(logsPath(request), signal)
+  if (!raw.ok) return raw
+  return decodeLogsData(raw.value)
 }

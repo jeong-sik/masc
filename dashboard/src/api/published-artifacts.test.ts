@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { Schema } from 'effect'
+import { Schema } from '../lib/wire-schema'
 import nativeInventory from './fixtures/published-artifacts-native.json'
 import { get, getPublic, getWithResponse, post } from './core'
 import { ArtifactPublicationSchema, captureArtifactWorkspace, fetchPublishedArtifact, fetchWorkspacePublishedArtifact, fetchPublicArtifact, fetchPublishedArtifacts, setPublishedArtifactShared } from './published-artifacts'

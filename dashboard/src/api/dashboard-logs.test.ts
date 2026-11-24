@@ -1,11 +1,6 @@
-import { Effect } from 'effect'
 import { describe, expect, it } from 'vitest'
-
-import {
-  DashboardHttp,
-  DashboardTransportError,
-  type DashboardHttpService,
-} from './effect-http'
+import { err, ok } from '../lib/result'
+import { DashboardTransportError } from './effect-http'
 import { fetchLogs, LogsSchemaDriftError } from './dashboard-logs'
 
 const currentWire = {
@@ -42,24 +37,17 @@ const currentWire = {
   entries: [],
 } as const
 
-function runWithHttp<A, E>(
-  program: Effect.Effect<A, E, DashboardHttp>,
-  http: DashboardHttpService,
-): Effect.Effect<A, E> {
-  return program.pipe(Effect.provideService(DashboardHttp, http))
-}
-
 describe('fetchLogs', () => {
-  it('maps the product request to the current query wire and decodes once', () => {
-    const data = Effect.runSync(runWithHttp(fetchLogs({
+  it('maps the product request to the current query wire and decodes once', async () => {
+    const res = await fetchLogs({
       limit: 200,
       level: 'INFO',
       sinceSeq: 10,
       beforeSeq: 20,
       categories: ['routine', 'uncategorized'],
       excludeCategories: ['fsm', 'routine'],
-    }), {
-      getUnknown: path => {
+    }, {
+      getUnknown: async path => {
         const [, query = ''] = path.split('?')
         const params = new URLSearchParams(query)
         expect(path.startsWith('/api/v1/dashboard/logs?')).toBe(true)
@@ -69,43 +57,45 @@ describe('fetchLogs', () => {
         expect(params.get('before_seq')).toBe('20')
         expect(params.get('category')).toBe('routine,uncategorized')
         expect(params.get('exclude_category')).toBe('fsm,routine')
-        return Effect.succeed(currentWire)
+        return ok(currentWire)
       },
-    }))
+    })
 
-    expect(data.entries).toEqual([])
+    expect(res.ok).toBe(true)
+    if (!res.ok) return
+    expect(res.value.entries).toEqual([])
   })
 
-  it('omits negative cursors instead of emitting invalid query state', () => {
-    Effect.runSync(runWithHttp(fetchLogs({ beforeSeq: -1 }), {
-      getUnknown: path => {
+  it('omits negative cursors instead of emitting invalid query state', async () => {
+    await fetchLogs({ beforeSeq: -1 }, {
+      getUnknown: async path => {
         expect(path).toBe('/api/v1/dashboard/logs')
-        return Effect.succeed(currentWire)
+        return ok(currentWire)
       },
-    }))
+    })
   })
 
-  it('preserves transport failures as typed values', () => {
+  it('preserves transport failures as typed values', async () => {
     const transportError = new DashboardTransportError({
       method: 'GET',
       path: '/api/v1/dashboard/logs',
       message: 'offline',
       cause: new Error('offline'),
     })
-    const error = Effect.runSync(Effect.flip(runWithHttp(
-      fetchLogs(),
-      { getUnknown: () => Effect.fail(transportError) },
-    )))
+    const res = await fetchLogs({}, { getUnknown: async () => err(transportError) })
 
-    expect(error).toBe(transportError)
+    expect(res.ok).toBe(false)
+    if (res.ok) return
+    expect(res.error).toBe(transportError)
   })
 
-  it('maps malformed payloads to logs drift', () => {
-    const error = Effect.runSync(Effect.flip(runWithHttp(
-      fetchLogs(),
-      { getUnknown: () => Effect.succeed({ total: 0, entries: [] }) },
-    )))
+  it('maps malformed payloads to logs drift', async () => {
+    const res = await fetchLogs({}, {
+      getUnknown: async () => ok({ total: 0, entries: [] }),
+    })
 
-    expect(error).toBeInstanceOf(LogsSchemaDriftError)
+    expect(res.ok).toBe(false)
+    if (res.ok) return
+    expect(res.error).toBeInstanceOf(LogsSchemaDriftError)
   })
 })

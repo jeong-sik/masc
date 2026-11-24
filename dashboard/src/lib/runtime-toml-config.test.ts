@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getStaticTOMLValue, parseTOML } from 'toml-eslint-parser'
+import { getStaticTOMLValue, parseTOML } from './toml-lite'
 import {
   createRuntimeTomlBinding,
   deleteRuntimeTomlKey,

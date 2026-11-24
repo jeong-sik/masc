@@ -1,4 +1,5 @@
-import { Either, Schema } from 'effect'
+import { Either } from '../lib/result'
+import { Schema } from '../lib/wire-schema'
 
 const text = Schema.NonEmptyString.pipe(Schema.filter(value => value.trim().length > 0))
 const id = Schema.Number.pipe(Schema.filter(value => Number.isSafeInteger(value) && value >= 0))

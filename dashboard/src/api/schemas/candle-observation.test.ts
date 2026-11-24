@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { Either, Schema } from 'effect'
+import { Either } from '../../lib/result'
+import { Schema } from '../../lib/wire-schema'
 import { CandleObservationSchema, candleAmountText, readCandleAccountRevision, readCandleBalance, readCandleObservation, readCandleRosterObservation } from './candle-observation'
 
 const ready = { status: 'ready', issued_milli: '18446744073709551614000', burned_milli: '1000', circulating_milli: '18446744073709551613000' } as const

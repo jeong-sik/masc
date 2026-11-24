@@ -13,10 +13,10 @@ import {
 import type { NonHomeTabId } from './types'
 
 describe('navigate', () => {
-  it('navigates to monitoring tab with agent param', () => {
-    navigate('monitoring', { section: 'agents', agent: 'sangsu' })
+  it('navigates to monitoring tab with runtime section and agent param', () => {
+    navigate('monitoring', { section: 'runtime', agent: 'sangsu' })
     expect(route.value.tab).toBe('monitoring')
-    expect(route.value.params.section).toBe('agents')
+    expect(route.value.params.section).toBe('runtime')
     expect(route.value.params.agent).toBe('sangsu')
   })
 
@@ -77,13 +77,6 @@ describe('navigate', () => {
     expect(window.location.hash).toBe('#board?post=post%201')
   })
 
-  it('redirects removed operations params to operations', () => {
-    navigate('command', { section: 'operations', surface: 'swarm' })
-    expect(route.value.tab).toBe('command')
-    expect(route.value.params.section).toBe('operations')
-    expect(route.value.params.surface).toBeUndefined()
-  })
-
   it('keeps runtime diagnostic monitor links routeable while hidden from primary IA', () => {
     navigate('monitoring', { section: 'transport-health' })
     expect(route.value.tab).toBe('monitoring')
@@ -102,70 +95,6 @@ describe('navigate', () => {
     expect(window.location.hash).toBe('#connectors?section=connector-status')
   })
 
-  it('maps cockpit Cognition design deep links into the Monitor agents lane', () => {
-    window.location.hash = '#repo=viewer&branch=wt%2Fsangsu-smoke&mode=Cognition'
-    window.dispatchEvent(new HashChangeEvent('hashchange'))
-
-    expect(route.value.tab).toBe('monitoring')
-    expect(route.value.params.section).toBe('agents')
-    expect(route.value.params.repo).toBe('viewer')
-    expect(route.value.params.branch).toBe('wt/sangsu-smoke')
-    expect(route.value.params.mode).toBe('Cognition')
-    expect(window.location.hash).toContain('section=agents')
-  })
-
-  it('treats slash-bearing raw cockpit query hashes as queries and redirects Cognition to agents', () => {
-    window.location.hash = '#repo=viewer&branch=wt/sangsu-smoke&mode=Cognition'
-    window.dispatchEvent(new HashChangeEvent('hashchange'))
-
-    expect(route.value.tab).toBe('monitoring')
-    expect(route.value.params.section).toBe('agents')
-    expect(route.value.params.branch).toBe('wt/sangsu-smoke')
-    expect(window.location.hash).toContain('section=agents')
-  })
-
-  it('maps cockpit IDE split mode links into the Code IDE view state', () => {
-    window.location.hash = '#mode=Split&branch=main'
-    window.dispatchEvent(new HashChangeEvent('hashchange'))
-
-    expect(route.value.tab).toBe('code')
-    expect(route.value.params.section).toBe('ide-shell')
-    expect(route.value.params.view).toBe('split-diff')
-    expect(route.value.params.branch).toBe('main')
-  })
-
-  it('maps path-qualified cockpit mode links when no explicit section is present', () => {
-    window.location.hash = '#code?mode=Split&branch=main'
-    window.dispatchEvent(new HashChangeEvent('hashchange'))
-
-    expect(route.value.tab).toBe('code')
-    expect(route.value.params.section).toBe('ide-shell')
-    expect(route.value.params.view).toBe('split-diff')
-    expect(route.value.params.branch).toBe('main')
-  })
-
-  it('preserves IDE context surface params on Code routes', () => {
-    navigate('code', {
-      section: 'ide-shell',
-      view: 'source',
-      file: 'lib/runtime.ml',
-      line: '42',
-      surface: 'Task',
-      source_id: 'task:runtime',
-    })
-
-    expect(route.value.tab).toBe('code')
-    expect(route.value.params).toMatchObject({
-      section: 'ide-shell',
-      view: 'source',
-      file: 'lib/runtime.ml',
-      line: '42',
-      surface: 'Task',
-      source_id: 'task:runtime',
-    })
-    expect(window.location.hash).toContain('surface=Task')
-  })
-
   it('keeps explicit production sections stronger than cockpit mode aliases', () => {
     window.location.hash = '#monitoring?section=runtime&mode=Cognition'
     window.dispatchEvent(new HashChangeEvent('hashchange'))
@@ -177,13 +106,12 @@ describe('navigate', () => {
 
   it('replaceRoute writes a canonical hash while preserving the current search params', () => {
     window.history.replaceState(null, '', '/dashboard?theme=paper#overview')
-    replaceRoute('workspace', { section: 'planning', view: 'default' })
+    replaceRoute('workspace', { section: 'work' })
 
     expect(route.value.tab).toBe('workspace')
-    expect(route.value.params.section).toBe('planning')
-    expect(route.value.params.view).toBe('default')
+    expect(route.value.params.section).toBe('work')
     expect(window.location.search).toBe('?theme=paper')
-    expect(window.location.hash).toBe('#workspace?section=planning&view=default')
+    expect(window.location.hash).toBe('#workspace?section=work')
   })
 
   it('replaceRoute dispatches hashchange for existing listeners', () => {
@@ -212,12 +140,7 @@ describe('canonical section routes', () => {
 
   it('uses the default section for an unknown query or path', () => {
     navigate('monitoring', { section: 'not-a-section', keeper: 'nova' })
-    expect(route.value.params).toEqual({ section: 'agents', keeper: 'nova' })
-
-    window.location.hash = '#command/not-a-section?target_id=op-42'
-    window.dispatchEvent(new HashChangeEvent('hashchange'))
-    expect(route.value.tab).toBe('command')
-    expect(route.value.params).toEqual({ section: 'operations', target_id: 'op-42' })
+    expect(route.value.params).toEqual({ section: 'runtime', keeper: 'nova' })
   })
 })
 

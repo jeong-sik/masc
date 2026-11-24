@@ -22,9 +22,9 @@ import type {
   DashboardScheduledAutomationRequest,
 } from '../../api'
 import type { KeeperLifecycleEvent } from '../../api/keeper'
-import type { CompositeObservation, LaneKey, SwimlaneSegment } from '../fsm-hub-types'
-import { isObservedStall } from '../fsm-hub-lane-analysis'
-import { laneChangedAt, laneTransitionCount } from '../fsm-hub-derivations'
+import type { CompositeObservation, LaneKey, SwimlaneSegment } from '../../lib/keeper-fsm-labels'
+import { isObservedStall } from '../../lib/keeper-fsm-labels'
+import { laneChangedAt, laneTransitionCount } from '../../lib/keeper-fsm-labels'
 import { waitingStateWithSources } from '../tools/keeper-waiting-inventory-panel'
 import { queueDrainStateOfEvidence as drainStateOfEvidence, type QueueDrainState } from '../schedule/queue-drain-status'
 import { waitingRowSinceSec } from '../common/waiting-row-window'

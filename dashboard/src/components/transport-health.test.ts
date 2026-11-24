@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { signal } from '@preact/signals'
-import { Effect, Option } from 'effect'
+import { Option, err, unwrapResult } from '../lib/result'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   filterHotSessions,
@@ -163,12 +163,14 @@ async function loadComponentWithApi(api: {
     const original = await importOriginal<typeof TransportHealthApi>()
     return {
       ...original,
-      fetchTransportHealth: () =>
-        Effect.tryPromise({
-          try: () => api.fetchTransportHealth(),
-          catch: error =>
-            error instanceof Error ? error : new Error(String(error)),
-        }).pipe(Effect.flatMap(original.decodeTransportHealthData)),
+      fetchTransportHealth: async () => {
+        try {
+          const raw = await api.fetchTransportHealth()
+          return original.decodeTransportHealthData(raw)
+        } catch (error) {
+          return err(error instanceof Error ? error : new Error(String(error)))
+        }
+      },
     }
   })
   vi.doMock('../sse', () => ({
@@ -736,7 +738,7 @@ describe('sameOriginEyebrow', () => {
 })
 
 function makeData(overrides?: Partial<TransportHealthData>): TransportHealthData {
-  const snapshot = Effect.runSync(decodeTransportHealthData(sampleResponse()))
+  const snapshot = unwrapResult(decodeTransportHealthData(sampleResponse()))
   if (!isTransportHealthReady(snapshot)) {
     throw new Error('expected ready transport-health test fixture')
   }

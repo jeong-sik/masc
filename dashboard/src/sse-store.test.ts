@@ -527,24 +527,6 @@ describe('setupServerPushReaction reconnect hydration', () => {
     expect(refreshExecution).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps operator lifecycle refreshes scoped to the command route', async () => {
-    const { sseStore } = await loadSseStore()
-    const refreshOperator = vi.fn()
-    sseStore.registerOperatorRefresh(refreshOperator)
-    route.value = { tab: 'command', params: {}, postId: null }
-    sseStore.routeServerPushEvent({
-      type: 'keeper_turn_complete',
-      name: 'qa-king',
-      turn: 42,
-    })
-    vi.advanceTimersByTime(1_000)
-    await flushAsyncWork()
-
-    expect(refreshOperator).toHaveBeenCalledTimes(1)
-    expect(refreshExecution).not.toHaveBeenCalled()
-
-  })
-
   it('routes all board SSE wire variants through the board refresh budget', async () => {
     const { sseStore } = await loadSseStore()
     route.value = { tab: 'workspace', params: { section: 'board' }, postId: null }
@@ -633,60 +615,6 @@ describe('setupServerPushReaction reconnect hydration', () => {
     expect(refresh).toHaveBeenCalledTimes(1)
     expect(refreshFusionRuns).not.toHaveBeenCalled()
     unregister()
-  })
-
-  it('routes keeper_tool_call to the IDE workspace refresh while on the code surface', async () => {
-    const { sseStore } = await loadSseStore()
-    route.value = { tab: 'code', params: {}, postId: null }
-    const ideRefresh = vi.fn()
-    const unregister = sseStore.registerIdeWorkspaceRefresh(ideRefresh)
-
-    sseStore.routeServerPushEvent({ type: 'keeper_tool_call' })
-    vi.advanceTimersByTime(1_000)
-    await flushAsyncWork()
-
-    expect(ideRefresh).toHaveBeenCalledTimes(1)
-    unregister()
-  })
-
-  it('normalizes the masc/ prefix when routing keeper edits to the IDE refresh', async () => {
-    const { sseStore } = await loadSseStore()
-    route.value = { tab: 'code', params: {}, postId: null }
-    const ideRefresh = vi.fn()
-    sseStore.registerIdeWorkspaceRefresh(ideRefresh)
-
-    sseStore.routeServerPushEvent({ type: 'masc/keeper_tool_call' })
-    vi.advanceTimersByTime(1_000)
-    await flushAsyncWork()
-
-    expect(ideRefresh).toHaveBeenCalledTimes(1)
-  })
-
-  it('does not refresh the IDE workspace off the code surface (route-scoped)', async () => {
-    const { sseStore } = await loadSseStore()
-    route.value = { tab: 'overview', params: {}, postId: null }
-    const ideRefresh = vi.fn()
-    sseStore.registerIdeWorkspaceRefresh(ideRefresh)
-
-    sseStore.routeServerPushEvent({ type: 'keeper_tool_call' })
-    vi.advanceTimersByTime(1_000)
-    await flushAsyncWork()
-
-    expect(ideRefresh).not.toHaveBeenCalled()
-  })
-
-  it('stops IDE workspace refreshes once the subscriber unregisters', async () => {
-    const { sseStore } = await loadSseStore()
-    route.value = { tab: 'code', params: {}, postId: null }
-    const ideRefresh = vi.fn()
-    const unregister = sseStore.registerIdeWorkspaceRefresh(ideRefresh)
-    unregister()
-
-    sseStore.routeServerPushEvent({ type: 'keeper_tool_call' })
-    vi.advanceTimersByTime(1_000)
-    await flushAsyncWork()
-
-    expect(ideRefresh).not.toHaveBeenCalled()
   })
 
   it('routes keeper_chat_appended pushes to the live chat refresh hook', async () => {
@@ -1206,23 +1134,7 @@ describe('setupServerPushReaction reconnect hydration', () => {
     expect(refreshBoard).not.toHaveBeenCalled()
   })
 
-  it('refreshes observatory telemetry from activity push events on the observatory route', async () => {
-    const { sseStore } = await loadSseStore()
-    const refreshActivity = vi.fn()
-    sseStore.registerActivityRefresh(refreshActivity)
-    route.value = { tab: 'monitoring', params: { section: 'observatory' }, postId: null }
-
-    sseStore.routeServerPushEvent({
-      type: 'activity_graph_changed',
-      payload: { kind: 'activity_graph_changed' },
-    } as unknown as Parameters<typeof sseStore.routeServerPushEvent>[0])
-    vi.advanceTimersByTime(2_000)
-    await flushAsyncWork()
-
-    expect(refreshActivity).toHaveBeenCalledTimes(1)
-  })
-
-  it('does not trigger observatory telemetry refresh from the workspace board route', async () => {
+  it('does not trigger activity refresh from the workspace board route', async () => {
     const { sseStore } = await loadSseStore()
     const refreshActivity = vi.fn()
     sseStore.registerActivityRefresh(refreshActivity)
@@ -1341,27 +1253,4 @@ describe('setupServerPushReaction reconnect hydration', () => {
 
     expect(refreshBoard).toHaveBeenCalledTimes(1)
   }, dashboardDeltaTimeoutMs)
-})
-
-it('refreshes mounted IDE conversation sources independently and unsubscribes cleanly', async () => {
-  vi.useFakeTimers()
-  const { sseStore } = await loadSseStore()
-  const refresh = vi.fn()
-  const stop = sseStore.registerIdeConversationRefresh(refresh)
-  route.value = { tab: 'code', params: { section: 'ide-shell' }, postId: null }
-  sseStore.routeServerPushEvent({ type: 'post_created', post_id: 'conversation-new' })
-  vi.advanceTimersByTime(1_000)
-  await flushAsyncWork()
-  expect(refresh.mock.calls).toEqual([['board']])
-  sseStore.routeServerPushEvent({ type: 'keeper_turn_complete', keeper_name: 'editor' })
-  vi.advanceTimersByTime(1_000)
-  await flushAsyncWork()
-  expect(refresh.mock.calls).toEqual([['board'], ['decisions']])
-  stop()
-  sseStore.routeServerPushEvent({ type: 'comment_added', post_id: 'conversation-new', comment_id: 'reply' })
-  vi.advanceTimersByTime(1_000)
-  await flushAsyncWork()
-  expect(refresh).toHaveBeenCalledTimes(2)
-  sseStore.cancelPendingServerPushRefreshes()
-  vi.useRealTimers()
 })

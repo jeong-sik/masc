@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { Either, Schema } from 'effect'
+import { Either } from '../../lib/result'
+import { Schema } from '../../lib/wire-schema'
 import { KeeperPortraitSchema, EQUIPMENT_IDS, isKeeperPortraitReading, keeperEquipmentKey, readKeeperPortrait } from './keeper-portrait'
 
 const equipment = { face: 'bare_face', neck: 'bare_neck', head: 'bare_head', hand: 'empty_hand', base: 'no_dish' } as const

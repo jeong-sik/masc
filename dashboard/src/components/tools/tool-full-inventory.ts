@@ -52,7 +52,7 @@ export function FullInventoryView({
   const [listContainer, setListContainer] = useState<HTMLDivElement | null>(null)
 
   useEffect(() => {
-    if (route.value.tab !== 'lab' || route.value.params.section !== 'tools') return
+    if (route.value.tab !== 'monitoring' || route.value.params.section !== 'fleet-health') return
     const q = route.value.params.q?.trim()
     searchQuery.value = q ?? ''
   }, [route.value.tab, route.value.params.section, route.value.params.q])

@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { unwrapResult, unwrapResultError } from '../../lib/result'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -44,7 +44,7 @@ function currentWire(value: string | null = '0.72') {
 }
 
 function expectDrift(value: unknown): DashboardConfigSchemaDriftError {
-  const error = Effect.runSync(Effect.flip(decodeDashboardConfig(value)))
+  const error = unwrapResultError(decodeDashboardConfig(value))
   expect(error).toBeInstanceOf(DashboardConfigSchemaDriftError)
   expect(error.message).toContain('dashboard-config schema drift')
   return error
@@ -52,7 +52,7 @@ function expectDrift(value: unknown): DashboardConfigSchemaDriftError {
 
 describe('decodeDashboardConfig', () => {
   it('strictly decodes current wire data into the config domain', () => {
-    const parsed = Effect.runSync(decodeDashboardConfig(currentWire()))
+    const parsed = unwrapResult(decodeDashboardConfig(currentWire()))
     const entry = parsed.categories.dashboard?.[0]
 
     expect(parsed.server).toEqual({
@@ -73,7 +73,7 @@ describe('decodeDashboardConfig', () => {
   })
 
   it('resolves a missing wire value to its product default once', () => {
-    const parsed = Effect.runSync(decodeDashboardConfig(currentWire(null)))
+    const parsed = unwrapResult(decodeDashboardConfig(currentWire(null)))
     expect(parsed.categories.dashboard?.[0]?.displayValue).toBe('0.70')
   })
 

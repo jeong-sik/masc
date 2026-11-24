@@ -163,6 +163,31 @@ let record ~base_path ~keeper_name ~at ~cause outcome =
 
 let get ~base_path ~keeper_name = KeyMap.find_opt (base_path, keeper_name) (Atomic.get state)
 
+let slot_to_json { starts_at; tally = { ok; rested; failed }; causes } =
+  let { scheduled; reacted; chat; own; unknown } = causes in
+  `Assoc
+    [ "starts_at", `Int starts_at
+    ; "ok", `Int ok
+    ; "rested", `Int rested
+    ; "failed", `Int failed
+    ; "scheduled", `Int scheduled
+    ; "reacted", `Int reacted
+    ; "chat", `Int chat
+    ; "own", `Int own
+    ; "unknown", `Int unknown
+    ]
+;;
+
+let recent_turns_json ~base_path ~keeper_name =
+  match get ~base_path ~keeper_name with
+  | None -> `Null
+  | Some pulse ->
+    `Assoc
+      [ "known_since", `Float pulse.known_since
+      ; "slots", `List (List.map slot_to_json pulse.slots)
+      ]
+;;
+
 let seed ~base_path ~keeper_name pulse =
   let key = base_path, keeper_name in
   let rec loop () =

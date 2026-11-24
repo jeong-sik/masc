@@ -62,6 +62,44 @@ let test_turns_are_counted_in_their_half_hour () =
     (causes pulse)
 ;;
 
+(* The roster and the execution snapshot send this one field. *)
+let test_row_field_is_the_pulse_or_null () =
+  Pulse.reset_for_tests ();
+  let field () = Pulse.recent_turns_json ~base_path:"/tmp/p1" ~keeper_name:"alpha" in
+  Alcotest.(check string) "a keeper with no pulse sends null" "null" (Yojson.Safe.to_string (field ()));
+  Pulse.record ~base_path:"/tmp/p1" ~keeper_name:"alpha" ~at:(at_slot ~offset:10 0)
+    ~cause:Pulse.Scheduled Pulse.Turn_ok;
+  Pulse.record ~base_path:"/tmp/p1" ~keeper_name:"alpha" ~at:(at_slot 1) ~cause:Pulse.Chat
+    Pulse.Turn_ok;
+  let slot ~starts_at ~scheduled ~chat =
+    `Assoc
+      [ "starts_at", `Int starts_at
+      ; "ok", `Int 1
+      ; "rested", `Int 0
+      ; "failed", `Int 0
+      ; "scheduled", `Int scheduled
+      ; "reacted", `Int 0
+      ; "chat", `Int chat
+      ; "own", `Int 0
+      ; "unknown", `Int 0
+      ]
+  in
+  let expected =
+    `Assoc
+      [ "known_since", `Float (at_slot ~offset:10 0)
+      ; ( "slots"
+        , `List
+            [ slot ~starts_at:(base + Pulse.slot_seconds) ~scheduled:0 ~chat:1
+            ; slot ~starts_at:base ~scheduled:1 ~chat:0
+            ] )
+      ]
+  in
+  Alcotest.(check string)
+    "known_since and one object per slot, newest first"
+    (Yojson.Safe.to_string expected)
+    (Yojson.Safe.to_string (field ()))
+;;
+
 let test_many_turns_keep_every_hour () =
   Pulse.reset_for_tests ();
   (* 360 turns over 12 hours: the old 24-turn cap held 48 minutes of them. *)
@@ -408,6 +446,8 @@ let () =
       , [ Alcotest.test_case "unknown keeper has no pulse" `Quick test_unknown_keeper_has_no_pulse
         ; Alcotest.test_case "turns are counted in their half hour" `Quick
             test_turns_are_counted_in_their_half_hour
+        ; Alcotest.test_case "the row field is the pulse or null" `Quick
+            test_row_field_is_the_pulse_or_null
         ; Alcotest.test_case "many turns keep every hour" `Quick test_many_turns_keep_every_hour
         ; Alcotest.test_case "a turn prunes slots older than a day" `Quick
             test_a_turn_prunes_slots_older_than_a_day

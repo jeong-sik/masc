@@ -270,6 +270,10 @@ let keepers_json
                            ; "paused", `Bool true
                            ; "diagnostic", diagnostic
                            ; "turn_count", `Int meta.runtime.usage.total_turns
+                           ; ( "recent_turns"
+                             , Keeper_turn_pulse.recent_turns_json
+                                 ~base_path:config.Workspace.base_path
+                                 ~keeper_name:meta.name )
                            ; ( "keeper_keepalive_interval_s"
                              , `Float keeper_keepalive_interval_s )
                            ; ( "keeper_snapshot_interval_s"
@@ -411,6 +415,10 @@ let keepers_json
                          ; "paused", `Bool meta.paused
                          ; "pause_state", `String (if meta.paused then "paused" else "active")
                          ; "turn_count", `Int meta.runtime.usage.total_turns
+                         ; ( "recent_turns"
+                           , Keeper_turn_pulse.recent_turns_json
+                               ~base_path:config.Workspace.base_path
+                               ~keeper_name:meta.name )
                          ; ( "keeper_keepalive_interval_s"
                            , `Float keeper_keepalive_interval_s )
                          ; ( "keeper_snapshot_interval_s"

@@ -2,6 +2,7 @@ import { readKeeperCostCoverage } from './lib/keeper-cost-coverage'
 import { readKeeperBoardAddress } from './lib/board-address'
 import { readRuntimeLaneObservation } from './lib/keeper-runtime-walk'
 import { readKeeperPortrait } from './lib/keeper-portrait'
+import { readKeeperTurnPulse } from './lib/keeper-turn-pulse'
 import { readCandleAccountRevision, readCandleBalance } from './lib/candle-observation'
 import { parseKeeperActivationMode } from './lib/keeper-activation-mode'
 import { decodeKeeperApprovalQueueState, gateObservationErrorState } from './lib/gate-observation-state'
@@ -774,6 +775,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         last_latency_ms: asNumber(row.last_latency_ms),
         keeper_age_s: asNumber(row.keeper_age_s),
         last_turn_ago_s: asNumber(row.last_turn_ago_s),
+        recent_turns: readKeeperTurnPulse(row.recent_turns),
         last_proactive_ago_s: asNumber(row.last_proactive_ago_s),
         last_proactive_reason: asString(row.last_proactive_reason) ?? null,
         last_activity_ago_s: asNumber(row.last_activity_ago_s),

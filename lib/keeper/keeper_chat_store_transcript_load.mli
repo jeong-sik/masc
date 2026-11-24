@@ -48,6 +48,10 @@ type history_page =
   ; next_cursor : Keeper_chat_history_page.cursor option
   }
 
+val project_history_page_result :
+  base_dir:string -> keeper_name:string -> Keeper_chat_history_page.page ->
+  (history_page, Keeper_chat_history_page.error) result
+
 val load_result :
   base_dir:string -> keeper_name:string ->
   (chat_message list, Keeper_chat_history_page.error) result

@@ -178,6 +178,7 @@
   uuidm
   time_compat
   fs_compat
+  masc.cost_ledger
   dated_jsonl
   dated_jsonl_kept_days
   masc_http_client

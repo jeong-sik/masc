@@ -5457,7 +5457,7 @@ let json_keys = function
   | json -> Alcotest.failf "expected a JSON object, got %s" (Yojson.Safe.to_string json)
 ;;
 
-let public_health_keys = [ "live"; "phase"; "ready"; "server"; "version" ]
+let public_health_keys = [ "auth_methods"; "live"; "phase"; "ready"; "server"; "version" ]
 let bearer token = [ "Authorization", "Bearer " ^ token ]
 let server_timing_header = "server-timing"
 
@@ -5529,7 +5529,7 @@ let check_public_health ~name ~ready ~phase (status, headers, body) =
   let open Yojson.Safe.Util in
   let json = health_json name body in
   Alcotest.(check int) (name ^ ": status") 200 status;
-  Alcotest.(check (list string)) (name ^ ": the five public keys") public_health_keys
+  Alcotest.(check (list string)) (name ^ ": the public keys") public_health_keys
     (json_keys json);
   Alcotest.(check string) (name ^ ": server") "masc" (json |> member "server" |> to_string);
   Alcotest.(check string) (name ^ ": version") Build_version.current

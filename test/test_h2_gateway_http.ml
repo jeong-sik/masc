@@ -896,7 +896,7 @@ let test_health_over_h2_follows_the_same_split () =
     let code, body = request ~meth:`GET client "/health" in
     check int "no credential is answered" 200 code;
     check (list string) "with the public probe and no other key"
-      [ "live"; "phase"; "ready"; "server"; "version" ]
+      [ "auth_methods"; "live"; "phase"; "ready"; "server"; "version" ]
       (Yojson.Safe.from_string body |> Yojson.Safe.Util.keys |> List.sort String.compare);
     let code, body = request ~token:reader ~meth:`GET client "/health" in
     check int "a reader is answered" 200 code;

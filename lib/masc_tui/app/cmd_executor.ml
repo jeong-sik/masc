@@ -2399,44 +2399,66 @@ let open_url_sync ?timeout_s ?(cancelled = fun () -> false) url =
       | exception Unix.Unix_error (err, fn, _) ->
           Error (Printf.sprintf "%s: %s" fn (Unix.error_message err)))
 
-let open_dos_screen_file ~sw ~cancelled png =
-  if cancelled () then Error "DOS screen opening cancelled"
+type dos_screen_file = Empty | Live of string | Released
+
+let remove_dos_screen_file path =
+  try Sys.remove path with Sys_error _ -> ()
+
+let release_dos_screen_file file =
+  match Atomic.exchange file Released with
+  | Live path -> remove_dos_screen_file path
+  | Empty | Released -> ()
+
+let dos_screen_cancelled = "DOS screen opening cancelled"
+
+let open_dos_screen_file ~file ~cancelled png =
+  let cancelled () =
+    cancelled ()
+    || match Atomic.get file with Released -> true | Empty | Live _ -> false
+  in
+  if cancelled () then Error dos_screen_cancelled
   else
     try
       let path, channel =
         Filename.open_temp_file ~mode:[ Open_binary ] "masc-dos-" ".png"
       in
-      let remove () = try Sys.remove path with Sys_error _ -> () in
-      let hook, written =
+      let written =
         Fun.protect ~finally:(fun () -> close_out_noerr channel) (fun () ->
-            (* A cancelled fiber may never receive the worker's result. *)
-            let hook =
-              match Eio.Switch.on_release_cancellable sw remove with
-              | hook -> hook
-              | exception ex ->
-                  let bt = Printexc.get_raw_backtrace () in
-                  remove ();
-                  Printexc.raise_with_backtrace ex bt
-            in
-            let written =
-              try
-                output_string channel png;
-                flush channel;
-                Ok ()
-              with Sys_error detail -> Error detail
-            in
-            (hook, written))
+            if Atomic.compare_and_set file Empty (Live path) then begin
+              output_string channel png;
+              flush channel;
+              Ok ()
+            end else begin
+              remove_dos_screen_file path;
+              Error dos_screen_cancelled
+            end)
       in
-      let result =
-        Result.bind written (fun () -> open_url_sync ~cancelled path)
-      in
-      (match result with
-       | Ok () -> ()
-       | Error _ ->
-           Eio.Switch.remove_hook hook;
-           remove ());
-      result
+      Result.bind written (fun () -> open_url_sync ~cancelled path)
     with Sys_error detail -> Error detail
+
+let open_dos_screen ~sw ~closed ~is_current png =
+  let file = Atomic.make Empty in
+  let release () = release_dos_screen_file file in
+  (* A cancelled fiber may never receive the worker's result. *)
+  let hook = Eio.Switch.on_release_cancellable sw release in
+  let keep_file = ref false in
+  Fun.protect
+    ~finally:(fun () ->
+      if not !keep_file then begin
+        Eio.Switch.remove_hook hook;
+        release ()
+      end)
+    (fun () ->
+      match
+        run_cancellable_systhread ~closed (fun ~cancelled ->
+            let cancelled () = cancelled () || not (is_current ()) in
+            open_dos_screen_file ~file ~cancelled png)
+      with
+      | Some (Ok ()) when is_current () ->
+          keep_file := true;
+          Ok ()
+      | Some (Error detail) -> Error detail
+      | Some (Ok ()) | None -> Error dos_screen_cancelled)
 
 let read_file_or_empty path =
   match In_channel.open_bin path with
@@ -3285,18 +3307,9 @@ let rec execute t = function
                   when not (String.starts_with ~prefix:"\137PNG\r\n\026\n" png) ->
                     Error (Msg.Decode_error "DOS screen response is not PNG")
                 | Ok png ->
-                    (match
-                       run_cancellable_systhread ~closed:t.closed (fun ~cancelled ->
-                           let cancelled () = cancelled () || not (is_current ()) in
-                           open_dos_screen_file ~sw:t.sw ~cancelled png)
-                     with
-                     | None ->
-                         Error
-                           (Msg.Transport
-                              (Health.Other_io "DOS screen opening cancelled"))
-                     | Some (Error detail) ->
-                         Error (Msg.Transport (Health.Other_io detail))
-                     | Some (Ok ()) -> Ok ())
+                    open_dos_screen ~sw:t.sw ~closed:t.closed ~is_current png
+                    |> Result.map_error (fun detail ->
+                           Msg.Transport (Health.Other_io detail))
               in
               if is_current () then
                 Ui_bus.publish_stream t.bus

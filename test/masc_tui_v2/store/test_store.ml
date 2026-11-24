@@ -19474,7 +19474,6 @@ let () =
                   base_path = "/tmp/ws";
                   masc_root = "/tmp/ws/.masc";
                   workspace_sha256 = Some "abc";
-                  instance_id = Some "inst-1";
                 }
               in
               let m_ws =

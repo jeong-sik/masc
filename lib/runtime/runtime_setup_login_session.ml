@@ -548,10 +548,11 @@ let run_with interpreter t ~saved_login ~on_auth_hint ~env ~child_env ~cwd ~argv
         let content = Buffer.contents buf in
         match String.rindex_opt content '\n' with
         | Some nl ->
-          let completed = String.sub content 0 (nl + 1) in
+          let completed = String.sub content 0 nl in
           let tail = String.sub content (nl + 1) (String.length content - nl - 1) in
           Buffer.clear buf;
-          emit_hints completed;
+          (* A pipe read can coalesce separate lines. Admit their context in order. *)
+          List.iter (fun line -> emit_hints line) (String.split_on_char '\n' completed);
           let tlen = String.length tail in
           if tlen > max_pipe_hint_buffer then emit_hints tail
           else (

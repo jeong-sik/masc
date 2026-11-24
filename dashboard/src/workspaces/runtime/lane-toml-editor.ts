@@ -286,7 +286,7 @@ function extractStringArray(bodyLines: readonly string[], keyName: string): read
 }
 
 function extractIntKey(blockText: string, keyName: string): number | undefined {
-  const re = new RegExp(`^\\s*${keyName}\\s*=\\s*([0-9_]+)\\b`, 'm')
+  const re = new RegExp(`^\\s*${keyName}\\s*=\\s*([+]?[0-9_]+)\\b`, 'm')
   const match = re.exec(blockText)
   if (!match) return undefined
   const n = Number.parseInt(match[1]!.replace(/_/g, ''), 10)

@@ -128,7 +128,7 @@ candidates = [
 
 [runtime.exact_output_lanes.verifier_exact]
 slots = ["glm-coding.glm-5", "ollama_cloud.deepseek-flash"]
-max_output_tokens = 8192
+max_output_tokens = +8192 # retain the deployed cap when reordering slots
 `
 
 describe('Layer 8 — Visual Lane CRUD, Chat 3-Block Toggles & Zero-Manual Web OAuth', () => {
@@ -270,6 +270,37 @@ describe('Layer 8 — Visual Lane CRUD, Chat 3-Block Toggles & Zero-Manual Web O
     expect(parseLanesFromToml(savedToml)[0]!.candidates).toEqual([
       'deepseek.deepseek-pro',
       'ollama_cloud.deepseek-flash',
+    ])
+
+    const exactEdit = await vi.waitFor(() => {
+      const button = container.querySelector<HTMLButtonElement>('[data-lane-row="exact_output:verifier_exact"] button')
+      expect(button?.disabled).toBe(false)
+      return button!
+    })
+    exactEdit.click()
+    await flushUi()
+    expect(container.querySelector<HTMLInputElement>('input[aria-label="max_output_tokens"]')?.value).toBe('8192')
+    container.querySelector<HTMLButtonElement>('button[aria-label="ollama_cloud.deepseek-flash 위로 이동"]')!.click()
+    await flushUi()
+    const exactPreview = [...container.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes('Diff 미리보기'),
+    )!
+    exactPreview.click()
+    await vi.waitFor(() => expect(previewBodies).toHaveLength(2))
+    const exactSave = await vi.waitFor(() => {
+      const button = [...container.querySelectorAll('[data-testid="lane-diff-preview"] button')].find((b) =>
+        b.textContent?.includes('변경 적용 (CAS Save)'),
+      ) as HTMLButtonElement | undefined
+      expect(button?.disabled).toBe(false)
+      return button!
+    })
+    exactSave.click()
+    await vi.waitFor(() => expect(saveBodies).toHaveLength(2))
+    const savedExactToml = String((saveBodies[1] as { source_text: string }).source_text)
+    expect(savedExactToml).toContain('max_output_tokens = +8192 # retain the deployed cap when reordering slots')
+    expect(parseLanesFromToml(savedExactToml).find((lane) => lane.kind === 'exact_output')?.candidates).toEqual([
+      'ollama_cloud.deepseek-flash',
+      'glm-coding.glm-5',
     ])
   })
 

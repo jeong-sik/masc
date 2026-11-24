@@ -140,6 +140,7 @@ export function LanesTab(props: WorkspaceViewProps) {
     readonly candidates: readonly string[]
     readonly newCandidate: string
     readonly maxOutputTokens: string
+    readonly maxOutputTokensEdited: boolean
   } | null>(null)
   const [laneDeleteConfirm, setLaneDeleteConfirm] = useState<{
     readonly kind: EditableLaneKind
@@ -486,12 +487,13 @@ export function LanesTab(props: WorkspaceViewProps) {
   const handlePreviewLaneEditor = async (ev: Event) => {
     ev.preventDefault()
     if (!laneEditor || !rawConfig) return
-    const parsedMaxTokens = laneEditor.kind === 'exact_output' && laneEditor.maxOutputTokens.trim()
-      ? Number.parseInt(laneEditor.maxOutputTokens.trim(), 10)
-      : null
+    const updateMaxTokens = laneEditor.kind === 'exact_output'
+      && (laneEditor.mode === 'create' || laneEditor.maxOutputTokensEdited)
+    const maxTokensText = laneEditor.maxOutputTokens.trim()
+    const parsedMaxTokens = updateMaxTokens && maxTokensText ? Number.parseInt(maxTokensText, 10) : null
     if (
-      laneEditor.kind === 'exact_output'
-      && laneEditor.maxOutputTokens.trim()
+      updateMaxTokens
+      && maxTokensText
       && (!Number.isSafeInteger(parsedMaxTokens) || (parsedMaxTokens ?? 0) <= 0)
     ) {
       setBanner({ kind: 'err', text: 'max_output_tokens는 양의 정수를 입력하세요.' })
@@ -501,7 +503,7 @@ export function LanesTab(props: WorkspaceViewProps) {
       kind: laneEditor.kind,
       id: laneEditor.id,
       candidates: laneEditor.candidates,
-      maxOutputTokens: laneEditor.kind === 'exact_output' ? parsedMaxTokens : undefined,
+      maxOutputTokens: updateMaxTokens ? parsedMaxTokens : undefined,
     })
     if (!upserted.ok) {
       setBanner({ kind: 'err', text: upserted.error })
@@ -855,6 +857,7 @@ export function LanesTab(props: WorkspaceViewProps) {
                     candidates: availableRuntimeIds[0] ? [availableRuntimeIds[0]] : [],
                     newCandidate: '',
                     maxOutputTokens: '8192',
+                    maxOutputTokensEdited: false,
                   })
                 }}
               >
@@ -928,6 +931,7 @@ export function LanesTab(props: WorkspaceViewProps) {
                                 candidates: [...lane.candidates],
                                 newCandidate: '',
                                 maxOutputTokens: lane.maxOutputTokens ? String(lane.maxOutputTokens) : '',
+                                maxOutputTokensEdited: false,
                               })
                             }}
                           >
@@ -1020,7 +1024,7 @@ export function LanesTab(props: WorkspaceViewProps) {
                         value=${laneEditor.maxOutputTokens}
                         onInput=${(e: Event) => {
                           const maxOutputTokens = (e.target as HTMLInputElement).value
-                          setLaneEditor((cur) => (cur ? { ...cur, maxOutputTokens } : null))
+                          setLaneEditor((cur) => (cur ? { ...cur, maxOutputTokens, maxOutputTokensEdited: true } : null))
                           discardLanePreview()
                         }}
                         class="mono tnum"

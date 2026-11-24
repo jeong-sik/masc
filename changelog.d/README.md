@@ -36,6 +36,13 @@ file, so merging one does not make the other conflict.
   main's fragment files behind; assembling them again would duplicate their
   entries, so `bump-version.sh` refuses to fold while any remain.
   `folded --delete` removes exactly those files.
+- `python3 scripts/changelog-fragments.py release-coverage --version <ver>`
+  runs at release-candidate time (in `release-build.yml`'s `release-body` job)
+  and verifies that every non-exempt pull request merged after the version-cut
+  commit is cited in `CHANGELOG.md` under `## [<ver>]`. Unlike
+  `missing --strict`, which checks pre-fold fragment presence when
+  `bump-version.sh` runs, `release-coverage` catches late post-cut merges whose
+  fragments were not folded into `## [<ver>]` or that merged without a fragment.
 
 
 ## Fragment exemptions

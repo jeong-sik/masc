@@ -52,6 +52,19 @@ Modes:
                                        fragments a pull request changes, so a
                                        stacked pull request is not refused for
                                        a lower fragment it does not carry
+  release-coverage --version V [--base B] [--head H] [--changelog C] [--dir D]
+                                       (exit 1 on findings) verify at RC time
+                                       that every non-exempt pull request merged
+                                       after the version-cut commit B (default:
+                                       earliest contiguous commit on H whose
+                                       dune-project carries `(version V)`) is
+                                       cited in CHANGELOG.md under `## [V]`.
+                                       Unlike `missing --strict`, which runs
+                                       pre-fold to ensure merged PRs have
+                                       fragment files, `release-coverage` runs
+                                       post-cut to catch late merges whose
+                                       fragments were never folded into `## [V]`
+                                       or that merged without a fragment.
 """
 
 import argparse
@@ -98,6 +111,7 @@ SECTION_HEADING = "## [{}]"
 # (English entries end "(#N).", Korean ones "(#N)"). A number named inside
 # another entry's text ("fixes #N") is a passing mention, not ownership.
 OWNER_CITE = re.compile(r"\(#([1-9][0-9]*)(?:, [^)]*)?\)\s*[.!]?\s*$")
+SECTION_PR_CITE = re.compile(r"(?<![A-Za-z0-9_])#([1-9][0-9]*)\b")
 
 
 # {section heading: [bullet text]}; a bullet keeps its continuation lines.
@@ -118,8 +132,8 @@ def is_exempt(sections: Sections) -> bool:
     return len(sections) == 1 and EXEMPT_SECTION in sections
 
 
-def parse_fragment(path: pathlib.Path) -> Sections:
-    """Return {section: [bullet text]} or raise FragmentError."""
+def parse_fragment_text(path: pathlib.Path, content: str) -> Sections:
+    """Return {section: [bullet text]} from fragment text or raise FragmentError."""
     match = FRAGMENT_NAME.match(path.name)
     if match is None:
         raise FragmentError(
@@ -149,7 +163,7 @@ def parse_fragment(path: pathlib.Path) -> Sections:
             )
         sections[section].append(text)
 
-    for lineno, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+    for lineno, raw in enumerate(content.splitlines(), 1):
         line = raw.rstrip()
         if re.match(r"^#+ ", line):
             close_bullet()
@@ -193,6 +207,11 @@ def parse_fragment(path: pathlib.Path) -> Sections:
     if empty:
         raise FragmentError(f"{path}: section without bullets: {', '.join(empty)}")
     return sections
+
+
+def parse_fragment(path: pathlib.Path) -> Sections:
+    """Return {section: [bullet text]} or raise FragmentError."""
+    return parse_fragment_text(path, path.read_text(encoding="utf-8"))
 
 
 def fragment_paths(directory: pathlib.Path) -> list[pathlib.Path]:
@@ -481,8 +500,8 @@ def pr_guard(base: str, head: str) -> int:
     return 1
 
 
-def merged_squashes(base: str, head: str) -> list[tuple[int, str]]:
-    """[(PR number, subject)] of squash commits merged into `head` since `base`.
+def merged_squashes_with_sha(base: str, head: str) -> list[tuple[int, str, str]]:
+    """[(PR number, commit sha, subject)] of squash commits merged into `head` since `base`.
 
     Squash subjects end in (#<number>). This repo has no merge commits, so the
     number is the only PR identity in the history.
@@ -490,12 +509,141 @@ def merged_squashes(base: str, head: str) -> list[tuple[int, str]]:
     log = subprocess.run(
         ["git", "log", "--format=%H %s", f"{base}..{head}"], text=True,
         capture_output=True, check=True).stdout
-    merged: list[tuple[int, str]] = []
+    merged: list[tuple[int, str, str]] = []
     for line in log.splitlines():
         match = re.search(r"\(#([1-9][0-9]*)\)$", line)
         if match is not None:
-            merged.append((int(match.group(1)), line.split(" ", 1)[1]))
+            sha, subject = line.split(" ", 1)
+            merged.append((int(match.group(1)), sha, subject))
     return merged
+
+
+def merged_squashes(base: str, head: str) -> list[tuple[int, str]]:
+    """[(PR number, subject)] of squash commits merged into `head` since `base`."""
+    return [(num, subj) for num, _sha, subj in merged_squashes_with_sha(base, head)]
+
+
+def find_version_cut(version: str, head: str = "HEAD") -> str:
+    """Return the earliest contiguous commit on `head` whose dune-project carries `version`."""
+    head_ver = package_version(head)
+    if head_ver != version:
+        raise FragmentError(
+            f"dune-project at {head} has version {head_ver!r}, expected {version!r}"
+        )
+    log = subprocess.run(
+        ["git", "log", "--first-parent", "--format=%H", head, "--", "dune-project"],
+        text=True, capture_output=True, check=True,
+    ).stdout
+    cut: str | None = None
+    for rev in log.splitlines():
+        rev = rev.strip()
+        if not rev:
+            continue
+        if package_version(rev) == version:
+            cut = rev
+        else:
+            break
+    if cut is None:
+        raise FragmentError(
+            f"could not locate version-cut commit for {version!r} in dune-project history of {head}"
+        )
+    return cut
+
+
+def section_cited_prs(changelog: pathlib.Path, version: str) -> set[int]:
+    """Return all PR numbers cited inside CHANGELOG.md's `## [<version>]` section."""
+    lines = changelog.read_text(encoding="utf-8").splitlines(keepends=True)
+    _before, body, _after = split_section(lines, version)
+    cited: set[int] = set()
+    for line in body:
+        for match in SECTION_PR_CITE.finditer(line):
+            cited.add(int(match.group(1)))
+    return cited
+
+
+def _commit_has_exempt_fragment(sha: str, number: int) -> bool:
+    """Return True when `sha` carries a valid `### Exempt` fragment for `number`."""
+    rel = f"{FRAGMENT_DIR}/{number}.md"
+    try:
+        raw = git_show(sha, rel)
+        if not raw:
+            return False
+        return is_exempt(parse_fragment_text(pathlib.Path(rel), raw))
+    except FragmentError:
+        return False
+
+
+def _disk_has_exempt_fragment(directory: pathlib.Path, number: int) -> bool:
+    """Return True when `directory/<number>.md` exists on disk as a valid `### Exempt` fragment."""
+    path = directory / f"{number}.md"
+    if not path.is_file():
+        return False
+    try:
+        return is_exempt(parse_fragment(path))
+    except FragmentError:
+        return False
+
+
+def release_coverage(
+    version: str,
+    base: str | None,
+    head: str,
+    changelog: pathlib.Path,
+    directory: pathlib.Path,
+) -> int:
+    """Verify every non-exempt post-cut PR in `base..head` is cited in `## [<version>]`.
+
+    Relationship with `missing --strict`:
+    - `missing --strict` runs pre-fold (at `bump-version.sh`) and ensures each
+      merged PR since the previous tag has a `changelog.d/<N>.md` file or
+      exemption.
+    - `release-coverage` runs post-cut (at RC time in `release-build.yml`) and
+      ensures every non-exempt PR merged after the version-cut commit is
+      actually cited in `CHANGELOG.md`'s `## [<version>]` section, catching
+      both late unfolded fragments and unfragmented post-cut merges.
+    """
+    cut = base if base is not None else find_version_cut(version, head)
+    merged = merged_squashes_with_sha(cut, head)
+    cited = section_cited_prs(changelog, version)
+    legacy_exempt = _exempt_numbers()
+    missing_prs: list[tuple[int, str, str]] = []
+    for number, sha, subject in merged:
+        if number in cited:
+            continue
+        if (
+            number in legacy_exempt
+            or _disk_has_exempt_fragment(directory, number)
+            or _commit_has_exempt_fragment(sha, number)
+        ):
+            continue
+        missing_prs.append((number, sha, subject))
+    if not missing_prs:
+        print(
+            f"release-coverage OK: all {len(merged)} post-cut pull request(s) in "
+            f"{cut[:12]}..{head} are recorded in ## [{version}] (or exempt)"
+        )
+        return 0
+    missing_prs.sort(key=lambda item: item[0])
+    print(
+        f"release-coverage FAILED: {len(missing_prs)} post-cut pull request(s) "
+        f"merged in {cut[:12]}..{head} are missing from {changelog} section ## [{version}]:",
+        file=sys.stderr,
+    )
+    for number, _sha, subject in missing_prs:
+        frag_path = directory / f"{number}.md"
+        detail = (
+            f"unfolded fragment: {frag_path}"
+            if frag_path.is_file()
+            else "no fragment"
+        )
+        print(f"  #{number} {subject}  [{detail}]", file=sys.stderr)
+    print(
+        f"Fold pending fragments with `python3 scripts/changelog-fragments.py "
+        f"assemble --into {version}` (or add a '### {EXEMPT_SECTION}' fragment "
+        f"for non-user-facing PRs) before cutting the release tag.",
+        file=sys.stderr,
+    )
+    return 1
 
 
 def _exempt_numbers() -> set[int]:
@@ -737,6 +885,14 @@ def main() -> int:
     guard.add_argument("--head", default="HEAD")
     listed = sub.add_parser("check-files")
     listed.add_argument("files", nargs="*", metavar="FRAGMENT")
+    cov = sub.add_parser("release-coverage")
+    cov.add_argument("--version", required=True, metavar="VERSION",
+                     help="release version section to verify in CHANGELOG.md (e.g. 0.81.0)")
+    cov.add_argument("--base", default=None,
+                     help="version-cut commit SHA/ref (default: auto-detected from dune-project)")
+    cov.add_argument("--head", default="HEAD")
+    cov.add_argument("--changelog", default=CHANGELOG)
+    cov.add_argument("--dir", default=FRAGMENT_DIR)
     args = parser.parse_args()
     try:
         if args.mode == "check":
@@ -754,6 +910,14 @@ def main() -> int:
         if args.mode == "missing":
             return missing(base=args.base, head=args.head, strict=args.strict,
                            directory=pathlib.Path(args.dir))
+        if args.mode == "release-coverage":
+            return release_coverage(
+                version=args.version,
+                base=args.base,
+                head=args.head,
+                changelog=pathlib.Path(args.changelog),
+                directory=pathlib.Path(args.dir),
+            )
         return pr_guard(args.base, args.head)
     except FragmentError as err:
         print(err, file=sys.stderr)

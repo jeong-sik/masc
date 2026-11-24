@@ -733,5 +733,176 @@ class MissingAndBumpIntegrationTests(unittest.TestCase):
         self.assertTrue((self.root / "changelog.d" / "54030.md").exists())
 
 
+
+class ReleaseCoverageTests(unittest.TestCase):
+    """Post-cut RC guard: every non-exempt PR merged after the version cut
+    must appear in CHANGELOG.md's `## [<version>]` section."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.env = {
+            **os.environ,
+            "GIT_AUTHOR_NAME": "test",
+            "GIT_AUTHOR_EMAIL": "test@example.com",
+            "GIT_COMMITTER_NAME": "test",
+            "GIT_COMMITTER_EMAIL": "test@example.com",
+        }
+        self._git("init", "-b", "main")
+        self._write("dune-project", "(lang dune 3.16)\n(version 0.80.0)\n")
+        self._write(
+            "CHANGELOG.md",
+            "# Changelog\n\n## [Unreleased]\n\n## [0.80.0] - 2026-11-22\n\n"
+            "### Fixed\n\n- Previous release entry (#54400).\n",
+        )
+        self._write("changelog.d/README.md", "# Fragments\n")
+        self._commit("chore(release): v0.80.0 (#54423)")
+        # Cut v0.81.0 (modeled on ba8eb25b / #54443).
+        self._write("dune-project", "(lang dune 3.16)\n(version 0.81.0)\n")
+        self._write(
+            "CHANGELOG.md",
+            "# Changelog\n\n## [Unreleased]\n\n## [0.81.0] - 2026-11-23\n\n"
+            "### Fixed\n\n- Initial 0.81.0 fix (#54436).\n\n"
+            "## [0.80.0] - 2026-11-22\n\n"
+            "### Fixed\n\n- Previous release entry (#54400).\n",
+        )
+        self._commit("chore(release): bump version to 0.81.0 and assemble CHANGELOG (#54443)")
+        self.cut_sha = self._git("rev-parse", "HEAD").strip()
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _git(self, *args: str) -> str:
+        return subprocess.run(
+            ["git", *args],
+            cwd=self.root,
+            env=self.env,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout
+
+    def _write(self, rel: str, text: str) -> None:
+        path = self.root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    def _commit(self, subject: str) -> str:
+        self._git("add", "-A")
+        self._git("commit", "-m", subject)
+        return self._git("rev-parse", "HEAD").strip()
+
+    def _run_coverage(self, *extra: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS / "changelog-fragments.py"),
+                "release-coverage",
+                "--version",
+                "0.81.0",
+                "--changelog",
+                str(self.root / "CHANGELOG.md"),
+                "--dir",
+                str(self.root / "changelog.d"),
+                *extra,
+            ],
+            cwd=self.root,
+            env=self.env,
+            text=True,
+            capture_output=True,
+        )
+
+    def test_fails_on_unrecorded_post_cut_pr_then_passes_after_fold(self) -> None:
+        # Late PR #54500 lands after cut with an unfolded fragment (not in ## [0.81.0]).
+        self._write("lib/schedule.ml", "let origin = `Requester\n")
+        self._write(
+            "changelog.d/54500.md",
+            "### Fixed\n\n- Derive schedule origin from the requester (#54500).\n",
+        )
+        self._commit("fix(schedule): derive origin from requester (#54500)")
+
+        bad = self._run_coverage()
+        self.assertEqual(bad.returncode, 1, bad.stdout + bad.stderr)
+        self.assertIn("release-coverage FAILED", bad.stderr)
+        self.assertIn("#54500", bad.stderr)
+        self.assertIn("unfolded fragment", bad.stderr)
+
+        # Fold #54500 into ## [0.81.0] via assemble --into 0.81.0 and commit as
+        # an exempt fold PR (#54505), matching the real v0.81.0 RC4 flow.
+        fold = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS / "changelog-fragments.py"),
+                "assemble",
+                "--dir",
+                str(self.root / "changelog.d"),
+                "--changelog",
+                str(self.root / "CHANGELOG.md"),
+                "--into",
+                "0.81.0",
+            ],
+            cwd=self.root,
+            env=self.env,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        self.assertEqual(fold.returncode, 0, fold.stdout + fold.stderr)
+        self._write(
+            "changelog.d/54505.md",
+            "### Exempt\n\n- Changelog-only fold of #54500 into 0.81.0 (#54505).\n",
+        )
+        self._commit("docs(changelog): fold #54500 into the 0.81.0 section (#54505)")
+
+        good = self._run_coverage()
+        self.assertEqual(good.returncode, 0, good.stdout + good.stderr)
+        self.assertIn("release-coverage OK", good.stdout)
+
+        # Even if a later assemble deletes exempt fragment 54505.md from disk,
+        # commit history still carries its `### Exempt` declaration.
+        (self.root / "changelog.d" / "54505.md").unlink()
+        self._write(
+            "changelog.d/54508.md",
+            "### Exempt\n\n- Prune exempt fragment (#54508).\n",
+        )
+        self._commit("chore(changelog): prune exempt fragment (#54508)")
+        still_good = self._run_coverage()
+        self.assertEqual(still_good.returncode, 0, still_good.stdout + still_good.stderr)
+
+    def test_fails_on_unfragmented_post_cut_pr(self) -> None:
+        # Post-cut PR #54503 lands without any fragment and without CHANGELOG citation.
+        self._write("test/test_wait.ml", "let () = ()\n")
+        self._commit("fix(test): wait_until uses wall time (#54503)")
+
+        res = self._run_coverage("--base", self.cut_sha)
+        self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
+        self.assertIn("#54503", res.stderr)
+        self.assertIn("no fragment", res.stderr)
+
+    def test_refuses_when_target_version_section_is_missing(self) -> None:
+        self._write("dune-project", "(lang dune 3.16)\n(version 0.82.0)\n")
+        self._commit("chore(release): bump dune-project without changelog section (#54600)")
+
+        res = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS / "changelog-fragments.py"),
+                "release-coverage",
+                "--version",
+                "0.82.0",
+                "--changelog",
+                str(self.root / "CHANGELOG.md"),
+                "--dir",
+                str(self.root / "changelog.d"),
+            ],
+            cwd=self.root,
+            env=self.env,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
+        self.assertIn("no section '## [0.82.0]'", res.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

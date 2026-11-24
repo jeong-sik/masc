@@ -2566,18 +2566,81 @@ let dashboard_bridge_rbac_and_sse_matrix () =
            ~path:Server_account_dashboard_bridge.observer_events_path
            ~headers:[ "Last-Event-ID", "not-an-int" ])
           .status;
-      (* Direct unit check on Server_account_dashboard_bridge.authorize & board_reader_of *)
+      (* P2-4 RBAC tightening: logs and operator snapshots/digests are Admin_only *)
+      List.iter
+        (fun path ->
+          Alcotest.(check int)
+            ("Worker GET " ^ path ^ " is 403")
+            403
+            (send a_member router ~meth:"GET" ~path).status;
+          Alcotest.(check int)
+            ("Admin GET " ^ path ^ " passes RBAC (503 engine_starting)")
+            503
+            (send admin router ~meth:"GET" ~path).status)
+        [ "/api/v1/dashboard/logs"; "/api/v1/operator"; "/api/v1/operator/digest" ];
+      (* Commit a Keeper owned by a_member to test ownership-scoped memory diff,
+         sandbox telemetry, board_reader_of, and SSE event visibility filtering. *)
+      let member_uid = user_of t a_member in
+      (match
+         Z.commit
+           t.routes.R.zone
+           { Z.author = Authz_records.Author.Authenticated (Principal.Human member_uid)
+           ; kind = Authz_record.Kind.Keeper
+           ; body =
+               get_ok
+                 (Authz_keeper_event.to_body
+                    (Authz_keeper_event.Made
+                       { keeper_id = get_ok (Keeper_id.of_string "keeper-1")
+                       ; user_id = member_uid
+                       ; engine_name = get_ok (Engine_name.of_string "member-owned-keeper")
+                       ; policy_id = get_ok (Policy_id.of_string "policy-1")
+                       ; turn_scope = Authorization_scope.all
+                       }))
+           }
+       with
+       | Ok (_ : Z.committed) -> ()
+       | Error err -> Alcotest.failf "keeper commit failed: %s" (Z.error_detail err));
+      (* Keeper-scoped memory diff is strictly owner-only (even non-owner Admin -> 403) *)
+      Alcotest.(check int)
+        "Worker reading unowned Keeper memory diff is 403"
+        403
+        (send a_member router ~meth:"GET" ~path:"/api/v1/memory/diff?scope=keeper&keeper=other-keeper&window=24h")
+          .status;
+      Alcotest.(check int)
+        "non-owner Admin reading Worker Keeper memory diff is 403"
+        403
+        (send admin router ~meth:"GET" ~path:"/api/v1/memory/diff?scope=keeper&keeper=member-owned-keeper&window=24h")
+          .status;
+      Alcotest.(check int)
+        "owner Worker reading own Keeper memory diff passes ownership check (503 engine_starting)"
+        503
+        (send a_member router ~meth:"GET" ~path:"/api/v1/memory/diff?scope=keeper&keeper=member-owned-keeper&window=24h")
+          .status;
+      (* Keeper-scoped sandbox telemetry: Worker own -> 503, Worker other -> 403, Admin any -> 503 *)
+      Alcotest.(check int)
+        "Worker reading unowned Keeper sandbox is 403"
+        403
+        (send a_member router ~meth:"GET" ~path:"/api/v1/infra/sandboxes/other-keeper").status;
+      Alcotest.(check int)
+        "owner Worker reading own Keeper sandbox passes (503 engine_starting)"
+        503
+        (send a_member router ~meth:"GET" ~path:"/api/v1/infra/sandboxes/member-owned-keeper").status;
+      Alcotest.(check int)
+        "Admin reading any Keeper sandbox passes (503 engine_starting)"
+        503
+        (send admin router ~meth:"GET" ~path:"/api/v1/infra/sandboxes/member-owned-keeper").status;
+      (* Direct unit checks: authorize, board_reader_of, observer_event_visible_to,
+         strip_single_user_auth_headers, and live revocation on principal disable. *)
       let trusted =
         match Z.read t.routes.R.zone with
         | Ok trusted -> trusted
         | Error uncertain -> Alcotest.fail (Z.uncertain_detail uncertain)
       in
-      let admin_cookie = List.assoc Q.session_cookie admin.cookies in
-      let sse_req =
+      let sse_req_of browser =
         { Masc.Auth_gate.credentials =
             { Authz_credential_presentation.authorization = []
             ; internal_token = []
-            ; session_cookies = [ admin_cookie ]
+            ; session_cookies = [ List.assoc Q.session_cookie browser.cookies ]
             ; query_credential = false
             }
         ; method_ = Q.Safe
@@ -2585,26 +2648,271 @@ let dashboard_bridge_rbac_and_sse_matrix () =
         ; csrf = None
         }
       in
+      let admin_auth =
+        match
+          Server_account_dashboard_bridge.authorize
+            trusted
+            ~now_ms:start_ms
+            Server_account_dashboard_bridge.Browser_observer_sse
+            (sse_req_of admin)
+        with
+        | Error answer -> Alcotest.failf "Admin browser EventSource refused: %s" answer.R.body
+        | Ok auth -> auth
+      in
+      let member_auth =
+        match
+          Server_account_dashboard_bridge.authorize
+            trusted
+            ~now_ms:start_ms
+            Server_account_dashboard_bridge.Browser_observer_sse
+            (sse_req_of a_member)
+        with
+        | Error answer -> Alcotest.failf "Worker browser EventSource refused: %s" answer.R.body
+        | Ok auth -> auth
+      in
+      (match
+         Server_account_dashboard_bridge.board_reader_of
+           ~state:admin_auth.Server_account_dashboard_bridge.state
+           admin_auth.Server_account_dashboard_bridge.caller
+       with
+       | Masc_board_handlers.Board_access.Workspace_member { actor_id; owned_keeper_ids } ->
+         Alcotest.(check string)
+           "board reader actor matches Admin user_id"
+           (User_id.to_string (user_of t admin))
+           actor_id;
+         Alcotest.(check (list string)) "Admin owns no keepers" [] owned_keeper_ids
+       | Masc_board_handlers.Board_access.Anonymous
+       | Masc_board_handlers.Board_access.Named _
+       | Masc_board_handlers.Board_access.Operator ->
+         Alcotest.fail "multi-account Admin must never get Operator board access");
+      (match
+         Server_account_dashboard_bridge.board_reader_of
+           ~state:member_auth.Server_account_dashboard_bridge.state
+           member_auth.Server_account_dashboard_bridge.caller
+       with
+       | Masc_board_handlers.Board_access.Workspace_member { actor_id; owned_keeper_ids } ->
+         Alcotest.(check string) "Worker board actor matches" (User_id.to_string member_uid) actor_id;
+         Alcotest.(check (list string))
+           "Worker owns member-owned-keeper"
+           [ "member-owned-keeper" ]
+           owned_keeper_ids
+       | Masc_board_handlers.Board_access.Anonymous
+       | Masc_board_handlers.Board_access.Named _
+       | Masc_board_handlers.Board_access.Operator ->
+         Alcotest.fail "multi-account Worker must get Workspace_member board access");
+      (* Per-principal SSE visibility filtering (P1-2) *)
+      let check_sse label ~admin_sees ~worker_sees payload =
+        Alcotest.(check bool)
+          (label ^ " (Admin)")
+          admin_sees
+          (Server_account_dashboard_bridge.observer_event_visible_to
+             ~state:admin_auth.Server_account_dashboard_bridge.state
+             admin_auth.Server_account_dashboard_bridge.caller
+             payload);
+        Alcotest.(check bool)
+          (label ^ " (Worker owner)")
+          worker_sees
+          (Server_account_dashboard_bridge.observer_event_visible_to
+             ~state:member_auth.Server_account_dashboard_bridge.state
+             member_auth.Server_account_dashboard_bridge.caller
+             payload)
+      in
+      check_sse
+        "private keeper_chat_operation_event"
+        ~admin_sees:false
+        ~worker_sees:true
+        (`Assoc
+           [ "type", `String "keeper_chat_operation_event"
+           ; "name", `String "member-owned-keeper"
+           ]);
+      check_sse
+        "private keeper_chat_appended"
+        ~admin_sees:false
+        ~worker_sees:true
+        (`Assoc [ "type", `String "keeper_chat_appended"; "name", `String "member-owned-keeper" ]);
+      check_sse
+        "private keeper_turn_preview_changed"
+        ~admin_sees:false
+        ~worker_sees:true
+        (`Assoc
+           [ "type", `String "keeper_turn_preview_changed"
+           ; "keeper", `String "member-owned-keeper"
+           ]);
+      check_sse
+        "operator_snapshot is Admin-only"
+        ~admin_sees:true
+        ~worker_sees:false
+        (`Assoc [ "type", `String "operator_snapshot" ]);
+      check_sse
+        "lane_addons operator visibility"
+        ~admin_sees:true
+        ~worker_sees:false
+        (`Assoc
+           [ "type", `String "workspace_dataset_changed"
+           ; "dataset", `String "lane_addons"
+           ; "visibility", `Assoc [ "kind", `String "operator" ]
+           ]);
+      check_sse
+        "lane_addons shared visibility"
+        ~admin_sees:true
+        ~worker_sees:true
+        (`Assoc
+           [ "type", `String "workspace_dataset_changed"
+           ; "dataset", `String "lane_addons"
+           ; "visibility", `Assoc [ "kind", `String "shared" ]
+           ]);
+      check_sse
+        "shared tui_v2_dataset_changed"
+        ~admin_sees:true
+        ~worker_sees:true
+        (`Assoc [ "type", `String "tui_v2_dataset_changed"; "dataset", `String "wiki" ]);
+      (* Single-user header/query sanitizer check (P1-3) *)
+      let dirty_req =
+        Httpun.Request.create
+          ~headers:
+            (Httpun.Headers.of_list
+               [ "Authorization", "Bearer fixture-token"
+               ; "Cookie", Q.session_cookie ^ "=abc"
+               ; "X-Masc-Agent", "spoofed"
+               ; "X-Masc-Internal-Token", "fixture-internal"
+               ; "Accept-Encoding", "gzip"
+               ])
+          `GET
+          "/api/v1/dashboard/workspace?light=true&me=spoof&agent=spoof&token=leak"
+      in
+      let clean_req = Server_account_dashboard_bridge.strip_single_user_auth_headers dirty_req in
+      Alcotest.(check (option string))
+        "Authorization stripped"
+        None
+        (Httpun.Headers.get clean_req.Httpun.Request.headers "authorization");
+      Alcotest.(check (option string))
+        "Cookie stripped"
+        None
+        (Httpun.Headers.get clean_req.Httpun.Request.headers "cookie");
+      Alcotest.(check (option string))
+        "X-Masc-Agent stripped"
+        None
+        (Httpun.Headers.get clean_req.Httpun.Request.headers "x-masc-agent");
+      Alcotest.(check (option string))
+        "Accept-Encoding preserved"
+        (Some "gzip")
+        (Httpun.Headers.get clean_req.Httpun.Request.headers "accept-encoding");
+      Alcotest.(check string)
+        "spoofed query params stripped, light=true kept"
+        "/api/v1/dashboard/workspace?light=true"
+        clean_req.Httpun.Request.target;
+      (* SSE session revocation check: disabling Worker immediately fails re-auth *)
+      let disabled =
+        send
+          admin
+          router
+          ~meth:"POST"
+          ~path:("/api/v1/auth/members/" ^ User_id.to_string member_uid ^ "/disable")
+          ~headers:(changing ~csrf:admin_csrf ())
+      in
+      Alcotest.(check int) ("disable Worker: " ^ disabled.body) 200 disabled.status;
+      let trusted_after =
+        match Z.read t.routes.R.zone with
+        | Ok trusted -> trusted
+        | Error uncertain -> Alcotest.fail (Z.uncertain_detail uncertain)
+      in
       match
         Server_account_dashboard_bridge.authorize
-          trusted
+          trusted_after
           ~now_ms:start_ms
           Server_account_dashboard_bridge.Browser_observer_sse
-          sse_req
+          (sse_req_of a_member)
       with
-      | Error answer -> Alcotest.failf "browser EventSource session refused: %s" answer.R.body
-      | Ok { Server_account_dashboard_bridge.caller; state } ->
-        (match Server_account_dashboard_bridge.board_reader_of ~state caller with
-         | Masc_board_handlers.Board_access.Workspace_member { actor_id; owned_keeper_ids } ->
-           Alcotest.(check string)
-             "board reader actor matches Admin user_id"
-             (User_id.to_string (user_of t admin))
-             actor_id;
-           Alcotest.(check (list string)) "no owned keepers initially" [] owned_keeper_ids
-         | Masc_board_handlers.Board_access.Anonymous
-         | Masc_board_handlers.Board_access.Named _
-         | Masc_board_handlers.Board_access.Operator ->
-           Alcotest.fail "multi-account Admin must never get Operator board access")))
+      | Ok _ -> Alcotest.fail "disabled Worker SSE session must fail re-authorization"
+      | Error answer ->
+        Alcotest.(check bool)
+          "disabled Worker SSE session rejected with 401/403"
+          true
+          (let code = R.status_code answer.R.status in
+           code = 401 || code = 403)))
+;;
+
+let dashboard_bridge_live_engine_regressions () =
+  with_installation (fun t ->
+    Eio.Switch.run (fun sw ->
+      let state = Masc.Mcp_server.For_testing.create_state ~base_path:t.base in
+      let router =
+        Server_account_dashboard_bridge.add_routes
+          ~sw
+          ~clock:(Eio.Stdenv.clock t.env)
+          ~login:t.routes
+          ~base_path:t.base
+          ~engine_state:(fun () -> Some state)
+          t.router
+      in
+      let admin = fresh_browser () in
+      Alcotest.(check int)
+        "Admin signs in"
+        200
+        (sign_in ~fields:[ "invite", admin_token ] t admin ~user_id:501).status;
+      let admin_csrf = csrf_of t admin in
+      let pat_reply =
+        send
+          admin
+          router
+          ~meth:"POST"
+          ~path:"/api/v1/auth/pats"
+          ~headers:(("Content-Type", "application/json") :: changing ~csrf:admin_csrf ())
+          ~body:
+            {|{"scope":{"runtimes":"all","channels":["direct"],"allowed_effects":["read_state"]},"expires_at_ms":null}|}
+      in
+      Alcotest.(check int) ("issue PAT: " ^ pat_reply.body) 200 pat_reply.status;
+      let read_pat =
+        match member "token" pat_reply with
+        | Some (`String tok) -> tok
+        | _ -> Alcotest.failf "no PAT token in %S" pat_reply.body
+      in
+      (* P1-1: Cookie-authenticated Admin calling POST /api/v1/operator/action and
+         /api/v1/operator/confirm WITHOUT X-Masc-Agent or Bearer must NOT fail with
+         "operator request actor is required". *)
+      List.iter
+        (fun path ->
+          let reply =
+            send
+              admin
+              router
+              ~meth:"POST"
+              ~path
+              ~headers:(("Content-Type", "application/json") :: changing ~csrf:admin_csrf ())
+              ~body:{|{}|}
+          in
+          Alcotest.(check bool)
+            (path ^ " does not reject cookie-Admin for missing single-user actor header: " ^ reply.body)
+            false
+            (contains ~sub:"operator request actor is required" reply.body))
+        [ "/api/v1/operator/action"; "/api/v1/operator/confirm" ];
+      (* P1-3: GET /api/v1/dashboard/bootstrap with Admin cookie AND with Read_state PAT
+         must omit single-user shell.auth projection (no token_valid=false / token_invalid). *)
+      let check_bootstrap label reply =
+        Alcotest.(check int) (label ^ ": " ^ reply.body) 200 reply.status;
+        match member "shell" reply with
+        | Some (`Assoc shell_fields) ->
+          Alcotest.(check bool)
+            (label ^ " omits single-user shell.auth")
+            false
+            (List.mem_assoc "auth" shell_fields);
+          Alcotest.(check bool)
+            (label ^ " has no single-user token_invalid")
+            false
+            (contains ~sub:"token_invalid" reply.body)
+        | _ -> Alcotest.failf "%s: missing shell object in %S" label reply.body
+      in
+      check_bootstrap
+        "cookie bootstrap"
+        (send admin router ~meth:"GET" ~path:"/api/v1/dashboard/bootstrap");
+      check_bootstrap
+        "PAT bootstrap"
+        (send
+           (fresh_browser ())
+           router
+           ~meth:"GET"
+           ~path:"/api/v1/dashboard/bootstrap"
+           ~headers:[ "Authorization", "Bearer " ^ read_pat ])))
 ;;
 
 let () =
@@ -2632,6 +2940,10 @@ let () =
             "dashboard bridge RBAC and cookie-SSE matrix"
             `Quick
             dashboard_bridge_rbac_and_sse_matrix
+        ; Alcotest.test_case
+            "dashboard bridge live engine regressions"
+            `Quick
+            dashboard_bridge_live_engine_regressions
         ] )
     ]
 ;;

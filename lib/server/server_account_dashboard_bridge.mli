@@ -17,18 +17,27 @@
       (browser sessions, PATs with [Read_state], and service credentials).
       Board reads always use {!Masc_board_handlers.Board_access.Workspace_member}
       derived from the authorized principal and its owned Keepers so an Admin
-      never reads another principal's [Direct] posts.
+      never reads another principal's [Direct] posts. Keeper-scoped memory
+      diffs enforce strict Keeper ownership ({!can_read_keeper_memory}), and
+      Keeper-scoped sandbox reads require Admin or Keeper ownership
+      ({!can_read_keeper_sandbox}).
     - {!Admin_only}: judged as [Route_access.Permission Masc_domain.CanAdmin]
       via {!Auth_gate.decide}. Permits only active [Admin] browser sessions
       (with Same-Origin and CSRF enforcement on unsafe methods); [Worker]
-      principals, PATs, and service credentials are refused with 403.
+      principals, PATs, and service credentials are refused with 403. Covers
+      config schema/patch, wiki writes, sandbox probes, standalone/exact lane
+      runs, ring logs, operator snapshot/digest/action/confirm, and schedule
+      pruning.
     - {!Browser_observer_sse}: judged as {!Route_access.Read_auth} via
       {!Auth_gate.decide} AND restricted to browser session bindings
       ({!Auth_gate.Session}) with no query-string credentials
       ({!Auth_gate.Query_credential} yields 401) and no cross-origin requests.
-      Session validity is re-checked against {!Authz_zone.read} on every
-      published frame and keepalive tick so signed-out, disabled, or deleted
-      principals are disconnected promptly. *)
+      Every replayed and live frame is filtered by {!observer_event_visible_to}
+      against a fresh trusted {!Authz_zone.read} snapshot so private Keeper
+      chat/turn streams never leak to non-owners and signed-out, disabled, or
+      deleted principals are disconnected promptly. Reconnects carrying
+      [Last-Event-ID] replay visible deliveries and emit an explicit
+      [observer_resync_required] event on replay gaps. *)
 
 (** [/api/v1/auth/events]: cookie-authenticated observer SSE endpoint for the
     unified web dashboard in multi-account mode. *)
@@ -63,6 +72,39 @@ val board_reader_of
   :  state:Authz_state.t
   -> Auth_gate.authenticated
   -> Masc_board_handlers.Board_access.reader
+
+(** Whether [caller] may read Keeper-scoped memory diffs for [keeper]:
+    strictly requires that [caller] owns [keeper] in [state]. *)
+val can_read_keeper_memory
+  :  state:Authz_state.t
+  -> Auth_gate.authenticated
+  -> keeper:string
+  -> bool
+
+(** Whether [caller] may read Keeper-scoped sandbox telemetry for [keeper]:
+    permits [Admin] or the owner of [keeper] in [state]. *)
+val can_read_keeper_sandbox
+  :  state:Authz_state.t
+  -> Auth_gate.authenticated
+  -> keeper:string
+  -> bool
+
+(** Per-principal SSE visibility predicate for {!observer_events_path}.
+    Private Keeper chat/AG-UI/turn-preview events are restricted strictly to
+    the Keeper's owner in [state]; operator-only events require [Admin];
+    [lane_addons] visibility fields are enforced fail-closed. *)
+val observer_event_visible_to
+  :  state:Authz_state.t
+  -> Auth_gate.authenticated
+  -> Yojson.Safe.t
+  -> bool
+
+(** Strips single-user auth headers ([Authorization], [Cookie],
+    [X-Masc-Internal-Token], [X-Masc-Agent], [X-Masc-Agent-Name],
+    [X-Gate-Agent]) and spoofable actor/token query parameters ([agent],
+    [agent_name], [me], [token], [access_token]) before passing an already
+    {!Auth_gate}-authorized request to shared projections. *)
+val strip_single_user_auth_headers : Httpun.Request.t -> Httpun.Request.t
 
 (** Registers the RBAC-gated operational dashboard routes and the
     cookie-authenticated observer SSE stream ({!observer_events_path}) on the

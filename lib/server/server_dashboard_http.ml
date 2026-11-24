@@ -835,36 +835,42 @@ let operator_control_context ~state ~sw ~clock ~config ~agent_name
   }
 ;;
 
-let operator_action_http_json ~state ~sw ~clock ~authorized_actor request ~args =
+let operator_action_for_actor_http_json ~state ~sw ~clock ~actor ~args =
   let workspace_scope = Mcp_server.workspace_scope state in
+  let ctx =
+    operator_control_context
+      ~state
+      ~sw
+      ~clock
+      ~config:workspace_scope.config
+      ~agent_name:actor
+  in
+  Operator_control.action_json ~actor_hint:actor ctx args
+;;
+
+let operator_action_http_json ~state ~sw ~clock ~authorized_actor request ~args =
   match explicit_operator_actor ~authorized_actor request with
   | Error _ as error -> error
-  | Ok actor ->
-    let ctx =
-      operator_control_context
-        ~state
-        ~sw
-        ~clock
-        ~config:workspace_scope.config
-        ~agent_name:actor
-    in
-    Operator_control.action_json ~actor_hint:actor ctx args
+  | Ok actor -> operator_action_for_actor_http_json ~state ~sw ~clock ~actor ~args
+;;
+
+let operator_confirm_for_actor_http_json ~state ~sw ~clock ~actor ~args =
+  let workspace_scope = Mcp_server.workspace_scope state in
+  let ctx =
+    operator_control_context
+      ~state
+      ~sw
+      ~clock
+      ~config:workspace_scope.config
+      ~agent_name:actor
+  in
+  Operator_control.confirm_json ~actor_hint:actor ctx args
 ;;
 
 let operator_confirm_http_json ~state ~sw ~clock ~authorized_actor request ~args =
-  let workspace_scope = Mcp_server.workspace_scope state in
   match explicit_operator_actor ~authorized_actor request with
   | Error _ as error -> error
-  | Ok actor ->
-    let ctx =
-      operator_control_context
-        ~state
-        ~sw
-        ~clock
-        ~config:workspace_scope.config
-        ~agent_name:actor
-    in
-    Operator_control.confirm_json ~actor_hint:actor ctx args
+  | Ok actor -> operator_confirm_for_actor_http_json ~state ~sw ~clock ~actor ~args
 ;;
 
 let operator_error_json message =
@@ -898,6 +904,7 @@ let operator_error_json message =
    payload shape, slice list, and error contract cannot drift between
    transports. *)
 let dashboard_bootstrap_http_json
+      ?(include_request_auth = true)
       ~(state : Mcp_server.server_state)
       ~sw
       ~(clock : _ Eio.Time.clock_ty Eio.Resource.t)
@@ -916,9 +923,10 @@ let dashboard_bootstrap_http_json
   in
   let shell =
     slice "shell" (fun () ->
+      let shell_request = if include_request_auth then Some request else None in
       dashboard_shell_http_json
         ?clock:state.Mcp_server.clock
-        ~request
+        ?request:shell_request
         ~light:true
         (Mcp_server.workspace_config state))
   in

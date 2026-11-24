@@ -189,11 +189,11 @@ let parse_set_route_body json lane =
         | Error _ as err -> err
         | Ok runtime_ids -> Ok (Runtime_route_runtime_ids (parsed_lane, runtime_ids)))
      | Runtime_default ->
-       (match Json_util.assoc_member_opt "runtime_ids" json with
-        | Some _ -> Error "default runtime_id required"
-        | None ->
-          optional_string_field json "runtime_id"
-          |> Result.map (fun runtime_id -> Runtime_route_runtime_id (parsed_lane, runtime_id))))
+       (match optional_string_field json "runtime_id" with
+        | Error _ as err -> err
+        | Ok None when Option.is_some (Json_util.assoc_member_opt "runtime_ids" json) ->
+          Error "default runtime_id required"
+        | Ok runtime_id -> Ok (Runtime_route_runtime_id (parsed_lane, runtime_id))))
 
 (* A new lane's name must not read as one of the other routes this endpoint
    edits, an exact/ name included: a lane created under it could never be

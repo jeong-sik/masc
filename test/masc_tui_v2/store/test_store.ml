@@ -3820,6 +3820,64 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
      && Option.equal Nav.equal_overlay m_wtab_help_replied.nav.overlay
           (Some Nav.Help)
      && Option.is_none m_wtab_help_replied.knowledge.pending_wiki_edit_slug);
+  (* P2 #1a: Esc popping Wiki_dive clears pending so returning to same slug on
+     Wiki tab does not auto-open the modal when Reply_wiki_page arrives. *)
+  let m_dive_esc, _ = step m_wagain (key Keymap.Input.Escape) in
+  Alcotest.(check (option string)) "Esc popping Wiki_dive clears pending slug"
+    None m_dive_esc.knowledge.pending_wiki_edit_slug;
+  (* P2 #1b: Esc on Knowledge_wiki tab cancels pending edit intent. *)
+  let m_tab_esc, _ = step m_wtab_req (key Keymap.Input.Escape) in
+  Alcotest.(check (option string)) "Esc on Wiki tab cancels pending slug"
+    None m_tab_esc.knowledge.pending_wiki_edit_slug;
+  (* P2 #2: Moving focus to sidebar, filter bar, or composer suppresses auto-open. *)
+  let m_tab_sidebar =
+    {
+      m_wtab_req with
+      nav = { m_wtab_req.nav with sidebar_focused = true; sidebar_open = Some true };
+    }
+  in
+  let m_tab_sidebar_replied, _ =
+    Update.step ~now:t1 m_tab_sidebar
+      (Msg.Http_reply
+         {
+           epoch = m_tab_sidebar.epoch;
+           reply =
+             Msg.Reply_wiki_page { page = page_r4.slug; result = Ok page_r4 };
+         })
+  in
+  Alcotest.(check bool) "sidebar focus suppresses wiki edit auto-open" true
+    (Option.is_none m_tab_sidebar_replied.inline_modal
+     && Option.is_none m_tab_sidebar_replied.knowledge.pending_wiki_edit_slug);
+  let m_tab_filter =
+    { m_wtab_req with nav = { m_wtab_req.nav with filter_focused = true } }
+  in
+  let m_tab_filter_replied, _ =
+    Update.step ~now:t1 m_tab_filter
+      (Msg.Http_reply
+         {
+           epoch = m_tab_filter.epoch;
+           reply =
+             Msg.Reply_wiki_page { page = page_r4.slug; result = Ok page_r4 };
+         })
+  in
+  Alcotest.(check bool) "filter focus suppresses wiki edit auto-open" true
+    (Option.is_none m_tab_filter_replied.inline_modal
+     && Option.is_none m_tab_filter_replied.knowledge.pending_wiki_edit_slug);
+  let m_tab_composer =
+    { m_wtab_req with drafts = Drafts.set_focus true m_wtab_req.drafts }
+  in
+  let m_tab_composer_replied, _ =
+    Update.step ~now:t1 m_tab_composer
+      (Msg.Http_reply
+         {
+           epoch = m_tab_composer.epoch;
+           reply =
+             Msg.Reply_wiki_page { page = page_r4.slug; result = Ok page_r4 };
+         })
+  in
+  Alcotest.(check bool) "composer focus suppresses wiki edit auto-open" true
+    (Option.is_none m_tab_composer_replied.inline_modal
+     && Option.is_none m_tab_composer_replied.knowledge.pending_wiki_edit_slug);
   (* A form opened on revision 3 saves against revision 3 even when
      revision 4 lands while it is open: the server then refuses the save
      instead of writing the old text over revision 4. *)

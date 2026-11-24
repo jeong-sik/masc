@@ -1078,6 +1078,10 @@ let modal_cycle_field ~delta modal =
 
 let is_viewing_wiki_slug ~slug m =
   Option.is_none m.nav.overlay
+  && Option.is_none m.inline_modal
+  && (not (sidebar_has_focus m))
+  && (not m.nav.filter_focused)
+  && (not (Drafts.is_focused m.drafts))
   &&
   match active_dive m with
   | Some (Nav.Dive_knowledge (Nav.Wiki_dive dive_slug)) ->

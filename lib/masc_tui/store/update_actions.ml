@@ -1496,16 +1496,23 @@ and execute_action ~now (m : Model.t) action =
                               dive_scroll_offset = 0;
                             };
                           knowledge =
-                            Knowledge_store.close_memory_diagram m.knowledge;
+                            m.knowledge
+                            |> Knowledge_store.close_memory_diagram
+                            |> Knowledge_store.clear_pending_wiki_edit;
                         }
                         |> Update_nav.sync_config_for_keeper_view
                       in
                       (next, View_fetches.fetches_for_current_view next)
                   | [] ->
-                      (* A zoomed panel advertises [Esc] as the way back to the
-                         list, so Esc restores the split layout before it
-                         touches the filter. *)
-                      if m.nav.zoomed then
+                      if Option.is_some m.knowledge.pending_wiki_edit_slug then
+                        ( {
+                            m with
+                            knowledge =
+                              Knowledge_store.clear_pending_wiki_edit
+                                m.knowledge;
+                          }
+                        , [] )
+                      else if m.nav.zoomed then
                         ({ m with nav = { m.nav with zoomed = false } }, [])
                       else if
                         Nav.equal_workspace m.nav.workspace Nav.Keepers

@@ -27,6 +27,7 @@ import {
   commandPaletteOpen,
   historicalIncidents,
   openInspectDrawer,
+  parseKeeperAsksPayload,
   pendingApprovals,
   railExpanded,
   recordIncident,
@@ -258,6 +259,17 @@ describe('Proposal A+ Shell components', () => {
       fireEvent.click(dismissBtn)
     })
     expect(historicalIncidents.value[0]?.dismissed).toBe(true)
+  })
+
+  it('parseKeeperAsksPayload filters live resolution.state (excludes answered/withdrawn, keeps open)', () => {
+    const parsed = parseKeeperAsksPayload({
+      asks: [
+        { ask_id: 'ask-open', keeper: 'k1', resolution: { state: 'open' }, question: 'Continue?' },
+        { ask_id: 'ask-ans', keeper: 'k1', resolution: { state: 'answered' }, question: 'Done?' },
+        { ask_id: 'ask-wd', keeper: 'k2', resolution: { state: 'withdrawn' }, question: 'Cancelled?' },
+      ],
+    }, 'default')
+    expect(parsed.map((a) => a.askId)).toEqual(['ask-open'])
   })
 
   it('MobileNav renders 4 primary tabs + More sheet with 44px touch-target classes', async () => {

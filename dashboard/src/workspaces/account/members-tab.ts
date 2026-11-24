@@ -130,17 +130,19 @@ export function MembersTab(): VNode {
                                   Disable
                                 </button>
                               `
-                            : html`
-                                <button
-                                  type="button"
-                                  class="btn-ghost"
-                                  disabled=${busy}
-                                  data-action="enable"
-                                  onClick=${() => { void runAction(member.userId, 'Enable member', () => enableMember(member.userId)) }}
-                                >
-                                  Enable
-                                </button>
-                              `}
+                            : member.status === 'disabled'
+                              ? html`
+                                  <button
+                                    type="button"
+                                    class="btn-ghost"
+                                    disabled=${busy}
+                                    data-action="enable"
+                                    onClick=${() => { void runAction(member.userId, 'Enable member', () => enableMember(member.userId)) }}
+                                  >
+                                    Enable
+                                  </button>
+                                `
+                              : null}
 
                           ${member.role === 'admin' && html`
                             <button

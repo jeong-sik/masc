@@ -71,23 +71,33 @@ export function LocalOperatorPanel({
       setWsError('워크스페이스 이름을 입력하세요.')
       return
     }
+    let normalizedBaseUrl: string | undefined
     if (baseUrl) {
-      try {
-        const parsed = new URL(baseUrl)
-        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-          setWsError('Origin URL은 http:// 또는 https:// 이어야 합니다.')
+      if (/^\/(?!\/)/.test(baseUrl)) {
+        normalizedBaseUrl = baseUrl.replace(/\/+$/, '') || '/'
+      } else {
+        try {
+          const parsed = new URL(baseUrl)
+          if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+            setWsError('동일 Origin의 http(s) URL 또는 상대 경로 접두사(예: /workspace-b)만 등록할 수 있습니다.')
+            return
+          }
+          if (typeof window !== 'undefined' && window.location?.origin && parsed.origin !== window.location.origin) {
+            setWsError('교차 출처(Cross-Origin) URL은 보안 정책상 차단됩니다. 동일 Origin URL 또는 상대 경로 접두사(/prefix)를 사용하세요.')
+            return
+          }
+          normalizedBaseUrl = `${parsed.origin}${parsed.pathname.replace(/\/+$/, '')}`
+        } catch {
+          setWsError('올바른 경로 접두사(/workspace-b) 또는 동일 Origin URL을 입력하세요.')
           return
         }
-      } catch {
-        setWsError('올바른 Origin URL 형식이 아닙니다 (예: http://127.0.0.1:8935).')
-        return
       }
     }
     const slug = label.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-|-$/g, '') || `ws-${Date.now()}`
     const id = targets.some((t) => t.id === slug) ? `${slug}-${targets.length + 1}` : slug
     registerWorkspaceTargets([
       ...targets,
-      { id, label, ...(baseUrl ? { baseUrl } : {}) },
+      { id, label, ...(normalizedBaseUrl ? { baseUrl: normalizedBaseUrl } : {}) },
     ])
     setWsLabel('')
     setWsBaseUrl('')
@@ -219,11 +229,11 @@ export function LocalOperatorPanel({
             />
           </label>
           <label class="ap-field ap-field--grow">
-            <span>Origin URL (optional)</span>
+            <span>Same-Origin Path Prefix or URL (optional)</span>
             <input
-              type="url"
+              type="text"
               class="ap-input mono"
-              placeholder="http://127.0.0.1:8935"
+              placeholder="/workspace-b"
               value=${wsBaseUrl}
               onInput=${(e: Event) => setWsBaseUrl((e.currentTarget as HTMLInputElement).value)}
             />

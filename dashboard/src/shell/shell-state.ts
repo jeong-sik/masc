@@ -18,7 +18,6 @@ import {
   activeWorkspaceId,
   authSession,
   currentSessionEpoch,
-  isAuthenticated,
   isEpochCurrent,
   sessionEpoch,
 } from '../core/auth'
@@ -283,27 +282,17 @@ export async function probeBuildConnectionInfo(
       headers: { Accept: 'application/json' },
     })
     if (healthRes.ok) {
-      const h = (await healthRes.json()) as unknown
-      if (isRecord(h)) {
-        version = asNonEmptyString(h.version)
-        serverCommit = asNonEmptyString(h.source_commit) ?? asNonEmptyString(h.commit) ?? asNonEmptyString(h.build_commit)
+      const ct = healthRes.headers.get('content-type') ?? ''
+      if (ct === '' || ct.includes('application/json')) {
+        const h = (await healthRes.json()) as unknown
+        if (isRecord(h)) {
+          version = asNonEmptyString(h.version)
+          serverCommit = asNonEmptyString(h.source_commit) ?? asNonEmptyString(h.commit) ?? asNonEmptyString(h.build_commit)
+          bundleCommit = asNonEmptyString(h.dashboard_commit) ?? asNonEmptyString(h.bundle_commit)
+        }
       }
     }
   } catch { /* non-fatal diagnostic probe */ }
-
-  try {
-    const idRes = await fetchImpl('/dashboard/.build-identity.json', {
-      method: 'GET',
-      credentials: 'same-origin',
-      headers: { Accept: 'application/json' },
-    })
-    if (idRes.ok) {
-      const b = (await idRes.json()) as unknown
-      if (isRecord(b)) {
-        bundleCommit = asNonEmptyString(b.source_commit)
-      }
-    }
-  } catch { /* optional in vite dev */ }
 
   if (!isEpochCurrent(startEpoch)) return
   const mismatched = Boolean(
@@ -399,8 +388,13 @@ export function parseKeeperAsksPayload(
     const askId = asNonEmptyString(row.ask_id) ?? asNonEmptyString(row.id)
     const keeper = asNonEmptyString(row.keeper) ?? asNonEmptyString(row.name) ?? 'keeper'
     if (!askId) continue
-    const state = typeof row.state === 'string' ? row.state.toLowerCase() : 'open'
-    if (state === 'answered' || state === 'resolved' || state === 'closed') continue
+    const resolutionState = isRecord(row.resolution) && typeof row.resolution.state === 'string'
+      ? row.resolution.state
+      : typeof row.state === 'string'
+        ? row.state
+        : 'open'
+    const state = resolutionState.trim().toLowerCase()
+    if (state === 'answered' || state === 'resolved' || state === 'closed' || state === 'withdrawn') continue
     const askedAt = typeof row.asked_at === 'number'
       ? row.asked_at
       : typeof row.created_at === 'number'
@@ -425,7 +419,9 @@ export function parseKeeperAsksPayload(
 }
 
 export async function refreshPendingHitl(fetchImpl?: typeof fetch): Promise<void> {
-  if (!isAuthenticated.peek()) {
+  // `/api/v1/keepers/tool-approvals` and `/api/v1/keepers/asks` are mounted only on single-user servers;
+  // skip in multi_account mode so boot never fires guaranteed 404s or false Ch3 incidents.
+  if (authSession.peek().kind !== 'single_user_local') {
     pendingApprovals.value = []
     pendingAsks.value = []
     return
@@ -442,7 +438,11 @@ export async function refreshPendingHitl(fetchImpl?: typeof fetch): Promise<void
 
     if (approvalsRes.ok) {
       pendingApprovals.value = parseToolApprovalsPayload(approvalsRes.value, workspaceId)
-    } else if (approvalsRes.error.kind !== 'epoch_stale' && approvalsRes.error.kind !== 'aborted') {
+    } else if (
+      approvalsRes.error.kind !== 'epoch_stale'
+      && approvalsRes.error.kind !== 'aborted'
+      && approvalsRes.error.kind !== 'not_found'
+    ) {
       recordIncident({
         severity: 'warn',
         source: 'approvals',
@@ -581,13 +581,13 @@ export function installShellObservers(fetchImpl?: typeof fetch): () => void {
     lastEpoch = epoch
     pendingApprovals.value = []
     pendingAsks.value = []
-    if (isAuthenticated.peek()) {
+    if (authSession.peek().kind === 'single_user_local') {
       void refreshPendingHitl(fetchImpl)
     }
   })
 
   const unsubAuth = authSession.subscribe((session) => {
-    if (session.kind !== 'single_user_local' && session.kind !== 'multi_account_signed_in') {
+    if (session.kind !== 'single_user_local') {
       pendingApprovals.value = []
       pendingAsks.value = []
     }

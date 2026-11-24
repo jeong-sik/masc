@@ -22,8 +22,8 @@ import {
   type AuthSession,
 } from '../core/auth'
 import { startObserverStream } from '../core/observer'
-import { apiMutate } from '../core/transport'
-import { parseOperatorActionResult } from '../api/schemas/operator-action'
+import { apiGet, apiMutate } from '../core/transport'
+import { parseRuntimeDefaultsResponse } from '../api/schemas/runtime-defaults'
 import {
   createCommandSearcher,
   type CommandSearchItem,
@@ -306,18 +306,20 @@ export function buildPaletteCommands(session: AuthSession): readonly PaletteComm
       shortcut: 'B',
       run: () => toggleRail(),
     },
-    {
-      id: 'action:refresh-hitl',
-      label: 'Action: Refresh Pending Approvals & Asks',
-      category: 'Action',
-      keywords: ['refresh', 'approval', 'ask', 'inbox', '승인', '새로고침'],
-      group: 'Action',
-      subtitle: 'Fetch /api/v1/keepers/tool-approvals & /asks',
-      run: async () => {
-        await refreshPendingHitl()
-        pushShellToast('승인 및 질문 대기열을 새로고침했습니다.', 'info')
-      },
-    },
+    ...(session.kind === 'single_user_local'
+      ? [{
+          id: 'action:refresh-hitl',
+          label: 'Action: Refresh Pending Approvals & Asks',
+          category: 'Action',
+          keywords: ['refresh', 'approval', 'ask', 'inbox', '승인', '새로고침'],
+          group: 'Action' as const,
+          subtitle: 'Fetch /api/v1/keepers/tool-approvals & /asks',
+          run: async () => {
+            await refreshPendingHitl()
+            pushShellToast('승인 및 질문 대기열을 새로고침했습니다.', 'info')
+          },
+        }]
+      : []),
     {
       id: 'action:reconnect-observer',
       label: 'Action: Reconnect Observer SSE Stream',
@@ -332,36 +334,52 @@ export function buildPaletteCommands(session: AuthSession): readonly PaletteComm
     },
     {
       id: 'action:operator-snapshot-check',
-      label: 'Action: Probe Operator Action Readiness',
+      label: 'Action: Read Operator Digest Snapshot',
       category: 'Action',
-      keywords: ['operator', 'action', 'probe', 'health', '운영자'],
+      keywords: ['operator', 'digest', 'probe', 'health', '운영자'],
       group: 'Action',
-      subtitle: adminLocked ? 'Admin only' : 'POST /api/v1/operator/action (dry preview)',
-      locked: adminLocked,
+      subtitle: 'GET /api/v1/operator/digest (read-only)',
       run: async () => {
-        if (adminLocked) {
-          pushShellToast('관리자 권한이 필요합니다.', 'warning')
-          return
-        }
-        const res = await apiMutate<unknown>('POST', '/api/v1/operator/action', {
-          action_type: 'status_probe',
-          dry_run: true,
-        })
+        const res = await apiGet<Record<string, unknown>>('/api/v1/operator/digest')
         if (!res.ok) {
           recordIncident({
             severity: 'warn',
             source: 'command-palette',
-            summary: `Operator probe returned ${res.error.status ?? res.error.kind}`,
+            summary: `Operator digest returned ${res.error.status ?? res.error.kind}`,
             detail: res.error.message,
           })
-          pushShellToast(`운영자 점검 실패: ${res.error.message}`, 'warning')
+          pushShellToast(`운영자 다이제스트 조회 실패: ${res.error.message}`, 'warning')
+          return
+        }
+        const status = typeof res.value?.health === 'string'
+          ? res.value.health
+          : typeof res.value?.status === 'string'
+            ? res.value.status
+            : 'ok'
+        pushShellToast(`Operator digest: ${status}`, 'success')
+      },
+    },
+    {
+      id: 'action:runtime-defaults-check',
+      label: 'Action: Inspect Resolved Runtime Defaults',
+      category: 'Action',
+      keywords: ['runtime', 'defaults', 'model', 'routing', '런타임'],
+      group: 'Action',
+      subtitle: 'GET /api/v1/dashboard/runtime-defaults (read-only)',
+      run: async () => {
+        const res = await apiGet<unknown>('/api/v1/dashboard/runtime-defaults')
+        if (!res.ok) {
+          pushShellToast(`런타임 기본값 조회 실패: ${res.error.message}`, 'warning')
           return
         }
         try {
-          const parsed = parseOperatorActionResult(res.value)
-          pushShellToast(`Operator status: ${parsed.status}`, 'success')
+          const parsed = parseRuntimeDefaultsResponse(res.value)
+          pushShellToast(
+            `Default runtime: ${parsed.default_runtime_id ?? '없음'} (${parsed.runtimes.length} configured)`,
+            'success',
+          )
         } catch (cause) {
-          pushShellToast(`응답 스키마 확인 필요: ${cause instanceof Error ? cause.message : String(cause)}`, 'warning')
+          pushShellToast(`런타임 스키마 확인 필요: ${cause instanceof Error ? cause.message : String(cause)}`, 'warning')
         }
       },
     },

@@ -113,7 +113,7 @@ describe('Unified /account wire parsers & workspace surface', () => {
     expect((init?.headers as Record<string, string>)['x-masc-csrf-token']).toBe('csrf-xyz')
   })
 
-  it('renders Google OIDC and GitHub OAuth sign-in gate in multi_account_signed_out mode', async () => {
+  it('renders CSP-safe top-level sign-in navigation link in multi_account_signed_out mode (zero form POSTs)', async () => {
     authSession.value = {
       kind: 'multi_account_signed_out',
       mode: 'multi_account',
@@ -130,8 +130,11 @@ describe('Unified /account wire parsers & workspace surface', () => {
 
     const gate = container.querySelector('[data-testid="multi-account-signin-gate"]')
     expect(gate).not.toBeNull()
-    expect(gate?.querySelector('form[action="/auth/oidc/start"][method="post"]')).not.toBeNull()
-    expect(gate?.querySelector('form[action="/auth/github/start"][method="post"]')).not.toBeNull()
+    expect(gate?.querySelector('form')).toBeNull()
+    const link = gate?.querySelector('[data-testid="multi-account-signin-link"]') as HTMLAnchorElement | null
+    expect(link).not.toBeNull()
+    expect(link?.getAttribute('href')).toBe('/')
+    expect(link?.getAttribute('data-oauth-providers')).toBe('google,github')
     expect(container.querySelector('[data-testid="account-provider-callout"]')?.textContent)
       .toContain('Runtime → Quotas')
   })
@@ -183,6 +186,13 @@ describe('Unified /account wire parsers & workspace surface', () => {
               identity: { provider: 'github', user_id: 777 },
               role: 'admin',
               status: 'active',
+              held: [],
+            },
+            {
+              user_id: 'u-unknown-status',
+              identity: { provider: 'github', user_id: 888 },
+              role: 'member',
+              status: 'quarantined_future_state',
               held: [],
             },
           ],
@@ -246,6 +256,49 @@ describe('Unified /account wire parsers & workspace surface', () => {
     const revokeCall = calls.find((c) => c.url === '/api/v1/auth/members/u-admin-2/revoke-admin')
     expect(revokeCall?.method).toBe('POST')
     expect(revokeCall?.body).toBe(JSON.stringify({ cause: 'operational' }))
+
+    // Unrecognised member status renders neither Disable nor Enable
+    const rowUnknown = container.querySelector('[data-member-id="u-unknown-status"]')!
+    expect(rowUnknown.querySelector('[data-action="disable"]')).toBeNull()
+    expect(rowUnknown.querySelector('[data-action="enable"]')).toBeNull()
+  })
+
+  it('allows revoking expired invites in InvitesTab', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResp({
+      invites: [{
+        invite_id: 'inv-expired-1',
+        role: 'member',
+        issuer: { kind: 'local_operator' },
+        expires_at_ms: 1_700_000_000_000,
+        status: 'expired',
+      }],
+    }))
+
+    authSession.value = {
+      kind: 'multi_account_signed_in',
+      mode: 'multi_account',
+      accountId: 'u-admin-1',
+      email: null,
+      displayName: 'Admin One',
+      role: 'admin',
+      csrfToken: 'csrf-admin',
+      authMethods: AUTH_METHODS,
+      workspaceId: 'default',
+    }
+
+    await act(async () => {
+      render(h(AccountWorkspace, {
+        subroute: 'invites',
+        onNavigate: vi.fn(),
+        onInspect: vi.fn(),
+      }), container)
+    })
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-invite-id="inv-expired-1"]')).not.toBeNull()
+    })
+    const row = container.querySelector('[data-invite-id="inv-expired-1"]')!
+    expect(row.textContent).toContain('Revoke')
   })
 
   it('renders cross-tab account_changed banner cleanly', async () => {
@@ -292,19 +345,30 @@ describe('Unified /account wire parsers & workspace surface', () => {
     expect(container.querySelector('[data-testid="account-local-operator"]')).not.toBeNull()
     expect(fetchSpy).not.toHaveBeenCalled()
 
-    // Add a new workspace target & switch to it -> bumps sessionEpoch
+    // Reject cross-origin URLs fail-closed (matching L3 resolveWorkspaceUrl)
     const labelInput = container.querySelector('input[placeholder="e.g. Staging MASC"]') as HTMLInputElement
-    const urlInput = container.querySelector('input[type="url"]') as HTMLInputElement
+    const urlInput = container.querySelector('input[placeholder="/workspace-b"]') as HTMLInputElement
+    await act(async () => {
+      fireEvent.input(labelInput, { target: { value: 'Cross Origin' } })
+      fireEvent.input(urlInput, { target: { value: 'https://evil.example.com' } })
+    })
+    await act(async () => {
+      fireEvent.submit(labelInput.closest('form')!)
+    })
+    expect(workspaceTargets.value.some((t) => t.id === 'cross-origin')).toBe(false)
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('교차 출처')
+
+    // Add a same-origin path prefix target & switch to it -> bumps sessionEpoch
     const beforeEpoch = sessionEpoch.value
     await act(async () => {
       fireEvent.input(labelInput, { target: { value: 'Prod Lab' } })
-      fireEvent.input(urlInput, { target: { value: 'http://127.0.0.1:8941' } })
+      fireEvent.input(urlInput, { target: { value: '/prod-lab' } })
     })
     await act(async () => {
       fireEvent.submit(labelInput.closest('form')!)
     })
 
-    expect(workspaceTargets.value.some((t) => t.id === 'prod-lab')).toBe(true)
+    expect(workspaceTargets.value.some((t) => t.id === 'prod-lab' && t.baseUrl === '/prod-lab')).toBe(true)
     const switchBtn = container.querySelector('[data-ws-row="prod-lab"] button') as HTMLButtonElement
     await act(async () => {
       fireEvent.click(switchBtn)

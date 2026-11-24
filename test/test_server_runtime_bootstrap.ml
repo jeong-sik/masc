@@ -5457,7 +5457,9 @@ let json_keys = function
   | json -> Alcotest.failf "expected a JSON object, got %s" (Yojson.Safe.to_string json)
 ;;
 
-let public_health_keys = [ "live"; "phase"; "ready"; "server"; "version" ]
+let public_health_keys =
+  [ "auth_methods"; "live"; "phase"; "ready"; "server"; "version" ]
+;;
 let bearer token = [ "Authorization", "Bearer " ^ token ]
 let server_timing_header = "server-timing"
 
@@ -5529,8 +5531,15 @@ let check_public_health ~name ~ready ~phase (status, headers, body) =
   let open Yojson.Safe.Util in
   let json = health_json name body in
   Alcotest.(check int) (name ^ ": status") 200 status;
-  Alcotest.(check (list string)) (name ^ ": the five public keys") public_health_keys
+  Alcotest.(check (list string)) (name ^ ": the six public keys") public_health_keys
     (json_keys json);
+  (* The public probe advertises the sign-in methods a browser may use. It
+     stays a discovery list: the account mode is what tells an account
+     server's answer from this one, and this body never carries it. *)
+  Alcotest.(check bool) (name ^ ": auth_methods is a discovery object") true
+    (match json |> member "auth_methods" with `Assoc _ -> true | _ -> false);
+  Alcotest.(check bool) (name ^ ": no account mode") false
+    (List.mem_assoc "account_mode" (json |> to_assoc));
   Alcotest.(check string) (name ^ ": server") "masc" (json |> member "server" |> to_string);
   Alcotest.(check string) (name ^ ": version") Build_version.current
     (json |> member "version" |> to_string);

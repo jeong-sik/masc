@@ -487,7 +487,7 @@ class LeftoverLinkedIssues(unittest.TestCase):
 
 
 class Sweeping(unittest.TestCase):
-    def sweep(self, exits, *, clock=None):
+    def sweep(self, exits, *, clock=None, freeze=None, argv=('sweep',)):
         runs = []
         def run(command, **kwargs):
             runs.append((command[-1], kwargs['env']['DISPATCH_PR'],
@@ -499,8 +499,10 @@ class Sweeping(unittest.TestCase):
                    patch.object(SWEEP, 'close_merged_issues',
                                 return_value={'pull_requests': [], 'not_reached': 0, 'issues': []}),
                    patch.object(SWEEP.subprocess, 'run', side_effect=run),
-                   patch.dict(os.environ, {'GITHUB_REPOSITORY': 'owner/repo'}),
-                   patch.object(SWEEP.sys, 'argv', ['sweep'])]
+                   patch.dict(os.environ, dict(GITHUB_REPOSITORY='owner/repo',
+                                               **({'MASC_RELEASE_FREEZE': freeze}
+                                                  if freeze is not None else {}))),
+                   patch.object(SWEEP.sys, 'argv', list(argv))]
         if clock is not None:
             patches.append(patch.object(SWEEP.time, 'monotonic', side_effect=clock))
         output = io.StringIO()
@@ -581,6 +583,139 @@ class Sweeping(unittest.TestCase):
             self.assertEqual(SWEEP.main(), 0)
         self.assertEqual(seen.get('DISPATCH_WORKER_BUDGET_SECONDS'),
                          str(SWEEP.WORKER_TIMEOUT_SECONDS))
+
+    def test_a_frozen_sweep_starts_no_worker(self):
+        code, runs, output = self.sweep([], freeze='1')
+        self.assertEqual((code, runs), (0, []))
+        # The gate fires before the quota read, so the report carries the
+        # skip reason and the reservation reclaim; these rows carry none.
+        self.assertIn('"status": "freeze_skipped"', output)
+        self.assertIn('MASC_RELEASE_FREEZE=1', output)
+        self.assertNotIn('quota_before', output)
+        self.assertNotIn('"open":', output)
+
+    def test_a_dry_sweep_still_walks_during_the_freeze(self):
+        code, runs, output = self.sweep([], freeze='1', argv=('sweep', '--dry-run'))
+        self.assertEqual((code, runs), (0, []))
+        self.assertIn('"stopped": "dry run"', output)
+        self.assertNotIn('freeze_skipped', output)
+
+    def test_the_sweep_reads_the_freeze_variable_when_the_env_is_empty(self):
+        def gh(arguments):
+            if arguments == ['api', 'repos/owner/repo/actions/variables/'
+                                   'MASC_RELEASE_FREEZE']:
+                return {'value': '1'}
+            raise AssertionError(arguments)
+        with patch.object(SWEEP, 'gh', side_effect=gh), \
+             patch.object(SWEEP, 'open_pulls', return_value=[]) as walk, \
+             patch.dict(os.environ, {'GITHUB_REPOSITORY': 'owner/repo'}), \
+             patch.object(SWEEP.sys, 'argv', ['sweep']), \
+             redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(SWEEP.main(), 0)
+        # The one open-list read of a frozen sweep is the reclaim walk; the
+        # quota read and the worker runs stay skipped.
+        walk.assert_called_once()
+        self.assertIn('freeze_skipped', output.getvalue())
+
+    def test_a_frozen_sweep_reclaims_armed_reservations(self):
+        """task-4046 review: the reclaim runs during a freeze — a pre-freeze
+        reservation would still let GitHub merge on the required checks —
+        but a freeze-exempt row keeps its reservation."""
+        armed, exempt = row(1), row(2)
+        armed['autoMergeRequest'] = {'enabledAt': '2026-11-24T10:00:00Z'}
+        exempt['autoMergeRequest'] = {'enabledAt': '2026-11-24T10:00:00Z'}
+        exempt['labels'] = {'nodes': [{'name': 'freeze-exempt'}]}
+        commands, errors = [], io.StringIO()
+        def run(command, **kwargs):
+            commands.append(list(command))
+            return subprocess.CompletedProcess(command, 0)
+        with patch.object(SWEEP, 'open_pulls', return_value=[armed, exempt, row(3)]), \
+             patch.object(SWEEP, 'quota') as quota, \
+             patch.object(SWEEP.subprocess, 'run', side_effect=run), \
+             patch.dict(os.environ, {'GITHUB_REPOSITORY': 'owner/repo',
+                                     'MASC_RELEASE_FREEZE': '1'}), \
+             patch.object(SWEEP.sys, 'argv', ['sweep']), \
+             redirect_stdout(io.StringIO()) as output, redirect_stderr(errors):
+            self.assertEqual(SWEEP.main(), 0)
+        self.assertEqual(commands, [['gh', 'pr', 'merge', '1', '--repo',
+                                     'owner/repo', '--disable-auto']])
+        quota.assert_not_called()
+        self.assertIn('"status": "freeze_skipped"', output.getvalue())
+        self.assertIn('"reclaimed"', output.getvalue())
+        self.assertIn('"not_reclaimed": []', output.getvalue())
+        self.assertEqual(errors.getvalue(), '')
+
+    def test_a_frozen_sweep_reports_a_failed_reclaim_and_continues(self):
+        """task-4046 review: a missed reclaim is one stderr line and the
+        report still names it — the sweep never stops at the first row."""
+        armed = row(1, autoMergeRequest={'enabledAt': '2026-11-24T10:00:00Z'})
+        refused = subprocess.CompletedProcess([], 1, '',
+                                             'gh: pull request 1 is not armed')
+        errors = io.StringIO()
+        with patch.object(SWEEP, 'open_pulls', return_value=[armed]), \
+             patch.object(SWEEP, 'quota'), \
+             patch.object(SWEEP.subprocess, 'run', return_value=refused), \
+             patch.dict(os.environ, {'GITHUB_REPOSITORY': 'owner/repo',
+                                     'MASC_RELEASE_FREEZE': '1'}), \
+             patch.object(SWEEP.sys, 'argv', ['sweep']), \
+             redirect_stdout(io.StringIO()) as output, redirect_stderr(errors):
+            self.assertEqual(SWEEP.main(), 0)
+        self.assertIn('"not_reclaimed"', output.getvalue())
+        self.assertIn('could not reclaim the armed reservation on #1',
+                      errors.getvalue())
+        self.assertIn('not armed', errors.getvalue())
+
+    def test_an_unreadable_freeze_variable_is_not_a_freeze_but_not_silent(self):
+        """task-4046 review: the sweep's fail-open fallback says so on stderr."""
+        errors = io.StringIO()
+        def gh(arguments):
+            if arguments == ['api', 'repos/owner/repo/actions/variables/'
+                                   'MASC_RELEASE_FREEZE']:
+                raise ValueError('Resource not accessible by integration')
+            raise AssertionError(arguments)
+        with patch.object(SWEEP, 'gh', side_effect=gh), \
+             patch.object(SWEEP, 'open_pulls', return_value=[]), \
+             patch.object(SWEEP, 'quota', return_value=None), \
+             patch.object(SWEEP, 'clean_branches', return_value={'found': 0}), \
+             patch.object(SWEEP, 'close_merged_issues',
+                          return_value={'pull_requests': [], 'not_reached': 0,
+                                        'issues': []}), \
+             patch.dict(os.environ, {'GITHUB_REPOSITORY': 'owner/repo'}), \
+             patch.object(SWEEP.sys, 'argv', ['sweep']), \
+             redirect_stdout(io.StringIO()) as output, redirect_stderr(errors):
+            self.assertEqual(SWEEP.main(), 0)
+        # Not frozen, and the report says the ordinary path ran: only the run
+        # log carries the reason the gate could not be read.
+        self.assertNotIn('freeze_skipped', output.getvalue())
+        recorded = errors.getvalue()
+        self.assertIn('MASC_RELEASE_FREEZE', recorded)
+        self.assertIn('Resource not accessible by integration', recorded)
+        self.assertIn('treating the release freeze as off', recorded)
+
+    def test_a_missing_freeze_variable_is_a_quiet_off_state(self):
+        """task-4046 review: a variable that does not exist is the ordinary
+        off state — the sweep walks, no freeze_skipped, no stderr line."""
+        errors = io.StringIO()
+        def gh(arguments):
+            if arguments == ['api', 'repos/owner/repo/actions/variables/'
+                                   'MASC_RELEASE_FREEZE']:
+                raise ValueError('gh: Not Found (HTTP 404)')
+            raise AssertionError(arguments)
+        with patch.object(SWEEP, 'gh', side_effect=gh), \
+             patch.object(SWEEP, 'open_pulls', return_value=[]) as walk, \
+             patch.object(SWEEP, 'quota', return_value=None), \
+             patch.object(SWEEP, 'clean_branches', return_value={'found': 0}), \
+             patch.object(SWEEP, 'close_merged_issues',
+                          return_value={'pull_requests': [], 'not_reached': 0,
+                                        'issues': []}), \
+             patch.dict(os.environ, {'GITHUB_REPOSITORY': 'owner/repo'}), \
+             patch.object(SWEEP.sys, 'argv', ['sweep']), \
+             redirect_stdout(io.StringIO()) as output, redirect_stderr(errors):
+            self.assertEqual(SWEEP.main(), 0)
+        self.assertEqual(walk.call_count, 1)
+        self.assertNotIn('freeze_skipped', output.getvalue())
+        self.assertNotIn('release-freeze', errors.getvalue())
+        self.assertNotIn('MASC_RELEASE_FREEZE', errors.getvalue())
 
 
 if __name__ == '__main__':

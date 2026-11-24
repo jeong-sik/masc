@@ -31,6 +31,7 @@ def sibling(name):
 REVIEWS = sibling('github-reviews')
 STACKS = sibling('stack-scope')
 GET = sibling('github-get')
+FREEZE = sibling('release-freeze')
 ISSUES = sibling('linked-issues')
 KEEP = sibling('branch-deletion')  # the sweep keeps the same branches
 CLIENT = GET.Client(
@@ -58,6 +59,16 @@ CLEANUP_RESERVE_SECONDS = 15
 # unusable retry_at, falls back to the old exit.
 MAX_QUOTA_RETRIES = 2
 MAX_QUOTA_WAIT_SECONDS = 3600
+# task-4046: the release freeze lives in a repository variable, not in a file
+# on main — a freeze marker would itself have to land on frozen main, and a
+# variable needs no code change to toggle. The flag's name, precedence and
+# loud/quiet read rules live in release-freeze.py, shared with the sweep;
+# the leader toggles the variable, no code or workflow change needed.
+FREEZE_VARIABLE = FREEZE.FREEZE_VARIABLE
+# task-4046: only this label opts a scope out of the freeze. The release
+# leader attaches it to the top pull request of a P0/P1 repair scope; no
+# other scope submits while the freeze is on.
+FREEZE_LABEL = FREEZE.FREEZE_LABEL
 # Set by main() when the sweep budget is known: the follow loop skips its
 # next poll once this moment has passed, so the cleanup keeps its reserve.
 _FOLLOW_DEADLINE = None
@@ -236,8 +247,18 @@ def reservation_reads(repo, number, seen):
     return (current, selected, head), []
 
 
-def auto_merge_default(repo, number):
-    """Arm ordinary Ready PRs; native stacks use the whole-scope worker."""
+def auto_merge_default(repo, number, arm=True):
+    """Arm ordinary Ready PRs; native stacks use the whole-scope worker.
+
+    task-4046: during a release freeze the caller passes arm=False. The
+    reads and the safety disarm still run — a stale reservation must not
+    outlive a run that could not confirm its conditions, frozen or not —
+    and a reservation an earlier unfrozen run armed is taken back: left
+    armed, GitHub lands it on its required checks mid-freeze and no run
+    would ever reclaim it. The freeze hold itself is raised where arming
+    would have happened, so a merged scope's `closed` event keeps its
+    ordinary wake path instead of a freeze comment (#54644 review).
+    """
     seen = {}
     try:
         reservation, disabled = stable_reads(lambda: reservation_reads(repo, number, seen))
@@ -255,6 +276,29 @@ def auto_merge_default(repo, number):
     if reservation is None:
         return None
     current, selected, head = reservation
+    if not arm:
+        if current.get('auto_merge') is not None:
+            # Reclaim a reservation an earlier unfrozen run made: left
+            # armed it would let GitHub merge on the required checks
+            # mid-freeze, and only a run on this pull request would ever
+            # take it down (#54644 review). A failed reclaim is one stderr
+            # line; the hold below stands either way.
+            try:
+                disable_reservation(repo, current)
+            except (ValueError, KeyError, TypeError, OSError,
+                    subprocess.SubprocessError) as error:
+                detail = f'{type(error).__name__}: {error}'[:300]
+                print(f'approval-auto-merge: could not reclaim the armed '
+                      f'reservation on #{number}: {detail}', file=sys.stderr)
+        # Raised past the read-safety block above on purpose: the freeze
+        # stops a new submission and takes back the one an earlier run
+        # already armed. GitHub merging on a pre-freeze reservation is a
+        # submission this gate exists to stop.
+        freeze_skip_comment(repo, number)
+        raise Hold(f'release freeze is on ({FREEZE_VARIABLE}=1): merge '
+                   f'submission skipped for #{number}; no merge request '
+                   f'was made ({FREEZE_LABEL} on the scope top admits a '
+                   f'P0/P1 repair)')
     attempt = None
     if current.get('auto_merge') is None:
         emit({'status': 'enabling_auto_merge', 'pr': selected, 'head': head})
@@ -807,6 +851,49 @@ def close_linked_issues(repo, numbers):
                  'reason': f'{type(error).__name__}: {error}'[:300]}]
 
 
+def freeze_flag(repo):
+    """'1' in the MASC_RELEASE_FREEZE repository variable.
+
+    The shared reader in release-freeze.py owns the precedence and the
+    loud/quiet rules. The worker's REST client raises a typed 404 for a
+    variable that does not exist — the ordinary off state, kept quiet;
+    every other failed read is loud and still fails open (#54644 review).
+    """
+    return FREEZE.freeze_flag(repo, read,
+                              missing=lambda error: isinstance(error, GET.ApiFailure)
+                              and error.status == 404)
+
+
+def freeze_exempt_pull(repo, number):
+    """Whether the scope's top pull request carries the freeze-exempt label."""
+    try:
+        labels = top_pull(repo, number).get('labels') or []
+    except Hold:
+        return False  # the scope has already merged; the hold says so
+    return any(label.get('name') == FREEZE_LABEL for label in labels)
+
+
+def freeze_skip_comment(repo, number):
+    """Leave the skip reason on the pull request. Best effort, never fatal."""
+    body = (f'Merge submission skipped: the release freeze is on (repository '
+            f'variable `{FREEZE_VARIABLE}=1`), and no merge request was made. '
+            f'A P0/P1 repair lands during a freeze only when the scope\'s top '
+            f'pull request carries the `{FREEZE_LABEL}` label; the next review '
+            f'event on it, or a manual dispatch of Approval auto-merge with '
+            f'`pr={number}`, then submits the scope.')
+    try:
+        posted = subprocess.run(['gh', 'api', f'repos/{repo}/issues/{number}/comments',
+                                 '-f', f'body={body}'], check=False,
+                                capture_output=True, text=True)
+    except (OSError, subprocess.SubprocessError) as error:
+        print(f'approval-auto-merge: could not leave the freeze skip comment '
+              f'on #{number}: {type(error).__name__}: {error}', file=sys.stderr)
+        return
+    if posted.returncode:
+        print(f'approval-auto-merge: could not leave the freeze skip comment '
+              f'on #{number}: {(posted.stderr or "").strip()[:300]}', file=sys.stderr)
+
+
 def requested_pr():
     if os.environ['GITHUB_EVENT_NAME'] == 'workflow_dispatch':
         raw = os.environ['DISPATCH_PR']
@@ -889,12 +976,35 @@ def main():
             outcome = resume(repo, receipt, dispatch=not args.dry_run)
             emit({'pr': number, 'result': outcome})
             return 0 if outcome.get('status') in SUCCESS else 1
+        # task-4046: the freeze stops new merge submissions and reservation
+        # arming mechanically. A receipt still followed above only observes a
+        # request an earlier run already submitted, so it stays on the
+        # unfrozen side. The arming pass below still runs its safety disarm
+        # while frozen — a stale reservation must not outlive a run that
+        # could not confirm it — and the freeze hold itself is raised only
+        # where a submission would have happened: inside auto_merge_default
+        # for ordinary scopes, and after `prepare` for native stacks, which
+        # plan no reservation there. A merged scope keeps its ordinary wake
+        # path with no freeze comment (#54644 review). A dry run writes
+        # nothing and stays inspectable during a freeze.
+        frozen = not args.dry_run and freeze_flag(repo)
+        if frozen and freeze_exempt_pull(repo, number):
+            frozen = False
+            print(f'approval-auto-merge: #{number} carries {FREEZE_LABEL} on '
+                  f'its scope top; admitting it despite the freeze',
+                  file=sys.stderr)
         if not args.dry_run:
-            automatic = auto_merge_default(repo, number)
+            automatic = auto_merge_default(repo, number, arm=not frozen)
             if automatic is not None:
                 emit(automatic)
                 return 0
         selected, head, scope = prepare(repo, number)
+        if frozen:
+            freeze_skip_comment(repo, number)
+            raise Hold(f'release freeze is on ({FREEZE_VARIABLE}=1): merge '
+                       f'submission skipped for #{number}; no merge request '
+                       f'was made ({FREEZE_LABEL} on the scope top admits a '
+                       f'P0/P1 repair)')
         if not args.dry_run:
             emit({'status': 'admitted', 'pr': selected, 'head': head, 'scope': scope})
         outcome = ({'status': 'eligible_dry_run'} if args.dry_run else

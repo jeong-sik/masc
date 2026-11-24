@@ -36,9 +36,65 @@ type refusal =
           a userinfo, an empty port or one above 65535, or a byte no host
           holds. *)
 
-(** Names the provider, and the variable, the field or the path that was
-    refused. The value of a secret is in no refusal. *)
+(** Names the provider, structured reason code, and the variable, the field or
+    the path that was refused. The value of a secret is in no refusal. *)
 val refusal_to_string : refusal -> string
+
+(** Structured, secret-free startup/preflight reason a Google or GitHub OAuth
+    login client is disabled or refused. *)
+type disabled_reason =
+  | Not_configured
+  | Secret_env_missing of { env_var : string }
+  | Client_id_empty
+  | Client_secret_empty of { env_var : string option }
+  | Redirect_uri_not_https
+  | Redirect_uri_malformed
+  | Redirect_uri_callback_mismatch of
+      { expected_path : string
+      ; actual_path : string
+      }
+  | Redirect_uri_origin_mismatch of
+      { base_url_origin : string
+      ; redirect_origin : string
+      }
+
+(** Stable snake_case code for structured diagnostics and logs:
+    ["not_configured"], ["secret_env_missing"], ["client_id_empty"],
+    ["client_secret_empty"], ["redirect_uri_not_https"],
+    ["redirect_uri_malformed"], ["redirect_uri_callback_mismatch"], or
+    ["redirect_uri_origin_mismatch"]. *)
+val disabled_reason_code : disabled_reason -> string
+
+(** Human-readable, secret-free explanation of {!disabled_reason}. *)
+val disabled_reason_detail : disabled_reason -> string
+
+(** Structured JSON object carrying ["code"], ["detail"], and non-secret
+    context fields. Secret values never appear. *)
+val disabled_reason_to_json : disabled_reason -> Yojson.Safe.t
+
+(** Maps any startup {!refusal} to its provider and structured
+    {!disabled_reason}. *)
+val disabled_reason_of_refusal : refusal -> Login_routes.provider * disabled_reason
+
+type provider_preflight =
+  | Enabled
+  | Disabled of disabled_reason
+
+type preflight =
+  { google : provider_preflight
+  ; github : provider_preflight
+  }
+
+(** Evaluates both Google and GitHub login clients independently against
+    [getenv] and [base_url] without stopping at the first error, surfacing why
+    each provider is enabled or disabled (never leaking secret values). *)
+val preflight_of_config
+  :  getenv:(string -> string option)
+  -> base_url:Server_request_authority.authority option
+  -> Authz_boot_mode_read.login_clients
+  -> preflight
+
+val preflight_to_json : preflight -> Yojson.Safe.t
 
 (** The clients of a server. *)
 type clients =

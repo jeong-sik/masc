@@ -1611,6 +1611,117 @@ let test_serves_its_table_alone () =
     | exception Served -> ())
 ;;
 
+let test_login_preflight_reports_structured_reasons_without_secrets () =
+  let base_url =
+    match
+      Server_request_authority.make_trust_policy
+        ~bind_host:"127.0.0.1"
+        ~bind_port:8935
+        ~https_port:None
+        ~explicit_base_url:(Some "https://masc.example")
+    with
+    | Ok policy -> Some (Server_request_authority.projection_context policy)
+    | Error error -> Alcotest.fail (Server_request_authority.trust_policy_error_to_string error)
+  in
+  let sentinel_secret = "synthetic-oauth-client-value-never-leak" in
+  let getenv = function
+    | "TEST_GITHUB_SECRET_SET" -> Some sentinel_secret
+    | "TEST_GOOGLE_SECRET_EMPTY" -> Some ""
+    | _ -> None
+  in
+  let preflight_mismatch =
+    Server_account_login.preflight_of_config
+      ~getenv
+      ~base_url
+      { Read.google =
+          Some
+            { Masc_domain.client_id = "google-id"
+            ; redirect_uri = "https://masc.example/auth/oidc/callback"
+            ; client_secret_env = "TEST_GOOGLE_SECRET_MISSING"
+            }
+      ; github =
+          Some
+            { Masc_domain.client_id = "github-id"
+            ; redirect_uri = "https://other.example/auth/github/callback"
+            ; client_secret_env = "TEST_GITHUB_SECRET_SET"
+            }
+      }
+  in
+  (match preflight_mismatch.google with
+   | Server_account_login.Disabled reason ->
+     Alcotest.(check string)
+       "google missing secret env code"
+       "secret_env_missing"
+       (Server_account_login.disabled_reason_code reason)
+   | Server_account_login.Enabled -> Alcotest.fail "google should be disabled");
+  (match preflight_mismatch.github with
+   | Server_account_login.Disabled reason ->
+     Alcotest.(check string)
+       "github origin mismatch code"
+       "redirect_uri_origin_mismatch"
+       (Server_account_login.disabled_reason_code reason)
+   | Server_account_login.Enabled -> Alcotest.fail "github should be disabled");
+  let rendered = Yojson.Safe.to_string (Server_account_login.preflight_to_json preflight_mismatch) in
+  let contains_sub ~sub s =
+    let n = String.length sub in
+    let rec loop i =
+      i + n <= String.length s && (String.equal (String.sub s i n) sub || loop (i + 1))
+    in
+    loop 0
+  in
+  Alcotest.(check bool) "preflight JSON never leaks secret values" false
+    (contains_sub ~sub:sentinel_secret rendered);
+  Alcotest.(check bool) "preflight JSON names secret_env_missing" true
+    (contains_sub ~sub:"secret_env_missing" rendered);
+  Alcotest.(check bool) "preflight JSON names redirect_uri_origin_mismatch" true
+    (contains_sub ~sub:"redirect_uri_origin_mismatch" rendered);
+  let malformed_redirect =
+    { Read.google = None
+    ; github =
+        Some
+          { Masc_domain.client_id = "github-id"
+          ; redirect_uri = "https://operator:" ^ sentinel_secret ^ "@masc.example/auth/github/callback"
+          ; client_secret_env = "TEST_GITHUB_SECRET_SET"
+          }
+    }
+  in
+  (match Server_account_login.clients_of_config ~getenv malformed_redirect with
+   | Error refusal ->
+     let message = Server_account_login.refusal_to_string refusal in
+     Alcotest.(check bool) "the boot refusal omits credentials from a malformed URL" false
+       (contains_sub ~sub:sentinel_secret message);
+     Alcotest.(check bool) "the boot refusal retains the malformed redirect code" true
+       (contains_sub ~sub:"redirect_uri_malformed" message)
+   | Ok _ -> Alcotest.fail "the malformed callback origin must be refused");
+  let preflight_empty =
+    Server_account_login.preflight_of_config
+      ~getenv
+      ~base_url
+      { Read.google =
+          Some
+            { Masc_domain.client_id = "google-id"
+            ; redirect_uri = "https://masc.example/auth/oidc/callback"
+            ; client_secret_env = "TEST_GOOGLE_SECRET_EMPTY"
+            }
+      ; github = None
+      }
+  in
+  (match preflight_empty.google, preflight_empty.github with
+   | Server_account_login.Disabled google_reason, Server_account_login.Disabled github_reason ->
+     Alcotest.(check string)
+       "google empty secret code"
+       "client_secret_empty"
+       (Server_account_login.disabled_reason_code google_reason);
+     Alcotest.(check string)
+       "github unconfigured code"
+       "not_configured"
+       (Server_account_login.disabled_reason_code github_reason)
+   | Server_account_login.Enabled, Server_account_login.Enabled
+   | Server_account_login.Enabled, Server_account_login.Disabled _
+   | Server_account_login.Disabled _, Server_account_login.Enabled ->
+     Alcotest.fail "both providers should be disabled")
+;;
+
 let () =
   Alcotest.run
     "server_accounts"
@@ -1668,6 +1779,10 @@ let () =
             "a redirect is read as it is written"
             `Quick
             test_reads_a_redirect_as_it_is_written
+        ; Alcotest.test_case
+            "login preflight reports structured reasons without leaking secrets"
+            `Quick
+            test_login_preflight_reports_structured_reasons_without_secrets
         ; Alcotest.test_case "it serves its table alone" `Quick test_serves_its_table_alone
         ] )
     ]

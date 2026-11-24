@@ -36,6 +36,38 @@ let set_transaction_cookie sealed =
 
 let clear_transaction_cookie = set_cookie ~name:transaction_cookie ~value:"" ~same_site:"Lax" ~max_age_s:0
 
+type cookie_transport_status =
+  | Https_secure_cookies
+  | Loopback_http_cookies
+  | Non_https_cookies_dropped
+
+let cookie_transport_status ~scheme ~is_loopback =
+  match scheme, is_loopback with
+  | `Https, (true | false) -> Https_secure_cookies
+  | `Http, true -> Loopback_http_cookies
+  | `Http, false -> Non_https_cookies_dropped
+;;
+
+let cookie_transport_code = function
+  | Https_secure_cookies -> "https_secure_cookies"
+  | Loopback_http_cookies -> "loopback_http_cookies"
+  | Non_https_cookies_dropped -> "non_https_cookies_dropped"
+;;
+
+let cookie_transport_warning = function
+  | Https_secure_cookies -> None
+  | Loopback_http_cookies ->
+    Some
+      "This login page is served over plain http:// on loopback. __Host- Secure cookies work in \
+       Chromium and Firefox on 127.0.0.1/localhost, while Safari drops Secure cookies over plain \
+       HTTP (401 on callback). Serve over HTTPS or use Chromium/Firefox locally."
+  | Non_https_cookies_dropped ->
+    Some
+      "This login page is served over plain http:// on a non-loopback host. Browsers discard \
+       __Host- Secure cookies over plain HTTP, so OAuth callbacks will return 401. Serve over \
+       HTTPS (MASC_HTTPS_PORT or a TLS reverse proxy with MASC_HTTP_BASE_URL=https://...)."
+;;
+
 type method_ =
   | Safe
   | Unsafe

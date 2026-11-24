@@ -126,6 +126,11 @@ val http_port_env_key : string
 val masc_http_port : unit -> string
 val masc_http_port_int : unit -> int
 
+val masc_host_opt : unit -> string option
+(** Return the trimmed [MASC_HOST] value, or [None] when it is unset or blank.
+    {!masc_host} maps [None] to {!default_host}; callers that must tell an
+    unconfigured host from an explicit one read this instead. *)
+
 val default_host : string
 val masc_host : unit -> string
 

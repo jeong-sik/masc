@@ -57,6 +57,11 @@ val google_callback_path : string
     path on the address of the server. *)
 val github_callback_path : string
 
+(** Cookie transport on the browser's admitted origin. *)
+val cookie_transport_of_authority
+  :  Server_request_authority.authority
+  -> Authz_browser_request.cookie_transport_status
+
 (** The pages and the routes of a person (plan, preview scope P3, and
     S1a-3b), on top of {!add_routes}:
     - [GET /] and [GET /accounts/invite], the pages of {!Auth_preview}, open

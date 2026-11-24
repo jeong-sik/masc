@@ -23,3 +23,20 @@ val add_routes :
   Http_server_eio.Router.t
 (** [clock] bounds the code exchange and the catalog refresh the callback
     performs; see {!Server_keeper_oauth.finish}. *)
+
+module For_testing : sig
+  type completion_signal =
+    { ok : bool
+    ; keeper : string
+    ; provider : string
+    ; auto_close : bool
+    }
+
+  val render_page
+    :  ?completion:completion_signal
+    -> title:string
+    -> heading:string
+    -> detail:string
+    -> unit
+    -> (string * string) list * string
+end

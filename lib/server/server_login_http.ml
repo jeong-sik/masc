@@ -324,13 +324,37 @@ let gate_request ~request_authority (request : Httpun.Request.t) =
   }
 ;;
 
-let page answer_of (t : R.t) (_ : Httpun.Request.t) reqd =
+let query_param request name =
+  match List.filter (fun (key, (_ : string)) -> String.equal key name) (query_of request) with
+  | [ (_, value) ] -> Some value
+  | [] | _ :: _ :: _ -> None
+;;
+
+let cookie_transport_of_authority authority =
+  let scheme =
+    match Server_request_authority.scheme authority with
+    | Server_request_authority.Https -> `Https
+    | Server_request_authority.Http -> `Http
+  in
+  Q.cookie_transport_status
+    ~scheme
+    ~is_loopback:(Masc_network_defaults.is_loopback_host (Server_request_authority.host authority))
+;;
+
+let page answer_of (t : R.t) (request : Httpun.Request.t) reqd =
+  let return_to = query_param request "return_to" in
+  let cookie_transport =
+    Option.map cookie_transport_of_authority (Server_request_authority.current ())
+  in
   respond
     reqd
     (answer_of
+       ?return_to
+       ?cookie_transport
        ~google:(Option.is_some t.google)
        ~nonce:(Csp_nonce.draw ())
-       ~github:(Option.is_some t.github))
+       ~github:(Option.is_some t.github)
+       ())
 ;;
 
 (* A request is judged on one snapshot of the zone, and only on one the zone

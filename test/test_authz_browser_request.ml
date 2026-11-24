@@ -242,6 +242,29 @@ let texts_are_told_apart () =
     (List.length (List.sort_uniq String.compare texts))
 ;;
 
+let cookie_transport_diagnostics () =
+  Alcotest.(check string)
+    "https has secure cookies"
+    "https_secure_cookies"
+    (Q.cookie_transport_code (Q.cookie_transport_status ~scheme:`Https ~is_loopback:false));
+  Alcotest.(check (option string))
+    "https needs no warning"
+    None
+    (Q.cookie_transport_warning (Q.cookie_transport_status ~scheme:`Https ~is_loopback:true));
+  let loopback_http = Q.cookie_transport_status ~scheme:`Http ~is_loopback:true in
+  Alcotest.(check string) "loopback http code" "loopback_http_cookies" (Q.cookie_transport_code loopback_http);
+  Alcotest.(check bool)
+    "loopback http warns about Safari dropping Secure cookies"
+    true
+    (Option.is_some (Q.cookie_transport_warning loopback_http));
+  let lan_http = Q.cookie_transport_status ~scheme:`Http ~is_loopback:false in
+  Alcotest.(check string) "non-loopback http code" "non_https_cookies_dropped" (Q.cookie_transport_code lan_http);
+  Alcotest.(check bool)
+    "non-loopback http warns that browsers discard __Host- Secure cookies"
+    true
+    (Option.is_some (Q.cookie_transport_warning lan_http))
+;;
+
 let () =
   Alcotest.run
     "authz_browser_request"
@@ -252,6 +275,7 @@ let () =
     ; ( "cookies"
       , [ Alcotest.test_case "values" `Quick the_cookies
         ; Alcotest.test_case "texts" `Quick texts_are_told_apart
+        ; Alcotest.test_case "transport diagnostics" `Quick cookie_transport_diagnostics
         ] )
     ]
 ;;

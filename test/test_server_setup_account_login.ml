@@ -56,6 +56,7 @@ let boundaries () = Eio_main.run (fun env ->
       let router = Server_routes_http_routes_dashboard.add_routes ~sw ~clock:(Eio.Stdenv.clock env)
         (Http_server_eio.Router.create ()) in
       let paths = ["POST","/api/v1/setup/accounts/login";
+        "POST","/api/v1/setup/accounts/login?auth_hints=1";
         "POST","/api/v1/setup/accounts/login/invalid/input";
         "POST","/api/v1/setup/accounts/login/invalid/cancel";
         "GET","/api/v1/setup/accounts/login/invalid"] in
@@ -139,6 +140,36 @@ streaming = true
   check_acp "kimi_acp" Runtime_setup_login_client.Kimi_code "Kimi Code" true;
   check_acp "agy_acp" Runtime_setup_login_client.Antigravity_acp "Antigravity" false
 
+let auth_hint_sse_frames () =
+  let hints : Runtime_setup_login_session.auth_hint list =
+    [ Auth_url { url = "https://auth.openai.com/codex/device" }
+    ; Device_code
+        { code = "A1B2-C3D4E"; verification_uri = Some "https://auth.openai.com/codex/device" }
+    ; Device_code { code = "WDJB-MJHT"; verification_uri = None }
+    ]
+  in
+  let frames query =
+    let request = Httpun.Request.create `POST (Auth_preview.connect_path ^ query) in
+    let emitted = ref [] in
+    let send event json = emitted := (event, Yojson.Safe.to_string json) :: !emitted in
+    let on_auth_hint =
+      Server_setup_account_login.For_testing.auth_hint_sender request ~login_id:"login-123" ~send
+    in
+    Option.iter (fun emit -> List.iter emit hints) on_auth_hint;
+    List.rev !emitted
+  in
+  let frame = pair string string in
+  check (list frame) "existing clients receive no extra frames" [] (frames "");
+  check (list frame) "unrecognized version keeps the existing contract" [] (frames "?auth_hints=2");
+  check (list frame) "opted-in clients receive typed frames bound to the login"
+    [ "auth_url", {|{"login_id":"login-123","url":"https://auth.openai.com/codex/device"}|}
+    ; "device_code",
+      {|{"login_id":"login-123","code":"A1B2-C3D4E","verification_uri":"https://auth.openai.com/codex/device"}|}
+    ; "device_code", {|{"login_id":"login-123","code":"WDJB-MJHT"}|}
+    ]
+    (frames "?auth_hints=1")
+
 let () = run "setup-account-login-routes" [
   "boundaries", [test_case "admin and request boundaries" `Quick boundaries];
-  "acp_refusals", [test_case "client-specific host-keyring refusal messages" `Quick acp_person_refusals]]
+  "acp_refusals", [test_case "client-specific host-keyring refusal messages" `Quick acp_person_refusals];
+  "auth_hints", [test_case "opt-in typed auth_url and device_code SSE frames" `Quick auth_hint_sse_frames]]

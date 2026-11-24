@@ -36,16 +36,6 @@ let pending_for_base_path = Keeper_oauth_pending.for_base_path
    redeemable once. *)
 let callback_path = "/api/v1/keepers/oauth/callback"
 
-let redirect_uri () =
-  match Env_config_core.masc_http_base_url_result () with
-  | Error message ->
-    (* Guessing would build an authorize call the provider redirects
-       somewhere this server is not, and the operator would see the
-       provider's error rather than ours. *)
-    Error (Printf.sprintf "this server does not know its own base URL: %s" message)
-  | Ok base_url -> Ok (base_url ^ callback_path)
-;;
-
 (* RFC 8252 7.3: a provider that accepts only native-app redirects takes
    http://127.0.0.1:<port>/... or http://[::1]:<port>/... and refuses a
    public host. Those two literals are the whole of what 7.3 names, so a
@@ -79,6 +69,31 @@ let loopback_redirect_uri () =
          "this provider accepts only an RFC 8252 loopback callback \
           (127.0.0.1 or [::1]), and this server listens on %s"
          host)
+;;
+
+let redirect_uri () =
+  match Env_config_core.masc_http_base_url_opt () with
+  | Some base_url -> Ok (base_url ^ callback_path)
+  | None ->
+    (* Zero-config local launch: when MASC_HTTP_BASE_URL is unset and MASC_HOST
+       is unset or a wildcard bind (0.0.0.0 / ::), fall back to the local
+       loopback callback so Server_callback providers work locally without
+       manual env exports. *)
+    let use_loopback =
+      match Env_config_core.masc_host_opt () with
+      | None -> true
+      | Some host -> Masc_network_defaults.is_unspecified_host host
+    in
+    let resolved =
+      if use_loopback then loopback_redirect_uri ()
+      else
+        Result.map
+          (fun base_url -> base_url ^ callback_path)
+          (Env_config_core.masc_http_base_url_result ())
+    in
+    Result.map_error
+      (fun message -> Printf.sprintf "this server does not know its own base URL: %s" message)
+      resolved
 ;;
 
 let redirect_uri_for (provider : Provider.t) =

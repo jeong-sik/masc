@@ -171,7 +171,7 @@ let parse raw =
        { status; headers = List.map header lines; body })
 ;;
 
-let exchange router ~meth ~path ~headers ~body =
+let exchange_with_authority ~authority router ~meth ~path ~headers ~body =
   Server_request_authority.with_current authority (fun () ->
     let output = Buffer.create 1024 in
     let connection =
@@ -206,6 +206,10 @@ let exchange router ~meth ~path ~headers ~body =
     in
     drain ();
     parse (Buffer.contents output))
+;;
+
+let exchange router ~meth ~path ~headers ~body =
+  exchange_with_authority ~authority router ~meth ~path ~headers ~body
 ;;
 
 (* ---- a browser ---- *)
@@ -3120,12 +3124,130 @@ let dashboard_bridge_live_engine_regressions () =
           .status))
 ;;
 
+let preview_return_to_and_http_diagnostic () =
+  with_installation (fun t ->
+    let router = Server_login_http.add_person_routes t.routes ~env:t.env ~base_path:t.base t.router in
+    let browser = fresh_browser () in
+    let dashboard_home = send browser router ~meth:"GET" ~path:"/?return_to=%2Fdashboard" in
+    Alcotest.(check int) "GET /?return_to=/dashboard" 200 dashboard_home.status;
+    Alcotest.(check (list string))
+      "honors safe relative return_to=/dashboard"
+      [ "/dashboard" ]
+      (return_to_of dashboard_home.body);
+    Alcotest.(check bool)
+      "loopback HTTP authority surfaces explicit cookie transport note"
+      true
+      (contains ~sub:{|data-cookie-transport="loopback_http_cookies"|} dashboard_home.body);
+    let dashboard_account =
+      send browser router ~meth:"GET" ~path:"/?return_to=%2Fdashboard%23account"
+    in
+    Alcotest.(check (list string))
+      "maps /dashboard#account to console path that passes Local_path and redirects to /dashboard#account"
+      [ Account_page.console_path ]
+      (return_to_of dashboard_account.body);
+    List.iter
+      (fun bad ->
+        let reply =
+          send
+            browser
+            router
+            ~meth:"GET"
+            ~path:("/?return_to=" ^ Uri.pct_encode ~component:`Query_value bad)
+        in
+        Alcotest.(check (list string))
+          ("rejects unsafe return_to " ^ bad)
+          [ Account_page.console_path ]
+          (return_to_of reply.body))
+      [ "//evil.example"
+      ; "https://evil.example/pwn"
+      ; "/\\evil.example"
+      ; "javascript:alert(1)"
+      ; "dashboard"
+      ; "/<script>"
+      ];
+    Alcotest.(check string)
+      "resolve_return_to accepts safe relative path with query"
+      "/dashboard/keepers?tab=active"
+      (Masc.Auth_preview.resolve_return_to (Some "/dashboard/keepers?tab=active"));
+    let projected_of ~bind_host ~explicit_base_url =
+      match
+        Server_request_authority.make_trust_policy
+          ~bind_host
+          ~bind_port:8935
+          ~https_port:None
+          ~explicit_base_url
+      with
+      | Ok policy -> Server_request_authority.projection_context policy
+      | Error error -> Alcotest.fail (Server_request_authority.trust_policy_error_to_string error)
+    in
+    let remote_http =
+      exchange_with_authority
+        ~authority:
+          (projected_of ~bind_host:"127.0.0.1" ~explicit_base_url:(Some "http://masc.example"))
+        router
+        ~meth:"GET"
+        ~path:"/"
+        ~headers:[]
+        ~body:""
+    in
+    Alcotest.(check bool)
+      "loopback bind behind plain-HTTP public host renders non_https_cookies_dropped alert"
+      true
+      (contains ~sub:{|data-cookie-transport="non_https_cookies_dropped"|} remote_http.body
+       && contains ~sub:{|role="alert"|} remote_http.body);
+    let wildcard_local =
+      exchange_with_authority
+        ~authority:(projected_of ~bind_host:"0.0.0.0" ~explicit_base_url:None)
+        router
+        ~meth:"GET"
+        ~path:"/"
+        ~headers:[]
+        ~body:""
+    in
+    Alcotest.(check bool)
+      "wildcard bind serving loopback 127.0.0.1 renders loopback_http_cookies note"
+      true
+      (contains ~sub:{|data-cookie-transport="loopback_http_cookies"|} wildcard_local.body
+       && contains ~sub:{|role="note"|} wildcard_local.body))
+;;
+
+let cookie_diagnostic_uses_browser_origin () =
+  let check_origin label ~bind_host ~base_url expected =
+    let policy =
+      match
+        Server_request_authority.make_trust_policy
+          ~bind_host ~bind_port:8935 ~https_port:None ~explicit_base_url:base_url
+      with
+      | Ok policy -> policy
+      | Error error -> Alcotest.fail (Server_request_authority.trust_policy_error_to_string error)
+    in
+    let status =
+      Server_request_authority.projection_context policy
+      |> Server_login_http.cookie_transport_of_authority
+      |> Authz_browser_request.cookie_transport_code
+    in
+    Alcotest.(check string) label expected status
+  in
+  check_origin "local browser can use an HTTP loopback origin on a wildcard bind"
+    ~bind_host:"0.0.0.0" ~base_url:None "loopback_http_cookies";
+  check_origin "remote HTTP origin remains remote behind a loopback bind"
+    ~bind_host:"127.0.0.1" ~base_url:(Some "http://masc.example") "non_https_cookies_dropped";
+  check_origin "public HTTPS origin can use Secure cookies behind a loopback bind"
+    ~bind_host:"127.0.0.1" ~base_url:(Some "https://masc.example") "https_secure_cookies"
+;;
+
 let () =
   Alcotest.run
     "server_login_http"
     [ ( "login"
       , [ Alcotest.test_case "a browser signs in, acts and signs out" `Quick a_browser_signs_in_acts_and_signs_out
         ; Alcotest.test_case "the preview follows a login" `Quick the_preview_follows_a_login
+        ; Alcotest.test_case
+            "preview return_to validation and loopback HTTP diagnostic"
+            `Quick
+            preview_return_to_and_http_diagnostic
+        ; Alcotest.test_case "cookie diagnostic uses the browser origin" `Quick
+            cookie_diagnostic_uses_browser_origin
         ; Alcotest.test_case "a PAT acts until it is revoked" `Quick a_pat_acts_until_it_is_revoked
         ; Alcotest.test_case "a person calls MCP" `Quick a_person_calls_mcp
         ; Alcotest.test_case "a person keeps Keepers over MCP" `Quick a_person_keeps_keepers_over_mcp

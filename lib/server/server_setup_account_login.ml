@@ -187,6 +187,25 @@ let finish owner ~client ~base_path ~integration_id ~cli_path ~login_id home =
     |> Result.map_error (fun error ->
       "The account was not linked to you: " ^ Authz_provider_account.error_to_string error)
 
+let auth_hint_sse_event ~login_id = function
+  | Session.Auth_url { url } ->
+    "auth_url", `Assoc [ "login_id", `String login_id; "url", `String url ]
+  | Session.Device_code { code; verification_uri } ->
+    let uri_field =
+      match verification_uri with
+      | Some uri -> [ "verification_uri", `String uri ]
+      | None -> []
+    in
+    "device_code", `Assoc ([ "login_id", `String login_id; "code", `String code ] @ uri_field)
+
+let auth_hint_sender request ~login_id ~send =
+  match Server_utils.query_param request "auth_hints" with
+  | Some "1" ->
+    Some (fun hint ->
+      let event, payload = auth_hint_sse_event ~login_id hint in
+      send event payload)
+  | Some _ | None -> None
+
 let start ~owner ~base_path ~body request reqd =
   let actor = actor_of owner in
   let prepared =
@@ -303,17 +322,20 @@ let start ~owner ~base_path ~body request reqd =
           Workspace_dataset_event.announce ~base_path
             Workspace_dataset_event.Account_emails in
         Server_sse_response.close_after response (fun () ->
+          let login_id = Session.id session in
           let on_ready () = send "started" (Receipt.to_json !receipt) in
           let on_output = function
             | Session.Piped (pipe, text) ->
               let stream = match pipe with Session.Stdout -> "stdout" | Stderr -> "stderr" in
               send "output" (`Assoc ["stream", `String stream; "text", `String text])
             | Screen text -> send "screen" (`Assoc ["text", `String text]) in
+          let on_auth_hint = auth_hint_sender request ~login_id ~send in
           let on_input_ready () = send "input_ready" (`Assoc []) in
           let completed =
             try
               Session.monitor session ~env ~is_closed (fun () ->
                 let* () = Session.run ?saved_login:(Client.saved_login_check home)
+                  ?on_auth_hint
                   session ~env ~child_env ~cwd:(Client.home_dir home)
                   ~argv:(Client.argv ~cli_path:spawn_path home) ~terminal:(Client.is_pty home)
                   ~is_closed ~on_ready ~on_output ~on_input_ready
@@ -712,4 +734,5 @@ let verify ~person ~base_path ~body request reqd =
 module For_testing = struct
   let initial_account_for_login = initial_account_for_login
   let finish_login = finish
+  let auth_hint_sender = auth_hint_sender
 end

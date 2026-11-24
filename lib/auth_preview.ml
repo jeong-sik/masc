@@ -57,16 +57,69 @@ let no_github_login =
   "이 서버에는 GitHub 로그인이 설정되어 있지 않아요. 이 서버를 운영하는 사람에게 알려 주세요."
 ;;
 
+let escape_html text =
+  let buffer = Buffer.create (String.length text) in
+  String.iter
+    (function
+      | '&' -> Buffer.add_string buffer "&amp;"
+      | '<' -> Buffer.add_string buffer "&lt;"
+      | '>' -> Buffer.add_string buffer "&gt;"
+      | '"' -> Buffer.add_string buffer "&quot;"
+      | '\'' -> Buffer.add_string buffer "&#39;"
+      | other -> Buffer.add_char buffer other)
+    text;
+  Buffer.contents buffer
+;;
+
+let dashboard_account_path = "/dashboard#account"
+
+(* Strictly validate relative return_to paths via [Oidc_login_transaction.Local_path]
+   (starts with "/", never "//", no scheme or backslash). The dashboard account
+   anchor ["/dashboard#account"] maps to [Account_page.console_path], which passes
+   [Local_path] validation on [/auth/*/start] and 303-redirects to ["/dashboard#account"]. *)
+let resolve_return_to = function
+  | None -> Account_page.console_path
+  | Some raw ->
+    if String.equal raw dashboard_account_path
+    then Account_page.console_path
+    else (
+      match Oidc_login_transaction.Local_path.of_string raw with
+      | Some path -> Oidc_login_transaction.Local_path.to_string path
+      | None -> Account_page.console_path)
+;;
+
+let transport_callout = function
+  | Authz_browser_request.Https_secure_cookies -> []
+  | Authz_browser_request.Loopback_http_cookies as status ->
+    (match Authz_browser_request.cookie_transport_warning status with
+     | None -> []
+     | Some warning ->
+       [ Printf.sprintf
+           "<p id=\"transport-note\" class=\"callout\" role=\"note\" data-cookie-transport=\"%s\">%s</p>"
+           (Authz_browser_request.cookie_transport_code status)
+           (escape_html warning)
+       ])
+  | Authz_browser_request.Non_https_cookies_dropped as status ->
+    (match Authz_browser_request.cookie_transport_warning status with
+     | None -> []
+     | Some warning ->
+       [ Printf.sprintf
+           "<p id=\"transport-note\" class=\"callout\" role=\"alert\" data-cookie-transport=\"%s\">%s</p>"
+           (Authz_browser_request.cookie_transport_code status)
+           (escape_html warning)
+       ])
+;;
+
 (* [label] is what the button says: each page names what the login does
    there. *)
-let start_form ~invite ~github ~label =
+let start_form ~invite ~github ~return_to ~label =
   String.concat
     "\n"
     [ "<form method=\"post\" action=\"/auth/github/start\">"
     ; (if invite then "<input type=\"hidden\" id=\"invite\" name=\"invite\">" else "")
     ; Printf.sprintf
         "<input type=\"hidden\" id=\"return-to\" name=\"return_to\" value=\"%s\">"
-        Account_page.console_path
+        (escape_html return_to)
     ; Printf.sprintf
         "<button id=\"go\" class=\"primary block\"%s>%s</button>"
         (if github then "" else " disabled aria-describedby=\"go-note\"")
@@ -76,7 +129,7 @@ let start_form ~invite ~github ~label =
     ]
 ;;
 
-let google_start_form ~invite ~google ~label =
+let google_start_form ~invite ~google ~return_to ~label =
   if not google
   then ""
   else
@@ -86,7 +139,7 @@ let google_start_form ~invite ~google ~label =
       ; (if invite then "<input type=\"hidden\" id=\"google-invite\" name=\"invite\">" else "")
       ; Printf.sprintf
           "<input type=\"hidden\" name=\"return_to\" value=\"%s\">"
-          Account_page.console_path
+          (escape_html return_to)
       ; Printf.sprintf "<button id=\"google-go\" class=\"button block\">%s</button>" label
       ; "</form>"
       ]
@@ -134,7 +187,9 @@ if (token === "") {
 }|}
 ;;
 
-let invite_page ~google ~nonce ~github =
+let invite_page ?return_to ?(cookie_transport = Authz_browser_request.Https_secure_cookies)
+    ~google ~nonce ~github () =
+  let return_to = resolve_return_to return_to in
   page
     ~google
     ~nonce
@@ -147,11 +202,18 @@ let invite_page ~google ~nonce ~github =
           ; "<h1 id=\"title\">초대를 받았어요</h1>"
           ; "<p id=\"note\">계정으로 로그인하면 초대를 수락하고 이 서버를 쓸 수 있어요.</p>"
           ; "<div id=\"accept\">"
-          ; start_form ~invite:true ~github ~label:"GitHub로 로그인하고 수락하기"
+          ; start_form ~invite:true ~github ~return_to ~label:"GitHub로 로그인하고 수락하기"
           ]
           @ (if google
-             then [ google_start_form ~invite:true ~google ~label:"Google로 로그인하고 수락하기" ]
+             then
+               [ google_start_form
+                   ~invite:true
+                   ~google
+                   ~return_to
+                   ~label:"Google로 로그인하고 수락하기"
+               ]
              else [])
+          @ transport_callout cookie_transport
           @ [ "<ul class=\"notes\">"
             ; "<li>초대 링크는 한 번만 쓸 수 있어요.</li>"
             ; "<li>기한이 지나면 쓸 수 없어요.</li>"
@@ -265,7 +327,9 @@ show();|}
     Authz_browser_request.csrf_header
 ;;
 
-let home_page ~google ~nonce ~github =
+let home_page ?return_to ?(cookie_transport = Authz_browser_request.Https_secure_cookies)
+    ~google ~nonce ~github () =
+  let return_to = resolve_return_to return_to in
   page
     ~google
     ~nonce
@@ -277,11 +341,13 @@ let home_page ~google ~nonce ~github =
           ; "<div class=\"card\">"
           ; "<h1>로그인</h1>"
           ; "<p>초대받은 계정으로 로그인하면 내 구독을 연결하고 내 Keeper를 만들 수 있어요.</p>"
-          ; start_form ~invite:false ~github ~label:"GitHub로 계속하기"
+          ; start_form ~invite:false ~github ~return_to ~label:"GitHub로 계속하기"
           ]
           @ (if google
-             then [ google_start_form ~invite:false ~google ~label:"Google로 계속하기" ]
+             then
+               [ google_start_form ~invite:false ~google ~return_to ~label:"Google로 계속하기" ]
              else [])
+          @ transport_callout cookie_transport
           @ [ "</div>"
             ; "<p class=\"hint center\">초대 링크를 받았다면 그 링크를 먼저 열어 주세요. 초대는 이 서버를 운영하는 사람에게 요청할 수 있어요.</p>"
             ; "</div>"

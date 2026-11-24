@@ -4,13 +4,65 @@ module Http = Http_server_eio
 
 let escape = Server_oauth_service.html_escape
 
-let page ~title ~heading ~detail =
-  Printf.sprintf
-    {|<!doctype html>
+type completion_signal =
+  { ok : bool
+  ; keeper : string
+  ; provider : string
+  ; auto_close : bool
+  }
+
+(* Static script with no interpolated request data: reads HTML-escaped data-*
+   attributes from #oauth-result so popup completion signals stay strictly
+   same-origin and CSP-nonce-compliant without JS string injection. Auto-close
+   is gated on data-auto-close="true" so warnings or tool-discovery failures
+   stay visible to the operator while the opener still refreshes immediately. *)
+let completion_script =
+  {|(function(){var el=document.getElementById("oauth-result");if(!el)return;var payload={type:"masc:oauth-complete",ok:el.getAttribute("data-ok")==="true",keeper:el.getAttribute("data-keeper")||"",provider:el.getAttribute("data-provider")||""};try{if(window.opener&&typeof window.opener.postMessage==="function"){window.opener.postMessage(payload,window.location.origin);}}catch(_e){}if(payload.ok&&el.getAttribute("data-auto-close")==="true"&&window.opener){try{window.close();}catch(_e){}}})();|}
+;;
+
+let render_page ~nonce ?completion ~title ~heading ~detail () =
+  let csp =
+    match completion with
+    | Some _ ->
+      Printf.sprintf
+        "default-src 'none'; script-src %s; style-src %s; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+        (Csp_nonce.source nonce)
+        (Csp_nonce.source nonce)
+    | None ->
+      Printf.sprintf
+        "default-src 'none'; style-src %s; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+        (Csp_nonce.source nonce)
+  in
+  let headers =
+    [ "cache-control", "no-store"
+    ; "referrer-policy", "no-referrer"
+    ; "content-security-policy", csp
+    ]
+  in
+  let main_attrs, script_tag =
+    match completion with
+    | None -> "", ""
+    | Some { ok; keeper; provider; auto_close } ->
+      let attrs =
+        Printf.sprintf
+          {| id="oauth-result" data-ok="%s" data-auto-close="%s" data-keeper="%s" data-provider="%s"|}
+          (if ok then "true" else "false")
+          (if auto_close then "true" else "false")
+          (escape keeper)
+          (escape provider)
+      in
+      let script =
+        Printf.sprintf "\n<script %s>%s</script>" (Csp_nonce.attribute nonce) completion_script
+      in
+      attrs, script
+  in
+  let body =
+    Printf.sprintf
+      {|<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>%s</title>
-<style>
+<style %s>
  :root { color-scheme: light dark; }
  body { font: 15px/1.6 ui-sans-serif, system-ui, sans-serif;
         margin: 0; min-height: 100vh; display: grid; place-items: center; }
@@ -18,13 +70,23 @@ let page ~title ~heading ~detail =
  h1 { font-size: 1.25rem; margin: 0 0 .5rem; }
  p { margin: 0; opacity: .8; }
 </style></head>
-<body><main><h1>%s</h1><p>%s</p></main></body></html>
+<body><main%s><h1>%s</h1><p>%s</p></main>%s</body></html>
 |}
-    (escape title) (escape heading) (escape detail)
+      (escape title)
+      (Csp_nonce.attribute nonce)
+      main_attrs
+      (escape heading)
+      (escape detail)
+      script_tag
+  in
+  headers, body
 ;;
 
-let respond_page ?status reqd ~title ~heading ~detail =
-  Http.Response.html ?status (page ~title ~heading ~detail) reqd
+let respond_page ?status ?completion reqd ~title ~heading ~detail =
+  let headers, body =
+    render_page ~nonce:(Csp_nonce.draw ()) ?completion ~title ~heading ~detail ()
+  in
+  Http.Response.html ?status ~headers body reqd
 ;;
 
 let handle_callback ~clock request reqd =
@@ -57,7 +119,17 @@ let handle_callback ~clock request reqd =
             ~now:(Unix.gettimeofday ())
         with
         | Ok attached ->
+          let auto_close =
+            Option.is_none attached.Server_keeper_oauth.warning
+            && Result.is_ok attached.Server_keeper_oauth.tool_discovery
+          in
           respond_page reqd ~title:"masc"
+            ~completion:
+              { ok = true
+              ; keeper = attached.Server_keeper_oauth.keeper
+              ; provider = attached.Server_keeper_oauth.provider_id
+              ; auto_close
+              }
             ~heading:
               (Printf.sprintf "%s is attached to %s" attached.Server_keeper_oauth.keeper
                  attached.Server_keeper_oauth.provider_label)
@@ -220,3 +292,16 @@ let add_routes ~clock router =
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/keepers/oauth/client" handle_set_client
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/keepers/oauth/disconnect" (handle_disconnect ~clock)
 ;;
+
+module For_testing = struct
+  type nonrec completion_signal = completion_signal =
+    { ok : bool
+    ; keeper : string
+    ; provider : string
+    ; auto_close : bool
+    }
+
+  let render_page ?completion ~title ~heading ~detail () =
+    render_page ~nonce:(Csp_nonce.draw ()) ?completion ~title ~heading ~detail ()
+  ;;
+end

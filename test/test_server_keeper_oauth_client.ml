@@ -28,6 +28,16 @@ let with_env name value f =
       | None -> Unix.unsetenv name)
     f
 
+let without_env name f =
+  let previous = Sys.getenv_opt name in
+  Unix.unsetenv name;
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some previous -> Unix.putenv name previous
+      | None -> Unix.unsetenv name)
+    f
+
 let identity_dir base_path =
   Filename.concat (Filename.concat base_path ".masc") "identity"
 
@@ -291,6 +301,117 @@ let test_each_provider_names_the_callback_it_accepts () =
         check Alcotest.bool "slack's row names none of its own" true
           (Option.bind (row "slack") (List.assoc_opt "callback") = None))))
 
+let contains_sub ~sub text =
+  let sub_len = String.length sub in
+  let text_len = String.length text in
+  let rec loop i =
+    i + sub_len <= text_len
+    && (String.equal (String.sub text i sub_len) sub || loop (i + 1))
+  in
+  loop 0
+
+let test_server_callback_falls_back_to_loopback_zero_config () =
+  let slack = provider_or_fail "slack" in
+  let expected = "http://127.0.0.1:55138/api/v1/keepers/oauth/callback" in
+  without_env "MASC_HTTP_BASE_URL" (fun () ->
+    without_env "MASC_HOST" (fun () ->
+      with_env "MASC_HTTP_PORT" "55138" (fun () ->
+        check (Alcotest.result Alcotest.string Alcotest.pass)
+          "unset MASC_HTTP_BASE_URL and MASC_HOST falls back to local loopback"
+          (Ok expected)
+          (Oauth.redirect_uri_for slack);
+        check Alcotest.bool "callback_json reports loopback url without problem" true
+          (Oauth.callback_json () = `Assoc [ "url", `String expected ]))));
+  without_env "MASC_HTTP_BASE_URL" (fun () ->
+    with_env "MASC_HTTP_PORT" "55138" (fun () ->
+      List.iter
+        (fun host ->
+          with_env "MASC_HOST" host (fun () ->
+            check (Alcotest.result Alcotest.string Alcotest.pass)
+              ("wildcard MASC_HOST=" ^ host ^ " falls back to 127.0.0.1")
+              (Ok expected)
+              (Oauth.redirect_uri_for slack)))
+        [ "0.0.0.0"; "::" ]));
+  with_env "MASC_HTTP_BASE_URL" "https://masc.example.org" (fun () ->
+    without_env "MASC_HOST" (fun () ->
+      check (Alcotest.result Alcotest.string Alcotest.pass)
+        "explicit MASC_HTTP_BASE_URL takes precedence over loopback fallback"
+        (Ok "https://masc.example.org/api/v1/keepers/oauth/callback")
+        (Oauth.redirect_uri_for slack)))
+
+let test_callback_completion_page_signals_opener_under_csp () =
+  let headers, body =
+    Server_keeper_oauth_http.For_testing.render_page
+      ~completion:
+        { Server_keeper_oauth_http.For_testing.ok = true
+        ; keeper = "keeper-\"<1>"
+        ; provider = "linear"
+        ; auto_close = true
+        }
+      ~title:"masc"
+      ~heading:"Attached"
+      ~detail:"3 tools discovered."
+      ()
+  in
+  check (Alcotest.option Alcotest.string) "no-store header" (Some "no-store")
+    (List.assoc_opt "cache-control" headers);
+  check (Alcotest.option Alcotest.string) "no-referrer header" (Some "no-referrer")
+    (List.assoc_opt "referrer-policy" headers);
+  let csp =
+    match List.assoc_opt "content-security-policy" headers with
+    | Some value -> value
+    | None -> Alcotest.fail "missing content-security-policy header"
+  in
+  check Alcotest.bool "CSP enables nonce script-src" true
+    (contains_sub ~sub:"script-src 'nonce-" csp);
+  check Alcotest.bool "CSP enables nonce style-src" true
+    (contains_sub ~sub:"style-src 'nonce-" csp);
+  check Alcotest.bool "escaped keeper in data attribute" true
+    (contains_sub ~sub:{|data-keeper="keeper-&quot;&lt;1&gt;"|} body);
+  check Alcotest.bool "provider in data attribute" true
+    (contains_sub ~sub:{|data-provider="linear"|} body);
+  check Alcotest.bool "auto_close=true enables auto-close" true
+    (contains_sub ~sub:{|data-auto-close="true"|} body
+     && contains_sub ~sub:{|el.getAttribute("data-auto-close")==="true"|} body);
+  check Alcotest.bool "same-origin postMessage completion signal" true
+    (contains_sub ~sub:{|masc:oauth-complete|} body
+     && contains_sub ~sub:{|window.opener.postMessage(payload,window.location.origin)|} body);
+  check Alcotest.bool "auto-closes popup window when gated" true
+    (contains_sub ~sub:{|window.close()|} body);
+  let _warn_headers, warn_body =
+    Server_keeper_oauth_http.For_testing.render_page
+      ~completion:
+        { Server_keeper_oauth_http.For_testing.ok = true
+        ; keeper = "keeper-1"
+        ; provider = "linear"
+        ; auto_close = false
+        }
+      ~title:"masc"
+      ~heading:"Attached with warning"
+      ~detail:"Token expires without renewal."
+      ()
+  in
+  check Alcotest.bool "warning/discovery-failure disables auto-close while still signaling opener"
+    true
+    (contains_sub ~sub:{|data-auto-close="false"|} warn_body
+     && contains_sub ~sub:{|masc:oauth-complete|} warn_body);
+  let err_headers, err_body =
+    Server_keeper_oauth_http.For_testing.render_page
+      ~title:"masc"
+      ~heading:"Refused"
+      ~detail:"access_denied"
+      ()
+  in
+  let err_csp =
+    match List.assoc_opt "content-security-policy" err_headers with
+    | Some value -> value
+    | None -> Alcotest.fail "missing error CSP header"
+  in
+  check Alcotest.bool "error page omits script-src" false
+    (contains_sub ~sub:"script-src" err_csp);
+  check Alcotest.bool "error page emits no script element" false
+    (contains_sub ~sub:"<script" err_body)
+
 let () =
   Alcotest.run "server_keeper_oauth_client"
     [ ( "recording an operator's own app",
@@ -318,5 +439,9 @@ let () =
             test_clearing_an_app_removes_old_secret_and_scopes;
           Alcotest.test_case "each provider names the callback it accepts" `Quick
             test_each_provider_names_the_callback_it_accepts;
+          Alcotest.test_case "zero-config local loopback fallback for server_callback providers"
+            `Quick test_server_callback_falls_back_to_loopback_zero_config;
+          Alcotest.test_case "callback completion HTML emits CSP-safe opener signal and close"
+            `Quick test_callback_completion_page_signals_opener_under_csp;
         ] );
     ]

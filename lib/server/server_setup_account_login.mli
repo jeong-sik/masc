@@ -75,6 +75,10 @@ val person_target :
 
 val start : owner:owner -> base_path:string -> body:string ->
   Httpun.Request.t -> Http_reqd.t -> unit
+(** Starts the account login stream. [auth_hints=1] in the start request
+    opts into [auth_url] and [device_code] events. The default stream retains
+    the original set of events for existing clients. *)
+
 val control : owner:owner -> base_path:string -> body:string ->
   Httpun.Request.t -> Http_reqd.t -> unit
 
@@ -209,4 +213,10 @@ module For_testing : sig
     -> login_id:string
     -> Runtime_setup_login_client.t
     -> (Runtime_setup_login_receipt.account, string) result
+
+  val auth_hint_sender
+    :  Httpun.Request.t
+    -> login_id:string
+    -> send:(string -> Yojson.Safe.t -> unit)
+    -> (Runtime_setup_login_session.auth_hint -> unit) option
 end

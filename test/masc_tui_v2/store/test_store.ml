@@ -15799,6 +15799,12 @@ let test_live_chat_activity_uses_open_content_and_tool_receipts () =
     custom m "KEEPER_STREAM_MESSAGE_STOP"
       (Printf.sprintf {|{"content_generation":3,"stream_scope":%d}|} scope)
   in
+  let start m scope =
+    custom m "KEEPER_STREAM_MESSAGE_START"
+      (Printf.sprintf
+         {|{"content_generation":3,"stream_scope":%d,"provider_message_id":"message","model":"model"}|}
+         scope)
+  in
   let m =
     apply_json model
       {|{"type":"TEXT_MESSAGE_CONTENT","delta":"Earlier reply text","textResponse":{"content_generation":3,"stream_scope":1}}|}
@@ -15837,6 +15843,13 @@ let test_live_chat_activity_uses_open_content_and_tool_receipts () =
     Phase_streaming trailing_text;
   check_phase "same-response model output leaves the tool result pending"
     (Phase_tool_waiting "Read") (stop trailing_text 2);
+  check_phase "a same-scope prelude leaves the tool result pending"
+    (Phase_tool_waiting "Read") (start args_ended 2);
+  let next_response = start args_ended 3 in
+  check_phase "a newer response prelude retires the earlier tool before any content"
+    Phase_awaiting_turn next_response;
+  check_phase "the first content sets activity after the new response prelude"
+    Phase_thinking (content next_response ~scope:3 ~block:1 "thinking" "observed");
   check_phase "fresh content can follow an unadmitted tool in the next response"
     Phase_thinking (content args_ended ~scope:3 ~block:1 "thinking" "observed");
   let next_tool = apply_json args_ended

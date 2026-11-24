@@ -1070,6 +1070,7 @@ let apply_chat_stream_chunk ~now ~keeper ~request_id ~is_btw ~chunk (m : Model.t
       | Wire_fleet.Chunk_thinking_delta _
       | Wire_fleet.Chunk_thinking_snapshot _
       | Wire_fleet.Chunk_model_content _
+      | Wire_fleet.Chunk_model_response_start _
       | Wire_fleet.Chunk_model_response_stop _
       | Wire_fleet.Chunk_tool_start _
       | Wire_fleet.Chunk_tool_args _
@@ -1169,6 +1170,7 @@ let apply_chat_stream_chunk ~now ~keeper ~request_id ~is_btw ~chunk (m : Model.t
            | None ->
                (Drafts.mark_failed_retryable ~now ~request_id ~reason:message m.drafts, [history]))
       | Wire_fleet.Chunk_model_content _
+      | Wire_fleet.Chunk_model_response_start _
       | Wire_fleet.Chunk_model_response_stop _
       | Wire_fleet.Chunk_tool_quarantined _
       | Wire_fleet.Chunk_tool_block_end _

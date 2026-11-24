@@ -1016,6 +1016,10 @@ let close_tool_block tool =
 let tool_from_earlier_scope ~stream_scope tool =
   Option.exists (fun scope -> scope < stream_scope) tool.stream_scope
 
+let retire_tool_from_earlier_scope ~stream_scope tool =
+  if tool_from_earlier_scope ~stream_scope tool then retire_pending_tool tool
+  else tool
+
 let note_tool_during_model_output ~stream_scope tool =
   if tool_from_earlier_scope ~stream_scope tool then
     retire_pending_tool tool
@@ -1074,6 +1078,7 @@ let is_explicit_execution_start = function
   | Wire_fleet.Chunk_thinking_delta _
   | Wire_fleet.Chunk_thinking_snapshot _
   | Wire_fleet.Chunk_model_content _
+  | Wire_fleet.Chunk_model_response_start _
   | Wire_fleet.Chunk_model_response_stop _
   | Wire_fleet.Chunk_tool_start _
   | Wire_fleet.Chunk_tool_args _
@@ -1103,6 +1108,7 @@ let is_queued_acceptance = function
   | Wire_fleet.Chunk_thinking_delta _
   | Wire_fleet.Chunk_thinking_snapshot _
   | Wire_fleet.Chunk_model_content _
+  | Wire_fleet.Chunk_model_response_start _
   | Wire_fleet.Chunk_model_response_stop _
   | Wire_fleet.Chunk_tool_start _
   | Wire_fleet.Chunk_tool_args _
@@ -1168,6 +1174,12 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
               if model_activity == b.model_activity && tools == b.tools then b
               else { b with model_activity; tools })
         t
+  | Wire_fleet.Chunk_model_response_start { operation_id; stream_scope } ->
+      update_live_stream ~keeper ~request_id ~operation_id
+        (fun b ->
+          let tools = List.map (retire_tool_from_earlier_scope ~stream_scope) b.tools in
+          { b with tools })
+        t
   | Wire_fleet.Chunk_model_response_stop { operation_id; owner } ->
       update_model_activity ~keeper ~request_id ~operation_id
         (fun current -> stop_model_response current owner) t
@@ -1200,6 +1212,7 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
         | Wire_fleet.Chunk_thinking_delta _
         | Wire_fleet.Chunk_thinking_snapshot _
         | Wire_fleet.Chunk_model_content _
+        | Wire_fleet.Chunk_model_response_start _
         | Wire_fleet.Chunk_model_response_stop _
         | Wire_fleet.Chunk_tool_start _
         | Wire_fleet.Chunk_tool_args _
@@ -1353,11 +1366,9 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
                       if String.equal tool.tool_use_id tool_use_id then None
                       else
                         let tool =
-                          if Option.exists
-                               (fun stream_scope -> tool_from_earlier_scope ~stream_scope tool)
-                               stream_scope
-                          then retire_pending_tool tool
-                          else tool
+                          match stream_scope with
+                          | Some stream_scope -> retire_tool_from_earlier_scope ~stream_scope tool
+                          | None -> tool
                         in
                         Some tool)
                     prev.tools
@@ -1491,6 +1502,7 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
                   tools = retire_pending_tools prev.tools;
                 }
             | Wire_fleet.Chunk_model_content _
+            | Wire_fleet.Chunk_model_response_start _
             | Wire_fleet.Chunk_model_response_stop _
             | Wire_fleet.Chunk_tool_quarantined _
             | Wire_fleet.Chunk_tool_block_end _

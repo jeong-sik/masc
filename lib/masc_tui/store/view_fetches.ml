@@ -151,7 +151,7 @@ let chat_status_fetches ~keeper (m : Model.t) =
   Drafts.pending_txs_for_keeper ~keeper m.drafts
   |> List.filter_map (fun (tx : Drafts.pending_message) ->
        match tx.state with
-       | Drafts.Delivered | Drafts.Failed_retryable _ -> None
+       | Drafts.Delivered | Drafts.No_operation_record | Drafts.Failed_retryable _ -> None
        | Drafts.Sending | Drafts.Queued | Drafts.Pending_processing | Drafts.Interrupting
        | Drafts.Confirming_delivery ->
            if has_stream tx.request_id then None

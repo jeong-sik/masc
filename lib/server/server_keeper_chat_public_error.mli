@@ -20,7 +20,7 @@ type t = private
 val make : incident_id:string -> kind -> t
 (** [incident_id] is an existing operation identity or a server-generated ID,
     never a diagnostic or caller error message. No text classifier is used. *)
-val to_json : t -> Yojson.Safe.t
+val to_json : ?absence:Keeper_chat_operation_read.absence -> t -> Yojson.Safe.t
 
 val failure_fields : t -> (string * Yojson.Safe.t) list
 (** Fixed public detail, stable error code and the same incident identity for

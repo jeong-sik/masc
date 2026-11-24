@@ -505,6 +505,9 @@ type chat_operation = {
 
 val chat_queue_path : keeper:string -> after:int64 option -> string
 val chat_operation_path : keeper:string -> operation_id:string -> string
+val is_absent_operation_error : keeper:string -> operation_id:string -> status:int -> body:string -> bool
+(** Only a scoped 404 from a successful exact owner lookup carries this evidence. *)
+
 val decode_chat_operation : Yojson.Safe.t -> (chat_operation, string) result
 val decode_chat_queue :
   after:int64 option -> Yojson.Safe.t -> (chat_operation list, string) result

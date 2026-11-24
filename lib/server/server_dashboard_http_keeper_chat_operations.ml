@@ -84,13 +84,14 @@ let mutation_route path =
 
 let error_json = Public_error.to_json
 
-let respond_error request reqd (error : api_error) =
+let error_response ?absence (error : api_error) =
   Log.Dashboard.warn "keeper_chat_operation_api error=%s" error.code;
-  Server_auth.respond_json_value_with_cors
-    ~status:error.status
-    request
-    reqd
-    (error_json error)
+  error.status, error_json ?absence error
+;;
+
+let respond_error request reqd (error : api_error) =
+  let status, body = error_response error in
+  Server_auth.respond_json_value_with_cors ~status request reqd body
 ;;
 
 let public_error kind detail =
@@ -102,6 +103,12 @@ let public_error kind detail =
 
 let invalid_input message = public_error Public_error.Invalid_input message
 let unknown_operation message = public_error Public_error.Unknown_operation message
+let absent_operation_response ~keeper_name operation_id =
+  let error = unknown_operation
+      ("unknown Keeper chat operation: " ^ Operation_id.to_string operation_id) in
+  error_response ~absence:{ keeper_name; operation_id } error
+;;
+
 let unavailable kind message = public_error kind message
 let gone kind message = public_error kind message
 
@@ -609,11 +616,8 @@ let handle_get state request reqd = function
        (match Registry.exact_operation ~base_path:(base_path state) ~keeper_name operation_id with
         | Error error -> respond_error request reqd (api_error_of_command_error error)
         | Ok None ->
-          respond_error
-            request
-            reqd
-            (unknown_operation
-               ("unknown Keeper chat operation: " ^ Operation_id.to_string operation_id))
+          let status, body = absent_operation_response ~keeper_name operation_id in
+          Server_auth.respond_json_value_with_cors ~status request reqd body
         | Ok (Some operation) ->
           Log.Dashboard.debug
             "keeper_chat_operation_get keeper=%s operation_id=%s state=%s"
@@ -786,6 +790,7 @@ let handle_mutation state request reqd route body =
 
 module For_testing = struct
   let public_operation_json = public_operation_json
+  let absent_operation_response = absent_operation_response
 
   let invalid_input_response detail =
     let error = invalid_input detail in

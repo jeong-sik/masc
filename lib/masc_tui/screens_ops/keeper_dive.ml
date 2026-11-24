@@ -630,42 +630,31 @@ let build_pending_tx_rows ~(theme : Theme.t) ~(model : Model.t) ~width
   List.map
     (fun (item : Chat_transcript.pending_tx_projection) ->
       let tx = item.tx in
-      if item.error_only then
-        let reason =
-          match tx.state with
-          | Drafts.Failed_retryable { reason } -> reason
-          | Drafts.Queued
-          | Drafts.Sending
-          | Drafts.Pending_processing
-          | Drafts.Confirming_delivery
-          | Drafts.Interrupting
-          | Drafts.Delivered ->
-              ""
-        in
-        let notice =
-          Ops_common.say model
-            ~ko:("전송 실패: " ^ reason)
-            ~en:("Send failed: " ^ reason)
-        in
-        single_span_row ~rail_rgb:theme.status_critical
-          ~prefix:(Glyph.to_utf8 Glyph.Live_failing ^ " ")
-          ~prefix_fg:theme.status_critical ~prefix_attrs:Attr.bold
-          ~text:
-            (Grapheme.truncate_to_width
-               ~max_width:(Int.max 12 (width - 22))
-               notice)
-          ~text_fg:theme.status_critical ~attrs:Attr.bold
+      if item.notice_only then
+        let notice, tone = match tx.state with
+          | Drafts.No_operation_record -> Say.resolve model.lang (Drafts.absence_notice tx), theme.status_attention
+          | Drafts.Failed_retryable { reason } ->
+              Ops_common.say model ~ko:("전송 실패: " ^ reason) ~en:("Send failed: " ^ reason), theme.status_critical
+          | Queued | Sending | Pending_processing | Confirming_delivery | Interrupting | Delivered ->
+              "", theme.text_muted in
+        single_span_row ~rail_rgb:tone
+          ~prefix:(if tx.state = Drafts.No_operation_record then "· " else Glyph.to_utf8 Glyph.Live_failing ^ " ")
+          ~prefix_fg:tone ~prefix_attrs:Attr.bold
+          ~text:(Grapheme.truncate_to_width ~max_width:(Int.max 12 (width - 22)) notice)
+          ~text_fg:tone ~attrs:Attr.bold
           ~right_meta:(Ops_common.say model ~ko:"[X] 닫기" ~en:"[X] dismiss")
           ~right_meta_fg:theme.text_muted ~right_meta_attrs:Attr.italic
           ~bg_rgb:theme.surface_1 ()
       else
         let state_str =
-          match Drafts.tx_state_label tx.state with
-          | Some state_say -> Say.resolve model.lang state_say
-          | None -> ""
+          if tx.state = Drafts.No_operation_record then Say.resolve model.lang (Drafts.absence_notice tx)
+          else match Drafts.tx_state_label tx.state with
+            | Some state_say -> Say.resolve model.lang state_say
+            | None -> ""
         in
         let state_fg =
           match tx.state with
+          | Drafts.No_operation_record -> theme.status_attention
           | Drafts.Failed_retryable _ -> theme.status_critical
           | Drafts.Queued | Drafts.Sending | Drafts.Interrupting ->
               theme.status_attention
@@ -690,6 +679,7 @@ let build_pending_tx_rows ~(theme : Theme.t) ~(model : Model.t) ~width
           match tx.state with
           | Drafts.Failed_retryable { reason } ->
               Printf.sprintf "%s (%s)" body_preview reason
+          | Drafts.No_operation_record
           | Drafts.Queued
           | Drafts.Sending
           | Drafts.Pending_processing
@@ -700,7 +690,7 @@ let build_pending_tx_rows ~(theme : Theme.t) ~(model : Model.t) ~width
         in
         let pill =
           match tx.state with
-          | Drafts.Failed_retryable _ ->
+          | Drafts.No_operation_record | Drafts.Failed_retryable _ ->
               Printf.sprintf "%s · %s" state_str
                 (Ops_common.say model ~ko:"[X] 닫기" ~en:"[X] dismiss")
           | Drafts.Queued

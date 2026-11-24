@@ -988,7 +988,7 @@ let allow_stream_takeover ~keeper ~request_id (m : Model.t) =
               String.equal tx.request_id request_id)
             m.drafts.pending_txs
         with
-        | Some { state = Drafts.Delivered | Drafts.Failed_retryable _; _ } ->
+        | Some { state = Drafts.Delivered | Drafts.No_operation_record | Drafts.Failed_retryable _; _ } ->
             true
         | Some
             {
@@ -1123,20 +1123,18 @@ let apply_chat_stream_chunk ~now ~keeper ~request_id ~is_btw ~chunk (m : Model.t
                    { keeper; limit = Some 80; cursor = None });
             ] )
       | Wire_fleet.Chunk_error { message; _ } ->
-          let accepted_operation =
-            Drafts.pending_txs_for_keeper ~keeper m.drafts
-            |> List.find_map (fun (tx : Drafts.pending_message) ->
-                 if String.equal tx.request_id request_id then tx.operation_id else None)
-          in
+          let tx = Drafts.pending_txs_for_keeper ~keeper m.drafts
+            |> List.find_opt (fun (tx : Drafts.pending_message) -> String.equal tx.request_id request_id) in
           let history = get_cmd m.epoch
             (Cmd.Get_chat_history { keeper; limit = Some 80; cursor = None }) in
-          (match accepted_operation with
+          if Option.fold ~none:false ~some:(fun (tx : Drafts.pending_message) -> tx.state = Drafts.No_operation_record) tx then
+            (m.drafts, [])
+          else (match Option.bind tx (fun (tx : Drafts.pending_message) -> tx.operation_id) with
            | Some operation_id ->
-               (* An error from reattaching the stream is not an operation verdict. *)
                (Drafts.mark_confirming ~now ~request_id m.drafts,
                 [history; get_cmd m.epoch (Cmd.Get_chat_status { keeper; operation_id })])
-           | None -> (Drafts.mark_failed_retryable ~now ~request_id ~reason:message m.drafts,
-                      [history]))
+           | None ->
+               (Drafts.mark_failed_retryable ~now ~request_id ~reason:message m.drafts, [history]))
       | Wire_fleet.Chunk_ignored -> (m.drafts, [])
     in
     ({ m with fleet; drafts }, cmds)
@@ -1197,7 +1195,7 @@ let apply_chat_stream_done ~now ~keeper ~request_id ~is_btw ~result (m : Model.t
           Fleet_store.finish_chat_stream ~keeper ~request_id ~error:None m.fleet
         in
         (match tx_state_opt with
-        | Some Drafts.Delivered -> ({ m with fleet }, [])
+        | Some (Drafts.Delivered | Drafts.No_operation_record) -> ({ m with fleet }, [])
         | Some (Drafts.Failed_retryable _) ->
             ({ m with fleet }, [ hist_cmd m.epoch ])
         | Some
@@ -1209,6 +1207,9 @@ let apply_chat_stream_done ~now ~keeper ~request_id ~is_btw ~result (m : Model.t
         | None ->
             let drafts = Drafts.mark_confirming ~now ~request_id m.drafts in
             ({ m with fleet; drafts }, reads m.epoch))
+    | Error err when Option.equal Drafts.equal_tx_state tx_state_opt (Some Drafts.No_operation_record) ->
+        let fleet = Fleet_store.finish_chat_stream ~keeper ~request_id ~error:None m.fleet in
+        Update_http.record_http_incident ~now ~source:(Health.Source_keeper keeper) ~context err { m with fleet }
     | Error err
       when refused_by_another_instance err && accepted
       ->

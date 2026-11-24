@@ -76,7 +76,7 @@ type stream_projection = {
 
 type pending_tx_projection = {
   tx : Drafts.pending_message;
-  error_only : bool;
+  notice_only : bool;
 }
 
 type transcript_section =

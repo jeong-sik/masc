@@ -2765,6 +2765,8 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                         ( Say.resolve lang
                             (Say.make ~ko:"전송 완료" ~en:"Delivered"),
                           ok_st )
+                    | Drafts.No_operation_record ->
+                        (Say.resolve lang (Drafts.absence_notice tx), attn_st)
                     | Drafts.Failed_retryable { reason } ->
                         ( Say.resolve lang
                             (Say.make ~ko:("전송 실패: " ^ reason)

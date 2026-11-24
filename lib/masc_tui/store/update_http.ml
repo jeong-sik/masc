@@ -149,7 +149,8 @@ let confirm_pending_txs_from_history ~now ~keeper
     (fun acc (tx : Drafts.pending_message) ->
       let op = Option.value tx.operation_id ~default:tx.request_id in
       if String_set.mem op terminals then Drafts.remove_tx ~request_id:tx.request_id acc
-      else if tx.state = Drafts.Sending &&
+      else if (tx.state = Drafts.Sending ||
+               (tx.state = Drafts.No_operation_record && Option.is_none tx.operation_id)) &&
               Option.equal String.equal (String_map.find_opt op inputs) (Some tx.body)
       then Drafts.mark_accepted ~now ~request_id:tx.request_id ~operation_id:(Some op) acc
       else acc)
@@ -367,7 +368,19 @@ let apply_http_reply ~now (m : Model.t) reply =
       then (m, [])
       else
         let set read =
-          { m with fleet = Fleet_store.set_chat_queue ~keeper { operations; read } m.fleet } in
+          (* A later inventory can positively identify a submission whose exact
+             lookup previously found no operation. Replayed rows from an older
+             read cannot displace that newer absence observation. *)
+          let recorded = List.fold_left (fun ids (operation : Wire_fleet.chat_operation) ->
+              Fleet_store.String_set.add (Keeper_chat_operation.Operation_id.to_string operation.id) ids)
+              Fleet_store.String_set.empty operations in
+          let drafts = List.fold_left (fun drafts (tx : Drafts.pending_message) ->
+              let id = Option.value tx.operation_id ~default:tx.request_id in
+              if tx.state = Drafts.No_operation_record && Clock.Mono.compare requested_at tx.updated_at >= 0
+                 && Fleet_store.String_set.mem id recorded
+              then Drafts.mark_queued ~now ~request_id:tx.request_id ~operation_id:(Some id) drafts
+              else drafts) m.drafts (Drafts.pending_txs_for_keeper ~keeper m.drafts) in
+          { m with drafts; fleet = Fleet_store.set_chat_queue ~keeper { operations; read } m.fleet } in
         (match result with
          | None -> (set (Observed.loading ~since_ns:requested_at), [])
          | Some (Ok ()) -> (set (Observed.value ~observed_at:requested_at ()), [])
@@ -385,7 +398,10 @@ let apply_http_reply ~now (m : Model.t) reply =
              let fleet = Fleet_store.set_chat_queue ~keeper { operations; read } m.fleet in
              record_http_incident ~now ~source:(Health.Source_keeper keeper)
                ~context:(Say.make ~ko:"대기열 조회" ~en:"Chat queue read") err { m with fleet })
-  | Msg.Reply_chat_status { keeper; operation_id; result = Ok operation } ->
+  | Msg.Reply_chat_absence { keeper; operation_id; requested_at } ->
+      let drafts = Drafts.mark_operation_absent ~keeper ~operation_id ~now ~requested_at m.drafts in
+      ({ m with drafts }, [])
+  | Msg.Reply_chat_status { keeper; operation_id; requested_at; result = Ok operation } ->
       let tx = Drafts.pending_txs_for_keeper ~keeper m.drafts
         |> List.find_opt (fun (tx : Drafts.pending_message) ->
              String.equal operation_id (Option.value tx.operation_id ~default:tx.request_id)) in
@@ -401,6 +417,8 @@ let apply_http_reply ~now (m : Model.t) reply =
                  Drafts.mark_failed_retryable ~now ~request_id ~reason m.drafts
              | Cancelled ->
                  Drafts.mark_failed_retryable ~now ~request_id ~reason:"Operation cancelled" m.drafts
+             | Queued | Running when tx.state = Drafts.No_operation_record &&
+                                     Clock.Mono.compare requested_at tx.updated_at < 0 -> m.drafts
              | Queued -> Drafts.mark_queued ~now ~request_id ~operation_id:(Some operation_id) m.drafts
              | Running -> Drafts.mark_accepted ~now ~request_id ~operation_id:(Some operation_id) m.drafts in
            ({ m with drafts }, []))

@@ -7250,7 +7250,7 @@ let test_agui_chat_stream_lifecycle_15_bugs () =
     (tx.state = Drafts.Confirming_delivery);
   let op = Option.value tx.operation_id ~default:tx.request_id in
   let m_c3, _ = Update.step ~now:t_p9 pending (Msg.Http_reply { epoch = pending.epoch;
-      reply = Msg.Reply_chat_status { keeper = "alpha-leader"; operation_id = op;
+      reply = Msg.Reply_chat_status { keeper = "alpha-leader"; operation_id = op; requested_at = t_p9;
           result = Ok { id = Result.get_ok (Keeper_chat_operation.Operation_id.of_string op); sequence = 0L; state = Keeper_chat_operation.State_name.Failed;
                         message = None; failure_detail = Some "operation failed" } } }) in
   Alcotest.(check bool) "the persisted failure ends the pending operation" false
@@ -10476,7 +10476,7 @@ let test_reopen_keeper_queue_and_reconcile () =
   let exact state (model : Model.t) =
     let operation = { op with id = Result.get_ok (Keeper_chat_operation.Operation_id.of_string tx.request_id); state } in
     Update.step ~now:t2 model (Msg.Http_reply { epoch = model.epoch;
-      reply = Msg.Reply_chat_status { keeper = "alpha"; operation_id = tx.request_id; result = Ok operation } }) |> fst in
+      reply = Msg.Reply_chat_status { keeper = "alpha"; operation_id = tx.request_id; requested_at = t2; result = Ok operation } }) |> fst in
   let tx_state model =
     match List.find_opt (fun (row : Drafts.pending_message) -> String.equal row.request_id tx.request_id)
             (Drafts.pending_txs_for_keeper ~keeper:"alpha" model.Model.drafts) with
@@ -10522,6 +10522,107 @@ let test_reopen_keeper_queue_and_reconcile () =
     (current.state = Drafts.Confirming_delivery);
   let model, _ = history_reply ~keeper:"alpha" [] model in
   Alcotest.(check bool) "pending input returns when its receipt leaves the page" true (local_visible model)
+
+let test_exact_operation_absence_recovery () =
+  let keeper = "alpha" in
+  let initial = in_alpha_chat (Model.initial ()) in
+  let send (m : Model.t) now =
+    let drafts = Drafts.insert_text "one original input" (Drafts.set_active_keeper keeper m.drafts) in
+    let sent, cmds = Update.execute_action ~now { m with drafts } Keymap.Submit_followup in
+    match List.filter_map (function
+        | Cmd.Http_post_stream { req = Cmd.Stream_keeper_chat { request; is_btw = false }; _ } ->
+            Some request.request_id
+        | _ -> None) (Cmd.flatten cmds) with
+    | [id] -> sent, id
+    | _ -> Alcotest.fail "expected one explicit chat POST" in
+  let sent, id = send initial t0 in
+  let row (m : Model.t) = List.find (fun (tx : Drafts.pending_message) -> String.equal tx.request_id id)
+      (Drafts.pending_txs_for_keeper ~keeper m.drafts) in
+  let read ?(request_keeper = keeper) ?(request_id = id) ~started ~now result (m : Model.t) =
+    let reply = Msg.chat_status_reply ~keeper:request_keeper ~operation_id:request_id ~requested_at:started result in
+    Update.step ~now m (Msg.Http_reply { epoch = m.epoch; reply }) |> fst in
+  let disconnect ~now (m : Model.t) =
+    Update.step ~now m (Msg.Chat_stream_done { epoch = m.epoch; keeper; request_id = id; is_btw = false;
+                                             result = Error (Msg.Transport (Health.Other_io "connection closed")) }) in
+  let detached, cmds = disconnect ~now:t1 sent in
+  Alcotest.(check bool) "a disconnect asks about the original POST id" true
+    (List.exists (function Cmd.Http_get { req = Cmd.Get_chat_status { operation_id; _ }; _ } ->
+                       String.equal operation_id id | _ -> false) (Cmd.flatten cmds));
+  let op_id = Result.get_ok (Keeper_chat_operation.Operation_id.of_string id) in
+  let scope = { Keeper_chat_operation_read.keeper_name = keeper; operation_id = op_id } in
+  let envelope ?absence () = Keeper_chat_operation_read.public_error_json ?absence
+      ~code:Keeper_chat_operation_read.unknown_operation_code ~message:"The operation was not found."
+      ~incident_id:"server-incident" () |> Yojson.Safe.to_string in
+  let http status body = Error (Msg.Http_error { status; body; api_error = None }) in
+  let absent = http 404 (envelope ~absence:scope ()) in
+  let later = Clock.Mono.after_s t2 1. in
+  List.iter (fun response ->
+      let model = read ~started:t1 ~now:t2 response detached in
+      Alcotest.(check bool) "unsupported or unreadable responses preserve unconfirmed delivery" true
+        ((row model).state = Drafts.Confirming_delivery))
+    [http 404 (envelope ()); http 404 "{}"; http 404 "invalid JSON";
+     http 404 (envelope ~absence:{scope with keeper_name = "beta"} ());
+     http 404 (envelope ~absence:{scope with operation_id = Result.get_ok
+                    (Keeper_chat_operation.Operation_id.of_string "another-request")} ());
+     http 410 (envelope ~absence:scope ()); http 403 (envelope ~absence:scope ());
+     http 503 (envelope ~absence:scope ())];
+  let missing = read ~started:t1 ~now:t2 absent detached in
+  Alcotest.(check bool) "exact readable absence preserves input and identity without a terminal verdict" true
+    (let tx = row missing in tx.state = Drafts.No_operation_record && tx.operation_id = None &&
+        tx.body = "one original input" && not (Drafts.has_active_tx_for ~keeper missing.drafts));
+  Alcotest.(check bool) "the missing operation leaves automatic status polling" true
+    (View_fetches.chat_status_fetches ~keeper missing = []);
+  let after_disconnect, cmds = disconnect ~now:later missing in
+  Alcotest.(check bool) "a delayed disconnect cannot restart polling the missing operation" true
+    ((row after_disconnect).state = Drafts.No_operation_record &&
+     not (List.exists (function Cmd.Http_get { req = Cmd.Get_chat_status _; _ } -> true | _ -> false) (Cmd.flatten cmds)));
+  let dismissed, _ = Update.execute_action ~now:later missing Keymap.Dismiss_errors in
+  Alcotest.(check int) "the original unresolved input can be dismissed with X" 0
+    (List.length (Drafts.pending_txs_for_keeper ~keeper dismissed.drafts));
+  let _, second_id = send missing later in
+  Alcotest.(check bool) "a deliberate second POST gets a fresh request id" false (String.equal second_id id);
+  let exact state = Ok Wire_fleet.{ id = op_id; sequence = 1L; state; message = None; failure_detail = None } in
+  let accepted = read ~started:t1 ~now:t2 (exact Running) detached in
+  let late_absence = read ~started:t1 ~now:later absent accepted in
+  Alcotest.(check bool) "an absence lookup started before a later acceptance cannot erase it" true
+    ((row late_absence).state = Drafts.Pending_processing);
+  let formerly_accepted = read ~started:later ~now:later absent accepted in
+  Alcotest.(check bool) "absent now, previously accepted remains distinguishable" true
+    ((row formerly_accepted).state = Drafts.No_operation_record && (row formerly_accepted).operation_id = Some id);
+  let replay = chat_row ~id:"operator-accepted" ~role:Wire_fleet.Role_user
+      ?provenance:(operation_provenance id Accepted_user) "one original input" in
+  let old_ack, _ = history_reply ~keeper [replay] formerly_accepted in
+  Alcotest.(check bool) "replaying the known accepted row leaves the absence notice in view" true
+    ((row old_ack).state = Drafts.No_operation_record &&
+     List.exists (function Chat_transcript.Section_pending rows ->
+       List.exists (fun (p : Chat_transcript.pending_tx_projection) -> p.notice_only) rows | _ -> false)
+       (Chat_transcript.project_transcript ~model:old_ack ~keeper));
+  let first_ack, _ = history_reply ~keeper [replay] missing in
+  Alcotest.(check bool) "new exact accepted input recovers the previously unknown submission" true
+    ((row first_ack).state = Drafts.Pending_processing && (row first_ack).operation_id = Some id);
+  let stale_positive = read ~started:t1 ~now:later (exact Queued) missing in
+  Alcotest.(check bool) "a stale queue observation cannot reopen a later absence" true
+    ((row stale_positive).state = Drafts.No_operation_record);
+  let queue (m : Model.t) at =
+    let op = Result.get_ok (exact Queued) in
+    Update.step ~now:later m (Msg.Http_reply { epoch = m.epoch; reply = Msg.Reply_chat_queue {
+        keeper; requested_at = at; operations = [op]; result = Some (Ok ()) } }) |> fst in
+  Alcotest.(check bool) "stale drawer evidence cannot reopen a later absence" true
+    ((row (queue missing t1)).state = Drafts.No_operation_record);
+  Alcotest.(check bool) "a newly read scoped queue can recover the exact id" true
+    ((row (queue missing later)).state = Drafts.Queued);
+  let failed = read ~started:later ~now:later (exact Failed) missing in
+  Alcotest.(check bool) "only the later failed operation observation establishes failure" true
+    (match (row failed).state with Drafts.Failed_retryable _ -> true | _ -> false);
+  let started = read ~started:later ~now:later (exact Running) missing in
+  Alcotest.(check bool) "subsequent exact running receipt recovers the local submission" true
+    ((row started).state = Drafts.Pending_processing);
+  let settled = read ~started:later ~now:later (exact Succeeded) formerly_accepted in
+  Alcotest.(check bool) "a later exact terminal status settles a previously absent record" true
+    ((row settled).state = Drafts.Delivered);
+  let after_terminal = read ~started:later ~now:later absent settled in
+  Alcotest.(check bool) "absence cannot replace an established terminal result" true
+    ((row after_terminal).state = Drafts.Delivered)
 
 let test_cut_reply_reads_the_operation_journal () =
   let m0 = in_alpha_chat (Model.initial ()) in
@@ -13987,6 +14088,7 @@ let () =
   Alcotest.run "masc_tui_store"
     [
       ("Board recovery", [Alcotest.test_case "recover the viewed keeper and exact quarantine generation" `Quick test_keeper_board_quarantine_recovery]);
+      ("exact chat lookup", [Alcotest.test_case "retain and dismiss scoped absent operations" `Quick test_exact_operation_absence_recovery]);
       ( "epoch"
       , [
           Alcotest.test_case "stale reply rejection" `Quick

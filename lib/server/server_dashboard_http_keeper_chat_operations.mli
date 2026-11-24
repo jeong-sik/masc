@@ -123,6 +123,8 @@ module For_testing : sig
     redaction:Keeper_secret_redaction.t -> Keeper_owner.Chat_operation.t -> Yojson.Safe.t
   (** The HTTP operation projection, including source redaction provenance. *)
 
+  val absent_operation_response :
+    keeper_name:string -> Keeper_owner.Chat_operation.Operation_id.t -> Httpun.Status.t * Yojson.Safe.t
   val invalid_input_response : string -> Httpun.Status.t * Yojson.Safe.t
   val command_error_response :
     Keeper_owner_registry.command_error -> Httpun.Status.t * Yojson.Safe.t

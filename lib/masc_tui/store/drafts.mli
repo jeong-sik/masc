@@ -19,6 +19,7 @@ type tx_state =
   | Sending
   | Pending_processing
   | Confirming_delivery
+  | No_operation_record
   | Interrupting
   | Delivered
   | Failed_retryable of { reason : string }
@@ -95,6 +96,7 @@ val empty : t
 
 val equal_delivery_mode : delivery_mode -> delivery_mode -> bool
 val equal_tx_state : tx_state -> tx_state -> bool
+val absence_notice : pending_message -> Say.t
 val tx_state_label : tx_state -> Say.t option
 
 val target_keeper_key : t -> string
@@ -158,6 +160,11 @@ val mark_accepted :
   t
 (** Transition a submission to {!Pending_processing} on server acceptance/run. *)
 
+val mark_operation_absent :
+  now:Clock.Mono.t -> requested_at:Clock.Mono.t -> keeper:string -> operation_id:string -> t -> t
+(** Retain a scoped absence observation for a nonterminal send. A receipt
+    started before newer local acceptance cannot displace it. *)
+
 val mark_confirming : now:Clock.Mono.t -> request_id:string -> t -> t
 (** Transition a submission to {!Confirming_delivery} while awaiting persisted
     history confirmation. *)
@@ -191,9 +198,8 @@ val remove_tx : request_id:string -> t -> t
 (** Remove a settled transmission entry (e.g. once both user prompt and
     [Role_request_failure] are durably persisted in history). *)
 
-val dismiss_failed_for_keeper : keeper:string -> t -> t * int
-(** Dismiss all [Failed_retryable] entries for [keeper], returning the updated
-    store and count of dismissed entries. *)
+val dismiss_notices_for_keeper : keeper:string -> t -> t * int
+(** Dismiss failure and absent-status notices for the Keeper and return their count. *)
 
 val active_tx_for_keeper : keeper:string -> t -> pending_message option
 (** Return the oldest executing transmission for [keeper] prioritized by

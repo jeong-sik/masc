@@ -673,7 +673,8 @@ let execute_get t ~epoch req =
               | Error _ as err -> err
             in
             let result = fetch_and_decode_get t ~path ~decode in
-            Msg.Http_reply { epoch; reply = Msg.Reply_chat_status { keeper; operation_id; result } }
+            let reply = Msg.chat_status_reply ~keeper ~operation_id ~requested_at result in
+            Msg.Http_reply { epoch; reply }
         | Cmd.Get_chat_history { keeper; _ } ->
             let result =
               fetch_and_decode_get t ~path

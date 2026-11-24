@@ -1129,7 +1129,7 @@ let open_setup_login_modal (m : Model.t) ?(integration_default = "") () =
     ]
 
 let dismiss_keeper_chat_errors ~now ~keeper (m : Model.t) =
-  let drafts, removed = Drafts.dismiss_failed_for_keeper ~keeper m.drafts in
+  let drafts, removed = Drafts.dismiss_notices_for_keeper ~keeper m.drafts in
   let had_err_stream =
     match Fleet_store.String_map.find_opt keeper m.fleet.chat_streams with
     | Some b -> (not b.active) && Option.is_some b.last_error
@@ -1140,8 +1140,8 @@ let dismiss_keeper_chat_errors ~now ~keeper (m : Model.t) =
     let count = Int.max 1 removed in
     ( Model.with_toast ~now ~level:Model.Toast_info
         (Say.make
-           ~ko:(Printf.sprintf "실패 알림 %d건 닫힘" count)
-           ~en:(Printf.sprintf "Dismissed %d failed notice(s)" count))
+           ~ko:(Printf.sprintf "전송 알림 %d건 닫힘" count)
+           ~en:(Printf.sprintf "Dismissed %d transmission notice(s)" count))
         { m with drafts; fleet }
     , [] )
   else (m, [])
@@ -2502,7 +2502,7 @@ and execute_action ~now (m : Model.t) action =
                                 | Drafts.Confirming_delivery
                                 | Drafts.Interrupting
                                 | Drafts.Delivered
-                                | Drafts.Failed_retryable _ );
+                                | Drafts.No_operation_record | Drafts.Failed_retryable _ );
                               _;
                             }
                         | None ->

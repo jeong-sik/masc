@@ -643,7 +643,7 @@ let live_chat_phase ~(model : Model.t) ~keeper =
             | Drafts.Pending_processing
             | Drafts.Confirming_delivery
             | Drafts.Delivered
-            | Drafts.Failed_retryable _ );
+            | Drafts.No_operation_record | Drafts.Failed_retryable _ );
           _;
         }
     | None ->
@@ -678,7 +678,7 @@ let live_chat_phase ~(model : Model.t) ~keeper =
                     state =
                       ( Drafts.Pending_processing
                       | Drafts.Delivered
-                      | Drafts.Failed_retryable _ );
+                      | Drafts.No_operation_record | Drafts.Failed_retryable _ );
                     _;
                   }
               | None ->
@@ -691,7 +691,7 @@ let live_chat_phase ~(model : Model.t) ~keeper =
         | Some { state = Drafts.Confirming_delivery; _ } -> Phase_confirming
         | Some { state = Drafts.Queued; _ } ->
             Phase_queued (Int.max 1 queued_count)
-        | Some { state = Drafts.Delivered | Drafts.Failed_retryable _; _ }
+        | Some { state = Drafts.Delivered | Drafts.No_operation_record | Drafts.Failed_retryable _; _ }
         | None -> (
             match active_turn_opt with
             | Some { tool_in_flight = Some tool; _ } -> Phase_tool_running tool
@@ -719,7 +719,7 @@ let live_chat_phase ~(model : Model.t) ~keeper =
                          | Drafts.Pending_processing
                          | Drafts.Confirming_delivery
                          | Drafts.Interrupting
-                         | Drafts.Delivered ->
+                         | Drafts.No_operation_record | Drafts.Delivered ->
                              None)
                 in
                 match latest_unpersisted_failed with
@@ -728,6 +728,9 @@ let live_chat_phase ~(model : Model.t) ~keeper =
                     match buf_opt with
                     | Some b
                       when (not b.active)
+                           && not (List.exists (fun (tx : Drafts.pending_message) ->
+                               String.equal tx.request_id b.request_id && tx.state = Drafts.No_operation_record)
+                               (Drafts.pending_txs_for_keeper ~keeper model.drafts))
                            && not (stream_reply_already_persisted hist_msgs b)
                       -> (
                         match b.last_error with
@@ -822,7 +825,7 @@ type stream_projection = {
 
 type pending_tx_projection = {
   tx : Drafts.pending_message;
-  error_only : bool;
+  notice_only : bool;
 }
 
 type transcript_section =
@@ -840,14 +843,16 @@ let project_transcript ~(model : Model.t) ~keeper =
            match tx.state with
            | Drafts.Delivered ->
                if has_persisted_user_for_op hist_msgs op_id ~body:tx.body then None
-               else Some (idx, { tx; error_only = false })
+               else Some (idx, { tx; notice_only = false })
+           | Drafts.No_operation_record ->
+               Some (idx, { tx; notice_only = has_persisted_user_for_op hist_msgs op_id ~body:tx.body })
            | Drafts.Failed_retryable _ ->
                if has_persisted_failure_for_op hist_msgs op_id then None
                else
                  let user_in_hist =
                    has_persisted_user_for_op hist_msgs op_id ~body:tx.body
                  in
-                 Some (idx, { tx; error_only = user_in_hist })
+                 Some (idx, { tx; notice_only = user_in_hist })
            | Drafts.Queued
            | Drafts.Sending
            | Drafts.Pending_processing
@@ -855,7 +860,7 @@ let project_transcript ~(model : Model.t) ~keeper =
            | Drafts.Interrupting ->
                if has_persisted_user_for_op hist_msgs op_id ~body:tx.body
                then None
-               else Some (idx, { tx; error_only = false }))
+               else Some (idx, { tx; notice_only = false }))
     |> List.filter_map Fun.id
   in
   let stream_opt =
@@ -884,7 +889,7 @@ let project_transcript ~(model : Model.t) ~keeper =
                       String.equal p.tx.request_id buf.request_id
                       &&
                       match p.tx.state with
-                      | Drafts.Failed_retryable _ -> true
+                      | Drafts.No_operation_record | Drafts.Failed_retryable _ -> true
                       | Drafts.Queued
                       | Drafts.Sending
                       | Drafts.Pending_processing

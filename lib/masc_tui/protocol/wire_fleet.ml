@@ -1656,6 +1656,15 @@ let operation_state json =
   let* raw = required_string_field json "state" in
   Keeper_chat_operation.State_name.of_wire raw
 
+let is_absent_operation_error ~keeper ~operation_id ~status ~body =
+  if status <> 404 then false
+  else match Keeper_chat_operation.Operation_id.of_string operation_id with
+    | Error _ -> false
+    | Ok operation_id ->
+        (match Yojson.Safe.from_string body with
+         | json -> Keeper_chat_operation_read.confirms_absence { keeper_name = keeper; operation_id } json
+         | exception Yojson.Json_error _ -> false)
+
 let decode_chat_operation json =
   let* raw_id = required_string_field json "operation_id" in
   let* id = Keeper_chat_operation.Operation_id.of_string raw_id in

@@ -355,7 +355,7 @@ let drawer_queue ~keeper m =
          match tx.state with
          | Drafts.Delivered -> false
          | Drafts.Queued | Drafts.Sending | Drafts.Pending_processing
-         | Drafts.Confirming_delivery | Drafts.Interrupting | Drafts.Failed_retryable _ ->
+         | Drafts.Confirming_delivery | Drafts.Interrupting | Drafts.No_operation_record | Drafts.Failed_retryable _ ->
              not (Fleet_store.String_set.mem
                (Option.value tx.operation_id ~default:tx.request_id) server_ids))
   in

@@ -6,6 +6,7 @@
  (wrapped false)
  (modules
   keeper_chat_operation
+  keeper_chat_operation_read
   keeper_chat_operation_reducer
   keeper_chat_operation_store
   keeper_native_call

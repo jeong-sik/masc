@@ -130,7 +130,8 @@ credential naming an absolute path (`oauth_source` for Antigravity); `env` and
 - The client runs its read tool without asking for permission in every mode, so
   a Keeper whose `keeper.tools.native` is `none` runs at `read`. Reads, search
   and MASC MCP tools are allowed; writes, shell and fetch are refused unless the
-  Keeper declares `full`.
+  Keeper declares `full`. Fusion and runtime verification require `none` and
+  refuse Muse Code before starting its process.
 - `effort` is refused at load, because the client has no effort option. Put
   `-c reasoning_effort="<level>"` in `args`, for example
   `args = ["acp", "-c", "reasoning_effort=\"low\""]`.

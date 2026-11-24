@@ -536,7 +536,8 @@ val start
     without requiring a global [Eio_context]. When [native_posture] is
     supplied, Antigravity [settings.json] enforces posture-specific write,
     command, and [cwd] read denies and Kimi suppresses [--skills-dir] under
-    [Native_none]. *)
+    [Native_none]. A driver that cannot enforce [Native_none] is refused
+    with [Invalid_config] before its process starts. *)
 
 val driver : t -> driver
 val mcp_server_isolation : t -> mcp_server_isolation

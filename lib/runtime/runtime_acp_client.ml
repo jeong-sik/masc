@@ -2934,12 +2934,20 @@ let foreground_process_mgr ~clock ?(grace_seconds = default_reap_grace_seconds) 
 ;;
 
 let start ~sw ~proc_mgr ~clock ?fs ~(config : config) ?mcp_server ?native_posture () =
+  let profile = profile_of_driver config.driver in
   if String.trim config.cli_path = ""
   then Error (Invalid_config "cli_path must be non-empty")
   else if String.trim config.cwd = ""
   then Error (Invalid_config "cwd must be non-empty")
+  else if
+    native_posture = Some Runtime_native_tools.Native_none && not profile.enforces_native_none
+  then
+    Error
+      (Invalid_config
+         (Printf.sprintf
+            "ACP driver %s cannot enforce the native tool posture 'none'"
+            (driver_to_string config.driver)))
   else (
-    let profile = profile_of_driver config.driver in
     let* temp_gemini_dir, managed_schema_root =
       match profile.mcp_wiring with
       | Gemini_dir_mcp_config ->

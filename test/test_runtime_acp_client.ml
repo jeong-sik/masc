@@ -365,6 +365,33 @@ let test_muse_profile_and_native_none () =
      = Runtime_native_tools.Native_read)
 ;;
 
+let test_muse_refuses_native_none_before_spawn () =
+  let cwd = Filename.temp_dir "masc-muse-native-none-" "" in
+  Fun.protect ~finally:(fun () -> Unix.rmdir cwd) (fun () ->
+    Eio_main.run (fun env ->
+      Eio.Switch.run (fun sw ->
+        let clock = Eio.Stdenv.clock env in
+        let proc_mgr = Runtime_acp_client.foreground_process_mgr ~clock () in
+        let config =
+          { (Runtime_acp_client.default_config ~driver:Muse_code ~cwd) with
+            cli_path = Filename.concat cwd "missing-executable"
+          }
+        in
+        let error =
+          testable
+            (fun fmt e -> Format.pp_print_string fmt (Runtime_acp_client.error_to_string e))
+            ( = )
+        in
+        check
+          (result unit error)
+          "refuses native none before attempting to spawn the missing executable"
+          (Error (Runtime_acp_client.Invalid_config
+                    "ACP driver muse_code cannot enforce the native tool posture 'none'"))
+          (Runtime_acp_client.start ~sw ~proc_mgr ~clock ~fs:(Eio.Stdenv.fs env) ~config
+             ~native_posture:Runtime_native_tools.Native_none ()
+           |> Result.map Runtime_acp_client.close))))
+;;
+
 let test_muse_argv_and_environment () =
   let cfg = Runtime_acp_client.default_config ~driver:Runtime_acp_client.Muse_code ~cwd:"/tmp" in
   check (list string) "default argv trusts the workspace and turns every observer off"
@@ -4969,6 +4996,8 @@ let () =
       , [ test_case "closed driver profiles" `Quick test_driver_profiles
         ; test_case "muse profile and native-none support" `Quick
             test_muse_profile_and_native_none
+        ; test_case "muse rejects native none before spawn" `Quick
+            test_muse_refuses_native_none_before_spawn
         ] )
     ; "environment", [ test_case "env strip and override" `Quick test_build_environment ]
     ; ( "argv_and_posture"

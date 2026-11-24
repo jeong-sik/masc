@@ -215,6 +215,12 @@ let timeout_sec_for_post : Cmd.post_request -> float = function
   | Cmd.Post_gate_resolution _
   | Cmd.Post_goal_transition _
   | Cmd.Post_goal_confirmation _
+  | Cmd.Post_task_create _
+  | Cmd.Post_task_transition _
+  | Cmd.Post_task_link_goal _
+  | Cmd.Post_goal_upsert _
+  | Cmd.Post_board_pin _
+  | Cmd.Post_board_delete _
   | Cmd.Post_verification_verdict _
   | Cmd.Post_runtime_assignment _
   | Cmd.Post_runtime_default_route _
@@ -2003,6 +2009,31 @@ let execute_post t ~epoch req =
     post_and_decode ~timeout_sec t ~path ~body ~decode
   in
   let post_ack t ~path ~body = post_ack ~timeout_sec t ~path ~body in
+  let post_mcp_ack tool_name =
+    let ep = Atomic.get t.endpoint in
+    let body_str = Yojson.Safe.to_string body in
+    let extra_headers =
+      [
+        ("Accept", "application/json, text/event-stream");
+        ("Mcp-Protocol-Version", Wire_work.mcp_protocol_version);
+        ("Mcp-Method", "tools/call");
+        ("Mcp-Name", tool_name);
+        ("X-Masc-Force-Json", "true");
+      ]
+    in
+    match
+      Http_client.post_raw ~io:t.io ~clock:t.clock ~timeout_sec ~extra_headers
+        ~content_type:"application/json" ~body:body_str ep ~path
+    with
+    | Error err -> Error (msg_error_of_http err)
+    | Ok raw -> (
+        match Wire_work.decode_mcp_tool_call_ack raw with
+        | Ok () -> Ok ()
+        | Error detail ->
+            Error
+              (Msg.Http_error
+                 { status = 400; body = detail; api_error = None }))
+  in
   fork_safe t (fun () ->
       let reply_opt =
         match req with
@@ -2393,6 +2424,72 @@ let execute_post t ~epoch req =
                 ~decode:Wire_keeper_context.decode_github_identity
             in
             Some (Msg.Reply_github_token_save { keeper; result })
+        | Cmd.Post_task_create _ ->
+            let result = post_mcp_ack "masc_add_task" in
+            Some
+              (Msg.Reply_action_ack
+                 {
+                   label = Say.make ~ko:"작업 생성 완료" ~en:"Task created";
+                   ack_scope = Msg.Ack_close_modal_and_refresh;
+                   for_modal = Some Nav.Task_create_form;
+                   result;
+                 })
+        | Cmd.Post_task_transition { task_id; _ } ->
+            let result = post_mcp_ack "masc_transition" in
+            Some
+              (Msg.Reply_action_ack
+                 {
+                   label =
+                     Say.make ~ko:"작업 상태 전환 완료"
+                       ~en:"Task transitioned";
+                   ack_scope = Msg.Ack_close_modal_and_refresh;
+                   for_modal = Some (Nav.Task_transition_form { task_id });
+                   result;
+                 })
+        | Cmd.Post_task_link_goal { task_id; _ } ->
+            let result = post_ack t ~path ~body in
+            Some
+              (Msg.Reply_action_ack
+                 {
+                   label =
+                     Say.make ~ko:"작업-목표 연결 완료"
+                       ~en:"Task linked to goal";
+                   ack_scope = Msg.Ack_close_modal_and_refresh;
+                   for_modal = Some (Nav.Task_link_goal { task_id });
+                   result;
+                 })
+        | Cmd.Post_goal_upsert { id; _ } ->
+            let result = post_mcp_ack "masc_goal_upsert" in
+            let label =
+              match id with
+              | Some _ -> Say.make ~ko:"목표 수정 완료" ~en:"Goal updated"
+              | None -> Say.make ~ko:"목표 생성 완료" ~en:"Goal created"
+            in
+            Some
+              (Msg.Reply_action_ack
+                 {
+                   label;
+                   ack_scope = Msg.Ack_close_modal_and_refresh;
+                   for_modal = Some (Nav.Goal_upsert_form id);
+                   result;
+                 })
+        | Cmd.Post_board_pin { pinned; _ } ->
+            let result = post_ack t ~path ~body in
+            let label =
+              if pinned then Say.make ~ko:"게시글 고정됨" ~en:"Post pinned"
+              else Say.make ~ko:"게시글 고정 해제됨" ~en:"Post unpinned"
+            in
+            Some
+              (Msg.Reply_action_ack
+                 {
+                   label;
+                   ack_scope = Msg.Ack_refresh_view;
+                   for_modal = None;
+                   result;
+                 })
+        | Cmd.Post_board_delete { post_id } ->
+            let result = post_ack t ~path ~body in
+            Some (Msg.Reply_board_delete { post_id; result })
       in
       Option.iter
         (fun reply ->

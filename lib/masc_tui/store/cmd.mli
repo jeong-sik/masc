@@ -326,6 +326,38 @@ type post_request =
       token : string;
       hostname : string option;
     }
+  | Post_task_create of {
+      title : string;
+      priority : int;
+      description : string option;
+      goal_id : string option;
+      expected_workspace : Wire_work.expected_workspace option;
+    }
+  | Post_task_transition of {
+      task_id : string;
+      action : Wire_work.task_transition_action;
+      notes : string option;
+      expected_workspace : Wire_work.expected_workspace option;
+    }
+  | Post_task_link_goal of {
+      task_id : string;
+      goal_id : string;
+      expected_workspace : Wire_work.expected_workspace;
+    }
+  | Post_goal_upsert of {
+      id : string option;
+      title : string;
+      measure : Wire_work.goal_measure option;
+      procedure : string;
+      priority : int option;
+      due_date : string option;
+      expected_workspace : Wire_work.expected_workspace option;
+    }
+  | Post_board_pin of {
+      post_id : string;
+      pinned : bool;
+    }
+  | Post_board_delete of { post_id : string }
 
 type put_request =
   | Put_wiki_page of { page : string; request : Wire_knowledge.wiki_put_request }
@@ -400,6 +432,7 @@ type t =
 val get_request_path : get_request -> string
 val post_request_path : post_request -> string
 val post_request_body : post_request -> Yojson.Safe.t
+val mcp_tool_name_of_post_request : post_request -> string option
 val put_request_path : put_request -> string
 val put_request_body : put_request -> Yojson.Safe.t
 val flatten : t list -> t list

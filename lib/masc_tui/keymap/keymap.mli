@@ -99,6 +99,7 @@ type action =
   | Open_external_editor
   | Interrupt_turn
   | Delete_selected
+  | Link_task_goal
   | Quit_app
 
 type scope =

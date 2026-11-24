@@ -119,6 +119,14 @@ type inline_action_kind =
       lane_id : string;
       opened_revision : string option;
     }
+  | Task_create_form
+  | Task_transition_form of { task_id : string }
+  | Task_link_goal of { task_id : string }
+  | Goal_upsert_form of string option
+  | Board_delete_post of {
+      post_id : string;
+      title : string;
+    }
 
 type system_gate_kind =
   | Micro_viewport
@@ -568,6 +576,11 @@ let inline_action_tag = function
   | Runtime_lane_create -> 14
   | Runtime_lane_edit _ -> 15
   | Runtime_lane_delete _ -> 16
+  | Task_create_form -> 17
+  | Task_transition_form _ -> 18
+  | Task_link_goal _ -> 19
+  | Goal_upsert_form _ -> 20
+  | Board_delete_post _ -> 21
 
 let equal_inline_action_kind a b =
   if not (Int.equal (inline_action_tag a) (inline_action_tag b)) then false
@@ -580,7 +593,8 @@ let equal_inline_action_kind a b =
     | Board_new_post, Board_new_post
     | Code_finder_form, Code_finder_form
     | Code_search_form, Code_search_form
-    | Runtime_lane_create, Runtime_lane_create ->
+    | Runtime_lane_create, Runtime_lane_create
+    | Task_create_form, Task_create_form ->
         true
     | Gate_reject x, Gate_reject y
     | Verification_reject x, Verification_reject y
@@ -599,6 +613,14 @@ let equal_inline_action_kind a b =
     | Runtime_lane_delete x, Runtime_lane_delete y ->
         String.equal x.lane_id y.lane_id
         && Option.equal String.equal x.opened_revision y.opened_revision
+    | Task_transition_form x, Task_transition_form y ->
+        String.equal x.task_id y.task_id
+    | Task_link_goal x, Task_link_goal y ->
+        String.equal x.task_id y.task_id
+    | Goal_upsert_form x, Goal_upsert_form y ->
+        Option.equal String.equal x y
+    | Board_delete_post x, Board_delete_post y ->
+        String.equal x.post_id y.post_id && String.equal x.title y.title
     | ( Btw_query
       | Gate_reject _
       | Verification_reject _
@@ -615,7 +637,12 @@ let equal_inline_action_kind a b =
       | Code_search_form
       | Runtime_lane_create
       | Runtime_lane_edit _
-      | Runtime_lane_delete _ ), _ ->
+      | Runtime_lane_delete _
+      | Task_create_form
+      | Task_transition_form _
+      | Task_link_goal _
+      | Goal_upsert_form _
+      | Board_delete_post _ ), _ ->
         false
 
 let system_gate_index = function

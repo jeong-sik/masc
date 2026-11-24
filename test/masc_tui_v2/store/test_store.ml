@@ -1810,7 +1810,13 @@ let test_verifier_regressions () =
         | Cmd.Post_oauth_identity_switch _
         | Cmd.Post_oauth_disconnect _
         | Cmd.Post_board_recovery _
-        | Cmd.Post_github_token _ ->
+        | Cmd.Post_github_token _
+        | Cmd.Post_task_create _
+        | Cmd.Post_task_transition _
+        | Cmd.Post_task_link_goal _
+        | Cmd.Post_goal_upsert _
+        | Cmd.Post_board_pin _
+        | Cmd.Post_board_delete _ ->
             false)
     | Cmd.Batch _
     | Cmd.Http_get _
@@ -3343,14 +3349,17 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
         |> Work_store.apply_verifications ~observed_at:t0 [ ver1 ];
     }
   in
-  (* [n] on Work_pipeline opens honest #goals proposal modal (not Schedule); on Work_tasks_schedules opens Schedule *)
+  (* [n] on Work_pipeline opens direct Goal_upsert_form (measure + procedure); on Work_schedules opens Schedule *)
   let m_goal_modal, _ = step m_work (char_key "n") in
-  Alcotest.(check bool) "[n] on Work_pipeline opens #goals Board proposal modal" true
-    (match m_goal_modal.inline_modal with
+  Alcotest.(check bool) "[n] on Work_pipeline opens direct Goal_upsert_form modal" true
+    (Option.equal Nav.equal_overlay m_goal_modal.nav.overlay
+       (Some (Nav.Inline_action (Nav.Goal_upsert_form None)))
+    &&
+    match m_goal_modal.inline_modal with
     | Some md ->
         List.exists
           (fun (f : Model.modal_form_field) ->
-            String.equal f.key "proposal_title")
+            String.equal f.key "goal_procedure" && f.required)
           md.fields
     | None -> false);
   (* Work_pipeline pane_index=1 reaches Verification hotkeys & dive even when Goals exist *)
@@ -4875,6 +4884,7 @@ let test_nav_fix4_knowledge_board_chains_and_wiki_clusters () =
       succession_chain_root_id = chain;
       chain_depth = None;
       is_signal = true;
+      pinned = false;
     }
   in
   let posts =
@@ -5541,6 +5551,7 @@ let test_nav_fix7_symmetric_viewport_scrolling_all_stores () =
       succession_chain_root_id = None;
       chain_depth = None;
       is_signal = true;
+      pinned = false;
     }
   in
   let k0 =
@@ -6328,6 +6339,7 @@ let test_p2_grouped_top_header_row0_restoration () =
       succession_chain_root_id = chain_root;
       chain_depth = depth;
       is_signal = true;
+      pinned = false;
     }
   in
   let board_posts =
@@ -13452,6 +13464,7 @@ let test_ux_batch4_knowledge_runtime_infra () =
       succession_chain_root_id = Some "root-solo";
       chain_depth = Some 1;
       is_signal = true;
+      pinned = false;
     }
   in
   let k_solo =
@@ -15173,6 +15186,7 @@ let test_ux_sweep_12_fixes () =
       created_at_unix = 1000.0;
       updated_at_unix = None;
       is_signal = true;
+      pinned = false;
       succession_chain_root_id = None;
       chain_depth = None;
     }
@@ -17316,6 +17330,490 @@ let test_runtime_lane_crud_requests_and_cas () =
            | _ -> false)
          (Cmd.flatten deleted_cmds))
 
+let test_work_and_board_crud_requests_and_guards () =
+  (* 1. Keymap SSOT: zero collisions across all scopes with Link_task_goal on 'g' in Screen_context *)
+  Alcotest.(check int) "Keymap has zero collisions" 0
+    (List.length (Keymap.collisions ()));
+  (* 2. Wire_work MCP 2026-07-28 envelope, goal measure parsing, and strict allowlist encoders *)
+  (match Wire_work.parse_goal_measure_input ~kind:"done_when" ~spec:"All CRUD wired" with
+  | Ok (Wire_work.Measure_done_when { condition = "All CRUD wired" }) -> ()
+  | _ -> Alcotest.fail "done_when measure parse failed");
+  (match Wire_work.parse_goal_measure_input ~kind:"count" ~spec:"14 files" with
+  | Ok (Wire_work.Measure_count { noun = "files"; total = 14 }) -> ()
+  | _ -> Alcotest.fail "count measure parse failed");
+  (match Wire_work.parse_goal_measure_input ~kind:"quantity" ~spec:"<= 100 ms" with
+  | Ok (Wire_work.Measure_quantity { unit = "ms"; direction = Wire_work.At_most; target })
+    when Float.equal target 100.0 -> ()
+  | _ -> Alcotest.fail "quantity measure parse failed");
+  Alcotest.(check bool) "invalid count measure refused" true
+    (Result.is_error (Wire_work.parse_goal_measure_input ~kind:"count" ~spec:"0 files"));
+  Alcotest.(check bool) "MCP ack Ok on plain JSON" true
+    (Result.is_ok
+       (Wire_work.decode_mcp_tool_call_ack
+          {|{"jsonrpc":"2.0","id":"1","result":{"content":[{"type":"text","text":"ok"}],"isError":false}}|}));
+  Alcotest.(check bool) "MCP ack Ok on SSE data frame" true
+    (Result.is_ok
+       (Wire_work.decode_mcp_tool_call_ack
+          "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":\"1\",\"result\":{\"isError\":false}}\n\n"));
+  Alcotest.(check bool) "MCP ack Error on result.isError=true" true
+    (Result.is_error
+       (Wire_work.decode_mcp_tool_call_ack
+          {|{"jsonrpc":"2.0","id":"1","result":{"content":[{"type":"text","text":"goal closed"}],"isError":true}}|}));
+  Alcotest.(check bool) "MCP ack Error on JSON-RPC error" true
+    (Result.is_error
+       (Wire_work.decode_mcp_tool_call_ack
+          {|{"jsonrpc":"2.0","id":"1","error":{"code":-32602,"message":"invalid params"}}|}));
+  let ws : Wire_work.expected_workspace =
+    { base_path = "/repo"; masc_root = "/repo/.masc" }
+  in
+  let link_req =
+    Cmd.Post_task_link_goal
+      { task_id = "task-001"; goal_id = "goal-1"; expected_workspace = ws }
+  in
+  Alcotest.(check string) "task link-goal REST path"
+    "/api/v1/tasks/task-001/link-goal"
+    (Cmd.post_request_path link_req);
+  Alcotest.(check string) "task link-goal strict 2-field body"
+    {|{"goal_id":"goal-1","expected_workspace":{"base_path":"/repo","masc_root":"/repo/.masc"}}|}
+    (Yojson.Safe.to_string (Cmd.post_request_body link_req));
+  let upsert_req =
+    Cmd.Post_goal_upsert
+      {
+        id = None;
+        title = "Ship TUI CRUD";
+        measure = Some (Wire_work.Measure_done_when { condition = "All routes tested" });
+        procedure = "Check board:post-1 and test suite";
+        priority = Some 2;
+        due_date = None;
+        expected_workspace = Some ws;
+      }
+  in
+  Alcotest.(check string) "goal upsert MCP path" "/mcp"
+    (Cmd.post_request_path upsert_req);
+  Alcotest.(check (option string)) "goal upsert MCP tool name"
+    (Some "masc_goal_upsert")
+    (Cmd.mcp_tool_name_of_post_request upsert_req);
+  let upsert_json_str = Yojson.Safe.to_string (Cmd.post_request_body upsert_req) in
+  Alcotest.(check bool) "goal upsert body contains protocol version 2026-07-28 and no legacy status"
+    true
+    (let has sub =
+       let n = String.length upsert_json_str and m = String.length sub in
+       let rec loop i =
+         if i + m > n then false
+         else if String.equal (String.sub upsert_json_str i m) sub then true
+         else loop (i + 1)
+       in
+       loop 0
+     in
+     has "2026-07-28" && has "masc_goal_upsert" && not (has {|"status":|}) && not (has {|"phase":|}));
+  let pin_req = Cmd.Post_board_pin { post_id = "p-1"; pinned = true } in
+  Alcotest.(check string) "board pin path" "/api/v1/dashboard/board/pin"
+    (Cmd.post_request_path pin_req);
+  Alcotest.(check string) "board pin JSON" {|{"post_id":"p-1","pinned":true}|}
+    (Yojson.Safe.to_string (Cmd.post_request_body pin_req));
+  let del_req = Cmd.Post_board_delete { post_id = "p-1" } in
+  Alcotest.(check string) "board delete path" "/api/v1/dashboard/board/delete"
+    (Cmd.post_request_path del_req);
+  Alcotest.(check string) "board delete JSON" {|{"post_id":"p-1"}|}
+    (Yojson.Safe.to_string (Cmd.post_request_body del_req));
+  (* 3. Store setup with workspace identity, tasks (1 goalless, 1 linked), and goals *)
+  let ws_id : Wire_common.workspace_identity =
+    {
+      instance_id = Some "inst-2";
+      base_path = "/repo";
+      masc_root = "/repo/.masc";
+      workspace_sha256 = Some "sha-ws";
+    }
+  in
+  let task_goalless : Wire_work.task =
+    {
+      id = "task-unlinked";
+      title = "Unlinked work";
+      description = None;
+      priority = 2;
+      status = Wire_work.Todo;
+      goal_link = Wire_work.Unlinked;
+      created_at = None;
+      updated_at = None;
+    }
+  in
+  let task_linked : Wire_work.task =
+    {
+      id = "task-linked";
+      title = "Linked work";
+      description = None;
+      priority = 2;
+      status = Wire_work.Claimed { assignee = "alpha"; claimed_at = "2026-11-24T00:00:00Z" };
+      goal_link = Wire_work.Linked "g-1";
+      created_at = None;
+      updated_at = None;
+    }
+  in
+  let m0 = Model.initial () in
+  let m_base =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Work; sidebar_focused = false };
+      server_identity = { m0.server_identity with workspace = Some ws_id };
+      work =
+        Work_store.empty
+        |> Work_store.apply_planning ~observed_at:t0
+             { goals = [ sample_goal ~id:"g-1" ~phase:Wire_work.Executing () ]; tasks = [ task_goalless; task_linked ] };
+    }
+  in
+  let set_fields pairs (m : Model.t) =
+    match m.inline_modal with
+    | None -> Alcotest.fail "expected inline_modal open"
+    | Some st ->
+        let fields =
+          List.map
+            (fun (f : Model.modal_form_field) ->
+              match List.assoc_opt f.key pairs with
+              | Some v -> { f with value = v }
+              | None -> f)
+            st.fields
+        in
+        { m with inline_modal = Some { st with fields } }
+  in
+  (* 4. Tasks tab: [n] Create Task, [c] Transition, [g] Link Goalless Task *)
+  let m_tasks = { m_base with work = Work_store.set_tab Nav.Work_tasks m_base.work } in
+  let m_tc_open, _ = Update.step ~now:t0 m_tasks (Msg.Key_event (char_key "n")) in
+  (match m_tc_open.nav.overlay with
+  | Some (Nav.Inline_action Nav.Task_create_form) -> ()
+  | _ -> Alcotest.fail "[n] on Work_tasks must open Task_create_form");
+  let m_tc_filled =
+    set_fields
+      [
+        ("task_title", "Add task CRUD");
+        ("task_priority", "1");
+        ("task_goal_id", "g-1");
+        ("task_description", "Wire modal to MCP");
+      ]
+      m_tc_open
+  in
+  let _, tc_cmds =
+    Update.step ~now:t0 m_tc_filled (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool) "Task_create_form emits Post_task_create" true
+    (List.exists
+       (function
+         | Cmd.Http_post
+             {
+               req =
+                 Cmd.Post_task_create
+                   {
+                     title = "Add task CRUD";
+                     priority = 1;
+                     goal_id = Some "g-1";
+                     description = Some "Wire modal to MCP";
+                     expected_workspace = Some _;
+                   };
+               _;
+             } ->
+             true
+         | _ -> false)
+       (Cmd.flatten tc_cmds));
+  (* [c] opens Task_transition_form seeded with 'claim' for Todo; Right cycles to 'start' *)
+  let m_tr_open, _ = Update.step ~now:t0 m_tasks (Msg.Key_event (char_key "c")) in
+  (match m_tr_open.inline_modal with
+  | Some ({ kind = Nav.Task_transition_form { task_id = "task-unlinked" }; _ } as st) ->
+      Alcotest.(check string) "Todo task defaults to claim" "claim"
+        (Model.modal_field_value ~key:"task_action" st)
+  | _ -> Alcotest.fail "[c] on Work_tasks must open Task_transition_form");
+  let m_tr_cycled, _ =
+    Update.step ~now:t0 m_tr_open (Msg.Key_event (key Keymap.Input.Right))
+  in
+  let _, tr_cmds =
+    Update.step ~now:t0 m_tr_cycled (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool) "Task_transition_form emits Post_task_transition(Task_start)" true
+    (List.exists
+       (function
+         | Cmd.Http_post
+             {
+               req =
+                 Cmd.Post_task_transition
+                   {
+                     task_id = "task-unlinked";
+                     action = Wire_work.Task_start;
+                     _;
+                   };
+               _;
+             } ->
+             true
+         | _ -> false)
+       (Cmd.flatten tr_cmds));
+  (* [g] on goalless task opens Task_link_goal and emits Post_task_link_goal *)
+  let m_link_open, _ = Update.step ~now:t0 m_tasks (Msg.Key_event (char_key "g")) in
+  (match m_link_open.nav.overlay with
+  | Some (Nav.Inline_action (Nav.Task_link_goal { task_id = "task-unlinked" })) -> ()
+  | _ -> Alcotest.fail "[g] on goalless task must open Task_link_goal");
+  let m_link_filled = set_fields [ ("link_goal_id", "g-1") ] m_link_open in
+  let _, link_cmds =
+    Update.step ~now:t0 m_link_filled (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool) "Task_link_goal emits Post_task_link_goal" true
+    (List.exists
+       (function
+         | Cmd.Http_post
+             {
+               req =
+                 Cmd.Post_task_link_goal
+                   { task_id = "task-unlinked"; goal_id = "g-1"; _ };
+               _;
+             } ->
+             true
+         | _ -> false)
+       (Cmd.flatten link_cmds));
+  (* [g] on already-linked task refuses locally (constitution goalless-only rule) *)
+  let m_tasks_linked, _ =
+    Update.step ~now:t0 m_tasks (Msg.Key_event (key Keymap.Input.Down))
+  in
+  let m_link_refused, link_refused_cmds =
+    Update.step ~now:t0 m_tasks_linked (Msg.Key_event (char_key "g"))
+  in
+  Alcotest.(check bool) "[g] on already-linked task refuses without modal or POST" true
+    (Option.is_none m_link_refused.nav.overlay && Cmd.flatten link_refused_cmds = []);
+  (* 5. Goals tab: [n] Create Goal requiring measure+procedure, [e] Edit Goal *)
+  let m_goals = { m_base with work = Work_store.set_tab Nav.Work_pipeline m_base.work } in
+  let m_gc_open, _ = Update.step ~now:t0 m_goals (Msg.Key_event (char_key "n")) in
+  let m_gc_no_proc =
+    set_fields
+      [
+        ("goal_title", "New Goal");
+        ("goal_measure_kind", "done_when");
+        ("goal_measure_spec", "Tests pass");
+        ("goal_procedure", "   ");
+      ]
+      m_gc_open
+  in
+  let _, gc_bad_cmds =
+    Update.step ~now:t0 m_gc_no_proc (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check int) "blank procedure blocks Goal_upsert_form submit" 0
+    (List.length (Cmd.flatten gc_bad_cmds));
+  let m_gc_ok =
+    set_fields
+      [
+        ("goal_title", "New Goal");
+        ("goal_measure_kind", "count");
+        ("goal_measure_spec", "3 PRs");
+        ("goal_procedure", "Verify Stack C PRs");
+        ("goal_priority", "1");
+      ]
+      m_gc_open
+  in
+  let _, gc_cmds =
+    Update.step ~now:t0 m_gc_ok (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool) "Goal_upsert_form create emits Post_goal_upsert(id=None)" true
+    (List.exists
+       (function
+         | Cmd.Http_post
+             {
+               req =
+                 Cmd.Post_goal_upsert
+                   {
+                     id = None;
+                     title = "New Goal";
+                     measure = Some (Wire_work.Measure_count { noun = "PRs"; total = 3 });
+                     procedure = "Verify Stack C PRs";
+                     priority = Some 1;
+                     _;
+                   };
+               _;
+             } ->
+             true
+         | _ -> false)
+       (Cmd.flatten gc_cmds));
+  let m_ge_open, _ = Update.step ~now:t0 m_goals (Msg.Key_event (char_key "e")) in
+  (match m_ge_open.nav.overlay with
+  | Some (Nav.Inline_action (Nav.Goal_upsert_form (Some "g-1"))) -> ()
+  | _ -> Alcotest.fail "[e] on Work_pipeline must open Goal_upsert_form (Some id)");
+  let _, ge_cmds =
+    Update.step ~now:t0 m_ge_open (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool)
+    "Goal_upsert_form edit without touching measure preserves stored measure (measure=None)"
+    true
+    (List.exists
+       (function
+         | Cmd.Http_post
+             { req = Cmd.Post_goal_upsert { id = Some "g-1"; measure = None; _ }; _ } ->
+             true
+         | _ -> false)
+       (Cmd.flatten ge_cmds));
+  (* submit_for_verification requires non-empty task_notes *)
+  let m_tr_open, _ = Update.step ~now:t0 m_tasks (Msg.Key_event (char_key "c")) in
+  let m_tr_blank_verif =
+    set_fields
+      [ ("task_action", "submit_for_verification"); ("task_notes", "   ") ]
+      m_tr_open
+  in
+  let _, tr_blank_cmds =
+    Update.step ~now:t0 m_tr_blank_verif (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check int)
+    "submit_for_verification with blank notes blocked locally (0 POSTs)" 0
+    (List.length (Cmd.flatten tr_blank_cmds));
+  let m_tr_ok_verif =
+    set_fields
+      [
+        ("task_action", "submit_for_verification");
+        ("task_notes", "CI green and evidence attached");
+      ]
+      m_tr_open
+  in
+  let _, tr_ok_cmds =
+    Update.step ~now:t0 m_tr_ok_verif (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool)
+    "submit_for_verification with notes emits Post_task_transition" true
+    (List.exists
+       (function
+         | Cmd.Http_post
+             {
+               req =
+                 Cmd.Post_task_transition
+                   {
+                     task_id = "task-unlinked";
+                     action = Wire_work.Task_submit_for_verification;
+                     notes = Some "CI green and evidence attached";
+                     _;
+                   };
+               _;
+             } ->
+             true
+         | _ -> false)
+       (Cmd.flatten tr_ok_cmds));
+  (* 6. Board & Thread_dive: [R]/[a] Reply, [u] Upvote, [p] Pin toggle, [d] Delete + dive pop *)
+  let sample_post : Wire_knowledge.board_post =
+    {
+      id = "post-42";
+      title = "CRUD Audit";
+      body = "Details";
+      author = "alpha";
+      hearth = Some "general";
+      post_kind = Some Wire_knowledge.Human_post;
+      visibility = Some Wire_knowledge.Vis_public;
+      created_at_unix = 1_700_000_000.0;
+      updated_at_unix = None;
+      score = 3;
+      comment_count = 0;
+      author_karma = Observed.value ~observed_at:t0 10;
+      succession_chain_root_id = None;
+      chain_depth = None;
+      is_signal = true;
+      pinned = false;
+    }
+  in
+  let m_board0 =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Knowledge; sidebar_focused = false };
+      knowledge = Knowledge_store.set_tab Nav.Knowledge_board m0.knowledge;
+    }
+  in
+  let m_board, _ =
+    Update.step ~now:t0 m_board0
+      (Msg.Http_reply
+         {
+           epoch = m_board0.epoch;
+           reply =
+             Msg.Reply_board_feed
+               (Ok
+                  {
+                    Wire_knowledge.posts = [ sample_post ];
+                    count = 1;
+                    sort_by = "recent";
+                    signal_only = true;
+                  });
+         })
+  in
+  let m_reply_r, _ =
+    Update.step ~now:t0 m_board (Msg.Key_event (char_key ~shift:true "R"))
+  in
+  (match m_reply_r.nav.overlay with
+  | Some (Nav.Inline_action (Nav.Board_comment { post_id = "post-42"; _ })) -> ()
+  | _ -> Alcotest.fail "[R] on Knowledge_board must open Board_comment");
+  let m_reply_a, _ = Update.step ~now:t0 m_board (Msg.Key_event (char_key "a")) in
+  (match m_reply_a.nav.overlay with
+  | Some (Nav.Inline_action (Nav.Board_comment { post_id = "post-42"; _ })) -> ()
+  | _ -> Alcotest.fail "[a] on Knowledge_board must open Board_comment");
+  let _, upvote_cmds = Update.step ~now:t0 m_board (Msg.Key_event (char_key "u")) in
+  Alcotest.(check bool) "[u] on Knowledge_board emits Post_board_vote Up" true
+    (List.exists
+       (function
+         | Cmd.Http_post
+             { req = Cmd.Post_board_vote { post_id = "post-42"; direction = `Up }; _ } ->
+             true
+         | _ -> false)
+       (Cmd.flatten upvote_cmds));
+  let _, pin_cmds = Update.step ~now:t0 m_board (Msg.Key_event (char_key "p")) in
+  Alcotest.(check bool) "[p] on unpinned post emits Post_board_pin(pinned=true)" true
+    (List.exists
+       (function
+         | Cmd.Http_post
+             { req = Cmd.Post_board_pin { post_id = "post-42"; pinned = true }; _ } ->
+             true
+         | _ -> false)
+       (Cmd.flatten pin_cmds));
+  let m_thread_dive =
+    {
+      m_board with
+      nav =
+        {
+          m_board.nav with
+          dive_stack = [ Nav.Dive_knowledge (Nav.Thread_dive "post-42") ];
+        };
+    }
+  in
+  let m_bdel_open, _ =
+    Update.step ~now:t0 m_thread_dive (Msg.Key_event (char_key "d"))
+  in
+  (match m_bdel_open.nav.overlay with
+  | Some (Nav.Inline_action (Nav.Board_delete_post { post_id = "post-42"; _ })) -> ()
+  | _ -> Alcotest.fail "[d] in Thread_dive must open Board_delete_post");
+  let m_bdel_wrong =
+    set_fields [ ("confirm_post_delete", "nope") ] m_bdel_open
+  in
+  let _, bdel_wrong_cmds =
+    Update.step ~now:t0 m_bdel_wrong (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check int) "wrong board delete confirmation emits no POST" 0
+    (List.length (Cmd.flatten bdel_wrong_cmds));
+  let m_bdel_ok =
+    set_fields [ ("confirm_post_delete", "delete") ] m_bdel_open
+  in
+  let m_bdel_submitting, bdel_cmds =
+    Update.step ~now:t0 m_bdel_ok (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool) "confirmed delete emits Post_board_delete" true
+    (List.exists
+       (function
+         | Cmd.Http_post { req = Cmd.Post_board_delete { post_id = "post-42" }; _ } ->
+             true
+         | _ -> false)
+       (Cmd.flatten bdel_cmds));
+  let m_bdeleted, bdeleted_cmds =
+    Update.step ~now:t1 m_bdel_submitting
+      (Msg.Http_reply
+         {
+           epoch = m_bdel_submitting.epoch;
+           reply = Msg.Reply_board_delete { post_id = "post-42"; result = Ok () };
+         })
+  in
+  Alcotest.(check bool) "Reply_board_delete Ok closes modal and pops Thread_dive" true
+    (Option.is_none m_bdeleted.inline_modal
+    && Option.is_none m_bdeleted.nav.overlay
+    && m_bdeleted.nav.dive_stack = []);
+  Alcotest.(check bool) "Reply_board_delete Ok refreshes Get_board_feed" true
+    (List.exists
+       (function
+         | Cmd.Http_get { req = Cmd.Get_board_feed _; _ } -> true
+         | _ -> false)
+       (Cmd.flatten bdeleted_cmds))
+
 let () =
   Alcotest.run "masc_tui_store"
     [
@@ -17328,6 +17826,11 @@ let () =
       , [
           Alcotest.test_case "create/edit/delete requests, CAS checks & Lane_dive pop"
             `Quick test_runtime_lane_crud_requests_and_cas;
+        ] );
+      ( "work_and_board_crud"
+      , [
+          Alcotest.test_case "tasks/goals MCP + link-goal + board reply/upvote/pin/delete"
+            `Quick test_work_and_board_crud_requests_and_guards;
         ] );
       ("Board recovery", [Alcotest.test_case "recover the viewed keeper and exact quarantine generation" `Quick test_keeper_board_quarantine_recovery]);
       ("exact chat lookup", [Alcotest.test_case "retain and dismiss scoped absent operations" `Quick test_exact_operation_absence_recovery]);

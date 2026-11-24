@@ -202,6 +202,7 @@ let mk_post ~id ~title ~author ~signal : Wire_knowledge.board_post =
     succession_chain_root_id = None;
     chain_depth = None;
     is_signal = signal;
+    pinned = false;
   }
 
 let mk_wiki_summary ~slug ~title : Wire_knowledge.wiki_page_summary =

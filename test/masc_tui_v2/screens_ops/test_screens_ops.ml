@@ -922,6 +922,7 @@ let make_populated_model ~cols ~rows ~lang =
                  succession_chain_root_id = None;
                  chain_depth = None;
                  is_signal = true;
+                 pinned = false;
                };
              ];
            count = 1;

@@ -117,6 +117,7 @@ type http_reply =
     }
   | Reply_board_comment of { post_id : string; result : (unit, http_error) result }
   | Reply_board_vote of { post_id : string; result : (unit, http_error) result }
+  | Reply_board_delete of { post_id : string; result : (unit, http_error) result }
   | Reply_wiki_index of (Wire_knowledge.wiki_index, http_error) result
   | Reply_wiki_page of {
       page : string;

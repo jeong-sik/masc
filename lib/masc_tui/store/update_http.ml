@@ -1001,7 +1001,12 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Github_token_form _
         | Nav.Runtime_lane_create
         | Nav.Runtime_lane_edit _
-        | Nav.Runtime_lane_delete _ ->
+        | Nav.Runtime_lane_delete _
+        | Nav.Task_create_form
+        | Nav.Task_transition_form _
+        | Nav.Task_link_goal _
+        | Nav.Goal_upsert_form _
+        | Nav.Board_delete_post _ ->
             false
       in
       let matches_modal =
@@ -1082,7 +1087,12 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Github_token_form _
             | Nav.Runtime_lane_create
             | Nav.Runtime_lane_edit _
-            | Nav.Runtime_lane_delete _ ->
+            | Nav.Runtime_lane_delete _
+            | Nav.Task_create_form
+            | Nav.Task_transition_form _
+            | Nav.Task_link_goal _
+            | Nav.Goal_upsert_form _
+            | Nav.Board_delete_post _ ->
                 modal)
           m.inline_modal
       in
@@ -1146,6 +1156,136 @@ let apply_http_reply ~now (m : Model.t) reply =
         record_http_incident ~now ~source:Health.Source_client_http
           ~context:(Say.make ~ko:"보드 투표" ~en:"Board vote")
           err m
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , cmds )
+  | Msg.Reply_board_delete { post_id; result = Ok () } ->
+      let matches_delete_modal = function
+        | Nav.Board_delete_post { post_id = mid; _ } -> String.equal mid post_id
+        | Nav.Btw_query
+        | Nav.Gate_reject _
+        | Nav.Verification_reject _
+        | Nav.Harness_overrule _
+        | Nav.Task_cancel _
+        | Nav.Goal_drop _
+        | Nav.Schedule_form
+        | Nav.Connector_form
+        | Nav.Repo_add_form
+        | Nav.Board_new_post
+        | Nav.Board_comment _
+        | Nav.Github_token_form _
+        | Nav.Code_finder_form
+        | Nav.Code_search_form
+        | Nav.Runtime_lane_create
+        | Nav.Runtime_lane_edit _
+        | Nav.Runtime_lane_delete _
+        | Nav.Task_create_form
+        | Nav.Task_transition_form _
+        | Nav.Task_link_goal _
+        | Nav.Goal_upsert_form _ ->
+            false
+      in
+      let close_modal =
+        match m.inline_modal with
+        | Some modal -> modal.submitting && matches_delete_modal modal.kind
+        | None -> false
+      in
+      let dive_stack, dive_return_stack =
+        match m.nav.dive_stack with
+        | top :: rest
+          when Nav.equal_dive top (Nav.Dive_knowledge (Nav.Thread_dive post_id))
+          ->
+            let return_rest =
+              match m.nav.dive_return_stack with
+              | _ :: r -> r
+              | [] -> []
+            in
+            (rest, return_rest)
+        | _ :: _ | [] -> (m.nav.dive_stack, m.nav.dive_return_stack)
+      in
+      let nav =
+        let nav0 = { m.nav with dive_stack; dive_return_stack } in
+        if not close_modal then nav0
+        else
+          match nav0.overlay with
+          | Some (Nav.Inline_action k) when matches_delete_modal k ->
+              { nav0 with overlay = nav0.return_overlay; return_overlay = None }
+          | Some
+              ( Nav.Inline_action _
+              | Nav.Palette
+              | Nav.Settings _
+              | Nav.Incidents
+              | Nav.Queue_context _
+              | Nav.Ask_answer
+              | Nav.Help
+              | Nav.System_gate _ )
+          | None ->
+              nav0
+      in
+      let inline_modal = if close_modal then None else m.inline_modal in
+      let next =
+        { m with nav; inline_modal }
+        |> Model.with_toast ~now ~level:Model.Toast_success
+             (Say.make ~ko:"게시글이 삭제되었습니다" ~en:"Board post deleted")
+      in
+      ( next
+      , [
+          Cmd.Http_get
+            {
+              epoch = m.epoch;
+              req =
+                Cmd.Get_board_feed
+                  {
+                    sort_by = next.knowledge.board_sort_by;
+                    hearth = next.knowledge.board_hearth;
+                    signal_only = next.knowledge.board_signal_only;
+                    limit = Some 50;
+                    offset = None;
+                  };
+            };
+        ] )
+  | Msg.Reply_board_delete { post_id; result = Error err } ->
+      let inline_modal =
+        Option.map
+          (fun (modal : Model.inline_modal_state) ->
+            match modal.kind with
+            | Nav.Board_delete_post { post_id = mid; _ }
+              when modal.submitting && String.equal mid post_id ->
+                {
+                  modal with
+                  submitting = false;
+                  error = Some (Msg.http_error_detail err);
+                }
+            | Nav.Board_delete_post _
+            | Nav.Btw_query
+            | Nav.Gate_reject _
+            | Nav.Verification_reject _
+            | Nav.Harness_overrule _
+            | Nav.Task_cancel _
+            | Nav.Goal_drop _
+            | Nav.Schedule_form
+            | Nav.Connector_form
+            | Nav.Repo_add_form
+            | Nav.Board_new_post
+            | Nav.Board_comment _
+            | Nav.Github_token_form _
+            | Nav.Code_finder_form
+            | Nav.Code_search_form
+            | Nav.Runtime_lane_create
+            | Nav.Runtime_lane_edit _
+            | Nav.Runtime_lane_delete _
+            | Nav.Task_create_form
+            | Nav.Task_transition_form _
+            | Nav.Task_link_goal _
+            | Nav.Goal_upsert_form _ ->
+                modal)
+          m.inline_modal
+      in
+      let next, cmds =
+        record_http_incident ~now ~source:Health.Source_client_http
+          ~context:(Say.make ~ko:"게시글 삭제" ~en:"Delete board post")
+          err { m with inline_modal }
       in
       ( Model.with_toast ~now ~level:Model.Toast_error
           (Msg.http_error_summary err) next
@@ -2365,7 +2505,12 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Board_comment _
         | Nav.Github_token_form _
         | Nav.Code_finder_form
-        | Nav.Code_search_form ->
+        | Nav.Code_search_form
+        | Nav.Task_create_form
+        | Nav.Task_transition_form _
+        | Nav.Task_link_goal _
+        | Nav.Goal_upsert_form _
+        | Nav.Board_delete_post _ ->
             false
       in
       let close_modal =
@@ -2458,7 +2603,12 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Board_comment _
         | Nav.Github_token_form _
         | Nav.Code_finder_form
-        | Nav.Code_search_form ->
+        | Nav.Code_search_form
+        | Nav.Task_create_form
+        | Nav.Task_transition_form _
+        | Nav.Task_link_goal _
+        | Nav.Goal_upsert_form _
+        | Nav.Board_delete_post _ ->
             false
       in
       let is_conflict =
@@ -3120,7 +3270,12 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Code_search_form
             | Nav.Runtime_lane_create
             | Nav.Runtime_lane_edit _
-            | Nav.Runtime_lane_delete _ ->
+            | Nav.Runtime_lane_delete _
+            | Nav.Task_create_form
+            | Nav.Task_transition_form _
+            | Nav.Task_link_goal _
+            | Nav.Goal_upsert_form _
+            | Nav.Board_delete_post _ ->
                 false)
         | Some
             (( Nav.Btw_query
@@ -3138,7 +3293,12 @@ let apply_http_reply ~now (m : Model.t) reply =
              | Nav.Code_search_form
              | Nav.Runtime_lane_create
              | Nav.Runtime_lane_edit _
-             | Nav.Runtime_lane_delete _ ) as kind) ->
+             | Nav.Runtime_lane_delete _
+             | Nav.Task_create_form
+             | Nav.Task_transition_form _
+             | Nav.Task_link_goal _
+             | Nav.Goal_upsert_form _
+             | Nav.Board_delete_post _ ) as kind) ->
             Nav.equal_inline_action_kind modal.kind kind
       in
       let close_inline_modal =
@@ -3223,7 +3383,12 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Code_search_form
             | Nav.Runtime_lane_create
             | Nav.Runtime_lane_edit _
-            | Nav.Runtime_lane_delete _ ->
+            | Nav.Runtime_lane_delete _
+            | Nav.Task_create_form
+            | Nav.Task_transition_form _
+            | Nav.Task_link_goal _
+            | Nav.Goal_upsert_form _
+            | Nav.Board_delete_post _ ->
                 false)
         | Some
             (( Nav.Btw_query
@@ -3241,7 +3406,12 @@ let apply_http_reply ~now (m : Model.t) reply =
              | Nav.Code_search_form
              | Nav.Runtime_lane_create
              | Nav.Runtime_lane_edit _
-             | Nav.Runtime_lane_delete _ ) as kind) ->
+             | Nav.Runtime_lane_delete _
+             | Nav.Task_create_form
+             | Nav.Task_transition_form _
+             | Nav.Task_link_goal _
+             | Nav.Goal_upsert_form _
+             | Nav.Board_delete_post _ ) as kind) ->
             Nav.equal_inline_action_kind modal.kind kind
       in
       let inline_modal =

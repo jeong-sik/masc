@@ -441,6 +441,7 @@ let populated_model ~cols ~rows ~lang =
             succession_chain_root_id = Some "p-root-1";
             chain_depth = Some 22;
             is_signal = true;
+            pinned = false;
           };
           {
             id = "p-2";
@@ -458,6 +459,7 @@ let populated_model ~cols ~rows ~lang =
             succession_chain_root_id = None;
             chain_depth = None;
             is_signal = true;
+            pinned = false;
           };
           {
             id = "p-noise";
@@ -475,6 +477,7 @@ let populated_model ~cols ~rows ~lang =
             succession_chain_root_id = None;
             chain_depth = None;
             is_signal = false;
+            pinned = false;
           };
         ];
       count = 3;

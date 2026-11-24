@@ -43,6 +43,8 @@ let board_hearths_path = "/api/v1/board/hearths"
 let board_comment_path = "/api/v1/tools/masc_board_comment"
 let board_vote_path = "/api/v1/tools/masc_board_vote"
 let board_comment_vote_path = "/api/v1/tools/masc_board_comment_vote"
+let board_pin_path = "/api/v1/dashboard/board/pin"
+let board_delete_path = "/api/v1/dashboard/board/delete"
 
 let wiki_index_path ?tag ?source ?sort () =
   let params =
@@ -161,6 +163,7 @@ type board_post = {
   succession_chain_root_id : string option;
   chain_depth : int option;
   is_signal : bool;
+  pinned : bool;
 }
 
 type board_comment = {
@@ -253,6 +256,7 @@ let decode_board_post ~observed_at json =
     if has_field json "is_signal" then required_bool_field json "is_signal"
     else Ok (is_signal_board_post ~post_kind ~hearth ~title ~body)
   in
+  let* pinned = decode_bool_field_or json "pinned" ~default:false in
   Ok
     {
       id;
@@ -270,6 +274,7 @@ let decode_board_post ~observed_at json =
       succession_chain_root_id;
       chain_depth;
       is_signal;
+      pinned;
     }
 
 let decode_board_comment json =
@@ -1135,6 +1140,12 @@ let encode_board_comment_vote ~comment_id ~direction =
       ("comment_id", `String comment_id);
       ("direction", `String (vote_dir_str direction));
     ]
+
+let encode_board_pin ~post_id ~pinned =
+  `Assoc [ ("post_id", `String (String.trim post_id)); ("pinned", `Bool pinned) ]
+
+let encode_board_delete ~post_id =
+  `Assoc [ ("post_id", `String (String.trim post_id)) ]
 
 type artifact_check = {
   id : string;

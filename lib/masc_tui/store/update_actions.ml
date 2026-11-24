@@ -1019,6 +1019,230 @@ let open_runtime_lane_delete_modal ~now (m : Model.t)
     in
     (m1, cmds1 @ rev_cmds)
 
+let default_task_transition_action (tk : Wire_work.task) =
+  match tk.status with
+  | Wire_work.Todo -> "claim"
+  | Wire_work.Claimed _ -> "start"
+  | Wire_work.InProgress _ -> "submit_for_verification"
+  | Wire_work.AwaitingVerification _ | Wire_work.Done _ | Wire_work.Cancelled _
+    ->
+      "release"
+
+let open_task_transition_modal ~now (m : Model.t) (tk : Wire_work.task) =
+  match tk.status with
+  | Wire_work.Done _ | Wire_work.Cancelled _ ->
+      ( Model.with_toast ~now ~level:Model.Toast_warning
+          (Say.make
+             ~ko:"완료·취소된 작업은 상태를 전환할 수 없습니다"
+             ~en:"Finished or cancelled tasks cannot be transitioned")
+          m
+      , [] )
+  | Wire_work.Todo
+  | Wire_work.Claimed _
+  | Wire_work.InProgress _
+  | Wire_work.AwaitingVerification _ ->
+      let kind = Nav.Task_transition_form { task_id = tk.id } in
+      let modal0 = Model.inline_modal_for kind in
+      let def_act = default_task_transition_action tk in
+      let fields =
+        List.map
+          (fun (f : Model.modal_form_field) ->
+            if String.equal f.key "task_action" then { f with value = def_act }
+            else f)
+          modal0.fields
+      in
+      let modal = { modal0 with fields } in
+      let nav =
+        {
+          m.nav with
+          overlay = Some (Nav.Inline_action kind);
+          return_overlay = None;
+          filter_focused = false;
+          sidebar_focused = false;
+          modal_edit_cursor = String.length (Model.modal_active_field_value modal);
+        }
+      in
+      let drafts = Drafts.set_focus false m.drafts in
+      let config = Config_store.cancel_edit_field m.config in
+      ( { m with nav; drafts; config; inline_modal = Some modal; ask_modal = None }
+      , [] )
+
+let open_task_link_goal_modal ~now (m : Model.t) (tk : Wire_work.task) =
+  match tk.status with
+  | Wire_work.Done _ | Wire_work.Cancelled _ ->
+      ( Model.with_toast ~now ~level:Model.Toast_warning
+          (Say.make ~ko:"완료·취소된 작업은 목표에 연결할 수 없습니다"
+             ~en:"Finished or cancelled tasks cannot be linked to a goal")
+          m
+      , [] )
+  | Wire_work.Todo
+  | Wire_work.Claimed _
+  | Wire_work.InProgress _
+  | Wire_work.AwaitingVerification _ -> (
+      match Wire_work.check_goal_link_assignable tk with
+      | Error detail ->
+          ( Model.with_toast ~now ~level:Model.Toast_warning
+              (Say.make
+                 ~ko:("이미 목표에 연결된 작업입니다 (미연결 작업만 연결 가능): " ^ detail)
+                 ~en:("Goalless tasks only: " ^ detail))
+              m
+          , [] )
+      | Ok () ->
+          Update_nav.open_inline_modal m (Nav.Task_link_goal { task_id = tk.id }))
+
+let open_goal_upsert_modal (m : Model.t) ?(goal : Wire_work.goal option) () =
+  let id_opt = Option.map (fun (g : Wire_work.goal) -> g.id) goal in
+  let kind = Nav.Goal_upsert_form id_opt in
+  let modal0 = Model.inline_modal_for kind in
+  let modal =
+    match goal with
+    | None -> modal0
+    | Some g ->
+        let fields =
+          List.map
+            (fun (f : Model.modal_form_field) ->
+              match f.key with
+              | "goal_title" -> { f with value = g.title }
+              | "goal_procedure" -> { f with value = g.procedure }
+              | "goal_priority" -> { f with value = string_of_int g.priority }
+              | "goal_due_date" ->
+                  { f with value = Option.value g.due_date ~default:"" }
+              | _ -> f)
+            modal0.fields
+        in
+        { modal0 with fields }
+  in
+  let nav =
+    {
+      m.nav with
+      overlay = Some (Nav.Inline_action kind);
+      return_overlay = None;
+      filter_focused = false;
+      sidebar_focused = false;
+      modal_edit_cursor = String.length (Model.modal_active_field_value modal);
+    }
+  in
+  let drafts = Drafts.set_focus false m.drafts in
+  let config = Config_store.cancel_edit_field m.config in
+  ({ m with nav; drafts; config; inline_modal = Some modal; ask_modal = None }, [])
+
+let selected_board_post_for_crud (m : Model.t) : Wire_knowledge.board_post option =
+  match Model.active_dive m with
+  | Some (Nav.Dive_knowledge (Nav.Thread_dive post_id)) -> (
+      match Observed.to_option m.knowledge.active_thread with
+      | Some (p, _) when String.equal p.id post_id -> Some p
+      | Some _ | None -> (
+          match Observed.to_option m.knowledge.board with
+          | Some feed ->
+              List.find_opt
+                (fun (p : Wire_knowledge.board_post) ->
+                  String.equal p.id post_id)
+                feed.posts
+          | None -> None))
+  | Some
+      ( Nav.Dive_knowledge
+          ( Nav.Wiki_dive _
+          | Nav.Artifact_dive _
+          | Nav.Memory_diff_dive _ )
+      | Nav.Dive_keeper _
+      | Nav.Dive_work _
+      | Nav.Dive_runtime _
+      | Nav.Dive_infra _ ) ->
+      None
+  | None ->
+      if
+        Nav.equal_workspace m.nav.workspace Nav.Knowledge
+        && Nav.equal_knowledge_tab m.knowledge.active_tab Nav.Knowledge_board
+      then Knowledge_store.selected_post m.knowledge
+      else None
+
+let open_board_comment_for_selected (m : Model.t) =
+  match Model.active_dive m with
+  | Some (Nav.Dive_knowledge (Nav.Thread_dive post_id)) ->
+      let parent_id =
+        Option.map
+          (fun (tc : Knowledge_store.threaded_comment) -> tc.comment.id)
+          (Knowledge_store.selected_thread_comment ~post_id m.knowledge)
+      in
+      Update_nav.open_inline_modal m (Nav.Board_comment { post_id; parent_id })
+  | Some
+      ( Nav.Dive_knowledge
+          ( Nav.Wiki_dive _
+          | Nav.Artifact_dive _
+          | Nav.Memory_diff_dive _ )
+      | Nav.Dive_keeper _
+      | Nav.Dive_work _
+      | Nav.Dive_runtime _
+      | Nav.Dive_infra _ ) ->
+      (m, [])
+  | None -> (
+      match Knowledge_store.selected_post m.knowledge with
+      | Some p ->
+          Update_nav.open_inline_modal m
+            (Nav.Board_comment { post_id = p.id; parent_id = None })
+      | None -> (m, []))
+
+let upvote_board_target ~now (m : Model.t) =
+  match Model.active_dive m with
+  | Some (Nav.Dive_knowledge (Nav.Thread_dive post_id)) ->
+      let req =
+        match Knowledge_store.selected_thread_comment ~post_id m.knowledge with
+        | Some tc ->
+            Cmd.Post_board_comment_vote
+              { post_id; comment_id = tc.comment.id; direction = `Up }
+        | None -> Cmd.Post_board_vote { post_id; direction = `Up }
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_info
+          (Say.make ~ko:"추천 전송 중..." ~en:"Submitting upvote...")
+          m
+      , [ Cmd.Http_post { epoch = m.epoch; req } ] )
+  | Some
+      ( Nav.Dive_knowledge
+          ( Nav.Wiki_dive _
+          | Nav.Artifact_dive _
+          | Nav.Memory_diff_dive _ )
+      | Nav.Dive_keeper _
+      | Nav.Dive_work _
+      | Nav.Dive_runtime _
+      | Nav.Dive_infra _ ) ->
+      (m, [])
+  | None -> (
+      match Knowledge_store.selected_post m.knowledge with
+      | Some p ->
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make ~ko:("추천 전송: " ^ p.title) ~en:("Upvoting: " ^ p.title))
+              m
+          , [
+              Cmd.Http_post
+                {
+                  epoch = m.epoch;
+                  req = Cmd.Post_board_vote { post_id = p.id; direction = `Up };
+                };
+            ] )
+      | None -> (m, []))
+
+let toggle_board_pin ~now (m : Model.t) =
+  match selected_board_post_for_crud m with
+  | Some p ->
+      let next_pinned = not p.pinned in
+      let toast =
+        if next_pinned then
+          Say.make ~ko:("게시글 고정 요청: " ^ p.title)
+            ~en:("Pinning post: " ^ p.title)
+        else
+          Say.make ~ko:("게시글 고정 해제 요청: " ^ p.title)
+            ~en:("Unpinning post: " ^ p.title)
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_info toast m
+      , [
+          Cmd.Http_post
+            {
+              epoch = m.epoch;
+              req = Cmd.Post_board_pin { post_id = p.id; pinned = next_pinned };
+            };
+        ] )
+  | None -> (m, [])
+
 let open_harness_overrule_for_selected ~verdict ~now (m : Model.t) =
   Update_nav.open_harness_overrule_for_context ~verdict ~now m
 
@@ -1979,7 +2203,12 @@ and execute_action ~now (m : Model.t) action =
                     | Nav.Code_search_form
                     | Nav.Runtime_lane_create
                     | Nav.Runtime_lane_edit _
-                    | Nav.Runtime_lane_delete _ )
+                    | Nav.Runtime_lane_delete _
+                    | Nav.Task_create_form
+                    | Nav.Task_transition_form _
+                    | Nav.Task_link_goal _
+                    | Nav.Goal_upsert_form _
+                    | Nav.Board_delete_post _ )
                   , _ ) ->
                     true
               in
@@ -2183,7 +2412,12 @@ and execute_action ~now (m : Model.t) action =
                | Nav.Code_search_form
                | Nav.Runtime_lane_create
                | Nav.Runtime_lane_edit _
-               | Nav.Runtime_lane_delete _ )) ->
+               | Nav.Runtime_lane_delete _
+               | Nav.Task_create_form
+               | Nav.Task_transition_form _
+               | Nav.Task_link_goal _
+               | Nav.Goal_upsert_form _
+               | Nav.Board_delete_post _ )) ->
             Update_nav.submit_inline_modal ~now m
         | Some Nav.Ask_answer -> (
             match m.ask_modal with
@@ -2450,7 +2684,12 @@ and execute_action ~now (m : Model.t) action =
             | Nav.Code_search_form
             | Nav.Runtime_lane_create
             | Nav.Runtime_lane_edit _
-            | Nav.Runtime_lane_delete _ ->
+            | Nav.Runtime_lane_delete _
+            | Nav.Task_create_form
+            | Nav.Task_transition_form _
+            | Nav.Task_link_goal _
+            | Nav.Goal_upsert_form _
+            | Nav.Board_delete_post _ ->
                 m.drafts
           in
           let closed =
@@ -3335,67 +3574,10 @@ and execute_action ~now (m : Model.t) action =
                       (m, []))
               | Nav.Work -> (
                   match m.work.active_tab with
-                  | Nav.Work_pipeline ->
-                      let modal : Model.inline_modal_state =
-                        {
-                          kind = Nav.Board_new_post;
-                          fields =
-                            [
-                              {
-                                key = "proposal_title";
-                                label =
-                                  Say.make ~ko:"#goals 제안 제목"
-                                    ~en:"Proposal title (#goals)";
-                                value = "";
-                                required = true;
-                                secret = false;
-                              };
-                              {
-                                key = "proposal_measure";
-                                label =
-                                  Say.make ~ko:"성공 기준 (Measure)"
-                                    ~en:"Success measure";
-                                value = "";
-                                required = true;
-                                secret = false;
-                              };
-                              {
-                                key = "proposal_procedure";
-                                label =
-                                  Say.make ~ko:"검증 절차 (Procedure)"
-                                    ~en:"Verification procedure";
-                                value = "";
-                                required = false;
-                                secret = false;
-                              };
-                              {
-                                key = "proposal_priority";
-                                label =
-                                  Say.make ~ko:"우선순위 (1-5)"
-                                    ~en:"Priority (1-5)";
-                                value = "2";
-                                required = false;
-                                secret = false;
-                              };
-                            ];
-                          active_field = 0;
-                          submitting = false;
-                          error = None;
-                        }
-                      in
-                      let nav =
-                        {
-                          m.nav with
-                          overlay = Some (Nav.Inline_action Nav.Board_new_post);
-                          return_overlay = None;
-                          filter_focused = false;
-                          modal_edit_cursor =
-                            String.length (Model.modal_active_field_value modal);
-                        }
-                      in
-                      let drafts = Drafts.set_focus false m.drafts in
-                      ({ m with nav; drafts; inline_modal = Some modal }, [])
-                  | Nav.Work_tasks | Nav.Work_schedules ->
+                  | Nav.Work_pipeline -> open_goal_upsert_modal m ()
+                  | Nav.Work_tasks ->
+                      Update_nav.open_inline_modal m Nav.Task_create_form
+                  | Nav.Work_schedules ->
                       Update_nav.open_schedule_form_populated m
                   | Nav.Work_harness ->
                       open_harness_overrule_for_selected ~verdict:"reject" ~now m
@@ -3403,10 +3585,9 @@ and execute_action ~now (m : Model.t) action =
                       ( Model.with_toast ~now ~level:Model.Toast_info
                           (Say.make
                              ~ko:
-                               "#goals 보드 제안은 목표(Goals) 탭, 스케줄 생성은 작업·일정 탭에서 [n]을 누르세요"
+                               "목표 생성은 목표(Goals), 작업 생성은 작업(Tasks), 일정 생성은 일정(Schedules) 탭에서 [n]을 누르세요"
                              ~en:
-                               "Press [n] on Goals to post a #goals proposal \
-                                or Tasks/Schedules to add a schedule")
+                               "Press [n] on Goals to create a goal, Tasks to add a task, or Schedules to add a schedule")
                           m
                       , [] ))
               | Nav.Runtime -> (
@@ -3692,7 +3873,12 @@ and execute_action ~now (m : Model.t) action =
                 | Nav.Code_search_form
                 | Nav.Runtime_lane_create
                 | Nav.Runtime_lane_edit _
-                | Nav.Runtime_lane_delete _ )
+                | Nav.Runtime_lane_delete _
+                | Nav.Task_create_form
+                | Nav.Task_transition_form _
+                | Nav.Task_link_goal _
+                | Nav.Goal_upsert_form _
+                | Nav.Board_delete_post _ )
             | Nav.Ask_answer
             | Nav.Help
             | Nav.System_gate
@@ -4971,8 +5157,16 @@ and execute_action ~now (m : Model.t) action =
                 with
                 | Some g -> Update_nav.request_goal_complete_guarded ~now m g
                 | None -> (m, []))
+            | Some (Nav.Dive_work (Nav.Task_dive task_id)) -> (
+                match
+                  List.find_opt
+                    (fun (tk : Wire_work.task) -> String.equal tk.id task_id)
+                    (Work_store.tasks m.work)
+                with
+                | Some tk -> open_task_transition_modal ~now m tk
+                | None -> (m, []))
             | Some
-                ( Nav.Dive_work (Nav.Task_dive _ | Nav.Verification_dive _)
+                ( Nav.Dive_work (Nav.Verification_dive _)
                 | Nav.Dive_knowledge
                     (Nav.Wiki_dive _ | Nav.Artifact_dive _ | Nav.Memory_diff_dive _)
                 | Nav.Dive_runtime _
@@ -5033,6 +5227,11 @@ and execute_action ~now (m : Model.t) action =
                   when Nav.equal_work_tab m.work.active_tab Nav.Work_pipeline -> (
                     match Work_store.selected_goal m.work with
                     | Some g -> Update_nav.request_goal_complete_guarded ~now m g
+                    | None -> (m, []))
+                | Nav.Work
+                  when Nav.equal_work_tab m.work.active_tab Nav.Work_tasks -> (
+                    match Work_store.selected_task m.work with
+                    | Some tk -> open_task_transition_modal ~now m tk
                     | None -> (m, []))
                 | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Runtime | Nav.Infra
                   ->
@@ -5233,21 +5432,39 @@ and execute_action ~now (m : Model.t) action =
           | Nav.Infra ->
               (m, []))
   | Keymap.Toggle_unreported -> (
-      if Option.is_some m.nav.overlay || Option.is_some (Model.active_dive m)
-      then (m, [])
+      if Option.is_some m.nav.overlay then (m, [])
       else
-        match m.nav.workspace with
-        | Nav.Runtime
-          when Nav.equal_runtime_tab m.runtime.active_tab
-                 Nav.Runtime_quotas_credits ->
-            ( {
-                m with
-                runtime = Runtime_store.toggle_unreported_accounts m.runtime;
-              }
-            , [] )
-        | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Keepers | Nav.Runtime
-        | Nav.Infra ->
-            (m, []))
+        match Model.active_dive m with
+        | Some (Nav.Dive_knowledge (Nav.Thread_dive _)) ->
+            upvote_board_target ~now m
+        | Some
+            ( Nav.Dive_knowledge
+                ( Nav.Wiki_dive _
+                | Nav.Artifact_dive _
+                | Nav.Memory_diff_dive _ )
+            | Nav.Dive_keeper _
+            | Nav.Dive_work _
+            | Nav.Dive_runtime _
+            | Nav.Dive_infra _ ) ->
+            (m, [])
+        | None -> (
+            match m.nav.workspace with
+            | Nav.Knowledge
+              when Nav.equal_knowledge_tab m.knowledge.active_tab
+                     Nav.Knowledge_board ->
+                upvote_board_target ~now m
+            | Nav.Runtime
+              when Nav.equal_runtime_tab m.runtime.active_tab
+                     Nav.Runtime_quotas_credits ->
+                ( {
+                    m with
+                    runtime =
+                      Runtime_store.toggle_unreported_accounts m.runtime;
+                  }
+                , [] )
+            | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Keepers | Nav.Runtime
+            | Nav.Infra ->
+                (m, [])))
   | Keymap.Unbind_connector -> (
       match active_keeper_for_tab Nav.Keeper_identity m with
       | Some keeper -> (
@@ -5407,6 +5624,8 @@ and execute_action ~now (m : Model.t) action =
             in
             open_runtime_assign_modal m ~keeper_default ~runtime_default:lane_id
               ()
+        | Some (Nav.Dive_knowledge (Nav.Thread_dive _)) ->
+            open_board_comment_for_selected m
         | Some
             ( Nav.Dive_work (Nav.Task_dive _)
             | Nav.Dive_keeper
@@ -5421,7 +5640,10 @@ and execute_action ~now (m : Model.t) action =
                     | Nav.Keeper_identity );
                   _;
                 }
-            | Nav.Dive_knowledge _
+            | Nav.Dive_knowledge
+                ( Nav.Wiki_dive _
+                | Nav.Artifact_dive _
+                | Nav.Memory_diff_dive _ )
             | Nav.Dive_runtime _
             | Nav.Dive_infra
                 ( Nav.Sandbox_dive _
@@ -5471,6 +5693,10 @@ and execute_action ~now (m : Model.t) action =
                   let infra = Infra_store.toggle_acting_rail m.infra in
                   let next = Update_nav.clamp_for_pane { m with infra } in
                   (next, View_fetches.fetches_for_current_view next)
+            | Nav.Knowledge
+              when Nav.equal_knowledge_tab m.knowledge.active_tab
+                     Nav.Knowledge_board ->
+                open_board_comment_for_selected m
             | Nav.Knowledge
               when Nav.equal_knowledge_tab m.knowledge.active_tab
                      Nav.Knowledge_memory -> (
@@ -5715,6 +5941,14 @@ and execute_action ~now (m : Model.t) action =
                            ~en:("Lane not found: " ^ lane_id))
                         m
                     , [] ))
+            | Some (Nav.Dive_work (Nav.Goal_dive goal_id)) -> (
+                match
+                  List.find_opt
+                    (fun (g : Wire_work.goal) -> String.equal g.id goal_id)
+                    (Work_store.goals m.work)
+                with
+                | Some g -> open_goal_upsert_modal m ~goal:g ()
+                | None -> (m, []))
             | Some
                 ( Nav.Dive_knowledge
                     ( Nav.Thread_dive _
@@ -5731,7 +5965,7 @@ and execute_action ~now (m : Model.t) action =
                         | Nav.Keeper_identity );
                       _;
                     }
-                | Nav.Dive_work _
+                | Nav.Dive_work (Nav.Task_dive _ | Nav.Verification_dive _)
                 | Nav.Dive_runtime (Nav.Tool_dive _)
                 | Nav.Dive_infra
                     ( Nav.Sandbox_dive _
@@ -5814,6 +6048,21 @@ and execute_action ~now (m : Model.t) action =
                             ] )
                       | None -> (m, []))
                   | None -> (m, []))
+                else if
+                  Nav.equal_workspace m.nav.workspace Nav.Work
+                  && Nav.equal_work_tab m.work.active_tab Nav.Work_pipeline
+                  && not
+                       (m.nav.pane_index = 1
+                       && Model.work_pipeline_verifs_visible m)
+                then (
+                  match Work_store.selected_goal m.work with
+                  | Some g -> open_goal_upsert_modal m ~goal:g ()
+                  | None ->
+                      ( Model.with_toast ~now ~level:Model.Toast_info
+                          (Say.make ~ko:"편집할 목표를 선택하세요"
+                             ~en:"Select a goal to edit")
+                          m
+                      , [] ))
                 else if
                   Nav.equal_workspace m.nav.workspace Nav.Runtime
                   && Nav.equal_runtime_tab m.runtime.active_tab
@@ -6160,7 +6409,9 @@ and execute_action ~now (m : Model.t) action =
           , [ Cmd.Copy_clipboard url ] )
       | None -> (m, []))
   | Keymap.Probe_sandbox -> (
-      if
+      if Option.is_none m.nav.overlay && Option.is_some (selected_board_post_for_crud m)
+      then toggle_board_pin ~now m
+      else if
         Option.is_none m.nav.overlay
         && Option.is_none (Model.active_dive m)
         && Nav.equal_workspace m.nav.workspace Nav.Infra
@@ -6427,6 +6678,37 @@ and execute_action ~now (m : Model.t) action =
       else
         match selected_lane_for_crud m with
         | Some lane -> open_runtime_lane_delete_modal ~now m lane
+        | None -> (
+            match selected_board_post_for_crud m with
+            | Some p ->
+                Update_nav.open_inline_modal m
+                  (Nav.Board_delete_post { post_id = p.id; title = p.title })
+            | None -> (m, [])))
+  | Keymap.Link_task_goal -> (
+      if Option.is_some m.nav.overlay || Model.sidebar_has_focus m then (m, [])
+      else
+        let task_opt =
+          match Model.active_dive m with
+          | Some (Nav.Dive_work (Nav.Task_dive task_id)) ->
+              List.find_opt
+                (fun (tk : Wire_work.task) -> String.equal tk.id task_id)
+                (Work_store.tasks m.work)
+          | Some
+              ( Nav.Dive_work (Nav.Goal_dive _ | Nav.Verification_dive _)
+              | Nav.Dive_keeper _
+              | Nav.Dive_knowledge _
+              | Nav.Dive_runtime _
+              | Nav.Dive_infra _ ) ->
+              None
+          | None ->
+              if
+                Nav.equal_workspace m.nav.workspace Nav.Work
+                && Nav.equal_work_tab m.work.active_tab Nav.Work_tasks
+              then Work_store.selected_task m.work
+              else None
+        in
+        match task_opt with
+        | Some tk -> open_task_link_goal_modal ~now m tk
         | None -> (m, []))
   | Keymap.Quit_app -> (
       let is_armed =

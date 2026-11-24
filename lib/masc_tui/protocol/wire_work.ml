@@ -8,6 +8,11 @@ let planning_path = "/api/v1/dashboard/planning"
 let execution_tasks_path = "/api/v1/dashboard/execution?light=true"
 let goals_path = "/api/v1/dashboard/goals"
 let goal_confirmation_path = "/api/v1/goals/confirmation"
+let mcp_path = "/mcp"
+let mcp_protocol_version = "2026-07-28"
+
+let task_link_goal_path ~task_id =
+  "/api/v1/tasks/" ^ percent_encode (String.trim task_id) ^ "/link-goal"
 
 let verification_requests_path ~view ~limit ~offset =
   Printf.sprintf "/api/v1/verification/requests?view=%s&limit=%d&offset=%d"
@@ -330,6 +335,238 @@ let encode_goal_confirmation (req : goal_confirmation_request) =
       ("expected_runtime_instance_id", `String req.expected_runtime_instance_id);
     ]
 
+type goal_measure_direction =
+  | At_least
+  | At_most
+
+type goal_measure =
+  | Measure_done_when of { condition : string }
+  | Measure_count of {
+      noun : string;
+      total : int;
+    }
+  | Measure_quantity of {
+      unit : string;
+      direction : goal_measure_direction;
+      target : float;
+    }
+
+let split_first_word raw =
+  let s = String.trim raw in
+  let len = String.length s in
+  let rec find_ws i =
+    if i >= len then len
+    else
+      match s.[i] with
+      | ' ' | '\t' | '\n' | '\r' -> i
+      | _ -> find_ws (i + 1)
+  in
+  let ws = find_ws 0 in
+  let first = String.sub s 0 ws in
+  let rest =
+    if ws >= len then "" else String.trim (String.sub s ws (len - ws))
+  in
+  (first, rest)
+
+let parse_goal_measure_input ~kind ~spec =
+  let spec = String.trim spec in
+  if String.equal spec "" then Error "Goal measure value is required"
+  else
+    match String.lowercase_ascii (String.trim kind) with
+    | "done_when" -> Ok (Measure_done_when { condition = spec })
+    | "count" -> (
+        let total_s, noun = split_first_word spec in
+        match int_of_string_opt total_s with
+        | Some total when total > 0 && not (String.equal noun "") ->
+            Ok (Measure_count { noun; total })
+        | Some _ | None ->
+            Error
+              "Count measure must be '<positive-int> <noun>' (e.g. '14 files')")
+    | "quantity" -> (
+        let dir_tok, rest1 = split_first_word spec in
+        let dir_opt =
+          match String.lowercase_ascii dir_tok with
+          | ">=" | "at_least" -> Some At_least
+          | "<=" | "at_most" -> Some At_most
+          | _ -> None
+        in
+        match dir_opt with
+        | None ->
+            Error
+              "Quantity measure must start with '>=' (at_least) or '<=' (at_most), e.g. '<= 100 ms'"
+        | Some direction -> (
+            let target_s, unit = split_first_word rest1 in
+            match float_of_string_opt target_s with
+            | Some target
+              when Float.is_finite target && not (String.equal unit "") ->
+                Ok (Measure_quantity { unit; direction; target })
+            | Some _ | None ->
+                Error
+                  "Quantity measure must be '<=|>= <number> <unit>' (e.g. '<= 100 ms')"))
+    | _ ->
+        Error "Measure kind must be 'done_when', 'count', or 'quantity'"
+
+let encode_goal_measure = function
+  | Measure_done_when { condition } ->
+      `Assoc [ ("kind", `String "done_when"); ("condition", `String condition) ]
+  | Measure_count { noun; total } ->
+      `Assoc
+        [
+          ("kind", `String "count");
+          ("noun", `String noun);
+          ("total", `Int total);
+        ]
+  | Measure_quantity { unit; direction; target } ->
+      let dir_str =
+        match direction with At_least -> "at_least" | At_most -> "at_most"
+      in
+      `Assoc
+        [
+          ("kind", `String "quantity");
+          ("unit", `String unit);
+          ("direction", `String dir_str);
+          ("target", `Float target);
+        ]
+
+let encode_goal_upsert ?id ~title ?measure ~procedure ?priority ?due_date
+    ?expected_workspace () =
+  let opt_str key = function
+    | Some v when not (String.equal (String.trim v) "") ->
+        [ (key, `String (String.trim v)) ]
+    | Some _ | None -> []
+  in
+  let measure_field =
+    match measure with
+    | Some m -> [ ("measure", encode_goal_measure m) ]
+    | None -> []
+  in
+  let priority_field =
+    match priority with
+    | Some p when p >= 1 && p <= 5 -> [ ("priority", `Int p) ]
+    | Some _ | None -> []
+  in
+  let ws_field =
+    match expected_workspace with
+    | Some ws -> [ ("expected_workspace", encode_expected_workspace ws) ]
+    | None -> []
+  in
+  `Assoc
+    (opt_str "id" id
+    @ [ ("title", `String (String.trim title)) ]
+    @ measure_field
+    @ [ ("procedure", `String (String.trim procedure)) ]
+    @ priority_field
+    @ opt_str "due_date" due_date
+    @ ws_field)
+
+let encode_mcp_tool_call ~id ~tool_name ~arguments =
+  `Assoc
+    [
+      ("jsonrpc", `String "2.0");
+      ("id", `String id);
+      ("method", `String "tools/call");
+      ( "params"
+      , `Assoc
+          [
+            ("name", `String tool_name);
+            ("arguments", arguments);
+            ( "_meta"
+            , `Assoc
+                [
+                  ( "io.modelcontextprotocol/protocolVersion"
+                  , `String mcp_protocol_version );
+                  ("io.modelcontextprotocol/clientCapabilities", `Assoc []);
+                ] );
+          ] );
+    ]
+
+let extract_mcp_json_payload raw =
+  let trimmed = String.trim raw in
+  if String.equal trimmed "" then None
+  else if trimmed.[0] = '{' then Some trimmed
+  else
+    let lines = String.split_on_char '\n' trimmed in
+    let data_payloads =
+      List.filter_map
+        (fun line ->
+          let l = String.trim line in
+          if String.starts_with ~prefix:"data:" l then
+            let rest = String.trim (String.sub l 5 (String.length l - 5)) in
+            if String.length rest > 0 && rest.[0] = '{' then Some rest
+            else None
+          else None)
+        lines
+    in
+    match List.rev data_payloads with
+    | last :: _ -> Some last
+    | [] -> Some trimmed
+
+let extract_mcp_result_error_text result_json =
+  match member "content" result_json with
+  | `List items -> (
+      let texts =
+        List.filter_map
+          (fun item ->
+            match member "text" item with
+            | `String s when not (String.equal (String.trim s) "") ->
+                Some (String.trim s)
+            | `String _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _
+            | `Assoc _ | `List _ ->
+                None)
+          items
+      in
+      match texts with
+      | [] -> "MCP tool call failed (isError=true)"
+      | xs -> String.concat " " xs)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ ->
+      "MCP tool call failed (isError=true)"
+
+let decode_mcp_tool_call_ack raw =
+  match extract_mcp_json_payload raw with
+  | None -> Ok ()
+  | Some payload -> (
+      match Yojson.Safe.from_string payload with
+      | exception Yojson.Json_error msg ->
+          Error ("invalid MCP JSON response: " ^ msg)
+      | json -> (
+          match member "error" json with
+          | `Assoc _ as err_obj -> (
+              match member "message" err_obj with
+              | `String msg when not (String.equal (String.trim msg) "") ->
+                  Error (String.trim msg)
+              | `String _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _
+              | `Assoc _ | `List _ ->
+                  Error (Yojson.Safe.to_string err_obj))
+          | `Null -> (
+              match member "result" json with
+              | `Assoc _ as res_obj -> (
+                  match member "isError" res_obj with
+                  | `Bool true -> Error (extract_mcp_result_error_text res_obj)
+                  | `Bool false | `Null | `Int _ | `Intlit _ | `Float _
+                  | `String _ | `Assoc _ | `List _ -> (
+                      match member "structuredContent" res_obj with
+                      | `Assoc _ as sc -> (
+                          match member "ok" sc with
+                          | `Bool false -> (
+                              match member "error" sc with
+                              | `String s
+                                when not (String.equal (String.trim s) "") ->
+                                  Error (String.trim s)
+                              | `String _ | `Null | `Bool _ | `Int _ | `Intlit _
+                              | `Float _ | `Assoc _ | `List _ ->
+                                  Error (extract_mcp_result_error_text res_obj))
+                          | `Bool true | `Null | `Int _ | `Intlit _ | `Float _
+                          | `String _ | `Assoc _ | `List _ ->
+                              Ok ())
+                      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _
+                      | `String _ | `List _ ->
+                          Ok ()))
+              | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _
+              | `List _ ->
+                  Ok ())
+          | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+              Error ("unexpected MCP error field: " ^ Yojson.Safe.to_string json)))
+
 type task_status =
   | Todo
   | Claimed of { assignee : string; claimed_at : string }
@@ -476,6 +713,83 @@ let encode_task_cancel ~task_id ~reason ~expected_workspace =
     ([ ("task_id", `String task_id) ]
     @ reason_field
     @ [ ("expected_workspace", encode_expected_workspace expected_workspace) ])
+
+type task_transition_action =
+  | Task_claim
+  | Task_start
+  | Task_release
+  | Task_submit_for_verification
+
+let equal_task_transition_action a b =
+  match (a, b) with
+  | Task_claim, Task_claim
+  | Task_start, Task_start
+  | Task_release, Task_release
+  | Task_submit_for_verification, Task_submit_for_verification ->
+      true
+  | ( (Task_claim | Task_start | Task_release | Task_submit_for_verification)
+    , (Task_claim | Task_start | Task_release | Task_submit_for_verification) )
+    ->
+      false
+
+let task_transition_action_to_string = function
+  | Task_claim -> "claim"
+  | Task_start -> "start"
+  | Task_release -> "release"
+  | Task_submit_for_verification -> "submit_for_verification"
+
+let task_transition_action_of_string raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "claim" -> Some Task_claim
+  | "start" -> Some Task_start
+  | "release" -> Some Task_release
+  | "submit_for_verification" -> Some Task_submit_for_verification
+  | _ -> None
+
+let encode_task_create ~title ~priority ?description ?goal_id
+    ?expected_workspace () =
+  let opt_str key = function
+    | Some s when not (String.equal (String.trim s) "") ->
+        [ (key, `String (String.trim s)) ]
+    | Some _ | None -> []
+  in
+  let ws_field =
+    match expected_workspace with
+    | Some ws -> [ ("expected_workspace", encode_expected_workspace ws) ]
+    | None -> []
+  in
+  `Assoc
+    ([ ("title", `String (String.trim title)); ("priority", `Int priority) ]
+    @ opt_str "description" description
+    @ opt_str "goal_id" goal_id
+    @ ws_field)
+
+let encode_task_transition ~task_id ~action ?notes ?expected_workspace () =
+  let notes_field =
+    match notes with
+    | Some n when not (String.equal (String.trim n) "") ->
+        [ ("notes", `String (String.trim n)) ]
+    | Some _ | None -> []
+  in
+  let ws_field =
+    match expected_workspace with
+    | Some ws -> [ ("expected_workspace", encode_expected_workspace ws) ]
+    | None -> []
+  in
+  `Assoc
+    ([
+       ("task_id", `String (String.trim task_id));
+       ("action", `String (task_transition_action_to_string action));
+     ]
+    @ notes_field
+    @ ws_field)
+
+let encode_task_link_goal ~goal_id ~expected_workspace =
+  `Assoc
+    [
+      ("goal_id", `String (String.trim goal_id));
+      ("expected_workspace", encode_expected_workspace expected_workspace);
+    ]
 
 let enrich_planning_with_tasks ~observed_at (snap : planning_snapshot) tasks =
   let count_for_goal goal_id =

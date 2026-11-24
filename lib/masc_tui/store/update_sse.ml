@@ -147,14 +147,15 @@ let apply_dataset_invalidation (m : Model.t) ds =
       in
       ({ m with knowledge }, cmds)
   | Wire_observer.Dataset_memory_health keeper_opt ->
-      let mark_if_matching ~get_keeper obs =
+      (* The named keeper's slots turn stale; with no keeper named, every
+         keeper's slots do. *)
+      let mark_scoped slots =
         match keeper_opt with
-        | None -> Observed.mark_stale obs
-        | Some target -> (
-            match Observed.to_option obs with
-            | Some data when String.equal (get_keeper data) target ->
-                Observed.mark_stale obs
-            | Some _ | None -> obs)
+        | None -> Knowledge_store.String_map.map Observed.mark_stale slots
+        | Some target ->
+            Knowledge_store.String_map.update target
+              (Option.map Observed.mark_stale)
+              slots
       in
       let knowledge =
         {
@@ -162,20 +163,8 @@ let apply_dataset_invalidation (m : Model.t) ds =
           world_memory = Observed.mark_stale m.knowledge.world_memory;
           keeper_memory_health =
             Observed.mark_stale m.knowledge.keeper_memory_health;
-          keeper_memory_facts =
-            mark_if_matching
-              ~get_keeper:(fun (f : Wire_knowledge.keeper_memory_facts) ->
-                f.keeper)
-              m.knowledge.keeper_memory_facts;
-          memory_os_internals =
-            (match keeper_opt with
-            | None ->
-                Knowledge_store.String_map.map Observed.mark_stale
-                  m.knowledge.memory_os_internals
-            | Some target ->
-                Knowledge_store.String_map.update target
-                  (Option.map Observed.mark_stale)
-                  m.knowledge.memory_os_internals);
+          keeper_memory_facts = mark_scoped m.knowledge.keeper_memory_facts;
+          memory_os_internals = mark_scoped m.knowledge.memory_os_internals;
         }
       in
       let base_cmds =
@@ -224,9 +213,11 @@ let apply_dataset_invalidation (m : Model.t) ds =
             Knowledge_store.Memory_diff_map.map Observed.mark_stale
               m.knowledge.memory_diffs;
           keeper_memory_activity =
-            Observed.mark_stale m.knowledge.keeper_memory_activity;
+            Knowledge_store.String_map.map Observed.mark_stale
+              m.knowledge.keeper_memory_activity;
           keeper_memory_facts =
-            Observed.mark_stale m.knowledge.keeper_memory_facts;
+            Knowledge_store.String_map.map Observed.mark_stale
+              m.knowledge.keeper_memory_facts;
           keeper_memory_health =
             Observed.mark_stale m.knowledge.keeper_memory_health;
           memory_os_internals =
@@ -718,11 +709,10 @@ let apply_observer_event (m : Model.t) = function
       in
       ({ m with fleet }, cmds)
   | Wire_observer.Keeper_memory_journal_appended { keeper; _ } ->
-      let mark_keeper_slot ~get_keeper obs =
-        match Observed.to_option obs with
-        | Some data when String.equal (get_keeper data) keeper ->
-            Observed.mark_stale obs
-        | Some _ | None -> obs
+      let mark_keeper_slot slots =
+        Knowledge_store.String_map.update keeper
+          (Option.map Observed.mark_stale)
+          slots
       in
       let memory_diffs =
         Knowledge_store.Memory_diff_map.mapi
@@ -738,21 +728,12 @@ let apply_observer_event (m : Model.t) = function
           m.knowledge with
           memory_diffs;
           keeper_memory_activity =
-            mark_keeper_slot
-              ~get_keeper:(fun (a : Wire_knowledge.keeper_memory_activity) ->
-                a.keeper)
-              m.knowledge.keeper_memory_activity;
-          keeper_memory_facts =
-            mark_keeper_slot
-              ~get_keeper:(fun (f : Wire_knowledge.keeper_memory_facts) ->
-                f.keeper)
-              m.knowledge.keeper_memory_facts;
+            mark_keeper_slot m.knowledge.keeper_memory_activity;
+          keeper_memory_facts = mark_keeper_slot m.knowledge.keeper_memory_facts;
           keeper_memory_health =
             Observed.mark_stale m.knowledge.keeper_memory_health;
           memory_os_internals =
-            Knowledge_store.String_map.update keeper
-              (Option.map Observed.mark_stale)
-              m.knowledge.memory_os_internals;
+            mark_keeper_slot m.knowledge.memory_os_internals;
         }
       in
       let e = m.epoch in

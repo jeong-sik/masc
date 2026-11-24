@@ -1743,7 +1743,10 @@ let dive_attention_entry (m : Model.t) (entry : Attention.entry) =
 let launch_memory_diagram ~now ~keeper ~(content_rect : Rect.t) ~kind ~mode
     ~(activity : Wire_knowledge.keeper_memory_activity)
     ~(selected : Wire_knowledge.memory_activity_event) (m : Model.t) =
-  let facts = Observed.to_option m.knowledge.keeper_memory_facts in
+  let facts =
+    Observed.to_option
+      (Knowledge_store.keeper_memory_facts_for ~keeper m.knowledge)
+  in
   match Memory_diagram.chart_of_activity ~keeper ~activity ~facts ~selected with
   | None ->
       ( Model.with_toast ~now ~level:Model.Toast_warning
@@ -1834,8 +1837,11 @@ let open_memory_diagram ~now ~kind (m : Model.t) =
         , [] )
       else (m, [])
   | Some (keeper, content_rect) -> (
-      match Observed.to_option m.knowledge.keeper_memory_activity with
-      | Some act when String.equal act.keeper keeper -> (
+      match
+        Observed.to_option
+          (Knowledge_store.keeper_memory_activity_for ~keeper m.knowledge)
+      with
+      | Some act -> (
           let selected_opt, empty_toast =
             match Memory_diagram.active_diagram m with
             | Some d ->
@@ -1926,7 +1932,7 @@ let open_memory_diagram ~now ~kind (m : Model.t) =
               in
               launch_memory_diagram ~now ~keeper ~content_rect ~kind ~mode
                 ~activity:act ~selected m)
-      | Some _ | None ->
+      | None ->
           ( Model.with_toast ~now ~level:Model.Toast_info
               (Say.make
                  ~ko:"기억 변천 이력을 불러오는 중입니다..."
@@ -1945,8 +1951,11 @@ let cycle_memory_diagram_mode ~now (m : Model.t) =
     Memory_diagram.active_diagram m, Memory_diagram.active_memory_content_rect m
   with
   | Some d, Some (keeper, content_rect) when String.equal d.keeper keeper -> (
-      match Observed.to_option m.knowledge.keeper_memory_activity with
-      | Some act when String.equal act.keeper keeper -> (
+      match
+        Observed.to_option
+          (Knowledge_store.keeper_memory_activity_for ~keeper m.knowledge)
+      with
+      | Some act -> (
           match
             List.find_opt
               (fun (ev : Wire_knowledge.memory_activity_event) ->
@@ -1958,7 +1967,7 @@ let cycle_memory_diagram_mode ~now (m : Model.t) =
               launch_memory_diagram ~now ~keeper ~content_rect ~kind:d.kind
                 ~mode ~activity:act ~selected m
           | None -> (m, []))
-      | Some _ | None -> (m, []))
+      | None -> (m, []))
   | (Some _ | None), (Some _ | None) -> (m, [])
 
 let refresh_open_memory_diagram ~now (m : Model.t) =
@@ -1966,8 +1975,11 @@ let refresh_open_memory_diagram ~now (m : Model.t) =
     Memory_diagram.active_diagram m, Memory_diagram.active_memory_content_rect m
   with
   | Some d, Some (keeper, content_rect) when String.equal d.keeper keeper -> (
-      match Observed.to_option m.knowledge.keeper_memory_activity with
-      | Some act when String.equal act.keeper keeper -> (
+      match
+        Observed.to_option
+          (Knowledge_store.keeper_memory_activity_for ~keeper m.knowledge)
+      with
+      | Some act -> (
           match
             List.find_opt
               (fun (ev : Wire_knowledge.memory_activity_event) ->
@@ -1978,7 +1990,7 @@ let refresh_open_memory_diagram ~now (m : Model.t) =
               launch_memory_diagram ~now ~keeper ~content_rect ~kind:d.kind
                 ~mode:d.mode ~activity:act ~selected m
           | None -> (m, []))
-      | Some _ | None -> (m, []))
+      | None -> (m, []))
   | (Some _ | None), (Some _ | None) -> (m, [])
 
 (* The reading Enter opens on the selected memory row of [keeper_opt]'s
@@ -1997,9 +2009,12 @@ let selected_memory_reading ?(force_diff = false) ~keeper_opt
         | None -> None
         | Some event ->
             let notes =
-              match Observed.to_option k.keeper_memory_activity with
-              | Some act when String.equal act.keeper kp -> act.notes
-              | Some _ | None -> []
+              match
+                Observed.to_option
+                  (Knowledge_store.keeper_memory_activity_for ~keeper:kp k)
+              with
+              | Some act -> act.notes
+              | None -> []
             in
             Some (Knowledge_store.Reading_activity { keeper = kp; event; notes }))
     | Some kp, Knowledge_store.View_facts -> (

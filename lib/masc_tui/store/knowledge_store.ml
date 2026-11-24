@@ -155,8 +155,10 @@ type t = {
   memory_diffs : Wire_knowledge.memory_diff Observed.t Memory_diff_map.t;
   memory_os_internals :
     Wire_knowledge.memory_os_internals Observed.t String_map.t;
-  keeper_memory_facts : Wire_knowledge.keeper_memory_facts Observed.t;
-  keeper_memory_activity : Wire_knowledge.keeper_memory_activity Observed.t;
+  keeper_memory_facts :
+    Wire_knowledge.keeper_memory_facts Observed.t String_map.t;
+  keeper_memory_activity :
+    Wire_knowledge.keeper_memory_activity Observed.t String_map.t;
   keeper_memory_health : Wire_knowledge.keeper_memory_health_fleet Observed.t;
   memory_diff_window : memory_diff_window;
   memory_diff_keeper : string option;
@@ -203,8 +205,8 @@ let empty =
     world_memory = Observed.unreported;
     memory_diffs = Memory_diff_map.empty;
     memory_os_internals = String_map.empty;
-    keeper_memory_facts = Observed.unreported;
-    keeper_memory_activity = Observed.unreported;
+    keeper_memory_facts = String_map.empty;
+    keeper_memory_activity = String_map.empty;
     keeper_memory_health = Observed.unreported;
     memory_diff_window = Window_24h;
     memory_diff_keeper = None;
@@ -260,6 +262,28 @@ let set_memory_os_internals ~keeper obs t =
   {
     t with
     memory_os_internals = String_map.add keeper obs t.memory_os_internals;
+  }
+
+let keeper_memory_facts_for ~keeper t =
+  match String_map.find_opt keeper t.keeper_memory_facts with
+  | Some obs -> obs
+  | None -> Observed.unreported
+
+let set_keeper_memory_facts ~keeper obs t =
+  {
+    t with
+    keeper_memory_facts = String_map.add keeper obs t.keeper_memory_facts;
+  }
+
+let keeper_memory_activity_for ~keeper t =
+  match String_map.find_opt keeper t.keeper_memory_activity with
+  | Some obs -> obs
+  | None -> Observed.unreported
+
+let set_keeper_memory_activity ~keeper obs t =
+  {
+    t with
+    keeper_memory_activity = String_map.add keeper obs t.keeper_memory_activity;
   }
 
 let memory_diff_window_query = function
@@ -638,14 +662,6 @@ let cycle_memory_diff_window t =
   in
   set_memory_diff_window next t
 
-let reset_scoped_slot_on_switch ~changed obs =
-  if not changed then Observed.mark_stale obs
-  else
-    match obs with
-    | Observed.Failed _ | Observed.Absent -> Observed.unreported
-    | Observed.Loading _ | Observed.Value _ | Observed.Unreported ->
-        Observed.mark_stale obs
-
 let set_memory_diff_keeper memory_diff_keeper t =
   let changed =
     not (Option.equal String.equal t.memory_diff_keeper memory_diff_keeper)
@@ -653,10 +669,6 @@ let set_memory_diff_keeper memory_diff_keeper t =
   {
     t with
     memory_diff_keeper;
-    keeper_memory_facts =
-      reset_scoped_slot_on_switch ~changed t.keeper_memory_facts;
-    keeper_memory_activity =
-      reset_scoped_slot_on_switch ~changed t.keeper_memory_activity;
     selected_fact_index = if changed then 0 else t.selected_fact_index;
     facts_scroll_offset = if changed then 0 else t.facts_scroll_offset;
     selected_activity_index = if changed then 0 else t.selected_activity_index;
@@ -1298,67 +1310,9 @@ let apply_artifacts ~observed_at artifacts t =
 let apply_world_memory ~observed_at mem t =
   { t with world_memory = Observed.value ~observed_at mem }
 
-let apply_keeper_memory_facts ~observed_at
-    (facts : Wire_knowledge.keeper_memory_facts) t =
-  let same_keeper =
-    match Observed.to_option t.keeper_memory_facts with
-    | Some prev -> String.equal prev.keeper facts.keeper
-    | None -> false
-  in
-  {
-    t with
-    keeper_memory_facts = Observed.value ~observed_at facts;
-    selected_fact_index = if same_keeper then t.selected_fact_index else 0;
-    facts_scroll_offset = if same_keeper then t.facts_scroll_offset else 0;
-  }
-
-let apply_keeper_memory_activity ~observed_at
-    (activity : Wire_knowledge.keeper_memory_activity) t =
-  let same_keeper =
-    match Observed.to_option t.keeper_memory_activity with
-    | Some prev -> String.equal prev.keeper activity.keeper
-    | None -> false
-  in
-  {
-    t with
-    keeper_memory_activity = Observed.value ~observed_at activity;
-    selected_activity_index =
-      if same_keeper then t.selected_activity_index else 0;
-    activity_scroll_offset =
-      if same_keeper then t.activity_scroll_offset else 0;
-  }
-
 let apply_keeper_memory_health ~observed_at
     (fleet : Wire_knowledge.keeper_memory_health_fleet) t =
   { t with keeper_memory_health = Observed.value ~observed_at fleet }
-
-let fail_keeper_memory_facts ~keeper ~reason ~retryable ~at t =
-  let keeper_memory_facts =
-    match t.keeper_memory_facts with
-    | Observed.Value { data; _ } when String.equal data.keeper keeper ->
-        Observed.mark_stale t.keeper_memory_facts
-    | Observed.Value _
-    | Observed.Loading _
-    | Observed.Absent
-    | Observed.Unreported
-    | Observed.Failed _ ->
-        Observed.failed ~reason ~retryable ~at
-  in
-  { t with keeper_memory_facts }
-
-let fail_keeper_memory_activity ~keeper ~reason ~retryable ~at t =
-  let keeper_memory_activity =
-    match t.keeper_memory_activity with
-    | Observed.Value { data; _ } when String.equal data.keeper keeper ->
-        Observed.mark_stale t.keeper_memory_activity
-    | Observed.Value _
-    | Observed.Loading _
-    | Observed.Absent
-    | Observed.Unreported
-    | Observed.Failed _ ->
-        Observed.failed ~reason ~retryable ~at
-  in
-  { t with keeper_memory_activity }
 
 let fail_keeper_memory_health ~reason ~retryable ~at t =
   let keeper_memory_health =
@@ -1638,8 +1592,8 @@ let health_row_for_keeper ~keeper t =
         fleet.keepers
 
 let filtered_memory_activity_events ~keeper t =
-  match Observed.to_option t.keeper_memory_activity with
-  | Some act when String.equal act.keeper keeper ->
+  match Observed.to_option (keeper_memory_activity_for ~keeper t) with
+  | Some act ->
       let q = String.trim t.filter_query in
       if String.equal q "" then act.events
       else
@@ -1668,7 +1622,7 @@ let filtered_memory_activity_events ~keeper t =
                    | None -> false)
                  ev.after)
           act.events
-  | Some _ | None -> []
+  | None -> []
 
 let selected_activity_event_for ~keeper t =
   let events = filtered_memory_activity_events ~keeper t in
@@ -1686,8 +1640,8 @@ let fact_retrieval_sort_key (f : Wire_knowledge.keeper_ordinary_fact) =
       (count, distinct_days, last_at_unix)
 
 let filtered_memory_fact_rows ~keeper t =
-  match Observed.to_option t.keeper_memory_facts with
-  | Some mf when String.equal mf.keeper keeper ->
+  match Observed.to_option (keeper_memory_facts_for ~keeper t) with
+  | Some mf ->
       let q = String.trim t.filter_query in
       let matches_text s = String.equal q "" || contains_ci ~needle:q s in
       let ord_rows =
@@ -1760,7 +1714,7 @@ let filtered_memory_fact_rows ~keeper t =
             []
       in
       ord_rows @ src_rows
-  | Some _ | None -> []
+  | None -> []
 
 let selected_memory_fact_row ~keeper t =
   let rows = filtered_memory_fact_rows ~keeper t in
@@ -2170,7 +2124,9 @@ let mark_stale_all t =
     memory_diffs = Memory_diff_map.map Observed.mark_stale t.memory_diffs;
     memory_os_internals =
       String_map.map Observed.mark_stale t.memory_os_internals;
-    keeper_memory_facts = Observed.mark_stale t.keeper_memory_facts;
-    keeper_memory_activity = Observed.mark_stale t.keeper_memory_activity;
+    keeper_memory_facts =
+      String_map.map Observed.mark_stale t.keeper_memory_facts;
+    keeper_memory_activity =
+      String_map.map Observed.mark_stale t.keeper_memory_activity;
     keeper_memory_health = Observed.mark_stale t.keeper_memory_health;
   }

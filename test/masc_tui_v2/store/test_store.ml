@@ -7320,9 +7320,13 @@ let test_memory_explorer_store_fetches_reading_and_sse () =
     | Observed.Failed { retryable = true; _ } -> true
     | _ -> false);
   Alcotest.(check bool) "facts stay Value" true
-    (Observed.is_value m_health_err.knowledge.keeper_memory_facts);
+    (Observed.is_value
+       (Knowledge_store.keeper_memory_facts_for ~keeper:"alpha"
+          m_health_err.knowledge));
   Alcotest.(check bool) "activity stays Value" true
-    (Observed.is_value m_health_err.knowledge.keeper_memory_activity);
+    (Observed.is_value
+       (Knowledge_store.keeper_memory_activity_for ~keeper:"alpha"
+          m_health_err.knowledge));
 
   (* 4. SSE invalidation: Keeper_memory_journal_appended & Dataset_memory_health refetch scoped keeper *)
   let m_sse1, cmds_sse1 =
@@ -7342,7 +7346,9 @@ let test_memory_explorer_store_fetches_reading_and_sse () =
          })
   in
   Alcotest.(check bool) "activity marked stale on journal append" true
-    (Observed.is_stale m_sse1.knowledge.keeper_memory_activity);
+    (Observed.is_stale
+       (Knowledge_store.keeper_memory_activity_for ~keeper:"alpha"
+          m_sse1.knowledge));
   let sse_paths = get_paths cmds_sse1 in
   Alcotest.(check bool) "journal append refetches activity" true
     (has_path "/api/v1/keepers/alpha/memory-journal?activity=1&limit=50" sse_paths);
@@ -7387,15 +7393,18 @@ let test_memory_explorer_store_fetches_reading_and_sse () =
   Alcotest.(check int) "Second Esc pops dive_stack" 0
     (List.length m_dive_esc2.nav.dive_stack);
 
-  (* 6. P1 #1: Cross-keeper late replies (Ok/404/Error) dropped; non-retryable failure resets on keeper switch;
-        World scope ignores stale keeper diff and returns None for selected_activity_event *)
+  (* 6. Issue #54520: Per-keeper facts/activity maps isolate each keeper's values,
+        404s, and errors: late replies for alpha land on alpha's own slot without
+        touching beta, non-retryable failures on beta stay on beta's slot without
+        poisoning alpha or gamma, and switching alpha -> beta -> alpha preserves
+        alpha's cached facts & activity without unnecessary refetching. *)
   let m_beta =
     {
       m_loaded with
       knowledge = Knowledge_store.set_memory_diff_keeper (Some "beta") m_loaded.knowledge;
     }
   in
-  let late_alpha_facts =
+  let late_alpha_404 =
     Msg.Http_reply
       {
         epoch = m_beta.epoch;
@@ -7410,10 +7419,20 @@ let test_memory_explorer_store_fetches_reading_and_sse () =
             };
       }
   in
-  let m_after_late_404, _ = Update.step ~now:t0 m_beta late_alpha_facts in
-  Alcotest.(check bool) "late alpha 404 dropped when viewing beta" true
-    (match m_after_late_404.knowledge.keeper_memory_facts with
-    | Observed.Value { data; _ } -> String.equal data.keeper "alpha"
+  let m_after_late_404, _ = Update.step ~now:t0 m_beta late_alpha_404 in
+  Alcotest.(check bool) "late alpha 404 lands on alpha slot only" true
+    (match
+       Knowledge_store.keeper_memory_facts_for ~keeper:"alpha"
+         m_after_late_404.knowledge
+     with
+    | Observed.Absent -> true
+    | _ -> false);
+  Alcotest.(check bool) "late alpha 404 leaves beta slot Unreported" true
+    (match
+       Knowledge_store.keeper_memory_facts_for ~keeper:"beta"
+         m_after_late_404.knowledge
+     with
+    | Observed.Unreported -> true
     | _ -> false);
   let late_alpha_err =
     Msg.Http_reply
@@ -7428,9 +7447,24 @@ let test_memory_explorer_store_fetches_reading_and_sse () =
       }
   in
   let m_after_late_err, _ = Update.step ~now:t0 m_after_late_404 late_alpha_err in
-  Alcotest.(check bool) "late alpha decode error dropped when viewing beta" true
-    (Observed.is_value m_after_late_err.knowledge.keeper_memory_activity);
-  (* Non-retryable Failed on beta resets to Unreported when switching to alpha so alpha fetches *)
+  Alcotest.(check bool) "late alpha decode error keeps alpha's previous value stale (not wiped)" true
+    (Observed.is_value
+       (Knowledge_store.keeper_memory_activity_for ~keeper:"alpha"
+          m_after_late_err.knowledge)
+     && Observed.is_stale
+          (Knowledge_store.keeper_memory_activity_for ~keeper:"alpha"
+             m_after_late_err.knowledge));
+  Alcotest.(check bool) "late alpha decode error records incident even while viewing beta" true
+    (Incidents.count m_after_late_err.incidents > Incidents.count m_after_late_404.incidents);
+  Alcotest.(check bool) "late alpha decode error leaves beta activity Unreported" true
+    (match
+       Knowledge_store.keeper_memory_activity_for ~keeper:"beta"
+         m_after_late_err.knowledge
+     with
+    | Observed.Unreported -> true
+    | _ -> false);
+  (* Non-retryable Failed on beta stays strictly on beta's slot; switching to
+     gamma still fetches gamma, and returning to alpha keeps alpha's cached value. *)
   let m_beta_failed, _ =
     Update.step ~now:t0 m_beta
       (Msg.Http_reply
@@ -7442,9 +7476,29 @@ let test_memory_explorer_store_fetches_reading_and_sse () =
          })
   in
   Alcotest.(check bool) "beta facts marked Failed(retryable=false)" true
-    (match m_beta_failed.knowledge.keeper_memory_facts with
+    (match
+       Knowledge_store.keeper_memory_facts_for ~keeper:"beta"
+         m_beta_failed.knowledge
+     with
     | Observed.Failed { retryable = false; _ } -> true
     | _ -> false);
+  let m_gamma =
+    {
+      m_beta_failed with
+      knowledge =
+        Knowledge_store.set_memory_diff_keeper (Some "gamma")
+          m_beta_failed.knowledge;
+    }
+  in
+  Alcotest.(check bool) "gamma slot stays Unreported despite beta non-retryable failure" true
+    (match
+       Knowledge_store.keeper_memory_facts_for ~keeper:"gamma" m_gamma.knowledge
+     with
+    | Observed.Unreported -> true
+    | _ -> false);
+  let gamma_fetch_paths = get_paths (View_fetches.fetches_for_current_view m_gamma) in
+  Alcotest.(check bool) "gamma facts fetched cleanly after beta non-retryable failure" true
+    (has_path "/api/v1/keepers/gamma/memory-facts" gamma_fetch_paths);
   let m_back_alpha =
     {
       m_beta_failed with
@@ -7453,12 +7507,16 @@ let test_memory_explorer_store_fetches_reading_and_sse () =
           m_beta_failed.knowledge;
     }
   in
-  Alcotest.(check bool) "switching from failed beta to alpha resets Failed -> Unreported" true
-    (match m_back_alpha.knowledge.keeper_memory_facts with
-    | Observed.Unreported -> true
-    | _ -> false);
+  Alcotest.(check bool) "switching alpha -> beta -> alpha preserves alpha's cached facts" true
+    (Observed.is_value
+       (Knowledge_store.keeper_memory_facts_for ~keeper:"alpha"
+          m_back_alpha.knowledge)
+     && not
+          (Observed.is_stale
+             (Knowledge_store.keeper_memory_facts_for ~keeper:"alpha"
+                m_back_alpha.knowledge)));
   let alpha_refetch_paths = get_paths (View_fetches.fetches_for_current_view m_back_alpha) in
-  Alcotest.(check bool) "alpha facts immediately refetched after beta non-retryable failure" true
+  Alcotest.(check bool) "returning to cached alpha does not needlessly refetch facts" false
     (has_path "/api/v1/keepers/alpha/memory-facts" alpha_refetch_paths);
   (* World scope ignores stale keeper diff & returns None for selected_activity_event *)
   let keeper_diff : Wire_knowledge.memory_diff =
@@ -7788,7 +7846,9 @@ let test_memory_explorer_store_fetches_reading_and_sse () =
          })
   in
   Alcotest.(check bool) "other-keeper Dataset_memory_health keeps alpha facts fresh" false
-    (Observed.is_stale m_sse_other_health.knowledge.keeper_memory_facts);
+    (Observed.is_stale
+       (Knowledge_store.keeper_memory_facts_for ~keeper:"alpha"
+          m_sse_other_health.knowledge));
   let m_sse_other_journal, _ =
     Update.step ~now:t0 m_loaded
       (Msg.Sse_event
@@ -7806,9 +7866,13 @@ let test_memory_explorer_store_fetches_reading_and_sse () =
          })
   in
   Alcotest.(check bool) "other-keeper journal append keeps alpha activity fresh" false
-    (Observed.is_stale m_sse_other_journal.knowledge.keeper_memory_activity);
+    (Observed.is_stale
+       (Knowledge_store.keeper_memory_activity_for ~keeper:"alpha"
+          m_sse_other_journal.knowledge));
   Alcotest.(check bool) "other-keeper journal append keeps alpha facts fresh" false
-    (Observed.is_stale m_sse_other_journal.knowledge.keeper_memory_facts)
+    (Observed.is_stale
+       (Knowledge_store.keeper_memory_facts_for ~keeper:"alpha"
+          m_sse_other_journal.knowledge))
 
 (* Agent-core lifecycle events land in Infra activity as [CORE] rows;
    provider streaming telemetry does not. *)

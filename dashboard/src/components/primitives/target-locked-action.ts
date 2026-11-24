@@ -71,8 +71,11 @@ export function evaluateTargetLock(params: {
 }
 
 export function TargetLockedAction(props: TargetLockedActionProps) {
+  const identityKey = `${props.target.workspaceId}:${props.target.requestId}`
+  const lastIdentityRef = useRef<string | null>(null)
   const capturedEpochRef = useRef<number | null>(null)
-  if (capturedEpochRef.current === null) {
+  if (lastIdentityRef.current !== identityKey || capturedEpochRef.current === null) {
+    lastIdentityRef.current = identityKey
     capturedEpochRef.current = props.lockedEpoch ?? sessionEpoch.peek()
   }
   const lockedEpoch = props.lockedEpoch ?? capturedEpochRef.current

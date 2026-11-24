@@ -8,7 +8,7 @@
 
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
-import { useEffect, useRef, useState } from 'preact/hooks'
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 
 export type QuickPeekMode = 'auto' | 'push' | 'overlay'
 
@@ -33,6 +33,8 @@ export function QuickPeekDrawer(props: QuickPeekDrawerProps) {
   const [isPushViewport, setIsPushViewport] = useState(detectDesktopPush)
   const previousFocusRef = useRef<HTMLElement | null>(null)
   const closeBtnRef = useRef<HTMLButtonElement>(null)
+  const onCloseRef = useRef(props.onClose)
+  onCloseRef.current = props.onClose
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
@@ -43,17 +45,19 @@ export function QuickPeekDrawer(props: QuickPeekDrawerProps) {
     return () => mq.removeEventListener?.('change', onChange)
   }, [])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!props.open) return
     previousFocusRef.current =
       typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
         ? document.activeElement
         : null
 
+    closeBtnRef.current?.focus?.()
+
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault()
-        props.onClose()
+        onCloseRef.current()
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -61,7 +65,7 @@ export function QuickPeekDrawer(props: QuickPeekDrawerProps) {
       window.removeEventListener('keydown', onKeyDown)
       previousFocusRef.current?.focus?.()
     }
-  }, [props.open, props.onClose])
+  }, [props.open])
 
   if (!props.open) return null
 

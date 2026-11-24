@@ -17,6 +17,7 @@ import {
   getSingleUserToken,
   isEpochCurrent,
   refreshMultiAccountCsrf,
+  resolveWorkspaceUrl,
   sessionEpoch,
 } from './auth'
 
@@ -211,7 +212,7 @@ export async function apiRequest<T>(opts: ApiRequestOptions<T>): Promise<Result<
 
     let response: Response
     try {
-      response = await fetchImpl(opts.path, init)
+      response = await fetchImpl(resolveWorkspaceUrl(opts.path), init)
     } catch (cause) {
       if (!isEpochCurrent(startEpoch)) {
         return err({ kind: 'epoch_stale', status: null, code: 'epoch_stale', message: 'Session epoch changed', retryable: false, cause })

@@ -16,6 +16,7 @@ import {
   refreshMultiAccountCsrf,
   registerWorkspaceTargets,
   resetAuthStateForTests,
+  resolveWorkspaceUrl,
   selectWorkspace,
   sessionEpoch,
   setSingleUserToken,
@@ -84,20 +85,32 @@ describe('core/auth', () => {
     expect(calls).toEqual(['/health', '/api/v1/dashboard/dev-token', '/api/v1/dashboard/shell'])
   })
 
-  it('transitions to single_user_auth_required on 401 from shell probe', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+  it('transitions to single_user_auth_required on 401 and unavailable on 5xx from shell probe', async () => {
+    const authReqFetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url === '/health') return jsonResponse({ status: 'ok' })
       if (url === '/api/v1/dashboard/shell') return jsonResponse({ error: 'unauthorized' }, 401)
       throw new Error(`unexpected url: ${url}`)
     })
 
-    const session = await bootstrapAuthSession({ fetchImpl: fetchMock as unknown as typeof fetch })
+    const session = await bootstrapAuthSession({ fetchImpl: authReqFetch as unknown as typeof fetch })
     expect(session.kind).toBe('single_user_auth_required')
+    expect(isAuthenticated.value).toBe(false)
+
+    // 503 during engine startup must fail closed to unavailable, NEVER single_user_local
+    resetAuthStateForTests()
+    const unavailableFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/health') return jsonResponse({ status: 'ok' })
+      if (url === '/api/v1/dashboard/shell') return jsonResponse({ error: 'engine_starting' }, 503)
+      throw new Error(`unexpected url: ${url}`)
+    })
+    const down = await bootstrapAuthSession({ fetchImpl: unavailableFetch as unknown as typeof fetch })
+    expect(down.kind).toBe('unavailable')
     expect(isAuthenticated.value).toBe(false)
   })
 
-  it('handles PascalCase Multi_account signed-in and signed-out sessions without calling dev-token', async () => {
+  it('reads live OCaml GET /auth/session + GET /api/v1/auth/whoami for Multi_account Admin/Worker/signed-out', async () => {
     const calls: string[] = []
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
@@ -109,15 +122,18 @@ describe('core/auth', () => {
           auth_methods: { google: true, github: true, dev_token: false },
         })
       }
-      if (url === '/api/v1/auth/session') {
+      if (url === '/auth/session') {
         return jsonResponse({
-          authenticated: true,
-          account_id: 'acct-alice',
-          email: 'alice@example.test',
-          display_name: 'Alice',
-          role: 'Admin',
+          user_id: 'usr-alice',
+          expires_at_ms: 1_800_000_000_000,
           csrf_token: 'csrf-val-1',
-          workspace_id: 'ws-alpha',
+        })
+      }
+      if (url === '/api/v1/auth/whoami') {
+        return jsonResponse({
+          principal: { kind: 'human', id: 'usr-alice' },
+          role: 'admin',
+          binding: { kind: 'browser_session' },
         })
       }
       throw new Error(`unexpected url: ${url}`)
@@ -126,25 +142,71 @@ describe('core/auth', () => {
     const session = await bootstrapAuthSession({ fetchImpl: fetchMock as unknown as typeof fetch })
     expect(session.kind).toBe('multi_account_signed_in')
     if (session.kind === 'multi_account_signed_in') {
-      expect(session.accountId).toBe('acct-alice')
+      expect(session.accountId).toBe('usr-alice')
       expect(session.role).toBe('admin')
-      expect(session.workspaceId).toBe('ws-alpha')
+      expect(session.csrfToken).toBe('csrf-val-1')
     }
     expect(getActiveCsrfToken()).toBe('csrf-val-1')
-    expect(activeWorkspaceId.value).toBe('ws-alpha')
+    expect(calls).toEqual(['/health', '/auth/session', '/api/v1/auth/whoami'])
     expect(calls).not.toContain('/api/v1/dashboard/dev-token')
 
-    // Signed-out transition
+    // Worker role + unknown role fail-closed to 'viewer'
+    resetAuthStateForTests()
+    const workerFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/health') return jsonResponse({ account_mode: 'Multi_account' })
+      if (url === '/auth/session') return jsonResponse({ user_id: 'usr-bob', expires_at_ms: 1, csrf_token: 'csrf-b' })
+      if (url === '/api/v1/auth/whoami') {
+        return jsonResponse({ principal: { kind: 'human', id: 'usr-bob' }, role: 'worker' })
+      }
+      throw new Error(`unexpected url: ${url}`)
+    })
+    const workerSession = await bootstrapAuthSession({ fetchImpl: workerFetch as unknown as typeof fetch })
+    expect(workerSession.kind).toBe('multi_account_signed_in')
+    if (workerSession.kind === 'multi_account_signed_in') {
+      expect(workerSession.role).toBe('worker')
+    }
+
+    // Signed-out transition (401 on GET /auth/session)
     resetAuthStateForTests()
     const signedOutFetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url === '/health') return jsonResponse({ account_mode: 'multi_account' })
-      if (url === '/api/v1/auth/session') return jsonResponse({ authenticated: false }, 401)
+      if (url === '/auth/session') return jsonResponse({ error: 'credential_required' }, 401)
       throw new Error(`unexpected url: ${url}`)
     })
     const out = await bootstrapAuthSession({ fetchImpl: signedOutFetch as unknown as typeof fetch })
     expect(out.kind).toBe('multi_account_signed_out')
     expect(isAuthenticated.value).toBe(false)
+  })
+
+  it('rejects non-human principals and detects mid-bootstrap session/whoami user_id mismatch', async () => {
+    const servicePrincipalFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/health') return jsonResponse({ account_mode: 'Multi_account' })
+      if (url === '/auth/session') return jsonResponse({ user_id: 'usr-1', csrf_token: 'c1' })
+      if (url === '/api/v1/auth/whoami') {
+        return jsonResponse({ principal: { kind: 'service_credential', id: 'svc-1' }, role: 'worker' })
+      }
+      throw new Error(`unexpected url: ${url}`)
+    })
+    const rejected = await bootstrapAuthSession({ fetchImpl: servicePrincipalFetch as unknown as typeof fetch })
+    expect(rejected.kind).toBe('unavailable')
+
+    resetAuthStateForTests()
+    const epochBefore = currentSessionEpoch()
+    const mismatchFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/health') return jsonResponse({ account_mode: 'Multi_account' })
+      if (url === '/auth/session') return jsonResponse({ user_id: 'usr-1', csrf_token: 'c1' })
+      if (url === '/api/v1/auth/whoami') {
+        return jsonResponse({ principal: { kind: 'human', id: 'usr-2' }, role: 'admin' })
+      }
+      throw new Error(`unexpected url: ${url}`)
+    })
+    const drifted = await bootstrapAuthSession({ fetchImpl: mismatchFetch as unknown as typeof fetch })
+    expect(drifted.kind).toBe('account_changed')
+    expect(currentSessionEpoch()).toBe(epochBefore + 1)
   })
 
   it('fails closed to unavailable on unknown account_mode', async () => {
@@ -153,14 +215,15 @@ describe('core/auth', () => {
     expect(session.kind).toBe('unavailable')
   })
 
-  it('increments monotonic sessionEpoch on workspace switch, token update, and account change', async () => {
+  it('increments monotonic sessionEpoch on workspace switch, token update, and enforces same-origin baseUrl', async () => {
     const epoch0 = currentSessionEpoch()
     registerWorkspaceTargets([
-      { id: 'ws-1', label: 'Workspace 1' },
-      { id: 'ws-2', label: 'Workspace 2' },
+      { id: 'ws-1', label: 'Workspace 1', baseUrl: '/ws/one/' },
+      { id: 'ws-2', label: 'Workspace 2', baseUrl: 'https://evil.example.invalid/ws' },
     ])
     expect(workspaceTargets.value).toHaveLength(2)
     expect(activeWorkspaceId.value).toBe('ws-1')
+    expect(resolveWorkspaceUrl('/api/v1/dashboard/shell')).toBe('/ws/one/api/v1/dashboard/shell')
     expect(sessionEpoch.value).toBeGreaterThan(epoch0)
 
     const epoch1 = currentSessionEpoch()
@@ -168,6 +231,8 @@ describe('core/auth', () => {
     expect(selectWorkspace('ws-2')).toBe(false) // idempotent
     expect(currentSessionEpoch()).toBe(epoch1 + 1)
     expect(isEpochCurrent(epoch1)).toBe(false)
+    // Cross-origin baseUrl is refused fail-closed so cookies/CSRF stay same-origin
+    expect(resolveWorkspaceUrl('/api/v1/dashboard/shell')).toBe('/api/v1/dashboard/shell')
 
     const epoch2 = currentSessionEpoch()
     setSingleUserToken('local-val-1')
@@ -181,13 +246,11 @@ describe('core/auth', () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url === '/health') return jsonResponse({ account_mode: 'Multi_account' })
-      if (url === '/api/v1/auth/session') {
-        return jsonResponse({
-          authenticated: true,
-          account_id: 'acct-1',
-          role: 'worker',
-          csrf_token: 'csrf-initial',
-        })
+      if (url === '/auth/session') {
+        return jsonResponse({ user_id: 'acct-1', expires_at_ms: 1, csrf_token: 'csrf-initial' })
+      }
+      if (url === '/api/v1/auth/whoami') {
+        return jsonResponse({ principal: { kind: 'human', id: 'acct-1' }, role: 'worker' })
       }
       throw new Error(`unexpected url: ${url}`)
     })
@@ -197,7 +260,6 @@ describe('core/auth', () => {
     const dispose = installAuthLifecycleGuards(fetchMock as unknown as typeof fetch)
 
     try {
-      // Simulate another tab signing into a different account
       const storageEvt = new StorageEvent('storage', {
         key: 'masc.core.account_marker',
         oldValue: 'acct-1',
@@ -213,7 +275,6 @@ describe('core/auth', () => {
       expect(currentSessionEpoch()).toBe(epochBefore + 1)
       expect(getActiveCsrfToken()).toBeNull()
 
-      // Verify pagehide wipes transient secrets
       setSingleUserToken('ephemeral-val')
       expect(getSingleUserToken()).toBe('ephemeral-val')
       window.dispatchEvent(new Event('pagehide'))
@@ -224,19 +285,21 @@ describe('core/auth', () => {
     }
   })
 
-  it('refreshes CSRF token in multi_account mode and detects account drift during refresh', async () => {
+  it('refreshes CSRF token via GET /auth/session + whoami and detects account drift', async () => {
     let csrfCounter = 1
     let accountId = 'acct-1'
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url === '/health') return jsonResponse({ account_mode: 'Multi_account' })
-      if (url === '/api/v1/auth/session') {
+      if (url === '/auth/session') {
         return jsonResponse({
-          authenticated: true,
-          account_id: accountId,
-          role: 'admin',
+          user_id: accountId,
+          expires_at_ms: 1_800_000_000_000,
           csrf_token: `csrf-rev-${csrfCounter++}`,
         })
+      }
+      if (url === '/api/v1/auth/whoami') {
+        return jsonResponse({ principal: { kind: 'human', id: accountId }, role: 'admin' })
       }
       throw new Error(`unexpected url: ${url}`)
     })
@@ -248,7 +311,6 @@ describe('core/auth', () => {
     expect(refreshed).toBe('csrf-rev-2')
     expect(getActiveCsrfToken()).toBe('csrf-rev-2')
 
-    // Now account drifts on server
     accountId = 'acct-other'
     const epochBefore = currentSessionEpoch()
     const afterDrift = await refreshMultiAccountCsrf(fetchMock as unknown as typeof fetch)
@@ -262,10 +324,8 @@ describe('core/auth', () => {
     const routeSig = signal<RouteState>({ tab: 'overview', params: {}, postId: null })
     const dispose = startNavTelemetry({ routeSignal: routeSig })
     try {
-      // authSession starts as 'probing' -> MUST NOT fire POST /api/v1/dashboard/nav-event
       expect(fetchSpy).not.toHaveBeenCalled()
 
-      // Multi-account signed out -> still MUST NOT fire
       authSession.value = {
         kind: 'multi_account_signed_out',
         mode: 'multi_account',
@@ -274,7 +334,6 @@ describe('core/auth', () => {
       routeSig.value = { tab: 'keepers', params: { section: 'keepers' }, postId: null }
       expect(fetchSpy).not.toHaveBeenCalled()
 
-      // Once signed in with CSRF token -> emits with x-masc-csrf-token
       authSession.value = {
         kind: 'multi_account_signed_in',
         mode: 'multi_account',

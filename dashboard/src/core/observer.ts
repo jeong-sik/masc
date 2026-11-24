@@ -15,6 +15,7 @@ import {
   currentSessionEpoch,
   getSingleUserToken,
   isEpochCurrent,
+  resolveWorkspaceUrl,
   sessionEpoch,
   type AuthSession,
 } from './auth'
@@ -52,7 +53,7 @@ export function resolveObserverEndpoint(session: AuthSession): {
 } | null {
   if (session.kind === 'multi_account_signed_in') {
     return {
-      url: '/api/v1/auth/events',
+      url: resolveWorkspaceUrl('/api/v1/auth/events'),
       headers: { Accept: 'text/event-stream' },
     }
   }
@@ -61,7 +62,7 @@ export function resolveObserverEndpoint(session: AuthSession): {
     const token = getSingleUserToken()
     if (token) headers.Authorization = `Bearer ${token}`
     return {
-      url: '/mcp?sse_kind=observer',
+      url: resolveWorkspaceUrl('/mcp?sse_kind=observer'),
       headers,
     }
   }

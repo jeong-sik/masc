@@ -17,6 +17,7 @@ import {
   QuickPeekDrawer,
   TargetLockedAction,
   VirtualList,
+  computeSeriesSignature,
   createCommandSearcher,
   type DataTableColumn,
 } from './index'
@@ -131,30 +132,103 @@ describe('components/primitives', () => {
       container,
     )
     expect(container.querySelector('.tla')!.getAttribute('data-locked')).toBe('true')
-  })
 
-  it('QuickPeekDrawer toggles wide mode [⤢] and closes on Escape', async () => {
-    const onClose = vi.fn()
+    // Swapping to a new requestId on a mounted TargetLockedAction refreshes capturedEpoch cleanly
+    resetAuthStateForTests()
     render(
       html`
-        <${QuickPeekDrawer} open=${true} title="Keeper Detail" mode="overlay" onClose=${onClose}>
-          <p>Read-only body</p>
+        <${TargetLockedAction} target=${target} currentRevision=${4}>
+          <button type="button">승인</button>
         <//>
       `,
       container,
     )
+    bumpSessionEpoch()
+    render(
+      html`
+        <${TargetLockedAction} target=${target} currentRevision=${4}>
+          <button type="button">승인</button>
+        <//>
+      `,
+      container,
+    )
+    expect(container.querySelector('.tla')!.getAttribute('data-locked')).toBe('true')
 
-    const drawer = container.querySelector('.qpeek')!
-    expect(drawer.getAttribute('data-wide')).toBe('false')
-    expect(drawer.getAttribute('data-mode')).toBe('overlay')
+    const nextTarget = { ...target, requestId: 'req-9002', revision: 1 }
+    render(
+      html`
+        <${TargetLockedAction} target=${nextTarget} currentRevision=${1}>
+          <button type="button">승인</button>
+        <//>
+      `,
+      container,
+    )
+    expect(container.querySelector('.tla')!.getAttribute('data-locked')).toBe('false')
+  })
 
-    const wideBtn = container.querySelector('button[aria-pressed]') as HTMLButtonElement
-    wideBtn.click()
-    await new Promise((r) => setTimeout(r, 0))
-    expect(container.querySelector('.qpeek')!.getAttribute('data-wide')).toBe('true')
+  it('QuickPeekDrawer focuses close button on open, does not steal focus on inline onClose re-renders, toggles [⤢], and closes on Escape', async () => {
+    const triggerBtn = document.createElement('button')
+    document.body.appendChild(triggerBtn)
+    triggerBtn.focus()
 
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
-    expect(onClose).toHaveBeenCalledTimes(1)
+    const onClose = vi.fn()
+    try {
+      render(
+        html`
+          <${QuickPeekDrawer} open=${true} title="Keeper Detail" mode="overlay" onClose=${() => onClose()}>
+            <input id="peek-input" type="text" />
+          <//>
+        `,
+        container,
+      )
+      await new Promise((r) => setTimeout(r, 0))
+
+      const drawer = container.querySelector('.qpeek')!
+      expect(drawer.getAttribute('data-wide')).toBe('false')
+      expect(drawer.getAttribute('data-mode')).toBe('overlay')
+      const closeBtn = container.querySelector('button[aria-label="닫기"]') as HTMLButtonElement
+      expect(document.activeElement).toBe(closeBtn)
+
+      // Move focus into the drawer input and re-render with a fresh inline onClose arrow
+      const input = container.querySelector('#peek-input') as HTMLInputElement
+      input.focus()
+      render(
+        html`
+          <${QuickPeekDrawer} open=${true} title="Keeper Detail Updated" mode="overlay" onClose=${() => onClose()}>
+            <input id="peek-input" type="text" />
+          <//>
+        `,
+        container,
+      )
+      await new Promise((r) => setTimeout(r, 0))
+      expect(document.activeElement).toBe(input)
+
+      const wideBtn = container.querySelector('button[aria-pressed]') as HTMLButtonElement
+      wideBtn.click()
+      await new Promise((r) => setTimeout(r, 0))
+      expect(container.querySelector('.qpeek')!.getAttribute('data-wide')).toBe('true')
+
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+      expect(onClose).toHaveBeenCalledTimes(1)
+    } finally {
+      triggerBtn.remove()
+    }
+  })
+
+  it('computeSeriesSignature stays stable across distinct inline arrays with identical series specs', () => {
+    const sig1 = computeSeriesSignature([
+      { label: 'Spend', colorToken: '--brass-1', width: 2 },
+      { label: 'Turns', colorToken: '--info-fg', dash: [4, 2] },
+    ])
+    const sig2 = computeSeriesSignature([
+      { label: 'Spend', colorToken: '--brass-1', width: 2 },
+      { label: 'Turns', colorToken: '--info-fg', dash: [4, 2] },
+    ])
+    const sig3 = computeSeriesSignature([
+      { label: 'Spend', colorToken: '--ok-fg', width: 2 },
+    ])
+    expect(sig1).toBe(sig2)
+    expect(sig1).not.toBe(sig3)
   })
 
   it('MasterDetail renders split container and emptyDetail when hasSelection is false', () => {

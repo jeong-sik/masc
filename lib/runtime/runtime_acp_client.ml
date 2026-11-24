@@ -80,6 +80,11 @@ type mcp_wiring =
   | Session_new_http_mcp
   | Gemini_dir_mcp_config
 
+type mcp_server_isolation =
+  | Single_pinned_server of string
+  | Shared_or_multi_server
+[@@deriving show, eq]
+
 type system_prompt_channel =
   | Meta_antigravity_append
   | Framed_in_first_prompt
@@ -182,13 +187,14 @@ let profile_of_driver = function
     ; default_strip_env = [ "MISTRAL_API_KEY" ]
     ; mcp_wiring = Session_new_http_mcp
     (* Live-verified against vibe-acp 3.1.0: _meta.tool_name emits
-       mcp_<server>.<tool> and <server>_<tool> (plus mcp_<server>_<tool> /
-       vendor kind="mcp"). *)
+       mcp_<server>.<tool> and <server>_<tool> (plus mcp_<server>_<tool>).
+       Implicit_vendor_mcp_kind is deliberately omitted because Vibe shares
+       operator [$HOME] ([Shared_or_multi_server]) and cannot prove server
+       provenance from an unqualified [kind = "mcp"] frame. *)
     ; mcp_identifier_syntaxes =
         [ Mcp_dot_prefix
         ; Mcp_underscore_prefix
         ; Server_underscore_prefix
-        ; Implicit_vendor_mcp_kind
         ]
     ; system_prompt_channel = Framed_in_first_prompt
     (* Live-verified against vibe-acp 3.1.0: totalTokens = inputTokens +
@@ -1445,33 +1451,48 @@ let parse_qualified_mcp_identifier ~driver ?mcp_server_name ~(kind : tool_kind o
   then None
   else (
     let profile = profile_of_driver driver in
+    let explicit_declared =
+      List.filter
+        (fun s -> not (equal_mcp_identifier_syntax s Implicit_vendor_mcp_kind))
+        profile.mcp_identifier_syntaxes
+    in
     match
       List.find_map
         (match_mcp_identifier_syntax ?mcp_server_name ~kind trimmed)
-        profile.mcp_identifier_syntaxes
+        explicit_declared
     with
     | Some _ as matched -> matched
     | None ->
-      (* Warn only on unambiguous cross-driver MCP prefixes (mcp__, mcp_<srv>.,
-         mcp_<srv>_) so ordinary native tools containing ':' or '/' (URLs, paths,
-         git:status) never trigger false-positive warning spam. *)
+      (* Warn and fail closed on unambiguous cross-driver MCP prefixes
+         (mcp__, mcp_<srv>., mcp_<srv>_) BEFORE considering
+         [Implicit_vendor_mcp_kind] so foreign-driver prefixes paired with
+         [kind = "mcp"] cannot silently skip the cross-driver warning. *)
       let explicit_cross_driver_syntaxes =
         [ Mcp_double_underscore; Mcp_dot_prefix; Mcp_underscore_prefix ]
       in
-      List.iter
-        (fun syntax ->
-           if not (driver_allows_mcp_syntax driver syntax)
-           then (
-             match match_mcp_identifier_syntax ?mcp_server_name ~kind trimmed syntax with
-             | Some _ ->
-               Log.Runtime_agent.warn
-                 "rejecting cross-driver ACP MCP identifier %S (syntax %s not declared for driver %s)"
-                 trimmed
-                 (show_mcp_identifier_syntax syntax)
-                 (driver_to_string driver)
-             | None -> ()))
-        explicit_cross_driver_syntaxes;
-      None)
+      let matched_cross_driver =
+        List.fold_left
+          (fun matched syntax ->
+             if not (driver_allows_mcp_syntax driver syntax)
+             then (
+               match match_mcp_identifier_syntax ?mcp_server_name ~kind trimmed syntax with
+               | Some _ ->
+                 Log.Runtime_agent.warn
+                   "rejecting cross-driver ACP MCP identifier %S (syntax %s not declared for driver %s)"
+                   trimmed
+                   (show_mcp_identifier_syntax syntax)
+                   (driver_to_string driver);
+                 true
+               | None -> matched)
+             else matched)
+          false
+          explicit_cross_driver_syntaxes
+      in
+      if matched_cross_driver
+      then None
+      else if driver_allows_mcp_syntax driver Implicit_vendor_mcp_kind
+      then match_mcp_identifier_syntax ?mcp_server_name ~kind trimmed Implicit_vendor_mcp_kind
+      else None)
 ;;
 
 let classify_tool_call ~driver ?managed_schema_root ?mcp_server_name (wire : tool_call_wire)
@@ -1628,12 +1649,19 @@ let classify_tool_call_json ~driver ?managed_schema_root ?mcp_server_name json =
   parse_tool_call_wire json |> classify_tool_call ~driver ?managed_schema_root ?mcp_server_name
 ;;
 
-let should_allow_tool_call ~policy identity =
+let should_allow_tool_call
+      ?(server_isolation = Shared_or_multi_server)
+      ~policy
+      identity
+  =
   let matches_pinned ~mcp_server_name ~allowed_tool_names = function
     | Mcp_tool { server = Explicit_server srv; tool_name } ->
       String.equal srv mcp_server_name && List.mem tool_name allowed_tool_names
     | Mcp_tool { server = Implicit_mcp_kind; tool_name } ->
-      List.mem tool_name allowed_tool_names
+      (match server_isolation with
+       | Single_pinned_server pinned_srv ->
+         String.equal pinned_srv mcp_server_name && List.mem tool_name allowed_tool_names
+       | Shared_or_multi_server -> false)
     | Managed_mcp_schema_read { mcp_server_name = srv; path } ->
       String.equal srv mcp_server_name
       && allowed_tool_names <> []
@@ -2333,6 +2361,7 @@ type t =
   ; mutable init_latency_ms : int
   ; managed_schema_root : (string * string) option
   ; mcp_server_name : string option
+  ; mcp_server_isolation : mcp_server_isolation
   ; mutable stderr_secrets : string list
   ; clock : float Eio.Time.clock_ty Eio.Resource.t
   ; signal_term : unit -> unit
@@ -2388,6 +2417,7 @@ let with_external_activity t f =
 ;;
 
 let driver t = t.driver
+let mcp_server_isolation t = t.mcp_server_isolation
 let capabilities t = t.capabilities
 let init_latency_ms t = t.init_latency_ms
 let is_alive t = Atomic.get t.alive && not (Atomic.get t.closed)
@@ -2591,7 +2621,7 @@ let handle_permission_request t ~id ~params =
   let req_session_id = json_string_opt "sessionId" params in
   let tool_call = Option.value (json_field "toolCall" params) ~default:(`Assoc []) in
   let incoming_wire = parse_tool_call_wire tool_call in
-  let allow, effective_wire =
+  let allow, effective_wire, denied_implicit_mcp =
     let matched_turn =
       with_state_lock t (fun () ->
         match t.active_turn, req_session_id with
@@ -2601,7 +2631,7 @@ let handle_permission_request t ~id ~params =
         | _ -> None)
     in
     match matched_turn with
-    | None -> false, incoming_wire
+    | None -> false, incoming_wire, false
     | Some (policy, mcp_server_name, effective_wire) ->
       note_activity t;
       let identity =
@@ -2611,13 +2641,31 @@ let handle_permission_request t ~id ~params =
           ?mcp_server_name
           effective_wire
       in
-      should_allow_tool_call ~policy identity, effective_wire
+      let allowed =
+        should_allow_tool_call
+          ~server_isolation:t.mcp_server_isolation
+          ~policy
+          identity
+      in
+      let denied_implicit =
+        (not allowed)
+        &&
+        match identity, t.mcp_server_isolation with
+        | Mcp_tool { server = Implicit_mcp_kind; _ }, Shared_or_multi_server -> true
+        | Mcp_tool { server = Implicit_mcp_kind; _ }, Single_pinned_server _
+        | Mcp_tool { server = Explicit_server _; _ }, (Single_pinned_server _ | Shared_or_multi_server)
+        | (Managed_mcp_schema_read _ | Native_tool _), (Single_pinned_server _ | Shared_or_multi_server) ->
+          false
+      in
+      allowed, effective_wire, denied_implicit
   in
   if not allow
   then
     Log.Runtime_agent.warn
-      "ACP permission denied: driver=%s tool_call_id=%s meta_tool=%s name=%s title=%S kind=%s session_id=%s"
+      "ACP permission denied: driver=%s isolation=%s%s tool_call_id=%s meta_tool=%s name=%s title=%S kind=%s session_id=%s"
       (driver_to_string t.driver)
+      (show_mcp_server_isolation t.mcp_server_isolation)
+      (if denied_implicit_mcp then " reason=implicit_mcp_kind_unisolated" else "")
       (if effective_wire.tool_call_id <> "" then effective_wire.tool_call_id else "<none>")
       (Option.value effective_wire.meta_tool_name ~default:"<none>")
       (Option.value effective_wire.name ~default:"<none>")
@@ -3089,6 +3137,11 @@ let start ~sw ~proc_mgr ~clock ?fs ~(config : config) ?mcp_server ?native_postur
                   try Eio.Process.signal process Sys.sigterm with
                   | Eio.Io _ | Unix.Unix_error _ -> ()
                 in
+                let mcp_server_isolation =
+                  match (profile_of_driver config.driver).mcp_wiring, managed_schema_root with
+                  | Gemini_dir_mcp_config, Some (pinned_srv, _) -> Single_pinned_server pinned_srv
+                  | Gemini_dir_mcp_config, None | Session_new_http_mcp, _ -> Shared_or_multi_server
+                in
                 let t =
                   { driver = config.driver
                   ; capabilities =
@@ -3105,6 +3158,7 @@ let start ~sw ~proc_mgr ~clock ?fs ~(config : config) ?mcp_server ?native_postur
                   ; init_latency_ms = 0
                   ; managed_schema_root
                   ; mcp_server_name
+                  ; mcp_server_isolation
                   ; stderr_secrets
                   ; clock = (clock :> float Eio.Time.clock_ty Eio.Resource.t)
                   ; signal_term

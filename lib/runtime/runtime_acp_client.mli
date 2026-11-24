@@ -69,6 +69,23 @@ type mcp_wiring =
           emitted so all MASC tools stay on [agy]'s lazy list past its 62 KB
           eager ceiling. *)
 
+type mcp_server_isolation =
+  | Single_pinned_server of string
+      (** Client process owns an isolated MCP configuration declaring ONLY
+          the named MASC MCP server (Antigravity's private [--gemini-dir]
+          with a single-entry [mcp_config.json]; live-verified against
+          [agy acp 1.5.14] to ignore [<cwd>/.gemini/{settings,config/mcp_config}.json]
+          while MASC sends [mcpServers = []] on [session/new]). An unqualified
+          {!Implicit_mcp_kind} wire frame can only originate from that named
+          pinned server. *)
+  | Shared_or_multi_server
+      (** Client process may attach additional host, plugin, or user-scoped
+          MCP servers alongside MASC (e.g. [Session_new_http_mcp] drivers
+          sharing operator [$HOME], or an Antigravity process started without
+          a MASC-owned [mcp_config.json]). Unqualified {!Implicit_mcp_kind}
+          frames cannot prove server provenance and MUST fail closed. *)
+[@@deriving show, eq]
+
 type system_prompt_channel =
   | Meta_antigravity_append
       (** Delivered via [_meta.antigravity.systemPrompt.append] in
@@ -363,8 +380,16 @@ val permission_policy_of_posture
   -> Runtime_native_tools.posture
   -> permission_policy
 
-val should_allow_tool_call : policy:permission_policy -> tool_call_identity -> bool
-(** Total permission decision over the closed {!tool_call_identity} variant. *)
+val should_allow_tool_call
+  :  ?server_isolation:mcp_server_isolation
+  -> policy:permission_policy
+  -> tool_call_identity
+  -> bool
+(** Pure total permission decision over the closed {!tool_call_identity}
+    variant. [server_isolation] defaults fail-closed to
+    {!Shared_or_multi_server}, which rejects unqualified {!Implicit_mcp_kind}
+    calls unless the caller proves {!Single_pinned_server} isolation from a
+    live client handle via {!mcp_server_isolation}. *)
 
 val is_masc_mcp_tool
   :  driver:driver
@@ -374,9 +399,10 @@ val is_masc_mcp_tool
   -> kind:tool_kind option
   -> bool
 (** Strict membership predicate for callers that only hold [(driver, title, kind)].
-    Prefer matching on {!tool_call_identity} from {!Tool_call_started} so
-    structured MCP calls and managed schema reads are classified without
-    display-title inspection. *)
+    Evaluates fail-closed under {!Shared_or_multi_server} (rejecting unqualified
+    {!Implicit_mcp_kind} because no live isolated client handle is presented).
+    Prefer matching on {!tool_call_identity} from {!Tool_call_started} with
+    {!mcp_server_isolation} from the live client handle. *)
 
 val is_read_only_tool_kind : tool_kind option -> bool
 (** True for read-only local ACP tool kinds ({!Tool_read}, {!Tool_search},
@@ -527,6 +553,10 @@ val start
     [Native_none]. *)
 
 val driver : t -> driver
+val mcp_server_isolation : t -> mcp_server_isolation
+(** Effective MCP server isolation proven for this live client handle
+    ({!Single_pinned_server} only when MASC materialized an isolated single-entry
+    [--gemini-dir/config/mcp_config.json]; {!Shared_or_multi_server} otherwise). *)
 val capabilities : t -> agent_capabilities
 val init_latency_ms : t -> int
 val is_alive : t -> bool

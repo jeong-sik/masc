@@ -2511,7 +2511,8 @@ let dashboard_bridge_rbac_and_sse_matrix () =
            ~headers:(changing ~csrf:admin_csrf ()))
           .status;
       (* Browser_observer_sse (GET /api/v1/auth/events):
-         Anonymous -> 401; Query token even with valid cookie -> 401 with Query_credential error;
+         Anonymous -> 401; Query token even with valid cookie -> 401 with Several_credentials
+         error (the cookie and the query token are two credentials);
          PAT -> 403; Service credential -> 403; Cross-origin -> 403;
          Malformed Last-Event-ID with valid cookie -> 400 (proves auth passed!). *)
       Alcotest.(check int)
@@ -2519,8 +2520,8 @@ let dashboard_bridge_rbac_and_sse_matrix () =
         401
         (send (fresh_browser ()) router ~meth:"GET" ~path:Server_account_dashboard_bridge.observer_events_path)
           .status;
-      let expected_query_cred_error =
-        Some (`String (Masc.Auth_gate.reason_to_string Masc.Auth_gate.Query_credential))
+      let expected_several_credentials_error =
+        Some (`String (Masc.Auth_gate.reason_to_string Masc.Auth_gate.Several_credentials))
       in
       let query_token_reply =
         send
@@ -2534,9 +2535,12 @@ let dashboard_bridge_rbac_and_sse_matrix () =
         401
         query_token_reply.status;
       Alcotest.(check bool)
-        "query-string ?token= error body names Query_credential reason"
+        "query-string ?token= error body names Several_credentials reason"
         true
-        (Option.equal Yojson.Safe.equal expected_query_cred_error (member "error" query_token_reply));
+        (Option.equal
+           Yojson.Safe.equal
+           expected_several_credentials_error
+           (member "error" query_token_reply));
       let query_access_token_reply =
         send
           admin
@@ -2549,11 +2553,11 @@ let dashboard_bridge_rbac_and_sse_matrix () =
         401
         query_access_token_reply.status;
       Alcotest.(check bool)
-        "query-string ?access_token= error body names Query_credential reason"
+        "query-string ?access_token= error body names Several_credentials reason"
         true
         (Option.equal
            Yojson.Safe.equal
-           expected_query_cred_error
+           expected_several_credentials_error
            (member "error" query_access_token_reply));
       Alcotest.(check int)
         "PAT bearer on /api/v1/auth/events is 403 (browser session cookie required)"

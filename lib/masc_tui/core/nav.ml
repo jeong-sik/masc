@@ -14,7 +14,8 @@ type work_tab =
 
 type knowledge_tab =
   | Knowledge_board
-  | Knowledge_wiki_artifacts
+  | Knowledge_wiki
+  | Knowledge_artifacts
   | Knowledge_memory
 
 type keepers_fleet_mode =
@@ -141,7 +142,7 @@ let all_work_tabs =
   [ Work_pipeline; Work_tasks_schedules; Work_inbox; Work_candle_scorecard ]
 
 let work_tab_label = function
-  | Work_pipeline -> Say.make ~ko:"파이프라인" ~en:"Pipeline"
+  | Work_pipeline -> Say.make ~ko:"목표" ~en:"Goals"
   | Work_tasks_schedules -> Say.make ~ko:"작업 · 일정" ~en:"Tasks & Schedules"
   | Work_inbox -> Say.make ~ko:"수신함" ~en:"Inbox"
   | Work_candle_scorecard -> Say.make ~ko:"캔들 · 성과" ~en:"Candle & Scorecard"
@@ -159,22 +160,25 @@ let prev_work_tab = function
   | Work_candle_scorecard -> Work_inbox
 
 let all_knowledge_tabs =
-  [ Knowledge_board; Knowledge_wiki_artifacts; Knowledge_memory ]
+  [ Knowledge_board; Knowledge_wiki; Knowledge_artifacts; Knowledge_memory ]
 
 let knowledge_tab_label = function
   | Knowledge_board -> Say.make ~ko:"보드" ~en:"Board"
-  | Knowledge_wiki_artifacts -> Say.make ~ko:"위키 · 산출물" ~en:"Wiki & Artifacts"
+  | Knowledge_wiki -> Say.make ~ko:"위키" ~en:"Wiki"
+  | Knowledge_artifacts -> Say.make ~ko:"산출물" ~en:"Artifacts"
   | Knowledge_memory -> Say.make ~ko:"기억" ~en:"Memory"
 
 let next_knowledge_tab = function
-  | Knowledge_board -> Knowledge_wiki_artifacts
-  | Knowledge_wiki_artifacts -> Knowledge_memory
+  | Knowledge_board -> Knowledge_wiki
+  | Knowledge_wiki -> Knowledge_artifacts
+  | Knowledge_artifacts -> Knowledge_memory
   | Knowledge_memory -> Knowledge_board
 
 let prev_knowledge_tab = function
   | Knowledge_board -> Knowledge_memory
-  | Knowledge_wiki_artifacts -> Knowledge_board
-  | Knowledge_memory -> Knowledge_wiki_artifacts
+  | Knowledge_wiki -> Knowledge_board
+  | Knowledge_artifacts -> Knowledge_wiki
+  | Knowledge_memory -> Knowledge_artifacts
 
 let all_keepers_fleet_modes =
   [ Fleet_companies; Fleet_attention; Fleet_pulse_wall ]
@@ -325,8 +329,9 @@ let equal_work_tab a b = Int.equal (work_tab_index a) (work_tab_index b)
 
 let knowledge_tab_index = function
   | Knowledge_board -> 0
-  | Knowledge_wiki_artifacts -> 1
-  | Knowledge_memory -> 2
+  | Knowledge_wiki -> 1
+  | Knowledge_artifacts -> 2
+  | Knowledge_memory -> 3
 
 let equal_knowledge_tab a b =
   Int.equal (knowledge_tab_index a) (knowledge_tab_index b)
@@ -498,4 +503,250 @@ let equal_focus_scope a b =
   | Ask_choice_focused, (Global | Workspace_focused _ | Dive_focused _ | Composer_focused | Approval_strip_focused | Overlay_focused _)
   | Approval_strip_focused, (Global | Workspace_focused _ | Dive_focused _ | Composer_focused | Ask_choice_focused | Overlay_focused _)
   | Overlay_focused _, (Global | Workspace_focused _ | Dive_focused _ | Composer_focused | Ask_choice_focused | Approval_strip_focused) ->
+      false
+
+type menu_section =
+  | Sec_overview
+  | Sec_work
+  | Sec_knowledge
+  | Sec_fleet
+  | Sec_runtime
+  | Sec_infra
+  | Sec_system
+
+type menu_target =
+  | Menu_pulse
+  | Menu_work of work_tab
+  | Menu_knowledge of knowledge_tab
+  | Menu_keepers
+  | Menu_runtime of runtime_tab
+  | Menu_infra of infra_tab
+  | Menu_settings
+  | Menu_incidents
+  | Menu_queue_context
+  | Menu_help
+
+type menu_item = {
+  section : menu_section;
+  target : menu_target;
+  label : Say.t;
+  shortcut : string option;
+}
+
+let menu_section_label = function
+  | Sec_overview -> Say.make ~ko:"홈" ~en:"Overview"
+  | Sec_work -> Say.make ~ko:"작업" ~en:"Work"
+  | Sec_knowledge -> Say.make ~ko:"지식" ~en:"Knowledge"
+  | Sec_fleet -> Say.make ~ko:"플릿" ~en:"Fleet"
+  | Sec_runtime -> Say.make ~ko:"런타임" ~en:"Runtime"
+  | Sec_infra -> Say.make ~ko:"인프라" ~en:"Infra"
+  | Sec_system -> Say.make ~ko:"시스템" ~en:"System"
+
+let menu_section_shortcut = function
+  | Sec_work -> Some "2"
+  | Sec_knowledge -> Some "3"
+  | Sec_runtime -> Some "5"
+  | Sec_infra -> Some "6"
+  | Sec_overview | Sec_fleet | Sec_system -> None
+
+let menu_section_index = function
+  | Sec_overview -> 0
+  | Sec_work -> 1
+  | Sec_knowledge -> 2
+  | Sec_fleet -> 3
+  | Sec_runtime -> 4
+  | Sec_infra -> 5
+  | Sec_system -> 6
+
+let equal_menu_section a b =
+  Int.equal (menu_section_index a) (menu_section_index b)
+
+let equal_menu_target a b =
+  match a, b with
+  | Menu_pulse, Menu_pulse
+  | Menu_keepers, Menu_keepers
+  | Menu_settings, Menu_settings
+  | Menu_incidents, Menu_incidents
+  | Menu_queue_context, Menu_queue_context
+  | Menu_help, Menu_help ->
+      true
+  | Menu_work x, Menu_work y -> equal_work_tab x y
+  | Menu_knowledge x, Menu_knowledge y -> equal_knowledge_tab x y
+  | Menu_runtime x, Menu_runtime y -> equal_runtime_tab x y
+  | Menu_infra x, Menu_infra y -> equal_infra_tab x y
+  | Menu_pulse, (Menu_work _ | Menu_knowledge _ | Menu_keepers | Menu_runtime _ | Menu_infra _ | Menu_settings | Menu_incidents | Menu_queue_context | Menu_help)
+  | Menu_work _, (Menu_pulse | Menu_knowledge _ | Menu_keepers | Menu_runtime _ | Menu_infra _ | Menu_settings | Menu_incidents | Menu_queue_context | Menu_help)
+  | Menu_knowledge _, (Menu_pulse | Menu_work _ | Menu_keepers | Menu_runtime _ | Menu_infra _ | Menu_settings | Menu_incidents | Menu_queue_context | Menu_help)
+  | Menu_keepers, (Menu_pulse | Menu_work _ | Menu_knowledge _ | Menu_runtime _ | Menu_infra _ | Menu_settings | Menu_incidents | Menu_queue_context | Menu_help)
+  | Menu_runtime _, (Menu_pulse | Menu_work _ | Menu_knowledge _ | Menu_keepers | Menu_infra _ | Menu_settings | Menu_incidents | Menu_queue_context | Menu_help)
+  | Menu_infra _, (Menu_pulse | Menu_work _ | Menu_knowledge _ | Menu_keepers | Menu_runtime _ | Menu_settings | Menu_incidents | Menu_queue_context | Menu_help)
+  | Menu_settings, (Menu_pulse | Menu_work _ | Menu_knowledge _ | Menu_keepers | Menu_runtime _ | Menu_infra _ | Menu_incidents | Menu_queue_context | Menu_help)
+  | Menu_incidents, (Menu_pulse | Menu_work _ | Menu_knowledge _ | Menu_keepers | Menu_runtime _ | Menu_infra _ | Menu_settings | Menu_queue_context | Menu_help)
+  | Menu_queue_context, (Menu_pulse | Menu_work _ | Menu_knowledge _ | Menu_keepers | Menu_runtime _ | Menu_infra _ | Menu_settings | Menu_incidents | Menu_help)
+  | Menu_help, (Menu_pulse | Menu_work _ | Menu_knowledge _ | Menu_keepers | Menu_runtime _ | Menu_infra _ | Menu_settings | Menu_incidents | Menu_queue_context) ->
+      false
+
+let all_menu_items =
+  [
+    {
+      section = Sec_overview;
+      target = Menu_pulse;
+      label = workspace_label Pulse;
+      shortcut = Some "1";
+    };
+    {
+      section = Sec_work;
+      target = Menu_work Work_pipeline;
+      label = work_tab_label Work_pipeline;
+      shortcut = None;
+    };
+    {
+      section = Sec_work;
+      target = Menu_work Work_tasks_schedules;
+      label = work_tab_label Work_tasks_schedules;
+      shortcut = None;
+    };
+    {
+      section = Sec_work;
+      target = Menu_work Work_inbox;
+      label = work_tab_label Work_inbox;
+      shortcut = None;
+    };
+    {
+      section = Sec_work;
+      target = Menu_work Work_candle_scorecard;
+      label = work_tab_label Work_candle_scorecard;
+      shortcut = None;
+    };
+    {
+      section = Sec_knowledge;
+      target = Menu_knowledge Knowledge_board;
+      label = knowledge_tab_label Knowledge_board;
+      shortcut = None;
+    };
+    {
+      section = Sec_knowledge;
+      target = Menu_knowledge Knowledge_wiki;
+      label = knowledge_tab_label Knowledge_wiki;
+      shortcut = None;
+    };
+    {
+      section = Sec_knowledge;
+      target = Menu_knowledge Knowledge_artifacts;
+      label = knowledge_tab_label Knowledge_artifacts;
+      shortcut = None;
+    };
+    {
+      section = Sec_knowledge;
+      target = Menu_knowledge Knowledge_memory;
+      label = knowledge_tab_label Knowledge_memory;
+      shortcut = None;
+    };
+    {
+      section = Sec_fleet;
+      target = Menu_keepers;
+      label = workspace_label Keepers;
+      shortcut = Some "4";
+    };
+    {
+      section = Sec_runtime;
+      target = Menu_runtime Runtime_quotas_credits;
+      label = runtime_tab_label Runtime_quotas_credits;
+      shortcut = None;
+    };
+    {
+      section = Sec_runtime;
+      target = Menu_runtime Runtime_efficiency_spend;
+      label = runtime_tab_label Runtime_efficiency_spend;
+      shortcut = None;
+    };
+    {
+      section = Sec_runtime;
+      target = Menu_runtime Runtime_failover_lanes;
+      label = runtime_tab_label Runtime_failover_lanes;
+      shortcut = None;
+    };
+    {
+      section = Sec_runtime;
+      target = Menu_runtime Runtime_tools_connectors;
+      label = runtime_tab_label Runtime_tools_connectors;
+      shortcut = None;
+    };
+    {
+      section = Sec_infra;
+      target = Menu_infra Infra_sandboxes;
+      label = infra_tab_label Infra_sandboxes;
+      shortcut = None;
+    };
+    {
+      section = Sec_infra;
+      target = Menu_infra Infra_repos_changes;
+      label = infra_tab_label Infra_repos_changes;
+      shortcut = None;
+    };
+    {
+      section = Sec_infra;
+      target = Menu_infra Infra_activity_logs;
+      label = infra_tab_label Infra_activity_logs;
+      shortcut = None;
+    };
+    {
+      section = Sec_system;
+      target = Menu_settings;
+      label = Say.make ~ko:"설정" ~en:"Settings";
+      shortcut = Some ",";
+    };
+    {
+      section = Sec_system;
+      target = Menu_incidents;
+      label = Say.make ~ko:"장애 이력" ~en:"Incidents";
+      shortcut = Some "I";
+    };
+    {
+      section = Sec_system;
+      target = Menu_queue_context;
+      label = Say.make ~ko:"큐 · 컨텍스트" ~en:"Queue & Ctx";
+      shortcut = Some "^T";
+    };
+    {
+      section = Sec_system;
+      target = Menu_help;
+      label = Say.make ~ko:"도움말" ~en:"Help";
+      shortcut = Some "?";
+    };
+  ]
+
+let menu_item_index = function
+  | Menu_pulse -> 0
+  | Menu_work Work_pipeline -> 1
+  | Menu_work Work_tasks_schedules -> 2
+  | Menu_work Work_inbox -> 3
+  | Menu_work Work_candle_scorecard -> 4
+  | Menu_knowledge Knowledge_board -> 5
+  | Menu_knowledge Knowledge_wiki -> 6
+  | Menu_knowledge Knowledge_artifacts -> 7
+  | Menu_knowledge Knowledge_memory -> 8
+  | Menu_keepers -> 9
+  | Menu_runtime Runtime_quotas_credits -> 10
+  | Menu_runtime Runtime_efficiency_spend -> 11
+  | Menu_runtime Runtime_failover_lanes -> 12
+  | Menu_runtime Runtime_tools_connectors -> 13
+  | Menu_infra Infra_sandboxes -> 14
+  | Menu_infra Infra_repos_changes -> 15
+  | Menu_infra Infra_activity_logs -> 16
+  | Menu_settings -> 17
+  | Menu_incidents -> 18
+  | Menu_queue_context -> 19
+  | Menu_help -> 20
+
+let menu_item_of_index idx = List.nth_opt all_menu_items idx
+
+let is_overlay_menu_target = function
+  | Menu_settings | Menu_incidents | Menu_queue_context | Menu_help -> true
+  | Menu_pulse
+  | Menu_work _
+  | Menu_knowledge _
+  | Menu_keepers
+  | Menu_runtime _
+  | Menu_infra _ ->
       false

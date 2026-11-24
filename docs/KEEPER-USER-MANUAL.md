@@ -1147,7 +1147,7 @@ conversation. `keeper_artifact_publish` accepts `title`, `summary`, `format`
 
 Open **Work → Artifacts** in the web dashboard to search the published list and
 read a document in a viewport-filling reader (in TUI v2.6, open **3 Knowledge →
-Wiki & Artifacts** and press `Space` to browse artifact metadata and copy
+Artifacts** to browse artifact metadata and copy
 SHA-256 hashes; HTML preview and download remain on the web dashboard/API). Use
 Back to list to
 return to the catalog; expand Report information for author and work links.

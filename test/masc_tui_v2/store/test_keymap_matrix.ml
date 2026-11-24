@@ -1143,15 +1143,13 @@ let test_axis_a_screen_dive_matrix () =
       , {
           (with_ws Nav.Knowledge base) with
           knowledge =
-            Knowledge_store.set_tab Nav.Knowledge_wiki_artifacts base.knowledge;
+            Knowledge_store.set_tab Nav.Knowledge_wiki base.knowledge;
         } );
       ( "Knowledge/Artifacts/Wide"
       , {
           (with_ws Nav.Knowledge base) with
           knowledge =
-            base.knowledge
-            |> Knowledge_store.set_tab Nav.Knowledge_wiki_artifacts
-            |> Knowledge_store.toggle_wiki_artifacts_submode;
+            Knowledge_store.set_tab Nav.Knowledge_artifacts base.knowledge;
         } );
       ( "Knowledge/Memory/Wide"
       , {
@@ -1433,7 +1431,7 @@ let test_axis_a_screen_dive_matrix () =
                         Nav.Infra_repos_changes)
                   || (Nav.equal_workspace m.nav.workspace Nav.Knowledge
                       && Nav.equal_knowledge_tab m.knowledge.active_tab
-                           Nav.Knowledge_wiki_artifacts)
+                           Nav.Knowledge_wiki)
             in
             if not is_valid_o then
               Alcotest.(check bool) (tag ^ " 'o' never emits Open_external_url")
@@ -1743,7 +1741,7 @@ let test_dynamic_rendered_hint_contracts () =
               m_base with
               nav = { m_base.nav with workspace = Nav.Knowledge };
               knowledge =
-                Knowledge_store.set_tab Nav.Knowledge_wiki_artifacts
+                Knowledge_store.set_tab Nav.Knowledge_wiki
                   m_base.knowledge;
             } );
           ( "Knowledge/Memory"
@@ -2344,7 +2342,7 @@ let test_journeys_tab_multipane_dives_safety () =
         base.knowledge
         |> Knowledge_store.set_wiki_page ~slug:long_wiki.slug
              (Observed.value ~observed_at:t0 long_wiki)
-        |> Knowledge_store.set_tab Nav.Knowledge_wiki_artifacts;
+        |> Knowledge_store.set_tab Nav.Knowledge_wiki;
     }
   in
   let m_kw_p1, _ = step m_kw (mk_key Keymap.Input.Tab) in
@@ -2893,21 +2891,23 @@ let test_journeys_tab_multipane_dives_safety () =
     {
       base with
       nav = { base.nav with workspace = Nav.Knowledge };
-      knowledge = Knowledge_store.set_tab Nav.Knowledge_wiki_artifacts base.knowledge;
+      knowledge = Knowledge_store.set_tab Nav.Knowledge_wiki base.knowledge;
     }
   in
   let m_z_kw1, _ = step m_z_kw (char_key "z") in
   Alcotest.(check bool) "R6 'z' on Knowledge > Wiki toggles zoomed = true" true
     m_z_kw1.nav.zoomed;
-  let m_z_art, _ = step m_z_kw1 (char_key " ") in
-  Alcotest.(check bool) "R6 Space Wiki->Artifacts resets zoomed = false" false
+  let m_z_space, _ = step m_z_kw1 (char_key " ") in
+  Alcotest.(check bool) "R6 Space never switches screens out of Wiki" true
+    (Nav.equal_knowledge_tab m_z_space.knowledge.active_tab Nav.Knowledge_wiki);
+  let m_z_art, _ = step m_z_kw1 (char_key "]") in
+  Alcotest.(check bool) "R6 ']' Wiki->Artifacts resets zoomed = false" false
     m_z_art.nav.zoomed;
+  Alcotest.(check bool) "R6 ']' Wiki->Artifacts lands on Knowledge_artifacts" true
+    (Nav.equal_knowledge_tab m_z_art.knowledge.active_tab Nav.Knowledge_artifacts);
   let m_z_art2, _ = step m_z_art (char_key "z") in
   Alcotest.(check bool) "R6 'z' on Artifacts stays false" false
     m_z_art2.nav.zoomed;
-  let m_z_tab, _ = step m_z_kw1 (char_key "]") in
-  Alcotest.(check bool) "R6 cycle_sub_tab resets zoomed = false" false
-    m_z_tab.nav.zoomed;
   let m_z_dive, _ = Update_nav.push_dive m_z_kw1 (Nav.Dive_knowledge (Nav.Wiki_dive "architecture")) in
   Alcotest.(check bool) "R6 push_dive resets zoomed = false" false
     m_z_dive.nav.zoomed;
@@ -3107,7 +3107,7 @@ let test_journeys_tab_multipane_dives_safety () =
       nav = { base.nav with workspace = Nav.Knowledge };
       knowledge =
         base.knowledge
-        |> Knowledge_store.set_tab Nav.Knowledge_wiki_artifacts
+        |> Knowledge_store.set_tab Nav.Knowledge_wiki
         |> Knowledge_store.set_wiki_page ~slug:stale_page.slug
              (Observed.value ~observed_at:t0 stale_page);
     }
@@ -4021,8 +4021,7 @@ let test_pillar2_scroll_bounds_all_surfaces () =
       knowledge =
         base.knowledge
         |> Knowledge_store.apply_artifacts ~observed_at:t0 many_artifacts
-        |> Knowledge_store.set_tab Nav.Knowledge_wiki_artifacts
-        |> Knowledge_store.toggle_wiki_artifacts_submode;
+        |> Knowledge_store.set_tab Nav.Knowledge_artifacts;
     }
   in
   let m_art_tall_end, _ = step m_art_tall (mk_key Keymap.Input.End) in
@@ -4071,7 +4070,7 @@ let test_pillar2_scroll_bounds_all_surfaces () =
         base.knowledge
         |> Knowledge_store.set_wiki_page ~slug:long_wiki_toc.slug
              (Observed.value ~observed_at:t0 long_wiki_toc)
-        |> Knowledge_store.set_tab Nav.Knowledge_wiki_artifacts;
+        |> Knowledge_store.set_tab Nav.Knowledge_wiki;
     }
   in
   let m_wiki_end, _ = step m_wiki_toc (mk_key Keymap.Input.End) in

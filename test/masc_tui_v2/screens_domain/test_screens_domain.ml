@@ -1308,7 +1308,8 @@ let test_knowledge_all_tabs_and_dives () =
   let tabs =
     [
       Nav.Knowledge_board;
-      Nav.Knowledge_wiki_artifacts;
+      Nav.Knowledge_wiki;
+      Nav.Knowledge_artifacts;
       Nav.Knowledge_memory;
     ]
   in
@@ -1371,25 +1372,16 @@ let test_knowledge_all_tabs_and_dives () =
                          Screen_knowledge.render ~model:m_zoom ~cache ~rect g)
                    in
                    assert_grid_invariants ~label:(lbl ^ "/Zoomed") g_zoom
-               | Nav.Knowledge_wiki_artifacts ->
+               | Nav.Knowledge_wiki ->
                    (* OSC 8 hyperlink interned for wiki links *)
                    Alcotest.(check bool)
                      (lbl ^ " interns OSC 8 wiki hyperlink") true
-                     (Option.is_some (Cell_grid.hyperlink_uri grid 1));
-                   (* Also test the Artifacts submode *)
-                   let m_art =
-                     {
-                       m with
-                       knowledge =
-                         Knowledge_store.toggle_wiki_artifacts_submode
-                           m.knowledge;
-                     }
-                   in
-                   let g_art =
-                     render_into ~cols ~rows (fun ~cache ~rect g ->
-                         Screen_knowledge.render ~model:m_art ~cache ~rect g)
-                   in
-                   assert_grid_invariants ~label:(lbl ^ "/Artifacts") g_art
+                     (Option.is_some (Cell_grid.hyperlink_uri grid 1))
+               | Nav.Knowledge_artifacts ->
+                   Alcotest.(check bool)
+                     (lbl ^ " renders Artifacts first-class tab") true
+                     (contains_sub ~needle:"Artifacts" ~haystack:text
+                      || contains_sub ~needle:"산출물" ~haystack:text)
                | Nav.Knowledge_memory ->
                    (* Retrieval heat & real /memory/act recovery acts *)
                    Alcotest.(check bool)
@@ -1897,7 +1889,7 @@ let test_p1_p2_verifier_regressions () =
       m_base with
       knowledge =
         m_base.knowledge
-        |> Knowledge_store.set_tab Nav.Knowledge_wiki_artifacts
+        |> Knowledge_store.set_tab Nav.Knowledge_wiki
         |> Knowledge_store.set_filter "orphan";
     }
   in
@@ -1938,8 +1930,7 @@ let test_p1_p2_verifier_regressions () =
       m_base with
       knowledge =
         m_base.knowledge
-        |> Knowledge_store.set_tab Nav.Knowledge_wiki_artifacts
-        |> Knowledge_store.toggle_wiki_artifacts_submode
+        |> Knowledge_store.set_tab Nav.Knowledge_artifacts
         |> Knowledge_store.apply_artifacts ~observed_at:now_mono [ art_a; art_b ]
         |> Knowledge_store.set_filter "beta";
     }
@@ -2077,7 +2068,7 @@ let test_p1_p2_verifier_regressions () =
       m_base with
       knowledge =
         m_base.knowledge
-        |> Knowledge_store.set_tab Nav.Knowledge_wiki_artifacts
+        |> Knowledge_store.set_tab Nav.Knowledge_wiki
         |> Knowledge_store.apply_wiki_lint ~observed_at:now_mono lint_rep;
     }
   in
@@ -2599,7 +2590,7 @@ let test_v25_knowledge_stacked_bar_and_conflict_rails () =
     {
       m_base with
       knowledge =
-        Knowledge_store.set_tab Nav.Knowledge_wiki_artifacts m_base.knowledge;
+        Knowledge_store.set_tab Nav.Knowledge_wiki m_base.knowledge;
     }
   in
   let g_wiki =
@@ -3536,7 +3527,7 @@ let test_nav_display_order_monotonic_screen_rows () =
   in
   let kw0 =
     Knowledge_store.empty
-    |> Knowledge_store.set_tab Nav.Knowledge_wiki_artifacts
+    |> Knowledge_store.set_tab Nav.Knowledge_wiki
     |> Knowledge_store.apply_wiki_index ~observed_at:now_mono
          {
            pages_total = 4;

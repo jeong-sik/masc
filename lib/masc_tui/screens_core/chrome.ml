@@ -495,7 +495,7 @@ let compact_work_tab_label ~(lang : Say.lang) ~compact tab =
   if not compact then Say.resolve lang (Nav.work_tab_label tab)
   else
     match tab with
-    | Nav.Work_pipeline -> Say.resolve lang (Say.make ~ko:"파이프라인" ~en:"Pipe")
+    | Nav.Work_pipeline -> Say.resolve lang (Say.make ~ko:"목표" ~en:"Goals")
     | Nav.Work_tasks_schedules -> Say.resolve lang (Say.make ~ko:"작업·일정" ~en:"Tasks")
     | Nav.Work_inbox -> Say.resolve lang (Say.make ~ko:"수신함" ~en:"Inbox")
     | Nav.Work_candle_scorecard -> Say.resolve lang (Say.make ~ko:"캔들·성과" ~en:"Candle")
@@ -505,7 +505,8 @@ let compact_knowledge_tab_label ~(lang : Say.lang) ~compact tab =
   else
     match tab with
     | Nav.Knowledge_board -> Say.resolve lang (Say.make ~ko:"보드" ~en:"Board")
-    | Nav.Knowledge_wiki_artifacts -> Say.resolve lang (Say.make ~ko:"위키·산출" ~en:"Wiki")
+    | Nav.Knowledge_wiki -> Say.resolve lang (Say.make ~ko:"위키" ~en:"Wiki")
+    | Nav.Knowledge_artifacts -> Say.resolve lang (Say.make ~ko:"산출물" ~en:"Artif")
     | Nav.Knowledge_memory -> Say.resolve lang (Say.make ~ko:"기억" ~en:"Memory")
 
 let compact_runtime_tab_label ~(lang : Say.lang) ~compact tab =

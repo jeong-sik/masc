@@ -61,7 +61,7 @@ type palette_section =
 
 type palette_action =
   | Pal_keymap_action of Keymap.action
-  | Pal_switch_workspace of Nav.workspace
+  | Pal_menu_target of Nav.menu_target
   | Pal_dive_keeper of string
   | Pal_select_company of string
   | Pal_dive_goal of string
@@ -89,6 +89,7 @@ val palette_entries : Model.t -> palette_entry list
 val palette_len : Model.t -> int
 
 val switch_workspace : Model.t -> Nav.workspace -> Model.t * Cmd.t list
+val navigate_menu_target : Model.t -> Nav.menu_target -> Model.t * Cmd.t list
 val open_overlay : Model.t -> Nav.overlay -> Model.t * Cmd.t list
 val open_global_settings :
   ?search_query:string -> Model.t -> Model.t * Cmd.t list

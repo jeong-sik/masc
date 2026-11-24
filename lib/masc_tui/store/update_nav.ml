@@ -363,7 +363,7 @@ type palette_section =
 
 type palette_action =
   | Pal_keymap_action of Keymap.action
-  | Pal_switch_workspace of Nav.workspace
+  | Pal_menu_target of Nav.menu_target
   | Pal_dive_keeper of string
   | Pal_select_company of string
   | Pal_dive_goal of string
@@ -587,6 +587,42 @@ let select_settings_tab (m : Model.t) tab =
   let nav = { m.nav with overlay = Some (Nav.Settings tab) } in
   let next = { m with nav; config } in
   (next, View_fetches.fetches_for_current_view next)
+
+let navigate_menu_target (m : Model.t) (target : Nav.menu_target) =
+  match target with
+  | Nav.Menu_pulse -> switch_workspace m Nav.Pulse
+  | Nav.Menu_work tab ->
+      let work =
+        if Nav.equal_work_tab m.work.active_tab tab then m.work
+        else Work_store.set_tab tab m.work
+      in
+      switch_workspace { m with work } Nav.Work
+  | Nav.Menu_knowledge tab ->
+      let knowledge =
+        if Nav.equal_knowledge_tab m.knowledge.active_tab tab then m.knowledge
+        else Knowledge_store.set_tab tab m.knowledge
+      in
+      switch_workspace { m with knowledge } Nav.Knowledge
+  | Nav.Menu_keepers -> switch_workspace m Nav.Keepers
+  | Nav.Menu_runtime tab ->
+      let runtime =
+        if Nav.equal_runtime_tab m.runtime.active_tab tab then m.runtime
+        else Runtime_store.set_tab tab m.runtime
+      in
+      switch_workspace { m with runtime } Nav.Runtime
+  | Nav.Menu_infra tab ->
+      let infra =
+        if Nav.equal_infra_tab m.infra.active_tab tab then m.infra
+        else Infra_store.set_tab tab m.infra
+      in
+      switch_workspace { m with infra } Nav.Infra
+  | Nav.Menu_settings -> open_global_settings m
+  | Nav.Menu_incidents ->
+      let incidents = Incidents.mark_all_read m.incidents in
+      open_overlay { m with incidents } Nav.Incidents
+  | Nav.Menu_queue_context ->
+      open_overlay m (Nav.Queue_context Nav.Drawer_queue)
+  | Nav.Menu_help -> open_overlay m Nav.Help
 
 let open_inline_modal (m : Model.t) kind =
   let modal = Model.inline_modal_for kind in
@@ -989,26 +1025,41 @@ let palette_entries (m : Model.t) : palette_entry list =
            })
   in
   let ws_entries =
-    Nav.all_workspaces
-    |> List.filter_map (fun ws ->
-           let lbl = Say.resolve lang (Nav.workspace_label ws) in
-           let idx = Nav.workspace_index ws in
-           let search_s = Printf.sprintf "%d %s" idx lbl in
+    Nav.all_menu_items
+    |> List.filter_map (fun (it : Nav.menu_item) ->
+           let lbl = Say.resolve lang it.label in
+           let sec_lbl = Say.resolve lang (Nav.menu_section_label it.section) in
+           let sec_en = Say.resolve Say.Lang_en (Nav.menu_section_label it.section) in
+           let sec_ko = Say.resolve Say.Lang_ko (Nav.menu_section_label it.section) in
+           let lbl_en = Say.resolve Say.Lang_en it.label in
+           let lbl_ko = Say.resolve Say.Lang_ko it.label in
+           let sc_s =
+             match it.shortcut with
+             | Some s -> s
+             | None ->
+                 Option.value (Nav.menu_section_shortcut it.section) ~default:""
+           in
+           let search_s =
+             Printf.sprintf "%s %s %s %s %s" sc_s sec_ko sec_en lbl_ko lbl_en
+           in
            match fuzzy_opt search_s with
            | None -> None
            | Some _ ->
+               let badge =
+                 match it.shortcut with
+                 | Some s -> Printf.sprintf "[%s]" s
+                 | None -> "→"
+               in
                Some
                  {
                    section = Pal_sec_workspaces;
-                   badge = Printf.sprintf "[%d]" idx;
+                   badge;
                    title = lbl;
-                   meta =
-                     Say.resolve lang
-                       (Say.make ~ko:"워크스페이스" ~en:"Workspace");
+                   meta = sec_lbl;
                    tone = Some Theme.Status_ok;
-                   action = Pal_switch_workspace ws;
+                   action = Pal_menu_target it.target;
                  })
-    |> take_n (if String.equal q "" then 3 else 6)
+    |> take_n (if String.equal q "" then 6 else 12)
   in
   let keeper_entries =
     Fleet_store.filtered_keepers { m.fleet with filter_query = "" }
@@ -1941,18 +1992,16 @@ let enter_plan (m : Model.t) : enter_plan =
               match Knowledge_store.selected_post m.knowledge with
               | Some p -> Enter_push (Nav.Dive_knowledge (Nav.Thread_dive p.id))
               | None -> Enter_noop)
-          | Nav.Knowledge_wiki_artifacts -> (
-              match m.knowledge.wiki_artifacts_submode with
-              | `Wiki -> (
-                  match Knowledge_store.selected_wiki_page m.knowledge with
-                  | Some p ->
-                      Enter_push (Nav.Dive_knowledge (Nav.Wiki_dive p.slug))
-                  | None -> Enter_noop)
-              | `Artifacts -> (
-                  match Knowledge_store.selected_artifact m.knowledge with
-                  | Some a ->
-                      Enter_push (Nav.Dive_knowledge (Nav.Artifact_dive a.id))
-                  | None -> Enter_noop))
+          | Nav.Knowledge_wiki -> (
+              match Knowledge_store.selected_wiki_page m.knowledge with
+              | Some p ->
+                  Enter_push (Nav.Dive_knowledge (Nav.Wiki_dive p.slug))
+              | None -> Enter_noop)
+          | Nav.Knowledge_artifacts -> (
+              match Knowledge_store.selected_artifact m.knowledge with
+              | Some a ->
+                  Enter_push (Nav.Dive_knowledge (Nav.Artifact_dive a.id))
+              | None -> Enter_noop)
           | Nav.Knowledge_memory -> (
               let diff_plan () =
                 let rev_bounds =
@@ -3462,38 +3511,35 @@ let knowledge_detail_max_scroll (m : Model.t) =
           in
           let md_h = max 0 (rem - comment_rows) in
           markdown_max_scroll ~theme ~width:content.w ~height:md_h p.body)
-  | Nav.Knowledge_wiki_artifacts -> (
-      match k.wiki_artifacts_submode with
-      | `Wiki ->
-          let right_rect =
-            if m.nav.zoomed then body_after_bar
-            else
-              snd
-                (Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
-                   ~left_ratio:0.38 ~top_ratio:0.48 bp body_after_bar)
+  | Nav.Knowledge_wiki ->
+      let right_rect =
+        if m.nav.zoomed then body_after_bar
+        else
+          snd
+            (Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
+               ~left_ratio:0.38 ~top_ratio:0.48 bp body_after_bar)
+      in
+      wiki_preview_max_scroll ~bp ~theme ~rect:right_rect ~target_slug:None k
+  | Nav.Knowledge_artifacts -> (
+      match Knowledge_store.selected_artifact k with
+      | None -> 0
+      | Some _ ->
+          let _, right_rect =
+            Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
+              ~left_ratio:0.56 ~top_ratio:0.54 bp body_after_bar
           in
-          wiki_preview_max_scroll ~bp ~theme ~rect:right_rect ~target_slug:None
-            k
-      | `Artifacts -> (
-          match Knowledge_store.selected_artifact k with
-          | None -> 0
-          | Some _ ->
-              let _, right_rect =
-                Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
-                  ~left_ratio:0.56 ~top_ratio:0.54 bp body_after_bar
-              in
-              let inner = ui_card_inner right_rect in
-              let band_h = if inner.h >= 7 then 2 else 1 in
-              let content =
-                Rect.make ~x:inner.x ~y:(inner.y + band_h) ~w:inner.w
-                  ~h:(max 0 (inner.h - band_h))
-                |> ui_pad_content ~bp
+          let inner = ui_card_inner right_rect in
+          let band_h = if inner.h >= 7 then 2 else 1 in
+          let content =
+            Rect.make ~x:inner.x ~y:(inner.y + band_h) ~w:inner.w
+              ~h:(max 0 (inner.h - band_h))
+            |> ui_pad_content ~bp
               in
               let content_h = max 1 content.h in
               (* ID, SHA-256, Author, Created and the viewer link, as
                  Screen_knowledge draws them. *)
               let total_rows = 5 in
-              max 0 (total_rows - content_h)))
+              max 0 (total_rows - content_h))
   | Nav.Knowledge_memory ->
       let right_rect =
         if m.nav.zoomed then body_after_bar
@@ -5394,24 +5440,20 @@ let apply_move (m : Model.t) dir =
                     in
                     let next = { m with knowledge } in
                     let nav_cmds =
-                      match
-                        knowledge.active_tab
-                      , knowledge.wiki_artifacts_submode
-                      , eff_pane
-                      with
-                      | Nav.Knowledge_wiki_artifacts, `Wiki, 0 ->
+                      match knowledge.active_tab, eff_pane with
+                      | Nav.Knowledge_wiki, 0 ->
                           View_fetches.selected_wiki_page_fetch next
-                      | Nav.Knowledge_memory, _, 0 ->
+                      | Nav.Knowledge_memory, 0 ->
                           if
                             not
                               (Option.equal String.equal prev_mem_keeper
                                  knowledge.memory_diff_keeper)
                           then View_fetches.fetches_for_current_view next
                           else []
-                      | Nav.Knowledge_wiki_artifacts, `Wiki, _
-                      | Nav.Knowledge_wiki_artifacts, `Artifacts, _
-                      | Nav.Knowledge_board, _, _
-                      | Nav.Knowledge_memory, _, _ ->
+                      | Nav.Knowledge_wiki, _
+                      | Nav.Knowledge_artifacts, _
+                      | Nav.Knowledge_board, _
+                      | Nav.Knowledge_memory, _ ->
                           []
                     in
                     (next, nav_cmds)

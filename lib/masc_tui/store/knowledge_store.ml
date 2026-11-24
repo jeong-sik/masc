@@ -141,7 +141,6 @@ type t = {
   expanded_succession_chains : String_set.t;
   active_thread :
     (Wire_knowledge.board_post * Wire_knowledge.board_comment list) Observed.t;
-  wiki_artifacts_submode : [ `Wiki | `Artifacts ];
   wiki_index : Wire_knowledge.wiki_index Observed.t;
   wiki_pages : Wire_knowledge.wiki_page_detail Observed.t String_map.t;
   wiki_log : Wire_knowledge.wiki_log_response Observed.t;
@@ -187,7 +186,6 @@ let empty =
     board_hearth = None;
     expanded_succession_chains = String_set.empty;
     active_thread = Observed.absent;
-    wiki_artifacts_submode = `Wiki;
     wiki_index = Observed.unreported;
     wiki_pages = String_map.empty;
     wiki_log = Observed.unreported;
@@ -492,23 +490,21 @@ let visual_row_for_selection t ~selected_index =
             else walk (vis_row + 1) (item_idx + 1) rest
       in
       walk 0 0 groups
-  | Nav.Knowledge_wiki_artifacts -> (
-      match t.wiki_artifacts_submode with
-      | `Wiki ->
-          let clusters = cluster_wiki_pages (wiki_pages_filtered t) in
-          let rec walk vis_row item_idx = function
-            | [] -> (selected_index, selected_index)
-            | (_, ps) :: rest ->
-                let n = List.length ps in
-                if selected_index < item_idx + n then
-                  let offset = selected_index - item_idx in
-                  let row = vis_row + 1 + offset in
-                  ((if offset = 0 then vis_row else row), row)
-                else walk (vis_row + 1 + n) (item_idx + n) rest
-          in
-          walk 0 0 clusters
-      | `Artifacts -> (selected_index, selected_index))
-  | Nav.Knowledge_memory -> (selected_index, selected_index)
+  | Nav.Knowledge_wiki ->
+      let clusters = cluster_wiki_pages (wiki_pages_filtered t) in
+      let rec walk vis_row item_idx = function
+        | [] -> (selected_index, selected_index)
+        | (_, ps) :: rest ->
+            let n = List.length ps in
+            if selected_index < item_idx + n then
+              let offset = selected_index - item_idx in
+              let row = vis_row + 1 + offset in
+              ((if offset = 0 then vis_row else row), row)
+            else walk (vis_row + 1 + n) (item_idx + n) rest
+      in
+      walk 0 0 clusters
+  | Nav.Knowledge_artifacts | Nav.Knowledge_memory ->
+      (selected_index, selected_index)
 
 let selected_post t =
   let ps = board_display_posts t in
@@ -575,18 +571,6 @@ let cycle_tab dir t =
     | Keymap.Prev -> Nav.prev_knowledge_tab t.active_tab
   in
   set_tab next_tab t
-
-let toggle_wiki_artifacts_submode t =
-  let wiki_artifacts_submode =
-    match t.wiki_artifacts_submode with `Wiki -> `Artifacts | `Artifacts -> `Wiki
-  in
-  {
-    t with
-    wiki_artifacts_submode;
-    selected_index = 0;
-    scroll_offset = 0;
-    detail_scroll_offset = 0;
-  }
 
 let toggle_signal_only t =
   {
@@ -1264,11 +1248,7 @@ let apply_thread ~observed_at thread t =
   { t with active_thread = Observed.value ~observed_at thread }
 
 let apply_wiki_index ~observed_at idx t =
-  let on_wiki =
-    Nav.equal_knowledge_tab t.active_tab Nav.Knowledge_wiki_artifacts
-    &&
-    match t.wiki_artifacts_submode with `Wiki -> true | `Artifacts -> false
-  in
+  let on_wiki = Nav.equal_knowledge_tab t.active_tab Nav.Knowledge_wiki in
   let prev_slug =
     if on_wiki then
       Option.map
@@ -1872,15 +1852,13 @@ let reset_detail_scroll t = { t with detail_scroll_offset = 0 }
 let active_list_len t =
   match t.active_tab with
   | Nav.Knowledge_board -> List.length (board_display_posts t)
-  | Nav.Knowledge_wiki_artifacts -> (
-      match t.wiki_artifacts_submode with
-      | `Wiki -> List.length (wiki_display_pages t)
-      | `Artifacts -> List.length (artifacts_filtered t))
+  | Nav.Knowledge_wiki -> List.length (wiki_display_pages t)
+  | Nav.Knowledge_artifacts -> List.length (artifacts_filtered t)
   | Nav.Knowledge_memory -> List.length (memory_left_rows t)
 
 let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t =
   match t.active_tab with
-  | Nav.Knowledge_board | Nav.Knowledge_wiki_artifacts ->
+  | Nav.Knowledge_board | Nav.Knowledge_wiki | Nav.Knowledge_artifacts ->
       if pane_index = 1 then
         let max_scroll =
           match max_detail_scroll with
@@ -1897,26 +1875,23 @@ let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t 
                   | Some p ->
                       max 0 (List.length (String.split_on_char '\n' p.body) - vis)
                   | None -> 0)
-              | Nav.Knowledge_wiki_artifacts -> (
-                  match t.wiki_artifacts_submode with
-                  | `Wiki -> (
-                      let body_opt =
-                        Option.bind (selected_wiki_page t)
-                          (fun (s : Wire_knowledge.wiki_page_summary) ->
-                            Option.map
-                              (fun (p : Wire_knowledge.wiki_page_detail) ->
-                                p.body_markdown)
-                              (Observed.to_option
-                                 (wiki_page_for ~slug:s.slug t)))
-                      in
-                      match body_opt with
-                      | Some body ->
-                          max 0 (List.length (String.split_on_char '\n' body) - vis)
-                      | None -> 0)
-                  | `Artifacts -> (
-                      match selected_artifact t with
-                      | Some _ -> max 0 (12 - vis)
-                      | None -> 0))
+              | Nav.Knowledge_wiki -> (
+                  let body_opt =
+                    Option.bind (selected_wiki_page t)
+                      (fun (s : Wire_knowledge.wiki_page_summary) ->
+                        Option.map
+                          (fun (p : Wire_knowledge.wiki_page_detail) ->
+                            p.body_markdown)
+                          (Observed.to_option (wiki_page_for ~slug:s.slug t)))
+                  in
+                  match body_opt with
+                  | Some body ->
+                      max 0 (List.length (String.split_on_char '\n' body) - vis)
+                  | None -> 0)
+              | Nav.Knowledge_artifacts -> (
+                  match selected_artifact t with
+                  | Some _ -> max 0 (12 - vis)
+                  | None -> 0)
               | Nav.Knowledge_memory -> 0)
         in
         let detail_scroll_offset =

@@ -38,7 +38,7 @@ let palette_section_header ~lang = function
   | Update_nav.Pal_sec_commands ->
       Say.resolve lang (Say.make ~ko:"명령" ~en:"Commands")
   | Update_nav.Pal_sec_workspaces ->
-      Say.resolve lang (Say.make ~ko:"워크스페이스" ~en:"Workspaces")
+      Say.resolve lang (Say.make ~ko:"화면 · 메뉴" ~en:"Screens & Menus")
   | Update_nav.Pal_sec_keepers ->
       Say.resolve lang (Say.make ~ko:"키퍼" ~en:"Keepers")
   | Update_nav.Pal_sec_companies ->

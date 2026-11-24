@@ -417,11 +417,9 @@ let can_zoom_current_view m =
     | Nav.Keepers -> Option.is_some (Fleet_store.selected_keeper_summary m.fleet)
     | Nav.Knowledge -> (
         match m.knowledge.active_tab with
-        | Nav.Knowledge_board | Nav.Knowledge_memory -> true
-        | Nav.Knowledge_wiki_artifacts -> (
-            match m.knowledge.wiki_artifacts_submode with
-            | `Wiki -> true
-            | `Artifacts -> false))
+        | Nav.Knowledge_board | Nav.Knowledge_wiki | Nav.Knowledge_memory ->
+            true
+        | Nav.Knowledge_artifacts -> false)
     | Nav.Pulse | Nav.Work | Nav.Runtime | Nav.Infra -> false
 
 let focusable_pane_count m =
@@ -632,16 +630,14 @@ let active_focus_label m =
                     if m.nav.pane_index = 1 then
                       pane_prefix ~ko:"타래 보기" ~en:"Thread"
                     else pane_prefix ~ko:"보드" ~en:"Board"
-                | Nav.Knowledge_wiki_artifacts -> (
-                    match m.knowledge.wiki_artifacts_submode with
-                    | `Wiki ->
-                        if m.nav.pane_index = 1 then
-                          pane_prefix ~ko:"위키 보기" ~en:"Wiki View"
-                        else pane_prefix ~ko:"위키 트리" ~en:"Wiki Tree"
-                    | `Artifacts ->
-                        if m.nav.pane_index = 1 then
-                          pane_prefix ~ko:"산출물 상세" ~en:"Artifact"
-                        else pane_prefix ~ko:"산출물 목록" ~en:"Artifacts")
+                | Nav.Knowledge_wiki ->
+                    if m.nav.pane_index = 1 then
+                      pane_prefix ~ko:"위키 보기" ~en:"Wiki View"
+                    else pane_prefix ~ko:"위키 트리" ~en:"Wiki Tree"
+                | Nav.Knowledge_artifacts ->
+                    if m.nav.pane_index = 1 then
+                      pane_prefix ~ko:"산출물 상세" ~en:"Artifact"
+                    else pane_prefix ~ko:"산출물 목록" ~en:"Artifacts"
                 | Nav.Knowledge_memory ->
                     if m.nav.pane_index = 1 then
                       pane_prefix ~ko:"기억 탐색" ~en:"Explorer"

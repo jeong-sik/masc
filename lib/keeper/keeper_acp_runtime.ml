@@ -1027,6 +1027,7 @@ let make_stream_projection
   let native_tool_indices : (string, int * Runtime_native_tools.observation) Hashtbl.t =
     Hashtbl.create 8
   in
+  let closed_native_tool_ids : (string, unit) Hashtbl.t = Hashtbl.create 8 in
   let anonymous_native_blocks : (int * Runtime_native_tools.observation) list ref = ref [] in
   let emit_queue : Agent_core.Types.sse_event Queue.t = Queue.create () in
   let emit_draining = ref false in
@@ -1156,6 +1157,62 @@ let make_stream_projection
   let record_tool_call_json entry =
     Stdlib.Mutex.protect tool_calls_mu (fun () -> tool_calls_rev := entry :: !tool_calls_rev)
   in
+  let record_native_tool_started ~tool_call_id ~title ~name ~raw_input =
+    let observation = native_observation_of_acp ~tool_call_id ~title ~name in
+    let is_new, should_drain =
+      Stdlib.Mutex.protect stream_mu (fun () ->
+        if !finished
+        then false, false
+        else if tool_call_id <> ""
+                && (Hashtbl.mem native_tool_indices tool_call_id
+                    || Hashtbl.mem closed_native_tool_ids tool_call_id)
+        then false, false
+        else (
+          let prefix =
+            ensure_message_started_locked ()
+            @ close_open_text_locked ()
+            @ close_open_thought_locked ()
+          in
+          let idx = alloc_index_locked () in
+          if tool_call_id <> ""
+          then Hashtbl.replace native_tool_indices tool_call_id (idx, observation)
+          else anonymous_native_blocks := (idx, observation) :: !anonymous_native_blocks;
+          let drain =
+            enqueue_events_locked
+              (prefix
+               @ [ Agent_core.Types.ContentBlockStart
+                     { index = idx
+                     ; content_type = Runtime_native_tools.stream_content_type
+                     ; tool_id = Runtime_native_tools.call_id observation
+                     ; tool_name = observation.tool_name
+                     }
+                 ])
+          in
+          true, drain))
+    in
+    if is_new
+    then (
+      record_tool_call_json
+        (`Assoc
+            [ "call_id", `String tool_call_id
+            ; "tool_name", `String (Option.value observation.tool_name ~default:title)
+            ; "origin", `String "native"
+            ; "arguments", Option.value raw_input ~default:(`Assoc [])
+            ]);
+      Option.iter
+        (fun observe ->
+           Runtime_native_tools.observe_exact_action
+             ~official_turn:turn_count
+             ~observe
+             observation)
+        on_native_action;
+      Host.record_raw_native_tool
+        ~keeper_name
+        ~raw_trace_run
+        ~phase:`Started
+        observation);
+    drain_events_if_owner should_drain
+  in
   let on_acp_event = function
     | Acp.Text_delta delta ->
       observe_activity ();
@@ -1264,60 +1321,33 @@ let make_stream_projection
       then observe_effect_attempted ();
       (match identity with
        | Acp.Native_tool { name; _ } ->
-         let observation = native_observation_of_acp ~tool_call_id ~title ~name in
-         let is_new, should_drain =
-           Stdlib.Mutex.protect stream_mu (fun () ->
-             if !finished
-             then false, false
-             else if tool_call_id <> "" && Hashtbl.mem native_tool_indices tool_call_id
-             then false, false
-             else (
-               let prefix =
-                 ensure_message_started_locked ()
-                 @ close_open_text_locked ()
-                 @ close_open_thought_locked ()
-               in
-               let idx = alloc_index_locked () in
-               if tool_call_id <> ""
-               then Hashtbl.replace native_tool_indices tool_call_id (idx, observation)
-               else anonymous_native_blocks := (idx, observation) :: !anonymous_native_blocks;
-               let drain =
-                 enqueue_events_locked
-                   (prefix
-                    @ [ Agent_core.Types.ContentBlockStart
-                          { index = idx
-                          ; content_type = Runtime_native_tools.stream_content_type
-                          ; tool_id = Runtime_native_tools.call_id observation
-                          ; tool_name = observation.tool_name
-                          }
-                      ])
-               in
-               true, drain))
-         in
-         if is_new
-         then (
-           record_tool_call_json
-             (`Assoc
-                 [ "call_id", `String tool_call_id
-                 ; "tool_name", `String (Option.value observation.tool_name ~default:title)
-                 ; "origin", `String "native"
-                 ; "arguments", Option.value raw_input ~default:(`Assoc [])
-                 ]);
-           Option.iter
-             (fun observe ->
-                Runtime_native_tools.observe_exact_action
-                  ~official_turn:turn_count
-                  ~observe
-                  observation)
-             on_native_action;
-           Host.record_raw_native_tool
-             ~keeper_name
-             ~raw_trace_run
-             ~phase:`Started
-             observation);
-         drain_events_if_owner should_drain
+         record_native_tool_started ~tool_call_id ~title ~name ~raw_input
        | Acp.Mcp_tool _ | Acp.Managed_mcp_schema_read _ -> ())
-    | Acp.Tool_call_updated { tool_call_id; title = _; status; raw_output = _ } ->
+    | Acp.Tool_call_updated
+        { tool_call_id; title; kind = _; status; raw_input; raw_output = _; identity } ->
+      observe_activity ();
+      (match identity with
+       | Some id ->
+         if should_fence_tool_call_started
+              ~native_posture
+              ~mcp_server_name
+              ~allowed_tool_names
+              id
+         then observe_effect_attempted ()
+       | None ->
+         (* Uncorrelated update (missing toolCallId, unannounced call, or
+            tracking-table eviction) fails closed on the same-turn retry fence. *)
+         observe_effect_attempted ());
+      (match identity with
+       | Some (Acp.Native_tool { name; _ }) ->
+         let fallback_title =
+           match title, name with
+           | Some t, _ when String.trim t <> "" -> t
+           | (Some _ | None), Some n when String.trim n <> "" -> n
+           | (Some _ | None), (Some _ | None) -> "tool_call"
+         in
+         record_native_tool_started ~tool_call_id ~title:fallback_title ~name ~raw_input
+       | Some (Acp.Mcp_tool _ | Acp.Managed_mcp_schema_read _) | None -> ());
       (match status with
        | None -> ()
        | Some st ->
@@ -1335,6 +1365,7 @@ let make_stream_projection
                     | None -> None, false
                     | Some (idx, observation) ->
                       Hashtbl.remove native_tool_indices tool_call_id;
+                      Hashtbl.replace closed_native_tool_ids tool_call_id ();
                       let drain =
                         enqueue_events_locked [ Agent_core.Types.ContentBlockStop { index = idx } ]
                       in
@@ -3411,6 +3442,7 @@ module For_testing = struct
   let compact_once_for_overflow = compact_once_for_overflow
 
   let project_stream_for_testing
+        ?on_effect_attempted
         ?on_native_action
         ?on_native_tool_completion
         ?on_usage_report
@@ -3444,7 +3476,7 @@ module For_testing = struct
         ~native_posture
         ~allowed_tool_names
         ~receipts
-        ~observe_effect_attempted:ignore
+        ~observe_effect_attempted:(Option.value on_effect_attempted ~default:ignore)
         ~observe_activity:ignore
         ~on_session_meta_updated:ignore
         ~on_native_action

@@ -186,7 +186,8 @@ module For_testing : sig
     -> unit
 
   val project_stream_for_testing
-    :  ?on_native_action:
+    :  ?on_effect_attempted:(unit -> unit)
+    -> ?on_native_action:
          (official_turn:int
           -> identity:Runtime_native_tools.action_identity
           -> tool_name:string

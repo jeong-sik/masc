@@ -4124,8 +4124,11 @@ let test_layer4_stream_projection_sse_framing_native_tools_and_zero_usage () =
     (Runtime_acp_client.Tool_call_updated
        { tool_call_id = "nat-call-1"
        ; title = None
+       ; kind = None
        ; status = Some Runtime_acp_client.Tool_completed
+       ; raw_input = None
        ; raw_output = None
+       ; identity = None
        });
   let final_api_usage : Agent_core.Types.api_usage =
     { input_tokens = 1500
@@ -4176,6 +4179,494 @@ let test_layer4_stream_projection_sse_framing_native_tools_and_zero_usage () =
   let open Yojson.Safe.Util in
   check int "observed_tool_calls records both MCP and native tools" 2
     (List.length (observed_tool_calls () |> to_list))
+;;
+
+let test_tool_call_update_escalation_re_evaluates_effect_fence () =
+  (* 1. End-to-end mock ACP server: tool_call_update kind escalation produces
+        merged kind + re-classified identity on Tool_call_updated, while
+        pinned MASC MCP status-only updates preserve their MASC MCP identity. *)
+  let tmp = Filename.temp_dir ~perms:0o700 "acp-update-fence-" "" in
+  let mock_script = Filename.concat tmp "mock_update_fence.py" in
+  let script_body =
+    {|#!/usr/bin/env python3
+import json, sys
+
+def send(obj):
+    sys.stdout.write(json.dumps(obj) + "\n")
+    sys.stdout.flush()
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    msg = json.loads(line)
+    method = msg.get("method")
+    mid = msg.get("id")
+    if method == "initialize":
+        send({"jsonrpc": "2.0", "id": mid, "result": {
+            "protocolVersion": 1,
+            "agentCapabilities": {"promptCapabilities": {"image": False}}
+        }})
+    elif method == "session/new":
+        send({"jsonrpc": "2.0", "id": mid, "result": {"sessionId": "sess-upd"}})
+    elif method == "session/prompt":
+        # A. Native read starts harmlessly, then escalates to execute on tool_call_update
+        send({"jsonrpc": "2.0", "method": "session/update", "params": {
+            "sessionId": "sess-upd",
+            "update": {
+                "sessionUpdate": "tool_call",
+                "toolCallId": "tc-esc",
+                "title": "read_file",
+                "kind": "read",
+                "status": "pending"
+            }
+        }})
+        send({"jsonrpc": "2.0", "method": "session/update", "params": {
+            "sessionId": "sess-upd",
+            "update": {
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "tc-esc",
+                "kind": "execute",
+                "status": "in_progress"
+            }
+        }})
+        # B. Pinned Kimi MCP call enriched with rawInput, repeated identical rawInput, then status-only completion
+        send({"jsonrpc": "2.0", "method": "session/update", "params": {
+            "sessionId": "sess-upd",
+            "update": {
+                "sessionUpdate": "tool_call",
+                "toolCallId": "tc-mcp",
+                "title": "mcp__masc__masc_probe_ping",
+                "kind": "other",
+                "status": "pending"
+            }
+        }})
+        send({"jsonrpc": "2.0", "method": "session/update", "params": {
+            "sessionId": "sess-upd",
+            "update": {
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "tc-mcp",
+                "title": "mcp__masc__masc_probe_ping",
+                "kind": "other",
+                "status": "in_progress",
+                "rawInput": {"a": 1, "nonce": "n1"}
+            }
+        }})
+        send({"jsonrpc": "2.0", "method": "session/update", "params": {
+            "sessionId": "sess-upd",
+            "update": {
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "tc-mcp",
+                "status": "completed",
+                "rawInput": {"nonce": "n1", "a": 1},
+                "rawOutput": "pong"
+            }
+        }})
+        # C. Conflicting rawInput mutation on same toolCallId MUST escalate to conflict:identity
+        send({"jsonrpc": "2.0", "method": "session/update", "params": {
+            "sessionId": "sess-upd",
+            "update": {
+                "sessionUpdate": "tool_call",
+                "toolCallId": "tc-raw-esc",
+                "title": "mcp__masc__masc_probe_ping",
+                "kind": "other",
+                "rawInput": {"nonce": "safe"},
+                "status": "pending"
+            }
+        }})
+        send({"jsonrpc": "2.0", "method": "session/update", "params": {
+            "sessionId": "sess-upd",
+            "update": {
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "tc-raw-esc",
+                "rawInput": {"nonce": "tampered"},
+                "status": "in_progress"
+            }
+        }})
+        # D. Conflicting MCP identifier title mutation (no structured name/_meta) MUST escalate to conflict:identity
+        send({"jsonrpc": "2.0", "method": "session/update", "params": {
+            "sessionId": "sess-upd",
+            "update": {
+                "sessionUpdate": "tool_call",
+                "toolCallId": "tc-title-esc",
+                "title": "mcp__masc__masc_probe_ping",
+                "kind": "other",
+                "status": "pending"
+            }
+        }})
+        send({"jsonrpc": "2.0", "method": "session/update", "params": {
+            "sessionId": "sess-upd",
+            "update": {
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "tc-title-esc",
+                "title": "mcp__evil__rm_rf",
+                "status": "in_progress"
+            }
+        }})
+        # E. Live-recorded kimi acp 2.7.2 native Read progress title ("Read" -> "Reading hello.txt") MUST NOT false-conflict
+        send({"jsonrpc": "2.0", "method": "session/update", "params": {
+            "sessionId": "sess-upd",
+            "update": {
+                "sessionUpdate": "tool_call",
+                "toolCallId": "tc-kimi-read",
+                "title": "Read",
+                "kind": "read",
+                "status": "pending"
+            }
+        }})
+        send({"jsonrpc": "2.0", "method": "session/update", "params": {
+            "sessionId": "sess-upd",
+            "update": {
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "tc-kimi-read",
+                "title": "Reading hello.txt",
+                "kind": "read",
+                "rawInput": {"path": "hello.txt"},
+                "status": "in_progress"
+            }
+        }})
+        # F. Antigravity mcp(...) wrapper with kind="execute" title mutation MUST escalate to conflict:identity
+        send({"jsonrpc": "2.0", "method": "session/update", "params": {
+            "sessionId": "sess-upd",
+            "update": {
+                "sessionUpdate": "tool_call",
+                "toolCallId": "tc-exec-wrap-esc",
+                "title": "mcp(masc/masc_probe_ping)",
+                "kind": "execute",
+                "status": "pending"
+            }
+        }})
+        send({"jsonrpc": "2.0", "method": "session/update", "params": {
+            "sessionId": "sess-upd",
+            "update": {
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "tc-exec-wrap-esc",
+                "title": "mcp(evil/rm_rf)",
+                "kind": "execute",
+                "status": "in_progress"
+            }
+        }})
+        # G. Late structured name injection differing from identifier-like prior title MUST escalate to conflict:identity
+        send({"jsonrpc": "2.0", "method": "session/update", "params": {
+            "sessionId": "sess-upd",
+            "update": {
+                "sessionUpdate": "tool_call",
+                "toolCallId": "tc-name-inject",
+                "title": "read_file",
+                "kind": "other",
+                "status": "pending"
+            }
+        }})
+        send({"jsonrpc": "2.0", "method": "session/update", "params": {
+            "sessionId": "sess-upd",
+            "update": {
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "tc-name-inject",
+                "name": "mcp__masc__masc_probe_ping",
+                "status": "in_progress"
+            }
+        }})
+        send({"jsonrpc": "2.0", "id": mid, "result": {"stopReason": "end_turn"}})
+|}
+  in
+  Out_channel.with_open_text mock_script (fun oc -> output_string oc script_body);
+  let updates_rev = ref [] in
+  Fun.protect ~finally:(fun () -> rm_rf tmp) (fun () ->
+    Eio_main.run (fun env ->
+      let clock = Eio.Stdenv.clock env in
+      let proc_mgr =
+        Runtime_acp_client.foreground_process_mgr ~clock ~grace_seconds:1.0 ()
+      in
+      let cfg =
+        { (Runtime_acp_client.default_config ~driver:Kimi_code ~cwd:tmp) with
+          cli_path = "python3"
+        ; args = [ mock_script ]
+        }
+      in
+      Eio.Switch.run (fun sw ->
+        let client =
+          match Runtime_acp_client.start ~sw ~proc_mgr ~clock ~config:cfg () with
+          | Ok c -> c
+          | Error err -> failf "start failed: %s" (Runtime_acp_client.error_to_string err)
+        in
+        Fun.protect ~finally:(fun () -> Runtime_acp_client.close client) (fun () ->
+          let sess =
+            match Runtime_acp_client.new_session client ~cwd:tmp () with
+            | Ok s -> s
+            | Error err -> failf "new_session failed: %s" (Runtime_acp_client.error_to_string err)
+          in
+          let policy =
+            Runtime_acp_client.Allow_read_and_masc_mcp
+              { mcp_server_name = "masc"
+              ; allowed_tool_names = [ "masc_probe_ping" ]
+              }
+          in
+          match
+            Runtime_acp_client.prompt
+              client
+              ~session_id:sess.session_id
+              ~blocks:[ Runtime_acp_client.Text_block "check update fence" ]
+              ~permission_policy:policy
+              ~on_event:(function
+                | Runtime_acp_client.Tool_call_updated { tool_call_id; kind; identity; _ } ->
+                  updates_rev := (tool_call_id, kind, identity) :: !updates_rev
+                | _ -> ())
+              ()
+          with
+          | Ok _ -> ()
+          | Error err -> failf "prompt failed: %s" (Runtime_acp_client.error_to_string err)))));
+  let updates = List.rev !updates_rev in
+  check int "eight Tool_call_updated events observed" 8 (List.length updates);
+  (match updates with
+   | [ ("tc-esc", esc_kind, esc_id)
+     ; ("tc-mcp", mcp_enrich_kind, mcp_enrich_id)
+     ; ("tc-mcp", mcp_kind, mcp_id)
+     ; ("tc-raw-esc", raw_esc_kind, raw_esc_id)
+     ; ("tc-title-esc", title_esc_kind, title_esc_id)
+     ; ("tc-kimi-read", kimi_read_kind, kimi_read_id)
+     ; ("tc-exec-wrap-esc", exec_wrap_kind, exec_wrap_id)
+     ; ("tc-name-inject", name_inject_kind, name_inject_id)
+     ] ->
+     check bool "escalated update carries conflict:read->execute kind" true
+       (Option.equal
+          Runtime_acp_client.equal_tool_kind
+          (Some (Runtime_acp_client.Tool_unknown "conflict:read->execute"))
+          esc_kind);
+     (match esc_id with
+      | Some (Runtime_acp_client.Native_tool { kind = Some (Runtime_acp_client.Tool_unknown "conflict:read->execute"); _ }) ->
+        ()
+      | _ -> fail "expected Native_tool with conflict:read->execute on escalated Tool_call_updated");
+     check bool "pinned MCP rawInput enrichment preserves Tool_other kind" true
+       (Option.equal
+          Runtime_acp_client.equal_tool_kind
+          (Some Runtime_acp_client.Tool_other)
+          mcp_enrich_kind);
+     (match mcp_enrich_id with
+      | Some
+          (Runtime_acp_client.Mcp_tool
+             { server = Runtime_acp_client.Explicit_server "masc"
+             ; tool_name = "masc_probe_ping"
+             }) -> ()
+      | _ -> fail "expected pinned MASC MCP identity preserved on rawInput enrichment");
+     check bool "pinned MCP key-reordered identical rawInput preserves Tool_other kind" true
+       (Option.equal
+          Runtime_acp_client.equal_tool_kind
+          (Some Runtime_acp_client.Tool_other)
+          mcp_kind);
+     (match mcp_id with
+      | Some
+          (Runtime_acp_client.Mcp_tool
+             { server = Runtime_acp_client.Explicit_server "masc"
+             ; tool_name = "masc_probe_ping"
+             }) -> ()
+      | _ -> fail "expected pinned MASC MCP identity preserved on key-reordered rawInput Tool_call_updated");
+     check bool "conflicting rawInput mutation escalates to conflict:identity" true
+       (Option.equal
+          Runtime_acp_client.equal_tool_kind
+          (Some (Runtime_acp_client.Tool_unknown "conflict:identity"))
+          raw_esc_kind);
+     (match raw_esc_id with
+      | Some (Runtime_acp_client.Native_tool { kind = Some (Runtime_acp_client.Tool_unknown "conflict:identity"); _ }) ->
+        ()
+      | _ -> fail "expected conflicting rawInput update to escalate to Native_tool conflict:identity");
+     check bool "conflicting title mutation escalates to conflict:identity" true
+       (Option.equal
+          Runtime_acp_client.equal_tool_kind
+          (Some (Runtime_acp_client.Tool_unknown "conflict:identity"))
+          title_esc_kind);
+     (match title_esc_id with
+      | Some (Runtime_acp_client.Native_tool { kind = Some (Runtime_acp_client.Tool_unknown "conflict:identity"); _ }) ->
+        ()
+      | _ -> fail "expected conflicting title update to escalate to Native_tool conflict:identity");
+     check bool "live kimi Read -> Reading hello.txt progress title keeps Tool_read" true
+       (Option.equal
+          Runtime_acp_client.equal_tool_kind
+          (Some Runtime_acp_client.Tool_read)
+          kimi_read_kind);
+     (match kimi_read_id with
+      | Some (Runtime_acp_client.Native_tool { kind = Some Runtime_acp_client.Tool_read; _ }) -> ()
+      | _ -> fail "expected live kimi Read progress title to preserve Native_tool Tool_read");
+     check bool "mcp(...) kind=execute title mutation escalates to conflict:identity" true
+       (Option.equal
+          Runtime_acp_client.equal_tool_kind
+          (Some (Runtime_acp_client.Tool_unknown "conflict:identity"))
+          exec_wrap_kind);
+     (match exec_wrap_id with
+      | Some (Runtime_acp_client.Native_tool { kind = Some (Runtime_acp_client.Tool_unknown "conflict:identity"); _ }) ->
+        ()
+      | _ -> fail "expected mcp(...) execute title mutation to escalate to Native_tool conflict:identity");
+     check bool "late structured name injection after identifier title escalates to conflict:identity" true
+       (Option.equal
+          Runtime_acp_client.equal_tool_kind
+          (Some (Runtime_acp_client.Tool_unknown "conflict:identity"))
+          name_inject_kind);
+     (match name_inject_id with
+      | Some (Runtime_acp_client.Native_tool { kind = Some (Runtime_acp_client.Tool_unknown "conflict:identity"); _ }) ->
+        ()
+      | _ -> fail "expected late structured name injection to escalate to Native_tool conflict:identity")
+   | _ -> fail "unexpected Tool_call_updated sequence");
+  (* 2. Keeper stream projection re-evaluates effect fence on Tool_call_updated *)
+  let read_fenced = ref 0 in
+  let on_acp_read, _, _, _, _ =
+    Keeper_acp_runtime.For_testing.project_stream_for_testing
+      ~on_effect_attempted:(fun () -> incr read_fenced)
+      ~driver:Kimi_code
+      ~model:"kimi-code/k3"
+      ~session_id:"sess-read-fence"
+      ~turn_count:1
+      ~native_posture:Runtime_native_tools.Native_read
+      ~allowed_tool_names:[ "masc_probe_ping" ]
+      ()
+  in
+  on_acp_read
+    (Runtime_acp_client.Tool_call_started
+       { tool_call_id = "tc-esc"
+       ; title = "read_file"
+       ; kind = Some Runtime_acp_client.Tool_read
+       ; status = Runtime_acp_client.Tool_pending
+       ; raw_input = None
+       ; identity =
+           Runtime_acp_client.Native_tool
+             { name = Some "read_file"
+             ; kind = Some Runtime_acp_client.Tool_read
+             ; locations = []
+             }
+       });
+  check int "Native_read Tool_read start does not fence" 0 !read_fenced;
+  on_acp_read
+    (Runtime_acp_client.Tool_call_updated
+       { tool_call_id = "tc-esc"
+       ; title = None
+       ; kind = Some (Runtime_acp_client.Tool_unknown "conflict:read->execute")
+       ; status = Some Runtime_acp_client.Tool_in_progress
+       ; raw_input = None
+       ; raw_output = None
+       ; identity =
+           Some
+             (Runtime_acp_client.Native_tool
+                { name = Some "read_file"
+                ; kind = Some (Runtime_acp_client.Tool_unknown "conflict:read->execute")
+                ; locations = []
+                })
+       });
+  check int "Tool_call_updated kind escalation fences same-turn retry" 1 !read_fenced;
+  (* 3. Under Native_none: correlated pinned MASC MCP & managed schema read stay
+        unfenced, while schema-read escalating to Native_tool trips the fence
+        AND records native-tool observation/completion, and uncorrelated
+        identity=None updates fail closed. *)
+  let none_fenced = ref 0 in
+  let escalated_native_actions = ref 0 in
+  let escalated_native_completions = ref 0 in
+  let on_acp_none, _, _, _, observed_none_tools =
+    Keeper_acp_runtime.For_testing.project_stream_for_testing
+      ~on_effect_attempted:(fun () -> incr none_fenced)
+      ~on_native_action:(fun ~official_turn:_ ~identity:_ ~tool_name:_ -> incr escalated_native_actions)
+      ~on_native_tool_completion:(fun ~block_index:_ ~tool_call_id:_ _ -> incr escalated_native_completions)
+      ~driver:Antigravity
+      ~model:"gemini-4-neon-medium"
+      ~session_id:"sess-none-fence"
+      ~turn_count:1
+      ~native_posture:Runtime_native_tools.Native_none
+      ~allowed_tool_names:[ "masc_probe_ping" ]
+      ()
+  in
+  let pinned_mcp_id =
+    Runtime_acp_client.Mcp_tool
+      { server = Runtime_acp_client.Explicit_server "masc"
+      ; tool_name = "masc_probe_ping"
+      }
+  in
+  on_acp_none
+    (Runtime_acp_client.Tool_call_started
+       { tool_call_id = "tc-mcp"
+       ; title = "mcp_masc_masc_probe_ping"
+       ; kind = Some Runtime_acp_client.Tool_other
+       ; status = Runtime_acp_client.Tool_pending
+       ; raw_input = None
+       ; identity = pinned_mcp_id
+       });
+  on_acp_none
+    (Runtime_acp_client.Tool_call_updated
+       { tool_call_id = "tc-mcp"
+       ; title = None
+       ; kind = Some Runtime_acp_client.Tool_other
+       ; status = Some Runtime_acp_client.Tool_completed
+       ; raw_input = None
+       ; raw_output = None
+       ; identity = Some pinned_mcp_id
+       });
+  on_acp_none
+    (Runtime_acp_client.Tool_call_started
+       { tool_call_id = "tc-schema"
+       ; title = "read_file"
+       ; kind = Some Runtime_acp_client.Tool_read
+       ; status = Runtime_acp_client.Tool_pending
+       ; raw_input = None
+       ; identity =
+           Runtime_acp_client.Managed_mcp_schema_read
+             { mcp_server_name = "masc"
+             ; path = "/tmp/gdir/antigravity-cli/mcp/masc/masc_probe_ping.json"
+             }
+       });
+  check int "correlated pinned MCP and managed schema read stay unfenced" 0 !none_fenced;
+  check int "no native action recorded before escalation" 0 !escalated_native_actions;
+  on_acp_none
+    (Runtime_acp_client.Tool_call_updated
+       { tool_call_id = "tc-schema"
+       ; title = None
+       ; kind = Some Runtime_acp_client.Tool_read
+       ; status = Some Runtime_acp_client.Tool_completed
+       ; raw_input = Some (`Assoc [ "path", `String "/etc/passwd" ])
+       ; raw_output = None
+       ; identity =
+           Some
+             (Runtime_acp_client.Native_tool
+                { name = Some "read_file"
+                ; kind = Some Runtime_acp_client.Tool_read
+                ; locations = [ "/tmp/gdir/antigravity-cli/mcp/masc/masc_probe_ping.json"; "/etc/passwd" ]
+                })
+       });
+  check int "schema read downgraded to Native_tool on Tool_call_updated trips fence" 1 !none_fenced;
+  check int "escalated Native_tool records native action" 1 !escalated_native_actions;
+  check int "escalated Native_tool completion closes native block" 1 !escalated_native_completions;
+  (match Yojson.Safe.Util.to_list (observed_none_tools ()) with
+   | [ entry ] ->
+     let open Yojson.Safe.Util in
+     check string "escalated Native_tool audit preserves merged raw_input arguments"
+       "/etc/passwd" (entry |> member "arguments" |> member "path" |> to_string)
+   | entries -> failf "expected 1 observed escalated native tool, got %d" (List.length entries));
+  (* Late duplicate update for an already-closed Native_tool must not reopen a duplicate native action *)
+  on_acp_none
+    (Runtime_acp_client.Tool_call_updated
+       { tool_call_id = "tc-schema"
+       ; title = None
+       ; kind = Some Runtime_acp_client.Tool_read
+       ; status = Some Runtime_acp_client.Tool_completed
+       ; raw_input = Some (`Assoc [ "path", `String "/etc/passwd" ])
+       ; raw_output = None
+       ; identity =
+           Some
+             (Runtime_acp_client.Native_tool
+                { name = Some "read_file"
+                ; kind = Some Runtime_acp_client.Tool_read
+                ; locations = [ "/tmp/gdir/antigravity-cli/mcp/masc/masc_probe_ping.json"; "/etc/passwd" ]
+                })
+       });
+  check int "late duplicate update does not record duplicate native action" 1 !escalated_native_actions;
+  (* Uncorrelated status-only Tool_call_updated (identity = None) fails closed on effect fence *)
+  let fenced_before_uncorrelated = !none_fenced in
+  on_acp_none
+    (Runtime_acp_client.Tool_call_updated
+       { tool_call_id = "tc-unannounced"
+       ; title = None
+       ; kind = None
+       ; status = Some Runtime_acp_client.Tool_completed
+       ; raw_input = None
+       ; raw_output = None
+       ; identity = None
+       });
+  check int "uncorrelated identity=None Tool_call_updated fails closed on effect fence"
+    (fenced_before_uncorrelated + 1) !none_fenced
 ;;
 
 let () =
@@ -4231,6 +4722,8 @@ let () =
             `Quick test_layer4_classify_prompt_error_usage_context_and_process_config_hash
         ; test_case "Layer 4 SSE framing, InputJsonSnapshot, native tool callbacks & zero-usage suppression"
             `Quick test_layer4_stream_projection_sse_framing_native_tools_and_zero_usage
+        ; test_case "Tool_call_updated monotonic escalation re-evaluates effect fence"
+            `Quick test_tool_call_update_escalation_re_evaluates_effect_fence
         ] )
     ; ( "wire"
       , [ test_case "session update & usage parsing" `Quick test_parse_wire_updates_and_usage

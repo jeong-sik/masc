@@ -320,9 +320,18 @@ type stream_event =
   | Tool_call_updated of
       { tool_call_id : string
       ; title : string option
+      ; kind : tool_kind option
       ; status : tool_call_status option
+      ; raw_input : Yojson.Safe.t option
       ; raw_output : Yojson.Safe.t option
+      ; identity : tool_call_identity option
       }
+      (** Incremental [tool_call_update] notification: [title], [status], and
+          [raw_output] reflect the update frame's own delta fields, whereas
+          [kind], [raw_input], and [identity] reflect the monotonically merged
+          [tool_call] + [tool_call_update] wire state ([identity = None] only
+          when neither tracked prior state nor this frame carries identity
+          fields). *)
   | Usage_updated of
       { used : int option
       ; size : int option

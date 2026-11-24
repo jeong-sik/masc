@@ -510,8 +510,11 @@ type stream_event =
   | Tool_call_updated of
       { tool_call_id : string
       ; title : string option
+      ; kind : tool_kind option
       ; status : tool_call_status option
+      ; raw_input : Yojson.Safe.t option
       ; raw_output : Yojson.Safe.t option
+      ; identity : tool_call_identity option
       }
   | Usage_updated of
       { used : int option
@@ -1144,14 +1147,80 @@ let is_non_empty_raw_input = function
   | Some _ -> true
 ;;
 
+let has_ascii_whitespace s =
+  String.exists (function ' ' | '\t' | '\n' | '\r' -> true | _ -> false) s
+;;
+
+let string_opt_conflicts prev inc =
+  match prev, inc with
+  | Some p, Some i -> not (String.equal p i)
+  | Some _, None | None, (Some _ | None) -> false
+;;
+
+let mcp_title_identifier_conflicts prev inc =
+  match prev, inc with
+  | Some p, Some i ->
+    (not (String.equal p i))
+    && (not (has_ascii_whitespace p))
+    && not (has_ascii_whitespace i)
+  | Some _, None | None, (Some _ | None) -> false
+;;
+
+let raw_input_conflicts prev inc =
+  if is_non_empty_raw_input prev && is_non_empty_raw_input inc
+  then (
+    match prev, inc with
+    | Some p, Some i -> not (Yojson.Safe.equal (Yojson.Safe.sort p) (Yojson.Safe.sort i))
+    | (Some _ | None), (Some _ | None) -> false)
+  else false
+;;
+
 (* Monotonic merge: first-observed identity fields (meta_server_name,
    meta_tool_name, name, title, non-empty raw_input) are immutable, while [kind]
    follows {!merge_tool_kind}'s security-restriction lattice so neither a later
    downgrade (e.g. Execute -> Read) nor an initial placeholder (e.g. Other ->
    Execute/Edit) can weaken policy enforcement. Missing fields may still be
-   enriched and locations are unioned. *)
+   enriched and locations are unioned. Any conflicting non-empty structured
+   identity field ([name], [_meta.server_name], [_meta.tool_name], key-order-
+   insensitive [raw_input]), conflicting whitespace-free MCP identifier [title]
+   (under any MCP- or wrapper-eligible kind including [Tool_execute] for
+   Antigravity [mcp(<srv>/<tool>)], while preserving live ACP human-display
+   title progress such as [kimi acp 2.7.2] "Read" -> "Reading hello.txt"), or
+   late introduction of a differing structured name after an identifier-like
+   [title] escalates [kind] to [Tool_unknown "conflict:identity"]. *)
 let merge_tool_call_wire ~(prior : tool_call_wire) ~(incoming : tool_call_wire) : tool_call_wire =
   let keep_first prev inc = match prev with Some _ -> prev | None -> inc in
+  let has_structured_tool_name =
+    Option.is_some prior.meta_tool_name
+    || Option.is_some incoming.meta_tool_name
+    || Option.is_some prior.name
+    || Option.is_some incoming.name
+  in
+  let merged_kind = merge_tool_kind ~prior:prior.kind ~incoming:incoming.kind in
+  let structured_name_introduced_conflict =
+    is_allowed_explicit_mcp_wrapper_kind merged_kind
+    && Option.is_none prior.name
+    && Option.is_none prior.meta_tool_name
+    &&
+    match prior.title with
+    | Some p when not (has_ascii_whitespace p) ->
+      let differs = function
+        | Some s -> not (String.equal p s)
+        | None -> false
+      in
+      differs incoming.name || differs incoming.meta_tool_name
+    | Some _ | None -> false
+  in
+  let identity_conflict =
+    string_opt_conflicts prior.name incoming.name
+    || string_opt_conflicts prior.meta_server_name incoming.meta_server_name
+    || string_opt_conflicts prior.meta_tool_name incoming.meta_tool_name
+    || raw_input_conflicts prior.raw_input incoming.raw_input
+    || structured_name_introduced_conflict
+    || ((not has_structured_tool_name)
+        && is_allowed_explicit_mcp_wrapper_kind merged_kind
+        && mcp_title_identifier_conflicts prior.title incoming.title)
+  in
   let raw_input =
     if is_non_empty_raw_input prior.raw_input
     then prior.raw_input
@@ -1163,11 +1232,16 @@ let merge_tool_call_wire ~(prior : tool_call_wire) ~(incoming : tool_call_wire) 
     prior.locations
     @ List.filter (fun p -> not (List.mem p prior.locations)) incoming.locations
   in
+  let kind =
+    if identity_conflict
+    then merge_tool_kind ~prior:merged_kind ~incoming:(Some (Tool_unknown "conflict:identity"))
+    else merged_kind
+  in
   { tool_call_id =
       if prior.tool_call_id <> "" then prior.tool_call_id else incoming.tool_call_id
   ; title = keep_first prior.title incoming.title
   ; name = keep_first prior.name incoming.name
-  ; kind = merge_tool_kind ~prior:prior.kind ~incoming:incoming.kind
+  ; kind
   ; meta_server_name = keep_first prior.meta_server_name incoming.meta_server_name
   ; meta_tool_name = keep_first prior.meta_tool_name incoming.meta_tool_name
   ; raw_input
@@ -1246,10 +1320,6 @@ let extract_schema_read_paths (wire : tool_call_wire) =
   | Ok input_paths ->
     let combined = wire.locations @ input_paths in
     if combined = [] then None else Some combined
-;;
-
-let has_ascii_whitespace s =
-  String.exists (function ' ' | '\t' | '\n' | '\r' -> true | _ -> false) s
 ;;
 
 (* Explicit [mcp(<server>/<tool>)] or [mcp(<server>:<tool>)] wrapper emitted by
@@ -1629,6 +1699,16 @@ let should_allow_permission ~driver ~policy ~title ~kind =
   should_allow_tool_call ~policy identity
 ;;
 
+let tool_call_wire_has_identity_fields (w : tool_call_wire) =
+  Option.is_some w.title
+  || Option.is_some w.name
+  || Option.is_some w.kind
+  || Option.is_some w.meta_server_name
+  || Option.is_some w.meta_tool_name
+  || Option.is_some w.raw_input
+  || w.locations <> []
+;;
+
 let parse_session_update_with ~driver ?managed_schema_root ?mcp_server_name ?merged_wire params =
   let update =
     match json_field "update" params with
@@ -1669,11 +1749,26 @@ let parse_session_update_with ~driver ?managed_schema_root ?mcp_server_name ?mer
          ; identity
          })
   | Some "tool_call_update" ->
-    let tool_call_id = Option.value (json_string_opt "toolCallId" update) ~default:"" in
+    let wire = Option.value merged_wire ~default:(parse_tool_call_wire update) in
+    let tool_call_id = wire.tool_call_id in
     let title = json_string_opt "title" update in
     let status = Option.map parse_tool_status (json_string_opt "status" update) in
     let raw_output = json_field "rawOutput" update in
-    Some (Tool_call_updated { tool_call_id; title; status; raw_output })
+    let identity =
+      if tool_call_wire_has_identity_fields wire
+      then Some (classify_tool_call ~driver ?managed_schema_root ?mcp_server_name wire)
+      else None
+    in
+    Some
+      (Tool_call_updated
+         { tool_call_id
+         ; title
+         ; kind = wire.kind
+         ; status
+         ; raw_input = wire.raw_input
+         ; raw_output
+         ; identity
+         })
   | Some "usage_update" ->
     let nonneg_opt = Option.map nonneg in
     let used = json_int_opt "used" update |> nonneg_opt in
@@ -2589,8 +2684,7 @@ let dispatch_incoming_message t msg =
             Some (record_turn_tool_call_wire turn (parse_tool_call_wire update))
           | Some turn, Some sid, Some "tool_call_update"
             when String.equal sid turn.session_id ->
-            ignore (record_turn_tool_call_wire turn (parse_tool_call_wire update) : tool_call_wire);
-            None
+            Some (record_turn_tool_call_wire turn (parse_tool_call_wire update))
           | _ -> None
         in
         let observer =

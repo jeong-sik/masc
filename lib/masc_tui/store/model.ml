@@ -264,7 +264,7 @@ let initial ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_ko)
     attention = Attention.empty;
     incidents = Incidents.empty;
     drafts = Drafts.empty;
-    fleet = Fleet_store.empty;
+    fleet = Fleet_store.set_wall_unix last_wall_unix Fleet_store.empty;
     work = Work_store.empty;
     knowledge = Knowledge_store.empty;
     runtime = Runtime_store.empty;
@@ -1177,7 +1177,9 @@ let effective_scorecard m : Wire_fleet.daily_scorecard =
     | None -> Observed.unreported
   in
   let turns_from_fleet =
-    match Fleet_store.total_turns_24h m.fleet with
+    match
+      Fleet_store.total_turns_24h ~now_unix:m.freshness.last_wall_unix m.fleet
+    with
     | Some n -> Observed.value ~observed_at:obs_at n
     | None -> Observed.unreported
   in

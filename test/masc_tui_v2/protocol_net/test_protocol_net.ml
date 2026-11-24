@@ -2240,9 +2240,6 @@ let test_v25_data_pipeline_decoders () =
   let k0 = List.hd ks in
   Alcotest.(check (option int)) "turn_count fallback from runtime_lane_observation"
     (Some 77) (Observed.to_option k0.total_turns);
-  Alcotest.(check (list (float 0.01)))
-    "recent_turns.slots oldest first (ok+fail), the empty slot between drawn as zero"
-    [ 1.0; 0.0; 4.0 ] k0.activity_sparkline_24h;
   let extras =
     expect_ok "decode_keepers_roster_extras"
       (Wire_fleet.decode_keepers_roster_extras live_keeper_json)
@@ -2251,14 +2248,43 @@ let test_v25_data_pipeline_decoders () =
     (List.assoc_opt "alpha-builder" extras.sandbox_profiles
      = Some Wire_fleet.Profile_microvm);
   (match List.assoc_opt "alpha-builder" extras.turn_pulses with
-   | Some { Wire_fleet.slots = [ older; newer ]; known_since } ->
+   | Some ({ Wire_fleet.slots = [ older; newer ]; known_since } as pulse) ->
        Alcotest.(check (float 0.5)) "pulse known_since" 1795166000.0 known_since;
        Alcotest.(check (list int)) "older slot causes: own"
          [ 0; 0; 0; 1; 0 ]
          [ older.scheduled; older.reacted; older.chat; older.own; older.unknown ];
        Alcotest.(check (list int)) "newer slot causes: scheduled, reacted, chat"
          [ 2; 1; 1; 0; 0 ]
-         [ newer.scheduled; newer.reacted; newer.chat; newer.own; newer.unknown ]
+         [ newer.scheduled; newer.reacted; newer.chat; newer.own; newer.unknown ];
+       (* Issue #54536: 24h sparkline and turn sum anchor to now_unix, not newest_slot. *)
+       let spark_at_newer =
+         Wire_fleet.sparkline_24h_of_pulse ~now_unix:1795252000.0 pulse
+       in
+       Alcotest.(check int) "sparkline always spans 48 half-hour slots" 48
+         (List.length spark_at_newer);
+       let tail3 =
+         List.filteri (fun i _ -> i >= 45) spark_at_newer
+       in
+       Alcotest.(check (list (float 0.01)))
+         "at newer slot: last 3 slots are [1.0; 0.0; 4.0]"
+         [ 1.0; 0.0; 4.0 ] tail3;
+       Alcotest.(check int) "turns_24h_of_pulse counts both in-window slots" 5
+         (Wire_fleet.turns_24h_of_pulse ~now_unix:1795252000.0 pulse);
+       (* Two hours later: quiet trailing hours appear as 0.0s. *)
+       let spark_2h_later =
+         Wire_fleet.sparkline_24h_of_pulse ~now_unix:(1795251600.0 +. 7200.0) pulse
+       in
+       let tail7 = List.filteri (fun i _ -> i >= 41) spark_2h_later in
+       Alcotest.(check (list (float 0.01)))
+         "two quiet hours append 4 trailing zeros"
+         [ 1.0; 0.0; 4.0; 0.0; 0.0; 0.0; 0.0 ] tail7;
+       (* Two days later: old slots drop out completely -> 0 turns and 48 zeros. *)
+       let now_2d_later = 1795251600.0 +. (48.0 *. 3600.0) in
+       Alcotest.(check int) "turns_24h_of_pulse is 0 after 2 quiet days" 0
+         (Wire_fleet.turns_24h_of_pulse ~now_unix:now_2d_later pulse);
+       Alcotest.(check bool) "sparkline is all zeros after 2 quiet days" true
+         (List.for_all (fun v -> Float.equal v 0.0)
+            (Wire_fleet.sparkline_24h_of_pulse ~now_unix:now_2d_later pulse))
    | Some _ | None -> Alcotest.fail "expected alpha-builder's two pulse slots, oldest first");
   Alcotest.(check (option string)) "candle circulating fallback" (Some "8000")
     (match extras.candle_summary with
@@ -2275,12 +2301,24 @@ let test_v25_data_pipeline_decoders () =
   let companies =
     Wire_fleet.group_by_company ~sandbox_profiles:extras.sandbox_profiles
       ~keeper_costs_24h:[ ("alpha-builder", 0.35) ]
+      ~now_unix:1795252000.0 ~turn_pulses:extras.turn_pulses
       ks
   in
   let cg = List.hd companies in
   Alcotest.(check string) "company = Platform Core" "Platform Core" cg.company;
   Alcotest.(check int) "company microvm_count = 1" 1 cg.microvm_count;
   Alcotest.(check int) "company turns_24h = 5" 5 cg.turns_24h;
+  Alcotest.(check int) "company sparkline_24h has 48 slots" 48
+    (List.length cg.sparkline_24h);
+  let companies_2d_later =
+    Wire_fleet.group_by_company ~sandbox_profiles:extras.sandbox_profiles
+      ~keeper_costs_24h:[ ("alpha-builder", 0.35) ]
+      ~now_unix:(1795251600.0 +. (48.0 *. 3600.0))
+      ~turn_pulses:extras.turn_pulses
+      ks
+  in
+  Alcotest.(check int) "company turns_24h drops to 0 after 2 quiet days" 0
+    (List.hd companies_2d_later).turns_24h;
   Alcotest.(check (float 0.01)) "company cost_24h_usd = 0.35" 0.35 cg.cost_24h_usd;
   (* 6. Planning backlog, Board signal filter, workspace-memory fallback, Config KO/EN labels *)
   (match
@@ -2542,7 +2580,6 @@ let test_p1_7_wire_fleet_offline_vs_failing_ssot () =
       total_turns = Observed.unreported;
       last_turn_at_unix = None;
       active_turn = None;
-      activity_sparkline_24h = [];
     }
   in
   let keepers =

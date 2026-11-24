@@ -133,7 +133,6 @@ type keeper_summary = {
   total_turns : int Observed.t;
   last_turn_at_unix : float option;
   active_turn : active_turn option;
-  activity_sparkline_24h : float list;
 }
 
 type unreadable_keeper = {
@@ -311,33 +310,69 @@ let company_sort_rank = function
   | "Other" -> 1
   | _ -> 0
 
-let aggregate_company_sparkline (members : keeper_summary list) =
-  let non_empty =
+let pulse_window_slots_24h = 48
+
+let slot_start_of_unix now_unix =
+  Int.of_float (Float.floor (now_unix /. Float.of_int turn_slot_seconds))
+  * turn_slot_seconds
+
+let pulse_window_bounds ~now_unix =
+  let current_slot = slot_start_of_unix now_unix in
+  let window_start =
+    current_slot - ((pulse_window_slots_24h - 1) * turn_slot_seconds)
+  in
+  (window_start, current_slot)
+
+let sparkline_24h_of_pulse ~now_unix { slots; known_since = _ } =
+  let window_start, current_slot = pulse_window_bounds ~now_unix in
+  let by_start = Hashtbl.create (List.length slots) in
+  List.iter
+    (fun (s : turn_slot) ->
+      if s.starts_at >= window_start && s.starts_at <= current_slot then
+        Hashtbl.replace by_start s.starts_at s)
+    slots;
+  List.init pulse_window_slots_24h (fun i ->
+      match
+        Hashtbl.find_opt by_start (window_start + (i * turn_slot_seconds))
+      with
+      | Some s -> Float.of_int (s.ok + s.failed)
+      | None -> 0.0)
+
+let turns_24h_of_pulse ~now_unix { slots; known_since = _ } =
+  let window_start, current_slot = pulse_window_bounds ~now_unix in
+  List.fold_left
+    (fun acc (s : turn_slot) ->
+      if s.starts_at >= window_start && s.starts_at <= current_slot then
+        acc + s.ok + s.failed
+      else acc)
+    0 slots
+
+let aggregate_company_sparkline ~now_unix ~pulse_tbl
+    (members : keeper_summary list) =
+  let member_sparks =
     List.filter_map
       (fun (k : keeper_summary) ->
-        if k.activity_sparkline_24h = [] then None
-        else Some (Array.of_list k.activity_sparkline_24h))
+        match Hashtbl.find_opt pulse_tbl k.name with
+        | Some pulse -> Some (sparkline_24h_of_pulse ~now_unix pulse)
+        | None -> None)
       members
   in
-  match non_empty with
+  match member_sparks with
   | [] -> []
-  | arrs ->
-      let max_len =
-        List.fold_left (fun acc a -> max acc (Array.length a)) 0 arrs
-      in
-      let out = Array.make max_len 0.0 in
+  | _ :: _ ->
+      let out = Array.make pulse_window_slots_24h 0.0 in
       List.iter
-        (fun a ->
-          let len = Array.length a in
-          let offset = max_len - len in
-          for i = 0 to len - 1 do
-            out.(offset + i) <- out.(offset + i) +. a.(i)
-          done)
-        arrs;
+        (fun spark ->
+          List.iteri
+            (fun i v ->
+              if i < pulse_window_slots_24h && Float.is_finite v && v > 0.0 then
+                out.(i) <- out.(i) +. v)
+            spark)
+        member_sparks;
       Array.to_list out
 
 let group_by_company ?(attention = []) ?(sandbox_profiles = [])
-    ?(keeper_costs_24h = []) keepers =
+    ?(keeper_costs_24h = []) ?now_unix ?(turn_pulses = []) keepers =
   let prefix_counts = Hashtbl.create 16 in
   List.iter
     (fun (k : keeper_summary) ->
@@ -369,6 +404,8 @@ let group_by_company ?(attention = []) ?(sandbox_profiles = [])
   List.iter (fun (n, p) -> Hashtbl.replace profile_tbl n p) sandbox_profiles;
   let cost_tbl = Hashtbl.create (max 8 (List.length keeper_costs_24h)) in
   List.iter (fun (n, c) -> Hashtbl.replace cost_tbl n c) keeper_costs_24h;
+  let pulse_tbl = Hashtbl.create (max 8 (List.length turn_pulses)) in
+  List.iter (fun (n, p) -> Hashtbl.replace pulse_tbl n p) turn_pulses;
   let buckets : (string, keeper_summary list) Hashtbl.t = Hashtbl.create 16 in
   List.iter
     (fun (k : keeper_summary) ->
@@ -429,11 +466,10 @@ let group_by_company ?(attention = []) ?(sandbox_profiles = [])
             | Some Profile_remote_ssh -> incr ssh_count
             | Some Profile_docker -> incr docker_count
             | Some (Profile_other _) | None -> ());
-            let k_turns =
-              List.fold_left ( +. ) 0.0 k.activity_sparkline_24h
-              |> Float.round |> Int.of_float
-            in
-            turns_24h := !turns_24h + k_turns;
+            (match now_unix, Hashtbl.find_opt pulse_tbl k.name with
+            | Some now, Some pulse ->
+                turns_24h := !turns_24h + turns_24h_of_pulse ~now_unix:now pulse
+            | Some _, None | None, (Some _ | None) -> ());
             let k_cost =
               match Hashtbl.find_opt cost_tbl k.name with
               | Some c -> c
@@ -441,7 +477,11 @@ let group_by_company ?(attention = []) ?(sandbox_profiles = [])
             in
             cost_24h_usd := !cost_24h_usd +. k_cost)
           members;
-        let sparkline_24h = aggregate_company_sparkline members in
+        let sparkline_24h =
+          match now_unix with
+          | Some now -> aggregate_company_sparkline ~now_unix:now ~pulse_tbl members
+          | None -> []
+        in
         {
           company;
           keepers = members;
@@ -555,23 +595,6 @@ let decode_turn_pulse json =
            Error (Printf.sprintf "recent_turns holds slot %d twice" starts_at)
        | None -> Ok (Some { known_since; slots = oldest_first }))
 
-(* Turns that ran ([ok] and [failed], as the server's fleet total counts them)
-   per slot from the oldest stored slot to the newest. The server stores only
-   slots that hold a turn, so a slot between two stored ones held none and is
-   drawn as zero instead of being closed up. *)
-let sparkline_of_pulse { slots; known_since = _ } =
-  match slots with
-  | [] -> []
-  | first :: _ ->
-      let by_start = Hashtbl.create (List.length slots) in
-      List.iter (fun (s : turn_slot) -> Hashtbl.replace by_start s.starts_at s) slots;
-      let last = (List.nth slots (List.length slots - 1)).starts_at in
-      let n = ((last - first.starts_at) / turn_slot_seconds) + 1 in
-      List.init n (fun i ->
-          match Hashtbl.find_opt by_start (first.starts_at + (i * turn_slot_seconds)) with
-          | Some s -> Float.of_int (s.ok + s.failed)
-          | None -> 0.0)
-
 let decode_lane_turn_count ~observed_at json =
   match optional_object_field json "runtime_lane_observation" with
   | Error _ | Ok None -> Observed.unreported
@@ -672,8 +695,10 @@ let decode_keeper_summary ~observed_at json =
         let* t = decode_active_turn obj in
         Ok (Some t)
   in
-  let* pulse = decode_turn_pulse json in
-  let activity_sparkline_24h = Option.fold ~none:[] ~some:sparkline_of_pulse pulse in
+  (* Validate recent_turns strictly so a malformed pulse fails roster decode;
+     actual 24h sparklines and sums are projected from [turn_pulses] against
+     current wall time at render/selector time (Issue #54536). *)
+  let* _pulse = decode_turn_pulse json in
   let company =
     match classify_company_single ~group name with
     | Some c -> c
@@ -695,7 +720,6 @@ let decode_keeper_summary ~observed_at json =
       total_turns;
       last_turn_at_unix;
       active_turn;
-      activity_sparkline_24h;
     }
 
 (* The gate roster lists a keeper whose effective meta did not read as a row

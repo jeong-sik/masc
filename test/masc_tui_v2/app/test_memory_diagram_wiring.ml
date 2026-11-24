@@ -133,7 +133,6 @@ let sample_keeper name : Wire_fleet.keeper_summary =
     total_turns = obs 10;
     last_turn_at_unix = Some 1_700_000_300.0;
     active_turn = None;
-    activity_sparkline_24h = [];
   }
 
 let key_char ?(ctrl = false) c : Keymap.Input.key_event =

@@ -87,7 +87,6 @@ let sample_keepers : Wire_fleet.keeper_summary list =
       total_turns = Observed.value ~observed_at:now_mono 412;
       last_turn_at_unix = Some (now_unix -. 45.0);
       active_turn = None;
-      activity_sparkline_24h = [ 2.0; 5.0; 9.0; 7.0; 11.0; 8.0; 6.0; 10.0 ];
     };
     {
       name = "wkbl-growth";
@@ -113,7 +112,6 @@ let sample_keepers : Wire_fleet.keeper_summary list =
             tool_in_flight = Some "MascBoardPostGet";
             elapsed_ms = Some 1420.0;
           };
-      activity_sparkline_24h = [ 1.0; 3.0; 6.0; 4.0; 5.0; 2.0; 1.0; 0.0 ];
     };
     {
       name = "code-reviewer";
@@ -139,7 +137,6 @@ let sample_keepers : Wire_fleet.keeper_summary list =
             tool_in_flight = Some "git_diff";
             elapsed_ms = Some 380.0;
           };
-      activity_sparkline_24h = [ 8.0; 10.0; 12.0; 14.0; 11.0; 13.0; 15.0; 12.0 ];
     };
     {
       name = "music-sensei";
@@ -156,7 +153,6 @@ let sample_keepers : Wire_fleet.keeper_summary list =
       total_turns = Observed.value ~observed_at:now_mono 44;
       last_turn_at_unix = None;
       active_turn = None;
-      activity_sparkline_24h = [ 0.0; 0.0; 1.0; 2.0; 0.0; 0.0; 0.0; 0.0 ];
     };
   ]
 
@@ -1991,7 +1987,7 @@ let test_v25_candle_peer_cards_zero_nested_boxes_and_violet_ai () =
     true (dec_l >= 8 && dec_m >= 8 && dec_r >= 8)
 
 let test_v25_keepers_5_company_fleet_tree_and_preview_inspector () =
-  let mk_keeper ~group ~name ~health ~spark : Wire_fleet.keeper_summary =
+  let mk_keeper ~group ~name ~health : Wire_fleet.keeper_summary =
     {
       name;
       group = Some group;
@@ -2007,21 +2003,15 @@ let test_v25_keepers_5_company_fleet_tree_and_preview_inspector () =
       total_turns = Observed.value ~observed_at:now_mono 120;
       last_turn_at_unix = Some (now_unix -. 60.0);
       active_turn = None;
-      activity_sparkline_24h = spark;
     }
   in
   let five_co_keepers =
     [
-      mk_keeper ~group:"MASC Core" ~name:"e-masc-the-leader" ~health:Wire_fleet.Keeper_healthy
-        ~spark:[ 2.0; 5.0; 8.0; 11.0; 9.0; 7.0 ];
-      mk_keeper ~group:"Code Review" ~name:"code-reviewer" ~health:Wire_fleet.Keeper_working
-        ~spark:[ 4.0; 6.0; 9.0; 12.0; 10.0; 8.0 ];
-      mk_keeper ~group:"WKBL Startup" ~name:"wkbl-growth" ~health:Wire_fleet.Keeper_healthy
-        ~spark:[ 1.0; 3.0; 4.0; 5.0; 3.0; 2.0 ];
-      mk_keeper ~group:"KidsNote Ops" ~name:"kidsnote-ops-monitor" ~health:Wire_fleet.Keeper_healthy
-        ~spark:[ 0.0; 1.0; 2.0; 1.0; 2.0; 1.0 ];
-      mk_keeper ~group:"Creative & R&D" ~name:"music-sensei" ~health:Wire_fleet.Keeper_idle
-        ~spark:[ 0.0; 0.0; 1.0; 0.0; 1.0; 0.0 ];
+      mk_keeper ~group:"MASC Core" ~name:"e-masc-the-leader" ~health:Wire_fleet.Keeper_healthy;
+      mk_keeper ~group:"Code Review" ~name:"code-reviewer" ~health:Wire_fleet.Keeper_working;
+      mk_keeper ~group:"WKBL Startup" ~name:"wkbl-growth" ~health:Wire_fleet.Keeper_healthy;
+      mk_keeper ~group:"KidsNote Ops" ~name:"kidsnote-ops-monitor" ~health:Wire_fleet.Keeper_healthy;
+      mk_keeper ~group:"Creative & R&D" ~name:"music-sensei" ~health:Wire_fleet.Keeper_idle;
     ]
   in
   let m0 = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_ko () in
@@ -2458,7 +2448,6 @@ let test_p2_standard_viewport_keepers_split_and_kpi_visibility () =
           (List.hd sample_keepers) with
           context = Observed.value ~observed_at:now_mono (measured_context 0.42);
           total_turns = Observed.value ~observed_at:now_mono 120;
-          activity_sparkline_24h = [];
         }
       in
       let fleet =
@@ -2592,49 +2581,88 @@ let test_p0_keeper_dive_honest_24h_vs_lifetime_turns () =
   (* P0-1: Keeper preview MUST NEVER label lifetime total_turns (e.g. 20.4k) as "24h 턴" *)
   let m0_ko = make_populated_model ~cols:140 ~rows:40 ~lang:Say.Lang_ko in
   let m0_en = make_populated_model ~cols:140 ~rows:40 ~lang:Say.Lang_en in
-  let k_with_spark =
+  let k_high_lifetime =
     {
       (List.hd sample_keepers) with
       total_turns = Observed.value ~observed_at:now_mono 20_400;
-      activity_sparkline_24h = [ 10.0; 15.0 ];
     }
   in
-  let k_no_spark =
+  let slot_now =
+    Int.of_float (Float.floor (now_unix /. 1800.0)) * 1800
+  in
+  let pulse_25 : Wire_fleet.turn_pulse =
     {
-      (List.hd sample_keepers) with
-      total_turns = Observed.value ~observed_at:now_mono 20_400;
-      activity_sparkline_24h = [];
+      known_since = Float.of_int (slot_now - 3600);
+      slots =
+        [
+          {
+            starts_at = slot_now - 1800;
+            ok = 10;
+            rested = 0;
+            failed = 0;
+            scheduled = 0;
+            reacted = 0;
+            chat = 0;
+            own = 10;
+            unknown = 0;
+          };
+          {
+            starts_at = slot_now;
+            ok = 12;
+            rested = 0;
+            failed = 3;
+            scheduled = 0;
+            reacted = 0;
+            chat = 0;
+            own = 15;
+            unknown = 0;
+          };
+        ];
     }
   in
-  (* Case 1: non-empty sparkline -> shows "24h 턴" / "24h Turns" with sum 25, NOT 20.4k *)
+  (* Case 1: turn_pulse present -> shows "24h 턴" / "24h Turns" with sum 25, NOT 20.4k *)
   let m_spark_ko =
     {
       m0_ko with
       fleet =
-        Fleet_store.apply_keepers ~observed_at:now_mono
-          (k_with_spark :: List.tl sample_keepers)
-          m0_ko.fleet;
+        m0_ko.fleet
+        |> Fleet_store.apply_keepers ~observed_at:now_mono
+             (k_high_lifetime :: List.tl sample_keepers)
+        |> Fleet_store.apply_roster_extras
+             {
+               sandbox_profiles = [];
+               candle_balances_milli = [];
+               candle_summary = None;
+               turn_pulses = [ (k_high_lifetime.name, pulse_25) ];
+             };
     }
   in
   let g_spark_ko =
     render_to_grid ~cols:140 ~rows:40 (Screen_keepers.render ~model:m_spark_ko)
   in
   let txt_spark_ko = grid_all_text g_spark_ko in
-  Alcotest.(check bool) "sparkline non-empty shows 24h 턴 label" true
+  Alcotest.(check bool) "turn pulse present shows 24h 턴 label" true
     (contains_sub ~needle:"24h 턴" txt_spark_ko);
-  Alcotest.(check bool) "sparkline non-empty shows true 24h sum 25" true
+  Alcotest.(check bool) "turn pulse present shows true 24h sum 25" true
     (contains_sub ~needle:"25" txt_spark_ko);
-  Alcotest.(check bool) "sparkline non-empty does NOT print 20.4k as 24h turns" false
+  Alcotest.(check bool) "turn pulse present does NOT print 20.4k as 24h turns" false
     (contains_sub ~needle:"20.4k" txt_spark_ko);
 
-  (* Case 2: empty sparkline -> explicitly labels lifetime total_turns as 누적 턴 / Total turns, NEVER 24h 턴 *)
+  (* Case 2: no turn_pulse -> explicitly labels lifetime total_turns as 누적 턴 / Total turns, NEVER 24h 턴 *)
   let m_life_ko =
     {
       m0_ko with
       fleet =
-        Fleet_store.apply_keepers ~observed_at:now_mono
-          (k_no_spark :: List.tl sample_keepers)
-          m0_ko.fleet;
+        m0_ko.fleet
+        |> Fleet_store.apply_keepers ~observed_at:now_mono
+             (k_high_lifetime :: List.tl sample_keepers)
+        |> Fleet_store.apply_roster_extras
+             {
+               sandbox_profiles = [];
+               candle_balances_milli = [];
+               candle_summary = None;
+               turn_pulses = [];
+             };
     }
   in
   let g_life_ko =
@@ -2652,9 +2680,16 @@ let test_p0_keeper_dive_honest_24h_vs_lifetime_turns () =
     {
       m0_en with
       fleet =
-        Fleet_store.apply_keepers ~observed_at:now_mono
-          (k_no_spark :: List.tl sample_keepers)
-          m0_en.fleet;
+        m0_en.fleet
+        |> Fleet_store.apply_keepers ~observed_at:now_mono
+             (k_high_lifetime :: List.tl sample_keepers)
+        |> Fleet_store.apply_roster_extras
+             {
+               sandbox_profiles = [];
+               candle_balances_milli = [];
+               candle_summary = None;
+               turn_pulses = [];
+             };
     }
   in
   let g_life_en =
@@ -2688,7 +2723,6 @@ let test_nav_keepers_display_order_monotonic_screen_rows () =
       total_turns = Observed.value ~observed_at:now_mono 10;
       last_turn_at_unix = Some now_unix;
       active_turn = None;
-      activity_sparkline_24h = [ 1.0; 2.0 ];
     }
   in
   let scrambled =
@@ -2768,7 +2802,6 @@ let test_p1_chat_transcript_render_parity () =
       total_turns = Observed.value ~observed_at:now_mono 10;
       last_turn_at_unix = Some now_unix;
       active_turn = None;
-      activity_sparkline_24h = [ 1.0; 2.0 ];
     }
   in
   let mk_msg ~id ~role ~content ?tool_call_name ts : Wire_fleet.chat_message =
@@ -2912,7 +2945,6 @@ let test_chat_peer_rows_name_their_author () =
       total_turns = Observed.value ~observed_at:now_mono 10;
       last_turn_at_unix = Some now_unix;
       active_turn = None;
-      activity_sparkline_24h = [ 1.0; 2.0 ];
     }
   in
   let mk_msg ~id ~role ~content ts : Wire_fleet.chat_message =
@@ -3061,7 +3093,6 @@ let test_agui_chat_chronological_projection_and_phase_parity () =
       total_turns = Observed.value ~observed_at:now_mono 3;
       last_turn_at_unix = Some now_unix;
       active_turn = None;
-      activity_sparkline_24h = [ 1.0 ];
     }
   in
   let find_row_y grid needle =

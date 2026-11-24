@@ -31,8 +31,8 @@ let attention_items_for_grouping (m : Model.t) =
 let company_groups_for_pulse (m : Model.t) =
   let attn_items = attention_items_for_grouping m in
   let keeper_costs_24h = Runtime_store.keeper_costs_24h_assoc m.runtime in
-  Fleet_store.company_groups_with_costs ~attention:attn_items ~keeper_costs_24h
-    m.fleet
+  Fleet_store.company_groups_with_costs ~attention:attn_items
+    ~now_unix:m.freshness.last_wall_unix ~keeper_costs_24h m.fleet
 
 let sparkline_samples_of_floats (xs : float list) =
   match xs with
@@ -328,7 +328,10 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
                ~en:(Printf.sprintf "%s turns"
                       (Format_val.format_value Format_val.Count (float_of_int n))))
       | None -> (
-          match Fleet_store.total_turns_24h model.fleet with
+          match
+            Fleet_store.total_turns_24h ~now_unix:model.freshness.last_wall_unix
+              model.fleet
+          with
           | Some n ->
               Say.resolve lang
                 (Say.make

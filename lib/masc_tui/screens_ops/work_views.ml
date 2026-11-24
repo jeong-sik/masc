@@ -3393,8 +3393,9 @@ let render_candle_scorecard ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
           let unfiltered_fleet = { model.fleet with filter_query = "" } in
           let costs_assoc = Runtime_store.keeper_costs_24h_assoc model.runtime in
           let groups =
-            Fleet_store.company_groups_with_costs ~keeper_costs_24h:costs_assoc
-              unfiltered_fleet
+            Fleet_store.company_groups_with_costs
+              ~now_unix:model.freshness.last_wall_unix
+              ~keeper_costs_24h:costs_assoc unfiltered_fleet
           in
           let grp_cnt = List.length groups in
           if !y < bot then begin

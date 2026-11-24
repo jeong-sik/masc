@@ -177,7 +177,6 @@ let make_rich_model ~lang ~cols ~rows =
       total_turns = Observed.value ~observed_at:now_mono 312;
       last_turn_at_unix = Some (now_unix -. 30.0);
       active_turn = None;
-      activity_sparkline_24h = [ 1.0; 3.0; 5.0; 4.0 ];
     }
   in
   let keeper_b : Wire_fleet.keeper_summary =
@@ -2717,7 +2716,6 @@ let test_p1_7_fleet_health_counts_ssot () =
       total_turns = Observed.unreported;
       last_turn_at_unix = None;
       active_turn = None;
-      activity_sparkline_24h = [];
     }
   in
   (* Live 8935 realistic 32-keeper roster: 11 active (3 working + 7 healthy + 1 degraded),
@@ -2786,7 +2784,6 @@ let test_p1_5_infra_sandboxes_404_fallback_honesty () =
       total_turns = Observed.unreported;
       last_turn_at_unix = None;
       active_turn = None;
-      activity_sparkline_24h = [];
     }
   in
   let keepers =
@@ -2899,7 +2896,6 @@ let test_p0_1_p0_2_runtime_spend_provenance_mtd_and_dual_usd () =
           total_turns = Observed.unreported;
           last_turn_at_unix = None;
           active_turn = None;
-          activity_sparkline_24h = [];
         })
   in
   let fleet = Fleet_store.apply_keepers ~observed_at:now_mono active_keepers m0.fleet in
@@ -3498,7 +3494,6 @@ let test_nav_display_order_monotonic_screen_rows () =
       total_turns = Observed.value ~observed_at:now_mono 20;
       last_turn_at_unix = Some now_unix;
       active_turn = None;
-      activity_sparkline_24h = [ 1.0; 2.0 ];
     }
   in
   let ks =

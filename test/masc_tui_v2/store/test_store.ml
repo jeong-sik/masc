@@ -39,7 +39,6 @@ let sample_keeper ?(health = Wire_fleet.Keeper_healthy) name :
     total_turns = Observed.value ~observed_at:t0 12;
     last_turn_at_unix = Some 1_700_000_000.0;
     active_turn = None;
-    activity_sparkline_24h = [ 1.0; 2.0; 3.0 ];
   }
 
 let roster_of keepers : Wire_fleet.keepers_roster = { keepers; unreadable = [] }
@@ -2309,7 +2308,10 @@ let test_v25_data_pipeline_and_settings_2pane () =
     (Cmd.get_request_path
        (Cmd.Get_verifications { view = `Pending; limit = 50; offset = 0 }));
   (* 2. View_fetches on Pulse fetches telemetry + scorecard sources *)
-  let m0 = Model.initial ~cols:140 ~rows:40 () in
+  let wall_slot = 1_795_251_600 in
+  let m0 =
+    Model.initial ~cols:140 ~rows:40 ~wall_unix:(Float.of_int (wall_slot + 300)) ()
+  in
   let pulse_cmds = Cmd.flatten (View_fetches.fetches_for_current_view ~force:true m0) in
   let has_path expected =
     List.exists
@@ -2339,7 +2341,6 @@ let test_v25_data_pipeline_and_settings_2pane () =
       (sample_keeper "alpha-builder") with
       group = Some "Platform Core";
       company = "Platform Core";
-      activity_sparkline_24h = [ 2.0; 5.0; 3.0 ];
     }
   in
   let m1, _ =
@@ -2359,7 +2360,49 @@ let test_v25_data_pipeline_and_settings_2pane () =
                burned_milli = "2500";
                circulating_milli = "7500";
              });
-      turn_pulses = [];
+      turn_pulses =
+        [
+          ( "alpha-builder"
+          , {
+              Wire_fleet.known_since = Float.of_int (wall_slot - 3600);
+              slots =
+                [
+                  {
+                    starts_at = wall_slot - 3600;
+                    ok = 2;
+                    rested = 0;
+                    failed = 0;
+                    scheduled = 0;
+                    reacted = 0;
+                    chat = 0;
+                    own = 2;
+                    unknown = 0;
+                  };
+                  {
+                    starts_at = wall_slot - 1800;
+                    ok = 5;
+                    rested = 0;
+                    failed = 0;
+                    scheduled = 0;
+                    reacted = 0;
+                    chat = 0;
+                    own = 5;
+                    unknown = 0;
+                  };
+                  {
+                    starts_at = wall_slot;
+                    ok = 3;
+                    rested = 0;
+                    failed = 0;
+                    scheduled = 0;
+                    reacted = 0;
+                    chat = 0;
+                    own = 3;
+                    unknown = 0;
+                  };
+                ];
+            } );
+        ];
     }
   in
   let m2, _ =
@@ -4001,31 +4044,70 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
 
 (* --- Comprehensive Arrow Navigation, Display Order & Symmetric Scroll Regression Suite --- *)
 
-let grouped_keeper ?(health = Wire_fleet.Keeper_healthy) ?(spark = [ 1.0 ])
-    ~group name : Wire_fleet.keeper_summary =
+let grouped_keeper ?(health = Wire_fleet.Keeper_healthy) ~group name :
+    Wire_fleet.keeper_summary =
   {
     (sample_keeper ~health name) with
     group = Some group;
     company = group;
-    activity_sparkline_24h = spark;
+  }
+
+let pulse_at ~starts_at turns : Wire_fleet.turn_pulse =
+  {
+    known_since = Float.of_int starts_at;
+    slots =
+      [
+        {
+          starts_at;
+          ok = turns;
+          rested = 0;
+          failed = 0;
+          scheduled = 0;
+          reacted = 0;
+          chat = 0;
+          own = turns;
+          unknown = 0;
+        };
+      ];
   }
 
 let test_nav_fix1_keepers_grouped_order_collapse_and_resync () =
+  let wall_slot = 1_795_251_600 in
+  let wall_unix = Float.of_int (wall_slot + 60) in
   (* Scrambled raw order across 4 generic groups *)
   let raw_ks =
     [
-      grouped_keeper ~group:"org-zeta" ~spark:[ 5.0 ] "zeta-1";
-      grouped_keeper ~group:"org-alpha" ~spark:[ 1.0 ] "alpha-2";
-      grouped_keeper ~group:"org-mid" ~spark:[ 9.0 ] "mid-1";
-      grouped_keeper ~group:"org-beta" ~spark:[ 3.0 ] "beta-2";
-      grouped_keeper ~group:"org-alpha" ~spark:[ 2.0 ] "alpha-1";
-      grouped_keeper ~group:"org-beta" ~spark:[ 8.0 ] "beta-1";
+      grouped_keeper ~group:"org-zeta" "zeta-1";
+      grouped_keeper ~group:"org-alpha" "alpha-2";
+      grouped_keeper ~group:"org-mid" "mid-1";
+      grouped_keeper ~group:"org-beta" "beta-2";
+      grouped_keeper ~group:"org-alpha" "alpha-1";
+      grouped_keeper ~group:"org-beta" "beta-1";
     ]
   in
   let expected_grouped =
     [ "alpha-1"; "alpha-2"; "beta-1"; "beta-2"; "mid-1"; "zeta-1" ]
   in
-  let f0 = Fleet_store.apply_keepers ~observed_at:t0 raw_ks Fleet_store.empty in
+  let f0 =
+    Fleet_store.empty
+    |> Fleet_store.set_wall_unix wall_unix
+    |> Fleet_store.apply_keepers ~observed_at:t0 raw_ks
+    |> Fleet_store.apply_roster_extras
+         {
+           sandbox_profiles = [];
+           candle_balances_milli = [];
+           candle_summary = None;
+           turn_pulses =
+             [
+               ("zeta-1", pulse_at ~starts_at:wall_slot 5);
+               ("alpha-2", pulse_at ~starts_at:wall_slot 1);
+               ("mid-1", pulse_at ~starts_at:wall_slot 9);
+               ("beta-2", pulse_at ~starts_at:wall_slot 3);
+               ("alpha-1", pulse_at ~starts_at:wall_slot 2);
+               ("beta-1", pulse_at ~starts_at:wall_slot 8);
+             ];
+         }
+  in
   let names_of ks =
     List.map (fun (k : Wire_fleet.keeper_summary) -> k.name) ks
   in
@@ -10171,6 +10253,108 @@ let test_live_chat_runtime_attempt_and_text_ownership () =
   | Drafts.Btw_failed _ ->
       Alcotest.fail "expected Btw_answered"
 
+let test_24h_pulse_sparkline_and_sums_use_now_unix () =
+  let slot_now = 1_795_251_600 in
+  let now_unix = Float.of_int (slot_now + 300) in
+  let slot_old = slot_now - (49 * Wire_fleet.turn_slot_seconds) in
+  let slot_recent = slot_now - (2 * Wire_fleet.turn_slot_seconds) in
+  let mk_slot starts_at ok failed : Wire_fleet.turn_slot =
+    {
+      starts_at;
+      ok;
+      rested = 1;
+      failed;
+      scheduled = ok;
+      reacted = failed;
+      chat = 0;
+      own = 1;
+      unknown = 0;
+    }
+  in
+  let stale_pulse : Wire_fleet.turn_pulse =
+    { known_since = Float.of_int slot_old; slots = [ mk_slot slot_old 10 2 ] }
+  in
+  let recent_pulse : Wire_fleet.turn_pulse =
+    {
+      known_since = Float.of_int slot_old;
+      slots = [ mk_slot slot_old 20 0; mk_slot slot_recent 3 1 ];
+    }
+  in
+  let ks =
+    [
+      grouped_keeper ~group:"org-a" "stale-keeper";
+      grouped_keeper ~group:"org-a" "active-keeper";
+      grouped_keeper ~group:"org-b" "no-pulse-keeper";
+    ]
+  in
+  let m0 = Model.initial ~cols:140 ~rows:40 ~wall_unix:now_unix () in
+  let fleet =
+    m0.fleet
+    |> Fleet_store.apply_keepers ~observed_at:t0 ks
+    |> Fleet_store.apply_roster_extras
+         {
+           sandbox_profiles = [];
+           candle_balances_milli = [];
+           candle_summary = None;
+           turn_pulses =
+             [ ("stale-keeper", stale_pulse); ("active-keeper", recent_pulse) ];
+         }
+  in
+  (* Stale keeper rested >24h: 0 turns in 24h window and 48 zero slots. *)
+  Alcotest.(check (option int)) "stale keeper has 0 turns in 24h" (Some 0)
+    (Fleet_store.keeper_turns_24h ~now_unix ~keeper:"stale-keeper" fleet);
+  Alcotest.(check bool) "stale keeper sparkline is 48 zeros" true
+    (let sp = Fleet_store.sparkline_24h ~now_unix ~keeper:"stale-keeper" fleet in
+     List.length sp = 48 && List.for_all (fun v -> Float.equal v 0.0) sp);
+  (* Active keeper counts only the in-window slot (3 ok + 1 failed = 4; rested excluded). *)
+  Alcotest.(check (option int)) "active keeper counts only in-window ok+failed"
+    (Some 4)
+    (Fleet_store.keeper_turns_24h ~now_unix ~keeper:"active-keeper" fleet);
+  let active_spark =
+    Fleet_store.sparkline_24h ~now_unix ~keeper:"active-keeper" fleet
+  in
+  Alcotest.(check int) "active sparkline length is 48" 48
+    (List.length active_spark);
+  Alcotest.(check (list (float 0.01)))
+    "quiet trailing slots after recent turn appear as zeros"
+    [ 4.0; 0.0; 0.0 ]
+    (List.filteri (fun i _ -> i >= 45) active_spark);
+  (* Keeper without pulse returns None / []. *)
+  Alcotest.(check (option int)) "no-pulse keeper returns None" None
+    (Fleet_store.keeper_turns_24h ~now_unix ~keeper:"no-pulse-keeper" fleet);
+  Alcotest.(check int) "no-pulse keeper sparkline is empty" 0
+    (List.length
+       (Fleet_store.sparkline_24h ~now_unix ~keeper:"no-pulse-keeper" fleet));
+  (* Fleet total_turns_24h and company_groups sum only in-window turns. *)
+  Alcotest.(check (option int)) "fleet total_turns_24h sums in-window turns only"
+    (Some 4) (Fleet_store.total_turns_24h ~now_unix fleet);
+  let org_a =
+    List.find
+      (fun (g : Wire_fleet.company_group) -> String.equal g.company "org-a")
+      (Fleet_store.company_groups ~now_unix fleet)
+  in
+  Alcotest.(check int) "company turns_24h excludes >24h slots" 4 org_a.turns_24h;
+  Alcotest.(check int) "company sparkline has 48 aligned slots" 48
+    (List.length org_a.sparkline_24h);
+  (* Fleet_pulse_wall sorts active-keeper ahead of stale-keeper even though stale
+     keeper has more expired turns in its pulse buffer. *)
+  let f_wall = Fleet_store.set_fleet_mode Nav.Fleet_pulse_wall fleet in
+  let ordered_names =
+    List.map
+      (fun (k : Wire_fleet.keeper_summary) -> k.name)
+      (Fleet_store.filtered_keepers f_wall)
+  in
+  Alcotest.(check (list string))
+    "Fleet_pulse_wall ranks in-window active keeper first"
+    [ "active-keeper"; "no-pulse-keeper"; "stale-keeper" ]
+    ordered_names;
+  (* Advancing wall clock via Msg.Tick past 24h drops active-keeper's turn to 0. *)
+  let m1 = { m0 with fleet = f_wall } in
+  let future_unix = now_unix +. (24.0 *. 3600.0) in
+  let m2, _ = Update.step ~now:t1 m1 (Msg.Tick { wall_unix = future_unix }) in
+  Alcotest.(check (option int))
+    "Tick advancing >24h drops fleet total_turns_24h to 0" (Some 0)
+    (Fleet_store.total_turns_24h ~now_unix:m2.freshness.last_wall_unix m2.fleet)
 let () =
   Alcotest.run "masc_tui_store"
     [
@@ -10321,5 +10505,8 @@ let () =
           Alcotest.test_case
             "Live chat and /btw honor runtime attempt boundary and text ownership"
             `Quick test_live_chat_runtime_attempt_and_text_ownership;
+          Alcotest.test_case
+            "24h pulse sparkline, sums, company rollup & wall sort anchor to now_unix"
+            `Quick test_24h_pulse_sparkline_and_sums_use_now_unix;
         ] );
     ]

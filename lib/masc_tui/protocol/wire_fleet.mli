@@ -112,7 +112,6 @@ type keeper_summary = {
   total_turns : int Observed.t;
   last_turn_at_unix : float option;
   active_turn : active_turn option;
-  activity_sparkline_24h : float list;
 }
 
 (** A roster row whose effective meta did not read: the server sends only the
@@ -183,6 +182,19 @@ type turn_pulse = {
 
 val turn_slot_seconds : int
 (** 1800, the server's slot width. *)
+
+val pulse_window_slots_24h : int
+(** 48 half-hour slots covering the last 24 hours. *)
+
+val sparkline_24h_of_pulse : now_unix:float -> turn_pulse -> float list
+(** 48 half-hour slots ending at the slot holding [now_unix], oldest first.
+    Each slot counts executed turns ([ok + failed]); quiet slots are [0.0],
+    and slots older than 24h before [now_unix] are excluded. *)
+
+val turns_24h_of_pulse : now_unix:float -> turn_pulse -> int
+(** Sum of executed turns ([ok + failed]) in the 48 half-hour slots ending at
+    the slot holding [now_unix], matching server
+    [Keeper_turn_pulse.turns_in_window]. *)
 
 type keeper_roster_extras = {
   sandbox_profiles : (string * keeper_sandbox_profile) list;
@@ -264,6 +276,8 @@ val group_by_company :
   ?attention:attention_item list ->
   ?sandbox_profiles:(string * keeper_sandbox_profile) list ->
   ?keeper_costs_24h:(string * float) list ->
+  ?now_unix:float ->
+  ?turn_pulses:(string * turn_pulse) list ->
   keeper_summary list ->
   company_group list
 (** Group Keepers by explicit [keeper.group] metadata (falling back to shared

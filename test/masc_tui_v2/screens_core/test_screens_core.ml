@@ -110,7 +110,6 @@ let mk_keeper ~name ~company ~health ?(turns = 120) ?(ctx = 0.42) () :
     total_turns = obs turns;
     last_turn_at_unix = Some 1763700000.0;
     active_turn = None;
-    activity_sparkline_24h = [ 1.0; 3.0; 5.0; 9.0; 7.0; 12.0; 8.0; 4.0 ];
   }
 
 let populated_model ~cols ~rows ~lang =
@@ -1920,7 +1919,6 @@ let test_v25_pulse_4kpi_hero_and_5_companies () =
       (mk_keeper ~name ~company:"" ~health ~turns ()) with
       group = Some group;
       company = "";
-      activity_sparkline_24h = [ 2.0; 4.0; 6.0; 8.0; 5.0; 9.0; 7.0; 11.0 ];
     }
   in
   let five_co_keepers =
@@ -2511,7 +2509,6 @@ let test_v25_round55_attention_bar_5companies_fail_and_settings_polish () =
       (mk_keeper ~name ~company:"" ~health ~turns ()) with
       group = Some group;
       company = "";
-      activity_sparkline_24h = [ 2.0; 4.0; 6.0; 8.0 ];
     }
   in
   List.iter
@@ -2845,7 +2842,6 @@ let test_p1_pulse_collapsed_company_highlight_and_scroll () =
       total_turns = Observed.value ~observed_at:Clock.Mono.zero 20;
       last_turn_at_unix = Some 1_795_200_000.0;
       active_turn = None;
-      activity_sparkline_24h = [ 1.0; 2.0 ];
     }
   in
   let ks =

@@ -58,6 +58,7 @@ type t =
   { endpoint : string
   ; server_name : string
   ; authorization : string
+  ; tool_specs : unit -> Yojson.Safe.t list
   ; session : Runtime_official_client_mcp.session
   ; state : mutable_state
   ; state_mutex : Eio.Mutex.t
@@ -583,7 +584,9 @@ let request_handler t ~path ~tool_specs ~tool_execution_mode ~call_tool _client_
       respond `Method_not_allowed "Method not allowed")
 ;;
 
-let tool_spec_names specs =
+let server_name (t : t) = t.server_name
+
+let tool_names (t : t) =
   List.filter_map
     (function
       | `Assoc fields ->
@@ -591,7 +594,7 @@ let tool_spec_names specs =
          | Some (`String name) -> Some name
          | _ -> None)
       | _ -> None)
-    specs
+    (t.tool_specs ())
 ;;
 
 let start ~sw ~net ~secure_random ~server_name ~tool_specs ~tool_execution_mode ~call_tool () =
@@ -623,6 +626,7 @@ let start ~sw ~net ~secure_random ~server_name ~tool_specs ~tool_execution_mode 
     { endpoint = Printf.sprintf "http://127.0.0.1:%d%s" port path
     ; server_name
     ; authorization
+    ; tool_specs
     ; session = Runtime_official_client_mcp.create_session ()
     ; state
     ; state_mutex = Eio.Mutex.create ()

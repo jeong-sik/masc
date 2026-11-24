@@ -192,6 +192,11 @@ type mcp_http_server =
         matches nothing. *)
   }
 
+val mcp_http_server_of_bridge : Runtime_official_client_mcp_http.t -> mcp_http_server
+(** The server a host is started with for [bridge]. The name, URL, headers and
+    tool names are all read from the bridge, so they cannot disagree with what
+    the bridge serves. *)
+
 type config =
   { driver : driver
   ; cli_path : string

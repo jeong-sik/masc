@@ -16,9 +16,13 @@ type tool_response =
     the handler returns; previously reserved handlers still drain. The delivery
     observer runs only after the full HTTP response write succeeds. *)
 
-val tool_spec_names : Yojson.Safe.t list -> string list
-(** The [name] of each tool spec, in order. A spec that is not an object with a
-    string [name] is left out: a client could not call it. *)
+val server_name : t -> string
+(** The server name the bridge was started with. *)
+
+val tool_names : t -> string list
+(** The [name] of each tool spec the bridge lists, in order, read from its
+    [tool_specs] when called. A spec that is not an object with a string
+    [name] is left out: a client could not call it. *)
 
 val start :
   sw:Eio.Switch.t ->

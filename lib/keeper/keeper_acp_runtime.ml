@@ -739,17 +739,6 @@ let start_mcp_bridge ~sw ~env ~pinned_tool_specs ~turn_slot ~turn_slot_mutex =
     ()
 ;;
 
-let mcp_server_of_bridge ~pinned_tool_specs bridge : Acp.mcp_http_server =
-  let { Runtime_official_client_mcp_http.url; headers } =
-    Runtime_official_client_mcp_http.endpoint bridge
-  in
-  { Acp.name = mcp_server_name
-  ; url
-  ; headers
-  ; tool_names = Runtime_official_client_mcp_http.tool_spec_names pinned_tool_specs
-  }
-;;
-
 let discover_skills_dirs ~base_path (config : Runtime_execution.acp_client) =
   let candidates =
     config.skills_dirs
@@ -806,7 +795,7 @@ let spawn_persistent_entry
                  ~turn_slot
                  ~turn_slot_mutex
              in
-             let mcp_server = mcp_server_of_bridge ~pinned_tool_specs bridge in
+             let mcp_server = Acp.mcp_http_server_of_bridge bridge in
              let acp_config : Acp.config =
                { driver = config.driver
                ; cli_path = config.cli_path
@@ -2826,7 +2815,7 @@ let run_without_lifecycle
         let bridge =
           start_mcp_bridge ~sw ~env ~pinned_tool_specs ~turn_slot ~turn_slot_mutex
         in
-        let mcp_server = mcp_server_of_bridge ~pinned_tool_specs bridge in
+        let mcp_server = Acp.mcp_http_server_of_bridge bridge in
         let acp_config : Acp.config =
           { driver = config.driver
           ; cli_path = config.cli_path

@@ -348,6 +348,17 @@ type mcp_http_server =
   ; tool_names : string list
   }
 
+let mcp_http_server_of_bridge bridge =
+  let { Runtime_official_client_mcp_http.url; headers } =
+    Runtime_official_client_mcp_http.endpoint bridge
+  in
+  { name = Runtime_official_client_mcp_http.server_name bridge
+  ; url
+  ; headers
+  ; tool_names = Runtime_official_client_mcp_http.tool_names bridge
+  }
+;;
+
 type config =
   { driver : driver
   ; cli_path : string

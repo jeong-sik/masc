@@ -742,10 +742,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ?fs ~cwd ~cwd_path ~timeout_s ~ac
                      else None)
                    ()
                in
-               let ep = Runtime_official_client_mcp_http.endpoint bridge in
-               let mcp_server : Runtime_acp_client.mcp_http_server =
-                 { name = "masc"; url = ep.url; headers = ep.headers; tool_names = [ tool.name ] }
-               in
+               let mcp_server = Runtime_acp_client.mcp_http_server_of_bridge bridge in
                let acp_config : Runtime_acp_client.config =
                  { driver = execution.driver
                  ; cli_path = execution.cli_path

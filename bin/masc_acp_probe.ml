@@ -267,16 +267,7 @@ let probe_one_driver ~env ~cwd ~timeout_s ~model_override ~posture (driver : Run
           ~call_tool:handle_tool
           ()
       in
-      let { Runtime_official_client_mcp_http.url; headers } =
-        Runtime_official_client_mcp_http.endpoint bridge
-      in
-      let mcp_server : Runtime_acp_client.mcp_http_server =
-        { name = mcp_server_name
-        ; url
-        ; headers
-        ; tool_names = Runtime_official_client_mcp_http.tool_spec_names (probe_tool_specs ())
-        }
-      in
+      let mcp_server = Runtime_acp_client.mcp_http_server_of_bridge bridge in
       let acp_cwd_result =
         match posture with
         | Runtime_native_tools.Native_none ->

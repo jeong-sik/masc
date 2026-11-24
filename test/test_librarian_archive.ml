@@ -207,6 +207,7 @@ let test_memory_diff_through_compaction () =
     | (p : Diff.position), Diff.Updated u -> Some (p.seq, p.revision, p.at, Types.memory_id u.before,
                                                     Types.memory_id u.after, u.body_source)
     | _, (Diff.Removed _ | Diff.Added _ | Diff.Successor_unavailable _) -> None) d.Diff.events in
+  let clean_history = read () in
   let initial_links = links before in
   check int "live fixture has a direct replacement" 1 (List.length initial_links);
   let raw = In_channel.with_open_bin path In_channel.input_all in
@@ -293,7 +294,63 @@ let test_memory_diff_through_compaction () =
     match Masc.Librarian_memory_change.of_json row with
     | Ok change when change.seq = c.seq -> Some change.revision | Ok _ | Error _ -> None) rows in
   check (list int) "both original sequence versions remain recoverable"
-    [c.revision; variant.revision] (List.sort Int.compare versions)
+    [c.revision; variant.revision] (List.sort Int.compare versions);
+  let max_rows = Archive.max_detailed_rows in
+  let recent_seq = max_rows + 3 in
+  let trace = List.init recent_seq (fun i ->
+    let seq = i + 1 in
+    let added, removed = match seq with
+      | 1 -> [], [old, removal]
+      | 2 -> [old], []
+      | 3 -> [], [old, Effects.Dropped { reason = "final historical removal" }]
+      | n when n = recent_seq -> c.added, c.removed
+      | _ -> [old], [] in
+    { c with seq; revision = seq; at = Float.of_int seq; added; removed }) in
+  let large = Filename.concat place.memory_dir "retention.memory-log.jsonl" in
+  let large_archive = Log_store.archive_path_of_log_path large in
+  let save h = match Archive.write_history ~archive_path:large_archive h with
+    | Ok () -> () | Error msg -> fail msg in
+  let again () = match Archive.history large with
+    | Ok h -> h | Error e -> fail (Masc.Private_jsonl_scan.error_to_string e) in
+  save { clean_history with changes = trace; unsequenced = [] };
+  let kept = again () in
+  check int "bounded detailed commit count" max_rows (List.length kept.changes);
+  check bool "older chronology folds to one final removal, including a re-add" true
+    (match kept.unsequenced, kept.folded with
+     | [e], Some f -> e.removal = Effects.Dropped { reason = "final historical removal" }
+                       && f.through_seq = 3 && f.min_revision = 1 && f.max_revision = 3
+                       && f.min_at = 1. && f.max_at = 3.
+     | _ -> false);
+  save kept;
+  check bool "checkpointing an already folded history is idempotent" true
+    ((again ()).folded = kept.folded && (again ()).unsequenced = kept.unsequenced);
+  let module Window = Masc.Librarian_history_window in
+  let at_last = Window.Revisions (recent_seq, recent_seq) in
+  let read_range ?(max_bytes = 4 * 1024 * 1024) r =
+    match Window.read ~range:r ~max_bytes large with
+    | Ok w -> w | Error e -> fail (Masc.Private_jsonl_scan.error_to_string e) in
+  let recent = read_range at_last in
+  let w = Diff.project_window ~range:at_last ~current ~revision:recent_seq recent in
+  check bool "query materializes only needed out-of-range bodies" true
+    (List.for_all (fun (q : Masc.Librarian_memory_change.t) ->
+       q.seq = recent_seq || q.added = [] && q.removed = []) recent.changes);
+  check bool "recent query keeps the exact replacement and tick" true
+    (List.length (links w) = 1 && List.map (fun (q : Masc.Librarian_memory_change.t) -> q.seq) w.ticks = [recent_seq]);
+  check bool "retention intersects the folded revision and time but excludes a recent query" true
+    (match recent.folded with
+     | Some b -> Window.intersects (Window.Revisions (1, 1)) b
+                 && Window.intersects (Window.Time (3., 3.)) b && not (Window.intersects at_last b)
+     | None -> false);
+  let short = read_range ~max_bytes:1024 at_last in
+  check bool "byte-bounded tail reports actual omitted input" true
+    (short.input_limited && short.archive_cut.by_bytes && List.length short.changes < max_rows);
+  check bool "omitted byte prefix never invents a count of missing sequences" true
+    ((Diff.project_window ~range:at_last ~current ~revision:recent_seq short).gaps = []);
+  let all = Diff.project ~range:(Diff.Time (0., Float.of_int recent_seq)) ~current ~revision:recent_seq kept in
+  check bool "returned changes retain the most recent events and signal the row bound" true
+    (all.events_limited && List.length all.events = max_rows
+     && List.exists (fun ((p : Diff.position), _) -> p.seq = Some recent_seq) all.events)
+
 ;;
 
 let test_compact_log_preserves_promotions_across_reboot_and_archive_read () =

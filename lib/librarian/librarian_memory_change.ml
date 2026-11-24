@@ -25,6 +25,11 @@ let to_json c =
          ; "removed", `List (List.map removed c.removed) ]
 ;;
 
+let fingerprint c =
+  Digestif.SHA256.digest_string (Yojson.Safe.to_string (to_json { c with line_at = 0 }))
+  |> Digestif.SHA256.to_raw_string
+;;
+
 let same_event a b =
   Yojson.Safe.equal (to_json { a with line_at = 0 }) (to_json { b with line_at = 0 })
 ;;

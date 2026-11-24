@@ -1,6 +1,6 @@
 (** Direct, occurrence-scoped fact transitions. A successor carries the source
     of its displayed body independently from the ID established by the removal. *)
-type range = Time of float * float | Revisions of int * int
+type range = Librarian_history_window.range = Time of float * float | Revisions of int * int
 type position =
   { seq : int option
   ; revision : int option
@@ -25,6 +25,9 @@ type t =
   ; unsequenced_in_range : int
   ; snapshot_ahead : bool
   ; snapshot_behind : bool
+  ; events_limited : bool
   }
 
 val project : range:range -> current:Keeper_memory_os_types.fact list -> revision:int -> Librarian_archive.history -> t
+
+val project_window : range:range -> current:Keeper_memory_os_types.fact list -> revision:int -> Librarian_history_window.t -> t

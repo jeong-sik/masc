@@ -727,10 +727,7 @@ let test_wire_knowledge () =
   | Wire_knowledge.Writers_none_in_process | Wire_knowledge.Writers_running _ ->
       Alcotest.fail "expected live idle/asking/resting/refused_at_bottom writer states");
   (* Real Keeper Memory Diff: nullable range, updated/retracted, retrieval_count, relation=revision, writer_status object *)
-  let kdiff =
-    expect_ok "keeper memory diff"
-      (Wire_knowledge.decode_memory_diff
-         (parse_json
+  let keeper_diff_fixture = parse_json
             {|{
               "schema_version": 1, "instance_id": "srv-1", "generated_at_unix": 1795252092.45,
               "data": {
@@ -749,8 +746,32 @@ let test_wire_knowledge () =
                 "invalidated": [],
                 "writer_status": { "kind": "writer", "row": { "state": "resting" } }
               }
-            }|}))
-  in
+            }|} in
+  let decode body = expect_ok "keeper memory diff" (Wire_knowledge.decode_memory_diff body) in
+  let kdiff = decode keeper_diff_fixture in
+  let covered coverage =
+    match keeper_diff_fixture with
+    | `Assoc envelope -> (match List.assoc "data" envelope with
+      | `Assoc data -> (decode (`Assoc (("data", `Assoc (("coverage", coverage) :: data)) :: List.remove_assoc "data" envelope))).body
+      | _ -> Alcotest.fail "expected data object")
+    | _ -> Alcotest.fail "expected envelope" in
+  let folded = `Assoc ["through_seq", `Int 3; "min_revision", `Int 1; "max_revision", `Int 2;
+                       "min_at", `Float 1.; "max_at", `Float 3.] in
+  (match covered (`Assoc ["status", `String "complete"; "folded_detail", folded]) with
+   | Wire_knowledge.Keeper_diff { counts = { history_coverage = Some (Complete_with_retention f); _ }; _ } ->
+     Alcotest.(check int) "recent complete response retains its historical boundary" 3 f.through_seq
+   | _ -> Alcotest.fail "missing retention boundary");
+  let partial = `Assoc ["status", `String "partial"; "folded_detail", folded; "retention_applies", `Bool true;
+    "input_limited", `Bool true; "output_limited", `Bool true;
+    "limit_causes", `List [`String "archive_bytes"; `String "result_rows"]; "conflicting_sequences", `Int 2;
+    "missing_sequences", `List []; "unsequenced_in_window", `Int 0; "unplaced_in_revision_range", `Int 0;
+    "unreadable_lines", `Int 1; "unresolved_successors", `Int 0; "snapshot_ahead", `Bool false; "snapshot_behind", `Bool false] in
+  (match covered partial with
+   | Wire_knowledge.Keeper_diff { counts = { history_coverage = Some (Partial_history p); _ }; _ } ->
+     Alcotest.(check bool) "range, cause and damaged versus conflicting records remain distinguishable" true
+       (p.retention_applies && p.limit_causes = [Archive_bytes; Result_rows] && p.missing_sequences = []
+        && p.unreadable_lines = 1 && p.conflicting_sequences = 2)
+   | _ -> Alcotest.fail "missing partial history");
   Alcotest.(check int) "heat_hot" 4 kdiff.retrieval_heat.hot;
   (match kdiff.body with
   | Wire_knowledge.Keeper_diff

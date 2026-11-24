@@ -657,12 +657,24 @@ type memory_invalidated_fact = {
   missing_premise_ids : string list;
 }
 
+type history_limit = Live_rows | Live_bytes | Archive_rows | Archive_bytes | Result_rows | Result_bytes
+
+type folded_history =
+  { through_seq : int; min_revision : int; max_revision : int; min_at : float; max_at : float }
+
 type keeper_history_coverage =
   | Complete_history
+  | Complete_with_retention of folded_history
   | Partial_history of
       { missing_sequences : (int * int) list
       ; unsequenced_in_window : int
       ; unplaced_in_revision_range : int
+      ; folded_detail : folded_history option
+      ; retention_applies : bool
+      ; input_limited : bool
+      ; output_limited : bool
+      ; limit_causes : history_limit list
+      ; conflicting_sequences : int
       ; unreadable_lines : int
       ; unresolved_successors : int
       ; snapshot_ahead : bool

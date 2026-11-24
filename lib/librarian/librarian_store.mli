@@ -182,7 +182,10 @@ val commit_molt
     ([.memory-archive.jsonl]) and atomically rewrites the live log to a single
     [Checkpoint] baseline line preserving the exact current snapshot, revision,
     reading position, and working state. Malformed historical bytes and
-    conflicting versions are retained in the archive and remain visible as
+    conflicting versions remain in the archive. It keeps the most recent 2,000
+    detailed committed sequences, folds earlier changes to the last removal per
+    absent fact, and records the folded sequence, revision and time range.
+    Damaged and conflicting records remain visible as
     incomplete coverage after each checkpoint. Returns the updated store and the
     number of historical lines compacted. *)
 val compact_log : t -> at:float -> (t * int, stop) result

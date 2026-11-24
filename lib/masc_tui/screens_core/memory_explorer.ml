@@ -1432,8 +1432,24 @@ let render_keeper_diff_view ~grid ~(rect : Rect.t) ~(theme : Theme.t)
              | Some (Partial_history coverage) when !y < bottom ->
                let ranges = coverage.missing_sequences
                  |> List.map (fun (first, last) -> Printf.sprintf "%d–%d" first last) |> String.concat ", " in
+               let limit_name = function
+                 | Wire_knowledge.Live_rows -> say lang ~ko:"live 행" ~en:"live rows"
+                 | Live_bytes -> say lang ~ko:"live 바이트" ~en:"live bytes"
+                 | Archive_rows -> say lang ~ko:"보관 행" ~en:"archive rows"
+                 | Archive_bytes -> say lang ~ko:"보관 바이트" ~en:"archive bytes"
+                 | Result_rows -> say lang ~ko:"응답 행" ~en:"result rows"
+                 | Result_bytes -> say lang ~ko:"응답 바이트" ~en:"result bytes" in
                let details = List.filter_map Fun.id
-                 [ (if ranges <> "" then Some ("seq " ^ ranges) else None)
+                 [ (match coverage.folded_detail with
+                    | Some f when coverage.retention_applies ->
+                      Some (Printf.sprintf "%s %d" (say lang ~ko:"상세 이력 요약 경계 seq" ~en:"detail folded through seq") f.through_seq)
+                    | Some _ | None -> None)
+                 ; (match coverage.limit_causes with [] -> None | causes ->
+                      Some (String.concat ", " (List.map limit_name causes) ^ " " ^ say lang ~ko:"한도 도달" ~en:"limit reached"))
+                 ; (if coverage.limit_causes = [] && coverage.input_limited then Some (say lang ~ko:"조회 한도 도달" ~en:"read limit reached") else None)
+                 ; (if coverage.limit_causes = [] && coverage.output_limited then Some (say lang ~ko:"표시 한도 도달" ~en:"result limit reached") else None)
+                 ; (if coverage.conflicting_sequences > 0 then Some (Printf.sprintf "%s %d" (say lang ~ko:"충돌" ~en:"conflicting sequences") coverage.conflicting_sequences) else None)
+                 ; (if ranges <> "" then Some ("seq " ^ ranges) else None)
                  ; (if coverage.unreadable_lines > 0 then Some (Printf.sprintf "%s %d" (say lang ~ko:"판독 불가" ~en:"unreadable") coverage.unreadable_lines) else None)
                  ; (if coverage.unsequenced_in_window + coverage.unplaced_in_revision_range > 0 then
                       Some (Printf.sprintf "%s %d" (say lang ~ko:"revision 미상" ~en:"revision unknown")
@@ -1446,7 +1462,7 @@ let render_keeper_diff_view ~grid ~(rect : Rect.t) ~(theme : Theme.t)
                          ~style:(Typography.status ~bg theme Theme.Status_attention)
                          (String.concat " · " (say lang ~ko:"부분 이력" ~en:"Partial history" :: details)));
                incr y
-             | Some (Partial_history _ | Complete_history) | None -> ());
+             | Some (Partial_history _ | Complete_history | Complete_with_retention _) | None -> ());
             let h = diff.retrieval_heat in
             let heat_total = h.hot + h.warm + h.cold + h.never_retrieved in
             if heat_total > 0 && bottom - !y >= 4 then begin

@@ -1,4 +1,4 @@
-type range = Time of float * float | Revisions of int * int
+type range = Librarian_history_window.range = Time of float * float | Revisions of int * int
 type position =
   { seq : int option
   ; revision : int option
@@ -23,29 +23,38 @@ type t =
   ; unsequenced_in_range : int
   ; snapshot_ahead : bool
   ; snapshot_behind : bool
+  ; events_limited : bool
   }
 
 module Types = Keeper_memory_os_types
 module Change = Librarian_memory_change
 module Archive = Librarian_archive
 
-let includes range ~at ~revision =
-  match range with
-  | Time (lo, hi) -> lo <= at && at <= hi
-  | Revisions (lo, hi) -> Option.fold ~none:false ~some:(fun r -> lo <= r && r <= hi) revision
-;;
+let includes = Librarian_history_window.includes
 
-let project ~range ~current ~revision (history : Archive.history) =
+let project_rows ~range ~current ~revision ~unsequenced ~changes ~prefix_limited ~(folded : Archive.folded option) =
   let id = Types.memory_id in
+  let targets = Hashtbl.create 32 in
+  let add_target = function
+    | Librarian_effects.Revised_into target | Superseded_by target | Merged_into target ->
+      Hashtbl.replace targets target ()
+    | Dropped _ | Molted _ | Retracted _ | Support_lost _ -> () in
+  List.iter (fun (old : Archive.left) -> if includes range ~at:old.at ~revision:None then add_target old.removal) unsequenced;
+  List.iter (fun (c : Change.t) -> if includes range ~at:c.at ~revision:(Some c.revision) then
+    List.iter (fun (_, r) -> add_target r) c.removed) changes;
   let known = Hashtbl.create 64 and held = Hashtbl.create 64 in
-  let remember body_source fact = Hashtbl.replace known (id fact) (fact, body_source) in
-  List.iter (fun (e : Archive.left) -> remember Archived_fact e.fact) history.unsequenced;
+  let wanted fact = Hashtbl.mem targets (id fact) in
+  let remember body_source fact = if wanted fact then Hashtbl.replace known (id fact) (fact, body_source) in
+  List.iter (fun (e : Archive.left) -> remember Archived_fact e.fact) unsequenced;
   List.iter (fun (c : Change.t) ->
     List.iter (fun (fact, _) -> remember Archived_fact fact) c.removed;
-    List.iter (remember Archived_fact) c.added) history.changes;
+    List.iter (remember Archived_fact) c.added) changes;
   List.iter (remember Current_snapshot) current;
-  let events = ref [] in
-  let emit position event = events := (position, event) :: !events in
+  let events = Queue.create () and events_limited = ref false in
+  let emit position event =
+    Queue.add (position, event) events;
+    if Queue.length events > Archive.max_detailed_rows then (
+      ignore (Queue.take events : position * event); events_limited := true) in
   let changes_at position ~added ~removed =
     let replacements = Hashtbl.create 8 and revisions = Hashtbl.create 8 in
     List.iter (fun fact -> Hashtbl.replace replacements (id fact) fact) added;
@@ -86,9 +95,10 @@ let project ~range ~current ~revision (history : Archive.history) =
       if includes range ~at:e.at ~revision:None then (
         changes_at { seq = None; revision = None; at = e.at; source = None } ~added:[] ~removed:[e.fact, e.removal];
         n + 1)
-      else n) 0 history.unsequenced
+      else n) 0 unsequenced
   in
-  let last_seq = ref 0 and last_rev = ref 0 and gaps = ref [] and ticks = ref [] in
+  let last_seq = ref (Option.fold ~none:0 ~some:(fun f -> f.Archive.through_seq) folded)
+  and last_rev = ref (Option.fold ~none:0 ~some:(fun f -> f.Archive.max_revision) folded) and gaps = ref [] and ticks = ref [] in
   List.iter (fun (c : Change.t) ->
     if c.seq > !last_seq + 1 then (
       (* A lost sequence has no recorded time. Adjacent timestamps cannot prove
@@ -96,7 +106,7 @@ let project ~range ~current ~revision (history : Archive.history) =
       let relevant = match range with
         | Time _ -> true
         | Revisions (lo, hi) -> lo <= c.revision && !last_rev <= hi in
-      if relevant then gaps := { first_seq = !last_seq + 1; last_seq = c.seq - 1 } :: !gaps;
+      if relevant && not prefix_limited then gaps := { first_seq = !last_seq + 1; last_seq = c.seq - 1 } :: !gaps;
       Hashtbl.clear held);
     last_seq := c.seq;
     last_rev := c.revision;
@@ -105,8 +115,15 @@ let project ~range ~current ~revision (history : Archive.history) =
       changes_at { seq = Some c.seq; revision = Some c.revision; at = c.at; source = Some c.source }
         ~added:c.added ~removed:c.removed);
     List.iter (fun (fact, _) -> Hashtbl.remove held (id fact)) c.removed;
-    List.iter (fun fact -> Hashtbl.replace held (id fact) fact) c.added) history.changes;
-  let snapshot_ahead = revision > max 1 !last_rev in
+    List.iter (fun fact -> if wanted fact then Hashtbl.replace held (id fact) fact) c.added) changes;
+  let snapshot_ahead = not prefix_limited && revision > max 1 !last_rev in
   let snapshot_behind = !last_seq > 0 && revision < !last_rev in
-  { events = List.rev !events; ticks = List.rev !ticks; gaps = List.rev !gaps; unsequenced_in_range; snapshot_ahead; snapshot_behind }
+  { events = List.of_seq (Queue.to_seq events); events_limited = !events_limited; ticks = List.rev !ticks; gaps = List.rev !gaps; unsequenced_in_range; snapshot_ahead; snapshot_behind }
+;;
+
+let project ~range ~current ~revision (history : Archive.history) =
+  project_rows ~range ~current ~revision ~unsequenced:history.unsequenced ~changes:history.changes ~folded:history.folded ~prefix_limited:false
+;;
+let project_window ~range ~current ~revision (history : Librarian_history_window.t) =
+  project_rows ~range ~current ~revision ~unsequenced:history.unsequenced ~changes:history.changes ~folded:history.folded ~prefix_limited:history.input_limited
 ;;

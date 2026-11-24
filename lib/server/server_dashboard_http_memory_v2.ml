@@ -715,23 +715,28 @@ let keeper_diff_json ~now ~config ~keeper_id ~range =
   match Cur.read_for_keepers_dir ~keepers_dir ~keeper_id with
   | Error detail -> error_result Env.Store_unavailable ("snapshot read failed: " ^ detail)
   | Ok snapshot ->
-    match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () -> Librarian_archive.history log_path) with
+    let current = Option.fold ~none:[] ~some:(fun (s : Cur.t) -> s.facts) snapshot in
+    let revision = Option.fold ~none:0 ~some:(fun (s : Cur.t) -> s.revision) snapshot in
+    let filter, window, lo_time, hi_time, from_rev =
+      match range with
+      | Range_window w ->
+        let lo = now -. window_seconds w in
+        Diff.Time (lo, now), Some (window_to_string w), Some lo, Some now, None
+      | Range_revs { from_rev; to_rev } ->
+        Diff.Revisions (from_rev, Option.value ~default:max_int to_rev), None, None, None, Some from_rev in
+    let max_bytes = Keeper_memory_os_render.hard_backstop_bytes
+        ~maximum_bytes:(Env_config.KeeperMemoryOs.facts_max_bytes ()) in
+    match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+      Librarian_history_window.read ~range:filter ~max_bytes log_path) with
     | Error error -> error_result Env.Store_unavailable
                        ("memory history read failed: " ^ Private_jsonl_scan.error_to_string error)
     | Ok history ->
-      let current = Option.fold ~none:[] ~some:(fun (s : Cur.t) -> s.facts) snapshot in
-      let revision = Option.fold ~none:0 ~some:(fun (s : Cur.t) -> s.revision) snapshot in
-      let last_revision = List.fold_left (fun _ (c : Librarian_memory_change.t) -> c.revision) revision history.changes in
-      let filter, window, lo_time, hi_time, from_rev, to_rev =
-        match range with
-        | Range_window w ->
-          let lo = now -. window_seconds w in
-          Diff.Time (lo, now), Some (window_to_string w), Some lo, Some now, None, None
-        | Range_revs { from_rev; to_rev } ->
-          let hi = Option.value ~default:(max revision last_revision) to_rev in
-          Diff.Revisions (from_rev, hi), None, None, None, Some from_rev, Some hi
-      in
-      let diff = Diff.project ~range:filter ~current ~revision history in
+      let to_rev = match range with
+        | Range_window _ -> None
+        | Range_revs { to_rev = Some rev; _ } -> Some rev
+        | Range_revs { to_rev = None; _ } -> Some (List.fold_left (fun hi (c : Librarian_memory_change.t) ->
+            max hi c.revision) revision history.changes) in
+      let diff = Diff.project_window ~range:filter ~current ~revision history in
       let heat_lookup, total_events, unreadable_events = build_event_heat_table ~now ~keepers_dir ~keeper_id in
       let fact_fields = fact_diff_entry_fields ~heat_lookup in
       let int_opt = Json_util.int_opt_to_json in
@@ -739,12 +744,23 @@ let keeper_diff_json ~now ~config ~keeper_id ~range =
         | Diff.Revision -> "revision" | Program_revision -> "program_revision"
         | Program_absorption -> "program_absorption" in
       let added = ref [] and updated = ref [] and retracted = ref [] and invalidated = ref [] and unresolved = ref [] in
-      List.iteri (fun order ((p : Diff.position), event) ->
+      let rows_left = ref Librarian_archive.max_detailed_rows and bytes_left = ref max_bytes in
+      let output_rows = ref diff.events_limited and output_bytes = ref false in
+      let admit rows =
+        let count = List.length rows in
+        if count > !rows_left then (output_rows := true; false)
+        else
+          let bytes = List.fold_left (fun n (_, row) -> n + String.length (Yojson.Safe.to_string row) + 1) 0 rows in
+          if bytes > !bytes_left then (output_bytes := true; false)
+          else (bytes_left := !bytes_left - bytes; rows_left := !rows_left - count; true) in
+      let ordered = List.mapi (fun order event -> order, event) diff.events in
+      List.iter (fun (order, ((p : Diff.position), event)) ->
+        let group = ref [] in
         let push target fields =
-          target := `Assoc (("order", `Int order) :: ("seq", int_opt p.seq) ::
-                             ("at_unix", `Float p.at) :: fields) :: !target
+          group := (target, `Assoc (("order", `Int order) :: ("seq", int_opt p.seq) ::
+                             ("at_unix", `Float p.at) :: fields)) :: !group
         in
-        match event with
+        (match event with
         | Diff.Added f ->
           push added (("added_at_rev", int_opt p.revision) :: fact_fields f)
         | Updated { before; after; relation = r; body_source } ->
@@ -763,27 +779,33 @@ let keeper_diff_json ~now ~config ~keeper_id ~range =
                          ; "drop_reason", Json_util.string_opt_to_json reason ];
           Option.iter (fun ids ->
             push invalidated [ "memory_id", `String (Types.memory_id fact); "text", `String fact.claim
-                             ; "at_rev", int_opt p.revision; "missing_premise_ids", `List (List.map (fun s -> `String s) ids) ]) missing)
-        diff.events;
-      let ticks = List.map (fun (c : Librarian_memory_change.t) ->
+                             ; "at_rev", int_opt p.revision; "missing_premise_ids", `List (List.map (fun s -> `String s) ids) ]) missing);
+        if admit !group then List.iter (fun (target, row) -> target := row :: !target) !group)
+        (List.rev ordered);
+      let ticks = List.fold_left (fun ticks (c : Librarian_memory_change.t) ->
           let invalidated = List.fold_left (fun n (_, what) ->
             match what with Librarian_effects.Support_lost _ -> n + 1
             | Dropped _ | Molted _ | Merged_into _ | Revised_into _ | Superseded_by _ | Retracted _ -> n) 0 c.removed in
-          `Assoc [ "seq", `Int c.seq; "rev", `Int c.revision; "at_unix", `Float c.at
+          let row = `Assoc [ "seq", `Int c.seq; "rev", `Int c.revision; "at_unix", `Float c.at
                  ; "source", `String (Cur.source_kind_to_string c.source.kind)
                  ; "added", `Int (List.length c.added); "removed", `Int (List.length c.removed)
-                 ; "invalidated", `Int invalidated ]) diff.ticks in
+                 ; "invalidated", `Int invalidated ] in
+          if admit [(), row] then row :: ticks else ticks) [] (List.rev diff.ticks) in
       let hot = ref 0 and warm = ref 0 and cold = ref 0 and never = ref 0 in
       List.iter (fun fact -> match (heat_lookup (Types.memory_id fact)).heat with
         | Heat_hot -> incr hot | Heat_warm -> incr warm | Heat_cold -> incr cold | Heat_never -> incr never) current;
       let first_rev = function [] -> None | (c : Librarian_memory_change.t) :: _ -> Some c.revision in
-      let count rows = `Int (List.length !rows) and body rows = `List (List.rev !rows) in
+      let count rows = `Int (List.length !rows) and body rows = `List !rows in
       let unplaced =
         match filter, history.changes with
         | Diff.Time _, _ -> 0
         | Revisions (lo, _), (first : Librarian_memory_change.t) :: _ when lo > first.revision -> 0
-        | Revisions _, _ -> List.length history.unsequenced in
-      let partial = history.unreadable > 0 || diff.gaps <> [] || diff.snapshot_ahead || diff.snapshot_behind
+        | Revisions _, _ -> history.unsequenced_count in
+      let retention_applies = Option.fold ~none:false ~some:(Librarian_history_window.intersects filter) history.folded in
+      let retention = match history.folded with None -> `Null | Some f ->
+        `Assoc ["through_seq", `Int f.through_seq; "min_revision", `Int f.min_revision;
+                "max_revision", `Int f.max_revision; "min_at", `Float f.min_at; "max_at", `Float f.max_at] in
+      let partial = history.input_limited || !output_rows || !output_bytes || retention_applies || history.conflicting > 0 || history.unreadable > 0 || diff.gaps <> [] || diff.snapshot_ahead || diff.snapshot_behind
                     || unplaced > 0 || diff.unsequenced_in_range > 0 || !unresolved <> [] in
       Ok (Env.ok ~now
         (`Assoc
@@ -793,6 +815,15 @@ let keeper_diff_json ~now ~config ~keeper_id ~range =
                              ; "to_rev", int_opt (match to_rev with Some _ -> to_rev | None -> first_rev (List.rev diff.ticks))
                              ; "from_unix", Json_util.float_opt_to_json lo_time; "to_unix", Json_util.float_opt_to_json hi_time ]
            ; "coverage", `Assoc [ "status", `String (if partial then "partial" else "complete")
+                                ; "folded_detail", retention; "retention_applies", `Bool retention_applies
+                                ; "input_limited", `Bool history.input_limited; "output_limited", `Bool (!output_rows || !output_bytes)
+                                ; "limit_causes", `List (List.filter_map (fun (hit, name) ->
+                                  if hit then Some (`String name) else None)
+                                  [ history.live_cut.by_rows, "live_rows"; history.live_cut.by_bytes, "live_bytes";
+                                    history.archive_cut.by_rows, "archive_rows"; history.archive_cut.by_bytes, "archive_bytes";
+                                    !output_rows, "result_rows"; !output_bytes, "result_bytes" ])
+                                ; "row_limit", `Int Librarian_archive.max_detailed_rows; "byte_limit", `Int max_bytes
+                                ; "conflicting_sequences", `Int history.conflicting
                                 ; "unsequenced_in_window", `Int diff.unsequenced_in_range
                                 ; "unplaced_in_revision_range", `Int unplaced
                                 ; "missing_sequences", `List (List.map (fun (g : Diff.gap) ->
@@ -803,7 +834,7 @@ let keeper_diff_json ~now ~config ~keeper_id ~range =
            ; "counts", `Assoc [ "total_facts_now", `Int (List.length current); "added", count added; "updated", count updated
                               ; "retracted", count retracted; "invalidated", count invalidated
                               ; "journal_failures_in_window", `Int 0; "journal_quarantines_in_window", `Int 0
-                              ; "undecodable_journal_lines", `Int history.unreadable ]
+                              ; "undecodable_journal_lines", `Int (history.unreadable + history.conflicting) ]
            ; "retrieval_heat", `Assoc [ "hot", `Int !hot; "warm", `Int !warm; "cold", `Int !cold; "never_retrieved", `Int !never
                                       ; "total_events", `Int total_events; "unreadable_event_lines", `Int unreadable_events ]
            ; "revisions", `List ticks; "added", body added; "updated", body updated; "retracted", body retracted

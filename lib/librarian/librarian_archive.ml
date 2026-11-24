@@ -19,6 +19,22 @@ type t =
   ; unreadable : int
   }
 
+let max_detailed_rows = 2000
+
+type folded =
+  { through_seq : int; min_revision : int; max_revision : int; min_at : float; max_at : float }
+
+let combine_folded a b =
+  { through_seq = max a.through_seq b.through_seq;
+    min_revision = min a.min_revision b.min_revision; max_revision = max a.max_revision b.max_revision;
+    min_at = min a.min_at b.min_at; max_at = max a.max_at b.max_at }
+
+let add_folded prior value = Some (Option.fold ~none:value ~some:(combine_folded value) prior)
+
+let folded_json f =
+  `List [`String "librarian.folded.v1"; `Int f.through_seq; `Int f.min_revision;
+         `Int f.max_revision; `Float f.min_at; `Float f.max_at]
+
 type retained = { opaque : Opaque_rows.t; conflicts : Change.t list }
 
 type history =
@@ -26,6 +42,7 @@ type history =
   ; changes : Change.t list
   ; unreadable : int
   ; live_lines : int
+  ; folded : folded option
   ; retained : retained
   }
 
@@ -60,6 +77,28 @@ let left_of_json = function
     Types.wire_here Types.Expected_object
 ;;
 
+type cold_row =
+  | Left of left
+  | Detail of Change.t
+  | Folded of folded
+  | Opaque of string
+  | Invalid
+
+let cold_row raw =
+  match Yojson.Safe.from_string raw with
+  | exception Yojson.Json_error _ -> Invalid
+  | `List [`String "librarian.folded.v1"; `Int through_seq; `Int min_revision;
+           `Int max_revision; `Float min_at; `Float max_at]
+    when through_seq > 0 && min_revision >= 0 && min_revision <= max_revision
+         && Float.is_finite min_at && Float.is_finite max_at && min_at <= max_at ->
+    Folded { through_seq; min_revision; max_revision; min_at; max_at }
+  | `List [`String "librarian.unreadable.v1"; `String ("live" | "archive" | "archive_fragment");
+           `Int offset; `Int seq; `String bytes] as marker
+    when offset >= 0 && seq >= 0 && Result.is_ok (Base64.decode bytes) -> Opaque (Yojson.Safe.to_string marker)
+  | `Assoc fields as json when List.mem_assoc "seq" fields ->
+    (match Change.of_json json with Ok c -> Detail c | Error _ -> Invalid)
+  | json -> (match left_of_json json with Ok left -> Left left | Error _ -> Invalid)
+
 let record_left seen (entry : left) =
   { gone = By_id.add (Types.memory_id entry.fact) (seen.removals, entry) seen.gone
   ; removals = seen.removals + 1
@@ -83,6 +122,16 @@ let left_of_history (history : history) ~current =
   { left = List.map snd ordered; unreadable = history.unreadable }
 ;;
 
+let compact_details (history : history) =
+  let excess = List.length history.changes - max_detailed_rows in
+  if excess <= 0 then history else
+    let old = List.take excess history.changes and changes = List.drop excess history.changes in
+    let unsequenced = (left_of_history { history with changes = old } ~current:[]).left in
+    let folded = List.fold_left (fun prior (c : Change.t) -> add_folded prior
+      { through_seq = c.seq; min_revision = c.revision; max_revision = c.revision;
+        min_at = c.at; max_at = c.at }) history.folded old in
+    { history with unsequenced; changes; folded }
+
 let write_history ~archive_path (history : history) =
   let dir = Filename.dirname archive_path in
   match Fs_compat.mkdir_p dir with
@@ -91,10 +140,12 @@ let write_history ~archive_path (history : history) =
   | () ->
     let buf = Buffer.create 4096 in
     let write json = Buffer.add_string buf (Yojson.Safe.to_string json); Buffer.add_char buf '\n' in
-    List.iter (fun old -> write (left_to_json old)) history.unsequenced;
-    List.iter (fun c -> write (Change.to_json c)) history.changes;
+    let history = compact_details history in
     List.iter (fun c -> write (Change.to_json c)) history.retained.conflicts;
     Opaque_rows.iter (fun row -> Buffer.add_string buf row; Buffer.add_char buf '\n') history.retained.opaque;
+    List.iter (fun old -> write (left_to_json old)) history.unsequenced;
+    List.iter (fun c -> write (Change.to_json c)) history.changes;
+    Option.iter (fun boundary -> write (folded_json boundary)) history.folded;
     Fs_compat.save_file_atomic_strict archive_path (Buffer.contents buf)
 ;;
 
@@ -143,15 +194,17 @@ let with_path_lock ~log_path f =
   Fun.protect ~finally:release (fun () -> Cross_context_mutex.with_lock entry.mu f)
 ;;
 
+let damaged_row ~origin ~at ~after_seq raw =
+  Yojson.Safe.to_string (`List [`String "librarian.unreadable.v1"; `String origin;
+                                `Int at; `Int after_seq; `String (Base64.encode_string raw)])
+let remember_raw ~origin ~at ~after_seq raw opaque =
+  Opaque_rows.add (damaged_row ~origin ~at ~after_seq raw) opaque
+
 let history_unlocked path =
   let open Result.Syntax in
   (* A checkpoint publishes the archive first. Capturing live before cold
      therefore sees either copy of every committed sequence, including when
      another process is between the two atomic renames. *)
-  let remember_raw ~origin ~at ~after_seq raw opaque =
-    let encoded = `List [`String "librarian.unreadable.v1"; `String origin;
-                         `Int at; `Int after_seq; `String (Base64.encode_string raw)] in
-    Opaque_rows.add (Yojson.Safe.to_string encoded) opaque in
   let* live, live_opaque, live_lines, _ =
     Log_store.fold_with_raw path ~init:([], Opaque_rows.empty, 0, 0)
       ~f:(fun (changes, opaque, count, after_seq) row raw ->
@@ -168,25 +221,16 @@ let history_unlocked path =
       | None -> Some [c]
       | Some copies when List.exists (Change.same_event c) copies -> Some copies
       | Some copies -> Some (c :: copies)) events in
-  let* old, versions, opaque, complete_end, after_seq =
-    Private_jsonl_scan.fold cold ~rows_per_read:128 ~init:([], By_seq.empty, live_opaque, 0, 0)
-      ~f:(fun (old, versions, opaque, _, after_seq) ~at raw ->
+  let* old, versions, opaque, complete_end, after_seq, folded =
+    Private_jsonl_scan.fold cold ~rows_per_read:128 ~init:([], By_seq.empty, live_opaque, 0, 0, None)
+      ~f:(fun (old, versions, opaque, _, after_seq, folded) ~at raw ->
         let next = at + String.length raw + 1 in
-        let damaged () = old, versions, remember_raw ~origin:"archive" ~at ~after_seq raw opaque, next, after_seq in
-        match Yojson.Safe.from_string raw with
-        | exception Yojson.Json_error _ -> damaged ()
-        | `List [`String "librarian.unreadable.v1"; `String ("live" | "archive" | "archive_fragment");
-                 `Int offset; `Int seq; `String bytes] as marker
-          when offset >= 0 && seq >= 0 && Result.is_ok (Base64.decode bytes) ->
-          old, versions, Opaque_rows.add (Yojson.Safe.to_string marker) opaque, next, after_seq
-        | `Assoc fields as json when List.mem_assoc "seq" fields ->
-          (match Change.of_json json with
-           | Ok c -> old, add_change versions c, opaque, next, max after_seq c.seq
-           | Error _ -> damaged ())
-        | json ->
-          (match left_of_json json with
-           | Ok left -> left :: old, versions, opaque, next, after_seq
-           | Error _ -> damaged ()))
+        match cold_row raw with
+        | Invalid -> old, versions, remember_raw ~origin:"archive" ~at ~after_seq raw opaque, next, after_seq, folded
+        | Opaque marker -> old, versions, Opaque_rows.add marker opaque, next, after_seq, folded
+        | Detail c -> old, add_change versions c, opaque, next, max after_seq c.seq, folded
+        | Left left -> left :: old, versions, opaque, next, after_seq, folded
+        | Folded boundary -> old, versions, opaque, next, after_seq, add_folded folded boundary)
   in
   (* A fragment in the atomically published archive is evidence of damage.
      Keep its exact bytes opaque even when those bytes alone parse as JSON. *)
@@ -215,6 +259,8 @@ let history_unlocked path =
   let versions = List.fold_left add_change versions live in
   let changes, conflicts, unreadable = By_seq.fold (fun _ copies (changes, conflicts, n) ->
     match copies with
+    | [one] when Option.fold ~none:false ~some:(fun f -> one.Change.seq <= f.through_seq) folded ->
+      changes, conflicts, n
     | [one] -> one :: changes, conflicts, n
     | many -> changes, List.rev_append many conflicts, n + 1)
     versions ([], [], Opaque_rows.cardinal opaque) in
@@ -228,7 +274,7 @@ let history_unlocked path =
       c.removed) changes;
   let unsequenced = List.rev old |> List.filter (fun (e : left) ->
     not (Hashtbl.mem known (Types.memory_id e.fact, e.removal, e.at))) in
-  Ok { unsequenced; changes; unreadable; live_lines; retained = { opaque; conflicts } }
+  Ok { unsequenced; changes; unreadable; live_lines; folded; retained = { opaque; conflicts } }
 ;;
 
 let history path = with_path_lock ~log_path:path (fun () -> history_unlocked path)

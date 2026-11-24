@@ -1414,12 +1414,24 @@ type memory_invalidated_fact = {
   missing_premise_ids : string list;
 }
 
+type history_limit = Live_rows | Live_bytes | Archive_rows | Archive_bytes | Result_rows | Result_bytes
+
+type folded_history =
+  { through_seq : int; min_revision : int; max_revision : int; min_at : float; max_at : float }
+
 type keeper_history_coverage =
   | Complete_history
+  | Complete_with_retention of folded_history
   | Partial_history of
       { missing_sequences : (int * int) list
       ; unsequenced_in_window : int
       ; unplaced_in_revision_range : int
+      ; folded_detail : folded_history option
+      ; retention_applies : bool
+      ; input_limited : bool
+      ; output_limited : bool
+      ; limit_causes : history_limit list
+      ; conflicting_sequences : int
       ; unreadable_lines : int
       ; unresolved_successors : int
       ; snapshot_ahead : bool
@@ -1911,9 +1923,31 @@ let decode_keeper_history_coverage data =
   | None -> Ok None
   | Some obj ->
     let* state = required_nonblank_string obj "status" in
+    let* folded = optional_object_field obj "folded_detail" in
+    let* folded_detail = match folded with
+      | None -> Ok None
+      | Some f ->
+        let* through_seq = required_nonnegative_int_field f "through_seq" in
+        let* min_revision = required_nonnegative_int_field f "min_revision" in
+        let* max_revision = required_nonnegative_int_field f "max_revision" in
+        let* min_at = required_finite_float f "min_at" in
+        let* max_at = required_finite_float f "max_at" in
+        if through_seq < 1 || min_revision > max_revision || min_at > max_at then Error "invalid folded history range"
+        else Ok (Some { through_seq; min_revision; max_revision; min_at; max_at }) in
     (match state with
-     | "complete" -> Ok (Some Complete_history)
+     | "complete" -> Ok (Some (match folded_detail with None -> Complete_history | Some f -> Complete_with_retention f))
      | "partial" ->
+       let flag key = Result.map (Option.value ~default:false) (optional_bool_field obj key) in
+       let* retention_applies = flag "retention_applies" in
+       let* input_limited = flag "input_limited" in
+       let* output_limited = flag "output_limited" in
+       let* causes = optional_list_field obj "limit_causes" in
+       let* limit_causes = decode_list "limit_causes" (function
+         | `String "live_rows" -> Ok Live_rows | `String "live_bytes" -> Ok Live_bytes
+         | `String "archive_rows" -> Ok Archive_rows | `String "archive_bytes" -> Ok Archive_bytes
+         | `String "result_rows" -> Ok Result_rows | `String "result_bytes" -> Ok Result_bytes
+         | _ -> Error "unknown memory history limit") causes in
+       let* conflicting_sequences = optional_nonnegative_count obj "conflicting_sequences" in
        let* gaps = required_list_field obj "missing_sequences" in
        let* missing_sequences = decode_list "missing_sequences" (fun json ->
          let* first = required_nonnegative_int_field json "first" in
@@ -1926,6 +1960,7 @@ let decode_keeper_history_coverage data =
        let* snapshot_ahead = required_bool_field obj "snapshot_ahead" in
        let* snapshot_behind = required_bool_field obj "snapshot_behind" in
        Ok (Some (Partial_history { missing_sequences; unsequenced_in_window; unplaced_in_revision_range;
+                                   folded_detail; retention_applies; input_limited; output_limited; limit_causes; conflicting_sequences;
                                    unreadable_lines; unresolved_successors; snapshot_ahead; snapshot_behind }))
      | other -> Error ("unknown keeper history coverage: " ^ other))
 

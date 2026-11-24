@@ -2494,6 +2494,10 @@ and execute_action ~now (m : Model.t) action =
                           let fleet, drafts =
                             mark_ui_interrupting stream_opt tx_opt
                           in
+                          let fleet =
+                            Fleet_store.mark_turn_interrupting ~keeper:name
+                              ~interrupt_token:turn.interrupt_token fleet
+                          in
                           Some
                             ( name
                             , `Turn_token turn.interrupt_token
@@ -6276,12 +6280,34 @@ and execute_action ~now (m : Model.t) action =
       | None -> (m, [])
       | Some keeper -> (
           match Fleet_store.active_turn_for ~keeper m.fleet with
+          | Some turn
+            when Fleet_store.is_turn_interrupting ~keeper
+                   ~interrupt_token:turn.interrupt_token m.fleet ->
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make
+                     ~ko:("이미 중단 요청을 전송했습니다: " ^ keeper)
+                     ~en:("Interrupt already requested for " ^ keeper))
+                  m
+              , [] )
+          | Some turn
+            when Wire_fleet.equal_turn_lane turn.lane
+                   Wire_fleet.Lane_maintenance ->
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make
+                     ~ko:("점검 턴은 중단할 수 없습니다: " ^ keeper)
+                     ~en:("Maintenance turn cannot be interrupted: " ^ keeper))
+                  m
+              , [] )
           | Some turn ->
+              let fleet =
+                Fleet_store.mark_turn_interrupting ~keeper
+                  ~interrupt_token:turn.interrupt_token m.fleet
+              in
               ( Model.with_toast ~now ~level:Model.Toast_warning
                   (Say.make
                      ~ko:("키퍼 턴 중단 요청 전송: " ^ keeper)
                      ~en:("Interrupt requested for keeper turn: " ^ keeper))
-                  m
+                  { m with fleet }
               , [
                   Cmd.Http_post
                     {

@@ -44,11 +44,27 @@ type live_chat_phase =
   | Phase_thinking
   | Phase_tool_running of string
   | Phase_streaming
+  | Phase_turn_running of {
+      turn : Wire_fleet.active_turn;
+      queued_count : int;
+    }
   | Phase_confirming
   | Phase_interrupting
   | Phase_failed of string
 
 val equal_live_chat_phase : live_chat_phase -> live_chat_phase -> bool
+
+val active_turn_short_activity : Wire_fleet.active_turn -> Say.t
+(** Concise live activity label for a running Owner-slot turn, derived from
+    [turn.preview] (or fallback [tool_in_flight]/[phase]). *)
+
+val active_turn_detail_summary : Wire_fleet.active_turn -> Say.t
+(** Single-line progress summary ([<lane> · <activity/preparation/last tool>])
+    for the active-turn transcript observation row. *)
+
+val active_turn_preview_tail : Wire_fleet.active_turn -> string option
+(** Secret-scrubbed single-line preview snippet from [turn.preview.text_tail],
+    or [None] when blank or absent. *)
 
 val live_chat_phase : model:Model.t -> keeper:string -> live_chat_phase
 (** Single-source-of-truth live chat turn phase driving the Keeper header badge,
@@ -81,6 +97,7 @@ type pending_tx_projection = {
 
 type transcript_section =
   | Section_history of Wire_fleet.chat_message list
+  | Section_active_turn of Wire_fleet.active_turn
   | Section_pending of pending_tx_projection list
   | Section_stream of stream_projection
 

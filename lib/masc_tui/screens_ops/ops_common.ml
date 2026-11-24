@@ -391,18 +391,30 @@ let keeper_live_status ~has_attention (k : Wire_fleet.keeper_summary) =
         ( Glyph.Live_working
         , Theme.Status_attention
         , Say.make ~ko:"복구 중" ~en:"Recovering" )
-    | Wire_fleet.Keeper_healthy ->
-        ( Glyph.Live_healthy
-        , Theme.Status_ok
-        , Say.make ~ko:"정상" ~en:"Healthy" )
+    | Wire_fleet.Keeper_healthy -> (
+        match k.active_turn with
+        | Some _ ->
+            ( Glyph.Live_working
+            , Theme.Status_active
+            , Say.make ~ko:"작업 중" ~en:"Working" )
+        | None ->
+            ( Glyph.Live_healthy
+            , Theme.Status_ok
+            , Say.make ~ko:"정상" ~en:"Healthy" ))
     | Wire_fleet.Keeper_paused ->
         ( Glyph.Live_paused
         , Theme.Status_historical
         , Say.make ~ko:"일시 정지" ~en:"Paused" )
-    | Wire_fleet.Keeper_idle ->
-        ( Glyph.Live_idle
-        , Theme.Status_historical
-        , Say.make ~ko:"유휴" ~en:"Idle" )
+    | Wire_fleet.Keeper_idle -> (
+        match k.active_turn with
+        | Some _ ->
+            ( Glyph.Live_working
+            , Theme.Status_active
+            , Say.make ~ko:"작업 중" ~en:"Working" )
+        | None ->
+            ( Glyph.Live_idle
+            , Theme.Status_historical
+            , Say.make ~ko:"유휴" ~en:"Idle" ))
 
 let activation_label = function
   | Wire_fleet.Activation_autonomous -> Say.make ~ko:"자율" ~en:"AUTO"
@@ -529,12 +541,13 @@ let keeper_turn_summary ~lang (k : Wire_fleet.keeper_summary) =
   match k.active_turn with
   | Some turn -> (
       let lane = Say.resolve lang (turn_lane_label turn.lane) in
-      match turn.tool_in_flight with
-      | Some tool -> Printf.sprintf "%s:%s" lane tool
-      | None -> (
-          match turn.phase with
-          | Some p -> Printf.sprintf "%s:%s" lane p
-          | None -> lane))
+      match turn.tool_in_flight, turn.preview, turn.phase with
+      | Some tool, _, _ -> Printf.sprintf "%s:%s" lane tool
+      | None, Some _, _ ->
+          Printf.sprintf "%s · %s" lane
+            (Say.resolve lang (Chat_transcript.active_turn_short_activity turn))
+      | None, None, Some p -> Printf.sprintf "%s:%s" lane p
+      | None, None, None -> lane)
   | None -> (
       match k.current_task_id with
       | Some tid -> tid

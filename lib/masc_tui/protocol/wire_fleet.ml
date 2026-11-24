@@ -72,13 +72,55 @@ type turn_lane =
   | Lane_maintenance
   | Lane_internal
 
+type turn_preview_activity =
+  | Preview_preparing
+  | Preview_waiting
+  | Preview_streaming
+  | Preview_tool_observed
+  | Preview_failed
+
+type turn_preparation_phase =
+  | Prep_task
+  | Prep_world
+  | Prep_context
+  | Prep_prompt
+  | Prep_tools
+  | Prep_skills
+  | Prep_lane_inputs
+  | Prep_workspace_memory
+  | Prep_wiki
+
+type turn_preparation_state =
+  | Prep_active
+  | Prep_prepared
+  | Prep_rejected
+  | Prep_raised
+  | Prep_cancelled
+
+type turn_preparation = {
+  phase : turn_preparation_phase;
+  state : turn_preparation_state;
+  started_at_unix : float;
+}
+
+type turn_preview = {
+  status_text : string;
+  activity : turn_preview_activity;
+  text_tail : string;
+  last_tool : string option;
+  updated_at_unix : float;
+  preparation : turn_preparation option;
+}
+
 type active_turn = {
   lane : turn_lane;
+  turn_ref : string option;
   started_at_unix : float;
   interrupt_token : string;
   phase : string option;
   tool_in_flight : string option;
   elapsed_ms : float option;
+  preview : turn_preview option;
 }
 
 type keeper_turn_state =
@@ -296,6 +338,106 @@ let turn_lane_of_string raw =
   | "internal" | "librarian" -> Some Lane_internal
   | _ -> None
 
+let turn_preview_activity_of_string raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "preparing" -> Some Preview_preparing
+  | "waiting" -> Some Preview_waiting
+  | "streaming" -> Some Preview_streaming
+  | "tool" -> Some Preview_tool_observed
+  | "failed" -> Some Preview_failed
+  | _ -> None
+
+let turn_preparation_phase_of_string raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "task" -> Some Prep_task
+  | "world" -> Some Prep_world
+  | "context" -> Some Prep_context
+  | "prompt" -> Some Prep_prompt
+  | "tools" -> Some Prep_tools
+  | "skills" -> Some Prep_skills
+  | "lane_inputs" -> Some Prep_lane_inputs
+  | "workspace_memory" -> Some Prep_workspace_memory
+  | "wiki" -> Some Prep_wiki
+  | _ -> None
+
+let turn_preparation_state_of_string raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "active" -> Some Prep_active
+  | "prepared" -> Some Prep_prepared
+  | "rejected" -> Some Prep_rejected
+  | "raised" -> Some Prep_raised
+  | "cancelled" -> Some Prep_cancelled
+  | _ -> None
+
+let turn_lane_tag = function
+  | Lane_chat -> 0
+  | Lane_proactive -> 1
+  | Lane_schedule -> 2
+  | Lane_board -> 3
+  | Lane_task -> 4
+  | Lane_verification -> 5
+  | Lane_maintenance -> 6
+  | Lane_internal -> 7
+
+let equal_turn_lane a b = Int.equal (turn_lane_tag a) (turn_lane_tag b)
+
+let turn_preview_activity_tag = function
+  | Preview_preparing -> 0
+  | Preview_waiting -> 1
+  | Preview_streaming -> 2
+  | Preview_tool_observed -> 3
+  | Preview_failed -> 4
+
+let equal_turn_preview_activity a b =
+  Int.equal (turn_preview_activity_tag a) (turn_preview_activity_tag b)
+
+let turn_preparation_phase_tag = function
+  | Prep_task -> 0
+  | Prep_world -> 1
+  | Prep_context -> 2
+  | Prep_prompt -> 3
+  | Prep_tools -> 4
+  | Prep_skills -> 5
+  | Prep_lane_inputs -> 6
+  | Prep_workspace_memory -> 7
+  | Prep_wiki -> 8
+
+let equal_turn_preparation_phase a b =
+  Int.equal (turn_preparation_phase_tag a) (turn_preparation_phase_tag b)
+
+let turn_preparation_state_tag = function
+  | Prep_active -> 0
+  | Prep_prepared -> 1
+  | Prep_rejected -> 2
+  | Prep_raised -> 3
+  | Prep_cancelled -> 4
+
+let equal_turn_preparation_state a b =
+  Int.equal (turn_preparation_state_tag a) (turn_preparation_state_tag b)
+
+let equal_turn_preparation (a : turn_preparation) (b : turn_preparation) =
+  equal_turn_preparation_phase a.phase b.phase
+  && equal_turn_preparation_state a.state b.state
+  && Float.equal a.started_at_unix b.started_at_unix
+
+let equal_turn_preview (a : turn_preview) (b : turn_preview) =
+  String.equal a.status_text b.status_text
+  && equal_turn_preview_activity a.activity b.activity
+  && String.equal a.text_tail b.text_tail
+  && Option.equal String.equal a.last_tool b.last_tool
+  && Float.equal a.updated_at_unix b.updated_at_unix
+  && Option.equal equal_turn_preparation a.preparation b.preparation
+
+let equal_active_turn (a : active_turn) (b : active_turn) =
+  equal_turn_lane a.lane b.lane
+  && Option.equal String.equal a.turn_ref b.turn_ref
+  && Float.equal a.started_at_unix b.started_at_unix
+  && String.equal a.interrupt_token b.interrupt_token
+  && Option.equal String.equal a.phase b.phase
+  && Option.equal String.equal a.tool_in_flight b.tool_in_flight
+  && Option.equal Float.equal a.elapsed_ms b.elapsed_ms
+  && Option.equal equal_turn_preview a.preview b.preview
+
 let prefix_before_dash name =
   match String.index_opt name '-' with
   | Some idx when idx > 0 -> Some (String.sub name 0 idx)
@@ -506,21 +648,60 @@ let group_by_company ?(attention = []) ?(sandbox_profiles = [])
       else String.compare a.company b.company)
     groups
 
+let decode_turn_preparation json =
+  let* phase =
+    decode_enum ~field:"phase" turn_preparation_phase_of_string json
+  in
+  let* state =
+    decode_enum ~field:"state" turn_preparation_state_of_string json
+  in
+  let* started_at_unix = required_finite_float json "started_at_unix" in
+  Ok { phase; state; started_at_unix }
+
+let decode_turn_preview json =
+  let* status_text = required_string_field json "status_text" in
+  let* activity =
+    decode_enum ~field:"activity" turn_preview_activity_of_string json
+  in
+  let* text_tail = required_string_field json "text_tail" in
+  let* last_tool = optional_nonblank_string json "last_tool" in
+  let* updated_at_unix = required_finite_float json "updated_at_unix" in
+  let* prep_obj = optional_object_field json "preparation" in
+  let* preparation =
+    match prep_obj with
+    | None -> Ok None
+    | Some pjson ->
+        let* p = decode_turn_preparation pjson in
+        Ok (Some p)
+  in
+  Ok { status_text; activity; text_tail; last_tool; updated_at_unix; preparation }
+
 let decode_active_turn json =
   let* lane = decode_enum ~field:"lane" turn_lane_of_string json in
+  let* turn_ref = optional_nonblank_string json "turn_ref" in
   let* started_at_unix = required_finite_float json "started_at_unix" in
   let* interrupt_token = required_string_field json "interrupt_token" in
   let* phase = optional_nonblank_string json "phase" in
   let* tool_in_flight = optional_nonblank_string json "tool_in_flight" in
   let* elapsed_ms = optional_finite_float json "elapsed_ms" in
+  let* prev_obj = optional_object_field json "preview" in
+  let* preview =
+    match prev_obj with
+    | None -> Ok None
+    | Some pjson ->
+        let* p = decode_turn_preview pjson in
+        Ok (Some p)
+  in
   Ok
     {
       lane;
+      turn_ref;
       started_at_unix;
       interrupt_token;
       phase;
       tool_in_flight;
       elapsed_ms;
+      preview;
     }
 
 let decode_keeper_turn_row json =

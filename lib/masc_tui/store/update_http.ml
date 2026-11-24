@@ -550,11 +550,12 @@ let apply_http_reply ~now (m : Model.t) reply =
               ~en:("Pending admission paused: " ^ keeper) )
         else
           let fleet1 =
-            match Fleet_store.String_map.find_opt keeper fleet0.chat_streams with
+            (match Fleet_store.String_map.find_opt keeper fleet0.chat_streams with
             | Some b when b.interrupting ->
                 Fleet_store.mark_chat_stream_interrupting ~keeper
                   ~request_id:b.request_id ~interrupting:false fleet0
-            | Some _ | None -> fleet0
+            | Some _ | None -> fleet0)
+            |> Fleet_store.clear_turn_interrupting ~keeper
           in
           let drafts1 =
             match Drafts.active_tx_for_keeper ~keeper m.drafts with
@@ -585,11 +586,12 @@ let apply_http_reply ~now (m : Model.t) reply =
         ] )
   | Msg.Reply_turn_interrupt { keeper; result = Error err } ->
       let fleet =
-        match Fleet_store.String_map.find_opt keeper m.fleet.chat_streams with
+        (match Fleet_store.String_map.find_opt keeper m.fleet.chat_streams with
         | Some b when b.interrupting ->
             Fleet_store.mark_chat_stream_interrupting ~keeper
               ~request_id:b.request_id ~interrupting:false m.fleet
-        | Some _ | None -> m.fleet
+        | Some _ | None -> m.fleet)
+        |> Fleet_store.clear_turn_interrupting ~keeper
       in
       let drafts =
         match Drafts.active_tx_for_keeper ~keeper m.drafts with

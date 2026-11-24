@@ -4293,11 +4293,13 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
                    Wire_fleet.Turn_active
                      {
                        lane = Wire_fleet.Lane_chat;
+                       turn_ref = None;
                        started_at_unix = 100.0;
                        interrupt_token = "int-tok-7";
                        phase = Some "thinking";
                        tool_in_flight = None;
                        elapsed_ms = Some 500.0;
+                       preview = None;
                      };
                };
              ];
@@ -9045,11 +9047,13 @@ let test_busy_enter_queues_and_steer_cuts_only_own_request () =
         Wire_fleet.Turn_active
           {
             lane = Wire_fleet.Lane_chat;
+            turn_ref = None;
             started_at_unix = 100.0;
             interrupt_token;
             phase = Some "thinking";
             tool_in_flight = None;
             elapsed_ms = Some 500.0;
+            preview = None;
           };
     }
   in
@@ -15630,6 +15634,436 @@ let test_ux_sweep_12_fixes () =
     (Option.map (fun (e : Attention.entry) -> e.id)
        (Attention.current_filtered_item ~query:"" m_gr_pulse.attention))
 
+let test_active_turn_preview_visibility_and_queued_followup () =
+  let keeper = "e-masc-the-leader" in
+  let hist_page : Wire_fleet.chat_history_page =
+    {
+      messages =
+        [
+          {
+            id = "hist-1";
+            role = Wire_fleet.Role_assistant;
+            content = "Previous turn summary";
+            ts_unix = 1795498418.0;
+            turn_ref = Some "trace-1#15204";
+            model_used = None;
+            tool_call_id = None;
+            tool_call_name = None;
+            execution_id = None;
+            operation_id = None;
+            transcript_slot = None;
+            failure_kind = None;
+          };
+        ];
+      has_more = false;
+      next_cursor = None;
+    }
+  in
+  let active_preview_waiting : Wire_fleet.turn_preview =
+    {
+      status_text =
+        "ollama · waiting for provider response · last observed tool: Execute";
+      activity = Wire_fleet.Preview_waiting;
+      text_tail = "";
+      last_tool = Some "Execute";
+      updated_at_unix = 1795503086.0;
+      preparation = None;
+    }
+  in
+  let active_turn_no_tail : Wire_fleet.active_turn =
+    {
+      lane = Wire_fleet.Lane_proactive;
+      turn_ref = Some "trace-1#15206";
+      started_at_unix = 1795503055.0;
+      interrupt_token = "itok-auto-15206";
+      phase = None;
+      tool_in_flight = None;
+      elapsed_ms = None;
+      preview = Some active_preview_waiting;
+    }
+  in
+  let turn_row_of turn : Wire_fleet.keeper_turn_row =
+    {
+      keeper_name = keeper;
+      chat_control_token = Some "ctrl-tok-1";
+      state = Wire_fleet.Turn_active turn;
+    }
+  in
+  let m0 =
+    let base = Model.initial ~cols:120 ~rows:36 () in
+    {
+      base with
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Keepers;
+          dive_stack =
+            [ Nav.Dive_keeper { name = keeper; tab = Nav.Keeper_chat } ];
+        };
+      fleet =
+        base.fleet
+        |> Fleet_store.apply_chat_history ~observed_at:t0 ~keeper hist_page
+        |> Fleet_store.apply_turns ~observed_at:t0
+             [ turn_row_of active_turn_no_tail ];
+      drafts =
+        base.drafts |> Drafts.set_active_keeper keeper |> Drafts.set_focus true;
+    }
+  in
+  (* 1. Autonomous running turn without queued messages projects Phase_turn_running
+     and Section_active_turn, without hijacking Esc away from Dive_keeper back. *)
+  let phase0 = Chat_transcript.live_chat_phase ~model:m0 ~keeper in
+  Alcotest.(check bool) "running autonomous turn reports Phase_turn_running" true
+    (Chat_transcript.equal_live_chat_phase phase0
+       (Chat_transcript.Phase_turn_running
+          { turn = active_turn_no_tail; queued_count = 0 }));
+  Alcotest.(check bool)
+    "autonomous Phase_turn_running does not hijack Esc (is_phase_interruptible=false)"
+    false
+    (Chat_transcript.is_phase_interruptible phase0);
+  let m0_esc, cmds_m0_esc =
+    Update.step ~now:t0
+      { m0 with drafts = Drafts.set_focus false m0.drafts }
+      (Msg.Key_event (key Keymap.Input.Escape))
+  in
+  Alcotest.(check bool) "Esc during autonomous turn pops Dive_keeper cleanly"
+    true
+    (Option.is_none (Model.active_dive m0_esc));
+  Alcotest.(check bool) "Esc during autonomous turn emits 0 interrupt POSTs" false
+    (List.exists
+       (function
+         | Cmd.Http_post { req = Cmd.Post_keeper_turn_interrupt _; _ } -> true
+         | _ -> false)
+       (Cmd.flatten cmds_m0_esc));
+  (* 2. Submitting a follow-up while autonomous turn runs queues the message,
+     requests fresh Get_keeper_turns on Accepted_queued, and keeps the running
+     turn visible ahead of the queued message. *)
+  let m1, _ =
+    Update.execute_action ~now:t0
+      { m0 with drafts = Drafts.insert_text "go on" m0.drafts }
+      Keymap.Submit_followup
+  in
+  let tx_q =
+    match Drafts.active_tx_for_keeper ~keeper m1.drafts with
+    | Some tx -> tx
+    | None -> Alcotest.fail "expected queued follow-up tx"
+  in
+  let m2, cmds_acc =
+    Update.step ~now:t1 m1
+      (Msg.Chat_stream_chunk
+         {
+           epoch = m1.epoch;
+           keeper;
+           request_id = tx_q.request_id;
+           is_btw = false;
+           chunk =
+             Wire_fleet.Chunk_accepted
+               {
+                 operation_id = tx_q.request_id;
+                 queued_count = 1;
+                 state = Keeper_chat_operation.State_name.Queued;
+                 interactive_outcome = None;
+                 control_token = None;
+               };
+         })
+  in
+  Alcotest.(check bool) "Accepted_queued refreshes Get_keeper_turns" true
+    (List.exists
+       (function
+         | Cmd.Http_get { req = Cmd.Get_keeper_turns; _ } -> true
+         | _ -> false)
+       (Cmd.flatten cmds_acc));
+  let phase2 = Chat_transcript.live_chat_phase ~model:m2 ~keeper in
+  Alcotest.(check bool)
+    "queued follow-up behind active turn keeps Phase_turn_running with queued_count=1"
+    true
+    (Chat_transcript.equal_live_chat_phase phase2
+       (Chat_transcript.Phase_turn_running
+          { turn = active_turn_no_tail; queued_count = 1 }));
+  (* Esc while queued behind an autonomous turn still pops Dive_keeper cleanly. *)
+  let m2_esc, cmds_m2_esc =
+    Update.step ~now:t1
+      { m2 with drafts = Drafts.set_focus false m2.drafts }
+      (Msg.Key_event (key Keymap.Input.Escape))
+  in
+  Alcotest.(check bool) "Esc while queued behind active turn pops Dive_keeper"
+    true
+    (Option.is_none (Model.active_dive m2_esc));
+  Alcotest.(check bool) "Esc while queued behind active turn emits 0 interrupts"
+    false
+    (List.exists
+       (function
+         | Cmd.Http_post { req = Cmd.Post_keeper_turn_interrupt _; _ } -> true
+         | _ -> false)
+       (Cmd.flatten cmds_m2_esc));
+  let sections2 = Chat_transcript.project_transcript ~model:m2 ~keeper in
+  (match sections2 with
+  | [
+      Chat_transcript.Section_history _;
+      Chat_transcript.Section_active_turn _;
+      Chat_transcript.Section_pending [ { tx; error_only = false } ];
+    ] ->
+      Alcotest.(check bool) "queued follow-up stays Drafts.Queued" true
+        (Drafts.equal_tx_state tx.state Drafts.Queued)
+  | _ ->
+      Alcotest.fail
+        "expected [Section_history; Section_active_turn; Section_pending]");
+  (* 2b. Once a follow-up is promoted to Pending_processing (Accepted_running),
+     it moves ahead of Section_active_turn so prompt stays above turn output. *)
+  let m2_promoted =
+    {
+      m2 with
+      drafts =
+        Drafts.mark_accepted ~now:t1 ~request_id:tx_q.request_id
+          ~operation_id:(Some tx_q.request_id) m2.drafts;
+    }
+  in
+  (match Chat_transcript.project_transcript ~model:m2_promoted ~keeper with
+  | [
+      Chat_transcript.Section_history _;
+      Chat_transcript.Section_pending [ { tx; error_only = false } ];
+      Chat_transcript.Section_active_turn _;
+    ] ->
+      Alcotest.(check bool) "promoted follow-up sits ahead of active turn" true
+        (Drafts.equal_tx_state tx.state Drafts.Pending_processing)
+  | _ ->
+      Alcotest.fail
+        "expected promoted follow-up before Section_active_turn");
+  (* 2c. An inactive stale stream (active = false) does not suppress Section_active_turn. *)
+  let m2_stale_stream =
+    let stale_buf : Fleet_store.chat_stream_buffer =
+      {
+        request_id = "old-req-0";
+        operation_id = Some "old-req-0";
+        turn_ref = None;
+        run_started = true;
+        interrupting = false;
+        prior_msg_ids = Fleet_store.String_set.empty;
+        text = "Earlier unpersisted reply";
+        text_ownership = Cut_reply.fresh_ownership;
+        thinking = "";
+        tools = [];
+        active = false;
+        ended = true;
+        last_error = None;
+      }
+    in
+    {
+      m2 with
+      fleet =
+        {
+          m2.fleet with
+          chat_streams =
+            Fleet_store.String_map.add keeper stale_buf m2.fleet.chat_streams;
+        };
+    }
+  in
+  Alcotest.(check bool) "stale inactive stream does not hide Section_active_turn"
+    true
+    (List.exists
+       (function
+         | Chat_transcript.Section_active_turn _ -> true
+         | Chat_transcript.Section_history _
+         | Chat_transcript.Section_pending _
+         | Chat_transcript.Section_stream _ ->
+             false)
+       (Chat_transcript.project_transcript ~model:m2_stale_stream ~keeper));
+  (* 3. Row budget stays exact when text_tail transitions from empty to non-empty. *)
+  let rows_no_tail =
+    Chat_transcript.count_transcript_rows ~model:m2 ~keeper ~width:80
+  in
+  let turn_with_tail =
+    {
+      active_turn_no_tail with
+      preview =
+        Some
+          {
+            active_preview_waiting with
+            activity = Wire_fleet.Preview_streaming;
+            text_tail = "Updating fixture max-context values";
+          };
+    }
+  in
+  let m2_tail =
+    {
+      m2 with
+      fleet =
+        Fleet_store.apply_turns ~observed_at:t1
+          [ turn_row_of turn_with_tail ]
+          m2.fleet;
+    }
+  in
+  let rows_with_tail =
+    Chat_transcript.count_transcript_rows ~model:m2_tail ~keeper ~width:80
+  in
+  Alcotest.(check int) "non-empty preview text_tail adds exactly 1 transcript row"
+    (rows_no_tail + 1) rows_with_tail;
+  (* 4. Ctrl+X interrupts the running autonomous turn without corrupting the
+     queued follow-up tx, enters Phase_interrupting, and deduplicates repeats. *)
+  let m_unfocused = { m2 with drafts = Drafts.set_focus false m2.drafts } in
+  let m_int, cmds_int =
+    Update.step ~now:t1 m_unfocused (Msg.Key_event (char_key ~ctrl:true "x"))
+  in
+  Alcotest.(check bool) "Ctrl+X interrupts running turn by interrupt_token" true
+    (List.exists
+       (function
+         | Cmd.Http_post
+             {
+               req =
+                 Cmd.Post_keeper_turn_interrupt
+                   { keeper = k; target = `Turn_token "itok-auto-15206" };
+               _;
+             }
+           when String.equal k keeper ->
+             true
+         | _ -> false)
+       (Cmd.flatten cmds_int));
+  Alcotest.(check bool) "Ctrl+X transitions observed turn into Phase_interrupting"
+    true
+    (Chat_transcript.equal_live_chat_phase
+       (Chat_transcript.live_chat_phase ~model:m_int ~keeper)
+       Chat_transcript.Phase_interrupting);
+  Alcotest.(check bool) "Ctrl+X keeps queued follow-up tx intact in Queued" true
+    (match Drafts.active_tx_for_keeper ~keeper m_int.drafts with
+    | Some { state = Drafts.Queued; _ } -> true
+    | Some _ | None -> false);
+  let _, cmds_int_dup =
+    Update.step ~now:t1 m_int (Msg.Key_event (char_key ~ctrl:true "x"))
+  in
+  Alcotest.(check bool) "Repeated Ctrl+X while interrupting emits 0 duplicate POSTs"
+    false
+    (List.exists
+       (function
+         | Cmd.Http_post { req = Cmd.Post_keeper_turn_interrupt _; _ } -> true
+         | _ -> false)
+       (Cmd.flatten cmds_int_dup));
+  (* 4b. Maintenance turns cannot be interrupted via Ctrl+X. *)
+  let maint_turn =
+    { active_turn_no_tail with lane = Wire_fleet.Lane_maintenance }
+  in
+  let m_maint =
+    {
+      m_unfocused with
+      fleet =
+        Fleet_store.apply_turns ~observed_at:t1 [ turn_row_of maint_turn ]
+          m_unfocused.fleet;
+    }
+  in
+  let _, cmds_maint =
+    Update.step ~now:t1 m_maint (Msg.Key_event (char_key ~ctrl:true "x"))
+  in
+  Alcotest.(check bool) "Ctrl+X refuses to interrupt Lane_maintenance" false
+    (List.exists
+       (function
+         | Cmd.Http_post { req = Cmd.Post_keeper_turn_interrupt _; _ } -> true
+         | _ -> false)
+       (Cmd.flatten cmds_maint));
+  (* 5. Roster refresh (apply_keepers with active_turn = None) preserves overlaid
+     active_turn from fleet.turns and reflects it in keeper_live_state/counts. *)
+  let roster_row : Wire_fleet.keeper_summary =
+    {
+      name = keeper;
+      group = Some "core";
+      company = "core";
+      health = Wire_fleet.Keeper_healthy;
+      paused = false;
+      keepalive_running = true;
+      activation_mode = Wire_fleet.Activation_autonomous;
+      runtime_id = "ollama";
+      model_id = Some "deepseek";
+      current_task_id = None;
+      context = Observed.unreported;
+      total_turns = Observed.unreported;
+      last_turn_at_unix = None;
+      active_turn = None;
+    }
+  in
+  let fleet_after_roster =
+    Fleet_store.apply_keepers ~observed_at:t1 [ roster_row ] m0.fleet
+  in
+  let refreshed_k =
+    match Fleet_store.find_keeper ~name:keeper fleet_after_roster with
+    | Some k -> k
+    | None -> Alcotest.fail "keeper missing after apply_keepers"
+  in
+  Alcotest.(check bool) "apply_keepers overlays active_turn from fleet.turns"
+    true
+    (Option.is_some refreshed_k.active_turn);
+  Alcotest.(check bool) "healthy keeper with active_turn reports Health.Working"
+    true
+    (match Fleet_store.keeper_live_state refreshed_k with
+    | Health.Working _ -> true
+    | Health.Healthy
+    | Health.Needs_attention _
+    | Health.Degraded _
+    | Health.Down _
+    | Health.Idle ->
+        false);
+  let hc = Fleet_store.fleet_health_counts [ refreshed_k ] in
+  Alcotest.(check int) "fleet_health_counts counts healthy+active_turn as working"
+    1 hc.working;
+  (* 6. Keeper_turn_changed SSE during Dive_keeper refreshes only for the viewed
+     keeper (ignoring preview_only churn from unrelated keepers). *)
+  let m_work_dive =
+    { m0 with nav = { m0.nav with workspace = Nav.Work } }
+  in
+  let _, cmds_sse_same =
+    Update.step ~now:t1 m_work_dive
+      (Msg.Sse_event
+         {
+           epoch = m_work_dive.epoch;
+           event =
+             Msg.Observer_event
+               (Wire_observer.Keeper_turn_changed
+                  { keeper; preview_only = true });
+         })
+  in
+  Alcotest.(check bool)
+    "Keeper_turn_changed refreshes Get_keeper_turns for viewed keeper on Nav.Work"
+    true
+    (List.exists
+       (function
+         | Cmd.Http_get { req = Cmd.Get_keeper_turns; _ } -> true
+         | _ -> false)
+       (Cmd.flatten cmds_sse_same));
+  let _, cmds_sse_other =
+    Update.step ~now:t1 m_work_dive
+      (Msg.Sse_event
+         {
+           epoch = m_work_dive.epoch;
+           event =
+             Msg.Observer_event
+               (Wire_observer.Keeper_turn_changed
+                  { keeper = "unrelated-keeper"; preview_only = true });
+         })
+  in
+  Alcotest.(check bool)
+    "Keeper_turn_changed ignores unrelated keeper preview churn in Dive_keeper"
+    false
+    (List.exists
+       (function
+         | Cmd.Http_get { req = Cmd.Get_keeper_turns; _ } -> true
+         | _ -> false)
+       (Cmd.flatten cmds_sse_other));
+  (* 7. Preview_failed detail summary extracts last failure without leaking runtime_id. *)
+  let failed_turn =
+    {
+      active_turn_no_tail with
+      preview =
+        Some
+          {
+            active_preview_waiting with
+            activity = Wire_fleet.Preview_failed;
+            status_text =
+              "ollama-secret-rt · provider attempt failed · last failure: timeout\n30s";
+          };
+    }
+  in
+  let failed_en =
+    Say.resolve Say.Lang_en (Chat_transcript.active_turn_detail_summary failed_turn)
+  in
+  Alcotest.(check string) "Preview_failed strips runtime_id and normalizes failure detail"
+    "auto · Attempt failed · timeout 30s" failed_en
+
 let () =
   Alcotest.run "masc_tui_store"
     [
@@ -15811,5 +16245,8 @@ let () =
           Alcotest.test_case
             "UX Sweep 12 Fixes: Attention sync, Composer PgUp/PgDn, Ctrl+Q 2-press, Dive return, Goals filter/sort, Goal_dive/Task_dive, Overrule auto-seed, 400 guards, Board comments scroll"
             `Quick test_ux_sweep_12_fixes;
+          Alcotest.test_case
+            "Active turn preview visibility, queued follow-up separation, interrupt & Dive SSE refresh"
+            `Quick test_active_turn_preview_visibility_and_queued_followup;
         ] );
     ]

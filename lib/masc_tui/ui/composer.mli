@@ -13,6 +13,11 @@ module Theme = Masc_tui_core.Theme
 module Cell_grid = Masc_tui_term.Cell_grid
 module Presenter = Masc_tui_term.Presenter
 
+type turn_running_kind =
+  | Turn_kind_active
+  | Turn_kind_tool
+  | Turn_kind_attention
+
 type pending_tx =
   | Tx_idle
   | Tx_queued           (** 전송 대기 / Queued *)
@@ -22,6 +27,8 @@ type pending_tx =
   | Tx_thinking         (** 추론 중… / Thinking… *)
   | Tx_tool_running of string (** 도구 실행 · <tool> / Tool · <tool> *)
   | Tx_streaming        (** 생성 중… / Streaming… *)
+  | Tx_turn_running of { kind : turn_running_kind; label : Say.t }
+      (** 실행 중인 턴 관측 / Observed running turn *)
   | Tx_confirming       (** 전송 확인 중 / Confirming *)
   | Tx_interrupting     (** 중단 요청 중 / Interrupting *)
   | Tx_failed of string (** 전송 실패 / Send failed *)

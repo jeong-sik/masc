@@ -112,11 +112,13 @@ let sample_keepers : Wire_fleet.keeper_summary list =
         Some
           {
             lane = Wire_fleet.Lane_task;
+            turn_ref = None;
             started_at_unix = now_unix -. 240.0;
             interrupt_token = "tok-wkbl-1";
             phase = Some "retrying";
             tool_in_flight = Some "MascBoardPostGet";
             elapsed_ms = Some 1420.0;
+            preview = None;
           };
     };
     {
@@ -137,11 +139,13 @@ let sample_keepers : Wire_fleet.keeper_summary list =
         Some
           {
             lane = Wire_fleet.Lane_verification;
+            turn_ref = None;
             started_at_unix = now_unix -. 12.0;
             interrupt_token = "tok-cr-1";
             phase = Some "reviewing";
             tool_in_flight = Some "git_diff";
             elapsed_ms = Some 380.0;
+            preview = None;
           };
     };
     {

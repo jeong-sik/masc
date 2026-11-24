@@ -1099,7 +1099,8 @@ let interrupt_active_keeper_turn ~now (m : Model.t) =
       | Chat_transcript.Phase_awaiting_turn
       | Chat_transcript.Phase_thinking
       | Chat_transcript.Phase_tool_running _
-      | Chat_transcript.Phase_streaming ->
+      | Chat_transcript.Phase_streaming
+      | Chat_transcript.Phase_turn_running _ ->
           let active_stream_opt =
             match Fleet_store.String_map.find_opt keeper m.fleet.chat_streams with
             | Some s when s.active && not s.interrupting -> Some s
@@ -1145,8 +1146,21 @@ let interrupt_active_keeper_turn ~now (m : Model.t) =
           , active_stream_opt
           , interruptible_tx_opt
           with
+          | Some turn, None, None
+            when Wire_fleet.equal_turn_lane turn.lane
+                   Wire_fleet.Lane_maintenance ->
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make
+                     ~ko:("점검 턴은 중단할 수 없습니다: " ^ keeper)
+                     ~en:("Maintenance turn cannot be interrupted: " ^ keeper))
+                  m
+              , [] )
           | Some turn, stream_opt, tx_opt ->
               let fleet, drafts = mark_ui_interrupting stream_opt tx_opt in
+              let fleet =
+                Fleet_store.mark_turn_interrupting ~keeper
+                  ~interrupt_token:turn.interrupt_token fleet
+              in
               ( Model.with_toast ~now ~level:Model.Toast_warning
                   (Say.make
                      ~ko:("키퍼 턴 중단 요청 전송: " ^ keeper)

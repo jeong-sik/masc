@@ -15,6 +15,11 @@ import re
 import sys
 
 FREEZE_VARIABLE = 'MASC_RELEASE_FREEZE'
+# task-4046: only this label opts a scope out of the freeze. The release
+# leader attaches it to the top pull request of a P0/P1 repair scope; no
+# other scope submits while the freeze is on, and a reservation on an
+# exempt scope survives the sweep's reclaim.
+FREEZE_LABEL = 'freeze-exempt'
 
 # The sweep's gh wrapper reports a missing variable in GitHub's own words
 # ("gh: Not Found (HTTP 404)"); the worker's REST client raises a typed 404
@@ -42,6 +47,13 @@ def freeze_flag(repo, read, missing=None):
     """
     passed = os.environ.get(FREEZE_VARIABLE, '').strip()
     if passed:
+        if passed not in ('0', '1'):
+            # task-4046 review: a value the reader does not know ('true',
+            # 'yes', a typo) is off like every other non-'1', but loudly:
+            # a silent wrong value is how a freeze quietly stops working.
+            print(f'release-freeze: the {FREEZE_VARIABLE} environment value '
+                  f'is not 0 or 1 ({passed[:40]}); treating the release '
+                  f'freeze as off', file=sys.stderr)
         return passed == '1'
     try:
         value = read(f'repos/{repo}/actions/variables/{FREEZE_VARIABLE}')['value']

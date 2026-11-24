@@ -2133,11 +2133,19 @@ class ReleaseFreezeGate(unittest.TestCase):
             self.assertEqual(member_reads, {PREFIX + '/pulls/102': 1})
 
     def test_any_other_variable_value_leaves_the_worker_untouched(self):
-        with FakeGitHub() as github:
-            code, output = self.run_frozen(101, value='0')
-            result = self.final_json(output)
-        self.assertEqual((code, result['status']), (0, 'auto_merge_enabled'))
+        environment = {'GITHUB_REPOSITORY': REPO, 'GITHUB_EVENT_NAME': 'workflow_dispatch',
+                       'DISPATCH_PR': '101', 'DISPATCH_RECEIPT': '',
+                       'GITHUB_STEP_SUMMARY': '', 'MASC_RELEASE_FREEZE': '0'}
+        output, errors = io.StringIO(), io.StringIO()
+        with FakeGitHub() as github, patch.dict(os.environ, environment), \
+             patch.object(sys, 'argv', ['auto-merge']), \
+             redirect_stdout(output), redirect_stderr(errors):
+            code = MERGE.main()
+        self.assertEqual((code, self.final_json(output.getvalue())['status']),
+                         (0, 'auto_merge_enabled'))
         self.assertEqual(github.comments, [])
+        # '0' is the documented off state: it stays off the stderr path too.
+        self.assertNotIn('release-freeze', errors.getvalue())
 
     def test_a_dry_run_stays_inspectable_during_the_freeze(self):
         with FakeGitHub() as github:
@@ -2267,9 +2275,11 @@ class ReleaseFreezeGate(unittest.TestCase):
         self.assertEqual(github.comments, [])
         self.assertEqual(github.mutations, [])
 
-    def test_a_frozen_run_only_observes_an_armed_reservation(self):
+    def test_a_frozen_run_reclaims_an_armed_reservation_and_holds(self):
         """task-4046 review: a reservation an earlier unfrozen run made is
-        observed — not re-submitted, not unwound: no hold, no comment."""
+        taken back during the freeze — left armed it would let GitHub merge
+        on the required checks mid-freeze, and no run would ever reclaim it
+        — and the run still holds."""
         environment = {'GITHUB_REPOSITORY': REPO, 'GITHUB_EVENT_NAME': 'workflow_dispatch',
                        'DISPATCH_PR': '101', 'DISPATCH_RECEIPT': '',
                        'GITHUB_STEP_SUMMARY': '', 'MASC_RELEASE_FREEZE': '1'}
@@ -2280,10 +2290,57 @@ class ReleaseFreezeGate(unittest.TestCase):
                  patch.object(sys, 'argv', ['auto-merge']), \
                  redirect_stdout(output), redirect_stderr(io.StringIO()):
                 code = MERGE.main()
+        result = self.final_json(output.getvalue())
+        self.assertEqual((code, result['status']), (0, 'held'))
+        self.assertIn('release freeze', result['reason'])
+        self.assertEqual(github.mutations,
+                         [['gh', 'pr', 'merge', '101', '--repo', REPO,
+                           '--disable-auto']])
+        self.assertEqual(len(github.comments), 1)
+
+    def test_a_failed_reclaim_is_loud_and_the_hold_stands(self):
+        """task-4046 review: a reclaim that cannot run is one stderr line,
+        and the freeze hold stands anyway."""
+        environment = {'GITHUB_REPOSITORY': REPO, 'GITHUB_EVENT_NAME': 'workflow_dispatch',
+                       'DISPATCH_PR': '101', 'DISPATCH_RECEIPT': '',
+                       'GITHUB_STEP_SUMMARY': '', 'MASC_RELEASE_FREEZE': '1'}
+        output, errors = io.StringIO(), io.StringIO()
+        with FakeGitHub() as github:
+            github.pulls[101]['auto_merge'] = {'merge_method': 'squash'}
+            upstream = MERGE.subprocess.run  # FakeGitHub's own interception
+            def run(command, **kwargs):
+                if '--disable-auto' in command:
+                    raise MERGE.subprocess.SubprocessError('gh died')
+                return upstream(command, **kwargs)
+            with patch.dict(os.environ, environment), \
+                 patch.object(sys, 'argv', ['auto-merge']), \
+                 patch.object(MERGE.subprocess, 'run', side_effect=run), \
+                 redirect_stdout(output), redirect_stderr(errors):
+                code = MERGE.main()
+        result = self.final_json(output.getvalue())
+        self.assertEqual(result['status'], 'held')
+        self.assertIn('release freeze', result['reason'])
+        self.assertIn('could not reclaim the armed reservation on #101',
+                      errors.getvalue())
+        self.assertIn('gh died', errors.getvalue())
+
+    def test_an_unrecognized_env_value_is_loud_and_off(self):
+        """task-4046 review: an environment value the reader does not know
+        leaves one stderr line instead of failing open silently."""
+        environment = {'GITHUB_REPOSITORY': REPO, 'GITHUB_EVENT_NAME': 'workflow_dispatch',
+                       'DISPATCH_PR': '101', 'DISPATCH_RECEIPT': '',
+                       'GITHUB_STEP_SUMMARY': '', 'MASC_RELEASE_FREEZE': 'true'}
+        output, errors = io.StringIO(), io.StringIO()
+        with FakeGitHub() as github, patch.dict(os.environ, environment), \
+             patch.object(sys, 'argv', ['auto-merge']), \
+             redirect_stdout(output), redirect_stderr(errors):
+            code = MERGE.main()
         self.assertEqual((code, self.final_json(output.getvalue())['status']),
                          (0, 'auto_merge_enabled'))
         self.assertEqual(github.comments, [])
-        self.assertEqual(github.mutations, [])
+        recorded = errors.getvalue()
+        self.assertIn('not 0 or 1', recorded)
+        self.assertIn('true', recorded)
 
     def test_a_frozen_stack_scope_is_held_after_the_disarm_pass(self):
         """task-4046 review: native stacks plan no reservation in the arming

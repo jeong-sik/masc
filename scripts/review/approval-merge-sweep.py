@@ -58,6 +58,7 @@ query($owner: String!, $name: String!, $cursor: String) {
           nodes { path }
         }
         autoMergeRequest { enabledAt }
+        labels(first: 20) { nodes { name } }
         latestOpinionatedReviews(first: 20) {
           nodes { state author { login } commit { oid } }
         }
@@ -120,6 +121,7 @@ KEEP = sibling('branch-deletion')  # the worker keeps the same branches
 # loud/quiet read rules live in release-freeze.py, shared with the worker.
 FREEZE = sibling('release-freeze')
 FREEZE_VARIABLE = FREEZE.FREEZE_VARIABLE
+FREEZE_LABEL = FREEZE.FREEZE_LABEL
 
 
 def gh(arguments):
@@ -146,6 +148,52 @@ def freeze_flag(repo):
     """
     return FREEZE.freeze_flag(repo, lambda path: gh(['api', path]),
                               missing=FREEZE.missing_from_gh)
+
+
+def reclaim_armed(repo):
+    """Take down the auto-merge reservations a freeze must stop merging.
+
+    The freeze stops new submissions, but a reservation armed just before
+    it would still let GitHub merge on the required checks, and this sweep
+    is the only path that returns regularly without an event (#54644
+    review). A row carrying freeze-exempt keeps its reservation: its scope
+    is admitted despite the freeze, and the worker arms it again on the
+    next review event. Every failure is one stderr line; a missed reclaim
+    never stops the report.
+    """
+    try:
+        rows = open_pulls(repo)
+    except (ValueError, KeyError, TypeError, OSError) as error:
+        print(f'approval-merge-sweep: cannot read the open pull requests to '
+              f'reclaim reservations: {error}', file=sys.stderr)
+        return {'reclaimed': [], 'not_reclaimed': []}
+    reclaimed: list[int] = []
+    not_reclaimed: list[int] = []
+    for row in rows:
+        if not row.get('autoMergeRequest'):
+            continue
+        labels = (row.get('labels') or {}).get('nodes') or []
+        if any(label.get('name') == FREEZE_LABEL for label in labels):
+            continue
+        number = row.get('number')
+        try:
+            dropped = subprocess.run(['gh', 'pr', 'merge', str(number), '--repo', repo,
+                                      '--disable-auto'], capture_output=True, text=True,
+                                     check=False, timeout=GH_TIMEOUT_SECONDS)
+        except (OSError, subprocess.SubprocessError) as error:
+            not_reclaimed.append(number)
+            print(f'approval-merge-sweep: could not reclaim the armed '
+                  f'reservation on #{number}: {type(error).__name__}: {error}',
+                  file=sys.stderr)
+            continue
+        if dropped.returncode:
+            not_reclaimed.append(number)
+            detail = (dropped.stderr or dropped.stdout or '').strip()[:200]
+            print(f'approval-merge-sweep: could not reclaim the armed '
+                  f'reservation on #{number}: {detail}', file=sys.stderr)
+        else:
+            reclaimed.append(number)
+    return {'reclaimed': reclaimed, 'not_reclaimed': not_reclaimed}
 
 
 def graphql(document, **variables):
@@ -515,12 +563,16 @@ def main():
         raise SystemExit('invalid repository')
     dry_run = '--dry-run' in sys.argv[1:]
     # task-4046: a frozen repository gets no worker runs, branch cleanup or
-    # issue closing from the sweep; the reason stays in the run log. A dry run
-    # reads the open list only and stays inspectable during a freeze.
+    # issue closing from the sweep, but the sweep still takes down
+    # reservations armed before the freeze — GitHub would merge those on
+    # the required checks otherwise, and this is the only path that returns
+    # regularly without an event (#54644 review). A dry run reads the open
+    # list only and stays inspectable during a freeze.
     if not dry_run and freeze_flag(repo):
         report = {'status': 'freeze_skipped',
                   'reason': f'release freeze is on ({FREEZE_VARIABLE}=1): no '
-                            f'worker runs, branch cleanup or issue closing ran'}
+                            f'worker runs, branch cleanup or issue closing ran',
+                  'reservations': reclaim_armed(repo)}
         output = json.dumps(report, ensure_ascii=False, indent=2)
         print(output, flush=True)
         if os.environ.get('GITHUB_STEP_SUMMARY'):

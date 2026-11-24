@@ -68,7 +68,7 @@ FREEZE_VARIABLE = FREEZE.FREEZE_VARIABLE
 # task-4046: only this label opts a scope out of the freeze. The release
 # leader attaches it to the top pull request of a P0/P1 repair scope; no
 # other scope submits while the freeze is on.
-FREEZE_LABEL = 'freeze-exempt'
+FREEZE_LABEL = FREEZE.FREEZE_LABEL
 # Set by main() when the sweep budget is known: the follow loop skips its
 # next poll once this moment has passed, so the cleanup keeps its reserve.
 _FOLLOW_DEADLINE = None
@@ -253,10 +253,11 @@ def auto_merge_default(repo, number, arm=True):
     task-4046: during a release freeze the caller passes arm=False. The
     reads and the safety disarm still run — a stale reservation must not
     outlive a run that could not confirm its conditions, frozen or not —
-    and a scope already reserved by an earlier unfrozen run is only
-    observed. The freeze hold itself is raised where arming would have
-    happened, so a merged scope's `closed` event keeps its ordinary wake
-    path instead of a freeze comment (#54644 review).
+    and a reservation an earlier unfrozen run armed is taken back: left
+    armed, GitHub lands it on its required checks mid-freeze and no run
+    would ever reclaim it. The freeze hold itself is raised where arming
+    would have happened, so a merged scope's `closed` event keeps its
+    ordinary wake path instead of a freeze comment (#54644 review).
     """
     seen = {}
     try:
@@ -275,11 +276,24 @@ def auto_merge_default(repo, number, arm=True):
     if reservation is None:
         return None
     current, selected, head = reservation
-    if not arm and current.get('auto_merge') is None:
+    if not arm:
+        if current.get('auto_merge') is not None:
+            # Reclaim a reservation an earlier unfrozen run made: left
+            # armed it would let GitHub merge on the required checks
+            # mid-freeze, and only a run on this pull request would ever
+            # take it down (#54644 review). A failed reclaim is one stderr
+            # line; the hold below stands either way.
+            try:
+                disable_reservation(repo, current)
+            except (ValueError, KeyError, TypeError, OSError,
+                    subprocess.SubprocessError) as error:
+                detail = f'{type(error).__name__}: {error}'[:300]
+                print(f'approval-auto-merge: could not reclaim the armed '
+                      f'reservation on #{number}: {detail}', file=sys.stderr)
         # Raised past the read-safety block above on purpose: the freeze
-        # stops a new submission and leaves a reservation an earlier run
-        # made alone. GitHub may still land that one on its required
-        # checks, exactly like a receipt this run only follows.
+        # stops a new submission and takes back the one an earlier run
+        # already armed. GitHub merging on a pre-freeze reservation is a
+        # submission this gate exists to stop.
         freeze_skip_comment(repo, number)
         raise Hold(f'release freeze is on ({FREEZE_VARIABLE}=1): merge '
                    f'submission skipped for #{number}; no merge request '

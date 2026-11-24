@@ -587,8 +587,8 @@ class Sweeping(unittest.TestCase):
     def test_a_frozen_sweep_starts_no_worker(self):
         code, runs, output = self.sweep([], freeze='1')
         self.assertEqual((code, runs), (0, []))
-        # The gate fires before the quota read and the open-pull walk, so the
-        # report carries only the skip reason.
+        # The gate fires before the quota read, so the report carries the
+        # skip reason and the reservation reclaim; these rows carry none.
         self.assertIn('"status": "freeze_skipped"', output)
         self.assertIn('MASC_RELEASE_FREEZE=1', output)
         self.assertNotIn('quota_before', output)
@@ -607,13 +607,63 @@ class Sweeping(unittest.TestCase):
                 return {'value': '1'}
             raise AssertionError(arguments)
         with patch.object(SWEEP, 'gh', side_effect=gh), \
-             patch.object(SWEEP, 'open_pulls') as walk, \
+             patch.object(SWEEP, 'open_pulls', return_value=[]) as walk, \
              patch.dict(os.environ, {'GITHUB_REPOSITORY': 'owner/repo'}), \
              patch.object(SWEEP.sys, 'argv', ['sweep']), \
              redirect_stdout(io.StringIO()) as output:
             self.assertEqual(SWEEP.main(), 0)
-        walk.assert_not_called()
+        # The one open-list read of a frozen sweep is the reclaim walk; the
+        # quota read and the worker runs stay skipped.
+        walk.assert_called_once()
         self.assertIn('freeze_skipped', output.getvalue())
+
+    def test_a_frozen_sweep_reclaims_armed_reservations(self):
+        """task-4046 review: the reclaim runs during a freeze — a pre-freeze
+        reservation would still let GitHub merge on the required checks —
+        but a freeze-exempt row keeps its reservation."""
+        armed, exempt = row(1), row(2)
+        armed['autoMergeRequest'] = {'enabledAt': '2026-11-24T10:00:00Z'}
+        exempt['autoMergeRequest'] = {'enabledAt': '2026-11-24T10:00:00Z'}
+        exempt['labels'] = {'nodes': [{'name': 'freeze-exempt'}]}
+        commands, errors = [], io.StringIO()
+        def run(command, **kwargs):
+            commands.append(list(command))
+            return subprocess.CompletedProcess(command, 0)
+        with patch.object(SWEEP, 'open_pulls', return_value=[armed, exempt, row(3)]), \
+             patch.object(SWEEP, 'quota') as quota, \
+             patch.object(SWEEP.subprocess, 'run', side_effect=run), \
+             patch.dict(os.environ, {'GITHUB_REPOSITORY': 'owner/repo',
+                                     'MASC_RELEASE_FREEZE': '1'}), \
+             patch.object(SWEEP.sys, 'argv', ['sweep']), \
+             redirect_stdout(io.StringIO()) as output, redirect_stderr(errors):
+            self.assertEqual(SWEEP.main(), 0)
+        self.assertEqual(commands, [['gh', 'pr', 'merge', '1', '--repo',
+                                     'owner/repo', '--disable-auto']])
+        quota.assert_not_called()
+        self.assertIn('"status": "freeze_skipped"', output.getvalue())
+        self.assertIn('"reclaimed"', output.getvalue())
+        self.assertIn('"not_reclaimed": []', output.getvalue())
+        self.assertEqual(errors.getvalue(), '')
+
+    def test_a_frozen_sweep_reports_a_failed_reclaim_and_continues(self):
+        """task-4046 review: a missed reclaim is one stderr line and the
+        report still names it — the sweep never stops at the first row."""
+        armed = row(1, autoMergeRequest={'enabledAt': '2026-11-24T10:00:00Z'})
+        refused = subprocess.CompletedProcess([], 1, '',
+                                             'gh: pull request 1 is not armed')
+        errors = io.StringIO()
+        with patch.object(SWEEP, 'open_pulls', return_value=[armed]), \
+             patch.object(SWEEP, 'quota'), \
+             patch.object(SWEEP.subprocess, 'run', return_value=refused), \
+             patch.dict(os.environ, {'GITHUB_REPOSITORY': 'owner/repo',
+                                     'MASC_RELEASE_FREEZE': '1'}), \
+             patch.object(SWEEP.sys, 'argv', ['sweep']), \
+             redirect_stdout(io.StringIO()) as output, redirect_stderr(errors):
+            self.assertEqual(SWEEP.main(), 0)
+        self.assertIn('"not_reclaimed"', output.getvalue())
+        self.assertIn('could not reclaim the armed reservation on #1',
+                      errors.getvalue())
+        self.assertIn('not armed', errors.getvalue())
 
     def test_an_unreadable_freeze_variable_is_not_a_freeze_but_not_silent(self):
         """task-4046 review: the sweep's fail-open fallback says so on stderr."""

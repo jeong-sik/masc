@@ -12,6 +12,8 @@ type get_request =
       limit : int option;
       cursor : string option;
     }
+  | Get_chat_queue of { keeper : string }
+  | Get_chat_status of { keeper : string; operation_id : string }
   | Get_chat_operation_events of {
       keeper : string;
       operation_id : string;
@@ -375,6 +377,8 @@ let get_request_path = function
   | Get_keeper_turns -> Wire_fleet.keepers_turns_path
   | Get_keeper_turn_records { keeper; limit } ->
       Wire_fleet.keeper_turn_records_path ~keeper ~limit
+  | Get_chat_queue { keeper } -> Wire_fleet.chat_queue_path ~keeper ~after:None
+  | Get_chat_status { keeper; operation_id } -> Wire_fleet.chat_operation_path ~keeper ~operation_id
   | Get_chat_history { keeper; limit; cursor } ->
       Wire_fleet.keeper_chat_history_page_path ~keeper ?limit ?cursor ()
   | Get_chat_operation_events { keeper; operation_id; from } ->

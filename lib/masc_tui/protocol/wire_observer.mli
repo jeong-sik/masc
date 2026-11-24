@@ -129,6 +129,7 @@ type event =
       connector : string option;
       at_unix : float;
     }
+  | Keeper_chat_queue_changed of string
   | Keeper_chat_stream_frame of {
       keeper : string;
       operation_id : string;

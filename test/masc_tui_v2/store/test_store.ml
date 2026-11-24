@@ -3,6 +3,12 @@ open Masc_tui_keymap
 open Masc_tui_protocol
 open Masc_tui_store
 
+let operation_provenance id transcript_slot =
+  let open Keeper_chat_delivery_identity in
+  match Request_id.of_string id with
+  | Ok id -> Some { delivery_key = Operation id; transcript_slot }
+  | Error error -> Alcotest.fail error
+
 let t0 = Clock.Mono.of_ns 1_000_000_000L
 let t1 = Clock.Mono.of_ns 2_000_000_000L
 let t2 = Clock.Mono.of_ns 3_000_000_000L
@@ -136,6 +142,8 @@ let has_get_health cmds =
               | Cmd.Get_keeper_turns
               | Cmd.Get_keeper_turn_records _
               | Cmd.Get_chat_history _
+              | Cmd.Get_chat_queue _
+              | Cmd.Get_chat_status _
               | Cmd.Get_chat_operation_events _
               | Cmd.Get_planning
               | Cmd.Get_verifications _
@@ -712,7 +720,7 @@ let test_compact_composer_and_drafts () =
                {
                  operation_id = "op-1";
                  queued_count = 0;
-                 state = Wire_fleet.Accepted_running;
+                 state = Keeper_chat_operation.State_name.Running;
                  interactive_outcome = None;
                  control_token = None;
                };
@@ -773,8 +781,7 @@ let test_compact_composer_and_drafts () =
                              tool_call_id = None;
                              tool_call_name = None;
                              execution_id = None;
-                             operation_id = None;
-                             transcript_slot = None;
+                             provenance = None;
                              failure_kind = None;
                            };
                          ];
@@ -784,7 +791,7 @@ let test_compact_composer_and_drafts () =
                };
          })
   in
-  Alcotest.(check bool) "persisted history confirms delivery" false
+  Alcotest.(check bool) "an unrelated row with the same body leaves the request unconfirmed" true
     (Drafts.has_active_tx_for ~keeper:"alpha" m20.drafts)
 
 (* A new epoch may face another server process, whose log seqs start from
@@ -1440,8 +1447,7 @@ let test_verifier_regressions () =
       tool_call_id = None;
       tool_call_name = None;
       execution_id = None;
-      operation_id = None;
-      transcript_slot = None;
+      provenance = None;
       failure_kind = None;
     }
   in
@@ -1494,7 +1500,7 @@ let test_verifier_regressions () =
                {
                  operation_id = "op-dup";
                  queued_count = 0;
-                 state = Wire_fleet.Accepted_running;
+                 state = Keeper_chat_operation.State_name.Running;
                  interactive_outcome = None;
                  control_token = None;
                };
@@ -1522,7 +1528,7 @@ let test_verifier_regressions () =
   in
   Alcotest.(check bool) "old identical message does not falsely confirm new tx"
     true (Drafts.has_active_tx_for ~keeper:"alpha" m_dup_stale.drafts);
-  (* Chunk_error followed by Chat_stream_done (Ok ()) keeps Failed_retryable *)
+  (* A stream failure after acceptance leaves the durable operation unconfirmed. *)
   let m_err, _ =
     Update.step ~now:t1 m_dup_stale
       (Msg.Chat_stream_chunk
@@ -1556,8 +1562,8 @@ let test_verifier_regressions () =
     | Some tx -> tx.state
     | None -> Alcotest.fail "missing dup tx after error EOF"
   in
-  Alcotest.(check bool) "EOF does not overwrite Failed_retryable" true
-    (Drafts.equal_tx_state final_state (Drafts.Failed_retryable { reason = "busy" }));
+  Alcotest.(check bool) "stream failure after acceptance waits for operation evidence" true
+    (Drafts.equal_tx_state final_state Drafts.Confirming_delivery);
   (* /btw EOF without Chunk_turn_done finalizes cleanly *)
   let m_btw, _ = Update.execute_slash ~now:t0 m_hist (Slash.Btw "ping") in
   let btw_id =
@@ -4200,8 +4206,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
             tool_call_id = None;
             tool_call_name = None;
             execution_id = None;
-            operation_id = None;
-            transcript_slot = None;
+            provenance = None;
             failure_kind = None;
           };
         ];
@@ -4942,8 +4947,7 @@ let test_nav_fix5_keeper_chat_scroll_direction_and_home_bound () =
           tool_call_id = None;
           tool_call_name = None;
           execution_id = None;
-          operation_id = None;
-          transcript_slot = None;
+          provenance = None;
           failure_kind = None;
         })
   in
@@ -5647,7 +5651,7 @@ let test_nav_left_right_subtab_cycling_and_guards () =
        (Some (Nav.Settings Nav.Settings_general_ui)))
 
 let test_p1_chat_transcript_ssot_exact_bounds () =
-  let mk_msg ~id ~role ~content ?tool_call_name ts : Wire_fleet.chat_message =
+  let mk_msg ~id ~role ~content ?tool_call_name ?provenance ts : Wire_fleet.chat_message =
     {
       id;
       role;
@@ -5658,8 +5662,7 @@ let test_p1_chat_transcript_ssot_exact_bounds () =
       tool_call_id = None;
       tool_call_name;
       execution_id = None;
-      operation_id = None;
-      transcript_slot = None;
+      provenance;
       failure_kind = None;
     }
   in
@@ -5689,7 +5692,7 @@ let test_p1_chat_transcript_ssot_exact_bounds () =
                  i)
             (1_700_000_010.0 +. float_of_int i))
     @ [
-        mk_msg ~id:"m-last" ~role:Wire_fleet.Role_assistant
+        mk_msg ~id:"m-last" ~role:Wire_fleet.Role_assistant ?provenance:(operation_provenance "op-dup" Terminal_result)
           ~content:"Final persisted assistant reply." 1_700_000_099.0;
       ]
   in
@@ -6648,7 +6651,7 @@ let test_tui_memory_os_internals_fetch_and_runtime_assignment_setup_cmds () =
        (Cmd.flatten poll_cmds))
 
 let test_agui_chat_stream_lifecycle_15_bugs () =
-  let mk_msg ~id ~role ~content ?operation_id ?transcript_slot ?failure_kind
+  let mk_msg ~id ~role ~content ?provenance ?failure_kind
       ?turn_ref ts : Wire_fleet.chat_message =
     {
       id;
@@ -6660,8 +6663,7 @@ let test_agui_chat_stream_lifecycle_15_bugs () =
       tool_call_id = None;
       tool_call_name = None;
       execution_id = None;
-      operation_id;
-      transcript_slot;
+      provenance;
       failure_kind;
     }
   in
@@ -6737,7 +6739,7 @@ let test_agui_chat_stream_lifecycle_15_bugs () =
                {
                  operation_id = tx_a.request_id;
                  queued_count = 0;
-                 state = Wire_fleet.Accepted_running;
+                 state = Keeper_chat_operation.State_name.Running;
                  interactive_outcome = Some Wire_fleet.Interactive_applied;
                  control_token = Some "ctrl-tok-fresh";
                };
@@ -6861,7 +6863,7 @@ let test_agui_chat_stream_lifecycle_15_bugs () =
                {
                  operation_id = tx_b.request_id;
                  queued_count = 1;
-                 state = Wire_fleet.Accepted_queued;
+                 state = Keeper_chat_operation.State_name.Queued;
                  interactive_outcome = None;
                  control_token = None;
                };
@@ -6913,7 +6915,7 @@ let test_agui_chat_stream_lifecycle_15_bugs () =
   Alcotest.(check (option string)) "no premature last_error before server ack" None
     (Fleet_store.String_map.find "alpha-leader" m_int.fleet.chat_streams).last_error;
 
-  (* BUG-10: Short repeated reply "OK" (already in prior_msg_ids) does NOT prematurely vanish! *)
+  (* Unrelated replies with identical text cannot settle a stream. *)
   let m_done_a, _ =
     Update.step ~now:t2 m10
       (Msg.Chat_stream_chunk
@@ -6935,11 +6937,10 @@ let test_agui_chat_stream_lifecycle_15_bugs () =
     | Some p -> p.messages
     | None -> []
   in
-  Alcotest.(check bool) "short repeated reply 'OK' in prior_msg_ids does NOT prematurely vanish"
+  Alcotest.(check bool) "repeated reply text keeps the open operation visible"
     false (Chat_transcript.stream_reply_already_persisted hist_old buf_done_a);
 
-  (* Finding #2: Back-to-back "OK" replies with distinct operation_ids do NOT cross-dedup
-     even when Turn 1's persisted row is NOT in Turn 2's prior_msg_ids *)
+  (* Two operations may produce the same reply. *)
   let buf_turn2_ok : Fleet_store.chat_stream_buffer =
     {
       buf_done_a with
@@ -6947,13 +6948,12 @@ let test_agui_chat_stream_lifecycle_15_bugs () =
       operation_id = Some "op-ok-2";
       turn_ref = None;
       text = "OK";
-      prior_msg_ids = Fleet_store.String_set.empty;
     }
   in
   let hist_turn1_ok =
     [
       mk_msg ~id:"hist-ok-1" ~role:Wire_fleet.Role_assistant ~content:"OK"
-        ~operation_id:"op-ok-1" ~transcript_slot:"terminal_result" 30.0;
+        ?provenance:(operation_provenance "op-ok-1" Terminal_result) 30.0;
     ]
   in
   Alcotest.(check bool)
@@ -6963,7 +6963,7 @@ let test_agui_chat_stream_lifecycle_15_bugs () =
     hist_turn1_ok
     @ [
         mk_msg ~id:"hist-ok-2" ~role:Wire_fleet.Role_assistant ~content:"OK"
-          ~operation_id:"op-ok-2" ~transcript_slot:"terminal_result" 31.0;
+          ?provenance:(operation_provenance "op-ok-2" Terminal_result) 31.0;
       ]
   in
   Alcotest.(check bool)
@@ -7052,10 +7052,9 @@ let test_agui_chat_stream_lifecycle_15_bugs () =
                            mk_msg ~id:"old-1" ~role:Wire_fleet.Role_user ~content:"이전 질문" 10.0;
                            mk_msg ~id:"old-2" ~role:Wire_fleet.Role_assistant ~content:"OK" 11.0;
                            mk_msg ~id:"srv-u-a" ~role:Wire_fleet.Role_user ~content:"음"
-                             ~operation_id:tx_a.request_id ~transcript_slot:"accepted_user" 20.0;
+                             ?provenance:(operation_provenance tx_a.request_id Accepted_user) 20.0;
                            mk_msg ~id:"srv-f-a" ~role:Wire_fleet.Role_request_failure
-                             ~content:"stale error from A" ~operation_id:tx_a.request_id
-                             ~transcript_slot:"settled_failure" ~failure_kind:"turn_exception" 21.0;
+                             ~content:"stale error from A" ?provenance:(operation_provenance tx_a.request_id Settled_failure) ~failure_kind:"turn_exception" 21.0;
                          ];
                        has_more = false;
                        next_cursor = None;
@@ -7108,7 +7107,7 @@ let test_agui_chat_stream_lifecycle_15_bugs () =
          | _ -> false)
        (Cmd.flatten emb_cmds));
 
-  (* BUG-14: Confirming_delivery bounded retries on Tick settle cleanly; idle Tick emits 0 cmds *)
+  (* A clock tick has no operation or delivery evidence. *)
   let _, idle_tick_cmds =
     Update.step ~now:(Clock.Mono.after_s t0 5.0) m0 (Msg.Tick { wall_unix = 200.0 })
   in
@@ -7183,7 +7182,7 @@ let test_agui_chat_stream_lifecycle_15_bugs () =
                {
                  operation_id = tx_q.request_id;
                  queued_count = 1;
-                 state = Wire_fleet.Accepted_queued;
+                 state = Keeper_chat_operation.State_name.Queued;
                  interactive_outcome = None;
                  control_token = None;
                };
@@ -7224,7 +7223,7 @@ let test_agui_chat_stream_lifecycle_15_bugs () =
                {
                  operation_id = tx_q.request_id;
                  queued_count = 0;
-                 state = Wire_fleet.Accepted_succeeded;
+                 state = Keeper_chat_operation.State_name.Succeeded;
                  interactive_outcome = Some Wire_fleet.Interactive_replayed;
                  control_token = None;
                };
@@ -7244,18 +7243,18 @@ let test_agui_chat_stream_lifecycle_15_bugs () =
          | _ -> false)
        (Cmd.flatten cmds_acc_done));
 
-  let t_p3 = Clock.Mono.after_s t0 3.0 in
-  let m_c1, cmds_c1 = Update.step ~now:t_p3 m_conf (Msg.Tick { wall_unix = 203.0 }) in
-  Alcotest.(check int) "Confirming_delivery tick recheck emits 1 Get_chat_history"
-    1 (List.length cmds_c1);
-  let t_p6 = Clock.Mono.after_s t_p3 3.0 in
-  let m_c2, _ = Update.step ~now:t_p6 m_c1 (Msg.Tick { wall_unix = 206.0 }) in
-  let t_p9 = Clock.Mono.after_s t_p6 3.0 in
-  let m_c3, cmds_c3 = Update.step ~now:t_p9 m_c2 (Msg.Tick { wall_unix = 209.0 }) in
-  Alcotest.(check int) "Bounded Confirming_delivery settles after 3 rechecks (0 further polls)"
-    0 (List.length cmds_c3);
-  Alcotest.(check bool) "Settled unconfirmed tx is no longer stuck in Confirming_delivery"
-    false (Drafts.has_active_tx_for ~keeper:"alpha-leader" m_c3.drafts);
+  let t_p9 = Clock.Mono.after_s t0 3600.0 in
+  let pending, _ = Update.step ~now:t_p9 m_conf (Msg.Tick { wall_unix = 3800.0 }) in
+  let tx = Option.get (Drafts.active_tx_for_keeper ~keeper:"alpha-leader" pending.drafts) in
+  Alcotest.(check bool) "elapsed time keeps the operation unconfirmed" true
+    (tx.state = Drafts.Confirming_delivery);
+  let op = Option.value tx.operation_id ~default:tx.request_id in
+  let m_c3, _ = Update.step ~now:t_p9 pending (Msg.Http_reply { epoch = pending.epoch;
+      reply = Msg.Reply_chat_status { keeper = "alpha-leader"; operation_id = op;
+          result = Ok { id = Result.get_ok (Keeper_chat_operation.Operation_id.of_string op); sequence = 0L; state = Keeper_chat_operation.State_name.Failed;
+                        message = None; failure_detail = Some "operation failed" } } }) in
+  Alcotest.(check bool) "the persisted failure ends the pending operation" false
+    (Drafts.has_active_tx_for ~keeper:"alpha-leader" m_c3.drafts);
   (* [X] dismisses failed pending txs cleanly in Dive Keeper_chat *)
   let m_dismissed, _ =
     Update.step ~now:t_p9 m_c3 (Msg.Key_event (char_key "X"))
@@ -10349,7 +10348,7 @@ let test_cut_reply_follows_the_connector_fold () =
   Alcotest.(check (option string)) "no journal draws nothing" None
     (Cut_reply.text Cut_reply.no_journal)
 
-let chat_row ~id ~role ?operation_id content : Wire_fleet.chat_message =
+let chat_row ~id ~role ?provenance content : Wire_fleet.chat_message =
   {
     id;
     role;
@@ -10360,13 +10359,13 @@ let chat_row ~id ~role ?operation_id content : Wire_fleet.chat_message =
     tool_call_id = None;
     tool_call_name = None;
     execution_id = None;
-    operation_id;
-    transcript_slot = None;
+    provenance;
     failure_kind = None;
   }
 
 let failure_row ~id ~operation_id =
-  chat_row ~id ~role:Wire_fleet.Role_request_failure ~operation_id
+  chat_row ~id ~role:Wire_fleet.Role_request_failure
+    ?provenance:(operation_provenance operation_id Settled_failure)
     "Keeper request failed: cancelled"
 
 let journal_gets cmds =
@@ -10412,17 +10411,86 @@ let in_alpha_chat (m : Model.t) =
       };
   }
 
+let test_reopen_keeper_queue_and_reconcile () =
+  let model = in_alpha_chat (Model.initial ()) in
+  let drafts = Drafts.set_active_keeper "alpha" model.drafts in
+  let model, cmds = Update.execute_action ~now:t0 { model with drafts } Keymap.Open_queue_context in
+  Alcotest.(check bool) "fresh drawer asks for the selected keeper's server queue" true
+    (List.exists (function
+      | Cmd.Http_get { req = Cmd.Get_chat_queue { keeper = "alpha" }; _ } -> true
+      | _ -> false) (Cmd.flatten cmds));
+  let op : Wire_fleet.chat_operation = {
+    id = Result.get_ok (Keeper_chat_operation.Operation_id.of_string "queued-from-another-session");
+    state = Keeper_chat_operation.State_name.Queued;
+    sequence = 11L; message = Some "prior input"; failure_detail = None } in
+  let receive model ~keeper ~requested_at operations result =
+    Update.step ~now:t2 model (Msg.Http_reply { epoch = model.Model.epoch;
+       reply = Msg.Reply_chat_queue { keeper; requested_at; operations; result } }) |> fst in
+  let progress = receive model ~keeper:"alpha" ~requested_at:t1 [op] None in
+  Alcotest.(check bool) "a partial receipt keeps its active read"
+    false (List.exists (function Cmd.Http_get { req = Cmd.Get_chat_queue _; _ } -> true | _ -> false)
+             (View_fetches.overlay_fetches progress));
+  let loaded = receive progress ~keeper:"alpha" ~requested_at:t1 [op] (Some (Ok ())) in
+  let _, reopened = Update_nav.open_overlay loaded (Nav.Queue_context Nav.Drawer_queue) in
+  Alcotest.(check bool) "reopening asks again even after a complete read"
+    true (List.exists (function Cmd.Http_get { req = Cmd.Get_chat_queue { keeper = "alpha" }; _ } -> true | _ -> false)
+            (Cmd.flatten reopened));
+  let loaded = receive loaded ~keeper:"alpha" ~requested_at:t0 [] (Some (Ok ())) in
+  let loaded = receive loaded ~keeper:"beta" ~requested_at:t2 [] (Some (Ok ())) in
+  let queue, local = Model.drawer_queue ~keeper:"alpha" loaded in
+  Alcotest.(check (option (list string))) "older or foreign replies leave the queued operation visible"
+    (Some ["queued-from-another-session"]) (Option.map (fun () -> List.map (fun (row : Wire_fleet.chat_operation) -> Keeper_chat_operation.Operation_id.to_string row.id) queue.operations) (Observed.to_option queue.read));
+  Alcotest.(check int) "server-only row has no local claim" 0 (List.length local);
+  let denied = receive loaded ~keeper:"alpha" ~requested_at:t2 [op]
+      (Some (Error (Msg.Http_error { status = 403; body = ""; api_error = None }))) in
+  Alcotest.(check bool) "unreadable queue keeps an explicit failure" true
+    (match (Fleet_store.chat_queue_for ~keeper:"alpha" denied.fleet).read with
+     | Observed.Failed { retryable = false; _ } -> true | _ -> false);
+  Alcotest.(check int) "denial withdraws the earlier page" 0
+    (List.length (Fleet_store.chat_queue_for ~keeper:"alpha" denied.fleet).operations);
+  let partial = receive loaded ~keeper:"alpha" ~requested_at:t2 [op]
+      (Some (Error (Msg.Transport Health.Timeout))) in
+  Alcotest.(check int) "a later transport failure keeps the earlier page" 1
+    (List.length (Fleet_store.chat_queue_for ~keeper:"alpha" partial.fleet).operations);
+  let typed = Drafts.set_current_text "same input" drafts in
+  let pending, tx = Option.get (Drafts.enqueue_submission ~now:t0 ~keeper:"alpha"
+      ~mode:Drafts.Mode_follow_up typed) in
+  let pending = Drafts.mark_confirming ~now:t1 ~request_id:tx.request_id pending in
+  let source = Result.get_ok (Keeper_chat_delivery_identity.Request_id.of_string "another-message") in
+  let peer = chat_row ~id:"different-row" ~role:Wire_fleet.Role_user
+      ~provenance:{ delivery_key = Workspace_message source; transcript_slot = Accepted_user } tx.body in
+  let pending, _ = history_reply ~keeper:"alpha" [peer] { loaded with drafts = pending } in
+  let local_visible model =
+    Chat_transcript.project_transcript ~model ~keeper:"alpha"
+    |> List.exists (function
+      | Chat_transcript.Section_pending rows ->
+          List.exists (fun (row : Chat_transcript.pending_tx_projection) ->
+              String.equal tx.request_id row.tx.request_id) rows
+      | _ -> false)
+  in
+  Alcotest.(check bool) "foreign same-body row keeps the session input visible" true
+    (local_visible pending);
+  let accepted = chat_row ~id:"accepted-row" ~role:Wire_fleet.Role_user
+      ?provenance:(operation_provenance tx.request_id Accepted_user) tx.body in
+  let model, _ = history_reply ~keeper:"alpha" [accepted] pending in
+  let current = Option.get (Drafts.active_tx_for_keeper ~keeper:"alpha" model.drafts) in
+  Alcotest.(check bool) "exact visible accepted row substitutes the local row" false (local_visible model);
+  Alcotest.(check bool) "accepted input alone keeps the operation open" true
+    (current.state = Drafts.Confirming_delivery);
+  let model, _ = history_reply ~keeper:"alpha" [] model in
+  Alcotest.(check bool) "pending input returns when its receipt leaves the page" true (local_visible model)
+
 let test_cut_reply_reads_the_operation_journal () =
   let m0 = in_alpha_chat (Model.initial ()) in
   let history =
     [
-      chat_row ~id:"u-cut" ~role:Wire_fleet.Role_user ~operation_id:"op-cut"
+      chat_row ~id:"u-cut" ~role:Wire_fleet.Role_user ?provenance:(operation_provenance "op-cut" Accepted_user)
         "question";
       failure_row ~id:"f-cut" ~operation_id:"op-cut";
       (* The same operation's settled failure: the reply is drawn once. *)
       failure_row ~id:"f-cut-settled" ~operation_id:"op-cut";
       chat_row ~id:"a-done" ~role:Wire_fleet.Role_assistant
-        ~operation_id:"op-done" "delivered reply";
+        ?provenance:(operation_provenance "op-done" Terminal_result) "delivered reply";
       (* A failure settled after a delivered reply is not a cut. *)
       failure_row ~id:"f-done" ~operation_id:"op-done";
     ]
@@ -14014,6 +14082,8 @@ let () =
           Alcotest.test_case
             "A cut reply reads its operation's journal once per page"
             `Quick test_cut_reply_reads_the_operation_journal;
+          Alcotest.test_case "reopened queue reads the server and preserves input provenance"
+            `Quick test_reopen_keeper_queue_and_reconcile;
           Alcotest.test_case
             "A pruned journal draws nothing; a failed read is an incident"
             `Quick test_cut_reply_journal_failures;

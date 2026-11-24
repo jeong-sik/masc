@@ -297,6 +297,10 @@ val initial :
 
 val active_dive : t -> Nav.dive option
 
+val drawer_queue :
+  keeper:string -> t -> Fleet_store.chat_queue * Drafts.pending_message list
+(** Server waiting rows and local transmissions not represented by those rows. *)
+
 val target_keeper : t -> string option
 (** The keeper the composer and the Ctrl+T drawer address: the composer's
     active keeper, else the selected roster keeper. *)

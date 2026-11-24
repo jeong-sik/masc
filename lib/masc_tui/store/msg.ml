@@ -97,6 +97,17 @@ type http_reply =
       keeper : string;
       result : (Wire_fleet.chat_history_page, http_error) result;
     }
+  | Reply_chat_queue of {
+      keeper : string;
+      requested_at : Clock.Mono.t;
+      operations : Wire_fleet.chat_operation list;
+      result : (unit, http_error) result option;
+    }
+  | Reply_chat_status of {
+      keeper : string;
+      operation_id : string;
+      result : (Wire_fleet.chat_operation, http_error) result;
+    }
   | Reply_chat_operation_events of {
       keeper : string;
       operation_id : string;

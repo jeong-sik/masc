@@ -133,175 +133,27 @@ let fail_decision_post ~now ~attention_id ~context err (m : Model.t) =
       next,
     cmds )
 
-let max_confirm_rechecks = 3
-
-let take_matching_user_msg (tx : Drafts.pending_message)
-    (pool : Wire_fleet.chat_message list) =
-  let tx_op_id = Option.value tx.operation_id ~default:tx.request_id in
-  let is_prior (msg : Wire_fleet.chat_message) =
-    List.exists (String.equal msg.id) tx.prior_user_msg_ids
-  in
-  let matches_exact_provenance (msg : Wire_fleet.chat_message) =
-    String.equal msg.content tx.body
-    && ((match msg.operation_id with
-        | Some op -> String.equal op tx_op_id
-        | None -> false)
-       || String.equal msg.id tx.request_id)
-  in
-  let matches_legacy_unseen_body (msg : Wire_fleet.chat_message) =
-    Option.is_none msg.operation_id
-    && (not (is_prior msg))
-    && String.equal msg.content tx.body
-  in
-  let rec extract pred acc = function
-    | [] -> None
-    | msg :: rest ->
-        if pred msg then Some (msg, List.rev_append acc rest)
-        else extract pred (msg :: acc) rest
-  in
-  match extract matches_exact_provenance [] pool with
-  | Some (matched, remaining) -> (Some matched, remaining)
-  | None -> (
-      match extract matches_legacy_unseen_body [] pool with
-      | Some (matched, remaining) -> (Some matched, remaining)
-      | None -> (None, pool))
-
 let confirm_pending_txs_from_history ~now ~keeper
     (page : Wire_fleet.chat_history_page) drafts =
-  let persisted_user_rows =
-    List.filter
-      (fun (msg : Wire_fleet.chat_message) ->
-        match msg.role with
-        | Wire_fleet.Role_user | Wire_fleet.Role_peer _ -> true
-        | Wire_fleet.Role_assistant
-        | Wire_fleet.Role_system
-        | Wire_fleet.Role_tool
-        | Wire_fleet.Role_request_failure ->
-            false)
-      page.messages
-  in
-  let persisted_failure_ops =
+  let open Fleet_store in
+  let inputs, terminals =
     List.fold_left
-      (fun acc (msg : Wire_fleet.chat_message) ->
-        match msg.role, msg.operation_id with
-        | Wire_fleet.Role_request_failure, Some op ->
-            Fleet_store.String_set.add op acc
-        | ( ( Wire_fleet.Role_user
-            | Wire_fleet.Role_peer _
-            | Wire_fleet.Role_assistant
-            | Wire_fleet.Role_system
-            | Wire_fleet.Role_tool
-            | Wire_fleet.Role_request_failure )
-          , (Some _ | None) ) ->
-            acc)
-      Fleet_store.String_set.empty page.messages
+      (fun (inputs, terminals) (row : Wire_fleet.chat_message) ->
+        match Wire_fleet.accepted_input_operation row, Wire_fleet.terminal_operation row with
+        | Some op, _ -> (String_map.add op row.content inputs, terminals)
+        | None, Some op -> (inputs, String_set.add op terminals)
+        | None, None -> (inputs, terminals))
+      (String_map.empty, String_set.empty) page.messages
   in
-  let persisted_assistant_ops =
-    List.fold_left
-      (fun acc (msg : Wire_fleet.chat_message) ->
-        match msg.role, msg.operation_id with
-        | Wire_fleet.Role_assistant, Some op -> (
-            match msg.transcript_slot with
-            | None | Some "terminal_result" ->
-                Fleet_store.String_set.add op acc
-            | Some _ -> acc)
-        | ( ( Wire_fleet.Role_user
-            | Wire_fleet.Role_peer _
-            | Wire_fleet.Role_assistant
-            | Wire_fleet.Role_system
-            | Wire_fleet.Role_tool
-            | Wire_fleet.Role_request_failure )
-          , (Some _ | None) ) ->
-            acc)
-      Fleet_store.String_set.empty page.messages
-  in
-  let drafts', _remaining =
-    List.fold_left
-      (fun (acc, pool) (tx : Drafts.pending_message) ->
-        match tx.state with
-        | Drafts.Delivered -> (acc, pool)
-        | Drafts.Queued
-        | Drafts.Sending
-        | Drafts.Pending_processing
-        | Drafts.Confirming_delivery
-        | Drafts.Interrupting
-        | Drafts.Failed_retryable _ ->
-            let tx_op_id =
-              Option.value tx.operation_id ~default:tx.request_id
-            in
-            let matched_user, next_pool = take_matching_user_msg tx pool in
-            if Fleet_store.String_set.mem tx_op_id persisted_failure_ops then
-              (Drafts.remove_tx ~request_id:tx.request_id acc, next_pool)
-            else if Fleet_store.String_set.mem tx_op_id persisted_assistant_ops
-            then
-              let acc' =
-                match tx.state with
-                | Drafts.Failed_retryable _ ->
-                    Drafts.remove_tx ~request_id:tx.request_id acc
-                | Drafts.Queued
-                | Drafts.Sending
-                | Drafts.Pending_processing
-                | Drafts.Confirming_delivery
-                | Drafts.Interrupting
-                | Drafts.Delivered ->
-                    Drafts.mark_delivered ~now ~request_id:tx.request_id ~keeper
-                      ~body:tx.body acc
-              in
-              (acc', next_pool)
-            else (
-              match matched_user with
-              | Some matched_msg -> (
-                  match tx.state with
-                  | Drafts.Confirming_delivery ->
-                      ( Drafts.mark_delivered ~now ~request_id:tx.request_id
-                          ~keeper ~body:tx.body acc
-                      , next_pool )
-                  | Drafts.Failed_retryable _ ->
-                      ( Drafts.mark_user_persisted ~request_id:tx.request_id
-                          ~operation_id:matched_msg.operation_id acc
-                      , next_pool )
-                  | Drafts.Sending ->
-                      let acc' =
-                        acc
-                        |> Drafts.mark_user_persisted ~request_id:tx.request_id
-                             ~operation_id:matched_msg.operation_id
-                        |> Drafts.mark_accepted ~now ~request_id:tx.request_id
-                             ~operation_id:matched_msg.operation_id
-                      in
-                      (acc', next_pool)
-                  | Drafts.Queued
-                  | Drafts.Pending_processing
-                  | Drafts.Interrupting ->
-                      ( Drafts.mark_user_persisted ~request_id:tx.request_id
-                          ~operation_id:matched_msg.operation_id acc
-                      , next_pool )
-                  | Drafts.Delivered -> (acc, next_pool))
-              | None -> (
-                  match tx.state with
-                  | Drafts.Confirming_delivery
-                    when tx.recheck_count >= max_confirm_rechecks ->
-                      let acc' =
-                        if tx.user_persisted then
-                          Drafts.mark_delivered ~now ~request_id:tx.request_id
-                            ~keeper ~body:tx.body acc
-                        else
-                          Drafts.mark_failed_retryable ~now
-                            ~request_id:tx.request_id
-                            ~reason:"Delivery not confirmed in chat history" acc
-                      in
-                      (acc', pool)
-                  | Drafts.Queued
-                  | Drafts.Sending
-                  | Drafts.Pending_processing
-                  | Drafts.Confirming_delivery
-                  | Drafts.Interrupting
-                  | Drafts.Delivered
-                  | Drafts.Failed_retryable _ ->
-                      (acc, pool))))
-      (drafts, persisted_user_rows)
-      (Drafts.pending_txs_for_keeper ~keeper drafts)
-  in
-  drafts'
+  List.fold_left
+    (fun acc (tx : Drafts.pending_message) ->
+      let op = Option.value tx.operation_id ~default:tx.request_id in
+      if String_set.mem op terminals then Drafts.remove_tx ~request_id:tx.request_id acc
+      else if tx.state = Drafts.Sending &&
+              Option.equal String.equal (String_map.find_opt op inputs) (Some tx.body)
+      then Drafts.mark_accepted ~now ~request_id:tx.request_id ~operation_id:(Some op) acc
+      else acc)
+    drafts (Drafts.pending_txs_for_keeper ~keeper drafts)
 
 let refresh_404_fallbacks ~now (m : Model.t) =
   let infra =
@@ -504,6 +356,55 @@ let apply_http_reply ~now (m : Model.t) reply =
                  x))
         ~source:(Health.Source_keeper keeper) ~ko:"턴 기록 조회"
         ~en:"Turn records fetch" err
+  | Msg.Reply_chat_queue { keeper; requested_at; operations; result } ->
+      let prior = (Fleet_store.chat_queue_for ~keeper m.fleet).read in
+      let previous = match prior with
+        | Observed.Loading { since_ns } -> Some since_ns
+        | Observed.Value { observed_at; _ } -> Some observed_at
+        | Observed.Failed { at; _ } -> Some at
+        | Observed.Unreported | Observed.Absent -> None in
+      if Option.fold ~none:false ~some:(fun stamp -> Clock.Mono.compare stamp requested_at > 0) previous
+      then (m, [])
+      else
+        let set read =
+          { m with fleet = Fleet_store.set_chat_queue ~keeper { operations; read } m.fleet } in
+        (match result with
+         | None -> (set (Observed.loading ~since_ns:requested_at), [])
+         | Some (Ok ()) -> (set (Observed.value ~observed_at:requested_at ()), [])
+         | Some (Error err) ->
+             let read = Observed.failed ~at:requested_at ~reason:(Msg.http_error_detail err)
+               ~retryable:(Msg.http_error_retryable err) in
+             let operations =
+               match err with
+               | Msg.Workspace_mismatch _ | Msg.Http_error { status = (401 | 403); _ } -> []
+               | Msg.Http_error _ | Msg.Transport _ | Msg.Decode_error _ -> operations
+             in
+             let fleet = Fleet_store.set_chat_queue ~keeper { operations; read } m.fleet in
+             record_http_incident ~now ~source:(Health.Source_keeper keeper)
+               ~context:(Say.make ~ko:"대기열 조회" ~en:"Chat queue read") err { m with fleet })
+  | Msg.Reply_chat_status { keeper; operation_id; result = Ok operation } ->
+      let tx = Drafts.pending_txs_for_keeper ~keeper m.drafts
+        |> List.find_opt (fun (tx : Drafts.pending_message) ->
+             String.equal operation_id (Option.value tx.operation_id ~default:tx.request_id)) in
+      (match tx with
+       | None -> (m, [])
+       | Some tx ->
+           let request_id = tx.request_id in
+           let drafts = match operation.state with
+             | Keeper_chat_operation.State_name.Succeeded ->
+                 Drafts.mark_delivered ~now ~request_id ~keeper ~body:tx.body m.drafts
+             | Failed ->
+                 let reason = Option.value operation.failure_detail ~default:"Operation failed" in
+                 Drafts.mark_failed_retryable ~now ~request_id ~reason m.drafts
+             | Cancelled ->
+                 Drafts.mark_failed_retryable ~now ~request_id ~reason:"Operation cancelled" m.drafts
+             | Queued | Running when tx.state <> Drafts.Confirming_delivery -> m.drafts
+             | Queued -> Drafts.mark_queued ~now ~request_id ~operation_id:(Some operation_id) m.drafts
+             | Running -> Drafts.mark_accepted ~now ~request_id ~operation_id:(Some operation_id) m.drafts in
+           ({ m with drafts }, []))
+  | Msg.Reply_chat_status { keeper; result = Error err; _ } ->
+      record_http_incident ~now ~source:(Health.Source_keeper keeper)
+        ~context:(Say.make ~ko:"대화 요청 상태 조회" ~en:"Chat operation read") err m
   | Msg.Reply_chat_history { keeper; result = Ok page } ->
       let fleet =
         Fleet_store.apply_chat_history ~observed_at:now ~keeper page m.fleet

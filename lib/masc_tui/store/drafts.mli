@@ -29,17 +29,12 @@ type pending_message = {
   body : string;
   mode : delivery_mode;
   operation_id : string option;
-  prior_user_msg_ids : string list;
-  user_persisted : bool;
   state : tx_state;
   created_at : Clock.Mono.t;
   updated_at : Clock.Mono.t;
-  recheck_count : int;
 }
-(** Tracks exact identity [(request_id, keeper, body)] without normalizing or
-    hashing message content, alongside pre-existing persisted user message IDs
-    at send time and [user_persisted] reconciliation state so persisted user
-    rows are never duplicated in the transcript. *)
+(** Session-owned transmission. The operation id from acceptance identifies
+    it on the server. Visible history rows own their own delivery evidence. *)
 
 type keeper_draft = {
   text : string;
@@ -138,7 +133,6 @@ val enqueue_submission :
   now:Clock.Mono.t ->
   keeper:string ->
   mode:delivery_mode ->
-  ?prior_user_msg_ids:string list ->
   t ->
   (t * pending_message) option
 (** Atomically consume the non-blank draft for [keeper] and create a
@@ -175,12 +169,6 @@ val mark_interrupting : now:Clock.Mono.t -> request_id:string -> t -> t
 val clear_interrupting : now:Clock.Mono.t -> request_id:string -> t -> t
 (** Restore an {!Interrupting} submission back to {!Pending_processing} when an
     interrupt request fails or reports no cancellation. *)
-
-val mark_user_persisted :
-  request_id:string -> ?operation_id:string option -> t -> t
-(** Record that the user prompt row is already durably persisted in chat history
-    so transcript rendering does not duplicate the user prompt while the turn
-    remains in flight or failed without a persisted server failure row. *)
 
 val downgrade_mode_to_follow_up : request_id:string -> t -> t
 (** Downgrade a [Mode_steer] submission to [Mode_follow_up] when server

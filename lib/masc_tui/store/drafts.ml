@@ -23,12 +23,9 @@ type pending_message = {
   body : string;
   mode : delivery_mode;
   operation_id : string option;
-  prior_user_msg_ids : string list;
-  user_persisted : bool;
   state : tx_state;
   created_at : Clock.Mono.t;
   updated_at : Clock.Mono.t;
-  recheck_count : int;
 }
 
 type keeper_draft = {
@@ -557,12 +554,21 @@ let fresh_request_id prefix seq =
   else Printf.sprintf "tui-%s-%s-%d" prefix process_session_nonce seq
 
 let append_bounded_tx msg txs =
-  let appended = txs @ [ msg ] in
-  let len = List.length appended in
-  if len <= max_retained_txs then appended
-  else List.drop (len - max_retained_txs) appended
+  (* The retention limit applies only to settled deliveries. Every outstanding
+     input, including a failure awaiting operator action, keeps its identity. *)
+  let _, kept =
+    List.fold_left
+      (fun (settled, rows) tx ->
+        match tx.state with
+        | Delivered when settled >= max_retained_txs -> (settled, rows)
+        | Delivered -> (settled + 1, tx :: rows)
+        | Queued | Sending | Pending_processing | Confirming_delivery
+        | Interrupting | Failed_retryable _ -> (settled, tx :: rows))
+      (0, []) (List.rev txs)
+  in
+  kept @ [msg]
 
-let enqueue_submission ~now ~keeper ~mode ?(prior_user_msg_ids = []) t =
+let enqueue_submission ~now ~keeper ~mode t =
   let d = draft_for ~keeper t in
   if String.equal (String.trim d.text) "" then None
   else
@@ -577,12 +583,9 @@ let enqueue_submission ~now ~keeper ~mode ?(prior_user_msg_ids = []) t =
         body = d.text;
         mode;
         operation_id = None;
-        prior_user_msg_ids;
-        user_persisted = false;
         state = Queued;
         created_at = now;
         updated_at = now;
-        recheck_count = 0;
       }
     in
     let by_keeper =
@@ -663,7 +666,6 @@ let mark_confirming ~now ~request_id t =
           m with
           state = Confirming_delivery;
           updated_at = now;
-          recheck_count = m.recheck_count + 1;
         })
     t
 
@@ -695,15 +697,6 @@ let clear_interrupting ~now ~request_id t =
           m)
     t
 
-let mark_user_persisted ~request_id ?(operation_id = None) t =
-  update_tx ~request_id
-    (fun m ->
-      let op =
-        match operation_id with Some _ as x -> x | None -> m.operation_id
-      in
-      { m with user_persisted = true; operation_id = op })
-    t
-
 let downgrade_mode_to_follow_up ~request_id t =
   update_tx ~request_id
     (fun m ->
@@ -720,8 +713,7 @@ let mark_delivered ~now ~request_id ~keeper ~body t =
           String.equal m.request_id request_id
           && String.equal m.keeper keeper
           && String.equal m.body body
-          && not (is_terminal_tx_state m.state)
-        then { m with state = Delivered; user_persisted = true; updated_at = now }
+        then { m with state = Delivered; updated_at = now }
         else m)
       t.pending_txs
   in

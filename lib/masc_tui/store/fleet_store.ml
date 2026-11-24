@@ -38,13 +38,17 @@ type active_tool_call = {
   output_preview : string option;
 }
 
+type chat_queue = {
+  operations : Wire_fleet.chat_operation list;
+  read : unit Observed.t;
+}
+
 type chat_stream_buffer = {
   request_id : string;
   operation_id : string option;
   turn_ref : string option;
   run_started : bool;
   interrupting : bool;
-  prior_msg_ids : String_set.t;
   text : string;
   text_ownership : Cut_reply.ownership;
   thinking : string;
@@ -78,6 +82,7 @@ type t = {
   selected_collapsed_company : string option;
   collapsed_companies : String_set.t;
   chat_histories : Wire_fleet.chat_history_page Observed.t String_map.t;
+  chat_queues : chat_queue String_map.t;
   chat_streams : chat_stream_buffer String_map.t;
   cut_replies : Cut_reply.t Observed.t Operation_map.t;
   chat_origin_mode : chat_display_origin;
@@ -114,6 +119,7 @@ let empty =
     selected_collapsed_company = None;
     collapsed_companies = String_set.empty;
     chat_histories = String_map.empty;
+    chat_queues = String_map.empty;
     chat_streams = String_map.empty;
     cut_replies = Operation_map.empty;
     chat_origin_mode = Display_origin_bare;
@@ -815,25 +821,20 @@ let apply_chat_history ~observed_at ~keeper page t =
   in
   { t with chat_histories }
 
-let snapshot_history_ids ~keeper t =
-  match String_map.find_opt keeper t.chat_histories with
-  | None -> String_set.empty
-  | Some obs -> (
-      match Observed.to_option obs with
-      | None -> String_set.empty
-      | Some page ->
-          List.fold_left
-            (fun acc (m : Wire_fleet.chat_message) -> String_set.add m.id acc)
-            String_set.empty page.messages)
+let chat_queue_for ~keeper t =
+  Option.value (String_map.find_opt keeper t.chat_queues)
+    ~default:{ operations = []; read = Observed.unreported }
 
-let fresh_stream_buffer ~keeper ~request_id t =
+let set_chat_queue ~keeper queue t =
+  { t with chat_queues = String_map.add keeper queue t.chat_queues }
+
+let fresh_stream_buffer ~request_id =
   {
     request_id;
     operation_id = None;
     turn_ref = None;
     run_started = false;
     interrupting = false;
-    prior_msg_ids = snapshot_history_ids ~keeper t;
     text = "";
     text_ownership = Cut_reply.fresh_ownership;
     thinking = "";
@@ -844,7 +845,7 @@ let fresh_stream_buffer ~keeper ~request_id t =
   }
 
 let start_chat_stream ~keeper ~request_id t =
-  let buf = fresh_stream_buffer ~keeper ~request_id t in
+  let buf = fresh_stream_buffer ~request_id in
   { t with chat_streams = String_map.add keeper buf t.chat_streams }
 
 let merge_opt_op prev_op incoming_op =
@@ -854,14 +855,14 @@ let is_explicit_execution_start = function
   | Wire_fleet.Chunk_run_started _
   | Wire_fleet.Chunk_runtime_attempt_started _ ->
       true
-  | Wire_fleet.Chunk_accepted { state = Wire_fleet.Accepted_running; _ } -> true
+  | Wire_fleet.Chunk_accepted { state = Keeper_chat_operation.State_name.Running; _ } -> true
   | Wire_fleet.Chunk_accepted
       {
         state =
-          ( Wire_fleet.Accepted_queued
-          | Wire_fleet.Accepted_succeeded
-          | Wire_fleet.Accepted_failed
-          | Wire_fleet.Accepted_cancelled );
+          ( Keeper_chat_operation.State_name.Queued
+          | Keeper_chat_operation.State_name.Succeeded
+          | Keeper_chat_operation.State_name.Failed
+          | Keeper_chat_operation.State_name.Cancelled );
         _;
       }
   | Wire_fleet.Chunk_text_delta _
@@ -877,14 +878,14 @@ let is_explicit_execution_start = function
       false
 
 let is_queued_acceptance = function
-  | Wire_fleet.Chunk_accepted { state = Wire_fleet.Accepted_queued; _ } -> true
+  | Wire_fleet.Chunk_accepted { state = Keeper_chat_operation.State_name.Queued; _ } -> true
   | Wire_fleet.Chunk_accepted
       {
         state =
-          ( Wire_fleet.Accepted_running
-          | Wire_fleet.Accepted_succeeded
-          | Wire_fleet.Accepted_failed
-          | Wire_fleet.Accepted_cancelled );
+          ( Keeper_chat_operation.State_name.Running
+          | Keeper_chat_operation.State_name.Succeeded
+          | Keeper_chat_operation.State_name.Failed
+          | Keeper_chat_operation.State_name.Cancelled );
         _;
       }
   | Wire_fleet.Chunk_run_started _
@@ -944,11 +945,11 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
               allow_takeover
               && (not (is_queued_acceptance chunk))
               && ((not b.active) || is_explicit_execution_start chunk)
-            then Some (fresh_stream_buffer ~keeper ~request_id t)
+            then Some (fresh_stream_buffer ~request_id)
             else None
         | None ->
             if is_queued_acceptance chunk then None
-            else Some (fresh_stream_buffer ~keeper ~request_id t)
+            else Some (fresh_stream_buffer ~request_id)
       in
       match prev_opt with
       | None -> t
@@ -961,29 +962,29 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
                   prev.run_started
                   ||
                   match state with
-                  | Wire_fleet.Accepted_running -> true
-                  | Wire_fleet.Accepted_queued
-                  | Wire_fleet.Accepted_succeeded
-                  | Wire_fleet.Accepted_failed
-                  | Wire_fleet.Accepted_cancelled ->
+                  | Keeper_chat_operation.State_name.Running -> true
+                  | Keeper_chat_operation.State_name.Queued
+                  | Keeper_chat_operation.State_name.Succeeded
+                  | Keeper_chat_operation.State_name.Failed
+                  | Keeper_chat_operation.State_name.Cancelled ->
                       false
                 in
                 let active =
                   match state with
-                  | Wire_fleet.Accepted_running -> true
-                  | Wire_fleet.Accepted_queued -> prev.run_started
-                  | Wire_fleet.Accepted_succeeded
-                  | Wire_fleet.Accepted_failed
-                  | Wire_fleet.Accepted_cancelled ->
+                  | Keeper_chat_operation.State_name.Running -> true
+                  | Keeper_chat_operation.State_name.Queued -> prev.run_started
+                  | Keeper_chat_operation.State_name.Succeeded
+                  | Keeper_chat_operation.State_name.Failed
+                  | Keeper_chat_operation.State_name.Cancelled ->
                       false
                 in
                 let ended =
                   match state with
-                  | Wire_fleet.Accepted_queued | Wire_fleet.Accepted_running ->
+                  | Keeper_chat_operation.State_name.Queued | Keeper_chat_operation.State_name.Running ->
                       prev.ended
-                  | Wire_fleet.Accepted_succeeded
-                  | Wire_fleet.Accepted_failed
-                  | Wire_fleet.Accepted_cancelled ->
+                  | Keeper_chat_operation.State_name.Succeeded
+                  | Keeper_chat_operation.State_name.Failed
+                  | Keeper_chat_operation.State_name.Cancelled ->
                       true
                 in
                 {
@@ -1245,6 +1246,7 @@ let finish_chat_stream ~keeper ~request_id ~error t =
 let detach_chat_streams t =
   {
     t with
+    chat_queues = String_map.empty;
     chat_streams =
       String_map.map
         (fun (b : chat_stream_buffer) ->
@@ -1686,7 +1688,7 @@ let cut_reply_rows ~keeper t =
   let replied =
     List.fold_left
       (fun acc (m : Wire_fleet.chat_message) ->
-        match m.role, m.operation_id with
+        match m.role, Wire_fleet.terminal_operation m with
         | Wire_fleet.Role_assistant, Some op -> String_set.add op acc
         | ( ( Wire_fleet.Role_user
             | Wire_fleet.Role_peer _
@@ -1701,7 +1703,7 @@ let cut_reply_rows ~keeper t =
   let _, rows =
     List.fold_left
       (fun (seen, rows) (m : Wire_fleet.chat_message) ->
-        match m.role, m.operation_id with
+        match m.role, Wire_fleet.terminal_operation m with
         | Wire_fleet.Role_request_failure, Some op ->
             if String_set.mem op seen || String_set.mem op replied then
               (seen, rows)
@@ -1775,5 +1777,6 @@ let mark_stale_all t =
     turn_records = String_map.map Observed.mark_stale t.turn_records;
     fleet_reading = Observed.mark_stale t.fleet_reading;
     chat_histories = String_map.map Observed.mark_stale t.chat_histories;
+    chat_queues = String_map.map (fun q -> { q with read = Observed.mark_stale q.read }) t.chat_queues;
     cut_replies = Operation_map.map Observed.mark_stale t.cut_replies;
   }

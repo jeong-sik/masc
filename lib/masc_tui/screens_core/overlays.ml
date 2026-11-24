@@ -2721,20 +2721,31 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                         ~en:"  [Esc] close · resolve via [Y]/[N] strip or [2 Work > Inbox]"));
               push pri_st ""
             end;
-            let txs = Drafts.pending_txs_for_keeper ~keeper model.drafts in
+            let queue, txs = Model.drawer_queue ~keeper model in
             let draft = Drafts.draft_for ~keeper model.drafts in
-            push (Typography.anchor ~bg theme)
-              (Say.resolve lang
-                 (Say.make
-                    ~ko:(Printf.sprintf "전송 대기열 (%d건)" (List.length txs))
-                    ~en:(Printf.sprintf "Pending Transmissions (%d)"
-                           (List.length txs))));
-            if txs = [] then
-              push whisper_st
-                (Say.resolve lang
-                   (Say.make ~ko:"  진행 중인 전송 없음"
-                      ~en:"  No active transmissions"))
-            else
+            let one_line = String.map (function '\n' | '\r' -> ' ' | c -> c) in
+            (match queue.read with
+             | Observed.Value { stale; _ } ->
+                 let label =
+                   if stale then Say.make ~ko:"서버 대기열 · 마지막 조회" ~en:"Server queue · last read"
+                   else Say.make ~ko:"서버 대기열" ~en:"Server queue"
+                 in
+                 push (Typography.anchor ~bg theme)
+                   (Printf.sprintf "%s (%d)" (Say.resolve lang label) (List.length queue.operations))
+             | Observed.Failed { reason; _ } ->
+                 push crit_st (Say.resolve lang (Say.make ~ko:"서버 대기열 조회 실패" ~en:"Server queue read failed") ^ " · " ^ reason)
+             | Observed.Loading _ | Observed.Unreported | Observed.Absent ->
+                 let label = if Option.is_none (Model.target_keeper model) then
+                     Say.make ~ko:"키퍼를 선택하세요" ~en:"Select a Keeper"
+                   else Say.make ~ko:"서버 대기열 조회 중…" ~en:"Reading server queue…" in
+                 push whisper_st (Say.resolve lang label));
+            List.iter (fun (op : Wire_fleet.chat_operation) ->
+               let body = Option.value op.message ~default:"" |> one_line in
+               push pri_st (Printf.sprintf "  %s  %s" (Keeper_chat_operation.Operation_id.to_string op.id) body))
+              queue.operations;
+            if txs <> [] then begin
+              push (Typography.anchor ~bg theme)
+                (Say.resolve lang (Say.make ~ko:"이 세션의 전송" ~en:"Session transmissions"));
               List.iter
                 (fun (tx : Drafts.pending_message) ->
                   let mode_s =
@@ -2772,7 +2783,8 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                   push st_style
                     (Printf.sprintf "  %s %s (%s) · %s" mode_s st_s tx.request_id
                        body_one))
-                txs;
+                txs
+            end;
             push pri_st "";
             push (Typography.anchor ~bg theme)
               (Say.resolve lang

@@ -343,6 +343,24 @@ let initial ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_ko)
 let active_dive m =
   match m.nav.dive_stack with d :: _ -> Some d | [] -> None
 
+let drawer_queue ~keeper m =
+  let queue = Fleet_store.chat_queue_for ~keeper m.fleet in
+  let server_ids =
+    queue.operations
+    |> List.fold_left (fun ids (row : Wire_fleet.chat_operation) ->
+         Fleet_store.String_set.add (Keeper_chat_operation.Operation_id.to_string row.id) ids) Fleet_store.String_set.empty
+  in
+  let remaining = Drafts.pending_txs_for_keeper ~keeper m.drafts
+    |> List.filter (fun (tx : Drafts.pending_message) ->
+         match tx.state with
+         | Drafts.Delivered -> false
+         | Drafts.Queued | Drafts.Sending | Drafts.Pending_processing
+         | Drafts.Confirming_delivery | Drafts.Interrupting | Drafts.Failed_retryable _ ->
+             not (Fleet_store.String_set.mem
+               (Option.value tx.operation_id ~default:tx.request_id) server_ids))
+  in
+  queue, remaining
+
 let target_keeper m =
   match m.drafts.active_keeper with
   | Some k when not (String.equal (String.trim k) "") -> Some (String.trim k)

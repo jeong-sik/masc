@@ -1747,7 +1747,7 @@ let test_p2_voice_runner_ffmpeg_and_mouse_capture () =
    running is posted again with its last journal seq, and only to the server
    instance that accepted it; anything else ends the submit. *)
 let test_chat_reattach_decision () =
-  let delay ?(acceptance = Some Masc_tui_protocol.Wire_fleet.Accepted_running)
+  let delay ?(acceptance = Some Keeper_chat_operation.State_name.Running)
       ?(terminal_seen = false) ?(reattaches = 0) result =
     Cmd_executor.chat_reattach_delay ~acceptance ~terminal_seen ~reattaches
       result
@@ -1766,15 +1766,15 @@ let test_chat_reattach_decision () =
   Alcotest.(check (option (float 0.0))) "a failure before acceptance is the submit's error"
     None (delay ~acceptance:None dropped);
   Alcotest.(check (option (float 0.0))) "a queued operation reattaches" (Some 1.0)
-    (delay ~acceptance:(Some Masc_tui_protocol.Wire_fleet.Accepted_queued) dropped);
+    (delay ~acceptance:(Some Keeper_chat_operation.State_name.Queued) dropped);
   Alcotest.(check (option (float 0.0)))
     "a close after an acceptance that reports the operation succeeded is final"
     None
-    (delay ~acceptance:(Some Masc_tui_protocol.Wire_fleet.Accepted_succeeded) (Ok ()));
+    (delay ~acceptance:(Some Keeper_chat_operation.State_name.Succeeded) (Ok ()));
   Alcotest.(check (option (float 0.0)))
     "a close after an acceptance that reports the operation cancelled is final"
     None
-    (delay ~acceptance:(Some Masc_tui_protocol.Wire_fleet.Accepted_cancelled) (Ok ()));
+    (delay ~acceptance:(Some Keeper_chat_operation.State_name.Cancelled) (Ok ()));
   Alcotest.(check (option (float 0.0))) "a terminal frame ends the stream" None
     (delay ~terminal_seen:true (Ok ()));
   Alcotest.(check (option (float 0.0))) "a 4xx is final" None

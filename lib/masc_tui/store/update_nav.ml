@@ -710,6 +710,20 @@ let switch_workspace (m : Model.t) ws =
   in
   (next, View_fetches.fetches_for_current_view next)
 
+let refresh_queue_on_entry (m : Model.t) =
+  if Option.equal Nav.equal_overlay m.nav.overlay
+       (Some (Nav.Queue_context Nav.Drawer_queue)) then
+    match Model.target_keeper m with
+    | Some keeper ->
+        let queue = Fleet_store.chat_queue_for ~keeper m.fleet in
+        let fleet =
+          Fleet_store.set_chat_queue ~keeper
+            { queue with read = Observed.mark_stale queue.read } m.fleet
+        in
+        { m with fleet }
+    | None -> m
+  else m
+
 let open_overlay (m : Model.t) overlay =
   let help_scroll_offset =
     match overlay with
@@ -839,7 +853,7 @@ let open_overlay (m : Model.t) overlay =
   in
   let next =
     { m with nav; drafts; config; incidents; knowledge; inline_modal; ask_modal }
-    |> Model.sync_sidebar_cursor
+    |> Model.sync_sidebar_cursor |> refresh_queue_on_entry
   in
   (next, View_fetches.fetches_for_current_view next)
 
@@ -1223,7 +1237,7 @@ let cycle_sub_tab (m : Model.t) dir =
               overlay = Some (Nav.Queue_context next_tab);
               queue_scroll_offset = 0;
             };
-        }
+        } |> refresh_queue_on_entry
       in
       (next, View_fetches.fetches_for_current_view next)
   | Some Nav.Ask_answer -> (
@@ -4745,10 +4759,11 @@ let queue_context_max_scroll (m : Model.t) tab =
     | Nav.Drawer_queue ->
         let attn_count = Attention.count m.attention in
         let attn_rows = if attn_count > 0 then attn_count + 3 else 0 in
-        let txs = Drafts.pending_txs_for_keeper ~keeper m.drafts in
+        let queue, txs = Model.drawer_queue ~keeper m in
+        let server_rows = List.length queue.operations in
         let others = Drafts.other_keepers_draft_count m.drafts in
-        attn_rows + 1 + max 1 (List.length txs) + 1 + 1 + 1
-        + if others > 0 then 1 else 0
+        attn_rows + 1 + server_rows + (if txs = [] then 0 else 1 + List.length txs)
+        + 3 + (if others > 0 then 1 else 0)
     | Nav.Drawer_schedules -> List.length (Work_store.schedules_list m.work)
     | Nav.Drawer_context ->
         let keeper_opt = Fleet_store.find_keeper ~name:keeper m.fleet in

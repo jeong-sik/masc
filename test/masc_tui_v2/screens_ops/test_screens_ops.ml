@@ -7,6 +7,12 @@ open Masc_tui_store
 open Masc_tui_screens_ops
 
 (* A measured context reading: [ratio] of a 200k-token window. *)
+let operation_provenance id transcript_slot =
+  let open Keeper_chat_delivery_identity in
+  match Request_id.of_string id with
+  | Ok id -> Some { delivery_key = Operation id; transcript_slot }
+  | Error error -> Alcotest.fail error
+
 let measured_context ratio : Wire_fleet.context_reading =
   Wire_fleet.Context_measured
     {
@@ -721,8 +727,7 @@ let make_populated_model ~cols ~rows ~lang =
                  tool_call_id = None;
                  tool_call_name = None;
                  execution_id = None;
-                 operation_id = None;
-                 transcript_slot = None;
+                 provenance = None;
                  failure_kind = None;
                };
                {
@@ -735,8 +740,7 @@ let make_populated_model ~cols ~rows ~lang =
                  tool_call_id = None;
                  tool_call_name = None;
                  execution_id = None;
-                 operation_id = None;
-                 transcript_slot = None;
+                 provenance = None;
                  failure_kind = None;
                };
                {
@@ -749,8 +753,7 @@ let make_populated_model ~cols ~rows ~lang =
                  tool_call_id = Some "tc-99";
                  tool_call_name = Some "git_diff";
                  execution_id = None;
-                 operation_id = None;
-                 transcript_slot = None;
+                 provenance = None;
                  failure_kind = None;
                };
                {
@@ -764,8 +767,7 @@ let make_populated_model ~cols ~rows ~lang =
                  tool_call_id = None;
                  tool_call_name = None;
                  execution_id = None;
-                 operation_id = None;
-                 transcript_slot = None;
+                 provenance = None;
                  failure_kind = None;
                };
              ];
@@ -1394,8 +1396,7 @@ let test_p1_chat_dedup_untyped_tool_and_code_bg () =
                  tool_call_id = Some "tc-200";
                  tool_call_name = Some "hist_tool";
                  execution_id = None;
-                 operation_id = None;
-                 transcript_slot = None;
+                 provenance = None;
                  failure_kind = None;
                };
                {
@@ -1408,8 +1409,7 @@ let test_p1_chat_dedup_untyped_tool_and_code_bg () =
                  tool_call_id = None;
                  tool_call_name = None;
                  execution_id = None;
-                 operation_id = None;
-                 transcript_slot = None;
+                 provenance = operation_provenance "op-2" Terminal_result;
                  failure_kind = None;
                };
                {
@@ -1422,8 +1422,7 @@ let test_p1_chat_dedup_untyped_tool_and_code_bg () =
                  tool_call_id = None;
                  tool_call_name = None;
                  execution_id = None;
-                 operation_id = None;
-                 transcript_slot = None;
+                 provenance = None;
                  failure_kind = None;
                };
              ];
@@ -2273,8 +2272,7 @@ let test_p1_keeper_dive_tool_card_secret_redaction () =
                  tool_call_id = Some "tc-sec-1";
                  tool_call_name = Some "hist_non_json";
                  execution_id = None;
-                 operation_id = None;
-                 transcript_slot = None;
+                 provenance = None;
                  failure_kind = None;
                };
                {
@@ -2287,8 +2285,7 @@ let test_p1_keeper_dive_tool_card_secret_redaction () =
                  tool_call_id = Some "tc-sec-2";
                  tool_call_name = Some "hist_json_embed";
                  execution_id = None;
-                 operation_id = None;
-                 transcript_slot = None;
+                 provenance = None;
                  failure_kind = None;
                };
                {
@@ -2301,8 +2298,7 @@ let test_p1_keeper_dive_tool_card_secret_redaction () =
                  tool_call_id = Some "tc-sec-3";
                  tool_call_name = Some "hist_trunc_json";
                  execution_id = None;
-                 operation_id = None;
-                 transcript_slot = None;
+                 provenance = None;
                  failure_kind = None;
                };
              ];
@@ -2370,8 +2366,7 @@ let test_p2_tool_modes_ctrl_o_hint_and_origin_modes () =
                    tool_call_id = Some "tc-lines-1";
                    tool_call_name = Some "log_dump";
                    execution_id = None;
-                   operation_id = None;
-                   transcript_slot = None;
+                   provenance = None;
                    failure_kind = None;
                  };
                ];
@@ -2831,7 +2826,7 @@ let test_p1_chat_transcript_render_parity () =
       active_turn = None;
     }
   in
-  let mk_msg ~id ~role ~content ?tool_call_name ts : Wire_fleet.chat_message =
+  let mk_msg ~id ~role ~content ?tool_call_name ?provenance ts : Wire_fleet.chat_message =
     {
       id;
       role;
@@ -2842,8 +2837,7 @@ let test_p1_chat_transcript_render_parity () =
       tool_call_id = None;
       tool_call_name;
       execution_id = None;
-      operation_id = None;
-      transcript_slot = None;
+      provenance;
       failure_kind = None;
     }
   in
@@ -2873,7 +2867,7 @@ let test_p1_chat_transcript_render_parity () =
                  i)
             (now_unix -. 400.0 +. float_of_int (i * 10)))
     @ [
-        mk_msg ~id:"c-last" ~role:Wire_fleet.Role_assistant
+        mk_msg ~id:"c-last" ~role:Wire_fleet.Role_assistant ?provenance:(operation_provenance "op-p" Terminal_result)
           ~content:"BOTTOM_MARKER_FINAL persisted reply." (now_unix -. 10.0);
       ]
   in
@@ -2985,8 +2979,7 @@ let test_chat_peer_rows_name_their_author () =
       tool_call_id = None;
       tool_call_name = None;
       execution_id = None;
-      operation_id = None;
-      transcript_slot = None;
+      provenance = None;
       failure_kind = None;
     }
   in
@@ -3142,8 +3135,7 @@ let test_agui_chat_chronological_projection_and_phase_parity () =
       tool_call_id = None;
       tool_call_name = None;
       execution_id = None;
-      operation_id = Some "op-old";
-      transcript_slot = Some "accepted_user";
+      provenance = operation_provenance "op-old" Accepted_user;
       failure_kind = None;
     }
   in
@@ -3211,7 +3203,7 @@ let test_agui_chat_chronological_projection_and_phase_parity () =
                {
                  operation_id = req_b;
                  queued_count = 1;
-                 state = Wire_fleet.Accepted_queued;
+                 state = Keeper_chat_operation.State_name.Queued;
                  interactive_outcome = None;
                  control_token = None;
                };
@@ -3296,8 +3288,7 @@ let test_agui_chat_chronological_projection_and_phase_parity () =
                              tool_call_id = None;
                              tool_call_name = None;
                              execution_id = None;
-                             operation_id = Some req_a;
-                             transcript_slot = Some "accepted_user";
+                             provenance = operation_provenance req_a Accepted_user;
                              failure_kind = None;
                            };
                            {
@@ -3310,8 +3301,7 @@ let test_agui_chat_chronological_projection_and_phase_parity () =
                              tool_call_id = None;
                              tool_call_name = None;
                              execution_id = None;
-                             operation_id = Some req_a;
-                             transcript_slot = Some "settled_failure";
+                             provenance = operation_provenance req_a Settled_failure;
                              failure_kind = Some "turn_exception";
                            };
                          ];

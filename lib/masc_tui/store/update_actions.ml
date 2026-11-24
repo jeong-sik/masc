@@ -1625,27 +1625,6 @@ and submit_composer ~now ~mode (m : Model.t) =
                 opened
             , cmds )
         | Some keeper -> (
-            let prior_user_msg_ids =
-              match
-                Fleet_store.String_map.find_opt keeper m.fleet.chat_histories
-              with
-              | None -> []
-              | Some obs -> (
-                  match Observed.to_option obs with
-                  | None -> []
-                  | Some page ->
-                      List.filter_map
-                        (fun (msg : Wire_fleet.chat_message) ->
-                          match msg.role with
-                          | Wire_fleet.Role_user | Wire_fleet.Role_peer _ ->
-                              Some msg.id
-                          | Wire_fleet.Role_assistant
-                          | Wire_fleet.Role_system
-                          | Wire_fleet.Role_tool
-                          | Wire_fleet.Role_request_failure ->
-                              None)
-                        page.messages)
-            in
             let keeper_is_busy =
               Option.is_some (Fleet_store.active_turn_for ~keeper m.fleet)
               || Fleet_store.has_active_chat_stream ~keeper m.fleet
@@ -1675,7 +1654,7 @@ and submit_composer ~now ~mode (m : Model.t) =
             let drafts0 = Drafts.set_active_keeper keeper m.drafts in
             match
               Drafts.enqueue_submission ~now ~keeper ~mode:effective_mode
-                ~prior_user_msg_ids drafts0
+                drafts0
             with
             | None -> (m, [])
             | Some (drafts1, tx) ->

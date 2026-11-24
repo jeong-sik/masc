@@ -9,6 +9,11 @@ type outcome =
   | Unknown_goal of { goal_id : string }
   | Superseded of { goal_id : string }
 
+type hold_identity =
+  { request_id : string
+  ; verification_run_id : string
+  }
+
 type written = Written | Not_written
 type decision = Release of Candle_payout.waiting | Refuse of outcome
 
@@ -23,7 +28,7 @@ let still_needed (w : Candle_payout.waiting) events =
   | Candle_payout.Settled -> false
 ;;
 
-let release ~now ~(config : Workspace_utils_backend_setup.config) ~goal_id =
+let release ~now ~(config : Workspace_utils_backend_setup.config) ~goal_id ~expected_hold =
   let base_path = config.Workspace_utils_backend_setup.base_path in
   match Candle_status.for_recording ~base_path with
   | Candle_status.Recording_off | Candle_status.Recording_disabled _
@@ -37,6 +42,10 @@ let release ~now ~(config : Workspace_utils_backend_setup.config) ~goal_id =
         (fun (w : Candle_payout.waiting) -> String.equal w.goal_id goal_id)
         (Candle_payout.waiting events) in
     let decision = match waiting with
+      | Some w when Option.exists (fun expected ->
+          not (String.equal expected.request_id w.request_id
+               && String.equal expected.verification_run_id w.verification_run_id)) expected_hold ->
+        Refuse (Superseded { goal_id })
       | Some w when Option.is_some (Candle_payout.held_window_of w events) -> Release w
       | Some _ -> Refuse (Not_held { goal_id })
       | None ->

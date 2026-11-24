@@ -19,10 +19,18 @@ type outcome =
   | Superseded of { goal_id : string }
       (** The ledger changed while the release was appended; read again. *)
 
+type hold_identity =
+  { request_id : string
+  ; verification_run_id : string
+  }
+
 val release :
   now:(unit -> float)
   -> config:Workspace_utils_backend_setup.config
   -> goal_id:string
+  -> expected_hold:hold_identity option
   -> (outcome, string) result
-(** Appends the release row for [goal_id]'s open hold. [Error] when the ledger
-    cannot be read or the row cannot be written. *)
+(** Appends the release row for [goal_id]'s open hold. A supplied identity
+    must match the open hold, otherwise returns [Superseded]. [None] addresses
+    the currently open hold. [Error] when the ledger cannot be read or the
+    row cannot be written. *)

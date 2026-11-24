@@ -1,14 +1,12 @@
 /**
- * Lazy Workspace Registry for Proposal A+ (8 Workspaces).
+ * Lazy Workspace Registry for Proposal A+ (All 8 Workspaces).
  *
  * - Re-exports the shared `WorkspaceViewProps` / `WorkspaceInspectPayload` contract.
- * - Lazily loads the real `AccountWorkspace` (`./account/index.ts`).
- * - Provides clean typed placeholder loader wrappers for the 7 sibling workspaces
- *   being authored in parallel by Layers 5–7 (`pulse`, `keepers`, `work`, `knowledge`,
- *   `runtime`, `infra`, `settings`) — each swaps cleanly in 1 line when stacked.
+ * - Lazily loads all 8 workspaces (`pulse`, `work`, `knowledge`, `keepers`,
+ *   `runtime`, `infra`, `settings`, `account`) so first-load JS/CSS stays strictly
+ *   bounded to the shell + vendor runtime.
  */
 
-import { html } from 'htm/preact'
 import { lazy } from 'preact/compat'
 import type {
   WorkspaceComponent,
@@ -26,51 +24,6 @@ export type {
   WorkspaceViewProps,
 }
 
-function createWorkspacePlaceholder(
-  id: WorkspaceId,
-  title: string,
-  description: string,
-): WorkspaceComponent {
-  return function WorkspacePlaceholder(props: WorkspaceViewProps) {
-    return html`
-      <section class="ap-placeholder" data-workspace-placeholder=${id}>
-        <header class="ap-placeholder-head">
-          <span class="ap-eyebrow">PROPOSAL A+ WORKSPACE</span>
-          <h1 class="ap-placeholder-title">${title}</h1>
-          <p class="ap-placeholder-desc">${description}</p>
-        </header>
-        <dl class="ap-placeholder-meta mono">
-          <div><dt>workspace</dt><dd>${id}</dd></div>
-          <div><dt>subroute</dt><dd>${props.subroute}</dd></div>
-          ${props.entityId ? html`<div><dt>entity</dt><dd>${props.entityId}</dd></div>` : null}
-          ${props.entityTab ? html`<div><dt>tab</dt><dd>${props.entityTab}</dd></div>` : null}
-        </dl>
-        <div class="ap-placeholder-actions">
-          <button
-            type="button"
-            class="btn-ghost"
-            onClick=${() => props.onInspect({
-              title: `${title} · Route Contract`,
-              subtitle: `/${id}/${props.subroute}`,
-              kind: 'workspace-meta',
-              data: { id, subroute: props.subroute, entityId: props.entityId, entityTab: props.entityTab },
-            })}
-          >
-            Quick-Peek Inspect
-          </button>
-          <button
-            type="button"
-            class="btn-primary"
-            onClick=${() => props.onNavigate('/account')}
-          >
-            Open Account
-          </button>
-        </div>
-      </section>
-    `
-  }
-}
-
 export const WORKSPACE_LOADERS: Readonly<Record<WorkspaceId, WorkspaceLoaderEntry>> = Object.freeze({
   pulse: {
     id: 'pulse',
@@ -83,24 +36,18 @@ export const WORKSPACE_LOADERS: Readonly<Record<WorkspaceId, WorkspaceLoaderEntr
   work: {
     id: 'work',
     title: '2 Work',
-    load: async () => ({
-      default: createWorkspacePlaceholder(
-        'work',
-        '2 Work — Goals, Tasks, Inbox & Candle',
-        'Goal verification lifecycle, Task/Schedule CRUD, Target-Locked Unified HITL Inbox & Candle Ledger (Layer 6).',
-      ),
-    }),
+    load: async () => {
+      const mod = await import('./work/index')
+      return { default: mod.WorkWorkspace }
+    },
   },
   knowledge: {
     id: 'knowledge',
     title: '3 Knowledge',
-    load: async () => ({
-      default: createWorkspacePlaceholder(
-        'knowledge',
-        '3 Knowledge — Board, Wiki, Artifacts & World Memory',
-        'Signal-only Board, Librarian Wiki CAS editor, Lean Artifacts & World Memory Diff/Conflicts (Layer 6).',
-      ),
-    }),
+    load: async () => {
+      const mod = await import('./knowledge/index')
+      return { default: mod.KnowledgeWorkspace }
+    },
   },
   keepers: {
     id: 'keepers',

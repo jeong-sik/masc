@@ -868,38 +868,52 @@ let add_routes ~sw ~clock router =
        )
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/goals/candle/hold/release" (fun state _actor req reqd ->
          Http.Request.read_body_async reqd (fun body ->
+           let bad_request message =
+             Error (`Bad_request, Keeper_api_types.error_json ~ok:false message) in
+           let parse_hold_identity fields =
+             let expected = List.filter (fun (key, _) -> String.equal key "expected_hold") fields in
+             match expected with
+             | [] -> Ok None
+             | [_, `Assoc entries] when List.length entries = 2 ->
+               (match List.assoc_opt "request_id" entries, List.assoc_opt "verification_run_id" entries with
+                | Some (`String request_id), Some (`String verification_run_id)
+                  when String.trim request_id <> "" && String.trim verification_run_id <> "" ->
+                  Ok (Some ({request_id; verification_run_id} : Candle_hold_release.hold_identity))
+                | _ -> bad_request "expected_hold must contain request_id and verification_run_id")
+             | _ -> bad_request "invalid expected_hold precondition" in
            let answer =
-             try
-               let json = Yojson.Safe.from_string body in
-               let config = Mcp_server.workspace_config state in
-               let goal_id = match json with
-                 | `Assoc fields ->
-                   (match List.assoc_opt "goal_id" fields with
-                    | Some (`String goal_id) -> Ok (String.trim goal_id)
-                    | Some _ -> Error "goal_id must be a string"
-                    | None -> Error "goal_id field is required")
-                 | _ -> Error "the body must be a JSON object" in
-               match goal_id with
-               | Error message -> Error message
-               | Ok goal_id when goal_id = "" -> Error "goal_id must not be blank"
-               | Ok goal_id ->
-                 Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-                   match Candle_hold_release.release ~now:(fun () -> Eio.Time.now clock) ~config ~goal_id with
-                   | Ok outcome ->
-                     (match outcome with
-                      | Candle_hold_release.Released _ -> Candle_payout_worker.wake ()
-                      | Candle_hold_release.Not_waiting _ | Candle_hold_release.Not_held _
-                      | Candle_hold_release.Unknown_goal _
-                      | Candle_hold_release.Superseded _ -> ());
-                     Ok outcome
-                   | Error detail -> Error detail)
-             with Yojson.Json_error detail ->
-               Error ("invalid JSON: " ^ detail)
+             let open Result.Syntax in
+             let* json = match Yojson.Safe.from_string body with
+               | json -> Ok json
+               | exception Yojson.Json_error detail -> bad_request ("invalid JSON: " ^ detail) in
+             let* goal_id, hold = match json with
+               | `Assoc fields ->
+                 (match List.assoc_opt "goal_id" fields with
+                  | Some (`String goal_id) when String.trim goal_id <> "" ->
+                    let* hold = parse_hold_identity fields in
+                    Ok (String.trim goal_id, hold)
+                  | Some (`String _) -> bad_request "goal_id must not be blank"
+                  | Some _ -> bad_request "goal_id must be a string"
+                  | None -> bad_request "goal_id field is required")
+               | _ -> bad_request "the body must be a JSON object" in
+             let config = Mcp_server.workspace_config state in
+             let* _workspace_matched =
+               Workspace.validate_expected_workspace ~config json
+               |> Result.map_error Server_refusal.expected_workspace_error in
+             Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+               match Candle_hold_release.release ~now:(fun () -> Eio.Time.now clock) ~config
+                       ~goal_id ~expected_hold:hold with
+               | Ok outcome ->
+                 (match outcome with
+                  | Candle_hold_release.Released _ -> Candle_payout_worker.wake ()
+                  | Candle_hold_release.Not_waiting _ | Candle_hold_release.Not_held _
+                  | Candle_hold_release.Unknown_goal _ | Candle_hold_release.Superseded _ -> ());
+                 Ok outcome
+               | Error detail -> bad_request detail)
            in
            match answer with
-           | Error message ->
-             respond_json_value_with_cors ~status:`Bad_request req reqd
-               (Keeper_api_types.error_json ~ok:false message)
+           | Error (status, response) ->
+             respond_json_value_with_cors ~status req reqd response
            | Ok (Candle_hold_release.Released { goal_id }) ->
              respond_json_value_with_cors req reqd
                (`Assoc ["ok", `Bool true; "outcome", `String "released"; "goal_id", `String goal_id])

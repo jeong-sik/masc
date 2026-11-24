@@ -627,7 +627,22 @@ let test_ambiguous_observation_is_durable_and_other_goals_progress () =
      ; Candle_candidates.Already_prepared {goal_id="goal-2"} ] -> ()
    | _ -> fail "durable hold was not reused");
   check string "repeated scan leaves ledger unchanged" before
-    (In_channel.with_open_bin (Candle_ledger.path ~base_path) In_channel.input_all)
+    (In_channel.with_open_bin (Candle_ledger.path ~base_path) In_channel.input_all);
+  let config = Workspace_utils_backend_setup.default_config base_path in
+  let release verification_run_id =
+    Candle_hold_release.release ~now:(fun () -> clock) ~config ~goal_id:"goal-1"
+      ~expected_hold:(Some { request_id = "req-1"; verification_run_id })
+    |> ok_or_fail in
+  check bool "a confirmation for an earlier run must be refused" true
+    (release "other-run" = Candle_hold_release.Superseded { goal_id = "goal-1" });
+  check string "refusing another run leaves the ledger intact" before
+    (In_channel.with_open_bin (Candle_ledger.path ~base_path) In_channel.input_all);
+  check bool "the observed hold should release" true
+    (release "run-1" = Candle_hold_release.Released { goal_id = "goal-1" });
+  let released = E.Candidate_window_released
+      { goal_id = "goal-1"; request_id = "req-1"; verification_run_id = "run-1" } in
+  check bool "the release row uses the observed payout identity" true
+    (List.exists (fun (event : E.t) -> event.body = released) (events base_path))
 ;;
 
 let test_missing_task_waits_and_can_recover () =

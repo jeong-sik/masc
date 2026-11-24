@@ -124,6 +124,14 @@ type inline_action_kind =
       lane_id : string;
       opened_revision : string option;
     }
+  | Task_create_form
+  | Task_transition_form of { task_id : string }
+  | Task_link_goal of { task_id : string }
+  | Goal_upsert_form of string option
+  | Board_delete_post of {
+      post_id : string;
+      title : string;
+    }
 
 type system_gate_kind =
   | Micro_viewport

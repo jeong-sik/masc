@@ -3461,7 +3461,12 @@ let classify_inline_form (modal : Model.inline_modal_state) : inline_form_kind =
     | Nav.Code_search_form
     | Nav.Runtime_lane_create
     | Nav.Runtime_lane_edit _
-    | Nav.Runtime_lane_delete _ ) as std ->
+    | Nav.Runtime_lane_delete _
+    | Nav.Task_create_form
+    | Nav.Task_transition_form _
+    | Nav.Task_link_goal _
+    | Nav.Goal_upsert_form _
+    | Nav.Board_delete_post _ ) as std ->
       Form_standard std
 
 let inline_action_title ~lang ~(modal : Model.inline_modal_state) _kind =
@@ -3550,6 +3555,25 @@ let inline_action_title ~lang ~(modal : Model.inline_modal_state) _kind =
         (Say.make
            ~ko:("레인 삭제 확인 · " ^ lane_id)
            ~en:("Delete Runtime Lane · " ^ lane_id))
+  | Form_standard Nav.Task_create_form ->
+      Say.resolve lang (Say.make ~ko:"새 작업 생성" ~en:"Create Task")
+  | Form_standard (Nav.Task_transition_form { task_id }) ->
+      Say.resolve lang
+        (Say.make ~ko:("작업 상태 전환 · " ^ task_id)
+           ~en:("Transition Task · " ^ task_id))
+  | Form_standard (Nav.Task_link_goal { task_id }) ->
+      Say.resolve lang
+        (Say.make ~ko:("작업 → 목표 연결 · " ^ task_id)
+           ~en:("Link Task to Goal · " ^ task_id))
+  | Form_standard (Nav.Goal_upsert_form None) ->
+      Say.resolve lang (Say.make ~ko:"새 목표 생성" ~en:"Create Goal")
+  | Form_standard (Nav.Goal_upsert_form (Some goal_id)) ->
+      Say.resolve lang
+        (Say.make ~ko:("목표 편집 · " ^ goal_id) ~en:("Edit Goal · " ^ goal_id))
+  | Form_standard (Nav.Board_delete_post { post_id; _ }) ->
+      Say.resolve lang
+        (Say.make ~ko:("게시글 삭제 확인 · " ^ post_id)
+           ~en:("Delete Board Post · " ^ post_id))
 
 let form_of_inline_modal (modal : Model.inline_modal_state) =
   let fields =
@@ -3608,7 +3632,12 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     | Nav.Code_search_form
     | Nav.Runtime_lane_create
     | Nav.Runtime_lane_edit _
-    | Nav.Runtime_lane_delete _ ->
+    | Nav.Runtime_lane_delete _
+    | Nav.Task_create_form
+    | Nav.Task_transition_form _
+    | Nav.Task_link_goal _
+    | Nav.Goal_upsert_form _
+    | Nav.Board_delete_post _ ->
         Int.max 7 (List.length modal.fields + 6 + if has_focused_help then 1 else 0)
   in
   let h = Int.min (Int.max 0 (rect.h - 2)) desired_h in
@@ -3654,7 +3683,12 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       | Nav.Code_search_form
       | Nav.Runtime_lane_create
       | Nav.Runtime_lane_edit _
-      | Nav.Runtime_lane_delete _ ->
+      | Nav.Runtime_lane_delete _
+      | Nav.Task_create_form
+      | Nav.Task_transition_form _
+      | Nav.Task_link_goal _
+      | Nav.Goal_upsert_form _
+      | Nav.Board_delete_post _ ->
           Say.resolve lang
             (Say.make ~ko:"[Tab] 필드 · [Enter] 제출 · [Esc] 취소"
                ~en:"[Tab] Field · [Enter] Submit · [Esc] Cancel")
@@ -3802,7 +3836,12 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       | Nav.Code_search_form
       | Nav.Runtime_lane_create
       | Nav.Runtime_lane_edit _
-      | Nav.Runtime_lane_delete _ ->
+      | Nav.Runtime_lane_delete _
+      | Nav.Task_create_form
+      | Nav.Task_transition_form _
+      | Nav.Task_link_goal _
+      | Nav.Goal_upsert_form _
+      | Nav.Board_delete_post _ ->
           let status_rows =
             if modal.submitting || Option.is_some modal.error then 1 else 0
           in
@@ -3813,7 +3852,9 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             | Form_standard
                 ( Nav.Connector_form
                 | Nav.Runtime_lane_create
-                | Nav.Runtime_lane_edit _ )
+                | Nav.Runtime_lane_edit _
+                | Nav.Task_create_form
+                | Nav.Task_link_goal _ )
             | Form_fusion_launch ->
                 if inner.h - status_rows >= 6 then 1 else 0
             | Form_board_goal_proposal
@@ -3836,7 +3877,10 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_search_form
-                | Nav.Runtime_lane_delete _ ) ->
+                | Nav.Runtime_lane_delete _
+                | Nav.Task_transition_form _
+                | Nav.Goal_upsert_form _
+                | Nav.Board_delete_post _ ) ->
                 0
           in
           let form_r =
@@ -3945,6 +3989,27 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                   (Cell_grid.put_text ~clip:er grid ~x:er.x ~y:er.y
                      ~style:whisper_st
                      (Grapheme.truncate_to_width ~max_width:er.w hint))
+            | Form_standard (Nav.Task_create_form | Nav.Task_link_goal _) ->
+                let goals = Work_store.goals model.work in
+                let hint =
+                  match goals with
+                  | [] ->
+                      Say.resolve lang
+                        (Say.make ~ko:"로드된 목표 없음"
+                           ~en:"No goals loaded")
+                  | _ ->
+                      let sample =
+                        goals
+                        |> List.filteri (fun i _ -> i < 4)
+                        |> List.map (fun (g : Wire_work.goal) -> g.id)
+                        |> String.concat ", "
+                      in
+                      "Goals: " ^ sample
+                in
+                ignore
+                  (Cell_grid.put_text ~clip:er grid ~x:er.x ~y:er.y
+                     ~style:whisper_st
+                     (Grapheme.truncate_to_width ~max_width:er.w hint))
             | Form_board_goal_proposal
             | Form_goal_confirmation_proof
             | Form_memory_act
@@ -3965,7 +4030,10 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_search_form
-                | Nav.Runtime_lane_delete _ ) ->
+                | Nav.Runtime_lane_delete _
+                | Nav.Task_transition_form _
+                | Nav.Goal_upsert_form _
+                | Nav.Board_delete_post _ ) ->
                 ()
           end;
           if status_rows = 1 then begin
@@ -4286,6 +4354,7 @@ let compact_help_group ~lang (grp : Keymap.help_group) : Keymap.help_group =
         | Keymap.Open_external_editor
         | Keymap.Interrupt_turn
         | Keymap.Delete_selected
+        | Keymap.Link_task_goal
         | Keymap.Quit_app ->
             Some e)
       grp.entries

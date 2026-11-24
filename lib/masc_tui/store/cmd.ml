@@ -319,6 +319,38 @@ type post_request =
       token : string;
       hostname : string option;
     }
+  | Post_task_create of {
+      title : string;
+      priority : int;
+      description : string option;
+      goal_id : string option;
+      expected_workspace : Wire_work.expected_workspace option;
+    }
+  | Post_task_transition of {
+      task_id : string;
+      action : Wire_work.task_transition_action;
+      notes : string option;
+      expected_workspace : Wire_work.expected_workspace option;
+    }
+  | Post_task_link_goal of {
+      task_id : string;
+      goal_id : string;
+      expected_workspace : Wire_work.expected_workspace;
+    }
+  | Post_goal_upsert of {
+      id : string option;
+      title : string;
+      measure : Wire_work.goal_measure option;
+      procedure : string;
+      priority : int option;
+      due_date : string option;
+      expected_workspace : Wire_work.expected_workspace option;
+    }
+  | Post_board_pin of {
+      post_id : string;
+      pinned : bool;
+    }
+  | Post_board_delete of { post_id : string }
 
 type put_request =
   | Put_wiki_page of { page : string; request : Wire_knowledge.wiki_put_request }
@@ -606,6 +638,61 @@ let post_request_path = function
       Wire_common.percent_encode item.partition_id ^ "/recovery"
   | Post_github_token { keeper; _ } ->
       Wire_keeper_context.github_token_path ~keeper
+  | Post_task_create _
+  | Post_task_transition _
+  | Post_goal_upsert _ ->
+      Wire_work.mcp_path
+  | Post_task_link_goal { task_id; _ } ->
+      Wire_work.task_link_goal_path ~task_id
+  | Post_board_pin _ -> Wire_knowledge.board_pin_path
+  | Post_board_delete _ -> Wire_knowledge.board_delete_path
+
+let mcp_tool_name_of_post_request = function
+  | Post_task_create _ -> Some "masc_add_task"
+  | Post_task_transition _ -> Some "masc_transition"
+  | Post_goal_upsert _ -> Some "masc_goal_upsert"
+  | Post_ask_answer _
+  | Post_tool_approval _
+  | Post_gate_resolution _
+  | Post_goal_transition _
+  | Post_goal_confirmation _
+  | Post_verification_verdict _
+  | Post_memory_act _
+  | Post_fusion_launch _
+  | Post_runtime_assignment _
+  | Post_runtime_default_route _
+  | Post_runtime_lane_create _
+  | Post_runtime_lane_update _
+  | Post_runtime_lane_delete _
+  | Post_setup_account_key _
+  | Post_setup_login_start _
+  | Post_sandbox_probe _
+  | Post_config_patch _
+  | Post_tui_preference _
+  | Post_keeper_turn_interrupt _
+  | Post_board_create _
+  | Post_board_comment _
+  | Post_board_vote _
+  | Post_board_comment_vote _
+  | Post_artifact_check _
+  | Post_artifact_share _
+  | Post_schedule_create _
+  | Post_connector_bind _
+  | Post_connector_unbind _
+  | Post_repo_add _
+  | Post_task_cancel _
+  | Post_harness_overrule _
+  | Post_browser_tabs _
+  | Post_oauth_login _
+  | Post_oauth_identity_refresh _
+  | Post_oauth_identity_switch _
+  | Post_oauth_disconnect _
+  | Post_board_recovery _
+  | Post_github_token _
+  | Post_task_link_goal _
+  | Post_board_pin _
+  | Post_board_delete _ ->
+      None
 
 let post_request_body = function
   | Post_ask_answer { keeper; ask_id; answers } ->
@@ -744,6 +831,35 @@ let post_request_body = function
           decision = Acknowledge_and_requeue }
   | Post_github_token { token; hostname; _ } ->
       Wire_keeper_context.encode_github_token_body ~token ?hostname ()
+  | Post_task_create { title; priority; description; goal_id; expected_workspace } ->
+      let arguments =
+        Wire_work.encode_task_create ~title ~priority ?description ?goal_id
+          ?expected_workspace ()
+      in
+      Wire_work.encode_mcp_tool_call ~id:"tui-task-create"
+        ~tool_name:"masc_add_task" ~arguments
+  | Post_task_transition { task_id; action; notes; expected_workspace } ->
+      let arguments =
+        Wire_work.encode_task_transition ~task_id ~action ?notes
+          ?expected_workspace ()
+      in
+      Wire_work.encode_mcp_tool_call ~id:"tui-task-transition"
+        ~tool_name:"masc_transition" ~arguments
+  | Post_task_link_goal { task_id = _; goal_id; expected_workspace } ->
+      Wire_work.encode_task_link_goal ~goal_id ~expected_workspace
+  | Post_goal_upsert
+      { id; title; measure; procedure; priority; due_date; expected_workspace }
+    ->
+      let arguments =
+        Wire_work.encode_goal_upsert ?id ~title ?measure ~procedure ?priority
+          ?due_date ?expected_workspace ()
+      in
+      Wire_work.encode_mcp_tool_call ~id:"tui-goal-upsert"
+        ~tool_name:"masc_goal_upsert" ~arguments
+  | Post_board_pin { post_id; pinned } ->
+      Wire_knowledge.encode_board_pin ~post_id ~pinned
+  | Post_board_delete { post_id } ->
+      Wire_knowledge.encode_board_delete ~post_id
 
 let put_request_path = function
   | Put_wiki_page { page; _ } -> Wire_knowledge.wiki_page_path ~page

@@ -2642,7 +2642,12 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                         | Nav.Code_search_form
                         | Nav.Runtime_lane_create
                         | Nav.Runtime_lane_edit _
-                        | Nav.Runtime_lane_delete _ )
+                        | Nav.Runtime_lane_delete _
+                        | Nav.Task_create_form
+                        | Nav.Task_transition_form _
+                        | Nav.Task_link_goal _
+                        | Nav.Goal_upsert_form _
+                        | Nav.Board_delete_post _ )
                       , _ ) ->
                         true
                   in
@@ -2776,9 +2781,43 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                             in
                             Some ({ m with inline_modal = Some next_modal }, [])
                         | None -> None)
+                    | Nav.Task_transition_form _, Some { key = "task_action"; value; _ } -> (
+                        match
+                          cycle_in
+                            [ "claim"; "start"; "release"; "submit_for_verification" ]
+                            (String.lowercase_ascii (String.trim value))
+                        with
+                        | Some next_act ->
+                            let next_modal =
+                              Model.modal_update_active_field
+                                (fun _ -> next_act)
+                                modal
+                            in
+                            Some ({ m with inline_modal = Some next_modal }, [])
+                        | None -> None)
+                    | Nav.Goal_upsert_form id_opt, Some { key = "goal_measure_kind"; value; _ } -> (
+                        let choices =
+                          match id_opt with
+                          | Some _ -> [ ""; "done_when"; "count"; "quantity" ]
+                          | None -> [ "done_when"; "count"; "quantity" ]
+                        in
+                        match
+                          cycle_in choices
+                            (String.lowercase_ascii (String.trim value))
+                        with
+                        | Some next_mk ->
+                            let next_modal =
+                              Model.modal_update_active_field
+                                (fun _ -> next_mk)
+                                modal
+                            in
+                            Some ({ m with inline_modal = Some next_modal }, [])
+                        | None -> None)
                     | ( ( Nav.Connector_form
                         | Nav.Board_new_post
-                        | Nav.Runtime_lane_create )
+                        | Nav.Runtime_lane_create
+                        | Nav.Task_transition_form _
+                        | Nav.Goal_upsert_form _ )
                       , (Some _ | None) )
                     | ( ( Nav.Btw_query
                         | Nav.Gate_reject _
@@ -2793,7 +2832,10 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                         | Nav.Code_finder_form
                         | Nav.Code_search_form
                         | Nav.Runtime_lane_edit _
-                        | Nav.Runtime_lane_delete _ )
+                        | Nav.Runtime_lane_delete _
+                        | Nav.Task_create_form
+                        | Nav.Task_link_goal _
+                        | Nav.Board_delete_post _ )
                       , (Some _ | None) ) ->
                         None
                   in
@@ -3339,7 +3381,9 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                    | Some
                                        ( Nav.Dive_infra (Nav.Sandbox_dive _)
                                        | Nav.Dive_keeper
-                                           { tab = Nav.Keeper_sandbox; _ } ) ->
+                                           { tab = Nav.Keeper_sandbox; _ }
+                                       | Nav.Dive_knowledge (Nav.Thread_dive _) )
+                                     ->
                                        true
                                    | Some
                                        ( Nav.Dive_infra
@@ -3360,18 +3404,27 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                                | Nav.Keeper_identity );
                                              _;
                                            }
+                                       | Nav.Dive_knowledge
+                                           ( Nav.Wiki_dive _
+                                           | Nav.Artifact_dive _
+                                           | Nav.Memory_diff_dive _ )
                                        | Nav.Dive_work _
-                                       | Nav.Dive_knowledge _
                                        | Nav.Dive_runtime _ ) ->
                                        false
                                    | None ->
                                        (Nav.equal_workspace m.nav.workspace
-                                          Nav.Infra
-                                       && (Nav.equal_infra_tab
-                                             m.infra.active_tab
-                                             Nav.Infra_sandboxes
-                                          || Nav.equal_infra_tab
-                                               m.infra.active_tab Nav.Infra_code))
+                                          Nav.Knowledge
+                                       && Nav.equal_knowledge_tab
+                                            m.knowledge.active_tab
+                                            Nav.Knowledge_board)
+                                       || (Nav.equal_workspace m.nav.workspace
+                                             Nav.Infra
+                                          && (Nav.equal_infra_tab
+                                                m.infra.active_tab
+                                                Nav.Infra_sandboxes
+                                             || Nav.equal_infra_tab
+                                                  m.infra.active_tab
+                                                  Nav.Infra_code))
                                        || (Nav.equal_workspace m.nav.workspace
                                              Nav.Runtime
                                           && Nav.equal_runtime_tab
@@ -3385,6 +3438,48 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                                m.fleet.keeper_dive_tab
                                                Nav.Keeper_sandbox)) ->
                                 Some Keymap.Probe_sandbox
+                            | Some "g"
+                              when (match Model.active_dive m with
+                                   | Some (Nav.Dive_work (Nav.Task_dive _)) ->
+                                       true
+                                   | Some
+                                       ( Nav.Dive_work
+                                           ( Nav.Goal_dive _
+                                           | Nav.Verification_dive _ )
+                                       | Nav.Dive_keeper _
+                                       | Nav.Dive_knowledge _
+                                       | Nav.Dive_runtime _
+                                       | Nav.Dive_infra _ ) ->
+                                       false
+                                   | None ->
+                                       Nav.equal_workspace m.nav.workspace
+                                         Nav.Work
+                                       && Nav.equal_work_tab m.work.active_tab
+                                            Nav.Work_tasks) ->
+                                Some Keymap.Link_task_goal
+                            | Some "R"
+                              when (match Model.active_dive m with
+                                   | Some
+                                       (Nav.Dive_knowledge (Nav.Thread_dive _))
+                                     ->
+                                       true
+                                   | Some
+                                       ( Nav.Dive_knowledge
+                                           ( Nav.Wiki_dive _
+                                           | Nav.Artifact_dive _
+                                           | Nav.Memory_diff_dive _ )
+                                       | Nav.Dive_keeper _
+                                       | Nav.Dive_work _
+                                       | Nav.Dive_runtime _
+                                       | Nav.Dive_infra _ ) ->
+                                       false
+                                   | None ->
+                                       Nav.equal_workspace m.nav.workspace
+                                         Nav.Knowledge
+                                       && Nav.equal_knowledge_tab
+                                            m.knowledge.active_tab
+                                            Nav.Knowledge_board) ->
+                                Some Keymap.Context_primary_action
                             | Some "t"
                               when Option.is_none (Model.active_dive m)
                                    && Nav.equal_workspace m.nav.workspace
@@ -3473,7 +3568,8 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                       | Keymap.Search_prev_match
                       | Keymap.Toggle_memory_chart
                       | Keymap.Open_external_editor
-                      | Keymap.Delete_selected ->
+                      | Keymap.Delete_selected
+                      | Keymap.Link_task_goal ->
                           `Ignore
                     in
                     match
@@ -3657,7 +3753,12 @@ let apply_paste ~now:_ (m : Model.t) text =
                   | Nav.Code_search_form
                   | Nav.Runtime_lane_create
                   | Nav.Runtime_lane_edit _
-                  | Nav.Runtime_lane_delete _ )
+                  | Nav.Runtime_lane_delete _
+                  | Nav.Task_create_form
+                  | Nav.Task_transition_form _
+                  | Nav.Task_link_goal _
+                  | Nav.Goal_upsert_form _
+                  | Nav.Board_delete_post _ )
                 , _ ) ->
                   true
             in

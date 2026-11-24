@@ -86,6 +86,7 @@ type action =
   | Open_external_editor
   | Interrupt_turn
   | Delete_selected
+  | Link_task_goal
   | Quit_app
 
 type scope =
@@ -246,6 +247,7 @@ let action_tag = function
   | Interrupt_turn -> 67
   | Quit_app -> 68
   | Delete_selected -> 69
+  | Link_task_goal -> 70
 
 let equal_action a b =
   if not (Int.equal (action_tag a) (action_tag b)) then false
@@ -320,6 +322,7 @@ let equal_action a b =
     | Open_external_editor, Open_external_editor
     | Interrupt_turn, Interrupt_turn
     | Delete_selected, Delete_selected
+    | Link_task_goal, Link_task_goal
     | Quit_app, Quit_app ->
         true
     | ( Switch_workspace _
@@ -390,6 +393,7 @@ let equal_action a b =
       | Open_external_editor
       | Interrupt_turn
       | Delete_selected
+      | Link_task_goal
       | Quit_app ),
       _ ->
         false
@@ -935,9 +939,14 @@ let bindings : binding list =
         ~footer_priority:0 (bare_char 'Y');
       bind ~scope:Screen_context ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Probe_sandbox ~key_display:"p"
-        ~hint_label:(Say.make ~ko:"프로브/파일/카탈로그" ~en:"Probe/Find/Pkg")
-        ~help_desc:(Say.make ~ko:"[샌드박스] 상태 프로브 / [코드] 퍼지 파일 찾기 / [애드온] 패키지 카탈로그" ~en:"[Sandboxes] Probe health / [Code] Fuzzy file finder / [Addons] Package catalog")
+        ~hint_label:(Say.make ~ko:"프로브/고정/파일" ~en:"Probe/Pin/Find")
+        ~help_desc:(Say.make ~ko:"[보드] 고정 토글 / [샌드박스] 상태 프로브 / [코드] 퍼지 파일 찾기 / [애드온] 패키지 카탈로그" ~en:"[Board] Pin toggle / [Sandboxes] Probe health / [Code] Fuzzy file finder / [Addons] Package catalog")
         ~footer_priority:0 (bare_char 'p');
+      bind ~scope:Screen_context ~tier:Bare_unfocused ~category:Cat_actions
+        ~action:Link_task_goal ~key_display:"g"
+        ~hint_label:(Say.make ~ko:"목표 연결" ~en:"Link Goal")
+        ~help_desc:(Say.make ~ko:"[작업] 목표 미연결 작업을 목표에 연결 (1회)" ~en:"[Tasks] Link goalless task to a Goal (one-time)")
+        ~footer_priority:0 (bare_char 'g');
       bind ~scope:Screen_context ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Refresh_browser_tabs ~key_display:"t"
         ~hint_label:(Say.make ~ko:"탭 새로고침" ~en:"Tabs")
@@ -1481,6 +1490,7 @@ let palette_commands ~lang =
           | Open_external_editor
           | Interrupt_turn
           | Delete_selected
+          | Link_task_goal
           | Quit_app ->
               true
         in

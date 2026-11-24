@@ -8,6 +8,9 @@ val planning_path : string
 val execution_tasks_path : string
 val goals_path : string
 val goal_confirmation_path : string
+val mcp_path : string
+val mcp_protocol_version : string
+val task_link_goal_path : task_id:string -> string
 val verification_requests_path :
   view:string -> limit:int -> offset:int -> string
 val verification_verdict_path : string
@@ -109,6 +112,52 @@ val encode_goal_transition :
 val encode_goal_confirmation : goal_confirmation_request -> Yojson.Safe.t
 (** Encode strict allowlist request body for [POST /api/v1/goals/confirmation]. *)
 
+type goal_measure_direction =
+  | At_least
+  | At_most
+
+type goal_measure =
+  | Measure_done_when of { condition : string }
+  | Measure_count of {
+      noun : string;
+      total : int;
+    }
+  | Measure_quantity of {
+      unit : string;
+      direction : goal_measure_direction;
+      target : float;
+    }
+
+val parse_goal_measure_input :
+  kind:string -> spec:string -> (goal_measure, string) result
+(** Parse operator modal fields into a closed {!goal_measure} matching
+    [config/tools/masc_goal_upsert.toml] ([done_when], [count], [quantity]). *)
+
+val encode_goal_measure : goal_measure -> Yojson.Safe.t
+
+val encode_goal_upsert :
+  ?id:string ->
+  title:string ->
+  ?measure:goal_measure ->
+  procedure:string ->
+  ?priority:int ->
+  ?due_date:string ->
+  ?expected_workspace:expected_workspace ->
+  unit ->
+  Yojson.Safe.t
+(** Arguments object for MCP [masc_goal_upsert]. Strictly omits [status] and
+    [phase] ([additional_properties = false]). *)
+
+val encode_mcp_tool_call :
+  id:string -> tool_name:string -> arguments:Yojson.Safe.t -> Yojson.Safe.t
+(** Stateless MCP 2026-07-28 JSON-RPC 2.0 [tools/call] request envelope for
+    [POST /mcp]. *)
+
+val decode_mcp_tool_call_ack : string -> (unit, string) result
+(** Validate a [POST /mcp] response (JSON or SSE [data:] frame), returning
+    [Error] if JSON-RPC [error], [result.isError = true], or
+    [structuredContent.ok = false] is reported. *)
+
 (** {1 Tasks & Goal Link Checks} *)
 
 type task_status =
@@ -174,6 +223,41 @@ val encode_task_cancel :
   Yojson.Safe.t
 (** Body for [POST /api/v1/dashboard/tasks/cancel]: [task_id], the trimmed
     [reason] when it is not blank, and the required [expected_workspace]. *)
+
+type task_transition_action =
+  | Task_claim
+  | Task_start
+  | Task_release
+  | Task_submit_for_verification
+
+val equal_task_transition_action :
+  task_transition_action -> task_transition_action -> bool
+
+val task_transition_action_to_string : task_transition_action -> string
+val task_transition_action_of_string : string -> task_transition_action option
+
+val encode_task_create :
+  title:string ->
+  priority:int ->
+  ?description:string ->
+  ?goal_id:string ->
+  ?expected_workspace:expected_workspace ->
+  unit ->
+  Yojson.Safe.t
+(** Arguments object for MCP [masc_add_task]. *)
+
+val encode_task_transition :
+  task_id:string ->
+  action:task_transition_action ->
+  ?notes:string ->
+  ?expected_workspace:expected_workspace ->
+  unit ->
+  Yojson.Safe.t
+(** Arguments object for MCP [masc_transition]. *)
+
+val encode_task_link_goal :
+  goal_id:string -> expected_workspace:expected_workspace -> Yojson.Safe.t
+(** Strict 2-field allowlist body for [POST /api/v1/tasks/:task_id/link-goal]. *)
 
 val decode_planning_snapshot :
   observed_at:Clock.Mono.t -> Yojson.Safe.t -> (planning_snapshot, string) result

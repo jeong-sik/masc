@@ -244,6 +244,7 @@ let make_rich_model ~lang ~cols ~rows =
       succession_chain_root_id = Some "chain-wkbl";
       chain_depth = Some 22;
       is_signal = true;
+      pinned = false;
     }
   in
   let p2 : Wire_knowledge.board_post =
@@ -273,6 +274,7 @@ let make_rich_model ~lang ~cols ~rows =
       succession_chain_root_id = None;
       chain_depth = None;
       is_signal = true;
+      pinned = false;
     }
   in
   let p_noise : Wire_knowledge.board_post =
@@ -292,6 +294,7 @@ let make_rich_model ~lang ~cols ~rows =
       succession_chain_root_id = None;
       chain_depth = None;
       is_signal = false;
+      pinned = false;
     }
   in
   let comments : Wire_knowledge.board_comment list =

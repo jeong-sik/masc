@@ -25,6 +25,8 @@ val board_hearths_path : string
 val board_comment_path : string
 val board_vote_path : string
 val board_comment_vote_path : string
+val board_pin_path : string
+val board_delete_path : string
 
 val wiki_index_path :
   ?tag:string -> ?source:string -> ?sort:string -> unit -> string
@@ -79,6 +81,7 @@ type board_post = {
   succession_chain_root_id : string option;
   chain_depth : int option;
   is_signal : bool;
+  pinned : bool;
 }
 
 type board_comment = {
@@ -132,6 +135,9 @@ val encode_board_vote :
 
 val encode_board_comment_vote :
   comment_id:string -> direction:[ `Up | `Down ] -> Yojson.Safe.t
+
+val encode_board_pin : post_id:string -> pinned:bool -> Yojson.Safe.t
+val encode_board_delete : post_id:string -> Yojson.Safe.t
 
 (** {1 Wiki ([/api/v1/wiki*])} *)
 

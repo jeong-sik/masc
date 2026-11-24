@@ -1732,6 +1732,132 @@ let inline_modal_for kind =
             secret = false;
           };
         ]
+    | Nav.Task_create_form ->
+        [
+          {
+            key = "task_title";
+            label = Say.make ~ko:"작업 제목" ~en:"Task title";
+            value = "";
+            required = true;
+            secret = false;
+          };
+          {
+            key = "task_priority";
+            label = Say.make ~ko:"우선순위 (1-5)" ~en:"Priority (1-5)";
+            value = "3";
+            required = false;
+            secret = false;
+          };
+          {
+            key = "task_goal_id";
+            label = Say.make ~ko:"연결 목표 ID (선택)" ~en:"Goal ID (optional)";
+            value = "";
+            required = false;
+            secret = false;
+          };
+          {
+            key = "task_description";
+            label = Say.make ~ko:"설명 (선택)" ~en:"Description (optional)";
+            value = "";
+            required = false;
+            secret = false;
+          };
+        ]
+    | Nav.Task_transition_form _ ->
+        [
+          {
+            key = "task_action";
+            label =
+              Say.make ~ko:"전환 액션" ~en:"Transition action";
+            value = "claim";
+            required = true;
+            secret = false;
+          };
+          {
+            key = "task_notes";
+            label = Say.make ~ko:"메모 (선택)" ~en:"Notes (optional)";
+            value = "";
+            required = false;
+            secret = false;
+          };
+        ]
+    | Nav.Task_link_goal _ ->
+        [
+          {
+            key = "link_goal_id";
+            label = Say.make ~ko:"연결할 목표 ID" ~en:"Target Goal ID";
+            value = "";
+            required = true;
+            secret = false;
+          };
+        ]
+    | Nav.Goal_upsert_form id_opt ->
+        let is_edit = Option.is_some id_opt in
+        [
+          {
+            key = "goal_title";
+            label = Say.make ~ko:"목표 제목" ~en:"Goal title";
+            value = "";
+            required = true;
+            secret = false;
+          };
+          {
+            key = "goal_measure_kind";
+            label =
+              (if is_edit then
+                 Say.make ~ko:"측정 형식 변경 (비워두면 유지)"
+                   ~en:"Replace measure kind (blank keeps stored)"
+               else Say.make ~ko:"측정 형식" ~en:"Measure kind");
+            value = (if is_edit then "" else "done_when");
+            required = not is_edit;
+            secret = false;
+          };
+          {
+            key = "goal_measure_spec";
+            label =
+              (if is_edit then
+                 Say.make ~ko:"성공 기준 변경 (비워두면 유지)"
+                   ~en:"Replace measure (blank keeps stored)"
+               else Say.make ~ko:"성공 기준 (Measure)" ~en:"Success measure");
+            value = "";
+            required = not is_edit;
+            secret = false;
+          };
+          {
+            key = "goal_procedure";
+            label = Say.make ~ko:"검증 절차 (Procedure)" ~en:"Procedure (required)";
+            value = "";
+            required = true;
+            secret = false;
+          };
+          {
+            key = "goal_priority";
+            label = Say.make ~ko:"우선순위 (1-5)" ~en:"Priority (1-5)";
+            value = "2";
+            required = false;
+            secret = false;
+          };
+          {
+            key = "goal_due_date";
+            label = Say.make ~ko:"마감일 (선택)" ~en:"Due date (optional)";
+            value = "";
+            required = false;
+            secret = false;
+          };
+        ]
+    | Nav.Board_delete_post { post_id; _ } ->
+        [
+          {
+            key = "confirm_post_delete";
+            label =
+              Say.make
+                ~ko:(Printf.sprintf "삭제 확인 ('delete' 또는 '%s')" post_id)
+                ~en:(Printf.sprintf "Confirm delete ('delete' or '%s')" post_id);
+            value = "";
+            required = true;
+            secret = false;
+          };
+        ]
   in
   let active_field =
     match kind with
@@ -1754,7 +1880,12 @@ let inline_modal_for kind =
     | Nav.Code_search_form
     | Nav.Runtime_lane_create
     | Nav.Runtime_lane_edit _
-    | Nav.Runtime_lane_delete _ ->
+    | Nav.Runtime_lane_delete _
+    | Nav.Task_create_form
+    | Nav.Task_transition_form _
+    | Nav.Task_link_goal _
+    | Nav.Goal_upsert_form _
+    | Nav.Board_delete_post _ ->
         0
   in
   { kind; fields; active_field; submitting = false; error = None }
@@ -1818,6 +1949,39 @@ let modal_field_help ~key =
         (Say.make
            ~ko:"레인 ID를 정확히 입력하고 Enter (CAS 리비전 검증 후 삭제)"
            ~en:"Type exact lane ID + Enter to delete (CAS revision verified)")
+  | "task_priority" | "goal_priority" ->
+      Some
+        (Say.make ~ko:"1 (최고) ~ 5 (최저)" ~en:"Integer 1 (highest) to 5 (lowest)")
+  | "task_action" ->
+      Some
+        (Say.make
+           ~ko:"허용: claim | start | release | submit_for_verification ([←→] 전환)"
+           ~en:"Allowed: claim | start | release | submit_for_verification ([←→] cycle)")
+  | "link_goal_id" ->
+      Some
+        (Say.make
+           ~ko:"목표 미연결 작업에 1회만 연결 가능 (이미 연결된 작업은 변경 불가)"
+           ~en:"One-time link for goalless tasks (already-linked tasks cannot be re-linked)")
+  | "goal_measure_kind" ->
+      Some
+        (Say.make
+           ~ko:"허용: done_when | count | quantity ([←→] 전환)"
+           ~en:"Allowed: done_when | count | quantity ([←→] cycle)")
+  | "goal_measure_spec" ->
+      Some
+        (Say.make
+           ~ko:"done_when: 조건 문장 | count: '14 개' | quantity: '<= 100 ms'"
+           ~en:"done_when: condition | count: '14 files' | quantity: '<= 100 ms'")
+  | "goal_procedure" ->
+      Some
+        (Say.make
+           ~ko:"필수: 기준을 어떻게 측정·확인할지 (URL, board:<id>, fusion:<id> 등)"
+           ~en:"Required: how to observe/verify the measure (URL, board:<id>, etc.)")
+  | "confirm_post_delete" ->
+      Some
+        (Say.make
+           ~ko:"'delete' 또는 글 ID를 입력 후 Enter (영구 삭제)"
+           ~en:"Type 'delete' or post ID + Enter to delete post")
   | "setup_key_integration" ->
       Some
         (Say.make

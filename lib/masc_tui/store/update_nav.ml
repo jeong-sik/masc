@@ -1175,7 +1175,12 @@ let open_inline_modal (m : Model.t) kind =
       | Nav.Code_search_form
       | Nav.Runtime_lane_create
       | Nav.Runtime_lane_edit _
-      | Nav.Runtime_lane_delete _ )
+      | Nav.Runtime_lane_delete _
+      | Nav.Task_create_form
+      | Nav.Task_transition_form _
+      | Nav.Task_link_goal _
+      | Nav.Goal_upsert_form _
+      | Nav.Board_delete_post _ )
       , ( Drafts.Btw_idle
         | Drafts.Btw_sending _
         | Drafts.Btw_streaming _
@@ -3684,7 +3689,12 @@ let classify_inline_form (modal : Model.inline_modal_state) : inline_form_kind =
     | Nav.Code_search_form
     | Nav.Runtime_lane_create
     | Nav.Runtime_lane_edit _
-    | Nav.Runtime_lane_delete _ ) as std ->
+    | Nav.Runtime_lane_delete _
+    | Nav.Task_create_form
+    | Nav.Task_transition_form _
+    | Nav.Task_link_goal _
+    | Nav.Goal_upsert_form _
+    | Nav.Board_delete_post _ ) as std ->
       Form_standard std
 
 (* The Schedule form's operator text. A delay is a whole count and one unit,
@@ -4610,6 +4620,224 @@ let submit_inline_modal ~now (m : Model.t) =
                                     };
                               };
                           ] )))
+          | Form_standard Nav.Task_create_form -> (
+              let title =
+                String.trim (Model.modal_field_value ~key:"task_title" modal)
+              in
+              let prio_raw =
+                String.trim (Model.modal_field_value ~key:"task_priority" modal)
+              in
+              let goal_raw =
+                String.trim (Model.modal_field_value ~key:"task_goal_id" modal)
+              in
+              let desc_raw =
+                String.trim
+                  (Model.modal_field_value ~key:"task_description" modal)
+              in
+              let prio_res =
+                if String.equal prio_raw "" then Ok 3
+                else
+                  match int_of_string_opt prio_raw with
+                  | Some p when p >= 1 && p <= 5 -> Ok p
+                  | Some _ | None ->
+                      Error "Priority must be an integer between 1 and 5"
+              in
+              match prio_res with
+              | Error err -> set_modal_error err
+              | Ok priority ->
+                  let goal_id =
+                    if String.equal goal_raw "" then None else Some goal_raw
+                  in
+                  let description =
+                    if String.equal desc_raw "" then None else Some desc_raw
+                  in
+                  let expected_workspace = expected_workspace_of m in
+                  ( mark_submitting m
+                  , [
+                      Cmd.Http_post
+                        {
+                          epoch = m.epoch;
+                          req =
+                            Cmd.Post_task_create
+                              {
+                                title;
+                                priority;
+                                description;
+                                goal_id;
+                                expected_workspace;
+                              };
+                        };
+                    ] ))
+          | Form_standard (Nav.Task_transition_form { task_id }) -> (
+              let action_raw =
+                String.trim (Model.modal_field_value ~key:"task_action" modal)
+              in
+              let notes_raw =
+                String.trim (Model.modal_field_value ~key:"task_notes" modal)
+              in
+              match Wire_work.task_transition_action_of_string action_raw with
+              | None ->
+                  set_modal_error
+                    "Action must be one of: claim, start, release, submit_for_verification"
+              | Some Wire_work.Task_submit_for_verification
+                when String.equal notes_raw "" ->
+                  set_modal_error
+                    "Notes are required when submitting a task for verification"
+              | Some action ->
+                  let notes =
+                    if String.equal notes_raw "" then None else Some notes_raw
+                  in
+                  let expected_workspace = expected_workspace_of m in
+                  ( mark_submitting m
+                  , [
+                      Cmd.Http_post
+                        {
+                          epoch = m.epoch;
+                          req =
+                            Cmd.Post_task_transition
+                              { task_id; action; notes; expected_workspace };
+                        };
+                    ] ))
+          | Form_standard (Nav.Task_link_goal { task_id }) -> (
+              let goal_id =
+                String.trim (Model.modal_field_value ~key:"link_goal_id" modal)
+              in
+              let assignable_res =
+                match
+                  List.find_opt
+                    (fun (t : Wire_work.task) -> String.equal t.id task_id)
+                    (Work_store.tasks m.work)
+                with
+                | Some tk -> (
+                    match tk.status with
+                    | Wire_work.Done _ | Wire_work.Cancelled _ ->
+                        Error "Finished or cancelled tasks cannot be linked to a goal"
+                    | Wire_work.Todo
+                    | Wire_work.Claimed _
+                    | Wire_work.InProgress _
+                    | Wire_work.AwaitingVerification _ ->
+                        Wire_work.check_goal_link_assignable tk)
+                | None -> Ok ()
+              in
+              match assignable_res with
+              | Error err -> set_modal_error err
+              | Ok () -> (
+                  match expected_workspace_of m with
+                  | None ->
+                      set_modal_error
+                        "Server workspace identity must be loaded before linking a task to a goal"
+                  | Some expected_workspace ->
+                      ( mark_submitting m
+                      , [
+                          Cmd.Http_post
+                            {
+                              epoch = m.epoch;
+                              req =
+                                Cmd.Post_task_link_goal
+                                  { task_id; goal_id; expected_workspace };
+                            };
+                        ] )))
+          | Form_standard (Nav.Goal_upsert_form id_opt) -> (
+              let title =
+                String.trim (Model.modal_field_value ~key:"goal_title" modal)
+              in
+              let measure_kind =
+                String.trim
+                  (Model.modal_field_value ~key:"goal_measure_kind" modal)
+              in
+              let measure_spec =
+                String.trim
+                  (Model.modal_field_value ~key:"goal_measure_spec" modal)
+              in
+              let procedure =
+                String.trim
+                  (Model.modal_field_value ~key:"goal_procedure" modal)
+              in
+              let prio_raw =
+                String.trim (Model.modal_field_value ~key:"goal_priority" modal)
+              in
+              let due_raw =
+                String.trim (Model.modal_field_value ~key:"goal_due_date" modal)
+              in
+              if String.equal procedure "" then
+                set_modal_error
+                  "Procedure is required (non-blank observable verification steps)"
+              else
+                let measure_res =
+                  match id_opt with
+                  | Some _ when String.equal measure_spec "" ->
+                      if String.equal measure_kind "" then Ok None
+                      else
+                        Error
+                          "Enter a measure spec or clear measure kind to preserve stored measure"
+                  | Some _ | None ->
+                      let effective_kind =
+                        if String.equal measure_kind "" then "done_when"
+                        else measure_kind
+                      in
+                      Result.map Option.some
+                        (Wire_work.parse_goal_measure_input
+                           ~kind:effective_kind ~spec:measure_spec)
+                in
+                match measure_res with
+                | Error err -> set_modal_error err
+                | Ok measure -> (
+                    let prio_res =
+                      if String.equal prio_raw "" then Ok None
+                      else
+                        match int_of_string_opt prio_raw with
+                        | Some p when p >= 1 && p <= 5 -> Ok (Some p)
+                        | Some _ | None ->
+                            Error "Priority must be an integer between 1 and 5"
+                    in
+                    match prio_res with
+                    | Error err -> set_modal_error err
+                    | Ok priority ->
+                        let due_date =
+                          if String.equal due_raw "" then None else Some due_raw
+                        in
+                        let expected_workspace = expected_workspace_of m in
+                        ( mark_submitting m
+                        , [
+                            Cmd.Http_post
+                              {
+                                epoch = m.epoch;
+                                req =
+                                  Cmd.Post_goal_upsert
+                                    {
+                                      id = id_opt;
+                                      title;
+                                      measure;
+                                      procedure;
+                                      priority;
+                                      due_date;
+                                      expected_workspace;
+                                    };
+                              };
+                          ] )))
+          | Form_standard (Nav.Board_delete_post { post_id; _ }) ->
+              let confirm =
+                String.trim
+                  (Model.modal_field_value ~key:"confirm_post_delete" modal)
+              in
+              if
+                not
+                  (String.equal (String.lowercase_ascii confirm) "delete"
+                  || String.equal confirm post_id)
+              then
+                set_modal_error
+                  (Printf.sprintf
+                     "Type 'delete' or exact post ID '%s' to confirm deletion"
+                     post_id)
+              else
+                ( mark_submitting m
+                , [
+                    Cmd.Http_post
+                      {
+                        epoch = m.epoch;
+                        req = Cmd.Post_board_delete { post_id };
+                      };
+                  ] )
           | Form_setup_login_start ->
               let integration_id =
                 String.trim
@@ -5228,6 +5456,7 @@ let help_max_scroll (m : Model.t) =
             | Keymap.Open_external_editor
             | Keymap.Interrupt_turn
             | Keymap.Delete_selected
+            | Keymap.Link_task_goal
             | Keymap.Quit_app ->
                 acc + 1)
           0 grp.entries
@@ -8903,7 +9132,12 @@ let apply_move (m : Model.t) dir =
                   | Nav.Code_search_form
                   | Nav.Runtime_lane_create
                   | Nav.Runtime_lane_edit _
-                  | Nav.Runtime_lane_delete _ )
+                  | Nav.Runtime_lane_delete _
+                  | Nav.Task_create_form
+                  | Nav.Task_transition_form _
+                  | Nav.Task_link_goal _
+                  | Nav.Goal_upsert_form _
+                  | Nav.Board_delete_post _ )
                 , _ ) ->
                   true
             in
@@ -8932,7 +9166,12 @@ let apply_move (m : Model.t) dir =
               | Nav.Code_search_form
               | Nav.Runtime_lane_create
               | Nav.Runtime_lane_edit _
-              | Nav.Runtime_lane_delete _ ->
+              | Nav.Runtime_lane_delete _
+              | Nav.Task_create_form
+              | Nav.Task_transition_form _
+              | Nav.Task_link_goal _
+              | Nav.Goal_upsert_form _
+              | Nav.Board_delete_post _ ->
                   (m, [])
             else
               let next_modal =

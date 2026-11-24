@@ -545,6 +545,32 @@ let sidebar_cursor_visual_row ~cursor =
   in
   find 0 sidebar_visual_rows
 
+let sidebar_has_below_overflow ~inner_h ~start =
+  let total = List.length sidebar_visual_rows in
+  inner_h >= 3 && start + inner_h < total
+
+let sidebar_visible_data_rows ~inner_h ~start =
+  if sidebar_has_below_overflow ~inner_h ~start then inner_h - 1 else inner_h
+
+let sidebar_hidden_below_sections ~inner_h ~start =
+  let cutoff = start + sidebar_visible_data_rows ~inner_h ~start in
+  let add_unique acc sec =
+    if List.exists (Nav.equal_menu_section sec) acc then acc else sec :: acc
+  in
+  let rec walk idx acc = function
+    | [] -> List.rev acc
+    | row :: rest ->
+        let acc =
+          if idx < cutoff then acc
+          else
+            match row with
+            | Sidebar_section sec -> add_unique acc sec
+            | Sidebar_item { item; _ } -> add_unique acc item.section
+        in
+        walk (idx + 1) acc rest
+  in
+  walk 0 [] sidebar_visual_rows
+
 let sidebar_viewport_start ~inner_h ~scroll ~cursor =
   let total = List.length sidebar_visual_rows in
   if inner_h <= 0 || total <= inner_h then 0
@@ -555,8 +581,13 @@ let sidebar_viewport_start ~inner_h ~scroll ~cursor =
     let target_top = if cursor = 0 then 0 else max 0 (vis_row - 1) in
     let s1 =
       if target_top < s0 then target_top
-      else if vis_row >= s0 + inner_h then vis_row - inner_h + 1
-      else s0
+      else
+        let eff_h =
+          if inner_h >= 3 && s0 + inner_h < total && vis_row < total - 1 then
+            inner_h - 1
+          else inner_h
+        in
+        if vis_row >= s0 + eff_h then vis_row - eff_h + 1 else s0
     in
     max 0 (min max_start s1)
 

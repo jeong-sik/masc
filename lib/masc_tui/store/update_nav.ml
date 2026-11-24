@@ -1592,12 +1592,37 @@ let palette_entries_with_overflow (m : Model.t) :
              | None ->
                  Option.value (Nav.menu_section_shortcut it.section) ~default:""
            in
+           let extra_aliases =
+             match it.target with
+             | Nav.Menu_infra Nav.Infra_repos_changes ->
+                 [ "workspace"; "워크스페이스"; "repo"; "repos"; "repository";
+                   "저장소"; "git"; "diff"; "변경" ]
+             | Nav.Menu_infra Nav.Infra_code ->
+                 [ "workspace"; "워크스페이스"; "code"; "코드"; "files"; "파일";
+                   "tree"; "트리"; "git" ]
+             | Nav.Menu_infra Nav.Infra_sandboxes ->
+                 [ "sandbox"; "vm"; "ssh"; "docker"; "container"; "샌드박스" ]
+             | Nav.Menu_infra Nav.Infra_activity_logs
+             | Nav.Menu_pulse
+             | Nav.Menu_work _
+             | Nav.Menu_knowledge _
+             | Nav.Menu_keepers
+             | Nav.Menu_keeper_tab _
+             | Nav.Menu_runtime _
+             | Nav.Menu_settings
+             | Nav.Menu_incidents
+             | Nav.Menu_queue_context
+             | Nav.Menu_help ->
+                 []
+           in
            let search_s =
              Printf.sprintf "%s %s %s %s %s" sc_s sec_ko sec_en lbl_ko lbl_en
            in
-           match fuzzy_opt search_s with
-           | None -> None
-           | Some _ ->
+           let matches_alias =
+             List.exists (String.equal (String.lowercase_ascii q)) extra_aliases
+           in
+           if Option.is_none (fuzzy_opt search_s) && not matches_alias then None
+           else
                let badge =
                  match it.shortcut with
                  | Some s -> Printf.sprintf "[%s]" s

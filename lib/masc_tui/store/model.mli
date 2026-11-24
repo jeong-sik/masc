@@ -255,6 +255,9 @@ type sidebar_row =
 val sidebar_visual_rows : sidebar_row list
 val sidebar_cursor_visual_row : cursor:int -> int
 val sidebar_viewport_start : inner_h:int -> scroll:int -> cursor:int -> int
+val sidebar_has_below_overflow : inner_h:int -> start:int -> bool
+val sidebar_visible_data_rows : inner_h:int -> start:int -> int
+val sidebar_hidden_below_sections : inner_h:int -> start:int -> Nav.menu_section list
 val active_menu_target : t -> Nav.menu_target
 val sync_sidebar_cursor : t -> t
 val body_top_y : t -> int

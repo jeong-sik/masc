@@ -418,6 +418,8 @@ type t = {
   pending_editor : (unit -> unit) option Atomic.t;
   wiki_editor_gen : int Atomic.t;
   editor_active : bool Atomic.t;
+  in_flight_gets_mu : Stdlib.Mutex.t;
+  in_flight_gets : (string, (Epoch.t * Cmd.get_request) option ref) Hashtbl.t;
   on_editor_ready : unit -> unit;
   on_quit : Exit_reason.t -> unit;
   on_restart : unit -> unit;
@@ -581,6 +583,8 @@ let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
   let pending_editor = Atomic.make None in
   let wiki_editor_gen = Atomic.make 0 in
   let editor_active = Atomic.make false in
+  let in_flight_gets_mu = Stdlib.Mutex.create () in
+  let in_flight_gets = Hashtbl.create 32 in
   let sse_hub =
     Sse_hub.create ~io ~clock ~endpoint:initial_ep
       ~on_event:(publish_hub_event ~bus ~stream_epoch)
@@ -597,6 +601,10 @@ let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
   let closed = Atomic.make false in
   Eio.Switch.on_release sw (fun () ->
       Atomic.set closed true;
+      Stdlib.Mutex.lock in_flight_gets_mu;
+      Fun.protect
+        ~finally:(fun () -> Stdlib.Mutex.unlock in_flight_gets_mu)
+        (fun () -> Hashtbl.clear in_flight_gets);
       ignore (Atomic.fetch_and_add wiki_editor_gen 1 : int);
       ignore (Atomic.exchange pending_editor None : (unit -> unit) option);
       match Atomic.exchange active_memory_diagram_cancel None with
@@ -621,6 +629,8 @@ let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
     pending_editor;
     wiki_editor_gen;
     editor_active;
+    in_flight_gets_mu;
+    in_flight_gets;
     on_editor_ready;
     on_quit;
     on_restart;
@@ -748,17 +758,186 @@ let read_chat_queue ~timeout_sec t ~keeper ~partial =
   in
   read None []
 
-let execute_get t ~epoch req =
+let get_request_keys ~epoch ~path ~requested_at (req : Cmd.get_request) =
+  let base = Printf.sprintf "%d:%s" (Epoch.to_int epoch) path in
+  (* One URL can feed distinct reducers. Preserve that identity both while
+     the HTTP request is running and while its reply awaits the UI drain. *)
+  let scoped suffix =
+    let key = base ^ suffix in
+    Some key, Key_get key
+  in
+  match req with
+  (* Timestamped queue/status reads use [Key_read (path, requested_at)] so a
+     newer overlapping refresh can overtake a stalled older read; never merge
+     them under single-flight dedup. *)
+  | Cmd.Get_chat_queue _ | Cmd.Get_chat_status _ -> None, Key_read (path, requested_at)
+  | Cmd.Get_board_quarantines { generation; _ } ->
+      Some (Printf.sprintf "%s#quarantines=%d" base generation),
+      board_snapshot_key ~epoch ~path [string_of_int generation]
+  | Cmd.Get_keeper_turn_records _ -> scoped "#fleet-turns"
+  | Cmd.Get_keeper_context_turn_records _ -> scoped "#context-turns"
+  | Cmd.Get_keeper_tool_calls { turn_ref = Some tr; _ } -> scoped ("#turn_ref=" ^ tr)
+  | Cmd.Get_keeper_tool_calls { turn_ref = None; _ } -> scoped "#tool-calls"
+  | Cmd.Get_tool_series _ -> scoped "#tool-series"
+  | Cmd.Get_tool_series_filtered _ -> scoped "#tool-series-filtered"
+  | Cmd.Get_health
+  | Cmd.Get_dashboard_shell
+  | Cmd.Get_keepers_roster
+  | Cmd.Get_keeper_turns
+  | Cmd.Get_chat_history _
+  | Cmd.Get_chat_operation_events _
+  | Cmd.Get_planning
+  | Cmd.Get_verifications _
+  | Cmd.Get_schedules _
+  | Cmd.Get_asks _
+  | Cmd.Get_tool_approvals
+  | Cmd.Get_gate_pending
+  | Cmd.Get_candle_ledger _
+  | Cmd.Get_board_feed _
+  | Cmd.Get_board_hearths
+  | Cmd.Get_board_thread _
+  | Cmd.Get_wiki_index _
+  | Cmd.Get_wiki_page _
+  | Cmd.Get_wiki_log _
+  | Cmd.Get_wiki_search _
+  | Cmd.Get_wiki_lint
+  | Cmd.Get_artifacts
+  | Cmd.Get_artifact_detail _
+  | Cmd.Get_artifact_checks
+  | Cmd.Get_world_memory
+  | Cmd.Get_memory_diff _
+  | Cmd.Get_keeper_memory_os_internals _
+  | Cmd.Get_keeper_memory_facts _
+  | Cmd.Get_keeper_memory_activity _
+  | Cmd.Get_keeper_memory_health _
+  | Cmd.Get_keeper_provider_input _
+  | Cmd.Get_keeper_provider_input_part _
+  | Cmd.Get_keeper_cache_outcome _
+  | Cmd.Get_keeper_next_request _
+  | Cmd.Get_keeper_turn_transcript _
+  | Cmd.Get_keeper_tool_stats _
+  | Cmd.Get_keeper_tool_result _
+  | Cmd.Get_provider_usage _
+  | Cmd.Get_keeper_costs _
+  | Cmd.Get_efficiency _
+  | Cmd.Get_models_metrics _
+  | Cmd.Get_runtime_metrics
+  | Cmd.Get_runtime_resolved
+  | Cmd.Get_runtime_config_raw
+  | Cmd.Get_setup_inventory
+  | Cmd.Get_setup_login_status _
+  | Cmd.Get_runtime_probe _
+  | Cmd.Get_exact_lane_runs _
+  | Cmd.Get_fusion_runs
+  | Cmd.Get_tools_catalog _
+  | Cmd.Get_skills
+  | Cmd.Get_connectors
+  | Cmd.Get_browser_lane
+  | Cmd.Get_lane_addons
+  | Cmd.Get_mcp_clients
+  | Cmd.Get_sandboxes
+  | Cmd.Get_keeper_sandbox _
+  | Cmd.Get_repositories
+  | Cmd.Get_repository_activity _
+  | Cmd.Get_system_logs _
+  | Cmd.Get_tui_preferences
+  | Cmd.Get_config_schema _
+  | Cmd.Get_fusion_run_detail _
+  | Cmd.Get_fusion_config
+  | Cmd.Get_fusion_board_evidence _
+  | Cmd.Get_harness_health
+  | Cmd.Get_verification_evidence _
+  | Cmd.Get_verification_summary
+  | Cmd.Get_verification_specs
+  | Cmd.Get_verification_tlc_results
+  | Cmd.Get_activity_events _
+  | Cmd.Get_keeper_runtime_trace _
+  | Cmd.Get_keeper_metrics _
+  | Cmd.Get_keeper_sandbox_logs _
+  | Cmd.Get_workspace_children _
+  | Cmd.Get_workspace_files _
+  | Cmd.Get_workspace_search _
+  | Cmd.Get_workspace_file _
+  | Cmd.Get_git_branches _
+  | Cmd.Get_git_worktrees _
+  | Cmd.Get_git_status _
+  | Cmd.Get_git_blame _
+  | Cmd.Get_git_log _
+  | Cmd.Get_git_diff _
+  | Cmd.Get_workspace_memory_ledger
+  | Cmd.Get_workspace_memory_context
+  | Cmd.Get_keeper_memory_journal _
+  | Cmd.Get_oauth_providers
+  | Cmd.Get_oauth_attached_tools _
+  | Cmd.Get_oauth_attempt_status _
+  | Cmd.Get_github_identity _
+  | Cmd.Get_addon_package_catalog _
+  | Cmd.Get_addon_package_preview _
+  | Cmd.Get_connector_names _ ->
+      Some base, Key_get path
+
+let rec execute_get t ~epoch req =
   let path = Cmd.get_request_path req in
   let timeout_sec = timeout_sec_for_get req in
   let fetch_and_decode_get t ~path ~decode =
     fetch_and_decode_get ~timeout_sec t ~path ~decode
   in
   let requested_at = Clock.Mono.now () in
-  let snapshot_key = ref (Key_get path) in
-  fork_safe t (fun () ->
-      let observed_at = Clock.Mono.now () in
-      let msg =
+  let inflight_key, snapshot_key = get_request_keys ~epoch ~path ~requested_at req in
+  let inflight_slot =
+    match inflight_key with
+    | None -> `Run_unlocked
+    | Some inflight_key ->
+        Stdlib.Mutex.lock t.in_flight_gets_mu;
+        Fun.protect
+          ~finally:(fun () -> Stdlib.Mutex.unlock t.in_flight_gets_mu)
+          (fun () ->
+            match Hashtbl.find_opt t.in_flight_gets inflight_key with
+            | Some pending_ref ->
+                (* Coalesce concurrent duplicates into at most one sequential
+                   follow-up so post-mutation / SSE / manual refreshes are
+                   never dropped while preventing duplicate GET storms. *)
+                pending_ref := Some (epoch, req);
+                `Coalesced
+            | None ->
+                let pending_ref = ref None in
+                Hashtbl.add t.in_flight_gets inflight_key pending_ref;
+                `Admitted (inflight_key, pending_ref))
+  in
+  match inflight_slot with
+  | `Coalesced -> ()
+  | `Run_unlocked | `Admitted _ ->
+      let release_inflight ~capture_followup =
+        match inflight_slot with
+        | `Run_unlocked | `Coalesced -> None
+        | `Admitted (inflight_key, pending_ref) ->
+            Stdlib.Mutex.lock t.in_flight_gets_mu;
+            Fun.protect
+              ~finally:(fun () -> Stdlib.Mutex.unlock t.in_flight_gets_mu)
+              (fun () ->
+                match Hashtbl.find_opt t.in_flight_gets inflight_key with
+                | Some slot when slot == pending_ref ->
+                    let followup = if capture_followup then !slot else None in
+                    Hashtbl.remove t.in_flight_gets inflight_key;
+                    followup
+                | Some _ | None -> None)
+      in
+      if Atomic.get t.closed then
+        ignore
+          (release_inflight ~capture_followup:false
+            : (Epoch.t * Cmd.get_request) option)
+      else
+        try
+          fork_safe t (fun () ->
+              let completed_ok = ref false in
+              let next_followup = ref None in
+              Fun.protect
+                ~finally:(fun () ->
+                  next_followup :=
+                    release_inflight ~capture_followup:!completed_ok)
+                (fun () ->
+                  let observed_at = Clock.Mono.now () in
+                  let msg =
         match req with
         | Cmd.Get_health ->
             let result =
@@ -815,16 +994,14 @@ let execute_get t ~epoch req =
             Msg.Http_reply
               { epoch; reply = Msg.Reply_keeper_turn_records { keeper; result } }
         | Cmd.Get_chat_queue { keeper } ->
-            snapshot_key := Key_read (path, requested_at);
             let reply operations result =
               Msg.Http_reply { epoch; reply = Msg.Reply_chat_queue { keeper; requested_at; operations; result } } in
-            let partial rows = Ui_bus.publish_snapshot t.bus ~key:!snapshot_key (reply rows None) in
+            let partial rows = Ui_bus.publish_snapshot t.bus ~key:snapshot_key (reply rows None) in
             let rows, result = read_chat_queue ~timeout_sec t ~keeper ~partial in
             reply rows (Some result)
         | Cmd.Get_chat_status { keeper; operation_id } ->
             (* Preserve each exact observation until the reducer has consumed it.
                A delayed queued read cannot replace a running or terminal one. *)
-            snapshot_key := Key_read (path, requested_at);
             let decode json =
               match Wire_fleet.decode_chat_operation json with
               | Ok row when String.equal (Keeper_chat_operation.Operation_id.to_string row.id) operation_id -> Ok row
@@ -1718,7 +1895,6 @@ let execute_get t ~epoch req =
             in
             Msg.Http_reply { epoch; reply }
         | Cmd.Get_board_quarantines { keeper; generation } ->
-            snapshot_key := board_snapshot_key ~epoch ~path [string_of_int generation];
             let result = fetch_and_decode_get t ~path ~decode:(Board_quarantine.inventory_of_json ~keeper) in
             Msg.Http_reply { epoch; reply = Msg.Reply_board_quarantines { keeper; generation; result } }
         | Cmd.Get_github_identity { keeper } ->
@@ -1762,7 +1938,17 @@ let execute_get t ~epoch req =
             in
             Msg.Http_reply { epoch; reply }
       in
-      Ui_bus.publish_snapshot t.bus ~key:!snapshot_key msg)
+      Ui_bus.publish_snapshot t.bus ~key:snapshot_key msg;
+      completed_ok := true);
+      match !next_followup with
+      | Some (next_epoch, next_req) when not (Atomic.get t.closed) ->
+          execute_get t ~epoch:next_epoch next_req
+      | Some _ | None -> ())
+        with exn ->
+          ignore
+            (release_inflight ~capture_followup:false
+              : (Epoch.t * Cmd.get_request) option);
+          raise exn
 
 let is_terminal_setup_login_status status =
   match String.lowercase_ascii (String.trim status) with

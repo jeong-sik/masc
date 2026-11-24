@@ -16595,6 +16595,205 @@ let test_timeout_detail_retryable_and_update_parity () =
         "Response timed out (30.0s · /api/v1/infra/sandboxes/probe)"
         (Say.resolve Say.Lang_en toast.message))
 
+let test_lazy_keeper_context_fetches_and_sidebar_workspace_discovery () =
+  let keeper = "alpha" in
+  let tr_json =
+    Yojson.Safe.from_string
+      {|{
+        "keeper": "alpha",
+        "count": 1,
+        "skipped_rows": 0,
+        "health": "healthy",
+        "live_turn_in_progress": false,
+        "entries": [
+          {
+            "diff_vs_prev": null,
+            "record": {
+              "execution_ids": ["exec-900"],
+              "keeper": "alpha",
+              "agent_name": "alpha",
+              "turn_kind": "direct",
+              "trace_id": "tr-900",
+              "absolute_turn": 90,
+              "turn_ref": "tr-900#90",
+              "blocks": [],
+              "input_components": [],
+              "request_observations": [],
+              "runtime_profile": "claude-sonnet-4",
+              "request_runtime_profile": "claude-sonnet-4",
+              "request_body_bytes": 1200,
+              "transmitted_atoms": null,
+              "total_atoms": null,
+              "model_input_measurement": null,
+              "model_input_front": null,
+              "response_observed_model_input": null,
+              "refused_model_input": null,
+              "raw_trace_run_ref": null,
+              "selected_model": "claude-sonnet-4",
+              "finish_reason": "end_turn",
+              "context_window": 200000,
+              "provider_context_window": 200000,
+              "request_latency_ms": 120,
+              "input_tokens": 1200,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 1000,
+              "output_tokens": 100,
+              "usage_scope": "per_request",
+              "input_provenance": "measured_request",
+              "ts": 1795252000.0
+            }
+          }
+        ]
+      }|}
+  in
+  let tr_page =
+    match Wire_keeper_context.decode_turn_records tr_json with
+    | Ok p -> p
+    | Error e -> Alcotest.fail ("decode_turn_records failed: " ^ e)
+  in
+  let base = Model.initial () in
+  let kc =
+    Keeper_context_store.empty
+    |> Keeper_context_store.apply_turn_records ~observed_at:t1 ~keeper tr_page
+  in
+  let model_for_subtab subtab =
+    {
+      base with
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Keepers;
+          dive_stack = [ Nav.Dive_keeper { name = keeper; tab = Nav.Keeper_context } ];
+        };
+      keeper_context = Keeper_context_store.set_subtab ~keeper subtab kc;
+    }
+  in
+  let has_get pred cmds =
+    List.exists
+      (function Cmd.Http_get { req; _ } -> pred req | _ -> false)
+      (Cmd.flatten cmds)
+  in
+  let is_next_req = function Cmd.Get_keeper_next_request _ -> true | _ -> false in
+  let is_provider_in = function Cmd.Get_keeper_provider_input _ -> true | _ -> false in
+  let is_cache_out = function Cmd.Get_keeper_cache_outcome _ -> true | _ -> false in
+  let is_transcript = function Cmd.Get_keeper_turn_transcript _ -> true | _ -> false in
+  let is_tool_calls = function Cmd.Get_keeper_tool_calls _ -> true | _ -> false in
+  (* 1. Default Ctx_composition fetches only next-request, not heavy per-turn scans *)
+  let cmds_comp =
+    View_fetches.fetches_for_current_view (model_for_subtab Keeper_context_store.Ctx_composition)
+  in
+  Alcotest.(check bool) "Ctx_composition requests next-request" true
+    (has_get is_next_req cmds_comp);
+  Alcotest.(check bool) "Ctx_composition skips provider-input" false
+    (has_get is_provider_in cmds_comp);
+  Alcotest.(check bool) "Ctx_composition skips cache-outcome" false
+    (has_get is_cache_out cmds_comp);
+  Alcotest.(check bool) "Ctx_composition skips turn-transcript" false
+    (has_get is_transcript cmds_comp);
+  Alcotest.(check bool) "Ctx_composition skips tool-calls" false
+    (has_get is_tool_calls cmds_comp);
+  (* 2. Ctx_exact_input fetches provider-input + cache-outcome only *)
+  let cmds_exact =
+    View_fetches.fetches_for_current_view (model_for_subtab Keeper_context_store.Ctx_exact_input)
+  in
+  Alcotest.(check bool) "Ctx_exact_input requests provider-input" true
+    (has_get is_provider_in cmds_exact);
+  Alcotest.(check bool) "Ctx_exact_input requests cache-outcome" true
+    (has_get is_cache_out cmds_exact);
+  Alcotest.(check bool) "Ctx_exact_input skips turn-transcript" false
+    (has_get is_transcript cmds_exact);
+  (* 3. Ctx_input_map fetches provider-input without cache-outcome or transcript *)
+  let cmds_map =
+    View_fetches.fetches_for_current_view (model_for_subtab Keeper_context_store.Ctx_input_map)
+  in
+  Alcotest.(check bool) "Ctx_input_map requests provider-input" true
+    (has_get is_provider_in cmds_map);
+  Alcotest.(check bool) "Ctx_input_map skips cache-outcome" false
+    (has_get is_cache_out cmds_map);
+  (* 4. Ctx_response fetches turn-transcript + tool-calls without provider-input/cache-outcome *)
+  let cmds_resp =
+    View_fetches.fetches_for_current_view (model_for_subtab Keeper_context_store.Ctx_response)
+  in
+  Alcotest.(check bool) "Ctx_response requests turn-transcript" true
+    (has_get is_transcript cmds_resp);
+  Alcotest.(check bool) "Ctx_response requests tool-calls" true
+    (has_get is_tool_calls cmds_resp);
+  Alcotest.(check bool) "Ctx_response skips provider-input" false
+    (has_get is_provider_in cmds_resp);
+  Alcotest.(check bool) "Ctx_response skips cache-outcome" false
+    (has_get is_cache_out cmds_resp);
+  (* 5. Ctrl+T Drawer_context still fetches next-request + cache-outcome without provider-input/transcript *)
+  let m_dive, _ =
+    Update_nav.push_dive
+    {
+      base with
+        nav = { base.nav with workspace = Nav.Keepers };
+      keeper_context = kc;
+    }
+      (Nav.Dive_keeper { name = keeper; tab = Nav.Keeper_chat })
+  in
+  let is_next_req_for k = function
+    | Cmd.Get_keeper_next_request { keeper } -> String.equal keeper k
+    | _ -> false
+  in
+  let is_cache_out_for k = function
+    | Cmd.Get_keeper_cache_outcome { keeper; _ } -> String.equal keeper k
+    | _ -> false
+  in
+  let _, cmds_drawer =
+    Update_nav.open_overlay m_dive (Nav.Queue_context Nav.Drawer_context)
+  in
+  Alcotest.(check bool) "Drawer_context requests cache-outcome for Dive keeper alpha"
+    true (has_get (is_cache_out_for keeper) cmds_drawer);
+  Alcotest.(check bool) "Drawer_context requests next-request for Dive keeper alpha"
+    true (has_get (is_next_req_for keeper) cmds_drawer);
+  Alcotest.(check bool) "Drawer_context skips provider-input" false
+    (has_get is_provider_in cmds_drawer);
+  Alcotest.(check bool) "Drawer_context skips turn-transcript" false
+    (has_get is_transcript cmds_drawer);
+  (* 6. Sidebar overflow surfaces Infra & System sections when terminal height clips menu,
+     and reaching bottom clears the below-overflow banner without snapping back *)
+  Alcotest.(check bool) "sidebar reports overflow below on short terminal" true
+    (Model.sidebar_has_below_overflow ~inner_h:20 ~start:0);
+  let hidden_secs = Model.sidebar_hidden_below_sections ~inner_h:20 ~start:0 in
+  Alcotest.(check bool) "Infra section reported in hidden-below overflow" true
+    (List.exists (Nav.equal_menu_section Nav.Sec_infra) hidden_secs);
+  Alcotest.(check bool) "System section reported in hidden-below overflow" true
+    (List.exists (Nav.equal_menu_section Nav.Sec_system) hidden_secs);
+  let total_rows = List.length Model.sidebar_visual_rows in
+  let max_scroll = Int.max 0 (total_rows - 20) in
+  let last_item_idx = Int.max 0 (List.length Nav.all_menu_items - 1) in
+  let bottom_start =
+    Model.sidebar_viewport_start ~inner_h:20 ~scroll:max_scroll
+      ~cursor:last_item_idx
+  in
+  Alcotest.(check int) "sidebar reaches max_scroll cleanly at bottom" max_scroll
+    bottom_start;
+  Alcotest.(check bool) "below-overflow clears at bottom" false
+    (Model.sidebar_has_below_overflow ~inner_h:20 ~start:bottom_start);
+  (* 7. Palette workspace/repo aliases discover Repos & Changes and Code *)
+  let palette_has_target query target =
+    let m_pal =
+      {
+        base with
+        nav = { base.nav with overlay = Some Nav.Palette };
+        palette = { base.palette with query };
+      }
+    in
+    List.exists
+      (fun (e : Update_nav.palette_entry) ->
+        match e.action with
+        | Update_nav.Pal_menu_target t -> Nav.equal_menu_target t target
+        | _ -> false)
+      (Update_nav.palette_entries m_pal)
+  in
+  Alcotest.(check bool) "Palette 'workspace' finds Repos & Changes" true
+    (palette_has_target "workspace" (Nav.Menu_infra Nav.Infra_repos_changes));
+  Alcotest.(check bool) "Palette 'workspace' finds Code" true
+    (palette_has_target "workspace" (Nav.Menu_infra Nav.Infra_code));
+  Alcotest.(check bool) "Palette '저장소' finds Repos & Changes" true
+    (palette_has_target "저장소" (Nav.Menu_infra Nav.Infra_repos_changes))
+
 let () =
   Alcotest.run "masc_tui_store"
     [
@@ -16788,5 +16987,8 @@ let () =
             `Quick test_active_turn_preview_visibility_and_queued_followup;
           Alcotest.test_case "interrupt receipts and completion follow their own request"
             `Quick test_interrupt_reply_and_stream_completion_are_request_scoped;
+          Alcotest.test_case
+            "Lazy Keeper Context fetches per subtab & sidebar/palette Workspace/Repos discovery"
+            `Quick test_lazy_keeper_context_fetches_and_sidebar_workspace_discovery;
         ] );
     ]

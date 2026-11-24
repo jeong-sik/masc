@@ -58,6 +58,18 @@ CLEANUP_RESERVE_SECONDS = 15
 # unusable retry_at, falls back to the old exit.
 MAX_QUOTA_RETRIES = 2
 MAX_QUOTA_WAIT_SECONDS = 3600
+# task-4046: the release freeze lives in a repository variable, not in a file
+# on main — a freeze marker would itself have to land on frozen main, and a
+# variable needs no code change to toggle. The release leader sets
+# `gh variable set MASC_RELEASE_FREEZE --body 1` while the freeze is on and
+# clears it (or sets it to 0) once publishing is over. Only the value '1'
+# freezes: a missing variable, an empty value, or anything else leaves the
+# ordinary behavior untouched.
+FREEZE_VARIABLE = 'MASC_RELEASE_FREEZE'
+# task-4046: only this label opts a scope out of the freeze. The release
+# leader attaches it to the top pull request of a P0/P1 repair scope; no
+# other scope submits while the freeze is on.
+FREEZE_LABEL = 'freeze-exempt'
 # Set by main() when the sweep budget is known: the follow loop skips its
 # next poll once this moment has passed, so the cleanup keeps its reserve.
 _FOLLOW_DEADLINE = None
@@ -807,6 +819,54 @@ def close_linked_issues(repo, numbers):
                  'reason': f'{type(error).__name__}: {error}'[:300]}]
 
 
+def freeze_flag(repo):
+    """'1' in the MASC_RELEASE_FREEZE repository variable.
+
+    The environment is read first, so the trusted workflow can pass the vars
+    context for free and tests can pin the flag; without it the variable is
+    read from the repository. A missing or unreadable variable is not a
+    freeze: every other admission hold still applies.
+    """
+    passed = os.environ.get(FREEZE_VARIABLE, '').strip()
+    if passed:
+        return passed == '1'
+    try:
+        value = read(f'repos/{repo}/actions/variables/{FREEZE_VARIABLE}')['value']
+    except (GET.ApiFailure, ValueError, KeyError, TypeError, OSError):
+        return False
+    return value.strip() == '1'
+
+
+def freeze_exempt_pull(repo, number):
+    """Whether the scope's top pull request carries the freeze-exempt label."""
+    try:
+        labels = top_pull(repo, number).get('labels') or []
+    except Hold:
+        return False  # the scope has already merged; the hold says so
+    return any(label.get('name') == FREEZE_LABEL for label in labels)
+
+
+def freeze_skip_comment(repo, number):
+    """Leave the skip reason on the pull request. Best effort, never fatal."""
+    body = (f'Merge submission skipped: the release freeze is on (repository '
+            f'variable `{FREEZE_VARIABLE}=1`), and no merge request was made. '
+            f'A P0/P1 repair lands during a freeze only when the scope\'s top '
+            f'pull request carries the `{FREEZE_LABEL}` label; the next review '
+            f'event on it, or a manual dispatch of Approval auto-merge with '
+            f'`pr={number}`, then submits the scope.')
+    try:
+        posted = subprocess.run(['gh', 'api', f'repos/{repo}/issues/{number}/comments',
+                                 '-f', f'body={body}'], check=False,
+                                capture_output=True, text=True)
+    except (OSError, subprocess.SubprocessError) as error:
+        print(f'approval-auto-merge: could not leave the freeze skip comment '
+              f'on #{number}: {type(error).__name__}: {error}', file=sys.stderr)
+        return
+    if posted.returncode:
+        print(f'approval-auto-merge: could not leave the freeze skip comment '
+              f'on #{number}: {(posted.stderr or "").strip()[:300]}', file=sys.stderr)
+
+
 def requested_pr():
     if os.environ['GITHUB_EVENT_NAME'] == 'workflow_dispatch':
         raw = os.environ['DISPATCH_PR']
@@ -889,6 +949,21 @@ def main():
             outcome = resume(repo, receipt, dispatch=not args.dry_run)
             emit({'pr': number, 'result': outcome})
             return 0 if outcome.get('status') in SUCCESS else 1
+        # task-4046: the freeze stops new merge submissions mechanically. A
+        # receipt still followed above only observes a request an earlier run
+        # already submitted, so it stays on the unfrozen side of this gate. A
+        # dry run writes nothing and stays inspectable during a freeze.
+        if not args.dry_run and freeze_flag(repo):
+            if freeze_exempt_pull(repo, number):
+                print(f'approval-auto-merge: #{number} carries {FREEZE_LABEL} on '
+                      f'its scope top; admitting it despite the freeze',
+                      file=sys.stderr)
+            else:
+                freeze_skip_comment(repo, number)
+                raise Hold(f'release freeze is on ({FREEZE_VARIABLE}=1): merge '
+                           f'submission skipped for #{number}; no merge request '
+                           f'was made ({FREEZE_LABEL} on the scope top admits a '
+                           f'P0/P1 repair)')
         if not args.dry_run:
             automatic = auto_merge_default(repo, number)
             if automatic is not None:

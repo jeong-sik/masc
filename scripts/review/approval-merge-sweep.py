@@ -102,6 +102,10 @@ query($owner: String!, $name: String!, $cursor: String) {
 '''
 PUSH_TIMEOUT_SECONDS = 120
 MERGER = 'github-actions'  # the account the merge worker's token merges as
+# task-4046: the release freeze lives in a repository variable, not in a file
+# on main; only the value '1' freezes. The sweep reads the variable the same
+# way the worker does, with the environment as a free first source.
+FREEZE_VARIABLE = 'MASC_RELEASE_FREEZE'
 
 
 def sibling(name):
@@ -128,6 +132,20 @@ def gh(arguments):
         raise ValueError((operation.stderr or operation.stdout).strip()[:ERROR_CHARACTERS] or
                          f'gh exited {operation.returncode}')
     return json.loads(operation.stdout)
+
+
+def freeze_flag(repo):
+    """'1' in the MASC_RELEASE_FREEZE repository variable; the environment is
+    read first, so a workflow can pass it (and tests can pin it). A missing
+    or unreadable variable is not a freeze."""
+    passed = os.environ.get(FREEZE_VARIABLE, '').strip()
+    if passed:
+        return passed == '1'
+    try:
+        value = gh(['api', f'repos/{repo}/actions/variables/{FREEZE_VARIABLE}'])
+    except (ValueError, KeyError, TypeError, OSError):
+        return False
+    return str(value.get('value', '')).strip() == '1'
 
 
 def graphql(document, **variables):
@@ -496,6 +514,19 @@ def main():
     if REPO.fullmatch(repo) is None:
         raise SystemExit('invalid repository')
     dry_run = '--dry-run' in sys.argv[1:]
+    # task-4046: a frozen repository gets no worker runs, branch cleanup or
+    # issue closing from the sweep; the reason stays in the run log. A dry run
+    # reads the open list only and stays inspectable during a freeze.
+    if not dry_run and freeze_flag(repo):
+        report = {'status': 'freeze_skipped',
+                  'reason': f'release freeze is on ({FREEZE_VARIABLE}=1): no '
+                            f'worker runs, branch cleanup or issue closing ran'}
+        output = json.dumps(report, ensure_ascii=False, indent=2)
+        print(output, flush=True)
+        if os.environ.get('GITHUB_STEP_SUMMARY'):
+            with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+                summary.write('```json\n' + output + '\n```\n')
+        return 0
     target = sweep_target(sys.argv[1:])
     started = time.monotonic()
     report: dict[str, object] = {'quota_before': quota()}

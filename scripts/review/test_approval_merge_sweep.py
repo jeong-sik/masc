@@ -487,7 +487,7 @@ class LeftoverLinkedIssues(unittest.TestCase):
 
 
 class Sweeping(unittest.TestCase):
-    def sweep(self, exits, *, clock=None):
+    def sweep(self, exits, *, clock=None, freeze=None, argv=('sweep',)):
         runs = []
         def run(command, **kwargs):
             runs.append((command[-1], kwargs['env']['DISPATCH_PR'],
@@ -499,8 +499,10 @@ class Sweeping(unittest.TestCase):
                    patch.object(SWEEP, 'close_merged_issues',
                                 return_value={'pull_requests': [], 'not_reached': 0, 'issues': []}),
                    patch.object(SWEEP.subprocess, 'run', side_effect=run),
-                   patch.dict(os.environ, {'GITHUB_REPOSITORY': 'owner/repo'}),
-                   patch.object(SWEEP.sys, 'argv', ['sweep'])]
+                   patch.dict(os.environ, dict(GITHUB_REPOSITORY='owner/repo',
+                                               **({'MASC_RELEASE_FREEZE': freeze}
+                                                  if freeze is not None else {}))),
+                   patch.object(SWEEP.sys, 'argv', list(argv))]
         if clock is not None:
             patches.append(patch.object(SWEEP.time, 'monotonic', side_effect=clock))
         output = io.StringIO()
@@ -581,6 +583,37 @@ class Sweeping(unittest.TestCase):
             self.assertEqual(SWEEP.main(), 0)
         self.assertEqual(seen.get('DISPATCH_WORKER_BUDGET_SECONDS'),
                          str(SWEEP.WORKER_TIMEOUT_SECONDS))
+
+    def test_a_frozen_sweep_starts_no_worker(self):
+        code, runs, output = self.sweep([], freeze='1')
+        self.assertEqual((code, runs), (0, []))
+        # The gate fires before the quota read and the open-pull walk, so the
+        # report carries only the skip reason.
+        self.assertIn('"status": "freeze_skipped"', output)
+        self.assertIn('MASC_RELEASE_FREEZE=1', output)
+        self.assertNotIn('quota_before', output)
+        self.assertNotIn('"open":', output)
+
+    def test_a_dry_sweep_still_walks_during_the_freeze(self):
+        code, runs, output = self.sweep([], freeze='1', argv=('sweep', '--dry-run'))
+        self.assertEqual((code, runs), (0, []))
+        self.assertIn('"stopped": "dry run"', output)
+        self.assertNotIn('freeze_skipped', output)
+
+    def test_the_sweep_reads_the_freeze_variable_when_the_env_is_empty(self):
+        def gh(arguments):
+            if arguments == ['api', 'repos/owner/repo/actions/variables/'
+                                   'MASC_RELEASE_FREEZE']:
+                return {'value': '1'}
+            raise AssertionError(arguments)
+        with patch.object(SWEEP, 'gh', side_effect=gh), \
+             patch.object(SWEEP, 'open_pulls') as walk, \
+             patch.dict(os.environ, {'GITHUB_REPOSITORY': 'owner/repo'}), \
+             patch.object(SWEEP.sys, 'argv', ['sweep']), \
+             redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(SWEEP.main(), 0)
+        walk.assert_not_called()
+        self.assertIn('freeze_skipped', output.getvalue())
 
 
 if __name__ == '__main__':

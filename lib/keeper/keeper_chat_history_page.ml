@@ -67,10 +67,30 @@ type row = { offset : int; line : string }
 type page = { rows : row list; next_cursor : cursor option }
 
 let byte_window = 4 * 1024 * 1024
+let min_page_window = 64 * 1024
+let anchor_initial_window = 4096
+let estimated_bytes_per_row = 2048
+
+let initial_page_window ~target_rows =
+  if target_rows >= byte_window / estimated_bytes_per_row then byte_window
+  else min byte_window (max min_page_window (target_rows * estimated_bytes_per_row))
 
 let read_bytes channel ~from ~length =
   seek_in channel from;
   really_input_string channel length
+
+let read_anchor_line channel ~offset ~file_size =
+  let max_len = min byte_window (file_size - offset) in
+  let rec loop window =
+    let length = min window max_len in
+    let bytes = read_bytes channel ~from:offset ~length in
+    match String.index_opt bytes '\n' with
+    | Some finish -> Some (String.sub bytes 0 finish)
+    | None ->
+      if length >= max_len then None
+      else loop (min max_len (window * 2))
+  in
+  if max_len <= 0 then None else loop anchor_initial_window
 
 let row_id ({ offset; line } : row) =
   match Yojson.Safe.from_string line with
@@ -165,19 +185,30 @@ let read ~path ~owner ?cursor ~max_rows () =
                 || String.equal (read_bytes channel ~from:(cursor.offset - 1) ~length:1) "\n" in
               if not boundary then Error Stale_cursor
               else
-                let bytes = read_bytes channel ~from:cursor.offset
-                  ~length:(min byte_window (opened.st_size - cursor.offset)) in
-                (match String.index_opt bytes '\n' with
+                (match read_anchor_line channel ~offset:cursor.offset ~file_size:opened.st_size with
                  | None -> Error Stale_cursor
-                 | Some finish ->
-                   let anchor = { offset = cursor.offset; line = String.sub bytes 0 finish } in
+                 | Some line ->
+                   let anchor = { offset = cursor.offset; line } in
                    (match row_id anchor with
                     | Ok id when String.equal id cursor.anchor_id -> Ok cursor.offset
                     | Ok _ | Error _ -> Error Stale_cursor))
         in
-        let from = max 0 (upto - byte_window) in
-        let* available = rows_in_slice ~from (read_bytes channel ~from ~length:(upto - from)) in
-        let rows = List.rev available |> List.take (max 1 max_rows) |> List.rev in
+        let target_rows = max 1 max_rows in
+        let rec read_window window =
+          let from = max 0 (upto - window) in
+          let slice = read_bytes channel ~from ~length:(upto - from) in
+          match rows_in_slice ~from slice with
+          | Error Row_exceeds_window when from > 0 && window < byte_window ->
+            read_window (min byte_window (window * 2))
+          | Error (Invalid_cursor _ | Stale_cursor | Invalid_row _ | Row_exceeds_window | Io_error _) as err -> err
+          | Ok available ->
+            if List.length available < target_rows && from > 0 && window < byte_window then
+              read_window (min byte_window (window * 2))
+            else
+              Ok (from, available)
+        in
+        let* from, available = read_window (initial_page_window ~target_rows) in
+        let rows = List.rev available |> List.take target_rows |> List.rev in
         let* next_cursor =
           match rows with
           | [] when from > 0 -> Error Row_exceeds_window

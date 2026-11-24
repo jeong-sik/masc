@@ -528,21 +528,24 @@ let handle_keeper_get_subroutes state req request reqd =
          reqd))
   | Some Route.(Keeper (Next_request, name)) -> (
     (* What the next Agent Core request would carry, computed from the values
-       a turn uses and nothing a turn owns: no dispatch, no cursor, no note. *)
+       a turn uses and nothing a turn owns: no dispatch, no cursor, no note.
+       Offloaded from the HTTP serving fiber so checkpoint, turn-record reads,
+       and JSON tree construction do not stall concurrent dashboard requests. *)
+    let config = Mcp_server.workspace_config state in
     (match
-       Keeper_next_request_forecast.forecast
-         ~config:(Mcp_server.workspace_config state)
-         ~keeper_name:name
+       Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+         Keeper_next_request_forecast.forecast ~config ~keeper_name:name
+         |> Result.map (fun forecast ->
+              match Keeper_next_request_forecast.to_json forecast with
+              | `Assoc fields ->
+                `Assoc
+                  (("dashboard_surface", `String "/api/v1/keepers/:name/next-request")
+                   :: fields)
+              | (`Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _) as json ->
+                json))
      with
-     | Ok forecast ->
-       Http.Response.json_value ~compress:true ~request:req
-         (match Keeper_next_request_forecast.to_json forecast with
-          | `Assoc fields ->
-            `Assoc
-              (("dashboard_surface", `String "/api/v1/keepers/:name/next-request")
-               :: fields)
-          | json -> json)
-         reqd
+     | Ok json ->
+       Http.Response.json_value_on_cpu ~compress:true ~request:req json reqd
      | Error detail ->
        Http.Response.json_value ~status:`Not_found
          (`Assoc [ "error", `String detail ])

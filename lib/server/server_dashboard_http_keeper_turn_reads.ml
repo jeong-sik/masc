@@ -95,13 +95,16 @@ let handle_records_get state req reqd name =
   else
     match keeper_turn_record_lookup_response
             ~config:(Mcp_server.workspace_config state) ~keeper_name:name req with
-    | Some (status, json) -> Http.Response.json_value ~status json reqd
+    | Some (`OK, json) ->
+      Http.Response.json_value_on_cpu ~status:`OK ~compress:true ~request:req json reqd
+    | Some ((`Bad_request | `Not_found | `Service_unavailable) as status, json) ->
+      Http.Response.json_value ~status json reqd
     | None ->
     let limit =
       Server_utils.int_query_param req "limit" ~default:50
       |> max 1 |> min Limits.trajectory_max_limit
     in
-    let config = (Mcp_server.workspace_config state) in
+    let config = Mcp_server.workspace_config state in
     let turn_record_freshness_slo_s =
       Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec
       |> float_of_int
@@ -109,55 +112,65 @@ let handle_records_get state req reqd name =
       Keeper_status_runtime.keeper_turn_record_freshness_slo_s
         ~keepalive_interval_s
     in
-    let store = Keeper_types_support.keeper_turn_record_store config name in
-    (match Server_keeper_turn_records.read ~store ~limit with
-     | Error error ->
-       Http.Response.json_value ~status:`Internal_server_error
-         (`Assoc ["error", `String (Dated_jsonl.read_error_to_string error)]) reqd
-     | Ok (records, skipped_rows) ->
-    let block_json = Turn_record.prompt_block_to_json in
-    let entries =
-      Turn_record.entries_with_diffs records
-      |> List.map (fun ((record : Turn_record.t), diff) ->
-           let diff_vs_prev =
-             match diff with
-             | Some (d : Turn_record.block_diff) ->
-               `Assoc
-                 [ ("added", `List (List.map block_json d.added))
-                 ; ("removed", `List (List.map block_json d.removed))
-                 ; ( "changed"
-                   , `List
-                       (List.map
-                          (fun (prev_b, next_b) ->
-                            `Assoc
-                              [ ("prev", block_json prev_b)
-                              ; ("next", block_json next_b)
-                              ])
-                          d.changed) )
-                 ]
-             | None -> `Null
-           in
-           `Assoc
-             [ ("record", Turn_record.to_json record)
-             ; ("diff_vs_prev", diff_vs_prev)
-             ])
-    in
-    let latest_ts =
-      List.fold_left
-        (fun acc (r : Turn_record.t) ->
-          match acc with
-          | Some existing when existing >= r.ts -> acc
-          | _ -> Some r.ts)
-        None records
-    in
-    let latest_age_s =
-      match latest_ts with
-      | Some ts -> Some (max 0.0 (Time_compat.now () -. ts))
-      | None -> None
-    in
     let live_turn =
       match Keeper_registry.get ~base_path:config.base_path name with
       | Some entry -> Keeper_composite_observer.live_turn_observation entry
+      | None -> None
+    in
+    let computed =
+      Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+        let store = Keeper_types_support.keeper_turn_record_store config name in
+        match Server_keeper_turn_records.read ~store ~limit with
+        | Error error -> Error error
+        | Ok (records, skipped_rows) ->
+          let block_json = Turn_record.prompt_block_to_json in
+          let entries =
+            Turn_record.entries_with_diffs records
+            |> List.map (fun ((record : Turn_record.t), diff) ->
+                 let diff_vs_prev =
+                   match diff with
+                   | Some (d : Turn_record.block_diff) ->
+                     `Assoc
+                       [ ("added", `List (List.map block_json d.added))
+                       ; ("removed", `List (List.map block_json d.removed))
+                       ; ( "changed"
+                         , `List
+                             (List.map
+                                (fun (prev_b, next_b) ->
+                                  `Assoc
+                                    [ ("prev", block_json prev_b)
+                                    ; ("next", block_json next_b)
+                                    ])
+                                d.changed) )
+                       ]
+                   | None -> `Null
+                 in
+                 `Assoc
+                   [ ("record", Turn_record.to_json record)
+                   ; ("diff_vs_prev", diff_vs_prev)
+                   ])
+          in
+          let latest_ts =
+            List.fold_left
+              (fun acc (r : Turn_record.t) ->
+                match acc with
+                | Some existing when existing >= r.ts -> acc
+                | _ -> Some r.ts)
+              None records
+          in
+          let memory_os =
+            Memory_reads.memory_os_dashboard_json ~config ~keeper_id:name
+          in
+          Ok (List.length records, skipped_rows, entries, latest_ts, memory_os))
+    in
+    (match computed with
+     | Error error ->
+       Http.Response.json_value ~status:`Internal_server_error
+         (`Assoc ["error", `String (Dated_jsonl.read_error_to_string error)]) reqd
+     | Ok (count, skipped_rows, entries, latest_ts, memory_os) ->
+    let latest_age_s =
+      match latest_ts with
+      | Some ts -> Some (max 0.0 (Time_compat.now () -. ts))
       | None -> None
     in
     let health, stale_reason =
@@ -175,7 +188,7 @@ let handle_records_get state req reqd name =
        afterwards. *)
     let json = `Assoc [
       ("keeper", `String name);
-      ("count", `Int (List.length records));
+      ("count", `Int count);
       ("skipped_rows", `Int skipped_rows);
       ("source", `String "turn_record");
       ("producer", `String "keeper_agent_run.run_turn|keeper_turn_record_writer");
@@ -204,13 +217,10 @@ let handle_records_get state req reqd name =
       ("health", `String health);
       ( "stale_reason",
         if stale_reason = "" then `Null else `String stale_reason );
-      ( "memory_os"
-      , Memory_reads.memory_os_dashboard_json
-          ~config:(Mcp_server.workspace_config state)
-          ~keeper_id:name );
+      ("memory_os", memory_os);
       ("entries", `List entries);
     ] in
-    Http.Response.json_value ~compress:true ~request:req json reqd)
+    Http.Response.json_value_on_cpu ~compress:true ~request:req json reqd)
 ;;
 
 let handle_transcript_get state req reqd name =
@@ -227,7 +237,12 @@ let handle_transcript_get state req reqd name =
          [("error", `String (Printf.sprintf "invalid keeper name: %s" name))])
       reqd
   else
-    let status, json = keeper_turn_transcript_lookup_response
-        ~config:(Mcp_server.workspace_config state) ~keeper_name:name req in
-    Http.Response.json_value ~status ~compress:true ~request:req json reqd
+    match
+      keeper_turn_transcript_lookup_response
+        ~config:(Mcp_server.workspace_config state) ~keeper_name:name req
+    with
+    | `OK, json ->
+      Http.Response.json_value_on_cpu ~status:`OK ~compress:true ~request:req json reqd
+    | (`Bad_request | `Service_unavailable) as status, json ->
+      Http.Response.json_value ~status json reqd
 ;;

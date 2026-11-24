@@ -2095,9 +2095,22 @@ and execute_action ~now (m : Model.t) action =
       let artifact_target_opt =
         match m.nav.overlay with
         | Some (Nav.System_gate Nav.Media_viewer) -> (
-            match Knowledge_store.selected_artifact m.knowledge with
+            match Model.focused_artifact m with
             | Some a -> `Artifact a
-            | None -> `Other)
+            | None -> (
+                match Model.active_dive m with
+                | Some (Nav.Dive_knowledge (Nav.Artifact_dive _)) ->
+                    `Artifact_missing
+                | Some
+                    ( Nav.Dive_keeper _
+                    | Nav.Dive_work _
+                    | Nav.Dive_infra _
+                    | Nav.Dive_knowledge
+                        ( Nav.Thread_dive _
+                        | Nav.Wiki_dive _
+                        | Nav.Memory_diff_dive _ ) )
+                | None ->
+                    `Other))
         | Some
             ( Nav.Palette
             | Nav.Settings _
@@ -2484,9 +2497,26 @@ and execute_action ~now (m : Model.t) action =
                   m
               , [] ))
       | Some (Nav.System_gate Nav.Media_viewer) -> (
-          match Knowledge_store.selected_artifact m.knowledge with
+          match Model.focused_artifact m with
           | Some art -> export_and_open_artifact art
-          | None -> (m, []))
+          | None -> (
+              match Model.active_dive m with
+              | Some (Nav.Dive_knowledge (Nav.Artifact_dive _)) ->
+                  ( Model.with_toast ~now ~level:Model.Toast_warning
+                      (Say.make ~ko:"해당 아티팩트를 찾을 수 없음"
+                         ~en:"Artifact not found")
+                      m
+                  , [] )
+              | Some
+                  ( Nav.Dive_keeper _
+                  | Nav.Dive_work _
+                  | Nav.Dive_infra _
+                  | Nav.Dive_knowledge
+                      ( Nav.Thread_dive _
+                      | Nav.Wiki_dive _
+                      | Nav.Memory_diff_dive _ ) )
+              | None ->
+                  (m, [])))
       | Some
           ( Nav.Palette
           | Nav.Incidents

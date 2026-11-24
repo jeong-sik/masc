@@ -107,6 +107,13 @@ val chat_reattach_same_instance :
     accepted the request still answers. A missing instance on either side is
     [false]. *)
 
+val run_chat_stream_result :
+  (unit -> (unit, Msg.http_error) result) -> (unit, Msg.http_error) result
+(** Run a chat stream body so unexpected exceptions (other than Eio
+    cancellation and {!Io_domain.Closed}) become [Error (Msg.Transport _)] and
+    are emitted as [Msg.Chat_stream_done] instead of leaking into [fork_safe]'s
+    [Reply_action_ack] and leaving the stream buffer open. *)
+
 val decode_hub_event_msgs :
   epoch:Epoch.t ->
   observed_at:Clock.Mono.t ->

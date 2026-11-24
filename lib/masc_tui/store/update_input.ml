@@ -543,7 +543,7 @@ let dispatch_system_gate_key ~now (m : Model.t) gate
   | Nav.Media_viewer, Keymap.Input.Char "y" when is_printable_key norm ->
       Some (Update_actions.execute_action ~now m Keymap.Copy_selected)
   | Nav.Media_viewer, Keymap.Input.Char "H" when is_printable_key norm -> (
-      match Knowledge_store.selected_artifact m.knowledge with
+      match Model.focused_artifact m with
       | Some art ->
           Some
             ( Model.with_toast ~now ~level:Model.Toast_info
@@ -552,7 +552,7 @@ let dispatch_system_gate_key ~now (m : Model.t) gate
             , [ Cmd.Copy_clipboard art.body.sha256 ] )
       | None -> Some (m, []))
   | Nav.Media_viewer, Keymap.Input.Char "e" when is_printable_key norm -> (
-      match Knowledge_store.selected_artifact m.knowledge with
+      match Model.focused_artifact m with
       | Some art ->
           let ext =
             Wire_knowledge.artifact_extension

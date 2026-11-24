@@ -1928,3 +1928,16 @@ let build_commit_mismatch m =
         let n = Int.min la lb in
         not (String.equal (String.sub a 0 n) (String.sub b 0 n))
   | (Some _ | None), (Some _ | None) -> false
+
+let focused_artifact m =
+  match active_dive m with
+  | Some (Nav.Dive_knowledge (Nav.Artifact_dive target)) ->
+      Knowledge_store.find_artifact_by_id_or_sha target m.knowledge
+  | Some
+      ( Nav.Dive_keeper _
+      | Nav.Dive_work _
+      | Nav.Dive_infra _
+      | Nav.Dive_knowledge
+          (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Memory_diff_dive _) )
+  | None ->
+      Knowledge_store.selected_artifact m.knowledge

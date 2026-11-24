@@ -1699,7 +1699,36 @@ let test_chat_reattach_decision () =
   Alcotest.(check bool) "a guard cleared for a handshake names no instance" false
     (same ~submitted_to:(Some "instance-1") None);
   Alcotest.(check bool) "a request sent before /health named an instance" false
-    (same ~submitted_to:None (Some "instance-1"))
+    (same ~submitted_to:None (Some "instance-1"));
+  (* Unexpected fiber exceptions become Transport errors for Chat_stream_done
+     while Eio cancellation and Io_domain.Closed propagate unchanged. *)
+  (match Cmd_executor.run_chat_stream_result (fun () -> Ok ()) with
+  | Ok () -> ()
+  | Error _ -> Alcotest.fail "expected Ok () pass-through");
+  (match
+     Cmd_executor.run_chat_stream_result (fun () -> failwith "stream_boom")
+   with
+  | Error (Msg.Transport (Health.Other_io detail)) ->
+      Alcotest.(check bool) "exception detail preserved" true
+        (contains_substring ~needle:"stream_boom" detail)
+  | Ok () | Error _ ->
+      Alcotest.fail "expected Transport Other_io from unexpected exception");
+  let closed_propagated =
+    try
+      ignore (Cmd_executor.run_chat_stream_result (fun () -> raise Io_domain.Closed));
+      false
+    with Io_domain.Closed -> true
+  in
+  Alcotest.(check bool) "Io_domain.Closed propagates" true closed_propagated;
+  let cancel_propagated =
+    try
+      ignore
+        (Cmd_executor.run_chat_stream_result (fun () ->
+             raise (Eio.Cancel.Cancelled (Failure "stop"))));
+      false
+    with Eio.Cancel.Cancelled _ -> true
+  in
+  Alcotest.(check bool) "Eio.Cancel.Cancelled propagates" true cancel_propagated
 
 let test_feature_wave1_osc52_and_artifact_export_safety () =
   (* 1. OSC 52 wrapping (never raw text) *)

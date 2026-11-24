@@ -291,7 +291,7 @@ let keeper_groups_json (keepers : (string * string option) list) : Yojson.Safe.t
   `List rows
 ;;
 
-let fleet_turns_24h_from_pulse ~base_path (keeper_names : string list) : int option =
+let fleet_turns_24h_from_pulse ~now ~base_path (keeper_names : string list) : int option =
   let total = ref 0 in
   let seeded = ref 0 in
   List.iter
@@ -300,10 +300,7 @@ let fleet_turns_24h_from_pulse ~base_path (keeper_names : string list) : int opt
       | None -> ()
       | Some pulse ->
         incr seeded;
-        List.iter
-          (fun (slot : Keeper_turn_pulse.slot) ->
-            total := !total + slot.tally.ok + slot.tally.failed)
-          pulse.slots)
+        total := !total + Keeper_turn_pulse.turns_in_window ~now pulse)
     keeper_names;
   if !seeded > 0 then Some !total else None
 ;;
@@ -524,7 +521,10 @@ let dashboard_shell_payload_json
     let scorecard_24h_json =
       let base = tasks_24h_rollup_json ~now:started_at tasks in
       let turns_24h_opt =
-        fleet_turns_24h_from_pulse ~base_path:config.Workspace.base_path configured_names
+        fleet_turns_24h_from_pulse
+          ~now:started_at
+          ~base_path:config.Workspace.base_path
+          configured_names
       in
       let verif_passed_opt, verif_rejected_opt =
         match

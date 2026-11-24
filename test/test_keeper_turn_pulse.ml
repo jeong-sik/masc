@@ -439,6 +439,36 @@ let test_seed_leaves_a_recorded_keeper_alone () =
     check_known "the recorded pulse stays" (at_slot 99) (seeded config "live"))
 ;;
 
+let test_turns_in_window_uses_now () =
+  Pulse.reset_for_tests ();
+  let record slot outcome =
+    Pulse.record ~base_path:"/tmp/p1" ~keeper_name:"quiet" ~at:(at_slot slot)
+      ~cause:Pulse.Own outcome
+  in
+  let slots_per_day = Pulse.window_seconds / Pulse.slot_seconds in
+  (* Slot 10 (ok), slot 53 (boundary ok + rested), slot 100 (current failed),
+     slot 101 (future ok). *)
+  record 10 Pulse.Turn_ok;
+  record (100 - slots_per_day) Pulse.Turn_ok;
+  record (100 - slots_per_day + 1) Pulse.Turn_ok;
+  record (100 - slots_per_day + 1) Pulse.Turn_rested;
+  record 100 Pulse.Turn_failed;
+  record 101 Pulse.Turn_ok;
+  let pulse = get_exn ~base_path:"/tmp/p1" ~keeper_name:"quiet" in
+  (* At slot 100: window is slots [53..100]; slot 52 and 101 are excluded,
+     and rested does not count toward ok+failed. *)
+  Alcotest.(check int)
+    "counts only ok+failed inside the 48-slot window ending at now"
+    2
+    (Pulse.turns_in_window ~now:(at_slot 100) pulse);
+  (* Two days later with no new turns: stored slots remain unpruned, yet
+     turns_in_window reports 0 instead of replaying the stale active day. *)
+  Alcotest.(check int)
+    "a keeper quiet for over a day reports 0 turns in the last 24h"
+    0
+    (Pulse.turns_in_window ~now:(at_slot (101 + slots_per_day + 48)) pulse)
+;;
+
 let () =
   Alcotest.run
     "keeper_turn_pulse"
@@ -455,6 +485,8 @@ let () =
             test_a_late_turn_lands_in_its_own_slot
         ; Alcotest.test_case "pulses are kept per workspace and keeper" `Quick
             test_pulses_are_kept_per_workspace_and_keeper
+        ; Alcotest.test_case "turns_in_window filters by current time" `Quick
+            test_turns_in_window_uses_now
         ] )
     ; ( "seed"
       , [ Alcotest.test_case "seed reads what the logs can tell" `Quick

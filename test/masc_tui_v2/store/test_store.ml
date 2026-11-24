@@ -15961,7 +15961,11 @@ let test_live_chat_activity_uses_open_content_and_tool_receipts () =
   let quarantined = custom tool "KEEPER_STREAM_PROTOCOL_ERROR"
       {|{"kind":"sse_stream_incomplete","quarantined_occurrence":{"toolStreamScope":2,"toolCallBlockIndex":2}}|} in
   check_phase "a quarantined tool occurrence is no longer pending" Phase_awaiting_turn quarantined;
-  let retry = apply args_ended (Wire_fleet.Chunk_runtime_attempt_started { operation_id = None }) in
+  let retry =
+    apply args_ended
+      (Wire_fleet.Chunk_runtime_attempt_started
+         { operation_id = None; runtime_id = None; attempt_index = None })
+  in
   check_phase "retry retires pending tools from the previous attempt" Phase_awaiting_turn retry
 
 let test_active_turn_preview_visibility_and_queued_followup () =
@@ -19360,7 +19364,7 @@ let () =
                      | Cmd.Http_post
                          {
                            req =
-                             Cmd.Post_keeper_lifecycle
+                             Cmd.Post_keeper_control_lifecycle
                                { keeper = "alpha"; action = `Shutdown; _ };
                            _;
                          } ->

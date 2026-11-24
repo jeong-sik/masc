@@ -16721,18 +16721,14 @@ let test_lazy_keeper_context_fetches_and_sidebar_workspace_discovery () =
   Alcotest.(check bool) "Ctx_response skips cache-outcome" false
     (has_get is_cache_out cmds_resp);
   (* 5. Ctrl+T Drawer_context still fetches next-request + cache-outcome without provider-input/transcript *)
-  let m_drawer =
+  let m_dive, _ =
+    Update_nav.push_dive
     {
       base with
-      nav =
-        {
-          base.nav with
-          workspace = Nav.Keepers;
-          dive_stack = [ Nav.Dive_keeper { name = keeper; tab = Nav.Keeper_chat } ];
-          overlay = Some (Nav.Queue_context Nav.Drawer_context);
-        };
+        nav = { base.nav with workspace = Nav.Keepers };
       keeper_context = kc;
     }
+      (Nav.Dive_keeper { name = keeper; tab = Nav.Keeper_chat })
   in
   let is_next_req_for k = function
     | Cmd.Get_keeper_next_request { keeper } -> String.equal keeper k
@@ -16742,10 +16738,12 @@ let test_lazy_keeper_context_fetches_and_sidebar_workspace_discovery () =
     | Cmd.Get_keeper_cache_outcome { keeper; _ } -> String.equal keeper k
     | _ -> false
   in
-  let cmds_drawer = View_fetches.fetches_for_current_view m_drawer in
-  Alcotest.(check bool) "Drawer_context resolves Dive keeper alpha (not _default) for cache-outcome"
+  let _, cmds_drawer =
+    Update_nav.open_overlay m_dive (Nav.Queue_context Nav.Drawer_context)
+  in
+  Alcotest.(check bool) "Drawer_context requests cache-outcome for Dive keeper alpha"
     true (has_get (is_cache_out_for keeper) cmds_drawer);
-  Alcotest.(check bool) "Drawer_context resolves Dive keeper alpha (not _default) for next-request"
+  Alcotest.(check bool) "Drawer_context requests next-request for Dive keeper alpha"
     true (has_get (is_next_req_for keeper) cmds_drawer);
   Alcotest.(check bool) "Drawer_context skips provider-input" false
     (has_get is_provider_in cmds_drawer);

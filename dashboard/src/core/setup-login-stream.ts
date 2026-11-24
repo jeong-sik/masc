@@ -239,7 +239,12 @@ export async function streamSetupAccountLogin(params: {
     }
     if (eventName === 'device_code' && isRecord(parsed)) {
       const code = asNonEmptyStr(parsed.code ?? parsed.user_code)
-      const url = typeof parsed.url === 'string' ? extractOAuthUrl(parsed.url) : announcedUrl
+      const rawUri = typeof parsed.verification_uri === 'string'
+        ? parsed.verification_uri
+        : typeof parsed.url === 'string'
+          ? parsed.url
+          : null
+      const url = rawUri ? extractOAuthUrl(rawUri) : announcedUrl
       if (url && url !== announcedUrl) {
         announcedUrl = url
         params.callbacks.onAuthUrl?.(url)

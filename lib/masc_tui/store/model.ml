@@ -125,6 +125,8 @@ type t = {
   lang : Say.lang;
   theme_preset : Theme.preset;
   tz_offset_sec : int;
+  tui_version : string;
+  tui_commit : string option;
   nav : nav_state;
   freshness : freshness_state;
   server_identity : server_identity;
@@ -206,7 +208,8 @@ let classify_viewport { cols; rows } =
 let is_too_small_viewport { cols; rows } = cols < 40 || rows < 12
 
 let initial ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_ko)
-    ?(theme_preset = Theme.Midnight) ?(tz_offset_sec = 0) ?(wall_unix = 0.0) () =
+    ?(theme_preset = Theme.Midnight) ?(tz_offset_sec = 0) ?(wall_unix = 0.0)
+    ?(tui_version = "") ?(tui_commit = None) () =
   let viewport = { cols = max 0 cols; rows = max 0 rows } in
   let breakpoint = classify_viewport viewport in
   let last_wall_unix =
@@ -219,6 +222,8 @@ let initial ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_ko)
     lang;
     theme_preset;
     tz_offset_sec;
+    tui_version;
+    tui_commit;
     nav =
       {
         workspace = Nav.Pulse;
@@ -1768,3 +1773,72 @@ let active_view_ssot_mode m =
                             observed_at_opt a.activity);
                       ];
                 }))
+
+let trimmed_nonempty_opt = function
+  | None -> None
+  | Some s ->
+      let t = String.trim s in
+      if String.equal t "" then None else Some t
+
+let short_commit_opt commit_opt =
+  match trimmed_nonempty_opt commit_opt with
+  | None -> None
+  | Some t ->
+      if String.length t <= 8 then Some t else Some (String.sub t 0 8)
+
+let format_version_tag raw_ver =
+  let v = String.trim raw_ver in
+  let len = String.length v in
+  if len = 0 then ""
+  else if Char.equal v.[0] 'v' || Char.equal v.[0] 'V' then v
+  else "v" ^ v
+
+let format_build_label ~version ~commit =
+  let ver_tag = format_version_tag version in
+  match (ver_tag, short_commit_opt commit) with
+  | "", None -> ""
+  | "", Some short -> short
+  | v, None -> v
+  | v, Some short -> Printf.sprintf "%s (%s)" v short
+
+let effective_server_build (m : t) =
+  let ver =
+    match trimmed_nonempty_opt m.server_identity.observer_version with
+    | Some _ as v -> v
+    | None -> (
+        match m.server_identity.health with
+        | Some h -> trimmed_nonempty_opt (Some h.version)
+        | None -> None)
+  in
+  let commit =
+    match trimmed_nonempty_opt m.server_identity.observer_commit with
+    | Some _ as c -> c
+    | None -> (
+        match m.server_identity.health with
+        | Some h -> trimmed_nonempty_opt h.binary_commit
+        | None -> None)
+  in
+  (ver, commit)
+
+let tui_build_label m =
+  format_build_label ~version:m.tui_version ~commit:m.tui_commit
+
+let server_build_label m =
+  let ver_opt, commit_opt = effective_server_build m in
+  let version = match ver_opt with Some v -> v | None -> "" in
+  let label = format_build_label ~version ~commit:commit_opt in
+  if String.equal label "" then None else Some label
+
+let build_commit_mismatch m =
+  let _, server_commit = effective_server_build m in
+  match (trimmed_nonempty_opt m.tui_commit, server_commit) with
+  | Some tc, Some sc ->
+      let a = String.lowercase_ascii tc in
+      let b = String.lowercase_ascii sc in
+      let la = String.length a in
+      let lb = String.length b in
+      if Int.equal la lb then not (String.equal a b)
+      else
+        let n = Int.min la lb in
+        not (String.equal (String.sub a 0 n) (String.sub b 0 n))
+  | (Some _ | None), (Some _ | None) -> false

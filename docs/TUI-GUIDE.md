@@ -58,7 +58,8 @@ Run `masc-tui --help` for the exact CLI flags (`lib/masc_tui/app/cli_args.ml`):
 | `--theme <midnight\|arcade\|paper\|mono>` | Color theme preset (default `midnight`) |
 | `--lang <ko\|en>` | UI language (default `ko`) |
 | `--no-auto-start` | Do not auto-start a local `masc` server when the port is offline |
-| `--version` / `--build-commit` | Print executable version or embedded Git commit SHA and exit |
+| `--version` | Print executable build version with embedded 8-char Git commit SHA (e.g. `0.81.0 (2a58dc57)`) and exit |
+| `--build-commit` | Print full embedded 40-char Git commit SHA and exit (exits `1` if unembedded) |
 | `-h`, `--help` | Print usage and exit |
 
 The legacy `--reasoning` and `--tool-view` startup flags were removed in v2.5
@@ -114,11 +115,11 @@ All shortcuts come from `lib/masc_tui/keymap/keymap.ml`; VT100 control aliases
 | `Ctrl+K` | — | Universal Command & Entity Palette (strictly separated from Approvals) |
 | `Ctrl+G` | `/keeper [name]` | Keeper/Chat quick switcher |
 | `Ctrl+L` | `/model [lane]` | Runtime/Model switcher |
-| `,` (unfocused), `Ctrl+,`, `Alt+,`, `F10` | `/config [query]` | 2-pane, 7-category **Settings** overlay |
+| `,` (unfocused), `Ctrl+,`, `Alt+,`, `F10` | `/config [query]` | 2-pane, 7-category **Settings** overlay (header shows running TUI & Server build version/commit) |
 | `Ctrl+T` | `/queue`, `/context` | 3-tab **Queue / Context / Schedules** drawer; the Context tab shows the selected Keeper's context fill per turn over its last 60 turns, and its latest compaction and history reset |
 | `I` (unfocused), `Alt+I` | `/incidents` | Historical Incidents drawer (`d` dismiss, `c`/`D` clear all, `Space` show dismissed, `o`/`Enter` dive) |
 | `J` (unfocused), `Alt+J` | `/jump` | Teleport to the highest-priority blocked item (Ask, Tool Approval, or Goal Confirmation) |
-| `?` (unfocused) | `/help` | Dynamic keymap help overlay |
+| `?` (unfocused) | `/help` | Dynamic keymap help overlay (top bar shows TUI & Server build version/commit and flags commit mismatch) |
 
 ### Chatting with a Keeper
 
@@ -651,7 +652,10 @@ source checkout builds `_build/default/bin/masc_tui.exe`, which does not match
 binaries into `~/.local/bin` (see [README From source](../README.md#from-source)).
 
 **The TUI does not show a change that is already on `main`.** The TUI is its
-own binary. Rebuilding or restarting `bin/main_eio.exe` does not replace an
+own binary. Check its embedded build commit with `masc-tui --version`,
+`masc-tui --build-commit`, or inside the `?` Help and `,` Settings overlays
+(which show both TUI and connected Server build commits and flag mismatches).
+Rebuilding or restarting `bin/main_eio.exe` does not replace an
 already-running TUI. Rebuild `bin/masc_tui.exe`, quit with `Ctrl+Q`, and
 reopen — or use `scripts/tui-graceful-restart.sh --dry-run` followed by
 `scripts/tui-graceful-restart.sh --build --base-path <dir>`.

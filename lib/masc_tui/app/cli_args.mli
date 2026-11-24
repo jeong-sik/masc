@@ -2,7 +2,9 @@
 
     Preserves all verified contracts from [release-build.yml],
     [tui-native-proof.yml], and [bin/masc_front_door.ml]:
-    - [--version] prints the build version and exits [0] without touching TTY.
+    - [--version] prints the build version with the embedded 8-char commit hash
+      when available (e.g. [0.81.0 (2a58dc57)], or bare [0.81.0] if unembedded)
+      and exits [0] without touching TTY.
     - [--build-commit] prints the embedded Git commit SHA and exits [0] (or
       exits [1] if unembedded) without touching TTY.
     - [--help] / [-h] documents [--port], [--base-path], [--url], [--theme],

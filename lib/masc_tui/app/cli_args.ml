@@ -43,7 +43,7 @@ let help_text =
       "                                Color theme preset (default: midnight)";
       "  --lang <ko|en>                UI language (default: ko)";
       "  --no-auto-start               Do not auto-start a local masc server when offline";
-      "  --version                     Print executable build version and exit";
+      "  --version                     Print build version (and short commit SHA) and exit";
       "  --build-commit                Print embedded Git commit SHA and exit";
       "  -h, --help                    Display this help message and exit";
     ]
@@ -210,6 +210,20 @@ let default_cwd () =
   | d -> d
   | exception Sys_error _ -> "."
 
+let short_commit_opt = function
+  | None -> None
+  | Some sha ->
+      let trimmed = String.trim sha in
+      let len = String.length trimmed in
+      if len = 0 then None
+      else if len <= 8 then Some trimmed
+      else Some (String.sub trimmed 0 8)
+
+let format_version ~version ~build_commit =
+  match short_commit_opt build_commit with
+  | Some short -> Printf.sprintf "%s (%s)" version short
+  | None -> version
+
 let parse ?(version = Build_version.current)
     ?(build_commit = Build_commit_generated.commit)
     ?(env = Sys.getenv_opt) ?cwd argv =
@@ -218,7 +232,8 @@ let parse ?(version = Build_version.current)
     | arg :: rest -> (
         let flag, inline_opt = split_long_opt arg in
         match flag with
-        | "--version" -> Error (`Info (Print_version version))
+        | "--version" ->
+            Error (`Info (Print_version (format_version ~version ~build_commit)))
         | "--build-commit" -> Error (`Info (Print_build_commit build_commit))
         | "--help" | "-h" -> Error (`Info (Print_help help_text))
         | "--no-auto-start" -> (

@@ -1474,8 +1474,9 @@ let test_setup_login_stream_error_and_single_delivery () =
   let collect ~stream =
     let emitted = ref [] in
     Cmd_executor.run_setup_login_stream
+      ~on_interrupted:(fun ~login_id:_ err -> emitted := Error err :: !emitted)
       ~publish:(fun res -> emitted := res :: !emitted)
-      ~stream;
+      ~stream ();
     List.rev !emitted
   in
   (* 1. SSE error after non-terminal "running" receipt MUST propagate Error *)
@@ -1528,6 +1529,43 @@ let test_setup_login_stream_error_and_single_delivery () =
   | [ Error (Msg.Decode_error _) ] -> ()
   | _ -> Alcotest.fail "expected single Decode_error on empty login stream")
 
+let test_setup_login_interruption_closes_owned_input () =
+  let now = Clock.Mono.zero in
+  let model = ref (Model.initial ()) in
+  let send msg = let next, _ = Update.step ~now !model msg in model := next in
+  let reply msg = send (Msg.Http_reply { epoch = !model.epoch; reply = msg }) in
+  let frames = ref [] in
+  let interrupted ~login_id error =
+    frames := (login_id, error) :: !frames;
+    reply (Msg.Reply_setup_login_interrupted { login_id; error })
+  in
+  let on_input_ready ~login_id =
+    send (Msg.Setup_login_input_ready { epoch = !model.epoch; login_id })
+  in
+  let input_is_open id =
+    Option.equal Nav.equal_overlay !model.nav.overlay
+      (Some (Nav.Inline_action (Nav.Setup_login_input_form { login_id = id })))
+    && !model.runtime.setup_login_input_ready
+  in
+  let event name data = "event: " ^ name ^ "\ndata: " ^ data ^ "\n\n" in
+  Cmd_executor.run_setup_login_stream ~on_interrupted:interrupted ~on_input_ready
+    ~publish:(fun result -> reply (Msg.Reply_setup_login_receipt result))
+    ~stream:(fun ~on_chunk ->
+      on_chunk (event "started" {|{"login_id":"one","integration_id":"codex_cli","status":"running"}|});
+      on_chunk "event: input_";
+      on_chunk "ready\r\ndata: {}\r\n\r\n";
+      Alcotest.(check bool) "the live login owns the input form" true (input_is_open "one");
+      interrupted ~login_id:"older" (Msg.Transport Health.Stream_eof);
+      Alcotest.(check bool) "a late interruption preserves another login's input" true (input_is_open "one");
+      Ok ()) ();
+  Alcotest.(check bool) "clean EOF emits one interruption for the observed login" true
+    (!frames = [ ("one", Msg.Transport Health.Stream_eof); ("older", Msg.Transport Health.Stream_eof) ]);
+  Alcotest.(check bool) "EOF clears input readiness and the owned modal" true
+    (not !model.runtime.setup_login_input_ready && !model.inline_modal = None && !model.nav.overlay = None);
+  Alcotest.(check bool) "EOF preserves the last server receipt" true
+    (Option.fold ~none:false ~some:(fun (r : Masc_tui_protocol.Wire_runtime.setup_login_receipt) ->
+      r.login_id = "one" && r.status = "running") !model.runtime.setup_login_receipt)
+
 let test_setup_login_stream_output_auth_url_input_ready_and_oauth_tick_gate () =
   let sse_event name json = "event: " ^ name ^ "\ndata: " ^ json ^ "\n\n" in
   let started_json =
@@ -1540,6 +1578,7 @@ let test_setup_login_stream_output_auth_url_input_ready_and_oauth_tick_gate () =
   let outputs = ref [] in
   let inputs_ready = ref [] in
   Cmd_executor.run_setup_login_stream
+    ~on_interrupted:(fun ~login_id:_ err -> receipts := Error err :: !receipts)
     ~on_output:(fun ~text ~auth_url ~device_code ->
       outputs := (text, auth_url, device_code) :: !outputs)
     ~on_input_ready:(fun ~login_id ->
@@ -1559,7 +1598,7 @@ let test_setup_login_stream_output_auth_url_input_ready_and_oauth_tick_gate () =
       on_chunk (sse_event "screen" {|{"text":"Paste code below:"}|});
       on_chunk (sse_event "input_ready" {|{"login_id":"login-042"}|});
       on_chunk (sse_event "complete" complete_json);
-      Ok ());
+      Ok ()) ();
   let outputs = List.rev !outputs in
   let inputs_ready = List.rev !inputs_ready in
   let receipts = List.rev !receipts in
@@ -2897,6 +2936,8 @@ let () =
             `Quick test_queue_drawer_walks_all_http_pages;
           Alcotest.test_case "setup login stream propagates non-terminal error & delivers terminal receipt once"
             `Quick test_setup_login_stream_error_and_single_delivery;
+          Alcotest.test_case "setup login EOF closes only the matching input form"
+            `Quick test_setup_login_interruption_closes_owned_input;
           Alcotest.test_case "setup login stream output/auth_url/device_code/input_ready & OAuth tick gate"
             `Quick test_setup_login_stream_output_auth_url_input_ready_and_oauth_tick_gate;
           Alcotest.test_case "chat stream reattach decision" `Quick

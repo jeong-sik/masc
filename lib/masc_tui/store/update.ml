@@ -549,7 +549,7 @@ let leave_old_epoch ~now ~(before : Model.t) (after : Model.t) =
       knowledge;
       runtime;
       keeper_context =
-        Keeper_context_store.clear_running_github_logins after.keeper_context;
+        Keeper_context_store.clear_epoch_logins after.keeper_context;
     }
 
 (* The view planner only returns commands. Reserve its inventory read before the

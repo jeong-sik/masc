@@ -18224,6 +18224,76 @@ let test_keeper_lifecycle_and_addon_crud_requests () =
            | _ -> false)
          (Cmd.flatten ask_done_cmds))
 
+let test_oauth_poll_lifecycle () =
+  let now = Clock.Mono.of_ns 1_000_000_000L in
+  let later = Clock.Mono.after_s now 2. in
+  let keeper = "alpha" and provider = "linear" in
+  let initial = Model.initial ~wall_unix:100. () in
+  let reply ~at (m : Model.t) reply =
+    Update.step ~now:at m (Msg.Http_reply { epoch = m.epoch; reply })
+  in
+  let start attempt_id m =
+    fst (reply ~at:now m (Msg.Reply_oauth_login { keeper; result =
+      Ok (Wire_keeper_context.Oauth_login_exchange { provider; provider_label = "Linear";
+        authorize_url = "https://auth.example.org/approve"; attempt_id; expires_at = Some 105. }) }))
+  in
+  let poll ?(id = "one") ~at m result =
+    reply ~at m (Msg.Reply_oauth_attempt_status { keeper; provider; attempt_id = id; result })
+  in
+  let status kind =
+    match Wire_keeper_context.decode_oauth_attempt_status (`Assoc [ "kind", `String kind ]) with
+    | Ok st -> Ok st
+    | Error reason -> Alcotest.fail reason
+  in
+  let deadline (m : Model.t) =
+    Keeper_context_store.next_oauth_poll_deadline_ns ~now_ns:(Clock.Mono.to_ns now) m.keeper_context
+  in
+  let pending = start "one" initial in
+  let active, _ = poll ~at:now pending (status "awaiting_consent") in
+  let quiet, _ = poll ~at:later active (status "awaiting_consent") in
+  Alcotest.(check bool) "unchanged consent keeps the current toast deadline" true (active.toast = quiet.toast);
+  let admitted, _ = poll ~at:later quiet (status "callback_admitted") in
+  Alcotest.(check bool) "callback admission is a new observation" true (quiet.toast <> admitted.toast);
+  List.iter (fun kind ->
+    let stopped, cmds = poll ~at:later admitted (status kind) in
+    Alcotest.(check (option int64)) kind None (deadline stopped);
+    let expected =
+      if String.equal kind "completed" then
+        [ Cmd.Http_get { epoch = stopped.epoch; req = Cmd.Get_oauth_attached_tools { keeper } } ]
+      else []
+    in
+    Alcotest.(check bool) "only published credentials refresh attached tools" true (Cmd.flatten cmds = expected);
+    let late, cmds = poll ~at:later stopped (status "awaiting_consent") in
+    Alcotest.(check bool) "settled attempt ignores a late reply" true
+      (late.toast = stopped.toast && Cmd.flatten cmds = [] && deadline late = None))
+    [ "unavailable"; "superseded"; "credential_publication_incomplete"; "failed"; "expired"; "completed" ];
+  let outage = Error (Msg.Http_error { status = 503; body = "unavailable"; api_error = None }) in
+  let first, _ = poll ~at:now pending outage in
+  let repeated, _ = poll ~at:later first (Error (Msg.Transport Health.Stream_eof)) in
+  Alcotest.(check bool) "retryable reads stay live inside the server login window" true (Option.is_some (deadline repeated));
+  Alcotest.(check int) "one incident for the outage" 1 (Incidents.count repeated.incidents);
+  Alcotest.(check bool) "repeated transport errors preserve other notifications" true (first.toast = repeated.toast);
+  let recovered, _ = poll ~at:later repeated (status "awaiting_consent") in
+  let failed_again, _ = poll ~at:later recovered outage in
+  Alcotest.(check int) "a recovered read separates outages" 2 (Incidents.count failed_again.incidents);
+  let expired, _ = Update.step ~now:(Clock.Mono.after_s now 5.) repeated
+    (Msg.Tick { wall_unix = 105. }) in
+  Alcotest.(check (option int64)) "the server-issued deadline halts automatic retry" None
+    (Keeper_context_store.next_oauth_poll_deadline_ns ~now_ns:(Clock.Mono.to_ns now)
+       ~wall_unix:105. expired.keeper_context);
+  let invalid, _ = poll ~at:now pending (Error (Msg.Decode_error "unknown OAuth status")) in
+  Alcotest.(check (option int64)) "a malformed status stops immediately" None (deadline invalid);
+  let replacement = start "two" pending in
+  let late, cmds = poll ~at:later replacement (status "completed") in
+  Alcotest.(check bool) "a replaced attempt cannot complete the active login" true
+    (late.toast = replacement.toast && Cmd.flatten cmds = [] && Option.is_some (deadline late));
+  let reconnect, _ = Update.step ~now:later replacement (Msg.Server_start_result (Ok ())) in
+  Alcotest.(check (option int64)) "a new server epoch drops process-owned attempts" None (deadline reconnect);
+  let stale, cmds = Update.step ~now:later reconnect (Msg.Http_reply { epoch = initial.epoch;
+    reply = Msg.Reply_oauth_attempt_status { keeper; provider; attempt_id = "two"; result = status "completed" } }) in
+  Alcotest.(check bool) "the preceding epoch cannot refresh tools" true
+    (stale.toast = reconnect.toast && Cmd.flatten cmds = [])
+
 let test_oauth_auto_open_input_and_tick_poll () =
   let t0 = Clock.Mono.of_ns 10_000_000_000L in
   let t1 = Clock.Mono.after_s t0 1.0 in
@@ -18542,7 +18612,7 @@ let test_oauth_auto_open_input_and_tick_poll () =
            reply =
              Msg.Reply_oauth_attempt_status
                {
-                 keeper = "sangsu";
+                 keeper = "sangsu"; provider = "github"; attempt_id = "att-7";
                  result =
                    Ok
                      {
@@ -18619,7 +18689,7 @@ let test_oauth_auto_open_input_and_tick_poll () =
                  reply =
                    Msg.Reply_oauth_attempt_status
                      {
-                       keeper = "sangsu";
+                       keeper = "sangsu"; provider = "github"; attempt_id = "att-7";
                        result =
                          Error
                            (Msg.Http_error
@@ -18648,7 +18718,7 @@ let test_oauth_auto_open_input_and_tick_poll () =
            reply =
              Msg.Reply_oauth_attempt_status
                {
-                 keeper = "sangsu";
+                 keeper = "sangsu"; provider = "github"; attempt_id = "att-7";
                  result =
                    Error
                      (Msg.Http_error
@@ -18719,6 +18789,8 @@ let () =
           Alcotest.test_case
             "setup login URL/input_ready, keeper OAuth auto-open & bounded Tick poll, GitHub device auto-open"
             `Quick test_oauth_auto_open_input_and_tick_poll;
+          Alcotest.test_case "attempt ownership, terminal receipts and bounded retry"
+            `Quick test_oauth_poll_lifecycle;
         ] );
       ("Board recovery", [Alcotest.test_case "recover the viewed keeper and exact quarantine generation" `Quick test_keeper_board_quarantine_recovery]);
       ("exact chat lookup", [Alcotest.test_case "retain and dismiss scoped absent operations" `Quick test_exact_operation_absence_recovery]);

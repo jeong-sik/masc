@@ -1908,11 +1908,11 @@ let rec execute_get t ~epoch req =
                 }
             in
             Msg.Http_reply { epoch; reply }
-        | Cmd.Get_oauth_attempt_status { keeper; _ } ->
+        | Cmd.Get_oauth_attempt_status { keeper; provider; attempt_id } ->
             let reply =
               Msg.Reply_oauth_attempt_status
                 {
-                  keeper;
+                  keeper; provider; attempt_id;
                   result =
                     fetch_and_decode_get t ~path
                       ~decode:Wire_keeper_context.decode_oauth_attempt_status;
@@ -1985,14 +1985,19 @@ let is_terminal_setup_login_status status =
 let run_setup_login_stream
     ?(on_output = fun ~text:_ ~auth_url:_ ~device_code:_ -> ())
     ?(on_input_ready = fun ~login_id:_ -> ())
+    ~on_interrupted
     ~(publish :
        (Wire_runtime.setup_login_receipt, Msg.http_error) result -> unit)
-    ~(stream : on_chunk:(string -> unit) -> (unit, Msg.http_error) result) :
+    ~(stream : on_chunk:(string -> unit) -> (unit, Msg.http_error) result) () :
     unit =
   let sse_decoder = Sse_wire.create_decoder () in
-  let saw_receipt = ref false in
   let terminal_published = ref false in
   let last_login_id = ref None in
+  let interrupt error =
+    match !last_login_id with
+    | Some login_id -> on_interrupted ~login_id error
+    | None -> publish (Error error)
+  in
   let string_field fields key =
     match List.assoc_opt key fields with
     | Some (`String s) when not (String.equal (String.trim s) "") ->
@@ -2008,13 +2013,14 @@ let run_setup_login_stream
     | None -> ()
   in
   let on_chunk raw =
-    let frames = Sse_wire.feed sse_decoder raw in
+    let frames = Sse_wire.feed_named sse_decoder raw in
     List.iter
-      (fun (frame : Sse_wire.frame) ->
+      (fun (event, (frame : Sse_wire.frame)) ->
+        if !terminal_published then () else
         let ev_name =
           Option.map
             (fun s -> String.lowercase_ascii (String.trim s))
-            frame.event
+            event
         in
         match ev_name with
         | Some "input_ready" ->
@@ -2077,13 +2083,11 @@ let run_setup_login_stream
             | json -> (
                 match Wire_runtime.decode_setup_login_receipt json with
                 | Ok receipt ->
-                    saw_receipt := true;
                     last_login_id := Some receipt.login_id;
                     if is_terminal_setup_login_status receipt.status then (
-                      if not !terminal_published then (
-                        terminal_published := true;
-                        publish (Ok receipt)))
-                    else if not !terminal_published then publish (Ok receipt)
+                      terminal_published := true;
+                      publish (Ok receipt))
+                    else publish (Ok receipt)
                 | Error _ -> (
                     match json with
                     | `Assoc fields -> (
@@ -2093,10 +2097,8 @@ let run_setup_login_stream
                           , first_string_field fields [ "error"; "message" ] )
                         with
                         | Some "error", Some err_msg ->
-                            if not !terminal_published then (
-                              terminal_published := true;
-                              publish
-                                (Error (Msg.Transport (Health.Other_io err_msg))))
+                            terminal_published := true;
+                            interrupt (Msg.Transport (Health.Other_io err_msg))
                         | (Some _ | None), (Some _ | None) ->
                             (* With ?auth_hints=1 enabled, rely exclusively on
                                server-side auth_url / device_code SSE events so
@@ -2115,15 +2117,12 @@ let run_setup_login_stream
       frames
   in
   let stream_res = stream ~on_chunk in
-  match !terminal_published, !saw_receipt, stream_res with
-  | true, _, _ -> ()
-  | false, _, Error err -> publish (Error err)
-  | false, true, Ok () -> ()
-  | false, false, Ok () ->
-      publish
-        (Error
-           (Msg.Decode_error
-              "setup login stream closed without a login receipt"))
+  if not !terminal_published then
+    match stream_res, !last_login_id with
+    | Error err, _ -> interrupt err
+    | Ok (), Some _ -> interrupt (Msg.Transport Health.Stream_eof)
+    | Ok (), None ->
+        publish (Error (Msg.Decode_error "setup login stream closed without a login receipt"))
 
 let execute_post t ~epoch req =
   let path = Cmd.post_request_path req in
@@ -2338,13 +2337,17 @@ let execute_post t ~epoch req =
               Ui_bus.publish_stream t.bus
                 (Msg.Setup_login_input_ready { epoch; login_id })
             in
-            run_setup_login_stream ~on_output ~on_input_ready ~publish
+            let on_interrupted ~login_id error =
+              Ui_bus.publish_stream t.bus
+                (Msg.Http_reply { epoch; reply = Msg.Reply_setup_login_interrupted { login_id; error } })
+            in
+            run_setup_login_stream ~on_output ~on_input_ready ~on_interrupted ~publish
               ~stream:(fun ~on_chunk ->
                 Http_client.post_stream ~io:t.io ~clock:t.clock
                   ~content_type:"application/json" ~body:body_str
                   ~on_response:(fun ~status:_ ~headers:_ -> ())
                   ~on_chunk ep ~path
-                |> Result.map_error msg_error_of_http);
+                |> Result.map_error msg_error_of_http) ();
             None
         | Cmd.Post_setup_login_input { login_id; _ } ->
             let result = post_ack t ~path ~body in

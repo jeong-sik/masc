@@ -299,7 +299,8 @@ val start_github_login : keeper:string -> t -> t
 val append_github_login_output : keeper:string -> line:string -> t -> t
 val finish_github_login :
   keeper:string -> error:string option -> t -> t
-val clear_running_github_logins : t -> t
+val clear_epoch_logins : t -> t
+(** Drop process-local OAuth attempts and detach running GitHub logins. *)
 (** Reset [github_login.running = false] across all keepers when leaving an
     epoch whose stream replies are abandoned. *)
 val move_identity_selection :

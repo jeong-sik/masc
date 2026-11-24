@@ -34,14 +34,15 @@ type decoder = {
   mutable skip_lf : bool;
   mutable data_rev : string list;
   mutable frame_id : string option;
+  mutable event_name : string option;
 }
 
 let create_decoder () = {
   line = Buffer.create 256; first_line = true; skip_lf = false;
-  data_rev = []; frame_id = None;
+  data_rev = []; frame_id = None; event_name = None;
 }
 
-let consume_line t =
+let consume_line ~emit t =
   let line = Buffer.contents t.line in
   Buffer.clear t.line;
   let line =
@@ -52,9 +53,10 @@ let consume_line t =
   if String.equal line "" then (
     let frame = match t.data_rev with
       | [] -> None
-      | fields -> Some {id = t.frame_id; data = String.concat "\n" (List.rev fields)} in
+      | fields -> Some (emit t.event_name {id = t.frame_id; data = String.concat "\n" (List.rev fields)}) in
     t.data_rev <- [];
     t.frame_id <- None;
+    t.event_name <- None;
     frame)
   else (
     (match data_payload_line line with
@@ -67,20 +69,24 @@ let consume_line t =
                then colon + 2 else colon + 1 in
              String.sub line 0 colon, String.sub line start (String.length line - start) in
        if String.equal field "id" && not (String.contains value '\000')
-       then t.frame_id <- Some value);
+       then t.frame_id <- Some value
+       else if String.equal field "event" then t.event_name <- Some value);
     None)
 
-let feed t chunk =
+let feed_with ~emit t chunk =
   let completed = ref [] in
   String.iter (fun c ->
     if t.skip_lf && c = '\n' then t.skip_lf <- false
     else (
       t.skip_lf <- false;
       if c = '\r' || c = '\n' then (
-        Option.iter (fun frame -> completed := frame :: !completed) (consume_line t);
+        Option.iter (fun frame -> completed := frame :: !completed) (consume_line ~emit t);
         t.skip_lf <- c = '\r')
       else Buffer.add_char t.line c)) chunk;
   List.rev !completed
+
+let feed t chunk = feed_with ~emit:(fun _ frame -> frame) t chunk
+let feed_named t chunk = feed_with ~emit:(fun name frame -> name, frame) t chunk
 
 let data_payloads_of_stream stream =
   feed (create_decoder ()) stream |> List.map (fun frame -> frame.data)

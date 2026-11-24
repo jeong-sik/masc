@@ -231,6 +231,7 @@ type http_reply =
   | Reply_runtime_config_raw of
       (Wire_runtime.runtime_config_raw_meta, http_error) result
   | Reply_setup_inventory of (Wire_runtime.setup_inventory, http_error) result
+  | Reply_setup_login_interrupted of { login_id : string; error : http_error }
   | Reply_setup_login_receipt of
       (Wire_runtime.setup_login_receipt, http_error) result
   | Reply_runtime_assignment of {
@@ -424,6 +425,8 @@ type http_reply =
     }
   | Reply_oauth_attempt_status of {
       keeper : string;
+      provider : string;
+      attempt_id : string;
       result : (Wire_keeper_context.oauth_attempt_status, http_error) result;
     }
   | Reply_oauth_login of {

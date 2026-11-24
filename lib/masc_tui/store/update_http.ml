@@ -99,6 +99,18 @@ let handle_workspace_mismatch ~now ~expected ~observed ~message (m : Model.t) =
       in
       (next, cmds)
 
+let close_setup_login_input ~login_id (m : Model.t) =
+  let form = Nav.Setup_login_input_form { login_id } in
+  match m.inline_modal with
+  | Some modal when Nav.equal_inline_action_kind modal.kind form ->
+      let nav =
+        if Option.equal Nav.equal_overlay m.nav.overlay (Some (Nav.Inline_action form))
+        then { m.nav with overlay = m.nav.return_overlay; return_overlay = None }
+        else m.nav
+      in
+      { m with nav; inline_modal = None }
+  | Some _ | None -> m
+
 let record_http_incident ~now ~source ~context err (m : Model.t) =
   match err with
   | Msg.Workspace_mismatch
@@ -2426,66 +2438,8 @@ let apply_http_reply ~now (m : Model.t) reply =
         else if is_failed_or_cancelled then Model.Toast_error
         else Model.Toast_info
       in
-      let close_login_input_modal =
-        is_terminal
-        &&
-        match m.inline_modal with
-        | Some { kind = Nav.Setup_login_input_form { login_id }; _ } ->
-            String.equal login_id receipt.login_id
-        | Some
-            {
-              kind =
-                ( Nav.Btw_query
-                | Nav.Gate_reject _
-                | Nav.Verification_reject _
-                | Nav.Harness_overrule _
-                | Nav.Task_cancel _
-                | Nav.Goal_drop _
-                | Nav.Schedule_form
-                | Nav.Connector_form
-                | Nav.Repo_add_form
-                | Nav.Board_new_post
-                | Nav.Board_comment _
-                | Nav.Github_token_form _
-                | Nav.Code_finder_form
-                | Nav.Code_search_form
-                | Nav.Runtime_lane_create
-                | Nav.Runtime_lane_edit _
-                | Nav.Runtime_lane_delete _
-                | Nav.Task_create_form
-                | Nav.Task_transition_form _
-                | Nav.Task_link_goal _
-                | Nav.Goal_upsert_form _
-                | Nav.Board_delete_post _
-                | Nav.Keeper_lifecycle_form _
-                | Nav.Keeper_purge_confirm _
-                | Nav.Addon_attach_form
-                | Nav.Addon_detach_confirm _
-                | Nav.Addon_invoke_action _ );
-              _;
-            }
-        | None -> false
-      in
-      let nav =
-        if not close_login_input_modal then m.nav
-        else
-          match m.nav.overlay with
-          | Some (Nav.Inline_action (Nav.Setup_login_input_form _)) ->
-              { m.nav with overlay = m.nav.return_overlay; return_overlay = None }
-          | Some
-              ( Nav.Inline_action _
-              | Nav.Palette
-              | Nav.Settings _
-              | Nav.Incidents
-              | Nav.Queue_context _
-              | Nav.Ask_answer
-              | Nav.Help
-              | Nav.System_gate _ )
-          | None ->
-              m.nav
-      in
-      let inline_modal =
-        if close_login_input_modal then None else m.inline_modal
+      let m =
+        if is_terminal then close_setup_login_input ~login_id:receipt.login_id m else m
       in
       let detail =
         match receipt.account with
@@ -2497,7 +2451,7 @@ let apply_http_reply ~now (m : Model.t) reply =
               receipt.login_id
       in
       let next =
-        { m with runtime; nav; inline_modal }
+        { m with runtime }
         |> Model.with_toast ~now ~level
              (Say.make ~ko:("로그인 상태: " ^ detail) ~en:("Login: " ^ detail))
       in
@@ -2510,6 +2464,24 @@ let apply_http_reply ~now (m : Model.t) reply =
         else []
       in
       (next, refresh_cmds)
+  | Msg.Reply_setup_login_interrupted { login_id; error } ->
+      let next = close_setup_login_input ~login_id m in
+      let owns_receipt =
+        Option.fold ~none:false
+          ~some:(fun (receipt : Wire_runtime.setup_login_receipt) ->
+            String.equal receipt.login_id login_id)
+          m.runtime.setup_login_receipt
+      in
+      if not owns_receipt && next == m then (m, [])
+      else
+        let runtime = Runtime_store.mark_setup_login_input_ready false next.runtime in
+        let context = Say.make ~ko:"계정 로그인 스트림 중단" ~en:"Account login stream interrupted" in
+        let next, cmds =
+          record_http_incident ~now ~source:(Health.Source_runtime "setup_login")
+            ~context error { next with runtime }
+        in
+        ( Model.with_toast ~now ~level:Model.Toast_error
+            (Say.concat ~sep:": " [context; Msg.http_error_summary error]) next, cmds )
   | Msg.Reply_setup_login_receipt (Error err) ->
       let next, cmds =
         record_http_incident ~now ~source:(Health.Source_runtime "setup_login")
@@ -4750,65 +4722,64 @@ let apply_http_reply ~now (m : Model.t) reply =
               { m with keeper_context = { m.keeper_context with by_keeper } })
             ~source:Health.Source_client_http ~ko:"OAuth 도구 조회"
             ~en:"OAuth attached tools fetch" err)
-  | Msg.Reply_oauth_attempt_status { keeper; result = Ok status } ->
-      let keeper_context =
-        Keeper_context_store.set_oauth_attempt_status ~keeper (Some status)
-          m.keeper_context
-      in
-      let m1 = { m with keeper_context } in
-      let kind_lc = String.lowercase_ascii (String.trim status.kind) in
-      let is_completed =
-        String.equal kind_lc "completed" || String.equal kind_lc "complete"
-      in
-      let next =
-        Model.with_toast ~now ~level:Model.Toast_info
-          (Say.make
-             ~ko:("OAuth 상태: " ^ status.kind)
-             ~en:("OAuth status: " ^ status.kind))
-          m1
-      in
-      let refresh_cmds =
-        if is_completed then
-          [
-            Cmd.Http_get
-              { epoch = m.epoch; req = Cmd.Get_oauth_attached_tools { keeper } };
-          ]
-        else []
-      in
-      (next, refresh_cmds)
-  | Msg.Reply_oauth_attempt_status { keeper; result = Error err } -> (
-      match err with
-      | Msg.Http_error { status = 401 | 403; _ } ->
-          let keeper_context =
-            m.keeper_context
-            |> Keeper_context_store.set_oauth_pending_login ~keeper None
-            |> Keeper_context_store.mark_oauth_denied ~at:now ~keeper
-                 ~reason:(Msg.http_error_detail err)
-          in
-          ( Model.with_toast ~now ~level:Model.Toast_warning
-              (Say.make ~ko:"OAuth 상태 확인 권한(CanAdmin) 필요"
-                 ~en:"OAuth status requires CanAdmin auth")
-              { m with keeper_context }
-          , [] )
-      | Msg.Http_error { status = 404 | 410; _ } ->
-          let keeper_context =
-            Keeper_context_store.set_oauth_pending_login ~keeper None
-              m.keeper_context
-          in
-          err_reply
-            ~fail:(fun m0 -> { m0 with keeper_context })
-            ~source:Health.Source_client_http ~ko:"OAuth 로그인 상태 확인"
-            ~en:"OAuth attempt status" err
-      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
-      | Msg.Decode_error _ ->
-          let keeper_context =
-            Keeper_context_store.record_oauth_poll_error ~keeper
-              m.keeper_context
-          in
-          err_reply
-            ~fail:(fun m0 -> { m0 with keeper_context })
-            ~source:Health.Source_client_http ~ko:"OAuth 로그인 상태 확인"
-            ~en:"OAuth attempt status" err)
+  | Msg.Reply_oauth_attempt_status { keeper; provider; attempt_id; result } ->
+      let ks = Keeper_context_store.get_keeper ~keeper m.keeper_context in
+      (match ks.oauth_pending_login with
+      | Some (Wire_keeper_context.Oauth_login_exchange ex)
+        when String.equal ex.provider provider && String.equal ex.attempt_id attempt_id ->
+          let stop = Keeper_context_store.set_oauth_pending_login ~keeper None in
+          (match result with
+          | Ok status ->
+              let settled = Keeper_context_store.is_oauth_attempt_settled status.kind in
+              let changed =
+                not (Option.fold ~none:false
+                       ~some:(fun (prev : Wire_keeper_context.oauth_attempt_status) ->
+                         String.equal prev.kind status.kind)
+                       ks.oauth_attempt_status)
+              in
+              let keeper_context =
+                Keeper_context_store.set_oauth_attempt_status ~keeper (Some status)
+                  m.keeper_context
+              in
+              let next = { m with keeper_context = if settled then stop keeper_context else keeper_context } in
+              let next =
+                if not changed then next
+                else Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make ~ko:("OAuth 상태: " ^ status.kind) ~en:("OAuth status: " ^ status.kind)) next
+              in
+              let cmds =
+                match String.lowercase_ascii (String.trim status.kind) with
+                | "completed" | "complete" ->
+                    [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_oauth_attached_tools { keeper } } ]
+                | _ -> []
+              in
+              (next, cmds)
+          | Error (Msg.Http_error { status = 401 | 403; _ } as err) ->
+              let keeper_context =
+                stop m.keeper_context
+                |> Keeper_context_store.mark_oauth_denied ~at:now ~keeper
+                     ~reason:(Msg.http_error_detail err)
+              in
+              ( Model.with_toast ~now ~level:Model.Toast_warning
+                  (Say.make ~ko:"OAuth 상태 확인 권한(CanAdmin) 필요"
+                     ~en:"OAuth status requires CanAdmin auth")
+                  { m with keeper_context }
+              , [] )
+          | Error ((Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+                  | Msg.Decode_error _) as err) ->
+              let retry = Msg.http_error_retryable err in
+              let keeper_context =
+                if retry then Keeper_context_store.record_oauth_poll_error ~keeper m.keeper_context
+                else stop m.keeper_context
+              in
+              if retry && ks.oauth_poll_consecutive_errors > 0 then ({ m with keeper_context }, [])
+              else
+                let next, cmds = err_reply ~fail:(fun m0 -> { m0 with keeper_context })
+                  ~source:Health.Source_client_http ~ko:"OAuth 로그인 상태 확인"
+                  ~en:"OAuth attempt status" err in
+                (Model.with_toast ~now ~level:Model.Toast_warning (Msg.http_error_summary err) next, cmds))
+      | Some (Wire_keeper_context.Oauth_login_exchange _ | Oauth_login_direct _) | None ->
+          (m, []))
   | Msg.Reply_oauth_mutation { keeper; label; result = Ok () } ->
       ( Model.with_toast ~now ~level:Model.Toast_success label m
       , [

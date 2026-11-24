@@ -989,15 +989,19 @@ let finish_github_login ~keeper ~error t =
       })
     t
 
-let clear_running_github_logins t =
+let clear_epoch_logins t =
   {
     t with
     by_keeper =
       String_map.map
         (fun ks ->
-          if ks.github_login.running then
-            { ks with github_login = { ks.github_login with running = false } }
-          else ks)
+          { ks with
+            oauth_pending_login = None;
+            oauth_attempt_status = None;
+            oauth_last_poll_ns = None;
+            oauth_poll_started_ns = None;
+            oauth_poll_consecutive_errors = 0;
+            github_login = { ks.github_login with running = false } })
         t.by_keeper;
   }
 

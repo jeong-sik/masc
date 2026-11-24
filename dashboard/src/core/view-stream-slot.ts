@@ -69,9 +69,23 @@ function startSlotConnection(slot: ActiveSlot): void {
   slot.generation = nextGen
   const controller = new AbortController()
   slot.controller = controller
-  const maybeCleanup = slot.connect(controller.signal, nextGen)
-  if (typeof maybeCleanup === 'function') {
-    slot.cleanup = maybeCleanup
+  try {
+    const maybeCleanup = slot.connect(controller.signal, nextGen)
+    if (typeof maybeCleanup === 'function') {
+      slot.cleanup = maybeCleanup
+    }
+  } catch (err) {
+    slot.controller = null
+    slot.cleanup = null
+    if (!controller.signal.aborted) {
+      controller.abort('view_stream_connect_failed')
+    }
+    if (activeSlot === slot) {
+      activeSlot = null
+      activeKeySignal.value = null
+      pausedSignal.value = false
+    }
+    throw err
   }
 }
 

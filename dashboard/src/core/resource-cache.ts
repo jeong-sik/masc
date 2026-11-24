@@ -178,7 +178,24 @@ export class ResourceCache {
 
     const run = (async (): Promise<Observed<T>> => {
       try {
-        const result = await loader(controller.signal)
+        let result: Result<T | null, ApiError>
+        try {
+          result = await loader(controller.signal)
+        } catch (cause) {
+          if (!isEpochCurrent(startEpoch) || controller.signal.aborted) {
+            return entry.state.peek()
+          }
+          const next = observedFailed<T>({
+            kind: 'network',
+            status: null,
+            code: 'loader_threw',
+            message: cause instanceof Error ? cause.message : String(cause),
+            retryable: true,
+            cause,
+          })
+          entry.state.value = next
+          return next
+        }
         if (!isEpochCurrent(startEpoch) || controller.signal.aborted) {
           return entry.state.peek()
         }

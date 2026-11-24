@@ -127,22 +127,44 @@ export function parseSseBlock(block: string): ObserverFrame | null {
   return { id, event, data, raw }
 }
 
+function addTopic(out: Set<string>, candidate: unknown): void {
+  if (typeof candidate === 'string') {
+    const trimmed = candidate.trim()
+    if (trimmed.length > 0 && trimmed !== 'message') out.add(trimmed)
+  }
+}
+
+export function extractObserverTopics(frame: ObserverFrame): readonly string[] {
+  const topics = new Set<string>()
+  addTopic(topics, frame.event)
+  if (typeof frame.data === 'object' && frame.data !== null) {
+    const rec = frame.data as Record<string, unknown>
+    addTopic(topics, rec.type)
+    addTopic(topics, rec.event_type)
+    addTopic(topics, rec.method)
+    if (typeof rec.params === 'object' && rec.params !== null) {
+      const params = rec.params as Record<string, unknown>
+      addTopic(topics, params.type)
+      addTopic(topics, params.event_type)
+      addTopic(topics, params.event)
+    }
+  }
+  return [...topics]
+}
+
 function dispatchFrame(frame: ObserverFrame): void {
   if (frame.id) lastEventIdSignal.value = frame.id
 
-  const payloadType =
-    typeof frame.data === 'object' && frame.data !== null && 'type' in frame.data
-      ? String((frame.data as Record<string, unknown>).type)
-      : frame.event
+  const topics = extractObserverTopics(frame)
 
-  if (frame.event === 'observer_resync_required' || payloadType === 'observer_resync_required') {
+  if (topics.includes('observer_resync_required')) {
     markStreamGap('observer_resync_required')
     return
   }
 
   // Invalidate matching cache topics lazily (no refetch storm!)
-  if (payloadType) {
-    resourceCache.invalidateTopic(payloadType)
+  for (const topic of topics) {
+    resourceCache.invalidateTopic(topic)
   }
 
   for (const listener of [...frameListeners]) {

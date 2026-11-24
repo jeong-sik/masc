@@ -249,6 +249,7 @@ interface AuthSessionWirePayload {
   readonly user_id?: unknown
   readonly expires_at_ms?: unknown
   readonly csrf_token?: unknown
+  readonly workspace_id?: unknown
 }
 
 interface AuthWhoamiWirePayload {
@@ -258,6 +259,7 @@ interface AuthWhoamiWirePayload {
   }
   readonly role?: unknown
   readonly binding?: unknown
+  readonly workspace_id?: unknown
 }
 
 function nonEmptyString(value: unknown): string | null {
@@ -356,7 +358,13 @@ async function readMultiAccountSession(
   }
 
   activeCsrfToken = csrfToken
-  const workspaceId = activeWorkspaceId.peek()
+  const prevWorkspaceId = activeWorkspaceId.peek()
+  const serverWorkspaceId = nonEmptyString(whoBody.workspace_id) ?? nonEmptyString(sessionBody.workspace_id)
+  const workspaceId = serverWorkspaceId ?? prevWorkspaceId
+  if (workspaceId !== prevWorkspaceId) {
+    activeWorkspaceId.value = workspaceId
+    bumpSessionEpoch()
+  }
   writeAccountMarker(userId)
   return {
     kind: 'multi_account_signed_in',
@@ -542,7 +550,8 @@ export function installAuthLifecycleGuards(
     const cur = authSession.peek()
     if (cur.kind !== 'multi_account_signed_in') return
     void readMultiAccountSession(fetchImpl, cur.authMethods, cur.accountId).then((next) => {
-      if (next.kind === 'account_changed') {
+      if (next.kind === 'account_changed' || next.kind === 'multi_account_signed_out') {
+        activeCsrfToken = null
         bumpSessionEpoch()
         authSession.value = next
       } else if (next.kind === 'multi_account_signed_in') {

@@ -293,15 +293,17 @@ export async function apiRequest<T>(opts: ApiRequestOptions<T>): Promise<Result<
   }
 
   try {
+    const prevCsrf = getActiveCsrfToken()
     const first = await executeOnce()
     if (
       !first.ok
-      && (first.error.kind === 'csrf_rejected' || (first.error.kind === 'forbidden' && UNSAFE_METHODS.has(method)))
+      && first.error.kind === 'csrf_rejected'
+      && UNSAFE_METHODS.has(method)
       && authSession.peek().kind === 'multi_account_signed_in'
       && isEpochCurrent(startEpoch)
     ) {
       const refreshed = await refreshMultiAccountCsrf(fetchImpl)
-      if (refreshed && isEpochCurrent(startEpoch)) {
+      if (refreshed && refreshed !== prevCsrf && isEpochCurrent(startEpoch)) {
         return await executeOnce()
       }
     }

@@ -111,4 +111,20 @@ describe('core/resource-cache & Observed<T>', () => {
     )
     expect(nfRes.kind).toBe('absent')
   })
+
+  it('catches loader exceptions cleanly into Observed failed without wedging in loading', async () => {
+    const failed = await cache.fetch('exploding', async () => {
+      throw new Error('unexpected json parse boom')
+    })
+    expect(failed.kind).toBe('failed')
+    if (failed.kind === 'failed') {
+      expect(failed.error.code).toBe('loader_threw')
+      expect(failed.error.message).toContain('unexpected json parse boom')
+      expect(failed.retryable).toBe(true)
+    }
+
+    // Subsequent fetch is NOT wedged by a stale inFlight promise
+    const recovered = await cache.fetch('exploding', async () => ok({ ok: true }))
+    expect(recovered.kind).toBe('value')
+  })
 })

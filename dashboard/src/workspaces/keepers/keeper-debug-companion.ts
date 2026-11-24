@@ -7,6 +7,7 @@
  * 4. `Config Diff`: Quick Keeper CAS schema dry-run diff
  */
 
+import type { WorkspaceInspectPayload } from '../types'
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
 import type uPlot from 'uplot'
@@ -44,7 +45,6 @@ import type {
   ProviderInputData,
   RawTraceTurnItem,
   TurnRecordItem,
-  WorkspaceInspectPayload,
 } from './types'
 
 export const COMPANION_DESKTOP_MIN_WIDTH = 1280

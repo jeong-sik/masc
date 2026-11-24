@@ -75,6 +75,14 @@ export const KEEPER_ENTITY_TABS = [
 
 export type KeeperEntityTab = (typeof KEEPER_ENTITY_TABS)[number]
 
+export const KEEPER_ENTITY_TAB_LABELS: Readonly<Record<KeeperEntityTab, string>> = Object.freeze({
+  chat: 'Chat',
+  memory: 'Memory',
+  'portrait-candle': 'Portrait & Candle',
+  'work-sandbox': 'Work & Sandbox',
+  config: 'Config',
+})
+
 export const ACCOUNT_SUBTABS = [
   'profile',
   'pats',
@@ -318,8 +326,8 @@ function normalizeRawInput(raw: string): { readonly pathname: string; readonly q
   return { pathname, query }
 }
 
-function isKeeperEntityTab(value: string | undefined): value is KeeperEntityTab {
-  return value !== undefined && (KEEPER_ENTITY_TABS as readonly string[]).includes(value)
+export function parseKeeperEntityTab(value: string | undefined): KeeperEntityTab {
+  return KEEPER_ENTITY_TABS.find((tab) => tab === value) ?? 'chat'
 }
 
 export function resolveRoute(rawInput: string): ResolvedRoute {
@@ -386,8 +394,7 @@ export function resolveRoute(rawInput: string): ResolvedRoute {
       }
     }
     const entityId = decodeURIComponent(segments[1])
-    const requestedTab = segments[2]?.toLowerCase()
-    const entityTab: KeeperEntityTab = isKeeperEntityTab(requestedTab) ? requestedTab : 'chat'
+    const entityTab = parseKeeperEntityTab(segments[2]?.toLowerCase())
     return {
       path: `/keepers/${encodeURIComponent(entityId)}/${entityTab}`,
       workspace: 'keepers',

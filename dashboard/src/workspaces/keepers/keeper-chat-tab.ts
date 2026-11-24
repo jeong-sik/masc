@@ -10,6 +10,7 @@
  * - Opt-In Right Debug Companion Pane (`⌘.`, `380px`, default closed `<1280px`).
  */
 
+import type { WorkspaceInspectPayload } from '../types'
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
 import { formatObserved } from '../../core/resource-cache'
@@ -36,7 +37,6 @@ import type {
   ChatTranscriptEntry,
   KeeperRosterItem,
   QueuedChatOperation,
-  WorkspaceInspectPayload,
 } from './types'
 
 export interface KeeperChatTabProps {

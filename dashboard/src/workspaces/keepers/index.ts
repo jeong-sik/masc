@@ -15,6 +15,8 @@ import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
 import { currentSessionEpoch } from '../../core/auth'
 import { markViewSynced, subscribeObserverFrames } from '../../core/observer'
 import { observedLoading, type Observed } from '../../core/resource-cache'
+import { parseKeeperEntityTab, type KeeperEntityTab } from '../../routes/router'
+import type { WorkspaceViewProps } from '../types'
 import { loadKeeperRoster } from './keepers-api'
 import { KeeperRoster } from './keeper-roster'
 import { KeeperHeader } from './keeper-header'
@@ -23,16 +25,8 @@ import { KeeperMemoryTab } from './keeper-memory-tab'
 import { KeeperPortraitCandleTab } from './keeper-portrait-candle-tab'
 import { KeeperWorkSandboxTab } from './keeper-work-sandbox-tab'
 import { KeeperConfigTab } from './keeper-config-tab'
-import {
-  parseKeeperEntityTab,
-  type KeeperEntityTab,
-  type KeeperRosterItem,
-  type WorkspaceInspectPayload,
-  type WorkspaceViewProps,
-} from './types'
+import type { KeeperRosterItem } from './types'
 import './keepers.css'
-
-export type { WorkspaceInspectPayload, WorkspaceViewProps }
 
 export function KeepersWorkspace(props: WorkspaceViewProps) {
   const [roster, setRoster] = useState<Observed<readonly KeeperRosterItem[]>>(() => observedLoading())

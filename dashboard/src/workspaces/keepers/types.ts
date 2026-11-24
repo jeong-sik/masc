@@ -1,53 +1,8 @@
 /**
- * Keepers Workspace — shared prop contract, entity tabs & authoritative wire types (#36).
+ * Keepers Workspace wire types (#36).
  */
 
-import type { ComponentChildren } from 'preact'
 import type { EQUIPMENT_IDS, KeeperEquipment } from '../../lib/keeper-portrait'
-
-export interface WorkspaceInspectPayload {
-  title: string
-  subtitle?: string
-  kind: string
-  data?: unknown
-  render?: () => ComponentChildren
-}
-
-export interface WorkspaceViewProps {
-  subroute: string
-  entityId?: string
-  entityTab?: string
-  onNavigate: (path: string) => void
-  onInspect: (payload: WorkspaceInspectPayload) => void
-}
-
-export type KeeperEntityTab =
-  | 'chat'
-  | 'memory'
-  | 'portrait-candle'
-  | 'work-sandbox'
-  | 'config'
-
-export const KEEPER_ENTITY_TABS: readonly { readonly id: KeeperEntityTab; readonly label: string }[] = [
-  { id: 'chat', label: 'Chat' },
-  { id: 'memory', label: 'Memory' },
-  { id: 'portrait-candle', label: 'Portrait & Candle' },
-  { id: 'work-sandbox', label: 'Work & Sandbox' },
-  { id: 'config', label: 'Config' },
-]
-
-export function parseKeeperEntityTab(raw: string | undefined): KeeperEntityTab {
-  switch (raw) {
-    case 'chat':
-    case 'memory':
-    case 'portrait-candle':
-    case 'work-sandbox':
-    case 'config':
-      return raw
-    default:
-      return 'chat'
-  }
-}
 
 export type RosterMode = 'companies' | 'attention' | 'wall24h'
 

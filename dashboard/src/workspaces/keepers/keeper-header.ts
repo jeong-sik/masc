@@ -19,10 +19,11 @@ import {
   resumeKeeperAction,
 } from './keepers-api'
 import {
+  KEEPER_ENTITY_TAB_LABELS,
   KEEPER_ENTITY_TABS,
   type KeeperEntityTab,
-  type KeeperRosterItem,
-} from './types'
+} from '../../routes/router'
+import type { KeeperRosterItem } from './types'
 
 export interface KeeperHeaderProps {
   readonly keeper: KeeperRosterItem
@@ -187,14 +188,14 @@ export function KeeperHeader(props: KeeperHeaderProps) {
       <nav class="kp-tabs" role="tablist" aria-label="Keeper 상세 탭">
         ${KEEPER_ENTITY_TABS.map((tab) => html`
           <button
-            key=${tab.id}
+            key=${tab}
             type="button"
             role="tab"
             class="kp-tab"
-            aria-selected=${props.activeTab === tab.id ? 'true' : 'false'}
-            onClick=${() => props.onSelectTab(tab.id)}
+            aria-selected=${props.activeTab === tab ? 'true' : 'false'}
+            onClick=${() => props.onSelectTab(tab)}
           >
-            ${tab.label}
+            ${KEEPER_ENTITY_TAB_LABELS[tab]}
           </button>
         `)}
       </nav>

@@ -28,6 +28,7 @@ import {
 import { currentSessionEpoch } from '../../core/auth'
 import { KeeperBadge } from '../../components/keeper-badge'
 import { UPlotChart, type UPlotSeriesSpec } from '../../components/primitives/uplot-chart'
+import type { WorkspaceViewProps } from '../types'
 import { loadPulseBundle, type PulseLoadBundle } from './pulse-data'
 import {
   buildAttentionQueue,
@@ -45,12 +46,8 @@ import type {
   PulseAttentionItem,
   PulseGoalSummary,
   PulseKeeperRow,
-  WorkspaceInspectPayload,
-  WorkspaceViewProps,
 } from './types'
 import './pulse.css'
-
-export type { WorkspaceInspectPayload, WorkspaceViewProps }
 
 const SPARKLINE_SERIES: readonly UPlotSeriesSpec[] = [
   {

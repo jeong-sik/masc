@@ -1,26 +1,9 @@
 /**
- * Pulse Workspace — shared prop contract & wire models.
+ * Pulse Workspace wire models.
  */
 
-import type { ComponentChildren } from 'preact'
 import type { Observed } from '../../core/resource-cache'
 import type uPlot from 'uplot'
-
-export interface WorkspaceInspectPayload {
-  title: string
-  subtitle?: string
-  kind: string
-  data?: unknown
-  render?: () => ComponentChildren
-}
-
-export interface WorkspaceViewProps {
-  subroute: string
-  entityId?: string
-  entityTab?: string
-  onNavigate: (path: string) => void
-  onInspect: (payload: WorkspaceInspectPayload) => void
-}
 
 export interface PulseTurnSlot {
   readonly starts_at: number

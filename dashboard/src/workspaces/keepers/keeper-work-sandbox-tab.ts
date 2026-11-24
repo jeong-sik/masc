@@ -7,6 +7,7 @@
  * - Keeper sandbox status (`GET /api/v1/infra/sandboxes/:k`, V2Envelope)
  */
 
+import type { WorkspaceInspectPayload } from '../types'
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
 import { DataTable, type DataTableColumn } from '../../components/primitives/data-table'
@@ -25,7 +26,6 @@ import type {
   KeeperToolCallEntry,
   KeeperToolCallsData,
   KeeperToolStatsData,
-  WorkspaceInspectPayload,
 } from './types'
 
 export interface KeeperWorkSandboxTabProps {

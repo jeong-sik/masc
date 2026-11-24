@@ -92,7 +92,7 @@ function renderDiffLines(patchText: string, maxLines = 40) {
               : { display: 'block', color: 'var(--fg-2)' }
         return html`<span key=${i} style=${style}>${line}</span>`
       })}
-      ${truncated && html`<span style=${{ display: 'block', color: 'var(--fg-3)', marginTop: '4px' }}>… (${allLines.length - maxLines}줄 생략 · [⤢] 전체 보기 클릭)</span>`}
+      ${truncated && html`<span style=${{ display: 'block', color: 'var(--fg-3)', marginTop: 'var(--sp-1)' }}>… (${allLines.length - maxLines}줄 생략 · [⤢] 전체 보기 클릭)</span>`}
     </pre>
   `
 }
@@ -229,7 +229,7 @@ export function ReposTab(props: WorkspaceViewProps) {
             value=${newName}
             onInput=${(e: Event) => setNewName((e.target as HTMLInputElement).value)}
             required
-            style=${{ padding: '6px 8px', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+            style=${{ padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
           />
           <input
             type="text"
@@ -237,7 +237,7 @@ export function ReposTab(props: WorkspaceViewProps) {
             value=${newUrl}
             onInput=${(e: Event) => setNewUrl((e.target as HTMLInputElement).value)}
             required
-            style=${{ padding: '6px 8px', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+            style=${{ padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
           />
           <div style=${{ display: 'flex', gap: 'var(--sp-2)' }}>
             <input
@@ -245,7 +245,7 @@ export function ReposTab(props: WorkspaceViewProps) {
               placeholder="기본 브랜치 (main)"
               value=${newBranch}
               onInput=${(e: Event) => setNewBranch((e.target as HTMLInputElement).value)}
-              style=${{ flex: 1, minWidth: 0, padding: '6px 8px', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+              style=${{ flex: 1, minWidth: 0, padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
             />
             <button type="submit" class="btn-primary" disabled=${busy === 'add'}>등록</button>
           </div>
@@ -266,7 +266,7 @@ export function ReposTab(props: WorkspaceViewProps) {
                   background: isSel ? 'var(--bg-4)' : 'var(--bg-2)',
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: '4px',
+                  gap: 'var(--sp-1)',
                 }}
               >
                 <div style=${{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--sp-2)' }}>
@@ -280,7 +280,7 @@ export function ReposTab(props: WorkspaceViewProps) {
                   <button
                     type="button"
                     class="btn-ghost"
-                    style=${{ padding: '2px 6px', fontSize: 'var(--fs-11)' }}
+                    style=${{ padding: 'var(--sp-0) var(--sp-1)', fontSize: 'var(--fs-11)' }}
                     disabled=${busy === `sync:${repo.id}`}
                     onClick=${() => void handleSyncRepo(repo.id)}
                   >
@@ -336,7 +336,7 @@ export function ReposTab(props: WorkspaceViewProps) {
                         <button
                           type="button"
                           class="btn-ghost"
-                          style=${{ padding: '2px 8px', fontSize: 'var(--fs-11)' }}
+                          style=${{ padding: 'var(--sp-0) var(--sp-2)', fontSize: 'var(--fs-11)' }}
                           onClick=${() => handleInspectDiff(ch)}
                         >
                           [⤢] 전체 Diff

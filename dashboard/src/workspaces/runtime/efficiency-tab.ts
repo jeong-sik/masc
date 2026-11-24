@@ -140,7 +140,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
   const historyKey = `runtime:provider-usage-history:${providerDays}`
   const toolSeriesKey = `runtime:tool-series-snap:${win}`
   const exactRunsKey = 'runtime:exact-runs-snap'
-  const costsKey = `runtime:keeper-costs:${win}`
+  const costsKey = 'runtime:keeper-costs:24h'
   const effKey = 'runtime:keeper-efficiency'
 
   const modelsObs = resourceCache.observe<ModelsMetricsPayload>(modelsKey).value
@@ -186,9 +186,10 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
       (signal) => apiGet<ExactLaneRunsPayload>('/api/v1/dashboard/exact-lane-runs?limit=50', { signal }),
       { ttlMs: 20_000, topics: ['exact_lane_runs'], reason },
     )
+    // Server enforces keeper_costs_max_window_minutes = 1440 (rejects >1440 with HTTP 400)
     void resourceCache.fetch<KeeperCostsPayload>(
       costsKey,
-      (signal) => apiGet<KeeperCostsPayload>(`/api/v1/dashboard/keeper-costs?window=${params.windowMinutes}`, { signal }),
+      (signal) => apiGet<KeeperCostsPayload>('/api/v1/dashboard/keeper-costs?window=1440', { signal }),
       { ttlMs: 20_000, topics: ['keeper_costs', 'model_metrics'], reason },
     )
     void resourceCache.fetch<KeeperEfficiencyPayload>(
@@ -488,7 +489,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
             class="mono"
             data-testid="efficiency-stream-badge"
             style=${{
-              padding: '3px 8px',
+              padding: 'var(--sp-0) var(--sp-2)',
               borderRadius: 'var(--radius-pill)',
               fontSize: 'var(--fs-11)',
               border: `1px solid ${streamStatus === 'live' ? 'var(--ok-border)' : 'var(--line-2)'}`,
@@ -575,7 +576,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
         <${UPlotChart}
           id="eff-panel-3-cooldown"
           title="3. 429 / Quota Cooldown Pressure"
-          subtitle=${html`<button type="button" class="btn-ghost" style=${{ padding: '2px 6px', fontSize: 'var(--fs-11)' }} onClick=${() => props.onNavigate('/runtime/quotas')}>
+          subtitle=${html`<button type="button" class="btn-ghost" style=${{ padding: 'var(--sp-0) var(--sp-1)', fontSize: 'var(--fs-11)' }} onClick=${() => props.onNavigate('/runtime/quotas')}>
             Quotas →
           </button>`}
           data=${cooldownChartData}
@@ -592,11 +593,11 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
           id="eff-panel-4-tools-exact"
           title="4. Tool Error Rate & Exact-Output Pass %"
           subtitle=${html`
-            <div style=${{ display: 'flex', gap: '4px' }}>
-              <button type="button" class="btn-ghost" style=${{ padding: '2px 6px', fontSize: 'var(--fs-11)' }} onClick=${() => props.onNavigate('/runtime/tools')}>
+            <div style=${{ display: 'flex', gap: 'var(--sp-1)' }}>
+              <button type="button" class="btn-ghost" style=${{ padding: 'var(--sp-0) var(--sp-1)', fontSize: 'var(--fs-11)' }} onClick=${() => props.onNavigate('/runtime/tools')}>
                 Tools →
               </button>
-              <button type="button" class="btn-ghost" style=${{ padding: '2px 6px', fontSize: 'var(--fs-11)' }} onClick=${() => props.onNavigate('/runtime/lanes')}>
+              <button type="button" class="btn-ghost" style=${{ padding: 'var(--sp-0) var(--sp-1)', fontSize: 'var(--fs-11)' }} onClick=${() => props.onNavigate('/runtime/lanes')}>
                 Lanes →
               </button>
             </div>
@@ -612,9 +613,9 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
       <!-- Virtualized Keeper Spend & Prompt Cache Outcomes Table -->
       <section style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', minWidth: 0 }}>
         <div class="wka-h">
-          <h3>Keeper별 비용 · 프롬프트 캐시 성과 (${joinedKeepers.length})</h3>
+          <h3>Keeper별 24h 비용 · 월간 프롬프트 캐시 성과 (${joinedKeepers.length})</h3>
           <span class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
-            미보고 구독 비용은 0이 아닌 "미보고"로 표기
+            비용은 24h 상한 창 · 미보고 구독 비용은 0이 아닌 "미보고"로 표기
           </span>
         </div>
         <${DataTable}

@@ -3,10 +3,12 @@ import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   activeViewStreamKey,
+  registerWorkspaceTargets,
   releaseAllViewStreams,
   resetAuthStateForTests,
   resetObserverStateForTests,
   resourceCache,
+  selectWorkspace,
 } from '../../core'
 import { InfraWorkspace, type WorkspaceInspectPayload } from './index'
 
@@ -211,12 +213,17 @@ describe('workspaces/infra', () => {
       category: 'turn',
     }))
 
+    registerWorkspaceTargets([{ id: 'ws-ops', label: 'Ops', baseUrl: '/ws/ops' }])
+    selectWorkspace('ws-ops')
+
+    const seenStreamUrls: string[] = []
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
-      if (url.startsWith('/api/v1/dashboard/logs/stream')) {
+      if (url.includes('/api/v1/dashboard/logs/stream')) {
+        seenStreamUrls.push(url)
         return pendingSseResponse()
       }
-      if (url.startsWith('/api/v1/dashboard/logs')) {
+      if (url.includes('/api/v1/dashboard/logs')) {
         return jsonResponse({ entries })
       }
       return jsonResponse({})
@@ -230,6 +237,7 @@ describe('workspaces/infra', () => {
     await flushUi(50)
 
     expect(activeViewStreamKey.value).toBe('infra-logs')
+    expect(seenStreamUrls).toEqual(['/ws/ops/api/v1/dashboard/logs/stream?limit=200'])
     // VirtualList MUST keep DOM strictly under 1,000 nodes even for 300+ log rows!
     expect(container.querySelectorAll('*').length).toBeLessThan(1000)
     const renderedLogRows = container.querySelectorAll('.v2-logs-row').length

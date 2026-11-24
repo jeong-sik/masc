@@ -50,7 +50,7 @@ export function AppearancePanel() {
       </div>
 
       <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 'var(--sp-3)' }}>
-        <div style=${{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+        <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
           <div style=${{ fontSize: 'var(--fs-12)', fontWeight: 600, color: 'var(--fg-2)' }}>색상 테마</div>
           <div class="ap-viewseg" role="group" aria-label="색상 테마 선택">
             <button
@@ -75,7 +75,7 @@ export function AppearancePanel() {
           </span>
         </div>
 
-        <div style=${{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+        <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
           <div style=${{ fontSize: 'var(--fs-12)', fontWeight: 600, color: 'var(--fg-2)' }}>고대비 모드 (APCA Lc ≥ 90)</div>
           <div class="ap-viewseg" role="group" aria-label="대비 모드 선택">
             <button

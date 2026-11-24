@@ -457,7 +457,7 @@ export function ToolsTab(_props: WorkspaceViewProps) {
         <span
           class="mono"
           style=${{
-            padding: '3px 8px',
+            padding: 'var(--sp-0) var(--sp-2)',
             borderRadius: 'var(--radius-pill)',
             fontSize: 'var(--fs-11)',
             border: `1px solid ${streamLive ? 'var(--ok-border)' : 'var(--line-2)'}`,
@@ -525,7 +525,7 @@ export function ToolsTab(_props: WorkspaceViewProps) {
             placeholder="도구 이름 / 설명 검색…"
             value=${search}
             onInput=${(e: Event) => setSearch((e.target as HTMLInputElement).value)}
-            style=${{ maxWidth: '320px', padding: '6px 10px', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+            style=${{ maxWidth: '320px', padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
           />
           <${DataTable}
             data=${toolRows}
@@ -612,16 +612,22 @@ export function ToolsTab(_props: WorkspaceViewProps) {
                 type="text"
                 placeholder="channel_id"
                 value=${bindTarget.channelId}
-                onInput=${(e: Event) => setBindTarget({ ...bindTarget, channelId: (e.target as HTMLInputElement).value })}
-                style=${{ padding: '5px 8px', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+                onInput=${(e: Event) => {
+                  const val = (e.target as HTMLInputElement).value
+                  setBindTarget((prev) => (prev ? { ...prev, channelId: val } : prev))
+                }}
+                style=${{ padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
                 required
               />
               <input
                 type="text"
                 placeholder="keeper_name"
                 value=${bindTarget.keeperName}
-                onInput=${(e: Event) => setBindTarget({ ...bindTarget, keeperName: (e.target as HTMLInputElement).value })}
-                style=${{ padding: '5px 8px', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+                onInput=${(e: Event) => {
+                  const val = (e.target as HTMLInputElement).value
+                  setBindTarget((prev) => (prev ? { ...prev, keeperName: val } : prev))
+                }}
+                style=${{ padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
                 required
               />
               <button type="submit" class="btn-primary">바인딩</button>
@@ -642,13 +648,13 @@ export function ToolsTab(_props: WorkspaceViewProps) {
                         </span>
                       </div>
                       ${c.error && html`<div style=${{ fontSize: 'var(--fs-11)', color: 'var(--err-fg)' }}>${c.error}</div>`}
-                      <div style=${{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
                         ${(c.configured_bindings ?? []).length === 0
                           ? html`<span class="dtable-absent" style=${{ fontSize: 'var(--fs-12)' }}>바인딩 없음</span>`
                           : (c.configured_bindings ?? []).map((b) => html`
                               <div key=${`${b.channel_id}:${b.keeper_name}`} style=${{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 'var(--fs-12)' }}>
                                 <span class="mono">${b.channel_id} → ${b.keeper_name}</span>
-                                <button type="button" class="btn-ghost" style=${{ padding: '2px 6px', fontSize: 'var(--fs-11)' }} onClick=${() => void handleConnectorUnbind(c.connector_id, b.channel_id)}>
+                                <button type="button" class="btn-ghost" style=${{ padding: 'var(--sp-0) var(--sp-1)', fontSize: 'var(--fs-11)' }} onClick=${() => void handleConnectorUnbind(c.connector_id, b.channel_id)}>
                                   Unbind
                                 </button>
                               </div>
@@ -683,7 +689,7 @@ export function ToolsTab(_props: WorkspaceViewProps) {
               type="text"
               value=${oauthKeeper}
               onInput=${(e: Event) => setOauthKeeper((e.target as HTMLInputElement).value)}
-              style=${{ padding: '5px 8px', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+              style=${{ padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
             />
             <button type="submit" class="btn-primary" disabled=${oauthLoading}>조회</button>
           </form>

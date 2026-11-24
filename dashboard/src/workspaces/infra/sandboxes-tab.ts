@@ -170,7 +170,7 @@ export function SandboxesTab(props: WorkspaceViewProps) {
             <span
               class="mono"
               data-testid="sandbox-probe-state"
-              style=${{ ...probeStateStyle(data.probe_state.kind), padding: '3px 8px', borderRadius: 'var(--radius-pill)', fontSize: 'var(--fs-11)', fontWeight: 600 }}
+              style=${{ ...probeStateStyle(data.probe_state.kind), padding: 'var(--sp-0) var(--sp-2)', borderRadius: 'var(--radius-pill)', fontSize: 'var(--fs-11)', fontWeight: 600 }}
             >
               probe: ${data.probe_state.kind}
             </span>
@@ -237,7 +237,7 @@ export function SandboxesTab(props: WorkspaceViewProps) {
               <h3>Shim Parity 검증</h3>
               <span
                 class="mono"
-                style=${{ ...parityBadgeStyle(data.shim_parity.status), padding: '2px 8px', borderRadius: 'var(--radius-pill)', fontSize: 'var(--fs-11)', fontWeight: 600 }}
+                style=${{ ...parityBadgeStyle(data.shim_parity.status), padding: 'var(--sp-0) var(--sp-2)', borderRadius: 'var(--radius-pill)', fontSize: 'var(--fs-11)', fontWeight: 600 }}
               >
                 ${data.shim_parity.status}
               </span>
@@ -256,7 +256,7 @@ export function SandboxesTab(props: WorkspaceViewProps) {
           ${data.unobserved_reasons.length > 0 && html`
             <section class="ap-error sev-warn" data-testid="sandbox-unobserved-reasons">
               <strong>미관측 사유 (${data.unobserved_reasons.length}건):</strong>
-              <ul style=${{ margin: 'var(--sp-1) 0 0', paddingLeft: '18px', fontSize: 'var(--fs-12)' }}>
+              <ul style=${{ margin: 'var(--sp-1) 0 0', paddingLeft: 'var(--sp-4)', fontSize: 'var(--fs-12)' }}>
                 ${data.unobserved_reasons.map((item, idx) => html`
                   <li key=${`${item.scope}-${idx}`}>
                     <span class="mono">${item.scope}</span>: ${item.reason}

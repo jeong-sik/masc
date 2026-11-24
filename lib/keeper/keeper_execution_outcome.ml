@@ -1,6 +1,6 @@
 type lane =
   | Direct
-  | Autonomous of Keeper_world_observation.keeper_cycle_channel
+  | Autonomous of Keeper_world_observation.keeper_cycle_decision
 
 type terminal =
   | Completed
@@ -39,5 +39,5 @@ let is_autonomous t =
 let metrics_channel t =
   match t.lane with
   | Direct -> Keeper_world_observation.Reactive
-  | Autonomous channel -> channel
+  | Autonomous decision -> decision.channel
 ;;

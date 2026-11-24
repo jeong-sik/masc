@@ -37,10 +37,8 @@ type causes = {
   chat : int;
   own : int;
   unknown : int;
-      (** Seeded autonomous turns with no [Opened] line read: the line lies
-          before the turn-log tail the seed reads, or the turn failed before
-          it opened one. A recorded turn never lands here, so such a turn moves
-          from its cause to [unknown] when the server restarts. *)
+      (** A cycle failed before dispatch, or the retained decision and turn
+          records do not identify the cause. *)
 }
 
 type slot = {
@@ -94,9 +92,9 @@ val seed_from_decision_log :
     Seeding leaves a keeper that already has a pulse alone.
 
     A direct request counts as chat. An autonomous row uses the decision's
-    recorded channel. For the scheduled channel, a due schedule observation
-    or scheduled input on the matching [Opened] line distinguishes a requested
-    schedule from the Keeper's own turn. Missing evidence stays unknown.
+    recorded channel and reasons. Older scheduled-channel rows identify a
+    requested schedule through the due observation or the matching [Opened]
+    line. Missing evidence stays unknown.
 
     [known_since] is the window start when a row older than the window was
     read. Otherwise it is the oldest row read, of any event, since the logs

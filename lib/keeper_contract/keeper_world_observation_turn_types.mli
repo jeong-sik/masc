@@ -63,6 +63,7 @@ type turn_verdict =
   | Skip of { reasons : skip_reason * skip_reason list }
 
 val turn_reason_of_event_queue_trigger : event_queue_trigger -> turn_reason
+val turn_reason_to_string : turn_reason -> string
 val skip_reason_to_string : skip_reason -> string
 val channel_to_string : keeper_cycle_channel -> string
 

@@ -35,8 +35,7 @@ let append_decision_record
     ~(observation : Keeper_world_observation.world_observation)
     ~(latency_ms : int)
     ~(outcome : Keeper_decision_outcome.t)
-    ~channel
-    ~(execution_path : execution_path)
+    ~(lane : Keeper_execution_outcome.lane)
     ~(degraded_retry_applied : Keeper_error_classify.degraded_retry option)
     ~(degraded_retry_deferred : Keeper_error_classify.degraded_retry option)
     ?turn_mode
@@ -46,6 +45,18 @@ let append_decision_record
     ?terminal_reason
     ?executed_runtime_id
     () : unit =
+  let execution_path, channel, wake_reasons =
+    match lane with
+    | Keeper_execution_outcome.Direct -> Direct_turn, Keeper_world_observation.Reactive, `Null
+    | Keeper_execution_outcome.Autonomous decision ->
+      let reasons = match decision.verdict with
+        | Run { reasons = first, rest } ->
+          List.map (fun reason -> `String (Keeper_world_observation_turn_types.turn_reason_to_string reason))
+            (first :: rest)
+        | Skip _ -> []
+      in
+      Autonomous_cycle, decision.channel, `List reasons
+  in
   let now_ts = Time_compat.now () in
   let claimable_task_count = Keeper_world_observation.claimable_task_count observation in
   let trigger_signals = observed_triggers_of_observation observation in
@@ -159,10 +170,8 @@ let append_decision_record
           | None -> `Null );
         ("approval_queue_state", approval_queue_state);
         ("pending_approval_count", pending_approval_count);
-        ( "channel",
-          `String
-            (Keeper_world_observation.channel_to_string
-               channel) );
+        ("channel", `String (Keeper_world_observation.channel_to_string channel));
+        ("wake_reasons", wake_reasons);
         ("outcome", `String (Keeper_decision_outcome.to_string outcome));
         (* Which path wrote the row. Without it the two are indistinguishable
            once [fallback_reason] is gone, and a cross-path disagreement cannot

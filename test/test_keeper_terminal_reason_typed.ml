@@ -1240,6 +1240,13 @@ let () =
     (persisted.runtime.usage.total_turns = updated_meta.runtime.usage.total_turns)
 ;;
 
+let scheduled_lane =
+  Masc.Keeper_execution_outcome.Autonomous
+    { should_run = true; channel = Scheduled_autonomous;
+      verdict = Run { reasons = Scheduled_autonomous_turn, [] };
+      since_last_scheduled_autonomous = None }
+;;
+
 let () =
   with_temp_dir "keeper-success-clears-stale-provider-failure" @@ fun workspace_dir ->
   let keeper_name = "success-clears-stale-provider-failure" in
@@ -1601,7 +1608,7 @@ max-concurrent = 1
         ~config ~meta ~keeper_turn_id:allocated_turn_id ~observation ~latency_ms:3
         ~outcome:Keeper_decision_outcome.Success
         ~turn_ctx_cell:(Masc.Keeper_tool_call_log.create_turn_ctx_cell ())
-        ~channel:Masc.Keeper_world_observation.Scheduled_autonomous ~execution_path:Masc.Keeper_unified_metrics_decision.Autonomous_cycle
+        ~lane:scheduled_lane
         ~degraded_retry_applied:settlement.degraded_retry_applied
         ~degraded_retry_deferred:settlement.degraded_retry_deferred
         ~result:(Some result) ();
@@ -1609,6 +1616,8 @@ max-concurrent = 1
       let row = Fs_compat.load_file log_path |> String.split_on_char '\n'
         |> List.filter (fun row -> row <> "") |> List.rev |> List.hd
         |> Yojson.Safe.from_string in
+      check "decision persists the scheduler's own reasons"
+        (Yojson.Safe.Util.member "wake_reasons" row = `List [`String "scheduled_autonomous_turn"]);
       check "decision persists executed call count including failed calls"
         (Yojson.Safe.Util.member "tool_call_count" row = `Int 3);
       check "decision preserves repeated canonical tool names"
@@ -1640,7 +1649,8 @@ max-concurrent = 1
     Masc.Keeper_execution_outcome.create
       ~lane:
         (Masc.Keeper_execution_outcome.Autonomous
-           Masc.Keeper_world_observation.Reactive)
+           { should_run = true; channel = Reactive; verdict = Run { reasons = Mention_pending, [] };
+             since_last_scheduled_autonomous = None })
       (run_result ())
   in
   check
@@ -3316,7 +3326,7 @@ max-concurrent = 1
     Masc.Keeper_unified_metrics_decision.append_decision_record
       ~config ~meta ~keeper_turn_id:1 ~observation:world ~latency_ms:3 ~outcome
       ~turn_ctx_cell:(Masc.Keeper_tool_call_log.create_turn_ctx_cell ())
-      ~channel:Masc.Keeper_world_observation.Scheduled_autonomous ~execution_path:Masc.Keeper_unified_metrics_decision.Autonomous_cycle
+      ~lane:scheduled_lane
       ~degraded_retry_applied:None ~degraded_retry_deferred:None
       ~result ?executed_runtime_id ();
     Fs_compat.load_file log_path |> String.split_on_char '\n'

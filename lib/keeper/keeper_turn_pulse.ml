@@ -222,8 +222,8 @@ let turn_ref_of_row json =
 
 (* Both lanes write an [event = "turn"] row and both record into the live
    pulse, so both seed it. [cause] is [None] for a row that names no lane,
-   which is read past, and [Some None] for an autonomous turn the turn log
-   did not name, which counts as unknown. *)
+   which is read past, and [Some None] for a turn whose retained records
+   cannot name its cause, which counts as unknown. *)
 let sample_of_row ~schedule_of_turn json =
   let autonomous_cause () =
     let open Keeper_world_observation in
@@ -231,14 +231,21 @@ let sample_of_row ~schedule_of_turn json =
     | None -> None
     | Some Reactive -> Some Reacted
     | Some Scheduled_autonomous ->
-      let observation = Yojson.Safe.Util.member "observation" json in
-      let due_ready = match observation with
-        | `Assoc _ -> Json_util.get_int observation "scheduled_automation_due_ready_count"
-        | _ -> None in
-      (match due_ready with
-       | Some count when count > 0 -> Some Scheduled
-       | _ -> Option.bind (turn_ref_of_row json) schedule_of_turn
-              |> Option.map (fun schedule_due -> cause_of_channel Scheduled_autonomous ~schedule_due))
+      (match Yojson.Safe.Util.member "wake_reasons" json with
+       | `List (_ :: _ as reasons) when List.for_all (function `String _ -> true | _ -> false) reasons ->
+         let due = Keeper_world_observation_turn_types.turn_reason_to_string Scheduled_automation_due in
+         Some (cause_of_channel Scheduled_autonomous ~schedule_due:(List.mem (`String due) reasons))
+       | `Null ->
+         (* Earlier rows kept the observation and a separate turn receipt. *)
+         let observation = Yojson.Safe.Util.member "observation" json in
+         let due_ready = match observation with
+           | `Assoc _ -> Json_util.get_int observation "scheduled_automation_due_ready_count"
+           | _ -> None in
+         (match due_ready with
+          | Some count when count > 0 -> Some Scheduled
+          | _ -> Option.bind (turn_ref_of_row json) schedule_of_turn
+                 |> Option.map (fun due -> cause_of_channel Scheduled_autonomous ~schedule_due:due))
+       | _ -> None)
   in
   let cause =
     match Option.bind (Json_util.get_string json "execution_path")

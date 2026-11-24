@@ -363,12 +363,15 @@ let opened_line ~turn ~at stimuli =
   |> Yojson.Safe.to_string
 ;;
 
-let decision_line ~turn ~slot ~path ~channel =
+let decision_line ~turn ~slot ~path ~channel ?wake_reasons () =
   Yojson.Safe.to_string
-    (`Assoc [ "event", `String "turn"; "ts_unix", `Float (at_slot ~offset:60 slot);
+    (`Assoc ([ "event", `String "turn"; "ts_unix", `Float (at_slot ~offset:60 slot);
               "outcome", `String "success"; "execution_path", `String path;
               "trace_id", `String "trace-t"; "turn_id", `Int turn;
-              "channel", `String (Masc.Keeper_world_observation.channel_to_string channel) ])
+              "channel", `String (Masc.Keeper_world_observation.channel_to_string channel) ]
+            @ match wake_reasons with
+              | Some reasons -> [ "wake_reasons", `List (List.map (fun reason -> `String reason) reasons) ]
+              | None -> []))
 ;;
 
 let test_seed_names_causes_from_the_turn_log () =
@@ -390,19 +393,23 @@ let test_seed_names_causes_from_the_turn_log () =
       ];
     write_lines
       (log_path keeper_name)
-      [ decision_line ~turn:1 ~slot:90 ~path:"autonomous_cycle" ~channel:Scheduled_autonomous
-      ; decision_line ~turn:2 ~slot:90 ~path:"autonomous_cycle" ~channel:Reactive
-      ; decision_line ~turn:3 ~slot:90 ~path:"autonomous_cycle" ~channel:Scheduled_autonomous
-      ; decision_line ~turn:4 ~slot:90 ~path:"autonomous_cycle" ~channel:Scheduled_autonomous
-      ; decision_line ~turn:5 ~slot:90 ~path:"direct_turn" ~channel:Reactive
-      ; decision_line ~turn:6 ~slot:90 ~path:"autonomous_cycle" ~channel:Reactive
+      [ decision_line ~turn:1 ~slot:90 ~path:"autonomous_cycle" ~channel:Scheduled_autonomous ()
+      ; decision_line ~turn:2 ~slot:90 ~path:"autonomous_cycle" ~channel:Reactive ()
+      ; decision_line ~turn:3 ~slot:90 ~path:"autonomous_cycle" ~channel:Scheduled_autonomous ()
+      ; decision_line ~turn:4 ~slot:90 ~path:"autonomous_cycle" ~channel:Scheduled_autonomous ()
+      ; decision_line ~turn:5 ~slot:90 ~path:"direct_turn" ~channel:Reactive ()
+      ; decision_line ~turn:6 ~slot:90 ~path:"autonomous_cycle" ~channel:Reactive ()
+      ; decision_line ~turn:7 ~slot:90 ~path:"autonomous_cycle" ~channel:Scheduled_autonomous
+          ~wake_reasons:["scheduled_autonomous_turn"; "scheduled_automation_due"] ()
+      ; decision_line ~turn:8 ~slot:90 ~path:"autonomous_cycle" ~channel:Scheduled_autonomous
+          ~wake_reasons:["scheduled_autonomous_turn"] ()
       ];
     match seeded config keeper_name with
     | Some pulse ->
       Alcotest.check
         cause_list
-        "a scope message reacts even with an empty queue"
-        [ base + (90 * Pulse.slot_seconds), [ 1; 2; 1; 1; 1 ] ]
+        "recorded decisions survive both an empty inbound queue and a missing Opened receipt"
+        [ base + (90 * Pulse.slot_seconds), [ 2; 2; 1; 2; 1 ] ]
         (causes pulse)
     | None -> Alcotest.fail "expected a seeded pulse")
 ;;

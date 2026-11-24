@@ -784,7 +784,7 @@ let is_structured_context_overflow_code code =
   | "request_too_large"
   | "invalid_argument_prompt_too_long"
   | "3200" -> true
-  | _ -> Backend_glm.is_context_overflow_code normalized
+  | _ -> false
 ;;
 
 let is_structured_context_overflow_type t =
@@ -823,9 +823,7 @@ let is_structured_quota_code code =
   | "usage_limit_exceeded"
   (* Mistral API: billing_api_budget_exhausted (code 2303). *)
   | "2303" -> true
-  (* ZhipuAI / GLM codes (1113, 1308-1311, 1313, 1314, 1316-1321) live in
-     Backend_glm.classify_glm_error as the single source of truth. *)
-  | _ -> Backend_glm.is_quota_code normalized
+  | _ -> false
 ;;
 
 let is_structured_quota_type t =

@@ -2531,6 +2531,17 @@ let test_acp_rpc_error_classification_pool_preservation_and_scopes () =
     ; "reason=QUOTA_EXHAUSTED is an invalid filter value"
     ; {|invalid filter {"error":{"code":"context_length_exceeded"}}|}
     ];
+  List.iter
+    (fun vendor_code ->
+       let error = rpc ~code:(-32602) ~data:(data_code vendor_code) "invalid parameter" in
+       check_core ("an unscoped numeric code keeps the RPC refusal: " ^ vendor_code) error
+         (function
+           | Agent_core.Error.Provider (Llm_provider.Error.ProviderReportedError _) -> true
+           | _ -> false))
+    [ "1308"; "1261" ];
+  (match refusal (rpc ~code:429 ~data:(data_code "1308") "request throttled") with
+   | Some (Retry.Signal_rate_limited _) -> ()
+   | _ -> fail "RPC status 429 remains a rate limit without scoped quota evidence");
   (* Closed jsonrpc_code_of_int partitioning: negative JSON-RPC codes never overlap HTTP 400..599 *)
   check bool "-32700 -> Jsonrpc_parse_error" true
     (Runtime_acp_client.jsonrpc_code_of_int (-32700) = Runtime_acp_client.Jsonrpc_parse_error);

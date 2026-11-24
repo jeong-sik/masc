@@ -952,11 +952,19 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
     if not (Rect.is_empty right_rect) then
       match sel_goal with
       | None ->
-          let r_spec =
-            Card.default_spec
-              ~title:
-                (Ops_common.say model ~ko:"선택된 목표 상세"
-                   ~en:"Selected Goal Detail")
+          let r_spec : Card.spec =
+            {
+              (Card.default_spec
+                 ~title:
+                   (Ops_common.say model ~ko:"선택된 목표 상세"
+                      ~en:"Selected Goal Detail"))
+              with
+              focused =
+                Model.body_has_focus model
+                &&
+                if Rect.is_empty linked_card_rect then model.nav.pane_index = 1
+                else model.nav.pane_index = 2;
+            }
           in
           let r_inner = Card.draw ~cache grid ~rect:right_rect ~theme r_spec in
           Ops_common.draw_observed_empty grid ~rect:r_inner ~theme
@@ -2264,8 +2272,8 @@ let render_inbox_empty ~(model : Model.t) ~cache ~(rect : Rect.t)
         in
         ignore
           (Table.draw grid ~rect:a_inner ~theme ~caps:Ops_common.default_caps
-             ~lang:model.lang ~col_gap:(Layout.table_col_gap bp) ~columns:cols
-             rows)
+             ~lang:model.lang ~scroll:model.work.detail_scroll_offset
+             ~col_gap:(Layout.table_col_gap bp) ~columns:cols rows)
     end;
     (* Right/Bottom: Active Approval & Sandbox Policy Summary *)
     if not (Rect.is_empty right_rect) then begin
@@ -2991,7 +2999,32 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
       end;
       if not (Rect.is_empty right_rect) then
         match selected_attn with
-        | None -> ()
+        | None ->
+            let p_spec : Card.spec =
+              {
+                (Card.default_spec
+                   ~title:
+                     (Ops_common.say model ~ko:"승인 · 응답 인스펙터"
+                        ~en:"Triage Inspector"))
+                with
+                focused = Model.pane_focused model 1;
+              }
+            in
+            let p_inner = Card.draw ~cache grid ~rect:right_rect ~theme p_spec in
+            if not (Rect.is_empty p_inner) then
+              if not (String.equal (String.trim model.work.filter_query) "") then
+                Ops_common.draw_observed_empty grid ~rect:p_inner ~theme
+                  ~lang:model.lang
+                  (Observed.value ~observed_at:Clock.Mono.zero ())
+                  ~empty_msg:
+                    (Say.make ~ko:"필터 결과 없음 — [Esc]로 필터 초기화"
+                       ~en:"No matching items — press [Esc] to clear filter")
+              else
+                Ops_common.draw_observed_empty grid ~rect:p_inner ~theme
+                  ~lang:model.lang model.work.asks
+                  ~empty_msg:
+                    (Say.make ~ko:"선택된 항목이 없습니다"
+                       ~en:"No item selected")
         | Some entry ->
             let tag, tok = attention_tag entry.kind in
             let p_spec : Card.spec =

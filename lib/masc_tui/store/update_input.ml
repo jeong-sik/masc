@@ -665,15 +665,8 @@ let dispatch_ask_answer_overlay_key ~now (m : Model.t)
                     , [] )
               | Some _ | None -> Some (m, []))
           | Keymap.Input.Char "C" when is_printable_key norm ->
-              let m_closed =
-                {
-                  m with
-                  nav = { m.nav with overlay = None };
-                  ask_modal = None;
-                }
-              in
               Some
-                (Update_nav.push_dive m_closed
+                (Update_nav.push_dive m
                    (Nav.Dive_keeper
                       { name = modal.ask.keeper; tab = Nav.Keeper_chat }))
           | Keymap.Input.Char "[" when is_printable_key norm ->
@@ -2252,9 +2245,7 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
                   match printable_char with
                   | Some ("a" | "x" | "h" | "X") ->
                       ( Model.with_toast ~now ~level:Model.Toast_warning
-                          (Say.make
-                             ~ko:"화면에 표시된 검증 항목이 없습니다 (창 높이를 늘려주세요)"
-                             ~en:"No verification visible in pane (increase viewport height)")
+                          (Update_nav.hidden_verif_toast_msg m)
                           m
                       , [] )
                   | _ -> (m, []))
@@ -3543,6 +3534,80 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                             |> Drafts.insert_text s
                           in
                           Some ({ m with drafts }, [])
+                      | ( Some (Nav.Dive_work (Nav.Goal_dive goal_id))
+                        , Keymap.Input.Char "J" )
+                        when is_printable_key norm ->
+                          Some
+                            ( Update_nav.scroll_goal_dive_measure ~delta:1
+                                ~goal_id m
+                            , [] )
+                      | ( Some (Nav.Dive_work (Nav.Goal_dive goal_id))
+                        , Keymap.Input.Char "K" )
+                        when is_printable_key norm ->
+                          Some
+                            ( Update_nav.scroll_goal_dive_measure ~delta:(-1)
+                                ~goal_id m
+                            , [] )
+                      | ( Some (Nav.Dive_work (Nav.Goal_dive goal_id))
+                        , Keymap.Input.Down )
+                        when norm.mods.shift && (not norm.mods.ctrl)
+                             && not norm.mods.alt ->
+                          Some
+                            ( Update_nav.scroll_goal_dive_measure ~delta:1
+                                ~goal_id m
+                            , [] )
+                      | ( Some (Nav.Dive_work (Nav.Goal_dive goal_id))
+                        , Keymap.Input.Up )
+                        when norm.mods.shift && (not norm.mods.ctrl)
+                             && not norm.mods.alt ->
+                          Some
+                            ( Update_nav.scroll_goal_dive_measure ~delta:(-1)
+                                ~goal_id m
+                            , [] )
+                      | ( Some (Nav.Dive_knowledge (Nav.Artifact_dive _))
+                        , Keymap.Input.Char "M" )
+                        when is_printable_key norm
+                             && Option.is_some (Model.focused_artifact m) ->
+                          Some
+                            (Update_nav.open_overlay m
+                               (Nav.System_gate Nav.Media_viewer))
+                      | None, Keymap.Input.Char "M"
+                        when is_printable_key norm
+                             && Nav.equal_workspace m.nav.workspace
+                                  Nav.Knowledge
+                             && Nav.equal_knowledge_tab m.knowledge.active_tab
+                                  Nav.Knowledge_artifacts
+                             && Option.is_some (Model.focused_artifact m) ->
+                          Some
+                            (Update_nav.open_overlay m
+                               (Nav.System_gate Nav.Media_viewer))
+                      | ( Some (Nav.Dive_keeper { tab = Nav.Keeper_memory; _ })
+                        , Keymap.Input.Char "D" )
+                        when is_printable_key norm
+                             && Knowledge_store.equal_keeper_memory_subview
+                                  m.knowledge.keeper_memory_subview
+                                  Knowledge_store.Kmem_diff_flow ->
+                          Some (Update_nav.open_memory_diff_dive m)
+                      | None, Keymap.Input.Char "D"
+                        when is_printable_key norm
+                             && ((Nav.equal_workspace m.nav.workspace
+                                    Nav.Knowledge
+                                  && Nav.equal_knowledge_tab
+                                       m.knowledge.active_tab
+                                       Nav.Knowledge_memory
+                                  && Knowledge_store.equal_memory_subview
+                                       m.knowledge.memory_subview
+                                       Knowledge_store.Mem_diff_flow)
+                                || (Nav.equal_workspace m.nav.workspace
+                                      Nav.Keepers
+                                    && (m.nav.pane_index >= 1 || m.nav.zoomed)
+                                    && Nav.equal_keeper_tab
+                                         m.fleet.keeper_dive_tab
+                                         Nav.Keeper_memory
+                                    && Knowledge_store.equal_keeper_memory_subview
+                                         m.knowledge.keeper_memory_subview
+                                         Knowledge_store.Kmem_diff_flow)) ->
+                          Some (Update_nav.open_memory_diff_dive m)
                       | ( ( Some
                               ( Nav.Dive_keeper
                                   {
@@ -3558,8 +3623,15 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                       | Nav.Keeper_identity );
                                     _;
                                   }
-                              | Nav.Dive_work _
-                              | Nav.Dive_knowledge _
+                              | Nav.Dive_work
+                                  ( Nav.Goal_dive _
+                                  | Nav.Task_dive _
+                                  | Nav.Verification_dive _ )
+                              | Nav.Dive_knowledge
+                                  ( Nav.Thread_dive _
+                                  | Nav.Wiki_dive _
+                                  | Nav.Artifact_dive _
+                                  | Nav.Memory_diff_dive _ )
                               | Nav.Dive_runtime _
                               | Nav.Dive_infra _ )
                           | None )
@@ -4201,8 +4273,51 @@ let apply_mouse ~now (m : Model.t) (ev : Keymap.Input.mouse_event) =
             if Model.sidebar_has_focus m then Update_nav.exit_sidebar_focus m
             else m
           in
-          Update_actions.execute_action ~now (cancel_edit m_target)
-            (Keymap.Move move_dir)
+          let m_base = cancel_edit m_target in
+          let hit_pane =
+            if Option.is_some m_base.nav.overlay then None
+            else
+              let rects = Model.pane_rects m_base in
+              let n = Model.focusable_pane_count m_base in
+              let rec find i = function
+                | [] -> None
+                | r :: rest ->
+                    if i < n && Rect.contains r ~x:gx ~y:gy then Some i
+                    else find (i + 1) rest
+              in
+              find 0 rects
+          in
+          match hit_pane with
+          | Some idx when not (Int.equal idx m_base.nav.pane_index) ->
+              let orig_pane = m_base.nav.pane_index in
+              let m_scrolled, cmds =
+                Update_actions.execute_action ~now
+                  { m_base with nav = { m_base.nav with pane_index = idx } }
+                  (Keymap.Move move_dir)
+              in
+              let same_view =
+                Nav.equal_workspace m_scrolled.nav.workspace m_base.nav.workspace
+                && Option.equal Nav.equal_overlay m_scrolled.nav.overlay
+                     m_base.nav.overlay
+                && Int.equal
+                     (List.length m_scrolled.nav.dive_stack)
+                     (List.length m_base.nav.dive_stack)
+              in
+              let m_final =
+                if same_view then
+                  let max_p =
+                    Int.max 0 (Model.focusable_pane_count m_scrolled - 1)
+                  in
+                  let restored = Int.max 0 (Int.min max_p orig_pane) in
+                  {
+                    m_scrolled with
+                    nav = { m_scrolled.nav with pane_index = restored };
+                  }
+                else m_scrolled
+              in
+              (m_final, cmds)
+          | Some _ | None ->
+              Update_actions.execute_action ~now m_base (Keymap.Move move_dir)
     | Keymap.Input.Left_press { col; row } -> (
         if
           Option.is_some m.nav.overlay

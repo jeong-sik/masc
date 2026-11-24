@@ -3491,7 +3491,7 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
         hotkey;
         footer_hint;
         focused =
-          Model.body_has_focus model && ((not embedded) || model.nav.pane_index = 1);
+          Model.body_has_focus model && ((not embedded) || model.nav.pane_index >= 1);
       }
     in
     let inner = Card.draw ~cache grid ~rect ~theme card_spec in

@@ -477,7 +477,7 @@ let test_observed_and_format_val () =
   Alcotest.(check int) "6 workspaces" 6 (List.length Nav.all_workspaces);
   Alcotest.(check int) "6 work tabs" 6 (List.length Nav.all_work_tabs);
   Alcotest.(check int) "4 knowledge tabs" 4 (List.length Nav.all_knowledge_tabs);
-  Alcotest.(check int) "31 unified menu items" 31 (List.length Nav.all_menu_items);
+  Alcotest.(check int) "36 unified menu items" 36 (List.length Nav.all_menu_items);
   List.iteri
     (fun idx (it : Nav.menu_item) ->
       Alcotest.(check int)

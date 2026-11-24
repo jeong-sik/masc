@@ -24,11 +24,6 @@ type thinking_display =
   | Thinking_full
   | Thinking_hidden
 
-type memory_display =
-  | Memory_hidden
-  | Memory_summary
-  | Memory_full
-
 type tool_call_state =
   | Tool_pending
   | Tool_result_pending of { model_output_after_close : bool }
@@ -142,7 +137,6 @@ type t = {
   chat_origin_mode : chat_display_origin;
   chat_tools_mode : Slash.tools_mode;
   chat_thinking_mode : thinking_display;
-  chat_memory_mode : memory_display;
   chat_turn_details_expanded : bool;
   chat_scroll_offset : int;
   keeper_dive_tab : Nav.keeper_tab;
@@ -182,7 +176,6 @@ let empty =
     chat_origin_mode = Display_origin_bare;
     chat_tools_mode = Slash.Tools_compact;
     chat_thinking_mode = Thinking_folded;
-    chat_memory_mode = Memory_hidden;
     chat_turn_details_expanded = false;
     chat_scroll_offset = 0;
     keeper_dive_tab = Nav.Keeper_chat;
@@ -217,17 +210,6 @@ let equal_thinking_display a b =
   | Thinking_folded, (Thinking_full | Thinking_hidden)
   | Thinking_full, (Thinking_folded | Thinking_hidden)
   | Thinking_hidden, (Thinking_folded | Thinking_full) ->
-      false
-
-let equal_memory_display a b =
-  match a, b with
-  | Memory_hidden, Memory_hidden
-  | Memory_summary, Memory_summary
-  | Memory_full, Memory_full ->
-      true
-  | Memory_hidden, (Memory_summary | Memory_full)
-  | Memory_summary, (Memory_hidden | Memory_full)
-  | Memory_full, (Memory_hidden | Memory_summary) ->
       false
 
 let working_detail_of_active_turn (turn_opt : Wire_fleet.active_turn option) =
@@ -1857,15 +1839,6 @@ let cycle_thinking_mode t =
     | Thinking_hidden -> Thinking_folded
   in
   { t with chat_thinking_mode }
-
-let cycle_memory_mode t =
-  let chat_memory_mode =
-    match t.chat_memory_mode with
-    | Memory_hidden -> Memory_summary
-    | Memory_summary -> Memory_full
-    | Memory_full -> Memory_hidden
-  in
-  { t with chat_memory_mode }
 
 let toggle_turn_details t =
   { t with chat_turn_details_expanded = not t.chat_turn_details_expanded }

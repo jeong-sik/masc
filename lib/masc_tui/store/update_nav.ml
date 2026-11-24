@@ -955,11 +955,26 @@ let select_settings_tab (m : Model.t) tab =
   (next, View_fetches.fetches_for_current_view next)
 
 let push_dive (m : Model.t) dive =
+  let return_overlay =
+    match m.nav.overlay with
+    | Some ((Nav.Incidents | Nav.Queue_context _ | Nav.Ask_answer) as ov) ->
+        Some ov
+    | Some
+        ( Nav.Palette
+        | Nav.Settings _
+        | Nav.Inline_action _
+        | Nav.Help
+        | Nav.System_gate _ )
+    | None ->
+        None
+  in
   let nav =
     {
       m.nav with
       dive_stack = dive :: m.nav.dive_stack;
-      dive_return_stack = (m.nav.pane_index, m.nav.zoomed) :: m.nav.dive_return_stack;
+      dive_return_stack =
+        (m.nav.pane_index, m.nav.zoomed, return_overlay)
+        :: m.nav.dive_return_stack;
       overlay = None;
       pane_index = 0;
       zoomed = false;
@@ -974,7 +989,8 @@ let push_dive (m : Model.t) dive =
     match dive with
     | Nav.Dive_work (Nav.Goal_dive _) -> Work_store.reset_goal_dive_state m.work
     | Nav.Dive_work (Nav.Task_dive _) -> Work_store.reset_task_dive_scroll m.work
-    | Nav.Dive_work (Nav.Verification_dive _)
+    | Nav.Dive_work (Nav.Verification_dive _) ->
+        Work_store.set_verification_dive_tab Work_store.Verif_tab_evidence m.work
     | Nav.Dive_keeper _
     | Nav.Dive_knowledge _
     | Nav.Dive_runtime _
@@ -1122,12 +1138,22 @@ let push_dive (m : Model.t) dive =
               Observed.absent
         in
         { m.runtime with exact_run_detail }
-    | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Fusion_dive _)
+    | Nav.Dive_runtime (Nav.Tool_dive _) -> { m.runtime with scroll_offset = 0 }
+    | Nav.Dive_runtime (Nav.Fusion_dive _)
     | Nav.Dive_keeper _
     | Nav.Dive_work _
     | Nav.Dive_knowledge _
     | Nav.Dive_infra _ ->
         m.runtime
+  in
+  let ask_modal =
+    if
+      List.exists
+        (fun (_, _, ov) ->
+          Option.equal Nav.equal_overlay ov (Some Nav.Ask_answer))
+        nav.dive_return_stack
+    then m.ask_modal
+    else None
   in
   let next =
     {
@@ -1136,12 +1162,13 @@ let push_dive (m : Model.t) dive =
       drafts;
       fleet;
       work;
+      runtime;
       config;
       knowledge;
       infra;
       runtime;
       inline_modal = None;
-      ask_modal = None;
+      ask_modal;
     }
   in
   (next, View_fetches.fetches_for_current_view next)
@@ -1263,11 +1290,7 @@ let move_sidebar (m : Model.t) (dir : Keymap.move_dir) =
         drafts = Drafts.set_focus false m.drafts;
       }
     in
-    match Nav.menu_item_of_index next_cursor with
-    | None -> (m_moved, [])
-    | Some it ->
-        if Nav.is_overlay_menu_target it.target then (m_moved, [])
-        else navigate_menu_target ~keep_sidebar_focus:true m_moved it.target
+    (m_moved, [])
 
 let activate_sidebar_cursor (m : Model.t) =
   match Nav.menu_item_of_index m.nav.sidebar_cursor with
@@ -1498,15 +1521,21 @@ let cycle_sub_tab (m : Model.t) dir =
                 m.nav.zoomed
                 && Option.is_some (Fleet_store.selected_keeper_summary m.fleet)
               in
-              if m.nav.pane_index = 1 || zoomed_keeper then
+              if m.nav.pane_index >= 1 || zoomed_keeper then
                 let fleet = Fleet_store.cycle_keeper_dive_tab dir m.fleet in
                 let drafts =
                   if Nav.equal_keeper_tab fleet.keeper_dive_tab Nav.Keeper_chat
                   then m.drafts
                   else Drafts.set_focus false m.drafts
                 in
+                let next_pane = if zoomed_keeper then 0 else 1 in
                 let nav =
-                  { m.nav with filter_focused = false; dive_scroll_offset = 0 }
+                  {
+                    m.nav with
+                    pane_index = next_pane;
+                    filter_focused = false;
+                    dive_scroll_offset = 0;
+                  }
                 in
                 let next =
                   { m with nav; drafts; fleet } |> sync_config_for_keeper_view
@@ -1519,7 +1548,12 @@ let cycle_sub_tab (m : Model.t) dir =
                 in
                 ({ m with nav; fleet }, [])
           | Nav.Runtime ->
-              let runtime = Runtime_store.cycle_tab dir m.runtime in
+              let runtime =
+                {
+                  (Runtime_store.cycle_tab dir m.runtime) with
+                  addon_catalog_mode = false;
+                }
+              in
               let nav =
                 { m.nav with pane_index = 0; zoomed = false; filter_focused = false }
               in
@@ -1528,7 +1562,10 @@ let cycle_sub_tab (m : Model.t) dir =
               in
               (next, View_fetches.fetches_for_current_view next)
           | Nav.Infra ->
-              let infra = Infra_store.cycle_tab dir m.infra in
+              let infra =
+                Infra_store.cycle_tab dir m.infra
+                |> Infra_store.set_code_right_mode Infra_store.Code_file
+              in
               let nav =
                 { m.nav with pane_index = 0; zoomed = false; filter_focused = false }
               in
@@ -3405,7 +3442,7 @@ let enter_plan (m : Model.t) : enter_plan =
           | Some _ | None ->
           match Fleet_store.selected_keeper_summary m.fleet with
           | Some k
-            when (m.nav.pane_index = 1 || m.nav.zoomed)
+            when (m.nav.pane_index >= 1 || m.nav.zoomed)
                  && (Nav.equal_keeper_tab m.fleet.keeper_dive_tab
                        Nav.Keeper_context
                     || Nav.equal_keeper_tab m.fleet.keeper_dive_tab
@@ -3420,7 +3457,7 @@ let enter_plan (m : Model.t) : enter_plan =
               keeper_enter_plan ~name:k.name ~tab:m.fleet.keeper_dive_tab m
           | Some k ->
               if
-                (m.nav.pane_index = 1 || m.nav.zoomed)
+                (m.nav.pane_index >= 1 || m.nav.zoomed)
                 && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
                      Nav.Keeper_memory
               then
@@ -7905,7 +7942,36 @@ let work_detail_max_scroll (m : Model.t) =
       match
         Attention.current_filtered_item ~query:m.work.filter_query m.attention
       with
-      | None -> 0
+      | None ->
+          if
+            Attention.is_empty m.attention
+            && m.work.recent_decisions_24h <> []
+          then
+            let hero_h = if br.h >= 12 then 4 else 3 in
+            let split_rect =
+              Rect.make ~x:br.x ~y:(br.y + hero_h) ~w:br.w
+                ~h:(max 0 (br.h - hero_h))
+            in
+            let left_rect =
+              if split_rect.w >= 96 then
+                match
+                  Masc_tui_ui.Layout.split_h_bp bp split_rect
+                    [ Masc_tui_ui.Layout.Ratio 0.58; Masc_tui_ui.Layout.Flex 1 ]
+                with
+                | [ l; _ ] -> l
+                | _ -> split_rect
+              else
+                match
+                  Masc_tui_ui.Layout.split_v_bp bp split_rect
+                    [ Masc_tui_ui.Layout.Ratio 0.55; Masc_tui_ui.Layout.Flex 1 ]
+                with
+                | [ t; _ ] -> t
+                | _ -> split_rect
+            in
+            let a_inner = ui_card_inner left_rect in
+            let vis_rows = max 1 (a_inner.h - 2) in
+            max 0 (List.length m.work.recent_decisions_24h - vis_rows)
+          else 0
       | Some entry -> (
           let _, br = Work_store.inbox_subview_rects br in
           let right_rect =
@@ -8137,6 +8203,79 @@ let work_detail_max_scroll (m : Model.t) =
           let table_rows = max 1 (e_inner.h - 2) in
           max 0 (List.length ledger.recent_events - table_rows))
 
+let tool_series_buckets_max_scroll ~bp ~(rect : Rect.t) ~buckets_n =
+  if buckets_n <= 0 || Rect.is_empty rect then 0
+  else
+    let main_rect =
+      match
+        Masc_tui_ui.Layout.split_v rect
+          [ Masc_tui_ui.Layout.Fixed 1; Masc_tui_ui.Layout.Flex 1 ]
+      with
+      | [ _; b ] -> b
+      | _ -> rect
+    in
+    let charts_h =
+      if main_rect.h >= 22 then 9 else if main_rect.h >= 14 then 6 else 0
+    in
+    let bottom_rect =
+      if charts_h > 0 then
+        match
+          Masc_tui_ui.Layout.split_v_bp bp main_rect
+            [ Masc_tui_ui.Layout.Fixed charts_h; Masc_tui_ui.Layout.Flex 1 ]
+        with
+        | [ _; b ] -> b
+        | _ -> main_rect
+      else main_rect
+    in
+    let tbl_rect =
+      if bottom_rect.w >= 86 then
+        match
+          Masc_tui_ui.Layout.split_h_bp bp bottom_rect
+            [ Masc_tui_ui.Layout.Ratio 0.62; Masc_tui_ui.Layout.Flex 1 ]
+        with
+        | [ l; _ ] -> l
+        | _ -> bottom_rect
+      else bottom_rect
+    in
+    let tbl_inner = ui_card_inner tbl_rect in
+    let vis_rows = max 1 (tbl_inner.h - 2) in
+    max 0 (buckets_n - vis_rows)
+
+let runtime_tools_keeper_pane0_max_scroll (m : Model.t) =
+  let bp = ui_bp m in
+  let br = ui_body_rect m in
+  let body_rect =
+    match
+      Masc_tui_ui.Layout.split_v br
+        [ Masc_tui_ui.Layout.Fixed 1; Masc_tui_ui.Layout.Flex 1 ]
+    with
+    | [ _; b ] -> b
+    | _ -> br
+  in
+  let left_rect, _ =
+    Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
+      ~left_ratio:0.52 ~top_ratio:0.50 bp body_rect
+  in
+  let lc = ui_card_inner left_rect |> ui_pad_content ~bp in
+  if Rect.is_empty lc then 0
+  else
+    match Observed.to_option m.runtime.tools_dashboard with
+    | Some
+        {
+          effective_keeper_surface =
+            Some (Wire_runtime.Keeper_surface_available s);
+          _;
+        } ->
+        max 0 (List.length s.tools + 8 - max 1 lc.h)
+    | Some
+        {
+          effective_keeper_surface =
+            Some (Wire_runtime.Keeper_surface_unavailable _) | None;
+          _;
+        }
+    | None ->
+        0
+
 let runtime_detail_max_scroll (m : Model.t) =
   let bp = ui_bp m in
   let br = ui_body_rect m in
@@ -8280,7 +8419,18 @@ let runtime_detail_max_scroll (m : Model.t) =
             | Runtime_store.Sec_async_requests -> 12
           in
           if Rect.is_empty rc then 0 else max 0 (total_lines - rc.h)
-      | Runtime_store.Tools_usage_calls | Runtime_store.Tools_catalog_tree -> 0)
+      | Runtime_store.Tools_usage_calls ->
+          let buckets_n =
+            match
+              ( Observed.to_option m.runtime.tool_series_summary
+              , Observed.to_option m.runtime.tool_series )
+            with
+            | Some s, _ -> List.length s.series.buckets
+            | None, Some ts -> List.length ts.buckets
+            | None, None -> 0
+          in
+          tool_series_buckets_max_scroll ~bp ~rect:body_rect ~buckets_n
+      | Runtime_store.Tools_catalog_tree -> 0)
   | Nav.Runtime_fusion -> (
       match Runtime_store.selected_fusion_run m.runtime with
       | None -> 0
@@ -9523,7 +9673,15 @@ let clamp_for_pane (m : Model.t) =
               }
           | Nav.Runtime ->
               let rt = sync_runtime_companies_if_needed m in
-              let max_detail_scroll = runtime_detail_max_scroll m in
+              let max_detail_scroll =
+                if
+                  Nav.equal_runtime_tab rt.active_tab Nav.Runtime_tools_usage
+                  && Runtime_store.equal_tools_subview rt.tools_subview
+                       Runtime_store.Tools_keeper_skills
+                  && pane_index = 0
+                then runtime_tools_keeper_pane0_max_scroll m
+                else runtime_detail_max_scroll m
+              in
               {
                 m with
                 runtime =
@@ -9631,6 +9789,164 @@ let task_dive_scroll_bounds (m : Model.t) (tk : Wire_work.task) : int * int =
     in
     (md_max, verif_max)
 
+let hidden_verif_toast_msg (m : Model.t) =
+  if Work_store.filtered_verifications m.work = [] then
+    Say.make ~ko:"대기 중인 검증 항목이 없습니다" ~en:"No pending verifications"
+  else
+    Say.make
+      ~ko:"검증 목록이 화면 높이 부족으로 숨겨졌습니다 (창 높이를 늘려주세요)"
+      ~en:"Verifications hidden due to short terminal (increase height)"
+
+let scroll_goal_dive_measure ~delta ~goal_id (m : Model.t) =
+  let max_scroll =
+    match
+      List.find_opt
+        (fun (g : Wire_work.goal) -> String.equal g.id goal_id)
+        (Work_store.goals m.work)
+    with
+    | None -> 0
+    | Some g ->
+        let bp = ui_bp m in
+        let br = ui_body_rect m in
+        let theme = Theme.of_preset m.theme_preset in
+        let main_card_rect, _ =
+          split_dive_with_json_store ~bp ~show_raw_json:m.infra.show_raw_json br
+        in
+        let inner = ui_card_inner main_card_rect in
+        if Rect.is_empty inner then 0
+        else
+          let y = ref inner.y in
+          let bot = Rect.bottom inner in
+          if inner.h >= 8 then begin
+            let has_sub =
+              match g.last_review_note with
+              | Some n when not (String.equal (String.trim n) "") -> true
+              | Some _ | None -> Option.is_some g.criterion_revision
+            in
+            let band_h = if has_sub then 2 else 1 in
+            y := !y + band_h + if inner.h >= 14 then 1 else 0
+          end;
+          let content = ops_pad_content inner in
+          let action_h = if bot - !y >= 6 then 1 else 0 in
+          let body_bot = bot - action_h in
+          if !y < body_bot then begin
+            let step_h =
+              match g.phase with
+              | Wire_work.Paused _ | Wire_work.Blocked _
+                when min 2 (body_bot - !y) >= 2 ->
+                  2
+              | Wire_work.Executing
+              | Wire_work.Verifying
+              | Wire_work.Awaiting_confirmation
+              | Wire_work.Paused _
+              | Wire_work.Blocked _
+              | Wire_work.Completed
+              | Wire_work.Dropped ->
+                  1
+            in
+            y := !y + step_h
+          end;
+          let rem_h = max 0 (body_bot - !y) in
+          let md_h =
+            if rem_h <= 0 then 0
+            else
+              min 7
+                (min rem_h (if rem_h >= 2 then max 2 (rem_h / 3) else rem_h))
+          in
+          if md_h <= 0 || content.w <= 0 then 0
+          else
+            let md_src =
+              Printf.sprintf "**%s:** %s\n\n**%s:** %s"
+                (Say.resolve m.lang (Say.make ~ko:"성공 조건" ~en:"Measure"))
+                (Chat_transcript.rewrite_masc_links_for_markdown g.measure)
+                (Say.resolve m.lang (Say.make ~ko:"측정 절차" ~en:"Procedure"))
+                (Chat_transcript.rewrite_masc_links_for_markdown g.procedure)
+            in
+            markdown_max_scroll ~theme ~width:content.w ~height:md_h md_src
+  in
+  let dive_scroll_offset =
+    Store_scroll.clamp_scroll ~max_scroll (m.nav.dive_scroll_offset + delta)
+  in
+  { m with nav = { m.nav with dive_scroll_offset } }
+
+let open_memory_diff_dive (m : Model.t) =
+  let keeper_opt =
+    match Model.active_dive m with
+    | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory }) -> Some name
+    | Some
+        ( Nav.Dive_keeper
+            {
+              tab =
+                ( Nav.Keeper_chat
+                | Nav.Keeper_context
+                | Nav.Keeper_tool_calls
+                | Nav.Keeper_work_candle
+                | Nav.Keeper_sandbox
+                | Nav.Keeper_config
+                | Nav.Keeper_logs
+                | Nav.Keeper_identity );
+              _;
+            }
+        | Nav.Dive_work _
+        | Nav.Dive_knowledge _
+        | Nav.Dive_runtime _
+        | Nav.Dive_infra _ ) ->
+        m.knowledge.memory_diff_keeper
+    | None ->
+        if
+          Nav.equal_workspace m.nav.workspace Nav.Keepers
+          && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory
+        then
+          Option.map
+            (fun (k : Wire_fleet.keeper_summary) -> k.name)
+            (Fleet_store.selected_keeper_summary m.fleet)
+        else m.knowledge.memory_diff_keeper
+  in
+  let diff_obs =
+    Knowledge_store.memory_diff_for ~keeper:keeper_opt
+      ~window:m.knowledge.memory_diff_window m.knowledge
+  in
+  let rev_bounds =
+    match Observed.to_option diff_obs with
+    | None -> None
+    | Some diff -> (
+        match diff.range.from_rev, diff.range.to_rev with
+        | Some a, Some b when b >= a && b > 0 -> Some (a, b)
+        | Some _, Some _
+        | Some _, None
+        | None, Some _
+        | None, None -> (
+            match diff.body with
+            | Wire_knowledge.Keeper_diff { revisions = first :: rest; _ } ->
+                let last = List.fold_left (fun _ r -> r) first rest in
+                Some (min first.rev last.rev, max first.rev last.rev)
+            | Wire_knowledge.World_diff { revisions = first :: rest; _ } ->
+                let last = List.fold_left (fun _ r -> r) first rest in
+                Some (min first.rev last.rev, max first.rev last.rev)
+            | Wire_knowledge.Keeper_diff { revisions = []; _ }
+            | Wire_knowledge.World_diff { revisions = []; _ } ->
+                None))
+  in
+  match rev_bounds with
+  | Some (from_rev, to_rev) ->
+      push_dive m
+        (Nav.Dive_knowledge
+           (Nav.Memory_diff_dive { keeper = keeper_opt; from_rev; to_rev }))
+  | None ->
+      ( m
+      , [
+          Cmd.Http_get
+            {
+              epoch = m.epoch;
+              req =
+                Cmd.Get_memory_diff
+                  {
+                    keeper = keeper_opt;
+                    window = m.knowledge.memory_diff_window;
+                  };
+            };
+        ] )
+
 let open_harness_overrule_for_context ~verdict ~now (m : Model.t) =
   if
     Option.is_none (Model.active_dive m)
@@ -9641,9 +9957,7 @@ let open_harness_overrule_for_context ~verdict ~now (m : Model.t) =
     && not (Model.work_pipeline_verifs_visible m)
   then
     ( Model.with_toast ~now ~level:Model.Toast_warning
-        (Say.make
-           ~ko:"화면에 표시된 검증 항목이 없습니다 (창 높이를 늘려주세요)"
-           ~en:"No verification visible in pane (increase viewport height)")
+        (hidden_verif_toast_msg m)
         m
     , [] )
   else
@@ -10398,7 +10712,8 @@ let apply_move (m : Model.t) dir =
                       when Option.is_none (Model.active_dive base)
                            && (not base.nav.zoomed)
                            && Model.focusable_pane_count base >= 2 ->
-                        1
+                        if base.nav.pane_index >= 1 then base.nav.pane_index
+                        else 0
                     | Nav.Menu_keeper_tab _
                     | Nav.Menu_pulse
                     | Nav.Menu_work _
@@ -10467,7 +10782,8 @@ let apply_move (m : Model.t) dir =
                 match ks.subtab with
                 | Keeper_context_store.Ctx_exact_input ->
                     let scroll_part =
-                      ((not embedded) && m.nav.pane_index = 1)
+                      (if embedded then m.nav.pane_index = 2
+                       else m.nav.pane_index = 1)
                       ||
                       match dir with
                       | Keymap.Page_up | Keymap.Page_down -> true
@@ -10729,7 +11045,7 @@ let apply_move (m : Model.t) dir =
                   | _ -> (body_r, Rect.empty)
               in
               let scroll_detail =
-                ((not embedded) && m.nav.pane_index = 1)
+                (if embedded then m.nav.pane_index = 2 else m.nav.pane_index = 1)
                 ||
                 match dir with
                 | Keymap.Page_up | Keymap.Page_down -> true
@@ -11049,6 +11365,45 @@ let apply_move (m : Model.t) dir =
                           (m.nav.dive_scroll_offset + sd)
                       in
                       ({ m with nav = { m.nav with dive_scroll_offset } }, []))
+            | Some (Nav.Dive_runtime (Nav.Tool_dive tool_name) as active) ->
+                let sd = scroll_delta dir in
+                if m.nav.pane_index = 1 then
+                  let bp = ui_bp m in
+                  let br = ui_body_rect m in
+                  let top_h = if br.h >= 20 then 9 else 6 in
+                  let series_rect =
+                    match
+                      Masc_tui_ui.Layout.split_v_bp bp br
+                        [
+                          Masc_tui_ui.Layout.Fixed top_h;
+                          Masc_tui_ui.Layout.Flex 1;
+                        ]
+                    with
+                    | [ _; b ] -> b
+                    | _ -> Rect.empty
+                  in
+                  let buckets_n =
+                    match Observed.to_option m.runtime.tool_detail_series with
+                    | Some (tn, s) when String.equal tn tool_name ->
+                        List.length s.series.buckets
+                    | Some _ | None -> 0
+                  in
+                  let max_scroll =
+                    tool_series_buckets_max_scroll ~bp ~rect:series_rect
+                      ~buckets_n
+                  in
+                  let scroll_offset =
+                    Store_scroll.clamp_scroll ~max_scroll
+                      (m.runtime.scroll_offset + sd)
+                  in
+                  ({ m with runtime = { m.runtime with scroll_offset } }, [])
+                else
+                  let max_scroll = dive_max_scroll m active in
+                  let dive_scroll_offset =
+                    Store_scroll.clamp_scroll ~max_scroll
+                      (m.nav.dive_scroll_offset + sd)
+                  in
+                  ({ m with nav = { m.nav with dive_scroll_offset } }, [])
             | Some
                 (( Nav.Dive_keeper
                      {
@@ -11057,7 +11412,10 @@ let apply_move (m : Model.t) dir =
                      }
                  | Nav.Dive_knowledge
                      (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
-                 | Nav.Dive_runtime _
+                 | Nav.Dive_runtime
+                     ( Nav.Fusion_dive _
+                     | Nav.Skill_dive _
+                     | Nav.Exact_run_dive _ )
                  | Nav.Dive_infra _ ) as active) ->
                 let delta = scroll_delta dir in
                 let max_scroll = dive_max_scroll m active in
@@ -11109,7 +11467,7 @@ let apply_move (m : Model.t) dir =
                     let zoomed_keeper =
                       m.nav.zoomed && Model.can_zoom_current_view m
                     in
-                    if pane_index = 1 || zoomed_keeper then
+                    if pane_index >= 1 || zoomed_keeper then
                       let embedded = not zoomed_keeper in
                       match Fleet_store.selected_keeper_summary m.fleet with
                       | None -> (m, [])
@@ -11375,6 +11733,20 @@ let apply_move (m : Model.t) dir =
                                 work0
                           in
                           ({ m with attention; work }, [])
+                        else if
+                          Attention.is_empty m.attention
+                          && m.work.recent_decisions_24h <> []
+                        then
+                          let sd = scroll_delta dir in
+                          let max_detail_scroll = work_detail_max_scroll m in
+                          ( {
+                              m with
+                              work =
+                                Work_store.move_selection ~pane_index:1
+                                  ~viewport_rows ~max_detail_scroll ~delta:sd
+                                  m.work;
+                            }
+                          , [] )
                         else
                           ( {
                               m with
@@ -11660,7 +12032,11 @@ let apply_move (m : Model.t) dir =
                       | Nav.Runtime_addons_browser, 1 when rt.addon_catalog_mode
                         ->
                           true
-                      | Nav.Runtime_tools_usage, 1
+                      | Nav.Runtime_tools_usage, _
+                        when Runtime_store.equal_tools_subview rt.tools_subview
+                               Runtime_store.Tools_usage_calls ->
+                          true
+                      | Nav.Runtime_tools_usage, (0 | 1)
                         when Runtime_store.equal_tools_subview rt.tools_subview
                                Runtime_store.Tools_keeper_skills ->
                           true
@@ -11678,9 +12054,15 @@ let apply_move (m : Model.t) dir =
                       if is_detail_scroll then scroll_delta dir else delta
                     in
                     let max_detail_scroll =
-                      if is_detail_scroll then
-                        Some (runtime_detail_max_scroll m)
-                      else None
+                      if not is_detail_scroll then None
+                      else if
+                        Nav.equal_runtime_tab rt.active_tab
+                          Nav.Runtime_tools_usage
+                        && Runtime_store.equal_tools_subview rt.tools_subview
+                             Runtime_store.Tools_keeper_skills
+                        && pane_index = 0
+                      then Some (runtime_tools_keeper_pane0_max_scroll m)
+                      else Some (runtime_detail_max_scroll m)
                     in
                     let eff_viewport_rows =
                       match rt.active_tab, pane_index with

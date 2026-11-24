@@ -27,11 +27,6 @@ type thinking_display =
   | Thinking_full
   | Thinking_hidden
 
-type memory_display =
-  | Memory_hidden
-  | Memory_summary
-  | Memory_full
-
 type tool_call_state =
   | Tool_pending
   | Tool_result_pending of { model_output_after_close : bool }
@@ -125,7 +120,6 @@ type t = {
   chat_origin_mode : chat_display_origin;
   chat_tools_mode : Slash.tools_mode;
   chat_thinking_mode : thinking_display;
-  chat_memory_mode : memory_display;
   chat_turn_details_expanded : bool;
   chat_scroll_offset : int;
   keeper_dive_tab : Nav.keeper_tab;
@@ -135,7 +129,6 @@ val empty : t
 
 val equal_chat_display_origin : chat_display_origin -> chat_display_origin -> bool
 val equal_thinking_display : thinking_display -> thinking_display -> bool
-val equal_memory_display : memory_display -> memory_display -> bool
 
 val keeper_live_state : Wire_fleet.keeper_summary -> Health.live_state
 (** Project authoritative [keeper_health] onto Channel 2 {!Health.live_state}. *)
@@ -306,7 +299,6 @@ val cycle_origin_mode : t -> t
 val set_tools_mode : Slash.tools_mode -> t -> t
 val cycle_tools_mode : t -> t
 val cycle_thinking_mode : t -> t
-val cycle_memory_mode : t -> t
 val toggle_turn_details : t -> t
 
 val toggle_company_collapsed : string -> t -> t

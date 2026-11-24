@@ -2270,9 +2270,13 @@ let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t 
       match t.tools_subview with
       | Tools_usage_calls ->
           let buckets_n =
-            match Observed.to_option t.tool_series with
-            | Some ts -> List.length ts.buckets
-            | None -> 0
+            match
+              ( Observed.to_option t.tool_series_summary
+              , Observed.to_option t.tool_series )
+            with
+            | Some s, _ -> List.length s.series.buckets
+            | None, Some ts -> List.length ts.buckets
+            | None, None -> 0
           in
           let max_scroll =
             match max_detail_scroll with

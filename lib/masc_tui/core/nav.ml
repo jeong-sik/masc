@@ -1006,6 +1006,12 @@ let all_menu_items =
     };
     {
       section = Sec_fleet;
+      target = Menu_keeper_tab Keeper_chat;
+      label = keeper_tab_label Keeper_chat;
+      shortcut = None;
+    };
+    {
+      section = Sec_fleet;
       target = Menu_keeper_tab Keeper_context;
       label = keeper_tab_label Keeper_context;
       shortcut = None;
@@ -1014,6 +1020,30 @@ let all_menu_items =
       section = Sec_fleet;
       target = Menu_keeper_tab Keeper_tool_calls;
       label = keeper_tab_label Keeper_tool_calls;
+      shortcut = None;
+    };
+    {
+      section = Sec_fleet;
+      target = Menu_keeper_tab Keeper_memory;
+      label = keeper_tab_label Keeper_memory;
+      shortcut = None;
+    };
+    {
+      section = Sec_fleet;
+      target = Menu_keeper_tab Keeper_work_candle;
+      label = keeper_tab_label Keeper_work_candle;
+      shortcut = None;
+    };
+    {
+      section = Sec_fleet;
+      target = Menu_keeper_tab Keeper_sandbox;
+      label = keeper_tab_label Keeper_sandbox;
+      shortcut = None;
+    };
+    {
+      section = Sec_fleet;
+      target = Menu_keeper_tab Keeper_config;
+      label = keeper_tab_label Keeper_config;
       shortcut = None;
     };
     {
@@ -1133,32 +1163,30 @@ let menu_item_index = function
   | Menu_knowledge Knowledge_artifacts -> 9
   | Menu_knowledge Knowledge_memory -> 10
   | Menu_keepers -> 11
-  | Menu_keeper_tab Keeper_context -> 12
-  | Menu_keeper_tab Keeper_tool_calls -> 13
-  | Menu_keeper_tab Keeper_logs -> 14
-  | Menu_keeper_tab Keeper_identity -> 15
-  | Menu_keeper_tab
-      ( Keeper_chat
-      | Keeper_memory
-      | Keeper_work_candle
-      | Keeper_sandbox
-      | Keeper_config ) ->
-      11
-  | Menu_runtime Runtime_quotas_credits -> 16
-  | Menu_runtime Runtime_efficiency_spend -> 17
-  | Menu_runtime Runtime_failover_lanes -> 18
-  | Menu_runtime Runtime_fusion -> 19
-  | Menu_runtime Runtime_tools_usage -> 20
-  | Menu_runtime Runtime_connectors -> 21
-  | Menu_runtime Runtime_addons_browser -> 22
-  | Menu_infra Infra_sandboxes -> 23
-  | Menu_infra Infra_repos_changes -> 24
-  | Menu_infra Infra_code -> 25
-  | Menu_infra Infra_activity_logs -> 26
-  | Menu_settings -> 27
-  | Menu_incidents -> 28
-  | Menu_queue_context -> 29
-  | Menu_help -> 30
+  | Menu_keeper_tab Keeper_chat -> 12
+  | Menu_keeper_tab Keeper_context -> 13
+  | Menu_keeper_tab Keeper_tool_calls -> 14
+  | Menu_keeper_tab Keeper_memory -> 15
+  | Menu_keeper_tab Keeper_work_candle -> 16
+  | Menu_keeper_tab Keeper_sandbox -> 17
+  | Menu_keeper_tab Keeper_config -> 18
+  | Menu_keeper_tab Keeper_logs -> 19
+  | Menu_keeper_tab Keeper_identity -> 20
+  | Menu_runtime Runtime_quotas_credits -> 21
+  | Menu_runtime Runtime_efficiency_spend -> 22
+  | Menu_runtime Runtime_failover_lanes -> 23
+  | Menu_runtime Runtime_fusion -> 24
+  | Menu_runtime Runtime_tools_usage -> 25
+  | Menu_runtime Runtime_connectors -> 26
+  | Menu_runtime Runtime_addons_browser -> 27
+  | Menu_infra Infra_sandboxes -> 28
+  | Menu_infra Infra_repos_changes -> 29
+  | Menu_infra Infra_code -> 30
+  | Menu_infra Infra_activity_logs -> 31
+  | Menu_settings -> 32
+  | Menu_incidents -> 33
+  | Menu_queue_context -> 34
+  | Menu_help -> 35
 
 let menu_item_of_index idx = List.nth_opt all_menu_items idx
 

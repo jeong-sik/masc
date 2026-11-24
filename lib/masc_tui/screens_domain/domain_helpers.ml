@@ -304,7 +304,7 @@ let draw_empty_notice ~grid ~(rect : Rect.t) ~(theme : Theme.t) ?bg ?hint msg =
     | Some _ | None -> ()
 
 let draw_observed_placeholder ~grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang ?bg
-    obs =
+    ?(filter_query = "") ?empty_msg obs =
   if Rect.is_empty rect then ()
   else
     let bg_color = resolve_bg theme bg in
@@ -357,15 +357,27 @@ let draw_observed_placeholder ~grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang ?b
              ~style:(Typography.status ~bg:bg_color ~bold:true theme Theme.Status_critical)
              line)
     | Observed.Value _ ->
-        let line =
-          Glyph.to_utf8 Glyph.Live_healthy
-          ^ " "
-          ^ Say.resolve lang (Say.make ~ko:"준비됨" ~en:"Ready")
-        in
-        ignore
-          (put_clipped ~grid ~clip:rect ~x:rect.x ~y:rect.y ~max_w:rect.w
-             ~style:(Typography.status ~bg:bg_color theme Theme.Status_ok)
-             line)
+        let trimmed_q = String.trim filter_query in
+        if not (String.equal trimmed_q "") then
+          draw_empty_notice ~grid ~rect ~theme ?bg
+            (Say.resolve lang
+               (Say.make
+                  ~ko:"필터 결과 없음 ([Esc] 초기화)"
+                  ~en:"No filter matches ([Esc] clear)"))
+        else (
+          match empty_msg with
+          | Some msg ->
+              draw_empty_notice ~grid ~rect ~theme ?bg (Say.resolve lang msg)
+          | None ->
+              let line =
+                Glyph.to_utf8 Glyph.Live_healthy
+                ^ " "
+                ^ Say.resolve lang (Say.make ~ko:"준비됨" ~en:"Ready")
+              in
+              ignore
+                (put_clipped ~grid ~clip:rect ~x:rect.x ~y:rect.y ~max_w:rect.w
+                   ~style:(Typography.status ~bg:bg_color theme Theme.Status_ok)
+                   line))
 
 let format_age ~now_unix ts_unix =
   if

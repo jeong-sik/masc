@@ -1207,30 +1207,44 @@ let draw_exact_input_subtab grid ~(rect : Rect.t) ~(theme : Theme.t)
                    (Int.min (List.length manifest.parts - 1)
                       st.selected_part_idx))
           in
+          let is_dive = Option.is_some (Model.active_dive model) in
+          let is_zoomed =
+            (not is_dive) && model.nav.zoomed
+            && Model.can_zoom_current_view model
+          in
           let left_focused =
-            if Option.is_some (Model.active_dive model) then
-              Model.pane_focused model 0
-            else
-              Model.body_has_focus model
-              && (model.nav.pane_index = 1 || model.nav.zoomed)
+            if is_dive || is_zoomed then Model.pane_focused model 0
+            else Model.pane_focused model 1
+          in
+          let right_focused =
+            if is_dive || is_zoomed then Model.pane_focused model 1
+            else Model.pane_focused model 2
           in
           ignore
             (Table.draw grid ~rect:left_r ~theme ~caps:Ops_common.default_caps
                ~lang:model.lang ?selected:sel ~focused:left_focused
                ~columns:cols rows);
           if not (Rect.is_empty right_r) then begin
+            let right_hdr_style =
+              if right_focused then
+                Typography.anchor ~bg:(Color.of_rgb theme.selection_bg) theme
+              else Typography.anchor ~bg theme
+            in
+            let right_prefix =
+              if right_focused then Glyph.to_utf8 Glyph.Focus_caret ^ " " else ""
+            in
             match Keeper_context_store.part_content_for_selected st with
             | Some pc ->
                 let scrubbed = Ops_common.scrub_secrets_in_text pc.text in
                 let hdr =
-                  Printf.sprintf "Part #%d · %s · %s" pc.part.part_index
+                  Printf.sprintf "%sPart #%d · %s · %s" right_prefix
+                    pc.part.part_index
                     (format_bytes pc.part.part_bytes)
                     (short_sha pc.part.part_sha256)
                 in
                 ignore
                   (Ops_common.put_line ~clip:right_r grid ~x:right_r.x
-                     ~y:right_r.y ~max_w:right_r.w
-                     ~style:(Typography.anchor ~bg theme) hdr);
+                     ~y:right_r.y ~max_w:right_r.w ~style:right_hdr_style hdr);
                 let body_r =
                   Rect.make ~x:right_r.x ~y:(right_r.y + 1) ~w:right_r.w
                     ~h:(Int.max 0 (right_r.h - 1))
@@ -1240,11 +1254,30 @@ let draw_exact_input_subtab grid ~(rect : Rect.t) ~(theme : Theme.t)
                     (Markdown.draw grid ~rect:body_r ~theme ~osc8:false
                        ~scroll:st.scroll_offset scrubbed)
             | None ->
-                Ops_common.draw_observed_empty grid ~rect:right_r ~theme
-                  ~lang:model.lang st.part_content
-                  ~empty_msg:
-                    (Say.make ~ko:"[Enter]를 눌러 선택 파트의 원문을 불러오세요"
-                       ~en:"Press [Enter] to load selected part text")
+                if right_focused && right_r.h >= 2 then begin
+                  let hdr =
+                    right_prefix
+                    ^ Ops_common.say model ~ko:"파트 원문" ~en:"Part Text"
+                  in
+                  ignore
+                    (Ops_common.put_line ~clip:right_r grid ~x:right_r.x
+                       ~y:right_r.y ~max_w:right_r.w ~style:right_hdr_style hdr);
+                  let body_r =
+                    Rect.make ~x:right_r.x ~y:(right_r.y + 1) ~w:right_r.w
+                      ~h:(Int.max 0 (right_r.h - 1))
+                  in
+                  Ops_common.draw_observed_empty grid ~rect:body_r ~theme
+                    ~lang:model.lang st.part_content
+                    ~empty_msg:
+                      (Say.make ~ko:"[Enter]를 눌러 선택 파트의 원문을 불러오세요"
+                         ~en:"Press [Enter] to load selected part text")
+                end
+                else
+                  Ops_common.draw_observed_empty grid ~rect:right_r ~theme
+                    ~lang:model.lang st.part_content
+                    ~empty_msg:
+                      (Say.make ~ko:"[Enter]를 눌러 선택 파트의 원문을 불러오세요"
+                         ~en:"Press [Enter] to load selected part text")
           end
 
 let draw_input_map_subtab grid ~(rect : Rect.t) ~(theme : Theme.t)
@@ -1873,12 +1906,18 @@ let draw_tool_calls_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
             Int.max 0
               (Int.min (List.length page.entries - 1) st.selected_call_idx)
           in
+          let is_dive = Option.is_some (Model.active_dive model) in
+          let is_zoomed =
+            (not is_dive) && model.nav.zoomed
+            && Model.can_zoom_current_view model
+          in
           let left_focused =
-            if Option.is_some (Model.active_dive model) then
-              Model.pane_focused model 0
-            else
-              Model.body_has_focus model
-              && (model.nav.pane_index = 1 || model.nav.zoomed)
+            if is_dive || is_zoomed then Model.pane_focused model 0
+            else Model.pane_focused model 1
+          in
+          let right_focused =
+            if is_dive || is_zoomed then Model.pane_focused model 1
+            else Model.pane_focused model 2
           in
           ignore
             (Table.draw grid ~rect:left_r ~theme ~caps:Ops_common.default_caps
@@ -1900,10 +1939,19 @@ let draw_tool_calls_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
                       | Some false -> "failed"
                       | None -> "unknown")
                 in
+                let right_hdr_style =
+                  if right_focused then
+                    Typography.anchor ~bg:(Color.of_rgb theme.selection_bg) theme
+                  else Typography.anchor ~bg theme
+                in
+                let right_prefix =
+                  if right_focused then Glyph.to_utf8 Glyph.Focus_caret ^ " "
+                  else ""
+                in
                 ignore
                   (Ops_common.put_line ~clip:right_r grid ~x:right_r.x ~y:!ry
-                     ~max_w:right_r.w ~style:(Typography.anchor ~bg theme)
-                     (Printf.sprintf "%s · %s" call.tool disp_s));
+                     ~max_w:right_r.w ~style:right_hdr_style
+                     (Printf.sprintf "%s%s · %s" right_prefix call.tool disp_s));
                 incr ry;
                 if !ry < rbot then begin
                   let eid_s =

@@ -12,7 +12,7 @@
  */
 
 import { html } from 'htm/preact'
-import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { markViewSynced } from '../../core/observer'
 import { resourceCache } from '../../core/resource-cache'
 import { apiGetV2, apiMutateV2 } from '../../core/transport'
@@ -65,6 +65,7 @@ export function WikiTab(props: WorkspaceViewProps) {
   const [pageDetail, setPageDetail] = useState<WikiPageData | null>(null)
   const [pageLoading, setPageLoading] = useState(false)
   const [pageError, setPageError] = useState<string | null>(null)
+  const pageAbortRef = useRef<AbortController | null>(null)
 
   const [editing, setEditing] = useState(false)
   const [creatingNew, setCreatingNew] = useState(false)
@@ -138,10 +139,11 @@ export function WikiTab(props: WorkspaceViewProps) {
     if (res.ok) setSearchResult(res.value)
   }, [])
 
-  const loadPage = useCallback(async (slug: string) => {
+  const loadPage = useCallback(async (slug: string, signal?: AbortSignal) => {
     setPageLoading(true)
     setPageError(null)
-    const res = await apiGetV2<WikiPageData>(`/api/v1/wiki/${encodeURIComponent(slug)}`)
+    const res = await apiGetV2<WikiPageData>(`/api/v1/wiki/${encodeURIComponent(slug)}`, { signal })
+    if (signal?.aborted) return null
     setPageLoading(false)
     if (!res.ok) {
       setPageError(res.error.message)
@@ -152,11 +154,16 @@ export function WikiTab(props: WorkspaceViewProps) {
   }, [])
 
   useEffect(() => {
-    if (selectedSlug && !creatingNew) {
-      setEditing(false)
-      setCasConflict(null)
-      setSaveFeedback(null)
-      void loadPage(selectedSlug)
+    pageAbortRef.current?.abort()
+    if (!selectedSlug || creatingNew) return
+    setEditing(false)
+    setCasConflict(null)
+    setSaveFeedback(null)
+    const ctrl = new AbortController()
+    pageAbortRef.current = ctrl
+    void loadPage(selectedSlug, ctrl.signal)
+    return () => {
+      ctrl.abort()
     }
   }, [selectedSlug, creatingNew, loadPage])
 
@@ -260,7 +267,10 @@ export function WikiTab(props: WorkspaceViewProps) {
     })
     resourceCache.invalidateTopic('wiki')
     await loadIndex('manual')
-    await loadPage(res.value.slug)
+    pageAbortRef.current?.abort()
+    const ctrl = new AbortController()
+    pageAbortRef.current = ctrl
+    await loadPage(res.value.slug, ctrl.signal)
   }
 
   const conflictDiff = useMemo(() => {
@@ -271,7 +281,7 @@ export function WikiTab(props: WorkspaceViewProps) {
   const displayedPages = wikiIndex?.pages ?? []
 
   const masterPane = html`
-    <div style=${{ display: 'flex', flexDirection: 'column', height: '100%', minWidth: 0 }}>
+    <div class="kn-pane-col">
       <div class="kn-pane-head">
         <div class="kn-chips" role="tablist" aria-label="Wiki 보기">
           <button type="button" role="tab" class="kn-chip" aria-selected=${leftView === 'pages'} aria-pressed=${leftView === 'pages'} onClick=${() => setLeftView('pages')}>
@@ -291,9 +301,9 @@ export function WikiTab(props: WorkspaceViewProps) {
       </div>
 
       ${leftView === 'pages' && html`
-        <div style=${{ padding: 'var(--sp-2) var(--sp-3)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', borderBottom: '1px solid var(--line-1)' }}>
+        <div class="kn-filter-bar">
           <form
-            style=${{ display: 'flex', gap: 'var(--sp-1)' }}
+            class="kn-search-row"
             onSubmit=${(e: Event) => {
               e.preventDefault()
               void runSearch(searchQuery)
@@ -301,8 +311,7 @@ export function WikiTab(props: WorkspaceViewProps) {
           >
             <input
               type="search"
-              class="kn-input"
-              style=${{ flex: '1 1 auto' }}
+              class="kn-input kn-search-input"
               placeholder="Wiki 전문 검색 (GET /api/v1/wiki/search)…"
               value=${searchQuery}
               onInput=${(e: Event) => {
@@ -359,14 +368,14 @@ export function WikiTab(props: WorkspaceViewProps) {
           `}
         </div>
 
-        ${loadError && html`<div class="kn-notice kn-notice--err" style=${{ margin: 'var(--sp-2)' }} role="alert">${loadError}</div>`}
+        ${loadError && html`<div class="kn-notice kn-notice--err kn-inset" role="alert">${loadError}</div>`}
 
         ${searchResult
           ? html`
-              <div style=${{ padding: 'var(--sp-2)', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
+              <div class="kn-search-results">
                 <div class="kn-row-meta">
                   <span>검색 결과: <strong>${searchResult.count}</strong>건 ("${searchResult.query}")</span>
-                  <button type="button" class="btn-ghost" style=${{ padding: 'var(--sp-1) var(--sp-2)' }} onClick=${() => { setSearchQuery(''); setSearchResult(null) }}>
+                  <button type="button" class="btn-ghost kn-btn-compact" onClick=${() => { setSearchQuery(''); setSearchResult(null) }}>
                     검색 닫기
                   </button>
                 </div>
@@ -390,7 +399,7 @@ export function WikiTab(props: WorkspaceViewProps) {
                       <span>rev ${r.revision}</span>
                     </div>
                     ${r.snippets[0] && html`
-                      <div style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-2)' }}>
+                      <div class="kn-sub-line">
                         L${r.snippets[0].line}: ${r.snippets[0].text}
                       </div>
                     `}
@@ -435,7 +444,7 @@ export function WikiTab(props: WorkspaceViewProps) {
       `}
 
       ${leftView === 'lint' && html`
-        <div class="kn-detail-pad" style=${{ overflowY: 'auto' }}>
+        <div class="kn-detail-pad kn-scroll-pad">
           <div class="kn-section-head">
             <h3 class="kn-section-title">Wiki Lint Findings</h3>
             <button type="button" class="btn-ghost" onClick=${() => void loadLint()}>다시 검사</button>
@@ -461,8 +470,7 @@ export function WikiTab(props: WorkspaceViewProps) {
                       <button
                         key=${`${f.kind}-${f.subject}-${idx}`}
                         type="button"
-                        class="kn-row-btn"
-                        style=${{ border: '1px solid var(--line-1)', borderRadius: 'var(--radius-sm)' }}
+                        class="kn-row-btn kn-card-row"
                         onClick=${() => {
                           const target = f.page ?? f.subject
                           if (target) {
@@ -473,9 +481,9 @@ export function WikiTab(props: WorkspaceViewProps) {
                       >
                         <div class="kn-row-top">
                           <span class="kn-badge kn-badge--warn">${f.kind}</span>
-                          <span class="mono" style=${{ fontSize: 'var(--fs-11)' }}>${f.page ?? f.subject}</span>
+                          <span class="mono kn-sub-id">${f.page ?? f.subject}</span>
                         </div>
-                        <div style=${{ fontSize: 'var(--fs-12)', color: 'var(--fg-2)' }}>
+                        <div class="kn-body-sm">
                           ${f.reason ?? f.target ?? f.subject} ${f.line ? `(L${f.line})` : ''}
                         </div>
                       </button>
@@ -485,7 +493,7 @@ export function WikiTab(props: WorkspaceViewProps) {
       `}
 
       ${leftView === 'log' && html`
-        <div class="kn-detail-pad" style=${{ overflowY: 'auto' }}>
+        <div class="kn-detail-pad kn-scroll-pad">
           <div class="kn-section-head">
             <h3 class="kn-section-title">Wiki Revision Log</h3>
             <button type="button" class="btn-ghost" onClick=${() => void loadLog()}>새로고침</button>
@@ -498,8 +506,7 @@ export function WikiTab(props: WorkspaceViewProps) {
                   <button
                     key=${entry.idx}
                     type="button"
-                    class="kn-row-btn"
-                    style=${{ border: '1px solid var(--line-1)', borderRadius: 'var(--radius-sm)' }}
+                    class="kn-row-btn kn-card-row"
                     onClick=${() => {
                       setCreatingNew(false)
                       setSelectedSlug(entry.page)
@@ -526,11 +533,11 @@ export function WikiTab(props: WorkspaceViewProps) {
         <div class="kn-detail-pad">
           <div class="kn-section-head">
             <div>
-              <h2 style=${{ margin: 0, fontSize: 'var(--fs-16)' }}>
+              <h2 class="kn-heading-tight">
                 ${creatingNew ? '새 Wiki 페이지 작성' : `편집: ${editSlug}`}
               </h2>
               ${!creatingNew && expectedSha && html`
-                <div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
+                <div class="mono kn-sub-id">
                   CAS Lock: rev ${expectedRev ?? '없음'} · sha256 ${expectedSha.slice(0, 12)}…
                 </div>
               `}
@@ -550,15 +557,15 @@ export function WikiTab(props: WorkspaceViewProps) {
           `}
 
           ${casConflict && html`
-            <section class="kn-section" style=${{ borderColor: 'var(--err-border)' }} role="alert" aria-label="409 CAS 충돌 복구">
+            <section class="kn-section kn-conflict-box" role="alert" aria-label="409 CAS 충돌 복구">
               <div class="kn-section-head">
-                <strong style=${{ color: 'var(--err-fg)' }}>409 conflict_cas — 동시 편집 충돌 감지</strong>
-                <span class="mono" style=${{ fontSize: 'var(--fs-11)' }}>
+                <strong class="kn-conflict-title">409 conflict_cas — 동시 편집 충돌 감지</strong>
+                <span class="mono kn-sub-id">
                   서버 최신 rev ${casConflict.serverPage.frontmatter.revision} · ${casConflict.serverPage.sha256.slice(0, 10)}…
                 </span>
               </div>
-              <div style=${{ fontSize: 'var(--fs-12)' }}>${casConflict.message}</div>
-              <div style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
+              <div class="kn-body-sm">${casConflict.message}</div>
+              <div class="kn-sub-id">
                 Diff (- 서버 최신본 / + 내 로컬 초안):
               </div>
               <pre class="kn-diff-box">${conflictDiff.map((chunk, idx) => html`
@@ -597,9 +604,9 @@ export function WikiTab(props: WorkspaceViewProps) {
             </section>
           `}
 
-          <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 'var(--sp-2)' }}>
-            <div style=${{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              <label for="wiki-slug" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>Slug</label>
+          <div class="kn-grid-auto">
+            <div class="kn-field">
+              <label for="wiki-slug" class="kn-field-label">Slug</label>
               <input
                 id="wiki-slug"
                 class="kn-input mono"
@@ -609,8 +616,8 @@ export function WikiTab(props: WorkspaceViewProps) {
                 placeholder="예: architecture-notes"
               />
             </div>
-            <div style=${{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              <label for="wiki-title" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>제목</label>
+            <div class="kn-field">
+              <label for="wiki-title" class="kn-field-label">제목</label>
               <input
                 id="wiki-title"
                 class="kn-input"
@@ -618,8 +625,8 @@ export function WikiTab(props: WorkspaceViewProps) {
                 onInput=${(e: Event) => setEditTitle((e.target as HTMLInputElement).value)}
               />
             </div>
-            <div style=${{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              <label for="wiki-source" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>출처 (source)</label>
+            <div class="kn-field">
+              <label for="wiki-source" class="kn-field-label">출처 (source)</label>
               <select
                 id="wiki-source"
                 class="kn-select"
@@ -639,7 +646,7 @@ export function WikiTab(props: WorkspaceViewProps) {
             onInput=${(e: Event) => setEditSummary((e.target as HTMLInputElement).value)}
             aria-label="페이지 요약"
           />
-          <div style=${{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--sp-2)' }}>
+          <div class="kn-grid-2">
             <input
               type="text"
               class="kn-input"
@@ -671,16 +678,16 @@ export function WikiTab(props: WorkspaceViewProps) {
           <div class="kn-detail-pad">
             ${saveFeedback && html`<div class=${`kn-notice kn-notice--${saveFeedback.kind}`} role="status">${saveFeedback.message}</div>`}
             <div class="kn-section-head">
-              <div style=${{ minWidth: 0 }}>
+              <div class="kn-min-w-0">
                 <div class="kn-row-meta">
                   <span class="mono">${pageDetail.slug}</span>
                   <span class="kn-badge">${pageDetail.frontmatter.source}</span>
                   <span class="mono tnum">rev ${pageDetail.frontmatter.revision}</span>
                   <span class="mono">sha256:${pageDetail.sha256.slice(0, 12)}</span>
                 </div>
-                <h2 style=${{ margin: '4px 0 0', fontSize: 'var(--fs-16)' }}>${pageDetail.frontmatter.title}</h2>
+                <h2 class="kn-heading">${pageDetail.frontmatter.title}</h2>
                 ${pageDetail.frontmatter.summary && html`
-                  <p style=${{ margin: '4px 0 0', fontSize: 'var(--fs-13)', color: 'var(--fg-2)' }}>
+                  <p class="kn-subcopy">
                     ${pageDetail.frontmatter.summary}
                   </p>
                 `}
@@ -718,12 +725,11 @@ export function WikiTab(props: WorkspaceViewProps) {
             `}
 
             <article
-              class="markdown-content"
-              style=${{ padding: 'var(--sp-3)', border: '1px solid var(--line-1)', borderRadius: 'var(--radius-md)', background: 'var(--bg-2)' }}
+              class="markdown-content kn-md-panel"
               dangerouslySetInnerHTML=${{ __html: renderSanitizedMarkdown(pageDetail.body_markdown) }}
             />
 
-            <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 'var(--sp-3)' }}>
+            <div class="kn-grid-links">
               <section class="kn-section">
                 <h3 class="kn-section-title">Backlinks (${pageDetail.backlinks.length})</h3>
                 ${pageDetail.backlinks.length === 0

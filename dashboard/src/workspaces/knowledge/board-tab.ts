@@ -3,14 +3,17 @@
  *
  * - `MasterDetail` + `VirtualList` (zero eager 200-post DOM explosion).
  * - Signal-only default filter ON (matching TUI `#6`), toggleable to All.
- * - Sub-boards & Hearths filter (`/api/v1/board/hearths`, `/api/v1/board/sub-boards`).
+ * - Multi-account capability gating: routes to `GET /api/v1/dashboard/board` in
+ *   `multi_account_signed_in` sessions and derives hearths from posts (0× 404).
+ * - Sub-boards & Hearths filter (`/api/v1/board/hearths`, `/api/v1/board/sub-boards` in single-user mode).
  * - Succession Chain folding (closed posts with `successor_id` fold into head thread).
  * - Zero-count emoji reactions collapsed behind a single `[+☺]` trigger (`#29` V2!).
  * - Full CRUD: create post, reply/comment, upvote/downvote, react, pin, delete.
  */
 
 import { html } from 'htm/preact'
-import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { authSession } from '../../core/auth'
 import { markViewSynced } from '../../core/observer'
 import { resourceCache } from '../../core/resource-cache'
 import { apiGet, apiMutate } from '../../core/transport'
@@ -46,6 +49,17 @@ interface BoardBundle {
 interface BoardDetailData {
   readonly post: BoardPostItem
   readonly comments: readonly BoardCommentItem[]
+}
+
+function deriveHearthsFromPosts(posts: readonly BoardPostItem[]): readonly BoardHearthItem[] {
+  const counts = new Map<string, number>()
+  for (const p of posts) {
+    if (!p.hearth) continue
+    counts.set(p.hearth, (counts.get(p.hearth) ?? 0) + 1)
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([name, count]) => ({ name, count }))
 }
 
 function ReactionBar(props: {
@@ -110,6 +124,7 @@ function ReactionBar(props: {
 }
 
 export function BoardTab(props: WorkspaceViewProps) {
+  const isMultiAccount = authSession.value.kind === 'multi_account_signed_in'
   const [bundle, setBundle] = useState<BoardBundle>({ posts: [], hearths: [], subBoards: [] })
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -125,6 +140,7 @@ export function BoardTab(props: WorkspaceViewProps) {
   const [detail, setDetail] = useState<BoardDetailData | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [expandedChainHeads, setExpandedChainHeads] = useState<Record<string, boolean>>({})
+  const detailAbortRef = useRef<AbortController | null>(null)
 
   // CRUD Forms
   const [showCreate, setShowCreate] = useState(false)
@@ -139,14 +155,32 @@ export function BoardTab(props: WorkspaceViewProps) {
   const loadBoard = useCallback(async (reason: 'mount' | 'manual' = 'mount') => {
     setLoading(true)
     setLoadError(null)
+    const multiAccountNow = authSession.peek().kind === 'multi_account_signed_in'
     const params = new URLSearchParams({ sort_by: sortBy, limit: '200' })
     if (signalOnly) params.set('exclude_system', 'true')
     if (selectedHearth) params.set('hearth', selectedHearth)
-    const cacheKey = `kn:board:${params.toString()}`
+    const cacheKey = `kn:board:${multiAccountNow ? 'ma' : 'local'}:${params.toString()}`
 
     const obs = await resourceCache.fetch<BoardBundle>(
       cacheKey,
       async (signal) => {
+        if (multiAccountNow) {
+          const postsRes = await apiGet<unknown>(`/api/v1/dashboard/board?${params.toString()}`, { signal })
+          if (!postsRes.ok) return postsRes
+          const posts: BoardPostItem[] = []
+          if (isRecord(postsRes.value) && Array.isArray(postsRes.value.posts)) {
+            for (const raw of postsRes.value.posts) {
+              const p = decodeBoardPost(raw)
+              if (p) posts.push(p)
+            }
+          }
+          return ok({
+            posts,
+            hearths: deriveHearthsFromPosts(posts),
+            subBoards: [],
+          })
+        }
+
         const [postsRes, hearthsRes, subBoardsRes] = await Promise.all([
           apiGet<unknown>(`/api/v1/board?${params.toString()}`, { signal }),
           apiGet<unknown>('/api/v1/board/hearths', { signal }),
@@ -205,15 +239,24 @@ export function BoardTab(props: WorkspaceViewProps) {
     } else if (obs.kind === 'failed') {
       setLoadError(obs.error.message)
     }
-  }, [sortBy, signalOnly, selectedHearth, props.entityId])
+  }, [sortBy, signalOnly, selectedHearth, props.entityId, isMultiAccount])
 
   useEffect(() => {
     void loadBoard('mount')
   }, [loadBoard])
 
-  const loadPostDetail = useCallback(async (postId: string) => {
+  const loadPostDetail = useCallback(async (postId: string, signal?: AbortSignal) => {
+    if (authSession.peek().kind === 'multi_account_signed_in') {
+      setDetail(null)
+      setDetailLoading(false)
+      return
+    }
     setDetailLoading(true)
-    const res = await apiGet<unknown>(`/api/v1/board/${encodeURIComponent(postId)}?format=flat&comment_limit=100`)
+    const res = await apiGet<unknown>(
+      `/api/v1/board/${encodeURIComponent(postId)}?format=flat&comment_limit=100`,
+      { signal },
+    )
+    if (signal?.aborted) return
     setDetailLoading(false)
     if (!res.ok || !isRecord(res.value)) return
     const postRaw = isRecord(res.value.post) ? res.value.post : res.value
@@ -229,16 +272,24 @@ export function BoardTab(props: WorkspaceViewProps) {
       const dec = decodeBoardComment(c)
       if (dec) comments.push(dec)
     }
+    if (signal?.aborted) return
     setDetail({ post, comments })
   }, [])
 
   useEffect(() => {
-    if (selectedPostId) {
-      void loadPostDetail(selectedPostId)
-    } else {
+    detailAbortRef.current?.abort()
+    if (!selectedPostId) {
       setDetail(null)
+      setDetailLoading(false)
+      return
     }
-  }, [selectedPostId, loadPostDetail])
+    const ctrl = new AbortController()
+    detailAbortRef.current = ctrl
+    void loadPostDetail(selectedPostId, ctrl.signal)
+    return () => {
+      ctrl.abort()
+    }
+  }, [selectedPostId, isMultiAccount, loadPostDetail])
 
   const foldedFeed = useMemo<readonly FoldedBoardEntry[]>(() => {
     const q = query.trim().toLowerCase()
@@ -262,6 +313,13 @@ export function BoardTab(props: WorkspaceViewProps) {
     () => foldedFeed.find((e) => e.head.id === selectedPostId) ?? null,
     [foldedFeed, selectedPostId],
   )
+
+  const refreshActiveDetail = async (postId: string) => {
+    detailAbortRef.current?.abort()
+    const ctrl = new AbortController()
+    detailAbortRef.current = ctrl
+    await loadPostDetail(postId, ctrl.signal)
+  }
 
   const handleCreatePost = async (e: Event) => {
     e.preventDefault()
@@ -311,7 +369,7 @@ export function BoardTab(props: WorkspaceViewProps) {
     setReplyText('')
     setReplyParentId(null)
     setFeedback({ kind: 'ok', message: '댓글이 등록되었습니다.' })
-    await loadPostDetail(activePost.id)
+    await refreshActiveDetail(activePost.id)
   }
 
   const handleVotePost = async (postId: string, direction: 'up' | 'down') => {
@@ -328,7 +386,7 @@ export function BoardTab(props: WorkspaceViewProps) {
     }
     resourceCache.invalidateTopic('board')
     await loadBoard('manual')
-    if (selectedPostId === postId) await loadPostDetail(postId)
+    if (selectedPostId === postId) await refreshActiveDetail(postId)
   }
 
   const handleVoteComment = async (commentId: string, direction: 'up' | 'down') => {
@@ -343,7 +401,7 @@ export function BoardTab(props: WorkspaceViewProps) {
       setFeedback({ kind: 'err', message: `댓글 투표 실패: ${res.error.message}` })
       return
     }
-    if (selectedPostId) await loadPostDetail(selectedPostId)
+    if (selectedPostId) await refreshActiveDetail(selectedPostId)
   }
 
   const handleToggleReaction = async (targetType: 'post' | 'comment', targetId: string, emoji: string) => {
@@ -358,7 +416,7 @@ export function BoardTab(props: WorkspaceViewProps) {
       setFeedback({ kind: 'err', message: `반응 변경 실패: ${res.error.message}` })
       return
     }
-    if (selectedPostId) await loadPostDetail(selectedPostId)
+    if (selectedPostId) await refreshActiveDetail(selectedPostId)
   }
 
   const handlePinPost = async (post: BoardPostItem) => {
@@ -375,7 +433,7 @@ export function BoardTab(props: WorkspaceViewProps) {
     setFeedback({ kind: 'ok', message: post.pinned ? '고정이 해제되었습니다.' : '게시글이 고정되었습니다.' })
     resourceCache.invalidateTopic('board')
     await loadBoard('manual')
-    await loadPostDetail(post.id)
+    await refreshActiveDetail(post.id)
   }
 
   const handleDeletePost = async (postId: string) => {
@@ -393,18 +451,20 @@ export function BoardTab(props: WorkspaceViewProps) {
   }
 
   const masterPane = html`
-    <div style=${{ display: 'flex', flexDirection: 'column', height: '100%', minWidth: 0 }}>
+    <div class="kn-pane-col">
       <div class="kn-pane-head">
         <h2 class="kn-pane-title">Board <span class="kn-chip-count">(${foldedFeed.length})</span></h2>
         <div class="kn-actions">
-          <button type="button" class="btn-primary" onClick=${() => setShowCreate((v) => !v)}>
-            ${showCreate ? '닫기' : '+ 새 글'}
-          </button>
+          ${!isMultiAccount && html`
+            <button type="button" class="btn-primary" onClick=${() => setShowCreate((v) => !v)}>
+              ${showCreate ? '닫기' : '+ 새 글'}
+            </button>
+          `}
           <button type="button" class="btn-ghost" onClick=${() => void loadBoard('manual')}>새로고침</button>
         </div>
       </div>
 
-      <div style=${{ padding: 'var(--sp-2) var(--sp-3)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', borderBottom: '1px solid var(--line-1)' }}>
+      <div class="kn-filter-bar">
         <div class="kn-toolbar">
           <div class="kn-chips" role="group" aria-label="피드 신호 필터">
             <button
@@ -483,8 +543,8 @@ export function BoardTab(props: WorkspaceViewProps) {
         `}
       </div>
 
-      ${showCreate && html`
-        <form class="kn-section" style=${{ margin: 'var(--sp-2)' }} onSubmit=${handleCreatePost}>
+      ${showCreate && !isMultiAccount && html`
+        <form class="kn-section kn-inset" onSubmit=${handleCreatePost}>
           <h3 class="kn-section-title">새 게시글 작성</h3>
           <input
             type="text"
@@ -515,7 +575,7 @@ export function BoardTab(props: WorkspaceViewProps) {
         </form>
       `}
 
-      ${loadError && html`<div class="kn-notice kn-notice--err" style=${{ margin: 'var(--sp-2)' }} role="alert">${loadError}</div>`}
+      ${loadError && html`<div class="kn-notice kn-notice--err kn-inset" role="alert">${loadError}</div>`}
 
       ${loading && bundle.posts.length === 0
         ? html`<div class="kn-detail-pad"><span class="dtable-absent">게시글 불러오는 중…</span></div>`
@@ -563,51 +623,58 @@ export function BoardTab(props: WorkspaceViewProps) {
     ? html`
         <div class="kn-detail-pad">
           ${feedback && html`<div class=${`kn-notice kn-notice--${feedback.kind}`} role="status">${feedback.message}</div>`}
+          ${isMultiAccount && html`
+            <div class="kn-notice kn-notice--info" role="note">
+              멀티-계정 대시보드 세션: <code>/api/v1/dashboard/board</code> 읽기 전용 피드를 표시합니다. 댓글·반응·편집은 단일-사용자 로컬 세션에서 지원됩니다.
+            </div>
+          `}
           <div class="kn-section-head">
-            <div style=${{ minWidth: 0 }}>
+            <div class="kn-min-w-0">
               <div class="kn-row-meta">
                 <${KeeperBadge} id=${activePost.author} portrait=${true} size="sm" />
                 ${activePost.hearth && html`<span class="kn-badge">#${activePost.hearth}</span>`}
                 ${activePost.pinned && html`<span class="kn-badge kn-badge--info">Pinned</span>`}
                 <span>${formatRelativeTime(activePost.createdAt)}</span>
               </div>
-              <h2 style=${{ margin: '4px 0 0', fontSize: 'var(--fs-16)' }}>${activePost.title}</h2>
+              <h2 class="kn-heading">${activePost.title}</h2>
             </div>
-            <div class="kn-actions">
-              <button
-                type="button"
-                class="btn-ghost"
-                disabled=${busy}
-                onClick=${() => void handleVotePost(activePost.id, 'up')}
-              >
-                ▲ ${activePost.votes}
-              </button>
-              <button
-                type="button"
-                class="btn-ghost"
-                disabled=${busy}
-                onClick=${() => void handleVotePost(activePost.id, 'down')}
-                aria-label="비추천"
-              >
-                ▼
-              </button>
-              <button
-                type="button"
-                class="btn-ghost"
-                disabled=${busy}
-                onClick=${() => void handlePinPost(activePost)}
-              >
-                ${activePost.pinned ? '고정 해제' : '고정'}
-              </button>
-              <button
-                type="button"
-                class="kn-btn-danger"
-                disabled=${busy}
-                onClick=${() => void handleDeletePost(activePost.id)}
-              >
-                삭제
-              </button>
-            </div>
+            ${!isMultiAccount && html`
+              <div class="kn-actions">
+                <button
+                  type="button"
+                  class="btn-ghost"
+                  disabled=${busy}
+                  onClick=${() => void handleVotePost(activePost.id, 'up')}
+                >
+                  ▲ ${activePost.votes}
+                </button>
+                <button
+                  type="button"
+                  class="btn-ghost"
+                  disabled=${busy}
+                  onClick=${() => void handleVotePost(activePost.id, 'down')}
+                  aria-label="비추천"
+                >
+                  ▼
+                </button>
+                <button
+                  type="button"
+                  class="btn-ghost"
+                  disabled=${busy}
+                  onClick=${() => void handlePinPost(activePost)}
+                >
+                  ${activePost.pinned ? '고정 해제' : '고정'}
+                </button>
+                <button
+                  type="button"
+                  class="kn-btn-danger"
+                  disabled=${busy}
+                  onClick=${() => void handleDeletePost(activePost.id)}
+                >
+                  삭제
+                </button>
+              </div>
+            `}
           </div>
 
           ${activeEntry && activeEntry.predecessors.length > 0 && html`
@@ -626,13 +693,12 @@ export function BoardTab(props: WorkspaceViewProps) {
                 </button>
               </div>
               ${expandedChainHeads[activePost.id] && html`
-                <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
+                <div class="kn-stack-1">
                   ${activeEntry.predecessors.map((pred) => html`
                     <button
                       key=${pred.id}
                       type="button"
-                      class="kn-row-btn"
-                      style=${{ border: '1px solid var(--line-1)', borderRadius: 'var(--radius-sm)' }}
+                      class="kn-row-btn kn-card-row"
                       onClick=${() => setSelectedPostId(pred.id)}
                     >
                       <div class="kn-row-top">
@@ -658,70 +724,70 @@ export function BoardTab(props: WorkspaceViewProps) {
           <${ReactionBar}
             reactions=${activePost.reactions}
             supportedEmojis=${activePost.supportedReactionEmojis}
-            disabled=${busy}
+            disabled=${busy || isMultiAccount}
             onToggle=${(emoji: string) => void handleToggleReaction('post', activePost.id, emoji)}
           />
 
-          <section class="kn-section" aria-label="댓글 스레드">
-            <h3 class="kn-section-title">Comments (${detail?.comments.length ?? activePost.commentCount})</h3>
-            ${detailLoading && !detail && html`<span class="dtable-absent">댓글 불러오는 중…</span>`}
-            ${detail && detail.comments.length === 0 && html`<span class="dtable-absent">아직 댓글이 없습니다.</span>`}
-            ${detail && detail.comments.map((c) => html`
-              <div key=${c.id} class=${`kn-comment ${c.parentId ? 'kn-comment--nested' : ''}`.trim()}>
-                <div class="kn-row-top">
-                  <div class="kn-row-meta">
-                    <${KeeperBadge} id=${c.author} size="sm" />
-                    <span>${formatRelativeTime(c.createdAt)}</span>
+          ${!isMultiAccount && html`
+            <section class="kn-section" aria-label="댓글 스레드">
+              <h3 class="kn-section-title">Comments (${detail?.comments.length ?? activePost.commentCount})</h3>
+              ${detailLoading && !detail && html`<span class="dtable-absent">댓글 불러오는 중…</span>`}
+              ${detail && detail.comments.length === 0 && html`<span class="dtable-absent">아직 댓글이 없습니다.</span>`}
+              ${detail && detail.comments.map((c) => html`
+                <div key=${c.id} class=${`kn-comment ${c.parentId ? 'kn-comment--nested' : ''}`.trim()}>
+                  <div class="kn-row-top">
+                    <div class="kn-row-meta">
+                      <${KeeperBadge} id=${c.author} size="sm" />
+                      <span>${formatRelativeTime(c.createdAt)}</span>
+                    </div>
+                    <div class="kn-actions">
+                      <button type="button" class="btn-ghost kn-btn-compact" disabled=${busy} onClick=${() => void handleVoteComment(c.id, 'up')}>
+                        ▲ ${c.votes}
+                      </button>
+                      <button type="button" class="btn-ghost kn-btn-compact" disabled=${busy} onClick=${() => void handleVoteComment(c.id, 'down')} aria-label="댓글 비추천">
+                        ▼
+                      </button>
+                      <button type="button" class="btn-ghost kn-btn-compact" onClick=${() => setReplyParentId(c.id)}>
+                        답글
+                      </button>
+                    </div>
                   </div>
-                  <div class="kn-actions">
-                    <button type="button" class="btn-ghost" style=${{ padding: 'var(--sp-1) var(--sp-2)' }} disabled=${busy} onClick=${() => void handleVoteComment(c.id, 'up')}>
-                      ▲ ${c.votes}
-                    </button>
-                    <button type="button" class="btn-ghost" style=${{ padding: 'var(--sp-1) var(--sp-2)' }} disabled=${busy} onClick=${() => void handleVoteComment(c.id, 'down')} aria-label="댓글 비추천">
-                      ▼
-                    </button>
-                    <button type="button" class="btn-ghost" style=${{ padding: 'var(--sp-1) var(--sp-2)' }} onClick=${() => setReplyParentId(c.id)}>
-                      답글
-                    </button>
-                  </div>
+                  <div
+                    class="markdown-content kn-body-md"
+                    dangerouslySetInnerHTML=${{ __html: renderSanitizedMarkdown(c.content) }}
+                  />
+                  <${ReactionBar}
+                    reactions=${c.reactions}
+                    supportedEmojis=${activePost.supportedReactionEmojis}
+                    disabled=${busy}
+                    onToggle=${(emoji: string) => void handleToggleReaction('comment', c.id, emoji)}
+                  />
                 </div>
-                <div
-                  class="markdown-content"
-                  style=${{ fontSize: 'var(--fs-13)' }}
-                  dangerouslySetInnerHTML=${{ __html: renderSanitizedMarkdown(c.content) }}
-                />
-                <${ReactionBar}
-                  reactions=${c.reactions}
-                  supportedEmojis=${activePost.supportedReactionEmojis}
-                  disabled=${busy}
-                  onToggle=${(emoji: string) => void handleToggleReaction('comment', c.id, emoji)}
-                />
-              </div>
-            `)}
+              `)}
 
-            <form style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', marginTop: 'var(--sp-2)' }} onSubmit=${handleReply}>
-              ${replyParentId && html`
-                <div class="kn-notice kn-notice--info">
-                  댓글 <span class="mono">${replyParentId}</span>에 답글 작성 중
-                  <button type="button" class="btn-ghost" style=${{ marginLeft: 'var(--sp-2)', padding: 'var(--sp-1) var(--sp-2)' }} onClick=${() => setReplyParentId(null)}>
-                    취소
+              <form class="kn-reply-form" onSubmit=${handleReply}>
+                ${replyParentId && html`
+                  <div class="kn-notice kn-notice--info">
+                    댓글 <span class="mono">${replyParentId}</span>에 답글 작성 중
+                    <button type="button" class="btn-ghost kn-btn-ml" onClick=${() => setReplyParentId(null)}>
+                      취소
+                    </button>
+                  </div>
+                `}
+                <textarea
+                  class="kn-textarea kn-textarea--reply"
+                  placeholder="댓글을 작성하세요 (Markdown 지원)…"
+                  value=${replyText}
+                  onInput=${(e: Event) => setReplyText((e.target as HTMLTextAreaElement).value)}
+                />
+                <div class="kn-actions">
+                  <button type="submit" class="btn-primary" disabled=${busy || !replyText.trim()}>
+                    댓글 등록
                   </button>
                 </div>
-              `}
-              <textarea
-                class="kn-textarea"
-                style=${{ minHeight: '72px' }}
-                placeholder="댓글을 작성하세요 (Markdown 지원)…"
-                value=${replyText}
-                onInput=${(e: Event) => setReplyText((e.target as HTMLTextAreaElement).value)}
-              />
-              <div class="kn-actions">
-                <button type="submit" class="btn-primary" disabled=${busy || !replyText.trim()}>
-                  댓글 등록
-                </button>
-              </div>
-            </form>
-          </section>
+              </form>
+            </section>
+          `}
         </div>
       `
     : null

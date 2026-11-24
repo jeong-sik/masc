@@ -3,15 +3,14 @@
  *
  * - `MasterDetail` (42%/58%) + `VirtualList` for bounded DOM (<1,200 nodes).
  * - Strict closed-sum `goal_phase` badges (rejecting legacy `status` field).
- * - Criterion review verdicts, Create/Propose Goal form requiring `measure` + non-empty `procedure`.
- * - Phase transitions (`POST /api/v1/tools/masc_goal_transition`).
- * - Verification verdicts (`POST /api/v1/verification/verdict`).
- * - Goal completion confirmation (`GET/POST /api/v1/goals/confirmation`) wrapped in `TargetLockedAction`.
- * - Linked tasks list (clicking jumps to `/work/tasks/<id>`) & Goal Candle payout link.
+ * - Strict `decodeGoalConfirmation()` reading `verification.completion.verdict` + `/health?full=1` `runtime_instance_id`.
+ * - Capability-gated in `multi_account_signed_in` mode (skips unbridged `/api/v1/verification/requests`).
+ * - Per-effect `AbortController` guards detail confirmation fetches against selection races.
+ * - Verification verdicts strictly scoped to the selected Goal's linked tasks (zero unrelated fallback).
  */
 
 import { html } from 'htm/preact'
-import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { activeWorkspaceId, currentSessionEpoch } from '../../core/auth'
 import { markViewSynced, subscribeObserverFrames } from '../../core/observer'
 import { formatObserved, resourceCache } from '../../core/resource-cache'
@@ -26,12 +25,15 @@ import {
   asStringArray,
   availableGoalActions,
   callMcpToolViaCore,
+  decodeGoalConfirmation,
   decodeGoalItem,
   formatRelativeTime,
   goalPhaseLabel,
   goalPhaseTone,
+  isMultiAccountSession,
   isRecord,
   readWorkspacePrecondition,
+  toExpectedWorkspaceBody,
   validateNewGoalInput,
   type GoalAction,
   type GoalConfirmationEvidence,
@@ -45,6 +47,7 @@ interface GoalsLoadBundle {
   readonly goals: readonly GoalItem[]
   readonly rejectedCount: number
   readonly verifications: readonly VerificationRequestItem[]
+  readonly verificationsSupported: boolean
 }
 
 function flattenGoalTree(nodes: unknown[], out: GoalItem[], rejected: { count: number }): void {
@@ -98,7 +101,12 @@ function actionLabel(action: GoalAction): string {
 }
 
 export function GoalsTab(props: WorkspaceViewProps) {
-  const [bundle, setBundle] = useState<GoalsLoadBundle>({ goals: [], rejectedCount: 0, verifications: [] })
+  const [bundle, setBundle] = useState<GoalsLoadBundle>({
+    goals: [],
+    rejectedCount: 0,
+    verifications: [],
+    verificationsSupported: true,
+  })
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [phaseFilter, setPhaseFilter] = useState<GoalPhase | 'ALL'>('ALL')
@@ -131,6 +139,7 @@ export function GoalsTab(props: WorkspaceViewProps) {
   const [confirmationLoading, setConfirmationLoading] = useState(false)
   const [confirmationLockedEpoch, setConfirmationLockedEpoch] = useState<number>(currentSessionEpoch())
   const [liveConfirmRev, setLiveConfirmRev] = useState<string | null>(null)
+  const confirmAbortRef = useRef<AbortController | null>(null)
 
   // Verification verdict state
   const [verdictReasonByReq, setVerdictReasonByReq] = useState<Record<string, string>>({})
@@ -138,18 +147,20 @@ export function GoalsTab(props: WorkspaceViewProps) {
   const loadData = useCallback(async (reason: 'mount' | 'manual' | 'sse' = 'mount') => {
     setLoading(true)
     setLoadError(null)
+    const multiAccount = isMultiAccountSession()
     const obs = await resourceCache.fetch<GoalsLoadBundle>(
-      'work:goals:bundle',
+      `work:goals:bundle:${multiAccount ? 'ma' : 'su'}`,
       async (signal) => {
-        const [goalsRes, verifRes] = await Promise.all([
-          apiGet<unknown>('/api/v1/dashboard/goals', { signal }),
-          apiGet<unknown>('/api/v1/verification/requests?view=awaiting&limit=50&offset=0', { signal }),
-        ])
+        const goalsPromise = apiGet<unknown>('/api/v1/dashboard/goals', { signal })
+        const verifPromise = multiAccount
+          ? Promise.resolve(null)
+          : apiGet<unknown>('/api/v1/verification/requests?view=awaiting&limit=50&offset=0', { signal })
+        const [goalsRes, verifRes] = await Promise.all([goalsPromise, verifPromise])
+
         let goalsRaw: unknown[] = []
         if (goalsRes.ok && isRecord(goalsRes.value) && Array.isArray(goalsRes.value.tree)) {
           goalsRaw = goalsRes.value.tree
         } else {
-          // Fallback to /api/v1/dashboard/planning
           const planRes = await apiGet<unknown>('/api/v1/dashboard/planning', { signal })
           if (!planRes.ok) {
             return goalsRes.ok ? planRes : goalsRes
@@ -161,8 +172,13 @@ export function GoalsTab(props: WorkspaceViewProps) {
         const goals: GoalItem[] = []
         const rejected = { count: 0 }
         flattenGoalTree(goalsRaw, goals, rejected)
-        const verifications = verifRes.ok ? decodeVerificationList(verifRes.value) : []
-        return ok({ goals, rejectedCount: rejected.count, verifications })
+        const verifications = verifRes && verifRes.ok ? decodeVerificationList(verifRes.value) : []
+        return ok({
+          goals,
+          rejectedCount: rejected.count,
+          verifications,
+          verificationsSupported: !multiAccount,
+        })
       },
       { ttlMs: 10_000, topics: ['goals', 'goal_updated', 'verification', 'planning'], reason },
     )
@@ -222,11 +238,18 @@ export function GoalsTab(props: WorkspaceViewProps) {
     [bundle.goals, selectedGoalId],
   )
 
-  const loadConfirmation = useCallback(async (goal: GoalItem) => {
+  const loadConfirmation = useCallback(async (goal: GoalItem, externalSignal?: AbortSignal) => {
+    confirmAbortRef.current?.abort()
+    const controller = new AbortController()
+    confirmAbortRef.current = controller
+    const signal = externalSignal ?? controller.signal
+
     setConfirmationLoading(true)
     setConfirmationError(null)
     setConfirmation(null)
-    const wsRes = await readWorkspacePrecondition()
+
+    const wsRes = await readWorkspacePrecondition(signal)
+    if (signal.aborted) return
     if (!wsRes.ok) {
       setConfirmationLoading(false)
       setConfirmationError(wsRes.error.message)
@@ -237,50 +260,36 @@ export function GoalsTab(props: WorkspaceViewProps) {
       expected_base_path: wsRes.value.base_path,
       expected_masc_root: wsRes.value.masc_root,
     })
-    const res = await apiGet<Record<string, unknown>>(`/api/v1/goals/confirmation?${params.toString()}`)
+    const res = await apiGet<unknown>(`/api/v1/goals/confirmation?${params.toString()}`, { signal })
+    if (signal.aborted) return
     setConfirmationLoading(false)
     if (!res.ok) {
       setConfirmationError(res.error.message)
       return
     }
-    const raw = res.value
-    const verif = isRecord(raw.verification) ? raw.verification : null
-    const completion = verif && isRecord(verif.completion) ? verif.completion : null
-    const criterion = completion && isRecord(completion.criterion) ? completion.criterion : null
-    const criterionRev =
-      (criterion ? asNonEmptyString(criterion.revision) : null)
-      ?? goal.criterionRevision
-      ?? 'rev-unknown'
-    const requestId = (completion ? asNonEmptyString(completion.request_id) : null) ?? `confirm-${goal.id}`
-    const runId = (completion ? asNonEmptyString(completion.run_id) : null)
-      ?? (completion ? asNonEmptyString(completion.verification_run_id) : null)
-      ?? 'run-unknown'
-
-    setConfirmation({
-      goalId: goal.id,
-      phase: goal.phase,
-      criterionRevision: criterionRev,
-      requestId,
-      verificationRunId: runId,
-      actor: (completion ? asNonEmptyString(completion.actor) : null) ?? 'verifier',
-      evidence: (completion ? asString(completion.evidence, '') : '') || '증명 본문 없음',
-      recordedAt: (completion ? asString(completion.recorded_at, '') : '') || '',
-      inspectionOperatorId: asString(raw.inspection_operator_id, 'operator'),
-      runtimeInstanceId: asString(raw.runtime_instance_id, asString(raw.instance_id, 'runtime')),
-      workspace: wsRes.value,
-    })
+    const decoded = decodeGoalConfirmation(res.value, goal.id, wsRes.value)
+    if (!decoded.ok) {
+      setConfirmationError(decoded.error)
+      return
+    }
+    setConfirmation(decoded.value)
     setConfirmationLockedEpoch(currentSessionEpoch())
-    setLiveConfirmRev(criterionRev)
+    setLiveConfirmRev(decoded.value.criterionRevision)
   }, [])
 
   useEffect(() => {
     if (selectedGoal && selectedGoal.phase === 'Awaiting_confirmation') {
-      void loadConfirmation(selectedGoal)
-    } else {
-      setConfirmation(null)
-      setConfirmationError(null)
-      setLiveConfirmRev(null)
+      const controller = new AbortController()
+      void loadConfirmation(selectedGoal, controller.signal)
+      return () => {
+        controller.abort()
+      }
     }
+    confirmAbortRef.current?.abort()
+    setConfirmation(null)
+    setConfirmationError(null)
+    setLiveConfirmRev(null)
+    return undefined
   }, [selectedGoal?.id, selectedGoal?.phase, loadConfirmation])
 
   const handleCreateGoal = async (e: Event) => {
@@ -314,7 +323,7 @@ export function GoalsTab(props: WorkspaceViewProps) {
     const callRes = await callMcpToolViaCore('masc_goal_upsert', {
       id: goalId,
       if_absent: true,
-      expected_workspace: wsRes.value,
+      expected_workspace: toExpectedWorkspaceBody(wsRes.value),
       title: validated.value.title,
       measure: validated.value.measure,
       procedure: validated.value.procedure,
@@ -347,7 +356,7 @@ export function GoalsTab(props: WorkspaceViewProps) {
     const body: Record<string, unknown> = {
       goal_id: goal.id,
       action,
-      expected_workspace: wsRes.value,
+      expected_workspace: toExpectedWorkspaceBody(wsRes.value),
     }
     if (transitionNote.trim()) body.note = transitionNote.trim()
     const res = await apiMutate<unknown>('POST', '/api/v1/tools/masc_goal_transition', body)
@@ -416,15 +425,15 @@ export function GoalsTab(props: WorkspaceViewProps) {
     await loadData('manual')
   }
 
+  // Strictly scope verifications to the selected goal's linked tasks (zero cross-goal fallback!)
   const relatedVerifications = useMemo(() => {
-    if (!selectedGoal) return bundle.verifications
+    if (!selectedGoal) return []
     const linkedIds = new Set(selectedGoal.linkedTasks.map((t) => t.id))
-    const matched = bundle.verifications.filter((v) => linkedIds.has(v.taskId))
-    return matched.length > 0 ? matched : bundle.verifications
+    return bundle.verifications.filter((v) => linkedIds.has(v.taskId))
   }, [bundle.verifications, selectedGoal])
 
   const masterPane = html`
-    <div style=${{ display: 'flex', flexDirection: 'column', height: '100%', minWidth: 0 }}>
+    <div class="wk-pane-col">
       <div class="wk-pane-head">
         <h2 class="wk-pane-title">Goals <span class="wk-chip-count">(${filteredGoals.length})</span></h2>
         <div class="wk-actions">
@@ -437,7 +446,7 @@ export function GoalsTab(props: WorkspaceViewProps) {
         </div>
       </div>
 
-      <div style=${{ padding: 'var(--sp-2) var(--sp-3)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', borderBottom: '1px solid var(--line-1)' }}>
+      <div class="wk-filter-bar">
         <input
           type="search"
           class="wk-input"
@@ -476,7 +485,7 @@ export function GoalsTab(props: WorkspaceViewProps) {
       </div>
 
       ${showCreate && html`
-        <form class="wk-form" style=${{ margin: 'var(--sp-2)' }} onSubmit=${handleCreateGoal}>
+        <form class="wk-form wk-inset" onSubmit=${handleCreateGoal}>
           <div class="wk-section-title">새 목표 생성 (measure + procedure 필수)</div>
           <div class="wk-field">
             <label for="goal-title">제목</label>
@@ -581,8 +590,8 @@ export function GoalsTab(props: WorkspaceViewProps) {
         </form>
       `}
 
-      ${createSuccess && html`<div class="wk-notice wk-notice--ok" style=${{ margin: 'var(--sp-2)' }}>${createSuccess}</div>`}
-      ${loadError && html`<div class="wk-notice wk-notice--err" style=${{ margin: 'var(--sp-2)' }} role="alert">${loadError}</div>`}
+      ${createSuccess && html`<div class="wk-notice wk-notice--ok wk-inset">${createSuccess}</div>`}
+      ${loadError && html`<div class="wk-notice wk-notice--err wk-inset" role="alert">${loadError}</div>`}
 
       ${loading && bundle.goals.length === 0
         ? html`<div class="wk-detail-pad"><span class="dtable-absent">목표 목록 불러오는 중…</span></div>`
@@ -626,9 +635,9 @@ export function GoalsTab(props: WorkspaceViewProps) {
     ? html`
         <div class="wk-detail-pad">
           <div class="wk-section-head">
-            <div style=${{ minWidth: 0 }}>
-              <div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>${selectedGoal.id}</div>
-              <h2 style=${{ margin: 'var(--sp-1) 0 0', fontSize: 'var(--fs-16)' }}>${selectedGoal.title}</h2>
+            <div class="wk-min-w-0">
+              <div class="mono wk-sub-id">${selectedGoal.id}</div>
+              <h2 class="wk-heading">${selectedGoal.title}</h2>
             </div>
             <div class="wk-actions">
               <span class=${`wk-badge wk-badge--${goalPhaseTone(selectedGoal.phase)}`}>
@@ -690,10 +699,10 @@ export function GoalsTab(props: WorkspaceViewProps) {
               ${selectedGoal.criterionVerdict.kind === 'pending' && html`<span class="wk-badge wk-badge--idle">${selectedGoal.criterionVerdict.state}</span>`}
               ${selectedGoal.criterionVerdict.kind === 'unavailable' && html`<span class="wk-badge wk-badge--warn">Unavailable</span>`}
             </div>
-            <div style=${{ fontSize: 'var(--fs-13)', whiteSpace: 'pre-wrap' }}>
+            <div class="wk-body-pre">
               ${selectedGoal.procedure || '측정 절차 없음'}
             </div>
-            <div style=${{ fontSize: 'var(--fs-12)', color: 'var(--fg-2)' }}>
+            <div class="wk-muted-sm">
               ${selectedGoal.criterionVerdict.kind === 'viable' || selectedGoal.criterionVerdict.kind === 'needs_revision'
                 ? selectedGoal.criterionVerdict.reason
                 : selectedGoal.criterionVerdict.kind === 'unavailable'
@@ -741,8 +750,8 @@ export function GoalsTab(props: WorkspaceViewProps) {
               ${confirmationLoading && html`<span class="dtable-absent">Verifier 증명 증거 불러오는 중…</span>`}
               ${confirmationError && html`<div class="wk-notice wk-notice--err" role="alert">${confirmationError}</div>`}
               ${confirmation && html`
-                <div style=${{ fontSize: 'var(--fs-12)', color: 'var(--fg-2)' }}>
-                  증명 주체: <strong>${confirmation.actor}</strong> · 기록: ${formatRelativeTime(confirmation.recordedAt)}
+                <div class="wk-muted-sm">
+                  증명 주체: <strong>${confirmation.actor}</strong> (${confirmation.authorityKind}) · 기록: ${formatRelativeTime(confirmation.recordedAt)}
                 </div>
                 <pre class="wk-code-preview">${confirmation.evidence}</pre>
                 <${TargetLockedAction}
@@ -783,13 +792,12 @@ export function GoalsTab(props: WorkspaceViewProps) {
             ${selectedGoal.linkedTasks.length === 0
               ? html`<span class="dtable-absent">연결된 태스크가 없습니다.</span>`
               : html`
-                  <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
+                  <div class="wk-stack-1">
                     ${selectedGoal.linkedTasks.map((t) => html`
                       <button
                         key=${t.id}
                         type="button"
-                        class="wk-row-btn"
-                        style=${{ border: '1px solid var(--line-1)', borderRadius: 'var(--radius-sm)' }}
+                        class="wk-row-btn wk-linked-row"
                         onClick=${() => props.onNavigate(`/work/tasks/${encodeURIComponent(t.id)}`)}
                       >
                         <div class="wk-row-top">
@@ -806,68 +814,63 @@ export function GoalsTab(props: WorkspaceViewProps) {
                 `}
           </section>
 
-          <section class="wk-section" aria-label="대기 중인 검증 판정">
+          <section class="wk-section" aria-label="연결 태스크 검증 판정">
             <h3 class="wk-section-title">Verification Verdicts (${relatedVerifications.length})</h3>
-            ${relatedVerifications.length === 0
-              ? html`<span class="dtable-absent">대기 중인 검증 제출이 없습니다.</span>`
-              : relatedVerifications.map((req) => html`
-                  <div
-                    key=${req.requestId}
-                    style=${{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 'var(--sp-2)',
-                      padding: 'var(--sp-2)',
-                      border: '1px solid var(--line-1)',
-                      borderRadius: 'var(--radius-sm)',
-                      background: 'var(--bg-1)',
-                    }}
-                  >
-                    <div class="wk-row-top">
-                      <strong>${req.taskTitle}</strong>
-                      <span class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>${req.requestId}</span>
-                    </div>
-                    <div class="wk-row-meta">
-                      <span>제출: <${KeeperBadge} id=${req.submittedBy} size="sm" /></span>
-                      <span>태스크: <span class="mono">${req.taskId}</span></span>
-                      ${req.reviewState && html`<span class="wk-badge">${req.reviewState}</span>`}
-                    </div>
-                    ${req.submittedEvidence.length > 0 && html`
-                      <div style=${{ fontSize: 'var(--fs-12)', color: 'var(--fg-2)' }}>
-                        증거: ${req.submittedEvidence.join(' · ')}
-                      </div>
-                    `}
-                    <input
-                      type="text"
-                      class="wk-input"
-                      placeholder="반려 사유 (reject 시 필수)"
-                      value=${verdictReasonByReq[req.requestId] ?? ''}
-                      onInput=${(e: Event) => setVerdictReasonByReq((prev) => ({
-                        ...prev,
-                        [req.requestId]: (e.target as HTMLInputElement).value,
-                      }))}
-                      aria-label=${`검증 ${req.requestId} 반려 사유`}
-                    />
-                    <div class="wk-actions">
-                      <button
-                        type="button"
-                        class="wk-btn-ok"
-                        disabled=${actionBusy !== null}
-                        onClick=${() => void handleVerificationVerdict(req, 'approve')}
-                      >
-                        검증 승인
-                      </button>
-                      <button
-                        type="button"
-                        class="wk-btn-danger"
-                        disabled=${actionBusy !== null}
-                        onClick=${() => void handleVerificationVerdict(req, 'reject')}
-                      >
-                        검증 반려
-                      </button>
-                    </div>
+            ${!bundle.verificationsSupported
+              ? html`
+                  <div class="wk-notice wk-notice--info">
+                    멀티 계정 세션에서는 단일 워크스페이스 검증 대기열(/api/v1/verification/requests) 조회가 브리지되지 않아 생략되었습니다.
                   </div>
-                `)}
+                `
+              : relatedVerifications.length === 0
+                ? html`<span class="dtable-absent">이 목표에 연결된 태스크의 대기 중인 검증 제출이 없습니다.</span>`
+                : relatedVerifications.map((req) => html`
+                    <div key=${req.requestId} class="wk-subcard">
+                      <div class="wk-row-top">
+                        <strong>${req.taskTitle}</strong>
+                        <span class="mono wk-sub-id">${req.requestId}</span>
+                      </div>
+                      <div class="wk-row-meta">
+                        <span>제출: <${KeeperBadge} id=${req.submittedBy} size="sm" /></span>
+                        <span>태스크: <span class="mono">${req.taskId}</span></span>
+                        ${req.reviewState && html`<span class="wk-badge">${req.reviewState}</span>`}
+                      </div>
+                      ${req.submittedEvidence.length > 0 && html`
+                        <div class="wk-muted-sm">
+                          증거: ${req.submittedEvidence.join(' · ')}
+                        </div>
+                      `}
+                      <input
+                        type="text"
+                        class="wk-input"
+                        placeholder="반려 사유 (reject 시 필수)"
+                        value=${verdictReasonByReq[req.requestId] ?? ''}
+                        onInput=${(e: Event) => setVerdictReasonByReq((prev) => ({
+                          ...prev,
+                          [req.requestId]: (e.target as HTMLInputElement).value,
+                        }))}
+                        aria-label=${`검증 ${req.requestId} 반려 사유`}
+                      />
+                      <div class="wk-actions">
+                        <button
+                          type="button"
+                          class="wk-btn-ok"
+                          disabled=${actionBusy !== null}
+                          onClick=${() => void handleVerificationVerdict(req, 'approve')}
+                        >
+                          검증 승인
+                        </button>
+                        <button
+                          type="button"
+                          class="wk-btn-danger"
+                          disabled=${actionBusy !== null}
+                          onClick=${() => void handleVerificationVerdict(req, 'reject')}
+                        >
+                          검증 반려
+                        </button>
+                      </div>
+                    </div>
+                  `)}
           </section>
         </div>
       `

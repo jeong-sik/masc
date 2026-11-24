@@ -1,19 +1,16 @@
 /**
  * `2 Work > Unified Inbox` Tab (`inbox-tab.ts`)
  *
- * - Single authoritative HITL surface combining:
- *   1. Tool Approvals (`GET /api/v1/keepers/tool-approvals`, `POST /api/v1/keepers/tool-approval`)
- *   2. Keeper Asks (`GET /api/v1/keepers/asks`, `POST /api/v1/keepers/ask-answer`)
- *   3. Channel Gate (`GET /api/v1/dashboard/gate`, `POST /api/v1/dashboard/gate/resolve`)
- *   4. Goal Confirmations (`Awaiting_confirmation` goals -> `GET/POST /api/v1/goals/confirmation`)
- *   5. 24h Decisions Audit Log (`recent_resolved` from `/api/v1/dashboard/gate` via `DataTable`)
- * - EVERY Approve / Deny / Answer / Confirm mutation is strictly wrapped in `TargetLockedAction`
- *   displaying `(workspace_id, keeper, request_id, revision)` and auto-locking immediately when
- *   SSE updates the target or `sessionEpoch` changes (`#28` K4)!
+ * - Single authoritative HITL surface combining Tool Approvals, Keeper Asks,
+ *   Channel Gate, Goal Confirmations, and 24h Decisions Audit Log (`DataTable`).
+ * - Capability-gated in `multi_account_signed_in` mode (zero speculative 404s on single-user-only HITL endpoints).
+ * - Strict `decodeGoalConfirmation()` + per-effect `AbortController` race guard.
+ * - Full Keeper Ask draft clearing (text clear + deselecting last multi-choice cleanly clears the question draft).
+ * - EVERY Approve / Deny / Answer / Confirm mutation strictly wrapped in `TargetLockedAction`.
  */
 
 import { html } from 'htm/preact'
-import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { activeWorkspaceId, currentSessionEpoch } from '../../core/auth'
 import { markViewSynced, subscribeObserverFrames } from '../../core/observer'
 import { resourceCache } from '../../core/resource-cache'
@@ -32,8 +29,10 @@ import {
   asNonEmptyString,
   asSafeInt,
   asString,
+  decodeGoalConfirmation,
   decodeGoalItem,
   formatRelativeTime,
+  isMultiAccountSession,
   isRecord,
   readWorkspacePrecondition,
   type AskChoiceItem,
@@ -54,6 +53,7 @@ interface InboxSnapshot {
   readonly gatePending: readonly GatePendingItem[]
   readonly awaitingGoals: readonly GoalItem[]
   readonly audit24h: readonly GateResolvedAuditRow[]
+  readonly singleUserHitlBridged: boolean
 }
 
 type InboxFilter = 'all' | 'tool_approval' | 'keeper_ask' | 'channel_gate' | 'goal_confirmation' | 'audit'
@@ -200,6 +200,7 @@ export function InboxTab(props: WorkspaceViewProps) {
     gatePending: [],
     awaitingGoals: [],
     audit24h: [],
+    singleUserHitlBridged: true,
   })
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -207,10 +208,8 @@ export function InboxTab(props: WorkspaceViewProps) {
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [capturedEpoch, setCapturedEpoch] = useState<number>(currentSessionEpoch())
 
-  // Tracks SSE-reported revision drift per inbox item key so TargetLockedAction auto-locks!
   const [liveRevisionByKey, setLiveRevisionByKey] = useState<Record<string, string | number>>({})
 
-  // Action states
   const [gateRejectReason, setGateRejectReason] = useState('')
   const [gateRememberRule, setGateRememberRule] = useState(false)
   const [askDrafts, setAskDrafts] = useState<Record<string, Record<string, AskAnswerDraft>>>({})
@@ -218,13 +217,37 @@ export function InboxTab(props: WorkspaceViewProps) {
   const [goalConfError, setGoalConfError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [feedback, setFeedback] = useState<{ kind: 'ok' | 'err'; message: string } | null>(null)
+  const goalConfAbortRef = useRef<AbortController | null>(null)
 
   const loadInbox = useCallback(async (reason: 'mount' | 'manual' = 'mount') => {
     setLoading(true)
     setLoadError(null)
+    const multiAccount = isMultiAccountSession()
     const obs = await resourceCache.fetch<InboxSnapshot>(
-      'work:inbox:snapshot',
+      `work:inbox:snapshot:${multiAccount ? 'ma' : 'su'}`,
       async (signal) => {
+        if (multiAccount) {
+          // Multi-account bridge does not expose single-user tool-approvals/asks/gate; skip cleanly (0x 404).
+          const planRes = await apiGet<unknown>('/api/v1/dashboard/planning', { signal })
+          const awaitingGoals: GoalItem[] = []
+          if (planRes.ok && isRecord(planRes.value) && Array.isArray(planRes.value.goals)) {
+            for (const g of planRes.value.goals) {
+              const dec = decodeGoalItem(g)
+              if (dec.ok && dec.value.phase === 'Awaiting_confirmation') {
+                awaitingGoals.push(dec.value)
+              }
+            }
+          }
+          return ok({
+            toolApprovals: [],
+            keeperAsks: [],
+            gatePending: [],
+            awaitingGoals,
+            audit24h: [],
+            singleUserHitlBridged: false,
+          })
+        }
+
         const [approvalsRes, asksRes, gateRes, planRes] = await Promise.all([
           apiGet<unknown>('/api/v1/keepers/tool-approvals', { signal }),
           apiGet<unknown>('/api/v1/keepers/asks?include_resolved=false', { signal }),
@@ -249,6 +272,7 @@ export function InboxTab(props: WorkspaceViewProps) {
           gatePending: gateDecoded.pending,
           awaitingGoals,
           audit24h: gateDecoded.resolved,
+          singleUserHitlBridged: true,
         })
       },
       { ttlMs: 8_000, topics: ['approval', 'ask', 'gate', 'goals', 'tool_approval'], reason },
@@ -268,7 +292,6 @@ export function InboxTab(props: WorkspaceViewProps) {
     void loadInbox('mount')
   }, [loadInbox])
 
-  // Auto-lock TargetLockedAction whenever an SSE frame mutates a pending HITL item!
   useEffect(() => {
     return subscribeObserverFrames((frame) => {
       if (!isRecord(frame.data)) return
@@ -331,10 +354,16 @@ export function InboxTab(props: WorkspaceViewProps) {
     [entries, selectedKey],
   )
 
-  const loadGoalConf = useCallback(async (goal: GoalItem) => {
+  const loadGoalConf = useCallback(async (goal: GoalItem, externalSignal?: AbortSignal) => {
+    goalConfAbortRef.current?.abort()
+    const controller = new AbortController()
+    goalConfAbortRef.current = controller
+    const signal = externalSignal ?? controller.signal
+
     setGoalConfEvidence(null)
     setGoalConfError(null)
-    const wsRes = await readWorkspacePrecondition()
+    const wsRes = await readWorkspacePrecondition(signal)
+    if (signal.aborted) return
     if (!wsRes.ok) {
       setGoalConfError(wsRes.error.message)
       return
@@ -344,34 +373,32 @@ export function InboxTab(props: WorkspaceViewProps) {
       expected_base_path: wsRes.value.base_path,
       expected_masc_root: wsRes.value.masc_root,
     })
-    const res = await apiGet<Record<string, unknown>>(`/api/v1/goals/confirmation?${params.toString()}`)
+    const res = await apiGet<unknown>(`/api/v1/goals/confirmation?${params.toString()}`, { signal })
+    if (signal.aborted) return
     if (!res.ok) {
       setGoalConfError(res.error.message)
       return
     }
-    const raw = res.value
-    const verif = isRecord(raw.verification) ? raw.verification : null
-    const comp = verif && isRecord(verif.completion) ? verif.completion : null
-    const crit = comp && isRecord(comp.criterion) ? comp.criterion : null
-    setGoalConfEvidence({
-      goalId: goal.id,
-      phase: goal.phase,
-      criterionRevision: (crit ? asNonEmptyString(crit.revision) : null) ?? goal.criterionRevision ?? 'rev-1',
-      requestId: (comp ? asNonEmptyString(comp.request_id) : null) ?? `confirm-${goal.id}`,
-      verificationRunId: (comp ? asNonEmptyString(comp.run_id) : null) ?? 'run-1',
-      actor: (comp ? asNonEmptyString(comp.actor) : null) ?? 'verifier',
-      evidence: (comp ? asString(comp.evidence, '') : '') || '증거 없음',
-      recordedAt: comp ? asString(comp.recorded_at, '') : '',
-      inspectionOperatorId: asString(raw.inspection_operator_id, 'operator'),
-      runtimeInstanceId: asString(raw.runtime_instance_id, 'runtime'),
-      workspace: wsRes.value,
-    })
+    const decoded = decodeGoalConfirmation(res.value, goal.id, wsRes.value)
+    if (!decoded.ok) {
+      setGoalConfError(decoded.error)
+      return
+    }
+    setGoalConfEvidence(decoded.value)
   }, [])
 
   useEffect(() => {
     if (selectedEntry?.kind === 'goal_confirmation') {
-      void loadGoalConf(selectedEntry.goal)
+      const controller = new AbortController()
+      void loadGoalConf(selectedEntry.goal, controller.signal)
+      return () => {
+        controller.abort()
+      }
     }
+    goalConfAbortRef.current?.abort()
+    setGoalConfEvidence(null)
+    setGoalConfError(null)
+    return undefined
   }, [selectedEntry?.key, loadGoalConf])
 
   const handleToolApproval = async (item: ToolApprovalWait, decision: 'approve' | 'deny') => {
@@ -421,7 +448,13 @@ export function InboxTab(props: WorkspaceViewProps) {
 
   const handleAnswerAsk = async (ask: KeeperAskItem) => {
     const draft = askDrafts[ask.askId] ?? {}
-    const missing = ask.questions.filter((q) => draft[q.questionId] === undefined)
+    const missing = ask.questions.filter((q) => {
+      const resp = draft[q.questionId]
+      if (!resp) return true
+      if (resp.kind === 'wrote') return resp.text.trim() === ''
+      if (resp.kind === 'chose') return resp.choiceIds.length === 0
+      return false
+    })
     if (missing.length > 0) {
       setFeedback({ kind: 'err', message: `미응답 질문이 ${missing.length}개 있습니다.` })
       return
@@ -432,7 +465,7 @@ export function InboxTab(props: WorkspaceViewProps) {
         return { question_id: q.questionId, response: { kind: 'chose', choice_ids: resp.choiceIds } }
       }
       if (resp.kind === 'wrote') {
-        return { question_id: q.questionId, response: { kind: 'wrote', text: resp.text } }
+        return { question_id: q.questionId, response: { kind: 'wrote', text: resp.text.trim() } }
       }
       return { question_id: q.questionId, response: { kind: 'skipped' } }
     })
@@ -475,11 +508,16 @@ export function InboxTab(props: WorkspaceViewProps) {
     await loadInbox('manual')
   }
 
-  const setQuestionDraft = (askId: string, questionId: string, next: AskAnswerDraft) => {
-    setAskDrafts((prev) => ({
-      ...prev,
-      [askId]: { ...(prev[askId] ?? {}), [questionId]: next },
-    }))
+  const setQuestionDraft = (askId: string, questionId: string, next: AskAnswerDraft | null) => {
+    setAskDrafts((prev) => {
+      const currentAsk = { ...(prev[askId] ?? {}) }
+      if (next === null) {
+        delete currentAsk[questionId]
+      } else {
+        currentAsk[questionId] = next
+      }
+      return { ...prev, [askId]: currentAsk }
+    })
   }
 
   const auditColumns = useMemo<readonly DataTableColumn<GateResolvedAuditRow>[]>(() => [
@@ -528,10 +566,19 @@ export function InboxTab(props: WorkspaceViewProps) {
     </div>
   `
 
+  const multiAccountNotice = !snap.singleUserHitlBridged
+    ? html`
+        <div class="wk-notice wk-notice--info" role="note">
+          멀티 계정 모드에서는 단일 워크스페이스 HITL 엔드포인트(Tool Approvals / Keeper Asks / Channel Gate)가 브리지되지 않아 404 요청을 생략했습니다. Goal 완료 확인 대기열만 표시됩니다.
+        </div>
+      `
+    : null
+
   if (filter === 'audit') {
     return html`
       <div class="wk-scroll-body">
         ${chipsBar}
+        ${multiAccountNotice}
         ${loadError && html`<div class="wk-notice wk-notice--err" role="alert">${loadError}</div>`}
         <${DataTable}
           data=${snap.audit24h}
@@ -545,11 +592,11 @@ export function InboxTab(props: WorkspaceViewProps) {
   }
 
   const masterPane = html`
-    <div style=${{ display: 'flex', flexDirection: 'column', height: '100%', minWidth: 0 }}>
+    <div class="wk-pane-col">
       <div class="wk-pane-head">
         <h2 class="wk-pane-title">Unified HITL Queue <span class="wk-chip-count">(${filteredEntries.length})</span></h2>
       </div>
-      ${loadError && html`<div class="wk-notice wk-notice--err" style=${{ margin: 'var(--sp-2)' }} role="alert">${loadError}</div>`}
+      ${loadError && html`<div class="wk-notice wk-notice--err wk-inset" role="alert">${loadError}</div>`}
       ${loading && entries.length === 0
         ? html`<div class="wk-detail-pad"><span class="dtable-absent">승인 대기열 불러오는 중…</span></div>`
         : html`
@@ -612,9 +659,9 @@ export function InboxTab(props: WorkspaceViewProps) {
 
           ${selectedEntry.kind === 'tool_approval' && html`
             <div class="wk-section-head">
-              <div>
+              <div class="wk-min-w-0">
                 <span class="wk-badge wk-badge--warn">Tool Approval</span>
-                <h2 style=${{ margin: '4px 0 0', fontSize: 'var(--fs-16)' }}>${selectedEntry.item.tool}</h2>
+                <h2 class="wk-heading">${selectedEntry.item.tool}</h2>
               </div>
               <${KeeperBadge} id=${selectedEntry.item.keeper} portrait=${true} />
             </div>
@@ -643,9 +690,9 @@ export function InboxTab(props: WorkspaceViewProps) {
 
           ${selectedEntry.kind === 'keeper_ask' && html`
             <div class="wk-section-head">
-              <div>
+              <div class="wk-min-w-0">
                 <span class="wk-badge wk-badge--info">Keeper Ask</span>
-                <h2 style=${{ margin: '4px 0 0', fontSize: 'var(--fs-16)' }}>${selectedEntry.item.askId}</h2>
+                <h2 class="wk-heading">${selectedEntry.item.askId}</h2>
               </div>
               <${KeeperBadge} id=${selectedEntry.item.keeper} portrait=${true} />
             </div>
@@ -660,7 +707,7 @@ export function InboxTab(props: WorkspaceViewProps) {
                     <strong>${q.header}</strong>
                     <span class="wk-badge">${q.mode === 'multi' ? '복수 선택' : '단일 선택'}</span>
                   </div>
-                  <div style=${{ fontSize: 'var(--fs-13)' }}>${q.prompt}</div>
+                  <div class="wk-body-pre">${q.prompt}</div>
                   ${q.choices.length > 0 && html`
                     <div class="wk-chips">
                       ${q.choices.map((c) => {
@@ -673,13 +720,15 @@ export function InboxTab(props: WorkspaceViewProps) {
                             aria-pressed=${active}
                             onClick=${() => {
                               const nextIds = q.mode === 'single'
-                                ? [c.choiceId]
+                                ? (active ? [] : [c.choiceId])
                                 : active
                                   ? chosenIds.filter((id) => id !== c.choiceId)
                                   : [...chosenIds, c.choiceId]
-                              if (nextIds.length > 0) {
-                                setQuestionDraft(selectedEntry.item.askId, q.questionId, { kind: 'chose', choiceIds: nextIds })
-                              }
+                              setQuestionDraft(
+                                selectedEntry.item.askId,
+                                q.questionId,
+                                nextIds.length === 0 ? null : { kind: 'chose', choiceIds: nextIds },
+                              )
                             }}
                           >
                             ${c.label}
@@ -697,9 +746,11 @@ export function InboxTab(props: WorkspaceViewProps) {
                       value=${wroteText}
                       onInput=${(e: Event) => {
                         const val = (e.target as HTMLInputElement).value
-                        if (val.trim()) {
-                          setQuestionDraft(selectedEntry.item.askId, q.questionId, { kind: 'wrote', text: val })
-                        }
+                        setQuestionDraft(
+                          selectedEntry.item.askId,
+                          q.questionId,
+                          val === '' ? null : { kind: 'wrote', text: val },
+                        )
                       }}
                     />
                   </div>
@@ -708,7 +759,11 @@ export function InboxTab(props: WorkspaceViewProps) {
                       type="button"
                       class="btn-ghost"
                       aria-pressed=${cur?.kind === 'skipped'}
-                      onClick=${() => setQuestionDraft(selectedEntry.item.askId, q.questionId, { kind: 'skipped' })}
+                      onClick=${() => setQuestionDraft(
+                        selectedEntry.item.askId,
+                        q.questionId,
+                        cur?.kind === 'skipped' ? null : { kind: 'skipped' },
+                      )}
                     >
                       ${cur?.kind === 'skipped' ? '건너뛰기 선택됨' : '이 질문 건너뛰기'}
                     </button>
@@ -735,9 +790,9 @@ export function InboxTab(props: WorkspaceViewProps) {
 
           ${selectedEntry.kind === 'channel_gate' && html`
             <div class="wk-section-head">
-              <div>
+              <div class="wk-min-w-0">
                 <span class="wk-badge wk-badge--warn">Channel Gate · ${selectedEntry.item.phase}</span>
-                <h2 style=${{ margin: '4px 0 0', fontSize: 'var(--fs-16)' }}>${selectedEntry.item.toolName}</h2>
+                <h2 class="wk-heading">${selectedEntry.item.toolName}</h2>
               </div>
               <${KeeperBadge} id=${selectedEntry.item.keeper} portrait=${true} />
             </div>
@@ -753,7 +808,7 @@ export function InboxTab(props: WorkspaceViewProps) {
                 onInput=${(e: Event) => setGateRejectReason((e.target as HTMLInputElement).value)}
               />
             </div>
-            <label style=${{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-1)', fontSize: 'var(--fs-12)' }}>
+            <label class="wk-check-label">
               <input
                 type="checkbox"
                 checked=${gateRememberRule}
@@ -783,9 +838,9 @@ export function InboxTab(props: WorkspaceViewProps) {
 
           ${selectedEntry.kind === 'goal_confirmation' && html`
             <div class="wk-section-head">
-              <div>
+              <div class="wk-min-w-0">
                 <span class="wk-badge wk-badge--warn">Goal Confirmation</span>
-                <h2 style=${{ margin: '4px 0 0', fontSize: 'var(--fs-16)' }}>${selectedEntry.goal.title}</h2>
+                <h2 class="wk-heading">${selectedEntry.goal.title}</h2>
               </div>
               <button
                 type="button"
@@ -820,9 +875,10 @@ export function InboxTab(props: WorkspaceViewProps) {
     : null
 
   return html`
-    <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)', height: '100%', minWidth: 0 }}>
+    <div class="wk-inbox-shell">
       ${chipsBar}
-      <div style=${{ flex: '1 1 auto', minHeight: 0, minWidth: 0 }}>
+      ${multiAccountNotice}
+      <div class="wk-pane-grow">
         <${MasterDetail}
           master=${masterPane}
           detail=${detailPane}

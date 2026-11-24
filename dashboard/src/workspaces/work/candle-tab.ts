@@ -4,14 +4,14 @@
  * - Wired to `GET /api/v1/candle/ledger?limit=100` (`apiGetV2`, `V2Envelope`), safely parsing
  *   decimal-string `supply.*_milli` & `decayed_milli` vs numeric `balance_milli` (`#36`).
  * - `UPlotChart` Decayed Supply vs Cumulative Issuance trend.
- * - Half-Life Policy Gauge (domain-only Candle Brass `--brass-1`).
+ * - Native `<progress class="wk-gauge">` half-life decay gauge (zero inline styles!).
  * - Keeper Candle Leaderboard (`DataTable` with `<KeeperBadge portrait={true} />`).
  * - Unattributed / Backlog-Fenced / Held-Window diagnostics & Goal Candle Hold/Release action
  *   (`GET /api/v1/dashboard/goals/candle`, `POST /api/v1/dashboard/goals/candle/hold/release`).
  */
 
 import { html } from 'htm/preact'
-import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import type uPlot from 'uplot'
 import { markViewSynced } from '../../core/observer'
 import { observedAbsent, observedValue, resourceCache } from '../../core/resource-cache'
@@ -45,13 +45,13 @@ export function CandleTab(props: WorkspaceViewProps) {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
-  // Goal Candle Observation & Hold Release
   const [inspectGoalId, setInspectGoalId] = useState(props.entityId ?? '')
   const [goalCandleData, setGoalCandleData] = useState<Record<string, unknown> | null>(null)
   const [goalCandleLoading, setGoalCandleLoading] = useState(false)
   const [goalCandleError, setGoalCandleError] = useState<string | null>(null)
   const [releaseBusy, setReleaseBusy] = useState<string | null>(null)
   const [releaseFeedback, setReleaseFeedback] = useState<{ kind: 'ok' | 'err'; message: string } | null>(null)
+  const inspectAbortRef = useRef<AbortController | null>(null)
 
   const loadLedger = useCallback(async (reason: 'mount' | 'manual' = 'mount') => {
     setLoading(true)
@@ -88,19 +88,26 @@ export function CandleTab(props: WorkspaceViewProps) {
     void loadLedger('mount')
   }, [loadLedger])
 
-  const inspectGoalCandle = useCallback(async (goalIdRaw: string) => {
+  const inspectGoalCandle = useCallback(async (goalIdRaw: string, externalSignal?: AbortSignal) => {
     const goalId = goalIdRaw.trim()
     if (!goalId) return
+    inspectAbortRef.current?.abort()
+    const controller = new AbortController()
+    inspectAbortRef.current = controller
+    const signal = externalSignal ?? controller.signal
+
     setGoalCandleLoading(true)
     setGoalCandleError(null)
     setGoalCandleData(null)
-    const wsRes = await readWorkspacePrecondition()
+    const wsRes = await readWorkspacePrecondition(signal)
+    if (signal.aborted) return
     const params = new URLSearchParams({ goal_id: goalId })
     if (wsRes.ok) {
       params.set('expected_base_path', wsRes.value.base_path)
       params.set('expected_masc_root', wsRes.value.masc_root)
     }
-    const res = await apiGet<Record<string, unknown>>(`/api/v1/dashboard/goals/candle?${params.toString()}`)
+    const res = await apiGet<Record<string, unknown>>(`/api/v1/dashboard/goals/candle?${params.toString()}`, { signal })
+    if (signal.aborted) return
     setGoalCandleLoading(false)
     if (!res.ok) {
       setGoalCandleError(res.error.message)
@@ -111,9 +118,14 @@ export function CandleTab(props: WorkspaceViewProps) {
 
   useEffect(() => {
     if (props.entityId) {
+      const controller = new AbortController()
       setInspectGoalId(props.entityId)
-      void inspectGoalCandle(props.entityId)
+      void inspectGoalCandle(props.entityId, controller.signal)
+      return () => {
+        controller.abort()
+      }
     }
+    return undefined
   }, [props.entityId, inspectGoalCandle])
 
   const handleReleaseHold = async (goalId: string) => {
@@ -198,7 +210,7 @@ export function CandleTab(props: WorkspaceViewProps) {
           .filter(([, v]) => v !== null)
           .map(([k, v]) => `${k}:${v}`)
         return activeSlots.length > 0
-          ? html`<span class="mono" style=${{ fontSize: 'var(--fs-11)' }}>${activeSlots.join(', ')}</span>`
+          ? html`<span class="mono wk-sub-id">${activeSlots.join(', ')}</span>`
           : html`<span class="dtable-absent">없음</span>`
       },
     },
@@ -216,7 +228,7 @@ export function CandleTab(props: WorkspaceViewProps) {
       <div class="wk-toolbar">
         <div>
           <span class="wk-badge wk-badge--brass">Candle Economy</span>
-          <span style=${{ marginLeft: 'var(--sp-2)', fontSize: 'var(--fs-12)', color: 'var(--fg-3)' }}>
+          <span class="wk-caption-inline">
             Goal 완료 보상 화폐 · 초상화 장신구 전용 (constitution.xml)
           </span>
         </div>
@@ -255,7 +267,7 @@ export function CandleTab(props: WorkspaceViewProps) {
           <${UPlotChart}
             id="candle-supply-trend"
             title="Decayed Supply vs Cumulative Issuance"
-            subtitle=${html`<span class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>events: ${ledger.recentEvents.length}</span>`}
+            subtitle=${html`<span class="mono wk-sub-id">events: ${ledger.recentEvents.length}</span>`}
             data=${chartData}
             series=${CANDLE_SERIES}
             height=${210}
@@ -292,9 +304,12 @@ export function CandleTab(props: WorkspaceViewProps) {
                 <span class="wk-kv-v tnum">${decayRatioPct === null ? '없음' : `${decayRatioPct}%`}</span>
               </div>
             </div>
-            <div class="wk-gauge-track" aria-label="유통 잔존 게이지">
-              <div class="wk-gauge-fill" style=${{ width: `${decayRatioPct ?? 0}%` }} />
-            </div>
+            <progress
+              class="wk-gauge"
+              value=${decayRatioPct ?? 0}
+              max="100"
+              aria-label="유통 잔존 게이지"
+            />
           </section>
         </div>
 
@@ -328,11 +343,10 @@ export function CandleTab(props: WorkspaceViewProps) {
             </div>
           `}
 
-          <div style=${{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-2)' }}>
+          <div class="wk-row-wrap">
             <input
               type="text"
-              class="wk-input"
-              style=${{ flex: '1 1 220px' }}
+              class="wk-input wk-flex-input"
               placeholder="Goal ID로 지급 상태 조회 (GET /api/v1/dashboard/goals/candle)…"
               value=${inspectGoalId}
               onInput=${(e: Event) => setInspectGoalId((e.target as HTMLInputElement).value)}
@@ -364,31 +378,18 @@ export function CandleTab(props: WorkspaceViewProps) {
           ${ledger.diagnostics.items.length === 0
             ? html`<span class="dtable-absent">현재 진단 경고가 없습니다.</span>`
             : html`
-                <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
+                <div class="wk-stack-2">
                   ${ledger.diagnostics.items.map((item) => html`
-                    <div
-                      key=${`${item.goalId}-${item.kind}-${item.atUnix}`}
-                      style=${{
-                        display: 'flex',
-                        flexWrap: 'wrap',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: 'var(--sp-2)',
-                        padding: 'var(--sp-2)',
-                        borderRadius: 'var(--radius-sm)',
-                        border: '1px solid var(--line-1)',
-                        background: 'var(--bg-1)',
-                      }}
-                    >
-                      <div style=${{ minWidth: 0, flex: '1 1 260px' }}>
-                        <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
+                    <div key=${`${item.goalId}-${item.kind}-${item.atUnix}`} class="wk-diag-row">
+                      <div class="wk-diag-main">
+                        <div class="wk-diag-title">
                           <span class=${`wk-badge ${item.kind === 'candidate_window_held' ? 'wk-badge--warn' : 'wk-badge--err'}`}>
                             ${item.kind}
                           </span>
                           <strong>${item.title ?? item.goalId}</strong>
-                          <span class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>${item.goalId}</span>
+                          <span class="mono wk-sub-id">${item.goalId}</span>
                         </div>
-                        <div style=${{ fontSize: 'var(--fs-12)', color: 'var(--fg-2)', marginTop: '2px' }}>
+                        <div class="wk-diag-hint">
                           ${item.diagnosticHint || item.observation}
                         </div>
                       </div>

@@ -262,11 +262,10 @@ let release_keeper_interrupt ~now ~keeper ~target (m : Model.t) =
       }
 
 let mcp_call_owns_modal ~rpc_id (m : Model.t) =
-  Option.equal Int.equal m.runtime.mcp_call_form_rpc_id (Some rpc_id)
-  &&
-  match m.inline_modal with
-  | Some { kind = Nav.Tool_execute_form _; submitting = true; _ } -> true
-  | Some _ | None -> false
+  match (m.runtime.mcp_call_form, m.inline_modal) with
+  | Some (pending_id, original), Some { kind; submitting = true; _ } ->
+      Int.equal pending_id rpc_id && Nav.equal_inline_action_kind original kind
+  | Some _, (Some _ | None) | None, _ -> false
 
 let apply_http_reply ~now (m : Model.t) reply =
   let failed_slot err slot =
@@ -6051,7 +6050,7 @@ let apply_http_reply ~now (m : Model.t) reply =
         Runtime_store.apply_mcp_call_result ~observed_at:now res m.runtime
       in
       let runtime =
-        if owns_modal then { runtime with mcp_call_form_rpc_id = None }
+        if owns_modal then { runtime with mcp_call_form = None }
         else runtime
       in
       let level, toast_msg =
@@ -6098,8 +6097,8 @@ let apply_http_reply ~now (m : Model.t) reply =
       let runtime =
         {
           m.runtime with
-          mcp_call_form_rpc_id =
-            (if owns_modal then None else m.runtime.mcp_call_form_rpc_id);
+          mcp_call_form =
+            (if owns_modal then None else m.runtime.mcp_call_form);
           mcp_call_result =
             Observed.failed ~reason:clean_err
               ~retryable:(Msg.http_error_retryable err) ~at:now;

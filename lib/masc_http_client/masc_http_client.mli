@@ -63,6 +63,7 @@ val request_stream :
   retention:'body Pool.body_retention ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   idle_timeout_sec:float ->
+  ?header_timeout_seconds:float ->
   method_:Pool.http_method ->
   url:string ->
   headers:(string * string) list ->

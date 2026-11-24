@@ -16482,9 +16482,125 @@ let test_interrupt_reply_and_stream_completion_are_request_scoped () =
     (Some "newer-control")
     (Fleet_store.chat_control_token_for ~keeper m_after_old_receipt.fleet)
 
+let test_timeout_detail_retryable_and_update_parity () =
+  let cases =
+    [
+      ( Health.Timeout_connect
+      , Some 5.0
+      , Some "/api/v1/dashboard/tools"
+      , "연결 시간 초과 (5.0s · /api/v1/dashboard/tools)"
+      , "Connect timed out (5.0s · /api/v1/dashboard/tools)" );
+      ( Health.Timeout_connect_cooldown
+      , Some 5.0
+      , Some "/api/v1/infra/sandboxes"
+      , "연결 쿨다운 대기 중 (5.0s · /api/v1/infra/sandboxes)"
+      , "Connect cooldown active (5.0s · /api/v1/infra/sandboxes)" );
+      ( Health.Timeout_response
+      , Some 30.0
+      , Some "/api/v1/dashboard/tools"
+      , "응답 시간 초과 (30.0s · /api/v1/dashboard/tools)"
+      , "Response timed out (30.0s · /api/v1/dashboard/tools)" );
+      ( Health.Timeout_stream_header
+      , Some 45.0
+      , Some "/api/v1/keepers/chat/stream"
+      , "스트림 응답 대기 초과 (45.0s · /api/v1/keepers/chat/stream)"
+      , "Stream header timed out (45.0s · /api/v1/keepers/chat/stream)" );
+      ( Health.Timeout_stream_idle
+      , Some 120.0
+      , Some "/mcp"
+      , "스트림 유휴 시간 초과 (120.0s · /mcp)"
+      , "Stream idle timed out (120.0s · /mcp)" );
+    ]
+  in
+  Alcotest.(check bool) "legacy Timeout retryable" true
+    (Msg.http_error_retryable (Msg.Transport Health.Timeout));
+  List.iter
+    (fun (phase, after_sec, path, exp_ko, exp_en) ->
+      let err =
+        Msg.Transport (Health.Timeout_detail { phase; after_sec; path })
+      in
+      Alcotest.(check bool) ("retryable: " ^ exp_en) true
+        (Msg.http_error_retryable err);
+      let summary = Msg.http_error_summary err in
+      Alcotest.(check string) ("summary KO: " ^ exp_ko) exp_ko
+        (Say.resolve Say.Lang_ko summary);
+      Alcotest.(check string) ("summary EN: " ^ exp_en) exp_en
+        (Say.resolve Say.Lang_en summary);
+      Alcotest.(check string) ("detail EN: " ^ exp_en) exp_en
+        (Msg.http_error_detail err))
+    cases;
+  (* Update.ml: Server_health_result treats Timeout_detail identically to Timeout
+     (does not mark server_offline or trigger Start_local_server, records incident) *)
+  let m0 = Model.initial () in
+  let td_err =
+    Msg.Transport
+      (Health.Timeout_detail
+         {
+           phase = Health.Timeout_response;
+           after_sec = Some 12.0;
+           path = Some "/health";
+         })
+  in
+  let m_health, health_cmds =
+    Update.step ~now:t0 m0
+      (Msg.Server_health_result { epoch = m0.epoch; result = Error td_err })
+  in
+  Alcotest.(check bool) "health Timeout_detail does not mark server_offline"
+    false m_health.freshness.server_offline;
+  Alcotest.(check int) "health Timeout_detail emits no autostart cmd" 0
+    (List.length health_cmds);
+  Alcotest.(check int) "health Timeout_detail records 1 incident" 1
+    (List.length m_health.incidents.entries);
+  let inc = List.hd m_health.incidents.entries in
+  Alcotest.(check string) "health incident detail preserves phase/sec/path"
+    "Response timed out (12.0s · /health)" inc.detail;
+
+  (* Update_http.ml: Reply_action_ack uses Msg.http_error_summary for Timeout_detail
+     (identical to Health.Timeout, distinct from Health.Other_io which shows label) *)
+  let action_err =
+    Msg.Transport
+      (Health.Timeout_detail
+         {
+           phase = Health.Timeout_response;
+           after_sec = Some 30.0;
+           path = Some "/api/v1/infra/sandboxes/probe";
+         })
+  in
+  let m_ack, _ =
+    Update.step ~now:t1 m0
+      (Msg.Http_reply
+         {
+           epoch = m0.epoch;
+           reply =
+             Msg.Reply_action_ack
+               {
+                 label =
+                   Say.make ~ko:"샌드박스 프로브 요청됨"
+                     ~en:"Sandbox probe requested";
+                 ack_scope = Msg.Ack_refresh_view;
+                 for_modal = None;
+                 result = Error action_err;
+               };
+         })
+  in
+  (match m_ack.toast with
+  | None -> Alcotest.fail "expected error toast on Reply_action_ack Timeout_detail"
+  | Some toast ->
+      Alcotest.(check string) "toast KO shows Timeout_detail summary"
+        "응답 시간 초과 (30.0s · /api/v1/infra/sandboxes/probe)"
+        (Say.resolve Say.Lang_ko toast.message);
+      Alcotest.(check string) "toast EN shows Timeout_detail summary"
+        "Response timed out (30.0s · /api/v1/infra/sandboxes/probe)"
+        (Say.resolve Say.Lang_en toast.message))
+
 let () =
   Alcotest.run "masc_tui_store"
     [
+      ( "timeout_diagnostics"
+      , [
+          Alcotest.test_case "Timeout_detail KO/EN formatting, retryable & Update/Update_http parity"
+            `Quick test_timeout_detail_retryable_and_update_parity;
+        ] );
       ("Board recovery", [Alcotest.test_case "recover the viewed keeper and exact quarantine generation" `Quick test_keeper_board_quarantine_recovery]);
       ("exact chat lookup", [Alcotest.test_case "retain and dismiss scoped absent operations" `Quick test_exact_operation_absence_recovery]);
       ( "epoch"

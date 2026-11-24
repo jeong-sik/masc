@@ -2512,6 +2512,203 @@ let test_bounded_clipboard_url_opener_and_async_wiki_editor () =
          Eio.Switch.fail sw Exit
        with Exit -> ()))
 
+let test_timeout_budgets_and_reattach_on_timeout_detail () =
+  Alcotest.(check (float 0.001)) "standard_timeout_sec" 12.0
+    Cmd_executor.standard_timeout_sec;
+  Alcotest.(check (float 0.001)) "heavy_timeout_sec" 30.0
+    Cmd_executor.heavy_timeout_sec;
+  Alcotest.(check (float 0.001)) "chat_stream_header_timeout_sec" 45.0
+    Cmd_executor.chat_stream_header_timeout_sec;
+
+  let ws_scope = Masc_tui_protocol.Wire_infra.Ws_project in
+  let heavy_gets =
+    [
+      ("Get_tools_catalog", Cmd.Get_tools_catalog { keeper = None });
+      ("Get_sandboxes", Cmd.Get_sandboxes);
+      ( "Get_workspace_search"
+      , Cmd.Get_workspace_search { scope = ws_scope; query = "timeout" } );
+      ("Get_workspace_files", Cmd.Get_workspace_files { scope = ws_scope });
+      ( "Get_workspace_file"
+      , Cmd.Get_workspace_file { scope = ws_scope; path = "dune" } );
+      ("Get_git_status", Cmd.Get_git_status { scope = ws_scope });
+      ( "Get_git_diff"
+      , Cmd.Get_git_diff { scope = ws_scope; path = "dune" } );
+      ("Get_dashboard_shell", Cmd.Get_dashboard_shell);
+      ("Get_keepers_roster", Cmd.Get_keepers_roster);
+      ("Get_planning", Cmd.Get_planning);
+      ("Get_candle_ledger", Cmd.Get_candle_ledger { limit = Some 50 });
+      ("Get_world_memory", Cmd.Get_world_memory);
+      ( "Get_keeper_memory_journal"
+      , Cmd.Get_keeper_memory_journal { keeper = "alpha"; limit = Some 20 } );
+      ( "Get_keeper_tool_calls"
+      , Cmd.Get_keeper_tool_calls
+          {
+            keeper = "alpha";
+            limit = Some 50;
+            execution_ids = None;
+            turn_ref = None;
+          } );
+      ("Get_artifacts", Cmd.Get_artifacts);
+      ( "Get_artifact_detail"
+      , Cmd.Get_artifact_detail { id = "art-1"; revision = None } );
+      ( "Get_board_feed"
+      , Cmd.Get_board_feed
+          {
+            sort_by = "recent";
+            hearth = None;
+            signal_only = false;
+            limit = Some 30;
+            offset = None;
+          } );
+      ("Get_runtime_probe", Cmd.Get_runtime_probe { force = true });
+      ("Get_efficiency", Cmd.Get_efficiency { month = None });
+      ("Get_harness_health", Cmd.Get_harness_health);
+      ( "Get_verification_evidence"
+      , Cmd.Get_verification_evidence
+          { task_id = "t-1"; verification_id = "v-1" } );
+      ( "Get_keeper_sandbox_logs"
+      , Cmd.Get_keeper_sandbox_logs { keeper = "alpha"; tail = Some 100 } );
+    ]
+  in
+  List.iter
+    (fun (label, req) ->
+      Alcotest.(check (float 0.001)) ("heavy GET: " ^ label) 30.0
+        (Cmd_executor.timeout_sec_for_get req))
+    heavy_gets;
+
+  let fast_gets =
+    [
+      ("Get_health", Cmd.Get_health);
+      ("Get_keeper_turns", Cmd.Get_keeper_turns);
+      ( "Get_asks"
+      , Cmd.Get_asks { keeper = None; include_resolved = false } );
+      ("Get_tool_approvals", Cmd.Get_tool_approvals);
+      ("Get_gate_pending", Cmd.Get_gate_pending);
+      ("Get_board_hearths", Cmd.Get_board_hearths);
+      ("Get_wiki_page", Cmd.Get_wiki_page { page = "home" });
+      ("Get_tui_preferences", Cmd.Get_tui_preferences);
+      ("Get_chat_queue", Cmd.Get_chat_queue { keeper = "alpha" });
+      ( "Get_chat_status"
+      , Cmd.Get_chat_status { keeper = "alpha"; operation_id = "op-1" } );
+      ("Get_mcp_clients", Cmd.Get_mcp_clients);
+    ]
+  in
+  List.iter
+    (fun (label, req) ->
+      Alcotest.(check (float 0.001)) ("fast GET: " ^ label) 12.0
+        (Cmd_executor.timeout_sec_for_get req))
+    fast_gets;
+
+  let heavy_posts =
+    [
+      ("Post_sandbox_probe", Cmd.Post_sandbox_probe `All);
+      ( "Post_fusion_launch"
+      , Cmd.Post_fusion_launch
+          {
+            keeper = "alpha";
+            request =
+              {
+                prompt = "check";
+                preset = Some "default";
+                topology = None;
+                web_tools = false;
+              };
+          } );
+      ( "Post_config_patch"
+      , Cmd.Post_config_patch
+          {
+            target = Masc_tui_protocol.Wire_config.Target_runtime;
+            keeper_name = None;
+            expected_sha256 = None;
+            dry_run = true;
+            ops = [];
+          } );
+      ( "Post_memory_act"
+      , Cmd.Post_memory_act
+          {
+            keeper = "alpha";
+            act = Masc_tui_protocol.Wire_knowledge.Act_resume;
+          } );
+      ( "Post_oauth_identity_refresh"
+      , Cmd.Post_oauth_identity_refresh
+          { keeper = "alpha"; provider = "github" } );
+      ("Post_browser_tabs", Cmd.Post_browser_tabs { client_id = "c-1" });
+      ( "Post_repo_add"
+      , Cmd.Post_repo_add { url = "https://example.com/r.git"; branch = None } );
+    ]
+  in
+  List.iter
+    (fun (label, req) ->
+      Alcotest.(check (float 0.001)) ("heavy POST: " ^ label) 30.0
+        (Cmd_executor.timeout_sec_for_post req))
+    heavy_posts;
+
+  let fast_posts =
+    [
+      ( "Post_ask_answer"
+      , Cmd.Post_ask_answer
+          { keeper = "alpha"; ask_id = "ask-1"; answers = [] } );
+      ( "Post_tool_approval"
+      , Cmd.Post_tool_approval
+          {
+            keeper = "alpha";
+            tool_call_id = "tc-1";
+            approval_id = "ap-1";
+            decision = Masc_tui_protocol.Wire_work.Tool_approve;
+            expected_workspace = None;
+          } );
+      ( "Post_board_vote"
+      , Cmd.Post_board_vote { post_id = "p-1"; direction = `Up } );
+      ( "Post_task_cancel"
+      , Cmd.Post_task_cancel
+          {
+            task_id = "task-1";
+            reason = None;
+            expected_workspace =
+              { base_path = "/tmp/ws"; masc_root = "/tmp/ws/.masc" };
+          } );
+      ( "Post_gate_resolution"
+      , Cmd.Post_gate_resolution
+          { id = "g-1"; approved = true; reason = None } );
+    ]
+  in
+  List.iter
+    (fun (label, req) ->
+      Alcotest.(check (float 0.001)) ("fast POST: " ^ label) 12.0
+        (Cmd_executor.timeout_sec_for_post req))
+    fast_posts;
+
+  (* Chat stream reattach treats Timeout_detail identically to retryable Timeout/Stream_eof *)
+  let running = Some Keeper_chat_operation.State_name.Running in
+  let stream_hdr_timeout =
+    Error
+      (Msg.Transport
+         (Health.Timeout_detail
+            {
+              phase = Health.Timeout_stream_header;
+              after_sec = Some 45.0;
+              path = Some "/api/v1/keepers/chat/stream";
+            }))
+  in
+  let stream_idle_timeout =
+    Error
+      (Msg.Transport
+         (Health.Timeout_detail
+            {
+              phase = Health.Timeout_stream_idle;
+              after_sec = Some 120.0;
+              path = Some "/api/v1/keepers/chat/stream";
+            }))
+  in
+  Alcotest.(check (option (float 0.001)))
+    "Timeout_stream_header reattaches on running op" (Some 1.0)
+    (Cmd_executor.chat_reattach_delay ~acceptance:running ~terminal_seen:false
+       ~reattaches:0 stream_hdr_timeout);
+  Alcotest.(check (option (float 0.001)))
+    "Timeout_stream_idle reattaches on running op" (Some 2.0)
+    (Cmd_executor.chat_reattach_delay ~acceptance:running ~terminal_seen:false
+       ~reattaches:1 stream_idle_timeout)
+
 let () =
   Alcotest.run "masc_tui_app"
     [
@@ -2574,6 +2771,8 @@ let () =
             `Quick test_feature_wave1_osc52_and_artifact_export_safety;
           Alcotest.test_case "P1-4/P1-6: bounded clipboard & URL opener + async Edit_wiki_page"
             `Quick test_bounded_clipboard_url_opener_and_async_wiki_editor;
+          Alcotest.test_case "exhaustive per-endpoint timeout budgets & Timeout_detail chat reattach"
+            `Quick test_timeout_budgets_and_reattach_on_timeout_detail;
         ] );
       ( "app"
       , [

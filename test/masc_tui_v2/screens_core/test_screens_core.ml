@@ -3656,11 +3656,66 @@ let test_ux_sweep_world_pulse_and_too_small_quit_arm () =
   assert_contains ~label:"TooSmallGuard shows armed Ctrl+Q prompt"
     ~needle:"Press Ctrl+Q again to quit" txt_small
 
+let test_render_util_timeout_detail_labels () =
+  let cases =
+    [
+      ( Health.Timeout_connect
+      , Some 5.0
+      , Some "/api/v1/dashboard/tools"
+      , "연결 시간 초과 (5.0s · /api/v1/dashboard/tools)"
+      , "Connect timed out (5.0s · /api/v1/dashboard/tools)" );
+      ( Health.Timeout_connect_cooldown
+      , Some 5.0
+      , Some "/api/v1/infra/sandboxes"
+      , "연결 쿨다운 대기 중 (5.0s · /api/v1/infra/sandboxes)"
+      , "Connect cooldown active (5.0s · /api/v1/infra/sandboxes)" );
+      ( Health.Timeout_response
+      , Some 30.0
+      , Some "/api/v1/dashboard/tools"
+      , "응답 시간 초과 (30.0s · /api/v1/dashboard/tools)"
+      , "Response timed out (30.0s · /api/v1/dashboard/tools)" );
+      ( Health.Timeout_stream_header
+      , Some 45.0
+      , Some "/api/v1/keepers/chat/stream"
+      , "스트림 응답 대기 초과 (45.0s · /api/v1/keepers/chat/stream)"
+      , "Stream header timed out (45.0s · /api/v1/keepers/chat/stream)" );
+      ( Health.Timeout_stream_idle
+      , Some 120.0
+      , Some "/mcp"
+      , "스트림 유휴 시간 초과 (120.0s · /mcp)"
+      , "Stream idle timed out (120.0s · /mcp)" );
+      ( Health.Timeout_response
+      , Some 12.0
+      , None
+      , "응답 시간 초과 (12.0s)"
+      , "Response timed out (12.0s)" );
+      ( Health.Timeout_stream_idle
+      , None
+      , None
+      , "스트림 유휴 시간 초과"
+      , "Stream idle timed out" );
+    ]
+  in
+  List.iter
+    (fun (phase, after_sec, path, exp_ko, exp_en) ->
+      let te = Health.Timeout_detail { phase; after_sec; path } in
+      Alcotest.(check string) ("KO: " ^ exp_ko) exp_ko
+        (Render_util.string_of_transport_error ~lang:Say.Lang_ko te);
+      Alcotest.(check string) ("EN: " ^ exp_en) exp_en
+        (Render_util.string_of_transport_error ~lang:Say.Lang_en te))
+    cases;
+  Alcotest.(check string) "legacy Timeout KO" "요청 시간 초과"
+    (Render_util.string_of_transport_error ~lang:Say.Lang_ko Health.Timeout);
+  Alcotest.(check string) "legacy Timeout EN" "Request timed out"
+    (Render_util.string_of_transport_error ~lang:Say.Lang_en Health.Timeout)
+
 let () =
   Alcotest.run "masc_tui_screens_core"
     [
       ( "chrome",
         [
+          Alcotest.test_case "Render_util.string_of_transport_error formats all 5 Timeout_detail phases in KO & EN"
+            `Quick test_render_util_timeout_detail_labels;
           Alcotest.test_case "compact 3-row auto-fold and expand triggers" `Quick
             test_compact_chrome_auto_fold;
           Alcotest.test_case "footer never overflows across 80/90/140/180 KO & EN" `Quick

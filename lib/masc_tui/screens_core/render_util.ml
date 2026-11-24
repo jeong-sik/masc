@@ -637,6 +637,8 @@ let string_of_transport_error ~lang = function
       Say.resolve lang (Say.make ~ko:"연결 거부됨 (서버 중지)" ~en:"Connection refused (server stopped)")
   | Health.Timeout ->
       Say.resolve lang (Say.make ~ko:"요청 시간 초과" ~en:"Request timed out")
+  | Health.Timeout_detail { phase; after_sec; path } ->
+      Say.resolve lang (Health.timeout_detail_say ~phase ~after_sec ~path)
   | Health.Http_status code ->
       Say.resolve lang
         (Say.make

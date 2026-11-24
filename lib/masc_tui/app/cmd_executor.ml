@@ -95,6 +95,161 @@ let msg_error_of_http = function
       Msg.Http_error { status; body; api_error }
   | Http_client.Decode_error msg -> Msg.Decode_error msg
 
+let standard_timeout_sec = 12.0
+let heavy_timeout_sec = 30.0
+let chat_stream_header_timeout_sec = 45.0
+
+let timeout_sec_for_get : Cmd.get_request -> float = function
+  (* Standard tier: lightweight state reads and single-entity lookups *)
+  | Cmd.Get_health
+  | Cmd.Get_keeper_turns
+  | Cmd.Get_chat_queue _
+  | Cmd.Get_chat_status _
+  | Cmd.Get_chat_operation_events _
+  | Cmd.Get_schedules _
+  | Cmd.Get_asks _
+  | Cmd.Get_tool_approvals
+  | Cmd.Get_gate_pending
+  | Cmd.Get_board_hearths
+  | Cmd.Get_wiki_page _
+  | Cmd.Get_artifact_checks
+  | Cmd.Get_setup_login_status _
+  | Cmd.Get_connectors
+  | Cmd.Get_mcp_clients
+  | Cmd.Get_tui_preferences
+  | Cmd.Get_workspace_children _
+  | Cmd.Get_oauth_providers
+  | Cmd.Get_oauth_attached_tools _
+  | Cmd.Get_oauth_attempt_status _
+  | Cmd.Get_board_quarantines _ ->
+      standard_timeout_sec
+  (* Heavy tier: dashboard/analytics aggregates, disk/git/ripgrep scans,
+     memory/keeper context & history reads, probes, and published artifacts *)
+  | Cmd.Get_dashboard_shell
+  | Cmd.Get_keepers_roster
+  | Cmd.Get_keeper_turn_records _
+  | Cmd.Get_chat_history _
+  | Cmd.Get_planning
+  | Cmd.Get_verifications _
+  | Cmd.Get_candle_ledger _
+  | Cmd.Get_board_feed _
+  | Cmd.Get_board_thread _
+  | Cmd.Get_wiki_index _
+  | Cmd.Get_wiki_log _
+  | Cmd.Get_wiki_search _
+  | Cmd.Get_wiki_lint
+  | Cmd.Get_artifacts
+  | Cmd.Get_artifact_detail _
+  | Cmd.Get_world_memory
+  | Cmd.Get_memory_diff _
+  | Cmd.Get_keeper_memory_os_internals _
+  | Cmd.Get_keeper_memory_facts _
+  | Cmd.Get_keeper_memory_activity _
+  | Cmd.Get_keeper_memory_health _
+  | Cmd.Get_keeper_context_turn_records _
+  | Cmd.Get_keeper_provider_input _
+  | Cmd.Get_keeper_provider_input_part _
+  | Cmd.Get_keeper_cache_outcome _
+  | Cmd.Get_keeper_next_request _
+  | Cmd.Get_keeper_turn_transcript _
+  | Cmd.Get_keeper_tool_stats _
+  | Cmd.Get_keeper_tool_calls _
+  | Cmd.Get_keeper_tool_result _
+  | Cmd.Get_provider_usage _
+  | Cmd.Get_keeper_costs _
+  | Cmd.Get_efficiency _
+  | Cmd.Get_models_metrics _
+  | Cmd.Get_runtime_metrics
+  | Cmd.Get_runtime_resolved
+  | Cmd.Get_runtime_config_raw
+  | Cmd.Get_setup_inventory
+  | Cmd.Get_runtime_probe _
+  | Cmd.Get_exact_lane_runs _
+  | Cmd.Get_fusion_runs
+  | Cmd.Get_tool_series _
+  | Cmd.Get_tool_series_filtered _
+  | Cmd.Get_tools_catalog _
+  | Cmd.Get_skills
+  | Cmd.Get_browser_lane
+  | Cmd.Get_lane_addons
+  | Cmd.Get_sandboxes
+  | Cmd.Get_keeper_sandbox _
+  | Cmd.Get_repositories
+  | Cmd.Get_repository_activity _
+  | Cmd.Get_system_logs _
+  | Cmd.Get_config_schema _
+  | Cmd.Get_fusion_run_detail _
+  | Cmd.Get_fusion_config
+  | Cmd.Get_fusion_board_evidence _
+  | Cmd.Get_harness_health
+  | Cmd.Get_verification_evidence _
+  | Cmd.Get_verification_summary
+  | Cmd.Get_verification_specs
+  | Cmd.Get_verification_tlc_results
+  | Cmd.Get_activity_events _
+  | Cmd.Get_keeper_runtime_trace _
+  | Cmd.Get_keeper_metrics _
+  | Cmd.Get_keeper_sandbox_logs _
+  | Cmd.Get_workspace_files _
+  | Cmd.Get_workspace_search _
+  | Cmd.Get_workspace_file _
+  | Cmd.Get_git_branches _
+  | Cmd.Get_git_worktrees _
+  | Cmd.Get_git_status _
+  | Cmd.Get_git_blame _
+  | Cmd.Get_git_log _
+  | Cmd.Get_git_diff _
+  | Cmd.Get_workspace_memory_ledger
+  | Cmd.Get_workspace_memory_context
+  | Cmd.Get_keeper_memory_journal _
+  | Cmd.Get_github_identity _
+  | Cmd.Get_addon_package_catalog _
+  | Cmd.Get_addon_package_preview _
+  | Cmd.Get_connector_names _ ->
+      heavy_timeout_sec
+
+let timeout_sec_for_post : Cmd.post_request -> float = function
+  (* Standard tier: quick mutations *)
+  | Cmd.Post_ask_answer _
+  | Cmd.Post_tool_approval _
+  | Cmd.Post_gate_resolution _
+  | Cmd.Post_goal_transition _
+  | Cmd.Post_goal_confirmation _
+  | Cmd.Post_verification_verdict _
+  | Cmd.Post_runtime_assignment _
+  | Cmd.Post_runtime_default_route _
+  | Cmd.Post_setup_account_key _
+  | Cmd.Post_tui_preference _
+  | Cmd.Post_keeper_turn_interrupt _
+  | Cmd.Post_board_create _
+  | Cmd.Post_board_comment _
+  | Cmd.Post_board_vote _
+  | Cmd.Post_board_comment_vote _
+  | Cmd.Post_artifact_check _
+  | Cmd.Post_artifact_share _
+  | Cmd.Post_schedule_create _
+  | Cmd.Post_connector_bind _
+  | Cmd.Post_connector_unbind _
+  | Cmd.Post_task_cancel _
+  | Cmd.Post_harness_overrule _
+  | Cmd.Post_oauth_identity_switch _
+  | Cmd.Post_oauth_disconnect _
+  | Cmd.Post_board_recovery _ ->
+      standard_timeout_sec
+  (* Heavy tier: probes, fusion launches, config patches, memory recovery,
+     OAuth/GitHub/repo/browser CLI or external-service calls *)
+  | Cmd.Post_sandbox_probe _
+  | Cmd.Post_fusion_launch _
+  | Cmd.Post_config_patch _
+  | Cmd.Post_memory_act _
+  | Cmd.Post_oauth_identity_refresh _
+  | Cmd.Post_oauth_login _
+  | Cmd.Post_browser_tabs _
+  | Cmd.Post_setup_login_start _
+  | Cmd.Post_repo_add _
+  | Cmd.Post_github_token _ ->
+      heavy_timeout_sec
+
 let stream_spec_of_id = function
   | Subscriptions.Stream_observer -> Sse_hub.Stream_spec.default_observer
   | Subscriptions.Stream_fleet -> Sse_hub.Stream_spec.default_fleet
@@ -506,28 +661,28 @@ let decode_raw_json t ~decode raw_body =
     Worker_pool.submit_cpu t.worker ~name:"tui_json_decode" work
   else work ()
 
-let fetch_and_decode_get ?timeout_sec t ~path ~decode =
+let fetch_and_decode_get ~timeout_sec t ~path ~decode =
   let ep = Atomic.get t.endpoint in
-  match Http_client.get_raw ~io:t.io ~clock:t.clock ?timeout_sec ep ~path with
+  match Http_client.get_raw ~io:t.io ~clock:t.clock ~timeout_sec ep ~path with
   | Error err -> Error (msg_error_of_http err)
   | Ok raw -> decode_raw_json t ~decode raw
 
-let post_and_decode t ~path ~body ~decode =
+let post_and_decode ~timeout_sec t ~path ~body ~decode =
   let ep = Atomic.get t.endpoint in
   let body_str = Yojson.Safe.to_string body in
   match
-    Http_client.post_raw ~io:t.io ~clock:t.clock ~content_type:"application/json"
-      ~body:body_str ep ~path
+    Http_client.post_raw ~io:t.io ~clock:t.clock ~timeout_sec
+      ~content_type:"application/json" ~body:body_str ep ~path
   with
   | Error err -> Error (msg_error_of_http err)
   | Ok raw -> decode_raw_json t ~decode raw
 
-let post_ack t ~path ~body =
+let post_ack ~timeout_sec t ~path ~body =
   let ep = Atomic.get t.endpoint in
   let body_str = Yojson.Safe.to_string body in
   match
-    Http_client.post_raw ~io:t.io ~clock:t.clock ~content_type:"application/json"
-      ~body:body_str ep ~path
+    Http_client.post_raw ~io:t.io ~clock:t.clock ~timeout_sec
+      ~content_type:"application/json" ~body:body_str ep ~path
   with
   | Error err -> Error (msg_error_of_http err)
   | Ok _ -> Ok ()
@@ -566,7 +721,7 @@ let board_snapshot_key ~epoch ~path ids =
   let scope = string_of_int (Epoch.to_int epoch) :: ids in
   Key_get (path ^ "#" ^ String.concat "/" (List.map Wire_common.percent_encode scope))
 
-let read_chat_queue t ~keeper ~partial =
+let read_chat_queue ~timeout_sec t ~keeper ~partial =
   let endpoint = Atomic.get t.endpoint in
   (* A move to the end assigns a new sequence between pages. Emit each
      operation at its last observed position. *)
@@ -580,7 +735,7 @@ let read_chat_queue t ~keeper ~partial =
   in
   let rec read after acc =
     let path = Wire_fleet.chat_queue_path ~keeper ~after in
-    let page = match Http_client.get_raw ~io:t.io ~clock:t.clock endpoint ~path with
+    let page = match Http_client.get_raw ~io:t.io ~clock:t.clock ~timeout_sec endpoint ~path with
       | Error err -> Error (msg_error_of_http err)
       | Ok raw -> decode_raw_json t ~decode:(Wire_fleet.decode_chat_queue ~after) raw in
     match page with
@@ -595,6 +750,10 @@ let read_chat_queue t ~keeper ~partial =
 
 let execute_get t ~epoch req =
   let path = Cmd.get_request_path req in
+  let timeout_sec = timeout_sec_for_get req in
+  let fetch_and_decode_get t ~path ~decode =
+    fetch_and_decode_get ~timeout_sec t ~path ~decode
+  in
   let requested_at = Clock.Mono.now () in
   let snapshot_key = ref (Key_get path) in
   fork_safe t (fun () ->
@@ -660,7 +819,7 @@ let execute_get t ~epoch req =
             let reply operations result =
               Msg.Http_reply { epoch; reply = Msg.Reply_chat_queue { keeper; requested_at; operations; result } } in
             let partial rows = Ui_bus.publish_snapshot t.bus ~key:!snapshot_key (reply rows None) in
-            let rows, result = read_chat_queue t ~keeper ~partial in
+            let rows, result = read_chat_queue ~timeout_sec t ~keeper ~partial in
             reply rows (Some result)
         | Cmd.Get_chat_status { keeper; operation_id } ->
             (* Preserve each exact observation until the reducer has consumed it.
@@ -1650,6 +1809,11 @@ let run_setup_login_stream
 let execute_post t ~epoch req =
   let path = Cmd.post_request_path req in
   let body = Cmd.post_request_body req in
+  let timeout_sec = timeout_sec_for_post req in
+  let post_and_decode t ~path ~body ~decode =
+    post_and_decode ~timeout_sec t ~path ~body ~decode
+  in
+  let post_ack t ~path ~body = post_ack ~timeout_sec t ~path ~body in
   fork_safe t (fun () ->
       let reply_opt =
         match req with
@@ -1760,7 +1924,7 @@ let execute_post t ~epoch req =
             let body_str = Yojson.Safe.to_string body in
             let result =
               match
-                Http_client.post_raw ~io:t.io ~clock:t.clock
+                Http_client.post_raw ~io:t.io ~clock:t.clock ~timeout_sec
                   ~content_type:"application/json" ~body:body_str ep ~path
               with
               | Ok raw ->
@@ -1883,7 +2047,7 @@ let execute_post t ~epoch req =
             let body_str = Yojson.Safe.to_string body in
             let result =
               match
-                Http_client.post_raw ~io:t.io ~clock:t.clock
+                Http_client.post_raw ~io:t.io ~clock:t.clock ~timeout_sec
                   ~content_type:"application/json" ~body:body_str ep ~path
               with
               | Ok raw ->
@@ -2039,7 +2203,8 @@ let execute_put t ~epoch req =
       | Cmd.Put_wiki_page { page; _ } ->
           let ep = Atomic.get t.endpoint in
           let result =
-            Http_client.put_json ~io:t.io ~clock:t.clock ep ~path ~body
+            Http_client.put_json ~io:t.io ~clock:t.clock
+              ~timeout_sec:standard_timeout_sec ep ~path ~body
               ~decode:Wire_knowledge.decode_wiki_put_result
             |> Result.map_error msg_error_of_http
           in
@@ -2246,6 +2411,7 @@ let execute_post_stream t ~epoch req =
               |> Yojson.Safe.to_string
             in
             Http_client.post_stream ~io:t.io ~clock:t.clock
+              ~header_timeout_sec:chat_stream_header_timeout_sec
               ~content_type:"application/json" ~body ~on_response
               ~on_chunk:(on_chunk (Sse_wire.create_decoder ()))
               ep ~path:Wire_fleet.keeper_chat_stream_path
@@ -2532,8 +2698,9 @@ let execute_editor_escape_hatch t target =
         in
         fork_safe t (fun () ->
             match
-              fetch_and_decode_get ~timeout_sec:3.0 t ~path
-                ~decode:Wire_knowledge.decode_wiki_page_detail
+              fetch_and_decode_get
+                ~timeout_sec:(timeout_sec_for_get (Cmd.Get_wiki_page { page }))
+                t ~path ~decode:Wire_knowledge.decode_wiki_page_detail
             with
             | Error err ->
                 if is_still_current () then
@@ -3063,7 +3230,7 @@ let rec execute t = function
       fork_safe t (fun () ->
           let path = Wire_knowledge.published_artifact_detail_path ~id ?revision () in
           match
-            fetch_and_decode_get t ~path
+            fetch_and_decode_get ~timeout_sec:heavy_timeout_sec t ~path
               ~decode:Wire_knowledge.decode_published_artifact_detail
           with
           | Ok detail ->
@@ -3108,7 +3275,7 @@ let rec execute t = function
                   Wire_knowledge.published_artifact_detail_path ~id ?revision ()
                 in
                 match
-                  fetch_and_decode_get t ~path
+                  fetch_and_decode_get ~timeout_sec:heavy_timeout_sec t ~path
                     ~decode:Wire_knowledge.decode_published_artifact_detail
                 with
                 | Ok detail ->

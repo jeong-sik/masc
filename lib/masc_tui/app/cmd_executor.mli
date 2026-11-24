@@ -44,6 +44,24 @@ val endpoint_of_cli :
 
 val msg_error_of_http : Http_client.http_error -> Msg.http_error
 
+val standard_timeout_sec : float
+(** Default per-request HTTP timeout ([12.0]s) for lightweight state reads and
+    quick mutations. *)
+
+val heavy_timeout_sec : float
+(** Extended per-request HTTP timeout ([30.0]s) for aggregate dashboards, disk
+    or git/ripgrep scans, probes, and heavy mutations. *)
+
+val chat_stream_header_timeout_sec : float
+(** Streaming HTTP response header timeout ([45.0]s) for keeper chat & [/btw]
+    submissions. *)
+
+val timeout_sec_for_get : Cmd.get_request -> float
+(** Exhaustive per-endpoint HTTP timeout budget for {!Cmd.get_request}. *)
+
+val timeout_sec_for_post : Cmd.post_request -> float
+(** Exhaustive per-endpoint HTTP timeout budget for {!Cmd.post_request}. *)
+
 val stream_spec_of_id : Subscriptions.stream_id -> Sse_hub.Stream_spec.t
 val stream_id_of_kind : Sse_hub.Stream_spec.kind -> Subscriptions.stream_id
 

@@ -1,14 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  authSession,
   bootstrapAuthSession,
   bumpSessionEpoch,
   resetAuthStateForTests,
   setSingleUserToken,
 } from './auth'
 import {
+  OBSERVER_SSE_INSTANCE_HEADER,
   extractObserverTopics,
+  getObserverSseInstanceId,
   observerConnected,
   observerLastEventId,
+  observerSseInstanceId,
   parseSseBlock,
   resetObserverStateForTests,
   resolveObserverEndpoint,
@@ -267,5 +271,45 @@ describe('core/observer & core/time-window', () => {
     expect(s1).toBe(s2)
     expect(syncSpy).toHaveBeenCalledTimes(1)
     expect(syncSpy).toHaveBeenCalledWith(CROSSHAIR_SYNC_KEY)
+  })
+
+  it('captures x-masc-sse-instance-id response header from observer stream and clears it on sessionEpoch bump', async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.close()
+      },
+    })
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/mcp?sse_kind=observer') {
+        return new Response(stream, {
+          status: 200,
+          headers: {
+            'Content-Type': 'text/event-stream',
+            [OBSERVER_SSE_INSTANCE_HEADER]: 'rt-inst-8935.epoch-4',
+          },
+        })
+      }
+      throw new Error(`unexpected ${url}`)
+    })
+
+    setSingleUserToken('tok-obs-1')
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    await startObserverStream({ fetchImpl: fetchMock as unknown as typeof fetch })
+
+    expect(observerSseInstanceId.value).toBe('rt-inst-8935.epoch-4')
+    expect(getObserverSseInstanceId()).toBe('rt-inst-8935.epoch-4')
+
+    // Bumping sessionEpoch clears cached observerSseInstanceId
+    bumpSessionEpoch()
+    expect(observerSseInstanceId.value).toBeNull()
+    expect(getObserverSseInstanceId()).toBeNull()
   })
 })

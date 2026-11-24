@@ -548,7 +548,7 @@ export function TopBar(): VNode {
             onClick=${() => navigate('/work/inbox')}
           >
             <${ShellIcon} name="inbox" size=${13} />
-            <span>Inbox</span>
+            <span class="ap-pill-label">Inbox</span>
             <span class="ap-pill-count tnum">${pending}</span>
           </button>
 

@@ -33,19 +33,45 @@ export interface ObserverFrame {
 export type ObserverListener = (frame: ObserverFrame) => void
 export type ResyncListener = (reason: string) => void
 
+export const OBSERVER_SSE_INSTANCE_HEADER = 'x-masc-sse-instance-id'
+
 const provenanceSignal = signal<ViewProvenance>('SNAPSHOT')
 const connectedSignal = signal<boolean>(false)
 const lastEventIdSignal = signal<string | null>(null)
+const sseInstanceIdSignal = signal<string | null>(null)
 
 export const viewProvenance: ReadonlySignal<ViewProvenance> = provenanceSignal
 export const observerConnected: ReadonlySignal<boolean> = connectedSignal
 export const observerLastEventId: ReadonlySignal<string | null> = lastEventIdSignal
+export const observerSseInstanceId: ReadonlySignal<string | null> = sseInstanceIdSignal
 
 const frameListeners = new Set<ObserverListener>()
 const resyncListeners = new Set<ResyncListener>()
 
 let activeController: AbortController | null = null
 let activeEpoch = 0
+let sseInstanceIdEpoch = 0
+let trackedInstanceEpoch = sessionEpoch.peek()
+
+sessionEpoch.subscribe((epoch) => {
+  if (epoch !== trackedInstanceEpoch) {
+    trackedInstanceEpoch = epoch
+    sseInstanceIdSignal.value = null
+    sseInstanceIdEpoch = 0
+  }
+})
+
+export function getObserverSseInstanceId(): string | null {
+  const id = sseInstanceIdSignal.peek()
+  if (!id || sseInstanceIdEpoch !== currentSessionEpoch()) return null
+  return id
+}
+
+export function setObserverSseInstanceId(id: string | null): void {
+  const cleaned = typeof id === 'string' && id.trim().length > 0 ? id.trim() : null
+  sseInstanceIdSignal.value = cleaned
+  sseInstanceIdEpoch = cleaned ? currentSessionEpoch() : 0
+}
 
 export function resolveObserverEndpoint(session: AuthSession): {
   readonly url: string
@@ -233,6 +259,11 @@ export async function startObserverStream(
       return
     }
 
+    const sseInstanceHeader = response.headers.get(OBSERVER_SSE_INSTANCE_HEADER)
+    if (sseInstanceHeader && sseInstanceHeader.trim().length > 0) {
+      setObserverSseInstanceId(sseInstanceHeader)
+    }
+
     connectedSignal.value = true
     provenanceSignal.value = 'LIVE SSE'
 
@@ -273,6 +304,9 @@ export async function startObserverStream(
 export function resetObserverStateForTests(): void {
   stopObserverStream()
   lastEventIdSignal.value = null
+  sseInstanceIdSignal.value = null
+  sseInstanceIdEpoch = 0
+  trackedInstanceEpoch = sessionEpoch.peek()
   provenanceSignal.value = 'SNAPSHOT'
   frameListeners.clear()
   resyncListeners.clear()

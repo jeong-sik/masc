@@ -162,6 +162,7 @@
   display: flex;
   align-items: center;
   gap: var(--sp-1);
+  flex: 1 1 auto;
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
@@ -1605,13 +1606,48 @@
 }
 
 /* Responsive adjustments */
+@media (max-width: 1120px) {
+  .ap-topbar {
+    padding: 0 var(--sp-2);
+    gap: var(--sp-2);
+  }
+  .ap-topbar-right {
+    gap: var(--sp-1);
+  }
+  .ap-switcher-trigger {
+    max-width: 210px;
+    gap: var(--sp-1);
+  }
+  .ap-switcher-role {
+    display: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .ap-switcher-trigger {
+    max-width: 156px;
+  }
+  .ap-switcher-principal,
+  .ap-switcher-sep,
+  .ap-pill-label,
+  .ap-pill .ap-kbd {
+    display: none;
+  }
+  .ap-win-btn {
+    padding: 0 var(--sp-1);
+  }
+  .ap-pill {
+    padding: 0 var(--sp-1);
+  }
+}
+
 @media (max-width: 767px) {
   .ap-topbar {
     padding: 0 var(--sp-2);
     gap: var(--sp-2);
   }
   .ap-switcher-trigger {
-    max-width: 190px;
+    max-width: 148px;
   }
   .ap-workspace,
   .ap-placeholder,

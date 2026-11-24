@@ -334,7 +334,8 @@ let apply_http_reply ~now (m : Model.t) reply =
       let fleet0 = Fleet_store.apply_turns ~observed_at:now rows m.fleet in
       let fleet, drafts, history_keepers =
         List.fold_left
-          (fun (fl, dr, hist_ks) (r : Wire_fleet.keeper_turn_row) ->
+          (fun ((fl : Fleet_store.t), dr, hist_ks)
+               (r : Wire_fleet.keeper_turn_row) ->
             match r.state with
             | Wire_fleet.Turn_active _ | Wire_fleet.Turn_unavailable _ ->
                 (fl, dr, hist_ks)

@@ -16012,9 +16012,14 @@ let test_active_turn_preview_visibility_and_queued_followup () =
          {
            epoch = m_work_dive.epoch;
            event =
-             Msg.Observer_event
-               (Wire_observer.Keeper_turn_changed
-                  { keeper; preview_only = true });
+             Msg.Sse_observer_delivery
+               {
+                 cursor = None;
+                 decoded =
+                   Wire_observer.Event
+                     (Wire_observer.Keeper_turn_changed
+                        { keeper; preview_only = true });
+               };
          })
   in
   Alcotest.(check bool)
@@ -16031,9 +16036,14 @@ let test_active_turn_preview_visibility_and_queued_followup () =
          {
            epoch = m_work_dive.epoch;
            event =
-             Msg.Observer_event
-               (Wire_observer.Keeper_turn_changed
-                  { keeper = "unrelated-keeper"; preview_only = true });
+             Msg.Sse_observer_delivery
+               {
+                 cursor = None;
+                 decoded =
+                   Wire_observer.Event
+                     (Wire_observer.Keeper_turn_changed
+                        { keeper = "unrelated-keeper"; preview_only = true });
+               };
          })
   in
   Alcotest.(check bool)

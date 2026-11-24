@@ -885,8 +885,8 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
         ignore
           (Table.draw grid ~rect:l_inner ~theme ~caps:Ops_common.default_caps
              ~lang:model.lang ~scroll:model.work.scroll_offset
-             ?selected:sel_goal_idx ~col_gap:(Layout.table_col_gap bp)
-             ~columns:cols rows)
+             ?selected:sel_goal_idx ~focused:(Model.pane_focused model 0)
+             ~col_gap:(Layout.table_col_gap bp) ~columns:cols rows)
     end;
     (* Bottom-left peer card: Linked Tasks & Verifications for selected goal *)
     if not (Rect.is_empty linked_card_rect) then
@@ -1478,8 +1478,8 @@ let render_tasks ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
           ignore
             (Table.draw grid ~rect:t_inner ~theme ~caps:Ops_common.default_caps
                ~lang:model.lang ~scroll:model.work.scroll_offset
-               ?selected:task_sel_opt ~col_gap:(Layout.table_col_gap bp)
-               ~columns:cols rows)
+               ?selected:task_sel_opt ~focused:(Model.pane_focused model 0)
+               ~col_gap:(Layout.table_col_gap bp) ~columns:cols rows)
       end;
       (* 2. Task Detail Inspector *)
       if not (Rect.is_empty detail_rect) then begin
@@ -1891,8 +1891,8 @@ let render_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
         ignore
           (Table.draw grid ~rect:s_inner ~theme ~caps:Ops_common.default_caps
              ~lang:model.lang ~scroll:model.work.schedules_scroll_offset
-             ?selected:sched_sel_opt ~col_gap:(Layout.table_col_gap bp)
-             ~columns:cols rows)
+             ?selected:sched_sel_opt ~focused:(Model.pane_focused model 0)
+             ~col_gap:(Layout.table_col_gap bp) ~columns:cols rows)
     end;
     if not (Rect.is_empty detail_rect) then begin
       let sel_sched = Option.bind sched_sel_opt (List.nth_opt filtered_scheds) in
@@ -2429,8 +2429,8 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
           ignore
             (Table.draw grid ~rect:l_inner ~theme ~caps:Ops_common.default_caps
                ~lang:model.lang ~scroll:model.attention.triage_scroll_offset
-               ~selected:sel_attn ~col_gap:(Layout.table_col_gap bp)
-               ~columns:cols rows)
+               ~selected:sel_attn ~focused:(Model.pane_focused model 0)
+               ~col_gap:(Layout.table_col_gap bp) ~columns:cols rows)
       end;
       if not (Rect.is_empty right_rect) then
         match
@@ -3221,6 +3221,7 @@ let render_candle_scorecard ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                      ~caps:Ops_common.default_caps ~lang:model.lang
                      ~scroll:model.work.scroll_offset
                      ~selected:model.work.selected_index
+                     ~focused:(Model.body_has_focus model)
                      ~col_gap:(Layout.table_col_gap bp) ~columns:cols rows)
             end
       end;
@@ -3737,8 +3738,8 @@ let render_harness ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
           ignore
             (Table.draw grid ~rect:l_inner ~theme ~caps:Ops_common.default_caps
                ~lang:model.lang ~col_gap:(Layout.table_col_gap bp)
-               ~scroll:model.work.harness_scroll_offset ~selected:sel ~columns
-               rows)
+               ~scroll:model.work.harness_scroll_offset ~selected:sel
+               ~focused:(Model.pane_focused model 0) ~columns rows)
       | Observed.Value _ ->
           Ops_common.draw_observed_empty grid ~rect:l_inner ~theme
             ~lang:model.lang model.work.harness_health

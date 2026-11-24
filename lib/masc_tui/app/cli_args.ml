@@ -12,6 +12,8 @@ type config = {
   workspace : string;
   theme : Theme.preset;
   lang : Say.lang;
+  theme_explicit : bool;
+  lang_explicit : bool;
   auto_start : bool;
 }
 
@@ -385,6 +387,8 @@ let parse ?(version = Build_version.current)
               workspace;
               theme;
               lang;
+              theme_explicit = Option.is_some d.theme;
+              lang_explicit = Option.is_some d.lang;
               auto_start = d.auto_start;
             })
 

@@ -848,8 +848,9 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
         let model =
           ref
             (Model.initial ~cols:init_cols ~rows:init_rows ~lang:cli.lang
-               ~theme_preset:cli.theme ~tz_offset_sec ~wall_unix:init_wall_unix
-               ~tui_version:Build_version.current
+               ~theme_preset:cli.theme ~cli_lang_override:cli.lang_explicit
+               ~cli_theme_override:cli.theme_explicit ~tz_offset_sec
+               ~wall_unix:init_wall_unix ~tui_version:Build_version.current
                ~tui_commit:Build_commit_generated.commit ())
         in
         let presenter =

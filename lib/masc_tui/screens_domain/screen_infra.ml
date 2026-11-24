@@ -1275,7 +1275,7 @@ let render_sandboxes ~(model : Model.t) ~cache ~(rect : Rect.t)
       ignore
         (Table.draw grid ~rect:tbl_inner ~theme ~caps:H.default_caps ~lang
            ~col_gap ~scroll:inf.scroll_offset ~selected:inf.selected_index
-           ~columns rows)
+           ~focused:(Model.pane_focused model 0) ~columns rows)
   end;
   if not (Rect.is_empty insp_rect) then
     draw_sandbox_inspector ~scroll:inf.detail_scroll_offset ~grid ~cache
@@ -1469,7 +1469,8 @@ let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
         ignore
           (Table.draw grid ~rect:repos_inner ~theme ~caps:H.default_caps ~lang
              ~col_gap:(Layout.table_col_gap bp) ~scroll:inf.scroll_offset
-             ~selected:inf.selected_index ~columns rows)
+             ~selected:inf.selected_index ~focused:(Model.pane_focused model 0)
+             ~columns rows)
     | Observed.Value _ ->
         H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp repos_inner) ~theme
           (Say.resolve lang
@@ -1523,12 +1524,15 @@ let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
             (* Rows repeat per call, so one path can sit on several rows;
                the cursor is the row index. *)
             let is_active = Int.equal idx sel_ch_idx in
+            let ch_focused = Model.pane_focused model 2 in
             let row_rect = Rect.make ~x:ch_inner.x ~y:!y ~w:ch_inner.w ~h:1 in
             let row_bg =
-              if is_active then theme.selection_bg else theme.surface_1
+              if is_active then H.selected_row_bg ~theme ~focused:ch_focused
+              else theme.surface_1
             in
             if is_active then
-              H.paint_selected_row_bg ~grid ~clip:ch_inner ~row_rect ~theme ();
+              H.paint_selected_row_bg ~grid ~clip:ch_inner ~row_rect ~theme
+                ~focused:ch_focused ();
             let sign, tone = file_change_badge fc in
             let stats_s =
               line_counts_text (Wire_infra.file_change_line_counts fc)
@@ -2008,7 +2012,7 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
       ignore
         (Table.draw grid ~rect:stream_inner ~theme ~caps:H.default_caps ~lang
            ~col_gap:(Layout.table_col_gap bp) ~scroll:inf.scroll_offset
-           ~selected:sel ~columns rows)
+           ~selected:sel ~focused:(Model.pane_focused model 0) ~columns rows)
     end
   end;
   (* Right: Structured K/V Detail Card for both Server Logs and MASC Events *)
@@ -2231,17 +2235,20 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
               let idx = start_i + local_i in
               if !y < bot then begin
                 let is_sel = Int.equal idx sel in
+                let act_focused = Model.pane_focused model 2 in
                 let row_rect =
                   Rect.make ~x:act_inner.x ~y:!y ~w:act_inner.w ~h:1
                 in
                 let row_bg =
-                  if is_sel then theme.selection_bg else theme.surface_1
+                  if is_sel then H.selected_row_bg ~theme ~focused:act_focused
+                  else theme.surface_1
                 in
                 if is_sel then
                   H.paint_selected_row_bg ~grid ~clip:act_inner ~row_rect ~theme
-                    ();
+                    ~focused:act_focused ();
                 let st =
-                  if is_sel then H.anchor_style ~theme ~bg:row_bg ()
+                  if is_sel && act_focused then
+                    H.anchor_style ~theme ~bg:row_bg ()
                   else H.text_style ~theme ~bg:row_bg ()
                 in
                 ignore
@@ -2351,14 +2358,17 @@ let render_code ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
           let idx = start_i + local_i in
           if !y < bot then begin
             let is_sel = Int.equal idx sel in
+            let tree_focused = Model.pane_focused model 0 in
             let row_rect =
               Rect.make ~x:left_inner.x ~y:!y ~w:left_inner.w ~h:1
             in
             let row_bg =
-              if is_sel then theme.selection_bg else theme.surface_1
+              if is_sel then H.selected_row_bg ~theme ~focused:tree_focused
+              else theme.surface_1
             in
             if is_sel then
-              H.paint_selected_row_bg ~grid ~clip:left_inner ~row_rect ~theme ();
+              H.paint_selected_row_bg ~grid ~clip:left_inner ~row_rect ~theme
+                ~focused:tree_focused ();
             let indent = String.make (Int.min 12 (nd.depth * 2)) ' ' in
             let caret =
               if nd.has_children then
@@ -2532,17 +2542,20 @@ let render_code ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                   let idx = start_i + local_i in
                   if !y < bot then begin
                     let is_sel = Int.equal idx sel in
+                    let res_focused = Model.pane_focused model 1 in
                     let row_rect =
                       Rect.make ~x:vis_rect.x ~y:!y ~w:vis_rect.w ~h:1
                     in
                     let row_bg =
-                      if is_sel then theme.selection_bg else theme.surface_1
+                      if is_sel then H.selected_row_bg ~theme ~focused:res_focused
+                      else theme.surface_1
                     in
                     if is_sel then
                       H.paint_selected_row_bg ~grid ~clip:vis_rect ~row_rect
-                        ~theme ();
+                        ~theme ~focused:res_focused ();
                     let st =
-                      if is_sel then H.anchor_style ~theme ~bg:row_bg ()
+                      if is_sel && res_focused then
+                        H.anchor_style ~theme ~bg:row_bg ()
                       else H.text_style ~theme ~bg:row_bg ()
                     in
                     ignore

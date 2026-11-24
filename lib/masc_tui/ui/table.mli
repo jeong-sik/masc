@@ -86,6 +86,7 @@ val draw :
   lang:Say.lang ->
   ?scroll:int ->
   ?selected:int ->
+  ?focused:bool ->
   ?zebra:bool ->
   ?col_gap:int ->
   ?header_separator:bool ->

@@ -995,7 +995,9 @@ let draw_grouped_section_form grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang
             let is_selected = Int.equal idx form_state.focused in
             let is_focused = is_selected && insp_focused in
             let row_bg_rgb =
-              if is_focused then theme.selection_bg else theme.surface_1
+              if is_focused then theme.selection_bg
+              else if is_selected then theme.surface_2
+              else theme.surface_1
             in
             let rbg = Color.of_rgb row_bg_rgb in
             let row_r = Rect.make ~x:fields_r.x ~y:!y ~w:fields_r.w ~h:1 in
@@ -1297,7 +1299,9 @@ let render_settings_tree_pane grid ~(rect : Rect.t) ~(theme : Theme.t)
             let is_sel = Int.equal idx effective_sel_idx in
             let rbg =
               Color.of_rgb
-                (if is_sel then theme.selection_bg else theme.surface_1)
+                (if is_sel && tree_focused then theme.selection_bg
+                 else if is_sel then theme.surface_2
+                 else theme.surface_1)
             in
             Cell_grid.fill_rect ~clip:body_r grid ~rect:row_r
               ~style:(Typography.primary ~bg:rbg theme) ();
@@ -1364,7 +1368,9 @@ let render_settings_tree_pane grid ~(rect : Rect.t) ~(theme : Theme.t)
             let is_sel = Int.equal idx effective_sel_idx in
             let rbg =
               Color.of_rgb
-                (if is_sel then theme.selection_bg else theme.surface_1)
+                (if is_sel && tree_focused then theme.selection_bg
+                 else if is_sel then theme.surface_2
+                 else theme.surface_1)
             in
             Cell_grid.fill_rect ~clip:body_r grid ~rect:row_r
               ~style:(Typography.primary ~bg:rbg theme) ();
@@ -1406,7 +1412,9 @@ let render_settings_tree_pane grid ~(rect : Rect.t) ~(theme : Theme.t)
             let is_sel = Int.equal idx effective_sel_idx in
             let rbg =
               Color.of_rgb
-                (if is_sel then theme.selection_bg else theme.surface_1)
+                (if is_sel && tree_focused then theme.selection_bg
+                 else if is_sel then theme.surface_2
+                 else theme.surface_1)
             in
             Cell_grid.fill_rect ~clip:body_r grid ~rect:row_r
               ~style:(Typography.primary ~bg:rbg theme) ();

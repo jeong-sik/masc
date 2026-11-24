@@ -882,8 +882,9 @@ let render_full_width_roster grid ~(rect : Rect.t) ~(theme : Theme.t)
         ignore
           (Table.draw grid ~rect ~theme ~caps:Ops_common.default_caps
              ~lang:model.lang ~scroll:model.fleet.scroll_offset
-             ?selected:selected_idx ~col_gap:(Layout.table_col_gap bp)
-             ~columns:standard_roster_columns rows)
+             ?selected:selected_idx ~focused:(Model.pane_focused model 0)
+             ~col_gap:(Layout.table_col_gap bp) ~columns:standard_roster_columns
+             rows)
     | Nav.Fleet_attention ->
         let counts = count_fleet ~model ks in
         let bucket_h = if rect.h >= 4 then 1 else 0 in
@@ -940,8 +941,9 @@ let render_full_width_roster grid ~(rect : Rect.t) ~(theme : Theme.t)
         ignore
           (Table.draw grid ~rect:tbl_rect ~theme ~caps:Ops_common.default_caps
              ~lang:model.lang ~scroll:model.fleet.scroll_offset
-             ?selected:selected_idx ~col_gap:(Layout.table_col_gap bp)
-             ~columns:standard_roster_columns rows)
+             ?selected:selected_idx ~focused:(Model.pane_focused model 0)
+             ~col_gap:(Layout.table_col_gap bp) ~columns:standard_roster_columns
+             rows)
     | Nav.Fleet_pulse_wall ->
         let samples = aggregate_pulse_samples ~model ks in
         let chart_h =
@@ -1028,8 +1030,8 @@ let render_full_width_roster grid ~(rect : Rect.t) ~(theme : Theme.t)
         ignore
           (Table.draw grid ~rect:tbl_rect ~theme ~caps:Ops_common.default_caps
              ~lang:model.lang ~scroll:model.fleet.scroll_offset
-             ?selected:selected_idx ~col_gap:(Layout.table_col_gap bp)
-             ~columns:pulse_wall_columns rows)
+             ?selected:selected_idx ~focused:(Model.pane_focused model 0)
+             ~col_gap:(Layout.table_col_gap bp) ~columns:pulse_wall_columns rows)
 
 (* The roster lists a keeper whose meta did not read with only its name and
    the read error, so it has no row in the fleet table; it gets a line under

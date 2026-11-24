@@ -27,6 +27,8 @@ type config = {
   workspace : string;
   theme : Theme.preset;
   lang : Say.lang;
+  theme_explicit : bool;
+  lang_explicit : bool;
   auto_start : bool;
 }
 

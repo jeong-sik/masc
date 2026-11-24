@@ -120,6 +120,8 @@ let test_cli_flags_and_urls () =
       Alcotest.(check bool) "theme" true
         (Theme.equal_preset cfg.theme Theme.Arcade_hi);
       Alcotest.(check bool) "lang" true (Say.equal_lang cfg.lang Say.Lang_en);
+      Alcotest.(check bool) "theme_explicit set" true cfg.theme_explicit;
+      Alcotest.(check bool) "lang_explicit set" true cfg.lang_explicit;
       Alcotest.(check bool) "auto_start disabled" false cfg.auto_start
   | Cli_args.Info _ | Cli_args.Parse_error _ ->
       Alcotest.fail "expected valid Run config");
@@ -141,7 +143,12 @@ let test_cli_flags_and_urls () =
      Cli_args.parse ~env:empty_env ~cwd:"/tmp/cwd"
        [ "--url"; "https://masc.example.internal" ]
    with
-  | Cli_args.Run cfg -> Alcotest.(check int) "https default port" 443 cfg.port
+  | Cli_args.Run cfg ->
+      Alcotest.(check int) "https default port" 443 cfg.port;
+      Alcotest.(check bool) "theme_explicit false when omitted" false
+        cfg.theme_explicit;
+      Alcotest.(check bool) "lang_explicit false when omitted" false
+        cfg.lang_explicit
   | Cli_args.Info _ | Cli_args.Parse_error _ ->
       Alcotest.fail "expected https default port 443")
 
@@ -654,6 +661,8 @@ let test_cmd_executor_auth_and_headers () =
           workspace = "test";
           theme = Theme.Midnight;
           lang = Say.Lang_en;
+          theme_explicit = false;
+          lang_explicit = false;
           auto_start = false;
         }
       in
@@ -756,6 +765,8 @@ let test_cmd_executor_dispatch_and_cancellation () =
       workspace = "test";
       theme = Theme.Midnight;
       lang = Say.Lang_en;
+      theme_explicit = false;
+      lang_explicit = false;
       auto_start = false;
     }
   in
@@ -1814,6 +1825,8 @@ let test_feature_wave1_osc52_and_artifact_export_safety () =
           workspace = "test";
           theme = Theme.Midnight;
           lang = Say.Lang_en;
+          theme_explicit = false;
+          lang_explicit = false;
           auto_start = false;
         }
       in

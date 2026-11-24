@@ -122,16 +122,22 @@ val put_kv :
   string ->
   unit
 
+val selected_row_bg : theme:Theme.t -> focused:bool -> Theme.rgb
+(** Background RGB for a selected row: [selection_bg] when the owning pane
+    has keyboard focus, else muted [surface_2]. *)
+
 val paint_selected_row_bg :
   grid:Cell_grid.t ->
   clip:Rect.t ->
   row_rect:Rect.t ->
   theme:Theme.t ->
+  ?focused:bool ->
   ?tone:Theme.status_token ->
   unit ->
   unit
-(** Fill [row_rect] with calm [selection_bg] and paint a 1-cell {!Glyph.Left_rail}
-    ([▎]) at [row_rect.x] in [tone] or [theme.accent] Bold. *)
+(** Fill [row_rect] with calm [selection_bg] and a 1-cell {!Glyph.Left_rail}
+    ([▎]) when [focused = true] (default), or muted [surface_2] without an
+    accent rail when [focused = false]. *)
 
 val draw_pills :
   grid:Cell_grid.t ->

@@ -2703,14 +2703,19 @@ let apply_http_reply ~now (m : Model.t) reply =
         ~en:"System logs fetch" err
   | Msg.Reply_tui_preferences (Ok prefs) ->
       let config = Config_store.apply_preferences ~observed_at:now prefs m.config in
-      let lang = match prefs.language with Some l -> l | None -> m.lang in
+      let lang =
+        if m.cli_lang_override then m.lang
+        else match prefs.language with Some l -> l | None -> m.lang
+      in
       let theme_preset =
-        match prefs.theme with
-        | Some name -> (
-            match Theme.preset_of_name name with
-            | Some p -> p
-            | None -> m.theme_preset)
-        | None -> m.theme_preset
+        if m.cli_theme_override then m.theme_preset
+        else
+          match prefs.theme with
+          | Some name -> (
+              match Theme.preset_of_name name with
+              | Some p -> p
+              | None -> m.theme_preset)
+          | None -> m.theme_preset
       in
       let knowledge =
         match prefs.board_sort with

@@ -911,10 +911,12 @@ let draw_credit_balances ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
         | Row_unreported_toggle { count; expanded; preview_names; store_idx } ->
             let is_sel = Int.equal store_idx sel_idx in
             let row_bg =
-              if is_sel then theme.selection_bg else theme.surface_1
+              if is_sel then H.selected_row_bg ~theme ~focused
+              else theme.surface_1
             in
             if is_sel then
-              H.paint_selected_row_bg ~grid ~clip:inner ~row_rect ~theme ();
+              H.paint_selected_row_bg ~grid ~clip:inner ~row_rect ~theme
+                ~focused ();
             let caret =
               if expanded then Glyph.Expand_open else Glyph.Expand_closed
             in
@@ -963,11 +965,13 @@ let draw_credit_balances ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
         | Row_account { acct; tier; store_idx } ->
             let is_sel = Int.equal store_idx sel_idx in
             let row_bg =
-              if is_sel then theme.selection_bg else theme.surface_1
+              if is_sel then H.selected_row_bg ~theme ~focused
+              else theme.surface_1
             in
             let row_bg_c = Color.of_rgb row_bg in
             if is_sel then
-              H.paint_selected_row_bg ~grid ~clip:inner ~row_rect ~theme ();
+              H.paint_selected_row_bg ~grid ~clip:inner ~row_rect ~theme
+                ~focused ();
             let alias = Runtime_store.account_display_name ~lang rt acct in
             let max_sub_ratio = max_subscription_window_ratio acct in
             let sub_saturated = is_subscription_saturated acct in
@@ -2248,7 +2252,8 @@ let render_efficiency_spend ~(model : Model.t) ~cache ~(rect : Rect.t)
       ignore
         (Table.draw grid ~rect:tbl_inner ~theme ~caps:H.default_caps ~lang
            ~col_gap:(Layout.table_col_gap bp) ~scroll:rt.scroll_offset
-           ?selected:selected_keeper_row_idx ~columns table_rows)
+           ?selected:selected_keeper_row_idx ~focused:(Model.body_has_focus model)
+           ~columns table_rows)
   end
 
 (* --- 3. Sub-Tab 3: Failover Lanes (Visual Flow_down Cascade + Lane Inspector) --- *)
@@ -2445,12 +2450,14 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
             let right_edge = Rect.right cascade_inner - pad_r in
             match v_arr.(v_idx) with
             | `Lane (lane, is_sel) ->
+                let lane_focused = Model.pane_focused model 0 in
                 let row_bg =
-                  if is_sel then theme.selection_bg else theme.surface_1
+                  if is_sel then H.selected_row_bg ~theme ~focused:lane_focused
+                  else theme.surface_1
                 in
                 if is_sel then
                   H.paint_selected_row_bg ~grid ~clip:cascade_inner
-                    ~row_rect:r_rect ~theme ();
+                    ~row_rect:r_rect ~theme ~focused:lane_focused ();
                 let decl =
                   if lane.declared then ""
                   else
@@ -3228,7 +3235,7 @@ let render_fusion ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         ignore
           (Table.draw grid ~rect:left_inner ~theme ~caps:H.default_caps ~lang
              ~col_gap:(Layout.table_col_gap bp) ~scroll:rt.fusion_scroll_offset
-             ~selected:sel ~columns rows)
+             ~selected:sel ~focused:(Model.pane_focused model 0) ~columns rows)
     | Observed.Value _ ->
         H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp left_inner) ~theme
           ~hint:
@@ -3889,7 +3896,7 @@ let render_tools_catalog_tree ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         (Table.draw grid ~rect:inner ~theme ~caps:H.default_caps ~lang
            ~col_gap:(Layout.table_col_gap bp)
            ~scroll:rt.tools_catalog_scroll_offset ?selected:!selected_row_idx
-           ~columns rows)
+           ~focused:(Model.body_has_focus model) ~columns rows)
   end
 
 let render_tools_keeper_skills ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
@@ -4342,7 +4349,8 @@ let render_connectors ~(model : Model.t) ~cache ~(rect : Rect.t)
         ignore
           (Table.draw grid ~rect:left_inner ~theme ~caps:H.default_caps ~lang
              ~col_gap:(Layout.table_col_gap bp)
-             ~scroll:rt.connector_scroll_offset ~selected:sel ~columns rows)
+             ~scroll:rt.connector_scroll_offset ~selected:sel
+             ~focused:(Model.pane_focused model 0) ~columns rows)
     | Observed.Value _ ->
         H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp left_inner) ~theme
           ~hint:
@@ -4464,7 +4472,8 @@ let render_connectors ~(model : Model.t) ~cache ~(rect : Rect.t)
          ignore
            (Table.draw grid ~rect:mcp_rect ~theme ~caps:H.default_caps ~lang
               ~col_gap:(Layout.table_col_gap bp)
-              ~scroll:rt.mcp_client_scroll_offset ~selected:sel ~columns rows)
+              ~scroll:rt.mcp_client_scroll_offset ~selected:sel
+              ~focused:(Model.pane_focused model 1) ~columns rows)
      | Observed.Value _ ->
          H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp mcp_rect) ~theme
            (Say.resolve lang
@@ -4768,8 +4777,8 @@ let render_addons_browser ~(model : Model.t) ~cache ~(rect : Rect.t)
           ignore
             (Table.draw grid ~rect:cat_inner ~theme ~caps:H.default_caps ~lang
                ~col_gap:(Layout.table_col_gap bp)
-               ~scroll:rt.addon_catalog_scroll_offset ~selected:sel ~columns
-               rows)
+               ~scroll:rt.addon_catalog_scroll_offset ~selected:sel
+               ~focused:(Model.pane_focused model 0) ~columns rows)
       | Observed.Value _ ->
           H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp cat_inner) ~theme
             (Say.resolve lang
@@ -4983,7 +4992,7 @@ let render_addons_browser ~(model : Model.t) ~cache ~(rect : Rect.t)
          ignore
            (Table.draw grid ~rect:tbl_rect ~theme ~caps:H.default_caps ~lang
               ~col_gap:(Layout.table_col_gap bp) ~scroll:rt.addon_scroll_offset
-              ~selected:sel ~columns rows)
+              ~selected:sel ~focused:(Model.pane_focused model 0) ~columns rows)
      | Observed.Value _ ->
          H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp tbl_rect) ~theme
            (Say.resolve lang
@@ -5196,10 +5205,15 @@ let render_addons_browser ~(model : Model.t) ~cache ~(rect : Rect.t)
          let sel =
            H.clamp_index (List.length clients) rt.browser_client_selected_index
          in
+         let clients_focused =
+           Model.pane_focused model 1
+           && match rt.browser_right_focus with `Clients -> true | `Tabs -> false
+         in
          ignore
            (Table.draw grid ~rect:clients_rect ~theme ~caps:H.default_caps ~lang
               ~col_gap:(Layout.table_col_gap bp)
-              ~scroll:rt.browser_client_scroll_offset ~selected:sel ~columns rows)
+              ~scroll:rt.browser_client_scroll_offset ~selected:sel
+              ~focused:clients_focused ~columns rows)
      | Observed.Value _ ->
          H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp clients_rect) ~theme
            (Say.resolve lang
@@ -5378,11 +5392,17 @@ let render_addons_browser ~(model : Model.t) ~cache ~(rect : Rect.t)
                   let sel =
                     H.clamp_index (List.length tabs) rt.browser_tab_selected_index
                   in
+                  let tabs_focused =
+                    Model.pane_focused model 1
+                    && match rt.browser_right_focus with
+                       | `Tabs -> true
+                       | `Clients -> false
+                  in
                   ignore
                     (Table.draw grid ~rect:tabs_body ~theme ~caps:H.default_caps
                        ~lang ~col_gap:(Layout.table_col_gap bp)
                        ~scroll:rt.browser_tab_scroll_offset ~selected:sel
-                       ~columns rows))
+                       ~focused:tabs_focused ~columns rows))
           | Observed.Absent | Observed.Unreported ->
               H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp tabs_body)
                 ~theme

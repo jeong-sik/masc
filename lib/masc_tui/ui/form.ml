@@ -841,7 +841,8 @@ let draw_focused_help_footer ~pad_x grid ~(rect : Rect.t) ~(theme : Theme.t)
           end
 
 let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang ?pad_x ?label_width
-    ?section_header ?show_row_badges ?show_help_footer (st : state) =
+    ?section_header ?show_row_badges ?show_help_footer ?(focused = true)
+    (st : state) =
   if Rect.is_empty rect then 0
   else
     let surface_card = Color.of_rgb theme.surface_1 in
@@ -940,10 +941,15 @@ let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang ?pad_x ?label_width
       let idx = vis_arr.(pos) in
       let f = st.fields.(idx) in
       if !y < bottom then begin
-        let is_focused =
+        let is_selected =
           match active_idx with Some a -> Int.equal a idx | None -> false
         in
-        let bg_rgb = if is_focused then theme.selection_bg else theme.surface_1 in
+        let is_focused = is_selected && focused in
+        let bg_rgb =
+          if is_focused then theme.selection_bg
+          else if is_selected then theme.surface_2
+          else theme.surface_1
+        in
         let bg = Color.of_rgb bg_rgb in
         let row_rect = Rect.make ~x:fields_rect.x ~y:!y ~w:fields_rect.w ~h:1 in
         let base_style = Typography.primary ~bg theme in
@@ -954,6 +960,7 @@ let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang ?pad_x ?label_width
             Glyph.Left_rail;
         let lbl_style =
           if is_focused then Typography.anchor ~bg theme
+          else if is_selected then Typography.primary ~bg theme
           else Typography.structure ~bg theme
         in
         let label_str =

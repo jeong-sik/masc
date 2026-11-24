@@ -1676,12 +1676,22 @@ let actionable_approval_item (m : Model.t) =
     && Nav.equal_workspace m.nav.workspace Nav.Work
     && Nav.equal_work_tab m.work.active_tab Nav.Work_inbox
   in
+  let on_pulse_attention =
+    Option.is_none m.nav.overlay
+    && m.nav.dive_stack = []
+    && Nav.equal_workspace m.nav.workspace Nav.Pulse
+    && Model.equal_pulse_pane (Model.active_pulse_pane m) Model.Pulse_attention
+  in
   if on_work_inbox then
     match
       Attention.current_filtered_item ~query:m.work.filter_query m.attention
     with
     | Some e when not (Attention.is_in_flight ~id:e.id m.attention) -> Some e
     | Some _ | None -> None
+  else if on_pulse_attention then
+    match Attention.current_filtered_item ~query:"" m.attention with
+    | Some e when not (Attention.is_in_flight ~id:e.id m.attention) -> Some e
+    | Some _ | None -> Attention.top_fast_path m.attention
   else Model.fast_approval_strip_item m
 
 let fast_approve_top ~now (m : Model.t) =
@@ -1782,7 +1792,17 @@ let fast_deny_top ~now (m : Model.t) =
           , cmds ))
 
 let teleport_blocked ~now (m : Model.t) =
-  match Attention.top_fast_path m.attention with
+  let target_opt =
+    if
+      Option.is_none m.nav.overlay
+      && m.nav.dive_stack = []
+      && Nav.equal_workspace m.nav.workspace Nav.Pulse
+      && Model.equal_pulse_pane (Model.active_pulse_pane m)
+           Model.Pulse_attention
+    then Attention.current_filtered_item ~query:"" m.attention
+    else Attention.top_fast_path m.attention
+  in
+  match target_opt with
   | None ->
       ( Model.with_toast ~now ~level:Model.Toast_info
           (Say.make ~ko:"즉시 조치가 필요한 항목이 없습니다"
@@ -1792,8 +1812,34 @@ let teleport_blocked ~now (m : Model.t) =
   | Some entry -> (
       match entry.kind with
       | Health.Pending_ask _ | Health.Held_tool_approval _ ->
-          let work = Work_store.set_tab Nav.Work_inbox m.work in
-          switch_workspace { m with work } Nav.Work
+          let work0 = Work_store.set_tab Nav.Work_inbox m.work in
+          let filtered =
+            Attention.filtered_items ~query:work0.filter_query m.attention
+          in
+          let find_idx items =
+            let rec go i = function
+              | [] -> None
+              | (e : Attention.entry) :: rest ->
+                  if String.equal e.id entry.id then Some i else go (i + 1) rest
+            in
+            go 0 items
+          in
+          let work, target_idx_opt =
+            match find_idx filtered with
+            | Some i -> (work0, Some i)
+            | None ->
+                let work_cleared = Work_store.set_filter "" work0 in
+                let all_items =
+                  Attention.filtered_items ~query:"" m.attention
+                in
+                (work_cleared, find_idx all_items)
+          in
+          let attention =
+            match target_idx_opt with
+            | Some idx -> Attention.select_triage_index idx m.attention
+            | None -> m.attention
+          in
+          switch_workspace { m with work; attention } Nav.Work
       | Health.Goal_confirmation { goal_id } ->
           let work = Work_store.set_tab Nav.Work_pipeline m.work in
           let m1, cmds1 = switch_workspace { m with work } Nav.Work in

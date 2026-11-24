@@ -48,6 +48,8 @@ type decoder
 val create : palette_requested:bool -> decoder
 val feed : decoder -> char -> unit
 val complete : decoder -> bool
+val is_finished : decoder -> bool
+(** [true] once {!finish} has ended active probe interception. *)
 val startup_status : decoder -> startup_status
 val observation : decoder -> observation
 val observe_palette : decoder -> Palette.slot -> Palette.rgb option -> unit

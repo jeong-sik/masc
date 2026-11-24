@@ -101,16 +101,33 @@ let apply_resize ~now (m : Model.t) ~cols ~rows =
       Config_store.cancel_edit_field next2.config
     else next2.config
   in
+  let overlay =
+    if not micro_locked then
+      match next2.nav.overlay with
+      | Some (Nav.System_gate Nav.Micro_viewport) -> None
+      | Some
+          ( Nav.System_gate (Nav.Auth_gate | Nav.Server_offline | Nav.Media_viewer)
+          | Nav.Palette
+          | Nav.Settings _
+          | Nav.Incidents
+          | Nav.Queue_context _
+          | Nav.Inline_action _
+          | Nav.Ask_answer
+          | Nav.Help )
+      | None ->
+          next2.nav.overlay
+    else next2.nav.overlay
+  in
   let next =
     {
       next2 with
       drafts;
       config;
-      nav = { next2.nav with pane_index; filter_focused };
+      nav = { next2.nav with overlay; pane_index; filter_focused };
     }
   in
-  (* Never clobber [m.nav.overlay] or [m.inline_modal]; [Micro_viewport] gating
-     is evaluated dynamically from [Model.is_too_small_viewport] / [Micro]. *)
+  (* Preserve active user overlays/modals across resize while defensively
+     clearing any explicit [Micro_viewport] gate once enlarged >= 80x24. *)
   match
     Memory_diagram.active_diagram next,
     Memory_diagram.active_memory_content_rect next
@@ -441,11 +458,47 @@ let step_raw ~now (m : Model.t) = function
 let leave_old_epoch ~now ~(before : Model.t) (after : Model.t) =
   if Epoch.equal before.epoch after.epoch then after
   else
+    let inline_modal =
+      Option.map
+        (fun (modal : Model.inline_modal_state) ->
+          if modal.submitting then { modal with submitting = false } else modal)
+        after.inline_modal
+    in
+    let ask_modal =
+      Option.map
+        (fun (modal : Model.ask_modal) ->
+          if modal.submitting then { modal with submitting = false } else modal)
+        after.ask_modal
+    in
+    let runtime =
+      if after.runtime.fusion_launch_draft.submitting then
+        Runtime_store.set_fusion_submitting false after.runtime
+      else after.runtime
+    in
+    let knowledge =
+      let k0 =
+        match after.knowledge.memory_diagram with
+        | Some d when Observed.is_loading d.payload ->
+            Knowledge_store.close_memory_diagram after.knowledge
+        | Some _ | None -> after.knowledge
+      in
+      k0
+      |> Knowledge_store.clear_pending_wiki_edit
+      |> Knowledge_store.clear_pending_artifact_revision
+    in
     {
       after with
       infra = Infra_store.forget_log_cursor after.infra;
       fleet = Fleet_store.detach_chat_streams after.fleet;
       drafts = Drafts.detach_streams ~now after.drafts;
+      attention = Attention.clear_all_in_flight after.attention;
+      inline_modal;
+      ask_modal;
+      config = Config_store.clear_in_flight after.config;
+      knowledge;
+      runtime;
+      keeper_context =
+        Keeper_context_store.clear_running_github_logins after.keeper_context;
     }
 
 let step ~now m msg =

@@ -96,6 +96,7 @@ type decoder = {
   mutable background : Palette.rgb option;
   ansi : Palette.rgb option array;
   mutable observed : observation;
+  mutable finished : bool;
 }
 
 let create ~palette_requested =
@@ -109,6 +110,7 @@ let create ~palette_requested =
     background = None;
     ansi = Array.make Palette.ansi_slot_count None;
     observed = { palette = None; graphics = None; cell_pixels = None };
+    finished = false;
   }
 
 let prepare_replay decoder =
@@ -225,7 +227,9 @@ let osc_prefix_match matched byte =
   | _ -> None
 
 let rec feed decoder byte =
-  match decoder.mode with
+  if decoder.finished then add_replay_char decoder byte
+  else
+    match decoder.mode with
   | Normal ->
       if byte = escape then begin
         Buffer.add_char decoder.pending byte;
@@ -331,11 +335,13 @@ let rec feed decoder byte =
       else decoder.mode <- Apc_passthrough (byte = escape)
 
 let palette decoder = decoder.observed.palette
+let is_finished decoder = decoder.finished
 
 let complete decoder =
-  Option.is_some decoder.observed.graphics
-  && ((not decoder.palette_requested)
-      || (Option.is_some decoder.foreground && Option.is_some decoder.background))
+  decoder.finished
+  || (Option.is_some decoder.observed.graphics
+      && ((not decoder.palette_requested)
+          || (Option.is_some decoder.foreground && Option.is_some decoder.background)))
 
 let pending decoder : Input_decoder.pending option =
   match decoder.mode with
@@ -436,6 +442,7 @@ let finish decoder =
    | Apc _ ->
        flush_pending decoder);
   decoder.mode <- Normal;
+  decoder.finished <- true;
   snapshot decoder
 
 let decode ~palette_requested text =

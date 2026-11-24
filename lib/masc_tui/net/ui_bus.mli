@@ -7,8 +7,9 @@
       On extreme burst overflow, the oldest unread entry is evicted and an
       exact {!Stream_gap} count is accumulated and emitted ahead of the
       surviving tail — zero IO-reader stalls and zero SSE disconnects.
-    - Lock-free {!Atomic.t} wake coalescing ensures [on_wake] fires outside the
-      microsecond-short internal queue mutex and at most once per pending burst. *)
+    - Wake coalescing latched under the microsecond-short internal queue mutex
+      ensures [on_wake] fires outside the lock at most once per pending burst
+      without a cross-domain lost-wakeup race. *)
 
 val default_stream_capacity : int
 (** [512]. *)

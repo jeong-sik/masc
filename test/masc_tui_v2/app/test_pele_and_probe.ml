@@ -353,6 +353,198 @@ let test_startup_probe_collection_and_capabilities () =
   check bool "closed fd yields empty observation cleanly" true
     (Probe.equal_observation Probe.empty_observation (Probe.observation pd_closed))
 
+let test_probe_post_grace_expiry_and_input_reader_recovery () =
+  let safe_close fd =
+    match Unix.close fd with () -> () | exception Unix.Unix_error _ -> ()
+  in
+  let write_all fd s =
+    ignore (Unix.write_substring fd s 0 (String.length s) : int)
+  in
+  let drain_keys queue =
+    let rec loop acc =
+      match Eio.Stream.take_nonblocking queue with
+      | Some (Msg.Key_event kev) -> loop (kev :: acc)
+      | Some _ -> loop acc
+      | None -> List.rev acc
+    in
+    loop []
+  in
+  Eio_main.run @@ fun env ->
+  Eio.Time.with_timeout_exn env#clock 5.0 @@ fun () ->
+  let clock = Eio.Stdenv.clock env in
+
+  (* 1. P2-8: Non-Kitty terminal never replies to graphics query; after grace
+     window expires via Probe.finish, Esc + '[' and Esc + ']' reach
+     Input_decoder cleanly instead of being silently swallowed. *)
+  Eio.Switch.run (fun sw ->
+      let rd, wr = Unix.pipe () in
+      Fun.protect
+        ~finally:(fun () ->
+          safe_close rd;
+          safe_close wr)
+        (fun () ->
+          Unix.set_nonblock rd;
+          let bell = Wake_bell.create () in
+          let signals = Signals.create ~bell in
+          let queue : Msg.t Eio.Stream.t = Eio.Stream.create max_int in
+          let pd = Probe.create ~palette_requested:true in
+          let handle =
+            App.start_input_reader ~sw ~clock ~fd:rd ~signals ~bell
+              ~input_queue:queue ~probe_decoder:pd ~probe_grace_s:0.04 ()
+          in
+          Eio.Time.sleep clock 0.08;
+          check bool "probe expired via Probe.finish" true (Probe.is_finished pd);
+          check bool "probe reports complete after grace expiry" true
+            (Probe.complete pd);
+          (* Esc then '[' and Esc then ']' reach Input_decoder cleanly *)
+          write_all wr "\x1b";
+          Eio.Time.sleep clock 0.05;
+          write_all wr "[";
+          Eio.Time.sleep clock 0.03;
+          write_all wr "\x1b";
+          Eio.Time.sleep clock 0.05;
+          write_all wr "]";
+          Eio.Time.sleep clock 0.03;
+          App.stop_input_reader handle;
+          let keys = drain_keys queue in
+          let expected =
+            [
+              Input_decoder.Escape;
+              Input_decoder.Char "[";
+              Input_decoder.Escape;
+              Input_decoder.Char "]";
+            ]
+          in
+          let actual = List.map (fun (k : Input_decoder.key_event) -> k.key) keys in
+          check int "all 4 keys (Esc, [, Esc, ]) delivered" (List.length expected)
+            (List.length actual);
+          List.iter2
+            (fun exp act ->
+              check bool "key matches" true (Input_decoder.equal_key exp act))
+            expected actual));
+
+  (* 2. P1-6: Unexpected non-cancel exception inside on_observation does NOT
+     kill input reader or deadlock stop_input_reader. *)
+  Eio.Switch.run (fun sw ->
+      let rd, wr = Unix.pipe () in
+      Fun.protect
+        ~finally:(fun () ->
+          safe_close rd;
+          safe_close wr)
+        (fun () ->
+          Unix.set_nonblock rd;
+          let bell = Wake_bell.create () in
+          let signals = Signals.create ~bell in
+          let queue : Msg.t Eio.Stream.t = Eio.Stream.create max_int in
+          let pd = Probe.create ~palette_requested:false in
+          let boom_count = ref 0 in
+          let handle =
+            App.start_input_reader ~sw ~clock ~fd:rd ~signals ~bell
+              ~input_queue:queue ~probe_decoder:pd ~probe_grace_s:1.0
+              ~on_observation:(fun _ ->
+                incr boom_count;
+                failwith "observer_boom")
+              ()
+          in
+          (* Trigger on_observation exception via graphics reply, then send key 'z' *)
+          write_all wr "\x1b_Gi=31;OK\x1b\\";
+          Eio.Time.sleep clock 0.04;
+          write_all wr "z";
+          Eio.Time.sleep clock 0.04;
+          App.stop_input_reader handle;
+          check bool "on_observation raised at least once" true (!boom_count >= 1);
+          let keys = drain_keys queue in
+          check bool "key 'z' still delivered after non-cancel exception" true
+            (List.exists
+               (fun (k : Input_decoder.key_event) ->
+                 Input_decoder.equal_key k.key (Input_decoder.Char "z"))
+               keys)));
+
+  (* 3. Probe grace expiry (`Probe_expire) MUST NOT prematurely flush an active
+     bracketed paste or split escape sequence in Input_decoder! *)
+  let drain_msgs queue =
+    let rec loop acc =
+      match Eio.Stream.take_nonblocking queue with
+      | None -> List.rev acc
+      | Some msg -> loop (msg :: acc)
+    in
+    loop []
+  in
+  Eio.Switch.run (fun sw ->
+      let rd, wr = Unix.pipe () in
+      Fun.protect
+        ~finally:(fun () ->
+          safe_close rd;
+          safe_close wr)
+        (fun () ->
+          Unix.set_nonblock rd;
+          let bell = Wake_bell.create () in
+          let signals = Signals.create ~bell in
+          let queue : Msg.t Eio.Stream.t = Eio.Stream.create max_int in
+          let pd = Probe.create ~palette_requested:true in
+          let handle =
+            App.start_input_reader ~sw ~clock ~fd:rd ~signals ~bell
+              ~input_queue:queue ~probe_decoder:pd ~probe_grace_s:0.06 ()
+          in
+          (* Start bracketed paste BEFORE the 60ms grace boundary *)
+          Eio.Time.sleep clock 0.02;
+          write_all wr "\x1b[200~hello ";
+          (* Cross the 60ms probe grace boundary while paste is still open *)
+          Eio.Time.sleep clock 0.08;
+          check bool "probe finished across paste boundary" true
+            (Probe.is_finished pd);
+          (* Complete the paste AFTER probe grace expiry *)
+          write_all wr "world\x1b[201~";
+          Eio.Time.sleep clock 0.04;
+          App.stop_input_reader handle;
+          let msgs = drain_msgs queue in
+          let pastes =
+            List.filter_map
+              (function Msg.Paste_text s -> Some s | _ -> None)
+              msgs
+          in
+          let key_events =
+            List.filter (function Msg.Key_event _ -> true | _ -> false) msgs
+          in
+          check (list string) "intact paste across probe grace boundary"
+            [ "hello world" ] pastes;
+          check int "zero stray key events leaked from paste tail" 0
+            (List.length key_events)));
+
+  Eio.Switch.run (fun sw ->
+      let rd, wr = Unix.pipe () in
+      Fun.protect
+        ~finally:(fun () ->
+          safe_close rd;
+          safe_close wr)
+        (fun () ->
+          Unix.set_nonblock rd;
+          let bell = Wake_bell.create () in
+          let signals = Signals.create ~bell in
+          let queue : Msg.t Eio.Stream.t = Eio.Stream.create max_int in
+          let pd = Probe.create ~palette_requested:true in
+          let handle =
+            App.start_input_reader ~sw ~clock ~fd:rd ~signals ~bell
+              ~input_queue:queue ~probe_decoder:pd ~probe_grace_s:0.06 ()
+          in
+          (* Send first byte of Up arrow (\x1b[A) just before grace boundary,
+             and remaining bytes just after grace boundary (< 50ms Escape idle). *)
+          Eio.Time.sleep clock 0.045;
+          write_all wr "\x1b";
+          Eio.Time.sleep clock 0.025;
+          check bool "probe finished across split escape boundary" true
+            (Probe.is_finished pd);
+          write_all wr "[A";
+          Eio.Time.sleep clock 0.04;
+          App.stop_input_reader handle;
+          let keys = drain_keys queue in
+          check int "split ESC + [A across grace boundary decodes as 1 key" 1
+            (List.length keys);
+          check bool "decoded key is Up (not split Escape + [ + A)" true
+            (match keys with
+             | [ k ] -> Input_decoder.equal_key k.key Input_decoder.Up
+             | _ -> false)))
+
 let () =
   run "masc_tui_v2_pele_and_probe"
     [
@@ -369,5 +561,8 @@ let () =
         [
           test_case "bounded startup probe, replay, Presenter caps, late replies"
             `Quick test_startup_probe_collection_and_capabilities;
+          test_case
+            "post-grace Probe expiry preserves Esc+[ / Esc+] & input reader survives exceptions"
+            `Quick test_probe_post_grace_expiry_and_input_reader_recovery;
         ] );
     ]

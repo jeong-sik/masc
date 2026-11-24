@@ -28,6 +28,11 @@ val probe_timeout_s : float
 (** Bounded non-blocking startup terminal probe deadline ([0.15] seconds) so
     non-responding terminals never hang TUI startup. *)
 
+val probe_grace_s : float
+(** Post-startup grace window ([2.0] seconds) before expiring an incomplete
+    {!Probe.decoder} via {!Probe.finish}, preventing non-Kitty terminals from
+    silently swallowing [Esc]+[[] / [Esc]+[]] or [Alt+[[] / [Alt+[]] forever. *)
+
 val palette_requested_of_env : getenv:(string -> string option) -> bool
 (** Decide whether to query OSC 10/11/4 palette at startup: returns [false] when
     [TERM] is absent, empty, or case-insensitively ["dumb"] (regardless of
@@ -151,6 +156,34 @@ val dispatch_decoded_events :
     [input_queue]. [Ctrl+C] arms/confirms interrupt; ordinary keys, bracketed
     pastes, and mouse events withdraw an armed interrupt. Late terminal probe
     replies invoke [on_reply] when supplied. *)
+
+type input_reader_handle
+
+val start_input_reader :
+  sw:Eio.Switch.t ->
+  clock:_ Eio.Time.clock ->
+  ?fd:Unix.file_descr ->
+  signals:Signals.t ->
+  bell:Wake_bell.t ->
+  input_queue:Msg.t Eio.Stream.t ->
+  ?probe_decoder:Probe.decoder ->
+  ?probe_grace_s:float ->
+  ?on_observation:(Probe.observation -> unit) ->
+  unit ->
+  input_reader_handle
+(** Spawn the stdin input reader daemon on [sw]. Always resolves its stopped
+    promise via [Fun.protect], recovers from non-cancel per-iteration decode
+    exceptions without killing input, and expires incomplete [probe_decoder]
+    state after [probe_grace_s] (default {!probe_grace_s}). *)
+
+val stop_input_reader : input_reader_handle -> unit
+(** Signal the input reader daemon to stop and await its clean termination. *)
+
+val can_launch_pending_wiki_editor : Model.t -> bool
+(** [true] iff the TUI is still viewing Wiki ([Knowledge_wiki] or [Wiki_dive])
+    with no active overlay, text-capture surface, or micro/too-small viewport
+    gate, so a completed async wiki pre-fetch may safely suspend the terminal
+    for [$EDITOR]. *)
 
 val should_emit_tick :
   now_ns:int64 ->

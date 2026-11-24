@@ -95,6 +95,16 @@ let scan_bare_url text idx =
   in
   trim raw_stop
 
+let has_non_space text ~from ~stop =
+  let rec scan i =
+    if i >= stop then false
+    else
+      match text.[i] with
+      | ' ' | '\t' | '\n' | '\r' | '\x0c' -> scan (i + 1)
+      | _ -> true
+  in
+  scan from
+
 let parse_inline ~osc8 text =
   let limit = String.length text in
   let out = ref [] in
@@ -111,6 +121,47 @@ let parse_inline ~osc8 text =
       out := { text = body; kind } :: !out
     end
   in
+  (* Monotonic closing-index caches per delimiter marker: since [walk] advances
+     [idx] strictly monotonically and closing predicates depend only on the
+     closing position in [text], each delimiter scans [text] at most once
+     across the entire line (O(N) worst case even on pathological unmatched
+     delimiters). *)
+  let next_backtick = ref (-1) in
+  let next_dstar = ref (-1) in
+  let next_dunder = ref (-1) in
+  let next_dtilde = ref (-1) in
+  let next_star = ref (-1) in
+  let next_under = ref (-1) in
+  let next_rbracket = ref (-1) in
+  let next_rparen = ref (-1) in
+  let last_link_target_check = ref (-1, false) in
+  let find_cached_close ~cache ~closes ~marker ~opening =
+    let cached = !cache in
+    if cached >= opening then
+      if cached >= limit then None else Some cached
+    else
+      let rec seek from =
+        match find_close text ~from ~marker with
+        | None -> None
+        | Some close ->
+            if closes close then Some close
+            else seek (close + String.length marker)
+      in
+      let res = seek opening in
+      cache := (match res with Some c -> c | None -> limit);
+      res
+  in
+  let find_cached_char ~cache ~ch ~from =
+    let cached = !cache in
+    if cached >= from then
+      if cached >= limit then None else Some cached
+    else
+      let res =
+        if from >= limit then None else String.index_from_opt text from ch
+      in
+      cache := (match res with Some c -> c | None -> limit);
+      res
+  in
   let rec walk idx =
     if idx >= limit then ()
     else
@@ -118,21 +169,15 @@ let parse_inline ~osc8 text =
         Buffer.add_char pending text.[idx];
         walk (idx + 1)
       in
-      let styled ?(closes = fun _ -> true) marker kind =
+      let styled ~cache ?(closes = fun _ -> true) marker kind =
         let opening = idx + String.length marker in
-        let rec seek from =
-          match find_close text ~from ~marker with
-          | None -> None
-          | Some close ->
-              if closes close then Some close
-              else seek (close + String.length marker)
-        in
-        match seek opening with
+        match find_cached_close ~cache ~closes ~marker ~opening with
         | None -> literal ()
         | Some close ->
-            let body = String.sub text opening (close - opening) in
-            if String.length (String.trim body) = 0 then literal ()
+            if not (has_non_space text ~from:opening ~stop:close) then
+              literal ()
             else begin
+              let body = String.sub text opening (close - opening) in
               emit kind body;
               walk (close + String.length marker)
             end
@@ -148,31 +193,55 @@ let parse_inline ~osc8 text =
       end
       else
         match text.[idx] with
-        | '`' -> styled "`" Inl_code
-        | '*' when starts_at text idx "**" -> styled "**" Inl_strong
+        | '`' -> styled ~cache:next_backtick "`" Inl_code
+        | '*' when starts_at text idx "**" ->
+            styled ~cache:next_dstar "**" Inl_strong
         | '_' when starts_at text idx "__" ->
             if underscore_opens text idx then
-              styled
+              styled ~cache:next_dunder
                 ~closes:(fun c -> underscore_closes text (c + 1))
                 "__" Inl_strong
             else literal ()
-        | '~' when starts_at text idx "~~" -> styled "~~" Inl_strike
-        | '*' -> styled "*" Inl_emphasis
+        | '~' when starts_at text idx "~~" ->
+            styled ~cache:next_dtilde "~~" Inl_strike
+        | '*' -> styled ~cache:next_star "*" Inl_emphasis
         | '_' ->
             if underscore_opens text idx then
-              styled ~closes:(underscore_closes text) "_" Inl_emphasis
+              styled ~cache:next_under ~closes:(underscore_closes text) "_"
+                Inl_emphasis
             else literal ()
         | '[' -> (
-            match String.index_from_opt text (idx + 1) ']' with
+            match
+              find_cached_char ~cache:next_rbracket ~ch:']' ~from:(idx + 1)
+            with
             | Some close_lbl when starts_at text (close_lbl + 1) "(" -> (
-                match String.index_from_opt text (close_lbl + 2) ')' with
+                match
+                  find_cached_char ~cache:next_rparen ~ch:')'
+                    ~from:(close_lbl + 2)
+                with
                 | Some close_url ->
-                    let label = String.sub text (idx + 1) (close_lbl - idx - 1) in
-                    let target =
-                      String.trim
-                        (String.sub text (close_lbl + 2) (close_url - close_lbl - 2))
+                    let has_label = close_lbl > idx + 1 in
+                    let has_target =
+                      let prev_lbl, prev_ok = !last_link_target_check in
+                      if Int.equal prev_lbl close_lbl then prev_ok
+                      else begin
+                        let ok =
+                          has_non_space text ~from:(close_lbl + 2)
+                            ~stop:close_url
+                        in
+                        last_link_target_check := (close_lbl, ok);
+                        ok
+                      end
                     in
-                    if String.length label > 0 && String.length target > 0 then begin
+                    if has_label && has_target then begin
+                      let label =
+                        String.sub text (idx + 1) (close_lbl - idx - 1)
+                      in
+                      let target =
+                        String.trim
+                          (String.sub text (close_lbl + 2)
+                             (close_url - close_lbl - 2))
+                      in
                       emit (Inl_link target) label;
                       if not osc8 then
                         emit Inl_link_target (Printf.sprintf " (%s)" target);
@@ -180,7 +249,7 @@ let parse_inline ~osc8 text =
                     end
                     else literal ()
                 | None -> literal ())
-            | _ -> literal ())
+            | Some _ | None -> literal ())
         | _ -> literal ()
   in
   walk 0;

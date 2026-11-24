@@ -1068,16 +1068,34 @@ type 'body stream_outcome =
    than reading the same value, so there is nothing here for them to import. *)
 let status_is_success status = status >= 200 && status <= 299
 
+let default_stream_header_timeout_sec = 30.0
+
+let effective_stream_header_timeout ~idle_timeout_sec ?header_timeout_seconds () =
+  match header_timeout_seconds with
+  | Some t when Float.is_finite t && t > 0.0 -> Some t
+  | Some _ -> Some default_stream_header_timeout_sec
+  | None ->
+    let bound =
+      if Float.is_finite idle_timeout_sec && idle_timeout_sec > 0.0 then
+        Float.min idle_timeout_sec default_stream_header_timeout_sec
+      else
+        default_stream_header_timeout_sec
+    in
+    Some bound
+
 (* Mirrors [do_request]'s connection lifecycle exactly — the release rules and
    the cancel-protected finalizer are the same; only the body read differs.
    [clock] measures progress and protocol-specific idle periods. Human-driven
-   sessions can leave idle lifetime to cancellation with an infinite window. *)
+   sessions can leave idle lifetime to cancellation with an infinite window,
+   while response headers remain bounded by [header_timeout_seconds] (default
+   [Float.min idle_timeout_sec 30.0]). *)
 let do_request_streaming
     (type body)
     t
     ~(retention : body body_retention)
     ~(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t)
     ~(idle_timeout_sec : float)
+    ?header_timeout_seconds
     ?headers
     ?body
     ?on_response
@@ -1101,24 +1119,36 @@ let do_request_streaming
       (fun ~release:release_once ->
         let path = path_and_query uri in
         let body_piaf = Option.map request_body body in
+        let header_timeout =
+          effective_stream_header_timeout ~idle_timeout_sec
+            ?header_timeout_seconds ()
+        in
         t.counters.inflight <- t.counters.inflight + 1;
         let result =
           Fun.protect
             ~finally:(fun () -> t.counters.inflight <- t.counters.inflight - 1)
             (fun () ->
-               try
-                 with_client_scope client ~on_error:(fun exn -> `Exn exn)
-                   (fun () -> Piaf.Client.request client.piaf
-                     ?headers:(ensure_host_header ~uri headers) ?body:body_piaf
-                     ~meth:(method_to_piaf method_) path)
-               with
-               | Eio.Cancel.Cancelled _ as e -> raise e
-               | exn -> Error (`Msg (exn_message exn)))
+               with_optional_timeout ~clock ?timeout_seconds:header_timeout
+                 ~timed_out:(fun after_seconds -> Timed_out { after_seconds })
+                 (fun () ->
+                    match
+                      try
+                        with_client_scope client ~on_error:(fun exn -> `Exn exn)
+                          (fun () -> Piaf.Client.request client.piaf
+                            ?headers:(ensure_host_header ~uri headers) ?body:body_piaf
+                            ~meth:(method_to_piaf method_) path)
+                      with
+                      | Eio.Cancel.Cancelled _ as e -> raise e
+                      | exn -> Error (`Msg (exn_message exn))
+                    with
+                    | Ok resp -> Ok resp
+                    | Error err ->
+                      Error (Exchange_failed (piaf_error_message (err :> Piaf.Error.t)))))
         in
         match result with
         | Error err ->
           release_once ~close_only:true;
-          Error (Exchange_failed (piaf_error_message (err :> Piaf.Error.t)))
+          Error err
         | Ok resp ->
           let status = Piaf.Status.to_code (Piaf.Response.status resp) in
           let headers_list =
@@ -1162,6 +1192,7 @@ let request_streaming
     ~retention
     ~(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t)
     ~idle_timeout_sec
+    ?header_timeout_seconds
     ~method_
     ~url
     ?headers
@@ -1170,8 +1201,8 @@ let request_streaming
     ~on_chunk
     () =
   let uri = Uri.of_string url in
-  do_request_streaming t ~retention ~clock ~idle_timeout_sec ?headers ?body ~method_
-    ?on_response ~on_chunk uri
+  do_request_streaming t ~retention ~clock ~idle_timeout_sec
+    ?header_timeout_seconds ?headers ?body ~method_ ?on_response ~on_chunk uri
 
 (* ── Stats ─────────────────────────────────────────────────────── *)
 

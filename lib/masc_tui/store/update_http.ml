@@ -26,15 +26,14 @@ let handle_workspace_mismatch ~now ~expected ~observed ~message (m : Model.t) =
           { expected_instance = exp_s; observed_instance = obs_s };
     }
   in
-  let clear_ask_modal_nav (nav : Model.nav_state) =
+  let clear_modal_nav (nav : Model.nav_state) =
     match nav.overlay with
-    | Some Nav.Ask_answer -> { nav with overlay = None }
+    | Some (Nav.Ask_answer | Nav.Inline_action _) -> { nav with overlay = None }
     | Some
         ( Nav.Palette
         | Nav.Settings _
         | Nav.Incidents
         | Nav.Queue_context _
-        | Nav.Inline_action _
         | Nav.Help
         | Nav.System_gate _ )
     | None ->
@@ -52,8 +51,9 @@ let handle_workspace_mismatch ~now ~expected ~observed ~message (m : Model.t) =
         {
           m with
           epoch = next_epoch;
-          nav = clear_ask_modal_nav m.nav;
+          nav = clear_modal_nav m.nav;
           ask_modal = None;
+          inline_modal = None;
           incidents;
           freshness;
           server_identity;
@@ -78,8 +78,9 @@ let handle_workspace_mismatch ~now ~expected ~observed ~message (m : Model.t) =
         {
           m with
           epoch = next_epoch;
-          nav = clear_ask_modal_nav m.nav;
+          nav = clear_modal_nav m.nav;
           ask_modal = None;
+          inline_modal = None;
           incidents;
           freshness;
           server_identity;
@@ -541,26 +542,36 @@ let apply_http_reply ~now (m : Model.t) reply =
       match result with
       | Ok page ->
           if answers_slot then
-            let cut =
-              Cut_reply.apply_page page
-                (Option.value (Observed.to_option slot) ~default:Cut_reply.start)
+            let prev =
+              Option.value (Observed.to_option slot) ~default:Cut_reply.start
             in
-            let next = set_slot (Observed.value ~observed_at:now cut) m in
-            let cmds =
-              match Cut_reply.next_page cut with
-              | Some from ->
-                  [
-                    Cmd.Http_get
-                      {
-                        epoch = next.epoch;
-                        req =
-                          Cmd.Get_chat_operation_events
-                            { keeper; operation_id; from };
-                      };
-                  ]
-              | None -> []
-            in
-            (next, cmds)
+            match Cut_reply.apply_page_checked page prev with
+            | Ok cut ->
+                let next = set_slot (Observed.value ~observed_at:now cut) m in
+                let cmds =
+                  match Cut_reply.next_page cut with
+                  | Some from ->
+                      [
+                        Cmd.Http_get
+                          {
+                            epoch = next.epoch;
+                            req =
+                              Cmd.Get_chat_operation_events
+                                { keeper; operation_id; from };
+                          };
+                      ]
+                  | None -> []
+                in
+                (next, cmds)
+            | Error err ->
+                let detail = Cut_reply.page_error_to_string err in
+                let http_err = Msg.Transport (Health.Protocol_error detail) in
+                err_reply
+                  ~fail:
+                    (set_slot
+                       (Observed.failed ~reason:detail ~retryable:false ~at:now))
+                  ~source:(Health.Source_keeper keeper) ~ko:"끊긴 답장 조회"
+                  ~en:"Cut reply fetch" http_err
           else (m, [])
       (* 410 is the route's [journal_pruned]: the operation ended and the
          server keeps no journal for it, so there is nothing to show now or
@@ -951,8 +962,9 @@ let apply_http_reply ~now (m : Model.t) reply =
             ~source:Health.Source_client_http ~ko:"서브보드 목록 조회"
             ~en:"Board hearths fetch" err)
   | Msg.Reply_board_comment { post_id; result = Ok () } ->
-      let is_board_comment_kind = function
-        | Nav.Board_comment _ -> true
+      let is_board_comment_for_post = function
+        | Nav.Board_comment { post_id = modal_post_id; _ } ->
+            String.equal modal_post_id post_id
         | Nav.Btw_query
         | Nav.Gate_reject _
         | Nav.Verification_reject _
@@ -969,14 +981,14 @@ let apply_http_reply ~now (m : Model.t) reply =
       in
       let matches_modal =
         match m.inline_modal with
-        | Some modal -> is_board_comment_kind modal.kind
+        | Some modal -> modal.submitting && is_board_comment_for_post modal.kind
         | None -> false
       in
       let nav =
         if not matches_modal then m.nav
         else
           match m.nav.overlay with
-          | Some (Nav.Inline_action k) when is_board_comment_kind k ->
+          | Some (Nav.Inline_action k) when is_board_comment_for_post k ->
               { m.nav with overlay = None }
           | Some
               ( Nav.Inline_action _
@@ -1017,17 +1029,19 @@ let apply_http_reply ~now (m : Model.t) reply =
                   };
             };
         ] )
-  | Msg.Reply_board_comment { post_id = _; result = Error err } ->
+  | Msg.Reply_board_comment { post_id; result = Error err } ->
       let inline_modal =
         Option.map
           (fun (modal : Model.inline_modal_state) ->
             match modal.kind with
-            | Nav.Board_comment _ ->
+            | Nav.Board_comment { post_id = modal_post_id; _ }
+              when modal.submitting && String.equal modal_post_id post_id ->
                 {
                   modal with
                   submitting = false;
                   error = Some (Msg.http_error_detail err);
                 }
+            | Nav.Board_comment _
             | Nav.Btw_query
             | Nav.Gate_reject _
             | Nav.Verification_reject _
@@ -2859,7 +2873,7 @@ let apply_http_reply ~now (m : Model.t) reply =
       ( Model.with_toast ~now ~level:Model.Toast_error
           (Msg.http_error_summary err) next
       , cmds )
-  | Msg.Reply_action_ack { label; ack_scope; result = Ok () } ->
+  | Msg.Reply_action_ack { label; ack_scope; for_modal; result = Ok () } ->
       let closes_modal =
         match ack_scope with
         | Msg.Ack_close_modal | Msg.Ack_close_modal_and_refresh -> true
@@ -2874,8 +2888,57 @@ let apply_http_reply ~now (m : Model.t) reply =
             true
         | Msg.Ack_toast_only | Msg.Ack_close_modal -> false
       in
+      let ack_matches_modal (modal : Model.inline_modal_state) =
+        closes_modal
+        && modal.submitting
+        &&
+        match for_modal with
+        | None -> false
+        | Some (Nav.Harness_overrule ack_hash) -> (
+            match modal.kind with
+            | Nav.Harness_overrule modal_hash ->
+                let raw =
+                  String.trim (Model.modal_field_value ~key:"notes_hash" modal)
+                in
+                let effective =
+                  if String.equal raw "" then String.trim modal_hash else raw
+                in
+                String.equal effective ack_hash
+            | Nav.Btw_query
+            | Nav.Gate_reject _
+            | Nav.Verification_reject _
+            | Nav.Task_cancel _
+            | Nav.Schedule_form
+            | Nav.Connector_form
+            | Nav.Repo_add_form
+            | Nav.Board_new_post
+            | Nav.Board_comment _
+            | Nav.Github_token_form _
+            | Nav.Code_finder_form
+            | Nav.Code_search_form ->
+                false)
+        | Some
+            (( Nav.Btw_query
+             | Nav.Gate_reject _
+             | Nav.Verification_reject _
+             | Nav.Task_cancel _
+             | Nav.Schedule_form
+             | Nav.Connector_form
+             | Nav.Repo_add_form
+             | Nav.Board_new_post
+             | Nav.Board_comment _
+             | Nav.Github_token_form _
+             | Nav.Code_finder_form
+             | Nav.Code_search_form ) as kind) ->
+            Nav.equal_inline_action_kind modal.kind kind
+      in
+      let close_inline_modal =
+        match m.inline_modal with
+        | Some modal -> ack_matches_modal modal
+        | None -> false
+      in
       let nav, inline_modal =
-        if not closes_modal then (m.nav, m.inline_modal)
+        if not close_inline_modal then (m.nav, m.inline_modal)
         else
           let nav' =
             match m.nav.overlay with
@@ -2913,23 +2976,69 @@ let apply_http_reply ~now (m : Model.t) reply =
         else []
       in
       (next, cmds)
-  | Msg.Reply_action_ack { label; ack_scope; result = Error err } ->
+  | Msg.Reply_action_ack { label; ack_scope; for_modal; result = Error err } ->
       let touches_modal =
         match ack_scope with
         | Msg.Ack_close_modal | Msg.Ack_close_modal_and_refresh -> true
         | Msg.Ack_toast_only | Msg.Ack_refresh_view | Msg.Ack_editor_saved ->
             false
       in
+      let ack_matches_modal (modal : Model.inline_modal_state) =
+        touches_modal
+        && modal.submitting
+        &&
+        match for_modal with
+        | None -> false
+        | Some (Nav.Harness_overrule ack_hash) -> (
+            match modal.kind with
+            | Nav.Harness_overrule modal_hash ->
+                let raw =
+                  String.trim (Model.modal_field_value ~key:"notes_hash" modal)
+                in
+                let effective =
+                  if String.equal raw "" then String.trim modal_hash else raw
+                in
+                String.equal effective ack_hash
+            | Nav.Btw_query
+            | Nav.Gate_reject _
+            | Nav.Verification_reject _
+            | Nav.Task_cancel _
+            | Nav.Schedule_form
+            | Nav.Connector_form
+            | Nav.Repo_add_form
+            | Nav.Board_new_post
+            | Nav.Board_comment _
+            | Nav.Github_token_form _
+            | Nav.Code_finder_form
+            | Nav.Code_search_form ->
+                false)
+        | Some
+            (( Nav.Btw_query
+             | Nav.Gate_reject _
+             | Nav.Verification_reject _
+             | Nav.Task_cancel _
+             | Nav.Schedule_form
+             | Nav.Connector_form
+             | Nav.Repo_add_form
+             | Nav.Board_new_post
+             | Nav.Board_comment _
+             | Nav.Github_token_form _
+             | Nav.Code_finder_form
+             | Nav.Code_search_form ) as kind) ->
+            Nav.equal_inline_action_kind modal.kind kind
+      in
       let inline_modal =
         if not touches_modal then m.inline_modal
         else
           Option.map
             (fun (modal : Model.inline_modal_state) ->
-              {
-                modal with
-                submitting = false;
-                error = Some (Msg.http_error_detail err);
-              })
+              if ack_matches_modal modal then
+                {
+                  modal with
+                  submitting = false;
+                  error = Some (Msg.http_error_detail err);
+                }
+              else modal)
             m.inline_modal
       in
       let next, cmds =

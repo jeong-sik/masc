@@ -254,6 +254,10 @@ type t = {
   sse_hub : Sse_hub.t;
   voice_runner : Voice_runner.t;
   editor_handoff : editor_handoff;
+  pending_editor : (unit -> unit) option Atomic.t;
+  wiki_editor_gen : int Atomic.t;
+  editor_active : bool Atomic.t;
+  on_editor_ready : unit -> unit;
   on_quit : Exit_reason.t -> unit;
   on_restart : unit -> unit;
 }
@@ -400,7 +404,8 @@ let publish_hub_event ~bus ~stream_epoch ev =
     (decode_hub_event_msgs ~epoch ~observed_at ev)
 
 let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
-    ?(editor_handoff = noop_editor_handoff) ~on_quit ~on_restart () =
+    ?(editor_handoff = noop_editor_handoff) ?(on_editor_ready = fun () -> ())
+    ~on_quit ~on_restart () =
   Eio.Switch.check sw;
   let clock = (clock :> float Eio.Time.clock_ty Eio.Resource.t) in
   let explicit_bearer_override =
@@ -412,6 +417,9 @@ let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
   let stream_epoch = Atomic.make Epoch.initial in
   let owned_server = Atomic.make None in
   let active_memory_diagram_cancel = Atomic.make None in
+  let pending_editor = Atomic.make None in
+  let wiki_editor_gen = Atomic.make 0 in
+  let editor_active = Atomic.make false in
   let sse_hub =
     Sse_hub.create ~io ~clock ~endpoint:initial_ep
       ~on_event:(publish_hub_event ~bus ~stream_epoch)
@@ -428,6 +436,8 @@ let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
   let closed = Atomic.make false in
   Eio.Switch.on_release sw (fun () ->
       Atomic.set closed true;
+      ignore (Atomic.fetch_and_add wiki_editor_gen 1 : int);
+      ignore (Atomic.exchange pending_editor None : (unit -> unit) option);
       match Atomic.exchange active_memory_diagram_cancel None with
       | Some flag -> Atomic.set flag true
       | None -> ());
@@ -447,11 +457,24 @@ let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
     sse_hub;
     voice_runner;
     editor_handoff;
+    pending_editor;
+    wiki_editor_gen;
+    editor_active;
+    on_editor_ready;
     on_quit;
     on_restart;
   }
 
 let current_endpoint t = Atomic.get t.endpoint
+
+let has_pending_editor t = Option.is_some (Atomic.get t.pending_editor)
+
+let run_pending_editor ?(can_launch = fun () -> true) t =
+  if not (Atomic.get t.closed) then
+    match Atomic.exchange t.pending_editor None with
+    | Some fn ->
+        if (not (Atomic.get t.editor_active)) && can_launch () then fn ()
+    | None -> ()
 
 let update_workspace_guard t ~instance_id ~workspace_sha256 =
   let guard : Http_client.workspace_guard =
@@ -524,6 +547,7 @@ let fork_safe t fn =
                            Say.make ~ko:"비동기 요청 오류"
                              ~en:"Async command error";
                          ack_scope = Msg.Ack_toast_only;
+                         for_modal = None;
                          result =
                            Error
                              (Msg.Transport
@@ -1619,6 +1643,7 @@ let execute_post t ~epoch req =
                  {
                    label = Say.make ~ko:"목표 상태 변경됨" ~en:"Goal transitioned";
                    ack_scope = Msg.Ack_refresh_view;
+                   for_modal = None;
                    result;
                  })
         | Cmd.Post_goal_confirmation confirm ->
@@ -1723,6 +1748,7 @@ let execute_post t ~epoch req =
                      Say.make ~ko:"샌드박스 프로브 요청됨"
                        ~en:"Sandbox probe requested";
                    ack_scope = Msg.Ack_refresh_view;
+                   for_modal = None;
                    result;
                  })
         | Cmd.Post_config_patch patch_req ->
@@ -1739,6 +1765,7 @@ let execute_post t ~epoch req =
                  {
                    label = Say.make ~ko:"TUI 설정 저장됨" ~en:"Preferences saved";
                    ack_scope = Msg.Ack_toast_only;
+                   for_modal = None;
                    result;
                  })
         | Cmd.Post_keeper_turn_interrupt { keeper; _ } ->
@@ -1754,6 +1781,7 @@ let execute_post t ~epoch req =
                  {
                    label = Say.make ~ko:"게시글 작성 완료" ~en:"Board post created";
                    ack_scope = Msg.Ack_close_modal_and_refresh;
+                   for_modal = Some Nav.Board_new_post;
                    result;
                  })
         | Cmd.Post_board_comment { post_id; _ } ->
@@ -1807,6 +1835,7 @@ let execute_post t ~epoch req =
                  {
                    label = Say.make ~ko:"일정 생성 완료" ~en:"Schedule created";
                    ack_scope = Msg.Ack_close_modal_and_refresh;
+                   for_modal = Some Nav.Schedule_form;
                    result;
                  })
         | Cmd.Post_connector_bind _ ->
@@ -1816,6 +1845,7 @@ let execute_post t ~epoch req =
                  {
                    label = Say.make ~ko:"커넥터 연결 완료" ~en:"Connector bound";
                    ack_scope = Msg.Ack_close_modal_and_refresh;
+                   for_modal = Some Nav.Connector_form;
                    result;
                  })
         | Cmd.Post_connector_unbind _ ->
@@ -1825,6 +1855,7 @@ let execute_post t ~epoch req =
                  {
                    label = Say.make ~ko:"커넥터 바인딩 해제됨" ~en:"Connector unbound";
                    ack_scope = Msg.Ack_refresh_view;
+                   for_modal = None;
                    result;
                  })
         | Cmd.Post_repo_add _ ->
@@ -1834,18 +1865,20 @@ let execute_post t ~epoch req =
                  {
                    label = Say.make ~ko:"저장소 추가 완료" ~en:"Repository added";
                    ack_scope = Msg.Ack_close_modal_and_refresh;
+                   for_modal = Some Nav.Repo_add_form;
                    result;
                  })
-        | Cmd.Post_task_cancel _ ->
+        | Cmd.Post_task_cancel { task_id; _ } ->
             let result = post_ack t ~path ~body in
             Some
               (Msg.Reply_action_ack
                  {
                    label = Say.make ~ko:"작업 취소 완료" ~en:"Task cancelled";
                    ack_scope = Msg.Ack_close_modal_and_refresh;
+                   for_modal = Some (Nav.Task_cancel task_id);
                    result;
                  })
-        | Cmd.Post_harness_overrule _ ->
+        | Cmd.Post_harness_overrule { notes_hash; _ } ->
             let result = post_ack t ~path ~body in
             Some
               (Msg.Reply_action_ack
@@ -1854,6 +1887,7 @@ let execute_post t ~epoch req =
                      Say.make ~ko:"판정 재정의 전송됨"
                        ~en:"Harness overrule submitted";
                    ack_scope = Msg.Ack_close_modal_and_refresh;
+                   for_modal = Some (Nav.Harness_overrule notes_hash);
                    result;
                  })
         | Cmd.Post_browser_tabs { client_id } ->
@@ -2187,19 +2221,90 @@ let voice_cmd_of_store = function
   | Cmd.Cancel_ptt -> Voice_runner.Cancel_ptt
   | Cmd.Probe_capabilities -> Voice_runner.Probe_capabilities
 
-let rec wait_reap_pid pid =
-  match Unix.waitpid [] pid with
-  | _, Unix.WEXITED 0 -> Ok ()
-  | _, Unix.WEXITED code ->
-      Error (Printf.sprintf "url opener exited with status %d" code)
-  | _, (Unix.WSIGNALED sig_num | Unix.WSTOPPED sig_num) ->
-      Error (Printf.sprintf "url opener stopped by signal %d" sig_num)
-  | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait_reap_pid pid
-  | exception Unix.Unix_error (Unix.ECHILD, _, _) -> Ok ()
-  | exception Unix.Unix_error (err, fn, _) ->
-      Error (Printf.sprintf "%s: %s" fn (Unix.error_message err))
+let url_opener_timeout_s = 3.0
 
-let open_url_sync url =
+let kill_and_reap_pid pid =
+  (match Unix.kill pid Sys.sigkill with
+   | () -> ()
+   | exception Unix.Unix_error _ -> ());
+  let rec reap () =
+    match Unix.waitpid [] pid with
+    | _, _ -> ()
+    | exception Unix.Unix_error (Unix.EINTR, _, _) -> reap ()
+    | exception Unix.Unix_error _ -> ()
+  in
+  reap ()
+
+let wait_reap_pid ?(timeout_s = url_opener_timeout_s)
+    ?(cancelled = fun () -> false) pid =
+  let timeout_s =
+    if Float.is_finite timeout_s && timeout_s > 0.0 then timeout_s
+    else url_opener_timeout_s
+  in
+  let deadline = Clock.Mono.after_s (Clock.Mono.now ()) timeout_s in
+  let rec loop poll_s =
+    if cancelled () then begin
+      kill_and_reap_pid pid;
+      Error "url opener cancelled"
+    end
+    else
+      match Unix.waitpid [ Unix.WNOHANG ] pid with
+      | 0, _ ->
+          let remaining =
+            Clock.Mono.seconds_since deadline ~since:(Clock.Mono.now ())
+          in
+          if remaining <= 0.0 then begin
+            kill_and_reap_pid pid;
+            Error (Printf.sprintf "url opener timed out after %.1fs" timeout_s)
+          end
+          else begin
+            Unix.sleepf (Float.min poll_s remaining);
+            loop (Float.min 0.025 (poll_s *. 1.5))
+          end
+      | _, Unix.WEXITED 0 -> Ok ()
+      | _, Unix.WEXITED code ->
+          Error (Printf.sprintf "url opener exited with status %d" code)
+      | _, Unix.WSIGNALED sig_num ->
+          Error (Printf.sprintf "url opener stopped by signal %d" sig_num)
+      | _, Unix.WSTOPPED sig_num ->
+          kill_and_reap_pid pid;
+          Error (Printf.sprintf "url opener stopped by signal %d" sig_num)
+      | exception Unix.Unix_error (Unix.EINTR, _, _) -> loop poll_s
+      | exception Unix.Unix_error (Unix.ECHILD, _, _) -> Ok ()
+      | exception Unix.Unix_error (err, fn, _) ->
+          kill_and_reap_pid pid;
+          Error (Printf.sprintf "%s: %s" fn (Unix.error_message err))
+  in
+  try loop 0.005 with
+  | Eio.Cancel.Cancelled _ as ex ->
+      Eio.Cancel.protect (fun () -> kill_and_reap_pid pid);
+      raise ex
+  | ex ->
+      kill_and_reap_pid pid;
+      raise ex
+
+let run_cancellable_systhread ~closed fn =
+  let cancel_flag = Atomic.make false in
+  let is_cancelled () = Atomic.get cancel_flag || Atomic.get closed in
+  let done_p, done_u = Eio.Promise.create () in
+  let result_ref = ref None in
+  Eio.Fiber.both
+    (fun () ->
+      try Eio.Promise.await done_p
+      with Eio.Cancel.Cancelled _ as ex ->
+        Atomic.set cancel_flag true;
+        raise ex)
+    (fun () ->
+      Fun.protect
+        ~finally:(fun () -> Eio.Promise.resolve done_u ())
+        (fun () ->
+          let res =
+            Eio_unix.run_in_systhread (fun () -> fn ~cancelled:is_cancelled)
+          in
+          result_ref := Some res));
+  !result_ref
+
+let open_url_sync ?timeout_s ?cancelled url =
   let opener =
     match Executable_path.absolute_on_path "open" with
     | Some bin -> Some bin
@@ -2208,7 +2313,7 @@ let open_url_sync url =
   match opener with
   | None -> Error "neither 'open' nor 'xdg-open' found on PATH"
   | Some bin -> (
-      match Unix.openfile "/dev/null" [ Unix.O_RDWR ] 0 with
+      match Unix.openfile "/dev/null" [ Unix.O_RDWR; Unix.O_CLOEXEC ] 0 with
       | devnull ->
           Fun.protect
             ~finally:(fun () ->
@@ -2217,7 +2322,7 @@ let open_url_sync url =
               match
                 Unix.create_process bin [| bin; url |] devnull devnull devnull
               with
-              | pid -> wait_reap_pid pid
+              | pid -> wait_reap_pid ?timeout_s ?cancelled pid
               | exception Unix.Unix_error (err, fn, _) ->
                   Error (Printf.sprintf "%s: %s" fn (Unix.error_message err)))
       | exception Unix.Unix_error (err, fn, _) ->
@@ -2232,23 +2337,28 @@ let read_file_or_empty path =
   | exception Sys_error _ -> Ok ""
 
 let run_editor_roundtrip t ~suffix initial =
-  t.editor_handoff.pause_terminal ();
-  match
-    Eio_unix.run_in_systhread (fun () ->
-        Masc_cli_editor.roundtrip
-          ~restore:(fun () -> ())
-          ~reenter:(fun () -> ())
-          ~suffix initial)
-  with
-  | res ->
-      t.editor_handoff.resume_terminal ();
-      res
-  | exception (Eio.Cancel.Cancelled _ as ex) ->
-      Eio.Cancel.protect t.editor_handoff.resume_terminal;
-      raise ex
-  | exception ex ->
-      Eio.Cancel.protect t.editor_handoff.resume_terminal;
-      Error (Masc_cli_editor.Form_unreadable (Printexc.to_string ex))
+  ignore (Atomic.fetch_and_add t.wiki_editor_gen 1 : int);
+  Atomic.set t.editor_active true;
+  Fun.protect
+    ~finally:(fun () -> Atomic.set t.editor_active false)
+    (fun () ->
+      t.editor_handoff.pause_terminal ();
+      match
+        Eio_unix.run_in_systhread (fun () ->
+            Masc_cli_editor.roundtrip
+              ~restore:(fun () -> ())
+              ~reenter:(fun () -> ())
+              ~suffix initial)
+      with
+      | res ->
+          t.editor_handoff.resume_terminal ();
+          res
+      | exception (Eio.Cancel.Cancelled _ as ex) ->
+          Eio.Cancel.protect t.editor_handoff.resume_terminal;
+          raise ex
+      | exception ex ->
+          Eio.Cancel.protect t.editor_handoff.resume_terminal;
+          Error (Masc_cli_editor.Form_unreadable (Printexc.to_string ex)))
 
 let can_edit_local_toml t =
   is_local_host t.cli.host || Option.is_some (Atomic.get t.owned_server)
@@ -2262,11 +2372,17 @@ let execute_editor_escape_hatch t target =
   let emit_ack ?(ack_scope = Msg.Ack_toast_only) ~label result =
     Ui_bus.publish_stream t.bus
       (Msg.Http_reply
-         { epoch; reply = Msg.Reply_action_ack { label; ack_scope; result } })
+         {
+           epoch;
+           reply =
+             Msg.Reply_action_ack
+               { label; ack_scope; for_modal = None; result };
+         })
   in
   match target with
   | Cmd.Edit_runtime_toml | Cmd.Edit_keeper_toml _ ->
-      if not (can_edit_local_toml t) then
+      if Atomic.get t.editor_active then ()
+      else if not (can_edit_local_toml t) then
         emit_ack
           ~label:
             (Say.make
@@ -2314,43 +2430,74 @@ let execute_editor_escape_hatch t target =
                       ~label:(Say.make ~ko:"TOML 저장 실패" ~en:"Save TOML")
                       (Error (Msg.Transport (Health.Other_io err)))
               end))
-  | Cmd.Edit_wiki_page page -> (
-      let path = Wire_knowledge.wiki_page_path ~page in
-      match
-        fetch_and_decode_get ~timeout_sec:3.0 t ~path
-          ~decode:Wire_knowledge.decode_wiki_page_detail
-      with
-      | Error err ->
-          emit_ack
-            ~label:(Say.make ~ko:"위키 문서 불러오기" ~en:"Load wiki page")
-            (Error err)
-      | Ok detail -> (
-          match run_editor_roundtrip t ~suffix:".md" detail.body_markdown with
-          | Error abort ->
-              let detail_str = Masc_cli_editor.abort_detail ~ko abort in
-              emit_ack
-                ~label:(Say.make ~ko:"편집기 종료" ~en:"Editor aborted")
-                (Error (Msg.Transport (Health.Other_io detail_str)))
-          | Ok edited ->
-              if String.equal edited detail.body_markdown then
-                emit_ack
-                  ~label:(Say.make ~ko:"변경 사항 없음" ~en:"No changes made")
-                  (Ok ())
-              else
-                let put_req : Wire_knowledge.wiki_put_request =
-                  {
-                    expected_revision = Some detail.frontmatter.revision;
-                    expected_sha256 = Some detail.sha256;
-                    title = detail.frontmatter.title;
-                    summary = detail.frontmatter.summary;
-                    source = detail.frontmatter.source;
-                    tags = detail.frontmatter.tags;
-                    body = edited;
-                    note = "edited via $EDITOR";
-                  }
-                in
-                execute_put t ~epoch
-                  (Cmd.Put_wiki_page { page; request = put_req })))
+  | Cmd.Edit_wiki_page page ->
+      if Atomic.get t.editor_active then ()
+      else
+        let my_gen = Atomic.fetch_and_add t.wiki_editor_gen 1 + 1 in
+        ignore (Atomic.exchange t.pending_editor None : (unit -> unit) option);
+        let path = Wire_knowledge.wiki_page_path ~page in
+        let is_still_current () =
+          (not (Atomic.get t.closed))
+          && (not (Atomic.get t.editor_active))
+          && Atomic.get t.wiki_editor_gen = my_gen
+          && Epoch.equal (Atomic.get t.stream_epoch) epoch
+        in
+        fork_safe t (fun () ->
+            match
+              fetch_and_decode_get ~timeout_sec:3.0 t ~path
+                ~decode:Wire_knowledge.decode_wiki_page_detail
+            with
+            | Error err ->
+                if is_still_current () then
+                  emit_ack
+                    ~label:(Say.make ~ko:"위키 문서 불러오기" ~en:"Load wiki page")
+                    (Error err)
+            | Ok detail ->
+                if is_still_current () then begin
+                  let launch () =
+                    if is_still_current () then
+                      match
+                        run_editor_roundtrip t ~suffix:".md" detail.body_markdown
+                      with
+                      | Error abort ->
+                          let detail_str =
+                            Masc_cli_editor.abort_detail ~ko abort
+                          in
+                          emit_ack
+                            ~label:
+                              (Say.make ~ko:"편집기 종료" ~en:"Editor aborted")
+                            (Error (Msg.Transport (Health.Other_io detail_str)))
+                      | Ok edited ->
+                          if String.equal edited detail.body_markdown then
+                            emit_ack
+                              ~label:
+                                (Say.make ~ko:"변경 사항 없음"
+                                   ~en:"No changes made")
+                              (Ok ())
+                          else
+                            let put_req : Wire_knowledge.wiki_put_request =
+                              {
+                                expected_revision =
+                                  Some detail.frontmatter.revision;
+                                expected_sha256 = Some detail.sha256;
+                                title = detail.frontmatter.title;
+                                summary = detail.frontmatter.summary;
+                                source = detail.frontmatter.source;
+                                tags = detail.frontmatter.tags;
+                                body = edited;
+                                note = "edited via $EDITOR";
+                              }
+                            in
+                            execute_put t ~epoch
+                              (Cmd.Put_wiki_page { page; request = put_req })
+                  in
+                  Atomic.set t.pending_editor (Some launch);
+                  if not (is_still_current ()) then
+                    ignore
+                      (Atomic.exchange t.pending_editor None
+                        : (unit -> unit) option)
+                  else t.on_editor_ready ()
+                end)
 
 let stop_owned_server_async owned =
   Eio.Cancel.protect (fun () ->
@@ -2707,19 +2854,37 @@ let execute_render_memory_diagram t ~epoch ~request_id ~keeper ~event_identity
                 | None -> ()
             end))
 
-let open_local_export_file path =
+let open_local_export_file ?timeout_s ?cancelled path =
   if not (is_safe_local_export_file path) then
     Error ("refusing to open unsafe or missing export file: " ^ path)
-  else open_url_sync path
+  else open_url_sync ?timeout_s ?cancelled path
 
-let copy_text_to_clipboard ~in_tmux text =
-  let write_osc52 raw =
-    let seq = Clipboard.osc52_sequence ~in_tmux raw in
-    Terminal_out.write seq;
-    Terminal_out.flush ()
-  in
+(* Run external clipboard tools off the UI domain via a cancellable, bounded
+   systhread, capturing any OSC 52 payload instead of writing to [Terminal_out]
+   from a background OS thread. Emitting OSC 52 back on the UI-domain fiber
+   keeps every write strictly atomic with [Presenter.present_back]. *)
+let copy_text_to_clipboard_async t ~in_tmux text =
   let session = Clipboard.copy_session Sys.getenv_opt in
-  Clipboard.copy_text session ~write_osc52 text
+  match
+    run_cancellable_systhread ~closed:t.closed (fun ~cancelled ->
+        let osc52_raw = ref None in
+        let outcome =
+          Clipboard.copy_text ~cancelled session
+            ~write_osc52:(fun raw -> osc52_raw := Some raw)
+            text
+        in
+        (outcome, !osc52_raw))
+  with
+  | None -> None
+  | Some (outcome, osc52_raw) ->
+      (match osc52_raw with
+       | Some raw
+         when (not (Atomic.get t.closed)) && not (Atomic.get t.editor_active) ->
+           let seq = Clipboard.osc52_sequence ~in_tmux raw in
+           Terminal_out.write seq;
+           Terminal_out.flush ()
+       | Some _ | None -> ());
+      Some outcome
 
 let publish_clipboard_outcome t ~epoch ~bytes outcome =
   let say = Clipboard.copy_outcome_say outcome in
@@ -2734,7 +2899,12 @@ let publish_clipboard_outcome t ~epoch ~bytes outcome =
          epoch;
          reply =
            Msg.Reply_action_ack
-             { label; ack_scope = Msg.Ack_toast_only; result = Ok () };
+             {
+               label;
+               ack_scope = Msg.Ack_toast_only;
+               for_modal = None;
+               result = Ok ();
+             };
        })
 let rec execute t = function
   | Cmd.Batch cmds -> List.iter (execute t) cmds
@@ -2745,10 +2915,14 @@ let rec execute t = function
   | Cmd.Sync_streams { epoch; streams } ->
       (* On epoch transitions, fence & stop previous streams while stream_epoch
          still names the old epoch so old-epoch cancellation callbacks cannot
-         tag events with the new epoch. *)
-      if not (Epoch.equal (Atomic.get t.stream_epoch) epoch) then
+         tag events with the new epoch, and discard any in-flight/queued
+         async wiki $EDITOR handoff belonging to the old epoch. *)
+      if not (Epoch.equal (Atomic.get t.stream_epoch) epoch) then begin
+        ignore (Atomic.fetch_and_add t.wiki_editor_gen 1 : int);
+        ignore (Atomic.exchange t.pending_editor None : (unit -> unit) option);
         ignore
-          (Sse_hub.sync_streams t.sse_hub [] : (Sse_hub.sync_diff, string) result);
+          (Sse_hub.sync_streams t.sse_hub [] : (Sse_hub.sync_diff, string) result)
+      end;
       Atomic.set t.stream_epoch epoch;
       let specs = List.map stream_spec_of_id streams in
       (match Sse_hub.sync_streams t.sse_hub specs with
@@ -2764,6 +2938,7 @@ let rec execute t = function
                        label =
                          Say.make ~ko:"SSE 스트림 동기화" ~en:"SSE stream sync";
                        ack_scope = Msg.Ack_toast_only;
+                       for_modal = None;
                        result = Error (Msg.Transport (Health.Protocol_error msg));
                      };
                }))
@@ -2774,11 +2949,11 @@ let rec execute t = function
       let epoch = Atomic.get t.stream_epoch in
       fork_safe t (fun () ->
           let in_tmux = Option.is_some (Sys.getenv_opt "TMUX") in
-          let outcome =
-            Eio_unix.run_in_systhread (fun () ->
-                copy_text_to_clipboard ~in_tmux text)
-          in
-          publish_clipboard_outcome t ~epoch ~bytes:(String.length text) outcome)
+          match copy_text_to_clipboard_async t ~in_tmux text with
+          | Some outcome ->
+              publish_clipboard_outcome t ~epoch ~bytes:(String.length text)
+                outcome
+          | None -> ())
   | Cmd.Render_memory_diagram
       {
         epoch;
@@ -2811,12 +2986,13 @@ let rec execute t = function
                      reply = Msg.Reply_artifact_detail { id; result = Ok detail };
                    });
               let in_tmux = Option.is_some (Sys.getenv_opt "TMUX") in
-              let outcome =
-                Eio_unix.run_in_systhread (fun () ->
-                    copy_text_to_clipboard ~in_tmux detail.content)
-              in
-              publish_clipboard_outcome t ~epoch
-                ~bytes:(String.length detail.content) outcome
+              (match
+                 copy_text_to_clipboard_async t ~in_tmux detail.content
+               with
+               | Some outcome ->
+                   publish_clipboard_outcome t ~epoch
+                     ~bytes:(String.length detail.content) outcome
+               | None -> ())
           | Error err ->
               Ui_bus.publish_stream t.bus
                 (Msg.Http_reply
@@ -2829,6 +3005,7 @@ let rec execute t = function
                              Say.make ~ko:"아티팩트 본문 복사"
                                ~en:"Copy artifact body";
                            ack_scope = Msg.Ack_toast_only;
+                           for_modal = None;
                            result = Error err;
                          };
                    }))
@@ -2870,6 +3047,7 @@ let rec execute t = function
                              Say.make ~ko:"아티팩트 내보내기"
                                ~en:"Export artifact";
                            ack_scope = Msg.Ack_toast_only;
+                           for_modal = None;
                            result = Error err;
                          };
                    })
@@ -2918,13 +3096,20 @@ let rec execute t = function
                 match write_res with
                 | Ok full_path ->
                     if open_after then
-                      Eio_unix.run_in_systhread (fun () ->
-                          match open_local_export_file full_path with
-                          | Ok () -> Ok full_path
-                          | Error open_err ->
-                              Error
-                                (Printf.sprintf "saved %s (open failed: %s)"
-                                   full_path open_err))
+                      match
+                        run_cancellable_systhread ~closed:t.closed
+                          (fun ~cancelled ->
+                            open_local_export_file ~cancelled full_path)
+                      with
+                      | Some (Ok ()) -> Ok full_path
+                      | Some (Error open_err) ->
+                          Error
+                            (Printf.sprintf "saved %s (open failed: %s)"
+                               full_path open_err)
+                      | None ->
+                          Error
+                            (Printf.sprintf "saved %s (open cancelled)"
+                               full_path)
                     else Ok full_path
                 | Error detail -> Error detail
               in
@@ -2949,6 +3134,7 @@ let rec execute t = function
                              {
                                label;
                                ack_scope = Msg.Ack_toast_only;
+                               for_modal = None;
                                result = Ok ();
                              };
                        })
@@ -2964,6 +3150,7 @@ let rec execute t = function
                                  Say.make ~ko:"아티팩트 내보내기"
                                    ~en:"Export artifact";
                                ack_scope = Msg.Ack_toast_only;
+                               for_modal = None;
                                result =
                                  Error (Msg.Transport (Health.Other_io detail));
                              };
@@ -2971,9 +3158,12 @@ let rec execute t = function
   | Cmd.Open_external_url url ->
       if is_safe_external_url url then
         fork_safe t (fun () ->
-            match Eio_unix.run_in_systhread (fun () -> open_url_sync url) with
-            | Ok () -> ()
-            | Error detail ->
+            match
+              run_cancellable_systhread ~closed:t.closed (fun ~cancelled ->
+                  open_url_sync ~cancelled url)
+            with
+            | Some (Ok ()) | None -> ()
+            | Some (Error detail) ->
                 Ui_bus.publish_stream t.bus
                   (Msg.Http_reply
                      {
@@ -2985,6 +3175,7 @@ let rec execute t = function
                                Say.make ~ko:"외부 링크 열기"
                                  ~en:"Open external URL";
                              ack_scope = Msg.Ack_toast_only;
+                             for_modal = None;
                              result =
                                Error (Msg.Transport (Health.Other_io detail));
                            };
@@ -2998,6 +3189,8 @@ let execute_all t cmds = List.iter (execute t) (Cmd.flatten cmds)
 
 let shutdown ?(preserve_owned_server = false) t =
   Atomic.set t.closed true;
+  ignore (Atomic.fetch_and_add t.wiki_editor_gen 1 : int);
+  ignore (Atomic.exchange t.pending_editor None : (unit -> unit) option);
   cancel_active_memory_diagram t;
   Voice_runner.stop t.voice_runner;
   Sse_hub.shutdown t.sse_hub;

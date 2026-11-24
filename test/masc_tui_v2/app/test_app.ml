@@ -966,6 +966,7 @@ let test_remote_editor_escape_hatch_blocked () =
                         {
                           label;
                           ack_scope = _;
+                          for_modal = None;
                           result = Error (Msg.Transport (Health.Other_io detail));
                         } ->
                         Some (label, detail, msg)
@@ -1903,7 +1904,7 @@ let test_feature_wave1_osc52_and_artifact_export_safety () =
                    {
                      reply =
                        Msg.Reply_action_ack
-                         { label; ack_scope = _; result = Ok () };
+                         { label; ack_scope = _; for_modal = None; result = Ok () };
                      _;
                    }) ->
                 Some (Say.resolve Say.Lang_en label)
@@ -2022,6 +2023,336 @@ let test_github_login_stream_exception_emits_done () =
   Alcotest.(check bool) "Io_domain.Closed propagates in github login stream"
     true closed_propagated
 
+let test_bounded_clipboard_url_opener_and_async_wiki_editor () =
+  (* 1. P1-4: Clipboard.copy_text bounds wedged pbcopy via WNOHANG + SIGKILL *)
+  let bin_dir = Filename.temp_dir "tui-clip-hang-" "" in
+  let fake_pbcopy = Filename.concat bin_dir "pbcopy" in
+  let orig_path = Sys.getenv_opt "PATH" in
+  Fun.protect
+    ~finally:(fun () ->
+      (match orig_path with
+       | Some p -> Unix.putenv "PATH" p
+       | None -> Unix.unsetenv "PATH");
+      (try Sys.remove fake_pbcopy with Sys_error _ -> ());
+      try Unix.rmdir bin_dir with Unix.Unix_error _ -> ())
+    (fun () ->
+      Out_channel.with_open_bin fake_pbcopy (fun oc ->
+          Out_channel.output_string oc "#!/bin/sh\nexec /bin/sleep 30\n");
+      Unix.chmod fake_pbcopy 0o700;
+      Unix.putenv "PATH" bin_dir;
+      let osc52_called = ref false in
+      let t0 = Clock.Mono.now () in
+      let outcome =
+        Masc_tui_term.Clipboard.copy_text ~timeout_s:0.08
+          Masc_tui_term.Clipboard.Local
+          ~write_osc52:(fun _ -> osc52_called := true)
+          "clip-payload"
+      in
+      let elapsed = Clock.Mono.seconds_since (Clock.Mono.now ()) ~since:t0 in
+      Alcotest.(check bool) "wedged pbcopy bounded under 1.0s" true
+        (elapsed < 1.0);
+      Alcotest.(check bool) "fell back to OSC 52 after timeout" true
+        !osc52_called;
+      Alcotest.(check bool) "outcome reports Tools_failed fallback" true
+        (match outcome with
+         | Masc_tui_term.Clipboard.Sent_to_terminal
+             (Masc_tui_term.Clipboard.Tools_failed _) ->
+             true
+         | _ -> false);
+      (* Cancelled copy_text MUST NOT call write_osc52 *)
+      let osc52_cancelled = ref false in
+      ignore
+        (Masc_tui_term.Clipboard.copy_text ~timeout_s:1.0
+           ~cancelled:(fun () -> true)
+           Masc_tui_term.Clipboard.Local
+           ~write_osc52:(fun _ -> osc52_cancelled := true)
+           "cancelled-payload"
+          : Masc_tui_term.Clipboard.copy_outcome);
+      Alcotest.(check bool) "cancelled copy_text skips write_osc52" false
+        !osc52_cancelled;
+      (* Cancelled read_image aborts immediately with cancelled Unreadable *)
+      Alcotest.(check bool) "cancelled read_image aborts immediately" true
+        (match
+           Masc_tui_term.Clipboard.read_image ~timeout_s:1.0
+             ~cancelled:(fun () -> true)
+             ()
+         with
+         | Error (Masc_tui_term.Clipboard.Unreadable { detail = "cancelled"; _ })
+           ->
+             true
+         | _ -> false);
+      (* Directory named pbcopy on PATH is ignored (S_REG check) *)
+      let dir_path = Filename.temp_dir "tui-clip-dir-" "" in
+      let dir_pbcopy = Filename.concat dir_path "pbcopy" in
+      Fun.protect
+        ~finally:(fun () ->
+          (try Unix.rmdir dir_pbcopy with Unix.Unix_error _ -> ());
+          try Unix.rmdir dir_path with Unix.Unix_error _ -> ())
+        (fun () ->
+          Unix.mkdir dir_pbcopy 0o755;
+          Unix.putenv "PATH" dir_path;
+          let osc52_dir = ref false in
+          let out_dir =
+            Masc_tui_term.Clipboard.copy_text ~timeout_s:0.2
+              Masc_tui_term.Clipboard.Local
+              ~write_osc52:(fun _ -> osc52_dir := true)
+              "dir-test"
+          in
+          Alcotest.(check bool) "directory pbcopy skipped -> Terminal_only" true
+            (!osc52_dir
+             &&
+             match out_dir with
+             | Masc_tui_term.Clipboard.Sent_to_terminal
+                 Masc_tui_term.Clipboard.Not_tried ->
+                 true
+             | _ -> false)));
+
+  (* 2. P1-4: Cmd_executor.wait_reap_pid bounds & cancels wedged opener PID *)
+  let safe_close fd =
+    match Unix.close fd with () -> () | exception Unix.Unix_error _ -> ()
+  in
+  let devnull = Unix.openfile "/dev/null" [ Unix.O_RDWR; Unix.O_CLOEXEC ] 0 in
+  Fun.protect
+    ~finally:(fun () -> safe_close devnull)
+    (fun () ->
+      let pid1 =
+        Unix.create_process "/bin/sh"
+          [| "/bin/sh"; "-c"; "exec /bin/sleep 30" |]
+          devnull devnull devnull
+      in
+      let t0 = Clock.Mono.now () in
+      let res1 = Cmd_executor.wait_reap_pid ~timeout_s:0.08 pid1 in
+      let elapsed1 = Clock.Mono.seconds_since (Clock.Mono.now ()) ~since:t0 in
+      Alcotest.(check bool) "wait_reap_pid timed out under 1.0s" true
+        (elapsed1 < 1.0);
+      (match res1 with
+       | Error msg ->
+           Alcotest.(check bool) "timeout error message" true
+             (contains_substring ~needle:"timed out" msg)
+       | Ok () -> Alcotest.fail "expected timeout error");
+      let pid2 =
+        Unix.create_process "/bin/sh"
+          [| "/bin/sh"; "-c"; "exec /bin/sleep 30" |]
+          devnull devnull devnull
+      in
+      let res2 =
+        Cmd_executor.wait_reap_pid ~timeout_s:5.0 ~cancelled:(fun () -> true)
+          pid2
+      in
+      Alcotest.(check bool) "cancelled wait_reap_pid returns Error promptly" true
+        (Result.is_error res2));
+
+  (* 3. P1-6: App.can_launch_pending_wiki_editor predicate *)
+  let m_wiki =
+    let m0 = Model.initial ~cols:120 ~rows:40 () in
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Knowledge };
+      knowledge = { m0.knowledge with active_tab = Nav.Knowledge_wiki };
+    }
+  in
+  Alcotest.(check bool) "can_launch on Knowledge_wiki" true
+    (App.can_launch_pending_wiki_editor m_wiki);
+  let m_wiki_dive =
+    {
+      m_wiki with
+      nav =
+        {
+          m_wiki.nav with
+          dive_stack = [ Nav.Dive_knowledge (Nav.Wiki_dive "guide") ];
+        };
+    }
+  in
+  Alcotest.(check bool) "can_launch on Wiki_dive" true
+    (App.can_launch_pending_wiki_editor m_wiki_dive);
+  Alcotest.(check bool) "blocked after switching to Pulse" false
+    (App.can_launch_pending_wiki_editor
+       { m_wiki with nav = { m_wiki.nav with workspace = Nav.Pulse } });
+  Alcotest.(check bool) "blocked on Knowledge_board" false
+    (App.can_launch_pending_wiki_editor
+       {
+         m_wiki with
+         knowledge = { m_wiki.knowledge with active_tab = Nav.Knowledge_board };
+       });
+  Alcotest.(check bool) "blocked when overlay open" false
+    (App.can_launch_pending_wiki_editor
+       { m_wiki with nav = { m_wiki.nav with overlay = Some Nav.Palette } });
+  Alcotest.(check bool) "blocked when filter focused" false
+    (App.can_launch_pending_wiki_editor
+       { m_wiki with nav = { m_wiki.nav with filter_focused = true } });
+  Alcotest.(check bool) "blocked in Micro breakpoint" false
+    (App.can_launch_pending_wiki_editor
+       {
+         (Model.initial ~cols:100 ~rows:20 ()) with
+         nav = { (Model.initial ~cols:100 ~rows:20 ()).nav with workspace = Nav.Knowledge };
+         knowledge = { Knowledge_store.empty with active_tab = Nav.Knowledge_wiki };
+       });
+
+  (* 4. P1-6: Cmd.Edit_wiki_page async fetch + stale-epoch, can_launch, and
+     out-of-order/double-Ctrl+E guards *)
+  let orig_editor = Sys.getenv_opt "EDITOR" in
+  let orig_visual = Sys.getenv_opt "VISUAL" in
+  let editor_dir = Filename.temp_dir "tui-wiki-editor-" "" in
+  let fake_editor = Filename.concat editor_dir "noop-editor.sh" in
+  Fun.protect
+    ~finally:(fun () ->
+      (match orig_editor with
+       | Some v -> Unix.putenv "EDITOR" v
+       | None -> Unix.unsetenv "EDITOR");
+      (match orig_visual with
+       | Some v -> Unix.putenv "VISUAL" v
+       | None -> Unix.unsetenv "VISUAL");
+      (try Sys.remove fake_editor with Sys_error _ -> ());
+      try Unix.rmdir editor_dir with Unix.Unix_error _ -> ())
+    (fun () ->
+      Out_channel.with_open_bin fake_editor (fun oc ->
+          Out_channel.output_string oc "#!/bin/sh\nexit 0\n");
+      Unix.chmod fake_editor 0o700;
+      Unix.putenv "EDITOR" fake_editor;
+      Unix.unsetenv "VISUAL";
+      let wiki_json slug =
+        Printf.sprintf
+          {|{"page":"%s","slug":"%s","file":"%s.md","frontmatter":{"title":"T","summary":"","source":"direct_experience","author":"op","created":"2026-01-01","updated":"2026-01-01","revision":1,"tags":[]},"sha256":"abc123","body_markdown":"hello","outgoing_links":[],"backlinks":[],"lint_findings":[]}|}
+          slug slug slug
+      in
+      let http_200 body =
+        Printf.sprintf
+          "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s"
+          (String.length body) body
+      in
+      Eio_main.run @@ fun env ->
+      Eio.Time.with_timeout_exn env#clock 5.0 @@ fun () ->
+      (try
+         Eio.Switch.run @@ fun sw ->
+         let clock = Eio.Stdenv.clock env in
+         let listener =
+           Eio.Net.listen ~sw ~backlog:8 env#net
+             (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+         in
+         let port =
+           match Eio.Net.listening_addr listener with
+           | `Tcp (_, p) -> p
+           | `Unix _ -> Alcotest.fail "expected TCP listener"
+         in
+         Eio.Fiber.fork_daemon ~sw (fun () ->
+             let rec loop () =
+               let flow, _addr = Eio.Net.accept ~sw listener in
+               Eio.Fiber.fork ~sw (fun () ->
+                   try
+                     let br = Eio.Buf_read.of_flow flow ~max_size:4096 in
+                     let req = Eio.Buf_read.line br in
+                     if contains_substring ~needle:"stall-page" req then
+                       Eio.Time.sleep clock 4.0
+                     else if contains_substring ~needle:"slow-a" req then begin
+                       Eio.Time.sleep clock 0.14;
+                       Eio.Flow.copy_string (http_200 (wiki_json "slow-a")) flow
+                     end
+                     else
+                       Eio.Flow.copy_string (http_200 (wiki_json "fast-b")) flow;
+                     Eio.Flow.close flow
+                   with
+                   | Eio.Cancel.Cancelled _ as ex -> raise ex
+                   | _ -> ());
+               loop ()
+             in
+             loop ());
+         let io = Io_domain.start ~sw ~env in
+         let worker = Worker_pool.create ~sw (Eio.Stdenv.domain_mgr env) in
+         let bus = Cmd_executor.create_bus () in
+         let cli : Cli_args.config =
+           {
+             scheme = "http";
+             host = "127.0.0.1";
+             port;
+             base_path = "/tmp/masc-tui-async-wiki-test";
+             workspace = "test";
+             theme = Theme.Midnight;
+             lang = Say.Lang_en;
+             theme_explicit = false;
+             lang_explicit = false;
+             auto_start = false;
+           }
+         in
+         let pause_count = ref 0 in
+         let resume_count = ref 0 in
+         let editor_handoff : Cmd_executor.editor_handoff =
+           {
+             pause_terminal = (fun () -> incr pause_count);
+             resume_terminal = (fun () -> incr resume_count);
+           }
+         in
+         let executor =
+           Cmd_executor.create ~sw ~io ~worker ~clock ~cli ~bus
+             ~bearer_token:None ~editor_handoff
+             ~on_quit:(fun _ -> ())
+             ~on_restart:(fun () -> ())
+             ()
+         in
+         let wait_pending ?(max_tries = 40) () =
+           let rec go n =
+             if Cmd_executor.has_pending_editor executor then true
+             else if n <= 0 then false
+             else begin
+               Eio.Time.sleep clock 0.01;
+               go (n - 1)
+             end
+           in
+           go max_tries
+         in
+         (* 4a. Stalled server does not block UI fiber *)
+         let t0 = Clock.Mono.now () in
+         Cmd_executor.execute executor
+           (Cmd.Open_editor_escape_hatch (Cmd.Edit_wiki_page "stall-page"));
+         let elapsed = Clock.Mono.seconds_since (Clock.Mono.now ()) ~since:t0 in
+         Alcotest.(check bool)
+           (Printf.sprintf
+              "Edit_wiki_page returns immediately without blocking UI (%.3fs < 0.2s)"
+              elapsed)
+           true (elapsed < 0.2);
+
+         (* 4b. Stale-epoch race: Sync_streams with new epoch clears pending_editor *)
+         Cmd_executor.execute executor
+           (Cmd.Open_editor_escape_hatch (Cmd.Edit_wiki_page "fast-b"));
+         Alcotest.(check bool) "fast-b queued pending_editor" true
+           (wait_pending ());
+         let epoch2 = Epoch.next Epoch.initial in
+         Cmd_executor.execute executor
+           (Cmd.Sync_streams { epoch = epoch2; streams = [] });
+         Alcotest.(check bool) "Sync_streams epoch bump clears pending_editor"
+           false (Cmd_executor.has_pending_editor executor);
+         Cmd_executor.run_pending_editor executor;
+         Alcotest.(check int) "stale-epoch pending_editor never launched" 0
+           !pause_count;
+
+         (* 4c. can_launch=false discards stale pending_editor cleanly *)
+         Cmd_executor.execute executor
+           (Cmd.Open_editor_escape_hatch (Cmd.Edit_wiki_page "fast-b"));
+         Alcotest.(check bool) "fast-b queued in epoch2" true (wait_pending ());
+         Cmd_executor.run_pending_editor ~can_launch:(fun () -> false) executor;
+         Alcotest.(check bool) "can_launch=false discarded pending_editor" false
+           (Cmd_executor.has_pending_editor executor);
+         Alcotest.(check int) "can_launch=false did not pause terminal" 0
+           !pause_count;
+
+         (* 4d. Out-of-order double Ctrl+E: slow-a then fast-b launches ONLY fast-b,
+            and late slow-a is dropped by wiki_editor_gen without re-opening $EDITOR *)
+         Cmd_executor.execute executor
+           (Cmd.Open_editor_escape_hatch (Cmd.Edit_wiki_page "slow-a"));
+         Cmd_executor.execute executor
+           (Cmd.Open_editor_escape_hatch (Cmd.Edit_wiki_page "fast-b"));
+         Alcotest.(check bool) "fast-b ready first" true (wait_pending ());
+         Cmd_executor.run_pending_editor ~can_launch:(fun () -> true) executor;
+         Alcotest.(check int) "fast-b launched editor once" 1 !pause_count;
+         Alcotest.(check int) "fast-b resumed terminal once" 1 !resume_count;
+         (* Wait past slow-a's 140ms server delay; stale slow-a must NOT re-queue *)
+         Eio.Time.sleep clock 0.22;
+         Alcotest.(check bool) "stale slow-a ignored after newer generation"
+           false (Cmd_executor.has_pending_editor executor);
+
+         Cmd_executor.shutdown executor;
+         Eio.Switch.fail sw Exit
+       with Exit -> ()))
+
 let () =
   Alcotest.run "masc_tui_app"
     [
@@ -2078,6 +2409,8 @@ let () =
             `Quick test_github_login_stream_exception_emits_done;
           Alcotest.test_case "Feature Wave 1: OSC 52 wrapping & safe atomic artifact export"
             `Quick test_feature_wave1_osc52_and_artifact_export_safety;
+          Alcotest.test_case "P1-4/P1-6: bounded clipboard & URL opener + async Edit_wiki_page"
+            `Quick test_bounded_clipboard_url_opener_and_async_wiki_editor;
         ] );
       ( "app"
       , [

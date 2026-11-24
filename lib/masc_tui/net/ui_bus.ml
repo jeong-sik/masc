@@ -34,7 +34,7 @@ type ('snap_key, 'snap, 'ev) t = {
   mutable pending_gap : int;
   mutable total_coalesced_snapshots : int;
   mutable total_dropped_stream_events : int;
-  wake_pending : bool Atomic.t;
+  mutable wake_pending : bool;
   on_wake : (unit -> unit) option;
 }
 
@@ -55,51 +55,69 @@ let create ?(stream_capacity = default_stream_capacity) ~key_equal ~key_hash
     pending_gap = 0;
     total_coalesced_snapshots = 0;
     total_dropped_stream_events = 0;
-    wake_pending = Atomic.make false;
+    wake_pending = false;
     on_wake;
   }
 
-let trigger_wake t =
+(* Must be called while holding [t.mu] so latching and clearing [wake_pending]
+   are strictly serialized against [drain_up_to]/[drain]. *)
+let latch_wake_locked t =
   match t.on_wake with
-  | None -> ()
-  | Some wake ->
-      if Atomic.compare_and_set t.wake_pending false true then wake ()
+  | None -> false
+  | Some _ ->
+      if t.wake_pending then false
+      else begin
+        t.wake_pending <- true;
+        true
+      end
+
+let fire_wake t should_wake =
+  if should_wake then
+    match t.on_wake with
+    | Some wake -> wake ()
+    | None -> ()
 
 let publish_snapshot t ~key value =
   (* Microsecond in-memory mutation only — zero I/O or fiber suspension. *)
-  Stdlib.Mutex.protect t.mu (fun () ->
-      let h = t.key_hash key in
-      let bucket =
-        match Hashtbl.find_opt t.snap_buckets h with
-        | Some b -> b
-        | None -> []
-      in
-      match List.find_opt (fun slot -> t.key_equal slot.key key) bucket with
-      | Some existing ->
-          existing.value <- value;
-          t.total_coalesced_snapshots <- t.total_coalesced_snapshots + 1
-      | None ->
-          let slot = { key; value } in
-          Hashtbl.replace t.snap_buckets h (slot :: bucket);
-          Queue.push slot t.snap_order;
-          t.snap_count <- t.snap_count + 1);
-  trigger_wake t
+  let should_wake =
+    Stdlib.Mutex.protect t.mu (fun () ->
+        let h = t.key_hash key in
+        let bucket =
+          match Hashtbl.find_opt t.snap_buckets h with
+          | Some b -> b
+          | None -> []
+        in
+        (match List.find_opt (fun slot -> t.key_equal slot.key key) bucket with
+        | Some existing ->
+            existing.value <- value;
+            t.total_coalesced_snapshots <- t.total_coalesced_snapshots + 1
+        | None ->
+            let slot = { key; value } in
+            Hashtbl.replace t.snap_buckets h (slot :: bucket);
+            Queue.push slot t.snap_order;
+            t.snap_count <- t.snap_count + 1);
+        latch_wake_locked t)
+  in
+  fire_wake t should_wake
 
 let publish_stream t ev =
-  Stdlib.Mutex.protect t.mu (fun () ->
-      if t.ring_len < t.ring_cap then begin
-        let tail = (t.ring_head + t.ring_len) mod t.ring_cap in
-        t.ring.(tail) <- Some ev;
-        t.ring_len <- t.ring_len + 1
-      end
-      else begin
-        (* Ring full: evict oldest entry, record exact gap, write newest at tail. *)
-        t.ring.(t.ring_head) <- Some ev;
-        t.ring_head <- (t.ring_head + 1) mod t.ring_cap;
-        t.pending_gap <- t.pending_gap + 1;
-        t.total_dropped_stream_events <- t.total_dropped_stream_events + 1
-      end);
-  trigger_wake t
+  let should_wake =
+    Stdlib.Mutex.protect t.mu (fun () ->
+        if t.ring_len < t.ring_cap then begin
+          let tail = (t.ring_head + t.ring_len) mod t.ring_cap in
+          t.ring.(tail) <- Some ev;
+          t.ring_len <- t.ring_len + 1
+        end
+        else begin
+          (* Ring full: evict oldest entry, record exact gap, write newest at tail. *)
+          t.ring.(t.ring_head) <- Some ev;
+          t.ring_head <- (t.ring_head + 1) mod t.ring_cap;
+          t.pending_gap <- t.pending_gap + 1;
+          t.total_dropped_stream_events <- t.total_dropped_stream_events + 1
+        end;
+        latch_wake_locked t)
+  in
+  fire_wake t should_wake
 
 let pop_one_snapshot_locked t =
   match Queue.take_opt t.snap_order with
@@ -136,7 +154,7 @@ let pop_one_stream_locked t =
 let drain_up_to ~max_items t =
   if max_items <= 0 then []
   else
-    let items, has_more =
+    let items, should_wake =
       Stdlib.Mutex.protect t.mu (fun () ->
           let rec loop remaining acc =
             if remaining = 0 then List.rev acc
@@ -152,10 +170,11 @@ let drain_up_to ~max_items t =
           let more =
             t.snap_count > 0 || t.pending_gap > 0 || t.ring_len > 0
           in
-          Atomic.set t.wake_pending false;
-          (drained, more))
+          t.wake_pending <- false;
+          let should_wake = if more then latch_wake_locked t else false in
+          (drained, should_wake))
     in
-    if has_more then trigger_wake t;
+    fire_wake t should_wake;
     items
 
 let drain t =
@@ -177,7 +196,7 @@ let drain t =
         | None -> ()
       in
       drain_stream ();
-      Atomic.set t.wake_pending false;
+      t.wake_pending <- false;
       List.rev !acc)
 
 let is_empty t =

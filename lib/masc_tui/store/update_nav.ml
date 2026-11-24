@@ -825,8 +825,20 @@ let open_overlay (m : Model.t) overlay =
     | Nav.System_gate _ ->
         None
   in
+  let inline_modal =
+    match overlay with
+    | Nav.Inline_action kind -> Some (Model.inline_modal_for kind)
+    | Nav.Palette
+    | Nav.Settings _
+    | Nav.Incidents
+    | Nav.Queue_context _
+    | Nav.Ask_answer
+    | Nav.Help
+    | Nav.System_gate _ ->
+        None
+  in
   let next =
-    { m with nav; drafts; config; incidents; knowledge; inline_modal = None; ask_modal }
+    { m with nav; drafts; config; incidents; knowledge; inline_modal; ask_modal }
     |> Model.sync_sidebar_cursor
   in
   (next, View_fetches.fetches_for_current_view next)
@@ -2167,9 +2179,11 @@ let focus_attention_entry_in_inbox (m : Model.t) (entry : Attention.entry) =
   { m with work; attention }
 
 let teleport_blocked ~now (m : Model.t) =
+  let in_micro = Model.equal_breakpoint m.breakpoint Model.Micro in
   let target_opt =
     if
-      Option.is_none m.nav.overlay
+      (not in_micro)
+      && Option.is_none m.nav.overlay
       && m.nav.dive_stack = []
       && Nav.equal_workspace m.nav.workspace Nav.Pulse
       && Model.equal_pulse_pane (Model.active_pulse_pane m)
@@ -2184,21 +2198,29 @@ let teleport_blocked ~now (m : Model.t) =
              ~en:"No items currently awaiting operator action")
           m
       , [] )
-  | Some entry -> (
-      match entry.payload with
-      | Attention.Payload_ask ask ->
-          let m0 = focus_attention_entry_in_inbox m entry in
-          let m1, cmds1 = switch_workspace m0 Nav.Work in
-          let m2, cmds2 = open_ask_modal m1 ask in
-          (m2, cmds1 @ cmds2)
-      | Attention.Payload_tool_approval _ | Attention.Payload_gate _ ->
-          let m0 = focus_attention_entry_in_inbox m entry in
-          switch_workspace m0 Nav.Work
-      | Attention.Payload_goal_confirmation g ->
-          let work = Work_store.set_tab Nav.Work_pipeline m.work in
-          let m1, cmds1 = switch_workspace { m with work } Nav.Work in
-          let m2, cmds2 = push_dive m1 (Nav.Dive_work (Nav.Goal_dive g.id)) in
-          (m2, cmds1 @ cmds2))
+  | Some entry ->
+      if in_micro then
+        match entry.payload with
+        | Attention.Payload_ask ask -> open_ask_modal m ask
+        | Attention.Payload_tool_approval _
+        | Attention.Payload_gate _
+        | Attention.Payload_goal_confirmation _ ->
+            open_overlay m (Nav.Queue_context Nav.Drawer_queue)
+      else (
+        match entry.payload with
+        | Attention.Payload_ask ask ->
+            let m0 = focus_attention_entry_in_inbox m entry in
+            let m1, cmds1 = switch_workspace m0 Nav.Work in
+            let m2, cmds2 = open_ask_modal m1 ask in
+            (m2, cmds1 @ cmds2)
+        | Attention.Payload_tool_approval _ | Attention.Payload_gate _ ->
+            let m0 = focus_attention_entry_in_inbox m entry in
+            switch_workspace m0 Nav.Work
+        | Attention.Payload_goal_confirmation g ->
+            let work = Work_store.set_tab Nav.Work_pipeline m.work in
+            let m1, cmds1 = switch_workspace { m with work } Nav.Work in
+            let m2, cmds2 = push_dive m1 (Nav.Dive_work (Nav.Goal_dive g.id)) in
+            (m2, cmds1 @ cmds2))
 
 let toggle_voice ~now (m : Model.t) =
   match m.drafts.voice with
@@ -3374,6 +3396,7 @@ let parse_schedule_repeat raw =
 let submit_inline_modal ~now (m : Model.t) =
   match m.inline_modal with
   | None -> (m, [])
+  | Some modal when modal.submitting -> (m, [])
   | Some modal -> (
       let missing_required =
         List.find_opt
@@ -4720,9 +4743,12 @@ let queue_context_max_scroll (m : Model.t) tab =
   let total_rows =
     match tab with
     | Nav.Drawer_queue ->
+        let attn_count = Attention.count m.attention in
+        let attn_rows = if attn_count > 0 then attn_count + 3 else 0 in
         let txs = Drafts.pending_txs_for_keeper ~keeper m.drafts in
         let others = Drafts.other_keepers_draft_count m.drafts in
-        1 + max 1 (List.length txs) + 1 + 1 + 1 + (if others > 0 then 1 else 0)
+        attn_rows + 1 + max 1 (List.length txs) + 1 + 1 + 1
+        + if others > 0 then 1 else 0
     | Nav.Drawer_schedules -> List.length (Work_store.schedules_list m.work)
     | Nav.Drawer_context ->
         let keeper_opt = Fleet_store.find_keeper ~name:keeper m.fleet in

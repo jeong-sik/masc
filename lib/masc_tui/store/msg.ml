@@ -320,6 +320,7 @@ type http_reply =
   | Reply_action_ack of {
       label : Say.t;
       ack_scope : ack_effect;
+      for_modal : Nav.inline_action_kind option;
       result : (unit, http_error) result;
     }
   | Reply_fusion_runs_snapshot of

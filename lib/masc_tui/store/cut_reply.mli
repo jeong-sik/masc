@@ -31,6 +31,19 @@ val retire_attempt : ownership -> ownership
 
 type t
 
+val max_pages : int
+(** Maximum journal pages read for a single cut reply ([100]) before failing
+    with {!Page_limit_exceeded}. *)
+
+type page_error =
+  | Cursor_did_not_advance of {
+      previous : Wire_chat_journal.from;
+      next : Wire_chat_journal.cursor;
+    }
+  | Page_limit_exceeded of { max_pages : int }
+
+val page_error_to_string : page_error -> string
+
 val start : t
 (** Nothing read yet. *)
 
@@ -38,8 +51,14 @@ val no_journal : t
 (** The server keeps no journal for the operation: nothing to show and
     nothing to ask. *)
 
+val apply_page_checked : Wire_chat_journal.page -> t -> (t, page_error) result
+(** Fold the page's events, rejecting a repeated/non-advancing [next] cursor or
+    more than {!max_pages} pages so a broken server cannot loop HTTP requests
+    forever. A reply that already ended returns [Ok t]. *)
+
 val apply_page : Wire_chat_journal.page -> t -> t
-(** Fold the page's events. A reply that already ended ignores the page. *)
+(** Fold the page's events. A reply that already ended ignores the page; a
+    non-advancing cursor or page-cap breach stops reading. *)
 
 val next_page : t -> Wire_chat_journal.from option
 (** The page to read next, [None] once the reply ended or the journal's

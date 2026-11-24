@@ -71,6 +71,9 @@ val set_auto_advance : bool -> t -> t
 val is_in_flight : id:string -> t -> bool
 val mark_in_flight : id:string -> t -> t
 val clear_in_flight : id:string -> t -> t
+val clear_all_in_flight : t -> t
+(** Drop all in-flight markers when leaving an epoch whose replies are
+    abandoned. *)
 
 val advance_after_resolution : resolved_id:string -> t -> t
 (** Remove [resolved_id], clear its in-flight flag, and clamp/advance

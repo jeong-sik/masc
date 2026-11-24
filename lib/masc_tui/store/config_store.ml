@@ -975,6 +975,19 @@ let mark_dry_run_loading t =
   { t with dry_run_preview = Dry_run_loading; dry_run_scroll_offset = 0 }
 let mark_save_in_flight t = { t with save_state = Save_in_flight }
 
+let clear_in_flight t =
+  let dry_run_preview =
+    match t.dry_run_preview with
+    | Dry_run_loading -> Dry_run_idle
+    | Dry_run_idle | Dry_run_ready _ | Dry_run_failed _ -> t.dry_run_preview
+  in
+  let save_state =
+    match t.save_state with
+    | Save_in_flight -> Save_idle
+    | Save_idle | Save_succeeded _ | Save_failed _ -> t.save_state
+  in
+  { t with dry_run_preview; save_state }
+
 let apply_patch_response ~dry_run (resp : Wire_config.patch_response) t =
   if dry_run then
     { t with dry_run_preview = Dry_run_ready resp; dry_run_scroll_offset = 0 }

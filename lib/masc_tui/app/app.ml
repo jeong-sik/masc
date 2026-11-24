@@ -10,6 +10,7 @@ type render_frame =
 let drain_budget_ns = 3_000_000L
 let voice_tick_interval_ns = 100_000_000L
 let probe_timeout_s = 0.15
+let probe_grace_s = 2.0
 
 let palette_requested_of_env ~getenv =
   let term_usable =
@@ -494,10 +495,10 @@ let next_minute_tick ~now_ns ~wall_unix ~last_minute =
   in
   (minute_due, cur_min, next_deadline_ns)
 
-let set_stdin_nonblock enabled =
+let set_fd_nonblock fd enabled =
   match
-    if enabled then Unix.set_nonblock Unix.stdin
-    else Unix.clear_nonblock Unix.stdin
+    if enabled then Unix.set_nonblock fd
+    else Unix.clear_nonblock fd
   with
   | () -> ()
   | exception Unix.Unix_error _ -> ()
@@ -534,163 +535,259 @@ let dispatch_decoded_events ~signals ~bell ~input_queue ?on_reply events =
     events;
   if !pushed then Wake_bell.ring bell Wake_bell.Ui_bus
 
-let start_input_reader ~sw ~clock ~signals ~bell ~input_queue ?probe_decoder
-    ?on_observation () =
+let start_input_reader ~sw ~clock ?(fd = Unix.stdin) ~signals ~bell ~input_queue
+    ?probe_decoder ?(probe_grace_s = probe_grace_s) ?on_observation () =
   Eio.Switch.check sw;
   let stop_p, stop_u = Eio.Promise.create () in
   let stopped, mark_stopped = Eio.Promise.create () in
   let finish () = ignore (Eio.Promise.try_resolve mark_stopped () : bool) in
+  let grace_s =
+    if Float.is_finite probe_grace_s && probe_grace_s > 0.0 then probe_grace_s
+    else 0.0
+  in
+  let grace_deadline = Clock.Mono.after_s (Clock.Mono.now ()) grace_s in
   Eio.Fiber.fork_daemon ~sw (fun () ->
-      let decoder = Input_decoder.create () in
-      let buf = Bytes.create 256 in
-      let last_obs =
-        ref
-          (match probe_decoder with
-           | Some pd -> Probe.observation pd
-           | None -> Probe.empty_observation)
-      in
-      let publish_if_changed () =
-        match probe_decoder with
-        | None -> ()
-        | Some pd ->
-            let cur = Probe.observation pd in
-            if not (Probe.equal_observation !last_obs cur) then begin
-              last_obs := cur;
-              Option.iter (fun f -> f cur) on_observation
-            end
-      in
-      let on_reply reply =
-        match probe_decoder with
-        | None -> ()
-        | Some pd ->
-            (match apply_terminal_reply ~probe_decoder:pd reply with
-             | Some obs ->
-                 last_obs := obs;
-                 Option.iter (fun f -> f obs) on_observation
-             | None -> ())
-      in
-      let emit_events =
-        dispatch_decoded_events ~signals ~bell ~input_queue ~on_reply
-      in
-      let probe_active () =
-        match probe_decoder with
-        | None -> false
-        | Some pd ->
-            (not (Probe.complete pd))
-            || Probe.has_replay pd
-            || Option.is_some (Probe.pending pd)
-      in
-      let drain_probe_replay () =
-        match probe_decoder with
-        | None -> ()
-        | Some pd ->
-            let rec drain () =
-              if Probe.has_replay pd then
-                match Probe.next pd ~next_raw:(fun () -> None) with
-                | Some ch ->
-                    emit_events (Input_decoder.feed decoder ch);
-                    drain ()
-                | None -> ()
-            in
-            drain ()
-      in
-      (* Replay any early user keystrokes buffered during startup probe
-         immediately before sleeping on stdin. *)
-      drain_probe_replay ();
-      let rec loop () =
-        Eio.Switch.check sw;
-        if Eio.Promise.is_resolved stop_p then begin
-          finish ();
-          `Stop_daemon
-        end
-        else
-          let pending_state =
-            match probe_decoder with
-            | Some pd when probe_active () -> (
-                match Probe.pending pd with
-                | Some _ as p -> p
-                | None -> Input_decoder.pending decoder)
-            | Some _ | None -> Input_decoder.pending decoder
+      Fun.protect ~finally:finish (fun () ->
+          let decoder = ref (Input_decoder.create ()) in
+          let buf = Bytes.create 256 in
+          let last_obs =
+            ref
+              (match probe_decoder with
+               | Some pd -> Probe.observation pd
+               | None -> Probe.empty_observation)
           in
-          let wait_result =
-            match pending_state with
-            | None ->
-                Eio.Fiber.first
-                  (fun () ->
-                    Eio_unix.await_readable Unix.stdin;
-                    `Readable)
-                  (fun () ->
-                    Eio.Promise.await stop_p;
-                    `Stop)
-            | Some pending_kind ->
-                let timeout_s = Input_decoder.idle_timeout_s pending_kind in
-                Eio.Fiber.first
-                  (fun () ->
-                    Eio_unix.await_readable Unix.stdin;
-                    `Readable)
-                  (fun () ->
+          let publish_if_changed () =
+            match probe_decoder with
+            | None -> ()
+            | Some pd ->
+                let cur = Probe.observation pd in
+                if not (Probe.equal_observation !last_obs cur) then begin
+                  last_obs := cur;
+                  Option.iter (fun f -> f cur) on_observation
+                end
+          in
+          let on_reply reply =
+            match probe_decoder with
+            | None -> ()
+            | Some pd -> (
+                match apply_terminal_reply ~probe_decoder:pd reply with
+                | Some obs ->
+                    last_obs := obs;
+                    Option.iter (fun f -> f obs) on_observation
+                | None -> ())
+          in
+          let emit_events =
+            dispatch_decoded_events ~signals ~bell ~input_queue ~on_reply
+          in
+          let drain_probe_replay () =
+            match probe_decoder with
+            | None -> ()
+            | Some pd ->
+                let rec drain () =
+                  if Probe.has_replay pd then
+                    match Probe.next pd ~next_raw:(fun () -> None) with
+                    | Some ch ->
+                        emit_events (Input_decoder.feed !decoder ch);
+                        drain ()
+                    | None -> ()
+                in
+                drain ()
+          in
+          let recover_step work =
+            match work () with
+            | () -> ()
+            | exception (Eio.Cancel.Cancelled _ as ex) -> raise ex
+            | exception ex ->
+                ignore ex;
+                decoder := Input_decoder.create ();
+                (match probe_decoder with
+                 | Some pd -> Probe.discard_incomplete_sequence pd
+                 | None -> ())
+          in
+          let maybe_expire_probe () =
+            match probe_decoder with
+            | Some pd
+              when (not (Probe.complete pd))
+                   && Clock.Mono.compare (Clock.Mono.now ()) grace_deadline >= 0
+              ->
+                recover_step (fun () ->
+                    ignore (Probe.finish pd : Probe.result);
+                    drain_probe_replay ();
+                    publish_if_changed ())
+            | Some _ | None -> ()
+          in
+          let probe_active () =
+            maybe_expire_probe ();
+            match probe_decoder with
+            | None -> false
+            | Some pd ->
+                (not (Probe.complete pd))
+                || Probe.has_replay pd
+                || Option.is_some (Probe.pending pd)
+          in
+          (* Replay any early user keystrokes buffered during startup probe
+             immediately before sleeping on stdin. *)
+          recover_step drain_probe_replay;
+          let rec loop () =
+            Eio.Switch.check sw;
+            if Eio.Promise.is_resolved stop_p then `Stop_daemon
+            else
+              let active_probe = probe_active () in
+              let pending_state =
+                match probe_decoder with
+                | Some pd when active_probe -> (
+                    match Probe.pending pd with
+                    | Some _ as p -> p
+                    | None -> Input_decoder.pending !decoder)
+                | Some _ | None -> Input_decoder.pending !decoder
+              in
+              let timer_opt =
+                let pending_timeout =
+                  Option.map Input_decoder.idle_timeout_s pending_state
+                in
+                let probe_timeout =
+                  match probe_decoder with
+                  | Some pd when active_probe && not (Probe.complete pd) ->
+                      let rem =
+                        Clock.Mono.seconds_since grace_deadline
+                          ~since:(Clock.Mono.now ())
+                      in
+                      Some (Float.max 0.001 rem)
+                  | Some _ | None -> None
+                in
+                match pending_timeout, probe_timeout with
+                | None, None -> None
+                | Some a, None -> Some (`Idle_flush, a)
+                | None, Some b -> Some (`Probe_expire, b)
+                | Some a, Some b ->
+                    if b < a then Some (`Probe_expire, b)
+                    else Some (`Idle_flush, a)
+              in
+              let wait_result =
+                match timer_opt with
+                | None ->
                     Eio.Fiber.first
                       (fun () ->
-                        Eio.Time.sleep clock timeout_s;
-                        `Idle_flush)
+                        match Eio_unix.await_readable fd with
+                        | () -> `Readable
+                        | exception (Eio.Cancel.Cancelled _ as ex) -> raise ex
+                        | exception Unix.Unix_error (Unix.EINTR, _, _) ->
+                            `Retry
+                        | exception Unix.Unix_error _ -> `Error)
                       (fun () ->
                         Eio.Promise.await stop_p;
-                        `Stop))
-          in
-          match wait_result with
-          | `Stop ->
-              finish ();
-              `Stop_daemon
-          | `Idle_flush ->
-              (match probe_decoder with
-               | Some pd when probe_active () ->
-                   if Probe.holds_incomplete_sequence pd then
-                     Probe.discard_incomplete_sequence pd
-                   else if Option.is_some (Probe.pending pd) then
-                     (match Probe.next pd ~next_raw:(fun () -> None) with
-                      | Some ch -> emit_events (Input_decoder.feed decoder ch)
-                      | None -> ());
-                   drain_probe_replay ();
-                   publish_if_changed ()
-               | Some _ | None -> ());
-              emit_events (Input_decoder.idle decoder);
-              loop ()
-          | `Readable -> (
-              match Unix.read Unix.stdin buf 0 256 with
-              | 0 ->
-                  Signals.record_terminate signals ~signal:"EOF";
-                  finish ();
-                  `Stop_daemon
-              | n ->
-                  (match probe_decoder with
-                   | Some pd when probe_active () ->
-                       for i = 0 to n - 1 do
-                         Probe.feed pd (Bytes.get buf i)
-                       done;
-                       drain_probe_replay ();
-                       publish_if_changed ()
-                   | Some _ | None ->
-                       let chunk = Bytes.sub_string buf 0 n in
-                       emit_events (Input_decoder.feed_string decoder chunk));
-                  loop ()
-              | exception Unix.Unix_error (Unix.EINTR, _, _) -> loop ()
-              | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) ->
-                  loop ()
-              | exception Unix.Unix_error _ ->
+                        `Stop)
+                | Some (timer_tag, timeout_s) ->
+                    Eio.Fiber.first
+                      (fun () ->
+                        match Eio_unix.await_readable fd with
+                        | () -> `Readable
+                        | exception (Eio.Cancel.Cancelled _ as ex) -> raise ex
+                        | exception Unix.Unix_error (Unix.EINTR, _, _) ->
+                            `Retry
+                        | exception Unix.Unix_error _ -> `Error)
+                      (fun () ->
+                        Eio.Fiber.first
+                          (fun () ->
+                            Eio.Time.sleep clock timeout_s;
+                            timer_tag)
+                          (fun () ->
+                            Eio.Promise.await stop_p;
+                            `Stop))
+              in
+              match wait_result with
+              | `Stop -> `Stop_daemon
+              | `Retry -> loop ()
+              | `Error ->
                   Signals.record_terminate signals ~signal:"STDIN_ERROR";
-                  finish ();
-                  `Stop_daemon)
-      in
-      match loop () with
-      | res -> res
-      | exception (Eio.Cancel.Cancelled _ as ex) ->
-          finish ();
-          raise ex);
+                  `Stop_daemon
+              | `Probe_expire ->
+                  maybe_expire_probe ();
+                  loop ()
+              | `Idle_flush ->
+                  recover_step (fun () ->
+                      let probe_was_pending =
+                        match probe_decoder with
+                        | Some pd -> Option.is_some (Probe.pending pd)
+                        | None -> false
+                      in
+                      let decoder_was_pending =
+                        Option.is_some (Input_decoder.pending !decoder)
+                      in
+                      let was_active = probe_active () in
+                      (match probe_decoder with
+                       | Some pd when was_active ->
+                           if Probe.holds_incomplete_sequence pd then
+                             Probe.discard_incomplete_sequence pd
+                           else if Option.is_some (Probe.pending pd) then
+                             (match Probe.next pd ~next_raw:(fun () -> None) with
+                              | Some ch ->
+                                  emit_events (Input_decoder.feed !decoder ch)
+                              | None -> ());
+                           drain_probe_replay ();
+                           publish_if_changed ()
+                       | Some _ | None -> ());
+                      if probe_was_pending || decoder_was_pending then
+                        emit_events (Input_decoder.idle !decoder));
+                  loop ()
+              | `Readable -> (
+                  match Unix.read fd buf 0 256 with
+                  | 0 ->
+                      Signals.record_terminate signals ~signal:"EOF";
+                      `Stop_daemon
+                  | n ->
+                      recover_step (fun () ->
+                          match probe_decoder with
+                          | Some pd when probe_active () ->
+                              for i = 0 to n - 1 do
+                                Probe.feed pd (Bytes.get buf i)
+                              done;
+                              drain_probe_replay ();
+                              publish_if_changed ()
+                          | Some _ | None ->
+                              let chunk = Bytes.sub_string buf 0 n in
+                              emit_events
+                                (Input_decoder.feed_string !decoder chunk));
+                      loop ()
+                  | exception Unix.Unix_error (Unix.EINTR, _, _) -> loop ()
+                  | exception
+                      Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) ->
+                      loop ()
+                  | exception Unix.Unix_error _ ->
+                      Signals.record_terminate signals ~signal:"STDIN_ERROR";
+                      `Stop_daemon)
+          in
+          loop ()));
   { stop_u; stopped }
 
 let stop_input_reader handle =
   ignore (Eio.Promise.try_resolve handle.stop_u () : bool);
   Eio.Promise.await handle.stopped
+
+let can_launch_pending_wiki_editor (m : Model.t) =
+  (not (Model.is_too_small_viewport m.viewport))
+  && (not (Model.equal_breakpoint m.breakpoint Model.Micro))
+  && Option.is_none m.nav.overlay
+  && (not (Model.is_text_capture_active m))
+  &&
+  match Model.active_dive m with
+  | Some (Nav.Dive_knowledge (Nav.Wiki_dive _)) -> true
+  | Some
+      ( Nav.Dive_knowledge
+          (Nav.Thread_dive _ | Nav.Artifact_dive _ | Nav.Memory_diff_dive _)
+      | Nav.Dive_keeper _
+      | Nav.Dive_work _
+      | Nav.Dive_runtime _
+      | Nav.Dive_infra _ ) ->
+      false
+  | None ->
+      Nav.equal_workspace m.nav.workspace Nav.Knowledge
+      && (match m.knowledge.active_tab with
+          | Nav.Knowledge_wiki -> true
+          | Nav.Knowledge_board
+          | Nav.Knowledge_artifacts
+          | Nav.Knowledge_memory ->
+              false)
 
 let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
   match Cli_args.check_tty () with
@@ -755,10 +852,12 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
           (match Termios.enter_raw_mode Unix.stdin with
           | Ok s -> raw_session := Some s
           | Error _ -> ());
-          set_stdin_nonblock true
+          set_fd_nonblock Unix.stdin true;
+          set_fd_nonblock Unix.stdout true
         in
         let restore_raw () =
-          set_stdin_nonblock false;
+          set_fd_nonblock Unix.stdin false;
+          set_fd_nonblock Unix.stdout false;
           match !raw_session with
           | None -> ()
           | Some s ->
@@ -929,6 +1028,7 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
         in
         let executor =
           Cmd_executor.create ~sw ~io ~worker ~clock ~cli ~bus ~editor_handoff
+            ~on_editor_ready:(fun () -> Wake_bell.ring bell Wake_bell.Ui_bus)
             ~on_quit ~on_restart ()
         in
         Eio.Switch.on_release sw (fun () ->
@@ -1017,21 +1117,26 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
 
         let drain_bus ~now ~deadline_ns =
           let rec loop () =
-            if !should_quit || Ui_bus.is_empty bus then ()
+            if !should_quit then ()
             else if Int64.compare (Clock.Mono.to_ns (Clock.Mono.now ())) deadline_ns >= 0
-            then Wake_bell.ring bell Wake_bell.Ui_bus
+            then begin
+              if not (Ui_bus.is_empty bus) then
+                Wake_bell.ring bell Wake_bell.Ui_bus
+            end
             else
-              let items = Ui_bus.drain_up_to ~max_items:32 bus in
-              List.iter
-                (fun item ->
-                  if not !should_quit then
-                    match item with
-                    | Ui_bus.Snapshot (_, msg) | Ui_bus.Stream_event msg ->
-                        apply_msg ~now msg
-                    | Ui_bus.Stream_gap dropped ->
-                        apply_msg ~now (Msg.Stream_gap dropped))
-                items;
-              loop ()
+              match Ui_bus.drain_up_to ~max_items:32 bus with
+              | [] -> ()
+              | items ->
+                  List.iter
+                    (fun item ->
+                      if not !should_quit then
+                        match item with
+                        | Ui_bus.Snapshot (_, msg) | Ui_bus.Stream_event msg ->
+                            apply_msg ~now msg
+                        | Ui_bus.Stream_gap dropped ->
+                            apply_msg ~now (Msg.Stream_gap dropped))
+                    items;
+                  loop ()
           in
           loop ()
         in
@@ -1106,10 +1211,17 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                     ~pace:Frame_scheduler.Pace_interactive !scheduler
               end;
 
-              (* 3. Drain input events first, then bounded 3 ms Ui_bus batch. *)
+              (* 3. Drain input events first, then bounded 3 ms Ui_bus batch,
+                    then any async-fetched $EDITOR handoff ready for the UI loop. *)
               let drain_deadline_ns = Int64.add now_ns drain_budget_ns in
               drain_inputs ~now ~deadline_ns:drain_deadline_ns;
               drain_bus ~now ~deadline_ns:drain_deadline_ns;
+              if not !should_quit then
+                Cmd_executor.run_pending_editor
+                  ~can_launch:(fun () ->
+                    (not !should_quit)
+                    && can_launch_pending_wiki_editor !model)
+                  executor;
 
               (* 4. Service active timers (toast expiration / 10 Hz voice timer)
                     without introducing idle polling. *)
@@ -1235,6 +1347,7 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                     Wake_bell.is_rung bell
                     || (not (Ui_bus.is_empty bus))
                     || not (Eio.Stream.is_empty input_queue)
+                    || Cmd_executor.has_pending_editor executor
                   then Eio.Fiber.yield ()
                   else
                     let sleep_now_ns = Clock.Mono.to_ns (Clock.Mono.now ()) in

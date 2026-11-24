@@ -203,6 +203,11 @@ let clear_in_flight ~id t =
       List.filter (fun x -> not (String.equal x id)) t.in_flight_ids;
   }
 
+let clear_all_in_flight t =
+  match t.in_flight_ids with
+  | [] -> t
+  | _ :: _ -> { t with in_flight_ids = [] }
+
 let top_fast_path t =
   List.find_opt (fun (e : entry) -> not (is_in_flight ~id:e.id t)) t.items
 

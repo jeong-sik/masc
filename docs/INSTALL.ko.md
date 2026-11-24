@@ -671,7 +671,7 @@ workspace의 guest shim과 명시적으로 초기화한 설정은 이 prefix tra
 부팅 로그에서 디코딩 불가 오류를 보고하고, 그 파일을 읽는 화면(Keeper 프로필,
 Goal 등)은 정리할 때까지 비어 있거나 오류를 반환합니다.
 
-`v0.82.0` 이상으로 올리기 전에 `runtime.toml`의 `[typesafeai]` 절에서
+`v0.81.0` 이상으로 올리기 전에 `runtime.toml`의 `[typesafeai]` 절에서
 `absorb_gate = ...` 키를 제거하세요. `[typesafeai]`는 알 수 없는 키가 남아
 있으면 부팅을 거부(fail-closed, `#54451`)하므로, 제거된 키가 남아 있으면 새
 서버가 기동되지 않습니다.

@@ -734,7 +734,7 @@ Delete or rewrite them before the new server starts. Otherwise the boot log
 reports the file as undecodable, and the surface that reads it (Keeper
 profiles, Goals) stays empty or returns that error until you do.
 
-Before upgrading to `v0.82.0` or later, remove any `absorb_gate = ...` key
+Before upgrading to `v0.81.0` or later, remove any `absorb_gate = ...` key
 from `[typesafeai]` in `runtime.toml`: `[typesafeai]` fails closed on unknown
 keys (`#54451`), so leaving the removed key in place prevents the server from
 booting.

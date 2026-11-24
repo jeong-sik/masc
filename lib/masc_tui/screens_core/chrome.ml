@@ -2242,8 +2242,9 @@ let render_frame ~(model : Model.t) ~cache ~render_body ~render_overlay grid =
             layout.body.h >= 4
             &&
             match Model.active_dive model with
-            | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_chat }) ->
-                String.equal name comp_st.target_keeper
+            | Some dive ->
+                Nav.equal_dive dive
+                  (Nav.Dive_keeper { name = comp_st.target_keeper; tab = Nav.Keeper_chat })
             | None ->
                 Nav.equal_workspace model.nav.workspace Nav.Keepers
                 && Nav.equal_keeper_tab model.fleet.keeper_dive_tab Nav.Keeper_chat
@@ -2253,7 +2254,6 @@ let render_frame ~(model : Model.t) ~cache ~render_body ~render_overlay grid =
                      (fun (keeper : Wire_fleet.keeper_summary) ->
                        String.equal keeper.name comp_st.target_keeper)
                      (Fleet_store.selected_keeper_summary model.fleet)
-            | Some _ -> false
           in
           let c =
             Composer.draw ~show_pending_tx:(not progress_in_chat) grid ~rect:r

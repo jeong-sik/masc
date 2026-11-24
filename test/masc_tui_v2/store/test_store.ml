@@ -4500,7 +4500,8 @@ let test_nav_fix1_keepers_grouped_order_collapse_and_resync () =
   Alcotest.(check (option string))
     "Down after poll reorder advances forward to zeta-1" (Some "zeta-1")
     f_after_down.selected_keeper;
-  (* Collapsing org-beta skips beta-1/beta-2 cleanly; if selected was inside beta, snaps to nearest visible *)
+  (* UX-20: Collapsing org-beta anchors cursor on the collapsed org-beta header
+     so users can immediately re-expand it with Space/Enter or step past it. *)
   let f_on_beta = Fleet_store.select_keeper "beta-1" f0 in
   let f_collapsed = Fleet_store.toggle_company_collapsed "org-beta" f_on_beta in
   Alcotest.(check (list string))
@@ -4508,16 +4509,32 @@ let test_nav_fix1_keepers_grouped_order_collapse_and_resync () =
     [ "alpha-1"; "alpha-2"; "mid-1"; "zeta-1" ]
     (names_of (Fleet_store.filtered_keepers f_collapsed));
   Alcotest.(check (option string))
-    "collapsing active group snaps to nearest visible (mid-1)" (Some "mid-1")
-    f_collapsed.selected_keeper;
-  Alcotest.(check int) "selected_index re-synced after collapse" 2
-    f_collapsed.selected_index;
-  let f_a2 = Fleet_store.select_keeper "alpha-2" f_collapsed in
-  let f_skip = Fleet_store.move_selection ~delta:1 f_a2 in
+    "collapsing active group anchors selected_collapsed_company on org-beta"
+    (Some "org-beta") f_collapsed.selected_collapsed_company;
+  let f_reexpanded =
+    Fleet_store.toggle_company_collapsed "org-beta" f_collapsed
+  in
   Alcotest.(check (option string))
-    "Down from alpha-2 skips collapsed org-beta to mid-1" (Some "mid-1")
-    f_skip.selected_keeper;
-  (* Collapsing ALL companies falls back safely to all grouped keepers *)
+    "re-expanding org-beta clears selected_collapsed_company" None
+    f_reexpanded.selected_collapsed_company;
+  Alcotest.(check (option string))
+    "re-expanding org-beta selects first member (beta-1)" (Some "beta-1")
+    f_reexpanded.selected_keeper;
+  let f_a2 = Fleet_store.select_keeper "alpha-2" f_collapsed in
+  let f_visit_collapsed = Fleet_store.move_selection ~delta:1 f_a2 in
+  Alcotest.(check (option string))
+    "Down from alpha-2 visits collapsed org-beta header" (Some "org-beta")
+    f_visit_collapsed.selected_collapsed_company;
+  let f_past_collapsed =
+    Fleet_store.move_selection ~delta:1 f_visit_collapsed
+  in
+  Alcotest.(check (option string))
+    "Down again from collapsed org-beta advances to mid-1" (Some "mid-1")
+    f_past_collapsed.selected_keeper;
+  Alcotest.(check (option string))
+    "stepping off collapsed header clears selected_collapsed_company" None
+    f_past_collapsed.selected_collapsed_company;
+  (* Collapsing ALL companies still leaves collapsed headers navigable via companies_nav_rows *)
   let f_all_collapsed =
     f0
     |> Fleet_store.toggle_company_collapsed "org-alpha"
@@ -4525,10 +4542,12 @@ let test_nav_fix1_keepers_grouped_order_collapse_and_resync () =
     |> Fleet_store.toggle_company_collapsed "org-mid"
     |> Fleet_store.toggle_company_collapsed "org-zeta"
   in
-  Alcotest.(check (list string))
-    "all-collapsed fallback preserves all grouped keepers"
-    expected_grouped
-    (names_of (Fleet_store.filtered_keepers f_all_collapsed));
+  Alcotest.(check int)
+    "all-collapsed companies_nav_rows contains all 4 collapsed company headers" 4
+    (List.length (Fleet_store.companies_nav_rows f_all_collapsed));
+  Alcotest.(check (option string))
+    "all-collapsed keeps highlight on last collapsed company header"
+    (Some "org-zeta") f_all_collapsed.selected_collapsed_company;
   (* set_fleet_mode re-syncs selected_index to selected_keeper in new sort order *)
   let f_wall = Fleet_store.set_fleet_mode Nav.Fleet_pulse_wall f_mid in
   Alcotest.(check (option string))
@@ -10188,12 +10207,13 @@ let test_unified_navigation_sidebar_focus_ring_and_mouse () =
               row = sr_logs.y + 3 + 1;
             }))
   in
-  Alcotest.(check bool) "Wheel over unfocused sidebar focuses sidebar" true
+  (* UX-27: Wheel over unfocused sidebar only scrolls sidebar_scroll without
+     stealing focus, switching workspace, wiping dive_stack, or popping modals. *)
+  Alcotest.(check bool) "Wheel over unfocused sidebar keeps focus in body" false
     (Model.sidebar_has_focus m_wheel_settings);
-  Alcotest.(check int) "Wheel down from Infra Logs lands on Settings"
-    (Nav.menu_item_index Nav.Menu_settings)
-    m_wheel_settings.nav.sidebar_cursor;
-  Alcotest.(check bool) "Wheel onto Settings does not auto-pop modal" true
+  Alcotest.(check bool) "Wheel over sidebar stays on Infra workspace" true
+    (Nav.equal_workspace m_wheel_settings.nav.workspace Nav.Infra);
+  Alcotest.(check bool) "Wheel over sidebar does not auto-pop modal" true
     (Option.is_none m_wheel_settings.nav.overlay);
   (* Review regression 3: Compact Auto_folded_pill click above footer does NOT
      falsely focus composer when Model.composer_rect is None *)
@@ -12051,6 +12071,457 @@ let test_ux_batch2_modals_settings_overlays () =
     "PR54557 harness overrule opener clears return_overlay" true
     (Option.is_none m_overrule.nav.return_overlay)
 
+let test_ux_batch3_work_keepers_chat_mouse () =
+  let m0 = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
+  let step m ev = Update.step ~now:t0 m (Msg.Key_event ev) in
+
+  (* UX-20: Keepers collapsed company header re-expands via Space and Enter *)
+  let k_a = { (sample_keeper "alpha-1") with company = "org-a"; group = Some "org-a" } in
+  let k_b = { (sample_keeper "beta-1") with company = "org-b"; group = Some "org-b" } in
+  let fleet0 = Fleet_store.apply_keepers ~observed_at:t0 [ k_a; k_b ] m0.fleet in
+  let m_k =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Keepers };
+      fleet = fleet0;
+    }
+  in
+  let m_col, _ = Update.execute_action ~now:t0 m_k Keymap.Toggle_expand in
+  Alcotest.(check (option string)) "UX-20 Space collapses org-a and anchors header"
+    (Some "org-a") m_col.fleet.selected_collapsed_company;
+  let m_exp_enter, _ = Update.execute_action ~now:t0 m_col Keymap.Dive_selected in
+  Alcotest.(check (option string)) "UX-20 Enter on collapsed org-a re-expands it"
+    None m_exp_enter.fleet.selected_collapsed_company;
+  Alcotest.(check (option string)) "UX-20 re-expanded org-a selects alpha-1"
+    (Some "alpha-1") m_exp_enter.fleet.selected_keeper;
+  let m_col2, _ = Update.execute_action ~now:t0 m_exp_enter Keymap.Toggle_expand in
+  let m_exp_space, _ = Update.execute_action ~now:t0 m_col2 Keymap.Toggle_expand in
+  Alcotest.(check (option string)) "UX-20 Space on collapsed org-a re-expands it"
+    None m_exp_space.fleet.selected_collapsed_company;
+
+  (* UX-21: Work_inbox Ask choices use uppercase A..D; lowercase b toggles sidebar;
+     sidebar focus blocks Fast_approve_top (Y) / Fast_deny_top (N). *)
+  let sample_ask : Wire_work.ask_row =
+    {
+      ask_id = "ask-1";
+      keeper = "alpha-1";
+      asked_at = 1700000000.0;
+      context = None;
+      questions =
+        [
+          {
+            question_id = "q-1";
+            header = "Confirm";
+            prompt = "Proceed?";
+            mode = Wire_work.Ask_single;
+            allow_free_text = false;
+            free_text_hint = None;
+            choices =
+              [
+                { choice_id = "c1"; label = "Opt1"; description = Some "first" };
+                { choice_id = "c2"; label = "Opt2"; description = Some "second" };
+              ];
+          };
+        ];
+      resolution = Wire_work.Ask_open;
+    }
+  in
+  let sample_apr : Wire_work.held_tool_approval =
+    {
+      approval_id = "apr-1";
+      tool_call_id = "tc-1";
+      keeper = "alpha-1";
+      tool = "git_push";
+      args_preview = "{}";
+      question = "Push?";
+      because = None;
+      asked_at = 1700000000.0;
+      timeout_sec = 60.0;
+    }
+  in
+  let m_ask =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Work; sidebar_open = Some true };
+      work =
+        m0.work
+        |> Work_store.set_tab Nav.Work_inbox
+        |> Work_store.apply_asks ~observed_at:t0 [ sample_ask ]
+        |> Work_store.apply_tool_approvals ~observed_at:t0 [ sample_apr ];
+      attention =
+        Attention.rebuild ~asks:[ sample_ask ] ~tool_approvals:[ sample_apr ]
+          ~gate_pending:[] ~goals:[] m0.attention
+        |> Attention.select_triage_index 1;
+    }
+  in
+  let m_b, cmds_b = step m_ask (char_key ~alt:true "b") in
+  Alcotest.(check bool) "UX-21 Alt+b from Ask focuses docked sidebar without submitting Ask choice 2"
+    true (Model.sidebar_has_focus m_b);
+  Alcotest.(check int) "UX-21 Alt+b emits no Ask HTTP submission" 0
+    (List.length cmds_b);
+  let m_b2, cmds_b2 = step m_b (char_key "b") in
+  Alcotest.(check bool) "UX-21 bare b while sidebar focused collapses sidebar instead of submitting Ask choice 2"
+    false (Model.sidebar_visible m_b2);
+  Alcotest.(check int) "UX-21 bare b from focused sidebar emits 0 Ask HTTP submissions"
+    0 (List.length cmds_b2);
+  let _, cmds_a = step m_ask (char_key "b") in
+  Alcotest.(check bool) "UX-21 bare b on focused Inbox Ask submits choice 2" true
+    (List.exists
+       (function
+         | Cmd.Http_post { req = Cmd.Post_ask_answer { ask_id = "ask-1"; _ }; _ } ->
+             true
+         | _ -> false)
+       cmds_a);
+  let m_sb =
+    { m_ask with nav = { m_ask.nav with sidebar_focused = true } }
+  in
+  Alcotest.(check bool) "UX-21 sidebar focus takes precedence over Ask_choice_focused"
+    true
+    (match Model.active_focus_scope m_sb with
+    | Nav.Workspace_focused Nav.Work -> true
+    | Nav.Global | Nav.Workspace_focused _ | Nav.Dive_focused _
+    | Nav.Composer_focused | Nav.Ask_choice_focused | Nav.Approval_strip_focused
+    | Nav.Overlay_focused _ ->
+        false);
+  let _, cmds_y = step m_sb (char_key "Y") in
+  Alcotest.(check int) "UX-21 sidebar focus blocks Y Fast_approve_top" 0
+    (List.length cmds_y);
+  let _, cmds_n = step m_sb (char_key "N") in
+  Alcotest.(check int) "UX-21 sidebar focus blocks N Fast_deny_top" 0
+    (List.length cmds_n);
+
+  (* UX-22: Work_candle_scorecard has 2 focusable panes and pane 1 scrolls ledger_scroll_offset *)
+  let sample_candle : Wire_work.candle_ledger =
+    {
+      ledger_state = Wire_work.Ledger_present;
+      total_events = 40;
+      balance_error = None;
+      policy_configuration = "default";
+      pricing_mode = "fixed";
+      disabled_reason = None;
+      half_life_sec = None;
+      issued_milli = "50000";
+      burned_milli = "8000";
+      circulating_milli = "42000";
+      total_supply_milli = "42000";
+      active_keepers = 1;
+      diagnostics =
+        {
+          unattributed_count = 0;
+          backlog_fenced_count = 0;
+          zero_linked_tasks_goals = 0;
+          held_windows_count = 0;
+        };
+      balances =
+        [
+          {
+            keeper = "alpha-1";
+            balance_milli = 42000;
+            decayed_milli = "0";
+            last_event_unix = Some 1700000000.0;
+            owned_items = [];
+          };
+        ];
+      recent_events =
+        List.init 40 (fun i : Wire_work.candle_event ->
+            {
+              seq = i + 1;
+              at_unix = 1700000000.0 +. float_of_int i;
+              kind =
+                Wire_work.Candle_granted
+                  {
+                    keeper = "alpha-1";
+                    amount_milli = 1000;
+                    reason = Printf.sprintf "event %d" i;
+                  };
+            });
+    }
+  in
+  let m_candle =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Work };
+      work =
+        m0.work
+        |> Work_store.set_tab Nav.Work_candle_scorecard
+        |> Work_store.apply_candle_ledger ~observed_at:t0 sample_candle;
+    }
+  in
+  Alcotest.(check int) "UX-22 Work_candle_scorecard has 2 focusable panes" 2
+    (Model.focusable_pane_count m_candle);
+  let m_candle_p1, _ = step m_candle (key Keymap.Input.Tab) in
+  Alcotest.(check int) "UX-22 Tab focuses Ledger Events pane 1" 1
+    m_candle_p1.nav.pane_index;
+  let m_candle_scrolled, _ = step m_candle_p1 (key Keymap.Input.Down) in
+  Alcotest.(check bool) "UX-22 Down in pane 1 increments ledger_scroll_offset" true
+    (m_candle_scrolled.work.ledger_scroll_offset > 0);
+
+  (* UX-23: Work_tasks & Work_schedules have 2 focusable panes and pane 1 scrolls detail_scroll_offset *)
+  let long_desc = String.concat "\n" (List.init 60 (fun i -> Printf.sprintf "Task line %d" i)) in
+  let sample_task : Wire_work.task =
+    {
+      id = "t-1";
+      title = "Long Task";
+      description = Some long_desc;
+      priority = 2;
+      status = Wire_work.Todo;
+      goal_link = Wire_work.Unlinked;
+      created_at = Some "2026-11-24T00:00:00Z";
+      updated_at = Some "2026-11-24T00:00:00Z";
+    }
+  in
+  let m_tasks =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Work };
+      work =
+        m0.work
+        |> Work_store.set_tab Nav.Work_tasks
+        |> Work_store.apply_planning ~observed_at:t0
+             { goals = []; tasks = [ sample_task ] };
+    }
+  in
+  Alcotest.(check int) "UX-23 Work_tasks has 2 focusable panes" 2
+    (Model.focusable_pane_count m_tasks);
+  let m_tasks_p1, _ = step m_tasks (key Keymap.Input.Tab) in
+  let m_tasks_sc, _ = step m_tasks_p1 (key Keymap.Input.Down) in
+  Alcotest.(check bool) "UX-23 Work_tasks pane 1 scrolls detail_scroll_offset" true
+    (m_tasks_sc.work.detail_scroll_offset > 0);
+  let sample_sched : Wire_work.schedule_row =
+    {
+      schedule_instance_id = "si-1";
+      schedule_id = "sc-1";
+      status = Wire_work.Sched_scheduled;
+      source = "keeper";
+      due_at_unix = 1700003600.0;
+      next_due_at_unix = Some 1700007200.0;
+      recurrence_kind = "interval";
+      recurrence_summary = "every 1h";
+      payload_kind = Some "wake";
+      payload_support = "supported";
+      payload_target = Some "alpha-1";
+      payload_keeper_name = Some "alpha-1";
+      payload_summary = Some long_desc;
+      last_wake_unix = None;
+      last_disposition = Wire_work.Wake_never;
+    }
+  in
+  let m_scheds =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Work };
+      work =
+        m0.work
+        |> Work_store.set_tab Nav.Work_schedules
+        |> Work_store.apply_schedules ~observed_at:t0 ([ sample_sched ], None);
+    }
+  in
+  Alcotest.(check int) "UX-23 Work_schedules has 2 focusable panes" 2
+    (Model.focusable_pane_count m_scheds);
+  let m_scheds_p1, _ = step m_scheds (key Keymap.Input.Tab) in
+  let m_scheds_sc, _ = step m_scheds_p1 (key Keymap.Input.Down) in
+  Alcotest.(check bool) "UX-23 Work_schedules pane 1 scrolls detail_scroll_offset" true
+    (m_scheds_sc.work.detail_scroll_offset > 0);
+
+  (* UX-24: Work_pipeline pane 1 [a]/[x] guarded when Verifications list is hidden *)
+  let sample_verif : Wire_work.verification_request =
+    {
+      request_id = "v-1";
+      task_id = "t-1";
+      task_title = "Long Task";
+      submitted_by = "alpha-1";
+      created_at_unix = Some 1700000000.0;
+      completion_contract = [];
+      required_artifacts = [];
+      submitted_evidence = [];
+      evidence_projection_error = None;
+      review_observation = None;
+    }
+  in
+  let m_pipe_tiny_base = Model.initial ~cols:140 ~rows:24 ~lang:Say.Lang_en () in
+  let m_pipe_tiny =
+    {
+      m_pipe_tiny_base with
+      nav = { m_pipe_tiny_base.nav with workspace = Nav.Work; pane_index = 1 };
+      attention = m_ask.attention;
+      drafts =
+        m_pipe_tiny_base.drafts
+        |> Drafts.set_active_keeper "alpha-1"
+        |> Drafts.insert_text "line1\nline2\nline3";
+      work =
+        m_pipe_tiny_base.work
+        |> Work_store.set_tab Nav.Work_pipeline
+        |> Work_store.apply_verifications ~observed_at:t0 [ sample_verif ];
+    }
+  in
+  Alcotest.(check bool) "UX-24 verifs hidden in very short pipeline viewport" false
+    (Model.work_pipeline_verifs_visible m_pipe_tiny);
+  let m_pipe_a, cmds_pipe_a = step m_pipe_tiny (char_key "a") in
+  Alcotest.(check int) "UX-24 hidden verif [a] does not submit HTTP mutation" 0
+    (List.length cmds_pipe_a);
+  Alcotest.(check bool) "UX-24 hidden verif [a] shows warning toast" true
+    (match m_pipe_a.toast with
+    | Some { level = Model.Toast_warning; _ } -> true
+    | Some _ | None -> false);
+
+  (* UX-25: Dive_work Raw JSON toggle exposes pane 1 with independent json_scroll_offset *)
+  let m_dive =
+    {
+      m_tasks with
+      nav =
+        {
+          m_tasks.nav with
+          dive_stack = [ Nav.Dive_work (Nav.Task_dive "t-1") ];
+          pane_index = 0;
+        };
+      infra = { m_tasks.infra with show_raw_json = true };
+    }
+  in
+  Alcotest.(check int) "UX-25 Dive_work with Raw JSON on wide viewport has 2 panes" 2
+    (Model.focusable_pane_count m_dive);
+  let m_dive_p1, _ = step m_dive (key Keymap.Input.Tab) in
+  Alcotest.(check int) "UX-25 Tab focuses Raw JSON pane 1" 1
+    m_dive_p1.nav.pane_index;
+  let m_dive_js, _ = step m_dive_p1 (key Keymap.Input.Down) in
+  Alcotest.(check bool) "UX-25 Down in JSON pane increments json_scroll_offset" true
+    (m_dive_js.nav.json_scroll_offset > 0);
+  Alcotest.(check int) "UX-25 JSON scroll leaves dive_scroll_offset untouched" 0
+    m_dive_js.nav.dive_scroll_offset;
+
+  (* UX-26: Keepers empty filtered roster collapses to 1 pane; Keeper_config [d] dry-run works on Bool *)
+  let m_k_empty =
+    {
+      m_k with
+      fleet = Fleet_store.set_filter "no-such-keeper-xyz" m_k.fleet;
+    }
+  in
+  Alcotest.(check int) "UX-26 Keepers empty filtered roster has 1 focusable pane" 1
+    (Model.focusable_pane_count m_k_empty);
+  let bool_field : Wire_config.schema_field =
+    {
+      table = "keeper";
+      key = "enabled";
+      full_key = "keeper.enabled";
+      label = "Enabled";
+      env = None;
+      description = None;
+      kind = Wire_config.Field_bool;
+      value = Wire_config.Val_bool true;
+      default_value = Some (Wire_config.Val_bool true);
+      provenance = Wire_config.Prov_project;
+      reload_scope = Wire_config.Hot_reload;
+      secret = false;
+      writable = true;
+    }
+  in
+  let cfg_bool =
+    Config_store.empty
+    |> Config_store.set_target (Wire_config.Target_keeper "alpha-1")
+    |> Config_store.apply_schema ~observed_at:t0
+         {
+           target = Wire_config.Target_keeper "alpha-1";
+           keeper = Some "alpha-1";
+           file_exists = true;
+           file_sha256 = "sha256-bool";
+           sections =
+             [
+               {
+                 id = "keeper";
+                 category = Wire_config.Cat_keepers_companies;
+                 title = "Keeper";
+                 fields = [ bool_field ];
+               };
+             ];
+         }
+  in
+  let m_kcfg =
+    {
+      m_k with
+      nav =
+        {
+          m_k.nav with
+          dive_stack =
+            [ Nav.Dive_keeper { name = "alpha-1"; tab = Nav.Keeper_config } ];
+          pane_index = 1;
+        };
+      config = cfg_bool;
+    }
+  in
+  let m_kcfg_toggled, cmds_sp = step m_kcfg (char_key " ") in
+  Alcotest.(check int)
+    "UX-26 Keeper_config [Space] on Field_bool stages local toggle without HTTP POST"
+    0 (List.length cmds_sp);
+  Alcotest.(check int) "UX-26 Keeper_config [Space] stages 1 dirty patch" 1
+    (Config_store.dirty_count m_kcfg_toggled.config);
+  let _, cmds_diff = step m_kcfg_toggled (char_key "d") in
+  Alcotest.(check bool) "UX-26 Keeper_config [d] emits dry-run Post_config_patch on dirty Field_bool"
+    true
+    (List.exists
+       (function
+         | Cmd.Http_post { req = Cmd.Post_config_patch { dry_run = true; _ }; _ } ->
+             true
+         | _ -> false)
+       cmds_diff);
+
+  (* UX-27: Chat stream preserves scrollback anchor; sidebar wheel only scrolls sidebar;
+     Model.pane_rects hit-tests 3-pane layout on Left_press. *)
+  let f_chat =
+    fleet0
+    |> Fleet_store.start_chat_stream ~keeper:"alpha-1" ~request_id:"req-1"
+  in
+  let f_chat = { f_chat with chat_scroll_offset = 5 } in
+  let f_chat2 =
+    Fleet_store.apply_chat_stream_chunk ~keeper:"alpha-1"
+      ~request_id:"req-1"
+      (Wire_fleet.Chunk_text_delta
+         {
+           operation_id = None;
+           delta = "\nline2\nline3";
+           owner = Wire_chat_journal.Unobserved_scope None;
+         })
+      f_chat
+  in
+  Alcotest.(check int)
+    "UX-27 chat stream chunk adjusts chat_scroll_offset by added newlines when scrolled up"
+    7 f_chat2.chat_scroll_offset;
+  let m_sb_dive =
+    {
+      m_dive with
+      nav = { m_dive.nav with sidebar_open = Some true; sidebar_scroll = 0 };
+    }
+  in
+  let m_sb_wheel, _ =
+    Update.step ~now:t0 m_sb_dive
+      (Msg.Mouse_event
+         (Masc_tui_term.Input_decoder.Wheel
+            { dir = Masc_tui_term.Input_decoder.Wheel_down; col = 5; row = 10 }))
+  in
+  Alcotest.(check bool) "UX-27 sidebar wheel does not wipe dive_stack" true
+    (m_sb_wheel.nav.dive_stack <> []);
+  let rects_pipe = Model.pane_rects m_pipe_tiny in
+  Alcotest.(check bool) "UX-27 Model.pane_rects computes non-empty rects" true
+    (rects_pipe <> []);
+  let m_pipe_wide =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Work; pane_index = 0 };
+      work = Work_store.set_tab Nav.Work_pipeline m0.work;
+    }
+  in
+  let wide_rects = Model.pane_rects m_pipe_wide in
+  Alcotest.(check bool) "UX-27 wide pipeline exposes >=2 pane rects" true
+    (List.length wide_rects >= 2);
+  let last_idx = List.length wide_rects - 1 in
+  let target_r = List.nth wide_rects last_idx in
+  let m_clicked, _ =
+    Update.step ~now:t0 m_pipe_wide
+      (Msg.Mouse_event
+         (Masc_tui_term.Input_decoder.Left_press
+            { col = target_r.x + 2; row = target_r.y + 2 }))
+  in
+  Alcotest.(check int) "UX-27 Left_press inside last pane_rect focuses that pane"
+    last_idx m_clicked.nav.pane_index
+
 let () =
   Alcotest.run "masc_tui_store"
     [
@@ -12216,5 +12687,8 @@ let () =
           Alcotest.test_case
             "UX Batch 2: Ack scope, modal/settings cursors, dirty Esc, @mention, /btw, Drawer, Help, UTF-8 & Toast"
             `Quick test_ux_batch2_modals_settings_overlays;
+          Alcotest.test_case
+            "UX Batch 3: Keepers collapse, Ask A..D, Candle/Tasks/Schedules/JSON panes, Config [d] & Mouse/Chat"
+            `Quick test_ux_batch3_work_keepers_chat_mouse;
         ] );
     ]

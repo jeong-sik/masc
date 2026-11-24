@@ -68,6 +68,7 @@ type t = {
   verif_selected_index : int;
   verif_scroll_offset : int;
   detail_scroll_offset : int;
+  ledger_scroll_offset : int;
   pulse_goal_index : int;
   schedules_scroll_offset : int;
   filter_query : string;

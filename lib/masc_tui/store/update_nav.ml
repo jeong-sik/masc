@@ -682,6 +682,7 @@ let switch_workspace (m : Model.t) ws =
       sidebar_focused = false;
       sidebar_open = close_drawer_if_floating m;
       dive_scroll_offset = 0;
+      json_scroll_offset = 0;
     }
   in
   let drafts = Drafts.set_focus false m.drafts in
@@ -861,6 +862,7 @@ let push_dive (m : Model.t) dive =
       sidebar_focused = false;
       sidebar_open = close_drawer_if_floating m;
       dive_scroll_offset = 0;
+      json_scroll_offset = 0;
     }
   in
   let drafts =
@@ -2663,6 +2665,7 @@ let keeper_identity_entries (m : Model.t) ~name : keeper_identity_entry list =
    where the key does something. *)
 type enter_plan =
   | Enter_noop
+  | Enter_expand_company of string
   | Enter_keeper_action of Cmd.t list
   | Enter_dispatch of Cmd.t list
   | Enter_push of Nav.dive
@@ -2791,6 +2794,7 @@ let keeper_enter_action ~name ~tab (m : Model.t) =
         }
       , [] )
   | Enter_noop
+  | Enter_expand_company _
   | Enter_dispatch _
   | Enter_push _
   | Enter_attention _
@@ -2903,6 +2907,10 @@ let enter_plan (m : Model.t) : enter_plan =
               | Some p -> Enter_push (Nav.Dive_knowledge (Nav.Thread_dive p.id))
               | None -> Enter_noop))
       | Nav.Keepers -> (
+          match m.fleet.selected_collapsed_company with
+          | Some company when m.nav.pane_index = 0 && not m.nav.zoomed ->
+              Enter_expand_company company
+          | Some _ | None ->
           match Fleet_store.selected_keeper_summary m.fleet with
           | Some k
             when (m.nav.pane_index = 1 || m.nav.zoomed)
@@ -3152,6 +3160,12 @@ let enter_plan (m : Model.t) : enter_plan =
 let dive_selected (m : Model.t) =
   match enter_plan m with
   | Enter_noop -> (m, [])
+  | Enter_expand_company company ->
+      ( {
+          m with
+          fleet = Fleet_store.toggle_company_collapsed company m.fleet;
+        }
+      , [] )
   | Enter_keeper_action cmds | Enter_dispatch cmds -> (m, cmds)
   | Enter_push dive -> push_dive m dive
   | Enter_attention entry -> dive_attention_entry m entry
@@ -3257,6 +3271,7 @@ let enter_hint (m : Model.t) =
   else
     match enter_plan m with
     | Enter_noop -> Enter_hint_hidden
+    | Enter_expand_company _
     | Enter_keeper_action _ | Enter_dispatch _
     | Enter_push _ | Enter_attention _ | Enter_toggle_unreported_accounts
     | Enter_fetch_memory_diff | Enter_open_memory_reading _
@@ -6232,7 +6247,119 @@ let work_detail_max_scroll (m : Model.t) =
           List.length (harness_verdict_detail_lines ~width:content.w m)
         in
         max 0 (total - max 1 content.h)
-  | Nav.Work_tasks | Nav.Work_schedules | Nav.Work_candle_scorecard -> 0
+  | Nav.Work_tasks -> (
+      match Work_store.selected_task m.work with
+      | None -> 0
+      | Some tk -> (
+          match tk.description with
+          | None -> 0
+          | Some desc ->
+              let body_r =
+                match
+                  Masc_tui_ui.Layout.split_v br
+                    [ Masc_tui_ui.Layout.Fixed 1; Masc_tui_ui.Layout.Flex 1 ]
+                with
+                | [ _; b ] -> b
+                | _ -> br
+              in
+              let detail_rect =
+                if body_r.w >= 96 then
+                  match
+                    Masc_tui_ui.Layout.split_h_bp bp body_r
+                      [ Masc_tui_ui.Layout.Ratio 0.54; Masc_tui_ui.Layout.Flex 1 ]
+                  with
+                  | [ _; r ] -> r
+                  | _ -> Rect.empty
+                else
+                  match
+                    Masc_tui_ui.Layout.split_v_bp bp body_r
+                      [ Masc_tui_ui.Layout.Ratio 0.52; Masc_tui_ui.Layout.Flex 1 ]
+                  with
+                  | [ _; b ] -> b
+                  | _ -> Rect.empty
+              in
+              let d_inner = ui_card_inner detail_rect in
+              let content = ops_pad_content d_inner in
+              if Rect.is_empty content then 0
+              else
+                let overhead =
+                  (if d_inner.h >= 7 then
+                     2 + if d_inner.h >= 12 then 1 else 0
+                   else 0)
+                  + 4
+                in
+                let md_h = max 1 (content.h - overhead) in
+                let theme = Theme.of_preset m.theme_preset in
+                markdown_max_scroll ~theme ~width:content.w ~height:md_h
+                  (Chat_transcript.rewrite_masc_links_for_markdown desc)))
+  | Nav.Work_schedules -> (
+      match Work_store.selected_schedule m.work with
+      | None -> 0
+      | Some sc -> (
+          match sc.payload_summary with
+          | None -> 0
+          | Some s when String.equal (String.trim s) "" -> 0
+          | Some summary_txt ->
+              let detail_rect =
+                if br.w >= 96 then
+                  match
+                    Masc_tui_ui.Layout.split_h_bp bp br
+                      [ Masc_tui_ui.Layout.Ratio 0.60; Masc_tui_ui.Layout.Flex 1 ]
+                  with
+                  | [ _; r ] -> r
+                  | _ -> Rect.empty
+                else
+                  match
+                    Masc_tui_ui.Layout.split_v_bp bp br
+                      [ Masc_tui_ui.Layout.Ratio 0.58; Masc_tui_ui.Layout.Flex 1 ]
+                  with
+                  | [ _; b ] -> b
+                  | _ -> Rect.empty
+              in
+              let d_inner = ui_card_inner detail_rect in
+              let content = ops_pad_content d_inner in
+              if Rect.is_empty content then 0
+              else
+                let overhead =
+                  (if d_inner.h >= 6 then
+                     2 + if d_inner.h >= 10 then 1 else 0
+                   else 0)
+                  + 5
+                in
+                let md_h = max 1 (content.h - overhead) in
+                let theme = Theme.of_preset m.theme_preset in
+                markdown_max_scroll ~theme ~width:content.w ~height:md_h
+                  summary_txt))
+  | Nav.Work_candle_scorecard -> (
+      match Observed.to_option m.work.candle_ledger with
+      | None -> 0
+      | Some ledger ->
+          let kpi_h = if br.h >= 22 then 5 else 0 in
+          let main_r =
+            Rect.make ~x:br.x ~y:(br.y + kpi_h) ~w:br.w
+              ~h:(max 0 (br.h - kpi_h))
+          in
+          let left_r =
+            if main_r.w >= 110 then
+              match
+                Masc_tui_ui.Layout.split_h_bp bp main_r
+                  [ Masc_tui_ui.Layout.Ratio 0.62; Masc_tui_ui.Layout.Flex 1 ]
+              with
+              | [ l; _ ] -> l
+              | _ -> main_r
+            else main_r
+          in
+          let ev_rect =
+            match
+              Masc_tui_ui.Layout.split_v_bp bp left_r
+                [ Masc_tui_ui.Layout.Ratio 0.54; Masc_tui_ui.Layout.Flex 1 ]
+            with
+            | [ _; b ] -> b
+            | _ -> Rect.empty
+          in
+          let e_inner = ui_card_inner ev_rect in
+          let table_rows = max 1 (e_inner.h - 2) in
+          max 0 (List.length ledger.recent_events - table_rows))
 
 let runtime_detail_max_scroll (m : Model.t) =
   let bp = ui_bp m in
@@ -8447,13 +8574,28 @@ let apply_move (m : Model.t) dir =
                   in
                   ( { m with nav = { m.nav with dive_scroll_offset }; knowledge }
                   , [] )
+            | Some (Nav.Dive_work _ as active) ->
+                let delta = scroll_delta dir in
+                if m.infra.show_raw_json && m.nav.pane_index = 1 then
+                  let max_scroll = dive_max_scroll m active in
+                  let json_scroll_offset =
+                    Store_scroll.clamp_scroll ~max_scroll
+                      (m.nav.json_scroll_offset + delta)
+                  in
+                  ({ m with nav = { m.nav with json_scroll_offset } }, [])
+                else
+                  let max_scroll = dive_max_scroll m active in
+                  let dive_scroll_offset =
+                    Store_scroll.clamp_scroll ~max_scroll
+                      (m.nav.dive_scroll_offset + delta)
+                  in
+                  ({ m with nav = { m.nav with dive_scroll_offset } }, [])
             | Some
                 (( Nav.Dive_keeper
                      {
                        tab = (Nav.Keeper_work_candle | Nav.Keeper_sandbox);
                        _;
                      }
-                 | Nav.Dive_work _
                  | Nav.Dive_knowledge
                      (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
                  | Nav.Dive_runtime _
@@ -8773,9 +8915,16 @@ let apply_move (m : Model.t) dir =
                             }
                           , [] )
                     | Nav.Work_tasks | Nav.Work_schedules ->
+                        let eff_delta =
+                          if pane_index = 1 then scroll_delta dir else delta
+                        in
+                        let max_detail_scroll =
+                          if pane_index = 1 then Some (work_detail_max_scroll m)
+                          else None
+                        in
                         let work =
-                          Work_store.move_selection ~pane_index:0 ~viewport_rows
-                            ~delta m.work
+                          Work_store.move_selection ~pane_index ~viewport_rows
+                            ?max_detail_scroll ~delta:eff_delta m.work
                         in
                         ({ m with work }, [])
                     | Nav.Work_pipeline ->
@@ -8802,11 +8951,19 @@ let apply_move (m : Model.t) dir =
                           }
                         , [] )
                     | Nav.Work_candle_scorecard ->
+                        let eff_delta =
+                          if pane_index = 1 then scroll_delta dir else delta
+                        in
+                        let max_detail_scroll =
+                          if pane_index = 1 then Some (work_detail_max_scroll m)
+                          else None
+                        in
                         ( {
                             m with
                             work =
                               Work_store.move_selection ~pane_index
-                                ~viewport_rows ~delta m.work;
+                                ~viewport_rows ?max_detail_scroll
+                                ~delta:eff_delta m.work;
                           }
                         , [] )
                     | Nav.Work_harness ->

@@ -82,6 +82,7 @@ type t = {
   pulse_scroll_offset : int;
   filter_query : string;
   selected_keeper : string option;
+  selected_collapsed_company : string option;
   collapsed_companies : String_set.t;
   chat_histories : Wire_fleet.chat_history_page Observed.t String_map.t;
   chat_streams : chat_stream_buffer String_map.t;
@@ -141,7 +142,12 @@ type fleet_health_counts = {
 val fleet_health_counts : Wire_fleet.keeper_summary list -> fleet_health_counts
 (** Compute {!fleet_health_counts} over a keeper list. *)
 
+type companies_nav_row =
+  | Nav_company_collapsed of string
+  | Nav_keeper of Wire_fleet.keeper_summary
+
 val filtered_keepers : t -> Wire_fleet.keeper_summary list
+val companies_nav_rows : t -> companies_nav_row list
 val company_groups :
   ?attention:Wire_fleet.attention_item list ->
   ?now_unix:float ->

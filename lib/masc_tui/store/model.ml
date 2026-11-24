@@ -31,6 +31,7 @@ type nav_state = {
   sidebar_cursor : int;
   sidebar_scroll : int;
   dive_scroll_offset : int;
+  json_scroll_offset : int;
   help_scroll_offset : int;
   queue_scroll_offset : int;
   btw_scroll_offset : int;
@@ -294,6 +295,7 @@ let initial ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_ko)
         sidebar_cursor = 0;
         sidebar_scroll = 0;
         dive_scroll_offset = 0;
+        json_scroll_offset = 0;
         help_scroll_offset = 0;
         queue_scroll_offset = 0;
         btw_scroll_offset = 0;
@@ -695,6 +697,11 @@ let body_rect m =
 let work_pipeline_has_linked_card m =
   inner_body_width m >= 96 && inner_body_height m >= 15
 
+let work_pipeline_verifs_visible m =
+  work_pipeline_has_linked_card m
+  && Work_store.filtered_verifications m.work <> []
+  && inner_body_height m >= 18
+
 let can_zoom_current_view m =
   if
     is_too_small_viewport m.viewport
@@ -740,6 +747,8 @@ let focusable_pane_count m =
                 Keeper_context_store.Ctx_exact_input
             then 2
             else 1
+        | Some (Nav.Dive_work _) ->
+            if m.infra.show_raw_json && inner_body_width m >= 88 then 2 else 1
         | Some
             ( Nav.Dive_keeper
                 {
@@ -753,7 +762,6 @@ let focusable_pane_count m =
                     | Nav.Keeper_identity );
                   _;
                 }
-            | Nav.Dive_work _
             | Nav.Dive_knowledge _
             | Nav.Dive_runtime _
             | Nav.Dive_infra _ ) ->
@@ -767,7 +775,7 @@ let focusable_pane_count m =
               match m.work.active_tab with
               | Nav.Work_pipeline ->
                   if work_pipeline_has_linked_card m then 3 else 2
-              | Nav.Work_tasks | Nav.Work_schedules -> 1
+              | Nav.Work_tasks | Nav.Work_schedules -> 2
               | Nav.Work_inbox ->
                   if
                     Attention.filtered_items ~query:m.work.filter_query
@@ -775,14 +783,21 @@ let focusable_pane_count m =
                     = []
                   then 1
                   else 2
-              | Nav.Work_candle_scorecard -> 1
+              | Nav.Work_candle_scorecard -> 2
               | Nav.Work_harness -> 2)
           | Nav.Knowledge -> 2
           | Nav.Keepers ->
+              let has_roster_or_loading =
+                Fleet_store.filtered_keepers m.fleet <> []
+                || Fleet_store.companies_nav_rows m.fleet <> []
+                || (String.equal (String.trim m.fleet.filter_query) ""
+                    && not (Observed.is_value m.fleet.keepers))
+              in
               if
                 (equal_breakpoint m.breakpoint Wide
                  || equal_breakpoint m.breakpoint Standard)
                 && inner_body_width m >= 104
+                && has_roster_or_loading
               then 2
               else 1
           | Nav.Runtime -> (
@@ -811,6 +826,168 @@ let focusable_pane_count m =
               | Nav.Infra_repos_changes ->
                   if Infra_store.repo_changes m.infra <> [] then 3 else 2))
 
+let split_h_ratio ~(gap : int) (r : Rect.t) (ratio : float) : Rect.t * Rect.t =
+  let avail = max 0 (r.w - gap) in
+  let lw = int_of_float (float_of_int avail *. ratio) in
+  let lw = max 0 (min avail lw) in
+  let rw = max 0 (avail - lw) in
+  ( Rect.make ~x:r.x ~y:r.y ~w:lw ~h:r.h
+  , Rect.make ~x:(r.x + lw + gap) ~y:r.y ~w:rw ~h:r.h )
+
+let split_v_ratio ~(gap : int) (r : Rect.t) (ratio : float) : Rect.t * Rect.t =
+  let avail = max 0 (r.h - gap) in
+  let th = int_of_float (float_of_int avail *. ratio) in
+  let th = max 0 (min avail th) in
+  let bh = max 0 (avail - th) in
+  ( Rect.make ~x:r.x ~y:r.y ~w:r.w ~h:th
+  , Rect.make ~x:r.x ~y:(r.y + th + gap) ~w:r.w ~h:bh )
+
+let pane_rects m =
+  let br = body_rect m in
+  let gap_h = match m.breakpoint with Wide -> 2 | Standard | Compact | Micro -> 1 in
+  let gap_v = match m.breakpoint with Wide | Standard -> 1 | Compact | Micro -> 0 in
+  let is_compact = equal_breakpoint m.breakpoint Compact in
+  let split2 ~left_ratio ~top_ratio r =
+    if is_compact then split_v_ratio ~gap:gap_v r top_ratio
+    else split_h_ratio ~gap:gap_h r left_ratio
+  in
+  let n = focusable_pane_count m in
+  if n <= 1 || Rect.is_empty br then [ br ]
+  else
+    match active_dive m with
+    | Some (Nav.Dive_keeper { tab = Nav.Keeper_tool_calls; _ }) ->
+        let l, r = split2 ~left_ratio:0.42 ~top_ratio:0.45 br in
+        [ l; r ]
+    | Some (Nav.Dive_keeper { tab = Nav.Keeper_context; _ }) ->
+        let l, r = split2 ~left_ratio:0.38 ~top_ratio:0.42 br in
+        [ l; r ]
+    | Some (Nav.Dive_work _) ->
+        let l, r = split_h_ratio ~gap:gap_h br 0.58 in
+        [ l; r ]
+    | Some
+        ( Nav.Dive_keeper
+            {
+              tab =
+                ( Nav.Keeper_chat
+                | Nav.Keeper_memory
+                | Nav.Keeper_work_candle
+                | Nav.Keeper_sandbox
+                | Nav.Keeper_config
+                | Nav.Keeper_logs
+                | Nav.Keeper_identity );
+              _;
+            }
+        | Nav.Dive_knowledge _
+        | Nav.Dive_runtime _
+        | Nav.Dive_infra _ ) ->
+        [ br ]
+    | None -> (
+        match m.nav.workspace with
+        | Nav.Pulse ->
+            let hero_h = if br.h >= 24 then 5 else if br.h >= 16 then 4 else 0 in
+            let grid_r =
+              Rect.make ~x:br.x ~y:(br.y + hero_h) ~w:br.w
+                ~h:(max 0 (br.h - hero_h))
+            in
+            let panes = pulse_panes m in
+            let has_attn =
+              List.exists (equal_pulse_pane Pulse_attention) panes
+            in
+            if is_compact then
+              let top, bot = split_v_ratio ~gap:gap_v grid_r 0.5 in
+              if has_attn then
+                let p0, p1 = split_v_ratio ~gap:gap_v top 0.5 in
+                let p2, p3 = split_v_ratio ~gap:gap_v bot 0.5 in
+                [ p0; p1; p2; p3 ]
+              else
+                let p1, p2 = split_v_ratio ~gap:gap_v bot 0.5 in
+                [ top; p1; p2 ]
+            else
+              let left, right = split_h_ratio ~gap:gap_h grid_r 0.54 in
+              let r_top, r_bot = split_v_ratio ~gap:gap_v right 0.52 in
+              if has_attn then
+                let l_top, l_bot = split_v_ratio ~gap:gap_v left 0.44 in
+                [ l_top; l_bot; r_top; r_bot ]
+              else [ left; r_top; r_bot ]
+        | Nav.Work -> (
+            match m.work.active_tab with
+            | Nav.Work_pipeline ->
+                let body =
+                  Rect.make ~x:br.x ~y:(br.y + 1) ~w:br.w ~h:(max 0 (br.h - 1))
+                in
+                let l, r = split2 ~left_ratio:0.55 ~top_ratio:0.52 body in
+                if work_pipeline_has_linked_card m then
+                  let l_top, l_bot = split_v_ratio ~gap:gap_v l 0.54 in
+                  [ l_top; l_bot; r ]
+                else [ l; r ]
+            | Nav.Work_tasks ->
+                let body =
+                  Rect.make ~x:br.x ~y:(br.y + 1) ~w:br.w ~h:(max 0 (br.h - 1))
+                in
+                let a, b =
+                  if body.w >= 96 then split_h_ratio ~gap:gap_h body 0.54
+                  else split_v_ratio ~gap:gap_v body 0.52
+                in
+                [ a; b ]
+            | Nav.Work_schedules ->
+                let a, b =
+                  if br.w >= 96 then split_h_ratio ~gap:gap_h br 0.60
+                  else split_v_ratio ~gap:gap_v br 0.58
+                in
+                [ a; b ]
+            | Nav.Work_inbox ->
+                let a, b = split2 ~left_ratio:0.42 ~top_ratio:0.45 br in
+                [ a; b ]
+            | Nav.Work_candle_scorecard ->
+                let kpi_h = if br.h >= 22 then 5 else 0 in
+                let main_r =
+                  Rect.make ~x:br.x ~y:(br.y + kpi_h) ~w:br.w
+                    ~h:(max 0 (br.h - kpi_h))
+                in
+                let left_r =
+                  if main_r.w >= 110 then fst (split_h_ratio ~gap:gap_h main_r 0.62)
+                  else main_r
+                in
+                let bal_r, ev_r = split_v_ratio ~gap:gap_v left_r 0.54 in
+                [ bal_r; ev_r ]
+            | Nav.Work_harness ->
+                let a, b = split2 ~left_ratio:0.48 ~top_ratio:0.48 br in
+                [ a; b ])
+        | Nav.Knowledge ->
+            let a, b = split2 ~left_ratio:0.46 ~top_ratio:0.48 br in
+            [ a; b ]
+        | Nav.Keepers ->
+            let left_w =
+              if equal_breakpoint m.breakpoint Wide then min 48 (max 34 (br.w * 34 / 100))
+              else min 42 (max 32 (br.w * 38 / 100))
+            in
+            let lw = min br.w left_w in
+            let l = Rect.make ~x:br.x ~y:br.y ~w:lw ~h:br.h in
+            let r =
+              Rect.make ~x:(br.x + lw + gap_h) ~y:br.y
+                ~w:(max 0 (br.w - lw - gap_h)) ~h:br.h
+            in
+            [ l; r ]
+        | Nav.Runtime ->
+            let a, b = split2 ~left_ratio:0.48 ~top_ratio:0.48 br in
+            [ a; b ]
+        | Nav.Infra -> (
+            match m.infra.active_tab with
+            | Nav.Infra_activity_logs when n = 3 ->
+                let left, rest = split_h_ratio ~gap:gap_h br 0.42 in
+                let mid, right = split_h_ratio ~gap:gap_h rest 0.58 in
+                [ left; mid; right ]
+            | Nav.Infra_repos_changes when n = 3 ->
+                let left, right = split_h_ratio ~gap:gap_h br 0.42 in
+                let l_top, l_bot = split_v_ratio ~gap:gap_v left 0.52 in
+                [ l_top; right; l_bot ]
+            | Nav.Infra_sandboxes
+            | Nav.Infra_code
+            | Nav.Infra_activity_logs
+            | Nav.Infra_repos_changes ->
+                let a, b = split2 ~left_ratio:0.46 ~top_ratio:0.48 br in
+                [ a; b ]))
+
 let active_focus_scope m =
   if is_too_small_viewport m.viewport then
     Nav.Overlay_focused (Nav.System_gate Nav.Micro_viewport)
@@ -820,9 +997,9 @@ let active_focus_scope m =
     | None ->
         if equal_breakpoint m.breakpoint Micro then
           Nav.Overlay_focused (Nav.System_gate Nav.Micro_viewport)
+        else if Drafts.is_focused m.drafts then Nav.Composer_focused
+        else if sidebar_has_focus m then Nav.Workspace_focused m.nav.workspace
         else (
-        if Drafts.is_focused m.drafts then Nav.Composer_focused
-        else
           match active_dive m with
           | Some d -> Nav.Dive_focused d
           | None ->
@@ -856,7 +1033,8 @@ let focus_scope_chain m =
     is_too_small_viewport m.viewport || equal_breakpoint m.breakpoint Micro
   in
   let approval_strip_active =
-    if
+    if sidebar_has_focus m then false
+    else if
       (not micro_locked)
       && Option.is_none m.nav.overlay
       && m.nav.dive_stack = []
@@ -957,7 +1135,10 @@ let active_focus_label m =
                   Say.make ~ko:("상세 · " ^ name) ~en:("DIVE · " ^ name)
             else Say.make ~ko:("상세 · " ^ name) ~en:("DIVE · " ^ name))
         | Some (Nav.Dive_work _) ->
-            Say.make ~ko:"작업 상세" ~en:"WORK DIVE"
+            if focusable_pane_count m > 1 then
+              if m.nav.pane_index = 1 then pane_prefix ~ko:"JSON 트리" ~en:"JSON Tree"
+              else pane_prefix ~ko:"작업 상세" ~en:"Work Dive"
+            else Say.make ~ko:"작업 상세" ~en:"WORK DIVE"
         | Some (Nav.Dive_knowledge _) ->
             Say.make ~ko:"지식 상세" ~en:"KNOWLEDGE DIVE"
         | Some (Nav.Dive_runtime (Nav.Tool_dive name)) ->
@@ -1003,7 +1184,9 @@ let active_focus_label m =
                       pane_prefix ~ko:"인스펙터" ~en:"Inspector"
                     else pane_prefix ~ko:"수신함" ~en:"Inbox"
                 | Nav.Work_candle_scorecard ->
-                    Say.make ~ko:"캔들 · 원장" ~en:"Candle"
+                    if m.nav.pane_index = 1 then
+                      pane_prefix ~ko:"원장 이벤트" ~en:"Ledger Events"
+                    else pane_prefix ~ko:"키퍼 잔액" ~en:"Balances"
                 | Nav.Work_harness ->
                     if m.nav.pane_index = 1 then
                       pane_prefix ~ko:"하네스 상세" ~en:"Run Detail"

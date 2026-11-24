@@ -63,6 +63,7 @@ type t = {
   verif_selected_index : int;
   verif_scroll_offset : int;
   detail_scroll_offset : int;
+  ledger_scroll_offset : int;
   pulse_goal_index : int;
   schedules_scroll_offset : int;
   filter_query : string;
@@ -100,6 +101,7 @@ let empty =
     verif_selected_index = 0;
     verif_scroll_offset = 0;
     detail_scroll_offset = 0;
+    ledger_scroll_offset = 0;
     pulse_goal_index = 0;
     schedules_scroll_offset = 0;
     filter_query = "";
@@ -120,6 +122,7 @@ let set_tab active_tab t =
     verif_selected_index = 0;
     verif_scroll_offset = 0;
     detail_scroll_offset = 0;
+    ledger_scroll_offset = 0;
     schedules_scroll_offset = 0;
   }
 
@@ -580,20 +583,48 @@ let move_selection ?(pane_index = 0) ?(has_linked_card = true) ?viewport_rows
           in
           { t with selected_index; scroll_offset; detail_scroll_offset })
   | Nav.Work_tasks ->
-      let len = List.length (filtered_tasks t) in
-      let selected_index = clamp_index len (t.selected_index + delta) in
-      let scroll_offset =
-        adjust_scroll ?viewport_rows ~scroll:t.scroll_offset selected_index
-      in
-      { t with selected_index; scroll_offset }
+      if pane_index = 1 then
+        let max_scroll =
+          match max_detail_scroll with Some ms -> max 0 ms | None -> 0
+        in
+        let detail_scroll_offset =
+          Store_scroll.clamp_scroll ~max_scroll (t.detail_scroll_offset + delta)
+        in
+        { t with detail_scroll_offset }
+      else
+        let len = List.length (filtered_tasks t) in
+        let selected_index = clamp_index len (t.selected_index + delta) in
+        let scroll_offset =
+          adjust_scroll ?viewport_rows ~scroll:t.scroll_offset selected_index
+        in
+        let detail_scroll_offset =
+          if Int.equal selected_index t.selected_index then
+            t.detail_scroll_offset
+          else 0
+        in
+        { t with selected_index; scroll_offset; detail_scroll_offset }
   | Nav.Work_schedules ->
-      let len = List.length (filtered_schedules t) in
-      let selected_index = clamp_index len (t.selected_index + delta) in
-      let schedules_scroll_offset =
-        adjust_scroll ?viewport_rows ~scroll:t.schedules_scroll_offset
-          selected_index
-      in
-      { t with selected_index; schedules_scroll_offset }
+      if pane_index = 1 then
+        let max_scroll =
+          match max_detail_scroll with Some ms -> max 0 ms | None -> 0
+        in
+        let detail_scroll_offset =
+          Store_scroll.clamp_scroll ~max_scroll (t.detail_scroll_offset + delta)
+        in
+        { t with detail_scroll_offset }
+      else
+        let len = List.length (filtered_schedules t) in
+        let selected_index = clamp_index len (t.selected_index + delta) in
+        let schedules_scroll_offset =
+          adjust_scroll ?viewport_rows ~scroll:t.schedules_scroll_offset
+            selected_index
+        in
+        let detail_scroll_offset =
+          if Int.equal selected_index t.selected_index then
+            t.detail_scroll_offset
+          else 0
+        in
+        { t with selected_index; schedules_scroll_offset; detail_scroll_offset }
   | Nav.Work_inbox ->
       if pane_index = 1 then
         let max_scroll =
@@ -621,12 +652,21 @@ let move_selection ?(pane_index = 0) ?(has_linked_card = true) ?viewport_rows
         in
         { t with selected_index; scroll_offset; detail_scroll_offset }
   | Nav.Work_candle_scorecard ->
-      let len = List.length (filtered_candle_balances t) in
-      let selected_index = clamp_index len (t.selected_index + delta) in
-      let scroll_offset =
-        adjust_scroll ?viewport_rows ~scroll:t.scroll_offset selected_index
-      in
-      { t with selected_index; scroll_offset }
+      if pane_index = 1 then
+        let max_scroll =
+          match max_detail_scroll with Some ms -> max 0 ms | None -> 0
+        in
+        let ledger_scroll_offset =
+          Store_scroll.clamp_scroll ~max_scroll (t.ledger_scroll_offset + delta)
+        in
+        { t with ledger_scroll_offset }
+      else
+        let len = List.length (filtered_candle_balances t) in
+        let selected_index = clamp_index len (t.selected_index + delta) in
+        let scroll_offset =
+          adjust_scroll ?viewport_rows ~scroll:t.scroll_offset selected_index
+        in
+        { t with selected_index; scroll_offset }
   | Nav.Work_harness ->
       if pane_index = 1 then
         let max_scroll =
@@ -683,6 +723,7 @@ let set_filter filter_query t =
     verif_selected_index = 0;
     verif_scroll_offset = 0;
     detail_scroll_offset = 0;
+    ledger_scroll_offset = 0;
     schedules_scroll_offset = 0;
   }
 
@@ -721,6 +762,7 @@ let set_task_status_filter task_status_filter t =
     selected_index = 0;
     scroll_offset = 0;
     detail_scroll_offset = 0;
+    ledger_scroll_offset = 0;
     schedules_scroll_offset = 0;
   }
 

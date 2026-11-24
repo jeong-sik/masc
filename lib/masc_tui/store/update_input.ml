@@ -2197,16 +2197,27 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
           | Nav.Work_pipeline -> (
               let active_target =
                 match m.nav.pane_index with
-                | 1 when Model.work_pipeline_has_linked_card m -> (
+                | 1 when Model.work_pipeline_verifs_visible m -> (
                     match Work_store.selected_verification m.work with
                     | Some v -> `Verification v
                     | None -> `None)
+                | 1 when Model.work_pipeline_has_linked_card m -> `Hidden_verif
                 | _ -> (
                     match Work_store.selected_goal m.work with
                     | Some g -> `Goal g
                     | None -> `None)
               in
               match active_target with
+              | `Hidden_verif -> (
+                  match printable_char with
+                  | Some ("a" | "x") ->
+                      ( Model.with_toast ~now ~level:Model.Toast_warning
+                          (Say.make
+                             ~ko:"화면에 표시된 검증 항목이 없습니다 (창 높이를 늘려주세요)"
+                             ~en:"No verification visible in pane (increase viewport height)")
+                          m
+                      , [] )
+                  | _ -> (m, []))
               | `Goal g -> (
                   match printable_char with
                   | Some "a" -> goal_action_on_approve ~now m g
@@ -2449,6 +2460,30 @@ let dispatch_keeper_config_key ~now (m : Model.t)
               ( Model.with_toast ~now ~level:Model.Toast_info
                   (Say.literal reason) m
               , [] ))
+    | Keymap.Input.Char "d" when is_printable_key norm -> (
+        if Config_store.dirty_count m.config > 0 then
+          match Config_store.build_patch_request ~dry_run:true m.config with
+          | Ok req ->
+              let config = Config_store.mark_dry_run_loading m.config in
+              Some
+                ( { m with config }
+                , [
+                    Cmd.Http_post
+                      { epoch = m.epoch; req = Cmd.Post_config_patch req };
+                  ] )
+          | Error reason ->
+              Some
+                ( Model.with_toast ~now ~level:Model.Toast_info
+                    (Say.literal reason) m
+                , [] )
+        else
+          Some
+            ( Model.with_toast ~now ~level:Model.Toast_info
+                (Say.make
+                   ~ko:"변경된 필드가 없습니다 ([←→] 값 변경 · [Enter] 편집)"
+                   ~en:"No staged changes ([←→] cycle · [Enter] edit)")
+                m
+            , [] ))
     | Keymap.Input.Char " " when is_printable_key norm -> (
         match Config_store.keeper_selected_field ~lang:m.lang m.config with
         | Some f when f.writable && f.kind = Wire_config.Field_bool ->
@@ -3561,8 +3596,6 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                       | Keymap.Focus_composer
                       | Keymap.Focus_filter
                       | Keymap.Voice_ptt_toggle
-                      | Keymap.Fast_approve_top
-                      | Keymap.Fast_deny_top
                       | Keymap.Refresh
                       | Keymap.Toggle_tool_details
                       | Keymap.Toggle_thinking
@@ -3571,6 +3604,8 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                       | Keymap.Quit_app ->
                           `Allow
                       | Keymap.Account_login -> `Move_right
+                      | Keymap.Fast_approve_top
+                      | Keymap.Fast_deny_top
                       | Keymap.Confirm_selected
                       | Keymap.Ask_select_choice _
                       | Keymap.Composer_kill_word
@@ -3886,11 +3921,24 @@ let apply_mouse ~now (m : Model.t) (ev : Keymap.Input.mouse_event) =
           | None -> false
         in
         if over_sidebar then
-          let m_sb =
-            if Model.sidebar_has_focus m then m
-            else Update_nav.enter_sidebar_focus m
+          (* Sidebar mouse wheel only scrolls the sidebar viewport — never
+             navigates workspaces or destroys the active dive_stack. *)
+          let inner_h =
+            match Model.sidebar_rect m with
+            | Some sr -> Int.max 1 (sr.h - 2)
+            | None -> 10
           in
-          Update_nav.move_sidebar m_sb move_dir
+          let total_rows = List.length Model.sidebar_visual_rows in
+          let max_scroll = Int.max 0 (total_rows - inner_h) in
+          let delta =
+            match dir with
+            | Keymap.Input.Wheel_up -> -2
+            | Keymap.Input.Wheel_down -> 2
+          in
+          let sidebar_scroll =
+            Store_scroll.clamp_scroll ~max_scroll (m.nav.sidebar_scroll + delta)
+          in
+          ({ m with nav = { m.nav with sidebar_scroll } }, [])
         else
           let m_target =
             if Model.sidebar_has_focus m then Update_nav.exit_sidebar_focus m
@@ -3904,6 +3952,7 @@ let apply_mouse ~now (m : Model.t) (ev : Keymap.Input.mouse_event) =
           || Model.equal_breakpoint m.breakpoint Model.Micro
         then (m, [])
         else
+          let m = cancel_edit m in
           let gx = col - 1 in
           let gy = row - 1 in
           (* 1. Top Rail clickable [b] Menu toggle at cols 1..4, row 0 *)
@@ -3952,21 +4001,31 @@ let apply_mouse ~now (m : Model.t) (ev : Keymap.Input.mouse_event) =
                   let body_r = Model.body_rect m in
                   if Rect.contains body_r ~x:gx ~y:gy then
                     let m0 =
+                      let exited = Update_nav.exit_sidebar_focus m in
                       {
-                        (Update_nav.exit_sidebar_focus m) with
-                        nav =
-                          {
-                            (Update_nav.exit_sidebar_focus m).nav with
-                            filter_focused = false;
-                          };
+                        exited with
+                        nav = { exited.nav with filter_focused = false };
                         drafts = Drafts.set_focus false m.drafts;
                       }
                     in
                     let panes = Model.focusable_pane_count m0 in
+                    let rects = Model.pane_rects m0 in
+                    let hit_pane =
+                      let rec find i = function
+                        | [] -> None
+                        | r :: rest ->
+                            if Rect.contains r ~x:gx ~y:gy then Some i
+                            else find (i + 1) rest
+                      in
+                      find 0 rects
+                    in
                     let next_pane =
-                      if panes <= 1 || body_r.w <= 0 then 0
-                      else if gx < body_r.x + (body_r.w / 2) then 0
-                      else Int.min (panes - 1) 1
+                      match hit_pane with
+                      | Some idx -> Int.min (Int.max 0 (panes - 1)) idx
+                      | None ->
+                          if panes <= 1 || body_r.w <= 0 then 0
+                          else if gx < body_r.x + (body_r.w / 2) then 0
+                          else Int.min (panes - 1) 1
                     in
                     ( Update_nav.clamp_for_pane
                         { m0 with nav = { m0.nav with pane_index = next_pane } }

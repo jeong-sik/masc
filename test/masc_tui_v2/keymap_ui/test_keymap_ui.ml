@@ -141,6 +141,10 @@ let test_keymap_scopes_and_3_tiers () =
     (Option.equal Keymap.equal_action
        (Some (Keymap.Ask_select_choice 2))
        (Keymap.dispatch ~scope_chain:ask_chain (char_ev 'b')));
+  Alcotest.(check bool) "Alt+b in Ask_choice -> Toggle_sidebar (escape hatch)" true
+    (Option.equal Keymap.equal_action
+       (Some Keymap.Toggle_sidebar)
+       (Keymap.dispatch ~scope_chain:ask_chain (char_ev ~alt:true 'b')));
   Alcotest.(check bool) "bare 2 in Ask_choice -> Work workspace (no hijack)" true
     (Option.equal Keymap.equal_action
        (Some (Keymap.Switch_workspace Nav.Work))

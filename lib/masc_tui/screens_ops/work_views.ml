@@ -364,15 +364,36 @@ let render_linked_tasks_card grid ~(rect : Rect.t) ~(theme : Theme.t)
     in
     let all_filtered_verifs = Work_store.filtered_verifications model.work in
     let verif_focused = Model.pane_focused model 1 in
+    let card_title =
+      if verif_focused then
+        Ops_common.say model ~ko:"연결된 작업 · 전체 검증"
+          ~en:"Linked Tasks & All Verifications"
+      else
+        Ops_common.say model ~ko:"연결된 작업 · 검증"
+          ~en:"Linked Tasks & Verifications"
+    in
+    let card_subtitle =
+      if verif_focused then
+        Some
+          (Ops_common.say model ~ko:"전체 목표 범위" ~en:"All Goals Scope")
+      else
+        match sel_goal with Some g -> Some g.id | None -> None
+    in
+    let card_badge =
+      if verif_focused then
+        Some
+          {
+            Card.glyph = Some Glyph.Action_required;
+            text = Int.to_string (List.length all_filtered_verifs);
+            tone = Some Theme.Status_active;
+          }
+      else badge
+    in
     let spec : Card.spec =
       {
-        (Card.default_spec
-           ~title:
-             (Ops_common.say model ~ko:"연결된 작업 · 검증"
-                ~en:"Linked Tasks & Verifications"))
-        with
-        subtitle = (match sel_goal with Some g -> Some g.id | None -> None);
-        badge;
+        (Card.default_spec ~title:card_title) with
+        subtitle = card_subtitle;
+        badge = card_badge;
         hotkey =
           Some
             (if verif_focused then
@@ -572,9 +593,9 @@ let render_linked_tasks_card grid ~(rect : Rect.t) ~(theme : Theme.t)
           end
           else begin
             let verif_reserve =
-              if verifs_to_render <> [] && body_bot - !y >= 5 then
+              if verifs_to_render <> [] && body_bot - !y >= 3 then
                 Int.min (List.length verifs_to_render + 1)
-                  (Int.max 2 ((body_bot - !y) / 2))
+                  (Int.max 3 ((body_bot - !y) / 2))
               else 0
             in
             let task_limit = Int.max 1 (body_bot - !y - verif_reserve) in
@@ -1988,15 +2009,31 @@ let render_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                   ~val_fg:theme.text_muted ~val_attrs:Attr.italic ();
                 incr y
             | Some _ | None -> ());
-            if !y < bot then
-              Ops_common.draw_kv_row grid ~rect:content ~y:!y ~theme ~bg:card_bg
-                ~label_w:12
-                ~key:(Ops_common.say model ~ko:"출력 요약" ~en:"Summary")
-                ~value:
-                  (match sc.payload_summary with
-                  | Some s -> s
-                  | None -> Glyph.to_utf8 Glyph.Missing_absent)
-                ()
+            if !y < bot then begin
+              let summary_txt =
+                match sc.payload_summary with
+                | Some s when not (String.equal (String.trim s) "") -> s
+                | Some _ | None -> Glyph.to_utf8 Glyph.Missing_absent
+              in
+              if bot - !y >= 3 then begin
+                Card.draw_hairline ~pad_x:0 ~bg:card_bg
+                  ~label:(Ops_common.say model ~ko:"출력 요약" ~en:"Summary")
+                  grid ~rect:content ~y:!y ~theme;
+                incr y;
+                let md_rect =
+                  Rect.make ~x:content.x ~y:!y ~w:content.w
+                    ~h:(Int.max 0 (bot - !y))
+                in
+                ignore
+                  (Markdown.draw grid ~rect:md_rect ~theme ~osc8:true
+                     ~scroll:model.work.detail_scroll_offset summary_txt)
+              end
+              else
+                Ops_common.draw_kv_row grid ~rect:content ~y:!y ~theme ~bg:card_bg
+                  ~label_w:12
+                  ~key:(Ops_common.say model ~ko:"출력 요약" ~en:"Summary")
+                  ~value:summary_txt ()
+            end
     end
 
 (* --- Sub-Tab 3: Inbox (Rapid-Fire Triage + Clean Empty 24h Audit & Policy) --- *)
@@ -2734,7 +2771,7 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                               | Wire_work.Ask_multi -> "[ ]"
                             in
                             let key_prefix =
-                              if idx < 4 then
+                              if instant_single && idx < 4 then
                                 Printf.sprintf "%s [%c] " marker
                                   (Char.chr (Char.code 'a' + idx))
                               else Printf.sprintf "%s " marker
@@ -3124,6 +3161,7 @@ let render_candle_scorecard ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                     tone = Some Theme.Status_ai;
                   }
             | None -> None);
+          focused = Model.pane_focused model 0;
         }
       in
       let b_inner = Card.draw ~cache grid ~rect:bal_rect ~theme bal_spec in
@@ -3343,7 +3381,7 @@ let render_candle_scorecard ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                      ~caps:Ops_common.default_caps ~lang:model.lang
                      ~scroll:model.work.scroll_offset
                      ~selected:model.work.selected_index
-                     ~focused:(Model.body_has_focus model)
+                     ~focused:(Model.pane_focused model 0)
                      ~col_gap:(Layout.table_col_gap bp) ~columns:cols rows)
             end
       end;
@@ -3357,7 +3395,13 @@ let render_candle_scorecard ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                     ~en:"Ledger Events"))
             with
             subtitle = Some "candle-ledger.jsonl";
-            focused = Model.body_has_focus model;
+            hotkey =
+              Some
+                (if Model.pane_focused model 1 then
+                   Ops_common.say model ~ko:"[↑↓] 스크롤 · [Tab] 잔액"
+                     ~en:"[↑↓] Scroll · [Tab] Balances"
+                 else Ops_common.say model ~ko:"[Tab] 원장" ~en:"[Tab] Events");
+            focused = Model.pane_focused model 1;
           }
         in
         let e_inner = Card.draw ~cache grid ~rect:ev_rect ~theme ev_spec in
@@ -3443,6 +3487,8 @@ let render_candle_scorecard ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                 ignore
                   (Table.draw grid ~rect:e_inner ~theme
                      ~caps:Ops_common.default_caps ~lang:model.lang
+                     ~scroll:model.work.ledger_scroll_offset
+                     ~focused:(Model.pane_focused model 1)
                      ~col_gap:(Layout.table_col_gap bp) ~columns:cols rows)
       end;
       (* Right Peer Card: Daily / 7d Group & Top Keeper Leaderboard *)

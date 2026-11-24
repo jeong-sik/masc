@@ -105,6 +105,8 @@ let settings_action_leaves_overlay = function
   | Keymap.Move _
   | Keymap.Toggle_expand
   | Keymap.Create_new
+  | Keymap.Delete_selected
+  | Keymap.Link_task_goal
   | Keymap.Refresh
   | Keymap.Copy_selected
   | Keymap.Open_external

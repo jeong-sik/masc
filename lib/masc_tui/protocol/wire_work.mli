@@ -460,6 +460,9 @@ type gate_pending = {
 }
 
 val decode_asks_snapshot : Yojson.Safe.t -> (ask_row list, string) result
+val decode_ask_question : Yojson.Safe.t -> (ask_question, string) result
+val decode_ask_resolution : Yojson.Safe.t -> (ask_resolution, string) result
+val encode_ask_response : ask_response -> Yojson.Safe.t
 val decode_tool_approvals : Yojson.Safe.t -> (held_tool_approval list, string) result
 val decode_gate_pending_list : Yojson.Safe.t -> (gate_pending list, string) result
 

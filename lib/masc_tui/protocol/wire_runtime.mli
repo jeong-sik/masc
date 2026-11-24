@@ -49,6 +49,11 @@ val connector_bind_path : connector:string -> string
 val browser_lane_path : string
 val browser_lane_read_path : string
 val lane_addons_path : string
+val lane_addon_attach_path : string
+val lane_addon_detach_path : string
+val lane_addon_actions_path : string
+val lane_addon_asks_path : ?include_resolved:bool -> unit -> string
+val lane_addon_ask_answer_path : string
 val lane_addon_package_catalog_path : ?directory:string -> unit -> string
 val lane_addon_package_preview_path : manifest_path:string -> string
 val mcp_clients_path : string
@@ -850,6 +855,39 @@ type lane_addons_snapshot = {
 }
 
 val decode_lane_addons : Yojson.Safe.t -> (lane_addons_snapshot, string) result
+
+type lane_addon_ask_row = {
+  declaration_id : string;
+  title : string;
+  ask_id : string;
+  asked_at : float;
+  context : string option;
+  questions : Wire_work.ask_question list;
+  resolution : Wire_work.ask_resolution;
+}
+
+val decode_lane_addon_asks :
+  Yojson.Safe.t -> (lane_addon_ask_row list, string) result
+
+val encode_lane_addon_attach :
+  manifest_path:string -> run_id:string -> binding:Yojson.Safe.t -> Yojson.Safe.t
+
+val encode_lane_addon_detach : instance_id:string -> Yojson.Safe.t
+
+val encode_lane_addon_action :
+  instance_id:string ->
+  expected_incarnation:string ->
+  request_id:string ->
+  action:Yojson.Safe.t ->
+  Yojson.Safe.t
+
+val encode_lane_addon_ask_answer :
+  declaration_id:string ->
+  ask_id:string ->
+  ?session_id:string ->
+  answers:(string * Wire_work.ask_response) list ->
+  unit ->
+  Yojson.Safe.t
 
 type mcp_client_row = {
   name : string;

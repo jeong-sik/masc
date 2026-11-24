@@ -1180,7 +1180,12 @@ let open_inline_modal (m : Model.t) kind =
       | Nav.Task_transition_form _
       | Nav.Task_link_goal _
       | Nav.Goal_upsert_form _
-      | Nav.Board_delete_post _ )
+      | Nav.Board_delete_post _
+      | Nav.Keeper_lifecycle_form _
+      | Nav.Keeper_purge_confirm _
+      | Nav.Addon_attach_form
+      | Nav.Addon_detach_confirm _
+      | Nav.Addon_invoke_action _ )
       , ( Drafts.Btw_idle
         | Drafts.Btw_sending _
         | Drafts.Btw_streaming _
@@ -2088,19 +2093,37 @@ let submit_ask_modal ~now (m : Model.t) =
               , [] )
           | Ok answers ->
               let attn_id = "ask:" ^ modal.ask.ask_id in
-              let attention = Attention.mark_in_flight ~id:attn_id m.attention in
+              let attention =
+                match modal.lane_addon_declaration_id with
+                | Some _ -> m.attention
+                | None -> Attention.mark_in_flight ~id:attn_id m.attention
+              in
               let cmd =
-                Cmd.Http_post
-                  {
-                    epoch = m.epoch;
-                    req =
-                      Cmd.Post_ask_answer
-                        {
-                          keeper = modal.ask.keeper;
-                          ask_id = modal.ask.ask_id;
-                          answers;
-                        };
-                  }
+                match modal.lane_addon_declaration_id with
+                | Some declaration_id ->
+                    Cmd.Http_post
+                      {
+                        epoch = m.epoch;
+                        req =
+                          Cmd.Post_lane_addon_ask_answer
+                            {
+                              declaration_id;
+                              ask_id = modal.ask.ask_id;
+                              answers;
+                            };
+                      }
+                | None ->
+                    Cmd.Http_post
+                      {
+                        epoch = m.epoch;
+                        req =
+                          Cmd.Post_ask_answer
+                            {
+                              keeper = modal.ask.keeper;
+                              ask_id = modal.ask.ask_id;
+                              answers;
+                            };
+                      }
               in
               let submitting_modal =
                 {
@@ -3694,7 +3717,12 @@ let classify_inline_form (modal : Model.inline_modal_state) : inline_form_kind =
     | Nav.Task_transition_form _
     | Nav.Task_link_goal _
     | Nav.Goal_upsert_form _
-    | Nav.Board_delete_post _ ) as std ->
+    | Nav.Board_delete_post _
+    | Nav.Keeper_lifecycle_form _
+    | Nav.Keeper_purge_confirm _
+    | Nav.Addon_attach_form
+    | Nav.Addon_detach_confirm _
+    | Nav.Addon_invoke_action _ ) as std ->
       Form_standard std
 
 (* The Schedule form's operator text. A delay is a whole count and one unit,
@@ -4844,6 +4872,203 @@ let submit_inline_modal ~now (m : Model.t) =
                         req = Cmd.Post_board_delete { post_id };
                       };
                   ] )
+          | Form_standard (Nav.Keeper_lifecycle_form { keeper }) -> (
+              let action_raw =
+                String.lowercase_ascii
+                  (String.trim
+                     (Model.modal_field_value ~key:"lifecycle_action" modal))
+              in
+              let confirm =
+                String.trim
+                  (Model.modal_field_value ~key:"confirm_keeper" modal)
+              in
+              let ws_pair =
+                Option.map
+                  (fun (ws : Wire_work.expected_workspace) ->
+                    (ws.base_path, ws.masc_root))
+                  (expected_workspace_of m)
+              in
+              let op_res =
+                match action_raw with
+                | "boot" -> Ok Wire_fleet.Keeper_boot
+                | "pause" -> Ok Wire_fleet.Keeper_pause
+                | "resume" ->
+                    let operator_operation_id =
+                      Printf.sprintf "tui-resume-%s-%Ld" keeper
+                        (Clock.Mono.to_ns now)
+                    in
+                    Ok (Wire_fleet.Keeper_resume { operator_operation_id })
+                | "shutdown" ->
+                    if String.equal confirm keeper then
+                      Ok Wire_fleet.Keeper_shutdown
+                    else
+                      Error
+                        (Printf.sprintf
+                           "Type exact keeper name '%s' to confirm shutdown"
+                           keeper)
+                | "reset" ->
+                    if String.equal confirm keeper then
+                      Ok Wire_fleet.Keeper_reset
+                    else
+                      Error
+                        (Printf.sprintf
+                           "Type exact keeper name '%s' to confirm reset" keeper)
+                | _ ->
+                    Error
+                      "Action must be one of: boot, pause, resume, shutdown, reset"
+              in
+              match op_res with
+              | Error err -> set_modal_error err
+              | Ok op ->
+                  ( mark_submitting m
+                  , [
+                      Cmd.Http_post
+                        {
+                          epoch = m.epoch;
+                          req =
+                            Cmd.Post_keeper_lifecycle
+                              {
+                                keeper;
+                                op;
+                                expected_workspace = ws_pair;
+                                from_modal = true;
+                              };
+                        };
+                    ] ))
+          | Form_standard (Nav.Keeper_purge_confirm { keeper }) -> (
+              let confirm =
+                String.trim
+                  (Model.modal_field_value ~key:"confirm_purge_keeper" modal)
+              in
+              if not (String.equal confirm keeper) then
+                set_modal_error
+                  (Printf.sprintf
+                     "Type exact keeper name '%s' to confirm permanent purge"
+                     keeper)
+              else
+                match expected_workspace_of m with
+                | None ->
+                    set_modal_error
+                      "Server workspace identity must be loaded before purging a keeper"
+                | Some ws ->
+                    ( mark_submitting m
+                    , [
+                        Cmd.Http_post
+                          {
+                            epoch = m.epoch;
+                            req =
+                              Cmd.Post_keeper_purge
+                                {
+                                  keeper;
+                                  expected_workspace =
+                                    (ws.base_path, ws.masc_root);
+                                };
+                          };
+                      ] ))
+          | Form_standard Nav.Addon_attach_form -> (
+              let manifest_path =
+                String.trim
+                  (Model.modal_field_value ~key:"addon_manifest_path" modal)
+              in
+              let run_id =
+                String.trim (Model.modal_field_value ~key:"addon_run_id" modal)
+              in
+              let binding_raw =
+                String.trim
+                  (Model.modal_field_value ~key:"addon_binding_json" modal)
+              in
+              let binding_res =
+                match Yojson.Safe.from_string binding_raw with
+                | `Assoc _ as obj -> Ok obj
+                | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _
+                | `List _ ->
+                    Error "Binding must be a JSON object (e.g. {})"
+                | exception Yojson.Json_error msg ->
+                    Error ("Invalid binding JSON: " ^ msg)
+              in
+              match binding_res with
+              | Error err -> set_modal_error err
+              | Ok binding ->
+                  ( mark_submitting m
+                  , [
+                      Cmd.Http_post
+                        {
+                          epoch = m.epoch;
+                          req =
+                            Cmd.Post_lane_addon_attach
+                              { manifest_path; run_id; binding };
+                        };
+                    ] ))
+          | Form_standard (Nav.Addon_detach_confirm { instance_id; _ }) ->
+              let confirm =
+                String.trim
+                  (Model.modal_field_value ~key:"confirm_addon_detach" modal)
+              in
+              if
+                not
+                  (String.equal (String.lowercase_ascii confirm) "detach"
+                  || String.equal confirm instance_id)
+              then
+                set_modal_error
+                  (Printf.sprintf
+                     "Type 'detach' or exact instance ID '%s' to confirm"
+                     instance_id)
+              else
+                ( mark_submitting m
+                , [
+                    Cmd.Http_post
+                      {
+                        epoch = m.epoch;
+                        req = Cmd.Post_lane_addon_detach { instance_id };
+                      };
+                  ] )
+          | Form_standard (Nav.Addon_invoke_action { instance_id; _ }) -> (
+              let action_name =
+                String.trim
+                  (Model.modal_field_value ~key:"addon_action_name" modal)
+              in
+              let payload_raw =
+                String.trim
+                  (Model.modal_field_value ~key:"addon_action_payload" modal)
+              in
+              let action_res =
+                match Yojson.Safe.from_string payload_raw with
+                | `Assoc fields ->
+                    let fields =
+                      if
+                        String.equal action_name ""
+                        || List.mem_assoc "action" fields
+                      then fields
+                      else ("action", `String action_name) :: fields
+                    in
+                    Ok (`Assoc fields)
+                | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _
+                | `List _ ->
+                    Error "Action payload must be a JSON object (e.g. {})"
+                | exception Yojson.Json_error msg ->
+                    Error ("Invalid action payload JSON: " ^ msg)
+              in
+              match action_res with
+              | Error err -> set_modal_error err
+              | Ok action ->
+                  let request_id =
+                    Printf.sprintf "tui-addon-act-%Ld" (Clock.Mono.to_ns now)
+                  in
+                  ( mark_submitting m
+                  , [
+                      Cmd.Http_post
+                        {
+                          epoch = m.epoch;
+                          req =
+                            Cmd.Post_lane_addon_action
+                              {
+                                instance_id;
+                                expected_incarnation = instance_id;
+                                request_id;
+                                action;
+                              };
+                        };
+                    ] ))
           | Form_setup_login_start ->
               let integration_id =
                 String.trim
@@ -9143,7 +9368,12 @@ let apply_move (m : Model.t) dir =
                   | Nav.Task_transition_form _
                   | Nav.Task_link_goal _
                   | Nav.Goal_upsert_form _
-                  | Nav.Board_delete_post _ )
+                  | Nav.Board_delete_post _
+                  | Nav.Keeper_lifecycle_form _
+                  | Nav.Keeper_purge_confirm _
+                  | Nav.Addon_attach_form
+                  | Nav.Addon_detach_confirm _
+                  | Nav.Addon_invoke_action _ )
                 , _ ) ->
                   true
             in
@@ -9177,7 +9407,12 @@ let apply_move (m : Model.t) dir =
               | Nav.Task_transition_form _
               | Nav.Task_link_goal _
               | Nav.Goal_upsert_form _
-              | Nav.Board_delete_post _ ->
+              | Nav.Board_delete_post _
+              | Nav.Keeper_lifecycle_form _
+              | Nav.Keeper_purge_confirm _
+              | Nav.Addon_attach_form
+              | Nav.Addon_detach_confirm _
+              | Nav.Addon_invoke_action _ ->
                   (m, [])
             else
               let next_modal =

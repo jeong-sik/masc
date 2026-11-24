@@ -3466,7 +3466,12 @@ let classify_inline_form (modal : Model.inline_modal_state) : inline_form_kind =
     | Nav.Task_transition_form _
     | Nav.Task_link_goal _
     | Nav.Goal_upsert_form _
-    | Nav.Board_delete_post _ ) as std ->
+    | Nav.Board_delete_post _
+    | Nav.Keeper_lifecycle_form _
+    | Nav.Keeper_purge_confirm _
+    | Nav.Addon_attach_form
+    | Nav.Addon_detach_confirm _
+    | Nav.Addon_invoke_action _ ) as std ->
       Form_standard std
 
 let inline_action_title ~lang ~(modal : Model.inline_modal_state) _kind =
@@ -3574,6 +3579,25 @@ let inline_action_title ~lang ~(modal : Model.inline_modal_state) _kind =
       Say.resolve lang
         (Say.make ~ko:("게시글 삭제 확인 · " ^ post_id)
            ~en:("Delete Board Post · " ^ post_id))
+  | Form_standard (Nav.Keeper_lifecycle_form { keeper }) ->
+      Say.resolve lang
+        (Say.make ~ko:("키퍼 라이프사이클 · @" ^ keeper)
+           ~en:("Keeper Lifecycle · @" ^ keeper))
+  | Form_standard (Nav.Keeper_purge_confirm { keeper }) ->
+      Say.resolve lang
+        (Say.make ~ko:("키퍼 영구 삭제 · @" ^ keeper)
+           ~en:("Purge Keeper · @" ^ keeper))
+  | Form_standard Nav.Addon_attach_form ->
+      Say.resolve lang
+        (Say.make ~ko:"레인 애드온 연결 (Attach)" ~en:"Attach Lane Addon")
+  | Form_standard (Nav.Addon_detach_confirm { title; _ }) ->
+      Say.resolve lang
+        (Say.make ~ko:("애드온 분리 확인 · " ^ title)
+           ~en:("Detach Lane Addon · " ^ title))
+  | Form_standard (Nav.Addon_invoke_action { instance_id; _ }) ->
+      Say.resolve lang
+        (Say.make ~ko:("애드온 액션 호출 · " ^ instance_id)
+           ~en:("Invoke Addon Action · " ^ instance_id))
 
 let form_of_inline_modal (modal : Model.inline_modal_state) =
   let fields =
@@ -3637,7 +3661,12 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     | Nav.Task_transition_form _
     | Nav.Task_link_goal _
     | Nav.Goal_upsert_form _
-    | Nav.Board_delete_post _ ->
+    | Nav.Board_delete_post _
+    | Nav.Keeper_lifecycle_form _
+    | Nav.Keeper_purge_confirm _
+    | Nav.Addon_attach_form
+    | Nav.Addon_detach_confirm _
+    | Nav.Addon_invoke_action _ ->
         Int.max 7 (List.length modal.fields + 6 + if has_focused_help then 1 else 0)
   in
   let h = Int.min (Int.max 0 (rect.h - 2)) desired_h in
@@ -3688,7 +3717,12 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       | Nav.Task_transition_form _
       | Nav.Task_link_goal _
       | Nav.Goal_upsert_form _
-      | Nav.Board_delete_post _ ->
+      | Nav.Board_delete_post _
+      | Nav.Keeper_lifecycle_form _
+      | Nav.Keeper_purge_confirm _
+      | Nav.Addon_attach_form
+      | Nav.Addon_detach_confirm _
+      | Nav.Addon_invoke_action _ ->
           Say.resolve lang
             (Say.make ~ko:"[Tab] 필드 · [Enter] 제출 · [Esc] 취소"
                ~en:"[Tab] Field · [Enter] Submit · [Esc] Cancel")
@@ -3841,7 +3875,12 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       | Nav.Task_transition_form _
       | Nav.Task_link_goal _
       | Nav.Goal_upsert_form _
-      | Nav.Board_delete_post _ ->
+      | Nav.Board_delete_post _
+      | Nav.Keeper_lifecycle_form _
+      | Nav.Keeper_purge_confirm _
+      | Nav.Addon_attach_form
+      | Nav.Addon_detach_confirm _
+      | Nav.Addon_invoke_action _ ->
           let status_rows =
             if modal.submitting || Option.is_some modal.error then 1 else 0
           in
@@ -3854,7 +3893,8 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 | Nav.Runtime_lane_create
                 | Nav.Runtime_lane_edit _
                 | Nav.Task_create_form
-                | Nav.Task_link_goal _ )
+                | Nav.Task_link_goal _
+                | Nav.Addon_invoke_action _ )
             | Form_fusion_launch ->
                 if inner.h - status_rows >= 6 then 1 else 0
             | Form_board_goal_proposal
@@ -3880,7 +3920,11 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 | Nav.Runtime_lane_delete _
                 | Nav.Task_transition_form _
                 | Nav.Goal_upsert_form _
-                | Nav.Board_delete_post _ ) ->
+                | Nav.Board_delete_post _
+                | Nav.Keeper_lifecycle_form _
+                | Nav.Keeper_purge_confirm _
+                | Nav.Addon_attach_form
+                | Nav.Addon_detach_confirm _ ) ->
                 0
           in
           let form_r =
@@ -4010,6 +4054,19 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                   (Cell_grid.put_text ~clip:er grid ~x:er.x ~y:er.y
                      ~style:whisper_st
                      (Grapheme.truncate_to_width ~max_width:er.w hint))
+            | Form_standard (Nav.Addon_invoke_action { action_names; _ }) ->
+                let hint =
+                  match action_names with
+                  | [] ->
+                      Say.resolve lang
+                        (Say.make ~ko:"선언된 액션 목록 없음 (직접 입력)"
+                           ~en:"No declared action_names (enter action name manually)")
+                  | xs -> "[←→] Actions: " ^ String.concat ", " xs
+                in
+                ignore
+                  (Cell_grid.put_text ~clip:er grid ~x:er.x ~y:er.y
+                     ~style:whisper_st
+                     (Grapheme.truncate_to_width ~max_width:er.w hint))
             | Form_board_goal_proposal
             | Form_goal_confirmation_proof
             | Form_memory_act
@@ -4033,7 +4090,11 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 | Nav.Runtime_lane_delete _
                 | Nav.Task_transition_form _
                 | Nav.Goal_upsert_form _
-                | Nav.Board_delete_post _ ) ->
+                | Nav.Board_delete_post _
+                | Nav.Keeper_lifecycle_form _
+                | Nav.Keeper_purge_confirm _
+                | Nav.Addon_attach_form
+                | Nav.Addon_detach_confirm _ ) ->
                 ()
           end;
           if status_rows = 1 then begin

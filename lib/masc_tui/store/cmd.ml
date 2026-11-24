@@ -111,6 +111,7 @@ type get_request =
   | Get_connectors
   | Get_browser_lane
   | Get_lane_addons
+  | Get_lane_addon_asks
   | Get_mcp_clients
   | Get_sandboxes
   | Get_keeper_sandbox of { keeper : string }
@@ -351,6 +352,33 @@ type post_request =
       pinned : bool;
     }
   | Post_board_delete of { post_id : string }
+  | Post_keeper_lifecycle of {
+      keeper : string;
+      op : Wire_fleet.keeper_lifecycle_op;
+      expected_workspace : (string * string) option;
+      from_modal : bool;
+    }
+  | Post_keeper_purge of {
+      keeper : string;
+      expected_workspace : string * string;
+    }
+  | Post_lane_addon_attach of {
+      manifest_path : string;
+      run_id : string;
+      binding : Yojson.Safe.t;
+    }
+  | Post_lane_addon_detach of { instance_id : string }
+  | Post_lane_addon_action of {
+      instance_id : string;
+      expected_incarnation : string;
+      request_id : string;
+      action : Yojson.Safe.t;
+    }
+  | Post_lane_addon_ask_answer of {
+      declaration_id : string;
+      ask_id : string;
+      answers : (string * Wire_work.ask_response) list;
+    }
 
 type put_request =
   | Put_wiki_page of { page : string; request : Wire_knowledge.wiki_put_request }
@@ -527,6 +555,7 @@ let get_request_path = function
   | Get_connectors -> Wire_runtime.connectors_path
   | Get_browser_lane -> Wire_runtime.browser_lane_path
   | Get_lane_addons -> Wire_runtime.lane_addons_path
+  | Get_lane_addon_asks -> Wire_runtime.lane_addon_asks_path ()
   | Get_mcp_clients -> Wire_runtime.mcp_clients_path
   | Get_sandboxes -> Wire_infra.infra_sandboxes_path
   | Get_keeper_sandbox { keeper } ->
@@ -646,6 +675,13 @@ let post_request_path = function
       Wire_work.task_link_goal_path ~task_id
   | Post_board_pin _ -> Wire_knowledge.board_pin_path
   | Post_board_delete _ -> Wire_knowledge.board_delete_path
+  | Post_keeper_lifecycle { keeper; op; _ } ->
+      Wire_fleet.keeper_lifecycle_path ~keeper op
+  | Post_keeper_purge _ -> Wire_fleet.keeper_purge_path
+  | Post_lane_addon_attach _ -> Wire_runtime.lane_addon_attach_path
+  | Post_lane_addon_detach _ -> Wire_runtime.lane_addon_detach_path
+  | Post_lane_addon_action _ -> Wire_runtime.lane_addon_actions_path
+  | Post_lane_addon_ask_answer _ -> Wire_runtime.lane_addon_ask_answer_path
 
 let mcp_tool_name_of_post_request = function
   | Post_task_create _ -> Some "masc_add_task"
@@ -691,7 +727,13 @@ let mcp_tool_name_of_post_request = function
   | Post_github_token _
   | Post_task_link_goal _
   | Post_board_pin _
-  | Post_board_delete _ ->
+  | Post_board_delete _
+  | Post_keeper_lifecycle _
+  | Post_keeper_purge _
+  | Post_lane_addon_attach _
+  | Post_lane_addon_detach _
+  | Post_lane_addon_action _
+  | Post_lane_addon_ask_answer _ ->
       None
 
 let post_request_body = function
@@ -860,6 +902,22 @@ let post_request_body = function
       Wire_knowledge.encode_board_pin ~post_id ~pinned
   | Post_board_delete { post_id } ->
       Wire_knowledge.encode_board_delete ~post_id
+  | Post_keeper_lifecycle { keeper = _; op; expected_workspace; from_modal = _ }
+    ->
+      Wire_fleet.encode_keeper_lifecycle_body ?expected_workspace op
+  | Post_keeper_purge { keeper; expected_workspace } ->
+      Wire_fleet.encode_keeper_purge ~agent_name:keeper ~expected_workspace
+  | Post_lane_addon_attach { manifest_path; run_id; binding } ->
+      Wire_runtime.encode_lane_addon_attach ~manifest_path ~run_id ~binding
+  | Post_lane_addon_detach { instance_id } ->
+      Wire_runtime.encode_lane_addon_detach ~instance_id
+  | Post_lane_addon_action
+      { instance_id; expected_incarnation; request_id; action } ->
+      Wire_runtime.encode_lane_addon_action ~instance_id ~expected_incarnation
+        ~request_id ~action
+  | Post_lane_addon_ask_answer { declaration_id; ask_id; answers } ->
+      Wire_runtime.encode_lane_addon_ask_answer ~declaration_id ~ask_id
+        ~answers ()
 
 let put_request_path = function
   | Put_wiki_page { page; _ } -> Wire_knowledge.wiki_page_path ~page

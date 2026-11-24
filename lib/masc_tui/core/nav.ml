@@ -127,6 +127,17 @@ type inline_action_kind =
       post_id : string;
       title : string;
     }
+  | Keeper_lifecycle_form of { keeper : string }
+  | Keeper_purge_confirm of { keeper : string }
+  | Addon_attach_form
+  | Addon_detach_confirm of {
+      instance_id : string;
+      title : string;
+    }
+  | Addon_invoke_action of {
+      instance_id : string;
+      action_names : string list;
+    }
 
 type system_gate_kind =
   | Micro_viewport
@@ -581,6 +592,11 @@ let inline_action_tag = function
   | Task_link_goal _ -> 19
   | Goal_upsert_form _ -> 20
   | Board_delete_post _ -> 21
+  | Keeper_lifecycle_form _ -> 22
+  | Keeper_purge_confirm _ -> 23
+  | Addon_attach_form -> 24
+  | Addon_detach_confirm _ -> 25
+  | Addon_invoke_action _ -> 26
 
 let equal_inline_action_kind a b =
   if not (Int.equal (inline_action_tag a) (inline_action_tag b)) then false
@@ -594,7 +610,8 @@ let equal_inline_action_kind a b =
     | Code_finder_form, Code_finder_form
     | Code_search_form, Code_search_form
     | Runtime_lane_create, Runtime_lane_create
-    | Task_create_form, Task_create_form ->
+    | Task_create_form, Task_create_form
+    | Addon_attach_form, Addon_attach_form ->
         true
     | Gate_reject x, Gate_reject y
     | Verification_reject x, Verification_reject y
@@ -621,6 +638,16 @@ let equal_inline_action_kind a b =
         Option.equal String.equal x y
     | Board_delete_post x, Board_delete_post y ->
         String.equal x.post_id y.post_id && String.equal x.title y.title
+    | Keeper_lifecycle_form x, Keeper_lifecycle_form y ->
+        String.equal x.keeper y.keeper
+    | Keeper_purge_confirm x, Keeper_purge_confirm y ->
+        String.equal x.keeper y.keeper
+    | Addon_detach_confirm x, Addon_detach_confirm y ->
+        String.equal x.instance_id y.instance_id
+        && String.equal x.title y.title
+    | Addon_invoke_action x, Addon_invoke_action y ->
+        String.equal x.instance_id y.instance_id
+        && List.equal String.equal x.action_names y.action_names
     | ( Btw_query
       | Gate_reject _
       | Verification_reject _
@@ -642,7 +669,12 @@ let equal_inline_action_kind a b =
       | Task_transition_form _
       | Task_link_goal _
       | Goal_upsert_form _
-      | Board_delete_post _ ), _ ->
+      | Board_delete_post _
+      | Keeper_lifecycle_form _
+      | Keeper_purge_confirm _
+      | Addon_attach_form
+      | Addon_detach_confirm _
+      | Addon_invoke_action _ ), _ ->
         false
 
 let system_gate_index = function

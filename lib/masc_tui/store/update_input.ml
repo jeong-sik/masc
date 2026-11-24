@@ -2647,7 +2647,12 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                         | Nav.Task_transition_form _
                         | Nav.Task_link_goal _
                         | Nav.Goal_upsert_form _
-                        | Nav.Board_delete_post _ )
+                        | Nav.Board_delete_post _
+                        | Nav.Keeper_lifecycle_form _
+                        | Nav.Keeper_purge_confirm _
+                        | Nav.Addon_attach_form
+                        | Nav.Addon_detach_confirm _
+                        | Nav.Addon_invoke_action _ )
                       , _ ) ->
                         true
                   in
@@ -2813,11 +2818,38 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                             in
                             Some ({ m with inline_modal = Some next_modal }, [])
                         | None -> None)
+                    | Nav.Keeper_lifecycle_form _, Some { key = "lifecycle_action"; value; _ } -> (
+                        match
+                          cycle_in
+                            [ "boot"; "pause"; "resume"; "shutdown"; "reset" ]
+                            (String.lowercase_ascii (String.trim value))
+                        with
+                        | Some next_op ->
+                            let next_modal =
+                              Model.modal_update_active_field
+                                (fun _ -> next_op)
+                                modal
+                            in
+                            Some ({ m with inline_modal = Some next_modal }, [])
+                        | None -> None)
+                    | ( Nav.Addon_invoke_action { action_names; _ }
+                      , Some { key = "addon_action_name"; value; _ } ) -> (
+                        match cycle_in action_names (String.trim value) with
+                        | Some next_act ->
+                            let next_modal =
+                              Model.modal_update_active_field
+                                (fun _ -> next_act)
+                                modal
+                            in
+                            Some ({ m with inline_modal = Some next_modal }, [])
+                        | None -> None)
                     | ( ( Nav.Connector_form
                         | Nav.Board_new_post
                         | Nav.Runtime_lane_create
                         | Nav.Task_transition_form _
-                        | Nav.Goal_upsert_form _ )
+                        | Nav.Goal_upsert_form _
+                        | Nav.Keeper_lifecycle_form _
+                        | Nav.Addon_invoke_action _ )
                       , (Some _ | None) )
                     | ( ( Nav.Btw_query
                         | Nav.Gate_reject _
@@ -2835,7 +2867,10 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                         | Nav.Runtime_lane_delete _
                         | Nav.Task_create_form
                         | Nav.Task_link_goal _
-                        | Nav.Board_delete_post _ )
+                        | Nav.Board_delete_post _
+                        | Nav.Keeper_purge_confirm _
+                        | Nav.Addon_attach_form
+                        | Nav.Addon_detach_confirm _ )
                       , (Some _ | None) ) ->
                         None
                   in
@@ -3758,7 +3793,12 @@ let apply_paste ~now:_ (m : Model.t) text =
                   | Nav.Task_transition_form _
                   | Nav.Task_link_goal _
                   | Nav.Goal_upsert_form _
-                  | Nav.Board_delete_post _ )
+                  | Nav.Board_delete_post _
+                  | Nav.Keeper_lifecycle_form _
+                  | Nav.Keeper_purge_confirm _
+                  | Nav.Addon_attach_form
+                  | Nav.Addon_detach_confirm _
+                  | Nav.Addon_invoke_action _ )
                 , _ ) ->
                   true
             in

@@ -157,6 +157,7 @@ type ask_live_status =
 
 type ask_modal = {
   ask : Wire_work.ask_row;
+  lane_addon_declaration_id : string option;
   question_idx : int;
   cursor : int;
   prompt_scroll : int;
@@ -383,6 +384,7 @@ val ask_choice_index_of_char : char -> int option
 val empty_ask_question_draft : ask_question_draft
 val ask_modal_for :
   ?preselect_choice_1based:int -> Wire_work.ask_row -> ask_modal
+val ask_modal_for_lane_addon : Wire_runtime.lane_addon_ask_row -> ask_modal
 val ask_modal_current_question : ask_modal -> Wire_work.ask_question option
 val ask_modal_rows : Wire_work.ask_question -> ask_modal_row list
 val ask_modal_current_row : ask_modal -> ask_modal_row option

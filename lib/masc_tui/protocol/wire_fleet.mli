@@ -9,6 +9,23 @@ val keepers_turns_path : string
 val fleet_stream_path : string
 val keeper_chat_stream_path : string
 val keeper_turn_interrupt_path : string
+val keeper_purge_path : string
+
+type keeper_lifecycle_op =
+  | Keeper_boot
+  | Keeper_pause
+  | Keeper_resume of { operator_operation_id : string }
+  | Keeper_shutdown
+  | Keeper_reset
+
+val keeper_lifecycle_path : keeper:string -> keeper_lifecycle_op -> string
+val keeper_lifecycle_op_label : keeper_lifecycle_op -> string
+
+val encode_keeper_lifecycle_body :
+  ?expected_workspace:string * string -> keeper_lifecycle_op -> Yojson.Safe.t
+
+val encode_keeper_purge :
+  agent_name:string -> expected_workspace:string * string -> Yojson.Safe.t
 
 val keeper_chat_history_path :
   keeper:string -> ?limit:int -> ?before_seq:int -> unit -> string

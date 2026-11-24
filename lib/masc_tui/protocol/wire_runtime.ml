@@ -85,6 +85,15 @@ let connector_bind_path ~connector =
 let browser_lane_path = "/api/v1/dashboard/browser-lane/clients"
 let browser_lane_read_path = "/api/v1/dashboard/browser-lane/read"
 let lane_addons_path = "/api/v1/lane-addons"
+let lane_addon_attach_path = "/api/v1/lane-addons/attach"
+let lane_addon_detach_path = "/api/v1/lane-addons/detach"
+let lane_addon_actions_path = "/api/v1/lane-addons/actions"
+
+let lane_addon_asks_path ?(include_resolved = false) () =
+  if include_resolved then "/api/v1/lane-addons/asks?include_resolved=true"
+  else "/api/v1/lane-addons/asks?include_resolved=false"
+
+let lane_addon_ask_answer_path = "/api/v1/lane-addons/ask-answer"
 let mcp_clients_path = "/api/v1/dashboard/clients"
 
 type usage_window_kind =
@@ -3361,6 +3370,81 @@ let decode_lane_addons json =
   let* inst_raw = optional_list_field body "instances" in
   let* instances = decode_list "instances" decode_addon_instance inst_raw in
   Ok { configuration_complete; declarations; instances; issues }
+
+type lane_addon_ask_row = {
+  declaration_id : string;
+  title : string;
+  ask_id : string;
+  asked_at : float;
+  context : string option;
+  questions : Wire_work.ask_question list;
+  resolution : Wire_work.ask_resolution;
+}
+
+let decode_lane_addon_ask_row json =
+  let* declaration_id = required_nonblank_string json "declaration_id" in
+  let* title = required_string_field json "title" in
+  let* ask_id = required_nonblank_string json "ask_id" in
+  let* asked_at = required_finite_float json "asked_at" in
+  let* context = optional_nonblank_string json "context" in
+  let* q_items = required_list_field json "questions" in
+  let* questions =
+    decode_list "questions" Wire_work.decode_ask_question q_items
+  in
+  let* res_json = required_object_field json "resolution" in
+  let* resolution = Wire_work.decode_ask_resolution res_json in
+  Ok { declaration_id; title; ask_id; asked_at; context; questions; resolution }
+
+let decode_lane_addon_asks json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* items = required_list_field body "asks" in
+  decode_list "asks" decode_lane_addon_ask_row items
+
+let encode_lane_addon_attach ~manifest_path ~run_id ~binding =
+  `Assoc
+    [
+      ("manifest_path", `String (String.trim manifest_path));
+      ("run_id", `String (String.trim run_id));
+      ("binding", binding);
+    ]
+
+let encode_lane_addon_detach ~instance_id =
+  `Assoc [ ("instance_id", `String (String.trim instance_id)) ]
+
+let encode_lane_addon_action ~instance_id ~expected_incarnation ~request_id
+    ~action =
+  `Assoc
+    [
+      ("instance_id", `String (String.trim instance_id));
+      ("expected_incarnation", `String (String.trim expected_incarnation));
+      ("request_id", `String (String.trim request_id));
+      ("action", action);
+    ]
+
+let encode_lane_addon_ask_answer ~declaration_id ~ask_id ?session_id ~answers ()
+    =
+  let session_field =
+    match session_id with
+    | Some sid when not (String.equal (String.trim sid) "") ->
+        [ ("session_id", `String (String.trim sid)) ]
+    | Some _ | None -> []
+  in
+  `Assoc
+    ([
+       ("declaration_id", `String (String.trim declaration_id));
+       ("ask_id", `String (String.trim ask_id));
+       ( "answers"
+       , `List
+           (List.map
+              (fun (question_id, response) ->
+                `Assoc
+                  [
+                    ("question_id", `String question_id);
+                    ("response", Wire_work.encode_ask_response response);
+                  ])
+              answers) );
+     ]
+    @ session_field)
 
 type mcp_client_row = {
   name : string;

@@ -1658,6 +1658,10 @@ type chat_stream_chunk =
       operation_id : string option;
       activity : model_content_activity;
     }
+  | Chunk_model_response_start of {
+      operation_id : string option;
+      stream_scope : int;
+    }
   | Chunk_model_response_stop of {
       operation_id : string option;
       owner : Wire_chat_journal.response_owner option;
@@ -2094,6 +2098,10 @@ let decode_custom_chat_chunk json =
       let* value = required_object_field json "value" in
       let* activity = decode_model_content_activity value in
       Ok (Chunk_model_content { operation_id = outer_op_id; activity })
+  | "KEEPER_STREAM_MESSAGE_START" ->
+      let* value = required_object_field json "value" in
+      let* stream_scope = required_nonnegative_int_field value "stream_scope" in
+      Ok (Chunk_model_response_start { operation_id = outer_op_id; stream_scope })
   | "KEEPER_STREAM_MESSAGE_STOP" ->
       let* value = required_member json "value" in
       let* owner =
@@ -2171,7 +2179,6 @@ let decode_custom_chat_chunk json =
                 { operation_id = outer_op_id; tool_use_id = scoped_tool_use_id scope block }))
   | "KEEPER_CONNECTED"
   | "KEEPER_PROVIDER_RETRY"
-  | "KEEPER_STREAM_MESSAGE_START"
   | "KEEPER_STREAM_MESSAGE_DELTA"
   | "KEEPER_STREAM_PING"
   | "KEEPER_CONTENT_BLOCK_START"

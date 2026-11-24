@@ -2914,6 +2914,7 @@ let execute_post_stream t ~epoch req =
                          | Wire_fleet.Chunk_thinking_delta _
                          | Wire_fleet.Chunk_thinking_snapshot _
                          | Wire_fleet.Chunk_model_content _
+                         | Wire_fleet.Chunk_model_response_start _
                          | Wire_fleet.Chunk_model_response_stop _
                          | Wire_fleet.Chunk_tool_start _
                          | Wire_fleet.Chunk_tool_args _

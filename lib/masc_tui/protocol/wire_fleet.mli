@@ -634,6 +634,10 @@ type chat_stream_chunk =
       operation_id : string option;
       activity : model_content_activity;
     }
+  | Chunk_model_response_start of {
+      operation_id : string option;
+      stream_scope : int;
+    }
   | Chunk_model_response_stop of {
       operation_id : string option;
       owner : Wire_chat_journal.response_owner option;

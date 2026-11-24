@@ -615,6 +615,98 @@ class MissingAndBumpIntegrationTests(unittest.TestCase):
         self.assertEqual(res_fail.returncode, 3, res_fail.stdout + res_fail.stderr)
         self.assertIn("#54099", res_fail.stdout)
 
+    def test_missing_strict_accepts_folded_owners_and_commit_exempt_but_rejects_unrecorded(
+        self,
+    ) -> None:
+        # PR #54101: merged with fragment, then folded into CHANGELOG.md and deleted.
+        self._write("src/a.txt", "a\n")
+        self._write(
+            "changelog.d/54101.md",
+            "### Fixed\n\n- Fix parser edge case (#54101).\n",
+        )
+        self._commit("fix: parser edge case (#54101)")
+
+        # PR #54102: merged with ### Exempt fragment, later deleted during fold.
+        self._write("docs/note.md", "note\n")
+        self._write(
+            "changelog.d/54102.md",
+            "### Exempt\n\n- Docs only: note update (#54102).\n",
+        )
+        self._commit("docs: note update (#54102)")
+
+        # Simulate a post-cut fold PR that folds #54101 into CHANGELOG.md (with a
+        # passing mention of #54103), deletes both fragments, and carries its own
+        # ### Exempt fragment.
+        changelog_text = (self.root / "CHANGELOG.md").read_text(encoding="utf-8")
+        self._write(
+            "CHANGELOG.md",
+            changelog_text.replace(
+                "## [Unreleased]\n",
+                "## [Unreleased]\n\n### Fixed\n\n"
+                "- Fix parser edge case (related to #54103) (#54101).\n",
+                1,
+            ),
+        )
+        (self.root / "changelog.d/54101.md").unlink()
+        (self.root / "changelog.d/54102.md").unlink()
+        self._write(
+            "changelog.d/54105.md",
+            "### Exempt\n\n- Fold post-cut fragments (#54105).\n",
+        )
+        self._commit("docs(changelog): fold post-cut fragments (#54105)")
+
+        res_ok = subprocess.run(
+            [
+                sys.executable,
+                "scripts/changelog-fragments.py",
+                "missing",
+                "--base",
+                self.base,
+                "--dir",
+                "changelog.d",
+                "--strict",
+            ],
+            cwd=self.root,
+            env=self.env,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(res_ok.returncode, 0, res_ok.stdout + res_ok.stderr)
+        self.assertNotIn("#54101", res_ok.stdout)
+        self.assertNotIn("#54102", res_ok.stdout)
+        self.assertNotIn("#54105", res_ok.stdout)
+
+        # Counterexample 1: PR #54103 has no fragment and is only passing-mentioned
+        # inside #54101's CHANGELOG entry -> must still exit 3.
+        self._write("src/b.txt", "b\n")
+        self._commit("fix: passing mention only (#54103)")
+
+        # Counterexample 2: PR #54104 has no fragment and no CHANGELOG mention -> exit 3.
+        self._write("src/c.txt", "c\n")
+        self._commit("feat: completely unrecorded (#54104)")
+
+        res_fail = subprocess.run(
+            [
+                sys.executable,
+                "scripts/changelog-fragments.py",
+                "missing",
+                "--base",
+                self.base,
+                "--dir",
+                "changelog.d",
+                "--strict",
+            ],
+            cwd=self.root,
+            env=self.env,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(res_fail.returncode, 3, res_fail.stdout + res_fail.stderr)
+        self.assertIn("#54103", res_fail.stdout)
+        self.assertIn("#54104", res_fail.stdout)
+        self.assertNotIn("#54101", res_fail.stdout)
+        self.assertNotIn("#54102", res_fail.stdout)
+
     def test_bump_version_end_to_end_mixed_release_and_exempt(self) -> None:
         self._write("src/fix.txt", "fix\n")
         self._write(

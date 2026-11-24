@@ -142,7 +142,8 @@
       <post_kind>Human_post | Automation_post | System_post</post_kind>
       <sub_board_access>Open | Members_only | Owner_only</sub_board_access>
       <error>Invalid_id | Post_not_found | Comment_not_found | Io_error
-             | Validation_error | Already_voted | Already_exists | Unauthorized</error>
+             | Validation_error | Already_voted | Already_exists | Unauthorized
+             | Recipient_lookup_failed</error>
 
       <ttl>
         <rule>default_ttl_hours 는 0 이고 이는 영구 보존을 뜻한다.</rule>

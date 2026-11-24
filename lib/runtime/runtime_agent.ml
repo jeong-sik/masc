@@ -172,25 +172,7 @@ let observed_http_transport
       ~net
       ()
   in
-  provider_http_observation_transport
-    { invoke_sync =
-      (fun req ->
-        (* RFC-0095 Phase 0 diagnostic trace — verify which transport path is invoked
-           per turn for each provider. Removed at Phase 0 closeout. *)
-        Log.Runtime_agent.debug
-          "rfc0095-trace: runtime_runner http_transport.invoke_sync invoked";
-        http_transport.invoke_sync req);
-      invoke_stream =
-      (fun ?on_telemetry ~on_event req ->
-        (* RFC-0095 Phase 0 diagnostic trace — verify which transport path is invoked
-           per turn for each provider. Removed at Phase 0 closeout. *)
-        Log.Runtime_agent.debug
-          "rfc0095-trace: runtime_runner http_transport.invoke_stream invoked";
-        http_transport.invoke_stream
-          ?on_telemetry
-          ~on_event
-          req);
-    }
+  provider_http_observation_transport http_transport
 
 let transport_for_provider
     ~sw

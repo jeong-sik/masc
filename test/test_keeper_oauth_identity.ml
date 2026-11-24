@@ -1722,7 +1722,16 @@ let test_start_guides_operator_when_registration_fails () =
   with
   | Error (Keeper_oauth_session.Registration_failed _ as e) ->
       let msg = Keeper_oauth_session.start_error_to_string e in
-      if not (String.contains msg 'A') then
+      let has_substr needle =
+        let nlen = String.length needle and mlen = String.length msg in
+        let rec loop i =
+          if i + nlen > mlen then false
+          else if String.sub msg i nlen = needle then true
+          else loop (i + 1)
+        in
+        loop 0
+      in
+      if not (has_substr "Keeper Identity" && has_substr "/api/v1/keepers/oauth/client") then
         Alcotest.failf "error message does not guide operator: %s" msg
   | Error other ->
       Alcotest.failf "wrong refusal: %s"

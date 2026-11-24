@@ -21,7 +21,7 @@ let start_error_to_string = function
       (Discovery.error_to_string err)
   | Registration_failed err ->
     Printf.sprintf
-      "could not register a client: %s; in TUI press 'A' (내 앱 쓰기) to set your Client ID and Secret (or POST /api/v1/keepers/oauth/client)"
+      "could not register a client: %s; set your Client ID and Secret in the dashboard Keeper Identity panel ('내 앱 쓰기') or POST /api/v1/keepers/oauth/client"
       (Registration.error_to_string err)
   | No_pkce_s256 issuer ->
     Printf.sprintf
@@ -30,7 +30,7 @@ let start_error_to_string = function
       issuer
   | No_registration issuer ->
     Printf.sprintf
-      "no client is configured and %s offers no registration endpoint; in TUI press 'A' (내 앱 쓰기) to set your Client ID and Secret (or POST /api/v1/keepers/oauth/client)"
+      "no client is configured and %s offers no registration endpoint; set your Client ID and Secret in the dashboard Keeper Identity panel ('내 앱 쓰기') or POST /api/v1/keepers/oauth/client"
       issuer
   | Superseded_by_newer_start ->
     "a newer login for this Keeper and service started while this one was \

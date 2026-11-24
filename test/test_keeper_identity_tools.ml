@@ -526,7 +526,7 @@ let github_provider () =
   | Error err ->
       Alcotest.failf "declaration rejected: %s" (Provider.error_to_string err)
 
-(* Writes the credential the way the GitHub tab does -- through
+(* Writes the credential the way the Keeper Identity panel does -- through
    [ensure_config_dir], which resolves the directory from a workspace config
    -- and leaves the reader to resolve it from a base path. If those two ever
    name different directories the token is written where nothing looks. *)

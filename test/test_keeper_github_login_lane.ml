@@ -547,7 +547,7 @@ let test_remote_login_runs_and_is_observed_on_the_endpoint () =
       identity_check.remote_root
 ;;
 
-(* The GitHub tab reads status through [observe]. For a Remote_ssh Keeper the
+(* The Keeper Identity panel reads status through [observe]. For a Remote_ssh Keeper the
    login lives on the endpoint, so a host read answered "not configured" right
    after a successful login. The read has to be the endpoint's probe, and it
    must not create anything there: the directories are the login's to make. *)
@@ -702,7 +702,7 @@ let test_stored_token_without_meta_reads_the_host () =
 
 (* The GitHub MCP identity sends the token from this host. A Remote_ssh
    Keeper's token is on its endpoint, so the read is refused by name instead
-   of telling the operator to log in from the GitHub tab, which they did. *)
+   of telling the operator to log in via masc keeper-github, which they did. *)
 let test_remote_stored_token_is_refused_by_name () =
   with_eio
   @@ fun () ->

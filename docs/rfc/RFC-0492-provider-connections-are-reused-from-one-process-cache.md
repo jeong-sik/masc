@@ -7,7 +7,7 @@ updated: 2026-11-12
 author: claude
 supersedes: []
 superseded_by: null
-related: ["0095"]
+related: []
 ---
 
 # RFC-0492: provider 연결은 프로세스 캐시 하나에서 다시 쓴다

@@ -1,8 +1,8 @@
 # Zendesk's remote MCP server.
 #
 # Zendesk requires an operator-created OAuth client app: create an app in the
-# Zendesk Admin Center, then in TUI press 'A' to enter the client ID and secret,
-# or POST them to /api/v1/keepers/oauth/client.
+# Zendesk Admin Center, then enter the client ID and secret in the dashboard
+# Keeper Identity panel ('내 앱 쓰기'), or POST them to /api/v1/keepers/oauth/client.
 #
 # Measured 2026-09-05: unauthenticated requests answer 401 with WWW-Authenticate
 # naming https://mcp.zendesk.com/.well-known/oauth-protected-resource/mcp,

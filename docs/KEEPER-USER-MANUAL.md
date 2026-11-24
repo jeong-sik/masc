@@ -738,7 +738,7 @@ configuration choice, not an automatic placement or per-Keeper cgroup budget.
 | Signal | What it means | First action |
 |---|---|---|
 | `sandbox_guest_unavailable`, including `microvm_work_volume_probe_unverified` | Guest start, adoption, replacement, or its execution transport failed. The command did not establish that its GitHub token was rejected. | Inspect the guest and transport. Do not re-login or repeatedly run `gh auth status`; that adds more exec requests to an already unhealthy lane. |
-| `github_identity_snapshot_unavailable` | The Keeper's GitHub identity is what failed: a direct refresh, snapshot, or revision check, or a guest or container start that refused the identity. | Inspect this Keeper's GitHub identity with `masc keeper-github status` or the GitHub tab. |
+| `github_identity_snapshot_unavailable` | The Keeper's GitHub identity is what failed: a direct refresh, snapshot, or revision check, or a guest or container start that refused the identity. | Inspect this Keeper's GitHub identity with `masc keeper-github status` or the dashboard Keeper Identity panel. |
 | `remote_github_unreachable` | Keeper-scoped auth failed and the API did not answer; token validity is unproven. | Repair endpoint networking/DNS first, then re-check auth. |
 | `remote_github_identity_missing` | The API answered but this Keeper's scoped auth failed. | Re-provision that Keeper's identity; do not send tokens per tool call. |
 

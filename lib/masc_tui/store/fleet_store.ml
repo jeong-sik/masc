@@ -66,6 +66,7 @@ type t = {
   candle_balances_milli : int String_map.t;
   candle_summary_fallback : Wire_fleet.candle_observation option;
   turn_pulses : Wire_fleet.turn_pulse String_map.t;
+  wall_unix : float;
   fleet_reading : Wire_fleet.fleet_stream_reading Observed.t;
   fleet_degradation : Wire_fleet.fleet_degradation option;
   fleet_mode : Nav.keepers_fleet_mode;
@@ -100,6 +101,7 @@ let empty =
     candle_balances_milli = String_map.empty;
     candle_summary_fallback = None;
     turn_pulses = String_map.empty;
+    wall_unix = 0.0;
     fleet_reading = Observed.unreported;
     fleet_degradation = None;
     fleet_mode = Nav.Fleet_companies;
@@ -322,22 +324,29 @@ let filtered_keepers t =
   | Nav.Fleet_pulse_wall ->
       List.stable_sort
         (fun (a : Wire_fleet.keeper_summary) (b : Wire_fleet.keeper_summary) ->
-          let sum xs = List.fold_left ( +. ) 0.0 xs in
-          let c =
-            Float.compare
-              (sum b.activity_sparkline_24h)
-              (sum a.activity_sparkline_24h)
+          let turns name =
+            match String_map.find_opt name t.turn_pulses with
+            | Some pulse -> Wire_fleet.turns_24h_of_pulse ~now_unix:t.wall_unix pulse
+            | None -> 0
           in
+          let c = Int.compare (turns b.name) (turns a.name) in
           if c <> 0 then c else String.compare a.name b.name)
         matched
 
-let company_groups_with_costs ?attention ~keeper_costs_24h t =
+let company_groups_with_costs ?attention ?now_unix ~keeper_costs_24h t =
   let sandbox_profiles = String_map.bindings t.sandbox_profiles in
+  let turn_pulses = String_map.bindings t.turn_pulses in
+  let now_unix =
+    match now_unix with
+    | Some _ as n -> n
+    | None -> if Float.is_finite t.wall_unix && t.wall_unix > 0.0 then Some t.wall_unix else None
+  in
   Wire_fleet.group_by_company ?attention ~sandbox_profiles ~keeper_costs_24h
+    ?now_unix ~turn_pulses
     (filter_matched_keepers t)
 
-let company_groups ?attention t =
-  company_groups_with_costs ?attention ~keeper_costs_24h:[] t
+let company_groups ?attention ?now_unix t =
+  company_groups_with_costs ?attention ?now_unix ~keeper_costs_24h:[] t
 
 let sandbox_profile_of ~keeper t =
   String_map.find_opt keeper t.sandbox_profiles
@@ -352,23 +361,31 @@ let fleet_infra_counts t =
       | Wire_fleet.Profile_other _ -> (vm, ssh, dock))
     t.sandbox_profiles (0, 0, 0)
 
-let total_turns_24h t =
+let set_wall_unix w t =
+  if Float.is_finite w && w > t.wall_unix then { t with wall_unix = w } else t
+
+let sparkline_24h ~now_unix ~keeper t =
+  match String_map.find_opt keeper t.turn_pulses with
+  | Some pulse -> Wire_fleet.sparkline_24h_of_pulse ~now_unix pulse
+  | None -> []
+
+let keeper_turns_24h ~now_unix ~keeper t =
+  match String_map.find_opt keeper t.turn_pulses with
+  | Some pulse -> Some (Wire_fleet.turns_24h_of_pulse ~now_unix pulse)
+  | None -> None
+
+let total_turns_24h ~now_unix t =
   let ks = keepers_list t in
-  let has_any =
-    List.exists
-      (fun (k : Wire_fleet.keeper_summary) -> k.activity_sparkline_24h <> [])
-      ks
+  let has_any, sum =
+    List.fold_left
+      (fun (has_any, acc) (k : Wire_fleet.keeper_summary) ->
+        match String_map.find_opt k.name t.turn_pulses with
+        | Some pulse ->
+            (true, acc + Wire_fleet.turns_24h_of_pulse ~now_unix pulse)
+        | None -> (has_any, acc))
+      (false, 0) ks
   in
-  if not has_any then None
-  else
-    let sum =
-      List.fold_left
-        (fun acc (k : Wire_fleet.keeper_summary) ->
-          acc
-          +. List.fold_left ( +. ) 0.0 k.activity_sparkline_24h)
-        0.0 ks
-    in
-    Some (Int.of_float (Float.round sum))
+  if has_any then Some sum else None
 
 let find_keeper ~name t =
   List.find_opt

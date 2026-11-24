@@ -210,10 +210,14 @@ let step_raw ~now (m : Model.t) = function
       (* Zero idle HTTP polling: ticks only record wall time, expire toasts,
          update voice recording elapsed seconds, and advance bounded rechecks
          for already-closed Confirming_delivery transmissions. *)
-      let freshness =
-        if wall_unix > m.freshness.last_wall_unix then
-          { m.freshness with last_wall_unix = wall_unix }
-        else m.freshness
+      let wall_advanced =
+        Float.is_finite wall_unix && wall_unix > m.freshness.last_wall_unix
+      in
+      let freshness, fleet =
+        if wall_advanced then
+          ( { m.freshness with last_wall_unix = wall_unix }
+          , Fleet_store.set_wall_unix wall_unix m.fleet )
+        else (m.freshness, m.fleet)
       in
       let drafts0 = Drafts.voice_tick_elapsed ~now m.drafts in
       let drafts, keepers_to_recheck =
@@ -267,7 +271,10 @@ let step_raw ~now (m : Model.t) = function
           keepers_to_recheck
       in
       let next =
-        { m with freshness; drafts } |> Model.expire_toast ~now
+        let m' =
+          { m with freshness; fleet; drafts } |> Model.expire_toast ~now
+        in
+        if wall_advanced then Model.sync_effective_scorecard ~now m' else m'
       in
       (next, recheck_cmds)
   | Msg.Server_health_result { epoch; result } ->

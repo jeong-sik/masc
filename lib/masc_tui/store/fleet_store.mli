@@ -72,6 +72,8 @@ type t = {
   candle_summary_fallback : Wire_fleet.candle_observation option;
   turn_pulses : Wire_fleet.turn_pulse String_map.t;
       (** Each keeper's turn pulse from the last roster read. *)
+  wall_unix : float;
+      (** Current wall-clock Unix seconds used to anchor 24h pulse windows. *)
   fleet_reading : Wire_fleet.fleet_stream_reading Observed.t;
   fleet_degradation : Wire_fleet.fleet_degradation option;
   fleet_mode : Nav.keepers_fleet_mode;
@@ -142,10 +144,12 @@ val fleet_health_counts : Wire_fleet.keeper_summary list -> fleet_health_counts
 val filtered_keepers : t -> Wire_fleet.keeper_summary list
 val company_groups :
   ?attention:Wire_fleet.attention_item list ->
+  ?now_unix:float ->
   t ->
   Wire_fleet.company_group list
 val company_groups_with_costs :
   ?attention:Wire_fleet.attention_item list ->
+  ?now_unix:float ->
   keeper_costs_24h:(string * float) list ->
   t ->
   Wire_fleet.company_group list
@@ -153,9 +157,19 @@ val sandbox_profile_of : keeper:string -> t -> Wire_fleet.keeper_sandbox_profile
 val fleet_infra_counts : t -> int * int * int
 (** [(microvm_count, remote_ssh_count, docker_count)] derived from keeper
     [meta.sandbox_profile]. *)
-val total_turns_24h : t -> int option
-(** Sum of 24h turn counts from keeper [activity_sparkline_24h] slots across
-    the fleet, or [None] when no keeper has sparkline data yet. *)
+val set_wall_unix : float -> t -> t
+(** Advance the fleet store's wall clock used to anchor 24h pulse windows and
+    activity ordering. *)
+val sparkline_24h : now_unix:float -> keeper:string -> t -> float list
+(** 48 half-hour slots ending at the slot holding [now_unix] for [keeper]'s
+    turn pulse, or [[]] when [keeper] has no turn pulse. *)
+val keeper_turns_24h : now_unix:float -> keeper:string -> t -> int option
+(** Executed turns ([ok + failed]) in the 24h window ending at [now_unix] for
+    [keeper], or [None] when [keeper] has no turn pulse. *)
+val total_turns_24h : now_unix:float -> t -> int option
+(** Sum of executed turns ([ok + failed]) in the 24h window ending at [now_unix]
+    across keepers in the fleet with turn pulse data, or [None] when no keeper
+    has pulse data yet. *)
 val find_keeper : name:string -> t -> Wire_fleet.keeper_summary option
 val selected_keeper_summary : t -> Wire_fleet.keeper_summary option
 val selected_company_keeper : t -> Wire_fleet.keeper_summary option

@@ -111,7 +111,6 @@ let mk_keeper ~name ~company ~health : Wire_fleet.keeper_summary =
     total_turns = obs 84;
     last_turn_at_unix = Some 1700000000.0;
     active_turn = None;
-    activity_sparkline_24h = [ 1.0; 2.0; 4.0; 3.0 ];
   }
 
 let mk_goal ~id ~title ~phase : Wire_work.goal =

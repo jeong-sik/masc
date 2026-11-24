@@ -318,17 +318,18 @@ let apply_http_reply ~now (m : Model.t) reply =
   in
   match reply with
   | Msg.Reply_dashboard_shell (Ok shell) ->
-      let freshness =
+      let freshness, fleet0 =
         match shell.generated_at_unix with
         | Some ts when ts > m.freshness.last_wall_unix ->
-            { m.freshness with last_wall_unix = ts }
-        | Some _ | None -> m.freshness
+            ( { m.freshness with last_wall_unix = ts }
+            , Fleet_store.set_wall_unix ts m.fleet )
+        | Some _ | None -> (m.freshness, m.fleet)
       in
       let next =
         {
           m with
           freshness;
-          fleet = Fleet_store.apply_shell ~observed_at:now shell m.fleet;
+          fleet = Fleet_store.apply_shell ~observed_at:now shell fleet0;
         }
         |> Model.sync_effective_scorecard ~now
       in

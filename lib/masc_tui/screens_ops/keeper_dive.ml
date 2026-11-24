@@ -2791,16 +2791,9 @@ let render_config_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
 
 (* --- Embedded Live Keeper Preview Header + 4-Metric Telemetry Strip --- *)
 
-let keeper_turns_24h_opt (k : Wire_fleet.keeper_summary) =
-  match k.activity_sparkline_24h with
-  | [] -> None
-  | slots ->
-      let sum =
-        List.fold_left
-          (fun acc v -> if Float.is_finite v && v > 0.0 then acc +. v else acc)
-          0.0 slots
-      in
-      Some (int_of_float (Float.round sum))
+let keeper_turns_24h_opt ~(model : Model.t) ~name =
+  Fleet_store.keeper_turns_24h ~now_unix:model.freshness.last_wall_unix
+    ~keeper:name model.fleet
 
 let draw_embedded_preview_header grid ~(rect : Rect.t) ~(theme : Theme.t)
     ~(model : Model.t) ~name (k : Wire_fleet.keeper_summary) =
@@ -2837,7 +2830,7 @@ let draw_embedded_preview_header grid ~(rect : Rect.t) ~(theme : Theme.t)
     in
     let ctx_display = Observed.map Fleet_store.context_display k.context in
     let turns_label, turns_short, turns_s =
-      match keeper_turns_24h_opt k with
+      match keeper_turns_24h_opt ~model ~name with
       | Some n24 ->
           ( Ops_common.say model ~ko:"24h 턴" ~en:"24h Turns"
           , Ops_common.say model ~ko:"24h" ~en:"24h"
@@ -2940,7 +2933,12 @@ let draw_embedded_preview_header grid ~(rect : Rect.t) ~(theme : Theme.t)
                 ~label:turns_label ~short_label:turns_short
                 ~value:turns_s ~val_style:(Typography.anchor ~bg theme);
               if cr.h >= 2 then
-                let samples = Ops_common.samples_of_floats k.activity_sparkline_24h in
+                let samples =
+                  Ops_common.samples_of_floats
+                    (Fleet_store.sparkline_24h
+                       ~now_unix:model.freshness.last_wall_unix ~keeper:name
+                       model.fleet)
+                in
                 if Array.length samples > 0 then
                   ignore
                     (Chart.draw_sparkline_run ~clip:cr grid ~x:cr.x ~y:(cr.y + 1)

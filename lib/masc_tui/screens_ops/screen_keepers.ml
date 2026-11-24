@@ -74,8 +74,8 @@ let count_fleet ~(model : Model.t) (ks : Wire_fleet.keeper_summary list) =
 let company_groups_for_model ~(model : Model.t) =
   let attn_items = attention_items_for_grouping model.attention in
   let keeper_costs_24h = Runtime_store.keeper_costs_24h_assoc model.runtime in
-  Fleet_store.company_groups_with_costs ~attention:attn_items ~keeper_costs_24h
-    model.fleet
+  Fleet_store.company_groups_with_costs ~attention:attn_items
+    ~now_unix:model.freshness.last_wall_unix ~keeper_costs_24h model.fleet
 
 let context_cell ~lang (obs : Wire_fleet.context_reading Observed.t) :
     Table.cell_content =
@@ -142,7 +142,11 @@ let keeper_table_row ~(model : Model.t) ~(theme : Theme.t) ~indent_name
   in
   let name_display = if indent_name then company_indent ^ k.name else k.name in
   let task_str = Ops_common.keeper_turn_summary ~lang:model.lang k in
-  let spark_samples = Ops_common.samples_of_floats k.activity_sparkline_24h in
+  let spark_samples =
+    Ops_common.samples_of_floats
+      (Fleet_store.sparkline_24h ~now_unix:model.freshness.last_wall_unix
+         ~keeper:k.name model.fleet)
+  in
   let turns_str =
     Format_val.format_observed Format_val.Count
       (Observed.map Float.of_int k.total_turns)
@@ -477,7 +481,7 @@ let render_narrow_company_rail grid ~(rect : Rect.t) ~(theme : Theme.t)
       List.exists
         (function
           | `Keeper (k : Wire_fleet.keeper_summary) ->
-              k.activity_sparkline_24h <> []
+              Option.is_some (Fleet_store.turn_pulse model.fleet k.name)
           | `Company _ -> false)
         flat_rows
     in
@@ -713,7 +717,12 @@ let render_narrow_company_rail grid ~(rect : Rect.t) ~(theme : Theme.t)
           end;
           if spark_w > 0 then begin
             rx := !rx - spark_w;
-            let samples = Ops_common.samples_of_floats k.activity_sparkline_24h in
+            let samples =
+              Ops_common.samples_of_floats
+                (Fleet_store.sparkline_24h
+                   ~now_unix:model.freshness.last_wall_unix ~keeper:k.name
+                   model.fleet)
+            in
             ignore
               (Chart.draw_sparkline_run ~clip:row_rect grid ~x:!rx ~y:py
                  ~width:spark_w ~theme ~bg ~unicode:true
@@ -770,7 +779,10 @@ let render_narrow_company_rail grid ~(rect : Rect.t) ~(theme : Theme.t)
         in
         let vm_n, ssh_n, _ = Fleet_store.fleet_infra_counts model.fleet in
         let turns_part =
-          match Fleet_store.total_turns_24h model.fleet with
+          match
+            Fleet_store.total_turns_24h
+              ~now_unix:model.freshness.last_wall_unix model.fleet
+          with
           | Some t -> Printf.sprintf " · %dt" t
           | None -> ""
         in
@@ -791,27 +803,35 @@ let render_narrow_company_rail grid ~(rect : Rect.t) ~(theme : Theme.t)
       end
     end
 
-let aggregate_pulse_samples (ks : Wire_fleet.keeper_summary list) =
-  let max_len =
-    List.fold_left
-      (fun acc (k : Wire_fleet.keeper_summary) ->
-        Int.max acc (List.length k.activity_sparkline_24h))
-      0 ks
-  in
-  if max_len = 0 then [||]
-  else
-    let sums = Array.make max_len 0.0 in
-    List.iter
+let aggregate_pulse_samples ~(model : Model.t)
+    (ks : Wire_fleet.keeper_summary list) =
+  let now_unix = model.freshness.last_wall_unix in
+  let sparks =
+    List.filter_map
       (fun (k : Wire_fleet.keeper_summary) ->
-        List.iteri
-          (fun i v ->
-            if i < max_len && Float.is_finite v && v > 0.0 then
-              sums.(i) <- sums.(i) +. v)
-          k.activity_sparkline_24h)
-      ks;
-    Array.map
-      (fun v -> if v <= 0.0 then Chart.Series.Zero else Chart.Series.Value v)
-      sums
+        match
+          Fleet_store.sparkline_24h ~now_unix ~keeper:k.name model.fleet
+        with
+        | [] -> None
+        | xs -> Some xs)
+      ks
+  in
+  match sparks with
+  | [] -> [||]
+  | _ :: _ ->
+      let n = Wire_fleet.pulse_window_slots_24h in
+      let sums = Array.make n 0.0 in
+      List.iter
+        (fun spark ->
+          List.iteri
+            (fun i v ->
+              if i < n && Float.is_finite v && v > 0.0 then
+                sums.(i) <- sums.(i) +. v)
+            spark)
+        sparks;
+      Array.map
+        (fun v -> if v <= 0.0 then Chart.Series.Zero else Chart.Series.Value v)
+        sums
 
 let render_full_width_roster grid ~(rect : Rect.t) ~(theme : Theme.t)
     ~(model : Model.t) =
@@ -923,7 +943,7 @@ let render_full_width_roster grid ~(rect : Rect.t) ~(theme : Theme.t)
              ?selected:selected_idx ~col_gap:(Layout.table_col_gap bp)
              ~columns:standard_roster_columns rows)
     | Nav.Fleet_pulse_wall ->
-        let samples = aggregate_pulse_samples ks in
+        let samples = aggregate_pulse_samples ~model ks in
         let chart_h =
           if Array.length samples > 0 && rect.h >= 12 then Int.min 6 (rect.h / 3)
           else 0

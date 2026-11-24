@@ -248,11 +248,9 @@ let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
     None
   | Keeper_event_queue.Completion_authority_rejected _ ->
     Some Keeper_world_observation.Completion_authority_rejection_stimulus
-  (* Dedicated turn_reason, same principle as the rejection twin: the producer
-     must be able to tell a verdict wake from an autonomous tick — and an
-     approved turn must never be described as a rejection. *)
-  | Keeper_event_queue.Task_outcome _ ->
-    Some Keeper_world_observation.Task_outcome_stimulus
+  (* The authoritative approval observation carries the verdict and selects
+     its wake policy in the cycle decision. *)
+  | Keeper_event_queue.Task_outcome _ -> None
   (* Dedicated turn_reason: the author has to be able to tell a cancellation
      wake from an autonomous tick, otherwise the turn is indistinguishable from
      the 96%-of-turns scheduled channel and the cancellation reads as noise. *)
@@ -1287,9 +1285,8 @@ let heartbeat_event_intake
     | Keeper_world_observation.Ask_answered_stimulus -> 4
     | Keeper_world_observation.Hitl_resolved_stimulus -> 5
     | Keeper_world_observation.Completion_authority_rejection_stimulus -> 6
-    | Keeper_world_observation.Task_outcome_stimulus -> 7
-    | Keeper_world_observation.Task_cancellation_stimulus -> 8
-    | Keeper_world_observation.Workspace_message_stimulus -> 9
+    | Keeper_world_observation.Task_cancellation_stimulus -> 7
+    | Keeper_world_observation.Workspace_message_stimulus -> 8
   in
   let compare_event_queue_trigger a b =
     Int.compare (event_queue_trigger_rank a) (event_queue_trigger_rank b)

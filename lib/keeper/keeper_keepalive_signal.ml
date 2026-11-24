@@ -249,6 +249,15 @@ let stimulus_wake_policy_of ~input_kind ~sender_kind =
     Carry
 ;;
 
+let task_verdict_wake_policy ~input_kind authority =
+  let sender_kind =
+    match authority with
+    | Masc_domain.Human_operator _ -> Human_sender
+    | Masc_domain.System_llm_agent _ -> System_sender
+  in
+  stimulus_wake_policy_of ~input_kind ~sender_kind
+;;
+
 let urgency_of_stimulus_wake_policy = function
   | Now -> Keeper_event_queue.Immediate
   | At_tick -> Keeper_event_queue.Normal

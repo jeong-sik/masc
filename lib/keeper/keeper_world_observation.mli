@@ -332,7 +332,6 @@ type event_queue_trigger =
   | Ask_answered_stimulus
   | Hitl_resolved_stimulus
   | Completion_authority_rejection_stimulus
-  | Task_outcome_stimulus
   | Task_cancellation_stimulus
   | Workspace_message_stimulus
 

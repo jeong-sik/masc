@@ -187,6 +187,33 @@ let test_requested_schedules_preserve_activation_modes () =
     [Masc.Keeper_activation_mode.Manual; On_demand; Autonomous]
 ;;
 
+let test_approved_task_rides_the_next_eligible_turn () =
+  without_overrides @@ fun () ->
+  let meta = { (ready_meta ()) with activation_mode = Masc.Keeper_activation_mode.On_demand } in
+  let approval : Keeper_event_queue.task_outcome =
+    { to_task_id = "task-approved"; to_verification_id = "vrf-approved";
+      to_producer = meta.name; to_authority = Masc_domain.System_llm_agent { agent_run_id = "judge" } }
+  in
+  let stimulus : Keeper_event_queue.stimulus =
+    { post_id = Keeper_event_queue.task_outcome_post_id approval; urgency = Low;
+      arrived_at = 1.; payload = Task_outcome approval }
+  in
+  let event =
+    match WO.pending_board_event_of_stimulus ~base_path:(Filename.get_temp_dir_name ()) ~meta stimulus with
+    | Ok (Some event) -> event
+    | Ok None | Error _ -> fail "approval did not reach intake"
+  in
+  let with_approval obs = { obs with WO.pending_board_events = [event] } in
+  let decision wake obs = WO.keeper_cycle_decision ~wake ~meta (with_approval obs) in
+  check bool "a late wake hint does not start a turn for an approval" false
+    (decision WO.Attention_wake base_obs).should_run;
+  check bool "a due boundary serves the queued approval for an on-demand keeper" true
+    (decision WO.Periodic_tick base_obs).should_run;
+  let mention = decision WO.Attention_wake mention_obs in
+  check bool "a mention can open the turn that carries the approval" true
+    (mention.should_run && mention.channel = WO.Reactive)
+;;
+
 let test_global_proactive_off_suppresses () =
   with_flag "MASC_KEEPER_AUTONOMOUS_ENABLED" "false" @@ fun () ->
   let meta = ready_meta () in
@@ -504,7 +531,8 @@ let () =
             test_global_proactive_off_suppresses
         ] )
     ; ( "reactive"
-      , [ test_case "default runs" `Quick test_default_reactive_runs
+      , [ test_case "a task approval rides an eligible turn" `Quick test_approved_task_rides_the_next_eligible_turn
+        ; test_case "default runs" `Quick test_default_reactive_runs
         ; test_case "global off does not suppress typed mention" `Quick
             test_global_reactive_off_does_not_suppress_typed_mention
         ; test_case "global off does not starve scheduled-autonomous" `Quick

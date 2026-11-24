@@ -344,7 +344,6 @@ type event_queue_trigger =
   | Ask_answered_stimulus
   | Hitl_resolved_stimulus
   | Completion_authority_rejection_stimulus
-  | Task_outcome_stimulus
   | Task_cancellation_stimulus
   | Workspace_message_stimulus
 
@@ -1774,10 +1773,6 @@ let has_pending_completion_authority_rejection
     observation.pending_board_events
 ;;
 
-let has_pending_task_outcome (observation : world_observation) =
-  List.exists is_task_outcome_event observation.pending_board_events
-;;
-
 let has_pending_task_cancellation (observation : world_observation) =
   List.exists is_task_cancellation_event observation.pending_board_events
 ;;
@@ -1830,6 +1825,16 @@ let keeper_cycle_decision
       | Never_started -> false)
   in
   let scheduled_due_from_queue = scheduled_due_from_queue <> [] in
+  let approval_wakes, approval_carried =
+    List.fold_left (fun (wakes, carried) (event : pending_board_event) ->
+      match event.event_kind with
+      | Task_outcome outcome ->
+        (match Keeper_keepalive_signal.task_verdict_wake_policy
+                 ~input_kind:Keeper_keepalive_signal.Task_outcome_approved outcome.to_authority with
+         | Keeper_keepalive_signal.Carry -> wakes, true
+         | Keeper_keepalive_signal.Now | Keeper_keepalive_signal.At_tick -> true, carried)
+      | _ -> wakes, carried) (false, false) observation.pending_board_events
+  in
   let reactive_triggers =
     [ (if Message_scope.has_kind Message_scope.Mention observation.pending_messages
        then Some Mention_pending
@@ -1866,15 +1871,7 @@ let keeper_cycle_decision
                triggers)
     then triggers @ [ Completion_authority_rejection_pending ]
     else triggers
-    (* Same shape as the rejection injection above: the observation may carry a
-       verdict whose stimulus was already consumed from the event queue by an
-       earlier cycle, and the turn must still be attributable to it rather
-       than reported as an unexplained autonomous tick. *)
-  |> fun triggers ->
-    if has_pending_task_outcome observation
-       && not (List.mem Task_outcome_pending triggers)
-    then triggers @ [ Task_outcome_pending ]
-    else triggers
+  |> fun triggers -> if approval_wakes then Task_outcome_pending :: triggers else triggers
     (* Same shape as the rejection injection above: the observation may carry a
        cancellation whose stimulus was already consumed from the event queue by
        an earlier cycle, and the turn must still be attributable to it rather
@@ -1915,6 +1912,7 @@ let keeper_cycle_decision
         not proactive_gate_enabled
         && not requested_schedule_due
         && not deferred_runtime_lane_pending
+        && not (wake = Periodic_tick && approval_carried)
       then
         { should_run = false
         ; channel = Scheduled_autonomous
@@ -1951,6 +1949,7 @@ let keeper_cycle_decision
                     })
              else None)
           ; (if has_actionable_schedule then Some Scheduled_automation_due else None)
+          ; (if approval_carried then Some Task_outcome_pending else None)
           ]
           |> List.filter_map Fun.id
         in

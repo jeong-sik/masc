@@ -589,6 +589,7 @@ let check_approved config ~verification_ids ~authority =
   let identities = List.map (fun stimulus ->
     match stimulus.Keeper_event_queue.payload with
     | Keeper_event_queue.Task_outcome outcome ->
+      Alcotest.(check bool) "approval is carried" true (stimulus.urgency = Low);
       Alcotest.(check string) "approval task" task_id outcome.to_task_id;
       Alcotest.(check string) "approval producer" producer outcome.to_producer;
       Alcotest.(check bool) "approval authority" true (authority = outcome.to_authority);
@@ -648,7 +649,7 @@ let test_approval_enqueue_before_ack_is_idempotent () =
     commit config ~authority:system ~verification_id D.Verdict_approved;
     (match Masc.Keeper_task_outcome_wake.wake_approved_producer
              ~config ~producer ~task_id ~verification_id ~authority:system with
-     | Signaled _ | Durable_deferred _ | Durable_wake_failed _ -> ()
+     | Queued_for_later _ -> ()
      | _ -> Alcotest.fail "fixture could not enqueue approval");
     (* The persisted source remains after the queue write: replay the same
        crash window in a fresh configuration, without a second model verdict. *)

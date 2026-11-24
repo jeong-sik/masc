@@ -236,6 +236,10 @@ val adaptive_idle_2h_sec : float
 val stimulus_wake_policy_of :
   input_kind:input_kind -> sender_kind:sender_kind -> stimulus_wake_policy
 
+val task_verdict_wake_policy :
+  input_kind:input_kind -> Masc_domain.completion_authority -> stimulus_wake_policy
+(** Use the verdict's recorded authority when choosing its wake timing. *)
+
 val urgency_of_stimulus_wake_policy :
   stimulus_wake_policy -> Keeper_event_queue.urgency
 

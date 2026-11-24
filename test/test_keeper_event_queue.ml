@@ -1135,24 +1135,8 @@ let () =
       (Masc.Keeper_world_observation.is_completion_authority_rejection_event
          outcome_event));
   assert (Masc.Keeper_world_observation.is_task_outcome_event outcome_event);
-  assert (
-    match
-      Masc.Keeper_heartbeat_stimulus_intake.event_queue_trigger_of_stimulus
-        outcome_stimulus
-    with
-    | Some Masc.Keeper_world_observation.Task_outcome_stimulus -> true
-    | Some
-        ( Masc.Keeper_world_observation.Bootstrap_stimulus
-        | Masc.Keeper_world_observation.Tool_result_ready_stimulus
-        | Masc.Keeper_world_observation.Scheduled_automation_stimulus
-        | Masc.Keeper_world_observation.Connector_attention_stimulus
-        | Masc.Keeper_world_observation.Ask_answered_stimulus
-        | Masc.Keeper_world_observation.Hitl_resolved_stimulus
-        | Masc.Keeper_world_observation.Completion_authority_rejection_stimulus
-        | Masc.Keeper_world_observation.Task_cancellation_stimulus
-        | Masc.Keeper_world_observation.Workspace_message_stimulus )
-    | None ->
-      false);
+  assert (Option.is_none
+      (Masc.Keeper_heartbeat_stimulus_intake.event_queue_trigger_of_stimulus outcome_stimulus));
   assert (
     stimulus_identity_equal
       outcome_stimulus

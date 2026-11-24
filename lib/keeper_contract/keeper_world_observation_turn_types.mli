@@ -21,7 +21,6 @@ type event_queue_trigger =
   | Completion_authority_rejection_stimulus
       (** A system LLM completion authority rejected evidence submitted by this
           Keeper; this is a distinct reactive input, not Board activity. *)
-  | Task_outcome_stimulus
       (** The approval twin: a completion authority approved evidence submitted
           by this Keeper; a distinct reactive input, never described as a
           rejection (#25868). *)

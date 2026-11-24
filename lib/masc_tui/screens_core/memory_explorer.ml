@@ -465,7 +465,9 @@ let draw_mode_pills ~grid ~(rect : Rect.t) ~(theme : Theme.t) ~(lang : Say.lang)
 
 let draw_os_internals_line ~grid ~clip ~x ~y ~max_w ~theme ~bg ~keeper
     (k : Knowledge_store.t) =
-  match Observed.to_option k.memory_os_internals with
+  match
+    Observed.to_option (Knowledge_store.memory_os_internals_for ~keeper k)
+  with
   | Some intr when String.equal intr.keeper keeper ->
       let comp_s =
         if intr.compaction.present then
@@ -1402,7 +1404,10 @@ let render_keeper_diff_view ~grid ~(rect : Rect.t) ~(theme : Theme.t)
     ~diff_scroll =
   if Rect.is_empty rect then ()
   else
-    match k.memory_diff with
+    match
+      Knowledge_store.memory_diff_for ~keeper:(Some keeper)
+        ~window:k.memory_diff_window k
+    with
     | Observed.Value { data = diff; _ } -> (
         match diff.scope, diff.body with
         | Wire_knowledge.Scope_keeper kp, Wire_knowledge.Keeper_diff { counts; _ }
@@ -1577,7 +1582,10 @@ let render_world_diff_body ~grid ~(rect : Rect.t) ~(theme : Theme.t)
         render_full_reading ~grid ~rect ~theme ~lang ~now_unix ~entry
           ~scroll:k.memory_reading_scroll
     | Some _ | None -> (
-        match k.memory_diff with
+        match
+          Knowledge_store.memory_diff_for ~keeper:None
+            ~window:k.memory_diff_window k
+        with
         | Observed.Value { data = diff; _ } -> (
             match diff.scope, diff.body with
             | ( Wire_knowledge.Scope_world

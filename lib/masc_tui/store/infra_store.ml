@@ -3,6 +3,8 @@ open Masc_tui_keymap
 open Masc_tui_protocol
 open Masc_tui_ui
 
+module String_map = Map.Make (String)
+
 let max_logs = 512
 let max_activity = 256
 
@@ -29,7 +31,7 @@ type t = {
   active_tab : Nav.infra_tab;
   sandboxes : Wire_infra.sandboxes_snapshot Observed.t;
   sandboxes_fallback_404 : bool;
-  keeper_sandbox : Wire_infra.keeper_sandbox_response Observed.t;
+  keeper_sandboxes : Wire_infra.keeper_sandbox_response Observed.t String_map.t;
   repositories : Wire_infra.repository list Observed.t;
   repo_activity : repo_activity option;
   logs : Wire_infra.system_log_entry list;
@@ -54,7 +56,7 @@ let empty =
     active_tab = Nav.Infra_sandboxes;
     sandboxes = Observed.unreported;
     sandboxes_fallback_404 = false;
-    keeper_sandbox = Observed.absent;
+    keeper_sandboxes = String_map.empty;
     repositories = Observed.unreported;
     repo_activity = None;
     logs = [];
@@ -250,8 +252,13 @@ let apply_sandboxes_fallback ~observed_at ~wall_unix
     sandboxes_fallback_404 = true;
   }
 
-let apply_keeper_sandbox ~observed_at keeper_sandbox t =
-  { t with keeper_sandbox = Observed.value ~observed_at keeper_sandbox }
+let keeper_sandbox_for ~keeper t =
+  match String_map.find_opt keeper t.keeper_sandboxes with
+  | Some obs -> obs
+  | None -> Observed.unreported
+
+let set_keeper_sandbox ~keeper obs t =
+  { t with keeper_sandboxes = String_map.add keeper obs t.keeper_sandboxes }
 
 let apply_repositories ~observed_at repositories t =
   { t with repositories = Observed.value ~observed_at repositories }
@@ -718,7 +725,7 @@ let mark_stale_all t =
   {
     t with
     sandboxes = Observed.mark_stale t.sandboxes;
-    keeper_sandbox = Observed.mark_stale t.keeper_sandbox;
+    keeper_sandboxes = String_map.map Observed.mark_stale t.keeper_sandboxes;
     repositories = Observed.mark_stale t.repositories;
     repo_activity =
       Option.map

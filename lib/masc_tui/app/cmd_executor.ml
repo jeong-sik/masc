@@ -654,13 +654,13 @@ let execute_get t ~epoch req =
                    ~decode:Wire_knowledge.decode_wiki_index)
             in
             Msg.Http_reply { epoch; reply }
-        | Cmd.Get_wiki_page _ ->
-            let reply =
-              Msg.Reply_wiki_page
-                (fetch_and_decode_get t ~path
-                   ~decode:Wire_knowledge.decode_wiki_page_detail)
+        | Cmd.Get_wiki_page { page } ->
+            let result =
+              fetch_and_decode_get t ~path
+                ~decode:Wire_knowledge.decode_wiki_page_detail
             in
-            Msg.Http_reply { epoch; reply }
+            Msg.Http_reply
+              { epoch; reply = Msg.Reply_wiki_page { page; result } }
         | Cmd.Get_wiki_log _ ->
             let reply =
               Msg.Reply_wiki_log
@@ -711,11 +711,12 @@ let execute_get t ~epoch req =
             in
             let reply = Msg.Reply_world_memory resolved in
             Msg.Http_reply { epoch; reply }
-        | Cmd.Get_memory_diff { keeper; _ } ->
+        | Cmd.Get_memory_diff { keeper; window } ->
             let reply =
               Msg.Reply_memory_diff
                 {
                   keeper;
+                  window;
                   result =
                     fetch_and_decode_get t ~path
                       ~decode:Wire_knowledge.decode_memory_diff;
@@ -888,13 +889,13 @@ let execute_get t ~epoch req =
                    ~decode:(Wire_infra.decode_sandboxes_snapshot ~observed_at))
             in
             Msg.Http_reply { epoch; reply }
-        | Cmd.Get_keeper_sandbox _ ->
-            let reply =
-              Msg.Reply_keeper_sandbox
-                (fetch_and_decode_get t ~path
-                   ~decode:(Wire_infra.decode_keeper_sandbox ~observed_at))
+        | Cmd.Get_keeper_sandbox { keeper } ->
+            let result =
+              fetch_and_decode_get t ~path
+                ~decode:(Wire_infra.decode_keeper_sandbox ~observed_at)
             in
-            Msg.Http_reply { epoch; reply }
+            Msg.Http_reply
+              { epoch; reply = Msg.Reply_keeper_sandbox { keeper; result } }
         | Cmd.Get_repositories ->
             let reply =
               Msg.Reply_repositories

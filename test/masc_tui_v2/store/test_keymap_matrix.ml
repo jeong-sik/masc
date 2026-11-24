@@ -644,7 +644,9 @@ let populated_model ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_en)
          }
     |> Knowledge_store.apply_artifacts ~observed_at:t0 artifacts
     |> Knowledge_store.apply_world_memory ~observed_at:t0 world_memory
-    |> Knowledge_store.apply_memory_diff ~observed_at:t0 memory_diff
+    |> Knowledge_store.set_memory_diff ~keeper:None
+         ~window:Knowledge_store.Window_24h
+         (Observed.value ~observed_at:t0 memory_diff)
   in
   let usage_windows : Wire_runtime.provider_usage_windows =
     {
@@ -2340,7 +2342,8 @@ let test_journeys_tab_multipane_dives_safety () =
       nav = { base.nav with workspace = Nav.Knowledge };
       knowledge =
         base.knowledge
-        |> Knowledge_store.apply_wiki_page ~observed_at:t0 long_wiki
+        |> Knowledge_store.set_wiki_page ~slug:long_wiki.slug
+             (Observed.value ~observed_at:t0 long_wiki)
         |> Knowledge_store.set_tab Nav.Knowledge_wiki_artifacts;
     }
   in
@@ -2372,8 +2375,9 @@ let test_journeys_tab_multipane_dives_safety () =
     {
       m_kw_dn with
       knowledge =
-        Knowledge_store.apply_wiki_page ~observed_at:t0
-          (mk_wiki_detail ~slug:"runbook" ~title:"Operations Runbook")
+        Knowledge_store.set_wiki_page ~slug:"runbook"
+          (Observed.value ~observed_at:t0
+             (mk_wiki_detail ~slug:"runbook" ~title:"Operations Runbook"))
           m_kw_dn.knowledge;
     }
   in
@@ -3104,7 +3108,8 @@ let test_journeys_tab_multipane_dives_safety () =
       knowledge =
         base.knowledge
         |> Knowledge_store.set_tab Nav.Knowledge_wiki_artifacts
-        |> Knowledge_store.apply_wiki_page ~observed_at:t0 stale_page;
+        |> Knowledge_store.set_wiki_page ~slug:stale_page.slug
+             (Observed.value ~observed_at:t0 stale_page);
     }
   in
   let _, cmds_wo = step m_wiki_mismatch (char_key "o") in
@@ -3889,7 +3894,9 @@ let test_pillar2_scroll_bounds_all_surfaces () =
         base.knowledge
         |> Knowledge_store.set_memory_diff_keeper (Some "alpha")
         |> Knowledge_store.set_memory_view_mode Knowledge_store.View_diff
-        |> Knowledge_store.apply_memory_diff ~observed_at:t0 big_diff;
+        |> Knowledge_store.set_memory_diff ~keeper:(Some "alpha")
+             ~window:Knowledge_store.Window_24h
+             (Observed.value ~observed_at:t0 big_diff);
     }
   in
   let m_kmem_end, _ = step m_kmem (mk_key Keymap.Input.End) in
@@ -4062,7 +4069,8 @@ let test_pillar2_scroll_bounds_all_surfaces () =
       nav = { base.nav with workspace = Nav.Knowledge; pane_index = 1 };
       knowledge =
         base.knowledge
-        |> Knowledge_store.apply_wiki_page ~observed_at:t0 long_wiki_toc
+        |> Knowledge_store.set_wiki_page ~slug:long_wiki_toc.slug
+             (Observed.value ~observed_at:t0 long_wiki_toc)
         |> Knowledge_store.set_tab Nav.Knowledge_wiki_artifacts;
     }
   in
@@ -4497,13 +4505,17 @@ let test_pillar2_scroll_bounds_all_surfaces () =
       knowledge =
         base.knowledge
         |> Knowledge_store.set_tab Nav.Knowledge_memory
-        |> Knowledge_store.apply_memory_diff ~observed_at:t0 world_diff_40;
+        |> Knowledge_store.set_memory_diff ~keeper:None
+             ~window:Knowledge_store.Window_24h
+             (Observed.value ~observed_at:t0 world_diff_40);
     }
   in
   assert_scroll_exact ~label:"Knowledge > Memory pane 1 (World_diff)"
     ~needle:"WORLD_CLAIM_LAST_39"
     ~get_off:(fun m -> m.knowledge.diff_scroll_offset)
     m_mem_world;
+  (* The dive fetches into the Window_revs slot of its own range, not the
+     Memory tab's Window_24h slot. *)
   let m_mem_dive_z =
     {
       m_mem_world with
@@ -4517,6 +4529,11 @@ let test_pillar2_scroll_bounds_all_surfaces () =
                 (Nav.Memory_diff_dive { keeper = None; from_rev = 1; to_rev = 40 });
             ];
         };
+      knowledge =
+        Knowledge_store.set_memory_diff ~keeper:None
+          ~window:(Knowledge_store.Window_revs { from_rev = 1; to_rev = 40 })
+          (Observed.value ~observed_at:t0 world_diff_40)
+          m_mem_world.knowledge;
     }
   in
   assert_scroll_exact ~label:"Memory_diff_dive (World_diff + zoomed)"
@@ -4980,7 +4997,8 @@ let test_pillar2_scroll_bounds_all_surfaces () =
       knowledge =
         base.knowledge
         |> Knowledge_store.apply_thread ~observed_at:t0 (post1, long_comments)
-        |> Knowledge_store.apply_wiki_page ~observed_at:t0 long_wiki_toc
+        |> Knowledge_store.set_wiki_page ~slug:long_wiki_toc.slug
+             (Observed.value ~observed_at:t0 long_wiki_toc)
         |> Knowledge_store.apply_artifacts ~observed_at:t0 many_artifacts;
       runtime = m_lanes.runtime;
       infra = Infra_store.apply_log_snapshot dive_logs base.infra;

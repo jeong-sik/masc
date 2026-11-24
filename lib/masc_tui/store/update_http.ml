@@ -750,18 +750,22 @@ let apply_http_reply ~now (m : Model.t) reply =
                { x with wiki_index = failed_slot err x.wiki_index }))
         ~source:Health.Source_client_http ~ko:"위키 색인 조회"
         ~en:"Wiki index fetch" err
-  | Msg.Reply_wiki_page (Ok page) ->
+  | Msg.Reply_wiki_page { page; result = Ok detail } ->
       ( {
           m with
           knowledge =
-            Knowledge_store.apply_wiki_page ~observed_at:now page m.knowledge;
+            Knowledge_store.set_wiki_page ~slug:page
+              (Observed.value ~observed_at:now detail)
+              m.knowledge;
         }
       , [] )
-  | Msg.Reply_wiki_page (Error err) ->
+  | Msg.Reply_wiki_page { page; result = Error err } ->
       err_reply
         ~fail:
           (on_knowledge (fun (x : Knowledge_store.t) ->
-               { x with wiki_page = failed_slot err x.wiki_page }))
+               Knowledge_store.set_wiki_page ~slug:page
+                 (failed_slot err (Knowledge_store.wiki_page_for ~slug:page x))
+                 x))
         ~source:Health.Source_client_http ~ko:"위키 문서 조회"
         ~en:"Wiki page fetch" err
   | Msg.Reply_wiki_log (Ok log) ->
@@ -811,11 +815,10 @@ let apply_http_reply ~now (m : Model.t) reply =
          stored page and index are marked stale and the current view reads
          them again instead of patching them. *)
       let knowledge =
-        {
-          m.knowledge with
-          wiki_page = Observed.mark_stale m.knowledge.wiki_page;
-          wiki_index = Observed.mark_stale m.knowledge.wiki_index;
-        }
+        let k = m.knowledge in
+        Knowledge_store.set_wiki_page ~slug:page
+          (Observed.mark_stale (Knowledge_store.wiki_page_for ~slug:page k))
+          { k with wiki_index = Observed.mark_stale k.wiki_index }
       in
       let done_ko, done_en =
         match saved.action with
@@ -874,140 +877,71 @@ let apply_http_reply ~now (m : Model.t) reply =
                { x with world_memory = failed_slot err x.world_memory }))
         ~source:Health.Source_client_http ~ko:"세계 기억 조회"
         ~en:"World memory fetch" err
-  | Msg.Reply_memory_diff { keeper; result } ->
-      let expected =
-        match Model.active_dive m with
-        | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory }) -> Some name
-        | Some (Nav.Dive_knowledge (Nav.Memory_diff_dive { keeper = dk; _ })) ->
-            dk
-        | Some
-            ( Nav.Dive_keeper
-                {
-                  tab =
-                    ( Nav.Keeper_chat
-                    | Nav.Keeper_work_candle
-                    | Nav.Keeper_sandbox
-                    | Nav.Keeper_config );
-                  _;
-                }
-            | Nav.Dive_work _
-            | Nav.Dive_knowledge
-                (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
-            | Nav.Dive_infra _ ) ->
-            m.knowledge.memory_diff_keeper
-        | None -> (
-            match m.nav.workspace with
-            | Nav.Keepers
-              when Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory
-              ->
-                Option.map
-                  (fun (k : Wire_fleet.keeper_summary) -> k.name)
-                  (Fleet_store.selected_keeper_summary m.fleet)
-            | Nav.Pulse
-            | Nav.Work
-            | Nav.Keepers
-            | Nav.Knowledge
-            | Nav.Runtime
-            | Nav.Infra ->
-                m.knowledge.memory_diff_keeper)
+  | Msg.Reply_memory_diff { keeper; window; result = Ok diff } ->
+      (* A diff is stored for the scope it was asked about. One whose scope
+         differs from the request is not stored. *)
+      let scope_ok =
+        match keeper, diff.scope with
+        | None, Wire_knowledge.Scope_world -> true
+        | Some kp, Wire_knowledge.Scope_keeper dk -> String.equal kp dk
+        | None, Wire_knowledge.Scope_keeper _
+        | Some _, Wire_knowledge.Scope_world ->
+            false
       in
-      if not (Option.equal String.equal expected keeper) then (m, [])
-      else (
-        match result with
-        | Ok diff ->
-            let scope_ok =
-              match keeper, diff.scope with
-              | None, Wire_knowledge.Scope_world -> true
-              | Some kp, Wire_knowledge.Scope_keeper dk -> String.equal kp dk
-              | None, Wire_knowledge.Scope_keeper _
-              | Some _, Wire_knowledge.Scope_world ->
-                  false
-            in
-            if scope_ok then
-              ( {
-                  m with
-                  knowledge =
-                    Knowledge_store.apply_memory_diff ~observed_at:now diff
-                      m.knowledge;
-                }
-              , [] )
-            else (m, [])
-        | Error err ->
-            err_reply
-              ~fail:
-                (on_knowledge (fun (x : Knowledge_store.t) ->
-                     { x with memory_diff = failed_slot err x.memory_diff }))
-              ~source:Health.Source_client_http ~ko:"기억 변화 조회"
-              ~en:"Memory diff fetch" err)
-  | Msg.Reply_keeper_memory_os_internals { keeper; result } ->
-      let expected =
-        match Model.active_dive m with
-        | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory }) -> Some name
-        | Some (Nav.Dive_knowledge (Nav.Memory_diff_dive { keeper = dk; _ })) ->
-            dk
-        | Some
-            ( Nav.Dive_keeper
-                {
-                  tab =
-                    ( Nav.Keeper_chat
-                    | Nav.Keeper_work_candle
-                    | Nav.Keeper_sandbox
-                    | Nav.Keeper_config );
-                  _;
-                }
-            | Nav.Dive_work _
-            | Nav.Dive_knowledge
-                (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
-            | Nav.Dive_infra _ ) ->
-            m.knowledge.memory_diff_keeper
-        | None -> (
-            match m.nav.workspace with
-            | Nav.Keepers
-              when Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory
-              ->
-                Option.map
-                  (fun (k : Wire_fleet.keeper_summary) -> k.name)
-                  (Fleet_store.selected_keeper_summary m.fleet)
-            | Nav.Pulse
-            | Nav.Work
-            | Nav.Keepers
-            | Nav.Knowledge
-            | Nav.Runtime
-            | Nav.Infra ->
-                m.knowledge.memory_diff_keeper)
-      in
-      if not (Option.equal String.equal expected (Some keeper)) then (m, [])
-      else (
-        match result with
-        | Ok internals when String.equal internals.keeper keeper ->
-            ( {
-                m with
-                knowledge =
-                  Knowledge_store.apply_memory_os_internals ~observed_at:now
-                    internals m.knowledge;
-              }
-            , [] )
-        | Ok _ -> (m, [])
-        | Error (Msg.Http_error { status = 404; _ }) ->
-            let knowledge =
-              { m.knowledge with memory_os_internals = Observed.absent }
-            in
-            ({ m with knowledge }, [])
-        | Error
-            (( Msg.Http_error _
-             | Msg.Transport _
-             | Msg.Workspace_mismatch _
-             | Msg.Decode_error _ ) as err) ->
-            err_reply
-              ~fail:
-                (on_knowledge (fun (x : Knowledge_store.t) ->
-                     {
-                       x with
-                       memory_os_internals =
-                         failed_slot err x.memory_os_internals;
-                     }))
-              ~source:Health.Source_client_http
-              ~ko:"메모리 OS 내부 상태 조회" ~en:"Memory OS internals fetch" err)
+      if scope_ok then
+        ( {
+            m with
+            knowledge =
+              Knowledge_store.set_memory_diff ~keeper ~window
+                (Observed.value ~observed_at:now diff)
+                m.knowledge;
+          }
+        , [] )
+      else (m, [])
+  | Msg.Reply_memory_diff { keeper; window; result = Error err } ->
+      err_reply
+        ~fail:
+          (on_knowledge (fun (x : Knowledge_store.t) ->
+               Knowledge_store.set_memory_diff ~keeper ~window
+                 (failed_slot err
+                    (Knowledge_store.memory_diff_for ~keeper ~window x))
+                 x))
+        ~source:Health.Source_client_http ~ko:"기억 변화 조회"
+        ~en:"Memory diff fetch" err
+  | Msg.Reply_keeper_memory_os_internals { keeper; result = Ok internals } ->
+      (* Internals are stored for the keeper they were asked about. An answer
+         that names another keeper is not stored. *)
+      if String.equal internals.keeper keeper then
+        ( {
+            m with
+            knowledge =
+              Knowledge_store.set_memory_os_internals ~keeper
+                (Observed.value ~observed_at:now internals)
+                m.knowledge;
+          }
+        , [] )
+      else (m, [])
+  | Msg.Reply_keeper_memory_os_internals { keeper; result = Error err } -> (
+      match err with
+      | Msg.Http_error { status = 404; _ } ->
+          ( {
+              m with
+              knowledge =
+                Knowledge_store.set_memory_os_internals ~keeper Observed.absent
+                  m.knowledge;
+            }
+          , [] )
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply
+            ~fail:
+              (on_knowledge (fun (x : Knowledge_store.t) ->
+                   Knowledge_store.set_memory_os_internals ~keeper
+                     (failed_slot err
+                        (Knowledge_store.memory_os_internals_for ~keeper x))
+                     x))
+            ~source:Health.Source_client_http ~ko:"메모리 OS 내부 상태 조회"
+            ~en:"Memory OS internals fetch" err)
   | Msg.Reply_keeper_memory_facts { keeper; result } ->
       let expected =
         match Model.active_dive m with
@@ -1697,18 +1631,23 @@ let apply_http_reply ~now (m : Model.t) reply =
                    { x with sandboxes = failed_slot err x.sandboxes }))
             ~source:(Health.Source_sandbox "fleet") ~ko:"샌드박스 조회"
             ~en:"Sandboxes fetch" err)
-  | Msg.Reply_keeper_sandbox (Ok ks) ->
+  | Msg.Reply_keeper_sandbox { keeper; result = Ok ks } ->
       ( {
           m with
-          infra = Infra_store.apply_keeper_sandbox ~observed_at:now ks m.infra;
+          infra =
+            Infra_store.set_keeper_sandbox ~keeper
+              (Observed.value ~observed_at:now ks)
+              m.infra;
         }
       , [] )
-  | Msg.Reply_keeper_sandbox (Error err) ->
+  | Msg.Reply_keeper_sandbox { keeper; result = Error err } ->
       err_reply
         ~fail:
           (on_infra (fun (x : Infra_store.t) ->
-               { x with keeper_sandbox = failed_slot err x.keeper_sandbox }))
-        ~source:(Health.Source_sandbox "keeper") ~ko:"키퍼 샌드박스 조회"
+               Infra_store.set_keeper_sandbox ~keeper
+                 (failed_slot err (Infra_store.keeper_sandbox_for ~keeper x))
+                 x))
+        ~source:(Health.Source_sandbox keeper) ~ko:"키퍼 샌드박스 조회"
         ~en:"Keeper sandbox fetch" err
   | Msg.Reply_repositories (Ok repos) ->
       let infra =

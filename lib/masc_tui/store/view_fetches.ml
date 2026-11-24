@@ -14,28 +14,6 @@ let needs_fetch ~force obs =
     | Observed.Failed { retryable = true; _ } ->
         true
 
-(* A slot that holds one target's answer at a time: a keeper's sandbox or
-   memory internals, a scope's memory diff, a wiki page. A value for another
-   target asks again. So does a failure, which does not record the target
-   that failed. *)
-let needs_target_fetch ~force ~holds_target obs =
-  match obs with
-  | Observed.Value { data; stale = false; _ } ->
-      force || not (holds_target data)
-  | Observed.Failed _ -> true
-  | Observed.Loading _
-  | Observed.Value { stale = true; _ }
-  | Observed.Absent
-  | Observed.Unreported ->
-      needs_fetch ~force obs
-
-let memory_diff_holds ~keeper (diff : Wire_knowledge.memory_diff) =
-  match (diff.scope, keeper) with
-  | Wire_knowledge.Scope_keeper k, Some name -> String.equal k name
-  | Wire_knowledge.Scope_world, None -> true
-  | Wire_knowledge.Scope_keeper _, None | Wire_knowledge.Scope_world, Some _ ->
-      false
-
 let add_if cond req acc = if cond then req :: acc else acc
 
 (* Once the ledger route has answered 404, the Candle panels read the
@@ -70,10 +48,8 @@ let fetches_for_context_drawer ~force (m : Model.t) =
         needs_fetch ~force (Fleet_store.turn_records_for ~keeper m.fleet)
       in
       let internals_needed =
-        needs_target_fetch ~force
-          ~holds_target:(fun (i : Wire_knowledge.memory_os_internals) ->
-            String.equal i.keeper keeper)
-          m.knowledge.memory_os_internals
+        needs_fetch ~force
+          (Knowledge_store.memory_os_internals_for ~keeper m.knowledge)
       in
       []
       |> add_keeper_costs ~force m
@@ -133,15 +109,13 @@ let keeper_tab_fetches ~force ~name ~tab (m : Model.t) =
               { keeper = name; limit = Some 80; cursor = None })
   | Nav.Keeper_memory ->
       let diff_needed =
-        needs_target_fetch ~force
-          ~holds_target:(memory_diff_holds ~keeper:(Some name))
-          m.knowledge.memory_diff
+        needs_fetch ~force
+          (Knowledge_store.memory_diff_for ~keeper:(Some name)
+             ~window:m.knowledge.memory_diff_window m.knowledge)
       in
       let internals_needed =
-        needs_target_fetch ~force
-          ~holds_target:(fun (i : Wire_knowledge.memory_os_internals) ->
-            String.equal i.keeper name)
-          m.knowledge.memory_os_internals
+        needs_fetch ~force
+          (Knowledge_store.memory_os_internals_for ~keeper:name m.knowledge)
       in
       let facts_needed =
         match m.knowledge.keeper_memory_facts with
@@ -188,10 +162,7 @@ let keeper_tab_fetches ~force ~name ~tab (m : Model.t) =
       |> candle_ledger_reqs ~force m
   | Nav.Keeper_sandbox ->
       let sandbox_needed =
-        needs_target_fetch ~force
-          ~holds_target:(fun (s : Wire_infra.keeper_sandbox_response) ->
-            String.equal s.keeper name)
-          m.infra.keeper_sandbox
+        needs_fetch ~force (Infra_store.keeper_sandbox_for ~keeper:name m.infra)
       in
       []
       |> add_if sandbox_needed (Cmd.Get_keeper_sandbox { keeper = name })
@@ -266,10 +237,8 @@ let selected_wiki_page_reqs ~force (m : Model.t) =
       | None -> []
       | Some p ->
           if
-            needs_target_fetch ~force
-              ~holds_target:(fun (d : Wire_knowledge.wiki_page_detail) ->
-                String.equal d.slug p.slug)
-              m.knowledge.wiki_page
+            needs_fetch ~force
+              (Knowledge_store.wiki_page_for ~slug:p.slug m.knowledge)
           then [ Cmd.Get_wiki_page { page = p.slug } ]
           else [])
 
@@ -381,10 +350,8 @@ let fetches_for_workspace ~force (m : Model.t) =
             | None -> []
             | Some keeper ->
                 let internals_needed =
-                  needs_target_fetch ~force
-                    ~holds_target:(fun (i : Wire_knowledge.memory_os_internals) ->
-                      String.equal i.keeper keeper)
-                    m.knowledge.memory_os_internals
+                  needs_fetch ~force
+                    (Knowledge_store.memory_os_internals_for ~keeper m.knowledge)
                 in
                 let facts_needed =
                   match m.knowledge.keeper_memory_facts with
@@ -417,10 +384,7 @@ let fetches_for_workspace ~force (m : Model.t) =
                      (Cmd.Get_keeper_memory_activity { keeper; limit = 50 })
           in
           let diff_needed =
-            needs_target_fetch ~force
-              ~holds_target:
-                (memory_diff_holds ~keeper:m.knowledge.memory_diff_keeper)
-              m.knowledge.memory_diff
+            needs_fetch ~force (Knowledge_store.current_memory_diff m.knowledge)
           in
           ([]
           |> add_if

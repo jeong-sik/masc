@@ -1205,7 +1205,9 @@ let test_visibility_enter_refresh_and_resize () =
     knowledge
     |> Knowledge_store.set_tab Nav.Knowledge_memory
     |> Knowledge_store.set_memory_diff_keeper (Some "alpha")
-    |> Knowledge_store.apply_memory_diff ~observed_at:now0 diff_snap
+    |> Knowledge_store.set_memory_diff ~keeper:(Some "alpha")
+         ~window:Knowledge_store.Window_24h
+         (Observed.value ~observed_at:now0 diff_snap)
   in
   let m_k3, _ =
     Update_nav.switch_workspace { m0 with fleet; knowledge = k_mem } Nav.Knowledge

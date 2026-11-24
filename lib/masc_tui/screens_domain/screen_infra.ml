@@ -2207,13 +2207,13 @@ let render_dive_sandbox ~keeper ~(model : Model.t) ~cache ~(rect : Rect.t)
   let lang = model.lang in
   let inf = model.infra in
   let entry_opt =
-    match Observed.to_option inf.keeper_sandbox with
-    | Some resp when String.equal resp.keeper keeper ->
+    match Observed.to_option (Infra_store.keeper_sandbox_for ~keeper inf) with
+    | Some resp ->
         Some
           (entry_of_keeper_detail
              ~sandboxes:(Observed.to_option inf.sandboxes)
              resp.sandbox)
-    | Some _ | None -> (
+    | None -> (
         match Observed.to_option inf.sandboxes with
         | Some s ->
             List.find_opt

@@ -59,6 +59,9 @@ type t = {
   field_meta : Wire_config.field_entity_meta String_map.t;
   search_query : string;
   dirty_fields : Wire_config.patch_op String_map.t;
+  dirty_by_target :
+    (Wire_config.config_target * Wire_config.patch_op String_map.t) list;
+  discard_confirm_armed : bool;
   dry_run_preview : dry_run_state;
   dry_run_scroll_offset : int;
   save_state : save_state;
@@ -73,6 +76,7 @@ type t = {
   scroll_offset : int;
   editing_field_key : string option;
   editing_buffer : string;
+  editing_cursor : int;
 }
 
 let all_categories_ordered =
@@ -106,6 +110,8 @@ let empty =
     field_meta = String_map.empty;
     search_query = "";
     dirty_fields = String_map.empty;
+    dirty_by_target = [];
+    discard_confirm_armed = false;
     dry_run_preview = Dry_run_idle;
     dry_run_scroll_offset = 0;
     save_state = Save_idle;
@@ -120,6 +126,7 @@ let empty =
     scroll_offset = 0;
     editing_field_key = None;
     editing_buffer = "";
+    editing_cursor = 0;
   }
 
 let contains_ci = Store_scroll.contains_ci
@@ -694,12 +701,33 @@ let cycle_tab dir t =
 let set_target target t =
   if equal_config_target target t.target then t
   else
+    (* Preserve staged edits per target so switching away and back never
+       silently discards unsaved patches. *)
+    let without_old =
+      List.filter (fun (tg, _) -> not (equal_config_target tg t.target))
+        t.dirty_by_target
+    in
+    let dirty_by_target =
+      if String_map.is_empty t.dirty_fields then without_old
+      else (t.target, t.dirty_fields) :: without_old
+    in
+    let restored_dirty =
+      match
+        List.find_opt
+          (fun (tg, _) -> equal_config_target tg target)
+          dirty_by_target
+      with
+      | Some (_, m) -> m
+      | None -> String_map.empty
+    in
     {
       t with
       target;
       schema = Observed.loading ~since_ns:Clock.Mono.zero;
       field_meta = String_map.empty;
-      dirty_fields = String_map.empty;
+      dirty_fields = restored_dirty;
+      dirty_by_target;
+      discard_confirm_armed = false;
       dry_run_preview = Dry_run_idle;
       dry_run_scroll_offset = 0;
       save_state = Save_idle;
@@ -709,6 +737,7 @@ let set_target target t =
       scroll_offset = 0;
       editing_field_key = None;
       editing_buffer = "";
+      editing_cursor = 0;
     }
 
 let set_new_keeper_name new_keeper_name t = { t with new_keeper_name }
@@ -861,17 +890,76 @@ let field_meta_map_of_list pairs =
     (fun acc (k, v) -> String_map.add k v acc)
     String_map.empty pairs
 
+let preserve_selection_after_schema_update ~prev_sec_id ~prev_field_key next =
+  let rows = visible_tree_rows next in
+  let sec_idx =
+    match prev_sec_id with
+    | Some sid -> (
+        let rec find i = function
+          | [] -> None
+          | Tree_section s :: _ when String.equal s.section_id sid -> Some i
+          | (Tree_section _ | Tree_category _ | Tree_models_catalog_toggle _) :: rest ->
+              find (i + 1) rest
+        in
+        match find 0 rows with
+        | Some i -> i
+        | None -> first_section_index_for_tab next.active_tab next)
+    | None -> first_section_index_for_tab next.active_tab next
+  in
+  let next1 = { next with selected_section_idx = sec_idx } in
+  let fields =
+    match selected_section next1 with
+    | Some s -> s.fields
+    | None -> []
+  in
+  let field_idx =
+    match prev_field_key with
+    | Some fk ->
+        let rec find i = function
+          | [] -> 0
+          | (f : Wire_config.schema_field) :: _ when String.equal f.full_key fk ->
+              i
+          | _ :: rest -> find (i + 1) rest
+        in
+        find 0 fields
+    | None -> 0
+  in
+  { next1 with selected_field_index = field_idx }
+
 let apply_schema_meta ~target meta t =
   if equal_config_target target t.target then
+    let prev_sec_id =
+      Option.map (fun s -> s.section_id) (selected_section t)
+    in
+    let prev_field_key =
+      match selected_section t with
+      | Some s ->
+          Option.map
+            (fun (f : Wire_config.schema_field) -> f.full_key)
+            (List.nth_opt s.fields
+               (clamp_index (List.length s.fields) t.selected_field_index))
+      | None -> None
+    in
     let next = { t with field_meta = field_meta_map_of_list meta } in
     if Observed.is_value next.schema then
-      let idx = first_section_index_for_tab next.active_tab next in
-      { next with selected_section_idx = idx; selected_field_index = 0 }
+      preserve_selection_after_schema_update ~prev_sec_id ~prev_field_key next
     else next
   else t
 
 let apply_schema ?field_meta ~observed_at (schema : Wire_config.config_schema) t =
   if equal_config_target schema.target t.target then
+    let prev_sec_id =
+      Option.map (fun s -> s.section_id) (selected_section t)
+    in
+    let prev_field_key =
+      match selected_section t with
+      | Some s ->
+          Option.map
+            (fun (f : Wire_config.schema_field) -> f.full_key)
+            (List.nth_opt s.fields
+               (clamp_index (List.length s.fields) t.selected_field_index))
+      | None -> None
+    in
     let field_meta =
       match field_meta with
       | Some pairs -> field_meta_map_of_list pairs
@@ -880,8 +968,7 @@ let apply_schema ?field_meta ~observed_at (schema : Wire_config.config_schema) t
     let next =
       { t with schema = Observed.value ~observed_at schema; field_meta }
     in
-    let idx = first_section_index_for_tab next.active_tab next in
-    { next with selected_section_idx = idx; selected_field_index = 0 }
+    preserve_selection_after_schema_update ~prev_sec_id ~prev_field_key next
   else t
 
 let mark_dry_run_loading t =
@@ -897,9 +984,15 @@ let apply_patch_response ~dry_run (resp : Wire_config.patch_response) t =
       | Some _ as sid -> sid
       | None -> t.last_snapshot_id
     in
+    let dirty_by_target =
+      List.filter (fun (tg, _) -> not (equal_config_target tg t.target))
+        t.dirty_by_target
+    in
     {
       t with
       dirty_fields = String_map.empty;
+      dirty_by_target;
+      discard_confirm_armed = false;
       dry_run_preview = Dry_run_idle;
       dry_run_scroll_offset = 0;
       save_state = Save_succeeded resp;
@@ -1083,32 +1176,60 @@ let apply_tui_pref_op ~observed_at ~full_key op t =
   { t with preferences = Observed.value ~observed_at prefs }
 
 let stage_patch ~full_key op t =
+  let dirty_fields = String_map.add full_key op t.dirty_fields in
+  let dirty_by_target =
+    (t.target, dirty_fields)
+    :: List.filter (fun (tg, _) -> not (equal_config_target tg t.target))
+         t.dirty_by_target
+  in
   {
     t with
-    dirty_fields = String_map.add full_key op t.dirty_fields;
+    dirty_fields;
+    dirty_by_target;
+    discard_confirm_armed = false;
     dry_run_preview = Dry_run_idle;
     dry_run_scroll_offset = 0;
   }
 
 let unstage_patch ~full_key t =
+  let dirty_fields = String_map.remove full_key t.dirty_fields in
+  let without =
+    List.filter (fun (tg, _) -> not (equal_config_target tg t.target))
+      t.dirty_by_target
+  in
+  let dirty_by_target =
+    if String_map.is_empty dirty_fields then without
+    else (t.target, dirty_fields) :: without
+  in
   {
     t with
-    dirty_fields = String_map.remove full_key t.dirty_fields;
+    dirty_fields;
+    dirty_by_target;
+    discard_confirm_armed = false;
     dry_run_preview = Dry_run_idle;
     dry_run_scroll_offset = 0;
   }
 
 let clear_dirty t =
+  let dirty_by_target =
+    List.filter (fun (tg, _) -> not (equal_config_target tg t.target))
+      t.dirty_by_target
+  in
   {
     t with
     dirty_fields = String_map.empty;
+    dirty_by_target;
+    discard_confirm_armed = false;
     dry_run_preview = Dry_run_idle;
     dry_run_scroll_offset = 0;
     editing_field_key = None;
     editing_buffer = "";
+    editing_cursor = 0;
   }
 
 let dirty_count t = String_map.cardinal t.dirty_fields
+let arm_discard_confirm t = { t with discard_confirm_armed = true }
+let disarm_discard_confirm t = { t with discard_confirm_armed = false }
 
 let step_field ~delta (f : Wire_config.schema_field) t =
   if not f.writable then
@@ -1395,6 +1516,8 @@ let begin_edit_new_keeper_name t =
     t with
     editing_field_key = Some new_keeper_name_field_key;
     editing_buffer = t.new_keeper_name;
+    editing_cursor = String.length t.new_keeper_name;
+    discard_confirm_armed = false;
   }
 
 let stage_remove_field (f : Wire_config.schema_field) t =
@@ -1462,6 +1585,8 @@ let begin_edit_field ?(step_enum = true) (f : Wire_config.schema_field) t =
             t with
             editing_field_key = Some f.full_key;
             editing_buffer = initial_buf;
+            editing_cursor = String.length initial_buf;
+            discard_confirm_armed = false;
           }
 
 let begin_edit_selected t =
@@ -1474,28 +1599,142 @@ let begin_edit_keeper_selected ?lang t =
   | None -> Error "No configuration field selected"
   | Some f -> begin_edit_field ~step_enum:true f t
 
-let update_edit_buffer editing_buffer t = { t with editing_buffer }
+let is_utf8_cont b = b land 0xC0 = 0x80
+
+let clamp_edit_cursor s c =
+  let len = String.length s in
+  let c = max 0 (min len c) in
+  let rec align i =
+    if i <= 0 || i >= len then i
+    else if is_utf8_cont (Char.code s.[i]) then align (i - 1)
+    else i
+  in
+  align c
+
+let prev_utf8_boundary s c =
+  let c = clamp_edit_cursor s c in
+  if c <= 0 then 0
+  else
+    let rec back i =
+      if i <= 0 then 0
+      else if is_utf8_cont (Char.code s.[i]) then back (i - 1)
+      else i
+    in
+    back (c - 1)
+
+let next_utf8_boundary s c =
+  let len = String.length s in
+  let c = clamp_edit_cursor s c in
+  if c >= len then len
+  else
+    let d = String.get_utf_8_uchar s c in
+    min len (c + max 1 (Uchar.utf_decode_length d))
+
+let update_edit_buffer editing_buffer t =
+  {
+    t with
+    editing_buffer;
+    editing_cursor = String.length editing_buffer;
+    discard_confirm_armed = false;
+  }
 
 let append_edit_char s t =
-  { t with editing_buffer = t.editing_buffer ^ s }
-
-let is_utf8_cont b = b land 0xC0 = 0x80
+  if String.equal s "" then t
+  else
+    let buf = t.editing_buffer in
+    let c = clamp_edit_cursor buf t.editing_cursor in
+    let before = String.sub buf 0 c in
+    let after = String.sub buf c (String.length buf - c) in
+    {
+      t with
+      editing_buffer = before ^ s ^ after;
+      editing_cursor = c + String.length s;
+      discard_confirm_armed = false;
+    }
 
 let backspace_edit_buffer t =
   let s = t.editing_buffer in
-  let len = String.length s in
-  if len <= 0 then t
+  let c = clamp_edit_cursor s t.editing_cursor in
+  if c <= 0 then t
   else
-    let rec prev i =
-      if i <= 0 then 0
-      else if is_utf8_cont (Char.code s.[i]) then prev (i - 1)
-      else i
+    let prev = prev_utf8_boundary s c in
+    let before = String.sub s 0 prev in
+    let after = String.sub s c (String.length s - c) in
+    {
+      t with
+      editing_buffer = before ^ after;
+      editing_cursor = prev;
+      discard_confirm_armed = false;
+    }
+
+let delete_edit_forward t =
+  let s = t.editing_buffer in
+  let len = String.length s in
+  let c = clamp_edit_cursor s t.editing_cursor in
+  if c >= len then t
+  else
+    let nxt = next_utf8_boundary s c in
+    let before = String.sub s 0 c in
+    let after = String.sub s nxt (len - nxt) in
+    {
+      t with
+      editing_buffer = before ^ after;
+      editing_cursor = c;
+      discard_confirm_armed = false;
+    }
+
+let kill_edit_line_start t =
+  let s = t.editing_buffer in
+  let c = clamp_edit_cursor s t.editing_cursor in
+  if c <= 0 then t
+  else
+    let after = String.sub s c (String.length s - c) in
+    {
+      t with
+      editing_buffer = after;
+      editing_cursor = 0;
+      discard_confirm_armed = false;
+    }
+
+let kill_edit_word t =
+  let s = t.editing_buffer in
+  let c = clamp_edit_cursor s t.editing_cursor in
+  if c <= 0 then t
+  else
+    let is_sp ch = Char.equal ch ' ' || Char.equal ch '\t' in
+    let rec skip_sp i =
+      if i <= 0 then 0 else if is_sp s.[i - 1] then skip_sp (i - 1) else i
     in
-    let cut = prev (len - 1) in
-    { t with editing_buffer = String.sub s 0 cut }
+    let rec skip_w i =
+      if i <= 0 then 0
+      else if is_sp s.[i - 1] then i
+      else skip_w (prev_utf8_boundary s i)
+    in
+    let start = skip_w (skip_sp c) in
+    let before = String.sub s 0 start in
+    let after = String.sub s c (String.length s - c) in
+    {
+      t with
+      editing_buffer = before ^ after;
+      editing_cursor = start;
+      discard_confirm_armed = false;
+    }
+
+let move_edit_cursor dir t =
+  let s = t.editing_buffer in
+  let len = String.length s in
+  let c = clamp_edit_cursor s t.editing_cursor in
+  let editing_cursor =
+    match dir with
+    | `Left -> prev_utf8_boundary s c
+    | `Right -> next_utf8_boundary s c
+    | `Home -> 0
+    | `End -> len
+  in
+  { t with editing_cursor }
 
 let cancel_edit_field t =
-  { t with editing_field_key = None; editing_buffer = "" }
+  { t with editing_field_key = None; editing_buffer = ""; editing_cursor = 0 }
 
 let parse_strict_bool s =
   match String.lowercase_ascii (String.trim s) with

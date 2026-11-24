@@ -43,6 +43,10 @@ type nav_state = {
   dive_scroll_offset : int;
   help_scroll_offset : int;
   queue_scroll_offset : int;
+  btw_scroll_offset : int;
+  palette_scroll_offset : int;
+  modal_edit_cursor : int;
+  return_overlay : Nav.overlay option;
 }
 
 type pulse_pane =
@@ -325,6 +329,10 @@ val open_wiki_edit_modal_for_detail :
 (** Open the inline Wiki edit modal seeded with [detail], recording [detail]
     as [knowledge.wiki_edit_base] and clearing any pending wiki edit slug. *)
 val modal_field_value : key:string -> inline_modal_state -> string
+val modal_active_field_value : inline_modal_state -> string
+val modal_field_help : key:string -> Say.t option
+(** Concise contextual help / allowed enum values for the focused inline modal
+    field, rendered below the input row so short labels never clip options. *)
 val modal_update_active_field :
   (string -> string) -> inline_modal_state -> inline_modal_state
 val modal_cycle_field : delta:int -> inline_modal_state -> inline_modal_state

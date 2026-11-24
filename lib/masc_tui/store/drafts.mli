@@ -124,6 +124,7 @@ val delete_forward : t -> t
 val kill_word : t -> t
 val kill_line_start : t -> t
 val move_cursor : [ `Left | `Right | `Home | `End ] -> t -> t
+val move_cursor_vertical : [ `Up | `Down ] -> t -> t
 val move_cursor_word : [ `Left | `Right ] -> t -> t
 val move_cursor_line : [ `Start | `End ] -> t -> t
 val clear_current_draft : t -> t

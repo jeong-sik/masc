@@ -1755,7 +1755,11 @@ let render_toast_pill grid ~(body_rect : Rect.t) ~(theme : Theme.t)
         let text = Grapheme.truncate_to_width ~max_width:max_w raw in
         let pw = Grapheme.display_width text + 3 in
         let px = Int.max body_rect.x (Rect.right body_rect - pw - 1) in
-        let py = Rect.bottom body_rect - 1 in
+        let py =
+          if Option.is_some model.nav.overlay && body_rect.h >= 4 then
+            Rect.bottom body_rect - 2
+          else Rect.bottom body_rect - 1
+        in
         let pill_rect = Rect.make ~x:px ~y:py ~w:pw ~h:1 in
         let fg = Color.of_rgb (Theme.status_color theme tone) in
         let bg = Color.of_rgb theme.surface_2 in

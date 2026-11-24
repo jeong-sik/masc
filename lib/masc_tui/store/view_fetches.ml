@@ -53,6 +53,9 @@ let fetches_for_context_drawer ~force (m : Model.t) =
       in
       []
       |> add_keeper_costs ~force m
+      |> add_if
+           (needs_fetch ~force m.runtime.efficiency)
+           (Cmd.Get_efficiency { month = None })
       |> add_if records_needed
            (Cmd.Get_keeper_turn_records
               { keeper; limit = context_history_turns })
@@ -165,10 +168,14 @@ let fetches_for_overlay ~force (m : Model.t) =
         | None -> []
       in
       drawer_reqs @ ctx_reqs
+  | Some (Nav.Queue_context Nav.Drawer_schedules) ->
+      if needs_fetch ~force m.work.schedules then
+        [ Cmd.Get_schedules { cursor = None } ]
+      else []
   | Some
       ( Nav.Palette
       | Nav.Incidents
-      | Nav.Queue_context (Nav.Drawer_queue | Nav.Drawer_schedules)
+      | Nav.Queue_context Nav.Drawer_queue
       | Nav.Inline_action _
       | Nav.Ask_answer
       | Nav.Help

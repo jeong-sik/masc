@@ -11478,6 +11478,7 @@ let test_ux_batch1_focus_resize_micro_zoom_and_cli_prefs () =
           m_s.config with
           editing_field_key = Some "tui.theme";
           editing_buffer = "paper";
+          editing_cursor = 5;
         };
     }
   in
@@ -11626,6 +11627,429 @@ let test_ux_batch1_focus_resize_micro_zoom_and_cli_prefs () =
     (Say.equal_lang m_explicit_en.lang Say.Lang_en);
   Alcotest.(check bool) "UX-09 explicit /lang clears cli_lang_override" false
     m_explicit_en.cli_lang_override
+
+let test_ux_batch2_modals_settings_overlays () =
+  let step m ev = Update.step ~now:t0 m (Msg.Key_event ev) in
+  let has_cmd pred cmds = List.exists pred cmds in
+  let m_base = Model.initial ~cols:120 ~rows:34 () in
+  let k_alpha = grouped_keeper ~group:"org-a" "alpha" in
+  let k_beta = grouped_keeper ~group:"org-a" "beta" in
+  let m_fleet =
+    {
+      m_base with
+      fleet =
+        Fleet_store.apply_keepers ~observed_at:t0 [ k_alpha; k_beta ]
+          m_base.fleet;
+    }
+  in
+
+  (* UX-10: Ack_toast_only never closes an open inline modal; Ack_close_modal_and_refresh closes + refreshes; Reply_memory_act Error sets Toast_error *)
+  let m_modal, _ = Update_nav.open_inline_modal m_fleet Nav.Repo_add_form in
+  let m_after_bg, _ =
+    Update.step ~now:t0 m_modal
+      (Msg.Http_reply
+         {
+           epoch = m_modal.epoch;
+           reply =
+             Msg.Reply_action_ack
+               {
+                 label = Say.literal "Copied";
+                 ack_scope = Msg.Ack_toast_only;
+                 result = Ok ();
+               };
+         })
+  in
+  Alcotest.(check bool) "UX-10 Ack_toast_only preserves open inline modal" true
+    (Option.is_some m_after_bg.inline_modal
+    && Option.is_some m_after_bg.nav.overlay);
+  let m_after_submit, cmds_submit =
+    Update.step ~now:t0 m_after_bg
+      (Msg.Http_reply
+         {
+           epoch = m_after_bg.epoch;
+           reply =
+             Msg.Reply_action_ack
+               {
+                 label = Say.literal "Repo added";
+                 ack_scope = Msg.Ack_close_modal_and_refresh;
+                 result = Ok ();
+               };
+         })
+  in
+  Alcotest.(check bool) "UX-10 Ack_close_modal_and_refresh closes modal" true
+    (Option.is_none m_after_submit.inline_modal
+    && Option.is_none m_after_submit.nav.overlay);
+  Alcotest.(check bool) "UX-10 Ack_close_modal_and_refresh refreshes current view"
+    true (cmds_submit <> []);
+  let m_mem_err, _ =
+    Update.step ~now:t0 m_fleet
+      (Msg.Http_reply
+         {
+           epoch = m_fleet.epoch;
+           reply =
+             Msg.Reply_memory_act
+               {
+                 keeper = "alpha";
+                 result =
+                   Error
+                     (Msg.Http_error
+                        { status = 500; body = "boom"; api_error = None });
+               };
+         })
+  in
+  Alcotest.(check bool) "UX-10 Reply_memory_act error shows Toast_error" true
+    (match m_mem_err.toast with
+    | Some { level = Model.Toast_error; _ } -> true
+    | Some _ | None -> false);
+
+  (* UX-11: Inline modal cursor movement, mid-string insert, Delete, Ctrl+U, Ctrl+W *)
+  let m_m0, _ = Update_nav.open_inline_modal m_fleet Nav.Repo_add_form in
+  let m_m1, _ = step m_m0 (char_key "a") in
+  let m_m2, _ = step m_m1 (char_key "c") in
+  let m_m3, _ = step m_m2 (key Keymap.Input.Left) in
+  let m_m4, _ = step m_m3 (char_key "b") in
+  let cur_val m =
+    match m.Model.inline_modal with
+    | Some mdl -> Model.modal_active_field_value mdl
+    | None -> ""
+  in
+  Alcotest.(check string) "UX-11 inline modal Left + insert edits mid-string"
+    "abc" (cur_val m_m4);
+  let m_m5, _ = step m_m4 (key Keymap.Input.Home) in
+  let m_m6, _ = step m_m5 (key Keymap.Input.Delete) in
+  Alcotest.(check string) "UX-11 inline modal Home + Delete removes first char"
+    "bc" (cur_val m_m6);
+  let m_m7, _ = step m_m6 (key Keymap.Input.End) in
+  let m_m8, _ = step m_m7 (char_key ~ctrl:true "u") in
+  Alcotest.(check string) "UX-11 inline modal End + Ctrl+U clears field" ""
+    (cur_val m_m8);
+
+  (* UX-12: Settings 2-step Esc confirm on dirty_count > 0, per-target dirty preservation, Ack_editor_saved clears dirty *)
+  let m_set0, _ = Update_nav.open_global_settings m_fleet in
+  let dirty_cfg =
+    Config_store.stage_patch ~full_key:"runtime.timeout"
+      (Wire_config.Set_int { table = "runtime"; key = "timeout"; value = 99 })
+      m_set0.config
+  in
+  let m_set_dirty = { m_set0 with config = dirty_cfg } in
+  let m_esc1, _ = step m_set_dirty (key Keymap.Input.Escape) in
+  Alcotest.(check bool) "UX-12 first Esc arms discard confirm & keeps Settings open"
+    true
+    (m_esc1.config.discard_confirm_armed
+    && Option.is_some m_esc1.nav.overlay
+    && Config_store.dirty_count m_esc1.config = 1);
+  let m_esc2, _ = step m_esc1 (key Keymap.Input.Escape) in
+  Alcotest.(check bool) "UX-12 second Esc discards dirty & closes Settings" true
+    ((not m_esc2.config.discard_confirm_armed)
+    && Option.is_none m_esc2.nav.overlay
+    && Config_store.dirty_count m_esc2.config = 0);
+  let cfg_sw =
+    dirty_cfg
+    |> Config_store.set_target (Wire_config.Target_keeper "alpha")
+    |> Config_store.set_target Wire_config.Target_runtime
+  in
+  Alcotest.(check int) "UX-12 set_target preserves per-target dirty_fields" 1
+    (Config_store.dirty_count cfg_sw);
+  let m_ed_saved, _ =
+    Update.step ~now:t0 m_set_dirty
+      (Msg.Http_reply
+         {
+           epoch = m_set_dirty.epoch;
+           reply =
+             Msg.Reply_action_ack
+               {
+                 label = Say.literal "Saved in $EDITOR";
+                 ack_scope = Msg.Ack_editor_saved;
+                 result = Ok ();
+               };
+         })
+  in
+  Alcotest.(check int) "UX-12 Ack_editor_saved clears stale dirty_fields" 0
+    (Config_store.dirty_count m_ed_saved.config);
+
+  (* UX-13: Leading @mention switches keeper, @none opens Palette_keepers, multiline Up/Down, no __default__ ghost count *)
+  let m_comp_none =
+    {
+      m_base with
+      drafts =
+        m_base.drafts |> Drafts.set_focus true |> Drafts.set_current_text "hello";
+    }
+  in
+  let m_no_keeper, _ = step m_comp_none (key Keymap.Input.Enter) in
+  Alcotest.(check bool) "UX-13 submit with no target keeper opens Palette_keepers"
+    true
+    (Option.equal Nav.equal_overlay m_no_keeper.nav.overlay (Some Nav.Palette)
+    && Model.equal_palette_mode m_no_keeper.palette.mode Model.Palette_keepers);
+  let m_mention =
+    {
+      m_fleet with
+      drafts =
+        m_fleet.drafts
+        |> Drafts.set_active_keeper "alpha"
+        |> Drafts.set_focus true
+        |> Drafts.set_current_text "@be";
+    }
+  in
+  let m_mention_done =
+    match Update_nav.resolve_composer_popup m_mention with
+    | Update_nav.Composer_popup_mention { items = cand :: _; _ } ->
+        Update_nav.apply_popup_completion cand m_mention
+    | _ -> m_mention
+  in
+  Alcotest.(check (option string))
+    "UX-13 leading @mention switches active_keeper to beta" (Some "beta")
+    m_mention_done.drafts.active_keeper;
+  let d_ml =
+    Drafts.empty
+    |> Drafts.set_active_keeper "alpha"
+    |> Drafts.set_current_text "line1\nline2"
+    |> Drafts.move_cursor_vertical `Up
+  in
+  Alcotest.(check bool) "UX-13 multiline Up moves cursor to line 1" true
+    ((Drafts.current_draft d_ml).cursor <= 5);
+  let d_ghost =
+    Drafts.empty
+    |> Drafts.set_current_text "pre-keeper"
+    |> Drafts.set_active_keeper "alpha"
+  in
+  Alcotest.(check int) "UX-13 other_keepers_draft_count excludes __default__" 0
+    (Drafts.other_keepers_draft_count d_ghost);
+
+  (* UX-14: Inline modal field help lookup populated *)
+  Alcotest.(check bool) "UX-14 modal_field_help returns help for memory_act" true
+    (Option.is_some (Model.modal_field_help ~key:"memory_act"));
+
+  (* UX-15: /btw scroll, copy y, and Enter-close when answered *)
+  let long_reply =
+    String.concat "\n" (List.init 40 (fun i -> Printf.sprintf "line %d" i))
+  in
+  let m_btw0, _ = Update_nav.open_inline_modal m_fleet Nav.Btw_query in
+  let m_btw_ans =
+    {
+      m_btw0 with
+      drafts =
+        {
+          m_btw0.drafts with
+          btw =
+            Drafts.Btw_answered
+              { keeper = "alpha"; prompt = "status?"; reply = long_reply };
+        };
+    }
+  in
+  let m_btw_sc, _ = step m_btw_ans (char_key "j") in
+  Alcotest.(check bool) "UX-15 /btw j scrolls btw_scroll_offset > 0" true
+    (m_btw_sc.nav.btw_scroll_offset > 0);
+  let _, cmds_btw_copy = step m_btw_sc (char_key "y") in
+  Alcotest.(check bool) "UX-15 /btw y emits Copy_clipboard with reply" true
+    (has_cmd
+       (function Cmd.Copy_clipboard s -> String.equal s long_reply | _ -> false)
+       cmds_btw_copy);
+  let m_btw_closed, _ = step m_btw_sc (key Keymap.Input.Enter) in
+  Alcotest.(check bool) "UX-15 /btw Enter closes answered modal" true
+    (Option.is_none m_btw_closed.nav.overlay
+    && Option.is_none m_btw_closed.inline_modal);
+
+  (* UX-16: Queue_context Drawer_schedules fetches Get_schedules; Drawer_context fetches Get_efficiency & scrolls *)
+  let m_sched, cmds_sched =
+    Update_nav.open_overlay m_fleet (Nav.Queue_context Nav.Drawer_schedules)
+  in
+  ignore m_sched;
+  Alcotest.(check bool) "UX-16 Drawer_schedules emits Get_schedules" true
+    (has_cmd
+       (function
+         | Cmd.Http_get { req = Cmd.Get_schedules _; _ } -> true | _ -> false)
+       cmds_sched);
+  let m_ctx_short, cmds_ctx =
+    Update_nav.open_overlay
+      { m_fleet with viewport = { cols = 100; rows = 14 } }
+      (Nav.Queue_context Nav.Drawer_context)
+  in
+  Alcotest.(check bool) "UX-16 Drawer_context emits Get_efficiency" true
+    (has_cmd
+       (function
+         | Cmd.Http_get { req = Cmd.Get_efficiency _; _ } -> true | _ -> false)
+       cmds_ctx);
+  let m_ctx_sc, _ = step m_ctx_short (char_key "j") in
+  Alcotest.(check bool) "UX-16 Drawer_context scrolls on j when short" true
+    (m_ctx_sc.nav.queue_scroll_offset > 0);
+
+  (* UX-17: ? inside Settings opens Help with return_overlay and Esc restores Settings *)
+  let m_help_from_set, _ = step m_set0 (char_key "?") in
+  Alcotest.(check bool) "UX-17 ? inside Settings opens Help & saves return_overlay"
+    true
+    (Option.equal Nav.equal_overlay m_help_from_set.nav.overlay (Some Nav.Help)
+    && Option.is_some m_help_from_set.nav.return_overlay);
+  let m_back_set, _ = step m_help_from_set (key Keymap.Input.Escape) in
+  Alcotest.(check bool) "UX-17 Esc from Help restores Settings overlay" true
+    (match m_back_set.nav.overlay with
+    | Some (Nav.Settings _) -> Option.is_none m_back_set.nav.return_overlay
+    | _ -> false);
+
+  (* UX-18: UTF-8 Korean fuzzy_score has no byte-level false positives & overflow reported *)
+  Alcotest.(check bool)
+    "UX-18 UTF-8 fuzzy_score rejects unrelated Korean sharing UTF-8 lead bytes"
+    true
+    (Option.is_none (Update_nav.fuzzy_score ~query:"가나다" "마바사아자차카타파하"));
+  Alcotest.(check bool) "UX-18 UTF-8 fuzzy_score matches Korean subsequence" true
+    (Option.is_some (Update_nav.fuzzy_score ~query:"가다" "가나다라"));
+  let _, overflow = Update_nav.palette_entries_with_overflow m_fleet in
+  Alcotest.(check bool) "UX-18 palette_entries_with_overflow reports capped workspaces"
+    true (overflow <> []);
+
+  (* UX-19: Incidents 2-step clear_all, Media_viewer [r] retry, Toast_error 7s protection *)
+  let inc0, _ =
+    Incidents.push ~occurred_at_unix:100.0 ~source:Health.Source_client_http
+      ~summary:(Say.literal "err") ~detail:"detail" ~status:Health.Resolved
+      m_fleet.incidents
+  in
+  let m_inc, _ =
+    Update_nav.open_overlay { m_fleet with incidents = inc0 } Nav.Incidents
+  in
+  let m_inc_c1, _ = step m_inc (char_key "c") in
+  Alcotest.(check bool) "UX-19 Incidents first c arms confirm without clearing"
+    true
+    (m_inc_c1.incidents.clear_confirm_armed
+    && Incidents.count m_inc_c1.incidents = 1);
+  let m_inc_c2, _ = step m_inc_c1 (char_key "c") in
+  Alcotest.(check int) "UX-19 Incidents second c clears all entries" 0
+    (Incidents.count m_inc_c2.incidents);
+  let m_mv_empty, _ =
+    Update_nav.open_overlay m_fleet (Nav.System_gate Nav.Media_viewer)
+  in
+  let m_mv_r, _ = step m_mv_empty (char_key "r") in
+  Alcotest.(check bool) "UX-19 Media_viewer [r] without artifact emits warning toast"
+    true
+    (match m_mv_r.toast with
+    | Some { level = Model.Toast_warning; _ } -> true
+    | Some _ | None -> false);
+  let m_err_t =
+    Model.with_toast ~now:t0 ~level:Model.Toast_error (Say.literal "fatal")
+      m_fleet
+  in
+  let m_info_try =
+    Model.with_toast ~now:(Clock.Mono.after_s t0 1.0) ~level:Model.Toast_info
+      (Say.literal "noisy") m_err_t
+  in
+  Alcotest.(check bool) "UX-19 unexpired Toast_error is not overwritten by Toast_info"
+    true
+    (match m_info_try.toast with
+    | Some { level = Model.Toast_error; message; _ } ->
+        String.equal (Say.resolve Say.Lang_en message) "fatal"
+    | Some _ | None -> false);
+
+  (* PR #54557 review regressions: UTF-8 cursor alignment across Update_nav & Config_store,
+     plus modal_edit_cursor/return_overlay initialization in all inline modal openers. *)
+  let ko_str = "한글제목" in
+  let mid_byte_cursor = 4 in
+  (* Byte 4 is inside '글' (bytes 3..5); helpers must align to boundary 3 instead of splitting UTF-8. *)
+  let ins_s, ins_c =
+    Update_nav.insert_at_cursor ~text:ko_str ~cursor:mid_byte_cursor ~insert:"!"
+  in
+  Alcotest.(check string) "PR54557 insert_at_cursor aligns mid-UTF-8 byte to char start"
+    "한!글제목" ins_s;
+  Alcotest.(check int) "PR54557 insert_at_cursor advances past inserted char" 4 ins_c;
+  let bs_s, bs_c =
+    Update_nav.backspace_at_cursor ~text:ko_str ~cursor:mid_byte_cursor
+  in
+  Alcotest.(check string) "PR54557 backspace_at_cursor aligns mid-UTF-8 safely"
+    "글제목" bs_s;
+  Alcotest.(check int) "PR54557 backspace_at_cursor cursor=0" 0 bs_c;
+  let del_s, del_c =
+    Update_nav.delete_at_cursor ~text:ko_str ~cursor:mid_byte_cursor
+  in
+  Alcotest.(check string) "PR54557 delete_at_cursor aligns mid-UTF-8 safely"
+    "한제목" del_s;
+  Alcotest.(check int) "PR54557 delete_at_cursor keeps aligned cursor" 3 del_c;
+  let kw_s, kw_c =
+    Update_nav.kill_word_back ~text:"hello 한글 world" ~cursor:12
+  in
+  Alcotest.(check string) "PR54557 kill_word_back deletes Korean word cleanly"
+    "hello  world" kw_s;
+  Alcotest.(check int) "PR54557 kill_word_back returns word start" 6 kw_c;
+
+  (* Config_store UTF-8 mid-cursor editing & Ctrl+W *)
+  let cfg_ins =
+    {
+      m_fleet.config with
+      editing_field_key = Some "server.note";
+      editing_buffer = "한글 메모";
+      editing_cursor = 10;
+    }
+    |> Config_store.move_edit_cursor `Left
+    |> Config_store.append_edit_char "X"
+  in
+  Alcotest.(check string) "PR54557 Config_store UTF-8 Left+insert places X at char boundary"
+    "한글 X메모" cfg_ins.editing_buffer;
+  let cfg_kw = Config_store.kill_edit_word cfg_ins in
+  Alcotest.(check string) "PR54557 Config_store Ctrl+W deletes word before cursor cleanly"
+    "한글 메모" cfg_kw.editing_buffer;
+
+  (* Wiki modal opener initializes modal_edit_cursor to UTF-8 title byte length and clears return_overlay *)
+  let m_stale_cursor =
+    {
+      m_fleet with
+      nav =
+        {
+          m_fleet.nav with
+          modal_edit_cursor = 1;
+          return_overlay = Some Nav.Help;
+        };
+    }
+  in
+  let sample_wiki_detail : Wire_knowledge.wiki_page_detail =
+    {
+      page = "한글페이지";
+      slug = "한글페이지";
+      file = "ko-page.md";
+      frontmatter =
+        {
+          title = "한글 위키";
+          summary = "요약";
+          source = Wire_knowledge.Source_research;
+          author = "alpha";
+          created = "2026-11-24";
+          updated = "2026-11-24";
+          revision = 1;
+          tags = [];
+        };
+      sha256 = "sha256-ko";
+      body_markdown = "본문";
+      outgoing_links = [];
+      backlinks = [];
+      lint_findings = [];
+    }
+  in
+  let m_wiki_modal =
+    Model.open_wiki_edit_modal_for_detail sample_wiki_detail m_stale_cursor
+  in
+  Alcotest.(check int)
+    "PR54557 open_wiki_edit_modal_for_detail initializes modal_edit_cursor to field 0 byte length"
+    (match m_wiki_modal.inline_modal with
+    | Some modal -> String.length (Model.modal_active_field_value modal)
+    | None -> -1)
+    m_wiki_modal.nav.modal_edit_cursor;
+  Alcotest.(check bool)
+    "PR54557 open_wiki_edit_modal_for_detail clears return_overlay" true
+    (Option.is_none m_wiki_modal.nav.return_overlay);
+
+  (* Harness overrule opener initializes modal_edit_cursor and clears return_overlay *)
+  let m_harness_base =
+    {
+      m_stale_cursor with
+      nav = { m_stale_cursor.nav with workspace = Nav.Work };
+      work = Work_store.set_tab Nav.Work_harness m_stale_cursor.work;
+    }
+  in
+  let m_overrule, _ = step m_harness_base (char_key "n") in
+  Alcotest.(check int)
+    "PR54557 harness overrule opener initializes modal_edit_cursor"
+    (match m_overrule.inline_modal with
+    | Some modal -> String.length (Model.modal_active_field_value modal)
+    | None -> -1)
+    m_overrule.nav.modal_edit_cursor;
+  Alcotest.(check bool)
+    "PR54557 harness overrule opener clears return_overlay" true
+    (Option.is_none m_overrule.nav.return_overlay)
 
 let () =
   Alcotest.run "masc_tui_store"
@@ -11789,5 +12213,8 @@ let () =
           Alcotest.test_case
             "UX Batch 1: Pulse Attention, Micro lock, resize clamp, zoom restore, Focus Pill & CLI prefs"
             `Quick test_ux_batch1_focus_resize_micro_zoom_and_cli_prefs;
+          Alcotest.test_case
+            "UX Batch 2: Ack scope, modal/settings cursors, dirty Esc, @mention, /btw, Drawer, Help, UTF-8 & Toast"
+            `Quick test_ux_batch2_modals_settings_overlays;
         ] );
     ]

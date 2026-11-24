@@ -29,6 +29,13 @@ val http_error_retryable : http_error -> bool
 (** [true] for transport failures, HTTP 5xx and 429. A decode error or a 4xx
     fails the same way on the next poll. *)
 
+type ack_effect =
+  | Ack_toast_only
+  | Ack_close_modal
+  | Ack_refresh_view
+  | Ack_close_modal_and_refresh
+  | Ack_editor_saved
+
 type http_reply =
   (* Fleet & Pulse *)
   | Reply_dashboard_shell of (Wire_fleet.dashboard_shell, http_error) result
@@ -272,7 +279,11 @@ type http_reply =
       dry_run : bool;
       result : (Wire_config.patch_response, http_error) result;
     }
-  | Reply_action_ack of { label : Say.t; result : (unit, http_error) result }
+  | Reply_action_ack of {
+      label : Say.t;
+      ack_scope : ack_effect;
+      result : (unit, http_error) result;
+    }
   (* Wave 3 Replies *)
   | Reply_fusion_runs_snapshot of
       (Wire_runtime.fusion_runs_snapshot, http_error) result

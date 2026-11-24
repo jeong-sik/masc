@@ -33,6 +33,10 @@ type nav_state = {
   dive_scroll_offset : int;
   help_scroll_offset : int;
   queue_scroll_offset : int;
+  btw_scroll_offset : int;
+  palette_scroll_offset : int;
+  modal_edit_cursor : int;
+  return_overlay : Nav.overlay option;
 }
 
 type pulse_pane =
@@ -292,6 +296,10 @@ let initial ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_ko)
         dive_scroll_offset = 0;
         help_scroll_offset = 0;
         queue_scroll_offset = 0;
+        btw_scroll_offset = 0;
+        palette_scroll_offset = 0;
+        modal_edit_cursor = 0;
+        return_overlay = None;
       };
     freshness =
       {
@@ -1236,7 +1244,7 @@ let inline_modal_for kind =
         [
           {
             key = "connector";
-            label = Say.make ~ko:"커넥터 이름 (예: discord)" ~en:"Connector name (e.g. discord)";
+            label = Say.make ~ko:"커넥터 이름" ~en:"Connector";
             value = "";
             required = true;
             secret = false;
@@ -1311,9 +1319,7 @@ let inline_modal_for kind =
         [
           {
             key = "token";
-            label =
-              Say.make ~ko:"GitHub PAT 토큰 (마스킹)"
-                ~en:"GitHub PAT token (masked)";
+            label = Say.make ~ko:"GitHub PAT" ~en:"GitHub PAT";
             value = "";
             required = true;
             secret = true;
@@ -1330,7 +1336,7 @@ let inline_modal_for kind =
         [
           {
             key = "query";
-            label = Say.make ~ko:"파일 경로 검색 (퍼지)" ~en:"Fuzzy file path";
+            label = Say.make ~ko:"파일 경로" ~en:"File path";
             value = "";
             required = true;
             secret = false;
@@ -1340,9 +1346,7 @@ let inline_modal_for kind =
         [
           {
             key = "query";
-            label =
-              Say.make ~ko:"코드 검색어 (2..200바이트)"
-                ~en:"Ripgrep query (2..200 bytes)";
+            label = Say.make ~ko:"코드 검색어" ~en:"Search query";
             value = "";
             required = true;
             secret = false;
@@ -1357,6 +1361,98 @@ let modal_field_value ~key modal =
   with
   | Some f -> String.trim f.value
   | None -> ""
+
+let modal_active_field_value modal =
+  match List.nth_opt modal.fields modal.active_field with
+  | Some f -> f.value
+  | None -> ""
+
+let modal_field_help ~key =
+  match key with
+  | "memory_act" ->
+      Some
+        (Say.make
+           ~ko:"허용: resume | adopt | restart_reading | skip_item | skip_line"
+           ~en:"Allowed: resume | adopt | restart_reading | skip_item | skip_line")
+  | "memory_arg" ->
+      Some
+        (Say.make
+           ~ko:"선택 인자: observed / turn_log:line / offset"
+           ~en:"Optional arg: observed / turn_log:line / offset")
+  | "fusion_topology" ->
+      Some
+        (Say.make
+           ~ko:"선택: simple | refine | conditional | judge_of_judges"
+           ~en:"Optional: simple | refine | conditional | judge_of_judges")
+  | "assign_keeper" ->
+      Some
+        (Say.make
+           ~ko:"비우거나 default 입력 시 기본 경로 변경"
+           ~en:"Leave blank or 'default' to change the default route")
+  | "assign_runtime_id" ->
+      Some
+        (Say.make
+           ~ko:"런타임/레인 ID (키퍼 배정 해제 시 비움)"
+           ~en:"Runtime or lane ID (leave blank to clear assignment)")
+  | "setup_key_integration" ->
+      Some
+        (Say.make
+           ~ko:"예: anthropic, openai, gemini, openrouter"
+           ~en:"e.g. anthropic, openai, gemini, openrouter")
+  | "setup_login_integration" ->
+      Some
+        (Say.make
+           ~ko:"예: claude-code, codex, vibe_acp, kimi_acp"
+           ~en:"e.g. claude-code, codex, vibe_acp, kimi_acp")
+  | "confirm_request_id" ->
+      Some
+        (Say.make
+           ~ko:"GET /goals/confirmation 에서 서버가 발급한 request_id"
+           ~en:"Server-issued request_id from GET /goals/confirmation")
+  | "confirm_verification_run_id" ->
+      Some
+        (Say.make
+           ~ko:"서버가 발급한 verification_run_id"
+           ~en:"Server-issued verification_run_id")
+  | "confirm_operator_id" ->
+      Some
+        (Say.make
+           ~ko:"expected_operator_id 값"
+           ~en:"Expected operator ID (expected_operator_id)")
+  | "connector" ->
+      Some
+        (Say.make
+           ~ko:"예: discord, slack, telegram (←→ 로 순환)"
+           ~en:"e.g. discord, slack, telegram (←→ to cycle)")
+  | "verdict" ->
+      Some
+        (Say.make ~ko:"허용: approve | reject" ~en:"Allowed: approve | reject")
+  | "notes_hash" ->
+      Some
+        (Say.make
+           ~ko:"64자리 소문자 16진수 해시"
+           ~en:"64 lowercase hex characters")
+  | "recurrence" ->
+      Some
+        (Say.make
+           ~ko:"예: once, every 30m, every 2h, daily"
+           ~en:"e.g. once, every 30m, every 2h, daily")
+  | "first_run_in" ->
+      Some
+        (Say.make
+           ~ko:"예: now, 5m, 1h, 300s"
+           ~en:"e.g. now, 5m, 1h, 300s")
+  | "query" ->
+      Some
+        (Say.make
+           ~ko:"검색어 입력 (코드 검색은 2..200바이트)"
+           ~en:"Enter query (ripgrep search: 2..200 bytes)")
+  | "token" ->
+      Some
+        (Say.make
+           ~ko:"마스킹 처리됨 — 화면·로그에 평문 미노출"
+           ~en:"Masked input — never echoed in plain text")
+  | _ -> None
 
 let modal_update_active_field f modal =
   let fields =
@@ -1953,16 +2049,38 @@ let open_wiki_edit_modal_for_detail (d : Wire_knowledge.wiki_page_detail) m =
     {
       m.nav with
       overlay = Some (Nav.Inline_action Nav.Board_new_post);
+      return_overlay = None;
       filter_focused = false;
+      modal_edit_cursor = String.length (modal_active_field_value modal);
     }
   in
   let drafts = Drafts.set_focus false m.drafts in
   let knowledge = Knowledge_store.begin_wiki_edit d m.knowledge in
   { m with nav; drafts; knowledge; inline_modal = Some modal }
 
-let with_toast ~now ?(duration_s = 4.0) ~level message m =
-  let expires_at = Clock.Mono.after_s now duration_s in
-  { m with toast = Some { message; level; expires_at } }
+let with_toast ~now ?duration_s ~level message m =
+  let eff_duration =
+    match duration_s with
+    | Some d -> d
+    | None -> (
+        match level with
+        | Toast_error -> 7.0
+        | Toast_info | Toast_success | Toast_warning -> 4.0)
+  in
+  (* Do not let a transient Toast_info silently clobber an active, unexpired
+     Toast_error so critical failure notices remain readable. *)
+  let keep_existing_error =
+    match m.toast, level with
+    | Some existing, Toast_info ->
+        (match existing.level with
+         | Toast_error -> Clock.Mono.compare now existing.expires_at < 0
+         | Toast_info | Toast_success | Toast_warning -> false)
+    | Some _, (Toast_success | Toast_warning | Toast_error) | None, _ -> false
+  in
+  if keep_existing_error then m
+  else
+    let expires_at = Clock.Mono.after_s now eff_duration in
+    { m with toast = Some { message; level; expires_at } }
 
 let expire_toast ~now m =
   match m.toast with

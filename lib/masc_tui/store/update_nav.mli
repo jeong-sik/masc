@@ -10,6 +10,15 @@ val drop_last_utf8 : string -> string
 val clamp_index : int -> int -> int
 val fuzzy_score : query:string -> string -> int option
 
+val insert_at_cursor : text:string -> cursor:int -> insert:string -> string * int
+val backspace_at_cursor : text:string -> cursor:int -> string * int
+val delete_at_cursor : text:string -> cursor:int -> string * int
+val move_cursor_utf8 :
+  [ `Left | `Right | `Home | `End ] -> text:string -> cursor:int -> int
+val kill_to_start : text:string -> cursor:int -> string * int
+val kill_word_back : text:string -> cursor:int -> string * int
+val btw_max_scroll : Model.t -> int
+
 (** {1 Shared Composer Slash & Mention Popup SSOT} *)
 
 type popup_candidate_kind =
@@ -86,6 +95,8 @@ type palette_entry = {
 }
 
 val palette_entries : Model.t -> palette_entry list
+val palette_entries_with_overflow :
+  Model.t -> palette_entry list * (palette_section * int) list
 val palette_len : Model.t -> int
 
 val switch_workspace : Model.t -> Nav.workspace -> Model.t * Cmd.t list

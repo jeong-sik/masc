@@ -11,6 +11,7 @@ type t = {
   filter_query : string;
   show_dismissed : bool;
   unread_count : int;
+  clear_confirm_armed : bool;
 }
 
 let empty =
@@ -23,6 +24,7 @@ let empty =
     filter_query = "";
     show_dismissed = false;
     unread_count = 0;
+    clear_confirm_armed = false;
   }
 
 let contains_ci = Store_scroll.contains_ci
@@ -86,7 +88,7 @@ let dismiss ~id t =
         else inc)
       t.entries
   in
-  let next = { t with entries } in
+  let next = { t with entries; clear_confirm_armed = false } in
   let vis_len = List.length (visible_entries next) in
   { next with selected_index = clamp_index vis_len next.selected_index }
 
@@ -96,7 +98,7 @@ let selected_entry t =
 
 let dismiss_selected t =
   match selected_entry t with
-  | None -> t
+  | None -> { t with clear_confirm_armed = false }
   | Some inc -> dismiss ~id:inc.id t
 
 let clear_all t =
@@ -107,9 +109,13 @@ let clear_all t =
     scroll_offset = 0;
     detail_scroll_offset = 0;
     unread_count = 0;
+    clear_confirm_armed = false;
   }
 
-let mark_all_read t = { t with unread_count = 0 }
+let arm_clear_confirm t = { t with clear_confirm_armed = true }
+let disarm_clear_confirm t = { t with clear_confirm_armed = false }
+
+let mark_all_read t = { t with unread_count = 0; clear_confirm_armed = false }
 
 let find_by_id id t =
   List.find_opt (fun (inc : Health.incident) -> Int.equal inc.id id) t.entries
@@ -126,13 +132,19 @@ let move_selection ?viewport_rows ~delta t =
     if Int.equal selected_index t.selected_index then t.detail_scroll_offset
     else 0
   in
-  { t with selected_index; scroll_offset; detail_scroll_offset }
+  {
+    t with
+    selected_index;
+    scroll_offset;
+    detail_scroll_offset;
+    clear_confirm_armed = false;
+  }
 
 let move_detail_scroll ~max_scroll ~delta t =
   let detail_scroll_offset =
     Store_scroll.clamp_scroll ~max_scroll (t.detail_scroll_offset + delta)
   in
-  { t with detail_scroll_offset }
+  { t with detail_scroll_offset; clear_confirm_armed = false }
 
 let set_filter filter_query t =
   let next =
@@ -142,6 +154,7 @@ let set_filter filter_query t =
       selected_index = 0;
       scroll_offset = 0;
       detail_scroll_offset = 0;
+      clear_confirm_armed = false;
     }
   in
   let vis_len = List.length (visible_entries next) in
@@ -149,7 +162,12 @@ let set_filter filter_query t =
 
 let toggle_show_dismissed t =
   let next =
-    { t with show_dismissed = not t.show_dismissed; detail_scroll_offset = 0 }
+    {
+      t with
+      show_dismissed = not t.show_dismissed;
+      detail_scroll_offset = 0;
+      clear_confirm_armed = false;
+    }
   in
   let vis_len = List.length (visible_entries next) in
   { next with selected_index = clamp_index vis_len next.selected_index }

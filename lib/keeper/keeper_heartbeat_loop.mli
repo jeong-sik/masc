@@ -460,9 +460,8 @@ module For_testing : sig
 
   (** Scheduling authority chosen from the loop's exact state. A deferred
       runtime suffix takes precedence over cadence because it is unfinished
-      input, rather than a fabricated periodic tick. When both are present,
-      the label is deferred while {!periodic_cadence_after_cycle} consumes
-      the due cadence boundary independently in the same cycle. *)
+      input. It carries the periodic due fact through the decision and the
+      cadence transition so both duties are served in the same cycle. *)
   val cycle_wake :
     periodic_due:bool ->
     deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane option ->
@@ -481,7 +480,6 @@ module For_testing : sig
       interval after that turn. *)
 
   val adaptive_idle_after_cycle :
-    periodic_due:bool ->
     wake:Keeper_world_observation.cycle_wake ->
     cycle_status:keepalive_cycle_status ->
     decided_channel:Keeper_world_observation.keeper_cycle_channel option ->

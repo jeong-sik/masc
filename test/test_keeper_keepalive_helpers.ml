@@ -1948,14 +1948,14 @@ let test_staggered_tick_and_adaptive_pull_in_backoff () =
 let test_adaptive_idle_backs_off_quiet_self_wakes_and_resets_on_reactions () =
   let module L = Keeper_heartbeat_loop in
   let module WO = Keeper_world_observation in
-  let step ~periodic_due ~wake ~decided_channel
+  let step ~wake ~decided_channel
       ?(cycle_status = L.Turn_cycle_turn_succeeded)
       ?(due_schedule = L.No_due_schedule_served) ~now state =
-    L.For_testing.adaptive_idle_after_cycle ~periodic_due ~wake ~cycle_status
+    L.For_testing.adaptive_idle_after_cycle ~wake ~cycle_status
       ~decided_channel ~due_schedule ~now state
   in
   let self_wake ~now state =
-    step ~periodic_due:true ~wake:WO.Periodic_tick
+    step ~wake:WO.Periodic_tick
       ~decided_channel:(Some WO.Scheduled_autonomous) ~now state
   in
   let s0 = KKS.adaptive_idle_init ~now:0.0 ~warmup_sec:1800.0 in
@@ -1968,7 +1968,7 @@ let test_adaptive_idle_backs_off_quiet_self_wakes_and_resets_on_reactions () =
   check bool "quiet self-wake stays at the 2h cap" true (KKS.adaptive_idle_stage s3 = KKS.Idle_2h);
   check (float 0.01) "capped self-wake two hours later" 19800.0 (adaptive_due_at s3);
   let reacted =
-    step ~periodic_due:false ~wake:WO.Attention_wake
+    step ~wake:WO.Attention_wake
       ~decided_channel:(Some WO.Reactive) ~now:13000.0 s3
   in
   check bool "a reaction returns the stage to 30m" true (KKS.adaptive_idle_stage reacted = KKS.Idle_30m);
@@ -1983,7 +1983,7 @@ let test_adaptive_idle_backs_off_quiet_self_wakes_and_resets_on_reactions () =
   check bool "the next quiet self-wake backs off again" true
     (KKS.adaptive_idle_stage quiet_again = KKS.Idle_1h);
   let at_boundary =
-    step ~periodic_due:true ~wake:WO.Periodic_tick ~decided_channel:(Some WO.Reactive)
+    step ~wake:WO.Periodic_tick ~decided_channel:(Some WO.Reactive)
       ~now:20000.0 quiet_again
   in
   check bool "a reaction at the boundary serves it at 30m" true
@@ -1996,7 +1996,7 @@ let test_adaptive_idle_backs_off_quiet_self_wakes_and_resets_on_reactions () =
   check bool "the quiet self-wake after that backs off" true
     (KKS.adaptive_idle_stage (self_wake ~now:23600.0 after_boundary_reaction) = KKS.Idle_1h);
   let failed_reaction =
-    step ~periodic_due:false ~wake:WO.Attention_wake ~decided_channel:(Some WO.Reactive)
+    step ~wake:WO.Attention_wake ~decided_channel:(Some WO.Reactive)
       ~cycle_status:L.Turn_cycle_turn_failed ~now:17000.0 quiet_again
   in
   check bool "a failed reaction turn returns the stage to 30m" true
@@ -2008,18 +2008,18 @@ let test_adaptive_idle_backs_off_quiet_self_wakes_and_resets_on_reactions () =
        check bool
          (label ^ ": a reactive decision whose turn never ran leaves the state alone")
          true
-         (step ~periodic_due:false ~wake:WO.Attention_wake
+         (step ~wake:WO.Attention_wake
             ~decided_channel:(Some WO.Reactive) ~cycle_status ~now:17000.0 quiet_again
           = quiet_again))
     [ "phase gate", L.Turn_cycle_without_turn; "provider rest", L.Turn_cycle_rested ];
   let not_opened =
-    step ~periodic_due:true ~wake:WO.Periodic_tick ~decided_channel:None
+    step ~wake:WO.Periodic_tick ~decided_channel:None
       ~cycle_status:L.Turn_cycle_rested ~now:20000.0 quiet_again
   in
   check bool "a provider rest before dispatch holds the current stage" true
     (KKS.adaptive_idle_stage not_opened = KKS.Idle_1h);
   let deferred =
-    step ~periodic_due:true ~wake:WO.Deferred_runtime_lane
+    step ~wake:(WO.Deferred_runtime_lane { periodic_due = true })
       ~decided_channel:(Some WO.Scheduled_autonomous) ~now:20000.0 quiet_again
   in
   check bool "a deferred suffix at the boundary holds the stage" true
@@ -2027,13 +2027,13 @@ let test_adaptive_idle_backs_off_quiet_self_wakes_and_resets_on_reactions () =
   check (float 0.01) "and consumes the boundary at the held interval" 23600.0
     (adaptive_due_at deferred);
   let undecided =
-    step ~periodic_due:true ~wake:WO.Periodic_tick ~decided_channel:None ~now:20000.0
+    step ~wake:WO.Periodic_tick ~decided_channel:None ~now:20000.0
       quiet_again
   in
   check bool "an undecided cycle at the boundary holds the stage" true
     (KKS.adaptive_idle_stage undecided = KKS.Idle_1h);
   let unrelated =
-    step ~periodic_due:false ~wake:WO.Attention_wake
+    step ~wake:WO.Attention_wake
       ~decided_channel:(Some WO.Scheduled_autonomous) ~now:17000.0 quiet_again
   in
   check bool "a non-reaction off the boundary leaves the state alone" true
@@ -2044,7 +2044,7 @@ let test_adaptive_idle_backs_off_quiet_self_wakes_and_resets_on_reactions () =
     |> KKS.adaptive_idle_after_self_wake ~now:3600.0
   in
   let after_schedule =
-    step ~periodic_due:false ~wake:WO.Attention_wake
+    step ~wake:WO.Attention_wake
       ~decided_channel:(Some WO.Scheduled_autonomous)
       ~due_schedule:L.Due_schedule_served ~now:5000.0 idle_2h_state
   in
@@ -2053,7 +2053,7 @@ let test_adaptive_idle_backs_off_quiet_self_wakes_and_resets_on_reactions () =
   check bool "a served due schedule returns the stage to 30m" true
     (KKS.adaptive_idle_stage after_schedule = KKS.Idle_30m);
   let reacted_then_schedule =
-    step ~periodic_due:false ~wake:WO.Attention_wake
+    step ~wake:WO.Attention_wake
       ~decided_channel:(Some WO.Scheduled_autonomous)
       ~due_schedule:L.Due_schedule_served ~now:13500.0 reacted
   in

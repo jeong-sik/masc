@@ -80,8 +80,8 @@ let deferred_runtime_lane = function
     None
 ;;
 
-let recorded_pulse = function
-  | Completed _ | Checkpointed _ | Input_required _ | Failed _ | Rested _ -> true
+let recorded_pulse ~turn_started = function
+  | Completed _ | Checkpointed _ | Input_required _ | Failed _ | Rested _ -> turn_started
   | Cancelled _ | Skipped _ -> false
 ;;
 
@@ -106,12 +106,17 @@ let run_keeper_cycle_admitted
       ~(turn_input : Keeper_heartbeat_source_batch.turn_input)
       ()
   =
+  let opened_cause = ref None in
+  let turn_started () =
+    opened_cause := Keeper_turn_pulse.cause_of_decision turn_decision;
+    Option.iter (fun started -> started ()) on_turn_started
+  in
   let admitted_execution =
     In_turn_pulse.with_in_turn_liveness_pulse ~ctx ~meta:meta_after_triage ~stop (fun () ->
       Keeper_unified_turn.run_keeper_cycle
         ~before_dispatch_authority
         ~execution_path:Keeper_unified_metrics_decision.Autonomous_cycle
-        ?on_turn_started
+        ~on_turn_started:turn_started
         ?deferred_runtime_lane
         ?on_deferred_runtime_consumed
         ~config:ctx.config
@@ -128,16 +133,18 @@ let run_keeper_cycle_admitted
         ())
   in
   let record_pulse outcome =
-    if record_pulse then (
+    match !opened_cause with
+    | Some cause when record_pulse ->
       Keeper_turn_pulse.record
         ~base_path:ctx.config.base_path
         ~keeper_name:meta_after_triage.name
         ~at:(Time_compat.now ())
-        ?cause:(Keeper_turn_pulse.cause_of_decision turn_decision)
+        ~cause
         outcome;
       Keeper_row_broadcast.changed
         ~base_path:ctx.config.base_path
-        ~keeper_name:meta_after_triage.name)
+        ~keeper_name:meta_after_triage.name
+    | Some _ | None -> ()
   in
   match admitted_execution with
   | Error failure ->

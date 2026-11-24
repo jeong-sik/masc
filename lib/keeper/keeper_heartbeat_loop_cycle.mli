@@ -33,9 +33,8 @@ val meta : cycle_outcome -> Keeper_meta_contract.keeper_meta
 val deferred_runtime_lane :
   cycle_outcome -> Keeper_turn_driver.deferred_runtime_lane option
 
-val recorded_pulse : cycle_outcome -> bool
-(** [true] iff {!run_keeper_cycle} already recorded a turn in
-    {!Keeper_turn_pulse} for this outcome. *)
+val recorded_pulse : turn_started:bool -> cycle_outcome -> bool
+(** Whether an opened turn with this disposition has a terminal pulse. *)
 
 val run_keeper_cycle
   :  admission_token:Keeper_turn_dispatch_authority.token

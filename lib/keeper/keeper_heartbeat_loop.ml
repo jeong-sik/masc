@@ -1023,7 +1023,7 @@ let next_cycle_starts_now ~after_failure ~stimuli_acked ~pending_stimulus =
 
 let cycle_wake ~periodic_due ~deferred_runtime_lane =
   match deferred_runtime_lane with
-  | Some _ -> Keeper_world_observation.Deferred_runtime_lane
+  | Some _ -> Keeper_world_observation.Deferred_runtime_lane { periodic_due }
   | None ->
     if periodic_due
     then Keeper_world_observation.Periodic_tick
@@ -1079,12 +1079,8 @@ let idle_cycle_of ~cycle_status ~decided_channel =
    deferred suffix from a self-wake at the same boundary. A self-wake backs off
    whether its turn finished, failed or never opened; a reaction that failed
    leaves its rows in the queue for the pulled-in boundary to retry.
-   [cycle_wake] pairs a due boundary with [Periodic_tick] or
-   [Deferred_runtime_lane] and a boundary not yet due with [Attention_wake] or
-   [Deferred_runtime_lane]; the other pairs are listed with the arm they would
-   take. *)
+   The same wake passed to the decision carries the boundary for accounting. *)
 let adaptive_idle_after_cycle
-      ~periodic_due
       ~(wake : Keeper_world_observation.cycle_wake)
       ~cycle_status
       ~decided_channel
@@ -1097,34 +1093,19 @@ let adaptive_idle_after_cycle
     (* #54338: a completed due schedule fills the boundary. *)
     Keeper_keepalive_signal.adaptive_idle_after_served_boundary ~now state
   | No_due_schedule_served ->
-    (match periodic_due, idle_cycle_of ~cycle_status ~decided_channel, wake with
-     (* A reaction took the due boundary. *)
-     | true, Reaction_turn,
-       (Keeper_world_observation.Periodic_tick | Keeper_world_observation.Attention_wake | Keeper_world_observation.Deferred_runtime_lane) ->
+    let open Keeper_world_observation in
+    (match wake, idle_cycle_of ~cycle_status ~decided_channel with
+     | (Periodic_tick | Deferred_runtime_lane { periodic_due = true }), Reaction_turn ->
        Keeper_keepalive_signal.adaptive_idle_after_reaction_at_boundary ~now
-     (* A self-wake at the due boundary: its turn finished, failed or never
-        opened. *)
-     | true, Not_a_reaction, (Keeper_world_observation.Periodic_tick | Keeper_world_observation.Attention_wake) ->
+     | Periodic_tick, Not_a_reaction ->
        Keeper_keepalive_signal.adaptive_idle_after_self_wake ~now state
-     (* A deferred suffix took the due boundary. Continuing a failed turn is
-        neither a reaction nor a quiet self-wake, so the stage holds. *)
-     | true, Not_a_reaction, Keeper_world_observation.Deferred_runtime_lane ->
+     | Periodic_tick, Undecided
+     | Deferred_runtime_lane { periodic_due = true }, (Not_a_reaction | Undecided) ->
        Keeper_keepalive_signal.adaptive_idle_hold_stage ~now state
-     (* The cycle ended before a decision: warmup, lifecycle block, busy owner,
-        owner rejection, or an interrupt or crash before the decision. The
-        boundary is consumed unjudged. *)
-     | true, Undecided,
-       (Keeper_world_observation.Periodic_tick | Keeper_world_observation.Attention_wake | Keeper_world_observation.Deferred_runtime_lane) ->
-       Keeper_keepalive_signal.adaptive_idle_hold_stage ~now state
-     (* A reaction off the boundary pulls the next self-wake in, never out. *)
-     | false, Reaction_turn,
-       (Keeper_world_observation.Periodic_tick | Keeper_world_observation.Attention_wake | Keeper_world_observation.Deferred_runtime_lane) ->
+     | (Attention_wake | Deferred_runtime_lane { periodic_due = false }), Reaction_turn ->
        Keeper_keepalive_signal.adaptive_idle_pull_in_on_reactive ~now state
-     (* Off the boundary without a reaction turn: bootstrap, a due schedule the
-        turn did not serve, a deferred suffix, or a reactive decision whose turn
-        never ran. The boundary stays where it is. *)
-     | false, (Not_a_reaction | Undecided),
-       (Keeper_world_observation.Periodic_tick | Keeper_world_observation.Attention_wake | Keeper_world_observation.Deferred_runtime_lane) -> state)
+     | (Attention_wake | Deferred_runtime_lane { periodic_due = false }), (Not_a_reaction | Undecided) ->
+       state)
 ;;
 
 (* A reaction turn that took its batch and did not finish leaves that batch in
@@ -1220,6 +1201,7 @@ let run_keepalive_unified_turn
        [Keeper_turn_pulse], subsequent settlement failures surface in registry
        state and logs without adding duplicate [Turn_failed] rows. *)
     let pulse_recorded = ref false in
+    let turn_opened () = Option.is_some !pulse_cause in
     let record_event_queue_failure message =
       event_queue_failed := true;
       match !cycle_outcome_ref with
@@ -1236,7 +1218,7 @@ let run_keepalive_unified_turn
           | Cycle.Rested _
           )
       | None ->
-        let should_record_pulse = not !pulse_recorded in
+        let should_record_pulse = turn_opened () && not !pulse_recorded in
         if should_record_pulse then pulse_recorded := true;
         record_crashed_cycle_failure
           ~record_pulse:should_record_pulse
@@ -1483,10 +1465,6 @@ let run_keepalive_unified_turn
              [source_batch] there, and its turn-entry reaction still gets its
              closing half below. *)
           let turn_stimuli = Keeper_heartbeat_source_batch.stimuli !source_batch in
-          record_replay_owned_turn_started_reactions
-            ~ctx
-            ~keeper_name:meta_after_triage.name
-            turn_stimuli;
           let event_bus = Event_bus_slots.get_keeper () in
           (* Preserve the typed resolution as input to the originating
              Keeper's external-effect Gate. It is not an AGENT_CORE approval. *)
@@ -1522,7 +1500,9 @@ let run_keepalive_unified_turn
                 run_keeper_cycle
                   ~on_turn_started:(fun () ->
                     decided_channel := Some turn_decision.channel;
-                    pulse_cause := Keeper_turn_pulse.cause_of_decision turn_decision)
+                    pulse_cause := Keeper_turn_pulse.cause_of_decision turn_decision;
+                    record_replay_owned_turn_started_reactions
+                      ~ctx ~keeper_name:meta_after_triage.name turn_stimuli)
                   ~admission_token
                   ~record_pulse:(not !pulse_recorded)
                   ?deferred_runtime_lane
@@ -1538,7 +1518,7 @@ let run_keepalive_unified_turn
                   ~turn_input
                   ()
               in
-              if Cycle.recorded_pulse outcome then pulse_recorded := true;
+              if Cycle.recorded_pulse ~turn_started:(turn_opened ()) outcome then pulse_recorded := true;
               outcome
           in
           let run_cycle () = run_fresh_cycle () in
@@ -1557,7 +1537,7 @@ let run_keepalive_unified_turn
              stimulus's evidence otherwise ends at "a turn started", and what
              the turn did is recovered by comparing that clock against the
              keeper's calls. *)
-          record_replay_owned_turn_finished_reactions
+          if turn_opened () then record_replay_owned_turn_finished_reactions
             ~ctx
             ~keeper_name:meta_after_triage.name
             ~disposition:(Cycle.turn_disposition cycle_outcome)
@@ -1702,7 +1682,7 @@ let run_keepalive_unified_turn
          turn failure so the caller does not dispatch
          [Turn_succeeded] for a cycle that never completed. *)
       handle_cycle_exception
-        ~record_pulse:(not !pulse_recorded)
+        ~record_pulse:(turn_opened () && not !pulse_recorded)
         ~registry_entry
         ~meta:meta_after_triage
         ~decided_channel:!decided_channel
@@ -2169,7 +2149,6 @@ let run_heartbeat_loop
         let cycle_now = cadence_now () in
         adaptive_idle :=
           adaptive_idle_after_cycle
-            ~periodic_due
             ~wake
             ~cycle_status:turn_outcome.cycle_status
             ~decided_channel:turn_outcome.decided_channel

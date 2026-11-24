@@ -1777,7 +1777,10 @@ let has_pending_task_cancellation (observation : world_observation) =
   List.exists is_task_cancellation_event observation.pending_board_events
 ;;
 
-type cycle_wake = Periodic_tick | Attention_wake | Deferred_runtime_lane
+type cycle_wake =
+  | Periodic_tick
+  | Attention_wake
+  | Deferred_runtime_lane of { periodic_due : bool }
 
 let keeper_cycle_decision
       ?(wake = Periodic_tick)
@@ -1794,7 +1797,12 @@ let keeper_cycle_decision
   let proactive_gate_enabled =
     Keeper_lifecycle_gate_env.enabled Keeper_lifecycle_gate.Proactive meta
   in
-  let deferred_runtime_lane_pending = wake = Deferred_runtime_lane in
+  let periodic_due, deferred_runtime_lane_pending =
+    match wake with
+    | Periodic_tick -> true, false
+    | Attention_wake -> false, false
+    | Deferred_runtime_lane { periodic_due } -> periodic_due, true
+  in
   (* A scheduler wake delivered through the event queue is a scheduled
      stimulus, not a reactive one. Routing it through the reactive trigger
      list ran the turn with [channel = Reactive], which applied the
@@ -1829,11 +1837,17 @@ let keeper_cycle_decision
     List.fold_left (fun (wakes, carried) (event : pending_board_event) ->
       match event.event_kind with
       | Task_outcome outcome ->
+        (* Admission follows the policy table even if a verdict is reclassified. *)
         (match Keeper_stimulus_wake_policy.task_verdict_wake_policy
                  ~input_kind:Keeper_stimulus_wake_policy.Task_outcome_approved outcome.to_authority with
          | Keeper_stimulus_wake_policy.Carry -> wakes, true
          | Keeper_stimulus_wake_policy.Now | Keeper_stimulus_wake_policy.At_tick -> true, carried)
-      | _ -> wakes, carried) (false, false) observation.pending_board_events
+      | Board_post_created | Board_post_updated | Board_comment_added _
+      | Board_reaction_changed _ | Board_vote_cast _ | Fusion_completed
+      | Delegate_completed _ | Ask_answered_row _ | Composition_completed
+      | Owned_job_completed _ | Schedule_due _ | External_attention _
+      | Completion_authority_rejected _ | Task_cancelled _ -> wakes, carried)
+      (false, false) observation.pending_board_events
   in
   let add_observed_reason ~pending reason triggers =
     if pending && not (List.mem reason triggers) then triggers @ [ reason ] else triggers
@@ -1891,7 +1905,7 @@ let keeper_cycle_decision
         not proactive_gate_enabled
         && not requested_schedule_due
         && not deferred_runtime_lane_pending
-        && not (wake = Periodic_tick && approval_carried)
+        && not (periodic_due && approval_carried)
       then
         { should_run = false
         ; channel = Scheduled_autonomous
@@ -1932,7 +1946,7 @@ let keeper_cycle_decision
       (* This reaction also serves a due periodic boundary. Its prompt and
          decision ledger must include the work that boundary would have shown. *)
       let accompanying_reasons =
-        [ (if wake = Periodic_tick && proactive_gate_enabled then task_backlog_reason () else None)
+        [ (if periodic_due && proactive_gate_enabled then task_backlog_reason () else None)
         ; (if requested_schedule_due then Some Scheduled_automation_due else None)
         ; (if approval_carried then Some Task_outcome_pending else None)
         ; (if deferred_runtime_lane_pending then Some Deferred_runtime_lane_pending else None)

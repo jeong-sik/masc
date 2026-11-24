@@ -92,7 +92,7 @@ let receipt_id_of_payload : Keeper_event_queue.stimulus_payload -> string option
 
 let row_of_selection (selection : Keeper_event_queue_state.pending_selection) =
   { arrival = selection.arrival
-  ; urgency = selection.source.urgency
+  ; urgency = Keeper_stimulus_wake_policy.effective_urgency selection.source
   ; mode = inbound_mode_of_stimulus selection.source
   ; arrived_at = selection.source.arrived_at
   ; preview = Keeper_reaction_ledger.stimulus_payload_preview selection.source.payload

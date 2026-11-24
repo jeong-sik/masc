@@ -5955,6 +5955,48 @@ let test_crashed_cycle_records_health_failure () =
   R.For_testing.clear ();
   cleanup_dir base_path
 
+let test_reactive_profile_failure_has_no_turn_pulse () =
+  ensure_default_runtime ();
+  Eio_main.run @@ fun env ->
+  install_test_env env;
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir "reactive-before-open" in
+  let keeper_name = "reactive-before-open" in
+  Fun.protect
+    ~finally:(fun () -> R.For_testing.clear (); cleanup_dir base_path)
+    (fun () ->
+      let meta = make_meta keeper_name in
+      let config = Masc.Workspace.default_config base_path in
+      let ctx : _ Keeper_types_profile.context =
+        { config; agent_name = "operator"; sw; clock = Eio.Stdenv.clock env;
+          proc_mgr = None; net = None;
+          publication_recovery_provider = Masc_test_deps.non_runtime_publication_recovery_provider }
+      in
+      let _entry = R.For_testing.register ~base_path keeper_name meta in
+      let profile = Filename.concat (Masc.Workspace.masc_dir config)
+          ("config/keepers/" ^ keeper_name ^ ".toml") in
+      write_file profile "[keeper";
+      let turn_decision = WO.keeper_cycle_decision ~wake:WO.Attention_wake
+          ~event_queue_triggers:[WO.Workspace_message_stimulus] ~meta base_observation in
+      check bool "the queued message would open a reactive turn" true
+        (turn_decision.should_run && turn_decision.channel = WO.Reactive);
+      let opened = ref false in
+      let outcome = Masc.Keeper_turn_dispatch_authority.run (fun admission_token ->
+        Masc.Keeper_heartbeat_loop_cycle.run_keeper_cycle ~admission_token ~ctx
+          ~meta_after_triage:meta ~stop:(Atomic.make false) ~obs:base_observation
+          ~turn_decision ~shared_context:(Agent_core.Context.create ())
+          ~turn_input:(Masc.Keeper_heartbeat_source_batch.for_turn ~reactive:true
+                         Masc.Keeper_heartbeat_source_batch.empty)
+          ~on_turn_started:(fun () -> opened := true) ()) in
+      (match outcome with
+       | Failed { failure = { error = Agent_core.Error.Config
+           (Agent_core.Error.InvalidConfig {field = "keeper.profile"; _}); _ }; _ } -> ()
+       | _ -> fail "expected the profile error before dispatch");
+      check bool "the selected turn never opened" false !opened;
+      check bool "a rejected cycle is absent from the live pulse" true
+        (Option.is_none (Masc.Keeper_turn_pulse.get ~base_path ~keeper_name)))
+;;
+
 let test_crashed_cycle_skip_pulse_prevents_double_count () =
   Eio_main.run @@ fun env ->
   install_test_env env;
@@ -5970,15 +6012,15 @@ let test_crashed_cycle_skip_pulse_prevents_double_count () =
       let keeper_name = "pulse-single-count-keeper" in
       let meta = make_meta keeper_name in
       check bool "Completed records pulse" true
-        (Masc.Keeper_heartbeat_loop_cycle.recorded_pulse (Completed { meta }));
+        (Masc.Keeper_heartbeat_loop_cycle.recorded_pulse ~turn_started:true (Completed { meta }));
       check bool "Checkpointed records pulse" true
-        (Masc.Keeper_heartbeat_loop_cycle.recorded_pulse (Checkpointed { meta }));
+        (Masc.Keeper_heartbeat_loop_cycle.recorded_pulse ~turn_started:true (Checkpointed { meta }));
       check bool "Input_required records pulse" true
-        (Masc.Keeper_heartbeat_loop_cycle.recorded_pulse (Input_required meta));
+        (Masc.Keeper_heartbeat_loop_cycle.recorded_pulse ~turn_started:true (Input_required meta));
       check bool "Cancelled skips pulse" false
-        (Masc.Keeper_heartbeat_loop_cycle.recorded_pulse (Cancelled meta));
+        (Masc.Keeper_heartbeat_loop_cycle.recorded_pulse ~turn_started:true (Cancelled meta));
       check bool "Skipped skips pulse" false
-        (Masc.Keeper_heartbeat_loop_cycle.recorded_pulse (Skipped meta));
+        (Masc.Keeper_heartbeat_loop_cycle.recorded_pulse ~turn_started:true (Skipped meta));
       let registry_entry = R.For_testing.register ~base_path keeper_name meta in
       (* Simulate a completed cycle already counted in Keeper_turn_pulse. *)
       Masc.Keeper_turn_pulse.record
@@ -6291,5 +6333,7 @@ let () =
         test_crashed_cycle_records_health_failure;
       test_case "post-cycle queue failure does not double-count turn pulse" `Quick
         test_crashed_cycle_skip_pulse_prevents_double_count;
+      test_case "a reactive profile failure opens no turn and records no pulse" `Quick
+        test_reactive_profile_failure_has_no_turn_pulse;
     ];
   ]

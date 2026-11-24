@@ -374,7 +374,7 @@ let test_an_undecodable_meta_that_appears_before_the_lock_keeps_the_task () =
      | Wake.Delivery (Task_wake.Unroutable_producer _) -> ()
      | Wake.Rejection_superseded _ -> Alcotest.fail "current rejection was superseded"
      | Wake.Delivery
-         ( Task_wake.Signaled _ | Task_wake.Durable_deferred _
+         ( Task_wake.Queued_for_later _ | Task_wake.Signaled _ | Task_wake.Durable_deferred _
          | Task_wake.Durable_wake_failed _ | Task_wake.Producer_identity_lookup_failed _
          | Task_wake.Durable_queue_failed _ ) ->
        Alcotest.fail "the first routing read must find no Keeper");
@@ -541,7 +541,7 @@ let test_enqueue_before_ack_is_idempotent () =
          | Task_wake.Durable_wake_failed _ ) -> ()
      | Wake.Rejection_superseded _ -> Alcotest.fail "current rejection was superseded"
      | Wake.Delivery
-         ( Task_wake.Unroutable_producer _ | Task_wake.Producer_identity_lookup_failed _
+         ( Task_wake.Queued_for_later _ | Task_wake.Unroutable_producer _ | Task_wake.Producer_identity_lookup_failed _
          | Task_wake.Durable_queue_failed _ ) ->
        Alcotest.fail "fixture failed to durably enqueue rejection");
     check_pending config 1;
@@ -684,6 +684,27 @@ let test_prior_immediate_approval_replays_without_an_extra_wake () =
       (Masc.Keeper_stimulus_wake_policy.effective_urgency committed = Low);
     Alcotest.(check bool) "old priority does not force a follow-up" true
       (Masc.Keeper_arrived_stimuli.inbound_mode_of_stimulus committed = Coalesce);
+    let snapshot = Queue.load_selections_with_errors
+        ~base_path:config.W.base_path ~keeper_name:producer in
+    Alcotest.(check int) "the durable queue is readable" 0 (List.length snapshot.read_errors);
+    let round = Masc.Keeper_arrived_stimuli.next_round
+        ~run_started_at:0. ~shown:[] snapshot.pending in
+    (match round.listed with
+     | [row] ->
+       Alcotest.(check bool) "model input reports the effective carry priority" true
+         (row.urgency = Low && row.mode = Coalesce)
+     | [] | _ :: _ :: _ -> Alcotest.fail "expected the one retained approval");
+    let fleet = Masc.Keeper_reaction_ledger.fleet_summary_json
+        ~base_path:config.W.base_path ~keeper_names:[producer] ~limit_per_keeper:5
+        ~owner_lifecycle:(fun ~keeper_name:_ -> Queue.Lifecycle_unknown "test owner") in
+    let open Yojson.Safe.Util in
+    (match fleet |> member "durable_event_queue_by_keeper" |> to_list with
+     | [health] ->
+       Alcotest.(check int) "operator still sees the durable approval" 1
+         (health |> member "durable_event_queue_pending_count" |> to_int);
+       Alcotest.(check int) "operator does not count the old priority as immediate" 0
+         (health |> member "immediate_count" |> to_int)
+     | [] | _ :: _ :: _ -> Alcotest.fail "expected health for one Keeper");
     match Task_wake.wake_approved_producer ~config ~producer ~task_id ~verification_id ~authority:human with
     | Durable_queue_failed _ -> ()
     | _ -> Alcotest.fail "a different verdict authority was accepted as a replay")
@@ -744,7 +765,7 @@ let expect_superseded ~verification_id = function
     Alcotest.(check string) "superseded task" task_id actual_task;
     Alcotest.(check string) "superseded verification" verification_id actual_verification
   | Wake.Delivery
-      ( Task_wake.Signaled _ | Task_wake.Durable_deferred _ | Task_wake.Durable_wake_failed _
+      ( Task_wake.Queued_for_later _ | Task_wake.Signaled _ | Task_wake.Durable_deferred _ | Task_wake.Durable_wake_failed _
       | Task_wake.Unroutable_producer _ | Task_wake.Producer_identity_lookup_failed _
       | Task_wake.Durable_queue_failed _ ) ->
     Alcotest.fail "old rejection still owned delivery"
@@ -860,7 +881,7 @@ let test_corrupt_primary_blocks_wake_without_changing_queue () =
          | Task_wake.Durable_wake_failed _ ) -> ()
      | Wake.Rejection_superseded _
      | Wake.Delivery
-         ( Task_wake.Unroutable_producer _ | Task_wake.Producer_identity_lookup_failed _
+         ( Task_wake.Queued_for_later _ | Task_wake.Unroutable_producer _ | Task_wake.Producer_identity_lookup_failed _
          | Task_wake.Durable_queue_failed _ ) ->
        Alcotest.fail "fixture did not enqueue the current rejection");
     check_pending config 1;
@@ -875,7 +896,7 @@ let test_corrupt_primary_blocks_wake_without_changing_queue () =
      | Wake.Delivery (Task_wake.Durable_queue_failed _) -> ()
      | Wake.Rejection_superseded _
      | Wake.Delivery
-         ( Task_wake.Signaled _ | Task_wake.Durable_deferred _ | Task_wake.Durable_wake_failed _
+         ( Task_wake.Queued_for_later _ | Task_wake.Signaled _ | Task_wake.Durable_deferred _ | Task_wake.Durable_wake_failed _
          | Task_wake.Unroutable_producer _ | Task_wake.Producer_identity_lookup_failed _ ) ->
        Alcotest.fail "wake accepted a recovered or corrupt primary backlog");
     Alcotest.(check bool) "standing never trusts recovered primary" true

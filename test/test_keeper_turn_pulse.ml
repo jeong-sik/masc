@@ -403,13 +403,15 @@ let test_seed_names_causes_from_the_turn_log () =
           ~wake_reasons:["scheduled_autonomous_turn"; "scheduled_automation_due"] ()
       ; decision_line ~turn:8 ~slot:90 ~path:"autonomous_cycle" ~channel:Scheduled_autonomous
           ~wake_reasons:["scheduled_autonomous_turn"] ()
+      ; decision_line ~turn:9 ~slot:90 ~path:"autonomous_cycle" ~channel:Scheduled_autonomous
+          ~wake_reasons:["future_trigger"] ()
       ];
     match seeded config keeper_name with
     | Some pulse ->
       Alcotest.check
         cause_list
         "recorded decisions survive both an empty inbound queue and a missing Opened receipt"
-        [ base + (90 * Pulse.slot_seconds), [ 2; 2; 1; 2; 1 ] ]
+        [ base + (90 * Pulse.slot_seconds), [ 2; 2; 1; 2; 2 ] ]
         (causes pulse)
     | None -> Alcotest.fail "expected a seeded pulse")
 ;;

@@ -73,5 +73,9 @@ let effective_urgency (stimulus : Keeper_event_queue.stimulus) =
   | Completion_authority_rejected rejection ->
     task_verdict_wake_policy ~input_kind:Task_cancelled_or_rejected rejection.car_authority
     |> urgency_of_stimulus_wake_policy
-  | _ -> stimulus.urgency
+  | Board_signal _ | Board_routing_pending _ | Board_attention _ | Bootstrap
+  | Tool_result_ready _ | Fusion_completed _ | Schedule_due _ | Connector_attention _
+  | Hitl_resolved _ | Ask_answered _ | Task_cancelled _ | Workspace_message _
+  | Delegate_completed _ | Composition_completed _ | Owned_job_completed _ ->
+    stimulus.urgency
 ;;

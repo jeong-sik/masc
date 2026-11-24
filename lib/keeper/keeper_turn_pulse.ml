@@ -232,9 +232,13 @@ let sample_of_row ~schedule_of_turn json =
     | Some Reactive -> Some Reacted
     | Some Scheduled_autonomous ->
       (match Yojson.Safe.Util.member "wake_reasons" json with
-       | `List (_ :: _ as reasons) when List.for_all (function `String _ -> true | _ -> false) reasons ->
-         let due = Keeper_world_observation_turn_types.turn_reason_to_string Scheduled_automation_due in
-         Some (cause_of_channel Scheduled_autonomous ~schedule_due:(List.mem (`String due) reasons))
+       | `List reasons when List.for_all (function `String _ -> true | _ -> false) reasons ->
+         let has reason =
+           List.mem (`String (Keeper_world_observation_turn_types.turn_reason_to_string reason)) reasons
+         in
+         if has Scheduled_automation_due then Some Scheduled
+         else if has Scheduled_autonomous_turn then Some Own
+         else None
        | `Null ->
          (* Earlier rows kept the observation and a separate turn receipt. *)
          let observation = Yojson.Safe.Util.member "observation" json in

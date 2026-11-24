@@ -2349,6 +2349,77 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
         probe_refresh_label ~lang pr.refresh_state ^ age
     | None -> Say.resolve lang (Say.make ~ko:"즉시 캐시" ~en:"Instant SSOT")
   in
+  let extra_lane_pills =
+    let standalone_pill =
+      match Observed.to_option rt.standalone_lanes with
+      | Some sl ->
+          [
+            {
+              H.label =
+                Printf.sprintf "Exact %d" (List.length sl.lanes);
+              active = false;
+              tone = Some Theme.Status_active;
+              glyph = None;
+            };
+          ]
+      | None -> []
+    in
+    let inv_pill =
+      match Observed.to_option rt.lanes_inventory with
+      | Some inv ->
+          [
+            {
+              H.label =
+                Printf.sprintf "All %d" (List.length inv.rows);
+              active = false;
+              tone = Some Theme.Status_historical;
+              glyph = None;
+            };
+          ]
+      | None -> []
+    in
+    let verif_pill =
+      let tc =
+        match Observed.to_option rt.verification_runs with
+        | Some v -> v.count
+        | None -> 0
+      in
+      let gc =
+        match Observed.to_option rt.goal_verification_runs with
+        | Some v -> v.count
+        | None -> 0
+      in
+      if tc + gc > 0 then
+        [
+          {
+            H.label = Printf.sprintf "Verif %d/%d" tc gc;
+            active = false;
+            tone = Some Theme.Status_ok;
+            glyph = None;
+          };
+        ]
+      else []
+    in
+    let preview_pill =
+      match Observed.to_option rt.runtime_raw_preview with
+      | Some pv ->
+          [
+            {
+              H.label =
+                if pv.ok && pv.can_save then "Preview OK"
+                else "Preview ERR";
+              active = true;
+              tone =
+                Some
+                  (if pv.ok && pv.can_save then Theme.Status_ok
+                   else Theme.Status_attention);
+              glyph = None;
+            };
+          ]
+      | None -> []
+    in
+    standalone_pill @ inv_pill @ verif_pill @ preview_pill
+  in
   let header_pills =
     [
       {
@@ -2378,6 +2449,7 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
         glyph = Some Glyph.Historical_incident;
       };
     ]
+    @ extra_lane_pills
   in
   ignore (H.draw_pills ~grid ~rect:header_rect ~theme header_pills);
   let left_rect, right_rect =
@@ -2391,8 +2463,8 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
          ~hotkey:
            (Say.resolve lang
               (Say.make
-                 ~ko:"[n] 생성 · [e] 편집 · [d] 삭제 · [a] 배정 · [f] 퓨전"
-                 ~en:"[n] New · [e] Edit · [d] Del · [a] Assign · [f] Fusion"))
+                 ~ko:"[n] 생성 · [e] 편집 · [R] 이름 · [d] 삭제 · [D] 실행 · [a] 배정"
+                 ~en:"[n] New · [e] Edit · [R] Rename · [d] Del · [D] Run · [a] Assign"))
          (Say.resolve lang
             (Say.make ~ko:"페일오버 캐스케이드" ~en:"Failover Cascade")))
   in
@@ -2855,9 +2927,19 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
         end
   end;
   (* Bottom Right Card: Unified Exact Output + Fusion Panel Fan-Out *)
+  let runs_subtitle =
+    match Observed.to_option rt.board_attention_quarantines with
+    | Some (kp, q) when q.count > 0 ->
+        Some (Printf.sprintf "quarantine:%s(%d)" kp q.count)
+    | Some _ | None -> None
+  in
   let runs_inner =
     Card.draw ~cache grid ~rect:runs_rect ~theme
-      (H.card_spec
+      (H.card_spec ?subtitle:runs_subtitle
+         ~hotkey:
+           (Say.resolve lang
+              (Say.make ~ko:"[d] Exact 상세 · [f] 퓨전"
+                 ~en:"[d] Exact Detail · [f] Fusion"))
          (Say.resolve lang
             (Say.make ~ko:"Exact · Fusion 실행 이력"
                ~en:"Exact & Fusion Runs")))
@@ -5329,6 +5411,22 @@ let render_addons_browser ~(model : Model.t) ~cache ~(rect : Rect.t)
     | [ a; b ] -> (a, b)
     | _ -> (Rect.empty, rect)
   in
+  let addon_asks_pill =
+    match Observed.to_option rt.lane_addon_asks with
+    | Some (_ :: _ as xs) ->
+        [
+          {
+            H.label =
+              Printf.sprintf "%s %d"
+                (Say.resolve lang (Say.make ~ko:"애드온 질문" ~en:"Addon Asks"))
+                (List.length xs);
+            active = true;
+            tone = Some Theme.Status_attention;
+            glyph = Some Glyph.Warning_triangle;
+          };
+        ]
+    | Some [] | None -> []
+  in
   let pills =
     [
       {
@@ -5360,6 +5458,7 @@ let render_addons_browser ~(model : Model.t) ~cache ~(rect : Rect.t)
         glyph = None;
       };
     ]
+    @ addon_asks_pill
     @
     if browser_issues <> [] then
       [
@@ -5384,8 +5483,8 @@ let render_addons_browser ~(model : Model.t) ~cache ~(rect : Rect.t)
                  ~en:"[Enter] Open/Preview · [Tab] Pane · [p] Runtime view")
           else
             Say.resolve lang
-              (Say.make ~ko:"[p] 카탈로그 · [Tab] 좌/우 · [Space] 클라/탭 · [t] 탭"
-                 ~en:"[p] Catalog · [Tab] Pane · [Space] Client/Tab · [t] Tabs"))
+              (Say.make ~ko:"[n] 부착 · [c] 실행/조작 · [O] 관측/씬 · [p] 카탈로그"
+                 ~en:"[n] Attach · [c] Act/Interact · [O] Obs/Scene · [p] Catalog"))
        pills);
   let left_rect, right_rect =
     Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.52
@@ -5606,14 +5705,20 @@ let render_addons_browser ~(model : Model.t) ~cache ~(rect : Rect.t)
     Card.draw ~cache grid ~rect:left_rect ~theme
       (H.card_spec ~focused:(Model.pane_focused model 0)
          ~badge:
-           (H.make_badge ~glyph:Glyph.Live_working ~tone:Theme.Status_active
-              "SYNCED · observer")
-         ~hotkey:(Say.resolve lang (Say.make ~ko:"[y] ID 복사" ~en:"[y] Copy ID"))
+           (H.make_badge ~glyph:Glyph.Live_working ~tone:Theme.Status_ok
+              "OPERATOR · live")
+         ~hotkey:
+           (Say.resolve lang
+              (Say.make
+                 ~ko:"[n] 부착 · [e] 선언 · [c] 실행 · [O] 관측 · [D] 슬라이스 · [x] 해제"
+                 ~en:"[n] Attach · [e] Decl · [c] Act · [O] Obs · [D] Slice · [x] Detach"))
          (Say.resolve lang (Say.make ~ko:"애드온 레인" ~en:"Addon Lanes")))
   in
   if not (Rect.is_empty left_inner) then begin
     let detail_h =
-      if left_inner.h >= 10 && Option.is_some (Runtime_store.selected_addon_instance rt)
+      if left_inner.h >= 12 && Option.is_some (Runtime_store.selected_addon_instance rt)
+      then 5
+      else if left_inner.h >= 10 && Option.is_some (Runtime_store.selected_addon_instance rt)
       then 4
       else 0
     in
@@ -5804,27 +5909,104 @@ let render_addons_browser ~(model : Model.t) ~cache ~(rect : Rect.t)
               else String.concat ", " inst.action_names
             in
             H.put_kv ~grid ~clip:det_r ~x:det_r.x ~y:!y ~max_w:det_r.w ~theme
-              ~key_w:8 ~key:"Actions" acts
+              ~key_w:8 ~key:"Actions" acts;
+            incr y
+          end;
+          if !y < bot then begin
+            let op_status =
+              let rec_part =
+                match Observed.to_option rt.addon_last_action_receipt with
+                | Some r ->
+                    let d =
+                      match r.detail with
+                      | Some s -> " · " ^ H.redact_secrets_in_text s
+                      | None -> ""
+                    in
+                    Printf.sprintf "act=%s(%s)%s" r.state r.request_id d
+                | None -> ""
+              in
+              let slice_part =
+                match Observed.to_option rt.addon_slice with
+                | Some sl -> Printf.sprintf "slice=%d rows" sl.row_count
+                | None -> ""
+              in
+              let ask_part =
+                match Observed.to_option rt.lane_addon_asks with
+                | Some (_ :: _ as xs) ->
+                    Printf.sprintf "asks=%d" (List.length xs)
+                | Some [] | None -> ""
+              in
+              [ rec_part; slice_part; ask_part ]
+              |> List.filter (fun s -> not (String.equal s ""))
+              |> String.concat " · "
+            in
+            if not (String.equal op_status "") then
+              H.put_kv ~grid ~clip:det_r ~x:det_r.x ~y:!y ~max_w:det_r.w ~theme
+                ~key_w:8 ~key:"Op" op_status
           end
     end
   end;
   (* Right pane (pane 1): Browser Lane Clients (top) + Per-Tab Listing (bottom) *)
   let right_focus_tag =
-    match rt.browser_right_focus with
-    | `Clients -> Say.resolve lang (Say.make ~ko:"클라이언트 포커스" ~en:"Clients focus")
-    | `Tabs -> Say.resolve lang (Say.make ~ko:"탭 포커스" ~en:"Tabs focus")
+    let base =
+      match rt.browser_right_focus with
+      | `Clients -> Say.resolve lang (Say.make ~ko:"클라이언트 포커스" ~en:"Clients focus")
+      | `Tabs -> Say.resolve lang (Say.make ~ko:"탭 포커스" ~en:"Tabs focus")
+    in
+    let sel_tab_id =
+      Option.map (fun (tb : Wire_runtime.browser_tab_row) -> tb.id)
+        (Runtime_store.selected_browser_tab rt)
+    in
+    let tab_matches tid =
+      match sel_tab_id with
+      | Some cur -> Int.equal cur tid
+      | None -> true
+    in
+    let candidates =
+      (match rt.browser_last_receipt with
+      | Observed.Value { observed_at; data = r; _ } ->
+          let tag = if r.ok then "ok" else "err" in
+          [ (observed_at, Printf.sprintf "op:%s %s" tag (H.redact_secrets_in_text r.summary)) ]
+      | Observed.Loading _ | Observed.Absent | Observed.Unreported | Observed.Failed _ -> [])
+      @ (match rt.browser_scene with
+        | Observed.Value { observed_at; data = tid, sc; _ } when tab_matches tid ->
+            [ (observed_at, Printf.sprintf "scene:#%d (%d nodes)" tid (List.length sc.nodes)) ]
+        | Observed.Value _ | Observed.Loading _ | Observed.Absent
+        | Observed.Unreported | Observed.Failed _ ->
+            [])
+      @
+      match rt.browser_screenshot with
+      | Observed.Value { observed_at; data = tid, sh; _ } when tab_matches tid ->
+          [ (observed_at, Printf.sprintf "shot:#%d (%dB)" tid sh.base64_bytes) ]
+      | Observed.Value _ | Observed.Loading _ | Observed.Absent
+      | Observed.Unreported | Observed.Failed _ ->
+          []
+    in
+    let op_note =
+      List.fold_left
+        (fun acc (ts, txt) ->
+          match acc with
+          | None -> Some (ts, txt)
+          | Some (best_ts, _) ->
+              if Clock.Mono.compare ts best_ts > 0 then Some (ts, txt) else acc)
+        None candidates
+      |> Option.map snd
+    in
+    match op_note with
+    | Some n -> Printf.sprintf "%s · %s" base n
+    | None -> base
   in
   let right_inner =
     Card.draw ~cache grid ~rect:right_rect ~theme
       (H.card_spec ~focused:(Model.pane_focused model 1)
          ~subtitle:right_focus_tag
          ~badge:
-           (H.make_badge ~glyph:Glyph.Live_idle ~tone:Theme.Status_historical
-              "SNAPSHOT · [r]")
+           (H.make_badge ~glyph:Glyph.Live_working ~tone:Theme.Status_ok
+              "OPERATOR · [r]")
          ~hotkey:
            (Say.resolve lang
-              (Say.make ~ko:"[→/Tab] 포커스 · [t] 탭 · [y] URL · [o] 열기"
-                 ~en:"[→/Tab] Focus · [t] Tabs · [y] URL · [o] Open"))
+              (Say.make ~ko:"[→/Tab] 포커스 · [t] 탭 · [c] 조작 · [O] 씬 · [W] 캡처 · [o] 열기"
+                 ~en:"[→/Tab] Focus · [t] Tabs · [c] Act · [O] Scene · [W] Shot · [o] Open"))
          (Say.resolve lang
             (Say.make ~ko:"브라우저 레인 클라이언트 · 탭"
                ~en:"Browser Clients & Open Tabs")))
@@ -6511,4 +6693,81 @@ let render_dive ~(target : Nav.runtime_dive_target) ~(model : Model.t) ~cache
                 (H.put_clipped ~grid ~clip:content ~x:content.x ~y:content.y
                    ~max_w:content.w ~style:(H.whisper_style ~theme ())
                    sf_summary)
+        end
+    | Nav.Exact_run_dive run_id ->
+        let inner =
+          Card.draw ~cache grid ~rect:body ~theme
+            (H.card_spec ~focused:(Model.body_has_focus model) ~subtitle:run_id
+               ~hotkey:
+                 (Say.resolve lang
+                    (Say.make ~ko:"[↑↓] 스크롤 · [y] ID 복사 · [r] 새로고침 · [Esc] 뒤로"
+                       ~en:"[↑↓] Scroll · [y] Copy ID · [r] Refresh · [Esc] Back"))
+               (Say.resolve lang
+                  (Say.make ~ko:"런타임 > Exact 레인 실행 상세"
+                     ~en:"Runtime > Exact Lane Run Detail")))
+        in
+        let content = H.pad_content ~bp inner in
+        if not (Rect.is_empty content) then begin
+          match rt.exact_run_detail with
+          | Observed.Value { data = rid, detail; _ }
+            when String.equal rid run_id ->
+              let opt_s = function Some s -> s | None -> "—" in
+              let elapsed_s =
+                match detail.elapsed_s with
+                | Some e -> Printf.sprintf "%.2fs" e
+                | None -> "—"
+              in
+              let json_lines heading j_opt =
+                match j_opt with
+                | None -> []
+                | Some j ->
+                    ("── " ^ heading)
+                    :: String.split_on_char '\n'
+                         (H.redact_secrets_in_text (Yojson.Safe.pretty_to_string j))
+              in
+              let all_lines =
+                [
+                  Printf.sprintf "Run ID: %s · Kind: %s · Lane: %s"
+                    detail.run_id detail.run_kind detail.lane;
+                  Printf.sprintf "Status: %s · Elapsed: %s · Slot: %s"
+                    detail.status elapsed_s (opt_s detail.selected_slot);
+                  Printf.sprintf "Subject: %s · Actor: %s · Skill Evidence: %s"
+                    (opt_s detail.subject_id) (opt_s detail.actor)
+                    (opt_s detail.skill_evidence_state);
+                ]
+                @ json_lines "Input" detail.input_json
+                @ json_lines "Output" detail.output_json
+                @ json_lines "Raw Payload" (Some detail.raw_json)
+              in
+              let skip =
+                Int.max 0
+                  (Int.min
+                     (Int.max 0 (List.length all_lines - content.h))
+                     model.nav.dive_scroll_offset)
+              in
+              let y = ref content.y and bot = Rect.bottom content in
+              List.iter
+                (fun ln ->
+                  if !y < bot then begin
+                    let st =
+                      if String.starts_with ~prefix:"──" ln then
+                        H.accent_style ~theme ~attrs:Attr.bold ()
+                      else H.text_style ~theme ()
+                    in
+                    ignore
+                      (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
+                         ~max_w:content.w ~style:st ln);
+                    incr y
+                  end)
+                (Store_scroll.drop skip all_lines)
+          | Observed.Loading _ ->
+              H.draw_observed_placeholder ~grid ~rect:content ~theme ~lang
+                rt.exact_run_detail
+          | Observed.Failed _ as obs ->
+              H.draw_observed_placeholder ~grid ~rect:content ~theme ~lang obs
+          | Observed.Value _ | Observed.Absent | Observed.Unreported ->
+              ignore
+                (H.put_clipped ~grid ~clip:content ~x:content.x ~y:content.y
+                   ~max_w:content.w ~style:(H.whisper_style ~theme ())
+                   (Printf.sprintf "Exact run %s — press [r] to refresh" run_id))
         end

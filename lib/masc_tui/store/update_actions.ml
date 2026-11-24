@@ -951,11 +951,15 @@ let open_runtime_lane_create_modal (m : Model.t) =
 let open_runtime_lane_edit_modal ~now (m : Model.t)
     (lane : Wire_runtime.failover_lane) =
   if String.equal lane.id "default" then
-    ( Model.with_toast ~now ~level:Model.Toast_info
-        (Say.make ~ko:"기본 라우트는 런타임 설정에서 변경하세요"
-           ~en:"Change the default route in Runtime Settings")
-        m
-    , [] )
+    let next, cmds = Update_nav.open_inline_modal m Nav.Default_route_edit in
+    let value = String.concat ", " lane.runtime_ids in
+    let inline_modal = Option.map
+      (fun (modal : Model.inline_modal_state) ->
+        { modal with fields = List.map
+            (fun (field : Model.modal_form_field) -> { field with value }) modal.fields })
+      next.inline_modal
+    in
+    ({ next with nav = { next.nav with modal_edit_cursor = String.length value }; inline_modal }, cmds)
   else (
   let exact_output, bare_id =
     if String.starts_with ~prefix:"exact/" lane.id then
@@ -996,6 +1000,16 @@ let open_runtime_lane_edit_modal ~now (m : Model.t)
   in
   ({ m with nav; drafts; config; inline_modal = Some modal; ask_modal = None }, rev_cmds))
 
+let open_named_lane_delete_modal (m : Model.t) lane_id =
+  let opened_revision = runtime_config_revision_opt m in
+  let kind = Nav.Runtime_lane_delete { lane_id; opened_revision } in
+  let next, cmds = Update_nav.open_inline_modal m kind in
+  let revision_cmds = match opened_revision with
+    | Some _ -> []
+    | None -> [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_runtime_config_raw } ]
+  in
+  (next, cmds @ revision_cmds)
+
 let open_runtime_lane_delete_modal ~now (m : Model.t)
     (lane : Wire_runtime.failover_lane) =
   if
@@ -1010,17 +1024,7 @@ let open_runtime_lane_delete_modal ~now (m : Model.t)
            ~en:"Only declared failover lanes can be deleted (synthesized/reserved routes cannot be removed)")
         m
     , [] )
-  else
-    let opened_revision = runtime_config_revision_opt m in
-    let kind = Nav.Runtime_lane_delete { lane_id = lane.id; opened_revision } in
-    let m1, cmds1 = Update_nav.open_inline_modal m kind in
-    let rev_cmds =
-      match opened_revision with
-      | Some _ -> []
-      | None ->
-          [ Cmd.Http_get { epoch = m1.epoch; req = Cmd.Get_runtime_config_raw } ]
-    in
-    (m1, cmds1 @ rev_cmds)
+  else open_named_lane_delete_modal m lane.id
 
 let default_task_transition_action (tk : Wire_work.task) =
   match tk.status with
@@ -1314,33 +1318,28 @@ let open_keeper_lifecycle_modal (m : Model.t) ~keeper ~default_action =
   let config = Config_store.cancel_edit_field m.config in
   ({ m with nav; drafts; config; inline_modal = Some modal; ask_modal = None }, [])
 
-let open_addon_attach_modal (m : Model.t) =
+let open_addon_attach_modal ?manifest_path ?run_id (m : Model.t) =
   let kind = Nav.Addon_attach_form in
   let modal0 = Model.inline_modal_for kind in
-  let seeded_manifest =
-    if not m.runtime.addon_catalog_mode then None
-    else
-      match Runtime_store.selected_addon_catalog_entry m.runtime with
-      | Some (Wire_runtime.Catalog_package { manifest_path; _ }) ->
-          Some manifest_path
-      | Some (Wire_runtime.Catalog_folder _ | Wire_runtime.Catalog_issue _)
-      | None ->
-          None
+  let manifest_path =
+    match manifest_path with
+    | Some _ -> manifest_path
+    | None when m.runtime.addon_catalog_mode -> (
+        match Runtime_store.selected_addon_catalog_entry m.runtime with
+        | Some (Wire_runtime.Catalog_package { manifest_path; _ }) -> Some manifest_path
+        | Some (Wire_runtime.Catalog_folder _ | Wire_runtime.Catalog_issue _) | None -> None)
+    | None -> None
   in
-  let modal =
-    match seeded_manifest with
-    | None -> modal0
-    | Some mp ->
-        let fields =
-          List.map
-            (fun (f : Model.modal_form_field) ->
-              if String.equal f.key "addon_manifest_path" then
-                { f with value = mp }
-              else f)
-            modal0.fields
-        in
-        { modal0 with fields }
+  let fields =
+    List.map
+      (fun (field : Model.modal_form_field) ->
+        match field.key, manifest_path, run_id with
+        | "addon_manifest_path", Some value, _ | "addon_run_id", _, Some value ->
+            { field with value }
+        | _ -> field)
+      modal0.fields
   in
+  let modal = { modal0 with fields } in
   let nav =
     {
       m.nav with
@@ -1380,7 +1379,7 @@ let open_addon_ask_modal ~now (m : Model.t) =
           (Say.make ~ko:"열린 애드온 질문(Ask)이 없습니다"
              ~en:"No open lane-addon asks")
           m
-      , [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_lane_addon_asks } ] )
+      , [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_lane_addon_asks { include_resolved = false } } ] )
   | Some ask_row ->
       let ask_modal = Model.ask_modal_for_lane_addon ask_row in
       let nav =
@@ -2690,6 +2689,654 @@ let rec execute_slash ~now (m : Model.t) cmd =
               Cmd.Http_post
                 { epoch = m.epoch; req = Cmd.Post_preset_delete { name } };
             ] ))
+  | Slash.Lane act -> (
+      match act with
+      | Slash.Lane_create { lane; runtime_ids } ->
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make ~ko:("레인 생성 중: " ^ lane) ~en:("Creating lane: " ^ lane))
+              m
+          , [
+              Cmd.Http_post
+                {
+                  epoch = m.epoch;
+                  req =
+                    Cmd.Post_runtime_routing_action
+                      {
+                        action = Wire_runtime.Route_create { lane; runtime_ids };
+                        label =
+                          Say.make ~ko:("레인 생성 완료: " ^ lane)
+                            ~en:("Lane created: " ^ lane);
+                      };
+                };
+            ] )
+      | Slash.Lane_remove lane ->
+          if Wire_runtime.is_named_routing_lane lane then
+            open_named_lane_delete_modal m lane
+          else
+            (Model.with_toast ~now ~level:Model.Toast_warning
+               (Say.make ~ko:"이 라우트는 삭제할 수 없습니다" ~en:"Only named lanes can be removed") m, [])
+      | Slash.Lane_rename { lane; to_lane } ->
+          if not (Wire_runtime.is_named_routing_lane lane && Wire_runtime.is_named_routing_lane to_lane) then
+            (Model.with_toast ~now ~level:Model.Toast_warning
+               (Say.make ~ko:"일반 레인 이름만 변경할 수 있습니다"
+                  ~en:"Renaming requires two named lane IDs") m, [])
+          else
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make
+                 ~ko:(Printf.sprintf "레인 이름 변경 중: %s -> %s" lane to_lane)
+                 ~en:(Printf.sprintf "Renaming lane: %s -> %s" lane to_lane))
+              m
+          , [
+              Cmd.Http_post
+                {
+                  epoch = m.epoch;
+                  req =
+                    Cmd.Post_runtime_routing_action
+                      {
+                        action = Wire_runtime.Route_rename { lane; to_lane };
+                        label =
+                          Say.make
+                            ~ko:(Printf.sprintf "레인 이름 변경: %s -> %s" lane to_lane)
+                            ~en:(Printf.sprintf "Lane renamed: %s -> %s" lane to_lane);
+                      };
+                };
+            ] )
+      | Slash.Lane_set { lane; runtime_ids } ->
+          let expected_source_revision =
+            match Observed.to_option m.runtime.runtime_config_raw with
+            | Some meta -> Some meta.source_revision
+            | None -> None
+          in
+          (match Wire_runtime.set_routing_action ~lane ~runtime_ids ~expected_source_revision with
+          | Error detail -> (Model.with_toast ~now ~level:Model.Toast_warning (Say.literal detail) m, [])
+          | Ok action ->
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make ~ko:("레인 후보 업데이트 중: " ^ lane)
+                 ~en:("Updating lane candidates: " ^ lane))
+              m
+          , [
+              Cmd.Http_post
+                {
+                  epoch = m.epoch;
+                  req =
+                    Cmd.Post_runtime_routing_action
+                      {
+                        action;
+                        label =
+                          Say.make ~ko:("레인 후보 업데이트: " ^ lane)
+                            ~en:("Lane updated: " ^ lane);
+                      };
+                };
+            ] ))
+      | Slash.Lane_exact_append { lane_id; runtime_id } ->
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make
+                 ~ko:(Printf.sprintf "Exact 슬롯 추가 중: %s + %s" lane_id runtime_id)
+                 ~en:(Printf.sprintf "Appending exact slot: %s + %s" lane_id runtime_id))
+              m
+          , [
+              Cmd.Http_post
+                {
+                  epoch = m.epoch;
+                  req =
+                    Cmd.Post_runtime_routing_action
+                      {
+                        action =
+                          Wire_runtime.Route_exact_append { lane_id; runtime_id };
+                        label =
+                          Say.make
+                            ~ko:(Printf.sprintf "Exact 슬롯 추가: %s + %s" lane_id runtime_id)
+                            ~en:(Printf.sprintf "Exact slot appended: %s + %s" lane_id runtime_id);
+                      };
+                };
+            ] )
+      | Slash.Lane_exact_drop { lane_id; runtime_id } ->
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make
+                 ~ko:(Printf.sprintf "Exact 슬롯 제거 중: %s - %s" lane_id runtime_id)
+                 ~en:(Printf.sprintf "Dropping exact slot: %s - %s" lane_id runtime_id))
+              m
+          , [
+              Cmd.Http_post
+                {
+                  epoch = m.epoch;
+                  req =
+                    Cmd.Post_runtime_routing_action
+                      {
+                        action =
+                          Wire_runtime.Route_exact_drop { lane_id; runtime_id };
+                        label =
+                          Say.make
+                            ~ko:(Printf.sprintf "Exact 슬롯 제거: %s - %s" lane_id runtime_id)
+                            ~en:(Printf.sprintf "Exact slot dropped: %s - %s" lane_id runtime_id);
+                      };
+                };
+            ] )
+      | Slash.Lane_exact_move { lane_id; runtime_id; direction } ->
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make
+                 ~ko:(Printf.sprintf "Exact 슬롯 이동 중: %s (%s)" lane_id runtime_id)
+                 ~en:(Printf.sprintf "Moving exact slot: %s (%s)" lane_id runtime_id))
+              m
+          , [
+              Cmd.Http_post
+                {
+                  epoch = m.epoch;
+                  req =
+                    Cmd.Post_runtime_routing_action
+                      {
+                        action =
+                          Wire_runtime.Route_exact_move
+                            { lane_id; runtime_id; direction };
+                        label =
+                          Say.make
+                            ~ko:(Printf.sprintf "Exact 슬롯 재정렬: %s (%s)" lane_id runtime_id)
+                            ~en:(Printf.sprintf "Exact slot reordered: %s (%s)" lane_id runtime_id);
+                      };
+                };
+            ] )
+      | Slash.Lane_exact_replace { lane_id; runtime_id; replacement } ->
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make
+                 ~ko:(Printf.sprintf "Exact 슬롯 교체 중: %s (%s -> %s)" lane_id runtime_id replacement)
+                 ~en:(Printf.sprintf "Replacing exact slot: %s (%s -> %s)" lane_id runtime_id replacement))
+              m
+          , [
+              Cmd.Http_post
+                {
+                  epoch = m.epoch;
+                  req =
+                    Cmd.Post_runtime_routing_action
+                      {
+                        action =
+                          Wire_runtime.Route_exact_replace
+                            {
+                              lane_id;
+                              runtime_id;
+                              replacement_runtime_id = replacement;
+                            };
+                        label =
+                          Say.make
+                            ~ko:(Printf.sprintf "Exact 슬롯 교체: %s (%s -> %s)" lane_id runtime_id replacement)
+                            ~en:(Printf.sprintf "Exact slot replaced: %s (%s -> %s)" lane_id runtime_id replacement);
+                      };
+                };
+            ] )
+      | Slash.Lane_run_inspect run_id ->
+          Update_nav.push_dive m
+            (Nav.Dive_runtime (Nav.Exact_run_dive run_id))
+      | Slash.Lane_quarantines keeper ->
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make ~ko:("보드 주목 격리 조회 중: @" ^ keeper)
+                 ~en:("Fetching board-attention quarantines: @" ^ keeper))
+              m
+          , [
+              Cmd.Http_get
+                {
+                  epoch = m.epoch;
+                  req = Cmd.Get_keeper_board_attention_quarantines { keeper };
+                };
+            ] )
+      | Slash.Lane_quarantine_recover
+          { keeper; partition_id; candidate_id; quarantine_id } ->
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make
+                 ~ko:(Printf.sprintf "@%s 격리 복구 요청 중 (%s)…" keeper partition_id)
+                 ~en:(Printf.sprintf "Recovering @%s quarantine (%s)…" keeper partition_id))
+              m
+          , [
+              Cmd.Http_post
+                {
+                  epoch = m.epoch;
+                  req =
+                    Cmd.Post_board_attention_quarantine_recovery
+                      {
+                        keeper;
+                        partition_id;
+                        candidate_id;
+                        expected_quarantine_id = quarantine_id;
+                      };
+                };
+            ] )
+      | Slash.Lane_raw_preview -> (
+          match Observed.to_option m.runtime.runtime_config_raw with
+          | Some { source_text = Some source_text; _ } ->
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make ~ko:"runtime.toml 검증 미리보기 실행 중…"
+                     ~en:"Validating runtime.toml preview…")
+                  m
+              , [
+                  Cmd.Http_post
+                    {
+                      epoch = m.epoch;
+                      req = Cmd.Post_runtime_config_raw_preview { source_text };
+                    };
+                ] )
+          | Some { source_text = None; _ } | None ->
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make
+                     ~ko:"runtime.toml 원문 로드 중 — 로드 후 다시 /lane raw-preview를 실행하세요"
+                     ~en:"Loading runtime.toml — run /lane raw-preview again once loaded")
+                  m
+              , [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_runtime_config_raw } ] )))
+  | Slash.Addon act -> (
+      match act with
+      | Slash.Addon_attach { manifest_path; run_id; binding_json = None } ->
+          open_addon_attach_modal ~manifest_path ~run_id m
+      | Slash.Addon_attach
+          { manifest_path; run_id; binding_json = Some raw_binding } -> (
+          match Yojson.Safe.from_string raw_binding with
+          | `Assoc _ as binding ->
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make ~ko:("애드온 연결 중: " ^ manifest_path)
+                     ~en:("Attaching addon: " ^ manifest_path))
+                  m
+              , [
+                  Cmd.Http_post
+                    {
+                      epoch = m.epoch;
+                      req =
+                        Cmd.Post_lane_addon_attach
+                          { manifest_path; run_id; binding; from_modal = false };
+                    };
+                ] )
+          | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _
+          | `List _ ->
+              ( Model.with_toast ~now ~level:Model.Toast_error
+                  (Say.make ~ko:"binding 인자는 JSON 객체여야 합니다"
+                     ~en:"binding argument must be a JSON object")
+                  m
+              , [] )
+          | exception Yojson.Json_error msg ->
+              let clean = Chat_transcript.scrub_secrets_in_text msg in
+              ( Model.with_toast ~now ~level:Model.Toast_error
+                  (Say.make ~ko:("binding JSON 오류: " ^ clean)
+                     ~en:("binding JSON error: " ^ clean))
+                  m
+              , [] ))
+      | Slash.Addon_detach instance_id ->
+          Update_nav.open_inline_modal m
+            (Nav.Addon_detach_confirm { instance_id; title = instance_id })
+      | Slash.Addon_observe instance_id ->
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make ~ko:("애드온 관측 중: " ^ instance_id)
+                 ~en:("Observing addon: " ^ instance_id))
+              m
+          , [
+              Cmd.Http_post
+                {
+                  epoch = m.epoch;
+                  req = Cmd.Post_lane_addon_observe { instance_id };
+                };
+            ] )
+      | Slash.Addon_retain instance_id ->
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make ~ko:("애드온 리소스 인수 중: " ^ instance_id)
+                 ~en:("Retaining addon: " ^ instance_id))
+              m
+          , [
+              Cmd.Http_post
+                {
+                  epoch = m.epoch;
+                  req = Cmd.Post_lane_addon_retain { instance_id };
+                };
+            ] )
+      | Slash.Addon_act { instance_id; action_json = None } ->
+          Update_nav.open_inline_modal m
+            (Nav.Addon_act_form
+               { instance_id; expected_incarnation = instance_id })
+      | Slash.Addon_act { instance_id; action_json = Some raw } -> (
+          match Yojson.Safe.from_string raw with
+          | `Assoc _ as action ->
+              let runtime, request_id =
+                Runtime_store.next_addon_request_id m.runtime
+              in
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make ~ko:("애드온 액션 실행 중: " ^ instance_id)
+                     ~en:("Running addon action: " ^ instance_id))
+                  { m with runtime }
+              , [
+                  Cmd.Http_post
+                    {
+                      epoch = m.epoch;
+                      req =
+                        Cmd.Post_lane_addon_act
+                          {
+                            instance_id;
+                            expected_incarnation = instance_id;
+                            request_id;
+                            action;
+                          };
+                    };
+                ] )
+          | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _
+          | `List _ ->
+              ( Model.with_toast ~now ~level:Model.Toast_error
+                  (Say.make ~ko:"action은 JSON 객체여야 합니다"
+                     ~en:"action must be a JSON object")
+                  m
+              , [] )
+          | exception Yojson.Json_error msg ->
+              let clean = Chat_transcript.scrub_secrets_in_text msg in
+              ( Model.with_toast ~now ~level:Model.Toast_error
+                  (Say.make ~ko:("action JSON 오류: " ^ clean)
+                     ~en:("action JSON error: " ^ clean))
+                  m
+              , [] ))
+      | Slash.Addon_evidence { instance_id; row_ids; keeper_name } ->
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make ~ko:("애드온 증거 보존/전달 중: " ^ instance_id)
+                 ~en:("Submitting addon evidence: " ^ instance_id))
+              m
+          , [
+              Cmd.Http_post
+                {
+                  epoch = m.epoch;
+                  req =
+                    Cmd.Post_lane_addon_evidence
+                      {
+                        instance_id;
+                        row_ids;
+                        keeper_name;
+                        broadcast = false;
+                        request_id = None;
+                      };
+                };
+            ] )
+      | Slash.Addon_decl_read source_path ->
+          let runtime =
+            { m.runtime with pending_addon_decl_path = Some source_path }
+          in
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make ~ko:("애드온 선언 읽는 중: " ^ source_path)
+                 ~en:("Reading addon declaration: " ^ source_path))
+              { m with runtime }
+          , [
+              Cmd.Http_get
+                {
+                  epoch = m.epoch;
+                  req = Cmd.Get_lane_addon_declaration { source_path };
+                };
+            ] )
+      | Slash.Addon_decl_new file_name ->
+          Update_nav.open_inline_modal m
+            (Nav.Addon_decl_form
+               {
+                 file_name;
+                 mode = `Create;
+                 expected_source_revision = None;
+               })
+      | Slash.Addon_slice { run_id; lane_id } ->
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make ~ko:"애드온 슬라이스 조회 중…" ~en:"Fetching addon slice…")
+              m
+          , [
+              Cmd.Http_get
+                {
+                  epoch = m.epoch;
+                  req = Cmd.Get_lane_addon_slice { run_id; lane_id };
+                };
+            ] )
+      | Slash.Addon_asks { include_resolved } ->
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make ~ko:"애드온 질문 목록 조회 중…"
+                 ~en:"Fetching addon asks…")
+              m
+          , [
+              Cmd.Http_get
+                {
+                  epoch = m.epoch;
+                  req = Cmd.Get_lane_addon_asks { include_resolved };
+                };
+            ] )
+      | Slash.Addon_ask_answer { declaration_id; ask_id; answers_json } -> (
+          let decoded =
+            match Yojson.Safe.from_string answers_json with
+            | json -> Wire_work.decode_ask_answers json
+            | exception Yojson.Json_error error -> Error error
+          in
+          match decoded with
+          | Ok answers ->
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make ~ko:("애드온 질문 응답 전송 중: " ^ ask_id)
+                     ~en:("Submitting addon ask answer: " ^ ask_id))
+                  m
+              , [
+                  Cmd.Http_post
+                    {
+                      epoch = m.epoch;
+                      req =
+                        Cmd.Post_lane_addon_ask_answer
+                          { declaration_id; ask_id; answers };
+                    };
+                ] )
+          | Error msg ->
+              let clean = Chat_transcript.scrub_secrets_in_text msg in
+              ( Model.with_toast ~now ~level:Model.Toast_error
+                  (Say.make ~ko:("answers JSON 오류: " ^ clean)
+                     ~en:("answers JSON error: " ^ clean))
+                  m
+              , [] ))
+      | Slash.Addon_operator { instance_id; args_json = None } ->
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make ~ko:("애드온 운영자 스키마 조회 중: " ^ instance_id)
+                 ~en:("Describing addon operator control: " ^ instance_id))
+              m
+          , [
+              Cmd.Http_post
+                {
+                  epoch = m.epoch;
+                  req =
+                    Cmd.Post_lane_addon_operator
+                      {
+                        instance_id;
+                        expected_incarnation = instance_id;
+                        mode = Wire_runtime.Operator_describe;
+                      };
+                };
+            ] )
+      | Slash.Addon_operator { instance_id; args_json = Some raw } -> (
+          match Yojson.Safe.from_string raw with
+          | `Assoc _ as args ->
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make ~ko:("애드온 운영자 호출 중: " ^ instance_id)
+                     ~en:("Invoking addon operator control: " ^ instance_id))
+                  m
+              , [
+                  Cmd.Http_post
+                    {
+                      epoch = m.epoch;
+                      req =
+                        Cmd.Post_lane_addon_operator
+                          {
+                            instance_id;
+                            expected_incarnation = instance_id;
+                            mode = Wire_runtime.Operator_invoke args;
+                          };
+                    };
+                ] )
+          | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _
+          | `List _ ->
+              ( Model.with_toast ~now ~level:Model.Toast_error
+                  (Say.make ~ko:"operator 인자는 JSON 객체여야 합니다"
+                     ~en:"operator arguments must be a JSON object")
+                  m
+              , [] )
+          | exception Yojson.Json_error msg ->
+              let clean = Chat_transcript.scrub_secrets_in_text msg in
+              ( Model.with_toast ~now ~level:Model.Toast_error
+                  (Say.make ~ko:("operator JSON 오류: " ^ clean)
+                     ~en:("operator JSON error: " ^ clean))
+                  m
+              , [] )))
+  | Slash.Browser act -> (
+      let resolve_client_and_tab ~client_opt ~tab_opt =
+        let cid =
+          match client_opt with
+          | Some c -> Some c
+          | None ->
+              Option.map
+                (fun (cl : Wire_runtime.browser_client_row) -> cl.client_id)
+                (Runtime_store.selected_browser_client m.runtime)
+        in
+        let tid, url_opt =
+          match tab_opt with
+          | Some t ->
+              let found_url =
+                match cid with
+                | None -> None
+                | Some c -> (
+                    match
+                      Observed.to_option
+                        (Runtime_store.browser_tabs_for ~client_id:c m.runtime)
+                    with
+                    | Some resp -> (
+                        match
+                          List.find_opt
+                            (fun (tb : Wire_runtime.browser_tab_row) ->
+                              Int.equal tb.id t)
+                            resp.tabs
+                        with
+                        | Some tb -> Some tb.url
+                        | None -> None)
+                    | None -> None)
+              in
+              (Some t, found_url)
+          | None -> (
+              match Runtime_store.selected_browser_tab m.runtime with
+              | Some tb -> (Some tb.id, Some tb.url)
+              | None -> (None, None))
+        in
+        (cid, tid, url_opt)
+      in
+      match act with
+      | Slash.Browser_scene { client_id; tab_id; view } -> (
+          match resolve_client_and_tab ~client_opt:client_id ~tab_opt:tab_id with
+          | Some cid, Some tid, _ ->
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make
+                     ~ko:(Printf.sprintf "브라우저 장면 조회 중 (#%d)…" tid)
+                     ~en:(Printf.sprintf "Fetching browser scene (#%d)…" tid))
+                  m
+              , [
+                  Cmd.Http_post
+                    {
+                      epoch = m.epoch;
+                      req =
+                        Cmd.Post_browser_scene
+                          { client_id = cid; tab_id = tid; view };
+                    };
+                ] )
+          | _ ->
+              ( Model.with_toast ~now ~level:Model.Toast_warning
+                  (Say.make
+                     ~ko:"브라우저 클라이언트와 탭을 먼저 선택하세요 (Runtime > Addons & Browser)"
+                     ~en:"Select a browser client and tab first (Runtime > Addons & Browser)")
+                  m
+              , [] ))
+      | Slash.Browser_screenshot { client_id; tab_id } -> (
+          match resolve_client_and_tab ~client_opt:client_id ~tab_opt:tab_id with
+          | Some cid, Some tid, _ ->
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make
+                     ~ko:(Printf.sprintf "브라우저 스크린샷 캡처 중 (#%d)…" tid)
+                     ~en:(Printf.sprintf "Capturing browser screenshot (#%d)…" tid))
+                  m
+              , [
+                  Cmd.Http_post
+                    {
+                      epoch = m.epoch;
+                      req =
+                        Cmd.Post_browser_screenshot
+                          { client_id = cid; tab_id = tid };
+                    };
+                ] )
+          | _ ->
+              ( Model.with_toast ~now ~level:Model.Toast_warning
+                  (Say.make
+                     ~ko:"브라우저 클라이언트와 탭을 먼저 선택하세요"
+                     ~en:"Select a browser client and tab first")
+                  m
+              , [] ))
+      | Slash.Browser_interact { client_id; tab_id; action = None; _ } -> (
+          match resolve_client_and_tab ~client_opt:client_id ~tab_opt:tab_id with
+          | Some cid, Some tid, expected_url ->
+              Update_nav.open_inline_modal m
+                (Nav.Browser_interact_form
+                   { client_id = cid; tab_id = tid; expected_url })
+          | _ ->
+              ( Model.with_toast ~now ~level:Model.Toast_warning
+                  (Say.make
+                     ~ko:"브라우저 클라이언트와 탭을 먼저 선택하세요"
+                     ~en:"Select a browser client and tab first")
+                  m
+              , [] ))
+      | Slash.Browser_interact
+          { client_id; tab_id; action = Some action; selector; text } -> (
+          match resolve_client_and_tab ~client_opt:client_id ~tab_opt:tab_id with
+          | Some cid, Some tid, expected_url ->
+              let y =
+                if String.equal action "scroll" then
+                  Option.bind selector int_of_string_opt
+                else None
+              in
+              let sel =
+                if String.equal action "scroll" then None else selector
+              in
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make
+                     ~ko:(Printf.sprintf "브라우저 인터랙션 실행 중 (%s · #%d)…" action tid)
+                     ~en:(Printf.sprintf "Running browser interact (%s · #%d)…" action tid))
+                  m
+              , [
+                  Cmd.Http_post
+                    {
+                      epoch = m.epoch;
+                      req =
+                        Cmd.Post_browser_interact
+                          {
+                            client_id = cid;
+                            tab_id = tid;
+                            expected_url;
+                            action;
+                            selector = sel;
+                            text;
+                            x = None;
+                            y;
+                          };
+                    };
+                ] )
+          | _ ->
+              ( Model.with_toast ~now ~level:Model.Toast_warning
+                  (Say.make
+                     ~ko:"브라우저 클라이언트와 탭을 먼저 선택하세요"
+                     ~en:"Select a browser client and tab first")
+                  m
+              , [] ))
+      | Slash.Browser_command raw -> (
+          match Yojson.Safe.from_string raw with
+          | `Assoc _ as arguments ->
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make ~ko:"브라우저 명령 전송 중…" ~en:"Sending browser command…")
+                  m
+              , [
+                  Cmd.Http_post
+                    { epoch = m.epoch; req = Cmd.Post_browser_command { arguments } };
+                ] )
+          | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _
+          | `List _ ->
+              ( Model.with_toast ~now ~level:Model.Toast_error
+                  (Say.make ~ko:"/browser command 인자는 JSON 객체여야 합니다"
+                     ~en:"/browser command argument must be a JSON object")
+                  m
+              , [] )
+          | exception Yojson.Json_error msg ->
+              let clean = Chat_transcript.scrub_secrets_in_text msg in
+              ( Model.with_toast ~now ~level:Model.Toast_error
+                  (Say.make ~ko:("/browser command JSON 오류: " ^ clean)
+                     ~en:("/browser command JSON error: " ^ clean))
+                  m
+              , [] )))
   | Slash.Tools None ->
       ({ m with fleet = Fleet_store.cycle_tools_mode m.fleet }, [])
   | Slash.Tools (Some mode) ->
@@ -3093,6 +3740,24 @@ and confirm_palette ~now (m : Model.t) =
                 ({ m_closed with drafts }, [])
               else if Slash.equal_command_id spec.id Slash.Cmd_preset then
                 execute_slash ~now m_closed (Slash.Preset Slash.Preset_list)
+              else if Slash.equal_command_id spec.id Slash.Cmd_lane then
+                let drafts =
+                  m_closed.drafts |> Drafts.set_current_text "/lane "
+                  |> Drafts.set_focus true
+                in
+                ({ m_closed with drafts }, [])
+              else if Slash.equal_command_id spec.id Slash.Cmd_addon then
+                let drafts =
+                  m_closed.drafts |> Drafts.set_current_text "/addon "
+                  |> Drafts.set_focus true
+                in
+                ({ m_closed with drafts }, [])
+              else if Slash.equal_command_id spec.id Slash.Cmd_browser then
+                let drafts =
+                  m_closed.drafts |> Drafts.set_current_text "/browser "
+                  |> Drafts.set_focus true
+                in
+                ({ m_closed with drafts }, [])
               else
                 match Slash.parse spec.name with
                 | Ok parsed -> execute_slash ~now m_closed parsed
@@ -3230,6 +3895,11 @@ and execute_action ~now (m : Model.t) action =
                     | Nav.Prompt_override_form _
                     | Nav.Preset_create_form
                     | Nav.Runtime_param_set_form _
+                    | Nav.Default_route_edit
+                    | Nav.Lane_rename_form _
+                    | Nav.Addon_decl_form _
+                    | Nav.Addon_act_form _
+                    | Nav.Browser_interact_form _
                     | Nav.Runtime_lane_create
                     | Nav.Runtime_lane_edit _
                     | Nav.Runtime_lane_delete _
@@ -3455,6 +4125,11 @@ and execute_action ~now (m : Model.t) action =
                | Nav.Prompt_override_form _
                | Nav.Preset_create_form
                | Nav.Runtime_param_set_form _
+               | Nav.Default_route_edit
+               | Nav.Lane_rename_form _
+               | Nav.Addon_decl_form _
+               | Nav.Addon_act_form _
+               | Nav.Browser_interact_form _
                | Nav.Runtime_lane_create
                | Nav.Runtime_lane_edit _
                | Nav.Runtime_lane_delete _
@@ -3743,6 +4418,11 @@ and execute_action ~now (m : Model.t) action =
             | Nav.Prompt_override_form _
             | Nav.Preset_create_form
             | Nav.Runtime_param_set_form _
+            | Nav.Default_route_edit
+            | Nav.Lane_rename_form _
+            | Nav.Addon_decl_form _
+            | Nav.Addon_act_form _
+            | Nav.Browser_interact_form _
             | Nav.Runtime_lane_create
             | Nav.Runtime_lane_edit _
             | Nav.Runtime_lane_delete _
@@ -4625,7 +5305,7 @@ and execute_action ~now (m : Model.t) action =
                   | Nav.Thread_dive _
                   | Nav.Wiki_dive _
                   | Nav.Memory_diff_dive _ )
-              | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Fusion_dive _)
+              | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Fusion_dive _ | Nav.Exact_run_dive _)
               | Nav.Dive_infra
                   ( Nav.Sandbox_dive _
                   | Nav.Incident_dive _
@@ -4968,6 +5648,11 @@ and execute_action ~now (m : Model.t) action =
                 | Nav.Prompt_override_form _
                 | Nav.Preset_create_form
                 | Nav.Runtime_param_set_form _
+                | Nav.Default_route_edit
+                | Nav.Lane_rename_form _
+                | Nav.Addon_decl_form _
+                | Nav.Addon_act_form _
+                | Nav.Browser_interact_form _
                 | Nav.Runtime_lane_create
                 | Nav.Runtime_lane_edit _
                 | Nav.Runtime_lane_delete _
@@ -5111,6 +5796,7 @@ and execute_action ~now (m : Model.t) action =
             | Some (Nav.Dive_runtime (Nav.Tool_dive name)) -> Some name
             | Some (Nav.Dive_runtime (Nav.Fusion_dive run_id)) -> Some run_id
             | Some (Nav.Dive_runtime (Nav.Skill_dive ref_s)) -> Some ref_s
+            | Some (Nav.Dive_runtime (Nav.Exact_run_dive run_id)) -> Some run_id
             | Some (Nav.Dive_infra idive) -> (
                 match idive with
                 | Nav.Sandbox_dive keeper | Nav.Runtime_trace_dive keeper ->
@@ -5998,7 +6684,8 @@ and execute_action ~now (m : Model.t) action =
                 | Nav.Wiki_dive _
                 | Nav.Artifact_dive _
                 | Nav.Memory_diff_dive _ )
-            | Nav.Dive_runtime (Nav.Fusion_dive _ | Nav.Skill_dive _)
+            | Nav.Dive_runtime
+                (Nav.Fusion_dive _ | Nav.Skill_dive _ | Nav.Exact_run_dive _)
             | Nav.Dive_infra _ ) ->
             (m, [])
         | None -> (
@@ -6386,7 +7073,52 @@ and execute_action ~now (m : Model.t) action =
                 | Nav.Runtime
                   when Nav.equal_runtime_tab m.runtime.active_tab
                          Nav.Runtime_addons_browser ->
-                    open_addon_ask_modal ~now m
+                    if m.runtime.addon_catalog_mode then (m, [])
+                    else if m.nav.pane_index = 1 then
+                      match
+                        ( Runtime_store.selected_browser_client m.runtime
+                        , Runtime_store.selected_browser_tab m.runtime )
+                      with
+                      | Some cl, Some tb ->
+                          Update_nav.open_inline_modal m
+                            (Nav.Browser_interact_form
+                               {
+                                 client_id = cl.client_id;
+                                 tab_id = tb.id;
+                                 expected_url = Some tb.url;
+                               })
+                      | Some _, None ->
+                          ( Model.with_toast ~now ~level:Model.Toast_warning
+                              (Say.make
+                                 ~ko:"브라우저 탭을 먼저 조회([t]) 및 선택하세요"
+                                 ~en:"Fetch ([t]) and select a browser tab first")
+                              m
+                          , [] )
+                      | None, _ ->
+                          ( Model.with_toast ~now ~level:Model.Toast_warning
+                              (Say.make
+                                 ~ko:"브라우저 클라이언트를 먼저 선택하세요"
+                                 ~en:"Select a browser client first")
+                              m
+                          , [] )
+                    else if Runtime_store.open_lane_addon_asks m.runtime <> [] then
+                      open_addon_ask_modal ~now m
+                    else (
+                      match Runtime_store.selected_addon_instance m.runtime with
+                      | Some inst ->
+                          Update_nav.open_inline_modal m
+                            (Nav.Addon_act_form
+                               {
+                                 instance_id = inst.instance_id;
+                                 expected_incarnation = inst.instance_id;
+                               })
+                      | None ->
+                          ( Model.with_toast ~now ~level:Model.Toast_warning
+                              (Say.make
+                                 ~ko:"액션을 실행할 애드온 인스턴스를 선택하세요"
+                                 ~en:"Select an addon instance first")
+                              m
+                          , [] ))
                 | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Runtime | Nav.Infra
                   ->
                     (m, []))))
@@ -7116,7 +7848,7 @@ and execute_action ~now (m : Model.t) action =
             execute_slash ~now m (Slash.Skill (Slash.Skill_delete ref_s))
         | Some
             ( Nav.Dive_knowledge _
-            | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Fusion_dive _)
+            | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Fusion_dive _ | Nav.Exact_run_dive _)
             | Nav.Dive_infra _ ) ->
             (m, [])
         | None -> (
@@ -7180,6 +7912,23 @@ and execute_action ~now (m : Model.t) action =
                     | Work_store.Inbox_queue | Work_store.Inbox_history ->
                         (m, []))
                 | Nav.Work_schedules | Nav.Work_candle_scorecard -> (m, []))
+            | Nav.Runtime
+              when Nav.equal_runtime_tab m.runtime.active_tab
+                     Nav.Runtime_failover_lanes -> (
+                match Runtime_store.selected_lane m.runtime with
+                | Some lane ->
+                    open_runtime_lane_delete_modal ~now m lane
+                | None -> (m, []))
+            | Nav.Runtime
+              when Nav.equal_runtime_tab m.runtime.active_tab
+                     Nav.Runtime_addons_browser
+                   && (not m.runtime.addon_catalog_mode)
+                   && m.nav.pane_index = 0 -> (
+                match Runtime_store.selected_addon_instance m.runtime with
+                | Some inst ->
+                    execute_slash ~now m
+                      (Slash.Addon (Slash.Addon_detach inst.instance_id))
+                | None -> (m, []))
             | Nav.Runtime
               when Nav.equal_runtime_tab m.runtime.active_tab
                      Nav.Runtime_tools_usage -> (
@@ -7396,6 +8145,7 @@ and execute_action ~now (m : Model.t) action =
                   (Nav.Tool_execute_form { tool_name; args_json = skeleton })
             | Some (Nav.Dive_runtime (Nav.Skill_dive ref_s)) ->
                 execute_slash ~now m (Slash.Skill (Slash.Skill_edit ref_s))
+            | Some (Nav.Dive_runtime (Nav.Exact_run_dive _)) -> (m, [])
             | Some
                 ( Nav.Dive_knowledge
                     ( Nav.Thread_dive _
@@ -7447,6 +8197,14 @@ and execute_action ~now (m : Model.t) action =
                     { m with nav = { m.nav with dive_scroll_offset = 0 }; knowledge }
                   in
                   (next, View_fetches.fetches_for_current_view next)
+                else if
+                  Nav.equal_workspace m.nav.workspace Nav.Runtime
+                  && Nav.equal_runtime_tab m.runtime.active_tab Nav.Runtime_addons_browser
+                  && m.runtime.addon_catalog_mode && m.nav.pane_index = 0
+                then
+                  Update_nav.open_inline_modal m
+                    (Nav.Addon_decl_form
+                       { file_name = "addon.toml"; mode = `Create; expected_source_revision = None })
                 else if
                   Nav.equal_workspace m.nav.workspace Nav.Runtime
                   && Nav.equal_runtime_tab m.runtime.active_tab

@@ -6589,6 +6589,209 @@ let test_wave4_layer3_wire_codecs () =
   Alcotest.(check bool) "runtime param overridden" true
     (List.hd params.parameters).has_override
 
+let test_wave4_layer4_wire_codecs () =
+  let valid_sha = String.make 64 'a' in
+  let set lane =
+    match Wire_runtime.set_routing_action ~lane ~runtime_ids:["r1"; "r2"]
+            ~expected_source_revision:(Some valid_sha) with
+    | Ok action -> Wire_runtime.encode_runtime_routing_action action
+    | Error detail -> Alcotest.fail detail
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check bool) "named route preserves ordered candidates and CAS" true
+    (member "runtime_ids" (set "fast") = `List [`String "r1"; `String "r2"]
+     && member "expected_source_revision" (set "fast") = `String valid_sha);
+  Alcotest.(check bool) "media failover keeps its list contract" true
+    (member "runtime_ids" (set "media_failover") = `List [`String "r1"; `String "r2"]
+     && member "expected_source_revision" (set "media_failover") = `Null);
+  (* 1. Runtime routing CRUD & CAS revision guard *)
+  let j_set_ok =
+    Wire_runtime.encode_runtime_routing_action
+      (Wire_runtime.Route_set_named
+         {
+           lane = "fast";
+           runtime_ids = [ "r1"; "r2" ];
+           expected_source_revision = Some valid_sha;
+         })
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string) "routing lane" "fast" (j_set_ok |> member "lane" |> to_string);
+  Alcotest.(check string) "routing action" "set" (j_set_ok |> member "action" |> to_string);
+  Alcotest.(check string) "routing CAS sha kept" valid_sha
+    (j_set_ok |> member "expected_source_revision" |> to_string);
+  let j_set_bad_sha =
+    Wire_runtime.encode_runtime_routing_action
+      (Wire_runtime.Route_set_named
+         {
+           lane = "fast";
+           runtime_ids = [ "r1" ];
+           expected_source_revision = Some "not-a-sha";
+         })
+  in
+  Alcotest.(check bool) "invalid CAS sha omitted" true
+    (j_set_bad_sha |> member "expected_source_revision" = `Null);
+  let j_move =
+    Wire_runtime.encode_runtime_routing_action
+      (Wire_runtime.Route_exact_move
+         { lane_id = "verifier"; runtime_id = "slot-2"; direction = `First })
+  in
+  Alcotest.(check string) "exact move lane prefix" "exact/verifier"
+    (j_move |> member "lane" |> to_string);
+  Alcotest.(check string) "exact move action" "move"
+    (j_move |> member "action" |> to_string);
+  Alcotest.(check string) "exact move direction" "first"
+    (j_move |> member "direction" |> to_string);
+  (* 2. Raw preview, lane inventory, standalone lanes, exact run detail, verifiers & quarantines *)
+  let pv =
+    expect_ok "decode_runtime_raw_preview"
+      (Wire_runtime.decode_runtime_raw_preview
+         (parse_json {|{"ok":true,"can_save":true,"runtime_validation":"ok"}|}))
+  in
+  Alcotest.(check bool) "raw preview ok && can_save" true (pv.ok && pv.can_save);
+  let inv =
+    expect_ok "decode_lane_inventory"
+      (Wire_runtime.decode_lane_inventory
+         (parse_json
+            {|{"observed_at":1700000000.0,
+               "package_read":{"directory":".masc/lanes","complete":true,"owner_present":true,"issues":[]},
+               "rows":[{"id":"default","label":"Default","purpose":"chat",
+                        "selection":{"kind":"failover"},"state":{"kind":"ready"}}]}|}))
+  in
+  Alcotest.(check int) "lanes inventory rows" 1 (List.length inv.rows);
+  Alcotest.(check string) "lanes inventory dir" ".masc/lanes" inv.directory;
+  let sl =
+    expect_ok "decode_standalone_lanes"
+      (Wire_runtime.decode_standalone_lanes
+         (parse_json
+            {|{"generated_at":"2026-11-24T00:00:00Z","observed_at_unix":1700000000.0,
+               "lanes":[{"lane_id":"verifier","label":"Verifier","purpose":"verify","required":true,
+                         "configuration_state":"configured","status":"ready",
+                         "admitted_slots":["s1"],"cli_slots":[],"dropped_slots":[],"declared_slots":["s1"],
+                         "retained_run_count":3,"running_count":0,"succeeded_count":2,"failed_count":1,"cancelled_count":0}]}|}))
+  in
+  Alcotest.(check int) "standalone lanes count" 1 (List.length sl.lanes);
+  let rd =
+    expect_ok "decode_exact_lane_run_detail"
+      (Wire_runtime.decode_exact_lane_run_detail
+         (parse_json
+            {|{"run_id":"run-99","run_kind":"exact_output","lane":"verifier","status":"succeeded",
+               "subject_id":"task-1","actor":"alpha","selected_slot":"s1","elapsed_s":1.25,
+               "skill_evidence":{"state":"verified"},"input":{"q":"hi"},"output":{"ok":true}}|}))
+  in
+  Alcotest.(check string) "exact run detail run_id" "run-99" rd.run_id;
+  Alcotest.(check (option string)) "exact run skill evidence" (Some "verified")
+    rd.skill_evidence_state;
+  let vr =
+    expect_ok "decode_verification_runs"
+      (Wire_runtime.decode_verification_runs
+         (parse_json
+            {|{"generated_at":"2026-11-24T00:00:00Z","count":1,
+               "runs":[{"run_id":"vr-1","task_id":"t-1","status":"rejected","detail":"mismatch"}]}|}))
+  in
+  Alcotest.(check int) "verification runs count" 1 vr.count;
+  Alcotest.(check (option string)) "verification run detail" (Some "mismatch")
+    (List.hd vr.runs).detail;
+  let q_snap =
+    expect_ok "decode_board_attention_quarantines"
+      (Wire_runtime.decode_board_attention_quarantines
+         (parse_json
+            {|{"count":1,"items":[{"keeper_name":"alpha","partition_id":"p1","candidate_id":"c1",
+               "quarantine_id":"q1","phase":"quarantined","failure_category":"timeout","quarantined_at":1700000001.0}],"errors":[]}|}))
+  in
+  Alcotest.(check int) "quarantines count" 1 q_snap.count;
+  let q_rec =
+    Wire_runtime.encode_board_attention_quarantine_recovery ~candidate_id:"c1"
+      ~expected_quarantine_id:"q1"
+  in
+  Alcotest.(check string) "quarantine recovery schema"
+    "keeper.board_attention.quarantine.recovery.request.v1"
+    (q_rec |> member "schema" |> to_string);
+  (* 3. Lane Add-ons operator codecs *)
+  let decl_create =
+    Wire_runtime.encode_addon_declaration_save ~mode:`Create ~file_name:"demo.toml"
+      ~source_text:"id = \"demo\"" ~expected_source_revision:(Some valid_sha)
+  in
+  Alcotest.(check bool) "addon decl create omits expected_source_revision" true
+    (decl_create |> member "expected_source_revision" = `Null);
+  let decl_save =
+    Wire_runtime.encode_addon_declaration_save ~mode:`Save ~file_name:"demo.toml"
+      ~source_text:"id = \"demo\"" ~expected_source_revision:(Some valid_sha)
+  in
+  Alcotest.(check string) "addon decl save includes valid sha" valid_sha
+    (decl_save |> member "expected_source_revision" |> to_string);
+  let act_body =
+    Wire_runtime.encode_lane_addon_action ~instance_id:"inst-1"
+      ~expected_incarnation:"inst-1" ~request_id:"tui-addon-1"
+      ~action:(`Assoc [ ("op", `String "ping") ])
+  in
+  Alcotest.(check string) "addon act expected_incarnation" "inst-1"
+    (act_body |> member "expected_incarnation" |> to_string);
+  let asks =
+    expect_ok "decode_lane_addon_asks"
+      (Wire_runtime.decode_lane_addon_asks
+         (parse_json
+            {|{"asks":[{"declaration_id":"decl-1","title":"Demo","ask_id":"ask-1","asked_at":1700000002.0,
+               "questions":[{"question_id":"q-1","header":"Approval","prompt":"Confirm?","mode":"single"}],"resolution":{"state":"open"}}]}|}))
+  in
+  Alcotest.(check int) "addon asks count" 1 (List.length asks);
+  Alcotest.(check bool) "addon ask resolution state" true
+    (match (List.hd asks).resolution with Wire_work.Ask_open -> true | _ -> false);
+  let answers = parse_json
+      {|[{"question_id":"q-1","response":{"kind":"chose","choice_ids":["yes"]}},
+          {"question_id":"q-2","response":{"kind":"wrote","text":"note"}},
+          {"question_id":"q-3","response":{"kind":"skipped"}}]|} in
+  let decoded = expect_ok "decode structured slash answers" (Wire_work.decode_ask_answers answers) in
+  let answer_request = Wire_runtime.encode_lane_addon_ask_answer
+      ~declaration_id:"decl-1" ~ask_id:"ask-1" ~answers:decoded () in
+  Alcotest.(check string) "slash and modal use the same answer shape"
+    (Yojson.Safe.to_string answers) (Yojson.Safe.to_string (member "answers" answer_request));
+  Alcotest.(check bool) "answers reject unknown response kinds" true
+    (Result.is_error (Wire_work.decode_ask_answers
+        (parse_json {|[{"question_id":"q-1","response":{"kind":"choose"}}]|})));
+  (* 4. Browser operator codecs *)
+  let sc_req =
+    Wire_runtime.encode_browser_scene_request ~client_id:"cl-1" ~tab_id:7
+      ~view:`Regions
+  in
+  Alcotest.(check string) "browser scene lane" "live"
+    (sc_req |> member "lane" |> to_string);
+  Alcotest.(check int) "browser scene tabId" 7
+    (sc_req |> member "tabId" |> to_int);
+  let sc =
+    expect_ok "decode_browser_scene_response"
+      (Wire_runtime.decode_browser_scene_response
+         (parse_json
+            {|{"documentId":"doc-1","tabId":7,"url":"https://example.com","title":"Ex",
+               "viewport":{"width":1280,"height":720,"scrollX":0,"scrollY":0},
+               "view":"regions","truncated":false,
+               "nodes":[{"nodeId":"n1","kind":"button","tag":"button","text":"Go","clickable":true,"editable":false}]}|}))
+  in
+  Alcotest.(check int) "browser scene nodes" 1 (List.length sc.nodes);
+  Alcotest.(check (float 0.01)) "browser scene viewport width" 1280.0 sc.width;
+  let sh =
+    expect_ok "decode_browser_screenshot_response"
+      (Wire_runtime.decode_browser_screenshot_response
+         (parse_json
+            {|{"ok":true,"data":{"tabId":7,"url":"https://example.com","title":"Ex","mimeType":"image/png","data":"AAAA"}}|}))
+  in
+  Alcotest.(check int) "browser screenshot base64 len" 4 sh.base64_bytes;
+  let op =
+    expect_ok "decode_browser_op_receipt"
+      (Wire_runtime.decode_browser_op_receipt
+         (parse_json {|{"ok":true,"action":"click","status":"done"}|}))
+  in
+  Alcotest.(check bool) "browser op receipt ok" true op.ok;
+  let op_inner_err =
+    expect_ok "decode_browser_op_receipt inner isError"
+      (Wire_runtime.decode_browser_op_receipt
+         (parse_json
+            {|{"ok":true,"data":{"isError":true,"content":[{"type":"text","text":"tab closed"}]}}|}))
+  in
+  Alcotest.(check bool) "browser op inner isError marks ok=false" false
+    op_inner_err.ok;
+  Alcotest.(check (option string)) "browser op inner error text" (Some "tab closed")
+    op_inner_err.error
+
 let () =
   Alcotest.run "masc_tui_v2_protocol_net"
     [
@@ -6641,6 +6844,8 @@ let () =
             test_wave4_layer2_wire_codecs;
           Alcotest.test_case "Feature Wave 4 Layer 3: Skills Editor/CRUD, Async Requests, Prompts, Presets & Runtime Params" `Quick
             test_wave4_layer3_wire_codecs;
+          Alcotest.test_case "Feature Wave 4 Layer 4: Runtime Lanes CRUD, Exact Run Detail, Verifiers, Quarantines, Add-ons & Browser Operator" `Quick
+            test_wave4_layer4_wire_codecs;
         ] );
       ( "net"
       , [

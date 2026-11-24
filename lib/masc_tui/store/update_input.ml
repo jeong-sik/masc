@@ -1761,7 +1761,8 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
       | _ -> (m, []))
   | Some
       ( Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Memory_diff_dive _)
-      | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Fusion_dive _)
+      | Nav.Dive_runtime
+          (Nav.Tool_dive _ | Nav.Fusion_dive _ | Nav.Exact_run_dive _)
       | Nav.Dive_infra
           ( Nav.Lane_dive _
           | Nav.Incident_dive _
@@ -1773,6 +1774,116 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
       match m.nav.workspace with
       | Nav.Runtime -> (
           match printable_char with
+          | Some "R"
+            when Nav.equal_runtime_tab m.runtime.active_tab
+                   Nav.Runtime_failover_lanes -> (
+              match Runtime_store.selected_lane m.runtime with
+              | Some lane when Wire_runtime.is_named_routing_lane lane.id ->
+                  Update_nav.open_inline_modal m (Nav.Lane_rename_form { lane = lane.id })
+              | Some _ ->
+                  (Model.with_toast ~now ~level:Model.Toast_warning
+                     (Say.make ~ko:"일반 레인 이름만 변경할 수 있습니다"
+                        ~en:"Only named lanes can be renamed") m, [])
+              | None -> (m, []))
+          | Some "D"
+            when Nav.equal_runtime_tab m.runtime.active_tab
+                   Nav.Runtime_failover_lanes -> (
+              match Observed.to_option m.runtime.exact_lane_runs with
+              | Some (first :: _) ->
+                  Update_nav.push_dive m
+                    (Nav.Dive_runtime (Nav.Exact_run_dive first.run_id))
+              | Some [] | None -> (m, []))
+          | Some "O"
+            when Nav.equal_runtime_tab m.runtime.active_tab
+                   Nav.Runtime_addons_browser -> (
+              if m.nav.pane_index = 1 then
+                match
+                  ( Runtime_store.selected_browser_client m.runtime
+                  , Runtime_store.selected_browser_tab m.runtime )
+                with
+                | Some cl, Some tb ->
+                    ( Model.with_toast ~now ~level:Model.Toast_info
+                        (Say.make
+                           ~ko:(Printf.sprintf "브라우저 장면 로드 중 (#%d)…" tb.id)
+                           ~en:(Printf.sprintf "Fetching browser scene (#%d)…" tb.id))
+                        m
+                    , [
+                        Cmd.Http_post
+                          {
+                            epoch = m.epoch;
+                            req =
+                              Cmd.Post_browser_scene
+                                {
+                                  client_id = cl.client_id;
+                                  tab_id = tb.id;
+                                  view = `Content;
+                                };
+                          };
+                      ] )
+                | _ -> (m, [])
+              else if not m.runtime.addon_catalog_mode then
+                match Runtime_store.selected_addon_instance m.runtime with
+                | Some inst ->
+                    ( Model.with_toast ~now ~level:Model.Toast_info
+                        (Say.make ~ko:("애드온 관측 트리거 중: " ^ inst.instance_id)
+                           ~en:("Triggering addon observe: " ^ inst.instance_id))
+                        m
+                    , [
+                        Cmd.Http_post
+                          {
+                            epoch = m.epoch;
+                            req =
+                              Cmd.Post_lane_addon_observe
+                                { instance_id = inst.instance_id };
+                          };
+                      ] )
+                | None -> (m, [])
+              else (m, []))
+          | Some "D"
+            when Nav.equal_runtime_tab m.runtime.active_tab
+                   Nav.Runtime_addons_browser
+                 && (not m.runtime.addon_catalog_mode)
+                 && m.nav.pane_index = 0 ->
+              let lane_id =
+                Option.map
+                  (fun (inst : Wire_runtime.addon_instance) -> inst.addon_id)
+                  (Runtime_store.selected_addon_instance m.runtime)
+              in
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make ~ko:"애드온 슬라이스 조회 중…"
+                     ~en:"Fetching addon slice…")
+                  m
+              , [
+                  Cmd.Http_get
+                    {
+                      epoch = m.epoch;
+                      req = Cmd.Get_lane_addon_slice { run_id = None; lane_id };
+                    };
+                ] )
+          | Some "W"
+            when Nav.equal_runtime_tab m.runtime.active_tab
+                   Nav.Runtime_addons_browser
+                 && m.nav.pane_index = 1 -> (
+              match
+                ( Runtime_store.selected_browser_client m.runtime
+                , Runtime_store.selected_browser_tab m.runtime )
+              with
+              | Some cl, Some tb ->
+                  ( Model.with_toast ~now ~level:Model.Toast_info
+                      (Say.make
+                         ~ko:(Printf.sprintf "브라우저 스크린샷 캡처 중 (#%d)…" tb.id)
+                         ~en:(Printf.sprintf "Capturing browser screenshot (#%d)…" tb.id))
+                      m
+                  , [
+                      Cmd.Http_post
+                        {
+                          epoch = m.epoch;
+                          req =
+                            Cmd.Post_browser_screenshot
+                              { client_id = cl.client_id; tab_id = tb.id };
+                        };
+                    ] )
+              | _ -> (m, []))
           | Some "R"
             when Nav.equal_runtime_tab m.runtime.active_tab
                    Nav.Runtime_tools_usage
@@ -2697,6 +2808,11 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                         | Nav.Prompt_override_form _
                         | Nav.Preset_create_form
                         | Nav.Runtime_param_set_form _
+                        | Nav.Default_route_edit
+                        | Nav.Lane_rename_form _
+                        | Nav.Addon_decl_form _
+                        | Nav.Addon_act_form _
+                        | Nav.Browser_interact_form _
                         | Nav.Runtime_lane_create
                         | Nav.Runtime_lane_edit _
                         | Nav.Runtime_lane_delete _
@@ -2931,6 +3047,11 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                         | Nav.Prompt_override_form _
                         | Nav.Preset_create_form
                         | Nav.Runtime_param_set_form _
+                        | Nav.Default_route_edit
+                        | Nav.Lane_rename_form _
+                        | Nav.Addon_decl_form _
+                        | Nav.Addon_act_form _
+                        | Nav.Browser_interact_form _
                         | Nav.Runtime_lane_edit _
                         | Nav.Runtime_lane_delete _
                         | Nav.Task_create_form
@@ -3865,6 +3986,11 @@ let apply_paste ~now:_ (m : Model.t) text =
                   | Nav.Prompt_override_form _
                   | Nav.Preset_create_form
                   | Nav.Runtime_param_set_form _
+                  | Nav.Default_route_edit
+                  | Nav.Lane_rename_form _
+                  | Nav.Addon_decl_form _
+                  | Nav.Addon_act_form _
+                  | Nav.Browser_interact_form _
                   | Nav.Runtime_lane_create
                   | Nav.Runtime_lane_edit _
                   | Nav.Runtime_lane_delete _

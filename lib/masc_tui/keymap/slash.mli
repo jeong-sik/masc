@@ -1,4 +1,4 @@
-(** Converged 28 orthogonal slash commands with strict typed parsing, fuzzy
+(** Converged 31 orthogonal slash commands with strict typed parsing, fuzzy
     filtering, and prefix completion.
 
     Strict parse contract ([constitution.xml#strict_parse_no_default]):
@@ -30,6 +30,9 @@ type command_id =
   | Cmd_skill
   | Cmd_prompt
   | Cmd_preset
+  | Cmd_lane
+  | Cmd_addon
+  | Cmd_browser
   | Cmd_tools
   | Cmd_clear
   | Cmd_theme
@@ -97,6 +100,75 @@ type preset_action =
   | Preset_restore of string
   | Preset_delete of string
 
+type lane_action =
+  | Lane_create of { lane : string; runtime_ids : string list }
+  | Lane_remove of string
+  | Lane_rename of { lane : string; to_lane : string }
+  | Lane_set of { lane : string; runtime_ids : string list }
+  | Lane_exact_append of { lane_id : string; runtime_id : string }
+  | Lane_exact_drop of { lane_id : string; runtime_id : string }
+  | Lane_exact_move of {
+      lane_id : string;
+      runtime_id : string;
+      direction : [ `Up | `Down | `First ];
+    }
+  | Lane_exact_replace of {
+      lane_id : string;
+      runtime_id : string;
+      replacement : string;
+    }
+  | Lane_run_inspect of string
+  | Lane_quarantines of string
+  | Lane_quarantine_recover of {
+      keeper : string;
+      partition_id : string;
+      candidate_id : string;
+      quarantine_id : string;
+    }
+  | Lane_raw_preview
+
+type addon_action =
+  | Addon_attach of {
+      manifest_path : string;
+      run_id : string;
+      binding_json : string option;
+    }
+  | Addon_detach of string
+  | Addon_observe of string
+  | Addon_retain of string
+  | Addon_act of { instance_id : string; action_json : string option }
+  | Addon_evidence of {
+      instance_id : string;
+      row_ids : string list;
+      keeper_name : string option;
+    }
+  | Addon_decl_read of string
+  | Addon_decl_new of string
+  | Addon_slice of { run_id : string option; lane_id : string option }
+  | Addon_asks of { include_resolved : bool }
+  | Addon_ask_answer of {
+      declaration_id : string;
+      ask_id : string;
+      answers_json : string;
+    }
+  | Addon_operator of { instance_id : string; args_json : string option }
+
+type browser_action =
+  | Browser_scene of {
+      client_id : string option;
+      tab_id : int option;
+      view : [ `Content | `Regions ];
+    }
+  | Browser_screenshot of { client_id : string option; tab_id : int option }
+  | Browser_interact of {
+      client_id : string option;
+      tab_id : int option;
+      action : string option;
+      selector : string option;
+      text : string option;
+    }
+  | Browser_command of string
+
 type parsed =
   | Pulse
   | Work
@@ -119,6 +191,9 @@ type parsed =
   | Skill of skill_action
   | Prompt of prompt_action
   | Preset of preset_action
+  | Lane of lane_action
+  | Addon of addon_action
+  | Browser of browser_action
   | Tools of tools_mode option
   | Clear
   | Theme of Theme.preset option
@@ -143,7 +218,7 @@ type spec = {
 }
 
 val all : spec list
-(** All 28 canonical slash command specifications in display order. *)
+(** All 31 canonical slash command specifications in display order. *)
 
 val equal_command_id : command_id -> command_id -> bool
 val equal_category : category -> category -> bool
@@ -153,6 +228,9 @@ val equal_gate_action : gate_action -> gate_action -> bool
 val equal_skill_action : skill_action -> skill_action -> bool
 val equal_prompt_action : prompt_action -> prompt_action -> bool
 val equal_preset_action : preset_action -> preset_action -> bool
+val equal_lane_action : lane_action -> lane_action -> bool
+val equal_addon_action : addon_action -> addon_action -> bool
+val equal_browser_action : browser_action -> browser_action -> bool
 val equal_parsed : parsed -> parsed -> bool
 val equal_parse_error : parse_error -> parse_error -> bool
 

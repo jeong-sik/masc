@@ -197,7 +197,6 @@ let has_get_health cmds =
               | Cmd.Get_connectors
               | Cmd.Get_browser_lane
               | Cmd.Get_lane_addons
-              | Cmd.Get_lane_addon_asks
               | Cmd.Get_mcp_clients
               | Cmd.Get_sandboxes
               | Cmd.Get_keeper_sandbox _
@@ -253,7 +252,17 @@ let has_get_health cmds =
               | Cmd.Get_prompts
               | Cmd.Get_presets
               | Cmd.Get_preset_show _
-              | Cmd.Get_runtime_params );
+              | Cmd.Get_runtime_params
+              | Cmd.Get_lanes_inventory
+              | Cmd.Get_standalone_lanes
+              | Cmd.Get_exact_lane_run_detail _
+              | Cmd.Get_verification_runs
+              | Cmd.Get_goal_verification_runs
+              | Cmd.Get_keeper_board_attention_quarantines _
+              | Cmd.Get_lane_addon_declaration _
+              | Cmd.Get_lane_addon_action_status _
+              | Cmd.Get_lane_addon_slice _
+              | Cmd.Get_lane_addon_asks _ );
             _;
           }
       | Cmd.Batch _
@@ -1856,6 +1865,19 @@ let test_verifier_regressions () =
         | Cmd.Post_preset_delete _
         | Cmd.Post_runtime_param_set _
         | Cmd.Post_runtime_param_clear _
+        | Cmd.Post_runtime_routing_action _
+        | Cmd.Post_runtime_config_raw_preview _
+        | Cmd.Post_board_attention_quarantine_recovery _
+        | Cmd.Post_lane_addon_declaration_save _
+        | Cmd.Post_lane_addon_observe _
+        | Cmd.Post_lane_addon_retain _
+        | Cmd.Post_lane_addon_evidence _
+        | Cmd.Post_lane_addon_act _
+        | Cmd.Post_lane_addon_operator _
+        | Cmd.Post_browser_scene _
+        | Cmd.Post_browser_screenshot _
+        | Cmd.Post_browser_command _
+        | Cmd.Post_browser_interact _
         | Cmd.Post_task_create _
         | Cmd.Post_task_transition _
         | Cmd.Post_task_link_goal _
@@ -6631,6 +6653,7 @@ let test_tui_memory_os_internals_fetch_and_runtime_assignment_setup_cmds () =
                   {
                     Wire_runtime.source_revision = "rev-cas-42";
                     assignments = [ "alpha", "old.slot" ];
+                    source_text = None;
                   });
          })
   in
@@ -17207,7 +17230,7 @@ let test_runtime_lane_crud_requests_and_cas () =
            epoch = m_lanes1.epoch;
            reply =
              Msg.Reply_runtime_config_raw
-               (Ok { Wire_runtime.source_revision = rev1; assignments = [] });
+               (Ok { Wire_runtime.source_revision = rev1; source_text = None; assignments = [] });
          })
   in
   let set_modal_fields pairs (m : Model.t) =
@@ -17319,8 +17342,11 @@ let test_runtime_lane_crud_requests_and_cas () =
   let m_edit_default, edit_default_cmds =
     Update.step ~now:t0 m_lanes (Msg.Key_event (char_key "e"))
   in
-  Alcotest.(check bool) "[e] on default route skips the candidate editor" true
-    (Option.is_none m_edit_default.inline_modal && Cmd.flatten edit_default_cmds = []);
+  Alcotest.(check bool) "[e] on default route opens the single-runtime editor" true
+    ((match m_edit_default.inline_modal with
+      | Some { kind = Nav.Default_route_edit; _ } -> true
+      | Some _ | None -> false)
+     && Cmd.flatten edit_default_cmds = []);
   let m_coder_unobserved, _ =
     Update.step ~now:t0 m_lanes1 (Msg.Key_event (key Keymap.Input.Down))
   in
@@ -17361,7 +17387,7 @@ let test_runtime_lane_crud_requests_and_cas () =
            epoch = m_edit_open.epoch;
            reply =
              Msg.Reply_runtime_config_raw
-               (Ok { Wire_runtime.source_revision = rev2; assignments = [] });
+               (Ok { Wire_runtime.source_revision = rev2; source_text = None; assignments = [] });
          })
   in
   let m_edit_drifted_res, drifted_cmds =
@@ -18043,6 +18069,7 @@ let test_keeper_lifecycle_and_addon_crud_requests () =
         manifest_path = "addons/browser/manifest.toml";
         run_id = "run-1";
         binding = `Assoc [ ("mode", `String "local") ];
+        from_modal = true;
       }
   in
   Alcotest.(check string) "addon attach path" "/api/v1/lane-addons/attach"
@@ -18071,7 +18098,7 @@ let test_keeper_lifecycle_and_addon_crud_requests () =
     (Yojson.Safe.to_string (Cmd.post_request_body act_req));
   Alcotest.(check string) "addon asks GET path"
     "/api/v1/lane-addons/asks?include_resolved=false"
-    (Cmd.get_request_path Cmd.Get_lane_addon_asks);
+    (Cmd.get_request_path (Cmd.Get_lane_addon_asks { include_resolved = false }));
   let ask_ans_req =
     Cmd.Post_lane_addon_ask_answer
       {
@@ -18267,7 +18294,7 @@ let test_keeper_lifecycle_and_addon_crud_requests () =
   Alcotest.(check bool) "Runtime_addons_browser fetches Get_lane_addon_asks" true
     (List.exists
        (function
-         | Cmd.Http_get { req = Cmd.Get_lane_addon_asks; _ } -> true
+         | Cmd.Http_get { req = Cmd.Get_lane_addon_asks _; _ } -> true
          | _ -> false)
        addon_fetches);
   let sample_inst : Wire_runtime.addon_instance =
@@ -18427,9 +18454,9 @@ let test_keeper_lifecycle_and_addon_crud_requests () =
              true
          | _ -> false)
        (Cmd.flatten act_raw_cmds));
-  (* [d] opens Addon_detach_confirm -> 'detach' emits Post_lane_addon_detach *)
+  (* [d] opens the exact-instance detach confirmation. *)
   let m_det_open, _ = Update.step ~now:t0 m_addons (Msg.Key_event (char_key "d")) in
-  let m_det_ok = set_fields [ ("confirm_addon_detach", "detach") ] m_det_open in
+  let m_det_ok = set_fields [ ("confirm_addon_detach", "inst-browser-1") ] m_det_open in
   let _, det_cmds =
     Update.step ~now:t0 m_det_ok (Msg.Key_event (key Keymap.Input.Enter))
   in
@@ -18471,6 +18498,18 @@ let test_keeper_lifecycle_and_addon_crud_requests () =
              true
          | _ -> false)
        (Cmd.flatten ask_cmds));
+  let m_other_ask, _ =
+    Update.step ~now:t1 m_ask_sub
+      (Msg.Http_reply
+         {
+           epoch = m_ask_sub.epoch;
+           reply = Msg.Reply_lane_addon_ask_answer
+             { declaration_id = "different-addon"; ask_id = "ask-addon-1"; result = Ok () };
+         })
+  in
+  Alcotest.(check bool) "another declaration's receipt preserves the pending ask" true
+    (Option.fold ~none:false ~some:(fun (modal : Model.ask_modal) -> modal.submitting)
+       m_other_ask.ask_modal);
   let m_ask_done, ask_done_cmds =
     Update.step ~now:t1 m_ask_sub
       (Msg.Http_reply
@@ -18486,7 +18525,7 @@ let test_keeper_lifecycle_and_addon_crud_requests () =
     && Option.is_none m_ask_done.nav.overlay
     && List.exists
          (function
-           | Cmd.Http_get { req = Cmd.Get_lane_addon_asks; _ } -> true
+           | Cmd.Http_get { req = Cmd.Get_lane_addon_asks _; _ } -> true
            | _ -> false)
          (Cmd.flatten ask_done_cmds))
 
@@ -20385,5 +20424,476 @@ let () =
                      | Cmd.Http_get { req = Cmd.Get_presets; _ } -> true
                      | _ -> false)
                    (View_fetches.fetches_for_current_view m_p403)));
+          Alcotest.test_case
+            "Wave 4 Layer 4: Runtime Lanes CRUD, Exact Run Dive, Add-ons & Browser Operator"
+            `Quick (fun () ->
+              let m0 = Model.initial ~cols:140 ~rows:40 () in
+              let revision = String.make 64 'a' in
+              let m0 = { m0 with runtime = { m0.runtime with runtime_config_raw =
+                  Observed.value ~observed_at:t0
+                    { Wire_runtime.source_revision = revision; source_text = None; assignments = [] } } } in
+              let m1 =
+                {
+                  m0 with
+                  nav = { m0.nav with workspace = Nav.Runtime; pane_index = 0 };
+                  runtime =
+                    m0.runtime
+                    |> Runtime_store.set_tab Nav.Runtime_failover_lanes
+                    |> Runtime_store.apply_runtime_resolved ~observed_at:t0
+                         {
+                           generated_at_iso = "2026-11-24T00:00:00Z";
+                           config_path = None;
+                           default_route = None;
+                           lanes =
+                             [
+                               {
+                                 id = "fast";
+                                 runtime_ids = [ "r1"; "r2" ];
+                                 declared = true;
+                               };
+                             ];
+                           runtimes = [];
+                           usage_windows = None;
+                         }
+                    |> Runtime_store.apply_exact_lane_runs ~observed_at:t0
+                         [
+                           {
+                             run_id = "run-42";
+                             lane = "verifier";
+                             status =
+                               Wire_runtime.Exact_output
+                                 Wire_runtime.Exact_succeeded;
+                             started_at_unix = 1700000000.0;
+                             subject_id = Some "task-1";
+                           };
+                         ];
+                }
+              in
+              let fetches = View_fetches.fetches_for_current_view m1 in
+              Alcotest.(check bool) "Failover_lanes fetches standalone lanes" true
+                (List.exists
+                   (function
+                     | Cmd.Http_get { req = Cmd.Get_standalone_lanes; _ } -> true
+                     | _ -> false)
+                   fetches);
+              Alcotest.(check bool) "Failover_lanes fetches verification runs" true
+                (List.exists
+                   (function
+                     | Cmd.Http_get { req = Cmd.Get_verification_runs; _ } -> true
+                     | _ -> false)
+                   fetches);
+              (* 403 latch on standalone lanes prevents refetch *)
+              let m_403, _ =
+                Update.step ~now:t0 m1
+                  (Msg.Http_reply
+                     {
+                       epoch = m1.epoch;
+                       reply =
+                         Msg.Reply_standalone_lanes
+                           (Error
+                              (Msg.Http_error
+                                 { status = 403; body = "forbidden"; api_error = None }));
+                     })
+              in
+              Alcotest.(check bool) "standalone_lanes_auth_denied latched" true
+                m_403.runtime.standalone_lanes_auth_denied;
+              Alcotest.(check bool) "latched standalone_lanes not refetched" false
+                (List.exists
+                   (function
+                     | Cmd.Http_get { req = Cmd.Get_standalone_lanes; _ } -> true
+                     | _ -> false)
+                   (View_fetches.fetches_for_current_view m_403));
+              let rt_reset = Runtime_store.mark_stale_all m_403.runtime in
+              Alcotest.(check bool) "mark_stale_all resets standalone_lanes_auth_denied"
+                false rt_reset.standalone_lanes_auth_denied;
+              let press ch m =
+                let m', cmds = Update.step ~now:t0 m (Msg.Key_event (char_key ch)) in
+                (m', Cmd.flatten cmds)
+              in
+              let type_text text m =
+                String.fold_left (fun next c -> fst (press (String.make 1 c) next)) m text
+              in
+              let enter m = Update.step ~now:t0 m (Msg.Key_event (key Keymap.Input.Enter)) in
+              let posts cmds =
+                List.filter_map (function Cmd.Http_post { req; _ } -> Some req | _ -> None)
+                  (Cmd.flatten cmds)
+              in
+              let check_route label body cmds =
+                match posts cmds with
+                | [req] ->
+                    Alcotest.(check string) (label ^ " path") Wire_runtime.runtime_routing_path (Cmd.post_request_path req);
+                    Alcotest.(check string) (label ^ " body") (Yojson.Safe.to_string body)
+                      (Yojson.Safe.to_string (Cmd.post_request_body req))
+                | _ -> Alcotest.fail (label ^ ": expected one routing POST")
+              in
+              let with_lane id (m : Model.t) =
+                let snap = Option.get (Observed.to_option m.runtime.runtime_resolved) in
+                let runtime = Runtime_store.apply_runtime_resolved ~observed_at:t0
+                    {snap with lanes = [{ id; runtime_ids = ["previous"]; declared = true }]} m.runtime in
+                {m with runtime}
+              in
+              let default = with_lane "default" m1 in
+              let prefilled, _ = press "e" default in
+              let at_end, _ = Update.step ~now:t0 prefilled (Msg.Key_event (char_key ~ctrl:true "e")) in
+              let default_form, _ = Update.step ~now:t0 at_end (Msg.Key_event (char_key ~ctrl:true "u")) in
+              let scalar_body = `Assoc ["lane", `String "default"; "runtime_id", `String "r1"] in
+              check_route "default edit form" scalar_body (snd (enter (type_text "r1" default_form)));
+              let slash line m =
+                match Slash.parse line with
+                | Ok parsed -> Update.execute_slash ~now:t0 m parsed
+                | Error _ -> Alcotest.fail line
+              in
+              check_route "default slash" scalar_body (snd (slash "/lane set default r1" default));
+              Alcotest.(check int) "several default IDs do not post from the form" 0
+                (List.length (posts (snd (enter (type_text "r1,r2" default_form)))));
+              Alcotest.(check int) "several default IDs do not post from slash" 0
+                (List.length (posts (snd (slash "/lane set default r1,r2" default))));
+              let assert_removal matches_target target_id ~refresh expected m =
+                let opened, initial = press "x" m in
+                Alcotest.(check int) "one key issues no removal" 0 (List.length (posts initial));
+                Alcotest.(check bool) "confirmation carries the selected identity" true
+                  (Option.fold ~none:false ~some:(fun (modal : Model.inline_modal_state) ->
+                     matches_target modal.kind) opened.inline_modal);
+                let canceled, cancel_cmds = Update.step ~now:t0 opened (Msg.Key_event (key Keymap.Input.Escape)) in
+                Alcotest.(check bool) "Escape cancels without any POST" true
+                  (Option.is_none canceled.inline_modal && posts cancel_cmds = []);
+                Alcotest.(check int) "blank confirmation issues no POST" 0
+                  (List.length (posts (snd (enter opened))));
+                Alcotest.(check int) "a different ID cannot confirm removal" 0
+                  (List.length (posts (snd (enter (type_text "other" opened)))));
+                let changed = refresh opened in
+                let submitted, cmds = enter (type_text target_id changed) in
+                Alcotest.(check bool) "confirmed operation remains pending until its receipt" true
+                  (Option.fold ~none:false ~some:(fun (modal : Model.inline_modal_state) -> modal.submitting) submitted.inline_modal);
+                match posts cmds with
+                | [req] -> Alcotest.(check bool) "confirmed POST retains its original target" true (expected req)
+                | _ -> Alcotest.fail "expected one confirmed POST"
+              in
+              assert_removal
+                (function Nav.Runtime_lane_delete { lane_id = "fast"; opened_revision = Some original } ->
+                    String.equal original revision | _ -> false) "fast"
+                ~refresh:(with_lane "later-selection")
+                (function Cmd.Post_runtime_lane_delete { lane_id = "fast"; expected_source_revision = Some observed } ->
+                  String.equal observed revision | _ -> false) m1;
+              List.iter (fun id ->
+                  let model = with_lane id m1 in
+                  List.iter (fun key ->
+                      let next, cmds = press key model in
+                      Alcotest.(check bool) ("reserved " ^ id ^ " blocks " ^ key) true
+                        (Option.is_none next.inline_modal && posts cmds = [])) ["R"; "x"];
+                  List.iter (fun command ->
+                      let next, cmds = slash command model in
+                      Alcotest.(check bool) command true (Option.is_none next.inline_modal && posts cmds = []))
+                    ["/lane remove " ^ id; "/lane rename " ^ id ^ " other"; "/lane rename fast " ^ id])
+                ["default"; "media_failover"; "exact/verifier_exact"];
+              let m_n, _ = press "n" m1 in
+              Alcotest.(check bool) "[n] on Failover_lanes opens Runtime_lane_create" true
+                (match m_n.inline_modal with
+                | Some { kind = Nav.Runtime_lane_create; _ } -> true
+                | _ -> false);
+              let m_e, _ = press "e" m1 in
+              Alcotest.(check bool) "[e] on Failover_lanes opens Runtime_lane_edit" true
+                (match m_e.inline_modal with
+                | Some { kind = Nav.Runtime_lane_edit { lane_id = "fast"; _ }; _ } -> true
+                | _ -> false);
+              let m_r, _ = press "R" m1 in
+              Alcotest.(check bool) "[R] on Failover_lanes opens Lane_rename_form" true
+                (match m_r.inline_modal with
+                | Some { kind = Nav.Lane_rename_form { lane = "fast" }; _ } -> true
+                | _ -> false);
+              let m_d, cmds_d = press "D" m1 in
+              Alcotest.(check bool) "[D] pushes Exact_run_dive run-42" true
+                (Model.active_dive m_d = Some (Nav.Dive_runtime (Nav.Exact_run_dive "run-42")));
+              Alcotest.(check bool) "Exact_run_dive fetches Get_exact_lane_run_detail" true
+                (List.exists
+                   (function
+                     | Cmd.Http_get
+                         { req = Cmd.Get_exact_lane_run_detail { run_id = "run-42" }; _ } ->
+                         true
+                     | _ -> false)
+                   cmds_d);
+              (* Stale Exact_run_dive reply dropped *)
+              let m_stale, _ =
+                Update.step ~now:t0 m_d
+                  (Msg.Http_reply
+                     {
+                       epoch = m_d.epoch;
+                       reply =
+                         Msg.Reply_exact_lane_run_detail
+                           {
+                             run_id = "run-other";
+                             result =
+                               Ok
+                                 {
+                                   run_id = "run-other";
+                                   run_kind = "exact_output";
+                                   lane = "verifier";
+                                   subject_id = None;
+                                   actor = None;
+                                   status = "succeeded";
+                                   started_at = None;
+                                   elapsed_s = None;
+                                   selected_slot = None;
+                                   skill_evidence_state = None;
+                                   input_json = None;
+                                   output_json = None;
+                                   raw_json = `Assoc [];
+                                 };
+                           };
+                     })
+              in
+              Alcotest.(check bool) "stale exact_run_detail ignored" true
+                (Option.is_none
+                   (Runtime_store.exact_run_detail_for ~run_id:"run-other" m_stale.runtime));
+              (* Addons & Browser Operator mode *)
+              let inst : Wire_runtime.addon_instance =
+                {
+                  instance_id = "inst-1";
+                  addon_id = "demo-addon";
+                  title = "Demo";
+                  revision = "rev-1";
+                  runtime_presence = Wire_runtime.Addon_live;
+                  phase = Wire_runtime.Addon_observing;
+                  execution_kind = Some "host_process";
+                  observation_seq = 2;
+                  rows_count = 3;
+                  observation_pending = false;
+                  visibility_kind = None;
+                  visibility_keeper = None;
+                  config_declaration_id = None;
+                  host_cycles = None;
+                  host_waiting_count = 0;
+                  host_issue_kind = None;
+                  resolved_image = None;
+                  action_names = [ "ping" ];
+                }
+              in
+              let browser_cl : Wire_runtime.browser_client_row =
+                {
+                  client_id = "cl-1";
+                  browser = "chromium";
+                  version = "131";
+                  engine_version = "131.0";
+                  transport = "extension";
+                  presence_state = Some "present";
+                  presence_reason = None;
+                  ownership = Some "operator";
+                  space = None;
+                  interactions = [];
+                  last_activities = [];
+                }
+              in
+              let tab_row : Wire_runtime.browser_tab_row =
+                {
+                  id = 7;
+                  window_id = None;
+                  active = true;
+                  opened_by = Some Wire_runtime.Tab_origin_agent;
+                  title = "Demo";
+                  label = None;
+                  url = "https://example.com";
+                  dialog_present = false;
+                  dialog_kind = None;
+                }
+              in
+              let m_ab =
+                {
+                  m1 with
+                  nav = { m1.nav with pane_index = 0 };
+                  runtime =
+                    m1.runtime
+                    |> Runtime_store.set_tab Nav.Runtime_addons_browser
+                    |> Runtime_store.apply_lane_addons ~observed_at:t0
+                         {
+                           configuration_complete = true;
+                           instances = [ inst ];
+                           declarations = [];
+                           issues = [];
+                         }
+                    |> Runtime_store.apply_browser_lane ~observed_at:t0
+                         {
+                           ok = true;
+                           available = true;
+                           inventory_complete = true;
+                           client_count = 1;
+                           issue_count = 0;
+                           automatic_browse_ok = true;
+                           clients = [ browser_cl ];
+                           issues = [];
+                           detail = None;
+                         }
+                    |> Runtime_store.apply_browser_tabs ~observed_at:t0
+                         ~client_id:"cl-1"
+                         {
+                           client_id = Some "cl-1";
+                           complete = true;
+                           unavailable_count = 0;
+                           tabs = [ tab_row ];
+                           error = None;
+                         };
+                }
+              in
+              Alcotest.(check bool) "Addons_browser fetches addon asks" true
+                (List.exists
+                   (function
+                     | Cmd.Http_get { req = Cmd.Get_lane_addon_asks _; _ } -> true
+                     | _ -> false)
+                   (View_fetches.fetches_for_current_view m_ab));
+              let m_ab_n, _ = press "n" m_ab in
+              Alcotest.(check bool) "[n] on Addons pane opens Addon_attach_form" true
+                (match m_ab_n.inline_modal with
+                | Some { kind = Nav.Addon_attach_form; _ } -> true
+                | _ -> false);
+              let m_ab_c, _ = press "c" m_ab in
+              Alcotest.(check bool) "[c] on Addons pane opens Addon_act_form" true
+                (match m_ab_c.inline_modal with
+                | Some
+                    {
+                      kind =
+                        Nav.Addon_act_form
+                          {
+                            instance_id = "inst-1";
+                            expected_incarnation = "inst-1";
+                          };
+                      _;
+                    } ->
+                    true
+                | _ -> false);
+              let _, cmds_obs = press "O" m_ab in
+              Alcotest.(check bool) "[O] on Addons pane emits Post_lane_addon_observe" true
+                (List.exists
+                   (function
+                     | Cmd.Http_post
+                         { req = Cmd.Post_lane_addon_observe { instance_id = "inst-1" }; _ } ->
+                         true
+                     | _ -> false)
+                   cmds_obs);
+              let _, cmds_sl = press "D" m_ab in
+              Alcotest.(check bool) "[D] on Addons pane emits Get_lane_addon_slice" true
+                (List.exists
+                   (function
+                     | Cmd.Http_get { req = Cmd.Get_lane_addon_slice _; _ } -> true
+                     | _ -> false)
+                   cmds_sl);
+              let refresh_addon (m : Model.t) =
+                let snapshot = Option.get (Observed.to_option m.runtime.lane_addons) in
+                let runtime = Runtime_store.apply_lane_addons ~observed_at:t1
+                    {snapshot with instances = [{inst with instance_id = "later-instance"}]} m.runtime in
+                {m with runtime}
+              in
+              assert_removal
+                (function Nav.Addon_detach_confirm { instance_id = "inst-1"; _ } -> true | _ -> false)
+                "inst-1" ~refresh:refresh_addon
+                (function Cmd.Post_lane_addon_detach { instance_id = "inst-1" } -> true | _ -> false) m_ab;
+              let m_br = { m_ab with nav = { m_ab.nav with pane_index = 1 } } in
+              let _, cmds_br_d = press "D" m_br in
+              Alcotest.(check bool) "[D] on Browser pane does NOT fetch addon slice" false
+                (List.exists
+                   (function
+                     | Cmd.Http_get { req = Cmd.Get_lane_addon_slice _; _ } -> true
+                     | _ -> false)
+                   cmds_br_d);
+              let m_br_c, _ = press "c" m_br in
+              Alcotest.(check bool) "[c] on Browser pane opens Browser_interact_form" true
+                (match m_br_c.inline_modal with
+                | Some
+                    {
+                      kind =
+                        Nav.Browser_interact_form
+                          {
+                            client_id = "cl-1";
+                            tab_id = 7;
+                            expected_url = Some "https://example.com";
+                          };
+                      _;
+                    } ->
+                    true
+                | _ -> false);
+              (* P1-1: stale Reply_lane_addon_declaration ignored when not pending *)
+              let m_decl_stale, _ =
+                Update.step ~now:t0 m_ab
+                  (Msg.Http_reply
+                     {
+                       epoch = m_ab.epoch;
+                       reply =
+                         Msg.Reply_lane_addon_declaration
+                           {
+                             source_path = "stale.toml";
+                             result =
+                               Ok
+                                 {
+                                   file_name = "stale.toml";
+                                   source_path = "stale.toml";
+                                   source_text = "id = \"stale\"";
+                                   source_revision = String.make 64 'b';
+                                   desired_revision = None;
+                                   valid = true;
+                                   messages = [];
+                                 };
+                           };
+                     })
+              in
+              Alcotest.(check bool) "stale addon decl reply does not hijack overlay" true
+                (Option.is_none m_decl_stale.nav.overlay);
+              (* P1-2: stale Reply_browser_scene for wrong client ignored *)
+              let m_sc_stale, _ =
+                Update.step ~now:t0 m_br
+                  (Msg.Http_reply
+                     {
+                       epoch = m_br.epoch;
+                       reply =
+                         Msg.Reply_browser_scene
+                           {
+                             client_id = "other-client";
+                             tab_id = 7;
+                             result =
+                               Ok
+                                 {
+                                   document_id = "d1";
+                                   tab_id = Some 7;
+                                   url = "https://other.test";
+                                   title = "Other";
+                                   width = 100.0;
+                                   height = 100.0;
+                                   scroll_x = 0.0;
+                                   scroll_y = 0.0;
+                                   view = "content";
+                                   truncated = false;
+                                   elapsed_ms = None;
+                                   nodes = [];
+                                 };
+                           };
+                     })
+              in
+              Alcotest.(check bool) "stale browser scene ignored" true
+                (Option.is_none (Observed.to_option m_sc_stale.runtime.browser_scene));
+              let _, cmds_sc = press "O" m_br in
+              Alcotest.(check bool) "[O] on Browser pane emits Post_browser_scene" true
+                (List.exists
+                   (function
+                     | Cmd.Http_post
+                         {
+                           req =
+                             Cmd.Post_browser_scene
+                               { client_id = "cl-1"; tab_id = 7; _ };
+                           _;
+                         } ->
+                         true
+                     | _ -> false)
+                   cmds_sc);
+              let _, cmds_sh = press "W" m_br in
+              Alcotest.(check bool) "[W] on Browser pane emits Post_browser_screenshot" true
+                (List.exists
+                   (function
+                     | Cmd.Http_post
+                         {
+                           req =
+                             Cmd.Post_browser_screenshot
+                               { client_id = "cl-1"; tab_id = 7 };
+                           _;
+                         } ->
+                         true
+                     | _ -> false)
+                   cmds_sh));
         ] );
     ]

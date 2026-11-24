@@ -697,6 +697,70 @@ type http_reply =
       cleared : bool;
       result : (unit, http_error) result;
     }
+  | Reply_lanes_inventory of
+      (Wire_runtime.lane_inventory_snapshot, http_error) result
+  | Reply_standalone_lanes of
+      (Wire_runtime.standalone_lanes_snapshot, http_error) result
+  | Reply_exact_lane_run_detail of {
+      run_id : string;
+      result : (Wire_runtime.exact_lane_run_detail, http_error) result;
+    }
+  | Reply_verification_runs of
+      (Wire_runtime.verifier_runs_snapshot, http_error) result
+  | Reply_goal_verification_runs of
+      (Wire_runtime.verifier_runs_snapshot, http_error) result
+  | Reply_keeper_board_attention_quarantines of {
+      keeper : string;
+      result :
+        (Wire_runtime.board_attention_quarantines_snapshot, http_error) result;
+    }
+  | Reply_board_attention_quarantine_recovery of {
+      keeper : string;
+      partition_id : string;
+      result : (unit, http_error) result;
+    }
+  | Reply_runtime_routing_action of {
+      label : Say.t;
+      result : (unit, http_error) result;
+    }
+  | Reply_runtime_config_raw_preview of
+      (Wire_runtime.runtime_raw_preview_result, http_error) result
+  | Reply_lane_addon_declaration of {
+      source_path : string;
+      result : (Wire_runtime.addon_declaration_document, http_error) result;
+    }
+  | Reply_lane_addon_declaration_saved of {
+      file_name : string;
+      result : (Wire_runtime.addon_declaration_document, http_error) result;
+    }
+  | Reply_lane_addon_action_receipt of
+      (Wire_runtime.addon_action_receipt, http_error) result
+  | Reply_lane_addon_slice of
+      (Wire_runtime.addon_slice_snapshot, http_error) result
+  | Reply_lane_addon_mutation of {
+      label : Say.t;
+      refresh_addons : bool;
+      result : (unit, http_error) result;
+    }
+  | Reply_lane_addon_operator of {
+      instance_id : string;
+      mode_label : string;
+      result : (Yojson.Safe.t, http_error) result;
+    }
+  | Reply_browser_scene of {
+      client_id : string;
+      tab_id : int;
+      result : (Wire_runtime.browser_scene_snapshot, http_error) result;
+    }
+  | Reply_browser_screenshot of {
+      client_id : string;
+      tab_id : int;
+      result : (Wire_runtime.browser_screenshot_meta, http_error) result;
+    }
+  | Reply_browser_op_receipt of {
+      label : Say.t;
+      result : (Wire_runtime.browser_op_receipt, http_error) result;
+    }
 
 let chat_status_reply ~keeper ~operation_id ~requested_at result =
   match result with

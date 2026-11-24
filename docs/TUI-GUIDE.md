@@ -26,8 +26,9 @@ table from a checkout with `bin/masc_tui_keys_doc_cli.exe`.
 
 Press `Ctrl+K` to open the **Universal Command & Entity Palette** — filter across
 all 9 sections (Commands, Workspaces, Keepers, Companies, Goals/Tasks, Board/Wiki,
-Sandboxes, Settings Keys, and all 22 Slash Commands including `/theme`, `/lang`,
-`/btw`, `/clear`, `/context`, `/restart`) and press `Enter` to execute or jump
+Sandboxes, Settings Keys, and all 31 Slash Commands including `/ctl`, `/gate`,
+`/exec`, `/skill`, `/prompt`, `/preset`, `/lane`, `/addon`, `/browser`, `/theme`,
+`/lang`, `/btw`, `/clear`, `/context`, `/restart`) and press `Enter` to execute or jump
 directly. Use `Ctrl+G` to jump straight to any Keeper's chat, and `Ctrl+L` to
 inspect or switch model runtimes.
 
@@ -196,6 +197,15 @@ Type a `/` command in the focused composer and press `Enter`
 | `/voice` | Toggle Voice Push-to-Talk |
 | `/btw <question>` | Ask an ephemeral side-query to the target Keeper without polluting chat history |
 | `/queue`, `/context` | Open the Queue or Context tab of the Queue/Context drawer |
+| `/ctl <action> [keeper]` | Keeper lifecycle & context control (`boot`, `shutdown`, `pause`, `resume`, `reset`, `clear`, `directive`, `note`, `run-next`, `checkpoints`) — destructive actions prompt 2-step confirmation |
+| `/gate <subcmd>` | HITL Gate & Always-Approve operator controls (`rules`, `mode`, `external-mode`, `del-rule`, `approve-always`, `retry`, `keeper-mode`, `ack-uncertain`, `restore-late`) |
+| `/exec <tool> [args_json]` | Invoke an MCP tool directly via stateless MCP `2026-07-28` (`POST /mcp`) |
+| `/skill <subcmd>` | Skill catalog & SKILL.md editor (`refresh`, `new`, `read`, `edit`, `delete`) |
+| `/prompt <subcmd>` | System prompt overrides & runtime params (`set`, `clear`, `param-set`, `param-clear`) |
+| `/preset <subcmd>` | Workspace preset management (`list`, `show`, `save`, `create`, `restore`, `delete`) |
+| `/lane <subcmd>` | Runtime lane CRUD, exact-lane candidate reorder, run inspection, raw preview & quarantine recovery (`create`, `remove`, `rename`, `set`, `exact-append`, `exact-drop`, `exact-move`, `exact-replace`, `run`, `quarantines`, `recover`, `raw-preview`) |
+| `/addon <subcmd>` | Lane Add-on operator controls (`attach`, `detach`, `observe`, `retain`, `act`, `evidence`, `decl-read`, `decl-new`, `slice`, `asks`, `answer`, `operator`) |
+| `/browser <subcmd>` | Browser (Ego) operator controls (`scene`, `screenshot`, `interact`, `command`) |
 | `/tools [compact\|results\|full]` | Cycle or set tool call detail mode |
 | `/clear` | Clear active composer draft and reset chat scroll (also clears active view filter when draft is empty) |
 | `/theme [midnight\|arcade_hi\|paper_light\|mono]` | Cycle or set color theme preset (persisted via `/api/v1/tui/preferences`) |
@@ -379,16 +389,20 @@ or `c` straight into Chat), the top sub-tab bar syncs to all **9 Keeper tabs**
    per-Keeper durable drafts, pending-delivery states (`Queued`, `Sending`,
    `Pending_processing`, `Confirming_delivery`), tool/thinking/origin toggles,
    and turn interrupt (`Ctrl+X` or `Esc` during an active turn).
-2. **Context & Turns**: per-turn context window inspector backed by live
-   `/turn-records`, `/provider-input`, `/cache-outcome`, `/next-request`,
-   `/turn-transcript`, and `/tool-calls`. Press `<`/`>` to step turns and `v`
-   to cycle all 4 views: **Composition** (context occupancy bar, carried
-   history reach, stacked prompt/tool/message composition, and Next-Request
-   Forecast band), **Exact Input** (wire-captured parts list, lazy `Enter`
-   part viewer, graceful 401/403 permission notice, and Cache Outcome TTL +
-   message-diff diagnosis), **Input Map** (SHA-256/bytes proof table), and
-   **Response** (turn transcript joined by `execution_ids`). Also summarized in
-   `Ctrl+T` → **Context** drawer (`Enter` dives straight into full view).
+2. **Context & Turns**: per-turn context window & execution-flow inspector backed
+   by live `/turn-records`, `/turn-flow`, `/provider-input`, `/cache-outcome`,
+   `/next-request`, `/turn-transcript`, `/tool-calls`, `/checkpoints`, and
+   `/operator-note`, with SSE auto-refresh and live retry/checkpoint/native-tool
+   progress tracking. Press `<`/`>` to step turns and `v` to cycle all **5 views**:
+   **Composition** (context occupancy bar, carried history reach, stacked
+   prompt/tool/message composition, and Next-Request Forecast band), **Turn Flow**
+   (per-turn Intake · Failover attempts · parallel tool batches · block diff
+   details · `memory_os` recall waterfall), **Exact Input** (wire-captured parts
+   list, lazy `Enter` part viewer, graceful 401/403 permission notice, and Cache
+   Outcome TTL + message-diff diagnosis), **Input Map** (SHA-256/bytes proof
+   table), and **Response** (turn transcript joined by `execution_ids`). Also
+   summarized in `Ctrl+T` → **Context** drawer (`Enter` dives straight into full
+   view). Keeper lifecycle & context actions are available via `/ctl`.
 3. **Tool Calls**: per-Keeper `/tool-stats` summary, `/tool-calls` table,
    unfolded `Json_tree` payload viewer, and lazy `Enter` `/tool-result` fetch.
 4. **Memory**: `[v]` cycles 4 per-Keeper sub-views — **Diff & Flow** (scoped
@@ -429,7 +443,12 @@ Seven 1st-class sub-tabs (`[` / `]`, and Left Navigation Sidebar `b`):
    SSE).
 3. **Failover Lanes**: ordered lane cascades (`Enter` opens Lane Dive), runtime
    probe reachability (`Space` toggles outside-lane probes, `r` forces probe),
-   and deduplicated **`exact_lane_runs`**.
+   operator lane CRUD (`n` create, `e` edit the single default runtime or reorder
+   lane candidates, `R` rename a named lane, `d` or `x` open removal confirmation and
+   enter the lane ID, plus `/lane` for exact-lane candidate `append`/`drop`/`move`/`replace`,
+   raw config preview, verifier runs, and board-attention quarantine recovery),
+   and deduplicated **`exact_lane_runs`** (`D` opens **Exact Run Dive** via
+   `GET /api/v1/dashboard/exact-lane-runs/:run_id`).
 4. **Fusion**: dedicated 1st-class tab for live **Fusion** multi-model runs
    backed by `/api/v1/dashboard/fusion-runs`, `/api/v1/dashboard/fusion-runs/:run_id`,
    `/api/v1/runtime/config/fusion` (presets for `[f]` Launch modal; graceful
@@ -438,38 +457,50 @@ Seven 1st-class sub-tabs (`[` / `]`, and Left Navigation Sidebar `b`):
    (`Enter`) display the full `Question → Panel → Judge → Evidence` pipeline,
    panel answers/failures/tokens, seat routing & fallback attempts, judge
    synthesis, tool-call trace preview, and replay warnings.
-5. **Tools & Usage**: live tool telemetry & catalog (`v` cycles 3 sub-views):
+5. **Tools & Usage**: live tool telemetry, HITL quality, skills, prompts & presets
+   (`v` cycles **5 sub-views**):
    - **Usage Calls**: `w` cycles `24h/1h`, `7d/1d`, `14d/1d` with totals strip,
      `Calls`/`Failed`/`p95` Braille curves, newest-first bucket table, and
      failure-class breakdown (live updates via view-scoped
      `tool-metrics/series/stream` SSE).
    - **Catalog Tree**: Domain → Family → Tool 6-column table joined from live
      `tool_inventory.tools` × `tool_usage.by_tool`; press `Enter` for **Tool
-     Detail Dive** (description, surfaces, and live per-tool series).
+     Detail Dive** (description, schema, live per-tool series, and `[e]`
+     stateless MCP `2026-07-28` Tool Executor).
    - **Keeper Surface & Skills**: `<`/`>` steps keepers to inspect live
-     `effective_keeper_surface` budgets/origins alongside `/api/v1/skills`.
+     `effective_keeper_surface` budgets/origins alongside `/api/v1/skills`
+     (`Enter` opens **Skill Dive** for SKILL.md read/edit/preview/delete/create/refresh;
+     `n` creates a skill, `R` refreshes the skill catalog).
+   - **Quality & Gate**: tool-quality success/latency/failure telemetry
+     (`/api/v1/dashboard/tool-quality`), gate tool events
+     (`/api/v1/gate/tool-events`), and per-keeper waiting inventory.
+   - **Prompts & Presets**: 4-section manager (`Tab`/`[`/`]`) for system
+     **Prompts** (`e` override, `x` reset), **Presets** (`n` create, `a`
+     restore, `x` delete), **Runtime Params** (`e` set, `x` clear), and live
+     **Async Requests** (`/api/v1/async-requests`).
 6. **Connectors**: dedicated 2-pane screen for Channel Gate Connectors (`n`
    opens the Connector bind form: connector name such as `discord`, channel ID
    with live `/api/v1/gate/connector/names` picker via `←`/`→`, and the Keeper
    to bind via `?name=<connector>`, `U` unbind) on the left and Connected MCP
    Clients + Browser/Addons summary on the right (`Tab` switches panes).
-7. **Addons & Browser**: dedicated 2-pane inspector (`Tab` switches panes; press
-   **`p`** to toggle the **Package Catalog** browser backed by
-   `/api/v1/lane-addons/package-catalog` & `/api/v1/lane-addons/package-preview`
+7. **Addons & Browser (Operator)**: dedicated 2-pane operator cockpit (`Tab`
+   switches panes; press **`p`** to toggle the **Package Catalog** browser backed
+   by `/api/v1/lane-addons/package-catalog` & `/api/v1/lane-addons/package-preview`
    with `Enter` directory browse & package preview):
    - **Left pane — Addon Lanes**: `GET /api/v1/lane-addons` table (`Addon`,
      `Presence` `LIVE`/`RETAINED`, `Phase`, `Exec`, `Obs#/Rows`, `Decl`) with
-     bottom detail strip (`instance_id`, `host_requests`, `visibility`,
-     `action_schema`; observer-synced via `lane_addon*` events).
+     bottom detail & operator status strip (`instance_id`, `host_requests`,
+     `visibility`, `action_schema`, latest action receipt, slice rows, and
+     pending addon asks). Operator hotkeys: `n` attach, `e` declaration create/save,
+     `c` execute addon action, `O` observe, `D` inspect slice, `x` open detach confirmation and enter the instance ID, `y`
+     copy ID (full CLI via `/addon`).
    - **Right pane — Browser Clients & Open Tabs**: top table shows connected
-     clients (`GET /api/v1/dashboard/browser-lane/clients`: `Space/Client`,
-     `Browser/Ver`, `Presence/Owner`, `Active Actor·Action`) plus
+     clients (`GET /api/v1/dashboard/browser-lane/clients`) plus
      `inventoryIssues` warning rails; bottom table shows per-tab listings
-     (`POST /api/v1/dashboard/browser-lane/read`: `#ID`, active dot, origin,
-     title, URL, dialog badge) fetched on client selection and on-demand with
-     `t` (zero idle polling). Press `Space` on the right pane to toggle focus
-     between Clients and Tabs, `y` to copy the selected addon ID or tab URL,
-     and `o` to open the selected tab's `http(s)` URL.
+     (`POST /api/v1/dashboard/browser-lane/read`) fetched on client selection and
+     on-demand with `t` (zero idle polling). Operator hotkeys: `Space` toggles
+     Clients/Tabs focus, `c` interact modal, `O` capture scene, `W` capture
+     screenshot, `y` copy tab URL, `o` open tab URL (full CLI via `/browser`).
 
 ### `6` Infra
 

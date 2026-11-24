@@ -8,8 +8,17 @@ open Masc_tui_core
 
 val runtime_resolved_path : string
 val runtime_config_raw_path : string
+val runtime_config_raw_preview_path : string
 val runtime_assignment_path : string
 val runtime_routing_path : string
+val lanes_inventory_path : string
+val standalone_lanes_path : string
+val exact_lane_run_detail_path : run_id:string -> string
+val verification_runs_path : string
+val goal_verification_runs_path : string
+val keeper_board_attention_quarantines_path : keeper:string -> string
+val keeper_board_attention_quarantine_recovery_path :
+  keeper:string -> partition_id:string -> string
 val setup_inventory_path : string
 val setup_credential_path : string
 val setup_accounts_login_path : string
@@ -73,12 +82,25 @@ val connector_bind_path : connector:string -> string
 (** [POST /api/v1/gate/connector/bind?name=<connector>]. *)
 val browser_lane_path : string
 val browser_lane_read_path : string
+val browser_lane_scene_path : string
+val browser_lane_screenshot_path : string
+val browser_lane_command_path : string
+val browser_lane_interact_path : string
 val lane_addons_path : string
+val lane_addon_declaration_read_path : source_path:string -> string
+val lane_addon_declaration_save_path : string
 val lane_addon_attach_path : string
 val lane_addon_detach_path : string
+val lane_addon_observe_path : string
+val lane_addon_retain_path : string
+val lane_addon_evidence_path : string
 val lane_addon_actions_path : string
+val lane_addon_action_status_path :
+  instance_id:string -> request_id:string -> string
+val lane_addon_slice_path : ?run_id:string -> ?lane_id:string -> unit -> string
 val lane_addon_asks_path : ?include_resolved:bool -> unit -> string
 val lane_addon_ask_answer_path : string
+val lane_addon_operator_path : string
 val lane_addon_package_catalog_path : ?directory:string -> unit -> string
 val lane_addon_package_preview_path : manifest_path:string -> string
 val mcp_clients_path : string
@@ -933,6 +955,7 @@ val decode_mcp_clients : Yojson.Safe.t -> (mcp_client_row list, string) result
 
 type runtime_config_raw_meta = {
   source_revision : string;
+  source_text : string option;
   assignments : (string * string) list;
 }
 
@@ -1525,3 +1548,289 @@ val encode_runtime_param_clear : param_key:string -> Yojson.Safe.t
 
 val decode_runtime_params :
   Yojson.Safe.t -> (runtime_params_snapshot, string) result
+
+(** {1 Wave 4 Layer 4: Runtime Lane CRUD, Exact Run Detail, Verifier, Quarantines, Add-ons & Browser Operator} *)
+
+type runtime_routing_action =
+  | Route_create of { lane : string; runtime_ids : string list }
+  | Route_rename of { lane : string; to_lane : string }
+  | Route_set_default of { runtime_id : string }
+  | Route_set_named of {
+      lane : string;
+      runtime_ids : string list;
+      expected_source_revision : string option;
+    }
+  | Route_set_media_failover of { runtime_ids : string list }
+  | Route_exact_append of { lane_id : string; runtime_id : string }
+  | Route_exact_drop of { lane_id : string; runtime_id : string }
+  | Route_exact_move of {
+      lane_id : string;
+      runtime_id : string;
+      direction : [ `Up | `Down | `First ];
+    }
+  | Route_exact_replace of {
+      lane_id : string;
+      runtime_id : string;
+      replacement_runtime_id : string;
+    }
+
+val is_named_routing_lane : string -> bool
+
+val set_routing_action :
+  lane:string -> runtime_ids:string list -> expected_source_revision:string option ->
+  (runtime_routing_action, string) result
+
+val encode_runtime_routing_action : runtime_routing_action -> Yojson.Safe.t
+
+type runtime_raw_preview_result = {
+  ok : bool;
+  can_save : bool;
+  runtime_validation : string option;
+  validation_json : Yojson.Safe.t option;
+}
+
+val encode_runtime_raw_preview : source_text:string -> Yojson.Safe.t
+val decode_runtime_raw_preview :
+  Yojson.Safe.t -> (runtime_raw_preview_result, string) result
+
+type lane_inventory_row = {
+  id : string;
+  label : string;
+  purpose : string;
+  selection_kind : string;
+  state_kind : string;
+  ui_category : string option;
+  summary : string option;
+}
+
+type lane_inventory_snapshot = {
+  observed_at : float;
+  directory : string;
+  complete : bool;
+  owner_present : bool;
+  rows : lane_inventory_row list;
+  issues : (string * string) list;
+}
+
+val decode_lane_inventory :
+  Yojson.Safe.t -> (lane_inventory_snapshot, string) result
+
+type standalone_lane_row = {
+  lane_id : string;
+  label : string;
+  purpose : string;
+  required : bool;
+  configuration_state : string;
+  status : string;
+  admitted_slots : string list;
+  cli_slots : string list;
+  dropped_slots : string list;
+  declared_slots : string list;
+  admission_error : string option;
+  retained_run_count : int;
+  running_count : int;
+  succeeded_count : int;
+  failed_count : int;
+  cancelled_count : int;
+  last_outcome : string option;
+  p50_elapsed_s : float option;
+}
+
+type standalone_lanes_snapshot = {
+  generated_at : string;
+  observed_at_unix : float;
+  lanes : standalone_lane_row list;
+}
+
+val decode_standalone_lanes :
+  Yojson.Safe.t -> (standalone_lanes_snapshot, string) result
+
+type exact_lane_run_detail = {
+  run_id : string;
+  run_kind : string;
+  lane : string;
+  subject_id : string option;
+  actor : string option;
+  status : string;
+  started_at : float option;
+  elapsed_s : float option;
+  selected_slot : string option;
+  skill_evidence_state : string option;
+  input_json : Yojson.Safe.t option;
+  output_json : Yojson.Safe.t option;
+  raw_json : Yojson.Safe.t;
+}
+
+val decode_exact_lane_run_detail :
+  Yojson.Safe.t -> (exact_lane_run_detail, string) result
+
+type verifier_run_row = {
+  run_id : string;
+  kind : [ `Task | `Goal ];
+  subject_id : string;
+  actor : string option;
+  status : string;
+  started_at : float option;
+  elapsed_s : float option;
+  evaluator_runtime : string option;
+  detail : string option;
+}
+
+type verifier_runs_snapshot = {
+  generated_at : string;
+  count : int;
+  runs : verifier_run_row list;
+}
+
+val decode_verification_runs :
+  Yojson.Safe.t -> (verifier_runs_snapshot, string) result
+val decode_goal_verification_runs :
+  Yojson.Safe.t -> (verifier_runs_snapshot, string) result
+
+type board_attention_quarantine_item = {
+  keeper_name : string;
+  partition_id : string;
+  candidate_id : string;
+  quarantine_id : string;
+  phase : string;
+  failure_category : string;
+  quarantined_at : float;
+  requested_by : string option;
+}
+
+type board_attention_quarantines_snapshot = {
+  count : int;
+  items : board_attention_quarantine_item list;
+  errors : (string * string) list;
+}
+
+val decode_board_attention_quarantines :
+  Yojson.Safe.t -> (board_attention_quarantines_snapshot, string) result
+
+val encode_board_attention_quarantine_recovery :
+  candidate_id:string -> expected_quarantine_id:string -> Yojson.Safe.t
+
+type addon_declaration_document = {
+  file_name : string;
+  source_path : string;
+  source_text : string;
+  source_revision : string;
+  desired_revision : string option;
+  valid : bool;
+  messages : string list;
+}
+
+val encode_addon_declaration_save :
+  mode:[ `Create | `Save ] ->
+  file_name:string ->
+  source_text:string ->
+  expected_source_revision:string option ->
+  Yojson.Safe.t
+
+val decode_addon_declaration_document :
+  Yojson.Safe.t -> (addon_declaration_document, string) result
+
+val encode_addon_evidence :
+  instance_id:string ->
+  row_ids:string list ->
+  ?keeper_name:string ->
+  ?broadcast:bool ->
+  ?request_id:string ->
+  unit ->
+  Yojson.Safe.t
+
+type addon_action_receipt = {
+  instance_id : string;
+  request_id : string;
+  state : string;
+  detail : string option;
+  result_json : Yojson.Safe.t option;
+}
+
+val decode_addon_action_receipt :
+  Yojson.Safe.t -> (addon_action_receipt, string) result
+
+type addon_slice_snapshot = {
+  raw_json : Yojson.Safe.t;
+  row_count : int;
+  summary_lines : string list;
+}
+
+val decode_addon_slice : Yojson.Safe.t -> (addon_slice_snapshot, string) result
+
+type addon_operator_mode =
+  | Operator_describe
+  | Operator_invoke of Yojson.Safe.t
+
+val encode_addon_operator :
+  instance_id:string ->
+  expected_incarnation:string ->
+  mode:addon_operator_mode ->
+  Yojson.Safe.t
+
+type browser_scene_node_summary = {
+  node_id : string;
+  kind : string;
+  tag : string;
+  text : string;
+  clickable : bool;
+  editable : bool;
+}
+
+type browser_scene_snapshot = {
+  document_id : string;
+  tab_id : int option;
+  url : string;
+  title : string;
+  width : float;
+  height : float;
+  scroll_x : float;
+  scroll_y : float;
+  view : string;
+  truncated : bool;
+  elapsed_ms : float option;
+  nodes : browser_scene_node_summary list;
+}
+
+val encode_browser_scene_request :
+  client_id:string -> tab_id:int -> view:[ `Content | `Regions ] -> Yojson.Safe.t
+
+val decode_browser_scene_response :
+  Yojson.Safe.t -> (browser_scene_snapshot, string) result
+
+type browser_screenshot_meta = {
+  tab_id : int;
+  url : string;
+  title : string;
+  mime_type : string;
+  base64_bytes : int;
+  elapsed_ms : float option;
+}
+
+val encode_browser_screenshot_request :
+  client_id:string -> tab_id:int -> Yojson.Safe.t
+
+val decode_browser_screenshot_response :
+  Yojson.Safe.t -> (browser_screenshot_meta, string) result
+
+val encode_browser_interact_request :
+  client_id:string ->
+  tab_id:int ->
+  ?expected_url:string ->
+  action:string ->
+  ?selector:string ->
+  ?text:string ->
+  ?x:int ->
+  ?y:int ->
+  unit ->
+  Yojson.Safe.t
+
+type browser_op_receipt = {
+  ok : bool;
+  summary : string;
+  data_json : Yojson.Safe.t option;
+  error : string option;
+}
+
+val decode_browser_op_receipt :
+  Yojson.Safe.t -> (browser_op_receipt, string) result

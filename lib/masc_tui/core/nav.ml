@@ -66,6 +66,7 @@ type runtime_dive_target =
   | Tool_dive of string
   | Fusion_dive of string
   | Skill_dive of string
+  | Exact_run_dive of string
 
 type infra_dive_target =
   | Sandbox_dive of string
@@ -159,6 +160,22 @@ type inline_action_kind =
   | Prompt_override_form of { key : string }
   | Preset_create_form
   | Runtime_param_set_form of { param_key : string }
+  | Default_route_edit
+  | Lane_rename_form of { lane : string }
+  | Addon_decl_form of {
+      file_name : string;
+      mode : [ `Create | `Save ];
+      expected_source_revision : string option;
+    }
+  | Addon_act_form of {
+      instance_id : string;
+      expected_incarnation : string;
+    }
+  | Browser_interact_form of {
+      client_id : string;
+      tab_id : int;
+      expected_url : string option;
+    }
 
 type system_gate_kind =
   | Micro_viewport
@@ -539,11 +556,13 @@ let equal_runtime_dive_target a b =
   match a, b with
   | Tool_dive x, Tool_dive y
   | Fusion_dive x, Fusion_dive y
-  | Skill_dive x, Skill_dive y ->
+  | Skill_dive x, Skill_dive y
+  | Exact_run_dive x, Exact_run_dive y ->
       String.equal x y
-  | Tool_dive _, (Fusion_dive _ | Skill_dive _)
-  | Fusion_dive _, (Tool_dive _ | Skill_dive _)
-  | Skill_dive _, (Tool_dive _ | Fusion_dive _) ->
+  | Tool_dive _, (Fusion_dive _ | Skill_dive _ | Exact_run_dive _)
+  | Fusion_dive _, (Tool_dive _ | Skill_dive _ | Exact_run_dive _)
+  | Skill_dive _, (Tool_dive _ | Fusion_dive _ | Exact_run_dive _)
+  | Exact_run_dive _, (Tool_dive _ | Fusion_dive _ | Skill_dive _) ->
       false
 
 let equal_infra_dive_target a b =
@@ -645,7 +664,11 @@ let inline_action_tag = function
   | Prompt_override_form _ -> 35
   | Preset_create_form -> 36
   | Runtime_param_set_form _ -> 37
-
+  | Default_route_edit -> 38
+  | Lane_rename_form _ -> 40
+  | Addon_decl_form _ -> 42
+  | Addon_act_form _ -> 43
+  | Browser_interact_form _ -> 44
 let equal_inline_action_kind a b =
   if not (Int.equal (inline_action_tag a) (inline_action_tag b)) then false
   else
@@ -659,6 +682,7 @@ let equal_inline_action_kind a b =
     | Code_search_form, Code_search_form
     | Skill_create_form, Skill_create_form
     | Preset_create_form, Preset_create_form
+    | Default_route_edit, Default_route_edit
     | Runtime_lane_create, Runtime_lane_create
     | Task_create_form, Task_create_form
     | Addon_attach_form, Addon_attach_form ->
@@ -686,6 +710,21 @@ let equal_inline_action_kind a b =
         String.equal x.key y.key
     | Runtime_param_set_form x, Runtime_param_set_form y ->
         String.equal x.param_key y.param_key
+    | Lane_rename_form x, Lane_rename_form y -> String.equal x.lane y.lane
+    | Addon_decl_form x, Addon_decl_form y ->
+        String.equal x.file_name y.file_name
+        && (match (x.mode, y.mode) with
+           | `Create, `Create | `Save, `Save -> true
+           | `Create, `Save | `Save, `Create -> false)
+        && Option.equal String.equal x.expected_source_revision
+             y.expected_source_revision
+    | Addon_act_form x, Addon_act_form y ->
+        String.equal x.instance_id y.instance_id
+        && String.equal x.expected_incarnation y.expected_incarnation
+    | Browser_interact_form x, Browser_interact_form y ->
+        String.equal x.client_id y.client_id
+        && Int.equal x.tab_id y.tab_id
+        && Option.equal String.equal x.expected_url y.expected_url
     | Board_comment x, Board_comment y ->
         String.equal x.post_id y.post_id
         && Option.equal String.equal x.parent_id y.parent_id
@@ -740,6 +779,11 @@ let equal_inline_action_kind a b =
       | Prompt_override_form _
       | Preset_create_form
       | Runtime_param_set_form _
+      | Default_route_edit
+      | Lane_rename_form _
+      | Addon_decl_form _
+      | Addon_act_form _
+      | Browser_interact_form _
       | Runtime_lane_create
       | Runtime_lane_edit _
       | Runtime_lane_delete _

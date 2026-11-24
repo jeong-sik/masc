@@ -117,7 +117,6 @@ type get_request =
   | Get_connectors
   | Get_browser_lane
   | Get_lane_addons
-  | Get_lane_addon_asks
   | Get_mcp_clients
   | Get_sandboxes
   | Get_keeper_sandbox of { keeper : string }
@@ -199,6 +198,23 @@ type get_request =
   | Get_presets
   | Get_preset_show of { name : string }
   | Get_runtime_params
+  (* Wave 4 Layer 4: Lanes Inventory, Standalone Lanes, Exact Run Detail, Verifier Runs, Quarantines & Lane Add-ons *)
+  | Get_lanes_inventory
+  | Get_standalone_lanes
+  | Get_exact_lane_run_detail of { run_id : string }
+  | Get_verification_runs
+  | Get_goal_verification_runs
+  | Get_keeper_board_attention_quarantines of { keeper : string }
+  | Get_lane_addon_declaration of { source_path : string }
+  | Get_lane_addon_action_status of {
+      instance_id : string;
+      request_id : string;
+    }
+  | Get_lane_addon_slice of {
+      run_id : string option;
+      lane_id : string option;
+    }
+  | Get_lane_addon_asks of { include_resolved : bool }
 
 type keeper_turn_interrupt_target =
   [ `Turn_token of string | `Operation_id of string ]
@@ -400,6 +416,7 @@ type post_request =
       manifest_path : string;
       run_id : string;
       binding : Yojson.Safe.t;
+      from_modal : bool;
     }
   | Post_lane_addon_detach of { instance_id : string }
   | Post_lane_addon_action of {
@@ -501,6 +518,61 @@ type post_request =
   | Post_preset_delete of { name : string }
   | Post_runtime_param_set of { param_key : string; value : Yojson.Safe.t }
   | Post_runtime_param_clear of { param_key : string }
+  (* Wave 4 Layer 4: Runtime Routing CRUD, Raw Preview, Quarantine Recovery, Lane Add-ons & Browser Operator *)
+  | Post_runtime_routing_action of {
+      action : Wire_runtime.runtime_routing_action;
+      label : Say.t;
+    }
+  | Post_runtime_config_raw_preview of { source_text : string }
+  | Post_board_attention_quarantine_recovery of {
+      keeper : string;
+      partition_id : string;
+      candidate_id : string;
+      expected_quarantine_id : string;
+    }
+  | Post_lane_addon_declaration_save of {
+      mode : [ `Create | `Save ];
+      file_name : string;
+      source_text : string;
+      expected_source_revision : string option;
+    }
+  | Post_lane_addon_observe of { instance_id : string }
+  | Post_lane_addon_retain of { instance_id : string }
+  | Post_lane_addon_evidence of {
+      instance_id : string;
+      row_ids : string list;
+      keeper_name : string option;
+      broadcast : bool;
+      request_id : string option;
+    }
+  | Post_lane_addon_act of {
+      instance_id : string;
+      expected_incarnation : string;
+      request_id : string;
+      action : Yojson.Safe.t;
+    }
+  | Post_lane_addon_operator of {
+      instance_id : string;
+      expected_incarnation : string;
+      mode : Wire_runtime.addon_operator_mode;
+    }
+  | Post_browser_scene of {
+      client_id : string;
+      tab_id : int;
+      view : [ `Content | `Regions ];
+    }
+  | Post_browser_screenshot of { client_id : string; tab_id : int }
+  | Post_browser_command of { arguments : Yojson.Safe.t }
+  | Post_browser_interact of {
+      client_id : string;
+      tab_id : int;
+      expected_url : string option;
+      action : string;
+      selector : string option;
+      text : string option;
+      x : int option;
+      y : int option;
+    }
 
 type put_request =
   | Put_wiki_page of { page : string; request : Wire_knowledge.wiki_put_request }

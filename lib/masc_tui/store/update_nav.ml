@@ -195,7 +195,8 @@ let slash_spec_takes_arg (spec : Slash.spec) = Option.is_some spec.arg_hint
 let slash_spec_requires_arg (spec : Slash.spec) =
   match spec.id with
   | Slash.Cmd_btw | Slash.Cmd_ctl | Slash.Cmd_gate | Slash.Cmd_exec
-  | Slash.Cmd_skill | Slash.Cmd_prompt ->
+  | Slash.Cmd_skill | Slash.Cmd_prompt | Slash.Cmd_lane | Slash.Cmd_addon
+  | Slash.Cmd_browser ->
       true
   | Slash.Cmd_pulse
   | Slash.Cmd_work
@@ -224,7 +225,8 @@ let slash_spec_requires_arg (spec : Slash.spec) =
 let resolve_slash_arg_candidates (m : Model.t) (spec : Slash.spec) ~arg_raw =
   match spec.id with
   | Slash.Cmd_theme | Slash.Cmd_lang | Slash.Cmd_tools | Slash.Cmd_ctl
-  | Slash.Cmd_gate | Slash.Cmd_skill | Slash.Cmd_prompt | Slash.Cmd_preset ->
+  | Slash.Cmd_gate | Slash.Cmd_skill | Slash.Cmd_prompt | Slash.Cmd_preset
+  | Slash.Cmd_lane | Slash.Cmd_addon | Slash.Cmd_browser ->
       let prefix_matches = Slash.complete ~prefix:(spec.name ^ " " ^ arg_raw) in
       let all_for_cmd =
         if prefix_matches <> [] then prefix_matches
@@ -748,6 +750,7 @@ let switch_workspace (m : Model.t) ws =
       config;
       knowledge;
       attention;
+      runtime = { m.runtime with pending_addon_decl_path = None };
       inline_modal = None;
       ask_modal = None;
     }
@@ -1051,6 +1054,19 @@ let push_dive (m : Model.t) dive =
           skill_editor_loaded;
           skill_editor_preview = Observed.absent;
         }
+    | Nav.Dive_runtime (Nav.Exact_run_dive run_id) ->
+        let exact_run_detail =
+          match m.runtime.exact_run_detail with
+          | Observed.Value { data = rid, _; _ } when String.equal rid run_id ->
+              m.runtime.exact_run_detail
+          | Observed.Value _
+          | Observed.Loading _
+          | Observed.Absent
+          | Observed.Unreported
+          | Observed.Failed _ ->
+              Observed.absent
+        in
+        { m.runtime with exact_run_detail }
     | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Fusion_dive _)
     | Nav.Dive_keeper _
     | Nav.Dive_work _
@@ -1247,6 +1263,11 @@ let open_inline_modal (m : Model.t) kind =
       | Nav.Prompt_override_form _
       | Nav.Preset_create_form
       | Nav.Runtime_param_set_form _
+      | Nav.Default_route_edit
+      | Nav.Lane_rename_form _
+      | Nav.Addon_decl_form _
+      | Nav.Addon_act_form _
+      | Nav.Browser_interact_form _
       | Nav.Runtime_lane_create
       | Nav.Runtime_lane_edit _
       | Nav.Runtime_lane_delete _
@@ -3341,7 +3362,7 @@ let enter_plan (m : Model.t) : enter_plan =
       ( Nav.Dive_work (Nav.Verification_dive _)
       | Nav.Dive_knowledge
           (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
-      | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Skill_dive _)
+      | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Skill_dive _ | Nav.Exact_run_dive _)
       | Nav.Dive_infra _ ) ->
       Enter_noop
   | None -> (
@@ -3830,6 +3851,11 @@ let classify_inline_form (modal : Model.inline_modal_state) : inline_form_kind =
     | Nav.Prompt_override_form _
     | Nav.Preset_create_form
     | Nav.Runtime_param_set_form _
+    | Nav.Default_route_edit
+    | Nav.Lane_rename_form _
+    | Nav.Addon_decl_form _
+    | Nav.Addon_act_form _
+    | Nav.Browser_interact_form _
     | Nav.Runtime_lane_create
     | Nav.Runtime_lane_edit _
     | Nav.Runtime_lane_delete _
@@ -5123,7 +5149,7 @@ let submit_inline_modal ~now (m : Model.t) =
                           epoch = m.epoch;
                           req =
                             Cmd.Post_lane_addon_attach
-                              { manifest_path; run_id; binding };
+                              { manifest_path; run_id; binding; from_modal = true };
                         };
                     ] ))
           | Form_standard (Nav.Addon_detach_confirm { instance_id; _ }) ->
@@ -5133,12 +5159,11 @@ let submit_inline_modal ~now (m : Model.t) =
               in
               if
                 not
-                  (String.equal (String.lowercase_ascii confirm) "detach"
-                  || String.equal confirm instance_id)
+                  (String.equal confirm instance_id)
               then
                 set_modal_error
                   (Printf.sprintf
-                     "Type 'detach' or exact instance ID '%s' to confirm"
+                     "Type exact instance ID '%s' to confirm"
                      instance_id)
               else
                 ( mark_submitting m
@@ -5530,6 +5555,169 @@ let submit_inline_modal ~now (m : Model.t) =
                         req = Cmd.Post_runtime_param_set { param_key; value };
                       };
                   ] )
+          | Form_standard Nav.Default_route_edit -> (
+              let runtime_ids = Model.modal_field_value ~key:"runtime_ids" modal
+                                |> Wire_runtime.parse_candidate_runtime_ids in
+              match runtime_ids with
+              | [runtime_id] ->
+                  ( mark_submitting m,
+                    [ Cmd.Http_post { epoch = m.epoch; req = Cmd.Post_runtime_routing_action
+                        { action = Wire_runtime.Route_set_default { runtime_id };
+                          label = Say.make ~ko:"기본 라우트 변경 완료" ~en:"Default route updated" } } ] )
+              | [] | _ :: _ :: _ -> set_modal_error "Enter exactly one default runtime ID")
+          | Form_standard (Nav.Lane_rename_form { lane }) ->
+              let to_lane = Model.modal_field_value ~key:"to_lane" modal in
+              if String.equal to_lane "" then
+                set_modal_error "New lane name is required"
+              else if not (Wire_runtime.is_named_routing_lane lane && Wire_runtime.is_named_routing_lane to_lane) then
+                set_modal_error "Renaming requires two named lane IDs"
+              else
+                ( mark_submitting m
+                , [
+                    Cmd.Http_post
+                      {
+                        epoch = m.epoch;
+                        req =
+                          Cmd.Post_runtime_routing_action
+                            {
+                              action = Wire_runtime.Route_rename { lane; to_lane };
+                              label =
+                                Say.make
+                                  ~ko:(Printf.sprintf "레인 이름 변경: %s -> %s" lane to_lane)
+                                  ~en:(Printf.sprintf "Lane renamed: %s -> %s" lane to_lane);
+                            };
+                      };
+                  ] )
+          | Form_standard
+              (Nav.Addon_decl_form
+                 { file_name = modal_fn; mode; expected_source_revision }) ->
+              let file_name =
+                match mode with
+                | `Save -> modal_fn
+                | `Create -> Model.modal_field_value ~key:"file_name" modal
+              in
+              let source_text =
+                Model.unescape_inline_text
+                  (Model.modal_field_raw_value ~key:"source_text" modal)
+              in
+              let cas_ok =
+                match mode with
+                | `Create -> true
+                | `Save -> (
+                    match expected_source_revision with
+                    | Some rev -> Wire_runtime.is_lowercase_sha256_hex rev
+                    | None -> false)
+              in
+              if String.equal file_name "" || not (Filename.check_suffix file_name ".toml")
+              then set_modal_error "file_name must end with .toml"
+              else if String.equal (String.trim source_text) "" then
+                set_modal_error "source_text is required"
+              else if not cas_ok then
+                set_modal_error
+                  "Save requires a valid 64-hex expected_source_revision (reload declaration)"
+              else
+                let rev_to_send =
+                  match mode with
+                  | `Create -> None
+                  | `Save -> expected_source_revision
+                in
+                ( mark_submitting m
+                , [
+                    Cmd.Http_post
+                      {
+                        epoch = m.epoch;
+                        req =
+                          Cmd.Post_lane_addon_declaration_save
+                            {
+                              mode;
+                              file_name;
+                              source_text;
+                              expected_source_revision = rev_to_send;
+                            };
+                      };
+                  ] )
+          | Form_standard
+              (Nav.Addon_act_form { instance_id; expected_incarnation }) -> (
+              let raw = Model.modal_field_value ~key:"action" modal in
+              match Yojson.Safe.from_string raw with
+              | `Assoc _ as action ->
+                  let runtime, request_id =
+                    Runtime_store.next_addon_request_id m.runtime
+                  in
+                  ( mark_submitting { m with runtime }
+                  , [
+                      Cmd.Http_post
+                        {
+                          epoch = m.epoch;
+                          req =
+                            Cmd.Post_lane_addon_act
+                              {
+                                instance_id;
+                                expected_incarnation;
+                                request_id;
+                                action;
+                              };
+                        };
+                    ] )
+              | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _
+              | `List _ ->
+                  set_modal_error "action must be a JSON object ({})"
+              | exception Yojson.Json_error msg ->
+                  set_modal_error
+                    ("Invalid action JSON: "
+                    ^ Chat_transcript.scrub_secrets_in_text msg))
+          | Form_standard
+              (Nav.Browser_interact_form { client_id; tab_id; expected_url }) ->
+              let action =
+                String.lowercase_ascii (Model.modal_field_value ~key:"action" modal)
+              in
+              let raw_selector =
+                let s = Model.modal_field_value ~key:"selector" modal in
+                if String.equal s "" then None else Some s
+              in
+              let text =
+                let t = Model.modal_field_raw_value ~key:"text" modal in
+                if String.equal action "fill" then Some t
+                else if String.equal (String.trim t) "" then None
+                else Some t
+              in
+              let ys = Model.modal_field_value ~key:"y" modal in
+              let y_parsed =
+                if String.equal ys "" then Ok None
+                else
+                  match int_of_string_opt ys with
+                  | Some v -> Ok (Some v)
+                  | None -> Error "y must be an integer"
+              in
+              if String.equal action "" then
+                set_modal_error "action is required"
+              else (
+                match y_parsed with
+                | Error err -> set_modal_error err
+                | Ok y_opt ->
+                    let selector, y =
+                      if String.equal action "scroll" then (None, y_opt)
+                      else (raw_selector, None)
+                    in
+                    ( mark_submitting m
+                    , [
+                        Cmd.Http_post
+                          {
+                            epoch = m.epoch;
+                            req =
+                              Cmd.Post_browser_interact
+                                {
+                                  client_id;
+                                  tab_id;
+                                  expected_url;
+                                  action;
+                                  selector;
+                                  text;
+                                  x = None;
+                                  y;
+                                };
+                          };
+                      ] ))
           | Form_setup_login_start ->
               let integration_id =
                 String.trim
@@ -8729,6 +8917,25 @@ let dive_max_scroll (m : Model.t) active =
             let lines = List.length (String.split_on_char '\n' loaded.source_text) in
             max 0 (lines + 10 - max 1 content.h)
         | None -> 0)
+  | Nav.Dive_runtime (Nav.Exact_run_dive run_id) -> (
+      let content = ui_card_inner br |> ui_pad_content ~bp in
+      if Rect.is_empty content then 0
+      else
+        match Runtime_store.exact_run_detail_for ~run_id m.runtime with
+        | Some d ->
+            let json_len = function
+              | None -> 0
+              | Some j ->
+                  1
+                  + List.length
+                      (String.split_on_char '\n' (Yojson.Safe.pretty_to_string j))
+            in
+            let total =
+              3 + json_len d.input_json + json_len d.output_json
+              + json_len (Some d.raw_json)
+            in
+            max 0 (total - max 1 content.h)
+        | None -> 0)
   | Nav.Dive_work (Nav.Goal_dive goal_id) -> (
       match
         List.find_opt
@@ -9884,6 +10091,11 @@ let apply_move (m : Model.t) dir =
                   | Nav.Prompt_override_form _
                   | Nav.Preset_create_form
                   | Nav.Runtime_param_set_form _
+                  | Nav.Default_route_edit
+                  | Nav.Lane_rename_form _
+                  | Nav.Addon_decl_form _
+                  | Nav.Addon_act_form _
+                  | Nav.Browser_interact_form _
                   | Nav.Runtime_lane_create
                   | Nav.Runtime_lane_edit _
                   | Nav.Runtime_lane_delete _
@@ -9934,6 +10146,11 @@ let apply_move (m : Model.t) dir =
               | Nav.Prompt_override_form _
               | Nav.Preset_create_form
               | Nav.Runtime_param_set_form _
+              | Nav.Default_route_edit
+              | Nav.Lane_rename_form _
+              | Nav.Addon_decl_form _
+              | Nav.Addon_act_form _
+              | Nav.Browser_interact_form _
               | Nav.Runtime_lane_create
               | Nav.Runtime_lane_edit _
               | Nav.Runtime_lane_delete _

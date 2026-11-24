@@ -1379,6 +1379,35 @@ let decode_gate_pending_list json =
       Error (title ^ ": " ^ detail)
   | other -> Error (Printf.sprintf "unknown approval_queue_state %S" other)
 
+let decode_ask_answers json =
+  let* items = match json with
+    | `List items -> Ok items
+    | `Assoc _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ ->
+        Error "answers: expected array"
+  in
+  let decode_answer item =
+    let* question_id = required_string_field item "question_id" in
+    let* response = required_object_field item "response" in
+    let* kind = required_string_field response "kind" in
+    let* value =
+      match kind with
+      | "chose" ->
+          let* ids = required_list_field response "choice_ids" in
+          let* choices = decode_list "choice_ids" (function
+            | `String id -> Ok id
+            | `List _ | `Assoc _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ ->
+                Error "choice ID must be a string") ids in
+          Ok (Ask_chose choices)
+      | "wrote" ->
+          let* text = required_string_field response "text" in
+          Ok (Ask_wrote text)
+      | "skipped" -> Ok Ask_skipped
+      | other -> Error ("Unknown answer kind: " ^ other)
+    in
+    Ok (question_id, value)
+  in
+  decode_list "answers" decode_answer items
+
 let encode_ask_response = function
   | Ask_chose choice_ids ->
       `Assoc

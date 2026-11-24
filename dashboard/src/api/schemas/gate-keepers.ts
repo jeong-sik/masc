@@ -2,6 +2,7 @@ import { CandleAccountRevisionSchema } from './candle-observation'
 import { KeeperPortraitSchema } from './keeper-portrait'
 import { readKeeperBoardAddress } from '../../lib/board-address'
 import { RuntimeLaneObservationSchema } from '../../lib/keeper-runtime-walk'
+import { KeeperTurnPulseSchema } from '../../lib/keeper-turn-pulse'
 import { KEEPER_ACTIVATION_MODES } from '../../lib/keeper-activation-mode'
 import { Data, Effect, ParseResult, Schema } from 'effect'
 
@@ -28,26 +29,6 @@ const KeeperLastFailureWireSchema = Schema.Struct({
     'fiber', 'exception', 'operator_interrupt',
   ),
   at_unix: Schema.NullOr(Schema.Number.pipe(Schema.filter(Number.isFinite))),
-})
-
-// Half-hour slots of the last day (RFC-0515 §2.1, RFC-0511 D5). Each slot
-// counts its turns twice: by outcome (ok, rested, failed) and by what started
-// them (scheduled, reacted, chat, own, unknown).
-const RecentTurnsSlotWireSchema = Schema.Struct({
-  starts_at: Schema.Number,
-  ok: Schema.Number,
-  rested: Schema.Number,
-  failed: Schema.Number,
-  scheduled: Schema.Number,
-  reacted: Schema.Number,
-  chat: Schema.Number,
-  own: Schema.Number,
-  unknown: Schema.Number,
-})
-
-const RecentTurnsWireSchema = Schema.Struct({
-  known_since: Schema.Number,
-  slots: Schema.Array(RecentTurnsSlotWireSchema),
 })
 
 // Any JSON value. Unlike Schema.Unknown it rejects a missing key, which reads
@@ -86,7 +67,7 @@ const GateKeeperWireSchema = Schema.Struct({
   operator_disposition: Schema.optional(Schema.NullOr(Schema.String)),
   operator_disposition_reason: Schema.optional(Schema.NullOr(Schema.String)),
   failing_since: Schema.optional(Schema.NullOr(Schema.Number)),
-  recent_turns: Schema.optional(Schema.NullOr(RecentTurnsWireSchema)),
+  recent_turns: Schema.optional(Schema.NullOr(KeeperTurnPulseSchema)),
   runtime_path_rest: Schema.optional(Schema.Unknown),
   keepalive_running: Schema.Boolean,
   activation_mode: Schema.Literal(...KEEPER_ACTIVATION_MODES),

@@ -1,6 +1,7 @@
 import type { KeeperCostCoverage } from '../lib/keeper-cost-coverage'
 import type { KeeperResponseOwner, KeeperResponseState } from '../lib/keeper-response-state'
 import type { KeeperPortraitReading } from '../lib/keeper-portrait'
+import type { KeeperTurnPulseReading } from '../lib/keeper-turn-pulse'
 import type { KeeperActivationMode } from '../lib/keeper-activation-mode'
 import type { KeeperApprovalQueueState } from './gate'
 // MASC Dashboard — Core entity types (Agent, Task, Message, Board, Keeper)
@@ -1457,6 +1458,8 @@ export interface Keeper {
   updated_at?: string
   keeper_age_s?: number
   last_turn_ago_s?: number
+  /** Turns per half-hour slot by outcome and cause; the server's turn pulse. */
+  recent_turns?: KeeperTurnPulseReading
   last_proactive_ago_s?: number
   last_proactive_reason?: string | null
   last_proactive_preview?: string | null

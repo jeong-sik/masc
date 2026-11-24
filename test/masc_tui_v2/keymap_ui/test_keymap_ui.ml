@@ -919,7 +919,7 @@ let test_composer_modes_and_voice () =
   Alcotest.(check bool) "focused cursor visible" true cursor.visible;
   let hdr = grid_row_text grid ~y:0 in
   Alcotest.(check bool) "honest pending tx pill shown" true
-    (contains_sub ~needle:"처리 대기" ~haystack:hdr);
+    (contains_sub ~needle:"응답 대기" ~haystack:hdr);
   let braille_count = ref 0 in
   for x = 0 to 79 do
     match (Cell_grid.get grid ~x ~y:3).glyph with

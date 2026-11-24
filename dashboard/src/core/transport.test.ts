@@ -79,6 +79,54 @@ describe('core/transport', () => {
     expect(seenCsrfHeaders).toEqual(['csrf-r1', 'csrf-r2'])
   })
 
+  it('does NOT refresh CSRF or retry on ordinary RBAC 403 forbidden or unchanged CSRF token', async () => {
+    let sessionFetches = 0
+    let rbacPosts = 0
+    let sameCsrfPosts = 0
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/health') return jsonResponse({ account_mode: 'Multi_account' })
+      if (url === '/auth/session') {
+        sessionFetches += 1
+        return jsonResponse({ user_id: 'acct-worker', expires_at_ms: 1, csrf_token: 'csrf-fixed' })
+      }
+      if (url === '/api/v1/auth/whoami') {
+        return jsonResponse({ principal: { kind: 'human', id: 'acct-worker' }, role: 'worker' })
+      }
+      if (url === '/api/v1/infra/admin-only') {
+        rbacPosts += 1
+        return jsonResponse({ error: { code: 'not_an_admin', message: 'Forbidden' } }, 403)
+      }
+      if (url === '/api/v1/operator/same-csrf') {
+        sameCsrfPosts += 1
+        return jsonResponse({ error: { code: 'csrf_invalid', message: 'CSRF mismatch' } }, 403)
+      }
+      throw new Error(`unexpected url: ${url}`)
+    })
+
+    await bootstrapAuthSession({ fetchImpl: fetchMock as unknown as typeof fetch })
+    expect(sessionFetches).toBe(1)
+
+    // Ordinary RBAC 403 forbidden must NOT trigger CSRF refresh or retry
+    const rbacRes = await apiMutate('POST', '/api/v1/infra/admin-only', {}, {
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+    expect(rbacRes.ok).toBe(false)
+    if (!rbacRes.ok) expect(rbacRes.error.kind).toBe('forbidden')
+    expect(rbacPosts).toBe(1)
+    expect(sessionFetches).toBe(1)
+
+    // CSRF rejection where refresh returns identical token must NOT blindly retry
+    const csrfRes = await apiMutate('POST', '/api/v1/operator/same-csrf', {}, {
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+    expect(csrfRes.ok).toBe(false)
+    if (!csrfRes.ok) expect(csrfRes.error.kind).toBe('csrf_rejected')
+    expect(sameCsrfPosts).toBe(1)
+    expect(sessionFetches).toBe(2)
+  })
+
   it('sends Authorization: Bearer in single_user mode when token is set', async () => {
     setSingleUserToken('single-val-1')
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {

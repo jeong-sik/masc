@@ -285,6 +285,49 @@ describe('core/auth', () => {
     }
   })
 
+  it('bumps sessionEpoch and exits signed-in state on visibilitychange when session expires or workspace_id drifts', async () => {
+    let sessionAlive = true
+    let serverWorkspace = 'ws-initial'
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/health') return jsonResponse({ account_mode: 'Multi_account' })
+      if (url === '/auth/session') {
+        if (!sessionAlive) return jsonResponse({ error: 'expired' }, 401)
+        return jsonResponse({ user_id: 'acct-vis', expires_at_ms: 1, csrf_token: 'csrf-vis' })
+      }
+      if (url === '/api/v1/auth/whoami') {
+        return jsonResponse({
+          principal: { kind: 'human', id: 'acct-vis' },
+          role: 'admin',
+          workspace_id: serverWorkspace,
+        })
+      }
+      throw new Error(`unexpected url: ${url}`)
+    })
+
+    const epoch0 = currentSessionEpoch()
+    await bootstrapAuthSession({ fetchImpl: fetchMock as unknown as typeof fetch })
+    expect(activeWorkspaceId.value).toBe('ws-initial')
+    expect(currentSessionEpoch()).toBe(epoch0 + 1)
+
+    const dispose = installAuthLifecycleGuards(fetchMock as unknown as typeof fetch)
+    try {
+      // Server expires session while tab was hidden
+      sessionAlive = false
+      const epochBeforeVis = currentSessionEpoch()
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+      document.dispatchEvent(new Event('visibilitychange'))
+      await new Promise((r) => setTimeout(r, 0))
+
+      expect(authSession.value.kind).toBe('account_changed')
+      expect(currentSessionEpoch()).toBe(epochBeforeVis + 1)
+      expect(getActiveCsrfToken()).toBeNull()
+    } finally {
+      dispose()
+      wipeTransientSecrets()
+    }
+  })
+
   it('refreshes CSRF token via GET /auth/session + whoami and detects account drift', async () => {
     let csrfCounter = 1
     let accountId = 'acct-1'

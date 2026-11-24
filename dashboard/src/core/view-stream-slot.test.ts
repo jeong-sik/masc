@@ -6,6 +6,7 @@ import {
   setSingleUserToken,
 } from './auth'
 import {
+  extractObserverTopics,
   observerConnected,
   observerLastEventId,
   parseSseBlock,
@@ -15,6 +16,8 @@ import {
   subscribeObserverResync,
   viewProvenance,
 } from './observer'
+import { resourceCache } from './resource-cache'
+import { ok } from '../lib/result'
 import {
   CROSSHAIR_SYNC_KEY,
   getUPlotSync,
@@ -116,6 +119,24 @@ describe('core/view-stream-slot (2+1 SSE invariant)', () => {
     expect(aborted).toBe(true)
     expect(activeViewStreamKey.value).toBeNull()
   })
+
+  it('cleans up controller and slot state if connect throws synchronously', () => {
+    const captured: AbortSignal[] = []
+    expect(() =>
+      acquireViewStream('broken:stream', (sig) => {
+        captured.push(sig)
+        throw new Error('sync connect failure')
+      }),
+    ).toThrow('sync connect failure')
+
+    expect(captured[0]?.aborted).toBe(true)
+    expect(activeViewStreamKey.value).toBeNull()
+
+    // Slot remains healthy for subsequent views
+    const h = acquireViewStream('healthy:stream', () => {})
+    expect(activeViewStreamKey.value).toBe('healthy:stream')
+    h.release()
+  })
 })
 
 describe('core/observer & core/time-window', () => {
@@ -163,10 +184,30 @@ describe('core/observer & core/time-window', () => {
     expect(parsed?.id).toBe('99')
     expect(parsed?.event).toBe('board_changed')
 
+    // JSON-RPC framed notifications/board carrying params.type or params.event_type
+    const jsonRpcFrame = parseSseBlock(
+      'id: 100\nevent: message\ndata: {"jsonrpc":"2.0","method":"notifications/board","params":{"type":"board_changed","event_type":"post_created"}}\n',
+    )!
+    expect(extractObserverTopics(jsonRpcFrame)).toEqual(
+      expect.arrayContaining(['notifications/board', 'board_changed', 'post_created']),
+    )
+
+    // Verify JSON-RPC observer frame invalidates matching ResourceCache topics live
+    await resourceCache.fetch('board:feed', async () => ok({ posts: 1 }), {
+      ttlMs: 60_000,
+      topics: ['board_changed'],
+    })
+    const boardSig = resourceCache.observe<{ posts: number }>('board:feed')
+    expect(boardSig.value.kind === 'value' && boardSig.value.stale).toBe(false)
+
     const encoder = new TextEncoder()
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
-        controller.enqueue(encoder.encode('id: 10\nevent: heartbeat\ndata: {"ok":true}\n\n'))
+        controller.enqueue(
+          encoder.encode(
+            'id: 10\nevent: message\ndata: {"jsonrpc":"2.0","method":"notifications/board","params":{"type":"board_changed"}}\n\n',
+          ),
+        )
         controller.enqueue(encoder.encode('event: observer_resync_required\ndata: {"reason":"gap"}\n\n'))
         controller.close()
       },
@@ -202,6 +243,7 @@ describe('core/observer & core/time-window', () => {
     unsub()
 
     expect(observerLastEventId.value).toBe('10')
+    expect(boardSig.value.kind === 'value' && boardSig.value.stale).toBe(true)
     expect(viewProvenance.value).toBe('STREAM_GAP')
     expect(resyncReasons).toContain('observer_resync_required')
     expect(observerConnected.value).toBe(false)

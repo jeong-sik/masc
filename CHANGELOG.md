@@ -48,6 +48,7 @@
 - The Muse Code executable lookup reads `MUSE_INSTALL_DIR`, the variable the Muse installer writes to. Before, MASC searched `PATH` and `~/.local/bin` only, so a client installed elsewhere was not found when MASC ran with the variable set and the directory was not on `PATH`. The lookup serves the ACP client start, `masc runtime-client-path --client muse-code` and the setup login (#54629).
 - Show Keeper chat reasoning, tool activity, reply streaming, and waiting in a fixed row above the input. Keep tool results pending until the stream confirms them (#54632).
 - Clear the previous tool wait in Keeper Chat as soon as the next model response starts. (#54637)
+- Keep Keeper Chat activity tied to the current response when earlier frames are delayed or skipped. (#54641)
 
 ### Performance
 

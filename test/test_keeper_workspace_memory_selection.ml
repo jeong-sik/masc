@@ -365,15 +365,15 @@ let test_host_binds_mvcc_candidates_details_and_publication () =
      | Ok () -> ()
      | Error detail -> Alcotest.fail detail);
     let upsert ~scope ~keeper_id claim =
-      let fact_id = World_memory_types.fact_id_of_claim ~scope ~claim in
+      let fact_id = Masc.World_memory_types.fact_id_of_claim ~scope ~claim in
       match
-        World_memory_store.upsert_fact ~base_path ~now:100. ~actor:keeper_id
-          ~fact_id ~claim ~scope ~category:Keeper_memory_os_types.Fact ~facets:[]
+        Masc.World_memory_store.upsert_fact ~base_path ~now:100. ~actor:keeper_id
+          ~fact_id ~claim ~scope ~category:Masc.Keeper_memory_os_types.Fact ~facets:[]
           ~provenance:(Proposed_by { keeper_id; source_fact_ids = [] })
           ~lifecycle:Working
       with
       | Ok fact -> fact
-      | Error error -> Alcotest.fail (World_memory_store.error_to_string error)
+      | Error error -> Alcotest.fail (Masc.World_memory_store.error_to_string error)
     in
     let public = upsert ~scope:"workspace" ~keeper_id:"allowed" "Shared deployment rule" in
     ignore (upsert ~scope:"keeper:allowed" ~keeper_id:"allowed" "Private rule");

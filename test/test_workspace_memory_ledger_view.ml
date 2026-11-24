@@ -101,14 +101,14 @@ let test_curator_ledger_reads_its_own_generation_in_an_mvcc_workspace () =
     Ledger.save ~base_path current |> require;
     let claim = "Independent World Memory claim" in
     let scope = "workspace" in
-    let fact_id = World_memory_types.fact_id_of_claim ~scope ~claim in
+    let fact_id = Masc.World_memory_types.fact_id_of_claim ~scope ~claim in
     (match
-       World_memory_store.upsert_fact ~base_path ~now:100. ~actor:"writer"
-         ~fact_id ~claim ~scope ~category:Keeper_memory_os_types.Fact ~facets:[]
+       Masc.World_memory_store.upsert_fact ~base_path ~now:100. ~actor:"writer"
+         ~fact_id ~claim ~scope ~category:Masc.Keeper_memory_os_types.Fact ~facets:[]
          ~provenance:(Proposed_by { keeper_id = "writer"; source_fact_ids = [] })
          ~lifecycle:Working
      with
-     | Error error -> Alcotest.fail (World_memory_store.error_to_string error)
+     | Error error -> Alcotest.fail (Masc.World_memory_store.error_to_string error)
      | Ok _ -> ());
     let snapshot = View.resolve_snapshot ~base_path |> require in
     View.summary_in_snapshot snapshot |> require |> check_summary "resolved curator" current;

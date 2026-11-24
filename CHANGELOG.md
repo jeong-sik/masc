@@ -118,6 +118,10 @@
 - OCaml callers can read the idle stage and deadline through `adaptive_idle_stage` and `adaptive_idle_due_at ~base_interval_sec`. Handle `Queued_for_later` for Task verdict delivery and the `periodic_due` field on a deferred wake (#54587).
 - World Memory preserves each fact change's original text and revision, reports relation and digest events separately, and respects private scope in history (#54590).
 - The TUI lists live Board quarantines and reports recovery against the selected candidate and quarantine generation (#54592).
+- Show durable Keeper chat requests after reconnect and confirm delivery with exact operation evidence (#54583).
+- Keep the original input visible for dismissal when its Keeper confirms there is currently no status record. A later receipt for the same request can still settle it (#54583).
+- **TUI Work & Candle scroll**: the `End` key now reaches the last Board post row, because the scroll bound counts the Board quarantine recovery hint row that #54592 added to the top of the tab (#54598).
+- Interpret GLM numeric refusal codes at the GLM codec and preserve other HTTP and ACP refusal states (#54599).
 
 ### Internal
 

@@ -127,6 +127,38 @@ describe('core/transport', () => {
     expect(sessionFetches).toBe(2)
   })
 
+  it.each(['malformed response', 'network failure'])(
+    'returns the original CSRF rejection after a refresh %s',
+    async (failure) => {
+      let sessionFetches = 0
+      let postAttempts = 0
+      const fetchMock: typeof fetch = async (input) => {
+        const url = String(input)
+        if (url === '/health') return jsonResponse({ account_mode: 'Multi_account' })
+        if (url === '/auth/session') {
+          sessionFetches += 1
+          if (sessionFetches === 1) return jsonResponse({ user_id: 'acct-1', csrf_token: 'csrf-1' })
+          if (failure === 'network failure') throw new TypeError('Failed to fetch')
+          return new Response('{ invalid json')
+        }
+        if (url === '/api/v1/auth/whoami') {
+          return jsonResponse({ principal: { kind: 'human', id: 'acct-1' }, role: 'worker' })
+        }
+        if (url === '/api/v1/operator/action') {
+          postAttempts += 1
+          return jsonResponse({ error: { code: 'csrf_invalid', message: 'CSRF expired' } }, 403)
+        }
+        throw new Error(`unexpected url: ${url}`)
+      }
+
+      await bootstrapAuthSession({ fetchImpl: fetchMock })
+      const result = await apiMutate('POST', '/api/v1/operator/action', {}, { fetchImpl: fetchMock })
+      expect(result).toMatchObject({ ok: false, error: { kind: 'csrf_rejected', status: 403 } })
+      expect(sessionFetches).toBe(2)
+      expect(postAttempts).toBe(1)
+    },
+  )
+
   it('sends Authorization: Bearer in single_user mode when token is set', async () => {
     setSingleUserToken('single-val-1')
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {

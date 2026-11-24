@@ -180,6 +180,22 @@ describe('core/auth', () => {
     expect(isAuthenticated.value).toBe(false)
   })
 
+  it.each(['/auth/session', '/api/v1/auth/whoami'])(
+    'reports a malformed %s response without surfacing the JSON parser exception',
+    async (malformedPath) => {
+      const fetchMock: typeof fetch = async (input) => {
+        const url = String(input)
+        if (url === malformedPath) return new Response('{ invalid json')
+        if (url === '/health') return jsonResponse({ account_mode: 'Multi_account' })
+        if (url === '/auth/session') return jsonResponse({ user_id: 'acct-1', csrf_token: 'csrf-1' })
+        throw new Error(`unexpected url: ${url}`)
+      }
+      const session = await bootstrapAuthSession({ fetchImpl: fetchMock })
+      expect(session).toEqual({ kind: 'unavailable', reason: `GET ${malformedPath} returned malformed payload` })
+      expect(getActiveCsrfToken()).toBeNull()
+    },
+  )
+
   it('rejects non-human principals and detects mid-bootstrap session/whoami user_id mismatch', async () => {
     const servicePrincipalFetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)

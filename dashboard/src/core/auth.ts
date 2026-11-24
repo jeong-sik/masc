@@ -294,10 +294,10 @@ async function readMultiAccountSession(
   if (!res.ok) {
     return { kind: 'unavailable', reason: `GET /auth/session failed (${res.status})` }
   }
-  const sessionBody = (await res.json()) as AuthSessionWirePayload
-  const userId = nonEmptyString(sessionBody.user_id)
-  const csrfToken = nonEmptyString(sessionBody.csrf_token)
-  if (userId === null || csrfToken === null) {
+  const sessionBody = (await res.json().catch(() => null)) as AuthSessionWirePayload | null
+  const userId = nonEmptyString(sessionBody?.user_id)
+  const csrfToken = nonEmptyString(sessionBody?.csrf_token)
+  if (sessionBody === null || userId === null || csrfToken === null) {
     activeCsrfToken = null
     return { kind: 'unavailable', reason: 'GET /auth/session returned malformed payload' }
   }
@@ -338,7 +338,11 @@ async function readMultiAccountSession(
     activeCsrfToken = null
     return { kind: 'unavailable', reason: `GET /api/v1/auth/whoami failed (${whoRes.status})` }
   }
-  const whoBody = (await whoRes.json()) as AuthWhoamiWirePayload
+  const whoBody = (await whoRes.json().catch(() => null)) as AuthWhoamiWirePayload | null
+  if (whoBody === null) {
+    activeCsrfToken = null
+    return { kind: 'unavailable', reason: 'GET /api/v1/auth/whoami returned malformed payload' }
+  }
   const principalKind = whoBody.principal?.kind
   const principalId = nonEmptyString(whoBody.principal?.id)
   if (principalKind !== 'human' || principalId === null) {
@@ -502,7 +506,8 @@ export async function refreshMultiAccountCsrf(
 ): Promise<string | null> {
   const cur = authSession.peek()
   if (cur.kind !== 'multi_account_signed_in') return null
-  const next = await readMultiAccountSession(fetchImpl, cur.authMethods, cur.accountId)
+  const next = await readMultiAccountSession(fetchImpl, cur.authMethods, cur.accountId).catch(() => null)
+  if (next === null) return null
   if (next.kind === 'account_changed') {
     bumpSessionEpoch()
     authSession.value = next

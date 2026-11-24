@@ -1395,9 +1395,13 @@ let selected_addon_instance t =
 
 let selected_live_dos_screen t =
   match selected_addon_instance t with
-  | Some { addon_id = "dos-machine"; runtime_presence = Addon_live;
-           phase = (Addon_attached | Addon_observing); _ } -> true
-  | Some _ | None -> false
+  | None -> false
+  | Some inst ->
+      String.equal inst.addon_id "dos-machine"
+      && (match inst.runtime_presence, inst.phase with
+          | Addon_live, (Addon_attached | Addon_observing) -> true
+          | Addon_live, (Addon_detaching | Addon_detached | Addon_failed | Addon_phase_other _)
+          | Addon_retained, _ -> false)
 
 let filtered_browser_clients t =
   let items =

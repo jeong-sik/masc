@@ -5505,6 +5505,7 @@ let enter_hint_name = function
   | Update_nav.Enter_hint_dive -> "dive"
   | Update_nav.Enter_hint_edit_field -> "edit field"
   | Update_nav.Enter_hint_confirm_field -> "confirm field"
+  | Update_nav.Enter_hint_dos_screen -> "DOS screen"
 
 let test_enter_hint_follows_enter_plan () =
   let m_base = populated_model ~cols:140 ~rows:40 ~lang:Say.Lang_en () in

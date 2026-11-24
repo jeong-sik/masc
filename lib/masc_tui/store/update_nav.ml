@@ -2706,6 +2706,7 @@ type enter_plan =
   | Enter_expand_company of string
   | Enter_keeper_action of Cmd.t list
   | Enter_dispatch of Cmd.t list
+  | Enter_open_dos_screen
   | Enter_push of Nav.dive
   | Enter_attention of Attention.entry
   | Enter_toggle_unreported_accounts
@@ -2834,6 +2835,7 @@ let keeper_enter_action ~name ~tab (m : Model.t) =
   | Enter_noop
   | Enter_expand_company _
   | Enter_dispatch _
+  | Enter_open_dos_screen
   | Enter_push _
   | Enter_attention _
   | Enter_toggle_unreported_accounts
@@ -3142,7 +3144,7 @@ let enter_plan (m : Model.t) : enter_plan =
               | Some (Wire_runtime.Catalog_issue _) | None -> Enter_noop)
           | Nav.Runtime_addons_browser
             when m.nav.pane_index = 0 && Runtime_store.selected_live_dos_screen m.runtime ->
-              Enter_dispatch [ Cmd.Open_dos_screen { epoch = m.epoch } ]
+              Enter_open_dos_screen
           | Nav.Runtime_connectors | Nav.Runtime_addons_browser -> Enter_noop)
       | Nav.Infra -> (
           match m.infra.active_tab with
@@ -3213,6 +3215,7 @@ let dive_selected (m : Model.t) =
         }
       , [] )
   | Enter_keeper_action cmds | Enter_dispatch cmds -> (m, cmds)
+  | Enter_open_dos_screen -> (m, [ Cmd.Open_dos_screen { epoch = m.epoch } ])
   | Enter_push dive -> push_dive m dive
   | Enter_attention entry -> dive_attention_entry m entry
   | Enter_toggle_unreported_accounts ->
@@ -3301,6 +3304,7 @@ let dive_selected (m : Model.t) =
 
 type enter_hint =
   | Enter_hint_hidden
+  | Enter_hint_dos_screen
   | Enter_hint_dive
   | Enter_hint_edit_field
   | Enter_hint_confirm_field
@@ -3317,6 +3321,7 @@ let enter_hint (m : Model.t) =
   else
     match enter_plan m with
     | Enter_noop -> Enter_hint_hidden
+    | Enter_open_dos_screen -> Enter_hint_dos_screen
     | Enter_expand_company _
     | Enter_keeper_action _ | Enter_dispatch _
     | Enter_push _ | Enter_attention _ | Enter_toggle_unreported_accounts

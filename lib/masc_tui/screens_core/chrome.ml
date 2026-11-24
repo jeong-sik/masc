@@ -1689,6 +1689,8 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
               match enter_hint with
               | Update_nav.Enter_hint_hidden -> None
               | Update_nav.Enter_hint_dive -> Some h
+              | Update_nav.Enter_hint_dos_screen ->
+                  Some (relabel h ~ko:"DOS 화면" ~en:"DOS screen")
               | Update_nav.Enter_hint_edit_field ->
                   Some (relabel h ~ko:"편집" ~en:"Edit")
               | Update_nav.Enter_hint_confirm_field ->

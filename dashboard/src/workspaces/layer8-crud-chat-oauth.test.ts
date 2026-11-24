@@ -828,6 +828,71 @@ candidates = ["safe.model"]
     expect(settled).not.toHaveBeenCalled()
   })
 
+  it('keeps a newer login running when an older attempt finishes cancelling', async () => {
+    let finishCancellation!: () => void
+    const pendingCancellation = new Promise<void>((resolve) => { finishCancellation = resolve })
+    const cancels = vi.fn()
+    const streams: AbortSignal[] = []
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/api/v1/dashboard/provider-usage') return jsonResponse({ scopes: [] })
+      if (url.startsWith('/api/v1/dashboard/provider-usage-history')) {
+        return jsonResponse({ state: 'unavailable', reason: 'none' })
+      }
+      if (url === '/api/v1/runtime/resolved') {
+        return jsonResponse({ default_route: 'default', runtimes: [], lanes: [], assignments: [] })
+      }
+      if (url === '/api/v1/setup/inventory') {
+        return jsonResponse({
+          integrations: [{
+            id: 'codex_subscription', display_name: 'Codex', enabled: true, credential_kind: 'login',
+          }],
+        })
+      }
+      if (url === '/api/v1/setup/accounts/login?auth_hints=1') {
+        const signal = init!.signal!
+        streams.push(signal)
+        const receipt = {
+          login_id: `login-${streams.length}`,
+          integration_id: 'codex_subscription',
+          status: 'running',
+        }
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(`event: started\ndata: ${JSON.stringify(receipt)}\n\n`))
+            signal.addEventListener('abort', () => controller.close(), { once: true })
+          },
+        })
+        return new Response(stream, { headers: { 'Content-Type': 'text/event-stream' } })
+      }
+      if (url === '/api/v1/setup/accounts/login/login-1/cancel') {
+        cancels()
+        await pendingCancellation
+        return jsonResponse({ accepted: true }, 202)
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(
+      html`<${RuntimeWorkspace} subroute="quotas" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+      container,
+    )
+    const button = (label: string) =>
+      [...container.querySelectorAll('button')].find((node) => node.textContent?.trim() === label)
+    const panel = () => container.querySelector('[data-testid="setup-login-panel"]')?.textContent
+    await vi.waitFor(() => expect(button('CLI OAuth')).toBeDefined())
+    button('CLI OAuth')!.click()
+    await vi.waitFor(() => expect(panel()).toContain('login-1'))
+    button('로그인 취소')!.click()
+    await vi.waitFor(() => expect(cancels).toHaveBeenCalledOnce())
+    button('CLI OAuth')!.click()
+    await vi.waitFor(() => expect(panel()).toContain('login-2'))
+    finishCancellation()
+    await flushUi()
+    expect(streams[1]?.aborted).toBe(false)
+    expect(panel()).toContain('running')
+  })
+
   it('(C-2 & C-3) Keeper OAuth loads keepers via /gate/keepers & shell groups fallback, strict postMessage, GitHub complete+attach, Config callback URL, and Account return_to', async () => {
     const popupMock = { closed: false, close: vi.fn(), location: { href: '' } }
     vi.spyOn(window, 'open').mockImplementation(() => popupMock as unknown as Window)

@@ -473,10 +473,12 @@ export function QuotasTab(props: WorkspaceViewProps) {
   }
 
   const handleCancelSetupLogin = async () => {
+    const owner = loginAbortRef.current
     if (loginReceipt?.loginId) {
       await cancelSetupLogin(loginReceipt.loginId)
     }
-    loginAbortRef.current?.abort('cancelled')
+    if (loginAbortRef.current !== owner) return
+    owner?.abort('cancelled')
     setLoginReceipt((cur) => (cur ? { ...cur, status: 'cancelled', streaming: false, inputReady: false } : cur))
   }
 

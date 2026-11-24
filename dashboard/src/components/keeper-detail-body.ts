@@ -39,6 +39,7 @@ import { SupervisorDiagnosticsPanel } from './keeper-supervisor-diagnostics'
 import { KeeperRuntimeModelEditor } from './keeper-runtime-model-editor'
 import { KeeperConditionsDivergent } from './keeper-conditions-divergent'
 import { KeeperActivitySummary } from './keeper-detail-activity-summary'
+import { KeeperCadence } from './keeper-detail-cadence'
 import { FsmHub } from './fsm-hub'
 import { currentDashboardActor } from '../api'
 import type { Keeper } from '../types'
@@ -161,6 +162,7 @@ export function KeeperDetailBody({
       <${KeeperMetricsPanel} key=${keeper.name} keeper=${keeper} />
 
       <${KeeperActivitySummary} keeper=${keeper} />
+      <${KeeperCadence} keeper=${keeper} />
         <//>
 
         <${KeeperDetailSection}

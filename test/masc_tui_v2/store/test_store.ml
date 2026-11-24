@@ -20224,7 +20224,8 @@ let () =
                 (Model.unescape_inline_text (Model.escape_inline_text tricky));
               (* P1-1 & P1-2: Real Msg.Key_event tests for [n]/[a]/[x]/[R] hotkeys *)
               let press ch m_in =
-                Update.step ~now:t0 m_in (Msg.Key_event (char_key ch))
+                let m_next, cmds = Update.step ~now:t0 m_in (Msg.Key_event (char_key ch)) in
+                (m_next, Cmd.flatten cmds)
               in
               let m_skills_view =
                 let nav =

@@ -109,9 +109,13 @@ def run(binary: Path, server_binary: Path, stamp: str | None,
                     if result.returncode != 0 or b"build-commit" not in result.stdout or result.stderr:
                         raise AssertionError(f"CLI help failed: {result!r}")
                 else:
-                    expected_stdout = (expected_version + "\n").encode() if flag == "--version" else (
-                        (stamp + "\n").encode() if stamp is not None else b""
-                    )
+                    if flag == "--version":
+                        if kind == "tui" and stamp is not None and stamp.strip():
+                            expected_stdout = f"{expected_version} ({stamp.strip()[:8]})\n".encode()
+                        else:
+                            expected_stdout = (expected_version + "\n").encode()
+                    else:
+                        expected_stdout = (stamp + "\n").encode() if stamp is not None else b""
                     expected_code = 1 if flag == "--build-commit" and stamp is None else 0
                     expected_stderr = (
                         b"build commit is not embedded\n" if expected_code == 1 else b""

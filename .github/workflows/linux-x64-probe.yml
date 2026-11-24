@@ -386,9 +386,11 @@ jobs:
           "$PROBE_STAGE/masc-tui" --build-commit | tee "$PROBE_OUT/tui-build-commit.txt"
           test "$(cat "$PROBE_OUT/tui-build-commit.txt")" = "$SOURCE_SHA"
           test -s "$PROBE_OUT/tui-version.txt"
-          # Both companions use the same linked dune-build-info version.
+          # Both companions use the same linked dune-build-info version; masc-tui
+          # also appends the embedded 8-char commit SHA.
           "$PROBE_STAGE/masc" --version > "$PROBE_OUT/server-version.txt"
-          cmp "$PROBE_OUT/tui-version.txt" "$PROBE_OUT/server-version.txt"
+          test -s "$PROBE_OUT/server-version.txt"
+          test "$(cat "$PROBE_OUT/tui-version.txt")" = "$(cat "$PROBE_OUT/server-version.txt") (${SOURCE_SHA:0:8})"
           test "$("$PROBE_STAGE/masc" build-commit)" = "$SOURCE_SHA"
           "$PROBE_STAGE/masc-exec-ssh-bootstrap" --help > "$PROBE_OUT/ssh-bootstrap-help.txt"
           grep -q -- '--endpoint' "$PROBE_OUT/ssh-bootstrap-help.txt"

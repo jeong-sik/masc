@@ -1782,6 +1782,22 @@ let render_settings_inspector_pane grid ~(rect : Rect.t) ~(theme : Theme.t)
         ~rect:dry_r ~theme ~lang ~pad_x
         ~dry_run_preview:model.config.dry_run_preview
 
+let format_build_summary (model : Model.t) =
+  let tui_lbl = Model.tui_build_label model in
+  let server_lbl = Model.server_build_label model in
+  let sep = " " ^ Glyph.to_utf8 Glyph.Separator_dot ^ " " in
+  match (String.equal tui_lbl "", server_lbl) with
+  | true, None -> None
+  | false, None -> Some ("TUI " ^ tui_lbl)
+  | true, Some srv -> Some ("Server " ^ srv)
+  | false, Some srv ->
+      let mark =
+        if Model.build_commit_mismatch model then
+          " " ^ Glyph.to_utf8 Glyph.Warning_triangle
+        else ""
+      in
+      Some (Printf.sprintf "TUI %s%sServer %s%s" tui_lbl sep srv mark)
+
 let render_settings grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     ~(model : Model.t) ~active_tab:_ =
   (* Full overlay rect so underlying workspace chrome never bleeds at col 0 / right wall *)
@@ -1790,9 +1806,23 @@ let render_settings grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
   else
     let lang = model.lang in
     let dirty_n = Config_store.dirty_count model.config in
+    let tui_lbl = Model.tui_build_label model in
+    let server_lbl = Model.server_build_label model in
+    let show_server_in_subtitle = modal_r.w >= 132 && dirty_n = 0 in
+    let subtitle =
+      if show_server_in_subtitle then format_build_summary model
+      else if not (String.equal tui_lbl "") then Some ("TUI " ^ tui_lbl)
+      else
+        match server_lbl with
+        | Some srv -> Some ("Server " ^ srv)
+        | None -> None
+    in
     let title =
-      Say.resolve lang
-        (Say.make ~ko:"설정 · Configuration" ~en:"Settings · Configuration")
+      if modal_r.w < 110 && Option.is_some subtitle then
+        Say.resolve lang (Say.make ~ko:"설정" ~en:"Settings")
+      else
+        Say.resolve lang
+          (Say.make ~ko:"설정 · Configuration" ~en:"Settings · Configuration")
     in
     let badge =
       if dirty_n > 0 then
@@ -1832,6 +1862,7 @@ let render_settings grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       Card.draw ~cache grid ~rect:modal_r ~theme
         {
           (Card.default_spec ~title) with
+          subtitle;
           badge;
           hotkey = Some hotkey;
           footer_hint = Some footer_hint;
@@ -1933,16 +1964,44 @@ let render_settings grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         else ""
       in
       let rd_w = Grapheme.display_width right_dirty_txt in
-      let search_max_w =
-        Int.max 0 (right_edge - rd_w - (if rd_w > 0 then 2 else 0) - !tx)
+      let show_dirty = rd_w > 0 && right_edge - rd_w > !tx + 4 in
+      let dirty_x = right_edge - rd_w in
+      let server_row_txt, server_row_st =
+        if not show_server_in_subtitle then
+          match server_lbl with
+          | Some srv ->
+              let mismatch = Model.build_commit_mismatch model in
+              let txt =
+                if mismatch then
+                  Printf.sprintf "Server %s %s" srv
+                    (Glyph.to_utf8 Glyph.Warning_triangle)
+                else "Server " ^ srv
+              in
+              (txt, if mismatch then attn_st else whisper_st)
+          | None -> ("", whisper_st)
+        else ("", whisper_st)
       in
+      let srv_w = Grapheme.display_width server_row_txt in
+      let server_right_edge = if show_dirty then dirty_x - 2 else right_edge in
+      let server_x = server_right_edge - srv_w in
+      let show_server_row = srv_w > 0 && server_x >= !tx + 14 in
+      let reserved_left_edge =
+        if show_server_row then server_x - 2
+        else if show_dirty then dirty_x - 2
+        else right_edge
+      in
+      let search_max_w = Int.max 0 (reserved_left_edge - !tx) in
       if search_max_w > 6 then
         ignore
           (Cell_grid.put_text ~clip:top_r grid ~x:!tx ~y:inner.y ~style:search_st
              (Grapheme.truncate_to_width ~max_width:search_max_w search_txt));
-      if rd_w > 0 && right_edge - rd_w > !tx + 4 then
+      if show_server_row then
         ignore
-          (Cell_grid.put_text ~clip:top_r grid ~x:(right_edge - rd_w) ~y:inner.y
+          (Cell_grid.put_text ~clip:top_r grid ~x:server_x ~y:inner.y
+             ~style:server_row_st server_row_txt);
+      if show_dirty then
+        ignore
+          (Cell_grid.put_text ~clip:top_r grid ~x:dirty_x ~y:inner.y
              ~style:attn_st right_dirty_txt);
       (* Row 1: Subtle border_subtle horizontal hairline *)
       if inner.h >= 2 then
@@ -3433,8 +3492,80 @@ let render_help_overlay grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         }
     in
     let pad_x = if inner.w >= 72 then 2 else 1 in
-    let content = Card.pad_inner ~pad_x inner in
-    if not (Rect.is_empty content) then begin
+    let content0 = Card.pad_inner ~pad_x inner in
+    if not (Rect.is_empty content0) then begin
+      let tui_lbl = Model.tui_build_label model in
+      let server_lbl = Model.server_build_label model in
+      let has_build_bar =
+        ((not (String.equal tui_lbl "")) || Option.is_some server_lbl)
+        && content0.h >= 4
+      in
+      let content =
+        if not has_build_bar then content0
+        else begin
+          let bg = Color.of_rgb theme.surface_2 in
+          let bar_r =
+            Rect.make ~x:content0.x ~y:content0.y ~w:content0.w ~h:1
+          in
+          let right_edge = Rect.right bar_r in
+          let struct_st = Typography.structure ~bg theme in
+          let primary_st = Typography.primary ~bg theme in
+          let whisper_st = Typography.whisper ~bg theme in
+          let mismatch = Model.build_commit_mismatch model in
+          let attn_st =
+            Typography.status ~bg ~bold:true theme Theme.Status_attention
+          in
+          let cx = ref bar_r.x in
+          let put_seg st txt =
+            let rem = right_edge - !cx in
+            if rem > 0 then begin
+              let fitted = Grapheme.truncate_to_width ~max_width:rem txt in
+              let adv =
+                Cell_grid.put_text ~clip:bar_r grid ~x:!cx ~y:bar_r.y ~style:st
+                  fitted
+              in
+              cx := !cx + adv
+            end
+          in
+          if not (String.equal tui_lbl "") then begin
+            put_seg struct_st "TUI ";
+            put_seg primary_st tui_lbl
+          end;
+          (match server_lbl with
+           | None -> ()
+           | Some srv ->
+               if not (String.equal tui_lbl "") then
+                 put_seg whisper_st
+                   (" " ^ Glyph.to_utf8 Glyph.Separator_dot ^ " ");
+               put_seg struct_st "Server ";
+               put_seg (if mismatch then attn_st else primary_st) srv);
+          if mismatch then begin
+            let full_tag =
+              Printf.sprintf "%s %s"
+                (Glyph.to_utf8 Glyph.Warning_triangle)
+                (Say.resolve lang
+                   (Say.make ~ko:"커밋 불일치" ~en:"commit mismatch"))
+            in
+            let full_w = Grapheme.display_width full_tag in
+            if !cx + 2 + full_w <= right_edge then
+              ignore
+                (Cell_grid.put_text ~clip:bar_r grid ~x:(right_edge - full_w)
+                   ~y:bar_r.y ~style:attn_st full_tag)
+            else if !cx + 2 <= right_edge then
+              put_seg attn_st (" " ^ Glyph.to_utf8 Glyph.Warning_triangle)
+          end;
+          let header_h =
+            if content0.h >= 6 then begin
+              Card.draw_hairline ~pad_x ~bg grid ~rect:inner
+                ~y:(content0.y + 1) ~theme;
+              2
+            end
+            else 1
+          in
+          Rect.make ~x:content0.x ~y:(content0.y + header_h) ~w:content0.w
+            ~h:(Int.max 0 (content0.h - header_h))
+        end
+      in
       let scroll = model.nav.help_scroll_offset in
       let groups =
         Keymap.help_entries ~scope_chain:Keymap.all_scopes ~lang

@@ -25,13 +25,38 @@ let empty_env _ = None
 
 let test_cli_info_flags () =
   (match
-     Cli_args.parse ~version:"1.2.3" ~build_commit:(Some "deadbeef")
+     Cli_args.parse ~version:"1.2.3" ~build_commit:(Some "deadbeef1234")
        ~env:empty_env ~cwd:"/tmp/ws" [ "--version" ]
    with
   | Cli_args.Info (Cli_args.Print_version v) ->
-      Alcotest.(check string) "version" "1.2.3" v
+      Alcotest.(check string) "version with embedded commit"
+        "1.2.3 (deadbeef)" v
   | Cli_args.Run _ | Cli_args.Info _ | Cli_args.Parse_error _ ->
       Alcotest.fail "expected Print_version");
+  (match
+     Cli_args.parse ~version:"1.2.3" ~build_commit:(Some "abc")
+       ~env:empty_env ~cwd:"/tmp/ws" [ "--version" ]
+   with
+  | Cli_args.Info (Cli_args.Print_version v) ->
+      Alcotest.(check string) "version with short commit" "1.2.3 (abc)" v
+  | Cli_args.Run _ | Cli_args.Info _ | Cli_args.Parse_error _ ->
+      Alcotest.fail "expected Print_version for short commit");
+  (match
+     Cli_args.parse ~version:"1.2.3" ~build_commit:None ~env:empty_env
+       ~cwd:"/tmp/ws" [ "--version" ]
+   with
+  | Cli_args.Info (Cli_args.Print_version v) ->
+      Alcotest.(check string) "bare version without commit" "1.2.3" v
+  | Cli_args.Run _ | Cli_args.Info _ | Cli_args.Parse_error _ ->
+      Alcotest.fail "expected bare Print_version when build_commit = None");
+  (match
+     Cli_args.parse ~version:"1.2.3" ~build_commit:(Some "   ") ~env:empty_env
+       ~cwd:"/tmp/ws" [ "--version" ]
+   with
+  | Cli_args.Info (Cli_args.Print_version v) ->
+      Alcotest.(check string) "bare version on blank commit" "1.2.3" v
+  | Cli_args.Run _ | Cli_args.Info _ | Cli_args.Parse_error _ ->
+      Alcotest.fail "expected bare Print_version when build_commit is blank");
   (match
      Cli_args.parse ~version:"1.2.3"
        ~build_commit:(Some "0123456789abcdef0123456789abcdef01234567")

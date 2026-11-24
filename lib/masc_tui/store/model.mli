@@ -135,6 +135,8 @@ type t = {
   lang : Say.lang;
   theme_preset : Theme.preset;
   tz_offset_sec : int;
+  tui_version : string;
+  tui_commit : string option;
   nav : nav_state;
   freshness : freshness_state;
   server_identity : server_identity;
@@ -228,6 +230,8 @@ val initial :
   ?theme_preset:Theme.preset ->
   ?tz_offset_sec:int ->
   ?wall_unix:float ->
+  ?tui_version:string ->
+  ?tui_commit:string option ->
   unit ->
   t
 
@@ -326,3 +330,20 @@ val sync_effective_scorecard : now:Clock.Mono.t -> t -> t
 val active_view_ssot_mode : t -> view_ssot_mode
 (** Honest per-view SSOT telemetry provenance derived purely from [(m.nav,
     m.freshness)] and the active surface's primary {!Observed.t} timestamp. *)
+
+val tui_build_label : t -> string
+(** Concise TUI executable build label derived from [m.tui_version] and the
+    first 8 chars of [m.tui_commit] (e.g. ["v0.81.0 (2a58dc57)"], ["v0.81.0"]
+    when commit is absent/blank, or [""] when both are absent). Safe on short
+    commit strings. *)
+
+val server_build_label : t -> string option
+(** Concise connected server build label derived from
+    [m.server_identity.observer_version] and [observer_commit] (falling back to
+    [server_identity.health] before the observer handshake completes), e.g.
+    [Some "v0.81.0 (4a271ac5)"], or [None] when neither version nor commit has
+    been observed. *)
+
+val build_commit_mismatch : t -> bool
+(** [true] iff both the TUI's embedded commit and the server's reported commit
+    are non-empty and disagree. *)

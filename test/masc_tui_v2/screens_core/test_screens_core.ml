@@ -3052,6 +3052,168 @@ let test_feature_wave1_honest_ssot_chrome_transitions () =
     (grid_row_text g_repos 0);
   assert_not_contains ~label:"Infra > Repos never claims LIVE SSE" ~needle:"LIVE SSE"
     (grid_row_text g_repos 0)
+
+let test_build_commit_display_in_help_and_settings () =
+  (* 1. Pure Model build-label & mismatch helpers *)
+  let m_bare = Model.initial ~tui_version:"0.81.0" ~tui_commit:None () in
+  Alcotest.(check string) "tui_build_label without commit" "v0.81.0"
+    (Model.tui_build_label m_bare);
+  Alcotest.(check (option string)) "server_build_label when unknown" None
+    (Model.server_build_label m_bare);
+  Alcotest.(check bool) "no mismatch when commits missing" false
+    (Model.build_commit_mismatch m_bare);
+  let m_short = Model.initial ~tui_version:"0.81.0" ~tui_commit:(Some "abc") () in
+  Alcotest.(check string) "tui_build_label safe on short commit" "v0.81.0 (abc)"
+    (Model.tui_build_label m_short);
+  let m_full =
+    let m0 =
+      Model.initial ~tui_version:"0.81.0"
+        ~tui_commit:(Some "2a58dc5799999999999999999999999999999999") ()
+    in
+    {
+      m0 with
+      server_identity =
+        {
+          m0.server_identity with
+          observer_version = Some "0.81.0";
+          observer_commit = Some "4a271ac588888888888888888888888888888888";
+        };
+    }
+  in
+  Alcotest.(check string) "tui_build_label 8-char short SHA"
+    "v0.81.0 (2a58dc57)" (Model.tui_build_label m_full);
+  Alcotest.(check (option string)) "server_build_label 8-char short SHA"
+    (Some "v0.81.0 (4a271ac5)") (Model.server_build_label m_full);
+  Alcotest.(check bool) "mismatch detected when commits differ" true
+    (Model.build_commit_mismatch m_full);
+  let m_same =
+    {
+      m_full with
+      server_identity =
+        {
+          m_full.server_identity with
+          observer_commit = Some "2a58dc5799999999999999999999999999999999";
+        };
+    }
+  in
+  Alcotest.(check bool) "no mismatch when commits equal" false
+    (Model.build_commit_mismatch m_same);
+
+  (* 2. ? Help and , Settings render TUI + Server build commit hashes cleanly
+        at normal (140x40), compact (90x28), and narrow (60x18) viewports. *)
+  let with_builds ~server_commit (m : Model.t) =
+    {
+      m with
+      tui_version = "0.81.0";
+      tui_commit = Some "2a58dc5799999999999999999999999999999999";
+      server_identity =
+        {
+          m.server_identity with
+          observer_version = Some "0.81.0";
+          observer_commit = Some server_commit;
+        };
+    }
+  in
+  List.iter
+    (fun lang ->
+      List.iter
+        (fun (cols, rows) ->
+          let base_mismatch =
+            populated_model ~cols ~rows ~lang
+            |> with_builds
+                 ~server_commit:"4a271ac588888888888888888888888888888888"
+          in
+          let base_match =
+            populated_model ~cols ~rows ~lang
+            |> with_builds
+                 ~server_commit:"2a58dc5799999999999999999999999999999999"
+          in
+          (* ? Help with mismatched commits *)
+          let m_help =
+            {
+              base_mismatch with
+              nav = { base_mismatch.nav with overlay = Some Nav.Help };
+            }
+          in
+          let g_help, _ = render_full ~model:m_help ~cols ~rows in
+          let lbl_h = Printf.sprintf "help_build_mismatch_%dx%d" cols rows in
+          assert_clean_grid ~label:lbl_h g_help;
+          let txt_h = grid_all_text g_help in
+          assert_contains ~label:lbl_h ~needle:"TUI v0.81.0 (2a58dc57)" txt_h;
+          assert_contains ~label:lbl_h ~needle:"Server v0.81.0 (4a271ac5)" txt_h;
+          assert_contains ~label:lbl_h
+            ~needle:(Glyph.to_utf8 Glyph.Warning_triangle) txt_h;
+          (* ? Help with matching commits omits mismatch warning *)
+          let m_help_ok =
+            {
+              base_match with
+              nav = { base_match.nav with overlay = Some Nav.Help };
+            }
+          in
+          let g_help_ok, _ = render_full ~model:m_help_ok ~cols ~rows in
+          let lbl_hok = Printf.sprintf "help_build_match_%dx%d" cols rows in
+          assert_clean_grid ~label:lbl_hok g_help_ok;
+          let txt_hok = grid_all_text g_help_ok in
+          assert_contains ~label:lbl_hok ~needle:"TUI v0.81.0 (2a58dc57)"
+            txt_hok;
+          assert_contains ~label:lbl_hok ~needle:"Server v0.81.0 (2a58dc57)"
+            txt_hok;
+          assert_not_contains ~label:lbl_hok ~needle:"commit mismatch" txt_hok;
+          assert_not_contains ~label:lbl_hok ~needle:"커밋 불일치" txt_hok;
+          (* , Settings (clean and dirty) renders TUI + Server build hashes at
+             wide/compact and clips gracefully at narrow 60x18 without losing
+             [Esc] or breaking layout. *)
+          let m_set_clean =
+            {
+              base_mismatch with
+              nav =
+                {
+                  base_mismatch.nav with
+                  overlay = Some (Nav.Settings Nav.Settings_general_ui);
+                };
+              config =
+                {
+                  base_mismatch.config with
+                  dirty_fields = Config_store.String_map.empty;
+                };
+            }
+          in
+          let g_set_clean, _ = render_full ~model:m_set_clean ~cols ~rows in
+          let lbl_sc = Printf.sprintf "settings_build_clean_%dx%d" cols rows in
+          assert_clean_grid ~label:lbl_sc g_set_clean;
+          let txt_sc = grid_all_text g_set_clean in
+          if cols >= 90 then begin
+            assert_contains ~label:lbl_sc ~needle:"TUI v0.81.0 (2a58dc57)"
+              txt_sc;
+            assert_contains ~label:lbl_sc ~needle:"Server v0.81.0 (4a271ac5)"
+              txt_sc
+          end
+          else
+            (* Narrow 60x18 clips subtitle gracefully while keeping Esc close intact *)
+            assert_contains ~label:lbl_sc ~needle:"[Esc]" txt_sc;
+          let m_set_dirty =
+            {
+              base_mismatch with
+              nav =
+                {
+                  base_mismatch.nav with
+                  overlay = Some (Nav.Settings Nav.Settings_general_ui);
+                };
+            }
+          in
+          let g_set_dirty, _ = render_full ~model:m_set_dirty ~cols ~rows in
+          let lbl_sd = Printf.sprintf "settings_build_dirty_%dx%d" cols rows in
+          assert_clean_grid ~label:lbl_sd g_set_dirty;
+          if cols >= 140 then begin
+            let txt_sd = grid_all_text g_set_dirty in
+            assert_contains ~label:lbl_sd ~needle:"TUI v0.81.0 (2a58dc57)"
+              txt_sd;
+            assert_contains ~label:lbl_sd ~needle:"Server v0.81.0 (4a271ac5)"
+              txt_sd
+          end)
+        [ (140, 40); (90, 28); (60, 18) ])
+    [ Say.Lang_ko; Say.Lang_en ]
+
 let () =
   Alcotest.run "masc_tui_screens_core"
     [
@@ -3109,6 +3271,8 @@ let () =
             `Quick test_p0_toast_above_active_overlay_and_settings_tab_focus;
           Alcotest.test_case "Setup API key inline modal masks secret field on screen"
             `Quick test_setup_key_inline_modal_masks_secret;
+          Alcotest.test_case "Help & Settings render TUI and Server build commit hashes"
+            `Quick test_build_commit_display_in_help_and_settings;
         ] );
       ( "memory_explorer",
         [

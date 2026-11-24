@@ -3052,10 +3052,19 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
     in
     let footer_hint =
       if embedded then
-        Some
-          (Ops_common.say model
-             ~ko:"[Enter] Dive · [c] 바로 채팅 · [V] 음성 PTT"
-             ~en:"[Enter] Dive · [c] Quick Chat · [V] Voice PTT")
+        if
+          Nav.equal_keeper_tab tab Nav.Keeper_memory
+          && model.nav.pane_index = 1
+        then
+          Some
+            (Ops_common.say model
+               ~ko:"[Enter] 전문 읽기 · [z] 확대 · [Tab] 목록"
+               ~en:"[Enter] Read · [z] Zoom · [Tab] Fleet")
+        else
+          Some
+            (Ops_common.say model
+               ~ko:"[Enter] Dive · [c] 바로 채팅 · [V] 음성 PTT"
+               ~en:"[Enter] Dive · [c] Quick Chat · [V] Voice PTT")
       else None
     in
     let card_spec : Card.spec =

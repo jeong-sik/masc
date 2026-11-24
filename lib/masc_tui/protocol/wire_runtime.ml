@@ -140,6 +140,16 @@ let classify_utilization = function
       Format_val.Subscription_zero
   | Util_credit_retracted -> Format_val.Unreported
 
+let has_active_subscription_window windows =
+  List.exists
+    (fun (w : usage_window) ->
+      match w.utilization with
+      | Util_credit_unlimited -> true
+      | Util_fraction f -> f < 1.0
+      | Util_percent p -> p < 100
+      | Util_credit_balance _ | Util_usd _ | Util_credit_retracted -> false)
+    windows
+
 let classify_account_cost_state = function
   | Account_not_reported_since_start | Account_reported_no_windows _ ->
       Format_val.Unreported
@@ -157,7 +167,15 @@ let classify_account_cost_state = function
           windows
       in
       match credit_opt with
-      | Some c -> c
+      | Some Format_val.Exhausted_zero ->
+          if has_active_subscription_window windows then
+            (* A subscription account with an active quota window (e.g. Ollama
+               Cloud weekly 7% used) plus $0 extra purchased credit is still a
+               live subscription, NOT exhausted. *)
+            Format_val.Subscription_zero
+          else Format_val.Exhausted_zero
+      | Some ((Format_val.Amount _ | Format_val.Subscription_zero | Format_val.Unreported) as c) ->
+          c
       | None -> (
           let has_sub =
             List.exists

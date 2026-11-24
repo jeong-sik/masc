@@ -3251,11 +3251,11 @@ let compact_help_group ~lang (grp : Keymap.help_group) : Keymap.help_group =
               Some
                 {
                   e with
-                  keys = [ "1..4" ];
+                  keys = [ "a..d" ];
                   desc =
                     Say.resolve lang
-                      (Say.make ~ko:"Ask 다중 선택지 응답"
-                         ~en:"Answer Ask choice (1..4)");
+                      (Say.make ~ko:"Ask 다중 선택지 응답 (a..d)"
+                         ~en:"Answer Ask choice (a..d)");
                   slash_twin = None;
                 }
             end

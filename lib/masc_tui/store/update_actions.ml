@@ -1278,6 +1278,14 @@ and execute_action ~now (m : Model.t) action =
           else if Drafts.is_focused m.drafts then
             match Update_nav.resolve_composer_popup m with
             | Update_nav.Composer_popup_slash _
+              when String.equal (String.trim (Drafts.current_draft m.drafts).text) "/" ->
+                (* Single Esc escapes a bare '/' slash-command peek cleanly:
+                   clears the lone '/' and returns focus to workspace nav. *)
+                let drafts =
+                  m.drafts |> Drafts.clear_current_draft |> Drafts.set_focus false
+                in
+                ({ m with drafts }, [])
+            | Update_nav.Composer_popup_slash _
             | Update_nav.Composer_popup_mention _ ->
                 ({ m with drafts = Drafts.dismiss_popup m.drafts }, [])
             | Update_nav.Composer_popup_none ->

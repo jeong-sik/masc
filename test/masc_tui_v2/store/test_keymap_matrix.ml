@@ -1990,15 +1990,21 @@ let test_journeys_slash_palette_filter () =
   Alcotest.(check string) "J3 @al + Tab completes '@alpha '" "@alpha "
     (Drafts.current_draft m_at_tab.drafts).text;
 
-  (* J4: Esc dismisses popup first (keeps focus), 2nd Esc blurs *)
+  (* J4: Bare '/' single Esc clears & blurs; typed '/hel' 1st Esc dismisses popup (keeps focus), 2nd Esc blurs *)
   record_case ();
-  let m_esc1, _ = step m1 (mk_key Keymap.Input.Escape) in
-  Alcotest.(check bool) "J4 1st Esc dismisses popup" true
+  let m_esc_bare, _ = step m1 (mk_key Keymap.Input.Escape) in
+  Alcotest.(check bool) "J4 bare '/' single Esc blurs composer cleanly" false
+    (Drafts.is_focused m_esc_bare.drafts);
+  Alcotest.(check string) "J4 bare '/' single Esc clears lone '/'" ""
+    (Drafts.current_draft m_esc_bare.drafts).text;
+  let m_typed, _ = type_str m_empty "/hel" in
+  let m_esc1, _ = step m_typed (mk_key Keymap.Input.Escape) in
+  Alcotest.(check bool) "J4 typed '/hel' 1st Esc dismisses popup" true
     m_esc1.drafts.popup_dismissed;
-  Alcotest.(check bool) "J4 1st Esc keeps composer focused" true
+  Alcotest.(check bool) "J4 typed '/hel' 1st Esc keeps composer focused" true
     (Drafts.is_focused m_esc1.drafts);
   let m_esc2, _ = step m_esc1 (mk_key Keymap.Input.Escape) in
-  Alcotest.(check bool) "J4 2nd Esc blurs composer" false
+  Alcotest.(check bool) "J4 typed '/hel' 2nd Esc blurs composer" false
     (Drafts.is_focused m_esc2.drafts);
 
   (* J5: /clear also clears workspace filter when draft empty *)

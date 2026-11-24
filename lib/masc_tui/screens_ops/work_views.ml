@@ -2234,7 +2234,7 @@ let render_inbox_empty ~(model : Model.t) ~cache ~(rect : Rect.t)
                [
                  ("Y", Ops_common.say model ~ko:"승인" ~en:"Approve");
                  ("N", Ops_common.say model ~ko:"거절" ~en:"Deny");
-                 ("1..4", Ops_common.say model ~ko:"질문 선택" ~en:"Ask Choice");
+                 ("a..d", Ops_common.say model ~ko:"질문 선택" ~en:"Ask Choice");
                ])
         end
       end
@@ -2410,7 +2410,7 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                       text = tag;
                       tone = Some tok;
                     };
-                hotkey = Some "[Y] Approve · [N] Deny · [1..4] Choice";
+                hotkey = Some "[Y] Approve · [N] Deny · [a..d] Choice";
                 focused = Model.pane_focused model 1;
               }
             in
@@ -2573,15 +2573,15 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                       if !y < bot then begin
                         Card.draw_hairline ~pad_x:0 ~bg:card_bg
                           ~label:
-                            (Ops_common.say model ~ko:"1..4 즉시 선택"
-                               ~en:"Instant 1..4 Choices")
+                            (Ops_common.say model ~ko:"a..d 즉시 선택"
+                               ~en:"Instant a..d Choices")
                           grid ~rect:content ~y:!y ~theme;
                         incr y
                       end;
                       List.iteri
                         (fun idx (ch : Wire_work.ask_choice) ->
                           if !y < bot then begin
-                            let num = idx + 1 in
+                            let key_ch = Char.chr (Char.code 'a' + idx) in
                             let row_bg =
                               if idx = 0 then Color.of_rgb theme.selection_bg
                               else card_bg
@@ -2595,7 +2595,7 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                               Card.draw_left_rail ~bg:row_bg ~color:theme.accent
                                 grid ~x:content.x ~y:!y ~h:1 ~theme
                             end;
-                            let main_txt = Printf.sprintf "[%d] %s" num ch.label in
+                            let main_txt = Printf.sprintf "[%c] %s" key_ch ch.label in
                             let start_x = content.x + 2 in
                             let max_w = Int.max 0 (content.w - 2) in
                             let main_st =

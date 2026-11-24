@@ -298,7 +298,11 @@ let find_actionable_ask (m : Model.t) =
     && Nav.equal_workspace m.nav.workspace Nav.Work
     && Nav.equal_work_tab m.work.active_tab Nav.Work_inbox
   in
-  if on_work_inbox && not (Attention.is_empty m.attention) then
+  if
+    on_work_inbox
+    && (not (Attention.is_empty m.attention)
+       || Option.is_some m.attention.selected_id)
+  then
     match
       Attention.current_filtered_item ~query:m.work.filter_query m.attention
     with
@@ -330,6 +334,7 @@ let find_actionable_ask (m : Model.t) =
             | Attention.Payload_goal_confirmation _ );
           _;
         }
+    | None when Option.is_some m.attention.selected_id -> None
     | None -> (
         match Work_store.selected_open_ask m.work with
         | Some ask -> Some ask

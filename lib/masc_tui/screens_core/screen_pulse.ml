@@ -947,7 +947,7 @@ let render_attention_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         in
         let start, _ =
           Table.compute_viewport ~total_rows:count ~viewport_rows:inner.h
-            ~scroll:0 ~selected:(Some sel)
+            ~scroll:0 ~selected:sel
         in
         let max_show = Int.min inner.h (Int.max 0 (count - start)) in
         for i = 0 to max_show - 1 do
@@ -955,7 +955,7 @@ let render_attention_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
           let e = items.(idx) in
           let py = inner.y + i in
           let row_r = Rect.make ~x:inner.x ~y:py ~w:inner.w ~h:1 in
-          let is_sel = pane_focused && Int.equal idx sel in
+          let is_sel = pane_focused && Option.equal Int.equal (Some idx) sel in
           let rbg =
             Color.of_rgb (if is_sel then theme.selection_bg else theme.surface_2)
           in

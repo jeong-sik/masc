@@ -15590,9 +15590,9 @@ let test_ux_sweep_12_fixes () =
     (Option.map (fun (e : Attention.entry) -> e.id)
        (Model.fast_approval_strip_item m_f_b2_help));
   let m_f_cleared, _ = Update_nav.set_active_filter_query "" m_f_b2 in
-  Alcotest.(check int)
+  Alcotest.(check (option int))
     "CR P2 #3: clearing filter syncs selected_index_in_filtered to 2 (gate:gate-b2)"
-    2
+    (Some 2)
     (Attention.selected_index_in_filtered ~query:"" m_f_cleared.attention);
   Alcotest.(check (option string))
     "CR P2 #3: clearing filter keeps gate:gate-b2 selected (not Alpha or Beta1)"
@@ -15616,6 +15616,62 @@ let test_ux_sweep_12_fixes () =
                | Cmd.Http_post { req = Cmd.Post_tool_approval _; _ } -> true
                | _ -> false)
              cmds_approve_b2));
+  let check_disarmed reason (m : Model.t) =
+    Alcotest.(check (option int)) (reason ^ ": no highlighted row") None
+      (Attention.selected_index_in_filtered ~query:m.work.filter_query
+         m.attention);
+    Alcotest.(check bool) (reason ^ ": inspector and action strip are closed")
+      true
+      (m.nav.pane_index = 0 && Model.focusable_pane_count m = 1
+       && Option.is_none (Model.fast_approval_strip_item m));
+    let _, cmds = step m (char_k ~shift:true "Y") in
+    Alcotest.(check bool) (reason ^ ": Y sends no approval") false
+      (has_cmd
+         (function
+           | Cmd.Http_post
+               { req = (Cmd.Post_tool_approval _ | Cmd.Post_gate_resolution _); _ } ->
+               true
+           | _ -> false)
+         cmds)
+  in
+  let m_f_detail =
+    { m_f_cleared with nav = { m_f_cleared.nav with pane_index = 1 } }
+  in
+  let m_f_edit, _ = step m_f_detail (char_k "/") in
+  let m_f_typed, _ = Update.step ~now:t0 m_f_edit (Msg.Paste_text "alpha") in
+  let m_f_hidden, _ = step m_f_typed (mk_key Keymap.Input.Enter) in
+  Alcotest.(check string) "filter edit exposes the Alpha row" "alpha"
+    m_f_hidden.work.filter_query;
+  check_disarmed "filter hides the selected Beta row" m_f_hidden;
+  let m_f_restored, _ = Update_nav.set_active_filter_query "" m_f_hidden in
+  Alcotest.(check (option string)) "clearing the filter restores Beta2"
+    (Some "gate:gate-b2")
+    (Option.map (fun (e : Attention.entry) -> e.id)
+       (Model.fast_approval_strip_item m_f_restored));
+  let m_inventory =
+    let work =
+      m_f_detail.work
+      |> Work_store.apply_tool_approvals ~observed_at:t0 [ ta0 ]
+      |> Work_store.apply_gate_pending ~observed_at:t0 [ g_beta1; g_beta2 ]
+    in
+    Model.rebuild_attention { m_f_detail with work }
+  in
+  let m_f_gone, _ =
+    Update.step ~now:t0 m_inventory
+      (Msg.Http_reply
+         { epoch = m_inventory.epoch; reply = Msg.Reply_gate_pending (Ok [ g_beta1 ]) })
+  in
+  check_disarmed "server removes the selected Beta row" m_f_gone;
+  let m_f_moved, _ = step m_f_gone (mk_key Keymap.Input.Down) in
+  let _, cmds_approve_alpha = step m_f_moved (char_k ~shift:true "Y") in
+  Alcotest.(check bool) "moving to Alpha enables approval of that row" true
+    (has_cmd
+       (function
+         | Cmd.Http_post
+             { req = Cmd.Post_tool_approval { approval_id = "ta-0"; _ }; _ } ->
+             true
+         | _ -> false)
+       cmds_approve_alpha);
   (* Scenario B: acting on Beta1 (Gate_reject auto-advances to Beta2), then clearing filter & switching to Pulse keeps Beta2 *)
   let m_gr_cleared, _ = Update_nav.set_active_filter_query "" m_gr_sub in
   let m_gr_pulse, _ = Update_nav.switch_workspace m_gr_sub Nav.Pulse in

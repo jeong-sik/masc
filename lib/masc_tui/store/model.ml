@@ -452,6 +452,10 @@ let fast_approval_strip_item m =
           | Some e when not (Attention.is_in_flight ~id:e.id m.attention) ->
               Some e
           | Some _ | None -> None
+        else if
+          Option.is_some m.attention.selected_id
+          && Option.is_none (Attention.current_triage_item m.attention)
+        then None
         else Attention.top_fast_path m.attention
 
 let composer_mode m =
@@ -846,11 +850,11 @@ let focusable_pane_count m =
               | Nav.Work_tasks | Nav.Work_schedules -> 2
               | Nav.Work_inbox ->
                   if
-                    Attention.filtered_items ~query:m.work.filter_query
-                      m.attention
-                    = []
-                  then 1
-                  else 2
+                    Option.is_some
+                      (Attention.current_filtered_item ~query:m.work.filter_query
+                         m.attention)
+                  then 2
+                  else 1
               | Nav.Work_candle_scorecard -> 2
               | Nav.Work_harness -> 2)
           | Nav.Knowledge -> 2
@@ -1082,7 +1086,10 @@ let active_focus_scope m =
                 Nav.equal_workspace m.nav.workspace Nav.Work
                 && Nav.equal_work_tab m.work.active_tab Nav.Work_inbox
                 &&
-                if not (Attention.is_empty m.attention) then
+                if
+                  not (Attention.is_empty m.attention)
+                  || Option.is_some m.attention.selected_id
+                then
                   match
                     Attention.current_filtered_item ~query:m.work.filter_query
                       m.attention

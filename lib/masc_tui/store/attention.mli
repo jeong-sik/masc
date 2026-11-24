@@ -27,8 +27,8 @@ type entry = {
 type t = {
   items : entry list;
   selected_id : string option;
-      (** Authoritative ID-anchored selection; [None] before explicit selection
-          or filter anchoring so initial bootstrap tracks highest urgency. *)
+      (** Selected entry, even while filtered out or absent from the queue.
+          [None] before a selection allows the default to follow urgency. *)
   triage_index : int;
   triage_scroll_offset : int;
   auto_advance : bool;
@@ -65,18 +65,17 @@ val current_triage_item : t -> entry option
 val filtered_items : query:string -> t -> entry list
 (** Filter queue entries case-insensitively by title, summary, keeper, or id. *)
 
-val selected_index_in_filtered : query:string -> t -> int
-(** Canonical 0-based index of the currently focused item inside
-    {!filtered_items}. Resolves [selected_id] first and falls back to clamped
-    [triage_index], guaranteeing rendered highlight and action target parity. *)
+val selected_index_in_filtered : query:string -> t -> int option
+(** Zero-based position of the selected entry in {!filtered_items}. A hidden
+    or missing selected identity has no highlighted or actionable row. *)
 
 val current_filtered_item : query:string -> t -> entry option
 (** Currently focused item within {!filtered_items}. *)
 
 val sync_selection : query:string -> t -> t
-(** Re-synchronize [triage_index], [triage_scroll_offset], and [selected_id]
-    with {!filtered_items} after filter or view domain transitions so clearing
-    or changing a filter never silently shifts selection to an unrelated row. *)
+(** Recompute the position for the current filter, preserving a hidden or
+    missing identity. The highest-priority visible row remains the default until
+    an item is selected. *)
 
 val move_triage : ?query:string -> ?viewport_rows:int -> delta:int -> t -> t
 val select_triage_index : ?query:string -> int -> t -> t
@@ -95,9 +94,8 @@ val advance_past_in_flight : ?query:string -> t -> t
     strip advance together without ever silently jumping to an unrelated row. *)
 
 val advance_after_resolution : ?query:string -> resolved_id:string -> t -> t
-(** Remove [resolved_id], clear its in-flight flag, and re-sync/advance
-    selection cleanly within [filtered_items ~query] when [auto_advance] is
-    enabled. *)
+(** Advance from the highlighted item when it was resolved and [auto_advance]
+    is enabled. Remove [resolved_id] and its in-flight flag. *)
 
 val count : t -> int
 val is_empty : t -> bool

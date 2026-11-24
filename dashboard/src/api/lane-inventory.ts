@@ -1,4 +1,4 @@
-import { Schema } from 'effect'
+import { Schema } from '../lib/wire-schema'
 import { get } from './core'
 import { laneAddonApplicationSchema } from './lane-addons'
 import { LANE_IDS, parseStandaloneLanesSnapshot } from './dashboard-standalone-lanes'

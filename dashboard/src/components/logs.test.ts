@@ -1,7 +1,7 @@
 import { h } from 'preact'
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/preact'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { Effect } from 'effect'
+import { ok } from '../lib/result'
 import type { LogEntry, LogsData } from '../api/dashboard-logs'
 import type { LogsStreamFrame } from '../api/schemas/logs'
 import {
@@ -69,13 +69,13 @@ async function loadLogs(
 ) {
   vi.resetModules()
   vi.doMock('../api/dashboard-logs', () => ({
-    fetchLogs: (request: unknown) => Effect.promise(async () => {
+    fetchLogs: async (request: unknown) => {
       const callFetchLogs = fetchLogs as (request: unknown) => unknown
       const response = await callFetchLogs(request) as Partial<LogsData> & {
         readonly entries: readonly LogEntry[]
       }
-      return logData(response.entries, response)
-    }),
+      return ok(logData(response.entries, response))
+    },
   }))
   const readFixture = fetchLogs as (request: unknown) => Promise<Partial<LogsData> & { entries: readonly LogEntry[] }>
   const readers = new Set<{ onFrame: (frame: LogsStreamFrame) => void }>()
@@ -338,39 +338,6 @@ describe('LogViewer Code links', () => {
     expect(fetchLogs).toHaveBeenCalledTimes(2)
   })
 
-  it('links safe structured log file details back to the Code IDE route', async () => {
-    const fetchLogs = vi.fn().mockResolvedValue(logData([entry({
-        seq: 1,
-        timestamp: '2026-05-14T00:00:00Z',
-        level: 'INFO',
-        source: 'structured',
-        module: 'keeper_tool',
-        message: 'read file',
-        details: { file_path: 'lib/runtime.ml', line: 12 },
-      })]))
-    const { LogViewer } = await loadLogs(fetchLogs)
-    const { container } = render(h(LogViewer, {}))
-
-    await waitFor(() =>
-      expect(container.querySelector('[data-testid="logs-code-link"]')).not.toBeNull(),
-    )
-    const codeLink = container.querySelector('[data-testid="logs-code-link"]') as HTMLButtonElement
-    expect(codeLink.textContent).toBe('Code')
-    expect(codeLink.getAttribute('title')).toBe('Code lib/runtime.ml:12')
-    const provenance = container.querySelector('[data-testid="logs-provenance"]') as HTMLElement
-    expect(provenance.textContent).toContain('masc_log_ring')
-    expect(provenance.textContent).toContain('dashboard_logs')
-    expect(provenance.textContent).toContain('system_log_2026-05-15.jsonl')
-
-    codeLink.click()
-    expect(window.location.hash).toBe(
-      '#code?section=ide-shell&view=source&file=lib%2Fruntime.ml&line=12&surface=Log&label=keeper_tool&source_id=log%3A1',
-    )
-  })
-
-  // decodeLogsData fails with LogsSchemaDriftError when a row does not
-  // decode, so there is no "parser dropped N rows" state to render here.
-
   it('renders v2 surface marker classes for CSS scoping', async () => {
     const fetchLogs = vi.fn().mockResolvedValue(logData([entry({
         seq: 1,
@@ -392,77 +359,12 @@ describe('LogViewer Code links', () => {
     expect(container.querySelector('.v2-logs-table-header')).not.toBeNull()
     expect(container.querySelector('[data-testid="logs-row"]')?.getAttribute('data-log-seq')).toBe('1')
     expect(container.querySelector('.v2-logs-summary')).not.toBeNull()
+    const provenance = container.querySelector('[data-testid="logs-provenance"]') as HTMLElement
+    expect(provenance.textContent).toContain('masc_log_ring')
+    expect(provenance.textContent).toContain('dashboard_logs')
+    expect(provenance.textContent).toContain('system_log_2026-05-15.jsonl')
   })
 
-  it('does not render Code links for unsafe absolute log file paths', async () => {
-    const fetchLogs = vi.fn().mockResolvedValue(logData([entry({
-        seq: 2,
-        timestamp: '2026-05-14T00:00:00Z',
-        level: 'INFO',
-        source: 'structured',
-        module: 'keeper_tool',
-        message: 'read file',
-        details: { file_path: '/tmp/runtime.ml', line: 12 },
-      })]))
-    const { LogViewer } = await loadLogs(fetchLogs)
-    const { container } = render(h(LogViewer, {}))
-
-    await waitFor(() => expect(container.textContent).toContain('read file'))
-    expect(container.querySelector('[data-testid="logs-code-link"]')).toBeNull()
-  })
-
-  it('links nested log evidence into operational IDE routes', async () => {
-    const fetchLogs = vi.fn().mockResolvedValue(logData([entry({
-        seq: 3,
-        timestamp: '2026-05-14T00:00:00Z',
-        level: 'WARN',
-        source: 'structured',
-        module: 'keeper_tool',
-        message: 'tool warning',
-        details: {
-          context: {
-            goal_id: 'goal-runtime',
-            task_id: 'task-runtime',
-            board_post_id: 'post-1',
-            comment_id: 'comment-1',
-          },
-          failure_envelope: {
-            evidence_ref: {
-              file_path: 'lib/runtime.ml',
-              line_start: 8,
-              pr_number: 15008,
-              branch: 'feat/runtime',
-              log_id: 'turn-8',
-              session_id: 'sess-nested',
-              operation_id: 'op-nested',
-              worker_run_id: 'wr-nested',
-            },
-          },
-        },
-      })]))
-    const { LogViewer } = await loadLogs(fetchLogs)
-    const { container } = render(h(LogViewer, {}))
-
-    await waitFor(() => expect(container.textContent).toContain('tool warning'))
-    const routeLinks = [...container.querySelectorAll<HTMLButtonElement>('.logs-route-link')]
-    expect(routeLinks.map(link => link.textContent)).toEqual([
-      'Code',
-      'Goal',
-      'Task',
-      'Board',
-      'Comment',
-      'PR',
-      'Git',
-      'Log',
-      'Telemetry',
-    ])
-
-    routeLinks.find(link => link.textContent === 'Code')?.click()
-    expect(window.location.hash).toBe('#code?section=ide-shell&view=source&file=lib%2Fruntime.ml&line=8&surface=Log&label=keeper_tool&source_id=log%3A3')
-
-    routeLinks.find(link => link.textContent === 'Telemetry')?.click()
-    expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&session_id=sess-nested&operation_id=op-nested&worker_run_id=wr-nested&q=turn-8')
-  })
   it('filters rows by kind chips and keeps kind-aware details for toolbar view', async () => {
     const fetchLogs = serverFiltered([
         entry({

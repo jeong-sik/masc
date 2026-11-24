@@ -1,6 +1,9 @@
 import type { OperatorRecommendedAction, RouteState } from './types'
 import { isRecord, asNullableString, asRecord } from './components/common/normalize'
-import { isRootTarget } from './components/ops/helpers'
+
+function isRootTarget(value?: string | null): boolean {
+  return value === 'root' || value === 'namespace' || value === 'workspace'
+}
 
 function asDisplayString(value: unknown): string | null {
   const text = asNullableString(value)

@@ -5,17 +5,14 @@ import { act, fireEvent } from '@testing-library/preact'
 import {
   App,
   shouldBootstrapCommandPaletteShortcut,
-  shouldShowCopilotFab,
   shouldShowDashboardHealthStrip,
   shouldSuppressFloatingChrome,
-  shouldUseCompactDashboardChrome,
 } from './app'
 import { route } from './router'
 import { executionLoaded, keepers, serverStatus, shellCounts, shellRuntimeResolution } from './store'
 import { activeKeeperName } from './keeper-state'
 import type { Keeper } from './types'
 import { commandPaletteRequested } from './components/common/command-palette-state'
-import { dashboardFocusMode } from './components/focus-mode-toggle'
 
 describe('App v2 header chrome', () => {
   let container: HTMLDivElement
@@ -32,7 +29,6 @@ describe('App v2 header chrome', () => {
     shellCounts.value = null
     shellRuntimeResolution.value = null
     activeKeeperName.value = ''
-    dashboardFocusMode.value = false
   })
 
   afterEach(() => {
@@ -46,7 +42,6 @@ describe('App v2 header chrome', () => {
     shellCounts.value = null
     shellRuntimeResolution.value = null
     activeKeeperName.value = ''
-    dashboardFocusMode.value = false
   })
 
   function renderApp() {
@@ -294,22 +289,6 @@ describe('App v2 header chrome', () => {
     expect(container.querySelector('nav.v2-nav.is-mnav')).not.toBeNull()
   })
 
-  it('uses the header Copilot control instead of a floating FAB on mobile', () => {
-    window.innerWidth = 900
-    renderApp()
-
-    expect(container.querySelector('[data-testid="copilot-dock-topbar-button"]')).not.toBeNull()
-    expect(container.querySelector('[data-testid="copilot-dock-fab"]')).toBeNull()
-  })
-
-  // REMOVED: "keeps mobile nav available on the keeper roster pane" and
-  // "hides mobile nav while reading the keeper chat pane" — both asserted the old
-  // per-pane mobile-nav gating driven by `#main-content[data-mpane]` +
-  // `keeperMobilePane`. The reskin dropped `data-mpane` from #main-content and the
-  // `nav[aria-label="Primary mobile navigation"]` element; the mobile bottom tab
-  // bar (`nav.v2-nav.is-mnav`) is now always present regardless of keeper pane.
-  // Positive bottom-bar coverage is kept above.
-
   it('renders the left side rail on desktop', () => {
     window.innerWidth = 1280
     renderApp()
@@ -353,7 +332,7 @@ describe('App v2 header chrome', () => {
     expect(scroll?.classList.contains('h-full')).toBe(true)
   })
 
-  it('hides floating status and focus chrome on prototype primary surfaces', () => {
+  it('hides floating status and focus chrome on primary surfaces', () => {
     window.innerWidth = 1280
     window.location.hash = '#overview'
     route.value = { tab: 'overview', params: {}, postId: null }
@@ -361,24 +340,6 @@ describe('App v2 header chrome', () => {
 
     expect(container.querySelector('[data-testid="dashboard-status-tray"]')).toBeNull()
     expect(container.querySelector('[data-testid="dashboard-focus-mode-toggle"]')).toBeNull()
-  })
-
-  it('can leave a retained focus-mode state from a primary route', async () => {
-    dashboardFocusMode.value = true
-    await act(async () => { renderApp() })
-
-    const exit = container.querySelector('[data-testid="dashboard-focus-mode-toggle"]')
-    expect(exit).not.toBeNull()
-    await act(async () => { fireEvent.click(exit as Element) })
-    expect(dashboardFocusMode.value).toBe(false)
-  })
-
-  it('can leave retained focus mode with its keyboard shortcut on a primary route', async () => {
-    dashboardFocusMode.value = true
-    await act(async () => { renderApp() })
-
-    await act(async () => { fireEvent.keyDown(document, { key: 'F11' }) })
-    expect(dashboardFocusMode.value).toBe(false)
   })
 
   it('keeps the command palette chunk out of the initial dashboard render', () => {
@@ -418,7 +379,7 @@ describe('shouldBootstrapCommandPaletteShortcut', () => {
 })
 
 describe('shouldSuppressFloatingChrome', () => {
-  it('suppresses floating chrome for prototype primary surfaces', () => {
+  it('suppresses floating chrome for primary surfaces', () => {
     expect(shouldSuppressFloatingChrome({
       currentTab: 'overview',
       keeperDetailMode: false,
@@ -431,88 +392,9 @@ describe('shouldSuppressFloatingChrome', () => {
       currentTab: 'logs',
       keeperDetailMode: false,
     })).toBe(true)
-    // monitoring joined V2_PRIMARY_SURFACE_IDS in #23578 (Monitor in the v2 rail).
     expect(shouldSuppressFloatingChrome({
       currentTab: 'monitoring',
       keeperDetailMode: false,
     })).toBe(true)
   })
-
-  it('keeps floating chrome only for surfaces outside the prototype rail', () => {
-    // `command` and `lab` joined V2_PRIMARY_SURFACE_IDS in #29798 — the
-    // v2 rail carries the 명령·Lab group.
-    expect(shouldSuppressFloatingChrome({
-      currentTab: 'command',
-      keeperDetailMode: false,
-    })).toBe(true)
-    expect(shouldSuppressFloatingChrome({
-      currentTab: 'lab',
-      keeperDetailMode: false,
-    })).toBe(true)
-  })
 })
-
-describe('shouldUseCompactDashboardChrome', () => {
-  it('keeps the standard shell for keeper detail routes', () => {
-    expect(shouldUseCompactDashboardChrome({
-      widgetSoloMode: false,
-      focusMode: false,
-    })).toBe(false)
-  })
-
-  it('uses compact chrome for widget solo routes', () => {
-    expect(shouldUseCompactDashboardChrome({
-      widgetSoloMode: true,
-      focusMode: false,
-    })).toBe(true)
-  })
-
-  it('uses compact chrome for focus mode', () => {
-    expect(shouldUseCompactDashboardChrome({
-      widgetSoloMode: false,
-      focusMode: true,
-    })).toBe(true)
-  })
-})
-
-describe('shouldShowCopilotFab', () => {
-  it('shows the floating Copilot trigger on regular desktop surfaces', () => {
-    expect(shouldShowCopilotFab({
-      dockOpen: false,
-      compactChromeMode: false,
-      isMobile: false,
-      currentTab: 'overview',
-    })).toBe(true)
-  })
-
-  it('hides the floating Copilot trigger when another chat surface owns the action', () => {
-    expect(shouldShowCopilotFab({
-      dockOpen: false,
-      compactChromeMode: false,
-      isMobile: false,
-      currentTab: 'keepers',
-    })).toBe(false)
-  })
-
-  it('hides the floating Copilot trigger for open, mobile, and compact chrome states', () => {
-    expect(shouldShowCopilotFab({
-      dockOpen: true,
-      compactChromeMode: false,
-      isMobile: false,
-      currentTab: 'overview',
-    })).toBe(false)
-    expect(shouldShowCopilotFab({
-      dockOpen: false,
-      compactChromeMode: false,
-      isMobile: true,
-      currentTab: 'overview',
-    })).toBe(false)
-    expect(shouldShowCopilotFab({
-      dockOpen: false,
-      compactChromeMode: true,
-      isMobile: false,
-      currentTab: 'overview',
-    })).toBe(false)
-  })
-})
-// Keeper Agent v2 sync: coverage ratchet trigger

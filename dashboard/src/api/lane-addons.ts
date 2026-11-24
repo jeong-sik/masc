@@ -1,4 +1,4 @@
-import { Schema } from 'effect'
+import { Schema } from '../lib/wire-schema'
 import { get, post } from './core'
 import { parseLaneAddonHostRequests, type LaneAddonHostRequestObservation } from './lane-addon-host-requests'
 import { optionalLaneAddonCategory } from './lane-addon-category'

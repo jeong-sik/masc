@@ -2,7 +2,8 @@
 // The server projects runtime.toml provider metadata reachability only; it
 // does not run inference or report model-load / KV-cache observations.
 
-import { Data, Either, ParseResult, Schema } from 'effect'
+import { TaggedError, Either } from '../../lib/result'
+import { ParseResult, Schema } from '../../lib/wire-schema'
 
 const NonnegativeNumberSchema = Schema.JsonNumber.pipe(Schema.nonNegative())
 
@@ -140,13 +141,13 @@ export type DashboardRuntimeProbeResponse = Schema.Schema.Type<
   typeof DashboardRuntimeProbeResponseSchema
 >
 
-export class RuntimeProbeSchemaDriftError extends Data.TaggedError(
+export class RuntimeProbeSchemaDriftError extends TaggedError(
   'RuntimeProbeSchemaDriftError',
 )<{
   readonly domain: 'runtime_probe'
   readonly issues: ReadonlyArray<ParseResult.ArrayFormatterIssue>
   readonly message: string
-}> {}
+}>() {}
 
 function schemaDriftError(error: ParseResult.ParseError): RuntimeProbeSchemaDriftError {
   const issues = ParseResult.ArrayFormatter.formatErrorSync(error)

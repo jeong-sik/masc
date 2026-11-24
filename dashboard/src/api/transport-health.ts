@@ -1,7 +1,6 @@
-import { Effect } from 'effect'
-
 import {
-  DashboardHttp,
+  defaultDashboardHttp,
+  type DashboardHttpService,
   type DashboardTransportError,
 } from './effect-http'
 import {
@@ -14,6 +13,7 @@ import {
   type TransportHealthSnapshot,
   type TransportHealthSchemaDriftError,
 } from './schemas/transport-health'
+import type { Result } from '../lib/result'
 
 export type {
   HotSession,
@@ -35,14 +35,11 @@ export type TransportHealthError =
 
 const TRANSPORT_HEALTH_PATH = '/api/v1/dashboard/transport-health'
 
-export function fetchTransportHealth(): Effect.Effect<
-  TransportHealthSnapshot,
-  TransportHealthError,
-  DashboardHttp
-> {
-  return Effect.gen(function*() {
-    const http = yield* DashboardHttp
-    const raw = yield* http.getUnknown(TRANSPORT_HEALTH_PATH)
-    return yield* decodeTransportHealthData(raw)
-  })
+export async function fetchTransportHealth(
+  http: DashboardHttpService = defaultDashboardHttp,
+  signal?: AbortSignal,
+): Promise<Result<TransportHealthSnapshot, TransportHealthError>> {
+  const raw = await http.getUnknown(TRANSPORT_HEALTH_PATH, signal)
+  if (!raw.ok) return raw
+  return decodeTransportHealthData(raw.value)
 }

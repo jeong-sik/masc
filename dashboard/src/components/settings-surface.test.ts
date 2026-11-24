@@ -40,7 +40,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
 import { act, fireEvent, waitFor } from '@testing-library/preact'
-import { Effect } from 'effect'
+import { err, ok } from '../lib/result'
 import {
   SettingsSurface,
   mcpExposedToolNames,
@@ -64,7 +64,6 @@ import { DashboardMain } from './dashboard-shell'
 import { SETTINGS_ROUTE_SECTION_IDS } from '../config/navigation'
 import { route, navigate as navigateTo } from '../router'
 import { dashboardObserverConnected } from '../dashboard-observer-state'
-import { tweaksDensity } from './tweaks-panel'
 import { notificationDeliveryError, notifyRules } from '../notifications'
 import {
   committedRuntimeTomlConfigFixture,
@@ -184,9 +183,16 @@ vi.mock('../dashboard-logs-stream', () => ({
   }) => {
     let active = true
     reader.onReset()
-    void Effect.runPromise(apiMock.fetchLogs(request)).then(data => {
-      if (active) reader.onFrame({ reset: true, data: data as LogsData, limit: 200 })
-    }, error => { if (active) reader.onError(error) })
+    void Promise.resolve(apiMock.fetchLogs(request)).then((result: unknown) => {
+      if (!active) return
+      if (result && typeof result === 'object' && 'ok' in result) {
+        const res = result as { ok: boolean; value?: LogsData; error?: unknown }
+        if (res.ok) reader.onFrame({ reset: true, data: res.value as LogsData, limit: 200 })
+        else reader.onError(res.error)
+      } else {
+        reader.onFrame({ reset: true, data: result as LogsData, limit: 200 })
+      }
+    }, (error: unknown) => { if (active) reader.onError(error) })
     return () => { active = false }
   },
 }))
@@ -471,8 +477,8 @@ function stubRuntimeResolved(value: RuntimeResolvedResponse = makeRuntimeResolve
 }
 
 function stubEmptyApi() {
-  apiMock.fetchDashboardConfig.mockReturnValue(Effect.succeed(makeDashboardConfig()))
-  apiMock.fetchLogs.mockReturnValue(Effect.succeed(makeLogsData([])))
+  apiMock.fetchDashboardConfig.mockResolvedValue(ok(makeDashboardConfig()))
+  apiMock.fetchLogs.mockResolvedValue(ok(makeLogsData([])))
   apiMock.fetchDashboardTools.mockResolvedValue({ tool_inventory: { count: 0, tools: [] } })
   stubRuntimeDefaults()
   stubRuntimeResolved()
@@ -597,7 +603,6 @@ describe('SettingsSurface', () => {
     }
     shellAuthSummary.value = null
     localStorage.clear()
-    tweaksDensity.value = 'spacious'
     notifyRules.value = {
       'approval:pending': true,
       'agent_core:agent_failed': true,
@@ -617,7 +622,6 @@ describe('SettingsSurface', () => {
     resetDevTokenBootstrap()
     sessionStorage.clear()
     localStorage.clear()
-    tweaksDensity.value = 'spacious'
     vi.unstubAllGlobals()
     vi.unstubAllEnvs()
   })
@@ -1091,76 +1095,6 @@ describe('SettingsSurface', () => {
     expect(container.querySelector('[data-testid="log-viewer"]')).not.toBeNull()
   })
 
-  it('renders a live theme switch inside the display section that can reach Paper', async () => {
-    route.value = { tab: 'settings', params: { section: 'display' }, postId: null }
-
-    render(html`<${SettingsSurface} />`, container)
-
-    expect(container.querySelector('[data-testid="settings-section-title"]')?.textContent).toBe('표시')
-    const themeButton = [...container.querySelectorAll('button')]
-      .find(b => /DARK|STYLESEED|PAPER/.test(b.textContent ?? ''))
-    expect(themeButton).toBeTruthy()
-
-    await fireEvent.click(themeButton as HTMLButtonElement)
-    expect(document.documentElement.dataset.theme).toBe('styleseed')
-
-    await fireEvent.click(themeButton as HTMLButtonElement)
-    expect(document.documentElement.dataset.theme).toBe('paper')
-    expect(localStorage.getItem('dashboardTheme')).toBe('paper')
-  })
-
-  it('wires display density to the dashboard density signal without fake locale previews', async () => {
-    route.value = { tab: 'settings', params: { section: 'display' }, postId: null }
-
-    render(html`<${SettingsSurface} />`, container)
-
-    expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent)
-      .toContain('browser-local shell state')
-    expect(container.querySelector('.set-card-b')?.getAttribute('data-settings-mode')).toBe('local')
-    expect(container.querySelector('[data-testid="settings-control-ledger"]')?.textContent)
-      .toContain('browser shell only')
-    // The ledger reads and never writes, so it ships collapsed: open above the
-    // real controls it looked like one of them that refused to work.
-    const ledger = container.querySelector('[data-testid="settings-control-ledger"]')
-    expect(ledger?.tagName.toLowerCase()).toBe('details')
-    expect((ledger as HTMLDetailsElement | null)?.open).toBe(false)
-    expect(ledger?.querySelector('summary')?.textContent).toContain('읽기 전용')
-    expect(container.querySelector('[data-control-id="settings-theme-density"]')?.getAttribute('data-control-kind'))
-      .toBe('browser-local')
-    expect(container.querySelector('[data-control-id="settings-display-locale"]')?.getAttribute('data-control-kind'))
-      .toBe('unsupported')
-    expect(container.querySelector('[data-testid="display-live-summary"]')?.textContent)
-      .toContain('spacious')
-
-    const clickSeg = async (label: string) => {
-      const button = Array.from(container.querySelectorAll<HTMLButtonElement>('.set-seg-b'))
-        .find(candidate => candidate.textContent === label)
-      expect(button).toBeTruthy()
-      await fireEvent.click(button as HTMLButtonElement)
-    }
-
-    await clickSeg('compact')
-
-    expect(tweaksDensity.value).toBe('compact')
-    expect(container.querySelector('[data-testid="display-live-summary"]')?.textContent)
-      .toContain('compact')
-    expect(container.querySelector('[data-testid="display-locale-readonly"]')?.textContent)
-      .toContain('no writer')
-    expect(container.querySelector('[data-testid="set-toggle"]')).toBeNull()
-    expect([...container.querySelectorAll('.set-seg-b')].map(b => b.textContent))
-      .toEqual(['compact', 'regular', 'spacious'])
-    expect(sessionStorage.getItem('masc.settings.local.displayLocale')).toBeNull()
-    expect(sessionStorage.getItem('masc.settings.local.displayTimezone')).toBeNull()
-    expect(sessionStorage.getItem('masc.settings.local.displayClock24')).toBeNull()
-
-    render(null, container)
-    render(html`<${SettingsSurface} />`, container)
-
-    expect(tweaksDensity.value).toBe('compact')
-    expect(container.querySelector('[data-testid="display-live-summary"]')?.textContent)
-      .toContain('compact')
-  })
-
   it('exports display HTML as a DOM snapshot without standalone resource claims', async () => {
     route.value = { tab: 'settings', params: { section: 'display' }, postId: null }
     const createObjectURL = vi.fn((_blob: Blob) => 'blob:masc-dashboard-snapshot')
@@ -1397,8 +1331,8 @@ describe('SettingsSurface', () => {
   it('paths page does not fabricate unknown rows when path resolution is unavailable', async () => {
     shellRuntimeResolution.value = null
     shellConfigResolution.value = null
-    apiMock.fetchDashboardConfig.mockReturnValueOnce(
-      Effect.fail(new Error('config unavailable')),
+    apiMock.fetchDashboardConfig.mockResolvedValueOnce(
+      err(new Error('config unavailable')),
     )
     stubRuntimeDefaults(makeRuntimeDefaults({ config_path: null }))
     stubRuntimeResolved(makeRuntimeResolved({ config_path: null }))
@@ -1420,8 +1354,8 @@ describe('SettingsSurface', () => {
   it('paths page labels provider-only path data as partial resolution', async () => {
     shellRuntimeResolution.value = null
     shellConfigResolution.value = null
-    apiMock.fetchDashboardConfig.mockReturnValueOnce(
-      Effect.fail(new Error('config unavailable')),
+    apiMock.fetchDashboardConfig.mockResolvedValueOnce(
+      err(new Error('config unavailable')),
     )
 
     render(html`<${SettingsSurface} />`, container)
@@ -1498,8 +1432,8 @@ describe('SettingsSurface', () => {
   })
 
   it('notify page surfaces config projection failures instead of rendering missing thresholds', async () => {
-    apiMock.fetchDashboardConfig.mockReturnValueOnce(
-      Effect.fail(new Error('config projection offline')),
+    apiMock.fetchDashboardConfig.mockResolvedValueOnce(
+      err(new Error('config projection offline')),
     )
 
     render(html`<${SettingsSurface} />`, container)
@@ -2389,7 +2323,7 @@ describe('SettingsSurface', () => {
     // be found by a /masc_/ test on the message body instead, which #30463
     // removed -- the body is not where the kind lives. This chip test is about
     // the filtering, so the fixture states the kind the way the producer does.
-    apiMock.fetchLogs.mockReturnValue(Effect.succeed(makeLogsData([
+    apiMock.fetchLogs.mockResolvedValue(ok(makeLogsData([
         makeLogEntry({
           seq: 7,
           level: 'INFO',

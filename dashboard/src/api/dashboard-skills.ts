@@ -4,7 +4,8 @@
 // (masc.skill-snapshot/v1, lib/skill_snapshot) plus the optional exact
 // parser-derived surface of each effective Skill.
 
-import { Either, ParseResult, Schema } from 'effect'
+import { Either } from '../lib/result'
+import { ParseResult, Schema } from '../lib/wire-schema'
 import { ApiRequestError, get, post, postControlPlane, type GetOptions } from './core'
 
 export interface SkillIdentity {

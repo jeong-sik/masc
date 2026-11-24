@@ -5,7 +5,6 @@ import { isDismissEscape } from '../lib/keyboard'
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect, useMemo } from 'preact/hooks'
-import { Effect } from 'effect'
 import { ConnectionStatus } from './dashboard-shell'
 import type { ComponentChildren } from 'preact'
 import { post } from '../api/core'
@@ -26,7 +25,7 @@ import {
   type GateKeeper,
   type KeeperListing,
 } from '../api/gate-keepers'
-import { DashboardTransportError, dashboardRuntime } from '../api/effect-http'
+import { DashboardTransportError, defaultDashboardHttp } from '../api/effect-http'
 import {
   KNOWN_CONNECTOR_IDS,
   connectorActivation,
@@ -204,11 +203,9 @@ async function refresh() {
     const [gateResult, connResult, keeperResult] = await Promise.allSettled([
       fetchGateStatus(signal),
       fetchGateConnectors(signal),
-      // Keep the transport's original refusal; runPromise alone wraps typed
-      // failures in FiberFailure, hiding their HTTP status from the observer.
-      dashboardRuntime.runPromise(Effect.either(fetchGateKeepers()), { signal }).then(result => {
-        if (result._tag === 'Right') return result.right
-        const error = result.left
+      fetchGateKeepers(defaultDashboardHttp, signal).then(result => {
+        if (result.ok) return result.value
+        const error = result.error
         throw error instanceof DashboardTransportError ? error.cause ?? error : error
       }),
     ])

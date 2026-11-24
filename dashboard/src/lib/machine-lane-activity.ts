@@ -1,4 +1,4 @@
-import { parseTOML, type AST } from 'toml-eslint-parser'
+import { parseTOML, type AST } from './toml-lite'
 import type { LaneInventoryRow } from '../api/lane-inventory'
 import { setRuntimeTomlKey } from './runtime-toml-config'
 

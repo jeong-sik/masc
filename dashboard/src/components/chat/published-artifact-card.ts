@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
-import { Schema } from 'effect'
+import { Schema } from '../../lib/wire-schema'
 import { ArtifactPublicationSchema, artifactHref } from '../../api/published-artifacts'
 import { toolCallCompletion, type ToolCallEntry } from '../../api/dashboard-keeper-tool-calls'
 import { fetchVerifiedToolBlobText } from '../../api/verified-tool-blob'

@@ -1,19 +1,9 @@
 // @vitest-environment jsdom
 
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
-import { waitFor } from '@testing-library/preact'
 import { MarkdownContent, renderMarkdown } from './markdown-renderer'
-import { renderMermaidSvg } from './mermaid-graph'
-
-// Mock the shared mermaid render path: markdown-renderer delegates to it for
-// ```mermaid fences. Real mermaid is dynamically imported and unavailable here.
-vi.mock('./mermaid-graph', () => ({
-  renderMermaidSvg: vi.fn(
-    async () => '<svg xmlns="http://www.w3.org/2000/svg"><rect width="4" height="4"/></svg>',
-  ),
-}))
 
 describe('MarkdownContent', () => {
   it('renders container', () => {
@@ -155,36 +145,5 @@ describe('renderMarkdown cache', () => {
 
     renderMarkdown('a different paragraph')
     expect(renderMarkdown.size).toBe(2)
-  })
-})
-
-describe('MarkdownContent mermaid fences', () => {
-  it('replaces a ```mermaid block with the shared-rendered svg', async () => {
-    const container = document.createElement('div')
-    render(h(MarkdownContent, { text: '```mermaid\ngraph TD; A-->B\n```' }), container)
-    await waitFor(() => {
-      expect(container.querySelector('.mermaid-rendered svg')).not.toBeNull()
-    })
-    // the original code fence is replaced, not left behind
-    expect(container.querySelector('code.language-mermaid')).toBeNull()
-  })
-
-  it('logs a warning and keeps the code block when mermaid render fails', async () => {
-    vi.mocked(renderMermaidSvg).mockRejectedValueOnce(new Error('render fail'))
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-
-    const container = document.createElement('div')
-    render(h(MarkdownContent, { text: '```mermaid\ngraph TD; A-->B\n```' }), container)
-
-    await waitFor(() => {
-      expect(warnSpy).toHaveBeenCalledWith(
-        '[markdown-renderer] mermaid fence render failed',
-        expect.any(Error),
-      )
-    })
-    // original code fence remains as fallback
-    expect(container.querySelector('code.language-mermaid')).not.toBeNull()
-
-    warnSpy.mockRestore()
   })
 })

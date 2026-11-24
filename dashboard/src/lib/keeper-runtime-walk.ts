@@ -1,4 +1,5 @@
-import { Either, Schema } from 'effect'
+import { Either } from './result'
+import { Schema } from './wire-schema'
 import { isRecord } from '../components/common/normalize'
 
 const integer = Schema.Number.pipe(Schema.filter(Number.isSafeInteger))

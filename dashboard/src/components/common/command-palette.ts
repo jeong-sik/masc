@@ -18,7 +18,7 @@ import { html } from 'htm/preact'
 import { Fragment } from 'preact'
 import { useEffect, useRef } from 'preact/hooks'
 import { useComputed, useSignal } from '@preact/signals'
-import { navigate, navigateToPost, route } from '../../router'
+import { navigate, navigateToPost } from '../../router'
 import { requestConfirm } from './confirm-dialog'
 import { runGarbageCollection } from '../flow-control/flow-control-state'
 import { missionAgentBriefs, missionKeeperBriefs } from '../../mission-signals'
@@ -30,7 +30,6 @@ import { dashboardAuthAccess } from '../../lib/dashboard-auth-access'
 import { approvalInputText } from '../../lib/keeper-approval-input-text'
 import { surfaceLabel } from '../v2/nav-rail-v2'
 import { V2_PRIMARY_SURFACE_IDS } from '../../config/navigation'
-import { toggleCopilotDock } from '../copilot-dock'
 import { globalShortcutManager } from '../../lib/global-shortcut-manager'
 import { isImeComposing } from '../../lib/keyboard'
 import { CONNECTOR_DISPLAY_NAMES, KNOWN_CONNECTOR_IDS } from '../connector-constants'
@@ -116,15 +115,6 @@ export function CommandPalette({ openOnMount = false }: CommandPaletteProps = {}
     const pending = approvals?.length ?? 0
 
     cmds.push({
-      id: 'action-chat-dock',
-      group: '명령',
-      kind: 'action',
-      title: 'Chat 열기',
-      sub: '⌘J · 보조 패널',
-      glyph: '◈',
-      run: () => toggleCopilotDock(),
-    })
-    cmds.push({
       id: 'action-gate-queue',
       group: '명령',
       kind: 'action',
@@ -149,24 +139,6 @@ export function CommandPalette({ openOnMount = false }: CommandPaletteProps = {}
         },
       })
     }
-
-    cmds.push({
-      id: 'ide-toggle-rails',
-      group: '명령',
-      kind: 'action',
-      title: route.value.params.rails === 'hidden' ? 'IDE rails 보이기' : 'IDE rails 숨기기',
-      sub: 'code · ide rails layout',
-      glyph: '▤',
-      run: () => {
-        const next: Record<string, string> = { ...route.value.params, section: 'ide-shell' }
-        if (next.rails === 'hidden') {
-          delete next.rails
-        } else {
-          next.rails = 'hidden'
-        }
-        navigate('code', next)
-      },
-    })
 
     for (const tab of V2_PRIMARY_SURFACE_IDS) {
       cmds.push({

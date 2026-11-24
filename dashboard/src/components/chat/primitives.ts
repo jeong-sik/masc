@@ -1045,13 +1045,6 @@ function codeBlockText(htmlContent: string, source?: string): string {
   return htmlContent
 }
 
-function codeBlockLanguage(cap?: string): string {
-  const label = cap?.trim()
-  if (!label) return 'text'
-  const extension = label.match(/(?:^|[./\\])([a-zA-Z0-9_+-]+)$/)?.[1]
-  return extension ?? label
-}
-
 // Reuse the canonical clipboard helper (common/copyable-code) — it carries the
 // execCommand fallback for non-secure contexts — and just layer the toast on its
 // boolean result so the message text matches what was copied.
@@ -1061,38 +1054,11 @@ async function copyWithToast(text: string, successMessage: string): Promise<void
 }
 
 function ChatCodeBlock({ cap, html: htmlContent, source }: { cap?: string; html: string; source?: string }) {
-  const [highlighted, setHighlighted] = useState<string | null>(null)
-  const [failed, setFailed] = useState(false)
-  const [containerRef, shouldHighlight] = useInViewOnce<HTMLDivElement>('300px')
   const codeId = useId()
-
-  useEffect(() => {
-    if (!shouldHighlight) {
-      setHighlighted(null)
-      setFailed(false)
-      return undefined
-    }
-    let cancelled = false
-    const run = async () => {
-      try {
-        setHighlighted(null)
-        setFailed(false)
-        const text = codeBlockText(htmlContent, source)
-        const { highlightCodeHtml } = await import('../common/shiki-highlighter')
-        const next = await highlightCodeHtml(text, codeBlockLanguage(cap))
-        if (!cancelled) setHighlighted(next)
-      } catch {
-        if (!cancelled) setFailed(true)
-      }
-    }
-    void run()
-    return () => { cancelled = true }
-  }, [htmlContent, cap, source, shouldHighlight])
-
   const plain = codeBlockText(htmlContent, source)
 
   return html`
-    <div class="chat-block-code ${failed ? 'chat-block-code-fallback' : ''}" data-chat-block="code" ref=${containerRef}>
+    <div class="chat-block-code" data-chat-block="code">
       <div class="chat-block-code-hd">
         ${cap ? html`<span class="chat-block-code-cap">${cap}</span>` : html`<span class="chat-block-code-cap" />`}
         <button
@@ -1105,9 +1071,7 @@ function ChatCodeBlock({ cap, html: htmlContent, source }: { cap?: string; html:
           복사
         </button>
       </div>
-      ${highlighted
-        ? html`<div class="m-0 overflow-x-auto p-0 text-2xs leading-relaxed" id=${codeId} dangerouslySetInnerHTML=${{ __html: highlighted }} />`
-        : html`<pre class="m-0 overflow-x-auto p-3 text-2xs leading-relaxed" id=${codeId}><code dangerouslySetInnerHTML=${{ __html: htmlContent }} /></pre>`}
+      <pre class="m-0 overflow-x-auto p-3 text-2xs leading-relaxed" id=${codeId}><code dangerouslySetInnerHTML=${{ __html: htmlContent }} /></pre>
     </div>
   `
 }
@@ -1537,44 +1501,9 @@ function ChatSvgBlock({ svg, cap }: { svg: string; cap?: string }) {
 }
 
 function ChatMermaidBlock({ source, caption }: ChatMermaidBlock) {
-  const id = useId()
-  const [containerRef, shouldRender] = useInViewOnce<HTMLElement>('200px')
-  const [svg, setSvg] = useState<string | null>(null)
-  const [error, setError] = useState(false)
-
-  useEffect(() => {
-    if (!shouldRender) return undefined
-    setError(false)
-    setSvg(null)
-    let active = true
-    const run = async () => {
-      try {
-        // Use the shared mermaid path: it initializes once, serializes renders
-        // to avoid SVG corruption, and returns DOMPurify-sanitized output.
-        // Re-running DOMPurify per chat block added ~1s+ of main-thread work
-        // for large diagrams (see dashboard perf audit).
-        const { renderMermaidSvg } = await import('../common/mermaid-graph')
-        const rendered = await renderMermaidSvg(source, `mermaid-${id}`)
-        if (active) setSvg(rendered)
-      } catch {
-        if (active) setError(true)
-      }
-    }
-    void run()
-    return () => { active = false }
-  }, [source, id, shouldRender])
-
-  if (error) {
-    return html`<${ChatCodeBlock} cap="mermaid" html=${escapeHtml(source)} source=${source} />`
-  }
-
   return html`
-    <figure class="chat-block-media" data-chat-block="mermaid" ref=${containerRef}>
-      <div class="chat-block-mermaid">
-        ${svg
-          ? html`<div dangerouslySetInnerHTML=${{ __html: svg }} />`
-          : html`<div class="chat-block-media-ph">${shouldRender ? '다이어그램 렌더링 중…' : '다이어그램 (스크롤 시 렌더링)'}</div>`}
-      </div>
+    <figure class="chat-block-media" data-chat-block="mermaid">
+      <${ChatCodeBlock} cap="mermaid" html=${escapeHtml(source)} source=${source} />
       ${caption ? html`<figcaption class="chat-block-media-cap">${caption}</figcaption>` : null}
     </figure>
   `

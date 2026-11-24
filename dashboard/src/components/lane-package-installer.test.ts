@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
 import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { getStaticTOMLValue, parseTOML } from 'toml-eslint-parser'
+import { getStaticTOMLValue, parseTOML } from '../lib/toml-lite'
 const api = vi.hoisted(() => ({ fetchLanePackageCatalog: vi.fn(), fetchLanePackagePreview: vi.fn() }))
 const lane = vi.hoisted(() => ({ fetchLaneAddons: vi.fn() }))
 const files = vi.hoisted(() => ({ saveLaneDeclaration: vi.fn(), fetchLaneDeclaration: vi.fn() }))

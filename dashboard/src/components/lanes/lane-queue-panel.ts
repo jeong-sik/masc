@@ -39,8 +39,8 @@ import {
   appendCompositeObservation,
   deriveSwimlaneSegments,
   observeSnapshot,
-} from '../fsm-hub-derivations'
-import type { CompositeObservation, LaneKey } from '../fsm-hub-types'
+} from '../../lib/keeper-fsm-labels'
+import type { CompositeObservation, LaneKey } from '../../lib/keeper-fsm-labels'
 import {
   keeperWaitingInventoryStates,
   subscribeKeeperWaitingInventory,

@@ -1,4 +1,4 @@
-import { parseTOML, type AST } from 'toml-eslint-parser'
+import { parseTOML, type AST } from './toml-lite'
 
 function keyPath(key: AST.TOMLKey): string[] {
   return key.keys.map(part => part.type === 'TOMLBare' ? part.name : part.value)

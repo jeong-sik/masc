@@ -10,8 +10,6 @@ import { MISSING_DATA_DASH } from '../lib/format-string'
 import { formatNumber } from '../lib/format-number'
 import { shellRuntimeResolution } from '../store'
 import { FilterChips } from './common/filter-chips'
-import { TelemetryUnified } from './telemetry-unified'
-import { FleetTelemetryPanel } from './fleet-telemetry-panel'
 import { ToolQualityPanel } from './tool-quality-panel'
 import { GateMonitor } from './gate-monitor'
 import { AttributionPanel } from './attribution-panel'
@@ -19,17 +17,14 @@ import { ToolMonitorOperationsBoard } from './tool-monitor/tool-monitor-operatio
 import { ToolMonitorReactivityBoard } from './tool-monitor/tool-monitor-reactivity'
 import type { DashboardFleetPressureHealth } from '../types'
 
-type FleetHealthView = 'default' | 'event-log' | 'comparison' | 'tool-quality' | 'gate' | 'attribution' | 'keeper-health'
+type FleetHealthView = 'default' | 'tool-quality' | 'gate' | 'attribution' | 'keeper-health'
 
-const FLEET_VIEWS: FleetHealthView[] = ['default', 'event-log', 'comparison', 'tool-quality', 'gate', 'attribution', 'keeper-health']
+const FLEET_VIEWS: FleetHealthView[] = ['default', 'tool-quality', 'gate', 'attribution', 'keeper-health']
 
 function isFleetView(v: string | undefined): v is FleetHealthView {
   return !!v && (FLEET_VIEWS as string[]).includes(v)
 }
 
-// Derive the active view from route params. Single source of truth — no
-// local writable signal needed. FilterChips uses the `value` prop (read-only)
-// + `onChange` to update the URL, which flows back through the route signal.
 const activeView = computed<FleetHealthView>(() => {
   const v = route.value.params.view
   return isFleetView(v) ? v : 'default'
@@ -39,8 +34,6 @@ const VIEW_CHIPS: Array<{ key: FleetHealthView; label: string }> = [
   { key: 'default',        label: 'Operations' },
   { key: 'tool-quality',   label: 'Tool Quality' },
   { key: 'gate',           label: 'Gate' },
-  { key: 'event-log',      label: 'Evidence Log' },
-  { key: 'comparison',     label: 'Keeper 비교' },
   { key: 'attribution',    label: 'Attribution' },
   { key: 'keeper-health',  label: '반응성 모니터' },
 ]
@@ -162,10 +155,6 @@ export function FleetHealthPanel() {
       <div class="transition-opacity duration-[var(--t-med)]">
         ${view === 'default'
           ? html`<${ToolMonitorOperationsBoard} />`
-        : view === 'event-log'
-          ? html`<${TelemetryUnified} />`
-        : view === 'comparison'
-          ? html`<${FleetTelemetryPanel} />`
         : view === 'tool-quality'
           ? html`<${ToolQualityPanel} />`
         : view === 'gate'

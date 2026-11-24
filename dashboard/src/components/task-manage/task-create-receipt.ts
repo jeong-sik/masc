@@ -1,5 +1,5 @@
 import { effect, signal, type ReadonlySignal } from '@preact/signals'
-import { v4 as randomUuid } from 'uuid'
+import { randomUuid } from '../../lib/uuid'
 import { callMcpTaskReceiptAtIdentity } from '../../api/mcp'
 import { artifactWorkspaceBody, type ArtifactWorkspace } from '../../api/published-artifacts'
 import { parseUniqueJson } from '../../lib/json-unique'

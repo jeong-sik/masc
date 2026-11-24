@@ -1,10 +1,7 @@
-import { sha256 } from '@noble/hashes/sha2.js'
-import { bytesToHex } from '@noble/hashes/utils.js'
-import { fromByteArray, toByteArray } from 'base64-js'
-import { validate as isUuid, version as uuidVersion } from 'uuid'
 import { get, type GetOptions } from './core'
 import { decodeExactSkillReference } from './dashboard-skills'
 import { isRecord } from '../components/common/normalize'
+import { isUuid, uuidVersion } from '../lib/uuid'
 
 function fields(value: unknown, required: readonly string[], optional: readonly string[] = []): Record<string, unknown> {
   if (!isRecord(value) || required.some(key => !Object.hasOwn(value, key))
@@ -42,7 +39,35 @@ function boolean(value: unknown): boolean {
   if (typeof value !== 'boolean') throw new Error('Expected result boolean')
   return value
 }
-function hash(bytes: Uint8Array): string { return bytesToHex(sha256(bytes)) }
+
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const copy = new Uint8Array(bytes.byteLength)
+  copy.set(bytes)
+  const buf = await crypto.subtle.digest('SHA-256', copy)
+  return Array.from(new Uint8Array(buf), b => b.toString(16).padStart(2, '0')).join('')
+}
+
+function decodeBase64Strict(input: string): Uint8Array {
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(input)) {
+    throw new Error('Invalid original result base64 bytes')
+  }
+  const binary = atob(input)
+  const out = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) {
+    out[i] = binary.charCodeAt(i)
+  }
+  // Canonical round-trip check
+  let roundTrip = ''
+  const chunkSize = 0x8000
+  for (let i = 0; i < out.length; i += chunkSize) {
+    roundTrip += String.fromCharCode(...out.subarray(i, i + chunkSize))
+  }
+  if (btoa(roundTrip) !== input) {
+    throw new Error('Invalid original result base64 bytes')
+  }
+  return out
+}
+
 const utf8 = new TextEncoder()
 
 export interface AsyncRequestIdentity { submitted_by: string; request_id: string; keeper_name: string }
@@ -171,7 +196,6 @@ function validatePhysicalRequest(request: Record<string, unknown>): void {
 }
 
 export async function fetchAsyncRequestStatus(identity: AsyncRequestIdentity, opts: GetOptions = {}): Promise<AsyncRequestStatus> {
-  // Target identities are exact store coordinates, not display labels.
   if ([identity.keeper_name, identity.submitted_by, identity.request_id].some(value => value.trim() !== value)) throw new Error('Request identity contains outer whitespace')
   text(identity.keeper_name)
   const query = new URLSearchParams({ submitted_by: text(identity.submitted_by), request_id: text(identity.request_id) })
@@ -240,8 +264,7 @@ export async function fetchOriginalToolResult(keeper: string, executionId: strin
       const start = integer(page.offset), next = integer(page.next_offset), eof = boolean(page.eof)
       const content = string(page.content)
       const encoding = enumeration(page.encoding, ['utf-8', 'base64'])
-      const bytes = encoding === 'utf-8' ? utf8.encode(content) : toByteArray(content)
-      if (encoding === 'base64' && fromByteArray(bytes) !== content) throw new Error('Invalid original result base64 bytes')
+      const bytes = encoding === 'utf-8' ? utf8.encode(content) : decodeBase64Strict(content)
       if (encoding === 'utf-8' && new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes) !== content) throw new Error('Invalid original UTF8 page')
       if (start !== offset || next < start || next > identity.total_bytes || eof !== (next === identity.total_bytes)
           || bytes.byteLength !== next - start || (!eof && next === start) || digest(page.sha256) !== identity.body_sha256) {
@@ -253,7 +276,7 @@ export async function fetchOriginalToolResult(keeper: string, executionId: strin
       const body = new Uint8Array(identity.total_bytes)
       let position = 0
       for (const chunk of chunks) { body.set(chunk, position); position += chunk.byteLength }
-      if (hash(body) !== identity.body_sha256) throw new Error('Original result body digest mismatch')
+      if (await sha256Hex(body) !== identity.body_sha256) throw new Error('Original result body digest mismatch')
       const complete = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(body)
       opts.signal?.throwIfAborted()
       return { state: 'body', ...identity, content: complete }

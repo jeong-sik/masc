@@ -1368,8 +1368,8 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             type="button"
             class="fl-create fl-top-btn primary"
             data-testid="keeper-create-entry"
-            title="Registry에서 페르소나를 골라 키퍼를 생성합니다"
-            onClick=${() => navigate('registry', {})}
+            title="Keepers 화면으로 이동"
+            onClick=${() => navigate('keepers', {})}
           >＋ 새 Keeper</button>
         </div>
         <div class="fl-meta"><span class="live">● live</span><span>${namespaceName}</span></div>

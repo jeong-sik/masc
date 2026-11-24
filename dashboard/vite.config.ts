@@ -4,7 +4,6 @@ import { defineConfig, type HtmlTagDescriptor, type Plugin } from 'vite'
 import preact from '@preact/preset-vite'
 import tailwindcss from '@tailwindcss/vite'
 import { sourceContextPlugin } from './dev/source-context-plugin'
-import { rhwpNoticesPlugin } from './dev/rhwp-notices-plugin'
 import { visualizer } from 'rollup-plugin-visualizer'
 
 const dashboardBasePath = '/dashboard/'
@@ -19,37 +18,6 @@ function chunkByPackage(id: string, packageNames: string[]): boolean {
     id.includes(`/node_modules/${packageName}/`),
   )
 }
-
-const heavyMermaidDependencyChunks: Array<{ packages: string[]; chunk: string }> = [
-  {
-    packages: ['cytoscape'],
-    chunk: 'cytoscape',
-  },
-  {
-    packages: ['cytoscape-cose-bilkent', 'cose-base', 'layout-base'],
-    chunk: 'mermaid-cose-layout',
-  },
-  {
-    packages: ['@mermaid-js/parser'],
-    chunk: 'mermaid-parser',
-  },
-  {
-    packages: ['langium'],
-    chunk: 'mermaid-parser-langium',
-  },
-  {
-    packages: ['chevrotain', 'chevrotain-allstar', '@chevrotain/regexp-to-ast'],
-    chunk: 'mermaid-parser-chevrotain',
-  },
-  {
-    packages: [
-      'vscode-jsonrpc',
-      'vscode-languageserver-protocol',
-      'vscode-languageserver-types',
-    ],
-    chunk: 'mermaid-parser-vscode-lsp',
-  },
-]
 
 function dashboardAssetHref(fileName: string): string {
   return `${dashboardBasePath}${fileName}`
@@ -161,7 +129,6 @@ export default defineConfig(({ command }) => {
   return {
     plugins: [
       sourceContextPlugin(),
-      rhwpNoticesPlugin(),
       tailwindcss(),
       preact(),
       ...reportPlugins,
@@ -172,47 +139,33 @@ export default defineConfig(({ command }) => {
     build: {
       outDir: '../assets/dashboard',
       emptyOutDir: true,
-      // 'hidden' produces .map files but omits the sourceMappingURL
-      // comment from JS, so browsers don't auto-fetch maps. Maps stay
-      // available for manual attach via DevTools "Add source map" or
-      // out-of-band tooling. Cuts the deployment artifact (Docker image
-      // copy step) from ~30 MB to ~7.3 MB without losing debug coverage.
       sourcemap: 'hidden',
       modulePreload: {
-        // Vite's automatic HTML preloads are all-or-nothing here; the
-        // build hook below injects the single manifest-derived vendor tag.
         resolveDependencies(_url, deps, { hostType }) {
           if (hostType === 'html') return []
           return deps
         },
-        // MASC dashboard targets the operator's modern browser runtime.
         polyfill: false,
       },
       rollupOptions: {
         output: {
-          // Keep manual chunk assignments explicit so Rollup does not merge
-          // runtime/helper dependencies into feature chunks. This avoids
-          // matching Vite/Rollup private virtual module ids.
           onlyExplicitManualChunks: true,
           manualChunks(id) {
             const normalizedId = normalizeModuleId(id)
-            for (const { packages, chunk } of heavyMermaidDependencyChunks) {
-              if (chunkByPackage(normalizedId, packages)) return chunk
-            }
-            if (normalizedId.includes('/node_modules/mermaid/dist/chunks/mermaid.core/')) {
-              const filename = normalizedId
-                .slice(normalizedId.lastIndexOf('/') + 1)
-                .replace(/\.mjs$/, '')
-              return `mermaid-${filename}`
-            }
-            if (normalizedId.includes('/node_modules/mermaid/dist/mermaid.core.mjs')) {
-              return 'mermaid-core'
-            }
-            if (chunkByPackage(normalizedId, ['effect'])) {
-              return 'effect-runtime'
-            }
             if (chunkByPackage(normalizedId, ['preact', 'htm', '@preact/signals', '@preact/signals-core'])) {
               return 'vendor'
+            }
+            if (chunkByPackage(normalizedId, ['lucide-preact'])) {
+              return 'icons'
+            }
+            if (chunkByPackage(normalizedId, ['uplot'])) {
+              return 'charts'
+            }
+            if (chunkByPackage(normalizedId, ['@tanstack/preact-table', '@tanstack/table-core', '@tanstack/virtual-core'])) {
+              return 'table'
+            }
+            if (chunkByPackage(normalizedId, ['marked', 'dompurify', 'diff'])) {
+              return 'markdown'
             }
             return undefined
           },
@@ -232,8 +185,6 @@ export default defineConfig(({ command }) => {
               changeOrigin: true,
               configure(proxy) {
                 proxy.on('proxyReqWs', (proxyReq, req, socket) => {
-                  // Preserve the browser's same-origin boundary before translating
-                  // both authority headers to the configured development backend.
                   const origin = req.headers.origin
                   let sameOrigin = false
                   try {
@@ -250,7 +201,6 @@ export default defineConfig(({ command }) => {
                 })
               },
             },
-            '/yjs': { target: proxyTarget, ws: true },
           },
         }
       : undefined,

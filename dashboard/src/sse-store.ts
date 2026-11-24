@@ -735,11 +735,6 @@ export function routeServerPushEvent(event: SSEEvent): void {
     || event.type === 'runtime_param_changed'
     || approvalRefreshEvent
   ) {
-    if (route.value.tab === 'command') {
-      scheduleRefresh('command_route', () => {
-        void refreshActiveRoute()
-      })
-    }
     if (_refreshGateFn) {
       const opts = approvalRefreshEvent ? { force: true } : undefined
       scheduleRefresh('gate', () => void handleGate(opts))

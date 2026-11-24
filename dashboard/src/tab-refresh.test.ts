@@ -26,21 +26,11 @@ vi.mock('./components/tool-quality-panel', () => ({
   refreshToolQuality: vi.fn(),
 }))
 
-vi.mock('./components/server-config', () => ({
-  refreshServerConfig: vi.fn(),
-}))
-
-vi.mock('./components/observatory/observatory', () => ({
-  refreshObservatorySurface: vi.fn(),
-}))
-
 vi.mock('./keeper-runtime', () => ({
   refreshActiveKeeperChatHistory: vi.fn(),
 }))
 
-import { refreshObservatorySurface } from './components/observatory/observatory'
 import { refreshActiveKeeperChatHistory } from './keeper-runtime'
-import { refreshServerConfig } from './components/server-config'
 import { refreshForRoute, refreshPlanForRoute } from './tab-refresh'
 import { refreshExecution, refreshFusionBoard, refreshFusionRuns, refreshShell } from './store'
 
@@ -73,13 +63,6 @@ describe('refreshPlanForRoute', () => {
     })).toEqual(['namespaceTruth', 'execution', 'missionSnapshot', 'activeKeeperChat'])
   })
 
-  it('hydrates the registry roster on direct entry', () => {
-    expect(refreshPlanForRoute({
-      tab: 'registry',
-      params: {},
-    })).toEqual(['namespaceTruth', 'execution', 'missionSnapshot'])
-  })
-
   it('hydrates the top-level board surface from the board store', () => {
     expect(refreshPlanForRoute({
       tab: 'board',
@@ -98,59 +81,23 @@ describe('refreshPlanForRoute', () => {
     expect(refreshPlanForRoute({
       tab: 'monitoring',
       params: {},
-    })).toEqual(['namespaceTruth', 'execution', 'missionSnapshot'])
+    })).toEqual(['namespaceTruth', 'missionSnapshot'])
 
     expect(refreshPlanForRoute({
       tab: 'monitoring',
-      params: { section: 'agents' },
-    })).toEqual(['namespaceTruth', 'execution', 'missionSnapshot'])
-
-    expect(refreshPlanForRoute({
-      tab: 'monitoring',
-      params: { section: 'journey' },
-    })).toEqual(['execution'])
-
-    expect(refreshPlanForRoute({
-      tab: 'monitoring',
-      params: { section: 'observatory' },
-    })).toEqual(['namespaceTruth', 'observatory'])
-
-    expect(refreshPlanForRoute({
-      tab: 'monitoring',
-      params: { section: 'observatory', view: 'activity' },
-    })).toEqual(['namespaceTruth', 'observatory'])
-
-    expect(refreshPlanForRoute({
-      tab: 'monitoring',
-      params: { section: 'observatory', view: 'live' },
-    })).toEqual(['namespaceTruth', 'observatory'])
+      params: { section: 'runtime' },
+    })).toEqual(['namespaceTruth', 'missionSnapshot'])
   })
 
-  it('keeps the consolidated command surface hydrated for ops queue deep links', () => {
-    expect(refreshPlanForRoute({
-      tab: 'command',
-      params: { section: 'operations' },
-    })).toEqual(['namespaceTruth', 'operatorSnapshot', 'operatorWorkspaceDigest'])
-  })
-
-  it('refreshes the new workspace and lab sections only where store-backed data is needed', () => {
-    // The default Work board (section: 'work') reads the same flat goals + tasks
-    // signals as planning, so it must fetch both. Regression guard: a missing
-    // 'work' branch left the board empty (0 goals / 0 jobs) despite live data.
+  it('refreshes the workspace sections only where store-backed data is needed', () => {
     expect(refreshPlanForRoute({
       tab: 'workspace',
       params: { section: 'work' },
     })).toEqual(['goals', 'execution'])
 
-    // Bare workspace route normalizes to the 'work' default section.
     expect(refreshPlanForRoute({
       tab: 'workspace',
       params: {},
-    })).toEqual(['goals', 'execution'])
-
-    expect(refreshPlanForRoute({
-      tab: 'workspace',
-      params: { section: 'planning' },
     })).toEqual(['goals', 'execution'])
 
     expect(refreshPlanForRoute({
@@ -159,59 +106,9 @@ describe('refreshPlanForRoute', () => {
     })).toEqual(['board'])
 
     expect(refreshPlanForRoute({
-      tab: 'lab',
-      params: { section: 'harness' },
-    })).toEqual(['harness'])
-
-    expect(refreshPlanForRoute({
       tab: 'monitoring',
       params: { section: 'fleet-health', view: 'tool-quality' },
     })).toEqual(['toolQuality'])
-
-    expect(refreshPlanForRoute({
-      tab: 'lab',
-      params: { section: 'tools' },
-    })).toEqual([])
-  })
-
-  it('hydrates the Code IDE route from live execution state', () => {
-    expect(refreshPlanForRoute({
-      tab: 'code',
-      params: { section: 'ide-shell', view: 'source' },
-    })).toEqual(['namespaceTruth', 'execution', 'missionSnapshot'])
-  })
-
-  it('refreshes the inspector shell through server config once (Phase 6: view param)', async () => {
-    refreshForRoute({
-      tab: 'command',
-      params: { section: 'operations', view: 'inspector' },
-    })
-
-    await waitFor(() => {
-      expect(refreshServerConfig).toHaveBeenCalledTimes(1)
-    })
-  })
-
-  it('refreshes observatory by triggering the timeline track fetch only', async () => {
-    refreshForRoute({
-      tab: 'monitoring',
-      params: { section: 'observatory' },
-    })
-
-    await waitFor(() => {
-      expect(refreshObservatorySurface).toHaveBeenCalledTimes(1)
-    })
-  })
-
-  it('keeps retired observatory lens routes on the unified observatory surface', async () => {
-    refreshForRoute({
-      tab: 'monitoring',
-      params: { section: 'observatory', view: 'activity' },
-    })
-
-    await waitFor(() => {
-      expect(refreshObservatorySurface).toHaveBeenCalledTimes(1)
-    })
   })
 
   it('uses the budgeted shell refresh path on overview navigation', () => {
@@ -230,24 +127,6 @@ describe('refreshPlanForRoute', () => {
     })
 
     expect(refreshExecution).toHaveBeenCalledWith({ immediate: true })
-  })
-
-  it('uses the scheduler-backed execution refresh path on monitoring navigation', () => {
-    refreshForRoute({
-      tab: 'monitoring',
-      params: { section: 'journey' },
-    })
-
-    expect(refreshExecution).toHaveBeenCalledWith()
-  })
-
-  it('uses the scheduler-backed execution refresh path on Code IDE navigation', () => {
-    refreshForRoute({
-      tab: 'code',
-      params: { section: 'ide-shell', view: 'source' },
-    })
-
-    expect(refreshExecution).toHaveBeenCalledWith()
   })
 
   it('uses the scheduler-backed execution refresh path on Keepers navigation', () => {
@@ -319,14 +198,5 @@ describe('refreshPlanForRoute fleet-health view-aware branching', () => {
       tab: 'monitoring',
       params: { section: 'fleet-health', view: 'tool-quality' },
     })).toEqual(['toolQuality'])
-  })
-
-  it('view=comparison hydrates fleet comparison rows', () => {
-    const plan = refreshPlanForRoute({
-      tab: 'monitoring',
-      params: { section: 'fleet-health', view: 'comparison' },
-    })
-    expect(plan).toContain('execution')
-    expect(plan).toContain('toolQuality')
   })
 })

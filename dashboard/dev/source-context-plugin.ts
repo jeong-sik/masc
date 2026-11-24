@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto'
 import { relative, resolve, sep } from 'node:path'
 import ts from 'typescript'
-import MagicString from 'magic-string'
 import type { Plugin } from 'vite'
 
 // TypeScript parses tagged templates and JSX; no HTML/selector guessing.
@@ -23,8 +22,6 @@ export function instrumentSource(code: string, id: string, projectRoot: string) 
         if ((spec.propertyName?.text ?? spec.name.text) === 'html') htmlImports.add(spec.name)
       }
     }
-    // A shadowed html import is left untouched. This explicit unsupported case
-    // cannot attach the wrong template implementation to a source location.
     if ((ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isBindingElement(node)
       || ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)
       || ts.isFunctionExpression(node) || ts.isClassExpression(node))
@@ -39,61 +36,80 @@ export function instrumentSource(code: string, id: string, projectRoot: string) 
   let helper = '__mascSourceHtml'
   while (names.has(helper)) helper += '_'
   let hasTemplates = false
-  const edits: {start: number; end: number; text: string}[] = []
+  const edits: { start: number; end: number; text: string }[] = []
   const digest = createHash('sha256').update(code).digest('hex')
   function metadata(node: ts.Node, kind: 'template' | 'element') {
     const point = source.getLineAndCharacterOfPosition(node.getStart(source))
-    return JSON.stringify({schema:'masc.source.v1',file,line:point.line+1,
-      column:point.character+1,kind,digest})
+    return JSON.stringify({
+      schema: 'masc.source.v1', file, line: point.line + 1,
+      column: point.character + 1, kind, digest,
+    })
   }
   function visit(node: ts.Node) {
     if (ts.isTaggedTemplateExpression(node) && ts.isIdentifier(node.tag) && tags.has(node.tag.text)) {
       hasTemplates = true
-      // A hoisted export may run through an ESM cycle before this module's
-      // declarations initialize. Resolve its cached tag at the call site.
-      edits.push({start:node.tag.getStart(source),end:node.tag.end,
-        text:`${helper}(${JSON.stringify(metadata(node, 'template'))})`})
+      edits.push({
+        start: node.tag.getStart(source),
+        end: node.tag.end,
+        text: `${helper}(${JSON.stringify(metadata(node, 'template'))})`,
+      })
     }
     if ((ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node))
       && ts.isIdentifier(node.tagName)
       && ((node.tagName.text.charAt(0) >= 'a' && node.tagName.text.charAt(0) <= 'z') || node.tagName.text.includes('-'))
       && !node.attributes.properties.some(prop => ts.isJsxAttribute(prop) && prop.name.getText(source) === 'data-masc-source')) {
-      edits.push({start:node.attributes.end,end:node.attributes.end,
-        text:` data-masc-source={${JSON.stringify(metadata(node, 'element'))}}`})
+      edits.push({
+        start: node.attributes.end,
+        end: node.attributes.end,
+        text: ` data-masc-source={${JSON.stringify(metadata(node, 'element'))}}`,
+      })
     }
     ts.forEachChild(node, visit)
   }
   visit(source)
   if (!edits.length) return undefined
-  const output = new MagicString(code)
-  for (const edit of edits) {
-    if (edit.start === edit.end) output.appendLeft(edit.start, edit.text)
-    else output.overwrite(edit.start, edit.end, edit.text)
-  }
-  if (hasTemplates) output.prepend(`import { sourceHtml as ${helper} } from "/@masc/source-context-runtime";\n`)
-  return {code:output.toString(), map:output.generateMap({hires:true,source:id,includeContent:true})}
 
+  // Apply non-overlapping edits from end to start so offsets remain exact.
+  const ordered = [...edits].sort((a, b) => b.start - a.start || b.end - a.end)
+  let output = code
+  for (const edit of ordered) {
+    output = output.slice(0, edit.start) + edit.text + output.slice(edit.end)
+  }
+  if (hasTemplates) {
+    output = `import { sourceHtml as ${helper} } from "/@masc/source-context-runtime";\n${output}`
+  }
+  return {
+    code: output,
+    map: {
+      version: 3 as const,
+      file: id,
+      sources: [id],
+      sourcesContent: [code],
+      names: [] as string[],
+      mappings: '',
+    },
+  }
 }
 
 export function sourceContextPlugin(): Plugin {
   let projectRoot = ''
   let runtime = ''
   return {
-    name:'masc-browser-source-context', apply:'serve', enforce:'pre',
+    name: 'masc-browser-source-context', apply: 'serve', enforce: 'pre',
     configResolved(config) {
-      projectRoot = resolve(config.root,'..')
-      runtime = resolve(config.root,'dev/source-context-runtime.ts')
+      projectRoot = resolve(config.root, '..')
+      runtime = resolve(config.root, 'dev/source-context-runtime.ts')
     },
     resolveId(id) {
       if (id === '/@masc/source-context-runtime') return runtime
       return undefined
     },
-    transform(code,id) {
+    transform(code, id) {
       const path = id.split('?')[0]
-      if (!path || !['.ts','.tsx','.js','.jsx'].some(ext => path.endsWith(ext))
-        || !path.startsWith(resolve(projectRoot,'dashboard/src')+sep)
+      if (!path || !['.ts', '.tsx', '.js', '.jsx'].some(ext => path.endsWith(ext))
+        || !path.startsWith(resolve(projectRoot, 'dashboard/src') + sep)
         || path.endsWith('.test.ts') || path.endsWith('.test.tsx')) return undefined
-      return instrumentSource(code,path,projectRoot)
+      return instrumentSource(code, path, projectRoot)
     },
   }
 }

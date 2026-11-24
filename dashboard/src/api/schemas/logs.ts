@@ -1,4 +1,5 @@
-import { Data, Effect, Option, ParseResult, Schema } from 'effect'
+import { Option, TaggedError, ok, err, type Result } from '../../lib/result'
+import { ParseResult, Schema } from '../../lib/wire-schema'
 
 const LogLevelSchema = Schema.Literal('DEBUG', 'INFO', 'WARN', 'ERROR')
 const LogSourceSchema = Schema.Literal(
@@ -200,13 +201,13 @@ export interface LogsData {
   readonly entries: readonly LogEntry[]
 }
 
-export class LogsSchemaDriftError extends Data.TaggedError(
+export class LogsSchemaDriftError extends TaggedError(
   'LogsSchemaDriftError',
 )<{
   readonly domain: 'logs'
   readonly issues: ReadonlyArray<ParseResult.ArrayFormatterIssue>
   readonly message: string
-}> {}
+}>() {}
 
 function schemaDriftError(error: ParseResult.ParseError): LogsSchemaDriftError {
   const issues = ParseResult.ArrayFormatter.formatErrorSync(error)
@@ -265,14 +266,12 @@ const STRICT_PARSE_OPTIONS = {
 
 export function decodeLogsData(
   data: unknown,
-): Effect.Effect<LogsData, LogsSchemaDriftError> {
-  return Schema.decodeUnknown(
+): Result<LogsData, LogsSchemaDriftError> {
+  const decoded = Schema.decodeUnknownResult(
     LogsValidatedWireSchema,
     STRICT_PARSE_OPTIONS,
-  )(data).pipe(
-    Effect.map(toLogsData),
-    Effect.mapError(schemaDriftError),
-  )
+  )(data)
+  return decoded.ok ? ok(toLogsData(decoded.value)) : err(schemaDriftError(decoded.error))
 }
 
 export interface LogsStreamFrame {
@@ -281,9 +280,9 @@ export interface LogsStreamFrame {
   readonly limit: number
 }
 
-export function decodeLogsStreamFrame(data: unknown): Effect.Effect<LogsStreamFrame, LogsSchemaDriftError> {
-  return Schema.decodeUnknown(LogsStreamWireSchema, STRICT_PARSE_OPTIONS)(data).pipe(
-    Effect.map(wire => ({ reset: wire.reset, data: toLogsData(wire), limit: wire.query.limit })),
-    Effect.mapError(schemaDriftError),
-  )
+export function decodeLogsStreamFrame(data: unknown): Result<LogsStreamFrame, LogsSchemaDriftError> {
+  const decoded = Schema.decodeUnknownResult(LogsStreamWireSchema, STRICT_PARSE_OPTIONS)(data)
+  return decoded.ok
+    ? ok({ reset: decoded.value.reset, data: toLogsData(decoded.value), limit: decoded.value.query.limit })
+    : err(schemaDriftError(decoded.error))
 }

@@ -1,4 +1,4 @@
-import { getStaticTOMLValue, parseTOML, ParseError, type AST } from 'toml-eslint-parser'
+import { getStaticTOMLValue, parseTOML, ParseError, type AST } from './toml-lite'
 
 export type RuntimeTomlTransportKind = 'endpoint' | 'command' | 'missing'
 export type RuntimeTomlCredentialType = 'env' | 'file' | 'inline' | 'none'

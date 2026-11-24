@@ -1,11 +1,6 @@
-import { Effect } from 'effect'
 import { describe, expect, it } from 'vitest'
-
-import {
-  DashboardHttp,
-  DashboardTransportError,
-  type DashboardHttpService,
-} from './effect-http'
+import { err, ok } from '../lib/result'
+import { DashboardTransportError } from './effect-http'
 import {
   DashboardConfigSchemaDriftError,
   fetchDashboardConfig,
@@ -23,46 +18,41 @@ const currentWire = {
   categories: {},
 } as const
 
-function runWithHttp<A, E>(
-  program: Effect.Effect<A, E, DashboardHttp>,
-  http: DashboardHttpService,
-): Effect.Effect<A, E> {
-  return program.pipe(Effect.provideService(DashboardHttp, http))
-}
-
 describe('fetchDashboardConfig', () => {
-  it('fetches and decodes unknown config data at the typed boundary', () => {
-    const data = Effect.runSync(runWithHttp(fetchDashboardConfig(), {
-      getUnknown: path => {
+  it('fetches and decodes unknown config data at the typed boundary', async () => {
+    const res = await fetchDashboardConfig({
+      getUnknown: async path => {
         expect(path).toBe('/api/v1/dashboard/config')
-        return Effect.succeed(currentWire)
+        return ok(currentWire)
       },
-    }))
+    })
 
-    expect(data.server.version).toBe('0.42.0')
+    expect(res.ok).toBe(true)
+    if (!res.ok) return
+    expect(res.value.server.version).toBe('0.42.0')
   })
 
-  it('preserves transport failures as typed values', () => {
+  it('preserves transport failures as typed values', async () => {
     const transportError = new DashboardTransportError({
       method: 'GET',
       path: '/api/v1/dashboard/config',
       message: 'offline',
       cause: new Error('offline'),
     })
-    const error = Effect.runSync(Effect.flip(runWithHttp(
-      fetchDashboardConfig(),
-      { getUnknown: () => Effect.fail(transportError) },
-    )))
+    const res = await fetchDashboardConfig({ getUnknown: async () => err(transportError) })
 
-    expect(error).toBe(transportError)
+    expect(res.ok).toBe(false)
+    if (res.ok) return
+    expect(res.error).toBe(transportError)
   })
 
-  it('maps malformed payloads to config drift', () => {
-    const error = Effect.runSync(Effect.flip(runWithHttp(
-      fetchDashboardConfig(),
-      { getUnknown: () => Effect.succeed({ generated_at: 'now' }) },
-    )))
+  it('maps malformed payloads to config drift', async () => {
+    const res = await fetchDashboardConfig({
+      getUnknown: async () => ok({ generated_at: 'now' }),
+    })
 
-    expect(error).toBeInstanceOf(DashboardConfigSchemaDriftError)
+    expect(res.ok).toBe(false)
+    if (res.ok) return
+    expect(res.error).toBeInstanceOf(DashboardConfigSchemaDriftError)
   })
 })

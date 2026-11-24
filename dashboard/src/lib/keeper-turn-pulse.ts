@@ -1,4 +1,5 @@
-import { Either, ParseResult, Schema } from 'effect'
+import { Either } from './result'
+import { ParseResult, Schema } from './wire-schema'
 
 // Mirror of Keeper_turn_pulse.recent_turns_json (lib/keeper/keeper_turn_pulse.ml):
 // half-hour slots, newest first, a slot with no turn left out. A slot counts

@@ -1,6 +1,12 @@
 import { ApiRequestError, get, getWithResponse, type GetOptions } from './core'
-import type { FileTreeNode } from '../components/ide/file-tree-store'
 import { parseWorkspaceSource, type WorkspaceSource } from './workspace-source'
+
+export interface FileTreeNode {
+  readonly path: string
+  readonly name: string
+  readonly kind: 'file' | 'dir'
+  readonly children?: ReadonlyArray<FileTreeNode>
+}
 
 export type { WorkspaceSource } from './workspace-source'
 

@@ -1,4 +1,4 @@
-import { Schema } from 'effect'
+import { Schema } from '../lib/wire-schema'
 import { DEFAULT_POST_TIMEOUT_MS, get, getPublic, getWithResponse, post } from './core'
 
 const revisionFields = {

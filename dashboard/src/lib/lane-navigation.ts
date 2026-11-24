@@ -1,4 +1,4 @@
-import { parseTOML, type AST } from 'toml-eslint-parser'
+import { parseTOML, type AST } from './toml-lite'
 import { LANE_IDS } from '../api/dashboard-standalone-lanes'
 import { isLaneRunIdentity, type LaneRunIdentity } from '../api/dashboard-exact-lane-runs'
 import type { LaneInventoryRow } from '../api/lane-inventory'

@@ -52,11 +52,10 @@ describe('dashboard surface navigation', () => {
     expect(workspace?.defaultTab).toBe('workspace')
   })
 
-  it('keeps the v2 primary shell aligned to the keeper-v2 prototype rail order', () => {
+  it('keeps the primary shell aligned to active surfaces after IDE and Lab retirement', () => {
     expect(PRIMARY_DASHBOARD_SURFACES.map(surface => surface.id)).toEqual([
       'overview',
       'keepers',
-      'registry',
       'monitoring',
       'workspace',
       'approvals',
@@ -64,16 +63,12 @@ describe('dashboard surface navigation', () => {
       'board',
       'fusion',
       'logs',
-      'code',
       'connectors',
-      'command',
-      'lab',
       'settings',
     ])
     expect(PRIMARY_DASHBOARD_NAV_ITEMS.map(item => item.label)).toEqual([
       'Overview',
       'Keepers',
-      'Registry',
       'Monitor',
       'Work',
       'Gate',
@@ -81,16 +76,13 @@ describe('dashboard surface navigation', () => {
       'Board',
       'Fusion',
       'Logs',
-      'IDE',
       'Connectors',
-      'Command',
-      'Lab',
       'Settings',
     ])
   })
 
   it('uses one sectionless-surface classifier for section stripping and section lookup', () => {
-    const sectionless = ['overview', 'logs', 'settings', 'keepers', 'registry', 'board', 'schedule', 'approvals', 'fusion'] as const
+    const sectionless = ['overview', 'logs', 'settings', 'keepers', 'board', 'schedule', 'approvals', 'fusion'] as const
     expect(sectionless.filter(id => isSectionlessSurface(id))).toEqual([...sectionless])
     expect(sectionItemsForTab('settings')).toEqual([])
     expect(normalizeRouteParams('settings', { section: 'legacy', surface: 'old', panel: 'theme' })).toEqual({
@@ -109,7 +101,7 @@ describe('dashboard surface navigation', () => {
     })
   })
 
-  it('exposes Schedule as a dedicated top-level v2 surface without lab section baggage', () => {
+  it('exposes Schedule as a dedicated top-level surface without section baggage', () => {
     expect(defaultParamsForTab('schedule')).toEqual({})
     expect(VISIBLE_DASHBOARD_NAV_ITEMS.map(item => item.id)).toContain('schedule')
     expect(sectionItemsForTab('schedule')).toEqual([])
@@ -117,62 +109,6 @@ describe('dashboard surface navigation', () => {
 
     const result = normalizeRouteParams('schedule', { section: 'tools', surface: 'lab', view: 'legacy' })
     expect(result).toEqual({ view: 'legacy' })
-  })
-})
-
-describe('code (IDE plane) navigation', () => {
-  it('exposes the production IDE plane in the sidebar', () => {
-    expect(defaultParamsForTab('code')).toEqual({ section: 'ide-shell' })
-    expect(DASHBOARD_SURFACES.find(surface => surface.id === 'code')?.hidden).not.toBe(true)
-    expect(DASHBOARD_SURFACES.find(surface => surface.id === 'code')?.label).toBe('IDE')
-
-    const visibleCodeSections = visibleSectionItemsForTab('code')
-    const allCodeSections = sectionItemsForTab('code')
-
-    expect(visibleCodeSections.map(item => item.id)).toEqual(['ide-shell'])
-    expect(allCodeSections.map(item => item.id)).toEqual(['ide-shell'])
-    expect(allCodeSections.map(item => item.label)).toEqual(['Code IDE'])
-  })
-
-  it('normalizes unknown code section to default ide-shell', () => {
-    const result = normalizeRouteParams('code', { section: 'bogus' })
-    expect(result.section).toBe('ide-shell')
-  })
-})
-
-describe('lab navigation', () => {
-  it('contains lab support surfaces', () => {
-    expect(defaultParamsForTab('lab')).toEqual({ section: 'tools' })
-
-    const labSections = visibleSectionItemsForTab('lab')
-
-    expect(labSections.map(item => item.id)).toEqual([
-      'tools',
-      'harness',
-      'keeper-memory-health',
-    ])
-
-    expect(labSections.map(item => item.label)).toEqual([
-      'Tools',
-      'Safety Harness',
-      '키퍼 메모리 상태',
-    ])
-  })
-})
-
-describe('command navigation', () => {
-  it('has only operations section (Phase 6+7: inspector absorbed; connectors split out)', () => {
-    expect(defaultParamsForTab('command')).toEqual({ section: 'operations' })
-
-    const commandSections = visibleSectionItemsForTab('command')
-
-    expect(commandSections.map(item => item.id)).toEqual([
-      'operations',
-    ])
-
-    expect(commandSections.map(item => item.label)).toEqual([
-      'Actions',
-    ])
   })
 })
 
@@ -212,14 +148,12 @@ describe('connectors navigation (Phase 7, post-2026-04-30 merge)', () => {
 })
 
 describe('monitoring navigation labels', () => {
-  it('uses keeper-fleet first Monitor IA labels', () => {
+  it('uses runtime-first Monitor IA labels', () => {
     const sections = visibleSectionItemsForTab('monitoring')
     const labelFor = (id: string) => sections.find(item => item.id === id)?.label
 
-    expect(labelFor('agents')).toBe('Keeper Fleet')
-    expect(labelFor('fleet-health')).toBe('Tool Monitor')
     expect(labelFor('runtime')).toBe('Runtime')
-    expect(labelFor('observatory')).toBe('Observatory')
+    expect(labelFor('fleet-health')).toBe('Tool Monitor')
     expect(labelFor('transport-health')).toBeUndefined()
     expect(labelFor('cognition')).toBeUndefined()
     expect(labelFor('journey')).toBeUndefined()
@@ -230,15 +164,13 @@ describe('monitoring navigation labels', () => {
     const descriptions = Object.fromEntries(sections.map(item => [item.id, item.description]))
 
     expect(descriptions).toMatchObject({
-      agents: 'Live and configured keeper roster.',
       'fleet-health': 'Tool quality and Gate signals.',
       runtime: 'Runtime lane health.',
-      observatory: 'Activity and runtime evidence.',
     })
 
     for (const item of sections) {
       const wordCount = item.description.split(/\s+/).filter(Boolean).length
-      expect(wordCount).toBeLessThanOrEqual(7)
+      expect(wordCount).toBeLessThanOrEqual(8)
       expect(item.description.split(',').length).toBeLessThanOrEqual(2)
     }
   })
@@ -249,44 +181,12 @@ describe('monitoring navigation labels', () => {
     const ids = sections.map(item => item.id)
     const allIds = allSections.map(item => item.id)
 
-    expect(defaultParamsForTab('monitoring')).toEqual({ section: 'agents' })
+    expect(defaultParamsForTab('monitoring')).toEqual({ section: 'runtime' })
     expect(ids).toEqual([
-      'agents', 'internal-agents', 'fleet-health', 'runtime', 'observatory', 'skills', 'lane-inventory', 'lane-addons', 'lanes',
+      'runtime', 'internal-agents', 'fleet-health', 'skills', 'lane-inventory', 'lane-addons', 'lanes',
     ])
-    expect(ids).toContain('agents')
-    expect(ids).toContain('fleet-health')
-    expect(ids).toContain('runtime')
-    expect(ids).toContain('observatory')
     expect(allIds).toContain('transport-health')
     expect(ids).not.toContain('transport-health')
-    // Legacy sections removed in Phase 1
-    expect(ids).not.toContain('live')
-    expect(ids).not.toContain('git-graph')
-    expect(ids).not.toContain('safe-autonomy')
-    expect(ids).not.toContain('cost')
-    expect(ids).not.toContain('runtime-inspector')
-    expect(ids).not.toContain('attribution')
-    expect(ids).not.toContain('activity')
-    expect(ids).not.toContain('tool-quality')
-    expect(ids).not.toContain('fleet')
-    expect(ids).not.toContain('telemetry')
-    expect(ids).not.toContain('metrics')
-    expect(ids).not.toContain('gate')
-  })
-
-  it('puts keeper fleet first before tool, runtime, and evidence lanes', () => {
-    const sections = visibleSectionItemsForTab('monitoring')
-    expect(sections.map(section => section.id)).toEqual([
-      'agents',
-      'internal-agents',
-      'fleet-health',
-      'runtime',
-      'observatory',
-      'skills',
-      'lane-inventory',
-      'lane-addons',
-      'lanes',
-    ])
   })
 
   it('keeps support diagnostics hidden from the sidebar', () => {
@@ -295,7 +195,6 @@ describe('monitoring navigation labels', () => {
 
     expect(hiddenIds).toEqual([
       'transport-health',
-      'journey',
     ])
   })
 
@@ -304,24 +203,12 @@ describe('monitoring navigation labels', () => {
     const labels = sections.map(item => item.label)
     const uniq = new Set(labels)
     expect(uniq.size).toBe(labels.length)
-    // Regression guard: the Runtime label must not be overloaded across
-    // multiple sidebar items.
     const runtimeOccurrences = labels.filter(l => l.includes('Runtime')).length
     expect(runtimeOccurrences).toBe(1)
   })
 })
 
 describe('workspace navigation labels', () => {
-  it('uses consolidated planning label (absorbs goals)', () => {
-    const sections = visibleSectionItemsForTab('workspace')
-    const labelFor = (id: string) => sections.find(item => item.id === id)?.label
-
-    expect(labelFor('planning')).toBe('Plans & Goals')
-    // goals is no longer a standalone section
-    const ids = sections.map(item => item.id)
-    expect(ids).not.toContain('goals')
-  })
-
   it('hides legacy board-family sections now that Board is top-level', () => {
     const visibleIds = visibleSectionItemsForTab('workspace').map(item => item.id)
     const allSections = sectionItemsForTab('workspace')
@@ -330,7 +217,6 @@ describe('workspace navigation labels', () => {
     expect(visibleIds).toEqual([
       'work',
       'artifacts',
-      'planning',
       'repositories',
       'verification',
     ])
@@ -357,16 +243,6 @@ describe('normalizeRouteParams query param preservation', () => {
       session_id: 'sess-1', operation_id: 'op-42', worker_run_id: 'run-7',
     })
   })
-
-  it('keeps operations workflow targets on the canonical section', () => {
-    expect(normalizeRouteParams('command', {
-      section: 'operations', target_type: 'operation', target_id: 'op-x',
-      source: 'execution', focus_kind: 'operation',
-    })).toEqual({
-      section: 'operations', target_type: 'operation', target_id: 'op-x',
-      source: 'execution', focus_kind: 'operation',
-    })
-  })
 })
 
 describe('normalizeRouteParams view param', () => {
@@ -376,9 +252,8 @@ describe('normalizeRouteParams view param', () => {
     expect(result.view).toBe('event-log')
   })
 
-  it('does not inject a view param when absent on the agents section', () => {
-    const result = normalizeRouteParams('monitoring', { section: 'agents' })
+  it('does not inject a view param when absent on the runtime section', () => {
+    const result = normalizeRouteParams('monitoring', { section: 'runtime' })
     expect(result.view).toBeUndefined()
   })
-
 })

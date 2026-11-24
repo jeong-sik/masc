@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { getStaticTOMLValue, parseTOML } from 'toml-eslint-parser'
+import { getStaticTOMLValue, parseTOML } from './toml-lite'
 import { bindingErrors, initialBindingInput, inputFromValue, packageDeclaration, parseBindingSchema, readBindingInput } from './lane-binding-form'
 
 const object = (properties: Record<string, unknown>, required = Object.keys(properties)) => ({ type: 'object', properties, required, additionalProperties: false })

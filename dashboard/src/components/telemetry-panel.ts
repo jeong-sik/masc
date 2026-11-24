@@ -1,31 +1,7 @@
-// MASC Dashboard — runtime telemetry sub-panel.
-//
-// Hosts the "infra/billing/audit" views that previously lived inline in
-// runtime-panel.ts: `cost`, `audit`. Today they both
-// dispatch to the same CostDashboard component (it sub-routes on the view
-// key); this module just owns the view-set membership predicate and the
-// thin render wrapper so runtime-panel.ts can ask "is this a telemetry view"
-// without enumerating the labels itself.
-//
-// Behavior is unchanged from the previous inline form: URLs, cockpit aliases
-// (audit / ct-agt / ct-mtx / ct-lat), and chip
-// strip layout (Primary vs Advanced) all stay where they are. This is a
-// pure structural extraction so a future PR can grow the telemetry surface
-// (richer dispatch, dedicated tabs, separate store) without touching
-// runtime-panel.
-
 import { html } from 'htm/preact'
-import { CostDashboard, type CostView } from './cost-dashboard'
 
-// Telemetry-panel handles only the "infra/billing/audit" subkeys of
-// CostView (CostView itself includes `decisions`, which this panel does
-// NOT render). Extract narrows the closed set so callers spreading
-// TELEMETRY_VIEW_CHIPS into RuntimeView-typed strips stay sound.
-export type TelemetryView = Extract<CostView, 'cost' | 'audit'>
+export type TelemetryView = 'cost' | 'audit'
 
-// Single SSOT for the telemetry chip definitions. Host components
-// import this list to render the Advanced chip strip — the labels live
-// next to the dispatch logic instead of being duplicated in runtime-panel.
 export const TELEMETRY_VIEW_CHIPS: ReadonlyArray<{ key: TelemetryView; label: string }> = [
   { key: 'cost', label: '비용 / 지연' },
   { key: 'audit', label: '감사' },
@@ -40,5 +16,9 @@ export function isTelemetryView(view: string): view is TelemetryView {
 }
 
 export function TelemetryPanel({ view }: { view: TelemetryView }) {
-  return html`<${CostDashboard} view=${view} />`
+  return html`
+    <div class="rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 text-xs text-[var(--color-fg-muted)]" data-testid="telemetry-panel" data-view=${view}>
+      ${view === 'cost' ? '비용 및 지연 지표는 Runtime Efficiency 뷰로 통합됩니다.' : '감사 이벤트 요약은 Logs 및 Runtime 뷰로 통합됩니다.'}
+    </div>
+  `
 }

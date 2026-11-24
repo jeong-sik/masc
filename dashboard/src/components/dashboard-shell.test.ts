@@ -9,45 +9,6 @@ import { dashboardLoading } from '../store'
 import { namespaceTruthInitializing } from '../namespace-truth-store'
 import { normalizeDashboardRuntimeResolution } from '../store-normalizers'
 
-describe('DashboardMain solo mode', () => {
-  let container: HTMLDivElement
-
-  beforeEach(() => {
-    container = document.createElement('div')
-    document.body.appendChild(container)
-    dashboardLoading.value = false
-    dashboardObserverConnected.value = true
-    dashboardObserverReady.value = true
-    namespaceTruthInitializing.value = false
-    document.title = 'MASC Dashboard'
-  })
-
-  afterEach(() => {
-    render(null, container)
-    container.remove()
-  })
-
-  it('keeps document title and active observability filters visible in solo mode', async () => {
-    route.value = {
-      tab: 'monitoring',
-      params: {
-        section: 'runtime',
-        view: 'cost',
-        solo: '1',
-        keeper: 'keeper-alpha',
-        range: '1h',
-      },
-      postId: null,
-    }
-
-    render(h(DashboardMain, {}), container)
-
-    await waitFor(() => expect(document.title).toBe('MASC · Runtime'))
-    expect(container.querySelector('[data-testid="dashboard-widget-solo-bar"]')).not.toBeNull()
-    expect(container.querySelector('[aria-label="Active observability filters"]')).not.toBeNull()
-  })
-})
-
 describe('DashboardMain primary heading', () => {
   let container: HTMLDivElement
 
@@ -647,30 +608,14 @@ describe('shouldRenderSurfaceLead', () => {
     route.value = { tab: 'overview', params: {}, postId: null }
   })
 
-  // Surfaces that render the shared SurfaceHeader in their own body must NOT
-  // also get the generic SurfaceLead — otherwise the title renders twice.
-  // monitoring/command/lab carried that gap out of their SurfaceHeader
-  // adoption. keepers is here rather than behind the keeper-detail guard:
-  // that guard returns true for every keepers route, so the table row was
-  // never reached and said 'generic' about a surface that renders its own.
-  it.each(['monitoring', 'command', 'lab', 'keepers'] as const)(
+  it.each(['monitoring', 'keepers'] as const)(
     'suppresses the generic SurfaceLead for the %s surface (renders its own SurfaceHeader)',
     tab => {
       expect(shouldRenderSurfaceLead({ tab, params: {}, postId: null })).toBe(false)
     },
   )
 
-  // board renders no header at all (#22086) and regressed a duplicate title
-  // when the lead supplied one (#22021). Suppressed for a different reason
-  // from the row above, which is why 'none' is its own value.
   it('suppresses the generic SurfaceLead for the headerless board surface', () => {
     expect(shouldRenderSurfaceLead({ tab: 'board', params: {}, postId: null })).toBe(false)
-  })
-
-  // code (IDE) and registry have no bespoke header, so they still rely on the
-  // generic SurfaceLead — a control that the table was not broadened to
-  // suppress the lead everywhere.
-  it.each(['code', 'registry'] as const)('keeps the generic SurfaceLead for the %s surface', tab => {
-    expect(shouldRenderSurfaceLead({ tab, params: {}, postId: null })).toBe(true)
   })
 })

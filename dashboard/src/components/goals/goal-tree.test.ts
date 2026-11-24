@@ -12,7 +12,7 @@ import type {
 } from '../../types'
 import { hydrateGoalTreeError, hydrateGoalTreeSnapshot } from '../../goal-tree-state'
 import { attentionReasonLabel } from '../../lib/keeper-attention-labels'
-import { operatorDispositionReasonLabel } from '../fsm-hub-types'
+import { operatorDispositionReasonLabel } from '../../lib/keeper-fsm-labels'
 import { observeGoalIds } from '../../lib/goal-identity'
 import { DASHBOARD_AGENT_NAME_KEY, persistDashboardActorName, resolveDashboardActorName } from '../../lib/dashboard-actor'
 

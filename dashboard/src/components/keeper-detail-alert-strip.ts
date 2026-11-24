@@ -17,7 +17,7 @@ import {
   isTurnTerminalFailureCode,
   operatorDispositionReasonLabel,
   type RuntimeAttemptObservation,
-} from './fsm-hub-types'
+} from '../lib/keeper-fsm-labels'
 import { keeperNeedsDiagnosticAttention, refreshAfterRuntimeAction } from './keeper-detail-helpers'
 import { pauseKeeper, resumeKeeper, wakeKeeper } from '../api/keeper'
 import { showToast } from './common/toast'

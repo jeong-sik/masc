@@ -7,19 +7,29 @@ import { JsonViewerCard, parseJsonLikeData } from '../common/json-viewer'
 import { TimeAgo } from '../common/time-ago'
 import { Markdown } from '../common/markdown'
 import { truncate } from '../../lib/truncate'
-import { exactGoalId, exactGoalIds } from '../../lib/goal-identity'
 import { toolDisplayLabel } from '../../lib/tool-display-label'
-import { asNullableString, asRecord, extractCodeLocation, type CodeLocation } from '../common/normalize'
+import { extractCodeLocation, type CodeLocation } from '../common/normalize'
 import { deriveTokPerSec, formatCost, formatMsCompact, formatTokPerSec } from '../../lib/format-number'
 import { toolCategory, durationColor, formatArgs as sharedFormatArgs } from '../tool-call-shared'
 import { SectionHeader } from '../common/section-header'
-import {
-  openIdeContextRouteLink,
-  routeLinksForContext,
-  type IdeContextRouteContext,
-  type IdeContextRouteLink,
-} from '../ide/ide-context-lens'
 import type { UnifiedTraceEvent, TraceEventKind } from './session-trace-state'
+
+export interface IdeContextRouteLink {
+  readonly id: string
+  readonly label: string
+  readonly evidence: string
+}
+export interface IdeContextRouteContext {
+  readonly filePath?: string
+  readonly line?: number
+  readonly goalId?: string
+  readonly taskId?: string
+  readonly sessionId?: string
+  readonly operationId?: string
+  readonly workerRunId?: string
+  readonly logId?: string
+  readonly keeperId?: string
+}
 
 // ── Constants ──────────────────────────────────────────
 
@@ -159,32 +169,6 @@ function formatArgs(args: Record<string, unknown> | string): string {
 
 type TraceCodeLocation = CodeLocation
 
-type TraceRouteContextFields = Pick<
-  IdeContextRouteContext,
-  | 'filePath'
-  | 'line'
-  | 'goalId'
-  | 'taskId'
-  | 'boardPostId'
-  | 'commentId'
-  | 'prId'
-  | 'gitRef'
-  | 'logId'
-  | 'sessionId'
-  | 'operationId'
-  | 'workerRunId'
->
-
-type MutableTraceRouteContext = {
-  -readonly [K in keyof TraceRouteContextFields]?: TraceRouteContextFields[K]
-}
-
-function stringishField(value: unknown): string | null {
-  if (typeof value === 'string') return asNullableString(value)
-  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
-  return null
-}
-
 function recordCodeLocation(value: Record<string, unknown>): TraceCodeLocation | null {
   const direct = extractCodeLocation(value)
   if (direct) return direct
@@ -202,46 +186,11 @@ function toolCallCodeRouteLink(event: UnifiedTraceEvent): IdeContextRouteLink | 
   if (!parsedArgs || typeof parsedArgs !== 'object' || Array.isArray(parsedArgs)) return null
   const location = recordCodeLocation(parsedArgs as Record<string, unknown>)
   if (!location) return null
-  return routeLinksForContext({
-    filePath: location.filePath,
-    line: location.line,
-    surface: 'Tool',
-    label: event.toolName ?? 'tool call',
-    sourceId: event.id,
-    keeperId: event.agentName,
-  }).find(link => link.label === 'Code') ?? null
+  return null
 }
 
-export function traceRouteLinks(event: UnifiedTraceEvent): ReadonlyArray<IdeContextRouteLink> {
-  const context: MutableTraceRouteContext = {}
-  mergeTraceRouteRecord(context, asRecord(event.detail.context))
-  mergeTraceRouteRecord(context, asRecord(event.detail.evidence_ref))
-  mergeTraceRouteRecord(context, asRecord(event.detail.tool_args))
-  mergeTraceRouteRecord(context, asRecord(event.detail.input))
-  mergeTraceRouteRecord(context, event.detail, true)
-
-  const parsedArgs = event.toolArgs ? parseJsonLikeData(event.toolArgs) : null
-  if (parsedArgs && typeof parsedArgs === 'object' && !Array.isArray(parsedArgs)) {
-    mergeTraceRouteRecord(context, parsedArgs as Record<string, unknown>)
-  }
-
-  context.sessionId ??= event.sessionId ?? undefined
-  context.operationId ??= event.operationId ?? undefined
-  context.workerRunId ??= event.workerRunId ?? undefined
-
-  if (!hasTraceRouteContext(context)) return []
-  return routeLinksForContext({
-    ...context,
-    surface: traceRouteSurface(event),
-    label: traceRouteLabel(event),
-    sourceId: event.id,
-    keeperId: event.agentName,
-    telemetry: context.logId !== undefined
-      || context.sessionId !== undefined
-      || context.operationId !== undefined
-      || context.workerRunId !== undefined,
-    telemetryQuery: context.logId ?? event.id,
-  })
+export function traceRouteLinks(_event: UnifiedTraceEvent): ReadonlyArray<IdeContextRouteLink> {
+  return []
 }
 
 function TraceContextLinks({
@@ -250,101 +199,7 @@ function TraceContextLinks({
   readonly links: ReadonlyArray<IdeContextRouteLink>
 }) {
   if (links.length === 0) return null
-  return html`
-    <div
-      class="v2-monitoring-trace-context flex flex-wrap items-center gap-1.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-2"
-      aria-label="Trace operational context links"
-    >
-      ${links.map(link => html`
-        <button
-          key=${link.id}
-          type="button"
-          data-testid="session-trace-context-link"
-          class="v2-monitoring-trace-action inline-flex max-w-44 items-center gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-3xs font-mono text-[var(--color-fg-muted)] hover:border-[var(--color-accent-border)] hover:text-[var(--color-accent-fg)]"
-          title=${link.evidence}
-          aria-label=${`Open ${link.evidence}`}
-          onClick=${() => openIdeContextRouteLink(link)}
-        >
-          <span class="shrink-0 font-semibold text-[var(--color-fg-secondary)]">${link.label}</span>
-          <span class="min-w-0 truncate">${traceLinkEvidenceSuffix(link)}</span>
-        </button>
-      `)}
-    </div>
-  `
-}
-
-function mergeTraceRouteRecord(
-  context: MutableTraceRouteContext,
-  record: Record<string, unknown> | null,
-  overwrite = false,
-): void {
-  if (!record) return
-  const location = recordCodeLocation(record)
-  if (location && (overwrite || context.filePath === undefined)) context.filePath = location.filePath
-  if (location?.line !== undefined && (overwrite || context.line === undefined)) context.line = location.line
-
-  const goalId = exactGoalId(record.goal_id) ?? exactGoalId(record.goalId)
-    ?? exactGoalIds(record.goal_ids)[0] ?? exactGoalIds(record.goalIds)[0]
-  if (goalId && (overwrite || context.goalId === undefined)) context.goalId = goalId
-  const taskId = firstStringish(record, ['task_id', 'taskId', 'task'])
-  if (taskId && (overwrite || context.taskId === undefined)) context.taskId = taskId
-  const boardPostId = firstStringish(record, ['board_post_id', 'boardPostId', 'post_id', 'postId'])
-  if (boardPostId && (overwrite || context.boardPostId === undefined)) context.boardPostId = boardPostId
-  const commentId = firstStringish(record, ['comment_id', 'commentId'])
-  if (commentId && (overwrite || context.commentId === undefined)) context.commentId = commentId
-  const prId = firstStringish(record, ['pr_id', 'prId', 'pr', 'pull_request_id', 'pullRequestId'])
-  if (prId && (overwrite || context.prId === undefined)) context.prId = prId
-  const gitRef = firstStringish(record, ['git_ref', 'gitRef', 'commit', 'commit_sha', 'branch', 'ref'])
-  if (gitRef && (overwrite || context.gitRef === undefined)) context.gitRef = gitRef
-  const logId = firstStringish(record, ['log_id', 'logId', 'log', 'turn_id', 'turnId'])
-  if (logId && (overwrite || context.logId === undefined)) context.logId = logId
-  const sessionId = firstStringish(record, ['session_id', 'sessionId'])
-  if (sessionId && (overwrite || context.sessionId === undefined)) context.sessionId = sessionId
-  const operationId = firstStringish(record, ['operation_id', 'operationId'])
-  if (operationId && (overwrite || context.operationId === undefined)) context.operationId = operationId
-  const workerRunId = firstStringish(record, ['worker_run_id', 'workerRunId'])
-  if (workerRunId && (overwrite || context.workerRunId === undefined)) context.workerRunId = workerRunId
-}
-
-function firstStringish(record: Record<string, unknown>, keys: ReadonlyArray<string>): string | null {
-  for (const key of keys) {
-    const value = stringishField(record[key])
-    if (value) return value
-  }
   return null
-}
-
-function hasTraceRouteContext(context: MutableTraceRouteContext): boolean {
-  return context.filePath !== undefined
-    || context.goalId !== undefined
-    || context.taskId !== undefined
-    || context.boardPostId !== undefined
-    || context.commentId !== undefined
-    || context.prId !== undefined
-    || context.gitRef !== undefined
-    || context.logId !== undefined
-    || context.sessionId !== undefined
-    || context.operationId !== undefined
-    || context.workerRunId !== undefined
-}
-
-function traceRouteSurface(event: UnifiedTraceEvent): string {
-  if (event.kind === 'tool_call') return 'Tool'
-  if (event.kind === 'agent_core_tool') return 'Tool'
-  if (event.kind === 'agent_core_turn') return 'Turn'
-  return KIND_STYLES[event.kind]?.label ?? event.kind
-}
-
-function traceRouteLabel(event: UnifiedTraceEvent): string {
-  return event.toolName ?? event.summary
-}
-
-function traceLinkEvidenceSuffix(link: IdeContextRouteLink): string {
-  const evidence = link.evidence.trim()
-  const labelPrefix = `${link.label} `
-  if (evidence.startsWith(labelPrefix)) return evidence.slice(labelPrefix.length)
-  const scoped = evidence.split(' · ').slice(1).join(' · ')
-  return scoped || evidence
 }
 
 // ── Task event helpers ─────────────────────────────────
@@ -486,16 +341,6 @@ function ToolCallDetail({ event }: { event: UnifiedTraceEvent }) {
           <span class="min-w-0 truncate text-3xs font-mono text-[var(--color-fg-muted)]" title=${codeRouteLink.evidence}>
             ${codeRouteLink.evidence}
           </span>
-          <button
-            type="button"
-            data-testid="session-trace-code-link"
-            class="v2-monitoring-trace-action shrink-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-3xs font-semibold text-[var(--color-accent-fg)] hover:border-[var(--color-accent-border)] hover:bg-[var(--color-bg-hover)]"
-            title=${codeRouteLink.evidence}
-            aria-label=${`Open ${codeRouteLink.evidence}`}
-            onClick=${() => openIdeContextRouteLink(codeRouteLink)}
-          >
-            Code
-          </button>
         </div>
       ` : null}
       <${TraceContextLinks} links=${contextLinks} />

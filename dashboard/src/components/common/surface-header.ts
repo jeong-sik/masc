@@ -15,7 +15,6 @@ import type { VNode } from 'preact'
 import type { TabId } from '../../types'
 import { hashForRoute, navigate, route } from '../../router'
 import { DASHBOARD_NAV_ITEMS, currentSectionForRoute } from '../../config/navigation'
-import { isWidgetSoloRoute } from '../widget-solo'
 import { Breadcrumb } from './breadcrumb'
 import type { BreadcrumbItem } from './breadcrumb'
 import { SurfaceHeaderActions } from './surface-header-actions'
@@ -73,8 +72,6 @@ function breadcrumbItemsForTrail(trail: BreadcrumbCrumb[]): BreadcrumbItem[] {
 }
 
 export function SurfaceHeader(): VNode | null {
-  if (isWidgetSoloRoute(route.value)) return null
-
   const currentTab = route.value.tab
   const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === currentTab)
   const currentSection = currentSectionForRoute(route.value)

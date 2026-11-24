@@ -1,20 +1,6 @@
-// MASC Dashboard — Root component (v2 skin shell)
-//
-// The chrome (top bar, nav rail, body grid) is the keeper-v2 prototype DOM
-// (`.v2-app` → `.v2-top` → `.v2-stage` → `.v2-body`), styled by the vendored
-// keeper-v2 CSS SSOT (src/styles/keeper-v2/*). The body still mounts the
-// existing `DashboardMain` surface dispatcher, so every surface keeps
-// rendering while it is migrated to the prototype DOM in stacked follow-ups.
-//
-// Lifecycle wiring uses the router, SSE observation, dev-token,
-// config thresholds, cleanup, volt/theme sync) is preserved verbatim from the
-// previous shell — only the rendered DOM changed.
-
 import { html } from 'htm/preact'
-import { ArtifactDraftSessionProvider } from './components/published-artifacts/artifact-draft-session'
 import { useEffect } from 'preact/hooks'
 import { lazy, Suspense } from 'preact/compat'
-import { persistentSignal } from './lib/persistent-signal'
 import { isImeComposing } from './lib/keyboard'
 import { route, initRouter } from './router'
 import { requestNamespaceTruthNow, disposeNamespaceTruthScheduler } from './namespace-truth-store'
@@ -37,44 +23,16 @@ import { ConfirmDialogOverlay } from './components/common/confirm-dialog'
 import { commandPaletteRequested, requestCommandPaletteOpen } from './components/common/command-palette-state'
 import { BundleStalenessBanner, installBundleStalenessWatch } from './components/bundle-staleness-banner'
 import { startErrorCleanup, stopErrorCleanup } from './components/common/error-notification-state'
-import { DashboardStatusTray } from './components/status-tray'
-import { DashboardFocusModeToggle, dashboardFocusMode } from './components/focus-mode-toggle'
 import { isPrimaryDashboardSurface } from './config/navigation'
 import { gateData } from './components/gate-signals'
 import type { TabId } from './types'
 import { useKeyboardShortcutHost } from '../design-system/headless-preact/use-keyboard-shortcut'
 import { matchesShortcutChord } from '../design-system/headless-core/keyboard-shortcuts'
 import { globalShortcutManager } from './lib/global-shortcut-manager'
-import { useKeeperPinShortcuts } from './components/ide/use-keeper-pin-shortcuts'
 import { useIsMobile } from './hooks/use-is-mobile'
-import { isWidgetSoloRoute } from './components/widget-solo'
 import { keeperMobilePane } from './components/keeper-detail-state'
-import {
-  CopilotDock,
-  CopilotDockFab,
-  useCopilotDock,
-  useCopilotDockShortcuts,
-} from './components/copilot-dock'
-import {
-  TweaksPanel,
-  tweaksDensity,
-  tweaksFontScale,
-  tweaksMotion,
-  tweaksBubble,
-  tweaksTheme,
-  tweaksVolt,
-  tweaksThreadW,
-} from './components/tweaks-panel'
 import { TopBarV2 } from './components/v2/top-bar-v2'
 import { NavRailV2 } from './components/v2/nav-rail-v2'
-
-// Sidebar collapsed state persists across reloads (kept for compatibility with
-// downstream consumers / tests). The v2 rail is a fixed 58px icon rail, so this
-// no longer toggles width, but the signal is retained so the contract holds.
-const sidebarCollapsed = persistentSignal<boolean>({
-  key: 'dashboard:sidebar-collapsed',
-  defaultValue: true,
-})
 
 export function shouldSuppressFloatingChrome({
   currentTab,
@@ -86,12 +44,6 @@ export function shouldSuppressFloatingChrome({
   return keeperDetailMode || isPrimaryDashboardSurface(currentTab)
 }
 
-// The keeper-v2 primary shell keeps its operational summary in the top bar and
-// routes deeper health evidence through Monitor. Rendering the same facts as a
-// second full-width strip shifts every primary surface below the prototype's
-// fixed 50px chrome and duplicates the existing navigation path. Retain the
-// strip for non-primary diagnostic/plugin surfaces where that top-level health
-// context is otherwise absent.
 export function shouldShowDashboardHealthStrip(currentTab: TabId): boolean {
   return !isPrimaryDashboardSurface(currentTab)
 }
@@ -128,42 +80,14 @@ function refreshCurrentRoute(options?: { recordVisit?: boolean }): void {
     })
 }
 
-export function shouldUseCompactDashboardChrome({
-  widgetSoloMode,
-  focusMode,
-}: {
-  widgetSoloMode: boolean
-  focusMode: boolean
-}): boolean {
-  return widgetSoloMode || focusMode
-}
-
-export function shouldShowCopilotFab({
-  dockOpen,
-  compactChromeMode,
-  isMobile,
-  currentTab,
-}: {
-  dockOpen: boolean
-  compactChromeMode: boolean
-  isMobile: boolean
-  currentTab: TabId
-}): boolean {
-  return !dockOpen && !compactChromeMode && !isMobile && currentTab !== 'keepers'
-}
-
 export function App() {
-  // Single document-level keydown host bound once at the root.
   useKeyboardShortcutHost(globalShortcutManager)
-  // Multi-keeper pin shortcuts share the root keyboard host.
-  useKeeperPinShortcuts(globalShortcutManager)
 
   useEffect(() => {
     let cancelled = false
     const shellBoot = new AbortController()
     const stopShellObservation = setupShellObservation()
 
-    // Initialize hash router and compatible deep links
     initRouter()
     const uninstallCredentialRecovery = installRejectedCredentialRecovery()
 
@@ -177,15 +101,9 @@ export function App() {
         if (cancelled) return
         void refreshShell({ light: true, signal: shellBoot.signal })
         requestNamespaceTruthNow()
-
         connectDashboardObserver()
       })
 
-    // Gate/HITL approvals feed the always-visible nav-rail approvals
-    // badge and topbar attention indicator (see approvalsBadge below), so the
-    // Gate resource must refresh globally. Keep boot on the read-only
-    // refresh module instead of gate-actions: first paint should not load
-    // toast/action write handlers just to count pending approvals.
     const refreshGateLazy = (opts?: { force?: boolean }) => {
       void import('./components/gate-refresh')
         .then(({ refreshGate }) => refreshGate(opts))
@@ -195,7 +113,6 @@ export function App() {
     }
     registerGateRefresh(refreshGateLazy)
     refreshGateLazy()
-
 
     const unsubscribeServerPush = setupServerPushReaction()
     const unsubNotify = initNotificationDelivery()
@@ -231,37 +148,12 @@ export function App() {
     refreshCurrentRoute({ recordVisit: true })
   }, [route.value.tab, route.value.params.section, route.value.params.view, route.value.params.q])
 
-  const dock = useCopilotDock()
-  useCopilotDockShortcuts(dock)
-
   const isMobile = useIsMobile()
-
   const currentTab = route.value.tab
-  const isCodeSurface = currentTab === 'code'
   const isScheduleSurface = currentTab === 'schedule'
-  const widgetSoloMode = isWidgetSoloRoute(route.value)
   const keeperDetailMode = isKeeperDetailDashboardRoute(route.value)
   const mobileKeeperPane = isMobile && keeperDetailMode ? keeperMobilePane.value : null
   const mobileKeeperReadingMode = mobileKeeperPane === 'chat'
-  const focusMode = dashboardFocusMode.value
-  const suppressFloatingChrome = shouldSuppressFloatingChrome({
-    currentTab,
-    keeperDetailMode,
-  })
-  const compactChromeMode = shouldUseCompactDashboardChrome({
-    widgetSoloMode,
-    focusMode,
-  })
-
-  // Volt only. The document theme attribute has one owner, theme-switch.ts,
-  // which also holds the storage keys and the URL parameter. This effect used
-  // to write it too, from tweaksTheme, whose vocabulary is 'dark' | 'paper' --
-  // so selecting styleseed and reloading rewrote the attribute to '' and the
-  // theme vanished (#22899). The app element below still carries its own
-  // data-theme; that one is app-scoped and not the document root.
-  useEffect(() => {
-    document.documentElement.setAttribute('data-volt', tweaksVolt.value)
-  }, [tweaksVolt.value])
 
   const approvalsBadge =
     gateData.value?.approval_queue_state?.state === 'ready'
@@ -270,76 +162,40 @@ export function App() {
         ? gateData.value.approval_queue_state
         : undefined
 
-  // Body grid columns. Desktop: nav rail (58px) + single content column. Mobile:
-  // a single 1fr column — the nav becomes a fixed bottom tab bar (.v2-nav.is-mnav),
-  // out of grid flow. (The keepers 4-column roster|chat|ctx grid is provided by
-  // the keeper-workspace layout, not here.)
-  const cols = isMobile || compactChromeMode ? 'minmax(0,1fr)' : '58px minmax(0,1fr)'
+  const cols = isMobile ? 'minmax(0,1fr)' : '58px minmax(0,1fr)'
 
   return html`
-    <${ArtifactDraftSessionProvider}>
     <div
       class="v2-app"
       data-surface=${currentTab}
-      data-density=${tweaksDensity.value}
-      data-motion=${tweaksMotion.value}
-      data-bubble=${tweaksBubble.value}
       data-mobile=${isMobile ? '1' : null}
-      data-font-scale=${tweaksFontScale.value}
-      data-theme=${tweaksTheme.value === 'paper' ? 'paper' : null}
-      data-volt=${tweaksVolt.value}
-      data-focus-mode=${focusMode ? 'true' : 'false'}
       data-keeper-detail-mode=${keeperDetailMode ? 'true' : 'false'}
       data-reading=${mobileKeeperReadingMode ? 'true' : 'false'}
-      data-widget-solo=${widgetSoloMode ? 'true' : 'false'}
-      style=${{
-        // tweaksFontScale.value is a percentage integer (80..140, default 100).
-        // craft-v2.css resolves it as `calc(var(--twk-font-scale) * 1%)`, so the
-        // raw percentage must be passed through. Dividing by 100 here (regressed
-        // in #21998) double-applies the percentage: 100 -> `1 * 1%` -> 0.16px,
-        // collapsing every inherited-font-size glyph (emoji, icon chars) to ~0px.
-        '--twk-font-scale': String(tweaksFontScale.value),
-        '--kw-thread-w': `${tweaksThreadW.value}px`,
-        '--thread-w': `${tweaksThreadW.value}px`,
-      }}
     >
       <${SkipLink} />
-      ${compactChromeMode ? null : html`<${TopBarV2} dock=${dock} />`}
-      ${/* Operational/safety strips re-mounted under the v2 top bar (review P1):
-          remote-auth warning + the runtime health chip bar. Both self-gate
-          (render null when there is no warning / no health signal). */ ''}
-      ${compactChromeMode ? null : html`<${RemoteWarningBanner} />`}
-      ${compactChromeMode ? null : html`<${BundleStaleBanner} />`}
-      ${compactChromeMode ? null : html`<${WorktreeServerBanner} />`}
-      ${compactChromeMode
-        ? null
-        : html`<${DashboardHealthStrip} hidden=${!shouldShowDashboardHealthStrip(currentTab)} />`}
+      <${TopBarV2} />
+      <${RemoteWarningBanner} />
+      <${BundleStaleBanner} />
+      <${WorktreeServerBanner} />
+      <${DashboardHealthStrip} hidden=${!shouldShowDashboardHealthStrip(currentTab)} />
 
       <div class="v2-stage">
         <div class="v2-body" style=${{ gridTemplateColumns: cols }}>
-          ${compactChromeMode ? null : html`<${NavRailV2} badges=${{ approvals: approvalsBadge }} mobile=${isMobile} />`}
+          <${NavRailV2} badges=${{ approvals: approvalsBadge }} mobile=${isMobile} />
           <main
             id="main-content"
             tabindex=${-1}
             class="v2-surface-host"
-            style=${{ minWidth: 0, minHeight: 0, overflowY: isCodeSurface || isScheduleSurface ? 'hidden' : 'auto' }}
+            style=${{ minWidth: 0, minHeight: 0, overflowY: isScheduleSurface ? 'hidden' : 'auto' }}
           >
-            <div class=${isCodeSurface || isScheduleSurface || widgetSoloMode ? 'h-full overflow-hidden p-0' : keeperDetailMode ? 'h-full p-0' : 'dashboard-main-scroll h-full p-4 max-[900px]:pb-16'}>
+            <div class=${isScheduleSurface ? 'h-full overflow-hidden p-0' : keeperDetailMode ? 'h-full p-0' : 'dashboard-main-scroll h-full p-4 max-[900px]:pb-16'}>
               <div class="v2-surface" key=${currentTab}>
                 <${DashboardMain} />
               </div>
             </div>
           </main>
         </div>
-        ${dock.state.value.open ? html`<${CopilotDock} dock=${dock} />` : null}
       </div>
-
-      ${shouldShowCopilotFab({
-        dockOpen: dock.state.value.open,
-        compactChromeMode,
-        isMobile,
-        currentTab,
-      }) ? html`<${CopilotDockFab} dock=${dock} />` : null}
 
       ${selectedAgentName.value
         ? html`<${Suspense} fallback=${null}><${LazyAgentDetailOverlay} /><//>`
@@ -347,16 +203,9 @@ export function App() {
       ${selectedTask.value
         ? html`<${Suspense} fallback=${null}><${LazyTaskDetailOverlay} /><//>`
         : null}
-      ${suppressFloatingChrome ? null : html`
-        <${DashboardStatusTray} sideRailCollapsed=${sidebarCollapsed.value} />
-      `}
-      ${dashboardFocusMode.value || !suppressFloatingChrome
-        ? html`<${DashboardFocusModeToggle} />`
-        : null}
       <${ToastContainer} />
       <${ConfirmDialogOverlay} />
       <${BundleStalenessBanner} />
-      <${TweaksPanel} />
       ${commandPaletteRequested.value
         ? html`
           <${Suspense} fallback=${null}>
@@ -365,6 +214,5 @@ export function App() {
         `
         : null}
     </div>
-    <//>
   `
 }

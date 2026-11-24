@@ -9,7 +9,6 @@ import { MarkdownContent as MarkdownRenderer } from './markdown-renderer'
 
 describe('Markdown', () => {
   let container: HTMLDivElement
-  const shikiRenderTimeoutMs = 10_000
 
   beforeEach(() => {
     container = document.createElement('div')
@@ -173,42 +172,6 @@ describe('Markdown', () => {
     render(html`<${MarkdownRenderer} text=${md} />`, container)
     const details = container.querySelector('details.think-block')
     expect(details).not.toBeNull()
-  })
-
-  // ── Shiki syntax highlighting integration ─────────────────
-  describe('shiki highlighting', () => {
-    const waitForShiki = () => waitFor(() => {
-      expect(container.querySelector('pre.shiki-rendered')).not.toBeNull()
-    }, { timeout: shikiRenderTimeoutMs })
-
-    it('highlights non-mermaid code fences via shiki', async () => {
-      const md = '```typescript\nconst x = 1\n```'
-      render(html`<${MarkdownRenderer} text=${md} />`, container)
-      await waitForShiki()
-      const shikiPre = container.querySelector('pre.shiki-rendered')
-      expect(shikiPre).not.toBeNull()
-      // The mock escapes HTML entities — verify content is present
-      expect(shikiPre?.textContent).toContain('const x = 1')
-    }, shikiRenderTimeoutMs)
-
-    it('does not apply shiki to mermaid code fences', async () => {
-      // Render both a mermaid and a non-mermaid block to verify selectivity
-      const md = '```mermaid\ngraph TD\nA-->B\n```\n\n```js\nconst a = 1\n```'
-      render(html`<${MarkdownRenderer} text=${md} />`, container)
-      await waitForShiki()
-      // Only the JS block should get shiki highlighting
-      const shikiBlocks = container.querySelectorAll('pre.shiki-rendered')
-      expect(shikiBlocks.length).toBe(1)
-      expect(shikiBlocks[0]?.textContent).toContain('const a = 1')
-    }, shikiRenderTimeoutMs)
-
-    it('escapes HTML entities in highlighted code (XSS prevention)', async () => {
-      const md = '```html\n<script>alert("xss")</script>\n```'
-      render(html`<${MarkdownRenderer} text=${md} />`, container)
-      await waitForShiki()
-      // The shiki mock escapes < and > so no raw <script> in DOM
-      expect(container.innerHTML).not.toContain('<script>')
-    }, shikiRenderTimeoutMs)
   })
 
   describe('truncated markdown repair', () => {

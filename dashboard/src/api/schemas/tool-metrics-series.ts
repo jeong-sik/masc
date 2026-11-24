@@ -19,7 +19,7 @@
 // `failure_count`.
 // Fields the server adds later are dropped on decode.
 
-import { Schema } from 'effect'
+import { Schema } from '../../lib/wire-schema'
 
 /** The classes of `Tool_result.tool_failure_class`, spelled as the server spells them. */
 const FailureClassCountsSchema = Schema.Struct({

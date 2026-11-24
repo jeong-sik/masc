@@ -1,4 +1,4 @@
-import { Schema } from 'effect'
+import { Schema } from '../lib/wire-schema'
 
 /** Display metadata declared by the package, independent of service authority. */
 export const LANE_ADDON_CATEGORIES = [

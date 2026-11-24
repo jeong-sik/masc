@@ -13,7 +13,6 @@ import { WORK_UNLINKED_GOAL_TITLE } from '../lib/work-copy'
 import { isUnambiguousGoalId } from '../lib/goal-identity'
 import { BoardSurface } from './board/board-surface'
 import { SubBoardSurface } from './board/sub-board-surface'
-import { PlanningPanel } from './planning-panel'
 import { useGoalTreeDecisionObservation } from './goals/goal-tree'
 import { VerificationRequestsPanel } from './verification-requests-panel'
 import { VerificationRunsPanel } from './verification-runs-panel'
@@ -38,7 +37,7 @@ import { errorToString } from '../lib/format-string'
 import type { Goal, GoalTreeNode, GoalTreeTask, Task, Keeper } from '../types'
 import { goalMeasureText, MEASURE_UNREADABLE } from '../api/goal-measure'
 
-type WorkSection = 'work' | 'board' | 'sub-boards' | 'planning' | 'repositories' | 'verification' | 'artifacts'
+type WorkSection = 'work' | 'board' | 'sub-boards' | 'repositories' | 'verification' | 'artifacts'
 
 const LazyArtifactsSurface = lazy(async () => ({
   default: (await import('./published-artifacts/artifacts-surface')).ArtifactsSurface,
@@ -49,7 +48,7 @@ const LazyRepositoryManagement = lazy(async () => ({
 }))
 
 function isWorkSection(v: string | undefined): v is WorkSection {
-  return v === 'work' || v === 'board' || v === 'sub-boards' || v === 'planning' || v === 'repositories' || v === 'verification' || v === 'artifacts'
+  return v === 'work' || v === 'board' || v === 'sub-boards' || v === 'repositories' || v === 'verification' || v === 'artifacts'
 }
 
 // ── Task state mapping ──────────────────────────────────────────────────────
@@ -1846,7 +1845,6 @@ export function Work() {
           : current === 'work' ? html`<${WorkSurfaceV2} />`
           : current === 'board' ? html`<${BoardSurface} />`
           : current === 'sub-boards' ? html`<${SubBoardSurface} />`
-          : current === 'planning' ? html`<${PlanningPanel} />`
           : current === 'repositories' ? html`
             <${Suspense} fallback=${html`<${LoadingState}>저장소 화면 불러오는 중...<//>`}>
               <${LazyRepositoryManagement} />

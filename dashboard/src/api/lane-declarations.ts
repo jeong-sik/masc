@@ -1,4 +1,5 @@
-import { Option, Schema } from 'effect'
+import { Option } from '../lib/result'
+import { Schema } from '../lib/wire-schema'
 import { ApiRequestError, get, post } from './core'
 
 const text = Schema.NonEmptyString

@@ -1,4 +1,5 @@
-import { Data, Effect, Option, ParseResult, Schema } from 'effect'
+import { Option, TaggedError, ok, err, type Result } from '../../lib/result'
+import { ParseResult, Schema } from '../../lib/wire-schema'
 
 const ConfigEntrySourceSchema = Schema.Literal(
   'env',
@@ -132,13 +133,13 @@ export interface DashboardConfig {
   readonly categories: Readonly<Record<string, readonly ConfigEntry[]>>
 }
 
-export class DashboardConfigSchemaDriftError extends Data.TaggedError(
+export class DashboardConfigSchemaDriftError extends TaggedError(
   'DashboardConfigSchemaDriftError',
 )<{
   readonly domain: 'dashboard-config'
   readonly issues: ReadonlyArray<ParseResult.ArrayFormatterIssue>
   readonly message: string
-}> {}
+}>() {}
 
 function schemaDriftError(
   error: ParseResult.ParseError,
@@ -191,12 +192,10 @@ const STRICT_PARSE_OPTIONS = {
 
 export function decodeDashboardConfig(
   data: unknown,
-): Effect.Effect<DashboardConfig, DashboardConfigSchemaDriftError> {
-  return Schema.decodeUnknown(
+): Result<DashboardConfig, DashboardConfigSchemaDriftError> {
+  const decoded = Schema.decodeUnknownResult(
     DashboardConfigValidatedWireSchema,
     STRICT_PARSE_OPTIONS,
-  )(data).pipe(
-    Effect.map(toDashboardConfig),
-    Effect.mapError(schemaDriftError),
-  )
+  )(data)
+  return decoded.ok ? ok(toDashboardConfig(decoded.value)) : err(schemaDriftError(decoded.error))
 }

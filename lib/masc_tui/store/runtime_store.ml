@@ -56,6 +56,13 @@ type tools_subview =
   | Tools_catalog_tree
   | Tools_keeper_skills
   | Tools_quality_gate
+  | Tools_prompts_presets
+
+type prompts_presets_section =
+  | Sec_prompts
+  | Sec_presets
+  | Sec_params
+  | Sec_async_requests
 
 type tools_window =
   | Tools_win_24h
@@ -116,6 +123,31 @@ type t = {
   mcp_call_form : (int * Nav.inline_action_kind) option;
   mcp_next_rpc_id : int;
   skills : Wire_runtime.skills_snapshot Observed.t;
+  skill_editor_sources : string list Observed.t;
+  skill_editor_sources_absent : bool;
+  skill_editor_sources_auth_denied : bool;
+  skill_editor_tools : Wire_runtime.skill_authoring_tool list Observed.t;
+  skill_editor_tools_absent : bool;
+  skill_editor_tools_auth_denied : bool;
+  skill_editor_loaded : (string * Wire_runtime.skill_editor_loaded) Observed.t;
+  skill_editor_preview : Wire_runtime.skill_editor_preview Observed.t;
+  skill_selected_index : int;
+  skill_scroll_offset : int;
+  async_requests : Wire_runtime.async_requests_snapshot Observed.t;
+  async_requests_absent : bool;
+  async_requests_auth_denied : bool;
+  prompts_catalog : Wire_runtime.prompts_catalog Observed.t;
+  prompts_absent : bool;
+  presets_listing : Wire_runtime.presets_listing Observed.t;
+  presets_absent : bool;
+  presets_auth_denied : bool;
+  pending_preset_select : string option;
+  preset_detail : (string * Wire_runtime.preset_detail) Observed.t;
+  runtime_params : Wire_runtime.runtime_params_snapshot Observed.t;
+  runtime_params_absent : bool;
+  pp_section : prompts_presets_section;
+  pp_selected_index : int;
+  pp_scroll_offset : int;
   tools_subview : tools_subview;
   tools_window : tools_window;
   tools_surface_keeper_idx : int;
@@ -162,12 +194,47 @@ let equal_tools_subview a b =
   | Tools_usage_calls, Tools_usage_calls
   | Tools_catalog_tree, Tools_catalog_tree
   | Tools_keeper_skills, Tools_keeper_skills
-  | Tools_quality_gate, Tools_quality_gate ->
+  | Tools_quality_gate, Tools_quality_gate
+  | Tools_prompts_presets, Tools_prompts_presets ->
       true
-  | Tools_usage_calls, (Tools_catalog_tree | Tools_keeper_skills | Tools_quality_gate)
-  | Tools_catalog_tree, (Tools_usage_calls | Tools_keeper_skills | Tools_quality_gate)
-  | Tools_keeper_skills, (Tools_usage_calls | Tools_catalog_tree | Tools_quality_gate)
-  | Tools_quality_gate, (Tools_usage_calls | Tools_catalog_tree | Tools_keeper_skills) ->
+  | ( Tools_usage_calls
+    , ( Tools_catalog_tree
+      | Tools_keeper_skills
+      | Tools_quality_gate
+      | Tools_prompts_presets ) )
+  | ( Tools_catalog_tree
+    , ( Tools_usage_calls
+      | Tools_keeper_skills
+      | Tools_quality_gate
+      | Tools_prompts_presets ) )
+  | ( Tools_keeper_skills
+    , ( Tools_usage_calls
+      | Tools_catalog_tree
+      | Tools_quality_gate
+      | Tools_prompts_presets ) )
+  | ( Tools_quality_gate
+    , ( Tools_usage_calls
+      | Tools_catalog_tree
+      | Tools_keeper_skills
+      | Tools_prompts_presets ) )
+  | ( Tools_prompts_presets
+    , ( Tools_usage_calls
+      | Tools_catalog_tree
+      | Tools_keeper_skills
+      | Tools_quality_gate ) ) ->
+      false
+
+let equal_prompts_presets_section a b =
+  match (a, b) with
+  | Sec_prompts, Sec_prompts
+  | Sec_presets, Sec_presets
+  | Sec_params, Sec_params
+  | Sec_async_requests, Sec_async_requests ->
+      true
+  | Sec_prompts, (Sec_presets | Sec_params | Sec_async_requests)
+  | Sec_presets, (Sec_prompts | Sec_params | Sec_async_requests)
+  | Sec_params, (Sec_prompts | Sec_presets | Sec_async_requests)
+  | Sec_async_requests, (Sec_prompts | Sec_presets | Sec_params) ->
       false
 
 let equal_tools_window a b =
@@ -244,6 +311,31 @@ let empty =
     mcp_call_form = None;
     mcp_next_rpc_id = 1;
     skills = Observed.unreported;
+    skill_editor_sources = Observed.unreported;
+    skill_editor_sources_absent = false;
+    skill_editor_sources_auth_denied = false;
+    skill_editor_tools = Observed.unreported;
+    skill_editor_tools_absent = false;
+    skill_editor_tools_auth_denied = false;
+    skill_editor_loaded = Observed.absent;
+    skill_editor_preview = Observed.absent;
+    skill_selected_index = 0;
+    skill_scroll_offset = 0;
+    async_requests = Observed.unreported;
+    async_requests_absent = false;
+    async_requests_auth_denied = false;
+    prompts_catalog = Observed.unreported;
+    prompts_absent = false;
+    presets_listing = Observed.unreported;
+    presets_absent = false;
+    presets_auth_denied = false;
+    pending_preset_select = None;
+    preset_detail = Observed.absent;
+    runtime_params = Observed.unreported;
+    runtime_params_absent = false;
+    pp_section = Sec_prompts;
+    pp_selected_index = 0;
+    pp_scroll_offset = 0;
     tools_subview = Tools_usage_calls;
     tools_window = Tools_win_24h;
     tools_surface_keeper_idx = 0;
@@ -302,9 +394,29 @@ let cycle_tools_subview t =
     | Tools_usage_calls -> Tools_catalog_tree
     | Tools_catalog_tree -> Tools_keeper_skills
     | Tools_keeper_skills -> Tools_quality_gate
-    | Tools_quality_gate -> Tools_usage_calls
+    | Tools_quality_gate -> Tools_prompts_presets
+    | Tools_prompts_presets -> Tools_usage_calls
   in
   set_tools_subview next t
+
+let set_prompts_presets_section pp_section t =
+  {
+    t with
+    pp_section;
+    pp_selected_index = 0;
+    pp_scroll_offset = 0;
+    detail_scroll_offset = 0;
+  }
+
+let cycle_prompts_presets_section t =
+  let next =
+    match t.pp_section with
+    | Sec_prompts -> Sec_presets
+    | Sec_presets -> Sec_params
+    | Sec_params -> Sec_async_requests
+    | Sec_async_requests -> Sec_prompts
+  in
+  set_prompts_presets_section next t
 
 let cycle_tools_window t =
   let tools_window =
@@ -371,6 +483,10 @@ let set_tab active_tab t =
     mcp_client_scroll_offset = 0;
     tools_catalog_selected_index = 0;
     tools_catalog_scroll_offset = 0;
+    skill_selected_index = 0;
+    skill_scroll_offset = 0;
+    pp_selected_index = 0;
+    pp_scroll_offset = 0;
     addon_selected_index = 0;
     addon_scroll_offset = 0;
     browser_client_selected_index = 0;
@@ -585,8 +701,264 @@ let apply_tools_warming ~observed_at t =
   in
   { t with tools_catalog }
 
+let filtered_skill_surfaces t =
+  match Observed.to_option t.skills with
+  | None -> []
+  | Some sk ->
+      let q = String.trim t.filter_query in
+      if String.equal q "" then sk.surfaces
+      else
+        List.filter
+          (fun (sf : Wire_runtime.skill_surface_entry) ->
+            contains_ci ~needle:q sf.reference
+            || contains_ci ~needle:q sf.kind
+            || Option.fold ~none:false ~some:(contains_ci ~needle:q) sf.summary)
+          sk.surfaces
+
+let selected_skill_surface t =
+  let xs = filtered_skill_surfaces t in
+  List.nth_opt xs (clamp_index (List.length xs) t.skill_selected_index)
+
+let find_skill_surface ~reference t =
+  let needle = String.trim reference in
+  match Observed.to_option t.skills with
+  | None -> None
+  | Some sk -> (
+      match
+        List.find_opt
+          (fun (sf : Wire_runtime.skill_surface_entry) ->
+            String.equal sf.reference needle)
+          sk.surfaces
+      with
+      | Some _ as exact -> exact
+      | None ->
+          List.find_opt
+            (fun (sf : Wire_runtime.skill_surface_entry) ->
+              contains_ci ~needle sf.reference)
+            sk.surfaces)
+
 let apply_skills ~observed_at snap t =
-  { t with skills = Observed.value ~observed_at snap }
+  let base = { t with skills = Observed.value ~observed_at snap } in
+  let len = List.length (filtered_skill_surfaces base) in
+  let skill_selected_index = clamp_index len base.skill_selected_index in
+  let skill_scroll_offset =
+    Int.min skill_selected_index (Int.max 0 base.skill_scroll_offset)
+  in
+  { base with skill_selected_index; skill_scroll_offset }
+
+let apply_skill_editor_sources ~observed_at sources t =
+  {
+    t with
+    skill_editor_sources = Observed.value ~observed_at sources;
+    skill_editor_sources_absent = false;
+    skill_editor_sources_auth_denied = false;
+  }
+
+let apply_skill_editor_tools ~observed_at tools t =
+  {
+    t with
+    skill_editor_tools = Observed.value ~observed_at tools;
+    skill_editor_tools_absent = false;
+    skill_editor_tools_auth_denied = false;
+  }
+
+let apply_skill_editor_loaded ~observed_at ~reference loaded t =
+  {
+    t with
+    skill_editor_loaded = Observed.value ~observed_at (reference, loaded);
+  }
+
+let skill_editor_loaded_for ~reference t =
+  match Observed.to_option t.skill_editor_loaded with
+  | Some (r, loaded)
+    when String.equal r reference || String.equal loaded.reference reference ->
+      Some loaded
+  | Some _ | None -> None
+
+let apply_skill_editor_preview ~observed_at preview t =
+  { t with skill_editor_preview = Observed.value ~observed_at preview }
+
+let filtered_prompts t =
+  match Observed.to_option t.prompts_catalog with
+  | None -> []
+  | Some cat ->
+      let q = String.trim t.filter_query in
+      if String.equal q "" then cat.prompts
+      else
+        List.filter
+          (fun (p : Wire_runtime.prompt_item) ->
+            contains_ci ~needle:q p.key
+            || contains_ci ~needle:q p.category
+            || contains_ci ~needle:q p.description)
+          cat.prompts
+
+let selected_prompt_item t =
+  let xs = filtered_prompts t in
+  List.nth_opt xs (clamp_index (List.length xs) t.pp_selected_index)
+
+let filtered_presets t =
+  match Observed.to_option t.presets_listing with
+  | None -> []
+  | Some listing ->
+      let q = String.trim t.filter_query in
+      if String.equal q "" then listing.presets
+      else
+        List.filter
+          (fun (p : Wire_runtime.preset_manifest) ->
+            contains_ci ~needle:q p.name || contains_ci ~needle:q p.description)
+          listing.presets
+
+let selected_preset_manifest t =
+  let xs = filtered_presets t in
+  List.nth_opt xs (clamp_index (List.length xs) t.pp_selected_index)
+
+let find_preset_index ~name xs =
+  let rec loop i = function
+    | [] -> None
+    | (p : Wire_runtime.preset_manifest) :: rest ->
+        if String.equal p.name name then Some i else loop (i + 1) rest
+  in
+  loop 0 xs
+
+let select_preset_by_name name t =
+  let xs = filtered_presets t in
+  match find_preset_index ~name xs with
+  | Some idx ->
+      let changed =
+        (not (equal_prompts_presets_section t.pp_section Sec_presets))
+        || not (Int.equal idx t.pp_selected_index)
+      in
+      {
+        t with
+        pp_section = Sec_presets;
+        pp_selected_index = idx;
+        pp_scroll_offset = idx;
+        pending_preset_select = None;
+        detail_scroll_offset = (if changed then 0 else t.detail_scroll_offset);
+        preset_detail =
+          (match t.preset_detail with
+          | Observed.Value { data = n, _; _ } when String.equal n name ->
+              t.preset_detail
+          | Observed.Value _
+          | Observed.Loading _
+          | Observed.Absent
+          | Observed.Unreported
+          | Observed.Failed _ ->
+              Observed.absent);
+      }
+  | None ->
+      {
+        t with
+        pp_section = Sec_presets;
+        pending_preset_select = Some name;
+        preset_detail = Observed.absent;
+      }
+
+let filtered_runtime_params t =
+  match Observed.to_option t.runtime_params with
+  | None -> []
+  | Some rp ->
+      let q = String.trim t.filter_query in
+      if String.equal q "" then rp.parameters
+      else
+        List.filter
+          (fun (p : Wire_runtime.runtime_param_item) ->
+            contains_ci ~needle:q p.key
+            || Option.fold ~none:false ~some:(contains_ci ~needle:q)
+                 p.description)
+          rp.parameters
+
+let selected_runtime_param t =
+  let xs = filtered_runtime_params t in
+  List.nth_opt xs (clamp_index (List.length xs) t.pp_selected_index)
+
+let filtered_async_requests t =
+  match Observed.to_option t.async_requests with
+  | None -> []
+  | Some snap ->
+      let q = String.trim t.filter_query in
+      if String.equal q "" then snap.requests
+      else
+        List.filter
+          (fun (r : Wire_runtime.async_request_row) ->
+            contains_ci ~needle:q r.request_id
+            || contains_ci ~needle:q r.keeper_name
+            || contains_ci ~needle:q r.status)
+          snap.requests
+
+let selected_async_request t =
+  let xs = filtered_async_requests t in
+  List.nth_opt xs (clamp_index (List.length xs) t.pp_selected_index)
+
+let pp_section_len t =
+  match t.pp_section with
+  | Sec_prompts -> List.length (filtered_prompts t)
+  | Sec_presets -> List.length (filtered_presets t)
+  | Sec_params -> List.length (filtered_runtime_params t)
+  | Sec_async_requests -> List.length (filtered_async_requests t)
+
+let clamp_pp_selection t =
+  let len = pp_section_len t in
+  let pp_selected_index = clamp_index len t.pp_selected_index in
+  let pp_scroll_offset =
+    Int.min pp_selected_index (Int.max 0 t.pp_scroll_offset)
+  in
+  { t with pp_selected_index; pp_scroll_offset }
+
+let apply_async_requests ~observed_at snap t =
+  {
+    t with
+    async_requests = Observed.value ~observed_at snap;
+    async_requests_absent = false;
+    async_requests_auth_denied = false;
+  }
+  |> clamp_pp_selection
+
+let apply_prompts_catalog ~observed_at cat t =
+  {
+    t with
+    prompts_catalog = Observed.value ~observed_at cat;
+    prompts_absent = false;
+  }
+  |> clamp_pp_selection
+
+let apply_presets_listing ~observed_at listing t =
+  let base =
+    {
+      t with
+      presets_listing = Observed.value ~observed_at listing;
+      presets_absent = false;
+      presets_auth_denied = false;
+    }
+  in
+  match base.pending_preset_select with
+  | Some name -> (
+      match find_preset_index ~name (filtered_presets base) with
+      | Some idx ->
+          {
+            base with
+            pp_selected_index = idx;
+            pp_scroll_offset = idx;
+            pending_preset_select = None;
+          }
+      | None -> { base with pending_preset_select = None } |> clamp_pp_selection)
+  | None -> clamp_pp_selection base
+
+let apply_preset_detail ~observed_at ~name detail t =
+  { t with preset_detail = Observed.value ~observed_at (name, detail) }
+
+let preset_detail_for ~name t =
+  match Observed.to_option t.preset_detail with
+  | Some (n, d) when String.equal n name -> Some d
+  | Some _ | None -> None
+
+let apply_runtime_params ~observed_at rp t =
+  {
+    t with
+    runtime_params = Observed.value ~observed_at rp;
+    runtime_params_absent = false;
+  }
+  |> clamp_pp_selection
 
 let apply_connectors ~observed_at connectors t =
   { t with connectors = Observed.value ~observed_at connectors }
@@ -1864,23 +2236,15 @@ let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t 
           }
       | Tools_keeper_skills ->
           if pane_index = 1 then
-            let max_scroll =
-              match max_detail_scroll with
-              | Some ms -> max 0 ms
-              | None -> (
-                  match Observed.to_option t.skills with
-                  | Some sk ->
-                      let vis = max 1 (Option.value viewport_rows ~default:10) in
-                      max 0
-                        (List.length sk.surfaces + List.length sk.shadows
-                         + List.length sk.rejections + 6 - vis)
-                  | None -> 0)
+            let len = List.length (filtered_skill_surfaces t) in
+            let skill_selected_index =
+              clamp_index len (t.skill_selected_index + delta)
             in
-            let detail_scroll_offset =
-              Store_scroll.clamp_scroll ~max_scroll
-                (t.detail_scroll_offset + delta)
+            let skill_scroll_offset =
+              Store_scroll.adjust_scroll ?viewport_rows
+                ~scroll:t.skill_scroll_offset skill_selected_index
             in
-            { t with detail_scroll_offset }
+            { t with skill_selected_index; skill_scroll_offset }
           else
             let max_scroll =
               match max_detail_scroll with
@@ -1948,7 +2312,40 @@ let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t 
             let scroll_offset =
               Store_scroll.clamp_scroll ~max_scroll (t.scroll_offset + delta)
             in
-            { t with scroll_offset })
+            { t with scroll_offset }
+      | Tools_prompts_presets ->
+          if pane_index = 1 then
+            let max_scroll =
+              match max_detail_scroll with Some ms -> max 0 ms | None -> 200
+            in
+            let detail_scroll_offset =
+              Store_scroll.clamp_scroll ~max_scroll
+                (t.detail_scroll_offset + delta)
+            in
+            { t with detail_scroll_offset }
+          else
+            let len = pp_section_len t in
+            let pp_selected_index =
+              clamp_index len (t.pp_selected_index + delta)
+            in
+            let pp_scroll_offset =
+              Store_scroll.adjust_scroll ?viewport_rows
+                ~scroll:t.pp_scroll_offset pp_selected_index
+            in
+            let changed = not (Int.equal pp_selected_index t.pp_selected_index) in
+            let preset_detail =
+              if changed && equal_prompts_presets_section t.pp_section Sec_presets
+              then Observed.absent
+              else t.preset_detail
+            in
+            {
+              t with
+              pp_selected_index;
+              pp_scroll_offset;
+              preset_detail;
+              detail_scroll_offset =
+                (if changed then 0 else t.detail_scroll_offset);
+            })
   | Nav.Runtime_connectors ->
       if pane_index = 1 then
         let len = List.length (filtered_mcp_clients t) in
@@ -2097,6 +2494,10 @@ let set_filter filter_query t =
     mcp_client_scroll_offset = 0;
     tools_catalog_selected_index = 0;
     tools_catalog_scroll_offset = 0;
+    skill_selected_index = 0;
+    skill_scroll_offset = 0;
+    pp_selected_index = 0;
+    pp_scroll_offset = 0;
     addon_selected_index = 0;
     addon_scroll_offset = 0;
     browser_client_selected_index = 0;
@@ -2138,6 +2539,24 @@ let mark_stale_all t =
     keeper_waiting_inventory_absent = false;
     mcp_tools_list = Observed.mark_stale t.mcp_tools_list;
     skills = Observed.mark_stale t.skills;
+    skill_editor_sources = Observed.mark_stale t.skill_editor_sources;
+    skill_editor_sources_absent = false;
+    skill_editor_sources_auth_denied = false;
+    skill_editor_tools = Observed.mark_stale t.skill_editor_tools;
+    skill_editor_tools_absent = false;
+    skill_editor_tools_auth_denied = false;
+    skill_editor_loaded = Observed.mark_stale t.skill_editor_loaded;
+    skill_editor_preview = Observed.mark_stale t.skill_editor_preview;
+    async_requests = Observed.mark_stale t.async_requests;
+    async_requests_absent = false;
+    async_requests_auth_denied = false;
+    prompts_catalog = Observed.mark_stale t.prompts_catalog;
+    prompts_absent = false;
+    presets_listing = Observed.mark_stale t.presets_listing;
+    presets_absent = false;
+    preset_detail = Observed.mark_stale t.preset_detail;
+    runtime_params = Observed.mark_stale t.runtime_params;
+    runtime_params_absent = false;
     connectors = Observed.mark_stale t.connectors;
     browser_lane = Observed.mark_stale t.browser_lane;
     browser_tabs = String_map.map Observed.mark_stale t.browser_tabs;

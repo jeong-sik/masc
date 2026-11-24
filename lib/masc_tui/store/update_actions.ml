@@ -2386,6 +2386,309 @@ let rec execute_slash ~now (m : Model.t) cmd =
                  ~en:("/exec JSON parse error: " ^ msg))
               m
           , [] ))
+  | Slash.Skill act -> (
+      let prefill_field ~key ~value (m_in : Model.t) =
+        match m_in.inline_modal with
+        | None -> m_in
+        | Some modal ->
+            let fields =
+              List.map
+                (fun (f : Model.modal_form_field) ->
+                  if String.equal f.key key then { f with value } else f)
+                modal.fields
+            in
+            { m_in with inline_modal = Some { modal with fields } }
+      in
+      match act with
+      | Slash.Skill_refresh ->
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make ~ko:"스킬 카탈로그 새로고침 중…"
+                 ~en:"Refreshing skill catalog…")
+              m
+          , [ Cmd.Http_post { epoch = m.epoch; req = Cmd.Post_skills_refresh } ]
+          )
+      | Slash.Skill_new ->
+          let m1, cmds = Update_nav.open_inline_modal m Nav.Skill_create_form in
+          let m2 =
+            match Observed.to_option m.runtime.skill_editor_sources with
+            | Some (first :: _) -> prefill_field ~key:"source_id" ~value:first m1
+            | Some [] | None -> m1
+          in
+          (m2, cmds)
+      | Slash.Skill_read ref_s ->
+          Update_nav.push_dive m (Nav.Dive_runtime (Nav.Skill_dive ref_s))
+      | Slash.Skill_edit ref_s -> (
+          match Runtime_store.skill_editor_loaded_for ~reference:ref_s m.runtime with
+          | Some { access = Wire_runtime.Skill_read_only; _ } ->
+              ( Model.with_toast ~now ~level:Model.Toast_warning
+                  (Say.make
+                     ~ko:("읽기 전용 스킬 소스입니다 — 편집할 수 없습니다: " ^ ref_s)
+                     ~en:("Skill source is read-only — cannot edit: " ^ ref_s))
+                  m
+              , [] )
+          | Some ({ access = Wire_runtime.Skill_read_write; _ } as loaded) ->
+              let m1, cmds =
+                Update_nav.open_inline_modal m
+                  (Nav.Skill_edit_form { reference = loaded.reference })
+              in
+              ( prefill_field ~key:"source_text"
+                  ~value:(Model.escape_inline_text loaded.source_text) m1
+              , cmds )
+          | None ->
+              let m1, cmds =
+                Update_nav.push_dive m (Nav.Dive_runtime (Nav.Skill_dive ref_s))
+              in
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make
+                     ~ko:"스킬 원문 로드 중 — 로드 후 [e]로 편집하세요"
+                     ~en:"Loading skill source — press [e] once loaded to edit")
+                  m1
+              , cmds ))
+      | Slash.Skill_delete ref_s -> (
+          match Runtime_store.skill_editor_loaded_for ~reference:ref_s m.runtime with
+          | Some { access = Wire_runtime.Skill_read_only; _ } ->
+              ( Model.with_toast ~now ~level:Model.Toast_warning
+                  (Say.make
+                     ~ko:("읽기 전용 스킬 소스입니다 — 삭제할 수 없습니다: " ^ ref_s)
+                     ~en:("Skill source is read-only — cannot delete: " ^ ref_s))
+                  m
+              , [] )
+          | Some { access = Wire_runtime.Skill_read_write; _ } | None ->
+              Update_nav.open_inline_modal m
+                (Nav.Skill_delete_confirm { reference = ref_s })))
+  | Slash.Prompt act -> (
+      let prefill_field ~key ~value (m_in : Model.t) =
+        match m_in.inline_modal with
+        | None -> m_in
+        | Some modal ->
+            let fields =
+              List.map
+                (fun (f : Model.modal_form_field) ->
+                  if String.equal f.key key then { f with value } else f)
+                modal.fields
+            in
+            { m_in with inline_modal = Some { modal with fields } }
+      in
+      match act with
+      | Slash.Prompt_set { key; value = None } ->
+          let m1, cmds =
+            Update_nav.open_inline_modal m (Nav.Prompt_override_form { key })
+          in
+          let current_val =
+            match Observed.to_option m.runtime.prompts_catalog with
+            | Some cat -> (
+                match
+                  List.find_opt
+                    (fun (p : Wire_runtime.prompt_item) ->
+                      String.equal p.key key)
+                    cat.prompts
+                with
+                | Some p -> Some p.effective
+                | None -> None)
+            | None -> None
+          in
+          let m2 =
+            match current_val with
+            | Some v ->
+                prefill_field ~key:"value" ~value:(Model.escape_inline_text v) m1
+            | None -> m1
+          in
+          (m2, cmds)
+      | Slash.Prompt_set { key; value = Some v } ->
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make ~ko:("프롬프트 오버라이드 저장 중: " ^ key)
+                 ~en:("Saving prompt override: " ^ key))
+              m
+          , [
+              Cmd.Http_post
+                {
+                  epoch = m.epoch;
+                  req = Cmd.Post_prompt_override { key; value = Some v };
+                };
+            ] )
+      | Slash.Prompt_clear key ->
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make ~ko:("프롬프트 오버라이드 해제 중: " ^ key)
+                 ~en:("Clearing prompt override: " ^ key))
+              m
+          , [
+              Cmd.Http_post
+                {
+                  epoch = m.epoch;
+                  req = Cmd.Post_prompt_override { key; value = None };
+                };
+            ] )
+      | Slash.Param_set { key; value_raw = None } ->
+          let m1, cmds =
+            Update_nav.open_inline_modal m
+              (Nav.Runtime_param_set_form { param_key = key })
+          in
+          let cur_val =
+            match Observed.to_option m.runtime.runtime_params with
+            | Some rp -> (
+                match
+                  List.find_opt
+                    (fun (p : Wire_runtime.runtime_param_item) ->
+                      String.equal p.key key)
+                    rp.parameters
+                with
+                | Some p -> Some (Yojson.Safe.to_string p.current)
+                | None -> None)
+            | None -> None
+          in
+          let m2 =
+            match cur_val with
+            | Some v -> prefill_field ~key:"value" ~value:v m1
+            | None -> m1
+          in
+          (m2, cmds)
+      | Slash.Param_set { key; value_raw = Some raw } ->
+          let value =
+            try Yojson.Safe.from_string (String.trim raw)
+            with Yojson.Json_error _ -> `String raw
+          in
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make ~ko:("런타임 파라미터 설정 중: " ^ key)
+                 ~en:("Setting runtime param: " ^ key))
+              m
+          , [
+              Cmd.Http_post
+                {
+                  epoch = m.epoch;
+                  req = Cmd.Post_runtime_param_set { param_key = key; value };
+                };
+            ] )
+      | Slash.Param_clear key ->
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make ~ko:("런타임 파라미터 기본값 복원 중: " ^ key)
+                 ~en:("Clearing runtime param: " ^ key))
+              m
+          , [
+              Cmd.Http_post
+                {
+                  epoch = m.epoch;
+                  req = Cmd.Post_runtime_param_clear { param_key = key };
+                };
+            ] ))
+  | Slash.Preset act -> (
+      let jump_to_presets (m_in : Model.t) =
+        let nav =
+          {
+            m_in.nav with
+            workspace = Nav.Runtime;
+            dive_stack = [];
+            overlay = None;
+            pane_index = 0;
+          }
+        in
+        let runtime =
+          m_in.runtime
+          |> Runtime_store.set_tab Nav.Runtime_tools_usage
+          |> Runtime_store.set_tools_subview Runtime_store.Tools_prompts_presets
+          |> Runtime_store.set_prompts_presets_section Runtime_store.Sec_presets
+        in
+        let next = { m_in with nav; runtime } in
+        (next, View_fetches.fetches_for_current_view next)
+      in
+      match act with
+      | Slash.Preset_list -> jump_to_presets m
+      | Slash.Preset_show name ->
+          let nav =
+            {
+              m.nav with
+              workspace = Nav.Runtime;
+              dive_stack = [];
+              overlay = None;
+              pane_index = 0;
+            }
+          in
+          let runtime =
+            m.runtime
+            |> Runtime_store.set_tab Nav.Runtime_tools_usage
+            |> Runtime_store.set_tools_subview
+                 Runtime_store.Tools_prompts_presets
+            |> Runtime_store.select_preset_by_name name
+          in
+          let next = { m with nav; runtime } in
+          let vf = View_fetches.fetches_for_current_view next in
+          let target_path = Wire_runtime.preset_show_path ~name in
+          let already_fetching =
+            List.exists
+              (function
+                | Cmd.Http_get { req; _ } ->
+                    String.equal (Cmd.get_request_path req) target_path
+                | Cmd.Http_post _
+                | Cmd.Http_put _
+                | Cmd.Http_delete _
+                | Cmd.Http_post_stream _
+                | Cmd.Batch _
+                | Cmd.Sync_streams _
+                | Cmd.Update_workspace_guard _
+                | Cmd.Voice_cmd _
+                | Cmd.Copy_clipboard _
+                | Cmd.Render_memory_diagram _
+                | Cmd.Cancel_memory_diagram
+                | Cmd.Fetch_artifact_and_copy _
+                | Cmd.Export_artifact _
+                | Cmd.Open_dos_screen _
+                | Cmd.Open_external_url _
+                | Cmd.Open_editor_escape_hatch _
+                | Cmd.Start_local_server
+                | Cmd.Restart_tui
+                | Cmd.Quit _ ->
+                    false)
+              vf
+          in
+          let extra =
+            if already_fetching then []
+            else
+              [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_preset_show { name } } ]
+          in
+          (next, vf @ extra)
+      | Slash.Preset_save { name; description } ->
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make ~ko:("프리셋 저장 중: " ^ name)
+                 ~en:("Saving preset: " ^ name))
+              m
+          , [
+              Cmd.Http_post
+                {
+                  epoch = m.epoch;
+                  req = Cmd.Post_preset_save { name; description };
+                };
+            ] )
+      | Slash.Preset_create { name = None; _ } ->
+          Update_nav.open_inline_modal m Nav.Preset_create_form
+      | Slash.Preset_create { name = Some name; description } ->
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make ~ko:("프리셋 생성 중: " ^ name)
+                 ~en:("Creating preset: " ^ name))
+              m
+          , [
+              Cmd.Http_post
+                {
+                  epoch = m.epoch;
+                  req = Cmd.Post_preset_create { name; description };
+                };
+            ] )
+      | Slash.Preset_restore name ->
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make ~ko:("프리셋 복원 중: " ^ name)
+                 ~en:("Restoring preset: " ^ name))
+              m
+          , [
+              Cmd.Http_post
+                { epoch = m.epoch; req = Cmd.Post_preset_restore { name } };
+            ] )
+      | Slash.Preset_delete name ->
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make ~ko:("프리셋 삭제 중: " ^ name)
+                 ~en:("Deleting preset: " ^ name))
+              m
+          , [
+              Cmd.Http_post
+                { epoch = m.epoch; req = Cmd.Post_preset_delete { name } };
+            ] ))
   | Slash.Tools None ->
       ({ m with fleet = Fleet_store.cycle_tools_mode m.fleet }, [])
   | Slash.Tools (Some mode) ->
@@ -2775,6 +3078,20 @@ and confirm_palette ~now (m : Model.t) =
                 Update_nav.open_inline_modal m_closed
                   (Nav.Tool_execute_form
                      { tool_name = "masc_status"; args_json = "{}" })
+              else if Slash.equal_command_id spec.id Slash.Cmd_skill then
+                let drafts =
+                  m_closed.drafts |> Drafts.set_current_text "/skill "
+                  |> Drafts.set_focus true
+                in
+                ({ m_closed with drafts }, [])
+              else if Slash.equal_command_id spec.id Slash.Cmd_prompt then
+                let drafts =
+                  m_closed.drafts |> Drafts.set_current_text "/prompt "
+                  |> Drafts.set_focus true
+                in
+                ({ m_closed with drafts }, [])
+              else if Slash.equal_command_id spec.id Slash.Cmd_preset then
+                execute_slash ~now m_closed (Slash.Preset Slash.Preset_list)
               else
                 match Slash.parse spec.name with
                 | Ok parsed -> execute_slash ~now m_closed parsed
@@ -2906,6 +3223,12 @@ and execute_action ~now (m : Model.t) action =
                     | Nav.Keeper_clear_form _
                     | Nav.Keeper_operator_note_form _
                     | Nav.Tool_execute_form _
+                    | Nav.Skill_create_form
+                    | Nav.Skill_edit_form _
+                    | Nav.Skill_delete_confirm _
+                    | Nav.Prompt_override_form _
+                    | Nav.Preset_create_form
+                    | Nav.Runtime_param_set_form _
                     | Nav.Runtime_lane_create
                     | Nav.Runtime_lane_edit _
                     | Nav.Runtime_lane_delete _
@@ -3125,6 +3448,12 @@ and execute_action ~now (m : Model.t) action =
                | Nav.Keeper_clear_form _
                | Nav.Keeper_operator_note_form _
                | Nav.Tool_execute_form _
+               | Nav.Skill_create_form
+               | Nav.Skill_edit_form _
+               | Nav.Skill_delete_confirm _
+               | Nav.Prompt_override_form _
+               | Nav.Preset_create_form
+               | Nav.Runtime_param_set_form _
                | Nav.Runtime_lane_create
                | Nav.Runtime_lane_edit _
                | Nav.Runtime_lane_delete _
@@ -3407,6 +3736,12 @@ and execute_action ~now (m : Model.t) action =
             | Nav.Keeper_clear_form _
             | Nav.Keeper_operator_note_form _
             | Nav.Tool_execute_form _
+            | Nav.Skill_create_form
+            | Nav.Skill_edit_form _
+            | Nav.Skill_delete_confirm _
+            | Nav.Prompt_override_form _
+            | Nav.Preset_create_form
+            | Nav.Runtime_param_set_form _
             | Nav.Runtime_lane_create
             | Nav.Runtime_lane_edit _
             | Nav.Runtime_lane_delete _
@@ -4222,6 +4557,7 @@ and execute_action ~now (m : Model.t) action =
                   | Cmd.Batch _
                   | Cmd.Http_post _
                   | Cmd.Http_put _
+                  | Cmd.Http_delete _
                   | Cmd.Http_post_stream _
                   | Cmd.Sync_streams _
                   | Cmd.Update_workspace_guard _
@@ -4278,6 +4614,8 @@ and execute_action ~now (m : Model.t) action =
               step_artifact_search ~now ~delta:1 m
           | Some (Nav.Dive_infra (Nav.Lane_dive _)) ->
               open_runtime_lane_create_modal m
+          | Some (Nav.Dive_runtime (Nav.Skill_dive _)) ->
+              execute_slash ~now m (Slash.Skill Slash.Skill_new)
           | Some
               ( Nav.Dive_keeper _
               | Nav.Dive_work _
@@ -4286,7 +4624,7 @@ and execute_action ~now (m : Model.t) action =
                   | Nav.Thread_dive _
                   | Nav.Wiki_dive _
                   | Nav.Memory_diff_dive _ )
-              | Nav.Dive_runtime _
+              | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Fusion_dive _)
               | Nav.Dive_infra
                   ( Nav.Sandbox_dive _
                   | Nav.Incident_dive _
@@ -4328,10 +4666,26 @@ and execute_action ~now (m : Model.t) action =
                       open_runtime_lane_create_modal m
                   | Nav.Runtime_addons_browser ->
                       open_addon_attach_modal m
+                  | Nav.Runtime_tools_usage -> (
+                      match m.runtime.tools_subview with
+                      | Runtime_store.Tools_keeper_skills ->
+                          execute_slash ~now m (Slash.Skill Slash.Skill_new)
+                      | Runtime_store.Tools_prompts_presets -> (
+                          match m.runtime.pp_section with
+                          | Runtime_store.Sec_presets ->
+                              Update_nav.open_inline_modal m
+                                Nav.Preset_create_form
+                          | Runtime_store.Sec_prompts
+                          | Runtime_store.Sec_params
+                          | Runtime_store.Sec_async_requests ->
+                              (m, []))
+                      | Runtime_store.Tools_usage_calls
+                      | Runtime_store.Tools_catalog_tree
+                      | Runtime_store.Tools_quality_gate ->
+                          (m, []))
                   | Nav.Runtime_quotas_credits
                   | Nav.Runtime_efficiency_spend
-                  | Nav.Runtime_fusion
-                  | Nav.Runtime_tools_usage ->
+                  | Nav.Runtime_fusion ->
                       (m, []))
               | Nav.Infra -> (
                   match m.infra.active_tab with
@@ -4607,6 +4961,12 @@ and execute_action ~now (m : Model.t) action =
                 | Nav.Keeper_clear_form _
                 | Nav.Keeper_operator_note_form _
                 | Nav.Tool_execute_form _
+                | Nav.Skill_create_form
+                | Nav.Skill_edit_form _
+                | Nav.Skill_delete_confirm _
+                | Nav.Prompt_override_form _
+                | Nav.Preset_create_form
+                | Nav.Runtime_param_set_form _
                 | Nav.Runtime_lane_create
                 | Nav.Runtime_lane_edit _
                 | Nav.Runtime_lane_delete _
@@ -4749,6 +5109,7 @@ and execute_action ~now (m : Model.t) action =
                     | None -> None))
             | Some (Nav.Dive_runtime (Nav.Tool_dive name)) -> Some name
             | Some (Nav.Dive_runtime (Nav.Fusion_dive run_id)) -> Some run_id
+            | Some (Nav.Dive_runtime (Nav.Skill_dive ref_s)) -> Some ref_s
             | Some (Nav.Dive_infra idive) -> (
                 match idive with
                 | Nav.Sandbox_dive keeper | Nav.Runtime_trace_dive keeper ->
@@ -4969,7 +5330,31 @@ and execute_action ~now (m : Model.t) action =
                                   (fun (r : Wire_runtime.tool_quality_tool_row) ->
                                     r.name)
                                   (List.nth_opt tq.by_tool idx)
-                            | None -> None))
+                            | None -> None)
+                        | Runtime_store.Tools_prompts_presets -> (
+                            match m.runtime.pp_section with
+                            | Runtime_store.Sec_prompts ->
+                                Option.map
+                                  (fun (p : Wire_runtime.prompt_item) -> p.key)
+                                  (Runtime_store.selected_prompt_item m.runtime)
+                            | Runtime_store.Sec_presets ->
+                                Option.map
+                                  (fun (p : Wire_runtime.preset_manifest) ->
+                                    p.name)
+                                  (Runtime_store.selected_preset_manifest
+                                     m.runtime)
+                            | Runtime_store.Sec_params ->
+                                Option.map
+                                  (fun (p : Wire_runtime.runtime_param_item) ->
+                                    p.key)
+                                  (Runtime_store.selected_runtime_param
+                                     m.runtime)
+                            | Runtime_store.Sec_async_requests ->
+                                Option.map
+                                  (fun (r : Wire_runtime.async_request_row) ->
+                                    r.request_id)
+                                  (Runtime_store.selected_async_request
+                                     m.runtime)))
                     | Nav.Runtime_connectors ->
                         Option.map
                           (fun (c : Wire_runtime.connector_row) -> c.connector_id)
@@ -5612,7 +5997,7 @@ and execute_action ~now (m : Model.t) action =
                 | Nav.Wiki_dive _
                 | Nav.Artifact_dive _
                 | Nav.Memory_diff_dive _ )
-            | Nav.Dive_runtime (Nav.Fusion_dive _)
+            | Nav.Dive_runtime (Nav.Fusion_dive _ | Nav.Skill_dive _)
             | Nav.Dive_infra _ ) ->
             (m, [])
         | None -> (
@@ -6119,6 +6504,35 @@ and execute_action ~now (m : Model.t) action =
                 | Nav.Runtime
                   when Nav.equal_runtime_tab m.runtime.active_tab
                          Nav.Runtime_tools_usage
+                       && Runtime_store.equal_tools_subview
+                            m.runtime.tools_subview
+                            Runtime_store.Tools_prompts_presets ->
+                    let next_sec =
+                      if delta >= 0 then
+                        match m.runtime.pp_section with
+                        | Runtime_store.Sec_prompts -> Runtime_store.Sec_presets
+                        | Runtime_store.Sec_presets -> Runtime_store.Sec_params
+                        | Runtime_store.Sec_params ->
+                            Runtime_store.Sec_async_requests
+                        | Runtime_store.Sec_async_requests ->
+                            Runtime_store.Sec_prompts
+                      else
+                        match m.runtime.pp_section with
+                        | Runtime_store.Sec_prompts ->
+                            Runtime_store.Sec_async_requests
+                        | Runtime_store.Sec_presets -> Runtime_store.Sec_prompts
+                        | Runtime_store.Sec_params -> Runtime_store.Sec_presets
+                        | Runtime_store.Sec_async_requests ->
+                            Runtime_store.Sec_params
+                    in
+                    let runtime =
+                      Runtime_store.set_prompts_presets_section next_sec m.runtime
+                    in
+                    let next = { m with runtime } in
+                    (next, View_fetches.fetches_for_current_view next)
+                | Nav.Runtime
+                  when Nav.equal_runtime_tab m.runtime.active_tab
+                         Nav.Runtime_tools_usage
                        && (Runtime_store.equal_tools_subview
                              m.runtime.tools_subview
                              Runtime_store.Tools_keeper_skills
@@ -6564,20 +6978,46 @@ and execute_action ~now (m : Model.t) action =
                           };
                       ] )
                 | None -> (m, []))
-            | Nav.Runtime ->
-                let keeper_default =
-                  Option.value (Update_nav.resolve_target_keeper m) ~default:""
-                in
-                let runtime_default =
-                  match Runtime_store.selected_lane m.runtime with
-                  | Some lane -> lane.id
-                  | None -> (
-                      match Observed.to_option m.runtime.runtime_resolved with
-                      | Some snap ->
-                          Option.value snap.default_route ~default:""
-                      | None -> "")
-                in
-                open_runtime_assign_modal m ~keeper_default ~runtime_default ()
+            | Nav.Runtime -> (
+                if
+                  Nav.equal_runtime_tab m.runtime.active_tab
+                    Nav.Runtime_tools_usage
+                  && Runtime_store.equal_tools_subview m.runtime.tools_subview
+                       Runtime_store.Tools_prompts_presets
+                  && Runtime_store.equal_prompts_presets_section
+                       m.runtime.pp_section Runtime_store.Sec_presets
+                then
+                  match Runtime_store.selected_preset_manifest m.runtime with
+                  | Some p ->
+                      ( Model.with_toast ~now ~level:Model.Toast_info
+                          (Say.make
+                             ~ko:("프리셋 복원 중 (자동 백업 _autosave): " ^ p.name)
+                             ~en:
+                               ("Restoring preset (autosaving _autosave): "
+                                ^ p.name))
+                          m
+                      , [
+                          Cmd.Http_post
+                            {
+                              epoch = m.epoch;
+                              req = Cmd.Post_preset_restore { name = p.name };
+                            };
+                        ] )
+                  | None -> (m, [])
+                else
+                  let keeper_default =
+                    Option.value (Update_nav.resolve_target_keeper m) ~default:""
+                  in
+                  let runtime_default =
+                    match Runtime_store.selected_lane m.runtime with
+                    | Some lane -> lane.id
+                    | None -> (
+                        match Observed.to_option m.runtime.runtime_resolved with
+                        | Some snap ->
+                            Option.value snap.default_route ~default:""
+                        | None -> "")
+                  in
+                  open_runtime_assign_modal m ~keeper_default ~runtime_default ())
             | Nav.Keepers -> (
                 let ws_pair =
                   Option.map
@@ -6671,9 +7111,11 @@ and execute_action ~now (m : Model.t) action =
               | Some _ | None -> "pause"
             in
             open_keeper_lifecycle_modal m ~keeper:name ~default_action
+        | Some (Nav.Dive_runtime (Nav.Skill_dive ref_s)) ->
+            execute_slash ~now m (Slash.Skill (Slash.Skill_delete ref_s))
         | Some
             ( Nav.Dive_knowledge _
-            | Nav.Dive_runtime _
+            | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Fusion_dive _)
             | Nav.Dive_infra _ ) ->
             (m, [])
         | None -> (
@@ -6737,6 +7179,76 @@ and execute_action ~now (m : Model.t) action =
                     | Work_store.Inbox_queue | Work_store.Inbox_history ->
                         (m, []))
                 | Nav.Work_schedules | Nav.Work_candle_scorecard -> (m, []))
+            | Nav.Runtime
+              when Nav.equal_runtime_tab m.runtime.active_tab
+                     Nav.Runtime_tools_usage -> (
+                match m.runtime.tools_subview with
+                | Runtime_store.Tools_keeper_skills when m.nav.pane_index = 1
+                  -> (
+                    match Runtime_store.selected_skill_surface m.runtime with
+                    | Some sf ->
+                        execute_slash ~now m
+                          (Slash.Skill (Slash.Skill_delete sf.reference))
+                    | None -> (m, []))
+                | Runtime_store.Tools_prompts_presets -> (
+                    match m.runtime.pp_section with
+                    | Runtime_store.Sec_prompts -> (
+                        match Runtime_store.selected_prompt_item m.runtime with
+                        | Some p ->
+                            ( Model.with_toast ~now ~level:Model.Toast_info
+                                (Say.make
+                                   ~ko:("프롬프트 오버라이드 해제 중: " ^ p.key)
+                                   ~en:("Clearing prompt override: " ^ p.key))
+                                m
+                            , [
+                                Cmd.Http_post
+                                  {
+                                    epoch = m.epoch;
+                                    req =
+                                      Cmd.Post_prompt_override
+                                        { key = p.key; value = None };
+                                  };
+                              ] )
+                        | None -> (m, []))
+                    | Runtime_store.Sec_presets -> (
+                        match Runtime_store.selected_preset_manifest m.runtime with
+                        | Some p ->
+                            ( Model.with_toast ~now ~level:Model.Toast_info
+                                (Say.make ~ko:("프리셋 삭제 중: " ^ p.name)
+                                   ~en:("Deleting preset: " ^ p.name))
+                                m
+                            , [
+                                Cmd.Http_post
+                                  {
+                                    epoch = m.epoch;
+                                    req = Cmd.Post_preset_delete { name = p.name };
+                                  };
+                              ] )
+                        | None -> (m, []))
+                    | Runtime_store.Sec_params -> (
+                        match Runtime_store.selected_runtime_param m.runtime with
+                        | Some p ->
+                            ( Model.with_toast ~now ~level:Model.Toast_info
+                                (Say.make
+                                   ~ko:("파라미터 기본값 복원 중: " ^ p.key)
+                                   ~en:("Clearing runtime param: " ^ p.key))
+                                m
+                            , [
+                                Cmd.Http_post
+                                  {
+                                    epoch = m.epoch;
+                                    req =
+                                      Cmd.Post_runtime_param_clear
+                                        { param_key = p.key };
+                                  };
+                              ] )
+                        | None -> (m, []))
+                    | Runtime_store.Sec_async_requests -> (m, []))
+                | Runtime_store.Tools_usage_calls
+                | Runtime_store.Tools_catalog_tree
+                | Runtime_store.Tools_keeper_skills
+                | Runtime_store.Tools_quality_gate ->
+                    (m, []))
             | Nav.Keepers -> (
                 match Fleet_store.selected_keeper_summary m.fleet with
                 | Some k ->
@@ -6881,6 +7393,8 @@ and execute_action ~now (m : Model.t) action =
                 in
                 Update_nav.open_inline_modal m
                   (Nav.Tool_execute_form { tool_name; args_json = skeleton })
+            | Some (Nav.Dive_runtime (Nav.Skill_dive ref_s)) ->
+                execute_slash ~now m (Slash.Skill (Slash.Skill_edit ref_s))
             | Some
                 ( Nav.Dive_knowledge
                     ( Nav.Thread_dive _
@@ -6932,6 +7446,43 @@ and execute_action ~now (m : Model.t) action =
                     { m with nav = { m.nav with dive_scroll_offset = 0 }; knowledge }
                   in
                   (next, View_fetches.fetches_for_current_view next)
+                else if
+                  Nav.equal_workspace m.nav.workspace Nav.Runtime
+                  && Nav.equal_runtime_tab m.runtime.active_tab
+                       Nav.Runtime_tools_usage
+                then (
+                  match m.runtime.tools_subview with
+                  | Runtime_store.Tools_keeper_skills when m.nav.pane_index = 1
+                    -> (
+                      match Runtime_store.selected_skill_surface m.runtime with
+                      | Some sf ->
+                          execute_slash ~now m
+                            (Slash.Skill (Slash.Skill_edit sf.reference))
+                      | None -> (m, []))
+                  | Runtime_store.Tools_prompts_presets -> (
+                      match m.runtime.pp_section with
+                      | Runtime_store.Sec_prompts -> (
+                          match Runtime_store.selected_prompt_item m.runtime with
+                          | Some p ->
+                              execute_slash ~now m
+                                (Slash.Prompt
+                                   (Slash.Prompt_set { key = p.key; value = None }))
+                          | None -> (m, []))
+                      | Runtime_store.Sec_presets -> (m, [])
+                      | Runtime_store.Sec_params -> (
+                          match Runtime_store.selected_runtime_param m.runtime with
+                          | Some p ->
+                              execute_slash ~now m
+                                (Slash.Prompt
+                                   (Slash.Param_set
+                                      { key = p.key; value_raw = None }))
+                          | None -> (m, []))
+                      | Runtime_store.Sec_async_requests -> (m, []))
+                  | Runtime_store.Tools_usage_calls
+                  | Runtime_store.Tools_catalog_tree
+                  | Runtime_store.Tools_keeper_skills
+                  | Runtime_store.Tools_quality_gate ->
+                      (m, []))
                 else if
                   Nav.equal_workspace m.nav.workspace Nav.Runtime
                   && Nav.equal_runtime_tab m.runtime.active_tab

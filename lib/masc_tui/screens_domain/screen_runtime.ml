@@ -4043,6 +4043,11 @@ let render_tools_keeper_skills ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
   let right_inner =
     Card.draw ~cache grid ~rect:right_rect ~theme
       (H.card_spec ~focused:(Model.pane_focused model 1)
+         ~hotkey:
+           (Say.resolve lang
+              (Say.make
+                 ~ko:"[Enter] 열람 · [n] 생성 · [e] 편집 · [x] 삭제 · [R] 갱신"
+                 ~en:"[Enter] Read · [n] New · [e] Edit · [x] Del · [R] Refresh"))
          (Say.resolve lang
             (Say.make ~ko:"스킬 프로파일 · 그림자 · 거절"
                ~en:"Skills Profiles, Shadows & Rejections")))
@@ -4051,6 +4056,7 @@ let render_tools_keeper_skills ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
   if not (Rect.is_empty rc) then begin
     match rt.skills with
     | Observed.Value { data = sk; _ } ->
+        let filtered_sf = Runtime_store.filtered_skill_surfaces rt in
         let y = ref rc.y and bot = Rect.bottom rc in
         if !y < bot then begin
           let rev_s =
@@ -4060,7 +4066,7 @@ let render_tools_keeper_skills ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             (H.put_clipped ~grid ~clip:rc ~x:rc.x ~y:!y ~max_w:rc.w
                ~style:(H.anchor_style ~theme ())
                (Printf.sprintf "State: %s%s · %d skills · %d shadows · %d rejected"
-                  sk.state rev_s (List.length sk.surfaces)
+                  sk.state rev_s (List.length filtered_sf)
                   (List.length sk.shadows) (List.length sk.rejections)));
           incr y
         end;
@@ -4071,7 +4077,9 @@ let render_tools_keeper_skills ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             (H.put_clipped ~grid ~clip:rc ~x:(rc.x + 2) ~y:!y
                ~max_w:(Int.max 0 (rc.w - 2))
                ~style:(H.status_style ~theme Theme.Status_critical)
-               ("Rejected: " ^ String.concat "; " (H.safe_take 3 sk.rejections)));
+               ("Rejected: "
+                ^ H.redact_secrets_in_text
+                    (String.concat "; " (H.safe_take 3 sk.rejections))));
           incr y
         end;
         if sk.shadows <> [] && !y < bot then begin
@@ -4090,38 +4098,55 @@ let render_tools_keeper_skills ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             ();
           incr y
         end;
+        let sel_idx =
+          Int.max 0 (Int.min (List.length filtered_sf - 1) rt.skill_selected_index)
+        in
         let skip =
           Int.min
-            (Int.max 0 (List.length sk.surfaces - Int.max 1 (bot - !y)))
-            (Int.max 0 rt.detail_scroll_offset)
+            (Int.max 0 (List.length filtered_sf - Int.max 1 (bot - !y)))
+            (Int.max 0 rt.skill_scroll_offset)
         in
-        List.iter
-          (fun (sf : Wire_runtime.skill_surface_entry) ->
+        let pane1_focused = Model.pane_focused model 1 in
+        List.iteri
+          (fun rel_i (sf : Wire_runtime.skill_surface_entry) ->
+            let abs_i = skip + rel_i in
             if !y < bot then begin
+              let is_sel = Int.equal abs_i sel_idx in
               let kind_tone =
                 match sf.kind with
                 | "composition" -> Theme.Status_ai
                 | "instruction" -> Theme.Status_ok
                 | _ -> Theme.Status_attention
               in
-              let tag = Printf.sprintf "[%s] " sf.kind in
+              let prefix =
+                if is_sel && pane1_focused then "▸ "
+                else if is_sel then "· "
+                else "  "
+              in
+              let tag = Printf.sprintf "%s[%s] " prefix sf.kind in
               let adv =
-                H.put_clipped ~grid ~clip:rc ~x:rc.x ~y:!y ~max_w:15
+                H.put_clipped ~grid ~clip:rc ~x:rc.x ~y:!y ~max_w:17
                   ~style:(H.status_style ~theme ~attrs:Attr.bold kind_tone) tag
               in
               let extra =
                 match (sf.error, sf.summary) with
-                | Some e, _ -> " · err: " ^ e
-                | None, Some s -> " · " ^ H.sanitize_single_line s
+                | Some e, _ -> " · err: " ^ H.redact_secrets_in_text e
+                | None, Some s ->
+                    " · " ^ H.redact_secrets_in_text (H.sanitize_single_line s)
                 | None, None -> ""
+              in
+              let row_style =
+                if is_sel && pane1_focused then
+                  H.accent_style ~theme ~attrs:Attr.bold ()
+                else H.text_style ~theme ()
               in
               ignore
                 (H.put_clipped ~grid ~clip:rc ~x:(rc.x + adv) ~y:!y
                    ~max_w:(Int.max 0 (rc.w - adv))
-                   ~style:(H.text_style ~theme ()) (sf.reference ^ extra));
+                   ~style:row_style (sf.reference ^ extra));
               incr y
             end)
-          (Store_scroll.drop skip sk.surfaces)
+          (Store_scroll.drop skip filtered_sf)
     | ( Observed.Loading _
       | Observed.Absent
       | Observed.Unreported
@@ -4174,6 +4199,17 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
           Runtime_store.equal_tools_subview rt.tools_subview
             Runtime_store.Tools_quality_gate;
         tone = Some Theme.Status_attention;
+        glyph = None;
+      };
+      {
+        H.label =
+          Say.resolve lang
+            (Say.make ~ko:"프롬프트 · 프리셋 · 파라미터"
+               ~en:"Prompts · Presets · Params");
+        active =
+          Runtime_store.equal_tools_subview rt.tools_subview
+            Runtime_store.Tools_prompts_presets;
+        tone = Some Theme.Status_ai;
         glyph = None;
       };
     ]
@@ -4463,6 +4499,448 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
                    ~y:(rc.y + idx - skip) ~style
                    (Grapheme.truncate_to_width ~max_width:rc.w line)))
           all_lines
+      end
+  | Runtime_store.Tools_prompts_presets ->
+      let left_rect, right_rect =
+        Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.46
+          ~top_ratio:0.48 bp body_rect
+      in
+      let sec_title =
+        match rt.pp_section with
+        | Runtime_store.Sec_prompts ->
+            Say.resolve lang (Say.make ~ko:"프롬프트 레지스트리" ~en:"Prompts Registry")
+        | Runtime_store.Sec_presets ->
+            Say.resolve lang (Say.make ~ko:"프롬프트 프리셋" ~en:"Prompt Presets")
+        | Runtime_store.Sec_params ->
+            Say.resolve lang (Say.make ~ko:"런타임 파라미터" ~en:"Runtime Params")
+        | Runtime_store.Sec_async_requests ->
+            Say.resolve lang (Say.make ~ko:"비동기 요청 브로커" ~en:"Async Requests")
+      in
+      let left_hotkey =
+        match rt.pp_section with
+        | Runtime_store.Sec_prompts ->
+            Say.resolve lang
+              (Say.make ~ko:"[< >] 섹션 · [e] 오버라이드 · [x] 해제"
+                 ~en:"[< >] Section · [e] Override · [x] Clear")
+        | Runtime_store.Sec_presets ->
+            Say.resolve lang
+              (Say.make ~ko:"[< >] 섹션 · [n] 생성 · [a] 복원 · [x] 삭제"
+                 ~en:"[< >] Section · [n] New · [a] Restore · [x] Del")
+        | Runtime_store.Sec_params ->
+            Say.resolve lang
+              (Say.make ~ko:"[< >] 섹션 · [e] 설정 · [x] 기본값"
+                 ~en:"[< >] Section · [e] Set · [x] Clear")
+        | Runtime_store.Sec_async_requests ->
+            Say.resolve lang
+              (Say.make ~ko:"[< >] 섹션 · [r] 새로고침"
+                 ~en:"[< >] Section · [r] Refresh")
+      in
+      let left_inner =
+        Card.draw ~cache grid ~rect:left_rect ~theme
+          (H.card_spec ~focused:(Model.pane_focused model 0)
+             ~hotkey:left_hotkey sec_title)
+      in
+      let lc = H.pad_content ~bp left_inner in
+      if not (Rect.is_empty lc) then begin
+        let sec_bar, list_r =
+          match Layout.split_v lc [ Layout.Fixed 1; Layout.Flex 1 ] with
+          | [ a; b ] -> (a, b)
+          | _ -> (Rect.empty, lc)
+        in
+        let sec_pills =
+          [
+            {
+              H.label = Say.resolve lang (Say.make ~ko:"프롬프트" ~en:"Prompts");
+              active =
+                Runtime_store.equal_prompts_presets_section rt.pp_section
+                  Runtime_store.Sec_prompts;
+              tone = Some Theme.Status_active;
+              glyph = None;
+            };
+            {
+              H.label = Say.resolve lang (Say.make ~ko:"프리셋" ~en:"Presets");
+              active =
+                Runtime_store.equal_prompts_presets_section rt.pp_section
+                  Runtime_store.Sec_presets;
+              tone = Some Theme.Status_ai;
+              glyph = None;
+            };
+            {
+              H.label = Say.resolve lang (Say.make ~ko:"파라미터" ~en:"Params");
+              active =
+                Runtime_store.equal_prompts_presets_section rt.pp_section
+                  Runtime_store.Sec_params;
+              tone = Some Theme.Status_ok;
+              glyph = None;
+            };
+            {
+              H.label = Say.resolve lang (Say.make ~ko:"비동기" ~en:"Async");
+              active =
+                Runtime_store.equal_prompts_presets_section rt.pp_section
+                  Runtime_store.Sec_async_requests;
+              tone = Some Theme.Status_attention;
+              glyph = None;
+            };
+          ]
+        in
+        ignore (H.draw_pills ~grid ~rect:sec_bar ~theme sec_pills);
+        let bg = Color.of_rgb theme.surface_1 in
+        let pane0_focused = Model.pane_focused model 0 in
+        let draw_list_rows rows =
+          if rows = [] then
+            ignore
+              (H.put_clipped ~grid ~clip:list_r ~x:list_r.x ~y:list_r.y
+                 ~max_w:list_r.w ~style:(Typography.whisper ~bg theme)
+                 (Say.resolve lang (Say.make ~ko:"항목 없음" ~en:"No entries")))
+          else
+            let sel = Int.max 0 (Int.min (List.length rows - 1) rt.pp_selected_index) in
+            let skip =
+              Int.min
+                (Int.max 0 (List.length rows - Int.max 1 list_r.h))
+                (Int.max 0 rt.pp_scroll_offset)
+            in
+            List.iteri
+              (fun rel_i (badge, text, tone_opt) ->
+                let y = list_r.y + rel_i in
+                if y < Rect.bottom list_r then begin
+                  let abs_i = skip + rel_i in
+                  let is_sel = Int.equal abs_i sel in
+                  let prefix =
+                    if is_sel && pane0_focused then "▸ "
+                    else if is_sel then "· "
+                    else "  "
+                  in
+                  let b_style =
+                    match tone_opt with
+                    | Some tone -> H.status_style ~theme ~attrs:Attr.bold tone
+                    | None -> Typography.whisper ~bg theme
+                  in
+                  let adv =
+                    H.put_clipped ~grid ~clip:list_r ~x:list_r.x ~y ~max_w:14
+                      ~style:b_style (prefix ^ badge ^ " ")
+                  in
+                  let row_st =
+                    if is_sel && pane0_focused then
+                      H.accent_style ~theme ~attrs:Attr.bold ()
+                    else Typography.primary ~bg theme
+                  in
+                  ignore
+                    (H.put_clipped ~grid ~clip:list_r ~x:(list_r.x + adv) ~y
+                       ~max_w:(Int.max 0 (list_r.w - adv)) ~style:row_st text)
+                end)
+              (Store_scroll.drop skip rows)
+        in
+        match rt.pp_section with
+        | Runtime_store.Sec_prompts -> (
+            match rt.prompts_catalog with
+            | Observed.Value { data = cat; _ } ->
+                let items = Runtime_store.filtered_prompts rt in
+                let prompt_rows =
+                  List.map
+                    (fun (p : Wire_runtime.prompt_item) ->
+                      let b = if p.has_override then "[OVR]" else "[DEF]" in
+                      let tone =
+                        if p.has_override then Some Theme.Status_attention
+                        else Some Theme.Status_ok
+                      in
+                      (b, Printf.sprintf "%s (%dB)" p.key p.char_count, tone))
+                    items
+                in
+                let held_rows =
+                  List.map
+                    (fun (h : Wire_runtime.prompt_held_back) ->
+                      ( "[HELD]"
+                      , Printf.sprintf "%s (%dB: %s)" h.key h.bytes
+                          (H.redact_secrets_in_text h.reason)
+                      , Some Theme.Status_critical ))
+                    cat.held_back
+                in
+                draw_list_rows (prompt_rows @ held_rows)
+            | ( Observed.Loading _
+              | Observed.Absent
+              | Observed.Unreported
+              | Observed.Failed _ ) as obs ->
+                H.draw_observed_placeholder ~grid ~rect:list_r ~theme ~lang obs)
+        | Runtime_store.Sec_presets -> (
+            match rt.presets_listing with
+            | Observed.Value { data = listing; _ } ->
+                let items = Runtime_store.filtered_presets rt in
+                let preset_rows =
+                  List.map
+                    (fun (p : Wire_runtime.preset_manifest) ->
+                      ( Printf.sprintf "[%d/%d]" p.override_count
+                          (List.length p.keepers)
+                      , p.name
+                        ^ (if String.equal (String.trim p.description) "" then ""
+                           else " · " ^ H.redact_secrets_in_text p.description)
+                      , Some Theme.Status_ai ))
+                    items
+                in
+                let unreadable_rows =
+                  List.map
+                    (fun (u : Wire_runtime.preset_unreadable) ->
+                      ( "[ERR]"
+                      , Printf.sprintf "%s: %s" u.name
+                          (H.redact_secrets_in_text u.reason)
+                      , Some Theme.Status_critical ))
+                    listing.unreadable
+                in
+                draw_list_rows (preset_rows @ unreadable_rows)
+            | ( Observed.Loading _
+              | Observed.Absent
+              | Observed.Unreported
+              | Observed.Failed _ ) as obs ->
+                H.draw_observed_placeholder ~grid ~rect:list_r ~theme ~lang obs)
+        | Runtime_store.Sec_params -> (
+            match rt.runtime_params with
+            | Observed.Value _ ->
+                let items = Runtime_store.filtered_runtime_params rt in
+                draw_list_rows
+                  (List.map
+                     (fun (p : Wire_runtime.runtime_param_item) ->
+                       let b = if p.has_override then "[SET]" else "[DEF]" in
+                       let tone =
+                         if p.has_override then Some Theme.Status_attention
+                         else Some Theme.Status_ok
+                       in
+                       let val_s =
+                         H.redact_secrets_in_text (Yojson.Safe.to_string p.current)
+                       in
+                       (b, Printf.sprintf "%s = %s" p.key val_s, tone))
+                     items)
+            | ( Observed.Loading _
+              | Observed.Absent
+              | Observed.Unreported
+              | Observed.Failed _ ) as obs ->
+                H.draw_observed_placeholder ~grid ~rect:list_r ~theme ~lang obs)
+        | Runtime_store.Sec_async_requests -> (
+            match rt.async_requests with
+            | Observed.Value _ ->
+                let items = Runtime_store.filtered_async_requests rt in
+                draw_list_rows
+                  (List.map
+                     (fun (r : Wire_runtime.async_request_row) ->
+                       let tone =
+                         match r.ok with
+                         | Some true -> Some Theme.Status_ok
+                         | Some false -> Some Theme.Status_critical
+                         | None -> Some Theme.Status_attention
+                       in
+                       ( "[" ^ r.status ^ "]"
+                       , Printf.sprintf "@%s · %s" r.keeper_name r.request_id
+                       , tone ))
+                     items)
+            | ( Observed.Loading _
+              | Observed.Absent
+              | Observed.Unreported
+              | Observed.Failed _ ) as obs ->
+                H.draw_observed_placeholder ~grid ~rect:list_r ~theme ~lang obs)
+      end;
+      let right_inner =
+        Card.draw ~cache grid ~rect:right_rect ~theme
+          (H.card_spec ~focused:(Model.pane_focused model 1)
+             (Say.resolve lang
+                (Say.make ~ko:"상세 인스펙터" ~en:"Detail Inspector")))
+      in
+      let rc = H.pad_content ~bp right_inner in
+      if not (Rect.is_empty rc) then begin
+        let detail_lines =
+          match rt.pp_section with
+          | Runtime_store.Sec_prompts -> (
+              match Runtime_store.selected_prompt_item rt with
+              | None ->
+                  [
+                    Say.resolve lang
+                      (Say.make ~ko:"선택된 프롬프트가 없습니다"
+                         ~en:"No prompt selected");
+                  ]
+              | Some p ->
+                  let vars =
+                    if p.template_variables = [] then "none"
+                    else String.concat ", " p.template_variables
+                  in
+                  let hdr =
+                    [
+                      Printf.sprintf "Key: %s · Source: %s%s" p.key p.source
+                        (if p.override_default_moved then " [DEFAULT MOVED]"
+                         else "");
+                      Printf.sprintf "Category: %s · Surface: %s · Vars: %s"
+                        p.category p.operator_surface vars;
+                      "Description: " ^ H.redact_secrets_in_text p.description;
+                      "── Effective Prompt Body";
+                    ]
+                  in
+                  hdr
+                  @ String.split_on_char '\n'
+                      (H.redact_secrets_in_text p.effective))
+          | Runtime_store.Sec_presets -> (
+              match Runtime_store.selected_preset_manifest rt with
+              | None ->
+                  [
+                    Say.resolve lang
+                      (Say.make ~ko:"선택된 프리셋이 없습니다 ([n]으로 생성)"
+                         ~en:"No preset selected (press [n] to create)");
+                  ]
+              | Some pm ->
+                  let base =
+                    [
+                      Printf.sprintf "Preset: %s (%s)" pm.name pm.created_at;
+                      "Description: " ^ H.redact_secrets_in_text pm.description;
+                      Printf.sprintf
+                        "Overrides: %d · Keepers: %d · Assignments: %d · Lanes: %d"
+                        pm.override_count (List.length pm.keepers)
+                        pm.assignment_count pm.lane_count;
+                    ]
+                  in
+                  let extra =
+                    match Runtime_store.preset_detail_for ~name:pm.name rt with
+                    | None -> (
+                        match rt.preset_detail with
+                        | Observed.Loading _ ->
+                            [
+                              "";
+                              Say.resolve lang
+                                (Say.make ~ko:"프리셋 상세 불러오는 중…"
+                                   ~en:"Loading preset detail…");
+                            ]
+                        | Observed.Failed { reason; _ } ->
+                            [
+                              "";
+                              Say.resolve lang
+                                (Say.make
+                                   ~ko:("프리셋 상세 조회 실패: " ^ H.redact_secrets_in_text reason)
+                                   ~en:("Preset detail failed: " ^ H.redact_secrets_in_text reason));
+                            ]
+                        | Observed.Value _
+                        | Observed.Absent
+                        | Observed.Unreported ->
+                            [
+                              "";
+                              Say.resolve lang
+                                (Say.make ~ko:"[Enter]를 눌러 상세 diff 로드"
+                                   ~en:"Press [Enter] to load full preset diff");
+                            ])
+                    | Some d ->
+                        [
+                          "── Saved Settings & Default Comparison";
+                          Printf.sprintf "  saved_settings: %s%s"
+                            d.saved_settings_status
+                            (match d.saved_settings_reason with
+                            | Some r -> " (" ^ H.redact_secrets_in_text r ^ ")"
+                            | None -> "");
+                          Printf.sprintf "  default_prompts: %s (%d changes)"
+                            d.default_prompts_status
+                            d.default_prompts_changes_count;
+                          "  directory: " ^ d.directory;
+                          "── Prompt Overrides: "
+                          ^ (if d.override_keys = [] then "none"
+                             else String.concat ", " d.override_keys);
+                          "── Keeper Instructions: "
+                          ^ (if d.keeper_files = [] then "none"
+                             else String.concat ", " d.keeper_files);
+                          "── Exact Lanes: "
+                          ^ (if d.lane_ids = [] then "none"
+                             else String.concat ", " d.lane_ids);
+                        ]
+                        @ List.map
+                            (fun (k, r) -> Printf.sprintf "  assign @%s -> %s" k r)
+                            (H.safe_take 12 d.assignments)
+                  in
+                  base @ extra)
+          | Runtime_store.Sec_params -> (
+              match Runtime_store.selected_runtime_param rt with
+              | None ->
+                  [
+                    Say.resolve lang
+                      (Say.make ~ko:"선택된 파라미터가 없습니다"
+                         ~en:"No runtime parameter selected");
+                  ]
+              | Some p ->
+                  [
+                    Printf.sprintf "Param: %s (%s)" p.key
+                      (if p.has_override then "overridden" else "default");
+                    "Current: "
+                    ^ H.redact_secrets_in_text (Yojson.Safe.to_string p.current);
+                    "Default: "
+                    ^ H.redact_secrets_in_text (Yojson.Safe.to_string p.default);
+                    "Type: " ^ Option.value p.value_type ~default:"unknown";
+                    "Choices: "
+                    ^ (if p.choices = [] then "free-form"
+                       else String.concat ", " p.choices);
+                    "Description: "
+                    ^ H.redact_secrets_in_text
+                        (Option.value p.description ~default:"—");
+                  ])
+          | Runtime_store.Sec_async_requests -> (
+              let summary_hdr =
+                match Observed.to_option rt.async_requests with
+                | Some snap ->
+                    [
+                      Printf.sprintf
+                        "Broker: %s · active=%d · runtime_owned=%d · unknown=%d · errors=%d"
+                        snap.status snap.active snap.runtime_owned
+                        snap.ownership_unknown snap.record_errors_count;
+                    ]
+                    @ (match snap.error_detail with
+                      | Some e -> [ "Error: " ^ H.redact_secrets_in_text e ]
+                      | None -> [])
+                | None -> []
+              in
+              let sel_lines =
+                match Runtime_store.selected_async_request rt with
+                | None ->
+                    [
+                      Say.resolve lang
+                        (Say.make ~ko:"활성 비동기 요청 없음"
+                           ~en:"No active async requests");
+                    ]
+                | Some r ->
+                    [
+                      "── Request Detail";
+                      "Request ID: " ^ r.request_id;
+                      Printf.sprintf "Keeper: @%s · Submitted By: %s"
+                        r.keeper_name r.submitted_by;
+                      Printf.sprintf "Status: %s · Ownership: %s" r.status
+                        (Option.value r.worker_ownership ~default:"—");
+                      Printf.sprintf "Elapsed: %s · Ok: %s"
+                        (match r.elapsed_sec with
+                        | Some s -> Printf.sprintf "%.1fs" s
+                        | None -> "—")
+                        (match r.ok with
+                        | Some true -> "true"
+                        | Some false -> "false"
+                        | None -> "pending");
+                    ]
+                    @ (match r.result_preview with
+                      | Some pv ->
+                          "── Result Preview"
+                          :: String.split_on_char '\n'
+                               (H.redact_secrets_in_text pv)
+                      | None -> [])
+              in
+              summary_hdr @ sel_lines)
+        in
+        let skip =
+          Int.max 0
+            (Int.min
+               (Int.max 0 (List.length detail_lines - rc.h))
+               rt.detail_scroll_offset)
+        in
+        let bg = Color.of_rgb theme.surface_1 in
+        let st_primary = Typography.primary ~bg theme in
+        let st_accent = Typography.accent ~bg ~bold:true theme in
+        List.iteri
+          (fun idx line ->
+            if idx >= skip && idx - skip < rc.h then
+              let style =
+                if String.starts_with ~prefix:"──" line then st_accent
+                else st_primary
+              in
+              ignore
+                (Cell_grid.put_text ~clip:rc grid ~x:rc.x
+                   ~y:(rc.y + idx - skip) ~style
+                   (Grapheme.truncate_to_width ~max_width:rc.w line)))
+          detail_lines
       end
 
 (* --- 6. Sub-Tab 6: Connectors & MCP Clients (Dedicated 2-Pane Screen) --- *)
@@ -5935,4 +6413,102 @@ let render_dive ~(target : Nav.runtime_dive_target) ~(model : Model.t) ~cache
                 incr y
               end)
             (Store_scroll.drop skip lines)
+        end
+    | Nav.Skill_dive ref_s ->
+        let inner =
+          Card.draw ~cache grid ~rect:body ~theme
+            (H.card_spec ~focused:(Model.body_has_focus model) ~subtitle:ref_s
+               ~hotkey:
+                 (Say.resolve lang
+                    (Say.make
+                       ~ko:"[e] 편집 · [p] 미리보기 검증 · [x] 삭제 · [n] 생성 · [R] 갱신 · [Esc] 뒤로"
+                       ~en:"[e] Edit · [p] Preview · [x] Delete · [n] New · [R] Refresh · [Esc] Back"))
+               (Say.resolve lang
+                  (Say.make ~ko:"런타임 > 스킬 인스펙터 & 편집기"
+                     ~en:"Runtime > Skill Inspector & Editor")))
+        in
+        let content = H.pad_content ~bp inner in
+        if not (Rect.is_empty content) then begin
+          match rt.skill_editor_loaded with
+          | Observed.Value { data = r, loaded; _ }
+            when String.equal r ref_s || String.equal loaded.reference ref_s ->
+              let sources_s =
+                match Observed.to_option rt.skill_editor_sources with
+                | Some (_ :: _ as xs) -> String.concat ", " xs
+                | Some [] | None -> "—"
+              in
+              let tools_n =
+                match Observed.to_option rt.skill_editor_tools with
+                | Some xs -> List.length xs
+                | None -> 0
+              in
+              let preview_lines =
+                match Observed.to_option rt.skill_editor_preview with
+                | None -> []
+                | Some pv ->
+                    let diag_part =
+                      if pv.diagnostics = [] then [ "  preview: valid (0 diagnostics)" ]
+                      else
+                        List.map
+                          (fun d -> "  [DIAG] " ^ H.redact_secrets_in_text d)
+                          pv.diagnostics
+                    in
+                    ("── Preview" :: diag_part)
+              in
+              let all_lines =
+                [
+                  Printf.sprintf "Reference: %s · Access: %s · Rev: %s"
+                    loaded.reference
+                    (Wire_runtime.skill_access_to_string loaded.access)
+                    loaded.snapshot_revision;
+                  Printf.sprintf "Writable Sources: %s · Authoring Tools: %d"
+                    sources_s tools_n;
+                ]
+                @ preview_lines
+                @ ("── SKILL.md Source"
+                  :: String.split_on_char '\n'
+                       (H.redact_secrets_in_text loaded.source_text))
+              in
+              let skip =
+                Int.max 0
+                  (Int.min
+                     (Int.max 0 (List.length all_lines - content.h))
+                     model.nav.dive_scroll_offset)
+              in
+              let y = ref content.y and bot = Rect.bottom content in
+              List.iter
+                (fun ln ->
+                  if !y < bot then begin
+                    let st =
+                      if String.starts_with ~prefix:"──" ln then
+                        H.accent_style ~theme ~attrs:Attr.bold ()
+                      else if String.starts_with ~prefix:"  [DIAG]" ln then
+                        H.status_style ~theme Theme.Status_attention
+                      else H.text_style ~theme ()
+                    in
+                    ignore
+                      (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
+                         ~max_w:content.w ~style:st ln);
+                    incr y
+                  end)
+                (Store_scroll.drop skip all_lines)
+          | Observed.Loading _ ->
+              H.draw_observed_placeholder ~grid ~rect:content ~theme ~lang
+                rt.skill_editor_loaded
+          | Observed.Failed _ as obs ->
+              H.draw_observed_placeholder ~grid ~rect:content ~theme ~lang obs
+          | Observed.Value _ | Observed.Absent | Observed.Unreported ->
+              let sf_summary =
+                match Runtime_store.find_skill_surface ~reference:ref_s rt with
+                | Some sf ->
+                    Printf.sprintf "Skill %s [%s] — loading SKILL.md…"
+                      sf.reference sf.kind
+                | None ->
+                    Printf.sprintf "Skill %s — press [R] to refresh catalog"
+                      ref_s
+              in
+              ignore
+                (H.put_clipped ~grid ~clip:content ~x:content.x ~y:content.y
+                   ~max_w:content.w ~style:(H.whisper_style ~theme ())
+                   sf_summary)
         end

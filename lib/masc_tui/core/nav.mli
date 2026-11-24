@@ -70,6 +70,7 @@ type knowledge_dive_target =
 type runtime_dive_target =
   | Tool_dive of string
   | Fusion_dive of string
+  | Skill_dive of string
 
 type infra_dive_target =
   | Sandbox_dive of string
@@ -157,6 +158,12 @@ type inline_action_kind =
   | Keeper_clear_form of string
   | Keeper_operator_note_form of string
   | Tool_execute_form of { tool_name : string; args_json : string }
+  | Skill_create_form
+  | Skill_edit_form of { reference : string }
+  | Skill_delete_confirm of { reference : string }
+  | Prompt_override_form of { key : string }
+  | Preset_create_form
+  | Runtime_param_set_form of { param_key : string }
 
 type system_gate_kind =
   | Micro_viewport

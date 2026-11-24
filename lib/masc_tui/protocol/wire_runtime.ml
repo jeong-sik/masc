@@ -79,6 +79,34 @@ let mcp_rpc_path = "/mcp"
 let mcp_protocol_version = "2026-07-28"
 
 let skills_path = "/api/v1/skills"
+let skill_editor_sources_path = "/api/v1/skills/editor/sources"
+let skill_editor_tools_path = "/api/v1/skills/editor/tools"
+let skill_editor_read_path = "/api/v1/skills/editor/read"
+let skill_editor_preview_new_path = "/api/v1/skills/editor/preview-new"
+let skill_editor_create_path = "/api/v1/skills/editor/create"
+let skill_editor_preview_path = "/api/v1/skills/editor/preview"
+let skill_editor_save_path = "/api/v1/skills/editor/save"
+let skill_editor_delete_path = "/api/v1/skills/editor"
+let skills_refresh_path = "/api/v1/skills/refresh"
+let async_requests_path = "/api/v1/async-requests"
+
+let async_request_status_path ~submitted_by ~request_id =
+  Printf.sprintf "/api/v1/async-requests/status?submitted_by=%s&request_id=%s"
+    (percent_encode (String.trim submitted_by))
+    (percent_encode (String.trim request_id))
+
+let prompts_path = "/api/v1/prompts"
+let presets_path = "/api/v1/presets"
+
+let preset_show_path ~name =
+  "/api/v1/presets/show?name=" ^ percent_encode (String.trim name)
+
+let preset_create_path = "/api/v1/presets/create"
+let preset_restore_path = "/api/v1/presets/restore"
+let preset_delete_path = "/api/v1/presets/delete"
+let runtime_params_path = "/api/v1/runtime/params"
+let runtime_param_set_path = "/api/v1/runtime/params/set"
+let runtime_param_clear_path = "/api/v1/runtime/params/clear"
 
 let connector_unbind_path ~connector =
   "/api/v1/gate/connector/unbind?name=" ^ percent_encode (String.trim connector)
@@ -2513,6 +2541,7 @@ let decode_tools_dashboard ~observed_at json =
 
 type skill_surface_entry = {
   reference : string;
+  reference_json : Yojson.Safe.t option;
   kind : string;
   summary : string option;
   error : string option;
@@ -2658,10 +2687,11 @@ let decode_skills_snapshot json =
         in
         match kind_opt with
         | Some kind ->
-            let reference =
+            let reference, reference_json =
               if has_field item "reference" then
-                string_of_ref_or_obj (member "reference" item)
-              else "unknown"
+                let raw_ref = member "reference" item in
+                (string_of_ref_or_obj raw_ref, Some raw_ref)
+              else ("unknown", None)
             in
             let summary = decode_skill_profile_summary item in
             let error =
@@ -2669,7 +2699,7 @@ let decode_skills_snapshot json =
               | Ok v -> v
               | Error _ -> None
             in
-            Some { reference; kind; summary; error }
+            Some { reference; reference_json; kind; summary; error }
         | None -> None)
       raw_surfaces
   in
@@ -5125,3 +5155,798 @@ let decode_mcp_tools_call_result ~tool_name json =
           structured_json;
           raw_error = None;
         }
+
+(* ---------- Wave 4 Layer 3: Skill Editor, Async Requests, Prompts, Presets & Runtime Params ---------- *)
+
+type skill_access =
+  | Skill_read_only
+  | Skill_read_write
+
+let skill_access_to_string = function
+  | Skill_read_only -> "read_only"
+  | Skill_read_write -> "read_write"
+
+type skill_authoring_tool = {
+  name : string;
+  description : string option;
+  execution : string option;
+}
+
+type skill_editor_loaded = {
+  reference : string;
+  reference_json : Yojson.Safe.t;
+  snapshot_revision : string;
+  source_text : string;
+  access : skill_access;
+}
+
+type skill_editor_preview = {
+  reference : string option;
+  kind : string option;
+  activation_tool : string option;
+  execution : string option;
+  body_bytes : int option;
+  diagnostics : string list;
+}
+
+type skill_editor_outcome = {
+  status : string;
+  snapshot_revision : string option;
+  reason : string option;
+  recovery_id : string option;
+  audit_status : string option;
+  preview : skill_editor_preview option;
+}
+
+type skill_refresh_receipt = {
+  ok : bool;
+  snapshot_revision : string;
+  publication : string;
+}
+
+let encode_skill_read_body ~reference_json =
+  `Assoc [ ("reference", reference_json) ]
+
+let encode_skill_preview_or_save_body ~reference_json ~source_text =
+  `Assoc
+    [ ("reference", reference_json); ("source_text", `String source_text) ]
+
+let encode_skill_create_body ~source_id ~package_id ~kind ~source_text =
+  let kind_s =
+    match kind with
+    | `Instruction -> "instruction"
+    | `Composition -> "composition"
+  in
+  `Assoc
+    [
+      ("source_id", `String (String.trim source_id));
+      ("package_id", `String (String.trim package_id));
+      ("kind", `String kind_s);
+      ("source_text", `String source_text);
+    ]
+
+let encode_skill_delete_body ~reference_json ~confirmed =
+  `Assoc [ ("reference", reference_json); ("confirmed", `Bool confirmed) ]
+
+let decode_skill_editor_sources json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* raw = required_list_field body "sources" in
+  decode_list "sources"
+    (fun item -> required_nonblank_string item "source_id")
+    raw
+
+let decode_skill_editor_tools json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* raw = required_list_field body "tools" in
+  decode_list "tools"
+    (fun item ->
+      let* name = required_nonblank_string item "name" in
+      let description =
+        match optional_nonblank_string item "description" with
+        | Ok v -> v
+        | Error _ -> None
+      in
+      let execution =
+        match optional_nonblank_string item "execution" with
+        | Ok v -> v
+        | Error _ -> None
+      in
+      Ok { name; description; execution })
+    raw
+
+let decode_skill_editor_loaded json =
+  let* _, body = unwrap_v2_or_raw json in
+  if not (has_field body "reference") then
+    Error "skill editor loaded missing reference"
+  else
+    let reference_json = member "reference" body in
+    let reference = string_of_ref_or_obj reference_json in
+    let* snapshot_revision = required_string_field body "snapshot_revision" in
+    let* source_text = required_string_field body "source_text" in
+    let* access_raw = required_nonblank_string body "access" in
+    let* access =
+      match access_raw with
+      | "read_only" -> Ok Skill_read_only
+      | "read_write" -> Ok Skill_read_write
+      | other -> Error (Printf.sprintf "unknown skill access %S" other)
+    in
+    Ok { reference; reference_json; snapshot_revision; source_text; access }
+
+let decode_skill_preview_obj obj =
+  let* diagnostics = optional_string_list obj "diagnostics" in
+  let profile_opt =
+    match optional_object_field obj "profile" with
+    | Ok v -> v
+    | Error _ -> None
+  in
+  let reference, kind, activation_tool, execution, body_bytes =
+    match profile_opt with
+    | None -> (None, None, None, None, None)
+    | Some p ->
+        let ref_s =
+          if has_field p "reference" then
+            Some (string_of_ref_or_obj (member "reference" p))
+          else None
+        in
+        let k =
+          match optional_nonblank_string p "kind" with
+          | Ok v -> v
+          | Error _ -> None
+        in
+        let act =
+          match optional_nonblank_string p "activation_tool" with
+          | Ok v -> v
+          | Error _ -> None
+        in
+        let exec =
+          match optional_nonblank_string p "execution" with
+          | Ok v -> v
+          | Error _ -> None
+        in
+        let bb =
+          match optional_object_field p "context" with
+          | Ok (Some ctx) -> (
+              match optional_int_field ctx "body_bytes" with
+              | Ok v -> v
+              | Error _ -> None)
+          | Ok None | Error _ -> None
+        in
+        (ref_s, k, act, exec, bb)
+  in
+  Ok { reference; kind; activation_tool; execution; body_bytes; diagnostics }
+
+let decode_skill_editor_preview json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* prev_obj =
+    match optional_object_field body "preview" with
+    | Ok (Some p) -> Ok p
+    | Ok None -> Ok body
+    | Error _ as err -> err
+  in
+  decode_skill_preview_obj prev_obj
+
+let decode_skill_editor_outcome json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* status = required_nonblank_string body "status" in
+  let snapshot_revision =
+    match optional_nonblank_string body "snapshot_revision" with
+    | Ok v -> v
+    | Error _ -> None
+  in
+  let reason =
+    match optional_nonblank_string body "reason" with
+    | Ok v -> v
+    | Error _ -> None
+  in
+  let recovery_id =
+    match optional_nonblank_string body "recovery_id" with
+    | Ok v -> v
+    | Error _ -> None
+  in
+  let audit_status =
+    match optional_nonblank_string body "audit_status" with
+    | Ok v -> v
+    | Error _ -> None
+  in
+  let preview =
+    match optional_object_field body "preview" with
+    | Ok (Some p) -> (
+        match decode_skill_preview_obj p with
+        | Ok v -> Some v
+        | Error _ -> None)
+    | Ok None | Error _ -> None
+  in
+  Ok { status; snapshot_revision; reason; recovery_id; audit_status; preview }
+
+let decode_skill_refresh_receipt json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* ok = required_bool_field body "ok" in
+  let* snapshot_revision = required_string_field body "snapshot_revision" in
+  let* publication = required_nonblank_string body "publication" in
+  Ok { ok; snapshot_revision; publication }
+
+type async_request_row = {
+  request_id : string;
+  keeper_name : string;
+  submitted_by : string;
+  status : string;
+  worker_ownership : string option;
+  submitted_at : float option;
+  elapsed_sec : float option;
+  completed_at : float option;
+  ok : bool option;
+  result_preview : string option;
+}
+
+type async_requests_snapshot = {
+  status : string;
+  active : int;
+  runtime_owned : int;
+  ownership_unknown : int;
+  record_errors_count : int;
+  requests : async_request_row list;
+  error_detail : string option;
+}
+
+let decode_async_request_row item =
+  let* request_id = required_nonblank_string item "request_id" in
+  let* keeper_name = required_nonblank_string item "keeper_name" in
+  let* submitted_by = required_string_field item "submitted_by" in
+  let* status = required_nonblank_string item "status" in
+  let worker_ownership =
+    match optional_nonblank_string item "worker_ownership" with
+    | Ok v -> v
+    | Error _ -> None
+  in
+  let submitted_at =
+    match optional_finite_float item "submitted_at" with
+    | Ok v -> v
+    | Error _ -> None
+  in
+  let elapsed_sec =
+    match optional_finite_float item "elapsed_sec" with
+    | Ok v -> v
+    | Error _ -> None
+  in
+  let completed_at =
+    match optional_finite_float item "completed_at" with
+    | Ok v -> v
+    | Error _ -> None
+  in
+  let ok =
+    match optional_bool_field item "ok" with
+    | Ok v -> v
+    | Error _ -> None
+  in
+  let result_preview =
+    if has_field item "result" then
+      match member "result" item with
+      | `Null -> None
+      | `String s ->
+          let t = String.trim s in
+          if String.equal t "" then None else Some t
+      | other -> Some (Yojson.Safe.to_string other)
+    else None
+  in
+  Ok
+    {
+      request_id;
+      keeper_name;
+      submitted_by;
+      status;
+      worker_ownership;
+      submitted_at;
+      elapsed_sec;
+      completed_at;
+      ok;
+      result_preview;
+    }
+
+let decode_async_requests json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* status = required_nonblank_string body "status" in
+  let active, runtime_owned, ownership_unknown, record_errors_count =
+    match optional_object_field body "summary" with
+    | Ok (Some s) ->
+        let gi k =
+          match optional_int_field s k with
+          | Ok (Some n) -> n
+          | Ok None | Error _ -> 0
+        in
+        (gi "active", gi "runtime_owned", gi "ownership_unknown", gi "record_errors")
+    | Ok None | Error _ -> (0, 0, 0, 0)
+  in
+  let* raw_reqs = optional_list_field body "requests" in
+  let* requests = decode_list "requests" decode_async_request_row raw_reqs in
+  let error_detail =
+    match optional_object_field body "error" with
+    | Ok (Some err_obj) -> (
+        let kind =
+          match optional_nonblank_string err_obj "kind" with
+          | Ok (Some k) -> k
+          | Ok None | Error _ -> "error"
+        in
+        match optional_nonblank_string err_obj "reason" with
+        | Ok (Some r) -> Some (kind ^ ": " ^ r)
+        | Ok None | Error _ -> Some kind)
+    | Ok None | Error _ -> None
+  in
+  Ok
+    {
+      status;
+      active;
+      runtime_owned;
+      ownership_unknown;
+      record_errors_count;
+      requests;
+      error_detail;
+    }
+
+type prompt_item = {
+  key : string;
+  category : string;
+  operator_surface : string;
+  description : string;
+  effective : string;
+  file_value : string option;
+  override_value : string option;
+  file_path : string option;
+  source : string;
+  has_override : bool;
+  override_default_moved : bool;
+  char_count : int;
+  template_variables : string list;
+}
+
+type prompt_held_back = {
+  key : string;
+  bytes : int;
+  reason : string;
+}
+
+type prompts_catalog = {
+  prompts : prompt_item list;
+  held_back : prompt_held_back list;
+}
+
+let encode_prompt_set ~key ~value =
+  `Assoc
+    [
+      ("key", `String (String.trim key));
+      ("action", `String "set");
+      ("value", `String value);
+    ]
+
+let encode_prompt_clear ~key =
+  `Assoc [ ("key", `String (String.trim key)); ("action", `String "clear") ]
+
+let decode_prompt_item item =
+  let* key = required_nonblank_string item "key" in
+  let category =
+    match optional_string_field item "category" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let operator_surface =
+    match optional_string_field item "operator_surface" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let description =
+    match optional_string_field item "description" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let effective =
+    match optional_string_field item "effective" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> (
+        match optional_string_field item "current" with
+        | Ok (Some s) -> s
+        | Ok None | Error _ -> "")
+  in
+  let file_value =
+    match optional_string_field item "file_value" with
+    | Ok v -> v
+    | Error _ -> None
+  in
+  let override_value =
+    match optional_string_field item "override_value" with
+    | Ok v -> v
+    | Error _ -> None
+  in
+  let file_path =
+    match optional_nonblank_string item "file_path" with
+    | Ok v -> v
+    | Error _ -> None
+  in
+  let source =
+    match optional_nonblank_string item "source" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> "file"
+  in
+  let has_override =
+    match optional_bool_field item "has_override" with
+    | Ok (Some b) -> b
+    | Ok None | Error _ -> Option.is_some override_value
+  in
+  let override_default_moved =
+    match optional_bool_field item "override_default_moved" with
+    | Ok (Some b) -> b
+    | Ok None | Error _ -> false
+  in
+  let char_count =
+    match optional_int_field item "char_count" with
+    | Ok (Some n) -> n
+    | Ok None | Error _ -> String.length effective
+  in
+  let* template_variables = optional_string_list item "template_variables" in
+  Ok
+    {
+      key;
+      category;
+      operator_surface;
+      description;
+      effective;
+      file_value;
+      override_value;
+      file_path;
+      source;
+      has_override;
+      override_default_moved;
+      char_count;
+      template_variables;
+    }
+
+let decode_prompts_catalog json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* raw_prompts = required_list_field body "prompts" in
+  let* prompts = decode_list "prompts" decode_prompt_item raw_prompts in
+  let* raw_hb = optional_list_field body "held_back" in
+  let* held_back =
+    decode_list "held_back"
+      (fun item ->
+        let* key = required_nonblank_string item "key" in
+        let bytes =
+          match optional_int_field item "bytes" with
+          | Ok (Some n) -> n
+          | Ok None | Error _ -> 0
+        in
+        let reason =
+          match optional_string_field item "reason" with
+          | Ok (Some r) -> r
+          | Ok None | Error _ -> ""
+        in
+        Ok { key; bytes; reason })
+      raw_hb
+  in
+  Ok { prompts; held_back }
+
+type preset_manifest = {
+  name : string;
+  description : string;
+  created_at : string;
+  override_count : int;
+  override_keys : string list;
+  keepers : string list;
+  assignment_count : int;
+  lane_count : int;
+}
+
+type preset_unreadable = {
+  name : string;
+  reason : string;
+}
+
+type presets_listing = {
+  presets : preset_manifest list;
+  unreadable : preset_unreadable list;
+}
+
+type preset_detail = {
+  name : string;
+  description : string;
+  created_at : string;
+  directory : string;
+  saved_settings_status : string;
+  saved_settings_reason : string option;
+  default_prompts_status : string;
+  default_prompts_changes_count : int;
+  override_keys : string list;
+  keeper_files : string list;
+  assignments : (string * string) list;
+  lane_ids : string list;
+}
+
+type preset_restore_report = {
+  restored : string;
+  autosave : string;
+  runtime_status : string;
+  overrides_applied_count : int;
+  instructions_applied_count : int;
+  skipped_count : int;
+}
+
+let encode_preset_save ~name ~description =
+  let base = [ ("name", `String (String.trim name)) ] in
+  let fields =
+    if String.equal (String.trim description) "" then base
+    else base @ [ ("description", `String description) ]
+  in
+  `Assoc fields
+
+let encode_preset_name ~name = `Assoc [ ("name", `String (String.trim name)) ]
+
+let decode_preset_manifest item =
+  let* name = required_nonblank_string item "name" in
+  let description =
+    match optional_string_field item "description" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let created_at =
+    match optional_string_field item "created_at" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let gi k =
+    match optional_int_field item k with
+    | Ok (Some n) -> n
+    | Ok None | Error _ -> 0
+  in
+  let* override_keys = optional_string_list item "override_keys" in
+  let* keepers = optional_string_list item "keepers" in
+  Ok
+    {
+      name;
+      description;
+      created_at;
+      override_count = gi "override_count";
+      override_keys;
+      keepers;
+      assignment_count = gi "assignment_count";
+      lane_count = gi "lane_count";
+    }
+
+let decode_presets_listing json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* raw_presets = required_list_field body "presets" in
+  let* presets = decode_list "presets" decode_preset_manifest raw_presets in
+  let* raw_unreadable = optional_list_field body "unreadable" in
+  let* unreadable =
+    decode_list "unreadable"
+      (fun item ->
+        let* name = required_string_field item "name" in
+        let reason =
+          match optional_string_field item "reason" with
+          | Ok (Some r) -> r
+          | Ok None | Error _ -> ""
+        in
+        Ok { name; reason })
+      raw_unreadable
+  in
+  Ok { presets; unreadable }
+
+let decode_preset_detail json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* preset = required_object_field body "preset" in
+  let* name = required_nonblank_string preset "name" in
+  let description =
+    match optional_string_field preset "description" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let created_at =
+    match optional_string_field preset "created_at" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let directory =
+    match optional_string_field body "directory" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let saved_settings_status, saved_settings_reason =
+    match optional_object_field body "saved_settings" with
+    | Ok (Some ss) ->
+        let st =
+          match optional_nonblank_string ss "status" with
+          | Ok (Some s) -> s
+          | Ok None | Error _ -> "unknown"
+        in
+        let rsn =
+          match optional_nonblank_string ss "reason" with
+          | Ok v -> v
+          | Error _ -> None
+        in
+        (st, rsn)
+    | Ok None | Error _ -> ("unknown", None)
+  in
+  let default_prompts_status, default_prompts_changes_count =
+    match optional_object_field body "default_prompts" with
+    | Ok (Some dp) ->
+        let st =
+          match optional_nonblank_string dp "status" with
+          | Ok (Some s) -> s
+          | Ok None | Error _ -> "unknown"
+        in
+        let ch =
+          match optional_list_field dp "changes" with
+          | Ok xs -> List.length xs
+          | Error _ -> 0
+        in
+        (st, ch)
+    | Ok None | Error _ -> ("unknown", 0)
+  in
+  let* raw_ov = optional_list_field preset "prompt_overrides" in
+  let override_keys =
+    List.filter_map
+      (fun item ->
+        match optional_nonblank_string item "key" with
+        | Ok v -> v
+        | Error _ -> None)
+      raw_ov
+  in
+  let* raw_inst = optional_list_field preset "instructions" in
+  let keeper_files =
+    List.filter_map
+      (fun item ->
+        match optional_nonblank_string item "keeper_file" with
+        | Ok v -> v
+        | Error _ -> None)
+      raw_inst
+  in
+  let* raw_asgn = optional_list_field preset "assignments" in
+  let assignments =
+    List.filter_map
+      (fun item ->
+        match
+          ( optional_nonblank_string item "keeper"
+          , optional_nonblank_string item "runtime" )
+        with
+        | Ok (Some k), Ok (Some r) -> Some (k, r)
+        | (Ok (Some _ | None) | Error _), (Ok (Some _ | None) | Error _) -> None)
+      raw_asgn
+  in
+  let* raw_lanes = optional_list_field preset "lanes" in
+  let lane_ids =
+    List.filter_map
+      (fun item ->
+        match optional_nonblank_string item "id" with
+        | Ok v -> v
+        | Error _ -> None)
+      raw_lanes
+  in
+  Ok
+    {
+      name;
+      description;
+      created_at;
+      directory;
+      saved_settings_status;
+      saved_settings_reason;
+      default_prompts_status;
+      default_prompts_changes_count;
+      override_keys;
+      keeper_files;
+      assignments;
+      lane_ids;
+    }
+
+let decode_preset_restore_report json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* rep =
+    match optional_object_field body "report" with
+    | Ok (Some r) -> Ok r
+    | Ok None -> Ok body
+    | Error _ as err -> err
+  in
+  let* restored = required_nonblank_string rep "restored" in
+  let autosave =
+    match optional_string_field rep "autosave" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> "_autosave"
+  in
+  let runtime_status =
+    match optional_object_field rep "runtime" with
+    | Ok (Some rt) -> (
+        match optional_nonblank_string rt "status" with
+        | Ok (Some s) -> s
+        | Ok None | Error _ -> "unknown")
+    | Ok None | Error _ -> "unknown"
+  in
+  let part_counts key =
+    match optional_object_field rep key with
+    | Ok (Some obj) ->
+        let app =
+          match optional_list_field obj "applied" with
+          | Ok xs -> List.length xs
+          | Error _ -> 0
+        in
+        let skp =
+          match optional_list_field obj "skipped" with
+          | Ok xs -> List.length xs
+          | Error _ -> 0
+        in
+        (app, skp)
+    | Ok None | Error _ -> (0, 0)
+  in
+  let ov_app, ov_skp = part_counts "prompt_overrides" in
+  let in_app, in_skp = part_counts "instructions" in
+  let sk_lanes =
+    match optional_list_field rep "skipped_lanes" with
+    | Ok xs -> List.length xs
+    | Error _ -> 0
+  in
+  let sk_asgn =
+    match optional_list_field rep "skipped_assignments" with
+    | Ok xs -> List.length xs
+    | Error _ -> 0
+  in
+  Ok
+    {
+      restored;
+      autosave;
+      runtime_status;
+      overrides_applied_count = ov_app;
+      instructions_applied_count = in_app;
+      skipped_count = ov_skp + in_skp + sk_lanes + sk_asgn;
+    }
+
+type runtime_param_item = {
+  key : string;
+  current : Yojson.Safe.t;
+  default : Yojson.Safe.t;
+  has_override : bool;
+  description : string option;
+  value_type : string option;
+  choices : string list;
+}
+
+type runtime_params_snapshot = {
+  parameters : runtime_param_item list;
+}
+
+let encode_runtime_param_set ~param_key ~value =
+  `Assoc [ ("param_key", `String (String.trim param_key)); ("value", value) ]
+
+let encode_runtime_param_clear ~param_key =
+  `Assoc [ ("param_key", `String (String.trim param_key)) ]
+
+let decode_runtime_param_item item =
+  let* key = required_nonblank_string item "key" in
+  let current = if has_field item "current" then member "current" item else `Null in
+  let default = if has_field item "default" then member "default" item else `Null in
+  let has_override =
+    match optional_bool_field item "has_override" with
+    | Ok (Some b) -> b
+    | Ok None | Error _ -> false
+  in
+  let description, value_type, choices =
+    match optional_object_field item "meta" with
+    | Ok (Some m) ->
+        let desc =
+          match optional_nonblank_string m "description" with
+          | Ok v -> v
+          | Error _ -> None
+        in
+        let vt =
+          match optional_nonblank_string m "value_type" with
+          | Ok v -> v
+          | Error _ -> None
+        in
+        let ch =
+          match optional_string_list m "choices" with
+          | Ok xs -> xs
+          | Error _ -> []
+        in
+        (desc, vt, ch)
+    | Ok None | Error _ -> (None, None, [])
+  in
+  Ok { key; current; default; has_override; description; value_type; choices }
+
+let decode_runtime_params json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* raw = required_list_field body "parameters" in
+  let* parameters = decode_list "parameters" decode_runtime_param_item raw in
+  Ok { parameters }

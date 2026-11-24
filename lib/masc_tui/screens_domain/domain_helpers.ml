@@ -333,6 +333,7 @@ let draw_observed_placeholder ~grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang ?b
         in
         draw_empty_notice ~grid ~rect ~theme ?bg line
     | Observed.Failed { reason; retryable; at = _ } ->
+        let clean_reason = Chat_transcript.scrub_secrets_in_text reason in
         let suffix =
           if retryable then
             Say.resolve lang
@@ -344,8 +345,8 @@ let draw_observed_placeholder ~grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang ?b
           ^ " "
           ^ Say.resolve lang
               (Say.make
-                 ~ko:("조회 실패: " ^ reason ^ suffix)
-                 ~en:("Fetch failed: " ^ reason ^ suffix))
+                 ~ko:("조회 실패: " ^ clean_reason ^ suffix)
+                 ~en:("Fetch failed: " ^ clean_reason ^ suffix))
         in
         let cy = rect.y + (rect.h / 2) in
         Card.draw_left_rail ~bg:bg_color ~tone:Theme.Status_critical grid

@@ -1978,7 +1978,7 @@ let test_dynamic_rendered_hint_contracts () =
         }
       in
       let pop_txt = grid_all_text (render_full ~model:pop_m) in
-      assert_has ~label:(lang_s ^ "/Popup/Counter") ~needle:"1/25" pop_txt;
+      assert_has ~label:(lang_s ^ "/Popup/Counter") ~needle:"1/28" pop_txt;
       assert_has ~label:(lang_s ^ "/Popup/TabHint") ~needle:"Tab" pop_txt;
       record_case ();
       let filt_m =

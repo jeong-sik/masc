@@ -6363,6 +6363,232 @@ let test_wave4_layer2_wire_codecs () =
   in
   Alcotest.(check bool) "mcp call error flagged" true mcp_err.is_error
 
+let test_wave4_layer3_wire_codecs () =
+  (* 1. Skills snapshot preserves exact reference_json *)
+  let sk_snap =
+    expect_ok "decode_skills_snapshot preserves reference_json"
+      (Wire_runtime.decode_skills_snapshot
+         (parse_json
+            {|{
+              "schema": "masc.skill-snapshot/v1",
+              "state": "ready",
+              "snapshot": { "snapshot_revision": "snap-rev-1", "shadows": [], "rejections": [] },
+              "surfaces": [
+                {
+                  "reference": {
+                    "identity": { "source_id": "workspace", "package_id": "ocaml-coding", "name": "ocaml-coding" },
+                    "content_revision": "sha256:abc"
+                  },
+                  "kind": "instruction",
+                  "profile": { "summary": "OCaml rules" }
+                }
+              ]
+            }|}))
+  in
+  Alcotest.(check int) "skills surface count" 1 (List.length sk_snap.surfaces);
+  Alcotest.(check bool) "reference_json preserved" true
+    (Option.is_some (List.hd sk_snap.surfaces).reference_json);
+  (* 2. Skill editor sources, tools, loaded, preview, outcome, refresh *)
+  let sources =
+    expect_ok "decode_skill_editor_sources"
+      (Wire_runtime.decode_skill_editor_sources
+         (parse_json {|{"status":"ready","sources":[{"source_id":"workspace"},{"source_id":"local"}]}|}))
+  in
+  Alcotest.(check (list string)) "writable sources" [ "workspace"; "local" ] sources;
+  let tools =
+    expect_ok "decode_skill_editor_tools"
+      (Wire_runtime.decode_skill_editor_tools
+         (parse_json
+            {|{"schema":"masc.skill-authoring-tools/v1","tools":[{"name":"masc_status","description":"Status","execution":"concurrent"}]}|}))
+  in
+  Alcotest.(check int) "authoring tools count" 1 (List.length tools);
+  let loaded =
+    expect_ok "decode_skill_editor_loaded"
+      (Wire_runtime.decode_skill_editor_loaded
+         (parse_json
+            {|{
+              "status": "ready",
+              "reference": { "identity": { "source_id": "workspace", "package_id": "demo", "name": "demo" }, "content_revision": "rev-1" },
+              "snapshot_revision": "snap-1",
+              "source_text": "---\nname: demo\n---\nHello",
+              "access": "read_write"
+            }|}))
+  in
+  Alcotest.(check string) "loaded access" "read_write"
+    (Wire_runtime.skill_access_to_string loaded.access);
+  let prev =
+    expect_ok "decode_skill_editor_preview"
+      (Wire_runtime.decode_skill_editor_preview
+         (parse_json
+            {|{"ok":true,"status":"valid","preview":{"profile":{"kind":"instruction","activation_tool":"skill_demo","execution":"inline","context":{"body_bytes":42}},"diagnostics":["warn1"]}}|}))
+  in
+  Alcotest.(check (list string)) "preview diagnostics" [ "warn1" ] prev.diagnostics;
+  let outcome =
+    expect_ok "decode_skill_editor_outcome"
+      (Wire_runtime.decode_skill_editor_outcome
+         (parse_json
+            {|{"status":"deleted_and_published","snapshot_revision":"snap-2","recovery_id":"rec-1","audit_status":"audit_call_returned"}|}))
+  in
+  Alcotest.(check string) "outcome status" "deleted_and_published" outcome.status;
+  let refresh =
+    expect_ok "decode_skill_refresh_receipt"
+      (Wire_runtime.decode_skill_refresh_receipt
+         (parse_json {|{"ok":true,"snapshot_revision":"snap-3","publication":"published"}|}))
+  in
+  Alcotest.(check string) "refresh publication" "published" refresh.publication;
+  let del_body =
+    Wire_runtime.encode_skill_delete_body ~reference_json:loaded.reference_json
+      ~confirmed:true
+  in
+  Alcotest.(check bool) "delete body carries confirmed=true" true
+    (match del_body with
+    | `Assoc fs -> List.assoc_opt "confirmed" fs = Some (`Bool true)
+    | _ -> false);
+  (* 3. Async requests *)
+  let async_snap =
+    expect_ok "decode_async_requests"
+      (Wire_runtime.decode_async_requests
+         (parse_json
+            {|{
+              "schema": "masc.async-request-observation/v1",
+              "status": "ready",
+              "summary": { "active": 1, "runtime_owned": 1, "ownership_unknown": 0, "record_errors": 0 },
+              "requests": [
+                {
+                  "request_id": "req-1",
+                  "keeper_name": "alpha",
+                  "submitted_by": "operator",
+                  "status": "running",
+                  "worker_ownership": "runtime_owned",
+                  "submitted_at": 1795250000.0,
+                  "elapsed_sec": 3.5
+                }
+              ],
+              "record_errors": []
+            }|}))
+  in
+  Alcotest.(check int) "async active" 1 async_snap.active;
+  Alcotest.(check int) "async rows" 1 (List.length async_snap.requests);
+  (* 4. Prompts *)
+  let prompts =
+    expect_ok "decode_prompts_catalog"
+      (Wire_runtime.decode_prompts_catalog
+         (parse_json
+            {|{
+              "prompts": [
+                {
+                  "key": "keeper.system",
+                  "category": "keeper",
+                  "operator_surface": "prompt_override",
+                  "description": "Base prompt",
+                  "effective": "Hello {{name}}",
+                  "file_value": "Default",
+                  "override_value": "Hello {{name}}",
+                  "source": "override",
+                  "has_override": true,
+                  "override_default_moved": false,
+                  "char_count": 14,
+                  "template_variables": ["name"]
+                }
+              ],
+              "held_back": []
+            }|}))
+  in
+  Alcotest.(check int) "prompts count" 1 (List.length prompts.prompts);
+  Alcotest.(check bool) "prompt has_override" true (List.hd prompts.prompts).has_override;
+  let prompt_set_body =
+    Wire_runtime.encode_prompt_set ~key:"keeper.system" ~value:"New text"
+  in
+  Alcotest.(check bool) "prompt set action" true
+    (match prompt_set_body with
+    | `Assoc fs -> List.assoc_opt "action" fs = Some (`String "set")
+    | _ -> false);
+  (* 5. Presets *)
+  let presets =
+    expect_ok "decode_presets_listing"
+      (Wire_runtime.decode_presets_listing
+         (parse_json
+            {|{
+              "ok": true,
+              "presets": [
+                {
+                  "schema_version": 1,
+                  "name": "baseline",
+                  "description": "Stable",
+                  "created_at": "2026-11-24T00:00:00Z",
+                  "override_count": 2,
+                  "override_keys": ["a", "b"],
+                  "keepers": ["alpha"],
+                  "assignment_count": 1,
+                  "lane_count": 2
+                }
+              ],
+              "unreadable": []
+            }|}))
+  in
+  Alcotest.(check int) "presets count" 1 (List.length presets.presets);
+  let pdet =
+    expect_ok "decode_preset_detail"
+      (Wire_runtime.decode_preset_detail
+         (parse_json
+            {|{
+              "ok": true,
+              "preset": {
+                "name": "baseline",
+                "description": "Stable",
+                "created_at": "2026-11-24T00:00:00Z",
+                "prompt_overrides": [{ "key": "a", "value": "x", "bytes": 1 }],
+                "instructions": [{ "keeper_file": "alpha", "bytes": 10, "text": "Be concise" }],
+                "assignments": [{ "keeper": "alpha", "runtime": "claude" }],
+                "lanes": [{ "id": "verifier_exact", "available": true, "enabled": true, "slots": [], "cli_slots": [] }]
+              },
+              "directory": "/tmp/.masc/presets/baseline",
+              "saved_settings": { "status": "matches" },
+              "default_prompts": { "status": "matches", "changes": [] }
+            }|}))
+  in
+  Alcotest.(check string) "preset detail saved_settings" "matches"
+    pdet.saved_settings_status;
+  let prep =
+    expect_ok "decode_preset_restore_report"
+      (Wire_runtime.decode_preset_restore_report
+         (parse_json
+            {|{
+              "ok": true,
+              "report": {
+                "restored": "baseline",
+                "autosave": "_autosave",
+                "prompt_overrides": { "applied": ["a"], "skipped": [] },
+                "instructions": { "applied": ["alpha"], "skipped": [] },
+                "runtime": { "status": "committed" },
+                "skipped_lanes": [],
+                "skipped_assignments": []
+              }
+            }|}))
+  in
+  Alcotest.(check string) "preset restore runtime_status" "committed"
+    prep.runtime_status;
+  (* 6. Runtime params *)
+  let params =
+    expect_ok "decode_runtime_params"
+      (Wire_runtime.decode_runtime_params
+         (parse_json
+            {|{
+              "parameters": [
+                {
+                  "key": "keeper.max_turns",
+                  "current": 16,
+                  "default": 8,
+                  "has_override": true,
+                  "meta": { "description": "Max turns", "value_type": "int", "choices": [] }
+                }
+              ]
+            }|}))
+  in
+  Alcotest.(check int) "runtime params count" 1 (List.length params.parameters);
+  Alcotest.(check bool) "runtime param overridden" true
+    (List.hd params.parameters).has_override
+
 let () =
   Alcotest.run "masc_tui_v2_protocol_net"
     [
@@ -6413,6 +6639,8 @@ let () =
             test_wave4_layer1_wire_codecs;
           Alcotest.test_case "Feature Wave 4 Layer 2: HITL Gate Policy/Rules/Modes/Retry/Recovery, Tool Quality, Waiting Inventory & Stateless MCP 2026-07-28" `Quick
             test_wave4_layer2_wire_codecs;
+          Alcotest.test_case "Feature Wave 4 Layer 3: Skills Editor/CRUD, Async Requests, Prompts, Presets & Runtime Params" `Quick
+            test_wave4_layer3_wire_codecs;
         ] );
       ( "net"
       , [

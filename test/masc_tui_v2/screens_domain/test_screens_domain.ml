@@ -3916,6 +3916,123 @@ let test_wave2_tools_artifacts_board_renders () =
   assert_grid_invariants ~label:"Wave2/ToolDive" g_td;
   Alcotest.(check bool) "Tool_dive shows masc_board_post" true
     (contains_sub ~needle:"masc_board_post" ~haystack:(grid_all_text g_td));
+  (* Wave 4 Layer 3: Tools_prompts_presets (4 sections) & Skill_dive invariants *)
+  let rt_pp_base =
+    rt2
+    |> Runtime_store.set_tools_subview Runtime_store.Tools_prompts_presets
+    |> Runtime_store.apply_prompts_catalog ~observed_at:now_mono
+         {
+           prompts =
+             [
+               {
+                 key = "keeper.system";
+                 category = "keeper";
+                 operator_surface = "tui";
+                 description = "Keeper prompt";
+                 effective = "Line1\nLine2";
+                 file_value = Some "Default";
+                 override_value = Some "Line1\nLine2";
+                 file_path = None;
+                 source = "override";
+                 has_override = true;
+                 override_default_moved = false;
+                 char_count = 11;
+                 template_variables = [ "keeper" ];
+               };
+             ];
+           held_back =
+             [ { key = "bad.prompt"; bytes = 99999; reason = "size limit" } ];
+         }
+    |> Runtime_store.apply_presets_listing ~observed_at:now_mono
+         {
+           presets =
+             [
+               {
+                 name = "baseline";
+                 description = "Base preset";
+                 created_at = "2026-11-24T00:00:00Z";
+                 override_count = 1;
+                 override_keys = [ "keeper.system" ];
+                 keepers = [ "alice" ];
+                 assignment_count = 1;
+                 lane_count = 1;
+               };
+             ];
+           unreadable = [ { name = "corrupt"; reason = "bad json" } ];
+         }
+    |> Runtime_store.apply_runtime_params ~observed_at:now_mono
+         {
+           parameters =
+             [
+               {
+                 key = "keeper.max_turns";
+                 current = `Int 16;
+                 default = `Int 8;
+                 has_override = true;
+                 description = Some "Max turns";
+                 value_type = Some "int";
+                 choices = [];
+               };
+             ];
+         }
+    |> Runtime_store.apply_async_requests ~observed_at:now_mono
+         {
+           status = "ok";
+           active = 1;
+           runtime_owned = 1;
+           ownership_unknown = 0;
+           record_errors_count = 0;
+           requests =
+             [
+               {
+                 request_id = "req-1";
+                 keeper_name = "alice";
+                 submitted_by = "operator";
+                 status = "running";
+                 worker_ownership = Some "runtime";
+                 submitted_at = Some 1700000000.0;
+                 elapsed_sec = Some 1.2;
+                 completed_at = None;
+                 ok = None;
+                 result_preview = None;
+               };
+             ];
+           error_detail = None;
+         }
+  in
+  List.iter
+    (fun (lbl, sec) ->
+      let rt_s = Runtime_store.set_prompts_presets_section sec rt_pp_base in
+      let g_pp =
+        render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
+            Screen_runtime.render ~model:{ m_base with runtime = rt_s } ~cache
+              ~rect gr)
+      in
+      assert_grid_invariants ~label:("Wave4L3/" ^ lbl) g_pp)
+    [
+      ("Prompts", Runtime_store.Sec_prompts);
+      ("Presets", Runtime_store.Sec_presets);
+      ("Params", Runtime_store.Sec_params);
+      ("Async", Runtime_store.Sec_async_requests);
+    ];
+  let rt_sd =
+    rt2
+    |> Runtime_store.apply_skill_editor_loaded ~observed_at:now_mono
+         ~reference:"ocaml-coding"
+         {
+           reference = "ocaml-coding";
+           reference_json = `Assoc [];
+           snapshot_revision = "rev-1";
+           source_text = "---\nname: ocaml-coding\n---\n# Guide";
+           access = Wire_runtime.Skill_read_write;
+         }
+  in
+  let g_sd =
+    render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
+        Screen_runtime.render_dive ~target:(Nav.Skill_dive "ocaml-coding")
+          ~model:{ m_base with runtime = rt_sd } ~cache ~rect gr)
+  in
+  assert_grid_invariants ~label:"Wave4L3/SkillDive" g_sd;
 
   (* 2. Rich HTML Artifact rendering: strips <script>, aligns <table>, toggles [v] Raw, shows Checked/Shared *)
   let sel_art = Option.get (Knowledge_store.selected_artifact m_base.knowledge) in

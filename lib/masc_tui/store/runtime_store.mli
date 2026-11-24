@@ -67,6 +67,13 @@ type tools_subview =
   | Tools_catalog_tree
   | Tools_keeper_skills
   | Tools_quality_gate
+  | Tools_prompts_presets
+
+type prompts_presets_section =
+  | Sec_prompts
+  | Sec_presets
+  | Sec_params
+  | Sec_async_requests
 
 type tools_window =
   | Tools_win_24h
@@ -127,6 +134,31 @@ type t = {
   mcp_call_form : (int * Nav.inline_action_kind) option;
   mcp_next_rpc_id : int;
   skills : Wire_runtime.skills_snapshot Observed.t;
+  skill_editor_sources : string list Observed.t;
+  skill_editor_sources_absent : bool;
+  skill_editor_sources_auth_denied : bool;
+  skill_editor_tools : Wire_runtime.skill_authoring_tool list Observed.t;
+  skill_editor_tools_absent : bool;
+  skill_editor_tools_auth_denied : bool;
+  skill_editor_loaded : (string * Wire_runtime.skill_editor_loaded) Observed.t;
+  skill_editor_preview : Wire_runtime.skill_editor_preview Observed.t;
+  skill_selected_index : int;
+  skill_scroll_offset : int;
+  async_requests : Wire_runtime.async_requests_snapshot Observed.t;
+  async_requests_absent : bool;
+  async_requests_auth_denied : bool;
+  prompts_catalog : Wire_runtime.prompts_catalog Observed.t;
+  prompts_absent : bool;
+  presets_listing : Wire_runtime.presets_listing Observed.t;
+  presets_absent : bool;
+  presets_auth_denied : bool;
+  pending_preset_select : string option;
+  preset_detail : (string * Wire_runtime.preset_detail) Observed.t;
+  runtime_params : Wire_runtime.runtime_params_snapshot Observed.t;
+  runtime_params_absent : bool;
+  pp_section : prompts_presets_section;
+  pp_selected_index : int;
+  pp_scroll_offset : int;
   tools_subview : tools_subview;
   tools_window : tools_window;
   tools_surface_keeper_idx : int;
@@ -496,3 +528,49 @@ val mcp_tool_schema_for :
 val apply_mcp_call_result :
   observed_at:Clock.Mono.t -> Wire_runtime.mcp_tool_call_result -> t -> t
 val next_mcp_rpc_id : t -> t * int
+
+val equal_prompts_presets_section :
+  prompts_presets_section -> prompts_presets_section -> bool
+val set_prompts_presets_section : prompts_presets_section -> t -> t
+val cycle_prompts_presets_section : t -> t
+val apply_skill_editor_sources :
+  observed_at:Clock.Mono.t -> string list -> t -> t
+val apply_skill_editor_tools :
+  observed_at:Clock.Mono.t -> Wire_runtime.skill_authoring_tool list -> t -> t
+val apply_skill_editor_loaded :
+  observed_at:Clock.Mono.t ->
+  reference:string ->
+  Wire_runtime.skill_editor_loaded ->
+  t ->
+  t
+val skill_editor_loaded_for :
+  reference:string -> t -> Wire_runtime.skill_editor_loaded option
+val apply_skill_editor_preview :
+  observed_at:Clock.Mono.t -> Wire_runtime.skill_editor_preview -> t -> t
+val filtered_skill_surfaces : t -> Wire_runtime.skill_surface_entry list
+val selected_skill_surface : t -> Wire_runtime.skill_surface_entry option
+val find_skill_surface : reference:string -> t -> Wire_runtime.skill_surface_entry option
+val apply_async_requests :
+  observed_at:Clock.Mono.t -> Wire_runtime.async_requests_snapshot -> t -> t
+val apply_prompts_catalog :
+  observed_at:Clock.Mono.t -> Wire_runtime.prompts_catalog -> t -> t
+val apply_presets_listing :
+  observed_at:Clock.Mono.t -> Wire_runtime.presets_listing -> t -> t
+val apply_preset_detail :
+  observed_at:Clock.Mono.t ->
+  name:string ->
+  Wire_runtime.preset_detail ->
+  t ->
+  t
+val preset_detail_for : name:string -> t -> Wire_runtime.preset_detail option
+val apply_runtime_params :
+  observed_at:Clock.Mono.t -> Wire_runtime.runtime_params_snapshot -> t -> t
+val filtered_prompts : t -> Wire_runtime.prompt_item list
+val selected_prompt_item : t -> Wire_runtime.prompt_item option
+val filtered_presets : t -> Wire_runtime.preset_manifest list
+val selected_preset_manifest : t -> Wire_runtime.preset_manifest option
+val select_preset_by_name : string -> t -> t
+val filtered_runtime_params : t -> Wire_runtime.runtime_param_item list
+val selected_runtime_param : t -> Wire_runtime.runtime_param_item option
+val filtered_async_requests : t -> Wire_runtime.async_request_row list
+val selected_async_request : t -> Wire_runtime.async_request_row option

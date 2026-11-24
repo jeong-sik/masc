@@ -182,6 +182,13 @@ type get_request =
   | Get_tool_quality of { n : int option; window_hours : int option }
   | Get_gate_tool_events of { window_minutes : int option }
   | Get_keeper_waiting_inventory of { keeper : string }
+  | Get_skill_editor_sources
+  | Get_skill_editor_tools
+  | Get_async_requests
+  | Get_prompts
+  | Get_presets
+  | Get_preset_show of { name : string }
+  | Get_runtime_params
 
 type keeper_turn_interrupt_target =
   [ `Turn_token of string | `Operation_id of string ]
@@ -447,9 +454,50 @@ type post_request =
       tool_name : string;
       arguments : Yojson.Safe.t;
     }
+  | Post_skill_editor_read of {
+      reference : string;
+      reference_json : Yojson.Safe.t;
+    }
+  | Post_skill_editor_preview_new of {
+      source_id : string;
+      package_id : string;
+      kind : [ `Instruction | `Composition ];
+      source_text : string;
+    }
+  | Post_skill_editor_create of {
+      source_id : string;
+      package_id : string;
+      kind : [ `Instruction | `Composition ];
+      source_text : string;
+    }
+  | Post_skill_editor_preview of {
+      reference : string;
+      reference_json : Yojson.Safe.t;
+      source_text : string;
+    }
+  | Post_skill_editor_save of {
+      reference : string;
+      reference_json : Yojson.Safe.t;
+      source_text : string;
+    }
+  | Post_skills_refresh
+  | Post_prompt_override of { key : string; value : string option }
+  | Post_preset_save of { name : string; description : string }
+  | Post_preset_create of { name : string; description : string }
+  | Post_preset_restore of { name : string }
+  | Post_preset_delete of { name : string }
+  | Post_runtime_param_set of { param_key : string; value : Yojson.Safe.t }
+  | Post_runtime_param_clear of { param_key : string }
 
 type put_request =
   | Put_wiki_page of { page : string; request : Wire_knowledge.wiki_put_request }
+
+type delete_request =
+  | Delete_skill_editor of {
+      reference : string;
+      reference_json : Yojson.Safe.t;
+      confirmed : bool;
+    }
 
 type stream_post_request =
   | Stream_keeper_chat of {
@@ -474,6 +522,7 @@ type t =
   | Http_get of { epoch : Epoch.t; req : get_request }
   | Http_post of { epoch : Epoch.t; req : post_request }
   | Http_put of { epoch : Epoch.t; req : put_request }
+  | Http_delete of { epoch : Epoch.t; req : delete_request }
   | Http_post_stream of { epoch : Epoch.t; req : stream_post_request }
   | Sync_streams of { epoch : Epoch.t; streams : Subscriptions.stream_id list }
   | Update_workspace_guard of {
@@ -700,6 +749,13 @@ let get_request_path = function
       Wire_work.gate_tool_events_path ?window_minutes ()
   | Get_keeper_waiting_inventory { keeper } ->
       Wire_runtime.keeper_waiting_inventory_path ~keeper
+  | Get_skill_editor_sources -> Wire_runtime.skill_editor_sources_path
+  | Get_skill_editor_tools -> Wire_runtime.skill_editor_tools_path
+  | Get_async_requests -> Wire_runtime.async_requests_path
+  | Get_prompts -> Wire_runtime.prompts_path
+  | Get_presets -> Wire_runtime.presets_path
+  | Get_preset_show { name } -> Wire_runtime.preset_show_path ~name
+  | Get_runtime_params -> Wire_runtime.runtime_params_path
 
 let post_request_path = function
   | Post_ask_answer _ -> Wire_work.keeper_ask_answer_path
@@ -792,6 +848,19 @@ let post_request_path = function
       Wire_work.hitl_approval_recover_path ~approval_id:consume_id
   | Post_hitl_late_approval_restore -> Wire_work.hitl_late_approval_restore_path
   | Post_mcp_tools_list _ | Post_mcp_tools_call _ -> Wire_runtime.mcp_rpc_path
+  | Post_skill_editor_read _ -> Wire_runtime.skill_editor_read_path
+  | Post_skill_editor_preview_new _ -> Wire_runtime.skill_editor_preview_new_path
+  | Post_skill_editor_create _ -> Wire_runtime.skill_editor_create_path
+  | Post_skill_editor_preview _ -> Wire_runtime.skill_editor_preview_path
+  | Post_skill_editor_save _ -> Wire_runtime.skill_editor_save_path
+  | Post_skills_refresh -> Wire_runtime.skills_refresh_path
+  | Post_prompt_override _ -> Wire_runtime.prompts_path
+  | Post_preset_save _ -> Wire_runtime.presets_path
+  | Post_preset_create _ -> Wire_runtime.preset_create_path
+  | Post_preset_restore _ -> Wire_runtime.preset_restore_path
+  | Post_preset_delete _ -> Wire_runtime.preset_delete_path
+  | Post_runtime_param_set _ -> Wire_runtime.runtime_param_set_path
+  | Post_runtime_param_clear _ -> Wire_runtime.runtime_param_clear_path
 
 let mcp_tool_name_of_post_request = function
   | Post_task_create _ -> Some "masc_add_task"
@@ -1084,6 +1153,29 @@ let post_request_body = function
       Wire_runtime.encode_mcp_tools_list_body ~id:rpc_id
   | Post_mcp_tools_call { rpc_id; tool_name; arguments } ->
       Wire_runtime.encode_mcp_tools_call_body ~id:rpc_id ~tool_name ~arguments
+  | Post_skill_editor_read { reference_json; _ } ->
+      Wire_runtime.encode_skill_read_body ~reference_json
+  | Post_skill_editor_preview_new { source_id; package_id; kind; source_text }
+  | Post_skill_editor_create { source_id; package_id; kind; source_text } ->
+      Wire_runtime.encode_skill_create_body ~source_id ~package_id ~kind
+        ~source_text
+  | Post_skill_editor_preview { reference_json; source_text; _ }
+  | Post_skill_editor_save { reference_json; source_text; _ } ->
+      Wire_runtime.encode_skill_preview_or_save_body ~reference_json ~source_text
+  | Post_skills_refresh -> `Assoc []
+  | Post_prompt_override { key; value = Some value } ->
+      Wire_runtime.encode_prompt_set ~key ~value
+  | Post_prompt_override { key; value = None } ->
+      Wire_runtime.encode_prompt_clear ~key
+  | Post_preset_save { name; description }
+  | Post_preset_create { name; description } ->
+      Wire_runtime.encode_preset_save ~name ~description
+  | Post_preset_restore { name } | Post_preset_delete { name } ->
+      Wire_runtime.encode_preset_name ~name
+  | Post_runtime_param_set { param_key; value } ->
+      Wire_runtime.encode_runtime_param_set ~param_key ~value
+  | Post_runtime_param_clear { param_key } ->
+      Wire_runtime.encode_runtime_param_clear ~param_key
 
 let put_request_path = function
   | Put_wiki_page { page; _ } -> Wire_knowledge.wiki_page_path ~page
@@ -1091,11 +1183,19 @@ let put_request_path = function
 let put_request_body = function
   | Put_wiki_page { request; _ } -> Wire_knowledge.encode_wiki_put_request request
 
+let delete_request_path = function
+  | Delete_skill_editor _ -> Wire_runtime.skill_editor_delete_path
+
+let delete_request_body = function
+  | Delete_skill_editor { reference_json; confirmed; _ } ->
+      Wire_runtime.encode_skill_delete_body ~reference_json ~confirmed
+
 let rec flatten_one acc = function
   | Batch xs -> List.fold_left flatten_one acc xs
   | ( Http_get _
     | Http_post _
     | Http_put _
+    | Http_delete _
     | Http_post_stream _
     | Sync_streams _
     | Update_workspace_guard _

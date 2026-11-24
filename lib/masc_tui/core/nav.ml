@@ -65,6 +65,7 @@ type knowledge_dive_target =
 type runtime_dive_target =
   | Tool_dive of string
   | Fusion_dive of string
+  | Skill_dive of string
 
 type infra_dive_target =
   | Sandbox_dive of string
@@ -152,6 +153,12 @@ type inline_action_kind =
   | Keeper_clear_form of string
   | Keeper_operator_note_form of string
   | Tool_execute_form of { tool_name : string; args_json : string }
+  | Skill_create_form
+  | Skill_edit_form of { reference : string }
+  | Skill_delete_confirm of { reference : string }
+  | Prompt_override_form of { key : string }
+  | Preset_create_form
+  | Runtime_param_set_form of { param_key : string }
 
 type system_gate_kind =
   | Micro_viewport
@@ -530,8 +537,14 @@ let equal_knowledge_dive_target a b =
 
 let equal_runtime_dive_target a b =
   match a, b with
-  | Tool_dive x, Tool_dive y | Fusion_dive x, Fusion_dive y -> String.equal x y
-  | Tool_dive _, Fusion_dive _ | Fusion_dive _, Tool_dive _ -> false
+  | Tool_dive x, Tool_dive y
+  | Fusion_dive x, Fusion_dive y
+  | Skill_dive x, Skill_dive y ->
+      String.equal x y
+  | Tool_dive _, (Fusion_dive _ | Skill_dive _)
+  | Fusion_dive _, (Tool_dive _ | Skill_dive _)
+  | Skill_dive _, (Tool_dive _ | Fusion_dive _) ->
+      false
 
 let equal_infra_dive_target a b =
   match a, b with
@@ -626,6 +639,12 @@ let inline_action_tag = function
   | Keeper_clear_form _ -> 29
   | Keeper_operator_note_form _ -> 30
   | Tool_execute_form _ -> 31
+  | Skill_create_form -> 32
+  | Skill_edit_form _ -> 33
+  | Skill_delete_confirm _ -> 34
+  | Prompt_override_form _ -> 35
+  | Preset_create_form -> 36
+  | Runtime_param_set_form _ -> 37
 
 let equal_inline_action_kind a b =
   if not (Int.equal (inline_action_tag a) (inline_action_tag b)) then false
@@ -638,6 +657,8 @@ let equal_inline_action_kind a b =
     | Board_new_post, Board_new_post
     | Code_finder_form, Code_finder_form
     | Code_search_form, Code_search_form
+    | Skill_create_form, Skill_create_form
+    | Preset_create_form, Preset_create_form
     | Runtime_lane_create, Runtime_lane_create
     | Task_create_form, Task_create_form
     | Addon_attach_form, Addon_attach_form ->
@@ -657,6 +678,14 @@ let equal_inline_action_kind a b =
     | Tool_execute_form x, Tool_execute_form y ->
         String.equal x.tool_name y.tool_name
         && String.equal x.args_json y.args_json
+    | Skill_edit_form x, Skill_edit_form y ->
+        String.equal x.reference y.reference
+    | Skill_delete_confirm x, Skill_delete_confirm y ->
+        String.equal x.reference y.reference
+    | Prompt_override_form x, Prompt_override_form y ->
+        String.equal x.key y.key
+    | Runtime_param_set_form x, Runtime_param_set_form y ->
+        String.equal x.param_key y.param_key
     | Board_comment x, Board_comment y ->
         String.equal x.post_id y.post_id
         && Option.equal String.equal x.parent_id y.parent_id
@@ -705,6 +734,12 @@ let equal_inline_action_kind a b =
       | Keeper_clear_form _
       | Keeper_operator_note_form _
       | Tool_execute_form _
+      | Skill_create_form
+      | Skill_edit_form _
+      | Skill_delete_confirm _
+      | Prompt_override_form _
+      | Preset_create_form
+      | Runtime_param_set_form _
       | Runtime_lane_create
       | Runtime_lane_edit _
       | Runtime_lane_delete _

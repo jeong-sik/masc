@@ -298,6 +298,7 @@ let find_render_cmd cmds =
       | Cmd.Http_get _
       | Cmd.Http_post _
       | Cmd.Http_put _
+      | Cmd.Http_delete _
       | Cmd.Http_post_stream _
       | Cmd.Sync_streams _
       | Cmd.Update_workspace_guard _
@@ -323,6 +324,7 @@ let has_cancel_diagram_cmd cmds =
       | Cmd.Http_get _
       | Cmd.Http_post _
       | Cmd.Http_put _
+      | Cmd.Http_delete _
       | Cmd.Http_post_stream _
       | Cmd.Sync_streams _
       | Cmd.Update_workspace_guard _
@@ -508,6 +510,7 @@ let test_store_diagram_keybindings_and_scope_safety () =
         | Cmd.Http_get _
         | Cmd.Http_post _
         | Cmd.Http_put _
+        | Cmd.Http_delete _
         | Cmd.Http_post_stream _
         | Cmd.Sync_streams _
         | Cmd.Update_workspace_guard _
@@ -1215,6 +1218,7 @@ let test_visibility_enter_refresh_and_resize () =
         | Cmd.Http_get _
         | Cmd.Http_post _
         | Cmd.Http_put _
+        | Cmd.Http_delete _
         | Cmd.Http_post_stream _
         | Cmd.Sync_streams _
         | Cmd.Update_workspace_guard _

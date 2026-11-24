@@ -273,7 +273,7 @@ let test_keymap_footer_width_budget () =
 (* --- 2. Slash Commands Tests --- *)
 
 let test_slash_22_commands () =
-  Alcotest.(check int) "exactly 25 slash commands" 25 (List.length Slash.all);
+  Alcotest.(check int) "exactly 28 slash commands" 28 (List.length Slash.all);
   let cases =
     [
       ("/pulse", Slash.Pulse);
@@ -311,6 +311,34 @@ let test_slash_22_commands () =
       ( "/exec masc_board_list {\"limit\":5}",
         Slash.Exec
           { tool_name = "masc_board_list"; args_json = Some "{\"limit\":5}" } );
+      ("/skill refresh", Slash.Skill Slash.Skill_refresh);
+      ("/skill new", Slash.Skill Slash.Skill_new);
+      ("/skill read ocaml-coding", Slash.Skill (Slash.Skill_read "ocaml-coding"));
+      ("/skill edit ocaml-coding", Slash.Skill (Slash.Skill_edit "ocaml-coding"));
+      ( "/skill delete ocaml-coding",
+        Slash.Skill (Slash.Skill_delete "ocaml-coding") );
+      ( "/prompt set system.greeting hello world",
+        Slash.Prompt
+          (Slash.Prompt_set
+             { key = "system.greeting"; value = Some "hello world" }) );
+      ( "/prompt clear system.greeting",
+        Slash.Prompt (Slash.Prompt_clear "system.greeting") );
+      ( "/prompt param-set keeper.max_turns 12",
+        Slash.Prompt
+          (Slash.Param_set { key = "keeper.max_turns"; value_raw = Some "12" }) );
+      ( "/prompt param-clear keeper.max_turns",
+        Slash.Prompt (Slash.Param_clear "keeper.max_turns") );
+      ("/preset", Slash.Preset Slash.Preset_list);
+      ("/preset list", Slash.Preset Slash.Preset_list);
+      ("/preset show baseline", Slash.Preset (Slash.Preset_show "baseline"));
+      ( "/preset save baseline prod snap",
+        Slash.Preset
+          (Slash.Preset_save { name = "baseline"; description = "prod snap" }) );
+      ( "/preset create v2",
+        Slash.Preset (Slash.Preset_create { name = Some "v2"; description = "" })
+      );
+      ("/preset restore baseline", Slash.Preset (Slash.Preset_restore "baseline"));
+      ("/preset delete old", Slash.Preset (Slash.Preset_delete "old"));
       ("/tools full", Slash.Tools (Some Slash.Tools_full));
       ("/clear", Slash.Clear);
       ("/theme arcade_hi", Slash.Theme (Some Theme.Arcade_hi));
@@ -330,6 +358,20 @@ let test_slash_22_commands () =
     | Ok _ | Error _ -> false);
   Alcotest.(check bool) "/gate completion lists mode" true
     (List.mem "/gate mode" (Slash.complete ~prefix:"/gate m"));
+  Alcotest.(check bool) "/skill completion lists refresh" true
+    (List.mem "/skill refresh" (Slash.complete ~prefix:"/skill r"));
+  Alcotest.(check bool) "/prompt completion lists param-set" true
+    (List.mem "/prompt param-set" (Slash.complete ~prefix:"/prompt p"));
+  Alcotest.(check bool) "/preset completion lists restore" true
+    (List.mem "/preset restore" (Slash.complete ~prefix:"/preset r"));
+  Alcotest.(check bool) "/skill unknown subcommand rejected" true
+    (match Slash.parse "/skill bogus" with
+    | Error (Slash.Invalid_argument _) -> true
+    | Ok _ | Error _ -> false);
+  Alcotest.(check bool) "/preset show missing name rejected" true
+    (match Slash.parse "/preset show" with
+    | Error (Slash.Invalid_argument _) -> true
+    | Ok _ | Error _ -> false);
   List.iter
     (fun (input, expected) ->
       match Slash.parse input with

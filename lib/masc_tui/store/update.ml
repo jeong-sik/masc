@@ -13,6 +13,7 @@ let has_explicit_sync_streams cmds =
       | Cmd.Http_get _
       | Cmd.Http_post _
       | Cmd.Http_put _
+      | Cmd.Http_delete _
       | Cmd.Http_post_stream _
       | Cmd.Update_workspace_guard _
       | Cmd.Voice_cmd _

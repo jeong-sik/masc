@@ -170,6 +170,26 @@ type change_event_kind =
 val change_event_kind_to_string : change_event_kind -> string
 val change_event_kind_of_string : string -> change_event_kind option
 
+type fact_version =
+  { version_scope : string
+  ; version_text : string
+  ; version_lifecycle : lifecycle
+  ; version_revision : int
+  }
+
+type change_evidence =
+  | Fact_written of { previous : fact_version option; current : fact_version }
+  | Edge_written of
+      { from_fact_id : string
+      ; from_scope : string
+      ; to_fact_id : string
+      ; to_scope : string
+      }
+
+val fact_version : world_fact -> fact_version
+val change_evidence_to_json : change_evidence -> Yojson.Safe.t
+val change_evidence_of_json : Yojson.Safe.t -> (change_evidence, string) result
+
 type change_event =
   { seq : int
   ; kind : change_event_kind
@@ -177,6 +197,7 @@ type change_event =
   ; summary : string
   ; actor : string
   ; recorded_at : float
+  ; evidence : change_evidence option
   }
 
 val change_event_to_json : change_event -> Yojson.Safe.t

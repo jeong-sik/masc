@@ -599,6 +599,7 @@ let populated_model ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_en)
                 incomplete_batches = 0;
                 aborted_batches = 0;
               };
+            history = None;
             unparseable_timestamps = 0;
             revisions = [];
             added =
@@ -609,6 +610,7 @@ let populated_model ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_en)
                   fact_id = "f-1";
                   summary = "Added cache policy";
                   recorded_at = "2026-11-22T10:00:00Z";
+                  claim_text = None;
                   payload = `Null;
                 };
                 {
@@ -617,6 +619,7 @@ let populated_model ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_en)
                   fact_id = "f-2";
                   summary = "Added failover route";
                   recorded_at = "2026-11-22T10:05:00Z";
+                  claim_text = None;
                   payload = `Null;
                 };
               ];
@@ -4787,6 +4790,7 @@ let test_pillar2_scroll_bounds_all_surfaces () =
                 incomplete_batches = 0;
                 aborted_batches = 0;
               };
+            history = None;
             unparseable_timestamps = 0;
             revisions = [];
             added =
@@ -4797,6 +4801,7 @@ let test_pillar2_scroll_bounds_all_surfaces () =
                     fact_id = Printf.sprintf "wf-%02d" i;
                     summary = Printf.sprintf "WORLD_CLAIM_LAST_%02d" i;
                     recorded_at = "2026-11-22T10:00:00Z";
+                    claim_text = None;
                     payload = `Null;
                   });
             updated = [];

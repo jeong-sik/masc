@@ -71,16 +71,28 @@ let with_db db f =
     (fun () -> f db)
 ;;
 
-let schema_initialized db =
+let schema_table_present db table =
   with_stmt db
-    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'world_memory_fts' LIMIT 1"
+    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1 LIMIT 1"
     (fun stmt ->
-       let rc = Sqlite3.step stmt in
-       if rc = Sqlite3.Rc.ROW
-       then Ok true
-       else if rc = Sqlite3.Rc.DONE
-       then Ok false
+       let* () = check db "bind table name" (Sqlite3.bind stmt 1 (Sqlite3.Data.TEXT table)) in
+       let result = Sqlite3.step stmt in
+       if result = Sqlite3.Rc.ROW then Ok true
+       else if result = Sqlite3.Rc.DONE then Ok false
        else Error (sqlite_err db "check world_memory schema"))
+;;
+
+let schema_initialized db = schema_table_present db "world_memory_fts"
+
+let ensure_change_evidence_table db =
+  let* exists = schema_table_present db "world_change_evidence" in
+  if exists then Ok ()
+  else
+    exec_ok db "create world_change_evidence"
+      "CREATE TABLE IF NOT EXISTS world_change_evidence (\
+         seq INTEGER PRIMARY KEY REFERENCES world_change_log(seq) ON DELETE CASCADE,\
+         evidence TEXT NOT NULL\
+       );"
 ;;
 
 let with_write_tx db f =
@@ -120,7 +132,7 @@ let init_schema db =
   let* () = exec_ok db "pragma synchronous" "PRAGMA synchronous=NORMAL;" in
   let* ready = schema_initialized db in
   if ready
-  then Ok ()
+  then ensure_change_evidence_table db
   else (
     let* () = exec_ok db "pragma journal_mode" "PRAGMA journal_mode=WAL;" in
     with_write_tx db (fun db ->
@@ -201,6 +213,7 @@ let init_schema db =
              recorded_at REAL NOT NULL\
            );"
       in
+      let* () = ensure_change_evidence_table db in
       exec_ok db "create world_memory_fts"
         "CREATE VIRTUAL TABLE IF NOT EXISTS world_memory_fts USING \
          fts5(entry_type UNINDEXED, target_id UNINDEXED, title, body, facets, tokenize='trigram');"))
@@ -263,7 +276,7 @@ let bound_log_summary summary =
   |> String_util.to_string
 ;;
 
-let log_change_in_tx db ~seq ~kind ~target_id ~summary ~actor ~now =
+let log_change_in_tx ?evidence db ~seq ~kind ~target_id ~summary ~actor ~now =
   let bounded_summary = bound_log_summary summary in
   let* () =
     with_stmt db
@@ -277,6 +290,17 @@ let log_change_in_tx db ~seq ~kind ~target_id ~summary ~actor ~now =
          let* () = check db "bind actor" (Sqlite3.bind stmt 5 (Sqlite3.Data.TEXT actor)) in
          let* () = check db "bind at" (Sqlite3.bind stmt 6 (Sqlite3.Data.FLOAT now)) in
          step_done db "insert change_log" stmt)
+  in
+  let* () =
+    match evidence with
+    | None -> Ok ()
+    | Some evidence ->
+      let serialized = Yojson.Safe.to_string (change_evidence_to_json evidence) in
+      with_stmt db "INSERT INTO world_change_evidence(seq, evidence) VALUES (?1, ?2)"
+        (fun stmt ->
+           let* () = check db "bind evidence seq" (Sqlite3.bind_int stmt 1 seq) in
+           let* () = check db "bind evidence" (Sqlite3.bind_text stmt 2 serialized) in
+           step_done db "insert change evidence" stmt)
   in
   if seq > max_change_log_rows
   then
@@ -886,16 +910,19 @@ let empty_consistent_snapshot =
   { facts = []; edges = []; entries = []; digest = None }
 ;;
 
+let read_snapshot_on_db ~include_inactive db =
+  let* facts = list_facts_on_db ~include_inactive db in
+  let* edges = list_edges_on_db ?fact_id:None db in
+  let* entries = list_index_on_db ?kind:None db in
+  let* digest = latest_digest_on_db db in
+  Ok { facts; edges; entries; digest }
+;;
+
 let read_snapshot ?(include_inactive = false) ~base_path () =
   Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
     let* res =
       open_db ~create_if_missing:false ~base_path (fun db ->
-        with_read_tx db (fun db ->
-          let* facts = list_facts_on_db ~include_inactive db in
-          let* edges = list_edges_on_db ?fact_id:None db in
-          let* entries = list_index_on_db ?kind:None db in
-          let* digest = latest_digest_on_db db in
-          Ok { facts; edges; entries; digest }))
+        with_read_tx db (read_snapshot_on_db ~include_inactive))
     in
     Ok (Option.value ~default:empty_consistent_snapshot res))
 ;;
@@ -1029,103 +1056,181 @@ let read_index_snapshot ~base_path =
     Ok (Option.join res))
 ;;
 
-let read_change_log ~base_path ~since_seq ~limit =
+type history_page = After of int | Tail
+
+let read_changes_on_db db ~page ~limit =
+  let* last_seq =
+    with_stmt db "SELECT COALESCE(MAX(seq), 0) FROM world_change_log" (fun stmt ->
+      if Sqlite3.step stmt = Sqlite3.Rc.ROW
+      then Ok (Sqlite3.column_int stmt 0)
+      else Error (sqlite_err db "max change_log seq"))
+  in
+  let* has_evidence = schema_table_present db "world_change_evidence" in
+  let evidence_column, join =
+    if has_evidence
+    then "e.evidence", "LEFT JOIN world_change_evidence e ON e.seq = l.seq "
+    else "NULL", ""
+  in
+  let order, limit = match page with
+    | After _ -> "WHERE l.seq > ?2 ORDER BY l.seq ASC LIMIT ?1", limit
+    | Tail -> "ORDER BY l.seq DESC LIMIT ?1", max 1 limit
+  in
+  let sql =
+    "SELECT l.seq, l.kind, l.target_id, l.summary, l.actor, l.recorded_at, "
+    ^ evidence_column ^ " FROM world_change_log l " ^ join ^ order
+  in
+  let* events =
+    with_stmt db sql (fun stmt ->
+      let* () = check db "bind change log limit" (Sqlite3.bind_int stmt 1 limit) in
+      let* () =
+        match page with
+        | After since_seq -> check db "bind change log cursor" (Sqlite3.bind_int stmt 2 since_seq)
+        | Tail -> Ok ()
+      in
+      let rec loop acc =
+        let result = Sqlite3.step stmt in
+        if result = Sqlite3.Rc.ROW then (
+          let seq = Sqlite3.column_int stmt 0 in
+          let kind_raw = Sqlite3.column_text stmt 1 in
+          let target_id = Sqlite3.column_text stmt 2 in
+          let summary = Sqlite3.column_text stmt 3 in
+          let actor = Sqlite3.column_text stmt 4 in
+          let recorded_at = Sqlite3.column_double stmt 5 in
+          let* kind =
+            match change_event_kind_of_string kind_raw with
+            | Some kind -> Ok kind
+            | None -> Error (Invalid_state ("unknown change event kind: " ^ kind_raw))
+          in
+          let* evidence =
+            match Sqlite3.column stmt 6 with
+            | Sqlite3.Data.NULL -> Ok None
+            | Sqlite3.Data.TEXT payload ->
+              (match Yojson.Safe.from_string payload with
+               | json ->
+                 change_evidence_of_json json
+                 |> Result.map Option.some
+                 |> Result.map_error (fun detail -> Invalid_state detail)
+               | exception Yojson.Json_error detail -> Error (Invalid_state detail))
+            | Sqlite3.Data.(NONE | INT _ | FLOAT _ | BLOB _) ->
+              Error (Invalid_state "invalid world change evidence storage type")
+          in
+          loop ({ seq; kind; target_id; summary; actor; recorded_at; evidence } :: acc))
+        else if result = Sqlite3.Rc.DONE then
+          Ok (match page with After _ -> List.rev acc | Tail -> acc)
+        else Error (sqlite_err db "read world_change_log")
+      in
+      loop [])
+  in
+  Ok (events, last_seq)
+;;
+
+let read_change_page ~base_path ~page ~limit =
   Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
     let* res =
       open_db ~create_if_missing:false ~base_path (fun db ->
-        with_read_tx db (fun db ->
-          let* last_seq =
-            with_stmt db "SELECT COALESCE(MAX(seq), 0) FROM world_change_log" (fun stmt ->
-              let rc = Sqlite3.step stmt in
-              if rc = Sqlite3.Rc.ROW
-              then Ok (Sqlite3.column_int stmt 0)
-              else Error (sqlite_err db "max change_log seq"))
-          in
-          let* events =
-            with_stmt db
-              "SELECT seq, kind, target_id, summary, actor, recorded_at \
-               FROM world_change_log WHERE seq > ?1 ORDER BY seq ASC LIMIT ?2"
-              (fun stmt ->
-                 let* () =
-                   check db "bind since" (Sqlite3.bind stmt 1 (Sqlite3.Data.INT (Int64.of_int since_seq)))
-                 in
-                 let* () =
-                   check db "bind limit" (Sqlite3.bind stmt 2 (Sqlite3.Data.INT (Int64.of_int limit)))
-                 in
-                 let rec loop acc =
-                   let rc = Sqlite3.step stmt in
-                   if rc = Sqlite3.Rc.ROW
-                   then (
-                     let seq = Sqlite3.column_int stmt 0 in
-                     let kind_raw = Sqlite3.column_text stmt 1 in
-                     let target_id = Sqlite3.column_text stmt 2 in
-                     let summary = Sqlite3.column_text stmt 3 in
-                     let actor = Sqlite3.column_text stmt 4 in
-                     let recorded_at = Sqlite3.column_double stmt 5 in
-                     let* kind =
-                       match change_event_kind_of_string kind_raw with
-                       | Some k -> Ok k
-                       | None -> Error (Invalid_state ("unknown change event kind: " ^ kind_raw))
-                     in
-                     loop ({ seq; kind; target_id; summary; actor; recorded_at } :: acc))
-                   else if rc = Sqlite3.Rc.DONE
-                   then Ok (List.rev acc)
-                   else Error (sqlite_err db "read world_change_log")
-                 in
-                 loop [])
-          in
-          Ok (events, last_seq)))
+        with_read_tx db (fun db -> read_changes_on_db db ~page ~limit))
     in
     Ok (Option.value ~default:([], 0) res))
 ;;
 
+let read_change_log ~base_path ~since_seq ~limit =
+  read_change_page ~base_path ~page:(After since_seq) ~limit
+;;
+
 let read_change_log_tail ~base_path ~limit =
-  let safe_limit = max 1 limit in
+  read_change_page ~base_path ~page:Tail ~limit
+;;
+
+let read_history_snapshot ~base_path ~page ~limit =
   Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
     let* res =
       open_db ~create_if_missing:false ~base_path (fun db ->
         with_read_tx db (fun db ->
-          let* last_seq =
-            with_stmt db "SELECT COALESCE(MAX(seq), 0) FROM world_change_log" (fun stmt ->
-              let rc = Sqlite3.step stmt in
-              if rc = Sqlite3.Rc.ROW
-              then Ok (Sqlite3.column_int stmt 0)
-              else Error (sqlite_err db "max change_log seq"))
-          in
-          let* events =
-            with_stmt db
-              "SELECT seq, kind, target_id, summary, actor, recorded_at \
-               FROM world_change_log ORDER BY seq DESC LIMIT ?1"
-              (fun stmt ->
-                 let* () =
-                   check db "bind limit" (Sqlite3.bind stmt 1 (Sqlite3.Data.INT (Int64.of_int safe_limit)))
-                 in
-                 (* Reading DESC and prepending naturally returns ASC order. *)
-                 let rec loop acc =
-                   let rc = Sqlite3.step stmt in
-                   if rc = Sqlite3.Rc.ROW
-                   then (
-                     let seq = Sqlite3.column_int stmt 0 in
-                     let kind_raw = Sqlite3.column_text stmt 1 in
-                     let target_id = Sqlite3.column_text stmt 2 in
-                     let summary = Sqlite3.column_text stmt 3 in
-                     let actor = Sqlite3.column_text stmt 4 in
-                     let recorded_at = Sqlite3.column_double stmt 5 in
-                     let* kind =
-                       match change_event_kind_of_string kind_raw with
-                       | Some k -> Ok k
-                       | None -> Error (Invalid_state ("unknown change event kind: " ^ kind_raw))
-                     in
-                     loop ({ seq; kind; target_id; summary; actor; recorded_at } :: acc))
-                   else if rc = Sqlite3.Rc.DONE
-                   then Ok acc
-                   else Error (sqlite_err db "read world_change_log tail")
-                 in
-                 loop [])
-          in
-          Ok (events, last_seq)))
+          let* snapshot = read_snapshot_on_db ~include_inactive:true db in
+          Ok (snapshot, read_changes_on_db db ~page ~limit)))
     in
-    Ok (Option.value ~default:([], 0) res))
+    Ok (Option.value ~default:(empty_consistent_snapshot, Ok ([], 0)) res))
+;;
+
+type shared_change =
+  | Claim_added of fact_version
+  | Claim_updated of { previous : fact_version option; current : fact_version }
+  | Claim_retracted of { previous : fact_version option; current : fact_version }
+  | Shared_edge
+  | Shared_index
+  | Shared_digest
+  | Private_change
+  | Missing_change_evidence
+
+let shared_change_of_snapshot (snapshot : consistent_snapshot) =
+  let facts = Hashtbl.create (List.length snapshot.facts) in
+  let edges = Hashtbl.create (List.length snapshot.edges) in
+  List.iter (fun (fact : world_fact) -> Hashtbl.replace facts fact.fact_id fact) snapshot.facts;
+  List.iter (fun (edge : world_edge) -> Hashtbl.replace edges edge.created_seq edge) snapshot.edges;
+  let currently_private fact_id =
+    match Hashtbl.find_opt facts fact_id with
+    | Some fact -> is_private_scope fact.scope
+    | None -> false
+  in
+  let fact_privacy fact = is_private_scope fact.version_scope in
+  let classify_fact ~fact_id ~created ~previous ~current =
+    if currently_private fact_id
+       || fact_privacy current
+       || Option.fold ~none:false ~some:fact_privacy previous
+    then Private_change
+    else if created
+    then Claim_added current
+    else if is_active_lifecycle current.version_lifecycle
+    then Claim_updated { previous; current }
+    else Claim_retracted { previous; current }
+  in
+  let classify_edge ~from_fact_id ~from_scope ~to_fact_id ~to_scope =
+    if currently_private from_fact_id || currently_private to_fact_id
+       || is_private_scope from_scope || is_private_scope to_scope
+    then Private_change
+    else Shared_edge
+  in
+  fun (event : change_event) ->
+    match event.kind, event.evidence with
+    | Index_upserted, None -> Shared_index
+    | Digest_committed, None -> Shared_digest
+    | (Fact_upserted | Fact_lifecycle_changed | Edge_added), _
+      when currently_private event.target_id -> Private_change
+    | (Fact_upserted | Fact_lifecycle_changed), Some (Fact_written { previous; current }) ->
+      classify_fact
+        ~fact_id:event.target_id
+        ~created:(event.kind = Fact_upserted && Option.is_none previous)
+        ~previous ~current
+    | Edge_added, Some (Edge_written { from_fact_id; from_scope; to_fact_id; to_scope })
+      when String.equal from_fact_id event.target_id ->
+      classify_edge ~from_fact_id ~from_scope ~to_fact_id ~to_scope
+    | (Fact_upserted | Fact_lifecycle_changed), None ->
+      (* A pre-evidence row can borrow a fact version only when that event is
+         the exact write that produced the version in this snapshot. *)
+      (match Hashtbl.find_opt facts event.target_id with
+       | Some fact when fact.updated_seq = event.seq ->
+         classify_fact
+           ~fact_id:event.target_id
+           ~created:(event.kind = Fact_upserted && fact.created_seq = event.seq)
+           ~previous:None ~current:(fact_version fact)
+       | Some _ | None -> Missing_change_evidence)
+    | Edge_added, None ->
+      (match Hashtbl.find_opt edges event.seq with
+       | Some edge
+         when String.equal edge.from_fact_id event.target_id && currently_private edge.to_fact_id ->
+         Private_change
+       | Some edge when String.equal edge.from_fact_id event.target_id ->
+         (match Hashtbl.find_opt facts edge.from_fact_id, Hashtbl.find_opt facts edge.to_fact_id with
+          | Some from_fact, Some to_fact
+            when from_fact.updated_seq <= event.seq && to_fact.updated_seq <= event.seq ->
+            classify_edge
+              ~from_fact_id:edge.from_fact_id ~from_scope:from_fact.scope
+              ~to_fact_id:edge.to_fact_id ~to_scope:to_fact.scope
+          | _ -> Missing_change_evidence)
+       | _ -> Missing_change_evidence)
+    | (Fact_upserted | Fact_lifecycle_changed), Some (Edge_written _)
+    | Edge_added, Some (Fact_written _ | Edge_written _)
+    | (Index_upserted | Digest_committed), Some _ -> Missing_change_evidence
 ;;
 
 (* --- Atomic Off-Domain Writes (Shared In-Transaction Primitives) --- *)
@@ -1250,14 +1355,7 @@ let upsert_fact_in_tx
           ~facets:sorted_facets
       else delete_fts_in_tx db ~entry_type:"world_fact" ~target_id:fact_id
     in
-    let* () =
-      log_change_in_tx db ~seq ~kind:Fact_upserted ~target_id:fact_id
-        ~summary:
-          (Printf.sprintf "[%s] rev=%d scope=%s (%dB)"
-             (lifecycle_to_string lifecycle) revision scope (String.length claim))
-        ~actor ~now
-    in
-    Ok
+    let fact =
       { fact_id
       ; claim
       ; category
@@ -1269,6 +1367,18 @@ let upsert_fact_in_tx
       ; created_seq
       ; updated_seq = seq
       }
+    in
+    let evidence =
+      Fact_written { previous = Option.map fact_version existing; current = fact_version fact }
+    in
+    let* () =
+      log_change_in_tx ~evidence db ~seq ~kind:Fact_upserted ~target_id:fact_id
+        ~summary:
+          (Printf.sprintf "[%s] rev=%d scope=%s (%dB)"
+             (lifecycle_to_string lifecycle) revision scope (String.length claim))
+        ~actor ~now
+    in
+    Ok fact
 ;;
 
 let upsert_fact
@@ -1317,15 +1427,15 @@ let add_edge_in_tx db ~now ~actor ~from_fact_id ~to_fact_id ~kind ~reason =
   (* Explicit FK existence check works on both freshly created DBs and
      pre-existing DBs opened with PRAGMA foreign_keys = ON. *)
   let* from_opt = get_fact_on_db db ~fact_id:from_fact_id in
-  let* () =
+  let* from_fact =
     match from_opt with
-    | Some _ -> Ok ()
+    | Some fact -> Ok fact
     | None -> Error (Invalid_state ("world edge source fact not found: " ^ from_fact_id))
   in
   let* to_opt = get_fact_on_db db ~fact_id:to_fact_id in
-  let* () =
+  let* to_fact =
     match to_opt with
-    | Some _ -> Ok ()
+    | Some fact -> Ok fact
     | None -> Error (Invalid_state ("world edge target fact not found: " ^ to_fact_id))
   in
   let* existing = find_edge_on_db db ~from_fact_id ~to_fact_id ~kind in
@@ -1353,8 +1463,11 @@ let add_edge_in_tx db ~now ~actor ~from_fact_id ~to_fact_id ~kind ~reason =
            in
            step_done db "insert world_edge" stmt)
     in
+    let evidence =
+      Edge_written { from_fact_id; from_scope = from_fact.scope; to_fact_id; to_scope = to_fact.scope }
+    in
     let* () =
-      log_change_in_tx db ~seq ~kind:Edge_added ~target_id:from_fact_id
+      log_change_in_tx ~evidence db ~seq ~kind:Edge_added ~target_id:from_fact_id
         ~summary:
           (Printf.sprintf "%s --%s--> %s: %s" from_fact_id (edge_kind_to_string kind)
              to_fact_id reason)
@@ -1410,8 +1523,10 @@ let transition_fact_lifecycle_in_tx db ~now ~actor ~fact_id ~to_lifecycle ~reaso
          then delete_fts_in_tx db ~entry_type:"world_fact" ~target_id:fact_id
          else Ok ()
        in
+       let current = { prev with lifecycle = next_life; revision = next_rev; updated_seq = seq } in
+       let evidence = Fact_written { previous = Some (fact_version prev); current = fact_version current } in
        let* () =
-         log_change_in_tx db ~seq ~kind:Fact_lifecycle_changed ~target_id:fact_id
+         log_change_in_tx ~evidence db ~seq ~kind:Fact_lifecycle_changed ~target_id:fact_id
            ~summary:
              (Printf.sprintf "%s -> %s: %s"
                 (lifecycle_to_string prev.lifecycle)
@@ -1419,7 +1534,7 @@ let transition_fact_lifecycle_in_tx db ~now ~actor ~fact_id ~to_lifecycle ~reaso
                 reason)
            ~actor ~now
        in
-       Ok { prev with lifecycle = next_life; revision = next_rev; updated_seq = seq })
+       Ok current)
 ;;
 
 let transition_fact_lifecycle ~base_path ~now ~actor ~fact_id ~to_lifecycle ~reason =

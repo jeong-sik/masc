@@ -1864,7 +1864,7 @@ let memory_flow_input_of_diff (diff : Wire_knowledge.memory_diff)
             | Ok at_unix ->
                 let added, removed =
                   match String.lowercase_ascii (String.trim r.op) with
-                  | "added" | "updated" -> (1, 0)
+                  | "added" -> (1, 0)
                   | "retracted" -> (0, 1)
                   | _ -> (0, 0)
                 in

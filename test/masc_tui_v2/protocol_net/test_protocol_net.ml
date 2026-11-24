@@ -778,17 +778,27 @@ let test_wire_knowledge () =
             {|{
               "scope": { "kind": "world" },
               "range": { "window": "24h", "from_rev": null, "to_rev": 5, "from_unix": 100.0, "to_unix": 200.0 },
-              "counts": { "total_claims_now": 3, "added": 1, "updated": 0, "retracted": 0, "incomplete_batches": 0, "aborted_batches": 0 },
+              "counts": { "total_claims_now": 3, "added": 1, "updated": 1, "retracted": 0, "incomplete_batches": 0, "aborted_batches": 0 },
+              "history": { "edge_changes": 2, "index_updates": 3, "digest_commits": 4, "missing_evidence": 5, "retained_from_seq": 2 },
               "retrieval_heat": { "hot": 1, "warm": 0, "cold": 0, "never_retrieved": 2, "total_events": 1, "unreadable_event_lines": 0 },
               "unparseable_timestamps": 0,
-              "revisions": [{ "rev": 5, "batch_id": "b1", "fact_id": "f1", "recorded_at": "2026-11-21T18:00:00Z", "op": "added" }],
-              "added": [{ "seq": 5, "batch_id": "b1", "fact_id": "f1", "summary": "New claim", "recorded_at": "2026-11-21T18:00:00Z", "payload": {} }],
-              "updated": [],
+              "revisions": [
+                { "rev": 4, "batch_id": "b1", "fact_id": "f1", "recorded_at": "2026-11-21T18:00:00Z", "op": "added" },
+                { "rev": 5, "batch_id": "b2", "fact_id": "f1", "recorded_at": "2026-11-21T18:10:00Z", "op": "updated" }
+              ],
+              "added": [{ "seq": 4, "batch_id": "b1", "fact_id": "f1", "summary": "New claim", "claim_text": "Original claim", "recorded_at": "2026-11-21T18:00:00Z", "payload": {} }],
+              "updated": [{ "seq": 5, "fact_id": "f1", "summary": "Revised claim", "before_text": "Original claim", "claim_text": "Current claim", "recorded_at": "2026-11-21T18:10:00Z", "before": null, "after": {} }],
               "retracted": []
             }|}))
   in
   (match wdiff.body with
-  | Wire_knowledge.World_diff { counts = { total_claims_now = 3; _ }; _ } -> ()
+  | Wire_knowledge.World_diff
+      { counts = { total_claims_now = 3; added = 1; _ }
+      ; history = Some { edge_changes = 2; index_updates = 3; digest_commits = 4; missing_evidence = 5; retained_from_seq = Some 2 }
+      ; added = [{ claim_text = Some "Original claim"; _ }]
+      ; updated = [{ before_text = Some "Original claim"; claim_text = Some "Current claim"; _ }]
+      ; _
+      } -> ()
   | Wire_knowledge.Keeper_diff _ | Wire_knowledge.World_diff _ ->
       Alcotest.fail "expected World_diff");
   (* Act_skip_line sends integer offset, NOT target *)

@@ -33,5 +33,6 @@
   masc_types
   masc_goal
   ptime
+  sqlite3
   yojson
   unix))

@@ -676,6 +676,14 @@ type world_diff_counts = {
   aborted_batches : int;
 }
 
+type world_change_history = {
+  edge_changes : int;
+  index_updates : int;
+  digest_commits : int;
+  missing_evidence : int;
+  retained_from_seq : int option;
+}
+
 type world_revision_tick = {
   rev : int;
   batch_id : string;
@@ -690,6 +698,7 @@ type world_change_entry = {
   fact_id : string;
   summary : string;
   recorded_at : string;
+  claim_text : string option;
   payload : Yojson.Safe.t;
 }
 
@@ -698,6 +707,8 @@ type world_updated_entry = {
   fact_id : string;
   summary : string;
   recorded_at : string;
+  before_text : string option;
+  claim_text : string option;
   before : Yojson.Safe.t;
   after : Yojson.Safe.t;
 }
@@ -714,6 +725,7 @@ type memory_diff_body =
     }
   | World_diff of {
       counts : world_diff_counts;
+      history : world_change_history option;
       unparseable_timestamps : int;
       revisions : world_revision_tick list;
       added : world_change_entry list;

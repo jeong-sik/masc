@@ -211,10 +211,12 @@ let test_grouped_sources_and_compact_results ~limited () =
   let candidates=rows "candidates" (member "state" request) in
   check (list string) "each current identity appears once in provider questions" (List.sort String.compare ids)
     (member "questions" request |> Json.to_assoc |> List.map fst |> List.sort String.compare);
-  let witnesses=List.fold_left (fun count row -> let detail=member "source_detail" row in
-    check bool "valid provenance has no added failure field" true (member "receipt_verification" detail=`Null);
-    count+List.length (rows "direct_admission_witnesses" detail)+List.length (rows "successor_witnesses" detail)) 0 candidates in
-  check int "legacy witnesses are empty under single-writer store" 0 witnesses;
+  let has key json = List.mem_assoc key (Json.to_assoc json) in
+  List.iter (fun row ->
+    let detail = member "source_detail" row in
+    check bool "valid provenance has no added failure field" false (has "receipt_verification" detail);
+    check bool "current evaluator input omits retired witness fields" true
+      (not (has "direct_admission_witnesses" detail || has "successor_witnesses" detail))) candidates;
   let selected=rows "selected" output in
   check (list string) "limit applies after the earlier candidate was omitted"
     (if limited then [second] else [second;third]) (List.map (text "id") selected);
@@ -224,14 +226,14 @@ let test_grouped_sources_and_compact_results ~limited () =
   check int "truncation count" (if limited then 1 else 0) (integer "truncated_count" output);
   Printf.printf "MEMORY_SELECT_TOOL_COMPACT %s\n%!" (Yojson.Safe.to_string (`Assoc
     ["limited",`Bool limited;"assessed_current_identities",`Int (List.length candidates);
-     "evaluated_witnesses",`Int witnesses;"delivered_current_identities",`Int (List.length selected);
+     "delivered_current_identities",`Int (List.length selected);
      "tool_output_bytes",`Int (String.length (Yojson.Safe.to_string output));
      "evaluator_source_detail_bytes",`Int (List.fold_left (fun total row ->
        total+String.length (Yojson.Safe.to_string (member "source_detail" row))) 0 candidates)]));
   List.iter (fun selected ->
     let detail=member "current" selected in
-    check bool "full historical evidence is not duplicated into tool output" true
-      (member "successor_witnesses" detail=`Null && member "direct_admission_witnesses" detail=`Null);
+    check bool "current result omits retired witness counts" true
+      (not (has "successor_witness_count" detail || has "direct_admission_witness_count" detail));
     check bool "current identity has a complete scoped claim" true (member "current_fact" detail<>`Null)) selected;
   let journal=Filename.concat (Filename.concat (Masc.Workspace.keepers_runtime_dir config) keeper_id) "memory-selection-evaluations.jsonl" in
   let logs=Fs_compat.load_file journal |> String.split_on_char '\n' |> List.filter ((<>) "") |> List.map Yojson.Safe.from_string in

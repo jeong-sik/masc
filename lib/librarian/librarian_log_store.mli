@@ -72,6 +72,13 @@ val fold
   -> f:('acc -> scanned -> 'acc)
   -> ('acc, Private_jsonl_scan.error) result
 
+val fold_with_raw
+  :  string
+  -> init:'acc
+  -> f:('acc -> scanned -> string -> 'acc)
+  -> ('acc, Private_jsonl_scan.error) result
+(** As {!fold}, with the original row bytes for lossless archival of decoding failures. *)
+
 type append_error =
   | End_moved of
       { expected : int
@@ -103,8 +110,9 @@ val append
   -> (appended, append_error) result
 
 (** Atomically replace the commit log with a single compacted checkpoint
-    baseline line so future scans read only post-checkpoint commits. *)
+    baseline line if the held end offset is still current, so future scans read only post-checkpoint commits. *)
 val rewrite_compacted
   :  path:string
+  -> at_end:int
   -> Librarian_log.line
   -> (appended, append_error) result

@@ -1262,6 +1262,19 @@ let reading_sanitize_single_line s =
     s;
   String.trim (Buffer.contents buf)
 
+let memory_change_time ~rev ~at =
+  match rev, at with
+  | Some revision, _ -> Printf.sprintf "@r%d" revision
+  | None, Some t -> Wire_common.format_unix_rfc3339 t
+  | None, None -> ""
+
+let memory_successor_source ~lang = function
+  | Some Wire_knowledge.Current_snapshot ->
+    Some (reading_say lang ~ko:"현재 스냅샷에서 찾은 후속 사실" ~en:"Successor body from the current snapshot")
+  | Some Archived_fact ->
+    Some (reading_say lang ~ko:"보관 이력에서 찾은 후속 사실" ~en:"Successor body from the archive")
+  | Some (Same_commit | Held_before) | None -> None
+
 let reading_format_age ~now_unix ts_unix =
   if
     (not (Float.is_finite now_unix))
@@ -1528,9 +1541,9 @@ let project_memory_reading_lines ~width ~lang ~now_unix entry =
       | Keeper_updated u ->
           push_wrapped ~rail:Theme.Status_active
             ~tone:(Reading_status { tone = Theme.Status_active; bold = true })
-            (Printf.sprintf "~ %s  ·  [%s] %s @r%d" scope_s u.after.category
+            (Printf.sprintf "~ %s  ·  [%s] %s %s" scope_s u.after.category
                (reading_relation_label ~lang u.relation)
-               u.at_rev);
+               (memory_change_time ~rev:u.at_rev ~at:u.at_unix));
           push_blank ();
           push_section ~rail:Theme.Status_critical
             (reading_say lang ~ko:"이전 (Before)" ~en:"Before");
@@ -1539,12 +1552,14 @@ let project_memory_reading_lines ~width ~lang ~now_unix entry =
           push_blank ();
           push_section ~rail:Theme.Status_ok
             (reading_say lang ~ko:"이후 (After)" ~en:"After");
+          Option.iter (fun source -> push_wrapped ~rail:Theme.Status_ok ~tone:(Reading_whisper { italic = false }) source)
+            (memory_successor_source ~lang u.after_source);
           push_wrapped ~rail:Theme.Status_ok ~tone:Reading_primary u.after.text
       | Keeper_retracted r ->
           push_wrapped ~rail:Theme.Status_critical
             ~tone:(Reading_status { tone = Theme.Status_critical; bold = true })
-            (Printf.sprintf "- %s  ·  [%s] @r%d  ·  %s" scope_s r.category
-               r.removed_at_rev r.removed_by);
+            (Printf.sprintf "- %s  ·  [%s] %s  ·  %s" scope_s r.category
+               (memory_change_time ~rev:r.removed_at_rev ~at:r.at_unix) (Option.value ~default:"" r.removed_by));
           (match r.drop_reason with
           | Some rs -> push_kv (reading_say lang ~ko:"사유" ~en:"Reason") rs
           | None -> ());
@@ -1553,7 +1568,7 @@ let project_memory_reading_lines ~width ~lang ~now_unix entry =
       | Keeper_invalidated inv ->
           push_wrapped ~rail:Theme.Status_attention
             ~tone:(Reading_status { tone = Theme.Status_attention; bold = true })
-            (Printf.sprintf "! %s  ·  @r%d" scope_s inv.at_rev);
+            (Printf.sprintf "! %s  ·  %s" scope_s (memory_change_time ~rev:inv.at_rev ~at:inv.at_unix));
           push_kv
             (reading_say lang ~ko:"유실된 전제" ~en:"Missing premises")
             (String.concat ", " inv.missing_premise_ids);
@@ -2186,7 +2201,7 @@ let filtered_memory_diff_items_for ~keeper_opt t =
           (fun (rf : Wire_knowledge.memory_retracted_fact) ->
             if
               memory_diff_matches_filter t
-                (rf.category ^ " " ^ rf.removed_by ^ " " ^ rf.text)
+                (rf.category ^ " " ^ Option.value ~default:"" rf.removed_by ^ " " ^ rf.text)
             then Some (Keeper_retracted rf)
             else None)
           retracted
@@ -2201,7 +2216,12 @@ let filtered_memory_diff_items_for ~keeper_opt t =
             else None)
           invalidated
       in
-      a @ u @ r @ inv
+      let order = function
+        | Keeper_added x -> x.Wire_knowledge.event_order
+        | Keeper_updated x -> x.event_order | Keeper_retracted x -> x.event_order
+        | Keeper_invalidated x -> x.event_order
+        | World_added _ | World_updated _ | World_retracted _ -> None in
+      List.stable_sort (fun x y -> Option.compare Int.compare (order x) (order y)) (a @ u @ r @ inv)
   | ( None
     , Some
         {

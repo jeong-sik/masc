@@ -139,6 +139,9 @@ type cause =
   (** Finite-storage log compaction baseline: historical removals were flushed
       to the cold archive sidecar and the live commit log now starts here. *)
 
+(** Read-side source identity for a committed change, shared by HTTP and MCP. *)
+val memory_source : cause -> Keeper_memory_os_current_types.source
+
 type commit =
   { seq : int
   ; at : float

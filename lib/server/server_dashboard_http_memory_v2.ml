@@ -610,34 +610,20 @@ type heat_stats =
   ; heat : retrieval_heat
   }
 
-let build_event_heat_table ~now ~keepers_dir ~keeper_id =
-  let counts = Hashtbl.create 64 in
-  let last_seen = Hashtbl.create 64 in
-  let unreadable = ref 0 in
-  let total_events = ref 0 in
-  (match Events.read ~keepers_dir ~keeper_id with
-   | Error _ -> ()
-   | Ok indexed_rows ->
-     List.iter
-       (fun (_idx, row_res) ->
-          match row_res with
-          | Error _ -> incr unreadable
-          | Ok (ev : Events.event) ->
-            incr total_events;
-            let prev_c =
-              match Hashtbl.find_opt counts ev.memory_id with
-              | Some n -> n
-              | None -> 0
-            in
-            Hashtbl.replace counts ev.memory_id (prev_c + 1);
-            let prev_ts = Hashtbl.find_opt last_seen ev.memory_id in
-            let next_ts =
-              match prev_ts with
-              | Some t when Float.compare t ev.recorded_at >= 0 -> t
-              | Some _ | None -> ev.recorded_at
-            in
-            Hashtbl.replace last_seen ev.memory_id next_ts)
-       indexed_rows);
+let build_event_heat_table ?(wanted = fun _ -> true) ~now ~keepers_dir ~keeper_id () =
+  let counts = Hashtbl.create 64 and last_seen = Hashtbl.create 64 in
+  let record (total, unreadable) = function
+    | Error _ -> total, unreadable + 1
+    | Ok (ev : Events.event) ->
+      if wanted ev.memory_id then (
+        let prior = Option.value ~default:0 (Hashtbl.find_opt counts ev.memory_id) in
+        Hashtbl.replace counts ev.memory_id (prior + 1);
+        let last = Option.value ~default:ev.recorded_at (Hashtbl.find_opt last_seen ev.memory_id) in
+        Hashtbl.replace last_seen ev.memory_id (max last ev.recorded_at));
+      total + 1, unreadable in
+  let total_events, unreadable = match Events.fold ~keepers_dir ~keeper_id ~init:(0, 0) ~f:record with
+    | Ok totals -> totals
+    | Error _ -> Hashtbl.clear counts; Hashtbl.clear last_seen; 0, 0 in
   let lookup memory_id =
     let retrieved_count =
       match Hashtbl.find_opt counts memory_id with
@@ -648,14 +634,13 @@ let build_event_heat_table ~now ~keepers_dir ~keeper_id =
     let heat = classify_retrieval_heat ~now ~retrieved_count ~last_retrieved_at in
     { retrieved_count; last_retrieved_at; heat }
   in
-  lookup, !total_events, !unreadable
+  lookup, total_events, unreadable
 ;;
 
-let fact_diff_entry_json ~heat_lookup (fact : Types.fact) =
+let fact_diff_entry_fields ~heat_lookup (fact : Types.fact) =
   let id = Types.memory_id fact in
   let hs = heat_lookup id in
-  `Assoc
-    [ "memory_id", `String id
+  [ "memory_id", `String id
     ; "category", `String (Types.category_to_string fact.category)
     ; "origin", `String (Types.origin_kind_to_string fact.origin.kind)
     ; "text", `String fact.claim
@@ -667,380 +652,148 @@ let fact_diff_entry_json ~heat_lookup (fact : Types.fact) =
     ]
 ;;
 
-let source_of_commit_cause (cause : Librarian_log.cause) : Cur.source =
-  let non_empty text fallback =
-    let trimmed = String.trim text in
-    if String.equal trimmed "" then fallback else trimmed
-  in
-  match cause with
-  | Librarian_log.Direct { write = Librarian_direct.Retract _; trace; _ } ->
-    { Cur.kind = Cur.Explicit_retract; trace_id = non_empty trace "explicit_retract" }
-  | Librarian_log.Direct
-      { write = Librarian_direct.(Remember _ | Supersede _); trace; _ } ->
-    { Cur.kind = Cur.Explicit_write; trace_id = non_empty trace "explicit_write" }
-  | Librarian_log.Read { trace; _ } ->
-    { Cur.kind = Cur.Librarian; trace_id = non_empty trace "librarian_read" }
-  | Librarian_log.Make_room { trace; _ } ->
-    { Cur.kind = Cur.Librarian; trace_id = non_empty trace "librarian_make_room" }
-  | Librarian_log.Molt_and_synthesize { trace; _ } ->
-    { Cur.kind = Cur.Librarian; trace_id = non_empty trace "librarian_molt" }
-  | Librarian_log.Adopt { by; _ } ->
-    { Cur.kind = Cur.Librarian; trace_id = non_empty by "adopt" }
-  | Librarian_log.Skip _ ->
-    { Cur.kind = Cur.Librarian; trace_id = "skip" }
-  | Librarian_log.Checkpoint _ ->
-    { Cur.kind = Cur.Librarian; trace_id = "checkpoint" }
-;;
-
 let keeper_diff_json ~now ~config ~keeper_id ~range =
-  let base_path = config.Workspace.base_path in
-  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let module Diff = Librarian_history_diff in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path in
+  let log_path = Librarian_log_store.path_for_keepers_dir ~keepers_dir ~keeper_id in
   match Cur.read_for_keepers_dir ~keepers_dir ~keeper_id with
-  | Error msg -> error_result Env.Store_unavailable ("snapshot read failed: " ^ msg)
-  | Ok snap_opt ->
-    let log_path = Librarian_log_store.path_for_keepers_dir ~keepers_dir ~keeper_id in
-    let max_diff_rows = 2000 in
-    (match
-       Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-         let tail_q :
-           (Librarian_log.commit, Librarian_log_store.undecodable) result Queue.t
-           =
-           Queue.create ()
-         in
-         let push_row row =
-           Queue.add row tail_q;
-           if Queue.length tail_q > max_diff_rows then ignore (Queue.take tail_q)
-         in
-         Librarian_log_store.fold log_path ~init:()
-           ~f:(fun () ({ line; _ } : Librarian_log_store.scanned) ->
-             match line with
-             | Ok (Librarian_log.Started _) -> ()
-             | Ok (Librarian_log.Committed commit) -> push_row (Ok commit)
-             | Error err -> push_row (Error err))
-         |> Result.map (fun () ->
-              Queue.fold (fun acc item -> item :: acc) [] tail_q |> List.rev))
-     with
-     | Error err ->
-       error_result
-         Env.Store_unavailable
-         ("commit log read failed: " ^ Private_jsonl_scan.error_to_string err)
-     | Ok journal_rows ->
-       let heat_lookup, total_events, unreadable_events =
-         build_event_heat_table ~now ~keepers_dir ~keeper_id
-       in
-       let current_facts =
-         match snap_opt with
-         | Some s -> s.facts
-         | None -> []
-       in
-       let current_rev =
-         match snap_opt with
-         | Some s -> s.revision
-         | None -> 0
-       in
-       let from_unix_opt, to_unix_opt, from_rev_opt, to_rev_opt, window_label =
-         match range with
-         | Range_window w ->
-           let span = window_seconds w in
-           Some (now -. span), Some now, None, None, Some (window_to_string w)
-         | Range_revs { from_rev; to_rev } ->
-           None, None, Some from_rev, Some (Option.value to_rev ~default:current_rev), None
-       in
-       let in_range_ts ts =
-         match from_unix_opt, to_unix_opt with
-         | Some lo, Some hi -> Float.compare ts lo >= 0 && Float.compare ts hi <= 0
-         | _ -> true
-       in
-       let in_range_rev rev =
-         match from_rev_opt, to_rev_opt with
-         | Some lo, Some hi -> rev >= lo && rev <= hi
-         | Some lo, None -> rev >= lo
-         | _ -> true
-       in
-       let added_map : (string, Types.fact * int) Hashtbl.t = Hashtbl.create 32 in
-       let removed_map :
-         (string, Types.fact * int * Cur.source * string option) Hashtbl.t
-         =
-         Hashtbl.create 32
-       in
-       let invalidated_rev = ref [] in
-       let rev_ticks_rev = ref [] in
-       let lineage_revisions_rev = ref [] in
-       let relation_by_pair : (string * string, string) Hashtbl.t = Hashtbl.create 32 in
-       let absorption_pairs_rev : (string * string * int) list ref = ref [] in
-       let undecodable_lines = ref 0 in
-       let min_rev_seen = ref None in
-       let max_rev_seen = ref None in
-       let min_committed_ts = ref None in
-       let max_committed_ts = ref None in
-       let record_rev r ts =
-         (match !min_rev_seen with
-          | None -> min_rev_seen := Some r
-          | Some prev -> if r < prev then min_rev_seen := Some r);
-         (match !max_rev_seen with
-          | None -> max_rev_seen := Some r
-          | Some prev -> if r > prev then max_rev_seen := Some r);
-         (match !min_committed_ts with
-          | None -> min_committed_ts := Some ts
-          | Some prev -> if Float.compare ts prev < 0 then min_committed_ts := Some ts);
-         match !max_committed_ts with
-         | None -> max_committed_ts := Some ts
-         | Some prev -> if Float.compare ts prev > 0 then max_committed_ts := Some ts
-       in
-       List.iter
-         (function
-           | Error _ -> incr undecodable_lines
-           | Ok (commit : Librarian_log.commit) ->
-             let recorded_at = commit.at in
-             let revision = commit.revision in
-             let source = source_of_commit_cause commit.cause in
-             let matches =
-               match range with
-               | Range_window _ -> in_range_ts recorded_at
-               | Range_revs _ -> in_range_rev revision
-             in
-             if matches
-             then (
-               record_rev revision recorded_at;
-               List.iter
-                 (fun fact ->
-                    let id = Types.memory_id fact in
-                    Hashtbl.replace added_map id (fact, revision))
-                 commit.effects.added;
-               let commit_invalidated = ref 0 in
-               let commit_rev_targets : (string, string list) Hashtbl.t = Hashtbl.create 4 in
-               List.iter
-                 (fun ((fact : Types.fact), (removal : Librarian_effects.removal)) ->
-                    let id = Types.memory_id fact in
-                    let reason =
-                      match removal with
-                      | Librarian_effects.Dropped { reason }
-                      | Librarian_effects.Retracted { reason; _ }
-                      | Librarian_effects.Molted { reason } -> Some reason
-                      | Librarian_effects.Support_lost { missing } ->
-                        incr commit_invalidated;
-                        invalidated_rev :=
-                          ({ Cur.fact; missing_premise_ids = missing }, revision)
-                          :: !invalidated_rev;
-                        None
-                      | Librarian_effects.Merged_into into_id ->
-                        Hashtbl.replace relation_by_pair (id, into_id) "program_absorption";
-                        absorption_pairs_rev := (id, into_id, revision) :: !absorption_pairs_rev;
-                        None
-                      | Librarian_effects.Revised_into into_id
-                      | Librarian_effects.Superseded_by into_id ->
-                        lineage_revisions_rev :=
-                          { Types.superseded = id; superseded_by = into_id }
-                          :: !lineage_revisions_rev;
-                        let prior =
-                          Option.value ~default:[] (Hashtbl.find_opt commit_rev_targets into_id)
-                        in
-                        Hashtbl.replace commit_rev_targets into_id (id :: prior);
-                        None
-                    in
-                    Hashtbl.replace removed_map id (fact, revision, source, reason))
-                 commit.effects.removed;
-               Hashtbl.iter
-                 (fun into_id old_ids ->
-                    let rel = if List.length old_ids > 1 then "program_revision" else "revision" in
-                    List.iter
-                      (fun old_id ->
-                         if not (Hashtbl.mem relation_by_pair (old_id, into_id))
-                         then Hashtbl.replace relation_by_pair (old_id, into_id) rel)
-                      old_ids)
-                 commit_rev_targets;
-               rev_ticks_rev
-               := `Assoc
-                    [ "rev", `Int revision
-                    ; "at_unix", `Float recorded_at
-                    ; "source", `String (Cur.source_kind_to_string source.kind)
-                    ; "added", `Int (List.length commit.effects.added)
-                    ; "removed", `Int (List.length commit.effects.removed)
-                    ; "invalidated", `Int !commit_invalidated
-                    ]
-                  :: !rev_ticks_rev))
-         journal_rows;
-       let lineage_revisions = List.rev !lineage_revisions_rev in
-       let failures_in_window = ref 0 in
-       let quarantines_in_window = ref 0 in
-       (* Pair explicit revision and absorption links into structured [updated] entries *)
-       let paired_old = Hashtbl.create 16 in
-       let paired_new = Hashtbl.create 16 in
-       let revision_updated_json =
-         List.filter_map
-           (fun (rev_link : Types.revision) ->
-              if Hashtbl.mem paired_old rev_link.superseded
-              then None
-              else (
-                match
-                  ( Hashtbl.find_opt removed_map rev_link.superseded
-                  , Hashtbl.find_opt added_map rev_link.superseded_by )
-                with
-                | Some (old_f, _old_rev, _src, _reason), Some (new_f, new_rev) ->
-                  Hashtbl.replace paired_old rev_link.superseded ();
-                  Hashtbl.replace paired_new rev_link.superseded_by ();
-                  let relation =
-                    match
-                      Hashtbl.find_opt relation_by_pair (rev_link.superseded, rev_link.superseded_by)
-                    with
-                    | Some rel -> rel
-                    | None -> "revision"
-                  in
-                  Some
-                    (`Assoc
-                      [ "relation", `String relation
-                      ; "at_rev", `Int new_rev
-                      ; "before", fact_diff_entry_json ~heat_lookup old_f
-                      ; "after", fact_diff_entry_json ~heat_lookup new_f
-                      ])
-                | _ -> None))
-           lineage_revisions
-       in
-       let current_facts_by_id = Hashtbl.create (max 16 (List.length current_facts)) in
-       List.iter (fun f -> Hashtbl.replace current_facts_by_id (Types.memory_id f) f) current_facts;
-       let absorption_updated_json =
-         !absorption_pairs_rev
-         |> List.rev
-         |> List.filter_map (fun (old_id, new_id, ev_rev) ->
-              if Hashtbl.mem paired_old old_id
-              then None
-              else (
-                match
-                  ( Hashtbl.find_opt removed_map old_id
-                  , match Hashtbl.find_opt added_map new_id with
-                    | Some (f, rev) -> Some (f, rev)
-                    | None ->
-                      Option.map (fun f -> f, ev_rev) (Hashtbl.find_opt current_facts_by_id new_id) )
-                with
-                | Some (old_f, _old_rev, _src, _reason), Some (new_f, new_rev) ->
-                  Hashtbl.replace paired_old old_id ();
-                  Hashtbl.replace paired_new new_id ();
-                  Some
-                    (`Assoc
-                      [ "relation", `String "program_absorption"
-                      ; "at_rev", `Int new_rev
-                      ; "before", fact_diff_entry_json ~heat_lookup old_f
-                      ; "after", fact_diff_entry_json ~heat_lookup new_f
-                      ])
-                | _ -> None))
-       in
-       let updated_json = revision_updated_json @ absorption_updated_json in
-       let added_json =
-         Hashtbl.fold
-           (fun id (fact, rev) acc ->
-              if Hashtbl.mem paired_new id
-              then acc
-              else (rev, id, fact) :: acc)
-           added_map
-           []
-         |> List.sort (fun (ra, ia, _) (rb, ib, _) ->
-              let c = Int.compare rb ra in
-              if c <> 0 then c else String.compare ia ib)
-         |> List.map (fun (rev, _id, fact) ->
-              match fact_diff_entry_json ~heat_lookup fact with
-              | `Assoc fields -> `Assoc (("added_at_rev", `Int rev) :: fields)
-              | other -> other)
-       in
-       let retracted_json =
-         Hashtbl.fold
-           (fun id (fact, rev, src, reason) acc ->
-              if Hashtbl.mem paired_old id
-              then acc
-              else (rev, id, fact, src, reason) :: acc)
-           removed_map
-           []
-         |> List.sort (fun (ra, ia, _, _, _) (rb, ib, _, _, _) ->
-              let c = Int.compare rb ra in
-              if c <> 0 then c else String.compare ia ib)
-         |> List.map (fun (rev, id, (fact : Types.fact), (src : Cur.source), reason) ->
-              `Assoc
-                [ "memory_id", `String id
-                ; "category", `String (Types.category_to_string fact.Types.category)
-                ; "text", `String fact.Types.claim
-                ; "removed_at_rev", `Int rev
-                ; "removed_by", `String (Cur.source_kind_to_string src.kind)
-                ; "drop_reason", Json_util.string_opt_to_json reason
-                ])
-       in
-       let invalidated_json =
-         !invalidated_rev
-         |> List.rev
-         |> List.map (fun ((inv : Cur.support_invalidation), rev) ->
-              `Assoc
-                [ "memory_id", `String (Types.memory_id inv.fact)
-                ; "text", `String inv.fact.claim
-                ; "at_rev", `Int rev
-                ; ( "missing_premise_ids"
-                  , `List (List.map (fun s -> `String s) inv.missing_premise_ids) )
-                ])
-       in
-       (* Compute retrieval heat totals across current facts *)
-       let hot = ref 0 in
-       let warm = ref 0 in
-       let cold = ref 0 in
-       let never = ref 0 in
-       List.iter
-         (fun fact ->
-            let hs = heat_lookup (Types.memory_id fact) in
-            match hs.heat with
-            | Heat_hot -> incr hot
-            | Heat_warm -> incr warm
-            | Heat_cold -> incr cold
-            | Heat_never -> incr never)
-         current_facts;
-       let writer_status = Keeper_memory_writer_health.keeper_rows ~config keeper_id in
-       let data =
-         `Assoc
-           [ ( "scope"
-             , `Assoc [ "kind", `String "keeper"; "keeper", `String keeper_id ] )
-           ; ( "range"
-             , `Assoc
-                 [ "window", Json_util.string_opt_to_json window_label
-                 ; ( "from_rev"
-                   , Json_util.int_opt_to_json
-                       (match from_rev_opt with
-                        | Some r -> Some r
-                        | None -> !min_rev_seen) )
-                 ; ( "to_rev"
-                   , Json_util.int_opt_to_json
-                       (match to_rev_opt with
-                        | Some r -> Some r
-                        | None ->
-                          (match !max_rev_seen with
-                           | Some _ as m -> m
-                           | None -> Some current_rev)) )
-                 ; "from_unix", Json_util.float_opt_to_json from_unix_opt
-                 ; "to_unix", Json_util.float_opt_to_json to_unix_opt
-                 ] )
-           ; ( "counts"
-             , `Assoc
-                 [ "total_facts_now", `Int (List.length current_facts)
-                 ; "added", `Int (List.length added_json)
-                 ; "updated", `Int (List.length updated_json)
-                 ; "retracted", `Int (List.length retracted_json)
-                 ; "invalidated", `Int (List.length invalidated_json)
-                 ; "journal_failures_in_window", `Int !failures_in_window
-                 ; "journal_quarantines_in_window", `Int !quarantines_in_window
-                 ; "undecodable_journal_lines", `Int !undecodable_lines
-                 ] )
-           ; ( "retrieval_heat"
-             , `Assoc
-                 [ "hot", `Int !hot
-                 ; "warm", `Int !warm
-                 ; "cold", `Int !cold
-                 ; "never_retrieved", `Int !never
-                 ; "total_events", `Int total_events
-                 ; "unreadable_event_lines", `Int unreadable_events
-                 ] )
-           ; "revisions", `List (List.rev !rev_ticks_rev)
-           ; "added", `List added_json
-           ; "updated", `List updated_json
-           ; "retracted", `List retracted_json
-           ; "invalidated", `List invalidated_json
-           ; "writer_status", writer_status
-           ]
-       in
-       Ok (Env.ok ~now data))
+  | Error detail -> error_result Env.Store_unavailable ("snapshot read failed: " ^ detail)
+  | Ok snapshot ->
+    let current = Option.fold ~none:[] ~some:(fun (s : Cur.t) -> s.facts) snapshot in
+    let revision = Option.fold ~none:0 ~some:(fun (s : Cur.t) -> s.revision) snapshot in
+    let filter, window, lo_time, hi_time, from_rev =
+      match range with
+      | Range_window w ->
+        let lo = now -. window_seconds w in
+        Diff.Time (lo, now), Some (window_to_string w), Some lo, Some now, None
+      | Range_revs { from_rev; to_rev } ->
+        Diff.Revisions (from_rev, Option.value ~default:max_int to_rev), None, None, None, Some from_rev in
+    let max_bytes = Keeper_memory_os_render.hard_backstop_bytes
+        ~maximum_bytes:(Env_config.KeeperMemoryOs.facts_max_bytes ()) in
+    match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+      Librarian_history_window.read ~range:filter ~max_bytes log_path) with
+    | Error error -> error_result Env.Store_unavailable
+                       ("memory history read failed: " ^ Private_jsonl_scan.error_to_string error)
+    | Ok history ->
+      let to_rev = match range with
+        | Range_window _ -> None
+        | Range_revs { to_rev = Some rev; _ } -> Some rev
+        | Range_revs { to_rev = None; _ } -> Some (List.fold_left (fun hi (c : Librarian_memory_change.t) ->
+            max hi c.revision) revision history.changes) in
+      let diff = Diff.project_window ~range:filter ~current ~revision history in
+      let visible = Hashtbl.create 64 in
+      let remember fact = Hashtbl.replace visible (Types.memory_id fact) () in
+      List.iter remember current;
+      List.iter (function
+        | _, Diff.Added f -> remember f
+        | _, Updated { before; after; _ } -> remember before; remember after
+        | _, (Removed _ | Successor_unavailable _) -> ()) diff.events;
+      let heat_lookup, total_events, unreadable_events =
+        build_event_heat_table ~wanted:(Hashtbl.mem visible) ~now ~keepers_dir ~keeper_id () in
+      let fact_fields = fact_diff_entry_fields ~heat_lookup in
+      let int_opt = Json_util.int_opt_to_json in
+      let relation = function
+        | Diff.Revision -> "revision" | Program_revision -> "program_revision"
+        | Program_absorption -> "program_absorption" in
+      let added = ref [] and updated = ref [] and retracted = ref [] and invalidated = ref [] and unresolved = ref [] in
+      let rows_left = ref Librarian_archive.max_detailed_rows and bytes_left = ref max_bytes in
+      let output_rows = ref diff.events_limited and output_bytes = ref false in
+      let admit rows =
+        let count = List.length rows in
+        if count > !rows_left then (output_rows := true; false)
+        else
+          let bytes = List.fold_left (fun n (_, row) -> n + String.length (Yojson.Safe.to_string row) + 1) 0 rows in
+          if bytes > !bytes_left then (output_bytes := true; false)
+          else (bytes_left := !bytes_left - bytes; rows_left := !rows_left - count; true) in
+      let ordered = List.mapi (fun order event -> order, event) diff.events in
+      List.iter (fun (order, ((p : Diff.position), event)) ->
+        let group = ref [] in
+        let push target fields =
+          group := (target, `Assoc (("order", `Int order) :: ("seq", int_opt p.seq) ::
+                             ("at_unix", `Float p.at) :: fields)) :: !group
+        in
+        (match event with
+        | Diff.Added f ->
+          push added (("added_at_rev", int_opt p.revision) :: fact_fields f)
+        | Updated { before; after; relation = r; body_source } ->
+          let provenance = match body_source with
+            | Diff.Same_commit -> "same_commit" | Held_before -> "held_before"
+            | Current_snapshot -> "current_snapshot" | Archived_fact -> "archived_fact" in
+          push updated [ "relation", `String (relation r); "at_rev", int_opt p.revision
+                       ; "before", `Assoc (fact_fields before); "after", `Assoc (fact_fields after); "after_source", `String provenance ]
+        | Successor_unavailable { before; successor_id; relation = r } ->
+          push unresolved [ "before_id", `String (Types.memory_id before); "after_id", `String successor_id
+                          ; "relation", `String (relation r); "at_rev", int_opt p.revision ]
+        | Removed { fact; reason; missing } ->
+          push retracted [ "memory_id", `String (Types.memory_id fact); "category", `String (Types.category_to_string fact.category)
+                         ; "text", `String fact.claim; "removed_at_rev", int_opt p.revision
+                         ; "removed_by", Json_util.string_opt_to_json (Option.map (fun (s : Cur.source) -> Cur.source_kind_to_string s.kind) p.source)
+                         ; "drop_reason", Json_util.string_opt_to_json reason ];
+          Option.iter (fun ids ->
+            push invalidated [ "memory_id", `String (Types.memory_id fact); "text", `String fact.claim
+                             ; "at_rev", int_opt p.revision; "missing_premise_ids", `List (List.map (fun s -> `String s) ids) ]) missing);
+        if admit !group then List.iter (fun (target, row) -> target := row :: !target) !group)
+        (List.rev ordered);
+      let ticks = List.fold_left (fun ticks (c : Librarian_memory_change.t) ->
+          let invalidated = List.fold_left (fun n (_, what) ->
+            match what with Librarian_effects.Support_lost _ -> n + 1
+            | Dropped _ | Molted _ | Merged_into _ | Revised_into _ | Superseded_by _ | Retracted _ -> n) 0 c.removed in
+          let row = `Assoc [ "seq", `Int c.seq; "rev", `Int c.revision; "at_unix", `Float c.at
+                 ; "source", `String (Cur.source_kind_to_string c.source.kind)
+                 ; "added", `Int (List.length c.added); "removed", `Int (List.length c.removed)
+                 ; "invalidated", `Int invalidated ] in
+          if admit [(), row] then row :: ticks else ticks) [] (List.rev diff.ticks) in
+      let hot = ref 0 and warm = ref 0 and cold = ref 0 and never = ref 0 in
+      List.iter (fun fact -> match (heat_lookup (Types.memory_id fact)).heat with
+        | Heat_hot -> incr hot | Heat_warm -> incr warm | Heat_cold -> incr cold | Heat_never -> incr never) current;
+      let first_rev = function [] -> None | (c : Librarian_memory_change.t) :: _ -> Some c.revision in
+      let count rows = `Int (List.length !rows) and body rows = `List !rows in
+      let unplaced =
+        match filter, history.changes with
+        | Diff.Time _, _ -> 0
+        | Revisions (lo, _), _ when Option.fold ~none:false
+            ~some:(fun (f : Librarian_archive.folded) -> lo > f.max_revision) history.folded -> 0
+        | Revisions (lo, _), (first : Librarian_memory_change.t) :: _ when lo > first.revision -> 0
+        | Revisions _, _ -> history.unsequenced_count in
+      let retention_applies = Option.fold ~none:false ~some:(Librarian_history_window.intersects filter) history.folded in
+      let retention = match history.folded with None -> `Null | Some f ->
+        `Assoc ["through_seq", `Int f.through_seq; "min_revision", `Int f.min_revision;
+                "max_revision", `Int f.max_revision; "min_at", `Float f.min_at; "max_at", `Float f.max_at] in
+      let partial = history.input_limited || !output_rows || !output_bytes || retention_applies || history.conflicting > 0 || history.unreadable > 0 || diff.gaps <> [] || diff.snapshot_ahead || diff.snapshot_behind
+                    || unplaced > 0 || diff.unsequenced_in_range > 0 || !unresolved <> [] in
+      Ok (Env.ok ~now
+        (`Assoc
+           [ "scope", `Assoc [ "kind", `String "keeper"; "keeper", `String keeper_id ]
+           ; "range", `Assoc [ "window", Json_util.string_opt_to_json window
+                             ; "from_rev", int_opt (match from_rev with Some _ -> from_rev | None -> first_rev diff.ticks)
+                             ; "to_rev", int_opt (match to_rev with Some _ -> to_rev | None -> first_rev (List.rev diff.ticks))
+                             ; "from_unix", Json_util.float_opt_to_json lo_time; "to_unix", Json_util.float_opt_to_json hi_time ]
+           ; "coverage", `Assoc [ "status", `String (if partial then "partial" else "complete")
+                                ; "folded_detail", retention; "retention_applies", `Bool retention_applies
+                                ; "input_limited", `Bool history.input_limited; "output_limited", `Bool (!output_rows || !output_bytes)
+                                ; "limit_causes", `List (List.filter_map (fun (hit, name) ->
+                                  if hit then Some (`String name) else None)
+                                  [ history.live_cut.by_rows, "live_rows"; history.live_cut.by_bytes, "live_bytes";
+                                    history.archive_cut.by_rows, "archive_rows"; history.archive_cut.by_bytes, "archive_bytes";
+                                    !output_rows, "result_rows"; !output_bytes, "result_bytes" ])
+                                ; "row_limit", `Int Librarian_archive.max_detailed_rows; "byte_limit", `Int max_bytes
+                                ; "conflicting_sequences", `Int history.conflicting
+                                ; "unsequenced_in_window", `Int diff.unsequenced_in_range
+                                ; "unplaced_in_revision_range", `Int unplaced
+                                ; "missing_sequences", `List (List.map (fun (g : Diff.gap) ->
+                                      `Assoc [ "first", `Int g.first_seq; "last", `Int g.last_seq ]) diff.gaps)
+                                ; "snapshot_ahead", `Bool diff.snapshot_ahead; "snapshot_behind", `Bool diff.snapshot_behind
+                                ; "unreadable_lines", `Int history.unreadable
+                                ; "unresolved_successors", count unresolved ]
+           ; "counts", `Assoc [ "total_facts_now", `Int (List.length current); "added", count added; "updated", count updated
+                              ; "retracted", count retracted; "invalidated", count invalidated
+                              ; "journal_failures_in_window", `Int 0; "journal_quarantines_in_window", `Int 0
+                              ; "undecodable_journal_lines", `Int (Librarian_history_window.undecodable_rows history) ]
+           ; "retrieval_heat", `Assoc [ "hot", `Int !hot; "warm", `Int !warm; "cold", `Int !cold; "never_retrieved", `Int !never
+                                      ; "total_events", `Int total_events; "unreadable_event_lines", `Int unreadable_events ]
+           ; "revisions", `List ticks; "added", body added; "updated", body updated; "retracted", body retracted
+           ; "invalidated", body invalidated; "unresolved_links", body unresolved
+           ; "writer_status", Keeper_memory_writer_health.keeper_rows ~config keeper_id ]))
 ;;
 
 let parse_rfc3339_unix raw =
@@ -1137,7 +890,7 @@ let fleet_retrieval_heat_json ~now ~keepers_dir =
   let unreadable_events = ref 0 in
   List.iter
     (fun kid ->
-       let lookup, ev_c, unr_c = build_event_heat_table ~now ~keepers_dir ~keeper_id:kid in
+       let lookup, ev_c, unr_c = build_event_heat_table ~now ~keepers_dir ~keeper_id:kid () in
        total_events := !total_events + ev_c;
        unreadable_events := !unreadable_events + unr_c;
        match Cur.read_for_keepers_dir ~keepers_dir ~keeper_id:kid with
@@ -1570,7 +1323,7 @@ let world_diff_json ~now ~config ~range =
     let unreadable_events = ref 0 in
     List.iter
       (fun kid ->
-         let lookup, ev_c, unr_c = build_event_heat_table ~now ~keepers_dir ~keeper_id:kid in
+         let lookup, ev_c, unr_c = build_event_heat_table ~now ~keepers_dir ~keeper_id:kid () in
          total_events := !total_events + ev_c;
          unreadable_events := !unreadable_events + unr_c;
          match Cur.read_for_keepers_dir ~keepers_dir ~keeper_id:kid with

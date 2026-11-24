@@ -249,6 +249,20 @@ let test_unreadable_line_stays_in_the_list () =
   check int "good rows still read" 2 (List.length (events_only rows))
 ;;
 
+let test_streaming_fold_matches_read () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let keeper_id = "heat" in
+  let path = Events.path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let good = Yojson.Safe.to_string (Events.event_to_json (retrieved ~at:1. "scope")) in
+  List.iter (fun suffix ->
+    Out_channel.with_open_bin path (fun oc -> output_string oc (good ^ "\n\nnot json\n{}\n" ^ suffix));
+    let listed = read_ok ~keepers_dir ~keeper_id |> List.map snd in
+    let folded = match Events.fold ~keepers_dir ~keeper_id ~init:[] ~f:(fun acc row -> row :: acc) with
+      | Error err -> fail (Events.file_read_error_to_string err) | Ok rev -> List.rev rev in
+    check bool "streaming heat has the same valid, malformed, blank, and final rows" true (listed = folded))
+    [good ^ "\n"; good; "broken"; "   "; ""]
+;;
+
 let test_append_refuses_what_read_would_refuse () =
   with_temp_keepers @@ fun keepers_dir ->
   let keeper_id = "keeper" in
@@ -448,6 +462,7 @@ let () =
         ] )
     ; ( "sidecar"
       , [ test_case "append then read in order" `Quick test_append_then_read_in_order
+        ; test_case "streaming fold preserves the complete lifetime observation" `Quick test_streaming_fold_matches_read
         ; test_case "append_all writes every valid event in order" `Quick
             test_append_all_writes_every_valid_event_in_order
         ; test_case "an append cuts a torn tail first" `Quick test_append_cuts_a_torn_tail_first

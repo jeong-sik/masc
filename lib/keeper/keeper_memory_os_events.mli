@@ -96,6 +96,12 @@ val read :
   keeper_id:string ->
   ((int * (event, read_error) result) list, file_read_error) result
 
+val fold :
+  keepers_dir:string -> keeper_id:string -> init:'a ->
+  f:('a -> (event, read_error) result -> 'a) -> ('a, file_read_error) result
+(** Stream the same nonblank rows as {!read}, including its final unterminated
+    row. The callback runs in the file worker. *)
+
 (** {1 Projection} *)
 
 type summary =

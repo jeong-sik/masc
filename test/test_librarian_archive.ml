@@ -188,6 +188,355 @@ let test_lines_that_do_not_decode_are_counted () =
     (archive_text place ~current:(memory state))
 ;;
 
+let test_memory_diff_through_compaction () =
+  let module Diff = Masc.Librarian_history_diff in
+  let place = started_place () in
+  let state = after_two_removals place in
+  let current = memory state in
+  let store = match state.state with
+    | Idle { store; _ } -> store
+    | Asking _ | Resting _ | Refused_at_bottom _ | Stopped _ -> fail "fixture did not settle" in
+  let revision = (Store.memory store).revision in
+  let path = log_path place in
+  let read () = match Archive.history path with
+    | Ok h -> h | Error e -> fail (Masc.Private_jsonl_scan.error_to_string e) in
+  let project range = Diff.project ~range ~current ~revision (read ()) in
+  let time = Diff.Time (200., 205.) in
+  let before = project time in
+  let links d = List.filter_map (function
+    | (p : Diff.position), Diff.Updated u -> Some (p.seq, p.revision, p.at, Types.memory_id u.before,
+                                                    Types.memory_id u.after, u.body_source)
+    | _, (Diff.Removed _ | Diff.Added _ | Diff.Successor_unavailable _) -> None) d.Diff.events in
+  let clean_history = read () in
+  let initial_links = links before in
+  check int "live fixture has a direct replacement" 1 (List.length initial_links);
+  let raw = In_channel.with_open_bin path In_channel.input_all in
+  (match Store.compact_log store ~at:206. with Ok _ -> () | Error _ -> fail "compact_log failed");
+  let cold = project time in
+  check bool "same ordered events and source coordinates before and after molt" true
+    (before.events = cold.events && before.ticks = cold.ticks && cold.gaps = []);
+  let checkpoint = In_channel.with_open_bin path In_channel.input_all in
+  Out_channel.with_open_bin path (fun oc -> output_string oc raw);
+  check bool "publish-before-rewrite overlap counts each sequence once" true ((project time).events = before.events);
+  Out_channel.with_open_bin path (fun oc -> output_string oc checkpoint);
+  let last = match Log_store.read_tail path with
+    | Ok (Written { last; _ }) -> last
+    | Ok Nothing_written | Error _ -> fail "missing fixture tail" in
+  check bool "stale checkpoint cannot replace a longer live log" true
+    (match Log_store.rewrite_compacted ~path ~at_end:0 last with
+     | Error (End_moved _) -> true
+     | Ok _ | Error (Directory_unavailable _ | Write_failed _) -> false);
+  check string "newer log bytes survive the refused rewrite" checkpoint (In_channel.with_open_bin path In_channel.input_all);
+  let archive_path = Log_store.archive_path_of_log_path path in
+  let c = List.find (fun (c : Masc.Librarian_memory_change.t) -> c.at = 205.) (read ()).changes in
+  let old, removal = List.hd c.removed in
+  let c2 = { c with seq = c.seq + 1; revision = c.revision + 1; at = c.at } in
+  let repeated = { (read ()) with unsequenced = []; changes = [c; c2] } in
+  let repeat = Diff.project ~range:time ~current ~revision repeated in
+  check bool "two committed occurrences may have the same IDs and the same time" true
+    (List.map (fun (seq, _, _, _, _, _) -> seq) (links repeat) = [ Some c.seq; Some c2.seq ]);
+  let unknown = id_of_claim "unretained successor" in
+  let missing = { c with added = []; removed = [old, Superseded_by unknown] } in
+  let incomplete = Diff.project ~range:time ~current ~revision { repeated with changes = [missing] } in
+  check bool "missing successor body retains the proved direct ID" true
+    (List.exists (function _, Diff.Successor_unavailable { successor_id; _ } -> successor_id = unknown
+                 | _, (Diff.Removed _ | Diff.Added _ | Diff.Updated _) -> false) incomplete.events);
+  (* The historical sidecar has no source or revision. Its direct target ID
+     and time are attested even when the later log only contains a checkpoint. *)
+  Out_channel.with_open_bin archive_path (fun oc ->
+    output_string oc (Yojson.Safe.to_string (`Assoc [ "fact", Types.fact_to_json old
+      ; "removal", Masc.Librarian_log_codec.removal_to_json removal; "at", `Float c.at; "line_at", `Int c.line_at ]) ^ "\n"));
+  let historical = project time in
+  check bool "legacy link has event time and current successor with unknown revision" true
+    (links historical = [None, None, 205., Types.memory_id old, id_of_claim new_owner, Diff.Current_snapshot]);
+  check bool "missing original sequences visible" true (historical.gaps <> []);
+  check bool "revision filter never guesses a revision for an old timestamp" true
+    ((project (Diff.Revisions (c.revision, c.revision))).events = []);
+  Out_channel.with_open_gen [ Open_wronly; Open_append; Open_binary ] 0o600 archive_path
+    (fun oc -> output_string oc "damaged\n");
+  check int "partial archive reports unreadable rows" 1 (read ()).unreadable;
+  Out_channel.with_open_gen [ Open_wronly; Open_append; Open_binary ] 0o600 archive_path
+    (fun oc -> output_string oc "{");
+  check int "an incomplete cold record counts separately" 2 (read ()).unreadable;
+  let checkpoint_at at =
+    let store = match Store.boot ~memory_dir:place.memory_dir ~turns_dir:place.turns_dir ~keeper_id ~at with
+      | Ok store -> store | Error _ -> fail "could not reopen the valid checkpoint tail" in
+    match Store.compact_log store ~at with
+    | Ok _ -> () | Error _ -> fail "unreadable historical data blocked the next checkpoint" in
+  checkpoint_at 207.;
+  check int "a successful checkpoint keeps both damaged cold records visible" 2 (read ()).unreadable;
+  let variant = { c with revision = c.revision + 1 } in
+  Out_channel.with_open_gen [ Open_wronly; Open_append; Open_binary ] 0o600 archive_path
+    (fun oc -> List.iter (fun change ->
+      output_string oc (Yojson.Safe.to_string (Masc.Librarian_memory_change.to_json change) ^ "\n")) [c; variant]);
+  let undecodable = "\255\000broken row" in
+  let damaged_live = undecodable ^ "\n" ^ In_channel.with_open_bin path In_channel.input_all in
+  Out_channel.with_open_bin path (fun oc -> output_string oc damaged_live);
+  checkpoint_at 208.;
+  let renewed = In_channel.with_open_bin path In_channel.input_all in
+  check int "live history returns to one checkpoint" 1 (List.length (String.split_on_char '\n' renewed) - 1);
+  check int "two cold errors, one historical live error and one conflicting sequence survive" 4 (read ()).unreadable;
+  Out_channel.with_open_bin path (fun oc -> output_string oc damaged_live);
+  check int "archive publication overlapping the former damaged live file counts each issue once" 4 (read ()).unreadable;
+  Out_channel.with_open_bin path (fun oc -> output_string oc renewed);
+  checkpoint_at 209.;
+  check int "another checkpoint keeps the same unresolved count" 4 (read ()).unreadable;
+  check bool "neither conflicting generation becomes a fact" true
+    (List.for_all (fun (change : Masc.Librarian_memory_change.t) -> change.seq <> c.seq) (read ()).changes);
+  let rows = In_channel.with_open_bin archive_path In_channel.input_lines |> List.map Yojson.Safe.from_string in
+  let opaque = List.filter_map (function
+    | `List [`String "librarian.unreadable.v1"; `String source; `Int _; `Int _; `String bytes] ->
+      Some (source, Base64.decode_exn bytes)
+    | _ -> None) rows |> List.sort compare in
+  check (list (pair string string)) "raw bytes and the cold fragment are recoverable"
+    ["archive", "damaged"; "archive_fragment", "{"; "live", undecodable] opaque;
+  let versions = List.filter_map (fun row ->
+    match Masc.Librarian_memory_change.of_json row with
+    | Ok change when change.seq = c.seq -> Some change.revision | Ok _ | Error _ -> None) rows in
+  check (list int) "both original sequence versions remain recoverable"
+    [c.revision; variant.revision] (List.sort Int.compare versions);
+  let max_rows = Archive.max_detailed_rows in
+  let recent_seq = max_rows + 3 in
+  let trace = List.init recent_seq (fun i ->
+    let seq = i + 1 in
+    let added, removed = match seq with
+      | 1 -> [], [old, removal]
+      | 2 -> [old], []
+      | 3 -> [], [old, Effects.Dropped { reason = "final historical removal" }]
+      | n when n = recent_seq -> c.added, c.removed
+      | _ -> [old], [] in
+    { c with seq; revision = seq; at = Float.of_int seq; added; removed }) in
+  let large = Filename.concat place.memory_dir "retention.memory-log.jsonl" in
+  let large_archive = Log_store.archive_path_of_log_path large in
+  let save h = match Archive.write_history ~archive_path:large_archive h with
+    | Ok () -> () | Error msg -> fail msg in
+  let again () = match Archive.history large with
+    | Ok h -> h | Error e -> fail (Masc.Private_jsonl_scan.error_to_string e) in
+  save { clean_history with changes = trace; unsequenced = [] };
+  let kept = again () in
+  check int "bounded detailed commit count" max_rows (List.length kept.changes);
+  check bool "older chronology folds to one final removal, including a re-add" true
+    (match kept.unsequenced, kept.folded with
+     | [e], Some f -> e.removal = Effects.Dropped { reason = "final historical removal" }
+                       && f.through_seq = 3 && f.min_revision = 1 && f.max_revision = 3
+                       && f.min_at = 1. && f.max_at = 3.
+     | _ -> false);
+  save kept;
+  check bool "checkpointing an already folded history is idempotent" true
+    ((again ()).folded = kept.folded && (again ()).unsequenced = kept.unsequenced);
+  let module Window = Masc.Librarian_history_window in
+  let at_last = Window.Revisions (recent_seq, recent_seq) in
+  let read_range ?(max_bytes = 4 * 1024 * 1024) r =
+    match Window.read ~range:r ~max_bytes large with
+    | Ok w -> w | Error e -> fail (Masc.Private_jsonl_scan.error_to_string e) in
+  let recent = read_range at_last in
+  let w = Diff.project_window ~range:at_last ~current ~revision:recent_seq recent in
+  check bool "omitting an older folded removal leaves recent input complete" true
+    (not recent.input_limited && not recent.details_limited && not recent.archive_cut.by_rows
+     && recent.unsequenced_count = 1 && recent.unreadable = 0 && recent.conflicting = 0);
+  check bool "first retained revision also follows the fold without a read limit" true
+    (not (read_range (Window.Revisions (4, 4))).input_limited);
+  check bool "complete sequenced input still reports an ahead snapshot" true
+    (Diff.project_window ~range:at_last ~current ~revision:(recent_seq + 1) recent).snapshot_ahead;
+  check bool "query materializes only needed out-of-range bodies" true
+    (List.for_all (fun (q : Masc.Librarian_memory_change.t) ->
+       q.seq = recent_seq || q.added = [] && q.removed = []) recent.changes);
+  check bool "recent query keeps the exact replacement and tick" true
+    (List.length (links w) = 1 && List.map (fun (q : Masc.Librarian_memory_change.t) -> q.seq) w.ticks = [recent_seq]);
+  check bool "retention intersects the folded revision and time but excludes a recent query" true
+    (match recent.folded with
+     | Some b -> Window.intersects (Window.Revisions (1, 1)) b
+                 && Window.intersects (Window.Time (3., 3.)) b && not (Window.intersects at_last b)
+     | None -> false);
+  let old = read_range (Window.Time (3., 3.)) in
+  check bool "omitted removal in the requested time range honestly limits coverage" true
+    (old.input_limited && old.archive_cut.by_rows && not old.details_limited);
+  let gapped = List.map (fun (c : Masc.Librarian_memory_change.t) ->
+    if c.seq = recent_seq then { c with seq = c.seq + 1 } else c) kept.changes in
+  save { kept with changes = gapped };
+  let gapped = Diff.project_window ~range:at_last ~current ~revision:recent_seq (read_range at_last) in
+  check (list (pair int int)) "older prefix omission does not hide a real sequence gap"
+    [recent_seq, recent_seq]
+    (List.map (fun (gap : Diff.gap) -> gap.first_seq, gap.last_seq) gapped.gaps);
+  save kept;
+  let short = read_range ~max_bytes:1024 at_last in
+  check bool "byte-bounded tail reports actual omitted input" true
+    (short.input_limited && short.details_limited && short.archive_cut.by_bytes
+     && List.length short.changes < max_rows);
+  check bool "omitted byte prefix never invents a count of missing sequences" true
+    ((Diff.project_window ~range:at_last ~current ~revision:recent_seq short).gaps = []);
+  let disputed = { c with seq = recent_seq + 1 } in
+  Out_channel.with_open_gen [Open_wronly; Open_append; Open_binary] 0o600 large_archive (fun oc ->
+    output_string oc "damaged\n";
+    List.iter (fun change ->
+      output_string oc (Yojson.Safe.to_string (Masc.Librarian_memory_change.to_json change) ^ "\n"))
+      [disputed; { disputed with revision = disputed.revision + 1 }]);
+  save (again ());
+  let damaged = read_range at_last in
+  check bool "bounded detail read reports archived damage and conflict outside its row window" true
+    (not damaged.input_limited && damaged.unreadable = 1 && damaged.conflicting = 1);
+  check int "publishing the summary preserves the original damage and conflict evidence" 2 (again ()).unreadable;
+  let live_damage = "different damage in the live log\n" in
+  Out_channel.with_open_bin large (fun oc -> output_string oc live_damage);
+  let separate = read_range at_last in
+  check int "new live damage adds to clipped published cold damage" 2 separate.unreadable;
+  check int "the bounded and full readers count the same independent evidence"
+    (again ()).unreadable (Window.undecodable_rows separate);
+  save (again ());
+  let overlap = read_range at_last in
+  check int "a still-visible live row may already be counted by the clipped publication" 2 overlap.unreadable;
+  check bool "possible overlap between live and clipped archived damage is partial" true overlap.input_limited;
+  let live_checkpoint = match last with
+    | Masc.Librarian_log.Committed commit ->
+      Masc.Librarian_log.Committed { commit with seq = recent_seq + 2 }
+    | Masc.Librarian_log.Started _ -> fail "expected a committed baseline" in
+  (match Log_store.rewrite_compacted ~path:large ~at_end:(String.length live_damage) live_checkpoint with
+   | Ok _ -> () | Error _ -> fail "could not install the new baseline");
+  Out_channel.with_open_gen [Open_wronly; Open_append; Open_binary] 0o600 large
+    (fun oc -> output_string oc "damage after the new baseline\n");
+  let newer = read_range at_last in
+  check int "live damage after a newer checkpoint is separate from clipped live-origin evidence"
+    3 newer.unreadable;
+  check int "later distinct evidence agrees with the full reader"
+    (again ()).unreadable (Window.undecodable_rows newer);
+  Out_channel.with_open_bin large ignore;
+  let legacy_footer = `List [`String "librarian.folded.v1"; `Int 3; `Int 1; `Int 3; `Float 1.; `Float 3.] in
+  let rows = In_channel.with_open_bin large_archive In_channel.input_lines in
+  let footer, detail, prefix = match List.rev rows with
+    | footer :: detail :: prefix -> footer, detail, List.rev prefix
+    | _ -> fail "expected a footer and detailed history" in
+  let write_rows rows = Out_channel.with_open_bin large_archive (fun oc ->
+    List.iter (fun row -> output_string oc row; output_char oc '\n') rows) in
+  write_rows (prefix @ ["damaged detail slot"; footer]);
+  let malformed = read_range at_last in
+  check bool "a footer cannot certify a malformed detailed slot" true
+    (malformed.details_limited && malformed.input_limited && malformed.unreadable > 0);
+  write_rows (prefix @ [footer; detail]);
+  check bool "a misplaced footer cannot certify coverage" true (read_range at_last).details_limited;
+  let impossible_footer = match Yojson.Safe.from_string footer with
+    | `List (tag :: detail :: unsequenced :: time :: _ :: rest) ->
+      Yojson.Safe.to_string (`List (tag :: detail :: unsequenced :: time :: `Int max_int :: rest))
+    | _ -> fail "expected archive coverage counters" in
+  write_rows (prefix @ [detail; impossible_footer]);
+  Out_channel.with_open_gen [Open_wronly; Open_append; Open_binary] 0o600 large_archive
+    (fun oc -> output_string oc "torn footer suffix");
+  let impossible = read_range at_last in
+  check bool "an impossible count and a torn suffix leave positive damage and partial coverage" true
+    (impossible.input_limited && impossible.unreadable >= 2
+     && Window.undecodable_rows impossible >= impossible.unreadable);
+  check int "combined unreadable and conflict counts cannot wrap" max_int
+    (Window.undecodable_rows { damaged with unreadable = max_int });
+  write_rows (prefix @ [detail; Yojson.Safe.to_string legacy_footer]);
+  let legacy = read_range at_last in
+  check bool "an old footer keeps legacy prefix uncertainty separate from sequence diagnostics" true
+    (legacy.input_limited && legacy.archive_cut.by_rows && not legacy.details_limited
+     && Option.is_some legacy.folded);
+  let overlap_path = Filename.concat place.memory_dir "damage-overlap.memory-log.jsonl" in
+  let checkpoint_line seq =
+    let line = match last with
+      | Masc.Librarian_log.Committed commit -> Masc.Librarian_log.Committed { commit with seq }
+      | Masc.Librarian_log.Started _ -> fail "expected a committed baseline" in
+    Yojson.Safe.to_string (Masc.Librarian_log_codec.to_json line) ^ "\n" in
+  let leading = String.make 8192 ' ' ^ checkpoint_line 1 in
+  let replaceable = checkpoint_line 2 in
+  let anchored = String.make 4096 ' ' ^ checkpoint_line 3 in
+  let same_damage = String.make (String.length replaceable - 1) 'x' ^ "\n" in
+  let write_live rows = Out_channel.with_open_bin overlap_path (fun oc -> List.iter (output_string oc) rows) in
+  let full_overlap () = match Archive.history overlap_path with
+    | Ok history -> history
+    | Error e -> fail (Masc.Private_jsonl_scan.error_to_string e) in
+  write_live [leading; replaceable; anchored; same_damage];
+  let overlap_archive = Log_store.archive_path_of_log_path overlap_path in
+  (match Archive.write_history ~archive_path:overlap_archive (full_overlap ()) with
+   | Ok () -> () | Error msg -> fail msg);
+  let archive_bytes = String.length (In_channel.with_open_bin overlap_archive In_channel.input_all) in
+  let live_tail_bytes = String.length replaceable + String.length anchored + String.length same_damage in
+  let max_bytes = max archive_bytes live_tail_bytes in
+  let read_overlap () = match Window.read ~range:at_last ~max_bytes overlap_path with
+    | Ok window ->
+      check bool "fixture clips the live prefix and exposes the entire archive" true
+        (window.live_cut.by_bytes && not window.archive_cut.by_bytes);
+      window
+    | Error e -> fail (Masc.Private_jsonl_scan.error_to_string e) in
+  write_live [leading; same_damage; anchored; same_damage];
+  check int "an exact copy consumes the slot even when the unanchored damage has the same payload"
+    2 (read_overlap ()).unreadable;
+  check int "full history also sees the two physical records with the same payload"
+    2 (full_overlap ()).unreadable;
+  write_live [leading; "unrelated malformed row\n"; anchored];
+  check int "unanchored damage with different bytes cannot reuse a visible archived slot"
+    2 (read_overlap ()).unreadable;
+  write_live [leading; same_damage; anchored];
+  check int "matching bytes may still overlap a visible slot without an exact copy"
+    1 (read_overlap ()).unreadable;
+  let mixed_path = Filename.concat place.memory_dir "mixed.memory-log.jsonl" in
+  let mixed_archive = Log_store.archive_path_of_log_path mixed_path in
+  let live_line seq =
+    match last with
+    | Masc.Librarian_log.Committed template ->
+      let row = Masc.Librarian_log.Committed { template with seq; revision = seq; at = Float.of_int seq } in
+      Yojson.Safe.to_string (Masc.Librarian_log_codec.to_json row) ^ "\n"
+    | Masc.Librarian_log.Started _ -> fail "expected a committed checkpoint" in
+  let save_bytes file raw = Out_channel.with_open_bin file (fun oc -> output_string oc raw) in
+  let sequences start count = List.init count (fun i -> start + i) in
+  let rows ns encode = String.concat "" (List.map encode ns) in
+  let live_suffix = rows (List.filter ((<>) 206) (sequences 205 96)) live_line in
+  let budget = String.length live_suffix in
+  let range = Window.Revisions (0, 310) in
+  let mixed () = match Window.read ~range ~max_bytes:budget mixed_path with
+    | Ok window -> window, Diff.project_window ~range ~current:[] ~revision:310 window
+    | Error e -> fail (Masc.Private_jsonl_scan.error_to_string e) in
+  let intervals (d : Diff.t) = List.map (fun (g : Diff.gap) -> g.first_seq, g.last_seq) d.gaps in
+  let cold_line seq = Yojson.Safe.to_string (Masc.Librarian_memory_change.to_json
+    { c with seq; revision = seq; at = Float.of_int seq; added = []; removed = [] }) ^ "\n" in
+  save_bytes mixed_archive (rows (sequences 1 100) cold_line);
+  save_bytes mixed_path (rows (sequences 101 104) live_line ^ live_suffix);
+  let mixed_window, mixed_diff = mixed () in
+  check bool "full cold 1-100 and live from 205 have a known suffix and latest revision" true
+    (not mixed_window.archive_cut.by_bytes && mixed_window.live_cut.by_bytes && mixed_diff.snapshot_ahead);
+  check (list (pair int int)) "the unseen live prefix is uncertain while live sequence 206 is missing"
+    [206, 206] (intervals mixed_diff);
+  let oversized = String.make (budget + 1) ' ' in
+  save_bytes mixed_archive (oversized ^ cold_line 1 ^ rows [100; 102; 103] cold_line);
+  let both_window, both_diff = mixed () in
+  check bool "two independently cut files certify only the intersection of their visible suffixes" true
+    (both_window.archive_cut.by_bytes && both_window.live_cut.by_bytes
+     && intervals both_diff = [206, 206] && both_diff.snapshot_ahead);
+  save_bytes mixed_path (rows (sequences 1 12) live_line);
+  save_bytes mixed_archive (oversized ^ cold_line 1 ^ rows [205; 207; 208] cold_line);
+  let cold_window, cold_diff = mixed () in
+  check bool "a cut archive and complete live history still expose a gap within the archive suffix" true
+    (cold_window.archive_cut.by_bytes && not cold_window.live_cut.by_bytes
+     && intervals cold_diff = [206, 206] && cold_diff.snapshot_ahead);
+  save_bytes mixed_archive (rows (List.filter ((<>) 42) (sequences 1 100)) cold_line);
+  save_bytes mixed_path (oversized ^ live_line 310);
+  let unbounded_window, unbounded_diff = mixed () in
+  check bool "a cut live file with no complete commit can contain both the gap and the snapshot revision" true
+    (unbounded_window.live_cut.by_bytes && not unbounded_window.archive_cut.by_bytes
+     && intervals unbounded_diff = [] && not unbounded_diff.snapshot_ahead);
+  save_bytes mixed_archive (oversized ^ cold_line 310);
+  save_bytes mixed_path (rows [1; 3] live_line);
+  let unknown_archive, archive_diff = mixed () in
+  check bool "an oversized archive commit cannot establish a gap or latest revision from live alone" true
+    (unknown_archive.archive_cut.by_bytes && not unknown_archive.live_cut.by_bytes
+     && intervals archive_diff = [] && not archive_diff.snapshot_ahead);
+  let last_row = 205 + max_rows in
+  let live_rows = rows (List.filter ((<>) 206) (sequences 101 (last_row - 100))) live_line in
+  save_bytes mixed_archive (rows (sequences 1 100) cold_line);
+  save_bytes mixed_path live_rows;
+  let all_revs = Window.Revisions (0, last_row + 1) in
+  let row_cut = Result.get_ok (Window.read ~range:all_revs ~max_bytes:(String.length live_rows) mixed_path) in
+  let row_diff = Diff.project_window ~range:all_revs ~current:[] ~revision:(last_row + 1) row_cut in
+  check bool "trimming only live rows reports its observed internal gap and its actual tail" true
+    (row_cut.live_cut.by_rows && not row_cut.live_cut.by_bytes
+     && intervals row_diff = [206, 206] && row_diff.snapshot_ahead);
+  let all = Diff.project ~range:(Diff.Time (0., Float.of_int recent_seq)) ~current ~revision:recent_seq kept in
+  check bool "returned changes retain the most recent events and signal the row bound" true
+    (all.events_limited && List.length all.events = max_rows
+     && List.exists (fun ((p : Diff.position), _) -> p.seq = Some recent_seq) all.events)
+
+;;
+
 let test_compact_log_preserves_promotions_across_reboot_and_archive_read () =
   let place = started_place () in
   let state = after_two_removals place in
@@ -309,7 +658,8 @@ let test_eio_concurrent_compact_log_and_archive_read () =
 let () =
   run "librarian_archive"
     [ ( "left"
-      , [ test_case "what left and why" `Quick test_what_left_and_why
+      , [ test_case "ordered memory changes before and after molt" `Quick test_memory_diff_through_compaction
+        ; test_case "what left and why" `Quick test_what_left_and_why
         ; test_case "a fact added again" `Quick test_a_fact_added_again_is_not_left
         ; test_case "a fact the snapshot holds" `Quick test_a_fact_the_snapshot_holds_is_not_left
         ; test_case "lines that do not decode" `Quick test_lines_that_do_not_decode_are_counted

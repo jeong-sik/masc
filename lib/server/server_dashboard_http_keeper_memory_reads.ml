@@ -151,31 +151,6 @@ let handle_working_context_get state req reqd name =
     Http.Response.json_value ~status ~compress:true ~request:req json reqd
 ;;
 
-let source_of_commit_cause (cause : Librarian_log.cause) : Keeper_memory_os_current.source =
-  let non_empty text fallback =
-    let trimmed = String.trim text in
-    if String.equal trimmed "" then fallback else trimmed
-  in
-  match cause with
-  | Librarian_log.Direct { write = Librarian_direct.Retract _; trace; _ } ->
-    { kind = Explicit_retract; trace_id = non_empty trace "explicit_retract" }
-  | Librarian_log.Direct
-      { write = Librarian_direct.(Remember _ | Supersede _); trace; _ } ->
-    { kind = Explicit_write; trace_id = non_empty trace "explicit_write" }
-  | Librarian_log.Read { trace; _ } ->
-    { kind = Librarian; trace_id = non_empty trace "librarian_read" }
-  | Librarian_log.Make_room { trace; _ } ->
-    { kind = Librarian; trace_id = non_empty trace "librarian_make_room" }
-  | Librarian_log.Molt_and_synthesize { trace; _ } ->
-    { kind = Librarian; trace_id = non_empty trace "librarian_molt" }
-  | Librarian_log.Adopt { by; _ } ->
-    { kind = Librarian; trace_id = non_empty by "adopt" }
-  | Librarian_log.Skip _ ->
-    { kind = Librarian; trace_id = "skip" }
-  | Librarian_log.Checkpoint _ ->
-    { kind = Librarian; trace_id = "checkpoint" }
-;;
-
 let undecodable_log_line_to_string = function
   | Librarian_log_store.Not_json -> "commit log line is not valid JSON"
   | Librarian_log_store.Malformed err ->
@@ -184,28 +159,22 @@ let undecodable_log_line_to_string = function
 
 let read_commit_lineage_from_log ~keepers_dir ~keeper_id =
   let log_path = Librarian_log_store.path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let collect (revs, rets) (fact, removal) =
+    let id = Keeper_memory_os_types.memory_id fact in
+    match removal with
+    | Librarian_effects.Revised_into into_id | Superseded_by into_id ->
+      { Keeper_memory_os_types.superseded = id; superseded_by = into_id } :: revs, rets
+    | Retracted _ -> revs, id :: rets
+    | Dropped _ | Merged_into _ | Support_lost _ | Molted _ -> revs, rets
+  in
   Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-    Librarian_log_store.fold log_path ~init:([], [])
-      ~f:(fun (revisions_rev, retractions_rev) ({ line; _ } : Librarian_log_store.scanned) ->
-        match line with
-        | Ok (Librarian_log.Committed commit) ->
-          List.fold_left
-            (fun (revs, rets) ((fact : Keeper_memory_os_types.fact), removal) ->
-               let id = Keeper_memory_os_types.memory_id fact in
-               match removal with
-               | Librarian_effects.Revised_into into_id
-               | Librarian_effects.Superseded_by into_id ->
-                 ( { Keeper_memory_os_types.superseded = id
-                   ; superseded_by = into_id
-                   }
-                   :: revs
-                 , rets )
-               | Librarian_effects.Retracted _ -> revs, id :: rets
-               | Dropped _ | Merged_into _ | Support_lost _ | Molted _ -> revs, rets)
-            (revisions_rev, retractions_rev)
-            commit.effects.removed
-        | Ok (Librarian_log.Started _) | Error _ -> revisions_rev, retractions_rev)
-    |> Result.map (fun (revs, rets) -> List.rev revs, List.rev rets)
+    Librarian_archive.history log_path
+    |> Result.map (fun history ->
+      let old = List.fold_left (fun acc (entry : Librarian_archive.left) ->
+        collect acc (entry.fact, entry.removal)) ([], []) history.Librarian_archive.unsequenced in
+      let revs, rets = List.fold_left (fun acc (c : Librarian_memory_change.t) ->
+        List.fold_left collect acc c.removed) old history.changes in
+      List.rev revs, List.rev rets, history.unreadable)
     |> Result.map_error Private_jsonl_scan.error_to_string)
 ;;
 
@@ -289,7 +258,7 @@ let read_memory_log_tail_projection ~keepers_dir ~keeper_id ~limit =
                     ; "error", `String (undecodable_log_line_to_string err)
                     ]
                 | Ok ((commit : Librarian_log.commit), retained) ->
-                  let source = source_of_commit_cause commit.cause in
+                  let source = Librarian_log.memory_source commit.cause in
                   let invalidated =
                     List.filter_map
                       (fun ((fact : Keeper_memory_os_types.fact), removal) ->
@@ -387,7 +356,9 @@ let handle_facts_get state req reqd name =
     in
     let revisions, retractions, lineage_read_error =
       match read_commit_lineage_from_log ~keepers_dir ~keeper_id:name with
-      | Ok (revisions, retractions) -> revisions, retractions, None
+      | Ok (revisions, retractions, unreadable) ->
+        revisions, retractions, (if unreadable = 0 then None else
+          Some (Printf.sprintf "%d unreadable or conflicting memory history records" unreadable))
       | Error detail ->
         [], [], Some ("memory commit log lineage read failed: " ^ detail)
     in

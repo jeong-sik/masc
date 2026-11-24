@@ -406,44 +406,38 @@ let compact_log t ~at =
   | Error stop -> Error stop
   | Ok () ->
     Librarian_archive.with_path_lock ~log_path:t.log_path (fun () ->
-      let line_count =
-        match Log_store.fold t.log_path ~init:0 ~f:(fun n (_ : Log_store.scanned) -> n + 1) with
-        | Ok n -> Ok n
-        | Error (_ : Private_jsonl_scan.error) -> Error Store_unwritable
-      in
-      match line_count with
-      | Error stop -> Error stop
-      | Ok compacted_lines ->
-        (match Librarian_archive.read_unlocked t.log_path ~current:t.memory.facts with
-         | Error (_ : Private_jsonl_scan.error) -> Error Store_unwritable
-         | Ok archived ->
-           let archive_path = Log_store.archive_path_of_log_path t.log_path in
-           (match Librarian_archive.write_cold_archive ~archive_path archived.left with
-            | Error (_ : string) -> Error Store_unwritable
-            | Ok () ->
-              (* Preserve unannounced [Promote_to_world] proposals from the
-                 previous tail onto the Checkpoint line so a crash between
-                 [compact_log] and [Librarian_writer.announce] still recovers
-                 those promotions on reboot via [promotions_of_tail]. *)
-              let carried_promotions =
-                match promotions_of_tail t.tail with
-                | Some (_, promos) -> promos
-                | None -> []
-              in
-              let baseline =
-                line_after t.tail ~at ~basis:t.digest ~after:t.digest ~revision:t.memory.revision
-                  ~cause:
-                    (Log.Checkpoint
-                       { compacted_lines; archived_entries = List.length archived.left })
-                  ~effects:{ Librarian_effects.empty with promotions = carried_promotions }
-                  ~reading:Stays
-              in
-              let tail = Log.Committed baseline in
-              (match Log_store.rewrite_compacted ~path:t.log_path tail with
-               | Ok { new_end; at = (_ : int) } ->
-                 Ok ({ t with log_end = new_end; tail }, compacted_lines)
-               | Error (Log_store.End_moved _ | Directory_unavailable _ | Write_failed _) ->
-                 Error Store_unwritable))))
+      match Librarian_archive.history_unlocked t.log_path with
+      | Error (_ : Private_jsonl_scan.error) -> Error Store_unwritable
+      | Ok history ->
+         let compacted_lines = history.live_lines in
+         let archived = Librarian_archive.left_of_history history ~current:t.memory.facts in
+         let archive_path = Log_store.archive_path_of_log_path t.log_path in
+         (match Librarian_archive.write_history ~archive_path history with
+          | Error (_ : string) -> Error Store_unwritable
+          | Ok () ->
+            (* Preserve unannounced [Promote_to_world] proposals from the
+               previous tail onto the Checkpoint line so a crash between
+               [compact_log] and [Librarian_writer.announce] still recovers
+               those promotions on reboot via [promotions_of_tail]. *)
+            let carried_promotions =
+              match promotions_of_tail t.tail with
+              | Some (_, promos) -> promos
+              | None -> []
+            in
+            let baseline =
+              line_after t.tail ~at ~basis:t.digest ~after:t.digest ~revision:t.memory.revision
+                ~cause:
+                  (Log.Checkpoint
+                     { compacted_lines; archived_entries = List.length archived.left })
+                ~effects:{ Librarian_effects.empty with promotions = carried_promotions }
+                ~reading:Stays
+            in
+            let tail = Log.Committed baseline in
+            (match Log_store.rewrite_compacted ~path:t.log_path ~at_end:t.log_end tail with
+             | Ok { new_end; at = (_ : int) } ->
+               Ok ({ t with log_end = new_end; tail }, compacted_lines)
+             | Error (Log_store.End_moved _ | Directory_unavailable _ | Write_failed _) ->
+               Error Store_unwritable)))
 ;;
 
 (* The working state of the tail, as a reading question shows it. *)

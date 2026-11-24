@@ -535,6 +535,7 @@ let sample_sandboxes : Wire_infra.sandboxes_snapshot =
 let sample_memory_diff : Wire_knowledge.memory_diff =
   let make_fact ~id ~cat ~text ~heat ~hits =
     {
+      event_order = None;
       Wire_knowledge.added_at_rev = Some 3820;
       memory_id = id;
       category = cat;
@@ -579,6 +580,7 @@ let sample_memory_diff : Wire_knowledge.memory_diff =
               journal_failures_in_window = 0;
               journal_quarantines_in_window = 0;
               undecodable_journal_lines = 0;
+              history_coverage = None;
             };
           revisions =
             [
@@ -601,7 +603,10 @@ let sample_memory_diff : Wire_knowledge.memory_diff =
             [
               {
                 relation = Wire_knowledge.Revision;
-                at_rev = 3825;
+                after_source = None;
+                event_order = None;
+                at_rev = Some 3825;
+                at_unix = None;
                 before =
                   make_fact ~id:"m2-old" ~cat:"lesson"
                     ~text:"Run full local dune build before push"
@@ -618,8 +623,10 @@ let sample_memory_diff : Wire_knowledge.memory_diff =
                 memory_id = "m3";
                 category = "fact";
                 text = "Legacy endpoint active";
-                removed_at_rev = 3822;
-                removed_by = "librarian";
+                event_order = None;
+                removed_at_rev = Some 3822;
+                at_unix = None;
+                removed_by = Some "librarian";
                 drop_reason = Some "superseded";
               };
             ];

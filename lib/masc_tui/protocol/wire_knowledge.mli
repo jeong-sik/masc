@@ -614,6 +614,7 @@ type memory_revision_tick = {
 }
 
 type memory_fact_entry = {
+  event_order : int option;
   added_at_rev : int option;
   memory_id : string;
   category : string;
@@ -626,28 +627,61 @@ type memory_fact_entry = {
   heat : memory_heat;
 }
 
+type successor_body_source = Same_commit | Held_before | Current_snapshot | Archived_fact
+
 type memory_updated_fact = {
+  event_order : int option;
   relation : modification_relation;
-  at_rev : int;
+  at_rev : int option;
+  at_unix : float option;
   before : memory_fact_entry;
   after : memory_fact_entry;
+  after_source : successor_body_source option;
 }
 
 type memory_retracted_fact = {
+  event_order : int option;
   memory_id : string;
   category : string;
   text : string;
-  removed_at_rev : int;
-  removed_by : string;
+  removed_at_rev : int option;
+  at_unix : float option;
+  removed_by : string option;
   drop_reason : string option;
 }
 
 type memory_invalidated_fact = {
+  event_order : int option;
   memory_id : string;
   text : string;
-  at_rev : int;
+  at_rev : int option;
+  at_unix : float option;
   missing_premise_ids : string list;
 }
+
+type history_limit = Live_rows | Live_bytes | Archive_rows | Archive_bytes | Result_rows | Result_bytes
+
+type folded_history =
+  { through_seq : int; min_revision : int; max_revision : int; min_at : float; max_at : float }
+
+type keeper_history_coverage =
+  | Complete_history
+  | Complete_with_retention of folded_history
+  | Partial_history of
+      { missing_sequences : (int * int) list
+      ; unsequenced_in_window : int
+      ; unplaced_in_revision_range : int
+      ; folded_detail : folded_history option
+      ; retention_applies : bool
+      ; input_limited : bool
+      ; output_limited : bool
+      ; limit_causes : history_limit list
+      ; conflicting_sequences : int
+      ; unreadable_lines : int
+      ; unresolved_successors : int
+      ; snapshot_ahead : bool
+      ; snapshot_behind : bool
+      }
 
 type keeper_diff_counts = {
   total_facts_now : int;
@@ -658,6 +692,9 @@ type keeper_diff_counts = {
   journal_failures_in_window : int;
   journal_quarantines_in_window : int;
   undecodable_journal_lines : int;
+  (** Historical count across the live commit log and the cold archive, including
+      unresolved conflicting sequences. *)
+  history_coverage : keeper_history_coverage option;
 }
 
 type keeper_writer_status =

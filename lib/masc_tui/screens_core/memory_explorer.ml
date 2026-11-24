@@ -1139,9 +1139,9 @@ let build_diff_visual_rows ~theme ~bg ~lang ~now_unix ~wrap_w ~selected_idx
       | Knowledge_store.Keeper_updated u ->
           let heat_lbl, heat_tone = heat_badge u.after.heat in
           let hdr =
-            Printf.sprintf "~ [%s] %s @r%d" u.after.category
+            Printf.sprintf "~ [%s] %s %s" u.after.category
               (relation_label ~lang u.relation)
-              u.at_rev
+              (Knowledge_store.memory_change_time ~rev:u.at_rev ~at:u.at_unix)
           in
           push
             (Diff_header_right
@@ -1166,9 +1166,9 @@ let build_diff_visual_rows ~theme ~bg ~lang ~now_unix ~wrap_w ~selected_idx
             match r.drop_reason with Some s -> " · " ^ s | None -> ""
           in
           let hdr =
-            Printf.sprintf "- [%s] %s @r%d · %s%s" r.category
+            Printf.sprintf "- [%s] %s %s · %s%s" r.category
               (say lang ~ko:"대체/철회" ~en:"retracted")
-              r.removed_at_rev r.removed_by why
+              (Knowledge_store.memory_change_time ~rev:r.removed_at_rev ~at:r.at_unix) (Option.value ~default:"" r.removed_by) why
           in
           push
             (Diff_plain
@@ -1183,7 +1183,7 @@ let build_diff_visual_rows ~theme ~bg ~lang ~now_unix ~wrap_w ~selected_idx
       | Knowledge_store.Keeper_invalidated inv ->
           let prems = String.concat ", " inv.missing_premise_ids in
           let hdr =
-            Printf.sprintf "! [invalidated] @r%d missing: %s" inv.at_rev prems
+            Printf.sprintf "! [invalidated] %s missing: %s" (Knowledge_store.memory_change_time ~rev:inv.at_rev ~at:inv.at_unix) prems
           in
           push
             (Diff_plain
@@ -1436,6 +1436,41 @@ let render_keeper_diff_view ~grid ~(rect : Rect.t) ~(theme : Theme.t)
                    summary);
               incr y
             end;
+            (match counts.history_coverage with
+             | Some (Partial_history coverage) when !y < bottom ->
+               let ranges = coverage.missing_sequences
+                 |> List.map (fun (first, last) -> Printf.sprintf "%d–%d" first last) |> String.concat ", " in
+               let limit_name = function
+                 | Wire_knowledge.Live_rows -> say lang ~ko:"live 행" ~en:"live rows"
+                 | Live_bytes -> say lang ~ko:"live 바이트" ~en:"live bytes"
+                 | Archive_rows -> say lang ~ko:"보관 행" ~en:"archive rows"
+                 | Archive_bytes -> say lang ~ko:"보관 바이트" ~en:"archive bytes"
+                 | Result_rows -> say lang ~ko:"응답 행" ~en:"result rows"
+                 | Result_bytes -> say lang ~ko:"응답 바이트" ~en:"result bytes" in
+               let details = List.filter_map Fun.id
+                 [ (match coverage.folded_detail with
+                    | Some f when coverage.retention_applies ->
+                      Some (Printf.sprintf "%s %d" (say lang ~ko:"상세 이력 요약 경계 seq" ~en:"detail folded through seq") f.through_seq)
+                    | Some _ | None -> None)
+                 ; (match coverage.limit_causes with [] -> None | causes ->
+                      Some (String.concat ", " (List.map limit_name causes) ^ " " ^ say lang ~ko:"한도 도달" ~en:"limit reached"))
+                 ; (if coverage.limit_causes = [] && coverage.input_limited then Some (say lang ~ko:"조회 한도 도달" ~en:"read limit reached") else None)
+                 ; (if coverage.limit_causes = [] && coverage.output_limited then Some (say lang ~ko:"표시 한도 도달" ~en:"result limit reached") else None)
+                 ; (if coverage.conflicting_sequences > 0 then Some (Printf.sprintf "%s %d" (say lang ~ko:"충돌" ~en:"conflicting sequences") coverage.conflicting_sequences) else None)
+                 ; (if ranges <> "" then Some ("seq " ^ ranges) else None)
+                 ; (if coverage.unreadable_lines > 0 then Some (Printf.sprintf "%s %d" (say lang ~ko:"판독 불가" ~en:"unreadable") coverage.unreadable_lines) else None)
+                 ; (if coverage.unsequenced_in_window + coverage.unplaced_in_revision_range > 0 then
+                      Some (Printf.sprintf "%s %d" (say lang ~ko:"revision 미상" ~en:"revision unknown")
+                        (coverage.unsequenced_in_window + coverage.unplaced_in_revision_range)) else None)
+                 ; (if coverage.unresolved_successors > 0 then
+                      Some (Printf.sprintf "%s %d" (say lang ~ko:"후속 본문 미확인" ~en:"missing successor bodies") coverage.unresolved_successors) else None)
+                 ; (if coverage.snapshot_ahead then Some (say lang ~ko:"스냅샷이 더 최신" ~en:"snapshot ahead") else None)
+                 ; (if coverage.snapshot_behind then Some (say lang ~ko:"스냅샷 반영 전" ~en:"snapshot behind") else None) ] in
+               ignore (put_clipped ~grid ~clip:rect ~x:rect.x ~y:!y ~max_w:rect.w
+                         ~style:(Typography.status ~bg theme Theme.Status_attention)
+                         (String.concat " · " (say lang ~ko:"부분 이력" ~en:"Partial history" :: details)));
+               incr y
+             | Some (Partial_history _ | Complete_history | Complete_with_retention _) | None -> ());
             let h = diff.retrieval_heat in
             let heat_total = h.hot + h.warm + h.cold + h.never_retrieved in
             if heat_total > 0 && bottom - !y >= 4 then begin

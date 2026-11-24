@@ -743,20 +743,6 @@ let read_keeper_memory_json ~config ~caller ~keeper =
                   ]))))
 ;;
 
-let source_kind_of_commit_cause = function
-  | Librarian_log.Direct { write = Librarian_direct.Retract _; _ } ->
-    Keeper_memory_os_current.Explicit_retract
-  | Librarian_log.Direct
-      { write = Librarian_direct.(Remember _ | Supersede _); _ } ->
-    Keeper_memory_os_current.Explicit_write
-  | Librarian_log.Read _
-  | Librarian_log.Make_room _
-  | Librarian_log.Molt_and_synthesize _
-  | Librarian_log.Adopt _
-  | Librarian_log.Skip _
-  | Librarian_log.Checkpoint _ -> Keeper_memory_os_current.Librarian
-;;
-
 (* RFC §12.1 G16: health surface carries only closed status/outcome/kind tokens,
    counts, revisions, timestamps, and hashes — no free-text claims, details,
    rejections, or file paths. *)
@@ -778,7 +764,7 @@ let commit_entry_summary ~retained (commit : Librarian_log.commit) =
     ; ( "source_kind"
       , `String
           (Keeper_memory_os_current.source_kind_to_string
-             (source_kind_of_commit_cause commit.cause)) )
+             (Librarian_log.memory_source commit.cause).kind) )
     ; "added_count", `Int (List.length commit.effects.added)
     ; "removed_count", `Int (List.length commit.effects.removed)
     ; "retained_count", `Int retained

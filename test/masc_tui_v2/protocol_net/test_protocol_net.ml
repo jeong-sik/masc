@@ -5269,6 +5269,85 @@ let test_wave3_live_wire_codecs () =
        (Wire_keeper_context.decode_github_identity (parse_json "42"))
       : string)
 
+let test_ui_bus_concurrent_no_lost_wakeup () =
+  (* P0-1 regression: cross-domain publish_stream/publish_snapshot + drain_up_to
+     must NEVER leave wake_pending = true with an empty bus. *)
+  let bell = Atomic.make false in
+  let wake_count = Atomic.make 0 in
+  let bus =
+    Ui_bus.create ~stream_capacity:64 ~key_equal:String.equal
+      ~key_hash:Hashtbl.hash
+      ~on_wake:(fun () ->
+        Atomic.set bell true;
+        Atomic.incr wake_count)
+      ()
+  in
+  (* 1. Deterministic partial-drain re-arming & empty-drain wake_pending reset *)
+  Ui_bus.publish_stream bus 1;
+  Ui_bus.publish_stream bus 2;
+  Alcotest.(check bool) "initial publish rings bell" true (Atomic.get bell);
+  Atomic.set bell false;
+  let first = Ui_bus.drain_up_to ~max_items:1 bus in
+  Alcotest.(check int) "partial drain takes 1 item" 1 (List.length first);
+  Alcotest.(check bool) "partial drain with more items re-rings bell" true
+    (Atomic.get bell);
+  Atomic.set bell false;
+  let second = Ui_bus.drain_up_to ~max_items:4 bus in
+  Alcotest.(check int) "second drain takes remaining 1 item" 1
+    (List.length second);
+  Alcotest.(check bool) "bus empty after full drain" true (Ui_bus.is_empty bus);
+  Alcotest.(check bool) "full drain does not spuriously ring bell" false
+    (Atomic.get bell);
+  Ui_bus.publish_snapshot bus ~key:"k" 42;
+  Alcotest.(check bool) "next publish after full drain rings bell" true
+    (Atomic.get bell);
+  ignore (Ui_bus.drain bus : (string, int, int) Ui_bus.item list);
+  Atomic.set bell false;
+
+  (* 2. Cross-domain stress interleaving publish_* (Domain 2) vs drain_up_to
+     (Domain 1), simulating app.ml's Wake_bell.drain_mask + drain_bus loop. *)
+  let producer_done = Atomic.make false in
+  let producer =
+    Domain.spawn (fun () ->
+        for i = 1 to 4000 do
+          if i mod 3 = 0 then Ui_bus.publish_snapshot bus ~key:"snap" i
+          else Ui_bus.publish_stream bus i;
+          if i mod 17 = 0 then Domain.cpu_relax ()
+        done;
+        Atomic.set producer_done true)
+  in
+  let drained_total = ref 0 in
+  let rec consume () =
+    Atomic.set bell false;
+    let batch = Ui_bus.drain_up_to ~max_items:8 bus in
+    drained_total := !drained_total + List.length batch;
+    if Atomic.get producer_done && Ui_bus.is_empty bus then begin
+      (* One final drain_up_to guarantees wake_pending = false under t.mu. *)
+      let tail = Ui_bus.drain_up_to ~max_items:32 bus in
+      drained_total := !drained_total + List.length tail
+    end
+    else begin
+      if batch = [] then Domain.cpu_relax ();
+      consume ()
+    end
+  in
+  consume ();
+  Domain.join producer;
+  Alcotest.(check bool) "drained items across domains" true (!drained_total > 0);
+  Alcotest.(check bool) "bus is empty at quiescence" true (Ui_bus.is_empty bus);
+  (* Critical P0-1 assertion: if wake_pending were stuck true while bus is empty,
+     this fresh publish would NOT fire on_wake! *)
+  Atomic.set bell false;
+  Ui_bus.publish_stream bus 999_999;
+  Alcotest.(check bool) "fresh stream publish after concurrent drain wakes UI"
+    true (Atomic.get bell);
+  ignore (Ui_bus.drain_up_to ~max_items:32 bus : (string, int, int) Ui_bus.item list);
+  Atomic.set bell false;
+  Ui_bus.publish_snapshot bus ~key:"after" 1;
+  Alcotest.(check bool) "fresh snapshot publish after concurrent drain wakes UI"
+    true (Atomic.get bell);
+  ignore (Ui_bus.drain bus : (string, int, int) Ui_bus.item list)
+
 let () =
   Alcotest.run "masc_tui_v2_protocol_net"
     [
@@ -5318,6 +5397,8 @@ let () =
       ( "net"
       , [
           Alcotest.test_case "ui_bus_coalesce_and_512_gap" `Quick test_ui_bus;
+          Alcotest.test_case "ui_bus_concurrent_no_lost_wakeup" `Quick
+            test_ui_bus_concurrent_no_lost_wakeup;
           Alcotest.test_case "sse_hub_diff_and_http_409" `Quick
             test_sse_hub_and_http_client;
           Alcotest.test_case "io_domain_isolation_and_shutdown" `Quick

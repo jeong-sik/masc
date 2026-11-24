@@ -253,6 +253,7 @@ val request_streaming :
   retention:'body body_retention ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   idle_timeout_sec:float ->
+  ?header_timeout_seconds:float ->
   method_:http_method ->
   url:string ->
   ?headers:(string * string) list ->
@@ -265,6 +266,12 @@ val request_streaming :
     ~on_chunk ()] issues one request and calls [on_chunk] with each body chunk
     as it arrives. [retention] decides whether a successful body is also kept
     whole. A non-success body is always kept, for {!Buffered}.
+
+    [header_timeout_seconds] bounds the wait for HTTP response headers after
+    connect, defaulting to [Float.min idle_timeout_sec 30.0] (or [30.0] when
+    [idle_timeout_sec] is infinite or non-positive). Stalled response headers
+    end as [Error (Timed_out _)] and close the connection rather than hanging
+    indefinitely.
 
     [on_response], when supplied, runs once after response headers arrive and
     before any body chunk is delivered, including for non-success statuses.

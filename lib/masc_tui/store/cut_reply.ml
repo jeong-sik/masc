@@ -65,41 +65,98 @@ type t = {
   text : string;
   ownership : ownership;
   reading : reading;
+  pages_read : int;
 }
 
+let max_pages = 100
+
+type page_error =
+  | Cursor_did_not_advance of {
+      previous : Journal.from;
+      next : Journal.cursor;
+    }
+  | Page_limit_exceeded of { max_pages : int }
+
+let page_error_to_string = function
+  | Cursor_did_not_advance { previous; next } ->
+      let prev_s =
+        match previous with
+        | Journal.From_start -> "start"
+        | Journal.After cur ->
+            Printf.sprintf "(%d,%d)" cur.last_seq cur.next_offset
+      in
+      Printf.sprintf
+        "chat event journal cursor did not advance (%s -> (%d,%d))" prev_s
+        next.last_seq next.next_offset
+  | Page_limit_exceeded { max_pages } ->
+      Printf.sprintf "chat event journal exceeded %d pages" max_pages
+
+let cursor_advanced ~previous (next : Journal.cursor) =
+  match previous with
+  | Journal.From_start -> true
+  | Journal.After prev ->
+      (not (Journal.equal_from previous (Journal.After next)))
+      && (next.last_seq > prev.last_seq
+          || (Int.equal next.last_seq prev.last_seq
+              && next.next_offset > prev.next_offset))
+
 let start =
-  { text = ""; ownership = fresh_ownership; reading = Reading Journal.From_start }
+  {
+    text = "";
+    ownership = fresh_ownership;
+    reading = Reading Journal.From_start;
+    pages_read = 0;
+  }
 
-let no_journal = { text = ""; ownership = fresh_ownership; reading = Ended }
+let no_journal =
+  { text = ""; ownership = fresh_ownership; reading = Ended; pages_read = 0 }
 
-let apply_page (page : Journal.page) t =
+let apply_page_checked (page : Journal.page) t =
   match t.reading with
-  | Ended -> t
-  | Reading _ ->
+  | Ended -> Ok t
+  | Reading cur ->
+      let next_pages = t.pages_read + 1 in
       (* [pieces] is the run's text so far, newest first, joined once. *)
       let finish ~pieces ~ownership reading =
-        { text = String.concat "" (List.rev pieces); ownership; reading }
+        {
+          text = String.concat "" (List.rev pieces);
+          ownership;
+          reading;
+          pages_read = next_pages;
+        }
       in
       let rec fold ~pieces ~ownership = function
-        | [] ->
-            finish ~pieces ~ownership
-              (match page.next with
-              | Some cursor -> Reading (Journal.After cursor)
-              | None -> Ended)
+        | [] -> (
+            match page.next with
+            | None -> Ok (finish ~pieces ~ownership Ended)
+            | Some cursor ->
+                if not (cursor_advanced ~previous:cur cursor) then
+                  Error (Cursor_did_not_advance { previous = cur; next = cursor })
+                else if next_pages >= max_pages then
+                  Error (Page_limit_exceeded { max_pages })
+                else
+                  Ok (finish ~pieces ~ownership (Reading (Journal.After cursor))))
         | (event : Journal.event) :: rest -> (
             match event with
-            | Journal.Run_started -> fold ~pieces:[] ~ownership:fresh_ownership rest
+            | Journal.Run_started ->
+                fold ~pieces:[] ~ownership:fresh_ownership rest
             | Journal.Runtime_attempt_started ->
                 fold ~pieces:[] ~ownership:(retire_attempt ownership) rest
             | Journal.Text_delta { text; owner } -> (
                 match admit ownership owner with
-                | Append ownership -> fold ~pieces:(text :: pieces) ~ownership rest
+                | Append ownership ->
+                    fold ~pieces:(text :: pieces) ~ownership rest
                 | Drop -> fold ~pieces ~ownership rest)
             | Journal.Run_finished | Journal.Event_error ->
-                finish ~pieces ~ownership Ended
+                Ok (finish ~pieces ~ownership Ended)
             | Journal.Other -> fold ~pieces ~ownership rest)
       in
       fold ~pieces:[ t.text ] ~ownership:t.ownership page.events
+
+let apply_page (page : Journal.page) t =
+  match apply_page_checked page t with
+  | Ok next -> next
+  | Error _ -> { t with reading = Ended }
 
 let next_page t =
   match t.reading with

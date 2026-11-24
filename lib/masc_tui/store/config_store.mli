@@ -125,6 +125,10 @@ val apply_schema_meta :
 
 val mark_dry_run_loading : t -> t
 val mark_save_in_flight : t -> t
+val clear_in_flight : t -> t
+(** Reset in-flight [Save_in_flight] and [Dry_run_loading] states back to idle
+    when leaving an epoch whose replies are abandoned, preserving staged
+    [dirty_fields]. *)
 val apply_patch_response :
   dry_run:bool -> Wire_config.patch_response -> t -> t
 val apply_patch_error : dry_run:bool -> string -> t -> t

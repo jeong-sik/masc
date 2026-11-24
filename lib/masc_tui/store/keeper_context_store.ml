@@ -855,6 +855,18 @@ let finish_github_login ~keeper ~error t =
       })
     t
 
+let clear_running_github_logins t =
+  {
+    t with
+    by_keeper =
+      String_map.map
+        (fun ks ->
+          if ks.github_login.running then
+            { ks with github_login = { ks.github_login with running = false } }
+          else ks)
+        t.by_keeper;
+  }
+
 let move_identity_selection ~keeper ~count ~delta t =
   update_keeper ~keeper
     (fun ks ->

@@ -2093,6 +2093,56 @@ let test_wave2_html_doc_renderer () =
   Alcotest.(check bool) "script-only HTML renders honest empty notice" true
     (contains ~needle:"No visible HTML content" empty_joined)
 
+let test_markdown_parse_inline_linear_unmatched_delimiters () =
+  let theme = Theme.default in
+  let sample =
+    "**bold** *em* __strong__ _ital_ ~~gone~~ `code` [site](https://example.com)"
+  in
+  let rendered = Markdown.render_lines ~theme ~width:120 ~osc8:true sample in
+  let spans =
+    List.concat_map (fun (l : Markdown.rendered_line) -> l.spans) rendered
+  in
+  Alcotest.(check bool) "bold span rendered" true
+    (List.exists
+       (fun (s : Markdown.styled_span) ->
+         String.equal s.text "bold" && Attr.has s.style.attrs Attr.bold)
+       spans);
+  Alcotest.(check bool) "italic span rendered" true
+    (List.exists
+       (fun (s : Markdown.styled_span) ->
+         String.equal s.text "ital" && Attr.has s.style.attrs Attr.italic)
+       spans);
+  Alcotest.(check bool) "link hyperlink attached" true
+    (List.exists
+       (fun (s : Markdown.styled_span) ->
+         String.equal s.text "site"
+         && Option.equal String.equal s.hyperlink (Some "https://example.com"))
+       spans);
+  let pathological =
+    [
+      String.concat " " (List.init 10_000 (fun _ -> "_a"));
+      String.concat " " (List.init 10_000 (fun _ -> "__a"));
+      String.make 10_000 '[' ^ "]";
+      String.make 10_000 '[' ^ "](";
+      String.make 10_000 '[' ^ "](   )";
+      String.make 10_000 '*';
+    ]
+  in
+  let t0 = Masc_tui_core.Clock.Mono.now () in
+  List.iter
+    (fun line ->
+      let out = Markdown.render_lines ~theme ~width:80 ~osc8:true line in
+      Alcotest.(check bool) "rendered non-empty lines" true (out <> []))
+    pathological;
+  let elapsed_s =
+    Masc_tui_core.Clock.Mono.seconds_since (Masc_tui_core.Clock.Mono.now ())
+      ~since:t0
+  in
+  Alcotest.(check bool)
+    (Printf.sprintf "10k unmatched delimiters parsed linearly (%.3fs < 2.0s)"
+       elapsed_s)
+    true (elapsed_s < 2.0)
+
 let () =
   Alcotest.run "masc_tui_keymap_ui"
     [
@@ -2145,6 +2195,8 @@ let () =
             `Quick test_json_tree_telemetry_vs_secrets;
           Alcotest.test_case "Markdown OSC 8 links & fenced code" `Quick
             test_markdown_osc8_and_fence;
+          Alcotest.test_case "Markdown O(N) parse_inline on 10k unmatched delimiters"
+            `Quick test_markdown_parse_inline_linear_unmatched_delimiters;
           Alcotest.test_case "Wave 2: Html_doc strips script/style/hidden, aligns tables & search highlights"
             `Quick test_wave2_html_doc_renderer;
         ] );

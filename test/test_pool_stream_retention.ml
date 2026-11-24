@@ -71,6 +71,75 @@ let test_a_refused_stream_is_read_whole_under_discard () =
   | Ok (Pool.Streamed _), _ -> Alcotest.fail "a 401 was streamed"
   | Error error, _ -> Alcotest.fail (Pool.request_error_to_string error)
 
+let start_silent_header_server ~sw ~net =
+  let listener =
+    Eio.Net.listen ~sw ~backlog:8 net (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+  in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    let rec accept_loop () =
+      let _flow, _addr = Eio.Net.accept ~sw listener in
+      accept_loop ()
+    in
+    accept_loop ());
+  match Eio.Net.listening_addr listener with
+  | `Tcp (_, port) -> Printf.sprintf "http://127.0.0.1:%d" port
+  | `Unix _ -> Alcotest.fail "expected a TCP listener"
+
+let test_streaming_header_timeout_fires_and_closes_socket () =
+  Eio_main.run (fun env ->
+    Eio.Time.with_timeout_exn env#clock 5.0 (fun () ->
+      Eio.Switch.run (fun sw ->
+        let base = start_silent_header_server ~sw ~net:env#net in
+        let pool = Pool.create ~sw ~env () in
+        let response_seen = ref false in
+        let chunk_seen = ref false in
+        (* 1. Explicit header_timeout_seconds bounds even infinite-idle streams *)
+        let res1 =
+          Pool.request_streaming pool ~retention:Pool.Discard_body
+            ~clock:env#clock ~idle_timeout_sec:Float.infinity
+            ~header_timeout_seconds:0.15 ~method_:`GET ~url:(base ^ "/hang")
+            ~on_response:(fun ~status:_ ~headers:_ -> response_seen := true)
+            ~on_chunk:(fun _ -> chunk_seen := true) ()
+        in
+        (match res1 with
+         | Error (Pool.Timed_out { after_seconds }) ->
+           Alcotest.(check bool) "timed out at explicit header bound" true
+             (after_seconds >= 0.1 && after_seconds <= 0.25)
+         | Error err ->
+           Alcotest.failf "expected Timed_out, got %s"
+             (Pool.request_error_to_string err)
+         | Ok _ -> Alcotest.fail "expected timeout on silent server");
+        Alcotest.(check bool) "on_response not called on header timeout" false
+          !response_seen;
+        Alcotest.(check bool) "on_chunk not called on header timeout" false
+          !chunk_seen;
+        let st1 = Pool.stats pool in
+        Alcotest.(check int) "inflight cleaned up after header timeout" 0
+          st1.total_inflight;
+        Alcotest.(check int) "timed-out socket closed, not parked" 0
+          st1.total_idle;
+        (* 2. Omitting header_timeout_seconds defaults to Float.min idle_timeout_sec 30.0 *)
+        let res2 =
+          Pool.request_streaming pool ~retention:Pool.Discard_body
+            ~clock:env#clock ~idle_timeout_sec:0.15 ~method_:`GET
+            ~url:(base ^ "/hang-default")
+            ~on_chunk:(fun _ -> chunk_seen := true) ()
+        in
+        (match res2 with
+         | Error (Pool.Timed_out { after_seconds }) ->
+           Alcotest.(check bool) "default header timeout uses min(idle, 30s)" true
+             (after_seconds >= 0.1 && after_seconds <= 0.25)
+         | Error err ->
+           Alcotest.failf "expected default Timed_out, got %s"
+             (Pool.request_error_to_string err)
+         | Ok _ -> Alcotest.fail "expected default timeout on silent server");
+        let st2 = Pool.stats pool in
+        Alcotest.(check int) "inflight cleaned up after default header timeout" 0
+          st2.total_inflight;
+        Alcotest.(check int) "default timed-out socket closed, not parked" 0
+          st2.total_idle;
+        Pool.shutdown pool)))
+
 let () =
   Alcotest.run "Pool stream retention"
     [ "real HTTP/1",
@@ -80,5 +149,7 @@ let () =
           test_discard_body_hands_every_chunk_on
       ; Alcotest.test_case "a refused stream is read whole under Discard_body" `Quick
           test_a_refused_stream_is_read_whole_under_discard
+      ; Alcotest.test_case "stalled response headers time out cleanly and close socket" `Quick
+          test_streaming_header_timeout_fires_and_closes_socket
       ]
     ]

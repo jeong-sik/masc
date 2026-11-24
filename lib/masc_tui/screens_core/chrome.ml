@@ -1943,6 +1943,13 @@ let render_micro_cockpit grid ~cache ~(body : Rect.t) ~(theme : Theme.t)
         in
         put_line attn_st draft_msg
       end;
+      let keys_line =
+        Say.resolve lang
+          (Say.make
+             ~ko:"키: Ctrl+K 명령 · 0/? 도움말 · 7/, 설정 · 8/I 이슈 · 9/Ctrl+T 큐 · J 이동 · r 새로고침 · Ctrl+Q 종료"
+             ~en:"Keys: Ctrl+K palette · 0/? help · 7/, settings · 8/I incidents · 9/Ctrl+T queue · J jump · r refresh · Ctrl+Q quit")
+      in
+      put_line sec keys_line;
       let resize_note =
         Say.resolve lang
           (Say.make ~ko:"전체 화면 레이아웃을 보려면 터미널을 80x24 이상으로 넓히세요."

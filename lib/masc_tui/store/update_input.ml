@@ -2564,7 +2564,7 @@ let dispatch_keeper_config_key ~now (m : Model.t)
     | Keymap.Input.Function _ ->
         None
 
-let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
+let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
   let norm = Keymap.normalize_key_event ev in
   (* Top-precedence Micro_viewport gate per tui-chat-design/SKILL.md: never
      mutate hidden drafts or underlying overlays. On <40x12 only Quit_app is
@@ -2712,7 +2712,30 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                   | None -> (m, [])))
           | Some (Nav.Inline_action _) -> (
               match m.inline_modal with
-              | None -> (m, [])
+              | None -> (
+                  match norm.key with
+                  | Keymap.Input.Escape ->
+                      Update_actions.execute_action ~now m
+                        Keymap.Pop_back_or_close
+                  | Keymap.Input.Char _
+                  | Keymap.Input.Enter
+                  | Keymap.Input.Tab
+                  | Keymap.Input.Backspace
+                  | Keymap.Input.Delete
+                  | Keymap.Input.Insert
+                  | Keymap.Input.Up
+                  | Keymap.Input.Down
+                  | Keymap.Input.Left
+                  | Keymap.Input.Right
+                  | Keymap.Input.Home
+                  | Keymap.Input.End
+                  | Keymap.Input.Page_up
+                  | Keymap.Input.Page_down
+                  | Keymap.Input.Function _ ->
+                      let cleaned =
+                        { m with nav = { m.nav with overlay = None } }
+                      in
+                      apply_key_event ~now cleaned ev)
               | Some modal -> (
                   let editable =
                     (not modal.submitting)

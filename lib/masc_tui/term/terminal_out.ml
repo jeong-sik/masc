@@ -70,30 +70,48 @@ let write_all_fd ?(stall_limit_s = frame_stall_limit_s) ?on_progress fd bytes =
   in
   loop 0 (Mono.after_s (Mono.now ()) limit)
 
+let notify_write_lost () =
+  Atomic.set lost true;
+  match (Atomic.get on_write_lost) () with
+  | () -> ()
+  | exception (Eio.Cancel.Cancelled _ as ex) -> raise ex
+  | exception Thread.Exit -> raise Thread.Exit
+  | exception ex -> ignore ex
+
 let rec writer () =
   Semaphore.Binary.acquire wake;
-  let rec take () =
-    Atomic.set writing true;
-    match Atomic.exchange queued [] with
-    | [] -> Atomic.set writing false
-    | chunks ->
-        let payload = String.concat "" (List.rev chunks) in
-        let stall_limit_s =
-          if Atomic.get shutting_down then shutdown_stall_limit_s
-          else frame_stall_limit_s
-        in
-        (match
-           write_all_fd ~stall_limit_s
-             ~on_progress:(fun () -> Atomic.incr progress)
-             Unix.stdout payload
-         with
-         | Ok () -> ()
-         | Error _ ->
-             Atomic.set lost true;
-             (Atomic.get on_write_lost) ());
-        take ()
-  in
-  take ();
+  (try
+     Fun.protect
+       ~finally:(fun () -> Atomic.set writing false)
+       (fun () ->
+         let rec take () =
+           Atomic.set writing true;
+           match Atomic.exchange queued [] with
+           | [] -> Atomic.set writing false
+           | chunks ->
+               let payload = String.concat "" (List.rev chunks) in
+               let stall_limit_s =
+                 if Atomic.get shutting_down then shutdown_stall_limit_s
+                 else frame_stall_limit_s
+               in
+               (match
+                  write_all_fd ~stall_limit_s
+                    ~on_progress:(fun () -> Atomic.incr progress)
+                    Unix.stdout payload
+                with
+                | Ok () -> ()
+                | Error _ -> notify_write_lost ());
+               take ()
+         in
+         take ())
+   with
+   | Eio.Cancel.Cancelled _ as ex -> raise ex
+   | Thread.Exit -> raise Thread.Exit
+   | ex ->
+       ignore ex;
+       Atomic.set writing false;
+       notify_write_lost ();
+       Thread.delay 0.05);
   writer ()
 
 let start () =

@@ -11502,9 +11502,9 @@ let test_ux_batch1_focus_resize_micro_zoom_and_cli_prefs () =
   let m_micro_j, _ =
     Update.step ~now:t0 m_micro_attn (Msg.Key_event (char_key "J"))
   in
-  Alcotest.(check bool) "UX-02 Micro allows 'J' Teleport_blocked" true
-    (Nav.equal_workspace m_micro_j.nav.workspace Nav.Work
-     && Nav.equal_work_tab m_micro_j.work.active_tab Nav.Work_inbox);
+  Alcotest.(check bool) "UX-02 Micro allows 'J' Teleport_blocked (visible Queue overlay)" true
+    (Option.equal Nav.equal_overlay m_micro_j.nav.overlay
+       (Some (Nav.Queue_context Nav.Drawer_queue)));
   let m_micro_settings =
     let m_s, _ =
       Update.step ~now:t0 m_micro_typed
@@ -11699,6 +11699,7 @@ let test_ux_batch2_modals_settings_overlays () =
                {
                  label = Say.literal "Copied";
                  ack_scope = Msg.Ack_toast_only;
+                 for_modal = None;
                  result = Ok ();
                };
          })
@@ -11706,16 +11707,26 @@ let test_ux_batch2_modals_settings_overlays () =
   Alcotest.(check bool) "UX-10 Ack_toast_only preserves open inline modal" true
     (Option.is_some m_after_bg.inline_modal
     && Option.is_some m_after_bg.nav.overlay);
+  let m_submitting =
+    {
+      m_after_bg with
+      inline_modal =
+        Option.map
+          (fun (md : Model.inline_modal_state) -> { md with submitting = true })
+          m_after_bg.inline_modal;
+    }
+  in
   let m_after_submit, cmds_submit =
-    Update.step ~now:t0 m_after_bg
+    Update.step ~now:t0 m_submitting
       (Msg.Http_reply
          {
-           epoch = m_after_bg.epoch;
+           epoch = m_submitting.epoch;
            reply =
              Msg.Reply_action_ack
                {
                  label = Say.literal "Repo added";
                  ack_scope = Msg.Ack_close_modal_and_refresh;
+                 for_modal = Some Nav.Repo_add_form;
                  result = Ok ();
                };
          })
@@ -11804,6 +11815,7 @@ let test_ux_batch2_modals_settings_overlays () =
                {
                  label = Say.literal "Saved in $EDITOR";
                  ack_scope = Msg.Ack_editor_saved;
+                 for_modal = None;
                  result = Ok ();
                };
          })
@@ -13105,6 +13117,659 @@ let test_ux_batch4_knowledge_runtime_infra () =
   Alcotest.(check (option string)) "Live roster refresh clears ghost selected_collapsed_company"
     None fl_refreshed.selected_collapsed_company
 
+let test_freeze_fixes_epoch_locks_micro_inline_and_cut_reply () =
+  let t0 = Clock.Mono.of_ns 50_000_000_000L in
+  let key k =
+    Msg.Key_event
+      {
+        Keymap.Input.key = k;
+        mods = { ctrl = false; alt = false; shift = false };
+      }
+  in
+  let char_key ?(ctrl = false) s =
+    Msg.Key_event
+      {
+        Keymap.Input.key = Keymap.Input.Char s;
+        mods = { ctrl; alt = false; shift = false };
+      }
+  in
+  let sample_tool_approval : Wire_work.held_tool_approval =
+    {
+      approval_id = "ta-lock-1";
+      tool_call_id = "tc-1";
+      keeper = "alpha";
+      tool = "bash";
+      args_preview = "ls";
+      question = "Allow bash?";
+      because = None;
+      asked_at = 1795250000.0;
+      timeout_sec = 60.0;
+    }
+  in
+  let sample_ask : Wire_work.ask_row =
+    {
+      ask_id = "ask-lock-1";
+      keeper = "alpha";
+      asked_at = 1795250001.0;
+      context = Some "Need decision";
+      questions =
+        [
+          {
+            question_id = "q1";
+            header = "Confirm";
+            prompt = "Proceed?";
+            mode = Wire_work.Ask_single;
+            allow_free_text = true;
+            free_text_hint = None;
+            choices =
+              [ { choice_id = "yes"; label = "Yes"; description = None } ];
+          };
+        ];
+      resolution = Wire_work.Ask_open;
+    }
+  in
+  let base_attention =
+    Attention.empty
+    |> Attention.rebuild ~asks:[ sample_ask ]
+         ~tool_approvals:[ sample_tool_approval ] ~gate_pending:[] ~goals:[]
+    |> Attention.mark_in_flight ~id:"tool:ta-lock-1"
+    |> Attention.mark_in_flight ~id:"ask:ask-lock-1"
+  in
+  let locked_inline_modal =
+    {
+      (Model.inline_modal_for (Nav.Board_comment { post_id = "p1"; parent_id = None })) with
+      submitting = true;
+    }
+  in
+  let locked_ask_modal =
+    { (Model.ask_modal_for sample_ask) with submitting = true }
+  in
+  let locked_config =
+    Config_store.empty
+    |> Config_store.mark_dry_run_loading
+    |> Config_store.mark_save_in_flight
+  in
+  let locked_runtime =
+    Runtime_store.empty |> Runtime_store.set_fusion_submitting true
+  in
+  let locked_kc =
+    Keeper_context_store.empty
+    |> Keeper_context_store.start_github_login ~keeper:"alpha"
+  in
+  let locked_knowledge =
+    let diag : Knowledge_store.memory_diagram_state =
+      {
+        request_id = 1;
+        keeper = "alpha";
+        event_identity = "ev-1";
+        revision = 1;
+        kind = Knowledge_store.Diagram_pele_card;
+        mode = Knowledge_store.Diagram_mode_auto;
+        payload = Observed.loading ~since_ns:t0;
+        scroll = 0;
+        copy_source = "";
+      }
+    in
+    Knowledge_store.empty
+    |> Knowledge_store.open_memory_diagram diag
+    |> Knowledge_store.request_wiki_edit ~slug:"guide"
+    |> Knowledge_store.set_pending_artifact_revision (Some ("art-1", Some 2))
+  in
+  let m_locked =
+    let m0 = Model.initial ~cols:120 ~rows:40 () in
+    {
+      m0 with
+      attention = base_attention;
+      inline_modal = Some locked_inline_modal;
+      ask_modal = Some locked_ask_modal;
+      nav =
+        {
+          m0.nav with
+          overlay =
+            Some
+              (Nav.Inline_action
+                 (Nav.Board_comment { post_id = "p1"; parent_id = None }));
+        };
+      config = locked_config;
+      knowledge = locked_knowledge;
+      runtime = locked_runtime;
+      keeper_context = locked_kc;
+    }
+  in
+  let check_locks_cleared ~label ~expect_modals_closed (m : Model.t) cmds =
+    Alcotest.(check bool) (label ^ ": epoch bumped") true
+      (not (Epoch.equal m.epoch m_locked.epoch));
+    Alcotest.(check int) (label ^ ": attention in_flight_ids cleared") 0
+      (List.length m.attention.in_flight_ids);
+    Alcotest.(check bool) (label ^ ": tool approval actionable again") true
+      (Option.is_some (Attention.top_fast_path m.attention));
+    (if expect_modals_closed then begin
+       Alcotest.(check bool) (label ^ ": inline_modal closed") true
+         (Option.is_none m.inline_modal);
+       Alcotest.(check bool) (label ^ ": ask_modal closed") true
+         (Option.is_none m.ask_modal);
+       Alcotest.(check bool) (label ^ ": Inline_action overlay cleared") true
+         (Option.is_none m.nav.overlay)
+     end
+     else begin
+       Alcotest.(check bool) (label ^ ": inline_modal.submitting reset") true
+         (match m.inline_modal with
+          | Some modal -> not modal.submitting
+          | None -> false);
+       Alcotest.(check bool) (label ^ ": ask_modal.submitting reset") true
+         (match m.ask_modal with
+          | Some modal -> not modal.submitting
+          | None -> false)
+     end);
+    Alcotest.(check bool) (label ^ ": config dry_run reset to idle") true
+      (match m.config.dry_run_preview with
+       | Config_store.Dry_run_idle -> true
+       | _ -> false);
+    Alcotest.(check bool) (label ^ ": config save_state reset to idle") true
+      (match m.config.save_state with
+       | Config_store.Save_idle -> true
+       | _ -> false);
+    Alcotest.(check bool) (label ^ ": fusion submitting reset") false
+      m.runtime.fusion_launch_draft.submitting;
+    Alcotest.(check bool) (label ^ ": github_login.running reset") false
+      (Keeper_context_store.get_keeper ~keeper:"alpha" m.keeper_context)
+        .github_login.running;
+    Alcotest.(check bool) (label ^ ": loading memory_diagram cleared") true
+      (Option.is_none m.knowledge.memory_diagram);
+    Alcotest.(check bool) (label ^ ": Cancel_memory_diagram emitted") true
+      (List.exists
+         (function Cmd.Cancel_memory_diagram -> true | _ -> false)
+         (Cmd.flatten cmds));
+    Alcotest.(check bool) (label ^ ": pending_wiki_edit_slug cleared") true
+      (Option.is_none m.knowledge.pending_wiki_edit_slug);
+    Alcotest.(check bool) (label ^ ": pending_artifact_revision cleared") true
+      (Option.is_none m.knowledge.pending_artifact_revision)
+  in
+  (* P0-3 Path A: 409 Workspace_mismatch *)
+  let m_wm, cmds_wm =
+    Update.step ~now:t0 m_locked
+      (Msg.Http_reply
+         {
+           epoch = m_locked.epoch;
+           reply =
+             Msg.Reply_action_ack
+               {
+                 label = Say.literal "test";
+                 ack_scope = Msg.Ack_toast_only;
+                 for_modal = None;
+                 result =
+                   Error
+                     (Msg.Workspace_mismatch
+                        {
+                          expected_instance = Some "i1";
+                          observed_instance = Some "i2";
+                          observed_workspace_sha256 = None;
+                          message = "changed";
+                        });
+               };
+         })
+  in
+  check_locks_cleared ~label:"Workspace_mismatch" ~expect_modals_closed:true
+    m_wm cmds_wm;
+  (* P0-3 Path B: Server_start_result (Ok ()) *)
+  let m_srv, cmds_srv =
+    Update.step ~now:t0 m_locked (Msg.Server_start_result (Ok ()))
+  in
+  check_locks_cleared ~label:"Server_start_result" ~expect_modals_closed:false
+    m_srv cmds_srv;
+  (* P0-3 Path C: Offline 'r' refresh *)
+  let m_offline =
+    {
+      m_locked with
+      freshness = { m_locked.freshness with server_offline = true };
+      nav = { m_locked.nav with overlay = None };
+    }
+  in
+  let m_ref, cmds_ref = Update.step ~now:t0 m_offline (char_key "r") in
+  check_locks_cleared ~label:"Offline refresh" ~expect_modals_closed:false
+    m_ref cmds_ref;
+
+  (* P1-7: Micro teleport_blocked opens visible overlay without mutating hidden workspace *)
+  let m_micro_tool =
+    let m0 = Model.initial ~cols:100 ~rows:20 () in
+    let attention =
+      Attention.empty
+      |> Attention.rebuild ~asks:[] ~tool_approvals:[ sample_tool_approval ]
+           ~gate_pending:[] ~goals:[]
+    in
+    { m0 with attention; nav = { m0.nav with workspace = Nav.Pulse } }
+  in
+  Alcotest.(check bool) "100x20 is Micro breakpoint" true
+    (Model.equal_breakpoint m_micro_tool.breakpoint Model.Micro);
+  let m_micro_after_j, _ = Update.step ~now:t0 m_micro_tool (char_key "J") in
+  Alcotest.(check bool) "Micro J on tool approval opens Drawer_queue overlay"
+    true
+    (Option.equal Nav.equal_overlay m_micro_after_j.nav.overlay
+       (Some (Nav.Queue_context Nav.Drawer_queue)));
+  Alcotest.(check bool) "Micro J preserves hidden workspace" true
+    (Nav.equal_workspace m_micro_after_j.nav.workspace Nav.Pulse);
+  let m_micro_ask =
+    let m0 = Model.initial ~cols:100 ~rows:20 () in
+    let attention =
+      Attention.empty
+      |> Attention.rebuild ~asks:[ sample_ask ] ~tool_approvals:[]
+           ~gate_pending:[] ~goals:[]
+    in
+    { m0 with attention; nav = { m0.nav with workspace = Nav.Pulse } }
+  in
+  let m_micro_after_j_ask, _ = Update.step ~now:t0 m_micro_ask (char_key "J") in
+  Alcotest.(check bool) "Micro J on Pending_ask opens Ask_answer overlay" true
+    (Option.equal Nav.equal_overlay m_micro_after_j_ask.nav.overlay
+       (Some Nav.Ask_answer));
+  Alcotest.(check bool) "Micro J on Ask preserves hidden workspace" true
+    (Nav.equal_workspace m_micro_after_j_ask.nav.workspace Nav.Pulse);
+  (* P1-7: Enlarging terminal defensively clears System_gate Micro_viewport *)
+  let m_gated =
+    let m0 = Model.initial ~cols:70 ~rows:20 () in
+    {
+      m0 with
+      nav = { m0.nav with overlay = Some (Nav.System_gate Nav.Micro_viewport) };
+    }
+  in
+  let m_enlarged, _ =
+    Update.step ~now:t0 m_gated (Msg.Resize { cols = 100; rows = 30 })
+  in
+  Alcotest.(check bool) "Resize >= 80x24 clears Micro_viewport overlay" true
+    (Option.is_none m_enlarged.nav.overlay);
+
+  (* P2-9: open_overlay initializes inline_modal & orphaned overlay does not trap Esc/Ctrl+Q *)
+  let m_open_inl, _ =
+    Update_nav.open_overlay (Model.initial ~cols:120 ~rows:40 ())
+      (Nav.Inline_action (Nav.Task_cancel "t-9"))
+  in
+  Alcotest.(check bool) "open_overlay (Inline_action _) populates inline_modal"
+    true (Option.is_some m_open_inl.inline_modal);
+  let m_orphan =
+    let m0 = Model.initial ~cols:120 ~rows:40 () in
+    {
+      m0 with
+      nav =
+        {
+          m0.nav with
+          overlay = Some (Nav.Inline_action (Nav.Task_cancel "t-9"));
+        };
+      inline_modal = None;
+    }
+  in
+  let m_orphan_esc, _ =
+    Update.step ~now:t0 m_orphan (key Keymap.Input.Escape)
+  in
+  Alcotest.(check bool) "Esc clears orphaned Inline_action overlay" true
+    (Option.is_none m_orphan_esc.nav.overlay);
+  let m_orphan_quit, cmds_orphan_quit =
+    Update.step ~now:t0 m_orphan (char_key ~ctrl:true "q")
+  in
+  Alcotest.(check bool) "Ctrl+Q clears orphan and emits Quit" true
+    (Option.is_none m_orphan_quit.nav.overlay
+     && List.exists
+          (function Cmd.Quit _ -> true | _ -> false)
+          (Cmd.flatten cmds_orphan_quit));
+  (* P2-9 in Micro breakpoint: orphaned Inline_action must quit on FIRST Ctrl+Q *)
+  let m_micro_orphan =
+    let m0 = Model.initial ~cols:100 ~rows:20 () in
+    {
+      m0 with
+      nav =
+        {
+          m0.nav with
+          overlay = Some (Nav.Inline_action (Nav.Task_cancel "t-9"));
+        };
+      inline_modal = None;
+    }
+  in
+  let m_micro_orphan_quit, cmds_micro_orphan_quit =
+    Update.step ~now:t0 m_micro_orphan (char_key ~ctrl:true "q")
+  in
+  Alcotest.(check bool)
+    "Micro orphaned Inline_action quits on FIRST Ctrl+Q press" true
+    (Option.is_none m_micro_orphan_quit.nav.overlay
+     && List.exists
+          (function Cmd.Quit _ -> true | _ -> false)
+          (Cmd.flatten cmds_micro_orphan_quit));
+
+  (* P2-10: Duplicate Enter on submitting inline modal + scoped Reply_action_ack *)
+  let m_comment, _ =
+    Update_nav.open_inline_modal (Model.initial ~cols:120 ~rows:40 ())
+      (Nav.Board_comment { post_id = "p-10"; parent_id = None })
+  in
+  let m_comment, _ = Update.step ~now:t0 m_comment (char_key "h") in
+  let m_comment, _ = Update.step ~now:t0 m_comment (char_key "i") in
+  (* Background Reply_action_ack while user is typing (submitting = false) must NOT close modal *)
+  let m_comment_after_bg, _ =
+    Update.step ~now:t0 m_comment
+      (Msg.Http_reply
+         {
+           epoch = m_comment.epoch;
+           reply =
+             Msg.Reply_action_ack
+               {
+                 label = Say.literal "copied";
+                 ack_scope = Msg.Ack_toast_only;
+                 for_modal = None;
+                 result = Ok ();
+               };
+         })
+  in
+  Alcotest.(check bool) "background ack preserves open non-submitting inline_modal"
+    true
+    (Option.is_some m_comment_after_bg.inline_modal
+     && Option.is_some m_comment_after_bg.nav.overlay);
+  let m_comment_after_bg_err, _ =
+    Update.step ~now:t0 m_comment_after_bg
+      (Msg.Http_reply
+         {
+           epoch = m_comment_after_bg.epoch;
+           reply =
+             Msg.Reply_action_ack
+               {
+                 label = Say.literal "bg err";
+                 ack_scope = Msg.Ack_toast_only;
+                 for_modal = None;
+                 result = Error (Msg.Transport (Health.Other_io "unrelated"));
+               };
+         })
+  in
+  Alcotest.(check bool)
+    "background error ack does not overwrite non-submitting modal.error" true
+    (match m_comment_after_bg_err.inline_modal with
+     | Some modal -> Option.is_none modal.error
+     | None -> false);
+  (* Submit once -> emits Post_board_comment & marks submitting = true *)
+  let m_sub1, cmds_sub1 =
+    Update.step ~now:t0 m_comment_after_bg (key Keymap.Input.Enter)
+  in
+  Alcotest.(check int) "first Enter emits 1 Post_board_comment" 1
+    (List.length
+       (List.filter
+          (function
+            | Cmd.Http_post { req = Cmd.Post_board_comment _; _ } -> true
+            | _ -> false)
+          (Cmd.flatten cmds_sub1)));
+  (* Second Enter while submitting -> NO duplicate POST *)
+  let m_sub2, cmds_sub2 =
+    Update.step ~now:t0 m_sub1 (key Keymap.Input.Enter)
+  in
+  Alcotest.(check int) "second Enter while submitting emits 0 commands" 0
+    (List.length (Cmd.flatten cmds_sub2));
+  (* Background Reply_action_ack (Ok & Error, for_modal=None or mismatched) while
+     Board_comment is submitting MUST NOT close or unlock it! *)
+  let m_sub_bg_ok, _ =
+    Update.step ~now:t0 m_sub2
+      (Msg.Http_reply
+         {
+           epoch = m_sub2.epoch;
+           reply =
+             Msg.Reply_action_ack
+               {
+                 label = Say.literal "copied";
+                 ack_scope = Msg.Ack_toast_only;
+                 for_modal = None;
+                 result = Ok ();
+               };
+         })
+  in
+  Alcotest.(check bool)
+    "background Ok ack (for_modal=None) does NOT close submitting Board_comment"
+    true
+    (match m_sub_bg_ok.inline_modal with
+     | Some modal -> modal.submitting && Option.is_some m_sub_bg_ok.nav.overlay
+     | None -> false);
+  let m_sub_bg_err, _ =
+    Update.step ~now:t0 m_sub_bg_ok
+      (Msg.Http_reply
+         {
+           epoch = m_sub_bg_ok.epoch;
+           reply =
+             Msg.Reply_action_ack
+               {
+                 label = Say.literal "bg err";
+                 ack_scope = Msg.Ack_toast_only;
+                 for_modal = None;
+                 result = Error (Msg.Transport (Health.Other_io "unrelated"));
+               };
+         })
+  in
+  Alcotest.(check bool)
+    "background Error ack (for_modal=None) does NOT unlock submitting Board_comment"
+    true
+    (match m_sub_bg_err.inline_modal with
+     | Some modal -> modal.submitting && Option.is_none modal.error
+     | None -> false);
+  let m_sub_other_modal, _ =
+    Update.step ~now:t0 m_sub_bg_err
+      (Msg.Http_reply
+         {
+           epoch = m_sub_bg_err.epoch;
+           reply =
+             Msg.Reply_action_ack
+               {
+                 label = Say.literal "sched";
+                 ack_scope = Msg.Ack_close_modal_and_refresh;
+                 for_modal = Some Nav.Schedule_form;
+                 result = Ok ();
+               };
+         })
+  in
+  Alcotest.(check bool)
+    "mismatched for_modal ack does NOT close submitting Board_comment" true
+    (match m_sub_other_modal.inline_modal with
+     | Some modal -> modal.submitting
+     | None -> false);
+  (* Matching Reply_board_comment closes Board_comment cleanly *)
+  let m_comment_closed, _ =
+    Update.step ~now:t0 m_sub_other_modal
+      (Msg.Http_reply
+         {
+           epoch = m_sub_other_modal.epoch;
+           reply = Msg.Reply_board_comment { post_id = "p-10"; result = Ok () };
+         })
+  in
+  Alcotest.(check bool)
+    "matching Reply_board_comment closes submitting Board_comment" true
+    (Option.is_none m_comment_closed.inline_modal
+     && Option.is_none m_comment_closed.nav.overlay);
+  (* Reply_action_ack-backed modal (Task_cancel "t-10"): only matching for_modal
+     unlocks on Error or closes on Ok! *)
+  let m_tc0 =
+    let m0 = Model.initial ~cols:120 ~rows:40 () in
+    let m_open, _ = Update_nav.open_inline_modal m0 (Nav.Task_cancel "t-10") in
+    {
+      m_open with
+      inline_modal =
+        Option.map
+          (fun (md : Model.inline_modal_state) -> { md with submitting = true })
+          m_open.inline_modal;
+    }
+  in
+  let m_tc_bg_ok, _ =
+    Update.step ~now:t0 m_tc0
+      (Msg.Http_reply
+         {
+           epoch = m_tc0.epoch;
+           reply =
+             Msg.Reply_action_ack
+               {
+                 label = Say.literal "bg";
+                 ack_scope = Msg.Ack_close_modal_and_refresh;
+                 for_modal = None;
+                 result = Ok ();
+               };
+         })
+  in
+  Alcotest.(check bool)
+    "for_modal=None Ok does NOT close submitting Task_cancel" true
+    (match m_tc_bg_ok.inline_modal with Some md -> md.submitting | None -> false);
+  let m_tc_wrong_id, _ =
+    Update.step ~now:t0 m_tc_bg_ok
+      (Msg.Http_reply
+         {
+           epoch = m_tc_bg_ok.epoch;
+           reply =
+             Msg.Reply_action_ack
+               {
+                 label = Say.literal "other";
+                 ack_scope = Msg.Ack_close_modal_and_refresh;
+                 for_modal = Some (Nav.Task_cancel "t-other");
+                 result = Ok ();
+               };
+         })
+  in
+  Alcotest.(check bool)
+    "mismatched Task_cancel id does NOT close submitting Task_cancel" true
+    (match m_tc_wrong_id.inline_modal with
+     | Some md -> md.submitting
+     | None -> false);
+  let m_tc_err, _ =
+    Update.step ~now:t0 m_tc_wrong_id
+      (Msg.Http_reply
+         {
+           epoch = m_tc_wrong_id.epoch;
+           reply =
+             Msg.Reply_action_ack
+               {
+                 label = Say.literal "cancel failed";
+                 ack_scope = Msg.Ack_close_modal_and_refresh;
+                 for_modal = Some (Nav.Task_cancel "t-10");
+                 result = Error (Msg.Transport (Health.Other_io "boom"));
+               };
+         })
+  in
+  Alcotest.(check bool)
+    "matching Task_cancel Error unlocks submitting and sets error" true
+    (match m_tc_err.inline_modal with
+     | Some md -> (not md.submitting) && Option.is_some md.error
+     | None -> false);
+  let m_tc_resub =
+    {
+      m_tc_err with
+      inline_modal =
+        Option.map
+          (fun (md : Model.inline_modal_state) -> { md with submitting = true })
+          m_tc_err.inline_modal;
+    }
+  in
+  let m_tc_closed, _ =
+    Update.step ~now:t0 m_tc_resub
+      (Msg.Http_reply
+         {
+           epoch = m_tc_resub.epoch;
+           reply =
+             Msg.Reply_action_ack
+               {
+                 label = Say.literal "cancelled";
+                 ack_scope = Msg.Ack_close_modal_and_refresh;
+                 for_modal = Some (Nav.Task_cancel "t-10");
+                 result = Ok ();
+               };
+         })
+  in
+  Alcotest.(check bool)
+    "matching Task_cancel Ok closes inline_modal & overlay" true
+    (Option.is_none m_tc_closed.inline_modal
+     && Option.is_none m_tc_closed.nav.overlay);
+
+  (* P2-11: Cut_reply cursor-progress guard & max-page cap *)
+  let c1 : Wire_chat_journal.cursor = { last_seq = 5; next_offset = 100 } in
+  let page1 : Wire_chat_journal.page =
+    {
+      events =
+        [
+          Wire_chat_journal.Text_delta
+            { text = "hi"; owner = Wire_chat_journal.Unobserved_scope None };
+        ];
+      next = Some c1;
+    }
+  in
+  let cut1 =
+    match Cut_reply.apply_page_checked page1 Cut_reply.start with
+    | Ok c -> c
+    | Error err -> Alcotest.fail (Cut_reply.page_error_to_string err)
+  in
+  (match Cut_reply.apply_page_checked { events = []; next = Some c1 } cut1 with
+   | Error (Cut_reply.Cursor_did_not_advance _) -> ()
+   | Ok _ -> Alcotest.fail "repeated cursor must be rejected"
+   | Error err -> Alcotest.fail (Cut_reply.page_error_to_string err));
+  (* Through Update.step: repeated cursor stops emitting Get_chat_operation_events
+     and marks slot as non-retryable Observed.Failed *)
+  let m_cut0 = Model.initial ~cols:120 ~rows:40 () in
+  let m_cut1, cmds_cut1 =
+    Update.step ~now:t0 m_cut0
+      (Msg.Http_reply
+         {
+           epoch = m_cut0.epoch;
+           reply =
+             Msg.Reply_chat_operation_events
+               {
+                 keeper = "alpha";
+                 operation_id = "op-loop";
+                 from = Wire_chat_journal.From_start;
+                 result = Ok page1;
+               };
+         })
+  in
+  Alcotest.(check bool) "advancing page 1 requests After c1" true
+    (List.exists
+       (function
+         | Cmd.Http_get
+             {
+               req =
+                 Cmd.Get_chat_operation_events
+                   { from = Wire_chat_journal.After c; _ };
+               _;
+             } ->
+             c.last_seq = 5 && c.next_offset = 100
+         | _ -> false)
+       (Cmd.flatten cmds_cut1));
+  let m_cut2, cmds_cut2 =
+    Update.step ~now:t0 m_cut1
+      (Msg.Http_reply
+         {
+           epoch = m_cut1.epoch;
+           reply =
+             Msg.Reply_chat_operation_events
+               {
+                 keeper = "alpha";
+                 operation_id = "op-loop";
+                 from = Wire_chat_journal.After c1;
+                 result = Ok { events = []; next = Some c1 };
+               };
+         })
+  in
+  Alcotest.(check int) "repeated cursor stops HTTP loop (0 cmds)" 0
+    (List.length (Cmd.flatten cmds_cut2));
+  Alcotest.(check bool) "repeated cursor marks slot Failed non-retryable" true
+    (match
+       Fleet_store.cut_reply_for ~keeper:"alpha" ~operation_id:"op-loop"
+         m_cut2.fleet
+     with
+     | Observed.Failed { retryable = false; _ } -> true
+     | _ -> false);
+  (* Page cap (max_pages = 100) *)
+  let rec feed_pages n cut =
+    let page : Wire_chat_journal.page =
+      {
+        events = [];
+        next = Some { last_seq = n; next_offset = n * 10 };
+      }
+    in
+    match Cut_reply.apply_page_checked page cut with
+    | Ok next ->
+        if n > Cut_reply.max_pages + 5 then
+          Alcotest.fail "expected Page_limit_exceeded"
+        else feed_pages (n + 1) next
+    | Error (Cut_reply.Page_limit_exceeded { max_pages }) ->
+        Alcotest.(check int) "capped at Cut_reply.max_pages" Cut_reply.max_pages
+          max_pages;
+        Alcotest.(check int) "stopped on page 100" Cut_reply.max_pages n
+    | Error err -> Alcotest.fail (Cut_reply.page_error_to_string err)
+  in
+  feed_pages 1 Cut_reply.start
+
 let () =
   Alcotest.run "masc_tui_store"
     [
@@ -13276,5 +13941,8 @@ let () =
           Alcotest.test_case
             "UX Batch 4: Memory dive/window, Wiki $EDITOR/log, Repos order, Logs anchor, Runtime [y]/[o] & [g] Home"
             `Quick test_ux_batch4_knowledge_runtime_infra;
+          Alcotest.test_case
+            "Freeze fixes: epoch lock resets, Micro J/resize, orphan/dup Inline_action & Cut_reply loop guard"
+            `Quick test_freeze_fixes_epoch_locks_micro_inline_and_cut_reply;
         ] );
     ]

@@ -210,6 +210,7 @@ val create :
   ?bearer_token:string option ->
   ?voice_backend:Voice_runner.backend ->
   ?editor_handoff:editor_handoff ->
+  ?on_editor_ready:(unit -> unit) ->
   on_quit:(Exit_reason.t -> unit) ->
   on_restart:(unit -> unit) ->
   unit ->
@@ -218,6 +219,22 @@ val create :
 val current_endpoint : t -> Http_client.endpoint
 val update_workspace_guard :
   t -> instance_id:string option -> workspace_sha256:string option -> unit
+
+val has_pending_editor : t -> bool
+(** [true] when an async pre-fetch (e.g. {!Cmd.Edit_wiki_page}) has finished
+    and queued an interactive [$EDITOR] handoff waiting for the UI loop. *)
+
+val run_pending_editor : ?can_launch:(unit -> bool) -> t -> unit
+(** Run any queued interactive [$EDITOR] handoff synchronously on the UI loop
+    so terminal pause/resume never races frame presentation. When [can_launch]
+    returns [false], any stale queued handoff is discarded cleanly without
+    suspending the terminal. *)
+
+val wait_reap_pid :
+  ?timeout_s:float -> ?cancelled:(unit -> bool) -> int -> (unit, string) result
+(** Poll [pid] with [WNOHANG] up to [timeout_s] (default [3.0]s) or until
+    [cancelled ()] becomes [true], sending [SIGKILL] and reaping on timeout or
+    cancellation so wedged external helpers never hang TUI exit. *)
 
 val execute : t -> Cmd.t -> unit
 (** Dispatch one {!Cmd.t}. Asynchronous work forks onto [sw] without blocking

@@ -2667,6 +2667,60 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         | Nav.Drawer_queue ->
             let rows_acc = ref [] in
             let push style txt = rows_acc := (style, txt) :: !rows_acc in
+            let attn_count = Attention.count model.attention in
+            if attn_count > 0 then begin
+              push (Typography.anchor ~bg theme)
+                (Say.resolve lang
+                   (Say.make
+                      ~ko:(Printf.sprintf "대기 중인 승인·확인 (%d건)" attn_count)
+                      ~en:(Printf.sprintf "Pending Attention / Approvals (%d)"
+                             attn_count)));
+              List.iter
+                (fun (entry : Attention.entry) ->
+                  let kind_tag =
+                    match entry.kind with
+                    | Health.Held_tool_approval _ -> "[TOOL]"
+                    | Health.Pending_ask _ -> "[ASK]"
+                    | Health.Goal_confirmation _ -> "[GOAL]"
+                  in
+                  let in_flight =
+                    Attention.is_in_flight ~id:entry.id model.attention
+                  in
+                  let keeper_s =
+                    match entry.keeper with
+                    | Some k -> " @" ^ k
+                    | None -> ""
+                  in
+                  let status_s =
+                    if in_flight then
+                      Say.resolve lang (Say.make ~ko:" (전송 중)" ~en:" (in flight)")
+                    else ""
+                  in
+                  let summary_one =
+                    String.map (function '\n' | '\r' -> ' ' | c -> c)
+                      (String.trim entry.summary)
+                  in
+                  let detail =
+                    if String.equal summary_one "" then ""
+                    else " · " ^ summary_one
+                  in
+                  let style = if in_flight then whisper_st else attn_st in
+                  push style
+                    (Printf.sprintf "  %s%s %s%s%s" kind_tag keeper_s entry.title
+                       status_s detail))
+                model.attention.items;
+              push whisper_st
+                (Say.resolve lang
+                   (if Model.equal_breakpoint model.breakpoint Model.Micro then
+                      Say.make
+                        ~ko:"  [Esc] 닫기 · 승인·처리는 터미널을 80x24 이상으로 넓혀 진행하세요"
+                        ~en:"  [Esc] close · enlarge terminal >= 80x24 to approve or resolve"
+                    else
+                      Say.make
+                        ~ko:"  [Esc] 닫기 · 상단 바 [Y]/[N] 또는 [2 Work > Inbox]에서 처리"
+                        ~en:"  [Esc] close · resolve via [Y]/[N] strip or [2 Work > Inbox]"));
+              push pri_st ""
+            end;
             let txs = Drafts.pending_txs_for_keeper ~keeper model.drafts in
             let draft = Drafts.draft_for ~keeper model.drafts in
             push (Typography.anchor ~bg theme)

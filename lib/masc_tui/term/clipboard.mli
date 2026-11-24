@@ -7,10 +7,17 @@ type error =
 
 type reader
 
+val default_timeout_s : float
+(** Default bounded timeout ([2.0] seconds) for external clipboard helpers. *)
+
 val readers : reader list
 val reader_name : reader -> string
 val reader_command : reader -> dest:string -> string
-val read_image : unit -> (string, error) result
+val read_image :
+  ?timeout_s:float ->
+  ?cancelled:(unit -> bool) ->
+  unit ->
+  (string, error) result
 val error_to_string : error -> string
 
 type writer
@@ -50,7 +57,12 @@ val osc52_sequence : ?in_tmux:bool -> string -> string
     in tmux DCS passthrough when [~in_tmux:true]). *)
 
 val copy_text :
-  copy_session -> write_osc52:(string -> unit) -> string -> copy_outcome
+  ?timeout_s:float ->
+  ?cancelled:(unit -> bool) ->
+  copy_session ->
+  write_osc52:(string -> unit) ->
+  string ->
+  copy_outcome
 
 val copy_outcome_say : copy_outcome -> Masc_tui_core.Say.t
 val copy_outcome_text : copy_outcome -> string

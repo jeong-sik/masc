@@ -6,6 +6,33 @@ import {
   decodeGateKeepers,
 } from './gate-keepers'
 
+// The context fields of a row whose Keeper has no turn record yet, as
+// context_fields_unavailable in
+// lib/keeper/keeper_context_observation_projection.ml writes them.
+function unobservedContextWire() {
+  const unavailable = { kind: 'not_observed', reason: 'context_measurement_missing' }
+  return {
+    context_ratio: null,
+    context_tokens: null,
+    context_max: null,
+    context_source: null,
+    context_provenance: 'unavailable',
+    estimated_context_ratio: null,
+    context_metrics_unavailable: unavailable,
+    context_metrics_unavailable_reason: 'context_measurement_missing',
+    context: {
+      source: null,
+      context_ratio: null,
+      context_tokens: null,
+      context_max: null,
+      provenance: 'unavailable',
+      estimated_context_ratio: null,
+      metrics_unavailable: unavailable,
+      metrics_unavailable_reason: 'context_measurement_missing',
+    },
+  }
+}
+
 // Keep this fixture keyed to keeper_list_row_json in
 // lib/keeper/keeper_tool_surface_ops.ml — the schema is strict both ways,
 // so a fixture that drifts from the producer only validates itself.
@@ -37,6 +64,7 @@ function keeperWire(name = 'planner') {
     runtime_id: `runtime-${name}`,
     created_at: '2026-08-12T00:00:00Z',
     updated_at: '2026-08-12T00:01:00Z',
+    ...unobservedContextWire(),
   }
 }
 
@@ -100,6 +128,106 @@ describe('decodeGateKeepers', () => {
       candle_decay: null,
       count: 1,
       keepers: [keeperWire()],
+      ...listingWire(1),
+    }))
+
+    expect(data.keepers).toEqual([{ name: 'planner', status: 'running' }])
+  })
+
+  // The three shapes observed_context_fields and context_fields_unavailable
+  // write: a measured turn, a turn whose input was estimated (raw count kept
+  // as evidence), and no turn record (keeperWire's default).
+  it('decodes rows carrying a measured and an estimated context observation', () => {
+    const measured = {
+      ...keeperWire('measured'),
+      context_ratio: 0.25,
+      context_tokens: 50000,
+      context_max: 200000,
+      context_source: 'turn_record',
+      context_provenance: 'measured',
+      estimated_context_ratio: null,
+      context_metrics_unavailable: null,
+      context_metrics_unavailable_reason: null,
+      context: {
+        source: 'turn_record',
+        context_ratio: 0.25,
+        context_tokens: 50000,
+        context_max: 200000,
+        provenance: 'measured',
+        estimated_context_ratio: null,
+        observed_at: '2026-08-12T00:01:00Z',
+        turn_ref: 'trace-measured#7',
+        absolute_turn: 7,
+        request_body_bytes: null,
+        metrics_unavailable: null,
+        metrics_unavailable_reason: null,
+        usage_scope: 'per_request',
+      },
+    }
+    const evidence = {
+      kind: 'not_observed',
+      reason: 'context_input_estimate',
+      usage_scope: 'per_request',
+      raw_input_tokens: 60000,
+      context_window: 200000,
+    }
+    const estimated = {
+      ...keeperWire('estimated'),
+      context_provenance: 'estimated',
+      estimated_context_ratio: 0.3,
+      context_metrics_unavailable: evidence,
+      context_metrics_unavailable_reason: 'context_input_estimate',
+      context: {
+        ...keeperWire().context,
+        provenance: 'estimated',
+        estimated_context_ratio: 0.3,
+        metrics_unavailable: evidence,
+        metrics_unavailable_reason: 'context_input_estimate',
+      },
+    }
+
+    const data = Effect.runSync(decodeGateKeepers({
+      count: 3,
+      keepers: [measured, estimated, keeperWire()],
+      ...listingWire(3),
+    }))
+
+    expect(data.keepers.map(keeper => keeper.name)).toEqual(['measured', 'estimated', 'planner'])
+  })
+
+  it('rejects a detailed row without its context observation', () => {
+    const wire: Record<string, unknown> = keeperWire()
+    delete wire.context
+    expectDrift({ count: 1, keepers: [wire], ...listingWire(1) })
+  })
+
+  it('decodes a row whose context names a reason this decoder has not seen', () => {
+    const wire = { ...keeperWire(), context_metrics_unavailable_reason: 'a_reason_added_later' }
+    const data = Effect.runSync(decodeGateKeepers({ count: 1, keepers: [wire], ...listingWire(1) }))
+
+    expect(data.keepers).toEqual([{ name: 'planner', status: 'running' }])
+  })
+
+  it('decodes a turn pulse whose slots are named objects', () => {
+    const data = Effect.runSync(decodeGateKeepers({
+      count: 1,
+      keepers: [{
+        ...keeperWire(),
+        recent_turns: {
+          known_since: 1_786_000_000,
+          slots: [{
+            starts_at: 1_786_001_400,
+            ok: 2,
+            rested: 1,
+            failed: 0,
+            scheduled: 1,
+            reacted: 1,
+            chat: 1,
+            own: 0,
+            unknown: 0,
+          }],
+        },
+      }],
       ...listingWire(1),
     }))
 

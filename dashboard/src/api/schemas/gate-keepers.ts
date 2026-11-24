@@ -50,6 +50,17 @@ const RecentTurnsWireSchema = Schema.Struct({
   slots: Schema.Array(RecentTurnsSlotWireSchema),
 })
 
+// Any JSON value. Unlike Schema.Unknown it rejects a missing key, which reads
+// as undefined.
+const UninterpretedJsonSchema = Schema.Union(
+  Schema.Null,
+  Schema.Boolean,
+  Schema.Number,
+  Schema.String,
+  Schema.Array(Schema.Unknown),
+  Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+)
+
 // Mirror of the healthy row built by keeper_list_row_json in
 // lib/keeper/keeper_tool_surface_ops.ml; phase/health/paused/next_action
 // ride the same row.
@@ -82,6 +93,20 @@ const GateKeeperWireSchema = Schema.Struct({
   runtime_id: Schema.NonEmptyString,
   created_at: Schema.NonEmptyString,
   updated_at: Schema.NonEmptyString,
+  // The context observation every detailed row carries
+  // (lib/keeper/keeper_context_observation_projection.ml `context_fields`).
+  // This consumer does not interpret it, so the keys must be present but
+  // their values are not checked: a reason string the server adds must not
+  // fail the whole roster.
+  context_ratio: UninterpretedJsonSchema,
+  context_tokens: UninterpretedJsonSchema,
+  context_max: UninterpretedJsonSchema,
+  context_source: UninterpretedJsonSchema,
+  context_provenance: UninterpretedJsonSchema,
+  estimated_context_ratio: UninterpretedJsonSchema,
+  context_metrics_unavailable: UninterpretedJsonSchema,
+  context_metrics_unavailable_reason: UninterpretedJsonSchema,
+  context: UninterpretedJsonSchema,
 })
 
 const GateKeeperDirectoryIssueWireSchema = Schema.Struct({

@@ -4234,7 +4234,7 @@ let apply_mouse ~now (m : Model.t) (ev : Keymap.Input.mouse_event) =
       else m
     in
     match ev with
-    | Keymap.Input.Wheel { dir; col; row } ->
+    | Keymap.Input.Wheel { dir; col; row } -> (
         let gx = col - 1 in
         let gy = row - 1 in
         let move_dir =
@@ -4317,7 +4317,7 @@ let apply_mouse ~now (m : Model.t) (ev : Keymap.Input.mouse_event) =
               in
               (m_final, cmds)
           | Some _ | None ->
-              Update_actions.execute_action ~now m_base (Keymap.Move move_dir)
+              Update_actions.execute_action ~now m_base (Keymap.Move move_dir))
     | Keymap.Input.Left_press { col; row } -> (
         if
           Option.is_some m.nav.overlay

@@ -68,6 +68,8 @@ jobs:
           src/workspaces/runtime/runtime.test.ts
           src/workspaces/infra/infra.test.ts
           src/workspaces/settings/settings.test.ts
+          src/workspaces/work/work.test.ts
+          src/workspaces/knowledge/knowledge.test.ts
           src/app.test.ts
 
       - name: Verify production bundle contract

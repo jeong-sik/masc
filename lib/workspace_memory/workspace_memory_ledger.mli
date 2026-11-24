@@ -114,10 +114,13 @@ type observation =
       }
 
 val observe : base_path:string -> observation
-(** Current durable ledger only. Old proposal files and publication descriptors
-    never count as an available ledger. A corrupt ledger or invalid workspace
-    base is unavailable. [Missing] means the ledger is absent in an existing
-    workspace, consistently with [load]. *)
+(** Observe World Memory when its SQLite store exists. Otherwise observe
+    the file-backed Curator ledger. *)
+
+val observe_curator : base_path:string -> observation
+(** Observe only the file-backed Curator ledger. Its generation can be
+    compared with {!sha256} of a value returned by {!load}. Old proposal
+    files and publication descriptors never count as an available ledger. *)
 
 val observe_with_briefing_template : briefing_template:string -> base_path:string -> observation
 (** As {!observe}, using a caller-supplied resolved briefing template so
@@ -125,7 +128,7 @@ val observe_with_briefing_template : briefing_template:string -> base_path:strin
 
 val check_readable : base_path:string -> (unit, string) result
 (** Fresh regular-file, payload-read and strict decoding checks used by
-    {!observe}. An absent ledger in an existing workspace succeeds; an invalid
+    {!observe_curator}. An absent ledger in an existing workspace succeeds; an invalid
     base, nonregular file or unreadable/corrupt ledger fails. Does not compute
     the ledger digest, resolve the briefing prompt or read the briefing.
     This is a read-only availability check, not a retained snapshot or write

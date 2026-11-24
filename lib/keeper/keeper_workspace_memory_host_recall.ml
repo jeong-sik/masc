@@ -1,6 +1,7 @@
 module Selection = Keeper_workspace_memory_selection
 module View = Workspace_memory_ledger_view
 module IO = Keeper_workspace_memory_selection_io
+module String_map = Map.Make (String)
 open Result.Syntax
 
 let decode_summary ~is_excluded json =
@@ -37,22 +38,101 @@ let deferred_reason = function
   | Source_unavailable detail -> "source_unavailable",detail
   | Applicability_unresolved -> "applicability_unresolved","source scope remains unresolved"
 
-let collect_with ~is_excluded ~summary ~detail_snapshot ~evaluate ~purpose =
-  let* initial = summary () in
-  let* snapshot = decode_summary ~is_excluded initial in
+type retrieval_phase =
+  { summary : Yojson.Safe.t
+  ; detail : id:string -> (Yojson.Safe.t, string) result
+  }
+
+let read_curator_phase ~base_path () =
+  Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+    let* snapshot = View.resolve_snapshot ~base_path in
+    let* summary = View.summary_in_snapshot snapshot in
+    Ok { summary; detail = View.detail_in_snapshot snapshot })
+;;
+
+let world_recall_record (fact : World_memory_types.world_fact) =
+  let owners =
+    match fact.provenance with
+    | World_memory_types.Proposed_by { keeper_id; _ } -> [ keeper_id ]
+    | World_memory_types.Cross_keeper_synthesized { keeper_ids; _ } -> keeper_ids
+  in
+  let members =
+    List.sort_uniq String.compare owners
+    |> List.map (fun keeper_id -> `Assoc [ "keeper_id", `String keeper_id ])
+  in
+  [ "id", `String fact.fact_id
+  ; "text", `String fact.claim
+  ; "scope", `String fact.scope
+  ; "revision", `Int fact.revision
+  ; "updated_seq", `Int fact.updated_seq
+  ; "members", `List members
+  ]
+;;
+
+let read_world_phase ~base_path () =
+  let* snapshot =
+    World_memory_store.read_snapshot ~include_inactive:false ~base_path ()
+    |> Result.map_error World_memory_store.error_to_string
+  in
+  let records =
+    List.fold_left
+      (fun records (fact : World_memory_types.world_fact) ->
+         if World_memory_types.is_private_scope fact.scope then records
+         else String_map.add fact.fact_id (world_recall_record fact) records)
+      String_map.empty
+      snapshot.facts
+  in
+  let claims =
+    String_map.bindings records |> List.map (fun (_, fields) -> `Assoc fields)
+  in
+  (* Digest jobs have their own cadence. Bind recall to the content read in
+     this transaction, including changes between two digest publications. *)
+  let ledger_sha256 =
+    Agent_core_sha256.(digest_string (Yojson.Safe.to_string (`List claims)) |> to_hex)
+  in
+  let summary =
+    `Assoc
+      [ "status", `String "available"
+      ; "ledger_sha256", `String ledger_sha256
+      ; "claims", `List claims
+      ; "conflicts", `List []
+      ]
+  in
+  let detail ~id =
+    match String_map.find_opt id records with
+    | None -> Ok (`Assoc [ "found", `Bool false; "id", `String id ])
+    | Some fields ->
+      Ok
+        (`Assoc
+           ([ "found", `Bool true
+            ; "kind", `String "claim"
+            ; "ledger_sha256", `String ledger_sha256
+            ; "semantic_verification", `String "not_performed"
+            ] @ fields))
+  in
+  Ok { summary; detail }
+;;
+
+let phase_reader ~base_path =
+  if World_memory_store.exists ~base_path then read_world_phase ~base_path
+  else read_curator_phase ~base_path
+;;
+
+let collect_with ~is_excluded ~initial ~read_phase ~evaluate ~purpose =
+  let* snapshot = decode_summary ~is_excluded initial.summary in
   match snapshot with
   | None -> Ok (`Assoc ["status",`String "missing"])
   | Some (ledger_sha256,candidates,withheld) ->
-    let resolve = bound_detail ~detail:(detail_snapshot ()) ~ledger_sha256 in
+    let resolve = bound_detail ~detail:initial.detail ~ledger_sha256 in
     let decisions = Selection.select_many ~evaluate ~resolve ~purpose candidates in
     (* Revalidate after model execution, including sources that can change
        independently of the Curator ledger. No stale selection is published. *)
-    let* final = summary () in
-    let* final_snapshot = decode_summary ~is_excluded final in
+    let* final = read_phase () in
+    let* final_snapshot = decode_summary ~is_excluded final.summary in
     let* () = match final_snapshot with
       | Some (current,_,final_withheld) when String.equal current ledger_sha256 && final_withheld=withheld -> Ok ()
       | Some _ | None -> Error "shared ledger changed before retrieval publication" in
-    let resolve = bound_detail ~detail:(detail_snapshot ()) ~ledger_sha256 in
+    let resolve = bound_detail ~detail:final.detail ~ledger_sha256 in
     let* selected = List.fold_left (fun result decision ->
       let* rows = result in
       match decision with
@@ -79,10 +159,6 @@ let collect_with ~is_excluded ~summary ~detail_snapshot ~evaluate ~purpose =
        "source_policy_withheld_count",`Int (List.length withheld);
        "not_needed_count",`Int (List.fold_left (fun count -> function
          | Selection.Not_needed _ -> count+1 | Selected _ | Deferred _ -> count) 0 decisions)])
-
-let collect ?(is_excluded = fun _ -> false) ~summary ~detail ~evaluate ~purpose () =
-  collect_with ~is_excluded ~summary
-    ~detail_snapshot:(fun () -> detail) ~evaluate ~purpose
 
 let render_payload payload =
   let unavailable = "\n\nShared memory host retrieval could not be rendered; availability is unknown." in
@@ -167,22 +243,15 @@ let defer_for_capacity prepared ~refusal =
      | Some _ | None -> unchanged ())
   | _ -> unchanged ()
 
-let prepare_available ~config ~keeper_id ~purpose =
+let prepare_available ~config ~keeper_id ~purpose ~initial ~read_phase =
   let result,adapter =
     match Typesafeai_config.workspace_memory_selection_destinations ~keeper_id with
       | Error reason -> Error (Typesafeai_config.unavailable_reason_to_string reason),None
       | Ok destinations ->
         let adapter = IO.create ~config ~keeper_id ~destinations in
-        let base_path = config.Workspace.base_path in
-        let summary () = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () -> View.summary ~base_path) in
-        let detail_snapshot () =
-          let snapshot = Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
-            Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () -> View.resolve_snapshot ~base_path)) in
-          fun ~id ->
-            let* snapshot = Eio.Lazy.force snapshot in
-            View.detail_in_snapshot snapshot ~id in
         let result = collect_with
-          ~is_excluded:(fun keeper_id -> Typesafeai_config.is_excluded ~keeper_id) ~summary ~detail_snapshot
+          ~is_excluded:(fun keeper_id -> Typesafeai_config.is_excluded ~keeper_id)
+          ~initial ~read_phase
           ~evaluate:(IO.evaluate ~clock:(Eio_context.get_clock_opt ()) adapter) ~purpose in
         let result = match IO.retain_result adapter ~purpose result with
           | Ok () -> result
@@ -209,12 +278,11 @@ let prepare_available ~config ~keeper_id ~purpose =
     | `List (_ :: _ as rows) ->
       let* _ = Typesafeai_config.workspace_memory_selection_destinations ~keeper_id
         |> Result.map_error Typesafeai_config.unavailable_reason_to_string in
-      let* snapshot = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-        View.resolve_snapshot ~base_path:config.Workspace.base_path) in
+      let* phase = read_phase () in
       List.fold_left (fun result row ->
         let* () = result in
         let id = Yojson.Safe.Util.(row |> member "id" |> to_string) in
-        let* current = View.detail_in_snapshot snapshot ~id in
+        let* current = phase.detail ~id in
         let excluded = match Yojson.Safe.Util.member "members" current with
           | `List members -> List.exists (fun member ->
               match Yojson.Safe.Util.member "keeper_id" member with
@@ -233,20 +301,39 @@ let prepare_available ~config ~keeper_id ~purpose =
 let prepare ~config ~keeper_id ~purpose =
   let empty text = {projection=Atomic.make {payload=`Null;text};validate=(fun _ -> Ok ());
     retain=(fun ~reason:_ ~payload:_ -> Error "no selected memory")} in
-  match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-    Workspace_memory_ledger.observe ~base_path:config.Workspace.base_path) with
-  | Workspace_memory_ledger.Missing -> empty ""
-  | Available descriptor when descriptor.claim_count=0 && descriptor.conflict_count=0 -> empty ""
-  | Unavailable _ -> empty "\n\nShared memory is unavailable; no selected evidence was retrieved."
-  | Available _ -> prepare_available ~config ~keeper_id ~purpose
+  let read_phase = phase_reader ~base_path:config.Workspace.base_path in
+  match read_phase () with
+  | Error _ -> empty "\n\nShared memory is unavailable; no selected evidence was retrieved."
+  | Ok initial ->
+    let open Yojson.Safe.Util in
+    if member "status" initial.summary = `String "missing"
+       || (member "claims" initial.summary = `List [] && member "conflicts" initial.summary = `List [])
+    then empty ""
+    else prepare_available ~config ~keeper_id ~purpose ~initial ~read_phase
+
 
 let render ~config ~keeper_id ~purpose =
   render_prepared (prepare ~config ~keeper_id ~purpose)
 
 module For_testing = struct
   let prepare_projection = make_prepared
-  let collect = collect
+
+  let collect_fixture ~is_excluded ~summary ~detail_snapshot ~evaluate ~purpose =
+    let read_phase () =
+      let* summary = summary () in
+      Ok { summary; detail = detail_snapshot () }
+    in
+    let* initial = read_phase () in
+    collect_with ~is_excluded ~initial ~read_phase ~evaluate ~purpose
+
   let collect_with_snapshots ~summary ~detail_snapshot ~evaluate ~purpose =
-    collect_with ~is_excluded:(fun _ -> false)
-      ~summary ~detail_snapshot ~evaluate ~purpose
+    collect_fixture ~is_excluded:(fun _ -> false) ~summary ~detail_snapshot ~evaluate ~purpose
+
+  let collect ?(is_excluded = fun _ -> false) ~summary ~detail ~evaluate ~purpose () =
+    collect_fixture ~is_excluded ~summary ~detail_snapshot:(fun () -> detail) ~evaluate ~purpose
+
+  let collect_from_store ~base_path ~is_excluded ~evaluate ~purpose =
+    let read_phase = phase_reader ~base_path in
+    let* initial = read_phase () in
+    collect_with ~is_excluded ~initial ~read_phase ~evaluate ~purpose
 end

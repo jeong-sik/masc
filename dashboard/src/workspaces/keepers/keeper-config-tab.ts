@@ -8,7 +8,15 @@
  */
 
 import { html } from 'htm/preact'
-import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import {
+  disconnectKeeperOAuth,
+  saveKeeperOAuthClient,
+  startKeeperGithubDeviceFlow,
+  startKeeperOAuthPopupFlow,
+  type ActiveKeeperOAuthFlow,
+  type KeeperOAuthFlowHandle,
+} from '../../core/keeper-oauth-flow'
 import {
   fetchConfigSchemaApi,
   postConfigPatchApi,
@@ -18,11 +26,10 @@ import {
   type ConfigSchemaData,
 } from '../../api/config-schema'
 import {
-  fetchKeeperAttachedProvidersApi,
+  fetchKeeperOAuthAttachedToolsApi,
   mutateKeeperSecretApi,
   refreshKeeperIdentityToolsApi,
   setKeeperIdentitySwitchApi,
-  startKeeperOAuthLoginApi,
 } from './keepers-api'
 import type {
   KeeperAttachedProvider,
@@ -71,8 +78,22 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
   const [secretValue, setSecretValue] = useState('')
   const [secretStatus, setSecretStatus] = useState<string | null>(null)
   const [providers, setProviders] = useState<readonly KeeperAttachedProvider[]>([])
+  const [oauthCallbackUrl, setOauthCallbackUrl] = useState<string | null>(null)
   const [oauthStatus, setOauthStatus] = useState<string | null>(null)
-  const [oauthAuthorizeUrl, setOauthAuthorizeUrl] = useState<string | null>(null)
+  const [activeOAuthFlow, setActiveOAuthFlow] = useState<ActiveKeeperOAuthFlow | null>(null)
+  const [clientDrawer, setClientDrawer] = useState<{
+    readonly provider: string
+    readonly providerLabel: string
+    readonly clientId: string
+    readonly clientSecret: string
+    readonly scopes: string
+  } | null>(null)
+  const [clientBusy, setClientBusy] = useState(false)
+  const oauthFlowRef = useRef<KeeperOAuthFlowHandle | null>(null)
+
+  useEffect(() => () => {
+    oauthFlowRef.current?.cancel()
+  }, [])
 
   const loadSchema = useCallback(async () => {
     setConfigError(null)
@@ -90,12 +111,17 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
   }, [keeperName])
 
   const loadProviders = useCallback(async () => {
-    const provRes = await fetchKeeperAttachedProvidersApi(keeperName)
-    if (provRes.ok) setProviders(provRes.value)
+    const provRes = await fetchKeeperOAuthAttachedToolsApi(keeperName)
+    if (provRes.ok) {
+      setProviders(provRes.value.providers)
+      setOauthCallbackUrl(provRes.value.callbackUrl)
+    }
   }, [keeperName])
 
   useEffect(() => {
-    setOauthAuthorizeUrl(null)
+    oauthFlowRef.current?.cancel()
+    setActiveOAuthFlow(null)
+    setClientDrawer(null)
     void Promise.all([loadSchema(), loadProviders()])
   }, [loadSchema, loadProviders])
 
@@ -378,15 +404,123 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
             <h3>OAuth Identity & Attached Tools</h3>
           </div>
           ${oauthStatus && html`<div class="kp-pill" data-tone="info">${oauthStatus}</div>`}
-          ${oauthAuthorizeUrl && html`
-            <a
-              class="btn-primary"
-              href=${oauthAuthorizeUrl}
-              target="_blank"
-              rel="noopener noreferrer"
+          ${activeOAuthFlow && html`
+            <div class="kp-block-card kp-block-card--tool" data-testid="keeper-config-oauth-flow" role="status">
+              <div class="kp-card-head">
+                <strong>${activeOAuthFlow.providerLabel} · ${activeOAuthFlow.phase}</strong>
+                <button
+                  type="button"
+                  class="btn-ghost"
+                  onClick=${() => {
+                    oauthFlowRef.current?.cancel()
+                    setActiveOAuthFlow(null)
+                  }}
+                >
+                  닫기
+                </button>
+              </div>
+              <div class="kp-roster-sub">${activeOAuthFlow.message}</div>
+              <div class="kp-pill-row">
+                ${activeOAuthFlow.authorizeUrl && html`
+                  <a
+                    class="btn-primary"
+                    href=${activeOAuthFlow.authorizeUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    OAuth 인증 페이지 열기 ↗
+                  </a>
+                `}
+                ${activeOAuthFlow.deviceCode && html`
+                  <span class="kp-pill" data-tone="brass">${activeOAuthFlow.deviceCode}</span>
+                `}
+              </div>
+            </div>
+          `}
+          ${clientDrawer && html`
+            <form
+              class="kp-block-card kp-block-card--memory"
+              data-testid="keeper-config-oauth-client-form"
+              onSubmit=${async (ev: Event) => {
+                ev.preventDefault()
+                if (!clientDrawer.clientId.trim()) return
+                setClientBusy(true)
+                const res = await saveKeeperOAuthClient({
+                  provider: clientDrawer.provider,
+                  clientId: clientDrawer.clientId,
+                  clientSecret: clientDrawer.clientSecret,
+                  scopes: clientDrawer.scopes,
+                })
+                setClientBusy(false)
+                if (!res.ok) {
+                  setOauthStatus(`앱 등록 실패: ${res.error.message}`)
+                  return
+                }
+                setOauthStatus(`${clientDrawer.providerLabel} OAuth 앱 등록 완료`)
+                setClientDrawer(null)
+                void loadProviders()
+              }}
             >
-              OAuth 인증 페이지 열기 ↗
-            </a>
+              <div class="kp-card-head">
+                <strong>내 OAuth 앱 등록 · ${clientDrawer.providerLabel}</strong>
+                <button type="button" class="btn-ghost" onClick=${() => setClientDrawer(null)}>닫기</button>
+              </div>
+              ${oauthCallbackUrl && html`
+                <div class="kp-pill-row" data-testid="keeper-oauth-callback-url" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-2)' }}>
+                  <span>Callback URL:</span>
+                  <code class="mono" style=${{ overflowWrap: 'anywhere' }}>${oauthCallbackUrl}</code>
+                  <button
+                    type="button"
+                    class="btn-ghost"
+                    onClick=${() => {
+                      if (typeof navigator !== 'undefined' && navigator.clipboard) {
+                        void navigator.clipboard.writeText(oauthCallbackUrl)
+                        setOauthStatus('Callback URL 복사 완료')
+                      }
+                    }}
+                  >
+                    복사
+                  </button>
+                </div>
+              `}
+              <input
+                type="text"
+                class="kp-input"
+                aria-label="Keeper OAuth Client ID"
+                placeholder="Client ID (필수)"
+                required
+                value=${clientDrawer.clientId}
+                onInput=${(e: Event) => {
+                  const clientId = (e.currentTarget as HTMLInputElement).value
+                  setClientDrawer((cur) => (cur ? { ...cur, clientId } : null))
+                }}
+              />
+              <input
+                type="password"
+                class="kp-input"
+                aria-label="Keeper OAuth Client Secret"
+                placeholder="Client Secret (공개 PKCE 앱은 비워두세요)"
+                value=${clientDrawer.clientSecret}
+                onInput=${(e: Event) => {
+                  const clientSecret = (e.currentTarget as HTMLInputElement).value
+                  setClientDrawer((cur) => (cur ? { ...cur, clientSecret } : null))
+                }}
+              />
+              <input
+                type="text"
+                class="kp-input"
+                aria-label="Keeper OAuth Scopes"
+                placeholder="Scopes (선택)"
+                value=${clientDrawer.scopes}
+                onInput=${(e: Event) => {
+                  const scopes = (e.currentTarget as HTMLInputElement).value
+                  setClientDrawer((cur) => (cur ? { ...cur, scopes } : null))
+                }}
+              />
+              <button type="submit" class="btn-primary" disabled=${clientBusy}>
+                ${clientBusy ? '저장 중…' : '앱 저장'}
+              </button>
+            </form>
           `}
           ${providers.length === 0
             ? html`<div class="kp-empty">연결 가능한 OAuth 공급자 없음</div>`
@@ -403,6 +537,21 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
                     </div>
                   </div>
                   <div class="kp-pill-row">
+                    ${prov.provider !== 'github' && html`
+                      <button
+                        type="button"
+                        class="btn-ghost"
+                        onClick=${() => setClientDrawer({
+                          provider: prov.provider,
+                          providerLabel: prov.provider_label,
+                          clientId: '',
+                          clientSecret: '',
+                          scopes: '',
+                        })}
+                      >
+                        앱 설정
+                      </button>
+                    `}
                     ${prov.attached
                       ? html`
                           <button
@@ -429,30 +578,50 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
                           >
                             갱신
                           </button>
+                          <button
+                            type="button"
+                            class="kp-btn-danger"
+                            onClick=${async () => {
+                              const res = await disconnectKeeperOAuth(keeperName, prov.provider)
+                              setOauthStatus(res.ok ? `${prov.provider_label} 연결 해제됨` : res.error.message)
+                              void loadProviders()
+                            }}
+                          >
+                            해제
+                          </button>
                         `
                       : html`
                           <button
                             type="button"
                             class="btn-primary"
-                            onClick=${async () => {
-                              const res = await startKeeperOAuthLoginApi(keeperName, prov.provider)
-                              if (res.ok && res.value.authorize_url) {
-                                try {
-                                  const parsed = new URL(res.value.authorize_url)
-                                  if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
-                                    setOauthAuthorizeUrl(parsed.toString())
-                                    setOauthStatus(`${prov.provider_label} 인증 링크가 준비되었습니다.`)
-                                  } else {
-                                    setOauthAuthorizeUrl(null)
-                                    setOauthStatus('유효하지 않은 OAuth URL 스킴입니다.')
-                                  }
-                                } catch {
-                                  setOauthAuthorizeUrl(null)
-                                  setOauthStatus('유효하지 않은 OAuth URL입니다.')
-                                }
-                              } else if (!res.ok) {
-                                setOauthStatus(`OAuth 시작 실패: ${res.error.message}`)
+                            onClick=${() => {
+                              oauthFlowRef.current?.cancel()
+                              if (prov.provider === 'github') {
+                                oauthFlowRef.current = startKeeperGithubDeviceFlow({
+                                  keeper: keeperName,
+                                  providerLabel: prov.provider_label,
+                                  onUpdate: (st) => {
+                                    setActiveOAuthFlow(st)
+                                    setOauthStatus(st.message)
+                                  },
+                                  onSettled: (ok) => {
+                                    if (ok) void loadProviders()
+                                  },
+                                })
+                                return
                               }
+                              oauthFlowRef.current = startKeeperOAuthPopupFlow({
+                                keeper: keeperName,
+                                provider: prov.provider,
+                                providerLabel: prov.provider_label,
+                                onUpdate: (st) => {
+                                  setActiveOAuthFlow(st)
+                                  setOauthStatus(st.message)
+                                },
+                                onSettled: (ok) => {
+                                  if (ok) void loadProviders()
+                                },
+                              })
                             }}
                           >
                             연결

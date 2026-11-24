@@ -30,10 +30,25 @@ import {
   KeeperDebugCompanion,
   shouldDefaultOpenCompanion,
 } from './keeper-debug-companion'
+import {
+  internalModeLabel,
+  loadChatBlockPrefs,
+  nextInternalMode,
+  nextThinkingMode,
+  nextToolsMode,
+  parseChatMessageBlocks,
+  saveChatBlockPrefs,
+  shouldRenderChatEntry,
+  summarizeCompact,
+  thinkingModeLabel,
+  toolsModeLabel,
+  type ChatBlockPrefs,
+} from './chat-blocks'
 import type {
   BtwQueryState,
   ChatAttachmentDraft,
   ChatDeliveryState,
+  ChatToolBlock,
   ChatTranscriptEntry,
   KeeperRosterItem,
   QueuedChatOperation,
@@ -82,6 +97,15 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const [voiceBusy, setVoiceBusy] = useState(false)
   const [controlToken, setControlToken] = useState<string | null>(keeper.chat_control_token)
   const [companionOpen, setCompanionOpen] = useState<boolean>(() => shouldDefaultOpenCompanion())
+  const [blockPrefs, setBlockPrefs] = useState<ChatBlockPrefs>(() => loadChatBlockPrefs())
+
+  const updateBlockPrefs = useCallback((updater: (cur: ChatBlockPrefs) => ChatBlockPrefs) => {
+    setBlockPrefs((cur) => {
+      const next = updater(cur)
+      saveChatBlockPrefs(next)
+      return next
+    })
+  }, [])
 
   const [btw, setBtw] = useState<BtwQueryState>({
     status: 'idle',
@@ -134,17 +158,23 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     }
   }, [loadInitialHistory])
 
-  // Global ⌘. / Ctrl+. shortcut to toggle Opt-In Right Debug Companion
+  // Global shortcuts: ⌘. / Ctrl+. (Debug Companion) and Alt+T (Thinking block visibility)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (e.isComposing || e.keyCode === 229) return
       if ((e.metaKey || e.ctrlKey) && e.key === '.') {
         e.preventDefault()
         setCompanionOpen((prev) => !prev)
+        return
+      }
+      if (e.altKey && !e.metaKey && !e.ctrlKey && e.key.toLowerCase() === 't') {
+        e.preventDefault()
+        updateBlockPrefs((cur) => ({ ...cur, thinking: nextThinkingMode(cur.thinking) }))
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [])
+  }, [updateBlockPrefs])
 
   const handleLoadEarlier = async () => {
     if (!nextCursor || loadingHistory) return
@@ -335,6 +365,39 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
               thinking: (m.thinking ?? '') + delta,
             }))
           },
+          onToolStart: (toolName, toolCallId) => {
+            updateAssistantEntry(assistantId, (m) => {
+              const nextTool: ChatToolBlock = { id: toolCallId, name: toolName, status: 'running' }
+              return { ...m, toolCalls: [...(m.toolCalls ?? []), nextTool] }
+            })
+          },
+          onToolArgsDelta: (toolCallId, delta) => {
+            updateAssistantEntry(assistantId, (m) => {
+              const list = [...(m.toolCalls ?? [])]
+              const idx = toolCallId
+                ? list.findIndex((t) => t.id === toolCallId)
+                : list.length - 1
+              if (idx < 0) return m
+              const cur = list[idx]!
+              list[idx] = { ...cur, args: (cur.args ?? '') + delta }
+              return { ...m, toolCalls: list }
+            })
+          },
+          onToolResult: (toolCallId, content) => {
+            updateAssistantEntry(assistantId, (m) => {
+              const list = [...(m.toolCalls ?? [])]
+              const idx = toolCallId
+                ? list.findIndex((t) => t.id === toolCallId)
+                : list.length - 1
+              if (idx < 0) {
+                list.push({ id: toolCallId || undefined, name: 'tool', result: content, status: 'completed' })
+              } else {
+                const cur = list[idx]!
+                list[idx] = { ...cur, result: content, status: 'completed' }
+              }
+              return { ...m, toolCalls: list }
+            })
+          },
           onReplyDetails: (reply, turnRef) => {
             updateAssistantEntry(assistantId, (m) => ({
               ...m,
@@ -439,12 +502,49 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     : RING_CIRCUMFERENCE
   const ringTone = ctxPct === null ? 'absent' : ctxPct >= 85 ? 'bad' : ctxPct >= 65 ? 'warn' : 'ok'
 
+  const recentSlice = messages.slice(-120)
+  const parsedEntries = recentSlice.map((msg) => ({ msg, blocks: parseChatMessageBlocks(msg) }))
+  const hiddenInternalCount = parsedEntries.filter(
+    ({ blocks }) => blocks.isInternalOnly && blockPrefs.internal === 'hidden',
+  ).length
+  const visibleEntries = parsedEntries.filter(({ msg, blocks }) =>
+    shouldRenderChatEntry(msg, blocks, blockPrefs),
+  )
+
   return html`
     <div class="kp-chat-shell" data-companion-open=${companionOpen ? 'true' : 'false'}>
       <div class="kp-chat-main">
         <div class="kp-chat-toolbar">
-          <div class="kp-pill-row">
+          <div class="kp-pill-row kp-chat-toggles">
             <span class="kp-pill" data-tone="info">Origin_bare · AG-UI SSE</span>
+            <button
+              type="button"
+              class="btn-ghost kp-toggle-btn"
+              data-testid="chat-toggle-thinking"
+              data-active=${blockPrefs.thinking !== 'hidden' ? 'true' : 'false'}
+              title="추론 블록 표시 모드 전환 (Alt+T)"
+              onClick=${() => updateBlockPrefs((cur) => ({ ...cur, thinking: nextThinkingMode(cur.thinking) }))}
+            >
+              추론: ${thinkingModeLabel(blockPrefs.thinking)} (Alt+T)
+            </button>
+            <button
+              type="button"
+              class="btn-ghost kp-toggle-btn"
+              data-testid="chat-toggle-tools"
+              data-active=${blockPrefs.tools !== 'hidden' ? 'true' : 'false'}
+              onClick=${() => updateBlockPrefs((cur) => ({ ...cur, tools: nextToolsMode(cur.tools) }))}
+            >
+              도구: ${toolsModeLabel(blockPrefs.tools)}
+            </button>
+            <button
+              type="button"
+              class="btn-ghost kp-toggle-btn"
+              data-testid="chat-toggle-internal"
+              data-active=${blockPrefs.internal === 'shown' ? 'true' : 'false'}
+              onClick=${() => updateBlockPrefs((cur) => ({ ...cur, internal: nextInternalMode(cur.internal) }))}
+            >
+              메모리·내부: ${internalModeLabel(blockPrefs.internal)}${hiddenInternalCount > 0 ? ` (${hiddenInternalCount})` : ''}
+            </button>
             ${hasMore && html`
               <button type="button" class="btn-ghost" disabled=${loadingHistory} onClick=${() => void handleLoadEarlier()}>
                 이전 대화 불러오기
@@ -476,12 +576,22 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
         <div class="kp-chat-list" role="log" aria-label="Keeper 대화 기록">
           ${loadingHistory && messages.length === 0
             ? html`<div class="kp-empty">대화 기록 불러오는 중…</div>`
-            : messages.length === 0
-              ? html`<div class="kp-empty">${keeper.name}과(와) 대화를 시작하세요.</div>`
-              : messages.slice(-120).map((msg) => html`
+            : visibleEntries.length === 0
+              ? html`<div class="kp-empty">${messages.length > 0 ? '현재 블록 필터에 표시할 메시지가 없습니다.' : `${keeper.name}과(와) 대화를 시작하세요.`}</div>`
+              : visibleEntries.map(({ msg, blocks }) => html`
                   <article key=${msg.id} class="kp-msg" data-role=${msg.role}>
                     <div class="kp-msg-head">
-                      <span>${msg.role === 'user' ? 'Operator' : msg.toolName ? `Tool · ${msg.toolName}` : keeper.name}</span>
+                      <span>
+                        ${msg.role === 'user'
+                          ? 'Operator'
+                          : blocks.autonomousSummary !== null
+                            ? `${keeper.name} · Autonomous Turn`
+                            : blocks.memoryItems.length > 0 && blocks.bodyText.length === 0
+                              ? `${keeper.name} · Memory Recall`
+                              : msg.toolName
+                                ? `Tool · ${msg.toolName}`
+                                : keeper.name}
+                      </span>
                       <div class="kp-pill-row">
                         ${msg.deliveryState && html`
                           <span class="kp-pill" data-tone=${deliveryBadgeTone(msg.deliveryState)}>
@@ -499,13 +609,79 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                         `}
                       </div>
                     </div>
-                    ${msg.thinking && html`
-                      <details class="kp-msg-thinking">
-                        <summary>Thinking</summary>
-                        <div>${msg.thinking}</div>
+
+                    ${blocks.thinkingText && blockPrefs.thinking !== 'hidden' && html`
+                      <details
+                        key=${`think:${blockPrefs.thinking}`}
+                        class="kp-block-card kp-msg-thinking"
+                        data-testid="chat-thinking-card"
+                        open=${blockPrefs.thinking === 'expanded' ? true : undefined}
+                      >
+                        <summary class="kp-block-summary">
+                          <span>추론 (Thinking)</span>
+                          <span class="kp-block-preview">${summarizeCompact(blocks.thinkingText, 80)}</span>
+                        </summary>
+                        <div class="kp-block-content">${blocks.thinkingText}</div>
                       </details>
                     `}
-                    <div class="kp-msg-body">${msg.content || (msg.deliveryState === 'Streaming' ? '응답 생성 중…' : '')}</div>
+
+                    ${blocks.toolBlocks.length > 0 && blockPrefs.tools !== 'hidden' && html`
+                      <div class="kp-block-stack">
+                        ${blocks.toolBlocks.map((tb, idx) => html`
+                          <details
+                            key=${`${tb.id ?? tb.name}-${idx}:${blockPrefs.tools}`}
+                            class="kp-block-card kp-block-card--tool"
+                            data-testid="chat-tool-card"
+                            open=${blockPrefs.tools === 'full' ? true : undefined}
+                          >
+                            <summary class="kp-block-summary">
+                              <span class="kp-pill" data-tone=${tb.status === 'error' ? 'bad' : 'info'}>도구 · ${tb.name}</span>
+                              <span class="kp-block-preview">
+                                ${summarizeCompact(tb.args ?? tb.result ?? tb.status ?? '실행됨', 90)}
+                              </span>
+                            </summary>
+                            <div class="kp-block-content">
+                              ${tb.args && html`
+                                <div class="kp-block-sublabel">입력 (Args)</div>
+                                <pre class="kp-block-pre">${tb.args}</pre>
+                              `}
+                              ${tb.result && html`
+                                <div class="kp-block-sublabel">결과 (Result)</div>
+                                <pre class="kp-block-pre">${tb.result}</pre>
+                              `}
+                            </div>
+                          </details>
+                        `)}
+                      </div>
+                    `}
+
+                    ${blocks.memoryItems.length > 0 && blockPrefs.internal === 'shown' && html`
+                      <details class="kp-block-card kp-block-card--memory" data-testid="chat-memory-card">
+                        <summary class="kp-block-summary">
+                          <span class="kp-pill" data-tone="brass">메모리 회상 (${blocks.memoryItems.length})</span>
+                          <span class="kp-block-preview">${summarizeCompact(blocks.memoryItems[0], 90)}</span>
+                        </summary>
+                        <ul class="kp-block-list">
+                          ${blocks.memoryItems.map((item, idx) => html`<li key=${idx}>${item}</li>`)}
+                        </ul>
+                      </details>
+                    `}
+
+                    ${blocks.autonomousSummary !== null && blockPrefs.internal === 'shown' && html`
+                      <details class="kp-block-card kp-block-card--auto" data-testid="chat-autonomous-card">
+                        <summary class="kp-block-summary">
+                          <span class="kp-pill" data-tone="warn">자율 턴 (Autonomous)</span>
+                          <span class="kp-block-preview">${blocks.autonomousSummary}</span>
+                        </summary>
+                        ${blocks.autonomousDetails && html`
+                          <pre class="kp-block-pre">${blocks.autonomousDetails}</pre>
+                        `}
+                      </details>
+                    `}
+
+                    ${(blocks.bodyText || msg.deliveryState === 'Streaming') && html`
+                      <div class="kp-msg-body">${blocks.bodyText || '응답 생성 중…'}</div>
+                    `}
                     ${msg.errorDetail && html`<div class="ap-error">${msg.errorDetail}</div>`}
                   </article>
                 `)}

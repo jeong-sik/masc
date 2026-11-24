@@ -68,7 +68,7 @@ function MultiAccountSignInGate({
       <div class="ap-signin-actions">
         ${(google || github) && html`
           <a
-            href="/"
+            href="/?return_to=%2Fdashboard%23account"
             class="btn-primary ap-signin-btn"
             data-testid="multi-account-signin-link"
             data-oauth-providers=${[google ? 'google' : '', github ? 'github' : ''].filter(Boolean).join(',')}

@@ -12,17 +12,23 @@
  */
 
 import { html } from 'htm/preact'
-import { useEffect, useMemo, useState } from 'preact/hooks'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import type uPlot from 'uplot'
 import {
   acquireViewStream,
   apiGet,
   authSession,
   apiMutate,
+  disconnectKeeperOAuth,
   observerSseInstanceId,
   resourceCache,
+  saveKeeperOAuthClient,
   sessionEpoch,
+  startKeeperGithubDeviceFlow,
+  startKeeperOAuthPopupFlow,
   timeWindow,
+  type ActiveKeeperOAuthFlow,
+  type KeeperOAuthFlowHandle,
 } from '../../core'
 import { DataTable, UPlotChart, type DataTableColumn, type UPlotSeriesSpec } from '../../components/primitives'
 import { KeeperBadge } from '../../components/keeper-badge'
@@ -42,6 +48,7 @@ import {
 } from './types'
 
 type ToolsSubSection = 'catalog' | 'skills' | 'connectors' | 'oauth' | 'clients'
+type OAuthTarget = { readonly keeper: string; readonly epoch: number }
 
 interface SkillSummaryItem {
   readonly identity: { readonly source_id: string; readonly package_id: string; readonly name: string }
@@ -126,10 +133,56 @@ export function ToolsTab(_props: WorkspaceViewProps) {
   // Connector bind form state
   const [bindTarget, setBindTarget] = useState<{ connectorId: string; channelId: string; keeperName: string } | null>(null)
 
-  // Keeper OAuth state
-  const [oauthKeeper, setOauthKeeper] = useState('default')
+  // Keeper OAuth state (real keeper selector + auto popup/poll + GitHub device flow + client app drawer)
+  const [keeperOptions, setKeeperOptions] = useState<readonly string[]>([])
+  const [oauthKeeper, setOauthKeeper] = useState('')
   const [oauthProviders, setOauthProviders] = useState<readonly KeeperOAuthProviderRow[]>([])
+  const [oauthCallbackUrl, setOauthCallbackUrl] = useState<string | null>(null)
   const [oauthLoading, setOauthLoading] = useState(false)
+  const [activeOAuthFlow, setActiveOAuthFlow] = useState<ActiveKeeperOAuthFlow | null>(null)
+  const [clientDrawer, setClientDrawer] = useState<{
+    readonly provider: string
+    readonly providerLabel: string
+    readonly clientId: string
+    readonly clientSecret: string
+    readonly scopes: string
+  } | null>(null)
+  const [clientBusy, setClientBusy] = useState(false)
+  const oauthFlowRef = useRef<KeeperOAuthFlowHandle | null>(null)
+
+  const selectedOAuthTarget = useRef<OAuthTarget | null>(null)
+  const oauthRead = useRef<AbortController | null>(null)
+
+  const isCurrentOAuthTarget = (target: OAuthTarget | null) =>
+    target !== null && target === selectedOAuthTarget.current && target.epoch === sessionEpoch.peek()
+
+  const selectOAuthKeeper = (name: string) => {
+    const keeper = name.trim()
+    const previous = selectedOAuthTarget.current
+    if (!previous || previous.keeper !== keeper || previous.epoch !== epoch) {
+      selectedOAuthTarget.current = { keeper, epoch }
+      oauthFlowRef.current?.cancel()
+      oauthRead.current?.abort()
+      setActiveOAuthFlow(null)
+      setClientDrawer(null)
+      setClientBusy(false)
+      setOauthProviders([])
+      setOauthCallbackUrl(null)
+      setOauthLoading(false)
+      setBanner(null)
+    }
+    setOauthKeeper(name)
+  }
+
+  useEffect(() => {
+    selectOAuthKeeper('')
+    setKeeperOptions([])
+    return () => {
+      selectedOAuthTarget.current = null
+      oauthFlowRef.current?.cancel()
+      oauthRead.current?.abort()
+    }
+  }, [epoch])
 
   const sinceHours = win === '24h' ? 24 : win === '7d' ? 168 : 720
   const bucket = win === '24h' ? 'hour' : 'day'
@@ -207,19 +260,88 @@ export function ToolsTab(_props: WorkspaceViewProps) {
         { ttlMs: 15_000, topics: ['clients'], reason: 'mount' },
       )
     } else if (section === 'oauth') {
-      void loadKeeperOAuth(oauthKeeper)
+      let cancelled = false
+      void (async () => {
+        let targetKeeper = selectedOAuthTarget.current?.keeper ?? ''
+        if (keeperOptions.length === 0 || !targetKeeper) {
+          const seen = new Set<string>()
+          const names: string[] = []
+          const addName = (raw: unknown) => {
+            if (typeof raw !== 'string') return
+            const t = raw.trim()
+            if (t && !seen.has(t)) {
+              seen.add(t)
+              names.push(t)
+            }
+          }
+
+          // Primary canonical roster endpoint: GET /api/v1/gate/keepers
+          const gateRes = await apiGet<{ readonly keepers?: readonly { readonly name?: string }[] }>('/api/v1/gate/keepers')
+          if (cancelled) return
+          if (gateRes.ok && Array.isArray(gateRes.value.keepers)) {
+            for (const k of gateRes.value.keepers) addName(k?.name)
+          }
+
+          // Fallback: flatten groups[].keepers (and optional top-level keepers) from /api/v1/dashboard/shell
+          if (names.length === 0) {
+            const shellRes = await apiGet<{
+              readonly groups?: readonly { readonly keepers?: readonly string[] }[]
+              readonly keepers?: readonly { readonly name?: string }[]
+            }>('/api/v1/dashboard/shell')
+            if (cancelled) return
+            if (shellRes.ok) {
+              if (Array.isArray(shellRes.value.groups)) {
+                for (const g of shellRes.value.groups) {
+                  if (Array.isArray(g?.keepers)) {
+                    for (const k of g.keepers) addName(k)
+                  }
+                }
+              }
+              if (Array.isArray(shellRes.value.keepers)) {
+                for (const k of shellRes.value.keepers) addName(k?.name)
+              }
+            }
+          }
+
+          targetKeeper = selectedOAuthTarget.current?.keeper ?? ''
+          if (names.length > 0) {
+            setKeeperOptions(names)
+            if (!targetKeeper || !names.includes(targetKeeper)) {
+              targetKeeper = names[0]!
+              selectOAuthKeeper(targetKeeper)
+            }
+          }
+        }
+        if (!cancelled && targetKeeper) {
+          void loadKeeperOAuth(targetKeeper)
+        }
+      })()
+      return () => {
+        cancelled = true
+      }
     }
-  }, [section])
+    return undefined
+  }, [section, epoch])
 
   const loadKeeperOAuth = async (keeperName: string) => {
-    if (!keeperName.trim()) return
+    const target = selectedOAuthTarget.current
+    if (!target?.keeper || target.keeper !== keeperName.trim() || !isCurrentOAuthTarget(target)) return
+    oauthRead.current?.abort()
+    const request = new AbortController()
+    oauthRead.current = request
     setOauthLoading(true)
-    const res = await apiGet<{ readonly providers?: readonly KeeperOAuthProviderRow[] }>(
-      `/api/v1/keepers/oauth/attached-tools?keeper=${encodeURIComponent(keeperName.trim())}`,
+    const res = await apiGet<{
+      readonly providers?: readonly KeeperOAuthProviderRow[]
+      readonly callback?: { readonly url?: string }
+    }>(
+      `/api/v1/keepers/oauth/attached-tools?keeper=${encodeURIComponent(target.keeper)}`,
+      { signal: request.signal },
     )
+    if (request.signal.aborted || !isCurrentOAuthTarget(target)) return
     setOauthLoading(false)
     if (res.ok) {
       setOauthProviders(res.value.providers ?? [])
+      setOauthCallbackUrl(typeof res.value.callback?.url === 'string' ? res.value.callback.url : null)
     } else {
       setOauthProviders([])
       setBanner({ kind: 'err', text: `OAuth 도구 조회 실패: ${res.error.message}` })
@@ -419,26 +541,63 @@ export function ToolsTab(_props: WorkspaceViewProps) {
     )
   }
 
-  // Keeper OAuth actions
-  const handleOAuthAttach = async (providerId: string) => {
-    const res = await apiMutate<{ readonly authorize_url?: string }>(
-      'POST',
-      `/api/v1/keepers/${encodeURIComponent(oauthKeeper)}/oauth-login`,
-      { provider: providerId },
-    )
-    if (!res.ok) {
-      setBanner({ kind: 'err', text: `OAuth 연결 시작 실패: ${res.error.message}` })
+  // Keeper OAuth actions (synchronous popup + postMessage + 1.5s attempt-status poll + GitHub device SSE)
+  const handleOAuthAttach = (providerRow: KeeperOAuthProviderRow) => {
+    const keeper = oauthKeeper.trim()
+    if (!keeper) {
+      setBanner({ kind: 'err', text: '먼저 대상 Keeper를 선택하세요.' })
       return
     }
-    setBanner({ kind: 'ok', text: `OAuth 인증 URL 발급됨: ${res.value.authorize_url ?? '(완료)'}` })
+    const target = selectedOAuthTarget.current
+    if (!target || target.keeper !== keeper || !isCurrentOAuthTarget(target)) return
+    oauthFlowRef.current?.cancel()
+    setBanner(null)
+    const label = providerRow.provider_label ?? providerRow.provider
+    const options = {
+      keeper,
+      providerLabel: label,
+      onUpdate: (state: ActiveKeeperOAuthFlow) => {
+        if (isCurrentOAuthTarget(target)) setActiveOAuthFlow(state)
+      },
+      onSettled: (ok: boolean) => {
+        if (ok && isCurrentOAuthTarget(target)) void loadKeeperOAuth(keeper)
+      },
+    }
+    oauthFlowRef.current = providerRow.provider === 'github'
+      ? startKeeperGithubDeviceFlow(options)
+      : startKeeperOAuthPopupFlow({ ...options, provider: providerRow.provider })
+  }
+
+  const handleSaveOAuthClient = async (ev: Event) => {
+    ev.preventDefault()
+    if (!clientDrawer || !clientDrawer.clientId.trim()) return
+    const target = selectedOAuthTarget.current
+    setClientBusy(true)
+    const res = await saveKeeperOAuthClient({
+      provider: clientDrawer.provider,
+      clientId: clientDrawer.clientId,
+      clientSecret: clientDrawer.clientSecret,
+      scopes: clientDrawer.scopes,
+    })
+    if (!isCurrentOAuthTarget(target)) return
+    setClientBusy(false)
+    if (!res.ok) {
+      setBanner({ kind: 'err', text: `OAuth 앱 등록 실패: ${res.error.message}` })
+      return
+    }
+    setBanner({ kind: 'ok', text: `${clientDrawer.providerLabel} OAuth 앱이 등록되었습니다. 이제 바로 연결할 수 있습니다.` })
+    setClientDrawer(null)
+    if (oauthKeeper.trim()) void loadKeeperOAuth(oauthKeeper)
   }
 
   const handleOAuthSwitch = async (providerId: string, enabled: boolean) => {
+    const target = selectedOAuthTarget.current
     const res = await apiMutate<unknown>(
       'POST',
       `/api/v1/keepers/${encodeURIComponent(oauthKeeper)}/identity-switch`,
       { provider: providerId, enabled },
     )
+    if (!isCurrentOAuthTarget(target)) return
     if (!res.ok) {
       setBanner({ kind: 'err', text: `스위치 전환 실패: ${res.error.message}` })
       return
@@ -447,10 +606,9 @@ export function ToolsTab(_props: WorkspaceViewProps) {
   }
 
   const handleOAuthDisconnect = async (providerId: string) => {
-    const res = await apiMutate<unknown>('POST', '/api/v1/keepers/oauth/disconnect', {
-      keeper: oauthKeeper,
-      provider: providerId,
-    })
+    const target = selectedOAuthTarget.current
+    const res = await disconnectKeeperOAuth(oauthKeeper, providerId)
+    if (!isCurrentOAuthTarget(target)) return
     if (!res.ok) {
       setBanner({ kind: 'err', text: `OAuth 연결 해제 실패: ${res.error.message}` })
       return
@@ -500,7 +658,7 @@ export function ToolsTab(_props: WorkspaceViewProps) {
       <${UPlotChart}
         id="runtime-tools-series"
         title="도구 호출 & 실패 시계열"
-        subtitle=${activeSeries
+        subtitle=${activeSeries?.total
           ? html`<span class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
               총 ${formatCompactNumber(activeSeries.total.call_count)}회 · 실패 ${activeSeries.total.failure_count} · p95 ${activeSeries.total.p95_ms !== null ? formatMs(activeSeries.total.p95_ms) : '미보고'}
             </span>`
@@ -704,14 +862,144 @@ export function ToolsTab(_props: WorkspaceViewProps) {
             style=${{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'center', flexWrap: 'wrap' }}
           >
             <label style=${{ fontSize: 'var(--fs-12)' }}>Keeper:</label>
-            <input
-              type="text"
-              value=${oauthKeeper}
-              onInput=${(e: Event) => setOauthKeeper((e.target as HTMLInputElement).value)}
-              style=${{ padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
-            />
-            <button type="submit" class="btn-primary" disabled=${oauthLoading}>조회</button>
+            ${keeperOptions.length > 0
+              ? html`
+                  <select
+                    aria-label="OAuth 대상 Keeper"
+                    value=${oauthKeeper}
+                    onChange=${(e: Event) => {
+                      const next = (e.target as HTMLSelectElement).value
+                      selectOAuthKeeper(next)
+                      void loadKeeperOAuth(next)
+                    }}
+                    style=${{ padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+                  >
+                    ${keeperOptions.map((name) => html`<option key=${name} value=${name}>${name}</option>`)}
+                  </select>
+                `
+              : html`
+                  <input
+                    type="text"
+                    aria-label="OAuth 대상 Keeper"
+                    placeholder="Keeper 이름 입력…"
+                    value=${oauthKeeper}
+                    onInput=${(e: Event) => selectOAuthKeeper((e.target as HTMLInputElement).value)}
+                    style=${{ padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+                  />
+                `}
+            <button type="submit" class="btn-primary" disabled=${oauthLoading || !oauthKeeper.trim()}>조회</button>
           </form>
+
+          ${activeOAuthFlow && html`
+            <div
+              data-testid="tools-oauth-active-flow"
+              role="status"
+              style=${{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 'var(--sp-2)',
+                padding: 'var(--sp-3)',
+                borderRadius: 'var(--radius-sm)',
+                border: `1px solid ${activeOAuthFlow.phase === 'failed' ? 'var(--err-border)' : activeOAuthFlow.phase === 'completed' ? 'var(--ok-border)' : 'var(--info-border)'}`,
+                background: activeOAuthFlow.phase === 'failed' ? 'var(--err-soft)' : activeOAuthFlow.phase === 'completed' ? 'var(--ok-soft)' : 'var(--info-soft)',
+              }}
+            >
+              <div style=${{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--sp-2)' }}>
+                <strong style=${{ fontSize: 'var(--fs-12)' }}>
+                  ${activeOAuthFlow.providerLabel} · ${activeOAuthFlow.phase}
+                </strong>
+                <button
+                  type="button"
+                  class="btn-ghost"
+                  onClick=${() => {
+                    oauthFlowRef.current?.cancel()
+                    setActiveOAuthFlow(null)
+                  }}
+                >
+                  닫기
+                </button>
+              </div>
+              <div style=${{ fontSize: 'var(--fs-12)' }}>${activeOAuthFlow.message}</div>
+              <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+                ${activeOAuthFlow.authorizeUrl && html`
+                  <a
+                    href=${activeOAuthFlow.authorizeUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="btn-primary"
+                    data-testid="tools-oauth-authorize-link"
+                  >
+                    OAuth 인증 페이지 열기 ↗
+                  </a>
+                `}
+                ${activeOAuthFlow.deviceCode && html`
+                  <span class="mono" data-testid="tools-oauth-device-code" style=${{ padding: 'var(--sp-1) var(--sp-2)', borderRadius: 'var(--radius-sm)', background: 'var(--brass-soft)', color: 'var(--brass-1)', fontWeight: 700 }}>
+                    ${activeOAuthFlow.deviceCode}
+                  </span>
+                `}
+              </div>
+            </div>
+          `}
+
+          ${clientDrawer && html`
+            <form
+              data-testid="tools-oauth-client-form"
+              onSubmit=${handleSaveOAuthClient}
+              style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', padding: 'var(--sp-3)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--brass-border)', background: 'var(--bg-1)' }}
+            >
+              <div class="wka-h">
+                <strong style=${{ fontSize: 'var(--fs-12)' }}>내 OAuth 앱 등록 · ${clientDrawer.providerLabel}</strong>
+                <button type="button" class="btn-ghost" onClick=${() => setClientDrawer(null)}>닫기</button>
+              </div>
+              ${oauthCallbackUrl && html`
+                <div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-2)', padding: 'var(--sp-1) var(--sp-2)', background: 'var(--bg-2)', borderRadius: 'var(--radius-sm)', overflowWrap: 'anywhere' }}>
+                  Callback URL: ${oauthCallbackUrl}
+                </div>
+              `}
+              <input
+                type="text"
+                aria-label="OAuth Client ID"
+                placeholder="Client ID (필수)"
+                required
+                value=${clientDrawer.clientId}
+                onInput=${(e: Event) => {
+                  const clientId = (e.target as HTMLInputElement).value
+                  setClientDrawer((cur) => (cur ? { ...cur, clientId } : null))
+                }}
+                class="mono"
+                style=${{ padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+              />
+              <input
+                type="password"
+                aria-label="OAuth Client Secret"
+                placeholder="Client Secret (공개 PKCE 앱이면 비워두세요)"
+                value=${clientDrawer.clientSecret}
+                onInput=${(e: Event) => {
+                  const clientSecret = (e.target as HTMLInputElement).value
+                  setClientDrawer((cur) => (cur ? { ...cur, clientSecret } : null))
+                }}
+                class="mono"
+                style=${{ padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+              />
+              <input
+                type="text"
+                aria-label="OAuth Scopes"
+                placeholder="Scopes (선택, 공백 구분)"
+                value=${clientDrawer.scopes}
+                onInput=${(e: Event) => {
+                  const scopes = (e.target as HTMLInputElement).value
+                  setClientDrawer((cur) => (cur ? { ...cur, scopes } : null))
+                }}
+                class="mono"
+                style=${{ padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+              />
+              <div style=${{ display: 'flex', gap: 'var(--sp-2)' }}>
+                <button type="submit" class="btn-primary" disabled=${clientBusy}>
+                  ${clientBusy ? '저장 중…' : 'OAuth 앱 저장'}
+                </button>
+              </div>
+            </form>
+          `}
 
           ${oauthProviders.length === 0
             ? html`<div class="dtable-absent">${oauthLoading ? '불러오는 중…' : '연결 가능한 OAuth 제공자가 없습니다.'}</div>`
@@ -727,20 +1015,33 @@ export function ToolsTab(_props: WorkspaceViewProps) {
                           : '미연결'}
                     </div>
                   </div>
-                  ${!p.problem && html`
-                    <div style=${{ display: 'flex', gap: 'var(--sp-1)' }}>
-                      ${!p.attached
-                        ? html`<button type="button" class="btn-primary" onClick=${() => void handleOAuthAttach(p.provider)}>OAuth 연결</button>`
-                        : html`
-                            <button type="button" class="btn-ghost" onClick=${() => void handleOAuthSwitch(p.provider, p.enabled === false)}>
-                              ${p.enabled === false ? '켜기' : '끄기'}
-                            </button>
-                            <button type="button" class="btn-ghost" style=${{ color: 'var(--err-fg)' }} onClick=${() => void handleOAuthDisconnect(p.provider)}>
-                              연결 해제
-                            </button>
-                          `}
-                    </div>
-                  `}
+                  <div style=${{ display: 'flex', gap: 'var(--sp-1)', flexWrap: 'wrap' }}>
+                    ${p.provider !== 'github' && html`
+                      <button
+                        type="button"
+                        class="btn-ghost"
+                        onClick=${() => setClientDrawer({
+                          provider: p.provider,
+                          providerLabel: p.provider_label ?? p.provider,
+                          clientId: '',
+                          clientSecret: '',
+                          scopes: '',
+                        })}
+                      >
+                        앱 설정
+                      </button>
+                    `}
+                    ${!p.problem && (!p.attached
+                      ? html`<button type="button" class="btn-primary" onClick=${() => handleOAuthAttach(p)}>OAuth 연결</button>`
+                      : html`
+                          <button type="button" class="btn-ghost" onClick=${() => void handleOAuthSwitch(p.provider, p.enabled === false)}>
+                            ${p.enabled === false ? '켜기' : '끄기'}
+                          </button>
+                          <button type="button" class="btn-ghost" style=${{ color: 'var(--err-fg)' }} onClick=${() => void handleOAuthDisconnect(p.provider)}>
+                            연결 해제
+                          </button>
+                        `)}
+                  </div>
                 </div>
               `)}
         </div>

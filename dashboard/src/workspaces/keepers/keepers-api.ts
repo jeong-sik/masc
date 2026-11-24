@@ -40,11 +40,13 @@ import type {
   CandleBalanceRow,
   CandleLedgerEventRow,
   ChatAttachmentDraft,
+  ChatEntryKind,
   ChatHistoryPage,
   ChatJournalCursor,
   ChatJournalEvent,
   ChatJournalPage,
   ChatJournalTextOwner,
+  ChatToolBlock,
   ChatTranscriptEntry,
   CheckpointInventoryData,
   KeeperAttachedProvider,
@@ -368,6 +370,39 @@ export function resetKeeperAction(name: string) {
 
 // ── Chat History, Queued Ops, Cut-Reply Journal & Origin_bare AG-UI SSE ──
 
+function decodeToolBlocks(raw: Record<string, unknown>): readonly ChatToolBlock[] | undefined {
+  const out: ChatToolBlock[] = []
+  if (Array.isArray(raw.tool_calls)) {
+    for (const tc of raw.tool_calls) {
+      if (!isRecord(tc)) continue
+      const name = asStr(tc.name) ?? asStr(tc.tool_name) ?? asStr(tc.tool) ?? 'tool'
+      const argsVal = tc.args ?? tc.input ?? tc.arguments
+      const resVal = tc.result ?? tc.output
+      out.push({
+        id: asStr(tc.id) ?? undefined,
+        name,
+        args: argsVal !== undefined ? (typeof argsVal === 'string' ? argsVal : JSON.stringify(argsVal, null, 2)) : undefined,
+        result: resVal !== undefined ? (typeof resVal === 'string' ? resVal : JSON.stringify(resVal, null, 2)) : undefined,
+        status: asStr(tc.status) ?? asStr(tc.outcome) ?? undefined,
+      })
+    }
+  } else {
+    const toolName = asStr(raw.tool_call_name) ?? asStr(raw.tool_name)
+    if (toolName && (raw.tool_input !== undefined || raw.tool_output !== undefined || raw.tool_result !== undefined)) {
+      const argsVal = raw.tool_input ?? raw.args
+      const resVal = raw.tool_output ?? raw.tool_result ?? raw.output
+      out.push({
+        id: asStr(raw.tool_call_id) ?? undefined,
+        name: toolName,
+        args: argsVal !== undefined ? (typeof argsVal === 'string' ? argsVal : JSON.stringify(argsVal, null, 2)) : undefined,
+        result: resVal !== undefined ? (typeof resVal === 'string' ? resVal : JSON.stringify(resVal, null, 2)) : undefined,
+        status: asStr(raw.status) ?? undefined,
+      })
+    }
+  }
+  return out.length > 0 ? out : undefined
+}
+
 function decodeHistoryRow(raw: unknown): ChatTranscriptEntry | null {
   if (!isRecord(raw)) return null
   const id = asStr(raw.id)
@@ -379,13 +414,50 @@ function decodeHistoryRow(raw: unknown): ChatTranscriptEntry | null {
       : 'assistant'
   const content = typeof raw.content === 'string' ? raw.content : ''
   const ts = asNum(raw.ts) ?? Date.now() / 1000
+  const thinking = asStr(raw.thinking) ?? asStr(raw.reasoning) ?? asStr(raw.reasoning_content) ?? undefined
+  const toolCalls = decodeToolBlocks(raw)
+  const autonomousTurn =
+    raw.autonomous === true
+    || asStr(raw.source) === 'autonomous'
+    || asStr(raw.turn_kind) === 'autonomous'
+    || (isRecord(raw.metadata) && (raw.metadata.autonomous === true || asStr(raw.metadata.turn_kind) === 'autonomous'))
+  const rawMemory = Array.isArray(raw.memory_recall)
+    ? raw.memory_recall
+    : Array.isArray(raw.recalled_facts)
+      ? raw.recalled_facts
+      : null
+  const memoryItems = rawMemory
+    ? rawMemory
+        .map((item) => {
+          if (typeof item === 'string') return item.trim()
+          if (isRecord(item) && typeof item.claim === 'string') return item.claim.trim()
+          return JSON.stringify(item)
+        })
+        .filter(Boolean)
+    : undefined
+  const kindRaw = asStr(raw.kind)
+  const kind: ChatEntryKind | undefined =
+    kindRaw === 'tool_call' || kindRaw === 'tool_result' || kindRaw === 'memory_recall' || kindRaw === 'autonomous' || kindRaw === 'system_internal' || kindRaw === 'chat'
+      ? kindRaw
+      : autonomousTurn
+        ? 'autonomous'
+        : memoryItems && memoryItems.length > 0 && !content.trim()
+          ? 'memory_recall'
+          : role === 'tool'
+            ? 'tool_result'
+            : undefined
   return {
     id,
     role,
     content,
+    thinking,
     ts,
     turnRef: asStr(raw.turn_ref) ?? undefined,
-    toolName: asStr(raw.tool_call_name) ?? undefined,
+    toolName: asStr(raw.tool_call_name) ?? asStr(raw.tool_name) ?? undefined,
+    kind,
+    toolCalls,
+    memoryItems: memoryItems && memoryItems.length > 0 ? memoryItems : undefined,
+    autonomousTurn: autonomousTurn || undefined,
     deliveryState: 'Delivered',
   }
 }
@@ -715,7 +787,9 @@ export interface StreamKeeperChatCallbacks {
   readonly onAttemptStarted?: () => void
   readonly onTextDelta?: (delta: string) => void
   readonly onThinkingDelta?: (delta: string) => void
-  readonly onToolStart?: (toolName: string) => void
+  readonly onToolStart?: (toolName: string, toolCallId?: string) => void
+  readonly onToolArgsDelta?: (toolCallId: string, delta: string) => void
+  readonly onToolResult?: (toolCallId: string, content: string) => void
   readonly onReplyDetails?: (reply: string, turnRef: string | null) => void
   readonly onFinished?: () => void
   readonly onError?: (message: string) => void
@@ -821,7 +895,19 @@ export async function streamKeeperChat(params: {
           } else if (type === 'TEXT_MESSAGE_CONTENT' && typeof parsed.delta === 'string') {
             params.callbacks.onTextDelta?.(parsed.delta)
           } else if (type === 'TOOL_CALL_START') {
-            params.callbacks.onToolStart?.(asStr(parsed.toolCallName) ?? 'tool')
+            params.callbacks.onToolStart?.(
+              asStr(parsed.toolCallName) ?? 'tool',
+              asStr(parsed.toolCallId) ?? undefined,
+            )
+          } else if (type === 'TOOL_CALL_ARGS' && typeof parsed.delta === 'string') {
+            params.callbacks.onToolArgsDelta?.(asStr(parsed.toolCallId) ?? '', parsed.delta)
+          } else if (type === 'TOOL_CALL_RESULT') {
+            const rawContent = typeof parsed.content === 'string'
+              ? parsed.content
+              : parsed.result !== undefined
+                ? JSON.stringify(parsed.result, null, 2)
+                : ''
+            params.callbacks.onToolResult?.(asStr(parsed.toolCallId) ?? '', rawContent)
           } else if (type === 'RUN_FINISHED') {
             terminal = true
             params.callbacks.onFinished?.()
@@ -1699,24 +1785,48 @@ export function fetchKeeperSandboxApi(keeper: string): Promise<Result<KeeperSand
 
 // ── Schema Config CAS & Secrets / OAuth Identity (#36) ───────────────────
 
+export interface KeeperAttachedToolsSnapshot {
+  readonly providers: readonly KeeperAttachedProvider[]
+  readonly callbackUrl: string | null
+}
+
+function decodeKeeperAttachedProviders(raw: unknown): readonly KeeperAttachedProvider[] {
+  const list = isRecord(raw) && Array.isArray(raw.providers) ? raw.providers : []
+  return list.filter(isRecord).map((p) => ({
+    provider: asStr(p.provider) ?? '',
+    provider_label: asStr(p.provider_label) ?? asStr(p.provider) ?? '',
+    attached: p.attached === true,
+    enabled: typeof p.enabled === 'boolean' ? p.enabled : undefined,
+    tools: Array.isArray(p.tools)
+      ? p.tools.filter((x): x is string => typeof x === 'string')
+      : undefined,
+    problem: asStr(p.problem) ?? undefined,
+    switch_problem: asStr(p.switch_problem) ?? undefined,
+  })).filter((p) => p.provider.length > 0)
+}
+
+export function fetchKeeperOAuthAttachedToolsApi(
+  keeper: string,
+): Promise<Result<KeeperAttachedToolsSnapshot, ApiError>> {
+  return apiGet<KeeperAttachedToolsSnapshot>(
+    `/api/v1/keepers/oauth/attached-tools?keeper=${encodeURIComponent(keeper)}`,
+    {
+      decode: (raw) => {
+        const callback = isRecord(raw) && isRecord(raw.callback) ? raw.callback : null
+        return {
+          providers: decodeKeeperAttachedProviders(raw),
+          callbackUrl: callback ? asStr(callback.url) : null,
+        }
+      },
+    },
+  )
+}
+
 export function fetchKeeperAttachedProvidersApi(keeper: string): Promise<Result<readonly KeeperAttachedProvider[], ApiError>> {
   return apiGet<readonly KeeperAttachedProvider[]>(
     `/api/v1/keepers/oauth/attached-tools?keeper=${encodeURIComponent(keeper)}`,
     {
-      decode: (raw) => {
-        const list = isRecord(raw) && Array.isArray(raw.providers) ? raw.providers : []
-        return list.filter(isRecord).map((p) => ({
-          provider: asStr(p.provider) ?? '',
-          provider_label: asStr(p.provider_label) ?? asStr(p.provider) ?? '',
-          attached: p.attached === true,
-          enabled: typeof p.enabled === 'boolean' ? p.enabled : undefined,
-          tools: Array.isArray(p.tools)
-            ? p.tools.filter((x): x is string => typeof x === 'string')
-            : undefined,
-          problem: asStr(p.problem) ?? undefined,
-          switch_problem: asStr(p.switch_problem) ?? undefined,
-        })).filter((p) => p.provider.length > 0)
-      },
+      decode: decodeKeeperAttachedProviders,
     },
   )
 }

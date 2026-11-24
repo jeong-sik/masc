@@ -1,5 +1,9 @@
 # 아티팩트 문서 내보내기
 
+> 이 문서는 2026년 11월 24일 Proposal A+에서 종료한 Dashboard의 Office
+> 문서 가져오기·변환·내보내기 화면을 기록합니다. 현재 게시본을 열고
+> Markdown·HTML 원본을 내려받는 경로는 [Report artifacts](report-artifacts.md)를 참고하세요.
+
 관련 목표: #45940. HTML·Markdown 게시 버전을 HWPX(.hwpx)·Word(.docx)·PPT(.pptx)·PDF(.pdf)로
 내보냅니다. 각 변환기는 현재 읽은 게시 버전을 사용합니다.
 

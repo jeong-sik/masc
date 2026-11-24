@@ -65,6 +65,22 @@ export interface ChatAttachmentDraft {
   readonly data: string
 }
 
+export interface ChatToolBlock {
+  readonly id?: string
+  readonly name: string
+  readonly args?: string
+  readonly result?: string
+  readonly status?: string
+}
+
+export type ChatEntryKind =
+  | 'chat'
+  | 'tool_call'
+  | 'tool_result'
+  | 'memory_recall'
+  | 'autonomous'
+  | 'system_internal'
+
 export interface ChatTranscriptEntry {
   readonly id: string
   readonly role: 'user' | 'assistant' | 'system' | 'tool' | 'request_failure'
@@ -74,6 +90,10 @@ export interface ChatTranscriptEntry {
   readonly operationId?: string
   readonly turnRef?: string
   readonly toolName?: string
+  readonly kind?: ChatEntryKind
+  readonly toolCalls?: readonly ChatToolBlock[]
+  readonly memoryItems?: readonly string[]
+  readonly autonomousTurn?: boolean
   readonly deliveryState?: ChatDeliveryState
   readonly cutStream?: boolean
   readonly errorDetail?: string

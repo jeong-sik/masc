@@ -13,13 +13,16 @@
  */
 
 import { html } from 'htm/preact'
-import { useEffect, useMemo, useState } from 'preact/hooks'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import type uPlot from 'uplot'
 import {
   apiGet,
   apiMutate,
+  cancelSetupLogin,
   currentAccountMode,
   resourceCache,
+  sendSetupLoginInput,
+  streamSetupAccountLogin,
   timeWindow,
   timeWindowProviderDays,
   type Observed,
@@ -111,6 +114,12 @@ interface LoginReceiptState {
   readonly accountRef?: string | null
   readonly authentication?: string | null
   readonly message?: string
+  readonly authUrl?: string | null
+  readonly deviceCode?: string | null
+  readonly inputReady?: boolean
+  readonly outputTail?: string
+  readonly streaming?: boolean
+  readonly popupBlocked?: boolean
 }
 
 interface CredentialFormState {
@@ -319,27 +328,158 @@ export function QuotasTab(props: WorkspaceViewProps) {
     loadAll('manual')
   }
 
+  const loginAbortRef = useRef<AbortController | null>(null)
+  const openedLoginUrlRef = useRef<string | null>(null)
+  const [loginInputText, setLoginInputText] = useState('')
+  const [copiedDeviceCode, setCopiedDeviceCode] = useState(false)
+
+  useEffect(() => () => {
+    loginAbortRef.current?.abort('unmount')
+  }, [])
+
   const handleStartOAuthLogin = async (integrationId: string) => {
+    loginAbortRef.current?.abort('superseded')
+    const ctrl = new AbortController()
+    loginAbortRef.current = ctrl
+    openedLoginUrlRef.current = null
+    setLoginInputText('')
+    setCopiedDeviceCode(false)
     setActionBusy(`login:${integrationId}`)
     setActionBanner(null)
-    const res = await apiMutate<Record<string, unknown>>(
-      'POST',
-      '/api/v1/setup/accounts/login',
-      { integration_id: integrationId },
-    )
+
+    setLoginReceipt({
+      loginId: '',
+      integrationId,
+      status: 'starting',
+      accountRef: null,
+      authentication: null,
+      authUrl: null,
+      deviceCode: null,
+      inputReady: false,
+      outputTail: '',
+      streaming: true,
+      popupBlocked: false,
+    })
+
+    await streamSetupAccountLogin({
+      integrationId,
+      signal: ctrl.signal,
+      callbacks: {
+        onStarted: (receipt) => {
+          setLoginReceipt((cur) => ({
+            ...(cur ?? { loginId: receipt.loginId, integrationId }),
+            loginId: receipt.loginId || cur?.loginId || '',
+            integrationId: receipt.integrationId || integrationId,
+            status: receipt.status,
+            accountRef: receipt.accountRef ?? cur?.accountRef ?? null,
+            authentication: receipt.authentication ?? cur?.authentication ?? null,
+            streaming: true,
+          }))
+        },
+        onOutput: (_stream, text) => {
+          setLoginReceipt((cur) => (cur ? { ...cur, outputTail: `${cur.outputTail ?? ''}${text}`.slice(-2000) } : cur))
+        },
+        onScreen: (text) => {
+          setLoginReceipt((cur) => (cur ? { ...cur, outputTail: text.slice(-2000) } : cur))
+        },
+        onAuthUrl: (url) => {
+          let popupBlocked = false
+          if (openedLoginUrlRef.current !== url) {
+            openedLoginUrlRef.current = url
+            if (typeof window !== 'undefined' && typeof window.open === 'function') {
+              try {
+                const win = window.open(url, '_blank', 'noopener,noreferrer')
+                popupBlocked = win === null
+              } catch {
+                popupBlocked = true
+              }
+            }
+          }
+          setLoginReceipt((cur) => (cur ? { ...cur, authUrl: url, popupBlocked } : cur))
+        },
+        onDeviceCode: (code) => {
+          setLoginReceipt((cur) => (cur ? { ...cur, deviceCode: code } : cur))
+        },
+        onInputReady: () => {
+          setLoginReceipt((cur) => (cur ? { ...cur, inputReady: true } : cur))
+        },
+        onComplete: (receipt) => {
+          setLoginReceipt((cur) => ({
+            ...(cur ?? { loginId: receipt.loginId, integrationId }),
+            loginId: receipt.loginId || cur?.loginId || '',
+            integrationId: receipt.integrationId || integrationId,
+            status: 'complete',
+            accountRef: receipt.accountRef ?? cur?.accountRef ?? null,
+            authentication: receipt.authentication ?? cur?.authentication ?? null,
+            inputReady: false,
+            streaming: false,
+          }))
+          setActionBanner({ kind: 'ok', text: `${integrationId} CLI OAuth 로그인이 완료되었습니다.` })
+          loadAll('manual')
+          const ref = receipt.accountRef
+          // POST /api/v1/setup/accounts/verify is only mounted in multi_account mode (server_login_http.mli:79)
+          if (accountMode === 'multi_account' && ref && resolveModelForIntegration(integrationId)) {
+            void handleVerifyAccount(integrationId, ref)
+          }
+        },
+        onError: (message, receipt) => {
+          setLoginReceipt((cur) => (cur
+            ? {
+                ...cur,
+                loginId: receipt?.loginId || cur.loginId,
+                status: receipt?.status || 'failed',
+                accountRef: receipt?.accountRef ?? cur.accountRef,
+                message,
+                inputReady: false,
+                streaming: false,
+              }
+            : null))
+          setActionBanner({ kind: 'err', text: `CLI OAuth 로그인 실패: ${message}` })
+        },
+      },
+    })
+
+    if (loginAbortRef.current === ctrl) {
+      setActionBusy((cur) => (cur === `login:${integrationId}` ? null : cur))
+      setLoginReceipt((cur) => (cur ? { ...cur, streaming: false } : cur))
+    }
+  }
+
+  const handleSubmitLoginInput = async (ev: Event) => {
+    ev.preventDefault()
+    if (!loginReceipt?.loginId || !loginInputText.trim()) return
+    const text = loginInputText.trim()
+    setActionBusy('login-input')
+    const res = await sendSetupLoginInput(loginReceipt.loginId, { kind: 'text', text })
     setActionBusy(null)
     if (!res.ok) {
-      setActionBanner({ kind: 'err', text: `CLI OAuth 로그인 시작 실패: ${res.error.message}` })
+      setActionBanner({ kind: 'err', text: `CLI 입력 전송 실패: ${res.error.message}` })
       return
     }
-    const loginId = typeof res.value.login_id === 'string' ? res.value.login_id : 'pending'
-    setLoginReceipt({
-      loginId,
-      integrationId,
-      status: typeof res.value.status === 'string' ? res.value.status : 'running',
-      accountRef: typeof res.value.account_ref === 'string' ? res.value.account_ref : null,
-      authentication: typeof res.value.authentication === 'string' ? res.value.authentication : null,
-    })
+    setLoginInputText('')
+    setLoginReceipt((cur) => (cur ? { ...cur, inputReady: false } : cur))
+  }
+
+  const handleSendLoginEnterKey = async () => {
+    if (!loginReceipt?.loginId) return
+    setActionBusy('login-input')
+    const res = await sendSetupLoginInput(loginReceipt.loginId, { kind: 'key', key: 'enter' })
+    setActionBusy(null)
+    if (!res.ok) {
+      setActionBanner({ kind: 'err', text: `Enter 키 전송 실패: ${res.error.message}` })
+      return
+    }
+    setLoginReceipt((cur) => (cur ? { ...cur, inputReady: false } : cur))
+  }
+
+  const handleCancelSetupLogin = async () => {
+    const owner = loginAbortRef.current
+    if (loginReceipt?.loginId) {
+      await cancelSetupLogin(loginReceipt.loginId)
+    }
+    if (loginAbortRef.current !== owner) return
+    owner?.abort('cancelled')
+    setLoginReceipt((cur) => (cur ? { ...cur, status: 'cancelled', streaming: false, inputReady: false } : cur))
   }
 
   const handleRefreshLoginReceipt = async () => {
@@ -362,6 +502,13 @@ export function QuotasTab(props: WorkspaceViewProps) {
   }
 
   const handleVerifyAccount = async (providerId: string, providerAccountId?: string) => {
+    if (accountMode !== 'multi_account') {
+      setActionBanner({
+        kind: 'err',
+        text: '계정 검증(/api/v1/setup/accounts/verify)은 multi_account 모드에서만 지원됩니다.',
+      })
+      return
+    }
     const acctId = (providerAccountId ?? '').trim()
     const model = resolveModelForIntegration(providerId)
     if (!acctId || !model) {
@@ -749,22 +896,117 @@ export function QuotasTab(props: WorkspaceViewProps) {
       `}
 
       ${loginReceipt && html`
-        <section class="wka-card" style=${{ borderColor: 'var(--info-border)', background: 'var(--info-soft)' }}>
+        <section
+          class="wka-card"
+          data-testid="setup-login-panel"
+          style=${{ borderColor: 'var(--info-border)', background: 'var(--info-soft)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}
+        >
           <div class="wka-h">
-            <h3>CLI OAuth 로그인 영수증 · ${loginReceipt.integrationId}</h3>
-            <button type="button" class="btn-ghost" onClick=${() => setLoginReceipt(null)}>닫기</button>
+            <h3>CLI OAuth 로그인 스트림 · ${loginReceipt.integrationId}</h3>
+            <div style=${{ display: 'flex', gap: 'var(--sp-2)' }}>
+              ${loginReceipt.streaming && html`
+                <button type="button" class="btn-ghost" style=${{ color: 'var(--err-fg)' }} onClick=${() => void handleCancelSetupLogin()}>
+                  로그인 취소
+                </button>
+              `}
+              <button
+                type="button"
+                class="btn-ghost"
+                onClick=${() => {
+                  loginAbortRef.current?.abort('dismissed')
+                  setLoginReceipt(null)
+                }}
+              >
+                닫기
+              </button>
+            </div>
           </div>
+
           <div class="mono" style=${{ fontSize: 'var(--fs-12)', display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-3)' }}>
-            <span>login_id: ${loginReceipt.loginId}</span>
-            <span>상태: ${loginReceipt.status}</span>
+            <span>login_id: ${loginReceipt.loginId || '연결 중…'}</span>
+            <span>상태: ${loginReceipt.status}${loginReceipt.streaming ? ' (SSE 실시간)' : ''}</span>
             ${loginReceipt.authentication && html`<span>인증: ${loginReceipt.authentication}</span>`}
             ${loginReceipt.accountRef && html`<span>ref: ${loginReceipt.accountRef.slice(0, 12)}…</span>`}
           </div>
-          <div style=${{ display: 'flex', gap: 'var(--sp-2)', marginTop: 'var(--sp-2)' }}>
-            <button type="button" class="btn-ghost" onClick=${handleRefreshLoginReceipt} disabled=${actionBusy === 'receipt'}>
-              영수증 상태 새로고침
-            </button>
-            ${loginReceipt.accountRef && html`
+
+          ${(loginReceipt.authUrl || loginReceipt.deviceCode) && html`
+            <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap', padding: 'var(--sp-2)', borderRadius: 'var(--radius-sm)', background: 'var(--bg-1)', border: '1px solid var(--line-2)' }}>
+              ${loginReceipt.authUrl && html`
+                <a
+                  href=${loginReceipt.authUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="btn-primary"
+                  data-testid="setup-login-auth-url"
+                >
+                  OAuth 인증 페이지 열기 ↗
+                </a>
+              `}
+              ${loginReceipt.deviceCode && html`
+                <span class="mono" data-testid="setup-login-device-code" style=${{ padding: 'var(--sp-1) var(--sp-2)', borderRadius: 'var(--radius-sm)', background: 'var(--brass-soft)', color: 'var(--brass-1)', fontWeight: 700, fontSize: 'var(--fs-13)' }}>
+                  ${loginReceipt.deviceCode}
+                </span>
+                <button
+                  type="button"
+                  class="btn-ghost"
+                  onClick=${() => {
+                    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+                      void navigator.clipboard.writeText(loginReceipt.deviceCode ?? '')
+                      setCopiedDeviceCode(true)
+                    }
+                  }}
+                >
+                  ${copiedDeviceCode ? '복사됨 ✓' : '코드 복사'}
+                </button>
+              `}
+              ${loginReceipt.popupBlocked && html`
+                <span style=${{ fontSize: 'var(--fs-11)', color: 'var(--warn-fg)' }}>
+                  브라우저 팝업이 차단되었습니다 — 위 버튼을 직접 클릭하세요.
+                </span>
+              `}
+            </div>
+          `}
+
+          ${loginReceipt.inputReady && loginReceipt.loginId && html`
+            <form
+              data-testid="setup-login-input-form"
+              onSubmit=${handleSubmitLoginInput}
+              style=${{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap', alignItems: 'center' }}
+            >
+              <input
+                type="text"
+                aria-label="CLI 로그인 응답 입력"
+                placeholder="인증 코드 또는 응답을 입력하세요…"
+                value=${loginInputText}
+                onInput=${(e: Event) => setLoginInputText((e.target as HTMLInputElement).value)}
+                class="mono"
+                style=${{ flex: '1 1 220px', minWidth: 0, padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+              />
+              <button type="submit" class="btn-primary" disabled=${actionBusy === 'login-input' || !loginInputText.trim()}>
+                응답 전송
+              </button>
+              <button type="button" class="btn-ghost" disabled=${actionBusy === 'login-input'} onClick=${() => void handleSendLoginEnterKey()}>
+                Enter 전송
+              </button>
+            </form>
+          `}
+
+          ${loginReceipt.outputTail && html`
+            <details>
+              <summary style=${{ cursor: 'pointer', fontSize: 'var(--fs-11)', color: 'var(--fg-2)' }}>CLI 로그인 출력 로그</summary>
+              <pre class="mono" style=${{ margin: 'var(--sp-1) 0 0', padding: 'var(--sp-2)', background: 'var(--bg-0)', border: '1px solid var(--line-1)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-11)', maxHeight: '180px', overflow: 'auto', whiteSpace: 'pre-wrap' }}>
+                ${loginReceipt.outputTail}
+              </pre>
+            </details>
+          `}
+
+          <div style=${{ display: 'flex', gap: 'var(--sp-2)' }}>
+            ${loginReceipt.loginId && html`
+              <button type="button" class="btn-ghost" onClick=${handleRefreshLoginReceipt} disabled=${actionBusy === 'receipt'}>
+                영수증 상태 새로고침
+              </button>
+            `}
+            ${accountMode === 'multi_account' && loginReceipt.accountRef && html`
               <button
                 type="button"
                 class="btn-primary"
@@ -861,9 +1103,6 @@ export function QuotasTab(props: WorkspaceViewProps) {
                         </button>
                         <button type="button" class="btn-ghost" onClick=${() => void handleStartOAuthLogin(integ.id)}>
                           CLI OAuth
-                        </button>
-                        <button type="button" class="btn-ghost" onClick=${() => void handleVerifyAccount(integ.id)}>
-                          검증
                         </button>
                         <button type="button" class="btn-ghost" onClick=${() => props.onNavigate(`/settings?key=providers.${encodeURIComponent(integ.id)}`)}>
                           Open Config Key

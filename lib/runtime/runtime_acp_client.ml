@@ -2888,9 +2888,10 @@ let install_client_of_driver = function
    runs with every observer off. Measured 2026-11-24 on turns with one tool
    call (two main model requests): 5 of the 8 sessions without the six
    switches below had the run (one of the 5 named a non-existent id instead);
-   the other 3 had no run and had also passed [-c approval_judge="off"] and
-   [-c reasoning_effort="minimal"], which were not tried alone. None of the 8
-   sessions with the switches had it. The host estimated the run's prompt at
+   the other 3 had no run and differed in three ways, none tried alone: they
+   passed [-c approval_judge="off"] and [-c reasoning_effort="minimal"], and
+   ran under settings that selected the ":ask-me" permission profile. None of
+   the 8 sessions with the switches had it. The host estimated the run's prompt at
    5.8 to 5.9k tokens, and 1.2 to 2.9 s passed from that prompt to the run's
    tool call. Which id matters was measured with the echo provider only, one
    id at a time: the run's one-tool surface appeared with the goal reminder
@@ -2917,8 +2918,10 @@ let muse_observer_capability_ids =
    session/new carries; without it the session starts with none (muse acp
    1.4.25, live-verified). It also loads the workspace's own skills, rules and
    MCP servers ([.mcp.json]), which is the Keeper workspace's content: [read]
-   and [full] run in the Keeper's repository, [none] in an empty isolated
-   directory. A repeated [-c] key makes the host refuse to run ("one setting,
+   and [full] run in the Keeper's repository, [none] in a fresh empty
+   temporary directory (the host also walks up to an ancestor that has a VCS
+   marker, so a temporary directory under a repository would load that
+   ancestor's [.mcp.json]). A repeated [-c] key makes the host refuse to run ("one setting,
    one occurrence"), so an operator [args] must not repeat the observer keys
    below. *)
 let muse_required_args =
@@ -2933,8 +2936,9 @@ let muse_required_args =
    session/request_permission frame, so refusing permission requests cannot
    keep its native tools off. The setting [run.toolset], a JSON array of
    names, names the tools the main conversation is offered; anything not
-   named is not offered (echo provider, 2026-11-24: 29 native tools by
-   default, 0 with an empty array, 2 with the two names below).
+   named is not offered (echo provider, 2026-11-24, with the six observer
+   switches: 28 native tools by default, 0 with an empty array, 2 with the two
+   names below; 29 by default without the switches).
    - [none]: the MCP server's tools only.
    - [read]: [read_file] and [search] (workspace file search with ripgrep
      semantics), plus the MCP server's tools. [read_file] is not confined to
@@ -2948,9 +2952,12 @@ let muse_required_args =
    matched every tool of a stub server whose tool names contain underscores.
    The glob also matches the tools of any server whose name starts with
    [masc__], which a trusted workspace or the operator's muse settings can
-   define. A literal list would not, but the host did not accept [-], [.],
-   [:] or [/] in a listed tool name (echo provider: "unknown tool"), so the
-   glob stays.
+   define. Exact names would not. The host registers a tool under its name
+   with every character outside [A-Za-z0-9_] replaced by [_] (a tool [a-b]
+   is [mcp__masc__a_b], and [mcp__masc__a-b] is unknown), and a listed name
+   that matches no registered tool fails every turn. The names in
+   config/tools use only [A-Za-z0-9_]; dynamic tools from other sources were
+   not checked. The glob cannot mismatch, so it stays.
    The host refuses an unknown plain name when the session starts. A name
    that matches no tool fails the first turn with "invalid run
    configuration: unknown tool"; the message gives the name, not the cause.

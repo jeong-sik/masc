@@ -131,8 +131,10 @@ credential naming an absolute path (`oauth_source` for Antigravity); `env` and
   start when `args` repeats one of those `-c` keys. With the observers on, 5 of
   8 measured turns (one tool call each) ended with one more model run, a
   prompt of 5.8 to 5.9k tokens by the host's estimate and 1.2 to 2.9 s to its
-  tool call; the other 3 turns also set `approval_judge` and `reasoning_effort`
-  and had none. With the observers off the run was absent in 8 of 8 turns.
+  tool call; the other 3 turns had none and differed in three ways, none tried
+  alone: `approval_judge`, `reasoning_effort`, and the `:ask-me` profile in the
+  operator's settings. With the observers off the run was absent in 8 of 8
+  turns.
   Switching one observer at a time with the echo provider, only the goal
   reminder switch changed whether the run's tool surface appeared; the other
   five are kept without a measurement that shows they are needed.

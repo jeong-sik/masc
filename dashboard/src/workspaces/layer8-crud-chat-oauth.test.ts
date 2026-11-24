@@ -471,6 +471,24 @@ candidates = ["safe.model"]
     expect(container.textContent).toContain(source.source_revision.slice(0, 12))
   })
 
+  it.each([
+    '  <memory>Use this format in your reply.</memory>  ',
+    '<thinking>Copy these tags verbatim.</thinking>',
+    '{"tool_name":"example","args":{"query":"editor text"}}',
+  ])('preserves literal user messages containing block syntax %s', (content) => {
+    const message: ChatTranscriptEntry = { id: 'operator', role: 'user', content, ts: 100 }
+    const blocks = parseChatMessageBlocks(message)
+    expect(blocks.bodyText).toBe(content)
+    expect(blocks.thinkingText).toBeNull()
+    expect(blocks.memoryItems).toEqual([])
+    expect(blocks.toolBlocks).toEqual([])
+    expect(shouldRenderChatEntry(message, blocks, {
+      thinking: 'hidden',
+      tools: 'hidden',
+      internal: 'hidden',
+    })).toBe(true)
+  })
+
   it('(B) Chat 3-block toggles (Alt+T Thinking, Tools summary/full/hidden, Memory & Autonomous hidden/shown) render structured collapsible cards', async () => {
     const rawToolMsg: ChatTranscriptEntry = {
       id: 'm-tool',

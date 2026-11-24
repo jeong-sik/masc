@@ -187,6 +187,19 @@ function extractInlineMemoryTags(content: string): {
  * as clean cards governed by the 3 toolbar toggles.
  */
 export function parseChatMessageBlocks(msg: ChatTranscriptEntry): ParsedChatBlocks {
+  if (msg.role === 'user') {
+    return {
+      thinkingText: null,
+      bodyText: msg.content,
+      toolBlocks: [],
+      memoryItems: [],
+      autonomousSummary: null,
+      autonomousDetails: null,
+      isInternalOnly: false,
+      isToolOnly: false,
+    }
+  }
+
   const { extractedThinking, remaining: afterThinking } = extractInlineThinkingTags(msg.content)
   const { extractedMemory, remaining: cleanedBody } = extractInlineMemoryTags(afterThinking)
 

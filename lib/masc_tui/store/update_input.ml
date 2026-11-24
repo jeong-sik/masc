@@ -2091,11 +2091,38 @@ let dispatch_keeper_config_key ~now (m : Model.t)
 let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
   let norm = Keymap.normalize_key_event ev in
   (* Top-precedence Micro_viewport gate per tui-chat-design/SKILL.md: never
-     mutate hidden drafts or underlying overlays; only Quit_app is accepted. *)
+     mutate hidden drafts or underlying overlays. On <40x12 only Quit_app is
+     accepted; on Micro (<80x24) only Quit_app, Force_refresh, and
+     Teleport_blocked ('J') advertised by the Micro Cockpit are accepted. *)
   if Model.is_too_small_viewport m.viewport then
     match Keymap.dispatch ~scope_chain:[ Keymap.Global ] norm with
     | Some act when Keymap.equal_action act Keymap.Quit_app ->
         Update_actions.execute_action ~now m Keymap.Quit_app
+    | Some _ | None -> (m, [])
+  else if
+    Model.equal_breakpoint m.breakpoint Model.Micro
+    && Option.is_none m.nav.overlay
+  then
+    (* Micro Cockpit (<80x24) hides Composer, Filter, and workspace body,
+       while still rendering Overlays on top. Block hidden-surface edits and
+       only allow explicit global/overlay-open actions. *)
+    let micro_allowed =
+      [
+        Keymap.Quit_app;
+        Keymap.Refresh;
+        Keymap.Teleport_blocked;
+        Keymap.Open_settings;
+        Keymap.Open_palette;
+        Keymap.Open_help;
+        Keymap.Open_incidents;
+        Keymap.Open_queue_context;
+      ]
+    in
+    match
+      Keymap.dispatch ~scope_chain:[ Keymap.Unfocused_nav; Keymap.Global ] norm
+    with
+    | Some act when List.exists (Keymap.equal_action act) micro_allowed ->
+        Update_actions.execute_action ~now m act
     | Some _ | None -> (m, [])
   else
     match m.nav.overlay with
@@ -2718,7 +2745,7 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                             || (Nav.equal_workspace m.nav.workspace Nav.Keepers
                                 && Nav.equal_keeper_tab
                                      m.fleet.keeper_dive_tab Nav.Keeper_memory
-                                && m.nav.pane_index = 1)
+                                && (m.nav.pane_index = 1 || m.nav.zoomed))
                       in
                       let is_code_git_toggle_g =
                         (not (Drafts.is_focused m.drafts))
@@ -3078,7 +3105,8 @@ let apply_paste ~now:_ (m : Model.t) text =
   if
     String.equal text ""
     || Model.is_too_small_viewport m.viewport
-    || Model.equal_breakpoint m.breakpoint Model.Micro
+    || (Model.equal_breakpoint m.breakpoint Model.Micro
+        && Option.is_none m.nav.overlay)
   then (m, [])
   else
     match m.nav.overlay with
@@ -3167,7 +3195,11 @@ let apply_paste ~now:_ (m : Model.t) text =
           ({ m with drafts }, [])
 
 let apply_mouse ~now (m : Model.t) (ev : Keymap.Input.mouse_event) =
-  if Model.is_too_small_viewport m.viewport then (m, [])
+  if
+    Model.is_too_small_viewport m.viewport
+    || (Model.equal_breakpoint m.breakpoint Model.Micro
+        && Option.is_none m.nav.overlay)
+  then (m, [])
   else
     let cancel_edit (m : Model.t) =
       if Config_store.is_editing_field m.config then

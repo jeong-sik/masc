@@ -414,7 +414,7 @@ let apply_staged_tui_pref_if_needed ~now ~key (m : Model.t)
             -> (
               match Theme.preset_of_name value with
               | Some preset ->
-                  ( { m1 with theme_preset = preset }
+                  ( { m1 with theme_preset = preset; cli_theme_override = false }
                   , [
                       Cmd.Http_post
                         {
@@ -433,7 +433,7 @@ let apply_staged_tui_pref_if_needed ~now ~key (m : Model.t)
                 then Say.Lang_en
                 else Say.Lang_ko
               in
-              ( { m1 with lang }
+              ( { m1 with lang; cli_lang_override = false }
               , [
                   Cmd.Http_post
                     {
@@ -1368,7 +1368,7 @@ let rec execute_slash ~now (m : Model.t) cmd =
           m.config
       in
       let next =
-        { m with theme_preset = preset; config }
+        { m with theme_preset = preset; cli_theme_override = false; config }
         |> Model.with_toast ~now ~level:Model.Toast_info
              (Say.concat ~sep:": "
                 [
@@ -1403,7 +1403,7 @@ let rec execute_slash ~now (m : Model.t) cmd =
           m.config
       in
       let next =
-        { m with lang; config }
+        { m with lang; cli_lang_override = false; config }
         |> Model.with_toast ~now ~level:Model.Toast_info
              (Say.make ~ko:"언어: 한국어" ~en:"Language: English")
       in
@@ -2121,7 +2121,7 @@ and execute_action ~now (m : Model.t) action =
             let cleared, cmds = Update_nav.set_active_filter_query "" m in
             ( { cleared with nav = { cleared.nav with filter_focused = false } },
               cmds )
-          else if Model.sidebar_has_focus m then
+          else if Model.sidebar_has_focus m || Model.sidebar_drawer_open m then
             (Update_nav.exit_sidebar_focus m, [])
           else if Drafts.is_focused m.drafts then
             match Update_nav.resolve_composer_popup m with
@@ -2332,7 +2332,27 @@ and execute_action ~now (m : Model.t) action =
                           }
                         , [] )
                       else if m.nav.zoomed then
-                        ({ m with nav = { m.nav with zoomed = false } }, [])
+                        let m0 =
+                          {
+                            m with
+                            nav =
+                              {
+                                m.nav with
+                                zoomed = false;
+                                pre_zoom_pane_index = None;
+                              };
+                          }
+                        in
+                        let max_pane =
+                          max 0 (Model.focusable_pane_count m0 - 1)
+                        in
+                        let restored =
+                          match m.nav.pre_zoom_pane_index with
+                          | Some p -> max 0 (min max_pane p)
+                          | None -> max 0 (min max_pane m0.nav.pane_index)
+                        in
+                        ( { m0 with nav = { m0.nav with pane_index = restored } }
+                        , [] )
                       else if
                         Nav.equal_workspace m.nav.workspace Nav.Keepers
                         && m.nav.pane_index = 1
@@ -3799,12 +3819,50 @@ and execute_action ~now (m : Model.t) action =
   | Keymap.Toggle_zoom ->
       if Model.sidebar_has_focus m then (m, [])
       else if not (Model.can_zoom_current_view m) then
-        if m.nav.zoomed then ({ m with nav = { m.nav with zoomed = false } }, [])
+        if m.nav.zoomed then
+          let m0 =
+            {
+              m with
+              nav = { m.nav with zoomed = false; pre_zoom_pane_index = None };
+            }
+          in
+          let max_pane = max 0 (Model.focusable_pane_count m0 - 1) in
+          let restored =
+            match m.nav.pre_zoom_pane_index with
+            | Some p -> max 0 (min max_pane p)
+            | None -> max 0 (min max_pane m0.nav.pane_index)
+          in
+          ({ m0 with nav = { m0.nav with pane_index = restored } }, [])
         else (m, [])
       else
         let zoomed = not m.nav.zoomed in
-        let pane_index = if zoomed then 0 else m.nav.pane_index in
-        let next = { m with nav = { m.nav with zoomed; pane_index } } in
+        let next =
+          if zoomed then
+            {
+              m with
+              nav =
+                {
+                  m.nav with
+                  zoomed = true;
+                  pre_zoom_pane_index = Some m.nav.pane_index;
+                  pane_index = 0;
+                };
+            }
+          else
+            let m0 =
+              {
+                m with
+                nav = { m.nav with zoomed = false; pre_zoom_pane_index = None };
+              }
+            in
+            let max_pane = max 0 (Model.focusable_pane_count m0 - 1) in
+            let restored =
+              match m.nav.pre_zoom_pane_index with
+              | Some p -> max 0 (min max_pane p)
+              | None -> max 0 (min max_pane m0.nav.pane_index)
+            in
+            { m0 with nav = { m0.nav with pane_index = restored } }
+        in
         if Option.is_some (Memory_diagram.active_diagram next) then
           Update_nav.refresh_open_memory_diagram ~now next
         else (next, [])

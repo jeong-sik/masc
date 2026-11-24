@@ -29,6 +29,7 @@ type nav_state = {
   dive_stack : Nav.dive list;
   overlay : Nav.overlay option;
   pane_index : int;
+  pre_zoom_pane_index : int option;
   zoomed : bool;
   filter_focused : bool;
   sidebar_open : bool option;
@@ -134,6 +135,8 @@ type t = {
   breakpoint : breakpoint;
   lang : Say.lang;
   theme_preset : Theme.preset;
+  cli_lang_override : bool;
+  cli_theme_override : bool;
   tz_offset_sec : int;
   tui_version : string;
   tui_commit : string option;
@@ -229,6 +232,8 @@ val initial :
   ?rows:int ->
   ?lang:Say.lang ->
   ?theme_preset:Theme.preset ->
+  ?cli_lang_override:bool ->
+  ?cli_theme_override:bool ->
   ?tz_offset_sec:int ->
   ?wall_unix:float ->
   ?tui_version:string ->

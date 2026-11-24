@@ -145,6 +145,7 @@ val draw :
   ?section_header:section_header ->
   ?show_row_badges:bool ->
   ?show_help_footer:bool ->
+  ?focused:bool ->
   state ->
   int
 (** Paint fields, calm [selection_bg] + [▎] focus indicator, optional

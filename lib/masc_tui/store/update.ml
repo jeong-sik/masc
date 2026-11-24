@@ -54,14 +54,63 @@ let apply_resize ~now (m : Model.t) ~cols ~rows =
   let viewport = { Model.cols = max 0 cols; rows = max 0 rows } in
   let breakpoint = Model.classify_viewport viewport in
   let next0 = { m with viewport; breakpoint } in
+  (* When shrinking across the docking threshold while the sidebar was not
+     focused, drop an explicit docked-open pin so an unfocused floating drawer
+     cannot cover the narrowed body. *)
+  let was_docked = Model.sidebar_docked m in
+  let is_docked = Model.sidebar_docked next0 in
+  let sidebar_open =
+    if was_docked && (not is_docked) && not m.nav.sidebar_focused then
+      match next0.nav.sidebar_open with
+      | Some true -> None
+      | (Some false | None) as v -> v
+    else next0.nav.sidebar_open
+  in
+  let next1 = { next0 with nav = { next0.nav with sidebar_open } } in
   (* Clear sidebar focus if shrinking hid the sidebar so keyboard focus can
      never remain trapped on an invisible surface. *)
+  let sidebar_focused =
+    if Model.sidebar_visible next1 then next1.nav.sidebar_focused else false
+  in
+  let next2 = { next1 with nav = { next1.nav with sidebar_focused } } in
+  (* Clamp pane_index to the resized layout's focusable pane count so focus can
+     never linger on a pane that collapsed away. *)
+  let max_pane = max 0 (Model.focusable_pane_count next2 - 1) in
+  let pane_index = max 0 (min max_pane next2.nav.pane_index) in
+  (* Entering Micro (<80x24) or too-small (<40x12) locks text surfaces so hidden
+     Composer/Filter/Settings edits cannot silently absorb keystrokes. *)
+  let micro_locked =
+    Model.is_too_small_viewport next2.viewport
+    || Model.equal_breakpoint next2.breakpoint Model.Micro
+  in
+  let overlay_hidden_locked =
+    Model.is_too_small_viewport next2.viewport
+    || (Model.equal_breakpoint next2.breakpoint Model.Micro
+        && Option.is_none next2.nav.overlay)
+  in
+  let drafts =
+    if micro_locked && Drafts.is_focused next2.drafts then
+      Drafts.set_focus false next2.drafts
+    else next2.drafts
+  in
+  let filter_focused =
+    if overlay_hidden_locked then false else next2.nav.filter_focused
+  in
+  let config =
+    if overlay_hidden_locked && Config_store.is_editing_field next2.config then
+      Config_store.cancel_edit_field next2.config
+    else next2.config
+  in
   let next =
-    if Model.sidebar_visible next0 then next0
-    else { next0 with nav = { next0.nav with sidebar_focused = false } }
+    {
+      next2 with
+      drafts;
+      config;
+      nav = { next2.nav with pane_index; filter_focused };
+    }
   in
   (* Never clobber [m.nav.overlay] or [m.inline_modal]; [Micro_viewport] gating
-     is evaluated dynamically from [Model.is_too_small_viewport m.viewport]. *)
+     is evaluated dynamically from [Model.is_too_small_viewport] / [Micro]. *)
   match
     Memory_diagram.active_diagram next,
     Memory_diagram.active_memory_content_rect next

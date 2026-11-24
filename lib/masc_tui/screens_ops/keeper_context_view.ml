@@ -764,9 +764,17 @@ let draw_exact_input_subtab grid ~(rect : Rect.t) ~(theme : Theme.t)
                    (Int.min (List.length manifest.parts - 1)
                       st.selected_part_idx))
           in
+          let left_focused =
+            if Option.is_some (Model.active_dive model) then
+              Model.pane_focused model 0
+            else
+              Model.body_has_focus model
+              && (model.nav.pane_index = 1 || model.nav.zoomed)
+          in
           ignore
             (Table.draw grid ~rect:left_r ~theme ~caps:Ops_common.default_caps
-               ~lang:model.lang ?selected:sel ~columns:cols rows);
+               ~lang:model.lang ?selected:sel ~focused:left_focused
+               ~columns:cols rows);
           if not (Rect.is_empty right_r) then begin
             match Keeper_context_store.part_content_for_selected st with
             | Some pc ->
@@ -1414,10 +1422,17 @@ let draw_tool_calls_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
             Int.max 0
               (Int.min (List.length page.entries - 1) st.selected_call_idx)
           in
+          let left_focused =
+            if Option.is_some (Model.active_dive model) then
+              Model.pane_focused model 0
+            else
+              Model.body_has_focus model
+              && (model.nav.pane_index = 1 || model.nav.zoomed)
+          in
           ignore
             (Table.draw grid ~rect:left_r ~theme ~caps:Ops_common.default_caps
                ~lang:model.lang ~scroll:st.call_scroll_offset ~selected:sel
-               ~columns:cols rows);
+               ~focused:left_focused ~columns:cols rows);
           if not (Rect.is_empty right_r) then begin
             match Keeper_context_store.selected_tool_call st with
             | None -> ()

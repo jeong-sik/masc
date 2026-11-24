@@ -170,15 +170,19 @@ let put_kv ~grid ~clip ~x ~y ~max_w ~(theme : Theme.t) ?bg ?key_w ~key
           ignore
             (put_clipped ~grid ~clip ~x:vx ~y ~max_w:rem ~style:v_style value)
 
+let selected_row_bg ~(theme : Theme.t) ~focused =
+  if focused then theme.selection_bg else theme.surface_2
+
 let paint_selected_row_bg ~grid ~clip ~(row_rect : Rect.t) ~(theme : Theme.t)
-    ?tone () =
+    ?(focused = true) ?tone () =
   if Rect.is_empty row_rect || Rect.is_empty clip then ()
   else
-    let sel_bg = Color.of_rgb theme.selection_bg in
+    let sel_bg = Color.of_rgb (selected_row_bg ~theme ~focused) in
     Cell_grid.fill_rect ~clip grid ~rect:row_rect
       ~style:(Typography.primary ~bg:sel_bg theme) ();
-    Card.draw_left_rail ~bg:sel_bg ?tone grid ~x:row_rect.x ~y:row_rect.y ~h:1
-      ~theme
+    if focused then
+      Card.draw_left_rail ~bg:sel_bg ?tone grid ~x:row_rect.x ~y:row_rect.y ~h:1
+        ~theme
 
 let draw_pills ~grid ~(rect : Rect.t) ~(theme : Theme.t) ?bg ?right_hint pills =
   if Rect.is_empty rect then 0

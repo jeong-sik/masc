@@ -1215,7 +1215,7 @@ let writer_state_badge = function
       (Glyph.Missing_absent, Theme.Status_historical, Say.make ~ko:"라이터 없음" ~en:"No Writer")
 
 let render_memory_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
-    ~name =
+    ~name ~focused =
   if Rect.is_empty rect then ()
   else
     let bg = Color.of_rgb theme.surface_1 in
@@ -1432,7 +1432,7 @@ let render_memory_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t
     in
     Masc_tui_screens_core.Memory_explorer.render_keeper_memory ~grid
       ~rect:content ~theme ~bp:(Ops_common.layout_bp model) ~model ~keeper:name
-      ~focused:(Model.body_has_focus model) ~diff_scroll:model.nav.dive_scroll_offset;
+      ~focused ~diff_scroll:model.nav.dive_scroll_offset;
     draw_librarian_footer writer_status_opt
     end
 
@@ -2849,7 +2849,10 @@ let render_config_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
     else
       ignore
         (Form.draw grid ~rect:form_rect ~theme ~lang:model.lang ~pad_x
-           ~section_header ~show_row_badges:false ~show_help_footer:false form_st);
+           ~section_header ~show_row_badges:false ~show_help_footer:false
+           ~focused:
+             (Model.is_keeper_config_active model && Model.body_has_focus model)
+           form_st);
     match server_diff_opt with
     | Some resp when diff_h >= 2 ->
         let diff_c = Card.pad_inner ~pad_x diff_rect in
@@ -3348,6 +3351,7 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
               ~theme ~model ~name
         | Nav.Keeper_memory ->
             render_memory_tab grid ~rect:content_rect ~theme ~model ~name
+              ~focused:card_spec.focused
         | Nav.Keeper_work_candle ->
             render_work_candle_tab grid ~rect:content_rect ~theme ~model ~name
         | Nav.Keeper_sandbox ->

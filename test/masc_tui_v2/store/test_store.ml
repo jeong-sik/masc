@@ -11301,6 +11301,290 @@ let test_single_slot_dive_error_target_guards () =
     "Runtime_trace_dive beta records matching beta Error" true
     (is_failed m_t_match.infra.runtime_trace)
 
+let test_ux_batch1_focus_resize_micro_zoom_and_cli_prefs () =
+  let t0 = Clock.Mono.of_ns 1_000_000_000L in
+  let mk_approval ~id ~keeper ~tool_name : Wire_work.held_tool_approval =
+    {
+      approval_id = id;
+      tool_call_id = "tc-" ^ id;
+      keeper;
+      tool = tool_name;
+      args_preview = "{}";
+      question = "Approve " ^ tool_name ^ "?";
+      because = None;
+      asked_at = 1700000000.0;
+      timeout_sec = 60.0;
+    }
+  in
+  (* UX-01: Pulse Attention [Y]/[N]/[J] honors triage_index and clears blocking Inbox filter *)
+  let a1 = mk_approval ~id:"apr-1" ~keeper:"alpha" ~tool_name:"shell_exec" in
+  let a2 = mk_approval ~id:"apr-2" ~keeper:"beta" ~tool_name:"git_push" in
+  let m0 = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
+  let attn =
+    Attention.rebuild ~asks:[] ~tool_approvals:[ a1; a2 ] ~gate_pending:[]
+      ~goals:[] m0.attention
+    |> Attention.select_triage_index 1
+  in
+  let m_pulse = { m0 with attention = attn } in
+  (match Model.fast_approval_strip_item m_pulse with
+   | Some e ->
+       Alcotest.(check bool) "UX-01 Pulse strip matches triage_index=1 (apr-2)"
+         true
+         (String.ends_with ~suffix:"apr-2" e.id)
+   | None -> Alcotest.fail "UX-01 expected fast_approval_strip_item on Pulse");
+  let _, cmds_y = Update.execute_action ~now:t0 m_pulse Keymap.Fast_approve_top in
+  let approved_id =
+    List.find_map
+      (function
+        | Cmd.Http_post { req = Cmd.Post_tool_approval { approval_id; _ }; _ } ->
+            Some approval_id
+        | _ -> None)
+      cmds_y
+  in
+  Alcotest.(check (option string))
+    "UX-01 Pulse [Y] approves highlighted apr-2, not apr-1" (Some "apr-2")
+    approved_id;
+  let m_pulse_filtered_inbox =
+    { m_pulse with work = Work_store.set_filter "alpha-only" m_pulse.work }
+  in
+  let m_jumped, _ =
+    Update.execute_action ~now:t0 m_pulse_filtered_inbox Keymap.Teleport_blocked
+  in
+  Alcotest.(check bool) "UX-01 [J] switches to Work_inbox" true
+    (Nav.equal_workspace m_jumped.nav.workspace Nav.Work
+     && Nav.equal_work_tab m_jumped.work.active_tab Nav.Work_inbox);
+  Alcotest.(check string) "UX-01 [J] clears stale Inbox filter hiding target" ""
+    m_jumped.work.filter_query;
+  Alcotest.(check int) "UX-01 [J] selects target apr-2 in Inbox" 1
+    m_jumped.attention.triage_index;
+
+  (* UX-02: Micro (<80x24) blurs hidden Composer/Filter and blocks typing & Enter *)
+  let m_comp =
+    {
+      m0 with
+      drafts =
+        m0.drafts |> Drafts.set_active_keeper "alpha"
+        |> Drafts.insert_text "secret-draft"
+        |> Drafts.set_focus true;
+      nav = { m0.nav with filter_focused = true };
+    }
+  in
+  let m_micro, _ =
+    Update.step ~now:t0 m_comp (Msg.Resize { cols = 70; rows = 20 })
+  in
+  Alcotest.(check bool) "UX-02 Resize to Micro blurs composer" false
+    (Drafts.is_focused m_micro.drafts);
+  Alcotest.(check bool) "UX-02 Resize to Micro blurs filter" false
+    m_micro.nav.filter_focused;
+  Alcotest.(check bool) "UX-02 Micro body_has_focus is false" false
+    (Model.body_has_focus m_micro);
+  let m_micro_typed, cmds_micro_enter =
+    let m1, _ = Update.step ~now:t0 m_micro (Msg.Key_event (char_key "z")) in
+    Update.step ~now:t0 m1
+      (Msg.Key_event
+         {
+           Keymap.Input.key = Keymap.Input.Enter;
+           mods = { ctrl = false; alt = false; shift = false };
+         })
+  in
+  Alcotest.(check string) "UX-02 Micro blocks typing into hidden draft"
+    "secret-draft"
+    (Drafts.draft_for ~keeper:"alpha" m_micro_typed.drafts).text;
+  Alcotest.(check int) "UX-02 Micro blocks Enter submission" 0
+    (List.length cmds_micro_enter);
+  let _, cmds_micro_quit =
+    Update.step ~now:t0 m_micro_typed
+      (Msg.Key_event
+         {
+           Keymap.Input.key = Keymap.Input.Char "q";
+           mods = { ctrl = true; alt = false; shift = false };
+         })
+  in
+  Alcotest.(check bool) "UX-02 Micro still allows Ctrl+Q Quit" true
+    (List.exists (function Cmd.Quit _ -> true | _ -> false) cmds_micro_quit);
+  let m_micro_help, _ =
+    Update.step ~now:t0 m_micro_typed (Msg.Key_event (char_key "?"))
+  in
+  Alcotest.(check bool) "UX-02 Micro allows '?' Help overlay" true
+    (match m_micro_help.nav.overlay with Some Nav.Help -> true | _ -> false);
+  let m_micro_attn =
+    let m_ma, _ =
+      Update.step ~now:t0 m_pulse (Msg.Resize { cols = 70; rows = 20 })
+    in
+    m_ma
+  in
+  let m_micro_j, _ =
+    Update.step ~now:t0 m_micro_attn (Msg.Key_event (char_key "J"))
+  in
+  Alcotest.(check bool) "UX-02 Micro allows 'J' Teleport_blocked" true
+    (Nav.equal_workspace m_micro_j.nav.workspace Nav.Work
+     && Nav.equal_work_tab m_micro_j.work.active_tab Nav.Work_inbox);
+  let m_micro_settings =
+    let m_s, _ =
+      Update.step ~now:t0 m_micro_typed
+        (Msg.Key_event
+           {
+             Keymap.Input.key = Keymap.Input.Char ",";
+             mods = { ctrl = true; alt = false; shift = false };
+           })
+    in
+    {
+      m_s with
+      nav = { m_s.nav with filter_focused = true };
+      config =
+        {
+          m_s.config with
+          editing_field_key = Some "tui.theme";
+          editing_buffer = "paper";
+        };
+    }
+  in
+  let m_micro_settings_resized, _ =
+    Update.step ~now:t0 m_micro_settings (Msg.Resize { cols = 72; rows = 21 })
+  in
+  Alcotest.(check bool)
+    "UX-02 Micro resize preserves visible Settings overlay filter_focused" true
+    m_micro_settings_resized.nav.filter_focused;
+  Alcotest.(check bool)
+    "UX-02 Micro resize preserves visible Settings field editing" true
+    (Config_store.is_editing_field m_micro_settings_resized.config);
+  let m_micro_pasted, _ =
+    Update.step ~now:t0
+      { m_micro_settings_resized with nav = { m_micro_settings_resized.nav with filter_focused = false } }
+      (Msg.Paste_text "_light")
+  in
+  Alcotest.(check string)
+    "UX-02 Micro paste works inside visible Settings field editor" "paper_light"
+    m_micro_pasted.config.editing_buffer;
+
+  (* UX-03: Resize clamps pane_index, drops unfocused docked pin, Esc closes unfocused drawer *)
+  let m_keepers_p1 =
+    let m_k =
+      {
+        m0 with
+        fleet =
+          Fleet_store.apply_roster ~observed_at:t0
+            (roster_of [ sample_keeper "alpha" ])
+            m0.fleet;
+        nav =
+          {
+            m0.nav with
+            workspace = Nav.Keepers;
+            pane_index = 1;
+            sidebar_open = Some true;
+            sidebar_focused = false;
+          };
+      }
+    in
+    m_k
+  in
+  let m_shrunk, _ =
+    Update.step ~now:t0 m_keepers_p1 (Msg.Resize { cols = 90; rows = 28 })
+  in
+  Alcotest.(check int) "UX-03 Resize clamps Keepers pane_index 1 -> 0" 0
+    m_shrunk.nav.pane_index;
+  Alcotest.(check bool)
+    "UX-03 Crossing <132 while sidebar unfocused drops floating drawer" false
+    (Model.sidebar_drawer_open m_shrunk);
+  let m_unfocused_drawer =
+    {
+      m_shrunk with
+      nav = { m_shrunk.nav with sidebar_open = Some true; sidebar_focused = false };
+    }
+  in
+  Alcotest.(check bool) "UX-03 unfocused drawer is open" true
+    (Model.sidebar_drawer_open m_unfocused_drawer);
+  let m_drawer_esc, _ =
+    Update.execute_action ~now:t0 m_unfocused_drawer Keymap.Pop_back_or_close
+  in
+  Alcotest.(check bool) "UX-03 Esc closes unfocused floating drawer" false
+    (Model.sidebar_drawer_open m_drawer_esc);
+
+  (* UX-05: Toggle_zoom keeps truthful ZOOM focus label & restores pane_index on unzoom *)
+  let m_zoomed, _ =
+    Update.execute_action ~now:t0 m_keepers_p1 Keymap.Toggle_zoom
+  in
+  Alcotest.(check bool) "UX-05 zoomed = true" true m_zoomed.nav.zoomed;
+  Alcotest.(check int) "UX-05 zoomed pane_index clamped to 0" 0
+    m_zoomed.nav.pane_index;
+  Alcotest.(check bool) "UX-05 zoomed Focus Pill reflects ZOOM" true
+    (String.starts_with ~prefix:"ZOOM"
+       (Say.resolve Say.Lang_en (Model.active_focus_label m_zoomed)));
+  let m_unzoomed, _ =
+    Update.execute_action ~now:t0 m_zoomed Keymap.Toggle_zoom
+  in
+  Alcotest.(check bool) "UX-05 unzoomed = false" false m_unzoomed.nav.zoomed;
+  Alcotest.(check int) "UX-05 unzoom restores pane_index = 1" 1
+    m_unzoomed.nav.pane_index;
+
+  (* UX-08: Multi-pane Dive Focus Pill & Keepers sidebar sub-tab cursor preservation *)
+  let m_tc_dive =
+    {
+      m0 with
+      nav =
+        {
+          m0.nav with
+          workspace = Nav.Keepers;
+          dive_stack =
+            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_tool_calls } ];
+          pane_index = 1;
+        };
+    }
+  in
+  Alcotest.(check string) "UX-08 Dive_keeper Tool Calls pane 1 Focus Pill"
+    "2/2 alpha · Detail"
+    (Say.resolve Say.Lang_en (Model.active_focus_label m_tc_dive));
+  let m_k_ctx_p0 =
+    {
+      m_keepers_p1 with
+      nav = { m_keepers_p1.nav with pane_index = 0 };
+      fleet = Fleet_store.set_keeper_dive_tab Nav.Keeper_context m_keepers_p1.fleet;
+    }
+  in
+  Alcotest.(check bool)
+    "UX-08 active_menu_target keeps Keeper_context even on pane 0" true
+    (match Model.active_menu_target m_k_ctx_p0 with
+     | Nav.Menu_keeper_tab Nav.Keeper_context -> true
+     | _ -> false);
+
+  (* UX-09: CLI --lang / --theme override survives boot Reply_tui_preferences *)
+  let m_cli =
+    Model.initial ~lang:Say.Lang_ko ~theme_preset:Theme.Paper_light
+      ~cli_lang_override:true ~cli_theme_override:true ()
+  in
+  let server_prefs : Wire_config.tui_preferences =
+    {
+      language = Some Say.Lang_en;
+      theme = Some "midnight";
+      board_sort = None;
+      reduce_motion = None;
+      hints_visible = None;
+      coalesce_queued_input = None;
+      send_on_stop = None;
+      audio_input_device = None;
+    }
+  in
+  let m_after_prefs, _ =
+    Update.step ~now:t0 m_cli
+      (Msg.Http_reply
+         {
+           epoch = m_cli.epoch;
+           reply = Msg.Reply_tui_preferences (Ok server_prefs);
+         })
+  in
+  Alcotest.(check bool) "UX-09 CLI --lang ko survives Reply_tui_preferences" true
+    (Say.equal_lang m_after_prefs.lang Say.Lang_ko);
+  Alcotest.(check bool) "UX-09 CLI --theme paper survives Reply_tui_preferences"
+    true
+    (Theme.equal_preset m_after_prefs.theme_preset Theme.Paper_light);
+  let m_explicit_en, _ =
+    Update.execute_slash ~now:t0 m_after_prefs (Slash.Lang (Some Say.Lang_en))
+  in
+  Alcotest.(check bool) "UX-09 explicit /lang en updates lang" true
+    (Say.equal_lang m_explicit_en.lang Say.Lang_en);
+  Alcotest.(check bool) "UX-09 explicit /lang clears cli_lang_override" false
+    m_explicit_en.cli_lang_override
+
 let () =
   Alcotest.run "masc_tui_store"
     [
@@ -11460,5 +11744,8 @@ let () =
           Alcotest.test_case
             "Single-slot dive Error replies honor active target ID guard except Workspace_mismatch"
             `Quick test_single_slot_dive_error_target_guards;
+          Alcotest.test_case
+            "UX Batch 1: Pulse Attention, Micro lock, resize clamp, zoom restore, Focus Pill & CLI prefs"
+            `Quick test_ux_batch1_focus_resize_micro_zoom_and_cli_prefs;
         ] );
     ]

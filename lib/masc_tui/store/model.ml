@@ -23,6 +23,7 @@ type nav_state = {
   dive_stack : Nav.dive list;
   overlay : Nav.overlay option;
   pane_index : int;
+  pre_zoom_pane_index : int option;
   zoomed : bool;
   filter_focused : bool;
   sidebar_open : bool option;
@@ -124,6 +125,8 @@ type t = {
   breakpoint : breakpoint;
   lang : Say.lang;
   theme_preset : Theme.preset;
+  cli_lang_override : bool;
+  cli_theme_override : bool;
   tz_offset_sec : int;
   tui_version : string;
   tui_commit : string option;
@@ -209,7 +212,8 @@ let classify_viewport { cols; rows } =
 let is_too_small_viewport { cols; rows } = cols < 40 || rows < 12
 
 let initial ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_ko)
-    ?(theme_preset = Theme.Midnight) ?(tz_offset_sec = 0) ?(wall_unix = 0.0)
+    ?(theme_preset = Theme.Midnight) ?(cli_lang_override = false)
+    ?(cli_theme_override = false) ?(tz_offset_sec = 0) ?(wall_unix = 0.0)
     ?(tui_version = "") ?(tui_commit = None) () =
   let viewport = { cols = max 0 cols; rows = max 0 rows } in
   let breakpoint = classify_viewport viewport in
@@ -222,6 +226,8 @@ let initial ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_ko)
     breakpoint;
     lang;
     theme_preset;
+    cli_lang_override;
+    cli_theme_override;
     tz_offset_sec;
     tui_version;
     tui_commit;
@@ -231,6 +237,7 @@ let initial ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_ko)
         dive_stack = [];
         overlay = None;
         pane_index = 0;
+        pre_zoom_pane_index = None;
         zoomed = false;
         filter_focused = false;
         sidebar_open = None;
@@ -325,7 +332,8 @@ let is_in_keeper_chat m =
       false
 
 let fast_approval_strip_item m =
-  if is_too_small_viewport m.viewport then None
+  if is_too_small_viewport m.viewport || equal_breakpoint m.breakpoint Micro then
+    None
   else
     match m.nav.overlay with
     | Some (Nav.System_gate _) -> None
@@ -355,6 +363,16 @@ let fast_approval_strip_item m =
                   Some e
               | Attention.Payload_ask _ -> None)
           | Some _ | None -> None
+        else if
+          m.nav.dive_stack = []
+          && Nav.equal_workspace m.nav.workspace Nav.Pulse
+          && (not (Attention.is_empty m.attention))
+          && Int.equal m.nav.pane_index 0
+        then
+          match Attention.current_filtered_item ~query:"" m.attention with
+          | Some e when not (Attention.is_in_flight ~id:e.id m.attention) ->
+              Some e
+          | Some _ | None -> Attention.top_fast_path m.attention
         else Attention.top_fast_path m.attention
 
 let composer_mode m =
@@ -479,10 +497,7 @@ let active_menu_target m =
                 | Nav.Dive_runtime _
                 | Nav.Dive_infra _ ) ->
                 None
-            | None ->
-                if m.nav.pane_index = 1 || m.nav.zoomed then
-                  Some m.fleet.keeper_dive_tab
-                else None
+            | None -> Some m.fleet.keeper_dive_tab
           in
           match tab_opt with
           | Some
@@ -746,7 +761,10 @@ let active_focus_scope m =
   else
     match m.nav.overlay with
     | Some ov -> Nav.Overlay_focused ov
-    | None -> (
+    | None ->
+        if equal_breakpoint m.breakpoint Micro then
+          Nav.Overlay_focused (Nav.System_gate Nav.Micro_viewport)
+        else (
         if Drafts.is_focused m.drafts then Nav.Composer_focused
         else
           match active_dive m with
@@ -778,9 +796,12 @@ let active_focus_scope m =
               else Nav.Workspace_focused m.nav.workspace)
 
 let focus_scope_chain m =
+  let micro_locked =
+    is_too_small_viewport m.viewport || equal_breakpoint m.breakpoint Micro
+  in
   let approval_strip_active =
     if
-      (not (is_too_small_viewport m.viewport))
+      (not micro_locked)
       && Option.is_none m.nav.overlay
       && m.nav.dive_stack = []
       && Nav.equal_workspace m.nav.workspace Nav.Work
@@ -797,6 +818,7 @@ let focus_scope_chain m =
 
 let body_has_focus m =
   (not (is_too_small_viewport m.viewport))
+  && (not (equal_breakpoint m.breakpoint Micro))
   && Option.is_none m.nav.overlay
   && (not m.nav.filter_focused)
   && (not (sidebar_has_focus m))
@@ -814,6 +836,9 @@ let active_focus_label m =
         ~en:(Printf.sprintf "%d/%d %s" idx n en)
     else Say.make ~ko ~en
   in
+  if is_too_small_viewport m.viewport then
+    Say.make ~ko:"화면 너무 작음" ~en:"VIEWPORT TOO SMALL"
+  else
   match m.nav.overlay with
   | Some Nav.Help -> Say.make ~ko:"오버레이 · 도움말" ~en:"OVERLAY · Help"
   | Some Nav.Palette -> Say.make ~ko:"오버레이 · 팔레트" ~en:"OVERLAY · Palette"
@@ -834,7 +859,9 @@ let active_focus_label m =
   | Some (Nav.System_gate _) ->
       Say.make ~ko:"시스템 게이트" ~en:"SYSTEM GATE"
   | None -> (
-      if m.nav.filter_focused then Say.make ~ko:"필터 입력" ~en:"FILTER"
+      if equal_breakpoint m.breakpoint Micro then
+        Say.make ~ko:"마이크로 (입력 잠금)" ~en:"MICRO (LOCKED)"
+      else if m.nav.filter_focused then Say.make ~ko:"필터 입력" ~en:"FILTER"
       else if Drafts.is_focused m.drafts then
         let k =
           match m.drafts.active_keeper with
@@ -847,8 +874,27 @@ let active_focus_label m =
         Say.make ~ko:"메뉴" ~en:"MENU"
       else
         match active_dive m with
-        | Some (Nav.Dive_keeper { name; _ }) ->
-            Say.make ~ko:("상세 · " ^ name) ~en:("DIVE · " ^ name)
+        | Some (Nav.Dive_keeper { name; tab }) -> (
+            if focusable_pane_count m > 1 then
+              match tab with
+              | Nav.Keeper_tool_calls ->
+                  if m.nav.pane_index = 1 then
+                    pane_prefix ~ko:(name ^ " · 상세") ~en:(name ^ " · Detail")
+                  else pane_prefix ~ko:(name ^ " · 호출") ~en:(name ^ " · Calls")
+              | Nav.Keeper_context ->
+                  if m.nav.pane_index = 1 then
+                    pane_prefix ~ko:(name ^ " · 원문") ~en:(name ^ " · Prompt")
+                  else
+                    pane_prefix ~ko:(name ^ " · 섹션") ~en:(name ^ " · Sections")
+              | Nav.Keeper_chat
+              | Nav.Keeper_memory
+              | Nav.Keeper_work_candle
+              | Nav.Keeper_sandbox
+              | Nav.Keeper_config
+              | Nav.Keeper_logs
+              | Nav.Keeper_identity ->
+                  Say.make ~ko:("상세 · " ^ name) ~en:("DIVE · " ^ name)
+            else Say.make ~ko:("상세 · " ^ name) ~en:("DIVE · " ^ name))
         | Some (Nav.Dive_work _) ->
             Say.make ~ko:"작업 상세" ~en:"WORK DIVE"
         | Some (Nav.Dive_knowledge _) ->
@@ -902,25 +948,35 @@ let active_focus_label m =
                       pane_prefix ~ko:"하네스 상세" ~en:"Run Detail"
                     else pane_prefix ~ko:"하네스 실행" ~en:"Harness")
             | Nav.Knowledge -> (
+                let zoomed = m.nav.zoomed && can_zoom_current_view m in
                 match m.knowledge.active_tab with
                 | Nav.Knowledge_board ->
-                    if m.nav.pane_index = 1 then
+                    if zoomed then Say.make ~ko:"확대 · 타래 보기" ~en:"ZOOM · Thread"
+                    else if m.nav.pane_index = 1 then
                       pane_prefix ~ko:"타래 보기" ~en:"Thread"
                     else pane_prefix ~ko:"보드" ~en:"Board"
                 | Nav.Knowledge_wiki ->
-                    if m.nav.pane_index = 1 then
+                    if zoomed then Say.make ~ko:"확대 · 위키 보기" ~en:"ZOOM · Wiki View"
+                    else if m.nav.pane_index = 1 then
                       pane_prefix ~ko:"위키 보기" ~en:"Wiki View"
                     else pane_prefix ~ko:"위키 트리" ~en:"Wiki Tree"
                 | Nav.Knowledge_artifacts ->
-                    if m.nav.pane_index = 1 then
+                    if zoomed then Say.make ~ko:"확대 · 산출물 상세" ~en:"ZOOM · Artifact"
+                    else if m.nav.pane_index = 1 then
                       pane_prefix ~ko:"산출물 상세" ~en:"Artifact"
                     else pane_prefix ~ko:"산출물 목록" ~en:"Artifacts"
                 | Nav.Knowledge_memory ->
-                    if m.nav.pane_index = 1 then
+                    if zoomed then Say.make ~ko:"확대 · 기억 탐색" ~en:"ZOOM · Explorer"
+                    else if m.nav.pane_index = 1 then
                       pane_prefix ~ko:"기억 탐색" ~en:"Explorer"
                     else pane_prefix ~ko:"기억 범위" ~en:"Memory Scope")
             | Nav.Keepers ->
-                if m.nav.pane_index = 1 then
+                if m.nav.zoomed && can_zoom_current_view m then
+                  let tab_lbl = Nav.keeper_tab_label m.fleet.keeper_dive_tab in
+                  Say.make
+                    ~ko:("확대 · " ^ Say.resolve Say.Lang_ko tab_lbl)
+                    ~en:("ZOOM · " ^ Say.resolve Say.Lang_en tab_lbl)
+                else if m.nav.pane_index = 1 then
                   pane_prefix ~ko:"키퍼 프리뷰" ~en:"Preview"
                 else pane_prefix ~ko:"키퍼 목록" ~en:"Fleet"
             | Nav.Runtime -> (

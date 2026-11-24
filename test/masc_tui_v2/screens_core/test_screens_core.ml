@@ -1637,20 +1637,22 @@ let test_pulse_selection_scroll_and_velocity_units () =
        Alcotest.fail
          (Printf.sprintf "pulse_company_scroll: expected Company-08 visible & focused:\n%s"
             (grid_all_text g_scroll_co)));
-  let last_attn_keeper =
+  let last_attn_needle =
     match Attention.current_triage_item m_scroll.attention with
     | Some item -> (
         match Render_util.attention_kind_keeper item.kind with
         | Some k -> k
-        | None -> "ask-keeper-08")
+        | None ->
+            if String.length item.title > 12 then String.sub item.title 0 12
+            else item.title)
     | None -> "ask-keeper-08"
   in
-  match find_focused_row_containing ~needle:last_attn_keeper g_scroll with
+  match find_focused_row_containing ~needle:last_attn_needle g_scroll with
   | Some _ -> ()
   | None ->
       Alcotest.fail
         (Printf.sprintf "pulse_attn_scroll: expected %S visible & focused:\n%s"
-           last_attn_keeper (grid_all_text g_scroll))
+           last_attn_needle (grid_all_text g_scroll))
 
 let test_no_default_leak_no_dup_diff_and_micro_grid_dims () =
   (* 1. Empty model NEVER leaks "@_default" across Composer, Compact, Micro, Ctrl+T *)
@@ -2378,6 +2380,7 @@ let test_v25_settings_grouped_scroll_1subgroup_and_single_highlight () =
   in
   let theme = Theme.of_preset base.theme_preset in
   let sel_bg = Color.of_rgb theme.selection_bg in
+  let muted_sel_bg = Color.of_rgb theme.surface_2 in
   let assert_single_tree_highlight ~label tree_idx =
     let cfg_insp =
       {
@@ -2389,15 +2392,21 @@ let test_v25_settings_grouped_scroll_1subgroup_and_single_highlight () =
     let m_insp = { m_1sub with config = cfg_insp } in
     let g_insp, _ = render_full ~model:m_insp ~cols:140 ~rows:40 in
     assert_clean_grid ~label g_insp;
-    let highlighted_rows = ref [] in
-    (* Left tree sits in cols 1..32, rows 4..37 *)
+    let bright_rows = ref [] in
+    let muted_rows = ref [] in
+    (* Left tree sits in cols 1..32, rows 4..37: when unfocused (Pane_inspector),
+       active section row uses muted surface_2, never competing selection_bg. *)
     for y = 4 to 37 do
-      if Color.equal (Cell_grid.get g_insp ~x:2 ~y).style.bg sel_bg then
-        highlighted_rows := y :: !highlighted_rows
+      let bg = (Cell_grid.get g_insp ~x:2 ~y).style.bg in
+      if Color.equal bg sel_bg then bright_rows := y :: !bright_rows;
+      if Color.equal bg muted_sel_bg then muted_rows := y :: !muted_rows
     done;
     Alcotest.(check int)
-      (label ^ ": exactly 1 highlighted row in Left Tree")
-      1 (List.length !highlighted_rows)
+      (label ^ ": 0 active-focus selection_bg rows in unfocused Left Tree")
+      0 (List.length !bright_rows);
+    Alcotest.(check int)
+      (label ^ ": exactly 1 muted active-section row in unfocused Left Tree")
+      1 (List.length !muted_rows)
   in
   (match cat_idx with
    | Some i -> assert_single_tree_highlight ~label:"tree_cat_pane_insp" i

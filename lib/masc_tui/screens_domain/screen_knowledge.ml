@@ -504,12 +504,15 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                match v_arr.(idx) with
                | `Group (grp, is_expanded, is_sel) ->
                    let p = grp.lead in
+                   let left_focused = Model.pane_focused model 0 in
                    let row_bg =
-                     if is_sel then theme.selection_bg else theme.surface_1
+                     if is_sel then
+                       H.selected_row_bg ~theme ~focused:left_focused
+                     else theme.surface_1
                    in
                    if is_sel then
                      H.paint_selected_row_bg ~grid ~clip:feed_rect
-                       ~row_rect:r_rect ~theme ();
+                       ~row_rect:r_rect ~theme ~focused:left_focused ();
                    let age = H.format_age ~now_unix p.created_at_unix in
                    let replies_s = Printf.sprintf "%dc" p.comment_count in
                    let age_w = Grapheme.display_width age in
@@ -573,12 +576,15 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                         ~max_w:(Int.max 0 (left_limit - !cx))
                         ~style:title_style p.title)
                | `Member (m, is_last, is_sel) ->
+                   let left_focused = Model.pane_focused model 0 in
                    let row_bg =
-                     if is_sel then theme.selection_bg else theme.surface_1
+                     if is_sel then
+                       H.selected_row_bg ~theme ~focused:left_focused
+                     else theme.surface_1
                    in
                    if is_sel then
                      H.paint_selected_row_bg ~grid ~clip:feed_rect
-                       ~row_rect:r_rect ~theme ();
+                       ~row_rect:r_rect ~theme ~focused:left_focused ();
                    let branch =
                      if is_last then Glyph.Tree_corner else Glyph.Tree_tee
                    in
@@ -1166,12 +1172,15 @@ let render_wiki ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~b
                        (H.put_right ~grid ~clip:r_rect ~right_x:right_edge ~y:py
                           ~max_w:6 ~style:(H.whisper_style ~theme ()) cnt_s)
                  | `Page (p, is_sel) ->
+                     let left_focused = Model.pane_focused model 0 in
                      let row_bg =
-                       if is_sel then theme.selection_bg else theme.surface_1
+                       if is_sel then
+                         H.selected_row_bg ~theme ~focused:left_focused
+                       else theme.surface_1
                      in
                      if is_sel then
                        H.paint_selected_row_bg ~grid ~clip:list_area
-                         ~row_rect:r_rect ~theme ();
+                         ~row_rect:r_rect ~theme ~focused:left_focused ();
                      let meta =
                        Printf.sprintf "%s%d r%d"
                          (Glyph.to_utf8 Glyph.External_arrow)
@@ -1866,7 +1875,8 @@ let render_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
             ignore
               (Table.draw grid ~rect:left_inner ~theme ~caps:H.default_caps ~lang
                  ~col_gap:(Layout.table_col_gap bp) ~scroll:k.scroll_offset
-                 ~selected:sel ~columns rows)
+                 ~selected:sel ~focused:(Model.pane_focused model 0) ~columns
+                 rows)
       | ( Observed.Loading _
         | Observed.Absent
         | Observed.Unreported

@@ -162,7 +162,7 @@ let put_aligned grid ~clip ~x ~y ~w ~align ~style text =
     ignore (Cell_grid.put_text ~clip grid ~x:(x + dx) ~y ~style fitted)
 
 let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ~(caps : Presenter.capabilities)
-    ~lang ?(scroll = 0) ?selected ?(zebra = false) ?col_gap
+    ~lang ?(scroll = 0) ?selected ?(focused = true) ?(zebra = false) ?col_gap
     ?(header_separator = true) ~columns rows =
   let total_rows = List.length rows in
   if Rect.is_empty rect then
@@ -224,18 +224,19 @@ let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ~(caps : Presenter.capabilitie
           match selected with Some s -> Int.equal s idx | None -> false
         in
         let bg_rgb =
-          if is_selected then theme.selection_bg
+          if is_selected && focused then theme.selection_bg
+          else if is_selected then theme.surface_2
           else if zebra && idx mod 2 = 1 then theme.surface_0
           else theme.surface_1
         in
         let bg = Color.of_rgb bg_rgb in
         let base_style = Typography.primary ~bg theme in
         let gauge_lbl_style =
-          if is_selected then Typography.anchor ~bg theme
+          if is_selected && focused then Typography.anchor ~bg theme
           else Typography.primary ~bg theme
         in
         Cell_grid.fill_rect ~clip:rect grid ~rect:row_rect ~style:base_style ();
-        if is_selected then begin
+        if is_selected && focused then begin
           let rail_style = Typography.accent ~bg ~bold:true theme in
           if caps.unicode_blocks then
             Cell_grid.put_glyph ~clip:row_rect grid ~x:rect.x ~y:py
@@ -252,7 +253,7 @@ let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ~(caps : Presenter.capabilitie
              | None -> ()
              | Some (Text { text; fg; attrs }) ->
                  let fg_color, eff_attrs =
-                   if is_selected && col.priority = 0 then
+                   if is_selected && focused && col.priority = 0 then
                      let c =
                        match fg with
                        | Some explicit -> explicit

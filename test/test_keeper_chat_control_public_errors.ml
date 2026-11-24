@@ -135,6 +135,20 @@ let test_a_command_that_reached_no_owner_was_not_accepted () =
   check bool "a code this build does not know reads as nothing" true
     (Shared.of_code "not_a_public_code" = None)
 
+(* 2026-11-23: four dashboard messages for a Keeper whose activation mode is
+   manual were accepted while it was down and stayed queued with nothing on
+   the screen. The refusal that replaces that acceptance has to read as
+   "nothing was admitted", or a client keeps the message held and asks about
+   an operation the store never recorded. *)
+let test_a_keeper_that_is_not_started_refuses_without_admitting () =
+  let module Shared = Masc.Keeper_chat_public_error in
+  let error = Public.make ~incident_id:"operation-not-started" Public.Keeper_not_started in
+  check string "stable public code" "keeper_not_started" error.Public.code;
+  check bool "answered as a conflict with the Keeper's state" true
+    (error.Public.status = `Conflict);
+  check bool "the refused message was not accepted" true
+    (Shared.pre_acceptance Shared.Keeper_not_started = Shared.Not_accepted)
+
 let () = run "Keeper public control replies"
     ["public replies", [
       test_case "queue effect survives interruption failure" `Quick
@@ -146,4 +160,6 @@ let () = run "Keeper public control replies"
       test_case "non-success response retains only public facts" `Quick
         test_non_success_error_retains_only_public_facts;
       test_case "a command that reached no owner was not accepted" `Quick
-        test_a_command_that_reached_no_owner_was_not_accepted]]
+        test_a_command_that_reached_no_owner_was_not_accepted;
+      test_case "a Keeper that is not started refuses without admitting" `Quick
+        test_a_keeper_that_is_not_started_refuses_without_admitting]]

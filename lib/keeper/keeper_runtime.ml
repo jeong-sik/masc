@@ -197,6 +197,16 @@ let autoboot_exclusion_reason ?profile_snapshot config name =
        boot path so load_or_materialize_boot_meta can emit the precise error. *)
     None
 
+(* The registry is read first: a keeper an operator started stays excluded
+   from autoboot by its declared mode while it is up. *)
+let awaits_operator_start config name =
+  (not (Keeper_registry.is_registered ~base_path:config.Workspace.base_path name))
+  &&
+  match autoboot_exclusion_reason config name with
+  | Some (Declarative_autoboot_disabled | Autoboot_disabled) -> true
+  | None | Some (Paused | Shutdown_admission_fence) -> false
+;;
+
 let bootstrap_candidate_keeper_names config =
   configured_keeper_names config
   |> List.filter (fun name -> Option.is_none (autoboot_exclusion_reason config name))

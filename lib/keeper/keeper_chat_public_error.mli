@@ -8,7 +8,7 @@ type kind =
   | Invalid_input | Unknown_operation | Not_queued | Idempotency_conflict
   | Native_call_unsettled | Store_fenced | Store_commit_unknown | Store_unreadable
   | Owner_unavailable | Owner_stopping
-  | Interrupt_failed | Operation_forbidden | Keeper_paused | Unknown_keeper
+  | Interrupt_failed | Operation_forbidden | Keeper_paused | Keeper_not_started | Unknown_keeper
   | Journal_unreadable | Journal_corrupt | Journal_unsupported_version | Journal_missing | Journal_pruned
   | Cursor_refusal of Keeper_chat_event_log.cursor_refusal
 
@@ -41,7 +41,9 @@ val pre_acceptance : kind -> pre_acceptance
     earlier fault raised refused the attempt before it touched the store.
     [Store_unreadable] is [Not_accepted]: a read failed before any write.
     [Store_commit_unknown] stays [Acceptance_unknown]: the Owner may have
-    committed before its store failed. *)
+    committed before its store failed. [Keeper_not_started] is
+    [Not_accepted]: a new message for a Keeper that only an operator starts
+    is refused before the Owner is asked to record it. *)
 
 val of_command_error : Keeper_owner_registry.command_error -> kind
 (** The kind every surface answers a typed Owner command failure with: the

@@ -3396,6 +3396,28 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
             payload
           |> Result.map_error (fun detail -> `Input detail)
         in
+        (* The Owner of a Keeper that only an operator starts still takes a
+           message and holds it queued, and no turn runs to say why: the
+           sender saw neither a reply nor a reason, and the message ran
+           whenever the Keeper was next started. A new message for such a
+           Keeper is refused here and writes nothing. An operation the store
+           already holds is served as before, so a client that sends its id
+           again reads that operation back. *)
+        let* () =
+          if not
+               (Keeper_runtime.awaits_operator_start
+                  (Mcp_server.workspace_config state)
+                  payload.name)
+          then Ok ()
+          else (
+            match
+              Keeper_owner_registry.exact_operation
+                ~base_path ~keeper_name:payload.name payload.request_id
+            with
+            | Ok (Some (_ : Keeper_chat_operation.t)) -> Ok ()
+            | Ok None -> Error `Not_started
+            | Error error -> Error (`Owner error))
+        in
         (match payload.admission_intent with
          | Queue_only -> Keeper_owner_registry.submit_operation
              ~base_path ~keeper_name:payload.name ~operation_id:payload.request_id
@@ -3422,6 +3444,12 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
           Log.Keeper.warn "keeper_chat_submit incident_id=%s code=%s detail=%s"
             public.incident_id public.code
             (Keeper_owner_registry.command_error_to_string error);
+          Error (submit_error_frame public)
+        | Error `Not_started ->
+          let public = Server_keeper_chat_public_error.make
+              ~incident_id:operation_id Keeper_not_started in
+          Log.Keeper.info "keeper_chat_submit incident_id=%s code=%s keeper=%s"
+            public.incident_id public.code payload.name;
           Error (submit_error_frame public)
       in
       match retry, opening with

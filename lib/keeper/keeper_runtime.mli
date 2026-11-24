@@ -120,6 +120,17 @@ val autoboot_exclusion_reason_of_reads
     [None], so the boot path reaches the keeper and reports the error; a
     reader for which that is the unsafe direction checks [profile] itself. *)
 
+val awaits_operator_start : Workspace.config -> string -> bool
+(** [true] when the keeper is not registered in this process and
+    {!autoboot_exclusion_reason} answers [Declarative_autoboot_disabled] or
+    [Autoboot_disabled]: the server does not start it, so it comes up only
+    when an operator starts it, and work queued for it meanwhile has no time
+    at which it runs.
+
+    [false] for a registered keeper; for one the boot path admits, which may
+    not have booted yet; and for a paused one, whose resume is a different
+    operator action than a start. *)
+
 val autoboot_excluded_keeper_reasons : Workspace.config -> autoboot_exclusion list
 (** Configured keepers skipped by autoboot with operator-facing reason labels. *)
 

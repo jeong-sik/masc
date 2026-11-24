@@ -157,6 +157,55 @@ let test_operator_paused_keeper_is_not_bootable () =
       | None -> fail "paused keeper had no typed autoboot exclusion")
 ;;
 
+(* 2026-11-23: a manual keeper that was down took four dashboard messages into
+   its queue and nothing ran them. The chat route now refuses a message for a
+   keeper this names. It must not name a keeper the boot path is about to
+   start, a paused one, or a manual one an operator already started. *)
+let test_only_a_manual_keeper_that_is_down_awaits_an_operator_start () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  with_temp_dir "masc-awaits-operator-start-" @@ fun base_path ->
+  let config = Workspace.default_config base_path in
+  let manual = "manual-down" in
+  let admitted = "admitted-not-booted" in
+  let paused = "manual-paused" in
+  Fun.protect
+    ~finally:(fun () ->
+      ignore (Workspace.reset config);
+      Keeper_registry.For_testing.clear ();
+      Keeper_runtime.reset_test_state base_path)
+    (fun () ->
+      write_keeper_toml ~base_path ~name:manual ~autoboot_enabled:false;
+      write_keeper_toml ~base_path ~name:admitted ~autoboot_enabled:true;
+      write_keeper_toml ~base_path ~name:paused ~autoboot_enabled:false;
+      ignore (Workspace.init config ~agent_name:None);
+      let manual_meta = make_meta manual in
+      write_meta_exn config manual_meta;
+      write_meta_exn config (make_meta admitted);
+      write_meta_exn config (make_meta ~paused:true paused);
+      check
+        bool
+        "a manual keeper that is down waits for an operator"
+        true
+        (Keeper_runtime.awaits_operator_start config manual);
+      check
+        bool
+        "a keeper the boot path admits is not refused before it boots"
+        false
+        (Keeper_runtime.awaits_operator_start config admitted);
+      check
+        bool
+        "a paused keeper is resumed, not started"
+        false
+        (Keeper_runtime.awaits_operator_start config paused);
+      ignore (Keeper_registry.For_testing.register ~base_path manual manual_meta);
+      check
+        bool
+        "a manual keeper an operator started is up"
+        false
+        (Keeper_runtime.awaits_operator_start config manual))
+;;
+
 let () =
   run
     "keeper autoboot single owner"
@@ -173,6 +222,10 @@ let () =
             "operator pause survives restart admission"
             `Quick
             test_operator_paused_keeper_is_not_bootable
+        ; test_case
+            "only a manual keeper that is down awaits an operator start"
+            `Quick
+            test_only_a_manual_keeper_that_is_down_awaits_an_operator_start
         ] )
     ]
 ;;

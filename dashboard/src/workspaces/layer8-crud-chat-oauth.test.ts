@@ -75,6 +75,14 @@ async function flushUi(ms = 35): Promise<void> {
   await new Promise((r) => setTimeout(r, ms))
 }
 
+async function waitFor(predicate: () => boolean, timeoutMs = 800, stepMs = 15): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (predicate()) return
+    await flushUi(stepMs)
+  }
+}
+
 function makeKeeper(name = 'code-reviewer-sister'): KeeperRosterItem {
   return {
     name,
@@ -494,7 +502,7 @@ candidates = ["safe.model"]
       if (url === '/api/v1/runtime/config/raw') {
         return jsonResponse({ source_revision: 'b'.repeat(64) })
       }
-      if (url === '/api/v1/setup/accounts/login' && init?.method === 'POST') {
+      if (url === '/api/v1/setup/accounts/login?auth_hints=1' && init?.method === 'POST') {
         const encoder = new TextEncoder()
         const stream = new ReadableStream<Uint8Array>({
           async start(controller) {
@@ -585,7 +593,32 @@ candidates = ["safe.model"]
     await flushUi(60)
     expect(verifyBodies).toEqual([{ provider_account_id: 'acct-ref-77', model: 'gpt-5-codex' }])
 
-    // 3) Premature EOF on setup login SSE invokes onError instead of silently stopping
+    // 3) Premature EOF on setup login SSE invokes onError instead of silently stopping,
+    //    and typed `auth_url`/`device_code` hints opt in via `?auth_hints=1`.
+    const requestedHintUrls: string[] = []
+    const hintUrls: string[] = []
+    const hintCodes: string[] = []
+    const hintRes = await streamSetupAccountLogin({
+      integrationId: 'codex_subscription',
+      fetchImpl: (async (input: RequestInfo | URL) => {
+        requestedHintUrls.push(String(input))
+        return sseResponse([
+          { event: 'started', data: { login_id: 'login-hint', integration_id: 'codex_subscription', status: 'running' } },
+          { event: 'auth_url', data: { url: 'https://auth.openai.com/authorize?state=h1' } },
+          { event: 'device_code', data: { user_code: 'HINT-4321', verification_uri: 'https://auth.openai.com/device' } },
+          { event: 'complete', data: { login_id: 'login-hint', integration_id: 'codex_subscription', status: 'complete' } },
+        ])
+      }) as unknown as typeof fetch,
+      callbacks: {
+        onAuthUrl: (u) => hintUrls.push(u),
+        onDeviceCode: (c) => hintCodes.push(c),
+      },
+    })
+    expect(requestedHintUrls).toEqual(['/api/v1/setup/accounts/login?auth_hints=1'])
+    expect(hintUrls).toEqual(['https://auth.openai.com/authorize?state=h1', 'https://auth.openai.com/device'])
+    expect(hintCodes).toEqual(['HINT-4321'])
+    expect(hintRes.completed).toBe(true)
+
     const eofErrors: string[] = []
     const eofResult = await streamSetupAccountLogin({
       integrationId: 'codex_subscription',
@@ -740,13 +773,13 @@ candidates = ["safe.model"]
     // KeeperConfigTab also exposes guided OAuth App drawer WITH copyable Callback URL
     render(null, container)
     render(html`<${KeeperConfigTab} keeperName="sangsu" onMutated=${vi.fn()} />`, container)
-    await flushUi(40)
+    await waitFor(() => (container.textContent ?? '').includes('Slack'))
     expect(container.textContent).toContain('Slack')
     const cfgAppBtn = [...container.querySelectorAll('button')].find((b) =>
       b.textContent?.trim() === '앱 설정',
     ) as HTMLButtonElement
     cfgAppBtn.click()
-    await flushUi(20)
+    await waitFor(() => container.querySelector('[data-testid="keeper-oauth-callback-url"]') !== null)
     expect(container.querySelector('[data-testid="keeper-oauth-callback-url"]')!.textContent).toContain(
       'http://127.0.0.1:8935/oauth/callback',
     )

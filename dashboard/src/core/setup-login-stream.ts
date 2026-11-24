@@ -281,7 +281,9 @@ export async function streamSetupAccountLogin(params: {
   }
 
   try {
-    const res = await fetchImpl(resolveWorkspaceUrl('/api/v1/setup/accounts/login'), {
+    // Opt into server-side structured `auth_url` / `device_code` SSE hint frames
+    // (gated behind `?auth_hints=1` to stay backwards-compatible with legacy clients).
+    const res = await fetchImpl(resolveWorkspaceUrl('/api/v1/setup/accounts/login?auth_hints=1'), {
       method: 'POST',
       credentials: 'same-origin',
       headers: buildSsePostHeaders(),

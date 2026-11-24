@@ -378,7 +378,8 @@ let msg_pace = function
   | Msg.Boot | Msg.Tick _ | Msg.Server_health_result _
   | Msg.Server_start_result _ | Msg.Http_reply _ | Msg.Sse_event _
   | Msg.Sse_freshness _ | Msg.Chat_stream_decode_warning _
-  | Msg.Voice_event _ | Msg.Stream_gap _ ->
+  | Msg.Voice_event _ | Msg.Stream_gap _ | Msg.Github_login_chunk _
+  | Msg.Github_login_done _ ->
       Frame_scheduler.Pace_animation
 
 let earliest_opt a b =
@@ -952,7 +953,9 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
             | Msg.Chat_stream_decode_warning _
             | Msg.Memory_diagram_rendered _
             | Msg.Voice_event _
-            | Msg.Stream_gap _ ->
+            | Msg.Stream_gap _
+            | Msg.Github_login_chunk _
+            | Msg.Github_login_done _ ->
                 false
           in
           if toggle_mouse then begin

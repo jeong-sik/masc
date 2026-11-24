@@ -5551,11 +5551,22 @@ let test_enter_hint_follows_enter_plan () =
           nav = { m_base.nav with workspace = Nav.Infra };
           infra = Infra_store.set_tab Nav.Infra_repos_changes m_base.infra;
         } );
-      ( "Infra/Logs"
+      ( "Infra/Logs (empty)"
       , {
           m_base with
           nav = { m_base.nav with workspace = Nav.Infra };
-          infra = Infra_store.set_tab Nav.Infra_activity_logs m_base.infra;
+          infra =
+            {
+              (Infra_store.set_tab Nav.Infra_activity_logs m_base.infra) with
+              logs = [];
+              activity_events = [];
+            };
+        } );
+      ( "Work/Harness"
+      , {
+          m_base with
+          nav = { m_base.nav with workspace = Nav.Work };
+          work = Work_store.set_tab Nav.Work_harness m_base.work;
         } );
       ( "Work/Candle"
       , {
@@ -5579,6 +5590,18 @@ let test_enter_hint_follows_enter_plan () =
       Alcotest.(check int) (label ^ ": Enter sends no request") 0
         (List.length cmds))
     no_target_views;
+  let infra_logs_populated =
+    {
+      m_base with
+      nav = { m_base.nav with workspace = Nav.Infra };
+      infra = Infra_store.set_tab Nav.Infra_activity_logs m_base.infra;
+    }
+  in
+  Alcotest.(check string) "Infra/Logs (populated): footer offers Enter" "dive"
+    (enter_hint_name (Update_nav.enter_hint infra_logs_populated));
+  let infra_logs_dived, _ = Update_nav.dive_selected infra_logs_populated in
+  Alcotest.(check int) "Infra/Logs (populated): Enter pushes dive" 1
+    (List.length infra_logs_dived.nav.dive_stack);
   let keepers =
     { m_base with nav = { m_base.nav with workspace = Nav.Keepers } }
   in
@@ -5736,8 +5759,19 @@ let test_wave2_100pct_menu_reachability_matrix () =
   (* 2. Left Navigation Sidebar 100% reachability sweep: 'b' + Down*n + Enter for EVERY menu item! *)
   let menu_items = Nav.all_menu_items in
   let n_menu = List.length menu_items in
-  Alcotest.(check int) "Left Navigation Sidebar has all 27 unified targets" 27
+  Alcotest.(check int) "Left Navigation Sidebar has all 31 unified targets (Wave 3)" 31
     n_menu;
+  let has_menu_target pred =
+    List.exists (fun (it : Nav.menu_item) -> pred it.target) menu_items
+  in
+  Alcotest.(check bool) "Sidebar includes Work_harness" true
+    (has_menu_target (function Nav.Menu_work Nav.Work_harness -> true | _ -> false));
+  Alcotest.(check bool) "Sidebar includes Infra_code" true
+    (has_menu_target (function Nav.Menu_infra Nav.Infra_code -> true | _ -> false));
+  Alcotest.(check bool) "Sidebar includes Keeper_logs" true
+    (has_menu_target (function Nav.Menu_keeper_tab Nav.Keeper_logs -> true | _ -> false));
+  Alcotest.(check bool) "Sidebar includes Keeper_identity" true
+    (has_menu_target (function Nav.Menu_keeper_tab Nav.Keeper_identity -> true | _ -> false));
   let m_rail_focused, _ = step base (char_key "b") in
   Alcotest.(check bool) "'b' focuses auto-docked Left Sidebar" true
     (Model.sidebar_visible m_rail_focused && Model.sidebar_has_focus m_rail_focused);
@@ -6197,7 +6231,7 @@ let test_wave2_100pct_menu_reachability_matrix () =
         (Printf.sprintf "Keymap SSOT exposes %s in Help" k)
         true
         (List.exists (String.equal k) all_help_keys))
-    [ "A"; "N"; "g"; "Ctrl+E"; "Ctrl+X" ];
+    [ "A"; "N"; "g"; "Ctrl+E"; "Ctrl+X"; "K"; "L"; "l" ];
 
   (* 5i. Sidebar focus isolation (P1): l focuses body, g jumps to sidebar top on
      Memory, and mutating screen-body hotkeys are strict no-ops while sidebar has focus *)
@@ -6323,6 +6357,1100 @@ let test_wave2_100pct_menu_reachability_matrix () =
     (match Model.active_dive m_cmp_act with
      | Some (Nav.Dive_keeper { tab = Nav.Keeper_context; _ }) -> true
      | _ -> false)
+
+(* ---------- Wave 3: Scroll Bounds, Stale Guards, CanAdmin Notices & Secret Masking ---------- *)
+
+let test_wave3_surfaces_scroll_bounds_guards_and_secrets () =
+  let base = populated_model ~cols:140 ~rows:30 ~lang:Say.Lang_en () in
+  let valid_hash =
+    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  in
+  (* 1. Surface 1: Fusion detail stale run_id guard + Fusion_dive scroll bounds *)
+  let mk_fusion_run id : Wire_runtime.fusion_run =
+    {
+      run_id = id;
+      keeper = "alpha";
+      preset = "consensus";
+      topology = Wire_runtime.Judge_of_judges;
+      started_at_unix = 1795253000.0;
+      finished_at_unix = Some 1795253050.0;
+      status = Wire_runtime.Fusion_completed;
+      stage = "done";
+      decision = Some "adopt";
+      summary = Some "Converged";
+    }
+  in
+  let long_panel =
+    List.init 25 (fun i : Wire_runtime.fusion_panel_entry ->
+        {
+          model = Printf.sprintf "model-%d" i;
+          status = `Answered;
+          answer = Some (Printf.sprintf "Detailed answer paragraph #%d for scroll testing." i);
+          input_tokens = Some 500;
+          output_tokens = Some 120;
+          reason_code = None;
+          reason_detail = None;
+        })
+  in
+  let fusion_detail : Wire_runtime.fusion_run_detail =
+    {
+      run = mk_fusion_run "run-A";
+      evidence =
+        Wire_runtime.Evidence_recorded
+          {
+            post_id = "p-ev-A";
+            title = "Evidence A";
+            author = "alpha";
+            body = "Body A";
+            question = Some "Q?";
+            panel = long_panel;
+            judge_status = Some "completed";
+            judge_decision = Some "adopt";
+            judge_synthesis = Some "Synthesis A";
+            judge_resolved_answer = None;
+            judge_failure = None;
+            judges = [];
+            seat_routes = [];
+            tool_trace = None;
+          };
+    }
+  in
+  let rt_fus =
+    base.runtime
+    |> Runtime_store.set_tab Nav.Runtime_fusion
+    |> Runtime_store.apply_fusion_runs ~observed_at:t0
+         [ mk_fusion_run "run-A"; mk_fusion_run "run-B" ]
+    |> Runtime_store.apply_fusion_detail ~observed_at:t0 ~run_id:"run-A"
+         fusion_detail
+  in
+  Alcotest.(check bool) "Fusion detail matches run-A" true
+    (Option.is_some (Runtime_store.fusion_detail_for ~run_id:"run-A" rt_fus));
+  Alcotest.(check bool) "Stale run_id guard rejects run-A detail for run-B" true
+    (Option.is_none (Runtime_store.fusion_detail_for ~run_id:"run-B" rt_fus));
+  let m_fdive =
+    {
+      base with
+      runtime = rt_fus;
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Runtime;
+          dive_stack = [ Nav.Dive_runtime (Nav.Fusion_dive "run-A") ];
+        };
+    }
+  in
+  let m_fdive_end, _ = step m_fdive (mk_key Keymap.Input.End) in
+  let m_fdive_extra, _ = step m_fdive_end (mk_key Keymap.Input.Down) in
+  Alcotest.(check bool) "Fusion_dive End scrolls > 0" true
+    (m_fdive_end.nav.dive_scroll_offset > 0);
+  Alcotest.(check int) "Fusion_dive Down past End stays clamped"
+    m_fdive_end.nav.dive_scroll_offset m_fdive_extra.nav.dive_scroll_offset;
+
+  (* 2. Surface 2: Work_harness valid vs invalid notes_hash pre-seeding & Verification_dive 4 tabs *)
+  let hh_snap : Wire_work.harness_health =
+    {
+      generated_at = 1795254000.0;
+      scope_note = "last 7d";
+      evaluator_status = "healthy";
+      fallback_ratio = 0.0;
+      last_signal_at = Some 1795253900.0;
+      calibration =
+        {
+          total_verdicts = 2;
+          approve_count = 1;
+          reject_count = 1;
+          labeled_count = 2;
+          false_positive_count = 0;
+          false_negative_count = 0;
+          agreement_rate = 1.0;
+          fallback_count = 0;
+          distinct_runtime_count = 1;
+          verdicts_with_generator_runtime = 2;
+          distinct_runtime_rate = Some 1.0;
+          recent_fallback_reasons = [];
+          unreadable_record_count = 0;
+        };
+      recent_verdicts =
+        [
+          {
+            timestamp = 1795253900.0;
+            task_id = "task-valid";
+            task_title = "Valid hash verdict";
+            agent_name = "alpha";
+            gate = "completion";
+            verdict = "reject";
+            evaluator_runtime = "opus";
+            fallback_reason = None;
+            notes_hash = valid_hash;
+          };
+          {
+            timestamp = 1795253800.0;
+            task_id = "task-bad";
+            task_title = "Bad hash verdict";
+            agent_name = "beta";
+            gate = "completion";
+            verdict = "reject";
+            evaluator_runtime = "opus";
+            fallback_reason = None;
+            notes_hash = "not-a-valid-64-hex";
+          };
+        ];
+      unreadable_verdicts_count = 0;
+    }
+  in
+  let m_hh =
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Work; pane_index = 0 };
+      work =
+        base.work
+        |> Work_store.set_tab Nav.Work_harness
+        |> Work_store.apply_harness_health ~observed_at:t0 hh_snap;
+    }
+  in
+  let m_hh_y, _ = step m_hh (char_key "y") in
+  Alcotest.(check bool) "Work_harness [y] pre-seeds valid 64-hex notes_hash" true
+    (Option.equal Nav.equal_overlay m_hh_y.nav.overlay
+       (Some (Nav.Inline_action (Nav.Harness_overrule valid_hash))));
+  let m_hh_bad = fst (step m_hh (mk_key Keymap.Input.Down)) in
+  let m_hh_bad_n, _ = step m_hh_bad (char_key "n") in
+  Alcotest.(check bool) "Work_harness [n] leaves invalid notes_hash empty (never pre-seeds garbage)"
+    true
+    (Option.equal Nav.equal_overlay m_hh_bad_n.nav.overlay
+       (Some (Nav.Inline_action (Nav.Harness_overrule ""))));
+
+  (* Verification_dive [v] cycles all 4 tabs + CanAdmin 403 notice *)
+  let m_vdive =
+    {
+      base with
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Work;
+          dive_stack = [ Nav.Dive_work (Nav.Verification_dive "verif-1") ];
+        };
+      work =
+        Work_store.mark_verification_evidence_denied ~at:t0 ~reason:"403 CanAdmin"
+          base.work;
+    }
+  in
+  let vd_txt = grid_all_text (render_full ~model:m_vdive) in
+  Alcotest.(check bool) "Verification_dive shows explicit CanAdmin notice on 403" true
+    (let needle = "CanAdmin" in
+     let n = String.length needle and h = String.length vd_txt in
+     let rec f i =
+       if i + n > h then false
+       else if String.sub vd_txt i n = needle then true
+       else f (i + 1)
+     in
+     f 0);
+  let m_vd_sum, _ = step m_vdive (char_key "v") in
+  let m_vd_sp, _ = step m_vd_sum (char_key "v") in
+  let m_vd_tlc, _ = step m_vd_sp (char_key "v") in
+  Alcotest.(check bool) "Verification_dive [v] cycles Evidence->Summary->Specs->TLC"
+    true
+    (Work_store.equal_verification_dive_tab m_vd_sum.work.verification_dive_tab
+       Work_store.Verif_tab_summary
+     && Work_store.equal_verification_dive_tab m_vd_sp.work.verification_dive_tab
+          Work_store.Verif_tab_specs
+     && Work_store.equal_verification_dive_tab m_vd_tlc.work.verification_dive_tab
+          Work_store.Verif_tab_tlc);
+
+  (* 3. Surface 3: Infra_code stale (scope, path) guard + file scroll bounds + [g] git mode cycle *)
+  let big_file_content =
+    String.concat "\n" (List.init 80 (fun i -> Printf.sprintf "let line_%d = %d" i i))
+  in
+  let inf_code =
+    base.infra
+    |> Infra_store.set_tab Nav.Infra_code
+    |> Infra_store.apply_workspace_file ~observed_at:t0 ~scope:Wire_infra.Ws_project
+         ~path:"lib/demo.ml"
+         { path = "lib/demo.ml"; content = big_file_content; revision = "rev1" }
+    |> Infra_store.apply_workspace_file ~observed_at:t0
+         ~scope:(Wire_infra.Ws_repo "other-repo") ~path:"other.ml"
+         { path = "other.ml"; content = "STALE_SCOPE"; revision = "rev2" }
+  in
+  Alcotest.(check (option string)) "Infra_code stale scope guard ignores wrong scope file"
+    (Some "lib/demo.ml")
+    (Option.map (fun (f : Wire_infra.workspace_file_content) -> f.path)
+       (Infra_store.open_file_for_current inf_code));
+  let m_code =
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Infra; pane_index = 1 };
+      infra = inf_code;
+    }
+  in
+  let m_code_end, _ = step m_code (mk_key Keymap.Input.End) in
+  let m_code_extra, _ = step m_code_end (mk_key Keymap.Input.Down) in
+  Alcotest.(check bool) "Infra_code file viewer End scrolls > 0" true
+    (m_code_end.infra.code.file_scroll_offset > 0);
+  Alcotest.(check int) "Infra_code file viewer Down past End stays clamped"
+    m_code_end.infra.code.file_scroll_offset
+    m_code_extra.infra.code.file_scroll_offset;
+  let m_code_git, _ = step m_code (char_key "g") in
+  Alcotest.(check bool) "Infra_code [g] cycles File -> Git Status" true
+    (Infra_store.equal_code_right_mode m_code_git.infra.code.right_mode
+       Infra_store.Code_git_status);
+  let expected_code_scopes =
+    Wire_infra.Ws_project
+    :: (List.map
+          (fun (r : Wire_infra.repository) -> Wire_infra.Ws_repo r.id)
+          (Infra_store.filtered_repositories m_code.infra)
+       @
+       match Observed.to_option m_code.fleet.keepers with
+       | Some ks ->
+           List.map
+             (fun (k : Wire_fleet.keeper_summary) -> Wire_infra.Ws_keeper k.name)
+             ks
+       | None -> [])
+  in
+  Alcotest.(check bool) "Infra_code has multiple scopes to cycle via [s]" true
+    (List.length expected_code_scopes >= 2);
+  Alcotest.(check bool) "Infra_code starts on Ws_project scope" true
+    (Wire_infra.equal_workspace_scope m_code.infra.code.scope
+       Wire_infra.Ws_project);
+  let m_code_cycled =
+    List.fold_left
+      (fun m_cur expected_next ->
+        let m_next, cmds = step m_cur (char_key "s") in
+        Alcotest.(check bool)
+          "Infra_code [s] cycles to expected next code scope" true
+          (Wire_infra.equal_workspace_scope m_next.infra.code.scope
+             expected_next);
+        Alcotest.(check bool)
+          "Infra_code [s] triggers workspace fetches for cycled scope" true
+          (List.length (Cmd.flatten cmds) > 0);
+        m_next)
+      m_code
+      (List.tl expected_code_scopes @ [ Wire_infra.Ws_project ])
+  in
+  Alcotest.(check bool) "Infra_code [s] wraps cleanly back to Ws_project" true
+    (Wire_infra.equal_workspace_scope m_code_cycled.infra.code.scope
+       Wire_infra.Ws_project);
+
+  (* 4. Surface 4: Knowledge > Memory & Keeper > Memory [v] sub-views + [g] Braille intact *)
+  let m_kmem =
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Knowledge };
+      knowledge = Knowledge_store.set_tab Nav.Knowledge_memory base.knowledge;
+    }
+  in
+  let m_kmem_hl, _ = step m_kmem (char_key "v") in
+  let m_kmem_ctx, _ = step m_kmem_hl (char_key "v") in
+  Alcotest.(check bool) "Knowledge > Memory [v] cycles Diff->Health/Ledger->Context"
+    true
+    (Knowledge_store.equal_memory_subview m_kmem_hl.knowledge.memory_subview
+       Knowledge_store.Mem_health_ledger
+     && Knowledge_store.equal_memory_subview m_kmem_ctx.knowledge.memory_subview
+          Knowledge_store.Mem_context);
+  let m_kpmem =
+    {
+      base with
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Keepers;
+          dive_stack =
+            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_memory } ];
+        };
+      knowledge =
+        Knowledge_store.apply_keeper_memory_facts ~observed_at:t0 ~keeper:"alpha"
+          {
+            keeper = "alpha";
+            ordinary =
+              Wire_knowledge.Memory_store_present
+                {
+                  revision = 3;
+                  snapshot_sha256 = "sha-alpha";
+                  updated_at_unix = 1795250000.0;
+                  facts =
+                    [
+                      {
+                        memory_id = "f-1";
+                        claim = "fact one";
+                        category = Wire_knowledge.Cat_custom "architecture";
+                        origin = Wire_knowledge.Origin_authored;
+                        basis = Wire_knowledge.Basis_observed;
+                        first_seen_unix = 1795250000.0;
+                        last_seen_unix = 1795250000.0;
+                        events =
+                          {
+                            retrieval = Wire_knowledge.Never_retrieved;
+                            retracted_count = 0;
+                            revised_from = [];
+                          };
+                      };
+                    ];
+                  support_invalidations = [];
+                };
+            source_bound = Wire_knowledge.Memory_store_absent;
+            events_unreadable_lines = 0;
+            events_read_error = None;
+          }
+          base.knowledge;
+    }
+  in
+  let m_kpm_h, _ = step m_kpmem (char_key "v") in
+  let m_kpm_f, _ = step m_kpm_h (char_key "v") in
+  let m_kpm_f_tog, _ = step m_kpm_f (mk_key Keymap.Input.Enter) in
+  Alcotest.(check bool) "Keeper > Memory Facts Tree Enter collapses category" true
+    (Knowledge_store.String_set.mem "architecture"
+       m_kpm_f_tog.knowledge.collapsed_fact_categories);
+
+  (* 5. Surface 5: Keeper_identity masked GitHub PAT NEVER echoed/leaked in grid or toast *)
+  let secret_pat = "test-pat-Wave3SecretMustNeverLeak123456" in
+  let m_id =
+    {
+      base with
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Keepers;
+          dive_stack =
+            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_identity } ];
+        };
+    }
+  in
+  let m_pat_open, _ = step m_id (char_key ~shift:true "K") in
+  Alcotest.(check bool) "[K] opens Github_token_form modal" true
+    (Option.equal Nav.equal_overlay m_pat_open.nav.overlay
+       (Some (Nav.Inline_action (Nav.Github_token_form "alpha"))));
+  let m_pat_typed, _ = type_str m_pat_open secret_pat in
+  let pat_grid_txt = grid_all_text (render_full ~model:m_pat_typed) in
+  let contains needle hay =
+    let n = String.length needle and h = String.length hay in
+    let rec f i =
+      if i + n > h then false
+      else if String.sub hay i n = needle then true
+      else f (i + 1)
+    in
+    f 0
+  in
+  Alcotest.(check bool) "Masked PAT modal NEVER renders plaintext PAT" false
+    (contains secret_pat pat_grid_txt);
+  let m_pat_sub, pat_cmds = step m_pat_typed (mk_key Keymap.Input.Enter) in
+  Alcotest.(check bool) "PAT submit emits Post_github_token" true
+    (has_cmd
+       (function
+         | Cmd.Http_post { req = Cmd.Post_github_token { keeper = "alpha"; token; _ }; _ }
+           when String.equal token secret_pat ->
+             true
+         | _ -> false)
+       pat_cmds);
+  Alcotest.(check bool) "PAT submit toast NEVER leaks plaintext PAT" false
+    (match m_pat_sub.toast with
+    | Some t -> contains secret_pat (Say.resolve Say.Lang_en t.message)
+    | None -> false);
+
+  (* Surface 5b: Addons [p] Package Catalog toggle & Connectors /connector/names ←/→ picker *)
+  let m_add =
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Runtime };
+      runtime = Runtime_store.set_tab Nav.Runtime_addons_browser base.runtime;
+    }
+  in
+  let m_add_cat, _ = step m_add (char_key "p") in
+  Alcotest.(check bool) "Addons [p] toggles Package Catalog mode" true
+    m_add_cat.runtime.addon_catalog_mode;
+
+  let m_conn =
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Runtime };
+      runtime =
+        Runtime_store.set_tab Nav.Runtime_connectors base.runtime
+        |> Runtime_store.apply_connector_names ~connector_id:"slack-eng"
+             [
+               { id = "C01ENG"; name = "engineering" };
+               { id = "C02OPS"; name = "ops" };
+             ];
+    }
+  in
+  let m_bind, _ = step m_conn (char_key "n") in
+  let m_bind_ch = fst (step m_bind (mk_key Keymap.Input.Tab)) in
+  let m_bind_cycled = fst (step m_bind_ch (mk_key Keymap.Input.Right)) in
+  let ch_val =
+    match m_bind_cycled.inline_modal with
+    | Some md -> Model.modal_field_value ~key:"channel" md
+    | None -> ""
+  in
+  Alcotest.(check bool) "Connector Bind modal ←/→ cycles real channel_id from /connector/names"
+    true
+    (String.equal ch_val "C01ENG" || String.equal ch_val "C02OPS");
+
+  (* 6. Wave 3 adversarial review regressions (#416 & #417) *)
+  (* 6a. Disjoint historical_evidence is selectable in filtered_fusion_runs *)
+  let rt_hist =
+    Runtime_store.apply_fusion_runs_snapshot ~observed_at:t0
+      {
+        generated_at = "2026-11-23T08:00:00Z";
+        replay = None;
+        historical_evidence =
+          [
+            {
+              run_id = "hist-only-run-1";
+              post_id = "p-hist-1";
+              title = "Historical Board Evidence";
+              created_at_unix = 1795253000.0;
+            };
+          ];
+        runs = [];
+      }
+      base.runtime
+  in
+  Alcotest.(check int) "disjoint historical_evidence appears in Fusion list" 1
+    (List.length (Runtime_store.filtered_fusion_runs rt_hist));
+
+  (* 6b. Activity backfill deduplicates by seq and orders newest-first *)
+  let act_items : Wire_infra.activity_event_item list =
+    [
+      {
+        seq = 10;
+        ts_ms = 1795254000000;
+        ts_iso = "";
+        kind = "turn.old";
+        actor_id = Some "alpha";
+        actor_kind = Some "keeper";
+        subject_id = None;
+        tags = [];
+        payload = `Null;
+      };
+      {
+        seq = 12;
+        ts_ms = 1795254005000;
+        ts_iso = "";
+        kind = "turn.new";
+        actor_id = Some "alpha";
+        actor_kind = Some "keeper";
+        subject_id = None;
+        tags = [];
+        payload = `Null;
+      };
+    ]
+  in
+  let inf_act =
+    Infra_store.empty
+    |> Infra_store.apply_activity_events_backfill act_items
+    |> Infra_store.apply_activity_events_backfill act_items
+  in
+  Alcotest.(check int) "activity backfill deduplicates seq on repeat refresh" 2
+    (List.length inf_act.activity_events);
+  Alcotest.(check string) "activity backfill sorts newest-first" "turn.new"
+    (List.hd inf_act.activity_events).summary;
+
+  (* 6c. Addons Package Preview scrolls when addon_catalog_mode=true & pane_index=1 *)
+  let rt_cat_scroll =
+    Runtime_store.move_selection ~pane_index:1 ~max_detail_scroll:20 ~delta:5
+      m_add_cat.runtime
+  in
+  Alcotest.(check int) "Addons Package Preview scrolls detail_scroll_offset" 5
+    rt_cat_scroll.detail_scroll_offset;
+
+  (* 6d. Code stale path guard rejects file/diff for non-active path *)
+  let inf_path_guard =
+    Infra_store.empty
+    |> Infra_store.set_tab Nav.Infra_code
+    |> Infra_store.set_code_active_file (Some "lib/active.ml")
+    |> Infra_store.apply_workspace_file ~observed_at:t0
+         ~scope:Wire_infra.Ws_project ~path:"lib/stale.ml"
+         { path = "lib/stale.ml"; content = "STALE"; revision = "r0" }
+  in
+  Alcotest.(check bool) "Code stale-path guard drops non-active file reply" true
+    (Option.is_none (Infra_store.open_file_for_current inf_path_guard));
+
+  (* 6e. OAuth mutation Ack triggers Get_oauth_attached_tools refetch *)
+  let _, oauth_cmds =
+    Update.step ~now:t0 m_id
+      (Msg.Http_reply
+         {
+           epoch = m_id.epoch;
+           reply =
+             Msg.Reply_oauth_mutation
+               {
+                 keeper = "alpha";
+                 label = Say.literal "OAuth refreshed";
+                 result = Ok ();
+               };
+         })
+  in
+  Alcotest.(check bool) "Reply_oauth_mutation Ok refetches attached-tools" true
+    (has_cmd
+       (function
+         | Cmd.Http_get { req = Cmd.Get_oauth_attached_tools { keeper = "alpha" }; _ }
+           ->
+             true
+         | _ -> false)
+       oauth_cmds);
+
+  (* 7. Wave 3 PR #54486 P2 review regressions (a)-(g) *)
+  let is_stale_value = function
+    | Observed.Value { stale = true; _ } -> true
+    | Observed.Value { stale = false; _ }
+    | Observed.Loading _
+    | Observed.Absent
+    | Observed.Unreported
+    | Observed.Failed _ ->
+        false
+  in
+  let is_unreported = function
+    | Observed.Unreported -> true
+    | Observed.Loading _
+    | Observed.Value _
+    | Observed.Absent
+    | Observed.Failed _ ->
+        false
+  in
+
+  (* 7a. 4 *_auth_denied flags reset on mark_stale_all + force=true bypass in View_fetches *)
+  let kc_denied =
+    base.keeper_context
+    |> Keeper_context_store.mark_oauth_denied ~at:t0 ~keeper:"alpha" ~reason:"403"
+    |> Keeper_context_store.mark_github_denied ~at:t0 ~keeper:"alpha" ~reason:"403"
+  in
+  let m_id_denied = { m_id with keeper_context = kc_denied } in
+  let id_cmds_no_force = View_fetches.fetches_for_current_view ~force:false m_id_denied in
+  let id_cmds_force = View_fetches.fetches_for_current_view ~force:true m_id_denied in
+  Alcotest.(check bool) "oauth/github auth_denied blocks force=false fetch" false
+    (has_cmd
+       (function
+         | Cmd.Http_get
+             {
+               req =
+                 ( Cmd.Get_oauth_attached_tools { keeper = "alpha" }
+                 | Cmd.Get_github_identity { keeper = "alpha" } );
+               _;
+             } ->
+             true
+         | _ -> false)
+       id_cmds_no_force);
+  Alcotest.(check bool) "oauth_auth_denied bypassed when force=true" true
+    (has_cmd
+       (function
+         | Cmd.Http_get { req = Cmd.Get_oauth_attached_tools { keeper = "alpha" }; _ }
+           ->
+             true
+         | _ -> false)
+       id_cmds_force);
+  Alcotest.(check bool) "github_auth_denied bypassed when force=true" true
+    (has_cmd
+       (function
+         | Cmd.Http_get { req = Cmd.Get_github_identity { keeper = "alpha" }; _ } ->
+             true
+         | _ -> false)
+       id_cmds_force);
+  let kc_alpha_stale =
+    Keeper_context_store.mark_stale_all kc_denied
+    |> Keeper_context_store.get_keeper ~keeper:"alpha"
+  in
+  Alcotest.(check bool) "Keeper_context_store.mark_stale_all clears oauth/github auth_denied"
+    true
+    ((not kc_alpha_stale.oauth_auth_denied)
+     && not kc_alpha_stale.github_auth_denied);
+
+  let ev_post : Wire_runtime.fusion_evidence_post =
+    {
+      post_id = "p-ev-1";
+      title = "Ev";
+      author = "alpha";
+      body = "body";
+      question = None;
+      panel = [];
+      judge_status = None;
+      judge_decision = None;
+      judge_synthesis = None;
+      judge_resolved_answer = None;
+      judge_failure = None;
+      judges = [];
+      seat_routes = [];
+      tool_trace = None;
+    }
+  in
+  let pkg_prev : Wire_runtime.addon_package_preview =
+    {
+      manifest_path = "addons/browser/lane.toml";
+      id = "browser";
+      revision = "1.0.0";
+      title = "Browser";
+      ui_category = Some "browser";
+      execution_kind = "host_process";
+      image_name = None;
+      image_state = None;
+      exported_tools = [];
+      contributions = [];
+      command = [];
+      directory = None;
+    }
+  in
+  let rt_denied =
+    rt_fus
+    |> Runtime_store.mark_fusion_config_denied ~at:t0 ~reason:"403"
+    |> Runtime_store.apply_fusion_board_evidence ~observed_at:t0 ~post_id:"p-ev-1"
+         ev_post
+    |> Runtime_store.apply_addon_package_preview ~observed_at:t0
+         ~manifest_path:"addons/browser/lane.toml" pkg_prev
+  in
+  let m_fus_denied =
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Runtime };
+      runtime = rt_denied;
+    }
+  in
+  Alcotest.(check bool) "fusion_config_auth_denied blocks force=false" false
+    (has_cmd
+       (function Cmd.Http_get { req = Cmd.Get_fusion_config; _ } -> true | _ -> false)
+       (View_fetches.fetches_for_current_view ~force:false m_fus_denied));
+  Alcotest.(check bool) "fusion_config_auth_denied bypassed when force=true" true
+    (has_cmd
+       (function Cmd.Http_get { req = Cmd.Get_fusion_config; _ } -> true | _ -> false)
+       (View_fetches.fetches_for_current_view ~force:true m_fus_denied));
+  let rt_stale = Runtime_store.mark_stale_all rt_denied in
+  Alcotest.(check bool) "Runtime_store.mark_stale_all clears fusion_config_auth_denied & marks preview/evidence stale"
+    true
+    ((not rt_stale.fusion_config_auth_denied)
+     && is_stale_value rt_stale.fusion_board_evidence
+     && is_stale_value rt_stale.addon_package_preview);
+
+  Alcotest.(check bool) "verification_evidence_auth_denied blocks force=false" false
+    (has_cmd
+       (function
+         | Cmd.Http_get { req = Cmd.Get_verification_evidence _; _ } -> true
+         | _ -> false)
+       (View_fetches.fetches_for_current_view ~force:false m_vdive));
+  Alcotest.(check bool) "verification_evidence_auth_denied bypassed when force=true" true
+    (has_cmd
+       (function
+         | Cmd.Http_get { req = Cmd.Get_verification_evidence _; _ } -> true
+         | _ -> false)
+       (View_fetches.fetches_for_current_view ~force:true m_vdive));
+  Alcotest.(check bool) "Work_store.mark_stale_all clears verification_evidence_auth_denied"
+    false
+    (Work_store.mark_stale_all m_vdive.work).verification_evidence_auth_denied;
+
+  (* 7b. Observed.Failed { retryable = false } NEVER triggers repeat refetch when force=false *)
+  let non_retry_fail = Observed.failed ~reason:"404" ~retryable:false ~at:t0 in
+  let m_vdive_nr =
+    {
+      m_vdive with
+      work =
+        {
+          m_vdive.work with
+          verification_evidence = non_retry_fail;
+          verification_evidence_auth_denied = false;
+        };
+    }
+  in
+  Alcotest.(check bool) "Verification_dive non-retryable fail skips force=false refetch"
+    false
+    (has_cmd
+       (function
+         | Cmd.Http_get { req = Cmd.Get_verification_evidence _; _ } -> true
+         | _ -> false)
+       (View_fetches.fetches_for_current_view ~force:false m_vdive_nr));
+  let m_fdive_nr =
+    { m_fdive with runtime = { m_fdive.runtime with fusion_detail = non_retry_fail } }
+  in
+  Alcotest.(check bool) "Fusion_dive non-retryable fail skips force=false refetch"
+    false
+    (has_cmd
+       (function
+         | Cmd.Http_get { req = Cmd.Get_fusion_run_detail _; _ } -> true
+         | _ -> false)
+       (View_fetches.fetches_for_current_view ~force:false m_fdive_nr));
+  let m_rfus_nr =
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Runtime };
+      runtime = { rt_fus with fusion_detail = non_retry_fail };
+    }
+  in
+  Alcotest.(check bool) "Runtime_fusion non-retryable fail skips force=false refetch"
+    false
+    (has_cmd
+       (function
+         | Cmd.Http_get { req = Cmd.Get_fusion_run_detail _; _ } -> true
+         | _ -> false)
+       (View_fetches.fetches_for_current_view ~force:false m_rfus_nr));
+  let m_rtrace_nr =
+    {
+      base with
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Infra;
+          dive_stack = [ Nav.Dive_infra (Nav.Runtime_trace_dive "alpha") ];
+        };
+      infra = { base.infra with runtime_trace = non_retry_fail };
+    }
+  in
+  Alcotest.(check bool) "Runtime_trace_dive non-retryable fail skips force=false refetch"
+    false
+    (has_cmd
+       (function
+         | Cmd.Http_get { req = Cmd.Get_keeper_runtime_trace _; _ } -> true
+         | _ -> false)
+       (View_fetches.fetches_for_current_view ~force:false m_rtrace_nr));
+  let m_add_nr =
+    {
+      m_add_cat with
+      runtime =
+        {
+          (Runtime_store.apply_addon_package_catalog ~observed_at:t0
+             {
+               directory = "addons";
+               parent = None;
+               entries =
+                 [
+                   Wire_runtime.Catalog_package
+                     {
+                       manifest_path = "addons/browser/lane.toml";
+                       title = "Browser";
+                       revision = "1.0.0";
+                       description = None;
+                       ui_category = None;
+                     };
+                 ];
+             }
+             m_add_cat.runtime)
+          with
+          addon_package_preview = non_retry_fail;
+        };
+    }
+  in
+  Alcotest.(check bool) "Runtime_addons_browser preview non-retryable fail skips force=false refetch"
+    false
+    (has_cmd
+       (function
+         | Cmd.Http_get { req = Cmd.Get_addon_package_preview _; _ } -> true
+         | _ -> false)
+       (View_fetches.fetches_for_current_view ~force:false m_add_nr));
+  let m_git_nr =
+    {
+      m_code with
+      infra =
+        {
+          m_code.infra with
+          code =
+            {
+              m_code.infra.code with
+              right_mode = Infra_store.Code_git_status;
+              git_status = non_retry_fail;
+            };
+        };
+    }
+  in
+  Alcotest.(check bool) "Infra_code git_status non-retryable fail skips force=false refetch"
+    false
+    (has_cmd
+       (function Cmd.Http_get { req = Cmd.Get_git_status _; _ } -> true | _ -> false)
+       (View_fetches.fetches_for_current_view ~force:false m_git_nr));
+  Alcotest.(check bool) "Infra_code git_status non-retryable fail refetches on force=true"
+    true
+    (has_cmd
+       (function Cmd.Http_get { req = Cmd.Get_git_status _; _ } -> true | _ -> false)
+       (View_fetches.fetches_for_current_view ~force:true m_git_nr));
+
+  (* 7c. activity_seen_seqs bounded to max_activity + reset on mark_stale_all/forget_log_cursor + code stale *)
+  let many_acts =
+    List.init (Infra_store.max_activity + 60) (fun i : Wire_infra.activity_event_item ->
+        {
+          seq = i + 1;
+          ts_ms = 1795254000000 + (i * 1000);
+          ts_iso = "";
+          kind = Printf.sprintf "turn.ev_%d" (i + 1);
+          actor_id = Some "alpha";
+          actor_kind = Some "keeper";
+          subject_id = None;
+          tags = [];
+          payload = `Null;
+        })
+  in
+  let inf_many =
+    Infra_store.empty
+    |> Infra_store.apply_activity_events_backfill many_acts
+  in
+  Alcotest.(check int) "activity_events capped at max_activity"
+    Infra_store.max_activity (List.length inf_many.activity_events);
+  Alcotest.(check bool) "activity_seen_seqs bounded to <= max_activity" true
+    (Infra_store.String_set.cardinal inf_many.activity_seen_seqs
+     <= Infra_store.max_activity);
+  let inf_code_full =
+    inf_code
+    |> Infra_store.apply_workspace_search ~observed_at:t0 ~scope:Wire_infra.Ws_project
+         { root = "."; query = "demo"; truncated = false; matches = [] }
+    |> Infra_store.apply_git_blame ~observed_at:t0 ~scope:Wire_infra.Ws_project
+         ~path:"lib/demo.ml" []
+    |> Infra_store.apply_git_log ~observed_at:t0 ~scope:Wire_infra.Ws_project
+         ~path:"lib/demo.ml" []
+    |> Infra_store.apply_git_diff ~observed_at:t0 ~scope:Wire_infra.Ws_project
+         ~path:"lib/demo.ml" { has_changes = false; lines = [] }
+    |> Infra_store.apply_activity_events_backfill act_items
+  in
+  let inf_stale = Infra_store.mark_stale_all inf_code_full in
+  Alcotest.(check bool) "Infra_store.mark_stale_all clears activity_seen_seqs & marks code slots stale"
+    true
+    (Infra_store.String_set.is_empty inf_stale.activity_seen_seqs
+     && is_stale_value inf_stale.code.open_file
+     && is_stale_value inf_stale.code.search_result
+     && is_stale_value inf_stale.code.git_blame
+     && is_stale_value inf_stale.code.git_log
+     && is_stale_value inf_stale.code.git_diff);
+  let inf_restarted =
+    { inf_act with last_log_seq = Some 99 }
+    |> Infra_store.forget_log_cursor
+  in
+  Alcotest.(check bool) "forget_log_cursor clears last_log_seq & activity_seen_seqs"
+    true
+    (Option.is_none inf_restarted.last_log_seq
+     && Infra_store.String_set.is_empty inf_restarted.activity_seen_seqs);
+  let inf_after_restart =
+    Infra_store.apply_activity_events_backfill
+      [
+        {
+          seq = 10;
+          ts_ms = 1795254999000;
+          ts_iso = "";
+          kind = "turn.after_restart";
+          actor_id = Some "alpha";
+          actor_kind = Some "keeper";
+          subject_id = None;
+          tags = [];
+          payload = `Null;
+        };
+      ]
+      inf_restarted
+  in
+  Alcotest.(check string) "server restart seq=10 accepted after forget_log_cursor"
+    "turn.after_restart" (List.hd inf_after_restart.activity_events).summary;
+
+  (* 7d. Knowledge_store stale-keeper fail guard & set_memory_diff_keeper reset *)
+  let beta_facts : Wire_knowledge.keeper_memory_facts =
+    {
+      keeper = "beta";
+      ordinary =
+        Wire_knowledge.Memory_store_present
+          {
+            revision = 2;
+            snapshot_sha256 = "sha-beta";
+            updated_at_unix = 1795250000.0;
+            facts = [];
+            support_invalidations = [];
+          };
+      source_bound = Wire_knowledge.Memory_store_absent;
+      events_unreadable_lines = 0;
+      events_read_error = None;
+    }
+  in
+  let beta_journal : Wire_knowledge.keeper_memory_journal =
+    {
+      keeper = "beta";
+      returned = 0;
+      undecodable_lines = 0;
+      entries = [];
+      activity_events = [];
+      activity_notes = [];
+    }
+  in
+  let ks_beta =
+    Knowledge_store.empty
+    |> Knowledge_store.set_memory_diff_keeper (Some "beta")
+    |> Knowledge_store.apply_keeper_memory_facts ~observed_at:t0 ~keeper:"beta"
+         beta_facts
+    |> Knowledge_store.apply_keeper_memory_journal ~observed_at:t0 ~keeper:"beta"
+         beta_journal
+    |> Knowledge_store.apply_memory_health_keeper ~observed_at:t0 ~keeper:"beta"
+         None
+    |> Knowledge_store.mark_keeper_memory_facts_failed ~at:t0 ~active_keeper:"beta"
+         ~keeper:"alpha" ~reason:"403" ~retryable:false ~auth_denied:true
+    |> Knowledge_store.mark_keeper_memory_journal_failed ~at:t0 ~active_keeper:"beta"
+         ~keeper:"alpha" ~reason:"403" ~retryable:false ~auth_denied:true
+    |> Knowledge_store.mark_memory_health_keeper_failed ~at:t0 ~active_keeper:"beta"
+         ~keeper:"alpha" ~reason:"500" ~retryable:true
+  in
+  Alcotest.(check bool) "stale keeper alpha failure does NOT overwrite active beta memory slots"
+    true
+    (Option.is_some (Knowledge_store.memory_facts_for_keeper ~keeper:"beta" ks_beta)
+     && Option.is_some (Knowledge_store.memory_journal_for_keeper ~keeper:"beta" ks_beta)
+     && (match ks_beta.memory_health_keeper with
+        | Observed.Value { data = "beta", _; _ } -> true
+        | _ -> false)
+     && Knowledge_store.String_set.mem "alpha" ks_beta.keeper_memory_facts_auth_denied);
+  let ks_beta_failed_then_switched =
+    ks_beta
+    |> Knowledge_store.mark_keeper_memory_facts_failed ~at:t0 ~active_keeper:"beta"
+         ~keeper:"beta" ~reason:"500" ~retryable:false ~auth_denied:false
+    |> Knowledge_store.mark_keeper_memory_journal_failed ~at:t0 ~active_keeper:"beta"
+         ~keeper:"beta" ~reason:"500" ~retryable:false ~auth_denied:false
+    |> Knowledge_store.mark_memory_health_keeper_failed ~at:t0 ~active_keeper:"beta"
+         ~keeper:"beta" ~reason:"500" ~retryable:false
+    |> Knowledge_store.set_memory_diff_keeper (Some "gamma")
+  in
+  Alcotest.(check bool) "set_memory_diff_keeper resets Failed slots and isolates per-keeper facts"
+    true
+    (is_unreported
+       (Knowledge_store.keeper_memory_facts_for ~keeper:"gamma"
+          ks_beta_failed_then_switched)
+     && (match
+           Knowledge_store.keeper_memory_facts_for ~keeper:"beta"
+             ks_beta_failed_then_switched
+         with
+        | Observed.Failed _ -> true
+        | _ -> false)
+     && is_unreported ks_beta_failed_then_switched.keeper_memory_journal
+     && is_unreported ks_beta_failed_then_switched.memory_health_keeper);
+
+  (* 7e. Reply_github_identity leaves open Github_token_form modal intact *)
+  let gh_obs =
+    match
+      Wire_keeper_context.decode_github_identity
+        (Yojson.Safe.from_string
+           {|{ "keeper": "alpha", "hostname": "github.com", "config_dir": "/tmp/gh", "projected_token_env_names": [], "stored": { "authenticated": false }, "effective": { "authenticated": false }, "effective_probe_scope": "host_process_credential_only", "checked_at_unix": 1795254000.0 }|})
+    with
+    | Ok v -> v
+    | Error msg -> Alcotest.fail ("decode_github_identity fixture: " ^ msg)
+  in
+  let m_pat_after_reply, _ =
+    Update.step ~now:t0 m_pat_typed
+      (Msg.Http_reply
+         {
+           epoch = m_pat_typed.epoch;
+           reply = Msg.Reply_github_identity { keeper = "alpha"; result = Ok gh_obs };
+         })
+  in
+  Alcotest.(check bool) "Reply_github_identity preserves open Github_token_form modal"
+    true
+    (Option.equal Nav.equal_overlay m_pat_after_reply.nav.overlay
+       (Some (Nav.Inline_action (Nav.Github_token_form "alpha")))
+     && Option.is_some m_pat_after_reply.inline_modal);
+
+  (* 7f. Ripgrep jump-to-line offset preserved & clamped on Reply_workspace_file *)
+  let m_search_ready =
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Infra; pane_index = 1 };
+      infra =
+        Infra_store.empty
+        |> Infra_store.set_tab Nav.Infra_code
+        |> Infra_store.apply_workspace_search ~observed_at:t0
+             ~scope:Wire_infra.Ws_project
+             {
+               root = ".";
+               query = "target";
+               truncated = false;
+               matches = [ { path = "lib/jump.ml"; line = 35; text = "let target = 1" } ];
+             };
+    }
+  in
+  let m_jumped, jump_cmds = step m_search_ready (mk_key Keymap.Input.Enter) in
+  Alcotest.(check bool) "ripgrep Enter dispatches Get_workspace_file & sets pending_jump_line"
+    true
+    (Option.equal
+       (fun (p1, l1) (p2, l2) -> String.equal p1 p2 && Int.equal l1 l2)
+       m_jumped.infra.code.pending_jump_line (Some ("lib/jump.ml", 35))
+     && has_cmd
+          (function
+            | Cmd.Http_get
+                { req = Cmd.Get_workspace_file { path = "lib/jump.ml"; _ }; _ } ->
+                true
+            | _ -> false)
+          jump_cmds);
+  let sixty_lines =
+    String.concat "\n" (List.init 60 (fun i -> Printf.sprintf "line %d" (i + 1)))
+  in
+  let m_file_loaded, _ =
+    Update.step ~now:t0 m_jumped
+      (Msg.Http_reply
+         {
+           epoch = m_jumped.epoch;
+           reply =
+             Msg.Reply_workspace_file
+               {
+                 scope = Wire_infra.Ws_project;
+                 path = "lib/jump.ml";
+                 result =
+                   Ok { path = "lib/jump.ml"; content = sixty_lines; revision = "r1" };
+               };
+         })
+  in
+  Alcotest.(check int) "Reply_workspace_file preserves jump line offset 34" 34
+    m_file_loaded.infra.code.file_scroll_offset;
+  Alcotest.(check bool) "pending_jump_line cleared after apply" true
+    (Option.is_none m_file_loaded.infra.code.pending_jump_line);
+  let ten_lines =
+    String.concat "\n" (List.init 10 (fun i -> Printf.sprintf "line %d" (i + 1)))
+  in
+  let m_file_clamped, _ =
+    Update.step ~now:t0 m_jumped
+      (Msg.Http_reply
+         {
+           epoch = m_jumped.epoch;
+           reply =
+             Msg.Reply_workspace_file
+               {
+                 scope = Wire_infra.Ws_project;
+                 path = "lib/jump.ml";
+                 result =
+                   Ok { path = "lib/jump.ml"; content = ten_lines; revision = "r2" };
+               };
+         })
+  in
+  Alcotest.(check int) "Reply_workspace_file clamps jump offset to file line count" 9
+    m_file_clamped.infra.code.file_scroll_offset;
+
+  (* 7g. Reply_workspace_search does NOT hijack pane_index on other screens/scopes *)
+  let search_res : Wire_infra.workspace_search_result =
+    { root = "."; query = "foo"; truncated = false; matches = [] }
+  in
+  let m_on_work =
+    { base with nav = { base.nav with workspace = Nav.Work; pane_index = 0 } }
+  in
+  let m_work_after_srch, _ =
+    Update.step ~now:t0 m_on_work
+      (Msg.Http_reply
+         {
+           epoch = m_on_work.epoch;
+           reply =
+             Msg.Reply_workspace_search
+               { scope = Wire_infra.Ws_project; result = Ok search_res };
+         })
+  in
+  Alcotest.(check int) "Reply_workspace_search does not hijack pane_index on Work" 0
+    m_work_after_srch.nav.pane_index;
+  let m_code_p0 =
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Infra; pane_index = 0 };
+      infra = Infra_store.empty |> Infra_store.set_tab Nav.Infra_code;
+    }
+  in
+  let m_code_stale_scope, _ =
+    Update.step ~now:t0 m_code_p0
+      (Msg.Http_reply
+         {
+           epoch = m_code_p0.epoch;
+           reply =
+             Msg.Reply_workspace_search
+               { scope = Wire_infra.Ws_repo "other"; result = Ok search_res };
+         })
+  in
+  Alcotest.(check int) "Reply_workspace_search stale scope does not hijack pane_index" 0
+    m_code_stale_scope.nav.pane_index;
+  let m_code_match_scope, _ =
+    Update.step ~now:t0 m_code_p0
+      (Msg.Http_reply
+         {
+           epoch = m_code_p0.epoch;
+           reply =
+             Msg.Reply_workspace_search
+               { scope = Wire_infra.Ws_project; result = Ok search_res };
+         })
+  in
+  Alcotest.(check int) "Reply_workspace_search matching Infra_code focuses pane_index=1" 1
+    m_code_match_scope.nav.pane_index
+
 let () =
   Alcotest.run "masc_tui_keymap_matrix"
     [
@@ -6371,5 +7499,8 @@ let () =
           Alcotest.test_case
             "100% Menu Reachability Matrix (Keyboard + Left Menu Rail + Zero Space Collisions)"
             `Quick test_wave2_100pct_menu_reachability_matrix;
+          Alcotest.test_case
+            "Wave 3: Scroll Bounds, Stale Guards, CanAdmin Notices, Masked PAT & Catalog/Names"
+            `Quick test_wave3_surfaces_scroll_bounds_guards_and_secrets;
         ] );
     ]

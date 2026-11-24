@@ -116,7 +116,8 @@ let view_scoped_stream (m : Model.t) : stream_id option =
           | Nav.Runtime_tools_usage -> Some Stream_tool_metrics_series)
       | Nav.Infra -> (
           match m.infra.active_tab with
-          | Nav.Infra_sandboxes | Nav.Infra_repos_changes -> None
+          | Nav.Infra_sandboxes | Nav.Infra_repos_changes | Nav.Infra_code ->
+              None
           | Nav.Infra_activity_logs ->
               Some (Stream_logs { since_seq = m.infra.last_log_seq })))
 

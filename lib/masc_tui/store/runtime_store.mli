@@ -98,6 +98,12 @@ type t = {
   runtime_probe : Wire_runtime.runtime_probe_snapshot Observed.t;
   exact_lane_runs : Wire_runtime.exact_lane_run list Observed.t;
   fusion_runs : Wire_runtime.fusion_run list Observed.t;
+  fusion_replay : Wire_runtime.fusion_replay_status option;
+  fusion_historical_evidence : Wire_runtime.fusion_historical_evidence list;
+  fusion_detail : (string * Wire_runtime.fusion_run_detail) Observed.t;
+  fusion_board_evidence : (string * Wire_runtime.fusion_evidence_post) Observed.t;
+  fusion_config : Wire_runtime.fusion_config_options Observed.t;
+  fusion_config_auth_denied : bool;
   fusion_launch_draft : fusion_draft;
   tool_series : Wire_runtime.tool_series Observed.t;
   tool_series_summary : Wire_runtime.tool_series_summary Observed.t;
@@ -111,9 +117,16 @@ type t = {
   tools_catalog_selected_index : int;
   tools_catalog_scroll_offset : int;
   connectors : Wire_runtime.connector_row list Observed.t;
+  connector_names : Wire_runtime.connector_name_mapping list String_map.t;
   browser_lane : Wire_runtime.browser_lane_status Observed.t;
   browser_tabs : Wire_runtime.browser_tabs_response Observed.t String_map.t;
   lane_addons : Wire_runtime.lane_addons_snapshot Observed.t;
+  addon_catalog_mode : bool;
+  addon_package_catalog : Wire_runtime.addon_package_catalog Observed.t;
+  addon_catalog_selected_index : int;
+  addon_catalog_scroll_offset : int;
+  addon_package_preview :
+    (string * Wire_runtime.addon_package_preview) Observed.t;
   mcp_clients : Wire_runtime.mcp_client_row list Observed.t;
   keeper_companies : string String_map.t;
   show_outside_lane_probes : bool;
@@ -391,3 +404,44 @@ val move_selection :
 val reset_detail_scroll : t -> t
 val set_filter : string -> t -> t
 val mark_stale_all : t -> t
+
+val apply_fusion_runs_snapshot :
+  observed_at:Clock.Mono.t -> Wire_runtime.fusion_runs_snapshot -> t -> t
+val apply_fusion_detail :
+  observed_at:Clock.Mono.t ->
+  run_id:string ->
+  Wire_runtime.fusion_run_detail ->
+  t ->
+  t
+val fusion_detail_for : run_id:string -> t -> Wire_runtime.fusion_run_detail option
+val apply_fusion_board_evidence :
+  observed_at:Clock.Mono.t ->
+  post_id:string ->
+  Wire_runtime.fusion_evidence_post ->
+  t ->
+  t
+val fusion_board_evidence_for :
+  post_id:string -> t -> Wire_runtime.fusion_evidence_post option
+val is_retained_fusion_run : run_id:string -> t -> bool
+val historical_evidence_for_run :
+  run_id:string -> t -> Wire_runtime.fusion_historical_evidence option
+val apply_fusion_config :
+  observed_at:Clock.Mono.t -> Wire_runtime.fusion_config_options -> t -> t
+val mark_fusion_config_denied : at:Clock.Mono.t -> reason:string -> t -> t
+val toggle_addon_catalog_mode : t -> t
+val apply_addon_package_catalog :
+  observed_at:Clock.Mono.t -> Wire_runtime.addon_package_catalog -> t -> t
+val apply_addon_package_preview :
+  observed_at:Clock.Mono.t ->
+  manifest_path:string ->
+  Wire_runtime.addon_package_preview ->
+  t ->
+  t
+val filtered_addon_catalog_entries : t -> Wire_runtime.addon_catalog_entry list
+val selected_addon_catalog_entry : t -> Wire_runtime.addon_catalog_entry option
+val addon_preview_for :
+  manifest_path:string -> t -> Wire_runtime.addon_package_preview option
+val apply_connector_names :
+  connector_id:string -> Wire_runtime.connector_name_mapping list -> t -> t
+val connector_channel_names :
+  connector_id:string -> t -> Wire_runtime.connector_name_mapping list

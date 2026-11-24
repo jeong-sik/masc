@@ -163,7 +163,9 @@ let keeper_config_dry_run_max_scroll (m : Model.t) =
                 | Nav.Keeper_tool_calls
                 | Nav.Keeper_memory
                 | Nav.Keeper_work_candle
-                | Nav.Keeper_sandbox );
+                | Nav.Keeper_sandbox
+                | Nav.Keeper_logs
+                | Nav.Keeper_identity );
               _;
             }
         | Nav.Dive_work _
@@ -954,7 +956,9 @@ let resolve_memory_act_keeper (m : Model.t) =
               | Nav.Keeper_tool_calls
               | Nav.Keeper_work_candle
               | Nav.Keeper_sandbox
-              | Nav.Keeper_config );
+              | Nav.Keeper_config
+              | Nav.Keeper_logs
+              | Nav.Keeper_identity );
             _;
           }
       | Nav.Dive_work _
@@ -1373,7 +1377,9 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
           | Nav.Keeper_memory
           | Nav.Keeper_work_candle
           | Nav.Keeper_sandbox
-          | Nav.Keeper_config )
+          | Nav.Keeper_config
+          | Nav.Keeper_logs
+          | Nav.Keeper_identity )
         , Some "c" ) ->
           let rest =
             match m.nav.dive_stack with _ :: tl -> tl | [] -> []
@@ -1419,7 +1425,9 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
           | Nav.Keeper_memory
           | Nav.Keeper_work_candle
           | Nav.Keeper_sandbox
-          | Nav.Keeper_config )
+          | Nav.Keeper_config
+          | Nav.Keeper_logs
+          | Nav.Keeper_identity )
         , (Some _ | None) ) ->
           (m, []))
   | Some (Nav.Dive_knowledge (Nav.Artifact_dive target)) -> (
@@ -1476,7 +1484,11 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
   | Some
       ( Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Memory_diff_dive _)
       | Nav.Dive_runtime _
-      | Nav.Dive_infra (Nav.Lane_dive _ | Nav.Incident_dive _) ) ->
+      | Nav.Dive_infra
+          ( Nav.Lane_dive _
+          | Nav.Incident_dive _
+          | Nav.Runtime_trace_dive _
+          | Nav.Log_detail_dive _ ) ) ->
       (m, [])
   | None -> (
       (* 2. Workspace-level contextual hotkeys *)
@@ -1553,6 +1565,7 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
                 ] )
           | ( ( Nav.Infra_sandboxes
               | Nav.Infra_repos_changes
+              | Nav.Infra_code
               | Nav.Infra_activity_logs )
             , (Some _ | None) ) ->
               (m, []))
@@ -1656,7 +1669,9 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
               | Nav.Keeper_memory
               | Nav.Keeper_work_candle
               | Nav.Keeper_sandbox
-              | Nav.Keeper_config )
+              | Nav.Keeper_config
+              | Nav.Keeper_logs
+              | Nav.Keeper_identity )
             , (Some _ | None) ) ->
               (m, []))
       | Nav.Knowledge -> (
@@ -1832,7 +1847,10 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
               | Some _, Some ("h" | "X") ->
                   Update_nav.open_inline_modal m (Nav.Harness_overrule "")
               | _ -> (m, []))
-          | Nav.Work_schedules | Nav.Work_inbox | Nav.Work_candle_scorecard ->
+          | Nav.Work_schedules
+          | Nav.Work_inbox
+          | Nav.Work_candle_scorecard
+          | Nav.Work_harness ->
               (m, []))
       | Nav.Pulse -> (m, [])))
 
@@ -1848,7 +1866,9 @@ let keeper_config_target_name (m : Model.t) =
               | Nav.Keeper_tool_calls
               | Nav.Keeper_memory
               | Nav.Keeper_work_candle
-              | Nav.Keeper_sandbox );
+              | Nav.Keeper_sandbox
+              | Nav.Keeper_logs
+              | Nav.Keeper_identity );
             _;
           }
       | Nav.Dive_work _
@@ -2201,11 +2221,155 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                         | Nav.Connector_form
                         | Nav.Repo_add_form
                         | Nav.Board_new_post
-                        | Nav.Board_comment _ )
+                        | Nav.Board_comment _
+                        | Nav.Github_token_form _
+                        | Nav.Code_finder_form
+                        | Nav.Code_search_form )
                       , _ ) ->
                         true
                   in
+                  let cycle_modal_picker ~delta =
+                    let cycle_in options cur =
+                      match options with
+                      | [] -> None
+                      | _ ->
+                          let len = List.length options in
+                          let idx =
+                            let rec find i = function
+                              | [] -> -1
+                              | x :: rest ->
+                                  if String.equal x cur then i
+                                  else find (i + 1) rest
+                            in
+                            find 0 options
+                          in
+                          let next_idx =
+                            if idx < 0 then 0
+                            else
+                              let v = (idx + delta) mod len in
+                              if v < 0 then v + len else v
+                          in
+                          List.nth_opt options next_idx
+                    in
+                    let active_fld = List.nth_opt modal.fields modal.active_field in
+                    match modal.kind, active_fld with
+                    | Nav.Connector_form, Some { key = "connector"; value; _ } -> (
+                        let ids =
+                          List.map
+                            (fun (c : Wire_runtime.connector_row) ->
+                              c.connector_id)
+                            (Runtime_store.filtered_connectors m.runtime)
+                        in
+                        match cycle_in ids (String.trim value) with
+                        | Some next_id ->
+                            let first_chan =
+                              match
+                                Runtime_store.connector_channel_names
+                                  ~connector_id:next_id m.runtime
+                              with
+                              | first :: _ -> first.id
+                              | [] -> ""
+                            in
+                            let fields =
+                              List.map
+                                (fun (f : Model.modal_form_field) ->
+                                  if String.equal f.key "connector" then
+                                    { f with value = next_id }
+                                  else if
+                                    (String.equal f.key "channel"
+                                    || String.equal f.key "channel_id")
+                                    && not (String.equal first_chan "")
+                                  then { f with value = first_chan }
+                                  else f)
+                                modal.fields
+                            in
+                            let cmds =
+                              if
+                                not
+                                  (Runtime_store.String_map.mem next_id
+                                     m.runtime.connector_names)
+                              then
+                                [
+                                  Cmd.Http_get
+                                    {
+                                      epoch = m.epoch;
+                                      req =
+                                        Cmd.Get_connector_names
+                                          {
+                                            connector = next_id;
+                                            scope = "channel";
+                                          };
+                                    };
+                                ]
+                              else []
+                            in
+                            Some
+                              ( { m with inline_modal = Some { modal with fields; error = None } }
+                              , cmds )
+                        | None -> None)
+                    | ( Nav.Connector_form
+                      , Some { key = ("channel" | "channel_id"); value; _ } ) -> (
+                        let cid = Model.modal_field_value ~key:"connector" modal in
+                        let chans =
+                          List.map
+                            (fun (cm : Wire_runtime.connector_name_mapping) ->
+                              cm.id)
+                            (Runtime_store.connector_channel_names
+                               ~connector_id:cid m.runtime)
+                        in
+                        match cycle_in chans (String.trim value) with
+                        | Some next_ch ->
+                            let next_modal =
+                              Model.modal_update_active_field
+                                (fun _ -> next_ch)
+                                modal
+                            in
+                            Some ({ m with inline_modal = Some next_modal }, [])
+                        | None -> None)
+                    | Nav.Board_new_post, Some { key = "fusion_preset"; value; _ } -> (
+                        let presets =
+                          match Observed.to_option m.runtime.fusion_config with
+                          | Some cfg ->
+                              List.map
+                                (fun (p : Wire_runtime.fusion_preset_option) ->
+                                  p.name)
+                                cfg.presets
+                          | None -> []
+                        in
+                        match cycle_in presets (String.trim value) with
+                        | Some next_p ->
+                            let next_modal =
+                              Model.modal_update_active_field
+                                (fun _ -> next_p)
+                                modal
+                            in
+                            Some ({ m with inline_modal = Some next_modal }, [])
+                        | None -> None)
+                    | ( ( Nav.Connector_form | Nav.Board_new_post )
+                      , (Some _ | None) )
+                    | ( ( Nav.Btw_query
+                        | Nav.Gate_reject _
+                        | Nav.Verification_reject _
+                        | Nav.Harness_overrule _
+                        | Nav.Task_cancel _
+                        | Nav.Schedule_form
+                        | Nav.Repo_add_form
+                        | Nav.Board_comment _
+                        | Nav.Github_token_form _
+                        | Nav.Code_finder_form
+                        | Nav.Code_search_form )
+                      , (Some _ | None) ) ->
+                        None
+                  in
                   match norm.key with
+                  | Keymap.Input.Left when editable -> (
+                      match cycle_modal_picker ~delta:(-1) with
+                      | Some res -> res
+                      | None -> (m, []))
+                  | Keymap.Input.Right when editable -> (
+                      match cycle_modal_picker ~delta:1 with
+                      | Some res -> res
+                      | None -> (m, []))
                   | Keymap.Input.Tab when editable ->
                       let delta = if norm.mods.shift then -1 else 1 in
                       ( {
@@ -2470,7 +2634,9 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                       | Nav.Keeper_memory
                                       | Nav.Keeper_work_candle
                                       | Nav.Keeper_sandbox
-                                      | Nav.Keeper_config );
+                                      | Nav.Keeper_config
+                                      | Nav.Keeper_logs
+                                      | Nav.Keeper_identity );
                                     _;
                                   }
                               | Nav.Dive_work _
@@ -2532,7 +2698,9 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                     | Nav.Keeper_tool_calls
                                     | Nav.Keeper_work_candle
                                     | Nav.Keeper_sandbox
-                                    | Nav.Keeper_config );
+                                    | Nav.Keeper_config
+                                    | Nav.Keeper_logs
+                                    | Nav.Keeper_identity );
                                   _;
                                 }
                             | Nav.Dive_work _
@@ -2551,6 +2719,19 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                 && Nav.equal_keeper_tab
                                      m.fleet.keeper_dive_tab Nav.Keeper_memory
                                 && m.nav.pane_index = 1)
+                      in
+                      let is_code_git_toggle_g =
+                        (not (Drafts.is_focused m.drafts))
+                        && (not m.nav.filter_focused)
+                        && (not (Model.sidebar_has_focus m))
+                        && Option.is_none m.nav.overlay
+                        && Option.is_none (Model.active_dive m)
+                        && (not norm.mods.ctrl) && (not norm.mods.alt)
+                        && (not norm.mods.shift)
+                        && Option.equal String.equal (key_char_opt norm.key)
+                             (Some "g")
+                        && Nav.equal_workspace m.nav.workspace Nav.Infra
+                        && Nav.equal_infra_tab m.infra.active_tab Nav.Infra_code
                       in
                       let screen_context_intercept =
                         if
@@ -2573,9 +2754,12 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                              Nav.Knowledge_board)
                                       || (Nav.equal_workspace m.nav.workspace
                                             Nav.Infra
-                                          && Nav.equal_infra_tab
-                                               m.infra.active_tab
-                                               Nav.Infra_activity_logs)) ->
+                                          && (Nav.equal_infra_tab
+                                                m.infra.active_tab
+                                                Nav.Infra_activity_logs
+                                             || Nav.equal_infra_tab
+                                                  m.infra.active_tab
+                                                  Nav.Infra_code))) ->
                                 Some Keymap.Cycle_signal_or_source
                             | Some "m"
                               when Option.is_none (Model.active_dive m)
@@ -2617,7 +2801,10 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                        true
                                    | Some
                                        ( Nav.Dive_infra
-                                           (Nav.Lane_dive _ | Nav.Incident_dive _)
+                                           ( Nav.Lane_dive _
+                                           | Nav.Incident_dive _
+                                           | Nav.Runtime_trace_dive _
+                                           | Nav.Log_detail_dive _ )
                                        | Nav.Dive_keeper
                                            {
                                              tab =
@@ -2626,7 +2813,9 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                                | Nav.Keeper_tool_calls
                                                | Nav.Keeper_memory
                                                | Nav.Keeper_work_candle
-                                               | Nav.Keeper_config );
+                                               | Nav.Keeper_config
+                                               | Nav.Keeper_logs
+                                               | Nav.Keeper_identity );
                                              _;
                                            }
                                        | Nav.Dive_work _
@@ -2636,8 +2825,16 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                    | None ->
                                        (Nav.equal_workspace m.nav.workspace
                                           Nav.Infra
-                                       && Nav.equal_infra_tab m.infra.active_tab
-                                            Nav.Infra_sandboxes)
+                                       && (Nav.equal_infra_tab
+                                             m.infra.active_tab
+                                             Nav.Infra_sandboxes
+                                          || Nav.equal_infra_tab
+                                               m.infra.active_tab Nav.Infra_code))
+                                       || (Nav.equal_workspace m.nav.workspace
+                                             Nav.Runtime
+                                          && Nav.equal_runtime_tab
+                                               m.runtime.active_tab
+                                               Nav.Runtime_addons_browser)
                                        || (Nav.equal_workspace m.nav.workspace
                                              Nav.Keepers
                                           && (m.nav.pane_index = 1
@@ -2653,7 +2850,7 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                    && Nav.equal_runtime_tab m.runtime.active_tab
                                         Nav.Runtime_addons_browser ->
                                 Some Keymap.Refresh_browser_tabs
-                            | _ -> None
+                            | Some _ | None -> None
                       in
                       if is_ctrl_x then interrupt_active_keeper_turn ~now m
                       else if is_memory_flow_toggle_g then
@@ -2674,6 +2871,24 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                  ^ Say.resolve Say.Lang_en lbl))
                             { m with knowledge }
                         , [] )
+                      else if is_code_git_toggle_g then
+                        let infra = Infra_store.cycle_code_git_mode m.infra in
+                        let lbl =
+                          Infra_store.code_right_mode_label
+                            infra.code.right_mode
+                        in
+                        let next =
+                          { m with infra }
+                          |> Model.with_toast ~now ~level:Model.Toast_info
+                               (Say.make
+                                  ~ko:
+                                    ("코드 패널 모드: "
+                                    ^ Say.resolve Say.Lang_ko lbl)
+                                  ~en:
+                                    ("Code panel mode: "
+                                    ^ Say.resolve Say.Lang_en lbl))
+                        in
+                        (next, View_fetches.fetches_for_current_view next)
                       else
                         match screen_context_intercept with
                         | Some act -> Update_actions.execute_action ~now m act
@@ -2897,7 +3112,10 @@ let apply_paste ~now:_ (m : Model.t) text =
                   | Nav.Connector_form
                   | Nav.Repo_add_form
                   | Nav.Board_new_post
-                  | Nav.Board_comment _ )
+                  | Nav.Board_comment _
+                  | Nav.Github_token_form _
+                  | Nav.Code_finder_form
+                  | Nav.Code_search_form )
                 , _ ) ->
                   true
             in

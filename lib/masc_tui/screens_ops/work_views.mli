@@ -77,3 +77,10 @@ val render_candle_scorecard :
   rect:Rect.t ->
   Cell_grid.t ->
   unit
+
+val render_harness :
+  model:Model.t ->
+  cache:Card.Cache.t ->
+  rect:Rect.t ->
+  Cell_grid.t ->
+  unit

@@ -1789,15 +1789,49 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
         };
       ]
   in
+  let acting_list = Update_nav.acting_keepers model in
+  let pills =
+    pills
+    @ [
+        {
+          H.label =
+            Printf.sprintf "[a] %s (%d)"
+              (Say.resolve lang (Say.make ~ko:"활동" ~en:"Acting"))
+              (List.length acting_list);
+          active = inf.acting_rail_open;
+          tone =
+            Some
+              (if acting_list <> [] then Theme.Status_ok
+               else Theme.Status_historical);
+          glyph = Some Glyph.Live_working;
+        };
+      ]
+  in
   let bar_right_hint =
-    if bar_rect.w >= 120 then Some "logs/stream + observer SSE · [s]"
-    else if bar_rect.w >= 96 && inf.stream_gap_count = 0 then Some "[s] source"
+    if bar_rect.w >= 120 then Some "logs/stream + observer SSE · [s] · [a] Acting"
+    else if bar_rect.w >= 96 && inf.stream_gap_count = 0 then Some "[s] src · [a] act"
     else None
   in
   ignore (H.draw_pills ~grid ~rect:bar_rect ~theme ?right_hint:bar_right_hint pills);
-  let left_rect, right_rect =
-    Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.62
-      ~top_ratio:0.56 bp body_rect
+  let left_rect, right_rect, acting_rect_opt =
+    if inf.acting_rail_open && body_rect.w >= 104 then
+      match
+        Layout.split_h_bp bp body_rect
+          [ Layout.Ratio 0.50; Layout.Ratio 0.32; Layout.Flex 1 ]
+      with
+      | [ a; b; c ] -> (a, b, Some c)
+      | _ ->
+          let l, r =
+            Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.62
+              ~top_ratio:0.56 bp body_rect
+          in
+          (l, r, None)
+    else
+      let l, r =
+        Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.62
+          ~top_ratio:0.56 bp body_rect
+      in
+      (l, r, None)
   in
   let stream_inner =
     Card.draw ~cache grid ~rect:left_rect ~theme
@@ -2165,6 +2199,558 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
                   end)
             (Store_scroll.drop skip all_rows)
         end
+  end;
+  match acting_rect_opt with
+  | Some act_rect when not (Rect.is_empty act_rect) ->
+      let act_inner =
+        Card.draw ~cache grid ~rect:act_rect ~theme
+          (H.card_spec ~focused:(Model.pane_focused model 2)
+             ~hotkey:
+               (Say.resolve lang
+                  (Say.make ~ko:"[Enter] 트레이스 · [a] 닫기"
+                     ~en:"[Enter] Trace · [a] Hide"))
+             (Say.resolve lang
+                (Say.make ~ko:"활동 중 키퍼" ~en:"Acting Keepers")))
+      in
+      if not (Rect.is_empty act_inner) then begin
+        if acting_list = [] then
+          H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp act_inner) ~theme
+            (Say.resolve lang
+               (Say.make ~ko:"현재 활동 중인 키퍼 없음"
+                  ~en:"No actively acting keepers"))
+        else
+          let total = List.length acting_list in
+          let sel = H.clamp_index total inf.acting_selected_index in
+          let start_i, _ =
+            Table.compute_viewport ~total_rows:total ~viewport_rows:act_inner.h
+              ~scroll:0 ~selected:(Some sel)
+          in
+          let y = ref act_inner.y and bot = Rect.bottom act_inner in
+          List.iteri
+            (fun local_i kp ->
+              let idx = start_i + local_i in
+              if !y < bot then begin
+                let is_sel = Int.equal idx sel in
+                let row_rect =
+                  Rect.make ~x:act_inner.x ~y:!y ~w:act_inner.w ~h:1
+                in
+                let row_bg =
+                  if is_sel then theme.selection_bg else theme.surface_1
+                in
+                if is_sel then
+                  H.paint_selected_row_bg ~grid ~clip:act_inner ~row_rect ~theme
+                    ();
+                let st =
+                  if is_sel then H.anchor_style ~theme ~bg:row_bg ()
+                  else H.text_style ~theme ~bg:row_bg ()
+                in
+                ignore
+                  (H.put_clipped ~grid ~clip:row_rect ~x:(act_inner.x + 1) ~y:!y
+                     ~max_w:(Int.max 0 (act_inner.w - 2))
+                     ~style:st
+                     (Printf.sprintf "%s @%s"
+                        (Glyph.to_utf8 Glyph.Live_working)
+                        kp));
+                incr y
+              end)
+            (Store_scroll.drop start_i acting_list)
+      end
+  | Some _ | None -> ()
+
+(* --- 3b. Sub-Tab 3: Code Workspace File Browser + Syntax Viewer + Git --- *)
+
+let workspace_scope_label = Wire_infra.workspace_scope_label
+
+let render_code ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
+    ~bp grid =
+  let lang = model.lang in
+  let inf = model.infra in
+  let code = inf.code in
+  let bar_rect, body_rect =
+    match Layout.split_v rect [ Layout.Fixed 1; Layout.Flex 1 ] with
+    | [ a; b ] -> (a, b)
+    | _ -> (Rect.empty, rect)
+  in
+  let scope_lbl = "[s] " ^ workspace_scope_label code.scope in
+  let mode_lbl =
+    "[g] " ^ Say.resolve lang (Infra_store.code_right_mode_label code.right_mode)
+  in
+  let pills =
+    [
+      {
+        H.label = scope_lbl;
+        active = true;
+        tone = Some Theme.Status_active;
+        glyph = Some Glyph.Live_healthy;
+      };
+      {
+        H.label = mode_lbl;
+        active =
+          not
+            (Infra_store.equal_code_right_mode code.right_mode
+               Infra_store.Code_file);
+        tone = Some Theme.Status_ai;
+        glyph = None;
+      };
+    ]
+    @
+    if String.equal (String.trim inf.filter_query) "" then []
+    else
+      [
+        {
+          H.label = "/" ^ inf.filter_query;
+          active = true;
+          tone = Some Theme.Status_active;
+          glyph = None;
+        };
+      ]
+  in
+  ignore
+    (H.draw_pills ~grid ~rect:bar_rect ~theme
+       ~right_hint:
+         (Say.resolve lang
+            (Say.make ~ko:"[p] 파일 찾기 · [f] 코드 검색 · [g] Git · [y] 복사"
+               ~en:"[p] Find · [f] Search · [g] Git · [y] Copy"))
+       pills);
+  let left_rect, right_rect =
+    Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.32
+      ~top_ratio:0.42 bp body_rect
+  in
+  let left_inner =
+    Card.draw ~cache grid ~rect:left_rect ~theme
+      (H.card_spec ~focused:(Model.pane_focused model 0)
+         ~subtitle:(workspace_scope_label code.scope)
+         ~hotkey:
+           (Say.resolve lang
+              (Say.make ~ko:"[Enter] 열기 · [s] 범위" ~en:"[Enter] Open · [s] Scope"))
+         (Say.resolve lang
+            (Say.make ~ko:"워크스페이스 트리" ~en:"Workspace Tree")))
+  in
+  if not (Rect.is_empty left_inner) then begin
+    let nodes = Infra_store.visible_code_tree_nodes inf in
+    if nodes = [] then
+      H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp left_inner) ~theme
+        (if code.tree_loaded then
+           Say.resolve lang
+             (Say.make ~ko:"일치하는 파일/디렉터리 없음"
+                ~en:"No matching files or directories")
+         else
+           Say.resolve lang
+             (Say.make ~ko:"워크스페이스 트리 불러오는 중…"
+                ~en:"Loading workspace tree…"))
+    else
+      let total = List.length nodes in
+      let sel = H.clamp_index total code.tree_selected_index in
+      let start_i, _ =
+        Table.compute_viewport ~total_rows:total ~viewport_rows:left_inner.h
+          ~scroll:code.tree_scroll_offset ~selected:(Some sel)
+      in
+      let y = ref left_inner.y and bot = Rect.bottom left_inner in
+      List.iteri
+        (fun local_i (nd : Wire_infra.workspace_tree_node) ->
+          let idx = start_i + local_i in
+          if !y < bot then begin
+            let is_sel = Int.equal idx sel in
+            let row_rect =
+              Rect.make ~x:left_inner.x ~y:!y ~w:left_inner.w ~h:1
+            in
+            let row_bg =
+              if is_sel then theme.selection_bg else theme.surface_1
+            in
+            if is_sel then
+              H.paint_selected_row_bg ~grid ~clip:left_inner ~row_rect ~theme ();
+            let indent = String.make (Int.min 12 (nd.depth * 2)) ' ' in
+            let caret =
+              if nd.has_children then
+                if Infra_store.String_set.mem nd.path code.expanded_dirs then
+                  Glyph.to_utf8 Glyph.Expand_open ^ " "
+                else Glyph.to_utf8 Glyph.Expand_closed ^ " "
+              else "  "
+            in
+            let diff_s =
+              match nd.diff with
+              | Some d when not (String.equal (String.trim d) "") -> d
+              | Some _ | None -> ""
+            in
+            let dw = Grapheme.display_width diff_s in
+            let st =
+              if is_sel then H.anchor_style ~theme ~bg:row_bg ()
+              else if nd.has_children then
+                H.accent_style ~theme ~bg:row_bg ()
+              else H.text_style ~theme ~bg:row_bg ()
+            in
+            ignore
+              (H.put_clipped ~grid ~clip:row_rect ~x:(left_inner.x + 1) ~y:!y
+                 ~max_w:(Int.max 0 (left_inner.w - 2 - dw - 1))
+                 ~style:st (indent ^ caret ^ nd.label));
+            if dw > 0 then
+              ignore
+                (H.put_right ~grid ~clip:row_rect
+                   ~right_x:(Rect.right row_rect - 1) ~y:!y ~max_w:dw
+                   ~style:(H.status_style ~theme ~bg:row_bg Theme.Status_attention)
+                   diff_s);
+            incr y
+          end)
+        (Store_scroll.drop start_i nodes)
+  end;
+  let right_subtitle =
+    match code.right_mode with
+    | Infra_store.Code_file -> (
+        match Infra_store.open_file_for_current inf with
+        | Some f -> Some f.path
+        | None -> None)
+    | Infra_store.Code_search_results -> (
+        match Observed.to_option code.search_result with
+        | Some (sc, res) when Wire_infra.equal_workspace_scope sc code.scope ->
+            Some (Printf.sprintf "/%s (%d)" res.query (List.length res.matches))
+        | Some _ | None -> None)
+    | Infra_store.Code_git_status
+    | Infra_store.Code_git_branches
+    | Infra_store.Code_git_worktrees
+    | Infra_store.Code_git_blame
+    | Infra_store.Code_git_log
+    | Infra_store.Code_git_diff ->
+        Some (workspace_scope_label code.scope)
+  in
+  let right_inner =
+    Card.draw ~cache grid ~rect:right_rect ~theme
+      (H.card_spec ?subtitle:right_subtitle ~focused:(Model.pane_focused model 1)
+         ~hotkey:
+           (Say.resolve lang
+              (Say.make ~ko:"[g] Git · [p] 찾기 · [f] 검색 · [y] 복사"
+                 ~en:"[g] Git · [p] Find · [f] Search · [y] Copy"))
+         (Say.resolve lang (Infra_store.code_right_mode_label code.right_mode)))
+  in
+  let rc = H.pad_content ~bp right_inner in
+  if not (Rect.is_empty rc) then begin
+    let hdr_rect = Rect.make ~x:rc.x ~y:rc.y ~w:rc.w ~h:1 in
+    let vis_rect =
+      Rect.make ~x:rc.x ~y:(rc.y + 1) ~w:rc.w ~h:(Int.max 0 (rc.h - 1))
+    in
+    let draw_plain_scrolled ~scroll (lines : (Theme.status_token option * string) list) =
+      let total = List.length lines in
+      let vis_h = Int.max 1 vis_rect.h in
+      let max_skip = Int.max 0 (total - vis_h) in
+      let skip = Int.min max_skip (Int.max 0 scroll) in
+      let y = ref vis_rect.y and bot = Rect.bottom vis_rect in
+      List.iter
+        (fun (tone_opt, txt) ->
+          if !y < bot then begin
+            let st =
+              match tone_opt with
+              | Some tone -> H.status_style ~theme tone
+              | None -> H.text_style ~theme ()
+            in
+            ignore
+              (H.put_clipped ~grid ~clip:vis_rect ~x:vis_rect.x ~y:!y
+                 ~max_w:vis_rect.w ~style:st txt);
+            incr y
+          end)
+        (Store_scroll.drop skip lines)
+    in
+    match code.right_mode with
+    | Infra_store.Code_file -> (
+        match Infra_store.open_file_for_current inf with
+        | None ->
+            ignore
+              (H.put_clipped ~grid ~clip:hdr_rect ~x:hdr_rect.x ~y:hdr_rect.y
+                 ~max_w:hdr_rect.w ~style:(H.whisper_style ~theme ())
+                 (Say.resolve lang
+                    (Say.make ~ko:"파일 미선택" ~en:"No file open")));
+            (match code.open_file with
+            | (Observed.Loading _ | Observed.Failed _) as obs ->
+                H.draw_observed_placeholder ~grid ~rect:vis_rect ~theme ~lang obs
+            | Observed.Value _ | Observed.Absent | Observed.Unreported ->
+                H.draw_empty_notice ~grid ~rect:vis_rect ~theme
+                  (Say.resolve lang
+                     (Say.make
+                        ~ko:"왼쪽 트리에서 파일을 선택하거나 [p]로 검색하세요"
+                        ~en:"Select a file from the tree or press [p] to fuzzy-find")))
+        | Some f ->
+            let lang_opt = Code_lexer.language_of_path f.path in
+            let rows = Code_lexer.rows_of_source ~language:lang_opt f.content in
+            let total = List.length rows in
+            let hdr_txt =
+              Printf.sprintf "%s · %d lines · rev %s" f.path total
+                (H.short_hash ~len:10 f.revision)
+            in
+            ignore
+              (H.put_clipped ~grid ~clip:hdr_rect ~x:hdr_rect.x ~y:hdr_rect.y
+                 ~max_w:hdr_rect.w ~style:(H.accent_style ~theme ~attrs:Attr.bold ())
+                 hdr_txt);
+            if not (Rect.is_empty vis_rect) then begin
+              let gutter_w =
+                Int.max 4 (String.length (Int.to_string (Int.max 1 total)) + 1)
+              in
+              let vis_h = Int.max 1 vis_rect.h in
+              let max_skip = Int.max 0 (total - vis_h) in
+              let skip = Int.min max_skip (Int.max 0 code.file_scroll_offset) in
+              let bg = Color.of_rgb theme.surface_1 in
+              let code_x = vis_rect.x + gutter_w + 1 in
+              let code_w = Int.max 0 (vis_rect.w - gutter_w - 1) in
+              List.iteri
+                (fun local_i segs ->
+                  let py = vis_rect.y + local_i in
+                  if py < Rect.bottom vis_rect then begin
+                    let lnum =
+                      Printf.sprintf "%*d " (gutter_w - 1) (skip + local_i + 1)
+                    in
+                    ignore
+                      (H.put_clipped ~grid ~clip:vis_rect ~x:vis_rect.x ~y:py
+                         ~max_w:gutter_w ~style:(H.whisper_style ~theme ()) lnum);
+                    if code_w > 0 then
+                      ignore
+                        (Code_lexer.draw_row ~clip:vis_rect grid ~x:code_x ~y:py
+                           ~max_w:code_w ~theme ~bg segs)
+                  end)
+                (Store_scroll.drop skip rows |> H.safe_take vis_rect.h)
+            end)
+    | Infra_store.Code_search_results -> (
+        match Observed.to_option code.search_result with
+        | Some (sc, res) when Wire_infra.equal_workspace_scope sc code.scope ->
+            let trunc = if res.truncated then " (truncated)" else "" in
+            ignore
+              (H.put_clipped ~grid ~clip:hdr_rect ~x:hdr_rect.x ~y:hdr_rect.y
+                 ~max_w:hdr_rect.w ~style:(H.accent_style ~theme ~attrs:Attr.bold ())
+                 (Printf.sprintf "Search \"%s\" · %d matches%s · [Enter] jump"
+                    res.query (List.length res.matches) trunc));
+            if res.matches = [] then
+              H.draw_empty_notice ~grid ~rect:vis_rect ~theme
+                (Say.resolve lang
+                   (Say.make ~ko:"검색 결과 없음" ~en:"No search matches"))
+            else
+              let total = List.length res.matches in
+              let sel = H.clamp_index total code.search_selected_index in
+              let start_i, _ =
+                Table.compute_viewport ~total_rows:total
+                  ~viewport_rows:(Int.max 1 vis_rect.h) ~scroll:0
+                  ~selected:(Some sel)
+              in
+              let y = ref vis_rect.y and bot = Rect.bottom vis_rect in
+              List.iteri
+                (fun local_i (mt : Wire_infra.workspace_search_match) ->
+                  let idx = start_i + local_i in
+                  if !y < bot then begin
+                    let is_sel = Int.equal idx sel in
+                    let row_rect =
+                      Rect.make ~x:vis_rect.x ~y:!y ~w:vis_rect.w ~h:1
+                    in
+                    let row_bg =
+                      if is_sel then theme.selection_bg else theme.surface_1
+                    in
+                    if is_sel then
+                      H.paint_selected_row_bg ~grid ~clip:vis_rect ~row_rect
+                        ~theme ();
+                    let st =
+                      if is_sel then H.anchor_style ~theme ~bg:row_bg ()
+                      else H.text_style ~theme ~bg:row_bg ()
+                    in
+                    ignore
+                      (H.put_clipped ~grid ~clip:row_rect ~x:vis_rect.x ~y:!y
+                         ~max_w:vis_rect.w ~style:st
+                         (Printf.sprintf "%s:%d  %s" mt.path mt.line
+                            (H.sanitize_single_line mt.text)));
+                    incr y
+                  end)
+                (Store_scroll.drop start_i res.matches)
+        | Some _ | None ->
+            ignore
+              (H.put_clipped ~grid ~clip:hdr_rect ~x:hdr_rect.x ~y:hdr_rect.y
+                 ~max_w:hdr_rect.w ~style:(H.whisper_style ~theme ())
+                 "Press [f] to run ripgrep search");
+            H.draw_observed_placeholder ~grid ~rect:vis_rect ~theme ~lang
+              code.search_result)
+    | Infra_store.Code_git_status -> (
+        match Observed.to_option code.git_status with
+        | Some (sc, st) when Wire_infra.equal_workspace_scope sc code.scope ->
+            ignore
+              (H.put_clipped ~grid ~clip:hdr_rect ~x:hdr_rect.x ~y:hdr_rect.y
+                 ~max_w:hdr_rect.w ~style:(H.accent_style ~theme ~attrs:Attr.bold ())
+                 (Printf.sprintf "Git Status · %d changes" st.total));
+            let rows =
+              [
+                ( Some Theme.Status_active
+                , Printf.sprintf "HEAD: %s · Upstream: %s"
+                    (Option.value ~default:"-" st.head)
+                    (Option.value ~default:"-" st.upstream) );
+                ( None
+                , Printf.sprintf "Total changed paths: %d" st.total );
+              ]
+              @ List.map
+                  (fun (ch : Wire_infra.git_status_change) ->
+                    let flags =
+                      Printf.sprintf "%s%s%s%s"
+                        (if ch.staged then "S" else ".")
+                        (if ch.unstaged then "M" else ".")
+                        (if ch.untracked then "?" else ".")
+                        (if ch.conflicted then "!" else ".")
+                    in
+                    let tone =
+                      if ch.conflicted then Some Theme.Status_critical
+                      else if ch.staged then Some Theme.Status_ok
+                      else Some Theme.Status_attention
+                    in
+                    (tone, Printf.sprintf "[%s] %s" flags ch.path))
+                  st.changes
+            in
+            draw_plain_scrolled ~scroll:code.git_scroll_offset rows
+        | Some _ | None ->
+            H.draw_observed_placeholder ~grid ~rect:vis_rect ~theme ~lang
+              code.git_status)
+    | Infra_store.Code_git_branches -> (
+        match Observed.to_option code.git_branches with
+        | Some (sc, bs) when Wire_infra.equal_workspace_scope sc code.scope ->
+            ignore
+              (H.put_clipped ~grid ~clip:hdr_rect ~x:hdr_rect.x ~y:hdr_rect.y
+                 ~max_w:hdr_rect.w ~style:(H.accent_style ~theme ~attrs:Attr.bold ())
+                 (Printf.sprintf "Git Branches (%d)" (List.length bs)));
+            let rows =
+              List.map
+                (fun (b : Wire_infra.git_branch_entry) ->
+                  let ab =
+                    match b.ahead, b.behind with
+                    | Some a, Some bh -> Printf.sprintf "+%d/-%d" a bh
+                    | Some a, None -> Printf.sprintf "+%d" a
+                    | None, Some bh -> Printf.sprintf "-%d" bh
+                    | None, None -> ""
+                  in
+                  let tone = if b.current then Some Theme.Status_ok else None in
+                  ( tone
+                  , Printf.sprintf "%s %-22s %-8s %s"
+                      (if b.current then "*" else " ")
+                      b.name ab
+                      (H.sanitize_single_line b.subject) ))
+                bs
+            in
+            draw_plain_scrolled ~scroll:code.git_scroll_offset rows
+        | Some _ | None ->
+            H.draw_observed_placeholder ~grid ~rect:vis_rect ~theme ~lang
+              code.git_branches)
+    | Infra_store.Code_git_worktrees -> (
+        match Observed.to_option code.git_worktrees with
+        | Some (sc, ws) when Wire_infra.equal_workspace_scope sc code.scope ->
+            ignore
+              (H.put_clipped ~grid ~clip:hdr_rect ~x:hdr_rect.x ~y:hdr_rect.y
+                 ~max_w:hdr_rect.w ~style:(H.accent_style ~theme ~attrs:Attr.bold ())
+                 (Printf.sprintf "Git Worktrees (%d)" (List.length ws)));
+            let rows =
+              List.map
+                (fun (wt : Wire_infra.git_worktree_entry) ->
+                  let flags =
+                    String.trim
+                      ((if wt.locked then "locked " else "")
+                      ^ if wt.prunable then "prunable" else "")
+                  in
+                  let tone =
+                    if wt.main then Some Theme.Status_ok
+                    else if wt.prunable then Some Theme.Status_attention
+                    else None
+                  in
+                  ( tone
+                  , Printf.sprintf "%s %-18s [%s] %s %s"
+                      (if wt.main then "*" else " ")
+                      wt.name wt.state
+                      (Option.value ~default:"-" wt.branch)
+                      flags ))
+                ws
+            in
+            draw_plain_scrolled ~scroll:code.git_scroll_offset rows
+        | Some _ | None ->
+            H.draw_observed_placeholder ~grid ~rect:vis_rect ~theme ~lang
+              code.git_worktrees)
+    | Infra_store.Code_git_blame -> (
+        let expected_path = Infra_store.active_code_file_path inf in
+        match Observed.to_option code.git_blame with
+        | Some (sc, path, bs)
+          when Wire_infra.equal_workspace_scope sc code.scope
+               && (match expected_path with
+                  | Some exp -> String.equal exp path
+                  | None -> true) ->
+            ignore
+              (H.put_clipped ~grid ~clip:hdr_rect ~x:hdr_rect.x ~y:hdr_rect.y
+                 ~max_w:hdr_rect.w ~style:(H.accent_style ~theme ~attrs:Attr.bold ())
+                 (Printf.sprintf "Git Blame · %s (%d spans)" path (List.length bs)));
+            let rows =
+              List.map
+                (fun (b : Wire_infra.git_blame_entry) ->
+                  ( Some Theme.Status_active
+                  , Printf.sprintf "L%d-%d  @%s  [%s]  %s" b.line_start
+                      b.line_end b.keeper_id b.kind b.file_path ))
+                bs
+            in
+            draw_plain_scrolled ~scroll:code.git_scroll_offset rows
+        | Some _ | None ->
+            H.draw_observed_placeholder ~grid ~rect:vis_rect ~theme ~lang
+              code.git_blame)
+    | Infra_store.Code_git_log -> (
+        let expected_path = Infra_store.active_code_file_path inf in
+        match Observed.to_option code.git_log with
+        | Some (sc, path, cs)
+          when Wire_infra.equal_workspace_scope sc code.scope
+               && (match expected_path with
+                  | Some exp -> String.equal exp path
+                  | None -> true) ->
+            let p_lbl = if String.equal path "" then "repo" else path in
+            ignore
+              (H.put_clipped ~grid ~clip:hdr_rect ~x:hdr_rect.x ~y:hdr_rect.y
+                 ~max_w:hdr_rect.w ~style:(H.accent_style ~theme ~attrs:Attr.bold ())
+                 (Printf.sprintf "Git Log · %s (%d commits)" p_lbl
+                    (List.length cs)));
+            let rows =
+              List.map
+                (fun (c : Wire_infra.git_log_commit) ->
+                  ( None
+                  , Printf.sprintf "%s  %-14s  %s"
+                      (H.short_hash ~len:8 c.hash)
+                      c.author
+                      (H.sanitize_single_line c.subject) ))
+                cs
+            in
+            draw_plain_scrolled ~scroll:code.git_scroll_offset rows
+        | Some _ | None ->
+            H.draw_observed_placeholder ~grid ~rect:vis_rect ~theme ~lang
+              code.git_log)
+    | Infra_store.Code_git_diff -> (
+        let expected_path = Infra_store.active_code_file_path inf in
+        match Observed.to_option code.git_diff with
+        | Some (sc, path, df)
+          when Wire_infra.equal_workspace_scope sc code.scope
+               && (match expected_path with
+                  | Some exp -> String.equal exp path
+                  | None -> true) ->
+            let p_lbl = if String.equal path "" then "working tree" else path in
+            ignore
+              (H.put_clipped ~grid ~clip:hdr_rect ~x:hdr_rect.x ~y:hdr_rect.y
+                 ~max_w:hdr_rect.w ~style:(H.accent_style ~theme ~attrs:Attr.bold ())
+                 (Printf.sprintf "Git Diff · %s (%d lines)" p_lbl
+                    (List.length df.lines)));
+            if not df.has_changes && df.lines = [] then
+              H.draw_empty_notice ~grid ~rect:vis_rect ~theme
+                (Say.resolve lang
+                   (Say.make ~ko:"변경 사항 없음" ~en:"No working tree changes"))
+            else
+              let rows =
+                List.map
+                  (fun (ln : Wire_infra.git_diff_line) ->
+                    let sign, tone =
+                      match ln.kind with
+                      | `Add -> ("+", Some Theme.Status_ok)
+                      | `Delete -> ("-", Some Theme.Status_critical)
+                      | `Context -> (" ", None)
+                    in
+                    let lno =
+                      match ln.new_line, ln.old_line with
+                      | Some n, _ -> Printf.sprintf "%4d " n
+                      | None, Some o -> Printf.sprintf "%4d " o
+                      | None, None -> "     "
+                    in
+                    (tone, Printf.sprintf "%s%s %s" lno sign ln.text))
+                  df.lines
+              in
+              draw_plain_scrolled ~scroll:code.git_scroll_offset rows
+        | Some _ | None ->
+            H.draw_observed_placeholder ~grid ~rect:vis_rect ~theme ~lang
+              code.git_diff)
   end
 
 (* --- 4. Top-Level Infra Render & Dive Render (ZERO Nested Cards!) --- *)
@@ -2179,6 +2765,8 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
     | Nav.Infra_sandboxes -> render_sandboxes ~model ~cache ~rect:body ~theme ~bp grid
     | Nav.Infra_repos_changes ->
         render_repos_changes ~model ~cache ~rect:body ~theme ~bp grid
+    | Nav.Infra_code ->
+        render_code ~model ~cache ~rect:body ~theme ~bp grid
     | Nav.Infra_activity_logs ->
         render_activity_logs ~model ~cache ~rect:body ~theme ~bp grid
 
@@ -2751,6 +3339,155 @@ let render_dive_incident ~incident_id ~(model : Model.t) ~cache ~(rect : Rect.t)
             end
           end
 
+let render_dive_runtime_trace ~keeper ~(model : Model.t) ~cache ~(rect : Rect.t)
+    ~(theme : Theme.t) ~bp grid =
+  let lang = model.lang in
+  let inf = model.infra in
+  let inner =
+    Card.draw ~cache grid ~rect ~theme
+      (H.card_spec ~focused:(Model.body_has_focus model) ~subtitle:("@" ^ keeper)
+         ~hotkey:
+           (Say.resolve lang
+              (Say.make ~ko:"[↑↓] 스크롤 · [r] 새로고침 · [Esc] 뒤로"
+                 ~en:"[↑↓] Scroll · [r] Reload · [Esc] Back"))
+         (Say.resolve lang
+            (Say.make ~ko:"인프라 > 키퍼 런타임 트레이스"
+               ~en:"Infra > Keeper Runtime Trace")))
+  in
+  let content = H.pad_content ~bp inner in
+  if Rect.is_empty content then ()
+  else
+    match Infra_store.runtime_trace_for ~keeper inf with
+    | None ->
+        H.draw_observed_placeholder ~grid ~rect:content ~theme ~lang
+          inf.runtime_trace
+    | Some tr ->
+        let y = ref content.y and bot = Rect.bottom content in
+        if !y < bot then begin
+          ignore
+            (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
+               ~max_w:content.w
+               ~style:(H.accent_style ~theme ~attrs:Attr.bold ())
+               (Printf.sprintf "Keeper: @%s · Trace: %s · Health: %s" tr.keeper
+                  tr.trace_id tr.health));
+          incr y
+        end;
+        if !y < bot then begin
+          let turn_s =
+            match tr.turn_id with
+            | Some t -> Printf.sprintf "#%d" t
+            | None -> "-"
+          in
+          let stale_s =
+            match tr.stale_reason with
+            | Some sr -> " · stale: " ^ sr
+            | None -> ""
+          in
+          ignore
+            (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
+               ~max_w:content.w ~style:(H.secondary_style ~theme ())
+               (Printf.sprintf "Turn: %s · Manifest: %d/%d · Receipts: %d%s"
+                  turn_s tr.manifest_returned_rows tr.manifest_total_rows
+                  tr.receipt_returned_rows stale_s));
+          incr y
+        end;
+        if !y < bot then begin
+          H.draw_divider ~grid ~rect:content ~y:!y ~theme
+            ~label:
+              (Say.resolve lang
+                 (Say.make ~ko:"트레이스 원문 (Json_tree)"
+                    ~en:"Runtime Trace Payload"))
+            ();
+          incr y
+        end;
+        let tree_h = Int.max 0 (bot - !y) in
+        if tree_h > 0 then begin
+          let tree_rect =
+            Rect.make ~x:content.x ~y:!y ~w:content.w ~h:tree_h
+          in
+          let lines =
+            Json_tree.flatten ~max_depth:4 ~redact_secrets:true tr.raw
+          in
+          ignore
+            (Json_tree.draw grid ~rect:tree_rect ~theme
+               ~scroll:model.nav.dive_scroll_offset lines)
+        end
+
+let render_dive_log_detail ~seq ~(model : Model.t) ~cache ~(rect : Rect.t)
+    ~(theme : Theme.t) ~bp grid =
+  let lang = model.lang in
+  let inf = model.infra in
+  let inner =
+    Card.draw ~cache grid ~rect ~theme
+      (H.card_spec ~focused:(Model.body_has_focus model) ~subtitle:("#" ^ Int.to_string seq)
+         ~hotkey:
+           (Say.resolve lang
+              (Say.make ~ko:"[↑↓] 스크롤 · [y] 복사 · [Esc] 뒤로"
+                 ~en:"[↑↓] Scroll · [y] Copy · [Esc] Back"))
+         (Say.resolve lang
+            (Say.make ~ko:"인프라 > 로그 상세" ~en:"Infra > Log Detail")))
+  in
+  let content = H.pad_content ~bp inner in
+  if Rect.is_empty content then ()
+  else
+    match Infra_store.find_log_by_seq seq inf with
+    | None ->
+        H.draw_empty_notice ~grid ~rect:content ~theme
+          (Say.resolve lang
+             (Say.make
+                ~ko:(Printf.sprintf "버퍼에서 로그 #%d를 찾을 수 없습니다" seq)
+                ~en:(Printf.sprintf "Log entry #%d not found in ring buffer" seq)))
+    | Some e ->
+        let y = ref content.y and bot = Rect.bottom content in
+        let lvl_s, lvl_tone = log_level_badge e.level in
+        let kp_s = match e.keeper with Some k -> " · @" ^ k | None -> "" in
+        let local_ts =
+          H.format_local_datetime ~tz_offset_sec:model.tz_offset_sec e.ts
+        in
+        if !y < bot then begin
+          ignore
+            (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
+               ~max_w:content.w
+               ~style:(H.status_style ~theme ~attrs:Attr.bold lvl_tone)
+               (Printf.sprintf "[%s] %s · %s/%s%s" lvl_s local_ts e.source
+                  e.module_name kp_s));
+          incr y
+        end;
+        let msg_lines =
+          H.wrap_lines ~max_width:(Int.max 1 (content.w - 2)) e.message
+          |> H.safe_take 6
+        in
+        List.iter
+          (fun ln ->
+            if !y < bot then begin
+              Card.draw_left_rail ~tone:lvl_tone grid ~x:content.x ~y:!y ~h:1
+                ~theme;
+              ignore
+                (H.put_clipped ~grid ~clip:content ~x:(content.x + 2) ~y:!y
+                   ~max_w:(Int.max 0 (content.w - 2))
+                   ~style:(H.text_style ~theme ()) ln);
+              incr y
+            end)
+          msg_lines;
+        if !y < bot then begin
+          H.draw_divider ~grid ~rect:content ~y:!y ~theme
+            ~label:(Say.resolve lang (Say.make ~ko:"구조화 속성" ~en:"Structured Details"))
+            ();
+          incr y
+        end;
+        let tree_h = Int.max 0 (bot - !y) in
+        if tree_h > 0 then begin
+          let tree_rect =
+            Rect.make ~x:content.x ~y:!y ~w:content.w ~h:tree_h
+          in
+          let lines =
+            Json_tree.flatten ~max_depth:5 ~redact_secrets:true e.details
+          in
+          ignore
+            (Json_tree.draw grid ~rect:tree_rect ~theme
+               ~scroll:model.nav.dive_scroll_offset lines)
+        end
+
 let render_dive ~(target : Nav.infra_dive_target) ~(model : Model.t) ~cache
     ~(rect : Rect.t) grid =
   if Rect.is_empty rect then ()
@@ -2765,3 +3502,7 @@ let render_dive ~(target : Nav.infra_dive_target) ~(model : Model.t) ~cache
         render_dive_lane ~lane_id ~model ~cache ~rect:body ~theme ~bp grid
     | Nav.Incident_dive incident_id ->
         render_dive_incident ~incident_id ~model ~cache ~rect:body ~theme ~bp grid
+    | Nav.Runtime_trace_dive keeper ->
+        render_dive_runtime_trace ~keeper ~model ~cache ~rect:body ~theme ~bp grid
+    | Nav.Log_detail_dive seq ->
+        render_dive_log_detail ~seq ~model ~cache ~rect:body ~theme ~bp grid

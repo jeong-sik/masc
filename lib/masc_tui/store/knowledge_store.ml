@@ -142,6 +142,17 @@ type threaded_comment = {
   is_reply : bool;
 }
 
+type memory_subview =
+  | Mem_diff_flow
+  | Mem_health_ledger
+  | Mem_context
+
+type keeper_memory_subview =
+  | Kmem_diff_flow
+  | Kmem_health
+  | Kmem_facts_tree
+  | Kmem_journal
+
 type t = {
   active_tab : Nav.knowledge_tab;
   board : Wire_knowledge.board_feed Observed.t;
@@ -178,6 +189,21 @@ type t = {
   keeper_memory_activity :
     Wire_knowledge.keeper_memory_activity Observed.t String_map.t;
   keeper_memory_health : Wire_knowledge.keeper_memory_health_fleet Observed.t;
+  memory_subview : memory_subview;
+  keeper_memory_subview : keeper_memory_subview;
+  memory_health_keeper :
+    (string * Wire_knowledge.keeper_memory_health_row option) Observed.t;
+  workspace_memory_ledger : Wire_knowledge.workspace_memory_ledger Observed.t;
+  workspace_memory_ledger_auth_denied : bool;
+  workspace_memory_context : Wire_knowledge.workspace_memory_context Observed.t;
+  workspace_memory_context_auth_denied : bool;
+  keeper_memory_facts_auth_denied : String_set.t;
+  collapsed_fact_categories : String_set.t;
+  facts_selected_index : int;
+  keeper_memory_journal :
+    (string * Wire_knowledge.keeper_memory_journal) Observed.t;
+  keeper_memory_journal_auth_denied : String_set.t;
+  memory_subview_scroll : int;
   memory_diff_window : memory_diff_window;
   memory_diff_keeper : string option;
   memory_view_mode : memory_view_mode;
@@ -234,6 +260,19 @@ let empty =
     keeper_memory_facts = String_map.empty;
     keeper_memory_activity = String_map.empty;
     keeper_memory_health = Observed.unreported;
+    memory_subview = Mem_diff_flow;
+    keeper_memory_subview = Kmem_diff_flow;
+    memory_health_keeper = Observed.unreported;
+    workspace_memory_ledger = Observed.unreported;
+    workspace_memory_ledger_auth_denied = false;
+    workspace_memory_context = Observed.unreported;
+    workspace_memory_context_auth_denied = false;
+    keeper_memory_facts_auth_denied = String_set.empty;
+    collapsed_fact_categories = String_set.empty;
+    facts_selected_index = 0;
+    keeper_memory_journal = Observed.unreported;
+    keeper_memory_journal_auth_denied = String_set.empty;
+    memory_subview_scroll = 0;
     memory_diff_window = Window_24h;
     memory_diff_keeper = None;
     memory_view_mode = View_evolution;
@@ -296,9 +335,18 @@ let keeper_memory_facts_for ~keeper t =
   | None -> Observed.unreported
 
 let set_keeper_memory_facts ~keeper obs t =
+  let keeper_memory_facts_auth_denied =
+    match obs with
+    | Observed.Value _ ->
+        String_set.remove keeper t.keeper_memory_facts_auth_denied
+    | Observed.Loading _ | Observed.Absent | Observed.Unreported
+    | Observed.Failed _ ->
+        t.keeper_memory_facts_auth_denied
+  in
   {
     t with
     keeper_memory_facts = String_map.add keeper obs t.keeper_memory_facts;
+    keeper_memory_facts_auth_denied;
   }
 
 let keeper_memory_activity_for ~keeper t =
@@ -944,6 +992,14 @@ let cycle_memory_diff_window t =
   in
   set_memory_diff_window next t
 
+let reset_scoped_slot_on_switch ~changed obs =
+  if not changed then Observed.mark_stale obs
+  else
+    match obs with
+    | Observed.Failed _ | Observed.Absent -> Observed.unreported
+    | Observed.Loading _ | Observed.Value _ | Observed.Unreported ->
+        Observed.mark_stale obs
+
 let set_memory_diff_keeper memory_diff_keeper t =
   let changed =
     not (Option.equal String.equal t.memory_diff_keeper memory_diff_keeper)
@@ -951,6 +1007,10 @@ let set_memory_diff_keeper memory_diff_keeper t =
   {
     t with
     memory_diff_keeper;
+    memory_health_keeper =
+      reset_scoped_slot_on_switch ~changed t.memory_health_keeper;
+    keeper_memory_journal =
+      reset_scoped_slot_on_switch ~changed t.keeper_memory_journal;
     selected_fact_index = if changed then 0 else t.selected_fact_index;
     facts_scroll_offset = if changed then 0 else t.facts_scroll_offset;
     selected_activity_index = if changed then 0 else t.selected_activity_index;
@@ -1600,6 +1660,12 @@ let apply_artifacts ~observed_at artifacts t =
 let apply_world_memory ~observed_at mem t =
   { t with world_memory = Observed.value ~observed_at mem }
 
+let apply_keeper_memory_facts ~observed_at ?keeper
+    (facts : Wire_knowledge.keeper_memory_facts) t =
+  let keeper_key = Option.value ~default:facts.keeper keeper in
+  set_keeper_memory_facts ~keeper:keeper_key
+    (Observed.value ~observed_at facts)
+    t
 let apply_keeper_memory_health ~observed_at
     (fleet : Wire_knowledge.keeper_memory_health_fleet) t =
   { t with keeper_memory_health = Observed.value ~observed_at fleet }
@@ -2433,4 +2499,197 @@ let mark_stale_all t =
     keeper_memory_activity =
       String_map.map Observed.mark_stale t.keeper_memory_activity;
     keeper_memory_health = Observed.mark_stale t.keeper_memory_health;
+    memory_health_keeper = Observed.mark_stale t.memory_health_keeper;
+    workspace_memory_ledger = Observed.mark_stale t.workspace_memory_ledger;
+    workspace_memory_ledger_auth_denied = false;
+    workspace_memory_context = Observed.mark_stale t.workspace_memory_context;
+    workspace_memory_context_auth_denied = false;
+    keeper_memory_facts_auth_denied = String_set.empty;
+    keeper_memory_journal = Observed.mark_stale t.keeper_memory_journal;
+    keeper_memory_journal_auth_denied = String_set.empty;
   }
+
+let memory_subview_rank = function
+  | Mem_diff_flow -> 0
+  | Mem_health_ledger -> 1
+  | Mem_context -> 2
+
+let equal_memory_subview a b =
+  Int.equal (memory_subview_rank a) (memory_subview_rank b)
+
+let set_memory_subview memory_subview t =
+  { t with memory_subview; memory_subview_scroll = 0; diff_scroll_offset = 0 }
+
+let cycle_memory_subview t =
+  let next =
+    match t.memory_subview with
+    | Mem_diff_flow -> Mem_health_ledger
+    | Mem_health_ledger -> Mem_context
+    | Mem_context -> Mem_diff_flow
+  in
+  set_memory_subview next t
+
+let keeper_memory_subview_rank = function
+  | Kmem_diff_flow -> 0
+  | Kmem_health -> 1
+  | Kmem_facts_tree -> 2
+  | Kmem_journal -> 3
+
+let equal_keeper_memory_subview a b =
+  Int.equal (keeper_memory_subview_rank a) (keeper_memory_subview_rank b)
+
+let set_keeper_memory_subview keeper_memory_subview t =
+  {
+    t with
+    keeper_memory_subview;
+    memory_subview_scroll = 0;
+    facts_selected_index = 0;
+  }
+
+let cycle_keeper_memory_subview t =
+  let next =
+    match t.keeper_memory_subview with
+    | Kmem_diff_flow -> Kmem_health
+    | Kmem_health -> Kmem_facts_tree
+    | Kmem_facts_tree -> Kmem_journal
+    | Kmem_journal -> Kmem_diff_flow
+  in
+  set_keeper_memory_subview next t
+
+let apply_memory_health_fleet ~observed_at fleet t =
+  apply_keeper_memory_health ~observed_at fleet t
+
+let keeper_matches_slot ~active_keeper ~keeper slot t =
+  let expected =
+    match active_keeper with
+    | Some active -> Some active
+    | None -> (
+        match t.memory_diff_keeper with
+        | Some _ as k -> k
+        | None -> (
+            match Observed.to_option slot with
+            | Some (k, _) -> Some k
+            | None -> None))
+  in
+  match expected with
+  | None -> true
+  | Some exp -> String.equal exp keeper
+
+let apply_memory_health_keeper ~observed_at ~keeper row t =
+  { t with memory_health_keeper = Observed.value ~observed_at (keeper, row) }
+
+let mark_memory_health_keeper_failed ~at ?active_keeper ~keeper ~reason
+    ~retryable t =
+  if not (keeper_matches_slot ~active_keeper ~keeper t.memory_health_keeper t)
+  then t
+  else
+    { t with memory_health_keeper = Observed.failed ~reason ~retryable ~at }
+
+let apply_workspace_memory_ledger ~observed_at ledger t =
+  {
+    t with
+    workspace_memory_ledger = Observed.value ~observed_at ledger;
+    workspace_memory_ledger_auth_denied = false;
+  }
+
+let mark_workspace_memory_ledger_failed ~at ~reason ~retryable ~auth_denied t =
+  {
+    t with
+    workspace_memory_ledger = Observed.failed ~reason ~retryable ~at;
+    workspace_memory_ledger_auth_denied =
+      t.workspace_memory_ledger_auth_denied || auth_denied;
+  }
+
+let apply_workspace_memory_context ~observed_at ctx t =
+  {
+    t with
+    workspace_memory_context = Observed.value ~observed_at ctx;
+    workspace_memory_context_auth_denied = false;
+  }
+
+let mark_workspace_memory_context_failed ~at ~reason ~retryable ~auth_denied t =
+  {
+    t with
+    workspace_memory_context = Observed.failed ~reason ~retryable ~at;
+    workspace_memory_context_auth_denied =
+      t.workspace_memory_context_auth_denied || auth_denied;
+  }
+
+let mark_keeper_memory_facts_failed ~at ?active_keeper ~keeper ~reason
+    ~retryable ~auth_denied t =
+  let _ = active_keeper in
+  let keeper_memory_facts_auth_denied =
+    if auth_denied then String_set.add keeper t.keeper_memory_facts_auth_denied
+    else t.keeper_memory_facts_auth_denied
+  in
+  {
+    t with
+    keeper_memory_facts =
+      String_map.add keeper (Observed.failed ~reason ~retryable ~at)
+        t.keeper_memory_facts;
+    keeper_memory_facts_auth_denied;
+  }
+
+let apply_keeper_memory_journal ~observed_at ~keeper journal t =
+  {
+    t with
+    keeper_memory_journal = Observed.value ~observed_at (keeper, journal);
+    keeper_memory_journal_auth_denied =
+      String_set.remove keeper t.keeper_memory_journal_auth_denied;
+  }
+
+let mark_keeper_memory_journal_failed ~at ?active_keeper ~keeper ~reason
+    ~retryable ~auth_denied t =
+  let keeper_memory_journal_auth_denied =
+    if auth_denied then
+      String_set.add keeper t.keeper_memory_journal_auth_denied
+    else t.keeper_memory_journal_auth_denied
+  in
+  if not (keeper_matches_slot ~active_keeper ~keeper t.keeper_memory_journal t)
+  then { t with keeper_memory_journal_auth_denied }
+  else
+    {
+      t with
+      keeper_memory_journal = Observed.failed ~reason ~retryable ~at;
+      keeper_memory_journal_auth_denied;
+    }
+
+let memory_health_for_keeper ~keeper t =
+  match Observed.to_option t.memory_health_keeper with
+  | Some (k, Some row) when String.equal k keeper -> Some row
+  | Some (_, None) | Some _ | None -> (
+      match Observed.to_option t.keeper_memory_health with
+      | Some fl ->
+          List.find_opt
+            (fun (r : Wire_knowledge.keeper_memory_health_row) ->
+              String.equal r.keeper_id keeper)
+            fl.keepers
+      | None -> None)
+
+let memory_facts_for_keeper ~keeper t =
+  match Observed.to_option (keeper_memory_facts_for ~keeper t) with
+  | Some facts when String.equal facts.keeper keeper -> Some facts
+  | Some _ | None -> None
+
+let memory_journal_for_keeper ~keeper t =
+  match Observed.to_option t.keeper_memory_journal with
+  | Some (k, j) when String.equal k keeper -> Some j
+  | Some _ | None -> None
+
+let toggle_fact_category cat t =
+  let collapsed_fact_categories =
+    if String_set.mem cat t.collapsed_fact_categories then
+      String_set.remove cat t.collapsed_fact_categories
+    else String_set.add cat t.collapsed_fact_categories
+  in
+  { t with collapsed_fact_categories }
+
+let move_memory_subview_scroll ?(max_scroll = 0) ~delta t =
+  let memory_subview_scroll =
+    Store_scroll.clamp_scroll ~max_scroll:(max 0 max_scroll)
+      (t.memory_subview_scroll + delta)
+  in
+  { t with memory_subview_scroll }
+
+let move_facts_selection ~count ~delta t =
+  { t with facts_selected_index = clamp_index count (t.facts_selected_index + delta) }

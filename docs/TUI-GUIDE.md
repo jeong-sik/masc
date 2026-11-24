@@ -78,15 +78,15 @@ All shortcuts come from `lib/masc_tui/keymap/keymap.ml`; VT100 control aliases
 
 | Key | Scope | Action |
 |---|---|---|
-| `b` / `Ctrl+B` / `Alt+B` | Unfocused / Global | Toggle or focus the **Collapsible Left Navigation Sidebar** (auto-docked when `cols >= 132`, floating drawer overlay when `cols < 132`): lists all 6 workspaces, every 1st-class sub-tab, Fleet + specialized Keeper tabs (`Context & Turns`, `Tool Calls`; all 7 Keeper tabs via `[` / `]` in Keepers pane 1 / Dive), and System overlays (27 targets; `↑`/`↓`/`j`/`k` live-preview, `Enter`/`→`/`l` focus body, `Tab`/`Shift+Tab` unified focus ring, `Esc` return to main pane) |
+| `b` / `Ctrl+B` / `Alt+B` | Unfocused / Global | Toggle or focus the **Collapsible Left Navigation Sidebar** (auto-docked when `cols >= 132`, floating drawer overlay when `cols < 132`): lists all 6 workspaces, every 1st-class sub-tab (including `Work → Harness` and `Infra → Code`), Fleet + specialized Keeper tabs (`Context & Turns`, `Tool Calls`, `Logs`, `Identity`; all 9 Keeper tabs via `[` / `]` in Keepers pane 1 / Dive), and System overlays (31 targets; `↑`/`↓`/`j`/`k` live-preview, `Enter`/`→`/`l` focus body, `Tab`/`Shift+Tab` unified focus ring, `Esc` return to main pane) |
 | `1`–`6` (or `Ctrl+1`–`6`, `Alt+1`–`6`, `F1`–`F6`) | Unfocused / Global | Switch to workspace `1 Pulse`, `2 Work`, `3 Knowledge`, `4 Keepers`, `5 Runtime`, `6 Infra` |
-| `[` / `]` (or `←` / `→` unfocused, `Alt+[` / `Alt+]`) | Unfocused / Global | Cycle sub-tabs (Workspaces, 7-tab Keeper Dive or Keepers split right pane, Queue/Context drawer; inside the composer `←`/`→` move the text cursor, in Settings Tree they collapse/expand categories, and in Settings Inspector or Keeper Config they cycle enum/bool/numeric values while `[` / `]` switch tabs) |
+| `[` / `]` (or `←` / `→` unfocused, `Alt+[` / `Alt+]`) | Unfocused / Global | Cycle sub-tabs (Workspaces, 9-tab Keeper Dive or Keepers split right pane, Queue/Context drawer; inside the composer `←`/`→` move the text cursor, in Settings Tree they collapse/expand categories, and in Settings Inspector or Keeper Config they cycle enum/bool/numeric values while `[` / `]` switch tabs) |
 | `↑` / `↓` or `j` / `k` | Unfocused / Overlay | Move list selection or scroll Keeper Chat |
-| `PgUp` / `PgDn`, `Home` (`g`) / `End` (`G`) | Unfocused / Overlay | Page scroll or jump to top / bottom (on Memory screens — World Memory, `Memory_diff_dive`, and `Keeper_memory` — `g` toggles the Memory Flow Braille chart `Flow ▲/▼` vs `Net Total`, overriding the global `Home` / jump-to-top binding; use `Home` to jump to top) |
+| `PgUp` / `PgDn`, `Home` (`g`) / `End` (`G`) | Unfocused / Overlay | Page scroll or jump to top / bottom (`g` is overridden on Memory screens — World Memory, `Memory_diff_dive`, and `Keeper_memory` — to toggle the Memory Flow Braille chart `Flow ▲/▼` vs `Net Total`, and on `Infra → Code` to cycle Git views; use `Home` to jump to top) |
 | `Tab` / `Shift+Tab` | Unfocused / Overlay | Cycle active focus panes on multi-pane views (omitted on single-pane views and narrow layouts; cycles tabs in Queue/Context, selection in Palette, or Tree / Inspector in Settings) |
-| `Enter` | Unfocused | 1-hop Dive into selected entity (Keeper, Goal, Task, Verification, Board Thread, Wiki, Artifact, Memory Diff, Tool Detail, Lane, Sandbox) or fetch full Provider Input Part / Tool Result |
-| `Space` | Unfocused | Non-colliding toggle (Board succession chain expand/collapse, Tasks status chip, Addons & Browser Clients/Tabs subfocus, Failover external probes, log level filter, Keeper Chat turn details, Settings dry-run diff) |
-| `v` | Unfocused | Cycle view mode (Artifacts Doc vs Raw, Keeper Context sub-tabs, Runtime Tools Usage/Catalog/Skills, Work Pipeline verification filter) |
+| `Enter` | Unfocused | 1-hop Dive into selected entity (Keeper, Goal, Task, Verification, Board Thread, Wiki, Artifact, Memory Diff, Fusion Run, Tool Detail, Lane, Sandbox, Runtime Trace, Log Detail) or expand/open files, catalog packages, Facts Tree categories, Provider Input Parts, and Tool Results |
+| `Space` | Unfocused | Non-colliding toggle (Board succession chain expand/collapse, Tasks status chip, Addons & Browser Clients/Tabs subfocus, Failover external probes, log level filter, Keeper Identity OAuth switch, Keeper Chat turn details, Settings dry-run diff) |
+| `v` | Unfocused | Cycle view mode (Artifacts Doc vs Raw, Verification Dive Evidence/Summary/Specs/TLC, Knowledge Memory Diff/Health & Ledger/Context, Keeper Memory Diff/Health/Facts Tree/Journal, Keeper Context sub-tabs, Keeper Logs Metrics vs Sandbox Logs, Runtime Tools Usage/Catalog/Skills, Work Pipeline verification filter) |
 | `/` | Unfocused / Settings / Incidents | Focus inline filter box or in-document search inside Artifact Dive (`n`/`N` step matches; `↑`/`↓` move selection live, `Enter`/`Tab` apply & blur, `Esc` clear & blur; on views without a filter bar such as Pulse or Keeper Chat, focuses the composer with `/`) |
 | `z` | Unfocused | Toggle detail pane zoom (including Knowledge > Artifacts) |
 | `r` | Unfocused | Force refresh active view from server SSOT (triggers `force=1` probe on Runtime Quotas/Failover) |
@@ -227,7 +227,7 @@ The organization cockpit (`lib/masc_tui/screens_core/screen_pulse.ml`):
 
 ### `2` Work
 
-Five 1st-class sub-tabs (`[` / `]` or `←` / `→`, and Left Navigation Sidebar `b`):
+Six 1st-class sub-tabs (`[` / `]` or `←` / `→`, and Left Navigation Sidebar `b`):
 
 1. **Goals** (Goals & Verifications): side-by-side Goals list and
    Verification requests (`Tab` switches pane; `Enter` dives into Goal or
@@ -237,7 +237,12 @@ Five 1st-class sub-tabs (`[` / `]` or `←` / `→`, and Left Navigation Sidebar
      modal when `Awaiting_confirmation`), `c` request completion verification,
      `x` pause (or drop when already paused).
    - Verification hotkeys: `a` approve verdict, `x` reject modal, `h` / `X`
-     harness overrule modal (`notes_hash`, `verdict`, `reason`).
+     harness overrule modal (`notes_hash`, `verdict`, `reason`). Inside
+     **Verification Dive**, press `v` to switch between **Evidence**
+     (`GET /api/v1/verification/evidence`, with explicit `CanAdmin` notice on
+     401/403), **Summary** (`/api/v1/verification/summary`), **Specs**
+     (`/api/v1/verification/specs`), and **TLC Results**
+     (`/api/v1/verification/tlc-results`).
 2. **Tasks**: workspace task backlog (`Space` cycles the status chip
    All → Active → AwaitingVerify → Todo → Unlinked → Done, `/` narrows by title
    or id within the chip, `Enter` dives into Task detail, `n` opens new
@@ -256,6 +261,12 @@ Five 1st-class sub-tabs (`[` / `]` or `←` / `→`, and Left Navigation Sidebar
 5. **Candle & Scorecard**: fleet Candle ledger (`GET /api/v1/candle/ledger`),
    policy/half-life status, Keeper balances, unattributed payout diagnostics,
    and group/fleet performance scorecard.
+6. **Harness** (Harness Health): live evaluator calibration metrics, pre-compact
+   / handoff / verdict health, and selected verdict detail (`GET /api/v1/dashboard/harness-health`)
+   including exact 64-hex `notes_hash`. Press `y` (approve) or `n` (reject) to
+   open the `Harness_overrule` modal (pre-seeded only when the selected verdict
+   carries a valid 64-char lowercase hex `notes_hash`; strict 64-hex validation
+   enforced on submit).
 
 #### Approvals
 
@@ -312,12 +323,18 @@ Four 1st-class sub-tabs (`[` / `]` or `←` / `→`, and Left Navigation Sidebar
    **Artifact Dive** (`/` + `n`/`N` in-document search).
 4. **Memory**: World Memory overview, Claims/Conflicts, Librarian writer status
    (`a` quick `resume`, `A` recovery act modal supporting `resume`, `adopt`,
-   `restart_reading`, `skip_item`, `skip_line`), the **Memory Flow** Braille
-   time-series chart (`g` toggles `Flow ▲/▼` vs `Net Total`, overriding the
-   global `Home` / jump-to-top binding on Memory screens including
-   `Memory_diff_dive` and `Keeper_memory`; use `Home` to jump to top), and the
-   **Temporal Diff Scrubber** (`w` cycles `24h` → `7d` → `30d`, `m` toggles
-   World vs Keeper scope, `Enter` dives into `rev A..B` revision diff).
+   `restart_reading`, `skip_item`, `skip_line`), plus `[v]` sub-views:
+   - **Diff & Flow**: **Memory Flow** Braille time-series chart (`g` toggles
+     `Flow ▲/▼` vs `Net Total`, overriding the global `Home` / jump-to-top
+     binding on Memory screens including `Memory_diff_dive` and `Keeper_memory`;
+     use `Home` to jump to top) and **Temporal Diff Scrubber** (`w` cycles
+     `24h` → `7d` → `30d`, `m` toggles World vs Keeper scope, `Enter` dives
+     into `rev A..B` revision diff).
+   - **Health & Ledger**: fleet Keeper memory health
+     (`GET /api/v1/dashboard/keeper-memory-health`) and workspace memory ledger
+     (`GET /api/v1/dashboard/workspace-memory-ledger`).
+   - **Context**: workspace-wide ordinary & source-bound memory context summary
+     (`GET /api/v1/dashboard/workspace-memory-context`).
 
 ### `4` Keepers
 
@@ -342,7 +359,7 @@ next roster refresh.
 
 Press `n` on **Keepers** to open Settings targeted at creating a new Keeper.
 When focusing the right split pane (`Tab`) or diving into any Keeper (`Enter`,
-or `c` straight into Chat), the top sub-tab bar syncs to all **7 Keeper tabs**
+or `c` straight into Chat), the top sub-tab bar syncs to all **9 Keeper tabs**
 (`[` / `]` cycles tabs):
 
 1. **Chat & Stream**: live streaming conversation (`POST /api/v1/keepers/chat/stream`),
@@ -361,11 +378,14 @@ or `c` straight into Chat), the top sub-tab bar syncs to all **7 Keeper tabs**
    `Ctrl+T` → **Context** drawer (`Enter` dives straight into full view).
 3. **Tool Calls**: per-Keeper `/tool-stats` summary, `/tool-calls` table,
    unfolded `Json_tree` payload viewer, and lazy `Enter` `/tool-result` fetch.
-4. **Memory**: Keeper-scoped Temporal Diff (`w` cycles `24h`/`7d`/`30d`),
-   **Memory Flow** Braille chart (`g` toggles `Flow ▲/▼` vs `Net Total`,
-   overriding the global `Home` / jump-to-top binding on `Keeper_memory` and
-   `Memory_diff_dive`; use `Home` to jump to top), **Retrieval Heat** stacked
-   bar, and Librarian recovery hotkeys (`a` resume, `A` recovery modal).
+4. **Memory**: `[v]` cycles 4 per-Keeper sub-views — **Diff & Flow** (scoped
+   Temporal Diff `[w]`, **Memory Flow** Braille chart where `[g]` toggles
+   `Flow ▲/▼` vs `Net Total`, overriding the global `Home` / jump-to-top binding
+   on `Keeper_memory` and `Memory_diff_dive`; use `Home` to jump to top,
+   **Retrieval Heat** stacked bar, Librarian recovery `[a]`/`[A]`), **Health**
+   (`/api/v1/dashboard/keeper-memory-health?keeper=<name>`), **Facts Tree**
+   (`/api/v1/keepers/:name/memory-facts` with `Enter` category expand/collapse),
+   and **Journal** (`/api/v1/keepers/:name/memory-journal?limit=50&activity=1`).
 5. **Work & Candle**: Keeper's linked Tasks, Goals, and Candle balance/equipped
    portrait items.
 6. **Sandbox**: Keeper's sandbox backend, network mode, agent socket, shim
@@ -374,6 +394,14 @@ or `c` straight into Chat), the top sub-tab bar syncs to all **7 Keeper tabs**
    `Enter`, `Space` dry-run diff, `Ctrl+S` save, `Delete`/`Ctrl+D` remove, `/`
    filter, `e` full Settings). Works identically in both Keeper Dive and the
    `4 Keepers` split preview right pane.
+8. **Logs**: remote-safe HTTP telemetry & sandbox stdout/stderr viewer (`v`
+   toggles `/api/v1/keepers/:name/metrics` vs
+   `/api/v1/gate/keeper-sandbox-logs`; zero local filesystem reads).
+9. **Identity**: per-Keeper OAuth & GitHub identity manager (`l` OAuth login or
+   GitHub SSE device flow login, `L` poll OAuth attempt status, `r` refresh
+   identity, `Space` switch OAuth enabled/disabled, `U` disconnect OAuth, `K`
+   masked GitHub PAT modal — secrets are never echoed or logged, `y` copy OAuth
+   authorize URL or GitHub device code; graceful `CanAdmin` notice on 401/403).
 
 ### `5` Runtime
 
@@ -390,7 +418,13 @@ Seven 1st-class sub-tabs (`[` / `]` or `←` / `→`, and Left Navigation Sideba
    probe reachability (`Space` toggles outside-lane probes, `r` forces probe),
    and deduplicated **`exact_lane_runs`**.
 4. **Fusion**: dedicated 1st-class tab for live **Fusion** multi-model runs
-   (`f` opens the Fusion launch modal).
+   backed by `/api/v1/dashboard/fusion-runs`, `/api/v1/dashboard/fusion-runs/:run_id`,
+   `/api/v1/runtime/config/fusion` (presets for `[f]` Launch modal; graceful
+   401/403 handling), and `/api/v1/board/:post_id` (`[e]` or `Enter` inside
+   **Fusion Dive** loads linked board evidence). Right pane & **Fusion Dive**
+   (`Enter`) display the full `Question → Panel → Judge → Evidence` pipeline,
+   panel answers/failures/tokens, seat routing & fallback attempts, judge
+   synthesis, tool-call trace preview, and replay warnings.
 5. **Tools & Usage**: live tool telemetry & catalog (`v` cycles 3 sub-views):
    - **Usage Calls**: `w` cycles `24h/1h`, `7d/1d`, `14d/1d` with totals strip,
      `Calls`/`Failed`/`p95` Braille curves, newest-first bucket table, and
@@ -402,11 +436,14 @@ Seven 1st-class sub-tabs (`[` / `]` or `←` / `→`, and Left Navigation Sideba
    - **Keeper Surface & Skills**: `<`/`>` steps keepers to inspect live
      `effective_keeper_surface` budgets/origins alongside `/api/v1/skills`.
 6. **Connectors**: dedicated 2-pane screen for Channel Gate Connectors (`n`
-   opens the Connector bind form: connector name such as `discord`, channel ID,
-   and the Keeper to bind via `?name=<connector>`, `U` unbind) on the left and
-   Connected MCP Clients + Browser/Addons summary on the right (`Tab` switches
-   panes).
-7. **Addons & Browser**: dedicated 2-pane inspector (`Tab` switches panes):
+   opens the Connector bind form: connector name such as `discord`, channel ID
+   with live `/api/v1/gate/connector/names` picker via `←`/`→`, and the Keeper
+   to bind via `?name=<connector>`, `U` unbind) on the left and Connected MCP
+   Clients + Browser/Addons summary on the right (`Tab` switches panes).
+7. **Addons & Browser**: dedicated 2-pane inspector (`Tab` switches panes; press
+   **`p`** to toggle the **Package Catalog** browser backed by
+   `/api/v1/lane-addons/package-catalog` & `/api/v1/lane-addons/package-preview`
+   with `Enter` directory browse & package preview):
    - **Left pane — Addon Lanes**: `GET /api/v1/lane-addons` table (`Addon`,
      `Presence` `LIVE`/`RETAINED`, `Phase`, `Exec`, `Obs#/Rows`, `Decl`) with
      bottom detail strip (`instance_id`, `host_requests`, `visibility`,
@@ -423,7 +460,7 @@ Seven 1st-class sub-tabs (`[` / `]` or `←` / `→`, and Left Navigation Sideba
 
 ### `6` Infra
 
-Three sub-tabs (`[` / `]` or `←` / `→`):
+Four 1st-class sub-tabs (`[` / `]` or `←` / `→`, and Left Navigation Sidebar `b`):
 
 1. **Sandboxes**: fleet inventory of MicroVM guests (presence, agent socket,
    shim parity, volume), SSH pools (reachability, active/max sessions), and
@@ -434,14 +471,27 @@ Three sub-tabs (`[` / `]` or `←` / `→`):
    repository's file-writing tool calls from the last 24 hours, with the
    recorded text in the preview pane. Calls the server could not read are
    counted in the changes card's subtitle.
-3. **Activity & Logs**: unified chronological **All / Server Logs / MASC
-   Events** timeline merging live `logs/stream` SSE (`LOG`) and
-   `observer/stream` activity events (`EVT`), with `SRC` badge column and
-   scrollable right-hand **Structured K/V Detail** pane (`Tab` to scroll).
-   Press `s` to cycle `ALL` → `LOGS` → `EVENTS`, `Space` to cycle log level
-   filter (`All` / `ERR` / `WRN` / `INF`), `/` to filter text across both logs
-   and events, and `y` to copy the selected log message or event detail
-   (`Stream_gap` pill surfaces any dropped events honestly).
+3. **Code**: workspace file browser, syntax viewer, and Git inspector backed by
+   `/api/v1/workspace/{children,files,search,file}` and
+   `/api/v1/git/{status,branches,worktrees,blame,log,diff}`:
+   - **Left pane**: lazy collapsible directory tree (`Enter` expands folders or
+     opens files; `s` cycles workspace scope across `project`, registered repos,
+     and keepers).
+   - **Right pane**: syntax-highlighted source viewer (`Code_lexer`, line
+     numbers, `y` copies file path/content), `[p]` fuzzy file finder modal,
+     `[f]` ripgrep code search modal (`Enter` jumps to file & line), and `[g]`
+     cycles File vs Git Status / Branches / Worktrees / Blame / Log / Diff.
+4. **Activity & Logs**: unified chronological **All / Server Logs / MASC
+   Events** timeline merging initial `/api/v1/activity/events` backfill, live
+   `logs/stream` SSE (`LOG`), and `observer/stream` activity events (`EVT`),
+   with `SRC` badge column and scrollable right-hand **Structured K/V Detail**
+   pane (`Tab` to scroll). Press `s` to cycle `ALL` → `LOGS` → `EVENTS`, `a` to
+   toggle the **Acting Keepers** side-rail (`Enter` dives into
+   **Runtime Trace Dive** via `/api/v1/keepers/:name/runtime-trace` or
+   **Log Detail Dive**), `Space` to cycle log level filter (`All` / `ERR` /
+   `WRN` / `INF`), `/` to filter text across both logs and events, and `y` to
+   copy the selected log message or event detail (`Stream_gap` pill surfaces any
+   dropped events honestly).
 
 ### Global 2-Pane Settings Overlay (`,`)
 

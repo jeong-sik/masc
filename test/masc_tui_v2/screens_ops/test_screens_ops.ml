@@ -1068,7 +1068,9 @@ let test_keeper_dive_all_5_tabs () =
                 | Nav.Keeper_tool_calls
                 | Nav.Keeper_work_candle
                 | Nav.Keeper_sandbox
-                | Nav.Keeper_config ->
+                | Nav.Keeper_config
+                | Nav.Keeper_logs
+                | Nav.Keeper_identity ->
                     m
               in
               let grid =
@@ -1120,7 +1122,16 @@ let test_keeper_dive_all_5_tabs () =
                   Alcotest.(check bool) "never leaks raw secret" false
                     (contains_sub ~needle:"sk-live" text);
                   Alcotest.(check bool) "shows TOML diff preview" true
-                    (contains_sub ~needle:"MASC Platform" text))
+                    (contains_sub ~needle:"MASC Platform" text)
+              | Nav.Keeper_logs ->
+                  Alcotest.(check bool) "renders Keeper Logs tab" true
+                    (contains_sub ~needle:"Metrics" text
+                     || contains_sub ~needle:"Sandbox" text
+                     || contains_sub ~needle:"Logs" text)
+              | Nav.Keeper_identity ->
+                  Alcotest.(check bool) "renders Keeper Identity tab" true
+                    (contains_sub ~needle:"Identity" text
+                     || contains_sub ~needle:"GitHub" text))
             Nav.all_keeper_tabs;
           (* Also verify remote_ssh keeper sandbox dive *)
           let ssh_grid =
@@ -1180,7 +1191,11 @@ let test_work_all_4_subtabs_and_empty_inbox () =
                     (contains_sub ~needle:"backlog_fenced" text);
                   Alcotest.(check bool) "shows portrait-accessories-only contract" true
                     (contains_sub ~needle:"portrait" text
-                     || contains_sub ~needle:"초상화" text))
+                     || contains_sub ~needle:"초상화" text)
+              | Nav.Work_harness ->
+                  Alcotest.(check bool) "renders Work Harness Health view" true
+                    (contains_sub ~needle:"Harness" text
+                     || contains_sub ~needle:"하네스" text))
             Nav.all_work_tabs;
           (* Inbox with Ask selected shows 1..4 choices *)
           let m_ask =

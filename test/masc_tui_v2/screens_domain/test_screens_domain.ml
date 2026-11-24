@@ -1800,6 +1800,12 @@ let test_infra_all_tabs_and_dives () =
                   Alcotest.(check bool)
                     (lbl ^ " renders syntax-highlighted diff content") true
                     (contains_sub ~needle:"new_val = 42" ~haystack:text)
+              | Nav.Infra_code ->
+                  Alcotest.(check bool)
+                    (lbl ^ " renders Code workspace browser") true
+                    (contains_sub ~needle:"project" ~haystack:text
+                    || contains_sub ~needle:"Tree" ~haystack:text
+                    || contains_sub ~needle:"트리" ~haystack:text)
               | Nav.Infra_activity_logs ->
                   (* Stream_gap badge shown *)
                   Alcotest.(check bool)

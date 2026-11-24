@@ -9,6 +9,27 @@ type context_subtab =
   | Ctx_input_map
   | Ctx_response
 
+type logs_subview =
+  | Logs_metrics
+  | Logs_sandbox
+
+type github_login_session = {
+  running : bool;
+  device_url : string option;
+  device_code : string option;
+  output_lines : string list;
+  error : string option;
+}
+
+let empty_github_login =
+  {
+    running = false;
+    device_url = None;
+    device_code = None;
+    output_lines = [];
+    error = None;
+  }
+
 type keeper_state = {
   turn_records : Wire_keeper_context.turn_records_page Observed.t;
   selected_turn_idx : int;
@@ -39,10 +60,24 @@ type keeper_state = {
   call_detail_scroll_offset : int;
   tool_result : (string * Wire_keeper_context.tool_result_response) Observed.t;
   tool_result_auth_denied : bool;
+  metrics : Wire_keeper_context.keeper_metrics_snapshot Observed.t;
+  sandbox_logs : Wire_keeper_context.keeper_sandbox_logs Observed.t;
+  logs_subview : logs_subview;
+  logs_scroll_offset : int;
+  oauth_attached : Wire_keeper_context.oauth_attached_tools_snapshot Observed.t;
+  oauth_auth_denied : bool;
+  oauth_pending_login : Wire_keeper_context.oauth_login_result option;
+  oauth_attempt_status : Wire_keeper_context.oauth_attempt_status option;
+  github_identity : Wire_keeper_context.github_identity_observation Observed.t;
+  github_auth_denied : bool;
+  github_login : github_login_session;
+  identity_selected_idx : int;
+  identity_scroll_offset : int;
 }
 
 type t = {
   by_keeper : keeper_state String_map.t;
+  oauth_providers : Wire_keeper_context.oauth_providers_snapshot Observed.t;
 }
 
 let empty_keeper_state =
@@ -75,9 +110,23 @@ let empty_keeper_state =
     call_detail_scroll_offset = 0;
     tool_result = Observed.unreported;
     tool_result_auth_denied = false;
+    metrics = Observed.unreported;
+    sandbox_logs = Observed.unreported;
+    logs_subview = Logs_metrics;
+    logs_scroll_offset = 0;
+    oauth_attached = Observed.unreported;
+    oauth_auth_denied = false;
+    oauth_pending_login = None;
+    oauth_attempt_status = None;
+    github_identity = Observed.unreported;
+    github_auth_denied = false;
+    github_login = empty_github_login;
+    identity_selected_idx = 0;
+    identity_scroll_offset = 0;
   }
 
-let empty = { by_keeper = String_map.empty }
+let empty =
+  { by_keeper = String_map.empty; oauth_providers = Observed.unreported }
 
 let get_keeper ~keeper t =
   match String_map.find_opt keeper t.by_keeper with
@@ -86,7 +135,7 @@ let get_keeper ~keeper t =
 
 let update_keeper ~keeper f t =
   let cur = get_keeper ~keeper t in
-  { by_keeper = String_map.add keeper (f cur) t.by_keeper }
+  { t with by_keeper = String_map.add keeper (f cur) t.by_keeper }
 
 let subtab_rank = function
   | Ctx_composition -> 0
@@ -626,6 +675,201 @@ let mark_stale_all t =
             tool_calls_auth_denied = false;
             tool_result = Observed.mark_stale ks.tool_result;
             tool_result_auth_denied = false;
+            metrics = Observed.mark_stale ks.metrics;
+            sandbox_logs = Observed.mark_stale ks.sandbox_logs;
+            oauth_attached = Observed.mark_stale ks.oauth_attached;
+            oauth_auth_denied = false;
+            github_identity = Observed.mark_stale ks.github_identity;
+            github_auth_denied = false;
           })
         t.by_keeper;
+    oauth_providers = Observed.mark_stale t.oauth_providers;
   }
+
+let equal_logs_subview a b =
+  match a, b with
+  | Logs_metrics, Logs_metrics | Logs_sandbox, Logs_sandbox -> true
+  | Logs_metrics, Logs_sandbox | Logs_sandbox, Logs_metrics -> false
+
+let toggle_logs_subview ~keeper t =
+  update_keeper ~keeper
+    (fun ks ->
+      let logs_subview =
+        match ks.logs_subview with
+        | Logs_metrics -> Logs_sandbox
+        | Logs_sandbox -> Logs_metrics
+      in
+      { ks with logs_subview; logs_scroll_offset = 0 })
+    t
+
+let move_logs_scroll ~keeper ?(max_scroll = 0) ~delta t =
+  update_keeper ~keeper
+    (fun ks ->
+      let logs_scroll_offset =
+        Store_scroll.clamp_scroll ~max_scroll:(max 0 max_scroll)
+          (ks.logs_scroll_offset + delta)
+      in
+      { ks with logs_scroll_offset })
+    t
+
+let apply_metrics ~observed_at ~keeper snap t =
+  update_keeper ~keeper
+    (fun ks -> { ks with metrics = Observed.value ~observed_at snap })
+    t
+
+let mark_metrics_failed ~at ~keeper ~reason ~retryable t =
+  update_keeper ~keeper
+    (fun ks -> { ks with metrics = Observed.failed ~reason ~retryable ~at })
+    t
+
+let apply_sandbox_logs ~observed_at ~keeper logs t =
+  update_keeper ~keeper
+    (fun ks -> { ks with sandbox_logs = Observed.value ~observed_at logs })
+    t
+
+let mark_sandbox_logs_failed ~at ~keeper ~reason ~retryable t =
+  update_keeper ~keeper
+    (fun ks -> { ks with sandbox_logs = Observed.failed ~reason ~retryable ~at })
+    t
+
+let apply_oauth_providers ~observed_at snap t =
+  { t with oauth_providers = Observed.value ~observed_at snap }
+
+let apply_oauth_attached_tools ~observed_at ~keeper snap t =
+  update_keeper ~keeper
+    (fun ks ->
+      {
+        ks with
+        oauth_attached = Observed.value ~observed_at snap;
+        oauth_auth_denied = false;
+      })
+    t
+
+let mark_oauth_denied ~at ~keeper ~reason t =
+  update_keeper ~keeper
+    (fun ks ->
+      {
+        ks with
+        oauth_attached = Observed.failed ~reason ~retryable:false ~at;
+        oauth_auth_denied = true;
+      })
+    t
+
+let set_oauth_pending_login ~keeper res t =
+  update_keeper ~keeper (fun ks -> { ks with oauth_pending_login = res }) t
+
+let set_oauth_attempt_status ~keeper status t =
+  update_keeper ~keeper (fun ks -> { ks with oauth_attempt_status = status }) t
+
+let apply_github_identity ~observed_at ~keeper obs t =
+  update_keeper ~keeper
+    (fun ks ->
+      {
+        ks with
+        github_identity = Observed.value ~observed_at obs;
+        github_auth_denied = false;
+      })
+    t
+
+let mark_github_denied ~at ~keeper ~reason t =
+  update_keeper ~keeper
+    (fun ks ->
+      {
+        ks with
+        github_identity = Observed.failed ~reason ~retryable:false ~at;
+        github_auth_denied = true;
+      })
+    t
+
+let extract_device_url text =
+  let tokens = String.split_on_char ' ' text in
+  List.find_opt
+    (fun tok ->
+      String.starts_with ~prefix:"https://" tok
+      || String.starts_with ~prefix:"http://" tok)
+    tokens
+  |> Option.map (fun s ->
+         String.trim
+           (String.map (function '\r' | '\n' -> ' ' | c -> c) s))
+
+let is_device_code_token tok =
+  let s =
+    String.trim (String.map (function '\r' | '\n' | '.' | ',' -> ' ' | c -> c) tok)
+  in
+  String.length s = 9 && Char.equal s.[4] '-'
+  &&
+  let is_alnum c = (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') in
+  is_alnum s.[0] && is_alnum s.[1] && is_alnum s.[2] && is_alnum s.[3]
+  && is_alnum s.[5] && is_alnum s.[6] && is_alnum s.[7] && is_alnum s.[8]
+
+let extract_device_code text =
+  let normalized =
+    String.map (function '\n' | '\r' | '\t' | ':' -> ' ' | c -> c) text
+  in
+  let tokens = String.split_on_char ' ' normalized in
+  List.find_opt is_device_code_token tokens |> Option.map String.trim
+
+let start_github_login ~keeper t =
+  update_keeper ~keeper
+    (fun ks ->
+      {
+        ks with
+        github_login = { empty_github_login with running = true };
+      })
+    t
+
+let append_github_login_output ~keeper ~line t =
+  update_keeper ~keeper
+    (fun ks ->
+      let gl = ks.github_login in
+      let device_url =
+        match gl.device_url with
+        | Some _ as u -> u
+        | None -> extract_device_url line
+      in
+      let device_code =
+        match gl.device_code with
+        | Some _ as c -> c
+        | None -> extract_device_code line
+      in
+      let trimmed = String.trim line in
+      let lines =
+        if String.equal trimmed "" then gl.output_lines
+        else
+          let next = gl.output_lines @ [ trimmed ] in
+          if List.length next > 20 then List.tl next else next
+      in
+      {
+        ks with
+        github_login =
+          { gl with device_url; device_code; output_lines = lines };
+      })
+    t
+
+let finish_github_login ~keeper ~error t =
+  update_keeper ~keeper
+    (fun ks ->
+      {
+        ks with
+        github_login = { ks.github_login with running = false; error };
+      })
+    t
+
+let move_identity_selection ~keeper ~count ~delta t =
+  update_keeper ~keeper
+    (fun ks ->
+      let identity_selected_idx =
+        Store_scroll.clamp_index count (ks.identity_selected_idx + delta)
+      in
+      { ks with identity_selected_idx })
+    t
+
+let move_identity_scroll ~keeper ?(max_scroll = 0) ~delta t =
+  update_keeper ~keeper
+    (fun ks ->
+      let identity_scroll_offset =
+        Store_scroll.clamp_scroll ~max_scroll:(max 0 max_scroll)
+          (ks.identity_scroll_offset + delta)
+      in
+      { ks with identity_scroll_offset })
+    t

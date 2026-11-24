@@ -160,7 +160,7 @@ let has_get_health cmds =
               | Cmd.Get_keeper_memory_os_internals _
               | Cmd.Get_keeper_memory_facts _
               | Cmd.Get_keeper_memory_activity _
-              | Cmd.Get_keeper_memory_health
+              | Cmd.Get_keeper_memory_health _
               | Cmd.Get_keeper_context_turn_records _
               | Cmd.Get_keeper_provider_input _
               | Cmd.Get_keeper_provider_input_part _
@@ -196,7 +196,39 @@ let has_get_health cmds =
               | Cmd.Get_repository_activity _
               | Cmd.Get_system_logs _
               | Cmd.Get_tui_preferences
-              | Cmd.Get_config_schema _ );
+              | Cmd.Get_config_schema _
+              | Cmd.Get_fusion_run_detail _
+              | Cmd.Get_fusion_board_evidence _
+              | Cmd.Get_fusion_config
+              | Cmd.Get_harness_health
+              | Cmd.Get_verification_evidence _
+              | Cmd.Get_verification_summary
+              | Cmd.Get_verification_specs
+              | Cmd.Get_verification_tlc_results
+              | Cmd.Get_activity_events _
+              | Cmd.Get_keeper_runtime_trace _
+              | Cmd.Get_keeper_metrics _
+              | Cmd.Get_keeper_sandbox_logs _
+              | Cmd.Get_workspace_children _
+              | Cmd.Get_workspace_files _
+              | Cmd.Get_workspace_search _
+              | Cmd.Get_workspace_file _
+              | Cmd.Get_git_branches _
+              | Cmd.Get_git_worktrees _
+              | Cmd.Get_git_status _
+              | Cmd.Get_git_blame _
+              | Cmd.Get_git_log _
+              | Cmd.Get_git_diff _
+              | Cmd.Get_workspace_memory_ledger
+              | Cmd.Get_workspace_memory_context
+              | Cmd.Get_keeper_memory_journal _
+              | Cmd.Get_oauth_providers
+              | Cmd.Get_oauth_attached_tools _
+              | Cmd.Get_oauth_attempt_status _
+              | Cmd.Get_github_identity _
+              | Cmd.Get_addon_package_catalog _
+              | Cmd.Get_addon_package_preview _
+              | Cmd.Get_connector_names _ );
             _;
           }
       | Cmd.Batch _
@@ -1046,7 +1078,7 @@ let test_subscriptions_bounded_and_zero_polling () =
       in
       let expected_view =
         match tab with
-        | Nav.Infra_sandboxes | Nav.Infra_repos_changes -> 0
+        | Nav.Infra_sandboxes | Nav.Infra_repos_changes | Nav.Infra_code -> 0
         | Nav.Infra_activity_logs -> 1
       in
       check_plan "Infra" m ~expected_view)
@@ -1131,11 +1163,14 @@ let test_keymap_and_slash_commands () =
   let m_tab1, _ = Update.step ~now:t0 m_tab2 (Msg.Key_event (char_key "[")) in
   Alcotest.(check bool) "'[' goes back to Pipeline" true
     (Nav.equal_work_tab m_tab1.work.active_tab Nav.Work_pipeline);
-  (* Switching into Infra > Activity & Logs emits Sync_streams *)
+  (* Switching into Infra > Code then Infra > Activity & Logs emits Sync_streams *)
   let m_infra, _ = Update.step ~now:t0 m_tab1 (Msg.Key_event (char_key "6")) in
   let m_infra2, _ = Update.step ~now:t0 m_infra (Msg.Key_event (char_key "]")) in
+  let m_infra3, _ = Update.step ~now:t0 m_infra2 (Msg.Key_event (char_key "]")) in
+  Alcotest.(check bool) "Infra 3rd tab is Infra_code" true
+    (Nav.equal_infra_tab m_infra3.infra.active_tab Nav.Infra_code);
   let m_logs, cmds_logs =
-    Update.step ~now:t0 m_infra2 (Msg.Key_event (char_key "]"))
+    Update.step ~now:t0 m_infra3 (Msg.Key_event (char_key "]"))
   in
   Alcotest.(check bool) "Infra > Logs emits Sync_streams" true
     (has_sync_streams cmds_logs);
@@ -1718,7 +1753,12 @@ let test_verifier_regressions () =
         | Cmd.Post_artifact_check _
         | Cmd.Post_artifact_share _
         | Cmd.Post_connector_unbind _
-        | Cmd.Post_browser_tabs _ ->
+        | Cmd.Post_browser_tabs _
+        | Cmd.Post_oauth_login _
+        | Cmd.Post_oauth_identity_refresh _
+        | Cmd.Post_oauth_identity_switch _
+        | Cmd.Post_oauth_disconnect _
+        | Cmd.Post_github_token _ ->
             false)
     | Cmd.Batch _
     | Cmd.Http_get _
@@ -1790,9 +1830,15 @@ let test_verifier_regressions () =
   let m_kchat, _ =
     Update.execute_slash ~now:t0 m_with_rt (Slash.Keeper (Some "alpha"))
   in
-  (* Cycle prev tab from Keeper_chat wraps directly to Keeper_config *)
-  let m_kcfg, cmds_kcfg =
+  (* Cycle prev tab 3x from Keeper_chat wraps Keeper_identity -> Keeper_logs -> Keeper_config *)
+  let m_kid, _ =
     Update.execute_action ~now:t0 m_kchat (Keymap.Sub_tab Keymap.Prev)
+  in
+  let m_klogs, _ =
+    Update.execute_action ~now:t0 m_kid (Keymap.Sub_tab Keymap.Prev)
+  in
+  let m_kcfg, cmds_kcfg =
+    Update.execute_action ~now:t0 m_klogs (Keymap.Sub_tab Keymap.Prev)
   in
   Alcotest.(check bool) "Keeper_config switched target to Target_keeper alpha"
     true
@@ -11031,6 +11077,230 @@ let test_media_viewer_follows_artifact_dive_target () =
     "missing Artifact_dive Copy_public_url does not touch list artifact" 0
     (List.length (Cmd.flatten cmds_url_miss))
 
+let test_single_slot_dive_error_target_guards () =
+  let ws_mismatch_err =
+    Msg.Workspace_mismatch
+      {
+        expected_instance = Some "inst-a";
+        observed_instance = Some "inst-b";
+        observed_workspace_sha256 = None;
+        message = "restarted";
+      }
+  in
+  let err_500 detail =
+    Msg.Http_error { status = 500; body = detail; api_error = None }
+  in
+  let err_403 detail =
+    Msg.Http_error { status = 403; body = detail; api_error = None }
+  in
+  let err_401 detail =
+    Msg.Http_error { status = 401; body = detail; api_error = None }
+  in
+  let is_failed = function
+    | Observed.Failed _ -> true
+    | Observed.Absent | Observed.Unreported | Observed.Loading _
+    | Observed.Value _ ->
+        false
+  in
+  (* (a) Fusion_dive B ignores delayed Reply_fusion_run_detail Error for A,
+     still routes Workspace_mismatch, and records matching B error. *)
+  let m_fusion_b =
+    let base = Model.initial () in
+    {
+      base with
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Runtime;
+          dive_stack = [ Nav.Dive_runtime (Nav.Fusion_dive "run-B") ];
+        };
+    }
+  in
+  let m_f_stale, cmds_f_stale =
+    Update.step ~now:t1 m_fusion_b
+      (Msg.Http_reply
+         {
+           epoch = m_fusion_b.epoch;
+           reply =
+             Msg.Reply_fusion_run_detail
+               { run_id = "run-A"; result = Error (err_500 "stale run-A boom") };
+         })
+  in
+  Alcotest.(check bool)
+    "Fusion_dive B ignores stale run-A Error (slot not Failed)" false
+    (is_failed m_f_stale.runtime.fusion_detail);
+  Alcotest.(check int) "Fusion_dive B ignores stale run-A Error (0 cmds)" 0
+    (List.length (Cmd.flatten cmds_f_stale));
+  let m_f_ws, cmds_f_ws =
+    Update.step ~now:t1 m_fusion_b
+      (Msg.Http_reply
+         {
+           epoch = m_fusion_b.epoch;
+           reply =
+             Msg.Reply_fusion_run_detail
+               { run_id = "run-A"; result = Error ws_mismatch_err };
+         })
+  in
+  Alcotest.(check bool)
+    "Fusion_dive B still handles Workspace_mismatch even for run-A" true
+    ((not (Epoch.equal m_f_ws.epoch m_fusion_b.epoch))
+     && List.exists
+          (function
+            | Cmd.Http_get { req = Cmd.Get_health; _ } -> true
+            | _ -> false)
+          (Cmd.flatten cmds_f_ws));
+  let m_f_match, _ =
+    Update.step ~now:t1 m_fusion_b
+      (Msg.Http_reply
+         {
+           epoch = m_fusion_b.epoch;
+           reply =
+             Msg.Reply_fusion_run_detail
+               { run_id = "run-B"; result = Error (err_500 "run-B boom") };
+         })
+  in
+  Alcotest.(check bool)
+    "Fusion_dive B records matching run-B Error on fusion_detail" true
+    (is_failed m_f_match.runtime.fusion_detail);
+  (* (b) Verification_dive B ignores delayed 401/403/500 Error for A without
+     poisoning verification_evidence or verification_evidence_auth_denied,
+     still routes Workspace_mismatch, and applies matching B errors. *)
+  let m_verif_b =
+    let base = Model.initial () in
+    {
+      base with
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Work;
+          dive_stack = [ Nav.Dive_work (Nav.Verification_dive "verif-B") ];
+        };
+    }
+  in
+  List.iter
+    (fun (label, err) ->
+      let m_stale, cmds_stale =
+        Update.step ~now:t1 m_verif_b
+          (Msg.Http_reply
+             {
+               epoch = m_verif_b.epoch;
+               reply =
+                 Msg.Reply_verification_evidence
+                   { verification_id = "verif-A"; result = Error err };
+             })
+      in
+      Alcotest.(check bool)
+        (Printf.sprintf "Verification_dive B ignores stale verif-A %s (slot intact)"
+           label)
+        false
+        (is_failed m_stale.work.verification_evidence);
+      Alcotest.(check bool)
+        (Printf.sprintf
+           "Verification_dive B ignores stale verif-A %s (auth_denied stays false)"
+           label)
+        false m_stale.work.verification_evidence_auth_denied;
+      Alcotest.(check int)
+        (Printf.sprintf "Verification_dive B ignores stale verif-A %s (0 cmds)"
+           label)
+        0
+        (List.length (Cmd.flatten cmds_stale)))
+    [
+      ("403", err_403 "forbidden A");
+      ("401", err_401 "unauthorized A");
+      ("500", err_500 "server error A");
+      ("transport", Msg.Transport (Health.Other_io "timeout A"));
+    ];
+  let m_v_ws, _ =
+    Update.step ~now:t1 m_verif_b
+      (Msg.Http_reply
+         {
+           epoch = m_verif_b.epoch;
+           reply =
+             Msg.Reply_verification_evidence
+               { verification_id = "verif-A"; result = Error ws_mismatch_err };
+         })
+  in
+  Alcotest.(check bool)
+    "Verification_dive B still handles Workspace_mismatch even for verif-A" true
+    (not (Epoch.equal m_v_ws.epoch m_verif_b.epoch));
+  let m_v_denied, _ =
+    Update.step ~now:t1 m_verif_b
+      (Msg.Http_reply
+         {
+           epoch = m_verif_b.epoch;
+           reply =
+             Msg.Reply_verification_evidence
+               {
+                 verification_id = "verif-B";
+                 result = Error (err_403 "forbidden B");
+               };
+         })
+  in
+  Alcotest.(check bool)
+    "Verification_dive B matching 403 sets verification_evidence_auth_denied"
+    true m_v_denied.work.verification_evidence_auth_denied;
+  Alcotest.(check bool)
+    "Verification_dive B matching 403 marks verification_evidence Failed" true
+    (is_failed m_v_denied.work.verification_evidence);
+  let m_v_500, _ =
+    Update.step ~now:t1 m_verif_b
+      (Msg.Http_reply
+         {
+           epoch = m_verif_b.epoch;
+           reply =
+             Msg.Reply_verification_evidence
+               {
+                 verification_id = "verif-B";
+                 result = Error (err_500 "server error B");
+               };
+         })
+  in
+  Alcotest.(check bool)
+    "Verification_dive B matching 500 marks verification_evidence Failed" true
+    (is_failed m_v_500.work.verification_evidence);
+  Alcotest.(check bool)
+    "Verification_dive B matching 500 leaves auth_denied false" false
+    m_v_500.work.verification_evidence_auth_denied;
+  (* (c) Runtime_trace_dive B ignores delayed Error for A, accepts B. *)
+  let m_trace_b =
+    let base = Model.initial () in
+    {
+      base with
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Infra;
+          dive_stack = [ Nav.Dive_infra (Nav.Runtime_trace_dive "beta") ];
+        };
+    }
+  in
+  let m_t_stale, _ =
+    Update.step ~now:t1 m_trace_b
+      (Msg.Http_reply
+         {
+           epoch = m_trace_b.epoch;
+           reply =
+             Msg.Reply_keeper_runtime_trace
+               { keeper = "alpha"; result = Error (err_500 "stale alpha") };
+         })
+  in
+  Alcotest.(check bool)
+    "Runtime_trace_dive beta ignores stale alpha Error" false
+    (is_failed m_t_stale.infra.runtime_trace);
+  let m_t_match, _ =
+    Update.step ~now:t1 m_trace_b
+      (Msg.Http_reply
+         {
+           epoch = m_trace_b.epoch;
+           reply =
+             Msg.Reply_keeper_runtime_trace
+               { keeper = "beta"; result = Error (err_500 "beta boom") };
+         })
+  in
+  Alcotest.(check bool)
+    "Runtime_trace_dive beta records matching beta Error" true
+    (is_failed m_t_match.infra.runtime_trace)
+
 let () =
   Alcotest.run "masc_tui_store"
     [
@@ -11187,5 +11457,8 @@ let () =
           Alcotest.test_case
             "Media_viewer honors Artifact_dive target across actions without list fallback"
             `Quick test_media_viewer_follows_artifact_dive_target;
+          Alcotest.test_case
+            "Single-slot dive Error replies honor active target ID guard except Workspace_mismatch"
+            `Quick test_single_slot_dive_error_target_guards;
         ] );
     ]

@@ -37,6 +37,20 @@ val keeper_tool_result_path :
   unit ->
   string
 
+val keeper_metrics_path : keeper:string -> string
+val keeper_sandbox_logs_path : keeper:string -> ?tail:int -> unit -> string
+val oauth_providers_path : string
+val oauth_attached_tools_path : keeper:string -> string
+val oauth_attempt_status_path :
+  keeper:string -> provider:string -> attempt_id:string -> string
+val oauth_login_path : keeper:string -> string
+val oauth_identity_refresh_path : keeper:string -> string
+val oauth_identity_switch_path : keeper:string -> string
+val oauth_disconnect_path : string
+val github_identity_path : keeper:string -> string
+val github_login_path : keeper:string -> string
+val github_token_path : keeper:string -> string
+
 (** {1 Turn Records ([GET /api/v1/keepers/:name/turn-records])} *)
 
 type turn_block_diff = {
@@ -289,3 +303,141 @@ val decode_tool_result : Yojson.Safe.t -> (tool_result_response, string) result
 val unfold_json_strings : Yojson.Safe.t -> Yojson.Safe.t
 (** Recursively unfold JSON-in-string fields ([{...}] or [[...]]) so nested
     tool call payloads render cleanly in {!Masc_tui_ui.Json_tree}. *)
+
+(** {1 Wave 3: Keeper Logs/Metrics & OAuth/GitHub Identity} *)
+
+type keeper_metrics_point = {
+  ts_unix : float;
+  trace_id : string;
+  channel : string;
+  latency_ms : int;
+  cost_usd : float option;
+  work_kind : string;
+  tool_call_count : int;
+  tools_used : string list;
+  message_count : int option;
+}
+
+type keeper_metrics_snapshot = {
+  keeper : string;
+  sample_points : int;
+  turn_points : int;
+  heartbeat_points : int;
+  proactive_points : int;
+  tool_call_count : int;
+  scanned_rows : int;
+  skipped_rows : int;
+  top_tools : (string * int) list;
+  series : keeper_metrics_point list;
+}
+
+type sandbox_log_instance = {
+  instance_id : string;
+  instance_name : string;
+  running : bool option;
+  stdout : string;
+  stderr : string;
+  error : string option;
+}
+
+type keeper_sandbox_logs = {
+  keeper : string;
+  backend : string option;
+  state : string;
+  reason : string option;
+  tail : int;
+  instances : sandbox_log_instance list;
+}
+
+type oauth_provider_row = {
+  id : string;
+  label : string;
+  app_state_kind : string;
+  problem : string option;
+  callback_url : string option;
+}
+
+type oauth_providers_snapshot = {
+  providers : oauth_provider_row list;
+  callback_url : string option;
+  callback_problem : string option;
+}
+
+type oauth_attached_provider = {
+  provider : string;
+  provider_label : string;
+  attached : bool;
+  app_state_kind : string;
+  enabled : bool option;
+  switch_problem : string option;
+  also_on : string list;
+  discovered_at : float option;
+  tools : string list;
+  problem : string option;
+}
+
+type oauth_attached_tools_snapshot = {
+  keeper : string;
+  providers : oauth_attached_provider list;
+}
+
+type oauth_attempt_status = {
+  kind : string;
+  expires_at : float option;
+  detail : string option;
+}
+
+type oauth_login_result =
+  | Oauth_login_exchange of {
+      provider : string;
+      provider_label : string;
+      authorize_url : string;
+      attempt_id : string;
+      expires_at : float option;
+    }
+  | Oauth_login_direct of {
+      provider : string;
+      provider_label : string;
+      tool_count : int;
+      message : string;
+    }
+
+type github_auth_probe = {
+  authenticated : bool;
+  login : string option;
+  scopes : string list;
+  error : string option;
+}
+
+type github_identity_observation = {
+  keeper : string;
+  hostname : string;
+  config_dir : string;
+  projected_token_env_names : string list;
+  stored : github_auth_probe;
+  effective : github_auth_probe;
+  effective_probe_scope : string;
+  checked_at_unix : float;
+}
+
+val decode_keeper_metrics :
+  Yojson.Safe.t -> (keeper_metrics_snapshot, string) result
+val decode_keeper_sandbox_logs :
+  Yojson.Safe.t -> (keeper_sandbox_logs, string) result
+val decode_oauth_providers :
+  Yojson.Safe.t -> (oauth_providers_snapshot, string) result
+val decode_oauth_attached_tools :
+  Yojson.Safe.t -> (oauth_attached_tools_snapshot, string) result
+val decode_oauth_attempt_status :
+  Yojson.Safe.t -> (oauth_attempt_status, string) result
+val decode_oauth_login_result :
+  Yojson.Safe.t -> (oauth_login_result, string) result
+val decode_github_identity :
+  Yojson.Safe.t -> (github_identity_observation, string) result
+
+val encode_oauth_provider_body : provider:string -> Yojson.Safe.t
+val encode_oauth_switch_body : provider:string -> enabled:bool -> Yojson.Safe.t
+val encode_oauth_disconnect_body :
+  keeper:string -> provider:string -> Yojson.Safe.t
+val encode_github_token_body :
+  token:string -> ?hostname:string -> unit -> Yojson.Safe.t

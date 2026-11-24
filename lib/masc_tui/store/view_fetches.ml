@@ -233,14 +233,47 @@ let keeper_tab_fetches ~force ~name ~tab (m : Model.t) =
           (Knowledge_store.memory_os_internals_for ~keeper:name m.knowledge)
       in
       let facts_needed =
-        needs_fetch ~force
-          (Knowledge_store.keeper_memory_facts_for ~keeper:name m.knowledge)
+        (force
+         || not
+              (Knowledge_store.String_set.mem name
+                 m.knowledge.keeper_memory_facts_auth_denied))
+        && needs_fetch ~force
+             (Knowledge_store.keeper_memory_facts_for ~keeper:name m.knowledge)
       in
       let activity_needed =
         needs_fetch ~force
           (Knowledge_store.keeper_memory_activity_for ~keeper:name m.knowledge)
       in
-      let health_needed = needs_fetch ~force m.knowledge.keeper_memory_health in
+      let journal_needed =
+        (force
+         || not
+              (Knowledge_store.String_set.mem name
+                 m.knowledge.keeper_memory_journal_auth_denied))
+        &&
+        match m.knowledge.keeper_memory_journal with
+        | Observed.Value { data = k, _; stale = false; _ } ->
+            force || not (String.equal k name)
+        | Observed.Loading _
+        | Observed.Value { stale = true; _ }
+        | Observed.Absent
+        | Observed.Unreported
+        | Observed.Failed _ ->
+            needs_fetch ~force m.knowledge.keeper_memory_journal
+      in
+      let fleet_health_needed =
+        needs_fetch ~force m.knowledge.keeper_memory_health
+      in
+      let keeper_health_needed =
+        match m.knowledge.memory_health_keeper with
+        | Observed.Value { data = k, _; stale = false; _ } ->
+            force || not (String.equal k name)
+        | Observed.Loading _
+        | Observed.Value { stale = true; _ }
+        | Observed.Absent
+        | Observed.Unreported
+        | Observed.Failed _ ->
+            needs_fetch ~force m.knowledge.memory_health_keeper
+      in
       []
       |> add_if diff_needed
            (Cmd.Get_memory_diff
@@ -253,7 +286,18 @@ let keeper_tab_fetches ~force ~name ~tab (m : Model.t) =
       |> add_if facts_needed (Cmd.Get_keeper_memory_facts { keeper = name })
       |> add_if activity_needed
            (Cmd.Get_keeper_memory_activity { keeper = name; limit = 50 })
-      |> add_if health_needed Cmd.Get_keeper_memory_health
+      |> add_if fleet_health_needed
+           (Cmd.Get_keeper_memory_health { keeper = None })
+      |> add_if
+           (keeper_health_needed
+            && Knowledge_store.equal_keeper_memory_subview
+                 m.knowledge.keeper_memory_subview Knowledge_store.Kmem_health)
+           (Cmd.Get_keeper_memory_health { keeper = Some name })
+      |> add_if
+           (journal_needed
+            && Knowledge_store.equal_keeper_memory_subview
+                 m.knowledge.keeper_memory_subview Knowledge_store.Kmem_journal)
+           (Cmd.Get_keeper_memory_journal { keeper = name; limit = Some 50 })
   | Nav.Keeper_work_candle ->
       []
       |> add_if (needs_fetch ~force m.work.planning) Cmd.Get_planning
@@ -275,6 +319,29 @@ let keeper_tab_fetches ~force ~name ~tab (m : Model.t) =
         || needs_fetch ~force m.config.schema
       in
       [] |> add_if schema_needed (Cmd.Get_config_schema target)
+  | Nav.Keeper_logs ->
+      let ks = Keeper_context_store.get_keeper ~keeper:name m.keeper_context in
+      []
+      |> add_if
+           (needs_fetch ~force ks.metrics)
+           (Cmd.Get_keeper_metrics { keeper = name })
+      |> add_if
+           (needs_fetch ~force ks.sandbox_logs)
+           (Cmd.Get_keeper_sandbox_logs { keeper = name; tail = Some 200 })
+  | Nav.Keeper_identity ->
+      let ks = Keeper_context_store.get_keeper ~keeper:name m.keeper_context in
+      []
+      |> add_if
+           (needs_fetch ~force m.keeper_context.oauth_providers)
+           Cmd.Get_oauth_providers
+      |> add_if
+           ((force || not ks.oauth_auth_denied)
+            && needs_fetch ~force ks.oauth_attached)
+           (Cmd.Get_oauth_attached_tools { keeper = name })
+      |> add_if
+           ((force || not ks.github_auth_denied)
+            && needs_fetch ~force ks.github_identity)
+           (Cmd.Get_github_identity { keeper = name })
 
 (* Every keeper tab sits under the dive header, whose KPI strip shows the
    keeper's cost and tokens from keeper-costs. *)
@@ -286,13 +353,58 @@ let fetches_for_dive ~force (m : Model.t) =
   | None -> []
   | Some (Nav.Dive_keeper { name; tab }) ->
       fetches_for_keeper_tab ~force ~name ~tab m
-  | Some (Nav.Dive_work _) ->
-      []
+  | Some (Nav.Dive_work target) ->
+      let extra =
+        match target with
+        | Nav.Verification_dive req_id ->
+            let ev_reqs =
+              if (not force) && m.work.verification_evidence_auth_denied then []
+              else
+                let needed =
+                  match m.work.verification_evidence with
+                  | Observed.Value { data = vid, _; stale = false; _ } ->
+                      force || not (String.equal vid req_id)
+                  | Observed.Loading _
+                  | Observed.Value { stale = true; _ }
+                  | Observed.Absent
+                  | Observed.Unreported
+                  | Observed.Failed _ ->
+                      needs_fetch ~force m.work.verification_evidence
+                in
+                if not needed then []
+                else
+                  match
+                    List.find_opt
+                      (fun (v : Wire_work.verification_request) ->
+                        String.equal v.request_id req_id)
+                      (Work_store.verifications_list m.work)
+                  with
+                  | Some v ->
+                      [
+                        Cmd.Get_verification_evidence
+                          { task_id = v.task_id; verification_id = v.request_id };
+                      ]
+                  | None -> []
+            in
+            ev_reqs
+            |> add_if
+                 (needs_fetch ~force m.work.verification_summary)
+                 Cmd.Get_verification_summary
+            |> add_if
+                 (needs_fetch ~force m.work.verification_specs)
+                 Cmd.Get_verification_specs
+            |> add_if
+                 (needs_fetch ~force m.work.verification_tlc_results)
+                 Cmd.Get_verification_tlc_results
+        | Nav.Goal_dive _ | Nav.Task_dive _ -> []
+      in
+      ([]
       |> add_if (needs_fetch ~force m.work.planning) Cmd.Get_planning
       |> add_if
            (needs_fetch ~force m.work.verifications)
            (Cmd.Get_verifications
-              { view = m.work.verification_view; limit = 50; offset = 0 })
+              { view = m.work.verification_view; limit = 50; offset = 0 }))
+      @ extra
   | Some (Nav.Dive_knowledge target) -> (
       match target with
       | Nav.Thread_dive post_id ->
@@ -365,6 +477,21 @@ let fetches_for_dive ~force (m : Model.t) =
       |> add_if series_needed
            (Cmd.Get_tool_series_filtered
               { bucket; since_hours; tool = Some tool_name })
+  | Some (Nav.Dive_runtime (Nav.Fusion_dive run_id)) ->
+      let detail_needed =
+        match m.runtime.fusion_detail with
+        | Observed.Value { data = rid, _; stale = false; _ } ->
+            force || not (String.equal rid run_id)
+        | Observed.Loading _
+        | Observed.Value { stale = true; _ }
+        | Observed.Absent
+        | Observed.Unreported
+        | Observed.Failed _ ->
+            needs_fetch ~force m.runtime.fusion_detail
+      in
+      []
+      |> add_if (needs_fetch ~force m.runtime.fusion_runs) Cmd.Get_fusion_runs
+      |> add_if detail_needed (Cmd.Get_fusion_run_detail { run_id })
   | Some (Nav.Dive_infra target) -> (
       match target with
       | Nav.Sandbox_dive keeper -> [ Cmd.Get_keeper_sandbox { keeper } ]
@@ -376,7 +503,22 @@ let fetches_for_dive ~force (m : Model.t) =
           |> add_if
                (needs_fetch ~force m.runtime.runtime_probe)
                (Cmd.Get_runtime_probe { force = false })
-      | Nav.Incident_dive _ -> [])
+      | Nav.Incident_dive _ | Nav.Log_detail_dive _ -> []
+      | Nav.Runtime_trace_dive keeper ->
+          let trace_needed =
+            match m.infra.runtime_trace with
+            | Observed.Value { data = k, _; stale = false; _ } ->
+                force || not (String.equal k keeper)
+            | Observed.Loading _
+            | Observed.Value { stale = true; _ }
+            | Observed.Absent
+            | Observed.Unreported
+            | Observed.Failed _ ->
+                needs_fetch ~force m.infra.runtime_trace
+          in
+          []
+          |> add_if trace_needed
+               (Cmd.Get_keeper_runtime_trace { keeper; limit = Some 50 }))
 
 (* The Wiki tab shows the selected page's body, so it needs that page unless
    the slot already holds it fresh. A dive covers the tab, and a Wiki dive
@@ -478,7 +620,12 @@ let fetches_for_workspace ~force (m : Model.t) =
       | Nav.Work_candle_scorecard ->
           []
           |> candle_ledger_reqs ~force m
-          |> add_if (needs_fetch ~force m.fleet.shell) Cmd.Get_dashboard_shell)
+          |> add_if (needs_fetch ~force m.fleet.shell) Cmd.Get_dashboard_shell
+      | Nav.Work_harness ->
+          []
+          |> add_if
+               (needs_fetch ~force m.work.harness_health)
+               Cmd.Get_harness_health)
   | Nav.Knowledge -> (
       match m.knowledge.active_tab with
       | Nav.Knowledge_board ->
@@ -550,9 +697,13 @@ let fetches_for_workspace ~force (m : Model.t) =
                     (Knowledge_store.memory_os_internals_for ~keeper m.knowledge)
                 in
                 let facts_needed =
-                  needs_fetch ~force
-                    (Knowledge_store.keeper_memory_facts_for ~keeper
-                       m.knowledge)
+                  (force
+                   || not
+                        (Knowledge_store.String_set.mem keeper
+                           m.knowledge.keeper_memory_facts_auth_denied))
+                  && needs_fetch ~force
+                       (Knowledge_store.keeper_memory_facts_for ~keeper
+                          m.knowledge)
                 in
                 let activity_needed =
                   needs_fetch ~force
@@ -576,7 +727,19 @@ let fetches_for_workspace ~force (m : Model.t) =
                Cmd.Get_world_memory
           |> add_if
                (needs_fetch ~force m.knowledge.keeper_memory_health)
-               Cmd.Get_keeper_memory_health
+               (Cmd.Get_keeper_memory_health { keeper = None })
+          |> add_if
+               (Knowledge_store.equal_memory_subview m.knowledge.memory_subview
+                  Knowledge_store.Mem_health_ledger
+                && (force || not m.knowledge.workspace_memory_ledger_auth_denied)
+                && needs_fetch ~force m.knowledge.workspace_memory_ledger)
+               Cmd.Get_workspace_memory_ledger
+          |> add_if
+               (Knowledge_store.equal_memory_subview m.knowledge.memory_subview
+                  Knowledge_store.Mem_context
+                && (force || not m.knowledge.workspace_memory_context_auth_denied)
+                && needs_fetch ~force m.knowledge.workspace_memory_context)
+               Cmd.Get_workspace_memory_context
           |> add_if diff_needed
                (Cmd.Get_memory_diff
                   {
@@ -662,11 +825,58 @@ let fetches_for_workspace ~force (m : Model.t) =
                (needs_fetch ~force m.runtime.fusion_runs)
                Cmd.Get_fusion_runs
       | Nav.Runtime_fusion ->
-          []
+          let detail_req =
+            match Runtime_store.selected_fusion_run m.runtime with
+            | None -> []
+            | Some run -> (
+                if Runtime_store.is_retained_fusion_run ~run_id:run.run_id m.runtime then
+                  let needed =
+                    match m.runtime.fusion_detail with
+                    | Observed.Value { data = rid, _; stale = false; _ } ->
+                        force || not (String.equal rid run.run_id)
+                    | Observed.Loading _
+                    | Observed.Value { stale = true; _ }
+                    | Observed.Absent
+                    | Observed.Unreported
+                    | Observed.Failed _ ->
+                        needs_fetch ~force m.runtime.fusion_detail
+                  in
+                  if not needed then []
+                  else [ Cmd.Get_fusion_run_detail { run_id = run.run_id } ]
+                else
+                  match
+                    Runtime_store.historical_evidence_for_run ~run_id:run.run_id
+                      m.runtime
+                  with
+                  | Some hist ->
+                      let ev_needed =
+                        match m.runtime.fusion_board_evidence with
+                        | Observed.Value { data = pid, _; stale = false; _ } ->
+                            force || not (String.equal pid hist.post_id)
+                        | Observed.Loading _
+                        | Observed.Value { stale = true; _ }
+                        | Observed.Absent
+                        | Observed.Unreported
+                        | Observed.Failed _ ->
+                            needs_fetch ~force m.runtime.fusion_board_evidence
+                      in
+                      if not ev_needed then []
+                      else
+                        [
+                          Cmd.Get_fusion_board_evidence { post_id = hist.post_id };
+                        ]
+                  | None -> [])
+          in
+          ([]
           |> add_if (needs_fetch ~force m.runtime.fusion_runs) Cmd.Get_fusion_runs
           |> add_if
+               ((force || not m.runtime.fusion_config_auth_denied)
+                && needs_fetch ~force m.runtime.fusion_config)
+               Cmd.Get_fusion_config
+          |> add_if
                (needs_fetch ~force m.runtime.exact_lane_runs)
-               (Cmd.Get_exact_lane_runs { lane = None; limit = Some 30 })
+               (Cmd.Get_exact_lane_runs { lane = None; limit = Some 30 }))
+          @ detail_req
       | Nav.Runtime_tools_usage ->
           let bucket, since_hours =
             Runtime_store.tools_window_params m.runtime.tools_window
@@ -696,18 +906,62 @@ let fetches_for_workspace ~force (m : Model.t) =
                (Cmd.Get_tools_catalog { keeper = surface_keeper })
           |> add_if (needs_fetch ~force m.runtime.skills) Cmd.Get_skills
       | Nav.Runtime_connectors ->
-          []
+          let name_reqs =
+            match Runtime_store.selected_connector m.runtime with
+            | Some c
+              when force
+                   || not
+                        (Runtime_store.String_map.mem c.connector_id
+                           m.runtime.connector_names) ->
+                [
+                  Cmd.Get_connector_names
+                    { connector = c.connector_id; scope = "channel" };
+                ]
+            | Some _ | None -> []
+          in
+          ([]
           |> add_if (needs_fetch ~force m.runtime.connectors) Cmd.Get_connectors
           |> add_if (needs_fetch ~force m.runtime.mcp_clients) Cmd.Get_mcp_clients
-          |> add_if (needs_fetch ~force m.runtime.browser_lane) Cmd.Get_browser_lane
+          |> add_if (needs_fetch ~force m.runtime.browser_lane) Cmd.Get_browser_lane)
+          @ name_reqs
       | Nav.Runtime_addons_browser ->
-          []
+          let catalog_reqs =
+            if not m.runtime.addon_catalog_mode then []
+            else
+              let preview_req =
+                match Runtime_store.selected_addon_catalog_entry m.runtime with
+                | Some (Wire_runtime.Catalog_package { manifest_path; _ }) ->
+                    let needed =
+                      match m.runtime.addon_package_preview with
+                      | Observed.Value { data = mp, _; stale = false; _ } ->
+                          force || not (String.equal mp manifest_path)
+                      | Observed.Loading _
+                      | Observed.Value { stale = true; _ }
+                      | Observed.Absent
+                      | Observed.Unreported
+                      | Observed.Failed _ ->
+                          needs_fetch ~force m.runtime.addon_package_preview
+                    in
+                    if not needed then []
+                    else [ Cmd.Get_addon_package_preview { manifest_path } ]
+                | Some (Wire_runtime.Catalog_folder _ | Wire_runtime.Catalog_issue _)
+                | None ->
+                    []
+              in
+              ([]
+              |> add_if
+                   (needs_fetch ~force m.runtime.addon_package_catalog)
+                   (Cmd.Get_addon_package_catalog { directory = None }))
+              @ preview_req
+          in
+          ([]
           |> add_if
                (needs_fetch ~force m.runtime.lane_addons)
                Cmd.Get_lane_addons
           |> add_if
                (needs_fetch ~force m.runtime.browser_lane)
                Cmd.Get_browser_lane)
+          @ catalog_reqs)
   | Nav.Infra -> (
       match m.infra.active_tab with
       | Nav.Infra_sandboxes ->
@@ -728,12 +982,128 @@ let fetches_for_workspace ~force (m : Model.t) =
                    (needs_fetch ~force activity)
                    (Cmd.Get_repository_activity { repo_id = repo.id })
           | None -> base_reqs)
+      | Nav.Infra_code ->
+          let sc = m.infra.code.scope in
+          let cur_file_opt = Infra_store.active_code_file_path m.infra in
+          let mode_reqs =
+            match m.infra.code.right_mode with
+            | Infra_store.Code_file | Infra_store.Code_search_results -> []
+            | Infra_store.Code_git_status ->
+                let needed =
+                  match m.infra.code.git_status with
+                  | Observed.Value { data = s, _; stale = false; _ } ->
+                      force || not (Wire_infra.equal_workspace_scope s sc)
+                  | Observed.Loading _
+                  | Observed.Value { stale = true; _ }
+                  | Observed.Absent
+                  | Observed.Unreported
+                  | Observed.Failed _ ->
+                      needs_fetch ~force m.infra.code.git_status
+                in
+                if not needed then [] else [ Cmd.Get_git_status { scope = sc } ]
+            | Infra_store.Code_git_branches ->
+                let needed =
+                  match m.infra.code.git_branches with
+                  | Observed.Value { data = s, _; stale = false; _ } ->
+                      force || not (Wire_infra.equal_workspace_scope s sc)
+                  | Observed.Loading _
+                  | Observed.Value { stale = true; _ }
+                  | Observed.Absent
+                  | Observed.Unreported
+                  | Observed.Failed _ ->
+                      needs_fetch ~force m.infra.code.git_branches
+                in
+                if not needed then [] else [ Cmd.Get_git_branches { scope = sc } ]
+            | Infra_store.Code_git_worktrees ->
+                let needed =
+                  match m.infra.code.git_worktrees with
+                  | Observed.Value { data = s, _; stale = false; _ } ->
+                      force || not (Wire_infra.equal_workspace_scope s sc)
+                  | Observed.Loading _
+                  | Observed.Value { stale = true; _ }
+                  | Observed.Absent
+                  | Observed.Unreported
+                  | Observed.Failed _ ->
+                      needs_fetch ~force m.infra.code.git_worktrees
+                in
+                if not needed then []
+                else [ Cmd.Get_git_worktrees { scope = sc } ]
+            | Infra_store.Code_git_blame -> (
+                match cur_file_opt with
+                | None -> []
+                | Some path ->
+                    let needed =
+                      match m.infra.code.git_blame with
+                      | Observed.Value { data = s, p, _; stale = false; _ } ->
+                          force
+                          || not
+                               (Wire_infra.equal_workspace_scope s sc
+                                && String.equal p path)
+                      | Observed.Loading _
+                      | Observed.Value { stale = true; _ }
+                      | Observed.Absent
+                      | Observed.Unreported
+                      | Observed.Failed _ ->
+                          needs_fetch ~force m.infra.code.git_blame
+                    in
+                    if not needed then []
+                    else [ Cmd.Get_git_blame { scope = sc; path } ])
+            | Infra_store.Code_git_log -> (
+                match cur_file_opt with
+                | None -> []
+                | Some path ->
+                    let needed =
+                      match m.infra.code.git_log with
+                      | Observed.Value { data = s, p, _; stale = false; _ } ->
+                          force
+                          || not
+                               (Wire_infra.equal_workspace_scope s sc
+                                && String.equal p path)
+                      | Observed.Loading _
+                      | Observed.Value { stale = true; _ }
+                      | Observed.Absent
+                      | Observed.Unreported
+                      | Observed.Failed _ ->
+                          needs_fetch ~force m.infra.code.git_log
+                    in
+                    if not needed then []
+                    else [ Cmd.Get_git_log { scope = sc; path } ])
+            | Infra_store.Code_git_diff -> (
+                match cur_file_opt with
+                | None -> []
+                | Some path ->
+                    let needed =
+                      match m.infra.code.git_diff with
+                      | Observed.Value { data = s, p, _; stale = false; _ } ->
+                          force
+                          || not
+                               (Wire_infra.equal_workspace_scope s sc
+                                && String.equal p path)
+                      | Observed.Loading _
+                      | Observed.Value { stale = true; _ }
+                      | Observed.Absent
+                      | Observed.Unreported
+                      | Observed.Failed _ ->
+                          needs_fetch ~force m.infra.code.git_diff
+                    in
+                    if not needed then []
+                    else [ Cmd.Get_git_diff { scope = sc; path } ])
+          in
+          ([]
+          |> add_if
+               (force || not m.infra.code.tree_loaded)
+               (Cmd.Get_workspace_children { scope = sc; dir = "" }))
+          @ mode_reqs
       | Nav.Infra_activity_logs ->
           []
           |> add_if
                (force || not m.infra.logs_loaded)
                (Cmd.Get_system_logs
-                  { limit = Some 200; level = m.infra.log_level_filter }))
+                  { limit = Some 200; level = m.infra.log_level_filter })
+          |> add_if
+               (force || not m.infra.activity_events_loaded)
+               (Cmd.Get_activity_events { limit = Some 200; after_seq = Some 0 })
+          |> add_if (needs_fetch ~force m.fleet.turns) Cmd.Get_keeper_turns)
 
 let fetches_for_current_view ?(force = false) (m : Model.t) =
   let reqs =
@@ -799,6 +1169,8 @@ let chat_tab_shown ~keeper (m : Model.t) =
              | Nav.Keeper_tool_calls
              | Nav.Keeper_memory
              | Nav.Keeper_work_candle
+             | Nav.Keeper_logs
+             | Nav.Keeper_identity
              | Nav.Keeper_sandbox
              | Nav.Keeper_config );
            _;

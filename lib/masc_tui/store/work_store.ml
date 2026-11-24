@@ -30,11 +30,27 @@ type task_status_filter =
   | Status_unlinked
   | Status_done
 
+type verification_dive_tab =
+  | Verif_tab_evidence
+  | Verif_tab_summary
+  | Verif_tab_specs
+  | Verif_tab_tlc
+
 type t = {
   active_tab : Nav.work_tab;
   planning : Wire_work.planning_snapshot Observed.t;
   backlog_counts : Wire_work.task_backlog_counts option;
   verifications : Wire_work.verification_request list Observed.t;
+  harness_health : Wire_work.harness_health Observed.t;
+  harness_selected_index : int;
+  harness_scroll_offset : int;
+  verification_evidence :
+    (string * Wire_work.verification_evidence_bundle) Observed.t;
+  verification_evidence_auth_denied : bool;
+  verification_summary : Wire_work.verification_summary Observed.t;
+  verification_specs : Wire_work.verification_specs Observed.t;
+  verification_tlc_results : Wire_work.verification_tlc_results Observed.t;
+  verification_dive_tab : verification_dive_tab;
   schedules : (Wire_work.schedule_row list * string option) Observed.t;
   asks : Wire_work.ask_row list Observed.t;
   tool_approvals : Wire_work.held_tool_approval list Observed.t;
@@ -63,6 +79,15 @@ let empty =
     planning = Observed.unreported;
     backlog_counts = None;
     verifications = Observed.unreported;
+    harness_health = Observed.unreported;
+    harness_selected_index = 0;
+    harness_scroll_offset = 0;
+    verification_evidence = Observed.unreported;
+    verification_evidence_auth_denied = false;
+    verification_summary = Observed.unreported;
+    verification_specs = Observed.unreported;
+    verification_tlc_results = Observed.unreported;
+    verification_dive_tab = Verif_tab_evidence;
     schedules = Observed.unreported;
     asks = Observed.unreported;
     tool_approvals = Observed.unreported;
@@ -602,6 +627,52 @@ let move_selection ?(pane_index = 0) ?(has_linked_card = true) ?viewport_rows
         adjust_scroll ?viewport_rows ~scroll:t.scroll_offset selected_index
       in
       { t with selected_index; scroll_offset }
+  | Nav.Work_harness ->
+      if pane_index = 1 then
+        let max_scroll =
+          match max_detail_scroll with Some ms -> max 0 ms | None -> 0
+        in
+        let detail_scroll_offset =
+          Store_scroll.clamp_scroll ~max_scroll
+            (t.detail_scroll_offset + delta)
+        in
+        { t with detail_scroll_offset }
+      else
+        let verdicts =
+          match Observed.to_option t.harness_health with
+          | None -> []
+          | Some hh ->
+              let q = String.trim t.filter_query in
+              if String.equal q "" then hh.recent_verdicts
+              else
+                List.filter
+                  (fun (v : Wire_work.harness_verdict_row) ->
+                    contains_ci ~needle:q v.task_id
+                    || contains_ci ~needle:q v.task_title
+                    || contains_ci ~needle:q v.agent_name
+                    || contains_ci ~needle:q v.verdict
+                    || contains_ci ~needle:q v.gate)
+                  hh.recent_verdicts
+        in
+        let len = List.length verdicts in
+        let harness_selected_index =
+          clamp_index len (t.harness_selected_index + delta)
+        in
+        let harness_scroll_offset =
+          adjust_scroll ?viewport_rows ~scroll:t.harness_scroll_offset
+            harness_selected_index
+        in
+        let detail_scroll_offset =
+          if Int.equal harness_selected_index t.harness_selected_index then
+            t.detail_scroll_offset
+          else 0
+        in
+        {
+          t with
+          harness_selected_index;
+          harness_scroll_offset;
+          detail_scroll_offset;
+        }
 
 let set_filter filter_query t =
   {
@@ -689,9 +760,93 @@ let mark_stale_all t =
     t with
     planning = Observed.mark_stale t.planning;
     verifications = Observed.mark_stale t.verifications;
+    harness_health = Observed.mark_stale t.harness_health;
+    verification_evidence = Observed.mark_stale t.verification_evidence;
+    verification_evidence_auth_denied = false;
+    verification_summary = Observed.mark_stale t.verification_summary;
+    verification_specs = Observed.mark_stale t.verification_specs;
+    verification_tlc_results = Observed.mark_stale t.verification_tlc_results;
     schedules = Observed.mark_stale t.schedules;
     asks = Observed.mark_stale t.asks;
     tool_approvals = Observed.mark_stale t.tool_approvals;
     gate_pending = Observed.mark_stale t.gate_pending;
     candle_ledger = Observed.mark_stale t.candle_ledger;
   }
+
+let verification_dive_tab_rank = function
+  | Verif_tab_evidence -> 0
+  | Verif_tab_summary -> 1
+  | Verif_tab_specs -> 2
+  | Verif_tab_tlc -> 3
+
+let equal_verification_dive_tab a b =
+  Int.equal (verification_dive_tab_rank a) (verification_dive_tab_rank b)
+
+let set_verification_dive_tab verification_dive_tab t =
+  { t with verification_dive_tab }
+
+let cycle_verification_dive_tab t =
+  let next =
+    match t.verification_dive_tab with
+    | Verif_tab_evidence -> Verif_tab_summary
+    | Verif_tab_summary -> Verif_tab_specs
+    | Verif_tab_specs -> Verif_tab_tlc
+    | Verif_tab_tlc -> Verif_tab_evidence
+  in
+  set_verification_dive_tab next t
+
+let apply_harness_health ~observed_at hh t =
+  let len = List.length hh.Wire_work.recent_verdicts in
+  {
+    t with
+    harness_health = Observed.value ~observed_at hh;
+    harness_selected_index = clamp_index len t.harness_selected_index;
+  }
+
+let filtered_harness_verdicts t =
+  match Observed.to_option t.harness_health with
+  | None -> []
+  | Some hh ->
+      let q = String.trim t.filter_query in
+      if String.equal q "" then hh.recent_verdicts
+      else
+        List.filter
+          (fun (v : Wire_work.harness_verdict_row) ->
+            contains_ci ~needle:q v.task_id
+            || contains_ci ~needle:q v.task_title
+            || contains_ci ~needle:q v.agent_name
+            || contains_ci ~needle:q v.verdict
+            || contains_ci ~needle:q v.gate)
+          hh.recent_verdicts
+
+let selected_harness_verdict t =
+  let xs = filtered_harness_verdicts t in
+  List.nth_opt xs (clamp_index (List.length xs) t.harness_selected_index)
+
+let apply_verification_evidence ~observed_at ~verification_id bundle t =
+  {
+    t with
+    verification_evidence = Observed.value ~observed_at (verification_id, bundle);
+    verification_evidence_auth_denied = false;
+  }
+
+let mark_verification_evidence_denied ~at ~reason t =
+  {
+    t with
+    verification_evidence = Observed.failed ~reason ~retryable:false ~at;
+    verification_evidence_auth_denied = true;
+  }
+
+let verification_evidence_for ~verification_id t =
+  match Observed.to_option t.verification_evidence with
+  | Some (vid, bundle) when String.equal vid verification_id -> Some bundle
+  | Some _ | None -> None
+
+let apply_verification_summary ~observed_at summary t =
+  { t with verification_summary = Observed.value ~observed_at summary }
+
+let apply_verification_specs ~observed_at specs t =
+  { t with verification_specs = Observed.value ~observed_at specs }
+
+let apply_verification_tlc_results ~observed_at tlc t =
+  { t with verification_tlc_results = Observed.value ~observed_at tlc }

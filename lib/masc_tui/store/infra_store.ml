@@ -35,6 +35,79 @@ type activity_source_filter =
 type timeline_entry =
   | Entry_log of Wire_infra.system_log_entry
   | Entry_event of activity_row
+module String_set = Set.Make (String)
+
+type code_right_mode =
+  | Code_file
+  | Code_search_results
+  | Code_git_status
+  | Code_git_branches
+  | Code_git_worktrees
+  | Code_git_blame
+  | Code_git_log
+  | Code_git_diff
+
+type code_state = {
+  scope : Wire_infra.workspace_scope;
+  expanded_dirs : String_set.t;
+  children_by_dir : Wire_infra.workspace_tree_node list String_map.t;
+  tree_loaded : bool;
+  tree_selected_index : int;
+  tree_scroll_offset : int;
+  right_mode : code_right_mode;
+  active_file_path : string option;
+  open_file :
+    (Wire_infra.workspace_scope * string * Wire_infra.workspace_file_content)
+    Observed.t;
+  file_scroll_offset : int;
+  pending_jump_line : (string * int) option;
+  files_catalog :
+    (Wire_infra.workspace_scope * Wire_infra.workspace_files_catalog) Observed.t;
+  search_result :
+    (Wire_infra.workspace_scope * Wire_infra.workspace_search_result) Observed.t;
+  search_selected_index : int;
+  git_status :
+    (Wire_infra.workspace_scope * Wire_infra.git_status_snapshot) Observed.t;
+  git_branches :
+    (Wire_infra.workspace_scope * Wire_infra.git_branch_entry list) Observed.t;
+  git_worktrees :
+    (Wire_infra.workspace_scope * Wire_infra.git_worktree_entry list) Observed.t;
+  git_blame :
+    (Wire_infra.workspace_scope * string * Wire_infra.git_blame_entry list)
+    Observed.t;
+  git_log :
+    (Wire_infra.workspace_scope * string * Wire_infra.git_log_commit list)
+    Observed.t;
+  git_diff :
+    (Wire_infra.workspace_scope * string * Wire_infra.git_diff_snapshot)
+    Observed.t;
+  git_scroll_offset : int;
+}
+
+let empty_code_state =
+  {
+    scope = Wire_infra.Ws_project;
+    expanded_dirs = String_set.singleton "";
+    children_by_dir = String_map.empty;
+    tree_loaded = false;
+    tree_selected_index = 0;
+    tree_scroll_offset = 0;
+    right_mode = Code_file;
+    active_file_path = None;
+    open_file = Observed.absent;
+    file_scroll_offset = 0;
+    pending_jump_line = None;
+    files_catalog = Observed.unreported;
+    search_result = Observed.absent;
+    search_selected_index = 0;
+    git_status = Observed.unreported;
+    git_branches = Observed.unreported;
+    git_worktrees = Observed.unreported;
+    git_blame = Observed.absent;
+    git_log = Observed.absent;
+    git_diff = Observed.absent;
+    git_scroll_offset = 0;
+  }
 
 type t = {
   active_tab : Nav.infra_tab;
@@ -45,12 +118,19 @@ type t = {
   repo_activity : repo_activity option;
   logs : Wire_infra.system_log_entry list;
   logs_loaded : bool;
+  activity_events_loaded : bool;
+  activity_seen_seqs : String_set.t;
+  activity_seen_entries : (string * float) list;
   last_log_seq : int option;
   stream_gap_count : int;
   log_level_filter : Wire_infra.log_level option;
   log_keeper_filter : string option;
   source_filter : activity_source_filter;
   activity_events : activity_row list;
+  acting_rail_open : bool;
+  acting_selected_index : int;
+  runtime_trace : (string * Wire_infra.runtime_trace_snapshot) Observed.t;
+  code : code_state;
   show_raw_json : bool;
   selected_index : int;
   scroll_offset : int;
@@ -71,12 +151,19 @@ let empty =
     repo_activity = None;
     logs = [];
     logs_loaded = false;
+    activity_events_loaded = false;
+    activity_seen_seqs = String_set.empty;
+    activity_seen_entries = [];
     last_log_seq = None;
     stream_gap_count = 0;
     log_level_filter = None;
     log_keeper_filter = None;
     source_filter = Source_all;
     activity_events = [];
+    acting_rail_open = false;
+    acting_selected_index = 0;
+    runtime_trace = Observed.absent;
+    code = empty_code_state;
     show_raw_json = false;
     selected_index = 0;
     scroll_offset = 0;
@@ -279,8 +366,6 @@ let max_seq_of entries =
     (fun acc (e : Wire_infra.system_log_entry) ->
       match acc with None -> Some e.seq | Some s -> Some (max s e.seq))
     None entries
-
-let forget_log_cursor t = { t with last_log_seq = None }
 
 let apply_log_snapshot entries t =
   let sorted_desc =
@@ -792,6 +877,121 @@ let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t 
               change_scroll_offset = 0;
               diff_scroll_offset = 0;
             })
+  | Nav.Infra_code ->
+      if pane_index = 1 then
+        match t.code.right_mode with
+        | Code_file ->
+            let max_scroll =
+              match max_detail_scroll with
+              | Some ms -> max 0 ms
+              | None -> (
+                  match Observed.to_option t.code.open_file with
+                  | Some (sc, _, fc)
+                    when Wire_infra.equal_workspace_scope sc t.code.scope ->
+                      let vis = max 1 (Option.value viewport_rows ~default:15) in
+                      max 0
+                        (List.length (String.split_on_char '\n' fc.content) - vis)
+                  | Some _ | None -> 0)
+            in
+            let file_scroll_offset =
+              Store_scroll.clamp_scroll ~max_scroll
+                (t.code.file_scroll_offset + delta)
+            in
+            { t with code = { t.code with file_scroll_offset } }
+        | Code_search_results ->
+            let len =
+              match Observed.to_option t.code.search_result with
+              | Some (sc, sr)
+                when Wire_infra.equal_workspace_scope sc t.code.scope ->
+                  List.length sr.matches
+              | Some _ | None -> 0
+            in
+            let search_selected_index =
+              clamp_index len (t.code.search_selected_index + delta)
+            in
+            let git_scroll_offset =
+              adjust_scroll ?viewport_rows ~scroll:t.code.git_scroll_offset
+                search_selected_index
+            in
+            {
+              t with
+              code = { t.code with search_selected_index; git_scroll_offset };
+            }
+        | Code_git_status
+        | Code_git_branches
+        | Code_git_worktrees
+        | Code_git_blame
+        | Code_git_log
+        | Code_git_diff ->
+            let max_scroll =
+              match max_detail_scroll with Some ms -> max 0 ms | None -> 0
+            in
+            let git_scroll_offset =
+              Store_scroll.clamp_scroll ~max_scroll
+                (t.code.git_scroll_offset + delta)
+            in
+            { t with code = { t.code with git_scroll_offset } }
+      else
+        let rec flatten_dir dir =
+          match String_map.find_opt dir t.code.children_by_dir with
+          | None -> []
+          | Some nodes ->
+              List.concat_map
+                (fun (n : Wire_infra.workspace_tree_node) ->
+                  if n.has_children && String_set.mem n.path t.code.expanded_dirs
+                  then n :: flatten_dir n.path
+                  else [ n ])
+                nodes
+        in
+        let all_nodes = flatten_dir "" in
+        let q = String.trim t.filter_query in
+        let nodes =
+          if String.equal q "" then all_nodes
+          else
+            List.filter
+              (fun (n : Wire_infra.workspace_tree_node) ->
+                contains_ci ~needle:q n.path || contains_ci ~needle:q n.label)
+              all_nodes
+        in
+        let len = List.length nodes in
+        let tree_selected_index =
+          clamp_index len (t.code.tree_selected_index + delta)
+        in
+        let tree_scroll_offset =
+          adjust_scroll ?viewport_rows ~scroll:t.code.tree_scroll_offset
+            tree_selected_index
+        in
+        let active_file_path, git_scroll_offset =
+          match t.code.right_mode with
+          | Code_git_blame | Code_git_log | Code_git_diff -> (
+              match List.nth_opt nodes tree_selected_index with
+              | Some n when not n.has_children ->
+                  let changed =
+                    not
+                      (Option.equal String.equal t.code.active_file_path
+                         (Some n.path))
+                  in
+                  (Some n.path, if changed then 0 else t.code.git_scroll_offset)
+              | Some _ | None ->
+                  (t.code.active_file_path, t.code.git_scroll_offset))
+          | Code_file
+          | Code_search_results
+          | Code_git_status
+          | Code_git_branches
+          | Code_git_worktrees ->
+              (t.code.active_file_path, t.code.git_scroll_offset)
+        in
+        {
+          t with
+          code =
+            {
+              t.code with
+              tree_selected_index;
+              tree_scroll_offset;
+              active_file_path;
+              git_scroll_offset;
+            };
+        }
   | Nav.Infra_activity_logs ->
       if pane_index = 1 then
         let max_scroll =
@@ -857,4 +1057,399 @@ let mark_stale_all t =
       Option.map
         (fun slot -> { slot with activity = Observed.mark_stale slot.activity })
         t.repo_activity;
+    runtime_trace = Observed.mark_stale t.runtime_trace;
+    activity_seen_seqs = String_set.empty;
+    activity_seen_entries = [];
+    code =
+      {
+        t.code with
+        open_file = Observed.mark_stale t.code.open_file;
+        files_catalog = Observed.mark_stale t.code.files_catalog;
+        search_result = Observed.mark_stale t.code.search_result;
+        git_status = Observed.mark_stale t.code.git_status;
+        git_branches = Observed.mark_stale t.code.git_branches;
+        git_worktrees = Observed.mark_stale t.code.git_worktrees;
+        git_blame = Observed.mark_stale t.code.git_blame;
+        git_log = Observed.mark_stale t.code.git_log;
+        git_diff = Observed.mark_stale t.code.git_diff;
+      };
   }
+
+let forget_log_cursor t =
+  {
+    t with
+    last_log_seq = None;
+    logs_loaded = false;
+    activity_events_loaded = false;
+    activity_seen_seqs = String_set.empty;
+    activity_seen_entries = [];
+  }
+
+let activity_kind_rank = function
+  | Activity_tool_call -> 0
+  | Activity_turn_complete -> 1
+  | Activity_agent_core -> 2
+  | Activity_stream_gap -> 3
+
+let equal_activity_row (a : activity_row) (b : activity_row) =
+  Float.equal a.at_unix b.at_unix
+  && Int.equal (activity_kind_rank a.kind) (activity_kind_rank b.kind)
+  && Option.equal String.equal a.keeper b.keeper
+  && String.equal a.summary b.summary
+  && Option.equal String.equal a.detail b.detail
+
+let activity_kind_of_wire kind =
+  let k = String.lowercase_ascii kind in
+  if String.starts_with ~prefix:"tool" k then Activity_tool_call
+  else if String.starts_with ~prefix:"turn" k then Activity_turn_complete
+  else Activity_agent_core
+
+let apply_activity_events_backfill (items : Wire_infra.activity_event_item list) t =
+  let sorted_items =
+    List.sort
+      (fun (a : Wire_infra.activity_event_item) b -> Int.compare b.seq a.seq)
+      items
+  in
+  let _seen, rev_rows, rev_entries =
+    List.fold_left
+      (fun (seen_acc, rows_acc, entries_acc)
+           (ev : Wire_infra.activity_event_item) ->
+        let key = Int.to_string ev.seq in
+        if String_set.mem key seen_acc then (seen_acc, rows_acc, entries_acc)
+        else
+          let summary =
+            match ev.subject_id with
+            | Some subj -> Printf.sprintf "%s (%s)" ev.kind subj
+            | None -> ev.kind
+          in
+          let detail =
+            match ev.payload with
+            | `Null | `Assoc [] -> None
+            | p -> Some (Yojson.Safe.pretty_to_string p)
+          in
+          let row =
+            {
+              at_unix = float_of_int ev.ts_ms /. 1000.0;
+              kind = activity_kind_of_wire ev.kind;
+              keeper = ev.actor_id;
+              summary;
+              detail;
+            }
+          in
+          let seen_acc' = String_set.add key seen_acc in
+          let entries_acc' = (key, row.at_unix) :: entries_acc in
+          let rows_acc' =
+            if List.exists (equal_activity_row row) t.activity_events then
+              rows_acc
+            else row :: rows_acc
+          in
+          (seen_acc', rows_acc', entries_acc'))
+      (t.activity_seen_seqs, [], []) sorted_items
+  in
+  let new_rows = List.rev rev_rows in
+  let new_entries = List.rev rev_entries in
+  let rec take n acc = function
+    | [] -> List.rev acc
+    | _ when n <= 0 -> List.rev acc
+    | x :: xs -> take (n - 1) (x :: acc) xs
+  in
+  let combined =
+    let merged =
+      List.stable_sort
+        (fun a b -> Float.compare b.at_unix a.at_unix)
+        (new_rows @ t.activity_events)
+    in
+    take max_activity [] merged
+  in
+  let min_retained_at =
+    if List.length combined < max_activity then None
+    else
+      match List.rev combined with
+      | oldest :: _ -> Some oldest.at_unix
+      | [] -> None
+  in
+  let retained_entries =
+    let sorted_entries =
+      List.stable_sort
+        (fun (_, a) (_, b) -> Float.compare b a)
+        (new_entries @ t.activity_seen_entries)
+    in
+    let rec dedup_take n seen acc = function
+      | [] -> List.rev acc
+      | _ when n <= 0 -> List.rev acc
+      | (k, ts) :: rest ->
+          let in_window =
+            match min_retained_at with
+            | Some min_ts -> ts >= min_ts
+            | None -> true
+          in
+          if (not in_window) || String_set.mem k seen then
+            dedup_take n seen acc rest
+          else dedup_take (n - 1) (String_set.add k seen) ((k, ts) :: acc) rest
+    in
+    dedup_take max_activity String_set.empty [] sorted_entries
+  in
+  let activity_seen_seqs =
+    List.fold_left
+      (fun acc (k, _) -> String_set.add k acc)
+      String_set.empty retained_entries
+  in
+  {
+    t with
+    activity_events = combined;
+    activity_events_loaded = true;
+    activity_seen_seqs;
+    activity_seen_entries = retained_entries;
+  }
+
+let toggle_acting_rail t =
+  { t with acting_rail_open = not t.acting_rail_open; acting_selected_index = 0 }
+
+let move_acting_selection ~count ~delta t =
+  {
+    t with
+    acting_selected_index = clamp_index count (t.acting_selected_index + delta);
+  }
+
+let apply_runtime_trace ~observed_at ~keeper snap t =
+  { t with runtime_trace = Observed.value ~observed_at (keeper, snap) }
+
+let runtime_trace_for ~keeper t =
+  match Observed.to_option t.runtime_trace with
+  | Some (k, snap) when String.equal k keeper -> Some snap
+  | Some _ | None -> None
+
+let code_right_mode_rank = function
+  | Code_file -> 0
+  | Code_search_results -> 1
+  | Code_git_status -> 2
+  | Code_git_branches -> 3
+  | Code_git_worktrees -> 4
+  | Code_git_blame -> 5
+  | Code_git_log -> 6
+  | Code_git_diff -> 7
+
+let equal_code_right_mode a b =
+  Int.equal (code_right_mode_rank a) (code_right_mode_rank b)
+
+let code_right_mode_label = function
+  | Code_file -> Say.make ~ko:"파일" ~en:"File"
+  | Code_search_results -> Say.make ~ko:"검색 결과" ~en:"Search"
+  | Code_git_status -> Say.make ~ko:"Git 상태" ~en:"Git Status"
+  | Code_git_branches -> Say.make ~ko:"브랜치" ~en:"Branches"
+  | Code_git_worktrees -> Say.make ~ko:"워크트리" ~en:"Worktrees"
+  | Code_git_blame -> Say.make ~ko:"Blame" ~en:"Blame"
+  | Code_git_log -> Say.make ~ko:"Git 로그" ~en:"Git Log"
+  | Code_git_diff -> Say.make ~ko:"Git Diff" ~en:"Git Diff"
+
+let set_code_right_mode right_mode t =
+  { t with code = { t.code with right_mode; git_scroll_offset = 0 } }
+
+let cycle_code_git_mode t =
+  let next =
+    match t.code.right_mode with
+    | Code_file | Code_search_results -> Code_git_status
+    | Code_git_status -> Code_git_branches
+    | Code_git_branches -> Code_git_worktrees
+    | Code_git_worktrees -> Code_git_blame
+    | Code_git_blame -> Code_git_log
+    | Code_git_log -> Code_git_diff
+    | Code_git_diff -> Code_file
+  in
+  set_code_right_mode next t
+
+let set_code_scope scope t =
+  if Wire_infra.equal_workspace_scope scope t.code.scope then t
+  else { t with code = { empty_code_state with scope } }
+
+let visible_code_tree_nodes t =
+  let rec flatten_dir dir =
+    match String_map.find_opt dir t.code.children_by_dir with
+    | None -> []
+    | Some nodes ->
+        List.concat_map
+          (fun (n : Wire_infra.workspace_tree_node) ->
+            if n.has_children && String_set.mem n.path t.code.expanded_dirs then
+              n :: flatten_dir n.path
+            else [ n ])
+          nodes
+  in
+  let all_nodes = flatten_dir "" in
+  let q = String.trim t.filter_query in
+  if String.equal q "" then all_nodes
+  else
+    List.filter
+      (fun (n : Wire_infra.workspace_tree_node) ->
+        contains_ci ~needle:q n.path || contains_ci ~needle:q n.label)
+      all_nodes
+
+let selected_code_tree_node t =
+  let nodes = visible_code_tree_nodes t in
+  List.nth_opt nodes (clamp_index (List.length nodes) t.code.tree_selected_index)
+
+let toggle_code_dir dir t =
+  let expanded_dirs =
+    if String_set.mem dir t.code.expanded_dirs then
+      String_set.remove dir t.code.expanded_dirs
+    else String_set.add dir t.code.expanded_dirs
+  in
+  { t with code = { t.code with expanded_dirs } }
+
+let apply_workspace_children ~scope ~dir nodes t =
+  if not (Wire_infra.equal_workspace_scope scope t.code.scope) then t
+  else
+    let children_by_dir = String_map.add dir nodes t.code.children_by_dir in
+    let tree_loaded = t.code.tree_loaded || String.equal dir "" in
+    { t with code = { t.code with children_by_dir; tree_loaded } }
+
+let apply_workspace_files ~observed_at ~scope catalog t =
+  if not (Wire_infra.equal_workspace_scope scope t.code.scope) then t
+  else
+    {
+      t with
+      code =
+        { t.code with files_catalog = Observed.value ~observed_at (scope, catalog) };
+    }
+
+let apply_workspace_search ~observed_at ~scope result t =
+  if not (Wire_infra.equal_workspace_scope scope t.code.scope) then t
+  else
+    {
+      t with
+      code =
+        {
+          t.code with
+          search_result = Observed.value ~observed_at (scope, result);
+          search_selected_index = 0;
+          right_mode = Code_search_results;
+          git_scroll_offset = 0;
+        };
+    }
+
+let set_code_active_file active_file_path t =
+  {
+    t with
+    code = { t.code with active_file_path; pending_jump_line = None };
+  }
+
+let active_code_file_path t =
+  match t.code.active_file_path with
+  | Some p when not (String.equal (String.trim p) "") -> Some p
+  | Some _ | None -> (
+      match selected_code_tree_node t with
+      | Some n when not n.has_children -> Some n.path
+      | Some _ | None -> (
+          match Observed.to_option t.code.open_file with
+          | Some (sc, p, _) when Wire_infra.equal_workspace_scope sc t.code.scope
+            ->
+              Some p
+          | Some _ | None -> None))
+
+let path_matches_active_code ~path t =
+  match active_code_file_path t with
+  | Some exp -> String.equal exp path
+  | None -> true
+
+let apply_workspace_file ~observed_at ~scope ~path content t =
+  if
+    (not (Wire_infra.equal_workspace_scope scope t.code.scope))
+    || not (path_matches_active_code ~path t)
+  then t
+  else
+    let file_scroll_offset =
+      match t.code.pending_jump_line with
+      | Some (target_path, line) when String.equal target_path path ->
+          let total_lines =
+            List.length (String.split_on_char '\n' content.Wire_infra.content)
+          in
+          let max_offset = max 0 (total_lines - 1) in
+          min max_offset (max 0 (line - 1))
+      | Some _ | None -> 0
+    in
+    {
+      t with
+      code =
+        {
+          t.code with
+          active_file_path = Some path;
+          open_file = Observed.value ~observed_at (scope, path, content);
+          file_scroll_offset;
+          pending_jump_line = None;
+        };
+    }
+
+let open_file_for_current t =
+  match Observed.to_option t.code.open_file with
+  | Some (sc, p, content)
+    when Wire_infra.equal_workspace_scope sc t.code.scope
+         && path_matches_active_code ~path:p t ->
+      Some content
+  | Some _ | None -> None
+
+let apply_git_status ~observed_at ~scope snap t =
+  if not (Wire_infra.equal_workspace_scope scope t.code.scope) then t
+  else
+    {
+      t with
+      code = { t.code with git_status = Observed.value ~observed_at (scope, snap) };
+    }
+
+let apply_git_branches ~observed_at ~scope branches t =
+  if not (Wire_infra.equal_workspace_scope scope t.code.scope) then t
+  else
+    {
+      t with
+      code =
+        { t.code with git_branches = Observed.value ~observed_at (scope, branches) };
+    }
+
+let apply_git_worktrees ~observed_at ~scope wts t =
+  if not (Wire_infra.equal_workspace_scope scope t.code.scope) then t
+  else
+    {
+      t with
+      code =
+        { t.code with git_worktrees = Observed.value ~observed_at (scope, wts) };
+    }
+
+let apply_git_blame ~observed_at ~scope ~path entries t =
+  if
+    (not (Wire_infra.equal_workspace_scope scope t.code.scope))
+    || not (path_matches_active_code ~path t)
+  then t
+  else
+    {
+      t with
+      code =
+        {
+          t.code with
+          git_blame = Observed.value ~observed_at (scope, path, entries);
+        };
+    }
+
+let apply_git_log ~observed_at ~scope ~path commits t =
+  if
+    (not (Wire_infra.equal_workspace_scope scope t.code.scope))
+    || not (path_matches_active_code ~path t)
+  then t
+  else
+    {
+      t with
+      code =
+        { t.code with git_log = Observed.value ~observed_at (scope, path, commits) };
+    }
+
+let apply_git_diff ~observed_at ~scope ~path diff t =
+  if
+    (not (Wire_infra.equal_workspace_scope scope t.code.scope))
+    || not (path_matches_active_code ~path t)
+  then t
+  else
+    {
+      t with
+      code =
+        { t.code with git_diff = Observed.value ~observed_at (scope, path, diff) };
+    }
+
+let find_log_by_seq seq t =
+  List.find_opt (fun (e : Wire_infra.system_log_entry) -> Int.equal e.seq seq) t.logs

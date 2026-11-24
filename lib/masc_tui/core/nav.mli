@@ -17,6 +17,7 @@ type work_tab =
   | Work_schedules
   | Work_inbox
   | Work_candle_scorecard
+  | Work_harness
 
 type knowledge_tab =
   | Knowledge_board
@@ -41,6 +42,7 @@ type runtime_tab =
 type infra_tab =
   | Infra_sandboxes
   | Infra_repos_changes
+  | Infra_code
   | Infra_activity_logs
 
 type keeper_tab =
@@ -51,6 +53,8 @@ type keeper_tab =
   | Keeper_work_candle
   | Keeper_sandbox
   | Keeper_config
+  | Keeper_logs
+  | Keeper_identity
 
 type work_dive_target =
   | Goal_dive of string
@@ -65,11 +69,14 @@ type knowledge_dive_target =
 
 type runtime_dive_target =
   | Tool_dive of string
+  | Fusion_dive of string
 
 type infra_dive_target =
   | Sandbox_dive of string
   | Lane_dive of string
   | Incident_dive of int
+  | Runtime_trace_dive of string
+  | Log_detail_dive of int
 
 type dive =
   | Dive_keeper of { name : string; tab : keeper_tab }
@@ -103,6 +110,9 @@ type inline_action_kind =
   | Repo_add_form
   | Board_new_post
   | Board_comment of { post_id : string; parent_id : string option }
+  | Github_token_form of string
+  | Code_finder_form
+  | Code_search_form
 
 type system_gate_kind =
   | Micro_viewport

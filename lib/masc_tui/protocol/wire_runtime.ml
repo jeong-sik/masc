@@ -3624,3 +3624,809 @@ let encode_setup_account_login_start ~integration_id ?account_ref () =
     | Some r when not (String.equal (String.trim r) "") ->
         [ ("account_ref", `String (String.trim r)) ]
     | Some _ | None -> []))
+
+(* --- Wave 3: Fusion Detail, Config Presets, Addon Package Catalog & Connector Names --- *)
+
+let fusion_run_detail_path ~run_id =
+  "/api/v1/dashboard/fusion-runs/" ^ percent_encode run_id
+
+let fusion_config_path = "/api/v1/runtime/config/fusion"
+
+let fusion_board_post_path ~post_id =
+  "/api/v1/board/" ^ percent_encode post_id
+
+let lane_addon_package_catalog_path ?directory () =
+  match directory with
+  | Some d when not (String.equal (String.trim d) "") ->
+      "/api/v1/lane-addons/package-catalog?directory="
+      ^ percent_encode (String.trim d)
+  | Some _ | None -> "/api/v1/lane-addons/package-catalog"
+
+let lane_addon_package_preview_path ~manifest_path =
+  "/api/v1/lane-addons/package-preview?manifest_path="
+  ^ percent_encode manifest_path
+
+let connector_names_path ~connector ?(scope = "channel") ?limit () =
+  let params =
+    [
+      "name=" ^ percent_encode connector;
+      "scope=" ^ percent_encode scope;
+    ]
+    @
+    match limit with
+    | Some n -> [ Printf.sprintf "limit=%d" (max 1 n) ]
+    | None -> []
+  in
+  "/api/v1/gate/connector/names?" ^ String.concat "&" params
+
+type fusion_replay_status =
+  | Replay_not_replayed
+  | Replay_absent
+  | Replay_complete of {
+      lines_read : int;
+      malformed_lines : int;
+      dropped_running : int;
+    }
+  | Replay_incomplete of {
+      reason : string;
+      lines_read : int;
+      malformed_lines : int;
+    }
+
+type fusion_historical_evidence = {
+  run_id : string;
+  post_id : string;
+  title : string;
+  created_at_unix : float;
+}
+
+type fusion_runs_snapshot = {
+  generated_at : string;
+  replay : fusion_replay_status option;
+  historical_evidence : fusion_historical_evidence list;
+  runs : fusion_run list;
+}
+
+type fusion_panel_entry = {
+  model : string;
+  status : [ `Answered | `Failed ];
+  answer : string option;
+  input_tokens : int option;
+  output_tokens : int option;
+  reason_code : string option;
+  reason_detail : string option;
+}
+
+type fusion_judge_node = {
+  role : string;
+  identity : string;
+  status : string;
+  decision : string option;
+  resolved_answer : string option;
+  synthesis : string option;
+  input_tokens : int;
+  output_tokens : int;
+  failure_code : string option;
+  error : string option;
+  elapsed_s : float option;
+  timed_out : bool option;
+}
+
+type fusion_seat_attempt = {
+  runtime : string;
+  code : string;
+  detail : string;
+}
+
+type fusion_seat_route = {
+  phase : string;
+  seat : string;
+  judge_role : string option;
+  route : string;
+  answered_by : string option;
+  failed_attempts : fusion_seat_attempt list;
+}
+
+type fusion_tool_trace = {
+  status : string;
+  observed_actors : string list;
+  dropped_events : int;
+  gaps : string list;
+  events_count : int;
+  events_preview : string list;
+}
+
+type fusion_evidence_post = {
+  post_id : string;
+  title : string;
+  author : string;
+  body : string;
+  question : string option;
+  panel : fusion_panel_entry list;
+  judge_status : string option;
+  judge_decision : string option;
+  judge_synthesis : string option;
+  judge_resolved_answer : string option;
+  judge_failure : string option;
+  judges : fusion_judge_node list;
+  seat_routes : fusion_seat_route list;
+  tool_trace : fusion_tool_trace option;
+}
+
+type fusion_evidence_status =
+  | Evidence_recorded of fusion_evidence_post
+  | Evidence_pending
+  | Evidence_absent
+
+type fusion_run_detail = {
+  run : fusion_run;
+  evidence : fusion_evidence_status;
+}
+
+type fusion_preset_option = {
+  name : string;
+  panels : string list;
+  judge : string option;
+  judges : string list;
+  min_answered : int option;
+}
+
+type fusion_config_options = {
+  enabled : bool;
+  default_preset : string;
+  staged_judge_group_size : int;
+  presets : fusion_preset_option list;
+}
+
+let int_or_zero json key =
+  match optional_int_field json key with Ok (Some n) -> n | Ok None | Error _ -> 0
+
+let decode_fusion_replay_opt body =
+  match optional_object_field body "replay" with
+  | Error _ as err -> err
+  | Ok None -> Ok None
+  | Ok (Some r) -> (
+      let* status = required_nonblank_string r "status" in
+      match status with
+      | "not_replayed" -> Ok (Some Replay_not_replayed)
+      | "absent" -> Ok (Some Replay_absent)
+      | "complete" ->
+          Ok
+            (Some
+               (Replay_complete
+                  {
+                    lines_read = int_or_zero r "lines_read";
+                    malformed_lines = int_or_zero r "malformed_lines";
+                    dropped_running = int_or_zero r "dropped_running";
+                  }))
+      | "incomplete" ->
+          let reason =
+            match optional_nonblank_string r "reason" with
+            | Ok (Some s) -> s
+            | Ok None | Error _ -> "incomplete replay"
+          in
+          Ok
+            (Some
+               (Replay_incomplete
+                  {
+                    reason;
+                    lines_read = int_or_zero r "lines_read";
+                    malformed_lines = int_or_zero r "malformed_lines";
+                  }))
+      | other -> Error (Printf.sprintf "unknown fusion replay status %S" other))
+
+let decode_fusion_historical_evidence_row json =
+  let* run_id = required_nonblank_string json "run_id" in
+  let* post_id = required_nonblank_string json "post_id" in
+  let* title =
+    match optional_string_field json "title" with
+    | Ok (Some s) -> Ok s
+    | Ok None -> Ok run_id
+    | Error _ as err -> err
+  in
+  let* created_at_unix =
+    match optional_finite_float json "created_at" with
+    | Ok (Some f) -> Ok f
+    | Ok None -> Ok 0.0
+    | Error _ as err -> err
+  in
+  Ok { run_id; post_id; title; created_at_unix }
+
+let decode_fusion_runs_snapshot json =
+  let* _, body = unwrap_v2_or_raw json in
+  let generated_at =
+    match optional_string_field body "generated_at" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let* replay = decode_fusion_replay_opt body in
+  let* hist_items = optional_list_field body "historical_evidence" in
+  let* historical_evidence =
+    decode_list "historical_evidence" decode_fusion_historical_evidence_row
+      hist_items
+  in
+  let* run_items = required_list_field body "runs" in
+  let* runs = decode_list "runs" decode_fusion_run run_items in
+  Ok { generated_at; replay; historical_evidence; runs }
+
+let decode_fusion_panel_entry json =
+  let* model = required_nonblank_string json "model" in
+  let* status_str = required_nonblank_string json "status" in
+  let* status =
+    match status_str with
+    | "answered" -> Ok `Answered
+    | "failed" -> Ok `Failed
+    | other -> Error (Printf.sprintf "unknown fusion panel status %S" other)
+  in
+  let* answer = optional_string_field json "answer" in
+  let* input_tokens = optional_int_field json "input_tokens" in
+  let* output_tokens = optional_int_field json "output_tokens" in
+  let* reason_code = optional_nonblank_string json "reason_code" in
+  let* reason_detail = optional_nonblank_string json "reason_detail" in
+  Ok
+    {
+      model;
+      status;
+      answer;
+      input_tokens;
+      output_tokens;
+      reason_code;
+      reason_detail;
+    }
+
+let decode_fusion_judge_node json =
+  let* role =
+    match optional_nonblank_string json "role" with
+    | Ok (Some r) -> Ok r
+    | Ok None -> Ok "single"
+    | Error _ as err -> err
+  in
+  let* identity =
+    match optional_nonblank_string json "identity" with
+    | Ok (Some id) -> Ok id
+    | Ok None -> (
+        match optional_nonblank_string json "model" with
+        | Ok (Some m) -> Ok m
+        | Ok None -> Ok "judge"
+        | Error _ as err -> err)
+    | Error _ as err -> err
+  in
+  let* status = required_nonblank_string json "status" in
+  let* decision = optional_nonblank_string json "decision" in
+  let* resolved_answer = optional_string_field json "resolved_answer" in
+  let* synthesis = optional_string_field json "synthesis" in
+  let input_tokens = int_or_zero json "input_tokens" in
+  let output_tokens = int_or_zero json "output_tokens" in
+  let* failure_code = optional_nonblank_string json "failure_code" in
+  let* error = optional_nonblank_string json "error" in
+  let* elapsed_s = optional_finite_float json "elapsed_s" in
+  let* timed_out = optional_bool_field json "timed_out" in
+  Ok
+    {
+      role;
+      identity;
+      status;
+      decision;
+      resolved_answer;
+      synthesis;
+      input_tokens;
+      output_tokens;
+      failure_code;
+      error;
+      elapsed_s;
+      timed_out;
+    }
+
+let decode_fusion_seat_attempt json =
+  let* runtime = required_nonblank_string json "runtime" in
+  let* code =
+    match optional_nonblank_string json "code" with
+    | Ok (Some c) -> Ok c
+    | Ok None -> Ok "failed"
+    | Error _ as err -> err
+  in
+  let* detail =
+    match optional_string_field json "detail" with
+    | Ok (Some d) -> Ok d
+    | Ok None -> Ok ""
+    | Error _ as err -> err
+  in
+  Ok { runtime; code; detail }
+
+let decode_fusion_seat_route json =
+  let* phase = required_nonblank_string json "phase" in
+  let* seat = required_nonblank_string json "seat" in
+  let* judge_role = optional_nonblank_string json "judge_role" in
+  let* route =
+    match optional_nonblank_string json "route" with
+    | Ok (Some r) -> Ok r
+    | Ok None -> Ok ""
+    | Error _ as err -> err
+  in
+  let* answered_by = optional_nonblank_string json "answered_by" in
+  let* failed_items = optional_list_field json "failed_attempts" in
+  let* failed_attempts =
+    decode_list "failed_attempts" decode_fusion_seat_attempt failed_items
+  in
+  Ok { phase; seat; judge_role; route; answered_by; failed_attempts }
+
+let summarize_trace_event = function
+  | `Assoc _ as ev ->
+      let actor =
+        match optional_nonblank_string ev "actor" with
+        | Ok (Some a) -> a
+        | Ok None | Error _ -> "?"
+      in
+      let tool =
+        match optional_nonblank_string ev "tool_name" with
+        | Ok (Some t) -> t
+        | Ok None | Error _ -> (
+            match optional_nonblank_string ev "tool" with
+            | Ok (Some t) -> t
+            | Ok None | Error _ -> (
+                match optional_nonblank_string ev "kind" with
+                | Ok (Some k) -> k
+                | Ok None | Error _ -> "event"))
+      in
+      let status_tag =
+        match optional_nonblank_string ev "status" with
+        | Ok (Some "succeeded") -> "ok"
+        | Ok (Some "failed") -> (
+            match optional_nonblank_string ev "error_class" with
+            | Ok (Some cls) -> "err:" ^ cls
+            | Ok None | Error _ -> "err")
+        | Ok (Some s) -> s
+        | Ok None | Error _ -> (
+            match optional_nonblank_string ev "event" with
+            | Ok (Some "called") -> "call"
+            | Ok (Some "completed") -> (
+                match optional_bool_field ev "ok" with
+                | Ok (Some true) -> "ok"
+                | Ok (Some false) -> "err"
+                | Ok None | Error _ -> "done")
+            | Ok (Some e) -> e
+            | Ok None | Error _ -> (
+                match optional_bool_field ev "ok" with
+                | Ok (Some true) -> "ok"
+                | Ok (Some false) -> "err"
+                | Ok None | Error _ -> ""))
+      in
+      if String.equal status_tag "" then Printf.sprintf "%s -> %s" actor tool
+      else Printf.sprintf "%s -> %s [%s]" actor tool status_tag
+  | other -> Yojson.Safe.to_string other
+
+let decode_trace_actor_item = function
+  | `String s -> Ok s
+  | `Assoc _ as obj ->
+      let phase =
+        match optional_nonblank_string obj "phase" with
+        | Ok (Some p) -> p
+        | Ok None | Error _ -> ""
+      in
+      let role =
+        match optional_nonblank_string obj "judge_role" with
+        | Ok (Some r) -> "/" ^ r
+        | Ok None | Error _ -> ""
+      in
+      let actor =
+        match optional_nonblank_string obj "actor" with
+        | Ok (Some a) -> a
+        | Ok None | Error _ -> "?"
+      in
+      if String.equal phase "" then Ok actor
+      else Ok (Printf.sprintf "%s%s:%s" phase role actor)
+  | bad -> field_type_error "observed_actors[]" "string or object" bad
+
+let decode_trace_gap_item = function
+  | `String s -> Ok s
+  | `Assoc _ as obj ->
+      let* actor_s = decode_trace_actor_item obj in
+      let reason =
+        match optional_nonblank_string obj "reason" with
+        | Ok (Some r) -> r
+        | Ok None | Error _ -> "gap"
+      in
+      Ok (Printf.sprintf "%s (%s)" actor_s reason)
+  | bad -> field_type_error "gaps[]" "string or object" bad
+
+let decode_fusion_tool_trace json =
+  let* status =
+    match optional_nonblank_string json "status" with
+    | Ok (Some s) -> Ok s
+    | Ok None -> Ok "complete"
+    | Error _ as err -> err
+  in
+  let* actor_items = optional_list_field json "observed_actors" in
+  let* observed_actors =
+    decode_list "observed_actors" decode_trace_actor_item actor_items
+  in
+  let dropped_events = int_or_zero json "dropped_events" in
+  let* gap_items = optional_list_field json "gaps" in
+  let* gaps = decode_list "gaps" decode_trace_gap_item gap_items in
+  let* events = optional_list_field json "events" in
+  let events_count = List.length events in
+  let events_preview =
+    events
+    |> List.filteri (fun i _ -> i < 12)
+    |> List.map summarize_trace_event
+  in
+  Ok { status; observed_actors; dropped_events; gaps; events_count; events_preview }
+
+let decode_fusion_evidence_post post =
+  let* post_id =
+    match optional_nonblank_string post "id" with
+    | Ok (Some id) -> Ok id
+    | Ok None -> Ok ""
+    | Error _ as err -> err
+  in
+  let* title =
+    match optional_string_field post "title" with
+    | Ok (Some s) -> Ok s
+    | Ok None -> Ok ""
+    | Error _ as err -> err
+  in
+  let* author =
+    match optional_string_field post "author" with
+    | Ok (Some s) -> Ok s
+    | Ok None -> Ok ""
+    | Error _ as err -> err
+  in
+  let* body =
+    match optional_string_field post "body" with
+    | Ok (Some s) -> Ok s
+    | Ok None -> (
+        match optional_string_field post "content" with
+        | Ok (Some s) -> Ok s
+        | Ok None -> Ok ""
+        | Error _ as err -> err)
+    | Error _ as err -> err
+  in
+  let* meta_opt = optional_object_field post "meta" in
+  let meta = Option.value ~default:(`Assoc []) meta_opt in
+  let* question = optional_string_field meta "question" in
+  let* panel_items = optional_list_field meta "panel" in
+  let* panel = decode_list "panel" decode_fusion_panel_entry panel_items in
+  let* judge_opt = optional_object_field meta "judge" in
+  let judge_status, judge_decision, judge_synthesis, judge_resolved_answer, judge_failure =
+    match judge_opt with
+    | None -> (None, None, None, None, None)
+    | Some j ->
+        let get_str k =
+          match optional_string_field j k with Ok v -> v | Error _ -> None
+        in
+        let failure =
+          match get_str "error", get_str "failure_code" with
+          | Some e, Some c -> Some (c ^ ": " ^ e)
+          | Some e, None -> Some e
+          | None, Some c -> Some c
+          | None, None -> None
+        in
+        ( get_str "status",
+          get_str "decision",
+          get_str "synthesis",
+          get_str "resolved_answer",
+          failure )
+  in
+  let* judges_items = optional_list_field meta "judges" in
+  let* judges = decode_list "judges" decode_fusion_judge_node judges_items in
+  let* seat_items =
+    match optional_list_field meta "seat_routes" with
+    | Ok (_ :: _ as xs) -> Ok xs
+    | Ok [] -> optional_list_field post "seat_routes"
+    | Error _ as err -> err
+  in
+  let* seat_routes = decode_list "seat_routes" decode_fusion_seat_route seat_items in
+  let* tool_trace =
+    match optional_object_field meta "tool_trace" with
+    | Ok None -> Ok None
+    | Ok (Some tt) ->
+        let* decoded = decode_fusion_tool_trace tt in
+        Ok (Some decoded)
+    | Error _ as err -> err
+  in
+  Ok
+    {
+      post_id;
+      title;
+      author;
+      body;
+      question;
+      panel;
+      judge_status;
+      judge_decision;
+      judge_synthesis;
+      judge_resolved_answer;
+      judge_failure;
+      judges;
+      seat_routes;
+      tool_trace;
+    }
+
+let decode_fusion_run_detail json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* run_obj = required_object_field body "run" in
+  let* run = decode_fusion_run run_obj in
+  let* ev_obj = required_object_field body "evidence" in
+  let* status = required_nonblank_string ev_obj "status" in
+  let* evidence =
+    match status with
+    | "recorded" -> (
+        match optional_object_field ev_obj "post" with
+        | Ok (Some post_obj) ->
+            let* post = decode_fusion_evidence_post post_obj in
+            Ok (Evidence_recorded post)
+        | Ok None -> Ok Evidence_absent
+        | Error _ as err -> err)
+    | "pending" -> Ok Evidence_pending
+    | "absent" -> Ok Evidence_absent
+    | other -> Error (Printf.sprintf "unknown fusion evidence status %S" other)
+  in
+  Ok { run; evidence }
+
+let decode_fusion_board_evidence json =
+  let* _, body = unwrap_v2_or_raw json in
+  let post_obj =
+    match optional_object_field body "post" with
+    | Ok (Some p) -> p
+    | Ok None | Error _ -> body
+  in
+  decode_fusion_evidence_post post_obj
+
+let decode_fusion_panel_group_label = function
+  | `String s -> Ok s
+  | `Assoc _ as obj ->
+      let label =
+        match optional_nonblank_string obj "label" with
+        | Ok (Some s) -> s
+        | Ok None | Error _ -> ""
+      in
+      let* models = optional_string_list obj "models" in
+      let models_s = String.concat "," models in
+      if not (String.equal label "") && not (String.equal models_s "") then
+        Ok (label ^ ":" ^ models_s)
+      else if not (String.equal models_s "") then Ok models_s
+      else if not (String.equal label "") then Ok label
+      else Ok "panel"
+  | bad -> field_type_error "panels[]" "string or panel_group object" bad
+
+let decode_fusion_judge_spec_label = function
+  | `String s -> Ok s
+  | `Assoc _ as obj ->
+      let label =
+        match optional_nonblank_string obj "label" with
+        | Ok (Some s) -> s
+        | Ok None | Error _ -> ""
+      in
+      let model =
+        match optional_nonblank_string obj "model" with
+        | Ok (Some m) -> m
+        | Ok None | Error _ -> ""
+      in
+      if not (String.equal label "") && not (String.equal model "") then
+        Ok (label ^ ":" ^ model)
+      else if not (String.equal model "") then Ok model
+      else if not (String.equal label "") then Ok label
+      else Ok "judge"
+  | bad -> field_type_error "judges[]" "string or judge_spec object" bad
+
+let decode_fusion_preset_option json =
+  let* name = required_nonblank_string json "name" in
+  let* panel_items = optional_list_field json "panels" in
+  let* panels = decode_list "panels" decode_fusion_panel_group_label panel_items in
+  let* judge = optional_nonblank_string json "judge" in
+  let* judge_items = optional_list_field json "judges" in
+  let* judges = decode_list "judges" decode_fusion_judge_spec_label judge_items in
+  let* min_answered = optional_int_field json "min_answered" in
+  Ok { name; panels; judge; judges; min_answered }
+
+let decode_fusion_config_options json =
+  let* _, body = unwrap_v2_or_raw json in
+  let cfg =
+    match optional_object_field body "config" with
+    | Ok (Some c) -> c
+    | Ok None | Error _ -> body
+  in
+  let enabled =
+    match optional_bool_field cfg "enabled" with
+    | Ok (Some b) -> b
+    | Ok None | Error _ -> true
+  in
+  let default_preset =
+    match optional_nonblank_string cfg "default_preset" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let staged_judge_group_size = int_or_zero cfg "staged_judge_group_size" in
+  let* preset_items = optional_list_field cfg "presets" in
+  let* presets =
+    decode_list "presets" decode_fusion_preset_option preset_items
+  in
+  Ok { enabled; default_preset; staged_judge_group_size; presets }
+
+type addon_catalog_entry =
+  | Catalog_folder of { path : string }
+  | Catalog_issue of { path : string; message : string }
+  | Catalog_package of {
+      manifest_path : string;
+      title : string;
+      revision : string;
+      description : string option;
+      ui_category : string option;
+    }
+
+type addon_package_catalog = {
+  directory : string;
+  parent : string option;
+  entries : addon_catalog_entry list;
+}
+
+type addon_package_preview = {
+  manifest_path : string;
+  id : string;
+  revision : string;
+  title : string;
+  ui_category : string option;
+  execution_kind : string;
+  image_name : string option;
+  image_state : string option;
+  exported_tools : string list;
+  contributions : string list;
+  command : string list;
+  directory : string option;
+}
+
+let decode_addon_catalog_entry json =
+  let* kind = required_nonblank_string json "kind" in
+  match kind with
+  | "folder" ->
+      let* path = required_nonblank_string json "path" in
+      Ok (Catalog_folder { path })
+  | "issue" ->
+      let* path = required_nonblank_string json "path" in
+      let* message = required_string_field json "message" in
+      Ok (Catalog_issue { path; message })
+  | "package" ->
+      let* manifest_path = required_nonblank_string json "manifest_path" in
+      let* title = required_nonblank_string json "title" in
+      let* revision =
+        match optional_nonblank_string json "revision" with
+        | Ok (Some r) -> Ok r
+        | Ok None -> Ok "0"
+        | Error _ as err -> err
+      in
+      let* description = optional_nonblank_string json "description" in
+      let* ui_category = optional_nonblank_string json "ui_category" in
+      Ok
+        (Catalog_package
+           { manifest_path; title; revision; description; ui_category })
+  | other -> Error (Printf.sprintf "unknown package catalog entry kind %S" other)
+
+let decode_addon_package_catalog json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* directory =
+    match optional_string_field body "directory" with
+    | Ok (Some d) -> Ok d
+    | Ok None -> Ok ""
+    | Error _ as err -> err
+  in
+  let* parent = optional_nonblank_string body "parent" in
+  let* items = required_list_field body "entries" in
+  let* entries = decode_list "entries" decode_addon_catalog_entry items in
+  Ok { directory; parent; entries }
+
+let decode_addon_package_preview json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* manifest_path = required_nonblank_string body "manifest_path" in
+  let* pkg = required_object_field body "package" in
+  let* id = required_nonblank_string pkg "id" in
+  let* revision =
+    match optional_nonblank_string pkg "revision" with
+    | Ok (Some r) -> Ok r
+    | Ok None -> Ok "0"
+    | Error _ as err -> err
+  in
+  let* title = required_nonblank_string pkg "title" in
+  let* ui_category = optional_nonblank_string pkg "ui_category" in
+  let* command = optional_string_list pkg "command" in
+  let* directory = optional_nonblank_string pkg "directory" in
+  let* contrib_items = optional_list_field pkg "contributions" in
+  let contributions =
+    List.filter_map
+      (function
+        | `String s -> Some s
+        | `Assoc _ as obj -> (
+            match optional_nonblank_string obj "kind" with
+            | Ok (Some k) -> Some k
+            | Ok None | Error _ -> None)
+        | _ -> None)
+      contrib_items
+  in
+  let* tool_items = optional_list_field pkg "exported_tools" in
+  let exported_tools =
+    List.filter_map
+      (function
+        | `String s -> Some s
+        | `Assoc _ as obj -> (
+            match optional_nonblank_string obj "name" with
+            | Ok (Some n) -> Some n
+            | Ok None | Error _ -> None)
+        | _ -> None)
+      tool_items
+  in
+  let* exec_opt = optional_object_field body "execution" in
+  let execution_kind, image_name, image_state =
+    match exec_opt with
+    | None -> ("host_process", None, None)
+    | Some ex ->
+        let kind =
+          match optional_nonblank_string ex "kind" with
+          | Ok (Some k) -> k
+          | Ok None | Error _ -> "host_process"
+        in
+        let img_name =
+          match optional_nonblank_string ex "image_name" with
+          | Ok v -> v
+          | Error _ -> None
+        in
+        let img_state =
+          match optional_object_field ex "image" with
+          | Ok (Some img) -> (
+              match optional_nonblank_string img "state" with
+              | Ok v -> v
+              | Error _ -> None)
+          | Ok None | Error _ -> None
+        in
+        (kind, img_name, img_state)
+  in
+  Ok
+    {
+      manifest_path;
+      id;
+      revision;
+      title;
+      ui_category;
+      execution_kind;
+      image_name;
+      image_state;
+      exported_tools;
+      contributions;
+      command;
+      directory;
+    }
+
+type connector_name_mapping = {
+  id : string;
+  name : string;
+}
+
+type connector_names_page = {
+  connector_id : string;
+  kind : string;
+  total : int;
+  has_more : bool;
+  mappings : connector_name_mapping list;
+}
+
+let decode_connector_name_mapping json =
+  let* id = required_nonblank_string json "id" in
+  let* name = required_nonblank_string json "name" in
+  Ok { id; name }
+
+let decode_connector_names_page json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* connector_id = required_nonblank_string body "connector_id" in
+  let* kind =
+    match optional_nonblank_string body "kind" with
+    | Ok (Some k) -> Ok k
+    | Ok None -> Ok "channel"
+    | Error _ as err -> err
+  in
+  let total = int_or_zero body "total" in
+  let has_more =
+    match optional_bool_field body "has_more" with
+    | Ok (Some b) -> b
+    | Ok None | Error _ -> false
+  in
+  let* items = optional_list_field body "mappings" in
+  let* mappings = decode_list "mappings" decode_connector_name_mapping items in
+  Ok { connector_id; kind; total; has_more; mappings }

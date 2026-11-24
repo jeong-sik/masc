@@ -14,6 +14,35 @@ val repository_activity_path : repo_id:string -> string
 (** [GET /api/v1/ide/repository-activity] for the last 24 hours. *)
 val system_logs_path : ?limit:int -> ?level:string -> unit -> string
 val system_logs_stream_path : ?since_seq:int -> unit -> string
+val activity_events_path : ?limit:int -> ?after_seq:int -> unit -> string
+val keeper_runtime_trace_path : keeper:string -> ?limit:int -> unit -> string
+
+type workspace_scope =
+  | Ws_project
+  | Ws_repo of string
+  | Ws_keeper of string
+
+val equal_workspace_scope : workspace_scope -> workspace_scope -> bool
+val workspace_scope_label : workspace_scope -> string
+val workspace_children_path :
+  scope:workspace_scope -> path:string -> ?limit:int -> unit -> string
+val workspace_files_path :
+  scope:workspace_scope -> ?path:string -> unit -> string
+val workspace_search_path :
+  scope:workspace_scope ->
+  ?path:string ->
+  query:string ->
+  ?ignore_case:bool ->
+  unit ->
+  string
+val workspace_file_path : scope:workspace_scope -> path:string -> unit -> string
+val git_branches_path : scope:workspace_scope -> ?path:string -> unit -> string
+val git_worktrees_path : scope:workspace_scope -> ?path:string -> unit -> string
+val git_status_path : scope:workspace_scope -> unit -> string
+val git_blame_path : scope:workspace_scope -> path:string -> unit -> string
+val git_log_path :
+  scope:workspace_scope -> path:string -> ?limit:int -> unit -> string
+val git_diff_path : scope:workspace_scope -> path:string -> unit -> string
 
 (** {1 Unified Sandboxes (microVM + Remote SSH + Docker + Host Storage/GC)} *)
 
@@ -314,3 +343,149 @@ type system_log_frame = { reset : bool; entries : system_log_entry list }
     matched than one page, or the cursor came from an earlier server run. *)
 
 val decode_system_log_frame : Yojson.Safe.t -> (system_log_frame, string) result
+
+(** {1 Wave 3: Activity Backfill, Runtime Trace, Workspace Code Browser & Git} *)
+
+type activity_event_item = {
+  seq : int;
+  ts_ms : int;
+  ts_iso : string;
+  kind : string;
+  actor_id : string option;
+  actor_kind : string option;
+  subject_id : string option;
+  tags : string list;
+  payload : Yojson.Safe.t;
+}
+
+val decode_activity_events_page :
+  Yojson.Safe.t -> (activity_event_item list * int, string) result
+
+type runtime_trace_snapshot = {
+  keeper : string;
+  trace_id : string;
+  turn_id : int option;
+  health : string;
+  stale_reason : string option;
+  manifest_total_rows : int;
+  manifest_returned_rows : int;
+  receipt_returned_rows : int;
+  raw : Yojson.Safe.t;
+}
+
+val decode_runtime_trace :
+  Yojson.Safe.t -> (runtime_trace_snapshot, string) result
+
+type workspace_tree_node = {
+  path : string;
+  label : string;
+  depth : int;
+  parent : string;
+  has_children : bool;
+  diff : string option;
+  keeper_id : string option;
+}
+
+type workspace_files_catalog = {
+  root : string;
+  files : string list;
+}
+
+type workspace_search_match = {
+  path : string;
+  line : int;
+  text : string;
+}
+
+type workspace_search_result = {
+  root : string;
+  query : string;
+  matches : workspace_search_match list;
+  truncated : bool;
+}
+
+type workspace_file_content = {
+  path : string;
+  content : string;
+  revision : string;
+}
+
+type git_branch_entry = {
+  name : string;
+  current : bool;
+  upstream_name : string option;
+  ahead : int option;
+  behind : int option;
+  commit_epoch : int;
+  subject : string;
+}
+
+type git_worktree_entry = {
+  name : string;
+  main : bool;
+  head : string option;
+  state : string;
+  branch : string option;
+  locked : bool;
+  prunable : bool;
+}
+
+type git_status_change = {
+  path : string;
+  staged : bool;
+  unstaged : bool;
+  untracked : bool;
+  conflicted : bool;
+}
+
+type git_status_snapshot = {
+  head : string option;
+  upstream : string option;
+  total : int;
+  changes : git_status_change list;
+}
+
+type git_blame_entry = {
+  file_path : string;
+  line_start : int;
+  line_end : int;
+  keeper_id : string;
+  timestamp_ms : int;
+  kind : string;
+}
+
+type git_log_commit = {
+  hash : string;
+  timestamp_ms : int;
+  author : string;
+  subject : string;
+}
+
+type git_diff_line = {
+  kind : [ `Add | `Delete | `Context ];
+  old_line : int option;
+  new_line : int option;
+  text : string;
+}
+
+type git_diff_snapshot = {
+  has_changes : bool;
+  lines : git_diff_line list;
+}
+
+val decode_workspace_children :
+  Yojson.Safe.t -> (workspace_tree_node list, string) result
+val decode_workspace_files :
+  Yojson.Safe.t -> (workspace_files_catalog, string) result
+val decode_workspace_search :
+  Yojson.Safe.t -> (workspace_search_result, string) result
+val decode_workspace_file :
+  path:string -> Yojson.Safe.t -> (workspace_file_content, string) result
+val decode_git_branches :
+  Yojson.Safe.t -> (git_branch_entry list, string) result
+val decode_git_worktrees :
+  Yojson.Safe.t -> (git_worktree_entry list, string) result
+val decode_git_status : Yojson.Safe.t -> (git_status_snapshot, string) result
+val decode_git_blame : Yojson.Safe.t -> (git_blame_entry list, string) result
+val decode_git_log : Yojson.Safe.t -> (git_log_commit list, string) result
+val decode_git_diff : Yojson.Safe.t -> (git_diff_snapshot, string) result

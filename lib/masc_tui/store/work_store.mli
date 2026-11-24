@@ -35,11 +35,27 @@ type task_status_filter =
   | Status_done
 (** Tasks status filter chip on [2 Work > Tasks]. *)
 
+type verification_dive_tab =
+  | Verif_tab_evidence
+  | Verif_tab_summary
+  | Verif_tab_specs
+  | Verif_tab_tlc
+
 type t = {
   active_tab : Nav.work_tab;
   planning : Wire_work.planning_snapshot Observed.t;
   backlog_counts : Wire_work.task_backlog_counts option;
   verifications : Wire_work.verification_request list Observed.t;
+  harness_health : Wire_work.harness_health Observed.t;
+  harness_selected_index : int;
+  harness_scroll_offset : int;
+  verification_evidence :
+    (string * Wire_work.verification_evidence_bundle) Observed.t;
+  verification_evidence_auth_denied : bool;
+  verification_summary : Wire_work.verification_summary Observed.t;
+  verification_specs : Wire_work.verification_specs Observed.t;
+  verification_tlc_results : Wire_work.verification_tlc_results Observed.t;
+  verification_dive_tab : verification_dive_tab;
   schedules : (Wire_work.schedule_row list * string option) Observed.t;
   asks : Wire_work.ask_row list Observed.t;
   tool_approvals : Wire_work.held_tool_approval list Observed.t;
@@ -158,3 +174,28 @@ val cycle_task_status_filter : t -> t
 val toggle_verification_view : t -> t
 val toggle_expanded : string -> t -> t
 val mark_stale_all : t -> t
+
+val equal_verification_dive_tab :
+  verification_dive_tab -> verification_dive_tab -> bool
+val cycle_verification_dive_tab : t -> t
+val set_verification_dive_tab : verification_dive_tab -> t -> t
+val apply_harness_health :
+  observed_at:Clock.Mono.t -> Wire_work.harness_health -> t -> t
+val filtered_harness_verdicts : t -> Wire_work.harness_verdict_row list
+val selected_harness_verdict : t -> Wire_work.harness_verdict_row option
+val apply_verification_evidence :
+  observed_at:Clock.Mono.t ->
+  verification_id:string ->
+  Wire_work.verification_evidence_bundle ->
+  t ->
+  t
+val mark_verification_evidence_denied :
+  at:Clock.Mono.t -> reason:string -> t -> t
+val verification_evidence_for :
+  verification_id:string -> t -> Wire_work.verification_evidence_bundle option
+val apply_verification_summary :
+  observed_at:Clock.Mono.t -> Wire_work.verification_summary -> t -> t
+val apply_verification_specs :
+  observed_at:Clock.Mono.t -> Wire_work.verification_specs -> t -> t
+val apply_verification_tlc_results :
+  observed_at:Clock.Mono.t -> Wire_work.verification_tlc_results -> t -> t

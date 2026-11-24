@@ -273,6 +273,142 @@ type http_reply =
       result : (Wire_config.patch_response, http_error) result;
     }
   | Reply_action_ack of { label : Say.t; result : (unit, http_error) result }
+  (* Wave 3 Replies *)
+  | Reply_fusion_runs_snapshot of
+      (Wire_runtime.fusion_runs_snapshot, http_error) result
+  | Reply_fusion_run_detail of {
+      run_id : string;
+      result : (Wire_runtime.fusion_run_detail, http_error) result;
+    }
+  | Reply_fusion_config of
+      (Wire_runtime.fusion_config_options, http_error) result
+  | Reply_fusion_board_evidence of {
+      post_id : string;
+      result : (Wire_runtime.fusion_evidence_post, http_error) result;
+    }
+  | Reply_harness_health of (Wire_work.harness_health, http_error) result
+  | Reply_verification_evidence of {
+      verification_id : string;
+      result : (Wire_work.verification_evidence_bundle, http_error) result;
+    }
+  | Reply_verification_summary of
+      (Wire_work.verification_summary, http_error) result
+  | Reply_verification_specs of
+      (Wire_work.verification_specs, http_error) result
+  | Reply_verification_tlc_results of
+      (Wire_work.verification_tlc_results, http_error) result
+  | Reply_activity_events of
+      (Wire_infra.activity_event_item list * int, http_error) result
+  | Reply_keeper_runtime_trace of {
+      keeper : string;
+      result : (Wire_infra.runtime_trace_snapshot, http_error) result;
+    }
+  | Reply_keeper_metrics of {
+      keeper : string;
+      result : (Wire_keeper_context.keeper_metrics_snapshot, http_error) result;
+    }
+  | Reply_keeper_sandbox_logs of {
+      keeper : string;
+      result : (Wire_keeper_context.keeper_sandbox_logs, http_error) result;
+    }
+  | Reply_workspace_children of {
+      scope : Wire_infra.workspace_scope;
+      dir : string;
+      result : (Wire_infra.workspace_tree_node list, http_error) result;
+    }
+  | Reply_workspace_files of {
+      scope : Wire_infra.workspace_scope;
+      result : (Wire_infra.workspace_files_catalog, http_error) result;
+    }
+  | Reply_workspace_search of {
+      scope : Wire_infra.workspace_scope;
+      result : (Wire_infra.workspace_search_result, http_error) result;
+    }
+  | Reply_workspace_file of {
+      scope : Wire_infra.workspace_scope;
+      path : string;
+      result : (Wire_infra.workspace_file_content, http_error) result;
+    }
+  | Reply_git_branches of {
+      scope : Wire_infra.workspace_scope;
+      result : (Wire_infra.git_branch_entry list, http_error) result;
+    }
+  | Reply_git_worktrees of {
+      scope : Wire_infra.workspace_scope;
+      result : (Wire_infra.git_worktree_entry list, http_error) result;
+    }
+  | Reply_git_status of {
+      scope : Wire_infra.workspace_scope;
+      result : (Wire_infra.git_status_snapshot, http_error) result;
+    }
+  | Reply_git_blame of {
+      scope : Wire_infra.workspace_scope;
+      path : string;
+      result : (Wire_infra.git_blame_entry list, http_error) result;
+    }
+  | Reply_git_log of {
+      scope : Wire_infra.workspace_scope;
+      path : string;
+      result : (Wire_infra.git_log_commit list, http_error) result;
+    }
+  | Reply_git_diff of {
+      scope : Wire_infra.workspace_scope;
+      path : string;
+      result : (Wire_infra.git_diff_snapshot, http_error) result;
+    }
+  | Reply_memory_health_keeper of {
+      keeper : string;
+      result :
+        (Wire_knowledge.keeper_memory_health_row option, http_error) result;
+    }
+  | Reply_workspace_memory_ledger of
+      (Wire_knowledge.workspace_memory_ledger, http_error) result
+  | Reply_workspace_memory_context of
+      (Wire_knowledge.workspace_memory_context, http_error) result
+  | Reply_keeper_memory_journal of {
+      keeper : string;
+      result : (Wire_knowledge.keeper_memory_journal, http_error) result;
+    }
+  | Reply_oauth_providers of
+      (Wire_keeper_context.oauth_providers_snapshot, http_error) result
+  | Reply_oauth_attached_tools of {
+      keeper : string;
+      result :
+        (Wire_keeper_context.oauth_attached_tools_snapshot, http_error) result;
+    }
+  | Reply_oauth_attempt_status of {
+      keeper : string;
+      result : (Wire_keeper_context.oauth_attempt_status, http_error) result;
+    }
+  | Reply_oauth_login of {
+      keeper : string;
+      result : (Wire_keeper_context.oauth_login_result, http_error) result;
+    }
+  | Reply_oauth_mutation of {
+      keeper : string;
+      label : Say.t;
+      result : (unit, http_error) result;
+    }
+  | Reply_github_identity of {
+      keeper : string;
+      result :
+        (Wire_keeper_context.github_identity_observation, http_error) result;
+    }
+  | Reply_github_token_save of {
+      keeper : string;
+      result :
+        (Wire_keeper_context.github_identity_observation, http_error) result;
+    }
+  | Reply_addon_package_catalog of
+      (Wire_runtime.addon_package_catalog, http_error) result
+  | Reply_addon_package_preview of {
+      manifest_path : string;
+      result : (Wire_runtime.addon_package_preview, http_error) result;
+    }
+  | Reply_connector_names of {
+      connector : string;
+      result : (Wire_runtime.connector_names_page, http_error) result;
+    }
 
 type sse_event =
   | Sse_observer_handshake of Wire_observer.handshake_result
@@ -341,3 +477,10 @@ type t =
     }
   | Voice_event of voice_event
   | Stream_gap of int
+  | Github_login_chunk of { epoch : Epoch.t; keeper : string; text : string }
+  | Github_login_done of {
+      epoch : Epoch.t;
+      keeper : string;
+      observation : Wire_keeper_context.github_identity_observation option;
+      error : string option;
+    }

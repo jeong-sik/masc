@@ -18,6 +18,12 @@ val keeper_tool_approvals_path : string
 val keeper_tool_approval_path : string
 val gate_path : string
 val candle_ledger_path : ?limit:int -> unit -> string
+val harness_health_path : string
+val verification_evidence_path :
+  task_id:string -> verification_id:string -> string
+val verification_summary_path : string
+val verification_specs_path : string
+val verification_tlc_results_path : string
 
 (** {1 Goals (Strict [goal_phase], Legacy [status] Forbidden)} *)
 
@@ -517,3 +523,139 @@ type candle_ledger = {
 }
 
 val decode_candle_ledger : Yojson.Safe.t -> (candle_ledger, string) result
+
+(** {1 Wave 3: Harness Health & Verification Evidence / Summary / Specs / TLC} *)
+
+type harness_verdict_row = {
+  timestamp : float;
+  task_id : string;
+  task_title : string;
+  agent_name : string;
+  gate : string;
+  verdict : string;
+  evaluator_runtime : string;
+  fallback_reason : string option;
+  notes_hash : string;
+}
+
+type harness_calibration = {
+  total_verdicts : int;
+  approve_count : int;
+  reject_count : int;
+  labeled_count : int;
+  false_positive_count : int;
+  false_negative_count : int;
+  agreement_rate : float;
+  fallback_count : int;
+  distinct_runtime_count : int;
+  verdicts_with_generator_runtime : int;
+  distinct_runtime_rate : float option;
+  recent_fallback_reasons : string list;
+  unreadable_record_count : int;
+}
+
+type harness_health = {
+  generated_at : float;
+  scope_note : string;
+  evaluator_status : string;
+  fallback_ratio : float;
+  last_signal_at : float option;
+  calibration : harness_calibration;
+  recent_verdicts : harness_verdict_row list;
+  unreadable_verdicts_count : int;
+}
+
+val is_valid_notes_hash : string -> bool
+(** Strict 64-character lowercase hexadecimal validator matching server
+    [POST /api/v1/dashboard/harness-label]. *)
+
+val decode_harness_health : Yojson.Safe.t -> (harness_health, string) result
+
+type verification_evidence_item =
+  | Verif_ev_note of string
+  | Verif_ev_artifact of {
+      reference : string;
+      content : string;
+      bytes : int;
+      truncated : bool;
+    }
+  | Verif_ev_binary of {
+      reference : string;
+      bytes : int;
+      sha256 : string;
+      format : string;
+      body : string option;
+    }
+  | Verif_ev_collab of {
+      reference : string;
+      content : string;
+      sha256 : string;
+    }
+  | Verif_ev_unreadable of {
+      reference : string option;
+      code : string;
+      detail : string option;
+    }
+
+type verification_evidence_bundle = {
+  task_id : string;
+  verification_id : string;
+  producer : string option;
+  authority_kind : string;
+  authority_actor : string;
+  available : bool;
+  unavailable_reason : string option;
+  items : verification_evidence_item list;
+}
+
+type verification_summary = {
+  updated_at : string;
+  total : int;
+  pending : int option;
+  approved : int option;
+  rejected : int option;
+  raw : Yojson.Safe.t;
+}
+
+type tla_spec_entry = {
+  name : string;
+  path : string;
+  category : string;
+  has_clean_cfg : bool;
+  has_buggy_cfg : bool;
+  mtime_iso : string;
+}
+
+type verification_specs = {
+  updated_at : string;
+  specs_dir : string option;
+  entries : tla_spec_entry list;
+}
+
+type tlc_result_entry = {
+  spec_name : string;
+  cfg_name : string;
+  category : string;
+  status : string;
+  states_explored : int option;
+  distinct_states : int option;
+  diameter : int option;
+  last_run_at : string option;
+  violation : string option;
+  log_path : string option;
+}
+
+type verification_tlc_results = {
+  updated_at : string;
+  results_dir : string option;
+  entries : tlc_result_entry list;
+}
+
+val decode_verification_evidence :
+  Yojson.Safe.t -> (verification_evidence_bundle, string) result
+val decode_verification_summary :
+  Yojson.Safe.t -> (verification_summary, string) result
+val decode_verification_specs :
+  Yojson.Safe.t -> (verification_specs, string) result
+val decode_verification_tlc_results :
+  Yojson.Safe.t -> (verification_tlc_results, string) result

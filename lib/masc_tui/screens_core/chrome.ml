@@ -582,6 +582,8 @@ let compact_keeper_tab_label ~(lang : Say.lang) ~compact tab =
     | Nav.Keeper_work_candle -> Say.resolve lang (Say.make ~ko:"작업" ~en:"Work")
     | Nav.Keeper_sandbox -> Say.resolve lang (Say.make ~ko:"격리" ~en:"Sbox")
     | Nav.Keeper_config -> Say.resolve lang (Say.make ~ko:"설정" ~en:"Cfg")
+    | Nav.Keeper_logs -> Say.resolve lang (Say.make ~ko:"로그" ~en:"Logs")
+    | Nav.Keeper_identity -> Say.resolve lang (Say.make ~ko:"인증" ~en:"Auth")
 
 let compact_work_tab_label ~(lang : Say.lang) ~compact tab =
   if not compact then Say.resolve lang (Nav.work_tab_label tab)
@@ -592,6 +594,7 @@ let compact_work_tab_label ~(lang : Say.lang) ~compact tab =
     | Nav.Work_schedules -> Say.resolve lang (Say.make ~ko:"일정" ~en:"Sched")
     | Nav.Work_inbox -> Say.resolve lang (Say.make ~ko:"수신함" ~en:"Inbox")
     | Nav.Work_candle_scorecard -> Say.resolve lang (Say.make ~ko:"캔들·성과" ~en:"Candle")
+    | Nav.Work_harness -> Say.resolve lang (Say.make ~ko:"하네스" ~en:"Harness")
 
 let compact_knowledge_tab_label ~(lang : Say.lang) ~compact tab =
   if not compact then Say.resolve lang (Nav.knowledge_tab_label tab)
@@ -620,6 +623,7 @@ let compact_infra_tab_label ~(lang : Say.lang) ~compact tab =
     match tab with
     | Nav.Infra_sandboxes -> Say.resolve lang (Say.make ~ko:"샌드박스" ~en:"Sbox")
     | Nav.Infra_repos_changes -> Say.resolve lang (Say.make ~ko:"저장소·변경" ~en:"Repos")
+    | Nav.Infra_code -> Say.resolve lang (Say.make ~ko:"코드" ~en:"Code")
     | Nav.Infra_activity_logs -> Say.resolve lang (Say.make ~ko:"활동·로그" ~en:"Logs")
 
 let active_filter_text (m : Model.t) =
@@ -717,7 +721,7 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
       else rect
     in
     let x = ref (rect.x + left_pad) in
-    let draw_tab_list tabs =
+    let draw_tab_list ?(gap = gap) tabs =
       let rec loop first = function
         | [] -> ()
         | (label, is_active) :: rest ->
@@ -768,14 +772,15 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
              ~style:crumb_style crumb
          in
          x := !x + adv + 2;
+         let use_compact_kt = compact || rect.w < 150 in
          let tabs =
            List.map
              (fun t ->
-               ( compact_keeper_tab_label ~lang ~compact t,
+               ( compact_keeper_tab_label ~lang ~compact:use_compact_kt t,
                  Nav.equal_keeper_tab t tab ))
              Nav.all_keeper_tabs
          in
-         draw_tab_list tabs
+         draw_tab_list ~gap:(if use_compact_kt then 1 else gap) tabs
      | Some (Nav.Dive_work target) ->
          let label =
            match target with
@@ -830,6 +835,8 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
            match target with
            | Nav.Tool_dive name ->
                Say.resolve lang (Say.make ~ko:"도구" ~en:"Tool") ^ " " ^ name
+           | Nav.Fusion_dive run_id ->
+               Say.resolve lang (Say.make ~ko:"퓨전" ~en:"Fusion") ^ " " ^ run_id
          in
          let crumb =
            Printf.sprintf "%s %s %s"
@@ -857,6 +864,15 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
                  Printf.sprintf "%s #%d"
                    (Say.resolve lang (Say.make ~ko:"이력" ~en:"Incident"))
                    id )
+           | Nav.Runtime_trace_dive keeper ->
+               ( Nav.workspace_label Nav.Infra,
+                 Say.resolve lang (Say.make ~ko:"런타임 추적" ~en:"Trace")
+                 ^ " " ^ keeper )
+           | Nav.Log_detail_dive seq ->
+               ( Nav.workspace_label Nav.Infra,
+                 Printf.sprintf "%s #%d"
+                   (Say.resolve lang (Say.make ~ko:"로그" ~en:"Log"))
+                   seq )
          in
          let crumb =
            Printf.sprintf "%s %s %s"
@@ -886,7 +902,8 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
                      | Nav.Work_tasks
                      | Nav.Work_schedules
                      | Nav.Work_inbox
-                     | Nav.Work_candle_scorecard ->
+                     | Nav.Work_candle_scorecard
+                     | Nav.Work_harness ->
                          base
                    in
                    (lbl, Nav.equal_work_tab t model.work.active_tab))
@@ -932,7 +949,7 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
                          Nav.equal_keeper_tab t model.fleet.keeper_dive_tab ))
                      Nav.all_keeper_tabs
                  in
-                 draw_tab_list tabs
+                 draw_tab_list ~gap:(if use_compact_kt then 1 else gap) tabs
              | None ->
                  let tabs =
                    List.map
@@ -1752,7 +1769,8 @@ let render_sidebar grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                     | Nav.Work_tasks
                     | Nav.Work_schedules
                     | Nav.Work_inbox
-                    | Nav.Work_candle_scorecard )
+                    | Nav.Work_candle_scorecard
+                    | Nav.Work_harness )
                 | Nav.Menu_knowledge _
                 | Nav.Menu_keepers
                 | Nav.Menu_keeper_tab _

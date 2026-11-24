@@ -3071,6 +3071,31 @@ let render_fusion ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         | Wire_runtime.Fusion_completed | Wire_runtime.Fusion_failed _ -> acc)
       0 runs
   in
+  let preset_pill =
+    if rt.fusion_config_auth_denied then
+      [
+        {
+          H.label = "Presets: CanAdmin";
+          active = false;
+          tone = Some Theme.Status_attention;
+          glyph = Some Glyph.Warning_triangle;
+        };
+      ]
+    else
+      match Observed.to_option rt.fusion_config with
+      | Some cfg ->
+          [
+            {
+              H.label =
+                Printf.sprintf "Presets (%d · %s)" (List.length cfg.presets)
+                  cfg.default_preset;
+              active = false;
+              tone = Some Theme.Status_active;
+              glyph = None;
+            };
+          ]
+      | None -> []
+  in
   let pills =
     [
       {
@@ -3093,22 +3118,23 @@ let render_fusion ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         glyph = None;
       };
     ]
+    @ preset_pill
   in
   ignore
     (H.draw_pills ~grid ~rect:bar_rect ~theme
        ~right_hint:
          (Say.resolve lang
-            (Say.make ~ko:"[f] 새 퓨전 패널 실행 · [r] 새로고침"
-               ~en:"[f] Launch Fusion Panel · [r] Refresh"))
+            (Say.make ~ko:"[Enter] 상세 다이브 · [e] 보드 증거 · [f] 실행 · [Tab] 스크롤"
+               ~en:"[Enter] Dive · [e] Evidence · [f] Launch · [Tab] Scroll"))
        pills);
   let left_rect, right_rect =
-    Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.54
-      ~top_ratio:0.52 bp body_rect
+    Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.44
+      ~top_ratio:0.46 bp body_rect
   in
   let left_inner =
     Card.draw ~cache grid ~rect:left_rect ~theme
       (H.card_spec ~focused:(Model.pane_focused model 0)
-         ~hotkey:(Say.resolve lang (Say.make ~ko:"[f] 실행" ~en:"[f] Launch"))
+         ~hotkey:(Say.resolve lang (Say.make ~ko:"[Enter] 다이브 · [f] 실행" ~en:"[Enter] Dive · [f] Launch"))
          (Say.resolve lang (Say.make ~ko:"Fusion 팬아웃 목록" ~en:"Fusion Panel Runs")))
   in
   if not (Rect.is_empty left_inner) then begin
@@ -3219,17 +3245,11 @@ let render_fusion ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp left_inner)
           ~theme ~lang obs
   end;
-  let det_rect, exact_rect =
-    match
-      Layout.split_v_bp bp right_rect [ Layout.Ratio 0.56; Layout.Flex 1 ]
-    with
-    | [ a; b ] -> (a, b)
-    | _ -> (right_rect, Rect.empty)
-  in
   let det_inner =
-    Card.draw ~cache grid ~rect:det_rect ~theme
+    Card.draw ~cache grid ~rect:right_rect ~theme
       (H.card_spec ~focused:(Model.pane_focused model 1)
-         (Say.resolve lang (Say.make ~ko:"선택 Fusion 상세" ~en:"Selected Fusion Run")))
+         ~hotkey:(Say.resolve lang (Say.make ~ko:"[Enter] 전체 보기 · [e] 증거" ~en:"[Enter] Dive · [e] Evidence"))
+         (Say.resolve lang (Say.make ~ko:"Fusion 파이프라인 상세" ~en:"Fusion Pipeline Detail")))
   in
   if not (Rect.is_empty det_inner) then begin
     let c = H.pad_content ~bp det_inner in
@@ -3239,90 +3259,30 @@ let render_fusion ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
           (Say.resolve lang
              (Say.make ~ko:"Fusion 실행을 선택하세요" ~en:"Select a Fusion run"))
     | Some f ->
-        let y = ref c.y and bot = Rect.bottom c in
-        let put_kv key v =
-          if !y < bot then begin
-            H.put_kv ~grid ~clip:c ~x:c.x ~y:!y ~max_w:c.w ~theme ~key_w:10
-              ~key v;
-            incr y
-          end
+        let lines =
+          Update_nav.fusion_detail_lines ~width:c.w model ~run_id:f.run_id
         in
-        put_kv "Run ID" f.run_id;
-        put_kv (Say.resolve lang (Say.make ~ko:"키퍼" ~en:"Keeper")) ("@" ^ f.keeper);
-        put_kv (Say.resolve lang (Say.make ~ko:"프리셋" ~en:"Preset"))
-          (Printf.sprintf "%s · %s" f.preset
-             (Wire_runtime.fusion_topology_to_string f.topology));
-        let st_s =
-          match f.status with
-          | Wire_runtime.Fusion_running -> "Running (" ^ f.stage ^ ")"
-          | Wire_runtime.Fusion_completed -> "Completed (" ^ f.stage ^ ")"
-          | Wire_runtime.Fusion_failed { code; error } ->
-              Printf.sprintf "Failed [%s]: %s" code error
-        in
-        put_kv (Say.resolve lang (Say.make ~ko:"상태" ~en:"Status")) st_s;
-        (match f.decision with
-         | Some d ->
-             put_kv (Say.resolve lang (Say.make ~ko:"판정" ~en:"Decision")) d
-         | None -> ());
-        (match f.summary with
-         | Some s when !y < bot ->
-             H.draw_divider ~grid ~rect:c ~y:!y ~theme
-               ~label:(Say.resolve lang (Say.make ~ko:"요약" ~en:"Summary")) ();
-             incr y;
-             let md_r = Rect.make ~x:c.x ~y:!y ~w:c.w ~h:(Int.max 0 (bot - !y)) in
-             if not (Rect.is_empty md_r) then
-               ignore
-                 (Markdown.draw grid ~rect:md_r ~theme ~osc8:true
-                    ~scroll:rt.detail_scroll_offset s)
-         | Some _ | None -> ())
-  end;
-  if not (Rect.is_empty exact_rect) then begin
-    let ex_inner =
-      Card.draw ~cache grid ~rect:exact_rect ~theme
-        (H.card_spec
-           (Say.resolve lang (Say.make ~ko:"Exact 레인 실행" ~en:"Exact Lane Runs")))
-    in
-    let ec = H.pad_content ~bp ex_inner in
-    if not (Rect.is_empty ec) then
-      if exact_runs = [] then
-        H.draw_empty_notice ~grid ~rect:ec ~theme
-          (Say.resolve lang
-             (Say.make ~ko:"최근 Exact 레인 실행 없음" ~en:"No recent Exact lane runs"))
-      else
-        let y = ref ec.y and bot = Rect.bottom ec in
-        List.iter
-          (fun (r : Wire_runtime.exact_lane_run) ->
-            if !y < bot then begin
-              let note =
-                match r.status with
-                | Wire_runtime.Exact_output
-                    (Wire_runtime.Exact_failed { code; detail }) ->
-                    " · " ^ code ^ " · " ^ detail
-                | Wire_runtime.Exact_output
-                    ( Wire_runtime.Exact_running
-                    | Wire_runtime.Exact_succeeded
-                    | Wire_runtime.Exact_cancelled
-                    | Wire_runtime.Exact_completion_persistence_failed
-                    | Wire_runtime.Exact_completion_durability_unknown )
-                | Wire_runtime.Task_verification _
-                | Wire_runtime.Goal_verification _ -> (
-                    match r.subject_id with Some s -> " · " ^ s | None -> "")
+        let max_s = Int.max 0 (List.length lines - Int.max 1 c.h) in
+        let scroll = Int.min max_s (Int.max 0 rt.detail_scroll_offset) in
+        List.iteri
+          (fun i ln ->
+            let py = c.y + i in
+            if py < Rect.bottom c then
+              let st =
+                if String.starts_with ~prefix:"[REPLAY" ln then
+                  H.status_style ~theme ~attrs:Attr.bold Theme.Status_attention
+                else if String.starts_with ~prefix:"──" ln then
+                  H.accent_style ~theme ~attrs:Attr.bold ()
+                else if String.starts_with ~prefix:"  [FAIL]" ln then
+                  H.status_style ~theme ~attrs:Attr.bold Theme.Status_critical
+                else if String.starts_with ~prefix:"  [OK]" ln then
+                  H.status_style ~theme ~attrs:Attr.bold Theme.Status_ok
+                else H.text_style ~theme ()
               in
-              let age = H.format_age ~now_unix r.started_at_unix in
-              let aw = Grapheme.display_width age in
               ignore
-                (H.put_clipped ~grid ~clip:ec ~x:ec.x ~y:!y
-                   ~max_w:(Int.max 8 (ec.w - aw - 2))
-                   ~style:(H.secondary_style ~theme ())
-                   (Printf.sprintf "%s [%s]%s" r.lane
-                      (Wire_runtime.lane_run_status_label r.status)
-                      note));
-              ignore
-                (H.put_right ~grid ~clip:ec ~right_x:(Rect.right ec) ~y:!y
-                   ~max_w:aw ~style:(H.whisper_style ~theme ()) age);
-              incr y
-            end)
-          exact_runs
+                (H.put_clipped ~grid ~clip:c ~x:c.x ~y:py ~max_w:c.w ~style:st
+                   ln))
+          (Store_scroll.drop scroll lines |> H.safe_take c.h)
   end
 
 (* --- 5. Sub-Tab 5: Tools & Usage (3 Switchable Sub-Views + Live P0 Wire Fix) --- *)
@@ -4261,13 +4221,31 @@ let render_connectors ~(model : Model.t) ~cache ~(rect : Rect.t)
     Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.50
       ~top_ratio:0.52 bp rect
   in
+  let sel_conn_names_sub =
+    match Runtime_store.selected_connector rt with
+    | Some c -> (
+        match
+          Runtime_store.connector_channel_names ~connector_id:c.connector_id rt
+        with
+        | [] -> None
+        | ns ->
+            let preview =
+              ns |> H.safe_take 3
+              |> List.map (fun (m : Wire_runtime.connector_name_mapping) ->
+                     "#" ^ m.name)
+              |> String.concat ", "
+            in
+            Some
+              (Printf.sprintf "%d named: %s" (List.length ns) preview))
+    | None -> None
+  in
   let left_inner =
     Card.draw ~cache grid ~rect:left_rect ~theme
-      (H.card_spec ~focused:(Model.pane_focused model 0)
+      (H.card_spec ?subtitle:sel_conn_names_sub ~focused:(Model.pane_focused model 0)
          ~hotkey:
            (Say.resolve lang
-              (Say.make ~ko:"[n] 바인드 · [U] 언바인드 · [r] 새로고침"
-                 ~en:"[n] Bind · [U] Unbind · [r] Refresh"))
+              (Say.make ~ko:"[n] 바인드 ([←→] 이름) · [U] 언바인드 · [r] 새로고침"
+                 ~en:"[n] Bind ([←→] names) · [U] Unbind · [r] Refresh"))
          (Say.resolve lang
             (Say.make ~ko:"채널 게이트 커넥터" ~en:"Channel Gate Connectors")))
   in
@@ -4300,7 +4278,7 @@ let render_connectors ~(model : Model.t) ~cache ~(rect : Rect.t)
               header = Say.make ~ko:"채널" ~en:"Channel";
               priority = 1;
               min_width = 8;
-              max_width = Some 16;
+              max_width = Some 20;
               weight = 2;
               align = Table.Left;
             };
@@ -4319,11 +4297,28 @@ let render_connectors ~(model : Model.t) ~cache ~(rect : Rect.t)
           List.map
             (fun (c : Wire_runtime.connector_row) ->
               let g, tone, st = connector_status_display ~lang c.connection in
+              let ch_names =
+                Runtime_store.connector_channel_names
+                  ~connector_id:c.connector_id rt
+              in
               let ch =
                 match c.channel with
-                | Some s ->
-                    if String.starts_with ~prefix:"#" s then s else "#" ^ s
-                | None -> Glyph.to_utf8 Glyph.Missing_absent
+                | Some s -> (
+                    match
+                      List.find_opt
+                        (fun (m : Wire_runtime.connector_name_mapping) ->
+                          String.equal m.id s)
+                        ch_names
+                    with
+                    | Some m -> Printf.sprintf "#%s (%s)" m.name s
+                    | None ->
+                        if String.starts_with ~prefix:"#" s then s else "#" ^ s)
+                | None -> (
+                    match ch_names with
+                    | [] -> Glyph.to_utf8 Glyph.Missing_absent
+                    | first :: _ ->
+                        Printf.sprintf "#%s (+%d)" first.name
+                          (Int.max 0 (List.length ch_names - 1)))
               in
               let name_s =
                 match c.error with
@@ -4585,7 +4580,7 @@ let render_addons_browser ~(model : Model.t) ~cache ~(rect : Rect.t)
           Printf.sprintf "%s %d/%d (%d decl)"
             (Say.resolve lang (Say.make ~ko:"애드온" ~en:"Addons"))
             live_addons (List.length addons) decl_count;
-        active = Model.pane_focused model 0;
+        active = (not rt.addon_catalog_mode) && Model.pane_focused model 0;
         tone = Some (if live_addons > 0 then Theme.Status_ok else Theme.Status_historical);
         glyph = Some (if live_addons > 0 then Glyph.Live_healthy else Glyph.Live_idle);
       };
@@ -4596,8 +4591,16 @@ let render_addons_browser ~(model : Model.t) ~cache ~(rect : Rect.t)
             (List.length clients)
             (Say.resolve lang (Say.make ~ko:"탭" ~en:"Tabs"))
             (List.length tabs);
-        active = Model.pane_focused model 1;
+        active = (not rt.addon_catalog_mode) && Model.pane_focused model 1;
         tone = Some (if clients <> [] then Theme.Status_active else Theme.Status_historical);
+        glyph = None;
+      };
+      {
+        H.label =
+          Say.resolve lang
+            (Say.make ~ko:"[p] 패키지 카탈로그" ~en:"[p] Package Catalog");
+        active = rt.addon_catalog_mode;
+        tone = Some Theme.Status_ai;
         glyph = None;
       };
     ]
@@ -4619,14 +4622,229 @@ let render_addons_browser ~(model : Model.t) ~cache ~(rect : Rect.t)
   ignore
     (H.draw_pills ~grid ~rect:bar_rect ~theme
        ~right_hint:
-         (Say.resolve lang
-            (Say.make ~ko:"[Tab] 좌/우 · [Space] 클라/탭 · [t] 탭 새로고침 · [o] URL 열기"
-               ~en:"[Tab] Pane · [Space] Client/Tab · [t] Tabs · [o] Open URL"))
+         (if rt.addon_catalog_mode then
+            Say.resolve lang
+              (Say.make ~ko:"[Enter] 열기/미리보기 · [Tab] 좌/우 · [p] 런타임 복귀"
+                 ~en:"[Enter] Open/Preview · [Tab] Pane · [p] Runtime view")
+          else
+            Say.resolve lang
+              (Say.make ~ko:"[p] 카탈로그 · [Tab] 좌/우 · [Space] 클라/탭 · [t] 탭"
+                 ~en:"[p] Catalog · [Tab] Pane · [Space] Client/Tab · [t] Tabs"))
        pills);
   let left_rect, right_rect =
     Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.52
       ~top_ratio:0.50 bp body_rect
   in
+  if rt.addon_catalog_mode then begin
+    let entries = Runtime_store.filtered_addon_catalog_entries rt in
+    let dir_sub =
+      match Observed.to_option rt.addon_package_catalog with
+      | Some cat -> Some cat.directory
+      | None -> None
+    in
+    let cat_inner =
+      Card.draw ~cache grid ~rect:left_rect ~theme
+        (H.card_spec ?subtitle:dir_sub ~focused:(Model.pane_focused model 0)
+           ~hotkey:
+             (Say.resolve lang
+                (Say.make ~ko:"[Enter] 열기/미리보기 · [p] 런타임"
+                   ~en:"[Enter] Open/Preview · [p] Runtime"))
+           (Say.resolve lang
+              (Say.make ~ko:"애드온 패키지 카탈로그" ~en:"Addon Package Catalog")))
+    in
+    if not (Rect.is_empty cat_inner) then begin
+      match rt.addon_package_catalog with
+      | Observed.Value _ when entries <> [] ->
+          let columns : Table.column list =
+            [
+              {
+                id = "kind";
+                header = Say.make ~ko:"유형" ~en:"Kind";
+                priority = 1;
+                min_width = 4;
+                max_width = Some 6;
+                weight = 1;
+                align = Table.Left;
+              };
+              {
+                id = "cat";
+                header = Say.make ~ko:"분류" ~en:"Category";
+                priority = 1;
+                min_width = 8;
+                max_width = Some 16;
+                weight = 1;
+                align = Table.Left;
+              };
+              {
+                id = "name";
+                header = Say.make ~ko:"패키지 / 폴더" ~en:"Package / Folder";
+                priority = 0;
+                min_width = 16;
+                max_width = None;
+                weight = 3;
+                align = Table.Left;
+              };
+              {
+                id = "desc";
+                header = Say.make ~ko:"설명" ~en:"Description";
+                priority = 2;
+                min_width = 12;
+                max_width = None;
+                weight = 2;
+                align = Table.Left;
+              };
+            ]
+          in
+          let rows =
+            List.mapi
+              (fun idx entry ->
+                match entry with
+                | Wire_runtime.Catalog_folder { path } ->
+                    {
+                      Table.id = Printf.sprintf "dir:%d:%s" idx path;
+                      cells =
+                        [
+                          ( "kind"
+                          , Table.Badge
+                              {
+                                glyph = None;
+                                text = "DIR";
+                                tone = Theme.Status_active;
+                              } );
+                          ("cat", Table.text_cell "folder");
+                          ("name", Table.text_cell path);
+                          ("desc", Table.text_cell "[Enter] browse");
+                        ];
+                    }
+                | Wire_runtime.Catalog_package
+                    { manifest_path; title; revision; description; ui_category } ->
+                    let cat_s = Option.value ~default:"addon" ui_category in
+                    let desc_s =
+                      Option.value ~default:manifest_path description
+                    in
+                    {
+                      Table.id = Printf.sprintf "pkg:%s" manifest_path;
+                      cells =
+                        [
+                          ( "kind"
+                          , Table.Badge
+                              {
+                                glyph = None;
+                                text = "PKG";
+                                tone = Theme.Status_ok;
+                              } );
+                          ( "cat"
+                          , Table.text_cell
+                              ~fg:(Color.of_rgb theme.text_secondary) cat_s );
+                          ( "name"
+                          , Table.text_cell
+                              (Printf.sprintf "%s @ %s" title revision) );
+                          ("desc", Table.text_cell (H.sanitize_single_line desc_s));
+                        ];
+                    }
+                | Wire_runtime.Catalog_issue { path; message } ->
+                    {
+                      Table.id = Printf.sprintf "iss:%d:%s" idx path;
+                      cells =
+                        [
+                          ( "kind"
+                          , Table.Badge
+                              {
+                                glyph = Some Glyph.Warning_triangle;
+                                text = "ERR";
+                                tone = Theme.Status_critical;
+                              } );
+                          ("cat", Table.text_cell "issue");
+                          ("name", Table.text_cell path);
+                          ( "desc"
+                          , Table.text_cell (H.sanitize_single_line message) );
+                        ];
+                    })
+              entries
+          in
+          let sel =
+            H.clamp_index (List.length entries) rt.addon_catalog_selected_index
+          in
+          ignore
+            (Table.draw grid ~rect:cat_inner ~theme ~caps:H.default_caps ~lang
+               ~col_gap:(Layout.table_col_gap bp)
+               ~scroll:rt.addon_catalog_scroll_offset ~selected:sel ~columns
+               rows)
+      | Observed.Value _ ->
+          H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp cat_inner) ~theme
+            (Say.resolve lang
+               (Say.make ~ko:"일치하는 애드온 패키지 없음"
+                  ~en:"No addon packages found"))
+      | ( Observed.Loading _
+        | Observed.Absent
+        | Observed.Unreported
+        | Observed.Failed _ ) as obs ->
+          H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp cat_inner)
+            ~theme ~lang obs
+    end;
+    let prev_inner =
+      Card.draw ~cache grid ~rect:right_rect ~theme
+        (H.card_spec ~focused:(Model.pane_focused model 1)
+           ~hotkey:
+             (Say.resolve lang
+                (Say.make ~ko:"[↑↓] 스크롤 · [p] 런타임"
+                   ~en:"[↑↓] Scroll · [p] Runtime"))
+           (Say.resolve lang
+              (Say.make ~ko:"패키지 미리보기" ~en:"Package Preview")))
+    in
+    let rc = H.pad_content ~bp prev_inner in
+    if not (Rect.is_empty rc) then begin
+      match Runtime_store.selected_addon_catalog_entry rt with
+      | Some (Wire_runtime.Catalog_package { manifest_path; title; _ }) -> (
+          match Runtime_store.addon_preview_for ~manifest_path rt with
+          | Some preview ->
+              let lines =
+                Update_nav.addon_catalog_preview_lines ~width:rc.w preview
+              in
+              let max_skip = Int.max 0 (List.length lines - rc.h) in
+              let skip = Int.min max_skip (Int.max 0 rt.detail_scroll_offset) in
+              let y = ref rc.y and bot = Rect.bottom rc in
+              List.iter
+                (fun ln ->
+                  if !y < bot then begin
+                    let st =
+                      if
+                        String.starts_with ~prefix:"Exported tools" ln
+                        || String.starts_with ~prefix:"Contributions" ln
+                      then H.accent_style ~theme ~attrs:Attr.bold ()
+                      else H.text_style ~theme ()
+                    in
+                    ignore
+                      (H.put_clipped ~grid ~clip:rc ~x:rc.x ~y:!y ~max_w:rc.w
+                         ~style:st ln);
+                    incr y
+                  end)
+                (Store_scroll.drop skip lines)
+          | None -> (
+              match rt.addon_package_preview with
+              | (Observed.Loading _ | Observed.Failed _) as obs ->
+                  H.draw_observed_placeholder ~grid ~rect:rc ~theme ~lang obs
+              | Observed.Value _ | Observed.Absent | Observed.Unreported ->
+                  H.draw_empty_notice ~grid ~rect:rc ~theme
+                    (Printf.sprintf "%s · %s" title
+                       (Say.resolve lang
+                          (Say.make ~ko:"[Enter] 패키지 미리보기 조회"
+                             ~en:"Press [Enter] to load package preview")))))
+      | Some (Wire_runtime.Catalog_folder { path }) ->
+          H.draw_empty_notice ~grid ~rect:rc ~theme
+            (Printf.sprintf "Folder: %s · %s" path
+               (Say.resolve lang
+                  (Say.make ~ko:"[Enter] 디렉터리 열기"
+                     ~en:"Press [Enter] to browse directory")))
+      | Some (Wire_runtime.Catalog_issue { path; message }) ->
+          H.draw_empty_notice ~grid ~rect:rc ~theme
+            (Printf.sprintf "%s · %s" path message)
+      | None ->
+          H.draw_observed_placeholder ~grid ~rect:rc ~theme ~lang
+            rt.addon_package_catalog
+    end
+  end
+  else begin
   (* Left pane (pane 0): Addon Lanes Table + selected detail strip *)
   let left_inner =
     Card.draw ~cache grid ~rect:left_rect ~theme
@@ -5176,6 +5394,7 @@ let render_addons_browser ~(model : Model.t) ~cache ~(rect : Rect.t)
                 ~rect:(H.pad_content ~bp tabs_body) ~theme ~lang obs)
     end
   end
+  end
 
 (* --- 8. Top-Level Runtime Workspace Entry & Tool Detail Dive --- *)
 
@@ -5307,4 +5526,50 @@ let render_dive ~(target : Nav.runtime_dive_target) ~(model : Model.t) ~cache
               in
               H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp inner)
                 ~theme ~lang rt.tool_detail_series
+        end
+    | Nav.Fusion_dive run_id ->
+        let inner =
+          Card.draw ~cache grid ~rect:body ~theme
+            (H.card_spec ~focused:(Model.body_has_focus model) ~subtitle:run_id
+               ~hotkey:
+                 (Say.resolve lang
+                    (Say.make
+                       ~ko:"[e/Enter] 보드 증거 로드 · [y] ID 복사 · [Esc] 뒤로"
+                       ~en:"[e/Enter] Board Evidence · [y] Copy ID · [Esc] Back"))
+               (Say.resolve lang
+                  (Say.make ~ko:"런타임 > 퓨전 실행 상세"
+                     ~en:"Runtime > Fusion Run Dive")))
+        in
+        let content = H.pad_content ~bp inner in
+        if not (Rect.is_empty content) then begin
+          let lines =
+            Update_nav.fusion_detail_lines ~width:content.w model ~run_id
+          in
+          let max_skip = Int.max 0 (List.length lines - content.h) in
+          let skip =
+            Int.min max_skip (Int.max 0 model.nav.dive_scroll_offset)
+          in
+          let y = ref content.y and bot = Rect.bottom content in
+          List.iter
+            (fun ln ->
+              if !y < bot then begin
+                let st =
+                  if String.starts_with ~prefix:"──" ln then
+                    H.accent_style ~theme ~attrs:Attr.bold ()
+                  else if
+                    String.starts_with ~prefix:"  [WARN]" ln
+                    || String.starts_with ~prefix:"[Replay" ln
+                  then H.status_style ~theme Theme.Status_attention
+                  else if
+                    String.starts_with ~prefix:"  [FAIL]" ln
+                    || String.starts_with ~prefix:"  Failure:" ln
+                  then H.status_style ~theme Theme.Status_critical
+                  else H.text_style ~theme ()
+                in
+                ignore
+                  (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
+                     ~max_w:content.w ~style:st ln);
+                incr y
+              end)
+            (Store_scroll.drop skip lines)
         end

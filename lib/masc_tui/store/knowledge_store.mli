@@ -131,6 +131,17 @@ type threaded_comment = {
   is_reply : bool;
 }
 
+type memory_subview =
+  | Mem_diff_flow
+  | Mem_health_ledger
+  | Mem_context
+
+type keeper_memory_subview =
+  | Kmem_diff_flow
+  | Kmem_health
+  | Kmem_facts_tree
+  | Kmem_journal
+
 type t = {
   active_tab : Nav.knowledge_tab;
   board : Wire_knowledge.board_feed Observed.t;
@@ -173,6 +184,21 @@ type t = {
     Wire_knowledge.keeper_memory_activity Observed.t String_map.t;
       (** One slot per keeper. *)
   keeper_memory_health : Wire_knowledge.keeper_memory_health_fleet Observed.t;
+  memory_subview : memory_subview;
+  keeper_memory_subview : keeper_memory_subview;
+  memory_health_keeper :
+    (string * Wire_knowledge.keeper_memory_health_row option) Observed.t;
+  workspace_memory_ledger : Wire_knowledge.workspace_memory_ledger Observed.t;
+  workspace_memory_ledger_auth_denied : bool;
+  workspace_memory_context : Wire_knowledge.workspace_memory_context Observed.t;
+  workspace_memory_context_auth_denied : bool;
+  keeper_memory_facts_auth_denied : String_set.t;
+  collapsed_fact_categories : String_set.t;
+  facts_selected_index : int;
+  keeper_memory_journal :
+    (string * Wire_knowledge.keeper_memory_journal) Observed.t;
+  keeper_memory_journal_auth_denied : String_set.t;
+  memory_subview_scroll : int;
   memory_diff_window : memory_diff_window;
   memory_diff_keeper : string option;
   memory_view_mode : memory_view_mode;
@@ -416,6 +442,12 @@ val mark_artifact_detail_failed :
   t
 val apply_world_memory :
   observed_at:Clock.Mono.t -> Wire_knowledge.world_memory -> t -> t
+val apply_keeper_memory_facts :
+  observed_at:Clock.Mono.t ->
+  ?keeper:string ->
+  Wire_knowledge.keeper_memory_facts ->
+  t ->
+  t
 val apply_keeper_memory_health :
   observed_at:Clock.Mono.t -> Wire_knowledge.keeper_memory_health_fleet -> t -> t
 val fail_keeper_memory_health :
@@ -563,3 +595,71 @@ val move_selection :
 val reset_detail_scroll : t -> t
 val set_filter : string -> t -> t
 val mark_stale_all : t -> t
+
+val equal_memory_subview : memory_subview -> memory_subview -> bool
+val cycle_memory_subview : t -> t
+val set_memory_subview : memory_subview -> t -> t
+val equal_keeper_memory_subview :
+  keeper_memory_subview -> keeper_memory_subview -> bool
+val cycle_keeper_memory_subview : t -> t
+val set_keeper_memory_subview : keeper_memory_subview -> t -> t
+val apply_memory_health_fleet :
+  observed_at:Clock.Mono.t ->
+  Wire_knowledge.keeper_memory_health_fleet ->
+  t ->
+  t
+val apply_memory_health_keeper :
+  observed_at:Clock.Mono.t ->
+  keeper:string ->
+  Wire_knowledge.keeper_memory_health_row option ->
+  t ->
+  t
+val mark_memory_health_keeper_failed :
+  at:Clock.Mono.t ->
+  ?active_keeper:string ->
+  keeper:string ->
+  reason:string ->
+  retryable:bool ->
+  t ->
+  t
+val apply_workspace_memory_ledger :
+  observed_at:Clock.Mono.t -> Wire_knowledge.workspace_memory_ledger -> t -> t
+val mark_workspace_memory_ledger_failed :
+  at:Clock.Mono.t -> reason:string -> retryable:bool -> auth_denied:bool -> t -> t
+val apply_workspace_memory_context :
+  observed_at:Clock.Mono.t -> Wire_knowledge.workspace_memory_context -> t -> t
+val mark_workspace_memory_context_failed :
+  at:Clock.Mono.t -> reason:string -> retryable:bool -> auth_denied:bool -> t -> t
+val mark_keeper_memory_facts_failed :
+  at:Clock.Mono.t ->
+  ?active_keeper:string ->
+  keeper:string ->
+  reason:string ->
+  retryable:bool ->
+  auth_denied:bool ->
+  t ->
+  t
+val apply_keeper_memory_journal :
+  observed_at:Clock.Mono.t ->
+  keeper:string ->
+  Wire_knowledge.keeper_memory_journal ->
+  t ->
+  t
+val mark_keeper_memory_journal_failed :
+  at:Clock.Mono.t ->
+  ?active_keeper:string ->
+  keeper:string ->
+  reason:string ->
+  retryable:bool ->
+  auth_denied:bool ->
+  t ->
+  t
+val memory_health_for_keeper :
+  keeper:string -> t -> Wire_knowledge.keeper_memory_health_row option
+val memory_facts_for_keeper :
+  keeper:string -> t -> Wire_knowledge.keeper_memory_facts option
+val memory_journal_for_keeper :
+  keeper:string -> t -> Wire_knowledge.keeper_memory_journal option
+val toggle_fact_category : string -> t -> t
+val move_memory_subview_scroll : ?max_scroll:int -> delta:int -> t -> t
+val move_facts_selection : count:int -> delta:int -> t -> t

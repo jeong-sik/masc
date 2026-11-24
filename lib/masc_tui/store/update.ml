@@ -282,7 +282,13 @@ let step_raw ~now (m : Model.t) = function
       else apply_server_health ~now m result
   | Msg.Server_start_result (Ok ()) ->
       let next_epoch = Epoch.next m.epoch in
-      let next = { m with epoch = next_epoch } in
+      let next =
+        {
+          m with
+          epoch = next_epoch;
+          infra = Infra_store.forget_log_cursor m.infra;
+        }
+      in
       (next, [ Cmd.Http_get { epoch = next_epoch; req = Cmd.Get_health } ])
   | Msg.Server_start_result (Error reason) ->
       let incidents, _ =
@@ -332,6 +338,46 @@ let step_raw ~now (m : Model.t) = function
         ({ m with knowledge }, [])
   | Msg.Voice_event ev -> apply_voice_event ~now m ev
   | Msg.Stream_gap dropped -> Update_sse.apply_stream_gap ~now dropped m
+  | Msg.Github_login_chunk { epoch; keeper; text } ->
+      if not (Epoch.is_current ~current:m.epoch ~reply:epoch) then (m, [])
+      else
+        let keeper_context =
+          Keeper_context_store.append_github_login_output ~keeper ~line:text
+            m.keeper_context
+        in
+        ({ m with keeper_context }, [])
+  | Msg.Github_login_done { epoch; keeper; observation; error } ->
+      if not (Epoch.is_current ~current:m.epoch ~reply:epoch) then (m, [])
+      else
+        let kc0 =
+          Keeper_context_store.finish_github_login ~keeper ~error
+            m.keeper_context
+        in
+        let keeper_context =
+          match observation with
+          | Some obs ->
+              Keeper_context_store.apply_github_identity ~observed_at:now
+                ~keeper obs kc0
+          | None -> kc0
+        in
+        let m1 = { m with keeper_context } in
+        let next =
+          match error with
+          | Some err ->
+              Model.with_toast ~now ~level:Model.Toast_warning
+                (Say.make ~ko:("GitHub 로그인 실패: " ^ err)
+                   ~en:("GitHub login failed: " ^ err))
+                m1
+          | None ->
+              Model.with_toast ~now ~level:Model.Toast_success
+                (Say.make ~ko:"GitHub 로그인 완료" ~en:"GitHub login complete")
+                m1
+        in
+        ( next
+        , [
+            Cmd.Http_get
+              { epoch = m.epoch; req = Cmd.Get_github_identity { keeper } };
+          ] )
 
 (* A new epoch is a new handshake, and the server behind it may be another
    process. Every path that moves the epoch returns through [step], so what

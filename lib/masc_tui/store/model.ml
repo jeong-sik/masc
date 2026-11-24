@@ -312,7 +312,9 @@ let is_in_keeper_chat m =
               | Nav.Keeper_memory
               | Nav.Keeper_work_candle
               | Nav.Keeper_sandbox
-              | Nav.Keeper_config );
+              | Nav.Keeper_config
+              | Nav.Keeper_logs
+              | Nav.Keeper_identity );
             _;
           }
       | Nav.Dive_work _
@@ -483,7 +485,11 @@ let active_menu_target m =
                 else None
           in
           match tab_opt with
-          | Some ((Nav.Keeper_context | Nav.Keeper_tool_calls) as tab) ->
+          | Some
+              (( Nav.Keeper_context
+               | Nav.Keeper_tool_calls
+               | Nav.Keeper_logs
+               | Nav.Keeper_identity ) as tab) ->
               Nav.Menu_keeper_tab tab
           | Some
               ( Nav.Keeper_chat
@@ -671,7 +677,9 @@ let focusable_pane_count m =
                     | Nav.Keeper_memory
                     | Nav.Keeper_work_candle
                     | Nav.Keeper_sandbox
-                    | Nav.Keeper_config );
+                    | Nav.Keeper_config
+                    | Nav.Keeper_logs
+                    | Nav.Keeper_identity );
                   _;
                 }
             | Nav.Dive_work _
@@ -696,7 +704,8 @@ let focusable_pane_count m =
                     = []
                   then 1
                   else 2
-              | Nav.Work_candle_scorecard -> 1)
+              | Nav.Work_candle_scorecard -> 1
+              | Nav.Work_harness -> 2)
           | Nav.Knowledge -> 2
           | Nav.Keepers ->
               if
@@ -724,7 +733,10 @@ let focusable_pane_count m =
               match m.infra.active_tab with
               | Nav.Infra_sandboxes ->
                   if inner_body_width m >= 100 then 2 else 1
-              | Nav.Infra_activity_logs -> 2
+              | Nav.Infra_code -> 2
+              | Nav.Infra_activity_logs ->
+                  if m.infra.acting_rail_open && inner_body_width m >= 104 then 3
+                  else 2
               | Nav.Infra_repos_changes ->
                   if Infra_store.repo_changes m.infra <> [] then 3 else 2))
 
@@ -843,8 +855,16 @@ let active_focus_label m =
             Say.make ~ko:"지식 상세" ~en:"KNOWLEDGE DIVE"
         | Some (Nav.Dive_runtime (Nav.Tool_dive name)) ->
             Say.make ~ko:("도구 · " ^ name) ~en:("TOOL · " ^ name)
+        | Some (Nav.Dive_runtime (Nav.Fusion_dive id)) ->
+            Say.make ~ko:("퓨전 · " ^ id) ~en:("FUSION · " ^ id)
         | Some (Nav.Dive_infra (Nav.Lane_dive id)) ->
             Say.make ~ko:("레인 · " ^ id) ~en:("LANE · " ^ id)
+        | Some (Nav.Dive_infra (Nav.Runtime_trace_dive keeper)) ->
+            Say.make ~ko:("추적 · " ^ keeper) ~en:("TRACE · " ^ keeper)
+        | Some (Nav.Dive_infra (Nav.Log_detail_dive seq)) ->
+            Say.make
+              ~ko:(Printf.sprintf "로그 · #%d" seq)
+              ~en:(Printf.sprintf "LOG · #%d" seq)
         | Some (Nav.Dive_infra (Nav.Sandbox_dive _ | Nav.Incident_dive _)) ->
             Say.make ~ko:"인프라 상세" ~en:"INFRA DIVE"
         | None -> (
@@ -876,7 +896,11 @@ let active_focus_label m =
                       pane_prefix ~ko:"인스펙터" ~en:"Inspector"
                     else pane_prefix ~ko:"수신함" ~en:"Inbox"
                 | Nav.Work_candle_scorecard ->
-                    Say.make ~ko:"캔들 · 원장" ~en:"Candle")
+                    Say.make ~ko:"캔들 · 원장" ~en:"Candle"
+                | Nav.Work_harness ->
+                    if m.nav.pane_index = 1 then
+                      pane_prefix ~ko:"하네스 상세" ~en:"Run Detail"
+                    else pane_prefix ~ko:"하네스 실행" ~en:"Harness")
             | Nav.Knowledge -> (
                 match m.knowledge.active_tab with
                 | Nav.Knowledge_board ->
@@ -938,10 +962,15 @@ let active_focus_label m =
                     | 0 -> pane_prefix ~ko:"저장소" ~en:"Repos"
                     | 2 -> pane_prefix ~ko:"파일 변경" ~en:"Changes"
                     | _ -> pane_prefix ~ko:"Diff" ~en:"Diff")
-                | Nav.Infra_activity_logs ->
+                | Nav.Infra_activity_logs -> (
+                    match m.nav.pane_index with
+                    | 1 -> pane_prefix ~ko:"로그 상세" ~en:"Detail"
+                    | 2 -> pane_prefix ~ko:"실행 중" ~en:"Acting"
+                    | _ -> pane_prefix ~ko:"활동·로그" ~en:"Logs")
+                | Nav.Infra_code ->
                     if m.nav.pane_index = 1 then
-                      pane_prefix ~ko:"로그 상세" ~en:"Detail"
-                    else pane_prefix ~ko:"활동·로그" ~en:"Logs")))
+                      pane_prefix ~ko:"코드 뷰" ~en:"Code"
+                    else pane_prefix ~ko:"파일 트리" ~en:"Files")))
 
 let is_keeper_config_active m =
   Option.is_none m.nav.overlay
@@ -957,7 +986,9 @@ let is_keeper_config_active m =
               | Nav.Keeper_tool_calls
               | Nav.Keeper_memory
               | Nav.Keeper_work_candle
-              | Nav.Keeper_sandbox );
+              | Nav.Keeper_sandbox
+              | Nav.Keeper_logs
+              | Nav.Keeper_identity );
             _;
           }
       | Nav.Dive_work _
@@ -1158,6 +1189,47 @@ let inline_modal_for kind =
           {
             key = "content";
             label = Say.make ~ko:"댓글 내용" ~en:"Comment";
+            value = "";
+            required = true;
+            secret = false;
+          };
+        ]
+    | Nav.Github_token_form _ ->
+        [
+          {
+            key = "token";
+            label =
+              Say.make ~ko:"GitHub PAT 토큰 (마스킹)"
+                ~en:"GitHub PAT token (masked)";
+            value = "";
+            required = true;
+            secret = true;
+          };
+          {
+            key = "hostname";
+            label = Say.make ~ko:"호스트명" ~en:"Hostname";
+            value = "github.com";
+            required = false;
+            secret = false;
+          };
+        ]
+    | Nav.Code_finder_form ->
+        [
+          {
+            key = "query";
+            label = Say.make ~ko:"파일 경로 검색 (퍼지)" ~en:"Fuzzy file path";
+            value = "";
+            required = true;
+            secret = false;
+          };
+        ]
+    | Nav.Code_search_form ->
+        [
+          {
+            key = "query";
+            label =
+              Say.make ~ko:"코드 검색어 (2..200바이트)"
+                ~en:"Ripgrep query (2..200 bytes)";
             value = "";
             required = true;
             secret = false;
@@ -1653,7 +1725,8 @@ let active_view_ssot_mode m =
         | Nav.Infra -> (
             match m.infra.active_tab with
             | Nav.Infra_activity_logs -> true
-            | Nav.Infra_sandboxes | Nav.Infra_repos_changes -> false)
+            | Nav.Infra_sandboxes | Nav.Infra_repos_changes | Nav.Infra_code ->
+                false)
         | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Keepers -> false)
   in
   let planned_count = if blocked then 0 else if has_view_stream then 3 else 2 in
@@ -1757,6 +1830,31 @@ let active_view_ssot_mode m =
                 observed_at_opt m.config.schema;
               ];
         }
+  | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_logs }) ->
+      let ks = Keeper_context_store.get_keeper ~keeper:name m.keeper_context in
+      Synced_snapshot
+        {
+          observer = m.freshness.observer;
+          observed_at =
+            latest_observed_at
+              [
+                observed_at_opt ks.metrics;
+                observed_at_opt ks.sandbox_logs;
+              ];
+        }
+  | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_identity }) ->
+      let ks = Keeper_context_store.get_keeper ~keeper:name m.keeper_context in
+      Synced_snapshot
+        {
+          observer = m.freshness.observer;
+          observed_at =
+            latest_observed_at
+              [
+                observed_at_opt m.keeper_context.oauth_providers;
+                observed_at_opt ks.oauth_attached;
+                observed_at_opt ks.github_identity;
+              ];
+        }
   | Some (Nav.Dive_work _) ->
       Synced_snapshot
         {
@@ -1818,6 +1916,17 @@ let active_view_ssot_mode m =
                 observed_at_opt m.runtime.tools_dashboard;
               ];
         }
+  | Some (Nav.Dive_runtime (Nav.Fusion_dive _)) ->
+      Synced_snapshot
+        {
+          observer = m.freshness.observer;
+          observed_at =
+            latest_observed_at
+              [
+                observed_at_opt m.runtime.fusion_detail;
+                observed_at_opt m.runtime.fusion_runs;
+              ];
+        }
   | Some (Nav.Dive_infra target) -> (
       match target with
       | Nav.Sandbox_dive keeper ->
@@ -1838,7 +1947,14 @@ let active_view_ssot_mode m =
               observer = m.freshness.observer;
               observed_at = observed_at_opt m.runtime.runtime_resolved;
             }
-      | Nav.Incident_dive _ -> Snapshot_only { observed_at = None })
+      | Nav.Runtime_trace_dive _ ->
+          Synced_snapshot
+            {
+              observer = m.freshness.observer;
+              observed_at = observed_at_opt m.infra.runtime_trace;
+            }
+      | Nav.Incident_dive _ | Nav.Log_detail_dive _ ->
+          Snapshot_only { observed_at = None })
   | None -> (
       match m.nav.workspace with
       | Nav.Pulse ->
@@ -1877,6 +1993,7 @@ let active_view_ssot_mode m =
                   ]
             | Nav.Work_candle_scorecard ->
                 observed_at_opt m.work.candle_ledger
+            | Nav.Work_harness -> observed_at_opt m.work.harness_health
           in
           Synced_snapshot { observer = m.freshness.observer; observed_at }
       | Nav.Knowledge -> (
@@ -2014,6 +2131,16 @@ let active_view_ssot_mode m =
                 {
                   observer = m.freshness.observer;
                   observed_at = observed_at_opt m.infra.sandboxes;
+                }
+          | Nav.Infra_code ->
+              Snapshot_only
+                {
+                  observed_at =
+                    latest_observed_at
+                      [
+                        observed_at_opt m.infra.code.open_file;
+                        observed_at_opt m.infra.code.git_status;
+                      ];
                 }
           | Nav.Infra_repos_changes ->
               Snapshot_only

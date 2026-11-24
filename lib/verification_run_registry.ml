@@ -307,6 +307,8 @@ module Payload = struct
     in
     Ok { outcome; evaluator_runtime; elapsed_s; tools }
   ;;
+
+  let retired_registration_of_yojson _ = Ok None
 end
 
 module Store = Run_registry_core.Make (Payload)

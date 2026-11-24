@@ -424,6 +424,35 @@ module Payload = struct
     Ok { lane; actor; input = Exact_input value; input_source }
   ;;
 
+  let retired_registration_of_yojson json =
+    let ( let* ) = Result.bind in
+    let* fields = Run_registry_core.Json.object_fields json in
+    let* () =
+      Run_registry_core.Json.exact_fields
+        ~required:[ "lane"; "actor"; "input" ]
+        fields
+    in
+    let* lane_key = Run_registry_core.Json.string_field "lane" fields in
+    let* _actor = Run_registry_core.Json.string_field "actor" fields in
+    let* _input_source, _value =
+      match List.assoc_opt "input" fields with
+      | Some value -> payload_source_of_yojson value
+      | None -> Error "missing field input"
+    in
+    let historical_lane =
+      match lane_key with
+      (* The curator recorded this key before the closed lane identity was
+         introduced. It is only readable in the historical registry. *)
+      | "workspace_curator_exact" -> Some Lane_run_identity.Workspace_memory_curator
+      | key -> Lane_run_identity.of_id key
+    in
+    match historical_lane with
+    | Some standalone when Option.is_none (lane_of_run_lane standalone) ->
+      Ok (Some (Lane_run_identity.to_id standalone))
+    | Some _ -> Ok None
+    | None -> Error (Printf.sprintf "unknown exact lane %S" lane_key)
+  ;;
+
   let completion_to_yojson completion =
     let detail =
       match completion.outcome with
@@ -861,6 +890,7 @@ let sweep_payload_dirs t ~log_path =
         String_map.empty
         (Store.list_entries t.store)
     in
+    let retired_ids = String_set.of_list (Store.retired_ids t.store) in
     (* These counters belong only to this synchronous startup sweep. Increment
        immediately after each joined operation acknowledges its successful
        effect, so a later failure cannot erase earlier successful removals. *)
@@ -870,7 +900,10 @@ let sweep_payload_dirs t ~log_path =
     let on_unlink () = incr unlinked_entries in
     let on_directory_removed () = incr removed_run_directories in
     let sweep_entry name =
-      match Payload_directory.with_child parent name (fun directory ->
+      if String_set.mem name retired_ids
+      then Ok ()
+      else
+        match Payload_directory.with_child parent name (fun directory ->
         match String_map.find_opt name referenced with
         | None ->
           remove_payload_directory ~parent ~directory ~log_path ~run_id:name

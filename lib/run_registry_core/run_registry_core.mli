@@ -54,6 +54,12 @@ module type Payload = sig
   val name : string
   val registration_to_yojson : registration -> Yojson.Safe.t
   val registration_of_yojson : Yojson.Safe.t -> (registration, string) result
+  val retired_registration_of_yojson : Yojson.Safe.t -> (string option, string) result
+  (** Classify a persisted registration payload before decoding it as active.
+      [Ok (Some label)] marks a structurally valid historical registration for
+      a retired lane/kind so replay and strict reads can pair its completions
+      without treating them as malformed orphans. [Ok None] proceeds to
+      {!registration_of_yojson}. [Error detail] rejects a malformed row. *)
   val completion_to_yojson : completion -> Yojson.Safe.t
   val completion_of_yojson : Yojson.Safe.t -> (completion, string) result
 
@@ -104,6 +110,8 @@ type persistence_failure =
 type replay_report =
   { lines_read : int
   ; malformed_lines : int
+  ; retired_registrations : int
+  ; retired_completions : int
   ; dropped_running : int
   ; reached_end : bool
   }
@@ -116,6 +124,8 @@ type replay_status =
 type cut_report =
   { lines_read : int
   ; malformed_lines : int
+  ; retired_registrations : int
+  ; retired_completions : int
   ; retained_entries : int
   ; reached_end : bool
   ; rewritten : bool
@@ -141,15 +151,21 @@ module Make (Payload : Payload) : sig
   val replay_status : t -> replay_status
   (** Immutable diagnostics from this registry instance's startup read. *)
 
+  val retired_ids : t -> string list
+  (** Unique ids of verified retired registrations observed during startup
+      replay and preserved in the log. *)
+
   val validate_event_json : Yojson.Safe.t -> (unit, string) result
   (** Pure event codec validation; does not replay or mutate a registry. *)
 
   val replay : string -> t
   (** Retains a lightweight in-memory projection while compaction streams the
-      selected original register/complete rows. Dropped payload fields are
-      never serialized from the projection over their durable source.
-      A replayed running entry gets the subsystem's explicit restart verdict.
-      As with {!cut_replay_log}, replay requires exclusive ownership of the log. *)
+      selected original register/complete rows and preserves verified retired
+      registration/completion rows verbatim at their original row positions.
+      Dropped payload fields are never serialized from the projection over
+      their durable source. A replayed running entry gets the subsystem's
+      explicit restart verdict. As with {!cut_replay_log}, replay requires
+      exclusive ownership of the log. *)
 
   val replay_with_retained_history : string -> t
   (** Retains JSONL history without automatic compaction while keeping completed

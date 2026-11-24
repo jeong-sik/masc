@@ -6,6 +6,7 @@ module Payload = struct
   let name = "strict-current-fixture"
   let registration_to_yojson value = value
   let registration_of_yojson value = Ok value
+  let retired_registration_of_yojson _ = Ok None
   let completion_to_yojson value = value
   let completion_of_yojson value = Ok value
   let shed_registration _ = `Null
@@ -208,9 +209,217 @@ let test_retained_history_late_terminal_has_original_registration () = with_path
      | Run_registry_core.Replayed report -> report.malformed_lines=0 && report.reached_end
      | Not_replayed | Log_absent -> false))
 
+module Retired_payload = struct
+  include Payload
+  let completed_retention = `Latest 2
+  let retired_registration_of_yojson = function
+    | `Assoc fields ->
+      (match List.assoc_opt "kind" fields with
+       | Some (`String "retired") ->
+         (match List.assoc_opt "lane" fields with
+          | Some (`String lane) -> Ok (Some lane)
+          | Some _ | None -> Error "retired registration missing lane")
+       | Some (`String "active") -> Ok None
+       | Some _ | None -> Error "unknown registration kind")
+    | _ -> Error "registration must be an object"
+  let registration_of_yojson = function
+    | `Assoc fields as value ->
+      (match List.assoc_opt "kind" fields with
+       | Some (`String "active") -> Ok value
+       | Some _ | None -> Error "non-active registration")
+    | _ -> Error "registration must be an object"
+end
+module RT = Run_registry_core.Make (Retired_payload)
+
+let register_row_at id started_at input =
+  Yojson.Safe.to_string
+    (`Assoc [ "event", `String "register"; "id", `String id; "started_at", `Float started_at; "registration", input ])
+  ^ "\n"
+let active_reg label = `Assoc ["kind", `String "active"; "label", `String label]
+let retired_reg lane = `Assoc ["kind", `String "retired"; "lane", `String lane]
+
+let contains_substring ~needle haystack =
+  let nlen = String.length needle in
+  let hlen = String.length haystack in
+  let rec loop i =
+    if i + nlen > hlen then false
+    else if String.sub haystack i nlen = needle then true
+    else loop (i + 1)
+  in
+  nlen = 0 || loop 0
+
+let capture_stderr f =
+  let pipe_read, pipe_write = Unix.pipe () in
+  let saved_stderr = Unix.dup Unix.stderr in
+  Unix.dup2 pipe_write Unix.stderr;
+  Unix.close pipe_write;
+  let result =
+    Fun.protect
+      ~finally:(fun () ->
+        flush stderr;
+        Unix.dup2 saved_stderr Unix.stderr;
+        Unix.close saved_stderr)
+      f
+  in
+  Unix.set_nonblock pipe_read;
+  let buf = Buffer.create 256 in
+  let tmp = Bytes.create 256 in
+  let rec read_all () =
+    match Unix.read pipe_read tmp 0 256 with
+    | 0 -> ()
+    | n ->
+      Buffer.add_subbytes buf tmp 0 n;
+      read_all ()
+    | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) -> ()
+  in
+  read_all ();
+  Unix.close pipe_read;
+  result, Buffer.contents buf
+
+let test_retired_pair_is_counted_and_compacted_while_preserving_active () = with_path (fun _ path ->
+  let evicted_rows =
+    register_row_at "active-evicted" 1. (active_reg "evicted")
+    ^ complete_row "active-evicted" (`String "evicted-out")
+  in
+  let active_1_rows =
+    register_row_at "active-1" 2. (active_reg "a1")
+    ^ complete_row "active-1" (`String "out-1")
+  in
+  let retired_rows =
+    register_row_at "retired-1" 3. (retired_reg "librarian_memory")
+    ^ complete_row "retired-1" (`String "retired-out")
+  in
+  let active_2_rows =
+    register_row_at "active-2" 4. (active_reg "a2")
+    ^ complete_row "active-2" (`String "out-2")
+  in
+  let expected_preserved = active_1_rows ^ retired_rows ^ active_2_rows in
+  let expected_digest = Digest.to_hex (Digest.string expected_preserved) in
+  write path (evicted_rows ^ expected_preserved);
+  let first, first_logs = capture_stderr (fun () -> RT.replay path) in
+  (match RT.replay_status first with
+   | Run_registry_core.Replayed
+       { lines_read = 8
+       ; malformed_lines = 0
+       ; retired_registrations = 1
+       ; retired_completions = 1
+       ; dropped_running = 0
+       ; reached_end = true
+       } -> ()
+   | _ -> fail "first replay should count retired pair separately from malformed lines");
+  check (list string) "retired_ids exposes preserved retired registration id" [ "retired-1" ] (RT.retired_ids first);
+  let after_first = load path in
+  check string "compaction evicts old active rows while preserving retired pair bytes and event order verbatim"
+    expected_preserved after_first;
+  check string "preserved retired and active rows retain exact digest"
+    expected_digest (Digest.to_hex (Digest.string after_first));
+  check bool "first boot emits aggregate retired summary" true
+    (contains_substring ~needle:"skipped 1 retired registration(s) and 1 paired completion(s) during replay" first_logs);
+  check bool "first boot emits no per-id unknown completion warning" false
+    (contains_substring ~needle:"replay skipped completion for unknown id" first_logs);
+  check bool "retired id is absent from projection" true (Option.is_none (RT.get_metadata first ~id:"retired-1"));
+  check bool "retired id is absent from strict read" true (RT.read_current_from_log first ~id:"retired-1" = Ok None);
+  (match RT.read_current_from_log first ~id:"active-1" with
+   | Ok (Some { registration; status = RT.Completed (`String "out-1"); _ }) ->
+     check json "active-1 registration preserved" (active_reg "a1") registration
+   | _ -> fail "active-1 was not preserved");
+  (match RT.read_current_from_log first ~id:"active-2" with
+   | Ok (Some { registration; status = RT.Completed (`String "out-2"); _ }) ->
+     check json "active-2 registration preserved" (active_reg "a2") registration
+   | _ -> fail "active-2 was not preserved");
+  let second, second_logs = capture_stderr (fun () -> RT.replay path) in
+  (match RT.replay_status second with
+   | Run_registry_core.Replayed
+       { lines_read = 6
+       ; malformed_lines = 0
+       ; retired_registrations = 1
+       ; retired_completions = 1
+       ; dropped_running = 0
+       ; reached_end = true
+       } -> ()
+   | _ -> fail "reboot replay should continue observing preserved retired rows with zero malformed lines");
+  check string "reboot compaction keeps identical bytes and digest"
+    expected_digest (Digest.to_hex (Digest.string (load path)));
+  check bool "reboot emits aggregate retired summary" true
+    (contains_substring ~needle:"skipped 1 retired registration(s) and 1 paired completion(s) during replay" second_logs);
+  check bool "reboot emits no per-id unknown completion warning" false
+    (contains_substring ~needle:"replay skipped completion for unknown id" second_logs))
+
+let test_retired_pair_with_retained_history_allows_strict_reads () = with_path (fun _ path ->
+  write path
+    (register_row "retired-1" (retired_reg "workspace_memory_curator")
+     ^ register_row "active-1" (active_reg "a1")
+     ^ complete_row "active-1" (`String "out-1"));
+  let registry = RT.replay_with_retained_history path in
+  (match RT.completed_from_log registry ~id:"active-1" with
+   | Ok (Some { status = RT.Completed (`String "out-1"); _ }) -> ()
+   | _ -> fail "active-1 completion should be readable before retired completion arrives");
+  (* Append retired completion later to exercise incremental observer_index.retired *)
+  let channel = open_out_gen [Open_append; Open_binary] 0o600 path in
+  output_string channel (complete_row "retired-1" (`String "late-retired-out"));
+  close_out channel;
+  check bool "retired completion returns Ok None in completed_from_log" true
+    (RT.completed_from_log registry ~id:"retired-1" = Ok None);
+  (match RT.completed_from_log registry ~id:"active-1" with
+   | Ok (Some { status = RT.Completed (`String "out-1"); _ }) -> ()
+   | _ -> fail "active-1 completion remains readable after retired completion");
+  check bool "retired id returns Ok None in read_current_from_log" true
+    (RT.read_current_from_log registry ~id:"retired-1" = Ok None);
+  check bool "reconcile_current confirms active-1 despite retained retired rows" true
+    (RT.reconcile_current registry ~id:"active-1"
+       ~decide:(fun current ->
+         match current with
+         | Some { status = RT.Completed (`String "out-1"); _ } -> Ok (RT.Confirm_current, ())
+         | _ -> Error "missing active-1")
+     = Ok ()))
+
+let test_true_orphan_and_corrupted_retired_row_remain_malformed () = with_path (fun _ path ->
+  let orphan_log =
+    register_row "retired-1" (retired_reg "verifier_exact")
+    ^ complete_row "retired-1" (`String "retired-out")
+    ^ complete_row "unknown-orphan" (`String "orphan-out")
+  in
+  write path orphan_log;
+  let reg_orphan = RT.replay path in
+  check string "true orphan blocks compaction even with retired pairs" orphan_log (load path);
+  (match RT.replay_status reg_orphan with
+   | Run_registry_core.Replayed
+       { lines_read = 3
+       ; malformed_lines = 1
+       ; retired_registrations = 1
+       ; retired_completions = 1
+       ; dropped_running = 0
+       ; reached_end = true
+       } -> ()
+   | _ -> fail "true orphan must still be counted as malformed");
+  check bool "incomplete startup refuses strict read when orphan is present" true
+    (match RT.read_current_from_log reg_orphan ~id:"retired-1" with
+     | Error (RT.Incomplete_startup report) -> report.malformed_lines = 1
+     | _ -> false);
+  let broken_retired =
+    register_row "broken-retired" (`Assoc ["kind", `String "retired"])
+    ^ complete_row "broken-retired" (`String "out")
+  in
+  write path broken_retired;
+  let reg_broken = RT.replay path in
+  check string "corrupted retired registration blocks compaction" broken_retired (load path);
+  match RT.replay_status reg_broken with
+  | Run_registry_core.Replayed
+      { lines_read = 2
+      ; malformed_lines = 2
+      ; retired_registrations = 0
+      ; retired_completions = 0
+      ; dropped_running = 0
+      ; reached_end = true
+      } -> ()
+  | _ -> fail "corrupted retired registration and its completion must be malformed")
+
 let () = run "strict current registry disk observation" ["current history",[
   test_case "startup orphan cannot disappear before strict publication" `Quick test_startup_orphan_cannot_be_compacted_away;
   test_case "retention eviction does not orphan a valid late terminal" `Quick test_retained_history_late_terminal_has_original_registration;
+  test_case "retired registration and completion pairs are counted and compacted cleanly" `Quick test_retired_pair_is_counted_and_compacted_while_preserving_active;
+  test_case "retained retired rows allow strict reads and incremental observer lookup" `Quick test_retired_pair_with_retained_history_allows_strict_reads;
+  test_case "true orphans and corrupted retired rows remain malformed" `Quick test_true_orphan_and_corrupted_retired_row_remain_malformed;
   test_case "full registration, terminal, reset and available null" `Quick test_full_lifecycle;
   test_case "volatile/uninitialized and legacy lookup contracts" `Quick test_readiness;
   test_case "absent and empty reads never create or chmod" `Quick test_missing_is_read_only;

@@ -312,6 +312,8 @@ module Payload = struct
       let* () = Run_registry_core.Json.exact_fields ~required:[ "kind" ] fields in
       Ok Scan_skipped_completion
   ;;
+
+  let retired_registration_of_yojson _ = Ok None
 end
 
 let evaluated_verdict_of_yojson = Payload.evaluated_verdict_of_yojson

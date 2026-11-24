@@ -199,6 +199,7 @@ module Payload = struct
     | None -> Error "Fusion completion result is missing"
     | Some result -> let* outcome = outcome_of_yojson result in Ok { outcome; finished_at }
 
+  let retired_registration_of_yojson _ = Ok None
 end
 
 module Store = Run_registry_core.Make (Payload)

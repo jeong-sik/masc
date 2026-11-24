@@ -3,9 +3,9 @@
 ## Outcome
 
 A Keeper can publish a report, document or self-contained HTML result that the
-operator can reopen independently of the conversation. The dashboard has an
-Artifacts section with a searchable list and a reader. A conversation card and
-the list open the same stable artifact link. Revisions preserve previous bytes.
+operator can reopen independently of the conversation. Dashboard Knowledge →
+Artifacts provides a searchable catalog and a reader. The conversation card
+opens the artifact at the published revision. Revisions preserve previous bytes.
 
 This is the requested Claude Artifacts interaction applied to MASC's existing
 workspace, identity and dashboard. It does not require another hosting service.
@@ -21,20 +21,11 @@ workspace, identity and dashboard. It does not require another hosting service.
    renders a compact open card for the successful publication tool result in the
    conversation. The Keeper includes the returned link in its report to users
    of other channels.
-4. Work → Artifacts shows title, author, summary, explicit document/web-page
-   format and update time. Format and local-calendar-day filters help find
-   today's publications or updates. The last successful inventory response
-   supplies the displayed list-query time; this is not a human review receipt.
-   An explicit HTML quick-preview action reads only that listed revision and
-   opens an inert embedded preview, including self-contained images. Selecting a
-   result opens a viewport-filling reader above the dashboard. Back to list or
-   Escape in the reader controls returns to the searchable catalog. Search filters title, summary and
-   author. Empty, loading, missing and failed states remain distinguishable.
-5. The reader provides rendered/source views, revision selection, copy-link and
-   exact-source download. HTML uses the remaining viewport. Markdown defaults
-   to the available width for tables and code, with an optional centered reading
-   width. Expand report information for the author, summary
-   and any Task or Goal links. A native modal keeps background controls inert.
+4. Knowledge → Artifacts lists published documents. Filter by format or search
+   by title, summary or ID. Selecting a result opens the reader beside the list.
+5. Switch revisions in the reader, copy the selected body or SHA-256, or
+   download its Markdown or HTML source. The reader shows the author, summary
+   and any Task or Goal links.
 6. Updating an artifact requires its ID and expected latest revision. A stale
    revision produces a conflict without overwriting another publication. The
    stable link follows the latest version; a version link is immutable. An
@@ -46,54 +37,9 @@ Existing files can be published by passing their body through the same API or
 tool. Runtime directories and private conversations are not recursively indexed.
 The report producer chooses which output is a standalone artifact.
 
-## Dashboard editing and file import
-
-The catalog's **파일 가져오기** action accepts one explicitly selected or dropped
-HWPX, DOCX, UTF-8 HTML or Markdown file. Office documents become HTML drafts with
-editable merged tables and native column/bar/line/pie chart data. Conversion
-notices appear before publication. The operator reviews its title, summary, explicit format
-and source before publishing. Invalid UTF-8 is refused rather than replaced;
-reading a file does not execute or publish it. The reader's **편집** action opens
-a source editor. It captures the selected revision and Task/Goal links when
-editing starts; a catalog refresh cannot silently rebase that draft.
-
-Office exports use the selected publication revision. A chart's HTML data table
-is its stored source; rendered SVG and exported native charts/workbooks are
-derived from that table. See [document import and export](artifact-document-export.md)
-for the supported structures, resource limits and layout differences.
-
-When an editable draft opens, the editor captures canonical base and MASC roots
-from health and requires the base to match its workspace authority. It checks
-that the workspace and credentials still own the draft after this read, then
-freezes the pair for publication, fixed-revision readback, and latest-version
-comparison using the existing workspace precondition headers. The server rejects
-a different pair before route dispatch, including a changed MASC root under the
-same base. A failed identity read preserves the draft but blocks saving until the
-editor is reopened; it never automatically recaptures or publishes the draft.
-
-Credential or workspace-authority retirement closes the old editor but retains
-its latest source and metadata under that original owner for the app session.
-The inert **이전 접근 상태의 원고** section offers source download and explicit,
-confirmed discard; it cannot publish or reopen the draft with replacement
-credentials. Imported source is retained before its first edit too. If another
-reader is open, close it to access that section. Late publication receipts remain
-separate and do not erase a retired draft. Only confirmed readback or an explicit
-discard clears the active draft. Leaving a section or switching readers releases
-the editor but preserves its latest copy for inert download or explicit discard
-when the artifact surface is shown again. The app owns this single in-memory
-collection across routes; download before reloading or closing the browser.
-It is not durable storage or a shared draft.
-
-Saving uses the existing publication API once and then reads the returned fixed
-revision to compare its body and metadata with the submitted draft. The response
-identity is retained separately from successful readback. Conflicts retain the
-draft and offer a read-only latest-version comparison. An uncertain write never
-automatically retries; the operator can download the draft and inspect the
-recorded revision. Late publication receipts retain their original workspace
-even after the selection or credential changes, without a read under replacement
-credentials. There is no automatic publication or confirmation on editor input.
-
-Authorship or publication alone is not evidence that a Keeper is currently viewing or editing a document.
+The November 24 Proposal A+ retired the Dashboard's browser draft editor and
+Office document converters. Keepers and API clients publish through the
+existing publication endpoints.
 
 ## Storage and authority
 
@@ -157,52 +103,11 @@ outcome before retrying.
   outside the server's control after sharing is revoked, including copies held
   in browser or intermediary caches. In unbound Dashboard asset mode, descendant
   symlinks and multi-link files are refused even when they name ordinary assets.
-- The read-only public Dashboard view sends its artifact request without the
-  browser's stored bearer, actor header or cookies. An expired local credential
-  therefore does not prevent an otherwise permitted anonymous read. Operator
-  views and writes continue to use their captured authentication. Workspace
-  authority alone is not operator permission: a tokenless reader uses the
-  public view, and an initial operator read refused for lack of permission may
-  try an anonymous view. A failed refresh retains an existing operator document
-  and draft instead of replacing them with the public view. Retained drafts
-  from an earlier authority stay accessible before a new reader dialog opens.
-- The Dashboard can show a document read-only while workspace identity is
-  pending. Before enabling edits or sharing, it captures both roots, rereads
-  the document against them and requires the server's matched workspace-read
-  receipt. If identity cannot be confirmed, editing and sharing stay disabled.
-  Temporary HTML previews are inert and cannot run scripts; documents whose
-  display is generated entirely by scripts may therefore appear blank until
-  the workspace-bound read succeeds. Public HTML readers remain interactive.
-  The editor and HTML app retain the roots of the admitted document, and their
-  writes carry the pair in the body as well as request headers. Relevant draft,
-  app-data and publication reads require the workspace-read receipt, including
-  the shared-draft event stream.
-  The share action requires a known sharing version and rechecks the selected
-  revision and latest publication against the original roots.
-  Before sending, it retains the exact operation in browser storage; if storage
-  is unavailable, this tab does not send. If storage readback fails after a
-  write attempt, another tab may have seen the request; this tab retains it in
-  memory as unconfirmed, which may be lost on reload. An unconfirmed operation can be checked
-  again with its original identity and preconditions, including after a page
-  reload in the same browser origin. Checking may apply the original request;
-  the recovery row shows its direction and original document. Separate tabs
-  still rely on the server's version checks. Browser storage readback and UI
-  tests do not establish survival of a browser or operating-system crash.
-  A workspace refusal settles that HTTP attempt only; a concurrent attempt in
-  another tab can still leave the operation unconfirmed.
-  A pending first change may also be settled by a subsequent read or before a
-  later publication, even if that publication then conflicts. Dashboard
-  automatic link copying waits for an in-flight document refresh and compares
-  its result to the independent share verification before copying. A failed or
-  indefinitely pending refresh cannot establish a copyable share state. The link pins the
-  displayed revision and uses the origin currently open in the browser, which
-  may be a local address; it is not evidence that the link is reachable from
-  elsewhere.
-  Root pairs identify paths, not a durable store incarnation. Replacing a
-  workspace with another store at the same canonical paths can satisfy these
-  checks; do not replay an uncertain operation across such a replacement.
-  Document-check requests have a separate existing workspace contract and are
-  not protected by the new artifact share or edit body guards.
+- A pending first share change may settle on a subsequent read or before a
+  later publication. Clients should retain the original operation ID and
+  preconditions when checking an uncertain write. Workspace root pairs
+  identify paths. Replacing a store at the same canonical paths can satisfy
+  the same checks, so replay requires the original store.
 - Share snapshots, the migration guard, and per-operation receipts form one
   storage authority; back up and restore them together. Receipts use disk space
   as operations accumulate. A missing historical receipt cannot be distinguished
@@ -217,20 +122,10 @@ outcome before retrying.
 
 ## Rendering
 
-Markdown uses the existing lazy Markdown renderer, including its sanitizer and
-diagram handling. HTML uses a sandboxed `srcdoc` frame with scripts allowed for
-self-contained interactive results, without same-origin, popup, form or parent
-navigation permissions. A prepended CSP blocks external subresource/fetch, object and nested
-frame loads; inline script/style and embedded data images remain available.
-The isolated document can navigate itself; this is not a general network
-sandbox. It cannot navigate the parent dashboard or read its storage.
-Source is displayed as text. Downloads contain the original stored bytes.
-Bearer tokens and dashboard credentials are never passed into artifact frames.
-
-The catalog quick preview uses an empty sandbox and disallows scripts in its
-initial CSP. It is separate from the interactive full reader: opening the list
-does not fetch every body or run HTML reports. Collapsing the preview, replacing
-its listed revision or changing credentials retires its request ownership.
+The Knowledge reader uses sanitized Markdown and an HTML srcdoc preview
+with an empty sandbox. Artifact links from the conversation render sanitized
+HTML or Markdown in the workspace reader. Opening the catalog reads metadata.
+Selecting a result retrieves the selected body.
 
 ## Implementation and evidence
 
@@ -241,8 +136,7 @@ its listed revision or changing credentials retires its request ownership.
    that exercise actual API responses, selection, revision/source views, search,
    missing/error states and stale-request handling. Run dashboard typecheck/lint.
 3. Use the real HTTP service in an isolated workspace to publish Markdown and
-   interactive HTML, reload their links and capture desktop/mobile browser
-   evidence. Browser execution must show HTML interaction and isolation.
+   HTML, reload their links and check rendering on desktop and mobile.
 4. Independent adversarial source review of the final change. Ordinary MASC
    stacks follow the repository's source-review workflow; source checks do not
    establish installed runtime behavior or deployment.
@@ -251,8 +145,8 @@ its listed revision or changing credentials retires its request ownership.
 
 - Claude Artifacts: https://support.claude.com/en/articles/17153992-what-are-artifacts-and-how-do-i-use-them
 - HTML iframe sandbox: https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/iframe#sandbox
-- Existing sources: `components/chat/artifact-panel.ts`,
-  `components/common/markdown.ts`, `Tool_blob_store`, workspace configuration.
+- Existing sources in the Dashboard include the Knowledge artifacts tab,
+  the published artifact card and the workspace artifact reader.
 
 External references checked 2026-10-19 KST. These references establish the
 interaction and browser primitives; the checks above establish MASC behavior.

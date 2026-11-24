@@ -4864,6 +4864,7 @@ let test_pillar2_scroll_bounds_all_surfaces () =
                     fact_id = Printf.sprintf "wf-%02d" i;
                     summary = Printf.sprintf "WORLD_CLAIM_LAST_%02d" i;
                     recorded_at = "2026-11-22T10:00:00Z";
+                    claim_text = None;
                     payload = `Null;
                   });
             updated = [];

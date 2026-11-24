@@ -4000,6 +4000,33 @@ let apply_http_reply ~now (m : Model.t) reply =
       | Msg.Decode_error _ ->
           err_reply ~fail:Fun.id ~source:Health.Source_client_http
             ~ko:"OAuth 로그인 시작" ~en:"OAuth login start" err)
+  | Msg.Reply_board_quarantines { keeper; generation; result } ->
+      let inventory = match result with
+        | Ok rows -> Observed.value ~observed_at:now rows
+        | Error err -> Observed.failed ~reason:(Msg.http_error_detail err)
+                         ~retryable:(Msg.http_error_retryable err) ~at:now in
+      let board_recovery = Board_recovery.observe ~keeper ~generation inventory m.knowledge.board_recovery in
+      let next = { m with knowledge = { m.knowledge with board_recovery } } in
+      (match result with
+       | Ok _ -> (next, [])
+       | Error err -> record_http_incident ~now ~source:(Health.Source_keeper keeper)
+           ~context:(Say.make ~ko:"Board 격리 목록 조회" ~en:"Read Board quarantines") err next)
+  | Msg.Reply_board_recovery { item; result } ->
+      let keeper = item.keeper_name in
+      let outcome = match result with
+        | Ok receipt -> Board_recovery.Accepted receipt
+        | Error (Msg.Http_error { status = (400 | 401 | 403); _ } as err) ->
+            Board_recovery.Rejected (Msg.http_error_detail err)
+        | Error ((Msg.Http_error _ | Msg.Transport _ | Msg.Decode_error _ | Msg.Workspace_mismatch _) as err) ->
+            Board_recovery.Unconfirmed (Msg.http_error_detail err) in
+      let board_recovery = Board_recovery.finish item outcome m.knowledge.board_recovery in
+      let next = { m with knowledge = { m.knowledge with board_recovery } } in
+      (match result with
+       | Error (Msg.Workspace_mismatch _ as err) ->
+           record_http_incident ~now ~source:(Health.Source_keeper keeper)
+             ~context:(Say.make ~ko:"Board 복구" ~en:"Board recovery") err next
+       | Ok _ | Error (Msg.Http_error _ | Msg.Transport _ | Msg.Decode_error _) ->
+           View_fetches.read_board_quarantines ~keeper ~now next)
   | Msg.Reply_github_identity { keeper; result = Ok obs } ->
       let keeper_context =
         Keeper_context_store.apply_github_identity ~observed_at:now ~keeper obs

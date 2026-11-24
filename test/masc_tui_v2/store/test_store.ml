@@ -225,6 +225,7 @@ let has_get_health cmds =
               | Cmd.Get_oauth_providers
               | Cmd.Get_oauth_attached_tools _
               | Cmd.Get_oauth_attempt_status _
+              | Cmd.Get_board_quarantines _
               | Cmd.Get_github_identity _
               | Cmd.Get_addon_package_catalog _
               | Cmd.Get_addon_package_preview _
@@ -1758,6 +1759,7 @@ let test_verifier_regressions () =
         | Cmd.Post_oauth_identity_refresh _
         | Cmd.Post_oauth_identity_switch _
         | Cmd.Post_oauth_disconnect _
+        | Cmd.Post_board_recovery _
         | Cmd.Post_github_token _ ->
             false)
     | Cmd.Batch _
@@ -13770,9 +13772,110 @@ let test_freeze_fixes_epoch_locks_micro_inline_and_cut_reply () =
   in
   feed_pages 1 Cut_reply.start
 
+let test_keeper_board_quarantine_recovery () =
+  let module Q = Board_quarantine in
+  let keeper = "alpha" in
+  let base = Model.initial () in
+  let m = { base with nav = { base.nav with workspace = Nav.Keepers; sidebar_focused = false;
+            dive_stack = [Nav.Dive_keeper { name = keeper; tab = Nav.Keeper_work_candle }] } } in
+  let act model key = Update.execute_action ~now:t1 model key in
+  let reply (m : Model.t) response =
+    Update.step ~now:t2 m (Msg.Http_reply { epoch = m.epoch; reply = response }) in
+  let read cmds =
+    match List.filter_map (function
+      | Cmd.Http_get { req = Cmd.Get_board_quarantines { keeper; generation } as req; _ } ->
+          Some (keeper, generation, Cmd.get_request_path req)
+      | _ -> None) (Cmd.flatten cmds) with
+    | [result] -> result
+    | _ -> Alcotest.fail "expected one scoped Board inventory GET" in
+  let item name id : Q.inventory_item =
+    { keeper_name = name; partition_id = "partition-" ^ id; candidate_id = id;
+      quarantine_id = "generation-" ^ id; phase = Q.Inventory_quarantined;
+      failure_category = Q.Exact_lane_exhausted; attempt_provenance = None;
+      quarantined_at = 1.; requested_at = None; requeued_at = None; requested_by = None } in
+  let a = item keeper "A" and b = item keeper "B" in
+  let inventory ?(errors = []) items = { Q.items; errors } in
+  let observe model generation result =
+    reply model (Msg.Reply_board_quarantines { keeper; generation; result }) |> fst in
+  let action model = act model Keymap.Context_primary_action in
+  let posts cmds = List.filter_map (function
+    | Cmd.Http_post { req = Cmd.Post_board_recovery item as req; _ } -> Some (item, req)
+    | _ -> None) (Cmd.flatten cmds) in
+  let m, cmds = act m Keymap.Cycle_view_mode in
+  let who, first, path = read cmds in
+  Alcotest.(check (pair string string)) "selected Keeper inventory route"
+    (keeper, "/api/v1/keepers/alpha/board-attention/quarantines") (who, path);
+  let forbidden = Msg.Http_error { status = 403; body = "forbidden"; api_error = None } in
+  let failed = observe m first (Error forbidden) in
+  Alcotest.(check int) "unreadable inventory never submits" 0 (List.length (posts (snd (action failed))));
+  let partial = observe m first (Ok (inventory ~errors:[{ Q.keeper_name = keeper;
+                           kind = Q.Inventory_partition_ledger_unavailable }] [a; b])) in
+  Alcotest.(check int) "partial ledger cannot authorize the mutation" 0 (List.length (posts (snd (action partial))));
+  let m = observe m first (Ok (inventory [a; b])) in
+  let force model = reply model (Msg.Reply_action_ack { label = Say.literal "refresh";
+    ack_scope = Msg.Ack_refresh_view; for_modal = None; result = Ok () }) in
+  let refreshing, forced = force m in
+  let _, auto_generation, _ = read forced in
+  Alcotest.(check bool) "background refresh reserves a new read before another action" true
+    (auto_generation > first && posts (snd (action refreshing)) = []);
+  let _, duplicate = force refreshing in
+  Alcotest.(check bool) "a second background refresh shares the pending read" false
+    (List.mem (Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_board_quarantines { keeper; generation = auto_generation } })
+       (Cmd.flatten duplicate));
+  let m, _ = act m (Keymap.Move Keymap.Down) in
+  let m, cmds = act m Keymap.Refresh in
+  let _, second, _ = read cmds in
+  let m = observe m second (Ok (inventory [b; a])) in
+  let m = observe m first (Ok (inventory [a])) in
+  let pending, cmds = action m in
+  let target, req = match posts cmds with [one] -> one | _ -> Alcotest.fail "expected one CAS" in
+  Alcotest.(check string) "selection follows the exact candidate after reordering" b.candidate_id target.candidate_id;
+  Alcotest.(check string) "partition from that candidate" "/api/v1/keepers/alpha/board-attention/quarantines/partition-B/recovery" (Cmd.post_request_path req);
+  Alcotest.(check bool) "producer request includes schema and expected generation"
+    true (Cmd.post_request_body req = Q.request_to_json { candidate_id = "B"; expected_quarantine_id = b.quarantine_id;
+                                                         decision = Acknowledge_and_requeue });
+  Alcotest.(check int) "in-flight action is not submitted twice" 0 (List.length (posts (snd (action pending))));
+  let check_readback err outcome =
+    let model, gets = reply pending (Msg.Reply_board_recovery { item = b; result = err }) in
+    let who, generation, _ = read gets in
+    Alcotest.(check string) "the sent Keeper is read again" keeper who;
+    let new_generation = { b with quarantine_id = "different-generation"; phase = Q.Inventory_quarantined } in
+    let model = observe model generation (Ok (inventory [new_generation; a])) in
+    let row = Board_recovery.entry ~keeper model.knowledge.board_recovery in
+    Alcotest.(check bool) "outcome stays tied to the old generation" true
+      (match row.command with Board_recovery.Result (actual, actual_outcome) ->
+            Q.same_candidate actual b && outcome actual_outcome | _ -> false);
+    Alcotest.(check int) "new generation must be selected explicitly" 0 (List.length (posts (snd (action model)))) in
+  check_readback (Error forbidden) (function Board_recovery.Rejected _ -> true | _ -> false);
+  check_readback (Error (Msg.Http_error { status = 409; body = "stale"; api_error = None }))
+    (function Board_recovery.Unconfirmed _ -> true | _ -> false);
+  check_readback (Error (Msg.Decode_error "quarantine tuple mismatch"))
+    (function Board_recovery.Unconfirmed _ -> true | _ -> false);
+  check_readback (Error (Msg.Transport (Health.Other_io "connection closed")))
+    (function Board_recovery.Unconfirmed _ -> true | _ -> false);
+  let switched, _ = Update.step ~now:t2 pending (Msg.Server_start_result (Ok ())) in
+  let receipt : Q.recovery_receipt = { wake = Q.Not_registered; audit = Q.Recording_failed } in
+  let success = Msg.Reply_board_recovery { item = b; result = Ok receipt } in
+  let switched, late_cmds = Update.step ~now:t2 switched (Msg.Http_reply { epoch = pending.epoch; reply = success }) in
+  let old = Board_recovery.entry ~keeper switched.knowledge.board_recovery in
+  Alcotest.(check bool) "old workspace selection, receipt and read-back are discarded" true
+    (old.command = Board_recovery.Idle && old.selected = None && late_cmds = []);
+  let accepted, gets = reply pending success in
+  let _, generation, _ = read gets in
+  let complete = { b with phase = Q.Inventory_requeued } in
+  let accepted = observe accepted generation (Ok (inventory [a; complete])) in
+  let entry = Board_recovery.entry ~keeper accepted.knowledge.board_recovery in
+  Alcotest.(check bool) "receipt preserves the wake and audit outcomes after read-back" true
+    (entry.command = Board_recovery.Result (b, Board_recovery.Accepted receipt));
+  Alcotest.(check bool) "completed exact generation cannot be requeued again" true
+    (Board_recovery.actionable entry = None && Board_recovery.selection_index entry = Some 1);
+  Alcotest.(check bool) "an inventory returned for another Keeper is rejected" true
+    (Result.is_error (Q.inventory_of_json ~keeper (Q.inventory_to_json (inventory [item "beta" "A"]))))
+
 let () =
   Alcotest.run "masc_tui_store"
     [
+      ("Board recovery", [Alcotest.test_case "recover the viewed keeper and exact quarantine generation" `Quick test_keeper_board_quarantine_recovery]);
       ( "epoch"
       , [
           Alcotest.test_case "stale reply rejection" `Quick

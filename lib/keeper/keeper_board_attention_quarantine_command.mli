@@ -10,9 +10,9 @@
 val request_schema : string
 val result_schema : string
 
-type decision = Acknowledge_and_requeue
+type decision = Board_quarantine.decision = Acknowledge_and_requeue
 
-type request =
+type request = Board_quarantine.request =
   { candidate_id : string
   ; expected_quarantine_id : string
   ; decision : decision
@@ -112,14 +112,14 @@ val failure_json : audit:Yojson.Safe.t -> execution_error -> Yojson.Safe.t
       the partition ledger does not explain (the partition names another
       candidate or generation, or the ledger is unreadable) and [execute]
       refuses it. It is not shown as finished. *)
-type inventory_phase =
+type inventory_phase = Board_quarantine.inventory_phase =
   | Inventory_quarantined
   | Inventory_requeue_requested
   | Inventory_requeue_unfinished
   | Inventory_requeued
   | Inventory_requeue_unreconciled
 
-type inventory_item =
+type inventory_item = Board_quarantine.inventory_item =
   { keeper_name : string
   ; partition_id : string
   ; candidate_id : string
@@ -133,18 +133,18 @@ type inventory_item =
   ; requested_by : string option
   }
 
-type inventory_error_kind =
+type inventory_error_kind = Board_quarantine.inventory_error_kind =
   | Inventory_candidate_ledger_unavailable
   | Inventory_partition_ledger_unavailable
       (** Read only for a keeper with a recorded requeue; that keeper's
           requeued rows are [Inventory_requeue_unreconciled]. *)
 
-type inventory_error =
+type inventory_error = Board_quarantine.inventory_error =
   { keeper_name : string
   ; kind : inventory_error_kind
   }
 
-type inventory =
+type inventory = Board_quarantine.inventory =
   { items : inventory_item list
   ; errors : inventory_error list
   }

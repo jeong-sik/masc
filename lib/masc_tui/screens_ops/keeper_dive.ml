@@ -1462,6 +1462,84 @@ let render_memory_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t
 
 (* --- Tab 3: Work & Candle (ZERO Nested Boxes — uses v_hairline / hairline!) --- *)
 
+let render_board_recovery grid ~(rect : Rect.t) ~theme ~(model : Model.t) ~name =
+  let module Q = Board_quarantine in
+  let say = Ops_common.say model in
+  let e = Board_recovery.entry ~keeper:name model.knowledge.board_recovery in
+  let area = Card.pad_inner ~pad_x:(Ops_common.pad_x_for ~model rect) rect in
+  let y = ref area.y in
+  let line style text =
+    if !y < area.y + area.h then begin
+      ignore (Cell_grid.put_text ~clip:area grid ~x:area.x ~y:!y ~style text);
+      incr y
+    end
+  in
+  let value = Typography.primary theme and detail = Typography.structure theme in
+  let warn = Typography.status theme Theme.Status_attention in
+  let error = Typography.status theme Theme.Status_critical in
+  line (Typography.anchor theme) (say ~ko:"Board 격리 복구" ~en:"Board quarantine recovery" ^ " · @" ^ name);
+  line detail (say ~ko:"↑↓ 후보 선택 · r 목록 새로고침 · v 작업·캔들"
+                  ~en:"↑↓ select candidate · r refresh · v Work & Candle");
+  let inventory = Observed.to_option e.inventory in
+  (match e.command with
+   | Board_recovery.Idle -> ()
+   | Board_recovery.Submitting target ->
+       line warn (say ~ko:"복구 요청 전송 중" ~en:"Submitting recovery" ^ " · " ^ target.candidate_id)
+   | Board_recovery.Result (target, outcome) ->
+       let label = match outcome with
+         | Board_recovery.Accepted { wake; audit } ->
+             let wake_label = match wake with
+               | Q.Signaled -> say ~ko:"작업자에 알림" ~en:"Worker signaled"
+               | Q.Coalesced -> say ~ko:"기존 작업자 알림에 병합" ~en:"Worker wake coalesced"
+               | Q.Not_registered -> say ~ko:"등록된 작업자 없음" ~en:"No worker registered" in
+             let audit_label = match audit with
+               | Q.Recorded -> ""
+               | Q.Recording_failed -> " · " ^ say ~ko:"감사 기록 실패" ~en:"Audit recording failed" in
+             say ~ko:"서버 접수" ~en:"Server accepted" ^ " · " ^ wake_label ^ audit_label
+         | Rejected reason -> say ~ko:"서버 거절" ~en:"Rejected" ^ " · " ^ reason
+         | Unconfirmed reason -> say ~ko:"결과 미확인" ~en:"Outcome unconfirmed" ^ " · " ^ reason in
+       line warn (label ^ " · " ^ target.candidate_id);
+       Option.iter (fun (current : Q.inventory) ->
+         let read_back = match List.find_opt (Q.same_candidate target) current.items with
+           | Some item -> Q.inventory_phase_to_string item.phase
+           | None when current.errors <> [] -> say ~ko:"원장 읽기 불완전" ~en:"Incomplete ledger read"
+           | None -> say ~ko:"같은 격리 ID가 목록에 없음" ~en:"Quarantine generation absent" in
+         line detail (say ~ko:"같은 후보 재조회" ~en:"Read-back" ^ " · " ^ read_back)) inventory);
+  match e.inventory with
+  | Observed.Unreported | Observed.Loading _ | Observed.Absent ->
+      line detail (say ~ko:"격리 원장 조회 중…" ~en:"Reading quarantine ledger…")
+  | Observed.Failed { reason; _ } ->
+      line error (say ~ko:"격리 원장 조회 실패" ~en:"Quarantine read failed" ^ " · " ^ reason)
+  | Observed.Value { data; stale; _ } ->
+      List.iter (fun (failure : Q.inventory_error) ->
+        line error (Q.inventory_error_kind_to_string failure.kind)) data.errors;
+      if data.items = [] && data.errors = [] then line detail (say ~ko:"격리 기록 없음" ~en:"No quarantine records");
+      let index = Board_recovery.selection_index e in
+      (match Option.bind index (List.nth_opt data.items) with
+       | None when data.items <> [] ->
+           line warn (say ~ko:"선택한 격리가 바뀌었습니다. ↑↓로 후보를 선택하세요."
+                          ~en:"The selected generation changed. Use ↑↓ to select a candidate.")
+       | None -> ()
+       | Some item ->
+           if Option.is_some (Board_recovery.actionable e) then
+             line (Typography.accent theme) (say ~ko:"c  확인 후 재큐잉" ~en:"c  Acknowledge and requeue");
+           let identity key id =
+             Memory_lineage.wrap_full_lines ~max_cells:(max 1 area.w) (key ^ " " ^ id)
+             |> List.iter (line value) in
+           identity "candidate" item.candidate_id;
+           identity "partition" item.partition_id;
+           identity "quarantine" item.quarantine_id;
+           line detail (Q.quarantine_failure_category_to_string item.failure_category ^ " · " ^
+                        Q.inventory_phase_to_string item.phase));
+      if stale then line warn (say ~ko:"마지막 관측 · r 새로고침" ~en:"Last observation · r refresh");
+      let space = max 0 (area.y + area.h - !y) in
+      let at = Option.value index ~default:0 in
+      let start = max 0 (min (List.length data.items - space) (at - space + 1)) in
+      List.drop start data.items |> List.take space |> List.iteri (fun offset (item : Q.inventory_item) ->
+        let selected = Option.equal Int.equal (Some (offset + start)) index in
+        line (if selected then Typography.anchor theme else value)
+          ((if selected then "› " else "  ") ^ Q.inventory_phase_to_string item.phase ^ " · " ^ item.candidate_id))
+
 let render_work_candle_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
     ~(model : Model.t) ~name =
   if Rect.is_empty rect then ()
@@ -1505,6 +1583,8 @@ let render_work_candle_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
     let push_line ~fg ~attrs line =
       rows_acc := `Line (fg, attrs, line) :: !rows_acc
     in
+    push_line ~fg:theme.text_secondary ~attrs:Attr.none
+      (Ops_common.say model ~ko:"[v] Board 격리 복구" ~en:"[v] Board quarantine recovery");
     let now_unix = model.freshness.last_wall_unix in
     let say = Ops_common.say model in
     push_hairline (say ~ko:"주기" ~en:"Cadence");
@@ -3402,6 +3482,8 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
         | Nav.Keeper_memory ->
             render_memory_tab grid ~rect:content_rect ~theme ~model ~name
               ~focused:card_spec.focused
+        | Nav.Keeper_work_candle when Board_recovery.shown ~keeper:name model.knowledge.board_recovery ->
+            render_board_recovery grid ~rect:content_rect ~theme ~model ~name
         | Nav.Keeper_work_candle ->
             render_work_candle_tab grid ~rect:content_rect ~theme ~model ~name
         | Nav.Keeper_sandbox ->

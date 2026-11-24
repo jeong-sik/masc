@@ -24,3 +24,5 @@ val selected_wiki_page_fetch : Model.t -> Cmd.t list
 
 val bootstrap_fetches : Model.t -> Cmd.t list
 (** Initial/recovery fetch batch emitted after a healthy [/health] handshake. *)
+
+val read_board_quarantines : now:Masc_tui_core.Clock.Mono.t -> keeper:string -> Model.t -> Model.t * Cmd.t list

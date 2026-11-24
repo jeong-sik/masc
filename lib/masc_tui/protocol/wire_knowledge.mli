@@ -1,3 +1,5 @@
+val board_quarantines_path : keeper:string -> string
+
 (** Knowledge domain wire codecs: Board posts/comments, Wiki
     ([/api/v1/wiki*]), Artifacts, World Memory ([/api/v1/memory/world]),
     Temporal Memory Diff ([/api/v1/memory/diff]), and Keeper Memory Recovery

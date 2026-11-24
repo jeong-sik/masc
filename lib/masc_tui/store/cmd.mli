@@ -168,6 +168,7 @@ type get_request =
       provider : string;
       attempt_id : string;
     }
+  | Get_board_quarantines of { keeper : string; generation : int }
   | Get_github_identity of { keeper : string }
   | Get_addon_package_catalog of { directory : string option }
   | Get_addon_package_preview of { manifest_path : string }
@@ -299,6 +300,7 @@ type post_request =
       enabled : bool;
     }
   | Post_oauth_disconnect of { keeper : string; provider : string }
+  | Post_board_recovery of Board_quarantine.inventory_item
   | Post_github_token of {
       keeper : string;
       token : string;

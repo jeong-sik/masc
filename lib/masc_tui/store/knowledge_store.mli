@@ -144,6 +144,7 @@ type keeper_memory_subview =
 
 type t = {
   active_tab : Nav.knowledge_tab;
+  board_recovery : Board_recovery.t;
   board : Wire_knowledge.board_feed Observed.t;
   board_hearths : Wire_knowledge.board_hearth_entry list Observed.t;
   board_signal_only : bool;

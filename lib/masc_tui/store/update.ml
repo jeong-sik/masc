@@ -482,7 +482,7 @@ let leave_old_epoch ~now ~(before : Model.t) (after : Model.t) =
             Knowledge_store.close_memory_diagram after.knowledge
         | Some _ | None -> after.knowledge
       in
-      k0
+      { k0 with board_recovery = Board_recovery.invalidate k0.board_recovery }
       |> Knowledge_store.clear_pending_wiki_edit
       |> Knowledge_store.clear_pending_artifact_revision
     in
@@ -500,6 +500,21 @@ let leave_old_epoch ~now ~(before : Model.t) (after : Model.t) =
       keeper_context =
         Keeper_context_store.clear_running_github_logins after.keeper_context;
     }
+
+(* The view planner only returns commands. Reserve its inventory read before the
+   next UI event can plan the same generation or submit from the previous read.
+   Explicit refreshes and post-command read-backs have already reserved theirs. *)
+let reserve_board_view_read ~now (m : Model.t) cmds =
+  let recovery = m.knowledge.board_recovery in
+  match cmds, Board_recovery.viewed_keeper recovery with
+  | [], _ | _, None -> m
+  | _ :: _, Some keeper ->
+      let generation = (Board_recovery.entry ~keeper recovery).generation + 1 in
+      let req = Cmd.Get_board_quarantines { keeper; generation } in
+      if List.mem (Cmd.Http_get { epoch = m.epoch; req }) (Cmd.flatten cmds) then
+        let board_recovery, _ = Board_recovery.read ~keeper ~now recovery in
+        { m with knowledge = { m.knowledge with board_recovery } }
+      else m
 
 let step ~now m msg =
   let next0, cmds = step_raw ~now m msg in
@@ -525,4 +540,4 @@ let step ~now m msg =
     |> reconcile_streams ~before:m ~after:next
     |> reconcile_memory_diagram ~before:m ~after:next
   in
-  (next, final_cmds)
+  (reserve_board_view_read ~now next cmds, final_cmds)

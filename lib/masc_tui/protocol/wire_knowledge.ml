@@ -4,6 +4,9 @@ open Wire_common
 
 let ( let* ) = Result.bind
 
+let board_quarantines_path ~keeper =
+  "/api/v1/keepers/" ^ percent_encode keeper ^ "/board-attention/quarantines"
+
 let board_list_path ?(sort_by = "recent") ?hearth ?(signal_only = true) ?limit
     ?offset () =
   let params =

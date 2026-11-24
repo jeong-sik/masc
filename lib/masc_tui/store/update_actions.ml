@@ -1331,6 +1331,16 @@ let focus_composer_for_slash (m : Model.t) =
   in
   ({ m with nav = { m.nav with filter_focused = false }; drafts }, [])
 
+let board_work_keeper (m : Model.t) =
+  if Model.sidebar_has_focus m then None else active_keeper_for_tab Nav.Keeper_work_candle m
+
+let board_recovery_keeper (m : Model.t) =
+  Option.bind (board_work_keeper m) (fun keeper ->
+    if Board_recovery.shown ~keeper m.knowledge.board_recovery then Some keeper else None)
+
+let set_board_recovery (m : Model.t) board_recovery =
+  { m with knowledge = { m.knowledge with board_recovery } }
+
 let rec execute_slash ~now (m : Model.t) cmd =
   match cmd with
   | Slash.Pulse -> Update_nav.switch_workspace m Nav.Pulse
@@ -2794,6 +2804,12 @@ and execute_action ~now (m : Model.t) action =
   | Keymap.Submit_steer -> submit_composer ~now ~mode:Drafts.Mode_steer m
   | Keymap.Submit_followup -> submit_composer ~now ~mode:Drafts.Mode_follow_up m
   | Keymap.Move dir -> (
+      match board_recovery_keeper m, dir with
+      | Some keeper, (Keymap.Up | Down | Page_up | Page_down | Home | End) ->
+          let board_recovery = Board_recovery.move ~keeper ~direction:dir ~page_rows:m.viewport.rows
+              m.knowledge.board_recovery in
+          (set_board_recovery m board_recovery, [])
+      | Some _, (Keymap.Left | Right) | None, _ ->
       match m.nav.overlay, dir with
       | Some (Nav.Settings _), (Keymap.Left | Keymap.Right) ->
           step_settings_pane_lr ~now m dir
@@ -3371,7 +3387,9 @@ and execute_action ~now (m : Model.t) action =
               { instance_id = None; workspace_sha256 = None };
             Cmd.Http_get { epoch = next_epoch; req = Cmd.Get_health };
           ] )
-      else
+      else (match board_recovery_keeper m with
+      | Some keeper -> View_fetches.read_board_quarantines ~keeper ~now m
+      | None ->
         let next = Model.mark_all_domains_stale m in
         let view_cmds = View_fetches.fetches_for_current_view ~force:true next in
         let probe_cmd =
@@ -3435,7 +3453,7 @@ and execute_action ~now (m : Model.t) action =
         ( Model.with_toast ~now ~level:Model.Toast_info
             (Say.make ~ko:"현재 화면 새로고침 중" ~en:"Refreshing active view")
             next
-        , view_cmds @ probe_cmd @ diagram_cmds @ oauth_refresh_cmd )
+        , view_cmds @ probe_cmd @ diagram_cmds @ oauth_refresh_cmd ))
   | Keymap.Copy_selected -> (
       let copy_artifact_body (a : Wire_knowledge.artifact_entry) =
         let fmt_label =
@@ -4589,6 +4607,13 @@ and execute_action ~now (m : Model.t) action =
             | Nav.Infra ->
                 (m, [])))
   | Keymap.Cycle_view_mode -> (
+      match board_work_keeper m with
+      | Some keeper ->
+          let current = m.knowledge.board_recovery in
+          if Board_recovery.shown ~keeper current then (set_board_recovery m (Board_recovery.close current), [])
+          else View_fetches.read_board_quarantines ~keeper ~now
+                 (set_board_recovery m (Board_recovery.open_view ~keeper current))
+      | None ->
       if Option.is_some (Memory_diagram.active_diagram m) then
         Update_nav.cycle_memory_diagram_mode ~now m
       else
@@ -4731,6 +4756,13 @@ and execute_action ~now (m : Model.t) action =
                     | Nav.Runtime | Nav.Infra ->
                         (m, [])))))
   | Keymap.Context_primary_action -> (
+      match board_recovery_keeper m with
+      | Some keeper ->
+          (match Board_recovery.start ~keeper m.knowledge.board_recovery with
+           | None -> (m, [])
+           | Some (recovery, item) ->
+               (set_board_recovery m recovery, [Cmd.Http_post { epoch = m.epoch; req = Cmd.Post_board_recovery item }]))
+      | None ->
       match active_artifact_target m with
       | Some art ->
           let rev, sha =

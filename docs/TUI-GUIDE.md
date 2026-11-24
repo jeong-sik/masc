@@ -803,3 +803,7 @@ TUI v2.6 tracks every dataset with an explicit `Observed.t` state (`Loading`,
 `Value`, `Absent`, `Unreported`, `Failed`) so missing or failed reads are never
 fabricated as zero. Press `I` to inspect HTTP/SSE failure details in the
 Historical Incidents drawer and `r` to force-refresh.
+
+### Board quarantine recovery
+
+Open a Keeper’s **Work & Candle** tab and press `v` to read its Board quarantine inventory. Select a candidate with the arrow keys. The detail shows its full candidate, partition and quarantine IDs. Press `c` to acknowledge and requeue that generation. The TUI reads the same Keeper’s ledger again and displays the recorded phase beside the command result. Press `r` to read the ledger again.

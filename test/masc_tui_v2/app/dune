@@ -9,6 +9,7 @@
   masc_tui_keymap
   masc_tui_ui
   masc_tui_protocol
+  masc.masc_board
   masc_tui_net
   masc_tui_store
   masc_tui_app

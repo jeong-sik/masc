@@ -59,7 +59,7 @@ type resumable_status =
   | Resumable_judged of judged_state
   | Resumable_consumed of consumed_state
 
-type quarantine_failure_category =
+type quarantine_failure_category = Board_quarantine.quarantine_failure_category =
   | Candidate_membership_conflict
   | Durable_partition_invariant
   | Exact_setup_unavailable
@@ -72,9 +72,8 @@ type quarantine_failure_category =
   | Unexpected_worker_failure
   | Exact_execution_quarantined
   | Exact_execution_interrupted
-[@@deriving enumerate]
 
-type attempt_provenance =
+type attempt_provenance = Board_quarantine.attempt_provenance =
   { slot_id : string
   ; call_id : string
   ; plan_fingerprint : string
@@ -143,23 +142,8 @@ type candidate =
    holds any non-v8 row, so older rows are never decoded as v8. *)
 let schema_version = 8
 
-let quarantine_failure_category_to_string = function
-  | Candidate_membership_conflict -> "candidate_membership_conflict"
-  | Durable_partition_invariant -> "durable_partition_invariant"
-  | Exact_setup_unavailable -> "exact_setup_unavailable"
-  | Exact_flow_replayed -> "exact_flow_replayed"
-  | Exact_lane_exhausted -> "exact_lane_exhausted"
-  | Exact_flow_bookkeeping_failed -> "exact_flow_bookkeeping_failed"
-  | Exact_completion_failed -> "exact_completion_failed"
-  | Domain_output_invalid -> "domain_output_invalid"
-  | Execution_provenance_mismatch -> "execution_provenance_mismatch"
-  | Unexpected_worker_failure -> "unexpected_worker_failure"
-  | Exact_execution_quarantined -> "exact_execution_quarantined"
-  | Exact_execution_interrupted -> "exact_execution_interrupted"
-;;
-
-let quarantine_failure_category_of_string s = List.find_opt (fun v -> String.equal (quarantine_failure_category_to_string v) s) all_of_quarantine_failure_category
-;;
+let quarantine_failure_category_to_string = Board_quarantine.quarantine_failure_category_to_string
+let quarantine_failure_category_of_string = Board_quarantine.quarantine_failure_category_of_string
 
 let status_view = function
   | Pending pending -> Direct_resumable (Resumable_pending pending)

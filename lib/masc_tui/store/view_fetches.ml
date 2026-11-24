@@ -1,6 +1,11 @@
 open Masc_tui_core
 open Masc_tui_protocol
 
+let read_board_quarantines ~now ~keeper (m : Model.t) =
+  let board_recovery, generation = Board_recovery.read ~keeper ~now m.knowledge.board_recovery in
+  { m with knowledge = { m.knowledge with board_recovery } },
+  [Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_board_quarantines { keeper; generation } }]
+
 let needs_fetch ~force obs =
   if force then true
   else
@@ -306,6 +311,11 @@ let keeper_tab_fetches ~force ~name ~tab (m : Model.t) =
             && Knowledge_store.equal_keeper_memory_subview
                  m.knowledge.keeper_memory_subview Knowledge_store.Kmem_journal)
            (Cmd.Get_keeper_memory_journal { keeper = name; limit = Some 50 })
+  | Nav.Keeper_work_candle when Board_recovery.shown ~keeper:name m.knowledge.board_recovery ->
+      let e = Board_recovery.entry ~keeper:name m.knowledge.board_recovery in
+      if needs_fetch ~force e.inventory && not (Observed.is_loading e.inventory) then
+        [Cmd.Get_board_quarantines { keeper = name; generation = e.generation + 1 }]
+      else []
   | Nav.Keeper_work_candle ->
       []
       |> add_if (needs_fetch ~force m.work.planning) Cmd.Get_planning

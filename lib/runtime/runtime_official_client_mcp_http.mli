@@ -16,6 +16,10 @@ type tool_response =
     the handler returns; previously reserved handlers still drain. The delivery
     observer runs only after the full HTTP response write succeeds. *)
 
+val tool_spec_names : Yojson.Safe.t list -> string list
+(** The [name] of each tool spec, in order. A spec that is not an object with a
+    string [name] is left out: a client could not call it. *)
+
 val start :
   sw:Eio.Switch.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->

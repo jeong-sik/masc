@@ -386,33 +386,54 @@ let test_muse_refuses_unsupported_config_before_spawn () =
 
 let test_muse_argv_and_environment () =
   let cfg = Runtime_acp_client.default_config ~driver:Runtime_acp_client.Muse_code ~cwd:"/tmp" in
-  let argv ?native_posture ?mcp_server_name cfg =
-    Runtime_acp_client.For_testing.build_argv ?native_posture ?mcp_server_name cfg
+  let masc =
+    { Runtime_acp_client.name = "masc"
+    ; url = "http://127.0.0.1:9/mcp"
+    ; headers = []
+    ; tool_names = [ "masc_status"; "keeper_skill" ]
+    }
+  in
+  let argv ?native_posture ?mcp_server cfg =
+    Runtime_acp_client.For_testing.build_argv ?native_posture ?mcp_server cfg
       ~temp_gemini_dir:None
   in
   let toolset names = [ "-c"; "run.toolset=" ^ names ] in
   let trusted = [ "muse"; "acp"; "--trust-workspace" ] @ muse_observer_flags in
   check (list string) "none offers the MCP server's tools only"
     (trusted @ toolset {|["mcp__masc__*"]|})
-    (argv ~native_posture:Runtime_native_tools.Native_none ~mcp_server_name:"masc" cfg);
+    (argv ~native_posture:Runtime_native_tools.Native_none ~mcp_server:masc cfg);
   check (list string) "read adds read_file and search"
     (trusted @ toolset {|["read_file","search","mcp__masc__*"]|})
-    (argv ~native_posture:Runtime_native_tools.Native_read ~mcp_server_name:"masc" cfg);
+    (argv ~native_posture:Runtime_native_tools.Native_read ~mcp_server:masc cfg);
+  (* A name that matches no tool fails the host's first turn, and a server that
+     lists no tool matches nothing, so the server is left out of the list. *)
+  check (list string) "a server that lists no tool is left out under none"
+    (trusted @ toolset "[]")
+    (argv ~native_posture:Runtime_native_tools.Native_none
+       ~mcp_server:{ masc with tool_names = [] } cfg);
+  check (list string) "a server that lists no tool is left out under read"
+    (trusted @ toolset {|["read_file","search"]|})
+    (argv ~native_posture:Runtime_native_tools.Native_read
+       ~mcp_server:{ masc with tool_names = [] } cfg);
+  check (list string) "the list names the server the session carries"
+    (trusted @ toolset {|["mcp__other__*"]|})
+    (argv ~native_posture:Runtime_native_tools.Native_none
+       ~mcp_server:{ masc with name = "other" } cfg);
   check (list string) "without an MCP server none offers no tool at all"
     (trusted @ toolset "[]")
     (argv ~native_posture:Runtime_native_tools.Native_none cfg);
   check (list string) "an unstated posture takes the none side"
     (trusted @ toolset {|["mcp__masc__*"]|})
-    (argv ~mcp_server_name:"masc" cfg);
+    (argv ~mcp_server:masc cfg);
   check (list string) "full leaves the host's default tools"
     trusted
-    (argv ~native_posture:Runtime_native_tools.Native_full ~mcp_server_name:"masc" cfg);
+    (argv ~native_posture:Runtime_native_tools.Native_full ~mcp_server:masc cfg);
   let effort_cfg = { cfg with args = [ "acp"; "-c"; "reasoning_effort=\"low\"" ] } in
   check (list string) "operator args replace the defaults and keep the required flags"
     ([ "muse"; "acp"; "-c"; "reasoning_effort=\"low\""; "--trust-workspace" ]
      @ muse_observer_flags
      @ toolset {|["read_file","search","mcp__masc__*"]|})
-    (argv ~native_posture:Runtime_native_tools.Native_read ~mcp_server_name:"masc" effort_cfg);
+    (argv ~native_posture:Runtime_native_tools.Native_read ~mcp_server:masc effort_cfg);
   let env =
     Runtime_acp_client.For_testing.build_environment
       ~base_env:[| "PATH=/usr/bin"; "MUSE_NO_AUTO_UPDATE=0"; "META_API_KEY=key" |]
@@ -425,7 +446,7 @@ let test_muse_argv_and_environment () =
   check (option string) "PATH is kept" (Some "/usr/bin") (find_env "PATH" env)
 ;;
 
-(* [start] hands its posture and its MCP server name to [build_argv]: dropping
+(* [start] hands its posture and its MCP server to [build_argv]: dropping
    either would spawn the host with a different tool list than the posture
    allows, and the argv test above calls [build_argv] directly. A stand-in
    host writes the arguments it was started with. *)
@@ -446,12 +467,17 @@ for line in sys.stdin:
     Eio_main.run @@ fun env ->
     let clock = Eio.Stdenv.clock env in
     let proc_mgr = Runtime_acp_client.foreground_process_mgr ~clock () in
-    let host_args posture =
+    let host_args ?(tool_names = [ "masc_status" ]) posture =
       Eio.Switch.run @@ fun sw ->
       let config = { (Runtime_acp_client.default_config ~driver:Muse_code ~cwd) with
                      cli_path = "python3"; args = [script; argv_file] } in
       let mcp_server =
-        { Runtime_acp_client.name = "masc"; url = "http://127.0.0.1:9/mcp"; headers = [] } in
+        { Runtime_acp_client.name = "masc"
+        ; url = "http://127.0.0.1:9/mcp"
+        ; headers = []
+        ; tool_names
+        }
+      in
       match Runtime_acp_client.start ~sw ~proc_mgr ~clock ~fs:(Eio.Stdenv.fs env) ~config
               ~mcp_server ~native_posture:posture () with
       | Error err -> fail (Runtime_acp_client.error_to_string err)
@@ -467,7 +493,13 @@ for line in sys.stdin:
     check (list string) "read"
       (required @ [ "-c"; {|run.toolset=["read_file","search","mcp__masc__*"]|} ])
       (host_args Runtime_native_tools.Native_read);
-    check (list string) "full" required (host_args Runtime_native_tools.Native_full))
+    check (list string) "full" required (host_args Runtime_native_tools.Native_full);
+    check (list string) "none, server lists no tool"
+      (required @ [ "-c"; "run.toolset=[]" ])
+      (host_args ~tool_names:[] Runtime_native_tools.Native_none);
+    check (list string) "read, server lists no tool"
+      (required @ [ "-c"; {|run.toolset=["read_file","search"]|} ])
+      (host_args ~tool_names:[] Runtime_native_tools.Native_read))
 ;;
 
 let test_muse_permission_grammar () =
@@ -2563,7 +2595,7 @@ for line in sys.stdin:
         Runtime_acp_client.foreground_process_mgr ~clock ~grace_seconds:1.0 ()
       in
       let mcp_server : Runtime_acp_client.mcp_http_server =
-        { name = "masc"; url = "http://127.0.0.1:9999/mcp"; headers = [] }
+        { name = "masc"; url = "http://127.0.0.1:9999/mcp"; headers = []; tool_names = [] }
       in
       let cfg =
         { (Runtime_acp_client.default_config ~driver:Antigravity ~cwd:tmp) with
@@ -3915,6 +3947,7 @@ for line in sys.stdin:
           { name = "masc"
           ; url = "http://127.0.0.1:9999/mcp/cap-l3-token987"
           ; headers = [ "Authorization", "Bearer bearer-secret-l3-xyz987654321" ]
+          ; tool_names = []
           }
         in
         let cfg =
@@ -5116,7 +5149,7 @@ for line in sys.stdin:
       ~label:"Antigravity without ~mcp_server"
       ();
     let masc_srv : Runtime_acp_client.mcp_http_server =
-      { name = "masc"; url = "http://127.0.0.1:1/mcp"; headers = [] }
+      { name = "masc"; url = "http://127.0.0.1:1/mcp"; headers = []; tool_names = [] }
     in
     run_case
       ~driver:Antigravity

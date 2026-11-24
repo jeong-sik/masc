@@ -185,6 +185,11 @@ type mcp_http_server =
   { name : string
   ; url : string
   ; headers : (string * string) list
+  ; tool_names : string list
+    (** The tools the server lists. [muse acp] is told to offer the server's
+        tools only when this is non-empty: its tool list fails the first turn
+        on a name that matches nothing, and a server that lists no tool
+        matches nothing. *)
   }
 
 type config =
@@ -536,9 +541,9 @@ val start
     supplied, Antigravity [settings.json] enforces posture-specific write,
     command, and [cwd] read denies and Kimi suppresses [--skills-dir] under
     [Native_none]. [muse acp] is started with [-c run.toolset] naming the
-    tools [native_posture] allows and the tools of [mcp_server]; the host
-    runs some native tools without a permission request, so refusing requests
-    could not keep them off. *)
+    tools [native_posture] allows and, when [mcp_server] lists any tool, the
+    tools of that server; the host runs some native tools without a
+    permission request, so refusing requests could not keep them off. *)
 
 val driver : t -> driver
 val mcp_server_isolation : t -> mcp_server_isolation
@@ -663,7 +668,7 @@ module For_testing : sig
 
   val build_argv
     :  ?native_posture:Runtime_native_tools.posture
-    -> ?mcp_server_name:string
+    -> ?mcp_server:mcp_http_server
     -> config
     -> temp_gemini_dir:string option
     -> string list

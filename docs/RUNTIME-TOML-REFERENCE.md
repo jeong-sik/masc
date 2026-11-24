@@ -128,14 +128,20 @@ credential naming an absolute path (`oauth_source` for Antigravity); `env` and
   `-c runtime_capabilities.<id>.enabled=false` per bundled reminder observer,
   and a `-c run.toolset=[...]` that follows the Keeper's native tool posture
   (next bullet). It also sets `MUSE_NO_AUTO_UPDATE=1`. The host refuses to
-  start when `args` repeats one of those `-c` keys. With the observers on, the
-  host ended each measured turn (one tool call each) with one more model run,
-  a prompt of 5.8 to 5.9k tokens by the host's estimate and 1.2 to 2.9 s to its
-  tool call. With them off that run was absent in 8 of 8 sessions.
+  start when `args` repeats one of those `-c` keys. With the observers on, 5 of
+  8 measured turns (one tool call each) ended with one more model run, a
+  prompt of 5.8 to 5.9k tokens by the host's estimate and 1.2 to 2.9 s to its
+  tool call; the other 3 turns also set `approval_judge` and `reasoning_effort`
+  and had none. With the observers off the run was absent in 8 of 8 turns.
+  Switching one observer at a time with the echo provider, only the goal
+  reminder switch changed whether the run's tool surface appeared; the other
+  five are kept without a measurement that shows they are needed.
 - The host decides tool approvals, not MASC, and runs some native tools
   without asking. Its default permission profile has a model run approve MCP
-  tool calls (a prompt of 13.6 to 13.7k tokens by the host's estimate, 1.4 to
-  4.2 s per call) and sends MASC no permission request. Workspace writes and
+  tool calls (5 measured sessions, one call to a no-argument tool each: a prompt
+  of 11.6 to 13.7k tokens by the host's estimate and 1.4 to 4.8 s to its tool
+  call; what it does with a call it rejects was not observed) and sends MASC no
+  permission request. Workspace writes and
   sandboxed shell commands run without a request, and so does the read tool.
   Refusing permission requests therefore cannot keep native tools off, so MASC
   names the tools the main conversation may use with `-c run.toolset`:
@@ -146,17 +152,24 @@ credential naming an absolute path (`oauth_source` for Antigravity); `env` and
   | `read` | `["read_file","search","mcp__masc__*"]` | file read, file search, MASC's tools |
   | `full` | not set | the host's default tools, among them shell, file writes, memory, cron, sub-agents, web fetch and web search |
 
-  `full` takes effect only when the Keeper's tool approval mode is `yolo`; in
-  any other mode MASC runs the Keeper at `read`. The host refuses an unknown
-  plain tool name when a session starts. A `session/new` without an MCP server
-  named `masc` fails the first turn with `invalid run configuration: unknown
-  tool`. `args` must not contain `run.toolset`, because the host refuses to
-  start on a repeated key. Fusion and runtime verification run Muse Code at
+  `read_file` is not limited to the workspace: a live session read
+  `/etc/hosts`. `full` takes effect only when the Keeper's tool approval mode
+  is `yolo`; in any other mode MASC runs the Keeper at `read`. The host
+  refuses an unknown plain tool name when a session starts, and fails the first
+  turn with `invalid run configuration: unknown tool` when a name in the list
+  matches no tool. A server that lists no tool, one that `session/new` did not
+  carry and one the host could not connect to all end that way, so MASC lists
+  `mcp__masc__*` only when the bridge lists a tool. The glob also matches the
+  tools of a server named `masc__<x>` from a trusted workspace `.mcp.json` or
+  the operator's muse settings. `args` must not contain `run.toolset`, because
+  the host refuses to start on a repeated key. Fusion and runtime verification run Muse Code at
   `none`. MASC's own permission policy applies only to requests the host
-  forwards. The host forwards MCP tool calls when the operator's muse settings
-  select the `:ask-me` profile in `$XDG_CONFIG_HOME/muse/settings.json`
-  (default `~/.config/muse/settings.json`). The setting applies to every muse
-  session of that user:
+  forwards. With the operator's muse settings on the `:ask-me` profile in
+  `$XDG_CONFIG_HOME/muse/settings.json` (default `~/.config/muse/settings.json`)
+  and the client in the `promptUnmatched` mode, the host forwarded MCP tool
+  calls in 2 of 2 measured sessions. MASC starts every session in `onRequest`,
+  and `:ask-me` with `onRequest` was not tried. The setting applies to every
+  muse session of that user:
 
   ```json
   { "schema_version": 1,

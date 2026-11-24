@@ -583,6 +583,17 @@ let request_handler t ~path ~tool_specs ~tool_execution_mode ~call_tool _client_
       respond `Method_not_allowed "Method not allowed")
 ;;
 
+let tool_spec_names specs =
+  List.filter_map
+    (function
+      | `Assoc fields ->
+        (match List.assoc_opt "name" fields with
+         | Some (`String name) -> Some name
+         | _ -> None)
+      | _ -> None)
+    specs
+;;
+
 let start ~sw ~net ~secure_random ~server_name ~tool_specs ~tool_execution_mode ~call_tool () =
   let path_id, authorization = fresh_capabilities secure_random in
   let path = "/mcp/" ^ path_id in

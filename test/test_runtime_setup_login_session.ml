@@ -251,8 +251,7 @@ let piped_auth_hints_multiline_device_code () = run_process (fun env path sessio
   let result = S.run session ~env ~child_env:(Unix.environment ()) ~cwd:path
     ~argv:["python3";"-c";
            "import sys,time\n"
-           ^ "sys.stdout.write('Status: HTTP-4000 EXIT-CODE\\n')\nsys.stdout.flush()\ntime.sleep(0.03)\n"
-           ^ "sys.stdout.write('2. Enter this one-time code (expires in 15 minutes)\\n')\nsys.stdout.flush()\ntime.sleep(0.05)\n"
+           ^ "sys.stdout.write('Status: HTTP-4000 EXIT-CODE\\n2. Enter this one-time code (expires in 15 minutes)\\n')\nsys.stdout.flush()\ntime.sleep(0.05)\n"
            ^ "sys.stdout.write('   A1B2-C3D4E\\n')\nsys.stdout.flush()\ntime.sleep(0.05)\n"
            ^ "sys.stdout.write('1. Open https://auth.openai.com/codex/device\\n')\nsys.stdout.flush()\ntime.sleep(0.05)\n"
            ^ "sys.stdout.write('   WDJB-MJHT\\n')\nsys.stdout.flush()\n"]
@@ -261,7 +260,7 @@ let piped_auth_hints_multiline_device_code () = run_process (fun env path sessio
     ~on_auth_hint:(fun h -> hints := !hints @ [ h ])
     ~on_output:(fun _ -> ()) in
   get result;
-  check (list hint_testable) "piped multi-chunk device codes preserve prior cue/URL context while ignoring earlier banners"
+  check (list hint_testable) "piped device codes respect line order within and across reads"
     [ S.Device_code { code = "A1B2-C3D4E"; verification_uri = None }
     ; S.Auth_url { url = "https://auth.openai.com/codex/device" }
     ; S.Device_code

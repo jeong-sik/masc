@@ -421,8 +421,11 @@ let dedup_strings items =
         true))
     items
 
-let extract_urls_and_codes ~prior_context raw =
+let extract_urls_and_codes ?(include_trailing_token = true) ~prior_context raw =
   let plain = strip_ansi raw in
+  (* The renderer wraps rows in ANSI styling. Clip the unfinished visible
+     token after stripping that styling. OSC 8 targets have their own terminator. *)
+  let plain = if include_trailing_token then plain else drop_trailing_incomplete_token plain in
   let urls = dedup_strings (extract_osc8_urls raw @ extract_https_urls_from_plain plain) in
   let saw_context = has_device_code_context plain in
   let has_context = prior_context || urls <> [] || saw_context in
@@ -510,15 +513,17 @@ let run_with interpreter t ~saved_login ~on_auth_hint ~env ~child_env ~cwd ~argv
     let screen = if terminal then Some (terminal_screen ()) else None in
     let emit_hints =
       match on_auth_hint with
-      | None -> fun _ -> ()
+      | None -> fun ?include_trailing_token:_ _ -> ()
       | Some on_auth_hint ->
         let seen_urls = Hashtbl.create 4 in
         let seen_codes = Hashtbl.create 4 in
         let last_auth_url = ref None in
         let saw_device_context = ref false in
-        fun raw ->
+        fun ?include_trailing_token raw ->
           let prior_context = Option.is_some !last_auth_url || !saw_device_context in
-          let urls, codes, saw_context = extract_urls_and_codes ~prior_context raw in
+          let urls, codes, saw_context =
+            extract_urls_and_codes ?include_trailing_token ~prior_context raw
+          in
           if saw_context then saw_device_context := true;
           List.iter
             (fun url ->
@@ -543,10 +548,11 @@ let run_with interpreter t ~saved_login ~on_auth_hint ~env ~child_env ~cwd ~argv
         let content = Buffer.contents buf in
         match String.rindex_opt content '\n' with
         | Some nl ->
-          let completed = String.sub content 0 (nl + 1) in
+          let completed = String.sub content 0 nl in
           let tail = String.sub content (nl + 1) (String.length content - nl - 1) in
           Buffer.clear buf;
-          emit_hints completed;
+          (* A pipe read can coalesce separate lines. Admit their context in order. *)
+          List.iter (fun line -> emit_hints line) (String.split_on_char '\n' completed);
           let tlen = String.length tail in
           if tlen > max_pipe_hint_buffer then emit_hints tail
           else (
@@ -585,8 +591,11 @@ let run_with interpreter t ~saved_login ~on_auth_hint ~env ~child_env ~cwd ~argv
       let changed = Vte.dirty_rows screen <> [] in
       Vte.clear_dirty screen;
       let chunk_terminated =
-        let len = String.length text in
-        len > 0 && is_token_separator text.[len - 1]
+        if Option.is_none on_auth_hint then false
+        else
+          let plain = strip_ansi text in
+          let len = String.length plain in
+          len > 0 && is_token_separator plain.[len - 1]
       in
       if changed then (
         let rendered = screen_text screen in
@@ -597,7 +606,7 @@ let run_with interpreter t ~saved_login ~on_auth_hint ~env ~child_env ~cwd ~argv
             emit_hints rendered)
           else (
             pending_screen := Some rendered;
-            emit_hints (drop_trailing_incomplete_token rendered)))
+            emit_hints ~include_trailing_token:false rendered))
       else if chunk_terminated then
         match !pending_screen with
         | None -> ()

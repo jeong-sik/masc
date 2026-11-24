@@ -1529,6 +1529,7 @@ let test_knowledge_all_tabs_and_dives () =
                                  incomplete_batches = 0;
                                  aborted_batches = 0;
                                };
+                             history = None;
                              unparseable_timestamps = 0;
                              revisions = [];
                              added =

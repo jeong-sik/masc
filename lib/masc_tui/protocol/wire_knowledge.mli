@@ -676,6 +676,13 @@ type world_diff_counts = {
   aborted_batches : int;
 }
 
+type world_change_history = {
+  edge_changes : int;
+  index_updates : int;
+  digest_commits : int;
+  missing_evidence : int;
+}
+
 type world_revision_tick = {
   rev : int;
   batch_id : string;
@@ -714,6 +721,7 @@ type memory_diff_body =
     }
   | World_diff of {
       counts : world_diff_counts;
+      history : world_change_history option;
       unparseable_timestamps : int;
       revisions : world_revision_tick list;
       added : world_change_entry list;

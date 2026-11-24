@@ -1433,6 +1433,13 @@ type world_diff_counts = {
   aborted_batches : int;
 }
 
+type world_change_history = {
+  edge_changes : int;
+  index_updates : int;
+  digest_commits : int;
+  missing_evidence : int;
+}
+
 type world_revision_tick = {
   rev : int;
   batch_id : string;
@@ -1471,6 +1478,7 @@ type memory_diff_body =
     }
   | World_diff of {
       counts : world_diff_counts;
+      history : world_change_history option;
       unparseable_timestamps : int;
       revisions : world_revision_tick list;
       added : world_change_entry list;
@@ -1902,6 +1910,17 @@ let decode_world_updated_entry json =
   let after = member "after" json in
   Ok { seq; fact_id; summary; recorded_at; before; after }
 
+let decode_world_change_history body =
+  let* history = optional_object_field body "history" in
+  match history with
+  | None -> Ok None
+  | Some history ->
+      let* edge_changes = required_nonnegative_int_field history "edge_changes" in
+      let* index_updates = required_nonnegative_int_field history "index_updates" in
+      let* digest_commits = required_nonnegative_int_field history "digest_commits" in
+      let* missing_evidence = required_nonnegative_int_field history "missing_evidence" in
+      Ok (Some { edge_changes; index_updates; digest_commits; missing_evidence })
+
 let decode_memory_diff json =
   let* _, body = unwrap_v2_or_raw json in
   let* scope_obj = required_object_field body "scope" in
@@ -1989,6 +2008,7 @@ let decode_memory_diff json =
                writer_status;
              })
     | Scope_world ->
+        let* history = decode_world_change_history body in
         let* total_claims_now =
           required_nonnegative_int_field counts_obj "total_claims_now"
         in
@@ -2032,6 +2052,7 @@ let decode_memory_diff json =
                    incomplete_batches;
                    aborted_batches;
                  };
+               history;
                unparseable_timestamps;
                revisions;
                added;

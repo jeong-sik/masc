@@ -779,6 +779,7 @@ let test_wire_knowledge () =
               "scope": { "kind": "world" },
               "range": { "window": "24h", "from_rev": null, "to_rev": 5, "from_unix": 100.0, "to_unix": 200.0 },
               "counts": { "total_claims_now": 3, "added": 1, "updated": 0, "retracted": 0, "incomplete_batches": 0, "aborted_batches": 0 },
+              "history": { "edge_changes": 2, "index_updates": 3, "digest_commits": 4, "missing_evidence": 5 },
               "retrieval_heat": { "hot": 1, "warm": 0, "cold": 0, "never_retrieved": 2, "total_events": 1, "unreadable_event_lines": 0 },
               "unparseable_timestamps": 0,
               "revisions": [{ "rev": 5, "batch_id": "b1", "fact_id": "f1", "recorded_at": "2026-11-21T18:00:00Z", "op": "added" }],
@@ -788,7 +789,11 @@ let test_wire_knowledge () =
             }|}))
   in
   (match wdiff.body with
-  | Wire_knowledge.World_diff { counts = { total_claims_now = 3; _ }; _ } -> ()
+  | Wire_knowledge.World_diff
+      { counts = { total_claims_now = 3; added = 1; _ }
+      ; history = Some { edge_changes = 2; index_updates = 3; digest_commits = 4; missing_evidence = 5 }
+      ; _
+      } -> ()
   | Wire_knowledge.Keeper_diff _ | Wire_knowledge.World_diff _ ->
       Alcotest.fail "expected World_diff");
   (* Act_skip_line sends integer offset, NOT target *)

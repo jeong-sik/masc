@@ -397,6 +397,88 @@ let change_event_kind_of_string = function
   | _ -> None
 ;;
 
+type fact_version =
+  { version_scope : string
+  ; version_text : string
+  ; version_lifecycle : lifecycle
+  ; version_revision : int
+  }
+
+type change_evidence =
+  | Fact_written of { previous : fact_version option; current : fact_version }
+  | Edge_written of
+      { from_fact_id : string
+      ; from_scope : string
+      ; to_fact_id : string
+      ; to_scope : string
+      }
+
+let fact_version (fact : world_fact) =
+  { version_scope = fact.scope
+  ; version_text = fact.claim
+  ; version_lifecycle = fact.lifecycle
+  ; version_revision = fact.revision
+  }
+;;
+
+let fact_version_to_json (fact : fact_version) =
+  `Assoc
+    [ "scope", `String fact.version_scope
+    ; "claim", `String fact.version_text
+    ; "lifecycle", `String (lifecycle_to_string fact.version_lifecycle)
+    ; "revision", `Int fact.version_revision
+    ]
+;;
+
+let change_evidence_to_json = function
+  | Fact_written { previous; current } ->
+    `Assoc
+      [ "kind", `String "fact"
+      ; "previous", Option.fold ~none:`Null ~some:fact_version_to_json previous
+      ; "current", fact_version_to_json current
+      ]
+  | Edge_written { from_fact_id; from_scope; to_fact_id; to_scope } ->
+    `Assoc
+      [ "kind", `String "edge"
+      ; "from_fact_id", `String from_fact_id
+      ; "from_scope", `String from_scope
+      ; "to_fact_id", `String to_fact_id
+      ; "to_scope", `String to_scope
+      ]
+;;
+
+let change_evidence_of_json (json : Yojson.Safe.t) =
+  let open Result.Syntax in
+  let open Yojson.Safe.Util in
+  let fact_version json =
+    let scope = json |> member "scope" |> to_string in
+    let claim = json |> member "claim" |> to_string in
+    let revision = json |> member "revision" |> to_int in
+    match json |> member "lifecycle" |> to_string |> lifecycle_of_string with
+    | Some lifecycle when revision > 0 -> Ok { version_scope = scope; version_text = claim; version_revision = revision; version_lifecycle = lifecycle }
+    | Some _ | None -> Error "invalid fact version in world change evidence"
+  in
+  try
+    match json |> member "kind" |> to_string with
+    | "fact" ->
+      let* current = fact_version (member "current" json) in
+      let* previous =
+        match member "previous" json with
+        | `Null -> Ok None
+        | value -> Result.map Option.some (fact_version value)
+      in
+      Ok (Fact_written { previous; current })
+    | "edge" ->
+      let text key = json |> member key |> to_string in
+      let from_fact_id = text "from_fact_id" in
+      let from_scope = text "from_scope" in
+      let to_fact_id = text "to_fact_id" in
+      let to_scope = text "to_scope" in
+      Ok (Edge_written { from_fact_id; from_scope; to_fact_id; to_scope })
+    | _ -> Error "unknown world change evidence kind"
+  with Yojson.Safe.Util.Type_error _ -> Error "invalid world change evidence"
+;;
+
 type change_event =
   { seq : int
   ; kind : change_event_kind
@@ -404,6 +486,7 @@ type change_event =
   ; summary : string
   ; actor : string
   ; recorded_at : float
+  ; evidence : change_evidence option
   }
 
 let change_event_to_json (ev : change_event) =
@@ -414,6 +497,7 @@ let change_event_to_json (ev : change_event) =
     ; "summary", `String ev.summary
     ; "actor", `String ev.actor
     ; "recorded_at", `Float ev.recorded_at
+    ; "evidence", Option.fold ~none:`Null ~some:change_evidence_to_json ev.evidence
     ]
 ;;
 

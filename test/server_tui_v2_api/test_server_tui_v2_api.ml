@@ -3153,6 +3153,79 @@ let test_track_a_task_goal_link_and_strict_claim () =
       (high_after.task_status = Masc_domain.Todo))
 ;;
 
+let test_world_diff_uses_event_time_classification_and_scope () =
+  with_temp_workspace (fun config ->
+    let base_path = config.Workspace.base_path in
+    let now = 1_760_000_000.0 in
+    let require = function
+      | Ok value -> value
+      | Error error -> Alcotest.fail (World_memory_store.error_to_string error)
+    in
+    let upsert ~at ~id ~scope claim =
+      World_memory_store.upsert_fact ~base_path ~now:(now -. at) ~actor:"alpha"
+        ~fact_id:id ~claim ~scope ~category:Keeper_memory_os_types.Fact ~facets:[]
+        ~provenance:(Proposed_by { keeper_id = "alpha"; source_fact_ids = [] })
+        ~lifecycle:Working
+      |> require
+    in
+    let public_id = "wf-first" in
+    let peer_id = "wf-peer" in
+    let private_id = "wf-private" in
+    let created = upsert ~at:50. ~id:public_id ~scope:"workspace" "Original public claim" in
+    ignore (upsert ~at:49. ~id:peer_id ~scope:"workspace" "Related public claim");
+    ignore (upsert ~at:48. ~id:private_id ~scope:"keeper:alpha" "Private claim");
+    let public_reason = "Explain the label scope=keeper: for documentation" in
+    let link to_fact_id reason =
+      World_memory_store.add_edge ~base_path ~now:(now -. 45.) ~actor:"alpha"
+        ~from_fact_id:public_id ~to_fact_id ~kind:Refines ~reason |> require
+    in
+    let shared_edge = link peer_id public_reason in
+    let private_edge = link private_id "Hidden edge reason" in
+    let revised = upsert ~at:40. ~id:public_id ~scope:"workspace" "Revised public claim" in
+    let terminal =
+      World_memory_store.transition_fact_lifecycle ~base_path ~now:(now -. 39.) ~actor:"alpha"
+        ~fact_id:public_id ~to_lifecycle:Molted ~reason:"obsolete"
+      |> require
+    in
+    ignore
+      (World_memory_store.upsert_index_entry ~base_path ~now:(now -. 30.) ~actor:"alpha"
+         ~entry_id:"wiki-fixture" ~kind:Wiki_page ~title:"Fixture"
+         ~uri:"masc://wiki/fixture" ~summary:"Fixture" ~facets:[] ~sha256:None |> require);
+    ignore (World_memory_store.commit_digest ~base_path ~now:(now -. 20.) ~actor:"alpha" () |> require);
+    let read range =
+      Memory_api.diff_json ~now ~config ~scope:Scope_world ~range ()
+      |> ok_or_fail "typed World Memory history"
+      |> json_member_exn "data"
+    in
+    let first_page = read (Range_revs { from_rev = created.updated_seq; to_rev = Some created.updated_seq }) in
+    let first_added = json_list_exn "added" first_page in
+    Alcotest.(check (list string)) "later revisions preserve the original creation"
+      ["Original public claim"] (List.map (json_string_exn "claim_text") first_added);
+    let data = read (Range_window Window_24h) in
+    let counts = json_member_exn "counts" data in
+    let history = json_member_exn "history" data in
+    Alcotest.(check (list int)) "fact counts exclude edges, index and digest"
+      [2; 1; 1] (List.map (fun field -> json_int_exn field counts) ["added"; "updated"; "retracted"]);
+    Alcotest.(check (list int)) "other history carries independent totals"
+      [1; 1; 1; 0]
+      (List.map (fun field -> json_int_exn field history)
+         ["edge_changes"; "index_updates"; "digest_commits"; "missing_evidence"]);
+    let update = List.hd (json_list_exn "updated" data) in
+    Alcotest.(check int) "updated row names the historical operation" revised.updated_seq
+      (json_int_exn "seq" update);
+    Alcotest.(check string) "updated row includes the historical previous text" "Original public claim"
+      (json_string_exn "before_text" update);
+    Alcotest.(check int) "terminal update carries its own revision" terminal.updated_seq
+      (json_int_exn "seq" (List.hd (json_list_exn "retracted" data)));
+    let revision_ids =
+      json_list_exn "revisions" data |> List.map (json_int_exn "rev")
+    in
+    Alcotest.(check bool) "public edge survives a private-scope quote in its reason" true
+      (List.mem shared_edge.created_seq revision_ids);
+    Alcotest.(check bool) "private endpoint hides that edge" false
+      (List.mem private_edge.created_seq revision_ids))
+;;
+
 let test_memory_os_world_mvcc_and_keeper_internals () =
   with_temp_workspace (fun config ->
     let base_path = config.Workspace.base_path in
@@ -3652,6 +3725,8 @@ let () =
     ; ( "memory_v2"
       , [ Alcotest.test_case "world conflicts + keeper diff + heat" `Quick test_memory_v2_world_and_diff
         ; Alcotest.test_case "Track A4 human-readable claim text in world diff" `Quick test_track_a_memory_diff_human_claim_text
+        ; Alcotest.test_case "World diff counts event-time facts with typed scope" `Quick
+            test_world_diff_uses_event_time_classification_and_scope
         ; Alcotest.test_case "World_memory_store MVCC + keeper Memory OS internals + program_absorption" `Quick
             test_memory_os_world_mvcc_and_keeper_internals
         ] )

@@ -599,6 +599,7 @@ let populated_model ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_en)
                 incomplete_batches = 0;
                 aborted_batches = 0;
               };
+            history = None;
             unparseable_timestamps = 0;
             revisions = [];
             added =
@@ -4850,6 +4851,7 @@ let test_pillar2_scroll_bounds_all_surfaces () =
                 incomplete_batches = 0;
                 aborted_batches = 0;
               };
+            history = None;
             unparseable_timestamps = 0;
             revisions = [];
             added =

@@ -1589,7 +1589,7 @@ let render_world_diff_body ~grid ~(rect : Rect.t) ~(theme : Theme.t)
         | Observed.Value { data = diff; _ } -> (
             match diff.scope, diff.body with
             | ( Wire_knowledge.Scope_world
-              , Wire_knowledge.World_diff { counts; _ } ) ->
+              , Wire_knowledge.World_diff { counts; history; _ } ) ->
                 let y = ref rect.y in
                 let bottom = Rect.bottom rect in
                 let win_str =
@@ -1620,6 +1620,24 @@ let render_world_diff_body ~grid ~(rect : Rect.t) ~(theme : Theme.t)
                        line);
                   incr y
                 end;
+                (match history with
+                | Some h when !y < bottom ->
+                    let items =
+                      [ h.edge_changes, say lang ~ko:"관계" ~en:"edge changes"
+                      ; h.index_updates, say lang ~ko:"색인" ~en:"index updates"
+                      ; h.digest_commits, say lang ~ko:"요약" ~en:"digest commits"
+                      ; h.missing_evidence, say lang ~ko:"근거 없는 과거 기록" ~en:"older records without evidence"
+                      ]
+                      |> List.filter_map (fun (count, label) ->
+                        if count = 0 then None else Some (Printf.sprintf "%d %s" count label))
+                    in
+                    if items <> [] then begin
+                      ignore
+                        (put_clipped ~grid ~clip:rect ~x:rect.x ~y:!y ~max_w:rect.w
+                           ~style:(Typography.anchor ~bg theme) (String.concat " · " items));
+                      incr y
+                    end
+                | Some _ | None -> ());
                 if !y + 1 < bottom then begin
                   let h = diff.retrieval_heat in
                   let bar_rect = Rect.make ~x:rect.x ~y:!y ~w:rect.w ~h:2 in

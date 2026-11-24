@@ -102,6 +102,31 @@ val read_change_log_tail
   -> limit:int
   -> (change_event list * int, store_error) result
 
+type history_page = After of int | Tail
+
+val read_history_snapshot
+  :  base_path:string
+  -> page:history_page
+  -> limit:int
+  -> (consistent_snapshot * (change_event list * int), store_error) result
+(** Read current facts, edges and the requested change page at one
+    SQLite read-transaction boundary. *)
+
+type shared_change =
+  | Claim_added of fact_version
+  | Claim_updated of { previous : fact_version option; current : fact_version }
+  | Claim_retracted of { previous : fact_version option; current : fact_version }
+  | Shared_edge
+  | Shared_index
+  | Shared_digest
+  | Private_change
+  | Missing_change_evidence
+
+val shared_change_of_snapshot : consistent_snapshot -> change_event -> shared_change
+(** Interpret history using event-time evidence. A pre-existing row without
+    evidence is eligible only when its subject can be proved from that same
+    snapshot. Rows carrying private endpoints or fact scope stay private. *)
+
 (** {1 Atomic Off-Domain Writes} *)
 
 val upsert_fact

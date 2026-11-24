@@ -130,7 +130,6 @@ type driver_profile =
   ; mode_for_native_full : string
   ; model_config_id : string
   ; effort_config_id : string option
-  ; enforces_native_none : bool
   }
 
 let profile_of_driver = function
@@ -161,7 +160,6 @@ let profile_of_driver = function
     ; mode_for_native_full = "auto"
     ; model_config_id = "model"
     ; effort_config_id = Some "thought_level"
-    ; enforces_native_none = true
     }
   | Kimi_code ->
     { driver = Kimi_code
@@ -184,7 +182,6 @@ let profile_of_driver = function
     ; mode_for_native_full = "yolo"
     ; model_config_id = "model"
     ; effort_config_id = Some "thinking"
-    ; enforces_native_none = true
     }
   | Mistral_vibe ->
     { driver = Mistral_vibe
@@ -216,7 +213,6 @@ let profile_of_driver = function
     ; mode_for_native_full = "auto-approve"
     ; model_config_id = "model"
     ; effort_config_id = Some "thinking"
-    ; enforces_native_none = true
     }
   | Muse_code ->
     { driver = Muse_code
@@ -232,13 +228,18 @@ let profile_of_driver = function
     (* Live-verified against muse acp 1.4.25 (2026-11-24): session/update
        tool_call emits title = name = "mcp__<server>__<tool>" with kind =
        "other"; native tools use plain names ("read_file", kind "read"). The
-       host's default permission profile has its own AI reviewer approve MCP
-       calls and sends no session/request_permission frame; each call adds
-       one model run of about 4,000 tokens and 1.4 to 4.2 s. The frame
-       appears when the operator's muse settings select
-       permissions.default_profile ":ask-me". It carries only the toolCallId,
-       so the identity comes from the tool_call frame. No ACP method and no
-       -c key that was tried selects the profile. *)
+       host's default permission profile has a model run approve MCP calls and
+       sends no session/request_permission frame. In four sessions each call to
+       a no-argument stub tool, ordered by the prompt, added one reviewer run:
+       the host estimated its prompt at 13.6 to 13.7k tokens (a 4,002-token
+       prefix), and 1.4 to 4.2 s passed from that prompt to the run's tool
+       call. Other tools and arguments were not tried. With settings that
+       selected permissions.default_profile ":ask-me" and the client in
+       promptUnmatched, an MCP call produced a frame in both sessions run that
+       way (the read call in a third produced none). The frame carries only the
+       toolCallId, so the identity comes from the tool_call frame.
+       session/setPermissionProfile and two other method names return -32601,
+       and -c permissions.default_profile is refused. *)
     ; mcp_identifier_syntaxes = [ Mcp_double_underscore ]
     ; system_prompt_channel = Framed_in_first_prompt
     (* muse acp reports no per-turn token counts: the prompt result holds only
@@ -255,11 +256,6 @@ let profile_of_driver = function
     ; mode_for_native_full = "allowAll"
     ; model_config_id = "model"
     ; effort_config_id = None
-    (* muse runs its read tool without a session/request_permission frame in
-       every mode, including for a path outside the workspace
-       (live-verified in onRequest and promptUnmatched), so the client cannot
-       refuse reads and [none] is not enforceable. *)
-    ; enforces_native_none = false
     }
 ;;
 
@@ -2871,17 +2867,21 @@ let install_client_of_driver = function
 
 (* ── Lifecycle: spawn + initialize ────────────────────────────────────────── *)
 
-(* muse acp 1.4.25 starts a separate model run after a turn for its bundled
-   reminder observers (memory, skill, verification, goal, todo and scope
-   reminders; the run's one tool is [submit_reminder_decision]). A Keeper
-   already carries its own memory, goals and verification, so the host runs
-   with every observer off. Measured 2026-11-24 on one-tool turns: the run
-   appeared in 5 of 5 sessions without the six switches below (4,560-token
-   prefix, 1.2 to 2.9 s of model time at the end of the turn) and in 0 of 8
-   sessions with them, and the main agent's tool count fell from 26 to 25.
-   [-c runtime_capabilities.<id>] accepts any id without checking it: a
-   session that named an id the host does not have kept the run, so a renamed
-   id fails silently and the observer stays on. *)
+(* muse acp 1.4.25 ends a turn with one more model run for its bundled
+   reminder observers (the run's one tool is [submit_reminder_decision]). A
+   Keeper already carries its own memory, goals and verification, so the host
+   runs with every observer off. Measured 2026-11-24 on turns with one tool
+   call (two main model requests): the run was present in 5 of 5 sessions
+   without the six switches below (one of them named a non-existent id
+   instead) and absent in 8 of 8 with them. The host estimated the run's
+   prompt at 5.8 to 5.9k tokens, and 1.2 to 2.9 s passed from that prompt to
+   the run's tool call. The host logged the goal reminder as skipped for lack
+   of a goal in every sample, so the goal reminder did not cause the run;
+   which of the six did was not isolated. With the switches the host
+   registered 34 tools instead of 35, which can be read without a turn.
+   [-c runtime_capabilities.<id>] accepts any id without checking it: the
+   session that named an id the host does not have kept the run and logged no
+   warning, so a renamed id fails silently and the observer stays on. *)
 let muse_observer_capability_ids =
   List.map
     (fun name -> "plugin:tbh-reminders:reminder:" ^ name)
@@ -2907,22 +2907,43 @@ let muse_required_args =
        muse_observer_capability_ids
 ;;
 
-(* Under its default permission profile muse acp 1.4.25 runs workspace writes
-   and sandboxed shell commands without a session/request_permission frame, so
-   the client cannot refuse them (live-verified: a write_file call created its
-   file in onRequest and promptUnmatched, a bash call ran in onRequest).
-   [--disable-write] and [--disable-shell] remove those tools from the host for
-   its lifetime (29 to 23 tools on the echo provider). They go on under every
-   posture but [full]; an unstated posture takes the restrictive side. The host
-   offers no flag for its web search and fetch tools. *)
-let muse_host_tool_flags = function
+(* muse acp 1.4.25 runs its read tool in every mode tried, workspace writes
+   and sandboxed shell commands in the modes tried, without a
+   session/request_permission frame, so refusing permission requests cannot
+   keep its native tools off. It offers the main conversation the tools named
+   by the setting [run.toolset]: a JSON array of names, where
+   [mcp__<server>__*] stands for every tool of one MCP server. Anything not
+   named is not offered (echo provider, 2026-11-24: 29 native tools by
+   default, 0 with an empty array, 2 with the two names below).
+   - [none]: the MCP server's tools only.
+   - [read]: [read_file] and [search] (workspace file search with ripgrep
+     semantics), plus the MCP server's tools.
+   - [full]: no setting, so the host keeps its default native tools, among
+     them shell, file writes, memory, cron, sub-agents, web fetch and search.
+   An unstated posture takes the [none] side. The host refuses an unknown
+   plain name when the session starts. A session/new that carries no MCP
+   server of the named name makes the first turn fail with "invalid run
+   configuration: unknown tool" instead of running without MASC's tools.
+   [mcp__<server>__*] matched every tool of a stub server whose tool names
+   contain underscores. A repeated [-c run.toolset] makes the host refuse to
+   run, so an operator [args] must not set it. *)
+let muse_toolset_args ?mcp_server_name posture =
+  let restricted native_tools =
+    let mcp_tools =
+      match mcp_server_name with
+      | Some name -> [ Printf.sprintf "mcp__%s__*" name ]
+      | None -> []
+    in
+    let names = List.map (fun tool -> `String tool) (native_tools @ mcp_tools) in
+    [ "-c"; "run.toolset=" ^ Yojson.Safe.to_string (`List names) ]
+  in
+  match posture with
   | Some Runtime_native_tools.Native_full -> []
-  | Some Runtime_native_tools.Native_none
-  | Some Runtime_native_tools.Native_read
-  | None -> [ "--disable-write"; "--disable-shell" ]
+  | Some Runtime_native_tools.Native_read -> restricted [ "read_file"; "search" ]
+  | Some Runtime_native_tools.Native_none | None -> restricted []
 ;;
 
-let build_argv ?native_posture (config : config) ~temp_gemini_dir =
+let build_argv ?native_posture ?mcp_server_name (config : config) ~temp_gemini_dir =
   let profile = profile_of_driver config.driver in
   let base_args = if config.args <> [] then config.args else profile.default_args in
   match config.driver with
@@ -2963,7 +2984,7 @@ let build_argv ?native_posture (config : config) ~temp_gemini_dir =
   | Muse_code ->
     (config.cli_path :: base_args)
     @ muse_required_args
-    @ muse_host_tool_flags native_posture
+    @ muse_toolset_args ?mcp_server_name native_posture
 ;;
 
 let foreground_process_mgr ~clock ?(grace_seconds = default_reap_grace_seconds) () =
@@ -2978,14 +2999,6 @@ let start ~sw ~proc_mgr ~clock ?fs ~(config : config) ?mcp_server ?native_postur
   then Error (Invalid_config "cwd must be non-empty")
   else if config.driver = Muse_code && Option.is_some config.oauth_source
   then Error (Invalid_config "ACP driver muse_code requires host sign-in with the credential file binding unset")
-  else if
-    native_posture = Some Runtime_native_tools.Native_none && not profile.enforces_native_none
-  then
-    Error
-      (Invalid_config
-         (Printf.sprintf
-            "ACP driver %s cannot enforce the native tool posture 'none'"
-            (driver_to_string config.driver)))
   else (
     let* temp_gemini_dir, managed_schema_root =
       match profile.mcp_wiring with
@@ -3024,7 +3037,11 @@ let start ~sw ~proc_mgr ~clock ?fs ~(config : config) ?mcp_server ?native_postur
         ~command:config.cli_path
     in
     let argv =
-      build_argv ?native_posture { config with cli_path = resolved_cli_path } ~temp_gemini_dir
+      build_argv
+        ?native_posture
+        ?mcp_server_name
+        { config with cli_path = resolved_cli_path }
+        ~temp_gemini_dir
     in
     let* cwd_path =
       let resolved =

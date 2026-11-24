@@ -123,33 +123,46 @@ credential naming an absolute path (`oauth_source` for Antigravity); `env` and
 
 - The client signs in with `muse login`. On macOS the secret is in the Keychain
   and `~/.config/muse/auth.json` holds metadata; other platforms are not
-  verified. MASC adds `--trust-workspace` (the host connects the session's MCP
-  server only with it) and one `-c runtime_capabilities.<id>.enabled=false` per
-  bundled reminder observer after `args`, and sets `MUSE_NO_AUTO_UPDATE=1`. The
-  host refuses to start when `args` repeats one of those `-c` keys. Each
-  observer is a separate model run after a turn, about 4,500 tokens and 1.2 to
-  2.9 s in the sessions measured.
-- The host decides tool approvals, not MASC. Its default permission profile has
-  an AI reviewer approve MCP tool calls, at about 4,000 tokens and 1.4 to 4.2 s
-  per call, and sends MASC no permission request. Workspace writes and
-  sandboxed shell commands run without a request, and so does the read tool in
-  every mode. MASC therefore starts the host with `--disable-write
-  --disable-shell` unless the Keeper declares `full`, and a Keeper whose
-  `keeper.tools.native` is `none` runs at `read`, because reads cannot be
-  removed. The host has no flag for its web search and fetch tools. MASC's own
-  permission policy applies only to requests the host forwards. The host
-  forwards MCP tool calls when the operator's muse settings select the
-  `:ask-me` profile in `$XDG_CONFIG_HOME/muse/settings.json` (default
-  `~/.config/muse/settings.json`). The setting applies to every muse session of
-  that user:
+  verified. MASC adds these after `args`: `--trust-workspace` (the host
+  connects the session's MCP server only with it), one
+  `-c runtime_capabilities.<id>.enabled=false` per bundled reminder observer,
+  and a `-c run.toolset=[...]` that follows the Keeper's native tool posture
+  (next bullet). It also sets `MUSE_NO_AUTO_UPDATE=1`. The host refuses to
+  start when `args` repeats one of those `-c` keys. With the observers on, the
+  host ended each measured turn (one tool call each) with one more model run,
+  a prompt of 5.8 to 5.9k tokens by the host's estimate and 1.2 to 2.9 s to its
+  tool call. With them off that run was absent in 8 of 8 sessions.
+- The host decides tool approvals, not MASC, and runs some native tools
+  without asking. Its default permission profile has a model run approve MCP
+  tool calls (a prompt of 13.6 to 13.7k tokens by the host's estimate, 1.4 to
+  4.2 s per call) and sends MASC no permission request. Workspace writes and
+  sandboxed shell commands run without a request, and so does the read tool.
+  Refusing permission requests therefore cannot keep native tools off, so MASC
+  names the tools the main conversation may use with `-c run.toolset`:
+
+  | Keeper `keeper.tools.native` | `run.toolset` | Tools the host offers |
+  | --- | --- | --- |
+  | `none` | `["mcp__masc__*"]` | MASC's tools only |
+  | `read` | `["read_file","search","mcp__masc__*"]` | file read, file search, MASC's tools |
+  | `full` | not set | the host's default tools, among them shell, file writes, memory, cron, sub-agents, web fetch and web search |
+
+  `full` takes effect only when the Keeper's tool approval mode is `yolo`; in
+  any other mode MASC runs the Keeper at `read`. The host refuses an unknown
+  plain tool name when a session starts. A `session/new` without an MCP server
+  named `masc` fails the first turn with `invalid run configuration: unknown
+  tool`. `args` must not contain `run.toolset`, because the host refuses to
+  start on a repeated key. Fusion and runtime verification run Muse Code at
+  `none`. MASC's own permission policy applies only to requests the host
+  forwards. The host forwards MCP tool calls when the operator's muse settings
+  select the `:ask-me` profile in `$XDG_CONFIG_HOME/muse/settings.json`
+  (default `~/.config/muse/settings.json`). The setting applies to every muse
+  session of that user:
 
   ```json
   { "schema_version": 1,
     "permissions": { "schema_version": 1, "default_profile": ":ask-me" } }
   ```
 
-  Fusion and runtime verification require `none` and refuse Muse Code before
-  starting its process.
 - Muse bindings reject provider and binding `effort`, model `reasoning-effort`, and
   effort variants at load. Per-turn effort overrides are also refused. Put
   `-c reasoning_effort="<level>"` in `args`, for example

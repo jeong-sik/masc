@@ -180,16 +180,6 @@ let parse_posture raw =
     Error (Printf.sprintf "unknown posture %S (expected none, read, or full)" other)
 ;;
 
-(* [none] where the client can enforce it, the [read] floor where it cannot:
-   the posture a Keeper on that client resolves to. *)
-let default_posture (driver : Runtime_acp_client.driver) =
-  Runtime_native_tools.degrade_on_admission
-    ~posture:Runtime_native_tools.Native_none
-    ~none_supported:
-      (Runtime_acp_client.profile_of_driver driver).Runtime_acp_client.enforces_native_none
-    ()
-;;
-
 let probe_one_driver ~env ~cwd ~timeout_s ~model_override ~posture (driver : Runtime_acp_client.driver)
   : driver_report
   =
@@ -640,7 +630,7 @@ let () =
   let cwd_arg = ref (Sys.getcwd ()) in
   let timeout_s_arg = ref default_turn_timeout_s in
   let model_arg = ref "" in
-  let posture_arg = ref "" in
+  let posture_arg = ref "none" in
   let json_only = ref false in
   let specs =
     [ ( "--drivers"
@@ -651,21 +641,17 @@ let () =
     ; "--model", Arg.Set_string model_arg, "Optional model override for all selected drivers"
     ; ( "--posture"
       , Arg.Set_string posture_arg
-      , "Native tool posture: none, read, or full (default: none, or read for a driver \
-         that cannot enforce none)" )
+      , "Native tool posture: none, read, or full (default: none)" )
     ; "--json", Arg.Set json_only, "Emit JSON report only"
     ]
   in
   Arg.parse specs (fun _ -> ()) "masc-acp-probe [OPTIONS]";
-  let posture_override =
-    if String.trim !posture_arg = ""
-    then None
-    else (
-      match parse_posture !posture_arg with
-      | Ok p -> Some p
-      | Error msg ->
-        Printf.eprintf "masc-acp-probe: %s\n" msg;
-        exit 2)
+  let posture =
+    match parse_posture !posture_arg with
+    | Ok p -> p
+    | Error msg ->
+      Printf.eprintf "masc-acp-probe: %s\n" msg;
+      exit 2
   in
   let drivers =
     match parse_drivers !drivers_arg with
@@ -685,11 +671,6 @@ let () =
     Eio_main.run (fun env ->
       List.map
         (fun driver ->
-           let posture =
-             match posture_override with
-             | Some p -> p
-             | None -> default_posture driver
-           in
            if not !json_only
            then
              Printf.eprintf

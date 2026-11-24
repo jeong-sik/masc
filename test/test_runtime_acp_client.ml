@@ -347,22 +347,11 @@ let test_muse_profile_and_native_none () =
   check (option string) "muse has no effort config option" None muse.effort_config_id;
   List.iter
     (fun driver ->
-       let name = Runtime_acp_client.driver_to_string driver in
-       let enforces = (Runtime_acp_client.profile_of_driver driver).enforces_native_none in
-       check bool (name ^ " native-none enforcement")
-         (not (Runtime_acp_client.equal_driver driver Runtime_acp_client.Muse_code))
-         enforces;
-       check bool (name ^ " execution agrees with its profile") enforces
+       check bool
+         (Runtime_acp_client.driver_to_string driver ^ " can enforce native none")
+         true
          (Runtime_execution.supports_native_none (acp_execution_of_driver driver)))
-    Runtime_acp_client.all_drivers;
-  check bool "muse none runs at the read floor" true
-    (Runtime_native_tools.degrade_on_admission
-       ~posture:Runtime_native_tools.Native_none
-       ~none_supported:
-         (Runtime_execution.supports_native_none
-            (acp_execution_of_driver Runtime_acp_client.Muse_code))
-       ()
-     = Runtime_native_tools.Native_read)
+    Runtime_acp_client.all_drivers
 ;;
 
 let test_muse_refuses_unsupported_config_before_spawn () =
@@ -388,12 +377,6 @@ let test_muse_refuses_unsupported_config_before_spawn () =
         in
         check
           (result unit error)
-          "refuses native none before attempting to spawn the missing executable"
-          (Error (Runtime_acp_client.Invalid_config
-                    "ACP driver muse_code cannot enforce the native tool posture 'none'"))
-          (start ~config ~native_posture:Runtime_native_tools.Native_none);
-        check
-          (result unit error)
           "rejects an explicit credential file before falling back to host sign-in"
           (Error (Runtime_acp_client.Invalid_config
                     "ACP driver muse_code requires host sign-in with the credential file binding unset"))
@@ -403,29 +386,33 @@ let test_muse_refuses_unsupported_config_before_spawn () =
 
 let test_muse_argv_and_environment () =
   let cfg = Runtime_acp_client.default_config ~driver:Runtime_acp_client.Muse_code ~cwd:"/tmp" in
-  let argv ?native_posture cfg =
-    Runtime_acp_client.For_testing.build_argv ?native_posture cfg ~temp_gemini_dir:None
+  let argv ?native_posture ?mcp_server_name cfg =
+    Runtime_acp_client.For_testing.build_argv ?native_posture ?mcp_server_name cfg
+      ~temp_gemini_dir:None
   in
-  let host_tool_flags = [ "--disable-write"; "--disable-shell" ] in
+  let toolset names = [ "-c"; "run.toolset=" ^ names ] in
   let trusted = [ "muse"; "acp"; "--trust-workspace" ] @ muse_observer_flags in
-  check (list string) "none turns every observer off and removes the host write and shell tools"
-    (trusted @ host_tool_flags)
+  check (list string) "none offers the MCP server's tools only"
+    (trusted @ toolset {|["mcp__masc__*"]|})
+    (argv ~native_posture:Runtime_native_tools.Native_none ~mcp_server_name:"masc" cfg);
+  check (list string) "read adds read_file and search"
+    (trusted @ toolset {|["read_file","search","mcp__masc__*"]|})
+    (argv ~native_posture:Runtime_native_tools.Native_read ~mcp_server_name:"masc" cfg);
+  check (list string) "without an MCP server none offers no tool at all"
+    (trusted @ toolset "[]")
     (argv ~native_posture:Runtime_native_tools.Native_none cfg);
-  check (list string) "read removes the host write and shell tools too"
-    (trusted @ host_tool_flags)
-    (argv ~native_posture:Runtime_native_tools.Native_read cfg);
-  check (list string) "an unstated posture takes the restrictive side"
-    (trusted @ host_tool_flags)
-    (argv cfg);
-  check (list string) "full keeps the host write and shell tools"
+  check (list string) "an unstated posture takes the none side"
+    (trusted @ toolset {|["mcp__masc__*"]|})
+    (argv ~mcp_server_name:"masc" cfg);
+  check (list string) "full leaves the host's default tools"
     trusted
-    (argv ~native_posture:Runtime_native_tools.Native_full cfg);
+    (argv ~native_posture:Runtime_native_tools.Native_full ~mcp_server_name:"masc" cfg);
   let effort_cfg = { cfg with args = [ "acp"; "-c"; "reasoning_effort=\"low\"" ] } in
   check (list string) "operator args replace the defaults and keep the required flags"
     ([ "muse"; "acp"; "-c"; "reasoning_effort=\"low\""; "--trust-workspace" ]
      @ muse_observer_flags
-     @ host_tool_flags)
-    (argv ~native_posture:Runtime_native_tools.Native_read effort_cfg);
+     @ toolset {|["read_file","search","mcp__masc__*"]|})
+    (argv ~native_posture:Runtime_native_tools.Native_read ~mcp_server_name:"masc" effort_cfg);
   let env =
     Runtime_acp_client.For_testing.build_environment
       ~base_env:[| "PATH=/usr/bin"; "MUSE_NO_AUTO_UPDATE=0"; "META_API_KEY=key" |]
@@ -436,6 +423,51 @@ let test_muse_argv_and_environment () =
     (find_env "MUSE_NO_AUTO_UPDATE" env);
   check (option string) "operator strip-env drops the key" None (find_env "META_API_KEY" env);
   check (option string) "PATH is kept" (Some "/usr/bin") (find_env "PATH" env)
+;;
+
+(* [start] hands its posture and its MCP server name to [build_argv]: dropping
+   either would spawn the host with a different tool list than the posture
+   allows, and the argv test above calls [build_argv] directly. A stand-in
+   host writes the arguments it was started with. *)
+let test_muse_start_spawns_the_host_with_the_posture_toolset () =
+  let cwd = Filename.temp_dir "muse-toolset-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree cwd) (fun () ->
+    let script = Filename.concat cwd "host.py" and argv_file = Filename.concat cwd "argv" in
+    Out_channel.with_open_text script (fun oc -> output_string oc
+      {|import json, sys
+with open(sys.argv[1], "w") as out:
+    json.dump(sys.argv[2:], out)
+for line in sys.stdin:
+    request = json.loads(line)
+    if "id" in request:
+        result = {"protocolVersion": 1, "agentCapabilities": {"loadSession": True}}
+        print(json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": result}), flush=True)
+|});
+    Eio_main.run @@ fun env ->
+    let clock = Eio.Stdenv.clock env in
+    let proc_mgr = Runtime_acp_client.foreground_process_mgr ~clock () in
+    let host_args posture =
+      Eio.Switch.run @@ fun sw ->
+      let config = { (Runtime_acp_client.default_config ~driver:Muse_code ~cwd) with
+                     cli_path = "python3"; args = [script; argv_file] } in
+      let mcp_server =
+        { Runtime_acp_client.name = "masc"; url = "http://127.0.0.1:9/mcp"; headers = [] } in
+      match Runtime_acp_client.start ~sw ~proc_mgr ~clock ~fs:(Eio.Stdenv.fs env) ~config
+              ~mcp_server ~native_posture:posture () with
+      | Error err -> fail (Runtime_acp_client.error_to_string err)
+      | Ok client ->
+        Runtime_acp_client.close client;
+        Yojson.Safe.from_file argv_file |> Yojson.Safe.Util.to_list
+        |> List.map Yojson.Safe.Util.to_string
+    in
+    let required = "--trust-workspace" :: muse_observer_flags in
+    check (list string) "none"
+      (required @ [ "-c"; {|run.toolset=["mcp__masc__*"]|} ])
+      (host_args Runtime_native_tools.Native_none);
+    check (list string) "read"
+      (required @ [ "-c"; {|run.toolset=["read_file","search","mcp__masc__*"]|} ])
+      (host_args Runtime_native_tools.Native_read);
+    check (list string) "full" required (host_args Runtime_native_tools.Native_full))
 ;;
 
 let test_muse_permission_grammar () =
@@ -5110,6 +5142,8 @@ let () =
     ; "environment", [ test_case "env strip and override" `Quick test_build_environment ]
     ; ( "argv_and_posture"
       , [ test_case "muse argv and environment" `Quick test_muse_argv_and_environment
+        ; test_case "muse start spawns the host with the posture toolset" `Quick
+            test_muse_start_spawns_the_host_with_the_posture_toolset
         ; test_case "muse MCP grammar and permission policy" `Quick
             test_muse_permission_grammar
         ; test_case "kimi --skills-dir order & strict permission posture" `Quick

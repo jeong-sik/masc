@@ -1,11 +1,14 @@
 import type { ComponentChildren } from 'preact'
 import {
   authSession,
+  currentSessionEpoch,
   getSingleUserToken,
+  isEpochCurrent,
   observedAbsent,
   observedUnreported,
   observedValue,
   parseSseBlock,
+  resolveWorkspaceUrl,
   type Observed,
   type ObserverFrame,
 } from '../../core'
@@ -201,6 +204,41 @@ export interface MultiAccountProviderAccountsResponse {
     readonly provider_account_id: string
     readonly integration_id?: string
   }[]
+}
+
+export interface MultiAccountIntegration {
+  readonly integration_id: string
+  readonly display_name: string
+  readonly connect: readonly string[]
+  readonly models: readonly string[]
+  readonly calls?: string
+}
+
+export interface MultiAccountIntegrationsResponse {
+  readonly integrations?: readonly MultiAccountIntegration[]
+}
+
+export interface LaneAddonAskQuestion {
+  readonly id?: string
+  readonly question_id?: string
+  readonly prompt?: string
+  readonly text?: string
+  readonly label?: string
+  readonly choices?: readonly { readonly id: string; readonly label?: string }[]
+}
+
+export interface LaneAddonAskRow {
+  readonly declaration_id: string
+  readonly title: string
+  readonly ask_id: string
+  readonly asked_at: number
+  readonly context: string | null
+  readonly questions: readonly LaneAddonAskQuestion[]
+  readonly resolution: { readonly state?: string }
+}
+
+export interface LaneAddonAsksResponse {
+  readonly asks?: readonly LaneAddonAskRow[]
 }
 
 export interface CacheStatsPayload {
@@ -760,6 +798,8 @@ export function openViewSseStream(
   onStatus?: (status: 'open' | 'error' | 'closed', detail?: string) => void,
   fetchImpl: typeof fetch = globalThis.fetch,
 ): void {
+  const startEpoch = currentSessionEpoch()
+  const resolvedUrl = resolveWorkspaceUrl(url)
   const headers: Record<string, string> = { Accept: 'text/event-stream' }
   const session = authSession.peek()
   if (session.kind !== 'multi_account_signed_in') {
@@ -769,13 +809,13 @@ export function openViewSseStream(
 
   void (async () => {
     try {
-      const res = await fetchImpl(url, {
+      const res = await fetchImpl(resolvedUrl, {
         method: 'GET',
         credentials: 'same-origin',
         headers,
         signal,
       })
-      if (signal.aborted) return
+      if (signal.aborted || !isEpochCurrent(startEpoch)) return
       if (!res.ok || !res.body) {
         onStatus?.('error', `HTTP ${res.status}`)
         return
@@ -785,13 +825,15 @@ export function openViewSseStream(
       const decoder = new TextDecoder()
       let buffer = ''
       try {
-        while (!signal.aborted) {
+        while (!signal.aborted && isEpochCurrent(startEpoch)) {
           const { value, done } = await reader.read()
           if (done) break
+          if (signal.aborted || !isEpochCurrent(startEpoch)) break
           buffer += decoder.decode(value, { stream: true })
           const blocks = buffer.split(/\r?\n\r?\n/)
           buffer = blocks.pop() ?? ''
           for (const block of blocks) {
+            if (signal.aborted || !isEpochCurrent(startEpoch)) return
             const frame = parseSseBlock(block)
             if (frame) onFrame(frame)
           }
@@ -799,9 +841,9 @@ export function openViewSseStream(
       } finally {
         reader.releaseLock()
       }
-      if (!signal.aborted) onStatus?.('closed')
+      if (!signal.aborted && isEpochCurrent(startEpoch)) onStatus?.('closed')
     } catch (err) {
-      if (!signal.aborted) {
+      if (!signal.aborted && isEpochCurrent(startEpoch)) {
         onStatus?.('error', err instanceof Error ? err.message : String(err))
       }
     }

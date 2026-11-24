@@ -22,6 +22,8 @@ import type {
   BrowserClientRow,
   BrowserClientsPayload,
   BrowserTabRow,
+  LaneAddonAskRow,
+  LaneAddonAsksResponse,
   LaneAddonInstanceRow,
   LaneAddonsPayload,
   WorkspaceViewProps,
@@ -51,12 +53,13 @@ type BrowserLaneState =
 
 export function AddonsTab(props: WorkspaceViewProps) {
   const addonsObs = resourceCache.observe<LaneAddonsPayload>('runtime:lane-addons').value
+  const asksObs = resourceCache.observe<LaneAddonAsksResponse>('runtime:lane-addons-asks').value
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [catalog, setCatalog] = useState<PackageCatalogPayload | null>(null)
   const [preview, setPreview] = useState<PackagePreviewPayload | null>(null)
   const [attachRunId, setAttachRunId] = useState('default')
   const [actionJson, setActionJson] = useState('{}')
-  const [askAnswerText, setAskAnswerText] = useState('')
+  const [askAnswersByKey, setAskAnswersByKey] = useState<Readonly<Record<string, string>>>({})
   const [banner, setBanner] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
 
   const [browserState, setBrowserState] = useState<BrowserLaneState>({ kind: 'loading' })
@@ -67,6 +70,11 @@ export function AddonsTab(props: WorkspaceViewProps) {
     void resourceCache.fetch<LaneAddonsPayload>(
       'runtime:lane-addons',
       (signal) => apiGet<LaneAddonsPayload>('/api/v1/lane-addons', { signal }),
+      { ttlMs: 15_000, topics: ['lane_addon'], reason },
+    )
+    void resourceCache.fetch<LaneAddonAsksResponse>(
+      'runtime:lane-addons-asks',
+      (signal) => apiGet<LaneAddonAsksResponse>('/api/v1/lane-addons/asks', { signal }),
       { ttlMs: 15_000, topics: ['lane_addon'], reason },
     )
   }
@@ -185,18 +193,34 @@ export function AddonsTab(props: WorkspaceViewProps) {
     })
   }
 
-  const handleAnswerHostAsk = async (requestId: string) => {
-    if (!askAnswerText.trim()) return
-    const res = await apiMutate<unknown>('POST', '/api/v1/keepers/ask-answer', {
-      ask_id: requestId,
-      answer: askAnswerText.trim(),
+  // Exact OCaml contract (lib/server/server_routes_http_routes_lane_addons.ml:692-713,808):
+  // POST /api/v1/lane-addons/ask-answer with { declaration_id, ask_id, answers }
+  const handleAnswerAddonAsk = async (ask: LaneAddonAskRow) => {
+    const submissions = ask.questions.map((q, idx) => {
+      const qid = q.id ?? q.question_id ?? `q-${idx}`
+      const key = `${ask.ask_id}:${qid}`
+      const text = (askAnswersByKey[key] ?? '').trim()
+      return {
+        question_id: qid,
+        response: text.length > 0
+          ? { kind: 'wrote' as const, text }
+          : { kind: 'skipped' as const },
+      }
     })
-    if (!res.ok) {
-      setBanner({ kind: 'err', text: `질문 응답 실패: ${res.error.message}` })
+    if (submissions.length === 0) {
+      setBanner({ kind: 'err', text: '응답할 질문 항목이 없습니다.' })
       return
     }
-    setBanner({ kind: 'ok', text: `요청 ${requestId}에 응답을 전달했습니다.` })
-    setAskAnswerText('')
+    const res = await apiMutate<unknown>('POST', '/api/v1/lane-addons/ask-answer', {
+      declaration_id: ask.declaration_id,
+      ask_id: ask.ask_id,
+      answers: submissions,
+    })
+    if (!res.ok) {
+      setBanner({ kind: 'err', text: `애드온 질문 응답 실패: ${res.error.message}` })
+      return
+    }
+    setBanner({ kind: 'ok', text: `애드온 질문 ${ask.ask_id} 응답이 기록되었습니다.` })
     loadAddons('manual')
   }
 
@@ -299,14 +323,14 @@ export function AddonsTab(props: WorkspaceViewProps) {
               <button type="button" class="btn-ghost" style=${{ color: 'var(--err-fg)' }} onClick=${() => void handleDetach(selectedInstance.instance_id)}>Detach</button>
             </div>
           </div>
-          <label style=${{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: 'var(--fs-12)' }}>
+          <label style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)', fontSize: 'var(--fs-12)' }}>
             <span>액션 호출 (JSON)</span>
             <textarea
               rows=${3}
               class="mono"
               value=${actionJson}
               onInput=${(e: Event) => setActionJson((e.target as HTMLTextAreaElement).value)}
-              style=${{ padding: '6px', fontSize: 'var(--fs-11)', background: 'var(--bg-0)', border: '1px solid var(--line-1)', borderRadius: 'var(--radius-sm)' }}
+              style=${{ padding: 'var(--sp-2)', fontSize: 'var(--fs-11)', background: 'var(--bg-0)', border: '1px solid var(--line-1)', borderRadius: 'var(--radius-sm)' }}
             />
           </label>
           <button type="button" class="btn-primary" style=${{ alignSelf: 'flex-start' }} onClick=${() => void handleInvokeAction(selectedInstance)}>
@@ -315,28 +339,57 @@ export function AddonsTab(props: WorkspaceViewProps) {
 
           ${(selectedInstance.host_requests?.waiting?.length ?? 0) > 0 && html`
             <div style=${{ borderTop: '1px solid var(--line-1)', paddingTop: 'var(--sp-2)' }}>
-              <div style=${{ fontSize: 'var(--fs-12)', fontWeight: 600, color: 'var(--warn-fg)', marginBottom: '4px' }}>
-                대기 중인 호스트 요청 / Ask (${selectedInstance.host_requests!.waiting!.length})
-              </div>
-              <div style=${{ display: 'flex', gap: 'var(--sp-1)', marginBottom: 'var(--sp-1)' }}>
-                <input
-                  type="text"
-                  placeholder="응답 텍스트…"
-                  value=${askAnswerText}
-                  onInput=${(e: Event) => setAskAnswerText((e.target as HTMLInputElement).value)}
-                  style=${{ flex: 1, minWidth: 0, padding: '4px 8px', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
-                />
+              <div style=${{ fontSize: 'var(--fs-12)', fontWeight: 600, color: 'var(--warn-fg)', marginBottom: 'var(--sp-1)' }}>
+                대기 중인 호스트 요청 (${selectedInstance.host_requests!.waiting!.length})
               </div>
               ${selectedInstance.host_requests!.waiting!.map((w) => html`
-                <div key=${w.request_id} style=${{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 'var(--fs-11)' }}>
-                  <span class="mono">${w.request_id} (${String(w.reason.reason ?? 'waiting')})</span>
-                  <button type="button" class="btn-ghost" style=${{ padding: '2px 6px', fontSize: 'var(--fs-11)' }} onClick=${() => void handleAnswerHostAsk(w.request_id)}>
-                    응답
-                  </button>
+                <div key=${w.request_id} class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-2)' }}>
+                  ${w.request_id} · ${String(w.reason.reason ?? 'waiting')}
                 </div>
               `)}
             </div>
           `}
+        </div>
+      `}
+
+      ${asksObs.kind === 'value' && (asksObs.data.asks?.length ?? 0) > 0 && html`
+        <div class="wka-card" data-testid="lane-addon-asks-panel" style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', borderColor: 'var(--warn-border)' }}>
+          <div class="wka-h">
+            <h3>열린 Lane-Addon 질문 (${asksObs.data.asks!.length})</h3>
+          </div>
+          ${asksObs.data.asks!.map((ask) => html`
+            <div key=${ask.ask_id} style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', padding: 'var(--sp-2)', background: 'var(--bg-2)', borderRadius: 'var(--radius-sm)' }}>
+              <div style=${{ fontWeight: 600, fontSize: 'var(--fs-12)' }}>${ask.title}</div>
+              <div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
+                declaration=${ask.declaration_id} · ask=${ask.ask_id}
+              </div>
+              ${ask.questions.map((q, qIdx) => {
+                const qid = q.id ?? q.question_id ?? `q-${qIdx}`
+                const key = `${ask.ask_id}:${qid}`
+                return html`
+                  <label key=${key} style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)', fontSize: 'var(--fs-12)' }}>
+                    <span>${q.prompt ?? q.text ?? q.label ?? qid}</span>
+                    <input
+                      type="text"
+                      aria-label=${`답변:${qid}`}
+                      placeholder="응답 입력 (비우면 skipped)"
+                      value=${askAnswersByKey[key] ?? ''}
+                      onInput=${(e: Event) => setAskAnswersByKey((prev) => ({ ...prev, [key]: (e.target as HTMLInputElement).value }))}
+                      style=${{ padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+                    />
+                  </label>
+                `
+              })}
+              <button
+                type="button"
+                class="btn-primary"
+                style=${{ alignSelf: 'flex-start' }}
+                onClick=${() => void handleAnswerAddonAsk(ask)}
+              >
+                질문 응답 제출
+              </button>
+            </div>
+          `)}
         </div>
       `}
 
@@ -348,7 +401,7 @@ export function AddonsTab(props: WorkspaceViewProps) {
               <button type="button" class="btn-ghost" onClick=${() => void loadCatalog(catalog.parent!)}>↑ 상위</button>
             `}
           </div>
-          <div style=${{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
             ${catalog.entries.map((entry, idx) => {
               if (entry.kind === 'folder') {
                 return html`
@@ -361,9 +414,9 @@ export function AddonsTab(props: WorkspaceViewProps) {
                 return html`<div key=${`i-${idx}`} style=${{ fontSize: 'var(--fs-11)', color: 'var(--err-fg)' }}>⚠ ${entry.path}: ${entry.message}</div>`
               }
               return html`
-                <div key=${entry.manifest_path} style=${{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--sp-2)', padding: '4px 6px', background: 'var(--bg-2)', borderRadius: 'var(--radius-sm)' }}>
+                <div key=${entry.manifest_path} style=${{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--sp-2)', padding: 'var(--sp-1) var(--sp-2)', background: 'var(--bg-2)', borderRadius: 'var(--radius-sm)' }}>
                   <span style=${{ fontSize: 'var(--fs-12)' }}>${entry.title}</span>
-                  <button type="button" class="btn-ghost" style=${{ padding: '2px 6px', fontSize: 'var(--fs-11)' }} onClick=${() => void handlePreviewManifest(entry.manifest_path)}>
+                  <button type="button" class="btn-ghost" style=${{ padding: 'var(--sp-0) var(--sp-1)', fontSize: 'var(--fs-11)' }} onClick=${() => void handlePreviewManifest(entry.manifest_path)}>
                     미리보기
                   </button>
                 </div>
@@ -379,7 +432,7 @@ export function AddonsTab(props: WorkspaceViewProps) {
                   value=${attachRunId}
                   onInput=${(e: Event) => setAttachRunId((e.target as HTMLInputElement).value)}
                   placeholder="run_id"
-                  style=${{ flex: 1, minWidth: 0, padding: '4px 8px', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+                  style=${{ flex: 1, minWidth: 0, padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
                 />
                 <button type="button" class="btn-primary" onClick=${() => void handleAttach(preview.manifest_path)}>Attach</button>
               </div>
@@ -462,11 +515,11 @@ export function AddonsTab(props: WorkspaceViewProps) {
                       </button>
                     </div>
                     ${tabs && html`
-                      <div style=${{ display: 'flex', flexDirection: 'column', gap: '4px', borderTop: '1px solid var(--line-1)', paddingTop: 'var(--sp-1)' }}>
+                      <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)', borderTop: '1px solid var(--line-1)', paddingTop: 'var(--sp-1)' }}>
                         ${tabs.length === 0
                           ? html`<span class="dtable-absent" style=${{ fontSize: 'var(--fs-11)' }}>열린 탭 없음</span>`
                           : tabs.slice(0, 8).map((t) => html`
-                              <div key=${t.id} style=${{ fontSize: 'var(--fs-11)', display: 'flex', gap: '6px', minWidth: 0 }}>
+                              <div key=${t.id} style=${{ fontSize: 'var(--fs-11)', display: 'flex', gap: 'var(--sp-1)', minWidth: 0 }}>
                                 <span style=${{ color: t.active ? 'var(--ok-fg)' : 'var(--fg-3)' }}>${t.active ? '●' : '○'}</span>
                                 <span style=${{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${t.title || t.url}</span>
                               </div>

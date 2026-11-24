@@ -241,7 +241,7 @@ export function LanesTab(props: WorkspaceViewProps) {
       sortable: true,
       sortValue: (r) => r.status,
       cell: (r) => html`
-        <span class="mono" style=${{ ...statusPillStyle(r.status), padding: '1px 7px', borderRadius: 'var(--radius-pill)', fontSize: 'var(--fs-11)' }}>
+        <span class="mono" style=${{ ...statusPillStyle(r.status), padding: 'var(--sp-0) var(--sp-2)', borderRadius: 'var(--radius-pill)', fontSize: 'var(--fs-11)' }}>
           ${r.status}
         </span>
       `,
@@ -293,7 +293,7 @@ export function LanesTab(props: WorkspaceViewProps) {
       sortable: true,
       sortValue: (r) => r.status,
       cell: (r) => html`
-        <span class="mono" style=${{ ...statusPillStyle(r.status), padding: '1px 7px', borderRadius: 'var(--radius-pill)', fontSize: 'var(--fs-11)' }}>
+        <span class="mono" style=${{ ...statusPillStyle(r.status), padding: 'var(--sp-0) var(--sp-2)', borderRadius: 'var(--radius-pill)', fontSize: 'var(--fs-11)' }}>
           ${r.status}
         </span>
       `,
@@ -558,7 +558,7 @@ export function LanesTab(props: WorkspaceViewProps) {
                   value=${defaultRouteInput}
                   onInput=${(e: Event) => setDefaultRouteInput((e.target as HTMLInputElement).value)}
                   placeholder="lane 또는 runtime ID"
-                  style=${{ flex: 1, minWidth: 0, padding: '6px 8px', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+                  style=${{ flex: 1, minWidth: 0, padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
                 />
                 <button type="submit" class="btn-primary" disabled=${busy === 'routing'}>적용</button>
               </div>
@@ -573,7 +573,7 @@ export function LanesTab(props: WorkspaceViewProps) {
                   value=${assignKeeper}
                   onInput=${(e: Event) => setAssignKeeper((e.target as HTMLInputElement).value)}
                   placeholder="keeper"
-                  style=${{ flex: '1 1 120px', minWidth: 0, padding: '6px 8px', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+                  style=${{ flex: '1 1 120px', minWidth: 0, padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
                 />
                 <input
                   type="text"
@@ -581,7 +581,7 @@ export function LanesTab(props: WorkspaceViewProps) {
                   value=${assignRuntime}
                   onInput=${(e: Event) => setAssignRuntime((e.target as HTMLInputElement).value)}
                   placeholder="runtime_id (비우면 기본값)"
-                  style=${{ flex: '1 1 140px', minWidth: 0, padding: '6px 8px', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+                  style=${{ flex: '1 1 140px', minWidth: 0, padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
                 />
                 <button type="submit" class="btn-primary" disabled=${busy === 'assignment'}>할당</button>
               </div>
@@ -663,7 +663,7 @@ export function LanesTab(props: WorkspaceViewProps) {
                       class="mono"
                       style=${{
                         fontSize: 'var(--fs-10)',
-                        padding: '2px var(--sp-1)',
+                        padding: 'var(--sp-0) var(--sp-1)',
                         borderRadius: 'var(--radius-pill)',
                         background: r.scopeBand === 'active_lane' ? 'var(--brass-soft)' : 'var(--idle-soft)',
                         color: r.scopeBand === 'active_lane' ? 'var(--brass-1)' : 'var(--fg-3)',
@@ -679,7 +679,7 @@ export function LanesTab(props: WorkspaceViewProps) {
                       ${r.provider_display_name} · <span class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>${r.model_id}</span>
                     </span>
                     <span>
-                      <span class="mono" style=${{ ...statusPillStyle(r.status), padding: '2px var(--sp-2)', borderRadius: 'var(--radius-pill)', fontSize: 'var(--fs-11)' }}>
+                      <span class="mono" style=${{ ...statusPillStyle(r.status), padding: 'var(--sp-0) var(--sp-2)', borderRadius: 'var(--radius-pill)', fontSize: 'var(--fs-11)' }}>
                         ${r.status}
                       </span>
                     </span>
@@ -768,49 +768,49 @@ export function LanesTab(props: WorkspaceViewProps) {
                 <button type="button" class="btn-ghost" onClick=${() => setFusionModalOpen(false)}>닫기</button>
               </div>
               <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 'var(--sp-2)' }}>
-                <label style=${{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: 'var(--fs-12)' }}>
+                <label style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)', fontSize: 'var(--fs-12)' }}>
                   <span>Keeper</span>
                   <input
                     type="text"
                     required
                     value=${fusionKeeper}
                     onInput=${(e: Event) => setFusionKeeper((e.target as HTMLInputElement).value)}
-                    style=${{ padding: '6px 8px', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+                    style=${{ padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
                   />
                 </label>
-                <label style=${{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: 'var(--fs-12)' }}>
+                <label style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)', fontSize: 'var(--fs-12)' }}>
                   <span>토폴로지 (닫힌 합타입)</span>
                   <select
                     value=${fusionTopology}
                     onChange=${(e: Event) => setFusionTopology((e.target as HTMLSelectElement).value as FusionTopology)}
-                    style=${{ padding: '6px 8px', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+                    style=${{ padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
                   >
                     ${FUSION_TOPOLOGIES.map((t) => html`<option key=${t.value} value=${t.value}>${t.label}</option>`)}
                   </select>
                 </label>
-                <label style=${{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: 'var(--fs-12)' }}>
+                <label style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)', fontSize: 'var(--fs-12)' }}>
                   <span>프리셋 (선택)</span>
                   <input
                     type="text"
                     placeholder="기본 프리셋"
                     value=${fusionPreset}
                     onInput=${(e: Event) => setFusionPreset((e.target as HTMLInputElement).value)}
-                    style=${{ padding: '6px 8px', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+                    style=${{ padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
                   />
                 </label>
               </div>
-              <label style=${{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: 'var(--fs-12)' }}>
+              <label style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)', fontSize: 'var(--fs-12)' }}>
                 <span>패널 질문 (Free Text)</span>
                 <textarea
                   rows=${3}
                   required
                   value=${fusionPrompt}
                   onInput=${(e: Event) => setFusionPrompt((e.target as HTMLTextAreaElement).value)}
-                  style=${{ padding: '8px', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)', resize: 'vertical' }}
+                  style=${{ padding: 'var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)', resize: 'vertical' }}
                 />
               </label>
               <div style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 'var(--sp-2)' }}>
-                <label style=${{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: 'var(--fs-12)' }}>
+                <label style=${{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-1)', fontSize: 'var(--fs-12)' }}>
                   <input
                     type="checkbox"
                     checked=${fusionWebTools}

@@ -32,6 +32,8 @@ import {
   maxUtilizationPct,
   partitionQuotaScopes,
   windowKindLabel,
+  type MultiAccountIntegration,
+  type MultiAccountIntegrationsResponse,
   type MultiAccountProviderAccount,
   type MultiAccountProviderAccountsResponse,
   type ProviderUsageHistoryPoint,
@@ -151,9 +153,11 @@ export function QuotasTab(props: WorkspaceViewProps) {
   const historyObs = resourceCache.observe<ProviderUsageHistoryResponse>(historyKey).value
   const inventoryKey = accountMode === 'multi_account' ? 'runtime:auth-provider-accounts' : 'runtime:setup-inventory'
   const inventoryObs = resourceCache.observe<SetupInventoryPayload | MultiAccountProviderAccountsResponse>(inventoryKey).value
+  const personIntegObs = resourceCache.observe<MultiAccountIntegrationsResponse>('runtime:auth-integrations').value
 
   const [tier3Expanded, setTier3Expanded] = useState(false)
   const [credForm, setCredForm] = useState<CredentialFormState | null>(null)
+  const [verifyModelInput, setVerifyModelInput] = useState<string>('')
   const [loginReceipt, setLoginReceipt] = useState<LoginReceiptState | null>(null)
   const [actionBusy, setActionBusy] = useState<string | null>(null)
   const [actionBanner, setActionBanner] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
@@ -180,6 +184,11 @@ export function QuotasTab(props: WorkspaceViewProps) {
         (signal) => apiGet<MultiAccountProviderAccountsResponse>('/api/v1/auth/provider-accounts', { signal }),
         { ttlMs: 20_000, topics: ['provider_accounts'], reason },
       )
+      void resourceCache.fetch<MultiAccountIntegrationsResponse>(
+        'runtime:auth-integrations',
+        (signal) => apiGet<MultiAccountIntegrationsResponse>('/api/v1/auth/integrations', { signal }),
+        { ttlMs: 30_000, topics: ['provider_accounts', 'config'], reason },
+      )
     } else {
       void resourceCache.fetch<SetupInventoryPayload>(
         'runtime:setup-inventory',
@@ -187,8 +196,8 @@ export function QuotasTab(props: WorkspaceViewProps) {
         { ttlMs: 20_000, topics: ['setup_inventory', 'config'], reason },
       )
       void apiGet<{ readonly source_revision?: string }>('/api/v1/runtime/config/raw').then((res) => {
-        if (res.ok && typeof res.value.source_revision === 'string') {
-          setSourceRevision(res.value.source_revision)
+        if (res.ok && typeof res.value.source_revision === 'string' && res.value.source_revision.trim().length > 0) {
+          setSourceRevision(res.value.source_revision.trim())
         }
       })
     }
@@ -240,24 +249,66 @@ export function QuotasTab(props: WorkspaceViewProps) {
     }
   }, [historyObs])
 
+  const personIntegrations: readonly MultiAccountIntegration[] =
+    personIntegObs.kind === 'value' && Array.isArray(personIntegObs.data.integrations)
+      ? personIntegObs.data.integrations
+      : []
+
+  const resolveModelForIntegration = (integrationId: string): string => {
+    const manual = verifyModelInput.trim()
+    if (manual) return manual
+    const integ = personIntegrations.find((i) => i.integration_id === integrationId)
+    if (integ && integ.models[0]) return integ.models[0]
+    const rt = resolvedData?.runtimes.find((r) => r.provider === integrationId && r.model)
+    return rt?.model ?? ''
+  }
+
   const handleSaveCredential = async (ev: Event) => {
     ev.preventDefault()
     if (!credForm || !credForm.providerId.trim() || !credForm.secret.trim()) return
     setActionBusy('save-cred')
     setActionBanner(null)
 
-    const path = accountMode === 'multi_account'
-      ? '/api/v1/setup/accounts/key'
-      : '/api/v1/setup/credential'
-    const body = accountMode === 'multi_account'
-      ? { integration_id: credForm.providerId.trim(), api_key: credForm.secret.trim() }
-      : {
-          provider_id: credForm.providerId.trim(),
-          secret: credForm.secret.trim(),
-          source_revision: sourceRevision || 'latest',
-        }
+    if (accountMode === 'multi_account') {
+      // Exact wire shape: lib/server/server_key_account.ml:133-137 requires { integration_id, key }
+      const res = await apiMutate<unknown>('POST', '/api/v1/setup/accounts/key', {
+        integration_id: credForm.providerId.trim(),
+        key: credForm.secret.trim(),
+      })
+      setActionBusy(null)
+      if (!res.ok) {
+        setActionBanner({ kind: 'err', text: `키 저장 실패: ${res.error.message}` })
+        return
+      }
+      setActionBanner({ kind: 'ok', text: `${credForm.providerId} 개인 API 키가 등록되었습니다.` })
+      setCredForm(null)
+      loadAll('manual')
+      return
+    }
 
-    const res = await apiMutate<unknown>('POST', path, body)
+    // Single-user CAS precondition: require real source_revision from /api/v1/runtime/config/raw (never 'latest'!)
+    let rev = sourceRevision.trim()
+    if (!rev) {
+      const rawRes = await apiGet<{ readonly source_revision?: string }>('/api/v1/runtime/config/raw')
+      if (rawRes.ok && typeof rawRes.value.source_revision === 'string') {
+        rev = rawRes.value.source_revision.trim()
+        if (rev) setSourceRevision(rev)
+      }
+    }
+    if (!rev) {
+      setActionBusy(null)
+      setActionBanner({
+        kind: 'err',
+        text: 'runtime.toml의 source_revision을 확인할 수 없어 자격 증명을 저장할 수 없습니다. 새로고침 후 다시 시도하세요.',
+      })
+      return
+    }
+
+    const res = await apiMutate<unknown>('POST', '/api/v1/setup/credential', {
+      provider_id: credForm.providerId.trim(),
+      secret: credForm.secret.trim(),
+      source_revision: rev,
+    })
     setActionBusy(null)
     if (!res.ok) {
       setActionBanner({ kind: 'err', text: `키 저장 실패: ${res.error.message}` })
@@ -310,19 +361,29 @@ export function QuotasTab(props: WorkspaceViewProps) {
     })
   }
 
-  const handleVerifyAccount = async (providerId: string, accountRef?: string) => {
-    setActionBusy(`verify:${providerId}`)
+  const handleVerifyAccount = async (providerId: string, providerAccountId?: string) => {
+    const acctId = (providerAccountId ?? '').trim()
+    const model = resolveModelForIntegration(providerId)
+    if (!acctId || !model) {
+      setActionBanner({
+        kind: 'err',
+        text: `계정 검증 실패 (${providerId}): provider_account_id와 검증할 모델명이 필요합니다.`,
+      })
+      return
+    }
+    setActionBusy(`verify:${acctId}`)
     setActionBanner(null)
+    // Exact wire shape: lib/server/server_setup_account_login.ml:424-432 requires { provider_account_id, model }
     const res = await apiMutate<unknown>('POST', '/api/v1/setup/accounts/verify', {
-      integration_id: providerId,
-      ...(accountRef ? { account_ref: accountRef } : {}),
+      provider_account_id: acctId,
+      model,
     })
     setActionBusy(null)
     if (!res.ok) {
-      setActionBanner({ kind: 'err', text: `검증 실패 (${providerId}): ${res.error.message}` })
+      setActionBanner({ kind: 'err', text: `검증 실패 (${acctId}): ${res.error.message}` })
       return
     }
-    setActionBanner({ kind: 'ok', text: `${providerId} 계정 검증 완료.` })
+    setActionBanner({ kind: 'ok', text: `${acctId} (${model}) 계정 검증 완료.` })
     loadAll('manual')
   }
 
@@ -361,7 +422,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
             class="mono tnum"
             style=${{
               ...badgeStyle,
-              padding: '2px 8px',
+              padding: 'var(--sp-0) var(--sp-2)',
               borderRadius: 'var(--radius-pill)',
               fontSize: 'var(--fs-11)',
               fontWeight: 600,
@@ -374,7 +435,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
 
         ${scope.windows.length > 0
           ? html`
-              <div style=${{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
                 ${scope.windows.map((w, wIdx) => {
                   const u = w.utilization
                   let barPct = 0
@@ -401,7 +462,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
                       : 'var(--ok)'
 
                   return html`
-                    <div key=${`${wIdx}-${w.limit_id ?? 'w'}`} style=${{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                    <div key=${`${wIdx}-${w.limit_id ?? 'w'}`} style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-0)' }}>
                       <div style=${{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--fs-11)', color: 'var(--fg-2)' }}>
                         <span class="mono">${windowKindLabel(w.window)} ${w.limit_id ? `(${w.limit_id})` : ''}</span>
                         <span class="mono tnum">
@@ -477,7 +538,11 @@ export function QuotasTab(props: WorkspaceViewProps) {
           <button
             type="button"
             class="btn-primary"
-            onClick=${() => setCredForm({ providerId: integrations[0]?.id ?? 'openai', secret: '', mode: 'api_key' })}
+            onClick=${() => setCredForm({
+              providerId: personIntegrations[0]?.integration_id ?? integrations[0]?.id ?? 'openai',
+              secret: '',
+              mode: 'api_key',
+            })}
           >
             + API 키 등록
           </button>
@@ -525,7 +590,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
           <strong>쿨다운(Quota Rest) 활성 런타임 (${restingRuntimes.length}):</strong>
           <div style=${{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-2)', marginTop: 'var(--sp-2)' }}>
             ${restingRuntimes.map((rt) => html`
-              <span key=${rt.id} class="mono tnum" style=${{ fontSize: 'var(--fs-12)', padding: '2px 8px', borderRadius: 'var(--radius-sm)', background: 'var(--bg-2)', border: '1px solid var(--warn-border)' }}>
+              <span key=${rt.id} class="mono tnum" style=${{ fontSize: 'var(--fs-12)', padding: 'var(--sp-0) var(--sp-2)', borderRadius: 'var(--radius-sm)', background: 'var(--bg-2)', border: '1px solid var(--warn-border)' }}>
                 ${rt.id} (${rt.quota_rest?.cause}) · 해제 ${formatResetCountdown(rt.quota_rest?.until)}
               </span>
             `)}
@@ -548,7 +613,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
             role="status"
             style=${{ borderColor: 'var(--warn-border)', background: 'var(--warn-soft)' }}
           >
-            <div style=${{ fontWeight: 600, color: 'var(--warn-fg)', marginBottom: '4px' }}>
+            <div style=${{ fontWeight: 600, color: 'var(--warn-fg)', marginBottom: 'var(--sp-1)' }}>
               ⚠ 제공자 사용량 이력 사용 불가 (state: unavailable)
             </div>
             <div style=${{ fontSize: 'var(--fs-12)', color: 'var(--fg-2)' }}>
@@ -638,25 +703,31 @@ export function QuotasTab(props: WorkspaceViewProps) {
             <button type="button" class="btn-ghost" onClick=${() => setCredForm(null)}>닫기</button>
           </div>
           <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 'var(--sp-2)' }}>
-            <label style=${{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: 'var(--fs-12)' }}>
+            <label style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)', fontSize: 'var(--fs-12)' }}>
               <span>제공자 ID</span>
               <input
                 type="text"
                 value=${credForm.providerId}
-                onInput=${(e: Event) => setCredForm({ ...credForm, providerId: (e.target as HTMLInputElement).value })}
-                style=${{ padding: '6px 8px', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+                onInput=${(e: Event) => {
+                  const val = (e.target as HTMLInputElement).value
+                  setCredForm((prev) => (prev ? { ...prev, providerId: val } : prev))
+                }}
+                style=${{ padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
                 required
               />
             </label>
-            <label style=${{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: 'var(--fs-12)' }}>
+            <label style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)', fontSize: 'var(--fs-12)' }}>
               <span>API 키 / 시크릿</span>
               <input
                 type="password"
                 autocomplete="off"
                 placeholder="sk-..."
                 value=${credForm.secret}
-                onInput=${(e: Event) => setCredForm({ ...credForm, secret: (e.target as HTMLInputElement).value })}
-                style=${{ padding: '6px 8px', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+                onInput=${(e: Event) => {
+                  const val = (e.target as HTMLInputElement).value
+                  setCredForm((prev) => (prev ? { ...prev, secret: val } : prev))
+                }}
+                style=${{ padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
                 required
               />
             </label>
@@ -718,6 +789,21 @@ export function QuotasTab(props: WorkspaceViewProps) {
             ${accountMode === 'multi_account' ? `${multiAccounts.length}개 계정` : `${integrations.length}개 제공자`}
           </span>
         </div>
+
+        ${accountMode === 'multi_account' && html`
+          <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', marginBottom: 'var(--sp-2)', flexWrap: 'wrap' }}>
+            <label style=${{ fontSize: 'var(--fs-12)', color: 'var(--fg-2)' }}>검증용 모델 (선택 시 우선 적용):</label>
+            <input
+              type="text"
+              aria-label="검증할 모델 ID"
+              placeholder="예: gpt-5-codex (비우면 통합 기본 모델)"
+              value=${verifyModelInput}
+              onInput=${(e: Event) => setVerifyModelInput((e.target as HTMLInputElement).value)}
+              class="mono"
+              style=${{ flex: '1 1 200px', minWidth: 0, padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-12)' }}
+            />
+          </div>
+        `}
 
         ${accountMode === 'multi_account'
           ? (multiAccounts.length === 0

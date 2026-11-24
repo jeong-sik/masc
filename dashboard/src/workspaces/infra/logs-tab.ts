@@ -15,8 +15,11 @@ import {
   acquireViewStream,
   apiGet,
   authSession,
+  currentSessionEpoch,
   getSingleUserToken,
+  isEpochCurrent,
   parseSseBlock,
+  resolveWorkspaceUrl,
   subscribeObserverFrames,
   viewStreamPaused,
 } from '../../core'
@@ -115,7 +118,10 @@ export function LogsTab(props: WorkspaceViewProps) {
     })
 
     // Single view-scoped SSE via ViewStreamSlot (auto-pauses on document.hidden!)
+    // Honors resolveWorkspaceUrl() and monotonic sessionEpoch fence.
     const handle = acquireViewStream('infra-logs', (signal) => {
+      const startEpoch = currentSessionEpoch()
+      const streamUrl = resolveWorkspaceUrl('/api/v1/dashboard/logs/stream?limit=200')
       const headers: Record<string, string> = { Accept: 'text/event-stream' }
       const session = authSession.peek()
       if (session.kind !== 'multi_account_signed_in') {
@@ -124,13 +130,13 @@ export function LogsTab(props: WorkspaceViewProps) {
       }
       void (async () => {
         try {
-          const res = await fetch('/api/v1/dashboard/logs/stream?limit=200', {
+          const res = await fetch(streamUrl, {
             method: 'GET',
             credentials: 'same-origin',
             headers,
             signal,
           })
-          if (signal.aborted) return
+          if (signal.aborted || !isEpochCurrent(startEpoch)) return
           if (!res.ok || !res.body) {
             setStreamStatus('error')
             return
@@ -140,13 +146,15 @@ export function LogsTab(props: WorkspaceViewProps) {
           const decoder = new TextDecoder()
           let buffer = ''
           try {
-            while (!signal.aborted) {
+            while (!signal.aborted && isEpochCurrent(startEpoch)) {
               const { value, done } = await reader.read()
               if (done) break
+              if (signal.aborted || !isEpochCurrent(startEpoch)) break
               buffer += decoder.decode(value, { stream: true })
               const blocks = buffer.split(/\r?\n\r?\n/)
               buffer = blocks.pop() ?? ''
               for (const block of blocks) {
+                if (signal.aborted || !isEpochCurrent(startEpoch)) return
                 const frame = parseSseBlock(block)
                 if (!frame) continue
                 const parsed = parseLogEntriesFromPayload(frame.data)
@@ -159,7 +167,7 @@ export function LogsTab(props: WorkspaceViewProps) {
             reader.releaseLock()
           }
         } catch {
-          if (!signal.aborted) setStreamStatus('error')
+          if (!signal.aborted && isEpochCurrent(startEpoch)) setStreamStatus('error')
         }
       })()
     })
@@ -221,7 +229,7 @@ export function LogsTab(props: WorkspaceViewProps) {
       render: () => html`
         <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)', minWidth: 0 }}>
           <div class="wka-card" style=${{ fontSize: 'var(--fs-12)' }}>
-            <div style=${{ fontWeight: 600, marginBottom: '4px' }}>${entry.message}</div>
+            <div style=${{ fontWeight: 600, marginBottom: 'var(--sp-1)' }}>${entry.message}</div>
             <div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
               source=${entry.source} · module=${entry.module || '없음'} · keeper=${entry.keeper ?? '없음'}
             </div>
@@ -249,7 +257,7 @@ export function LogsTab(props: WorkspaceViewProps) {
             class="mono"
             data-testid="logs-stream-status"
             style=${{
-              padding: '3px 8px',
+              padding: 'var(--sp-0) var(--sp-2)',
               borderRadius: 'var(--radius-pill)',
               fontSize: 'var(--fs-11)',
               border: `1px solid ${pausedByVisibility ? 'var(--warn-border)' : streamStatus === 'live' ? 'var(--ok-border)' : 'var(--line-2)'}`,
@@ -299,7 +307,7 @@ export function LogsTab(props: WorkspaceViewProps) {
             placeholder="모듈 / Keeper / 메시지 검색…"
             value=${query}
             onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
-            style=${{ flex: '1 1 180px', minWidth: 0, padding: '5px 8px', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+            style=${{ flex: '1 1 180px', minWidth: 0, padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
           />
 
           <button type="button" class="btn-ghost" onClick=${() => setEntries([])}>버퍼 비우기</button>

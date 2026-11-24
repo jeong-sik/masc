@@ -325,17 +325,17 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
             <div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>${field.full_key}</div>
           </div>
 
-          <div style=${{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
+          <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-1)', flexWrap: 'wrap' }}>
             <span
               class="mono"
-              style=${{ ...provenanceStyle(field.provenance), padding: '1px 6px', borderRadius: 'var(--radius-pill)', fontSize: 'var(--fs-10)' }}
+              style=${{ ...provenanceStyle(field.provenance), padding: 'var(--sp-0) var(--sp-1)', borderRadius: 'var(--radius-pill)', fontSize: 'var(--fs-10)' }}
             >
               ${field.provenance}
             </span>
             <span
               class="mono"
               style=${{
-                padding: '1px 6px',
+                padding: 'var(--sp-0) var(--sp-1)',
                 borderRadius: 'var(--radius-pill)',
                 fontSize: 'var(--fs-10)',
                 background: 'var(--bg-3)',
@@ -345,12 +345,12 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
               ${field.reload_scope}
             </span>
             ${field.secret && html`
-              <span class="mono" style=${{ padding: '1px 6px', borderRadius: 'var(--radius-pill)', fontSize: 'var(--fs-10)', background: 'var(--err-soft)', color: 'var(--err-fg)' }}>
+              <span class="mono" style=${{ padding: 'var(--sp-0) var(--sp-1)', borderRadius: 'var(--radius-pill)', fontSize: 'var(--fs-10)', background: 'var(--err-soft)', color: 'var(--err-fg)' }}>
                 secret
               </span>
             `}
             ${!field.writable && html`
-              <span class="mono" style=${{ padding: '1px 6px', borderRadius: 'var(--radius-pill)', fontSize: 'var(--fs-10)', background: 'var(--idle-soft)', color: 'var(--fg-3)' }}>
+              <span class="mono" style=${{ padding: 'var(--sp-0) var(--sp-1)', borderRadius: 'var(--radius-pill)', fontSize: 'var(--fs-10)', background: 'var(--idle-soft)', color: 'var(--fg-3)' }}>
                 read-only
               </span>
             `}
@@ -364,7 +364,7 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
         <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
           ${isBool
             ? html`
-                <label style=${{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: 'var(--fs-12)' }}>
+                <label style=${{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-1)', fontSize: 'var(--fs-12)' }}>
                   <input
                     type="checkbox"
                     aria-label=${field.full_key}
@@ -382,7 +382,7 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
                     disabled=${!field.writable}
                     value=${currentDisplay}
                     onChange=${(e: Event) => stageFieldChange(field, (e.target as HTMLSelectElement).value)}
-                    style=${{ padding: '5px 8px', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+                    style=${{ padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
                   >
                     ${field.enum_values!.map((opt) => html`<option key=${opt} value=${opt}>${opt}</option>`)}
                   </select>
@@ -396,7 +396,7 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
                       value=${currentDisplay}
                       onInput=${(e: Event) => stageFieldChange(field, (e.target as HTMLTextAreaElement).value)}
                       class="mono"
-                      style=${{ flex: 1, minWidth: '220px', padding: '5px 8px', fontSize: 'var(--fs-12)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+                      style=${{ flex: 1, minWidth: '220px', padding: 'var(--sp-1) var(--sp-2)', fontSize: 'var(--fs-12)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
                     />
                   `
                 : html`
@@ -408,7 +408,7 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
                       value=${field.secret && !isModified ? '' : currentDisplay}
                       onInput=${(e: Event) => stageFieldChange(field, (e.target as HTMLInputElement).value)}
                       class="mono tnum"
-                      style=${{ flex: 1, minWidth: '200px', padding: '5px 8px', fontSize: 'var(--fs-12)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+                      style=${{ flex: 1, minWidth: '200px', padding: 'var(--sp-1) var(--sp-2)', fontSize: 'var(--fs-12)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
                     />
                   `}
 
@@ -416,7 +416,7 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
             <button
               type="button"
               class="btn-ghost"
-              style=${{ padding: '4px 8px', fontSize: 'var(--fs-11)' }}
+              style=${{ padding: 'var(--sp-1) var(--sp-2)', fontSize: 'var(--fs-11)' }}
               onClick=${() => stageFieldChange(field, null, true)}
             >
               기본값 복원
@@ -426,7 +426,7 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
             <button
               type="button"
               class="btn-ghost"
-              style=${{ padding: '4px 8px', fontSize: 'var(--fs-11)', color: 'var(--err-fg)' }}
+              style=${{ padding: 'var(--sp-1) var(--sp-2)', fontSize: 'var(--fs-11)', color: 'var(--err-fg)' }}
               onClick=${() => unstageField(field.full_key)}
             >
               변경 취소
@@ -454,7 +454,7 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
             placeholder="설정 키 / 설명 검색…"
             value=${searchQuery}
             onInput=${(e: Event) => setSearchQuery((e.target as HTMLInputElement).value)}
-            style=${{ padding: '6px 10px', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)', minWidth: '200px' }}
+            style=${{ padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)', minWidth: '200px' }}
           />
           <button
             type="button"
@@ -495,7 +495,7 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
           class="wka-card"
           data-testid="settings-apply-receipt"
           role="status"
-          style=${{ borderColor: 'var(--ok-border)', background: 'var(--ok-soft)', display: 'flex', flexDirection: 'column', gap: '6px' }}
+          style=${{ borderColor: 'var(--ok-border)', background: 'var(--ok-soft)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}
         >
           <div style=${{ fontWeight: 600, color: 'var(--ok-fg)' }}>
             ✓ 설정 패치 적용 완료 (${reloadScopeNotice(applyResult.reload_scope).label})
@@ -559,7 +559,7 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
 
       <!-- 2-Pane Category Tree + Property Inspector -->
       <div class="set-shell" style=${{ padding: 0 }}>
-        <nav class="set-card-b" aria-label="설정 카테고리 (7개)" style=${{ padding: 'var(--sp-2)', display: 'flex', flexDirection: 'column', gap: '4px', alignSelf: 'start' }}>
+        <nav class="set-card-b" aria-label="설정 카테고리 (7개)" style=${{ padding: 'var(--sp-2)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)', alignSelf: 'start' }}>
           ${categories.map((cat) => {
             const isSel = !searchQuery.trim() && activeCategory?.id === cat.id
             const catStagedCount = cat.fields.filter((f) => f.full_key in staged).length
@@ -577,7 +577,7 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
                   justifyContent: 'space-between',
                   alignItems: 'center',
                   gap: 'var(--sp-2)',
-                  padding: '8px 10px',
+                  padding: 'var(--sp-2) var(--sp-3)',
                   borderRadius: 'var(--radius-sm)',
                   border: 'none',
                   background: isSel ? 'var(--bg-4)' : 'transparent',

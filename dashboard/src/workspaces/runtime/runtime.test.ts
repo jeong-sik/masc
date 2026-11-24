@@ -4,15 +4,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   activeViewStreamKey,
   authSession,
+  bumpSessionEpoch,
+  registerWorkspaceTargets,
   releaseAllViewStreams,
   resetAuthStateForTests,
   resetObserverStateForTests,
   resetTimeWindowForTests,
   resourceCache,
+  selectWorkspace,
   setTimeWindow,
 } from '../../core'
 import { RuntimeWorkspace, type WorkspaceInspectPayload } from './index'
-import { classifyQuotaScope, partitionQuotaScopes, type ProviderUsageScope } from './types'
+import { classifyQuotaScope, openViewSseStream, partitionQuotaScopes, type ProviderUsageScope } from './types'
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -234,13 +237,17 @@ describe('workspaces/runtime', () => {
     expect(onNavigate).toHaveBeenCalledWith('/settings?key=providers.openai')
   })
 
-  it('enforces 2+1 SSE discipline on 4-panel Efficiency: live SSE ONLY on 24h, snapshot on 7d/30d, never 2nd SSE', async () => {
+  it('enforces 2+1 SSE discipline on 4-panel Efficiency: live SSE ONLY on 24h, snapshot on 7d/30d, clamps keeper-costs?window=1440', async () => {
     const sseCalls: string[] = []
+    const keeperCostUrls: string[] = []
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url.includes('/stream')) {
         sseCalls.push(url)
         return pendingSseResponse()
+      }
+      if (url.startsWith('/api/v1/dashboard/keeper-costs')) {
+        keeperCostUrls.push(url)
       }
       if (url.startsWith('/api/v1/dashboard/cache-stats')) {
         return jsonResponse({
@@ -334,11 +341,12 @@ describe('workspaces/runtime', () => {
     expect(container.textContent).toContain('code-reviewer-sister')
     expect(container.textContent).toContain('미보고')
 
-    // Switch to 7d -> MUST release view-scoped SSE stream and stay snapshot-only
+    // Switch to 7d -> MUST release view-scoped SSE stream, stay snapshot-only, and NEVER request keeper-costs > 1440
     setTimeWindow('7d')
     await flushUi(40)
     expect(activeViewStreamKey.value).toBeNull()
     expect(sseCalls).toHaveLength(1)
+    expect(keeperCostUrls.every((u) => u === '/api/v1/dashboard/keeper-costs?window=1440')).toBe(true)
     expect(container.querySelector('[data-testid="efficiency-stream-badge"]')!.textContent).toContain('SNAPSHOT (7d)')
   })
 
@@ -556,7 +564,7 @@ describe('workspaces/runtime', () => {
     expect(card503!.textContent).toContain('browser lane addon is not attached')
   })
 
-  it('loads multi_account provider_accounts verbatim from /api/v1/auth/provider-accounts', async () => {
+  it('loads multi_account provider_accounts, sends exact {integration_id,key} & {provider_account_id,model}, and rejects synthetic "latest" credential revision', async () => {
     authSession.value = {
       kind: 'multi_account_signed_in',
       mode: 'multi_account',
@@ -569,8 +577,14 @@ describe('workspaces/runtime', () => {
       workspaceId: 'default',
     }
 
-    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+    const postBodies: { url: string; body: Record<string, unknown> }[] = []
+
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
+      if (init?.method === 'POST') {
+        postBodies.push({ url, body: JSON.parse(String(init.body)) as Record<string, unknown> })
+        return jsonResponse({ ok: true })
+      }
       if (url.startsWith('/api/v1/auth/provider-accounts')) {
         return jsonResponse({
           provider_accounts: [{
@@ -579,6 +593,17 @@ describe('workspaces/runtime', () => {
             kind: 'login',
           }],
           runtimes: [],
+        })
+      }
+      if (url.startsWith('/api/v1/auth/integrations')) {
+        return jsonResponse({
+          integrations: [{
+            integration_id: 'openai_codex',
+            display_name: 'OpenAI Codex',
+            connect: ['login', 'key'],
+            models: ['gpt-5-codex'],
+            calls: 'allowed',
+          }],
         })
       }
       if (url.startsWith('/api/v1/runtime/resolved')) {
@@ -598,5 +623,176 @@ describe('workspaces/runtime', () => {
 
     expect(container.textContent).toContain('pa-codex-01')
     expect(container.textContent).toContain('openai_codex')
+
+    // Verify account sends exact 2-member { provider_account_id, model }
+    const verifyBtn = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.trim() === '검증',
+    ) as HTMLButtonElement
+    verifyBtn.click()
+    await flushUi(30)
+
+    expect(postBodies[0]).toEqual({
+      url: '/api/v1/setup/accounts/verify',
+      body: { provider_account_id: 'pa-codex-01', model: 'gpt-5-codex' },
+    })
+
+    // Register API key sends exact { integration_id, key } (NOT api_key!)
+    const openKeyFormBtn = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('+ API 키 등록'),
+    ) as HTMLButtonElement
+    openKeyFormBtn.click()
+    await flushUi(15)
+
+    const form = container.querySelector('form') as HTMLFormElement
+    const textInput = form.querySelector('input[type="text"]') as HTMLInputElement
+    const pwInput = form.querySelector('input[type="password"]') as HTMLInputElement
+    textInput.value = 'openai_codex'
+    textInput.dispatchEvent(new Event('input', { bubbles: true }))
+    pwInput.value = 'sk-test-1234'
+    pwInput.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushUi(10)
+
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await flushUi(30)
+
+    expect(postBodies[1]).toEqual({
+      url: '/api/v1/setup/accounts/key',
+      body: { integration_id: 'openai_codex', key: 'sk-test-1234' },
+    })
+
+    // Single-user credential save MUST NOT fabricate source_revision: 'latest' when config/raw lacks revision
+    resetAuthStateForTests()
+    resourceCache.clearAll()
+    const singleUserPosts: string[] = []
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (init?.method === 'POST') {
+        singleUserPosts.push(url)
+        return jsonResponse({ ok: true })
+      }
+      if (url.startsWith('/api/v1/runtime/config/raw')) {
+        return jsonResponse({})
+      }
+      if (url.startsWith('/api/v1/setup/inventory')) {
+        return jsonResponse({ integrations: [{ id: 'openai', display_name: 'OpenAI', setup_support: 'full' }] })
+      }
+      if (url.startsWith('/api/v1/runtime/resolved')) {
+        return jsonResponse({ config_path: null, default_route: null, default_runtime: null, runtimes: [], lanes: [], assignments: [], provider_usage_windows: [] })
+      }
+      if (url.startsWith('/api/v1/dashboard/provider-usage-history')) {
+        return jsonResponse({ state: 'unavailable', reason: 'no history' })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(null, container)
+    render(
+      html`<${RuntimeWorkspace} subroute="quotas" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+      container,
+    )
+    await flushUi(40)
+
+    const openBtn2 = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('+ API 키 등록'),
+    ) as HTMLButtonElement
+    openBtn2.click()
+    await flushUi(15)
+
+    const form2 = container.querySelector('form') as HTMLFormElement
+    const pw2 = form2.querySelector('input[type="password"]') as HTMLInputElement
+    pw2.value = 'sk-single-user'
+    pw2.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushUi(10)
+    form2.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await flushUi(30)
+
+    expect(singleUserPosts).toEqual([])
+    expect(container.textContent).toContain('source_revision')
+  })
+
+  it('submits Lane-Addon asks to POST /api/v1/lane-addons/ask-answer with exact {declaration_id,ask_id,answers} and enforces resolveWorkspaceUrl + sessionEpoch on openViewSseStream', async () => {
+    const postCalls: { url: string; body: Record<string, unknown> }[] = []
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (init?.method === 'POST') {
+        postCalls.push({ url, body: JSON.parse(String(init.body)) as Record<string, unknown> })
+        return jsonResponse({ recorded: true, declaration_id: 'decl-1', ask_id: 'ask-9', answer_count: 1 })
+      }
+      if (url.startsWith('/api/v1/lane-addons/asks')) {
+        return jsonResponse({
+          asks: [{
+            declaration_id: 'decl-1',
+            title: 'Confirm browser workspace',
+            ask_id: 'ask-9',
+            asked_at: 1_700_000_000,
+            context: null,
+            questions: [{ id: 'q-space', prompt: 'Workspace name?' }],
+            resolution: { state: 'open' },
+          }],
+        })
+      }
+      if (url.startsWith('/api/v1/lane-addons')) {
+        return jsonResponse({ configuration: null, instances: [], rows: [], coverage: [] })
+      }
+      if (url.startsWith('/api/v1/dashboard/browser-lane/clients')) {
+        return jsonResponse({ ok: false, error: 'not attached' }, 503)
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(
+      html`<${RuntimeWorkspace} subroute="addons" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+      container,
+    )
+    await flushUi(40)
+
+    const asksPanel = container.querySelector('[data-testid="lane-addon-asks-panel"]')
+    expect(asksPanel).not.toBeNull()
+    const input = asksPanel!.querySelector('input[aria-label="답변:q-space"]') as HTMLInputElement
+    input.value = 'masc-prod'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushUi(10)
+
+    const submitBtn = Array.from(asksPanel!.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('질문 응답 제출'),
+    ) as HTMLButtonElement
+    submitBtn.click()
+    await flushUi(30)
+
+    expect(postCalls).toEqual([{
+      url: '/api/v1/lane-addons/ask-answer',
+      body: {
+        declaration_id: 'decl-1',
+        ask_id: 'ask-9',
+        answers: [{ question_id: 'q-space', response: { kind: 'wrote', text: 'masc-prod' } }],
+      },
+    }])
+
+    // Verify openViewSseStream honors resolveWorkspaceUrl and drops frames after bumpSessionEpoch
+    registerWorkspaceTargets([{ id: 'alpha', label: 'Alpha', baseUrl: '/ws/alpha' }])
+    selectWorkspace('alpha')
+
+    let fetchedSseUrl = ''
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null
+    const mockSseFetch = vi.fn(async (input: RequestInfo | URL) => {
+      fetchedSseUrl = String(input)
+      const stream = new ReadableStream<Uint8Array>({
+        start(ctrl) { streamController = ctrl },
+      })
+      return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+    }) as typeof fetch
+
+    const received: unknown[] = []
+    const ac = new AbortController()
+    openViewSseStream('/api/v1/models/metrics/stream?window=1440&bucket_min=60', ac.signal, (f) => received.push(f), undefined, mockSseFetch)
+    await flushUi(20)
+    expect(fetchedSseUrl).toBe('/ws/alpha/api/v1/models/metrics/stream?window=1440&bucket_min=60')
+
+    // Bump epoch BEFORE chunk arrives -> frame MUST be dropped!
+    bumpSessionEpoch()
+    streamController!.enqueue(new TextEncoder().encode('event: metrics\ndata: {"stale":true}\n\n'))
+    await flushUi(20)
+    expect(received).toHaveLength(0)
+    ac.abort()
   })
 })

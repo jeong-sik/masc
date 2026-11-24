@@ -21,7 +21,8 @@ val source_url : client -> string
       keeper's own working directory.
     - Otherwise, when [command] is the client's own name ({!name}), the
       directory the vendor installer writes to: [CODEX_INSTALL_DIR] for Codex
-      when set, else [~/.local/bin].
+      and [MUSE_INSTALL_DIR] for Muse Code when set (the installer writes only
+      there), else [~/.local/bin].
       Relative installer destinations are resolved against the lookup's working
       directory so the returned spawn path remains valid in another workspace. A
       shell whose PATH does not hold that

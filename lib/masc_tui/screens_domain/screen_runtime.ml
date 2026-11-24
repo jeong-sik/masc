@@ -5701,17 +5701,19 @@ let render_addons_browser ~(model : Model.t) ~cache ~(rect : Rect.t)
   end
   else begin
   (* Left pane (pane 0): Addon Lanes Table + selected detail strip *)
+  let observer_glyph, observer_label, observer_tone =
+    Masc_tui_screens_core.Render_util.freshness_pill ~model ~compact:false
+  in
   let left_inner =
     Card.draw ~cache grid ~rect:left_rect ~theme
       (H.card_spec ~focused:(Model.pane_focused model 0)
          ~badge:
-           (H.make_badge ~glyph:Glyph.Live_working ~tone:Theme.Status_ok
-              "OPERATOR · live")
+           (H.make_badge ~glyph:observer_glyph ~tone:observer_tone observer_label)
          ~hotkey:
            (Say.resolve lang
               (Say.make
-                 ~ko:"[n] 부착 · [e] 선언 · [c] 실행 · [O] 관측 · [D] 슬라이스 · [x] 해제"
-                 ~en:"[n] Attach · [e] Decl · [c] Act · [O] Obs · [D] Slice · [x] Detach"))
+                 ~ko:"[n] 연결 · [e] 액션 · [c] 응답/실행 · [O] 관측 · [D] 슬라이스 · [x] 분리"
+                 ~en:"[n] Attach · [e] Action · [c] Ask/Act · [O] Obs · [D] Slice · [x] Detach"))
          (Say.resolve lang (Say.make ~ko:"애드온 레인" ~en:"Addon Lanes")))
   in
   if not (Rect.is_empty left_inner) then begin
@@ -6001,8 +6003,8 @@ let render_addons_browser ~(model : Model.t) ~cache ~(rect : Rect.t)
       (H.card_spec ~focused:(Model.pane_focused model 1)
          ~subtitle:right_focus_tag
          ~badge:
-           (H.make_badge ~glyph:Glyph.Live_working ~tone:Theme.Status_ok
-              "OPERATOR · [r]")
+           (H.make_badge ~glyph:Glyph.Live_idle ~tone:Theme.Status_historical
+              (Say.resolve lang (Say.make ~ko:"스냅샷 · [r]" ~en:"SNAPSHOT · [r]")))
          ~hotkey:
            (Say.resolve lang
               (Say.make ~ko:"[→/Tab] 포커스 · [t] 탭 · [c] 조작 · [O] 씬 · [W] 캡처 · [o] 열기"

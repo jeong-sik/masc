@@ -3740,9 +3740,16 @@ let test_feature_wave1_domain_renders () =
       runtime = Runtime_store.set_tab Nav.Runtime_addons_browser m_base.runtime;
     }
   in
-  let g_ab =
+  let render_addons model =
     render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
-        Screen_runtime.render ~model:m_ab ~cache ~rect gr)
+        Screen_runtime.render ~model ~cache ~rect gr)
+  in
+  let g_ab =
+    render_addons
+      { m_ab with
+        freshness =
+          { m_ab.freshness with
+            observer = Health.Live { last_event_ns = now_mono; revision = 1 } } }
   in
   assert_grid_invariants ~label:"Wave1/AddonsBrowser" g_ab;
   let txt_ab = grid_all_text g_ab in
@@ -3756,6 +3763,11 @@ let test_feature_wave1_domain_renders () =
   Alcotest.(check bool) "Mixed-mode badges SYNCED & SNAPSHOT present" true
     (contains_sub ~needle:"SYNCED" ~haystack:txt_ab
      && contains_sub ~needle:"SNAPSHOT" ~haystack:txt_ab);
+  let connecting = grid_all_text (render_addons m_ab) in
+  Alcotest.(check bool) "Connecting observer and browser snapshot are visible together"
+    true
+    (contains_sub ~needle:"SYNCING" ~haystack:connecting
+     && contains_sub ~needle:"SNAPSHOT" ~haystack:connecting);
 
   (* 3. Infra Activity & Logs renders SRC column (LOG/EVT) & right detail for Entry_event *)
   let m_logs =

@@ -681,6 +681,7 @@ type world_change_history = {
   index_updates : int;
   digest_commits : int;
   missing_evidence : int;
+  retained_from_seq : int option;
 }
 
 type world_revision_tick = {
@@ -697,6 +698,7 @@ type world_change_entry = {
   fact_id : string;
   summary : string;
   recorded_at : string;
+  claim_text : string option;
   payload : Yojson.Safe.t;
 }
 
@@ -705,6 +707,8 @@ type world_updated_entry = {
   fact_id : string;
   summary : string;
   recorded_at : string;
+  before_text : string option;
+  claim_text : string option;
   before : Yojson.Safe.t;
   after : Yojson.Safe.t;
 }

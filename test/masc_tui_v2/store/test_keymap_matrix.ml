@@ -610,6 +610,7 @@ let populated_model ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_en)
                   fact_id = "f-1";
                   summary = "Added cache policy";
                   recorded_at = "2026-11-22T10:00:00Z";
+                  claim_text = None;
                   payload = `Null;
                 };
                 {
@@ -618,6 +619,7 @@ let populated_model ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_en)
                   fact_id = "f-2";
                   summary = "Added failover route";
                   recorded_at = "2026-11-22T10:05:00Z";
+                  claim_text = None;
                   payload = `Null;
                 };
               ];

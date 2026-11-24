@@ -272,12 +272,12 @@ let world_json_from_mvcc_db ~now ~base_path ~writer_health =
   (* Read with [include_inactive:true] so [Superseded]/[Molted] keeper-private
      facts still seed [private_fact_ids] and never leak through change-log rows,
      while [public_facts] stays filtered to active shared workspace facts. *)
-  match World_memory_store.read_snapshot ~include_inactive:true ~base_path () with
+  match World_memory_store.read_history_snapshot ~base_path ~page:Tail ~limit:200 with
   | Error err ->
     error_result
       Env.Store_unavailable
       ("world memory db unavailable: " ^ World_memory_store.error_to_string err)
-  | Ok snapshot ->
+  | Ok (snapshot, change_log) ->
     (* Never leak keeper-private scoped facts into workspace-shared World Memory views. *)
     let public_facts =
       List.filter
@@ -380,7 +380,7 @@ let world_json_from_mvcc_db ~now ~base_path ~writer_health =
             ] )
     in
     let log_report_json =
-      match World_memory_store.read_change_log_tail ~base_path ~limit:200 with
+      match change_log with
       | Error err ->
         `Assoc
           [ "status", `String "unavailable"
@@ -1164,17 +1164,17 @@ let fleet_retrieval_heat_json ~now ~keepers_dir =
 
 let world_diff_json_from_mvcc_db ~now ~base_path ~keepers_dir ~range =
   let module Store = World_memory_store in
-  let page =
-    match range with
-    | Range_window _ -> Store.Tail
-    | Range_revs { from_rev; _ } -> Store.After (max 0 (from_rev - 1))
-  in
-  match Store.read_history_snapshot ~base_path ~page ~limit:500 with
-  | Error err ->
+  match Store.read_history_snapshot ~base_path ~page:Tail ~limit:Store.max_change_log_rows with
+  | Error err | Ok (_, Error err) ->
     error_result
       Env.Store_unavailable
       ("world memory history unavailable: " ^ Store.error_to_string err)
-  | Ok (snapshot, (events, max_seq)) ->
+  | Ok (snapshot, Ok (events, max_seq)) ->
+    let retained_from_seq =
+      match events with
+      | [] -> None
+      | first :: _ -> Some first.World_memory_types.seq
+    in
     let active_public_count =
       List.fold_left
         (fun count (fact : World_memory_types.world_fact) ->
@@ -1282,6 +1282,7 @@ let world_diff_json_from_mvcc_db ~now ~base_path ~keepers_dir ~range =
               ; "index_updates", `Int !index_updates
               ; "digest_commits", `Int !digest_commits
               ; "missing_evidence", `Int !missing_evidence
+              ; "retained_from_seq", Json_util.int_opt_to_json retained_from_seq
               ] )
         ; "retrieval_heat", fleet_retrieval_heat_json ~now ~keepers_dir
         ; "revisions", `List (List.rev !revisions)

@@ -451,7 +451,7 @@ let change_evidence_of_json (json : Yojson.Safe.t) =
   let open Result.Syntax in
   let open Yojson.Safe.Util in
   let fact_version json =
-    let scope = json |> member "scope" |> to_string in
+    let* scope = json |> member "scope" |> to_string |> validate_scope in
     let claim = json |> member "claim" |> to_string in
     let revision = json |> member "revision" |> to_int in
     match json |> member "lifecycle" |> to_string |> lifecycle_of_string with
@@ -462,18 +462,21 @@ let change_evidence_of_json (json : Yojson.Safe.t) =
     match json |> member "kind" |> to_string with
     | "fact" ->
       let* current = fact_version (member "current" json) in
-      let* previous =
-        match member "previous" json with
-        | `Null -> Ok None
-        | value -> Result.map Option.some (fact_version value)
-      in
-      Ok (Fact_written { previous; current })
+      (match List.assoc_opt "previous" (to_assoc json) with
+       | Some `Null when current.version_revision = 1 ->
+         Ok (Fact_written { previous = None; current })
+       | Some `Null | None -> Error "missing previous fact version in world change evidence"
+       | Some value ->
+         let* previous = fact_version value in
+         if previous.version_revision = current.version_revision - 1
+         then Ok (Fact_written { previous = Some previous; current })
+         else Error "nonconsecutive fact versions in world change evidence")
     | "edge" ->
       let text key = json |> member key |> to_string in
       let from_fact_id = text "from_fact_id" in
-      let from_scope = text "from_scope" in
+      let* from_scope = text "from_scope" |> validate_scope in
       let to_fact_id = text "to_fact_id" in
-      let to_scope = text "to_scope" in
+      let* to_scope = text "to_scope" |> validate_scope in
       Ok (Edge_written { from_fact_id; from_scope; to_fact_id; to_scope })
     | _ -> Error "unknown world change evidence kind"
   with Yojson.Safe.Util.Type_error _ -> Error "invalid world change evidence"

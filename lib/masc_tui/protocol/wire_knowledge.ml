@@ -1438,6 +1438,7 @@ type world_change_history = {
   index_updates : int;
   digest_commits : int;
   missing_evidence : int;
+  retained_from_seq : int option;
 }
 
 type world_revision_tick = {
@@ -1454,6 +1455,7 @@ type world_change_entry = {
   fact_id : string;
   summary : string;
   recorded_at : string;
+  claim_text : string option;
   payload : Yojson.Safe.t;
 }
 
@@ -1462,6 +1464,8 @@ type world_updated_entry = {
   fact_id : string;
   summary : string;
   recorded_at : string;
+  before_text : string option;
+  claim_text : string option;
   before : Yojson.Safe.t;
   after : Yojson.Safe.t;
 }
@@ -1898,17 +1902,20 @@ let decode_world_change_entry json =
   let* fact_id = required_nonblank_string json "fact_id" in
   let* summary = required_string_field json "summary" in
   let* recorded_at = required_nonblank_string json "recorded_at" in
+  let* claim_text = optional_nonblank_string json "claim_text" in
   let payload = member "payload" json in
-  Ok { seq; batch_id; fact_id; summary; recorded_at; payload }
+  Ok { seq; batch_id; fact_id; summary; recorded_at; claim_text; payload }
 
 let decode_world_updated_entry json =
   let* seq = required_nonnegative_int_field json "seq" in
   let* fact_id = required_nonblank_string json "fact_id" in
   let* summary = required_string_field json "summary" in
   let* recorded_at = required_nonblank_string json "recorded_at" in
+  let* before_text = optional_nonblank_string json "before_text" in
+  let* claim_text = optional_nonblank_string json "claim_text" in
   let before = member "before" json in
   let after = member "after" json in
-  Ok { seq; fact_id; summary; recorded_at; before; after }
+  Ok { seq; fact_id; summary; recorded_at; before_text; claim_text; before; after }
 
 let decode_world_change_history body =
   let* history = optional_object_field body "history" in
@@ -1919,7 +1926,8 @@ let decode_world_change_history body =
       let* index_updates = required_nonnegative_int_field history "index_updates" in
       let* digest_commits = required_nonnegative_int_field history "digest_commits" in
       let* missing_evidence = required_nonnegative_int_field history "missing_evidence" in
-      Ok (Some { edge_changes; index_updates; digest_commits; missing_evidence })
+      let* retained_from_seq = optional_int_field history "retained_from_seq" in
+      Ok (Some { edge_changes; index_updates; digest_commits; missing_evidence; retained_from_seq })
 
 let decode_memory_diff json =
   let* _, body = unwrap_v2_or_raw json in

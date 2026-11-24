@@ -1215,7 +1215,11 @@ let build_diff_visual_rows ~theme ~bg ~lang ~now_unix ~wrap_w ~selected_idx
                  right_txt = ts;
                  right_style = Typography.whisper ~bg theme;
                  selected;
-               })
+               });
+          Option.iter
+            (push_wrapped ~rail:Theme.Status_ok
+               ~style:(Typography.primary ~bg theme) ~selected ~prefix:"+ ")
+            e.claim_text
       | Knowledge_store.World_updated u ->
           let ts =
             match String.index_opt u.recorded_at 'T' with
@@ -1250,12 +1254,12 @@ let build_diff_visual_rows ~theme ~bg ~lang ~now_unix ~wrap_w ~selected_idx
             |> List.map (fun (k, v) -> k ^ "=" ^ v)
             |> String.concat " · "
           in
-          let b_s = fmt_kvs u.before in
+          let b_s = Option.value ~default:(fmt_kvs u.before) u.before_text in
           if not (String.equal b_s "") then
             push_wrapped ~rail:Theme.Status_active
               ~style:(Typography.status ~bg theme Theme.Status_critical)
               ~selected ~prefix:"- " b_s;
-          let a_s = fmt_kvs u.after in
+          let a_s = Option.value ~default:(fmt_kvs u.after) u.claim_text in
           if not (String.equal a_s "") then
             push_wrapped ~rail:Theme.Status_active
               ~style:(Typography.status ~bg theme Theme.Status_ok) ~selected
@@ -1280,7 +1284,11 @@ let build_diff_visual_rows ~theme ~bg ~lang ~now_unix ~wrap_w ~selected_idx
                  right_txt = ts;
                  right_style = Typography.whisper ~bg theme;
                  selected;
-               }))
+               });
+          Option.iter
+            (push_wrapped ~rail:Theme.Status_critical
+               ~style:(Typography.whisper ~bg theme) ~selected ~prefix:"- ")
+            r.claim_text)
     items;
   List.rev !acc
 
@@ -1630,6 +1638,15 @@ let render_world_diff_body ~grid ~(rect : Rect.t) ~(theme : Theme.t)
                       ]
                       |> List.filter_map (fun (count, label) ->
                         if count = 0 then None else Some (Printf.sprintf "%d %s" count label))
+                    in
+                    let items =
+                      match h.retained_from_seq with
+                      | Some rev when rev > 1 ->
+                          items
+                          @ [ Printf.sprintf "%s %d"
+                                (say lang ~ko:"첫 보존 리비전" ~en:"first retained revision")
+                                rev ]
+                      | Some _ | None -> items
                     in
                     if items <> [] then begin
                       ignore

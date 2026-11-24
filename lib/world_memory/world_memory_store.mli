@@ -104,13 +104,17 @@ val read_change_log_tail
 
 type history_page = After of int | Tail
 
+val max_change_log_rows : int
+(** Retention bound for the World Memory change log. *)
+
 val read_history_snapshot
   :  base_path:string
   -> page:history_page
   -> limit:int
-  -> (consistent_snapshot * (change_event list * int), store_error) result
+  -> (consistent_snapshot * ((change_event list * int), store_error) result, store_error) result
 (** Read current facts, edges and the requested change page at one
-    SQLite read-transaction boundary. *)
+    SQLite read-transaction boundary. Malformed history remains a separate
+    error so callers can still show the current snapshot. *)
 
 type shared_change =
   | Claim_added of fact_version
@@ -125,7 +129,8 @@ type shared_change =
 val shared_change_of_snapshot : consistent_snapshot -> change_event -> shared_change
 (** Interpret history using event-time evidence. A pre-existing row without
     evidence is eligible only when its subject can be proved from that same
-    snapshot. Rows carrying private endpoints or fact scope stay private. *)
+    snapshot. Fact and endpoint visibility respects both the event scope
+    and current private ownership. *)
 
 (** {1 Atomic Off-Domain Writes} *)
 

@@ -1540,6 +1540,7 @@ let test_knowledge_all_tabs_and_dives () =
                                    fact_id = "f-add-1";
                                    summary = "Added world claim";
                                    recorded_at = "2026-11-21T18:00:00Z";
+                                   claim_text = None;
                                    payload = `Assoc [ ("claim", `String "ok") ];
                                  };
                                ];
@@ -1550,6 +1551,8 @@ let test_knowledge_all_tabs_and_dives () =
                                    fact_id = "f-upd-2";
                                    summary = "Updated world claim";
                                    recorded_at = "2026-11-21T19:00:00Z";
+                                   before_text = None;
+                                   claim_text = None;
                                    before = `Assoc [ ("ttl", `Int 30) ];
                                    after = `Assoc [ ("ttl", `Int 300) ];
                                  };
@@ -1562,6 +1565,7 @@ let test_knowledge_all_tabs_and_dives () =
                                    fact_id = "f-ret-3";
                                    summary = "Retracted stale claim";
                                    recorded_at = "2026-11-21T19:30:00Z";
+                                   claim_text = None;
                                    payload = `Null;
                                  };
                                ];

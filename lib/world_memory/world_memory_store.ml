@@ -76,10 +76,10 @@ let schema_table_present db table =
     "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1 LIMIT 1"
     (fun stmt ->
        let* () = check db "bind table name" (Sqlite3.bind stmt 1 (Sqlite3.Data.TEXT table)) in
-       match Sqlite3.step stmt with
-       | Sqlite3.Rc.ROW -> Ok true
-       | Sqlite3.Rc.DONE -> Ok false
-       | _ -> Error (sqlite_err db "check world_memory schema"))
+       let result = Sqlite3.step stmt in
+       if result = Sqlite3.Rc.ROW then Ok true
+       else if result = Sqlite3.Rc.DONE then Ok false
+       else Error (sqlite_err db "check world_memory schema"))
 ;;
 
 let schema_initialized db = schema_table_present db "world_memory_fts"
@@ -1061,9 +1061,9 @@ type history_page = After of int | Tail
 let read_changes_on_db db ~page ~limit =
   let* last_seq =
     with_stmt db "SELECT COALESCE(MAX(seq), 0) FROM world_change_log" (fun stmt ->
-      match Sqlite3.step stmt with
-      | Sqlite3.Rc.ROW -> Ok (Sqlite3.column_int stmt 0)
-      | _ -> Error (sqlite_err db "max change_log seq"))
+      if Sqlite3.step stmt = Sqlite3.Rc.ROW
+      then Ok (Sqlite3.column_int stmt 0)
+      else Error (sqlite_err db "max change_log seq"))
   in
   let* has_evidence = schema_table_present db "world_change_evidence" in
   let evidence_column, join =
@@ -1088,8 +1088,8 @@ let read_changes_on_db db ~page ~limit =
         | Tail -> Ok ()
       in
       let rec loop acc =
-        match Sqlite3.step stmt with
-        | Sqlite3.Rc.ROW ->
+        let result = Sqlite3.step stmt in
+        if result = Sqlite3.Rc.ROW then (
           let seq = Sqlite3.column_int stmt 0 in
           let kind_raw = Sqlite3.column_text stmt 1 in
           let target_id = Sqlite3.column_text stmt 2 in
@@ -1111,12 +1111,13 @@ let read_changes_on_db db ~page ~limit =
                  |> Result.map Option.some
                  |> Result.map_error (fun detail -> Invalid_state detail)
                | exception Yojson.Json_error detail -> Error (Invalid_state detail))
-            | _ -> Error (Invalid_state "invalid world change evidence storage type")
+            | Sqlite3.Data.(NONE | INT _ | FLOAT _ | BLOB _) ->
+              Error (Invalid_state "invalid world change evidence storage type")
           in
-          loop ({ seq; kind; target_id; summary; actor; recorded_at; evidence } :: acc)
-        | Sqlite3.Rc.DONE ->
+          loop ({ seq; kind; target_id; summary; actor; recorded_at; evidence } :: acc))
+        else if result = Sqlite3.Rc.DONE then
           Ok (match page with After _ -> List.rev acc | Tail -> acc)
-        | _ -> Error (sqlite_err db "read world_change_log")
+        else Error (sqlite_err db "read world_change_log")
       in
       loop [])
   in
@@ -1146,10 +1147,9 @@ let read_history_snapshot ~base_path ~page ~limit =
       open_db ~create_if_missing:false ~base_path (fun db ->
         with_read_tx db (fun db ->
           let* snapshot = read_snapshot_on_db ~include_inactive:true db in
-          let* changes = read_changes_on_db db ~page ~limit in
-          Ok (snapshot, changes)))
+          Ok (snapshot, read_changes_on_db db ~page ~limit)))
     in
-    Ok (Option.value ~default:(empty_consistent_snapshot, ([], 0)) res))
+    Ok (Option.value ~default:(empty_consistent_snapshot, Ok ([], 0)) res))
 ;;
 
 type shared_change =
@@ -1167,9 +1167,16 @@ let shared_change_of_snapshot (snapshot : consistent_snapshot) =
   let edges = Hashtbl.create (List.length snapshot.edges) in
   List.iter (fun (fact : world_fact) -> Hashtbl.replace facts fact.fact_id fact) snapshot.facts;
   List.iter (fun (edge : world_edge) -> Hashtbl.replace edges edge.created_seq edge) snapshot.edges;
+  let currently_private fact_id =
+    match Hashtbl.find_opt facts fact_id with
+    | Some fact -> is_private_scope fact.scope
+    | None -> false
+  in
   let fact_privacy fact = is_private_scope fact.version_scope in
-  let classify_fact ~created ~previous ~current =
-    if fact_privacy current || Option.fold ~none:false ~some:fact_privacy previous
+  let classify_fact ~fact_id ~created ~previous ~current =
+    if currently_private fact_id
+       || fact_privacy current
+       || Option.fold ~none:false ~some:fact_privacy previous
     then Private_change
     else if created
     then Claim_added current
@@ -1177,37 +1184,48 @@ let shared_change_of_snapshot (snapshot : consistent_snapshot) =
     then Claim_updated { previous; current }
     else Claim_retracted { previous; current }
   in
-  let classify_edge ~from_scope ~to_scope =
-    if is_private_scope from_scope || is_private_scope to_scope then Private_change
+  let classify_edge ~from_fact_id ~from_scope ~to_fact_id ~to_scope =
+    if currently_private from_fact_id || currently_private to_fact_id
+       || is_private_scope from_scope || is_private_scope to_scope
+    then Private_change
     else Shared_edge
   in
   fun (event : change_event) ->
     match event.kind, event.evidence with
     | Index_upserted, None -> Shared_index
     | Digest_committed, None -> Shared_digest
+    | (Fact_upserted | Fact_lifecycle_changed | Edge_added), _
+      when currently_private event.target_id -> Private_change
     | (Fact_upserted | Fact_lifecycle_changed), Some (Fact_written { previous; current }) ->
       classify_fact
+        ~fact_id:event.target_id
         ~created:(event.kind = Fact_upserted && Option.is_none previous)
         ~previous ~current
-    | Edge_added, Some (Edge_written { from_fact_id; from_scope; to_scope; _ })
+    | Edge_added, Some (Edge_written { from_fact_id; from_scope; to_fact_id; to_scope })
       when String.equal from_fact_id event.target_id ->
-      classify_edge ~from_scope ~to_scope
+      classify_edge ~from_fact_id ~from_scope ~to_fact_id ~to_scope
     | (Fact_upserted | Fact_lifecycle_changed), None ->
       (* A pre-evidence row can borrow a fact version only when that event is
          the exact write that produced the version in this snapshot. *)
       (match Hashtbl.find_opt facts event.target_id with
        | Some fact when fact.updated_seq = event.seq ->
          classify_fact
+           ~fact_id:event.target_id
            ~created:(event.kind = Fact_upserted && fact.created_seq = event.seq)
            ~previous:None ~current:(fact_version fact)
        | Some _ | None -> Missing_change_evidence)
     | Edge_added, None ->
       (match Hashtbl.find_opt edges event.seq with
+       | Some edge
+         when String.equal edge.from_fact_id event.target_id && currently_private edge.to_fact_id ->
+         Private_change
        | Some edge when String.equal edge.from_fact_id event.target_id ->
          (match Hashtbl.find_opt facts edge.from_fact_id, Hashtbl.find_opt facts edge.to_fact_id with
           | Some from_fact, Some to_fact
             when from_fact.updated_seq <= event.seq && to_fact.updated_seq <= event.seq ->
-            classify_edge ~from_scope:from_fact.scope ~to_scope:to_fact.scope
+            classify_edge
+              ~from_fact_id:edge.from_fact_id ~from_scope:from_fact.scope
+              ~to_fact_id:edge.to_fact_id ~to_scope:to_fact.scope
           | _ -> Missing_change_evidence)
        | _ -> Missing_change_evidence)
     | (Fact_upserted | Fact_lifecycle_changed), Some (Edge_written _)

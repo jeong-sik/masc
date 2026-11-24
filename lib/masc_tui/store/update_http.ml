@@ -489,10 +489,28 @@ let apply_http_reply ~now (m : Model.t) reply =
            | Msg.Transport _
            | Msg.Workspace_mismatch _
            | Msg.Decode_error _ ) as err) ->
-          err_reply
-            ~fail:(set_slot (failed_slot err slot))
-            ~source:(Health.Source_keeper keeper) ~ko:"끊긴 답장 조회"
-            ~en:"Cut reply fetch" err)
+          (* A reply for a page the slot no longer waits for changes nothing
+             and records no incident. A workspace mismatch is the exception:
+             it is about the workspace, not about this slot. *)
+          let about_workspace =
+            match err with
+            | Msg.Workspace_mismatch _ -> true
+            | Msg.Http_error _ | Msg.Transport _ | Msg.Decode_error _ -> false
+          in
+          if answers_slot || about_workspace then
+            (* The failure replaces the slot, partial read included. A
+               failed fetch that kept the partial read stale would ask the
+               same page again after every trigger, so a page that fails for
+               good would never stop. A retryable failure asks again from the
+               start, and the partial read draws nothing meanwhile. *)
+            err_reply
+              ~fail:
+                (set_slot
+                   (Observed.failed ~reason:(Msg.http_error_detail err)
+                      ~retryable:(Msg.http_error_retryable err) ~at:now))
+              ~source:(Health.Source_keeper keeper) ~ko:"끊긴 답장 조회"
+              ~en:"Cut reply fetch" err
+          else (m, []))
   | Msg.Reply_turn_interrupt { keeper; result = Ok resp } ->
       let fleet0 =
         match resp.chat_control_token with

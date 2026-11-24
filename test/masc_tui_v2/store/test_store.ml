@@ -9965,6 +9965,74 @@ let test_cut_reply_journal_failures () =
     (Fleet_store.String_map.bindings
        (Fleet_store.cut_replies_by_row ~keeper:"alpha" broken.fleet))
 
+(* The first page of a long journal landed and a later page fails. The partial
+   read draws nothing, so the failure replaces it. A stale partial read would
+   be asked for the same page again at every trigger. *)
+let test_cut_reply_failure_after_the_first_page () =
+  let history = [ failure_row ~id:"f-long" ~operation_id:"op-long" ] in
+  let m0, _ =
+    history_reply ~keeper:"alpha" history (in_alpha_chat (Model.initial ()))
+  in
+  let cursor : Wire_chat_journal.cursor = { last_seq = 1; next_offset = 240 } in
+  let page2 = Wire_chat_journal.After cursor in
+  let after_first, _ =
+    journal_reply ~operation_id:"op-long" ~from:Wire_chat_journal.From_start
+      (Ok (journal_page ~next:cursor [ unowned "cut " ]))
+      m0
+  in
+  let slot_failure (m : Model.t) =
+    match
+      Fleet_store.cut_reply_for ~keeper:"alpha" ~operation_id:"op-long" m.fleet
+    with
+    | Observed.Failed { retryable; _ } -> Some retryable
+    | Observed.Value _ | Observed.Loading _ | Observed.Absent
+    | Observed.Unreported ->
+        None
+  in
+  let not_found =
+    Error (Msg.Http_error { status = 404; body = "no such page"; api_error = None })
+  in
+  let incidents_before = Incidents.count after_first.incidents in
+  let gone, gone_cmds =
+    journal_reply ~operation_id:"op-long" ~from:page2 not_found after_first
+  in
+  Alcotest.(check (option bool))
+    "a non-retryable failure replaces the partial read" (Some false)
+    (slot_failure gone);
+  Alcotest.(check int) "the failure records one incident"
+    (incidents_before + 1)
+    (Incidents.count gone.incidents);
+  Alcotest.(check (list (pair string string))) "the failed reply asks nothing"
+    [] (journal_gets gone_cmds);
+  Alcotest.(check (list (pair string string)))
+    "the planner does not ask the failed page again" []
+    (journal_gets (View_fetches.fetches_for_current_view gone));
+  Alcotest.(check (list (pair string string)))
+    "a chat history landing does not ask it again" []
+    (journal_gets (snd (history_reply ~keeper:"alpha" history gone)));
+  let duplicate, duplicate_cmds =
+    journal_reply ~operation_id:"op-long" ~from:page2 not_found gone
+  in
+  Alcotest.(check int) "a second failure of the same page records nothing"
+    (Incidents.count gone.incidents)
+    (Incidents.count duplicate.incidents);
+  Alcotest.(check (list (pair string string)))
+    "a second failure of the same page asks nothing" []
+    (journal_gets duplicate_cmds);
+  let down, _ =
+    journal_reply ~operation_id:"op-long" ~from:page2
+      (Error
+         (Msg.Http_error
+            { status = 503; body = "journal unreadable"; api_error = None }))
+      after_first
+  in
+  Alcotest.(check (option bool)) "a retryable failure replaces the partial read"
+    (Some true) (slot_failure down);
+  Alcotest.(check (list (pair string string)))
+    "a retryable failure asks again from the start"
+    [ ("op-long", "start") ]
+    (journal_gets (View_fetches.fetches_for_current_view down))
+
 let () =
   Alcotest.run "masc_tui_store"
     [
@@ -10109,5 +10177,8 @@ let () =
           Alcotest.test_case
             "A pruned journal draws nothing; a failed read is an incident"
             `Quick test_cut_reply_journal_failures;
+          Alcotest.test_case
+            "A failure after the first page replaces the partial read"
+            `Quick test_cut_reply_failure_after_the_first_page;
         ] );
     ]

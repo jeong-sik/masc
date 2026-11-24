@@ -65,8 +65,9 @@ describe('single OKLCH design-system token SSOT (source.ts)', () => {
     expect(hcDark?.media).toBe('(prefers-contrast: more)')
   })
 
-  it('defines the 4px 6-step spacing scale and 44px mobile touch target', () => {
+  it('defines the 4px spacing scale (+ --sp-0 hairline) and 44px mobile touch target', () => {
     const byName = new Map(ALL.map((tok) => [tok.name, tok.value]))
+    expect(byName.get('sp-0')).toBe('2px')
     expect(byName.get('sp-1')).toBe('4px')
     expect(byName.get('sp-2')).toBe('8px')
     expect(byName.get('sp-3')).toBe('12px')
@@ -74,5 +75,19 @@ describe('single OKLCH design-system token SSOT (source.ts)', () => {
     expect(byName.get('sp-5')).toBe('24px')
     expect(byName.get('sp-6')).toBe('32px')
     expect(byName.get('mobile-touch-target-min')).toBe('44px')
+  })
+
+  it('keeps zero off-grid spacing px literals across layout stylesheets', () => {
+    const offGridRe = /\b(?:padding|margin|gap):\s*[^;]*\b(?:1|2|3|5|6|10)px\b/
+    const sheets = ['shell.css', 'primitives.css', 'charts.css', 'chat.css', 'surfaces.css']
+    const violations: string[] = []
+    for (const sheet of sheets) {
+      const text = readFileSync(resolve(process.cwd(), 'src/styles', sheet), 'utf8')
+      const lines = text.split('\n')
+      lines.forEach((line, idx) => {
+        if (offGridRe.test(line)) violations.push(`${sheet}:${idx + 1}: ${line.trim()}`)
+      })
+    }
+    expect(violations).toEqual([])
   })
 })

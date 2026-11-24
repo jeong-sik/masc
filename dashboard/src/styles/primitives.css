@@ -17,8 +17,8 @@
 .kb-chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 2px 8px 2px 3px;
+  gap: var(--sp-2);
+  padding: var(--sp-0) var(--sp-2) var(--sp-0) var(--sp-1);
   border-radius: var(--radius-pill);
   background: var(--kb-bg);
   border: 1px solid var(--kb-bd);
@@ -31,8 +31,8 @@
   min-width: 0;
 }
 
-.kb-chip--sm { font-size: var(--fs-11); padding: 1px 6px 1px 2px; gap: 4px; }
-.kb-chip--lg { font-size: var(--fs-13); padding: 3px 10px 3px 4px; gap: 8px; }
+.kb-chip--sm { font-size: var(--fs-11); padding: var(--sp-0) var(--sp-2) var(--sp-0) var(--sp-0); gap: var(--sp-1); }
+.kb-chip--lg { font-size: var(--fs-13); padding: var(--sp-1) var(--sp-3) var(--sp-1) var(--sp-1); gap: var(--sp-2); }
 
 .kb-label {
   overflow: hidden;
@@ -49,18 +49,18 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   border-radius: var(--radius-circle);
   background: var(--kb-c);
   color: var(--bg-0);
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: var(--fs-10);
   font-weight: 700;
   flex: none;
 }
-.kb-sigil--sm { width: 15px; height: 15px; font-size: 8px; }
-.kb-sigil--lg { width: 28px; height: 28px; font-size: 11px; }
+.kb-sigil--sm { width: 18px; height: 18px; font-size: var(--fs-10); }
+.kb-sigil--lg { width: 28px; height: 28px; font-size: var(--fs-11); }
 
 .kb-portrait {
   width: 28px;
@@ -96,7 +96,7 @@
   display: inline-flex;
   align-items: center;
   gap: var(--sp-1);
-  padding: 2px 6px;
+  padding: var(--sp-0) var(--sp-2);
   border-radius: var(--radius-sm);
   background: color-mix(in oklch, var(--kc, var(--brass-1)) 14%, transparent);
   border: 1px solid color-mix(in oklch, var(--kc, var(--brass-1)) 35%, transparent);
@@ -192,7 +192,7 @@
 .dtable-sort-btn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--sp-1);
   border: none;
   background: transparent;
   color: inherit;
@@ -201,7 +201,7 @@
   padding: 0;
 }
 
-@container dtable (max-width: 640px) {
+@container dtable (max-width: 767px) {
   .dtable thead { display: none; }
   .dtable tbody, .dtable tr, .dtable td { display: block; width: 100%; }
   .dtable tr {
@@ -216,7 +216,7 @@
     justify-content: space-between;
     align-items: baseline;
     gap: var(--sp-2);
-    padding: 2px 0;
+    padding: var(--sp-0) 0;
     border: none;
     text-align: right;
   }
@@ -252,7 +252,7 @@
   background: var(--bg-1);
 }
 
-@container master-detail (max-width: 860px) {
+@container master-detail (max-width: 767px) {
   .md-split {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -356,7 +356,7 @@
 
 .tla-kv {
   display: inline-flex;
-  gap: 4px;
+  gap: var(--sp-1);
 }
 
 .tla-k {
@@ -386,7 +386,7 @@
   align-items: center;
   justify-content: center;
   gap: var(--sp-1);
-  padding: 6px 12px;
+  padding: var(--sp-2) var(--sp-3);
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
   background: var(--cta-bg);
@@ -403,7 +403,7 @@
   align-items: center;
   justify-content: center;
   gap: var(--sp-1);
-  padding: 6px 10px;
+  padding: var(--sp-2) var(--sp-3);
   border-radius: var(--radius-sm);
   border: 1px solid var(--line-1);
   background: var(--bg-2);
@@ -428,7 +428,7 @@
   font-size: var(--fs-12);
 }
 .markdown-content code {
-  padding: 1px 4px;
+  padding: var(--sp-0) var(--sp-1);
   border-radius: var(--radius-xs);
   background: var(--bg-3);
   font-size: 0.92em;

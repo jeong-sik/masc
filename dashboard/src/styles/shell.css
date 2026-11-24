@@ -147,7 +147,7 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: var(--sp-0);
   width: 44px;
   min-height: 40px;
   border-radius: var(--radius-md);
@@ -232,8 +232,8 @@
   position: absolute;
   top: calc(100% + var(--sp-1));
   right: 0;
-  min-width: 260px;
-  max-width: 340px;
+  min-width: min(260px, calc(100vw - var(--sp-4) * 2));
+  max-width: min(340px, calc(100vw - var(--sp-4) * 2));
   padding: var(--sp-2);
   background: var(--bg-3);
   border: 1px solid var(--line-2);
@@ -265,7 +265,7 @@
   background: var(--bg-4);
 }
 
-/* Mobile shell (< 900px) — 44px minimum touch targets */
+/* Mobile shell (< 768px) — 44px minimum touch targets */
 .v2-app[data-mobile="1"] .v2-body {
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) 56px;

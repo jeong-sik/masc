@@ -35,7 +35,11 @@ val tool_series_filtered_path :
 val dashboard_tools_path : ?keeper:string -> unit -> string
 val skills_path : string
 val connector_unbind_path : connector:string -> string
+val connector_names_path : connector:string -> ?scope:string -> ?limit:int -> unit -> string
 val fusion_runs_path : string
+val fusion_run_detail_path : run_id:string -> string
+val fusion_config_path : string
+val fusion_board_post_path : post_id:string -> string
 val fusion_launch_path : keeper:string -> string
 val exact_lane_runs_path : ?lane:string -> ?limit:int -> unit -> string
 val connectors_path : string
@@ -45,6 +49,8 @@ val connector_bind_path : connector:string -> string
 val browser_lane_path : string
 val browser_lane_read_path : string
 val lane_addons_path : string
+val lane_addon_package_catalog_path : ?directory:string -> unit -> string
+val lane_addon_package_preview_path : manifest_path:string -> string
 val mcp_clients_path : string
 
 (** {1 Provider-Free Quotas, Subscription Windows & Credit Balances} *)
@@ -914,3 +920,186 @@ val encode_setup_credential :
 
 val encode_setup_account_login_start :
   integration_id:string -> ?account_ref:string -> unit -> Yojson.Safe.t
+
+(** {1 Wave 3: Fusion Detail, Config Presets, Addon Package Catalog & Connector Names} *)
+
+type fusion_replay_status =
+  | Replay_not_replayed
+  | Replay_absent
+  | Replay_complete of {
+      lines_read : int;
+      malformed_lines : int;
+      dropped_running : int;
+    }
+  | Replay_incomplete of {
+      reason : string;
+      lines_read : int;
+      malformed_lines : int;
+    }
+
+type fusion_historical_evidence = {
+  run_id : string;
+  post_id : string;
+  title : string;
+  created_at_unix : float;
+}
+
+type fusion_runs_snapshot = {
+  generated_at : string;
+  replay : fusion_replay_status option;
+  historical_evidence : fusion_historical_evidence list;
+  runs : fusion_run list;
+}
+
+type fusion_panel_entry = {
+  model : string;
+  status : [ `Answered | `Failed ];
+  answer : string option;
+  input_tokens : int option;
+  output_tokens : int option;
+  reason_code : string option;
+  reason_detail : string option;
+}
+
+type fusion_judge_node = {
+  role : string;
+  identity : string;
+  status : string;
+  decision : string option;
+  resolved_answer : string option;
+  synthesis : string option;
+  input_tokens : int;
+  output_tokens : int;
+  failure_code : string option;
+  error : string option;
+  elapsed_s : float option;
+  timed_out : bool option;
+}
+
+type fusion_seat_attempt = {
+  runtime : string;
+  code : string;
+  detail : string;
+}
+
+type fusion_seat_route = {
+  phase : string;
+  seat : string;
+  judge_role : string option;
+  route : string;
+  answered_by : string option;
+  failed_attempts : fusion_seat_attempt list;
+}
+
+type fusion_tool_trace = {
+  status : string;
+  observed_actors : string list;
+  dropped_events : int;
+  gaps : string list;
+  events_count : int;
+  events_preview : string list;
+}
+
+type fusion_evidence_post = {
+  post_id : string;
+  title : string;
+  author : string;
+  body : string;
+  question : string option;
+  panel : fusion_panel_entry list;
+  judge_status : string option;
+  judge_decision : string option;
+  judge_synthesis : string option;
+  judge_resolved_answer : string option;
+  judge_failure : string option;
+  judges : fusion_judge_node list;
+  seat_routes : fusion_seat_route list;
+  tool_trace : fusion_tool_trace option;
+}
+
+type fusion_evidence_status =
+  | Evidence_recorded of fusion_evidence_post
+  | Evidence_pending
+  | Evidence_absent
+
+type fusion_run_detail = {
+  run : fusion_run;
+  evidence : fusion_evidence_status;
+}
+
+type fusion_preset_option = {
+  name : string;
+  panels : string list;
+  judge : string option;
+  judges : string list;
+  min_answered : int option;
+}
+
+type fusion_config_options = {
+  enabled : bool;
+  default_preset : string;
+  staged_judge_group_size : int;
+  presets : fusion_preset_option list;
+}
+
+val decode_fusion_runs_snapshot :
+  Yojson.Safe.t -> (fusion_runs_snapshot, string) result
+val decode_fusion_run_detail :
+  Yojson.Safe.t -> (fusion_run_detail, string) result
+val decode_fusion_board_evidence :
+  Yojson.Safe.t -> (fusion_evidence_post, string) result
+val decode_fusion_config_options :
+  Yojson.Safe.t -> (fusion_config_options, string) result
+
+type addon_catalog_entry =
+  | Catalog_folder of { path : string }
+  | Catalog_issue of { path : string; message : string }
+  | Catalog_package of {
+      manifest_path : string;
+      title : string;
+      revision : string;
+      description : string option;
+      ui_category : string option;
+    }
+
+type addon_package_catalog = {
+  directory : string;
+  parent : string option;
+  entries : addon_catalog_entry list;
+}
+
+type addon_package_preview = {
+  manifest_path : string;
+  id : string;
+  revision : string;
+  title : string;
+  ui_category : string option;
+  execution_kind : string;
+  image_name : string option;
+  image_state : string option;
+  exported_tools : string list;
+  contributions : string list;
+  command : string list;
+  directory : string option;
+}
+
+val decode_addon_package_catalog :
+  Yojson.Safe.t -> (addon_package_catalog, string) result
+val decode_addon_package_preview :
+  Yojson.Safe.t -> (addon_package_preview, string) result
+
+type connector_name_mapping = {
+  id : string;
+  name : string;
+}
+
+type connector_names_page = {
+  connector_id : string;
+  kind : string;
+  total : int;
+  has_more : bool;
+  mappings : connector_name_mapping list;
+}
+
+val decode_connector_names_page :
+  Yojson.Safe.t -> (connector_names_page, string) result

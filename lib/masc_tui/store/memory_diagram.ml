@@ -301,9 +301,14 @@ let keeper_memory_content_of_tabs_body ~bp ~embedded ~has_keeper
         else if content_rect.w < 44 then 1
         else Layout.card_pad_x bp
       in
-      let footer_h = if content_rect.h >= 7 then 2 else 0 in
+      let subbar_h = if content_rect.h >= 4 then 1 else 0 in
+      let after_subbar =
+        if subbar_h = 1 then snd (Rect.split_v content_rect ~top_h:1)
+        else content_rect
+      in
+      let footer_h = if after_subbar.h >= 7 then 2 else 0 in
       let mem_body, _ =
-        Rect.split_v content_rect ~top_h:(Int.max 0 (content_rect.h - footer_h))
+        Rect.split_v after_subbar ~top_h:(Int.max 0 (after_subbar.h - footer_h))
       in
       Card.pad_inner ~pad_x mem_body
 
@@ -315,14 +320,21 @@ let active_memory_content_rect (m : Model.t) =
     | Some (bp, body) -> (
         match Model.active_dive m with
         | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory }) ->
-            let has_keeper =
-              Option.is_some (Fleet_store.find_keeper ~name m.fleet)
-            in
-            let content =
-              keeper_memory_content_of_tabs_body ~bp ~embedded:false ~has_keeper
-                body
-            in
-            if Rect.is_empty content then None else Some (name, content)
+            if
+              not
+                (Knowledge_store.equal_keeper_memory_subview
+                   m.knowledge.keeper_memory_subview
+                   Knowledge_store.Kmem_diff_flow)
+            then None
+            else
+              let has_keeper =
+                Option.is_some (Fleet_store.find_keeper ~name m.fleet)
+              in
+              let content =
+                keeper_memory_content_of_tabs_body ~bp ~embedded:false ~has_keeper
+                  body
+              in
+              if Rect.is_empty content then None else Some (name, content)
         | Some
             ( Nav.Dive_keeper
                 {
@@ -332,7 +344,9 @@ let active_memory_content_rect (m : Model.t) =
                     | Nav.Keeper_tool_calls
                     | Nav.Keeper_work_candle
                     | Nav.Keeper_sandbox
-                    | Nav.Keeper_config );
+                    | Nav.Keeper_config
+                    | Nav.Keeper_logs
+                    | Nav.Keeper_identity );
                   _;
                 }
             | Nav.Dive_work _
@@ -344,6 +358,9 @@ let active_memory_content_rect (m : Model.t) =
             match m.nav.workspace with
             | Nav.Keepers
               when Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory
+                   && Knowledge_store.equal_keeper_memory_subview
+                        m.knowledge.keeper_memory_subview
+                        Knowledge_store.Kmem_diff_flow
               -> (
                 match Fleet_store.selected_keeper_summary m.fleet with
                 | None -> None
@@ -386,7 +403,10 @@ let active_memory_content_rect (m : Model.t) =
                     else None)
             | Nav.Knowledge
               when Nav.equal_knowledge_tab m.knowledge.active_tab
-                     Nav.Knowledge_memory -> (
+                     Nav.Knowledge_memory
+                   && Knowledge_store.equal_memory_subview
+                        m.knowledge.memory_subview Knowledge_store.Mem_diff_flow
+              -> (
                 match m.knowledge.memory_diff_keeper with
                 | None -> None
                 | Some keeper ->

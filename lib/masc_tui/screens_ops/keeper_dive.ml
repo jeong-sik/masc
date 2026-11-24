@@ -1220,6 +1220,84 @@ let render_memory_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t
   else
     let bg = Color.of_rgb theme.surface_1 in
     let pad_x = Ops_common.pad_x_for ~model rect in
+    let subbar_h = if rect.h >= 4 then 1 else 0 in
+    let subbar_rect, rect =
+      if subbar_h = 1 then Rect.split_v rect ~top_h:1
+      else (Rect.empty, rect)
+    in
+    if subbar_h = 1 then begin
+      let ksv = model.knowledge.keeper_memory_subview in
+      let sub_pills =
+        [
+          ( Ops_common.say model ~ko:"[v] 탐색·Diff" ~en:"[v] Explorer & Diff"
+          , Knowledge_store.equal_keeper_memory_subview ksv
+              Knowledge_store.Kmem_diff_flow
+          , Some Theme.Status_active );
+          ( Ops_common.say model ~ko:"헬스" ~en:"Health"
+          , Knowledge_store.equal_keeper_memory_subview ksv
+              Knowledge_store.Kmem_health
+          , Some Theme.Status_ok );
+          ( Ops_common.say model ~ko:"팩트 트리" ~en:"Facts Tree"
+          , Knowledge_store.equal_keeper_memory_subview ksv
+              Knowledge_store.Kmem_facts_tree
+          , Some Theme.Status_ai );
+          ( Ops_common.say model ~ko:"저널" ~en:"Journal"
+          , Knowledge_store.equal_keeper_memory_subview ksv
+              Knowledge_store.Kmem_journal
+          , Some Theme.Status_attention );
+        ]
+      in
+      ignore (Ops_common.draw_pills grid ~rect:subbar_rect ~theme ~bg sub_pills)
+    end;
+    if
+      not
+        (Knowledge_store.equal_keeper_memory_subview
+           model.knowledge.keeper_memory_subview Knowledge_store.Kmem_diff_flow)
+    then begin
+      let content = Card.pad_inner ~pad_x rect in
+      if not (Rect.is_empty content) then begin
+        let lines =
+          Update_nav.keeper_memory_subview_lines ~width:content.w ~name
+            model.knowledge
+        in
+        let max_skip = Int.max 0 (List.length lines - content.h) in
+        let skip =
+          Int.min max_skip (Int.max 0 model.nav.dive_scroll_offset)
+        in
+        let y = ref content.y and bot = Rect.bottom content in
+        List.iter
+          (fun ln ->
+            if !y < bot then begin
+              let is_sel = String.starts_with ~prefix:">" ln in
+              let row_rect =
+                Rect.make ~x:content.x ~y:!y ~w:content.w ~h:1
+              in
+              let row_bg =
+                if is_sel then Color.of_rgb theme.selection_bg else bg
+              in
+              if is_sel then
+                Cell_grid.fill_rect ~clip:content grid ~rect:row_rect
+                  ~style:(Style.make ~fg:(Color.of_rgb theme.text_primary) ~bg:row_bg ())
+                  ();
+              let st =
+                if is_sel then Typography.anchor ~bg:row_bg theme
+                else if String.starts_with ~prefix:"──" ln then
+                  Typography.status ~bg ~bold:true theme Theme.Status_active
+                else if String.starts_with ~prefix:"  [error" ln then
+                  Typography.status ~bg theme Theme.Status_critical
+                else if String.starts_with ~prefix:"  [warn" ln then
+                  Typography.status ~bg theme Theme.Status_attention
+                else Typography.structure ~bg theme
+              in
+              ignore
+                (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
+                   ~max_w:content.w ~style:st ln);
+              incr y
+            end)
+          (Store_scroll.drop skip lines)
+      end
+    end
+    else begin
     let footer_h = if rect.h >= 7 then 2 else 0 in
     let body_rect, writer_rect =
       Rect.split_v rect ~top_h:(Int.max 0 (rect.h - footer_h))
@@ -1354,8 +1432,9 @@ let render_memory_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t
     in
     Masc_tui_screens_core.Memory_explorer.render_keeper_memory ~grid
       ~rect:content ~theme ~bp:(Ops_common.layout_bp model) ~model ~keeper:name
-      ~focused:true ~diff_scroll:model.nav.dive_scroll_offset;
+      ~focused:(Model.body_has_focus model) ~diff_scroll:model.nav.dive_scroll_offset;
     draw_librarian_footer writer_status_opt
+    end
 
 (* --- Tab 3: Work & Candle (ZERO Nested Boxes — uses v_hairline / hairline!) --- *)
 
@@ -2981,7 +3060,89 @@ let draw_embedded_preview_header grid ~(rect : Rect.t) ~(theme : Theme.t)
   end;
   Card.draw_hairline ~pad_x ~bg grid ~rect ~y:(rect.y + 4) ~theme
 
-(* --- Unified 5-Tab Keeper Dive Entrypoint --- *)
+let render_logs_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
+    ~name =
+  if Rect.is_empty rect then ()
+  else
+    let bg = Color.of_rgb theme.surface_1 in
+    let pad_x = Ops_common.pad_x_for ~model rect in
+    let content = Card.pad_inner ~pad_x rect in
+    if not (Rect.is_empty content) then begin
+      let ks = Keeper_context_store.get_keeper ~keeper:name model.keeper_context in
+      let lines = Update_nav.keeper_logs_lines ~width:content.w ~name ks in
+      let max_skip = Int.max 0 (List.length lines - content.h) in
+      let skip = Int.min max_skip (Int.max 0 ks.logs_scroll_offset) in
+      let y = ref content.y and bot = Rect.bottom content in
+      List.iter
+        (fun ln ->
+          if !y < bot then begin
+            let st =
+              if String.starts_with ~prefix:"──" ln then
+                Typography.status ~bg ~bold:true theme Theme.Status_active
+              else if String.starts_with ~prefix:"  stderr:" ln then
+                Typography.status ~bg theme Theme.Status_attention
+              else if String.starts_with ~prefix:"  stdout:" ln then
+                Typography.status ~bg theme Theme.Status_ok
+              else Typography.structure ~bg theme
+            in
+            ignore
+              (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
+                 ~max_w:content.w ~style:st ln);
+            incr y
+          end)
+        (Store_scroll.drop skip lines)
+    end
+
+let render_identity_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
+    ~(model : Model.t) ~name =
+  if Rect.is_empty rect then ()
+  else
+    let bg = Color.of_rgb theme.surface_1 in
+    let pad_x = Ops_common.pad_x_for ~model rect in
+    let content = Card.pad_inner ~pad_x rect in
+    if not (Rect.is_empty content) then begin
+      let ks = Keeper_context_store.get_keeper ~keeper:name model.keeper_context in
+      let lines =
+        Update_nav.keeper_identity_lines ~width:content.w ~name model
+      in
+      let max_skip = Int.max 0 (List.length lines - content.h) in
+      let skip = Int.min max_skip (Int.max 0 ks.identity_scroll_offset) in
+      let y = ref content.y and bot = Rect.bottom content in
+      List.iter
+        (fun ln ->
+          if !y < bot then begin
+            let is_sel = String.starts_with ~prefix:">" ln in
+            let row_rect = Rect.make ~x:content.x ~y:!y ~w:content.w ~h:1 in
+            let row_bg =
+              if is_sel then Color.of_rgb theme.selection_bg else bg
+            in
+            if is_sel then
+              Cell_grid.fill_rect ~clip:content grid ~rect:row_rect
+                ~style:
+                  (Style.make ~fg:(Color.of_rgb theme.text_primary) ~bg:row_bg ())
+                ();
+            let st =
+              if is_sel then Typography.anchor ~bg:row_bg theme
+              else if String.starts_with ~prefix:"──" ln then
+                Typography.status ~bg ~bold:true theme Theme.Status_active
+              else if
+                String.starts_with ~prefix:"  [CanAdmin" ln
+                || String.starts_with ~prefix:"  Error:" ln
+                || String.starts_with ~prefix:"  Effective error:" ln
+              then Typography.status ~bg theme Theme.Status_attention
+              else if String.starts_with ~prefix:"  One-time code:" ln then
+                Typography.status ~bg ~bold:true theme Theme.Status_ok
+              else Typography.structure ~bg theme
+            in
+            ignore
+              (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
+                 ~max_w:content.w ~style:st ln);
+            incr y
+          end)
+        (Store_scroll.drop skip lines)
+    end
+
+(* --- Unified 9-Tab Keeper Dive Entrypoint --- *)
 
 let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
     ~(rect : Rect.t) grid =
@@ -3058,8 +3219,18 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
         else if Nav.equal_keeper_tab tab Nav.Keeper_memory then
           Some
             (Ops_common.say model
-               ~ko:"[Enter] 전문 · [.] Pele/Mermaid · [Ctrl+O] 형성 트리"
-               ~en:"[Enter] Read · [.] Pele/Mermaid · [Ctrl+O] Tree")
+               ~ko:"[v] 하위뷰 · [Enter] 전문 · [.] Pele/Mermaid · [Ctrl+O] 형성 트리"
+               ~en:"[v] Sub-view · [Enter] Read · [.] Pele/Mermaid · [Ctrl+O] Tree")
+        else if Nav.equal_keeper_tab tab Nav.Keeper_logs then
+          Some
+            (Ops_common.say model
+               ~ko:"[v] 메트릭/샌드박스 · [r] 새로고침 · [z] 확대"
+               ~en:"[v] Metrics/Sandbox · [r] Refresh · [z] Zoom")
+        else if Nav.equal_keeper_tab tab Nav.Keeper_identity then
+          Some
+            (Ops_common.say model
+               ~ko:"[l] 로그인 · [Space] 전환 · [K] PAT · [y] 복사"
+               ~en:"[l] Login · [Space] Switch · [K] PAT · [y] Copy")
         else
           Some
             (Ops_common.say model ~ko:"[Ctrl+T] 큐 · [z] 확대"
@@ -3077,8 +3248,18 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
       else if Nav.equal_keeper_tab tab Nav.Keeper_memory then
         Some
           (Ops_common.say model
-             ~ko:"[Enter] 전문 · [.] Pele/Mermaid · [Ctrl+O] 형성 트리"
-             ~en:"[Enter] Read · [.] Pele/Mermaid · [Ctrl+O] Tree")
+             ~ko:"[v] 하위뷰 · [Enter] 전문 · [.] Pele/Mermaid · [Ctrl+O] 형성 트리"
+             ~en:"[v] Sub-view · [Enter] Read · [.] Pele/Mermaid · [Ctrl+O] Tree")
+      else if Nav.equal_keeper_tab tab Nav.Keeper_logs then
+        Some
+          (Ops_common.say model
+             ~ko:"[v] 메트릭/샌드박스 · [r] 새로고침 · [←→] 탭 · [Esc] 목록"
+             ~en:"[v] Metrics/Sandbox · [r] Refresh · [←→] Tabs · [Esc] Fleet")
+      else if Nav.equal_keeper_tab tab Nav.Keeper_identity then
+        Some
+          (Ops_common.say model
+             ~ko:"[l] 로그인 · [L] 폴 · [Space] 전환 · [U] 해제 · [K] PAT · [y] 복사"
+             ~en:"[l] Login · [L] Poll · [Space] Switch · [U] Disconnect · [K] PAT · [y] Copy")
       else if Nav.equal_keeper_tab tab Nav.Keeper_chat && has_running_turn then
         Some
           (Ops_common.say model ~ko:"[Esc/Ctrl+X] 턴 중단 · [y] 복사 · [←→] 탭"
@@ -3174,3 +3355,7 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
         | Nav.Keeper_config ->
             render_config_tab grid ~rect:content_rect ~theme ~model ~name
               keeper_opt
+        | Nav.Keeper_logs ->
+            render_logs_tab grid ~rect:content_rect ~theme ~model ~name
+        | Nav.Keeper_identity ->
+            render_identity_tab grid ~rect:content_rect ~theme ~model ~name

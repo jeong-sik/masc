@@ -3182,7 +3182,10 @@ let classify_inline_form (modal : Model.inline_modal_state) : inline_form_kind =
     | Nav.Schedule_form
     | Nav.Connector_form
     | Nav.Repo_add_form
-    | Nav.Board_comment _ ) as std ->
+    | Nav.Board_comment _
+    | Nav.Github_token_form _
+    | Nav.Code_finder_form
+    | Nav.Code_search_form ) as std ->
       Form_standard std
 
 let inline_action_title ~lang ~(modal : Model.inline_modal_state) _kind =
@@ -3245,6 +3248,15 @@ let inline_action_title ~lang ~(modal : Model.inline_modal_state) _kind =
             (Say.make
                ~ko:(Printf.sprintf "타래 댓글 작성 (%s)" post_id)
                ~en:(Printf.sprintf "Add Comment (%s)" post_id)))
+  | Form_standard (Nav.Github_token_form keeper) ->
+      Say.resolve lang
+        (Say.make
+           ~ko:("GitHub PAT 등록 (마스킹) · " ^ keeper)
+           ~en:("GitHub PAT Token (Masked) · " ^ keeper))
+  | Form_standard Nav.Code_finder_form ->
+      Say.resolve lang (Say.make ~ko:"코드 파일 퍼지 검색" ~en:"Fuzzy File Finder")
+  | Form_standard Nav.Code_search_form ->
+      Say.resolve lang (Say.make ~ko:"워크스페이스 코드 검색 (rg)" ~en:"Workspace Code Search")
 
 let form_of_inline_modal (modal : Model.inline_modal_state) =
   let fields =
@@ -3281,6 +3293,7 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         | Drafts.Btw_idle | Drafts.Btw_sending _ -> 7
         | Drafts.Btw_streaming _ | Drafts.Btw_answered _ | Drafts.Btw_failed _ ->
             13)
+    | Nav.Code_finder_form -> 14
     | Nav.Gate_reject _
     | Nav.Verification_reject _
     | Nav.Harness_overrule _
@@ -3289,8 +3302,10 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     | Nav.Connector_form
     | Nav.Repo_add_form
     | Nav.Board_new_post
-    | Nav.Board_comment _ ->
-        Int.max 7 (List.length modal.fields + 5)
+    | Nav.Board_comment _
+    | Nav.Github_token_form _
+    | Nav.Code_search_form ->
+        Int.max 7 (List.length modal.fields + 6)
   in
   let h = Int.min (Int.max 0 (rect.h - 2)) desired_h in
   let x = rect.x + ((rect.w - w) / 2) in
@@ -3408,18 +3423,146 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       | Nav.Connector_form
       | Nav.Repo_add_form
       | Nav.Board_new_post
-      | Nav.Board_comment _ ->
+      | Nav.Board_comment _
+      | Nav.Github_token_form _
+      | Nav.Code_finder_form
+      | Nav.Code_search_form ->
           let status_rows =
             if modal.submitting || Option.is_some modal.error then 1 else 0
           in
+          let extra_rows =
+            match classify_inline_form modal with
+            | Form_standard Nav.Code_finder_form ->
+                Int.max 0 (Int.min 7 (inner.h - status_rows - 4))
+            | Form_standard Nav.Connector_form | Form_fusion_launch ->
+                if inner.h - status_rows >= 6 then 1 else 0
+            | Form_board_goal_proposal
+            | Form_goal_confirmation_proof
+            | Form_memory_act
+            | Form_wiki_edit
+            | Form_runtime_assign
+            | Form_setup_account_key
+            | Form_setup_login_start
+            | Form_standard
+                ( Nav.Btw_query
+                | Nav.Gate_reject _
+                | Nav.Verification_reject _
+                | Nav.Harness_overrule _
+                | Nav.Task_cancel _
+                | Nav.Schedule_form
+                | Nav.Repo_add_form
+                | Nav.Board_new_post
+                | Nav.Board_comment _
+                | Nav.Github_token_form _
+                | Nav.Code_search_form ) ->
+                0
+          in
           let form_r =
             Rect.make ~x:inner.x ~y:inner.y ~w:inner.w
-              ~h:(Int.max 0 (inner.h - status_rows))
+              ~h:(Int.max 0 (inner.h - status_rows - extra_rows))
           in
           let form_st = form_of_inline_modal modal in
           ignore
             (Form.draw grid ~rect:form_r ~theme ~lang ~pad_x
                ~show_row_badges:false form_st);
+          if extra_rows > 0 then begin
+            let ey = Rect.bottom form_r in
+            let er =
+              Rect.make ~x:padded.x ~y:ey ~w:padded.w ~h:extra_rows
+            in
+            let whisper_st = Typography.whisper ~bg theme in
+            match classify_inline_form modal with
+            | Form_standard Nav.Code_finder_form ->
+                let q = Model.modal_field_value ~key:"query" modal in
+                let matches = Update_nav.code_fuzzy_matches ~query:q model in
+                if matches = [] then
+                  ignore
+                    (Cell_grid.put_text ~clip:er grid ~x:er.x ~y:er.y
+                       ~style:whisper_st
+                       (Grapheme.truncate_to_width ~max_width:er.w
+                          (Say.resolve lang
+                             (Say.make ~ko:"일치하는 파일 없음 (직접 경로 입력 후 Enter)"
+                                ~en:"No matching files (type path + Enter)"))))
+                else
+                  List.iteri
+                    (fun idx path ->
+                      if idx < extra_rows then
+                        let st = if idx = 0 then acc_st else Typography.primary ~bg theme in
+                        let prefix = if idx = 0 then "▸ " else "  " in
+                        ignore
+                          (Cell_grid.put_text ~clip:er grid ~x:er.x
+                             ~y:(er.y + idx) ~style:st
+                             (Grapheme.truncate_to_width ~max_width:er.w
+                                (prefix ^ path))))
+                    matches
+            | Form_standard Nav.Connector_form ->
+                let cid = Model.modal_field_value ~key:"connector" modal in
+                let names =
+                  Runtime_store.connector_channel_names ~connector_id:cid
+                    model.runtime
+                in
+                let hint =
+                  if names = [] then
+                    Say.resolve lang
+                      (Say.make ~ko:"[←→] 커넥터/채널 순환"
+                         ~en:"[←→] Cycle connector/channel")
+                  else
+                    let sample =
+                      names
+                      |> List.filteri (fun i _ -> i < 4)
+                      |> List.map (fun (m : Wire_runtime.connector_name_mapping) ->
+                             Printf.sprintf "%s(%s)" m.name m.id)
+                      |> String.concat ", "
+                    in
+                    "[←→] Channels: " ^ sample
+                in
+                ignore
+                  (Cell_grid.put_text ~clip:er grid ~x:er.x ~y:er.y
+                     ~style:whisper_st
+                     (Grapheme.truncate_to_width ~max_width:er.w hint))
+            | Form_fusion_launch ->
+                let hint =
+                  if model.runtime.fusion_config_auth_denied then
+                    Say.resolve lang
+                      (Say.make ~ko:"프리셋 목록은 CanAdmin 권한 필요 (직접 입력 가능)"
+                         ~en:"Presets require CanAdmin (manual preset entry supported)")
+                  else
+                    match Observed.to_option model.runtime.fusion_config with
+                    | Some cfg when cfg.presets <> [] ->
+                        let names =
+                          cfg.presets
+                          |> List.map (fun (p : Wire_runtime.fusion_preset_option) ->
+                                 p.name)
+                          |> String.concat ", "
+                        in
+                        "[←→] Presets: " ^ names
+                    | Some _ | None -> "[←→] Presets (loading...)"
+                in
+                ignore
+                  (Cell_grid.put_text ~clip:er grid ~x:er.x ~y:er.y
+                     ~style:whisper_st
+                     (Grapheme.truncate_to_width ~max_width:er.w hint))
+            | Form_board_goal_proposal
+            | Form_goal_confirmation_proof
+            | Form_memory_act
+            | Form_wiki_edit
+            | Form_runtime_assign
+            | Form_setup_account_key
+            | Form_setup_login_start
+            | Form_standard
+                ( Nav.Btw_query
+                | Nav.Gate_reject _
+                | Nav.Verification_reject _
+                | Nav.Harness_overrule _
+                | Nav.Task_cancel _
+                | Nav.Schedule_form
+                | Nav.Repo_add_form
+                | Nav.Board_new_post
+                | Nav.Board_comment _
+                | Nav.Github_token_form _
+                | Nav.Code_search_form ) ->
+                ()
+          end;
           if status_rows = 1 then begin
             let sy = Rect.bottom inner - 1 in
             let sr = Rect.make ~x:padded.x ~y:sy ~w:padded.w ~h:1 in

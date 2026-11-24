@@ -957,3 +957,559 @@ let decode_system_log_frame json =
   let* reset = required_bool_field json "reset" in
   let* entries = decode_system_log_snapshot json in
   Ok { reset; entries }
+
+(* --- Wave 3: Activity Backfill, Runtime Trace, Workspace Code Browser & Git --- *)
+
+let activity_events_path ?(limit = 200) ?(after_seq = 0) () =
+  Printf.sprintf "/api/v1/activity/events?limit=%d&after_seq=%d" (max 1 limit)
+    (max 0 after_seq)
+
+let keeper_runtime_trace_path ~keeper ?(limit = 50) () =
+  Printf.sprintf "/api/v1/keepers/%s/runtime-trace?limit=%d"
+    (percent_encode keeper) (max 1 limit)
+
+type workspace_scope =
+  | Ws_project
+  | Ws_repo of string
+  | Ws_keeper of string
+
+let equal_workspace_scope a b =
+  match a, b with
+  | Ws_project, Ws_project -> true
+  | Ws_repo x, Ws_repo y | Ws_keeper x, Ws_keeper y -> String.equal x y
+  | Ws_project, (Ws_repo _ | Ws_keeper _)
+  | Ws_repo _, (Ws_project | Ws_keeper _)
+  | Ws_keeper _, (Ws_project | Ws_repo _) ->
+      false
+
+let workspace_scope_label = function
+  | Ws_project -> "project"
+  | Ws_repo r -> "repo:" ^ r
+  | Ws_keeper k -> "keeper:" ^ k
+
+let scope_query_params = function
+  | Ws_project -> []
+  | Ws_repo id -> [ "repo_id=" ^ percent_encode id ]
+  | Ws_keeper k -> [ "keeper=" ^ percent_encode k ]
+
+let with_query base params =
+  match params with
+  | [] -> base
+  | ps -> base ^ "?" ^ String.concat "&" ps
+
+let workspace_children_path ~scope ~path ?(limit = 200) () =
+  let params =
+    scope_query_params scope
+    @ [ "path=" ^ percent_encode path; Printf.sprintf "limit=%d" (max 1 limit) ]
+  in
+  with_query "/api/v1/workspace/children" params
+
+let normalized_workspace_path path =
+  let p = Option.value ~default:"" path in
+  if String.equal (String.trim p) "." then "" else p
+
+let workspace_files_path ~scope ?path () =
+  let params =
+    scope_query_params scope
+    @ [ "path=" ^ percent_encode (normalized_workspace_path path) ]
+  in
+  with_query "/api/v1/workspace/files" params
+
+let workspace_search_path ~scope ?path ~query ?(ignore_case = true) () =
+  let params =
+    scope_query_params scope
+    @ [
+        "path=" ^ percent_encode (normalized_workspace_path path);
+        "q=" ^ percent_encode query;
+        "ignore_case=" ^ if ignore_case then "1" else "0";
+      ]
+  in
+  with_query "/api/v1/workspace/search" params
+
+let workspace_file_path ~scope ~path () =
+  with_query "/api/v1/workspace/file"
+    (scope_query_params scope @ [ "path=" ^ percent_encode path ])
+
+let git_branches_path ~scope ?path () =
+  let params =
+    scope_query_params scope
+    @ [ "path=" ^ percent_encode (normalized_workspace_path path) ]
+  in
+  with_query "/api/v1/git/branches" params
+
+let git_worktrees_path ~scope ?path () =
+  let params =
+    scope_query_params scope
+    @ [ "path=" ^ percent_encode (normalized_workspace_path path) ]
+  in
+  with_query "/api/v1/git/worktrees" params
+
+let git_status_path ~scope () =
+  with_query "/api/v1/git/status" (scope_query_params scope)
+
+let git_blame_path ~scope ~path () =
+  with_query "/api/v1/git/blame"
+    (scope_query_params scope @ [ "path=" ^ percent_encode path ])
+
+let git_log_path ~scope ~path ?(limit = 50) () =
+  with_query "/api/v1/git/log"
+    (scope_query_params scope
+    @ [ "path=" ^ percent_encode path; Printf.sprintf "limit=%d" (max 1 limit) ])
+
+let git_diff_path ~scope ~path () =
+  with_query "/api/v1/git/diff"
+    (scope_query_params scope @ [ "path=" ^ percent_encode path ])
+
+type activity_event_item = {
+  seq : int;
+  ts_ms : int;
+  ts_iso : string;
+  kind : string;
+  actor_id : string option;
+  actor_kind : string option;
+  subject_id : string option;
+  tags : string list;
+  payload : Yojson.Safe.t;
+}
+
+let decode_activity_event_item json =
+  let* seq = required_int_field json "seq" in
+  let* ts_ms = required_int_field json "ts_ms" in
+  let* ts_iso = required_nonblank_string json "ts_iso" in
+  let* kind = required_nonblank_string json "kind" in
+  let actor_id, actor_kind =
+    match optional_object_field json "actor" with
+    | Ok (Some a) ->
+        let id =
+          match optional_nonblank_string a "id" with Ok v -> v | Error _ -> None
+        in
+        let k =
+          match optional_nonblank_string a "kind" with Ok v -> v | Error _ -> None
+        in
+        (id, k)
+    | Ok None | Error _ -> (None, None)
+  in
+  let subject_id =
+    match optional_object_field json "subject" with
+    | Ok (Some s) -> (
+        match optional_nonblank_string s "id" with Ok v -> v | Error _ -> None)
+    | Ok None | Error _ -> None
+  in
+  let* tags = optional_string_list json "tags" in
+  let payload = member "payload" json in
+  Ok { seq; ts_ms; ts_iso; kind; actor_id; actor_kind; subject_id; tags; payload }
+
+let decode_activity_events_page json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* items = required_list_field body "events" in
+  let* events = decode_list "events" decode_activity_event_item items in
+  let next_seq =
+    match optional_int_field body "next_after_seq" with
+    | Ok (Some n) -> n
+    | Ok None | Error _ -> (
+        match optional_int_field body "latest_seq" with
+        | Ok (Some n) -> n
+        | Ok None | Error _ -> 0)
+  in
+  Ok (events, next_seq)
+
+type runtime_trace_snapshot = {
+  keeper : string;
+  trace_id : string;
+  turn_id : int option;
+  health : string;
+  stale_reason : string option;
+  manifest_total_rows : int;
+  manifest_returned_rows : int;
+  receipt_returned_rows : int;
+  raw : Yojson.Safe.t;
+}
+
+let int_or_zero_infra json key =
+  match optional_int_field json key with Ok (Some n) -> n | Ok None | Error _ -> 0
+
+let decode_runtime_trace json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* keeper = required_nonblank_string body "keeper" in
+  let trace_id =
+    match optional_string_field body "trace_id" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let* turn_id = optional_int_field body "turn_id" in
+  let health =
+    match optional_nonblank_string body "health" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> "empty"
+  in
+  let* stale_reason = optional_nonblank_string body "stale_reason" in
+  Ok
+    {
+      keeper;
+      trace_id;
+      turn_id;
+      health;
+      stale_reason;
+      manifest_total_rows = int_or_zero_infra body "manifest_total_rows";
+      manifest_returned_rows = int_or_zero_infra body "manifest_returned_rows";
+      receipt_returned_rows = int_or_zero_infra body "receipt_returned_rows";
+      raw = body;
+    }
+
+type workspace_tree_node = {
+  path : string;
+  label : string;
+  depth : int;
+  parent : string;
+  has_children : bool;
+  diff : string option;
+  keeper_id : string option;
+}
+
+type workspace_files_catalog = {
+  root : string;
+  files : string list;
+}
+
+type workspace_search_match = {
+  path : string;
+  line : int;
+  text : string;
+}
+
+type workspace_search_result = {
+  root : string;
+  query : string;
+  matches : workspace_search_match list;
+  truncated : bool;
+}
+
+type workspace_file_content = {
+  path : string;
+  content : string;
+  revision : string;
+}
+
+type git_branch_entry = {
+  name : string;
+  current : bool;
+  upstream_name : string option;
+  ahead : int option;
+  behind : int option;
+  commit_epoch : int;
+  subject : string;
+}
+
+type git_worktree_entry = {
+  name : string;
+  main : bool;
+  head : string option;
+  state : string;
+  branch : string option;
+  locked : bool;
+  prunable : bool;
+}
+
+type git_status_change = {
+  path : string;
+  staged : bool;
+  unstaged : bool;
+  untracked : bool;
+  conflicted : bool;
+}
+
+type git_status_snapshot = {
+  head : string option;
+  upstream : string option;
+  total : int;
+  changes : git_status_change list;
+}
+
+type git_blame_entry = {
+  file_path : string;
+  line_start : int;
+  line_end : int;
+  keeper_id : string;
+  timestamp_ms : int;
+  kind : string;
+}
+
+type git_log_commit = {
+  hash : string;
+  timestamp_ms : int;
+  author : string;
+  subject : string;
+}
+
+type git_diff_line = {
+  kind : [ `Add | `Delete | `Context ];
+  old_line : int option;
+  new_line : int option;
+  text : string;
+}
+
+type git_diff_snapshot = {
+  has_changes : bool;
+  lines : git_diff_line list;
+}
+
+let decode_workspace_tree_node json =
+  let* path = required_nonblank_string json "path" in
+  let label =
+    match optional_nonblank_string json "label" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> Filename.basename path
+  in
+  let depth = int_or_zero_infra json "depth" in
+  let parent =
+    match optional_string_field json "parent" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let has_children =
+    match optional_bool_field json "hasChildren" with
+    | Ok (Some b) -> b
+    | Ok None | Error _ -> false
+  in
+  let* diff = optional_nonblank_string json "diff" in
+  let* keeper_id = optional_nonblank_string json "keeperId" in
+  Ok { path; label; depth; parent; has_children; diff; keeper_id }
+
+let decode_workspace_children json =
+  match json with
+  | `List items -> decode_list "children" decode_workspace_tree_node items
+  | `Assoc _ -> (
+      let* _, body = unwrap_v2_or_raw json in
+      match optional_list_field body "children" with
+      | Ok (_ :: _ as items) -> decode_list "children" decode_workspace_tree_node items
+      | Ok [] -> (
+          match optional_list_field body "entries" with
+          | Ok items -> decode_list "entries" decode_workspace_tree_node items
+          | Error _ as err -> err)
+      | Error _ as err -> err)
+  | _ -> Error "workspace/children expected JSON array or object"
+
+let decode_workspace_files json =
+  let* _, body = unwrap_v2_or_raw json in
+  let root =
+    match optional_string_field body "root" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> "."
+  in
+  let* files = required_string_list body "files" in
+  Ok { root; files }
+
+let decode_workspace_search_match json =
+  let* path = required_nonblank_string json "path" in
+  let* line = required_int_field json "line" in
+  let* text = required_string_field json "text" in
+  Ok { path; line; text }
+
+let decode_workspace_search json =
+  let* _, body = unwrap_v2_or_raw json in
+  let root =
+    match optional_string_field body "root" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> "."
+  in
+  let query =
+    match optional_string_field body "query" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let* items = required_list_field body "matches" in
+  let* matches = decode_list "matches" decode_workspace_search_match items in
+  let truncated =
+    match optional_bool_field body "truncated" with
+    | Ok (Some b) -> b
+    | Ok None | Error _ -> false
+  in
+  Ok { root; query; matches; truncated }
+
+let decode_workspace_file ~path json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* content = required_string_field body "content" in
+  let revision =
+    match optional_string_field body "revision" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  Ok { path; content; revision }
+
+let decode_git_branch_entry json =
+  let* name = required_nonblank_string json "name" in
+  let current =
+    match optional_bool_field json "current" with
+    | Ok (Some b) -> b
+    | Ok None | Error _ -> false
+  in
+  let upstream_name, ahead, behind =
+    match optional_object_field json "upstream" with
+    | Ok (Some u) ->
+        let uname =
+          match optional_nonblank_string u "name" with Ok v -> v | Error _ -> None
+        in
+        let ah =
+          match optional_int_field u "ahead" with Ok v -> v | Error _ -> None
+        in
+        let bh =
+          match optional_int_field u "behind" with Ok v -> v | Error _ -> None
+        in
+        (uname, ah, bh)
+    | Ok None | Error _ -> (None, None, None)
+  in
+  let commit_epoch = int_or_zero_infra json "commit_epoch" in
+  let subject =
+    match optional_string_field json "subject" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  Ok { name; current; upstream_name; ahead; behind; commit_epoch; subject }
+
+let decode_git_branches json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* items = required_list_field body "branches" in
+  decode_list "branches" decode_git_branch_entry items
+
+let decode_git_worktree_entry json =
+  let* name = required_nonblank_string json "name" in
+  let main =
+    match optional_bool_field json "main" with
+    | Ok (Some b) -> b
+    | Ok None | Error _ -> false
+  in
+  let* head = optional_nonblank_string json "head" in
+  let state =
+    match optional_nonblank_string json "state" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> "branch"
+  in
+  let* branch = optional_nonblank_string json "branch" in
+  let locked =
+    match optional_bool_field json "locked" with
+    | Ok (Some b) -> b
+    | Ok None | Error _ -> false
+  in
+  let prunable =
+    match optional_bool_field json "prunable" with
+    | Ok (Some b) -> b
+    | Ok None | Error _ -> false
+  in
+  Ok { name; main; head; state; branch; locked; prunable }
+
+let decode_git_worktrees json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* items = required_list_field body "worktrees" in
+  decode_list "worktrees" decode_git_worktree_entry items
+
+let decode_git_status_change json =
+  let* path = required_nonblank_string json "path" in
+  let bool_or_f k =
+    match optional_bool_field json k with Ok (Some b) -> b | Ok None | Error _ -> false
+  in
+  Ok
+    {
+      path;
+      staged = bool_or_f "staged";
+      unstaged = bool_or_f "unstaged";
+      untracked = bool_or_f "untracked";
+      conflicted = bool_or_f "conflicted";
+    }
+
+let decode_git_status json =
+  let* _, body = unwrap_v2_or_raw json in
+  let head, upstream =
+    match optional_object_field body "branch" with
+    | Ok (Some b) ->
+        let h =
+          match optional_nonblank_string b "head" with Ok v -> v | Error _ -> None
+        in
+        let u =
+          match optional_nonblank_string b "upstream" with
+          | Ok (Some s) -> Some s
+          | Ok None | Error _ -> (
+              match optional_object_field b "upstream" with
+              | Ok (Some uo) -> (
+                  match optional_nonblank_string uo "name" with
+                  | Ok v -> v
+                  | Error _ -> None)
+              | Ok None | Error _ -> None)
+        in
+        (h, u)
+    | Ok None | Error _ -> (None, None)
+  in
+  let* items = optional_list_field body "changes" in
+  let* changes = decode_list "changes" decode_git_status_change items in
+  let total =
+    match optional_int_field body "total" with
+    | Ok (Some n) -> n
+    | Ok None | Error _ -> List.length changes
+  in
+  Ok { head; upstream; total; changes }
+
+let decode_git_blame_entry json =
+  let* file_path = required_nonblank_string json "file_path" in
+  let line_start = int_or_zero_infra json "line_start" in
+  let line_end = int_or_zero_infra json "line_end" in
+  let* keeper_id = required_nonblank_string json "keeper_id" in
+  let timestamp_ms = int_or_zero_infra json "timestamp_ms" in
+  let kind =
+    match optional_nonblank_string json "kind" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> "edit"
+  in
+  Ok { file_path; line_start; line_end; keeper_id; timestamp_ms; kind }
+
+let decode_git_blame json =
+  match json with
+  | `List items -> decode_list "blame" decode_git_blame_entry items
+  | `Assoc _ ->
+      let* _, body = unwrap_v2_or_raw json in
+      let* items = optional_list_field body "entries" in
+      decode_list "entries" decode_git_blame_entry items
+  | _ -> Error "git/blame expected JSON array or object"
+
+let decode_git_log_commit json =
+  let* hash = required_nonblank_string json "hash" in
+  let timestamp_ms = int_or_zero_infra json "timestamp_ms" in
+  let author =
+    match optional_string_field json "author" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let subject =
+    match optional_string_field json "subject" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  Ok { hash; timestamp_ms; author; subject }
+
+let decode_git_log json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* items = required_list_field body "commits" in
+  decode_list "commits" decode_git_log_commit items
+
+let decode_git_diff_line json =
+  let* kind_str = required_nonblank_string json "kind" in
+  let* kind =
+    match kind_str with
+    | "add" -> Ok `Add
+    | "delete" -> Ok `Delete
+    | "context" -> Ok `Context
+    | other -> Error (Printf.sprintf "unknown git diff line kind %S" other)
+  in
+  let* old_line = optional_int_field json "oldLine" in
+  let* new_line = optional_int_field json "newLine" in
+  let* text = required_string_field json "text" in
+  Ok { kind; old_line; new_line; text }
+
+let decode_git_diff json =
+  let* _, body = unwrap_v2_or_raw json in
+  let has_changes =
+    match optional_bool_field body "has_changes" with
+    | Ok (Some b) -> b
+    | Ok None | Error _ -> false
+  in
+  let* items = optional_list_field body "unified" in
+  let* lines = decode_list "unified" decode_git_diff_line items in
+  Ok { has_changes; lines }

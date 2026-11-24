@@ -711,7 +711,7 @@ let bindings : binding list =
         ~footer_priority:0 (mk_chord Input.Home);
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
         ~action:(Move Home) ~key_display:"g" ~hint_label:(Say.make ~ko:"처음" ~en:"Top")
-        ~help_desc:(Say.make ~ko:"맨 위로 이동 (기억 탭: 그래프 모드 전환)" ~en:"Jump to top (Memory: toggle flow chart mode)")
+        ~help_desc:(Say.make ~ko:"맨 위로 이동 (기억: 그래프 / 코드: Git 보기 전환)" ~en:"Jump to top (Memory: flow chart / Code: toggle Git view)")
         ~footer_priority:0 (bare_char 'g');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
         ~action:(Move End) ~key_display:"End" ~hint_label:(Say.make ~ko:"끝" ~en:"End")
@@ -742,17 +742,17 @@ let bindings : binding list =
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Create_new ~key_display:"n"
         ~hint_label:(Say.make ~ko:"새로 만들기" ~en:"New")
-        ~help_desc:(Say.make ~ko:"현재 워크스페이스 새 항목 생성 (검색 중 다음 일치)" ~en:"Create new item (next match in artifact search)")
+        ~help_desc:(Say.make ~ko:"새 항목 생성 / 하네스 거절 재정의 / 검색 다음 일치" ~en:"Create new item / Harness reject overrule / Next match")
         ~footer_priority:0 (bare_char 'n');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Refresh ~key_display:"r"
         ~hint_label:(Say.make ~ko:"새로고침" ~en:"Refresh")
-        ~help_desc:(Say.make ~ko:"서버 SSOT 스냅샷 즉시 새로고침" ~en:"Force refresh live SSOT snapshot")
+        ~help_desc:(Say.make ~ko:"서버 SSOT 스냅샷 즉시 새로고침 / OAuth 새로고침" ~en:"Force refresh live SSOT snapshot / OAuth identity refresh")
         ~footer_priority:0 (bare_char 'r');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Copy_selected ~key_display:"y"
         ~hint_label:(Say.make ~ko:"복사" ~en:"Copy")
-        ~help_desc:(Say.make ~ko:"선택 항목을 클립보드(OSC 52)로 복사" ~en:"Copy selection via OSC 52")
+        ~help_desc:(Say.make ~ko:"클립보드 복사(OSC 52) / 하네스 승인 재정의 / 코드·디바이스 코드 복사" ~en:"Copy via OSC 52 / Harness approve overrule / Copy path, code or device code")
         ~footer_priority:0 (bare_char 'y');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Open_external ~key_display:"o"
@@ -793,7 +793,7 @@ let bindings : binding list =
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Cycle_view_mode ~key_display:"v"
         ~hint_label:(Say.make ~ko:"보기 전환" ~en:"View")
-        ~help_desc:(Say.make ~ko:"산출물 문서/원본 · 도구 하위뷰 · 컨텍스트 탭 · 파이프라인 검증 · 기억 다이어그램 모드 전환" ~en:"Switch Artifact Doc/Raw, Tools sub-view, Context tab, Pipeline verify view, or Memory diagram mode")
+        ~help_desc:(Say.make ~ko:"산출물·도구·컨텍스트·검증증거·기억·키퍼로그 하위뷰 / 기억 다이어그램 모드 전환" ~en:"Cycle sub-view (Artifacts/Tools/Context/Verification/Memory/Keeper Logs) or Memory diagram mode")
         ~footer_priority:0 (bare_char 'v');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Context_primary_action ~key_display:"c"
@@ -827,8 +827,8 @@ let bindings : binding list =
         ~footer_priority:0 (bare_char '>');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Launch_fusion ~key_display:"f"
-        ~hint_label:(Say.make ~ko:"퓨전/기억사실" ~en:"Fusion/Facts")
-        ~help_desc:(Say.make ~ko:"Runtime 퓨전 패널 실행 모달 열기 / 기억 전체 사실 보기" ~en:"Open Runtime Fusion launch modal / Memory Explorer Facts view")
+        ~hint_label:(Say.make ~ko:"퓨전/검색/사실" ~en:"Fusion/Find/Facts")
+        ~help_desc:(Say.make ~ko:"Runtime 퓨전 실행 모달 / 코드 ripgrep 검색 / 기억 전체 사실 보기" ~en:"Open Runtime Fusion launch modal / Code ripgrep search / Memory Explorer Facts view")
         ~footer_priority:0 (bare_char 'f');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Toggle_unreported ~key_display:"u"
@@ -838,12 +838,12 @@ let bindings : binding list =
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Unbind_connector ~key_display:"U"
         ~hint_label:(Say.make ~ko:"연결 해제" ~en:"Unbind")
-        ~help_desc:(Say.make ~ko:"선택 커넥터 채널 바인딩 해제" ~en:"Unbind selected connector channel")
+        ~help_desc:(Say.make ~ko:"커넥터 채널 바인딩 해제 / OAuth 공급자 연결 해제" ~en:"Unbind selected connector channel / Disconnect OAuth provider")
         ~footer_priority:0 (bare_char 'U');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Entity_approve_or_assign ~key_display:"a"
-        ~hint_label:(Say.make ~ko:"승인/배정" ~en:"Approve/Assign")
-        ~help_desc:(Say.make ~ko:"목표·검증 승인 / 런타임 배정 / 사서 라이터 재개" ~en:"Approve goal/verification, assign runtime, or resume librarian writer")
+        ~hint_label:(Say.make ~ko:"승인/배정/액팅" ~en:"Approve/Acting")
+        ~help_desc:(Say.make ~ko:"목표·검증 승인 / 런타임 배정 / 활동 로그 Acting 레일 토글" ~en:"Approve goal/verification, assign runtime, or toggle Acting rail")
         ~footer_priority:0 (bare_char 'a');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Entity_reject_or_cancel ~key_display:"x"
@@ -852,23 +852,23 @@ let bindings : binding list =
         ~footer_priority:0 (bare_char 'x');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Edit_or_export ~key_display:"e"
-        ~hint_label:(Say.make ~ko:"편집/내보내기" ~en:"Edit/Export")
-        ~help_desc:(Say.make ~ko:"위키 편집 / 산출물 파일 내보내기 / 키퍼 설정 편집 / 기억 변천 보기" ~en:"Edit wiki, export artifact file, edit keeper config, or Memory Evolution view")
+        ~hint_label:(Say.make ~ko:"편집/증거" ~en:"Edit/Evidence")
+        ~help_desc:(Say.make ~ko:"위키 편집 / 산출물 내보내기 / 퓨전 보드 증거 열기 / 키퍼 설정 편집 / 기억 변천 보기" ~en:"Edit wiki, export artifact, open Fusion board evidence, edit keeper config, or Memory Evolution view")
         ~footer_priority:0 (bare_char 'e');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Configure_provider_key ~key_display:"K"
-        ~hint_label:(Say.make ~ko:"API 키" ~en:"API Key")
-        ~help_desc:(Say.make ~ko:"프로바이더 API 키 설정 모달 열기" ~en:"Configure provider API key")
+        ~hint_label:(Say.make ~ko:"API/PAT 키" ~en:"API/PAT Key")
+        ~help_desc:(Say.make ~ko:"프로바이더 API 키 / 키퍼 GitHub PAT 설정(마스킹)" ~en:"Configure provider API key / Keeper masked GitHub PAT")
         ~footer_priority:0 (bare_char 'K');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Account_login ~key_display:"l"
         ~hint_label:(Say.make ~ko:"로그인" ~en:"Login")
-        ~help_desc:(Say.make ~ko:"프로바이더 계정 로그인 시작" ~en:"Start provider account login")
+        ~help_desc:(Say.make ~ko:"프로바이더 계정 / 키퍼 OAuth·GitHub 디바이스 로그인 시작" ~en:"Start provider, OAuth, or GitHub device login")
         ~footer_priority:0 (bare_char 'l');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Poll_account_login ~key_display:"L"
         ~hint_label:(Say.make ~ko:"로그인 확인" ~en:"Poll Login")
-        ~help_desc:(Say.make ~ko:"진행 중인 계정 로그인 영수증 조회" ~en:"Poll in-flight account login receipt")
+        ~help_desc:(Say.make ~ko:"진행 중인 계정 / OAuth 로그인 상태 조회" ~en:"Poll in-flight account or OAuth login attempt status")
         ~footer_priority:0 (bare_char 'L');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Copy_hash ~key_display:"H"
@@ -908,8 +908,8 @@ let bindings : binding list =
         ~footer_priority:0 (bare_char 'Y');
       bind ~scope:Screen_context ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Probe_sandbox ~key_display:"p"
-        ~hint_label:(Say.make ~ko:"프로브" ~en:"Probe")
-        ~help_desc:(Say.make ~ko:"[샌드박스] 샌드박스 상태 프로브 실행" ~en:"[Sandboxes] Probe sandbox health")
+        ~hint_label:(Say.make ~ko:"프로브/파일/카탈로그" ~en:"Probe/Find/Pkg")
+        ~help_desc:(Say.make ~ko:"[샌드박스] 상태 프로브 / [코드] 퍼지 파일 찾기 / [애드온] 패키지 카탈로그" ~en:"[Sandboxes] Probe health / [Code] Fuzzy file finder / [Addons] Package catalog")
         ~footer_priority:0 (bare_char 'p');
       bind ~scope:Screen_context ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Refresh_browser_tabs ~key_display:"t"

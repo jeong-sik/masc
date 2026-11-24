@@ -1429,3 +1429,496 @@ let decode_candle_ledger json =
       balances;
       recent_events;
     }
+
+(* --- Wave 3: Harness Health & Verification Evidence / Summary / Specs / TLC --- *)
+
+let harness_health_path = "/api/v1/dashboard/harness-health"
+
+let verification_evidence_path ~task_id ~verification_id =
+  Printf.sprintf "/api/v1/verification/evidence?task_id=%s&verification_id=%s"
+    (percent_encode task_id) (percent_encode verification_id)
+
+let verification_summary_path = "/api/v1/verification/summary"
+let verification_specs_path = "/api/v1/verification/specs"
+let verification_tlc_results_path = "/api/v1/verification/tlc-results"
+
+type harness_verdict_row = {
+  timestamp : float;
+  task_id : string;
+  task_title : string;
+  agent_name : string;
+  gate : string;
+  verdict : string;
+  evaluator_runtime : string;
+  fallback_reason : string option;
+  notes_hash : string;
+}
+
+type harness_calibration = {
+  total_verdicts : int;
+  approve_count : int;
+  reject_count : int;
+  labeled_count : int;
+  false_positive_count : int;
+  false_negative_count : int;
+  agreement_rate : float;
+  fallback_count : int;
+  distinct_runtime_count : int;
+  verdicts_with_generator_runtime : int;
+  distinct_runtime_rate : float option;
+  recent_fallback_reasons : string list;
+  unreadable_record_count : int;
+}
+
+type harness_health = {
+  generated_at : float;
+  scope_note : string;
+  evaluator_status : string;
+  fallback_ratio : float;
+  last_signal_at : float option;
+  calibration : harness_calibration;
+  recent_verdicts : harness_verdict_row list;
+  unreadable_verdicts_count : int;
+}
+
+let is_valid_notes_hash s =
+  let len = String.length s in
+  if len <> 64 then false
+  else
+    let rec loop i =
+      if i = 64 then true
+      else
+        let c = s.[i] in
+        if (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') then loop (i + 1)
+        else false
+    in
+    loop 0
+
+let int_or_0 json key =
+  match optional_int_field json key with Ok (Some n) -> n | Ok None | Error _ -> 0
+
+let float_or_0 json key =
+  match optional_finite_float json key with
+  | Ok (Some f) -> f
+  | Ok None | Error _ -> 0.0
+
+let decode_harness_verdict_row json =
+  let timestamp = float_or_0 json "timestamp" in
+  let* task_id = required_nonblank_string json "task_id" in
+  let task_title =
+    match optional_string_field json "task_title" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> task_id
+  in
+  let agent_name =
+    match optional_string_field json "agent_name" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let gate =
+    match optional_string_field json "gate" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let* verdict = required_nonblank_string json "verdict" in
+  let evaluator_runtime =
+    match optional_string_field json "evaluator_runtime" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let* fallback_reason = optional_nonblank_string json "fallback_reason" in
+  let notes_hash =
+    match optional_string_field json "notes_hash" with
+    | Ok (Some s) -> String.trim s
+    | Ok None | Error _ -> ""
+  in
+  Ok
+    {
+      timestamp;
+      task_id;
+      task_title;
+      agent_name;
+      gate;
+      verdict;
+      evaluator_runtime;
+      fallback_reason;
+      notes_hash;
+    }
+
+let decode_harness_health json =
+  let* _, body = unwrap_v2_or_raw json in
+  let generated_at = float_or_0 body "generated_at" in
+  let scope_note =
+    match optional_string_field body "scope_note" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let* overview = required_object_field body "overview" in
+  let* evaluator_status = required_nonblank_string overview "evaluator_status" in
+  let fallback_ratio = float_or_0 overview "fallback_ratio" in
+  let* last_signal_at = optional_finite_float overview "last_signal_at" in
+  let* cal = required_object_field body "calibration" in
+  let* distinct_runtime_rate =
+    optional_finite_float cal "distinct_runtime_rate"
+  in
+  let* recent_fallback_reasons =
+    optional_string_list cal "recent_fallback_reasons"
+  in
+  let calibration =
+    {
+      total_verdicts = int_or_0 cal "total_verdicts";
+      approve_count = int_or_0 cal "approve_count";
+      reject_count = int_or_0 cal "reject_count";
+      labeled_count = int_or_0 cal "labeled_count";
+      false_positive_count = int_or_0 cal "false_positive_count";
+      false_negative_count = int_or_0 cal "false_negative_count";
+      agreement_rate = float_or_0 cal "agreement_rate";
+      fallback_count = int_or_0 cal "fallback_count";
+      distinct_runtime_count = int_or_0 cal "distinct_runtime_count";
+      verdicts_with_generator_runtime =
+        int_or_0 cal "verdicts_with_generator_runtime";
+      distinct_runtime_rate;
+      recent_fallback_reasons;
+      unreadable_record_count = int_or_0 cal "unreadable_record_count";
+    }
+  in
+  let* verdict_items = optional_list_field body "recent_verdicts" in
+  let* recent_verdicts =
+    decode_list "recent_verdicts" decode_harness_verdict_row verdict_items
+  in
+  let unreadable_verdicts_count =
+    int_or_0 body "recent_verdicts_unreadable_count"
+  in
+  Ok
+    {
+      generated_at;
+      scope_note;
+      evaluator_status;
+      fallback_ratio;
+      last_signal_at;
+      calibration;
+      recent_verdicts;
+      unreadable_verdicts_count;
+    }
+
+type verification_evidence_item =
+  | Verif_ev_note of string
+  | Verif_ev_artifact of {
+      reference : string;
+      content : string;
+      bytes : int;
+      truncated : bool;
+    }
+  | Verif_ev_binary of {
+      reference : string;
+      bytes : int;
+      sha256 : string;
+      format : string;
+      body : string option;
+    }
+  | Verif_ev_collab of {
+      reference : string;
+      content : string;
+      sha256 : string;
+    }
+  | Verif_ev_unreadable of {
+      reference : string option;
+      code : string;
+      detail : string option;
+    }
+
+type verification_evidence_bundle = {
+  task_id : string;
+  verification_id : string;
+  producer : string option;
+  authority_kind : string;
+  authority_actor : string;
+  available : bool;
+  unavailable_reason : string option;
+  items : verification_evidence_item list;
+}
+
+type verification_summary = {
+  updated_at : string;
+  total : int;
+  pending : int option;
+  approved : int option;
+  rejected : int option;
+  raw : Yojson.Safe.t;
+}
+
+type tla_spec_entry = {
+  name : string;
+  path : string;
+  category : string;
+  has_clean_cfg : bool;
+  has_buggy_cfg : bool;
+  mtime_iso : string;
+}
+
+type verification_specs = {
+  updated_at : string;
+  specs_dir : string option;
+  entries : tla_spec_entry list;
+}
+
+type tlc_result_entry = {
+  spec_name : string;
+  cfg_name : string;
+  category : string;
+  status : string;
+  states_explored : int option;
+  distinct_states : int option;
+  diameter : int option;
+  last_run_at : string option;
+  violation : string option;
+  log_path : string option;
+}
+
+type verification_tlc_results = {
+  updated_at : string;
+  results_dir : string option;
+  entries : tlc_result_entry list;
+}
+
+let decode_verification_evidence_item json =
+  let* kind = required_nonblank_string json "kind" in
+  match kind with
+  | "note" ->
+      let* content = required_string_field json "content" in
+      Ok (Verif_ev_note content)
+  | "artifact" ->
+      let* reference = required_nonblank_string json "reference" in
+      let content =
+        match optional_string_field json "content" with
+        | Ok (Some s) -> s
+        | Ok None | Error _ -> ""
+      in
+      let bytes = int_or_0 json "bytes" in
+      let truncated =
+        match optional_bool_field json "truncated" with
+        | Ok (Some b) -> b
+        | Ok None | Error _ -> false
+      in
+      Ok (Verif_ev_artifact { reference; content; bytes; truncated })
+  | "artifact_binary" ->
+      let* reference = required_nonblank_string json "reference" in
+      let bytes = int_or_0 json "bytes" in
+      let sha256 =
+        match optional_string_field json "sha256" with
+        | Ok (Some s) -> s
+        | Ok None | Error _ -> ""
+      in
+      let format =
+        match optional_string_field json "format" with
+        | Ok (Some s) -> s
+        | Ok None | Error _ -> "unknown"
+      in
+      let* body = optional_nonblank_string json "body" in
+      Ok (Verif_ev_binary { reference; bytes; sha256; format; body })
+  | "collaboration" ->
+      let* reference = required_nonblank_string json "reference" in
+      let content =
+        match optional_string_field json "content" with
+        | Ok (Some s) -> s
+        | Ok None | Error _ -> ""
+      in
+      let sha256 =
+        match optional_string_field json "sha256" with
+        | Ok (Some s) -> s
+        | Ok None | Error _ -> ""
+      in
+      Ok (Verif_ev_collab { reference; content; sha256 })
+  | "artifact_unreadable" ->
+      let* reference = optional_nonblank_string json "reference" in
+      let code, detail =
+        match optional_object_field json "reason" with
+        | Ok (Some r) ->
+            let c =
+              match optional_nonblank_string r "code" with
+              | Ok (Some s) -> s
+              | Ok None | Error _ -> "unreadable"
+            in
+            let d =
+              match optional_nonblank_string r "detail" with
+              | Ok v -> v
+              | Error _ -> None
+            in
+            (c, d)
+        | Ok None | Error _ -> ("unreadable", None)
+      in
+      Ok (Verif_ev_unreadable { reference; code; detail })
+  | other ->
+      Error (Printf.sprintf "unknown verification evidence item kind %S" other)
+
+let decode_verification_evidence json =
+  let* _, body = unwrap_v2_or_raw json in
+  let res =
+    match optional_object_field body "result" with
+    | Ok (Some r) -> r
+    | Ok None | Error _ -> body
+  in
+  let* task_id = required_nonblank_string res "task_id" in
+  let* verification_id = required_nonblank_string res "verification_id" in
+  let* producer = optional_nonblank_string res "producer" in
+  let authority_kind =
+    match optional_string_field res "authority_kind" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let authority_actor =
+    match optional_string_field res "authority_actor" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let* ev_obj = required_object_field res "evidence" in
+  let* access = required_nonblank_string ev_obj "access" in
+  match access with
+  | "available" ->
+      let* raw_items = optional_list_field ev_obj "items" in
+      let* items =
+        decode_list "items" decode_verification_evidence_item raw_items
+      in
+      Ok
+        {
+          task_id;
+          verification_id;
+          producer;
+          authority_kind;
+          authority_actor;
+          available = true;
+          unavailable_reason = None;
+          items;
+        }
+  | "unavailable" ->
+      let* unavailable_reason = optional_nonblank_string ev_obj "reason" in
+      Ok
+        {
+          task_id;
+          verification_id;
+          producer;
+          authority_kind;
+          authority_actor;
+          available = false;
+          unavailable_reason;
+          items = [];
+        }
+  | other -> Error (Printf.sprintf "unknown verification evidence access %S" other)
+
+let decode_verification_summary json =
+  let* _, body = unwrap_v2_or_raw json in
+  let updated_at =
+    match optional_string_field body "updated_at" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let total = int_or_0 body "total" in
+  let counts_obj =
+    match optional_object_field body "counts" with
+    | Ok (Some o) -> o
+    | Ok None | Error _ -> (
+        match optional_object_field body "by_status" with
+        | Ok (Some o) -> o
+        | Ok None | Error _ -> body)
+  in
+  let opt_int obj k =
+    match optional_int_field obj k with Ok v -> v | Error _ -> None
+  in
+  let pending = opt_int counts_obj "pending" in
+  let approved =
+    match opt_int counts_obj "approved" with
+    | Some _ as v -> v
+    | None -> opt_int counts_obj "passed"
+  in
+  let rejected =
+    match opt_int counts_obj "rejected" with
+    | Some _ as v -> v
+    | None -> opt_int counts_obj "failed"
+  in
+  Ok { updated_at; total; pending; approved; rejected; raw = body }
+
+let decode_tla_spec_entry json =
+  let* name = required_nonblank_string json "name" in
+  let path =
+    match optional_string_field json "path" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> name
+  in
+  let category =
+    match optional_string_field json "category" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> "general"
+  in
+  let has_clean_cfg =
+    match optional_bool_field json "has_clean_cfg" with
+    | Ok (Some b) -> b
+    | Ok None | Error _ -> false
+  in
+  let has_buggy_cfg =
+    match optional_bool_field json "has_buggy_cfg" with
+    | Ok (Some b) -> b
+    | Ok None | Error _ -> false
+  in
+  let mtime_iso =
+    match optional_string_field json "mtime_iso" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  Ok { name; path; category; has_clean_cfg; has_buggy_cfg; mtime_iso }
+
+let decode_verification_specs json =
+  let* _, body = unwrap_v2_or_raw json in
+  let updated_at =
+    match optional_string_field body "updated_at" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let* specs_dir = optional_nonblank_string body "specs_dir" in
+  let* items = optional_list_field body "entries" in
+  let* entries = decode_list "entries" decode_tla_spec_entry items in
+  Ok { updated_at; specs_dir; entries }
+
+let decode_tlc_result_entry json =
+  let* spec_name = required_nonblank_string json "spec_name" in
+  let cfg_name =
+    match optional_string_field json "cfg_name" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let category =
+    match optional_string_field json "category" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> "general"
+  in
+  let* status = required_nonblank_string json "status" in
+  let* states_explored = optional_int_field json "states_explored" in
+  let* distinct_states = optional_int_field json "distinct_states" in
+  let* diameter = optional_int_field json "diameter" in
+  let* last_run_at = optional_nonblank_string json "last_run_at" in
+  let* violation = optional_nonblank_string json "violation" in
+  let* log_path = optional_nonblank_string json "log_path" in
+  Ok
+    {
+      spec_name;
+      cfg_name;
+      category;
+      status;
+      states_explored;
+      distinct_states;
+      diameter;
+      last_run_at;
+      violation;
+      log_path;
+    }
+
+let decode_verification_tlc_results json =
+  let* _, body = unwrap_v2_or_raw json in
+  let updated_at =
+    match optional_string_field body "updated_at" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let* results_dir = optional_nonblank_string body "results_dir" in
+  let* items = optional_list_field body "entries" in
+  let* entries = decode_list "entries" decode_tlc_result_entry items in
+  Ok { updated_at; results_dir; entries }

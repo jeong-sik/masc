@@ -57,7 +57,7 @@ type get_request =
   | Get_keeper_memory_os_internals of { keeper : string }
   | Get_keeper_memory_facts of { keeper : string }
   | Get_keeper_memory_activity of { keeper : string; limit : int }
-  | Get_keeper_memory_health
+  | Get_keeper_memory_health of { keeper : string option }
   | Get_keeper_context_turn_records of {
       keeper : string;
       limit : int option;
@@ -120,6 +120,51 @@ type get_request =
     }
   | Get_tui_preferences
   | Get_config_schema of Wire_config.config_target
+  | Get_fusion_run_detail of { run_id : string }
+  | Get_fusion_config
+  | Get_fusion_board_evidence of { post_id : string }
+  | Get_harness_health
+  | Get_verification_evidence of { task_id : string; verification_id : string }
+  | Get_verification_summary
+  | Get_verification_specs
+  | Get_verification_tlc_results
+  | Get_activity_events of { limit : int option; after_seq : int option }
+  | Get_keeper_runtime_trace of { keeper : string; limit : int option }
+  | Get_keeper_metrics of { keeper : string }
+  | Get_keeper_sandbox_logs of { keeper : string; tail : int option }
+  | Get_workspace_children of {
+      scope : Wire_infra.workspace_scope;
+      dir : string;
+    }
+  | Get_workspace_files of { scope : Wire_infra.workspace_scope }
+  | Get_workspace_search of {
+      scope : Wire_infra.workspace_scope;
+      query : string;
+    }
+  | Get_workspace_file of {
+      scope : Wire_infra.workspace_scope;
+      path : string;
+    }
+  | Get_git_branches of { scope : Wire_infra.workspace_scope }
+  | Get_git_worktrees of { scope : Wire_infra.workspace_scope }
+  | Get_git_status of { scope : Wire_infra.workspace_scope }
+  | Get_git_blame of { scope : Wire_infra.workspace_scope; path : string }
+  | Get_git_log of { scope : Wire_infra.workspace_scope; path : string }
+  | Get_git_diff of { scope : Wire_infra.workspace_scope; path : string }
+  | Get_workspace_memory_ledger
+  | Get_workspace_memory_context
+  | Get_keeper_memory_journal of { keeper : string; limit : int option }
+  | Get_oauth_providers
+  | Get_oauth_attached_tools of { keeper : string }
+  | Get_oauth_attempt_status of {
+      keeper : string;
+      provider : string;
+      attempt_id : string;
+    }
+  | Get_github_identity of { keeper : string }
+  | Get_addon_package_catalog of { directory : string option }
+  | Get_addon_package_preview of { manifest_path : string }
+  | Get_connector_names of { connector : string; scope : string }
 
 type post_request =
   | Post_ask_answer of {
@@ -239,6 +284,19 @@ type post_request =
       reason : string;
     }
   | Post_browser_tabs of { client_id : string }
+  | Post_oauth_login of { keeper : string; provider : string }
+  | Post_oauth_identity_refresh of { keeper : string; provider : string }
+  | Post_oauth_identity_switch of {
+      keeper : string;
+      provider : string;
+      enabled : bool;
+    }
+  | Post_oauth_disconnect of { keeper : string; provider : string }
+  | Post_github_token of {
+      keeper : string;
+      token : string;
+      hostname : string option;
+    }
 
 type put_request =
   | Put_wiki_page of { page : string; request : Wire_knowledge.wiki_put_request }
@@ -248,6 +306,7 @@ type stream_post_request =
       request : Wire_fleet.chat_submit_request;
       is_btw : bool;
     }
+  | Stream_github_login of { keeper : string }
 
 type voice_cmd =
   | Start_ptt of { device : string option }
@@ -362,8 +421,8 @@ let get_request_path = function
       Wire_knowledge.keeper_memory_facts_path ~keeper
   | Get_keeper_memory_activity { keeper; limit } ->
       Wire_knowledge.keeper_memory_activity_path ~keeper ~limit ()
-  | Get_keeper_memory_health ->
-      Wire_knowledge.keeper_memory_health_path ()
+  | Get_keeper_memory_health { keeper } ->
+      Wire_knowledge.keeper_memory_health_path ?keeper ()
   | Get_keeper_context_turn_records { keeper; limit; turn_ref } ->
       Wire_keeper_context.keeper_turn_records_path ~keeper ?limit ?turn_ref ()
   | Get_keeper_provider_input { keeper; turn_ref } ->
@@ -422,6 +481,54 @@ let get_request_path = function
       Wire_infra.system_logs_path ?limit ?level ()
   | Get_tui_preferences -> Wire_config.tui_preferences_path
   | Get_config_schema target -> Wire_config.config_schema_path target
+  | Get_fusion_run_detail { run_id } ->
+      Wire_runtime.fusion_run_detail_path ~run_id
+  | Get_fusion_config -> Wire_runtime.fusion_config_path
+  | Get_fusion_board_evidence { post_id } ->
+      Wire_runtime.fusion_board_post_path ~post_id
+  | Get_harness_health -> Wire_work.harness_health_path
+  | Get_verification_evidence { task_id; verification_id } ->
+      Wire_work.verification_evidence_path ~task_id ~verification_id
+  | Get_verification_summary -> Wire_work.verification_summary_path
+  | Get_verification_specs -> Wire_work.verification_specs_path
+  | Get_verification_tlc_results -> Wire_work.verification_tlc_results_path
+  | Get_activity_events { limit; after_seq } ->
+      Wire_infra.activity_events_path ?limit ?after_seq ()
+  | Get_keeper_runtime_trace { keeper; limit } ->
+      Wire_infra.keeper_runtime_trace_path ~keeper ?limit ()
+  | Get_keeper_metrics { keeper } -> Wire_keeper_context.keeper_metrics_path ~keeper
+  | Get_keeper_sandbox_logs { keeper; tail } ->
+      Wire_keeper_context.keeper_sandbox_logs_path ~keeper ?tail ()
+  | Get_workspace_children { scope; dir } ->
+      Wire_infra.workspace_children_path ~scope ~path:dir ()
+  | Get_workspace_files { scope } -> Wire_infra.workspace_files_path ~scope ()
+  | Get_workspace_search { scope; query } ->
+      Wire_infra.workspace_search_path ~scope ~query ()
+  | Get_workspace_file { scope; path } ->
+      Wire_infra.workspace_file_path ~scope ~path ()
+  | Get_git_branches { scope } -> Wire_infra.git_branches_path ~scope ()
+  | Get_git_worktrees { scope } -> Wire_infra.git_worktrees_path ~scope ()
+  | Get_git_status { scope } -> Wire_infra.git_status_path ~scope ()
+  | Get_git_blame { scope; path } -> Wire_infra.git_blame_path ~scope ~path ()
+  | Get_git_log { scope; path } -> Wire_infra.git_log_path ~scope ~path ()
+  | Get_git_diff { scope; path } -> Wire_infra.git_diff_path ~scope ~path ()
+  | Get_workspace_memory_ledger -> Wire_knowledge.workspace_memory_ledger_path
+  | Get_workspace_memory_context -> Wire_knowledge.workspace_memory_context_path
+  | Get_keeper_memory_journal { keeper; limit } ->
+      Wire_knowledge.keeper_memory_journal_path ~keeper ?limit ~activity:true ()
+  | Get_oauth_providers -> Wire_keeper_context.oauth_providers_path
+  | Get_oauth_attached_tools { keeper } ->
+      Wire_keeper_context.oauth_attached_tools_path ~keeper
+  | Get_oauth_attempt_status { keeper; provider; attempt_id } ->
+      Wire_keeper_context.oauth_attempt_status_path ~keeper ~provider ~attempt_id
+  | Get_github_identity { keeper } ->
+      Wire_keeper_context.github_identity_path ~keeper
+  | Get_addon_package_catalog { directory } ->
+      Wire_runtime.lane_addon_package_catalog_path ?directory ()
+  | Get_addon_package_preview { manifest_path } ->
+      Wire_runtime.lane_addon_package_preview_path ~manifest_path
+  | Get_connector_names { connector; scope } ->
+      Wire_runtime.connector_names_path ~connector ~scope ()
 
 let post_request_path = function
   | Post_ask_answer _ -> Wire_work.keeper_ask_answer_path
@@ -456,6 +563,14 @@ let post_request_path = function
   | Post_task_cancel _ -> "/api/v1/dashboard/tasks/cancel"
   | Post_harness_overrule _ -> "/api/v1/dashboard/harness-label"
   | Post_browser_tabs _ -> Wire_runtime.browser_lane_read_path
+  | Post_oauth_login { keeper; _ } -> Wire_keeper_context.oauth_login_path ~keeper
+  | Post_oauth_identity_refresh { keeper; _ } ->
+      Wire_keeper_context.oauth_identity_refresh_path ~keeper
+  | Post_oauth_identity_switch { keeper; _ } ->
+      Wire_keeper_context.oauth_identity_switch_path ~keeper
+  | Post_oauth_disconnect _ -> Wire_keeper_context.oauth_disconnect_path
+  | Post_github_token { keeper; _ } ->
+      Wire_keeper_context.github_token_path ~keeper
 
 let post_request_body = function
   | Post_ask_answer { keeper; ask_id; answers } ->
@@ -572,6 +687,15 @@ let post_request_body = function
         ]
   | Post_browser_tabs { client_id } ->
       Wire_runtime.encode_browser_tabs_request ~client_id
+  | Post_oauth_login { provider; _ }
+  | Post_oauth_identity_refresh { provider; _ } ->
+      Wire_keeper_context.encode_oauth_provider_body ~provider
+  | Post_oauth_identity_switch { provider; enabled; _ } ->
+      Wire_keeper_context.encode_oauth_switch_body ~provider ~enabled
+  | Post_oauth_disconnect { keeper; provider } ->
+      Wire_keeper_context.encode_oauth_disconnect_body ~keeper ~provider
+  | Post_github_token { token; hostname; _ } ->
+      Wire_keeper_context.encode_github_token_body ~token ?hostname ()
 
 let put_request_path = function
   | Put_wiki_page { page; _ } -> Wire_knowledge.wiki_page_path ~page

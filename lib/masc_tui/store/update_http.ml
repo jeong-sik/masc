@@ -53,7 +53,14 @@ let handle_workspace_mismatch ~now ~expected ~observed ~message (m : Model.t) =
         }
       in
       let next =
-        { m with epoch = next_epoch; incidents; freshness; server_identity }
+        {
+          m with
+          epoch = next_epoch;
+          incidents;
+          freshness;
+          server_identity;
+          infra = Infra_store.forget_log_cursor m.infra;
+        }
         |> Model.mark_all_domains_stale
         |> Model.with_toast ~now ~level:Model.Toast_warning summary
       in
@@ -293,6 +300,58 @@ let refresh_404_fallbacks ~now (m : Model.t) =
     else m.work
   in
   { m with infra; work }
+
+let fusion_detail_matches_active (m : Model.t) run_id =
+  match Model.active_dive m with
+  | Some (Nav.Dive_runtime (Nav.Fusion_dive rid)) -> String.equal rid run_id
+  | Some
+      ( Nav.Dive_keeper _
+      | Nav.Dive_work _
+      | Nav.Dive_knowledge _
+      | Nav.Dive_runtime (Nav.Tool_dive _)
+      | Nav.Dive_infra _ ) ->
+      false
+  | None -> (
+      match Runtime_store.selected_fusion_run m.runtime with
+      | Some sel -> String.equal sel.run_id run_id
+      | None -> true)
+
+let verification_evidence_matches_active (m : Model.t) verification_id =
+  match Model.active_dive m with
+  | Some (Nav.Dive_work (Nav.Verification_dive vid)) ->
+      String.equal vid verification_id
+  | Some
+      ( Nav.Dive_keeper _
+      | Nav.Dive_work (Nav.Goal_dive _ | Nav.Task_dive _)
+      | Nav.Dive_knowledge _
+      | Nav.Dive_runtime _
+      | Nav.Dive_infra _ )
+  | None ->
+      true
+
+let runtime_trace_matches_active (m : Model.t) keeper =
+  match Model.active_dive m with
+  | Some (Nav.Dive_infra (Nav.Runtime_trace_dive k)) -> String.equal k keeper
+  | Some
+      ( Nav.Dive_keeper _
+      | Nav.Dive_work _
+      | Nav.Dive_knowledge _
+      | Nav.Dive_runtime _
+      | Nav.Dive_infra
+          ( Nav.Sandbox_dive _
+          | Nav.Lane_dive _
+          | Nav.Incident_dive _
+          | Nav.Log_detail_dive _ ) )
+  | None ->
+      true
+
+let addon_preview_matches_active (m : Model.t) manifest_path =
+  match Runtime_store.selected_addon_catalog_entry m.runtime with
+  | Some (Wire_runtime.Catalog_package { manifest_path = cur; _ }) ->
+      String.equal cur manifest_path
+  | Some (Wire_runtime.Catalog_folder _ | Wire_runtime.Catalog_issue _) | None
+    ->
+      true
 
 let apply_http_reply ~now (m : Model.t) reply =
   let failed_slot err slot =
@@ -838,7 +897,10 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Schedule_form
         | Nav.Connector_form
         | Nav.Repo_add_form
-        | Nav.Board_new_post ->
+        | Nav.Board_new_post
+        | Nav.Code_finder_form
+        | Nav.Code_search_form
+        | Nav.Github_token_form _ ->
             false
       in
       let matches_modal =
@@ -909,7 +971,10 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Schedule_form
             | Nav.Connector_form
             | Nav.Repo_add_form
-            | Nav.Board_new_post ->
+            | Nav.Board_new_post
+            | Nav.Code_finder_form
+            | Nav.Code_search_form
+            | Nav.Github_token_form _ ->
                 modal)
           m.inline_modal
       in
@@ -1431,6 +1496,15 @@ let apply_http_reply ~now (m : Model.t) reply =
       else (m, [])
   | Msg.Reply_keeper_memory_facts { keeper; result = Error err } -> (
       match err with
+      | Msg.Http_error { status = 401 | 403; _ } ->
+          ( {
+              m with
+              knowledge =
+                Knowledge_store.mark_keeper_memory_facts_failed ~at:now ~keeper
+                  ~reason:(Msg.http_error_detail err) ~retryable:false
+                  ~auth_denied:true m.knowledge;
+            }
+          , [] )
       | Msg.Http_error { status = 404; _ } ->
           ( {
               m with
@@ -1629,7 +1703,7 @@ let apply_http_reply ~now (m : Model.t) reply =
               Keeper_context_store.String_map.add keeper (f st)
                 m.keeper_context.by_keeper
             in
-            { m with keeper_context = { by_keeper } }
+            { m with keeper_context = { m.keeper_context with by_keeper } }
           in
           err_reply
             ~fail:
@@ -1669,7 +1743,7 @@ let apply_http_reply ~now (m : Model.t) reply =
                   { st with part_content = failed_slot err st.part_content }
                   m.keeper_context.by_keeper
               in
-              { m with keeper_context = { by_keeper } })
+              { m with keeper_context = { m.keeper_context with by_keeper } })
             ~source:(Health.Source_keeper keeper) ~ko:"입력 파트 본문 조회"
             ~en:"Provider input part fetch" err)
   | Msg.Reply_keeper_cache_outcome { keeper; turn_ref; result = Ok reading } ->
@@ -1701,7 +1775,7 @@ let apply_http_reply ~now (m : Model.t) reply =
                   { st with cache_outcome = failed_slot err st.cache_outcome }
                   m.keeper_context.by_keeper
               in
-              { m with keeper_context = { by_keeper } })
+              { m with keeper_context = { m.keeper_context with by_keeper } })
             ~source:(Health.Source_keeper keeper) ~ko:"캐시 진단 조회"
             ~en:"Cache outcome fetch" err)
   | Msg.Reply_keeper_next_request { keeper; result = Ok forecast } ->
@@ -1732,7 +1806,7 @@ let apply_http_reply ~now (m : Model.t) reply =
                   { st with next_request = failed_slot err st.next_request }
                   m.keeper_context.by_keeper
               in
-              { m with keeper_context = { by_keeper } })
+              { m with keeper_context = { m.keeper_context with by_keeper } })
             ~source:(Health.Source_keeper keeper) ~ko:"다음 요청 예측 조회"
             ~en:"Next request forecast fetch" err)
   | Msg.Reply_keeper_turn_transcript { keeper; turn_ref; result = Ok tr } ->
@@ -1764,7 +1838,7 @@ let apply_http_reply ~now (m : Model.t) reply =
                   { st with turn_transcript = failed_slot err st.turn_transcript }
                   m.keeper_context.by_keeper
               in
-              { m with keeper_context = { by_keeper } })
+              { m with keeper_context = { m.keeper_context with by_keeper } })
             ~source:(Health.Source_keeper keeper) ~ko:"턴 전사 조회"
             ~en:"Turn transcript fetch" err)
   | Msg.Reply_keeper_tool_stats { keeper; result = Ok stats } ->
@@ -1795,7 +1869,7 @@ let apply_http_reply ~now (m : Model.t) reply =
                   { st with tool_stats = failed_slot err st.tool_stats }
                   m.keeper_context.by_keeper
               in
-              { m with keeper_context = { by_keeper } })
+              { m with keeper_context = { m.keeper_context with by_keeper } })
             ~source:(Health.Source_keeper keeper) ~ko:"키퍼 도구 통계 조회"
             ~en:"Keeper tool stats fetch" err)
   | Msg.Reply_keeper_tool_calls { keeper; turn_ref; result = Ok page } ->
@@ -1849,7 +1923,7 @@ let apply_http_reply ~now (m : Model.t) reply =
                 Keeper_context_store.String_map.add keeper st'
                   m.keeper_context.by_keeper
               in
-              { m with keeper_context = { by_keeper } })
+              { m with keeper_context = { m.keeper_context with by_keeper } })
             ~source:(Health.Source_keeper keeper) ~ko:"키퍼 도구 호출 조회"
             ~en:"Keeper tool calls fetch" err)
   | Msg.Reply_keeper_tool_result { keeper; execution_id; result = Ok res } ->
@@ -1883,7 +1957,7 @@ let apply_http_reply ~now (m : Model.t) reply =
                   { st with tool_result = failed_slot err st.tool_result }
                   m.keeper_context.by_keeper
               in
-              { m with keeper_context = { by_keeper } })
+              { m with keeper_context = { m.keeper_context with by_keeper } })
             ~source:(Health.Source_keeper keeper) ~ko:"도구 실행 결과 조회"
             ~en:"Tool result fetch" err)
   | Msg.Reply_provider_usage (Ok uw) ->
@@ -2373,12 +2447,35 @@ let apply_http_reply ~now (m : Model.t) reply =
             ~source:(Health.Source_runtime "skills") ~ko:"스킬 스냅샷 조회"
             ~en:"Skills snapshot fetch" err)
   | Msg.Reply_connectors (Ok conns) ->
-      ( {
-          m with
-          runtime =
-            Runtime_store.apply_connectors ~observed_at:now conns m.runtime;
-        }
-      , [] )
+      let runtime =
+        Runtime_store.apply_connectors ~observed_at:now conns m.runtime
+      in
+      let next = { m with runtime } in
+      let name_cmds =
+        if
+          Option.is_none (Model.active_dive next)
+          && Nav.equal_workspace next.nav.workspace Nav.Runtime
+          && Nav.equal_runtime_tab next.runtime.active_tab
+               Nav.Runtime_connectors
+        then
+          match Runtime_store.selected_connector next.runtime with
+          | Some c
+            when Runtime_store.connector_channel_names
+                   ~connector_id:c.connector_id next.runtime
+                 = [] ->
+              [
+                Cmd.Http_get
+                  {
+                    epoch = next.epoch;
+                    req =
+                      Cmd.Get_connector_names
+                        { connector = c.connector_id; scope = "channel" };
+                  };
+              ]
+          | Some _ | None -> []
+        else []
+      in
+      (next, name_cmds)
   | Msg.Reply_connectors (Error err) ->
       err_reply
         ~fail:
@@ -2730,3 +2827,1068 @@ let apply_http_reply ~now (m : Model.t) reply =
             Msg.http_error_summary err
       in
       (Model.with_toast ~now ~level:Model.Toast_error toast_msg next, cmds)
+  (* --- Wave 3 Replies --- *)
+  | Msg.Reply_fusion_runs_snapshot (Ok snap) ->
+      let runtime =
+        Runtime_store.apply_fusion_runs_snapshot ~observed_at:now snap m.runtime
+      in
+      let next = { m with runtime } in
+      let detail_cmds =
+        if
+          Option.is_none (Model.active_dive next)
+          && Nav.equal_workspace next.nav.workspace Nav.Runtime
+          && Nav.equal_runtime_tab next.runtime.active_tab Nav.Runtime_fusion
+        then
+          match Runtime_store.selected_fusion_run next.runtime with
+          | Some run -> (
+              if
+                Runtime_store.is_retained_fusion_run ~run_id:run.run_id
+                  next.runtime
+              then
+                if
+                  Option.is_none
+                    (Runtime_store.fusion_detail_for ~run_id:run.run_id
+                       next.runtime)
+                then
+                  [
+                    Cmd.Http_get
+                      {
+                        epoch = next.epoch;
+                        req = Cmd.Get_fusion_run_detail { run_id = run.run_id };
+                      };
+                  ]
+                else []
+              else
+                match
+                  Runtime_store.historical_evidence_for_run ~run_id:run.run_id
+                    next.runtime
+                with
+                | Some hist
+                  when Option.is_none
+                         (Runtime_store.fusion_board_evidence_for
+                            ~post_id:hist.post_id next.runtime) ->
+                    [
+                      Cmd.Http_get
+                        {
+                          epoch = next.epoch;
+                          req =
+                            Cmd.Get_fusion_board_evidence
+                              { post_id = hist.post_id };
+                        };
+                    ]
+                | Some _ | None -> [])
+          | None -> []
+        else []
+      in
+      (next, detail_cmds)
+  | Msg.Reply_fusion_runs_snapshot (Error err) ->
+      err_reply
+        ~fail:
+          (on_runtime (fun (x : Runtime_store.t) ->
+               { x with fusion_runs = failed_slot err x.fusion_runs }))
+        ~source:Health.Source_client_http ~ko:"퓨전 실행 목록 조회"
+        ~en:"Fusion runs fetch" err
+  | Msg.Reply_fusion_run_detail { run_id; result = Ok detail } ->
+      if not (fusion_detail_matches_active m run_id) then (m, [])
+      else
+        ( {
+            m with
+            runtime =
+              Runtime_store.apply_fusion_detail ~observed_at:now ~run_id detail
+                m.runtime;
+          }
+        , [] )
+  | Msg.Reply_fusion_run_detail { run_id; result = Error err } -> (
+      match err with
+      | Msg.Workspace_mismatch _ ->
+          err_reply ~fail:Fun.id ~source:Health.Source_client_http
+            ~ko:"퓨전 상세 조회" ~en:"Fusion detail fetch" err
+      | Msg.Http_error { status = 404; _ } -> (m, [])
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Decode_error _ ->
+          if not (fusion_detail_matches_active m run_id) then (m, [])
+          else
+            err_reply
+              ~fail:
+                (on_runtime (fun (x : Runtime_store.t) ->
+                     { x with fusion_detail = failed_slot err x.fusion_detail }))
+              ~source:Health.Source_client_http ~ko:"퓨전 상세 조회"
+              ~en:"Fusion detail fetch" err)
+  | Msg.Reply_fusion_config (Ok cfg) ->
+      ( {
+          m with
+          runtime =
+            Runtime_store.apply_fusion_config ~observed_at:now cfg m.runtime;
+        }
+      , [] )
+  | Msg.Reply_fusion_config (Error err) -> (
+      match err with
+      | Msg.Http_error { status = 401 | 403; _ } ->
+          let runtime =
+            Runtime_store.mark_fusion_config_denied ~at:now
+              ~reason:(Msg.http_error_detail err) m.runtime
+          in
+          ({ m with runtime }, [])
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply
+            ~fail:
+              (on_runtime (fun (x : Runtime_store.t) ->
+                   { x with fusion_config = failed_slot err x.fusion_config }))
+            ~source:Health.Source_client_http ~ko:"퓨전 설정 조회"
+            ~en:"Fusion config fetch" err)
+  | Msg.Reply_fusion_board_evidence { post_id; result = Ok post } ->
+      let runtime =
+        Runtime_store.apply_fusion_board_evidence ~observed_at:now ~post_id post
+          m.runtime
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_info
+          (Say.make
+             ~ko:("보드 증거 로드됨: " ^ post_id)
+             ~en:("Loaded board evidence: " ^ post_id))
+          { m with runtime }
+      , [] )
+  | Msg.Reply_fusion_board_evidence { post_id = _; result = Error err } ->
+      err_reply
+        ~fail:
+          (on_runtime (fun (x : Runtime_store.t) ->
+               {
+                 x with
+                 fusion_board_evidence =
+                   failed_slot err x.fusion_board_evidence;
+               }))
+        ~source:Health.Source_client_http ~ko:"퓨전 보드 증거 조회"
+        ~en:"Fusion board evidence fetch" err
+  | Msg.Reply_harness_health (Ok hh) ->
+      ( {
+          m with
+          work = Work_store.apply_harness_health ~observed_at:now hh m.work;
+        }
+      , [] )
+  | Msg.Reply_harness_health (Error err) ->
+      err_reply
+        ~fail:
+          (on_work (fun (x : Work_store.t) ->
+               { x with harness_health = failed_slot err x.harness_health }))
+        ~source:Health.Source_client_http ~ko:"하네스 상태 조회"
+        ~en:"Harness health fetch" err
+  | Msg.Reply_verification_evidence { verification_id; result = Ok bundle } ->
+      if not (verification_evidence_matches_active m verification_id) then
+        (m, [])
+      else
+        ( {
+            m with
+            work =
+              Work_store.apply_verification_evidence ~observed_at:now
+                ~verification_id bundle m.work;
+          }
+        , [] )
+  | Msg.Reply_verification_evidence { verification_id; result = Error err } -> (
+      match err with
+      | Msg.Workspace_mismatch _ ->
+          err_reply ~fail:Fun.id ~source:Health.Source_client_http
+            ~ko:"검증 증거 조회" ~en:"Verification evidence fetch" err
+      | Msg.Http_error { status = 401 | 403; _ } ->
+          if not (verification_evidence_matches_active m verification_id) then
+            (m, [])
+          else
+            let work =
+              Work_store.mark_verification_evidence_denied ~at:now
+                ~reason:(Msg.http_error_detail err) m.work
+            in
+            ({ m with work }, [])
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Decode_error _ ->
+          if not (verification_evidence_matches_active m verification_id) then
+            (m, [])
+          else
+            err_reply
+              ~fail:
+                (on_work (fun (x : Work_store.t) ->
+                     {
+                       x with
+                       verification_evidence =
+                         failed_slot err x.verification_evidence;
+                     }))
+              ~source:Health.Source_client_http ~ko:"검증 증거 조회"
+              ~en:"Verification evidence fetch" err)
+  | Msg.Reply_verification_summary (Ok summary) ->
+      ( {
+          m with
+          work =
+            Work_store.apply_verification_summary ~observed_at:now summary m.work;
+        }
+      , [] )
+  | Msg.Reply_verification_summary (Error err) ->
+      err_reply
+        ~fail:
+          (on_work (fun (x : Work_store.t) ->
+               {
+                 x with
+                 verification_summary = failed_slot err x.verification_summary;
+               }))
+        ~source:Health.Source_client_http ~ko:"검증 요약 조회"
+        ~en:"Verification summary fetch" err
+  | Msg.Reply_verification_specs (Ok specs) ->
+      ( {
+          m with
+          work =
+            Work_store.apply_verification_specs ~observed_at:now specs m.work;
+        }
+      , [] )
+  | Msg.Reply_verification_specs (Error err) ->
+      err_reply
+        ~fail:
+          (on_work (fun (x : Work_store.t) ->
+               {
+                 x with
+                 verification_specs = failed_slot err x.verification_specs;
+               }))
+        ~source:Health.Source_client_http ~ko:"TLA+ 명세 조회"
+        ~en:"Verification specs fetch" err
+  | Msg.Reply_verification_tlc_results (Ok tlc) ->
+      ( {
+          m with
+          work =
+            Work_store.apply_verification_tlc_results ~observed_at:now tlc m.work;
+        }
+      , [] )
+  | Msg.Reply_verification_tlc_results (Error err) ->
+      err_reply
+        ~fail:
+          (on_work (fun (x : Work_store.t) ->
+               {
+                 x with
+                 verification_tlc_results =
+                   failed_slot err x.verification_tlc_results;
+               }))
+        ~source:Health.Source_client_http ~ko:"TLC 결과 조회"
+        ~en:"TLC results fetch" err
+  | Msg.Reply_activity_events (Ok (items, _next_seq)) ->
+      ( {
+          m with
+          infra = Infra_store.apply_activity_events_backfill items m.infra;
+        }
+      , [] )
+  | Msg.Reply_activity_events (Error err) ->
+      err_reply ~fail:Fun.id ~source:Health.Source_client_http
+        ~ko:"활동 이벤트 백필 조회" ~en:"Activity events backfill" err
+  | Msg.Reply_keeper_runtime_trace { keeper; result = Ok snap } ->
+      if not (runtime_trace_matches_active m keeper) then (m, [])
+      else
+        ( {
+            m with
+            infra =
+              Infra_store.apply_runtime_trace ~observed_at:now ~keeper snap
+                m.infra;
+          }
+        , [] )
+  | Msg.Reply_keeper_runtime_trace { keeper; result = Error err } -> (
+      match err with
+      | Msg.Workspace_mismatch _ ->
+          err_reply ~fail:Fun.id ~source:Health.Source_client_http
+            ~ko:"런타임 트레이스 조회" ~en:"Runtime trace fetch" err
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Decode_error _ ->
+          if not (runtime_trace_matches_active m keeper) then (m, [])
+          else
+            err_reply
+              ~fail:
+                (on_infra (fun (x : Infra_store.t) ->
+                     { x with runtime_trace = failed_slot err x.runtime_trace }))
+              ~source:Health.Source_client_http ~ko:"런타임 트레이스 조회"
+              ~en:"Runtime trace fetch" err)
+  | Msg.Reply_keeper_metrics { keeper; result = Ok snap } ->
+      ( {
+          m with
+          keeper_context =
+            Keeper_context_store.apply_metrics ~observed_at:now ~keeper snap
+              m.keeper_context;
+        }
+      , [] )
+  | Msg.Reply_keeper_metrics { keeper; result = Error err } ->
+      let retryable =
+        match err with
+        | Msg.Http_error { status = 401 | 403 | 404; _ } -> false
+        | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+        | Msg.Decode_error _ ->
+            true
+      in
+      let m_failed =
+        {
+          m with
+          keeper_context =
+            Keeper_context_store.mark_metrics_failed ~at:now ~keeper
+              ~reason:(Msg.http_error_detail err) ~retryable m.keeper_context;
+        }
+      in
+      let next, cmds =
+        record_http_incident ~now ~source:Health.Source_client_http
+          ~context:(Say.make ~ko:"키퍼 지표 조회" ~en:"Keeper metrics fetch")
+          err m_failed
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , cmds )
+  | Msg.Reply_keeper_sandbox_logs { keeper; result = Ok logs } ->
+      ( {
+          m with
+          keeper_context =
+            Keeper_context_store.apply_sandbox_logs ~observed_at:now ~keeper logs
+              m.keeper_context;
+        }
+      , [] )
+  | Msg.Reply_keeper_sandbox_logs { keeper; result = Error err } ->
+      let retryable =
+        match err with
+        | Msg.Http_error { status = 401 | 403 | 404; _ } -> false
+        | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+        | Msg.Decode_error _ ->
+            true
+      in
+      let m_failed =
+        {
+          m with
+          keeper_context =
+            Keeper_context_store.mark_sandbox_logs_failed ~at:now ~keeper
+              ~reason:(Msg.http_error_detail err) ~retryable m.keeper_context;
+        }
+      in
+      let next, cmds =
+        record_http_incident ~now ~source:Health.Source_client_http
+          ~context:
+            (Say.make ~ko:"키퍼 샌드박스 로그 조회"
+               ~en:"Keeper sandbox logs fetch")
+          err m_failed
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , cmds )
+  | Msg.Reply_workspace_children { scope; dir; result = Ok nodes } ->
+      let infra =
+        Infra_store.apply_workspace_children ~scope ~dir nodes m.infra
+      in
+      ({ m with infra }, [])
+  | Msg.Reply_workspace_children { scope = _; dir = _; result = Error err } ->
+      err_reply ~fail:Fun.id ~source:Health.Source_client_http
+        ~ko:"워크스페이스 트리 조회" ~en:"Workspace tree fetch" err
+  | Msg.Reply_workspace_files { scope; result = Ok catalog } ->
+      ( {
+          m with
+          infra =
+            Infra_store.apply_workspace_files ~observed_at:now ~scope catalog
+              m.infra;
+        }
+      , [] )
+  | Msg.Reply_workspace_files { scope = _; result = Error err } ->
+      err_reply
+        ~fail:
+          (on_infra (fun (x : Infra_store.t) ->
+               {
+                 x with
+                 code =
+                   {
+                     x.code with
+                     files_catalog = failed_slot err x.code.files_catalog;
+                   };
+               }))
+        ~source:Health.Source_client_http ~ko:"워크스페이스 파일 목록 조회"
+        ~en:"Workspace files fetch" err
+  | Msg.Reply_workspace_search { scope; result = Ok res } ->
+      let infra =
+        Infra_store.apply_workspace_search ~observed_at:now ~scope res m.infra
+      in
+      let focus_results =
+        Option.is_none (Model.active_dive m)
+        && Nav.equal_workspace m.nav.workspace Nav.Infra
+        && Nav.equal_infra_tab m.infra.active_tab Nav.Infra_code
+        && Wire_infra.equal_workspace_scope scope m.infra.code.scope
+      in
+      let nav =
+        if focus_results then { m.nav with pane_index = 1 } else m.nav
+      in
+      ({ m with infra; nav }, [])
+  | Msg.Reply_workspace_search { scope = _; result = Error err } ->
+      err_reply
+        ~fail:
+          (on_infra (fun (x : Infra_store.t) ->
+               {
+                 x with
+                 code =
+                   {
+                     x.code with
+                     search_result = failed_slot err x.code.search_result;
+                   };
+               }))
+        ~source:Health.Source_client_http ~ko:"코드 검색" ~en:"Code search" err
+  | Msg.Reply_workspace_file { scope; path; result = Ok content } ->
+      let infra =
+        Infra_store.apply_workspace_file ~observed_at:now ~scope ~path content
+          m.infra
+      in
+      ({ m with infra }, [])
+  | Msg.Reply_workspace_file { scope = _; path = _; result = Error err } ->
+      err_reply
+        ~fail:
+          (on_infra (fun (x : Infra_store.t) ->
+               {
+                 x with
+                 code =
+                   { x.code with open_file = failed_slot err x.code.open_file };
+               }))
+        ~source:Health.Source_client_http ~ko:"파일 내용 조회" ~en:"File read"
+        err
+  | Msg.Reply_git_branches { scope; result = Ok branches } ->
+      ( {
+          m with
+          infra =
+            Infra_store.apply_git_branches ~observed_at:now ~scope branches
+              m.infra;
+        }
+      , [] )
+  | Msg.Reply_git_branches { scope = _; result = Error err } ->
+      err_reply
+        ~fail:
+          (on_infra (fun (x : Infra_store.t) ->
+               {
+                 x with
+                 code =
+                   {
+                     x.code with
+                     git_branches = failed_slot err x.code.git_branches;
+                   };
+               }))
+        ~source:Health.Source_client_http ~ko:"Git 브랜치 조회"
+        ~en:"Git branches fetch" err
+  | Msg.Reply_git_worktrees { scope; result = Ok wts } ->
+      ( {
+          m with
+          infra =
+            Infra_store.apply_git_worktrees ~observed_at:now ~scope wts m.infra;
+        }
+      , [] )
+  | Msg.Reply_git_worktrees { scope = _; result = Error err } ->
+      err_reply
+        ~fail:
+          (on_infra (fun (x : Infra_store.t) ->
+               {
+                 x with
+                 code =
+                   {
+                     x.code with
+                     git_worktrees = failed_slot err x.code.git_worktrees;
+                   };
+               }))
+        ~source:Health.Source_client_http ~ko:"Git 워크트리 조회"
+        ~en:"Git worktrees fetch" err
+  | Msg.Reply_git_status { scope; result = Ok snap } ->
+      ( {
+          m with
+          infra =
+            Infra_store.apply_git_status ~observed_at:now ~scope snap m.infra;
+        }
+      , [] )
+  | Msg.Reply_git_status { scope = _; result = Error err } ->
+      err_reply
+        ~fail:
+          (on_infra (fun (x : Infra_store.t) ->
+               {
+                 x with
+                 code =
+                   {
+                     x.code with
+                     git_status = failed_slot err x.code.git_status;
+                   };
+               }))
+        ~source:Health.Source_client_http ~ko:"Git 상태 조회"
+        ~en:"Git status fetch" err
+  | Msg.Reply_git_blame { scope; path; result = Ok entries } ->
+      ( {
+          m with
+          infra =
+            Infra_store.apply_git_blame ~observed_at:now ~scope ~path entries
+              m.infra;
+        }
+      , [] )
+  | Msg.Reply_git_blame { scope = _; path = _; result = Error err } ->
+      err_reply
+        ~fail:
+          (on_infra (fun (x : Infra_store.t) ->
+               {
+                 x with
+                 code =
+                   { x.code with git_blame = failed_slot err x.code.git_blame };
+               }))
+        ~source:Health.Source_client_http ~ko:"Git blame 조회"
+        ~en:"Git blame fetch" err
+  | Msg.Reply_git_log { scope; path; result = Ok commits } ->
+      ( {
+          m with
+          infra =
+            Infra_store.apply_git_log ~observed_at:now ~scope ~path commits
+              m.infra;
+        }
+      , [] )
+  | Msg.Reply_git_log { scope = _; path = _; result = Error err } ->
+      err_reply
+        ~fail:
+          (on_infra (fun (x : Infra_store.t) ->
+               {
+                 x with
+                 code = { x.code with git_log = failed_slot err x.code.git_log };
+               }))
+        ~source:Health.Source_client_http ~ko:"Git 로그 조회"
+        ~en:"Git log fetch" err
+  | Msg.Reply_git_diff { scope; path; result = Ok diff } ->
+      ( {
+          m with
+          infra =
+            Infra_store.apply_git_diff ~observed_at:now ~scope ~path diff m.infra;
+        }
+      , [] )
+  | Msg.Reply_git_diff { scope = _; path = _; result = Error err } ->
+      err_reply
+        ~fail:
+          (on_infra (fun (x : Infra_store.t) ->
+               {
+                 x with
+                 code =
+                   { x.code with git_diff = failed_slot err x.code.git_diff };
+               }))
+        ~source:Health.Source_client_http ~ko:"Git diff 조회"
+        ~en:"Git diff fetch" err
+  | Msg.Reply_memory_health_keeper { keeper; result = Ok row } ->
+      let matches_keeper =
+        match Model.active_dive m with
+        | Some (Nav.Dive_keeper { name; _ }) -> String.equal name keeper
+        | Some
+            ( Nav.Dive_work _
+            | Nav.Dive_knowledge _
+            | Nav.Dive_runtime _
+            | Nav.Dive_infra _ ) ->
+            false
+        | None -> (
+            match Fleet_store.selected_keeper_summary m.fleet with
+            | Some k -> String.equal k.name keeper
+            | None -> true)
+      in
+      if not matches_keeper then (m, [])
+      else
+        ( {
+            m with
+            knowledge =
+              Knowledge_store.apply_memory_health_keeper ~observed_at:now ~keeper
+                row m.knowledge;
+          }
+        , [] )
+  | Msg.Reply_memory_health_keeper { keeper; result = Error err } ->
+      let active_keeper =
+        match Model.active_dive m with
+        | Some (Nav.Dive_keeper { name; _ }) -> Some name
+        | Some
+            ( Nav.Dive_work _
+            | Nav.Dive_knowledge _
+            | Nav.Dive_runtime _
+            | Nav.Dive_infra _ ) ->
+            None
+        | None -> (
+            match Fleet_store.selected_keeper_summary m.fleet with
+            | Some k -> Some k.name
+            | None -> m.knowledge.memory_diff_keeper)
+      in
+      let matches_keeper =
+        match Model.active_dive m with
+        | Some (Nav.Dive_keeper { name; _ }) -> String.equal name keeper
+        | Some
+            ( Nav.Dive_work _
+            | Nav.Dive_knowledge _
+            | Nav.Dive_runtime _
+            | Nav.Dive_infra _ ) ->
+            false
+        | None -> (
+            match Fleet_store.selected_keeper_summary m.fleet with
+            | Some k -> String.equal k.name keeper
+            | None -> true)
+      in
+      let retryable =
+        match err with
+        | Msg.Http_error { status = 400 | 401 | 403 | 404; _ } -> false
+        | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+        | Msg.Decode_error _ ->
+            true
+      in
+      let m_failed =
+        if matches_keeper then
+          {
+            m with
+            knowledge =
+              Knowledge_store.mark_memory_health_keeper_failed ~at:now
+                ?active_keeper ~keeper ~reason:(Msg.http_error_detail err)
+                ~retryable m.knowledge;
+          }
+        else m
+      in
+      let next, cmds =
+        record_http_incident ~now ~source:Health.Source_client_http
+          ~context:
+            (Say.make ~ko:"키퍼 기억 상태 조회"
+               ~en:"Keeper memory health fetch")
+          err m_failed
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , cmds )
+  | Msg.Reply_workspace_memory_ledger (Ok ledger) ->
+      ( {
+          m with
+          knowledge =
+            Knowledge_store.apply_workspace_memory_ledger ~observed_at:now ledger
+              m.knowledge;
+        }
+      , [] )
+  | Msg.Reply_workspace_memory_ledger (Error err) -> (
+      match err with
+      | Msg.Http_error { status = 401 | 403; _ } ->
+          ( {
+              m with
+              knowledge =
+                Knowledge_store.mark_workspace_memory_ledger_failed ~at:now
+                  ~reason:(Msg.http_error_detail err) ~retryable:false
+                  ~auth_denied:true m.knowledge;
+            }
+          , [] )
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          let m_failed =
+            {
+              m with
+              knowledge =
+                Knowledge_store.mark_workspace_memory_ledger_failed ~at:now
+                  ~reason:(Msg.http_error_detail err) ~retryable:true
+                  ~auth_denied:false m.knowledge;
+            }
+          in
+          let next, cmds =
+            record_http_incident ~now ~source:Health.Source_client_http
+              ~context:
+                (Say.make ~ko:"워크스페이스 기억 원장 조회"
+                   ~en:"Workspace memory ledger fetch")
+              err m_failed
+          in
+          ( Model.with_toast ~now ~level:Model.Toast_error
+              (Msg.http_error_summary err) next
+          , cmds ))
+  | Msg.Reply_workspace_memory_context (Ok ctx) ->
+      ( {
+          m with
+          knowledge =
+            Knowledge_store.apply_workspace_memory_context ~observed_at:now ctx
+              m.knowledge;
+        }
+      , [] )
+  | Msg.Reply_workspace_memory_context (Error err) -> (
+      match err with
+      | Msg.Http_error { status = 401 | 403; _ } ->
+          ( {
+              m with
+              knowledge =
+                Knowledge_store.mark_workspace_memory_context_failed ~at:now
+                  ~reason:(Msg.http_error_detail err) ~retryable:false
+                  ~auth_denied:true m.knowledge;
+            }
+          , [] )
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          let m_failed =
+            {
+              m with
+              knowledge =
+                Knowledge_store.mark_workspace_memory_context_failed ~at:now
+                  ~reason:(Msg.http_error_detail err) ~retryable:true
+                  ~auth_denied:false m.knowledge;
+            }
+          in
+          let next, cmds =
+            record_http_incident ~now ~source:Health.Source_client_http
+              ~context:
+                (Say.make ~ko:"워크스페이스 기억 컨텍스트 조회"
+                   ~en:"Workspace memory context fetch")
+              err m_failed
+          in
+          ( Model.with_toast ~now ~level:Model.Toast_error
+              (Msg.http_error_summary err) next
+          , cmds ))
+  | Msg.Reply_keeper_memory_journal { keeper; result = Ok journal } ->
+      let matches_keeper =
+        match Model.active_dive m with
+        | Some (Nav.Dive_keeper { name; _ }) -> String.equal name keeper
+        | Some
+            ( Nav.Dive_work _
+            | Nav.Dive_knowledge _
+            | Nav.Dive_runtime _
+            | Nav.Dive_infra _ ) ->
+            false
+        | None -> (
+            match Fleet_store.selected_keeper_summary m.fleet with
+            | Some k -> String.equal k.name keeper
+            | None -> true)
+      in
+      if not matches_keeper then (m, [])
+      else
+        ( {
+            m with
+            knowledge =
+              Knowledge_store.apply_keeper_memory_journal ~observed_at:now
+                ~keeper journal m.knowledge;
+          }
+        , [] )
+  | Msg.Reply_keeper_memory_journal { keeper; result = Error err } -> (
+      let active_keeper =
+        match Model.active_dive m with
+        | Some (Nav.Dive_keeper { name; _ }) -> Some name
+        | Some
+            ( Nav.Dive_work _
+            | Nav.Dive_knowledge _
+            | Nav.Dive_runtime _
+            | Nav.Dive_infra _ ) ->
+            None
+        | None -> (
+            match Fleet_store.selected_keeper_summary m.fleet with
+            | Some k -> Some k.name
+            | None -> m.knowledge.memory_diff_keeper)
+      in
+      let matches_keeper =
+        match Model.active_dive m with
+        | Some (Nav.Dive_keeper { name; _ }) -> String.equal name keeper
+        | Some
+            ( Nav.Dive_work _
+            | Nav.Dive_knowledge _
+            | Nav.Dive_runtime _
+            | Nav.Dive_infra _ ) ->
+            false
+        | None -> (
+            match Fleet_store.selected_keeper_summary m.fleet with
+            | Some k -> String.equal k.name keeper
+            | None -> true)
+      in
+      match err with
+      | Msg.Http_error { status = 401 | 403; _ } ->
+          let knowledge =
+            if matches_keeper then
+              Knowledge_store.mark_keeper_memory_journal_failed ~at:now
+                ?active_keeper ~keeper ~reason:(Msg.http_error_detail err)
+                ~retryable:false ~auth_denied:true m.knowledge
+            else
+              {
+                m.knowledge with
+                keeper_memory_journal_auth_denied =
+                  Knowledge_store.String_set.add keeper
+                    m.knowledge.keeper_memory_journal_auth_denied;
+              }
+          in
+          ({ m with knowledge }, [])
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          let m_failed =
+            if matches_keeper then
+              {
+                m with
+                knowledge =
+                  Knowledge_store.mark_keeper_memory_journal_failed ~at:now
+                    ?active_keeper ~keeper ~reason:(Msg.http_error_detail err)
+                    ~retryable:true ~auth_denied:false m.knowledge;
+              }
+            else m
+          in
+          let next, cmds =
+            record_http_incident ~now ~source:Health.Source_client_http
+              ~context:
+                (Say.make ~ko:"키퍼 기억 저널 조회"
+                   ~en:"Keeper memory journal fetch")
+              err m_failed
+          in
+          ( Model.with_toast ~now ~level:Model.Toast_error
+              (Msg.http_error_summary err) next
+          , cmds ))
+  | Msg.Reply_oauth_providers (Ok providers) ->
+      ( {
+          m with
+          keeper_context =
+            Keeper_context_store.apply_oauth_providers ~observed_at:now providers
+              m.keeper_context;
+        }
+      , [] )
+  | Msg.Reply_oauth_providers (Error err) ->
+      err_reply
+        ~fail:(fun (m : Model.t) ->
+          {
+            m with
+            keeper_context =
+              {
+                m.keeper_context with
+                oauth_providers =
+                  failed_slot err m.keeper_context.oauth_providers;
+              };
+          })
+        ~source:Health.Source_client_http ~ko:"OAuth 공급자 조회"
+        ~en:"OAuth providers fetch" err
+  | Msg.Reply_oauth_attached_tools { keeper; result = Ok snap } ->
+      ( {
+          m with
+          keeper_context =
+            Keeper_context_store.apply_oauth_attached_tools ~observed_at:now
+              ~keeper snap m.keeper_context;
+        }
+      , [] )
+  | Msg.Reply_oauth_attached_tools { keeper; result = Error err } -> (
+      match err with
+      | Msg.Http_error { status = 401 | 403; _ } ->
+          ( {
+              m with
+              keeper_context =
+                Keeper_context_store.mark_oauth_denied ~at:now ~keeper
+                  ~reason:(Msg.http_error_detail err) m.keeper_context;
+            }
+          , [] )
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply
+            ~fail:(fun (m : Model.t) ->
+              let st = Keeper_context_store.get_keeper ~keeper m.keeper_context in
+              let by_keeper =
+                Keeper_context_store.String_map.add keeper
+                  { st with oauth_attached = failed_slot err st.oauth_attached }
+                  m.keeper_context.by_keeper
+              in
+              { m with keeper_context = { m.keeper_context with by_keeper } })
+            ~source:Health.Source_client_http ~ko:"OAuth 도구 조회"
+            ~en:"OAuth attached tools fetch" err)
+  | Msg.Reply_oauth_attempt_status { keeper; result = Ok status } ->
+      let keeper_context =
+        Keeper_context_store.set_oauth_attempt_status ~keeper (Some status)
+          m.keeper_context
+      in
+      let m1 = { m with keeper_context } in
+      let next =
+        Model.with_toast ~now ~level:Model.Toast_info
+          (Say.make
+             ~ko:("OAuth 상태: " ^ status.kind)
+             ~en:("OAuth status: " ^ status.kind))
+          m1
+      in
+      let refresh_cmds =
+        if String.equal status.kind "completed" then
+          [
+            Cmd.Http_get
+              { epoch = m.epoch; req = Cmd.Get_oauth_attached_tools { keeper } };
+          ]
+        else []
+      in
+      (next, refresh_cmds)
+  | Msg.Reply_oauth_attempt_status { keeper; result = Error err } -> (
+      match err with
+      | Msg.Http_error { status = 401 | 403; _ } ->
+          let keeper_context =
+            Keeper_context_store.mark_oauth_denied ~at:now ~keeper
+              ~reason:(Msg.http_error_detail err) m.keeper_context
+          in
+          ( Model.with_toast ~now ~level:Model.Toast_warning
+              (Say.make ~ko:"OAuth 상태 확인 권한(CanAdmin) 필요"
+                 ~en:"OAuth status requires CanAdmin auth")
+              { m with keeper_context }
+          , [] )
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply ~fail:Fun.id ~source:Health.Source_client_http
+            ~ko:"OAuth 로그인 상태 확인" ~en:"OAuth attempt status" err)
+  | Msg.Reply_oauth_mutation { keeper; label; result = Ok () } ->
+      ( Model.with_toast ~now ~level:Model.Toast_success label m
+      , [
+          Cmd.Http_get
+            { epoch = m.epoch; req = Cmd.Get_oauth_attached_tools { keeper } };
+        ] )
+  | Msg.Reply_oauth_mutation { keeper; label; result = Error err } -> (
+      match err with
+      | Msg.Http_error { status = 401 | 403; _ } ->
+          let keeper_context =
+            Keeper_context_store.mark_oauth_denied ~at:now ~keeper
+              ~reason:(Msg.http_error_detail err) m.keeper_context
+          in
+          ( Model.with_toast ~now ~level:Model.Toast_warning
+              (Say.make ~ko:"OAuth 변경 권한(CanAdmin) 필요"
+                 ~en:"OAuth update requires CanAdmin auth")
+              { m with keeper_context }
+          , [] )
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          let next, cmds =
+            record_http_incident ~now ~source:Health.Source_client_http
+              ~context:label err m
+          in
+          ( Model.with_toast ~now ~level:Model.Toast_error
+              (Msg.http_error_summary err) next
+          , cmds ))
+  | Msg.Reply_oauth_login { keeper; result = Ok res } ->
+      let keeper_context =
+        Keeper_context_store.set_oauth_pending_login ~keeper (Some res)
+          m.keeper_context
+      in
+      let m1 = { m with keeper_context } in
+      let toast, extra =
+        match res with
+        | Wire_keeper_context.Oauth_login_exchange { provider_label; _ } ->
+            ( Say.make
+                ~ko:(provider_label ^ " 인증 URL 준비됨 ([y] 복사 · [L] 상태 확인)")
+                ~en:(provider_label ^ " auth URL ready ([y] copy · [L] poll)")
+            , [] )
+        | Wire_keeper_context.Oauth_login_direct { provider_label; message; _ } ->
+            ( Say.make
+                ~ko:(provider_label ^ ": " ^ message)
+                ~en:(provider_label ^ ": " ^ message)
+            , [
+                Cmd.Http_get
+                  {
+                    epoch = m.epoch;
+                    req = Cmd.Get_oauth_attached_tools { keeper };
+                  };
+              ] )
+      in
+      (Model.with_toast ~now ~level:Model.Toast_success toast m1, extra)
+  | Msg.Reply_oauth_login { keeper; result = Error err } -> (
+      match err with
+      | Msg.Http_error { status = 401 | 403; _ } ->
+          let keeper_context =
+            Keeper_context_store.mark_oauth_denied ~at:now ~keeper
+              ~reason:(Msg.http_error_detail err) m.keeper_context
+          in
+          ( Model.with_toast ~now ~level:Model.Toast_warning
+              (Say.make ~ko:"OAuth 로그인 권한(CanAdmin) 필요"
+                 ~en:"OAuth login requires CanAdmin auth")
+              { m with keeper_context }
+          , [] )
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply ~fail:Fun.id ~source:Health.Source_client_http
+            ~ko:"OAuth 로그인 시작" ~en:"OAuth login start" err)
+  | Msg.Reply_github_identity { keeper; result = Ok obs } ->
+      let keeper_context =
+        Keeper_context_store.apply_github_identity ~observed_at:now ~keeper obs
+          m.keeper_context
+      in
+      ({ m with keeper_context }, [])
+  | Msg.Reply_github_identity { keeper; result = Error err } -> (
+      match err with
+      | Msg.Http_error { status = 401 | 403; _ } ->
+          let keeper_context =
+            Keeper_context_store.mark_github_denied ~at:now ~keeper
+              ~reason:(Msg.http_error_detail err) m.keeper_context
+          in
+          ({ m with keeper_context }, [])
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply
+            ~fail:(fun (m : Model.t) ->
+              let st = Keeper_context_store.get_keeper ~keeper m.keeper_context in
+              let by_keeper =
+                Keeper_context_store.String_map.add keeper
+                  { st with github_identity = failed_slot err st.github_identity }
+                  m.keeper_context.by_keeper
+              in
+              { m with keeper_context = { m.keeper_context with by_keeper } })
+            ~source:Health.Source_client_http ~ko:"GitHub 아이덴티티 조회"
+            ~en:"GitHub identity fetch" err)
+  | Msg.Reply_github_token_save { keeper; result = Ok obs } ->
+      let keeper_context =
+        Keeper_context_store.apply_github_identity ~observed_at:now ~keeper obs
+          m.keeper_context
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_success
+          (Say.make ~ko:"GitHub 토큰이 저장되었습니다" ~en:"GitHub token saved")
+          { m with keeper_context }
+      , [] )
+  | Msg.Reply_github_token_save { keeper; result = Error err } -> (
+      match err with
+      | Msg.Http_error { status = 401 | 403; _ } ->
+          let keeper_context =
+            Keeper_context_store.mark_github_denied ~at:now ~keeper
+              ~reason:(Msg.http_error_detail err) m.keeper_context
+          in
+          ( Model.with_toast ~now ~level:Model.Toast_warning
+              (Say.make ~ko:"GitHub 토큰 저장 권한(CanAdmin) 필요"
+                 ~en:"GitHub token save requires CanAdmin auth")
+              { m with keeper_context }
+          , [] )
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply ~fail:Fun.id ~source:Health.Source_client_http
+            ~ko:"GitHub 토큰 저장" ~en:"GitHub token save" err)
+  | Msg.Reply_addon_package_catalog (Ok cat) ->
+      let runtime =
+        Runtime_store.apply_addon_package_catalog ~observed_at:now cat m.runtime
+      in
+      let next = { m with runtime } in
+      let preview_cmds =
+        match Runtime_store.selected_addon_catalog_entry next.runtime with
+        | Some (Wire_runtime.Catalog_package { manifest_path; _ }) ->
+            [
+              Cmd.Http_get
+                {
+                  epoch = next.epoch;
+                  req = Cmd.Get_addon_package_preview { manifest_path };
+                };
+            ]
+        | Some (Wire_runtime.Catalog_folder _ | Wire_runtime.Catalog_issue _)
+        | None ->
+            []
+      in
+      (next, preview_cmds)
+  | Msg.Reply_addon_package_catalog (Error err) ->
+      err_reply
+        ~fail:
+          (on_runtime (fun (x : Runtime_store.t) ->
+               {
+                 x with
+                 addon_package_catalog =
+                   failed_slot err x.addon_package_catalog;
+               }))
+        ~source:Health.Source_client_http ~ko:"애드온 패키지 카탈로그 조회"
+        ~en:"Addon package catalog fetch" err
+  | Msg.Reply_addon_package_preview { manifest_path; result = Ok prev } ->
+      if not (addon_preview_matches_active m manifest_path) then (m, [])
+      else
+        ( {
+            m with
+            runtime =
+              Runtime_store.apply_addon_package_preview ~observed_at:now
+                ~manifest_path prev m.runtime;
+          }
+        , [] )
+  | Msg.Reply_addon_package_preview { manifest_path; result = Error err } -> (
+      match err with
+      | Msg.Workspace_mismatch _ ->
+          err_reply ~fail:Fun.id ~source:Health.Source_client_http
+            ~ko:"애드온 패키지 미리보기 조회" ~en:"Addon package preview fetch"
+            err
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Decode_error _ ->
+          if not (addon_preview_matches_active m manifest_path) then (m, [])
+          else
+            err_reply
+              ~fail:
+                (on_runtime (fun (x : Runtime_store.t) ->
+                     {
+                       x with
+                       addon_package_preview =
+                         failed_slot err x.addon_package_preview;
+                     }))
+              ~source:Health.Source_client_http ~ko:"애드온 패키지 미리보기 조회"
+              ~en:"Addon package preview fetch" err)
+  | Msg.Reply_connector_names { connector; result = Ok page } ->
+      let runtime =
+        Runtime_store.apply_connector_names ~connector_id:connector
+          page.mappings m.runtime
+      in
+      ({ m with runtime }, [])
+  | Msg.Reply_connector_names { connector = _; result = Error err } -> (
+      match err with
+      | Msg.Http_error { status = 401 | 403 | 404 | 400; _ } -> (m, [])
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply ~fail:Fun.id ~source:Health.Source_client_http
+            ~ko:"커넥터 채널 이름 조회" ~en:"Connector names fetch" err)

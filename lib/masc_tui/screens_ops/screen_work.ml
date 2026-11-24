@@ -15,6 +15,8 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
         Work_views.render_inbox ~model ~cache ~rect grid
     | Nav.Work_candle_scorecard ->
         Work_views.render_candle_scorecard ~model ~cache ~rect grid
+    | Nav.Work_harness ->
+        Work_views.render_harness ~model ~cache ~rect grid
 
 let render_dive ~target ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
   Work_dive.render ~target ~model ~cache ~rect grid

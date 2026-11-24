@@ -19,7 +19,9 @@ let active_memory_reading (m : Model.t) :
                 | Nav.Keeper_tool_calls
                 | Nav.Keeper_work_candle
                 | Nav.Keeper_sandbox
-                | Nav.Keeper_config );
+                | Nav.Keeper_config
+                | Nav.Keeper_logs
+                | Nav.Keeper_identity );
               _;
             }
         | Nav.Dive_work _
@@ -729,7 +731,9 @@ let resolve_memory_act_keeper (m : Model.t) =
              | Nav.Keeper_tool_calls
              | Nav.Keeper_work_candle
              | Nav.Keeper_sandbox
-             | Nav.Keeper_config );
+             | Nav.Keeper_config
+             | Nav.Keeper_logs
+             | Nav.Keeper_identity );
            _;
          })
   | Some
@@ -824,7 +828,17 @@ let open_fusion_launch_modal (m : Model.t) =
     | Some t -> Wire_runtime.fusion_topology_to_string t
     | None -> ""
   in
-  let preset_default = Option.value draft.preset ~default:"" in
+  let preset_default =
+    match draft.preset with
+    | Some p when not (String.equal (String.trim p) "") -> p
+    | Some _ | None -> (
+        match Observed.to_option m.runtime.fusion_config with
+        | Some cfg when not (String.equal (String.trim cfg.default_preset) "")
+          ->
+            cfg.default_preset
+        | Some { presets = first :: _; _ } -> first.name
+        | Some { presets = []; _ } | None -> "")
+  in
   open_custom_inline_modal m
     [
       {
@@ -852,12 +866,172 @@ let open_fusion_launch_modal (m : Model.t) =
       };
       {
         key = "fusion_preset";
-        label = Say.make ~ko:"프리셋 (선택)" ~en:"Preset (optional)";
+        label =
+          Say.make ~ko:"프리셋 (선택 · [←→] 순환)" ~en:"Preset (optional · [←→] cycle)";
         value = preset_default;
         required = false;
         secret = false;
       };
     ]
+
+let open_harness_overrule_for_selected ~verdict ~now (m : Model.t) =
+  let seed_hash, warning_opt =
+    match Work_store.selected_harness_verdict m.work with
+    | Some v when Wire_work.is_valid_notes_hash v.notes_hash ->
+        (v.notes_hash, None)
+    | Some _ ->
+        ( ""
+        , Some
+            (Say.make
+               ~ko:
+                 "선택된 판정에 유효한 64-hex notes_hash 가 없습니다 (직접 입력하세요)"
+               ~en:
+                 "Selected verdict lacks a valid 64-hex notes_hash (enter \
+                  manually)") )
+    | None -> ("", None)
+  in
+  let modal0 = Model.inline_modal_for (Nav.Harness_overrule seed_hash) in
+  let fields =
+    List.map
+      (fun (f : Model.modal_form_field) ->
+        if String.equal f.key "verdict" then { f with value = verdict } else f)
+      modal0.fields
+  in
+  let modal = { modal0 with fields } in
+  let nav =
+    {
+      m.nav with
+      overlay = Some (Nav.Inline_action (Nav.Harness_overrule seed_hash));
+      filter_focused = false;
+      sidebar_focused = false;
+    }
+  in
+  let drafts = Drafts.set_focus false m.drafts in
+  let config = Config_store.cancel_edit_field m.config in
+  let base = { m with nav; drafts; config; inline_modal = Some modal } in
+  let next =
+    match warning_opt with
+    | Some msg -> Model.with_toast ~now ~level:Model.Toast_warning msg base
+    | None -> base
+  in
+  (next, [])
+
+let open_connector_form_populated (m : Model.t) =
+  let connector_default =
+    match Runtime_store.selected_connector m.runtime with
+    | Some c -> c.connector_id
+    | None -> (
+        match Runtime_store.filtered_connectors m.runtime with
+        | c :: _ -> c.connector_id
+        | [] -> "")
+  in
+  let channel_default =
+    if String.equal connector_default "" then ""
+    else
+      match
+        Runtime_store.connector_channel_names ~connector_id:connector_default
+          m.runtime
+      with
+      | first :: _ -> first.id
+      | [] -> ""
+  in
+  let keeper_default =
+    Option.value (Update_nav.resolve_target_keeper m) ~default:""
+  in
+  let modal0 = Model.inline_modal_for Nav.Connector_form in
+  let fields =
+    List.map
+      (fun (f : Model.modal_form_field) ->
+        if String.equal f.key "connector" then { f with value = connector_default }
+        else if String.equal f.key "channel" || String.equal f.key "channel_id" then
+          { f with value = channel_default }
+        else if String.equal f.key "keeper" || String.equal f.key "keeper_name" then
+          { f with value = keeper_default }
+        else f)
+      modal0.fields
+  in
+  let modal = { modal0 with fields } in
+  let nav =
+    {
+      m.nav with
+      overlay = Some (Nav.Inline_action Nav.Connector_form);
+      filter_focused = false;
+      sidebar_focused = false;
+    }
+  in
+  let drafts = Drafts.set_focus false m.drafts in
+  let config = Config_store.cancel_edit_field m.config in
+  let cmds =
+    if
+      (not (String.equal connector_default ""))
+      && not
+           (Runtime_store.String_map.mem connector_default
+              m.runtime.connector_names)
+    then
+      [
+        Cmd.Http_get
+          {
+            epoch = m.epoch;
+            req =
+              Cmd.Get_connector_names
+                { connector = connector_default; scope = "channel" };
+          };
+      ]
+    else []
+  in
+  ({ m with nav; drafts; config; inline_modal = Some modal }, cmds)
+
+let active_keeper_for_tab target_tab (m : Model.t) =
+  if Option.is_some m.nav.overlay then None
+  else
+    match Model.active_dive m with
+    | Some (Nav.Dive_keeper { name; tab }) when Nav.equal_keeper_tab tab target_tab
+      ->
+        Some name
+    | Some
+        ( Nav.Dive_keeper _
+        | Nav.Dive_work _
+        | Nav.Dive_knowledge _
+        | Nav.Dive_runtime _
+        | Nav.Dive_infra _ ) ->
+        None
+    | None ->
+        if
+          Nav.equal_workspace m.nav.workspace Nav.Keepers
+          && (m.nav.pane_index = 1 || m.nav.zoomed)
+          && Nav.equal_keeper_tab m.fleet.keeper_dive_tab target_tab
+        then
+          Option.map
+            (fun (k : Wire_fleet.keeper_summary) -> k.name)
+            (Fleet_store.selected_keeper_summary m.fleet)
+        else None
+
+let available_code_scopes (m : Model.t) : Wire_infra.workspace_scope list =
+  let repo_scopes =
+    List.map
+      (fun (r : Wire_infra.repository) -> Wire_infra.Ws_repo r.id)
+      (Infra_store.filtered_repositories m.infra)
+  in
+  let keeper_scopes =
+    match Observed.to_option m.fleet.keepers with
+    | Some ks ->
+        List.map
+          (fun (k : Wire_fleet.keeper_summary) -> Wire_infra.Ws_keeper k.name)
+          ks
+    | None -> []
+  in
+  Wire_infra.Ws_project :: (repo_scopes @ keeper_scopes)
+
+let next_code_scope (m : Model.t) : Wire_infra.workspace_scope =
+  let scopes = available_code_scopes m in
+  let cur = m.infra.code.scope in
+  let rec find = function
+    | [] -> Wire_infra.Ws_project
+    | [ _ ] -> (match scopes with s :: _ -> s | [] -> Wire_infra.Ws_project)
+    | x :: y :: rest ->
+        if Wire_infra.equal_workspace_scope x cur then y else find (y :: rest)
+  in
+  find scopes
 
 let open_runtime_assign_modal (m : Model.t) ?(keeper_default = "")
     ?(runtime_default = "") () =
@@ -1013,7 +1187,9 @@ let active_keeper_for_context (m : Model.t) =
                  | Nav.Keeper_memory
                  | Nav.Keeper_work_candle
                  | Nav.Keeper_sandbox
-                 | Nav.Keeper_config );
+                 | Nav.Keeper_config
+                 | Nav.Keeper_logs
+                 | Nav.Keeper_identity );
                _;
              })
       | Some
@@ -1570,7 +1746,10 @@ and execute_action ~now (m : Model.t) action =
                     | Nav.Connector_form
                     | Nav.Repo_add_form
                     | Nav.Board_new_post
-                    | Nav.Board_comment _ )
+                    | Nav.Board_comment _
+                    | Nav.Github_token_form _
+                    | Nav.Code_finder_form
+                    | Nav.Code_search_form )
                   , _ ) ->
                     true
               in
@@ -1883,7 +2062,10 @@ and execute_action ~now (m : Model.t) action =
             | Nav.Connector_form
             | Nav.Repo_add_form
             | Nav.Board_new_post
-            | Nav.Board_comment _ ->
+            | Nav.Board_comment _
+            | Nav.Github_token_form _
+            | Nav.Code_finder_form
+            | Nav.Code_search_form ->
                 m.drafts
           in
           let closed =
@@ -2067,7 +2249,9 @@ and execute_action ~now (m : Model.t) action =
                             | Nav.Keeper_memory
                             | Nav.Keeper_work_candle
                             | Nav.Keeper_sandbox
-                            | Nav.Keeper_config );
+                            | Nav.Keeper_config
+                            | Nav.Keeper_logs
+                            | Nav.Keeper_identity );
                           _;
                         }
                     | Nav.Dive_work _
@@ -2300,12 +2484,50 @@ and execute_action ~now (m : Model.t) action =
           match Model.active_dive m with
           | Some (Nav.Dive_keeper { tab = Nav.Keeper_chat; _ }) ->
               ({ m with fleet = Fleet_store.toggle_turn_details m.fleet }, [])
-          | Some (Nav.Dive_keeper { tab = Nav.Keeper_memory; _ }) ->
-              let knowledge =
-                Knowledge_store.cycle_memory_diff_window m.knowledge
+          | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory }) ->
+              if
+                Knowledge_store.equal_keeper_memory_subview
+                  m.knowledge.keeper_memory_subview
+                  Knowledge_store.Kmem_facts_tree
+              then Update_nav.keeper_enter_action ~name ~tab:Nav.Keeper_memory m
+              else
+                let knowledge =
+                  Knowledge_store.cycle_memory_diff_window m.knowledge
+                in
+                let next = { m with knowledge } in
+                (next, View_fetches.fetches_for_current_view next)
+          | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_identity }) -> (
+              let ks =
+                Keeper_context_store.get_keeper ~keeper:name m.keeper_context
               in
-              let next = { m with knowledge } in
-              (next, View_fetches.fetches_for_current_view next)
+              let entries = Update_nav.keeper_identity_entries m ~name in
+              match
+                List.nth_opt entries
+                  (Update_nav.clamp_index (List.length entries)
+                     ks.identity_selected_idx)
+              with
+              | Some (Update_nav.Identity_oauth { provider; enabled; _ }) ->
+                  let next_enabled = not (Option.value ~default:false enabled) in
+                  ( Model.with_toast ~now ~level:Model.Toast_info
+                      (Say.make
+                         ~ko:
+                           (Printf.sprintf "OAuth 도구 전환: %s -> %s" provider
+                              (if next_enabled then "활성" else "비활성"))
+                         ~en:
+                           (Printf.sprintf "Toggling OAuth tools %s -> %s"
+                              provider
+                              (if next_enabled then "enabled" else "disabled")))
+                      m
+                  , [
+                      Cmd.Http_post
+                        {
+                          epoch = m.epoch;
+                          req =
+                            Cmd.Post_oauth_identity_switch
+                              { keeper = name; provider; enabled = next_enabled };
+                        };
+                    ] )
+              | Some Update_nav.Identity_github | None -> (m, []))
           | Some (Nav.Dive_infra _ | Nav.Dive_work _) ->
               ({ m with infra = Infra_store.toggle_raw_json m.infra }, [])
           | Some
@@ -2316,7 +2538,8 @@ and execute_action ~now (m : Model.t) action =
                       | Nav.Keeper_tool_calls
                       | Nav.Keeper_work_candle
                       | Nav.Keeper_sandbox
-                      | Nav.Keeper_config );
+                      | Nav.Keeper_config
+                      | Nav.Keeper_logs );
                     _;
                   }
               | Nav.Dive_knowledge _
@@ -2337,11 +2560,75 @@ and execute_action ~now (m : Model.t) action =
                     && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
                          Nav.Keeper_memory
                   then
-                    let knowledge =
-                      Knowledge_store.cycle_memory_diff_window m.knowledge
-                    in
-                    let next = { m with knowledge } in
-                    (next, View_fetches.fetches_for_current_view next)
+                    if
+                      Knowledge_store.equal_keeper_memory_subview
+                        m.knowledge.keeper_memory_subview
+                        Knowledge_store.Kmem_facts_tree
+                    then
+                      match Fleet_store.selected_keeper_summary m.fleet with
+                      | Some k ->
+                          Update_nav.keeper_enter_action ~name:k.name
+                            ~tab:Nav.Keeper_memory m
+                      | None -> (m, [])
+                    else
+                      let knowledge =
+                        Knowledge_store.cycle_memory_diff_window m.knowledge
+                      in
+                      let next = { m with knowledge } in
+                      (next, View_fetches.fetches_for_current_view next)
+                  else if
+                    (m.nav.pane_index = 1 || m.nav.zoomed)
+                    && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
+                         Nav.Keeper_identity
+                  then (
+                    match Fleet_store.selected_keeper_summary m.fleet with
+                    | None -> (m, [])
+                    | Some k -> (
+                        let ks =
+                          Keeper_context_store.get_keeper ~keeper:k.name
+                            m.keeper_context
+                        in
+                        let entries =
+                          Update_nav.keeper_identity_entries m ~name:k.name
+                        in
+                        match
+                          List.nth_opt entries
+                            (Update_nav.clamp_index (List.length entries)
+                               ks.identity_selected_idx)
+                        with
+                        | Some
+                            (Update_nav.Identity_oauth { provider; enabled; _ })
+                          ->
+                            let next_enabled =
+                              not (Option.value ~default:false enabled)
+                            in
+                            ( Model.with_toast ~now ~level:Model.Toast_info
+                                (Say.make
+                                   ~ko:
+                                     (Printf.sprintf "OAuth 도구 전환: %s -> %s"
+                                        provider
+                                        (if next_enabled then "활성"
+                                        else "비활성"))
+                                   ~en:
+                                     (Printf.sprintf
+                                        "Toggling OAuth tools %s -> %s" provider
+                                        (if next_enabled then "enabled"
+                                        else "disabled")))
+                                m
+                            , [
+                                Cmd.Http_post
+                                  {
+                                    epoch = m.epoch;
+                                    req =
+                                      Cmd.Post_oauth_identity_switch
+                                        {
+                                          keeper = k.name;
+                                          provider;
+                                          enabled = next_enabled;
+                                        };
+                                  };
+                              ] )
+                        | Some Update_nav.Identity_github | None -> (m, [])))
                   else if m.nav.pane_index = 0 then
                     match Fleet_store.selected_keeper_summary m.fleet with
                     | Some k ->
@@ -2411,7 +2698,8 @@ and execute_action ~now (m : Model.t) action =
                   | Nav.Work_pipeline
                   | Nav.Work_schedules
                   | Nav.Work_inbox
-                  | Nav.Work_candle_scorecard ->
+                  | Nav.Work_candle_scorecard
+                  | Nav.Work_harness ->
                       (m, []))
               | Nav.Infra -> (
                   match m.infra.active_tab with
@@ -2421,7 +2709,43 @@ and execute_action ~now (m : Model.t) action =
                           infra = Infra_store.cycle_log_level_filter m.infra;
                         }
                       , [] )
-                  | Nav.Infra_sandboxes | Nav.Infra_repos_changes -> (m, []))
+                  | Nav.Infra_code when m.nav.pane_index = 0 -> (
+                      match Infra_store.selected_code_tree_node m.infra with
+                      | Some node when node.has_children ->
+                          let was_expanded =
+                            Infra_store.String_set.mem node.path
+                              m.infra.code.expanded_dirs
+                          in
+                          let infra =
+                            Infra_store.toggle_code_dir node.path m.infra
+                          in
+                          let cmds =
+                            if
+                              (not was_expanded)
+                              && not
+                                   (Infra_store.String_map.mem node.path
+                                      infra.code.children_by_dir)
+                            then
+                              [
+                                Cmd.Http_get
+                                  {
+                                    epoch = m.epoch;
+                                    req =
+                                      Cmd.Get_workspace_children
+                                        {
+                                          scope = m.infra.code.scope;
+                                          dir = node.path;
+                                        };
+                                  };
+                              ]
+                            else []
+                          in
+                          ({ m with infra }, cmds)
+                      | Some _ | None -> (m, []))
+                  | Nav.Infra_code
+                  | Nav.Infra_sandboxes
+                  | Nav.Infra_repos_changes ->
+                      (m, []))
               | Nav.Pulse -> (m, []))))
   | Keymap.Create_new -> (
       match m.nav.overlay with
@@ -2600,6 +2924,8 @@ and execute_action ~now (m : Model.t) action =
                       ({ m with nav; drafts; inline_modal = Some modal }, [])
                   | Nav.Work_tasks | Nav.Work_schedules ->
                       Update_nav.open_inline_modal m Nav.Schedule_form
+                  | Nav.Work_harness ->
+                      open_harness_overrule_for_selected ~verdict:"reject" ~now m
                   | Nav.Work_inbox | Nav.Work_candle_scorecard ->
                       ( Model.with_toast ~now ~level:Model.Toast_info
                           (Say.make
@@ -2612,8 +2938,7 @@ and execute_action ~now (m : Model.t) action =
                       , [] ))
               | Nav.Runtime -> (
                   match m.runtime.active_tab with
-                  | Nav.Runtime_connectors ->
-                      Update_nav.open_inline_modal m Nav.Connector_form
+                  | Nav.Runtime_connectors -> open_connector_form_populated m
                   | Nav.Runtime_quotas_credits
                   | Nav.Runtime_efficiency_spend
                   | Nav.Runtime_failover_lanes
@@ -2625,7 +2950,10 @@ and execute_action ~now (m : Model.t) action =
                   match m.infra.active_tab with
                   | Nav.Infra_repos_changes ->
                       Update_nav.open_inline_modal m Nav.Repo_add_form
-                  | Nav.Infra_sandboxes | Nav.Infra_activity_logs -> (m, []))
+                  | Nav.Infra_sandboxes
+                  | Nav.Infra_code
+                  | Nav.Infra_activity_logs ->
+                      (m, []))
               | Nav.Keepers ->
                   let config =
                     m.config
@@ -2703,10 +3031,39 @@ and execute_action ~now (m : Model.t) action =
             Update_nav.refresh_open_memory_diagram ~now next
           else (next, [])
         in
+        let oauth_refresh_cmd =
+          match active_keeper_for_tab Nav.Keeper_identity next with
+          | None -> []
+          | Some keeper -> (
+              let ks =
+                Keeper_context_store.get_keeper ~keeper next.keeper_context
+              in
+              let entries = Update_nav.keeper_identity_entries next ~name:keeper in
+              match
+                List.nth_opt entries
+                  (Update_nav.clamp_index (List.length entries)
+                     ks.identity_selected_idx)
+              with
+              | Some
+                  (Update_nav.Identity_oauth { provider; attached = true; _ }) ->
+                  [
+                    Cmd.Http_post
+                      {
+                        epoch = next.epoch;
+                        req =
+                          Cmd.Post_oauth_identity_refresh { keeper; provider };
+                      };
+                  ]
+              | Some
+                  ( Update_nav.Identity_oauth { attached = false; _ }
+                  | Update_nav.Identity_github )
+              | None ->
+                  [])
+        in
         ( Model.with_toast ~now ~level:Model.Toast_info
             (Say.make ~ko:"현재 화면 새로고침 중" ~en:"Refreshing active view")
             next
-        , view_cmds @ probe_cmd @ diagram_cmds )
+        , view_cmds @ probe_cmd @ diagram_cmds @ oauth_refresh_cmd )
   | Keymap.Copy_selected -> (
       let copy_artifact_body (a : Wire_knowledge.artifact_entry) =
         let fmt_label =
@@ -2802,7 +3159,24 @@ and execute_action ~now (m : Model.t) action =
                  ~en:"Artifact not found")
               m
           , [] )
+      | `Other
+        when Option.is_none m.nav.overlay
+             && Option.is_none (Model.active_dive m)
+             && Nav.equal_workspace m.nav.workspace Nav.Work
+             && Nav.equal_work_tab m.work.active_tab Nav.Work_harness ->
+          open_harness_overrule_for_selected ~verdict:"approve" ~now m
       | `Other ->
+      let copy_identity_for ~name =
+        let ks = Keeper_context_store.get_keeper ~keeper:name m.keeper_context in
+        match ks.github_login.device_code with
+        | Some code -> Some code
+        | None -> (
+            match ks.oauth_pending_login with
+            | Some (Wire_keeper_context.Oauth_login_exchange ex) ->
+                Some ex.authorize_url
+            | Some (Wire_keeper_context.Oauth_login_direct _) | None ->
+                Some name)
+      in
       let text_opt =
         match m.nav.overlay with
         | Some (Nav.System_gate Nav.Media_viewer) -> None
@@ -2874,12 +3248,14 @@ and execute_action ~now (m : Model.t) action =
                     match latest_keeper_reply_text m with
                     | Some (_, reply) -> Some reply
                     | None -> Some name)
+                | Nav.Keeper_identity -> copy_identity_for ~name
                 | Nav.Keeper_context
                 | Nav.Keeper_tool_calls
                 | Nav.Keeper_memory
                 | Nav.Keeper_work_candle
                 | Nav.Keeper_sandbox
-                | Nav.Keeper_config ->
+                | Nav.Keeper_config
+                | Nav.Keeper_logs ->
                     Some name)
             | Some (Nav.Dive_work wd) -> (
                 match wd with
@@ -2936,11 +3312,14 @@ and execute_action ~now (m : Model.t) action =
                     | Some wm -> wm.briefing.text
                     | None -> None))
             | Some (Nav.Dive_runtime (Nav.Tool_dive name)) -> Some name
+            | Some (Nav.Dive_runtime (Nav.Fusion_dive run_id)) -> Some run_id
             | Some (Nav.Dive_infra idive) -> (
                 match idive with
-                | Nav.Sandbox_dive keeper -> Some keeper
+                | Nav.Sandbox_dive keeper | Nav.Runtime_trace_dive keeper ->
+                    Some keeper
                 | Nav.Lane_dive lane_id -> Some lane_id
-                | Nav.Incident_dive id -> Some (Int.to_string id))
+                | Nav.Incident_dive id | Nav.Log_detail_dive id ->
+                    Some (Int.to_string id))
             | None -> (
                 match m.nav.workspace with
                 | Nav.Knowledge -> (
@@ -2984,6 +3363,19 @@ and execute_action ~now (m : Model.t) action =
                         Option.map
                           (fun (r : Wire_infra.repository) -> r.url)
                           (Infra_store.selected_repository m.infra)
+                    | Nav.Infra_code ->
+                        if m.nav.pane_index = 1 then
+                          match Infra_store.open_file_for_current m.infra with
+                          | Some f -> Some f.content
+                          | None ->
+                              Option.map
+                                (fun (n : Wire_infra.workspace_tree_node) ->
+                                  n.path)
+                                (Infra_store.selected_code_tree_node m.infra)
+                        else
+                          Option.map
+                            (fun (n : Wire_infra.workspace_tree_node) -> n.path)
+                            (Infra_store.selected_code_tree_node m.infra)
                     | Nav.Infra_activity_logs -> (
                         match Infra_store.selected_timeline_entry m.infra with
                         | Some (Infra_store.Entry_log e) -> Some e.message
@@ -2995,17 +3387,22 @@ and execute_action ~now (m : Model.t) action =
                             | Some _ | None -> Some ev.summary)
                         | None -> None))
                 | Nav.Keepers | Nav.Pulse -> (
-                    let in_chat =
-                      Nav.equal_workspace m.nav.workspace Nav.Keepers
-                      && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
-                           Nav.Keeper_chat
-                    in
-                    match if in_chat then latest_keeper_reply_text m else None with
-                    | Some (_, reply) -> Some reply
+                    match active_keeper_for_tab Nav.Keeper_identity m with
+                    | Some name -> copy_identity_for ~name
                     | None ->
-                        Option.map
-                          (fun (k : Wire_fleet.keeper_summary) -> k.name)
-                          (Fleet_store.selected_keeper_summary m.fleet))
+                        let in_chat =
+                          Nav.equal_workspace m.nav.workspace Nav.Keepers
+                          && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
+                               Nav.Keeper_chat
+                        in
+                        match
+                          if in_chat then latest_keeper_reply_text m else None
+                        with
+                        | Some (_, reply) -> Some reply
+                        | None ->
+                            Option.map
+                              (fun (k : Wire_fleet.keeper_summary) -> k.name)
+                              (Fleet_store.selected_keeper_summary m.fleet))
                 | Nav.Work -> (
                     match m.work.active_tab with
                     | Nav.Work_pipeline -> (
@@ -3058,7 +3455,12 @@ and execute_action ~now (m : Model.t) action =
                         let rows = Work_store.filtered_candle_balances m.work in
                         match List.nth_opt rows m.work.selected_index with
                         | Some row -> Some row.keeper
-                        | None -> None))
+                        | None -> None)
+                    | Nav.Work_harness ->
+                        Option.map
+                          (fun (v : Wire_work.harness_verdict_row) ->
+                            v.notes_hash)
+                          (Work_store.selected_harness_verdict m.work))
                 | Nav.Runtime -> (
                     match m.runtime.active_tab with
                     | Nav.Runtime_addons_browser ->
@@ -3252,6 +3654,21 @@ and execute_action ~now (m : Model.t) action =
                     extract_first_http_url txt)
               in
               open_url_or_notice url_opt
+          | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_identity }) ->
+              let ks =
+                Keeper_context_store.get_keeper ~keeper:name m.keeper_context
+              in
+              let url_opt =
+                match ks.github_login.device_url with
+                | Some u -> Some u
+                | None -> (
+                    match ks.oauth_pending_login with
+                    | Some (Wire_keeper_context.Oauth_login_exchange ex) ->
+                        Some ex.authorize_url
+                    | Some (Wire_keeper_context.Oauth_login_direct _) | None ->
+                        None)
+              in
+              open_url_or_notice url_opt
           | Some
               (Nav.Dive_keeper
                  {
@@ -3261,7 +3678,8 @@ and execute_action ~now (m : Model.t) action =
                      | Nav.Keeper_memory
                      | Nav.Keeper_work_candle
                      | Nav.Keeper_sandbox
-                     | Nav.Keeper_config );
+                     | Nav.Keeper_config
+                     | Nav.Keeper_logs );
                    _;
                  }) ->
               (m, [])
@@ -3292,8 +3710,11 @@ and execute_action ~now (m : Model.t) action =
               (m, [])
           | Some
               (Nav.Dive_infra
-                 (Nav.Sandbox_dive _ | Nav.Lane_dive _ | Nav.Incident_dive _))
-            ->
+                 ( Nav.Sandbox_dive _
+                 | Nav.Lane_dive _
+                 | Nav.Incident_dive _
+                 | Nav.Runtime_trace_dive _
+                 | Nav.Log_detail_dive _ )) ->
               (m, [])
           | None -> (
               match m.nav.workspace with
@@ -3303,7 +3724,10 @@ and execute_action ~now (m : Model.t) action =
                       match Infra_store.selected_repository m.infra with
                       | Some repo -> (m, [ Cmd.Open_external_url repo.url ])
                       | None -> open_url_or_notice None)
-                  | Nav.Infra_sandboxes | Nav.Infra_activity_logs -> (m, []))
+                  | Nav.Infra_sandboxes
+                  | Nav.Infra_code
+                  | Nav.Infra_activity_logs ->
+                      (m, []))
               | Nav.Knowledge -> (
                   match m.knowledge.active_tab with
                   | Nav.Knowledge_artifacts -> (
@@ -3345,7 +3769,8 @@ and execute_action ~now (m : Model.t) action =
                       open_url_or_notice url_opt
                   | Nav.Work_schedules
                   | Nav.Work_inbox
-                  | Nav.Work_candle_scorecard ->
+                  | Nav.Work_candle_scorecard
+                  | Nav.Work_harness ->
                       (m, []))
               | Nav.Keepers ->
                   let url_opt =
@@ -3399,7 +3824,9 @@ and execute_action ~now (m : Model.t) action =
                     | Nav.Keeper_tool_calls
                     | Nav.Keeper_work_candle
                     | Nav.Keeper_sandbox
-                    | Nav.Keeper_config );
+                    | Nav.Keeper_config
+                    | Nav.Keeper_logs
+                    | Nav.Keeper_identity );
                   _;
                 }
             | Nav.Dive_work _
@@ -3445,7 +3872,9 @@ and execute_action ~now (m : Model.t) action =
                     | Nav.Keeper_tool_calls
                     | Nav.Keeper_work_candle
                     | Nav.Keeper_sandbox
-                    | Nav.Keeper_config );
+                    | Nav.Keeper_config
+                    | Nav.Keeper_logs
+                    | Nav.Keeper_identity );
                   _;
                 }
             | Nav.Dive_work _
@@ -3479,6 +3908,24 @@ and execute_action ~now (m : Model.t) action =
                  Nav.Knowledge_board ->
             let knowledge = Knowledge_store.toggle_signal_only m.knowledge in
             let next = { m with knowledge } in
+            (next, View_fetches.fetches_for_current_view next)
+        | Nav.Infra
+          when Nav.equal_infra_tab m.infra.active_tab Nav.Infra_code ->
+            let scope = next_code_scope m in
+            let infra = Infra_store.set_code_scope scope m.infra in
+            let scope_lbl =
+              match scope with
+              | Wire_infra.Ws_project -> "project"
+              | Wire_infra.Ws_repo id -> "repo:" ^ id
+              | Wire_infra.Ws_keeper k -> "keeper:" ^ k
+            in
+            let next =
+              { m with infra }
+              |> Model.with_toast ~now ~level:Model.Toast_info
+                   (Say.make
+                      ~ko:("코드 범위: " ^ scope_lbl)
+                      ~en:("Code scope: " ^ scope_lbl))
+            in
             (next, View_fetches.fetches_for_current_view next)
         | Nav.Infra
           when Nav.equal_infra_tab m.infra.active_tab Nav.Infra_activity_logs ->
@@ -3555,6 +4002,8 @@ and execute_action ~now (m : Model.t) action =
                 (next, View_fetches.fetches_for_current_view next)
             | Nav.Work -> (
                 match m.work.active_tab with
+                | Nav.Work_harness ->
+                    open_harness_overrule_for_selected ~verdict:"approve" ~now m
                 | Nav.Work_pipeline
                   when m.nav.pane_index = 1
                        && Model.work_pipeline_has_linked_card m -> (
@@ -3599,13 +4048,16 @@ and execute_action ~now (m : Model.t) action =
                    | Nav.Keeper_tool_calls
                    | Nav.Keeper_work_candle
                    | Nav.Keeper_sandbox
-                   | Nav.Keeper_config );
+                   | Nav.Keeper_config
+                   | Nav.Keeper_logs
+                   | Nav.Keeper_identity );
                  _;
                })
         | Some
             ( Nav.Dive_work _
             | Nav.Dive_knowledge
                 (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
+            | Nav.Dive_runtime (Nav.Fusion_dive _)
             | Nav.Dive_infra _ ) ->
             (m, [])
         | None -> (
@@ -3666,27 +4118,98 @@ and execute_action ~now (m : Model.t) action =
               let next = { m with keeper_context } in
               (next, View_fetches.fetches_for_current_view next)
           | None -> (
-              if
-                Option.is_some m.nav.overlay
-                || Option.is_some (Model.active_dive m)
-              then (m, [])
+              if Option.is_some m.nav.overlay then (m, [])
               else
-                match m.nav.workspace with
-                | Nav.Work
-                  when Nav.equal_work_tab m.work.active_tab Nav.Work_pipeline ->
-                    let work = Work_store.toggle_verification_view m.work in
-                    let next = { m with work } in
+                match Model.active_dive m with
+                | Some (Nav.Dive_work (Nav.Verification_dive _)) ->
+                    let work = Work_store.cycle_verification_dive_tab m.work in
+                    let nav = { m.nav with dive_scroll_offset = 0 } in
+                    let next = { m with nav; work } in
                     (next, View_fetches.fetches_for_current_view next)
-                | Nav.Runtime
-                  when Nav.equal_runtime_tab m.runtime.active_tab
-                         Nav.Runtime_tools_usage ->
-                    let runtime = Runtime_store.cycle_tools_subview m.runtime in
-                    let nav = { m.nav with pane_index = 0 } in
-                    let next = { m with nav; runtime } in
+                | Some (Nav.Dive_keeper { tab = Nav.Keeper_memory; _ }) ->
+                    let knowledge =
+                      Knowledge_store.cycle_keeper_memory_subview m.knowledge
+                    in
+                    let nav = { m.nav with dive_scroll_offset = 0 } in
+                    let next = { m with nav; knowledge } in
                     (next, View_fetches.fetches_for_current_view next)
-                | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Keepers
-                | Nav.Runtime | Nav.Infra ->
-                    (m, []))))
+                | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_logs }) ->
+                    let keeper_context =
+                      Keeper_context_store.toggle_logs_subview ~keeper:name
+                        m.keeper_context
+                    in
+                    let next = { m with keeper_context } in
+                    (next, View_fetches.fetches_for_current_view next)
+                | Some
+                    ( Nav.Dive_work (Nav.Goal_dive _ | Nav.Task_dive _)
+                    | Nav.Dive_keeper
+                        {
+                          tab =
+                            ( Nav.Keeper_chat
+                            | Nav.Keeper_context
+                            | Nav.Keeper_tool_calls
+                            | Nav.Keeper_work_candle
+                            | Nav.Keeper_sandbox
+                            | Nav.Keeper_config
+                            | Nav.Keeper_identity );
+                          _;
+                        }
+                    | Nav.Dive_knowledge _
+                    | Nav.Dive_runtime _
+                    | Nav.Dive_infra _ ) ->
+                    (m, [])
+                | None -> (
+                    match m.nav.workspace with
+                    | Nav.Work
+                      when Nav.equal_work_tab m.work.active_tab
+                             Nav.Work_pipeline ->
+                        let work = Work_store.toggle_verification_view m.work in
+                        let next = { m with work } in
+                        (next, View_fetches.fetches_for_current_view next)
+                    | Nav.Knowledge
+                      when Nav.equal_knowledge_tab m.knowledge.active_tab
+                             Nav.Knowledge_memory ->
+                        let knowledge =
+                          Knowledge_store.cycle_memory_subview m.knowledge
+                        in
+                        let next = { m with knowledge } in
+                        (next, View_fetches.fetches_for_current_view next)
+                    | Nav.Keepers
+                      when (m.nav.pane_index = 1 || m.nav.zoomed)
+                           && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
+                                Nav.Keeper_memory ->
+                        let knowledge =
+                          Knowledge_store.cycle_keeper_memory_subview
+                            m.knowledge
+                        in
+                        let nav = { m.nav with dive_scroll_offset = 0 } in
+                        let next = { m with nav; knowledge } in
+                        (next, View_fetches.fetches_for_current_view next)
+                    | Nav.Keepers
+                      when (m.nav.pane_index = 1 || m.nav.zoomed)
+                           && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
+                                Nav.Keeper_logs -> (
+                        match Fleet_store.selected_keeper_summary m.fleet with
+                        | Some k ->
+                            let keeper_context =
+                              Keeper_context_store.toggle_logs_subview
+                                ~keeper:k.name m.keeper_context
+                            in
+                            let next = { m with keeper_context } in
+                            (next, View_fetches.fetches_for_current_view next)
+                        | None -> (m, []))
+                    | Nav.Runtime
+                      when Nav.equal_runtime_tab m.runtime.active_tab
+                             Nav.Runtime_tools_usage ->
+                        let runtime =
+                          Runtime_store.cycle_tools_subview m.runtime
+                        in
+                        let nav = { m.nav with pane_index = 0 } in
+                        let next = { m with nav; runtime } in
+                        (next, View_fetches.fetches_for_current_view next)
+                    | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Keepers
+                    | Nav.Runtime | Nav.Infra ->
+                        (m, [])))))
   | Keymap.Context_primary_action -> (
       match active_artifact_target m with
       | Some art ->
@@ -3759,7 +4282,9 @@ and execute_action ~now (m : Model.t) action =
                        | Nav.Keeper_memory
                        | Nav.Keeper_work_candle
                        | Nav.Keeper_sandbox
-                       | Nav.Keeper_config );
+                       | Nav.Keeper_config
+                       | Nav.Keeper_logs
+                       | Nav.Keeper_identity );
                    }) ->
                 let rest =
                   match m.nav.dive_stack with _ :: tl -> tl | [] -> []
@@ -4004,7 +4529,9 @@ and execute_action ~now (m : Model.t) action =
                       | Nav.Keeper_tool_calls
                       | Nav.Keeper_work_candle
                       | Nav.Keeper_sandbox
-                      | Nav.Keeper_config );
+                      | Nav.Keeper_config
+                      | Nav.Keeper_logs
+                      | Nav.Keeper_identity );
                     _;
                   }
               | Nav.Dive_work _
@@ -4039,6 +4566,9 @@ and execute_action ~now (m : Model.t) action =
                  || Nav.equal_runtime_tab m.runtime.active_tab Nav.Runtime_fusion
             ->
               open_fusion_launch_modal m
+          | Nav.Infra when Nav.equal_infra_tab m.infra.active_tab Nav.Infra_code
+            ->
+              Update_nav.open_inline_modal m Nav.Code_search_form
           | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Keepers | Nav.Runtime
           | Nav.Infra ->
               (m, []))
@@ -4059,6 +4589,32 @@ and execute_action ~now (m : Model.t) action =
         | Nav.Infra ->
             (m, []))
   | Keymap.Unbind_connector -> (
+      match active_keeper_for_tab Nav.Keeper_identity m with
+      | Some keeper -> (
+          let ks =
+            Keeper_context_store.get_keeper ~keeper m.keeper_context
+          in
+          let entries = Update_nav.keeper_identity_entries m ~name:keeper in
+          match
+            List.nth_opt entries
+              (Update_nav.clamp_index (List.length entries)
+                 ks.identity_selected_idx)
+          with
+          | Some (Update_nav.Identity_oauth { provider; _ }) ->
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make
+                     ~ko:("OAuth 연결 해제 요청: " ^ provider)
+                     ~en:("Disconnecting OAuth provider: " ^ provider))
+                  m
+              , [
+                  Cmd.Http_post
+                    {
+                      epoch = m.epoch;
+                      req = Cmd.Post_oauth_disconnect { keeper; provider };
+                    };
+                ] )
+          | Some Update_nav.Identity_github | None -> (m, []))
+      | None ->
       if Option.is_some m.nav.overlay || Option.is_some (Model.active_dive m)
       then (m, [])
       else
@@ -4179,7 +4735,9 @@ and execute_action ~now (m : Model.t) action =
                     | Nav.Keeper_context
                     | Nav.Keeper_tool_calls
                     | Nav.Keeper_work_candle
-                    | Nav.Keeper_sandbox );
+                    | Nav.Keeper_sandbox
+                    | Nav.Keeper_logs
+                    | Nav.Keeper_identity );
                   _;
                 }
             | Nav.Dive_knowledge _
@@ -4188,6 +4746,9 @@ and execute_action ~now (m : Model.t) action =
             (m, [])
         | None -> (
             match m.nav.workspace with
+            | Nav.Work
+              when Nav.equal_work_tab m.work.active_tab Nav.Work_harness ->
+                open_harness_overrule_for_selected ~verdict:"approve" ~now m
             | Nav.Work
               when Nav.equal_work_tab m.work.active_tab Nav.Work_pipeline -> (
                 if m.nav.pane_index = 1 && Model.work_pipeline_has_linked_card m
@@ -4218,6 +4779,12 @@ and execute_action ~now (m : Model.t) action =
                   match Work_store.selected_goal m.work with
                   | Some g -> goal_action_on_approve ~now m g
                   | None -> (m, []))
+            | Nav.Infra
+              when Nav.equal_infra_tab m.infra.active_tab
+                     Nav.Infra_activity_logs ->
+                let infra = Infra_store.toggle_acting_rail m.infra in
+                let next = Update_nav.clamp_for_pane { m with infra } in
+                (next, View_fetches.fetches_for_current_view next)
             | Nav.Knowledge
               when Nav.equal_knowledge_tab m.knowledge.active_tab
                      Nav.Knowledge_memory -> (
@@ -4323,6 +4890,8 @@ and execute_action ~now (m : Model.t) action =
                     | Some tk ->
                         Update_nav.open_inline_modal m (Nav.Task_cancel tk.id)
                     | None -> (m, []))
+                | Nav.Work_harness ->
+                    open_harness_overrule_for_selected ~verdict:"reject" ~now m
                 | Nav.Work_schedules
                 | Nav.Work_inbox
                 | Nav.Work_candle_scorecard ->
@@ -4391,6 +4960,46 @@ and execute_action ~now (m : Model.t) action =
                   { m with nav = { m.nav with dive_scroll_offset = 0 }; knowledge }
                 in
                 (next, View_fetches.fetches_for_current_view next)
+            | Some (Nav.Dive_runtime (Nav.Fusion_dive run_id)) -> (
+                let post_id_opt =
+                  match Runtime_store.fusion_detail_for ~run_id m.runtime with
+                  | Some { evidence = Wire_runtime.Evidence_recorded p; _ } ->
+                      Some p.post_id
+                  | Some
+                      {
+                        evidence =
+                          Wire_runtime.Evidence_pending
+                          | Wire_runtime.Evidence_absent;
+                        _;
+                      }
+                  | None -> (
+                      match
+                        Runtime_store.historical_evidence_for_run ~run_id
+                          m.runtime
+                      with
+                      | Some ev -> Some ev.post_id
+                      | None -> None)
+                in
+                match post_id_opt with
+                | Some post_id ->
+                    ( Model.with_toast ~now ~level:Model.Toast_info
+                        (Say.make
+                           ~ko:("보드 증거 불러오는 중: " ^ post_id)
+                           ~en:("Loading board evidence: " ^ post_id))
+                        m
+                    , [
+                        Cmd.Http_get
+                          {
+                            epoch = m.epoch;
+                            req = Cmd.Get_fusion_board_evidence { post_id };
+                          };
+                      ] )
+                | None ->
+                    ( Model.with_toast ~now ~level:Model.Toast_info
+                        (Say.make ~ko:"연결된 보드 증거가 없습니다"
+                           ~en:"No linked board evidence for this fusion run")
+                        m
+                    , [] ))
             | Some
                 ( Nav.Dive_knowledge
                     ( Nav.Thread_dive _
@@ -4402,11 +5011,13 @@ and execute_action ~now (m : Model.t) action =
                         | Nav.Keeper_context
                         | Nav.Keeper_tool_calls
                         | Nav.Keeper_work_candle
-                        | Nav.Keeper_sandbox );
+                        | Nav.Keeper_sandbox
+                        | Nav.Keeper_logs
+                        | Nav.Keeper_identity );
                       _;
                     }
                 | Nav.Dive_work _
-                | Nav.Dive_runtime _
+                | Nav.Dive_runtime (Nav.Tool_dive _)
                 | Nav.Dive_infra _ ) ->
                 (m, [])
             | None ->
@@ -4435,8 +5046,59 @@ and execute_action ~now (m : Model.t) action =
                     { m with nav = { m.nav with dive_scroll_offset = 0 }; knowledge }
                   in
                   (next, View_fetches.fetches_for_current_view next)
+                else if
+                  Nav.equal_workspace m.nav.workspace Nav.Runtime
+                  && Nav.equal_runtime_tab m.runtime.active_tab
+                       Nav.Runtime_fusion
+                then (
+                  match Runtime_store.selected_fusion_run m.runtime with
+                  | Some run -> (
+                      let post_id_opt =
+                        match
+                          Runtime_store.fusion_detail_for ~run_id:run.run_id
+                            m.runtime
+                        with
+                        | Some { evidence = Wire_runtime.Evidence_recorded p; _ }
+                          ->
+                            Some p.post_id
+                        | Some
+                            {
+                              evidence =
+                                Wire_runtime.Evidence_pending
+                                | Wire_runtime.Evidence_absent;
+                              _;
+                            }
+                        | None -> (
+                            match
+                              Runtime_store.historical_evidence_for_run
+                                ~run_id:run.run_id m.runtime
+                            with
+                            | Some ev -> Some ev.post_id
+                            | None -> None)
+                      in
+                      match post_id_opt with
+                      | Some post_id ->
+                          ( Model.with_toast ~now ~level:Model.Toast_info
+                              (Say.make
+                                 ~ko:("보드 증거 불러오는 중: " ^ post_id)
+                                 ~en:("Loading board evidence: " ^ post_id))
+                              m
+                          , [
+                              Cmd.Http_get
+                                {
+                                  epoch = m.epoch;
+                                  req =
+                                    Cmd.Get_fusion_board_evidence { post_id };
+                                };
+                            ] )
+                      | None -> (m, []))
+                  | None -> (m, []))
                 else (m, [])))
   | Keymap.Configure_provider_key -> (
+      match active_keeper_for_tab Nav.Keeper_identity m with
+      | Some keeper ->
+          Update_nav.open_inline_modal m (Nav.Github_token_form keeper)
+      | None ->
       if Option.is_some m.nav.overlay || Option.is_some (Model.active_dive m)
       then (m, [])
       else
@@ -4451,6 +5113,48 @@ and execute_action ~now (m : Model.t) action =
         | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Keepers | Nav.Infra ->
             (m, []))
   | Keymap.Account_login -> (
+      match active_keeper_for_tab Nav.Keeper_identity m with
+      | Some keeper -> (
+          let ks =
+            Keeper_context_store.get_keeper ~keeper m.keeper_context
+          in
+          let entries = Update_nav.keeper_identity_entries m ~name:keeper in
+          match
+            List.nth_opt entries
+              (Update_nav.clamp_index (List.length entries)
+                 ks.identity_selected_idx)
+          with
+          | Some (Update_nav.Identity_oauth { provider; _ }) ->
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make
+                     ~ko:("OAuth 로그인 시작: " ^ provider)
+                     ~en:("Starting OAuth login: " ^ provider))
+                  m
+              , [
+                  Cmd.Http_post
+                    {
+                      epoch = m.epoch;
+                      req = Cmd.Post_oauth_login { keeper; provider };
+                    };
+                ] )
+          | Some Update_nav.Identity_github ->
+              let keeper_context =
+                Keeper_context_store.start_github_login ~keeper m.keeper_context
+              in
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make
+                     ~ko:("GitHub 기기 로그인 시작: " ^ keeper)
+                     ~en:("Starting GitHub device login: " ^ keeper))
+                  { m with keeper_context }
+              , [
+                  Cmd.Http_post_stream
+                    {
+                      epoch = m.epoch;
+                      req = Cmd.Stream_github_login { keeper };
+                    };
+                ] )
+          | None -> (m, []))
+      | None ->
       if Option.is_some m.nav.overlay || Option.is_some (Model.active_dive m)
       then (m, [])
       else
@@ -4459,6 +5163,38 @@ and execute_action ~now (m : Model.t) action =
         | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Keepers | Nav.Infra ->
             (m, []))
   | Keymap.Poll_account_login -> (
+      match active_keeper_for_tab Nav.Keeper_identity m with
+      | Some keeper -> (
+          let ks =
+            Keeper_context_store.get_keeper ~keeper m.keeper_context
+          in
+          match ks.oauth_pending_login with
+          | Some (Wire_keeper_context.Oauth_login_exchange ex) ->
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make
+                     ~ko:("OAuth 시도 상태 조회: " ^ ex.attempt_id)
+                     ~en:("Polling OAuth attempt: " ^ ex.attempt_id))
+                  m
+              , [
+                  Cmd.Http_get
+                    {
+                      epoch = m.epoch;
+                      req =
+                        Cmd.Get_oauth_attempt_status
+                          {
+                            keeper;
+                            provider = ex.provider;
+                            attempt_id = ex.attempt_id;
+                          };
+                    };
+                ] )
+          | Some (Wire_keeper_context.Oauth_login_direct _) | None ->
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make ~ko:"진행 중인 OAuth 로그인이 없습니다 ([l] 시작)"
+                     ~en:"No pending OAuth attempt ([l] to start)")
+                  m
+              , [] ))
+      | None ->
       if Option.is_some m.nav.overlay || Option.is_some (Model.active_dive m)
       then (m, [])
       else
@@ -4507,9 +5243,22 @@ and execute_action ~now (m : Model.t) action =
                     | Nav.Wiki_dive _
                     | Nav.Memory_diff_dive _ )
                 | Nav.Dive_runtime _
-                | Nav.Dive_infra _ )
+                | Nav.Dive_infra _ ) ->
+                (m, [])
             | None ->
-                (m, [])))
+                if
+                  Nav.equal_workspace m.nav.workspace Nav.Work
+                  && Nav.equal_work_tab m.work.active_tab Nav.Work_harness
+                then
+                  match Work_store.selected_harness_verdict m.work with
+                  | Some v when not (String.equal (String.trim v.notes_hash) "") ->
+                      ( Model.with_toast ~now ~level:Model.Toast_info
+                          (Say.make ~ko:"notes_hash 복사됨"
+                             ~en:"Copied notes_hash")
+                          m
+                      , [ Cmd.Copy_clipboard v.notes_hash ] )
+                  | Some _ | None -> (m, [])
+                else (m, [])))
   | Keymap.Dismiss_errors -> (
       if Option.is_some m.nav.overlay then (m, [])
       else
@@ -4529,7 +5278,9 @@ and execute_action ~now (m : Model.t) action =
                     | Nav.Keeper_memory
                     | Nav.Keeper_work_candle
                     | Nav.Keeper_sandbox
-                    | Nav.Keeper_config );
+                    | Nav.Keeper_config
+                    | Nav.Keeper_logs
+                    | Nav.Keeper_identity );
                   _;
                 }
             | Nav.Dive_work (Nav.Goal_dive _)
@@ -4559,6 +5310,8 @@ and execute_action ~now (m : Model.t) action =
                     | Some _ ->
                         Update_nav.open_inline_modal m (Nav.Harness_overrule "")
                     | None -> (m, []))
+                | Nav.Work_harness ->
+                    open_harness_overrule_for_selected ~verdict:"reject" ~now m
                 | Nav.Work_pipeline
                 | Nav.Work_schedules
                 | Nav.Work_inbox
@@ -4683,6 +5436,51 @@ and execute_action ~now (m : Model.t) action =
           , [ Cmd.Copy_clipboard url ] )
       | None -> (m, []))
   | Keymap.Probe_sandbox -> (
+      if
+        Option.is_none m.nav.overlay
+        && Option.is_none (Model.active_dive m)
+        && Nav.equal_workspace m.nav.workspace Nav.Infra
+        && Nav.equal_infra_tab m.infra.active_tab Nav.Infra_code
+      then
+        let m1, _ = Update_nav.open_inline_modal m Nav.Code_finder_form in
+        let scope = m1.infra.code.scope in
+        let need_files =
+          match m1.infra.code.files_catalog with
+          | Observed.Value { data = sc, _; stale = false; _ } ->
+              not (Wire_infra.equal_workspace_scope sc scope)
+          | Observed.Loading _
+          | Observed.Value { stale = true; _ }
+          | Observed.Absent
+          | Observed.Unreported
+          | Observed.Failed _ ->
+              true
+        in
+        let cmds =
+          if need_files then
+            [ Cmd.Http_get { epoch = m1.epoch; req = Cmd.Get_workspace_files { scope } } ]
+          else []
+        in
+        (m1, cmds)
+      else if
+        Option.is_none m.nav.overlay
+        && Option.is_none (Model.active_dive m)
+        && Nav.equal_workspace m.nav.workspace Nav.Runtime
+        && Nav.equal_runtime_tab m.runtime.active_tab Nav.Runtime_addons_browser
+      then
+        let runtime = Runtime_store.toggle_addon_catalog_mode m.runtime in
+        let nav = { m.nav with pane_index = 0 } in
+        let next =
+          { m with nav; runtime }
+          |> Model.with_toast ~now ~level:Model.Toast_info
+               (if runtime.addon_catalog_mode then
+                  Say.make ~ko:"애드온 패키지 카탈로그 보기"
+                    ~en:"Addons: Package Catalog browser"
+                else
+                  Say.make ~ko:"애드온 인스턴스 & 브라우저 보기"
+                    ~en:"Addons: Instances & Browser view")
+        in
+        (next, View_fetches.fetches_for_current_view next)
+      else
       let target_opt =
         if Option.is_some m.nav.overlay then None
         else
@@ -4692,7 +5490,11 @@ and execute_action ~now (m : Model.t) action =
               (Nav.Dive_keeper { name = keeper; tab = Nav.Keeper_sandbox }) ->
               Some (`Keeper keeper, keeper)
           | Some
-              ( Nav.Dive_infra (Nav.Lane_dive _ | Nav.Incident_dive _)
+              ( Nav.Dive_infra
+                  ( Nav.Lane_dive _
+                  | Nav.Incident_dive _
+                  | Nav.Runtime_trace_dive _
+                  | Nav.Log_detail_dive _ )
               | Nav.Dive_keeper
                   {
                     tab =
@@ -4701,7 +5503,9 @@ and execute_action ~now (m : Model.t) action =
                       | Nav.Keeper_tool_calls
                       | Nav.Keeper_memory
                       | Nav.Keeper_work_candle
-                      | Nav.Keeper_config );
+                      | Nav.Keeper_config
+                      | Nav.Keeper_logs
+                      | Nav.Keeper_identity );
                     _;
                   }
               | Nav.Dive_work _

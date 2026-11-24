@@ -841,7 +841,7 @@ let render_verification_dive ~req_id ~(model : Model.t) ~cache ~(rect : Rect.t)
         (Card.default_spec ~title) with
         subtitle = (match v_opt with Some v -> Some v.task_title | None -> None);
         badge;
-        hotkey = Some "[a] Approve · [x] Reject · [Space] JSON · [Esc] Back";
+        hotkey = Some "[v] Tab · [a] Approve · [x] Reject · [h] Overrule · [Space] JSON · [Esc] Back";
         focused = Model.body_has_focus model;
       }
     in
@@ -907,50 +907,109 @@ let render_verification_dive ~req_id ~(model : Model.t) ~cache ~(rect : Rect.t)
                 ~val_attrs:Attr.bold ();
               incr y
           | Some _ | None -> ());
+          (* [v] Evidence Panel Tab Bar: Evidence | Summary | Specs | TLC *)
+          if !y < body_bot then begin
+            let tab_item t ko en =
+              let active =
+                Work_store.equal_verification_dive_tab
+                  model.work.verification_dive_tab t
+              in
+              let lbl = Ops_common.say model ~ko ~en in
+              if active then "[" ^ lbl ^ "]" else " " ^ lbl ^ " "
+            in
+            let bar =
+              Printf.sprintf "[v] %s  %s  %s  %s"
+                (tab_item Work_store.Verif_tab_evidence "증거" "Evidence")
+                (tab_item Work_store.Verif_tab_summary "요약" "Summary")
+                (tab_item Work_store.Verif_tab_specs "명세" "Specs")
+                (tab_item Work_store.Verif_tab_tlc "TLC" "TLC")
+            in
+            ignore
+              (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
+                 ~max_w:content.w
+                 ~style:(Typography.accent ~bg ~bold:true theme)
+                 bar);
+            incr y
+          end;
           let rest =
             Rect.make ~x:content.x ~y:!y ~w:content.w
               ~h:(Int.max 0 (body_bot - !y))
           in
-          let chk_r, diff_r =
-            match
-              Layout.split_v ~gap:0 rest [ Layout.Ratio 0.44; Layout.Flex 1 ]
-            with
-            | [ a; b ] -> (a, b)
-            | _ -> (rest, Rect.empty)
+          let draw_tab_lines ~(rect : Rect.t) lines =
+            if not (Rect.is_empty rect) then
+              let max_s = Int.max 0 (List.length lines - Int.max 1 rect.h) in
+              let scroll =
+                Int.min max_s (Int.max 0 model.nav.dive_scroll_offset)
+              in
+              List.iteri
+                (fun i ln ->
+                  let py = rect.y + i in
+                  if py < Rect.bottom rect then
+                    let st =
+                      if String.starts_with ~prefix:"[CanAdmin" ln then
+                        Typography.status ~bg ~bold:true theme
+                          Theme.Status_attention
+                      else if String.starts_with ~prefix:"[unreadable" ln then
+                        Typography.status ~bg theme Theme.Status_critical
+                      else if String.starts_with ~prefix:"[" ln then
+                        Typography.accent ~bg ~bold:true theme
+                      else Typography.primary ~bg theme
+                    in
+                    ignore
+                      (Ops_common.put_line ~clip:rect grid ~x:rect.x ~y:py
+                         ~max_w:rect.w ~style:st ln))
+                (Store_scroll.drop scroll lines |> List.take rect.h)
           in
-          if not (Rect.is_empty chk_r) then begin
-            Card.draw_hairline ~pad_x:0 ~bg
-              ~label:
-                (Ops_common.say model ~ko:"증거 참조 체크리스트"
-                   ~en:"Evidence Refs Checklist")
-              grid ~rect:chk_r ~y:chk_r.y ~theme;
-            draw_evidence_checklist ~scroll:model.nav.dive_scroll_offset grid
-              ~rect:
-                (Rect.make ~x:chk_r.x ~y:(chk_r.y + 1) ~w:chk_r.w
-                   ~h:(Int.max 0 (chk_r.h - 1)))
-              ~theme ~model v
-          end;
-          if not (Rect.is_empty diff_r) then begin
-            Card.draw_hairline ~pad_x:0 ~bg
-              ~label:
-                (Ops_common.say model ~ko:"구조화 반려 Diff"
-                   ~en:"Structured Rejection Diff")
-              grid ~rect:diff_r ~y:diff_r.y ~theme;
-            let dr =
-              Rect.make ~x:diff_r.x ~y:(diff_r.y + 1) ~w:diff_r.w
-                ~h:(Int.max 0 (diff_r.h - 1))
-            in
-            ignore
-              (Diff.draw grid ~rect:dr ~theme
-                 ~scroll:model.nav.dive_scroll_offset
-                 (Work_views.build_rejection_diff_rows ~model v))
-          end;
+          let tab_lines =
+            Update_nav.verification_dive_tab_lines ~width:content.w model v
+          in
+          (match model.work.verification_dive_tab with
+          | Work_store.Verif_tab_summary
+          | Work_store.Verif_tab_specs
+          | Work_store.Verif_tab_tlc ->
+              draw_tab_lines ~rect:rest tab_lines
+          | Work_store.Verif_tab_evidence ->
+              let chk_r, diff_r =
+                match
+                  Layout.split_v ~gap:0 rest [ Layout.Ratio 0.56; Layout.Flex 1 ]
+                with
+                | [ a; b ] -> (a, b)
+                | _ -> (rest, Rect.empty)
+              in
+              if not (Rect.is_empty chk_r) then begin
+                Card.draw_hairline ~pad_x:0 ~bg
+                  ~label:
+                    (Ops_common.say model ~ko:"검증 증거 번들 (/verification/evidence)"
+                       ~en:"Verification Evidence Bundle")
+                  grid ~rect:chk_r ~y:chk_r.y ~theme;
+                let ev_r =
+                  Rect.make ~x:chk_r.x ~y:(chk_r.y + 1) ~w:chk_r.w
+                    ~h:(Int.max 0 (chk_r.h - 1))
+                in
+                draw_tab_lines ~rect:ev_r tab_lines
+              end;
+              if not (Rect.is_empty diff_r) then begin
+                Card.draw_hairline ~pad_x:0 ~bg
+                  ~label:
+                    (Ops_common.say model ~ko:"구조화 반려 Diff"
+                       ~en:"Structured Rejection Diff")
+                  grid ~rect:diff_r ~y:diff_r.y ~theme;
+                let dr =
+                  Rect.make ~x:diff_r.x ~y:(diff_r.y + 1) ~w:diff_r.w
+                    ~h:(Int.max 0 (diff_r.h - 1))
+                in
+                ignore
+                  (Diff.draw grid ~rect:dr ~theme
+                     ~scroll:model.nav.dive_scroll_offset
+                     (Work_views.build_rejection_diff_rows ~model v))
+              end);
           if action_h = 1 then
             ignore
               (Ops_common.draw_keycap_bar grid
                  ~rect:(Rect.make ~x:content.x ~y:(bot - 1) ~w:content.w ~h:1)
                  ~theme ~bg
                  [
+                   ("v", Ops_common.say model ~ko:"증거탭" ~en:"Tab");
                    ("a", Ops_common.say model ~ko:"승인" ~en:"Approve");
                    ("x", Ops_common.say model ~ko:"반려" ~en:"Reject");
                    ("Space", "JSON");

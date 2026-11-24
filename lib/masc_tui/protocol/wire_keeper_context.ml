@@ -888,3 +888,479 @@ let rec unfold_json_strings (json : Yojson.Safe.t) : Yojson.Safe.t =
         | exception Yojson.Json_error _ -> json
       else json
   | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> json
+
+(* --- Wave 3: Keeper Logs/Metrics & OAuth/GitHub Identity --- *)
+
+let keeper_metrics_path ~keeper =
+  (* Live server strictly rejects ?limit= on /api/v1/keepers/:name/metrics *)
+  Printf.sprintf "/api/v1/keepers/%s/metrics" (percent_encode keeper)
+
+let keeper_sandbox_logs_path ~keeper ?(tail = 200) () =
+  Printf.sprintf "/api/v1/gate/keeper-sandbox-logs?name=%s&tail=%d"
+    (percent_encode keeper) (max 1 tail)
+
+let oauth_providers_path = "/api/v1/keepers/oauth/providers"
+
+let oauth_attached_tools_path ~keeper =
+  "/api/v1/keepers/oauth/attached-tools?keeper=" ^ percent_encode keeper
+
+let oauth_attempt_status_path ~keeper ~provider ~attempt_id =
+  Printf.sprintf
+    "/api/v1/keepers/oauth/attempt-status?keeper=%s&provider=%s&attempt_id=%s"
+    (percent_encode keeper) (percent_encode provider) (percent_encode attempt_id)
+
+let oauth_login_path ~keeper =
+  Printf.sprintf "/api/v1/keepers/%s/oauth-login" (percent_encode keeper)
+
+let oauth_identity_refresh_path ~keeper =
+  Printf.sprintf "/api/v1/keepers/%s/identity-refresh" (percent_encode keeper)
+
+let oauth_identity_switch_path ~keeper =
+  Printf.sprintf "/api/v1/keepers/%s/identity-switch" (percent_encode keeper)
+
+let oauth_disconnect_path = "/api/v1/keepers/oauth/disconnect"
+
+let github_identity_path ~keeper =
+  Printf.sprintf "/api/v1/keepers/%s/github-identity" (percent_encode keeper)
+
+let github_login_path ~keeper =
+  Printf.sprintf "/api/v1/keepers/%s/github-login" (percent_encode keeper)
+
+let github_token_path ~keeper =
+  Printf.sprintf "/api/v1/keepers/%s/github-token" (percent_encode keeper)
+
+type keeper_metrics_point = {
+  ts_unix : float;
+  trace_id : string;
+  channel : string;
+  latency_ms : int;
+  cost_usd : float option;
+  work_kind : string;
+  tool_call_count : int;
+  tools_used : string list;
+  message_count : int option;
+}
+
+type keeper_metrics_snapshot = {
+  keeper : string;
+  sample_points : int;
+  turn_points : int;
+  heartbeat_points : int;
+  proactive_points : int;
+  tool_call_count : int;
+  scanned_rows : int;
+  skipped_rows : int;
+  top_tools : (string * int) list;
+  series : keeper_metrics_point list;
+}
+
+type sandbox_log_instance = {
+  instance_id : string;
+  instance_name : string;
+  running : bool option;
+  stdout : string;
+  stderr : string;
+  error : string option;
+}
+
+type keeper_sandbox_logs = {
+  keeper : string;
+  backend : string option;
+  state : string;
+  reason : string option;
+  tail : int;
+  instances : sandbox_log_instance list;
+}
+
+type oauth_provider_row = {
+  id : string;
+  label : string;
+  app_state_kind : string;
+  problem : string option;
+  callback_url : string option;
+}
+
+type oauth_providers_snapshot = {
+  providers : oauth_provider_row list;
+  callback_url : string option;
+  callback_problem : string option;
+}
+
+type oauth_attached_provider = {
+  provider : string;
+  provider_label : string;
+  attached : bool;
+  app_state_kind : string;
+  enabled : bool option;
+  switch_problem : string option;
+  also_on : string list;
+  discovered_at : float option;
+  tools : string list;
+  problem : string option;
+}
+
+type oauth_attached_tools_snapshot = {
+  keeper : string;
+  providers : oauth_attached_provider list;
+}
+
+type oauth_attempt_status = {
+  kind : string;
+  expires_at : float option;
+  detail : string option;
+}
+
+type oauth_login_result =
+  | Oauth_login_exchange of {
+      provider : string;
+      provider_label : string;
+      authorize_url : string;
+      attempt_id : string;
+      expires_at : float option;
+    }
+  | Oauth_login_direct of {
+      provider : string;
+      provider_label : string;
+      tool_count : int;
+      message : string;
+    }
+
+type github_auth_probe = {
+  authenticated : bool;
+  login : string option;
+  scopes : string list;
+  error : string option;
+}
+
+type github_identity_observation = {
+  keeper : string;
+  hostname : string;
+  config_dir : string;
+  projected_token_env_names : string list;
+  stored : github_auth_probe;
+  effective : github_auth_probe;
+  effective_probe_scope : string;
+  checked_at_unix : float;
+}
+
+let int_or_0_kc json key =
+  match optional_int_field json key with Ok (Some n) -> n | Ok None | Error _ -> 0
+
+let float_or_0_kc json key =
+  match optional_finite_float json key with
+  | Ok (Some f) -> f
+  | Ok None | Error _ -> 0.0
+
+let decode_keeper_metrics_point json =
+  let ts_unix = float_or_0_kc json "ts_unix" in
+  let trace_id =
+    match optional_string_field json "trace_id" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let channel =
+    match optional_string_field json "channel" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> "reactive"
+  in
+  let latency_ms = int_or_0_kc json "latency_ms" in
+  let* cost_usd = optional_finite_float json "cost_usd" in
+  let work_kind =
+    match optional_string_field json "work_kind" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let tool_call_count = int_or_0_kc json "tool_call_count" in
+  let* tools_used = optional_string_list json "tools_used" in
+  let* message_count = optional_int_field json "message_count" in
+  Ok
+    {
+      ts_unix;
+      trace_id;
+      channel;
+      latency_ms;
+      cost_usd;
+      work_kind;
+      tool_call_count;
+      tools_used;
+      message_count;
+    }
+
+let decode_keeper_metrics json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* keeper = required_nonblank_string body "keeper" in
+  let* series_items = optional_list_field body "series" in
+  let* series = decode_list "series" decode_keeper_metrics_point series_items in
+  let ws =
+    match optional_object_field body "window_summary" with
+    | Ok (Some w) -> w
+    | Ok None | Error _ -> `Assoc []
+  in
+  let* top_tool_items = optional_list_field ws "top_tools" in
+  let top_tools =
+    List.filter_map
+      (fun item ->
+        match optional_nonblank_string item "tool" with
+        | Ok (Some name) -> Some (name, int_or_0_kc item "count")
+        | Ok None | Error _ -> None)
+      top_tool_items
+  in
+  Ok
+    {
+      keeper;
+      sample_points = int_or_0_kc ws "sample_points";
+      turn_points = int_or_0_kc ws "turn_points";
+      heartbeat_points = int_or_0_kc ws "heartbeat_points";
+      proactive_points = int_or_0_kc ws "proactive_points";
+      tool_call_count = int_or_0_kc ws "tool_call_count";
+      scanned_rows = int_or_0_kc body "scanned_rows";
+      skipped_rows = int_or_0_kc body "skipped_rows";
+      top_tools;
+      series;
+    }
+
+let decode_sandbox_log_instance json =
+  let instance_id =
+    match optional_string_field json "instance_id" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let instance_name =
+    match optional_string_field json "instance_name" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> instance_id
+  in
+  let* running = optional_bool_field json "running" in
+  let stdout =
+    match optional_string_field json "stdout" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let stderr =
+    match optional_string_field json "stderr" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let* error = optional_nonblank_string json "error" in
+  Ok { instance_id; instance_name; running; stdout; stderr; error }
+
+let decode_keeper_sandbox_logs json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* keeper = required_nonblank_string body "keeper" in
+  let* backend = optional_nonblank_string body "backend" in
+  let state =
+    match optional_nonblank_string body "state" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> "no_instance"
+  in
+  let* reason = optional_nonblank_string body "reason" in
+  let tail = int_or_0_kc body "tail" in
+  let* inst_items = optional_list_field body "instances" in
+  let* instances =
+    decode_list "instances" decode_sandbox_log_instance inst_items
+  in
+  Ok { keeper; backend; state; reason; tail; instances }
+
+let extract_app_state json =
+  match optional_object_field json "app_state" with
+  | Ok (Some a) ->
+      let kind =
+        match optional_nonblank_string a "kind" with
+        | Ok (Some s) -> s
+        | Ok None | Error _ -> "none"
+      in
+      let prob =
+        match optional_nonblank_string a "problem" with Ok v -> v | Error _ -> None
+      in
+      (kind, prob)
+  | Ok None | Error _ -> ("none", None)
+
+let decode_oauth_provider_row json =
+  let* id = required_nonblank_string json "id" in
+  let label =
+    match optional_nonblank_string json "label" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> id
+  in
+  let app_state_kind, app_problem = extract_app_state json in
+  let top_problem =
+    match optional_nonblank_string json "problem" with Ok v -> v | Error _ -> None
+  in
+  let problem =
+    match top_problem with Some _ as p -> p | None -> app_problem
+  in
+  let callback_url =
+    match optional_object_field json "callback" with
+    | Ok (Some cb) -> (
+        match optional_nonblank_string cb "url" with Ok v -> v | Error _ -> None)
+    | Ok None | Error _ -> None
+  in
+  Ok { id; label; app_state_kind; problem; callback_url }
+
+let decode_oauth_providers json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* items = optional_list_field body "providers" in
+  let* providers = decode_list "providers" decode_oauth_provider_row items in
+  let callback_url, callback_problem =
+    match optional_object_field body "callback" with
+    | Ok (Some cb) ->
+        let u =
+          match optional_nonblank_string cb "url" with Ok v -> v | Error _ -> None
+        in
+        let p =
+          match optional_nonblank_string cb "problem" with
+          | Ok v -> v
+          | Error _ -> None
+        in
+        (u, p)
+    | Ok None | Error _ -> (None, None)
+  in
+  Ok { providers; callback_url; callback_problem }
+
+let decode_oauth_attached_provider json =
+  let* provider = required_nonblank_string json "provider" in
+  let provider_label =
+    match optional_nonblank_string json "provider_label" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> provider
+  in
+  let attached =
+    match optional_bool_field json "attached" with
+    | Ok (Some b) -> b
+    | Ok None | Error _ -> false
+  in
+  let app_state_kind, app_prob = extract_app_state json in
+  let* enabled = optional_bool_field json "enabled" in
+  let* switch_problem = optional_nonblank_string json "switch_problem" in
+  let* also_on = optional_string_list json "also_on" in
+  let* discovered_at = optional_finite_float json "discovered_at" in
+  let* tools = optional_string_list json "tools" in
+  let top_prob =
+    match optional_nonblank_string json "problem" with Ok v -> v | Error _ -> None
+  in
+  let problem = match top_prob with Some _ as p -> p | None -> app_prob in
+  Ok
+    {
+      provider;
+      provider_label;
+      attached;
+      app_state_kind;
+      enabled;
+      switch_problem;
+      also_on;
+      discovered_at;
+      tools;
+      problem;
+    }
+
+let decode_oauth_attached_tools json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* keeper = required_nonblank_string body "keeper" in
+  let* items = optional_list_field body "providers" in
+  let* providers = decode_list "providers" decode_oauth_attached_provider items in
+  Ok { keeper; providers }
+
+let decode_oauth_attempt_status json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* kind = required_nonblank_string body "kind" in
+  let* expires_at = optional_finite_float body "expires_at" in
+  let detail =
+    match optional_nonblank_string body "error" with
+    | Ok (Some s) -> Some s
+    | Ok None | Error _ -> (
+        match optional_nonblank_string body "detail" with
+        | Ok v -> v
+        | Error _ -> None)
+  in
+  Ok { kind; expires_at; detail }
+
+let decode_oauth_login_result json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* provider = required_nonblank_string body "provider" in
+  let provider_label =
+    match optional_nonblank_string body "provider_label" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> provider
+  in
+  match optional_nonblank_string body "authorize_url" with
+  | Ok (Some authorize_url) ->
+      let* attempt_id = required_nonblank_string body "attempt_id" in
+      let* expires_at = optional_finite_float body "expires_at" in
+      Ok
+        (Oauth_login_exchange
+           { provider; provider_label; authorize_url; attempt_id; expires_at })
+  | Ok None | Error _ ->
+      let tool_count = int_or_0_kc body "tool_count" in
+      let message =
+        match optional_string_field body "message" with
+        | Ok (Some s) -> s
+        | Ok None | Error _ -> "Connected"
+      in
+      Ok (Oauth_login_direct { provider; provider_label; tool_count; message })
+
+let decode_github_auth_probe json =
+  let authenticated =
+    match optional_bool_field json "authenticated" with
+    | Ok (Some b) -> b
+    | Ok None | Error _ -> false
+  in
+  let* login = optional_nonblank_string json "login" in
+  let* scopes = optional_string_list json "scopes" in
+  let* error = optional_nonblank_string json "error" in
+  Ok { authenticated; login; scopes; error }
+
+let decode_github_identity json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* keeper = required_nonblank_string body "keeper" in
+  let hostname =
+    match optional_nonblank_string body "hostname" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> "github.com"
+  in
+  let config_dir =
+    match optional_string_field body "config_dir" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let* projected_token_env_names =
+    optional_string_list body "projected_token_env_names"
+  in
+  let* stored_obj = required_object_field body "stored" in
+  let* stored = decode_github_auth_probe stored_obj in
+  let* eff_obj = required_object_field body "effective" in
+  let* effective = decode_github_auth_probe eff_obj in
+  let effective_probe_scope =
+    match optional_string_field body "effective_probe_scope" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let checked_at_unix = float_or_0_kc body "checked_at_unix" in
+  Ok
+    {
+      keeper;
+      hostname;
+      config_dir;
+      projected_token_env_names;
+      stored;
+      effective;
+      effective_probe_scope;
+      checked_at_unix;
+    }
+
+let encode_oauth_provider_body ~provider =
+  `Assoc [ ("provider", `String provider) ]
+
+let encode_oauth_switch_body ~provider ~enabled =
+  `Assoc [ ("provider", `String provider); ("enabled", `Bool enabled) ]
+
+let encode_oauth_disconnect_body ~keeper ~provider =
+  `Assoc [ ("keeper", `String keeper); ("provider", `String provider) ]
+
+let encode_github_token_body ~token ?hostname () =
+  `Assoc
+    (("token", `String token)
+    ::
+    (match hostname with
+    | Some h when not (String.equal (String.trim h) "") ->
+        [ ("hostname", `String (String.trim h)) ]
+    | Some _ | None -> []))

@@ -12,6 +12,7 @@ type work_tab =
   | Work_schedules
   | Work_inbox
   | Work_candle_scorecard
+  | Work_harness
 
 type knowledge_tab =
   | Knowledge_board
@@ -36,6 +37,7 @@ type runtime_tab =
 type infra_tab =
   | Infra_sandboxes
   | Infra_repos_changes
+  | Infra_code
   | Infra_activity_logs
 
 type keeper_tab =
@@ -46,6 +48,8 @@ type keeper_tab =
   | Keeper_work_candle
   | Keeper_sandbox
   | Keeper_config
+  | Keeper_logs
+  | Keeper_identity
 
 type work_dive_target =
   | Goal_dive of string
@@ -60,11 +64,14 @@ type knowledge_dive_target =
 
 type runtime_dive_target =
   | Tool_dive of string
+  | Fusion_dive of string
 
 type infra_dive_target =
   | Sandbox_dive of string
   | Lane_dive of string
   | Incident_dive of int
+  | Runtime_trace_dive of string
+  | Log_detail_dive of int
 
 type dive =
   | Dive_keeper of { name : string; tab : keeper_tab }
@@ -98,6 +105,9 @@ type inline_action_kind =
   | Repo_add_form
   | Board_new_post
   | Board_comment of { post_id : string; parent_id : string option }
+  | Github_token_form of string
+  | Code_finder_form
+  | Code_search_form
 
 type system_gate_kind =
   | Micro_viewport
@@ -157,6 +167,7 @@ let all_work_tabs =
     Work_schedules;
     Work_inbox;
     Work_candle_scorecard;
+    Work_harness;
   ]
 
 let work_tab_label = function
@@ -165,20 +176,23 @@ let work_tab_label = function
   | Work_schedules -> Say.make ~ko:"일정" ~en:"Schedules"
   | Work_inbox -> Say.make ~ko:"수신함" ~en:"Inbox"
   | Work_candle_scorecard -> Say.make ~ko:"캔들 · 성과" ~en:"Candle & Scorecard"
+  | Work_harness -> Say.make ~ko:"하네스" ~en:"Harness"
 
 let next_work_tab = function
   | Work_pipeline -> Work_tasks
   | Work_tasks -> Work_schedules
   | Work_schedules -> Work_inbox
   | Work_inbox -> Work_candle_scorecard
-  | Work_candle_scorecard -> Work_pipeline
+  | Work_candle_scorecard -> Work_harness
+  | Work_harness -> Work_pipeline
 
 let prev_work_tab = function
-  | Work_pipeline -> Work_candle_scorecard
+  | Work_pipeline -> Work_harness
   | Work_tasks -> Work_pipeline
   | Work_schedules -> Work_tasks
   | Work_inbox -> Work_schedules
   | Work_candle_scorecard -> Work_inbox
+  | Work_harness -> Work_candle_scorecard
 
 let all_knowledge_tabs =
   [ Knowledge_board; Knowledge_wiki; Knowledge_artifacts; Knowledge_memory ]
@@ -258,22 +272,25 @@ let prev_runtime_tab = function
   | Runtime_addons_browser -> Runtime_connectors
 
 let all_infra_tabs =
-  [ Infra_sandboxes; Infra_repos_changes; Infra_activity_logs ]
+  [ Infra_sandboxes; Infra_repos_changes; Infra_code; Infra_activity_logs ]
 
 let infra_tab_label = function
   | Infra_sandboxes -> Say.make ~ko:"샌드박스" ~en:"Sandboxes"
   | Infra_repos_changes -> Say.make ~ko:"저장소 · 변경" ~en:"Repos & Changes"
+  | Infra_code -> Say.make ~ko:"코드" ~en:"Code"
   | Infra_activity_logs -> Say.make ~ko:"활동 · 로그" ~en:"Activity & Logs"
 
 let next_infra_tab = function
   | Infra_sandboxes -> Infra_repos_changes
-  | Infra_repos_changes -> Infra_activity_logs
+  | Infra_repos_changes -> Infra_code
+  | Infra_code -> Infra_activity_logs
   | Infra_activity_logs -> Infra_sandboxes
 
 let prev_infra_tab = function
   | Infra_sandboxes -> Infra_activity_logs
   | Infra_repos_changes -> Infra_sandboxes
-  | Infra_activity_logs -> Infra_repos_changes
+  | Infra_code -> Infra_repos_changes
+  | Infra_activity_logs -> Infra_code
 
 let all_keeper_tabs =
   [
@@ -284,6 +301,8 @@ let all_keeper_tabs =
     Keeper_work_candle;
     Keeper_sandbox;
     Keeper_config;
+    Keeper_logs;
+    Keeper_identity;
   ]
 
 let keeper_tab_label = function
@@ -294,6 +313,8 @@ let keeper_tab_label = function
   | Keeper_work_candle -> Say.make ~ko:"작업 · 캔들" ~en:"Work & Candle"
   | Keeper_sandbox -> Say.make ~ko:"샌드박스" ~en:"Sandbox"
   | Keeper_config -> Say.make ~ko:"설정" ~en:"Config"
+  | Keeper_logs -> Say.make ~ko:"로그 · 지표" ~en:"Logs & Metrics"
+  | Keeper_identity -> Say.make ~ko:"아이덴티티" ~en:"Identity"
 
 let next_keeper_tab = function
   | Keeper_chat -> Keeper_context
@@ -302,16 +323,20 @@ let next_keeper_tab = function
   | Keeper_memory -> Keeper_work_candle
   | Keeper_work_candle -> Keeper_sandbox
   | Keeper_sandbox -> Keeper_config
-  | Keeper_config -> Keeper_chat
+  | Keeper_config -> Keeper_logs
+  | Keeper_logs -> Keeper_identity
+  | Keeper_identity -> Keeper_chat
 
 let prev_keeper_tab = function
-  | Keeper_chat -> Keeper_config
+  | Keeper_chat -> Keeper_identity
   | Keeper_context -> Keeper_chat
   | Keeper_tool_calls -> Keeper_context
   | Keeper_memory -> Keeper_tool_calls
   | Keeper_work_candle -> Keeper_memory
   | Keeper_sandbox -> Keeper_work_candle
   | Keeper_config -> Keeper_sandbox
+  | Keeper_logs -> Keeper_config
+  | Keeper_identity -> Keeper_logs
 
 let all_settings_tabs =
   [
@@ -377,6 +402,7 @@ let work_tab_index = function
   | Work_schedules -> 2
   | Work_inbox -> 3
   | Work_candle_scorecard -> 4
+  | Work_harness -> 5
 
 let equal_work_tab a b = Int.equal (work_tab_index a) (work_tab_index b)
 
@@ -412,7 +438,8 @@ let equal_runtime_tab a b =
 let infra_tab_index = function
   | Infra_sandboxes -> 0
   | Infra_repos_changes -> 1
-  | Infra_activity_logs -> 2
+  | Infra_code -> 2
+  | Infra_activity_logs -> 3
 
 let equal_infra_tab a b = Int.equal (infra_tab_index a) (infra_tab_index b)
 
@@ -424,6 +451,8 @@ let keeper_tab_index = function
   | Keeper_work_candle -> 4
   | Keeper_sandbox -> 5
   | Keeper_config -> 6
+  | Keeper_logs -> 7
+  | Keeper_identity -> 8
 
 let equal_keeper_tab a b = Int.equal (keeper_tab_index a) (keeper_tab_index b)
 
@@ -455,16 +484,23 @@ let equal_knowledge_dive_target a b =
       false
 
 let equal_runtime_dive_target a b =
-  match a, b with Tool_dive x, Tool_dive y -> String.equal x y
+  match a, b with
+  | Tool_dive x, Tool_dive y | Fusion_dive x, Fusion_dive y -> String.equal x y
+  | Tool_dive _, Fusion_dive _ | Fusion_dive _, Tool_dive _ -> false
 
 let equal_infra_dive_target a b =
   match a, b with
-  | Sandbox_dive x, Sandbox_dive y | Lane_dive x, Lane_dive y ->
+  | Sandbox_dive x, Sandbox_dive y
+  | Lane_dive x, Lane_dive y
+  | Runtime_trace_dive x, Runtime_trace_dive y ->
       String.equal x y
-  | Incident_dive x, Incident_dive y -> Int.equal x y
-  | Sandbox_dive _, (Lane_dive _ | Incident_dive _)
-  | Lane_dive _, (Sandbox_dive _ | Incident_dive _)
-  | Incident_dive _, (Sandbox_dive _ | Lane_dive _) ->
+  | Incident_dive x, Incident_dive y | Log_detail_dive x, Log_detail_dive y ->
+      Int.equal x y
+  | Sandbox_dive _, (Lane_dive _ | Incident_dive _ | Runtime_trace_dive _ | Log_detail_dive _)
+  | Lane_dive _, (Sandbox_dive _ | Incident_dive _ | Runtime_trace_dive _ | Log_detail_dive _)
+  | Incident_dive _, (Sandbox_dive _ | Lane_dive _ | Runtime_trace_dive _ | Log_detail_dive _)
+  | Runtime_trace_dive _, (Sandbox_dive _ | Lane_dive _ | Incident_dive _ | Log_detail_dive _)
+  | Log_detail_dive _, (Sandbox_dive _ | Lane_dive _ | Incident_dive _ | Runtime_trace_dive _) ->
       false
 
 let equal_dive a b =
@@ -502,34 +538,56 @@ let queue_context_tab_index = function
 let equal_queue_context_tab a b =
   Int.equal (queue_context_tab_index a) (queue_context_tab_index b)
 
+let inline_action_tag = function
+  | Btw_query -> 0
+  | Gate_reject _ -> 1
+  | Verification_reject _ -> 2
+  | Harness_overrule _ -> 3
+  | Task_cancel _ -> 4
+  | Schedule_form -> 5
+  | Connector_form -> 6
+  | Repo_add_form -> 7
+  | Board_new_post -> 8
+  | Board_comment _ -> 9
+  | Github_token_form _ -> 10
+  | Code_finder_form -> 11
+  | Code_search_form -> 12
+
 let equal_inline_action_kind a b =
-  match a, b with
-  | Btw_query, Btw_query
-  | Schedule_form, Schedule_form
-  | Connector_form, Connector_form
-  | Repo_add_form, Repo_add_form
-  | Board_new_post, Board_new_post ->
-      true
-  | Gate_reject x, Gate_reject y
-  | Verification_reject x, Verification_reject y
-  | Task_cancel x, Task_cancel y ->
-      String.equal x y
-  | Harness_overrule x, Harness_overrule y ->
-      String.equal x y
-  | Board_comment x, Board_comment y ->
-      String.equal x.post_id y.post_id
-      && Option.equal String.equal x.parent_id y.parent_id
-  | Btw_query, (Gate_reject _ | Verification_reject _ | Harness_overrule _ | Task_cancel _ | Schedule_form | Connector_form | Repo_add_form | Board_new_post | Board_comment _)
-  | Gate_reject _, (Btw_query | Verification_reject _ | Harness_overrule _ | Task_cancel _ | Schedule_form | Connector_form | Repo_add_form | Board_new_post | Board_comment _)
-  | Verification_reject _, (Btw_query | Gate_reject _ | Harness_overrule _ | Task_cancel _ | Schedule_form | Connector_form | Repo_add_form | Board_new_post | Board_comment _)
-  | Harness_overrule _, (Btw_query | Gate_reject _ | Verification_reject _ | Task_cancel _ | Schedule_form | Connector_form | Repo_add_form | Board_new_post | Board_comment _)
-  | Task_cancel _, (Btw_query | Gate_reject _ | Verification_reject _ | Harness_overrule _ | Schedule_form | Connector_form | Repo_add_form | Board_new_post | Board_comment _)
-  | Schedule_form, (Btw_query | Gate_reject _ | Verification_reject _ | Harness_overrule _ | Task_cancel _ | Connector_form | Repo_add_form | Board_new_post | Board_comment _)
-  | Connector_form, (Btw_query | Gate_reject _ | Verification_reject _ | Harness_overrule _ | Task_cancel _ | Schedule_form | Repo_add_form | Board_new_post | Board_comment _)
-  | Repo_add_form, (Btw_query | Gate_reject _ | Verification_reject _ | Harness_overrule _ | Task_cancel _ | Schedule_form | Connector_form | Board_new_post | Board_comment _)
-  | Board_new_post, (Btw_query | Gate_reject _ | Verification_reject _ | Harness_overrule _ | Task_cancel _ | Schedule_form | Connector_form | Repo_add_form | Board_comment _)
-  | Board_comment _, (Btw_query | Gate_reject _ | Verification_reject _ | Harness_overrule _ | Task_cancel _ | Schedule_form | Connector_form | Repo_add_form | Board_new_post) ->
-      false
+  if not (Int.equal (inline_action_tag a) (inline_action_tag b)) then false
+  else
+    match a, b with
+    | Btw_query, Btw_query
+    | Schedule_form, Schedule_form
+    | Connector_form, Connector_form
+    | Repo_add_form, Repo_add_form
+    | Board_new_post, Board_new_post
+    | Code_finder_form, Code_finder_form
+    | Code_search_form, Code_search_form ->
+        true
+    | Gate_reject x, Gate_reject y
+    | Verification_reject x, Verification_reject y
+    | Harness_overrule x, Harness_overrule y
+    | Task_cancel x, Task_cancel y
+    | Github_token_form x, Github_token_form y ->
+        String.equal x y
+    | Board_comment x, Board_comment y ->
+        String.equal x.post_id y.post_id
+        && Option.equal String.equal x.parent_id y.parent_id
+    | ( Btw_query
+      | Gate_reject _
+      | Verification_reject _
+      | Harness_overrule _
+      | Task_cancel _
+      | Schedule_form
+      | Connector_form
+      | Repo_add_form
+      | Board_new_post
+      | Board_comment _
+      | Github_token_form _
+      | Code_finder_form
+      | Code_search_form ), _ ->
+        false
 
 let system_gate_index = function
   | Micro_viewport -> 0
@@ -698,6 +756,12 @@ let all_menu_items =
       shortcut = None;
     };
     {
+      section = Sec_work;
+      target = Menu_work Work_harness;
+      label = work_tab_label Work_harness;
+      shortcut = None;
+    };
+    {
       section = Sec_knowledge;
       target = Menu_knowledge Knowledge_board;
       label = knowledge_tab_label Knowledge_board;
@@ -737,6 +801,18 @@ let all_menu_items =
       section = Sec_fleet;
       target = Menu_keeper_tab Keeper_tool_calls;
       label = keeper_tab_label Keeper_tool_calls;
+      shortcut = None;
+    };
+    {
+      section = Sec_fleet;
+      target = Menu_keeper_tab Keeper_logs;
+      label = keeper_tab_label Keeper_logs;
+      shortcut = None;
+    };
+    {
+      section = Sec_fleet;
+      target = Menu_keeper_tab Keeper_identity;
+      label = keeper_tab_label Keeper_identity;
       shortcut = None;
     };
     {
@@ -795,6 +871,12 @@ let all_menu_items =
     };
     {
       section = Sec_infra;
+      target = Menu_infra Infra_code;
+      label = infra_tab_label Infra_code;
+      shortcut = None;
+    };
+    {
+      section = Sec_infra;
       target = Menu_infra Infra_activity_logs;
       label = infra_tab_label Infra_activity_logs;
       shortcut = None;
@@ -832,34 +914,38 @@ let menu_item_index = function
   | Menu_work Work_schedules -> 3
   | Menu_work Work_inbox -> 4
   | Menu_work Work_candle_scorecard -> 5
-  | Menu_knowledge Knowledge_board -> 6
-  | Menu_knowledge Knowledge_wiki -> 7
-  | Menu_knowledge Knowledge_artifacts -> 8
-  | Menu_knowledge Knowledge_memory -> 9
-  | Menu_keepers -> 10
-  | Menu_keeper_tab Keeper_context -> 11
-  | Menu_keeper_tab Keeper_tool_calls -> 12
+  | Menu_work Work_harness -> 6
+  | Menu_knowledge Knowledge_board -> 7
+  | Menu_knowledge Knowledge_wiki -> 8
+  | Menu_knowledge Knowledge_artifacts -> 9
+  | Menu_knowledge Knowledge_memory -> 10
+  | Menu_keepers -> 11
+  | Menu_keeper_tab Keeper_context -> 12
+  | Menu_keeper_tab Keeper_tool_calls -> 13
+  | Menu_keeper_tab Keeper_logs -> 14
+  | Menu_keeper_tab Keeper_identity -> 15
   | Menu_keeper_tab
       ( Keeper_chat
       | Keeper_memory
       | Keeper_work_candle
       | Keeper_sandbox
       | Keeper_config ) ->
-      10
-  | Menu_runtime Runtime_quotas_credits -> 13
-  | Menu_runtime Runtime_efficiency_spend -> 14
-  | Menu_runtime Runtime_failover_lanes -> 15
-  | Menu_runtime Runtime_fusion -> 16
-  | Menu_runtime Runtime_tools_usage -> 17
-  | Menu_runtime Runtime_connectors -> 18
-  | Menu_runtime Runtime_addons_browser -> 19
-  | Menu_infra Infra_sandboxes -> 20
-  | Menu_infra Infra_repos_changes -> 21
-  | Menu_infra Infra_activity_logs -> 22
-  | Menu_settings -> 23
-  | Menu_incidents -> 24
-  | Menu_queue_context -> 25
-  | Menu_help -> 26
+      11
+  | Menu_runtime Runtime_quotas_credits -> 16
+  | Menu_runtime Runtime_efficiency_spend -> 17
+  | Menu_runtime Runtime_failover_lanes -> 18
+  | Menu_runtime Runtime_fusion -> 19
+  | Menu_runtime Runtime_tools_usage -> 20
+  | Menu_runtime Runtime_connectors -> 21
+  | Menu_runtime Runtime_addons_browser -> 22
+  | Menu_infra Infra_sandboxes -> 23
+  | Menu_infra Infra_repos_changes -> 24
+  | Menu_infra Infra_code -> 25
+  | Menu_infra Infra_activity_logs -> 26
+  | Menu_settings -> 27
+  | Menu_incidents -> 28
+  | Menu_queue_context -> 29
+  | Menu_help -> 30
 
 let menu_item_of_index idx = List.nth_opt all_menu_items idx
 

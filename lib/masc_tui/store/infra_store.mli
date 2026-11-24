@@ -39,6 +39,54 @@ type activity_source_filter =
 type timeline_entry =
   | Entry_log of Wire_infra.system_log_entry
   | Entry_event of activity_row
+module String_set : Set.S with type elt = string
+
+type code_right_mode =
+  | Code_file
+  | Code_search_results
+  | Code_git_status
+  | Code_git_branches
+  | Code_git_worktrees
+  | Code_git_blame
+  | Code_git_log
+  | Code_git_diff
+
+type code_state = {
+  scope : Wire_infra.workspace_scope;
+  expanded_dirs : String_set.t;
+  children_by_dir : Wire_infra.workspace_tree_node list String_map.t;
+  tree_loaded : bool;
+  tree_selected_index : int;
+  tree_scroll_offset : int;
+  right_mode : code_right_mode;
+  active_file_path : string option;
+  open_file :
+    (Wire_infra.workspace_scope * string * Wire_infra.workspace_file_content)
+    Observed.t;
+  file_scroll_offset : int;
+  pending_jump_line : (string * int) option;
+  files_catalog :
+    (Wire_infra.workspace_scope * Wire_infra.workspace_files_catalog) Observed.t;
+  search_result :
+    (Wire_infra.workspace_scope * Wire_infra.workspace_search_result) Observed.t;
+  search_selected_index : int;
+  git_status :
+    (Wire_infra.workspace_scope * Wire_infra.git_status_snapshot) Observed.t;
+  git_branches :
+    (Wire_infra.workspace_scope * Wire_infra.git_branch_entry list) Observed.t;
+  git_worktrees :
+    (Wire_infra.workspace_scope * Wire_infra.git_worktree_entry list) Observed.t;
+  git_blame :
+    (Wire_infra.workspace_scope * string * Wire_infra.git_blame_entry list)
+    Observed.t;
+  git_log :
+    (Wire_infra.workspace_scope * string * Wire_infra.git_log_commit list)
+    Observed.t;
+  git_diff :
+    (Wire_infra.workspace_scope * string * Wire_infra.git_diff_snapshot)
+    Observed.t;
+  git_scroll_offset : int;
+}
 
 type t = {
   active_tab : Nav.infra_tab;
@@ -50,12 +98,19 @@ type t = {
   repo_activity : repo_activity option;
   logs : Wire_infra.system_log_entry list;
   logs_loaded : bool;
+  activity_events_loaded : bool;
+  activity_seen_seqs : String_set.t;
+  activity_seen_entries : (string * float) list;
   last_log_seq : int option;
   stream_gap_count : int;
   log_level_filter : Wire_infra.log_level option;
   log_keeper_filter : string option;
   source_filter : activity_source_filter;
   activity_events : activity_row list;
+  acting_rail_open : bool;
+  acting_selected_index : int;
+  runtime_trace : (string * Wire_infra.runtime_trace_snapshot) Observed.t;
+  code : code_state;
   show_raw_json : bool;
   selected_index : int;
   scroll_offset : int;
@@ -116,9 +171,9 @@ val fail_repo_activity :
 val apply_log_snapshot : Wire_infra.system_log_entry list -> t -> t
 
 val forget_log_cursor : t -> t
-(** Drop [last_log_seq], so the next log stream opens without a cursor and the
-    server answers with a reset frame from its own ring. A new server process
-    numbers its lines from zero again. *)
+(** Drop [last_log_seq], reset log/activity backfill flags, and clear
+    [activity_seen_seqs], so the next log stream and activity backfill start
+    cleanly on a new server process whose sequence numbers restart from zero. *)
 val apply_log_frame : Wire_infra.system_log_frame -> t -> t
 (** A reset frame replaces the list and [last_log_seq]; any other frame
     appends its entries oldest first. *)
@@ -174,3 +229,92 @@ val move_selection :
 val reset_detail_scroll : t -> t
 val set_filter : string -> t -> t
 val mark_stale_all : t -> t
+
+val apply_activity_events_backfill : Wire_infra.activity_event_item list -> t -> t
+val toggle_acting_rail : t -> t
+val move_acting_selection : count:int -> delta:int -> t -> t
+val apply_runtime_trace :
+  observed_at:Clock.Mono.t ->
+  keeper:string ->
+  Wire_infra.runtime_trace_snapshot ->
+  t ->
+  t
+val runtime_trace_for :
+  keeper:string -> t -> Wire_infra.runtime_trace_snapshot option
+
+val equal_code_right_mode : code_right_mode -> code_right_mode -> bool
+val code_right_mode_label : code_right_mode -> Say.t
+val cycle_code_git_mode : t -> t
+val set_code_right_mode : code_right_mode -> t -> t
+val set_code_scope : Wire_infra.workspace_scope -> t -> t
+val visible_code_tree_nodes : t -> Wire_infra.workspace_tree_node list
+val selected_code_tree_node : t -> Wire_infra.workspace_tree_node option
+val toggle_code_dir : string -> t -> t
+val apply_workspace_children :
+  scope:Wire_infra.workspace_scope ->
+  dir:string ->
+  Wire_infra.workspace_tree_node list ->
+  t ->
+  t
+val apply_workspace_files :
+  observed_at:Clock.Mono.t ->
+  scope:Wire_infra.workspace_scope ->
+  Wire_infra.workspace_files_catalog ->
+  t ->
+  t
+val apply_workspace_search :
+  observed_at:Clock.Mono.t ->
+  scope:Wire_infra.workspace_scope ->
+  Wire_infra.workspace_search_result ->
+  t ->
+  t
+val apply_workspace_file :
+  observed_at:Clock.Mono.t ->
+  scope:Wire_infra.workspace_scope ->
+  path:string ->
+  Wire_infra.workspace_file_content ->
+  t ->
+  t
+val set_code_active_file : string option -> t -> t
+val active_code_file_path : t -> string option
+val open_file_for_current : t -> Wire_infra.workspace_file_content option
+val apply_git_status :
+  observed_at:Clock.Mono.t ->
+  scope:Wire_infra.workspace_scope ->
+  Wire_infra.git_status_snapshot ->
+  t ->
+  t
+val apply_git_branches :
+  observed_at:Clock.Mono.t ->
+  scope:Wire_infra.workspace_scope ->
+  Wire_infra.git_branch_entry list ->
+  t ->
+  t
+val apply_git_worktrees :
+  observed_at:Clock.Mono.t ->
+  scope:Wire_infra.workspace_scope ->
+  Wire_infra.git_worktree_entry list ->
+  t ->
+  t
+val apply_git_blame :
+  observed_at:Clock.Mono.t ->
+  scope:Wire_infra.workspace_scope ->
+  path:string ->
+  Wire_infra.git_blame_entry list ->
+  t ->
+  t
+val apply_git_log :
+  observed_at:Clock.Mono.t ->
+  scope:Wire_infra.workspace_scope ->
+  path:string ->
+  Wire_infra.git_log_commit list ->
+  t ->
+  t
+val apply_git_diff :
+  observed_at:Clock.Mono.t ->
+  scope:Wire_infra.workspace_scope ->
+  path:string ->
+  Wire_infra.git_diff_snapshot ->
+  t ->
+  t
+val find_log_by_seq : int -> t -> Wire_infra.system_log_entry option

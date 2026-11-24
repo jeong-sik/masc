@@ -23,7 +23,9 @@ let is_viewing_keeper_chat ~keeper (m : Model.t) =
               | Nav.Keeper_memory
               | Nav.Keeper_work_candle
               | Nav.Keeper_sandbox
-              | Nav.Keeper_config );
+              | Nav.Keeper_config
+              | Nav.Keeper_logs
+              | Nav.Keeper_identity );
             _;
           }
       | Nav.Dive_work _
@@ -45,7 +47,9 @@ let active_memory_keeper (m : Model.t) =
               | Nav.Keeper_tool_calls
               | Nav.Keeper_work_candle
               | Nav.Keeper_sandbox
-              | Nav.Keeper_config );
+              | Nav.Keeper_config
+              | Nav.Keeper_logs
+              | Nav.Keeper_identity );
             _;
           }
       | Nav.Dive_work _
@@ -87,7 +91,9 @@ let is_viewing_memory (m : Model.t) =
               | Nav.Keeper_tool_calls
               | Nav.Keeper_work_candle
               | Nav.Keeper_sandbox
-              | Nav.Keeper_config );
+              | Nav.Keeper_config
+              | Nav.Keeper_logs
+              | Nav.Keeper_identity );
             _;
           }
       | Nav.Dive_work _
@@ -123,7 +129,9 @@ let reads_schedules (m : Model.t) =
              | Nav.Keeper_tool_calls
              | Nav.Keeper_memory
              | Nav.Keeper_sandbox
-             | Nav.Keeper_config );
+             | Nav.Keeper_config
+             | Nav.Keeper_logs
+             | Nav.Keeper_identity );
            _;
          })
   | Some
@@ -211,7 +219,7 @@ let apply_dataset_invalidation (m : Model.t) ds =
                 ]
             | Some _, Some _ | None, (Some _ | None) -> []
           in
-          get_cmd e Cmd.Get_keeper_memory_health :: keeper_cmds
+          get_cmd e (Cmd.Get_keeper_memory_health { keeper = None }) :: keeper_cmds
       in
       ({ m with knowledge }, base_cmds @ mem_cmds)
   | Wire_observer.Dataset_world_memory ->
@@ -271,7 +279,7 @@ let apply_dataset_invalidation (m : Model.t) ds =
                   (Cmd.Get_keeper_memory_activity { keeper = kp; limit = 50 });
                 get_cmd e (Cmd.Get_keeper_memory_facts { keeper = kp });
                 get_cmd e (Cmd.Get_keeper_memory_os_internals { keeper = kp });
-                get_cmd e Cmd.Get_keeper_memory_health;
+                get_cmd e (Cmd.Get_keeper_memory_health { keeper = None });
               ]
           | None ->
               [
@@ -281,7 +289,7 @@ let apply_dataset_invalidation (m : Model.t) ds =
                        keeper = knowledge.memory_diff_keeper;
                        window = knowledge.memory_diff_window;
                      });
-                get_cmd e Cmd.Get_keeper_memory_health;
+                get_cmd e (Cmd.Get_keeper_memory_health { keeper = None });
               ]
       in
       ({ m with knowledge }, cmds)
@@ -772,15 +780,16 @@ let apply_observer_event (m : Model.t) = function
                   (Cmd.Get_keeper_memory_activity { keeper = kp; limit = 50 });
                 get_cmd e (Cmd.Get_keeper_memory_facts { keeper = kp });
                 get_cmd e (Cmd.Get_keeper_memory_os_internals { keeper = kp });
-                get_cmd e Cmd.Get_keeper_memory_health;
+                get_cmd e (Cmd.Get_keeper_memory_health { keeper = None });
               ]
-          | Some _ -> [ get_cmd e Cmd.Get_keeper_memory_health ]
+          | Some _ ->
+              [ get_cmd e (Cmd.Get_keeper_memory_health { keeper = None }) ]
           | None ->
               [
                 get_cmd e
                   (Cmd.Get_memory_diff
                      { keeper = None; window = knowledge.memory_diff_window });
-                get_cmd e Cmd.Get_keeper_memory_health;
+                get_cmd e (Cmd.Get_keeper_memory_health { keeper = None });
               ]
       in
       ({ m with knowledge }, cmds)
@@ -860,7 +869,10 @@ let apply_sse_event ~now (m : Model.t) = function
       in
       let next = { m with server_identity } in
       if hs.needs_cold_resync then
-        let next = Model.mark_all_domains_stale next in
+        let next =
+          { next with infra = Infra_store.forget_log_cursor next.infra }
+          |> Model.mark_all_domains_stale
+        in
         (next, View_fetches.bootstrap_fetches next)
       else (next, [])
   | Msg.Sse_observer_delivery delivery -> (

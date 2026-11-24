@@ -104,6 +104,8 @@ val open_palette : Model.t -> Model.palette_mode -> Model.t * Cmd.t list
 val push_dive : Model.t -> Nav.dive -> Model.t * Cmd.t list
 val sync_config_for_keeper_view : Model.t -> Model.t
 val cycle_sub_tab : Model.t -> Keymap.cycle_dir -> Model.t * Cmd.t list
+val keeper_enter_action :
+  name:string -> tab:Nav.keeper_tab -> Model.t -> Model.t * Cmd.t list
 val dive_selected : Model.t -> Model.t * Cmd.t list
 
 val open_memory_diagram :
@@ -187,3 +189,38 @@ val toggle_voice : now:Clock.Mono.t -> Model.t -> Model.t * Cmd.t list
 val submit_inline_modal : now:Clock.Mono.t -> Model.t -> Model.t * Cmd.t list
 val clamp_for_pane : Model.t -> Model.t
 val apply_move : Model.t -> Keymap.move_dir -> Model.t * Cmd.t list
+
+(** {1 Wave 3 Shared SSOT Projections & Scroll Line Builders} *)
+
+type keeper_identity_entry =
+  | Identity_oauth of {
+      provider : string;
+      label : string;
+      attached : bool;
+      enabled : bool option;
+    }
+  | Identity_github
+
+val acting_keepers : Model.t -> string list
+val keeper_facts_categories :
+  Wire_knowledge.keeper_memory_facts ->
+  (string * Wire_knowledge.keeper_ordinary_fact list) list
+val code_fuzzy_matches : query:string -> Model.t -> string list
+val keeper_identity_entries : Model.t -> name:string -> keeper_identity_entry list
+
+val fusion_detail_lines :
+  width:int -> Model.t -> run_id:string -> string list
+val harness_verdict_detail_lines : width:int -> Model.t -> string list
+val addon_catalog_preview_lines :
+  width:int -> Wire_runtime.addon_package_preview -> string list
+val knowledge_memory_subview_lines :
+  width:int -> Knowledge_store.t -> string list
+val keeper_memory_subview_lines :
+  width:int -> name:string -> Knowledge_store.t -> string list
+val keeper_logs_lines :
+  width:int -> name:string -> Keeper_context_store.keeper_state -> string list
+val keeper_identity_lines :
+  width:int -> name:string -> Model.t -> string list
+val verification_dive_tab_lines :
+  width:int -> Model.t -> Wire_work.verification_request -> string list
+val code_right_pane_line_count : Model.t -> int

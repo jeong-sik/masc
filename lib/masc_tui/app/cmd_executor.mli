@@ -135,6 +135,20 @@ val run_setup_login_stream :
     propagating stream errors whenever no terminal receipt
     ([complete]/[completed]/[failed]/[cancelled]/[interrupted]) has arrived. *)
 
+val run_github_login_stream :
+  publish_chunk:(string -> unit) ->
+  publish_done:
+    (observation:
+       Masc_tui_protocol.Wire_keeper_context.github_identity_observation option ->
+    error:string option ->
+    unit) ->
+  stream:(on_chunk:(string -> unit) -> (unit, Msg.http_error) result) ->
+  unit
+(** Run a GitHub device-login SSE stream through {!run_chat_stream_result} so
+    unexpected non-cancel exceptions in [stream] or [on_chunk] become
+    [error = Some _] and always invoke [publish_done], while
+    [Eio.Cancel.Cancelled] and {!Io_domain.Closed} propagate unchanged. *)
+
 val is_local_host : string -> bool
 (** [true] iff [host] refers to the local loopback interface
     (["127.0.0.1"], ["localhost"], ["::1"], or ["[::1]"], case-insensitive

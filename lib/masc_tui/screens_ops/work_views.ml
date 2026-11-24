@@ -1497,7 +1497,7 @@ let render_tasks ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
           {
             (Card.default_spec ~title:d_title) with
             badge = d_badge;
-            focused = model.nav.pane_index = 1;
+            focused = Model.pane_focused model 1;
           }
         in
         let d_inner = Card.draw ~cache grid ~rect:detail_rect ~theme d_spec in
@@ -1915,7 +1915,7 @@ let render_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
           with
           badge = d_badge;
           hotkey = Some (Ops_common.say model ~ko:"[n] 새 일정" ~en:"[n] New");
-          focused = model.nav.pane_index = 1;
+          focused = Model.pane_focused model 1;
         }
       in
       let d_inner = Card.draw ~cache grid ~rect:detail_rect ~theme d_spec in
@@ -3615,3 +3615,186 @@ let render_candle_scorecard ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
             (List.take (Int.max 0 (bot - !y)) top_keepers)
         end
       end
+
+let render_harness ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
+  if Rect.is_empty rect then ()
+  else
+    let theme = Ops_common.theme_of_model model in
+    let bp = Ops_common.layout_bp model in
+    let left_rect, right_rect =
+      Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.48
+        ~top_ratio:0.48 bp rect
+    in
+    let hh_opt = Observed.to_option model.work.harness_health in
+    let status_badge =
+      match hh_opt with
+      | Some hh ->
+          let tone =
+            if hh.fallback_ratio > 0.2 then Theme.Status_attention
+            else if String.equal (String.lowercase_ascii hh.evaluator_status) "ok"
+                    || String.equal (String.lowercase_ascii hh.evaluator_status) "healthy"
+            then Theme.Status_ok
+            else Theme.Status_active
+          in
+          Some
+            {
+              Card.glyph = Some Glyph.Live_healthy;
+              text =
+                Printf.sprintf "%s · agr %.0f%% · fb %.0f%%" hh.evaluator_status
+                  (hh.calibration.agreement_rate *. 100.0)
+                  (hh.fallback_ratio *. 100.0);
+              tone = Some tone;
+            }
+      | None -> None
+    in
+    let left_spec : Card.spec =
+      {
+        (Card.default_spec
+           ~title:
+             (Ops_common.say model ~ko:"하네스 판정 이력"
+                ~en:"Harness Health & Verdicts"))
+        with
+        badge = status_badge;
+        hotkey = Some "[y] Approve · [n] Reject · [H] Hash";
+        focused = Model.pane_focused model 0;
+      }
+    in
+    let l_inner = Card.draw ~cache grid ~rect:left_rect ~theme left_spec in
+    if not (Rect.is_empty l_inner) then begin
+      let verdicts = Work_store.filtered_harness_verdicts model.work in
+      match model.work.harness_health with
+      | Observed.Value _ when verdicts <> [] ->
+          let columns : Table.column list =
+            [
+              {
+                id = "verdict";
+                header = Say.make ~ko:"판정" ~en:"Verdict";
+                priority = 0;
+                min_width = 7;
+                max_width = Some 10;
+                weight = 1;
+                align = Table.Left;
+              };
+              {
+                id = "task";
+                header = Say.make ~ko:"작업" ~en:"Task";
+                priority = 0;
+                min_width = 14;
+                max_width = None;
+                weight = 3;
+                align = Table.Left;
+              };
+              {
+                id = "agent";
+                header = Say.make ~ko:"키퍼" ~en:"Keeper";
+                priority = 1;
+                min_width = 10;
+                max_width = Some 16;
+                weight = 2;
+                align = Table.Left;
+              };
+              {
+                id = "eval";
+                header = Say.make ~ko:"평가기" ~en:"Eval";
+                priority = 2;
+                min_width = 8;
+                max_width = Some 14;
+                weight = 1;
+                align = Table.Left;
+              };
+            ]
+          in
+          let rows =
+            List.mapi
+              (fun i (v : Wire_work.harness_verdict_row) ->
+                let vl = String.lowercase_ascii v.verdict in
+                let tone =
+                  if String.equal vl "approve" || String.equal vl "approved" then
+                    Theme.Status_ok
+                  else if String.equal vl "reject" || String.equal vl "rejected" then
+                    Theme.Status_critical
+                  else Theme.Status_attention
+                in
+                {
+                  Table.id = Printf.sprintf "%d:%s:%s" i v.task_id v.notes_hash;
+                  cells =
+                    [
+                      ( "verdict"
+                      , Table.Badge { glyph = None; text = v.verdict; tone } );
+                      ("task", Table.text_cell v.task_title);
+                      ("agent", Table.text_cell ("@" ^ v.agent_name));
+                      ( "eval"
+                      , Table.text_cell ~fg:(Color.of_rgb theme.text_secondary)
+                          v.evaluator_runtime );
+                    ];
+                })
+              verdicts
+          in
+          let sel =
+            Store_scroll.clamp_index (List.length verdicts)
+              model.work.harness_selected_index
+          in
+          ignore
+            (Table.draw grid ~rect:l_inner ~theme ~caps:Ops_common.default_caps
+               ~lang:model.lang ~col_gap:(Layout.table_col_gap bp)
+               ~scroll:model.work.harness_scroll_offset ~selected:sel ~columns
+               rows)
+      | Observed.Value _ ->
+          Ops_common.draw_observed_empty grid ~rect:l_inner ~theme
+            ~lang:model.lang model.work.harness_health
+            ~empty_msg:
+              (Say.make ~ko:"기록된 하네스 판정이 없습니다"
+                 ~en:"No harness verdicts recorded")
+      | ( Observed.Loading _
+        | Observed.Absent
+        | Observed.Unreported
+        | Observed.Failed _ ) as obs ->
+          Ops_common.draw_observed_empty grid ~rect:l_inner ~theme
+            ~lang:model.lang obs
+            ~empty_msg:
+              (Say.make ~ko:"하네스 헬스 불러오는 중..."
+                 ~en:"Loading harness health...")
+    end;
+    let right_spec : Card.spec =
+      {
+        (Card.default_spec
+           ~title:
+             (Ops_common.say model ~ko:"판정 상세 · 교정 지표"
+                ~en:"Verdict Detail & Calibration"))
+        with
+        hotkey = Some "[y] Approve · [n] Reject · [Tab] Scroll";
+        focused = Model.pane_focused model 1;
+      }
+    in
+    let r_inner = Card.draw ~cache grid ~rect:right_rect ~theme right_spec in
+    if not (Rect.is_empty r_inner) then begin
+      let pad_x = Ops_common.pad_x_for ~model r_inner in
+      let content = Card.pad_inner ~pad_x r_inner in
+      if not (Rect.is_empty content) then begin
+        let bg = Color.of_rgb theme.surface_1 in
+        let lines =
+          Update_nav.harness_verdict_detail_lines ~width:content.w model
+        in
+        let max_s = Int.max 0 (List.length lines - Int.max 1 content.h) in
+        let scroll =
+          Int.min max_s (Int.max 0 model.work.detail_scroll_offset)
+        in
+        List.iteri
+          (fun i ln ->
+            let py = content.y + i in
+            if py < Rect.bottom content then
+              let st =
+                if String.starts_with ~prefix:"──" ln then
+                  Typography.accent ~bg ~bold:true theme
+                else if String.starts_with ~prefix:"notes_hash (valid" ln then
+                  Typography.status ~bg ~bold:true theme Theme.Status_ok
+                else if String.starts_with ~prefix:"notes_hash (invalid" ln then
+                  Typography.status ~bg ~bold:true theme Theme.Status_attention
+                else Typography.primary ~bg theme
+              in
+              ignore
+                (Ops_common.put_line ~clip:content grid ~x:content.x ~y:py
+                   ~max_w:content.w ~style:st ln))
+          (Store_scroll.drop scroll lines |> List.take content.h)
+      end
+    end

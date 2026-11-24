@@ -87,6 +87,12 @@ type t = {
   runtime_probe : Wire_runtime.runtime_probe_snapshot Observed.t;
   exact_lane_runs : Wire_runtime.exact_lane_run list Observed.t;
   fusion_runs : Wire_runtime.fusion_run list Observed.t;
+  fusion_replay : Wire_runtime.fusion_replay_status option;
+  fusion_historical_evidence : Wire_runtime.fusion_historical_evidence list;
+  fusion_detail : (string * Wire_runtime.fusion_run_detail) Observed.t;
+  fusion_board_evidence : (string * Wire_runtime.fusion_evidence_post) Observed.t;
+  fusion_config : Wire_runtime.fusion_config_options Observed.t;
+  fusion_config_auth_denied : bool;
   fusion_launch_draft : fusion_draft;
   tool_series : Wire_runtime.tool_series Observed.t;
   tool_series_summary : Wire_runtime.tool_series_summary Observed.t;
@@ -100,9 +106,16 @@ type t = {
   tools_catalog_selected_index : int;
   tools_catalog_scroll_offset : int;
   connectors : Wire_runtime.connector_row list Observed.t;
+  connector_names : Wire_runtime.connector_name_mapping list String_map.t;
   browser_lane : Wire_runtime.browser_lane_status Observed.t;
   browser_tabs : Wire_runtime.browser_tabs_response Observed.t String_map.t;
   lane_addons : Wire_runtime.lane_addons_snapshot Observed.t;
+  addon_catalog_mode : bool;
+  addon_package_catalog : Wire_runtime.addon_package_catalog Observed.t;
+  addon_catalog_selected_index : int;
+  addon_catalog_scroll_offset : int;
+  addon_package_preview :
+    (string * Wire_runtime.addon_package_preview) Observed.t;
   mcp_clients : Wire_runtime.mcp_client_row list Observed.t;
   keeper_companies : string String_map.t;
   show_outside_lane_probes : bool;
@@ -185,6 +198,12 @@ let empty =
     runtime_probe = Observed.unreported;
     exact_lane_runs = Observed.unreported;
     fusion_runs = Observed.unreported;
+    fusion_replay = None;
+    fusion_historical_evidence = [];
+    fusion_detail = Observed.absent;
+    fusion_board_evidence = Observed.absent;
+    fusion_config = Observed.unreported;
+    fusion_config_auth_denied = false;
     fusion_launch_draft = empty_fusion_draft;
     tool_series = Observed.unreported;
     tool_series_summary = Observed.unreported;
@@ -198,9 +217,15 @@ let empty =
     tools_catalog_selected_index = 0;
     tools_catalog_scroll_offset = 0;
     connectors = Observed.unreported;
+    connector_names = String_map.empty;
     browser_lane = Observed.unreported;
     browser_tabs = String_map.empty;
     lane_addons = Observed.unreported;
+    addon_catalog_mode = false;
+    addon_package_catalog = Observed.unreported;
+    addon_catalog_selected_index = 0;
+    addon_catalog_scroll_offset = 0;
+    addon_package_preview = Observed.absent;
     mcp_clients = Observed.unreported;
     keeper_companies = String_map.empty;
     show_outside_lane_probes = false;
@@ -1251,9 +1276,34 @@ let selected_tool_catalog_entry t =
   List.nth_opt xs (clamp_index (List.length xs) t.tools_catalog_selected_index)
 
 let filtered_fusion_runs t =
-  let runs =
+  let live_runs =
     match Observed.to_option t.fusion_runs with Some xs -> xs | None -> []
   in
+  let historical_only =
+    List.filter_map
+      (fun (h : Wire_runtime.fusion_historical_evidence) ->
+        if
+          List.exists
+            (fun (r : Wire_runtime.fusion_run) -> String.equal r.run_id h.run_id)
+            live_runs
+        then None
+        else
+          Some
+            {
+              Wire_runtime.run_id = h.run_id;
+              keeper = "board";
+              preset = "historical";
+              topology = Wire_runtime.Simple;
+              status = Wire_runtime.Fusion_completed;
+              stage = "evidence";
+              started_at_unix = h.created_at_unix;
+              finished_at_unix = Some h.created_at_unix;
+              decision = None;
+              summary = Some h.title;
+            })
+      t.fusion_historical_evidence
+  in
+  let runs = live_runs @ historical_only in
   let q = String.trim t.filter_query in
   if String.equal q "" then runs
   else
@@ -1719,7 +1769,58 @@ let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t 
         in
         { t with connector_selected_index; connector_scroll_offset }
   | Nav.Runtime_addons_browser ->
-      if pane_index = 1 then
+      if t.addon_catalog_mode then
+        if pane_index = 1 then
+          let max_scroll =
+            match max_detail_scroll with Some ms -> max 0 ms | None -> 0
+          in
+          let detail_scroll_offset =
+            Store_scroll.clamp_scroll ~max_scroll
+              (t.detail_scroll_offset + delta)
+          in
+          { t with detail_scroll_offset }
+        else
+          let entries =
+            match Observed.to_option t.addon_package_catalog with
+            | None -> []
+            | Some cat ->
+                let q = String.trim t.filter_query in
+                if String.equal q "" then cat.entries
+                else
+                  List.filter
+                    (function
+                      | Wire_runtime.Catalog_folder { path } ->
+                          contains_ci ~needle:q path
+                      | Wire_runtime.Catalog_issue { path; message } ->
+                          contains_ci ~needle:q path
+                          || contains_ci ~needle:q message
+                      | Wire_runtime.Catalog_package
+                          { manifest_path; title; description; ui_category; _ }
+                        ->
+                          contains_ci ~needle:q manifest_path
+                          || contains_ci ~needle:q title
+                          || Option.fold ~none:false
+                               ~some:(contains_ci ~needle:q) description
+                          || Option.fold ~none:false
+                               ~some:(contains_ci ~needle:q) ui_category)
+                    cat.entries
+          in
+          let len = List.length entries in
+          let addon_catalog_selected_index =
+            clamp_index len (t.addon_catalog_selected_index + delta)
+          in
+          let addon_catalog_scroll_offset =
+            Store_scroll.adjust_scroll ?viewport_rows
+              ~scroll:t.addon_catalog_scroll_offset
+              addon_catalog_selected_index
+          in
+          {
+            t with
+            addon_catalog_selected_index;
+            addon_catalog_scroll_offset;
+            detail_scroll_offset = 0;
+          }
+      else if pane_index = 1 then
         match t.browser_right_focus with
         | `Clients ->
             let len = List.length (filtered_browser_clients t) in
@@ -1818,6 +1919,10 @@ let mark_stale_all t =
     runtime_probe = Observed.mark_stale t.runtime_probe;
     exact_lane_runs = Observed.mark_stale t.exact_lane_runs;
     fusion_runs = Observed.mark_stale t.fusion_runs;
+    fusion_detail = Observed.mark_stale t.fusion_detail;
+    fusion_board_evidence = Observed.mark_stale t.fusion_board_evidence;
+    fusion_config = Observed.mark_stale t.fusion_config;
+    fusion_config_auth_denied = false;
     tool_series = Observed.mark_stale t.tool_series;
     tool_series_summary = Observed.mark_stale t.tool_series_summary;
     tool_detail_series = Observed.mark_stale t.tool_detail_series;
@@ -1828,5 +1933,124 @@ let mark_stale_all t =
     browser_lane = Observed.mark_stale t.browser_lane;
     browser_tabs = String_map.map Observed.mark_stale t.browser_tabs;
     lane_addons = Observed.mark_stale t.lane_addons;
+    addon_package_catalog = Observed.mark_stale t.addon_package_catalog;
+    addon_package_preview = Observed.mark_stale t.addon_package_preview;
     mcp_clients = Observed.mark_stale t.mcp_clients;
   }
+
+let apply_fusion_runs_snapshot ~observed_at
+    (snap : Wire_runtime.fusion_runs_snapshot) t =
+  {
+    t with
+    fusion_runs = Observed.value ~observed_at snap.runs;
+    fusion_replay = snap.replay;
+    fusion_historical_evidence = snap.historical_evidence;
+  }
+
+let apply_fusion_detail ~observed_at ~run_id detail t =
+  { t with fusion_detail = Observed.value ~observed_at (run_id, detail) }
+
+let fusion_detail_for ~run_id t =
+  match Observed.to_option t.fusion_detail with
+  | Some (id, detail) when String.equal id run_id -> Some detail
+  | Some _ | None -> None
+
+let apply_fusion_board_evidence ~observed_at ~post_id post t =
+  { t with fusion_board_evidence = Observed.value ~observed_at (post_id, post) }
+
+let fusion_board_evidence_for ~post_id t =
+  match Observed.to_option t.fusion_board_evidence with
+  | Some (id, post) when String.equal id post_id -> Some post
+  | Some _ | None -> None
+
+let is_retained_fusion_run ~run_id t =
+  match Observed.to_option t.fusion_runs with
+  | Some runs ->
+      List.exists
+        (fun (r : Wire_runtime.fusion_run) -> String.equal r.run_id run_id)
+        runs
+  | None -> false
+
+let historical_evidence_for_run ~run_id t =
+  List.find_opt
+    (fun (h : Wire_runtime.fusion_historical_evidence) ->
+      String.equal h.run_id run_id)
+    t.fusion_historical_evidence
+
+let apply_fusion_config ~observed_at cfg t =
+  {
+    t with
+    fusion_config = Observed.value ~observed_at cfg;
+    fusion_config_auth_denied = false;
+  }
+
+let mark_fusion_config_denied ~at ~reason t =
+  {
+    t with
+    fusion_config = Observed.failed ~reason ~retryable:false ~at;
+    fusion_config_auth_denied = true;
+  }
+
+let toggle_addon_catalog_mode t =
+  {
+    t with
+    addon_catalog_mode = not t.addon_catalog_mode;
+    addon_catalog_selected_index = 0;
+    addon_catalog_scroll_offset = 0;
+  }
+
+let apply_addon_package_catalog ~observed_at cat t =
+  let len = List.length cat.Wire_runtime.entries in
+  {
+    t with
+    addon_package_catalog = Observed.value ~observed_at cat;
+    addon_catalog_selected_index = clamp_index len t.addon_catalog_selected_index;
+  }
+
+let apply_addon_package_preview ~observed_at ~manifest_path prev t =
+  {
+    t with
+    addon_package_preview = Observed.value ~observed_at (manifest_path, prev);
+  }
+
+let filtered_addon_catalog_entries t =
+  match Observed.to_option t.addon_package_catalog with
+  | None -> []
+  | Some cat ->
+      let q = String.trim t.filter_query in
+      if String.equal q "" then cat.entries
+      else
+        List.filter
+          (function
+            | Wire_runtime.Catalog_folder { path } -> contains_ci ~needle:q path
+            | Wire_runtime.Catalog_issue { path; message } ->
+                contains_ci ~needle:q path || contains_ci ~needle:q message
+            | Wire_runtime.Catalog_package
+                { manifest_path; title; description; ui_category; _ } ->
+                contains_ci ~needle:q manifest_path
+                || contains_ci ~needle:q title
+                || Option.fold ~none:false ~some:(contains_ci ~needle:q)
+                     description
+                || Option.fold ~none:false ~some:(contains_ci ~needle:q)
+                     ui_category)
+          cat.entries
+
+let selected_addon_catalog_entry t =
+  let xs = filtered_addon_catalog_entries t in
+  List.nth_opt xs (clamp_index (List.length xs) t.addon_catalog_selected_index)
+
+let addon_preview_for ~manifest_path t =
+  match Observed.to_option t.addon_package_preview with
+  | Some (p, prev) when String.equal p manifest_path -> Some prev
+  | Some _ | None -> None
+
+let apply_connector_names ~connector_id mappings t =
+  {
+    t with
+    connector_names = String_map.add connector_id mappings t.connector_names;
+  }
+
+let connector_channel_names ~connector_id t =
+  match String_map.find_opt connector_id t.connector_names with
+  | Some xs -> xs
+  | None -> []

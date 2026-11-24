@@ -824,6 +824,8 @@ let test_cmd_executor_dispatch_and_cancellation () =
                  | Msg.Chat_stream_done _
                  | Msg.Chat_stream_decode_warning _
                  | Msg.Memory_diagram_rendered _
+                 | Msg.Github_login_chunk _
+                 | Msg.Github_login_done _
                  | Msg.Stream_gap _ ->
                      ())
              | Ui_bus.Snapshot _ | Ui_bus.Stream_gap _ -> ())
@@ -969,7 +971,9 @@ let test_remote_editor_escape_hatch_blocked () =
                 | Msg.Chat_stream_chunk _
                 | Msg.Chat_stream_done _
                 | Msg.Chat_stream_decode_warning _
-                 | Msg.Memory_diagram_rendered _
+                | Msg.Memory_diagram_rendered _
+                | Msg.Github_login_chunk _
+                | Msg.Github_login_done _
                 | Msg.Voice_event _
                 | Msg.Stream_gap _ ->
                     None)
@@ -1106,7 +1110,9 @@ let test_bus_key_hash_and_stream_frames () =
             | Msg.Chat_stream_chunk _
             | Msg.Chat_stream_done _
             | Msg.Chat_stream_decode_warning _
-                 | Msg.Memory_diagram_rendered _
+            | Msg.Memory_diagram_rendered _
+            | Msg.Github_login_chunk _
+            | Msg.Github_login_done _
             | Msg.Voice_event _
             | Msg.Stream_gap _ ) ) ->
             None)
@@ -1216,7 +1222,9 @@ let test_bus_key_hash_and_stream_frames () =
   | Msg.Chat_stream_chunk _
   | Msg.Chat_stream_done _
   | Msg.Chat_stream_decode_warning _
-                 | Msg.Memory_diagram_rendered _
+  | Msg.Memory_diagram_rendered _
+  | Msg.Github_login_chunk _
+  | Msg.Github_login_done _
   | Msg.Voice_event _
   | Msg.Stream_gap _ ->
       Alcotest.fail "expected Sse_models_metrics_snapshot");
@@ -1905,6 +1913,95 @@ let test_feature_wave1_osc52_and_artifact_export_safety () =
           end
       | None -> Alcotest.fail "expected Reply_action_ack for Export_artifact")
 
+let test_github_login_stream_exception_emits_done () =
+  let keeper = "alpha" in
+  let m_running =
+    let base = Model.initial () in
+    {
+      base with
+      keeper_context =
+        Keeper_context_store.start_github_login ~keeper base.keeper_context;
+    }
+  in
+  Alcotest.(check bool) "github_login starts running = true" true
+    (Keeper_context_store.get_keeper ~keeper m_running.keeper_context)
+      .github_login.running;
+  (* 1. Non-cancel exception inside stream emits Github_login_done with Error
+     and clears running = false in the store. *)
+  let done_evt = ref None in
+  Cmd_executor.run_github_login_stream
+    ~publish_chunk:(fun _ -> ())
+    ~publish_done:(fun ~observation ~error ->
+      done_evt := Some (observation, error))
+    ~stream:(fun ~on_chunk:_ -> failwith "gh_stream_boom");
+  (match !done_evt with
+  | Some (None, Some err_msg) ->
+      Alcotest.(check bool) "stream exception detail preserved" true
+        (contains_substring ~needle:"gh_stream_boom" err_msg);
+      let m_after, _ =
+        Update.step ~now:Clock.Mono.zero m_running
+          (Msg.Github_login_done
+             {
+               epoch = m_running.epoch;
+               keeper;
+               observation = None;
+               error = Some err_msg;
+             })
+      in
+      let gl =
+        (Keeper_context_store.get_keeper ~keeper m_after.keeper_context)
+          .github_login
+      in
+      Alcotest.(check bool) "Github_login_done clears running = false" false
+        gl.running;
+      Alcotest.(check bool) "Github_login_done records error" true
+        (Option.is_some gl.error)
+  | Some _ | None ->
+      Alcotest.fail "expected publish_done with error on stream exception");
+  (* 2. Non-cancel exception raised during on_chunk also emits Github_login_done
+     so running cannot get stuck true. *)
+  let done_chunk_evt = ref None in
+  Cmd_executor.run_github_login_stream
+    ~publish_chunk:(fun _ -> failwith "chunk_boom")
+    ~publish_done:(fun ~observation ~error ->
+      done_chunk_evt := Some (observation, error))
+    ~stream:(fun ~on_chunk ->
+      on_chunk "data: {\"text\":\"Enter code ABCD-1234\"}\n\n";
+      Ok ());
+  (match !done_chunk_evt with
+  | Some (None, Some err_msg) ->
+      Alcotest.(check bool) "on_chunk exception detail preserved" true
+        (contains_substring ~needle:"chunk_boom" err_msg)
+  | Some _ | None ->
+      Alcotest.fail "expected publish_done with error on on_chunk exception");
+  (* 3. Eio.Cancel.Cancelled and Io_domain.Closed propagate unchanged. *)
+  let done_on_cancel = ref false in
+  let cancel_propagated =
+    try
+      Cmd_executor.run_github_login_stream
+        ~publish_chunk:(fun _ -> ())
+        ~publish_done:(fun ~observation:_ ~error:_ -> done_on_cancel := true)
+        ~stream:(fun ~on_chunk:_ ->
+          raise (Eio.Cancel.Cancelled (Failure "cancelled")));
+      false
+    with Eio.Cancel.Cancelled _ -> true
+  in
+  Alcotest.(check bool) "Eio.Cancel.Cancelled propagates in github login stream"
+    true cancel_propagated;
+  Alcotest.(check bool) "Cancelled does not emit fake Github_login_done" false
+    !done_on_cancel;
+  let closed_propagated =
+    try
+      Cmd_executor.run_github_login_stream
+        ~publish_chunk:(fun _ -> ())
+        ~publish_done:(fun ~observation:_ ~error:_ -> ())
+        ~stream:(fun ~on_chunk:_ -> raise Io_domain.Closed);
+      false
+    with Io_domain.Closed -> true
+  in
+  Alcotest.(check bool) "Io_domain.Closed propagates in github login stream"
+    true closed_propagated
+
 let () =
   Alcotest.run "masc_tui_app"
     [
@@ -1957,6 +2054,8 @@ let () =
             `Quick test_setup_login_stream_error_and_single_delivery;
           Alcotest.test_case "chat stream reattach decision" `Quick
             test_chat_reattach_decision;
+          Alcotest.test_case "github login stream catches non-cancel exceptions and emits done"
+            `Quick test_github_login_stream_exception_emits_done;
           Alcotest.test_case "Feature Wave 1: OSC 52 wrapping & safe atomic artifact export"
             `Quick test_feature_wave1_osc52_and_artifact_export_safety;
         ] );

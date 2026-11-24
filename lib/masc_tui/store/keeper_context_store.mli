@@ -18,6 +18,18 @@ type context_subtab =
   | Ctx_input_map
   | Ctx_response
 
+type logs_subview =
+  | Logs_metrics
+  | Logs_sandbox
+
+type github_login_session = {
+  running : bool;
+  device_url : string option;
+  device_code : string option;
+  output_lines : string list;
+  error : string option;
+}
+
 type keeper_state = {
   turn_records : Wire_keeper_context.turn_records_page Observed.t;
   selected_turn_idx : int;
@@ -48,10 +60,24 @@ type keeper_state = {
   call_detail_scroll_offset : int;
   tool_result : (string * Wire_keeper_context.tool_result_response) Observed.t;
   tool_result_auth_denied : bool;
+  metrics : Wire_keeper_context.keeper_metrics_snapshot Observed.t;
+  sandbox_logs : Wire_keeper_context.keeper_sandbox_logs Observed.t;
+  logs_subview : logs_subview;
+  logs_scroll_offset : int;
+  oauth_attached : Wire_keeper_context.oauth_attached_tools_snapshot Observed.t;
+  oauth_auth_denied : bool;
+  oauth_pending_login : Wire_keeper_context.oauth_login_result option;
+  oauth_attempt_status : Wire_keeper_context.oauth_attempt_status option;
+  github_identity : Wire_keeper_context.github_identity_observation Observed.t;
+  github_auth_denied : bool;
+  github_login : github_login_session;
+  identity_selected_idx : int;
+  identity_scroll_offset : int;
 }
 
 type t = {
   by_keeper : keeper_state String_map.t;
+  oauth_providers : Wire_keeper_context.oauth_providers_snapshot Observed.t;
 }
 
 val empty : t
@@ -209,3 +235,54 @@ val apply_tool_result :
   t
 
 val mark_stale_all : t -> t
+
+val equal_logs_subview : logs_subview -> logs_subview -> bool
+val toggle_logs_subview : keeper:string -> t -> t
+val move_logs_scroll : keeper:string -> ?max_scroll:int -> delta:int -> t -> t
+val apply_metrics :
+  observed_at:Clock.Mono.t ->
+  keeper:string ->
+  Wire_keeper_context.keeper_metrics_snapshot ->
+  t ->
+  t
+val mark_metrics_failed :
+  at:Clock.Mono.t -> keeper:string -> reason:string -> retryable:bool -> t -> t
+val apply_sandbox_logs :
+  observed_at:Clock.Mono.t ->
+  keeper:string ->
+  Wire_keeper_context.keeper_sandbox_logs ->
+  t ->
+  t
+val mark_sandbox_logs_failed :
+  at:Clock.Mono.t -> keeper:string -> reason:string -> retryable:bool -> t -> t
+val apply_oauth_providers :
+  observed_at:Clock.Mono.t ->
+  Wire_keeper_context.oauth_providers_snapshot ->
+  t ->
+  t
+val apply_oauth_attached_tools :
+  observed_at:Clock.Mono.t ->
+  keeper:string ->
+  Wire_keeper_context.oauth_attached_tools_snapshot ->
+  t ->
+  t
+val mark_oauth_denied : at:Clock.Mono.t -> keeper:string -> reason:string -> t -> t
+val set_oauth_pending_login :
+  keeper:string -> Wire_keeper_context.oauth_login_result option -> t -> t
+val set_oauth_attempt_status :
+  keeper:string -> Wire_keeper_context.oauth_attempt_status option -> t -> t
+val apply_github_identity :
+  observed_at:Clock.Mono.t ->
+  keeper:string ->
+  Wire_keeper_context.github_identity_observation ->
+  t ->
+  t
+val mark_github_denied : at:Clock.Mono.t -> keeper:string -> reason:string -> t -> t
+val start_github_login : keeper:string -> t -> t
+val append_github_login_output : keeper:string -> line:string -> t -> t
+val finish_github_login :
+  keeper:string -> error:string option -> t -> t
+val move_identity_selection :
+  keeper:string -> count:int -> delta:int -> t -> t
+val move_identity_scroll :
+  keeper:string -> ?max_scroll:int -> delta:int -> t -> t

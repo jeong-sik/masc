@@ -63,7 +63,7 @@ type get_request =
   | Get_keeper_memory_os_internals of { keeper : string }
   | Get_keeper_memory_facts of { keeper : string }
   | Get_keeper_memory_activity of { keeper : string; limit : int }
-  | Get_keeper_memory_health
+  | Get_keeper_memory_health of { keeper : string option }
   | Get_keeper_context_turn_records of {
       keeper : string;
       limit : int option;
@@ -126,6 +126,52 @@ type get_request =
     }
   | Get_tui_preferences
   | Get_config_schema of Wire_config.config_target
+  (* Wave 3: Fusion, Harness, Verification Evidence, Activity/Trace, Code, Memory, Keeper Logs & Identity *)
+  | Get_fusion_run_detail of { run_id : string }
+  | Get_fusion_config
+  | Get_fusion_board_evidence of { post_id : string }
+  | Get_harness_health
+  | Get_verification_evidence of { task_id : string; verification_id : string }
+  | Get_verification_summary
+  | Get_verification_specs
+  | Get_verification_tlc_results
+  | Get_activity_events of { limit : int option; after_seq : int option }
+  | Get_keeper_runtime_trace of { keeper : string; limit : int option }
+  | Get_keeper_metrics of { keeper : string }
+  | Get_keeper_sandbox_logs of { keeper : string; tail : int option }
+  | Get_workspace_children of {
+      scope : Wire_infra.workspace_scope;
+      dir : string;
+    }
+  | Get_workspace_files of { scope : Wire_infra.workspace_scope }
+  | Get_workspace_search of {
+      scope : Wire_infra.workspace_scope;
+      query : string;
+    }
+  | Get_workspace_file of {
+      scope : Wire_infra.workspace_scope;
+      path : string;
+    }
+  | Get_git_branches of { scope : Wire_infra.workspace_scope }
+  | Get_git_worktrees of { scope : Wire_infra.workspace_scope }
+  | Get_git_status of { scope : Wire_infra.workspace_scope }
+  | Get_git_blame of { scope : Wire_infra.workspace_scope; path : string }
+  | Get_git_log of { scope : Wire_infra.workspace_scope; path : string }
+  | Get_git_diff of { scope : Wire_infra.workspace_scope; path : string }
+  | Get_workspace_memory_ledger
+  | Get_workspace_memory_context
+  | Get_keeper_memory_journal of { keeper : string; limit : int option }
+  | Get_oauth_providers
+  | Get_oauth_attached_tools of { keeper : string }
+  | Get_oauth_attempt_status of {
+      keeper : string;
+      provider : string;
+      attempt_id : string;
+    }
+  | Get_github_identity of { keeper : string }
+  | Get_addon_package_catalog of { directory : string option }
+  | Get_addon_package_preview of { manifest_path : string }
+  | Get_connector_names of { connector : string; scope : string }
 
 type post_request =
   | Post_ask_answer of {
@@ -245,6 +291,19 @@ type post_request =
       reason : string;
     }
   | Post_browser_tabs of { client_id : string }
+  | Post_oauth_login of { keeper : string; provider : string }
+  | Post_oauth_identity_refresh of { keeper : string; provider : string }
+  | Post_oauth_identity_switch of {
+      keeper : string;
+      provider : string;
+      enabled : bool;
+    }
+  | Post_oauth_disconnect of { keeper : string; provider : string }
+  | Post_github_token of {
+      keeper : string;
+      token : string;
+      hostname : string option;
+    }
 
 type put_request =
   | Put_wiki_page of { page : string; request : Wire_knowledge.wiki_put_request }
@@ -254,6 +313,7 @@ type stream_post_request =
       request : Wire_fleet.chat_submit_request;
       is_btw : bool;
     }
+  | Stream_github_login of { keeper : string }
 
 type voice_cmd =
   | Start_ptt of { device : string option }

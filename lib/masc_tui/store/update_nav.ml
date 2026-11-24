@@ -424,7 +424,9 @@ let sync_config_for_keeper_tab ~name ~tab (config : Config_store.t) =
   | Nav.Keeper_tool_calls
   | Nav.Keeper_memory
   | Nav.Keeper_work_candle
-  | Nav.Keeper_sandbox ->
+  | Nav.Keeper_sandbox
+  | Nav.Keeper_logs
+  | Nav.Keeper_identity ->
       Config_store.cancel_edit_field config
 
 let sync_fleet_for_keeper_tab ~name ~tab fleet =
@@ -435,7 +437,9 @@ let sync_fleet_for_keeper_tab ~name ~tab fleet =
   | Nav.Keeper_memory
   | Nav.Keeper_work_candle
   | Nav.Keeper_sandbox
-  | Nav.Keeper_config ->
+  | Nav.Keeper_config
+  | Nav.Keeper_logs
+  | Nav.Keeper_identity ->
       fleet
 
 let sync_config_for_keeper_view (m : Model.t) =
@@ -737,7 +741,9 @@ let push_dive (m : Model.t) dive =
             | Nav.Keeper_tool_calls
             | Nav.Keeper_work_candle
             | Nav.Keeper_sandbox
-            | Nav.Keeper_config );
+            | Nav.Keeper_config
+            | Nav.Keeper_logs
+            | Nav.Keeper_identity );
           _;
         }
     | Nav.Dive_work _
@@ -908,7 +914,10 @@ let open_inline_modal (m : Model.t) kind =
       | Nav.Connector_form
       | Nav.Repo_add_form
       | Nav.Board_new_post
-      | Nav.Board_comment _ )
+      | Nav.Board_comment _
+      | Nav.Github_token_form _
+      | Nav.Code_finder_form
+      | Nav.Code_search_form )
       , ( Drafts.Btw_idle
         | Drafts.Btw_sending _
         | Drafts.Btw_streaming _
@@ -1032,7 +1041,9 @@ let cycle_sub_tab (m : Model.t) dir =
             | Nav.Keeper_tool_calls
             | Nav.Keeper_work_candle
             | Nav.Keeper_sandbox
-            | Nav.Keeper_config ->
+            | Nav.Keeper_config
+            | Nav.Keeper_logs
+            | Nav.Keeper_identity ->
                 m.knowledge
                 |> Knowledge_store.close_memory_reading
                 |> Knowledge_store.close_memory_diagram
@@ -2115,18 +2126,170 @@ let selected_memory_reading ?(force_diff = false) ~keeper_opt
               (Knowledge_store.Reading_diff_item { keeper = keeper_opt; item })
         | None -> None)
 
+let acting_keepers (m : Model.t) : string list =
+  let seen = Hashtbl.create 16 in
+  let acc = ref [] in
+  let add k =
+    let k = String.trim k in
+    if (not (String.equal k "")) && not (Hashtbl.mem seen k) then (
+      Hashtbl.add seen k ();
+      acc := k :: !acc)
+  in
+  (match Observed.to_option m.fleet.turns with
+  | Some turns ->
+      List.iter (fun (t : Wire_fleet.keeper_turn_row) -> add t.keeper_name) turns
+  | None -> ());
+  (match Observed.to_option m.fleet.keepers with
+  | Some keepers ->
+      List.iter
+        (fun (k : Wire_fleet.keeper_summary) ->
+          match k.health with
+          | Wire_fleet.Keeper_working | Wire_fleet.Keeper_recovering
+          | Wire_fleet.Keeper_booting ->
+              add k.name
+          | Wire_fleet.Keeper_healthy
+          | Wire_fleet.Keeper_idle
+          | Wire_fleet.Keeper_degraded
+          | Wire_fleet.Keeper_failing
+          | Wire_fleet.Keeper_offline
+          | Wire_fleet.Keeper_paused ->
+              ())
+        keepers
+  | None -> ());
+  List.rev !acc
+
+let keeper_facts_categories (facts : Wire_knowledge.keeper_memory_facts) :
+    (string * Wire_knowledge.keeper_ordinary_fact list) list =
+  let ordinary_facts =
+    match facts.ordinary with
+    | Wire_knowledge.Memory_store_present om -> om.facts
+    | Wire_knowledge.Memory_store_absent
+    | Wire_knowledge.Memory_store_read_error _ ->
+        []
+  in
+  let tbl : (string, Wire_knowledge.keeper_ordinary_fact list) Hashtbl.t =
+    Hashtbl.create 8
+  in
+  List.iter
+    (fun (f : Wire_knowledge.keeper_ordinary_fact) ->
+      let raw_cat = Wire_knowledge.memory_fact_category_to_string f.category in
+      let cat =
+        if String.equal (String.trim raw_cat) "" then "general" else raw_cat
+      in
+      let prev = Option.value ~default:[] (Hashtbl.find_opt tbl cat) in
+      Hashtbl.replace tbl cat (f :: prev))
+    ordinary_facts;
+  Hashtbl.fold (fun cat xs acc -> (cat, List.rev xs) :: acc) tbl []
+  |> List.sort (fun (a, _) (b, _) -> String.compare a b)
+
+let code_fuzzy_matches ~query (m : Model.t) : string list =
+  let files =
+    match Observed.to_option m.infra.code.files_catalog with
+    | Some (sc, cat) when Wire_infra.equal_workspace_scope sc m.infra.code.scope
+      ->
+        cat.files
+    | Some _ | None -> []
+  in
+  let q = String.trim query in
+  if String.equal q "" then take_n 20 files
+  else
+    files
+    |> List.filter_map (fun path ->
+           match fuzzy_score ~query:q path with
+           | Some score -> Some (score, path)
+           | None -> None)
+    |> List.sort (fun (s1, p1) (s2, p2) ->
+           let c = Int.compare s2 s1 in
+           if c <> 0 then c else String.compare p1 p2)
+    |> List.map snd
+
+type keeper_identity_entry =
+  | Identity_oauth of {
+      provider : string;
+      label : string;
+      attached : bool;
+      enabled : bool option;
+    }
+  | Identity_github
+
+let keeper_identity_entries (m : Model.t) ~name : keeper_identity_entry list =
+  let ks = Keeper_context_store.get_keeper ~keeper:name m.keeper_context in
+  let attached_map :
+      (string, Wire_keeper_context.oauth_attached_provider) Hashtbl.t =
+    Hashtbl.create 8
+  in
+  (match Observed.to_option ks.oauth_attached with
+  | Some snap ->
+      List.iter
+        (fun (p : Wire_keeper_context.oauth_attached_provider) ->
+          Hashtbl.replace attached_map p.provider p)
+        snap.providers
+  | None -> ());
+  let seen = Hashtbl.create 8 in
+  let acc = ref [] in
+  (match Observed.to_option m.keeper_context.oauth_providers with
+  | Some snap ->
+      List.iter
+        (fun (p : Wire_keeper_context.oauth_provider_row) ->
+          if not (Hashtbl.mem seen p.id) then (
+            Hashtbl.add seen p.id ();
+            let att = Hashtbl.find_opt attached_map p.id in
+            let attached =
+              match att with Some a -> a.attached | None -> false
+            in
+            let enabled = Option.bind att (fun a -> a.enabled) in
+            acc :=
+              Identity_oauth
+                { provider = p.id; label = p.label; attached; enabled }
+              :: !acc))
+        snap.providers
+  | None -> ());
+  (match Observed.to_option ks.oauth_attached with
+  | Some snap ->
+      List.iter
+        (fun (a : Wire_keeper_context.oauth_attached_provider) ->
+          if not (Hashtbl.mem seen a.provider) then (
+            Hashtbl.add seen a.provider ();
+            acc :=
+              Identity_oauth
+                {
+                  provider = a.provider;
+                  label = a.provider_label;
+                  attached = a.attached;
+                  enabled = a.enabled;
+                }
+              :: !acc))
+        snap.providers
+  | None -> ());
+  List.rev (Identity_github :: !acc)
+
 (* What Enter does on the current unfocused view. [dive_selected] runs the
    plan and the footer reads [enter_hint], so the footer only offers Enter
    where the key does something. *)
 type enter_plan =
   | Enter_noop
   | Enter_keeper_action of Cmd.t list
+  | Enter_dispatch of Cmd.t list
   | Enter_push of Nav.dive
   | Enter_attention of Attention.entry
   | Enter_toggle_unreported_accounts
   | Enter_fetch_memory_diff
   | Enter_open_memory_reading of Knowledge_store.memory_reading_entry
   | Enter_scope_memory of string option
+  | Enter_toggle_fact_category of string
+  | Enter_code_toggle_dir of {
+      scope : Wire_infra.workspace_scope;
+      path : string;
+    }
+  | Enter_code_open_file of {
+      scope : Wire_infra.workspace_scope;
+      path : string;
+    }
+  | Enter_code_jump_match of {
+      scope : Wire_infra.workspace_scope;
+      path : string;
+      line : int;
+    }
 
 (* Enter on a memory row opens its reading, unless a reading or a memory
    diagram is already open; with nothing selected it does [otherwise]. *)
@@ -2182,20 +2345,59 @@ let keeper_enter_plan ~name ~tab (m : Model.t) : enter_plan =
                 };
             ]
       | Some { execution_id = None; _ } | None -> Enter_noop)
+  | Nav.Keeper_memory
+    when Knowledge_store.equal_keeper_memory_subview
+           m.knowledge.keeper_memory_subview Knowledge_store.Kmem_facts_tree -> (
+      match Knowledge_store.memory_facts_for_keeper ~keeper:name m.knowledge with
+      | Some facts -> (
+          let cats = keeper_facts_categories facts in
+          match
+            List.nth_opt cats
+              (clamp_index (List.length cats) m.knowledge.facts_selected_index)
+          with
+          | Some (cat, _) -> Enter_toggle_fact_category cat
+          | None -> Enter_noop)
+      | None -> Enter_noop)
   | Nav.Keeper_chat
   | Nav.Keeper_context
   | Nav.Keeper_memory
   | Nav.Keeper_work_candle
   | Nav.Keeper_sandbox
-  | Nav.Keeper_config ->
+  | Nav.Keeper_config
+  | Nav.Keeper_logs
+  | Nav.Keeper_identity ->
       Enter_noop
+
+let keeper_enter_action ~name ~tab (m : Model.t) =
+  match keeper_enter_plan ~name ~tab m with
+  | Enter_keeper_action cmds -> (m, cmds)
+  | Enter_toggle_fact_category cat ->
+      ( {
+          m with
+          knowledge = Knowledge_store.toggle_fact_category cat m.knowledge;
+        }
+      , [] )
+  | Enter_noop
+  | Enter_dispatch _
+  | Enter_push _
+  | Enter_attention _
+  | Enter_toggle_unreported_accounts
+  | Enter_fetch_memory_diff
+  | Enter_open_memory_reading _
+  | Enter_scope_memory _
+  | Enter_code_toggle_dir _
+  | Enter_code_open_file _
+  | Enter_code_jump_match _ ->
+      (m, [])
 
 let enter_plan (m : Model.t) : enter_plan =
   (* Never push duplicate or cross-workspace dives when already inside a dive!
-     Inside Keeper_context (Exact_input) or Keeper_tool_calls, Enter fetches
-     the selected provider-input part or full tool-result. *)
+     Inside Keeper_context (Exact_input), Keeper_tool_calls, or Keeper_memory
+     (Facts Tree), Enter fetches the selected part/result or toggles category. *)
   match Model.active_dive m with
-  | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory }) ->
+  | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory })
+    when Knowledge_store.equal_keeper_memory_subview
+           m.knowledge.keeper_memory_subview Knowledge_store.Kmem_diff_flow ->
       memory_reading_plan ~keeper_opt:(Some name)
         ~otherwise:(fun () -> Enter_noop)
         m
@@ -2211,8 +2413,39 @@ let enter_plan (m : Model.t) : enter_plan =
         }
   | Some
       (Nav.Dive_keeper
-         { name; tab = (Nav.Keeper_context | Nav.Keeper_tool_calls) as tab }) ->
+         {
+           name;
+           tab =
+             (Nav.Keeper_context | Nav.Keeper_tool_calls | Nav.Keeper_memory) as
+             tab;
+         }) ->
       keeper_enter_plan ~name ~tab m
+  | Some (Nav.Dive_runtime (Nav.Fusion_dive run_id)) -> (
+      let post_id_opt =
+        match Runtime_store.fusion_detail_for ~run_id m.runtime with
+        | Some { evidence = Wire_runtime.Evidence_recorded p; _ } ->
+            Some p.post_id
+        | Some
+            {
+              evidence = Wire_runtime.Evidence_pending | Wire_runtime.Evidence_absent;
+              _;
+            }
+        | None -> (
+            match Runtime_store.historical_evidence_for_run ~run_id m.runtime with
+            | Some ev -> Some ev.post_id
+            | None -> None)
+      in
+      match post_id_opt with
+      | Some post_id ->
+          Enter_dispatch
+            [
+              Cmd.Http_get
+                {
+                  epoch = m.epoch;
+                  req = Cmd.Get_fusion_board_evidence { post_id };
+                };
+            ]
+      | None -> Enter_noop)
   | Some
       (Nav.Dive_keeper
          {
@@ -2220,14 +2453,16 @@ let enter_plan (m : Model.t) : enter_plan =
              ( Nav.Keeper_chat
              | Nav.Keeper_work_candle
              | Nav.Keeper_sandbox
-             | Nav.Keeper_config );
+             | Nav.Keeper_config
+             | Nav.Keeper_logs
+             | Nav.Keeper_identity );
            _;
          })
   | Some
       ( Nav.Dive_work _
       | Nav.Dive_knowledge
           (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
-      | Nav.Dive_runtime _
+      | Nav.Dive_runtime (Nav.Tool_dive _)
       | Nav.Dive_infra _ ) ->
       Enter_noop
   | None -> (
@@ -2260,7 +2495,12 @@ let enter_plan (m : Model.t) : enter_plan =
                  && (Nav.equal_keeper_tab m.fleet.keeper_dive_tab
                        Nav.Keeper_context
                     || Nav.equal_keeper_tab m.fleet.keeper_dive_tab
-                         Nav.Keeper_tool_calls) ->
+                         Nav.Keeper_tool_calls
+                    || (Nav.equal_keeper_tab m.fleet.keeper_dive_tab
+                          Nav.Keeper_memory
+                       && Knowledge_store.equal_keeper_memory_subview
+                            m.knowledge.keeper_memory_subview
+                            Knowledge_store.Kmem_facts_tree)) ->
               keeper_enter_plan ~name:k.name ~tab:m.fleet.keeper_dive_tab m
           | Some k ->
               if
@@ -2268,9 +2508,15 @@ let enter_plan (m : Model.t) : enter_plan =
                 && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
                      Nav.Keeper_memory
               then
-                memory_reading_plan ~keeper_opt:(Some k.name)
-                  ~otherwise:(fun () -> Enter_noop)
-                  m
+                if
+                  Knowledge_store.equal_keeper_memory_subview
+                    m.knowledge.keeper_memory_subview
+                    Knowledge_store.Kmem_diff_flow
+                then
+                  memory_reading_plan ~keeper_opt:(Some k.name)
+                    ~otherwise:(fun () -> Enter_noop)
+                    m
+                else Enter_noop
               else
                 Enter_push
                   (Nav.Dive_keeper
@@ -2302,7 +2548,7 @@ let enter_plan (m : Model.t) : enter_plan =
               with
               | Some entry -> Enter_attention entry
               | None -> Enter_noop)
-          | Nav.Work_candle_scorecard -> Enter_noop)
+          | Nav.Work_candle_scorecard | Nav.Work_harness -> Enter_noop)
       | Nav.Knowledge -> (
           match m.knowledge.active_tab with
           | Nav.Knowledge_board -> (
@@ -2399,10 +2645,35 @@ let enter_plan (m : Model.t) : enter_plan =
               | Runtime_store.Tools_usage_calls
               | Runtime_store.Tools_keeper_skills ->
                   Enter_noop)
-          | Nav.Runtime_fusion
-          | Nav.Runtime_connectors
-          | Nav.Runtime_addons_browser ->
-              Enter_noop)
+          | Nav.Runtime_fusion -> (
+              match Runtime_store.selected_fusion_run m.runtime with
+              | Some run ->
+                  Enter_push (Nav.Dive_runtime (Nav.Fusion_dive run.run_id))
+              | None -> Enter_noop)
+          | Nav.Runtime_addons_browser when m.runtime.addon_catalog_mode -> (
+              match Runtime_store.selected_addon_catalog_entry m.runtime with
+              | Some (Wire_runtime.Catalog_folder { path }) ->
+                  Enter_dispatch
+                    [
+                      Cmd.Http_get
+                        {
+                          epoch = m.epoch;
+                          req =
+                            Cmd.Get_addon_package_catalog
+                              { directory = Some path };
+                        };
+                    ]
+              | Some (Wire_runtime.Catalog_package { manifest_path; _ }) ->
+                  Enter_dispatch
+                    [
+                      Cmd.Http_get
+                        {
+                          epoch = m.epoch;
+                          req = Cmd.Get_addon_package_preview { manifest_path };
+                        };
+                    ]
+              | Some (Wire_runtime.Catalog_issue _) | None -> Enter_noop)
+          | Nav.Runtime_connectors | Nav.Runtime_addons_browser -> Enter_noop)
       | Nav.Infra -> (
           match m.infra.active_tab with
           | Nav.Infra_sandboxes -> (
@@ -2410,12 +2681,62 @@ let enter_plan (m : Model.t) : enter_plan =
               | Some keeper ->
                   Enter_push (Nav.Dive_infra (Nav.Sandbox_dive keeper))
               | None -> Enter_noop)
-          | Nav.Infra_repos_changes | Nav.Infra_activity_logs -> Enter_noop))
+          | Nav.Infra_code ->
+              let scope = m.infra.code.scope in
+              if m.nav.pane_index = 0 then
+                match Infra_store.selected_code_tree_node m.infra with
+                | None -> Enter_noop
+                | Some node when node.has_children ->
+                    Enter_code_toggle_dir { scope; path = node.path }
+                | Some node -> Enter_code_open_file { scope; path = node.path }
+              else (
+                match m.infra.code.right_mode with
+                | Infra_store.Code_search_results -> (
+                    match Observed.to_option m.infra.code.search_result with
+                    | Some (sc, res)
+                      when Wire_infra.equal_workspace_scope sc scope -> (
+                        match
+                          List.nth_opt res.matches
+                            m.infra.code.search_selected_index
+                        with
+                        | Some mt ->
+                            Enter_code_jump_match
+                              { scope; path = mt.path; line = max 1 mt.line }
+                        | None -> Enter_noop)
+                    | Some _ | None -> Enter_noop)
+                | Infra_store.Code_file
+                | Infra_store.Code_git_status
+                | Infra_store.Code_git_branches
+                | Infra_store.Code_git_worktrees
+                | Infra_store.Code_git_blame
+                | Infra_store.Code_git_log
+                | Infra_store.Code_git_diff ->
+                    Enter_noop)
+          | Nav.Infra_activity_logs ->
+              if m.infra.acting_rail_open && m.nav.pane_index = 2 then
+                let acting = acting_keepers m in
+                match
+                  List.nth_opt acting
+                    (clamp_index (List.length acting)
+                       m.infra.acting_selected_index)
+                with
+                | Some k ->
+                    Enter_push (Nav.Dive_infra (Nav.Runtime_trace_dive k))
+                | None -> Enter_noop
+              else (
+                match Infra_store.selected_timeline_entry m.infra with
+                | Some (Infra_store.Entry_log e) ->
+                    Enter_push (Nav.Dive_infra (Nav.Log_detail_dive e.seq))
+                | Some (Infra_store.Entry_event { keeper = Some k; _ }) ->
+                    Enter_push (Nav.Dive_infra (Nav.Runtime_trace_dive k))
+                | Some (Infra_store.Entry_event { keeper = None; _ }) | None ->
+                    Enter_noop)
+          | Nav.Infra_repos_changes -> Enter_noop))
 
 let dive_selected (m : Model.t) =
   match enter_plan m with
   | Enter_noop -> (m, [])
-  | Enter_keeper_action cmds -> (m, cmds)
+  | Enter_keeper_action cmds | Enter_dispatch cmds -> (m, cmds)
   | Enter_push dive -> push_dive m dive
   | Enter_attention entry -> dive_attention_entry m entry
   | Enter_toggle_unreported_accounts ->
@@ -2447,6 +2768,60 @@ let dive_selected (m : Model.t) =
       in
       let next = { m with nav = { m.nav with pane_index = 1 }; knowledge } in
       (next, View_fetches.fetches_for_current_view next)
+  | Enter_toggle_fact_category cat ->
+      ( {
+          m with
+          knowledge = Knowledge_store.toggle_fact_category cat m.knowledge;
+        }
+      , [] )
+  | Enter_code_toggle_dir { scope; path } ->
+      let was_expanded =
+        Infra_store.String_set.mem path m.infra.code.expanded_dirs
+      in
+      let infra = Infra_store.toggle_code_dir path m.infra in
+      let needs_children =
+        (not was_expanded)
+        && not (Infra_store.String_map.mem path infra.code.children_by_dir)
+      in
+      let cmds =
+        if needs_children then
+          [
+            Cmd.Http_get
+              {
+                epoch = m.epoch;
+                req = Cmd.Get_workspace_children { scope; dir = path };
+              };
+          ]
+        else []
+      in
+      ({ m with infra }, cmds)
+  | Enter_code_open_file { scope; path } ->
+      let infra =
+        m.infra
+        |> Infra_store.set_code_active_file (Some path)
+        |> Infra_store.set_code_right_mode Infra_store.Code_file
+      in
+      let nav = { m.nav with pane_index = 1 } in
+      ( { m with nav; infra }
+      , [
+          Cmd.Http_get
+            { epoch = m.epoch; req = Cmd.Get_workspace_file { scope; path } };
+        ] )
+  | Enter_code_jump_match { scope; path; line } ->
+      let code =
+        {
+          m.infra.code with
+          active_file_path = Some path;
+          right_mode = Infra_store.Code_file;
+          file_scroll_offset = max 0 (line - 1);
+          pending_jump_line = Some (path, line);
+        }
+      in
+      ( { m with infra = { m.infra with code } }
+      , [
+          Cmd.Http_get
+            { epoch = m.epoch; req = Cmd.Get_workspace_file { scope; path } };
+        ] )
 
 type enter_hint =
   | Enter_hint_hidden
@@ -2466,10 +2841,12 @@ let enter_hint (m : Model.t) =
   else
     match enter_plan m with
     | Enter_noop -> Enter_hint_hidden
-    | Enter_keeper_action _
+    | Enter_keeper_action _ | Enter_dispatch _
     | Enter_push _ | Enter_attention _ | Enter_toggle_unreported_accounts
     | Enter_fetch_memory_diff | Enter_open_memory_reading _
-    | Enter_scope_memory _ ->
+    | Enter_scope_memory _ | Enter_toggle_fact_category _
+    | Enter_code_toggle_dir _ | Enter_code_open_file _
+    | Enter_code_jump_match _ ->
         Enter_hint_dive
 
 type inline_form_kind =
@@ -2504,7 +2881,10 @@ let classify_inline_form (modal : Model.inline_modal_state) : inline_form_kind =
     | Nav.Schedule_form
     | Nav.Connector_form
     | Nav.Repo_add_form
-    | Nav.Board_comment _ ) as std ->
+    | Nav.Board_comment _
+    | Nav.Github_token_form _
+    | Nav.Code_finder_form
+    | Nav.Code_search_form ) as std ->
       Form_standard std
 
 (* The Schedule form's operator text. A delay is a whole count and one unit,
@@ -2657,18 +3037,12 @@ let submit_inline_modal ~now (m : Model.t) =
                 if String.equal notes_hash_raw "" then String.trim default_hash
                 else notes_hash_raw
               in
-              let is_valid_hex_hash s =
-                Int.equal (String.length s) 64
-                && String.for_all
-                     (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false)
-                     s
-              in
               let verdict_raw =
                 String.lowercase_ascii
                   (Model.modal_field_value ~key:"verdict" modal)
               in
               let reason = Model.modal_field_value ~key:"reason" modal in
-              if not (is_valid_hex_hash notes_hash) then
+              if not (Wire_work.is_valid_notes_hash notes_hash) then
                 set_modal_error
                   "notes_hash must be 64 lowercase hex characters"
               else
@@ -3148,6 +3522,82 @@ let submit_inline_modal ~now (m : Model.t) =
                               };
                         };
                     ] ))
+          | Form_standard (Nav.Github_token_form keeper) ->
+              let token = Model.modal_field_value ~key:"token" modal in
+              let hostname_raw = Model.modal_field_value ~key:"hostname" modal in
+              let hostname =
+                if String.equal hostname_raw "" then None else Some hostname_raw
+              in
+              (* Security: close modal immediately and never echo/log PAT. *)
+              ( close_with_inflight_toast
+                  ~msg:
+                    (Say.make
+                       ~ko:("GitHub PAT 저장 요청 전송 중: " ^ keeper)
+                       ~en:("Submitting masked GitHub PAT for " ^ keeper))
+                  m
+              , [
+                  Cmd.Http_post
+                    {
+                      epoch = m.epoch;
+                      req = Cmd.Post_github_token { keeper; token; hostname };
+                    };
+                ] )
+          | Form_standard Nav.Code_finder_form ->
+              let query = Model.modal_field_value ~key:"query" modal in
+              let scope = m.infra.code.scope in
+              let path =
+                match code_fuzzy_matches ~query m with
+                | first :: _ -> first
+                | [] -> query
+              in
+              let infra =
+                m.infra
+                |> Infra_store.set_code_active_file (Some path)
+                |> Infra_store.set_code_right_mode Infra_store.Code_file
+              in
+              let nav =
+                {
+                  m.nav with
+                  overlay = None;
+                  filter_focused = false;
+                  pane_index = 1;
+                }
+              in
+              ( { m with nav; infra; inline_modal = None }
+              , [
+                  Cmd.Http_get
+                    {
+                      epoch = m.epoch;
+                      req = Cmd.Get_workspace_file { scope; path };
+                    };
+                ] )
+          | Form_standard Nav.Code_search_form ->
+              let query = Model.modal_field_value ~key:"query" modal in
+              let qlen = String.length query in
+              if qlen < 2 || qlen > 200 then
+                set_modal_error "Query must be between 2 and 200 bytes"
+              else
+                let scope = m.infra.code.scope in
+                let infra =
+                  Infra_store.set_code_right_mode
+                    Infra_store.Code_search_results m.infra
+                in
+                let nav =
+                  {
+                    m.nav with
+                    overlay = None;
+                    filter_focused = false;
+                    pane_index = 1;
+                  }
+                in
+                ( { m with nav; infra; inline_modal = None }
+                , [
+                    Cmd.Http_get
+                      {
+                        epoch = m.epoch;
+                        req = Cmd.Get_workspace_search { scope; query };
+                      };
+                  ] )
           | Form_setup_login_start ->
               let integration_id =
                 String.trim
@@ -3206,7 +3656,8 @@ let estimated_viewport_rows (m : Model.t) =
           match m.work.active_tab with
           | Nav.Work_pipeline -> min 10 (max 4 (rows - 14))
           | Nav.Work_tasks | Nav.Work_schedules -> max 4 (rows - 14)
-          | Nav.Work_inbox | Nav.Work_candle_scorecard -> max 4 (rows - 12))
+          | Nav.Work_inbox | Nav.Work_candle_scorecard | Nav.Work_harness ->
+              max 4 (rows - 12))
       | Nav.Knowledge -> max 4 (rows - 14)
       | Nav.Runtime -> (
           match m.runtime.active_tab with
@@ -3867,6 +4318,966 @@ let wiki_preview_max_scroll ~bp ~theme ~(rect : Rect.t)
                   s.summary
             | None -> 0))
 
+let wrap_lines ~width text =
+  Chat_transcript.wrap_plain_lines ~width:(max 1 width) text
+
+let fusion_detail_lines ~width (m : Model.t) ~run_id : string list =
+  let w = max 20 width in
+  let lines = ref [] in
+  let push s = lines := s :: !lines in
+  let push_wrapped prefix text =
+    let wrapped = wrap_lines ~width:(max 10 (w - String.length prefix)) text in
+    match wrapped with
+    | [] -> push prefix
+    | first :: rest ->
+        push (prefix ^ first);
+        let indent = String.make (String.length prefix) ' ' in
+        List.iter (fun ln -> push (indent ^ ln)) rest
+  in
+  let detail_opt = Runtime_store.fusion_detail_for ~run_id m.runtime in
+  let run_opt =
+    match detail_opt with
+    | Some d -> Some d.run
+    | None ->
+        List.find_opt
+          (fun (r : Wire_runtime.fusion_run) -> String.equal r.run_id run_id)
+          (Runtime_store.filtered_fusion_runs m.runtime)
+  in
+  (match m.runtime.fusion_replay with
+  | Some (Wire_runtime.Replay_incomplete { reason; lines_read; malformed_lines }) ->
+      push
+        (Printf.sprintf "[REPLAY WARNING] incomplete (%s) · %d lines · %d malformed"
+           reason lines_read malformed_lines)
+  | Some (Wire_runtime.Replay_complete { malformed_lines; dropped_running; _ })
+    when malformed_lines > 0 || dropped_running > 0 ->
+      push
+        (Printf.sprintf "[REPLAY NOTICE] %d malformed · %d dropped running"
+           malformed_lines dropped_running)
+  | Some (Wire_runtime.Replay_complete _ | Wire_runtime.Replay_not_replayed | Wire_runtime.Replay_absent)
+  | None -> ());
+  (match run_opt with
+  | None -> push ("Run " ^ run_id ^ " (loading...)")
+  | Some r ->
+      let st =
+        match r.status with
+        | Wire_runtime.Fusion_running -> "running"
+        | Wire_runtime.Fusion_completed -> "completed"
+        | Wire_runtime.Fusion_failed { code; error } ->
+            Printf.sprintf "failed (%s: %s)" code error
+      in
+      push
+        (Printf.sprintf "Run: %s · Keeper: %s · Preset: %s · Topology: %s"
+           r.run_id r.keeper r.preset
+           (Wire_runtime.fusion_topology_to_string r.topology));
+      push (Printf.sprintf "Status: %s · Stage: %s" st r.stage);
+      Option.iter (fun dec -> push ("Decision: " ^ dec)) r.decision;
+      Option.iter (fun sum -> push_wrapped "Summary: " sum) r.summary);
+  let evidence_post_opt, reloaded_board_post =
+    let detail_post_opt =
+      match detail_opt with
+      | Some { evidence = Wire_runtime.Evidence_recorded p; _ } -> Some p
+      | Some
+          {
+            evidence = Wire_runtime.Evidence_pending | Wire_runtime.Evidence_absent;
+            _;
+          }
+      | None -> None
+    in
+    let linked_post_id_opt =
+      match detail_post_opt with
+      | Some p when not (String.equal (String.trim p.post_id) "") ->
+          Some p.post_id
+      | Some _ | None ->
+          Option.map
+            (fun (h : Wire_runtime.fusion_historical_evidence) -> h.post_id)
+            (Runtime_store.historical_evidence_for_run ~run_id m.runtime)
+    in
+    let reloaded_opt =
+      Option.bind linked_post_id_opt (fun post_id ->
+          Runtime_store.fusion_board_evidence_for ~post_id m.runtime)
+    in
+    match reloaded_opt with
+    | Some p -> (Some p, true)
+    | None -> (detail_post_opt, false)
+  in
+  (match detail_opt, evidence_post_opt with
+  | _, Some ev ->
+      push "── Pipeline: Question -> Panel -> Judge -> Evidence ──";
+      push
+        (Printf.sprintf "Board Evidence: %s (%s)%s" ev.post_id ev.title
+           (if reloaded_board_post then " [board]" else ""));
+      Option.iter (fun q -> push_wrapped "Question: " q) ev.question;
+      if ev.panel <> [] then (
+        push (Printf.sprintf "── Panel (%d) ──" (List.length ev.panel));
+        List.iter
+          (fun (pe : Wire_runtime.fusion_panel_entry) ->
+            let st =
+              match pe.status with
+              | `Answered -> "OK"
+              | `Failed -> "FAIL"
+            in
+            let toks =
+              match pe.input_tokens, pe.output_tokens with
+              | Some i, Some o -> Printf.sprintf " (%di/%do tok)" i o
+              | _ -> ""
+            in
+            push (Printf.sprintf "  [%s] %s%s" st pe.model toks);
+            (match pe.answer with
+            | Some a when not (String.equal (String.trim a) "") ->
+                push_wrapped "    " a
+            | Some _ | None -> ());
+            match pe.reason_code, pe.reason_detail with
+            | Some c, Some d -> push_wrapped ("    err(" ^ c ^ "): ") d
+            | Some c, None -> push ("    err: " ^ c)
+            | None, Some d -> push_wrapped "    err: " d
+            | None, None -> ())
+          ev.panel);
+      if ev.seat_routes <> [] then (
+        push
+          (Printf.sprintf "── Seat Routing (%d) ──"
+             (List.length ev.seat_routes));
+        List.iter
+          (fun (sr : Wire_runtime.fusion_seat_route) ->
+            let ans = Option.value ~default:"-" sr.answered_by in
+            let role =
+              match sr.judge_role with Some r -> "/" ^ r | None -> ""
+            in
+            push
+              (Printf.sprintf "  %s%s [%s] route=%s -> %s" sr.phase role sr.seat
+                 sr.route ans);
+            List.iter
+              (fun (att : Wire_runtime.fusion_seat_attempt) ->
+                push_wrapped
+                  (Printf.sprintf "    fallback fail %s [%s]: " att.runtime
+                     att.code)
+                  att.detail)
+              sr.failed_attempts)
+          ev.seat_routes);
+      push "── Judge Synthesis ──";
+      (match ev.judge_status, ev.judge_decision with
+      | Some st, Some dec ->
+          push (Printf.sprintf "  status=%s · decision=%s" st dec)
+      | Some st, None -> push ("  status=" ^ st)
+      | None, Some dec -> push ("  decision=" ^ dec)
+      | None, None -> ());
+      Option.iter (fun f -> push_wrapped "  failure: " f) ev.judge_failure;
+      Option.iter (fun s -> push_wrapped "  synthesis: " s) ev.judge_synthesis;
+      Option.iter
+        (fun a -> push_wrapped "  resolved: " a)
+        ev.judge_resolved_answer;
+      if ev.judges <> [] then
+        List.iter
+          (fun (j : Wire_runtime.fusion_judge_node) ->
+            let el =
+              match j.elapsed_s with
+              | Some s -> Printf.sprintf " %.1fs" s
+              | None -> ""
+            in
+            let to_s =
+              match j.timed_out with Some true -> " TIMEOUT" | _ -> ""
+            in
+            push
+              (Printf.sprintf "  judge[%s] %s: %s (%di/%do%s%s)" j.role
+                 j.identity j.status j.input_tokens j.output_tokens el to_s);
+            Option.iter (fun s -> push_wrapped "    " s) j.synthesis;
+            Option.iter (fun e -> push_wrapped "    err: " e) j.error)
+          ev.judges;
+      (match ev.tool_trace with
+      | Some tr ->
+          push
+            (Printf.sprintf "── Tool Trace (%s · %d events · %d dropped) ──"
+               tr.status tr.events_count tr.dropped_events);
+          if tr.observed_actors <> [] then
+            push ("  actors: " ^ String.concat ", " tr.observed_actors);
+          List.iter (fun g -> push ("  gap: " ^ g)) tr.gaps;
+          List.iter (fun p -> push ("  · " ^ p)) tr.events_preview
+      | None -> ());
+      if
+        ev.panel = []
+        && Option.is_none ev.judge_synthesis
+        && not (String.equal (String.trim ev.body) "")
+      then (
+        push "── Board Body ──";
+        List.iter push (wrap_lines ~width:w ev.body))
+  | Some { evidence = Wire_runtime.Evidence_pending; _ }, None ->
+      push "Evidence: pending (run in progress or board write pending)"
+  | Some { evidence = Wire_runtime.Evidence_absent; _ }, None -> (
+      match Runtime_store.historical_evidence_for_run ~run_id m.runtime with
+      | Some hist ->
+          push
+            (Printf.sprintf
+               "Historical Board Evidence available: %s (%s) — press [e] or \
+                [Enter] to load"
+               hist.post_id hist.title)
+      | None -> push "Evidence: absent")
+  | Some { evidence = Wire_runtime.Evidence_recorded _; _ }, None
+  | None, None ->
+      ());
+  List.rev !lines
+
+let harness_verdict_detail_lines ~width (m : Model.t) : string list =
+  let w = max 20 width in
+  let lines = ref [] in
+  let push s = lines := s :: !lines in
+  (match Work_store.selected_harness_verdict m.work with
+  | None -> push "No harness verdict selected."
+  | Some v ->
+      push (Printf.sprintf "Task: %s (%s)" v.task_title v.task_id);
+      push (Printf.sprintf "Keeper: %s · Gate: %s" v.agent_name v.gate);
+      push
+        (Printf.sprintf "Verdict: %s · Evaluator: %s" v.verdict
+           v.evaluator_runtime);
+      (match v.fallback_reason with
+      | Some r ->
+          List.iter push (wrap_lines ~width:w ("Fallback reason: " ^ r))
+      | None -> push "Fallback reason: none");
+      let hash_valid = Wire_work.is_valid_notes_hash v.notes_hash in
+      push
+        (Printf.sprintf "notes_hash (%s): %s"
+           (if hash_valid then "valid 64-hex" else "invalid/missing")
+           (if String.equal v.notes_hash "" then "-" else v.notes_hash));
+      push
+        "Actions: [y] Approve overrule · [n] Reject overrule · [H] Copy \
+         notes_hash");
+  (match Observed.to_option m.work.harness_health with
+  | Some hh ->
+      let c = hh.calibration in
+      push "── Evaluator Calibration ──";
+      push
+        (Printf.sprintf "Status: %s · Fallback ratio: %.1f%%"
+           hh.evaluator_status (hh.fallback_ratio *. 100.0));
+      push
+        (Printf.sprintf
+           "Verdicts: %d (approve=%d reject=%d labeled=%d) · Agreement: %.1f%%"
+           c.total_verdicts c.approve_count c.reject_count c.labeled_count
+           (c.agreement_rate *. 100.0));
+      push
+        (Printf.sprintf "FP=%d · FN=%d · Fallbacks=%d · Unreadable=%d"
+           c.false_positive_count c.false_negative_count c.fallback_count
+           hh.unreadable_verdicts_count);
+      (match c.distinct_runtime_rate with
+      | Some rate ->
+          push
+            (Printf.sprintf "Distinct runtime rate: %.1f%% (%d/%d)"
+               (rate *. 100.0) c.distinct_runtime_count
+               c.verdicts_with_generator_runtime)
+      | None -> ());
+      if c.recent_fallback_reasons <> [] then (
+        push "Recent fallback reasons:";
+        List.iter (fun r -> push ("  · " ^ r)) c.recent_fallback_reasons);
+      if not (String.equal (String.trim hh.scope_note) "") then
+        List.iter push (wrap_lines ~width:w ("Scope: " ^ hh.scope_note))
+  | None -> ());
+  List.rev !lines
+
+let addon_catalog_preview_lines ~width (p : Wire_runtime.addon_package_preview)
+    : string list =
+  let w = max 20 width in
+  let lines = ref [] in
+  let push s = lines := s :: !lines in
+  push (Printf.sprintf "%s (%s @ %s)" p.title p.id p.revision);
+  push ("Manifest: " ^ p.manifest_path);
+  push
+    (Printf.sprintf "Category: %s · Execution: %s"
+       (Option.value ~default:"uncategorized" p.ui_category)
+       p.execution_kind);
+  (match p.image_name, p.image_state with
+  | Some img, Some st ->
+      push (Printf.sprintf "Image: %s [%s]" img st)
+  | Some img, None -> push ("Image: " ^ img)
+  | None, Some st -> push ("Image state: " ^ st)
+  | None, None -> ());
+  Option.iter (fun d -> push ("Directory: " ^ d)) p.directory;
+  if p.command <> [] then
+    List.iter push
+      (wrap_lines ~width:w ("Command: " ^ String.concat " " p.command));
+  push (Printf.sprintf "Exported tools (%d):" (List.length p.exported_tools));
+  List.iter (fun t -> push ("  · " ^ t)) p.exported_tools;
+  if p.contributions <> [] then (
+    push (Printf.sprintf "Contributions (%d):" (List.length p.contributions));
+    List.iter (fun c -> push ("  · " ^ c)) p.contributions);
+  List.rev !lines
+
+let knowledge_memory_subview_lines ~width (k : Knowledge_store.t) : string list =
+  let w = max 20 width in
+  let lines = ref [] in
+  let push s = lines := s :: !lines in
+  match k.memory_subview with
+  | Knowledge_store.Mem_diff_flow -> []
+  | Knowledge_store.Mem_health_ledger ->
+      push "── Fleet Keeper Memory Health ──";
+      (match Observed.to_option k.keeper_memory_health with
+      | None -> push "  (loading /api/v1/dashboard/keeper-memory-health...)"
+      | Some fl ->
+          let total_facts, total_invalidations, total_alerts, warn_alerts, error_alerts =
+            Wire_knowledge.memory_health_fleet_totals fl
+          in
+          push
+            (Printf.sprintf
+               "  Facts: %d · Invalidations: %d · Alerts: %d (warn=%d err=%d)"
+               total_facts total_invalidations total_alerts warn_alerts
+               error_alerts);
+          List.iter
+            (fun (row : Wire_knowledge.keeper_memory_health_row) ->
+              push
+                (Printf.sprintf
+                   "  %s r%d · facts=%d (obs=%d der=%d src=%d) inv=%d \
+                    alerts=%d"
+                   row.keeper_id row.revision row.facts row.observed_facts
+                   row.derived_facts row.source_facts row.support_invalidations
+                   (List.length row.alerts));
+              List.iter
+                (fun (al : Wire_knowledge.memory_health_alert) ->
+                  List.iter push
+                    (wrap_lines ~width:w
+                       (Printf.sprintf "    [%s/%s] %s"
+                          (Wire_knowledge.memory_health_alert_severity_to_string
+                             al.severity)
+                          al.code al.message)))
+                row.alerts)
+            fl.keepers);
+      push "── Workspace Memory Ledger ──";
+      (match k.workspace_memory_ledger with
+      | Observed.Failed { reason; _ } ->
+          push
+            ("  [auth/error] " ^ reason
+            ^ (if k.workspace_memory_ledger_auth_denied then
+                 " (requires CanReadState — press [r] to retry)"
+               else ""))
+      | Observed.Loading _ | Observed.Unreported | Observed.Absent ->
+          push "  (loading /api/v1/dashboard/workspace-memory-ledger...)"
+      | Observed.Value { data = led; _ } ->
+          push
+            (Printf.sprintf "  Status: %s · Claims: %d · Conflicts: %d · Facts: %d"
+               led.status (List.length led.claims) (List.length led.conflicts)
+               (List.length led.facts));
+          Option.iter (fun sha -> push ("  SHA-256: " ^ sha)) led.ledger_sha256;
+          List.iter
+            (fun (cid, text) ->
+              List.iter push
+                (wrap_lines ~width:w (Printf.sprintf "  [claim %s] %s" cid text)))
+            led.claims;
+          List.iter
+            (fun (cid, desc) ->
+              List.iter push
+                (wrap_lines ~width:w
+                   (Printf.sprintf "  [conflict %s] %s" cid desc)))
+            led.conflicts;
+          List.iter
+            (fun (f : Wire_knowledge.workspace_ledger_fact) ->
+              let txt = Option.value ~default:"-" f.claim_text in
+              List.iter push
+                (wrap_lines ~width:w
+                   (Printf.sprintf "  [%s/%s] %s" f.disposition_kind
+                      f.source_state txt)))
+            led.facts);
+      List.rev !lines
+  | Knowledge_store.Mem_context ->
+      push "── Workspace Memory Context ──";
+      (match k.workspace_memory_context with
+      | Observed.Failed { reason; _ } ->
+          push
+            ("  [auth/error] " ^ reason
+            ^ (if k.workspace_memory_context_auth_denied then
+                 " (requires CanReadState — press [r] to retry)"
+               else ""))
+      | Observed.Loading _ | Observed.Unreported | Observed.Absent ->
+          push "  (loading /api/v1/dashboard/workspace-memory-context...)"
+      | Observed.Value { data = ctx; _ } ->
+          push
+            (Printf.sprintf "  Discovery: %s (%d keepers)" ctx.discovery_status
+               (List.length ctx.keepers));
+          Option.iter (fun d -> push ("  Detail: " ^ d)) ctx.discovery_detail;
+          let obs_str = function
+            | Wire_knowledge.Ctx_missing -> "missing"
+            | Wire_knowledge.Ctx_unavailable r -> "unavailable(" ^ r ^ ")"
+            | Wire_knowledge.Ctx_available { revision; fact_count } ->
+                let r =
+                  match revision with Some n -> Printf.sprintf "r%d " n | None -> ""
+                in
+                Printf.sprintf "%s%d facts" r fact_count
+          in
+          List.iter
+            (fun (kp : Wire_knowledge.workspace_context_keeper) ->
+              push
+                (Printf.sprintf "  %-20s ordinary: %-18s source: %s"
+                   kp.keeper_id (obs_str kp.ordinary)
+                   (obs_str kp.source_bound)))
+            ctx.keepers);
+      List.rev !lines
+
+let keeper_memory_subview_lines ~width ~name (k : Knowledge_store.t) :
+    string list =
+  let w = max 20 width in
+  let lines = ref [] in
+  let push s = lines := s :: !lines in
+  match k.keeper_memory_subview with
+  | Knowledge_store.Kmem_diff_flow -> []
+  | Knowledge_store.Kmem_health ->
+      push ("── Memory Health: " ^ name ^ " ──");
+      (match Knowledge_store.memory_health_for_keeper ~keeper:name k with
+      | None -> push "  (no health observation for this keeper yet)"
+      | Some row ->
+          push
+            (Printf.sprintf
+               "  Revision: r%d · Snapshot: %s (%d B)"
+               row.revision
+               (if row.snapshot_present then "present" else "absent")
+               row.snapshot_bytes);
+          push
+            (Printf.sprintf
+               "  Facts: %d (observed=%d · derived=%d · source=%d)"
+               row.facts row.observed_facts row.derived_facts row.source_facts);
+          push
+            (Printf.sprintf
+               "  Delta: +%d/-%d · Invalidations: %d (source=%d) · Failures: \
+                lib=%d vis=%d"
+               row.added row.removed row.support_invalidations
+               row.source_invalidations row.librarian_failures
+               row.vision_ingest_errors);
+          Option.iter (fun e -> push ("  Read error: " ^ e)) row.read_error;
+          Option.iter
+            (fun e -> push ("  Source read error: " ^ e))
+            row.source_read_error;
+          if row.alerts = [] then push "  Alerts: none"
+          else (
+            push (Printf.sprintf "  Alerts (%d):" (List.length row.alerts));
+            List.iter
+              (fun (al : Wire_knowledge.memory_health_alert) ->
+                List.iter push
+                  (wrap_lines ~width:w
+                     (Printf.sprintf "    [%s/%s] %s: %s"
+                        (Wire_knowledge.memory_health_alert_severity_to_string
+                           al.severity)
+                        al.code al.label al.message)))
+              row.alerts));
+      List.rev !lines
+  | Knowledge_store.Kmem_facts_tree ->
+      push ("── Facts Tree: " ^ name ^ " ([Space/Enter] fold/expand) ──");
+      (match Knowledge_store.memory_facts_for_keeper ~keeper:name k with
+      | None -> (
+          match Knowledge_store.keeper_memory_facts_for ~keeper:name k with
+          | Observed.Failed { reason; _ } ->
+              push
+                ("  [auth/error] " ^ reason
+                ^ (if
+                     Knowledge_store.String_set.mem name
+                       k.keeper_memory_facts_auth_denied
+                   then " (requires CanAdmin — press [r] to retry)"
+                   else ""))
+          | Observed.Loading _ | Observed.Unreported | Observed.Absent
+          | Observed.Value _ ->
+              push "  (loading /api/v1/keepers/:name/memory-facts...)")
+      | Some facts ->
+          let ord_rev, ord_facts, ord_invs, ord_err =
+            match facts.ordinary with
+            | Wire_knowledge.Memory_store_present om ->
+                ( Some om.revision
+                , om.facts
+                , List.length om.support_invalidations
+                , None )
+            | Wire_knowledge.Memory_store_absent -> (None, [], 0, None)
+            | Wire_knowledge.Memory_store_read_error e -> (None, [], 0, Some e)
+          in
+          let src_facts, src_invs, src_err =
+            match facts.source_bound with
+            | Wire_knowledge.Memory_store_present sm ->
+                (sm.facts, List.length sm.invalidations, None)
+            | Wire_knowledge.Memory_store_absent -> ([], 0, None)
+            | Wire_knowledge.Memory_store_read_error e -> ([], 0, Some e)
+          in
+          let rev_s =
+            match ord_rev with Some r -> Printf.sprintf "r%d" r | None -> "-"
+          in
+          push
+            (Printf.sprintf
+               "  Ordinary (%s): %d · Source-bound: %d · Invalidations: %d+%d"
+               rev_s (List.length ord_facts) (List.length src_facts) ord_invs
+               src_invs);
+          Option.iter (fun e -> push ("  Ordinary error: " ^ e)) ord_err;
+          Option.iter (fun e -> push ("  Source error: " ^ e)) src_err;
+          let cats = keeper_facts_categories facts in
+          let sel =
+            clamp_index (List.length cats) k.facts_selected_index
+          in
+          List.iteri
+            (fun idx (cat, items) ->
+              let collapsed =
+                Knowledge_store.String_set.mem cat k.collapsed_fact_categories
+              in
+              let mark = if idx = sel then ">" else " " in
+              let arrow = if collapsed then "▸" else "▾" in
+              push
+                (Printf.sprintf "%s %s %s (%d)" mark arrow cat
+                   (List.length items));
+              if not collapsed then
+                List.iter
+                  (fun (f : Wire_knowledge.keeper_ordinary_fact) ->
+                    List.iter push
+                      (wrap_lines ~width:w
+                         (Printf.sprintf "    · [%s] %s"
+                            (Wire_knowledge.memory_fact_origin_to_string f.origin)
+                            f.claim)))
+                  items)
+            cats;
+          if src_facts <> [] then (
+            push
+              (Printf.sprintf "── Source-Bound Facts (%d) ──"
+                 (List.length src_facts));
+            List.iter
+              (fun (sf : Wire_knowledge.keeper_source_fact) ->
+                List.iter push
+                  (wrap_lines ~width:w
+                     (Printf.sprintf "  · %s (%s)" sf.claim sf.path)))
+              src_facts));
+      List.rev !lines
+  | Knowledge_store.Kmem_journal ->
+      push ("── Memory Journal & Activity: " ^ name ^ " ──");
+      (match Knowledge_store.memory_journal_for_keeper ~keeper:name k with
+      | None -> (
+          match k.keeper_memory_journal with
+          | Observed.Failed { reason; _ } ->
+              push
+                ("  [auth/error] " ^ reason
+                ^ (if
+                     Knowledge_store.String_set.mem name
+                       k.keeper_memory_journal_auth_denied
+                   then " (requires CanAdmin — press [r] to retry)"
+                   else ""))
+          | Observed.Loading _ | Observed.Unreported | Observed.Absent
+          | Observed.Value _ ->
+              push "  (loading /api/v1/keepers/:name/memory-journal...)")
+      | Some j ->
+          push
+            (Printf.sprintf "  Entries: %d · Activity: %d · Undecodable: %d"
+               (List.length j.entries) (List.length j.activity_events)
+               j.undecodable_lines);
+          List.iter
+            (fun (e : Wire_knowledge.memory_journal_entry) ->
+              let rev_s =
+                match e.revision with Some r -> Printf.sprintf "r%d" r | None -> "-"
+              in
+              let st = if e.ok then "OK" else "ERR" in
+              let out = Option.value ~default:"-" e.outcome in
+              push
+                (Printf.sprintf "  [%s] %s %s (+%d/-%d ret=%d inv=%d) %s" st
+                   rev_s out e.added e.removed e.retained e.invalidated
+                   e.structural_id);
+              Option.iter (fun err -> push ("    err: " ^ err)) e.error)
+            j.entries;
+          if j.activity_events <> [] then (
+            push "── Activity Stream ──";
+            List.iter
+              (fun (ev : Wire_knowledge.journal_activity_event) ->
+                push
+                  (Printf.sprintf "  r%d [%s] %s (before=%d after=%d)"
+                     ev.revision ev.kind ev.identity
+                     (List.length ev.before_claims)
+                     (List.length ev.after_claims));
+                Option.iter (fun r -> push ("    reason: " ^ r)) ev.reason)
+              j.activity_events);
+          List.iter (fun note -> push ("  note: " ^ note)) j.activity_notes);
+      List.rev !lines
+
+let keeper_logs_lines ~width ~name (ks : Keeper_context_store.keeper_state) :
+    string list =
+  let w = max 20 width in
+  let lines = ref [] in
+  let push s = lines := s :: !lines in
+  match ks.logs_subview with
+  | Keeper_context_store.Logs_metrics ->
+      push ("── Keeper Metrics: " ^ name ^ " ([v] Sandbox Logs) ──");
+      (match ks.metrics with
+      | Observed.Failed { reason; _ } ->
+          push ("  [error] " ^ reason)
+      | Observed.Loading _ | Observed.Unreported | Observed.Absent ->
+          push "  (loading /api/v1/keepers/:name/metrics...)"
+      | Observed.Value { data = snap; _ } ->
+          push
+            (Printf.sprintf
+               "  Samples: %d (turns=%d hb=%d proactive=%d) · Tool calls: %d"
+               snap.sample_points snap.turn_points snap.heartbeat_points
+               snap.proactive_points snap.tool_call_count);
+          push
+            (Printf.sprintf "  Scanned rows: %d · Skipped: %d" snap.scanned_rows
+               snap.skipped_rows);
+          if snap.top_tools <> [] then (
+            push "── Top Tools ──";
+            List.iter
+              (fun (tool, cnt) ->
+                push (Printf.sprintf "  %-30s %d calls" tool cnt))
+              snap.top_tools);
+          push (Printf.sprintf "── Recent Points (%d) ──" (List.length snap.series));
+          List.iter
+            (fun (pt : Wire_keeper_context.keeper_metrics_point) ->
+              let cost_s =
+                match pt.cost_usd with
+                | Some c -> Printf.sprintf "$%.4f" c
+                | None -> "-"
+              in
+              push
+                (Printf.sprintf "  [%s/%s] %dms %s tools=%d trace=%s"
+                   pt.work_kind pt.channel pt.latency_ms cost_s
+                   pt.tool_call_count pt.trace_id))
+            snap.series);
+      List.rev !lines
+  | Keeper_context_store.Logs_sandbox ->
+      push ("── Remote Sandbox Logs: " ^ name ^ " ([v] Metrics) ──");
+      (match ks.sandbox_logs with
+      | Observed.Failed { reason; _ } ->
+          push ("  [error] " ^ reason)
+      | Observed.Loading _ | Observed.Unreported | Observed.Absent ->
+          push "  (loading /api/v1/gate/keeper-sandbox-logs...)"
+      | Observed.Value { data = sl; _ } ->
+          push
+            (Printf.sprintf "  State: %s · Backend: %s · Tail: %d" sl.state
+               (Option.value ~default:"-" sl.backend)
+               sl.tail);
+          Option.iter (fun r -> push ("  Reason: " ^ r)) sl.reason;
+          if sl.instances = [] then push "  (no sandbox instances reported)"
+          else
+            List.iter
+              (fun (inst : Wire_keeper_context.sandbox_log_instance) ->
+                let run_s =
+                  match inst.running with
+                  | Some true -> "running"
+                  | Some false -> "stopped"
+                  | None -> "unknown"
+                in
+                push
+                  (Printf.sprintf "── Instance %s (%s · %s) ──"
+                     inst.instance_name inst.instance_id run_s);
+                Option.iter (fun e -> push ("  error: " ^ e)) inst.error;
+                if not (String.equal (String.trim inst.stdout) "") then (
+                  push "  [stdout]";
+                  List.iter
+                    (fun ln -> List.iter push (wrap_lines ~width:w ("  " ^ ln)))
+                    (String.split_on_char '\n' inst.stdout));
+                if not (String.equal (String.trim inst.stderr) "") then (
+                  push "  [stderr]";
+                  List.iter
+                    (fun ln -> List.iter push (wrap_lines ~width:w ("  " ^ ln)))
+                    (String.split_on_char '\n' inst.stderr)))
+              sl.instances);
+      List.rev !lines
+
+let keeper_identity_lines ~width ~name (m : Model.t) : string list =
+  let w = max 20 width in
+  let ks = Keeper_context_store.get_keeper ~keeper:name m.keeper_context in
+  let entries = keeper_identity_entries m ~name in
+  let sel = clamp_index (List.length entries) ks.identity_selected_idx in
+  let lines = ref [] in
+  let push s = lines := s :: !lines in
+  push
+    ("── Keeper Identity: " ^ name
+   ^ " ([l] Login · [L] Poll · [r] Refresh · [Space] Toggle · [U] Disconnect \
+      · [K] GitHub PAT · [y] Copy) ──");
+  if ks.oauth_auth_denied then
+    push "  [CanAdmin required] OAuth identity endpoints returned 401/403";
+  (match Observed.to_option m.keeper_context.oauth_providers with
+  | Some p ->
+      Option.iter (fun u -> push ("  OAuth callback: " ^ u)) p.callback_url;
+      Option.iter (fun pr -> push ("  Callback problem: " ^ pr)) p.callback_problem
+  | None -> ());
+  push "── Providers & GitHub ──";
+  List.iteri
+    (fun idx entry ->
+      let mark = if idx = sel then ">" else " " in
+      match entry with
+      | Identity_oauth { provider; label; attached; enabled } ->
+          let st = if attached then "attached" else "unattached" in
+          let en =
+            match enabled with
+            | Some true -> "enabled"
+            | Some false -> "disabled"
+            | None -> "-"
+          in
+          push (Printf.sprintf "%s [OAuth] %s (%s) · %s · %s" mark label provider st en)
+      | Identity_github ->
+          let gh_s =
+            if ks.github_auth_denied then "CanAdmin required (401/403)"
+            else
+              match Observed.to_option ks.github_identity with
+              | None -> "loading..."
+              | Some g ->
+                  let eff =
+                    if g.effective.authenticated then
+                      "@" ^ Option.value ~default:"ok" g.effective.login
+                    else "unauthenticated"
+                  in
+                  Printf.sprintf "%s (%s)" eff g.hostname
+          in
+          push (Printf.sprintf "%s [GitHub] %s" mark gh_s))
+    entries;
+  (match ks.oauth_pending_login with
+  | Some (Wire_keeper_context.Oauth_login_exchange ex) ->
+      push
+        (Printf.sprintf "── OAuth Login Pending (%s · attempt=%s) ──"
+           ex.provider_label ex.attempt_id);
+      List.iter push (wrap_lines ~width:w ("  URL: " ^ ex.authorize_url));
+      push "  Press [y] to copy URL · [L] to poll attempt status"
+  | Some (Wire_keeper_context.Oauth_login_direct d) ->
+      push
+        (Printf.sprintf "  OAuth direct (%s): %d tools · %s" d.provider_label
+           d.tool_count d.message)
+  | None -> ());
+  (match ks.oauth_attempt_status with
+  | Some st ->
+      push
+        (Printf.sprintf "  Attempt status: %s%s" st.kind
+           (match st.detail with Some d -> " · " ^ d | None -> ""))
+  | None -> ());
+  (match Observed.to_option ks.oauth_attached with
+  | Some att ->
+      List.iter
+        (fun (p : Wire_keeper_context.oauth_attached_provider) ->
+          if p.tools <> [] then
+            List.iter push
+              (wrap_lines ~width:w
+                 (Printf.sprintf "  [%s tools (%d)]: %s" p.provider
+                    (List.length p.tools) (String.concat ", " p.tools)));
+          Option.iter (fun pr -> push ("  [" ^ p.provider ^ " problem]: " ^ pr)) p.problem)
+        att.providers
+  | None -> ());
+  push "── GitHub Identity Detail ──";
+  if ks.github_auth_denied then
+    push "  [CanAdmin required] GitHub identity endpoint returned 401/403"
+  else (
+    match Observed.to_option ks.github_identity with
+    | None -> push "  (loading /api/v1/keepers/:name/github-identity...)"
+    | Some g ->
+        push
+          (Printf.sprintf "  Host: %s · Scope: %s" g.hostname
+             g.effective_probe_scope);
+        push
+          (Printf.sprintf "  Stored: %s (%s) · Effective: %s (%s)"
+             (if g.stored.authenticated then "auth" else "none")
+             (Option.value ~default:"-" g.stored.login)
+             (if g.effective.authenticated then "auth" else "none")
+             (Option.value ~default:"-" g.effective.login));
+        if g.effective.scopes <> [] then
+          push ("  Scopes: " ^ String.concat ", " g.effective.scopes);
+        Option.iter (fun e -> push ("  Effective error: " ^ e)) g.effective.error);
+  if
+    ks.github_login.running
+    || Option.is_some ks.github_login.device_url
+    || Option.is_some ks.github_login.device_code
+    || ks.github_login.output_lines <> []
+    || Option.is_some ks.github_login.error
+  then (
+    push
+      (Printf.sprintf "── GitHub Device Flow (%s) ──"
+         (if ks.github_login.running then "running..." else "finished"));
+    Option.iter
+      (fun u -> push ("  Verification URL: " ^ u))
+      ks.github_login.device_url;
+    Option.iter
+      (fun c -> push ("  One-time code: " ^ c ^ "  ([y] copy code)"))
+      ks.github_login.device_code;
+    Option.iter (fun e -> push ("  Error: " ^ e)) ks.github_login.error;
+    List.iter
+      (fun ln -> List.iter push (wrap_lines ~width:w ("  | " ^ ln)))
+      (take_n 12 (List.rev ks.github_login.output_lines)));
+  List.rev !lines
+
+let verification_dive_tab_lines ~width (m : Model.t)
+    (v : Wire_work.verification_request) : string list =
+  let w = max 20 width in
+  let lines = ref [] in
+  let push s = lines := s :: !lines in
+  match m.work.verification_dive_tab with
+  | Work_store.Verif_tab_evidence ->
+      if m.work.verification_evidence_auth_denied then (
+        push "[CanAdmin required] GET /api/v1/verification/evidence returned 401/403";
+        push "Configure an admin token or switch tabs with [v] for Summary / Specs / TLC.")
+      else (
+        match
+          Work_store.verification_evidence_for ~verification_id:v.request_id
+            m.work
+        with
+        | None ->
+            push "(loading /api/v1/verification/evidence...)"
+        | Some bundle ->
+            push
+              (Printf.sprintf "Authority: %s (%s) · Producer: %s · Available: %s"
+                 bundle.authority_kind bundle.authority_actor
+                 (Option.value ~default:"-" bundle.producer)
+                 (if bundle.available then "yes" else "no"));
+            Option.iter
+              (fun r -> push ("Unavailable reason: " ^ r))
+              bundle.unavailable_reason;
+            if bundle.items = [] then push "(no evidence items recorded)"
+            else
+              List.iter
+                (function
+                  | Wire_work.Verif_ev_note txt ->
+                      List.iter push (wrap_lines ~width:w ("[note] " ^ txt))
+                  | Wire_work.Verif_ev_artifact
+                      { reference; content; bytes; truncated } ->
+                      push
+                        (Printf.sprintf "[artifact] %s (%dB%s)" reference bytes
+                           (if truncated then " truncated" else ""));
+                      List.iter push (wrap_lines ~width:w ("  " ^ content))
+                  | Wire_work.Verif_ev_binary
+                      { reference; bytes; sha256; format; body } ->
+                      push
+                        (Printf.sprintf "[binary:%s] %s (%dB sha=%s)" format
+                           reference bytes sha256);
+                      Option.iter
+                        (fun b -> List.iter push (wrap_lines ~width:w ("  " ^ b)))
+                        body
+                  | Wire_work.Verif_ev_collab { reference; content; sha256 } ->
+                      push
+                        (Printf.sprintf "[collab] %s (sha=%s)" reference sha256);
+                      List.iter push (wrap_lines ~width:w ("  " ^ content))
+                  | Wire_work.Verif_ev_unreadable { reference; code; detail } ->
+                      push
+                        (Printf.sprintf "[unreadable:%s] %s%s" code
+                           (Option.value ~default:"-" reference)
+                           (match detail with Some d -> " · " ^ d | None -> "")))
+                bundle.items);
+      List.rev !lines
+  | Work_store.Verif_tab_summary ->
+      (match Observed.to_option m.work.verification_summary with
+      | None -> push "(loading /api/v1/verification/summary...)"
+      | Some s ->
+          let parts =
+            [ "Updated: " ^ s.updated_at; Printf.sprintf "Total=%d" s.total ]
+            @ (match s.pending with
+              | Some n -> [ Printf.sprintf "Pending=%d" n ]
+              | None -> [])
+            @ (match s.approved with
+              | Some n -> [ Printf.sprintf "Approved=%d" n ]
+              | None -> [])
+            @
+            match s.rejected with
+            | Some n -> [ Printf.sprintf "Rejected=%d" n ]
+            | None -> []
+          in
+          push (String.concat " · " parts);
+          let jlines =
+            Masc_tui_ui.Json_tree.flatten ~max_depth:4 ~redact_secrets:true s.raw
+          in
+          let format_jval = function
+            | Masc_tui_ui.Json_tree.Object_node { count } ->
+                Printf.sprintf "{%d keys}" count
+            | Masc_tui_ui.Json_tree.Array_node { count } ->
+                Printf.sprintf "[%d items]" count
+            | Masc_tui_ui.Json_tree.String_val s -> "\"" ^ s ^ "\""
+            | Masc_tui_ui.Json_tree.Redacted_secret -> "[REDACTED]"
+            | Masc_tui_ui.Json_tree.Int_val n -> Int.to_string n
+            | Masc_tui_ui.Json_tree.Float_val f -> Printf.sprintf "%.4g" f
+            | Masc_tui_ui.Json_tree.Bool_val b -> Bool.to_string b
+            | Masc_tui_ui.Json_tree.Null_val -> "null"
+          in
+          List.iter
+            (fun (jl : Masc_tui_ui.Json_tree.line) ->
+              let indent = String.make (min 12 (jl.depth * 2)) ' ' in
+              let k_s =
+                match jl.key with Some k -> k ^ ": " | None -> ""
+              in
+              push (indent ^ k_s ^ format_jval jl.value))
+            jlines);
+      List.rev !lines
+  | Work_store.Verif_tab_specs ->
+      (match Observed.to_option m.work.verification_specs with
+      | None -> push "(loading /api/v1/verification/specs...)"
+      | Some sp ->
+          push
+            (Printf.sprintf "Updated: %s · Dir: %s · Specs: %d" sp.updated_at
+               (Option.value ~default:"-" sp.specs_dir)
+               (List.length sp.entries));
+          List.iter
+            (fun (e : Wire_work.tla_spec_entry) ->
+              push
+                (Printf.sprintf "  [%s] %s (clean=%s buggy=%s) · %s" e.category
+                   e.name
+                   (if e.has_clean_cfg then "y" else "n")
+                   (if e.has_buggy_cfg then "y" else "n")
+                   e.path))
+            sp.entries);
+      List.rev !lines
+  | Work_store.Verif_tab_tlc ->
+      (match Observed.to_option m.work.verification_tlc_results with
+      | None -> push "(loading /api/v1/verification/tlc-results...)"
+      | Some tlc ->
+          push
+            (Printf.sprintf "Updated: %s · Dir: %s · Results: %d" tlc.updated_at
+               (Option.value ~default:"-" tlc.results_dir)
+               (List.length tlc.entries));
+          List.iter
+            (fun (e : Wire_work.tlc_result_entry) ->
+              let st_s =
+                match e.states_explored, e.distinct_states with
+                | Some tot, Some dist ->
+                    Printf.sprintf " states=%d(%d)" tot dist
+                | Some tot, None -> Printf.sprintf " states=%d" tot
+                | _ -> ""
+              in
+              push
+                (Printf.sprintf "  [%s] %s/%s (%s)%s" e.status e.spec_name
+                   e.cfg_name e.category st_s);
+              Option.iter
+                (fun viol ->
+                  List.iter push (wrap_lines ~width:w ("    violation: " ^ viol)))
+                e.violation)
+            tlc.entries);
+      List.rev !lines
+
+let code_right_pane_line_count (m : Model.t) : int =
+  let c = m.infra.code in
+  match c.right_mode with
+  | Infra_store.Code_file -> (
+      match Infra_store.open_file_for_current m.infra with
+      | Some f -> List.length (String.split_on_char '\n' f.content)
+      | None -> 0)
+  | Infra_store.Code_search_results -> 0
+  | Infra_store.Code_git_status -> (
+      match Observed.to_option c.git_status with
+      | Some (sc, st) when Wire_infra.equal_workspace_scope sc c.scope ->
+          2 + List.length st.changes
+      | Some _ | None -> 0)
+  | Infra_store.Code_git_branches -> (
+      match Observed.to_option c.git_branches with
+      | Some (sc, bs) when Wire_infra.equal_workspace_scope sc c.scope ->
+          List.length bs
+      | Some _ | None -> 0)
+  | Infra_store.Code_git_worktrees -> (
+      match Observed.to_option c.git_worktrees with
+      | Some (sc, ws) when Wire_infra.equal_workspace_scope sc c.scope ->
+          List.length ws
+      | Some _ | None -> 0)
+  | Infra_store.Code_git_blame -> (
+      let expected_path = Infra_store.active_code_file_path m.infra in
+      match Observed.to_option c.git_blame with
+      | Some (sc, path, bs)
+        when Wire_infra.equal_workspace_scope sc c.scope
+             && (match expected_path with
+                | Some exp -> String.equal exp path
+                | None -> true) ->
+          List.length bs
+      | Some _ | None -> 0)
+  | Infra_store.Code_git_log -> (
+      let expected_path = Infra_store.active_code_file_path m.infra in
+      match Observed.to_option c.git_log with
+      | Some (sc, path, cs)
+        when Wire_infra.equal_workspace_scope sc c.scope
+             && (match expected_path with
+                | Some exp -> String.equal exp path
+                | None -> true) ->
+          List.length cs
+      | Some _ | None -> 0)
+  | Infra_store.Code_git_diff -> (
+      let expected_path = Infra_store.active_code_file_path m.infra in
+      match Observed.to_option c.git_diff with
+      | Some (sc, path, df)
+        when Wire_infra.equal_workspace_scope sc c.scope
+             && (match expected_path with
+                | Some exp -> String.equal exp path
+                | None -> true) ->
+          List.length df.lines
+      | Some _ | None -> 0)
+
 let memory_right_pane_max_scroll ~bp ~(rect : Rect.t)
     (k : Knowledge_store.t) =
   let inner = ui_card_inner rect in
@@ -4014,7 +5425,7 @@ let knowledge_detail_max_scroll (m : Model.t) =
                          ~theme raw_body)
           in
           max 0 (body_rows - doc_h))
-  | Nav.Knowledge_memory ->
+  | Nav.Knowledge_memory -> (
       let right_rect =
         if m.nav.zoomed then body_after_bar
         else
@@ -4022,7 +5433,17 @@ let knowledge_detail_max_scroll (m : Model.t) =
             (Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
                ~left_ratio:0.48 ~top_ratio:0.48 bp body_after_bar)
       in
-      memory_right_pane_max_scroll ~bp ~rect:right_rect k
+      match k.memory_subview with
+      | Knowledge_store.Mem_diff_flow ->
+          memory_right_pane_max_scroll ~bp ~rect:right_rect k
+      | Knowledge_store.Mem_health_ledger | Knowledge_store.Mem_context ->
+          let inner = ui_card_inner right_rect |> ui_pad_content ~bp in
+          if Rect.is_empty inner then 0
+          else
+            let total =
+              List.length (knowledge_memory_subview_lines ~width:inner.w k)
+            in
+            max 0 (total - max 1 inner.h))
 
 let work_detail_max_scroll (m : Model.t) =
   let bp = ui_bp m in
@@ -4297,6 +5718,18 @@ let work_detail_max_scroll (m : Model.t) =
                   markdown_max_scroll ~theme ~width:w ~height:md_h
                     (Chat_transcript.rewrite_masc_links_for_markdown
                        (g.measure ^ "\n\n" ^ g.procedure))))
+  | Nav.Work_harness ->
+      let _, right_rect =
+        Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
+          ~left_ratio:0.48 ~top_ratio:0.48 bp br
+      in
+      let content = ui_card_inner right_rect |> ops_pad_content in
+      if Rect.is_empty content then 0
+      else
+        let total =
+          List.length (harness_verdict_detail_lines ~width:content.w m)
+        in
+        max 0 (total - max 1 content.h)
   | Nav.Work_tasks | Nav.Work_schedules | Nav.Work_candle_scorecard -> 0
 
 let runtime_detail_max_scroll (m : Model.t) =
@@ -4401,8 +5834,42 @@ let runtime_detail_max_scroll (m : Model.t) =
                 let vis = max 1 (rc.h - hdr_rows) in
                 max 0 (List.length sk.surfaces - vis))
       | Runtime_store.Tools_usage_calls | Runtime_store.Tools_catalog_tree -> 0)
+  | Nav.Runtime_fusion -> (
+      match Runtime_store.selected_fusion_run m.runtime with
+      | None -> 0
+      | Some run ->
+          let _, right_rect =
+            Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
+              ~left_ratio:0.44 ~top_ratio:0.46 bp body_rect
+          in
+          let rc = ui_card_inner right_rect |> ui_pad_content ~bp in
+          if Rect.is_empty rc then 0
+          else
+            let total =
+              List.length (fusion_detail_lines ~width:rc.w m ~run_id:run.run_id)
+            in
+            max 0 (total - max 1 rc.h))
+  | Nav.Runtime_addons_browser when m.runtime.addon_catalog_mode -> (
+      match Runtime_store.selected_addon_catalog_entry m.runtime with
+      | Some (Wire_runtime.Catalog_package { manifest_path; _ }) -> (
+          match Runtime_store.addon_preview_for ~manifest_path m.runtime with
+          | None -> 0
+          | Some preview ->
+              let _, right_rect =
+                Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
+                  ~left_ratio:0.52 ~top_ratio:0.50 bp body_rect
+              in
+              let rc = ui_card_inner right_rect |> ui_pad_content ~bp in
+              if Rect.is_empty rc then 0
+              else
+                let total =
+                  List.length (addon_catalog_preview_lines ~width:rc.w preview)
+                in
+                max 0 (total - max 1 rc.h))
+      | Some (Wire_runtime.Catalog_folder _ | Wire_runtime.Catalog_issue _)
+      | None ->
+          0)
   | Nav.Runtime_efficiency_spend
-  | Nav.Runtime_fusion
   | Nav.Runtime_connectors
   | Nav.Runtime_addons_browser ->
       0
@@ -4474,6 +5941,24 @@ let infra_detail_max_scroll (m : Model.t) =
                 let diff_h = max 1 (inner.h - band_h - link_h - 1) in
                 max 0 (List.length rows - diff_h))
       | None -> 0)
+  | Nav.Infra_code ->
+      let body_rect =
+        match
+          Masc_tui_ui.Layout.split_v br
+            [ Masc_tui_ui.Layout.Fixed 1; Masc_tui_ui.Layout.Flex 1 ]
+        with
+        | [ _; b ] -> b
+        | _ -> br
+      in
+      let _, right_rect =
+        Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
+          ~left_ratio:0.32 ~top_ratio:0.42 bp body_rect
+      in
+      let rc = ui_card_inner right_rect |> ui_pad_content ~bp in
+      if Rect.is_empty rc then 0
+      else
+        let vis_h = max 1 (rc.h - 1) in
+        max 0 (code_right_pane_line_count m - vis_h)
   | Nav.Infra_activity_logs -> (
       match Infra_store.selected_timeline_entry m.infra with
       | None -> 0
@@ -4487,8 +5972,22 @@ let infra_detail_max_scroll (m : Model.t) =
             | _ -> br
           in
           let _, right_rect =
-            Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
-              ~left_ratio:0.62 ~top_ratio:0.56 bp body_rect
+            if m.infra.acting_rail_open && body_rect.w >= 104 then
+              match
+                Masc_tui_ui.Layout.split_h_bp bp body_rect
+                  [
+                    Masc_tui_ui.Layout.Ratio 0.50;
+                    Masc_tui_ui.Layout.Ratio 0.32;
+                    Masc_tui_ui.Layout.Flex 1;
+                  ]
+              with
+              | [ l; r; _ ] -> (l, r)
+              | _ ->
+                  Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
+                    ~left_ratio:0.62 ~top_ratio:0.56 bp body_rect
+            else
+              Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
+                ~left_ratio:0.62 ~top_ratio:0.56 bp body_rect
           in
           let inner = ui_card_inner right_rect in
           if Rect.is_empty inner then 0
@@ -4543,50 +6042,92 @@ let keeper_tab_max_scroll ~embedded (m : Model.t) ~name ~tab =
   if content_w <= 0 || content_h <= 0 then 0
   else
     match tab with
-    | Nav.Keeper_memory ->
-        let footer_h = if content_h >= 7 then 2 else 0 in
-        let body_h = max 0 (content_h - footer_h) in
-        let hdr_rows =
-          match
-            Observed.to_option
-              (Knowledge_store.memory_diff_for ~keeper:(Some name)
-                 ~window:m.knowledge.memory_diff_window m.knowledge)
-          with
-          | Some
-              { retrieval_heat = heat; body = Wire_knowledge.Keeper_diff _; _ }
-            ->
-              let has_os =
-                Option.is_some
-                  (Observed.to_option
-                     (Knowledge_store.memory_os_internals_for ~keeper:name
-                        m.knowledge))
-              in
-              let heat_total =
-                heat.hot + heat.warm + heat.cold + heat.never_retrieved
-              in
-              let base = 2 + if has_os then 1 else 0 in
-              let heat_rows =
-                if heat_total > 0 && body_h - base >= 4 then 3 else 0
-              in
-              let y_after_heat = base + heat_rows in
-              let flow_h =
-                Masc_tui_ui.Memory_flow.chart_height_for
-                  ~avail_h:(body_h - y_after_heat)
-              in
-              let flow_rows =
-                if flow_h > 0 then
-                  let rem_after = body_h - (y_after_heat + flow_h) in
-                  flow_h + if rem_after > 0 then 1 else 0
-                else 0
-              in
-              y_after_heat + flow_rows
-          | Some { body = Wire_knowledge.World_diff _; _ } | None -> 0
+    | Nav.Keeper_memory -> (
+        let subbar_h = if content_h >= 4 then 1 else 0 in
+        let body_h = max 0 (content_h - subbar_h) in
+        match m.knowledge.keeper_memory_subview with
+        | Knowledge_store.Kmem_diff_flow ->
+            let footer_h = if body_h >= 7 then 2 else 0 in
+            let inner_h = max 0 (body_h - footer_h) in
+            let hdr_rows =
+              match
+                Observed.to_option
+                  (Knowledge_store.memory_diff_for ~keeper:(Some name)
+                     ~window:m.knowledge.memory_diff_window m.knowledge)
+              with
+              | Some
+                  {
+                    retrieval_heat = heat;
+                    body = Wire_knowledge.Keeper_diff _;
+                    _;
+                  } ->
+                  let has_os =
+                    Option.is_some
+                      (Observed.to_option
+                         (Knowledge_store.memory_os_internals_for ~keeper:name
+                            m.knowledge))
+                  in
+                  let heat_total =
+                    heat.hot + heat.warm + heat.cold + heat.never_retrieved
+                  in
+                  let base = 2 + if has_os then 1 else 0 in
+                  let heat_rows =
+                    if heat_total > 0 && inner_h - base >= 4 then 3 else 0
+                  in
+                  let y_after_heat = base + heat_rows in
+                  let flow_h =
+                    Masc_tui_ui.Memory_flow.chart_height_for
+                      ~avail_h:(inner_h - y_after_heat)
+                  in
+                  let flow_rows =
+                    if flow_h > 0 then
+                      let rem_after = inner_h - (y_after_heat + flow_h) in
+                      flow_h + if rem_after > 0 then 1 else 0
+                    else 0
+                  in
+                  y_after_heat + flow_rows
+              | Some { body = Wire_knowledge.World_diff _; _ } | None -> 0
+            in
+            let vis_h = max 1 (inner_h - hdr_rows) in
+            let total =
+              Knowledge_store.keeper_memory_diff_line_count ~name m.knowledge
+            in
+            max 0 (total - vis_h)
+        | Knowledge_store.Kmem_health
+        | Knowledge_store.Kmem_facts_tree
+        | Knowledge_store.Kmem_journal ->
+            let pad_x =
+              if content_w < 20 then 0
+              else if content_w < 44 then 1
+              else Masc_tui_ui.Layout.card_pad_x (ui_bp m)
+            in
+            let inner_w = max 1 (content_w - (2 * pad_x)) in
+            let total =
+              List.length
+                (keeper_memory_subview_lines ~width:inner_w ~name m.knowledge)
+            in
+            max 0 (total - max 1 body_h))
+    | Nav.Keeper_logs ->
+        let pad_x =
+          if content_w < 20 then 0
+          else if content_w < 44 then 1
+          else Masc_tui_ui.Layout.card_pad_x (ui_bp m)
         in
-        let vis_h = max 1 (body_h - hdr_rows) in
+        let inner_w = max 1 (content_w - (2 * pad_x)) in
+        let ks = Keeper_context_store.get_keeper ~keeper:name m.keeper_context in
+        let total = List.length (keeper_logs_lines ~width:inner_w ~name ks) in
+        max 0 (total - max 1 content_h)
+    | Nav.Keeper_identity ->
+        let pad_x =
+          if content_w < 20 then 0
+          else if content_w < 44 then 1
+          else Masc_tui_ui.Layout.card_pad_x (ui_bp m)
+        in
+        let inner_w = max 1 (content_w - (2 * pad_x)) in
         let total =
-          Knowledge_store.keeper_memory_diff_line_count ~name m.knowledge
+          List.length (keeper_identity_lines ~width:inner_w ~name m)
         in
-        max 0 (total - vis_h)
+        max 0 (total - max 1 content_h)
     | Nav.Keeper_work_candle ->
         let left_h =
           if content_w >= 76 then content_h
@@ -4671,8 +6212,10 @@ let memory_reading_max_scroll (m : Model.t) =
             let cw, ch =
               Chat_transcript.keeper_content_rect_size ~embedded:false ~model:m
             in
-            let footer_h = if ch >= 7 then 2 else 0 in
-            (keeper_padded_w cw, max 0 (ch - footer_h))
+            let subbar_h = if ch >= 4 then 1 else 0 in
+            let ch_after = max 0 (ch - subbar_h) in
+            let footer_h = if ch_after >= 7 then 2 else 0 in
+            (keeper_padded_w cw, max 0 (ch_after - footer_h))
         | Some (Nav.Dive_knowledge (Nav.Memory_diff_dive _)) ->
             let body_after_bar =
               match
@@ -4700,7 +6243,9 @@ let memory_reading_max_scroll (m : Model.t) =
                     | Nav.Keeper_tool_calls
                     | Nav.Keeper_work_candle
                     | Nav.Keeper_sandbox
-                    | Nav.Keeper_config );
+                    | Nav.Keeper_config
+                    | Nav.Keeper_logs
+                    | Nav.Keeper_identity );
                   _;
                 }
             | Nav.Dive_work _
@@ -4721,8 +6266,10 @@ let memory_reading_max_scroll (m : Model.t) =
                   Chat_transcript.keeper_content_rect_size
                     ~embedded:(not zoomed_keeper) ~model:m
                 in
-                let footer_h = if ch >= 7 then 2 else 0 in
-                (keeper_padded_w cw, max 0 (ch - footer_h))
+                let subbar_h = if ch >= 4 then 1 else 0 in
+                let ch_after = max 0 (ch - subbar_h) in
+                let footer_h = if ch_after >= 7 then 2 else 0 in
+                (keeper_padded_w cw, max 0 (ch_after - footer_h))
             | Nav.Knowledge
               when Nav.equal_knowledge_tab m.knowledge.active_tab
                      Nav.Knowledge_memory ->
@@ -4979,6 +6526,14 @@ let dive_max_scroll (m : Model.t) active =
           | Some desc when md_h > 0 && mc.w > 0 ->
               markdown_max_scroll ~theme ~width:mc.w ~height:md_h desc
           | Some _ | None -> 0))
+  | Nav.Dive_runtime (Nav.Fusion_dive run_id) ->
+      let content = ui_card_inner br |> ui_pad_content ~bp in
+      if Rect.is_empty content then 0
+      else
+        let total =
+          List.length (fusion_detail_lines ~width:content.w m ~run_id)
+        in
+        max 0 (total - max 1 content.h)
   | Nav.Dive_work (Nav.Goal_dive goal_id) -> (
       match
         List.find_opt
@@ -5257,36 +6812,43 @@ let dive_max_scroll (m : Model.t) active =
               let action_h = if bot - !y >= 6 then 1 else 0 in
               let body_bot = bot - action_h in
               let kv_rows =
-                2 + if Option.is_some v.review_observation then 1 else 0
+                3 + if Option.is_some v.review_observation then 1 else 0
               in
               y := min body_bot (!y + kv_rows);
               let rest =
                 Rect.make ~x:content.x ~y:!y ~w:content.w
                   ~h:(max 0 (body_bot - !y))
               in
-              let chk_r, diff_r =
-                match
-                  Masc_tui_ui.Layout.split_v ~gap:0 rest
-                    [ Masc_tui_ui.Layout.Ratio 0.44; Masc_tui_ui.Layout.Flex 1 ]
-                with
-                | [ a; b ] -> (a, b)
-                | _ -> (rest, Rect.empty)
-              in
-              let chk_max =
-                if Rect.is_empty chk_r then 0
-                else
-                  let chk_body_h = max 0 (chk_r.h - 1) in
-                  if chk_body_h <= 0 then 0
-                  else max 0 (evidence_checklist_row_count v - chk_body_h)
-              in
-              let diff_max =
-                if Rect.is_empty diff_r then 0
-                else
-                  let dr_h = max 0 (diff_r.h - 1) in
-                  if dr_h <= 0 then 0
-                  else max 0 (rejection_diff_row_count ~lang:m.lang v - dr_h)
-              in
-              max chk_max diff_max
+              let tab_lines = verification_dive_tab_lines ~width:content.w m v in
+              let tab_max = max 0 (List.length tab_lines - max 1 rest.h) in
+              match m.work.verification_dive_tab with
+              | Work_store.Verif_tab_summary
+              | Work_store.Verif_tab_specs
+              | Work_store.Verif_tab_tlc ->
+                  tab_max
+              | Work_store.Verif_tab_evidence ->
+                  let chk_r, diff_r =
+                    match
+                      Masc_tui_ui.Layout.split_v ~gap:0 rest
+                        [ Masc_tui_ui.Layout.Ratio 0.56; Masc_tui_ui.Layout.Flex 1 ]
+                    with
+                    | [ a; b ] -> (a, b)
+                    | _ -> (rest, Rect.empty)
+                  in
+                  let ev_max =
+                    if Rect.is_empty chk_r then 0
+                    else
+                      let ev_h = max 1 (chk_r.h - 1) in
+                      max 0 (List.length tab_lines - ev_h)
+                  in
+                  let diff_max =
+                    if Rect.is_empty diff_r then 0
+                    else
+                      let dr_h = max 0 (diff_r.h - 1) in
+                      if dr_h <= 0 then 0
+                      else max 0 (rejection_diff_row_count ~lang:m.lang v - dr_h)
+                  in
+                  max ev_max diff_max
           in
           let json_max =
             if Rect.is_empty json_card_rect then 0
@@ -5423,6 +6985,36 @@ let dive_max_scroll (m : Model.t) active =
             let log_h = max 1 (content.h - detail_h - 1) in
             let log_max = max 0 (List.length filtered_logs - log_h) in
             max detail_max log_max)
+  | Nav.Dive_infra (Nav.Runtime_trace_dive keeper) -> (
+      match Infra_store.runtime_trace_for ~keeper m.infra with
+      | None -> 0
+      | Some tr ->
+          let content = ui_card_inner br |> ui_pad_content ~bp in
+          if Rect.is_empty content then 0
+          else
+            let tree_h = max 1 (content.h - 3) in
+            let lines =
+              Masc_tui_ui.Json_tree.flatten ~max_depth:4 ~redact_secrets:true
+                tr.raw
+            in
+            max 0 (List.length lines - tree_h))
+  | Nav.Dive_infra (Nav.Log_detail_dive seq) -> (
+      match Infra_store.find_log_by_seq seq m.infra with
+      | None -> 0
+      | Some e ->
+          let content = ui_card_inner br |> ui_pad_content ~bp in
+          if Rect.is_empty content then 0
+          else
+            let msg_lines =
+              wrap_lines ~width:(max 1 (content.w - 2)) e.message
+            in
+            let msg_n = min 6 (List.length msg_lines) in
+            let tree_h = max 1 (content.h - msg_n - 2) in
+            let jlines =
+              Masc_tui_ui.Json_tree.flatten ~max_depth:5 ~redact_secrets:true
+                e.details
+            in
+            max 0 (List.length jlines - tree_h))
 
 let move_keeper_config_selection ~embedded ~name ~delta (m : Model.t) =
   let _, content_h =
@@ -5571,7 +7163,10 @@ let apply_move (m : Model.t) dir =
                   | Nav.Connector_form
                   | Nav.Repo_add_form
                   | Nav.Board_new_post
-                  | Nav.Board_comment _ )
+                  | Nav.Board_comment _
+                  | Nav.Github_token_form _
+                  | Nav.Code_finder_form
+                  | Nav.Code_search_form )
                 , _ ) ->
                   true
             in
@@ -6055,67 +7650,141 @@ let apply_move (m : Model.t) dir =
             | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_config }) ->
                 move_keeper_config_selection ~embedded:false ~name
                   ~delta:(move_delta dir) m
+            | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_logs }) ->
+                let max_scroll =
+                  keeper_tab_max_scroll ~embedded:false m ~name
+                    ~tab:Nav.Keeper_logs
+                in
+                let keeper_context =
+                  Keeper_context_store.move_logs_scroll ~keeper:name ~max_scroll
+                    ~delta:(scroll_delta dir) m.keeper_context
+                in
+                ({ m with keeper_context }, [])
+            | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_identity }) ->
+                let entries_count =
+                  List.length (keeper_identity_entries m ~name)
+                in
+                let max_scroll =
+                  keeper_tab_max_scroll ~embedded:false m ~name
+                    ~tab:Nav.Keeper_identity
+                in
+                let keeper_context =
+                  match dir with
+                  | Keymap.Page_up | Keymap.Page_down ->
+                      Keeper_context_store.move_identity_scroll ~keeper:name
+                        ~max_scroll ~delta:(scroll_delta dir) m.keeper_context
+                  | Keymap.Up | Keymap.Down | Keymap.Home | Keymap.End
+                  | Keymap.Left | Keymap.Right ->
+                      m.keeper_context
+                      |> Keeper_context_store.move_identity_selection
+                           ~keeper:name ~count:entries_count
+                           ~delta:(move_delta dir)
+                      |> Keeper_context_store.move_identity_scroll ~keeper:name
+                           ~max_scroll ~delta:(scroll_delta dir)
+                in
+                ({ m with keeper_context }, [])
             | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory }) ->
-                let has_matching_diagram =
-                  Option.is_some (Memory_diagram.active_diagram m)
-                in
-                let has_matching_reading =
-                  match m.knowledge.memory_reading with
-                  | Some entry ->
-                      Knowledge_store.memory_reading_matches_scope
-                        ~keeper_opt:(Some name) entry
-                  | None -> false
-                in
-                if has_matching_diagram then
+                if
+                  not
+                    (Knowledge_store.equal_keeper_memory_subview
+                       m.knowledge.keeper_memory_subview
+                       Knowledge_store.Kmem_diff_flow)
+                then
                   let sd = scroll_delta dir in
-                  let max_scroll = memory_diagram_max_scroll m in
-                  let knowledge =
-                    Knowledge_store.scroll_memory_diagram ~max_scroll ~delta:sd
-                      m.knowledge
+                  let max_scroll =
+                    keeper_tab_max_scroll ~embedded:false m ~name
+                      ~tab:Nav.Keeper_memory
                   in
-                  ({ m with knowledge }, [])
-                else if has_matching_reading then
-                  let sd = scroll_delta dir in
-                  let max_scroll = memory_reading_max_scroll m in
                   let knowledge =
-                    Knowledge_store.scroll_memory_reading ~max_scroll ~delta:sd
-                      m.knowledge
+                    match m.knowledge.keeper_memory_subview with
+                    | Knowledge_store.Kmem_facts_tree -> (
+                        match
+                          Knowledge_store.memory_facts_for_keeper ~keeper:name
+                            m.knowledge
+                        with
+                        | Some facts ->
+                            let cnt =
+                              List.length (keeper_facts_categories facts)
+                            in
+                            Knowledge_store.move_facts_selection ~count:cnt
+                              ~delta:(move_delta dir) m.knowledge
+                        | None -> m.knowledge)
+                    | Knowledge_store.Kmem_diff_flow
+                    | Knowledge_store.Kmem_health
+                    | Knowledge_store.Kmem_journal ->
+                        m.knowledge
                   in
-                  ({ m with knowledge }, [])
-                else (
-                  match m.knowledge.memory_view_mode with
-                  | Knowledge_store.View_evolution ->
-                      let knowledge =
-                        Knowledge_store.move_memory_activity ~keeper:name
-                          ~viewport_rows ~delta:(move_delta dir) m.knowledge
-                      in
-                      ({ m with knowledge }, [])
-                  | Knowledge_store.View_facts ->
-                      let knowledge =
-                        Knowledge_store.move_memory_facts ~keeper:name
-                          ~viewport_rows ~delta:(move_delta dir) m.knowledge
-                      in
-                      ({ m with knowledge }, [])
-                  | Knowledge_store.View_diff ->
-                      let sd = scroll_delta dir in
-                      let max_scroll =
-                        keeper_tab_max_scroll ~embedded:false m ~name
-                          ~tab:Nav.Keeper_memory
-                      in
-                      let dive_scroll_offset =
-                        Store_scroll.clamp_scroll ~max_scroll
-                          (m.nav.dive_scroll_offset + sd)
-                      in
-                      let knowledge =
-                        Knowledge_store.move_memory_diff_cursor
-                          ~delta:(move_delta dir) m.knowledge
-                      in
-                      ( {
-                          m with
-                          nav = { m.nav with dive_scroll_offset };
-                          knowledge;
-                        }
-                      , [] ))
+                  let dive_scroll_offset =
+                    Store_scroll.clamp_scroll ~max_scroll
+                      (m.nav.dive_scroll_offset + sd)
+                  in
+                  ( {
+                      m with
+                      nav = { m.nav with dive_scroll_offset };
+                      knowledge;
+                    }
+                  , [] )
+                else
+                  let has_matching_diagram =
+                    Option.is_some (Memory_diagram.active_diagram m)
+                  in
+                  let has_matching_reading =
+                    match m.knowledge.memory_reading with
+                    | Some entry ->
+                        Knowledge_store.memory_reading_matches_scope
+                          ~keeper_opt:(Some name) entry
+                    | None -> false
+                  in
+                  if has_matching_diagram then
+                    let sd = scroll_delta dir in
+                    let max_scroll = memory_diagram_max_scroll m in
+                    let knowledge =
+                      Knowledge_store.scroll_memory_diagram ~max_scroll ~delta:sd
+                        m.knowledge
+                    in
+                    ({ m with knowledge }, [])
+                  else if has_matching_reading then
+                    let sd = scroll_delta dir in
+                    let max_scroll = memory_reading_max_scroll m in
+                    let knowledge =
+                      Knowledge_store.scroll_memory_reading ~max_scroll ~delta:sd
+                        m.knowledge
+                    in
+                    ({ m with knowledge }, [])
+                  else (
+                    match m.knowledge.memory_view_mode with
+                    | Knowledge_store.View_evolution ->
+                        let knowledge =
+                          Knowledge_store.move_memory_activity ~keeper:name
+                            ~viewport_rows ~delta:(move_delta dir) m.knowledge
+                        in
+                        ({ m with knowledge }, [])
+                    | Knowledge_store.View_facts ->
+                        let knowledge =
+                          Knowledge_store.move_memory_facts ~keeper:name
+                            ~viewport_rows ~delta:(move_delta dir) m.knowledge
+                        in
+                        ({ m with knowledge }, [])
+                    | Knowledge_store.View_diff ->
+                        let sd = scroll_delta dir in
+                        let max_scroll =
+                          keeper_tab_max_scroll ~embedded:false m ~name
+                            ~tab:Nav.Keeper_memory
+                        in
+                        let dive_scroll_offset =
+                          Store_scroll.clamp_scroll ~max_scroll
+                            (m.nav.dive_scroll_offset + sd)
+                        in
+                        let knowledge =
+                          Knowledge_store.move_memory_diff_cursor
+                            ~delta:(move_delta dir) m.knowledge
+                        in
+                        ( {
+                            m with
+                            nav = { m.nav with dive_scroll_offset };
+                            knowledge;
+                          }
+                        , [] ))
             | Some
                 (Nav.Dive_knowledge
                    (Nav.Memory_diff_dive { keeper; from_rev; to_rev }) as active)
@@ -6226,69 +7895,149 @@ let apply_move (m : Model.t) dir =
                           | Nav.Keeper_config ->
                               move_keeper_config_selection ~embedded
                                 ~name:k.name ~delta:(move_delta dir) m
+                          | Nav.Keeper_logs ->
+                              let max_scroll =
+                                keeper_tab_max_scroll ~embedded m ~name:k.name
+                                  ~tab:Nav.Keeper_logs
+                              in
+                              let keeper_context =
+                                Keeper_context_store.move_logs_scroll
+                                  ~keeper:k.name ~max_scroll
+                                  ~delta:(scroll_delta dir) m.keeper_context
+                              in
+                              ({ m with keeper_context }, [])
+                          | Nav.Keeper_identity ->
+                              let entries_count =
+                                List.length
+                                  (keeper_identity_entries m ~name:k.name)
+                              in
+                              let max_scroll =
+                                keeper_tab_max_scroll ~embedded m ~name:k.name
+                                  ~tab:Nav.Keeper_identity
+                              in
+                              let keeper_context =
+                                match dir with
+                                | Keymap.Page_up | Keymap.Page_down ->
+                                    Keeper_context_store.move_identity_scroll
+                                      ~keeper:k.name ~max_scroll
+                                      ~delta:(scroll_delta dir) m.keeper_context
+                                | Keymap.Up | Keymap.Down | Keymap.Home
+                                | Keymap.End | Keymap.Left | Keymap.Right ->
+                                    m.keeper_context
+                                    |> Keeper_context_store.move_identity_selection
+                                         ~keeper:k.name ~count:entries_count
+                                         ~delta:(move_delta dir)
+                                    |> Keeper_context_store.move_identity_scroll
+                                         ~keeper:k.name ~max_scroll
+                                         ~delta:(scroll_delta dir)
+                              in
+                              ({ m with keeper_context }, [])
                           | Nav.Keeper_memory ->
-                              let has_matching_diagram =
-                                Option.is_some (Memory_diagram.active_diagram m)
-                              in
-                              let has_matching_reading =
-                                match m.knowledge.memory_reading with
-                                | Some entry ->
-                                    Knowledge_store.memory_reading_matches_scope
-                                      ~keeper_opt:(Some k.name) entry
-                                | None -> false
-                              in
-                              if has_matching_diagram then
+                              if
+                                not
+                                  (Knowledge_store.equal_keeper_memory_subview
+                                     m.knowledge.keeper_memory_subview
+                                     Knowledge_store.Kmem_diff_flow)
+                              then
                                 let sd = scroll_delta dir in
-                                let max_scroll = memory_diagram_max_scroll m in
-                                let knowledge =
-                                  Knowledge_store.scroll_memory_diagram
-                                    ~max_scroll ~delta:sd m.knowledge
+                                let max_scroll =
+                                  keeper_tab_max_scroll ~embedded m ~name:k.name
+                                    ~tab:Nav.Keeper_memory
                                 in
-                                ({ m with knowledge }, [])
-                              else if has_matching_reading then
-                                let sd = scroll_delta dir in
-                                let max_scroll = memory_reading_max_scroll m in
                                 let knowledge =
-                                  Knowledge_store.scroll_memory_reading
-                                    ~max_scroll ~delta:sd m.knowledge
+                                  match m.knowledge.keeper_memory_subview with
+                                  | Knowledge_store.Kmem_facts_tree -> (
+                                      match
+                                        Knowledge_store.memory_facts_for_keeper
+                                          ~keeper:k.name m.knowledge
+                                      with
+                                      | Some facts ->
+                                          let cnt =
+                                            List.length
+                                              (keeper_facts_categories facts)
+                                          in
+                                          Knowledge_store.move_facts_selection
+                                            ~count:cnt ~delta:(move_delta dir)
+                                            m.knowledge
+                                      | None -> m.knowledge)
+                                  | Knowledge_store.Kmem_diff_flow
+                                  | Knowledge_store.Kmem_health
+                                  | Knowledge_store.Kmem_journal ->
+                                      m.knowledge
                                 in
-                                ({ m with knowledge }, [])
-                              else (
-                                match m.knowledge.memory_view_mode with
-                                | Knowledge_store.View_evolution ->
-                                    let knowledge =
-                                      Knowledge_store.move_memory_activity
-                                        ~keeper:k.name ~viewport_rows
-                                        ~delta:(move_delta dir) m.knowledge
-                                    in
-                                    ({ m with knowledge }, [])
-                                | Knowledge_store.View_facts ->
-                                    let knowledge =
-                                      Knowledge_store.move_memory_facts
-                                        ~keeper:k.name ~viewport_rows
-                                        ~delta:(move_delta dir) m.knowledge
-                                    in
-                                    ({ m with knowledge }, [])
-                                | Knowledge_store.View_diff ->
-                                    let sd = scroll_delta dir in
-                                    let max_scroll =
-                                      keeper_tab_max_scroll ~embedded m
-                                        ~name:k.name ~tab:Nav.Keeper_memory
-                                    in
-                                    let dive_scroll_offset =
-                                      Store_scroll.clamp_scroll ~max_scroll
-                                        (m.nav.dive_scroll_offset + sd)
-                                    in
-                                    let knowledge =
-                                      Knowledge_store.move_memory_diff_cursor
-                                        ~delta:(move_delta dir) m.knowledge
-                                    in
-                                    ( {
-                                        m with
-                                        nav = { m.nav with dive_scroll_offset };
-                                        knowledge;
-                                      }
-                                    , [] ))
+                                let dive_scroll_offset =
+                                  Store_scroll.clamp_scroll ~max_scroll
+                                    (m.nav.dive_scroll_offset + sd)
+                                in
+                                ( {
+                                    m with
+                                    nav = { m.nav with dive_scroll_offset };
+                                    knowledge;
+                                  }
+                                , [] )
+                              else
+                                let has_matching_diagram =
+                                  Option.is_some (Memory_diagram.active_diagram m)
+                                in
+                                let has_matching_reading =
+                                  match m.knowledge.memory_reading with
+                                  | Some entry ->
+                                      Knowledge_store.memory_reading_matches_scope
+                                        ~keeper_opt:(Some k.name) entry
+                                  | None -> false
+                                in
+                                if has_matching_diagram then
+                                  let sd = scroll_delta dir in
+                                  let max_scroll = memory_diagram_max_scroll m in
+                                  let knowledge =
+                                    Knowledge_store.scroll_memory_diagram
+                                      ~max_scroll ~delta:sd m.knowledge
+                                  in
+                                  ({ m with knowledge }, [])
+                                else if has_matching_reading then
+                                  let sd = scroll_delta dir in
+                                  let max_scroll = memory_reading_max_scroll m in
+                                  let knowledge =
+                                    Knowledge_store.scroll_memory_reading
+                                      ~max_scroll ~delta:sd m.knowledge
+                                  in
+                                  ({ m with knowledge }, [])
+                                else (
+                                  match m.knowledge.memory_view_mode with
+                                  | Knowledge_store.View_evolution ->
+                                      let knowledge =
+                                        Knowledge_store.move_memory_activity
+                                          ~keeper:k.name ~viewport_rows
+                                          ~delta:(move_delta dir) m.knowledge
+                                      in
+                                      ({ m with knowledge }, [])
+                                  | Knowledge_store.View_facts ->
+                                      let knowledge =
+                                        Knowledge_store.move_memory_facts
+                                          ~keeper:k.name ~viewport_rows
+                                          ~delta:(move_delta dir) m.knowledge
+                                      in
+                                      ({ m with knowledge }, [])
+                                  | Knowledge_store.View_diff ->
+                                      let sd = scroll_delta dir in
+                                      let max_scroll =
+                                        keeper_tab_max_scroll ~embedded m
+                                          ~name:k.name ~tab:Nav.Keeper_memory
+                                      in
+                                      let dive_scroll_offset =
+                                        Store_scroll.clamp_scroll ~max_scroll
+                                          (m.nav.dive_scroll_offset + sd)
+                                      in
+                                      let knowledge =
+                                        Knowledge_store.move_memory_diff_cursor
+                                          ~delta:(move_delta dir) m.knowledge
+                                      in
+                                      ( {
+                                          m with
+                                          nav = { m.nav with dive_scroll_offset };
+                                          knowledge;
+                                        }
+                                      , [] ))
                           | (Nav.Keeper_work_candle | Nav.Keeper_sandbox) as tab
                             ->
                               let sd = scroll_delta dir in
@@ -6429,6 +8178,23 @@ let apply_move (m : Model.t) dir =
                               Work_store.move_selection ~pane_index
                                 ~viewport_rows ~delta m.work;
                           }
+                        , [] )
+                    | Nav.Work_harness ->
+                        let is_detail = pane_index = 1 in
+                        let eff_delta =
+                          if is_detail then scroll_delta dir else delta
+                        in
+                        let max_detail_scroll =
+                          if is_detail then Some (work_detail_max_scroll m)
+                          else None
+                        in
+                        ( {
+                            m with
+                            work =
+                              Work_store.move_selection ~pane_index
+                                ~viewport_rows ?max_detail_scroll
+                                ~delta:eff_delta m.work;
+                          }
                         , [] ))
                 | Nav.Knowledge ->
                     let eff_pane =
@@ -6485,9 +8251,22 @@ let apply_move (m : Model.t) dir =
                       else None
                     in
                     let knowledge =
-                      Knowledge_store.move_selection ~pane_index:eff_pane
-                        ~viewport_rows ?max_detail_scroll ~delta:eff_delta
-                        m.knowledge
+                      if
+                        Nav.equal_knowledge_tab m.knowledge.active_tab
+                          Nav.Knowledge_memory
+                        && eff_pane = 1
+                        && not
+                             (Knowledge_store.equal_memory_subview
+                                m.knowledge.memory_subview
+                                Knowledge_store.Mem_diff_flow)
+                      then
+                        let max_scroll = knowledge_detail_max_scroll m in
+                        Knowledge_store.move_memory_subview_scroll ~max_scroll
+                          ~delta:(scroll_delta dir) m.knowledge
+                      else
+                        Knowledge_store.move_selection ~pane_index:eff_pane
+                          ~viewport_rows ?max_detail_scroll ~delta:eff_delta
+                          m.knowledge
                     in
                     let next = { m with knowledge } in
                     let nav_cmds =
@@ -6540,10 +8319,35 @@ let apply_move (m : Model.t) dir =
                         (fun (c : Wire_runtime.browser_client_row) -> c.client_id)
                         (Runtime_store.selected_browser_client rt)
                     in
+                    let prev_fusion_id =
+                      Option.map
+                        (fun (r : Wire_runtime.fusion_run) -> r.run_id)
+                        (Runtime_store.selected_fusion_run rt)
+                    in
+                    let prev_catalog_manifest =
+                      match Runtime_store.selected_addon_catalog_entry rt with
+                      | Some (Wire_runtime.Catalog_package { manifest_path; _ })
+                        ->
+                          Some manifest_path
+                      | Some
+                          ( Wire_runtime.Catalog_folder _
+                          | Wire_runtime.Catalog_issue _ )
+                      | None ->
+                          None
+                    in
+                    let prev_connector_id =
+                      Option.map
+                        (fun (c : Wire_runtime.connector_row) -> c.connector_id)
+                        (Runtime_store.selected_connector rt)
+                    in
                     let is_detail_scroll =
                       match rt.active_tab, pane_index with
                       | Nav.Runtime_quotas_credits, 0
-                      | Nav.Runtime_failover_lanes, 1 ->
+                      | Nav.Runtime_failover_lanes, 1
+                      | Nav.Runtime_fusion, 1 ->
+                          true
+                      | Nav.Runtime_addons_browser, 1 when rt.addon_catalog_mode
+                        ->
                           true
                       | ( ( Nav.Runtime_quotas_credits
                           | Nav.Runtime_efficiency_spend
@@ -6913,6 +8717,7 @@ let apply_move (m : Model.t) dir =
                       if
                         Nav.equal_runtime_tab next_rt.active_tab
                           Nav.Runtime_addons_browser
+                        && (not next_rt.addon_catalog_mode)
                         && pane_index = 1
                         && next_rt.browser_right_focus = `Clients
                       then
@@ -6943,21 +8748,128 @@ let apply_move (m : Model.t) dir =
                                     };
                                 ])
                         | Some _ | None -> []
+                      else if
+                        Nav.equal_runtime_tab next_rt.active_tab
+                          Nav.Runtime_addons_browser
+                        && next_rt.addon_catalog_mode && pane_index = 0
+                      then
+                        match
+                          Runtime_store.selected_addon_catalog_entry next_rt
+                        with
+                        | Some
+                            (Wire_runtime.Catalog_package { manifest_path; _ })
+                          when not
+                                 (Option.equal String.equal
+                                    prev_catalog_manifest (Some manifest_path))
+                          ->
+                            [
+                              Cmd.Http_get
+                                {
+                                  epoch = m.epoch;
+                                  req =
+                                    Cmd.Get_addon_package_preview
+                                      { manifest_path };
+                                };
+                            ]
+                        | Some
+                            ( Wire_runtime.Catalog_package _
+                            | Wire_runtime.Catalog_folder _
+                            | Wire_runtime.Catalog_issue _ )
+                        | None ->
+                            []
+                      else if
+                        Nav.equal_runtime_tab next_rt.active_tab
+                          Nav.Runtime_fusion
+                        && pane_index = 0
+                      then
+                        match Runtime_store.selected_fusion_run next_rt with
+                        | Some run
+                          when not
+                                 (Option.equal String.equal prev_fusion_id
+                                    (Some run.run_id)) ->
+                            [
+                              Cmd.Http_get
+                                {
+                                  epoch = m.epoch;
+                                  req =
+                                    Cmd.Get_fusion_run_detail
+                                      { run_id = run.run_id };
+                                };
+                            ]
+                        | Some _ | None -> []
+                      else if
+                        Nav.equal_runtime_tab next_rt.active_tab
+                          Nav.Runtime_connectors
+                        && pane_index = 0
+                      then
+                        match Runtime_store.selected_connector next_rt with
+                        | Some conn
+                          when (not
+                                  (Option.equal String.equal prev_connector_id
+                                     (Some conn.connector_id)))
+                               && not
+                                    (Runtime_store.String_map.mem
+                                       conn.connector_id next_rt.connector_names)
+                          ->
+                            [
+                              Cmd.Http_get
+                                {
+                                  epoch = m.epoch;
+                                  req =
+                                    Cmd.Get_connector_names
+                                      {
+                                        connector = conn.connector_id;
+                                        scope = "channel";
+                                      };
+                                };
+                            ]
+                        | Some _ | None -> []
                       else []
                     in
                     ({ m with runtime = next_rt }, tab_cmds)
                 | Nav.Infra ->
+                    if
+                      Nav.equal_infra_tab m.infra.active_tab
+                        Nav.Infra_activity_logs
+                      && m.infra.acting_rail_open && pane_index = 2
+                    then
+                      let count = List.length (acting_keepers m) in
+                      let infra =
+                        Infra_store.move_acting_selection ~count ~delta m.infra
+                      in
+                      ({ m with infra }, [])
+                    else
+                    let is_code_search_select =
+                      Nav.equal_infra_tab m.infra.active_tab Nav.Infra_code
+                      && pane_index = 1
+                      && Infra_store.equal_code_right_mode
+                           m.infra.code.right_mode
+                           Infra_store.Code_search_results
+                    in
                     let eff_delta =
-                      if pane_index = 1 then scroll_delta dir else delta
+                      if pane_index = 1 && not is_code_search_select then
+                        scroll_delta dir
+                      else delta
                     in
                     let max_detail_scroll =
                       if pane_index = 1 then Some (infra_detail_max_scroll m)
                       else None
                     in
-                    follow_selected_repository
-                      {
-                        m with
-                        infra =
-                          Infra_store.move_selection ~pane_index ~viewport_rows
-                            ?max_detail_scroll ~delta:eff_delta m.infra;
-                      })))
+                    let prev_code_path =
+                      Infra_store.active_code_file_path m.infra
+                    in
+                    let infra0 =
+                      Infra_store.move_selection ~pane_index ~viewport_rows
+                        ?max_detail_scroll ~delta:eff_delta m.infra
+                    in
+                    if
+                      Nav.equal_infra_tab infra0.active_tab Nav.Infra_code
+                      && pane_index = 0
+                      && not
+                           (Option.equal String.equal prev_code_path
+                              (Infra_store.active_code_file_path infra0))
+                    then
+                      let next_m = { m with infra = infra0 } in
+                      (next_m, View_fetches.fetches_for_current_view next_m)
+                    else
+                      follow_selected_repository { m with infra = infra0 })))

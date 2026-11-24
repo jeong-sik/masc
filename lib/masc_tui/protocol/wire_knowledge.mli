@@ -751,6 +751,10 @@ val keeper_memory_os_internals_path : keeper:string -> string
 val keeper_memory_facts_path : keeper:string -> string
 val keeper_memory_activity_path : keeper:string -> ?limit:int -> unit -> string
 val keeper_memory_health_path : ?keeper:string -> unit -> string
+val workspace_memory_ledger_path : string
+val workspace_memory_context_path : string
+val keeper_memory_journal_path :
+  keeper:string -> ?limit:int -> ?activity:bool -> unit -> string
 
 type compaction_internals = {
   present : bool;
@@ -1012,5 +1016,90 @@ type keeper_memory_health_fleet = {
   keepers : keeper_memory_health_row list;
 }
 
+val memory_health_alert_severity_to_string :
+  memory_health_alert_severity -> string
+
+val memory_health_fleet_totals :
+  keeper_memory_health_fleet -> int * int * int * int * int
+(** Returns [(total_facts, total_invalidations, total_alerts, warn_alerts, error_alerts)]. *)
+
 val decode_keeper_memory_health_fleet :
   Yojson.Safe.t -> (keeper_memory_health_fleet, string) result
+
+val decode_keeper_memory_health_single :
+  Yojson.Safe.t -> (keeper_memory_health_row option, string) result
+
+(** {1 Workspace Memory Ledger, Context & Keeper Journal} *)
+
+type workspace_ledger_fact = {
+  claim_text : string option;
+  disposition_kind : string;
+  disposition_detail : string option;
+  source_state : string;
+}
+
+type workspace_memory_ledger = {
+  status : string;
+  ledger_sha256 : string option;
+  claims : (string * string) list;
+  conflicts : (string * string) list;
+  facts : workspace_ledger_fact list;
+}
+
+type workspace_context_obs =
+  | Ctx_missing
+  | Ctx_unavailable of string
+  | Ctx_available of { revision : int option; fact_count : int }
+
+type workspace_context_keeper = {
+  keeper_id : string;
+  ordinary : workspace_context_obs;
+  source_bound : workspace_context_obs;
+}
+
+type workspace_memory_context = {
+  generated_at : float;
+  discovery_status : string;
+  discovery_detail : string option;
+  keepers : workspace_context_keeper list;
+}
+
+type memory_journal_entry = {
+  structural_id : string;
+  ok : bool;
+  outcome : string option;
+  recorded_at : float option;
+  revision : int option;
+  source_kind : string option;
+  added : int;
+  removed : int;
+  retained : int;
+  invalidated : int;
+  error : string option;
+}
+
+type journal_activity_event = {
+  identity : string;
+  recorded_at : float;
+  revision : int;
+  kind : string;
+  before_claims : string list;
+  after_claims : string list;
+  reason : string option;
+}
+
+type keeper_memory_journal = {
+  keeper : string;
+  returned : int;
+  undecodable_lines : int;
+  entries : memory_journal_entry list;
+  activity_events : journal_activity_event list;
+  activity_notes : string list;
+}
+
+val decode_workspace_memory_ledger :
+  Yojson.Safe.t -> (workspace_memory_ledger, string) result
+val decode_workspace_memory_context :
+  Yojson.Safe.t -> (workspace_memory_context, string) result
+val decode_keeper_memory_journal :
+  Yojson.Safe.t -> (keeper_memory_journal, string) result

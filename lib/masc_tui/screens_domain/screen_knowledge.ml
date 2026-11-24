@@ -2499,6 +2499,60 @@ let draw_temporal_memory_diff ~(model : Model.t) ~grid ~cache ~(rect : Rect.t)
           ~rect:content ~theme ~lang ~now_unix ~k ~focused
           ~diff_scroll:k.diff_scroll_offset
 
+let draw_memory_subview_card ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
+    ~bp ~lang ~(k : Knowledge_store.t) ~focused =
+  let title =
+    match k.memory_subview with
+    | Knowledge_store.Mem_health_ledger ->
+        Say.resolve lang
+          (Say.make ~ko:"기억 헬스 · 워크스페이스 원장"
+             ~en:"Memory Health & Workspace Ledger")
+    | Knowledge_store.Mem_context ->
+        Say.resolve lang
+          (Say.make ~ko:"워크스페이스 메모리 컨텍스트"
+             ~en:"Workspace Memory Context")
+    | Knowledge_store.Mem_diff_flow ->
+        Say.resolve lang (Say.make ~ko:"기억 Diff" ~en:"Memory Diff")
+  in
+  let inner =
+    Card.draw ~cache grid ~rect ~theme
+      (H.card_spec ~focused
+         ~hotkey:
+           (Say.resolve lang
+              (Say.make ~ko:"[v] 하위뷰 · [↑↓] 스크롤 · [r] 새로고침"
+                 ~en:"[v] View · [↑↓] Scroll · [r] Refresh"))
+         title)
+  in
+  let content = H.pad_content ~bp inner in
+  if not (Rect.is_empty content) then begin
+    let lines =
+      Update_nav.knowledge_memory_subview_lines ~width:content.w k
+    in
+    let max_skip = Int.max 0 (List.length lines - content.h) in
+    let skip = Int.min max_skip (Int.max 0 k.memory_subview_scroll) in
+    let y = ref content.y and bot = Rect.bottom content in
+    List.iter
+      (fun ln ->
+        if !y < bot then begin
+          let st =
+            if String.starts_with ~prefix:"──" ln then
+              H.accent_style ~theme ~attrs:Attr.bold ()
+            else if
+              String.starts_with ~prefix:"    [error" ln
+              || String.starts_with ~prefix:"  [conflict" ln
+            then H.status_style ~theme Theme.Status_critical
+            else if String.starts_with ~prefix:"    [warn" ln then
+              H.status_style ~theme Theme.Status_attention
+            else H.text_style ~theme ()
+          in
+          ignore
+            (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
+               ~max_w:content.w ~style:st ln);
+          incr y
+        end)
+      (Store_scroll.drop skip lines)
+  end
+
 let render_memory ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     ~bp grid =
   let lang = model.lang in
@@ -2527,6 +2581,33 @@ let render_memory ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
   in
   let pills =
     [
+      {
+        H.label =
+          Say.resolve lang (Say.make ~ko:"Diff & Flow" ~en:"Diff & Flow");
+        active =
+          Knowledge_store.equal_memory_subview k.memory_subview
+            Knowledge_store.Mem_diff_flow;
+        tone = Some Theme.Status_active;
+        glyph = None;
+      };
+      {
+        H.label =
+          Say.resolve lang (Say.make ~ko:"헬스·원장" ~en:"Health & Ledger");
+        active =
+          Knowledge_store.equal_memory_subview k.memory_subview
+            Knowledge_store.Mem_health_ledger;
+        tone = Some Theme.Status_ok;
+        glyph = None;
+      };
+      {
+        H.label =
+          Say.resolve lang (Say.make ~ko:"컨텍스트" ~en:"Context");
+        active =
+          Knowledge_store.equal_memory_subview k.memory_subview
+            Knowledge_store.Mem_context;
+        tone = Some Theme.Status_ai;
+        glyph = None;
+      };
       {
         H.label = scope_label;
         active = true;
@@ -2565,10 +2646,23 @@ let render_memory ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       };
     ]
   in
-  ignore (H.draw_pills ~grid ~rect:top_rect ~theme pills);
+  ignore
+    (H.draw_pills ~grid ~rect:top_rect ~theme
+       ~right_hint:
+         (Say.resolve lang
+            (Say.make ~ko:"[v] 하위뷰 · [g] 차트 · [w] 기간"
+               ~en:"[v] View · [g] Flow · [w] Window"))
+       pills);
+  let draw_right ~rect ~focused =
+    match k.memory_subview with
+    | Knowledge_store.Mem_diff_flow ->
+        draw_temporal_memory_diff ~model ~grid ~cache ~rect ~theme ~bp ~lang
+          ~now_unix ~k ~focused
+    | Knowledge_store.Mem_health_ledger | Knowledge_store.Mem_context ->
+        draw_memory_subview_card ~grid ~cache ~rect ~theme ~bp ~lang ~k ~focused
+  in
   if model.nav.zoomed then
-    draw_temporal_memory_diff ~model ~grid ~cache ~rect:body_rect ~theme ~bp
-      ~lang ~now_unix ~k ~focused:(Model.body_has_focus model)
+    draw_right ~rect:body_rect ~focused:(Model.body_has_focus model)
   else
     let left_rect, right_rect =
       Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.48
@@ -2576,8 +2670,7 @@ let render_memory ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     in
     draw_world_and_librarian ~grid ~cache ~rect:left_rect ~theme ~bp ~lang ~k
       ~focused:(Model.pane_focused model 0);
-    draw_temporal_memory_diff ~model ~grid ~cache ~rect:right_rect ~theme ~bp
-      ~lang ~now_unix ~k ~focused:(Model.pane_focused model 1)
+    draw_right ~rect:right_rect ~focused:(Model.pane_focused model 1)
 
 (* --- 4. Top-Level Workspace Render & Dive Render --- *)
 

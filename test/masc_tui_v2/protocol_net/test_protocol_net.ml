@@ -4758,6 +4758,517 @@ let test_wave2_live_wire_codecs () =
     "/api/v1/gate/connector/unbind?name=slack"
     (Wire_runtime.connector_unbind_path ~connector:"slack")
 
+let test_wave3_live_wire_codecs () =
+  (* Surface 1: Fusion runs snapshot, run detail, config presets, board evidence *)
+  let fusion_runs_json =
+    parse_json
+      {|{
+        "generated_at": "2026-11-23T08:00:00Z",
+        "replay": { "status": "complete", "lines_read": 12, "malformed_lines": 1, "dropped_running": 0 },
+        "historical_evidence": [
+          { "run_id": "run-hist-1", "post_id": "p-hist-1", "title": "Historical Fusion", "created_at": 1795253000.0 }
+        ],
+        "runs": [
+          {
+            "run_id": "run-w3-1",
+            "keeper": "alpha-leader",
+            "preset": "consensus-3",
+            "topology": "judge_of_judges",
+            "started_at": 1795253800.0,
+            "finished_at": 1795253845.0,
+            "status": "completed",
+            "stage": "done",
+            "decision": "adopt",
+            "summary": "All panelists converged on option B"
+          }
+        ]
+      }|}
+  in
+  let fsnap =
+    expect_ok "decode_fusion_runs_snapshot"
+      (Wire_runtime.decode_fusion_runs_snapshot fusion_runs_json)
+  in
+  Alcotest.(check int) "1 fusion run" 1 (List.length fsnap.runs);
+  Alcotest.(check int) "1 historical evidence" 1
+    (List.length fsnap.historical_evidence);
+  Alcotest.(check bool) "replay complete with 1 malformed" true
+    (match fsnap.replay with
+    | Some (Wire_runtime.Replay_complete { malformed_lines = 1; lines_read = 12; _ }) -> true
+    | _ -> false);
+  let fusion_detail_json =
+    parse_json
+      {|{
+        "run": {
+          "run_id": "run-w3-1",
+          "keeper": "alpha-leader",
+          "preset": "consensus-3",
+          "topology": "judge_of_judges",
+          "started_at": 1795253800.0,
+          "finished_at": 1795253845.0,
+          "status": "completed",
+          "stage": "done",
+          "decision": "adopt",
+          "summary": "Converged"
+        },
+        "evidence": {
+          "status": "recorded",
+          "post": {
+            "id": "p-fusion-1",
+            "title": "Fusion Result: run-w3-1",
+            "author": "alpha-leader",
+            "body": "Full evidence body",
+            "meta": {
+              "question": "Which architecture scales best?",
+              "panel": [
+                { "model": "claude-sonnet-4", "status": "answered", "answer": "Option B", "input_tokens": 1200, "output_tokens": 300 },
+                { "model": "gpt-5", "status": "failed", "reason_code": "timeout", "reason_detail": "30s exceeded" }
+              ],
+              "judge": { "status": "completed", "decision": "adopt", "synthesis": "Option B wins cleanly" },
+              "judges": [
+                { "role": "final", "identity": "opus-judge", "status": "completed", "decision": "adopt", "input_tokens": 2000, "output_tokens": 500 }
+              ],
+              "seat_routes": [
+                {
+                  "phase": "panel",
+                  "seat": "seat-1",
+                  "route": "lane-primary",
+                  "answered_by": "claude-sonnet-4",
+                  "failed_attempts": [
+                    { "runtime": "backup-1", "code": "rate_limit", "detail": "429" }
+                  ]
+                }
+              ],
+              "tool_trace": {
+                "status": "partial",
+                "observed_actors": [
+                  { "phase": "panel", "actor": "alpha-leader" },
+                  { "phase": "judge", "actor": "opus-judge", "judge_role": "final" }
+                ],
+                "dropped_events": 0,
+                "gaps": [
+                  { "phase": "panel", "actor": "backup-1", "reason": "official_client_uninstrumented" }
+                ],
+                "events": [
+                  {
+                    "phase": "panel",
+                    "actor": "alpha-leader",
+                    "event": "completed",
+                    "agent_name": "alpha-leader",
+                    "tool_use_id": "tu-1",
+                    "turn": 1,
+                    "planned_index": 0,
+                    "tool_name": "masc_board_post",
+                    "status": "succeeded",
+                    "output": { "text": "ok", "bytes": 2, "truncated": false }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }|}
+  in
+  let fdet =
+    expect_ok "decode_fusion_run_detail"
+      (Wire_runtime.decode_fusion_run_detail fusion_detail_json)
+  in
+  (match fdet.evidence with
+  | Wire_runtime.Evidence_recorded post ->
+      Alcotest.(check int) "2 panel rows" 2 (List.length post.panel);
+      Alcotest.(check int) "1 seat route" 1 (List.length post.seat_routes);
+      Alcotest.(check int) "1 failed seat attempt" 1
+        (List.length (List.hd post.seat_routes).failed_attempts);
+      (match post.tool_trace with
+      | None -> Alcotest.fail "expected tool_trace"
+      | Some tt ->
+          Alcotest.(check int) "2 live object observed_actors" 2
+            (List.length tt.observed_actors);
+          Alcotest.(check int) "1 live object gap" 1 (List.length tt.gaps);
+          Alcotest.(check bool) "live succeeded event tagged [ok]" true
+            (List.exists
+               (fun s ->
+                 let n = String.length "[ok]" and h = String.length s in
+                 let rec f i =
+                   if i + n > h then false
+                   else if String.sub s i n = "[ok]" then true
+                   else f (i + 1)
+                 in
+                 f 0)
+               tt.events_preview))
+  | Wire_runtime.Evidence_pending | Wire_runtime.Evidence_absent ->
+      Alcotest.fail "expected Evidence_recorded");
+  let fcfg =
+    expect_ok "decode_fusion_config_options"
+      (Wire_runtime.decode_fusion_config_options
+         (parse_json
+            {|{
+              "config": {
+                "enabled": true,
+                "default_preset": "consensus-3",
+                "staged_judge_group_size": 3,
+                "presets": [
+                  {
+                    "name": "consensus-3",
+                    "panels": [
+                      { "models": ["claude-sonnet-4", "gpt-5"], "label": "primary", "system_prompt": "", "web_tools": false, "max_output_tokens": null, "timeout_s": null }
+                    ],
+                    "judge": "opus",
+                    "judge_system_prompt": "",
+                    "judge_max_output_tokens": null,
+                    "judge_timeout_s": null,
+                    "judges": [
+                      { "model": "opus", "label": "final", "system_prompt": "", "web_tools": false, "max_output_tokens": null, "timeout_s": null }
+                    ],
+                    "min_answered": 2
+                  }
+                ]
+              }
+            }|}))
+  in
+  Alcotest.(check string) "default preset" "consensus-3" fcfg.default_preset;
+  Alcotest.(check int) "1 fusion preset" 1 (List.length fcfg.presets);
+  Alcotest.(check int) "live panel group decoded" 1
+    (List.length (List.hd fcfg.presets).panels);
+  Alcotest.(check int) "live judge spec decoded" 1
+    (List.length (List.hd fcfg.presets).judges);
+
+  (* Surface 2: Harness health + strict 64-hex notes_hash + Verification Evidence/Summary/Specs/TLC + Activity + Runtime Trace + Keeper Logs *)
+  let valid_hash =
+    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  in
+  Alcotest.(check bool) "valid 64 lowercase hex" true
+    (Wire_work.is_valid_notes_hash valid_hash);
+  Alcotest.(check bool) "rejects uppercase hex" false
+    (Wire_work.is_valid_notes_hash (String.uppercase_ascii valid_hash));
+  Alcotest.(check bool) "rejects 63-char hex" false
+    (Wire_work.is_valid_notes_hash (String.sub valid_hash 0 63));
+  Alcotest.(check bool) "rejects non-hex" false
+    (Wire_work.is_valid_notes_hash (String.make 64 'z'));
+  let hh =
+    expect_ok "decode_harness_health"
+      (Wire_work.decode_harness_health
+         (parse_json
+            (Printf.sprintf
+               {|{
+                 "generated_at": 1795254000.0,
+                 "scope_note": "last 7d",
+                 "overview": { "evaluator_status": "healthy", "fallback_ratio": 0.05, "last_signal_at": 1795253900.0 },
+                 "calibration": { "total_verdicts": 20, "approve_count": 16, "reject_count": 4, "labeled_count": 10, "false_positive_count": 1, "false_negative_count": 0, "agreement_rate": 0.90, "fallback_count": 1, "distinct_runtime_count": 2, "verdicts_with_generator_runtime": 18, "distinct_runtime_rate": 0.85, "recent_fallback_reasons": ["timeout"], "unreadable_record_count": 0 },
+                 "recent_verdicts": [
+                   { "timestamp": 1795253900.0, "task_id": "task-1", "task_title": "Ship Wave 3", "agent_name": "alpha", "gate": "completion", "verdict": "approve", "evaluator_runtime": "opus", "notes_hash": %S }
+                 ],
+                 "recent_verdicts_unreadable_count": 0
+               }|}
+               valid_hash)))
+  in
+  Alcotest.(check string) "harness evaluator_status" "healthy" hh.evaluator_status;
+  Alcotest.(check string) "harness notes_hash exact" valid_hash
+    (List.hd hh.recent_verdicts).notes_hash;
+  let vev =
+    expect_ok "decode_verification_evidence"
+      (Wire_work.decode_verification_evidence
+         (parse_json
+            {|{
+              "result": {
+                "task_id": "task-1",
+                "verification_id": "verif-1",
+                "producer": "alpha",
+                "authority_kind": "operator",
+                "authority_actor": "admin",
+                "evidence": {
+                  "access": "available",
+                  "items": [
+                    { "kind": "note", "content": "All tests green" },
+                    { "kind": "artifact", "reference": "report.md", "content": "# OK", "bytes": 4, "truncated": false },
+                    { "kind": "artifact_unreadable", "reference": "missing.bin", "reason": { "code": "not_found", "detail": "deleted" } }
+                  ]
+                }
+              }
+            }|}))
+  in
+  Alcotest.(check bool) "verif evidence available" true vev.available;
+  Alcotest.(check int) "3 evidence items" 3 (List.length vev.items);
+  let vsum =
+    expect_ok "decode_verification_summary"
+      (Wire_work.decode_verification_summary
+         (parse_json {|{ "updated_at": "2026-11-23T08:00:00Z", "total": 10 }|}))
+  in
+  Alcotest.(check int) "verif summary total" 10 vsum.total;
+  Alcotest.(check (option int)) "verif summary omits unreported pending" None
+    vsum.pending;
+  Alcotest.(check (option int)) "verif summary omits unreported approved" None
+    vsum.approved;
+  Alcotest.(check (option int)) "verif summary omits unreported rejected" None
+    vsum.rejected;
+  let vspecs =
+    expect_ok "decode_verification_specs"
+      (Wire_work.decode_verification_specs
+         (parse_json {|{ "updated_at": "2026-11-23T08:00:00Z", "specs_dir": "specs", "entries": [{ "name": "KeeperFSM.tla", "path": "specs/KeeperFSM.tla", "category": "keeper", "has_clean_cfg": true, "has_buggy_cfg": true, "mtime_iso": "2026-11-23T07:00:00Z" }] }|}))
+  in
+  Alcotest.(check int) "1 TLA spec" 1 (List.length vspecs.entries);
+  let vtlc =
+    expect_ok "decode_verification_tlc_results"
+      (Wire_work.decode_verification_tlc_results
+         (parse_json {|{ "updated_at": "2026-11-23T08:00:00Z", "results_dir": "specs/tlc", "entries": [{ "spec_name": "KeeperFSM", "cfg_name": "clean.cfg", "category": "keeper", "status": "pass", "states_explored": 4200, "distinct_states": 900, "diameter": 12 }] }|}))
+  in
+  Alcotest.(check int) "1 TLC result" 1 (List.length vtlc.entries);
+  let act_events, next_seq =
+    expect_ok "decode_activity_events_page"
+      (Wire_infra.decode_activity_events_page
+         (parse_json {|{ "events": [{ "seq": 10, "ts_ms": 1795254000000, "ts_iso": "2026-11-23T08:00:00Z", "kind": "turn.completed", "actor": { "id": "alpha", "kind": "keeper" }, "subject": { "id": "task-1" }, "tags": ["turn"], "payload": { "ok": true } }], "next_after_seq": 10 }|}))
+  in
+  Alcotest.(check int) "1 activity event" 1 (List.length act_events);
+  Alcotest.(check int) "next_after_seq" 10 next_seq;
+  let rtrace =
+    expect_ok "decode_runtime_trace"
+      (Wire_infra.decode_runtime_trace
+         (parse_json {|{ "keeper": "alpha", "trace_id": "tr-9", "turn_id": 42, "health": "healthy", "manifest_total_rows": 5, "manifest_returned_rows": 5, "receipt_returned_rows": 2 }|}))
+  in
+  Alcotest.(check string) "runtime trace id" "tr-9" rtrace.trace_id;
+  Alcotest.(check string) "keeper metrics path has NO ?limit="
+    "/api/v1/keepers/alpha/metrics"
+    (Wire_keeper_context.keeper_metrics_path ~keeper:"alpha");
+  let kmet =
+    expect_ok "decode_keeper_metrics"
+      (Wire_keeper_context.decode_keeper_metrics
+         (parse_json {|{ "keeper": "alpha", "scanned_rows": 50, "skipped_rows": 0, "window_summary": { "sample_points": 5, "turn_points": 3, "heartbeat_points": 2, "proactive_points": 0, "tool_call_count": 9, "top_tools": [{ "tool": "masc_board_post", "count": 4 }] }, "series": [{ "ts_unix": 1795254000.0, "trace_id": "tr-9", "channel": "reactive", "latency_ms": 840, "cost_usd": 0.02, "work_kind": "turn", "tool_call_count": 2, "tools_used": ["masc_board_post"] }] }|}))
+  in
+  Alcotest.(check int) "keeper metrics turn_points" 3 kmet.turn_points;
+  let kslog =
+    expect_ok "decode_keeper_sandbox_logs"
+      (Wire_keeper_context.decode_keeper_sandbox_logs
+         (parse_json {|{ "keeper": "alpha", "backend": "microvm", "state": "ok", "tail": 200, "instances": [{ "instance_id": "vm-1", "instance_name": "alpha-vm", "running": true, "stdout": "ready\n", "stderr": "" }] }|}))
+  in
+  Alcotest.(check int) "1 sandbox log instance" 1 (List.length kslog.instances);
+
+  (* Surface 3: Workspace Code Browser + Git (100% live shapes + required ?path=) *)
+  Alcotest.(check string) "workspace_files_path always emits path="
+    "/api/v1/workspace/files?path="
+    (Wire_infra.workspace_files_path ~scope:Wire_infra.Ws_project ());
+  Alcotest.(check string) "workspace_search_path always emits path= (never .)"
+    "/api/v1/workspace/search?path=&q=Eio&ignore_case=1"
+    (Wire_infra.workspace_search_path ~scope:Wire_infra.Ws_project ~path:"."
+       ~query:"Eio" ());
+  Alcotest.(check string) "git_branches_path always emits path="
+    "/api/v1/git/branches?path="
+    (Wire_infra.git_branches_path ~scope:Wire_infra.Ws_project ());
+  Alcotest.(check string) "git_worktrees_path always emits path="
+    "/api/v1/git/worktrees?path="
+    (Wire_infra.git_worktrees_path ~scope:Wire_infra.Ws_project ());
+  let ws_nodes =
+    expect_ok "decode_workspace_children (live bare array)"
+      (Wire_infra.decode_workspace_children
+         (parse_json {|[{ "path": "lib", "label": "lib", "depth": 0, "parent": "", "hasChildren": true, "diff": "M" }, { "path": "lib/main.ml", "label": "main.ml", "depth": 1, "parent": "lib", "hasChildren": false }]|}))
+  in
+  Alcotest.(check int) "2 workspace tree nodes" 2 (List.length ws_nodes);
+  let ws_files =
+    expect_ok "decode_workspace_files"
+      (Wire_infra.decode_workspace_files
+         (parse_json {|{ "root": ".", "files": ["lib/main.ml", "README.md"] }|}))
+  in
+  Alcotest.(check int) "2 workspace files" 2 (List.length ws_files.files);
+  let ws_search =
+    expect_ok "decode_workspace_search"
+      (Wire_infra.decode_workspace_search
+         (parse_json {|{ "root": ".", "query": "Eio", "truncated": false, "matches": [{ "path": "lib/main.ml", "line": 12, "text": "Eio_main.run" }] }|}))
+  in
+  Alcotest.(check int) "1 search match" 1 (List.length ws_search.matches);
+  let ws_file =
+    expect_ok "decode_workspace_file"
+      (Wire_infra.decode_workspace_file ~path:"lib/main.ml"
+         (parse_json {|{ "content": "let () = print_endline \"ok\"\n", "revision": "rev-abc123" }|}))
+  in
+  Alcotest.(check string) "workspace file rev" "rev-abc123" ws_file.revision;
+  let g_st =
+    expect_ok "decode_git_status (live upstream object)"
+      (Wire_infra.decode_git_status
+         (parse_json {|{ "branch": { "head": "main", "upstream": { "name": "origin/main", "ahead": 1, "behind": 0 } }, "total": 1, "changes": [{ "path": "lib/main.ml", "staged": true, "unstaged": false, "untracked": false, "conflicted": false }] }|}))
+  in
+  Alcotest.(check (option string)) "git status upstream decoded from object"
+    (Some "origin/main") g_st.upstream;
+  Alcotest.(check int) "1 git status change" 1 (List.length g_st.changes);
+  let g_br =
+    expect_ok "decode_git_branches"
+      (Wire_infra.decode_git_branches
+         (parse_json {|{ "branches": [{ "name": "main", "current": true, "upstream": { "name": "origin/main", "ahead": 1, "behind": 0 }, "commit_epoch": 1795254000, "subject": "feat: wave3" }] }|}))
+  in
+  Alcotest.(check int) "1 git branch" 1 (List.length g_br);
+  let g_wt =
+    expect_ok "decode_git_worktrees (live state=branch)"
+      (Wire_infra.decode_git_worktrees
+         (parse_json {|{ "worktrees": [{ "name": "main-wt", "main": true, "head": "abc1234", "state": "branch", "branch": "main", "locked": false, "prunable": false }] }|}))
+  in
+  Alcotest.(check int) "1 git worktree" 1 (List.length g_wt);
+  let g_bl =
+    expect_ok "decode_git_blame (live bare array)"
+      (Wire_infra.decode_git_blame
+         (parse_json {|[{ "file_path": "lib/main.ml", "line_start": 1, "line_end": 10, "keeper_id": "alpha", "timestamp_ms": 1795254000000, "kind": "edit" }]|}))
+  in
+  Alcotest.(check int) "1 git blame span" 1 (List.length g_bl);
+  let g_log =
+    expect_ok "decode_git_log"
+      (Wire_infra.decode_git_log
+         (parse_json {|{ "commits": [{ "hash": "abcdef123456", "timestamp_ms": 1795254000000, "author": "builder", "subject": "add code view" }] }|}))
+  in
+  Alcotest.(check int) "1 git log commit" 1 (List.length g_log);
+  let g_diff =
+    expect_ok "decode_git_diff"
+      (Wire_infra.decode_git_diff
+         (parse_json {|{ "has_changes": true, "unified": [{ "kind": "context", "oldLine": 1, "newLine": 1, "text": "let x = 1" }, { "kind": "add", "newLine": 2, "text": "let y = 2" }] }|}))
+  in
+  Alcotest.(check int) "2 git diff lines" 2 (List.length g_diff.lines);
+
+  (* Surface 4: Memory Health, Ledger, Context, Facts Tree, Journal *)
+  let mhf =
+    expect_ok "decode_keeper_memory_health_fleet"
+      (Wire_knowledge.decode_keeper_memory_health_fleet
+         (parse_json {|{ "schema": "keeper.memory_os.current_health.v19", "generated_at": 1795254000.0, "keepers": [{ "keeper_id": "alpha", "revision": 5, "updated_at": 1795254000.0, "facts": 30, "observed_facts": 20, "derived_facts": 10, "support_invalidations": 1, "snapshot_bytes": 4096, "added": 2, "removed": 0, "snapshot_present": true, "age_bins": null, "facts_by_hour": [], "librarian_failures": 0, "vision_ingest_errors": 0, "read_error": null, "source_revision": 1, "source_facts": 3, "source_invalidations": 0, "source_snapshot_bytes": 512, "source_snapshot_present": true, "source_read_error": null, "alerts": [{ "severity": "warn", "code": "stale_digest", "target": "alpha", "label": "Stale", "message": "digest lag" }] }] }|}))
+  in
+  let total_facts, _, total_alerts, warn_alerts, _ =
+    Wire_knowledge.memory_health_fleet_totals mhf
+  in
+  Alcotest.(check int) "fleet memory total_facts" 30 total_facts;
+  Alcotest.(check int) "fleet memory total_alerts" 1 total_alerts;
+  Alcotest.(check int) "fleet memory warn_alerts" 1 warn_alerts;
+  let wml =
+    expect_ok "decode_workspace_memory_ledger"
+      (Wire_knowledge.decode_workspace_memory_ledger
+         (parse_json {|{ "status": "available", "ledger_sha256": "deadbeef", "ledger": { "claims": [{ "claim_id": "c-1", "claim": "main is squash-only" }], "conflicts": [], "facts": [{ "current_claim": "ci passes", "source_state": "present", "disposition": { "kind": "claim", "claim_id": "c-1" } }] } }|}))
+  in
+  Alcotest.(check int) "1 workspace ledger claim" 1 (List.length wml.claims);
+  let wmc =
+    expect_ok "decode_workspace_memory_context"
+      (Wire_knowledge.decode_workspace_memory_context
+         (parse_json {|{ "generated_at": 1795254000.0, "discovery": { "status": "available" }, "keepers": [{ "keeper_id": "alpha", "ordinary": { "status": "available", "snapshot": { "revision": 5, "facts": [1,2] } }, "source_bound": { "status": "missing" } }] }|}))
+  in
+  Alcotest.(check int) "1 workspace context keeper" 1 (List.length wmc.keepers);
+  let kmf =
+    expect_ok "decode_keeper_memory_facts"
+      (Wire_knowledge.decode_keeper_memory_facts
+         (parse_json {|{ "keeper": "alpha", "ordinary": { "present": true, "revision": 5, "snapshot_sha256": "deadbeef", "updated_at": 1795254000.0, "facts": [{ "memory_id": "m-1", "claim": "use result types", "category": "fact", "origin": "authored", "first_seen": 1795250000.0, "last_seen": 1795254000.0, "basis": { "kind": "observed" }, "events": { "retrieved_count": 0, "retrieved_distinct_days": 0, "last_retrieved_at": null, "retracted_count": 0, "revised_from": [] } }], "support_invalidations": [] }, "source_bound": { "present": true, "revision": 1, "updated_at": 1795254000.0, "facts": [{ "claim": "docs contract", "path": "AGENTS.md", "first_seen": 1795250000.0, "sha256": "abc" }], "invalidations": [] }, "events_unreadable_lines": 0, "events_read_error": null }|}))
+  in
+  let ordinary_count =
+    match kmf.ordinary with
+    | Wire_knowledge.Memory_store_present om -> List.length om.facts
+    | Wire_knowledge.Memory_store_absent
+    | Wire_knowledge.Memory_store_read_error _ -> 0
+  in
+  Alcotest.(check int) "1 ordinary fact" 1 ordinary_count;
+  let kmj =
+    expect_ok "decode_keeper_memory_journal (live List change fields)"
+      (Wire_knowledge.decode_keeper_memory_journal
+         (parse_json {|{ "keeper": "alpha", "returned": 1, "undecodable_lines": 0, "entries": [{ "structural_id": "j-1", "ok": true, "outcome": "committed", "recorded_at": 1795253900.0, "revision": 5, "source": { "kind": "explicit_write", "trace_id": "tr-1" }, "change": { "added": [{ "memory_id": "m-1", "claim": "c1" }, { "memory_id": "m-2", "claim": "c2" }], "removed": [], "retained": 10, "invalidated": [{ "fact": { "memory_id": "m-0" }, "missing_premise_ids": ["p-1"] }] } }], "activity": { "events": [{ "identity": "ev-1", "recorded_at": 1795253900.0, "revision": 5, "kind": "fact_added", "before": [], "after": [{ "claim": "use result types" }] }], "notes": ["clean run"] } }|}))
+  in
+  Alcotest.(check int) "1 journal entry" 1 (List.length kmj.entries);
+  Alcotest.(check int) "journal change.added list length = 2" 2
+    (List.hd kmj.entries).added;
+  Alcotest.(check int) "journal change.invalidated list length = 1" 1
+    (List.hd kmj.entries).invalidated;
+  Alcotest.(check int) "1 journal activity event" 1
+    (List.length kmj.activity_events);
+
+  (* Surface 5: Keeper Identity (OAuth + GitHub), Addon Package Catalog/Preview, Connector Names *)
+  let op =
+    expect_ok "decode_oauth_providers (live on_file)"
+      (Wire_keeper_context.decode_oauth_providers
+         (parse_json {|{ "callback": { "url": "http://127.0.0.1:8935/oauth/cb" }, "providers": [{ "id": "slack", "label": "Slack", "app_state": { "kind": "on_file" } }] }|}))
+  in
+  Alcotest.(check int) "1 oauth provider" 1 (List.length op.providers);
+  let oa =
+    expect_ok "decode_oauth_attached_tools (live on_file)"
+      (Wire_keeper_context.decode_oauth_attached_tools
+         (parse_json {|{ "keeper": "alpha", "providers": [{ "provider": "slack", "provider_label": "Slack", "attached": true, "app_state": { "kind": "on_file" }, "enabled": true, "tools": ["slack_post"] }] }|}))
+  in
+  Alcotest.(check int) "1 attached provider" 1 (List.length oa.providers);
+  let ost =
+    expect_ok "decode_oauth_attempt_status"
+      (Wire_keeper_context.decode_oauth_attempt_status
+         (parse_json {|{ "kind": "pending", "expires_at": 1795254600.0 }|}))
+  in
+  Alcotest.(check string) "oauth attempt kind" "pending" ost.kind;
+  let ghi =
+    expect_ok "decode_github_identity (live host_process_credential_only)"
+      (Wire_keeper_context.decode_github_identity
+         (parse_json {|{ "keeper": "alpha", "hostname": "github.com", "config_dir": "/tmp/gh", "projected_token_env_names": ["GH_TOKEN"], "stored": { "authenticated": true, "login": "bot-alpha", "scopes": ["repo"] }, "effective": { "authenticated": true, "login": "bot-alpha", "scopes": ["repo"] }, "effective_probe_scope": "host_process_credential_only", "checked_at_unix": 1795254000.0 }|}))
+  in
+  Alcotest.(check (option string)) "github login" (Some "bot-alpha") ghi.effective.login;
+  let acat =
+    expect_ok "decode_addon_package_catalog (live lane.toml)"
+      (Wire_runtime.decode_addon_package_catalog
+         (parse_json {|{ "directory": "addons", "entries": [{ "kind": "folder", "path": "addons/custom" }, { "kind": "package", "manifest_path": "addons/browser/lane.toml", "title": "Browser Lane", "revision": "1.2.0", "description": "Web automation", "ui_category": "browser" }] }|}))
+  in
+  Alcotest.(check int) "2 catalog entries" 2 (List.length acat.entries);
+  let aprev =
+    expect_ok "decode_addon_package_preview (live observe/derive/act)"
+      (Wire_runtime.decode_addon_package_preview
+         (parse_json {|{ "manifest_path": "addons/browser/lane.toml", "package": { "id": "browser", "revision": "1.2.0", "title": "Browser Lane", "ui_category": "browser", "exported_tools": ["browser_open"], "contributions": ["observe", "derive", "act"] }, "execution": { "kind": "host_process" } }|}))
+  in
+  Alcotest.(check string) "addon preview id" "browser" aprev.id;
+  let cnames =
+    expect_ok "decode_connector_names_page"
+      (Wire_runtime.decode_connector_names_page
+         (parse_json {|{ "connector_id": "slack-eng", "kind": "channel", "total": 2, "has_more": false, "mappings": [{ "id": "C01ENG", "name": "engineering" }, { "id": "C02OPS", "name": "ops" }] }|}))
+  in
+  Alcotest.(check int) "2 connector channel names" 2 (List.length cnames.mappings);
+
+  (* Negative malformed decoder Error paths & Evidence_pending / Evidence_absent *)
+  let mk_fusion_ev_json status =
+    parse_json
+      (Printf.sprintf
+         {|{
+           "run": {
+             "run_id": "run-ev-1", "keeper": "alpha", "preset": "consensus",
+             "topology": "simple", "started_at": 1795253000.0,
+             "status": "completed", "stage": "done"
+           },
+           "evidence": { "status": %S }
+         }|}
+         status)
+  in
+  let fdet_pending =
+    expect_ok "decode_fusion_run_detail Evidence_pending"
+      (Wire_runtime.decode_fusion_run_detail (mk_fusion_ev_json "pending"))
+  in
+  Alcotest.(check bool) "fusion evidence status=pending decodes Evidence_pending" true
+    (match fdet_pending.evidence with
+    | Wire_runtime.Evidence_pending -> true
+    | Wire_runtime.Evidence_recorded _ | Wire_runtime.Evidence_absent -> false);
+  let fdet_absent =
+    expect_ok "decode_fusion_run_detail Evidence_absent"
+      (Wire_runtime.decode_fusion_run_detail (mk_fusion_ev_json "absent"))
+  in
+  Alcotest.(check bool) "fusion evidence status=absent decodes Evidence_absent" true
+    (match fdet_absent.evidence with
+    | Wire_runtime.Evidence_absent -> true
+    | Wire_runtime.Evidence_recorded _ | Wire_runtime.Evidence_pending -> false);
+  ignore
+    (expect_err "fusion evidence unknown status rejected"
+       (Wire_runtime.decode_fusion_run_detail (mk_fusion_ev_json "unknown_status"))
+      : string);
+  ignore
+    (expect_err "decode_verification_evidence missing evidence rejected"
+       (Wire_work.decode_verification_evidence
+          (parse_json {|{ "result": { "task_id": "t1", "verification_id": "v1" } }|}))
+      : string);
+  ignore
+    (expect_err "decode_verification_evidence unknown item kind rejected"
+       (Wire_work.decode_verification_evidence
+          (parse_json
+             {|{ "result": { "task_id": "t1", "verification_id": "v1", "evidence": { "access": "available", "items": [{ "kind": "mystery" }] } } }|}))
+      : string);
+  ignore
+    (expect_err "decode_harness_health malformed non-object rejected"
+       (Wire_work.decode_harness_health (parse_json "[]"))
+      : string);
+  ignore
+    (expect_err "decode_workspace_file missing content rejected"
+       (Wire_infra.decode_workspace_file ~path:"a.ml" (parse_json {|{ "revision": "r1" }|}))
+      : string);
+  ignore
+    (expect_err "decode_github_identity malformed non-object rejected"
+       (Wire_keeper_context.decode_github_identity (parse_json "42"))
+      : string)
+
 let () =
   Alcotest.run "masc_tui_v2_protocol_net"
     [
@@ -4801,6 +5312,8 @@ let () =
             test_feature_wave1_wire_decoders;
           Alcotest.test_case "Feature Wave 2: Keeper Context (8 routes), Live Tools P0, Skills, Hearths & Artifact Checks" `Quick
             test_wave2_live_wire_codecs;
+          Alcotest.test_case "Feature Wave 3: Fusion, Harness, Verification Evidence, Code/Git, Memory, Keeper Logs & Identity, Addons Catalog, Connector Names" `Quick
+            test_wave3_live_wire_codecs;
         ] );
       ( "net"
       , [

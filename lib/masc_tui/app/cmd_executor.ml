@@ -856,7 +856,7 @@ let execute_get t ~epoch req =
                 }
             in
             Msg.Http_reply { epoch; reply }
-        | Cmd.Get_keeper_memory_health ->
+        | Cmd.Get_keeper_memory_health { keeper = None } ->
             let reply =
               Msg.Reply_keeper_memory_health
                 (fetch_and_decode_get t ~path
@@ -1048,9 +1048,9 @@ let execute_get t ~epoch req =
             Msg.Http_reply { epoch; reply }
         | Cmd.Get_fusion_runs ->
             let reply =
-              Msg.Reply_fusion_runs
+              Msg.Reply_fusion_runs_snapshot
                 (fetch_and_decode_get t ~path
-                   ~decode:Wire_runtime.decode_fusion_runs)
+                   ~decode:Wire_runtime.decode_fusion_runs_snapshot)
             in
             Msg.Http_reply { epoch; reply }
         | Cmd.Get_tool_series _ ->
@@ -1184,6 +1184,334 @@ let execute_get t ~epoch req =
                          });
                   Msg.Reply_config_schema (Ok schema)
               | Error err -> Msg.Reply_config_schema (Error err)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_fusion_run_detail { run_id } ->
+            let reply =
+              Msg.Reply_fusion_run_detail
+                {
+                  run_id;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_runtime.decode_fusion_run_detail;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_fusion_config ->
+            let reply =
+              Msg.Reply_fusion_config
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_runtime.decode_fusion_config_options)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_fusion_board_evidence { post_id } ->
+            let reply =
+              Msg.Reply_fusion_board_evidence
+                {
+                  post_id;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_runtime.decode_fusion_board_evidence;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_harness_health ->
+            let reply =
+              Msg.Reply_harness_health
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_work.decode_harness_health)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_verification_evidence { verification_id; _ } ->
+            let reply =
+              Msg.Reply_verification_evidence
+                {
+                  verification_id;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_work.decode_verification_evidence;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_verification_summary ->
+            let reply =
+              Msg.Reply_verification_summary
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_work.decode_verification_summary)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_verification_specs ->
+            let reply =
+              Msg.Reply_verification_specs
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_work.decode_verification_specs)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_verification_tlc_results ->
+            let reply =
+              Msg.Reply_verification_tlc_results
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_work.decode_verification_tlc_results)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_activity_events _ ->
+            let reply =
+              Msg.Reply_activity_events
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_infra.decode_activity_events_page)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_keeper_runtime_trace { keeper; _ } ->
+            let reply =
+              Msg.Reply_keeper_runtime_trace
+                {
+                  keeper;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_infra.decode_runtime_trace;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_keeper_metrics { keeper } ->
+            let reply =
+              Msg.Reply_keeper_metrics
+                {
+                  keeper;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_keeper_context.decode_keeper_metrics;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_keeper_sandbox_logs { keeper; _ } ->
+            let reply =
+              Msg.Reply_keeper_sandbox_logs
+                {
+                  keeper;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_keeper_context.decode_keeper_sandbox_logs;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_workspace_children { scope; dir } ->
+            let reply =
+              Msg.Reply_workspace_children
+                {
+                  scope;
+                  dir;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_infra.decode_workspace_children;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_workspace_files { scope } ->
+            let reply =
+              Msg.Reply_workspace_files
+                {
+                  scope;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_infra.decode_workspace_files;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_workspace_search { scope; _ } ->
+            let reply =
+              Msg.Reply_workspace_search
+                {
+                  scope;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_infra.decode_workspace_search;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_workspace_file { scope; path = fpath } ->
+            let reply =
+              Msg.Reply_workspace_file
+                {
+                  scope;
+                  path = fpath;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:(Wire_infra.decode_workspace_file ~path:fpath);
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_git_branches { scope } ->
+            let reply =
+              Msg.Reply_git_branches
+                {
+                  scope;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_infra.decode_git_branches;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_git_worktrees { scope } ->
+            let reply =
+              Msg.Reply_git_worktrees
+                {
+                  scope;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_infra.decode_git_worktrees;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_git_status { scope } ->
+            let reply =
+              Msg.Reply_git_status
+                {
+                  scope;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_infra.decode_git_status;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_git_blame { scope; path = fpath } ->
+            let reply =
+              Msg.Reply_git_blame
+                {
+                  scope;
+                  path = fpath;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_infra.decode_git_blame;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_git_log { scope; path = fpath } ->
+            let reply =
+              Msg.Reply_git_log
+                {
+                  scope;
+                  path = fpath;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_infra.decode_git_log;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_git_diff { scope; path = fpath } ->
+            let reply =
+              Msg.Reply_git_diff
+                {
+                  scope;
+                  path = fpath;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_infra.decode_git_diff;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_keeper_memory_health { keeper = Some keeper } ->
+            let reply =
+              Msg.Reply_memory_health_keeper
+                {
+                  keeper;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_knowledge.decode_keeper_memory_health_single;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_workspace_memory_ledger ->
+            let reply =
+              Msg.Reply_workspace_memory_ledger
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_knowledge.decode_workspace_memory_ledger)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_workspace_memory_context ->
+            let reply =
+              Msg.Reply_workspace_memory_context
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_knowledge.decode_workspace_memory_context)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_keeper_memory_journal { keeper; _ } ->
+            let reply =
+              Msg.Reply_keeper_memory_journal
+                {
+                  keeper;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_knowledge.decode_keeper_memory_journal;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_oauth_providers ->
+            let reply =
+              Msg.Reply_oauth_providers
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_keeper_context.decode_oauth_providers)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_oauth_attached_tools { keeper } ->
+            let reply =
+              Msg.Reply_oauth_attached_tools
+                {
+                  keeper;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_keeper_context.decode_oauth_attached_tools;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_oauth_attempt_status { keeper; _ } ->
+            let reply =
+              Msg.Reply_oauth_attempt_status
+                {
+                  keeper;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_keeper_context.decode_oauth_attempt_status;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_github_identity { keeper } ->
+            let reply =
+              Msg.Reply_github_identity
+                {
+                  keeper;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_keeper_context.decode_github_identity;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_addon_package_catalog _ ->
+            let reply =
+              Msg.Reply_addon_package_catalog
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_runtime.decode_addon_package_catalog)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_addon_package_preview { manifest_path } ->
+            let reply =
+              Msg.Reply_addon_package_preview
+                {
+                  manifest_path;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_runtime.decode_addon_package_preview;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_connector_names { connector; _ } ->
+            let reply =
+              Msg.Reply_connector_names
+                {
+                  connector;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_runtime.decode_connector_names_page;
+                }
             in
             Msg.Http_reply { epoch; reply }
       in
@@ -1523,6 +1851,50 @@ let execute_post t ~epoch req =
                 ~decode:Wire_runtime.decode_browser_tabs_response
             in
             Some (Msg.Reply_browser_tabs { client_id; result })
+        | Cmd.Post_oauth_login { keeper; _ } ->
+            let result =
+              post_and_decode t ~path ~body
+                ~decode:Wire_keeper_context.decode_oauth_login_result
+            in
+            Some (Msg.Reply_oauth_login { keeper; result })
+        | Cmd.Post_oauth_identity_refresh { keeper; _ } ->
+            let result = post_ack t ~path ~body in
+            Some
+              (Msg.Reply_oauth_mutation
+                 {
+                   keeper;
+                   label =
+                     Say.make ~ko:"OAuth 도구 새로고침 완료"
+                       ~en:"OAuth tools refreshed";
+                   result;
+                 })
+        | Cmd.Post_oauth_identity_switch { keeper; _ } ->
+            let result = post_ack t ~path ~body in
+            Some
+              (Msg.Reply_oauth_mutation
+                 {
+                   keeper;
+                   label =
+                     Say.make ~ko:"OAuth 공급자 상태 전환됨"
+                       ~en:"OAuth provider toggled";
+                   result;
+                 })
+        | Cmd.Post_oauth_disconnect { keeper; _ } ->
+            let result = post_ack t ~path ~body in
+            Some
+              (Msg.Reply_oauth_mutation
+                 {
+                   keeper;
+                   label =
+                     Say.make ~ko:"OAuth 연결 해제됨" ~en:"OAuth disconnected";
+                   result;
+                 })
+        | Cmd.Post_github_token { keeper; _ } ->
+            let result =
+              post_and_decode t ~path ~body
+                ~decode:Wire_keeper_context.decode_github_identity
+            in
+            Some (Msg.Reply_github_token_save { keeper; result })
       in
       Option.iter
         (fun reply ->
@@ -1595,6 +1967,70 @@ let run_chat_stream_result fn =
   | Eio.Cancel.Cancelled _ as ex -> raise ex
   | Io_domain.Closed as ex -> raise ex
   | ex -> Error (Msg.Transport (Health.Other_io (Printexc.to_string ex)))
+
+let run_github_login_stream ~publish_chunk ~publish_done ~stream =
+  let sse_decoder = Sse_wire.create_decoder () in
+  let final_obs = ref None in
+  let final_err = ref None in
+  let on_chunk raw =
+    let frames = Sse_wire.feed sse_decoder raw in
+    List.iter
+      (fun (frame : Sse_wire.frame) ->
+        match Yojson.Safe.from_string frame.data with
+        | json -> (
+            let has_key k =
+              match json with
+              | `Assoc fields -> List.mem_assoc k fields
+              | _ -> false
+            in
+            if has_key "observation" || has_key "stored" then (
+              let obs_json =
+                match json with
+                | `Assoc fields -> (
+                    match List.assoc_opt "observation" fields with
+                    | Some o -> o
+                    | None -> json)
+                | _ -> json
+              in
+              match
+                Wire_keeper_context.decode_github_identity obs_json
+              with
+              | Ok obs -> final_obs := Some obs
+              | Error reason ->
+                  final_err :=
+                    Some ("github identity decode: " ^ reason))
+            else if has_key "text" then (
+              match Wire_common.optional_nonblank_string json "text" with
+              | Ok (Some text) -> publish_chunk text
+              | Ok None | Error _ -> ())
+            else if has_key "message" || has_key "error" then
+              let msg =
+                match
+                  Wire_common.optional_nonblank_string json "message"
+                with
+                | Ok (Some m) -> m
+                | Ok None | Error _ -> (
+                    match
+                      Wire_common.optional_nonblank_string json "error"
+                    with
+                    | Ok (Some m) -> m
+                    | Ok None | Error _ -> "github login error")
+              in
+              final_err := Some msg
+            else ())
+        | exception Yojson.Json_error _ ->
+            if not (String.equal (String.trim frame.data) "") then
+              publish_chunk frame.data)
+      frames
+  in
+  let res = run_chat_stream_result (fun () -> stream ~on_chunk) in
+  let error =
+    match !final_err, res with
+    | Some e, _ -> Some e
+    | None, Error err -> Some (Msg.http_error_detail err)
+    | None, Ok () -> None
+  in
+  publish_done ~observation:!final_obs ~error
 
 let execute_post_stream t ~epoch req =
   match req with
@@ -1716,6 +2152,23 @@ let execute_post_stream t ~epoch req =
                  is_btw;
                  result;
                }))
+  | Cmd.Stream_github_login { keeper } ->
+      fork_safe t (fun () ->
+          let ep = Atomic.get t.endpoint in
+          let path = Wire_keeper_context.github_login_path ~keeper in
+          let on_response ~status:_ ~headers:_ = () in
+          run_github_login_stream
+            ~publish_chunk:(fun text ->
+              Ui_bus.publish_stream t.bus
+                (Msg.Github_login_chunk { epoch; keeper; text }))
+            ~publish_done:(fun ~observation ~error ->
+              Ui_bus.publish_stream t.bus
+                (Msg.Github_login_done { epoch; keeper; observation; error }))
+            ~stream:(fun ~on_chunk ->
+              Http_client.post_stream ~io:t.io ~clock:t.clock
+                ~content_type:"application/json" ~body:"{}" ~on_response
+                ~on_chunk ep ~path
+              |> Result.map_error msg_error_of_http))
 
 let voice_cmd_of_store = function
   | Cmd.Start_ptt { device } -> Voice_runner.Start_ptt { device }

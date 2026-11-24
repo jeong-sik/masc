@@ -2256,7 +2256,6 @@ let decode_memory_os_internals json =
           available_act_tokens;
         };
     }
-
 (* {1 Per-Keeper Memory Facts ([/api/v1/keepers/:name/memory-facts])} *)
 
 type memory_fact_category =
@@ -2962,6 +2961,28 @@ let decode_keeper_memory_health_row json =
       alerts;
     }
 
+let memory_health_alert_severity_to_string = function
+  | Alert_warn -> "warn"
+  | Alert_error -> "error"
+
+let memory_health_fleet_totals (fleet : keeper_memory_health_fleet) =
+  List.fold_left
+    (fun (tf, ti, ta, tw, te) (row : keeper_memory_health_row) ->
+      let w, e =
+        List.fold_left
+          (fun (w, e) (al : memory_health_alert) ->
+            match al.severity with
+            | Alert_warn -> (w + 1, e)
+            | Alert_error -> (w, e + 1))
+          (0, 0) row.alerts
+      in
+      ( tf + row.facts
+      , ti + row.support_invalidations
+      , ta + List.length row.alerts
+      , tw + w
+      , te + e ))
+    (0, 0, 0, 0, 0) fleet.keepers
+
 let decode_keeper_memory_health_fleet json =
   let* _, body = unwrap_v2_or_raw json in
   let* schema = required_nonblank_string body "schema" in
@@ -3015,3 +3036,328 @@ let decode_wiki_put_result json =
   let* revision = required_nonnegative_int_field body "revision" in
   let* warnings = required_string_list body "warnings" in
   Ok { action; revision; warnings }
+
+let decode_keeper_memory_health_single json =
+  let* fleet = decode_keeper_memory_health_fleet json in
+  Ok (List.nth_opt fleet.keepers 0)
+
+(* --- Workspace Memory Ledger, Context & Keeper Journal --- *)
+
+let workspace_memory_ledger_path = "/api/v1/dashboard/workspace-memory-ledger"
+let workspace_memory_context_path = "/api/v1/dashboard/workspace-memory-context"
+
+let keeper_memory_journal_path ~keeper ?(limit = 50) ?(activity = true) () =
+  Printf.sprintf "/api/v1/keepers/%s/memory-journal?limit=%d%s"
+    (percent_encode keeper) (max 1 limit)
+    (if activity then "&activity=1" else "")
+
+type workspace_ledger_fact = {
+  claim_text : string option;
+  disposition_kind : string;
+  disposition_detail : string option;
+  source_state : string;
+}
+
+type workspace_memory_ledger = {
+  status : string;
+  ledger_sha256 : string option;
+  claims : (string * string) list;
+  conflicts : (string * string) list;
+  facts : workspace_ledger_fact list;
+}
+
+type workspace_context_obs =
+  | Ctx_missing
+  | Ctx_unavailable of string
+  | Ctx_available of { revision : int option; fact_count : int }
+
+type workspace_context_keeper = {
+  keeper_id : string;
+  ordinary : workspace_context_obs;
+  source_bound : workspace_context_obs;
+}
+
+type workspace_memory_context = {
+  generated_at : float;
+  discovery_status : string;
+  discovery_detail : string option;
+  keepers : workspace_context_keeper list;
+}
+
+type memory_journal_entry = {
+  structural_id : string;
+  ok : bool;
+  outcome : string option;
+  recorded_at : float option;
+  revision : int option;
+  source_kind : string option;
+  added : int;
+  removed : int;
+  retained : int;
+  invalidated : int;
+  error : string option;
+}
+
+type journal_activity_event = {
+  identity : string;
+  recorded_at : float;
+  revision : int;
+  kind : string;
+  before_claims : string list;
+  after_claims : string list;
+  reason : string option;
+}
+
+type keeper_memory_journal = {
+  keeper : string;
+  returned : int;
+  undecodable_lines : int;
+  entries : memory_journal_entry list;
+  activity_events : journal_activity_event list;
+  activity_notes : string list;
+}
+
+let int_or_zero_k json key =
+  match optional_int_field json key with
+  | Ok (Some v) -> v
+  | Ok None | Error _ -> 0
+
+let float_or_zero_k json key =
+  match optional_finite_float json key with
+  | Ok (Some v) -> v
+  | Ok None | Error _ -> 0.0
+
+let decode_workspace_ledger_fact json =
+  let* claim_text = optional_nonblank_string json "current_claim" in
+  let source_state =
+    match optional_nonblank_string json "source_state" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> "present"
+  in
+  let disposition_kind, disposition_detail =
+    match optional_object_field json "disposition" with
+    | Ok (Some d) ->
+        let k =
+          match optional_nonblank_string d "kind" with
+          | Ok (Some s) -> s
+          | Ok None | Error _ -> "claim"
+        in
+        let detail =
+          match optional_nonblank_string d "claim_id" with
+          | Ok (Some s) -> Some s
+          | Ok None | Error _ -> (
+              match optional_nonblank_string d "conflict_id" with
+              | Ok (Some s) -> Some s
+              | Ok None | Error _ -> (
+                  match optional_nonblank_string d "reason" with
+                  | Ok v -> v
+                  | Error _ -> None))
+        in
+        (k, detail)
+    | Ok None | Error _ -> ("unknown", None)
+  in
+  Ok { claim_text; disposition_kind; disposition_detail; source_state }
+
+let decode_workspace_memory_ledger json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* status = required_nonblank_string body "status" in
+  let* ledger_sha256 = optional_nonblank_string body "ledger_sha256" in
+  match optional_object_field body "ledger" with
+  | Error _ as err -> err
+  | Ok None -> Ok { status; ledger_sha256; claims = []; conflicts = []; facts = [] }
+  | Ok (Some ledger) ->
+      let* claim_items = optional_list_field ledger "claims" in
+      let claims =
+        List.filter_map
+          (fun c ->
+            match
+              optional_nonblank_string c "claim_id",
+              optional_string_field c "claim"
+            with
+            | Ok (Some cid), Ok (Some txt) -> Some (cid, txt)
+            | Ok None, _ | Error _, _ | Ok (Some _), (Ok None | Error _) -> None)
+          claim_items
+      in
+      let* conflict_items = optional_list_field ledger "conflicts" in
+      let conflicts =
+        List.filter_map
+          (fun c ->
+            match
+              optional_nonblank_string c "conflict_id",
+              optional_string_field c "description"
+            with
+            | Ok (Some cid), Ok (Some txt) -> Some (cid, txt)
+            | Ok None, _ | Error _, _ | Ok (Some _), (Ok None | Error _) -> None)
+          conflict_items
+      in
+      let* fact_items = optional_list_field ledger "facts" in
+      let* facts = decode_list "facts" decode_workspace_ledger_fact fact_items in
+      Ok { status; ledger_sha256; claims; conflicts; facts }
+
+let decode_workspace_context_obs json =
+  let* status = required_nonblank_string json "status" in
+  match status with
+  | "missing" -> Ok Ctx_missing
+  | "unavailable" ->
+      let detail =
+        match optional_string_field json "detail" with
+        | Ok (Some s) -> s
+        | Ok None | Error _ -> "unavailable"
+      in
+      Ok (Ctx_unavailable detail)
+  | "available" ->
+      let rev, count =
+        match optional_object_field json "snapshot" with
+        | Ok (Some snap) ->
+            let r =
+              match optional_int_field snap "revision" with
+              | Ok v -> v
+              | Error _ -> None
+            in
+            let fc =
+              match optional_list_field snap "facts" with
+              | Ok xs -> List.length xs
+              | Error _ -> 0
+            in
+            (r, fc)
+        | Ok None | Error _ -> (None, 0)
+      in
+      Ok (Ctx_available { revision = rev; fact_count = count })
+  | other -> Error (Printf.sprintf "unknown workspace context status %S" other)
+
+let decode_workspace_context_keeper json =
+  let* keeper_id = required_nonblank_string json "keeper_id" in
+  let* ord_obj = required_object_field json "ordinary" in
+  let* ordinary = decode_workspace_context_obs ord_obj in
+  let* src_obj = required_object_field json "source_bound" in
+  let* source_bound = decode_workspace_context_obs src_obj in
+  Ok { keeper_id; ordinary; source_bound }
+
+let decode_workspace_memory_context json =
+  let* _, body = unwrap_v2_or_raw json in
+  let generated_at = float_or_zero_k body "generated_at" in
+  let discovery_status, discovery_detail =
+    match optional_object_field body "discovery" with
+    | Ok (Some d) ->
+        let st =
+          match optional_nonblank_string d "status" with
+          | Ok (Some s) -> s
+          | Ok None | Error _ -> "available"
+        in
+        let det =
+          match optional_nonblank_string d "detail" with
+          | Ok v -> v
+          | Error _ -> None
+        in
+        (st, det)
+    | Ok None | Error _ -> ("available", None)
+  in
+  let* items = optional_list_field body "keepers" in
+  let* keepers = decode_list "keepers" decode_workspace_context_keeper items in
+  Ok { generated_at; discovery_status; discovery_detail; keepers }
+
+let decode_memory_journal_entry json =
+  let structural_id =
+    match optional_string_field json "structural_id" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let ok =
+    match optional_bool_field json "ok" with
+    | Ok (Some b) -> b
+    | Ok None | Error _ -> true
+  in
+  let* outcome = optional_nonblank_string json "outcome" in
+  let* recorded_at = optional_finite_float json "recorded_at" in
+  let* revision = optional_int_field json "revision" in
+  let source_kind =
+    match optional_object_field json "source" with
+    | Ok (Some s) -> (
+        match optional_nonblank_string s "kind" with Ok v -> v | Error _ -> None)
+    | Ok None | Error _ -> None
+  in
+  let count_list_or_int obj key =
+    match member key obj with
+    | `List xs -> List.length xs
+    | `Int n -> n
+    | `Float f -> int_of_float f
+    | _ -> 0
+  in
+  let added, removed, retained, invalidated =
+    match optional_object_field json "change" with
+    | Ok (Some c) ->
+        ( count_list_or_int c "added",
+          count_list_or_int c "removed",
+          int_or_zero_k c "retained",
+          count_list_or_int c "invalidated" )
+    | Ok None | Error _ -> (0, 0, 0, 0)
+  in
+  let* error = optional_nonblank_string json "error" in
+  Ok
+    {
+      structural_id;
+      ok;
+      outcome;
+      recorded_at;
+      revision;
+      source_kind;
+      added;
+      removed;
+      retained;
+      invalidated;
+      error;
+    }
+
+let extract_claim_texts json key =
+  match optional_list_field json key with
+  | Error _ -> []
+  | Ok items ->
+      List.filter_map
+        (fun item ->
+          match optional_nonblank_string item "claim" with
+          | Ok (Some c) -> Some c
+          | Ok None | Error _ -> None)
+        items
+
+let decode_journal_activity_event json =
+  let identity =
+    match optional_string_field json "identity" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> ""
+  in
+  let recorded_at = float_or_zero_k json "recorded_at" in
+  let revision = int_or_zero_k json "revision" in
+  let* kind = required_nonblank_string json "kind" in
+  let before_claims = extract_claim_texts json "before" in
+  let after_claims = extract_claim_texts json "after" in
+  let* reason = optional_nonblank_string json "reason" in
+  Ok { identity; recorded_at; revision; kind; before_claims; after_claims; reason }
+
+let decode_keeper_memory_journal json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* keeper = required_nonblank_string body "keeper" in
+  let returned = int_or_zero_k body "returned" in
+  let undecodable_lines = int_or_zero_k body "undecodable_lines" in
+  let* entry_items = optional_list_field body "entries" in
+  let* entries = decode_list "entries" decode_memory_journal_entry entry_items in
+  let* activity_events, activity_notes =
+    match optional_object_field body "activity" with
+    | Error _ as err -> err
+    | Ok None -> Ok ([], [])
+    | Ok (Some act) ->
+        let* ev_items = optional_list_field act "events" in
+        let* events =
+          decode_list "activity.events" decode_journal_activity_event ev_items
+        in
+        let* notes = optional_string_list act "notes" in
+        Ok (events, notes)
+  in
+  Ok
+    {
+      keeper;
+      returned;
+      undecodable_lines;
+      entries;
+      activity_events;
+      activity_notes;
+    }

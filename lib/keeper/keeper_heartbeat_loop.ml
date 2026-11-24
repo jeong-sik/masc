@@ -570,6 +570,7 @@ let set_failure_reason_exact registry_entry ~site reason =
 ;;
 
 let record_crashed_cycle_failure
+      ?(record_pulse = true)
       ~(registry_entry : Keeper_registry.registry_entry)
       ~(sources : Keeper_heartbeat_source_batch.t)
       exn
@@ -591,13 +592,15 @@ let record_crashed_cycle_failure
       Keeper_turn_failure_streak.increment ~base_path ~keeper_name
     in
     Health.record_failure ~agent_name:keeper_name ~reason:detail;
-    Keeper_turn_pulse.record
-      ~base_path
-      ~keeper_name
-      ~at:(Time_compat.now ())
-      ~cause:
-        (Keeper_turn_pulse.cause_of_inputs (Keeper_heartbeat_source_batch.stimuli sources))
-      Keeper_turn_pulse.Turn_failed;
+    if record_pulse
+    then
+      Keeper_turn_pulse.record
+        ~base_path
+        ~keeper_name
+        ~at:(Time_compat.now ())
+        ~cause:
+          (Keeper_turn_pulse.cause_of_inputs (Keeper_heartbeat_source_batch.stimuli sources))
+        Keeper_turn_pulse.Turn_failed;
     Keeper_row_broadcast.changed ~base_path ~keeper_name);
   Otel_metric_store.inc_counter
     Keeper_metrics.(to_string CycleExceptions)
@@ -624,11 +627,19 @@ let interrupted_cycle_outcome ~(meta : keeper_meta) ~decided_channel =
   }
 ;;
 
-let handle_cycle_exception ~registry_entry ~(meta : keeper_meta) ~decided_channel ~sources exn =
+let handle_cycle_exception
+      ?(record_pulse = true)
+      ~registry_entry
+      ~(meta : keeper_meta)
+      ~decided_channel
+      ~sources
+      exn
+  =
   if Keeper_registry_types.is_operator_interrupt exn
   then interrupted_cycle_outcome ~meta ~decided_channel
   else (
     record_crashed_cycle_failure
+      ~record_pulse
       ~registry_entry
       ~sources
       exn;
@@ -1205,12 +1216,21 @@ let run_keepalive_unified_turn
          @@ Llm_provider.Http_request_observer.capture (fun () ->
            Keeper_turn_dispatch_authority.run (fun admission_token ->
     let source_batch = ref Keeper_heartbeat_source_batch.empty in
+    (* Pre-validation intake batch: preserved unchanged so pulse causes always
+       match [turn_input] and the turn log's [Opened] line even when a source is
+       withdrawn during dispatch validation. *)
+    let pulse_sources = ref Keeper_heartbeat_source_batch.empty in
     let diagnostic_selection = ref None in
     let cycle_outcome_ref = ref None in
     let hitl_resolutions_for_cycle = ref [] in
     let selection_acked = ref false in
     let stimuli_acked = ref false in
     let event_queue_failed = ref false in
+    (* At most one pulse entry per autonomous cycle: once [run_keeper_cycle] or
+       an earlier queue/crash failure has counted this cycle in
+       [Keeper_turn_pulse], subsequent settlement failures surface in registry
+       state and logs without adding duplicate [Turn_failed] rows. *)
+    let pulse_recorded = ref false in
     let record_event_queue_failure message =
       event_queue_failed := true;
       match !cycle_outcome_ref with
@@ -1227,9 +1247,12 @@ let run_keepalive_unified_turn
           | Cycle.Rested _
           )
       | None ->
+        let should_record_pulse = not !pulse_recorded in
+        if should_record_pulse then pulse_recorded := true;
         record_crashed_cycle_failure
+          ~record_pulse:should_record_pulse
           ~registry_entry
-          ~sources:!source_batch
+          ~sources:!pulse_sources
           (Event_queue_cycle_failed message)
     in
     try
@@ -1265,6 +1288,7 @@ let run_keepalive_unified_turn
           ~pending_board_events
       in
       source_batch := event_intake.source_batch;
+      pulse_sources := event_intake.source_batch;
       diagnostic_selection := event_intake.diagnostic_selection;
       let selected_source_authority () =
         match
@@ -1501,20 +1525,25 @@ let run_keepalive_unified_turn
               Cycle.Skipped meta_after_triage
             | Ok hitl_resolutions ->
               hitl_resolutions_for_cycle := Keeper_hitl_resolution_batch.resolutions hitl_resolutions;
-              run_keeper_cycle
-                ~admission_token
-                ?deferred_runtime_lane
-                ~on_deferred_runtime_consumed
-                ?event_bus
-                ~hitl_resolutions
-                ~ctx
-                ~meta_after_triage
-                ~stop
-                ~obs
-                ~turn_decision
-                ~shared_context
-                ~turn_input
-                ()
+              let outcome =
+                run_keeper_cycle
+                  ~admission_token
+                  ~record_pulse:(not !pulse_recorded)
+                  ?deferred_runtime_lane
+                  ~on_deferred_runtime_consumed
+                  ?event_bus
+                  ~hitl_resolutions
+                  ~ctx
+                  ~meta_after_triage
+                  ~stop
+                  ~obs
+                  ~turn_decision
+                  ~shared_context
+                  ~turn_input
+                  ()
+              in
+              if Cycle.recorded_pulse outcome then pulse_recorded := true;
+              outcome
           in
           let run_cycle () = run_fresh_cycle () in
           let cycle_outcome =
@@ -1677,10 +1706,11 @@ let run_keepalive_unified_turn
          turn failure so the caller does not dispatch
          [Turn_succeeded] for a cycle that never completed. *)
       handle_cycle_exception
+        ~record_pulse:(not !pulse_recorded)
         ~registry_entry
         ~meta:meta_after_triage
         ~decided_channel:!decided_channel
-        ~sources:!source_batch
+        ~sources:!pulse_sources
         exn)))
     with
   | Ok (`Ran outcome) -> outcome

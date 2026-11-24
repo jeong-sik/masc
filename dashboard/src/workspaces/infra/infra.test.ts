@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   OBSERVER_SSE_INSTANCE_HEADER,
   activeViewStreamKey,
+  authSession,
   registerWorkspaceTargets,
   releaseAllViewStreams,
   resetAuthStateForTests,
@@ -210,7 +211,50 @@ describe('workspaces/infra', () => {
     expect(inspected[0]!.title).toBe('lib/example.ml')
   })
 
+  it.each([
+    { status: 200, label: 'SNAPSHOT' },
+    { status: 403, label: 'UNAVAILABLE' },
+  ])('uses the authorized Logs read in an account session (HTTP $status)', async ({ status, label }) => {
+    authSession.value = {
+      kind: 'multi_account_signed_in',
+      mode: 'multi_account',
+      accountId: 'operator-1',
+      email: 'operator@example.com',
+      displayName: 'Operator',
+      role: 'admin',
+      csrfToken: 'fixture-csrf',
+      authMethods: { google: true, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    setObserverSseInstanceId('account-observer.1')
+    const request = vi.fn(async () => status === 200
+      ? jsonResponse({ entries: [{ seq: 1, message: 'Log snapshot row' }] })
+      : jsonResponse({ error: 'Log access refused' }, status))
+    globalThis.fetch = request as typeof fetch
+    render(html`<${InfraWorkspace} subroute="logs" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="logs-stream-status"]')?.textContent).toContain(label)
+    })
+
+    expect(activeViewStreamKey.value).toBeNull()
+    expect(request.mock.calls).toHaveLength(1)
+    expect(request).toHaveBeenCalledWith('/api/v1/dashboard/logs?limit=200', expect.objectContaining({
+      credentials: 'same-origin',
+    }))
+    expect(container.querySelector('[role="alert"]')?.textContent ?? null)
+      .toBe(status === 200 ? null : '로그 조회 실패: Log access refused')
+    if (status === 200) expect(container.textContent).toContain('Log snapshot row')
+    else expect(container.textContent).not.toContain('표시할 로그 또는 이벤트가 없습니다.')
+  })
+
   it('virtualizes 300+ Activity & Logs rows under <1,000 DOM nodes and holds single infra-logs view stream', async () => {
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: false,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
     const entries = Array.from({ length: 300 }, (_, i) => ({
       seq: 1000 - i,
       ts: new Date(1_700_000_000_000 - i * 1000).toISOString(),

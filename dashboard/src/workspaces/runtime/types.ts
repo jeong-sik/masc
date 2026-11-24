@@ -791,7 +791,13 @@ export function windowKindLabel(kind: ProviderUsageWindowKind): string {
   }
 }
 
-// ── Mode-Aware View SSE Stream Reader (Zero Bearer in multi_account) ──
+export function snapshotUnavailableReason(obs: Observed<unknown>): string | null {
+  if (obs.kind === 'failed') return obs.error.message
+  if (obs.kind === 'absent' || obs.kind === 'unreported') return obs.reason ?? '응답을 확인할 수 없습니다.'
+  return null
+}
+
+// ── Single-user view SSE ──
 
 export function openViewSseStream(
   url: string,
@@ -800,6 +806,7 @@ export function openViewSseStream(
   onStatus?: (status: 'open' | 'error' | 'closed', detail?: string) => void,
   fetchImpl: typeof fetch = globalThis.fetch,
 ): void {
+  if (authSession.peek().kind !== 'single_user_local') return
   const startEpoch = currentSessionEpoch()
   const sseInstanceId = getObserverSseInstanceId()
   if (!sseInstanceId) {
@@ -811,11 +818,8 @@ export function openViewSseStream(
     Accept: 'text/event-stream',
     [OBSERVER_SSE_INSTANCE_HEADER]: sseInstanceId,
   }
-  const session = authSession.peek()
-  if (session.kind !== 'multi_account_signed_in') {
-    const token = getSingleUserToken()
-    if (token) headers.Authorization = `Bearer ${token}`
-  }
+  const token = getSingleUserToken()
+  if (token) headers.Authorization = `Bearer ${token}`
 
   void (async () => {
     try {

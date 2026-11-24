@@ -19,12 +19,14 @@ import type uPlot from 'uplot'
 import {
   acquireViewStream,
   apiGet,
+  authSession,
   formatObserved,
   observedAbsent,
   observedUnreported,
   observedValue,
   observerSseInstanceId,
   resourceCache,
+  sessionEpoch,
   subscribeObserverFrames,
   timeWindow,
   timeWindowProviderDays,
@@ -42,6 +44,7 @@ import {
   formatPercent,
   formatUsd,
   openViewSseStream,
+  snapshotUnavailableReason,
   toObservedNumber,
   type CacheStatsPayload,
   type ExactLaneRunsPayload,
@@ -127,14 +130,13 @@ interface JoinedKeeperSpendRow {
 
 export function EfficiencyTab(props: WorkspaceViewProps) {
   const win = timeWindow.value
-  const sseInstanceId = observerSseInstanceId.value
+  const sseInstanceId = authSession.value.kind === 'single_user_local' ? observerSseInstanceId.value : null
+  const epoch = sessionEpoch.value
   const params = windowToModelsParams(win)
   const providerDays = timeWindowProviderDays(win)
 
   const [liveMetrics, setLiveMetrics] = useState<ModelsMetricsPayload | null>(null)
-  const [streamStatus, setStreamStatus] = useState<'live' | 'snapshot' | 'error'>(
-    win === '24h' && sseInstanceId ? 'live' : 'snapshot',
-  )
+  const [streamLive, setStreamLive] = useState(false)
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const modelsKey = `runtime:models-metrics:${win}`
@@ -205,13 +207,13 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
   useEffect(() => {
     setLiveMetrics(null)
     loadSnapshots('mount')
-  }, [win])
+  }, [win, epoch])
 
   // Strict 2+1 SSE invariant (#26 SRE #3):
   // Acquire single view-scoped SSE ONLY on '24h' once observer x-masc-sse-instance-id is populated.
   useEffect(() => {
     if (win !== '24h' || !sseInstanceId) {
-      setStreamStatus('snapshot')
+      setStreamLive(false)
       return
     }
     const handle = acquireViewStream('runtime-efficiency', (signal) => {
@@ -221,19 +223,16 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
         (frame) => {
           if (frame.data && typeof frame.data === 'object' && 'models' in (frame.data as Record<string, unknown>)) {
             setLiveMetrics(frame.data as ModelsMetricsPayload)
-            setStreamStatus('live')
+            setStreamLive(true)
           }
         },
-        (st) => {
-          if (st === 'open') setStreamStatus('live')
-          else if (st === 'error') setStreamStatus('error')
-        },
+        (status) => setStreamLive(status === 'open'),
       )
     })
     return () => {
       handle.release()
     }
-  }, [win, sseInstanceId])
+  }, [win, sseInstanceId, epoch])
 
   // Observer SSE debounced invalidation for secondary bands (Panel 3 & Panel 4) — ZERO 2nd view SSE!
   useEffect(() => {
@@ -271,9 +270,16 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     }
   }, [win])
 
-  const effectiveModels = (win === '24h' && liveMetrics)
+  const effectiveModels = (win === '24h' && sseInstanceId && liveMetrics)
     ? liveMetrics
     : (modelsObs.kind === 'value' ? modelsObs.data : null)
+  const live = win === '24h' && sseInstanceId !== null && streamLive
+  const snapshotError = !effectiveModels ? snapshotUnavailableReason(modelsObs) : null
+  const seriesSource = live ? '● LIVE SSE (models/metrics/stream)'
+    : snapshotError ? '○ UNAVAILABLE'
+    : modelsObs.kind === 'loading' && !effectiveModels ? '◐ LOADING'
+    : `○ SNAPSHOT (${win})`
+
 
   const buckets = useMemo(() => aggregateModelBuckets(effectiveModels), [effectiveModels])
 
@@ -540,15 +546,17 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
           subtitle=${html`<span
             class="mono"
             data-testid="efficiency-stream-badge"
-            style=${{ fontSize: 'var(--fs-11)', color: win === '24h' && streamStatus === 'live' ? 'var(--ok-fg)' : 'var(--fg-3)' }}
+            style=${{ fontSize: 'var(--fs-11)', color: live ? 'var(--ok-fg)' : 'var(--fg-3)' }}
           >
-            ${win === '24h' && streamStatus === 'live' ? '● LIVE SSE (models/metrics/stream)' : `○ SNAPSHOT (${win})`}
+            ${seriesSource}
           </span>`}
           data=${velocitySpendChartData}
           series=${VELOCITY_SPEND_SERIES}
           height=${190}
           syncCrosshair=${true}
-          emptyLabel="토큰 속도/비용 버킷 없음"
+          emptyLabel=${snapshotError ? `모델 지표 조회 실패: ${snapshotError}`
+            : modelsObs.kind === 'loading' ? '모델 지표 불러오는 중…'
+            : '토큰 속도/비용 버킷 없음'}
         />
 
         <!-- Panel 3: 429 / Quota Cooldown Pressure -->

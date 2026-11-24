@@ -22,9 +22,11 @@ import {
   observerSseInstanceId,
   parseSseBlock,
   resolveWorkspaceUrl,
+  sessionEpoch,
   subscribeObserverFrames,
   viewStreamPaused,
 } from '../../core'
+import { isRecord } from '../../lib/type-guards'
 import { VirtualList } from '../../components/primitives'
 import type {
   TimelineEntry,
@@ -36,6 +38,7 @@ const MAX_TIMELINE_ENTRIES = 1000
 
 type KindFilter = 'ALL' | 'LOGS' | 'EVENTS'
 type LevelFilter = 'ALL' | TimelineLevel
+type SnapshotState = { readonly kind: 'loading' | 'ready' } | { readonly kind: 'failed'; readonly message: string }
 
 function normalizeLevel(raw: unknown): TimelineLevel {
   const s = typeof raw === 'string' ? raw.toUpperCase() : 'INFO'
@@ -106,22 +109,40 @@ export function LogsTab(props: WorkspaceViewProps) {
   const [query, setQuery] = useState('')
   const [selectedEntry, setSelectedEntry] = useState<TimelineEntry | null>(null)
   const [streamStatus, setStreamStatus] = useState<'connecting' | 'live' | 'error'>('connecting')
-  const pausedByVisibility = viewStreamPaused.value
-  const sseInstanceId = observerSseInstanceId.value
+  const [snapshot, setSnapshot] = useState<SnapshotState>({ kind: 'loading' })
+  const liveSupported = authSession.value.kind === 'single_user_local'
+  const sseInstanceId = liveSupported ? observerSseInstanceId.value : null
+  const pausedByVisibility = sseInstanceId !== null && viewStreamPaused.value
+  const epoch = sessionEpoch.value
 
   useEffect(() => {
-    // Initial snapshot load so users immediately see logs before SSE frame arrives
-    void apiGet<unknown>('/api/v1/dashboard/logs?limit=200').then((res) => {
-      if (res.ok) {
-        const parsed = parseLogEntriesFromPayload(res.value)
-        if (parsed.entries.length > 0) {
-          setEntries((prev) => mergeTimeline(prev, parsed.entries, false))
+    const controller = new AbortController()
+    const { signal } = controller
+    setEntries([])
+    setSnapshot({ kind: 'loading' })
+    setSelectedEntry(null)
+
+    void apiGet('/api/v1/dashboard/logs?limit=200', {
+      signal,
+      decode: (raw) => {
+        if (!isRecord(raw) || !Array.isArray(raw.entries)) {
+          throw new Error('서버가 로그 목록을 반환하지 않았습니다.')
         }
+        return parseLogEntriesFromPayload(raw).entries
+      },
+    }).then((res) => {
+      if (signal.aborted || !isEpochCurrent(epoch)) return
+      if (res.ok) {
+        setSnapshot({ kind: 'ready' })
+        setEntries((prev) => mergeTimeline(prev, res.value, false))
+      } else {
+        setSnapshot({ kind: 'failed', message: res.error.message })
       }
     })
 
     // Interleave Observer SSE EVT entries chronologically
     const unsubObserver = subscribeObserverFrames((frame) => {
+      if (!isEpochCurrent(epoch)) return
       const nowSec = Date.now() / 1000
       const nowIso = new Date(nowSec * 1000).toISOString()
       const dataObj = frame.data && typeof frame.data === 'object' && !Array.isArray(frame.data)
@@ -148,29 +169,26 @@ export function LogsTab(props: WorkspaceViewProps) {
     })
 
     return () => {
+      controller.abort()
       unsubObserver()
     }
-  }, [])
+  }, [epoch])
 
   // Single view-scoped SSE via ViewStreamSlot (auto-pauses on document.hidden!)
   // Waits for observer x-masc-sse-instance-id so zero premature HTTP 400s fire.
   useEffect(() => {
-    if (!sseInstanceId) {
-      setStreamStatus('connecting')
-      return
-    }
+    if (!sseInstanceId) return
     const handle = acquireViewStream('infra-logs', (signal) => {
+      if (authSession.peek().kind !== 'single_user_local') return
+      setStreamStatus('connecting')
       const startEpoch = currentSessionEpoch()
       const streamUrl = resolveWorkspaceUrl('/api/v1/dashboard/logs/stream?limit=200')
       const headers: Record<string, string> = {
         Accept: 'text/event-stream',
         [OBSERVER_SSE_INSTANCE_HEADER]: sseInstanceId,
       }
-      const session = authSession.peek()
-      if (session.kind !== 'multi_account_signed_in') {
-        const token = getSingleUserToken()
-        if (token) headers.Authorization = `Bearer ${token}`
-      }
+      const token = getSingleUserToken()
+      if (token) headers.Authorization = `Bearer ${token}`
       void (async () => {
         try {
           const res = await fetch(streamUrl, {
@@ -209,6 +227,7 @@ export function LogsTab(props: WorkspaceViewProps) {
           } finally {
             reader.releaseLock()
           }
+          if (!signal.aborted && isEpochCurrent(startEpoch)) setStreamStatus('error')
         } catch {
           if (!signal.aborted && isEpochCurrent(startEpoch)) setStreamStatus('error')
         }
@@ -218,7 +237,17 @@ export function LogsTab(props: WorkspaceViewProps) {
     return () => {
       handle.release()
     }
-  }, [sseInstanceId])
+  }, [sseInstanceId, epoch])
+
+  const live = sseInstanceId !== null && streamStatus === 'live'
+  const connecting = sseInstanceId !== null && streamStatus === 'connecting'
+  const snapshotError = !live && snapshot.kind === 'failed' ? snapshot.message : null
+  const sourceLabel = pausedByVisibility ? '⏸ PAUSED (hidden)'
+    : live ? '● LIVE SSE'
+    : connecting ? '◐ CONNECTING'
+    : snapshot.kind === 'ready' ? '○ SNAPSHOT'
+    : snapshot.kind === 'failed' ? '○ UNAVAILABLE'
+    : '◐ LOADING'
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -275,18 +304,20 @@ export function LogsTab(props: WorkspaceViewProps) {
               padding: 'var(--sp-0) var(--sp-2)',
               borderRadius: 'var(--radius-pill)',
               fontSize: 'var(--fs-11)',
-              border: `1px solid ${pausedByVisibility ? 'var(--warn-border)' : streamStatus === 'live' ? 'var(--ok-border)' : 'var(--line-2)'}`,
-              background: pausedByVisibility ? 'var(--warn-soft)' : streamStatus === 'live' ? 'var(--ok-soft)' : 'var(--bg-2)',
-              color: pausedByVisibility ? 'var(--warn-fg)' : streamStatus === 'live' ? 'var(--ok-fg)' : 'var(--fg-2)',
+              border: `1px solid ${pausedByVisibility ? 'var(--warn-border)' : live ? 'var(--ok-border)' : 'var(--line-2)'}`,
+              background: pausedByVisibility ? 'var(--warn-soft)' : live ? 'var(--ok-soft)' : 'var(--bg-2)',
+              color: pausedByVisibility ? 'var(--warn-fg)' : live ? 'var(--ok-fg)' : 'var(--fg-2)',
             }}
           >
-            ${pausedByVisibility ? '⏸ PAUSED (hidden)' : streamStatus === 'live' ? '● LIVE SSE' : streamStatus === 'error' ? '○ SNAPSHOT' : '◐ CONNECTING'}
+            ${sourceLabel}
           </span>
           <span class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
             ${filtered.length} / ${entries.length}
           </span>
         </div>
       </header>
+
+      ${snapshotError && html`<div class="ap-error" role="alert">로그 조회 실패: ${snapshotError}</div>`}
 
       <section class="v2-logs-panel">
         <div class="v2-logs-toolbar">
@@ -343,7 +374,10 @@ export function LogsTab(props: WorkspaceViewProps) {
             height=${460}
             ariaLabel="통합 로그 및 이벤트 타임라인"
             getItemKey=${(item: TimelineEntry) => item.id}
-            empty=${html`<div style=${{ padding: 'var(--sp-4)' }} class="dtable-absent">표시할 로그 또는 이벤트가 없습니다.</div>`}
+            empty=${snapshotError ? null : html`
+              <div style=${{ padding: 'var(--sp-4)' }} class="dtable-absent">
+                ${snapshot.kind === 'loading' ? '로그 불러오는 중…' : '표시할 로그 또는 이벤트가 없습니다.'}
+              </div>`}
             renderItem=${(item: TimelineEntry) => {
               const isSel = selectedEntry?.id === item.id
               return html`

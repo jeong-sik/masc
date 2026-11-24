@@ -105,6 +105,13 @@ describe('workspaces/runtime', () => {
       return 0
     })
     resetAuthStateForTests()
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: false,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
     resetObserverStateForTests()
     resetTimeWindowForTests('24h')
     releaseAllViewStreams()
@@ -239,6 +246,46 @@ describe('workspaces/runtime', () => {
     expect(onNavigate).toHaveBeenCalledWith('/settings?key=providers.openai')
   })
 
+  it.each([
+    { subroute: 'tools', source: '/api/v1/tool-metrics/series', badge: 'tools-stream-badge', data: { buckets: [], total: { call_count: 0, failure_count: 0, p95_ms: null } } },
+    { subroute: 'efficiency', source: '/api/v1/models/metrics', badge: 'efficiency-stream-badge', data: { models: [] } },
+  ])('respects the account-mode snapshot contract for $subroute', async ({ subroute, source, badge, data }) => {
+    authSession.value = {
+      kind: 'multi_account_signed_in',
+      mode: 'multi_account',
+      accountId: 'ops-1',
+      email: 'ops@example.com',
+      displayName: 'Ops',
+      role: 'worker',
+      csrfToken: 'fixture-csrf',
+      authMethods: { google: true, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    setObserverSseInstanceId('account-observer.1')
+    const urls: string[] = []
+    let snapshotStatus = 404
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      urls.push(url)
+      if (url.startsWith(source + '?') && snapshotStatus === 200) return jsonResponse(data)
+      return jsonResponse({ error: 'Metrics route unavailable' }, 404)
+    }) as typeof fetch
+
+    render(html`<${RuntimeWorkspace} subroute=${subroute} onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await vi.waitFor(() => {
+      expect(container.querySelector(`[data-testid="${badge}"]`)?.textContent).toContain('UNAVAILABLE')
+      expect(container.textContent).toContain('Metrics route unavailable')
+    })
+
+    snapshotStatus = 200
+    setTimeWindow('7d')
+    await vi.waitFor(() => {
+      expect(container.querySelector(`[data-testid="${badge}"]`)?.textContent).toContain('SNAPSHOT (7d)')
+    })
+    expect(activeViewStreamKey.value).toBeNull()
+    expect(urls.some((url) => url.includes('/stream'))).toBe(false)
+  })
+
   it('enforces 2+1 SSE discipline on 4-panel Efficiency: live SSE ONLY on 24h, snapshot on 7d/30d, clamps keeper-costs?window=1440', async () => {
     const sseCalls: { url: string; instanceHeader: string | undefined }[] = []
     const keeperCostUrls: string[] = []
@@ -343,23 +390,24 @@ describe('workspaces/runtime', () => {
 
     // Once observer SSE delivers x-masc-sse-instance-id: opens strictly 1 view SSE with header
     setObserverSseInstanceId('inst-live-rt.epoch-1')
-    await flushUi(40)
-
-    expect(activeViewStreamKey.value).toBe('runtime-efficiency')
-    expect(sseCalls).toEqual([
-      { url: '/api/v1/models/metrics/stream?window=1440&bucket_min=60', instanceHeader: 'inst-live-rt.epoch-1' },
-    ])
+    await vi.waitFor(() => {
+      expect(activeViewStreamKey.value).toBe('runtime-efficiency')
+      expect(sseCalls).toEqual([
+        { url: '/api/v1/models/metrics/stream?window=1440&bucket_min=60', instanceHeader: 'inst-live-rt.epoch-1' },
+      ])
+    })
     expect(container.querySelector('.uplot-grid-2x2')).not.toBeNull()
     expect(container.textContent).toContain('code-reviewer-sister')
     expect(container.textContent).toContain('미보고')
 
     // Switch to 7d -> MUST release view-scoped SSE stream, stay snapshot-only, and NEVER request keeper-costs > 1440
     setTimeWindow('7d')
-    await flushUi(40)
-    expect(activeViewStreamKey.value).toBeNull()
+    await vi.waitFor(() => {
+      expect(activeViewStreamKey.value).toBeNull()
+      expect(container.querySelector('[data-testid="efficiency-stream-badge"]')?.textContent).toContain('SNAPSHOT (7d)')
+    })
     expect(sseCalls).toHaveLength(1)
     expect(keeperCostUrls.every((u) => u === '/api/v1/dashboard/keeper-costs?window=1440')).toBe(true)
-    expect(container.querySelector('[data-testid="efficiency-stream-badge"]')!.textContent).toContain('SNAPSHOT (7d)')
   })
 
   it('virtualizes 240+ Runtime probes cleanly under <1,000 DOM nodes and opens Exact Output Quick-Peek on click', async () => {

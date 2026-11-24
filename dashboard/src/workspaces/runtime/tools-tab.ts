@@ -17,9 +17,11 @@ import type uPlot from 'uplot'
 import {
   acquireViewStream,
   apiGet,
+  authSession,
   apiMutate,
   observerSseInstanceId,
   resourceCache,
+  sessionEpoch,
   timeWindow,
 } from '../../core'
 import { DataTable, UPlotChart, type DataTableColumn, type UPlotSeriesSpec } from '../../components/primitives'
@@ -30,6 +32,7 @@ import {
   formatPercent,
   formatUnixTime,
   openViewSseStream,
+  snapshotUnavailableReason,
   toObservedNumber,
   type DashboardToolRow,
   type GateConnectorRow,
@@ -105,7 +108,8 @@ function normalizeToolsPayload(raw: unknown): readonly DashboardToolRow[] {
 
 export function ToolsTab(_props: WorkspaceViewProps) {
   const win = timeWindow.value
-  const sseInstanceId = observerSseInstanceId.value
+  const sseInstanceId = authSession.value.kind === 'single_user_local' ? observerSseInstanceId.value : null
+  const epoch = sessionEpoch.value
   const [section, setSection] = useState<ToolsSubSection>('catalog')
   const [search, setSearch] = useState('')
   const [liveSeries, setLiveSeries] = useState<ToolMetricsSeriesPayload | null>(null)
@@ -148,7 +152,7 @@ export function ToolsTab(_props: WorkspaceViewProps) {
       ),
       { ttlMs: 15_000, topics: ['tool_metrics'], reason: 'mount' },
     )
-  }, [win])
+  }, [win, epoch])
 
   // Live SSE for 24h tool series once observer x-masc-sse-instance-id is populated (strict 2+1 SSE)
   useEffect(() => {
@@ -174,7 +178,7 @@ export function ToolsTab(_props: WorkspaceViewProps) {
     return () => {
       handle.release()
     }
-  }, [win, sseInstanceId])
+  }, [win, sseInstanceId, epoch])
 
   // Lazy load active sub-section
   useEffect(() => {
@@ -222,9 +226,16 @@ export function ToolsTab(_props: WorkspaceViewProps) {
     }
   }
 
-  const activeSeries = (win === '24h' && liveSeries)
+  const activeSeries = (win === '24h' && sseInstanceId && liveSeries)
     ? liveSeries
     : (seriesObs.kind === 'value' ? seriesObs.data : null)
+  const live = win === '24h' && sseInstanceId !== null && streamLive
+  const snapshotError = !activeSeries ? snapshotUnavailableReason(seriesObs) : null
+  const seriesSource = live ? '● LIVE SSE (tool-metrics)'
+    : snapshotError ? '○ UNAVAILABLE'
+    : seriesObs.kind === 'loading' && !activeSeries ? '◐ LOADING'
+    : `○ SNAPSHOT (${win})`
+
 
   const chartData = useMemo<uPlot.AlignedData>(() => {
     if (!activeSeries) return [[], [], []]
@@ -461,16 +472,17 @@ export function ToolsTab(_props: WorkspaceViewProps) {
         </div>
         <span
           class="mono"
+          data-testid="tools-stream-badge"
           style=${{
             padding: 'var(--sp-0) var(--sp-2)',
             borderRadius: 'var(--radius-pill)',
             fontSize: 'var(--fs-11)',
-            border: `1px solid ${streamLive ? 'var(--ok-border)' : 'var(--line-2)'}`,
-            background: streamLive ? 'var(--ok-soft)' : 'var(--bg-2)',
-            color: streamLive ? 'var(--ok-fg)' : 'var(--fg-2)',
+            border: `1px solid ${live ? 'var(--ok-border)' : 'var(--line-2)'}`,
+            background: live ? 'var(--ok-soft)' : 'var(--bg-2)',
+            color: live ? 'var(--ok-fg)' : 'var(--fg-2)',
           }}
         >
-          ${streamLive ? '● LIVE SSE (tool-metrics)' : `○ SNAPSHOT (${win})`}
+          ${seriesSource}
         </span>
       </header>
 
@@ -497,7 +509,9 @@ export function ToolsTab(_props: WorkspaceViewProps) {
         series=${TOOL_SERIES_SPECS}
         height=${185}
         syncCrosshair=${true}
-        emptyLabel="도구 호출 시계열 데이터 없음"
+        emptyLabel=${snapshotError ? `도구 호출 시계열 조회 실패: ${snapshotError}`
+          : seriesObs.kind === 'loading' ? '도구 호출 시계열 불러오는 중…'
+          : '도구 호출 시계열 데이터 없음'}
       />
 
       <!-- Plug-in Surface Switcher -->

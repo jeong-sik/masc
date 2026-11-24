@@ -1575,8 +1575,18 @@ let dashboard_runtime_defaults_snapshot () =
    them here moves those refusals ahead of the dispatch instead of paying one
    failed attempt per review to rediscover them (#37382). Both read the same
    capabilities the dispatch path reads — no caller passes a capability
-   override to either. *)
+   override to either.
+
+   The review also runs at native posture [none]
+   ([Workspace_metric_hooks]). A client that cannot enforce it
+   ({!Runtime_execution.supports_native_none}) is refused here, not at its
+   first call. *)
 let verifier_runtime_admission (runtime : t) =
+  let refuse_without_native_suppression () =
+    Error
+      (runtime.id
+       ^ ": completion verifier requires native-tool suppression, which this client does not support")
+  in
   match runtime.execution with
   | Runtime_execution.Agent_core sealed
     when not
@@ -1591,12 +1601,15 @@ let verifier_runtime_admission (runtime : t) =
              .Llm_provider.Capabilities.supports_system_prompt ->
     Error (runtime.id ^ ": completion verifier requires a model that takes a system prompt")
   | Runtime_execution.Agent_core _ -> Ok ()
+  | Runtime_execution.Acp _
+    when not (Runtime_execution.supports_native_none runtime.execution) ->
+    refuse_without_native_suppression ()
   | (Runtime_execution.Claude_code _ | Runtime_execution.Acp _) when runtime.model.tools_support -> Ok ()
   | Runtime_execution.Claude_code _ | Runtime_execution.Acp _ ->
     Error (runtime.id ^ ": completion verifier requires model tools-support")
   | Runtime_execution.Codex_app_server _
   | Runtime_execution.Antigravity_cli _ ->
-    Error (runtime.id ^ ": completion verifier requires native-tool suppression, which this client does not support")
+    refuse_without_native_suppression ()
 ;;
 
 (* The one answer to "can this id judge as a [verifier_exact] cli slot?", over
@@ -4272,7 +4285,11 @@ let capability_of_runtime (rt : t) : runtime_capability =
   in
   let supports_tool_free =
     match rt.execution with
-    | Runtime_execution.Claude_code _ | Runtime_execution.Acp _ -> rt.model.tools_support
+    (* A tool-free lane runs at native posture none; a client that cannot
+       enforce it ({!Runtime_execution.supports_native_none}) refuses at its
+       first call, so it is not admitted here. *)
+    | Runtime_execution.Claude_code _ | Runtime_execution.Acp _ ->
+      rt.model.tools_support && Runtime_execution.supports_native_none rt.execution
     | Runtime_execution.Agent_core sealed ->
       let caps =
         Agent_core.Provider_runtime_binding.capabilities_for_provider_config

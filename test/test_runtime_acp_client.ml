@@ -582,6 +582,60 @@ default = "p.%s"
        ~binding_model:"m" ~binding_fields:""))
 ;;
 
+(* A completion review and the Verifier exact lane run at native posture none.
+   Admission has to give the answer dispatch gives: a client that cannot
+   enforce none (muse acp) is refused when the row is read, not at its first
+   call. *)
+let test_native_none_decides_verifier_and_tool_free_admission () =
+  let runtime_of driver =
+    let source =
+      Printf.sprintf
+        {|[providers.p]
+protocol = "acp"
+driver = "%s"
+command = "cli"
+args = ["acp"]
+is-non-interactive = true
+[models.m]
+api-name = "m"
+max-context = 400000
+tools-support = true
+[p.m]
+[runtime]
+default = "p.m"
+|} driver
+    in
+    match Runtime_toml.parse_string source with
+    | Error errs ->
+      failf "%s row failed to parse: %s" driver
+        (String.concat "; "
+           (List.map (fun (e : Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errs))
+    | Ok cfg ->
+      (match Runtime_instance.partition_bindings cfg cfg.bindings with
+       | [ runtime ], [] -> runtime
+       | _ -> failf "%s row did not materialize as one runtime" driver)
+  in
+  let kimi = runtime_of "kimi_code" and muse = runtime_of "muse_code" in
+  let verifier_lane = Runtime.requirement_of_exact_lane Runtime.Verifier in
+  check bool "kimi_code is admitted as a completion verifier" true
+    (Result.is_ok (Runtime.verifier_runtime_admission kimi));
+  (match Runtime.verifier_runtime_admission muse with
+   | Ok () -> fail "muse_code cannot turn native tools off but was admitted as a verifier"
+   | Error detail ->
+     check bool "the refusal names native-tool suppression" true
+       (String.ends_with
+          ~suffix:"requires native-tool suppression, which this client does not support"
+          detail));
+  check bool "kimi_code fits the Verifier exact lane" true
+    (Result.is_ok
+       (Runtime.admits ~lane:verifier_lane ~runtime:(Runtime.capability_of_runtime kimi)));
+  match Runtime.admits ~lane:verifier_lane ~runtime:(Runtime.capability_of_runtime muse) with
+  | Ok () -> fail "muse_code was admitted to a tool-free lane"
+  | Error refusal ->
+    check bool "tool-free is the refusal" true
+      (Runtime.equal_refusal Runtime.Tool_free_unsupported refusal)
+;;
+
 let test_muse_turn_effort_refused_before_session_rpc () =
   let cwd = Filename.temp_dir "muse-effort-rpc-" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree cwd) (fun () ->
@@ -5162,6 +5216,8 @@ let () =
         ; test_case "muse_code row materializes and refuses effort" `Quick
             test_muse_toml_row_and_effort
         ; test_case "Muse model and binding effort admission" `Quick test_muse_binding_effort_admission
+        ; test_case "muse_code is not admitted where native tools must be off" `Quick
+            test_native_none_decides_verifier_and_tool_free_admission
         ; test_case "unknown driver rejected" `Quick test_unknown_driver_rejected
         ; test_case "typed ACP effort and default model_selection TOML boundary" `Quick
             test_typed_acp_effort_and_model_selection_toml

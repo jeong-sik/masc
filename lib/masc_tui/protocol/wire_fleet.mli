@@ -625,10 +625,15 @@ type chat_stream_chunk =
       delta : string;
       owner : Wire_chat_journal.text_owner;
     }
-  | Chunk_thinking_delta of { operation_id : string option; delta : string }
+  | Chunk_thinking_delta of {
+      operation_id : string option;
+      delta : string;
+      owner : Wire_chat_journal.response_owner option;
+    }
   | Chunk_thinking_snapshot of {
       operation_id : string option;
       snapshot : string;
+      owner : Wire_chat_journal.response_owner option;
     }
   | Chunk_model_content of {
       operation_id : string option;
@@ -636,6 +641,7 @@ type chat_stream_chunk =
     }
   | Chunk_model_response_start of {
       operation_id : string option;
+      content_generation : int option;  (** Absent from older journal entries. *)
       stream_scope : int;
     }
   | Chunk_model_response_stop of {

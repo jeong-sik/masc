@@ -1649,10 +1649,15 @@ type chat_stream_chunk =
       delta : string;
       owner : Wire_chat_journal.text_owner;
     }
-  | Chunk_thinking_delta of { operation_id : string option; delta : string }
+  | Chunk_thinking_delta of {
+      operation_id : string option;
+      delta : string;
+      owner : Wire_chat_journal.response_owner option;
+    }
   | Chunk_thinking_snapshot of {
       operation_id : string option;
       snapshot : string;
+      owner : Wire_chat_journal.response_owner option;
     }
   | Chunk_model_content of {
       operation_id : string option;
@@ -1660,6 +1665,7 @@ type chat_stream_chunk =
     }
   | Chunk_model_response_start of {
       operation_id : string option;
+      content_generation : int option;
       stream_scope : int;
     }
   | Chunk_model_response_stop of {
@@ -2027,6 +2033,12 @@ let decode_native_completion_ok completion =
       Ok None
   | Some _ -> Ok None
 
+let optional_thinking_owner value =
+  if has_field value "response" then
+    let* response = required_object_field value "response" in
+    Result.map Option.some (Wire_chat_journal.decode_response_owner ~owner_field:"response" response)
+  else Ok None
+
 let decode_model_content_activity value =
   let fields = [ "generation"; "stream_scope"; "block_index"; "channel"; "state" ] in
   (* The producer owns the response/block coordinates. The optional provider
@@ -2089,11 +2101,13 @@ let decode_custom_chat_chunk json =
   | "KEEPER_THINKING_DELTA" ->
       let* value = required_object_field json "value" in
       let* delta = required_string_field value "delta" in
-      Ok (Chunk_thinking_delta { operation_id = outer_op_id; delta })
+      let* owner = optional_thinking_owner value in
+      Ok (Chunk_thinking_delta { operation_id = outer_op_id; delta; owner })
   | "KEEPER_THINKING_SNAPSHOT" ->
       let* value = required_object_field json "value" in
       let* snapshot = required_string_field value "snapshot" in
-      Ok (Chunk_thinking_snapshot { operation_id = outer_op_id; snapshot })
+      let* owner = optional_thinking_owner value in
+      Ok (Chunk_thinking_snapshot { operation_id = outer_op_id; snapshot; owner })
   | "KEEPER_MODEL_CONTENT_ACTIVITY" ->
       let* value = required_object_field json "value" in
       let* activity = decode_model_content_activity value in
@@ -2101,7 +2115,12 @@ let decode_custom_chat_chunk json =
   | "KEEPER_STREAM_MESSAGE_START" ->
       let* value = required_object_field json "value" in
       let* stream_scope = required_nonnegative_int_field value "stream_scope" in
-      Ok (Chunk_model_response_start { operation_id = outer_op_id; stream_scope })
+      let* content_generation =
+        if has_field value "content_generation" then
+          Result.map Option.some (required_nonnegative_int_field value "content_generation")
+        else Ok None
+      in
+      Ok (Chunk_model_response_start { operation_id = outer_op_id; content_generation; stream_scope })
   | "KEEPER_STREAM_MESSAGE_STOP" ->
       let* value = required_member json "value" in
       let* owner =
@@ -2246,7 +2265,8 @@ let decode_chat_stream_chunk json =
   | "thinking_delta" ->
       let* operation_id = chunk_operation_id json in
       let* delta = required_string_field json "delta" in
-      Ok (Chunk_thinking_delta { operation_id; delta })
+      let* owner = optional_thinking_owner json in
+      Ok (Chunk_thinking_delta { operation_id; delta; owner })
   | "tool_start" | "TOOL_CALL_START" ->
       let* operation_id = chunk_operation_id json in
       let* tool_use_id, stream_scope = resolve_tool_reference json in

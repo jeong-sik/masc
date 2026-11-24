@@ -790,7 +790,7 @@ let make_populated_model ~cols ~rows ~lang =
     |> Fleet_store.apply_chat_stream_chunk ~keeper:"e-masc-the-leader"
          ~request_id:"req-live-1"
          (Wire_fleet.Chunk_thinking_delta
-            { operation_id = Some "op-1"; delta = "Checking head commit and approvals..." })
+            { operation_id = Some "op-1"; delta = "Checking head commit and approvals..."; owner = None })
     |> Fleet_store.apply_chat_stream_chunk ~keeper:"e-masc-the-leader"
          ~request_id:"req-live-1"
          (Wire_fleet.Chunk_tool_start

@@ -54,6 +54,7 @@ type chat_queue = {
 }
 
 type model_activity
+type response_start
 
 type chat_stream_buffer = {
   request_id : string;
@@ -65,6 +66,7 @@ type chat_stream_buffer = {
   text_ownership : Cut_reply.ownership;
   thinking : string;
   model_activity : model_activity;
+  response_start : response_start option;  (** Evidence from message-start frames in this run. *)
   tools : active_tool_call list;
   active : bool;
   ended : bool;

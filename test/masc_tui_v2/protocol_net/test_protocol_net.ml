@@ -3246,7 +3246,7 @@ let test_agui_chat_stream_and_history_provenance () =
             }|}))
   in
   (match think_delta with
-  | Wire_fleet.Chunk_thinking_delta { operation_id = Some "tui-99-1"; delta = "checking logs" }
+  | Wire_fleet.Chunk_thinking_delta { operation_id = Some "tui-99-1"; delta = "checking logs"; owner = None }
     ->
       ()
   | _ -> Alcotest.fail "expected Chunk_thinking_delta");

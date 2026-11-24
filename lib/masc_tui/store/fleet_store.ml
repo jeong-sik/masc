@@ -59,6 +59,8 @@ type model_activity =
     }
   | Response_stopped of Wire_chat_journal.response_owner
 
+type response_start = Scope_only_start of int | Owned_start
+
 type chat_stream_buffer = {
   request_id : string;
   operation_id : string option;
@@ -69,6 +71,7 @@ type chat_stream_buffer = {
   text_ownership : Cut_reply.ownership;
   thinking : string;
   model_activity : model_activity;
+  response_start : response_start option;
   tools : active_tool_call list;
   active : bool;
   ended : bool;
@@ -997,6 +1000,37 @@ let note_unscoped_delta current channel delta =
       if String.equal delta "" then current else Receiving_delta channel
   | Receiving_response _ | Response_stopped _ -> current
 
+let model_response_owner = function
+  | Receiving_response { owner; _ } | Response_stopped owner -> Some owner
+  | Waiting_for_content | Receiving_delta _ -> None
+
+let latest_response_scope b =
+  let model_scope = Option.map
+      (fun (owner : Wire_chat_journal.response_owner) -> owner.stream_scope)
+      (model_response_owner b.model_activity)
+  in
+  match b.response_start with
+  | Some (Scope_only_start scope) -> Some (Option.fold ~none:scope ~some:(max scope) model_scope)
+  | Some Owned_start | None -> model_scope
+
+let before_scope_only_start b (owner : Wire_chat_journal.response_owner) =
+  match b.response_start with
+  | Some (Scope_only_start scope) when owner.stream_scope < scope ->
+      Option.for_all
+        (fun (current : Wire_chat_journal.response_owner) ->
+           current.content_generation = owner.content_generation)
+        (model_response_owner b.model_activity)
+  | Some (Scope_only_start _ | Owned_start) | None -> false
+
+let admit_model_bytes b owner =
+  match owner, model_response_owner b.model_activity with
+  | Wire_chat_journal.Observed_response incoming, _ when before_scope_only_start b incoming ->
+      Cut_reply.Drop
+  | Wire_chat_journal.Observed_response incoming, Some current
+    when Wire_chat_journal.compare_response_owner incoming current < 0 -> Cut_reply.Drop
+  | (Wire_chat_journal.Observed_response _ | Unobserved_scope _), _ ->
+      Cut_reply.admit b.text_ownership owner
+
 let retire_pending_tool tool =
   match tool.tool_state with
   | Tool_pending | Tool_result_pending _ -> { tool with tool_state = Tool_unfinished }
@@ -1019,6 +1053,40 @@ let tool_from_earlier_scope ~stream_scope tool =
 let retire_tool_from_earlier_scope ~stream_scope tool =
   if tool_from_earlier_scope ~stream_scope tool then retire_pending_tool tool
   else tool
+
+let start_model_response b ~content_generation ~stream_scope =
+  let current = model_response_owner b.model_activity in
+  let retire_earlier () = List.map (retire_tool_from_earlier_scope ~stream_scope) b.tools in
+  match content_generation with
+  | None ->
+      (* Older producers attach a generation to content, but not to starts.
+         Only a start with an explicit generation establishes the newer format. *)
+      (match b.response_start with
+      | Some Owned_start -> b
+      | Some (Scope_only_start _) | None ->
+          if Option.exists (fun previous -> stream_scope <= previous) (latest_response_scope b) then b
+          else
+            { b with response_start = Some (Scope_only_start stream_scope);
+              model_activity = retire_model_activity b.model_activity; tools = retire_earlier () })
+  | Some content_generation ->
+      let owner = { Wire_chat_journal.content_generation; stream_scope } in
+      let order = Option.map (Wire_chat_journal.compare_response_owner owner) current in
+      let precedes_known_scope = Option.is_some current && before_scope_only_start b owner in
+      if precedes_known_scope || Option.exists (fun n -> n < 0) order then b
+      else
+        match Cut_reply.admit b.text_ownership (Observed_response owner) with
+        | Cut_reply.Drop -> b
+        | Append text_ownership when order = Some 0 ->
+            { b with response_start = Some Owned_start; text_ownership }
+        | Append text_ownership ->
+            let tools =
+              match current with
+              | Some prior when prior.content_generation < content_generation ->
+                  retire_pending_tools b.tools
+              | Some _ | None -> retire_earlier ()
+            in
+            { b with model_activity = Receiving_response { owner; blocks = [] };
+              response_start = Some Owned_start; text_ownership; tools }
 
 let note_tool_during_model_output ~stream_scope tool =
   if tool_from_earlier_scope ~stream_scope tool then
@@ -1047,6 +1115,7 @@ let fresh_stream_buffer ~request_id =
     text_ownership = Cut_reply.fresh_ownership;
     thinking = "";
     model_activity = empty_model_activity;
+    response_start = None;
     tools = [];
     active = true;
     ended = false;
@@ -1154,6 +1223,23 @@ let update_stream_tool ~keeper ~request_id ~operation_id ~tool_use_id update t =
       { b with tools })
     t
 
+let apply_thinking b ~operation_id ~owner ~thought ~update =
+  let admission =
+    match owner with
+    | Some owner -> admit_model_bytes b (Observed_response owner)
+    | None -> Cut_reply.Append b.text_ownership
+  in
+  match admission with
+  | Cut_reply.Drop -> b
+  | Append text_ownership ->
+      { b with
+        operation_id = merge_opt_op b.operation_id operation_id;
+        run_started = true;
+        thinking = update b.thinking thought;
+        text_ownership;
+        model_activity = note_unscoped_delta b.model_activity Content_thinking thought;
+        active = true }
+
 let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
     t =
   match chunk with
@@ -1161,7 +1247,8 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
   | Wire_fleet.Chunk_model_content { operation_id; activity } ->
       update_live_stream ~keeper ~request_id ~operation_id
         (fun b ->
-          match note_model_content b.model_activity activity with
+          if before_scope_only_start b activity.owner then b
+          else match note_model_content b.model_activity activity with
           | None -> b
           | Some model_activity ->
               let tools =
@@ -1171,15 +1258,18 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
                       b.tools
                 | Content_ended -> b.tools
               in
-              if model_activity == b.model_activity && tools == b.tools then b
-              else { b with model_activity; tools })
+              let response_start =
+                match b.response_start, model_response_owner b.model_activity with
+                | Some (Scope_only_start _), Some previous
+                  when activity.owner.content_generation > previous.content_generation -> None
+                | (Some (Scope_only_start _ | Owned_start) | None), _ -> b.response_start
+              in
+              if model_activity == b.model_activity && tools == b.tools && response_start == b.response_start
+              then b else { b with model_activity; response_start; tools })
         t
-  | Wire_fleet.Chunk_model_response_start { operation_id; stream_scope } ->
+  | Wire_fleet.Chunk_model_response_start { operation_id; content_generation; stream_scope } ->
       update_live_stream ~keeper ~request_id ~operation_id
-        (fun b ->
-          let tools = List.map (retire_tool_from_earlier_scope ~stream_scope) b.tools in
-          { b with tools })
-        t
+        (fun b -> start_model_response b ~content_generation ~stream_scope) t
   | Wire_fleet.Chunk_model_response_stop { operation_id; owner } ->
       update_model_activity ~keeper ~request_id ~operation_id
         (fun current -> stop_model_response current owner) t
@@ -1292,6 +1382,7 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
                   text_ownership = Cut_reply.fresh_ownership;
                   thinking = "";
                   model_activity = empty_model_activity;
+                  response_start = None;
                   tools = retire_pending_tools prev.tools;
                   active = true;
                 }
@@ -1308,7 +1399,7 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
                   active = true;
                 }
             | Wire_fleet.Chunk_text_delta { operation_id; delta; owner } -> (
-                match Cut_reply.admit prev.text_ownership owner with
+                match admit_model_bytes prev owner with
                 | Cut_reply.Append text_ownership ->
                     {
                       prev with
@@ -1320,33 +1411,14 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
                         note_unscoped_delta prev.model_activity Content_text delta;
                       active = true;
                     }
-                | Cut_reply.Drop ->
-                    {
-                      prev with
-                      operation_id = merge_opt_op prev.operation_id operation_id;
-                      run_started = true;
-                      active = true;
-                    })
-            | Wire_fleet.Chunk_thinking_delta { operation_id; delta } ->
-                {
-                  prev with
-                  operation_id = merge_opt_op prev.operation_id operation_id;
-                  run_started = true;
-                  thinking = prev.thinking ^ delta;
-                  model_activity =
-                    note_unscoped_delta prev.model_activity Content_thinking delta;
-                  active = true;
-                }
-            | Wire_fleet.Chunk_thinking_snapshot { operation_id; snapshot } ->
-                {
-                  prev with
-                  operation_id = merge_opt_op prev.operation_id operation_id;
-                  run_started = true;
-                  thinking = snapshot;
-                  model_activity =
-                    note_unscoped_delta prev.model_activity Content_thinking snapshot;
-                  active = true;
-                }
+                | Cut_reply.Drop -> prev)
+            | Wire_fleet.Chunk_thinking_delta { operation_id; delta; owner } ->
+                apply_thinking prev ~operation_id ~owner ~thought:delta ~update:( ^ )
+            | Wire_fleet.Chunk_thinking_snapshot { operation_id; snapshot; owner } ->
+                apply_thinking prev ~operation_id ~owner ~thought:snapshot ~update:(fun _ snapshot -> snapshot)
+            | Wire_fleet.Chunk_tool_start { stream_scope = Some scope; _ }
+              when Option.exists (fun current -> scope < current) (latest_response_scope prev) ->
+                prev
             | Wire_fleet.Chunk_tool_start
                 { operation_id; tool_use_id; stream_scope; tool_name; args_preview } ->
                 let entry =

@@ -1205,6 +1205,7 @@ let count_transcript_rows ~(model : Model.t) ~keeper ~width =
   let inline_asst_prefix =
     Printf.sprintf "00:00 %s " (Glyph.to_utf8 Glyph.Live_healthy)
   in
+  let cut_replies = Fleet_store.cut_replies_by_row ~keeper model.fleet in
   let count_history hist_msgs =
     let _, total =
       List.fold_left
@@ -1272,9 +1273,18 @@ let count_transcript_rows ~(model : Model.t) ~keeper ~width =
                   count_tool_output_rows ~tools_mode ~width msg.content
                 else 0
             | Wire_fleet.Role_request_failure ->
+                let cut_reply_r =
+                  match Fleet_store.String_map.find_opt msg.id cut_replies with
+                  | Some text ->
+                      1
+                      + count_markdown_rows ~theme ~width ~rail_present:true
+                          ~prefix:"  " text
+                  | None -> 0
+                in
                 1
                 + count_markdown_rows ~theme ~width ~rail_present:true
                     ~prefix:"  " msg.content
+                + cut_reply_r
           in
           (false, acc + spacing + msg_r))
         (true, 0) hist_msgs

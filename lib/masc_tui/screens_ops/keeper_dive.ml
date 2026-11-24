@@ -213,6 +213,9 @@ let build_history_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
   let base_bg = theme.surface_1 in
   let user_bg = theme.surface_2 in
   let runtimes = Runtime_store.runtime_options model.runtime in
+  let cut_replies =
+    Fleet_store.cut_replies_by_row ~keeper:keeper_name model.fleet
+  in
   let origin_mode =
     match model.fleet.chat_origin_mode with
     | Fleet_store.Display_origin_inline ->
@@ -435,10 +438,28 @@ let build_history_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
                   ~right_meta:meta ~right_meta_fg:theme.text_muted
                   ~right_meta_attrs:Attr.italic ~bg_rgb:base_bg ()
               in
-              hdr
+              (* What the Keeper had streamed before the cut, rebuilt from the
+                 operation's journal. Chat_transcript.count_transcript_rows
+                 counts the same rows. *)
+              let cut_reply_rows =
+                match Fleet_store.String_map.find_opt msg.id cut_replies with
+                | None -> []
+                | Some text ->
+                    single_span_row ~rail_rgb:theme.border_inactive
+                      ~prefix:(Glyph.to_utf8 Glyph.Tree_corner ^ " ")
+                      ~prefix_fg:theme.text_muted
+                      ~text:(Ops_common.say model ~ko:"끊긴 답장" ~en:"Cut reply")
+                      ~text_fg:theme.text_secondary ~attrs:Attr.italic
+                      ~bg_rgb:base_bg ()
+                    :: markdown_rows ~rail_rgb:theme.border_inactive ~theme
+                         ~width ~prefix:"  " ~cont_prefix:"  "
+                         ~prefix_fg:theme.text_secondary ~bg_rgb:base_bg text
+              in
+              (hdr
               :: markdown_rows ~rail_rgb:theme.status_critical ~theme ~width
                    ~prefix:"  " ~cont_prefix:"  "
-                   ~prefix_fg:theme.status_critical ~bg_rgb:base_bg msg.content
+                   ~prefix_fg:theme.status_critical ~bg_rgb:base_bg msg.content)
+              @ cut_reply_rows
         in
         loop (Some hhmm) (List.rev_append (spacing @ msg_rows) acc) rest
   in

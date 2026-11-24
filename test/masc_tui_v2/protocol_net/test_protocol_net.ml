@@ -2842,6 +2842,18 @@ let test_tui_memory_os_and_runtime_setup_codecs () =
   Alcotest.(check (option string)) "account keyring_host" (Some "keyring_host") recp.account;
   Alcotest.(check (option string)) "account_ref None" None recp.account_ref
 
+let test_chat_queue_pages () =
+  let page = parse_json
+      {|{"state":"Queued","operations":[{"operation_id":"op-x","sequence":"101","state":"Queued","input":{"message":"hello"}}]}|} in
+  let rows = expect_ok "server queue after sequence" (Wire_fleet.decode_chat_queue ~after:(Some 100L) page) in
+  Alcotest.(check (list string)) "server ids" ["op-x"]
+    (List.map (fun (op : Wire_fleet.chat_operation) -> Keeper_chat_operation.Operation_id.to_string op.id) rows);
+  Alcotest.(check bool) "a repeated cursor cannot advance a read" true
+    (Result.is_error (Wire_fleet.decode_chat_queue ~after:(Some 101L) page));
+  Alcotest.(check bool) "incomplete provenance is rejected" true
+    (Result.is_error (Wire_fleet.decode_chat_history (parse_json
+      {|[{"id":"row","role":"user","content":"hi","ts":42,"delivery_key":{"kind":"operation","operation_id":"op-x"}}]|})))
+
 let test_agui_chat_stream_and_history_provenance () =
   (* BUG-1: Real server AG-UI SSE frames *)
   let accepted_running =
@@ -2874,7 +2886,7 @@ let test_agui_chat_stream_and_history_provenance () =
       {
         operation_id = "tui-99-1";
         queued_count = 0;
-        state = Wire_fleet.Accepted_running;
+        state = Keeper_chat_operation.State_name.Running;
         interactive_outcome = Some Wire_fleet.Interactive_applied;
         control_token = Some "ctrl-tok-77";
       } ->
@@ -2901,7 +2913,7 @@ let test_agui_chat_stream_and_history_provenance () =
       {
         operation_id = "tui-99-2";
         queued_count = 1;
-        state = Wire_fleet.Accepted_queued;
+        state = Keeper_chat_operation.State_name.Queued;
         interactive_outcome = None;
         control_token = None;
       } ->
@@ -3279,6 +3291,7 @@ let test_agui_chat_stream_and_history_provenance () =
                 {
                   "id": "msg-100-1",
                   "role": "user",
+                  "speaker_authority":"owner",
                   "content": "음",
                   "ts": 1795252000.0,
                   "delivery_key": { "kind": "operation", "operation_id": "tui-99-1" },
@@ -3301,12 +3314,10 @@ let test_agui_chat_stream_and_history_provenance () =
   Alcotest.(check int) "2 history rows decoded" 2 (List.length page.messages);
   let u_msg = List.nth page.messages 0 in
   let f_msg = List.nth page.messages 1 in
-  Alcotest.(check (option string)) "user operation_id" (Some "tui-99-1") u_msg.operation_id;
-  Alcotest.(check (option string)) "user transcript_slot" (Some "accepted_user") u_msg.transcript_slot;
+  Alcotest.(check (option string)) "user operation_id" (Some "tui-99-1") (Wire_fleet.accepted_input_operation u_msg);
   Alcotest.(check bool) "failure role is Role_request_failure" true
     (f_msg.role = Wire_fleet.Role_request_failure);
-  Alcotest.(check (option string)) "failure operation_id" (Some "tui-99-1") f_msg.operation_id;
-  Alcotest.(check (option string)) "failure transcript_slot" (Some "settled_failure") f_msg.transcript_slot;
+  Alcotest.(check (option string)) "failure operation_id" (Some "tui-99-1") (Wire_fleet.terminal_operation f_msg);
   Alcotest.(check (option string)) "failure_kind" (Some "turn_exception") f_msg.failure_kind;
   (* Turn interrupt response decoder *)
   let int_resp =
@@ -5366,6 +5377,7 @@ let () =
       , [
           Alcotest.test_case "wire_common" `Quick test_wire_common;
           Alcotest.test_case "wire_fleet" `Quick test_wire_fleet;
+          Alcotest.test_case "queued operation pages" `Quick test_chat_queue_pages;
           Alcotest.test_case "agui_chat_stream_and_history_provenance" `Quick
             test_agui_chat_stream_and_history_provenance;
           Alcotest.test_case "chat_history_speaker" `Quick

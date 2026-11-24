@@ -714,6 +714,16 @@ let apply_observer_event (m : Model.t) = function
           m.infra
       in
       ({ m with infra }, [])
+  | Wire_observer.Keeper_chat_queue_changed keeper ->
+      let queue = Fleet_store.chat_queue_for ~keeper m.fleet in
+      let queue = { queue with read = Observed.mark_stale queue.read } in
+      let next = { m with fleet = Fleet_store.set_chat_queue ~keeper queue m.fleet } in
+      let reads =
+        if Option.equal Nav.equal_overlay m.nav.overlay (Some (Nav.Queue_context Nav.Drawer_queue))
+           && Option.equal String.equal (Model.target_keeper m) (Some keeper)
+        then [get_cmd m.epoch (Cmd.Get_chat_queue { keeper })] else []
+      in
+      (next, reads @ View_fetches.chat_status_fetches ~keeper next)
   | Wire_observer.Keeper_chat_appended { keeper; _ } ->
       let fleet = Fleet_store.mark_chat_history_stale ~keeper m.fleet in
       let viewing_chat = is_viewing_keeper_chat ~keeper m in
@@ -978,7 +988,7 @@ let allow_stream_takeover ~keeper ~request_id (m : Model.t) =
               String.equal tx.request_id request_id)
             m.drafts.pending_txs
         with
-        | Some { state = Drafts.Delivered | Drafts.Failed_retryable _; _ } ->
+        | Some { state = Drafts.Delivered | Drafts.No_operation_record | Drafts.Failed_retryable _; _ } ->
             true
         | Some
             {
@@ -1060,15 +1070,15 @@ let apply_chat_stream_chunk ~now ~keeper ~request_id ~is_btw ~chunk (m : Model.t
           in
           let d1, extra_cmds =
             match state with
-            | Wire_fleet.Accepted_queued ->
+            | Keeper_chat_operation.State_name.Queued ->
                 ( Drafts.mark_queued ~now ~request_id
                     ~operation_id:(Some operation_id) d0
                 , [] )
-            | Wire_fleet.Accepted_running ->
+            | Keeper_chat_operation.State_name.Running ->
                 ( Drafts.mark_accepted ~now ~request_id
                     ~operation_id:(Some operation_id) d0
                 , [] )
-            | Wire_fleet.Accepted_succeeded | Wire_fleet.Accepted_cancelled ->
+            | Keeper_chat_operation.State_name.Succeeded | Keeper_chat_operation.State_name.Cancelled ->
                 let d_conf =
                   Drafts.mark_accepted ~now ~request_id
                     ~operation_id:(Some operation_id) d0
@@ -1080,7 +1090,7 @@ let apply_chat_stream_chunk ~now ~keeper ~request_id ~is_btw ~chunk (m : Model.t
                       (Cmd.Get_chat_history
                          { keeper; limit = Some 80; cursor = None });
                   ] )
-            | Wire_fleet.Accepted_failed ->
+            | Keeper_chat_operation.State_name.Failed ->
                 let d_fail =
                   Drafts.mark_accepted ~now ~request_id
                     ~operation_id:(Some operation_id) d0
@@ -1113,13 +1123,18 @@ let apply_chat_stream_chunk ~now ~keeper ~request_id ~is_btw ~chunk (m : Model.t
                    { keeper; limit = Some 80; cursor = None });
             ] )
       | Wire_fleet.Chunk_error { message; _ } ->
-          ( Drafts.mark_failed_retryable ~now ~request_id ~reason:message
-              m.drafts
-          , [
-              get_cmd m.epoch
-                (Cmd.Get_chat_history
-                   { keeper; limit = Some 80; cursor = None });
-            ] )
+          let tx = Drafts.pending_txs_for_keeper ~keeper m.drafts
+            |> List.find_opt (fun (tx : Drafts.pending_message) -> String.equal tx.request_id request_id) in
+          let history = get_cmd m.epoch
+            (Cmd.Get_chat_history { keeper; limit = Some 80; cursor = None }) in
+          if Option.fold ~none:false ~some:(fun (tx : Drafts.pending_message) -> tx.state = Drafts.No_operation_record) tx then
+            (m.drafts, [])
+          else (match Option.bind tx (fun (tx : Drafts.pending_message) -> tx.operation_id) with
+           | Some operation_id ->
+               (Drafts.mark_confirming ~now ~request_id m.drafts,
+                [history; get_cmd m.epoch (Cmd.Get_chat_status { keeper; operation_id })])
+           | None ->
+               (Drafts.mark_failed_retryable ~now ~request_id ~reason:message m.drafts, [history]))
       | Wire_fleet.Chunk_ignored -> (m.drafts, [])
     in
     ({ m with fleet; drafts }, cmds)
@@ -1143,19 +1158,6 @@ let refused_by_another_instance = function
   | Msg.Workspace_mismatch _ -> true
   | Msg.Transport _ | Msg.Http_error _ | Msg.Decode_error _ -> false
 
-(* Queued behind a turn, running, or being cut by a steer: the server had
-   accepted the request. *)
-let accepted_by_server = function
-  | Some (Drafts.Queued | Drafts.Pending_processing | Drafts.Interrupting) ->
-      true
-  | Some
-      ( Drafts.Sending
-      | Drafts.Confirming_delivery
-      | Drafts.Delivered
-      | Drafts.Failed_retryable _ )
-  | None ->
-      false
-
 let apply_chat_stream_done ~now ~keeper ~request_id ~is_btw ~result (m : Model.t)
     =
   if is_btw then
@@ -1175,16 +1177,17 @@ let apply_chat_stream_done ~now ~keeper ~request_id ~is_btw ~result (m : Model.t
       get_cmd epoch
         (Cmd.Get_chat_history { keeper; limit = Some 80; cursor = None })
     in
-    let tx_state_opt =
-      match
-        List.find_opt
-          (fun (tx : Drafts.pending_message) ->
-            String.equal tx.request_id request_id)
-          m.drafts.pending_txs
-      with
-      | Some tx -> Some tx.state
-      | None -> None
-    in
+    let tx =
+      List.find_opt (fun (tx : Drafts.pending_message) ->
+        String.equal tx.request_id request_id && String.equal tx.keeper keeper) m.drafts.pending_txs in
+    let tx_state_opt = Option.map (fun (tx : Drafts.pending_message) -> tx.state) tx in
+    let accepted = Option.exists (fun (tx : Drafts.pending_message) -> Option.is_some tx.operation_id) tx in
+    let reads epoch =
+      match tx with
+      | None -> [hist_cmd epoch]
+      | Some tx ->
+          let operation_id = Option.value tx.operation_id ~default:request_id in
+          [hist_cmd epoch; get_cmd epoch (Cmd.Get_chat_status { keeper; operation_id })] in
     let context = Say.make ~ko:"키퍼 대화 전송" ~en:"Keeper chat stream" in
     match result with
     | Ok () ->
@@ -1192,7 +1195,7 @@ let apply_chat_stream_done ~now ~keeper ~request_id ~is_btw ~result (m : Model.t
           Fleet_store.finish_chat_stream ~keeper ~request_id ~error:None m.fleet
         in
         (match tx_state_opt with
-        | Some Drafts.Delivered -> ({ m with fleet }, [])
+        | Some (Drafts.Delivered | Drafts.No_operation_record) -> ({ m with fleet }, [])
         | Some (Drafts.Failed_retryable _) ->
             ({ m with fleet }, [ hist_cmd m.epoch ])
         | Some
@@ -1203,9 +1206,12 @@ let apply_chat_stream_done ~now ~keeper ~request_id ~is_btw ~result (m : Model.t
             | Drafts.Interrupting )
         | None ->
             let drafts = Drafts.mark_confirming ~now ~request_id m.drafts in
-            ({ m with fleet; drafts }, [ hist_cmd m.epoch ]))
+            ({ m with fleet; drafts }, reads m.epoch))
+    | Error err when Option.equal Drafts.equal_tx_state tx_state_opt (Some Drafts.No_operation_record) ->
+        let fleet = Fleet_store.finish_chat_stream ~keeper ~request_id ~error:None m.fleet in
+        Update_http.record_http_incident ~now ~source:(Health.Source_keeper keeper) ~context err { m with fleet }
     | Error err
-      when refused_by_another_instance err && accepted_by_server tx_state_opt
+      when refused_by_another_instance err && accepted
       ->
         (* The old instance accepted the request, and only the reattach was
            refused. The 409 moves the epoch, so [Update.step] ends the buffer
@@ -1215,22 +1221,22 @@ let apply_chat_stream_done ~now ~keeper ~request_id ~is_btw ~result (m : Model.t
         Update_http.record_http_incident ~now
           ~source:(Health.Source_keeper keeper) ~context err m
     | Error err ->
+        let refusal =
+          match err with
+          | Msg.Http_error { status; _ } -> status >= 400 && status < 500
+          | Msg.Workspace_mismatch _ -> true
+          | Msg.Transport _ | Msg.Decode_error _ -> false
+        in
+        let rejected = refusal && not (accepted) in
         let detail = Msg.http_error_detail err in
-        let fleet =
-          Fleet_store.finish_chat_stream ~keeper ~request_id
-            ~error:(Some detail) m.fleet
-        in
+        let fleet = Fleet_store.finish_chat_stream ~keeper ~request_id
+            ~error:(if rejected then Some detail else None) m.fleet in
         let drafts =
-          Drafts.mark_failed_retryable ~now ~request_id ~reason:detail m.drafts
-        in
-        let next, inc_cmds =
-          Update_http.record_http_incident ~now
-            ~source:(Health.Source_keeper keeper) ~context err
-            { m with fleet; drafts }
-        in
-        (* A 409 moves the epoch, and a history read of the old epoch would
-           be dropped. *)
-        (next, inc_cmds @ [ hist_cmd next.epoch ])
+          if rejected then Drafts.mark_failed_retryable ~now ~request_id ~reason:detail m.drafts
+          else Drafts.mark_confirming ~now ~request_id m.drafts in
+        let next, inc_cmds = Update_http.record_http_incident ~now
+            ~source:(Health.Source_keeper keeper) ~context err { m with fleet; drafts } in
+        (next, inc_cmds @ (if rejected then [hist_cmd next.epoch] else reads next.epoch))
 
 let apply_stream_gap ~now dropped (m : Model.t) =
   if dropped <= 0 then (m, [])

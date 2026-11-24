@@ -13,6 +13,7 @@ type tx_state =
   | Sending
   | Pending_processing
   | Confirming_delivery
+  | No_operation_record
   | Interrupting
   | Delivered
   | Failed_retryable of { reason : string }
@@ -23,12 +24,9 @@ type pending_message = {
   body : string;
   mode : delivery_mode;
   operation_id : string option;
-  prior_user_msg_ids : string list;
-  user_persisted : bool;
   state : tx_state;
   created_at : Clock.Mono.t;
   updated_at : Clock.Mono.t;
-  recheck_count : int;
 }
 
 type keeper_draft = {
@@ -118,70 +116,26 @@ let equal_delivery_mode a b =
 
 let equal_tx_state a b =
   match a, b with
-  | Queued, Queued
-  | Sending, Sending
-  | Pending_processing, Pending_processing
-  | Confirming_delivery, Confirming_delivery
-  | Interrupting, Interrupting
-  | Delivered, Delivered ->
-      true
+  | Queued, Queued | Sending, Sending | Pending_processing, Pending_processing
+  | Confirming_delivery, Confirming_delivery | No_operation_record, No_operation_record
+  | Interrupting, Interrupting | Delivered, Delivered -> true
   | Failed_retryable x, Failed_retryable y -> String.equal x.reason y.reason
-  | ( Queued
-    , ( Sending
-      | Pending_processing
-      | Confirming_delivery
-      | Interrupting
-      | Delivered
-      | Failed_retryable _ ) )
-  | ( Sending
-    , ( Queued
-      | Pending_processing
-      | Confirming_delivery
-      | Interrupting
-      | Delivered
-      | Failed_retryable _ ) )
-  | ( Pending_processing
-    , ( Queued
-      | Sending
-      | Confirming_delivery
-      | Interrupting
-      | Delivered
-      | Failed_retryable _ ) )
-  | ( Confirming_delivery
-    , ( Queued
-      | Sending
-      | Pending_processing
-      | Interrupting
-      | Delivered
-      | Failed_retryable _ ) )
-  | ( Interrupting
-    , ( Queued
-      | Sending
-      | Pending_processing
-      | Confirming_delivery
-      | Delivered
-      | Failed_retryable _ ) )
-  | ( Delivered
-    , ( Queued
-      | Sending
-      | Pending_processing
-      | Confirming_delivery
-      | Interrupting
-      | Failed_retryable _ ) )
-  | ( Failed_retryable _
-    , ( Queued
-      | Sending
-      | Pending_processing
-      | Confirming_delivery
-      | Interrupting
-      | Delivered ) ) ->
-      false
+  | (Queued | Sending | Pending_processing | Confirming_delivery | No_operation_record |
+     Interrupting | Delivered | Failed_retryable _),
+    (Queued | Sending | Pending_processing | Confirming_delivery | No_operation_record |
+     Interrupting | Delivered | Failed_retryable _) -> false
+
+let absence_notice (tx : pending_message) =
+  match tx.operation_id with
+  | None -> Say.make ~ko:"상태 기록 없음 · 전송 결과 미확인" ~en:"No status record · delivery unconfirmed"
+  | Some _ -> Say.make ~ko:"이전에 접수됨 · 현재 상태 기록 없음" ~en:"Previously accepted · no current status record"
 
 let tx_state_label = function
   | Queued -> Some (Say.make ~ko:"전송 대기" ~en:"Queued")
   | Sending -> Some (Say.make ~ko:"전송 중" ~en:"Sending")
   | Pending_processing -> Some (Say.make ~ko:"처리 대기" ~en:"Awaiting turn")
   | Confirming_delivery -> Some (Say.make ~ko:"전송 확인 중" ~en:"Confirming")
+  | No_operation_record -> Some (Say.make ~ko:"상태 기록 없음" ~en:"No status record")
   | Interrupting -> Some (Say.make ~ko:"중단 요청 중" ~en:"Interrupting")
   | Delivered -> None
   | Failed_retryable _ -> Some (Say.make ~ko:"전송 실패" ~en:"Send failed")
@@ -557,12 +511,21 @@ let fresh_request_id prefix seq =
   else Printf.sprintf "tui-%s-%s-%d" prefix process_session_nonce seq
 
 let append_bounded_tx msg txs =
-  let appended = txs @ [ msg ] in
-  let len = List.length appended in
-  if len <= max_retained_txs then appended
-  else List.drop (len - max_retained_txs) appended
+  (* The retention limit applies only to settled deliveries. Every outstanding
+     input, including a failure awaiting operator action, keeps its identity. *)
+  let _, kept =
+    List.fold_left
+      (fun (settled, rows) tx ->
+        match tx.state with
+        | Delivered when settled >= max_retained_txs -> (settled, rows)
+        | Delivered -> (settled + 1, tx :: rows)
+        | Queued | Sending | Pending_processing | Confirming_delivery
+        | Interrupting | No_operation_record | Failed_retryable _ -> (settled, tx :: rows))
+      (0, []) (List.rev txs)
+  in
+  kept @ [msg]
 
-let enqueue_submission ~now ~keeper ~mode ?(prior_user_msg_ids = []) t =
+let enqueue_submission ~now ~keeper ~mode t =
   let d = draft_for ~keeper t in
   if String.equal (String.trim d.text) "" then None
   else
@@ -577,12 +540,9 @@ let enqueue_submission ~now ~keeper ~mode ?(prior_user_msg_ids = []) t =
         body = d.text;
         mode;
         operation_id = None;
-        prior_user_msg_ids;
-        user_persisted = false;
         state = Queued;
         created_at = now;
         updated_at = now;
-        recheck_count = 0;
       }
     in
     let by_keeper =
@@ -605,7 +565,7 @@ let enqueue_submission ~now ~keeper ~mode ?(prior_user_msg_ids = []) t =
 
 let is_terminal_tx_state = function
   | Delivered | Failed_retryable _ -> true
-  | Queued | Sending | Pending_processing | Confirming_delivery | Interrupting
+  | Queued | Sending | Pending_processing | Confirming_delivery | No_operation_record | Interrupting
     ->
       false
 
@@ -628,12 +588,13 @@ let mark_sending ~now ~request_id t =
 let mark_queued ~now ~request_id ~operation_id t =
   update_tx ~request_id
     (fun m ->
-      if is_terminal_tx_state m.state then m
-      else
-        let op =
-          match operation_id with Some _ as x -> x | None -> m.operation_id
-        in
-        { m with operation_id = op; state = Queued; updated_at = now })
+      match m.state with
+      | Sending | Queued | Confirming_delivery | No_operation_record ->
+          let operation_id =
+            match operation_id with Some _ -> operation_id | None -> m.operation_id
+          in
+          { m with operation_id; state = Queued; updated_at = now }
+      | Pending_processing | Interrupting | Delivered | Failed_retryable _ -> m)
     t
 
 let mark_accepted ~now ~request_id ~operation_id t =
@@ -647,23 +608,31 @@ let mark_accepted ~now ~request_id ~operation_id t =
         let next_state =
           match m.state with
           | Interrupting -> Interrupting
-          | Queued | Sending | Pending_processing | Confirming_delivery
+          | Queued | Sending | Pending_processing | Confirming_delivery | No_operation_record
           | Delivered | Failed_retryable _ ->
               Pending_processing
         in
         { m with operation_id = op; state = next_state; updated_at = now })
     t
 
+let mark_operation_absent ~now ~requested_at ~keeper ~operation_id t =
+  let pending_txs = List.map (fun (m : pending_message) ->
+    let id = Option.value m.operation_id ~default:m.request_id in
+    if String.equal keeper m.keeper && String.equal id operation_id &&
+       Clock.Mono.compare requested_at m.updated_at >= 0 && not (is_terminal_tx_state m.state)
+    then { m with state = No_operation_record; updated_at = now }
+    else m) t.pending_txs in
+  { t with pending_txs }
+
 let mark_confirming ~now ~request_id t =
   update_tx ~request_id
     (fun m ->
-      if is_terminal_tx_state m.state then m
+      if is_terminal_tx_state m.state || m.state = No_operation_record then m
       else
         {
           m with
           state = Confirming_delivery;
           updated_at = now;
-          recheck_count = m.recheck_count + 1;
         })
     t
 
@@ -677,6 +646,7 @@ let mark_interrupting ~now ~request_id t =
       | Confirming_delivery
       | Interrupting
       | Delivered
+      | No_operation_record
       | Failed_retryable _ ->
           m)
     t
@@ -691,17 +661,9 @@ let clear_interrupting ~now ~request_id t =
       | Pending_processing
       | Confirming_delivery
       | Delivered
+      | No_operation_record
       | Failed_retryable _ ->
           m)
-    t
-
-let mark_user_persisted ~request_id ?(operation_id = None) t =
-  update_tx ~request_id
-    (fun m ->
-      let op =
-        match operation_id with Some _ as x -> x | None -> m.operation_id
-      in
-      { m with user_persisted = true; operation_id = op })
     t
 
 let downgrade_mode_to_follow_up ~request_id t =
@@ -720,8 +682,7 @@ let mark_delivered ~now ~request_id ~keeper ~body t =
           String.equal m.request_id request_id
           && String.equal m.keeper keeper
           && String.equal m.body body
-          && not (is_terminal_tx_state m.state)
-        then { m with state = Delivered; user_persisted = true; updated_at = now }
+        then { m with state = Delivered; updated_at = now }
         else m)
       t.pending_txs
   in
@@ -737,6 +698,7 @@ let mark_failed_retryable ~now ~request_id ~reason t =
       | Pending_processing
       | Confirming_delivery
       | Interrupting
+      | No_operation_record
       | Failed_retryable _ ->
           { m with state = Failed_retryable { reason }; updated_at = now })
     t
@@ -749,14 +711,14 @@ let remove_tx ~request_id t =
   in
   { t with pending_txs }
 
-let dismiss_failed_for_keeper ~keeper t =
+let dismiss_notices_for_keeper ~keeper t =
   let removed = ref 0 in
   let pending_txs =
     List.filter
       (fun (m : pending_message) ->
         if String.equal m.keeper keeper then
           match m.state with
-          | Failed_retryable _ ->
+          | No_operation_record | Failed_retryable _ ->
               incr removed;
               false
           | Queued
@@ -777,7 +739,7 @@ let active_tx_priority = function
   | Sending -> Some 2
   | Confirming_delivery -> Some 3
   | Queued -> Some 4
-  | Delivered | Failed_retryable _ -> None
+  | Delivered | No_operation_record | Failed_retryable _ -> None
 
 let pending_txs_for_keeper ~keeper t =
   List.filter
@@ -814,7 +776,7 @@ let has_unreconciled_tx_for ~keeper t =
       | Pending_processing
       | Confirming_delivery
       | Interrupting
-      | Failed_retryable _ ->
+      | No_operation_record | Failed_retryable _ ->
           true)
     t.pending_txs
 
@@ -829,7 +791,7 @@ let queued_count_for_keeper ~keeper t =
         | Confirming_delivery
         | Interrupting
         | Delivered
-        | Failed_retryable _ ->
+        | No_operation_record | Failed_retryable _ ->
             acc
       else acc)
     0 t.pending_txs
@@ -1040,7 +1002,7 @@ let detach_streams ~now t =
         match tx.state with
         | Queued | Sending | Pending_processing | Interrupting ->
             mark_confirming ~now ~request_id:tx.request_id acc
-        | Confirming_delivery | Delivered | Failed_retryable _ -> acc)
+        | Confirming_delivery | No_operation_record | Delivered | Failed_retryable _ -> acc)
       t t.pending_txs
   in
   match t.btw with

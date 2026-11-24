@@ -6,13 +6,18 @@ open Masc_tui_term
 
 type bus_key =
   | Key_get of string
+  | Key_read of string * Clock.Mono.t
   | Key_freshness of Subscriptions.stream_id
 
 let equal_bus_key a b =
   match a, b with
   | Key_get x, Key_get y -> String.equal x y
   | Key_freshness x, Key_freshness y -> Subscriptions.equal_stream_kind x y
-  | Key_get _, Key_freshness _ | Key_freshness _, Key_get _ -> false
+  | Key_read (x, tx), Key_read (y, ty) ->
+      String.equal x y && Clock.Mono.equal tx ty
+  | Key_get _, (Key_freshness _ | Key_read _)
+  | Key_freshness _, (Key_get _ | Key_read _)
+  | Key_read _, (Key_get _ | Key_freshness _) -> false
 
 let stream_kind_tag = function
   | Subscriptions.Stream_observer -> 0
@@ -23,6 +28,7 @@ let stream_kind_tag = function
 
 let hash_bus_key = function
   | Key_get path -> Hashtbl.hash (0, path)
+  | Key_read (path, stamp) -> Hashtbl.hash (2, path, Clock.Mono.to_ns stamp)
   | Key_freshness stream -> Hashtbl.hash (1, stream_kind_tag stream)
 
 type bus = (bus_key, Msg.t, Msg.t) Ui_bus.t
@@ -560,8 +566,36 @@ let board_snapshot_key ~epoch ~path ids =
   let scope = string_of_int (Epoch.to_int epoch) :: ids in
   Key_get (path ^ "#" ^ String.concat "/" (List.map Wire_common.percent_encode scope))
 
+let read_chat_queue t ~keeper ~partial =
+  let endpoint = Atomic.get t.endpoint in
+  (* A move to the end assigns a new sequence between pages. Emit each
+     operation at its last observed position. *)
+  let rows acc =
+    List.fold_left
+      (fun (seen, ordered) (row : Wire_fleet.chat_operation) ->
+         let id = Keeper_chat_operation.Operation_id.to_string row.id in
+         if Fleet_store.String_set.mem id seen then seen, ordered
+         else Fleet_store.String_set.add id seen, row :: ordered)
+      (Fleet_store.String_set.empty, []) acc |> snd
+  in
+  let rec read after acc =
+    let path = Wire_fleet.chat_queue_path ~keeper ~after in
+    let page = match Http_client.get_raw ~io:t.io ~clock:t.clock endpoint ~path with
+      | Error err -> Error (msg_error_of_http err)
+      | Ok raw -> decode_raw_json t ~decode:(Wire_fleet.decode_chat_queue ~after) raw in
+    match page with
+    | Error err -> rows acc, Error err
+    | Ok [] -> rows acc, Ok ()
+    | Ok page ->
+        let acc = List.rev_append page acc in
+        partial (rows acc);
+        read (Some (List.hd acc).sequence) acc
+  in
+  read None []
+
 let execute_get t ~epoch req =
   let path = Cmd.get_request_path req in
+  let requested_at = Clock.Mono.now () in
   let snapshot_key = ref (Key_get path) in
   fork_safe t (fun () ->
       let observed_at = Clock.Mono.now () in
@@ -621,6 +655,26 @@ let execute_get t ~epoch req =
             in
             Msg.Http_reply
               { epoch; reply = Msg.Reply_keeper_turn_records { keeper; result } }
+        | Cmd.Get_chat_queue { keeper } ->
+            snapshot_key := Key_read (path, requested_at);
+            let reply operations result =
+              Msg.Http_reply { epoch; reply = Msg.Reply_chat_queue { keeper; requested_at; operations; result } } in
+            let partial rows = Ui_bus.publish_snapshot t.bus ~key:!snapshot_key (reply rows None) in
+            let rows, result = read_chat_queue t ~keeper ~partial in
+            reply rows (Some result)
+        | Cmd.Get_chat_status { keeper; operation_id } ->
+            (* Preserve each exact observation until the reducer has consumed it.
+               A delayed queued read cannot replace a running or terminal one. *)
+            snapshot_key := Key_read (path, requested_at);
+            let decode json =
+              match Wire_fleet.decode_chat_operation json with
+              | Ok row when String.equal (Keeper_chat_operation.Operation_id.to_string row.id) operation_id -> Ok row
+              | Ok _ -> Error "chat operation returned a different id"
+              | Error _ as err -> err
+            in
+            let result = fetch_and_decode_get t ~path ~decode in
+            let reply = Msg.chat_status_reply ~keeper ~operation_id ~requested_at result in
+            Msg.Http_reply { epoch; reply }
         | Cmd.Get_chat_history { keeper; _ } ->
             let result =
               fetch_and_decode_get t ~path
@@ -1987,15 +2041,15 @@ let execute_put t ~epoch req =
    request from the history. *)
 let chat_reattach_backoff_s = [| 1.0; 2.0; 4.0; 8.0; 15.0 |]
 
-let chat_reattach_delay ~(acceptance : Wire_fleet.accepted_state option)
+let chat_reattach_delay ~(acceptance : Keeper_chat_operation.State_name.t option)
     ~terminal_seen ~reattaches (result : (unit, Msg.http_error) result) =
   match acceptance with
   | None
   | Some
-      ( Wire_fleet.Accepted_succeeded | Wire_fleet.Accepted_failed
-      | Wire_fleet.Accepted_cancelled ) ->
+      ( Keeper_chat_operation.State_name.Succeeded | Keeper_chat_operation.State_name.Failed
+      | Keeper_chat_operation.State_name.Cancelled ) ->
       None
-  | Some (Wire_fleet.Accepted_queued | Wire_fleet.Accepted_running) -> (
+  | Some (Keeper_chat_operation.State_name.Queued | Keeper_chat_operation.State_name.Running) -> (
       if terminal_seen || reattaches >= Array.length chat_reattach_backoff_s
       then None
       else

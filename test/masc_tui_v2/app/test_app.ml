@@ -1042,21 +1042,7 @@ let test_remote_editor_escape_hatch_blocked () =
       Alcotest.fail
         "expected warning toast when Open_external pressed on Target_keeper_create"
 
-let test_board_replies_survive_epoch_change_and_stream_overflow () =
-  let module Q = Board_quarantine in
-  let keeper = "alpha" in
-  let item : Q.inventory_item =
-    { keeper_name = keeper; partition_id = "p"; candidate_id = "candidate/a";
-      quarantine_id = "generation/b"; phase = Q.Inventory_quarantined;
-      failure_category = Q.Exact_lane_exhausted; attempt_provenance = None;
-      quarantined_at = 1.; requested_at = None; requeued_at = None; requested_by = None } in
-  let inventory = Q.inventory_to_json { items = [item]; errors = [] } in
-  let receipt = `Assoc [
-    "schema", `String Q.result_schema; "ok", `Bool true; "keeper_name", `String keeper;
-    "partition_id", `String item.partition_id; "candidate_id", `String item.candidate_id;
-    "quarantine_id", `String item.quarantine_id; "failure_category", `String "exact_lane_exhausted";
-    "decision", `String "acknowledge_and_requeue"; "wake", `String "not_registered";
-    "audit", `Assoc ["recorded", `Bool true]] in
+let with_loopback_executor ?stream_capacity ~respond run =
   Eio_main.run @@ fun env ->
   Eio.Time.with_timeout_exn env#clock 5. @@ fun () ->
   Eio.Switch.run @@ fun sw ->
@@ -1074,26 +1060,47 @@ let test_board_replies_survive_epoch_change_and_stream_overflow () =
           match String.split_on_char ':' (String.lowercase_ascii header) with
           | ["content-length"; n] -> int_of_string_opt (String.trim n) | _ -> None) in
         Option.iter (fun n -> ignore (Eio.Buf_read.take n reader : string)) length;
-        let body = if String.starts_with ~prefix:"POST " request then receipt else inventory in
+        let status, body = match String.split_on_char ' ' request with
+          | [meth; path; _] -> respond ~meth ~path
+          | _ -> Alcotest.failf "unexpected HTTP request %s" request in
         let raw = Yojson.Safe.to_string body in
         Eio.Flow.copy_string (Printf.sprintf
-          "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s"
-          (String.length raw) raw) flow);
+          "HTTP/1.1 %d %s\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s"
+          status (if status = 200 then "OK" else "Unavailable") (String.length raw) raw) flow);
       accept () in
     accept ());
   let cli = match Cli_args.parse ~env:empty_env ~cwd:"/tmp" ["--port"; string_of_int port; "--no-auto-start"] with
     | Cli_args.Run cli -> cli | _ -> Alcotest.fail "expected fixture endpoint" in
   let io = Io_domain.start ~sw ~env in
   let worker = Worker_pool.create ~sw env#domain_mgr in
-  let bus = Cmd_executor.create_bus ~stream_capacity:1 () in
+  let bus = Cmd_executor.create_bus ?stream_capacity () in
   let exec = Cmd_executor.create ~sw ~io ~worker ~clock:env#clock ~cli ~bus ~bearer_token:None
     ~on_quit:ignore ~on_restart:ignore () in
+  Fun.protect ~finally:(fun () -> Cmd_executor.shutdown exec) (fun () -> run env#clock bus exec)
+
+let test_board_replies_survive_epoch_change_and_stream_overflow () =
+  let module Q = Board_quarantine in
+  let keeper = "alpha" in
+  let item : Q.inventory_item =
+    { keeper_name = keeper; partition_id = "p"; candidate_id = "candidate/a";
+      quarantine_id = "generation/b"; phase = Q.Inventory_quarantined;
+      failure_category = Q.Exact_lane_exhausted; attempt_provenance = None;
+      quarantined_at = 1.; requested_at = None; requeued_at = None; requested_by = None } in
+  let inventory = Q.inventory_to_json { items = [item]; errors = [] } in
+  let receipt = `Assoc [
+    "schema", `String Q.result_schema; "ok", `Bool true; "keeper_name", `String keeper;
+    "partition_id", `String item.partition_id; "candidate_id", `String item.candidate_id;
+    "quarantine_id", `String item.quarantine_id; "failure_category", `String "exact_lane_exhausted";
+    "decision", `String "acknowledge_and_requeue"; "wake", `String "not_registered";
+    "audit", `Assoc ["recorded", `Bool true]] in
+  let respond ~meth ~path:_ = 200, (if meth = "POST" then receipt else inventory) in
+  with_loopback_executor ~stream_capacity:1 ~respond @@ fun clock bus exec ->
   let dispatch count cmd =
     Cmd_executor.execute exec cmd;
     let rec wait () =
       let s = Ui_bus.stats bus in
       if s.queued_snapshots + s.total_coalesced_snapshots + s.queued_stream_events < count then
-        (Eio.Time.sleep env#clock 0.001; wait ()) in
+        (Eio.Time.sleep clock 0.001; wait ()) in
     wait () in
   let old = Epoch.initial and current = Epoch.next Epoch.initial in
   let read epoch = Cmd.Http_get { epoch; req = Cmd.Get_board_quarantines { keeper; generation = 1 } } in
@@ -1113,8 +1120,86 @@ let test_board_replies_survive_epoch_change_and_stream_overflow () =
     (List.exists (function Ui_bus.Snapshot (_, Msg.Http_reply { epoch; reply = Msg.Reply_board_recovery
       { item = actual; result = Ok { wake = Q.Not_registered; audit = Q.Recorded } } }) ->
         Epoch.equal epoch current && Q.same_candidate actual item | _ -> false) messages);
-  Alcotest.(check int) "one stream event was evicted" 1 (Ui_bus.stats bus).total_dropped_stream_events;
-  Cmd_executor.shutdown exec
+  Alcotest.(check int) "one stream event was evicted" 1 (Ui_bus.stats bus).total_dropped_stream_events
+
+let test_queue_drawer_walks_all_http_pages () =
+  let alpha = "alpha" and beta = "beta" in
+  let start keeper = "/api/v1/keepers/" ^ keeper ^ "/chat/operations?state=queued" in
+  let after keeper sequence = start keeper ^ "&after_sequence=" ^ string_of_int sequence in
+  let operation prefix number sequence =
+    `Assoc ["operation_id", `String (Printf.sprintf "%s-%d" prefix number);
+            "sequence", `String (string_of_int sequence); "state", `String "Queued";
+            "input", `Assoc ["message", `String "queued input"]] in
+  let page rows =
+    `Assoc ["schema", `String "masc.keeper_chat_operations.list.v1"; "state", `String "Queued";
+            "operations", `List rows] in
+  let first_page = List.init 100 (fun n -> operation alpha (n + 1) (n + 1)) in
+  (* Operation 2 moves to the tail after the first page was read. *)
+  let next_page = [operation alpha 101 101; operation alpha 102 102; operation alpha 103 103;
+                   operation alpha 2 104] in
+  let expected_first = List.init 100 (fun i -> Printf.sprintf "alpha-%d" (i + 1)) in
+  let expected_all =
+    List.filter ((<>) "alpha-2") expected_first @ ["alpha-101"; "alpha-102"; "alpha-103"; "alpha-2"] in
+  let seen = ref [] and alpha_reads = ref 0 in
+  let held, hold = Eio.Promise.create () and release, resume = Eio.Promise.create () in
+  let respond ~meth ~path =
+    if meth <> "GET" then Alcotest.failf "unexpected HTTP method %s" meth;
+    seen := path :: !seen;
+    if path = start alpha then (incr alpha_reads; 200, page first_page)
+    else if path = after alpha 100 then
+      (match !alpha_reads with
+       | 1 -> 503, `Assoc []
+       | 2 -> Eio.Promise.resolve hold (); Eio.Promise.await release; 503, `Assoc []
+       | _ -> 200, page next_page)
+    else if path = after alpha 104 then 200, page []
+    else if path = start beta then 200, page [operation beta 1 1]
+    else if path = after beta 1 then 200, page []
+    else Alcotest.failf "unexpected queue path %s" path in
+  with_loopback_executor ~respond @@ fun clock bus exec ->
+  let model = ref (Model.initial ()) in
+  let dispatch keeper action =
+    let m = { !model with drafts = Drafts.set_active_keeper keeper !model.drafts } in
+    let next, cmds = Update.execute_action ~now:(Clock.Mono.now ()) m action in
+    model := next;
+    match List.filter (function Cmd.Http_get { req = Cmd.Get_chat_queue { keeper = k }; _ } ->
+               String.equal k keeper | _ -> false) (Cmd.flatten cmds) with
+    | [cmd] -> Cmd_executor.execute exec cmd
+    | _ -> Alcotest.fail "expected the drawer to issue one queue read" in
+  let rec await_reply keeper accept =
+    let found = List.fold_left (fun found -> function
+      | Ui_bus.Snapshot (_, (Msg.Http_reply { reply = Msg.Reply_chat_queue r; _ } as msg)) ->
+          let next, _ = Update.step ~now:(Clock.Mono.now ()) !model msg in
+          model := next; (String.equal keeper r.keeper && accept r.result) || found
+      | _ -> found) false (Ui_bus.drain bus) in
+    if not found then (Eio.Time.sleep clock 0.001; await_reply keeper accept) in
+  let queue keeper = fst (Model.drawer_queue ~keeper !model) in
+  let ids keeper = List.map (fun (row : Masc_tui_protocol.Wire_fleet.chat_operation) ->
+      Keeper_chat_operation.Operation_id.to_string row.id) (queue keeper).operations in
+  let complete = function Some (Ok ()) -> true | _ -> false in
+  let failed = function Some (Error (Msg.Http_error {status=503; _})) -> true | _ -> false in
+  dispatch alpha Masc_tui_keymap.Keymap.Open_queue_context;
+  await_reply alpha failed;
+  Alcotest.(check (list string)) "a second-page error retains every first-page id" expected_first (ids alpha);
+  Alcotest.(check bool) "the partial inventory remains explicitly failed" true
+    (match (queue alpha).read with Observed.Failed { retryable = true; _ } -> true | _ -> false);
+  dispatch alpha Masc_tui_keymap.Keymap.Refresh;
+  Eio.Promise.await held;
+  await_reply alpha Option.is_none;
+  dispatch beta Masc_tui_keymap.Keymap.Refresh;
+  await_reply beta complete;
+  Alcotest.(check (list string)) "another Keeper receives its own inventory" ["beta-1"] (ids beta);
+  dispatch alpha Masc_tui_keymap.Keymap.Refresh;
+  await_reply alpha complete;
+  Alcotest.(check (list string)) "all 103 durable ids include the operation moved across pages once"
+    expected_all (ids alpha);
+  Eio.Promise.resolve resume ();
+  await_reply alpha failed;
+  Alcotest.(check bool) "an older deferred failure leaves the newer complete read intact" true
+    (Observed.to_option (queue alpha).read = Some () && ids alpha = expected_all);
+  Alcotest.(check (list string)) "refreshing alpha preserves beta" ["beta-1"] (ids beta);
+  Alcotest.(check (list string)) "the actual HTTP requests advance by returned sequence and refresh from the beginning"
+    [start alpha; after alpha 100; start alpha; after alpha 100; start beta; after beta 1;
+     start alpha; after alpha 100; after alpha 104] (List.rev !seen)
 
 let test_bus_key_hash_and_stream_frames () =
   (* P1-1: equal Stream_logs keys with differing since_seq MUST hash identically
@@ -1747,7 +1832,7 @@ let test_p2_voice_runner_ffmpeg_and_mouse_capture () =
    running is posted again with its last journal seq, and only to the server
    instance that accepted it; anything else ends the submit. *)
 let test_chat_reattach_decision () =
-  let delay ?(acceptance = Some Masc_tui_protocol.Wire_fleet.Accepted_running)
+  let delay ?(acceptance = Some Keeper_chat_operation.State_name.Running)
       ?(terminal_seen = false) ?(reattaches = 0) result =
     Cmd_executor.chat_reattach_delay ~acceptance ~terminal_seen ~reattaches
       result
@@ -1766,15 +1851,15 @@ let test_chat_reattach_decision () =
   Alcotest.(check (option (float 0.0))) "a failure before acceptance is the submit's error"
     None (delay ~acceptance:None dropped);
   Alcotest.(check (option (float 0.0))) "a queued operation reattaches" (Some 1.0)
-    (delay ~acceptance:(Some Masc_tui_protocol.Wire_fleet.Accepted_queued) dropped);
+    (delay ~acceptance:(Some Keeper_chat_operation.State_name.Queued) dropped);
   Alcotest.(check (option (float 0.0)))
     "a close after an acceptance that reports the operation succeeded is final"
     None
-    (delay ~acceptance:(Some Masc_tui_protocol.Wire_fleet.Accepted_succeeded) (Ok ()));
+    (delay ~acceptance:(Some Keeper_chat_operation.State_name.Succeeded) (Ok ()));
   Alcotest.(check (option (float 0.0)))
     "a close after an acceptance that reports the operation cancelled is final"
     None
-    (delay ~acceptance:(Some Masc_tui_protocol.Wire_fleet.Accepted_cancelled) (Ok ()));
+    (delay ~acceptance:(Some Keeper_chat_operation.State_name.Cancelled) (Ok ()));
   Alcotest.(check (option (float 0.0))) "a terminal frame ends the stream" None
     (delay ~terminal_seen:true (Ok ()));
   Alcotest.(check (option (float 0.0))) "a 4xx is final" None
@@ -2477,6 +2562,8 @@ let () =
             `Quick test_bus_key_hash_and_stream_frames;
           Alcotest.test_case "Board inventory and receipts survive workspace changes and stream bursts"
             `Quick test_board_replies_survive_epoch_change_and_stream_overflow;
+          Alcotest.test_case "queue drawer follows HTTP keysets across overlapping refreshes"
+            `Quick test_queue_drawer_walks_all_http_pages;
           Alcotest.test_case "setup login stream propagates non-terminal error & delivers terminal receipt once"
             `Quick test_setup_login_stream_error_and_single_delivery;
           Alcotest.test_case "chat stream reattach decision" `Quick

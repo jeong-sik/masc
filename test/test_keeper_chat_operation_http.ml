@@ -1025,6 +1025,19 @@ let assert_private_error_absent body =
 ;;
 
 let test_owner_error_has_safe_public_response () =
+  let keeper_name = "alpha" in
+  let operation_id = Result.get_ok (Keeper_owner.Chat_operation.Operation_id.of_string "request_1") in
+  let scope = { Keeper_chat_operation_read.keeper_name; operation_id } in
+  let status, body = Api.For_testing.absent_operation_response ~keeper_name operation_id in
+  check bool "a successful exact lookup reports its scoped absence"
+    true (status = `Not_found && Keeper_chat_operation_read.confirms_absence scope body);
+  List.iter (fun cause ->
+      let status, body = Api.For_testing.command_error_response
+          (Keeper_owner_registry.Command_lookup_failed cause) in
+      check bool "an unavailable lookup keeps its old 404 and provides no absence proof"
+        true (status = `Not_found && not (Keeper_chat_operation_read.confirms_absence scope body)))
+    [ Keeper_owner_registry.Owner_not_found keeper_name; Owner_unavailable keeper_name;
+      Inventory_not_installed "/private/example" ];
   let detail = "orchid river seventy nine at /private/example/.masc/keepers/alpha" in
   let cause = Keeper_owner_registry.Command_rejected (Keeper_owner.Store_unavailable detail) in
   let status,body = Api.For_testing.command_error_response cause in

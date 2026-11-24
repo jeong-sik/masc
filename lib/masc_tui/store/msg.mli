@@ -53,6 +53,19 @@ type http_reply =
       keeper : string;
       result : (Wire_fleet.chat_history_page, http_error) result;
     }
+  | Reply_chat_queue of {
+      keeper : string;
+      requested_at : Clock.Mono.t;
+      operations : Wire_fleet.chat_operation list;
+      result : (unit, http_error) result option;
+    }
+  | Reply_chat_absence of { keeper : string; operation_id : string; requested_at : Clock.Mono.t }
+  | Reply_chat_status of {
+      keeper : string;
+      operation_id : string;
+      requested_at : Clock.Mono.t;
+      result : (Wire_fleet.chat_operation, http_error) result;
+    }
   | Reply_chat_operation_events of {
       keeper : string;
       operation_id : string;
@@ -428,6 +441,10 @@ type http_reply =
       connector : string;
       result : (Wire_runtime.connector_names_page, http_error) result;
     }
+
+val chat_status_reply :
+  keeper:string -> operation_id:string -> requested_at:Clock.Mono.t ->
+  (Wire_fleet.chat_operation, http_error) result -> http_reply
 
 type sse_event =
   | Sse_observer_handshake of Wire_observer.handshake_result

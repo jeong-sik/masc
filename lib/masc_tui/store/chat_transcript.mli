@@ -34,10 +34,7 @@ val markdown_body_lines :
 
 val stream_reply_already_persisted :
   Wire_fleet.chat_message list -> Fleet_store.chat_stream_buffer -> bool
-(** True when a finished or errored stream buffer is already durably represented
-    in persisted chat history (by exact [operation_id] against [Role_assistant]
-    terminal result or [Role_request_failure], by exact [turn_ref], or by legacy
-    trimmed-text match strictly excluding [buf.prior_msg_ids]). *)
+(** Whether the operation's durable terminal transcript row has arrived. *)
 
 type live_chat_phase =
   | Phase_idle
@@ -79,7 +76,7 @@ type stream_projection = {
 
 type pending_tx_projection = {
   tx : Drafts.pending_message;
-  error_only : bool;
+  notice_only : bool;
 }
 
 type transcript_section =

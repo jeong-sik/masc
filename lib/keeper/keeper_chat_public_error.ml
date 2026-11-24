@@ -11,7 +11,7 @@ let all = all_of_kind
 
 let code = function
   | Invalid_input -> "invalid_input"
-  | Unknown_operation -> "unknown_operation"
+  | Unknown_operation -> Keeper_chat_operation_read.unknown_operation_code
   | Not_queued -> "not_queued"
   | Idempotency_conflict -> "idempotency_conflict"
   | Native_call_unsettled -> "native_call_unsettled"

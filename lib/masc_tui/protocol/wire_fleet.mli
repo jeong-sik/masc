@@ -485,8 +485,7 @@ type chat_message = {
   tool_call_id : string option;
   tool_call_name : string option;
   execution_id : string option;
-  operation_id : string option;
-  transcript_slot : string option;
+  provenance : Keeper_chat_delivery_identity.delivery_provenance option;
   failure_kind : string option;
 }
 
@@ -496,12 +495,26 @@ type chat_history_page = {
   next_cursor : string option;
 }
 
-type accepted_state =
-  | Accepted_queued
-  | Accepted_running
-  | Accepted_succeeded
-  | Accepted_failed
-  | Accepted_cancelled
+type chat_operation = {
+  id : Keeper_chat_operation.Operation_id.t;
+  sequence : int64;
+  state : Keeper_chat_operation.State_name.t;
+  message : string option;
+  failure_detail : string option;
+}
+
+val chat_queue_path : keeper:string -> after:int64 option -> string
+val chat_operation_path : keeper:string -> operation_id:string -> string
+val is_absent_operation_error : keeper:string -> operation_id:string -> status:int -> body:string -> bool
+(** Only a scoped 404 from a successful exact owner lookup carries this evidence. *)
+
+val decode_chat_operation : Yojson.Safe.t -> (chat_operation, string) result
+val decode_chat_queue :
+  after:int64 option -> Yojson.Safe.t -> (chat_operation list, string) result
+
+val accepted_input_operation : chat_message -> string option
+val terminal_operation : chat_message -> string option
+(** Operation identity from the persisted delivery key, slot and row role. *)
 
 type interactive_outcome =
   | Interactive_applied
@@ -520,7 +533,7 @@ type chat_stream_chunk =
   | Chunk_accepted of {
       operation_id : string;
       queued_count : int;
-      state : accepted_state;
+      state : Keeper_chat_operation.State_name.t;
       interactive_outcome : interactive_outcome option;
       control_token : string option;
     }

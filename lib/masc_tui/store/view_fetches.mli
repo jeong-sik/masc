@@ -11,6 +11,9 @@ val overlay_fetches : Model.t -> Cmd.t list
     workspace or dive, so a reply that leaves its slots stale asks for these
     wherever the overlay is. *)
 
+val chat_status_fetches : keeper:string -> Model.t -> Cmd.t list
+(** Detached nonterminal requests are reconciled by their own operation ids. *)
+
 val cut_reply_fetches : keeper:string -> Model.t -> Cmd.t list
 (** The journal pages [keeper]'s cut replies wait for, when that keeper's Chat
     transcript is on screen. The Chat tab's fetch list can only name the

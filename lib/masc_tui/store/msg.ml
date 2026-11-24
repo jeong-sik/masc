@@ -97,6 +97,19 @@ type http_reply =
       keeper : string;
       result : (Wire_fleet.chat_history_page, http_error) result;
     }
+  | Reply_chat_queue of {
+      keeper : string;
+      requested_at : Clock.Mono.t;
+      operations : Wire_fleet.chat_operation list;
+      result : (unit, http_error) result option;
+    }
+  | Reply_chat_absence of { keeper : string; operation_id : string; requested_at : Clock.Mono.t }
+  | Reply_chat_status of {
+      keeper : string;
+      operation_id : string;
+      requested_at : Clock.Mono.t;
+      result : (Wire_fleet.chat_operation, http_error) result;
+    }
   | Reply_chat_operation_events of {
       keeper : string;
       operation_id : string;
@@ -465,6 +478,14 @@ type http_reply =
       connector : string;
       result : (Wire_runtime.connector_names_page, http_error) result;
     }
+
+let chat_status_reply ~keeper ~operation_id ~requested_at result =
+  match result with
+  | Error (Http_error { status; body; _ })
+    when Wire_fleet.is_absent_operation_error ~keeper ~operation_id ~status ~body ->
+      Reply_chat_absence { keeper; operation_id; requested_at }
+  | Ok _ | Error (Http_error _ | Transport _ | Decode_error _ | Workspace_mismatch _) ->
+      Reply_chat_status { keeper; operation_id; requested_at; result }
 
 type sse_event =
   | Sse_observer_handshake of Wire_observer.handshake_result

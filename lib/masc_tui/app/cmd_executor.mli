@@ -13,6 +13,7 @@ open Masc_tui_store
 
 type bus_key =
   | Key_get of string
+  | Key_read of string * Clock.Mono.t
   | Key_freshness of Subscriptions.stream_id
 
 val equal_bus_key : bus_key -> bus_key -> bool
@@ -88,7 +89,7 @@ val fetch_planning_with_tasks :
     [Transport]) instead of silently returning an empty task list. *)
 
 val chat_reattach_delay :
-  acceptance:Masc_tui_protocol.Wire_fleet.accepted_state option ->
+  acceptance:Keeper_chat_operation.State_name.t option ->
   terminal_seen:bool ->
   reattaches:int ->
   (unit, Msg.http_error) result ->

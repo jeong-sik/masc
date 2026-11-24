@@ -1356,8 +1356,7 @@ type chat_message = {
   tool_call_id : string option;
   tool_call_name : string option;
   execution_id : string option;
-  operation_id : string option;
-  transcript_slot : string option;
+  provenance : Keeper_chat_delivery_identity.delivery_provenance option;
   failure_kind : string option;
 }
 
@@ -1367,12 +1366,13 @@ type chat_history_page = {
   next_cursor : string option;
 }
 
-type accepted_state =
-  | Accepted_queued
-  | Accepted_running
-  | Accepted_succeeded
-  | Accepted_failed
-  | Accepted_cancelled
+type chat_operation = {
+  id : Keeper_chat_operation.Operation_id.t;
+  sequence : int64;
+  state : Keeper_chat_operation.State_name.t;
+  message : string option;
+  failure_detail : string option;
+}
 
 type interactive_outcome =
   | Interactive_applied
@@ -1391,7 +1391,7 @@ type chat_stream_chunk =
   | Chunk_accepted of {
       operation_id : string;
       queued_count : int;
-      state : accepted_state;
+      state : Keeper_chat_operation.State_name.t;
       interactive_outcome : interactive_outcome option;
       control_token : string option;
     }
@@ -1584,19 +1584,10 @@ let decode_chat_message json =
   let* tool_call_id = optional_nonblank_string json "tool_call_id" in
   let* tool_call_name = optional_nonblank_string json "tool_call_name" in
   let* execution_id = optional_nonblank_string json "execution_id" in
-  let* delivery_key_opt = optional_object_field json "delivery_key" in
-  let* dk_op_id =
-    match delivery_key_opt with
-    | Some dk -> optional_nonblank_string dk "operation_id"
-    | None -> Ok None
-  in
-  let* top_op_id = optional_nonblank_string json "operation_id" in
-  let operation_id = match dk_op_id with Some _ as x -> x | None -> top_op_id in
-  let* slot_opt = optional_object_field json "transcript_slot" in
-  let* transcript_slot =
-    match slot_opt with
-    | Some sl -> optional_nonblank_string sl "kind"
-    | None -> Ok None
+  let* provenance =
+    match json with
+    | `Assoc fields -> Keeper_chat_delivery_identity.delivery_provenance_of_fields fields
+    | value -> field_type_error "chat message" "an object" value
   in
   let* failure_kind = optional_nonblank_string json "failure_kind" in
   Ok
@@ -1610,8 +1601,7 @@ let decode_chat_message json =
       tool_call_id;
       tool_call_name;
       execution_id;
-      operation_id;
-      transcript_slot;
+      provenance;
       failure_kind;
     }
 
@@ -1627,14 +1617,90 @@ let decode_chat_history_page json =
   let* next_cursor = optional_nonblank_string body "next_cursor" in
   Ok { messages; has_more; next_cursor }
 
-let accepted_state_of_string raw =
-  match String.lowercase_ascii (String.trim raw) with
-  | "queued" -> Some Accepted_queued
-  | "running" | "accepted" -> Some Accepted_running
-  | "succeeded" -> Some Accepted_succeeded
-  | "failed" -> Some Accepted_failed
-  | "cancelled" -> Some Accepted_cancelled
-  | _ -> None
+let operation_slot (row : chat_message) =
+  let open Keeper_chat_delivery_identity in
+  match row.provenance with
+  | Some { delivery_key = Operation id; transcript_slot } ->
+      Some (Request_id.to_string id, transcript_slot)
+  | Some { delivery_key = (Operation_checkpoint _ | Operation_native _ | Fusion_run _
+                         | Workspace_message _ | Connector_message _ | Approval_lifecycle _
+                         | Autonomous_turn _); _ } | None -> None
+
+let accepted_input_operation row =
+  match operation_slot row with
+  | Some (id, slot) when row.role = Role_user &&
+      Keeper_chat_delivery_identity.transcript_slot_equal slot Accepted_user -> Some id
+  | None | Some _ -> None
+
+let terminal_operation row =
+  let open Keeper_chat_delivery_identity in
+  match operation_slot row with
+  | Some (id, slot) when
+      ((row.role = Role_assistant || row.role = Role_request_failure)
+         && transcript_slot_equal slot Terminal_result) ||
+      (row.role = Role_request_failure && transcript_slot_equal slot Settled_failure) ->
+      Some id
+  | None | Some _ -> None
+
+let chat_operations_path ~keeper =
+  Printf.sprintf "/api/v1/keepers/%s/chat/operations" (percent_encode keeper)
+
+let chat_queue_path ~keeper ~after =
+  chat_operations_path ~keeper ^ "?state=queued" ^
+  (match after with None -> "" | Some seq -> "&after_sequence=" ^ Int64.to_string seq)
+
+let chat_operation_path ~keeper ~operation_id =
+  chat_operations_path ~keeper ^ "/" ^ percent_encode operation_id
+
+let operation_state json =
+  let* raw = required_string_field json "state" in
+  Keeper_chat_operation.State_name.of_wire raw
+
+let is_absent_operation_error ~keeper ~operation_id ~status ~body =
+  if status <> 404 then false
+  else match Keeper_chat_operation.Operation_id.of_string operation_id with
+    | Error _ -> false
+    | Ok operation_id ->
+        (match Yojson.Safe.from_string body with
+         | json -> Keeper_chat_operation_read.confirms_absence { keeper_name = keeper; operation_id } json
+         | exception Yojson.Json_error _ -> false)
+
+let decode_chat_operation json =
+  let* raw_id = required_string_field json "operation_id" in
+  let* id = Keeper_chat_operation.Operation_id.of_string raw_id in
+  let* raw = required_string_field json "sequence" in
+  let* sequence =
+    match Int64.of_string_opt raw with
+    | Some seq when seq >= 0L -> Ok seq
+    | Some _ | None -> Error "invalid chat operation sequence"
+  in
+  let* state = operation_state json in
+  let* input = optional_object_field json "input" in
+  let* message = match input with
+    | Some value -> optional_string_field value "message"
+    | None -> Ok None
+  in
+  let* failure_detail =
+    match state with
+    | Keeper_chat_operation.State_name.Failed ->
+        Result.map Option.some (required_nonblank_string json "failure_detail")
+    | Queued | Running | Succeeded | Cancelled -> Ok None
+  in
+  Ok { id; sequence; state; message; failure_detail }
+
+let decode_chat_queue ~after json =
+  let* state = operation_state json in
+  let* rows = required_list_field json "operations" in
+  let* rows = decode_list "queued operations" decode_chat_operation rows in
+  let rec valid_page after = function
+    | [] -> true
+    | row :: rest ->
+        row.state = Keeper_chat_operation.State_name.Queued
+        && Option.fold ~none:true ~some:(fun prev -> row.sequence > prev) after
+        && valid_page (Some row.sequence) rest
+  in
+  if state = Keeper_chat_operation.State_name.Queued && valid_page after rows then Ok rows
+  else Error "invalid queued operations page"
 
 let interactive_outcome_of_string raw =
   match String.lowercase_ascii (String.trim raw) with
@@ -1706,7 +1772,7 @@ let decode_custom_chat_chunk json =
       let* value = required_object_field json "value" in
       let* operation_id = required_nonblank_string value "operation_id" in
       let* queued_count = required_nonnegative_int_field value "queued_count" in
-      let* state = decode_enum ~field:"state" accepted_state_of_string value in
+      let* state = operation_state value in
       let* interactive_opt = optional_object_field value "interactive" in
       let* interactive_outcome, control_token =
         match interactive_opt with
@@ -1822,7 +1888,7 @@ let decode_chat_stream_chunk json =
   | "accepted" ->
       let* operation_id = required_nonblank_string json "operation_id" in
       let* queued_count = required_nonnegative_int_field json "queued_count" in
-      let* state = decode_enum ~field:"state" accepted_state_of_string json in
+      let* state = operation_state json in
       Ok
         (Chunk_accepted
            {

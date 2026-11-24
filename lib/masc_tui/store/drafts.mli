@@ -19,6 +19,7 @@ type tx_state =
   | Sending
   | Pending_processing
   | Confirming_delivery
+  | No_operation_record
   | Interrupting
   | Delivered
   | Failed_retryable of { reason : string }
@@ -29,17 +30,12 @@ type pending_message = {
   body : string;
   mode : delivery_mode;
   operation_id : string option;
-  prior_user_msg_ids : string list;
-  user_persisted : bool;
   state : tx_state;
   created_at : Clock.Mono.t;
   updated_at : Clock.Mono.t;
-  recheck_count : int;
 }
-(** Tracks exact identity [(request_id, keeper, body)] without normalizing or
-    hashing message content, alongside pre-existing persisted user message IDs
-    at send time and [user_persisted] reconciliation state so persisted user
-    rows are never duplicated in the transcript. *)
+(** Session-owned transmission. The operation id from acceptance identifies
+    it on the server. Visible history rows own their own delivery evidence. *)
 
 type keeper_draft = {
   text : string;
@@ -100,6 +96,7 @@ val empty : t
 
 val equal_delivery_mode : delivery_mode -> delivery_mode -> bool
 val equal_tx_state : tx_state -> tx_state -> bool
+val absence_notice : pending_message -> Say.t
 val tx_state_label : tx_state -> Say.t option
 
 val target_keeper_key : t -> string
@@ -138,7 +135,6 @@ val enqueue_submission :
   now:Clock.Mono.t ->
   keeper:string ->
   mode:delivery_mode ->
-  ?prior_user_msg_ids:string list ->
   t ->
   (t * pending_message) option
 (** Atomically consume the non-blank draft for [keeper] and create a
@@ -153,8 +149,8 @@ val mark_queued :
   operation_id:string option ->
   t ->
   t
-(** Transition a submission to {!Queued} when server acceptance reports the
-    operation queued behind an active turn. *)
+(** Record a queued receipt for a submission awaiting acceptance or confirmation.
+    Later queued receipts preserve an observed start, interrupt or terminal state. *)
 
 val mark_accepted :
   now:Clock.Mono.t ->
@@ -163,6 +159,11 @@ val mark_accepted :
   t ->
   t
 (** Transition a submission to {!Pending_processing} on server acceptance/run. *)
+
+val mark_operation_absent :
+  now:Clock.Mono.t -> requested_at:Clock.Mono.t -> keeper:string -> operation_id:string -> t -> t
+(** Retain a scoped absence observation for a nonterminal send. A receipt
+    started before newer local acceptance cannot displace it. *)
 
 val mark_confirming : now:Clock.Mono.t -> request_id:string -> t -> t
 (** Transition a submission to {!Confirming_delivery} while awaiting persisted
@@ -175,12 +176,6 @@ val mark_interrupting : now:Clock.Mono.t -> request_id:string -> t -> t
 val clear_interrupting : now:Clock.Mono.t -> request_id:string -> t -> t
 (** Restore an {!Interrupting} submission back to {!Pending_processing} when an
     interrupt request fails or reports no cancellation. *)
-
-val mark_user_persisted :
-  request_id:string -> ?operation_id:string option -> t -> t
-(** Record that the user prompt row is already durably persisted in chat history
-    so transcript rendering does not duplicate the user prompt while the turn
-    remains in flight or failed without a persisted server failure row. *)
 
 val downgrade_mode_to_follow_up : request_id:string -> t -> t
 (** Downgrade a [Mode_steer] submission to [Mode_follow_up] when server
@@ -203,9 +198,8 @@ val remove_tx : request_id:string -> t -> t
 (** Remove a settled transmission entry (e.g. once both user prompt and
     [Role_request_failure] are durably persisted in history). *)
 
-val dismiss_failed_for_keeper : keeper:string -> t -> t * int
-(** Dismiss all [Failed_retryable] entries for [keeper], returning the updated
-    store and count of dismissed entries. *)
+val dismiss_notices_for_keeper : keeper:string -> t -> t * int
+(** Dismiss failure and absent-status notices for the Keeper and return their count. *)
 
 val active_tx_for_keeper : keeper:string -> t -> pending_message option
 (** Return the oldest executing transmission for [keeper] prioritized by

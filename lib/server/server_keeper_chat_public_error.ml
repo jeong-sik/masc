@@ -45,13 +45,9 @@ let make ~incident_id kind =
   }
 ;;
 
-let to_json error =
-  `Assoc
-    [ "schema", `String "masc.keeper_chat_operation.error.v1"
-    ; "error", `String error.code
-    ; "message", `String error.message
-    ; "incident_id", `String error.incident_id
-    ]
+let to_json ?absence error =
+  Keeper_chat_operation_read.public_error_json ?absence ~code:error.code ~message:error.message
+    ~incident_id:error.incident_id ()
 ;;
 
 let failure_fields error =

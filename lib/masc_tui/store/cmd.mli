@@ -18,6 +18,8 @@ type get_request =
       limit : int option;
       cursor : string option;
     }
+  | Get_chat_queue of { keeper : string }
+  | Get_chat_status of { keeper : string; operation_id : string }
   | Get_chat_operation_events of {
       keeper : string;
       operation_id : string;

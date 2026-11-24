@@ -41,13 +41,17 @@ type active_tool_call = {
   output_preview : string option;
 }
 
+type chat_queue = {
+  operations : Wire_fleet.chat_operation list;
+  read : unit Observed.t;
+}
+
 type chat_stream_buffer = {
   request_id : string;
   operation_id : string option;
   turn_ref : string option;
   run_started : bool;
   interrupting : bool;
-  prior_msg_ids : String_set.t;
   text : string;
   text_ownership : Cut_reply.ownership;
   thinking : string;
@@ -85,6 +89,7 @@ type t = {
   selected_collapsed_company : string option;
   collapsed_companies : String_set.t;
   chat_histories : Wire_fleet.chat_history_page Observed.t String_map.t;
+  chat_queues : chat_queue String_map.t;
   chat_streams : chat_stream_buffer String_map.t;
   cut_replies : Cut_reply.t Observed.t Operation_map.t;
       (** The reply text each cut operation's journal holds, read for its
@@ -236,7 +241,7 @@ val apply_chat_stream_chunk :
     late chunks/errors from a different [request_id] are dropped unless
     [allow_takeover = true] and either the prior buffer is inactive or the chunk
     signals explicit execution start ([Chunk_run_started] /
-    [Chunk_accepted { state = Accepted_running }]). *)
+    [Chunk_accepted { state = Running }]). *)
 
 val mark_chat_stream_interrupting :
   keeper:string -> request_id:string -> interrupting:bool -> t -> t
@@ -276,6 +281,10 @@ val set_filter : string -> t -> t
 val mark_stale_all : t -> t
 val mark_keepers_stale : t -> t
 (** Also marks every keeper's [turn_records] stale. *)
+
+val chat_queue_for : keeper:string -> t -> chat_queue
+val set_chat_queue :
+  keeper:string -> chat_queue -> t -> t
 
 val turn_records_for :
   keeper:string -> t -> Wire_fleet.keeper_turn_records Observed.t

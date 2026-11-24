@@ -142,6 +142,22 @@ let fetches_for_keeper_context ~force ~name (m : Model.t) =
                 turn_ref = Some turn_ref;
               })
 
+let chat_status_fetches ~keeper (m : Model.t) =
+  let has_stream request_id =
+    match Fleet_store.String_map.find_opt keeper m.fleet.chat_streams with
+    | Some stream -> stream.active && String.equal stream.request_id request_id
+    | None -> false
+  in
+  Drafts.pending_txs_for_keeper ~keeper m.drafts
+  |> List.filter_map (fun (tx : Drafts.pending_message) ->
+       match tx.state with
+       | Drafts.Delivered | Drafts.No_operation_record | Drafts.Failed_retryable _ -> None
+       | Drafts.Sending | Drafts.Queued | Drafts.Pending_processing | Drafts.Interrupting
+       | Drafts.Confirming_delivery ->
+           if has_stream tx.request_id then None
+           else Some (Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_chat_status {
+               keeper; operation_id = Option.value tx.operation_id ~default:tx.request_id } }))
+
 let fetches_for_overlay ~force (m : Model.t) =
   match m.nav.overlay with
   | Some (Nav.Settings _) ->
@@ -173,6 +189,14 @@ let fetches_for_overlay ~force (m : Model.t) =
         | None -> []
       in
       drawer_reqs @ ctx_reqs
+  | Some (Nav.Queue_context Nav.Drawer_queue) ->
+      (match Model.target_keeper m with
+       | None -> []
+       | Some keeper ->
+           let read = (Fleet_store.chat_queue_for ~keeper m.fleet).read in
+           if needs_fetch ~force read && (force || not (Observed.is_loading read)) then
+             [ Cmd.Get_chat_queue { keeper } ]
+           else [])
   | Some (Nav.Queue_context Nav.Drawer_schedules) ->
       if needs_fetch ~force m.work.schedules then
         [ Cmd.Get_schedules { cursor = None } ]
@@ -180,7 +204,6 @@ let fetches_for_overlay ~force (m : Model.t) =
   | Some
       ( Nav.Palette
       | Nav.Incidents
-      | Nav.Queue_context Nav.Drawer_queue
       | Nav.Inline_action _
       | Nav.Ask_answer
       | Nav.Help

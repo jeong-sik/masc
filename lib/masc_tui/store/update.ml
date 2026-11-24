@@ -192,7 +192,12 @@ let apply_server_health ~now (m : Model.t)
       let sync_cmd =
         Cmd.Sync_streams { epoch = next.epoch; streams = Subscriptions.plan next }
       in
-      let boot_cmds = View_fetches.bootstrap_fetches next in
+      let detached = next.drafts.pending_txs
+          |> List.filter_map (fun (tx : Drafts.pending_message) ->
+               if tx.state = Drafts.Confirming_delivery then Some tx.keeper else None)
+          |> List.sort_uniq String.compare
+          |> List.concat_map (fun keeper -> View_fetches.chat_status_fetches ~keeper next) in
+      let boot_cmds = View_fetches.bootstrap_fetches next @ detached in
       (next, (guard_cmd :: sync_cmd :: boot_cmds))
   | Error (Msg.Workspace_mismatch { expected_instance; observed_instance; message; _ }) ->
       Update_http.handle_workspace_mismatch ~now ~expected:expected_instance
@@ -275,8 +280,7 @@ let step_raw ~now (m : Model.t) = function
   | Msg.Resize { cols; rows } -> apply_resize ~now m ~cols ~rows
   | Msg.Tick { wall_unix } ->
       (* Zero idle HTTP polling: ticks only record wall time, expire toasts,
-         update voice recording elapsed seconds, and advance bounded rechecks
-         for already-closed Confirming_delivery transmissions. *)
+         and update voice recording elapsed seconds. *)
       let wall_advanced =
         Float.is_finite wall_unix && wall_unix > m.freshness.last_wall_unix
       in
@@ -286,64 +290,14 @@ let step_raw ~now (m : Model.t) = function
           , Fleet_store.set_wall_unix wall_unix m.fleet )
         else (m.freshness, m.fleet)
       in
-      let drafts0 = Drafts.voice_tick_elapsed ~now m.drafts in
-      let drafts, keepers_to_recheck =
-        List.fold_left
-          (fun (acc, keepers) (tx : Drafts.pending_message) ->
-            match tx.state with
-            | Drafts.Confirming_delivery ->
-                let elapsed =
-                  Clock.Mono.seconds_since now ~since:tx.updated_at
-                in
-                if elapsed < 2.0 then (acc, keepers)
-                else if tx.recheck_count >= 3 then
-                  let acc' =
-                    if tx.user_persisted then
-                      Drafts.mark_delivered ~now ~request_id:tx.request_id
-                        ~keeper:tx.keeper ~body:tx.body acc
-                    else
-                      Drafts.mark_failed_retryable ~now
-                        ~request_id:tx.request_id
-                        ~reason:"Delivery confirmation timed out" acc
-                  in
-                  (acc', keepers)
-                else
-                  let acc' =
-                    Drafts.mark_confirming ~now ~request_id:tx.request_id acc
-                  in
-                  let keepers' =
-                    if List.exists (String.equal tx.keeper) keepers then keepers
-                    else tx.keeper :: keepers
-                  in
-                  (acc', keepers')
-            | Drafts.Queued
-            | Drafts.Sending
-            | Drafts.Pending_processing
-            | Drafts.Interrupting
-            | Drafts.Delivered
-            | Drafts.Failed_retryable _ ->
-                (acc, keepers))
-          (drafts0, []) drafts0.pending_txs
-      in
-      let recheck_cmds =
-        List.rev_map
-          (fun keeper ->
-            Cmd.Http_get
-              {
-                epoch = m.epoch;
-                req =
-                  Cmd.Get_chat_history
-                    { keeper; limit = Some 80; cursor = None };
-              })
-          keepers_to_recheck
-      in
+      let drafts = Drafts.voice_tick_elapsed ~now m.drafts in
       let next =
         let m' =
           { m with freshness; fleet; drafts } |> Model.expire_toast ~now
         in
         if wall_advanced then Model.sync_effective_scorecard ~now m' else m'
       in
-      (next, recheck_cmds)
+      (next, [])
   | Msg.Server_health_result { epoch; result } ->
       if not (Epoch.is_current ~current:m.epoch ~reply:epoch) then (m, [])
       else apply_server_health ~now m result

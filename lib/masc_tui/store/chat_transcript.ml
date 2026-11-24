@@ -469,68 +469,9 @@ let markdown_body_lines ~theme ~width ~rail_present ~prefix text =
 let stream_reply_already_persisted (hist_msgs : Wire_fleet.chat_message list)
     (buf : Fleet_store.chat_stream_buffer) =
   let buf_op_id = Option.value buf.operation_id ~default:buf.request_id in
-  let op_persisted =
-    List.exists
-      (fun (m : Wire_fleet.chat_message) ->
-        match m.operation_id with
-        | Some op when String.equal op buf_op_id -> (
-            match m.role with
-            | Wire_fleet.Role_assistant -> (
-                match m.transcript_slot with
-                | None | Some "terminal_result" -> true
-                | Some _ -> false)
-            | Wire_fleet.Role_request_failure -> true
-            | Wire_fleet.Role_user
-            | Wire_fleet.Role_peer _
-            | Wire_fleet.Role_system
-            | Wire_fleet.Role_tool ->
-                false)
-        | Some _ | None -> false)
-      hist_msgs
-  in
-  let turn_ref_persisted =
-    match buf.turn_ref with
-    | None -> false
-    | Some tr ->
-        List.exists
-          (fun (m : Wire_fleet.chat_message) ->
-            match m.role, m.turn_ref with
-            | ( (Wire_fleet.Role_assistant | Wire_fleet.Role_request_failure)
-              , Some mtr ) ->
-                String.equal mtr tr
-            | ( ( Wire_fleet.Role_user
-                | Wire_fleet.Role_peer _
-                | Wire_fleet.Role_assistant
-                | Wire_fleet.Role_system
-                | Wire_fleet.Role_tool
-                | Wire_fleet.Role_request_failure )
-              , (Some _ | None) ) ->
-                false)
-          hist_msgs
-  in
-  let legacy_text_persisted =
-    match buf.last_error with
-    | Some _ -> false
-    | None ->
-        let trimmed = String.trim buf.text in
-        if String.equal trimmed "" then false
-        else
-          List.exists
-            (fun (m : Wire_fleet.chat_message) ->
-              match m.role with
-              | Wire_fleet.Role_assistant ->
-                  Option.is_none m.operation_id
-                  && (not (Fleet_store.String_set.mem m.id buf.prior_msg_ids))
-                  && String.equal (String.trim m.content) trimmed
-              | Wire_fleet.Role_user
-              | Wire_fleet.Role_peer _
-              | Wire_fleet.Role_system
-              | Wire_fleet.Role_tool
-              | Wire_fleet.Role_request_failure ->
-                  false)
-            hist_msgs
-  in
-  op_persisted || turn_ref_persisted || legacy_text_persisted
+  List.exists
+    (fun row -> Option.equal String.equal (Wire_fleet.terminal_operation row) (Some buf_op_id))
+    hist_msgs
 
 type live_chat_phase =
   | Phase_idle
@@ -668,36 +609,17 @@ let history_msgs_for_keeper ~(model : Model.t) ~keeper =
       | Some page -> page.messages
       | None -> [])
 
-let has_persisted_failure_for_op (hist_msgs : Wire_fleet.chat_message list)
-    op_id =
+let has_persisted_failure_for_op hist_msgs op_id =
   List.exists
-    (fun (m : Wire_fleet.chat_message) ->
-      match m.role, m.operation_id with
-      | Wire_fleet.Role_request_failure, Some op -> String.equal op op_id
-      | ( ( Wire_fleet.Role_user
-          | Wire_fleet.Role_peer _
-          | Wire_fleet.Role_assistant
-          | Wire_fleet.Role_system
-          | Wire_fleet.Role_tool
-          | Wire_fleet.Role_request_failure )
-        , (Some _ | None) ) ->
-          false)
+    (fun (row : Wire_fleet.chat_message) ->
+       row.role = Wire_fleet.Role_request_failure
+       && Option.equal String.equal (Wire_fleet.terminal_operation row) (Some op_id))
     hist_msgs
 
-let has_persisted_user_for_op (hist_msgs : Wire_fleet.chat_message list) op_id =
+let has_persisted_user_for_op hist_msgs op_id ~body =
   List.exists
-    (fun (m : Wire_fleet.chat_message) ->
-      match m.role, m.operation_id with
-      | (Wire_fleet.Role_user | Wire_fleet.Role_peer _), Some op ->
-          String.equal op op_id
-      | ( ( Wire_fleet.Role_user
-          | Wire_fleet.Role_peer _
-          | Wire_fleet.Role_assistant
-          | Wire_fleet.Role_system
-          | Wire_fleet.Role_tool
-          | Wire_fleet.Role_request_failure )
-        , (Some _ | None) ) ->
-          false)
+    (fun row -> Option.equal String.equal (Wire_fleet.accepted_input_operation row) (Some op_id)
+                && String.equal row.content body)
     hist_msgs
 
 let live_chat_phase ~(model : Model.t) ~keeper =
@@ -721,7 +643,7 @@ let live_chat_phase ~(model : Model.t) ~keeper =
             | Drafts.Pending_processing
             | Drafts.Confirming_delivery
             | Drafts.Delivered
-            | Drafts.Failed_retryable _ );
+            | Drafts.No_operation_record | Drafts.Failed_retryable _ );
           _;
         }
     | None ->
@@ -756,7 +678,7 @@ let live_chat_phase ~(model : Model.t) ~keeper =
                     state =
                       ( Drafts.Pending_processing
                       | Drafts.Delivered
-                      | Drafts.Failed_retryable _ );
+                      | Drafts.No_operation_record | Drafts.Failed_retryable _ );
                     _;
                   }
               | None ->
@@ -769,7 +691,7 @@ let live_chat_phase ~(model : Model.t) ~keeper =
         | Some { state = Drafts.Confirming_delivery; _ } -> Phase_confirming
         | Some { state = Drafts.Queued; _ } ->
             Phase_queued (Int.max 1 queued_count)
-        | Some { state = Drafts.Delivered | Drafts.Failed_retryable _; _ }
+        | Some { state = Drafts.Delivered | Drafts.No_operation_record | Drafts.Failed_retryable _; _ }
         | None -> (
             match active_turn_opt with
             | Some { tool_in_flight = Some tool; _ } -> Phase_tool_running tool
@@ -797,7 +719,7 @@ let live_chat_phase ~(model : Model.t) ~keeper =
                          | Drafts.Pending_processing
                          | Drafts.Confirming_delivery
                          | Drafts.Interrupting
-                         | Drafts.Delivered ->
+                         | Drafts.No_operation_record | Drafts.Delivered ->
                              None)
                 in
                 match latest_unpersisted_failed with
@@ -806,6 +728,9 @@ let live_chat_phase ~(model : Model.t) ~keeper =
                     match buf_opt with
                     | Some b
                       when (not b.active)
+                           && not (List.exists (fun (tx : Drafts.pending_message) ->
+                               String.equal tx.request_id b.request_id && tx.state = Drafts.No_operation_record)
+                               (Drafts.pending_txs_for_keeper ~keeper model.drafts))
                            && not (stream_reply_already_persisted hist_msgs b)
                       -> (
                         match b.last_error with
@@ -900,7 +825,7 @@ type stream_projection = {
 
 type pending_tx_projection = {
   tx : Drafts.pending_message;
-  error_only : bool;
+  notice_only : bool;
 }
 
 type transcript_section =
@@ -916,22 +841,26 @@ let project_transcript ~(model : Model.t) ~keeper =
     |> List.mapi (fun idx (tx : Drafts.pending_message) ->
            let op_id = Option.value tx.operation_id ~default:tx.request_id in
            match tx.state with
-           | Drafts.Delivered -> None
+           | Drafts.Delivered ->
+               if has_persisted_user_for_op hist_msgs op_id ~body:tx.body then None
+               else Some (idx, { tx; notice_only = false })
+           | Drafts.No_operation_record ->
+               Some (idx, { tx; notice_only = has_persisted_user_for_op hist_msgs op_id ~body:tx.body })
            | Drafts.Failed_retryable _ ->
                if has_persisted_failure_for_op hist_msgs op_id then None
                else
                  let user_in_hist =
-                   tx.user_persisted || has_persisted_user_for_op hist_msgs op_id
+                   has_persisted_user_for_op hist_msgs op_id ~body:tx.body
                  in
-                 Some (idx, { tx; error_only = user_in_hist })
+                 Some (idx, { tx; notice_only = user_in_hist })
            | Drafts.Queued
            | Drafts.Sending
            | Drafts.Pending_processing
            | Drafts.Confirming_delivery
            | Drafts.Interrupting ->
-               if tx.user_persisted || has_persisted_user_for_op hist_msgs op_id
+               if has_persisted_user_for_op hist_msgs op_id ~body:tx.body
                then None
-               else Some (idx, { tx; error_only = false }))
+               else Some (idx, { tx; notice_only = false }))
     |> List.filter_map Fun.id
   in
   let stream_opt =
@@ -960,7 +889,7 @@ let project_transcript ~(model : Model.t) ~keeper =
                       String.equal p.tx.request_id buf.request_id
                       &&
                       match p.tx.state with
-                      | Drafts.Failed_retryable _ -> true
+                      | Drafts.No_operation_record | Drafts.Failed_retryable _ -> true
                       | Drafts.Queued
                       | Drafts.Sending
                       | Drafts.Pending_processing

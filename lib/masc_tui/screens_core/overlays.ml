@@ -1672,8 +1672,9 @@ let render_settings_inspector_pane grid ~(rect : Rect.t) ~(theme : Theme.t)
     let bg = Color.of_rgb theme.surface_1 in
     let pad_x = if rect.w >= 50 then 2 else 1 in
     let insp_focused =
-      Config_store.equal_settings_pane model.config.settings_pane
-        Config_store.Pane_inspector
+      (not (Config_store.is_two_pane_width ~cols:model.viewport.cols))
+      || Config_store.equal_settings_pane model.config.settings_pane
+           Config_store.Pane_inspector
     in
     Cell_grid.fill_rect ~clip:rect grid ~rect
       ~style:(Typography.primary ~bg theme) ();

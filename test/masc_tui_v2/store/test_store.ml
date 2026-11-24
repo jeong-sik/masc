@@ -6101,21 +6101,33 @@ let test_p1_work_inbox_ask_approval_sync () =
     "pressing '1' on tool approval emits 0 Post_ask_answer" None
     (has_ask_post cmds_press1_ap);
 
-  (* Step Down -> index 1 (ask-1) -> Down -> index 2 (ask-2) *)
+  (* Step Down -> index 1 (ask-1) -> Down -> index 2 (ask-2).
+     Pane 0 (Inbox list) keeps Workspace_focused so [b] still opens sidebar
+     instead of accidentally submitting Ask choice #2. *)
   let m_i1, _ =
     Update.step ~now:t0 m_inbox (Msg.Key_event (key Keymap.Input.Down))
   in
-  Alcotest.(check bool) "triage_index=1 (ask-1) enters Ask_choice_focused" true
+  Alcotest.(check bool)
+    "triage_index=1 on pane 0 stays Workspace_focused Work" true
     (Nav.equal_focus_scope
        (Model.active_focus_scope m_i1)
-       Nav.Ask_choice_focused);
+       (Nav.Workspace_focused Nav.Work));
   let m_i2, _ =
     Update.step ~now:t0 m_i1 (Msg.Key_event (key Keymap.Input.Down))
   in
-  Alcotest.(check bool) "triage_index=2 (ask-2) enters Ask_choice_focused" true
+  Alcotest.(check bool)
+    "triage_index=2 on pane 0 stays Workspace_focused Work" true
     (Nav.equal_focus_scope
        (Model.active_focus_scope m_i2)
-       Nav.Ask_choice_focused);
+       (Nav.Workspace_focused Nav.Work));
+  let m_b_pane0, cmds_b_pane0 =
+    Update.step ~now:t0 m_i2 (Msg.Key_event (char_key "b"))
+  in
+  Alcotest.(check bool) "Work_inbox pane 0 'b' focuses sidebar instead of Ask"
+    true (Model.sidebar_has_focus m_b_pane0);
+  Alcotest.(check (option string))
+    "Work_inbox pane 0 'b' emits 0 Post_ask_answer" None
+    (has_ask_post cmds_b_pane0);
   (* Copy_selected ('y') copies ask-2, NOT ask-1 *)
   let _, cmds_copy = Update.step ~now:t0 m_i2 (Msg.Key_event (char_key "y")) in
   let copied =
@@ -6140,10 +6152,23 @@ let test_p1_work_inbox_ask_approval_sync () =
   in
   Alcotest.(check (option string))
     "Work_inbox 'y' on triage_index=2 copies ask-2" (Some "ask-2") copied;
-  (* Pressing 'a' answers ask-2, NOT ask-1; bare '1' stays workspace switch! *)
-  let _, cmds_ans = Update.step ~now:t0 m_i2 (Msg.Key_event (char_key "a")) in
+  (* Tab to pane 1 (Ask detail pane) activates Ask_choice_focused *)
+  let m_i2_pane1, _ =
+    Update.step ~now:t0 m_i2 (Msg.Key_event (key Keymap.Input.Tab))
+  in
+  Alcotest.(check int) "Tab from Inbox list enters detail pane 1" 1
+    m_i2_pane1.nav.pane_index;
+  Alcotest.(check bool)
+    "triage_index=2 on pane 1 enters Ask_choice_focused" true
+    (Nav.equal_focus_scope
+       (Model.active_focus_scope m_i2_pane1)
+       Nav.Ask_choice_focused);
+  (* Pressing 'a' on pane 1 answers ask-2, NOT ask-1; bare '1' stays workspace switch! *)
+  let _, cmds_ans =
+    Update.step ~now:t0 m_i2_pane1 (Msg.Key_event (char_key "a"))
+  in
   Alcotest.(check (option string))
-    "Work_inbox 'a' on triage_index=2 submits Post_ask_answer for ask-2"
+    "Work_inbox pane 1 'a' on triage_index=2 submits Post_ask_answer for ask-2"
     (Some "ask-2") (has_ask_post cmds_ans)
 
 let test_p1_pulse_collapsed_company_dive_and_scroll () =
@@ -12751,7 +12776,13 @@ let test_ux_batch3_work_keepers_chat_mouse () =
   let m_ask =
     {
       m0 with
-      nav = { m0.nav with workspace = Nav.Work; sidebar_open = Some true };
+      nav =
+        {
+          m0.nav with
+          workspace = Nav.Work;
+          pane_index = 1;
+          sidebar_open = Some true;
+        };
       work =
         m0.work
         |> Work_store.set_tab Nav.Work_inbox
@@ -19179,6 +19210,462 @@ let test_preset_denial_refresh () =
     (denied_again.runtime.presets_auth_denied &&
      not (List.mem get (View_fetches.fetches_for_current_view denied_again)))
 
+let test_layer1_input_esc_focus_traps () =
+  (* #1: Failed Reply_turn_interrupt must not trap Esc in Dive_keeper forever,
+     while explicit Ctrl+X remains retryable on the same active operation. *)
+  let keeper = "alpha" in
+  let m_chat_run =
+    let base = Model.initial () in
+    let base =
+      {
+        base with
+        nav =
+          {
+            base.nav with
+            workspace = Nav.Keepers;
+            dive_stack =
+              [ Nav.Dive_keeper { name = keeper; tab = Nav.Keeper_chat } ];
+          };
+        drafts =
+          base.drafts |> Drafts.set_active_keeper keeper
+          |> Drafts.insert_text "hello" |> Drafts.set_focus false;
+      }
+    in
+    let m_sub, _ = Update.execute_action ~now:t0 base Keymap.Submit_steer in
+    let tx_s =
+      match Drafts.active_tx_for_keeper ~keeper m_sub.drafts with
+      | Some tx -> tx
+      | None -> Alcotest.fail "missing submitted tx"
+    in
+    let m_acc, _ =
+      Update.step ~now:t0 m_sub
+        (Msg.Chat_stream_chunk
+           {
+             epoch = m_sub.epoch;
+             keeper;
+             request_id = tx_s.request_id;
+             is_btw = false;
+             chunk =
+               Wire_fleet.Chunk_accepted
+                 {
+                   operation_id = tx_s.request_id;
+                   queued_count = 0;
+                   state = Keeper_chat_operation.State_name.Running;
+                   interactive_outcome = None;
+                   control_token = None;
+                 };
+           })
+    in
+    m_acc
+  in
+  let has_interrupt_post cmds =
+    List.exists
+      (function
+        | Cmd.Http_post { req = Cmd.Post_keeper_turn_interrupt _; _ } -> true
+        | _ -> false)
+      (Cmd.flatten cmds)
+  in
+  let m_esc1, cmds_esc1 =
+    Update.step ~now:t1 m_chat_run (Msg.Key_event (key Keymap.Input.Escape))
+  in
+  Alcotest.(check bool) "#1: first Esc sends Post_keeper_turn_interrupt" true
+    (has_interrupt_post cmds_esc1);
+  let target =
+    match
+      List.find_map
+        (function
+          | Cmd.Http_post
+              { req = Cmd.Post_keeper_turn_interrupt { target; _ }; _ } ->
+              Some target
+          | _ -> None)
+        (Cmd.flatten cmds_esc1)
+    with
+    | Some t -> t
+    | None -> Alcotest.fail "expected interrupt target"
+  in
+  let m_int_err, _ =
+    Update.step ~now:t2 m_esc1
+      (Msg.Http_reply
+         {
+           epoch = m_esc1.epoch;
+           reply =
+             Msg.Reply_turn_interrupt
+               {
+                 keeper;
+                 target;
+                 result = Error (Msg.Transport (Health.Other_io "503"));
+               };
+         })
+  in
+  let _, cmds_ctrlx =
+    Update.step ~now:t2 m_int_err (Msg.Key_event (char_key ~ctrl:true "x"))
+  in
+  Alcotest.(check bool)
+    "#1: Ctrl+X stays retryable after failed interrupt" true
+    (has_interrupt_post cmds_ctrlx);
+  let m_esc2, cmds_esc2 =
+    Update.step ~now:t2 m_int_err (Msg.Key_event (key Keymap.Input.Escape))
+  in
+  Alcotest.(check bool)
+    "#1: second Esc exits Dive_keeper instead of looping after failed interrupt"
+    true (Option.is_none (Model.active_dive m_esc2));
+  Alcotest.(check bool) "#1: second Esc sends 0 duplicate interrupt POSTs" false
+    (has_interrupt_post cmds_esc2);
+
+  (* #3: Universal pane_index clamp on Update.step + Tab recovery from stale pane_index *)
+  let m_tasks0 =
+    let base = Model.initial ~cols:140 ~rows:40 () in
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Work; pane_index = 2 };
+      work = Work_store.set_tab Nav.Work_tasks base.work;
+    }
+  in
+  let m_tasks_clamped, _ =
+    Update.step ~now:t0 m_tasks0 (Msg.Tick { wall_unix = 1_795_254_000.0 })
+  in
+  Alcotest.(check int)
+    "#3: Update.step clamps stale pane_index=2 down to focusable_pane_count - 1 (1)"
+    1 m_tasks_clamped.nav.pane_index;
+  let m_stale_1pane =
+    let base = Model.initial ~cols:100 ~rows:30 () in
+    {
+      base with
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Work;
+          sidebar_open = Some false;
+          pane_index = 2;
+        };
+      work =
+        Work_store.set_tab Nav.Work_inbox base.work
+        |> Work_store.apply_asks ~observed_at:t0 [];
+    }
+    |> Model.rebuild_attention
+  in
+  let m_tab_rec, _ =
+    Update.step ~now:t0 m_stale_1pane (Msg.Key_event (key Keymap.Input.Tab))
+  in
+  Alcotest.(check int) "#3: Tab recovers pane_index=0 from stale pane_index" 0
+    m_tab_rec.nav.pane_index;
+
+  (* #7: Board_recovery Esc cascade & sub-tab cleanup *)
+  let m_br0 =
+    let base = Model.initial ~cols:140 ~rows:40 () in
+    {
+      base with
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Keepers;
+          dive_stack =
+            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_work_candle } ];
+        };
+      knowledge =
+        {
+          base.knowledge with
+          board_recovery =
+            Board_recovery.open_view ~keeper:"alpha"
+              base.knowledge.board_recovery;
+        };
+    }
+  in
+  let m_br_esc1, _ =
+    Update.step ~now:t0 m_br0 (Msg.Key_event (key Keymap.Input.Escape))
+  in
+  Alcotest.(check bool) "#7: first Esc closes Board_recovery" false
+    (Board_recovery.shown ~keeper:"alpha" m_br_esc1.knowledge.board_recovery);
+  Alcotest.(check bool) "#7: first Esc stays inside Dive_keeper" true
+    (Option.is_some (Model.active_dive m_br_esc1));
+  let m_br_esc2, _ =
+    Update.step ~now:t0 m_br_esc1 (Msg.Key_event (key Keymap.Input.Escape))
+  in
+  Alcotest.(check bool) "#7: second Esc exits Dive_keeper" true
+    (Option.is_none (Model.active_dive m_br_esc2));
+  let m_br_tab, _ =
+    Update.step ~now:t0 m_br0 (Msg.Key_event (char_key "]"))
+  in
+  Alcotest.(check bool) "#7: cycling keeper sub-tab closes Board_recovery" false
+    (Board_recovery.shown ~keeper:"alpha" m_br_tab.knowledge.board_recovery);
+
+  (* #8: Alt+] sub-tab switch clears filter_focused *)
+  let m_flt =
+    let base = Model.initial ~cols:140 ~rows:40 () in
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Work; filter_focused = true };
+      work = Work_store.set_tab Nav.Work_inbox base.work;
+    }
+  in
+  let m_flt_next, _ =
+    Update.step ~now:t0 m_flt (Msg.Key_event (char_key ~alt:true "]"))
+  in
+  Alcotest.(check bool) "#8: Alt+] switches Work tab" true
+    (not (Nav.equal_work_tab m_flt_next.work.active_tab Nav.Work_inbox));
+  Alcotest.(check bool) "#8: Alt+] clears filter_focused" false
+    m_flt_next.nav.filter_focused;
+
+  (* #10: Async Voice_transcript appends text without hijacking overlay/filter/Micro focus *)
+  let m_ov_voice =
+    let base = Model.initial ~cols:140 ~rows:40 () in
+    {
+      base with
+      nav =
+        {
+          base.nav with
+          overlay = Some (Nav.Settings Nav.Settings_general_ui);
+        };
+    }
+  in
+  let m_ov_after, _ =
+    Update.step ~now:t0 m_ov_voice
+      (Msg.Voice_event (Msg.Voice_transcript "dictated text"))
+  in
+  Alcotest.(check string) "#10: voice transcript appended while overlay open"
+    "dictated text" (Drafts.current_draft m_ov_after.drafts).text;
+  Alcotest.(check bool) "#10: voice transcript does not steal composer focus over overlay"
+    false (Drafts.is_focused m_ov_after.drafts);
+  Alcotest.(check bool) "#10: Settings overlay stays open" true
+    (Option.is_some m_ov_after.nav.overlay);
+  let m_micro_voice = Model.initial ~cols:60 ~rows:20 () in
+  let m_micro_after, _ =
+    Update.step ~now:t0 m_micro_voice
+      (Msg.Voice_event (Msg.Voice_transcript "micro voice"))
+  in
+  Alcotest.(check bool) "#10: voice transcript does not focus composer on Micro"
+    false (Drafts.is_focused m_micro_after.drafts);
+
+  (* #13a: Artifact_dive [N] searches previous match instead of Approval Strip Fast_deny_top *)
+  let art : Wire_knowledge.artifact_entry =
+    {
+      id = "art-search-1";
+      revision = 1;
+      title = "Searchable Doc";
+      summary = "";
+      author = "alpha";
+      created_at_unix = 1_795_254_000.0;
+      body = { sha256 = "sha-search-1"; bytes = 64; mime = "text/markdown" };
+    }
+  in
+  let detail : Wire_knowledge.published_artifact_detail =
+    {
+      artifact = art;
+      content = "needle line 1\n\nfiller\n\nneedle line 2";
+      revisions = [];
+      shared = false;
+      share_version = 1;
+    }
+  in
+  let m_art_n =
+    let base = Model.initial ~cols:140 ~rows:40 () in
+    let knowledge =
+      Knowledge_store.empty
+      |> Knowledge_store.apply_artifacts ~observed_at:t0 [ art ]
+      |> Knowledge_store.apply_artifact_detail ~observed_at:t0 detail
+      |> Knowledge_store.set_artifact_search "needle"
+    in
+    let work =
+      base.work
+      |> Work_store.apply_tool_approvals ~observed_at:t0
+           [ sample_tool_approval ~id:"ap-strip-1" ~keeper:"alpha" () ]
+    in
+    {
+      base with
+      work;
+      knowledge;
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Knowledge;
+          dive_stack = [ Nav.Dive_knowledge (Nav.Artifact_dive art.id) ];
+        };
+    }
+    |> Model.rebuild_attention
+  in
+  let m_art_after_n, cmds_art_n =
+    Update.step ~now:t0 m_art_n (Msg.Key_event (char_key "N"))
+  in
+  Alcotest.(check bool) "#13a: [N] in Artifact_dive does not open deny modal"
+    true (Option.is_none m_art_after_n.nav.overlay);
+  Alcotest.(check int) "#13a: [N] in Artifact_dive emits 0 approval POSTs" 0
+    (List.length (Cmd.flatten cmds_art_n));
+  Alcotest.(check int) "#13a: [N] steps to previous search match (wraps to idx 1)"
+    1 m_art_after_n.knowledge.artifact_search_match_idx;
+
+  (* #13b & #19b & #19c: Settings edit/dirty Global guards, narrow resize Pane_inspector, Micro Settings / *)
+  let schema_str_bool : Wire_config.config_schema =
+    {
+      target = Wire_config.Target_runtime;
+      keeper = None;
+      file_exists = true;
+      file_sha256 = "sha-l1";
+      sections =
+        [
+          {
+            id = "providers";
+            category = Wire_config.Cat_providers_models;
+            title = "Providers";
+            fields =
+              [
+                {
+                  table = "providers";
+                  key = "model";
+                  full_key = "providers.model";
+                  label = "Model";
+                  env = None;
+                  description = None;
+                  kind = Wire_config.Field_string;
+                  value = Wire_config.Val_string "gpt-5";
+                  default_value = Some (Wire_config.Val_string "gpt-5");
+                  provenance = Wire_config.Prov_default;
+                  reload_scope = Wire_config.Hot_reload;
+                  secret = false;
+                  writable = true;
+                };
+              ];
+          };
+        ];
+    }
+  in
+  let m_set_wide =
+    let base = Model.initial ~cols:140 ~rows:40 () in
+    let config =
+      Config_store.empty
+      |> Config_store.set_tab Nav.Settings_providers_models
+      |> Config_store.apply_schema ~observed_at:t0 schema_str_bool
+      |> Config_store.set_pane Config_store.Pane_inspector
+    in
+    {
+      base with
+      config;
+      nav =
+        {
+          base.nav with
+          overlay = Some (Nav.Settings Nav.Settings_providers_models);
+        };
+    }
+  in
+  (* Begin editing text field -> Ctrl+K must NOT abandon edit *)
+  let m_set_edit, _ =
+    Update.step ~now:t0 m_set_wide (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool) "#13b: Settings Enter begins editing text field" true
+    (Config_store.is_editing_field m_set_edit.config);
+  let m_set_edit_k, _ =
+    Update.step ~now:t0 m_set_edit (Msg.Key_event (char_key ~ctrl:true "k"))
+  in
+  Alcotest.(check bool)
+    "#13b: Ctrl+K while editing Settings field stays in Settings editing" true
+    (Config_store.is_editing_field m_set_edit_k.config
+    && Option.equal Nav.equal_overlay m_set_edit_k.nav.overlay
+         (Some (Nav.Settings Nav.Settings_providers_models)));
+  (* Type a char and commit -> dirty_count = 1 -> Ctrl+K arms discard guard *)
+  let m_set_typed, _ =
+    Update.step ~now:t0 m_set_edit (Msg.Key_event (char_key "x"))
+  in
+  let m_set_dirty, _ =
+    Update.step ~now:t0 m_set_typed (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check int) "#13b: committed edit stages dirty=1" 1
+    (Config_store.dirty_count m_set_dirty.config);
+  let m_set_dirty_k, _ =
+    Update.step ~now:t0 m_set_dirty (Msg.Key_event (char_key ~ctrl:true "k"))
+  in
+  Alcotest.(check bool)
+    "#13b: Ctrl+K with dirty Settings stays in Settings and arms discard confirm"
+    true
+    (Option.equal Nav.equal_overlay m_set_dirty_k.nav.overlay
+       (Some (Nav.Settings Nav.Settings_providers_models))
+    && m_set_dirty_k.config.discard_confirm_armed);
+  (* Btw_query left via Ctrl+K clears drafts.btw *)
+  let m_btw =
+    let base = Model.initial ~cols:140 ~rows:40 () in
+    {
+      base with
+      nav = { base.nav with overlay = Some (Nav.Inline_action Nav.Btw_query) };
+      inline_modal = Some (Model.inline_modal_for Nav.Btw_query);
+      drafts =
+        {
+          base.drafts with
+          btw =
+            Drafts.Btw_answered
+              { keeper = "alpha"; prompt = "hi"; reply = "pong" };
+        };
+    }
+  in
+  let m_btw_k, _ =
+    Update.step ~now:t0 m_btw (Msg.Key_event (char_key ~ctrl:true "k"))
+  in
+  Alcotest.(check bool) "#13b: leaving Btw_query via Ctrl+K clears drafts.btw"
+    true
+    (match m_btw_k.drafts.btw with Drafts.Btw_idle -> true | _ -> false);
+
+  (* #19a: Ask_answer [?] opens Help and [Esc] restores Ask_answer with ask_modal intact *)
+  let ask = sample_ask ~id:"ask-help-1" ~keeper:"alpha" () in
+  let m_ask =
+    let base = Model.initial ~cols:140 ~rows:40 () in
+    {
+      base with
+      nav = { base.nav with overlay = Some Nav.Ask_answer };
+      ask_modal = Some (Model.ask_modal_for ask);
+    }
+  in
+  let m_ask_help, _ =
+    Update.step ~now:t0 m_ask (Msg.Key_event (char_key "?"))
+  in
+  Alcotest.(check bool) "#19a: [?] in Ask_answer opens Help" true
+    (Option.equal Nav.equal_overlay m_ask_help.nav.overlay (Some Nav.Help));
+  Alcotest.(check bool) "#19a: Help preserves ask_modal for return" true
+    (Option.is_some m_ask_help.ask_modal);
+  let m_ask_back, _ =
+    Update.step ~now:t0 m_ask_help (Msg.Key_event (key Keymap.Input.Escape))
+  in
+  Alcotest.(check bool) "#19a: Esc from Help returns to Ask_answer" true
+    (Option.equal Nav.equal_overlay m_ask_back.nav.overlay (Some Nav.Ask_answer));
+  Alcotest.(check bool) "#19a: ask_modal still intact after Help round-trip" true
+    (Option.is_some m_ask_back.ask_modal);
+
+  (* #19b: Narrow resize (< 74 cols) normalizes Settings pane to Pane_inspector *)
+  let m_set_tree =
+    {
+      m_set_wide with
+      config = Config_store.set_pane Config_store.Pane_tree m_set_wide.config;
+    }
+  in
+  let m_set_narrow, _ =
+    Update.step ~now:t0 m_set_tree (Msg.Resize { cols = 68; rows = 28 })
+  in
+  Alcotest.(check bool)
+    "#19b: narrow Resize normalizes Settings pane to Pane_inspector" true
+    (match m_set_narrow.config.settings_pane with
+    | Config_store.Pane_inspector -> true
+    | Config_store.Pane_tree -> false);
+
+  (* #19c: Micro viewport allows [/] inside Settings while keeping bare Micro blocked *)
+  let m_micro_set =
+    let base = Model.initial ~cols:60 ~rows:20 () in
+    {
+      base with
+      nav =
+        {
+          base.nav with
+          overlay = Some (Nav.Settings Nav.Settings_general_ui);
+        };
+    }
+  in
+  let m_micro_set_flt, _ =
+    Update.step ~now:t0 m_micro_set (Msg.Key_event (char_key "/"))
+  in
+  Alcotest.(check bool) "#19c: [/] focuses search in Settings on Micro viewport"
+    true m_micro_set_flt.nav.filter_focused;
+  let m_micro_bare_flt, _ =
+    Update.step ~now:t0 (Model.initial ~cols:60 ~rows:20 ())
+      (Msg.Key_event (char_key "/"))
+  in
+  Alcotest.(check bool) "#19c: [/] stays blocked on bare Micro viewport" false
+    m_micro_bare_flt.nav.filter_focused
+
 let () =
   Alcotest.run "masc_tui_store"
     [
@@ -20919,5 +21406,8 @@ let () =
                          true
                      | _ -> false)
                    cmds_sh));
+          Alcotest.test_case
+            "Layer 1: input, Esc-cascade, focus-trap, modal & key-hijack fixes"
+            `Quick test_layer1_input_esc_focus_traps;
         ] );
     ]

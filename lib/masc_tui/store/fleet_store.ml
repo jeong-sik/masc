@@ -116,6 +116,8 @@ type t = {
   unreadable_keepers : Wire_fleet.unreadable_keeper list;
   turns : Wire_fleet.keeper_turn_row list Observed.t;
   interrupting_turn_tokens : string String_map.t;
+  esc_attempted_turn_tokens : string String_map.t;
+  esc_attempted_operation_ids : string String_map.t;
   turn_records : Wire_fleet.keeper_turn_records Observed.t String_map.t;
   chat_control_tokens : string String_map.t;
   sandbox_profiles : Wire_fleet.keeper_sandbox_profile String_map.t;
@@ -154,6 +156,8 @@ let empty =
     unreadable_keepers = [];
     turns = Observed.unreported;
     interrupting_turn_tokens = String_map.empty;
+    esc_attempted_turn_tokens = String_map.empty;
+    esc_attempted_operation_ids = String_map.empty;
     turn_records = String_map.empty;
     chat_control_tokens = String_map.empty;
     sandbox_profiles = String_map.empty;
@@ -870,7 +874,7 @@ let apply_turns ~observed_at rows t =
         | Some _ | None -> acc)
       t.chat_control_tokens rows
   in
-  let interrupting_turn_tokens =
+  let prune_turn_tokens tokens =
     String_map.filter
       (fun keeper tok ->
         match
@@ -883,13 +887,16 @@ let apply_turns ~observed_at rows t =
             String.equal turn.interrupt_token tok
         | Some { state = Wire_fleet.Turn_idle; _ } -> false
         | Some { state = Wire_fleet.Turn_unavailable _; _ } | None -> true)
-      t.interrupting_turn_tokens
+      tokens
   in
+  let interrupting_turn_tokens = prune_turn_tokens t.interrupting_turn_tokens in
+  let esc_attempted_turn_tokens = prune_turn_tokens t.esc_attempted_turn_tokens in
   let keepers = Observed.map (overlay_turns_on_keepers rows) t.keepers in
   {
     t with
     turns = Observed.value ~observed_at rows;
     interrupting_turn_tokens;
+    esc_attempted_turn_tokens;
     chat_control_tokens;
     keepers;
   }
@@ -1135,7 +1142,12 @@ let fresh_stream_buffer ~request_id =
 
 let start_chat_stream ~keeper ~request_id t =
   let buf = fresh_stream_buffer ~request_id in
-  { t with chat_streams = String_map.add keeper buf t.chat_streams }
+  {
+    t with
+    chat_streams = String_map.add keeper buf t.chat_streams;
+    esc_attempted_operation_ids =
+      String_map.remove keeper t.esc_attempted_operation_ids;
+  }
 
 let merge_opt_op prev_op incoming_op =
   match incoming_op with Some _ as x -> x | None -> prev_op
@@ -1714,6 +1726,30 @@ let clear_turn_interrupting ~keeper ~interrupt_token t =
     }
   else t
 
+let mark_esc_interrupt_attempted_turn ~keeper ~interrupt_token t =
+  {
+    t with
+    esc_attempted_turn_tokens =
+      String_map.add keeper interrupt_token t.esc_attempted_turn_tokens;
+  }
+
+let is_esc_interrupt_attempted_turn ~keeper ~interrupt_token t =
+  match String_map.find_opt keeper t.esc_attempted_turn_tokens with
+  | Some tok -> String.equal tok interrupt_token
+  | None -> false
+
+let mark_esc_interrupt_attempted_op ~keeper ~operation_id t =
+  {
+    t with
+    esc_attempted_operation_ids =
+      String_map.add keeper operation_id t.esc_attempted_operation_ids;
+  }
+
+let is_esc_interrupt_attempted_op ~keeper ~operation_id t =
+  match String_map.find_opt keeper t.esc_attempted_operation_ids with
+  | Some op -> String.equal op operation_id
+  | None -> false
+
 let clear_inactive_chat_stream_error ~keeper t =
   match String_map.find_opt keeper t.chat_streams with
   | Some b when (not b.active) && Option.is_some b.last_error ->
@@ -1741,13 +1777,20 @@ let finish_chat_stream ~keeper ~request_id ~error t =
             (match error with Some _ as e -> e | None -> b.last_error);
         }
       in
-      { t with chat_streams = String_map.add keeper next t.chat_streams }
+      {
+        t with
+        chat_streams = String_map.add keeper next t.chat_streams;
+        esc_attempted_operation_ids =
+          String_map.remove keeper t.esc_attempted_operation_ids;
+      }
   | Some _ | None -> t
 
 let detach_chat_streams t =
   {
     t with
     chat_queues = String_map.empty;
+    esc_attempted_turn_tokens = String_map.empty;
+    esc_attempted_operation_ids = String_map.empty;
     chat_streams =
       String_map.map
         (fun (b : chat_stream_buffer) ->

@@ -529,10 +529,6 @@ let step_settings_pane_lr ~now (m : Model.t) (dir : Keymap.move_dir) =
       in
       match Config_store.step_selected_field ~delta cfg0 with
       | Ok (config, true) -> (
-          let config =
-            if not two_pane then { config with settings_pane = m.config.settings_pane }
-            else config
-          in
           match
             Option.bind sel_key_opt (fun key ->
                 apply_staged_tui_pref_if_needed ~now ~key m config)
@@ -584,7 +580,9 @@ let open_custom_inline_modal (m : Model.t) (fields : Model.modal_form_field list
       modal_edit_cursor = String.length (Model.modal_active_field_value modal);
     }
   in
-  let drafts = Drafts.set_focus false m.drafts in
+  let drafts =
+    m.drafts |> Drafts.set_focus false |> Update_nav.clear_btw_if_leaving m
+  in
   let config = Config_store.cancel_edit_field m.config in
   ({ m with nav; drafts; config; inline_modal = Some modal }, [])
 
@@ -1444,7 +1442,9 @@ let open_connector_form_populated (m : Model.t) =
       modal_edit_cursor = String.length (Model.modal_active_field_value modal);
     }
   in
-  let drafts = Drafts.set_focus false m.drafts in
+  let drafts =
+    m.drafts |> Drafts.set_focus false |> Update_nav.clear_btw_if_leaving m
+  in
   let config = Config_store.cancel_edit_field m.config in
   let cmds =
     if
@@ -1800,8 +1800,9 @@ let board_recovery_keeper (m : Model.t) =
 let set_board_recovery (m : Model.t) board_recovery =
   { m with knowledge = { m.knowledge with board_recovery } }
 
-let request_keeper_interrupt ~now ~keeper ~target (m : Model.t) =
-  let fleet, drafts =
+let request_keeper_interrupt ?(from_escape = false) ~now ~keeper ~target
+    (m : Model.t) =
+  let fleet0, drafts =
     match target with
     | `Turn_token interrupt_token ->
         (Fleet_store.mark_turn_interrupting ~keeper ~interrupt_token m.fleet, m.drafts)
@@ -1810,6 +1811,17 @@ let request_keeper_interrupt ~now ~keeper ~target (m : Model.t) =
             ~interrupting:true m.fleet
         , Drafts.set_operation_interrupting ~now ~keeper ~operation_id
             ~interrupting:true m.drafts )
+  in
+  let fleet =
+    if not from_escape then fleet0
+    else
+      match target with
+      | `Turn_token interrupt_token ->
+          Fleet_store.mark_esc_interrupt_attempted_turn ~keeper ~interrupt_token
+            fleet0
+      | `Operation_id operation_id ->
+          Fleet_store.mark_esc_interrupt_attempted_op ~keeper ~operation_id
+            fleet0
   in
   ( Model.with_toast ~now ~level:Model.Toast_warning
       (Say.make
@@ -3969,17 +3981,21 @@ and execute_action ~now (m : Model.t) action =
             in
             (sync_pane base target_pane, [])
           else (
+            let cur =
+              if n <= 0 then 0 else Int.max 0 (Int.min (n - 1) m.nav.pane_index)
+            in
+            let out_of_range = m.nav.pane_index >= n || m.nav.pane_index < 0 in
             match dir with
             | Keymap.Next ->
-                if m.nav.pane_index + 1 < n then
-                  (sync_pane m (m.nav.pane_index + 1), [])
+                if out_of_range then (sync_pane m 0, [])
+                else if cur + 1 < n then (sync_pane m (cur + 1), [])
                 else if Model.sidebar_visible m then
                   (Update_nav.enter_sidebar_focus m, [])
                 else if n <= 1 then (m, [])
                 else (sync_pane m 0, [])
             | Keymap.Prev ->
-                if m.nav.pane_index > 0 then
-                  (sync_pane m (m.nav.pane_index - 1), [])
+                if out_of_range then (sync_pane m (Int.max 0 (n - 1)), [])
+                else if cur > 0 then (sync_pane m (cur - 1), [])
                 else if Model.sidebar_visible m then
                   (Update_nav.enter_sidebar_focus m, [])
                 else if n <= 1 then (m, [])
@@ -4012,14 +4028,14 @@ and execute_action ~now (m : Model.t) action =
                 nav;
                 inline_modal = None;
                 ask_modal = None;
-                drafts = Drafts.set_focus true m0.drafts;
+                drafts =
+                  m0.drafts
+                  |> Update_nav.clear_btw_if_leaving m0
+                  |> Drafts.set_focus true;
               }
             , [] ))
   | Keymap.Focus_filter -> (
-      if
-        Model.is_too_small_viewport m.viewport
-        || Model.equal_breakpoint m.breakpoint Model.Micro
-      then (m, [])
+      if Model.is_too_small_viewport m.viewport then (m, [])
       else
         match m.nav.overlay with
         | Some (Nav.Settings _ | Nav.Incidents) ->
@@ -4038,7 +4054,9 @@ and execute_action ~now (m : Model.t) action =
             | Nav.System_gate _ ) ->
             (m, [])
         | None ->
-            let m = Update_nav.exit_sidebar_focus m in
+            if Model.equal_breakpoint m.breakpoint Model.Micro then (m, [])
+            else
+              let m = Update_nav.exit_sidebar_focus m in
             (
             if Model.is_keeper_config_active m then
               ( {
@@ -4590,6 +4608,10 @@ and execute_action ~now (m : Model.t) action =
                   knowledge = Knowledge_store.close_memory_reading m.knowledge;
                 }
               , [] )
+            else if Option.is_some (board_recovery_keeper m) then
+              ( set_board_recovery m
+                  (Board_recovery.close m.knowledge.board_recovery)
+              , [] )
             else
               let active_chat_interrupt =
                 match Model.active_dive m with
@@ -4619,7 +4641,7 @@ and execute_action ~now (m : Model.t) action =
               in
               match active_chat_interrupt with
               | Some (keeper, target) ->
-                  request_keeper_interrupt ~now ~keeper ~target m
+                  request_keeper_interrupt ~from_escape:true ~now ~keeper ~target m
               | None -> (
                   match m.nav.dive_stack with
                   | top :: rest -> (
@@ -4665,10 +4687,15 @@ and execute_action ~now (m : Model.t) action =
                                 json_scroll_offset = 0;
                               };
                             knowledge =
-                              m.knowledge
-                              |> Knowledge_store.clear_pending_artifact_revision
-                              |> Knowledge_store.close_memory_diagram
-                              |> Knowledge_store.clear_pending_wiki_edit;
+                              {
+                                (m.knowledge
+                                |> Knowledge_store.clear_pending_artifact_revision
+                                |> Knowledge_store.close_memory_diagram
+                                |> Knowledge_store.clear_pending_wiki_edit)
+                                with
+                                board_recovery =
+                                  Board_recovery.close m.knowledge.board_recovery;
+                              };
                             infra = { m.infra with show_raw_json = false };
                           }
                         in
@@ -4916,11 +4943,6 @@ and execute_action ~now (m : Model.t) action =
               | Some ({ writable = true; kind = Wire_config.Field_bool; _ } as f) -> (
                   match Config_store.step_selected_field ~delta:1 cfg0 with
                   | Ok (config, true) -> (
-                      let config =
-                        if not two_pane then
-                          { config with settings_pane = m.config.settings_pane }
-                        else config
-                      in
                       match
                         apply_staged_tui_pref_if_needed ~now ~key:f.full_key m
                           config

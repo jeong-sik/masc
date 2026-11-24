@@ -238,6 +238,10 @@ let render_top_rail grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
       let menu_lbl =
         if sb_focused then
           Glyph.to_utf8 Glyph.Focus_caret ^ "b"
+        else if
+          Nav.equal_focus_scope (Model.active_focus_scope model)
+            Nav.Ask_choice_focused
+        then "[^B]"
         else "[b]"
       in
       let m_adv =
@@ -1608,11 +1612,50 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           || (Model.is_keeper_config_active model
               && (Config_store.is_editing_field model.config
                   || not (String.equal model.config.search_query "")))
+          || (match Model.active_dive model with
+              | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_work_candle }) ->
+                  Board_recovery.shown ~keeper:name model.knowledge.board_recovery
+              | Some
+                  ( Nav.Dive_keeper
+                      {
+                        tab =
+                          ( Nav.Keeper_chat
+                          | Nav.Keeper_context
+                          | Nav.Keeper_tool_calls
+                          | Nav.Keeper_memory
+                          | Nav.Keeper_sandbox
+                          | Nav.Keeper_config
+                          | Nav.Keeper_logs
+                          | Nav.Keeper_identity );
+                        _;
+                      }
+                  | Nav.Dive_work _
+                  | Nav.Dive_knowledge _
+                  | Nav.Dive_runtime _
+                  | Nav.Dive_infra _ ) ->
+                  false
+              | None ->
+                  Nav.equal_workspace model.nav.workspace Nav.Keepers
+                  && Nav.equal_keeper_tab model.fleet.keeper_dive_tab
+                       Nav.Keeper_work_candle
+                  && (model.nav.pane_index = 1
+                     || (model.nav.zoomed && Model.can_zoom_current_view model))
+                  &&
+                  match Fleet_store.selected_keeper_summary model.fleet with
+                  | Some k ->
+                      Board_recovery.shown ~keeper:k.name
+                        model.knowledge.board_recovery
+                  | None -> false)
           || (Nav.equal_workspace model.nav.workspace Nav.Work
               && Nav.equal_work_tab model.work.active_tab Nav.Work_tasks
               && not
                    (Work_store.equal_task_status_filter
                       model.work.task_status_filter Work_store.Status_all))
+          || (Nav.equal_workspace model.nav.workspace Nav.Work
+              && Nav.equal_work_tab model.work.active_tab Nav.Work_pipeline
+              && not
+                   (Work_store.equal_goal_phase_filter
+                      model.work.goal_phase_filter Work_store.Goal_filter_all))
         in
         List.filter_map
           (fun (h : Keymap.footer_hint) ->

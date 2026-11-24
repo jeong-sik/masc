@@ -1020,13 +1020,22 @@ let local_interrupt_target ~(model : Model.t) ~keeper
           }
       | None -> None)
 
+let escape_interrupt_already_attempted ~(model : Model.t) ~keeper = function
+  | `Turn_token interrupt_token ->
+      Fleet_store.is_esc_interrupt_attempted_turn ~keeper ~interrupt_token
+        model.fleet
+  | `Operation_id operation_id ->
+      Fleet_store.is_esc_interrupt_attempted_op ~keeper ~operation_id model.fleet
+
 let escape_interrupt_target ~(model : Model.t) ~keeper =
   match Fleet_store.active_turn_for ~keeper model.fleet with
   | Some turn when not (Wire_fleet.equal_turn_lane turn.lane Wire_fleet.Lane_chat) ->
       None
   | active_turn -> (
       match local_interrupt_target ~model ~keeper with
-      | Some target when not (interrupt_target_pending ~model ~keeper target) ->
+      | Some target
+        when (not (interrupt_target_pending ~model ~keeper target))
+             && not (escape_interrupt_already_attempted ~model ~keeper target) ->
           Some target
       | Some _ -> None
       | None ->
@@ -1034,9 +1043,13 @@ let escape_interrupt_target ~(model : Model.t) ~keeper =
              || not (is_phase_interruptible (live_chat_phase ~model ~keeper))
           then None
           else
-            Option.map
-              (fun (turn : Wire_fleet.active_turn) -> `Turn_token turn.interrupt_token)
-              active_turn)
+            match active_turn with
+            | Some (turn : Wire_fleet.active_turn) ->
+                let target = `Turn_token turn.interrupt_token in
+                if escape_interrupt_already_attempted ~model ~keeper target then
+                  None
+                else Some target
+            | None -> None)
 
 let explicit_interrupt_target ~model ~keeper
     (active_turn : Wire_fleet.active_turn option) =

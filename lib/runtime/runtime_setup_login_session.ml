@@ -400,16 +400,23 @@ let extract_device_codes_from_plain ~has_context plain =
     in
     loop 0 []
 
-let drop_trailing_incomplete_token text =
-  let len = String.length text in
-  if len = 0 || is_token_separator text.[len - 1] then text
+let drop_trailing_token_from_plain plain =
+  let len = String.length plain in
+  let rec skip_trailing_sep i =
+    if i < 0 then -1
+    else if is_token_separator plain.[i] then skip_trailing_sep (i - 1)
+    else i
+  in
+  let last_non_sep = skip_trailing_sep (len - 1) in
+  if last_non_sep < 0 then ""
   else
-    let rec find_sep i =
-      if i < 0 then 0
-      else if is_token_separator text.[i] then i + 1
-      else find_sep (i - 1)
+    let rec skip_token i =
+      if i < 0 then -1
+      else if is_token_separator plain.[i] then i
+      else skip_token (i - 1)
     in
-    String.sub text 0 (find_sep (len - 1))
+    let sep_idx = skip_token last_non_sep in
+    if sep_idx < 0 then "" else String.sub plain 0 (sep_idx + 1)
 
 let dedup_strings items =
   let seen = Hashtbl.create 4 in
@@ -421,16 +428,23 @@ let dedup_strings items =
         true))
     items
 
-let extract_urls_and_codes ~prior_context raw =
+let extract_urls_and_codes ~prior_context ~drop_trailing_token raw =
   let plain = strip_ansi raw in
-  let urls = dedup_strings (extract_osc8_urls raw @ extract_https_urls_from_plain plain) in
-  let saw_context = has_device_code_context plain in
+  let plain_for_scan =
+    if drop_trailing_token then drop_trailing_token_from_plain plain else plain
+  in
+  let urls =
+    dedup_strings (extract_osc8_urls raw @ extract_https_urls_from_plain plain_for_scan)
+  in
+  let saw_context = has_device_code_context plain_for_scan in
   let has_context = prior_context || urls <> [] || saw_context in
-  let codes = dedup_strings (extract_device_codes_from_plain ~has_context plain) in
+  let codes = dedup_strings (extract_device_codes_from_plain ~has_context plain_for_scan) in
   urls, codes, saw_context
 
 let extract_auth_hints raw =
-  let urls, codes, _ = extract_urls_and_codes ~prior_context:false raw in
+  let urls, codes, _ =
+    extract_urls_and_codes ~prior_context:false ~drop_trailing_token:false raw
+  in
   let verification_uri =
     match urls with
     | first :: _ -> Some first
@@ -510,15 +524,17 @@ let run_with interpreter t ~saved_login ~on_auth_hint ~env ~child_env ~cwd ~argv
     let screen = if terminal then Some (terminal_screen ()) else None in
     let emit_hints =
       match on_auth_hint with
-      | None -> fun _ -> ()
+      | None -> fun ~drop_trailing_token:_ _ -> ()
       | Some on_auth_hint ->
         let seen_urls = Hashtbl.create 4 in
         let seen_codes = Hashtbl.create 4 in
         let last_auth_url = ref None in
         let saw_device_context = ref false in
-        fun raw ->
+        fun ~drop_trailing_token raw ->
           let prior_context = Option.is_some !last_auth_url || !saw_device_context in
-          let urls, codes, saw_context = extract_urls_and_codes ~prior_context raw in
+          let urls, codes, saw_context =
+            extract_urls_and_codes ~prior_context ~drop_trailing_token raw
+          in
           if saw_context then saw_device_context := true;
           List.iter
             (fun url ->
@@ -546,26 +562,27 @@ let run_with interpreter t ~saved_login ~on_auth_hint ~env ~child_env ~cwd ~argv
           let completed = String.sub content 0 (nl + 1) in
           let tail = String.sub content (nl + 1) (String.length content - nl - 1) in
           Buffer.clear buf;
-          emit_hints completed;
+          emit_hints ~drop_trailing_token:false completed;
           let tlen = String.length tail in
-          if tlen > max_pipe_hint_buffer then emit_hints tail
+          if tlen > max_pipe_hint_buffer then emit_hints ~drop_trailing_token:false tail
           else (
             Buffer.add_string buf tail;
-            if tlen > 0 && is_token_separator tail.[tlen - 1] then emit_hints tail)
+            if tlen > 0 && is_token_separator tail.[tlen - 1] then
+              emit_hints ~drop_trailing_token:false tail)
         | None ->
           let clen = String.length content in
           if clen > max_pipe_hint_buffer then (
             Buffer.clear buf;
-            emit_hints content)
+            emit_hints ~drop_trailing_token:false content)
           else if clen > 0 && is_token_separator content.[clen - 1] then
-            emit_hints content)
+            emit_hints ~drop_trailing_token:false content)
     in
     let flush_hints () =
       let flush buf =
         if Buffer.length buf > 0 then (
           let pending = Buffer.contents buf in
           Buffer.clear buf;
-          emit_hints pending)
+          emit_hints ~drop_trailing_token:false pending)
       in
       flush stdout_hint_buf;
       flush stderr_hint_buf;
@@ -573,7 +590,7 @@ let run_with interpreter t ~saved_login ~on_auth_hint ~env ~child_env ~cwd ~argv
       | None -> ()
       | Some rendered ->
         pending_screen := None;
-        emit_hints rendered
+        emit_hints ~drop_trailing_token:false rendered
     in
     let draw screen text =
       (* Replies are dropped: see [terminal_screen]. So are requests to the
@@ -584,9 +601,12 @@ let run_with interpreter t ~saved_login ~on_auth_hint ~env ~child_env ~cwd ~argv
       (* A cursor move or a new pen alone changes no row, so nothing new shows. *)
       let changed = Vte.dirty_rows screen <> [] in
       Vte.clear_dirty screen;
+      (* Strip ANSI before checking termination so trailing SGR sequences
+         (like CSI 0 m from VTE or the child) do not hide a split token. *)
       let chunk_terminated =
-        let len = String.length text in
-        len > 0 && is_token_separator text.[len - 1]
+        let plain_chunk = strip_ansi text in
+        let len = String.length plain_chunk in
+        len > 0 && is_token_separator plain_chunk.[len - 1]
       in
       if changed then (
         let rendered = screen_text screen in
@@ -594,16 +614,16 @@ let run_with interpreter t ~saved_login ~on_auth_hint ~env ~child_env ~cwd ~argv
         if Option.is_some on_auth_hint then
           if chunk_terminated then (
             pending_screen := None;
-            emit_hints rendered)
+            emit_hints ~drop_trailing_token:false rendered)
           else (
             pending_screen := Some rendered;
-            emit_hints (drop_trailing_incomplete_token rendered)))
+            emit_hints ~drop_trailing_token:true rendered))
       else if chunk_terminated then
         match !pending_screen with
         | None -> ()
         | Some rendered ->
           pending_screen := None;
-          emit_hints rendered
+          emit_hints ~drop_trailing_token:false rendered
     in
     let rec receive () =
       let json = Yojson.Safe.from_string (Eio.Buf_read.line reader) in

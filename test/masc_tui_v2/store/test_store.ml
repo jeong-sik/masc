@@ -10441,6 +10441,23 @@ let test_reopen_keeper_queue_and_reconcile () =
   Alcotest.(check (option (list string))) "older or foreign replies leave the queued operation visible"
     (Some ["queued-from-another-session"]) (Option.map (fun () -> List.map (fun (row : Wire_fleet.chat_operation) -> Keeper_chat_operation.Operation_id.to_string row.id) queue.operations) (Observed.to_option queue.read));
   Alcotest.(check int) "server-only row has no local claim" 0 (List.length local);
+  let queue_after operations result =
+    let model = receive loaded ~keeper:"alpha" ~requested_at:t2 operations (Some result) in
+    Fleet_store.chat_queue_for ~keeper:"alpha" model.fleet in
+  let reset = queue_after [] (Ok ()) in
+  Alcotest.(check bool) "an authoritative empty first page clears the previous inventory" true
+    (Observed.to_option reset.read = Some () && reset.operations = []);
+  List.iter (fun error ->
+    let retained = queue_after [] (Error error) in
+    Alcotest.(check bool) "a failed first page shows its error and the last observed operations" true
+      (match retained.read with Observed.Failed _ -> retained.operations = [op] | _ -> false))
+    [Msg.Transport (Health.Other_io "connection reset");
+     Msg.Http_error { status = 503; body = ""; api_error = None };
+     Msg.Decode_error "invalid first page"];
+  let next_page = { op with id = Result.get_ok (Keeper_chat_operation.Operation_id.of_string "new-queue-id") } in
+  let partial_failure = queue_after [next_page] (Error (Msg.Transport (Health.Other_io "second page"))) in
+  Alcotest.(check bool) "a new partial page supersedes the earlier read" true
+    (partial_failure.operations = [next_page]);
   let denied = receive loaded ~keeper:"alpha" ~requested_at:t2 [op]
       (Some (Error (Msg.Http_error { status = 403; body = ""; api_error = None }))) in
   Alcotest.(check bool) "unreadable queue keeps an explicit failure" true
@@ -10455,6 +10472,32 @@ let test_reopen_keeper_queue_and_reconcile () =
   let typed = Drafts.set_current_text "same input" drafts in
   let pending, tx = Option.get (Drafts.enqueue_submission ~now:t0 ~keeper:"alpha"
       ~mode:Drafts.Mode_follow_up typed) in
+  let detached = { loaded with drafts = pending } in
+  let exact state (model : Model.t) =
+    let operation = { op with id = Result.get_ok (Keeper_chat_operation.Operation_id.of_string tx.request_id); state } in
+    Update.step ~now:t2 model (Msg.Http_reply { epoch = model.epoch;
+      reply = Msg.Reply_chat_status { keeper = "alpha"; operation_id = tx.request_id; result = Ok operation } }) |> fst in
+  let tx_state model =
+    match List.find_opt (fun (row : Drafts.pending_message) -> String.equal row.request_id tx.request_id)
+            (Drafts.pending_txs_for_keeper ~keeper:"alpha" model.Model.drafts) with
+    | Some row -> row.state | None -> Alcotest.fail "missing transmission" in
+  let queued = exact Queued detached in
+  Alcotest.(check bool) "an exact queued status accepts detached sending" true (tx_state queued = Drafts.Queued);
+  let running = exact Running queued in
+  Alcotest.(check bool) "the detached queue starts on the exact running read" true
+    (tx_state running = Drafts.Pending_processing &&
+     Chat_transcript.equal_live_chat_phase (Chat_transcript.live_chat_phase ~model:running ~keeper:"alpha")
+       Chat_transcript.Phase_awaiting_turn);
+  Alcotest.(check bool) "running can also be the first observed status of a send" true
+    (tx_state (exact Running detached) = Drafts.Pending_processing);
+  Alcotest.(check bool) "a delayed queue read cannot rewind processing" true
+    (tx_state (exact Queued running) = Drafts.Pending_processing);
+  let interrupting = { running with drafts = Drafts.mark_interrupting ~now:t1 ~request_id:tx.request_id running.drafts } in
+  Alcotest.(check bool) "a running or queued read preserves a pending interrupt" true
+    (tx_state (exact Queued (exact Running interrupting)) = Drafts.Interrupting);
+  let settled = exact Succeeded running in
+  Alcotest.(check bool) "nonterminal reads leave the confirmed terminal state intact" true
+    (tx_state (exact Queued (exact Running settled)) = Drafts.Delivered);
   let pending = Drafts.mark_confirming ~now:t1 ~request_id:tx.request_id pending in
   let source = Result.get_ok (Keeper_chat_delivery_identity.Request_id.of_string "another-message") in
   let peer = chat_row ~id:"different-row" ~role:Wire_fleet.Role_user

@@ -2733,7 +2733,12 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                  push (Typography.anchor ~bg theme)
                    (Printf.sprintf "%s (%d)" (Say.resolve lang label) (List.length queue.operations))
              | Observed.Failed { reason; _ } ->
-                 push crit_st (Say.resolve lang (Say.make ~ko:"서버 대기열 조회 실패" ~en:"Server queue read failed") ^ " · " ^ reason)
+                 let label =
+                   match queue.operations with
+                   | [] -> Say.make ~ko:"서버 대기열 조회 실패" ~en:"Server queue read failed"
+                   | _ :: _ -> Say.make ~ko:"서버 대기열 조회 실패 · 마지막 관측" ~en:"Server queue read failed · last observed rows"
+                 in
+                 push crit_st (Say.resolve lang label ^ " · " ^ reason)
              | Observed.Loading _ | Observed.Unreported | Observed.Absent ->
                  let label = if Option.is_none (Model.target_keeper model) then
                      Say.make ~ko:"키퍼를 선택하세요" ~en:"Select a Keeper"

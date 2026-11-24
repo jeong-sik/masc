@@ -147,8 +147,8 @@ val mark_queued :
   operation_id:string option ->
   t ->
   t
-(** Transition a submission to {!Queued} when server acceptance reports the
-    operation queued behind an active turn. *)
+(** Record a queued receipt for a submission awaiting acceptance or confirmation.
+    Later queued receipts preserve an observed start, interrupt or terminal state. *)
 
 val mark_accepted :
   now:Clock.Mono.t ->

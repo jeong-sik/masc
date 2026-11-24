@@ -631,12 +631,13 @@ let mark_sending ~now ~request_id t =
 let mark_queued ~now ~request_id ~operation_id t =
   update_tx ~request_id
     (fun m ->
-      if is_terminal_tx_state m.state then m
-      else
-        let op =
-          match operation_id with Some _ as x -> x | None -> m.operation_id
-        in
-        { m with operation_id = op; state = Queued; updated_at = now })
+      match m.state with
+      | Sending | Queued | Confirming_delivery ->
+          let operation_id =
+            match operation_id with Some _ -> operation_id | None -> m.operation_id
+          in
+          { m with operation_id; state = Queued; updated_at = now }
+      | Pending_processing | Interrupting | Delivered | Failed_retryable _ -> m)
     t
 
 let mark_accepted ~now ~request_id ~operation_id t =

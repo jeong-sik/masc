@@ -663,6 +663,9 @@ let execute_get t ~epoch req =
             let rows, result = read_chat_queue t ~keeper ~partial in
             reply rows (Some result)
         | Cmd.Get_chat_status { keeper; operation_id } ->
+            (* Preserve each exact observation until the reducer has consumed it.
+               A delayed queued read cannot replace a running or terminal one. *)
+            snapshot_key := Key_read (path, requested_at);
             let decode json =
               match Wire_fleet.decode_chat_operation json with
               | Ok row when String.equal (Keeper_chat_operation.Operation_id.to_string row.id) operation_id -> Ok row

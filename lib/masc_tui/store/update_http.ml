@@ -357,8 +357,8 @@ let apply_http_reply ~now (m : Model.t) reply =
         ~source:(Health.Source_keeper keeper) ~ko:"턴 기록 조회"
         ~en:"Turn records fetch" err
   | Msg.Reply_chat_queue { keeper; requested_at; operations; result } ->
-      let prior = (Fleet_store.chat_queue_for ~keeper m.fleet).read in
-      let previous = match prior with
+      let prior = Fleet_store.chat_queue_for ~keeper m.fleet in
+      let previous = match prior.read with
         | Observed.Loading { since_ns } -> Some since_ns
         | Observed.Value { observed_at; _ } -> Some observed_at
         | Observed.Failed { at; _ } -> Some at
@@ -377,7 +377,10 @@ let apply_http_reply ~now (m : Model.t) reply =
              let operations =
                match err with
                | Msg.Workspace_mismatch _ | Msg.Http_error { status = (401 | 403); _ } -> []
-               | Msg.Http_error _ | Msg.Transport _ | Msg.Decode_error _ -> operations
+               | Msg.Http_error _ | Msg.Transport _ | Msg.Decode_error _ ->
+                   (* The empty terminator proves an empty queue on success. On a
+                      failed read, no rows means the first page never arrived. *)
+                   (match operations with [] -> prior.operations | _ :: _ -> operations)
              in
              let fleet = Fleet_store.set_chat_queue ~keeper { operations; read } m.fleet in
              record_http_incident ~now ~source:(Health.Source_keeper keeper)
@@ -398,7 +401,6 @@ let apply_http_reply ~now (m : Model.t) reply =
                  Drafts.mark_failed_retryable ~now ~request_id ~reason m.drafts
              | Cancelled ->
                  Drafts.mark_failed_retryable ~now ~request_id ~reason:"Operation cancelled" m.drafts
-             | Queued | Running when tx.state <> Drafts.Confirming_delivery -> m.drafts
              | Queued -> Drafts.mark_queued ~now ~request_id ~operation_id:(Some operation_id) m.drafts
              | Running -> Drafts.mark_accepted ~now ~request_id ~operation_id:(Some operation_id) m.drafts in
            ({ m with drafts }, []))

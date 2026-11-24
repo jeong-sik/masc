@@ -214,6 +214,31 @@ let test_approved_task_rides_the_next_eligible_turn () =
     (mention.should_run && mention.channel = WO.Reactive)
 ;;
 
+let test_periodic_reactions_surface_due_work () =
+  without_overrides @@ fun () ->
+  let meta = ready_meta () in
+  let observation = { mention_obs with failed_task_count = 1 } in
+  let reasons ~meta ~wake observation =
+    let decision = WO.keeper_cycle_decision ~meta ~wake observation in
+    check bool "the mention still owns the reactive channel" true (decision.channel = WO.Reactive);
+    match decision.verdict with
+    | WO.Run { reasons = first, rest } -> first :: rest
+    | WO.Skip _ -> fail "the mention did not open a turn"
+  in
+  let backlog = WO.Task_backlog { unclaimed = 0; failed = 1 } in
+  let due = reasons ~meta ~wake:WO.Periodic_tick observation in
+  check bool "a reaction serving the boundary carries both duties" true
+    (List.mem WO.Mention_pending due && List.mem backlog due);
+  check bool "an early mention has no periodic work duty" false
+    (List.mem backlog (reasons ~meta ~wake:WO.Attention_wake observation));
+  let on_demand = { meta with activation_mode = Masc.Keeper_activation_mode.On_demand } in
+  check bool "an on-demand owner has no spontaneous backlog duty" false
+    (List.mem backlog (reasons ~meta:on_demand ~wake:WO.Periodic_tick observation));
+  let scheduled = { observation with scheduled_automation = schedule_attention_obs.scheduled_automation } in
+  check bool "a requested due schedule also reaches the reactive prompt" true
+    (List.mem WO.Scheduled_automation_due (reasons ~meta ~wake:WO.Attention_wake scheduled))
+;;
+
 let test_global_proactive_off_suppresses () =
   with_flag "MASC_KEEPER_AUTONOMOUS_ENABLED" "false" @@ fun () ->
   let meta = ready_meta () in
@@ -532,6 +557,7 @@ let () =
         ] )
     ; ( "reactive"
       , [ test_case "a task approval rides an eligible turn" `Quick test_approved_task_rides_the_next_eligible_turn
+        ; test_case "periodic reactions surface due work" `Quick test_periodic_reactions_surface_due_work
         ; test_case "default runs" `Quick test_default_reactive_runs
         ; test_case "global off does not suppress typed mention" `Quick
             test_global_reactive_off_does_not_suppress_typed_mention

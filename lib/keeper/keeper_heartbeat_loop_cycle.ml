@@ -91,6 +91,7 @@ let recorded_pulse = function
    must not interleave with this lane's meta writes. *)
 let run_keeper_cycle_admitted
       ~before_dispatch_authority
+      ?(record_pulse = true)
       ?deferred_runtime_lane
       ?on_deferred_runtime_consumed
       ?event_bus
@@ -125,18 +126,19 @@ let run_keeper_cycle_admitted
         ())
   in
   let record_pulse outcome =
-    Keeper_turn_pulse.record
-      ~base_path:ctx.config.base_path
-      ~keeper_name:meta_after_triage.name
-      ~at:(Time_compat.now ())
-      ~cause:
-        (Keeper_turn_pulse.cause_of_inputs
-           (Keeper_heartbeat_source_batch.stimuli
-              (Keeper_heartbeat_source_batch.sources turn_input)))
-      outcome;
-    Keeper_row_broadcast.changed
-      ~base_path:ctx.config.base_path
-      ~keeper_name:meta_after_triage.name
+    if record_pulse then (
+      Keeper_turn_pulse.record
+        ~base_path:ctx.config.base_path
+        ~keeper_name:meta_after_triage.name
+        ~at:(Time_compat.now ())
+        ~cause:
+          (Keeper_turn_pulse.cause_of_inputs
+             (Keeper_heartbeat_source_batch.stimuli
+                (Keeper_heartbeat_source_batch.sources turn_input)))
+        outcome;
+      Keeper_row_broadcast.changed
+        ~base_path:ctx.config.base_path
+        ~keeper_name:meta_after_triage.name)
   in
   match admitted_execution with
   | Error failure ->
@@ -213,6 +215,7 @@ let run_keeper_cycle_admitted
 
 let run_keeper_cycle
       ~admission_token
+      ?(record_pulse = true)
       ?deferred_runtime_lane
       ?on_deferred_runtime_consumed
       ?event_bus
@@ -235,6 +238,7 @@ let run_keeper_cycle
   run_keeper_cycle_admitted
     ~before_dispatch_authority:
       (fun () -> Keeper_turn_dispatch_authority.validate admission_token)
+    ~record_pulse
     ?deferred_runtime_lane
     ?on_deferred_runtime_consumed
     ~ctx

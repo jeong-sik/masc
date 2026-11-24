@@ -5969,6 +5969,16 @@ let test_crashed_cycle_skip_pulse_prevents_double_count () =
     (fun () ->
       let keeper_name = "pulse-single-count-keeper" in
       let meta = make_meta keeper_name in
+      check bool "Completed records pulse" true
+        (Masc.Keeper_heartbeat_loop_cycle.recorded_pulse (Completed { meta }));
+      check bool "Checkpointed records pulse" true
+        (Masc.Keeper_heartbeat_loop_cycle.recorded_pulse (Checkpointed { meta }));
+      check bool "Input_required records pulse" true
+        (Masc.Keeper_heartbeat_loop_cycle.recorded_pulse (Input_required meta));
+      check bool "Cancelled skips pulse" false
+        (Masc.Keeper_heartbeat_loop_cycle.recorded_pulse (Cancelled meta));
+      check bool "Skipped skips pulse" false
+        (Masc.Keeper_heartbeat_loop_cycle.recorded_pulse (Skipped meta));
       let registry_entry = R.For_testing.register ~base_path keeper_name meta in
       (* Simulate a completed cycle already counted in Keeper_turn_pulse. *)
       Masc.Keeper_turn_pulse.record

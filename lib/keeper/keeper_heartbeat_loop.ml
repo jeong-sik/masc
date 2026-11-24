@@ -1525,20 +1525,25 @@ let run_keepalive_unified_turn
               Cycle.Skipped meta_after_triage
             | Ok hitl_resolutions ->
               hitl_resolutions_for_cycle := Keeper_hitl_resolution_batch.resolutions hitl_resolutions;
-              run_keeper_cycle
-                ~admission_token
-                ?deferred_runtime_lane
-                ~on_deferred_runtime_consumed
-                ?event_bus
-                ~hitl_resolutions
-                ~ctx
-                ~meta_after_triage
-                ~stop
-                ~obs
-                ~turn_decision
-                ~shared_context
-                ~turn_input
-                ()
+              let outcome =
+                run_keeper_cycle
+                  ~admission_token
+                  ~record_pulse:(not !pulse_recorded)
+                  ?deferred_runtime_lane
+                  ~on_deferred_runtime_consumed
+                  ?event_bus
+                  ~hitl_resolutions
+                  ~ctx
+                  ~meta_after_triage
+                  ~stop
+                  ~obs
+                  ~turn_decision
+                  ~shared_context
+                  ~turn_input
+                  ()
+              in
+              if Cycle.recorded_pulse outcome then pulse_recorded := true;
+              outcome
           in
           let run_cycle () = run_fresh_cycle () in
           let cycle_outcome =
@@ -1548,7 +1553,6 @@ let run_keepalive_unified_turn
               ~lane_of_outcome:Cycle.deferred_runtime_lane
           in
           cycle_outcome_ref := Some cycle_outcome;
-          if Cycle.recorded_pulse cycle_outcome then pulse_recorded := true;
           (* What the next turn is told about this one moved into
              [Keeper_heartbeat_loop_cycle.run_keeper_cycle]: every lane runs
              through that wrapper, so the stop reason crosses lanes now

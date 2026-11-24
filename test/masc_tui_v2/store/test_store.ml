@@ -18254,6 +18254,13 @@ let test_oauth_poll_lifecycle () =
   Alcotest.(check bool) "unchanged consent keeps the current toast deadline" true (active.toast = quiet.toast);
   let admitted, _ = poll ~at:later quiet (status "callback_admitted") in
   Alcotest.(check bool) "callback admission is a new observation" true (quiet.toast <> admitted.toast);
+  List.iter (fun active ->
+    let limit = Clock.Mono.after_s now 601. in
+    let _, cmds = Update.step ~now:limit active (Msg.Tick { wall_unix = 701. }) in
+    Alcotest.(check bool) "a healthy login still reads the server outcome after consent expiry" true
+      (List.mem (Cmd.Http_get { epoch = active.epoch; req = Cmd.Get_oauth_attempt_status
+          { keeper; provider; attempt_id = "one" } }) (Cmd.flatten cmds)))
+    [ quiet; admitted ];
   List.iter (fun kind ->
     let stopped, cmds = poll ~at:later admitted (status kind) in
     Alcotest.(check (option int64)) kind None (deadline stopped);

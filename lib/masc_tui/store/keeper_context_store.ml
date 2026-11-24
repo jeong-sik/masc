@@ -850,10 +850,16 @@ let is_oauth_exchange_pollable ~now_ns ?wall_unix (ks : keeper_state)
         w >= exp
     | (Some _ | None), (Some _ | None) -> false
   in
-  (not settled)
-  && (not errors_exhausted)
-  && (not window_exceeded)
-  && not wall_expired
+  let confirmed_active =
+    match ks.oauth_attempt_status with
+    | Some { kind = ("awaiting_consent" | "callback_admitted"); _ } ->
+        ks.oauth_poll_consecutive_errors = 0
+    | Some _ | None -> false
+  in
+  (* An admitted callback can publish after the consent deadline. A healthy
+     status read keeps following the server to its terminal receipt. *)
+  (not settled) && (not errors_exhausted)
+  && (confirmed_active || (not window_exceeded && not wall_expired))
 
 let pending_oauth_polls ~now ?wall_unix t =
   let now_ns = Clock.Mono.to_ns now in

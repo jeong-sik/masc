@@ -2551,15 +2551,15 @@ let test_journeys_tab_multipane_dives_safety () =
   Alcotest.(check int) "J17 Infra Repos w/ changes has 3 panes" 3
     (Model.focusable_pane_count m_ir);
   let m_ir_p1, _ = step m_ir (mk_key Keymap.Input.Tab) in
-  let m_ir_d1, _ = step m_ir_p1 (mk_key Keymap.Input.Down) in
-  Alcotest.(check bool) "J17 Infra Repos pane 1 scrolls diff_scroll_offset" true
-    (m_ir_d1.infra.diff_scroll_offset > 0);
-  Alcotest.(check int) "J17 Infra Repos pane 1 preserves repo selected_index" 0
-    m_ir_d1.infra.selected_index;
-  let m_ir_p2, _ = step m_ir_d1 (mk_key Keymap.Input.Tab) in
-  let m_ir_c1, _ = step m_ir_p2 (mk_key Keymap.Input.Down) in
-  Alcotest.(check int) "J17 Infra Repos pane 2 moves change_selected_index" 1
+  let m_ir_c1, _ = step m_ir_p1 (mk_key Keymap.Input.Down) in
+  Alcotest.(check int) "J17 Infra Repos pane 1 moves change_selected_index" 1
     m_ir_c1.infra.change_selected_index;
+  Alcotest.(check int) "J17 Infra Repos pane 1 preserves repo selected_index" 0
+    m_ir_c1.infra.selected_index;
+  let m_ir_p2, _ = step m_ir_c1 (mk_key Keymap.Input.Tab) in
+  let m_ir_d1, _ = step m_ir_p2 (mk_key Keymap.Input.Down) in
+  Alcotest.(check bool) "J17 Infra Repos pane 2 scrolls diff_scroll_offset" true
+    (m_ir_d1.infra.diff_scroll_offset > 0);
   let ir_cmds = View_fetches.fetches_for_current_view ~force:true m_ir in
   Alcotest.(check bool)
     "J17 Infra Repos fetches the selected repository's activity" true
@@ -4997,7 +4997,7 @@ let test_pillar2_scroll_bounds_all_surfaces () =
     in
     {
       base with
-      nav = { base.nav with workspace = Nav.Infra; pane_index = 1 };
+      nav = { base.nav with workspace = Nav.Infra; pane_index = 2 };
       infra =
         base.infra
         |> Infra_store.set_tab Nav.Infra_repos_changes
@@ -5005,7 +5005,7 @@ let test_pillar2_scroll_bounds_all_surfaces () =
              activity;
     }
   in
-  assert_scroll_exact ~label:"Infra > Repos pane 1 (with sel_repo link row)"
+  assert_scroll_exact ~label:"Infra > Repos pane 2 (with sel_repo link row)"
     ~needle:"repo_line_44"
     ~get_off:(fun m -> m.infra.diff_scroll_offset)
     m_repos_p1;
@@ -6619,8 +6619,11 @@ let test_wave3_surfaces_scroll_bounds_guards_and_secrets () =
   Alcotest.(check int) "Infra_code file viewer Down past End stays clamped"
     m_code_end.infra.code.file_scroll_offset
     m_code_extra.infra.code.file_scroll_offset;
-  let m_code_git, _ = step m_code (char_key "g") in
-  Alcotest.(check bool) "Infra_code [g] cycles File -> Git Status" true
+  let m_code_top, _ = step m_code_end (char_key "g") in
+  Alcotest.(check int) "Infra_code [g] jumps to top (Vim Home)" 0
+    m_code_top.infra.code.file_scroll_offset;
+  let m_code_git, _ = step m_code (char_key "v") in
+  Alcotest.(check bool) "Infra_code [v] cycles File -> Git Status" true
     (Infra_store.equal_code_right_mode m_code_git.infra.code.right_mode
        Infra_store.Code_git_status);
   let expected_code_scopes =

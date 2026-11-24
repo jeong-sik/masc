@@ -148,7 +148,7 @@ let build ~now_unix ~mode (inp : input) =
              ~en:(Printf.sprintf "1 observed revision (r%d)" single.rev))
     | _ :: _ :: _ -> None
   in
-  let hotkey_hint = Some "[g]" in
+  let hotkey_hint = Some "[M]" in
   let title =
     match mode with
     | Flow_io ->

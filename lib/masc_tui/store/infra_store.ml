@@ -383,44 +383,6 @@ let apply_log_snapshot entries t =
   in
   { t with logs = bounded; logs_loaded = true; last_log_seq }
 
-let append_log (entry : Wire_infra.system_log_entry) t =
-  let exists =
-    List.exists
-      (fun (e : Wire_infra.system_log_entry) -> Int.equal e.seq entry.seq)
-      t.logs
-  in
-  let logs =
-    if exists then t.logs else List.take max_logs (entry :: t.logs)
-  in
-  let last_log_seq =
-    match t.last_log_seq with
-    | None -> Some entry.seq
-    | Some prev -> Some (max prev entry.seq)
-  in
-  { t with logs; logs_loaded = true; last_log_seq }
-
-(* A reset frame replaces the list and the cursor. After a server restart the
-   ring numbers from zero again, so keeping the old entries would drop every
-   new line whose seq an old one already had, and keeping the old maximum
-   would hand the next stream a cursor from the previous run. *)
-let apply_log_frame ({ reset; entries } : Wire_infra.system_log_frame) t =
-  if reset then
-    let bounded =
-      entries
-      |> List.stable_sort
-           (fun (a : Wire_infra.system_log_entry) (b : Wire_infra.system_log_entry) ->
-             Int.compare b.seq a.seq)
-      |> List.take max_logs
-    in
-    { t with logs = bounded; logs_loaded = true; last_log_seq = max_seq_of bounded }
-  else List.fold_left (fun acc entry -> append_log entry acc) t (List.rev entries)
-
-let push_activity row t =
-  {
-    t with
-    activity_events = List.take max_activity (row :: t.activity_events);
-  }
-
 let record_stream_gap dropped t =
   if dropped <= 0 then t
   else { t with stream_gap_count = t.stream_gap_count + dropped }
@@ -520,6 +482,87 @@ let visible_timeline t =
             Float.compare (entry_timestamp_unix b) (entry_timestamp_unix a))
           (logs @ events)
 
+let same_timeline_entry a b =
+  match a, b with
+  | Entry_log ea, Entry_log eb -> Int.equal ea.seq eb.seq
+  | Entry_event eva, Entry_event evb ->
+      Float.equal eva.at_unix evb.at_unix
+      && String.equal eva.summary evb.summary
+      && Option.equal String.equal eva.keeper evb.keeper
+  | Entry_log _, Entry_event _ | Entry_event _, Entry_log _ -> false
+
+(* Preserve the reader's selected entry when live SSE prepends new items while
+   scrolled off the newest row (selected_index > 0). Index 0 stays pinned to
+   the live tail head. *)
+let anchor_timeline_selection ~prev_t next_t =
+  if
+    not
+      (Nav.equal_infra_tab prev_t.active_tab Nav.Infra_activity_logs
+      && prev_t.selected_index > 0)
+  then next_t
+  else
+    let prev_vis = visible_timeline prev_t in
+    let prev_idx = clamp_index (List.length prev_vis) prev_t.selected_index in
+    match List.nth_opt prev_vis prev_idx with
+    | None -> next_t
+    | Some anchor ->
+        let next_vis = visible_timeline next_t in
+        let rec find i = function
+          | [] -> None
+          | x :: rest ->
+              if same_timeline_entry anchor x then Some i else find (i + 1) rest
+        in
+        (match find 0 next_vis with
+         | Some new_idx ->
+             let shift = new_idx - prev_idx in
+             let scroll_offset = max 0 (prev_t.scroll_offset + shift) in
+             { next_t with selected_index = new_idx; scroll_offset }
+         | None ->
+             let clamped = clamp_index (List.length next_vis) prev_idx in
+             { next_t with selected_index = clamped })
+
+let append_log (entry : Wire_infra.system_log_entry) t =
+  let exists =
+    List.exists
+      (fun (e : Wire_infra.system_log_entry) -> Int.equal e.seq entry.seq)
+      t.logs
+  in
+  let logs =
+    if exists then t.logs else List.take max_logs (entry :: t.logs)
+  in
+  let last_log_seq =
+    match t.last_log_seq with
+    | None -> Some entry.seq
+    | Some prev -> Some (max prev entry.seq)
+  in
+  let next = { t with logs; logs_loaded = true; last_log_seq } in
+  if exists then next else anchor_timeline_selection ~prev_t:t next
+
+(* A reset frame replaces the list and the cursor. After a server restart the
+   ring numbers from zero again, so keeping the old entries would drop every
+   new line whose seq an old one already had, and keeping the old maximum
+   would hand the next stream a cursor from the previous run. *)
+let apply_log_frame ({ reset; entries } : Wire_infra.system_log_frame) t =
+  if reset then
+    let bounded =
+      entries
+      |> List.stable_sort
+           (fun (a : Wire_infra.system_log_entry) (b : Wire_infra.system_log_entry) ->
+             Int.compare b.seq a.seq)
+      |> List.take max_logs
+    in
+    { t with logs = bounded; logs_loaded = true; last_log_seq = max_seq_of bounded }
+  else List.fold_left (fun acc entry -> append_log entry acc) t (List.rev entries)
+
+let push_activity row t =
+  let next =
+    {
+      t with
+      activity_events = List.take max_activity (row :: t.activity_events);
+    }
+  in
+  anchor_timeline_selection ~prev_t:t next
+
 let set_source_filter source_filter t =
   {
     t with
@@ -550,7 +593,7 @@ let set_log_level_filter log_level_filter t =
 let cycle_log_level_filter t =
   let next =
     match t.log_level_filter with
-    | None -> Some Wire_infra.Log_info
+    | None -> Some Wire_infra.Log_debug
     | Some Wire_infra.Log_debug -> Some Wire_infra.Log_info
     | Some Wire_infra.Log_info -> Some Wire_infra.Log_warn
     | Some Wire_infra.Log_warn -> Some Wire_infra.Log_error
@@ -559,7 +602,13 @@ let cycle_log_level_filter t =
   set_log_level_filter next t
 
 let set_log_keeper_filter log_keeper_filter t =
-  { t with log_keeper_filter; selected_index = 0; scroll_offset = 0 }
+  {
+    t with
+    log_keeper_filter;
+    selected_index = 0;
+    scroll_offset = 0;
+    detail_scroll_offset = 0;
+  }
 
 let toggle_raw_json t = { t with show_raw_json = not t.show_raw_json }
 
@@ -820,63 +869,67 @@ let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t 
         in
         { t with selected_index; scroll_offset; detail_scroll_offset }
   | Nav.Infra_repos_changes -> (
-      match pane_index with
-      | 1 ->
-          let max_scroll =
-            match max_detail_scroll with
-            | Some ms -> max 0 ms
-            | None -> (
-                match selected_change t with
-                | Some fc ->
-                    let vis =
-                      max 1
-                        (Option.value viewport_rows
-                           ~default:Store_scroll.default_viewport_rows)
-                    in
-                    max 0 (List.length (change_preview_rows fc) - vis)
-                | None -> 0)
-          in
-          let diff_scroll_offset =
-            Store_scroll.clamp_scroll ~max_scroll (t.diff_scroll_offset + delta)
-          in
-          { t with diff_scroll_offset }
-      | 2 ->
-          let len = List.length (repo_changes t) in
-          let change_selected_index =
-            clamp_index len (t.change_selected_index + delta)
-          in
-          let change_scroll_offset =
-            adjust_scroll ?viewport_rows ~scroll:t.change_scroll_offset
-              change_selected_index
-          in
-          let diff_scroll_offset =
-            if Int.equal change_selected_index t.change_selected_index then
-              t.diff_scroll_offset
-            else 0
-          in
+      let has_changes = repo_changes t <> [] in
+      let is_changes_pane = has_changes && pane_index = 1 in
+      let is_diff_pane =
+        if has_changes then pane_index = 2 else pane_index = 1
+      in
+      if is_diff_pane then
+        let max_scroll =
+          match max_detail_scroll with
+          | Some ms -> max 0 ms
+          | None -> (
+              match selected_change t with
+              | Some fc ->
+                  let vis =
+                    max 1
+                      (Option.value viewport_rows
+                         ~default:Store_scroll.default_viewport_rows)
+                  in
+                  max 0 (List.length (change_preview_rows fc) - vis)
+              | None -> 0)
+        in
+        let diff_scroll_offset =
+          Store_scroll.clamp_scroll ~max_scroll (t.diff_scroll_offset + delta)
+        in
+        { t with diff_scroll_offset }
+      else if is_changes_pane then
+        let len = List.length (repo_changes t) in
+        let change_selected_index =
+          clamp_index len (t.change_selected_index + delta)
+        in
+        let change_scroll_offset =
+          adjust_scroll ?viewport_rows ~scroll:t.change_scroll_offset
+            change_selected_index
+        in
+        let diff_scroll_offset =
+          if Int.equal change_selected_index t.change_selected_index then
+            t.diff_scroll_offset
+          else 0
+        in
+        {
+          t with
+          change_selected_index;
+          change_scroll_offset;
+          diff_scroll_offset;
+        }
+      else
+        let len = List.length (filtered_repositories t) in
+        let selected_index = clamp_index len (t.selected_index + delta) in
+        let scroll_offset =
+          adjust_scroll ?viewport_rows ~scroll:t.scroll_offset selected_index
+        in
+        if Int.equal selected_index t.selected_index then
+          { t with selected_index; scroll_offset }
+        else
           {
             t with
-            change_selected_index;
-            change_scroll_offset;
-            diff_scroll_offset;
-          }
-      | _ ->
-          let len = List.length (filtered_repositories t) in
-          let selected_index = clamp_index len (t.selected_index + delta) in
-          let scroll_offset =
-            adjust_scroll ?viewport_rows ~scroll:t.scroll_offset selected_index
-          in
-          if Int.equal selected_index t.selected_index then
-            { t with selected_index; scroll_offset }
-          else
-            {
-              t with
-              selected_index;
-              scroll_offset;
-              change_selected_index = 0;
-              change_scroll_offset = 0;
-              diff_scroll_offset = 0;
-            })
+            selected_index;
+            scroll_offset;
+            change_selected_index = 0;
+            change_scroll_offset = 0;
+            diff_scroll_offset = 0;
+          })
   | Nav.Infra_code ->
       if pane_index = 1 then
         match t.code.right_mode with

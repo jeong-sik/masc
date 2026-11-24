@@ -556,6 +556,7 @@ type board_space_effect =
   | Board_space_toggle_chain of string
   | Board_space_toggle_signal_only
 
+val selected_post_expandable_chain_root : t -> string option
 val board_space_effect : t -> board_space_effect
 
 val selected_wiki_page : t -> Wire_knowledge.wiki_page_summary option

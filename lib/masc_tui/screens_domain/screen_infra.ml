@@ -561,7 +561,10 @@ let draw_sandbox_inspector ?(scroll = 0) ~grid ~cache ~(rect : Rect.t)
   let inner =
     Card.draw ~cache grid ~rect ~theme
       (H.card_spec ?subtitle ~focused
-         ~hotkey:(Say.resolve lang (Say.make ~ko:"[Enter] 상세" ~en:"[Enter] Dive"))
+         ~hotkey:
+           (Say.resolve lang
+              (Say.make ~ko:"[Enter] 상세 · [p] 프로브"
+                 ~en:"[Enter] Dive · [p] Probe"))
          (Say.resolve lang (Say.make ~ko:"샌드박스 인스펙터" ~en:"Sandbox Inspector")))
   in
   if Rect.is_empty inner then ()
@@ -1496,9 +1499,10 @@ let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
         Option.bind (Observed.to_option activity) (activity_gap_note ~lang)
     | None -> None
   in
+  let ch_focused = changes <> [] && Model.pane_focused model 1 in
   let ch_inner =
     Card.draw ~cache grid ~rect:changes_rect ~theme
-      (H.card_spec ?subtitle:gap_note ~focused:(Model.pane_focused model 2)
+      (H.card_spec ?subtitle:gap_note ~focused:ch_focused
          (Say.resolve lang
             (Say.make
                ~ko:(Printf.sprintf "키퍼 파일 변경 (%d)" (List.length changes))
@@ -1524,7 +1528,6 @@ let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
             (* Rows repeat per call, so one path can sit on several rows;
                the cursor is the row index. *)
             let is_active = Int.equal idx sel_ch_idx in
-            let ch_focused = Model.pane_focused model 2 in
             let row_rect = Rect.make ~x:ch_inner.x ~y:!y ~w:ch_inner.w ~h:1 in
             let row_bg =
               if is_active then H.selected_row_bg ~theme ~focused:ch_focused
@@ -1579,9 +1582,11 @@ let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
     | None, Some r -> Some r.default_branch
     | None, None -> None
   in
+  let diff_pane_idx = if changes <> [] then 2 else 1 in
   let diff_inner =
     Card.draw ~cache grid ~rect:right_rect ~theme
-      (H.card_spec ?subtitle:diff_subtitle ~focused:(Model.pane_focused model 1)
+      (H.card_spec ?subtitle:diff_subtitle
+         ~focused:(Model.pane_focused model diff_pane_idx)
          ~hotkey:(Say.resolve lang (Say.make ~ko:"[o] URL 열기" ~en:"[o] Open URL"))
          (Say.resolve lang (Say.make ~ko:"변경 미리보기" ~en:"Change Preview")))
   in
@@ -1750,26 +1755,34 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
            };
          ]
        else [])
-    @ [
-        {
-          H.label = "ERR";
-          active = level_active (Some Wire_infra.Log_error);
-          tone = Some Theme.Status_critical;
-          glyph = None;
-        };
-        {
-          H.label = "WRN";
-          active = level_active (Some Wire_infra.Log_warn);
-          tone = Some Theme.Status_attention;
-          glyph = None;
-        };
-        {
-          H.label = "INF";
-          active = level_active (Some Wire_infra.Log_info);
-          tone = Some Theme.Status_ok;
-          glyph = None;
-        };
-      ]
+    @ (if src_is_events then []
+       else
+         [
+           {
+             H.label = "ERR";
+             active = level_active (Some Wire_infra.Log_error);
+             tone = Some Theme.Status_critical;
+             glyph = None;
+           };
+           {
+             H.label = "WRN";
+             active = level_active (Some Wire_infra.Log_warn);
+             tone = Some Theme.Status_attention;
+             glyph = None;
+           };
+           {
+             H.label = "INF";
+             active = level_active (Some Wire_infra.Log_info);
+             tone = Some Theme.Status_ok;
+             glyph = None;
+           };
+           {
+             H.label = "DBG";
+             active = level_active (Some Wire_infra.Log_debug);
+             tone = Some Theme.Status_historical;
+             glyph = None;
+           };
+         ])
     @ (match inf.log_keeper_filter with
        | Some kp ->
            [
@@ -2070,15 +2083,17 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
         in
         if not (Rect.is_empty content) then begin
           let y = ref content.y and bot = Rect.bottom content in
-          let max_msg_rows = Int.min 6 (Int.max 1 (bot - !y - 2)) in
           let msg_lines =
             H.wrap_lines ~max_width:(Int.max 1 (content.w - 2)) e.message
-            |> H.safe_take max_msg_rows
           in
           let msg_n = List.length msg_lines in
-          if msg_n > 0 then begin
+          let eff_scroll = Int.max 0 inf.detail_scroll_offset in
+          let msg_skip = Int.min msg_n eff_scroll in
+          let vis_msg = Store_scroll.drop msg_skip msg_lines in
+          let vis_msg_n = Int.min (List.length vis_msg) (Int.max 0 (bot - !y)) in
+          if vis_msg_n > 0 then begin
             Card.draw_left_rail ~tone:lvl_tone grid ~x:content.x ~y:!y
-              ~h:(Int.min msg_n (bot - !y)) ~theme;
+              ~h:vis_msg_n ~theme;
             List.iter
               (fun line ->
                 if !y < bot then begin
@@ -2088,9 +2103,9 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
                        ~style:(H.text_style ~theme ()) line);
                   incr y
                 end)
-              msg_lines
+              vis_msg
           end;
-          if !y < bot then begin
+          if eff_scroll <= msg_n && !y < bot then begin
             H.draw_divider ~grid ~rect:content ~y:!y ~theme
               ~label:(Say.resolve lang (Say.make ~ko:"속성 트리" ~en:"Attributes"))
               ();
@@ -2101,12 +2116,13 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
             let tree_rect =
               Rect.make ~x:content.x ~y:!y ~w:content.w ~h:tree_h
             in
+            let tree_scroll = Int.max 0 (eff_scroll - (msg_n + 1)) in
             let lines =
               Json_tree.flatten ~max_depth:4 ~redact_secrets:true e.details
             in
             ignore
               (Json_tree.draw grid ~rect:tree_rect ~theme
-                 ~scroll:inf.detail_scroll_offset lines)
+                 ~scroll:tree_scroll lines)
           end
         end
     | Some (Infra_store.Entry_event ev) ->
@@ -2280,7 +2296,7 @@ let render_code ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
   in
   let scope_lbl = "[s] " ^ workspace_scope_label code.scope in
   let mode_lbl =
-    "[g] " ^ Say.resolve lang (Infra_store.code_right_mode_label code.right_mode)
+    "[v] " ^ Say.resolve lang (Infra_store.code_right_mode_label code.right_mode)
   in
   let pills =
     [
@@ -2316,8 +2332,8 @@ let render_code ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     (H.draw_pills ~grid ~rect:bar_rect ~theme
        ~right_hint:
          (Say.resolve lang
-            (Say.make ~ko:"[p] 파일 찾기 · [f] 코드 검색 · [g] Git · [y] 복사"
-               ~en:"[p] Find · [f] Search · [g] Git · [y] Copy"))
+            (Say.make ~ko:"[p] 파일 찾기 · [f] 코드 검색 · [v] Git · [y] 복사"
+               ~en:"[p] Find · [f] Search · [v] Git · [y] Copy"))
        pills);
   let left_rect, right_rect =
     Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.32
@@ -2427,8 +2443,8 @@ let render_code ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       (H.card_spec ?subtitle:right_subtitle ~focused:(Model.pane_focused model 1)
          ~hotkey:
            (Say.resolve lang
-              (Say.make ~ko:"[g] Git · [p] 찾기 · [f] 검색 · [y] 복사"
-                 ~en:"[g] Git · [p] Find · [f] Search · [y] Copy"))
+              (Say.make ~ko:"[v] Git · [p] 찾기 · [f] 검색 · [y] 복사"
+                 ~en:"[v] Git · [p] Find · [f] Search · [y] Copy"))
          (Say.resolve lang (Infra_store.code_right_mode_label code.right_mode)))
   in
   let rc = H.pad_content ~bp right_inner in
@@ -2533,8 +2549,8 @@ let render_code ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               let sel = H.clamp_index total code.search_selected_index in
               let start_i, _ =
                 Table.compute_viewport ~total_rows:total
-                  ~viewport_rows:(Int.max 1 vis_rect.h) ~scroll:0
-                  ~selected:(Some sel)
+                  ~viewport_rows:(Int.max 1 vis_rect.h)
+                  ~scroll:code.git_scroll_offset ~selected:(Some sel)
               in
               let y = ref vis_rect.y and bot = Rect.bottom vis_rect in
               List.iteri
@@ -2984,7 +3000,10 @@ let render_dive_sandbox ~keeper ~(model : Model.t) ~cache ~(rect : Rect.t)
                  else Theme.Status_historical)
               (if inf.show_raw_json then "[Space] Json_tree ON"
                else "[Space] Json_tree"))
-         ~hotkey:(Say.resolve lang (Say.make ~ko:"[Esc] 뒤로" ~en:"[Esc] Back"))
+         ~hotkey:
+           (Say.resolve lang
+              (Say.make ~ko:"[p] 프로브 · [Esc] 뒤로"
+                 ~en:"[p] Probe · [Esc] Back"))
          (Say.resolve lang
             (Say.make ~ko:"인프라 > 샌드박스 상세" ~en:"Infra > Sandbox Dive")))
   in
@@ -3300,6 +3319,29 @@ let render_dive_incident ~incident_id ~(model : Model.t) ~cache ~(rect : Rect.t)
             let y = ref content.y and bot = Rect.bottom content in
             let rem = Int.max 0 (bot - !y) in
             let detail_h = Int.max 0 (rem / 2) in
+            let detail_max =
+              if detail_h <= 0 then 0
+              else
+                match embedded_json with
+                | Some (prefix, parsed_json) ->
+                    let used = if String.equal prefix "" then 0 else 1 in
+                    let tree_h = Int.max 1 (detail_h - used) in
+                    let lines =
+                      Json_tree.flatten ~max_depth:4 ~redact_secrets:true
+                        parsed_json
+                    in
+                    Int.max 0 (List.length lines - tree_h)
+                | None ->
+                    let safe_detail = H.redact_secrets_in_text inc.detail in
+                    let total_md =
+                      List.length
+                        (Markdown.render_lines ~theme ~width:content.w
+                           ~osc8:true safe_detail)
+                    in
+                    Int.max 0 (total_md - detail_h)
+            in
+            let top_scroll = Int.min detail_max model.nav.dive_scroll_offset in
+            let log_scroll = Int.max 0 (model.nav.dive_scroll_offset - detail_max) in
             if detail_h > 0 then begin
               (match embedded_json with
                | Some (prefix, parsed_json) ->
@@ -3324,7 +3366,7 @@ let render_dive_incident ~incident_id ~(model : Model.t) ~cache ~(rect : Rect.t)
                      in
                      ignore
                        (Json_tree.draw grid ~rect:tree_rect ~theme
-                          ~scroll:model.nav.dive_scroll_offset lines)
+                          ~scroll:top_scroll lines)
                    end
                | None ->
                    let md_rect =
@@ -3333,7 +3375,7 @@ let render_dive_incident ~incident_id ~(model : Model.t) ~cache ~(rect : Rect.t)
                    let safe_detail = H.redact_secrets_in_text inc.detail in
                    ignore
                      (Markdown.draw grid ~rect:md_rect ~theme ~osc8:true
-                        ~scroll:model.nav.dive_scroll_offset safe_detail));
+                        ~scroll:top_scroll safe_detail));
               y := !y + detail_h
             end;
             if !y < bot then begin
@@ -3346,9 +3388,8 @@ let render_dive_incident ~incident_id ~(model : Model.t) ~cache ~(rect : Rect.t)
                 Rect.make ~x:content.x ~y:!y ~w:content.w
                   ~h:(Int.max 0 (bot - !y))
               in
-              draw_tail_logs ~scroll:model.nav.dive_scroll_offset ~grid
-                ~rect:log_area ~theme ~lang
-                ~tz_offset_sec:model.tz_offset_sec ~filter_opt inf.logs
+              draw_tail_logs ~scroll:log_scroll ~grid ~rect:log_area ~theme
+                ~lang ~tz_offset_sec:model.tz_offset_sec ~filter_opt inf.logs
             end
           end
 
@@ -3468,21 +3509,27 @@ let render_dive_log_detail ~seq ~(model : Model.t) ~cache ~(rect : Rect.t)
         end;
         let msg_lines =
           H.wrap_lines ~max_width:(Int.max 1 (content.w - 2)) e.message
-          |> H.safe_take 6
         in
-        List.iter
-          (fun ln ->
-            if !y < bot then begin
-              Card.draw_left_rail ~tone:lvl_tone grid ~x:content.x ~y:!y ~h:1
-                ~theme;
-              ignore
-                (H.put_clipped ~grid ~clip:content ~x:(content.x + 2) ~y:!y
-                   ~max_w:(Int.max 0 (content.w - 2))
-                   ~style:(H.text_style ~theme ()) ln);
-              incr y
-            end)
-          msg_lines;
-        if !y < bot then begin
+        let msg_n = List.length msg_lines in
+        let eff_scroll = Int.max 0 model.nav.dive_scroll_offset in
+        let msg_skip = Int.min msg_n eff_scroll in
+        let vis_msg = Store_scroll.drop msg_skip msg_lines in
+        let vis_msg_n = Int.min (List.length vis_msg) (Int.max 0 (bot - !y)) in
+        if vis_msg_n > 0 then begin
+          Card.draw_left_rail ~tone:lvl_tone grid ~x:content.x ~y:!y
+            ~h:vis_msg_n ~theme;
+          List.iter
+            (fun ln ->
+              if !y < bot then begin
+                ignore
+                  (H.put_clipped ~grid ~clip:content ~x:(content.x + 2) ~y:!y
+                     ~max_w:(Int.max 0 (content.w - 2))
+                     ~style:(H.text_style ~theme ()) ln);
+                incr y
+              end)
+            vis_msg
+        end;
+        if eff_scroll <= msg_n && !y < bot then begin
           H.draw_divider ~grid ~rect:content ~y:!y ~theme
             ~label:(Say.resolve lang (Say.make ~ko:"구조화 속성" ~en:"Structured Details"))
             ();
@@ -3493,12 +3540,13 @@ let render_dive_log_detail ~seq ~(model : Model.t) ~cache ~(rect : Rect.t)
           let tree_rect =
             Rect.make ~x:content.x ~y:!y ~w:content.w ~h:tree_h
           in
+          let tree_scroll = Int.max 0 (eff_scroll - (msg_n + 1)) in
           let lines =
             Json_tree.flatten ~max_depth:5 ~redact_secrets:true e.details
           in
           ignore
             (Json_tree.draw grid ~rect:tree_rect ~theme
-               ~scroll:model.nav.dive_scroll_offset lines)
+               ~scroll:tree_scroll lines)
         end
 
 let render_dive ~(target : Nav.infra_dive_target) ~(model : Model.t) ~cache

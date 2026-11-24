@@ -2496,8 +2496,6 @@ let dispatch_keeper_config_key ~now (m : Model.t)
                      ~en:"[d] Dry-run diff · [Enter] Edit · [←→] Cycle value")
                   m
               , [] ))
-    | Keymap.Input.Char "d" when is_printable_key norm ->
-        Some (Update_actions.dry_run_settings_config ~now m)
     | Keymap.Input.Char "s" when norm.mods.ctrl && not norm.mods.alt ->
         Some (save_settings_config ~now m)
     | Keymap.Input.Delete -> (
@@ -3353,67 +3351,6 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                         && Option.equal String.equal (key_char_opt norm.key)
                              (Some "x")
                       in
-                      let is_memory_flow_toggle_g =
-                        (not (Drafts.is_focused m.drafts))
-                        && (not m.nav.filter_focused)
-                        && (not (Model.sidebar_has_focus m))
-                        && Option.is_none m.nav.overlay
-                        && Option.is_none (Memory_diagram.active_diagram m)
-                        && Option.is_none m.knowledge.memory_reading
-                        && (not norm.mods.ctrl) && (not norm.mods.alt)
-                        && (not norm.mods.shift)
-                        && Option.equal String.equal (key_char_opt norm.key)
-                             (Some "g")
-                        &&
-                        match Model.active_dive m with
-                        | Some (Nav.Dive_knowledge (Nav.Memory_diff_dive _)) ->
-                            true
-                        | Some (Nav.Dive_keeper { tab = Nav.Keeper_memory; _ }) ->
-                            true
-                        | Some
-                            ( Nav.Dive_keeper
-                                {
-                                  tab =
-                                    ( Nav.Keeper_chat
-                                    | Nav.Keeper_context
-                                    | Nav.Keeper_tool_calls
-                                    | Nav.Keeper_work_candle
-                                    | Nav.Keeper_sandbox
-                                    | Nav.Keeper_config
-                                    | Nav.Keeper_logs
-                                    | Nav.Keeper_identity );
-                                  _;
-                                }
-                            | Nav.Dive_work _
-                            | Nav.Dive_runtime _
-                            | Nav.Dive_infra _
-                            | Nav.Dive_knowledge
-                                ( Nav.Thread_dive _
-                                | Nav.Wiki_dive _
-                                | Nav.Artifact_dive _ ) ) ->
-                            false
-                        | None ->
-                            (Nav.equal_workspace m.nav.workspace Nav.Knowledge
-                             && Nav.equal_knowledge_tab m.knowledge.active_tab
-                                  Nav.Knowledge_memory)
-                            || (Nav.equal_workspace m.nav.workspace Nav.Keepers
-                                && Nav.equal_keeper_tab
-                                     m.fleet.keeper_dive_tab Nav.Keeper_memory
-                                && (m.nav.pane_index = 1 || m.nav.zoomed))
-                      in
-                      let is_code_git_toggle_g =
-                        (not (Drafts.is_focused m.drafts))
-                        && (not m.nav.filter_focused)
-                        && (not (Model.sidebar_has_focus m))
-                        && Option.is_none m.nav.overlay
-                        && Option.is_none (Model.active_dive m)
-                        && (not norm.mods.ctrl) && (not norm.mods.alt)
-                        && (not norm.mods.shift)
-                        && Option.equal String.equal (key_char_opt norm.key)
-                             (Some "g")
-                        && Nav.equal_workspace m.nav.workspace Nav.Infra
-                        && Nav.equal_infra_tab m.infra.active_tab Nav.Infra_code
-                      in
                       let screen_context_intercept =
                         if
                           Drafts.is_focused m.drafts
@@ -3534,42 +3471,6 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                             | Some _ | None -> None
                       in
                       if is_ctrl_x then interrupt_active_keeper_turn ~now m
-                      else if is_memory_flow_toggle_g then
-                        let knowledge =
-                          Knowledge_store.toggle_memory_flow_mode m.knowledge
-                        in
-                        let lbl =
-                          Masc_tui_ui.Memory_flow.mode_label
-                            knowledge.memory_flow_mode
-                        in
-                        ( Model.with_toast ~now ~level:Model.Toast_info
-                            (Say.make
-                               ~ko:
-                                 ("기억 그래프 모드: "
-                                 ^ Say.resolve Say.Lang_ko lbl)
-                               ~en:
-                                 ("Memory chart mode: "
-                                 ^ Say.resolve Say.Lang_en lbl))
-                            { m with knowledge }
-                        , [] )
-                      else if is_code_git_toggle_g then
-                        let infra = Infra_store.cycle_code_git_mode m.infra in
-                        let lbl =
-                          Infra_store.code_right_mode_label
-                            infra.code.right_mode
-                        in
-                        let next =
-                          { m with infra }
-                          |> Model.with_toast ~now ~level:Model.Toast_info
-                               (Say.make
-                                  ~ko:
-                                    ("코드 패널 모드: "
-                                    ^ Say.resolve Say.Lang_ko lbl)
-                                  ~en:
-                                    ("Code panel mode: "
-                                    ^ Say.resolve Say.Lang_en lbl))
-                        in
-                        (next, View_fetches.fetches_for_current_view next)
                       else
                         match screen_context_intercept with
                         | Some act -> Update_actions.execute_action ~now m act

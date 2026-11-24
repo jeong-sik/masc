@@ -9374,7 +9374,7 @@ let test_feature_wave1_store_and_polish_nits () =
        (function Cmd.Http_get { req = Cmd.Get_lane_addons; _ } -> true | _ -> false)
        cmds_sse_addon);
 
-  (* === Feature 3: [g] toggles Memory Flow mode on Knowledge > Memory & Keeper_memory === *)
+  (* === Feature 3: [M] toggles Memory Flow mode on Knowledge > Memory & Keeper_memory (freeing [g] for Home) === *)
   let m_mem =
     {
       m0 with
@@ -9383,12 +9383,12 @@ let test_feature_wave1_store_and_polish_nits () =
     }
   in
   let mode0 = m_mem.knowledge.memory_flow_mode in
-  let m_mem_g, _ = Update.step ~now:t1 m_mem (Msg.Key_event (char_key "g")) in
-  Alcotest.(check bool) "[g] toggles memory_flow_mode Flow_io -> Net_total" true
-    (m_mem_g.knowledge.memory_flow_mode <> mode0);
-  let m_mem_g2, _ = Update.step ~now:t1 m_mem_g (Msg.Key_event (char_key "g")) in
-  Alcotest.(check bool) "[g] twice toggles back to Flow_io" true
-    (m_mem_g2.knowledge.memory_flow_mode = mode0);
+  let m_mem_m, _ = Update.step ~now:t1 m_mem (Msg.Key_event (char_key "M")) in
+  Alcotest.(check bool) "[M] toggles memory_flow_mode Flow_io -> Net_total" true
+    (m_mem_m.knowledge.memory_flow_mode <> mode0);
+  let m_mem_m2, _ = Update.step ~now:t1 m_mem_m (Msg.Key_event (char_key "M")) in
+  Alcotest.(check bool) "[M] twice toggles back to Flow_io" true
+    (m_mem_m2.knowledge.memory_flow_mode = mode0);
 
   (* === Feature 4: Honest Per-View SSOT mode + Unified Infra timeline [s] === *)
   let live_fr =
@@ -12624,6 +12624,487 @@ let test_ux_batch3_work_keepers_chat_mouse () =
   Alcotest.(check int) "UX-27 Left_press inside last pane_rect focuses that pane"
     last_idx m_clicked.nav.pane_index
 
+let test_ux_batch4_knowledge_runtime_infra () =
+  let m0 = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
+  let mk_key key : Keymap.Input.key_event =
+    { key; mods = Keymap.Input.no_mods }
+  in
+  let step m ev = Update.step ~now:t0 m (Msg.Key_event ev) in
+
+  (* UX-28: Memory_diff_dive [w] is no-op; Knowledge_memory non-Diff subview guards [e]/[f]/[Enter] *)
+  let m_mdive =
+    {
+      m0 with
+      nav =
+        {
+          m0.nav with
+          workspace = Nav.Knowledge;
+          dive_stack =
+            [
+              Nav.Dive_knowledge
+                (Nav.Memory_diff_dive { keeper = None; from_rev = 1; to_rev = 5 });
+            ];
+        };
+      knowledge =
+        m0.knowledge
+        |> Knowledge_store.set_tab Nav.Knowledge_memory
+        |> Knowledge_store.set_memory_diff_window Knowledge_store.Window_24h;
+    }
+  in
+  let m_mdive_w, _ = step m_mdive (char_key "w") in
+  Alcotest.(check bool) "UX-28 [w] inside Memory_diff_dive does not mutate main window"
+    true
+    (Knowledge_store.equal_memory_diff_window
+       m_mdive_w.knowledge.memory_diff_window Knowledge_store.Window_24h);
+  let m_kmem_health =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Knowledge; pane_index = 1 };
+      knowledge =
+        m0.knowledge
+        |> Knowledge_store.set_tab Nav.Knowledge_memory
+        |> Knowledge_store.cycle_memory_subview;
+    }
+  in
+  let m_kmem_e, _ = step m_kmem_health (char_key "e") in
+  let m_kmem_f, _ = step m_kmem_health (char_key "f") in
+  let m_kmem_ret, _ = step m_kmem_health (mk_key Keymap.Input.Enter) in
+  Alcotest.(check bool) "UX-28 [e]/[f] on Health subview do not mutate memory_view_mode"
+    true
+    (Knowledge_store.equal_memory_view_mode m_kmem_e.knowledge.memory_view_mode
+       m_kmem_health.knowledge.memory_view_mode
+     && Knowledge_store.equal_memory_view_mode m_kmem_f.knowledge.memory_view_mode
+          m_kmem_health.knowledge.memory_view_mode);
+  Alcotest.(check int) "UX-28 [Enter] on Health subview pushes no dive" 0
+    (List.length m_kmem_ret.nav.dive_stack);
+
+  (* UX-29: Wiki view fetches Get_wiki_log + multiline wiki modal warns and labels $EDITOR *)
+  let m_wiki =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Knowledge };
+      knowledge = Knowledge_store.set_tab Nav.Knowledge_wiki m0.knowledge;
+    }
+  in
+  let wiki_cmds = View_fetches.fetches_for_current_view ~force:true m_wiki in
+  Alcotest.(check bool) "UX-29 Knowledge_wiki dispatches Get_wiki_log" true
+    (List.exists
+       (function
+         | Cmd.Http_get { req = Cmd.Get_wiki_log _; _ } -> true
+         | _ -> false)
+       (Cmd.flatten wiki_cmds));
+  let multi_wiki : Wire_knowledge.wiki_page_detail =
+    {
+      page = "arch";
+      slug = "arch";
+      file = "arch.md";
+      sha256 = "sha-arch";
+      frontmatter =
+        {
+          title = "Architecture";
+          summary = "Overview";
+          source = Wire_knowledge.Source_observation;
+          author = "alpha";
+          created = "2026-11-20";
+          updated = "2026-11-22";
+          revision = 2;
+          tags = [];
+        };
+      body_markdown = "# Heading\nLine 2\nLine 3";
+      backlinks = [];
+      outgoing_links = [];
+      lint_findings = [];
+    }
+  in
+  let empty_lint : Wire_knowledge.wiki_index_lint =
+    {
+      total_findings = 0;
+      counts =
+        {
+          broken_link = 0;
+          unsupported_link = 0;
+          orphan = 0;
+          orphan_unconfirmed = 0;
+          missing_sources = 0;
+          hearsay_only = 0;
+          unreadable_page = 0;
+          revision_log_gap = 0;
+          revision_log_hole = 0;
+          duplicate_title_candidates = 0;
+        };
+      log_hole_suppressed = false;
+      orphans = [];
+      duplicate_title_candidates = [];
+      findings = [];
+    }
+  in
+  let m_wiki_multi =
+    {
+      m_wiki with
+      knowledge =
+        m_wiki.knowledge
+        |> Knowledge_store.apply_wiki_index ~observed_at:t0
+             {
+               pages_total = 1;
+               pages_readable = 1;
+               pages_unreadable = 0;
+               pages =
+                 [
+                   {
+                     slug = "arch";
+                     file = "arch.md";
+                     title = "Architecture";
+                     summary = "Overview";
+                     source = Wire_knowledge.Source_observation;
+                     author = "alpha";
+                     created = "2026-11-20";
+                     updated = "2026-11-22";
+                     revision = 2;
+                     tags = [];
+                     backlink_count = 0;
+                     outgoing_link_count = 0;
+                     sources_count = 0;
+                     hearsay_count = 0;
+                     sha256 = "sha-arch";
+                   };
+                 ];
+               unreadable_pages = [];
+               lint = empty_lint;
+             }
+        |> Knowledge_store.set_wiki_page ~slug:"arch"
+             (Observed.value ~observed_at:t0 multi_wiki);
+    }
+  in
+  let m_wiki_e, _ = step m_wiki_multi (char_key "e") in
+  Alcotest.(check bool) "UX-29 multiline wiki [e] shows $EDITOR hint toast" true
+    (Option.is_some m_wiki_e.toast);
+
+  (* UX-30: set_memory_diff_window resets selection/scroll/reading *)
+  let k_dirty =
+    {
+      m0.knowledge with
+      selected_diff_index = 4;
+      diff_scroll_offset = 12;
+      memory_reading_scroll = 5;
+    }
+  in
+  let k_reset =
+    Knowledge_store.set_memory_diff_window Knowledge_store.Window_7d k_dirty
+  in
+  Alcotest.(check (pair int int)) "UX-30 set_memory_diff_window resets index & scroll"
+    (0, 0) (k_reset.selected_diff_index, k_reset.diff_scroll_offset);
+
+  (* UX-31: Infra > Repos & Changes natural pane order 0 Repos -> 1 Changes -> 2 Diff *)
+  let repo1 : Wire_infra.repository =
+    {
+      id = "repo-1";
+      name = "masc";
+      codebase = None;
+      url = "https://example.com/masc";
+      default_branch = "main";
+      resolved_local_path = "/tmp/masc";
+      status = Wire_infra.Repo_cloning;
+      auto_sync = true;
+      keepers = [ "alpha" ];
+    }
+  in
+  let act1 : Wire_infra.repository_activity =
+    {
+      window_hours = 24.0;
+      changes =
+        [
+          {
+            path = "a.ml";
+            keeper = "alpha";
+            change =
+              Wire_infra.Change_write
+                {
+                  content =
+                    String.concat "\n"
+                      (List.init 40 (fun i -> Printf.sprintf "line %d" i));
+                };
+            line_evidence = None;
+            succeeded = true;
+          };
+          {
+            path = "b.ml";
+            keeper = "alpha";
+            change = Wire_infra.Change_write { content = "hello" };
+            line_evidence = None;
+            succeeded = true;
+          };
+        ];
+      incomplete = 0;
+      unattributed = 0;
+    }
+  in
+  let m_repos =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Infra; pane_index = 0 };
+      infra =
+        m0.infra
+        |> Infra_store.set_tab Nav.Infra_repos_changes
+        |> Infra_store.apply_repositories ~observed_at:t0 [ repo1 ]
+        |> Infra_store.apply_repo_activity ~repo_id:"repo-1" ~observed_at:t0 act1;
+    }
+  in
+  let m_r_p1, _ = step m_repos (mk_key Keymap.Input.Tab) in
+  let m_r_p1_dn, _ = step m_r_p1 (mk_key Keymap.Input.Down) in
+  Alcotest.(check int) "UX-31 pane 1 moves change_selected_index" 1
+    m_r_p1_dn.infra.change_selected_index;
+  Alcotest.(check bool) "UX-31 pane 1 focus label mentions Changes" true
+    (let lbl = Model.active_focus_label m_r_p1 in
+     let s = Say.resolve Say.Lang_en lbl in
+     String.length s >= 7);
+  let m_r_p2, _ = step m_r_p1 (mk_key Keymap.Input.Tab) in
+  let m_r_p2_dn, _ = step m_r_p2 (mk_key Keymap.Input.Down) in
+  Alcotest.(check bool) "UX-31 pane 2 scrolls diff_scroll_offset" true
+    (m_r_p2_dn.infra.diff_scroll_offset > 0);
+
+  (* UX-32: Logs live-prepend anchors selection, Log_debug in level cycle, Acting <104 warns, show_raw_json resets on dive push/pop *)
+  let mk_log seq =
+    {
+      Wire_infra.seq;
+      ts = Printf.sprintf "2026-11-24T10:%02d:00Z" (seq mod 60);
+      level = Wire_infra.Log_info;
+      source = "server";
+      module_name = "http";
+      message = Printf.sprintf "msg-%d" seq;
+      keeper = Some "alpha";
+      turn_id = None;
+      category = None;
+      details = `Assoc [];
+    }
+  in
+  let inf_logs =
+    m0.infra
+    |> Infra_store.set_tab Nav.Infra_activity_logs
+    |> Infra_store.apply_log_snapshot [ mk_log 3; mk_log 2; mk_log 1 ]
+    |> Infra_store.move_selection ~pane_index:0 ~delta:1
+  in
+  Alcotest.(check int) "UX-32 logs starts at index 1 (seq 2)" 1
+    inf_logs.selected_index;
+  let inf_after_append =
+    Infra_store.apply_log_frame { reset = false; entries = [ mk_log 4 ] }
+      inf_logs
+  in
+  Alcotest.(check int) "UX-32 live prepend shifts selected_index to keep seq 2 anchored"
+    2 inf_after_append.selected_index;
+  let inf_dbg = Infra_store.cycle_log_level_filter inf_logs in
+  Alcotest.(check bool) "UX-32 cycle_log_level_filter includes Log_debug first"
+    true
+    (match inf_dbg.log_level_filter with
+     | Some Wire_infra.Log_debug -> true
+     | Some (Wire_infra.Log_info | Wire_infra.Log_warn | Wire_infra.Log_error)
+     | None -> false);
+  let m_narrow_logs =
+    {
+      (Model.initial ~cols:96 ~rows:30 ~lang:Say.Lang_en ()) with
+      nav = { m0.nav with workspace = Nav.Infra };
+      infra = inf_logs;
+    }
+  in
+  let m_narrow_act, _ = step m_narrow_logs (char_key "a") in
+  Alcotest.(check bool) "UX-32 Acting rail at <104 cols stays closed with warning toast"
+    true
+    ((not m_narrow_act.infra.acting_rail_open) && Option.is_some m_narrow_act.toast);
+  let m_raw =
+    {
+      m0 with
+      infra = { m0.infra with show_raw_json = true };
+    }
+  in
+  let m_pushed, _ =
+    Update_nav.push_dive m_raw (Nav.Dive_infra (Nav.Sandbox_dive "alpha"))
+  in
+  Alcotest.(check bool) "UX-32 push_dive resets show_raw_json to false" false
+    m_pushed.infra.show_raw_json;
+
+  (* UX-33: Runtime [y] copies tab-appropriate entity, [o] guards focus, browser tabs preserve selected id *)
+  let acc1 : Wire_runtime.account_usage =
+    {
+      scope = "anthropic";
+      scope_id = "acct-prod-1";
+      providers = [ { id = "anthropic"; display_name = "Anthropic" } ];
+      state = Wire_runtime.Account_not_reported_since_start;
+      cost_state =
+        Wire_runtime.classify_account_cost_state
+          Wire_runtime.Account_not_reported_since_start;
+    }
+  in
+  let m_quotas =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Runtime };
+      runtime =
+        m0.runtime
+        |> Runtime_store.set_tab Nav.Runtime_quotas_credits
+        |> Runtime_store.apply_usage_windows ~observed_at:t0
+             { since_unix = 1795250000.0; accounts = [ acc1 ] };
+    }
+  in
+  let _, q_copy_cmds = step m_quotas (char_key "y") in
+  Alcotest.(check bool) "UX-33 Runtime_quotas_credits [y] copies scope_id" true
+    (List.exists
+       (function Cmd.Copy_clipboard s -> String.equal s "acct-prod-1" | _ -> false)
+       (Cmd.flatten q_copy_cmds));
+  let m_addons =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Runtime; pane_index = 0 };
+      runtime =
+        Runtime_store.set_tab Nav.Runtime_addons_browser m0.runtime;
+    }
+  in
+  let m_addons_o, addons_o_cmds = step m_addons (char_key "o") in
+  Alcotest.(check bool) "UX-33 Addons [o] on pane 0 does not open external URL and guides user"
+    true
+    (Option.is_some m_addons_o.toast
+     && not
+          (List.exists
+             (function Cmd.Open_external_url _ -> true | _ -> false)
+             (Cmd.flatten addons_o_cmds)));
+  let tab_row id url : Wire_runtime.browser_tab_row =
+    {
+      id;
+      title = "Tab " ^ Int.to_string id;
+      url;
+      active = false;
+      window_id = Some 1;
+      opened_by = None;
+      label = None;
+      dialog_present = false;
+      dialog_kind = None;
+    }
+  in
+  let br_client : Wire_runtime.browser_client_row =
+    {
+      client_id = "cli-1";
+      browser = "chrome";
+      version = "1.0";
+      engine_version = "120";
+      transport = "cdp";
+      space = None;
+      ownership = None;
+      presence_state = Some "connected";
+      presence_reason = None;
+      interactions = [];
+      last_activities = [];
+    }
+  in
+  let br_lane : Wire_runtime.browser_lane_status =
+    {
+      ok = true;
+      available = true;
+      inventory_complete = true;
+      client_count = 1;
+      issue_count = 0;
+      automatic_browse_ok = true;
+      detail = None;
+      clients = [ br_client ];
+      issues = [];
+    }
+  in
+  let rt_tabs =
+    m0.runtime
+    |> Runtime_store.set_tab Nav.Runtime_addons_browser
+    |> Runtime_store.apply_browser_lane ~observed_at:t0 br_lane
+    |> Runtime_store.apply_browser_tabs ~observed_at:t0 ~client_id:"cli-1"
+         {
+           client_id = Some "cli-1";
+           tabs = [ tab_row 10 "https://a.test"; tab_row 20 "https://b.test" ];
+           complete = true;
+           unavailable_count = 0;
+           error = None;
+         }
+    |> Runtime_store.toggle_browser_right_focus
+    |> Runtime_store.move_selection ~pane_index:1 ~delta:1
+  in
+  let rt_tabs_refreshed =
+    Runtime_store.apply_browser_tabs ~observed_at:t0 ~client_id:"cli-1"
+      {
+        client_id = Some "cli-1";
+        tabs =
+          [
+            tab_row 99 "https://new.test";
+            tab_row 10 "https://a.test";
+            tab_row 20 "https://b.test";
+          ];
+        complete = true;
+        unavailable_count = 0;
+        error = None;
+      }
+      rt_tabs
+  in
+  Alcotest.(check int) "UX-33 apply_browser_tabs preserves selected tab id=20 at index 2"
+    2 rt_tabs_refreshed.browser_tab_selected_index;
+
+  (* UX-34: Single-member succession chain is not expandable via Space; [g] jumps Home on Memory *)
+  let solo_chain_post : Wire_knowledge.board_post =
+    {
+      id = "p-solo";
+      author = "alpha";
+      title = "Solo chain";
+      body = "Only member";
+      created_at_unix = 1795250000.0;
+      updated_at_unix = Some 1795250000.0;
+      score = 0;
+      comment_count = 0;
+      author_karma = Observed.absent;
+      hearth = Some "ops";
+      post_kind = None;
+      visibility = None;
+      succession_chain_root_id = Some "root-solo";
+      chain_depth = Some 1;
+      is_signal = true;
+    }
+  in
+  let k_solo =
+    m0.knowledge
+    |> Knowledge_store.set_tab Nav.Knowledge_board
+    |> Knowledge_store.apply_board ~observed_at:t0
+         {
+           posts = [ solo_chain_post ];
+           count = 1;
+           sort_by = "recent";
+           signal_only = false;
+         }
+  in
+  Alcotest.(check (option string))
+    "UX-34 single-member chain returns None for selected_post_expandable_chain_root"
+    None (Knowledge_store.selected_post_expandable_chain_root k_solo);
+  let m_kmem_scroll =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Knowledge; pane_index = 1 };
+      knowledge =
+        {
+          (Knowledge_store.set_tab Nav.Knowledge_memory m0.knowledge) with
+          diff_scroll_offset = 5;
+          selected_diff_index = 3;
+        };
+    }
+  in
+  let m_kmem_g, _ = step m_kmem_scroll (char_key "g") in
+  Alcotest.(check (pair int int)) "UX-34 bare [g] on Knowledge > Memory jumps to top (Home)"
+    (0, 0)
+    (m_kmem_g.knowledge.diff_scroll_offset, m_kmem_g.knowledge.selected_diff_index);
+
+  (* Follow-up P2 from PR #54567: live apply_keepers clears ghost selected_collapsed_company *)
+  let k_a = { (sample_keeper "alpha-1") with company = "org-gone"; group = Some "org-gone" } in
+  let k_b = { (sample_keeper "beta-1") with company = "org-live"; group = Some "org-live" } in
+  let fl_col =
+    m0.fleet
+    |> Fleet_store.apply_keepers ~observed_at:t0 [ k_a; k_b ]
+    |> Fleet_store.toggle_company_collapsed "org-gone"
+  in
+  Alcotest.(check (option string)) "Collapsed org-gone anchored before live roster refresh"
+    (Some "org-gone") fl_col.selected_collapsed_company;
+  let fl_refreshed = Fleet_store.apply_keepers ~observed_at:t0 [ k_b ] fl_col in
+  Alcotest.(check (option string)) "Live roster refresh clears ghost selected_collapsed_company"
+    None fl_refreshed.selected_collapsed_company
+
 let () =
   Alcotest.run "masc_tui_store"
     [
@@ -12790,7 +13271,10 @@ let () =
             "UX Batch 2: Ack scope, modal/settings cursors, dirty Esc, @mention, /btw, Drawer, Help, UTF-8 & Toast"
             `Quick test_ux_batch2_modals_settings_overlays;
           Alcotest.test_case
-            "UX Batch 3: Keepers collapse, Ask A..D, Candle/Tasks/Schedules/JSON panes, Config [d] & Mouse/Chat"
+            "UX Batch 3: Keepers collapse, Ask sidebar guard, Candle/Tasks/Schedules/JSON panes, Config [d] & Mouse/Chat"
             `Quick test_ux_batch3_work_keepers_chat_mouse;
+          Alcotest.test_case
+            "UX Batch 4: Memory dive/window, Wiki $EDITOR/log, Repos order, Logs anchor, Runtime [y]/[o] & [g] Home"
+            `Quick test_ux_batch4_knowledge_runtime_infra;
         ] );
     ]

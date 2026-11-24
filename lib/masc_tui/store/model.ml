@@ -980,7 +980,7 @@ let pane_rects m =
             | Nav.Infra_repos_changes when n = 3 ->
                 let left, right = split_h_ratio ~gap:gap_h br 0.42 in
                 let l_top, l_bot = split_v_ratio ~gap:gap_v left 0.52 in
-                [ l_top; right; l_bot ]
+                [ l_top; l_bot; right ]
             | Nav.Infra_sandboxes
             | Nav.Infra_code
             | Nav.Infra_activity_logs
@@ -1260,7 +1260,8 @@ let active_focus_label m =
                 | Nav.Infra_repos_changes -> (
                     match m.nav.pane_index with
                     | 0 -> pane_prefix ~ko:"저장소" ~en:"Repos"
-                    | 2 -> pane_prefix ~ko:"파일 변경" ~en:"Changes"
+                    | 1 when Infra_store.repo_changes m.infra <> [] ->
+                        pane_prefix ~ko:"파일 변경" ~en:"Changes"
                     | _ -> pane_prefix ~ko:"Diff" ~en:"Diff")
                 | Nav.Infra_activity_logs -> (
                     match m.nav.pane_index with
@@ -2210,7 +2211,12 @@ let open_wiki_edit_modal_for_detail (d : Wire_knowledge.wiki_page_detail) m =
           };
           {
             key = "wiki_body";
-            label = Say.make ~ko:"본문 (Markdown)" ~en:"Body (Markdown)";
+            label =
+              if String.contains d.body_markdown '\n' then
+                Say.make
+                  ~ko:"본문 (다중줄 — [Ctrl+E] $EDITOR 권장)"
+                  ~en:"Body (multiline — use [Ctrl+E] $EDITOR)"
+              else Say.make ~ko:"본문 (Markdown)" ~en:"Body (Markdown)";
             value = d.body_markdown;
             required = true;
             secret = false;

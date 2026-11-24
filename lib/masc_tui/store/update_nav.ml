@@ -898,6 +898,7 @@ let push_dive (m : Model.t) dive =
     | Nav.Dive_infra _ ->
         Config_store.cancel_edit_field m.config
   in
+  let infra = { m.infra with show_raw_json = false } in
   let knowledge =
     let base =
       m.knowledge |> Knowledge_store.clear_armed_vote
@@ -948,6 +949,7 @@ let push_dive (m : Model.t) dive =
       fleet;
       config;
       knowledge;
+      infra;
       inline_modal = None;
       ask_modal = None;
     }
@@ -3031,7 +3033,12 @@ let enter_plan (m : Model.t) : enter_plan =
                             }))
                 | None -> Enter_fetch_memory_diff
               in
-              if m.nav.pane_index = 1 || m.nav.zoomed then
+              if
+                not
+                  (Knowledge_store.equal_memory_subview
+                     m.knowledge.memory_subview Knowledge_store.Mem_diff_flow)
+              then Enter_noop
+              else if m.nav.pane_index = 1 || m.nav.zoomed then
                 memory_reading_plan ~keeper_opt:m.knowledge.memory_diff_keeper
                   ~otherwise:diff_plan m
               else
@@ -6631,20 +6638,19 @@ let infra_detail_max_scroll (m : Model.t) =
             else (
               match entry with
               | Infra_store.Entry_log e ->
-                  let max_msg_rows = min 6 (max 1 (content.h - 2)) in
                   let msg_lines =
                     Chat_transcript.wrap_plain_lines
                       ~width:(max 1 (content.w - 2))
                       e.message
                   in
-                  let msg_n = min max_msg_rows (List.length msg_lines) in
-                  let tree_h = max 1 (content.h - msg_n - 1) in
-                  let total =
-                    List.length
-                      (Masc_tui_ui.Json_tree.flatten ~max_depth:4
-                         ~redact_secrets:true e.details)
+                  let tree_lines =
+                    Masc_tui_ui.Json_tree.flatten ~max_depth:4
+                      ~redact_secrets:true e.details
                   in
-                  max 0 (total - tree_h)
+                  let total =
+                    List.length msg_lines + 1 + List.length tree_lines
+                  in
+                  max 0 (total - max 1 content.h)
               | Infra_store.Entry_event ev ->
                   let detail_lines =
                     match ev.detail with
@@ -6969,26 +6975,16 @@ let dive_max_scroll (m : Model.t) active =
   | Nav.Dive_keeper { name; tab } ->
       keeper_tab_max_scroll ~embedded:false m ~name ~tab
   | Nav.Dive_knowledge (Nav.Memory_diff_dive { keeper; from_rev; to_rev }) ->
-      let body_rect =
-        match
-          Masc_tui_ui.Layout.split_v br
-            [ Masc_tui_ui.Layout.Fixed 1; Masc_tui_ui.Layout.Flex 1 ]
-        with
-        | [ _; b ] -> b
-        | _ -> br
-      in
-      let right_rect =
-        if m.nav.zoomed then body_rect
-        else
-          snd
-            (Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
-               ~left_ratio:0.48 ~top_ratio:0.48 bp body_rect)
-      in
       let k_scoped =
-        Knowledge_store.scope_memory_diff_dive ~keeper ~from_rev ~to_rev
-          m.knowledge
+        {
+          (Knowledge_store.scope_memory_diff_dive ~keeper ~from_rev ~to_rev
+             m.knowledge)
+          with
+          memory_subview = Knowledge_store.Mem_diff_flow;
+          memory_view_mode = Knowledge_store.View_diff;
+        }
       in
-      memory_right_pane_max_scroll ~bp ~rect:right_rect k_scoped
+      memory_right_pane_max_scroll ~bp ~rect:br k_scoped
   | Nav.Dive_knowledge (Nav.Thread_dive post_id) -> (
       let post_opt, comments =
         match Observed.to_option m.knowledge.active_thread with
@@ -7613,7 +7609,7 @@ let dive_max_scroll (m : Model.t) active =
             in
             let log_h = max 1 (content.h - detail_h - 1) in
             let log_max = max 0 (List.length filtered_logs - log_h) in
-            max detail_max log_max)
+            detail_max + log_max)
   | Nav.Dive_infra (Nav.Runtime_trace_dive keeper) -> (
       match Infra_store.runtime_trace_for ~keeper m.infra with
       | None -> 0
@@ -7637,13 +7633,13 @@ let dive_max_scroll (m : Model.t) active =
             let msg_lines =
               wrap_lines ~width:(max 1 (content.w - 2)) e.message
             in
-            let msg_n = min 6 (List.length msg_lines) in
-            let tree_h = max 1 (content.h - msg_n - 2) in
             let jlines =
               Masc_tui_ui.Json_tree.flatten ~max_depth:5 ~redact_secrets:true
                 e.details
             in
-            max 0 (List.length jlines - tree_h))
+            let body_h = max 1 (content.h - 1) in
+            let total = List.length msg_lines + 1 + List.length jlines in
+            max 0 (total - body_h))
 
 let move_keeper_config_selection ~embedded ~name ~delta (m : Model.t) =
   let _, content_h =
@@ -9136,6 +9132,10 @@ let apply_move (m : Model.t) dir =
                       | Nav.Runtime_addons_browser, 1 when rt.addon_catalog_mode
                         ->
                           true
+                      | Nav.Runtime_tools_usage, 1
+                        when Runtime_store.equal_tools_subview rt.tools_subview
+                               Runtime_store.Tools_keeper_skills ->
+                          true
                       | ( ( Nav.Runtime_quotas_credits
                           | Nav.Runtime_efficiency_spend
                           | Nav.Runtime_failover_lanes
@@ -9633,13 +9633,31 @@ let apply_move (m : Model.t) dir =
                            m.infra.code.right_mode
                            Infra_store.Code_search_results
                     in
+                    let is_repos_diff_pane =
+                      Nav.equal_infra_tab m.infra.active_tab
+                        Nav.Infra_repos_changes
+                      &&
+                      let has_ch = Infra_store.repo_changes m.infra <> [] in
+                      if has_ch then pane_index = 2 else pane_index = 1
+                    in
+                    let is_repos_changes_pane =
+                      Nav.equal_infra_tab m.infra.active_tab
+                        Nav.Infra_repos_changes
+                      && pane_index = 1
+                      && Infra_store.repo_changes m.infra <> []
+                    in
+                    let is_infra_detail_scroll =
+                      is_repos_diff_pane
+                      || (pane_index = 1
+                         && (not is_code_search_select)
+                         && not is_repos_changes_pane)
+                    in
                     let eff_delta =
-                      if pane_index = 1 && not is_code_search_select then
-                        scroll_delta dir
-                      else delta
+                      if is_infra_detail_scroll then scroll_delta dir else delta
                     in
                     let max_detail_scroll =
-                      if pane_index = 1 then Some (infra_detail_max_scroll m)
+                      if is_infra_detail_scroll then
+                        Some (infra_detail_max_scroll m)
                       else None
                     in
                     let prev_code_path =

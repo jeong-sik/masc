@@ -804,7 +804,17 @@ let open_memory_act_modal (m : Model.t) ~(keeper_default : string) =
 let open_wiki_edit_modal ~now (m : Model.t) ~(slug : string) =
   match Knowledge_store.wiki_page_for ~slug m.knowledge with
   | Observed.Value { data = d; stale = false; _ } ->
-      (Model.open_wiki_edit_modal_for_detail d m, [])
+      let m1 = Model.open_wiki_edit_modal_for_detail d m in
+      let m2 =
+        if String.contains d.body_markdown '\n' then
+          Model.with_toast ~now ~level:Model.Toast_info
+            (Say.make
+               ~ko:"다중줄 위키 본문은 [Ctrl+E] $EDITOR 편집을 권장합니다"
+               ~en:"Multiline wiki body: use [Ctrl+E] $EDITOR for full Markdown")
+            m1
+        else m1
+      in
+      (m2, [])
   | Observed.Value _ | Observed.Loading _ | Observed.Absent
   | Observed.Unreported | Observed.Failed _ ->
       let m =
@@ -2637,6 +2647,7 @@ and execute_action ~now (m : Model.t) action =
                               |> Knowledge_store.clear_pending_artifact_revision
                               |> Knowledge_store.close_memory_diagram
                               |> Knowledge_store.clear_pending_wiki_edit;
+                            infra = { m.infra with show_raw_json = false };
                           }
                           |> Update_nav.sync_config_for_keeper_view
                         in
@@ -2998,10 +3009,13 @@ and execute_action ~now (m : Model.t) action =
               | Nav.Knowledge -> (
                   match m.knowledge.active_tab with
                   | Nav.Knowledge_board -> (
-                      (* Space strictly controls Succession Chain expand/collapse!
-                         Signal-only toggle moved to [s]. *)
-                      match Knowledge_store.selected_post m.knowledge with
-                      | Some { succession_chain_root_id = Some root_id; _ } ->
+                      (* Space strictly controls Succession Chain expand/collapse
+                         for chains with >1 member! Signal-only toggle is on [s]. *)
+                      match
+                        Knowledge_store.selected_post_expandable_chain_root
+                          m.knowledge
+                      with
+                      | Some root_id ->
                           ( {
                               m with
                               knowledge =
@@ -3009,8 +3023,7 @@ and execute_action ~now (m : Model.t) action =
                                   m.knowledge;
                             }
                           , [] )
-                      | Some { succession_chain_root_id = None; _ } | None ->
-                          (m, []))
+                      | None -> (m, []))
                   | Nav.Knowledge_wiki
                   | Nav.Knowledge_artifacts
                   | Nav.Knowledge_memory ->
@@ -3025,7 +3038,8 @@ and execute_action ~now (m : Model.t) action =
                         }
                       , [] )
                   | Nav.Runtime_addons_browser ->
-                      if m.nav.pane_index = 1 then
+                      if m.nav.pane_index = 1 && not m.runtime.addon_catalog_mode
+                      then
                         ( {
                             m with
                             runtime =
@@ -3850,7 +3864,17 @@ and execute_action ~now (m : Model.t) action =
                 | Nav.Runtime -> (
                     match m.runtime.active_tab with
                     | Nav.Runtime_addons_browser ->
-                        if m.nav.pane_index = 0 then
+                        if m.runtime.addon_catalog_mode then
+                          match
+                            Runtime_store.selected_addon_catalog_entry m.runtime
+                          with
+                          | Some (Wire_runtime.Catalog_package { manifest_path; _ }) ->
+                              Some manifest_path
+                          | Some (Wire_runtime.Catalog_folder { path; _ })
+                          | Some (Wire_runtime.Catalog_issue { path; _ }) ->
+                              Some path
+                          | None -> None
+                        else if m.nav.pane_index = 0 then
                           Option.map
                             (fun (inst : Wire_runtime.addon_instance) ->
                               inst.instance_id)
@@ -3871,10 +3895,32 @@ and execute_action ~now (m : Model.t) action =
                                       cl.client_id)
                                     (Runtime_store.selected_browser_client
                                        m.runtime)))
-                    | Nav.Runtime_tools_usage ->
-                        Option.map
-                          (fun (e : Wire_runtime.tool_catalog_entry) -> e.name)
-                          (Runtime_store.selected_tool_catalog_entry m.runtime)
+                    | Nav.Runtime_tools_usage -> (
+                        match m.runtime.tools_subview with
+                        | Runtime_store.Tools_catalog_tree ->
+                            Option.map
+                              (fun (e : Wire_runtime.tool_catalog_entry) -> e.name)
+                              (Runtime_store.selected_tool_catalog_entry m.runtime)
+                        | Runtime_store.Tools_usage_calls ->
+                            let tools = Runtime_store.filtered_tools m.runtime in
+                            let idx =
+                              Update_nav.clamp_index (List.length tools)
+                                m.runtime.selected_index
+                            in
+                            Option.map
+                              (fun (t : Wire_runtime.tool_summary) -> t.name)
+                              (List.nth_opt tools idx)
+                        | Runtime_store.Tools_keeper_skills ->
+                            let keeper_names =
+                              match Observed.to_option m.fleet.keepers with
+                              | Some ks ->
+                                  List.map
+                                    (fun (k : Wire_fleet.keeper_summary) -> k.name)
+                                    ks
+                              | None -> []
+                            in
+                            Runtime_store.selected_tools_surface_keeper
+                              ~keeper_names m.runtime)
                     | Nav.Runtime_connectors ->
                         Option.map
                           (fun (c : Wire_runtime.connector_row) -> c.connector_id)
@@ -3883,8 +3929,19 @@ and execute_action ~now (m : Model.t) action =
                         Option.map
                           (fun (r : Wire_runtime.fusion_run) -> r.run_id)
                           (Runtime_store.selected_fusion_run m.runtime)
-                    | Nav.Runtime_quotas_credits
-                    | Nav.Runtime_efficiency_spend
+                    | Nav.Runtime_quotas_credits ->
+                        let accs = Runtime_store.filtered_accounts m.runtime in
+                        let idx =
+                          Update_nav.clamp_index (List.length accs)
+                            m.runtime.selected_index
+                        in
+                        Option.map
+                          (fun (a : Wire_runtime.account_usage) -> a.scope_id)
+                          (List.nth_opt accs idx)
+                    | Nav.Runtime_efficiency_spend ->
+                        Option.map
+                          (fun (r : Runtime_store.keeper_spend_row) -> r.keeper)
+                          (Runtime_store.selected_keeper_spend_row m.runtime)
                     | Nav.Runtime_failover_lanes ->
                         Option.map
                           (fun (l : Wire_runtime.failover_lane) -> l.id)
@@ -4168,13 +4225,25 @@ and execute_action ~now (m : Model.t) action =
               | Nav.Runtime -> (
                   match m.runtime.active_tab with
                   | Nav.Runtime_addons_browser ->
-                      let url_opt =
-                        Option.bind
-                          (Runtime_store.selected_browser_tab m.runtime)
-                          (fun (tb : Wire_runtime.browser_tab_row) ->
-                            extract_first_http_url tb.url)
-                      in
-                      open_url_or_notice url_opt
+                      if
+                        (not m.runtime.addon_catalog_mode)
+                        && m.nav.pane_index = 1
+                        && m.runtime.browser_right_focus = `Tabs
+                      then
+                        let url_opt =
+                          Option.bind
+                            (Runtime_store.selected_browser_tab m.runtime)
+                            (fun (tb : Wire_runtime.browser_tab_row) ->
+                              extract_first_http_url tb.url)
+                        in
+                        open_url_or_notice url_opt
+                      else
+                        ( Model.with_toast ~now ~level:Model.Toast_info
+                            (Say.make
+                               ~ko:"브라우저 탭 패널(Tab → Space)에서 [o]로 URL을 열 수 있습니다"
+                               ~en:"Focus Browser Tabs (Tab → Space) to open a tab URL with [o]")
+                            m
+                        , [] )
                   | Nav.Runtime_quotas_credits
                   | Nav.Runtime_efficiency_spend
                   | Nav.Runtime_failover_lanes
@@ -4264,6 +4333,8 @@ and execute_action ~now (m : Model.t) action =
             | Nav.Knowledge ->
                 Nav.equal_knowledge_tab m.knowledge.active_tab
                   Nav.Knowledge_memory
+                && Knowledge_store.equal_memory_subview
+                     m.knowledge.memory_subview Knowledge_store.Mem_diff_flow
             | Nav.Keepers ->
                 Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory
             | Nav.Pulse | Nav.Work | Nav.Runtime | Nav.Infra -> false)
@@ -4312,6 +4383,8 @@ and execute_action ~now (m : Model.t) action =
             | Nav.Knowledge ->
                 Nav.equal_knowledge_tab m.knowledge.active_tab
                   Nav.Knowledge_memory
+                && Knowledge_store.equal_memory_subview
+                     m.knowledge.memory_subview Knowledge_store.Mem_diff_flow
             | Nav.Keepers ->
                 Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory
             | Nav.Pulse | Nav.Work | Nav.Runtime | Nav.Infra -> false)
@@ -4453,8 +4526,7 @@ and execute_action ~now (m : Model.t) action =
       if Option.is_some m.nav.overlay then (m, [])
       else
         match Model.active_dive m with
-        | Some (Nav.Dive_keeper { tab = Nav.Keeper_memory; _ })
-        | Some (Nav.Dive_knowledge (Nav.Memory_diff_dive _)) ->
+        | Some (Nav.Dive_keeper { tab = Nav.Keeper_memory; _ }) ->
             let knowledge =
               Knowledge_store.cycle_memory_diff_window m.knowledge
             in
@@ -4481,7 +4553,10 @@ and execute_action ~now (m : Model.t) action =
         | Some
             ( Nav.Dive_work _
             | Nav.Dive_knowledge
-                (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
+                ( Nav.Thread_dive _
+                | Nav.Wiki_dive _
+                | Nav.Artifact_dive _
+                | Nav.Memory_diff_dive _ )
             | Nav.Dive_runtime (Nav.Fusion_dive _)
             | Nav.Dive_infra _ ) ->
             (m, [])
@@ -4631,6 +4706,26 @@ and execute_action ~now (m : Model.t) action =
                         in
                         let nav = { m.nav with pane_index = 0 } in
                         let next = { m with nav; runtime } in
+                        (next, View_fetches.fetches_for_current_view next)
+                    | Nav.Infra
+                      when Nav.equal_infra_tab m.infra.active_tab Nav.Infra_code
+                      ->
+                        let infra = Infra_store.cycle_code_git_mode m.infra in
+                        let lbl =
+                          Infra_store.code_right_mode_label
+                            infra.code.right_mode
+                        in
+                        let next =
+                          { m with infra }
+                          |> Model.with_toast ~now ~level:Model.Toast_info
+                               (Say.make
+                                  ~ko:
+                                    ("코드 패널 모드: "
+                                    ^ Say.resolve Say.Lang_ko lbl)
+                                  ~en:
+                                    ("Code panel mode: "
+                                    ^ Say.resolve Say.Lang_en lbl))
+                        in
                         (next, View_fetches.fetches_for_current_view next)
                     | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Keepers
                     | Nav.Runtime | Nav.Infra ->
@@ -4988,7 +5083,9 @@ and execute_action ~now (m : Model.t) action =
           | None ->
               (Nav.equal_workspace m.nav.workspace Nav.Knowledge
                && Nav.equal_knowledge_tab m.knowledge.active_tab
-                    Nav.Knowledge_memory)
+                    Nav.Knowledge_memory
+               && Knowledge_store.equal_memory_subview
+                    m.knowledge.memory_subview Knowledge_store.Mem_diff_flow)
               || (Nav.equal_workspace m.nav.workspace Nav.Keepers
                   && (m.nav.pane_index = 1 || m.nav.zoomed)
                   && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
@@ -5271,9 +5368,20 @@ and execute_action ~now (m : Model.t) action =
             | Nav.Infra
               when Nav.equal_infra_tab m.infra.active_tab
                      Nav.Infra_activity_logs ->
-                let infra = Infra_store.toggle_acting_rail m.infra in
-                let next = Update_nav.clamp_for_pane { m with infra } in
-                (next, View_fetches.fetches_for_current_view next)
+                if
+                  (not m.infra.acting_rail_open)
+                  && Model.inner_body_width m < 104
+                then
+                  ( Model.with_toast ~now ~level:Model.Toast_warning
+                      (Say.make
+                         ~ko:"Acting 레일은 가로 104칸 이상에서 표시됩니다"
+                         ~en:"Acting rail requires viewport width >= 104 cols")
+                      m
+                  , [] )
+                else
+                  let infra = Infra_store.toggle_acting_rail m.infra in
+                  let next = Update_nav.clamp_for_pane { m with infra } in
+                  (next, View_fetches.fetches_for_current_view next)
             | Nav.Knowledge
               when Nav.equal_knowledge_tab m.knowledge.active_tab
                      Nav.Knowledge_memory -> (
@@ -5531,7 +5639,9 @@ and execute_action ~now (m : Model.t) action =
                 else if
                   (Nav.equal_workspace m.nav.workspace Nav.Knowledge
                    && Nav.equal_knowledge_tab m.knowledge.active_tab
-                        Nav.Knowledge_memory)
+                        Nav.Knowledge_memory
+                   && Knowledge_store.equal_memory_subview
+                        m.knowledge.memory_subview Knowledge_store.Mem_diff_flow)
                   || (Nav.equal_workspace m.nav.workspace Nav.Keepers
                       && (m.nav.pane_index = 1 || m.nav.zoomed)
                       && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
@@ -6087,14 +6197,60 @@ and execute_action ~now (m : Model.t) action =
       then step_artifact_search ~now ~delta:(-1) m
       else (m, [])
   | Keymap.Toggle_memory_chart ->
-      let knowledge = Knowledge_store.toggle_memory_flow_mode m.knowledge in
-      let lbl = Masc_tui_ui.Memory_flow.mode_label knowledge.memory_flow_mode in
-      ( Model.with_toast ~now ~level:Model.Toast_info
-          (Say.make
-             ~ko:("기억 그래프 모드: " ^ Say.resolve Say.Lang_ko lbl)
-             ~en:("Memory chart mode: " ^ Say.resolve Say.Lang_en lbl))
-          { m with knowledge }
-      , [] )
+      let in_memory_chart =
+        Option.is_none m.nav.overlay
+        && Option.is_none (Memory_diagram.active_diagram m)
+        && Option.is_none m.knowledge.memory_reading
+        && (not (Model.sidebar_has_focus m))
+        &&
+        match Model.active_dive m with
+        | Some (Nav.Dive_knowledge (Nav.Memory_diff_dive _))
+        | Some (Nav.Dive_keeper { tab = Nav.Keeper_memory; _ }) ->
+            true
+        | Some
+            ( Nav.Dive_keeper
+                {
+                  tab =
+                    ( Nav.Keeper_chat
+                    | Nav.Keeper_context
+                    | Nav.Keeper_tool_calls
+                    | Nav.Keeper_work_candle
+                    | Nav.Keeper_sandbox
+                    | Nav.Keeper_config
+                    | Nav.Keeper_logs
+                    | Nav.Keeper_identity );
+                  _;
+                }
+            | Nav.Dive_work _
+            | Nav.Dive_runtime _
+            | Nav.Dive_infra _
+            | Nav.Dive_knowledge
+                ( Nav.Thread_dive _
+                | Nav.Wiki_dive _
+                | Nav.Artifact_dive _ ) ) ->
+            false
+        | None ->
+            (Nav.equal_workspace m.nav.workspace Nav.Knowledge
+             && Nav.equal_knowledge_tab m.knowledge.active_tab
+                  Nav.Knowledge_memory
+             && Knowledge_store.equal_memory_subview
+                  m.knowledge.memory_subview Knowledge_store.Mem_diff_flow)
+            || (Nav.equal_workspace m.nav.workspace Nav.Keepers
+                && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory
+                && (m.nav.pane_index = 1 || m.nav.zoomed))
+      in
+      if not in_memory_chart then (m, [])
+      else
+        let knowledge = Knowledge_store.toggle_memory_flow_mode m.knowledge in
+        let lbl =
+          Masc_tui_ui.Memory_flow.mode_label knowledge.memory_flow_mode
+        in
+        ( Model.with_toast ~now ~level:Model.Toast_info
+            (Say.make
+               ~ko:("기억 그래프 모드: " ^ Say.resolve Say.Lang_ko lbl)
+               ~en:("Memory chart mode: " ^ Say.resolve Say.Lang_en lbl))
+            { m with knowledge }
+        , [] )
   | Keymap.Open_external_editor -> (
       match Knowledge_store.selected_wiki_page m.knowledge with
       | Some p

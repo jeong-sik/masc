@@ -1,5 +1,8 @@
-import { describe, it, expect } from 'vitest'
-import { kSlot, kSigil } from './keeper-badge'
+// @vitest-environment happy-dom
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { h, render } from 'preact'
+import { fireEvent } from '@testing-library/preact'
+import { KeeperBadge, kSlot, kSigil, keeperPortraitUrl } from './keeper-badge'
 
 describe('kSlot', () => {
   it('returns deterministic slot 1..12 for unknown ids', () => {
@@ -17,9 +20,15 @@ describe('kSlot', () => {
 })
 
 describe('kSigil', () => {
-  it('extracts first letter + first letter after hyphen for hyphenated ids', () => {
+  it('extracts first + last segment initials for hyphenated ids without family collisions', () => {
     expect(kSigil('foo-bar')).toBe('FB')
-    expect(kSigil('alpha-beta-gamma')).toBe('AB')
+    expect(kSigil('code-reviewer-sister')).toBe('CS')
+    expect(kSigil('code-reviewer-brother')).toBe('CB')
+    expect(kSigil('code-reviewer-father')).toBe('CF')
+    expect(kSigil('code-reviewer-uncle')).toBe('CU')
+    expect(kSigil('e-masc-the-leader')).toBe('EL')
+    expect(kSigil('e-masc-the-scribe')).toBe('ES')
+    expect(kSigil('alpha-beta-gamma')).toBe('AG')
   })
 
   it('falls back to first 2 letters for non-hyphenated ids', () => {
@@ -34,5 +43,39 @@ describe('kSigil', () => {
   it('strips non-alphanumeric chars before deriving', () => {
     expect(kSigil('ab.cd')).toBe('AB')
     expect(kSigil('foo!bar')).toBe('FO')
+  })
+})
+
+describe('KeeperBadge', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+  })
+
+  it('renders a soft-tinted chip with collision-free sigil and slot class', () => {
+    render(h(KeeperBadge, { id: 'code-reviewer-sister' }), container)
+    const chip = container.querySelector('.kb-chip')
+    expect(chip).not.toBeNull()
+    expect(chip?.classList.contains(`kb-slot-${kSlot('code-reviewer-sister')}`)).toBe(true)
+    expect(container.querySelector('.kb-sigil')?.textContent).toBe('CS')
+    expect(container.querySelector('.kb-label')?.textContent).toBe('code-reviewer-sister')
+  })
+
+  it('renders portrait thumbnail and falls back cleanly to sigil on image error', () => {
+    render(h(KeeperBadge, { id: 'e-masc-the-leader', portrait: true, size: 'lg' }), container)
+    const img = container.querySelector('img.kb-portrait') as HTMLImageElement | null
+    expect(img).not.toBeNull()
+    expect(img?.getAttribute('src')).toBe(keeperPortraitUrl('e-masc-the-leader', 64))
+
+    fireEvent.error(img!)
+    expect(container.querySelector('img.kb-portrait')).toBeNull()
+    expect(container.querySelector('.kb-sigil')?.textContent).toBe('EL')
   })
 })

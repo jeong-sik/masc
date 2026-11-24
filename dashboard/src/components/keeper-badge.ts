@@ -1,18 +1,11 @@
-// Keeper attribution primitive — color + sigil, two-channel rule.
-//
-// SPEC §3.6 v0.3 (design-system/SPEC.md): color alone never identifies
-// a keeper. Always emit color + sigil. <KeeperBadge> is the canonical
-// attribution unit anywhere in the dashboard.
-//
-// Slot resolution: kSlot(id) → 1..12 deterministic FNV-1a hash, with
-// 5 anchor ids in KEEPER_REGISTRY pinned for brand recall.
-// Sigil: kSigil(id) → 2-letter monogram (registry override or
-// auto-derived from id).
+// Keeper attribution primitive — two-channel identity (OKLCH slot + collision-free sigil)
+// with soft-tinted chip surface (16% bg / 35% border) and optional 28–36px portrait.png thumbnail.
 
 import { html } from 'htm/preact'
 import type { VNode } from 'preact'
-import { MONO_STACK } from './common/font-stacks'
-// FNV-1a 32-bit hash mapped onto 1..12 (avoids 0 so slot is 1-indexed).
+import { useState } from 'preact/hooks'
+
+// FNV-1a 32-bit hash mapped onto 1..12 (1-indexed OKLCH keeper slot).
 function hash12(str: string): number {
   let h = 0x811c9dc5
   for (let i = 0; i < str.length; i++) {
@@ -26,20 +19,29 @@ export function kSlot(id: string): number {
   return hash12(String(id))
 }
 
+/**
+ * Collision-resistant 2-letter monogram for a keeper ID.
+ * Multi-segment hyphenated names take the first and last segment initials
+ * (`code-reviewer-sister` -> `CS`, `e-masc-the-leader` -> `EL`, `foo-bar` -> `FB`)
+ * so sibling keepers in the same family never collapse onto the same monogram.
+ * Single-segment IDs take the first 2 alphanumeric characters.
+ */
 export function kSigil(id: string): string {
-  // Auto-derive: first letter + first letter after hyphen, else first 2.
-  const s = String(id).replace(/[^a-z0-9-]/gi, '')
-  const parts = s.split('-').filter(Boolean)
-  const first = parts[0]
-  const second = parts[1]
-  if (first && second && first[0] && second[0]) {
-    return (first[0] + second[0]).toUpperCase()
+  const cleaned = String(id).replace(/[^a-z0-9-]/gi, '')
+  const parts = cleaned.split('-').filter(Boolean)
+  if (parts.length >= 2) {
+    const first = parts[0]!
+    const last = parts[parts.length - 1]!
+    if (first[0] && last[0]) {
+      return (first[0] + last[0]).toUpperCase()
+    }
   }
-  return s.slice(0, 2).toUpperCase()
+  return cleaned.replace(/-/g, '').slice(0, 2).toUpperCase()
 }
 
-const SANS_STACK = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
-const HEARTBEAT_EASING = 'var(--ease-inout)'
+export function keeperPortraitUrl(id: string, size = 64): string {
+  return `/api/v1/keepers/${encodeURIComponent(id)}/portrait.png?size=${size}`
+}
 
 export type KeeperBadgeSize = 'sm' | 'md' | 'lg'
 export type KeeperBadgeVariant = 'sigil' | 'full' | 'name'
@@ -51,6 +53,8 @@ export interface KeeperBadgeProps {
   variant?: KeeperBadgeVariant
   title?: string
   beat?: boolean
+  /** Render a 28-36px portrait thumbnail with 1.5px slot ring (falls back to sigil on error). */
+  portrait?: boolean | string
 }
 
 export function KeeperBadge({
@@ -60,75 +64,67 @@ export function KeeperBadge({
   variant = 'full',
   title,
   beat = false,
+  portrait = false,
 }: KeeperBadgeProps): VNode {
   const slot = kSlot(id)
   const sigil = kSigil(id)
   const display = name ?? id
-  const sizePx = size === 'sm' ? 14 : size === 'lg' ? 24 : 18
-  const fontPx = size === 'sm' ? 8 : size === 'lg' ? 11 : 9
-  const radius = size === 'lg' ? 3 : 2
+  const [portraitFailed, setPortraitFailed] = useState(false)
 
-  const sigilStyle = {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: `${sizePx}px`,
-    height: `${sizePx}px`,
-    fontSize: `${fontPx}px`,
-    borderRadius: `${radius}px`,
-    background: `var(--color-keeper-${slot})`,
-    color: 'var(--color-bg-page)',
-    fontFamily: MONO_STACK,
-    fontWeight: 700,
-    letterSpacing: 0,
-    flex: 'none',
-    boxShadow: beat
-      ? `0 0 6px rgb(var(--color-keeper-${slot}-glow) / 0.7)`
-      : undefined,
-    animation: beat
-      ? `keeper-heartbeat 1.4s ${HEARTBEAT_EASING} infinite`
-      : undefined,
-  }
+  const portraitSrc = typeof portrait === 'string'
+    ? portrait
+    : portrait === true
+      ? keeperPortraitUrl(id, 64)
+      : null
 
-  const sigilEl = html`
-    <span
-      style=${sigilStyle}
-      aria-hidden=${variant === 'full' ? 'true' : 'false'}
-    >${sigil}</span>
-  `
+  const showPortrait = portraitSrc !== null && !portraitFailed
+
+  const avatarEl = showPortrait
+    ? html`
+        <img
+          class=${`kb-portrait kb-portrait--${size}${beat ? ' kb-beat' : ''}`}
+          src=${portraitSrc}
+          alt=${variant === 'full' ? '' : display}
+          aria-hidden=${variant === 'full' ? 'true' : undefined}
+          loading="lazy"
+          decoding="async"
+          onError=${() => setPortraitFailed(true)}
+        />
+      `
+    : html`
+        <span
+          class=${`kb-sigil kb-sigil--${size}${beat ? ' kb-beat' : ''}`}
+          aria-hidden=${variant === 'full' ? 'true' : 'false'}
+        >${sigil}</span>
+      `
 
   if (variant === 'sigil') {
     return html`
-      <span title=${title || display} aria-label=${display}>${sigilEl}</span>
+      <span
+        class=${`kb-root kb-slot-${slot}`}
+        data-keeper-slot=${slot}
+        title=${title || display}
+        aria-label=${display}
+      >${avatarEl}</span>
     `
   }
+
   if (variant === 'name') {
     return html`
-      <span style=${{ color: `var(--color-keeper-${slot})`, fontWeight: 500 }}>
+      <span class=${`kb-name kb-slot-${slot}`} data-keeper-slot=${slot} title=${title}>
         ${display}
       </span>
     `
   }
+
   return html`
     <span
-      style=${{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: '6px',
-        verticalAlign: 'middle',
-      }}
+      class=${`kb-chip kb-chip--${size} kb-slot-${slot}`}
+      data-keeper-slot=${slot}
       title=${title}
     >
-      ${sigilEl}
-      <span
-        style=${{
-          color: `var(--color-keeper-${slot})`,
-          fontFamily: SANS_STACK,
-          fontSize: '11px',
-          fontWeight: 500,
-        }}
-      >${display}</span>
+      ${avatarEl}
+      <span class="kb-label">${display}</span>
     </span>
   `
 }
-

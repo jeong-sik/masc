@@ -209,27 +209,22 @@ type keepalive_turn_outcome = {
 val record_crashed_cycle_failure :
   ?record_pulse:bool ->
   registry_entry:Keeper_registry.registry_entry ->
-  sources:Keeper_heartbeat_source_batch.t ->
+  cause:Keeper_turn_pulse.cause option ->
   exn ->
   unit
-(** [sources] are the pre-validation queue entries the cycle took before it
-    crashed; when [record_pulse] is [true] (the default), the turn pulse counts
-    the crash once under the cause they give. Pass [~record_pulse:false] when
-    the cycle already recorded a pulse entry (e.g. post-cycle queue settlement
-    failure after a completed or rested turn) so one cycle is never counted
-    twice. *)
+(** A cycle failure without an opened turn has no known turn cause. A
+    settlement failure after the pulse was recorded does not count twice. *)
 
 (** Convert an exception escaping one autonomous cycle into its accounting
     outcome. Operator interrupts are expected cancellation and do not mutate
     the turn-failure counter; every other exception is recorded as a crash.
-    [decided_channel] is the cycle decision's channel when the exception came
-    after it. *)
+    [decided_channel] carries a scheduled decision or an opened reaction. *)
 val handle_cycle_exception :
   ?record_pulse:bool ->
   registry_entry:Keeper_registry.registry_entry ->
   meta:keeper_meta ->
   decided_channel:Keeper_world_observation.keeper_cycle_channel option ->
-  sources:Keeper_heartbeat_source_batch.t ->
+  cause:Keeper_turn_pulse.cause option ->
   exn -> keepalive_turn_outcome
 
 type turn_terminal_settlement =

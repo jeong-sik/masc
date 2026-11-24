@@ -22,15 +22,8 @@ type outcome =
   | Turn_rested
   | Turn_failed
 
-(** What started a turn, read from what the turn took in. *)
-type cause =
-  | Scheduled  (** Every input the turn took was a due schedule. *)
-  | Reacted  (** The turn took at least one input that was not a due schedule. *)
-  | Chat  (** A direct request: someone wrote to the keeper. *)
-  | Own
-      (** The autonomous cycle took no input. A cadence tick and a broadcast
-          wake that found the queue empty both land here: the turn log writes
-          no input for either, so a seed could not tell them apart. *)
+(** Why the scheduler opened a turn, or the direct chat lane. *)
+type cause = Scheduled | Reacted | Chat | Own
 
 type tally = {
   ok : int;
@@ -72,14 +65,12 @@ val window_seconds : int
 val slot_start : float -> int
 (** The start of the slot that holds Unix time [at]. *)
 
-val cause_of_inputs : Keeper_event_queue.stimulus list -> cause
-(** The cause of an autonomous turn from the queue entries it took. No entry is
-    {!Own}. *)
+val cause_of_decision : Keeper_world_observation.keeper_cycle_decision -> cause option
+(** A skipped decision has no turn cause. *)
 
 val record :
-  base_path:string -> keeper_name:string -> at:float -> cause:cause -> outcome -> unit
-(** Count one turn that ended at [at]. A keeper with no pulse yet knows its
-    turns from [at] on. *)
+  base_path:string -> keeper_name:string -> at:float -> ?cause:cause -> outcome -> unit
+(** Count an outcome. An unknown cause stays unknown. *)
 
 val get : base_path:string -> keeper_name:string -> pulse option
 (** [None] when the keeper was neither seeded nor recorded. *)
@@ -102,11 +93,10 @@ val seed_from_decision_log :
     without reaching the window start. Rows stamped after [now] are dropped.
     Seeding leaves a keeper that already has a pulse alone.
 
-    A [direct_turn] row is {!Chat}. An [autonomous_cycle] row takes its cause
-    from the keeper's turn log: the [Opened] line whose turn ref is the row's
-    [trace_id] and [turn_id] names what the turn took. A row with no such line
-    read counts as [unknown]. The turn log's tail is read within the decision
-    log's bounds, and only once an autonomous row needs a cause.
+    A direct request counts as chat. An autonomous row uses the decision's
+    recorded channel. For the scheduled channel, a due schedule observation
+    or scheduled input on the matching [Opened] line distinguishes a requested
+    schedule from the Keeper's own turn. Missing evidence stays unknown.
 
     [known_since] is the window start when a row older than the window was
     read. Otherwise it is the oldest row read, of any event, since the logs

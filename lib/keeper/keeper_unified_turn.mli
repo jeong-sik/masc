@@ -115,6 +115,7 @@ val continuation_channel_of_wake :
 val run_keeper_cycle
   :  before_dispatch_authority:(unit -> (unit, string) result)
   -> execution_path:Keeper_unified_metrics_decision.execution_path
+  -> ?on_turn_started:(unit -> unit)
   -> ?deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane
   -> ?on_deferred_runtime_consumed:(unit -> unit)
   -> config:Workspace.config

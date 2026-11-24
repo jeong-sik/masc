@@ -39,6 +39,7 @@ val recorded_pulse : cycle_outcome -> bool
 
 val run_keeper_cycle
   :  admission_token:Keeper_turn_dispatch_authority.token
+  -> ?on_turn_started:(unit -> unit)
   -> ?record_pulse:bool
   -> ?deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane
   -> ?on_deferred_runtime_consumed:(unit -> unit)

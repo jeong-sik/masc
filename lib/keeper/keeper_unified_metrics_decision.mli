@@ -29,7 +29,7 @@ val append_decision_record :
   observation:Keeper_world_observation.world_observation ->
   latency_ms:int ->
   outcome:Keeper_decision_outcome.t ->
-  ?channel:Keeper_world_observation.keeper_cycle_channel ->
+  channel:Keeper_world_observation.keeper_cycle_channel ->
   execution_path:execution_path ->
   degraded_retry_applied:Keeper_error_classify.degraded_retry option ->
   degraded_retry_deferred:Keeper_error_classify.degraded_retry option ->

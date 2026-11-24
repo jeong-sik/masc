@@ -1601,7 +1601,7 @@ max-concurrent = 1
         ~config ~meta ~keeper_turn_id:allocated_turn_id ~observation ~latency_ms:3
         ~outcome:Keeper_decision_outcome.Success
         ~turn_ctx_cell:(Masc.Keeper_tool_call_log.create_turn_ctx_cell ())
-        ~execution_path:Masc.Keeper_unified_metrics_decision.Autonomous_cycle
+        ~channel:Masc.Keeper_world_observation.Scheduled_autonomous ~execution_path:Masc.Keeper_unified_metrics_decision.Autonomous_cycle
         ~degraded_retry_applied:settlement.degraded_retry_applied
         ~degraded_retry_deferred:settlement.degraded_retry_deferred
         ~result:(Some result) ();
@@ -3316,7 +3316,7 @@ max-concurrent = 1
     Masc.Keeper_unified_metrics_decision.append_decision_record
       ~config ~meta ~keeper_turn_id:1 ~observation:world ~latency_ms:3 ~outcome
       ~turn_ctx_cell:(Masc.Keeper_tool_call_log.create_turn_ctx_cell ())
-      ~execution_path:Masc.Keeper_unified_metrics_decision.Autonomous_cycle
+      ~channel:Masc.Keeper_world_observation.Scheduled_autonomous ~execution_path:Masc.Keeper_unified_metrics_decision.Autonomous_cycle
       ~degraded_retry_applied:None ~degraded_retry_deferred:None
       ~result ?executed_runtime_id ();
     Fs_compat.load_file log_path |> String.split_on_char '\n'

@@ -237,8 +237,8 @@ type keepalive_turn_outcome = {
   due_schedule : due_schedule_service;
       (** Whether the cycle's turn served a due schedule. *)
   decided_channel : Keeper_world_observation.keeper_cycle_channel option;
-      (** The channel the cycle decision chose; [None] when the cycle ended
-          before a decision. The adaptive idle transition reads it. *)
+      (** A scheduled decision or an opened reactive turn. A reactive
+          admission failure has no channel for idle accounting. *)
 }
 
 (* The loop-local hint is the in-process view of
@@ -572,7 +572,7 @@ let set_failure_reason_exact registry_entry ~site reason =
 let record_crashed_cycle_failure
       ?(record_pulse = true)
       ~(registry_entry : Keeper_registry.registry_entry)
-      ~(sources : Keeper_heartbeat_source_batch.t)
+      ~cause
       exn
   =
   (* Capture the backtrace before any other call can clobber it. *)
@@ -598,8 +598,7 @@ let record_crashed_cycle_failure
         ~base_path
         ~keeper_name
         ~at:(Time_compat.now ())
-        ~cause:
-          (Keeper_turn_pulse.cause_of_inputs (Keeper_heartbeat_source_batch.stimuli sources))
+        ?cause
         Keeper_turn_pulse.Turn_failed;
     Keeper_row_broadcast.changed ~base_path ~keeper_name);
   Otel_metric_store.inc_counter
@@ -632,7 +631,7 @@ let handle_cycle_exception
       ~registry_entry
       ~(meta : keeper_meta)
       ~decided_channel
-      ~sources
+      ~cause
       exn
   =
   if Keeper_registry_types.is_operator_interrupt exn
@@ -641,7 +640,7 @@ let handle_cycle_exception
     record_crashed_cycle_failure
       ~record_pulse
       ~registry_entry
-      ~sources
+      ~cause
       exn;
     { meta
     ; cycle_status = Turn_cycle_crashed
@@ -1216,10 +1215,7 @@ let run_keepalive_unified_turn
          @@ Llm_provider.Http_request_observer.capture (fun () ->
            Keeper_turn_dispatch_authority.run (fun admission_token ->
     let source_batch = ref Keeper_heartbeat_source_batch.empty in
-    (* Pre-validation intake batch: preserved unchanged so pulse causes always
-       match [turn_input] and the turn log's [Opened] line even when a source is
-       withdrawn during dispatch validation. *)
-    let pulse_sources = ref Keeper_heartbeat_source_batch.empty in
+    let pulse_cause = ref None in
     let diagnostic_selection = ref None in
     let cycle_outcome_ref = ref None in
     let hitl_resolutions_for_cycle = ref [] in
@@ -1252,7 +1248,7 @@ let run_keepalive_unified_turn
         record_crashed_cycle_failure
           ~record_pulse:should_record_pulse
           ~registry_entry
-          ~sources:!pulse_sources
+          ~cause:!pulse_cause
           (Event_queue_cycle_failed message)
     in
     try
@@ -1288,7 +1284,6 @@ let run_keepalive_unified_turn
           ~pending_board_events
       in
       source_batch := event_intake.source_batch;
-      pulse_sources := event_intake.source_batch;
       diagnostic_selection := event_intake.diagnostic_selection;
       let selected_source_authority () =
         match
@@ -1361,7 +1356,12 @@ let run_keepalive_unified_turn
           obs
       in
       let turn_decision = scheduling.turn_decision in
-      decided_channel := Some turn_decision.channel;
+      (* A selected reactive source can still fail revalidation before the
+         unified turn opens. Only its actual opening starts a reaction. *)
+      (match turn_decision.channel with
+       | Keeper_world_observation.Scheduled_autonomous ->
+         decided_channel := Some Keeper_world_observation.Scheduled_autonomous
+       | Keeper_world_observation.Reactive -> ());
       let should_run_turn =
         should_run_turn_after_event_intake
           ~scheduled:scheduling.should_run_turn
@@ -1527,6 +1527,9 @@ let run_keepalive_unified_turn
               hitl_resolutions_for_cycle := Keeper_hitl_resolution_batch.resolutions hitl_resolutions;
               let outcome =
                 run_keeper_cycle
+                  ~on_turn_started:(fun () ->
+                    decided_channel := Some turn_decision.channel;
+                    pulse_cause := Keeper_turn_pulse.cause_of_decision turn_decision)
                   ~admission_token
                   ~record_pulse:(not !pulse_recorded)
                   ?deferred_runtime_lane
@@ -1710,7 +1713,7 @@ let run_keepalive_unified_turn
         ~registry_entry
         ~meta:meta_after_triage
         ~decided_channel:!decided_channel
-        ~sources:!pulse_sources
+        ~cause:!pulse_cause
         exn)))
     with
   | Ok (`Ran outcome) -> outcome

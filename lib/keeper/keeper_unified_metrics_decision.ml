@@ -35,7 +35,7 @@ let append_decision_record
     ~(observation : Keeper_world_observation.world_observation)
     ~(latency_ms : int)
     ~(outcome : Keeper_decision_outcome.t)
-    ?channel
+    ~channel
     ~(execution_path : execution_path)
     ~(degraded_retry_applied : Keeper_error_classify.degraded_retry option)
     ~(degraded_retry_deferred : Keeper_error_classify.degraded_retry option)
@@ -47,11 +47,6 @@ let append_decision_record
     ?executed_runtime_id
     () : unit =
   let now_ts = Time_compat.now () in
-  let channel =
-    Option.value
-      ~default:(decision_channel_of_observation observation)
-      channel
-  in
   let claimable_task_count = Keeper_world_observation.claimable_task_count observation in
   let trigger_signals = observed_triggers_of_observation observation in
   let affordances = observed_affordances_of_observation observation in

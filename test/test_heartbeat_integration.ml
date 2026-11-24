@@ -833,7 +833,7 @@ let test_crashed_cycle_records_turn_failure () =
         (R.get_turn_failures ~base_path:config.base_path meta.name);
       KHL.record_crashed_cycle_failure
         ~registry_entry
-        ~sources:Masc.Keeper_heartbeat_source_batch.empty
+        ~cause:None
         (Failure "boom");
       let count = R.get_turn_failures ~base_path:config.base_path meta.name in
       check int "crash recorded as turn failure" 1 count;
@@ -877,7 +877,7 @@ let test_crashed_cycle_records_turn_failure () =
         (Some (R.Exception "replacement cause"));
       KHL.record_crashed_cycle_failure
         ~registry_entry:stale_entry
-        ~sources:Masc.Keeper_heartbeat_source_batch.empty
+        ~cause:None
         (Failure "old fiber crash");
       check int "stale crash does not increment replacement debt" 0
         (R.get_turn_failures ~base_path:config.base_path stale_meta.name);
@@ -930,7 +930,7 @@ let test_operator_interrupt_skips_turn_accounting () =
           ~registry_entry
           ~meta
           ~decided_channel:(Some Masc.Keeper_world_observation.Reactive)
-          ~sources:Masc.Keeper_heartbeat_source_batch.empty
+          ~cause:None
           (Eio.Cancel.Cancelled R.Operator_interrupt)
       in
       check bool "an interrupt after the decision keeps the decision's channel" true
@@ -5947,7 +5947,7 @@ let test_crashed_cycle_records_health_failure () =
   for i = 1 to 3 do
     KHL.record_crashed_cycle_failure
       ~registry_entry
-      ~sources:Masc.Keeper_heartbeat_source_batch.empty
+      ~cause:None
       (Failure (Printf.sprintf "boom-%d" i))
   done;
   let summary = Health.get_summary ~agent_name:keeper_name in
@@ -5993,7 +5993,7 @@ let test_crashed_cycle_skip_pulse_prevents_double_count () =
       KHL.record_crashed_cycle_failure
         ~record_pulse:false
         ~registry_entry
-        ~sources:Masc.Keeper_heartbeat_source_batch.empty
+        ~cause:None
         (Failure "event queue ack failed");
       check int "registry streak incremented" 1
         (R.get_turn_failures ~base_path keeper_name);

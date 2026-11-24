@@ -157,6 +157,7 @@ let continuation_channel_of_wake = function
 let run_keeper_cycle
       ~(before_dispatch_authority : unit -> (unit, string) result)
       ~(execution_path : Keeper_unified_metrics_decision.execution_path)
+      ?on_turn_started
       ?deferred_runtime_lane
       ?on_deferred_runtime_consumed
       ~(config : Workspace.config)
@@ -645,6 +646,7 @@ let run_keeper_cycle
          block clears the field, preventing stale state on idle keepers. *)
                Keeper_registry.mark_turn_started ~observation_token ~base_path:config.base_path ~wake
                  ~turn_id:keeper_turn_id meta.name;
+               Option.iter (fun started -> started ()) on_turn_started;
                (* Refresh from the committed owner projection, then put the
                   TOML back on. The projection is durable keeper JSON, which
                   omits the TOML-owned fields on purpose
@@ -1187,6 +1189,7 @@ let run_keeper_cycle
                     ~observation
                     ~latency_ms
                     ~outcome:Keeper_decision_outcome.Failed
+                    ~channel
                     ~execution_path
                     ~degraded_retry_applied
                     ~degraded_retry_deferred

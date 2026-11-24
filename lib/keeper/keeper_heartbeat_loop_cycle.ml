@@ -91,6 +91,7 @@ let recorded_pulse = function
    must not interleave with this lane's meta writes. *)
 let run_keeper_cycle_admitted
       ~before_dispatch_authority
+      ?on_turn_started
       ?(record_pulse = true)
       ?deferred_runtime_lane
       ?on_deferred_runtime_consumed
@@ -110,6 +111,7 @@ let run_keeper_cycle_admitted
       Keeper_unified_turn.run_keeper_cycle
         ~before_dispatch_authority
         ~execution_path:Keeper_unified_metrics_decision.Autonomous_cycle
+        ?on_turn_started
         ?deferred_runtime_lane
         ?on_deferred_runtime_consumed
         ~config:ctx.config
@@ -131,10 +133,7 @@ let run_keeper_cycle_admitted
         ~base_path:ctx.config.base_path
         ~keeper_name:meta_after_triage.name
         ~at:(Time_compat.now ())
-        ~cause:
-          (Keeper_turn_pulse.cause_of_inputs
-             (Keeper_heartbeat_source_batch.stimuli
-                (Keeper_heartbeat_source_batch.sources turn_input)))
+        ?cause:(Keeper_turn_pulse.cause_of_decision turn_decision)
         outcome;
       Keeper_row_broadcast.changed
         ~base_path:ctx.config.base_path
@@ -215,6 +214,7 @@ let run_keeper_cycle_admitted
 
 let run_keeper_cycle
       ~admission_token
+      ?on_turn_started
       ?(record_pulse = true)
       ?deferred_runtime_lane
       ?on_deferred_runtime_consumed
@@ -238,6 +238,7 @@ let run_keeper_cycle
   run_keeper_cycle_admitted
     ~before_dispatch_authority:
       (fun () -> Keeper_turn_dispatch_authority.validate admission_token)
+    ?on_turn_started
     ~record_pulse
     ?deferred_runtime_lane
     ?on_deferred_runtime_consumed

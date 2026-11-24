@@ -363,18 +363,14 @@ let opened_line ~turn ~at stimuli =
   |> Yojson.Safe.to_string
 ;;
 
-let decision_line ~turn ~slot ~path =
-  Printf.sprintf
-    {|{"event":"turn","ts_unix":%.1f,"outcome":"success","execution_path":"%s","trace_id":"trace-t","turn_id":%d}|}
-    (at_slot ~offset:60 slot)
-    path
-    turn
+let decision_line ~turn ~slot ~path ~channel =
+  Yojson.Safe.to_string
+    (`Assoc [ "event", `String "turn"; "ts_unix", `Float (at_slot ~offset:60 slot);
+              "outcome", `String "success"; "execution_path", `String path;
+              "trace_id", `String "trace-t"; "turn_id", `Int turn;
+              "channel", `String (Masc.Keeper_world_observation.channel_to_string channel) ])
 ;;
 
-(* An autonomous row takes its cause from the [Opened] line its trace and turn
-   number name: only schedules is scheduled, anything else taken is a
-   reaction, nothing taken is the keeper's own. A row whose line was not
-   written is unknown, and a direct row is chat without a line. *)
 let test_seed_names_causes_from_the_turn_log () =
   with_workspace (fun config log_path ->
     let keeper_name = "joined" in
@@ -390,21 +386,23 @@ let test_seed_names_causes_from_the_turn_log () =
       [ opened_line ~turn:1 ~at:(at_slot 90) [ schedule ]
       ; opened_line ~turn:2 ~at:(at_slot 90) [ schedule; receipt ]
       ; opened_line ~turn:3 ~at:(at_slot 90) []
+      ; opened_line ~turn:6 ~at:(at_slot 90) []
       ];
     write_lines
       (log_path keeper_name)
-      [ decision_line ~turn:1 ~slot:90 ~path:"autonomous_cycle"
-      ; decision_line ~turn:2 ~slot:90 ~path:"autonomous_cycle"
-      ; decision_line ~turn:3 ~slot:90 ~path:"autonomous_cycle"
-      ; decision_line ~turn:4 ~slot:90 ~path:"autonomous_cycle"
-      ; decision_line ~turn:5 ~slot:90 ~path:"direct_turn"
+      [ decision_line ~turn:1 ~slot:90 ~path:"autonomous_cycle" ~channel:Scheduled_autonomous
+      ; decision_line ~turn:2 ~slot:90 ~path:"autonomous_cycle" ~channel:Reactive
+      ; decision_line ~turn:3 ~slot:90 ~path:"autonomous_cycle" ~channel:Scheduled_autonomous
+      ; decision_line ~turn:4 ~slot:90 ~path:"autonomous_cycle" ~channel:Scheduled_autonomous
+      ; decision_line ~turn:5 ~slot:90 ~path:"direct_turn" ~channel:Reactive
+      ; decision_line ~turn:6 ~slot:90 ~path:"autonomous_cycle" ~channel:Reactive
       ];
     match seeded config keeper_name with
     | Some pulse ->
       Alcotest.check
         cause_list
-        "scheduled, reacted, own, unknown and chat"
-        [ base + (90 * Pulse.slot_seconds), [ 1; 1; 1; 1; 1 ] ]
+        "a scope message reacts even with an empty queue"
+        [ base + (90 * Pulse.slot_seconds), [ 1; 2; 1; 1; 1 ] ]
         (causes pulse)
     | None -> Alcotest.fail "expected a seeded pulse")
 ;;

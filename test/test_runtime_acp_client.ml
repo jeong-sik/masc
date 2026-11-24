@@ -403,14 +403,29 @@ let test_muse_refuses_unsupported_config_before_spawn () =
 
 let test_muse_argv_and_environment () =
   let cfg = Runtime_acp_client.default_config ~driver:Runtime_acp_client.Muse_code ~cwd:"/tmp" in
-  check (list string) "default argv trusts the workspace and turns every observer off"
-    ([ "muse"; "acp"; "--trust-workspace" ] @ muse_observer_flags)
-    (Runtime_acp_client.For_testing.build_argv cfg ~temp_gemini_dir:None);
+  let argv ?native_posture cfg =
+    Runtime_acp_client.For_testing.build_argv ?native_posture cfg ~temp_gemini_dir:None
+  in
+  let host_tool_flags = [ "--disable-write"; "--disable-shell" ] in
+  let trusted = [ "muse"; "acp"; "--trust-workspace" ] @ muse_observer_flags in
+  check (list string) "none turns every observer off and removes the host write and shell tools"
+    (trusted @ host_tool_flags)
+    (argv ~native_posture:Runtime_native_tools.Native_none cfg);
+  check (list string) "read removes the host write and shell tools too"
+    (trusted @ host_tool_flags)
+    (argv ~native_posture:Runtime_native_tools.Native_read cfg);
+  check (list string) "an unstated posture takes the restrictive side"
+    (trusted @ host_tool_flags)
+    (argv cfg);
+  check (list string) "full keeps the host write and shell tools"
+    trusted
+    (argv ~native_posture:Runtime_native_tools.Native_full cfg);
   let effort_cfg = { cfg with args = [ "acp"; "-c"; "reasoning_effort=\"low\"" ] } in
   check (list string) "operator args replace the defaults and keep the required flags"
     ([ "muse"; "acp"; "-c"; "reasoning_effort=\"low\""; "--trust-workspace" ]
-     @ muse_observer_flags)
-    (Runtime_acp_client.For_testing.build_argv effort_cfg ~temp_gemini_dir:None);
+     @ muse_observer_flags
+     @ host_tool_flags)
+    (argv ~native_posture:Runtime_native_tools.Native_read effort_cfg);
   let env =
     Runtime_acp_client.For_testing.build_environment
       ~base_env:[| "PATH=/usr/bin"; "MUSE_NO_AUTO_UPDATE=0"; "META_API_KEY=key" |]

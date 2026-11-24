@@ -231,9 +231,14 @@ let profile_of_driver = function
     ; mcp_wiring = Session_new_http_mcp
     (* Live-verified against muse acp 1.4.25 (2026-11-24): session/update
        tool_call emits title = name = "mcp__<server>__<tool>" with kind =
-       "other"; the later session/request_permission frame carries only the
-       toolCallId, so the identity comes from the tool_call frame. Native tools
-       use plain names ("read_file", kind "read"). *)
+       "other"; native tools use plain names ("read_file", kind "read"). The
+       host's default permission profile has its own AI reviewer approve MCP
+       calls and sends no session/request_permission frame; each call adds
+       one model run of about 4,000 tokens and 1.4 to 4.2 s. The frame
+       appears when the operator's muse settings select
+       permissions.default_profile ":ask-me". It carries only the toolCallId,
+       so the identity comes from the tool_call frame. No ACP method and no
+       -c key that was tried selects the profile. *)
     ; mcp_identifier_syntaxes = [ Mcp_double_underscore ]
     ; system_prompt_channel = Framed_in_first_prompt
     (* muse acp reports no per-turn token counts: the prompt result holds only
@@ -2866,14 +2871,17 @@ let install_client_of_driver = function
 
 (* ── Lifecycle: spawn + initialize ────────────────────────────────────────── *)
 
-(* muse acp 1.4.25 bundles reminder observers (memory recall, skill recall,
-   goal, todo, scope and verification reminders). Each enabled observer makes
-   its own model calls on the operator's subscription and injects text into the
-   session. A Keeper already carries its own memory, goals and verification, so
-   the host runs with every observer off. The ids are the host's capability
-   names, each present in the 1.4.25 binary; [-c runtime_capabilities.<id>]
-   accepts any id without checking it, so a renamed id fails silently and the
-   observer stays on. *)
+(* muse acp 1.4.25 starts a separate model run after a turn for its bundled
+   reminder observers (memory, skill, verification, goal, todo and scope
+   reminders; the run's one tool is [submit_reminder_decision]). A Keeper
+   already carries its own memory, goals and verification, so the host runs
+   with every observer off. Measured 2026-11-24 on one-tool turns: the run
+   appeared in 5 of 5 sessions without the six switches below (4,560-token
+   prefix, 1.2 to 2.9 s of model time at the end of the turn) and in 0 of 8
+   sessions with them, and the main agent's tool count fell from 26 to 25.
+   [-c runtime_capabilities.<id>] accepts any id without checking it: a
+   session that named an id the host does not have kept the run, so a renamed
+   id fails silently and the observer stays on. *)
 let muse_observer_capability_ids =
   List.map
     (fun name -> "plugin:tbh-reminders:reminder:" ^ name)
@@ -2897,6 +2905,21 @@ let muse_required_args =
   :: List.concat_map
        (fun id -> [ "-c"; Printf.sprintf "runtime_capabilities.%s.enabled=false" id ])
        muse_observer_capability_ids
+;;
+
+(* Under its default permission profile muse acp 1.4.25 runs workspace writes
+   and sandboxed shell commands without a session/request_permission frame, so
+   the client cannot refuse them (live-verified: a write_file call created its
+   file in onRequest and promptUnmatched, a bash call ran in onRequest).
+   [--disable-write] and [--disable-shell] remove those tools from the host for
+   its lifetime (29 to 23 tools on the echo provider). They go on under every
+   posture but [full]; an unstated posture takes the restrictive side. The host
+   offers no flag for its web search and fetch tools. *)
+let muse_host_tool_flags = function
+  | Some Runtime_native_tools.Native_full -> []
+  | Some Runtime_native_tools.Native_none
+  | Some Runtime_native_tools.Native_read
+  | None -> [ "--disable-write"; "--disable-shell" ]
 ;;
 
 let build_argv ?native_posture (config : config) ~temp_gemini_dir =
@@ -2937,7 +2960,10 @@ let build_argv ?native_posture (config : config) ~temp_gemini_dir =
     in
     (config.cli_path :: pre_args) @ base_args
   | Mistral_vibe -> config.cli_path :: base_args
-  | Muse_code -> (config.cli_path :: base_args) @ muse_required_args
+  | Muse_code ->
+    (config.cli_path :: base_args)
+    @ muse_required_args
+    @ muse_host_tool_flags native_posture
 ;;
 
 let foreground_process_mgr ~clock ?(grace_seconds = default_reap_grace_seconds) () =

@@ -126,12 +126,30 @@ credential naming an absolute path (`oauth_source` for Antigravity); `env` and
   verified. MASC adds `--trust-workspace` (the host connects the session's MCP
   server only with it) and one `-c runtime_capabilities.<id>.enabled=false` per
   bundled reminder observer after `args`, and sets `MUSE_NO_AUTO_UPDATE=1`. The
-  host refuses to start when `args` repeats one of those `-c` keys.
-- The client runs its read tool without asking for permission in every mode, so
-  a Keeper whose `keeper.tools.native` is `none` runs at `read`. Reads, search
-  and MASC MCP tools are allowed; writes, shell and fetch are refused unless the
-  Keeper declares `full`. Fusion and runtime verification require `none` and
-  refuse Muse Code before starting its process.
+  host refuses to start when `args` repeats one of those `-c` keys. Each
+  observer is a separate model run after a turn, about 4,500 tokens and 1.2 to
+  2.9 s in the sessions measured.
+- The host decides tool approvals, not MASC. Its default permission profile has
+  an AI reviewer approve MCP tool calls, at about 4,000 tokens and 1.4 to 4.2 s
+  per call, and sends MASC no permission request. Workspace writes and
+  sandboxed shell commands run without a request, and so does the read tool in
+  every mode. MASC therefore starts the host with `--disable-write
+  --disable-shell` unless the Keeper declares `full`, and a Keeper whose
+  `keeper.tools.native` is `none` runs at `read`, because reads cannot be
+  removed. The host has no flag for its web search and fetch tools. MASC's own
+  permission policy applies only to requests the host forwards. The host
+  forwards MCP tool calls when the operator's muse settings select the
+  `:ask-me` profile in `$XDG_CONFIG_HOME/muse/settings.json` (default
+  `~/.config/muse/settings.json`). The setting applies to every muse session of
+  that user:
+
+  ```json
+  { "schema_version": 1,
+    "permissions": { "schema_version": 1, "default_profile": ":ask-me" } }
+  ```
+
+  Fusion and runtime verification require `none` and refuse Muse Code before
+  starting its process.
 - Muse bindings reject provider and binding `effort`, model `reasoning-effort`, and
   effort variants at load. Per-turn effort overrides are also refused. Put
   `-c reasoning_effort="<level>"` in `args`, for example

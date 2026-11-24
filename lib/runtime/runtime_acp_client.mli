@@ -155,7 +155,9 @@ type driver_profile =
       (** Whether refusing [session/request_permission] keeps every native
           tool off. [false] when the client runs some tools without asking
           (the [muse acp] read tool), so posture [none] runs at the [read]
-          floor ({!Runtime_native_tools.degrade_on_admission}). *)
+          floor ({!Runtime_native_tools.degrade_on_admission}). [muse acp]
+          also runs workspace writes and shell commands without asking, so its
+          argv removes those tools under [none] and [read]. *)
   }
 
 val profile_of_driver : driver -> driver_profile

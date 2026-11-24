@@ -285,6 +285,10 @@ let each_kind_of_route_judges_the_request () =
         , Route_access.Self_authenticated Route_access.Person_mcp
         , request Nothing
         , "judged by its route" )
+      ; ( "multi-account dashboard bridge, nothing"
+        , Route_access.Self_authenticated Route_access.Multi_account_dashboard
+        , request Nothing
+        , "judged by its route" )
       ; ( "OAuth route, nothing"
         , Route_access.Self_authenticated Route_access.Oauth_protocol
         , request Nothing

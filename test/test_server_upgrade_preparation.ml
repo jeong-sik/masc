@@ -735,7 +735,10 @@ let test_a_server_that_withdrew_its_announcement_is_sent_nothing_more () =
 let test_the_public_probe_is_a_version_the_command_line_reads () =
   let body =
     Yojson.Safe.to_string
-      (Server_health_public.health_json ~ready:false ~phase:Masc.Server_startup_state.Blocking)
+      (Server_health_public.health_json
+         ~dev_token:false
+         ~ready:false
+         ~phase:Masc.Server_startup_state.Blocking)
   in
   Alcotest.(check (option string)) "the command line reads the release version"
     (Some Build_version.current) (Upgrade.compact_health_version body);

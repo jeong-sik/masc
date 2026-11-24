@@ -35,8 +35,9 @@
     except the routes of a browser login, which judge the request themselves
     ([Self_authenticated Browser_session]): the start and the callback of a
     login run before the browser has a session. The MCP endpoint of a person
-    ([Self_authenticated Person_mcp]) judges itself as well: it calls {!decide}
-    for the method or the tool that each message names. The OAuth routes and the
+    ([Self_authenticated Person_mcp]) and the multi-account dashboard bridge
+    ([Self_authenticated Multi_account_dashboard]) judge themselves as well:
+    each calls {!decide} for the access tier or tool that the request names. The OAuth routes and the
     loopback dev token are not served in multi-account mode. A credential that
     is presented is authenticated on every kind, so a revoked or legacy one is
     refused even where none is needed. *)

@@ -2523,10 +2523,20 @@ let run ~sw ~runtime_sw ~env ~address ~port ~judged ?input_base_path ?on_ready
      routes of the single-user server are not started for it. *)
   match judged.booted with
   | Authz_boot_mode_read.Multi_account multi_account ->
+    let engine_state : Mcp_server.server_state option Atomic.t = Atomic.make None in
     (match
        Server_accounts.run ~sw ~env ~address ~port ~lease:judged.lease ?on_ready
+         ~dashboard_state:(fun () -> Atomic.get engine_state)
          ~start_engine:(fun access ->
-           start_engine ~sw ~runtime_sw ~env ?input_base_path ~accept_store_quarantine access)
+           let state_promise =
+             start_engine ~sw ~runtime_sw ~env ?input_base_path ~accept_store_quarantine access
+           in
+           let ready_promise, resolve_ready = Eio.Promise.create () in
+           Eio.Fiber.fork ~sw (fun () ->
+             let state = Eio.Promise.await state_promise in
+             Atomic.set engine_state (Some state);
+             Eio.Promise.resolve resolve_ready state);
+           ready_promise)
          multi_account
      with
      | Ok () -> ()

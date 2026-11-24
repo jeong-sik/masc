@@ -91,15 +91,24 @@ let refusal_to_string = function
 let health_server_field = Server_health_public.server_field
 let health_version_field = Server_health_public.version_field
 let health_account_mode_field = "account_mode"
+let health_auth_methods_field = Server_health_public.auth_methods_field
 let health_server_name = Server_health_public.server_name
 let health_account_mode = Masc_domain.account_mode_label Masc_domain.Multi_account
 
-let health (_ : Httpun.Request.t) reqd =
+let health (login : Login_routes.t) (_ : Httpun.Request.t) reqd =
+  let auth_methods =
+    Server_health_public.auth_methods_to_json
+      { Server_health_public.google = Option.is_some login.google
+      ; github = Option.is_some login.github
+      ; dev_token = false
+      }
+  in
   Http.Response.json_value
     (`Assoc
        [ health_server_field, `String health_server_name
        ; health_version_field, `String Build_version.current
        ; health_account_mode_field, `String health_account_mode
+       ; health_auth_methods_field, auth_methods
        ])
     reqd
 ;;
@@ -158,16 +167,32 @@ let add_routes_of_people login ~env ~base_path router =
   |> Server_account_console.add_routes
 ;;
 
-let register ?person_keeper_routes ~login ~env ~base_path ~engine zone router =
+let register
+      ?person_keeper_routes
+      ?(dashboard_state = fun () -> None)
+      ~sw
+      ~login
+      ~env
+      ~base_path
+      ~engine
+      zone
+      router
+  =
   let router =
     router
-    |> Server_route.get Server_route.Always_public Server_health_paths.health health
+    |> Server_route.get Server_route.Always_public Server_health_paths.health (health login)
     |> Server_route.get Server_route.Always_public Server_health_paths.liveness liveness
     |> Server_route.get
          Server_route.Always_public
          Server_health_paths.readiness
          (readiness ~engine zone)
     |> add_routes_of_people login ~env ~base_path
+    |> Server_account_dashboard_bridge.add_routes
+         ~sw
+         ~clock:(Eio.Stdenv.clock env)
+         ~login
+         ~base_path
+         ~engine_state:dashboard_state
   in
   (* The routes whose subject is a Keeper of the engine are added by the layer
      that holds the engine: the caller supplies [person_keeper_routes], so this
@@ -317,6 +342,7 @@ let run
       ~lease
       ?on_ready
       ?person_keeper_routes
+      ?dashboard_state
       ~(start_engine : Runtime_account_access.published -> engine Eio.Promise.t)
       multi_account
   =
@@ -356,7 +382,7 @@ let run
   (match Server_account_console.unreadable () with
    | None -> ()
    | Some reason ->
-     Log.Server.warn "%s answers 503: %s" Server_account_console.page_path reason);
+     Log.Server.warn "%s answers 503: %s" Server_account_console.dashboard_path reason);
   (* The probe of readiness is in the table, and the engine starts only once
      the access is published, below. So the probe reads this promise, which
      is resolved when the one of the engine is. *)
@@ -367,6 +393,8 @@ let run
       (Table.checked
          (register
             ?person_keeper_routes
+            ?dashboard_state
+            ~sw
             ~login
             ~env
             ~base_path

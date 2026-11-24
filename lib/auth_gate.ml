@@ -73,6 +73,7 @@ let served_reason_label = function
   | Route_access.Websocket_upgrade -> "a WebSocket upgrade"
   | Route_access.Browser_session -> "a browser login route"
   | Route_access.Person_mcp -> "the MCP endpoint of a person"
+  | Route_access.Multi_account_dashboard -> "the multi-account dashboard"
   | Route_access.Subpath_dispatch -> "a sub-path route"
 ;;
 
@@ -148,8 +149,10 @@ let need_of : Route_access.t -> (need, reason) result = function
   | Route_access.Tool_actor { tool_name } -> tool_need tool_name
   | Route_access.Manage_own_provider -> Ok Own_provider
   | Route_access.Manage_own_keeper -> Ok Own_keeper
-  | Route_access.Self_authenticated (Route_access.Browser_session | Route_access.Person_mcp) ->
-    Ok Judged_by_its_route
+  | Route_access.Self_authenticated
+      ( Route_access.Browser_session
+      | Route_access.Person_mcp
+      | Route_access.Multi_account_dashboard ) -> Ok Judged_by_its_route
   | Route_access.Self_authenticated
       ((Route_access.Oauth_protocol | Route_access.Loopback_dev_token) as reason) ->
     Ok (Not_served reason)

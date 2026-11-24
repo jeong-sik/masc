@@ -143,6 +143,8 @@ let allowlist_path = Login_allowlist_routes.path
 let allowlist_entry_prefix = allowlist_path ^ "/"
 let invites_path = Login_invite_routes.path
 let invite_entry_prefix = invites_path ^ "/"
+let members_path = Login_member_routes.path
+let member_entry_prefix = members_path ^ "/"
 let pats_path = Login_pat_routes.path
 let pat_prefix = pats_path ^ "/"
 
@@ -192,6 +194,19 @@ let list_members t request reqd =
   with_browser request reqd (fun browser -> respond reqd (Login_member_routes.list t browser))
 ;;
 
+type member_post_action =
+  | Disable
+  | Enable
+  | Revoke_admin
+
+let parse_member_post_path rest =
+  match String.split_on_char '/' rest with
+  | [ user_id; "disable" ] when not (String.equal user_id "") -> Some (user_id, Disable)
+  | [ user_id; "enable" ] when not (String.equal user_id "") -> Some (user_id, Enable)
+  | [ user_id; "revoke-admin" ] when not (String.equal user_id "") -> Some (user_id, Revoke_admin)
+  | _ -> None
+;;
+
 (* The router matched the prefix, so the path holds it; the rest is the id,
    which the route reads. *)
 let with_entry ~prefix request reqd f =
@@ -199,6 +214,34 @@ let with_entry ~prefix request reqd f =
   if not (String.starts_with ~prefix path)
   then Http.Response.not_found reqd
   else f (String.sub path (String.length prefix) (String.length path - String.length prefix))
+;;
+
+let member_post_action t request reqd =
+  with_entry ~prefix:member_entry_prefix request reqd (fun rest ->
+    match parse_member_post_path rest with
+    | None -> Http.Response.not_found reqd
+    | Some (user_id, Disable) ->
+      with_browser request reqd (fun browser ->
+        with_body reqd (fun (_ : string) ->
+          respond reqd (Login_member_routes.disable t browser ~user_id)))
+    | Some (user_id, Enable) ->
+      with_browser request reqd (fun browser ->
+        with_body reqd (fun (_ : string) ->
+          respond reqd (Login_member_routes.enable t browser ~user_id)))
+    | Some (user_id, Revoke_admin) ->
+      with_browser request reqd (fun browser ->
+        with_body reqd (fun body ->
+          respond reqd (Login_member_routes.revoke_admin t browser ~user_id ~body))))
+;;
+
+let delete_member t request reqd =
+  with_entry ~prefix:member_entry_prefix request reqd (fun user_id ->
+    if String.equal user_id "" || String.contains user_id '/'
+    then Http.Response.not_found reqd
+    else
+      with_browser request reqd (fun browser ->
+        with_body reqd (fun (_ : string) ->
+          respond reqd (Login_member_routes.delete t browser ~user_id))))
 ;;
 
 let remove t request reqd =
@@ -253,7 +296,9 @@ let add_routes t router =
   |> Server_route.post access invites_path (issue_invite t)
   |> Server_route.get access invites_path (list_invites t)
   |> Server_route.prefix_delete access invite_entry_prefix (revoke_invite t)
-  |> Server_route.get access Login_member_routes.path (list_members t)
+  |> Server_route.get access members_path (list_members t)
+  |> Server_route.prefix_post access member_entry_prefix (member_post_action t)
+  |> Server_route.prefix_delete access member_entry_prefix (delete_member t)
   |> Server_route.post access pats_path (issue_pat t)
   |> Server_route.get access pats_path (list_pats t)
   |> Server_route.prefix_delete access pat_prefix (revoke_pat t)

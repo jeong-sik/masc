@@ -85,10 +85,26 @@ val operator_snapshot_http_json :
   Httpun.Request.t ->
   Yojson.Safe.t
 
+val operator_snapshot_for_actor_http_json :
+  state:Mcp_server.server_state ->
+  sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  actor:string ->
+  Httpun.Request.t ->
+  Yojson.Safe.t
+
 val operator_digest_http_json :
   state:Mcp_server.server_state ->
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  Httpun.Request.t ->
+  (Yojson.Safe.t, 'a) result
+
+val operator_digest_for_actor_http_json :
+  state:Mcp_server.server_state ->
+  sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  actor:string ->
   Httpun.Request.t ->
   (Yojson.Safe.t, 'a) result
 

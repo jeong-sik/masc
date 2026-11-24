@@ -16,8 +16,26 @@ val server_name : string
 val version_field : string
 (** ["version"]. *)
 
-val health_json : ready:bool -> phase:Server_startup_state.phase -> Yojson.Safe.t
-(** [{server; version; live; ready; phase}], five keys and no other.
+val auth_methods_field : string
+(** ["auth_methods"]. *)
+
+type auth_methods =
+  { google : bool
+  ; github : bool
+  ; dev_token : bool
+  }
+
+val auth_methods_to_json : auth_methods -> Yojson.Safe.t
+(** [{"google": bool, "github": bool, "dev_token": bool}]. *)
+
+val single_user_auth_methods : dev_token:bool -> auth_methods
+(** Public authentication discovery for a single-user server: browser OAuth
+    providers are always [false], and [dev_token] reflects whether the loopback
+    dev-token route is enabled. *)
+
+val health_json :
+  dev_token:bool -> ready:bool -> phase:Server_startup_state.phase -> Yojson.Safe.t
+(** [{server; version; live; auth_methods; ready; phase}], six keys and no other.
     [version] is [Build_version.current]; [live] is
     [Server_startup_state.is_live ()]. The body never says the account mode,
     which is what tells an account server's answer from this one. *)

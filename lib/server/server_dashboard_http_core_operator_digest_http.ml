@@ -40,12 +40,8 @@ let default_json ~state ~scope ~owner ~sw ~clock =
         attest_instance scope json)
       else match cached () with Some current -> current | None -> attest_instance scope json
 
-let operator_digest_http_json ~state ~sw ~clock request =
-  (* Entry capture precedes auth resolution, cache waiting and actual compute. *)
-  let scope = Mcp_server.workspace_scope state in
-  let owner = Owner.owner_for_scope ~state scope in
-  let config = scope.config in
-  let actor = Server_auth.dashboard_actor_for_request ~base_path:config.base_path request in
+let operator_digest_with_scope_and_actor ~state ~scope ~owner ~sw ~clock ~actor request =
+  let config = scope.Mcp_server.config in
   let target_type = Server_utils.query_param request "target_type" in
   let target_id = Server_utils.query_param request "target_id" in
   let include_workers = match Server_utils.query_param request "include_workers" with
@@ -78,3 +74,19 @@ let operator_digest_http_json ~state ~sw ~clock request =
           | Error detail -> `Assoc ["error", `String "validation_error";
               "message", `String detail; "generated_at", `String (Masc_domain.now_iso ())])) in
   Ok (result |> Query.with_operator_digest_metadata ~config ~query |> attest_instance scope)
+
+let operator_digest_http_json ~state ~sw ~clock request =
+  (* Entry capture precedes auth resolution, cache waiting and actual compute. *)
+  let scope = Mcp_server.workspace_scope state in
+  let owner = Owner.owner_for_scope ~state scope in
+  let actor = Server_auth.dashboard_actor_for_request ~base_path:scope.config.base_path request in
+  operator_digest_with_scope_and_actor ~state ~scope ~owner ~sw ~clock ~actor request
+
+let operator_digest_for_actor_http_json ~state ~sw ~clock ~actor request =
+  let scope = Mcp_server.workspace_scope state in
+  let owner = Owner.owner_for_scope ~state scope in
+  let actor =
+    let trimmed = String.trim actor in
+    if String.equal trimmed "" then None else Some trimmed
+  in
+  operator_digest_with_scope_and_actor ~state ~scope ~owner ~sw ~clock ~actor request

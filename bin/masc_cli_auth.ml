@@ -501,20 +501,20 @@ let serve_preview ~base_path ~store ~port github =
         Printf.printf
           "The multi-account preview listens on %s. Open %s/ in a browser, or the link of \
            masc auth invite made with MASC_HTTP_BASE_URL=%s. It serves the login routes \
-           and the console of a signed-in person at %s, where the person connects their own \
+           and the unified dashboard of a signed-in person at %s, where the person connects their own \
            subscription and runs their Keepers on it. Stop it with Ctrl-C.\n%!"
           base_url
           base_url
           base_url
-          Server_account_console.page_path;
+          Server_account_console.dashboard_path;
         (* As the account server does at its start: the page that stands in
-           for the console names no reason to the browser. *)
+           for the dashboard names no reason to the browser. *)
         (match Server_account_console.unreadable () with
          | None -> ()
          | Some reason ->
            Printf.printf
              "%s answers 503 in this preview: %s.\n%!"
-             Server_account_console.page_path
+             Server_account_console.dashboard_path
              reason);
         (* And which providers offer people no model to check. The access
            is published above. *)

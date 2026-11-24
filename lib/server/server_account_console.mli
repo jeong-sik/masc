@@ -3,50 +3,53 @@
    here is public, and the policy of the page decides what a browser runs on
    the origin where a person signs in. *)
 
-(** The console of a signed-in person, as the account server answers it
-    (multi-account plan, C6).
+(** The unified dashboard SPA and legacy account console redirect served by the
+    account server in multi-account mode.
 
-    The console is built in the dashboard workspace ([dashboard/src/accounts],
-    [dashboard/vite.accounts.config.ts]) and lies in the dashboard bundle
-    under [accounts/]. This module answers that build and nothing else of the
-    bundle: the account server does not serve the operator dashboard.
+    All routes registered here are [Always_public]: the HTML frame and static
+    assets carry no user or workspace data. Every operational JSON and SSE
+    route called by the dashboard authenticates the request itself against the
+    authorization zone ({!Server_account_dashboard_bridge},
+    {!Server_login_http}).
 
-    The routes are [Always_public]. The page is the frame a browser needs
-    before it can ask who is signed in, and its files hold nothing of a
-    person: every JSON route the console calls authenticates the request
-    itself.
+    - [GET /dashboard] and [GET /dashboard/<spa-deep-link>]: the unified
+      dashboard [index.html] from the dashboard bundle under {!policy}, never
+      stored. When the bundle cannot give [index.html], answers 503 with an
+      {!Account_page} fallback that discloses no server paths or reasons.
+    - [GET /dashboard/assets/<path>]: static files under [assets/] in the
+      dashboard bundle, served via {!Server_routes_http_pages.serve_dashboard_asset}
+      with {!policy} and strict relative-path traversal validation.
+    - [GET /favicon.ico] and [GET /favicon.svg]: {!Server_routes_http_pages.favicon_svg}
+      with [content-security-policy: default-src 'none'].
+    - [GET /accounts/console]: redirects [303 See Other] to
+      [/dashboard#account] with [cache-control: no-store] and
+      [referrer-policy: same-origin], keeping bookmarked console links working.
+    - [GET /accounts/console/base.css]: {!Account_page.base_sheet} with ETag
+      validation.
+    - [GET /accounts/console/assets/<path>]: legacy console build assets under
+      [accounts/assets/] with {!policy} and strict relative-path validation. *)
 
-    - [GET /accounts/console]: the page of the build under {!policy}, never
-      stored. When the bundle cannot give the page, the answer is a 503 with a
-      page in the frame of {!Account_page} that says so.
-    - [GET /accounts/console/assets/<path>]: a file of the build, read and
-      compressed as the single-user server does the assets of the dashboard
-      ({!Server_routes_http_pages.serve_dashboard_asset}). The answer lets a
-      browser keep the file for a year: the build names a file after a hash
-      of its bytes, and this module does not check that a name does. The
-      answer carries {!policy}, so a file a browser opens as a document runs
-      under the limits of the page. A path that is no plain relative path is
-      a 404, and so is a name the bundle holds no file of. A bundle read from
-      a directory ([MASC_ASSETS_DIR]) answers a 503 instead when its reader
-      refuses a name for another reason, such as a part of the path that is
-      a file (issue #51705).
-    - [GET /accounts/console/base.css]: {!Account_page.base_sheet}, which the
-      page links so that it looks like the pages the server writes itself. A
-      browser asks for it again on every use, with the entity tag it holds. *)
-
-(** [/accounts/console]. *)
+(** [/accounts/console]. Kept for backwards-compatible redirects and callers. *)
 val page_path : string
 
-(** The content security policy of the page: scripts and sheets of this
-    origin, requests to this origin, and nothing else. It lets a browser run
-    no inline script, apply no inline style and no [style] attribute, submit
-    no form, and show the page in no frame. *)
+(** [/dashboard]. *)
+val dashboard_path : string
+
+(** [/dashboard#account], the redirect target of {!page_path}. *)
+val console_redirect_target : string
+
+(** Strict zero-inline-script content security policy applied to the unified
+    dashboard page and its served assets: scripts, stylesheets, fonts, images
+    (plus [data:] URIs), and same-origin connections only, with
+    [script-src-attr 'none'], [object-src 'none'], [style-src-attr 'unsafe-inline']
+    (for dynamic chart and virtualized row positioning), no inline scripts, no
+    forms, and no framing. *)
 val policy : string
 
-(** Why the bundle cannot give the page now, in words for the log of the
-    server; [None] when it can. *)
+(** Why the bundle cannot give the dashboard page ([index.html]) now, in words
+    for the log of the server; [None] when it can. *)
 val unreadable : unit -> string option
 
-(** Registers the three routes. The page that says the console cannot be
-    opened draws the nonce of its sheet ({!Csp_nonce.draw}). *)
+(** Registers the unified dashboard SPA, asset, favicon, and [/accounts/console]
+    redirect routes on [router]. *)
 val add_routes : Http_server_eio.Router.t -> Http_server_eio.Router.t

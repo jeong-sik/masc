@@ -24,31 +24,27 @@
     {b The table.} The routes this module registers are everything the
     server answers. A route is
     [Always_public], or it authenticates the request in its own code against
-    the authorization zone ([Self_authenticated Browser_session], and
-    [Self_authenticated Person_mcp] for the MCP endpoint of a person).
+    the authorization zone ([Self_authenticated Browser_session],
+    [Self_authenticated Person_mcp] for the MCP endpoint of a person, and
+    [Self_authenticated Multi_account_dashboard] for the operational dashboard
+    and cookie-authenticated observer SSE bridge).
     {!run} makes the table with {!Server_account_table.checked} before it
     listens ({!Route_of_another_kind}), so a registration of another kind
     stops the boot and is not served.
 
     The table holds the three health probes, the login routes
     ({!Server_login_http.add_routes}): the start and the callback of a
-    Google and of a GitHub login, the logout, the session, the allowlist and
-    the personal access tokens, and the pages and routes of a person
-    ({!Server_login_http.add_person_routes}): the home page and the page
-    of an invitation, who-am-I, the person's subscriptions and their
-    connection, the person's Keepers, and one turn of a Keeper on the
-    Runtime its owner gave it. A turn starts the official client of the
-    person's own subscription, on the home of that account, as a process of
-    the server ({!Server_preview_keeper_turn}).
+    Google and of a GitHub login, the logout, the session, the allowlist,
+    invitations, member management, and personal access tokens, the pages and
+    routes of a person ({!Server_login_http.add_person_routes}), the unified
+    dashboard SPA and [/accounts/console] redirect
+    ({!Server_account_console.add_routes}), and the RBAC-gated operational
+    dashboard and cookie-authenticated observer SSE bridge
+    ({!Server_account_dashboard_bridge.add_routes}).
 
-    It also holds the console of a signed-in person
-    ({!Server_account_console.add_routes}): the page, the files of its build
-    and the sheet it shares with the pages above. The page and the files come
-    from the dashboard bundle of the server and the sheet from the binary;
-    all three are answered with no credential. The rest of the bundle, the
-    operator dashboard among it, is not answered.
-    When the bundle cannot give the page, the page is a 503, the boot says
-    why in the log, and every other route answers as it does without it.
+    When the bundle cannot give the dashboard page, [/dashboard] is a 503, the
+    boot says why in the log, and every other route answers as it does without
+    it.
 
     {b The login clients.} They are the [google] and the [github] member of
     the [config.json] that the boot judged
@@ -72,8 +68,8 @@
     {b The probes.} They are answered with no credential, to a request whose
     Host is an identity of the server ({!Server_http_ingress.serve_table}),
     and say nothing of the host or of the process.
-    - [GET /health]: the server name, the release version and the account
-      mode.
+    - [GET /health]: the server name, the release version, the account
+      mode, and [auth_methods] ([google], [github], [dev_token = false]).
     - [GET /health/live]: [{"live": true}] once the listener answers.
     - [GET /health/ready]: [{"ready": true}] once the engine is ready and
       while a decision can rest on the authorization zone
@@ -142,7 +138,8 @@ type refusal =
           ({!Server_account_login.refusal}). *)
   | Route_of_another_kind of Server_account_table.refusal
       (** The table holds a route that is neither [Always_public] nor
-          [Self_authenticated] with [Browser_session] or [Person_mcp]. *)
+          [Self_authenticated] with [Browser_session], [Person_mcp], or
+          [Multi_account_dashboard]. *)
   | Https_listener_refused of string
       (** {!Server_bootstrap_http.https_listener_of_env} refused. *)
   | Listener_not_bound of
@@ -255,6 +252,7 @@ val run
   -> ?on_ready:(unit -> unit)
   -> ?person_keeper_routes:
        (base_path:string -> Http_server_eio.Router.t -> Http_server_eio.Router.t)
+  -> ?dashboard_state:(unit -> Mcp_server.server_state option)
   -> start_engine:(Runtime_account_access.published -> 'engine Eio.Promise.t)
   -> Authz_boot_mode_read.multi_account
   -> (unit, refusal) result

@@ -179,6 +179,17 @@ val operator_action_http_json :
   args:Yojson.Safe.t ->
   (Yojson.Safe.t, string) result
 
+val operator_action_for_actor_http_json :
+  state:Mcp_server.server_state ->
+  sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  actor:string ->
+  args:Yojson.Safe.t ->
+  (Yojson.Safe.t, string) result
+(** Actor-bound variant for routes whose caller identity was already
+    authenticated by {!Auth_gate.decide} (multi-account browser sessions),
+    avoiding single-user [Server_auth] header/token probing. *)
+
 val operator_confirm_http_json :
   state:Mcp_server.server_state ->
   sw:Eio.Switch.t ->
@@ -187,6 +198,16 @@ val operator_confirm_http_json :
   Httpun.Request.t ->
   args:Yojson.Safe.t ->
   (Yojson.Safe.t, string) result
+
+val operator_confirm_for_actor_http_json :
+  state:Mcp_server.server_state ->
+  sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  actor:string ->
+  args:Yojson.Safe.t ->
+  (Yojson.Safe.t, string) result
+(** Actor-bound counterpart of {!operator_confirm_http_json} for
+    {!Auth_gate}-authenticated callers. *)
 
 val operator_error_json : string -> Yojson.Safe.t
 
@@ -203,6 +224,7 @@ val operator_error_json : string -> Yojson.Safe.t
     call this function so the payload shape and slice list cannot
     drift between transports. *)
 val dashboard_bootstrap_http_json :
+  ?include_request_auth:bool ->
   state:Mcp_server.server_state ->
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->

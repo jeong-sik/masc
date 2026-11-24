@@ -141,15 +141,15 @@ credential naming an absolute path (`oauth_source` for Antigravity); `env` and
   tool calls (5 measured sessions, one call to a no-argument tool each: a prompt
   of 11.6 to 13.7k tokens by the host's estimate and 1.4 to 4.8 s to its tool
   call; what it does with a call it rejects was not observed) and sends MASC no
-  permission request. Workspace writes and
-  sandboxed shell commands run without a request, and so does the read tool.
-  Refusing permission requests therefore cannot keep native tools off, so MASC
-  names the tools the main conversation may use with `-c run.toolset`:
+  permission request. Workspace writes and sandboxed shell commands run without
+  a request, and so does the read tool. Refusing permission requests therefore
+  cannot keep native tools off, so MASC names the tools the main conversation
+  may use with `-c run.toolset`:
 
   | Keeper `keeper.tools.native` | `run.toolset` | Tools the host offers |
   | --- | --- | --- |
-  | `none` | `["mcp__masc__*"]` | MASC's tools only |
-  | `read` | `["read_file","search","mcp__masc__*"]` | file read, file search, MASC's tools |
+  | `none` | `["mcp__masc__*"]`, or `[]` when the bridge lists no tool | MASC's tools only |
+  | `read` | `["read_file","search","mcp__masc__*"]`, without the last entry when the bridge lists no tool | file read, file search, MASC's tools |
   | `full` | not set | the host's default tools, among them shell, file writes, memory, cron, sub-agents, web fetch and web search |
 
   `read_file` is not limited to the workspace: a live session read
@@ -162,12 +162,12 @@ credential naming an absolute path (`oauth_source` for Antigravity); `env` and
   `mcp__masc__*` only when the bridge lists a tool. The glob also matches the
   tools of a server named `masc__<x>` from a trusted workspace `.mcp.json` or
   the operator's muse settings. `args` must not contain `run.toolset`, because
-  the host refuses to start on a repeated key. Fusion and runtime verification run Muse Code at
-  `none`. MASC's own permission policy applies only to requests the host
-  forwards. With the operator's muse settings on the `:ask-me` profile in
-  `$XDG_CONFIG_HOME/muse/settings.json` (default `~/.config/muse/settings.json`)
-  and the client in the `promptUnmatched` mode, the host forwarded MCP tool
-  calls in 2 of 2 measured sessions. MASC starts every session in `onRequest`,
+  the host refuses to start on a repeated key. Fusion and runtime verification
+  run Muse Code at `none`. MASC's own permission policy applies only to
+  requests the host forwards. With the operator's muse settings on the
+  `:ask-me` profile in `$XDG_CONFIG_HOME/muse/settings.json` (default
+  `~/.config/muse/settings.json`) and the client in the `promptUnmatched` mode,
+  the host forwarded MCP tool calls in 2 of 2 measured sessions. MASC starts every session in `onRequest`,
   and `:ask-me` with `onRequest` was not tried. The setting applies to every
   muse session of that user:
 

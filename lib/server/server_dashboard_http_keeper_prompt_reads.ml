@@ -3,6 +3,179 @@
 module Http = Http_server_eio
 module Types = Server_dashboard_http_keeper_api_types
 
+(* Bounded process-local cache for expensive per-turn reads whose persisted
+   result for one [(masc_dir, keeper, turn_ref)] is validated against the
+   latest day-file stat of its backing store(s). Kept separate from
+   [Dashboard_cache] so per-turn keys cannot evict shared fleet/dashboard hot
+   keys. *)
+module Bounded_turn_cache = struct
+  type entry =
+    { stamp : string
+    ; json : Yojson.Safe.t
+    ; expires_at : float
+    ; seq : int
+    }
+
+  type t =
+    { mu : Stdlib.Mutex.t
+    ; max_entries : int
+    ; ttl_s : float
+    ; next_seq : int ref
+    ; entries : (string, entry) Hashtbl.t
+    ; order : (string * int) Queue.t
+    }
+
+  let create ~max_entries ~ttl_s =
+    { mu = Stdlib.Mutex.create ()
+    ; max_entries
+    ; ttl_s
+    ; next_seq = ref 0
+    ; entries = Hashtbl.create max_entries
+    ; order = Queue.create ()
+    }
+  ;;
+
+  let with_lock t f =
+    Stdlib.Mutex.lock t.mu;
+    Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock t.mu) f
+  ;;
+
+  let rec prune_order_head t ~now =
+    match Queue.peek_opt t.order with
+    | None -> ()
+    | Some (key, expected_seq) ->
+      (match Hashtbl.find_opt t.entries key with
+       | Some { seq; expires_at; _ } when seq = expected_seq && now <= expires_at -> ()
+       | Some { seq; _ } when seq = expected_seq ->
+         ignore (Queue.take_opt t.order);
+         Hashtbl.remove t.entries key;
+         prune_order_head t ~now
+       | Some _ | None ->
+         ignore (Queue.take_opt t.order);
+         prune_order_head t ~now)
+  ;;
+
+  let compact_order_if_needed t ~now =
+    if Queue.length t.order > t.max_entries * 2
+    then (
+      let live = Queue.create () in
+      Queue.iter
+        (fun ((key, expected_seq) as item) ->
+          match Hashtbl.find_opt t.entries key with
+          | Some { seq; expires_at; _ } when seq = expected_seq && now <= expires_at ->
+            Queue.add item live
+          | Some { seq; _ } when seq = expected_seq ->
+            Hashtbl.remove t.entries key
+          | Some _ | None -> ())
+        t.order;
+      Queue.clear t.order;
+      Queue.transfer live t.order)
+  ;;
+
+  let rec evict_to_capacity t =
+    if Hashtbl.length t.entries >= t.max_entries
+    then (
+      match Queue.take_opt t.order with
+      | None -> ()
+      | Some (oldest, expected_seq) ->
+        (match Hashtbl.find_opt t.entries oldest with
+         | Some { seq; _ } when seq = expected_seq -> Hashtbl.remove t.entries oldest
+         | Some _ | None -> ());
+        evict_to_capacity t)
+  ;;
+
+  let get t ~key ~stamp =
+    let now = Time_compat.now () in
+    with_lock t (fun () ->
+      match Hashtbl.find_opt t.entries key with
+      | Some { stamp = cached_stamp; json; expires_at; _ }
+        when now <= expires_at && String.equal cached_stamp stamp ->
+        Some json
+      | Some _ ->
+        Hashtbl.remove t.entries key;
+        None
+      | None -> None)
+  ;;
+
+  let set t ~key ~stamp json =
+    let now = Time_compat.now () in
+    let expires_at = now +. t.ttl_s in
+    with_lock t (fun () ->
+      prune_order_head t ~now;
+      if not (Hashtbl.mem t.entries key) then evict_to_capacity t;
+      incr t.next_seq;
+      let seq = !(t.next_seq) in
+      Queue.add (key, seq) t.order;
+      Hashtbl.replace t.entries key { stamp; json; expires_at; seq };
+      compact_order_if_needed t ~now)
+  ;;
+end
+
+let file_stat_stamp path =
+  try
+    let st = Unix.stat path in
+    match st.Unix.st_kind with
+    | Unix.S_REG ->
+      Printf.sprintf "%s:%d:%d:%d:%h:%h"
+        path st.st_dev st.st_ino st.st_size st.st_mtime st.st_ctime
+    | Unix.(S_DIR | S_CHR | S_BLK | S_LNK | S_FIFO | S_SOCK) -> path ^ ":non-reg"
+  with Unix.Unix_error _ -> path ^ ":absent"
+;;
+
+let latest_store_file_stamp store =
+  match Dated_jsonl.month_dir_paths_newest_first_result store with
+  | Error _ -> None
+  | Ok [] -> Some "empty"
+  | Ok (month_dir :: _) ->
+    (match Dated_jsonl.day_file_paths_newest_first_result month_dir with
+     | Error _ -> None
+     | Ok [] -> Some (month_dir ^ ":empty")
+     | Ok (day_path :: _) -> Some (file_stat_stamp day_path))
+;;
+
+let turn_cache_key ~config ~keeper ~turn_ref =
+  String.concat "\000"
+    [ Workspace.masc_dir config; keeper; Ids.Turn_ref.to_string turn_ref ]
+;;
+
+let provider_input_manifest_cache =
+  Bounded_turn_cache.create ~max_entries:64 ~ttl_s:60.0
+;;
+
+let cache_outcome_cache =
+  Bounded_turn_cache.create ~max_entries:64 ~ttl_s:15.0
+;;
+
+let idle_is_config_independent = function
+  | Keeper_cache_outcome_reading.Start_unrecorded -> true
+  | Keeper_cache_outcome_reading.Idle { lifetime; _ } ->
+    (match lifetime with
+     | Keeper_cache_outcome_reading.Lifetime_declared _
+     | Keeper_cache_outcome_reading.Lifetime_unrecorded -> true
+     | Keeper_cache_outcome_reading.Provider_default_unknown _ -> false)
+;;
+
+let cache_outcome_is_settled (reading : Keeper_cache_outcome_reading.reading) =
+  match reading.outcome with
+  | Keeper_cache_outcome_reading.Not_per_request _ -> true
+  | Keeper_cache_outcome_reading.First_request
+      { earlier =
+          Keeper_cache_outcome_reading.Earlier
+            { idle; prefix = Keeper_cache_outcome_reading.Compared _; _ }
+      ; _
+      } -> idle_is_config_independent idle
+  | Keeper_cache_outcome_reading.Turn_not_in_ledger
+  | Keeper_cache_outcome_reading.Ledger_row_unreadable _
+  | Keeper_cache_outcome_reading.First_request
+      { earlier = Keeper_cache_outcome_reading.No_earlier_request _; _ }
+  | Keeper_cache_outcome_reading.First_request
+      { earlier =
+          Keeper_cache_outcome_reading.Earlier
+            { prefix = Keeper_cache_outcome_reading.Not_compared _; _ }
+      ; _
+      } -> false
+;;
+
 (* The doors onto one exact turn of one Keeper. Each runs its read on the
    pool: finding a turn decodes store rows newest first, and a live
    provider-input store holds 79-231 MB of them. *)
@@ -137,11 +310,27 @@ let handle_provider_input_manifest_get state req reqd name =
     ~read:(fun ~config ~keeper ~turn_ref ->
       Ok
         (fun () ->
-          Keeper_provider_input_snapshot.read_manifest
-            ~config
-            ~keeper
-            ~turn_ref
-          |> Result.map Keeper_provider_input_snapshot.manifest_to_json))
+          let key = turn_cache_key ~config ~keeper ~turn_ref in
+          let store = Keeper_types_support.keeper_provider_input_store config keeper in
+          let stamp_opt = latest_store_file_stamp store in
+          match Option.bind stamp_opt (fun stamp ->
+            Bounded_turn_cache.get provider_input_manifest_cache ~key ~stamp) with
+          | Some json -> Ok json
+          | None ->
+            (match
+               Keeper_provider_input_snapshot.read_manifest
+                 ~config
+                 ~keeper
+                 ~turn_ref
+             with
+             | Ok manifest ->
+               let json = Keeper_provider_input_snapshot.manifest_to_json manifest in
+               (match stamp_opt, latest_store_file_stamp store with
+                | Some before, Some after when String.equal before after ->
+                  Bounded_turn_cache.set provider_input_manifest_cache ~key ~stamp:before json
+                | Some _, Some _ | Some _, None | None, _ -> ());
+               Ok json
+             | Error _ as err -> err)))
 ;;
 
 (* No cost row of a Keeper is older than the Keeper, so the ledger walk opens
@@ -189,13 +378,39 @@ let handle_cache_outcome_get state req reqd name =
     ~read:(fun ~config ~keeper ~turn_ref ->
       Result.map
         (fun born_at () ->
-           Keeper_cache_outcome.read
-             ~config
-             ~keeper
-             ~turn_ref
-             ~born_at
-             ~provider_default_s:provider_default_cache_ttl_s
-           |> Result.map Keeper_cache_outcome_reading.to_json)
+          let key = turn_cache_key ~config ~keeper ~turn_ref in
+          let pi_store = Keeper_types_support.keeper_provider_input_store config keeper in
+          let cost_store =
+            Cost_ledger.store_of_base_path ~base_path:config.Workspace.base_path
+          in
+          let current_stamp () =
+            match latest_store_file_stamp pi_store, latest_store_file_stamp cost_store with
+            | Some pi_s, Some cost_s -> Some (pi_s ^ "\000" ^ cost_s)
+            | None, _ | Some _, None -> None
+          in
+          let stamp_opt = current_stamp () in
+          match Option.bind stamp_opt (fun stamp ->
+            Bounded_turn_cache.get cache_outcome_cache ~key ~stamp) with
+          | Some json -> Ok json
+          | None ->
+            (match
+               Keeper_cache_outcome.read
+                 ~config
+                 ~keeper
+                 ~turn_ref
+                 ~born_at
+                 ~provider_default_s:provider_default_cache_ttl_s
+             with
+             | Ok reading ->
+               let json = Keeper_cache_outcome_reading.to_json reading in
+               if cache_outcome_is_settled reading
+               then (
+                 match stamp_opt, current_stamp () with
+                 | Some before, Some after when String.equal before after ->
+                   Bounded_turn_cache.set cache_outcome_cache ~key ~stamp:before json
+                 | Some _, Some _ | Some _, None | None, _ -> ());
+               Ok json
+             | Error _ as err -> err))
         (keeper_born_at ~config ~keeper))
     ~error_status:(fun (Keeper_cache_outcome.Ledger_unreadable _) -> `Service_unavailable)
     ~error_to_string:Keeper_cache_outcome.read_error_to_string

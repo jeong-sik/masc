@@ -215,6 +215,35 @@ let test_changed_anchor_and_truncation_refuse_cursor () =
     expect_stale ())
 ;;
 
+let test_adaptive_window_expands_across_large_rows_and_cursor_anchors () =
+  (* Rows of ~6 KiB each exceed both the 4 KiB initial cursor anchor read and
+     the 160 KiB initial page window for 80 rows (~480 KiB total), exercising
+     adaptive backward window growth and adaptive forward anchor reads. *)
+  let pad = String.make 6000 'a' in
+  let rows =
+    List.init 100 (fun i ->
+      row ~content:(Printf.sprintf "big-%03d-%s" (i + 1) pad) (`At (float_of_int (i + 1))))
+  in
+  with_lane "chat-exact-adaptive" rows (fun config name ->
+    let first = page ~max_total:80 config name None in
+    let first_rows = messages_of first in
+    Alcotest.(check int) "adaptive window collects all 80 requested large rows"
+      80 (List.length first_rows);
+    Alcotest.(check bool) "newest row is big-100" true
+      (String.starts_with ~prefix:"big-100-" (content_of (List.hd (List.rev first_rows))));
+    Alcotest.(check bool) "oldest row in page is big-021" true
+      (String.starts_with ~prefix:"big-021-" (content_of (List.hd first_rows)));
+    let cursor = cursor_of first in
+    Alcotest.(check bool) "cursor issued across >4 KiB anchor row" true (Option.is_some cursor);
+    let second = page ~max_total:80 config name cursor in
+    let second_rows = messages_of second in
+    Alcotest.(check int) "remaining 20 rows paged cleanly across >4 KiB anchor"
+      20 (List.length second_rows);
+    Alcotest.(check bool) "oldest row overall is big-001" true
+      (String.starts_with ~prefix:"big-001-" (content_of (List.hd second_rows)));
+    Alcotest.(check bool) "prefix exhausted" false (bool_field "has_more" second))
+;;
+
 let test_oversize_row_is_an_error_instead_of_exhaustion () =
   with_lane "chat-exact-oversize" [] (fun config name ->
     let path = chat_path ~base_dir:config.Workspace.base_path ~keeper_name:name in
@@ -240,15 +269,14 @@ let with_history_state f =
         f state (Mcp_server.workspace_config state)))
 ;;
 
-(* Exercise the actual GET subroute, including status and cache disposition. *)
-let get_history state name =
+let get_history_path state target =
   let output = Buffer.create 1024 in
   let connection = Httpun.Server_connection.create (fun reqd ->
     let req = Httpun.Reqd.request reqd in
     let reqd = Http_reqd.of_httpun reqd in
     Keeper_api.handle_keeper_get_subroutes state req req reqd) in
   let wire = Printf.sprintf
-      "GET /api/v1/keepers/%s/chat/history HTTP/1.1\r\nHost: localhost\r\n\r\n" name in
+      "GET %s HTTP/1.1\r\nHost: localhost\r\n\r\n" target in
   let input = Bigstringaf.of_string ~off:0 ~len:(String.length wire) wire in
   ignore (Httpun.Server_connection.read_eof connection input ~off:0 ~len:(Bigstringaf.length input));
   let rec drain () =
@@ -273,6 +301,20 @@ let get_history state name =
     | _ :: rest -> body rest
     | [] -> Alcotest.fail "missing HTTP header boundary" in
   status, Yojson.Safe.from_string (body lines)
+;;
+
+(* Exercise the actual GET subroute, including status and cache disposition. *)
+let get_history state name =
+  get_history_path state (Printf.sprintf "/api/v1/keepers/%s/chat/history" name)
+;;
+
+let get_history_page ?limit state name =
+  let target =
+    match limit with
+    | None -> Printf.sprintf "/api/v1/keepers/%s/chat/history/page" name
+    | Some n -> Printf.sprintf "/api/v1/keepers/%s/chat/history/page?limit=%d" name n
+  in
+  get_history_path state target
 ;;
 
 let cache_entries () =
@@ -496,6 +538,74 @@ let test_strict_transcript_preserves_existing_role_window () =
          Keeper_chat_store.Role.equal m.role Keeper_chat_store.Role.User) strict |> List.length))
 ;;
 
+let test_http_page_get_cache_freshness_and_limit_normalization () =
+  with_history_state (fun state config ->
+    let name = "page-cache-freshness" in
+    let base_dir = config.Workspace.base_path in
+    (* 1. Absent keeper returns 200 empty and does not pollute Dashboard_cache *)
+    let st_absent, body_absent = get_history_page state name in
+    Alcotest.(check int) "absent keeper page status" 200 st_absent;
+    Alcotest.(check int) "absent keeper empty rows" 0 (List.length (messages_of body_absent));
+    (* 2. Populate rows and fetch head page twice (cache fill + hit) *)
+    write_lane ~base_dir ~keeper_name:name [ row ~content:"first" (`At 1.) ];
+    let st1, body1 = get_history_page ~limit:80 state name in
+    Alcotest.(check int) "first page status" 200 st1;
+    Alcotest.(check (list string)) "first page rows" [ "first" ]
+      (List.map content_of (messages_of body1));
+    let st2, body2 = get_history_page ~limit:80 state name in
+    Alcotest.(check int) "cached page status" 200 st2;
+    Alcotest.(check (list string)) "cached page rows" [ "first" ]
+      (List.map content_of (messages_of body2));
+    (* 3. Appending a new row immediately invalidates the head-page cache *)
+    let path = chat_path ~base_dir ~keeper_name:name in
+    let oc = open_out_gen [ Open_wronly; Open_append ] 0o600 path in
+    output_string oc (Yojson.Safe.to_string (row ~content:"second" (`At 2.)) ^ "\n");
+    close_out oc;
+    let st3, body3 = get_history_page ~limit:80 state name in
+    Alcotest.(check int) "appended page status" 200 st3;
+    Alcotest.(check (list string)) "appended row visible immediately" [ "first"; "second" ]
+      (List.map content_of (messages_of body3));
+    (* 4. Arbitrary out-of-range limits normalize without flooding Dashboard_cache *)
+    let st_hi, body_hi = get_history_page ~limit:999999 state name in
+    Alcotest.(check int) "high limit status" 200 st_hi;
+    Alcotest.(check int) "high limit rows" 2 (List.length (messages_of body_hi));
+    let st_lo, body_lo = get_history_page ~limit:(-5) state name in
+    Alcotest.(check int) "low limit status" 200 st_lo;
+    Alcotest.(check (list string)) "low limit clamps to 1 newest row" [ "second" ]
+      (List.map content_of (messages_of body_lo));
+    Alcotest.(check int) "page cache stays separate from Dashboard_cache" 0 (cache_entries ()))
+;;
+
+let test_http_cached_head_page_refreshes_redaction () =
+  with_history_state (fun state config ->
+    let name = "page-cache-redaction" in
+    let base_dir = config.Workspace.base_path in
+    let secret = "fixture.chat.history.redaction" in
+    let content = "value: " ^ secret in
+    let sensitive_row =
+      `Assoc [ "id", `String "sensitive"; "role", `String "user"; "content", `String content
+             ; "ts", `Float 2. ]
+    in
+    write_lane ~base_dir ~keeper_name:name
+      [ row ~content:"older" (`At 1.); sensitive_row; row ~content:"current" (`At 3.) ];
+    let status, before = get_history_page ~limit:2 state name in
+    Alcotest.(check int) "warm page status" 200 status;
+    Alcotest.(check (list string)) "original page contents" [ content; "current" ]
+      (List.map content_of (messages_of before));
+    Alcotest.(check bool) "older row has a continuation" true (bool_field "has_more" before);
+    let token_file = Keeper_secret_redaction.ssh_remote_token_file ~base_path:base_dir
+        ~keeper_name:name in
+    mkdir_p (Filename.dirname token_file);
+    let oc = open_out_gen [ Open_wronly; Open_creat; Open_excl ] 0o600 token_file in
+    Fun.protect ~finally:(fun () -> close_out oc) (fun () -> output_string oc (secret ^ "\n"));
+    let status, after = get_history_page ~limit:2 state name in
+    Alcotest.(check int) "page after projection change status" 200 status;
+    Alcotest.(check (list string)) "same page reflects new secret" [ "value: [REDACTED]"; "current" ]
+      (List.map content_of (messages_of after));
+    Alcotest.(check bool) "physical continuation is unchanged" true
+      (field "next_cursor" before = field "next_cursor" after))
+;;
+
 let () =
   Server_startup_state.mark_state_ready () |> Result.get_ok;
   Alcotest.run "server_dashboard_http_keeper_chat_page"
@@ -507,7 +617,10 @@ let () =
       ; Alcotest.test_case "page hint is a contiguous slice" `Quick test_page_limit_is_a_contiguous_slice
       ; Alcotest.test_case "cursor owner and issued prefix remain bound" `Quick test_cursor_binding_and_later_incomplete_append
       ; Alcotest.test_case "anchor rewrite and truncation refuse cursor" `Quick test_changed_anchor_and_truncation_refuse_cursor
+      ; Alcotest.test_case "adaptive window expands across large rows and cursor anchors" `Quick test_adaptive_window_expands_across_large_rows_and_cursor_anchors
       ; Alcotest.test_case "oversize row fails without skipping" `Quick test_oversize_row_is_an_error_instead_of_exhaustion
+      ; Alcotest.test_case "HTTP head page caches fresh reads, invalidates on append, and normalizes limits" `Quick test_http_page_get_cache_freshness_and_limit_normalization
+      ; Alcotest.test_case "HTTP cached head page refreshes secret redaction" `Quick test_http_cached_head_page_refreshes_redaction
       ]
     ; "legacy history truth boundary",
       [ Alcotest.test_case "unknown names never register or cache empty success" `Quick test_unknown_names_never_register_or_cache_empty_history

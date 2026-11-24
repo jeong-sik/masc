@@ -169,12 +169,10 @@ let load_result ~base_dir ~keeper_name =
   in
   Ok (fst (finish ()))
 
-let load_history_page_result ~base_dir ~keeper_name ?cursor
-      ?(max_total = max_total_lines) () =
+let project_history_page_result ~base_dir ~keeper_name
+    (page : Keeper_chat_history_page.page) =
   let open Result.Syntax in
   let path = chat_path ~base_dir ~keeper_name in
-  let* page = Keeper_chat_history_page.read ~path ~owner:keeper_name ?cursor
-    ~max_rows:(max 1 (min max_total max_total_lines)) () in
   let redaction = redaction_for ~base_dir ~keeper_name in
   let* messages_rev =
     List.fold_left (fun state (row : Keeper_chat_history_page.row) ->
@@ -186,3 +184,11 @@ let load_history_page_result ~base_dir ~keeper_name ?cursor
       (Ok []) page.rows
   in
   Ok { history_messages = List.rev messages_rev; next_cursor = page.next_cursor }
+
+let load_history_page_result ~base_dir ~keeper_name ?cursor
+      ?(max_total = max_total_lines) () =
+  let open Result.Syntax in
+  let path = chat_path ~base_dir ~keeper_name in
+  let* page = Keeper_chat_history_page.read ~path ~owner:keeper_name ?cursor
+    ~max_rows:(max 1 (min max_total max_total_lines)) () in
+  project_history_page_result ~base_dir ~keeper_name page

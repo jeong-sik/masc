@@ -839,21 +839,35 @@ let scan_step ?(lower_bound = 0) input ~chunk_size ~decode { scan_position = pos
 ;;
 
 let find_latest_decoded_from_channel ?(from = 0) ?until input ~decode f =
-  let chunk_size = 8192 in
-  let rec drive state =
+  let initial_chunk_size = 8192 in
+  let max_chunk_size = 256 * 1024 in
+  let rec drive ~chunk_size state =
     let decoded_newest_first, next =
-      off_fiber ~name:__FUNCTION__ (fun () -> scan_step ~lower_bound:from input ~chunk_size ~decode state)
+      off_fiber ~name:__FUNCTION__ (fun () ->
+        scan_step ~lower_bound:from input ~chunk_size ~decode state)
     in
     match List.find_map f decoded_newest_first with
     | Some _ as found -> found
     | None ->
       (match next with
        | None -> None
-       | Some state -> drive state)
+       | Some state ->
+         let next_chunk_size =
+           match decoded_newest_first with
+           | [] -> chunk_size
+           | _ :: _ -> min max_chunk_size (chunk_size * 2)
+         in
+         let state =
+           if state.read_size < next_chunk_size
+           then { state with read_size = next_chunk_size }
+           else state
+         in
+         drive ~chunk_size:next_chunk_size state)
   in
   drive
+    ~chunk_size:initial_chunk_size
     { scan_position = (match until with Some position -> position | None -> in_channel_length input)
-    ; read_size = chunk_size
+    ; read_size = initial_chunk_size
     ; unfinished_line = []
     }
 ;;
@@ -1321,10 +1335,10 @@ let read_recent_view view t =
   | Ok day_files -> read_recent_view_over view t day_files
 
 (* [n] counts the values [f] produced, where [filter_map_recent]'s [n] counts
-   rows visited. Each day file is scanned backwards in 8 KB chunks through the
-   same primitive as [find_latest_entry_result], so a sparse/no-match query
-   never materialises a whole day file. Only the current chunk/line fragment
-   and the selected values remain live. *)
+   rows visited. Each day file is scanned backwards in adaptive 8 KB to 256 KB
+   chunks through the same primitive as [find_latest_entry_result], so a
+   sparse/no-match query never materialises a whole day file. Only the current
+   chunk/line fragment and the selected values remain live. *)
 let collect_matching_files ?(offset = 0) t n ~month_is_in_range
       ~day_is_in_range ~f =
   if n <= 0 then []

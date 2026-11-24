@@ -323,29 +323,27 @@ let pulse_window_bounds ~now_unix =
   in
   (window_start, current_slot)
 
-let sparkline_24h_of_pulse ~now_unix { slots; known_since = _ } =
+let aligned_24h_slot_counts ~now_unix { slots; known_since = _ } =
   let window_start, current_slot = pulse_window_bounds ~now_unix in
   let by_start = Hashtbl.create (List.length slots) in
   List.iter
     (fun (s : turn_slot) ->
       if s.starts_at >= window_start && s.starts_at <= current_slot then
-        Hashtbl.replace by_start s.starts_at s)
+        Hashtbl.replace by_start s.starts_at (s.ok + s.failed))
     slots;
-  List.init pulse_window_slots_24h (fun i ->
+  Array.init pulse_window_slots_24h (fun i ->
       match
         Hashtbl.find_opt by_start (window_start + (i * turn_slot_seconds))
       with
-      | Some s -> Float.of_int (s.ok + s.failed)
-      | None -> 0.0)
+      | Some n -> n
+      | None -> 0)
 
-let turns_24h_of_pulse ~now_unix { slots; known_since = _ } =
-  let window_start, current_slot = pulse_window_bounds ~now_unix in
-  List.fold_left
-    (fun acc (s : turn_slot) ->
-      if s.starts_at >= window_start && s.starts_at <= current_slot then
-        acc + s.ok + s.failed
-      else acc)
-    0 slots
+let sparkline_24h_of_pulse ~now_unix pulse =
+  Array.to_list
+    (Array.map Float.of_int (aligned_24h_slot_counts ~now_unix pulse))
+
+let turns_24h_of_pulse ~now_unix pulse =
+  Array.fold_left ( + ) 0 (aligned_24h_slot_counts ~now_unix pulse)
 
 let aggregate_company_sparkline ~now_unix ~pulse_tbl
     (members : keeper_summary list) =

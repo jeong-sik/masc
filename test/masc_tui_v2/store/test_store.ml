@@ -10256,7 +10256,9 @@ let test_live_chat_runtime_attempt_and_text_ownership () =
 let test_24h_pulse_sparkline_and_sums_use_now_unix () =
   let slot_now = 1_795_251_600 in
   let now_unix = Float.of_int (slot_now + 300) in
-  let slot_old = slot_now - (49 * Wire_fleet.turn_slot_seconds) in
+  let slot_expired_edge = slot_now - (48 * Wire_fleet.turn_slot_seconds) in
+  let slot_oldest_included = slot_now - (47 * Wire_fleet.turn_slot_seconds) in
+  let slot_future = slot_now + Wire_fleet.turn_slot_seconds in
   let slot_recent = slot_now - (2 * Wire_fleet.turn_slot_seconds) in
   let mk_slot starts_at ok failed : Wire_fleet.turn_slot =
     {
@@ -10272,12 +10274,21 @@ let test_24h_pulse_sparkline_and_sums_use_now_unix () =
     }
   in
   let stale_pulse : Wire_fleet.turn_pulse =
-    { known_since = Float.of_int slot_old; slots = [ mk_slot slot_old 10 2 ] }
+    {
+      known_since = Float.of_int slot_expired_edge;
+      slots = [ mk_slot slot_expired_edge 10 2; mk_slot slot_future 7 0 ];
+    }
   in
   let recent_pulse : Wire_fleet.turn_pulse =
     {
-      known_since = Float.of_int slot_old;
-      slots = [ mk_slot slot_old 20 0; mk_slot slot_recent 3 1 ];
+      known_since = Float.of_int slot_expired_edge;
+      slots =
+        [
+          mk_slot slot_expired_edge 20 0;
+          mk_slot slot_oldest_included 1 0;
+          mk_slot slot_recent 2 1;
+          mk_slot slot_future 9 0;
+        ];
     }
   in
   let ks =
@@ -10288,8 +10299,43 @@ let test_24h_pulse_sparkline_and_sums_use_now_unix () =
     ]
   in
   let m0 = Model.initial ~cols:140 ~rows:40 ~wall_unix:now_unix () in
+  let shell_stub : Wire_fleet.dashboard_shell =
+    {
+      generated_at_unix = Some now_unix;
+      project = Some "test";
+      version = Some "0.1";
+      counts =
+        {
+          agents = 0;
+          tasks = 0;
+          tasks_done_24h = 0;
+          keepers = 3;
+          persisted_keepers = Observed.unreported;
+          configured_keepers = Observed.unreported;
+          total_runtimes = 1;
+        };
+      scorecard_24h =
+        {
+          tasks_done_24h = Observed.unreported;
+          tasks_done_total = Observed.unreported;
+          tasks_in_progress = Observed.unreported;
+          tasks_claimed = Observed.unreported;
+          tasks_awaiting_verification = Observed.unreported;
+          tasks_todo = Observed.unreported;
+          tasks_cancelled = Observed.unreported;
+          goals_completed_24h = Observed.unreported;
+          verifications_passed_24h = Observed.unreported;
+          verifications_rejected_24h = Observed.unreported;
+          board_posts_24h = Observed.unreported;
+          turns_24h = Observed.unreported;
+          cost_24h_usd = Observed.unreported;
+        };
+      groups = [];
+    }
+  in
   let fleet =
     m0.fleet
+    |> Fleet_store.apply_shell ~observed_at:t0 shell_stub
     |> Fleet_store.apply_keepers ~observed_at:t0 ks
     |> Fleet_store.apply_roster_extras
          {
@@ -10300,14 +10346,18 @@ let test_24h_pulse_sparkline_and_sums_use_now_unix () =
              [ ("stale-keeper", stale_pulse); ("active-keeper", recent_pulse) ];
          }
   in
-  (* Stale keeper rested >24h: 0 turns in 24h window and 48 zero slots. *)
-  Alcotest.(check (option int)) "stale keeper has 0 turns in 24h" (Some 0)
+  (* Stale keeper has only the 48-slots-ago expired boundary slot and a future
+     slot: 0 turns in 24h window and 48 zero slots. *)
+  Alcotest.(check (option int)) "stale keeper excludes 48-slots-ago and future slots"
+    (Some 0)
     (Fleet_store.keeper_turns_24h ~now_unix ~keeper:"stale-keeper" fleet);
   Alcotest.(check bool) "stale keeper sparkline is 48 zeros" true
     (let sp = Fleet_store.sparkline_24h ~now_unix ~keeper:"stale-keeper" fleet in
      List.length sp = 48 && List.for_all (fun v -> Float.equal v 0.0) sp);
-  (* Active keeper counts only the in-window slot (3 ok + 1 failed = 4; rested excluded). *)
-  Alcotest.(check (option int)) "active keeper counts only in-window ok+failed"
+  (* Active keeper counts 47-slots-ago boundary (1) + recent slot (2 ok + 1 failed = 3) = 4;
+     excludes 48-slots-ago (20), future (9), and rested. *)
+  Alcotest.(check (option int))
+    "active keeper includes 47-slots-ago & recent, excludes 48-slots-ago & future"
     (Some 4)
     (Fleet_store.keeper_turns_24h ~now_unix ~keeper:"active-keeper" fleet);
   let active_spark =
@@ -10315,9 +10365,12 @@ let test_24h_pulse_sparkline_and_sums_use_now_unix () =
   in
   Alcotest.(check int) "active sparkline length is 48" 48
     (List.length active_spark);
+  Alcotest.(check (float 0.01))
+    "oldest in-window slot (47 slots ago) lands at sparkline index 0" 1.0
+    (List.hd active_spark);
   Alcotest.(check (list (float 0.01)))
     "quiet trailing slots after recent turn appear as zeros"
-    [ 4.0; 0.0; 0.0 ]
+    [ 3.0; 0.0; 0.0 ]
     (List.filteri (fun i _ -> i >= 45) active_spark);
   (* Keeper without pulse returns None / []. *)
   Alcotest.(check (option int)) "no-pulse keeper returns None" None
@@ -10348,13 +10401,27 @@ let test_24h_pulse_sparkline_and_sums_use_now_unix () =
     "Fleet_pulse_wall ranks in-window active keeper first"
     [ "active-keeper"; "no-pulse-keeper"; "stale-keeper" ]
     ordered_names;
-  (* Advancing wall clock via Msg.Tick past 24h drops active-keeper's turn to 0. *)
-  let m1 = { m0 with fleet = f_wall } in
-  let future_unix = now_unix +. (24.0 *. 3600.0) in
+  (* Advancing wall clock via Msg.Tick past 24h refreshes BOTH Fleet_store.total_turns_24h
+     AND the cached scorecard (m.fleet.shell.scorecard_24h.turns_24h). *)
+  let m1 =
+    { m0 with fleet = f_wall } |> Model.sync_effective_scorecard ~now:t0
+  in
+  let scorecard_turns (m : Model.t) =
+    match Observed.to_option m.fleet.shell with
+    | Some sh -> Observed.to_option sh.scorecard_24h.turns_24h
+    | None -> None
+  in
+  Alcotest.(check (option int))
+    "scorecard turns_24h starts at 4 before idle Tick" (Some 4)
+    (scorecard_turns m1);
+  let future_unix = now_unix +. (25.0 *. 3600.0) in
   let m2, _ = Update.step ~now:t1 m1 (Msg.Tick { wall_unix = future_unix }) in
   Alcotest.(check (option int))
     "Tick advancing >24h drops fleet total_turns_24h to 0" (Some 0)
-    (Fleet_store.total_turns_24h ~now_unix:m2.freshness.last_wall_unix m2.fleet)
+    (Fleet_store.total_turns_24h ~now_unix:m2.freshness.last_wall_unix m2.fleet);
+  Alcotest.(check (option int))
+    "Tick advancing >24h refreshes cached scorecard turns_24h to 0" (Some 0)
+    (scorecard_turns m2)
 let () =
   Alcotest.run "masc_tui_store"
     [

@@ -181,6 +181,38 @@ export function selectWorkspace(workspaceId: string): boolean {
   return true
 }
 
+/**
+ * Resolves a dashboard API/SSE path against the active `WorkspaceTarget.baseUrl`
+ * when configured as a same-origin path prefix (e.g. `"/ws/alpha"`).
+ * Cross-origin `baseUrl` values are refused fail-closed so same-origin session
+ * cookies and CSRF headers are never leaked across origins.
+ */
+export function resolveWorkspaceUrl(path: string): string {
+  const activeId = activeWorkspaceId.peek()
+  const target = workspaceTargets.peek().find((t) => t.id === activeId)
+  const rawBase = target?.baseUrl?.trim()
+  if (!rawBase) return path
+
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`
+  if (rawBase.startsWith('/')) {
+    const cleanPrefix = rawBase.replace(/\/+$/, '')
+    return `${cleanPrefix}${normalizedPath}`
+  }
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    try {
+      const parsed = new URL(rawBase, window.location.origin)
+      if (parsed.origin !== window.location.origin) {
+        return normalizedPath
+      }
+      const cleanPrefix = parsed.pathname.replace(/\/+$/, '')
+      return `${cleanPrefix}${normalizedPath}`
+    } catch {
+      return normalizedPath
+    }
+  }
+  return normalizedPath
+}
+
 function parseAccountMode(raw: unknown): AccountMode | 'invalid' {
   if (raw === undefined || raw === null) return 'single_user'
   if (raw === 'Multi_account' || raw === 'multi_account') return 'multi_account'
@@ -213,17 +245,23 @@ function writeAccountMarker(accountId: string | null): void {
   } catch { /* storage unavailable */ }
 }
 
-interface MultiAccountSessionPayload {
-  readonly authenticated?: boolean
-  readonly account_id?: string
-  readonly id?: string
-  readonly principal_id?: string
-  readonly email?: string | null
-  readonly display_name?: string
-  readonly name?: string
-  readonly role?: string
-  readonly csrf_token?: string
-  readonly workspace_id?: string
+interface AuthSessionWirePayload {
+  readonly user_id?: unknown
+  readonly expires_at_ms?: unknown
+  readonly csrf_token?: unknown
+}
+
+interface AuthWhoamiWirePayload {
+  readonly principal?: {
+    readonly kind?: unknown
+    readonly id?: unknown
+  }
+  readonly role?: unknown
+  readonly binding?: unknown
+}
+
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
 }
 
 async function readMultiAccountSession(
@@ -231,7 +269,8 @@ async function readMultiAccountSession(
   authMethods: AuthMethods,
   previousAccountId: string | null,
 ): Promise<AuthSession> {
-  const res = await fetchImpl('/api/v1/auth/session', {
+  // 1. Live OCaml Server_login_http route: GET /auth/session -> { user_id, expires_at_ms, csrf_token }
+  const res = await fetchImpl('/auth/session', {
     method: 'GET',
     credentials: 'same-origin',
     headers: { Accept: 'application/json' },
@@ -251,10 +290,35 @@ async function readMultiAccountSession(
     return { kind: 'multi_account_signed_out', mode: 'multi_account', authMethods }
   }
   if (!res.ok) {
-    return { kind: 'unavailable', reason: `GET /api/v1/auth/session failed (${res.status})` }
+    return { kind: 'unavailable', reason: `GET /auth/session failed (${res.status})` }
   }
-  const body = (await res.json()) as MultiAccountSessionPayload
-  if (body.authenticated === false) {
+  const sessionBody = (await res.json()) as AuthSessionWirePayload
+  const userId = nonEmptyString(sessionBody.user_id)
+  const csrfToken = nonEmptyString(sessionBody.csrf_token)
+  if (userId === null || csrfToken === null) {
+    activeCsrfToken = null
+    return { kind: 'unavailable', reason: 'GET /auth/session returned malformed payload' }
+  }
+
+  if (previousAccountId !== null && previousAccountId !== userId) {
+    activeCsrfToken = null
+    writeAccountMarker(userId)
+    return {
+      kind: 'account_changed',
+      mode: 'multi_account',
+      previousAccountId,
+      nextAccountId: userId,
+      authMethods,
+    }
+  }
+
+  // 2. Live OCaml Auth_preview route: GET /api/v1/auth/whoami -> { principal: { kind: "human", id }, role, binding }
+  const whoRes = await fetchImpl('/api/v1/auth/whoami', {
+    method: 'GET',
+    credentials: 'same-origin',
+    headers: { Accept: 'application/json' },
+  })
+  if (whoRes.status === 401 || whoRes.status === 403) {
     activeCsrfToken = null
     writeAccountMarker(null)
     if (previousAccountId !== null) {
@@ -268,37 +332,39 @@ async function readMultiAccountSession(
     }
     return { kind: 'multi_account_signed_out', mode: 'multi_account', authMethods }
   }
-  const accountId = body.account_id ?? body.principal_id ?? body.id ?? ''
-  if (!accountId) {
-    return { kind: 'multi_account_signed_out', mode: 'multi_account', authMethods }
+  if (!whoRes.ok) {
+    activeCsrfToken = null
+    return { kind: 'unavailable', reason: `GET /api/v1/auth/whoami failed (${whoRes.status})` }
   }
-  const csrfToken = typeof body.csrf_token === 'string' ? body.csrf_token : ''
-  activeCsrfToken = csrfToken || null
-
-  if (previousAccountId !== null && previousAccountId !== accountId) {
-    writeAccountMarker(accountId)
+  const whoBody = (await whoRes.json()) as AuthWhoamiWirePayload
+  const principalKind = whoBody.principal?.kind
+  const principalId = nonEmptyString(whoBody.principal?.id)
+  if (principalKind !== 'human' || principalId === null) {
+    activeCsrfToken = null
+    return { kind: 'unavailable', reason: 'GET /api/v1/auth/whoami did not return a human principal' }
+  }
+  if (principalId !== userId) {
+    activeCsrfToken = null
+    writeAccountMarker(principalId)
     return {
       kind: 'account_changed',
       mode: 'multi_account',
-      previousAccountId,
-      nextAccountId: accountId,
+      previousAccountId: userId,
+      nextAccountId: principalId,
       authMethods,
     }
   }
-  const workspaceId = typeof body.workspace_id === 'string' && body.workspace_id.trim()
-    ? body.workspace_id.trim()
-    : activeWorkspaceId.peek()
-  if (workspaceId !== activeWorkspaceId.peek()) {
-    activeWorkspaceId.value = workspaceId
-  }
-  writeAccountMarker(accountId)
+
+  activeCsrfToken = csrfToken
+  const workspaceId = activeWorkspaceId.peek()
+  writeAccountMarker(userId)
   return {
     kind: 'multi_account_signed_in',
     mode: 'multi_account',
-    accountId,
-    email: typeof body.email === 'string' ? body.email : null,
-    displayName: body.display_name ?? body.name ?? body.email ?? accountId,
-    role: parseRole(body.role),
+    accountId: userId,
+    email: null,
+    displayName: userId,
+    role: parseRole(whoBody.role),
     csrfToken,
     authMethods,
     workspaceId,
@@ -386,6 +452,14 @@ export async function bootstrapAuthSession(
           mode: 'single_user',
           authMethods,
           reason: `Authorization required (${shellRes.status})`,
+        }
+        authSession.value = next
+        return next
+      }
+      if (!shellRes.ok) {
+        const next: AuthSession = {
+          kind: 'unavailable',
+          reason: `GET /api/v1/dashboard/shell failed (${shellRes.status})`,
         }
         authSession.value = next
         return next

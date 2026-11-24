@@ -175,9 +175,14 @@ describe('core/observer & core/time-window', () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url === '/health') return new Response(JSON.stringify({ account_mode: 'Multi_account' }))
-      if (url === '/api/v1/auth/session') {
+      if (url === '/auth/session') {
         return new Response(
-          JSON.stringify({ authenticated: true, account_id: 'acct-1', role: 'admin', csrf_token: 'c1' }),
+          JSON.stringify({ user_id: 'acct-1', expires_at_ms: 1_800_000_000_000, csrf_token: 'c1' }),
+        )
+      }
+      if (url === '/api/v1/auth/whoami') {
+        return new Response(
+          JSON.stringify({ principal: { kind: 'human', id: 'acct-1' }, role: 'admin' }),
         )
       }
       if (url === '/api/v1/auth/events') {

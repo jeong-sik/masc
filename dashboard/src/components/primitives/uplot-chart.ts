@@ -87,14 +87,37 @@ function withAlpha(oklchColor: string, alpha: number): string {
   return `color-mix(in oklch, ${oklchColor} ${pct}%, transparent)`
 }
 
+export function computeSeriesSignature(series: readonly UPlotSeriesSpec[]): string {
+  return series
+    .map((s) =>
+      [
+        s.label,
+        s.colorToken ?? '',
+        s.width ?? '',
+        s.fillAlpha ?? '',
+        s.unit ?? '',
+        s.dash?.join(',') ?? '',
+        s.show ?? true,
+      ].join('|'),
+    )
+    .join(';')
+}
+
 export function UPlotChart(props: UPlotChartProps) {
   const mountRef = useRef<HTMLDivElement>(null)
   const plotRef = useRef<uPlot | null>(null)
+  const seriesRef = useRef(props.series)
+  seriesRef.current = props.series
+  const formatterRef = useRef(props.valueFormatter)
+  formatterRef.current = props.valueFormatter
+  const dataRef = useRef(props.data)
+  dataRef.current = props.data
   const [themeRevision, setThemeRevision] = useState(0)
   const [loadError, setLoadError] = useState<string | null>(null)
 
   const height = props.height ?? 220
   const hasPoints = Array.isArray(props.data[0]) && props.data[0].length > 0
+  const seriesSignature = computeSeriesSignature(props.series)
 
   // Re-read OKLCH CSS tokens whenever data-theme or data-contrast changes
   useEffect(() => {
@@ -129,7 +152,7 @@ export function UPlotChart(props: UPlotChartProps) {
 
         const seriesDefs: uPlot.Series[] = [
           {},
-          ...props.series.map((spec, idx) => {
+          ...seriesRef.current.map((spec, idx) => {
             const stroke = palette.resolveColor(spec.colorToken, idx)
             return {
               label: spec.label,
@@ -140,7 +163,7 @@ export function UPlotChart(props: UPlotChartProps) {
               fill: spec.fillAlpha ? withAlpha(stroke, spec.fillAlpha) : undefined,
               value: (_self: uPlot, raw: number) => {
                 if (raw == null || Number.isNaN(raw)) return '없음'
-                if (props.valueFormatter) return props.valueFormatter(idx, raw)
+                if (formatterRef.current) return formatterRef.current(idx, raw)
                 const formatted = Number.isInteger(raw) ? String(raw) : raw.toFixed(2)
                 return spec.unit ? `${formatted} ${spec.unit}` : formatted
               },
@@ -186,7 +209,7 @@ export function UPlotChart(props: UPlotChartProps) {
         }
 
         mountRef.current.innerHTML = ''
-        const plot = new UPlotCtor(opts, props.data, mountRef.current)
+        const plot = new UPlotCtor(opts, dataRef.current, mountRef.current)
         plotRef.current = plot
         setLoadError(null)
 
@@ -216,7 +239,7 @@ export function UPlotChart(props: UPlotChartProps) {
       plotRef.current?.destroy()
       plotRef.current = null
     }
-  }, [hasPoints, height, props.id, props.series, props.syncCrosshair, props.title, themeRevision])
+  }, [hasPoints, height, props.id, props.syncCrosshair, props.title, seriesSignature, themeRevision])
 
   // Fast-path data update without tearing down canvas
   useEffect(() => {

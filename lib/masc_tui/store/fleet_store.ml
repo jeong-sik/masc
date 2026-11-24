@@ -573,6 +573,22 @@ let sync_selection_after_change ~prev_index ~reset_scroll ~clear_if_empty next =
     if reset_scroll || n_groups = 0 then 0
     else min next.pulse_scroll_offset (max 0 (n_groups - 1))
   in
+  (* A roster refresh can remove the company the cursor sits on while its
+     collapsed flag stays set. Keep the header selection only while its row is
+     still one of the navigable rows. *)
+  let selected_collapsed_company =
+    match next.selected_collapsed_company with
+    | None -> None
+    | Some company ->
+        let still_navigable =
+          List.exists
+            (function
+              | Nav_company_collapsed name -> String.equal name company
+              | Nav_keeper _ -> false)
+            (companies_nav_rows next)
+        in
+        if still_navigable then Some company else None
+  in
   if len = 0 then
     let selected_keeper = if clear_if_empty then None else next.selected_keeper in
     {
@@ -581,6 +597,7 @@ let sync_selection_after_change ~prev_index ~reset_scroll ~clear_if_empty next =
       scroll_offset = 0;
       pulse_scroll_offset;
       selected_keeper;
+      selected_collapsed_company;
     }
   else
     let selected_index, selected_keeper =
@@ -618,6 +635,7 @@ let sync_selection_after_change ~prev_index ~reset_scroll ~clear_if_empty next =
       scroll_offset;
       pulse_scroll_offset;
       selected_keeper;
+      selected_collapsed_company;
     }
 
 let apply_keepers ~observed_at ks t =

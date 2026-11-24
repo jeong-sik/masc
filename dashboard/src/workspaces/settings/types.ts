@@ -1,79 +1,9 @@
-import type { ComponentChildren } from 'preact'
-
-export interface WorkspaceInspectPayload {
-  title: string
-  subtitle?: string
-  kind: string
-  data?: unknown
-  render?: () => ComponentChildren
-}
-
-export interface WorkspaceViewProps {
-  subroute: string
-  entityId?: string
-  entityTab?: string
-  onNavigate: (path: string) => void
-  onInspect: (payload: WorkspaceInspectPayload) => void
-}
-
-export type ReloadScope = 'hot_reload' | 'next_turn' | 'restart_required'
-
-export interface ConfigField {
-  readonly table: string
-  readonly key: string
-  readonly full_key: string
-  readonly type: string
-  readonly current_value: unknown
-  readonly default_value: unknown
-  readonly provenance: string
-  readonly reload_scope: ReloadScope
-  readonly secret: boolean
-  readonly writable: boolean
-  readonly description: string
-  readonly enum_values?: readonly string[]
-  readonly label?: string
-  readonly entity_group?: string
-  readonly entity_title?: string
-  readonly sub_group?: string | null
-}
-
-export interface ConfigCategory {
-  readonly id: string
-  readonly title: string
-  readonly field_count: number
-  readonly fields: readonly ConfigField[]
-}
-
-export interface ConfigSchemaData {
-  readonly target: string
-  readonly keeper?: string | null
-  readonly file_exists: boolean
-  readonly file_sha256: string
-  readonly categories: readonly ConfigCategory[]
-}
-
-export interface ConfigPatchChangeOp {
-  readonly op: 'set_string' | 'set_int' | 'set_float' | 'set_bool' | 'set_string_array' | 'remove'
-  readonly table: string
-  readonly key: string
-  readonly full_key: string
-  readonly value?: unknown
-}
-
-export interface ConfigPatchData {
-  readonly applied: boolean
-  readonly dry_run: boolean
-  readonly target: string
-  readonly changed: boolean
-  readonly before_sha256: string
-  readonly new_sha256: string
-  readonly snapshot_id: string | null
-  readonly snapshot_path?: string
-  readonly reload_scope: ReloadScope
-  readonly unified_diff: string
-  readonly diff_hunks: readonly unknown[]
-  readonly validation_warnings: readonly string[]
-}
+import type {
+  ConfigCategorySpec as ConfigCategory,
+  ConfigFieldSpec as ConfigField,
+  ConfigPatchChange,
+  ConfigReloadScope as ReloadScope,
+} from '../../api/config-schema'
 
 export interface WorldConfigExportResponse {
   readonly ok: boolean
@@ -160,7 +90,7 @@ export function reloadScopeNotice(scope: ReloadScope): { label: string; detail: 
   }
 }
 
-export function patchOpForField(field: ConfigField, nextValue: unknown, remove = false): ConfigPatchChangeOp {
+export function patchOpForField(field: ConfigField, nextValue: unknown, remove = false): ConfigPatchChange | null {
   if (remove) {
     return { op: 'remove', table: field.table, key: field.key, full_key: field.full_key }
   }
@@ -169,12 +99,14 @@ export function patchOpForField(field: ConfigField, nextValue: unknown, remove =
     return { op: 'set_bool', table: field.table, key: field.key, full_key: field.full_key, value: Boolean(nextValue) }
   }
   if (t === 'int' || t === 'integer') {
-    const n = typeof nextValue === 'number' ? Math.trunc(nextValue) : parseInt(String(nextValue), 10)
-    return { op: 'set_int', table: field.table, key: field.key, full_key: field.full_key, value: Number.isFinite(n) ? n : 0 }
+    const n = typeof nextValue === 'number' ? nextValue
+      : typeof nextValue === 'string' && nextValue.trim() ? Number(nextValue) : NaN
+    return Number.isSafeInteger(n) ? { op: 'set_int', table: field.table, key: field.key, full_key: field.full_key, value: n } : null
   }
   if (t === 'float' || t === 'number') {
-    const n = typeof nextValue === 'number' ? nextValue : parseFloat(String(nextValue))
-    return { op: 'set_float', table: field.table, key: field.key, full_key: field.full_key, value: Number.isFinite(n) ? n : 0 }
+    const n = typeof nextValue === 'number' ? nextValue
+      : typeof nextValue === 'string' && nextValue.trim() ? Number(nextValue) : NaN
+    return Number.isFinite(n) ? { op: 'set_float', table: field.table, key: field.key, full_key: field.full_key, value: n } : null
   }
   if (t === 'string_array' || t === 'string_list' || Array.isArray(nextValue)) {
     const arr = Array.isArray(nextValue)

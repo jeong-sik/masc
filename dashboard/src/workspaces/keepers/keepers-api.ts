@@ -24,7 +24,6 @@ import {
   apiGet,
   apiGetV2,
   apiMutate,
-  apiMutateV2,
   type ApiError,
 } from '../../core/transport'
 import { acquireViewStream } from '../../core/view-stream-slot'
@@ -48,12 +47,6 @@ import type {
   ChatJournalTextOwner,
   ChatTranscriptEntry,
   CheckpointInventoryData,
-  ConfigCategorySpec,
-  ConfigFieldSpec,
-  ConfigPatchChange,
-  ConfigPatchResult,
-  ConfigReloadScope,
-  ConfigSchemaData,
   KeeperAttachedProvider,
   KeeperCandleLedgerData,
   KeeperCatalogItem,
@@ -1705,97 +1698,6 @@ export function fetchKeeperSandboxApi(keeper: string): Promise<Result<KeeperSand
 }
 
 // ── Schema Config CAS & Secrets / OAuth Identity (#36) ───────────────────
-
-export function decodeConfigSchema(raw: unknown): ConfigSchemaData {
-  const rec = isRecord(raw) ? raw : {}
-  const categories: ConfigCategorySpec[] = Array.isArray(rec.categories)
-    ? rec.categories.filter(isRecord).map((c) => {
-        const fields: ConfigFieldSpec[] = Array.isArray(c.fields)
-          ? c.fields.filter(isRecord).map((f) => {
-              const rs = f.reload_scope
-              const reloadScope: ConfigReloadScope =
-                rs === 'hot_reload' || rs === 'restart_required' ? rs : 'next_turn'
-              return {
-                table: typeof f.table === 'string' ? f.table : '',
-                key: asStr(f.key) ?? '',
-                full_key: asStr(f.full_key) ?? '',
-                type: asStr(f.type) ?? 'string',
-                current_value: f.current_value,
-                default_value: f.default_value,
-                provenance: asStr(f.provenance) ?? 'default',
-                reload_scope: reloadScope,
-                secret: f.secret === true,
-                writable: f.writable !== false,
-                description: typeof f.description === 'string' ? f.description : '',
-                enum_values: Array.isArray(f.enum_values)
-                  ? f.enum_values.filter((x): x is string => typeof x === 'string')
-                  : undefined,
-                label: asStr(f.label) ?? undefined,
-              }
-            }).filter((f) => f.key.length > 0)
-          : []
-        return {
-          id: asStr(c.id) ?? 'general',
-          title: asStr(c.title) ?? 'General',
-          field_count: asNum(c.field_count) ?? fields.length,
-          fields,
-        }
-      })
-    : []
-  return {
-    target: asStr(rec.target) ?? '',
-    keeper: asStr(rec.keeper),
-    file_exists: rec.file_exists === true,
-    file_sha256: typeof rec.file_sha256 === 'string' ? rec.file_sha256 : '',
-    categories,
-  }
-}
-
-export function fetchConfigSchemaApi(target: string): Promise<Result<ConfigSchemaData, ApiError>> {
-  return apiGetV2<ConfigSchemaData>(
-    `/api/v1/config/schema?target=${encodeURIComponent(target)}`,
-    { decode: decodeConfigSchema },
-  )
-}
-
-export function postConfigPatchApi(params: {
-  readonly target: string
-  readonly keeperName?: string
-  readonly expectedSha256?: string
-  readonly dryRun: boolean
-  readonly changes: readonly ConfigPatchChange[]
-}): Promise<Result<ConfigPatchResult, ApiError>> {
-  const body: Record<string, unknown> = {
-    target: params.target,
-    dry_run: params.dryRun,
-    changes: params.changes,
-  }
-  if (params.keeperName) body.keeper_name = params.keeperName
-  if (params.expectedSha256) body.expected_sha256 = params.expectedSha256
-
-  return apiMutateV2<ConfigPatchResult>('POST', '/api/v1/config/patch', body, {
-    decode: (raw) => {
-      const rec = isRecord(raw) ? raw : {}
-      const rs = rec.reload_scope
-      const reloadScope: ConfigReloadScope =
-        rs === 'hot_reload' || rs === 'restart_required' ? rs : 'next_turn'
-      return {
-        applied: rec.applied === true,
-        dry_run: rec.dry_run !== false,
-        target: asStr(rec.target) ?? params.target,
-        changed: rec.changed === true,
-        before_sha256: typeof rec.before_sha256 === 'string' ? rec.before_sha256 : '',
-        new_sha256: typeof rec.new_sha256 === 'string' ? rec.new_sha256 : '',
-        snapshot_id: asStr(rec.snapshot_id),
-        reload_scope: reloadScope,
-        unified_diff: typeof rec.unified_diff === 'string' ? rec.unified_diff : '',
-        validation_warnings: Array.isArray(rec.validation_warnings)
-          ? rec.validation_warnings.filter((x): x is string => typeof x === 'string')
-          : [],
-      }
-    },
-  })
-}
 
 export function fetchKeeperAttachedProvidersApi(keeper: string): Promise<Result<readonly KeeperAttachedProvider[], ApiError>> {
   return apiGet<readonly KeeperAttachedProvider[]>(

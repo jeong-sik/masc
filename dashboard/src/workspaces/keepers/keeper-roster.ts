@@ -9,15 +9,17 @@ import { KeeperBadge } from '../../components/keeper-badge'
 import { VirtualList } from '../../components/primitives/virtual-list'
 import {
   fetchConfigSchemaApi,
+  postConfigPatchApi,
+  type ConfigPatchChange,
+  type ConfigPatchResult,
+  type ConfigSchemaData,
+} from '../../api/config-schema'
+import {
   filterAndSortRoster,
   needsRosterAttention,
   observeRosterContextPct,
-  postConfigPatchApi,
 } from './keepers-api'
 import type {
-  ConfigPatchChange,
-  ConfigPatchResult,
-  ConfigSchemaData,
   KeeperRosterItem,
   RosterMode,
 } from './types'

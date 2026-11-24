@@ -17,23 +17,24 @@ import { html } from 'htm/preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import {
   apiGet,
-  apiGetV2,
-  apiMutateV2,
   resourceCache,
 } from '../../core'
+import {
+  fetchConfigSchemaApi,
+  postConfigPatchApi,
+  type ConfigFieldSpec as ConfigField,
+  type ConfigPatchChange,
+  type ConfigPatchResult,
+  type ConfigSchemaData,
+} from '../../api/config-schema'
+import type { WorkspaceViewProps } from '../types'
 import { AppearancePanel } from './appearance-panel'
 import {
   CANONICAL_SETTINGS_CATEGORIES,
   organizeCategoriesIntoSeven,
   patchOpForField,
   reloadScopeNotice,
-  type ConfigField,
-  type ConfigPatchChangeOp,
-  type ConfigPatchData,
-  type ConfigSchemaData,
   type WorldConfigExportResponse,
-  type WorkspaceInspectPayload,
-  type WorkspaceViewProps,
 } from './types'
 
 export {
@@ -41,12 +42,17 @@ export {
   organizeCategoriesIntoSeven,
   patchOpForField,
   reloadScopeNotice,
-  type ConfigField,
-  type ConfigPatchChangeOp,
-  type ConfigPatchData,
-  type ConfigSchemaData,
-  type WorkspaceInspectPayload,
-  type WorkspaceViewProps,
+}
+export type { WorkspaceInspectPayload } from '../types'
+export type { ConfigSchemaData } from '../../api/config-schema'
+
+type FieldDraft = ConfigPatchChange | { readonly op: 'invalid_number'; readonly value: string }
+
+interface ConfigPreview {
+  readonly target: string
+  readonly sha256: string
+  readonly changes: readonly ConfigPatchChange[]
+  readonly result: ConfigPatchResult
 }
 
 function provenanceStyle(prov: string) {
@@ -111,9 +117,9 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
 
   const [activeCategoryId, setActiveCategoryId] = useState<string>('general')
   const [searchQuery, setSearchQuery] = useState<string>(() => resolveInitialSearchKey())
-  const [staged, setStaged] = useState<Readonly<Record<string, ConfigPatchChangeOp>>>({})
-  const [dryRunResult, setDryRunResult] = useState<ConfigPatchData | null>(null)
-  const [applyResult, setApplyResult] = useState<ConfigPatchData | null>(null)
+  const [staged, setStaged] = useState<Readonly<Record<string, FieldDraft>>>({})
+  const [preview, setPreview] = useState<ConfigPreview | null>(null)
+  const [applyResult, setApplyResult] = useState<ConfigPatchResult | null>(null)
   const [casConflict, setCasConflict] = useState<string | null>(null)
   const [errorBanner, setErrorBanner] = useState<string | null>(null)
   const [busy, setBusy] = useState<'preview' | 'apply' | 'export' | null>(null)
@@ -121,10 +127,7 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
   const loadSchema = (reason: 'mount' | 'manual' = 'mount') => {
     void resourceCache.fetch<ConfigSchemaData>(
       schemaCacheKey,
-      (signal) => apiGetV2<ConfigSchemaData>(
-        `/api/v1/config/schema?target=${encodeURIComponent(target)}`,
-        { signal },
-      ),
+      (signal) => fetchConfigSchemaApi(target, signal),
       { ttlMs: 15_000, topics: ['config'], reason },
     )
   }
@@ -140,8 +143,13 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
     [schemaData],
   )
 
-  const stagedList = useMemo(() => Object.values(staged), [staged])
+  const drafts = useMemo(() => Object.values(staged), [staged])
+  const hasInvalidNumber = drafts.some((draft) => draft.op === 'invalid_number')
+  const stagedList = useMemo(() => drafts.filter((draft) => draft.op !== 'invalid_number'), [drafts])
   const stagedCount = stagedList.length
+  const dryRunResult = preview && !hasInvalidNumber && preview.changes === stagedList
+    && preview.target === schemaData?.target && preview.sha256 === schemaData.file_sha256
+    ? preview.result : null
 
   const activeCategory = categories.find((c) => c.id === activeCategoryId) ?? categories[0] ?? null
 
@@ -161,9 +169,10 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
   }, [categories, activeCategory, searchQuery])
 
   const stageFieldChange = (field: ConfigField, nextValue: unknown, remove = false) => {
-    const op = patchOpForField(field, nextValue, remove)
-    setStaged((prev) => ({ ...prev, [field.full_key]: op }))
-    setDryRunResult(null)
+    const draft: FieldDraft = patchOpForField(field, nextValue, remove)
+      ?? { op: 'invalid_number', value: String(nextValue ?? '') }
+    setStaged((prev) => ({ ...prev, [field.full_key]: draft }))
+    setPreview(null)
     setCasConflict(null)
     setErrorBanner(null)
   }
@@ -174,20 +183,21 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
       delete next[fullKey]
       return next
     })
-    setDryRunResult(null)
+    setPreview(null)
   }
 
   const handlePreviewDiff = async () => {
-    if (!schemaData || stagedList.length === 0) return
+    if (!schemaData || hasInvalidNumber || stagedList.length === 0 || busy) return
     setBusy('preview')
+    setPreview(null)
     setErrorBanner(null)
     setCasConflict(null)
     setApplyResult(null)
 
-    const res = await apiMutateV2<ConfigPatchData>('POST', '/api/v1/config/patch', {
-      target: schemaData.target || target,
-      expected_sha256: schemaData.file_sha256,
-      dry_run: true,
+    const res = await postConfigPatchApi({
+      target: schemaData.target,
+      expectedSha256: schemaData.file_sha256,
+      dryRun: true,
       changes: stagedList,
     })
     setBusy(null)
@@ -200,20 +210,25 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
       }
       return
     }
-    setDryRunResult(res.value)
+    setPreview({
+      target: schemaData.target,
+      sha256: schemaData.file_sha256,
+      changes: stagedList,
+      result: res.value,
+    })
   }
 
   const handleApplyPatch = async () => {
-    if (!schemaData || stagedList.length === 0) return
+    if (!preview || !dryRunResult?.changed || busy) return
     setBusy('apply')
     setErrorBanner(null)
     setCasConflict(null)
 
-    const res = await apiMutateV2<ConfigPatchData>('POST', '/api/v1/config/patch', {
-      target: schemaData.target || target,
-      expected_sha256: schemaData.file_sha256,
-      dry_run: false,
-      changes: stagedList,
+    const res = await postConfigPatchApi({
+      target: preview.target,
+      expectedSha256: preview.sha256,
+      dryRun: false,
+      changes: preview.changes,
     })
     setBusy(null)
 
@@ -227,14 +242,14 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
     }
 
     setApplyResult(res.value)
-    setDryRunResult(null)
+    setPreview(null)
     setStaged({})
     loadSchema('manual')
   }
 
   const handleReloadAfterConflict = () => {
     setCasConflict(null)
-    setDryRunResult(null)
+    setPreview(null)
     setErrorBanner(null)
     loadSchema('manual')
   }
@@ -288,6 +303,7 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
     const stagedOp = staged[field.full_key]
     const isModified = stagedOp !== undefined
     const isRemoved = stagedOp?.op === 'remove'
+    const invalidNumber = stagedOp?.op === 'invalid_number'
     const currentDisplay = isModified
       ? (isRemoved
           ? '(키 제거 예정)'
@@ -298,7 +314,8 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
 
     const fieldType = field.type.toLowerCase()
     const isBool = fieldType === 'bool' || fieldType === 'boolean'
-    const isNum = fieldType === 'int' || fieldType === 'integer' || fieldType === 'float' || fieldType === 'number'
+    const isInt = fieldType === 'int' || fieldType === 'integer'
+    const isNum = isInt || fieldType === 'float' || fieldType === 'number'
     const isArray = fieldType === 'string_array' || fieldType === 'string_list'
     const hasEnum = Array.isArray(field.enum_values) && field.enum_values.length > 0
 
@@ -368,7 +385,7 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
                   <input
                     type="checkbox"
                     aria-label=${field.full_key}
-                    disabled=${!field.writable}
+                    disabled=${!field.writable || busy === 'apply'}
                     checked=${isModified ? Boolean(stagedOp.value) : Boolean(field.current_value)}
                     onChange=${(e: Event) => stageFieldChange(field, (e.target as HTMLInputElement).checked)}
                   />
@@ -379,7 +396,7 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
               ? html`
                   <select
                     aria-label=${field.full_key}
-                    disabled=${!field.writable}
+                    disabled=${!field.writable || busy === 'apply'}
                     value=${currentDisplay}
                     onChange=${(e: Event) => stageFieldChange(field, (e.target as HTMLSelectElement).value)}
                     style=${{ padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
@@ -392,7 +409,7 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
                     <textarea
                       rows=${3}
                       aria-label=${field.full_key}
-                      disabled=${!field.writable}
+                      disabled=${!field.writable || busy === 'apply'}
                       value=${currentDisplay}
                       onInput=${(e: Event) => stageFieldChange(field, (e.target as HTMLTextAreaElement).value)}
                       class="mono"
@@ -403,7 +420,9 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
                     <input
                       type=${field.secret ? 'password' : isNum ? 'number' : 'text'}
                       aria-label=${field.full_key}
-                      disabled=${!field.writable}
+                      disabled=${!field.writable || busy === 'apply'}
+                      aria-invalid=${invalidNumber}
+                      step=${isNum ? (isInt ? 1 : 'any') : undefined}
                       placeholder=${field.secret ? '•••••••• (새 시크릿 입력 시 덮어씀)' : String(field.default_value ?? '없음')}
                       value=${field.secret && !isModified ? '' : currentDisplay}
                       onInput=${(e: Event) => stageFieldChange(field, (e.target as HTMLInputElement).value)}
@@ -412,11 +431,13 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
                     />
                   `}
 
+          ${invalidNumber && html`<span class="ap-error" role="alert">${isInt ? '정수를 입력하세요.' : '숫자를 입력하세요.'}</span>`}
           ${field.writable && field.table && html`
             <button
               type="button"
               class="btn-ghost"
               style=${{ padding: 'var(--sp-1) var(--sp-2)', fontSize: 'var(--fs-11)' }}
+              disabled=${busy === 'apply'}
               onClick=${() => stageFieldChange(field, null, true)}
             >
               기본값 복원
@@ -427,6 +448,7 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
               type="button"
               class="btn-ghost"
               style=${{ padding: 'var(--sp-1) var(--sp-2)', fontSize: 'var(--fs-11)', color: 'var(--err-fg)' }}
+              disabled=${busy === 'apply'}
               onClick=${() => unstageField(field.full_key)}
             >
               변경 취소
@@ -467,7 +489,7 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
           <button
             type="button"
             class="btn-primary"
-            disabled=${stagedCount === 0 || busy !== null || !schemaData}
+            disabled=${stagedCount === 0 || hasInvalidNumber || busy !== null || !schemaData}
             onClick=${() => void handlePreviewDiff()}
           >
             ${busy === 'preview' ? 'Diff 생성 중…' : `Preview Diff (${stagedCount})`}
@@ -519,11 +541,11 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
           <div class="wka-h">
             <h3>Dry-Run Unified Diff 미리보기 (${stagedCount}건 변경)</h3>
             <div style=${{ display: 'flex', gap: 'var(--sp-2)' }}>
-              <button type="button" class="btn-ghost" onClick=${() => setDryRunResult(null)}>닫기</button>
+              <button type="button" class="btn-ghost" onClick=${() => setPreview(null)}>닫기</button>
               <button
                 type="button"
                 class="btn-primary"
-                disabled=${busy === 'apply' || !dryRunResult.changed}
+                disabled=${busy !== null || !dryRunResult.changed}
                 onClick=${() => void handleApplyPatch()}
               >
                 ${busy === 'apply' ? '적용 중…' : 'Apply Patch'}
@@ -603,7 +625,7 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
               style=${{ marginTop: 'var(--sp-2)', color: 'var(--err-fg)' }}
               onClick=${() => {
                 setStaged({})
-                setDryRunResult(null)
+                setPreview(null)
               }}
             >
               스테이징 모두 취소 (${stagedCount})

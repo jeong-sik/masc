@@ -136,6 +136,15 @@ describe('workspaces/infra', () => {
     expect(calls.some((c) => c.url === '/api/v1/infra/sandboxes/probe' && c.method === 'POST')).toBe(true)
   })
 
+  it('reports repository access failure instead of an empty registration list', async () => {
+    globalThis.fetch = vi.fn(async () => jsonResponse({ error: 'repository access denied' }, 403)) as typeof fetch
+    render(html`<${InfraWorkspace} subroute="repos" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi()
+
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('저장소 조회 실패')
+    expect(container.textContent).not.toContain('등록된 저장소가 없습니다.')
+  })
+
   it('fetches Repos and ALWAYS passes repo_id to /api/v1/ide/repository-activity (OkData), rendering diff & [⤢] inspect drawer', async () => {
     const seenUrls: string[] = []
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {

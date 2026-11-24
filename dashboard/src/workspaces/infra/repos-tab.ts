@@ -252,47 +252,53 @@ export function ReposTab(props: WorkspaceViewProps) {
         </form>
       `}
 
-      ${repos.length === 0
-        ? html`<div class="dtable-absent">${reposObs.kind === 'loading' ? '저장소 불러오는 중…' : '등록된 저장소가 없습니다.'}</div>`
-        : repos.map((repo) => {
-            const isSel = repo.id === effectiveRepoId
-            return html`
-              <div
-                key=${repo.id}
-                style=${{
-                  padding: 'var(--sp-2)',
-                  borderRadius: 'var(--radius-sm)',
-                  border: `1px solid ${isSel ? 'var(--line-3)' : 'var(--line-1)'}`,
-                  background: isSel ? 'var(--bg-4)' : 'var(--bg-2)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 'var(--sp-1)',
-                }}
+      ${reposObs.kind === 'loading' && html`<div class="dtable-absent">저장소 불러오는 중…</div>`}
+      ${reposObs.kind === 'failed' && html`<div class="ap-error" role="alert">저장소 조회 실패: ${reposObs.error.message}</div>`}
+      ${(reposObs.kind === 'absent' || reposObs.kind === 'unreported') && html`
+        <div class="dtable-absent">저장소 목록을 확인할 수 없습니다.</div>
+      `}
+      ${reposObs.kind === 'value' && repos.length === 0 && html`
+        <div class="dtable-absent">등록된 저장소가 없습니다.</div>
+      `}
+      ${repos.map((repo) => {
+        const isSel = repo.id === effectiveRepoId
+        return html`
+          <div
+            key=${repo.id}
+            style=${{
+              padding: 'var(--sp-2)',
+              borderRadius: 'var(--radius-sm)',
+              border: `1px solid ${isSel ? 'var(--line-3)' : 'var(--line-1)'}`,
+              background: isSel ? 'var(--bg-4)' : 'var(--bg-2)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 'var(--sp-1)',
+            }}
+          >
+            <div style=${{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--sp-2)' }}>
+              <button
+                type="button"
+                onClick=${() => setSelectedRepoId(repo.id)}
+                style=${{ background: 'transparent', border: 'none', padding: 0, textAlign: 'left', cursor: 'pointer', fontWeight: 600, fontSize: 'var(--fs-13)', color: 'var(--fg-1)' }}
               >
-                <div style=${{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--sp-2)' }}>
-                  <button
-                    type="button"
-                    onClick=${() => setSelectedRepoId(repo.id)}
-                    style=${{ background: 'transparent', border: 'none', padding: 0, textAlign: 'left', cursor: 'pointer', fontWeight: 600, fontSize: 'var(--fs-13)', color: 'var(--fg-1)' }}
-                  >
-                    ${repo.name}
-                  </button>
-                  <button
-                    type="button"
-                    class="btn-ghost"
-                    style=${{ padding: 'var(--sp-0) var(--sp-1)', fontSize: 'var(--fs-11)' }}
-                    disabled=${busy === `sync:${repo.id}`}
-                    onClick=${() => void handleSyncRepo(repo.id)}
-                  >
-                    동기화
-                  </button>
-                </div>
-                <div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
-                  ${repo.default_branch} · ${repo.status}
-                </div>
-              </div>
-            `
-          })}
+                ${repo.name}
+              </button>
+              <button
+                type="button"
+                class="btn-ghost"
+                style=${{ padding: 'var(--sp-0) var(--sp-1)', fontSize: 'var(--fs-11)' }}
+                disabled=${busy === `sync:${repo.id}`}
+                onClick=${() => void handleSyncRepo(repo.id)}
+              >
+                동기화
+              </button>
+            </div>
+            <div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
+              ${repo.default_branch} · ${repo.status}
+            </div>
+          </div>
+        `
+      })}
     </div>
   `
 

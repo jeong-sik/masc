@@ -206,6 +206,76 @@ describe('workspaces/settings', () => {
     expect(inspected[0]!.kind).toBe('world_config_export')
   })
 
+  it('rejects incomplete receipts and keeps cleared numeric fields out of the patch', async () => {
+    const patchBodies: Record<string, unknown>[] = []
+    const numberField = {
+      ...SAMPLE_SCHEMA.categories[0]!.fields[0]!,
+      key: 'port',
+      full_key: 'server.port',
+      label: 'Port',
+      type: 'int',
+      current_value: 8935,
+      default_value: 8935,
+      enum_values: undefined,
+    }
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const envelope = { schema_version: 1, instance_id: 'inst-1', generated_at_unix: 1 }
+      if (url.startsWith('/api/v1/config/schema')) {
+        return jsonResponse({
+          ...envelope,
+          data: {
+            ...SAMPLE_SCHEMA,
+            categories: [
+              { id: 'incomplete', title: 'Incomplete' },
+              { id: 'general', title: 'General', fields: [numberField, { ...numberField, full_key: 'server.broken', type: null }] },
+            ],
+          },
+        })
+      }
+      if (url === '/api/v1/config/patch') {
+        patchBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>)
+        return jsonResponse({
+          ...envelope,
+          data: {
+            applied: false, dry_run: true, target: 'runtime', changed: true,
+            before_sha256: SAMPLE_SCHEMA.file_sha256, snapshot_id: null,
+            reload_scope: 'hot_reload', unified_diff: '+port = 0',
+          },
+        })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(html`<${SettingsWorkspace} subroute="runtime" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi()
+
+    const input = container.querySelector<HTMLInputElement>('[aria-label="server.port"]')!
+    expect(input.value).toBe('8935')
+    expect(container.querySelector('[aria-label="server.broken"]')).toBeNull()
+    const preview = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('Preview Diff'))!
+    input.value = ''
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushUi()
+    expect(input.value).toBe('')
+    expect(input.getAttribute('aria-invalid')).toBe('true')
+    expect(preview.disabled).toBe(true)
+    expect(patchBodies).toHaveLength(0)
+
+    input.value = '0'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushUi()
+    expect(preview.disabled).toBe(false)
+    preview.click()
+    await flushUi()
+
+    expect(patchBodies[0]?.changes).toEqual([
+      { op: 'set_int', table: 'server', key: 'port', full_key: 'server.port', value: 0 },
+    ])
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Invalid configuration patch receipt')
+    expect(container.querySelector('[data-testid="settings-dry-run-panel"]')).toBeNull()
+  })
+
   it('handles HTTP 409 conflict_cas with explicit reload recovery', async () => {
     let schemaFetches = 0
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

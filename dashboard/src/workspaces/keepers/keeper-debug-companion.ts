@@ -15,8 +15,13 @@ import { activeWorkspaceId } from '../../core/auth'
 import { UPlotChart, type UPlotSeriesSpec } from '../../components/primitives/uplot-chart'
 import { TargetLockedAction } from '../../components/primitives/target-locked-action'
 import {
-  clearKeeperHistoryAction,
   fetchConfigSchemaApi,
+  postConfigPatchApi,
+  type ConfigPatchResult,
+  type ConfigSchemaData,
+} from '../../api/config-schema'
+import {
+  clearKeeperHistoryAction,
   fetchKeeperCheckpointsApi,
   fetchKeeperLastPromptApi,
   fetchKeeperMemoryFactsApi,
@@ -27,14 +32,11 @@ import {
   fetchKeeperRawTracesApi,
   fetchKeeperToolCallsApi,
   fetchKeeperTurnRecordsApi,
-  postConfigPatchApi,
   postKeeperMemoryAct,
   resetKeeperAction,
 } from './keepers-api'
 import type {
   CheckpointInventoryData,
-  ConfigPatchResult,
-  ConfigSchemaData,
   DebugCompanionTab,
   KeeperLastPromptData,
   KeeperMemoryFactsData,

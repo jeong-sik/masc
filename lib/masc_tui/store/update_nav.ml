@@ -6347,22 +6347,26 @@ let keeper_memory_subview_lines ~width ~name (k : Knowledge_store.t) :
                            al.severity)
                         al.code al.label al.message)))
               row.alerts));
-      (match Observed.to_option (Knowledge_store.memory_os_internals_for ~keeper:name k) with
-      | Some internals when String.equal internals.keeper name ->
+      (match Knowledge_store.memory_os_internals_for ~keeper:name k with
+      | Observed.Value { data = internals; _ } when String.equal internals.keeper name ->
           let compaction = internals.compaction in
           let compaction_summary =
-            if compaction.present then
-              Printf.sprintf "cmp:%dep/%dt/%dB" compaction.epoch_count
-                compaction.archived_turns_count compaction.anchor_bytes
-            else "cmp:none"
+            match compaction.read_error with
+            | Some reason -> "cmp:read error: " ^ reason
+            | None when compaction.present ->
+                Printf.sprintf "cmp:%dep/%dt/%dB" compaction.epoch_count
+                  compaction.archived_turns_count compaction.anchor_bytes
+            | None -> "cmp:none"
           in
           let turns = internals.canonical_turns in
           let turns_summary =
-            if turns.present then
-              Printf.sprintf "turns:%d(%s,rst:%d)" turns.turn_count
-                (Option.value turns.latest_runtime_kind ~default:"?")
-                turns.history_resets_count
-            else "turns:none"
+            match turns.read_error with
+            | Some reason -> "turns:read error: " ^ reason
+            | None when turns.present ->
+                Printf.sprintf "turns:%d(%s,rst:%d)" turns.turn_count
+                  (Option.value turns.latest_runtime_kind ~default:"?")
+                  turns.history_resets_count
+            | None -> "turns:none"
           in
           let digest = internals.memory_digest in
           let digest_summary =
@@ -6389,7 +6393,9 @@ let keeper_memory_subview_lines ~width ~name (k : Knowledge_store.t) :
             (wrap_lines ~width:w
                (Printf.sprintf "  OS %s · %s · %s · %s"
                   compaction_summary turns_summary digest_summary molt_summary))
-      | Some _ | None -> ());
+      | Observed.Failed { reason; _ } ->
+          List.iter push (wrap_lines ~width:w ("  OS read error: " ^ reason))
+      | Observed.Value _ | Observed.Unreported | Observed.Absent | Observed.Loading _ -> ());
       List.rev !lines
   | Knowledge_store.Kmem_facts_tree ->
       push ("── Facts Tree: " ^ name ^ " ([Space/Enter] fold/expand) ──");

@@ -2987,6 +2987,42 @@ let test_memory_activity_journal_window () =
   assert_contains ~label:"a single available body row still shows the selected event"
     ~needle:"visible claim" (render ~journal_lines:3 ~rows:2)
 
+let test_memory_health_os_read_errors () =
+  let keeper = "alpha" in
+  let health_lines result =
+    let model = Model.initial () in
+    let knowledge = model.knowledge |> Knowledge_store.set_keeper_memory_subview Kmem_health in
+    let reply = Msg.Reply_keeper_memory_os_internals { keeper; result } in
+    let model, _ =
+      Update.step ~now:Clock.Mono.zero { model with knowledge }
+        (Msg.Http_reply { epoch = model.epoch; reply })
+    in
+    Update_nav.keeper_memory_subview_lines ~width:120 ~name:keeper model.knowledge
+    |> String.concat "\n"
+  in
+  let wire = Yojson.Safe.from_string {|{
+    "keeper":"alpha",
+    "compaction":{"present":false,"epoch_count":0,"archived_turns_count":0,"anchor_bytes":0,"read_error":"bad anchor"},
+    "canonical_turns":{"present":false,"turn_count":0,"read_error":"bad turn log"},
+    "memory_digest":{"present":false},
+    "librarian_molt":{"writer_kind":"resting","available_acts":[]}
+  }|} in
+  let internals =
+    match Wire_knowledge.decode_memory_os_internals wire with
+    | Ok value -> value
+    | Error reason -> Alcotest.fail reason
+  in
+  let failed_sources = health_lines (Ok internals) in
+  assert_contains ~label:"compaction read failure" ~needle:"bad anchor" failed_sources;
+  assert_contains ~label:"canonical turns read failure" ~needle:"bad turn log" failed_sources;
+  let absent_sources = health_lines (Ok { internals with
+    compaction = { internals.compaction with read_error = None };
+    canonical_turns = { internals.canonical_turns with read_error = None } }) in
+  assert_contains ~label:"confirmed empty compaction" ~needle:"cmp:none" absent_sources;
+  assert_contains ~label:"confirmed empty turns" ~needle:"turns:none" absent_sources;
+  assert_contains ~label:"failed request carries its own reason" ~needle:"malformed OS response"
+    (health_lines (Error (Msg.Decode_error "malformed OS response")))
+
 let test_memory_diff_viewport_skip_multi_row_selection () =
   let skip = Masc_tui_screens_core.Memory_explorer.diff_viewport_skip in
   (* Selected 3-row block [30..32] starts past avail_h=12 when scroll=15:
@@ -3813,6 +3849,8 @@ let () =
         [
           Alcotest.test_case "bounded journal activity preserves coverage and selection"
             `Quick test_memory_activity_journal_window;
+          Alcotest.test_case "Memory Health distinguishes read failures from missing history"
+            `Quick test_memory_health_os_read_errors;
           Alcotest.test_case
             "diff_viewport_skip keeps multi-row selection inside visible slice"
             `Quick test_memory_diff_viewport_skip_multi_row_selection;

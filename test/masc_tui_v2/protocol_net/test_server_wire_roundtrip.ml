@@ -1617,6 +1617,102 @@ let test_cut_reply_journal_roundtrip () =
       (connector_reply events) (tui_reply events)
   done
 
+(* POST /api/v1/keepers/chat/stream live AG-UI SSE projection:
+   Server_keeper_chat_agui_projection.project -> Ag_ui.event_to_json ->
+   Wire_fleet.decode_chat_stream_chunk -> Fleet_store.apply_chat_stream_chunk.
+   Live streaming text must equal [connector_reply] across runtime attempt
+   retries, superseded response generations/scopes, and post-terminal frames. *)
+module Agui_projection = Server_keeper_chat_agui_projection
+module Fleet_store = Masc_tui_store.Fleet_store
+
+let tui_live_stream_reply events =
+  let _, fleet =
+    List.fold_left
+      (fun (proj, fleet) event ->
+        let proj, agui_opt =
+          Agui_projection.project ~timestamp:1_781_300_000.0
+            ~redact_text:Fun.id proj event
+        in
+        let fleet =
+          match agui_opt with
+          | None -> fleet
+          | Some agui_ev -> (
+              let json = Ag_ui.event_to_json agui_ev in
+              match Wire_fleet.decode_chat_stream_chunk json with
+              | Ok chunk ->
+                  Fleet_store.apply_chat_stream_chunk ~keeper:"alpha"
+                    ~request_id:cut_operation_id chunk fleet
+              | Error detail ->
+                  Alcotest.failf
+                    "the TUI refused a projected AG-UI frame: %s (%s)" detail
+                    (Yojson.Safe.to_string json))
+        in
+        (proj, fleet))
+      ( Agui_projection.initial
+      , Fleet_store.start_chat_stream ~keeper:"alpha"
+          ~request_id:cut_operation_id Fleet_store.empty )
+      events
+  in
+  match Fleet_store.String_map.find_opt "alpha" fleet.chat_streams with
+  | Some buf when not (String.equal buf.text "") -> Some buf.text
+  | Some _ | None -> None
+
+let test_live_chat_stream_ownership_roundtrip () =
+  let cases =
+    [
+      ( "live stream before cut"
+      , [ run_started ] @ unread_events
+        @ [ delta "Hel"; delta "lo"; cut; delta "after the cut" ] );
+      ( "live stream runtime attempt retry retires attempt 1"
+      , [
+          run_started;
+          delta ~response:(observed 1 0) "first";
+          attempt_started 1;
+          delta ~response:(observed 1 0) "late";
+          delta ~response:(observed 2 0) "second";
+          Chat_events.Run_finished { run_id = "run-cut" };
+        ] );
+      ( "live stream runtime attempt with None runtime_id"
+      , [
+          run_started;
+          delta ~response:(observed 1 0) "stale";
+          Chat_events.Agent_core_runtime_attempt_started
+            { runtime_id = None; attempt_index = Some 2 };
+          delta ~response:(observed 1 0) "dropped";
+          delta ~response:(observed 2 0) "fresh";
+        ] );
+      ("live stream new run resets", [ run_started; delta "a"; run_started; delta "b" ]);
+      ( "live stream bare scope ahead of admitted response"
+      , [
+          delta ~response:(observed 1 4) "A";
+          delta ~response:(Chat_events.Unobserved_scope (Some 6)) "U";
+          delta ~response:(observed 1 5) "B";
+          delta ~response:(observed 1 6) "C";
+          cut;
+        ] );
+      ( "live stream finished run ignores late delta"
+      , [
+          run_started;
+          delta "done";
+          Chat_events.Run_finished { run_id = "run-cut" };
+          delta "late";
+        ] );
+      ("live stream no text", [ run_started; cut ]);
+    ]
+  in
+  List.iter
+    (fun (label, events) ->
+      Alcotest.(check (option string)) label (connector_reply events)
+        (tui_live_stream_reply events))
+    cases;
+  let state = Random.State.make [| 54530 |] in
+  for round = 1 to 300 do
+    let events = random_journal state in
+    Alcotest.(check (option string))
+      (Printf.sprintf "random live stream %d" round)
+      (connector_reply events) (tui_live_stream_reply events)
+  done
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1662,6 +1758,9 @@ let () =
           Alcotest.test_case
             "chat events route pages -> Wire_chat_journal and Cut_reply"
             `Quick test_cut_reply_journal_roundtrip;
+          Alcotest.test_case
+            "live AG-UI chat stream projection -> Wire_fleet and Fleet_store ownership"
+            `Quick test_live_chat_stream_ownership_roundtrip;
         ] );
       ( "knowledge",
         [

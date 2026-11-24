@@ -804,7 +804,11 @@ let make_populated_model ~cols ~rows ~lang =
     |> Fleet_store.apply_chat_stream_chunk ~keeper:"e-masc-the-leader"
          ~request_id:"req-live-1"
          (Wire_fleet.Chunk_text_delta
-            { operation_id = Some "op-1"; delta = "Confirmed head SHA matches." })
+            {
+              operation_id = Some "op-1";
+              delta = "Confirmed head SHA matches.";
+              owner = Wire_chat_journal.Unobserved_scope None;
+            })
   in
   let fleet =
     Fleet_store.apply_shell ~observed_at:now_mono
@@ -3122,7 +3126,11 @@ let test_agui_chat_chronological_projection_and_phase_parity () =
            is_btw = false;
            chunk =
              Wire_fleet.Chunk_text_delta
-               { operation_id = Some req_a; delta = "LIVE_STREAM_A_REPLY" };
+               {
+                 operation_id = Some req_a;
+                 delta = "LIVE_STREAM_A_REPLY";
+                 owner = Wire_chat_journal.Unobserved_scope None;
+               };
          })
   in
   let m5 = { m4 with drafts = Drafts.insert_text "QUEUED_FOLLOWUP_B" m4.drafts } in

@@ -1374,7 +1374,12 @@ type chat_stream_chunk =
       control_token : string option;
     }
   | Chunk_run_started of { operation_id : string option }
-  | Chunk_text_delta of { operation_id : string option; delta : string }
+  | Chunk_runtime_attempt_started of { operation_id : string option }
+  | Chunk_text_delta of {
+      operation_id : string option;
+      delta : string;
+      owner : Wire_chat_journal.text_owner;
+    }
   | Chunk_thinking_delta of { operation_id : string option; delta : string }
   | Chunk_thinking_snapshot of {
       operation_id : string option;
@@ -1763,8 +1768,9 @@ let decode_custom_chat_chunk json =
              ok;
              output_preview = None;
            })
+  | "KEEPER_RUNTIME_ATTEMPT_STARTED" ->
+      Ok (Chunk_runtime_attempt_started { operation_id = outer_op_id })
   | "KEEPER_CONNECTED"
-  | "KEEPER_RUNTIME_ATTEMPT_STARTED"
   | "KEEPER_PROVIDER_RETRY"
   | "KEEPER_STREAM_MESSAGE_START"
   | "KEEPER_STREAM_MESSAGE_DELTA"
@@ -1808,10 +1814,32 @@ let decode_chat_stream_chunk json =
       let* operation_id = chunk_operation_id json in
       Ok (Chunk_run_started { operation_id })
   | "TEXT_MESSAGE_START" | "TEXT_MESSAGE_END" -> Ok Chunk_ignored
-  | "text_delta" | "TEXT_MESSAGE_CONTENT" ->
+  | "TEXT_MESSAGE_CONTENT" ->
       let* operation_id = chunk_operation_id json in
       let* delta = required_string_field json "delta" in
-      Ok (Chunk_text_delta { operation_id; delta })
+      let* fields =
+        match json with
+        | `Assoc fields -> Ok fields
+        | bad -> field_type_error "TEXT_MESSAGE_CONTENT" "an object" bad
+      in
+      let* owner =
+        Wire_chat_journal.decode_text_owner_fields ~owner_field:"textResponse"
+          ~scope_field:"textStreamScope" fields
+      in
+      Ok (Chunk_text_delta { operation_id; delta; owner })
+  | "text_delta" ->
+      let* operation_id = chunk_operation_id json in
+      let* delta = required_string_field json "delta" in
+      let* fields =
+        match json with
+        | `Assoc fields -> Ok fields
+        | bad -> field_type_error "text_delta" "an object" bad
+      in
+      let* owner =
+        Wire_chat_journal.decode_text_owner_fields ~owner_field:"response"
+          ~scope_field:"stream_scope" fields
+      in
+      Ok (Chunk_text_delta { operation_id; delta; owner })
   | "thinking_delta" ->
       let* operation_id = chunk_operation_id json in
       let* delta = required_string_field json "delta" in

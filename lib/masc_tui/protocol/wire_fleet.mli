@@ -511,7 +511,12 @@ type chat_stream_chunk =
       control_token : string option;
     }
   | Chunk_run_started of { operation_id : string option }
-  | Chunk_text_delta of { operation_id : string option; delta : string }
+  | Chunk_runtime_attempt_started of { operation_id : string option }
+  | Chunk_text_delta of {
+      operation_id : string option;
+      delta : string;
+      owner : Wire_chat_journal.text_owner;
+    }
   | Chunk_thinking_delta of { operation_id : string option; delta : string }
   | Chunk_thinking_snapshot of {
       operation_id : string option;

@@ -2902,8 +2902,12 @@ let test_agui_chat_stream_and_history_provenance () =
             }|}))
   in
   (match text_delta with
-  | Wire_fleet.Chunk_text_delta { operation_id = Some "tui-99-1"; delta = "안녕하세요" }
-    ->
+  | Wire_fleet.Chunk_text_delta
+      {
+        operation_id = Some "tui-99-1";
+        delta = "안녕하세요";
+        owner = Wire_chat_journal.Unobserved_scope None;
+      } ->
       ()
   | _ -> Alcotest.fail "expected Chunk_text_delta");
   let text_delta_no_run =
@@ -2913,8 +2917,90 @@ let test_agui_chat_stream_and_history_provenance () =
             {|{"type":"TEXT_MESSAGE_CONTENT","threadId":"t","timestamp":1.0,"delta":"!"}|}))
   in
   (match text_delta_no_run with
-  | Wire_fleet.Chunk_text_delta { operation_id = None; delta = "!" } -> ()
+  | Wire_fleet.Chunk_text_delta
+      {
+        operation_id = None;
+        delta = "!";
+        owner = Wire_chat_journal.Unobserved_scope None;
+      } ->
+      ()
   | _ -> Alcotest.fail "expected Chunk_text_delta with None operation_id");
+  (* Issue #54530: runtime attempt boundary & textResponse / textStreamScope *)
+  let attempt_started =
+    expect_ok "CUSTOM KEEPER_RUNTIME_ATTEMPT_STARTED decodes as Chunk_runtime_attempt_started"
+      (Wire_fleet.decode_chat_stream_chunk
+         (parse_json
+            {|{
+              "type": "CUSTOM",
+              "threadId": "keeper:alpha-leader",
+              "timestamp": 1795252002.1,
+              "runId": "keeper-operation-run-tui-99-1",
+              "name": "KEEPER_RUNTIME_ATTEMPT_STARTED",
+              "value": { "runtime_id": "rt-2", "attempt_index": 2 }
+            }|}))
+  in
+  (match attempt_started with
+  | Wire_fleet.Chunk_runtime_attempt_started { operation_id = Some "tui-99-1" }
+    ->
+      ()
+  | _ -> Alcotest.fail "expected Chunk_runtime_attempt_started");
+  let text_delta_owned =
+    expect_ok "TEXT_MESSAGE_CONTENT decodes textResponse"
+      (Wire_fleet.decode_chat_stream_chunk
+         (parse_json
+            {|{
+              "type": "TEXT_MESSAGE_CONTENT",
+              "threadId": "keeper:alpha-leader",
+              "timestamp": 1795252002.2,
+              "runId": "keeper-operation-run-tui-99-1",
+              "delta": "attempt 2",
+              "textResponse": { "content_generation": 2, "stream_scope": 1 }
+            }|}))
+  in
+  (match text_delta_owned with
+  | Wire_fleet.Chunk_text_delta
+      {
+        operation_id = Some "tui-99-1";
+        delta = "attempt 2";
+        owner =
+          Wire_chat_journal.Observed_response
+            { content_generation = 2; stream_scope = 1 };
+      } ->
+      ()
+  | _ -> Alcotest.fail "expected Observed_response on TEXT_MESSAGE_CONTENT");
+  let text_delta_scoped =
+    expect_ok "TEXT_MESSAGE_CONTENT decodes textStreamScope"
+      (Wire_fleet.decode_chat_stream_chunk
+         (parse_json
+            {|{
+              "type": "TEXT_MESSAGE_CONTENT",
+              "threadId": "keeper:alpha-leader",
+              "timestamp": 1795252002.3,
+              "delta": "scoped",
+              "textStreamScope": 4
+            }|}))
+  in
+  (match text_delta_scoped with
+  | Wire_fleet.Chunk_text_delta
+      {
+        operation_id = None;
+        delta = "scoped";
+        owner = Wire_chat_journal.Unobserved_scope (Some 4);
+      } ->
+      ()
+  | _ -> Alcotest.fail "expected Unobserved_scope (Some 4) on TEXT_MESSAGE_CONTENT");
+  ignore
+    (expect_err "TEXT_MESSAGE_CONTENT rejects conflicting textResponse + textStreamScope"
+       (Wire_fleet.decode_chat_stream_chunk
+          (parse_json
+             {|{
+               "type": "TEXT_MESSAGE_CONTENT",
+               "threadId": "t",
+               "timestamp": 1.0,
+               "delta": "bad",
+               "textResponse": { "content_generation": 1, "stream_scope": 0 },
+               "textStreamScope": 1
+             }|})));
   let think_delta =
     expect_ok "CUSTOM KEEPER_THINKING_DELTA"
       (Wire_fleet.decode_chat_stream_chunk

@@ -65,9 +65,9 @@ let path ~keeper ~operation_id ~from =
     (String.concat "&" params)
 
 (* Keeper_chat_events.response_identity_of_json: exactly the two indexes. *)
-let decode_response_owner json =
+let decode_response_owner ~owner_field json =
   let* () =
-    require_exact_object_fields "text_delta response"
+    require_exact_object_fields owner_field
       [ "content_generation"; "stream_scope" ]
       json
   in
@@ -77,29 +77,35 @@ let decode_response_owner json =
   let* stream_scope = required_nonnegative_int_field json "stream_scope" in
   Ok { content_generation; stream_scope }
 
-(* Keeper_chat_events.text_response_of_fields ~owner_field:"response"
-   ~scope_field:"stream_scope": an observed response, a bare scope, or
-   neither; both, or either twice, is malformed. *)
-let decode_text_owner fields =
+(* Keeper_chat_events.text_response_of_fields: an observed response, a bare
+   scope, or neither; both, or either twice, is malformed. *)
+let decode_text_owner_fields ~owner_field ~scope_field fields =
   let named key =
     List.filter_map
       (fun (name, value) -> if String.equal name key then Some value else None)
       fields
   in
-  match named "response", named "stream_scope" with
+  match named owner_field, named scope_field with
   | [], [] -> Ok (Unobserved_scope None)
   | [ owner ], [] ->
       Result.map
         (fun owner -> Observed_response owner)
-        (decode_response_owner owner)
+        (decode_response_owner ~owner_field owner)
   | [], [ scope ] -> (
       match scope with
       | `Int value when value >= 0 -> Ok (Unobserved_scope (Some value))
       | `Int _ | `Null | `Bool _ | `Intlit _ | `Float _ | `String _ | `Assoc _
       | `List _ ->
-          Error "text_delta stream_scope must be a nonnegative integer")
+          Error (Printf.sprintf "%s must be a nonnegative integer" scope_field))
   | _ :: _ :: _, _ | _, _ :: _ :: _ | _ :: _, _ :: _ ->
-      Error "text_delta has conflicting or duplicate ownership fields"
+      Error
+        (Printf.sprintf
+           "conflicting or duplicate text ownership fields (%s / %s)"
+           owner_field scope_field)
+
+let decode_text_owner fields =
+  decode_text_owner_fields ~owner_field:"response" ~scope_field:"stream_scope"
+    fields
 
 (* Every tag Keeper_chat_event_log.keeper_chat_event_to_json writes. The
    connectors' reply fold reads five of them (Keeper_chat_discord,

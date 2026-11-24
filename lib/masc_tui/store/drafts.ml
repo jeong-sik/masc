@@ -1,4 +1,5 @@
 open Masc_tui_core
+open Masc_tui_protocol
 
 module String_map = Map.Make (String)
 
@@ -65,6 +66,7 @@ type btw_status =
       keeper : string;
       prompt : string;
       buffer : string;
+      ownership : Cut_reply.ownership;
     }
   | Btw_answered of { keeper : string; prompt : string; reply : string }
   | Btw_failed of { keeper : string; prompt : string; reason : string }
@@ -829,22 +831,63 @@ let start_btw ~now ~keeper ~prompt t =
   let btw = Btw_sending { request_id; keeper; prompt; started_at = now } in
   ({ t with btw; next_request_seq = next_seq }, request_id)
 
-let append_btw_delta ~request_id ~delta t =
+let reset_btw_run ~request_id t =
   match t.btw with
-  | Btw_sending s when String.equal s.request_id request_id ->
+  | Btw_streaming s when String.equal s.request_id request_id ->
+      {
+        t with
+        btw =
+          Btw_streaming
+            { s with buffer = ""; ownership = Cut_reply.fresh_ownership };
+      }
+  | Btw_sending _ | Btw_streaming _ | Btw_idle | Btw_answered _ | Btw_failed _
+    ->
+      t
+
+let retire_btw_attempt ~request_id t =
+  match t.btw with
+  | Btw_streaming s when String.equal s.request_id request_id ->
       {
         t with
         btw =
           Btw_streaming
             {
-              request_id = s.request_id;
-              keeper = s.keeper;
-              prompt = s.prompt;
-              buffer = delta;
+              s with
+              buffer = "";
+              ownership = Cut_reply.retire_attempt s.ownership;
             };
       }
-  | Btw_streaming s when String.equal s.request_id request_id ->
-      { t with btw = Btw_streaming { s with buffer = s.buffer ^ delta } }
+  | Btw_sending _ | Btw_streaming _ | Btw_idle | Btw_answered _ | Btw_failed _
+    ->
+      t
+
+let append_btw_delta ?(owner = Wire_chat_journal.Unobserved_scope None)
+    ~request_id ~delta t =
+  match t.btw with
+  | Btw_sending s when String.equal s.request_id request_id -> (
+      match Cut_reply.admit Cut_reply.fresh_ownership owner with
+      | Cut_reply.Append ownership ->
+          {
+            t with
+            btw =
+              Btw_streaming
+                {
+                  request_id = s.request_id;
+                  keeper = s.keeper;
+                  prompt = s.prompt;
+                  buffer = delta;
+                  ownership;
+                };
+          }
+      | Cut_reply.Drop -> t)
+  | Btw_streaming s when String.equal s.request_id request_id -> (
+      match Cut_reply.admit s.ownership owner with
+      | Cut_reply.Append ownership ->
+          {
+            t with
+            btw = Btw_streaming { s with buffer = s.buffer ^ delta; ownership };
+          }
+      | Cut_reply.Drop -> t)
   | Btw_sending _ | Btw_streaming _ | Btw_idle | Btw_answered _ | Btw_failed _
     ->
       t

@@ -49,9 +49,11 @@ type chat_stream_buffer = {
   interrupting : bool;
   prior_msg_ids : String_set.t;
   text : string;
+  text_ownership : Cut_reply.ownership;
   thinking : string;
   tools : active_tool_call list;
   active : bool;
+  ended : bool;
   last_error : string option;
 }
 

@@ -157,7 +157,10 @@ export function InvitesTab(): VNode {
             : html`
                 <ul class="ap-acct-list">
                   ${invites.map((inv) => {
-                    const canRevoke = inv.status.kind === 'open' || inv.status.kind === 'revocation_pending'
+                    const canRevoke =
+                      inv.status.kind === 'open'
+                      || inv.status.kind === 'expired'
+                      || inv.status.kind === 'revocation_pending'
                     return html`
                       <li key=${inv.id} class="ap-acct-row" data-invite-id=${inv.id}>
                         <div>

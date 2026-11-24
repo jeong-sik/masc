@@ -10,6 +10,7 @@ import {
   activeOverlay,
   commandPaletteMounted,
   commandPaletteOpen,
+  historicalIncidents,
   railExpanded,
   resetShellStateForTests,
 } from './shell/shell-state'
@@ -115,7 +116,13 @@ describe('Proposal A+ Application Shell (src/app.ts)', () => {
       expect(authSession.value.kind).toBe('multi_account_signed_in')
       expect(container.querySelector('[data-testid="route-gate-admin-only"]')).not.toBeNull()
     })
-    expect(fetchSpy.mock.calls.some(([u]) => String(u).includes('/api/v1/infra/'))).toBe(false)
+    const calledUrls = fetchSpy.mock.calls.map(([u]) => String(u))
+    expect(calledUrls.some((u) => u.includes('/api/v1/infra/'))).toBe(false)
+    // Zero 404 probes in multi_account mode (no single-user HITL endpoints, no .build-identity.json SPA fallback)
+    expect(calledUrls).not.toContain('/api/v1/keepers/tool-approvals')
+    expect(calledUrls).not.toContain('/api/v1/keepers/asks')
+    expect(calledUrls).not.toContain('/dashboard/.build-identity.json')
+    expect(historicalIncidents.value).toHaveLength(0)
   })
 
   it('wires global shortcuts: [b] rail toggle, [1]-[6] trunks, [,] settings, [i] incidents, [⌘T] queue, and [⌘K] palette', async () => {

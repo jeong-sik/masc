@@ -66,19 +66,22 @@ function MultiAccountSignInGate({
       </header>
 
       <div class="ap-signin-actions">
-        ${google && html`
-          <form method="post" action="/auth/oidc/start">
-            <button type="submit" class="btn-primary ap-signin-btn" data-oauth-provider="google">
-              Continue with Google OIDC
-            </button>
-          </form>
-        `}
-        ${github && html`
-          <form method="post" action="/auth/github/start">
-            <button type="submit" class="btn-ghost ap-signin-btn" data-oauth-provider="github">
-              Continue with GitHub OAuth
-            </button>
-          </form>
+        ${(google || github) && html`
+          <a
+            href="/"
+            class="btn-primary ap-signin-btn"
+            data-testid="multi-account-signin-link"
+            data-oauth-providers=${[google ? 'google' : '', github ? 'github' : ''].filter(Boolean).join(',')}
+          >
+            ${google && github
+              ? 'Continue to Sign-In (Google / GitHub)'
+              : google
+                ? 'Continue to Google OIDC Sign-In'
+                : 'Continue to GitHub OAuth Sign-In'}
+          </a>
+          <p class="ap-muted">
+            Redirects to the server sign-in page (<code>/</code>) where OAuth form submission is permitted by strict CSP, then returns to <code>/dashboard#account</code>.
+          </p>
         `}
         ${neither && html`
           <div class="ap-inline-alert ap-inline-alert--warn" role="alert">

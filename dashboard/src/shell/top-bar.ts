@@ -246,15 +246,13 @@ function AccountWorkspaceSwitcher(): VNode {
 
             ${session.kind === 'multi_account_signed_out' && html`
               <div class="ap-switcher-oauth">
-                ${session.authMethods.google && html`
-                  <form method="post" action="/auth/oidc/start">
-                    <button type="submit" class="btn-primary ap-w-full">Continue with Google</button>
-                  </form>
-                `}
-                ${session.authMethods.github && html`
-                  <form method="post" action="/auth/github/start">
-                    <button type="submit" class="btn-ghost ap-w-full">Continue with GitHub</button>
-                  </form>
+                ${(session.authMethods.google || session.authMethods.github) && html`
+                  <a href="/" class="btn-primary ap-w-full" data-testid="switcher-signin-link">
+                    Sign In (${[
+                      session.authMethods.google ? 'Google' : '',
+                      session.authMethods.github ? 'GitHub' : '',
+                    ].filter(Boolean).join(' / ')})
+                  </a>
                 `}
                 <button
                   type="button"

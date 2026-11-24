@@ -809,7 +809,7 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: var(--sp-1);
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -933,7 +933,7 @@
   padding: var(--sp-2);
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--sp-1);
 }
 
 .ap-cmdk-empty {
@@ -997,7 +997,7 @@
   background: var(--brass-soft);
   color: var(--brass-1);
   border-radius: var(--radius-xs);
-  padding: 0 1px;
+  padding: 0;
 }
 
 .ap-cmdk-item-meta {
@@ -1355,7 +1355,7 @@
 }
 
 .ap-kv-grid dd {
-  margin: 2px 0 0;
+  margin: var(--sp-1) 0 0;
   font-size: var(--fs-13);
   color: var(--fg-1);
 }
@@ -1601,7 +1601,7 @@
   background: transparent;
   color: var(--fg-3);
   cursor: pointer;
-  padding: 2px;
+  padding: var(--sp-1);
 }
 
 /* Responsive adjustments */

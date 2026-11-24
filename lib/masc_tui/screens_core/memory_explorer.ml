@@ -360,17 +360,20 @@ let draw_mode_pills ~grid ~(rect : Rect.t) ~(theme : Theme.t) ~(lang : Say.lang)
   if Rect.is_empty rect then ()
   else
     let ev_cnt =
-      match Observed.to_option k.keeper_memory_activity with
-      | Some act when String.equal act.keeper keeper ->
-          Printf.sprintf " (%d)" (List.length act.events)
-      | Some _ | None -> ""
+      match
+        Observed.to_option (Knowledge_store.keeper_memory_activity_for ~keeper k)
+      with
+      | Some act -> Printf.sprintf " (%d)" (List.length act.events)
+      | None -> ""
     in
     let fact_cnt =
-      match Observed.to_option k.keeper_memory_facts with
-      | Some mf when String.equal mf.keeper keeper ->
+      match
+        Observed.to_option (Knowledge_store.keeper_memory_facts_for ~keeper k)
+      with
+      | Some _ ->
           let n = List.length (Knowledge_store.filtered_memory_fact_rows ~keeper k) in
           Printf.sprintf " (%d)" n
-      | Some _ | None -> ""
+      | None -> ""
     in
     let win_s =
       match k.memory_diff_window with
@@ -677,19 +680,9 @@ let render_evolution_view ~grid ~(rect : Rect.t) ~(theme : Theme.t)
     ~(lang : Say.lang) ~now_unix ~bg ~keeper ~(k : Knowledge_store.t) ~focused =
   if Rect.is_empty rect then ()
   else
-    match k.keeper_memory_activity with
+    match Knowledge_store.keeper_memory_activity_for ~keeper k with
     | Observed.Value { data = act; stale; _ } ->
-        if not (String.equal act.keeper keeper) then
-          let msg =
-            say lang
-              ~ko:(Printf.sprintf "%s 기억 변천 이력 대기 중..." keeper)
-              ~en:(Printf.sprintf "Awaiting memory evolution for %s..." keeper)
-          in
-          ignore
-            (put_clipped ~grid ~clip:rect ~x:rect.x ~y:rect.y ~max_w:rect.w
-               ~style:(Typography.whisper ~bg theme)
-               (Glyph.to_utf8 Glyph.Transport_reconnecting ^ " " ^ msg))
-        else begin
+        begin
           let y = ref rect.y in
           let bottom = Rect.bottom rect in
           let events = Knowledge_store.filtered_memory_activity_events ~keeper k in
@@ -874,19 +867,9 @@ let render_facts_view ~grid ~(rect : Rect.t) ~(theme : Theme.t)
     ~(lang : Say.lang) ~now_unix ~bg ~keeper ~(k : Knowledge_store.t) ~focused =
   if Rect.is_empty rect then ()
   else
-    match k.keeper_memory_facts with
+    match Knowledge_store.keeper_memory_facts_for ~keeper k with
     | Observed.Value { data = mf; stale; _ } ->
-        if not (String.equal mf.keeper keeper) then
-          let msg =
-            say lang
-              ~ko:(Printf.sprintf "%s 전체 기억 불러오는 중..." keeper)
-              ~en:(Printf.sprintf "Awaiting memory facts for %s..." keeper)
-          in
-          ignore
-            (put_clipped ~grid ~clip:rect ~x:rect.x ~y:rect.y ~max_w:rect.w
-               ~style:(Typography.whisper ~bg theme)
-               (Glyph.to_utf8 Glyph.Transport_reconnecting ^ " " ^ msg))
-        else begin
+        begin
           let y = ref rect.y in
           let bottom = Rect.bottom rect in
           (* Status header + partial error disclosure *)

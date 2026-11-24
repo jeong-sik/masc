@@ -153,10 +153,10 @@ let model_in_keeper_memory_dive ~keeper =
   let knowledge =
     Knowledge_store.empty
     |> Knowledge_store.set_memory_diff_keeper (Some keeper)
-    |> Knowledge_store.apply_keeper_memory_activity ~observed_at:now0
-         (sample_activity ~keeper)
-    |> Knowledge_store.apply_keeper_memory_facts ~observed_at:now0
-         (sample_facts ~keeper)
+    |> Knowledge_store.set_keeper_memory_activity ~keeper
+         (Observed.value ~observed_at:now0 (sample_activity ~keeper))
+    |> Knowledge_store.set_keeper_memory_facts ~keeper
+         (Observed.value ~observed_at:now0 (sample_facts ~keeper))
   in
   let m1 = { m0 with fleet; knowledge } in
   let m2, _ =
@@ -1093,10 +1093,10 @@ let test_visibility_enter_refresh_and_resize () =
   let knowledge =
     Knowledge_store.empty
     |> Knowledge_store.set_memory_diff_keeper (Some "alpha")
-    |> Knowledge_store.apply_keeper_memory_activity ~observed_at:now0
-         (sample_activity ~keeper:"alpha")
-    |> Knowledge_store.apply_keeper_memory_facts ~observed_at:now0
-         (sample_facts ~keeper:"alpha")
+    |> Knowledge_store.set_keeper_memory_activity ~keeper:"alpha"
+         (Observed.value ~observed_at:now0 (sample_activity ~keeper:"alpha"))
+    |> Knowledge_store.set_keeper_memory_facts ~keeper:"alpha"
+         (Observed.value ~observed_at:now0 (sample_facts ~keeper:"alpha"))
   in
   let m_kp0, _ = Update_nav.switch_workspace { m0 with fleet; knowledge } Nav.Keepers in
   let m_kp_open, _ = Update.step ~now:now0 m_kp0 (Msg.Key_event (key_char ".")) in

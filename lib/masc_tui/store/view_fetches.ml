@@ -133,26 +133,12 @@ let keeper_tab_fetches ~force ~name ~tab (m : Model.t) =
           (Knowledge_store.memory_os_internals_for ~keeper:name m.knowledge)
       in
       let facts_needed =
-        match m.knowledge.keeper_memory_facts with
-        | Observed.Value { data; stale = false; _ } ->
-            force || not (String.equal data.keeper name)
-        | Observed.Loading _
-        | Observed.Value { stale = true; _ }
-        | Observed.Absent
-        | Observed.Unreported
-        | Observed.Failed _ ->
-            needs_fetch ~force m.knowledge.keeper_memory_facts
+        needs_fetch ~force
+          (Knowledge_store.keeper_memory_facts_for ~keeper:name m.knowledge)
       in
       let activity_needed =
-        match m.knowledge.keeper_memory_activity with
-        | Observed.Value { data; stale = false; _ } ->
-            force || not (String.equal data.keeper name)
-        | Observed.Loading _
-        | Observed.Value { stale = true; _ }
-        | Observed.Absent
-        | Observed.Unreported
-        | Observed.Failed _ ->
-            needs_fetch ~force m.knowledge.keeper_memory_activity
+        needs_fetch ~force
+          (Knowledge_store.keeper_memory_activity_for ~keeper:name m.knowledge)
       in
       let health_needed = needs_fetch ~force m.knowledge.keeper_memory_health in
       []
@@ -431,26 +417,14 @@ let fetches_for_workspace ~force (m : Model.t) =
                     (Knowledge_store.memory_os_internals_for ~keeper m.knowledge)
                 in
                 let facts_needed =
-                  match m.knowledge.keeper_memory_facts with
-                  | Observed.Value { data; stale = false; _ } ->
-                      force || not (String.equal data.keeper keeper)
-                  | Observed.Loading _
-                  | Observed.Value { stale = true; _ }
-                  | Observed.Absent
-                  | Observed.Unreported
-                  | Observed.Failed _ ->
-                      needs_fetch ~force m.knowledge.keeper_memory_facts
+                  needs_fetch ~force
+                    (Knowledge_store.keeper_memory_facts_for ~keeper
+                       m.knowledge)
                 in
                 let activity_needed =
-                  match m.knowledge.keeper_memory_activity with
-                  | Observed.Value { data; stale = false; _ } ->
-                      force || not (String.equal data.keeper keeper)
-                  | Observed.Loading _
-                  | Observed.Value { stale = true; _ }
-                  | Observed.Absent
-                  | Observed.Unreported
-                  | Observed.Failed _ ->
-                      needs_fetch ~force m.knowledge.keeper_memory_activity
+                  needs_fetch ~force
+                    (Knowledge_store.keeper_memory_activity_for ~keeper
+                       m.knowledge)
                 in
                 []
                 |> add_if internals_needed

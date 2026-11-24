@@ -145,8 +145,12 @@ type t = {
   memory_os_internals :
     Wire_knowledge.memory_os_internals Observed.t String_map.t;
       (** One slot per keeper. *)
-  keeper_memory_facts : Wire_knowledge.keeper_memory_facts Observed.t;
-  keeper_memory_activity : Wire_knowledge.keeper_memory_activity Observed.t;
+  keeper_memory_facts :
+    Wire_knowledge.keeper_memory_facts Observed.t String_map.t;
+      (** One slot per keeper. *)
+  keeper_memory_activity :
+    Wire_knowledge.keeper_memory_activity Observed.t String_map.t;
+      (** One slot per keeper. *)
   keeper_memory_health : Wire_knowledge.keeper_memory_health_fleet Observed.t;
   memory_diff_window : memory_diff_window;
   memory_diff_keeper : string option;
@@ -202,6 +206,20 @@ val memory_os_internals_for :
     [keeper]. *)
 val set_memory_os_internals :
   keeper:string -> Wire_knowledge.memory_os_internals Observed.t -> t -> t
+
+val keeper_memory_facts_for :
+  keeper:string -> t -> Wire_knowledge.keeper_memory_facts Observed.t
+(** [keeper]'s slot. [Unreported] until the facts route answers for
+    [keeper]. *)
+val set_keeper_memory_facts :
+  keeper:string -> Wire_knowledge.keeper_memory_facts Observed.t -> t -> t
+
+val keeper_memory_activity_for :
+  keeper:string -> t -> Wire_knowledge.keeper_memory_activity Observed.t
+(** [keeper]'s slot. [Unreported] until the activity route answers for
+    [keeper]. *)
+val set_keeper_memory_activity :
+  keeper:string -> Wire_knowledge.keeper_memory_activity Observed.t -> t -> t
 
 val memory_diff_window_query : memory_diff_window -> string option
 val equal_memory_diff_window : memory_diff_window -> memory_diff_window -> bool
@@ -334,26 +352,8 @@ val mark_artifact_detail_failed :
   t
 val apply_world_memory :
   observed_at:Clock.Mono.t -> Wire_knowledge.world_memory -> t -> t
-val apply_keeper_memory_facts :
-  observed_at:Clock.Mono.t -> Wire_knowledge.keeper_memory_facts -> t -> t
-val apply_keeper_memory_activity :
-  observed_at:Clock.Mono.t -> Wire_knowledge.keeper_memory_activity -> t -> t
 val apply_keeper_memory_health :
   observed_at:Clock.Mono.t -> Wire_knowledge.keeper_memory_health_fleet -> t -> t
-val fail_keeper_memory_facts :
-  keeper:string ->
-  reason:string ->
-  retryable:bool ->
-  at:Clock.Mono.t ->
-  t ->
-  t
-val fail_keeper_memory_activity :
-  keeper:string ->
-  reason:string ->
-  retryable:bool ->
-  at:Clock.Mono.t ->
-  t ->
-  t
 val fail_keeper_memory_health :
   reason:string -> retryable:bool -> at:Clock.Mono.t -> t -> t
 val record_memory_act_answer :

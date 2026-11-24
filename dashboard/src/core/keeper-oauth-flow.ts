@@ -25,6 +25,7 @@ import {
 import { apiGet, apiMutate, type ApiError } from './transport'
 import { extractDeviceCode, extractOAuthUrl, stripAnsi } from './setup-login-stream'
 import type { Result } from '../lib/result'
+import { readSse } from '../lib/sse-reader'
 
 export type OAuthAttemptKind =
   | 'awaiting_consent'
@@ -396,28 +397,24 @@ export function startKeeperGithubDeviceFlow(params: {
         return
       }
 
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buf = ''
-
-      const processFrame = (rawFrame: string) => {
-        if (disposed) return
-        let evName = 'message'
-        const dataLines: string[] = []
-        for (const line of rawFrame.split(/\r?\n/)) {
-          if (line.startsWith('event:')) evName = line.slice(6).trim()
-          else if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart())
-        }
-        if (dataLines.length === 0) return
-        let parsed: unknown = null
+      await readSse(res.body, (evName, data) => {
+        if (disposed || !isEpochCurrent(startEpoch) || streamError !== null || sawComplete) return
+        let parsed: unknown
         try {
-          parsed = JSON.parse(dataLines.join('\n'))
+          parsed = JSON.parse(data)
         } catch {
           parsed = null
         }
 
         if (evName === 'complete') {
-          sawComplete = true
+          const receipt = isRecord(parsed) ? parsed.observation : null
+          if (isRecord(receipt) && receipt.ok === true && receipt.keeper === params.keeper
+              && isRecord(receipt.stored) && receipt.stored.authenticated === true) {
+            sawComplete = true
+          } else {
+            streamError = '완료 응답에서 이 Keeper의 저장된 GitHub 로그인을 확인하지 못했습니다.'
+            emit({ phase: 'failed', message: streamError })
+          }
           return
         }
 
@@ -456,27 +453,10 @@ export function startKeeperGithubDeviceFlow(params: {
               : 'GitHub 디바이스 인증을 진행하고 있습니다…',
           })
         }
-      }
-
-      try {
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          buf += decoder.decode(value, { stream: true })
-          const parts = buf.split(/\r?\n\r?\n/)
-          buf = parts.pop() ?? ''
-          for (const frame of parts) {
-            if (frame.trim()) processFrame(frame)
-          }
-        }
-        buf += decoder.decode()
-        if (buf.trim()) processFrame(buf)
-      } finally {
-        reader.releaseLock()
-      }
+      }, { signal: controller.signal })
 
       if (disposed || !isEpochCurrent(startEpoch)) return
-      if (streamError) {
+      if (streamError !== null) {
         params.onSettled(false)
         return
       }
@@ -501,11 +481,10 @@ export function startKeeperGithubDeviceFlow(params: {
         { provider: 'github' },
       )
       if (disposed || !isEpochCurrent(startEpoch)) return
-      if (!attachRes.ok) {
-        emit({
-          phase: 'failed',
-          message: `GitHub CLI 인증은 완료되었으나 MCP 도구 연결 실패: ${attachRes.error.message}`,
-        })
+      if (!attachRes.ok || attachRes.value.attached !== true || attachRes.value.keeper !== params.keeper
+          || attachRes.value.provider !== 'github') {
+        const detail = attachRes.ok ? '이 Keeper에 대한 연결 확인을 받지 못했습니다.' : attachRes.error.message
+        emit({ phase: 'failed', message: `GitHub CLI 인증은 완료되었으나 MCP 도구 연결 실패: ${detail}` })
         params.onSettled(false)
         return
       }

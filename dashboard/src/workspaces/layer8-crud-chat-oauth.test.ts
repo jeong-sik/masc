@@ -731,6 +731,74 @@ candidates = ["safe.model"]
     expect(eofErrors).toHaveLength(1)
   })
 
+  it.each([
+    ['output followed by EOF', [], false],
+    ['an explicit error', [{ event: 'error', data: { message: 'login refused' } }], false],
+    ['a complete frame for a different Keeper', [
+      { event: 'complete', data: { observation: { ok: true, keeper: 'other', stored: { authenticated: true } } } },
+    ], false],
+    ['an effective credential without a stored login', [
+      { event: 'complete', data: { observation: { ok: true, keeper: 'sangsu', stored: { authenticated: false }, effective: { authenticated: true } } } },
+    ], false],
+    ['a confirmed stored login', [
+      { event: 'complete', data: { observation: { ok: true, keeper: 'sangsu', stored: { authenticated: true } } } },
+    ], true],
+  ] as const)('settles Keeper GitHub login once after %s', async (_label, terminal, succeeded) => {
+    const settled = vi.fn()
+    const update = vi.fn()
+    const attach = vi.fn(async () => jsonResponse({ keeper: 'sangsu', provider: 'github', attached: true }))
+    globalThis.fetch = attach
+    startKeeperGithubDeviceFlow({
+      keeper: 'sangsu',
+      fetchImpl: async () => sseResponse([{ event: 'output', data: { stream: 'stdout', text: 'Waiting for login' } }, ...terminal]),
+      onUpdate: update,
+      onSettled: settled,
+    })
+    await vi.waitFor(() => expect(settled.mock.calls).toEqual([[succeeded]]))
+    expect(attach).toHaveBeenCalledTimes(succeeded ? 1 : 0)
+    expect(update).toHaveBeenLastCalledWith(expect.objectContaining({
+      phase: succeeded ? 'completed' : 'failed',
+    }))
+  })
+
+  it('refuses a mismatched attachment receipt after the CLI confirms this Keeper’s login', async () => {
+    globalThis.fetch = vi.fn(async () => jsonResponse({ attached: true, keeper: 'other', provider: 'github' }))
+    const settled = vi.fn()
+    const update = vi.fn()
+    startKeeperGithubDeviceFlow({
+      keeper: 'sangsu',
+      fetchImpl: async () => sseResponse([{
+        event: 'complete', data: { observation: { ok: true, keeper: 'sangsu', stored: { authenticated: true } } },
+      }]),
+      onUpdate: update, onSettled: settled,
+    })
+    await vi.waitFor(() => expect(settled.mock.calls).toEqual([[false]]))
+    expect(globalThis.fetch).toHaveBeenCalledOnce()
+    expect(update).toHaveBeenLastCalledWith(expect.objectContaining({ phase: 'failed' }))
+  })
+
+  it('closes a still-open GitHub login stream on a session change without settling the new session', async () => {
+    const cancelled = vi.fn()
+    const settled = vi.fn()
+    const update = vi.fn()
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('event: output\ndata: {"stream":"stdout","text":"waiting"}\n\n'))
+      },
+      cancel: cancelled,
+    })
+    startKeeperGithubDeviceFlow({
+      keeper: 'sangsu',
+      fetchImpl: async () => new Response(body),
+      onUpdate: update,
+      onSettled: settled,
+    })
+    await vi.waitFor(() => expect(update).toHaveBeenLastCalledWith(expect.objectContaining({ phase: 'awaiting_user' })))
+    bumpSessionEpoch()
+    await vi.waitFor(() => expect(cancelled).toHaveBeenCalledOnce())
+    expect(settled).not.toHaveBeenCalled()
+  })
+
   it('(C-2 & C-3) Keeper OAuth loads keepers via /gate/keepers & shell groups fallback, strict postMessage, GitHub complete+attach, Config callback URL, and Account return_to', async () => {
     const popupMock = { closed: false, close: vi.fn(), location: { href: '' } }
     vi.spyOn(window, 'open').mockImplementation(() => popupMock as unknown as Window)
@@ -787,7 +855,7 @@ candidates = ["safe.model"]
         githubStreamCalled = true
         return sseResponse([
           { event: 'output', data: { stream: 'stdout', text: 'Open https://github.com/login/device and enter code GHAB-5678\n' } },
-          { event: 'complete', data: { observation: { authenticated: true } } },
+          { event: 'complete', data: { observation: { ok: true, keeper: 'sangsu', stored: { authenticated: true } } } },
         ])
       }
       if (url === '/api/v1/keepers/oauth/client' && init?.method === 'POST') {

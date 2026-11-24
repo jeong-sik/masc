@@ -1,22 +1,25 @@
-type client = Codex | Claude | Antigravity | Mistral_vibe | Kimi_code
+type client = Codex | Claude | Antigravity | Mistral_vibe | Kimi_code | Muse_code
 let name = function
   | Codex -> "codex"
   | Claude -> "claude"
   | Antigravity -> "agy"
   | Mistral_vibe -> "vibe-acp"
   | Kimi_code -> "kimi"
+  | Muse_code -> "muse"
 let source_url = function
   | Codex -> "https://developers.openai.com/codex/cli/"
   | Claude -> "https://code.claude.com/docs/en/installation"
   | Antigravity -> "https://antigravity.google/docs/cli/install/"
   | Mistral_vibe -> "https://github.com/mistralai/mistral-vibe"
   | Kimi_code -> "https://www.kimi.com/coding/docs/en/kimi-cli.html"
+  | Muse_code -> "https://dev.meta.ai/docs/muse-code"
 let script = function
   | Codex -> "https://chatgpt.com/codex/install.sh", "sh"
   | Claude -> "https://claude.ai/install.sh", "bash"
   | Antigravity -> "https://antigravity.google/cli/install.sh", "bash"
   | Mistral_vibe -> "https://mistral.ai/vibe/install.sh", "sh"
   | Kimi_code -> "https://code.kimi.com/install.sh", "sh"
+  | Muse_code -> "https://dev.meta.ai/install.sh", "bash"
 (* An executable regular file at [path], as the path was given. [stat] follows
    a link, so a link to such a file passes; the path returned is the link,
    not its target. The Claude Code installer keeps ~/.local/bin/claude as a
@@ -48,7 +51,7 @@ let path_directories () =
 let install_dir_variable = function
   | Codex -> Some "CODEX_INSTALL_DIR"
   | Mistral_vibe | Kimi_code -> Some "UV_TOOL_BIN_DIR"
-  | Claude | Antigravity -> None
+  | Claude | Antigravity | Muse_code -> None
 
 (* Where the vendor installer writes the client: the client's install
    directory variable when it is set, else ~/.local/bin (and ~/.cargo/bin for
@@ -70,12 +73,12 @@ let vendor_directories client =
       (match client with
        | Mistral_vibe | Kimi_code ->
          [ local_bin; Filename.concat home ".cargo/bin" ]
-       | Codex | Claude | Antigravity -> [ local_bin ])
+       | Codex | Claude | Antigravity | Muse_code -> [ local_bin ])
     | None -> []
   in
   match client, explicit with
   | Codex, _ :: _ -> explicit
-  | (Codex | Claude | Antigravity | Mistral_vibe | Kimi_code), _ ->
+  | (Codex | Claude | Antigravity | Mistral_vibe | Kimi_code | Muse_code), _ ->
     explicit @ home_fallbacks
 ;;
 

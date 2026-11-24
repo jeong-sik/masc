@@ -7,6 +7,7 @@ let client_arg =
     ; "antigravity", Install.Antigravity
     ; "mistral-vibe", Install.Mistral_vibe
     ; "kimi-code", Install.Kimi_code
+    ; "muse-code", Install.Muse_code
     ]
 ;;
 
@@ -16,6 +17,7 @@ let client_name = function
   | Install.Antigravity -> "antigravity"
   | Install.Mistral_vibe -> "mistral-vibe"
   | Install.Kimi_code -> "kimi-code"
+  | Install.Muse_code -> "muse-code"
 ;;
 
 let to_json ~client ~command ~path =

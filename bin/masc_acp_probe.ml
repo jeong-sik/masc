@@ -1,8 +1,9 @@
 (** Live end-to-end ACP v1 multi-runtime verification probe for MASC.
 
     Exercises real persistent ACP sessions against Antigravity ([agy acp]),
-    Kimi Code ([kimi acp]), and Mistral Vibe ([vibe-acp], stripping
-    [MISTRAL_API_KEY] to enforce the keyring subscription).
+    Kimi Code ([kimi acp]), Mistral Vibe ([vibe-acp], stripping
+    [MISTRAL_API_KEY] to enforce the keyring subscription), and Muse Code
+    ([muse acp]).
 
     For each requested driver, this executable:
     1. Starts a loopback [Runtime_official_client_mcp_http] server exposing two
@@ -167,6 +168,7 @@ let default_model_for_driver = function
   | Runtime_acp_client.Antigravity -> Some "gemini-3.8-flash-high"
   | Runtime_acp_client.Kimi_code -> None
   | Runtime_acp_client.Mistral_vibe -> None
+  | Runtime_acp_client.Muse_code -> None
 ;;
 
 let parse_posture raw =
@@ -598,6 +600,10 @@ let driver_report_to_yojson (r : driver_report) : Yojson.Safe.t =
     ]
 ;;
 
+let driver_names =
+  List.map Runtime_acp_client.driver_to_string Runtime_acp_client.all_drivers
+;;
+
 let parse_drivers raw =
   let parts =
     String.split_on_char ',' raw
@@ -612,14 +618,15 @@ let parse_drivers raw =
        | None ->
          Error
            (Printf.sprintf
-              "unknown ACP driver %S (expected antigravity, kimi_code, or mistral_vibe)"
-              item))
+              "unknown ACP driver %S (expected one of %s)"
+              item
+              (String.concat ", " driver_names)))
   in
   go [] parts
 ;;
 
 let () =
-  let drivers_arg = ref "antigravity,kimi_code,mistral_vibe" in
+  let drivers_arg = ref (String.concat "," driver_names) in
   let cwd_arg = ref (Sys.getcwd ()) in
   let timeout_s_arg = ref default_turn_timeout_s in
   let model_arg = ref "" in
@@ -628,7 +635,7 @@ let () =
   let specs =
     [ ( "--drivers"
       , Arg.Set_string drivers_arg
-      , "Comma-separated ACP drivers (default: antigravity,kimi_code,mistral_vibe)" )
+      , "Comma-separated ACP drivers (default: every driver)" )
     ; "--cwd", Arg.Set_string cwd_arg, "Working directory with .agents/skills (default: cwd)"
     ; "--timeout-s", Arg.Set_float timeout_s_arg, "Per-turn idle timeout in seconds (default: 120)"
     ; "--model", Arg.Set_string model_arg, "Optional model override for all selected drivers"

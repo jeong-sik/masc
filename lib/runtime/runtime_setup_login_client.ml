@@ -138,6 +138,7 @@ let argv ~cli_path t = match t.login with
   | Acp_keyring { driver = Runtime_acp_client.Mistral_vibe; _ } -> [cli_path; "--setup"]
   | Acp_keyring { driver = Runtime_acp_client.Kimi_code; _ } -> [cli_path; "login"]
   | Acp_keyring { driver = Runtime_acp_client.Antigravity; _ } -> [cli_path]
+  | Acp_keyring { driver = Runtime_acp_client.Muse_code; _ } -> [cli_path; "login"]
 
 let client_environment = function
   | Native {client=Codex_home; account_home} ->
@@ -258,6 +259,7 @@ let observe ~mgr ~clock ~cwd ~cli_path ~account_request t = match t.login with
       | Runtime_acp_client.Mistral_vibe -> Runtime_official_cli_install.Mistral_vibe, "Mistral Vibe"
       | Runtime_acp_client.Kimi_code -> Runtime_official_cli_install.Kimi_code, "Kimi Code"
       | Runtime_acp_client.Antigravity -> Runtime_official_cli_install.Antigravity, "Antigravity"
+      | Runtime_acp_client.Muse_code -> Runtime_official_cli_install.Muse_code, "Muse Code"
     in
     let spawn_path =
       Runtime_official_cli_install.spawn_path install_client ~command:cli_path
@@ -276,6 +278,7 @@ let publish ~workspace ~integration_id ~cli_path t = match t.login with
       | Runtime_acp_client.Mistral_vibe -> "Mistral Vibe"
       | Runtime_acp_client.Kimi_code -> "Kimi Code"
       | Runtime_acp_client.Antigravity -> "Antigravity ACP"
+      | Runtime_acp_client.Muse_code -> "Muse Code"
     in
     Error (label ^ " stores credentials in the host OS keyring/CLI store and publishes no separate setup credential copy.")
   | Antigravity_home {home; timeout_s; host} ->

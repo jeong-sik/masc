@@ -189,7 +189,7 @@ login on a separate machine does not select that account.
 | Claude Code | `claude-code` | `account-home` selects `CLAUDE_CONFIG_DIR` |
 | Codex | `codex-app-server` | `account-home` selects `CODEX_HOME` |
 | Antigravity | `antigravity-cli` | A file credential selects the OAuth source; MASC seeds a separate managed HOME for persistent sessions and uses a disposable per-call HOME for one-shot exact/panel calls (`#43401`, `#43404`) |
-| ACP (`agy`, `kimi`, `vibe-acp`) | `acp` | Driver-native login (e.g. host keyring / CLI config) or optional file credential (`oauth_source` for Antigravity) |
+| ACP (`agy`, `kimi`, `vibe-acp`, `muse acp`) | `acp` | Driver-native login (e.g. host keyring / CLI config) or optional file credential (`oauth_source` for Antigravity) |
 
 `masc setup` and the web model picker offer the official clients. Declared
 `account-home` values survive setup unchanged. A new Claude Code or Codex

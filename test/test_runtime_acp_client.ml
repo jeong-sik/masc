@@ -2,7 +2,7 @@ open Alcotest
 open Masc
 
 let test_driver_profiles () =
-  check int "three ACP drivers" 3 (List.length Runtime_acp_client.all_drivers);
+  check int "four ACP drivers" 4 (List.length Runtime_acp_client.all_drivers);
   List.iter
     (fun driver ->
        let name = Runtime_acp_client.driver_to_string driver in
@@ -295,6 +295,254 @@ default = "agy_test.m_agy"
   check bool "vibe driver" true (Runtime_acp_client.equal_driver Mistral_vibe vibe.driver);
   check (list string) "vibe strip_env" [ "MISTRAL_API_KEY" ] vibe.strip_env;
   check (option string) "vibe mode" (Some "auto-approve") vibe.mode
+;;
+
+(* ── Muse Code (muse acp 1.4.25, live-verified 2026-11-24) ────────────────── *)
+
+let muse_observer_flags =
+  List.concat_map
+    (fun name ->
+       [ "-c"
+       ; Printf.sprintf "runtime_capabilities.plugin:tbh-reminders:reminder:%s.enabled=false" name
+       ])
+    [ "memory"
+    ; "skill-reminder"
+    ; "verify-reminder"
+    ; "goal-reminder"
+    ; "todo-reminder"
+    ; "scope-reminder"
+    ]
+;;
+
+let acp_execution_of_driver driver =
+  let config : Runtime_execution.acp_client =
+    { driver
+    ; cli_path = "cli"
+    ; args = []
+    ; strip_env = []
+    ; skills_dirs = []
+    ; model = Runtime_acp_client.keep_cli_default
+    ; effort = None
+    ; mode = None
+    ; oauth_source = None
+    ; timeout_s = 1.
+    }
+  in
+  Runtime_execution.Acp config
+;;
+
+let test_muse_profile_and_native_none () =
+  let muse = Runtime_acp_client.profile_of_driver Runtime_acp_client.Muse_code in
+  check string "muse command" "muse" muse.default_command;
+  check (list string) "muse default args" [ "acp" ] muse.default_args;
+  check bool "muse uses session/new HTTP MCP" true
+    (muse.mcp_wiring = Runtime_acp_client.Session_new_http_mcp);
+  check bool "muse MCP grammar locked to live-verified Mcp_double_underscore" true
+    (muse.mcp_identifier_syntaxes = [ Runtime_acp_client.Mcp_double_underscore ]);
+  check (list (pair string string)) "muse pins the launcher update check off"
+    [ "MUSE_NO_AUTO_UPDATE", "1" ] muse.env_set;
+  check (list string) "muse pins onRequest under none and read, allowAll under full"
+    [ "onRequest"; "onRequest"; "allowAll" ]
+    [ muse.mode_for_native_none; muse.mode_for_native_read; muse.mode_for_native_full ];
+  check (option string) "muse has no effort config option" None muse.effort_config_id;
+  List.iter
+    (fun driver ->
+       let name = Runtime_acp_client.driver_to_string driver in
+       let enforces = (Runtime_acp_client.profile_of_driver driver).enforces_native_none in
+       check bool (name ^ " native-none enforcement")
+         (not (Runtime_acp_client.equal_driver driver Runtime_acp_client.Muse_code))
+         enforces;
+       check bool (name ^ " execution agrees with its profile") enforces
+         (Runtime_execution.supports_native_none (acp_execution_of_driver driver)))
+    Runtime_acp_client.all_drivers;
+  check bool "muse none runs at the read floor" true
+    (Runtime_native_tools.degrade_on_admission
+       ~posture:Runtime_native_tools.Native_none
+       ~none_supported:
+         (Runtime_execution.supports_native_none
+            (acp_execution_of_driver Runtime_acp_client.Muse_code))
+       ()
+     = Runtime_native_tools.Native_read)
+;;
+
+let test_muse_refuses_unsupported_config_before_spawn () =
+  let cwd = Filename.temp_dir "masc-muse-native-none-" "" in
+  Fun.protect ~finally:(fun () -> Unix.rmdir cwd) (fun () ->
+    Eio_main.run (fun env ->
+      Eio.Switch.run (fun sw ->
+        let clock = Eio.Stdenv.clock env in
+        let proc_mgr = Runtime_acp_client.foreground_process_mgr ~clock () in
+        let config =
+          { (Runtime_acp_client.default_config ~driver:Muse_code ~cwd) with
+            cli_path = Filename.concat cwd "missing-executable"
+          }
+        in
+        let error =
+          testable
+            (fun fmt e -> Format.pp_print_string fmt (Runtime_acp_client.error_to_string e))
+            ( = )
+        in
+        let start ~config ~native_posture =
+          Runtime_acp_client.start ~sw ~proc_mgr ~clock ~fs:(Eio.Stdenv.fs env) ~config
+            ~native_posture () |> Result.map Runtime_acp_client.close
+        in
+        check
+          (result unit error)
+          "refuses native none before attempting to spawn the missing executable"
+          (Error (Runtime_acp_client.Invalid_config
+                    "ACP driver muse_code cannot enforce the native tool posture 'none'"))
+          (start ~config ~native_posture:Runtime_native_tools.Native_none);
+        check
+          (result unit error)
+          "rejects an explicit credential file before falling back to host sign-in"
+          (Error (Runtime_acp_client.Invalid_config
+                    "ACP driver muse_code requires host sign-in with the credential file binding unset"))
+          (start ~config:{ config with oauth_source = Some (Filename.concat cwd "missing-credential") }
+             ~native_posture:Runtime_native_tools.Native_read))))
+;;
+
+let test_muse_argv_and_environment () =
+  let cfg = Runtime_acp_client.default_config ~driver:Runtime_acp_client.Muse_code ~cwd:"/tmp" in
+  check (list string) "default argv trusts the workspace and turns every observer off"
+    ([ "muse"; "acp"; "--trust-workspace" ] @ muse_observer_flags)
+    (Runtime_acp_client.For_testing.build_argv cfg ~temp_gemini_dir:None);
+  let effort_cfg = { cfg with args = [ "acp"; "-c"; "reasoning_effort=\"low\"" ] } in
+  check (list string) "operator args replace the defaults and keep the required flags"
+    ([ "muse"; "acp"; "-c"; "reasoning_effort=\"low\""; "--trust-workspace" ]
+     @ muse_observer_flags)
+    (Runtime_acp_client.For_testing.build_argv effort_cfg ~temp_gemini_dir:None);
+  let env =
+    Runtime_acp_client.For_testing.build_environment
+      ~base_env:[| "PATH=/usr/bin"; "MUSE_NO_AUTO_UPDATE=0"; "META_API_KEY=key" |]
+      ~driver:Runtime_acp_client.Muse_code
+      ~extra_strip_env:[ "META_API_KEY" ]
+  in
+  check (option string) "update check stays off over an inherited value" (Some "1")
+    (find_env "MUSE_NO_AUTO_UPDATE" env);
+  check (option string) "operator strip-env drops the key" None (find_env "META_API_KEY" env);
+  check (option string) "PATH is kept" (Some "/usr/bin") (find_env "PATH" env)
+;;
+
+let test_muse_permission_grammar () =
+  let allowed_tool_names = [ "masc_probe_ping"; "keeper_skill" ] in
+  let mcp_only =
+    Runtime_acp_client.Allow_masc_mcp_only { mcp_server_name = "masc"; allowed_tool_names }
+  in
+  let read_and_mcp =
+    Runtime_acp_client.Allow_read_and_masc_mcp { mcp_server_name = "masc"; allowed_tool_names }
+  in
+  let classify =
+    Runtime_acp_client.For_testing.classify_tool_call_json
+      ~driver:Runtime_acp_client.Muse_code
+      ~mcp_server_name:"masc"
+  in
+  (* Shape recorded from muse acp 1.4.25: an MCP call is title = name =
+     mcp__<server>__<tool> with kind other; a native read is read_file with
+     kind read. *)
+  let frame ~title ~kind =
+    `Assoc
+      [ "toolCallId", `String "recorded-1"
+      ; "title", `String title
+      ; "name", `String title
+      ; "kind", `String kind
+      ; "status", `String "pending"
+      ]
+  in
+  let allowed policy wire = Runtime_acp_client.should_allow_tool_call ~policy (classify wire) in
+  check bool "masc tool allowed under mcp-only" true
+    (allowed mcp_only (frame ~title:"mcp__masc__masc_probe_ping" ~kind:"other"));
+  check bool "masc tool allowed under read-and-mcp" true
+    (allowed read_and_mcp (frame ~title:"mcp__masc__keeper_skill" ~kind:"other"));
+  check bool "foreign MCP server denied" false
+    (allowed read_and_mcp (frame ~title:"mcp__foreign-srv__masc_probe_ping" ~kind:"other"));
+  check bool "native read denied under mcp-only" false
+    (allowed mcp_only (frame ~title:"read_file" ~kind:"read"));
+  check bool "native read allowed under read-and-mcp" true
+    (allowed read_and_mcp (frame ~title:"read_file" ~kind:"read"));
+  check bool "native write denied under read-and-mcp" false
+    (allowed read_and_mcp (frame ~title:"write_file" ~kind:"edit"));
+  check bool "native shell denied under read-and-mcp" false
+    (allowed read_and_mcp (frame ~title:"shell" ~kind:"execute"));
+  List.iter
+    (fun title ->
+       check bool ("another driver's grammar " ^ title ^ " is rejected") false
+         (Runtime_acp_client.For_testing.should_allow_permission
+            ~driver:Runtime_acp_client.Muse_code
+            ~policy:mcp_only
+            ~title
+            ~kind:(Some Runtime_acp_client.Tool_other)))
+    [ "mcp(masc/keeper_skill)"
+    ; "mcp_masc.masc_probe_ping"
+    ; "mcp_masc_masc_probe_ping"
+    ; "masc_masc_probe_ping"
+    ]
+;;
+
+let test_muse_toml_row_and_effort () =
+  let source =
+    {|
+[providers.muse_test]
+protocol = "acp"
+driver = "muse_code"
+command = "muse"
+args = ["acp", "-c", "reasoning_effort=\"low\""]
+is-non-interactive = true
+timeout-s = 120.0
+
+[models.m_muse]
+api-name = "muse-ember-1.0"
+max-context = 1007997
+
+[muse_test.m_muse]
+
+[runtime]
+default = "muse_test.m_muse"
+|}
+  in
+  let cfg =
+    match Runtime_toml.parse_string source with
+    | Ok cfg -> cfg
+    | Error errs ->
+      failf "muse_code row failed to parse: %s"
+        (String.concat "; "
+           (List.map (fun (e : Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errs))
+  in
+  let runtimes, dropped = Runtime_instance.partition_bindings cfg cfg.bindings in
+  check int "zero dropped" 0 (List.length dropped);
+  (match runtimes with
+   | [ ({ execution = Runtime_execution.Acp exec; _ } as runtime) ] ->
+     check bool "muse driver" true
+       (Runtime_acp_client.equal_driver Runtime_acp_client.Muse_code exec.driver);
+     check (list string) "operator args are kept as written"
+       [ "acp"; "-c"; "reasoning_effort=\"low\"" ] exec.args;
+     check (option string) "model id" (Some "muse-ember-1.0")
+       (Runtime_execution.model_id (Runtime_execution.Acp exec));
+     check bool "quota is scoped per ACP driver" true
+       (Runtime_quota_window.scope_equal
+          (Runtime_instance.quota_scope_of_runtime runtime)
+          (Runtime_quota_window.scope_of_acp_driver ~driver:"muse_code"))
+   | _ -> fail "expected a single materialized muse_code runtime");
+  let with_effort =
+    {|
+[providers.muse_eff]
+protocol = "acp"
+driver = "muse_code"
+command = "muse"
+is-non-interactive = true
+effort = "low"
+[models.m]
+api-name = "m"
+max-context = 1000
+[muse_eff.m]
+[runtime]
+default = "muse_eff.m"
+|}
+  in
+  match Runtime_toml.parse_string with_effort with
+  | Error (err :: _) ->
+    check string "error path identifies the effort key" "providers.muse_eff.effort" err.path
+  | Error [] -> fail "expected a non-empty error list for muse_code effort"
+  | Ok _ -> fail "muse_code has no effort option, so effort must be refused at parse time"
 ;;
 
 let test_unknown_driver_rejected () =
@@ -4753,10 +5001,19 @@ for line in sys.stdin:
 
 let () =
   run "runtime_acp_client"
-    [ "profiles", [ test_case "closed driver profiles" `Quick test_driver_profiles ]
+    [ ( "profiles"
+      , [ test_case "closed driver profiles" `Quick test_driver_profiles
+        ; test_case "muse profile and native-none support" `Quick
+            test_muse_profile_and_native_none
+        ; test_case "muse rejects unsupported config before spawn" `Quick
+            test_muse_refuses_unsupported_config_before_spawn
+        ] )
     ; "environment", [ test_case "env strip and override" `Quick test_build_environment ]
     ; ( "argv_and_posture"
-      , [ test_case "kimi --skills-dir order & strict permission posture" `Quick
+      , [ test_case "muse argv and environment" `Quick test_muse_argv_and_environment
+        ; test_case "muse MCP grammar and permission policy" `Quick
+            test_muse_permission_grammar
+        ; test_case "kimi --skills-dir order & strict permission posture" `Quick
             test_build_argv_and_strict_permission_posture
         ; test_case "agy acp mcp(masc/...) and call_mcp_tool permission posture" `Quick
             test_antigravity_acp_mcp_permission_and_call_mcp_tool
@@ -4818,6 +5075,8 @@ let () =
     ; "compaction", [ test_case "structural monotonic drop detection" `Quick test_compaction_detection ]
     ; ( "toml"
       , [ test_case "all three drivers materialize" `Quick test_toml_materialization_all_three_drivers
+        ; test_case "muse_code row materializes and refuses effort" `Quick
+            test_muse_toml_row_and_effort
         ; test_case "unknown driver rejected" `Quick test_unknown_driver_rejected
         ; test_case "typed ACP effort and default model_selection TOML boundary" `Quick
             test_typed_acp_effort_and_model_selection_toml

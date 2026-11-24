@@ -109,6 +109,7 @@ type acp_driver = Runtime_acp_client.driver =
   | Antigravity
   | Kimi_code
   | Mistral_vibe
+  | Muse_code
 [@@deriving show, eq]
 
 type acp_options =

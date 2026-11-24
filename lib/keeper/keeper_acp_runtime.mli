@@ -1,6 +1,6 @@
 (** Unified Keeper projection for persistent ACP v1 official runtimes:
-    Antigravity ([agy acp]), Kimi Code ([kimi acp]), and Mistral Vibe
-    ([vibe-acp]).
+    Antigravity ([agy acp]), Kimi Code ([kimi acp]), Mistral Vibe
+    ([vibe-acp]), and Muse Code ([muse acp]).
 
     Each Keeper owns an isolated persistent child process and loopback HTTP MCP
     bridge under its own [Eio.Switch.t], amortizing CLI cold start while

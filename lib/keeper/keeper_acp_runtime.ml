@@ -1,5 +1,5 @@
 (** Unified Keeper projection for persistent ACP v1 official runtimes
-    (Antigravity, Kimi Code, Mistral Vibe). *)
+    (Antigravity, Kimi Code, Mistral Vibe, Muse Code). *)
 
 open Result.Syntax
 module Host = Keeper_official_client_host
@@ -1833,7 +1833,7 @@ let run_without_lifecycle
         ~keeper_name
         ~client_label:runtime_label
         ~default:Runtime_native_tools.Native_none
-        ~none_supported:true
+        ~none_supported:(Runtime_execution.supports_native_none (Runtime_execution.Acp config))
   in
   let* () = on_guidance_prepared () in
   let tool_surface_sha256 =

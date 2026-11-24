@@ -404,7 +404,7 @@ let resolve_native_posture ~base_path ~keeper_name (runtime : Runtime_instance.t
       ~keeper_name
       ~client_label:("ACP(" ^ Runtime_acp_client.driver_to_string config.driver ^ ")")
       ~default:Runtime_native_tools.Native_none
-      ~none_supported:true
+      ~none_supported:(Runtime_execution.supports_native_none runtime.execution)
     |> Result.map Option.some
 ;;
 

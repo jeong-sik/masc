@@ -58,6 +58,9 @@ let choice_of_provider (provider : Runtime_schema.provider) =
        | Some { driver = Runtime_schema.Mistral_vibe; _ } -> Some Mistral_vibe
        | Some { driver = Runtime_schema.Kimi_code; _ } -> Some Kimi_acp
        | Some { driver = Runtime_schema.Antigravity; _ } -> Some Antigravity_acp
+       (* The wizard has no Muse Code choice; a muse_code row is edited in
+          runtime.toml. *)
+       | Some { driver = Runtime_schema.Muse_code; _ } -> None
        | None -> None)
   in
   match candidate with

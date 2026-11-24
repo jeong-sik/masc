@@ -274,7 +274,18 @@ let recovery_failure_of_acp_error = function
   | Acp.Protocol_error _ -> Session_store.Protocol_failed
   | Acp.Rpc_error { refusal = Some (Llm_provider.Retry.Signal_context_overflow _); _ } ->
     Session_store.Input_rejected Session_store.Bootstrap_floor_exceeded
-  | Acp.Rpc_error _ -> Session_store.Provider_rejected
+  | Acp.Rpc_error
+      { refusal =
+          ( None
+          | Some
+              ( Llm_provider.Retry.Signal_request_body_too_large _
+              | Llm_provider.Retry.Signal_hard_quota _
+              | Llm_provider.Retry.Signal_rate_limited _
+              | Llm_provider.Retry.Signal_auth_error _
+              | Llm_provider.Retry.Signal_authorization_error _
+              | Llm_provider.Retry.Signal_provider_unavailable _ ) )
+      ; _
+      } -> Session_store.Provider_rejected
   | Acp.Timeout _ -> Session_store.Transport_interrupted
   | Acp.Process_exited _ -> Session_store.Transport_interrupted
   | Acp.Client_closed -> Session_store.Transport_interrupted
@@ -325,7 +336,18 @@ let classify_prompt_error ~is_gate_continuation ~activity_observed = function
   | ( Acp.Invalid_config _
     | Acp.Spawn_refused _
     | Acp.Protocol_error _
-    | Acp.Rpc_error _
+    | Acp.Rpc_error
+        { refusal =
+            ( None
+            | Some
+                ( Llm_provider.Retry.Signal_request_body_too_large _
+                | Llm_provider.Retry.Signal_hard_quota _
+                | Llm_provider.Retry.Signal_rate_limited _
+                | Llm_provider.Retry.Signal_auth_error _
+                | Llm_provider.Retry.Signal_authorization_error _
+                | Llm_provider.Retry.Signal_provider_unavailable _ ) )
+        ; _
+        }
     | Acp.Timeout _
     | Acp.Process_exited _
     | Acp.Client_closed ) as err ->
@@ -2721,7 +2743,19 @@ let run_without_lifecycle
          | Acp.Invalid_config _
          | Acp.Spawn_refused _
          | Acp.Protocol_error _
-         | Acp.Rpc_error _
+         | Acp.Rpc_error
+             { refusal =
+                 ( None
+                 | Some
+                     ( Llm_provider.Retry.Signal_context_overflow _
+                     | Llm_provider.Retry.Signal_request_body_too_large _
+                     | Llm_provider.Retry.Signal_hard_quota _
+                     | Llm_provider.Retry.Signal_rate_limited _
+                     | Llm_provider.Retry.Signal_auth_error _
+                     | Llm_provider.Retry.Signal_authorization_error _
+                     | Llm_provider.Retry.Signal_provider_unavailable _ ) )
+             ; _
+             }
          | Acp.Timeout _
          | Acp.Process_exited _
          | Acp.Client_closed -> ());

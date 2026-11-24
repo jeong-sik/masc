@@ -241,7 +241,18 @@ let refused_for_input_size = function
             ( Runtime_acp_client.Invalid_config _
             | Runtime_acp_client.Spawn_refused _
             | Runtime_acp_client.Protocol_error _
-            | Runtime_acp_client.Rpc_error _
+            | Runtime_acp_client.Rpc_error
+                { refusal =
+                    ( None
+                    | Some
+                        ( Llm_provider.Retry.Signal_request_body_too_large _
+                        | Llm_provider.Retry.Signal_hard_quota _
+                        | Llm_provider.Retry.Signal_rate_limited _
+                        | Llm_provider.Retry.Signal_auth_error _
+                        | Llm_provider.Retry.Signal_authorization_error _
+                        | Llm_provider.Retry.Signal_provider_unavailable _ ) )
+                ; _
+                }
             | Runtime_acp_client.Timeout _
             | Runtime_acp_client.Process_exited _
             | Runtime_acp_client.Client_closed )

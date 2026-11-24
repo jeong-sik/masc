@@ -216,7 +216,10 @@ approval gates.
 Open a draft using [scripts/pr-open.sh](../../scripts/pr-open.sh) or GitHub's fork
 PR flow. Fill the [PR template](../../.github/pull_request_template.md), including
 an issue link. Mark the PR ready when its diff and evidence are ready for review.
-PR creation, pushes and ready transitions do not automatically start CI.
+Opening a PR and pushing to it start the required `changes` and `type-check`
+checks ([pr-type-check.yml](../../.github/workflows/pr-type-check.yml)).
+`type-check` runs `dune build @check` when a file outside `docs/`,
+`changelog.d/` and `dashboard/` changed.
 
 [pr-check.yml](../../.github/workflows/pr-check.yml) provides explicit source,
 configuration and credential checks.
@@ -230,9 +233,10 @@ with a focused build. Request these only when needed. The constitution's
 threshold. A cold dependency cache can take longer; only an actual successful
 completion is build evidence.
 
-There is no automatic PR or general push CI. The operator-authorized
-`main-minimal-build.yml` checks main every 30 minutes and builds four operator
-executables only when non-documentation inputs lack a successful build receipt.
+A push to a branch other than main starts no CI. The operator-authorized
+`main-minimal-build.yml` checks main on each push and every 30 minutes. It
+builds three operator executables and type-checks the tree only when
+non-documentation inputs lack a successful build receipt.
 It reuses opam/Dune caches and records actual build SHA versus skipped scope;
 it does not change ordinary review or Release/Tag requirements.
 At `release/vX.Y.Z`, explicitly

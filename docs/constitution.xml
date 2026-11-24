@@ -335,8 +335,10 @@
       동일 저장소 `release/v*` 예외)가 차단한다.
     </work_unit>
     <build_and_ci>
-      PR·일반 branch push 로 자동 CI 를 시작하지 않는다.
-      운영자가 요청한 main 최소 빌드 관측은 예외다. 30분 주기로 실행 파일 4개만 확인하며,
+      PR 은 필수 검사 `changes`·`type-check` 를 자동으로 돌린다. `type-check` 는 `docs/`·`changelog.d/`·`dashboard/` 밖
+      파일이 바뀌었을 때 `dune build @check` 를 돌리고, native stack 은 최상단 PR 에서 한 번만 돌린다.
+      일반 branch push 로는 자동 CI 를 시작하지 않는다. PR 마다 도는 검사는 운영자의 명시 요청 없이 늘리지 않는다.
+      운영자가 요청한 main 최소 빌드 관측은 main push 와 30분 주기로 운영 실행 파일 3개와 전체 type-check 를 확인하며,
       문서·changelog 외 입력이 이미 성공한 빌드와 같으면 toolchain 준비와 빌드를 생략한다.
       실행 중인 빌드는 취소하지 않고 중복 실행을 직렬화한다. 실제 빌드 SHA 와 생략을 구분해 기록한다.
       이 관측은 PR 승인이나 Release/Tag 전체 검증을 대체하지 않는다.

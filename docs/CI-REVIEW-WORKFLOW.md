@@ -17,9 +17,20 @@ change request on the same account, but does not prove the original finding was
 resolved. Before merging, the integrator reads the review and comment text and
 checks the change or explanation that addresses each outstanding concern.
 
-There is no automatic PR, push or tag CI. The operator-authorized
-`main-minimal-build.yml` checks main at minutes 7 and 37: it builds the server,
-TUI, browser host and deployment preflight executables in one Dune invocation.
+Every pull request runs `pr-type-check.yml`, and main requires both of its
+checks. `changes` classifies the changed paths, checks the changelog fragments
+the pull request changes and rejects merge commits. `type-check` runs
+`dune build @check` when a file outside `docs/`, `changelog.d/` and
+`dashboard/` changed; a native stack is type-checked once, at its top pull
+request. `pr-python-bin-free.yml` also runs on every pull request, and
+`alphatex-native.yml`, `changelog-fragments.yml` and `review-script-tests.yml`
+run only when their own paths change. No workflow runs on a push to a branch
+other than main, or on a tag push.
+
+The operator-authorized `main-minimal-build.yml` runs on each push to main and
+at minutes 7 and 37: it builds the server, TUI and deployment preflight
+executables in one Dune invocation, then type-checks the whole tree with
+`dune build @check`.
 Successful non-documentation input fingerprints skip toolchain setup and build;
 the summary names the actual previously built SHA, and a skip is not compilation
 evidence for a newer SHA. Existing opam caching and a shared Dune cache reduce
@@ -29,14 +40,14 @@ This observation does not approve a PR or replace full Release/Tag checks.
 
 An optional merge-compile observation can be requested: `merge-compile.yml`,
 dispatched explicitly on main with the exact head SHA
-(top head for stacks, PR head for singles), builds the same four
+(top head for stacks, PR head for singles), builds the same three
 executables in one Dune invocation and settles a `merge-compile` commit
 status on that SHA. The executing toolchain (`.github/actions`, the two
 scripts it invokes) must be byte-identical to main's, or the dispatch fails;
 toolchain PRs re-dispatch with `trust-head-toolchain=true`, which is recorded
 in the settled status and receipt. Non-documentation inputs identical to an
 already built SHA settle instantly by input identity (docs-only heads build
-nothing — no dune rule in the four-executable closure reads `docs/` or
+nothing — no dune rule in the three-executable closure reads `docs/` or
 `changelog.d/`); anything else builds asynchronously —
 dispatch fire-and-forget. The record describes the head that was built; a new
 head needs a separate record. The status and freshness against the merge target

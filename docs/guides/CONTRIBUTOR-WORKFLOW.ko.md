@@ -195,8 +195,10 @@ GitHub Issue·PR은 공개 변경을 추적합니다. MASC는 공유 목표와 �
 
 [scripts/pr-open.sh](../../scripts/pr-open.sh) 또는 GitHub fork PR 흐름으로 초안을 엽니다.
 [PR 템플릿](../../.github/pull_request_template.md)을 채우고 이슈를 연결합니다.
-diff와 증거가 준비되면 ready for review로 바꿉니다. PR 생성, push와 ready 전환은
-CI를 자동으로 시작하지 않습니다.
+diff와 증거가 준비되면 ready for review로 바꿉니다. PR을 열거나 PR에 push하면
+필수 검사 `changes`와 `type-check`가 돕니다
+([pr-type-check.yml](../../.github/workflows/pr-type-check.yml)). `type-check`는
+`docs/`, `changelog.d/`, `dashboard/` 밖 파일이 바뀌었을 때 `dune build @check`를 실행합니다.
 
 [pr-check.yml](../../.github/workflows/pr-check.yml)은 소스·설정 문법과 credential 검사를
 명시적 요청으로 실행합니다. 선택한 정확한 소스의 native TUI 검사에는 같은 소스의
@@ -208,9 +210,10 @@ CI를 자동으로 시작하지 않습니다.
 의존성 캐시가 준비되지 않으면 더 오래 걸릴 수 있습니다. 실제로 성공한 완료 결과만
 빌드 증거로 사용합니다.
 
-PR과 일반 push의 자동 CI는 없습니다. 운영자가 요청한
-`main-minimal-build.yml`은 30분마다 main을 확인하며, 문서·changelog 외 입력에
-성공한 빌드 기록이 없을 때만 운영 실행 파일 4개를 빌드합니다. opam/Dune 캐시를
+main이 아닌 가지에 push하면 CI가 돌지 않습니다. 운영자가 요청한
+`main-minimal-build.yml`은 main에 push될 때와 30분마다 main을 확인합니다.
+문서·changelog 외 입력에 성공한 빌드 기록이 없을 때만 운영 실행 파일 3개를 빌드하고
+전체 type-check를 실행합니다. opam/Dune 캐시를
 재사용하고 실제 빌드 SHA와 생략을 구분합니다. 일반 리뷰와 Release/Tag 요구사항은 같습니다.
 `release/vX.Y.Z`에서는 먼저 [릴리즈 freeze](RELEASE-FREEZE.md)에 따라 포함 범위와
 후보 SHA를 고정합니다. 이후에는 검토된 출시 차단 수리만 반영하며, main의 새 변경은

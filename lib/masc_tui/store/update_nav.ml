@@ -2547,14 +2547,13 @@ let launch_memory_diagram_target ~now ~keeper ~(content_rect : Rect.t) ~kind
       | Some chart ->
           launch_memory_diagram_chart ~now ~keeper ~content_rect ~kind ~mode
             ~source:(Knowledge_store.Diagram_source_event selected.identity)
-            ~event_identity:selected.identity ~revision:selected.revision ~chart
+            ~event_identity:selected.identity ~revision:selected.revision
+            ~chart:(Masc_tui_ui.Memory_lineage.Lineage chart)
             m)
   | Launch_fact_snapshot { revision; fact; activity } ->
-      let ko = Say.equal_lang m.lang Say.Lang_ko in
-      let now_unix = m.freshness.last_wall_unix in
       let chart =
-        Memory_diagram.chart_of_ordinary_fact ~tz_offset_sec:m.tz_offset_sec ~ko
-          ~now:now_unix ~revision ~activity fact
+        Masc_tui_ui.Memory_lineage.Current_snapshot
+          (Memory_diagram.snapshot_of_ordinary_fact ~revision ~activity fact)
       in
       launch_memory_diagram_chart ~now ~keeper ~content_rect ~kind ~mode
         ~source:(Knowledge_store.Diagram_source_fact_snapshot fact.memory_id)
@@ -2695,19 +2694,14 @@ let open_memory_diagram ~now ~kind (m : Model.t) =
               | Some
                   ( Knowledge_store.World_added _
                   | Knowledge_store.World_updated _
-                  | Knowledge_store.World_retracted _ )
-              | None ->
+                  | Knowledge_store.World_retracted _ ) ->
                   None
-            in
-            let resolved =
-              match diff_target with
-              | Some _ as t -> t
               | None -> fallback_any_target ()
             in
-            ( resolved
+            ( diff_target
             , false
-            , Say.make ~ko:"다이어그램을 열 기억 변천 또는 사실이 없습니다"
-                ~en:"No memory evolution event or fact available for diagram" )
+            , Say.make ~ko:"선택한 기억의 변천 이력이나 현재 사실을 찾을 수 없습니다"
+                ~en:"No activity or current fact available for the selected memory" )
       in
       match Memory_diagram.active_diagram m with
       | Some d -> (

@@ -3143,6 +3143,15 @@ let render_memory_diagram_payload ?run_pele ?(theme_preset = Theme.Midnight)
         | Some p -> p
         | None -> Palette.of_theme (Theme.of_preset theme_preset)
       in
+      let source format label render_lineage =
+        match chart with
+        | Masc_tui_ui.Memory_lineage.Lineage lineage ->
+            (format, label, render_lineage lineage)
+        | Masc_tui_ui.Memory_lineage.Current_snapshot snapshot ->
+            (Pele.Mermaid, "Pele Mermaid",
+             Masc_tui_ui.Memory_lineage.snapshot_mermaid ~tz_offset_sec ~ko
+               ~now:now_unix snapshot)
+      in
       let run_scene scene =
         match run_pele with
         | Some f -> f scene
@@ -3162,14 +3171,15 @@ let render_memory_diagram_payload ?run_pele ?(theme_preset = Theme.Midnight)
                 note = Some (combine_fallback_note reason mermaid_note);
               }
           else
-            let svg =
-              Masc_tui_ui.Memory_lineage.transition_svg ~tz_offset_sec ~ko
-                ~now:now_unix ~palette:effective_palette chart
+            let format, format_label, input =
+              source Pele.Svg "Pele SVG"
+                (Masc_tui_ui.Memory_lineage.transition_svg ~tz_offset_sec ~ko
+                   ~now:now_unix ~palette:effective_palette)
             in
             let colors = Some (Pele.colors_of_palette effective_palette) in
             let scene =
-              Pele.scene ~format:Pele.Svg ~max_width:1240 ~font_size:15 ~now_ms
-                ~colors svg
+              Pele.scene ~format ~max_width:1240 ~font_size:15 ~now_ms
+                ~colors input
             in
             match run_scene scene with
             | Ok png -> (
@@ -3179,7 +3189,7 @@ let render_memory_diagram_payload ?run_pele ?(theme_preset = Theme.Midnight)
                       {
                         png;
                         pixel_size;
-                        format_label = "Pele SVG";
+                        format_label;
                         fallback_lines;
                       }
                 | None ->
@@ -3211,15 +3221,15 @@ let render_memory_diagram_payload ?run_pele ?(theme_preset = Theme.Midnight)
             in
             Knowledge_store.Diagram_text { lines = tree_lines; note = Some reason }
           else
-            let graph_json =
-              Masc_tui_ui.Memory_lineage.formation_graph_json ~tz_offset_sec ~ko
-                ~now:now_unix ~palette:effective_palette ~keeper_name:keeper
-                chart
+            let format, format_label, input =
+              source Pele.Graph "Pele Graph"
+                (Masc_tui_ui.Memory_lineage.formation_graph_json ~tz_offset_sec ~ko
+                   ~now:now_unix ~palette:effective_palette ~keeper_name:keeper)
             in
             let colors = Some (Pele.colors_of_palette effective_palette) in
             let scene =
-              Pele.scene ~format:Pele.Graph ~max_width:1400 ~font_size:14
-                ~now_ms ~colors graph_json
+              Pele.scene ~format ~max_width:1400 ~font_size:14
+                ~now_ms ~colors input
             in
             match run_scene scene with
             | Ok png -> (
@@ -3229,7 +3239,7 @@ let render_memory_diagram_payload ?run_pele ?(theme_preset = Theme.Midnight)
                       {
                         png;
                         pixel_size;
-                        format_label = "Pele Graph";
+                        format_label;
                         fallback_lines = tree_lines;
                       }
                 | None ->

@@ -225,6 +225,7 @@ let test_wire_to_lineage_adapter () =
     m3_status;
 
   (* Pure fallbacks never crash even on very narrow widths *)
+  let chart = Memory_lineage.Lineage chart in
   let narrow_rows, narrow_note =
     Memory_diagram.render_mermaid_fallback ~ko:false ~now:1_700_000_500.0
       ~max_width:14 ~kind:Knowledge_store.Diagram_pele_card chart
@@ -639,6 +640,7 @@ let test_cmd_executor_render_decisions () =
     Memory_diagram.chart_of_activity ~keeper:"alpha" ~activity:act
       ~facts:(Some facts) ~selected:ev2
     |> Option.get
+    |> fun lineage -> Memory_lineage.Lineage lineage
   in
   let pal = sample_palette () in
   let kitty_probe : Probe.observation =
@@ -1062,6 +1064,7 @@ let test_term_dumb_masks_term_program () =
     Memory_diagram.chart_of_activity ~keeper:"alpha" ~activity:act
       ~facts:(Some facts) ~selected:(List.hd act.events)
     |> Option.get
+    |> fun lineage -> Memory_lineage.Lineage lineage
   in
   let pele_calls = ref 0 in
   let payload =
@@ -1311,6 +1314,49 @@ let test_visibility_enter_refresh_and_resize () =
     (Option.is_none (Model.active_dive m_k3_enter));
   check bool "Enter in 3 -> Memory keeps diagram open" true
     (Option.is_some (Memory_diagram.active_diagram m_k3_enter));
+
+  let missing_id = "m-retracted-outside-activity-window" in
+  let selected_diff =
+    match diff_snap.body with
+    | Wire_knowledge.Keeper_diff body ->
+        let retracted : Wire_knowledge.memory_retracted_fact =
+          {
+            event_order = None;
+            memory_id = missing_id;
+            category = "fact";
+            text = "Retracted memory";
+            removed_at_rev = Some 3;
+            at_unix = Some 1_700_000_300.0;
+            removed_by = None;
+            drop_reason = None;
+          }
+        in
+        { diff_snap with
+          body = Wire_knowledge.Keeper_diff
+            { body with counts = { body.counts with retracted = 1 };
+              retracted = [ retracted ] } }
+    | Wire_knowledge.World_diff _ -> fail "expected a keeper diff fixture"
+  in
+  let selection =
+    m_k3.knowledge
+    |> Knowledge_store.set_memory_view_mode Knowledge_store.View_diff
+    |> Knowledge_store.set_memory_diff ~keeper:(Some "alpha")
+         ~window:Knowledge_store.Window_24h
+         (Observed.value ~observed_at:now0 selected_diff)
+  in
+  check bool "the retracted row is selected" true
+    (match Knowledge_store.selected_memory_diff_item_for
+       ~keeper_opt:(Some "alpha") selection with
+    | Some (Knowledge_store.Keeper_retracted fact) -> String.equal fact.memory_id missing_id
+    | _ -> false);
+  let m_missing, missing_commands =
+    Update.step ~now:now0 { m_k3 with knowledge = selection }
+      (Msg.Key_event (key_char "."))
+  in
+  check bool "missing selected fact cannot open another memory diagram" true
+    (Option.is_none m_missing.knowledge.memory_diagram);
+  check bool "missing selected fact sends no renderer command" true
+    (Option.is_none (find_render_cmd (Cmd.flatten missing_commands)));
 
   (* 7c. [r] retries a Failed diagram with incremented request_id *)
   let req_failed = (Option.get m_dive_open.knowledge.memory_diagram).request_id in
@@ -1592,21 +1638,68 @@ let test_all_subviews_and_orphan_fact_snapshot () =
         String.equal id "m-orphan"
     | Knowledge_store.Diagram_source_event _ -> false);
   (match find_render_cmd orphan_cmds with
-  | Some (Cmd.Render_memory_diagram { chart; _ }) ->
-      check int "snapshot chart has zero fabricated before facts" 0
-        (List.length chart.selected.before);
-      check int "snapshot chart has exactly 1 current after fact" 1
-        (List.length chart.selected.after);
-      check string "snapshot chart preserves exact claim"
-        "Fact with no activity event"
-        (Memory_lineage.fact_claim_text ~ko:false chart
-           (List.hd chart.selected.after));
-      check bool "snapshot chart reason marks Current snapshot" true
-        (match chart.selected.reason with
-        | Some r -> has_substring r "Current snapshot"
-        | None -> false)
-  | Some _ | None ->
-      fail "expected Render_memory_diagram command for orphan fact snapshot");
+  | Some (Cmd.Render_memory_diagram { chart = Current_snapshot snapshot; _ }) ->
+      check string "current fact ID" "m-orphan" snapshot.fact.memory_id;
+      check (option string) "current claim" (Some "Fact with no activity event")
+        snapshot.fact.claim;
+      check (option int) "actual number of returned events" (Some 3)
+        snapshot.activity_entries;
+      let chart = Memory_lineage.Current_snapshot snapshot in
+      let probe = { Probe.empty_observation with graphics = Some Probe.Graphics_supported } in
+      let render ~kind ~mode run_pele =
+        Cmd_executor.render_memory_diagram_payload ~run_pele ~probe
+          ~term_program:None ~palette:None ~keeper:"alpha" ~kind ~mode ~ko:false
+          ~tz_offset_sec:0 ~now_unix:1_700_000_500.0 ~max_width:100 ~chart ()
+      in
+      let scene_for_snapshot (scene : Pele.scene) =
+        check bool "single Mermaid fact scene" true
+          (match scene.format with Pele.Mermaid -> true | Svg | Graph -> false);
+        check string "Pele receives the same source as the clipboard"
+          d_orphan.copy_source scene.source;
+        check bool "snapshot has one fact node and no event or edge" true
+          (match String.split_on_char '\n' scene.source with
+          | [ "flowchart TD"; node; "" ] ->
+              String.starts_with ~prefix:"Fact[" node
+              && has_substring node "Current snapshot" && has_substring node "m-orphan"
+          | _ -> false);
+        Ok (sample_png ~w:640 ~h:480)
+      in
+      List.iter (fun kind ->
+          match render ~kind ~mode:Knowledge_store.Diagram_mode_auto scene_for_snapshot with
+          | Knowledge_store.Diagram_pele_png { format_label; _ } ->
+              check string "snapshot graphics format" "Pele Mermaid" format_label
+          | Diagram_text _ -> fail "expected a graphical snapshot")
+        [ Knowledge_store.Diagram_pele_card; Diagram_formation_tree ];
+      let narrow_lines, note =
+        Memory_diagram.render_mermaid_fallback ~ko:false ~max_width:24
+          ~kind:Knowledge_store.Diagram_pele_card chart
+      in
+      check bool "narrow Mermaid fallback displays the fact without source markup" true
+        (Option.is_some note && List.mem "m-orphan" narrow_lines
+         && List.for_all (fun line -> Grapheme.display_width line <= 24) narrow_lines);
+      let no_pele _ = fail "forced text must not call Pele" in
+      List.iter (fun mode ->
+          match render ~kind:Knowledge_store.Diagram_formation_tree ~mode no_pele with
+          | Knowledge_store.Diagram_text { lines; _ } ->
+              let body = String.concat "\n" lines in
+              check bool "text shows the selected fact as a snapshot" true
+                (has_substring body "Current snapshot" && has_substring body "m-orphan");
+              check bool "text invents no re-observation" false (has_substring body "Reobserved")
+          | Diagram_pele_png _ -> fail "expected a text snapshot")
+        [ Knowledge_store.Diagram_mode_mermaid; Diagram_mode_tree ]
+  | Some _ | None -> fail "expected a snapshot render command for the selected fact");
+  let unobserved =
+    { m_facts_en with knowledge = Knowledge_store.set_keeper_memory_activity
+        ~keeper:"alpha" Observed.Absent m_facts_en.knowledge }
+  in
+  let _, unobserved_cmds = Update.step ~now:now0 unobserved (Msg.Key_event (key_char ".")) in
+  (match find_render_cmd unobserved_cmds with
+   | Some (Cmd.Render_memory_diagram { chart = Current_snapshot snapshot; _ }) ->
+       check (option int) "missing journal has no observed count" None snapshot.activity_entries;
+       check bool "missing activity stays unobserved in the snapshot" true
+         (List.mem "Activity unavailable"
+            (Memory_lineage.snapshot_lines ~ko:false ~max_width:100 snapshot))
+   | Some _ | None -> fail "expected the selected fact from the available snapshot");
   (* Cycling [v] on snapshot diagram works cleanly (Auto -> Mermaid -> Tree) *)
   let m_orphan_v1, cmds_v1 =
     Update.step ~now:now0 m_orphan_open (Msg.Key_event (key_char "v"))

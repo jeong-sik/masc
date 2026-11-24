@@ -351,7 +351,7 @@ type t =
       tz_offset_sec : int;
       now_unix : float;
       max_width : int;
-      chart : Masc_tui_ui.Memory_lineage.chart;
+      chart : Masc_tui_ui.Memory_lineage.diagram;
     }
   | Cancel_memory_diagram
   | Fetch_artifact_and_copy of {

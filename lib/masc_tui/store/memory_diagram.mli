@@ -36,19 +36,12 @@ val chart_of_activity :
     {!Memory_lineage.chart}. Returns [None] when [activity.keeper <> keeper] or
     [selected.identity] is absent from [activity.events]. *)
 
-val chart_of_ordinary_fact :
-  ?tz_offset_sec:int ->
-  ko:bool ->
-  ?now:float ->
+val snapshot_of_ordinary_fact :
   revision:int ->
   activity:Wire_knowledge.keeper_memory_activity option ->
   Wire_knowledge.keeper_ordinary_fact ->
-  Memory_lineage.chart
-(** Construct an honest single-fact current-snapshot {!Memory_lineage.chart}
-    for an ordinary memory fact whose [memory_id] does not appear in the recent
-    activity window. Shows the fact's full claim, category, origin, revision,
-    and observed timestamps, explicitly marked as a current snapshot with no
-    fabricated transition history. *)
+  Memory_lineage.snapshot
+(** Observe the selected ordinary fact and the available activity count. *)
 
 val find_latest_event_for_fact :
   memory_id:string ->
@@ -68,7 +61,7 @@ val mermaid_source :
   ko:bool ->
   ?now:float ->
   kind:Knowledge_store.memory_diagram_kind ->
-  Memory_lineage.chart ->
+  Memory_lineage.diagram ->
   string
 (** Generate Mermaid source for [kind]: {!Memory_lineage.transition_mermaid}
     for [Diagram_pele_card] or {!Memory_lineage.mermaid} for
@@ -80,13 +73,13 @@ val render_mermaid_fallback :
   ?now:float ->
   max_width:int ->
   kind:Knowledge_store.memory_diagram_kind ->
-  Memory_lineage.chart ->
+  Memory_lineage.diagram ->
   string list * string option
 (** Render [chart] via {!Mermaid.render_adaptive} bounded to [max_width]
     (automatically retrying horizontal [LR]/[RL] flowcharts as [TD] on
-    [Too_wide]). If Mermaid still refuses the source, returns wrapped raw
-    Mermaid source lines paired with a concise diagnostic note instead of
-    raising. *)
+    [Too_wide]). If Mermaid cannot render a current snapshot, show its fact and
+    metadata at the available width. For a lineage diagram, return its wrapped
+    Mermaid source and diagnostic. *)
 
 val render_tree_lines :
   ?tz_offset_sec:int ->
@@ -94,7 +87,7 @@ val render_tree_lines :
   ?now:float ->
   ?keeper_name:string ->
   max_width:int ->
-  Memory_lineage.chart ->
+  Memory_lineage.diagram ->
   Memory_tree.line list
 (** Render [chart] into semantic {!Memory_tree.line} rows bounded by
     [max_width]. *)
@@ -107,7 +100,7 @@ val copy_source_of_chart :
   max_width:int ->
   kind:Knowledge_store.memory_diagram_kind ->
   mode:Knowledge_store.memory_diagram_mode ->
-  Memory_lineage.chart ->
+  Memory_lineage.diagram ->
   string
 (** Build the plain-text clipboard payload ([y]) for the active diagram
     (Mermaid source or rendered formation tree text). *)

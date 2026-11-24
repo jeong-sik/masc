@@ -197,7 +197,7 @@ val render_memory_diagram_payload :
   tz_offset_sec:int ->
   now_unix:float ->
   max_width:int ->
-  chart:Masc_tui_ui.Memory_lineage.chart ->
+  chart:Masc_tui_ui.Memory_lineage.diagram ->
   unit ->
   Knowledge_store.memory_diagram_payload
 (** Resolve a memory diagram render request according to [kind], [mode],
@@ -205,7 +205,8 @@ val render_memory_diagram_payload :
     automatic {!Masc_tui_term.Palette.of_theme} fallback from [theme_preset]
     when OSC 10/11 palette replies were not observed). Forced
     [Diagram_mode_mermaid] and [Diagram_mode_tree] render purely in memory
-    without calling [run_pele]. [Diagram_mode_auto] attempts Pele SVG (for
+    without calling [run_pele]. [Diagram_mode_auto] uses a single Pele Mermaid fact node for a current
+    snapshot. For a journal event it attempts Pele SVG (for
     [Diagram_pele_card]) or Pele Graph JSON (for [Diagram_formation_tree]) when
     graphics are available, automatically falling back to Mermaid or Formation
     Tree text with a 1-line diagnostic note on any capability gap or Pele

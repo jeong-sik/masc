@@ -74,83 +74,19 @@ let chart_of_activity ~keeper ~(activity : Wire_knowledge.keeper_memory_activity
     in
     Memory_lineage.select ~event_id:selected.identity lineage_activity
 
-let chart_of_ordinary_fact ?(tz_offset_sec = 0) ~ko ?now ~revision
+let snapshot_of_ordinary_fact ~revision
     ~(activity : Wire_knowledge.keeper_memory_activity option)
-    (fact : Wire_knowledge.keeper_ordinary_fact) =
-  let recorded_at =
-    if Float.is_finite fact.last_seen_unix && fact.last_seen_unix > 0.0 then
-      fact.last_seen_unix
-    else fact.first_seen_unix
-  in
-  let now_ts =
-    match now with
-    | Some ts when Float.is_finite ts && ts > 0.0 -> ts
-    | Some _ | None -> recorded_at
-  in
-  let first_str =
-    Memory_lineage.format_instant ~tz_offset_sec ~now:now_ts fact.first_seen_unix
-  in
-  let last_str =
-    Memory_lineage.format_instant ~tz_offset_sec ~now:now_ts fact.last_seen_unix
-  in
-  let cat_str = Wire_knowledge.memory_fact_category_to_string fact.category in
-  let origin_str = Wire_knowledge.memory_fact_origin_to_string fact.origin in
-  let reason =
-    if ko then
-      Printf.sprintf
-        "현재 스냅샷 (최근 변천 이력 없음) · 분류: %s · 출처: %s · r%d · 최초 %s · 최근 %s"
-        cat_str origin_str revision first_str last_str
-    else
-      Printf.sprintf
-        "Current snapshot (no recent transition history) · category: %s · origin: %s · r%d · first %s · last %s"
-        cat_str origin_str revision first_str last_str
-  in
-  let journal_lines, limit, snapshot_note =
-    match activity with
-    | Some act ->
-        let note =
-          if ko then
-            Printf.sprintf
-              "현재 스냅샷 표시 — 최근 %d건 변천 이력에 연결된 전이가 없어 이전 이력을 생성하지 않았습니다"
-              act.limit
-          else
-            Printf.sprintf
-              "Current snapshot — no transition in the latest %d activity entries; no prior history fabricated"
-              act.limit
-        in
-        (act.journal_lines, act.limit, note)
-    | None ->
-        let note =
-          if ko then
-            "현재 스냅샷 표시 — 최근 변천 이력 미관측 · 이전 이력을 생성하지 않았습니다"
-          else
-            "Current snapshot — activity log unavailable; no prior history fabricated"
-        in
-        (0, 50, note)
-  in
-  let event_id = "snapshot:" ^ fact.memory_id in
-  let snapshot_event : Memory_lineage.event =
-    {
-      identity = event_id;
-      recorded_at;
-      revision;
-      kind = Memory_lineage.Reobserved;
-      before = [];
-      after = [ { Memory_lineage.memory_id = fact.memory_id; claim = Some fact.claim } ];
-      reason = Some reason;
-    }
-  in
-  let lineage_activity : Memory_lineage.activity =
-    {
-      events = [ snapshot_event ];
-      limit;
-      journal_lines;
-      notes = [ snapshot_note ];
-    }
-  in
-  match Memory_lineage.select ~event_id lineage_activity with
-  | Some chart -> chart
-  | None -> assert false
+    (fact : Wire_knowledge.keeper_ordinary_fact) : Memory_lineage.snapshot =
+  {
+    fact = { memory_id = fact.memory_id; claim = nonblank_opt (Some fact.claim) };
+    revision;
+    category = Wire_knowledge.memory_fact_category_to_string fact.category;
+    origin = Wire_knowledge.memory_fact_origin_to_string fact.origin;
+    first_seen = fact.first_seen_unix;
+    last_seen = fact.last_seen_unix;
+    activity_entries = Option.map (fun (a : Wire_knowledge.keeper_memory_activity) ->
+        List.length a.events) activity;
+  }
 
 let event_references_fact ~memory_id (ev : Wire_knowledge.memory_activity_event)
     =
@@ -199,10 +135,13 @@ let parse_png_dimensions bytes =
       else None
 
 let mermaid_source ?tz_offset_sec ~ko ?now ~kind chart =
-  match kind with
-  | Knowledge_store.Diagram_pele_card ->
+  match chart, kind with
+  | Memory_lineage.Current_snapshot snapshot,
+    (Knowledge_store.Diagram_pele_card | Knowledge_store.Diagram_formation_tree) ->
+      Memory_lineage.snapshot_mermaid ?tz_offset_sec ~ko ?now snapshot
+  | Memory_lineage.Lineage chart, Knowledge_store.Diagram_pele_card ->
       Memory_lineage.transition_mermaid ?tz_offset_sec ~ko ?now chart
-  | Knowledge_store.Diagram_formation_tree ->
+  | Memory_lineage.Lineage chart, Knowledge_store.Diagram_formation_tree ->
       Memory_lineage.mermaid ?tz_offset_sec ~ko ?now chart
 
 let mermaid_failure_note ~ko = function
@@ -230,14 +169,26 @@ let render_mermaid_fallback ?tz_offset_sec ~ko ?now ~max_width ~kind chart =
   let src = mermaid_source ?tz_offset_sec ~ko ?now ~kind chart in
   match Mermaid.render_adaptive ~cols src with
   | Ok rows -> (rows, None)
-  | Error failure ->
-      let note = mermaid_failure_note ~ko failure in
-      let raw_lines = Knowledge_store.wrap_lines ~max_width:cols src in
-      (raw_lines, Some note)
+  | Error failure -> (
+      match chart with
+      | Memory_lineage.Current_snapshot snapshot ->
+          let note =
+            if ko then "현재 스냅샷을 텍스트로 표시합니다"
+            else "Showing the current snapshot as text"
+          in
+          (Memory_lineage.snapshot_lines ?tz_offset_sec ~ko ?now ~max_width:cols snapshot, Some note)
+      | Memory_lineage.Lineage _ ->
+          let raw_lines = Knowledge_store.wrap_lines ~max_width:cols src in
+          (raw_lines, Some (mermaid_failure_note ~ko failure)))
 
 let render_tree_lines ?tz_offset_sec ~ko ?now ?keeper_name ~max_width chart =
-  Memory_tree.render_lines ?tz_offset_sec ~ko ?now ?keeper_name
-    ~max_width:(Int.max 12 max_width) chart
+  match chart with
+  | Memory_lineage.Lineage lineage ->
+      Memory_tree.render_lines ?tz_offset_sec ~ko ?now ?keeper_name
+        ~max_width:(Int.max 12 max_width) lineage
+  | Memory_lineage.Current_snapshot snapshot ->
+      Memory_lineage.snapshot_lines ?tz_offset_sec ~ko ?now ~max_width snapshot
+      |> List.map (fun text -> { Memory_tree.kind = Memory_tree.Scope; text })
 
 let copy_source_of_chart ?tz_offset_sec ~ko ?now ?keeper_name ~max_width ~kind
     ~mode chart =
@@ -253,7 +204,7 @@ let copy_source_of_chart ?tz_offset_sec ~ko ?now ?keeper_name ~max_width ~kind
   | Knowledge_store.Diagram_mode_auto -> (
       match kind with
       | Knowledge_store.Diagram_pele_card ->
-          Memory_lineage.transition_mermaid ?tz_offset_sec ~ko ?now chart
+          mermaid_source ?tz_offset_sec ~ko ?now ~kind chart
       | Knowledge_store.Diagram_formation_tree -> tree_text ())
 
 (* --- Single-SSOT Screen Geometry (matches Chrome + Knowledge + Keepers) --- *)

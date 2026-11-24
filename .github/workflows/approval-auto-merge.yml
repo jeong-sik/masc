@@ -56,4 +56,10 @@ jobs:
           DISPATCH_PR: ${{ inputs.pr }}
           DISPATCH_RECEIPT: ${{ inputs.receipt }}
           REQUEST_FILE: ${{ runner.temp }}/approval-merge-request/request.json
+          # task-4046: the worker reads this variable before any admission work
+          # and holds new submissions while it is '1'. The vars context needs no
+          # extra permission; reading the variable through the API instead would
+          # need a Variables permission the workflow token does not have, and a
+          # failed read is treated as "not frozen".
+          MASC_RELEASE_FREEZE: ${{ vars.MASC_RELEASE_FREEZE }}
         run: python3 scripts/review/approval-auto-merge.py

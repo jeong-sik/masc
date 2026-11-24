@@ -727,7 +727,7 @@ let bindings : binding list =
         ~footer_priority:0 (mk_chord Input.Home);
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
         ~action:(Move Home) ~key_display:"g" ~hint_label:(Say.make ~ko:"처음" ~en:"Top")
-        ~help_desc:(Say.make ~ko:"맨 위로 이동 (기억: 그래프 / 코드: Git 보기 전환)" ~en:"Jump to top (Memory: flow chart / Code: toggle Git view)")
+        ~help_desc:(Say.make ~ko:"맨 위로 이동" ~en:"Jump to top")
         ~footer_priority:0 (bare_char 'g');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
         ~action:(Move End) ~key_display:"End" ~hint_label:(Say.make ~ko:"끝" ~en:"End")
@@ -809,7 +809,7 @@ let bindings : binding list =
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Cycle_view_mode ~key_display:"v"
         ~hint_label:(Say.make ~ko:"보기 전환" ~en:"View")
-        ~help_desc:(Say.make ~ko:"산출물·도구·컨텍스트·검증증거·기억·키퍼로그 하위뷰 / 기억 다이어그램 모드 전환" ~en:"Cycle sub-view (Artifacts/Tools/Context/Verification/Memory/Keeper Logs) or Memory diagram mode")
+        ~help_desc:(Say.make ~ko:"산출물·도구·컨텍스트·검증증거·기억·키퍼로그·코드 Git 하위뷰 / 기억 다이어그램 모드 전환" ~en:"Cycle sub-view (Artifacts/Tools/Context/Verification/Memory/Keeper Logs/Code Git) or Memory diagram mode")
         ~footer_priority:0 (bare_char 'v');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Context_primary_action ~key_display:"c"
@@ -942,11 +942,11 @@ let bindings : binding list =
         ~hint_label:(Say.make ~ko:"이전 일치" ~en:"Prev match")
         ~help_desc:(Say.make ~ko:"[산출물 상세] 이전 검색 결과로 이동" ~en:"[Artifact Dive] Jump to previous search match")
         ~footer_priority:0 (bare_char 'N');
-      bind ~scope:Screen_context ~tier:Bare_unfocused ~category:Cat_actions
-        ~action:Toggle_memory_chart ~key_display:"g"
+      bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
+        ~action:Toggle_memory_chart ~key_display:"M"
         ~hint_label:(Say.make ~ko:"그래프 모드" ~en:"Chart mode")
         ~help_desc:(Say.make ~ko:"[기억 탭] 기억 유입/순합 그래프 모드 전환" ~en:"[Memory] Toggle Flow I/O vs Net Total chart mode")
-        ~footer_priority:0 (bare_char 'g');
+        ~footer_priority:0 (bare_char 'M');
       bind ~scope:Screen_context ~tier:Universal_ctrl ~category:Cat_actions
         ~action:Open_external_editor ~key_display:"Ctrl+E"
         ~hint_label:(Say.make ~ko:"외부 편집기" ~en:"$EDITOR")

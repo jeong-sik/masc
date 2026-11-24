@@ -499,15 +499,6 @@ let browser_tabs_for ~client_id t =
   | Some obs -> obs
   | None -> Observed.absent
 
-let apply_browser_tabs ~observed_at ~client_id resp t =
-  {
-    t with
-    browser_tabs =
-      String_map.add client_id (Observed.value ~observed_at resp) t.browser_tabs;
-    browser_tab_selected_index = 0;
-    browser_tab_scroll_offset = 0;
-  }
-
 let mark_browser_tabs_loading ~since ~client_id t =
   {
     t with
@@ -1462,6 +1453,49 @@ let selected_browser_tab t =
   List.nth_opt items
     (clamp_index (List.length items) t.browser_tab_selected_index)
 
+let apply_browser_tabs ~observed_at ~client_id resp t =
+  let selected_client_matches =
+    match selected_browser_client t with
+    | Some cl -> String.equal cl.client_id client_id
+    | None -> false
+  in
+  let prev_tab_id =
+    if selected_client_matches then
+      Option.map
+        (fun (tb : Wire_runtime.browser_tab_row) -> tb.id)
+        (selected_browser_tab t)
+    else None
+  in
+  let next_map =
+    String_map.add client_id (Observed.value ~observed_at resp) t.browser_tabs
+  in
+  if not selected_client_matches then
+    { t with browser_tabs = next_map }
+  else
+    let next_t = { t with browser_tabs = next_map } in
+    let tabs = filtered_browser_tabs next_t in
+    let idx =
+      match prev_tab_id with
+      | Some want_id ->
+          let rec find i = function
+            | [] -> 0
+            | (tb : Wire_runtime.browser_tab_row) :: rest ->
+                if Int.equal tb.id want_id then i else find (i + 1) rest
+          in
+          find 0 tabs
+      | None -> 0
+    in
+    let scroll =
+      if idx = 0 then 0
+      else
+        Store_scroll.adjust_scroll ~scroll:t.browser_tab_scroll_offset idx
+    in
+    {
+      next_t with
+      browser_tab_selected_index = idx;
+      browser_tab_scroll_offset = scroll;
+    }
+
 let selected_lane t =
   let lanes = filtered_lanes t in
   List.nth_opt lanes (clamp_index (List.length lanes) t.selected_index)
@@ -1537,12 +1571,13 @@ let visual_row_for_selection t ~selected_index =
       let rec walk_dom vis_row item_idx = function
         | [] -> (selected_index, selected_index)
         | (d : tool_domain_group) :: d_rest ->
+            let has_fam_hdr = List.length d.families > 1 in
             let rec walk_fam vr ii first_in_dom = function
               | [] -> walk_dom vr ii d_rest
               | (f : tool_family_group) :: f_rest ->
                   let n = List.length f.tools in
                   let fam_hdr = vr in
-                  let first_item_row = vr + 1 in
+                  let first_item_row = if has_fam_hdr then vr + 1 else vr in
                   if selected_index < ii + n then
                     let offset = selected_index - ii in
                     let row = first_item_row + offset in

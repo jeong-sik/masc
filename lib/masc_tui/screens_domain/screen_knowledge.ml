@@ -456,9 +456,11 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                          String.equal m.id sid)
                        grp.members
                in
+               let is_multi = List.length grp.members > 1 in
+               let group_is_sel = group_has_sel && not (is_expanded && is_multi) in
                visual_rows :=
-                 (`Group (grp, is_expanded, group_has_sel)) :: !visual_rows;
-               if is_expanded && List.length grp.members > 1 then
+                 (`Group (grp, is_expanded, group_is_sel)) :: !visual_rows;
+               if is_expanded && is_multi then
                  let total_m = List.length grp.members in
                  List.iteri
                    (fun idx (m : Wire_knowledge.board_post) ->
@@ -646,8 +648,9 @@ let extract_markdown_headings (md : string) : (int * string) list =
            Some (1, String.trim (String.sub s 2 (String.length s - 2)))
          else None)
 
-let draw_wiki_preview ~target_slug ~scroll ~grid ~cache ~(rect : Rect.t)
-    ~(theme : Theme.t) ~bp ~lang ~(k : Knowledge_store.t) ~focused =
+let draw_wiki_preview ~show_inline_rail ~target_slug ~scroll ~grid ~cache
+    ~(rect : Rect.t) ~(theme : Theme.t) ~bp ~lang ~(k : Knowledge_store.t)
+    ~focused =
   let sel_summary =
     match target_slug with
     | Some want -> (
@@ -700,8 +703,8 @@ let draw_wiki_preview ~target_slug ~scroll ~grid ~cache ~(rect : Rect.t)
                    Say.make ~ko:"[e] 편집 · [Ctrl+E] $EDITOR · [Esc] 뒤로"
                      ~en:"[e] Edit · [Ctrl+E] $EDITOR · [Esc] Back"
                | None ->
-                   Say.make ~ko:"[Enter] 전체보기 · [e] 편집"
-                     ~en:"[Enter] Dive · [e] Edit"))
+                   Say.make ~ko:"[Enter] 전체보기 · [e] 편집 · [Ctrl+E] $EDITOR"
+                     ~en:"[Enter] Dive · [e] Edit · [Ctrl+E] $EDITOR"))
          title)
   in
   if Rect.is_empty inner then ()
@@ -734,7 +737,8 @@ let draw_wiki_preview ~target_slug ~scroll ~grid ~cache ~(rect : Rect.t)
             in
             if not (Rect.is_empty below) then begin
               let show_toc_rail =
-                Layout.equal_breakpoint bp Layout.Wide
+                show_inline_rail
+                && Layout.equal_breakpoint bp Layout.Wide
                 && below.w >= 68
                 && below.h >= 8
               in
@@ -1053,9 +1057,9 @@ let render_wiki ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~b
     (H.draw_pills ~grid ~rect:bar_rect ~theme ~right_hint:lint_hint_str
        mode_pills);
   if model.nav.zoomed then
-    draw_wiki_preview ~target_slug:None ~scroll:k.detail_scroll_offset
-      ~grid ~cache ~rect:body_rect ~theme ~bp ~lang ~k
-      ~focused:(Model.body_has_focus model)
+    draw_wiki_preview ~show_inline_rail:true ~target_slug:None
+      ~scroll:k.detail_scroll_offset ~grid ~cache ~rect:body_rect ~theme ~bp
+      ~lang ~k ~focused:(Model.body_has_focus model)
   else
     let left_rect, right_rect =
       Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.38
@@ -1276,9 +1280,9 @@ let render_wiki ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~b
           (H.safe_take (log_rows - 1) log_entries)
       end
     end;
-    draw_wiki_preview ~target_slug:None ~scroll:k.detail_scroll_offset ~grid
-      ~cache ~rect:right_rect ~theme ~bp ~lang ~k
-      ~focused:(Model.pane_focused model 1)
+    draw_wiki_preview ~show_inline_rail:true ~target_slug:None
+      ~scroll:k.detail_scroll_offset ~grid ~cache ~rect:right_rect ~theme ~bp
+      ~lang ~k ~focused:(Model.pane_focused model 1)
 
 (* --- 2b. Rich HTML & Markdown Artifacts Renderer (1st-class sub-tab + Dive) --- *)
 
@@ -2443,8 +2447,9 @@ let draw_world_and_librarian ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       | Observed.Failed _ ) as obs ->
         H.draw_observed_placeholder ~grid ~rect:content ~theme ~lang obs
 
-let draw_temporal_memory_diff ~(model : Model.t) ~grid ~cache ~(rect : Rect.t)
-    ~(theme : Theme.t) ~bp ~lang ~now_unix ~(k : Knowledge_store.t) ~focused =
+let draw_temporal_memory_diff ~is_dive ~(model : Model.t) ~grid ~cache
+    ~(rect : Rect.t) ~(theme : Theme.t) ~bp ~lang ~now_unix
+    ~(k : Knowledge_store.t) ~focused =
   let scope_str =
     match k.memory_diff_keeper with
     | None -> Say.resolve lang (Say.make ~ko:"월드 메모리" ~en:"World Memory")
@@ -2459,6 +2464,18 @@ let draw_temporal_memory_diff ~(model : Model.t) ~grid ~cache ~(rect : Rect.t)
         Printf.sprintf "rev %d->%d" from_rev to_rev
   in
   let title, hotkey =
+    if is_dive then
+      ( (match k.memory_diff_keeper with
+         | Some _ ->
+             Say.resolve lang
+               (Say.make ~ko:"키퍼 기억 Diff 상세" ~en:"Keeper Memory Diff Dive")
+         | None ->
+             Say.resolve lang
+               (Say.make ~ko:"월드 기억 Diff 상세" ~en:"World Memory Diff Dive"))
+      , Say.resolve lang
+          (Say.make ~ko:"[↑↓] 스크롤 · [Enter] 전문 · [M] 차트 · [Esc] 뒤로"
+             ~en:"[↑↓] Scroll · [Enter] Read · [M] Chart · [Esc] Back") )
+    else
     match k.memory_diff_keeper with
     | Some kp ->
         let diagram_open =
@@ -2487,8 +2504,8 @@ let draw_temporal_memory_diff ~(model : Model.t) ~grid ~cache ~(rect : Rect.t)
             (Say.make ~ko:"시간축 메모리 Diff 스크러버"
                ~en:"Temporal Memory Diff Scrubber")
         , Say.resolve lang
-            (Say.make ~ko:"[w] 창 · [m] 범위 · [g] 흐름/총량"
-               ~en:"[w] Window · [m] Scope · [g] Flow/Net") )
+            (Say.make ~ko:"[w] 창 · [m] 범위 · [M] 흐름/총량"
+               ~en:"[w] Window · [m] Scope · [M] Flow/Net") )
   in
   let inner =
     Card.draw ~cache grid ~rect ~theme
@@ -2660,14 +2677,14 @@ let render_memory ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     (H.draw_pills ~grid ~rect:top_rect ~theme
        ~right_hint:
          (Say.resolve lang
-            (Say.make ~ko:"[v] 하위뷰 · [g] 차트 · [w] 기간"
-               ~en:"[v] View · [g] Flow · [w] Window"))
+            (Say.make ~ko:"[v] 하위뷰 · [M] 차트 · [w] 기간"
+               ~en:"[v] View · [M] Flow · [w] Window"))
        pills);
   let draw_right ~rect ~focused =
     match k.memory_subview with
     | Knowledge_store.Mem_diff_flow ->
-        draw_temporal_memory_diff ~model ~grid ~cache ~rect ~theme ~bp ~lang
-          ~now_unix ~k ~focused
+        draw_temporal_memory_diff ~is_dive:false ~model ~grid ~cache ~rect
+          ~theme ~bp ~lang ~now_unix ~k ~focused
     | Knowledge_store.Mem_health_ledger | Knowledge_store.Mem_context ->
         draw_memory_subview_card ~grid ~cache ~rect ~theme ~bp ~lang ~k ~focused
   in
@@ -2766,22 +2783,10 @@ let render_dive_thread ~post_id ~(model : Model.t) ~cache ~(rect : Rect.t)
     in
     [
       {
-        H.label = Say.resolve lang (Say.make ~ko:"이전" ~en:"Prev");
-        active = false;
-        tone = Some Theme.Status_active;
-        glyph = Some Glyph.External_arrow;
-      };
-      {
         H.label = depth_info;
         active = true;
         tone = Some Theme.Status_ok;
         glyph = None;
-      };
-      {
-        H.label = Say.resolve lang (Say.make ~ko:"다음" ~en:"Next");
-        active = false;
-        tone = Some Theme.Status_active;
-        glyph = Some Glyph.Focus_caret;
       };
       {
         H.label = Say.resolve lang (Say.make ~ko:"[c] 댓글" ~en:"[c] Comment");
@@ -3003,9 +3008,9 @@ let render_dive_wiki ~slug ~(model : Model.t) ~cache ~(rect : Rect.t)
     Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.66
       ~top_ratio:0.68 bp rect
   in
-  draw_wiki_preview ~target_slug:(Some slug) ~scroll:model.nav.dive_scroll_offset
-    ~grid ~cache ~rect:main_rect ~theme ~bp ~lang ~k
-    ~focused:(Model.body_has_focus model);
+  draw_wiki_preview ~show_inline_rail:false ~target_slug:(Some slug)
+    ~scroll:model.nav.dive_scroll_offset ~grid ~cache ~rect:main_rect ~theme
+    ~bp ~lang ~k ~focused:(Model.body_has_focus model);
   let side_inner =
     Card.draw ~cache grid ~rect:side_rect ~theme
       (H.card_spec ~subtitle:slug
@@ -3129,6 +3134,7 @@ let render_dive_memory ~keeper ~from_rev ~to_rev ~(model : Model.t) ~cache
       (Knowledge_store.scope_memory_diff_dive ~keeper ~from_rev ~to_rev
          model.knowledge)
       with
+      memory_subview = Knowledge_store.Mem_diff_flow;
       memory_view_mode = Knowledge_store.View_diff;
       diff_scroll_offset = model.nav.dive_scroll_offset;
     }
@@ -3140,7 +3146,9 @@ let render_dive_memory ~keeper ~from_rev ~to_rev ~(model : Model.t) ~cache
       knowledge = k_scoped;
     }
   in
-  render_memory ~model:scoped_model ~cache ~rect ~theme ~bp grid
+  draw_temporal_memory_diff ~is_dive:true ~model:scoped_model ~grid ~cache ~rect
+    ~theme ~bp ~lang:model.lang ~now_unix:model.freshness.last_wall_unix
+    ~k:k_scoped ~focused:(Model.body_has_focus model)
 
 let render_dive ~(target : Nav.knowledge_dive_target) ~(model : Model.t) ~cache
     ~(rect : Rect.t) grid =

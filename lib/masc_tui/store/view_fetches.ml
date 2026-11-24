@@ -656,7 +656,10 @@ let fetches_for_workspace ~force (m : Model.t) =
           |> add_if
                (needs_fetch ~force m.knowledge.wiki_index)
                (Cmd.Get_wiki_index { tag = None; source = None; sort = None })
-          |> add_if (needs_fetch ~force m.knowledge.wiki_lint) Cmd.Get_wiki_lint)
+          |> add_if (needs_fetch ~force m.knowledge.wiki_lint) Cmd.Get_wiki_lint
+          |> add_if
+               (needs_fetch ~force m.knowledge.wiki_log)
+               (Cmd.Get_wiki_log { limit = Some 30; page = None }))
           @ selected_wiki_page_reqs ~force m
       | Nav.Knowledge_artifacts ->
           let selected_artifact_req =

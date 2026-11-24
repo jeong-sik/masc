@@ -626,12 +626,23 @@ type board_space_effect =
   | Board_space_toggle_chain of string
   | Board_space_toggle_signal_only
 
-let board_space_effect t =
+let selected_post_expandable_chain_root t =
   match selected_post t with
   | Some { Wire_knowledge.succession_chain_root_id = Some root_id; _ } ->
-      Board_space_toggle_chain root_id
-  | Some { Wire_knowledge.succession_chain_root_id = None; _ } | None ->
-      Board_space_toggle_signal_only
+      let has_multi =
+        List.exists
+          (fun (grp : succession_group) ->
+            Option.equal String.equal grp.chain_root_id (Some root_id)
+            && List.length grp.members > 1)
+          (group_succession_chains (filtered_posts t))
+      in
+      if has_multi then Some root_id else None
+  | Some { Wire_knowledge.succession_chain_root_id = None; _ } | None -> None
+
+let board_space_effect t =
+  match selected_post_expandable_chain_root t with
+  | Some root_id -> Board_space_toggle_chain root_id
+  | None -> Board_space_toggle_signal_only
 
 let selected_wiki_page t =
   let ps = wiki_display_pages t in
@@ -980,7 +991,14 @@ let toggle_succession_chain ~root_id t =
   { next with selected_index; scroll_offset }
 
 let set_memory_diff_window memory_diff_window t =
-  { t with memory_diff_window }
+  {
+    t with
+    memory_diff_window;
+    selected_diff_index = 0;
+    diff_scroll_offset = 0;
+    memory_reading = None;
+    memory_reading_scroll = 0;
+  }
 
 let cycle_memory_diff_window t =
   let next =
@@ -2437,9 +2455,16 @@ let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t 
                       Store_scroll.clamp_scroll ~max_scroll
                         (t.diff_scroll_offset + delta)
                     in
+                    let entry_delta =
+                      let ad = abs delta in
+                      if ad <= 1 || ad >= 100_000 then delta
+                      else
+                        let step = max 1 (ad / 3) in
+                        if delta < 0 then -step else step
+                    in
                     let selected_diff_index =
                       clamp_index (memory_diff_entry_count t)
-                        (t.selected_diff_index + delta)
+                        (t.selected_diff_index + entry_delta)
                     in
                     { t with diff_scroll_offset; selected_diff_index }))
       else

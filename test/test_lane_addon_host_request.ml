@@ -22,7 +22,6 @@ let test_a_listing_is_refused_whole () =
     ; "not an object", `List [] ];
   check bool "an empty listing is a listing" true (Host.listing_of_json (`Assoc [ "requests", `List [] ]) = Ok [])
 
-(* RFC librarian-read-waits-and-shrinks-no-further-than-the-refusal-says 3.1. *)
 let test_a_page_rises_above_its_cursor () =
   let page ids = `Assoc [ "requests", `List (List.map exact ids) ] in
   let read ~after json = Result.map (List.map Host.request_id) (Host.page_of_json ~after json) in

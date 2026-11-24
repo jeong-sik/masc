@@ -7,7 +7,7 @@ updated: 2026-11-17
 author: vincent + claude
 supersedes: []
 superseded_by: null
-related: ["librarian-read-waits-and-shrinks-no-further-than-the-refusal-says", "librarian-ends-waiting-requests-of-a-replaced-declaration"]
+related: []
 ---
 
 # Exact worker package 는 서버가 싣고 다니고, 선언은 실은 package 를 이름으로 부른다

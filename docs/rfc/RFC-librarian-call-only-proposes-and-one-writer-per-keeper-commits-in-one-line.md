@@ -7,7 +7,7 @@ updated: 2026-11-21
 author: vincent + claude
 supersedes: []
 superseded_by: null
-related: ["librarian-lifecycle", "0517", "librarian-read-waits-and-shrinks-no-further-than-the-refusal-says", "0474"]
+related: ["librarian-lifecycle", "0517", "0474"]
 ---
 
 # Librarian 의 모델 호출은 제안만 하고, 반영은 Keeper 마다 하나인 쓰는 쪽이 기록 한 줄로 한다
@@ -808,7 +808,7 @@ type bottom = { with_memory : judged option; alone : judged option }  (* 맨 앞
 
 ### 7.6 폭 기억
 
-거절된 범위를 기억하지 않으면, 반영할 때마다 가장 넓은 폭부터 다시 거절당한다. 운영자 RFC 가 이름 붙여 거절한 모양이다([RFC-librarian-read-waits-and-shrinks-no-further-than-the-refusal-says](RFC-librarian-read-waits-and-shrinks-no-further-than-the-refusal-says.md) §3.2).
+거절된 범위를 기억하지 않으면, 반영할 때마다 가장 넓은 폭부터 다시 거절당한다. 운영자가 이름 붙여 거절한 모양이다.
 쓰는 쪽은 거절된 범위마다 그 크기와 아직 안 읽은 양을 메모리에 둔다.
 
 ```ocaml

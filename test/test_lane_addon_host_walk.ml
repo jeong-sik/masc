@@ -156,8 +156,7 @@ let test_a_kept_exception_outlives_a_later_stop = in_eio (fun () ->
   check bool "the kept exception, not a combination" true
     (match !raised with Some (Failure message) -> String.equal message "broken" | Some _ | None -> false))
 
-(* A listing of several pages (RFC
-   librarian-read-waits-and-shrinks-no-further-than-the-refusal-says 3.1).
+(* A listing of several pages.
    Reading a page is noted like a request, so each test states when the walk
    reads it. *)
 let then_page t name listing () = note t ("read " ^ name); listing

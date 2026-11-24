@@ -89,8 +89,7 @@ type host_request_listing =
           requests the worker waits for (RFC operator-quiz §4.4). *)
   | Pages
       (** [[world] host_request_pages = true]: the worker answers one page per
-          call (RFC librarian-read-waits-and-shrinks-no-further-than-the-refusal-says
-          3.1). A page is exactly [{"requests": [...]}] and lists, in rising
+          call. A page is exactly [{"requests": [...]}] and lists, in rising
           request id order, the pending requests after the cursor it was asked
           with. The host asks for the next page after the last id of each page
           and stops at an empty page. *)

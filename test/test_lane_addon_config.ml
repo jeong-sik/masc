@@ -747,7 +747,6 @@ let operator_asks_are_a_package_declaration () = with_directory (fun _root packa
     check bool ("world.asks refuses " ^ table) true (Result.is_error (load_declaration ~path)))
     [ "operator = \"yes\"\n"; "operator = true\nkeeper = true\n" ])
 
-(* RFC librarian-read-waits-and-shrinks-no-further-than-the-refusal-says 3.1. *)
 let host_request_pages_are_a_package_declaration () = with_directory (fun _root packages directory ->
   let manifest = install_package packages in
   let path = Filename.concat directory "quiz.toml" in

@@ -244,7 +244,7 @@ module Outcomes = Map.Make (Destination_key)
    §3.2). An immutable map behind an atomic: asks run on several fibers and
    domains, readers take a snapshot without waiting. No call is refused
    here; the Librarian gate reads it to decide whether a refused original
-   retains a new attempt (RFC librarian-gate-waits-on-the-destination-not-on-passes). *)
+   retains a new attempt. *)
 let outcomes : destination_outcome Outcomes.t Atomic.t = Atomic.make Outcomes.empty
 
 let note_outcome key update =

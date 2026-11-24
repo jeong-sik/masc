@@ -923,8 +923,7 @@ let test_a_request_listed_again_after_delivery_ends_the_cycle () =
       check string "for that request" "r3" (text "request_id" issue)
     | _ -> fail "a relisted delivered request must end the cycle with an issue")
 
-(* RFC librarian-read-waits-and-shrinks-no-further-than-the-refusal-says 3.1:
-   one pass walks every page of the listing. *)
+(* One pass walks every page of the listing. *)
 let paged_manifest = manifest_with_world "host_request_pages=true\n"
 
 let answered ~validate =

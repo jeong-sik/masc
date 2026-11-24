@@ -7,7 +7,7 @@ updated: 2026-11-17
 author: claude
 supersedes: []
 superseded_by: null
-related: ["turn-failure-visible-stop", "librarian-gate-waits-on-the-destination-not-on-passes", "0492"]
+related: ["turn-failure-visible-stop", "0492"]
 ---
 
 # RFC-0522: 실측 provider 실패를 로컬 대역 끝점에서 재생해 생산 호출 체인으로 고정한다
@@ -20,7 +20,7 @@ related: ["turn-failure-visible-stop", "librarian-gate-waits-on-the-destination-
   - 2026-11-12 사용자 결정: PR·병합당 CI run 수를 늘리는 설계는 하지 않는다(constitution build_and_ci "PR·일반 branch push 로 자동 CI 를 시작하지 않는다"와 같은 방향). 재생 시험은 기존 테스트 binary 안에서만 돈다.
   - RFC-turn-failure-visible-stop: 실패 면제와 클래스별 예산을 걷어냈고, 각 레인이 소유한 유한한 시도가 끝나 턴이 실패하면 원인 불문 crash 계정에 오른다. 이 RFC 는 그 계정에 오르는 입력을 실측 모양 그대로 만들어 준다. 계정 규칙은 바꾸지 않는다.
   - RFC-0492: provider 연결은 프로세스 하나의 캐시에서 재사용되고, 쓰기 실패는 request_not_delivered/Possibly_delivered 로 갈라 재전송 여부를 정한다. #51648 의 두 와이어 모양은 이 구분의 입력이다.
-  - RFC-librarian-gate-waits-on-the-destination-not-on-passes(#52386): 판정 서버 거절은 닫힌 합타입으로 나뉘고 Refusing 중에는 새 시도를 만들지 않는다. 판정 서버 재생은 이 RFC 의 1단계 범위 밖이다(§5 D2).
+  - 판정 서버 거절(#52386): 닫힌 합타입으로 나뉘고 Refusing 중에는 새 시도를 만들지 않는다. 판정 서버 재생은 이 RFC 의 1단계 범위 밖이다(§5 D2).
   - constitution forbidden#budget_gate, #string_matching: 재생 시험은 분류·회전 규칙에 새 숫자·문자열 판단을 넣지 않는다.
   - constitution testing: feature_surface 의 기능을 시험한다. 이 RFC 가 시험하는 기능은 runtime 그룹의 Model Free·Provider Free·failover 다. 함수 시험을 늘리는 게 아니다.
 - 코드 좌표는 `origin/main` `277c8f55816d` 에서 읽었다(리뷰가 지적한 retry.ml·http_client.mli·RUNTIME-TOML-REFERENCE.md §9·test_http_client_cache.ml 좌표는 리뷰 시점 base 에서 재확인했다). 운영 로그는 읽지 않았다.

@@ -84,6 +84,7 @@ type dataset_invalidation =
   | Dataset_activity
   | Dataset_gate
   | Dataset_keepers
+  | Dataset_lane_addons
   | Dataset_other of string
 
 type agent_core_kind =
@@ -200,11 +201,13 @@ type delivery = {
 let is_legacy_stripped_type t =
   String.starts_with ~prefix:"msx_" t
   || String.starts_with ~prefix:"msx:" t
-  || String.starts_with ~prefix:"lane_addon" t
   || String.starts_with ~prefix:"keeper_skill_activation" t
   || String.equal t "skill_catalog_published"
-  || String.equal t "lane_addon_exports_changed"
   || String.equal t "installation_asks_changed"
+
+let is_lane_addon_event_type t =
+  String.starts_with ~prefix:"lane_addon" t
+  || String.starts_with ~prefix:"masc:lane:" t
 
 let dataset_of_wire ~keeper name =
   match String.lowercase_ascii (String.trim name) with
@@ -229,6 +232,7 @@ let dataset_of_wire ~keeper name =
   | "activity" -> Dataset_activity
   | "gate" -> Dataset_gate
   | "keepers" | "keeper_composite" -> Dataset_keepers
+  | "lane_addons" | "lane_addon" | "browser_observation" -> Dataset_lane_addons
   | other -> Dataset_other other
 
 (* Custom agent-core payloads are not typed on the wire: sse_event.atd types
@@ -281,10 +285,10 @@ let decode_agent_core_kind ~event_type payload =
 
 let decode_agent_core json =
   let* event_type = required_nonblank_string json "event_type" in
-  if
-    String.starts_with ~prefix:"lane_addon" event_type
-    || String.starts_with ~prefix:"msx" event_type
-  then Ok (Ignored_legacy event_type)
+  if is_lane_addon_event_type event_type then
+    Ok (Dataset_changed Dataset_lane_addons)
+  else if String.starts_with ~prefix:"msx" event_type then
+    Ok (Ignored_legacy event_type)
   else
     let* at_unix = required_finite_float json "ts_unix" in
     let* agent = optional_nonblank_string json "agent_name" in
@@ -319,7 +323,9 @@ let decode_agent_core json =
          })
 
 let decode_typed_event type_name json =
-  if is_legacy_stripped_type type_name then Ok (Ignored_legacy type_name)
+  if is_lane_addon_event_type type_name then
+    Ok (Dataset_changed Dataset_lane_addons)
+  else if is_legacy_stripped_type type_name then Ok (Ignored_legacy type_name)
   else if String.starts_with ~prefix:"agent_core:" type_name then
     decode_agent_core json
   else

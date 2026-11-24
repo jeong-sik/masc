@@ -358,20 +358,16 @@ let render_top_rail grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
       Render_util.freshness_pill ~model ~compact
     in
     let is_live =
-      match (fresh_tone, model.freshness.observer) with
-      | Theme.Status_ok, Health.Live _ -> true
-      | ( Theme.Status_ok
-        | Theme.Status_active
-        | Theme.Status_attention
-        | Theme.Status_critical
-        | Theme.Status_ai
-        | Theme.Status_historical ),
-        ( Health.Connecting
-        | Health.Live _
-        | Health.Reconnecting _
-        | Health.Stale _
-        | Health.Disconnected _
-        | Health.Workspace_mismatch _ ) ->
+      match (fresh_tone, Model.active_view_ssot_mode model) with
+      | Theme.Status_ok, Model.Live_sse { freshness; _ } ->
+          Health.is_transport_live freshness
+      | ( Theme.Status_ok,
+          (Model.Synced_snapshot _ | Model.Snapshot_only _) )
+      | ( ( Theme.Status_active | Theme.Status_attention
+          | Theme.Status_critical | Theme.Status_ai | Theme.Status_historical ),
+          ( Model.Live_sse _
+          | Model.Synced_snapshot _
+          | Model.Snapshot_only _ ) ) ->
           false
     in
     let fresh_item =
@@ -566,6 +562,7 @@ let compact_runtime_tab_label ~(lang : Say.lang) ~compact tab =
     | Nav.Runtime_efficiency_spend -> Say.resolve lang (Say.make ~ko:"효율·지출" ~en:"Spend")
     | Nav.Runtime_failover_lanes -> Say.resolve lang (Say.make ~ko:"페일오버" ~en:"Lanes")
     | Nav.Runtime_tools_connectors -> Say.resolve lang (Say.make ~ko:"도구·연동" ~en:"Tools")
+    | Nav.Runtime_addons_browser -> Say.resolve lang (Say.make ~ko:"애드온·웹" ~en:"Addons")
 
 let compact_infra_tab_label ~(lang : Say.lang) ~compact tab =
   if not compact then Say.resolve lang (Nav.infra_tab_label tab)
@@ -1107,13 +1104,13 @@ let footer_right_status_hint ~(model : Model.t) =
         | Nav.System_gate Nav.Media_viewer ) ->
         Say.resolve lang (Say.make ~ko:"Esc 돌아가기" ~en:"Esc return")
     | None -> (
-        let _, fresh_lbl, _ = Render_util.freshness_pill ~model ~compact:true in
+        let ssot_hint = Render_util.footer_ssot_hint ~model in
         match workspace_basename model with
-        | Some ws ->
-            Printf.sprintf "SSE %s %s %s" fresh_lbl
+        | Some ws when Grapheme.display_width ssot_hint <= 20 ->
+            Printf.sprintf "%s %s %s" ssot_hint
               (Glyph.to_utf8 Glyph.Separator_dot)
-              (Grapheme.truncate_to_width ~max_width:14 ws)
-        | None -> Printf.sprintf "SSE %s" fresh_lbl)
+              (Grapheme.truncate_to_width ~max_width:12 ws)
+        | Some _ | None -> ssot_hint)
 
 let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
     ~breakpoint ~composer_folded =

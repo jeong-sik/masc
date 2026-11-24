@@ -612,8 +612,22 @@ let open_overlay (m : Model.t) overlay =
         | Wire_config.Target_keeper_create ) ) ->
         Config_store.cancel_edit_field m.config
   in
+  let knowledge =
+    match overlay with
+    | Nav.System_gate Nav.Media_viewer ->
+        { m.knowledge with detail_scroll_offset = 0 }
+    | Nav.Palette
+    | Nav.Settings _
+    | Nav.Incidents
+    | Nav.Queue_context _
+    | Nav.Inline_action _
+    | Nav.Help
+    | Nav.System_gate
+        (Nav.Auth_gate | Nav.Server_offline | Nav.Micro_viewport) ->
+        m.knowledge
+  in
   let next =
-    { m with nav; drafts; config; inline_modal = None }
+    { m with nav; drafts; config; knowledge; inline_modal = None }
     |> Model.sync_sidebar_cursor
   in
   (next, View_fetches.fetches_for_current_view next)
@@ -2213,7 +2227,8 @@ let enter_plan (m : Model.t) : enter_plan =
                     (Nav.Dive_keeper
                        { name = row.keeper; tab = Nav.Keeper_work_candle })
               | None -> Enter_noop)
-          | Nav.Runtime_tools_connectors -> Enter_noop)
+          | Nav.Runtime_tools_connectors | Nav.Runtime_addons_browser ->
+              Enter_noop)
       | Nav.Infra -> (
           match m.infra.active_tab with
           | Nav.Infra_sandboxes -> (
@@ -2957,6 +2972,7 @@ let estimated_viewport_rows (m : Model.t) =
           match m.runtime.active_tab with
           | Nav.Runtime_efficiency_spend -> max 4 ((rows - 10) * 40 / 100)
           | Nav.Runtime_tools_connectors -> max 4 (rows - 21)
+          | Nav.Runtime_addons_browser -> max 4 (rows - 14)
           | Nav.Runtime_quotas_credits | Nav.Runtime_failover_lanes ->
               max 4 (rows - 11))
       | Nav.Infra -> max 4 (rows - 12))
@@ -3587,9 +3603,10 @@ let memory_right_pane_max_scroll ~bp ~(rect : Rect.t)
     match Observed.to_option (Knowledge_store.current_memory_diff k) with
     | None -> 0
     | Some _ ->
-        (* Matches draw_temporal_memory_diff (screen_knowledge.ml:2183-2317):
+        (* Matches draw_temporal_memory_diff (screen_knowledge.ml):
            Row 0 summary (1) + Stacked_bar (2 if y+1 < bottom, unconditionally
            for both Keeper_diff and World_diff) + OS line (1 if keeper matches)
+           + Memory_flow Braille chart (chart_height_for ~avail_h:(bottom - y))
            + divider (1). *)
         let y = ref 0 in
         let bottom = content.h in
@@ -3602,6 +3619,10 @@ let memory_right_pane_max_scroll ~bp ~(rect : Rect.t)
          with
         | Some _ when !y < bottom -> incr y
         | Some _ | None -> ());
+        let flow_h =
+          Masc_tui_ui.Memory_flow.chart_height_for ~avail_h:(bottom - !y)
+        in
+        if flow_h > 0 then y := !y + flow_h;
         if !y < bottom then incr y;
         let avail_h = max 1 (bottom - !y) in
         max 0 (Knowledge_store.memory_diff_line_count k - avail_h)
@@ -3667,7 +3688,7 @@ let knowledge_detail_max_scroll (m : Model.t) =
   | Nav.Knowledge_artifacts -> (
       match Knowledge_store.selected_artifact k with
       | None -> 0
-      | Some _ ->
+      | Some a ->
           let _, right_rect =
             Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
               ~left_ratio:0.56 ~top_ratio:0.54 bp body_after_bar
@@ -3678,12 +3699,19 @@ let knowledge_detail_max_scroll (m : Model.t) =
             Rect.make ~x:inner.x ~y:(inner.y + band_h) ~w:inner.w
               ~h:(max 0 (inner.h - band_h))
             |> ui_pad_content ~bp
-              in
-              let content_h = max 1 content.h in
-              (* ID, SHA-256, Author, Created and the viewer link, as
-                 Screen_knowledge draws them. *)
-              let total_rows = 5 in
-              max 0 (total_rows - content_h))
+          in
+          let content_h = max 1 content.h in
+          let detail_opt = Knowledge_store.artifact_detail_for_entry a k in
+          let preview_lines =
+            Knowledge_store.artifact_preview_lines a detail_opt
+          in
+          (* ID, SHA-256, Author, Created, Summary, Actions as Screen_knowledge draws them. *)
+          let meta_rows = 6 in
+          let body_rows =
+            if preview_lines = [] then 0 else 1 + List.length preview_lines
+          in
+          let total_rows = meta_rows + body_rows in
+          max 0 (total_rows - content_h))
   | Nav.Knowledge_memory ->
       let right_rect =
         if m.nav.zoomed then body_after_bar
@@ -3961,7 +3989,7 @@ let work_detail_max_scroll (m : Model.t) =
                 in
                 markdown_max_scroll ~theme ~width:w ~height:md_h prompt_md
             | Attention.Payload_goal_confirmation g ->
-                let md_h = max 0 (avail_h - 3) in
+                let md_h = max 0 (avail_h - 2) in
                 if md_h <= 0 then 0
                 else
                   markdown_max_scroll ~theme ~width:w ~height:md_h
@@ -4041,7 +4069,10 @@ let runtime_detail_max_scroll (m : Model.t) =
               (* gauge (1) + divider (1) = 2 rows before slot probes *)
               let avail_slot_rows = max 1 (body_area.h - 2) in
               max 0 (List.length lane.runtime_ids - avail_slot_rows))
-  | Nav.Runtime_efficiency_spend | Nav.Runtime_tools_connectors -> 0
+  | Nav.Runtime_efficiency_spend
+  | Nav.Runtime_tools_connectors
+  | Nav.Runtime_addons_browser ->
+      0
 
 let infra_detail_max_scroll (m : Model.t) =
   let bp = ui_bp m in
@@ -4111,9 +4142,9 @@ let infra_detail_max_scroll (m : Model.t) =
                 max 0 (List.length rows - diff_h))
       | None -> 0)
   | Nav.Infra_activity_logs -> (
-      match Infra_store.selected_log m.infra with
+      match Infra_store.selected_timeline_entry m.infra with
       | None -> 0
-      | Some e ->
+      | Some entry ->
           let body_rect =
             match
               Masc_tui_ui.Layout.split_v br
@@ -4136,21 +4167,41 @@ let infra_detail_max_scroll (m : Model.t) =
               |> ui_pad_content ~bp
             in
             if Rect.is_empty content then 0
-            else
-              let max_msg_rows = min 6 (max 1 (content.h - 2)) in
-              let msg_lines =
-                Chat_transcript.wrap_plain_lines
-                  ~width:(max 1 (content.w - 2))
-                  e.message
-              in
-              let msg_n = min max_msg_rows (List.length msg_lines) in
-              let tree_h = max 1 (content.h - msg_n - 1) in
-              let total =
-                List.length
-                  (Masc_tui_ui.Json_tree.flatten ~max_depth:4
-                     ~redact_secrets:true e.details)
-              in
-              max 0 (total - tree_h))
+            else (
+              match entry with
+              | Infra_store.Entry_log e ->
+                  let max_msg_rows = min 6 (max 1 (content.h - 2)) in
+                  let msg_lines =
+                    Chat_transcript.wrap_plain_lines
+                      ~width:(max 1 (content.w - 2))
+                      e.message
+                  in
+                  let msg_n = min max_msg_rows (List.length msg_lines) in
+                  let tree_h = max 1 (content.h - msg_n - 1) in
+                  let total =
+                    List.length
+                      (Masc_tui_ui.Json_tree.flatten ~max_depth:4
+                         ~redact_secrets:true e.details)
+                  in
+                  max 0 (total - tree_h)
+              | Infra_store.Entry_event ev ->
+                  let detail_lines =
+                    match ev.detail with
+                    | Some d when not (String.equal (String.trim d) "") ->
+                        Chat_transcript.wrap_plain_lines
+                          ~width:(max 1 (content.w - 2))
+                          d
+                    | Some _ | None -> []
+                  in
+                  let sum_lines =
+                    Chat_transcript.wrap_plain_lines
+                      ~width:(max 1 (content.w - 2))
+                      ev.summary
+                  in
+                  let total =
+                    List.length sum_lines + 3 + List.length detail_lines
+                  in
+                  max 0 (total - max 1 content.h)))
 
 let keeper_tab_max_scroll ~embedded (m : Model.t) ~name ~tab =
   let content_w, content_h =
@@ -4184,7 +4235,18 @@ let keeper_tab_max_scroll ~embedded (m : Model.t) ~name ~tab =
               let heat_rows =
                 if heat_total > 0 && body_h - base >= 4 then 3 else 0
               in
-              base + heat_rows
+              let y_after_heat = base + heat_rows in
+              let flow_h =
+                Masc_tui_ui.Memory_flow.chart_height_for
+                  ~avail_h:(body_h - y_after_heat)
+              in
+              let flow_rows =
+                if flow_h > 0 then
+                  let rem_after = body_h - (y_after_heat + flow_h) in
+                  flow_h + if rem_after > 0 then 1 else 0
+                else 0
+              in
+              y_after_heat + flow_rows
           | Some { body = Wire_knowledge.World_diff _; _ } | None -> 0
         in
         let vis_h = max 1 (body_h - hdr_rows) in
@@ -4473,7 +4535,7 @@ let dive_max_scroll (m : Model.t) active =
       in
       wiki_preview_max_scroll ~bp ~theme ~rect:main_rect
         ~target_slug:(Some slug) m.knowledge
-  | Nav.Dive_knowledge (Nav.Artifact_dive id) ->
+  | Nav.Dive_knowledge (Nav.Artifact_dive target) ->
       let inner = ui_card_inner br in
       let content = ui_pad_content ~bp inner in
       let artifacts =
@@ -4481,18 +4543,30 @@ let dive_max_scroll (m : Model.t) active =
         | Some xs -> xs
         | None -> []
       in
-      (* Title, Summary, Revision, MIME, Size, SHA-256, Author, Created and
-         the viewer link, as Screen_knowledge.render_dive_artifact draws
-         them. *)
-      let header_rows =
-        match Knowledge_store.artifact_by_id m.knowledge id with
-        | None -> 0
-        | Some _ -> 9
+      let art_opt =
+        Knowledge_store.find_artifact_by_id_or_sha target m.knowledge
       in
-      if artifacts = [] || header_rows + 1 >= content.h then 0
-      else
-        let rev_vis_h = max 1 (content.h - header_rows - 1) in
-        max 0 (List.length artifacts - rev_vis_h)
+      let detail_rows =
+        match art_opt with
+        | None -> 0
+        | Some a ->
+            let detail_opt =
+              Knowledge_store.artifact_detail_for_entry a m.knowledge
+            in
+            let preview_lines =
+              Knowledge_store.artifact_preview_lines a detail_opt
+            in
+            let meta = 9 in
+            let body =
+              if preview_lines = [] then 0 else 1 + List.length preview_lines
+            in
+            meta + body
+      in
+      let rev_rows =
+        if artifacts = [] then 0 else 1 + List.length artifacts
+      in
+      let total = detail_rows + rev_rows in
+      max 0 (total - max 1 content.h)
   | Nav.Dive_work (Nav.Goal_dive goal_id) -> (
       match
         List.find_opt
@@ -5123,7 +5197,47 @@ let apply_move (m : Model.t) dir =
             (m.nav.help_scroll_offset + delta)
         in
         ({ m with nav = { m.nav with help_scroll_offset } }, [])
-    | Some (Nav.System_gate _) -> (m, [])
+    | Some (Nav.System_gate Nav.Media_viewer) -> (
+        match dir with
+        | Keymap.Left | Keymap.Right -> (m, [])
+        | Keymap.Up | Keymap.Down | Keymap.Page_up | Keymap.Page_down
+        | Keymap.Home | Keymap.End ->
+            let delta = scroll_delta dir in
+            let max_scroll =
+              let w = min (max 0 (m.viewport.cols - 4)) 78 in
+              let h = min (max 0 (m.viewport.rows - 2)) 15 in
+              if w < 2 || h < 2 then 0
+              else
+                let inner_h = max 0 (h - 2) in
+                let pad_y = if inner_h >= 7 then 1 else 0 in
+                let content_h = max 0 (inner_h - (2 * pad_y)) in
+                if content_h <= 0 then 0
+                else
+                  let total_lines =
+                    match Knowledge_store.selected_artifact m.knowledge with
+                    | None -> 2
+                    | Some art ->
+                        let detail_opt =
+                          Knowledge_store.artifact_detail_for_entry art
+                            m.knowledge
+                        in
+                        let preview =
+                          Knowledge_store.artifact_preview_lines art detail_opt
+                        in
+                        if preview = [] then 5 else 5 + List.length preview
+                  in
+                  max 0 (total_lines - content_h)
+            in
+            let detail_scroll_offset =
+              Store_scroll.clamp_scroll ~max_scroll
+                (m.knowledge.detail_scroll_offset + delta)
+            in
+            ( { m with knowledge = { m.knowledge with detail_scroll_offset } }
+            , [] ))
+    | Some
+        (Nav.System_gate
+          (Nav.Auth_gate | Nav.Server_offline | Nav.Micro_viewport)) ->
+        (m, [])
     | None ->
         if Model.sidebar_has_focus m then
           match dir with
@@ -5581,6 +5695,11 @@ let apply_move (m : Model.t) dir =
                           true
                       | Knowledge_store.View_diff -> false
                     in
+                    let prev_art_id =
+                      match Knowledge_store.selected_artifact m.knowledge with
+                      | Some a -> Some a.id
+                      | None -> None
+                    in
                     let eff_delta =
                       if eff_pane = 1 && not is_memory_list_cursor then
                         scroll_delta dir
@@ -5612,6 +5731,31 @@ let apply_move (m : Model.t) dir =
                                  knowledge.memory_diff_keeper)
                           then View_fetches.fetches_for_current_view next
                           else []
+                      | Nav.Knowledge_artifacts, 0 -> (
+                          match Knowledge_store.selected_artifact knowledge with
+                          | Some a ->
+                              let loaded_matches =
+                                Option.is_some
+                                  (Knowledge_store.artifact_detail_for_entry a
+                                     knowledge)
+                              in
+                              if
+                                (not
+                                   (Option.equal String.equal prev_art_id
+                                      (Some a.id)))
+                                || not loaded_matches
+                              then
+                                [
+                                  Cmd.Http_get
+                                    {
+                                      epoch = m.epoch;
+                                      req =
+                                        Cmd.Get_artifact_detail
+                                          { id = a.id; revision = Some a.revision };
+                                    };
+                                ]
+                              else []
+                          | None -> [])
                       | Nav.Knowledge_wiki, _
                       | Nav.Knowledge_artifacts, _
                       | Nav.Knowledge_board, _
@@ -5621,6 +5765,11 @@ let apply_move (m : Model.t) dir =
                     (next, nav_cmds)
                 | Nav.Runtime ->
                     let rt = sync_runtime_companies_if_needed m in
+                    let prev_browser_cid =
+                      Option.map
+                        (fun (c : Wire_runtime.browser_client_row) -> c.client_id)
+                        (Runtime_store.selected_browser_client rt)
+                    in
                     let is_detail_scroll =
                       match rt.active_tab, pane_index with
                       | Nav.Runtime_quotas_credits, 0
@@ -5629,7 +5778,8 @@ let apply_move (m : Model.t) dir =
                       | ( ( Nav.Runtime_quotas_credits
                           | Nav.Runtime_efficiency_spend
                           | Nav.Runtime_failover_lanes
-                          | Nav.Runtime_tools_connectors )
+                          | Nav.Runtime_tools_connectors
+                          | Nav.Runtime_addons_browser )
                         , _ ) ->
                           false
                     in
@@ -5672,6 +5822,160 @@ let apply_move (m : Model.t) dir =
                             else 0
                           in
                           max 1 (inner.h - reserve_ext)
+                      | Nav.Runtime_addons_browser, pane ->
+                          let bp = ui_bp m in
+                          let br = ui_body_rect m in
+                          let body_rect =
+                            match
+                              Masc_tui_ui.Layout.split_v br
+                                [
+                                  Masc_tui_ui.Layout.Fixed 1;
+                                  Masc_tui_ui.Layout.Flex 1;
+                                ]
+                            with
+                            | [ _; b ] -> b
+                            | _ -> br
+                          in
+                          let left_rect, right_rect =
+                            Masc_tui_ui.Layout.adaptive_split_2
+                              ~stack_on_compact:true ~left_ratio:0.52
+                              ~top_ratio:0.50 bp body_rect
+                          in
+                          let table_data_rows ~(rect : Rect.t)
+                              (columns : Masc_tui_ui.Table.column list) =
+                            if rect.w <= 0 || rect.h <= 0 then 1
+                            else
+                              let col_gap =
+                                Masc_tui_ui.Layout.table_col_gap bp
+                              in
+                              let _, dropped =
+                                Masc_tui_ui.Table.resolve_columns ~col_gap
+                                  ~avail_w:rect.w columns
+                              in
+                              let has_hidden_notice =
+                                dropped <> [] && rect.h >= 3
+                              in
+                              let header_rows = if rect.h >= 2 then 1 else 0 in
+                              let footer_rows =
+                                if has_hidden_notice then 1 else 0
+                              in
+                              let sep_rows =
+                                if
+                                  header_rows = 1
+                                  && rect.h - header_rows - footer_rows >= 3
+                                then 1
+                                else 0
+                              in
+                              max 1
+                                (rect.h - header_rows - sep_rows - footer_rows)
+                          in
+                          let col ~id ~priority ~min_width ?max_width ~weight
+                              ~align () : Masc_tui_ui.Table.column =
+                            {
+                              id;
+                              header = Say.literal id;
+                              priority;
+                              min_width;
+                              max_width;
+                              weight;
+                              align;
+                            }
+                          in
+                          if pane = 0 then
+                            let left_inner = ui_card_inner left_rect in
+                            let detail_h =
+                              if
+                                left_inner.h >= 10
+                                && Option.is_some
+                                     (Runtime_store.selected_addon_instance rt)
+                              then 4
+                              else 0
+                            in
+                            let tbl_rect =
+                              Rect.make ~x:left_inner.x ~y:left_inner.y
+                                ~w:left_inner.w
+                                ~h:(max 0 (left_inner.h - detail_h))
+                            in
+                            table_data_rows ~rect:tbl_rect
+                              [
+                                col ~id:"addon" ~priority:0 ~min_width:14
+                                  ~weight:3 ~align:Masc_tui_ui.Table.Left ();
+                                col ~id:"pres" ~priority:1 ~min_width:5
+                                  ~max_width:8 ~weight:1
+                                  ~align:Masc_tui_ui.Table.Left ();
+                                col ~id:"phase" ~priority:1 ~min_width:5
+                                  ~max_width:7 ~weight:1
+                                  ~align:Masc_tui_ui.Table.Left ();
+                                col ~id:"exec" ~priority:2 ~min_width:6
+                                  ~max_width:10 ~weight:1
+                                  ~align:Masc_tui_ui.Table.Left ();
+                                col ~id:"obs" ~priority:2 ~min_width:8
+                                  ~max_width:12 ~weight:1
+                                  ~align:Masc_tui_ui.Table.Right ();
+                                col ~id:"decl" ~priority:3 ~min_width:7
+                                  ~max_width:12 ~weight:1
+                                  ~align:Masc_tui_ui.Table.Left ();
+                              ]
+                          else
+                            let right_inner = ui_card_inner right_rect in
+                            let browser_issues =
+                              match Observed.to_option rt.browser_lane with
+                              | Some bl -> bl.issues
+                              | None -> []
+                            in
+                            let issues_h =
+                              if browser_issues <> [] && right_inner.h >= 12
+                              then min 3 (List.length browser_issues)
+                              else 0
+                            in
+                            let main_h = max 0 (right_inner.h - issues_h) in
+                            let clients_h =
+                              if main_h <= 0 then 0
+                              else min main_h (max 4 ((main_h * 45) / 100))
+                            in
+                            let tabs_h = max 0 (main_h - clients_h) in
+                            (match rt.browser_right_focus with
+                            | `Clients ->
+                                let clients_rect =
+                                  Rect.make ~x:right_inner.x ~y:right_inner.y
+                                    ~w:right_inner.w ~h:clients_h
+                                in
+                                table_data_rows ~rect:clients_rect
+                                  [
+                                    col ~id:"client" ~priority:0 ~min_width:14
+                                      ~weight:3 ~align:Masc_tui_ui.Table.Left ();
+                                    col ~id:"browser" ~priority:1 ~min_width:10
+                                      ~max_width:18 ~weight:2
+                                      ~align:Masc_tui_ui.Table.Left ();
+                                    col ~id:"presence" ~priority:1 ~min_width:10
+                                      ~max_width:16 ~weight:1
+                                      ~align:Masc_tui_ui.Table.Left ();
+                                    col ~id:"activity" ~priority:2 ~min_width:12
+                                      ~weight:2 ~align:Masc_tui_ui.Table.Left ();
+                                  ]
+                            | `Tabs ->
+                                let tabs_body =
+                                  Rect.make ~x:right_inner.x
+                                    ~y:(right_inner.y + clients_h + issues_h + 1)
+                                    ~w:right_inner.w
+                                    ~h:(max 0 (tabs_h - 1))
+                                in
+                                table_data_rows ~rect:tabs_body
+                                  [
+                                    col ~id:"id" ~priority:1 ~min_width:4
+                                      ~max_width:6 ~weight:1
+                                      ~align:Masc_tui_ui.Table.Right ();
+                                    col ~id:"act" ~priority:1 ~min_width:2
+                                      ~max_width:3 ~weight:1
+                                      ~align:Masc_tui_ui.Table.Center ();
+                                    col ~id:"origin" ~priority:2 ~min_width:5
+                                      ~max_width:8 ~weight:1
+                                      ~align:Masc_tui_ui.Table.Left ();
+                                    col ~id:"title" ~priority:0 ~min_width:12
+                                      ~weight:2 ~align:Masc_tui_ui.Table.Left ();
+                                    col ~id:"url" ~priority:0 ~min_width:16
+                                      ~weight:3 ~align:Masc_tui_ui.Table.Left ();
+                                  ])
                       | ( ( Nav.Runtime_quotas_credits
                           | Nav.Runtime_efficiency_spend
                           | Nav.Runtime_failover_lanes
@@ -5679,14 +5983,48 @@ let apply_move (m : Model.t) dir =
                         , _ ) ->
                           viewport_rows
                     in
-                    ( {
-                        m with
-                        runtime =
-                          Runtime_store.move_selection ~pane_index
-                            ~viewport_rows:eff_viewport_rows ?max_detail_scroll
-                            ~delta:eff_delta rt;
-                      }
-                    , [] )
+                    let next_rt =
+                      Runtime_store.move_selection ~pane_index
+                        ~viewport_rows:eff_viewport_rows ?max_detail_scroll
+                        ~delta:eff_delta rt
+                    in
+                    let tab_cmds =
+                      if
+                        Nav.equal_runtime_tab next_rt.active_tab
+                          Nav.Runtime_addons_browser
+                        && pane_index = 1
+                        && next_rt.browser_right_focus = `Clients
+                      then
+                        match Runtime_store.selected_browser_client next_rt with
+                        | Some cl
+                          when not
+                                 (Option.equal String.equal prev_browser_cid
+                                    (Some cl.client_id)) -> (
+                            match
+                              Runtime_store.browser_tabs_for
+                                ~client_id:cl.client_id next_rt
+                            with
+                            | Observed.Value { stale = false; _ }
+                            | Observed.Failed { retryable = false; _ } ->
+                                []
+                            | Observed.Loading _
+                            | Observed.Value { stale = true; _ }
+                            | Observed.Absent
+                            | Observed.Unreported
+                            | Observed.Failed { retryable = true; _ } ->
+                                [
+                                  Cmd.Http_post
+                                    {
+                                      epoch = m.epoch;
+                                      req =
+                                        Cmd.Post_browser_tabs
+                                          { client_id = cl.client_id };
+                                    };
+                                ])
+                        | Some _ | None -> []
+                      else []
+                    in
+                    ({ m with runtime = next_rt }, tab_cmds)
                 | Nav.Infra ->
                     let eff_delta =
                       if pane_index = 1 then scroll_delta dir else delta

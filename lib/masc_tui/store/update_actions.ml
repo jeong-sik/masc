@@ -1186,12 +1186,14 @@ and execute_action ~now (m : Model.t) action =
                   in
                   match Config_store.begin_edit_selected cfg0 with
                   | Ok config -> (
-                      match
-                        Option.bind sel_key_opt (fun key ->
-                            apply_staged_tui_pref_if_needed ~now ~key m config)
-                      with
-                      | Some res -> res
-                      | None -> ({ m with config }, []))
+                      if not (Config_store.is_editing_field config) then
+                        match
+                          Option.bind sel_key_opt (fun key ->
+                              apply_staged_tui_pref_if_needed ~now ~key m config)
+                        with
+                        | Some res -> res
+                        | None -> ({ m with config }, [])
+                      else ({ m with config }, []))
                   | Error reason ->
                       ( Model.with_toast ~now ~level:Model.Toast_info
                           (Say.literal reason) m
@@ -1742,6 +1744,15 @@ and execute_action ~now (m : Model.t) action =
                             Runtime_store.toggle_outside_lane_probes m.runtime;
                         }
                       , [] )
+                  | Nav.Runtime_addons_browser ->
+                      if m.nav.pane_index = 1 then
+                        ( {
+                            m with
+                            runtime =
+                              Runtime_store.toggle_browser_right_focus m.runtime;
+                          }
+                        , [] )
+                      else (m, [])
                   | Nav.Runtime_quotas_credits
                   | Nav.Runtime_efficiency_spend
                   | Nav.Runtime_tools_connectors ->
@@ -1832,6 +1843,8 @@ and execute_action ~now (m : Model.t) action =
                   | Cmd.Copy_clipboard _
                   | Cmd.Render_memory_diagram _
                   | Cmd.Cancel_memory_diagram
+                  | Cmd.Fetch_artifact_and_copy _
+                  | Cmd.Export_artifact _
                   | Cmd.Open_external_url _
                   | Cmd.Open_editor_escape_hatch _
                   | Cmd.Start_local_server
@@ -1957,7 +1970,8 @@ and execute_action ~now (m : Model.t) action =
                       Update_nav.open_inline_modal m Nav.Connector_form
                   | Nav.Runtime_quotas_credits
                   | Nav.Runtime_efficiency_spend
-                  | Nav.Runtime_failover_lanes ->
+                  | Nav.Runtime_failover_lanes
+                  | Nav.Runtime_addons_browser ->
                       (m, []))
               | Nav.Infra -> (
                   match m.infra.active_tab with
@@ -2030,7 +2044,8 @@ and execute_action ~now (m : Model.t) action =
             , _ )
           | ( Nav.Runtime
             , ( Nav.Runtime_efficiency_spend
-              | Nav.Runtime_tools_connectors ) ) ->
+              | Nav.Runtime_tools_connectors
+              | Nav.Runtime_addons_browser ) ) ->
               []
         in
         let next, diagram_cmds =
@@ -2043,12 +2058,89 @@ and execute_action ~now (m : Model.t) action =
             next
         , view_cmds @ probe_cmd @ diagram_cmds )
   | Keymap.Copy_selected -> (
+      let copy_artifact_body (a : Wire_knowledge.artifact_entry) =
+        let fmt_label =
+          match Wire_knowledge.artifact_format_of_entry a with
+          | `Html -> "HTML"
+          | `Markdown -> "Markdown"
+        in
+        match Knowledge_store.artifact_detail_for_entry a m.knowledge with
+        | Some detail ->
+            ( Model.with_toast ~now ~level:Model.Toast_info
+                (Say.make
+                   ~ko:(Printf.sprintf "%s 본문 복사 중 (%dB)" fmt_label
+                          (String.length detail.content))
+                   ~en:(Printf.sprintf "Copying %s body (%dB)" fmt_label
+                          (String.length detail.content)))
+                m
+            , [ Cmd.Copy_clipboard detail.content ] )
+        | None ->
+            ( Model.with_toast ~now ~level:Model.Toast_info
+                (Say.make
+                   ~ko:(Printf.sprintf "%s 본문 불러와 복사 중…" fmt_label)
+                   ~en:(Printf.sprintf "Fetching %s body to copy…" fmt_label))
+                m
+            , [
+                Cmd.Fetch_artifact_and_copy
+                  { epoch = m.epoch; id = a.id; revision = Some a.revision };
+              ] )
+      in
+      let artifact_target_opt =
+        match m.nav.overlay with
+        | Some (Nav.System_gate Nav.Media_viewer) -> (
+            match Knowledge_store.selected_artifact m.knowledge with
+            | Some a -> `Artifact a
+            | None -> `Other)
+        | Some
+            ( Nav.Palette
+            | Nav.Settings _
+            | Nav.Queue_context _
+            | Nav.Inline_action _
+            | Nav.Incidents
+            | Nav.Help
+            | Nav.System_gate
+                (Nav.Auth_gate | Nav.Server_offline | Nav.Micro_viewport) ) ->
+            `Other
+        | None -> (
+            match Model.active_dive m with
+            | Some (Nav.Dive_knowledge (Nav.Artifact_dive target)) ->
+                (match
+                   Knowledge_store.find_artifact_by_id_or_sha target m.knowledge
+                 with
+                 | Some a -> `Artifact a
+                 | None -> `Artifact_missing)
+            | Some
+                ( Nav.Dive_keeper _
+                | Nav.Dive_work _
+                | Nav.Dive_infra _
+                | Nav.Dive_knowledge
+                    ( Nav.Thread_dive _
+                    | Nav.Wiki_dive _
+                    | Nav.Memory_diff_dive _ ) ) ->
+                `Other
+            | None ->
+                if
+                  Nav.equal_workspace m.nav.workspace Nav.Knowledge
+                  && Nav.equal_knowledge_tab m.knowledge.active_tab
+                       Nav.Knowledge_artifacts
+                then
+                  match Knowledge_store.selected_artifact m.knowledge with
+                  | Some a -> `Artifact a
+                  | None -> `Other
+                else `Other)
+      in
+      match artifact_target_opt with
+      | `Artifact art -> copy_artifact_body art
+      | `Artifact_missing ->
+          ( Model.with_toast ~now ~level:Model.Toast_warning
+              (Say.make ~ko:"해당 아티팩트를 찾을 수 없음"
+                 ~en:"Artifact not found")
+              m
+          , [] )
+      | `Other ->
       let text_opt =
         match m.nav.overlay with
-        | Some (Nav.System_gate Nav.Media_viewer) ->
-            Option.map
-              (fun (a : Wire_knowledge.artifact_entry) -> a.body.sha256)
-              (Knowledge_store.selected_artifact m.knowledge)
+        | Some (Nav.System_gate Nav.Media_viewer) -> None
         | Some
             ( Nav.Palette
             | Nav.Settings _
@@ -2171,10 +2263,7 @@ and execute_action ~now (m : Model.t) action =
                       ->
                         Some detail.body_markdown
                     | Some _ | None -> Some slug)
-                | Nav.Artifact_dive id -> (
-                    match Knowledge_store.artifact_by_id m.knowledge id with
-                    | Some a -> Some a.body.sha256
-                    | None -> Some id)
+                | Nav.Artifact_dive id -> Some id
                 | Nav.Memory_diff_dive _ -> (
                     match Observed.to_option m.knowledge.world_memory with
                     | Some wm -> wm.briefing.text
@@ -2208,11 +2297,7 @@ and execute_action ~now (m : Model.t) action =
                               ->
                                 Some detail.body_markdown
                             | Some _ | None -> Some sel.slug))
-                    | Nav.Knowledge_artifacts ->
-                        Option.map
-                          (fun (a : Wire_knowledge.artifact_entry) ->
-                            a.body.sha256)
-                          (Knowledge_store.selected_artifact m.knowledge)
+                    | Nav.Knowledge_artifacts -> None
                     | Nav.Knowledge_memory -> (
                         match Observed.to_option m.knowledge.world_memory with
                         | Some wm -> (
@@ -2231,10 +2316,16 @@ and execute_action ~now (m : Model.t) action =
                         Option.map
                           (fun (r : Wire_infra.repository) -> r.url)
                           (Infra_store.selected_repository m.infra)
-                    | Nav.Infra_activity_logs ->
-                        Option.map
-                          (fun (e : Wire_infra.system_log_entry) -> e.message)
-                          (Infra_store.selected_log m.infra))
+                    | Nav.Infra_activity_logs -> (
+                        match Infra_store.selected_timeline_entry m.infra with
+                        | Some (Infra_store.Entry_log e) -> Some e.message
+                        | Some (Infra_store.Entry_event ev) -> (
+                            match ev.detail with
+                            | Some d when not (String.equal (String.trim d) "")
+                              ->
+                                Some (ev.summary ^ "\n" ^ d)
+                            | Some _ | None -> Some ev.summary)
+                        | None -> None))
                 | Nav.Keepers | Nav.Pulse -> (
                     let in_chat =
                       Nav.equal_workspace m.nav.workspace Nav.Keepers
@@ -2300,10 +2391,37 @@ and execute_action ~now (m : Model.t) action =
                         match List.nth_opt rows m.work.selected_index with
                         | Some row -> Some row.keeper
                         | None -> None))
-                | Nav.Runtime ->
-                    Option.map
-                      (fun (l : Wire_runtime.failover_lane) -> l.id)
-                      (Runtime_store.selected_lane m.runtime))))
+                | Nav.Runtime -> (
+                    match m.runtime.active_tab with
+                    | Nav.Runtime_addons_browser ->
+                        if m.nav.pane_index = 0 then
+                          Option.map
+                            (fun (inst : Wire_runtime.addon_instance) ->
+                              inst.instance_id)
+                            (Runtime_store.selected_addon_instance m.runtime)
+                        else (
+                          match m.runtime.browser_right_focus with
+                          | `Clients ->
+                              Option.map
+                                (fun (cl : Wire_runtime.browser_client_row) ->
+                                  cl.client_id)
+                                (Runtime_store.selected_browser_client m.runtime)
+                          | `Tabs -> (
+                              match Runtime_store.selected_browser_tab m.runtime with
+                              | Some tb -> Some tb.url
+                              | None ->
+                                  Option.map
+                                    (fun (cl : Wire_runtime.browser_client_row) ->
+                                      cl.client_id)
+                                    (Runtime_store.selected_browser_client
+                                       m.runtime)))
+                    | Nav.Runtime_quotas_credits
+                    | Nav.Runtime_efficiency_spend
+                    | Nav.Runtime_failover_lanes
+                    | Nav.Runtime_tools_connectors ->
+                        Option.map
+                          (fun (l : Wire_runtime.failover_lane) -> l.id)
+                          (Runtime_store.selected_lane m.runtime)))))
       in
       match text_opt with
       | Some txt ->
@@ -2313,6 +2431,37 @@ and execute_action ~now (m : Model.t) action =
           , [ Cmd.Copy_clipboard txt ] )
       | None -> (m, []))
   | Keymap.Open_external -> (
+      let export_and_open_artifact (a : Wire_knowledge.artifact_entry) =
+        let ext =
+          Wire_knowledge.artifact_extension
+            (Wire_knowledge.artifact_format_of_entry a)
+        in
+        let filename_stem =
+          if String.trim a.title <> "" then a.title else a.id
+        in
+        let content_opt =
+          Option.map
+            (fun (d : Wire_knowledge.published_artifact_detail) -> d.content)
+            (Knowledge_store.artifact_detail_for_entry a m.knowledge)
+        in
+        ( Model.with_toast ~now ~level:Model.Toast_info
+            (Say.make
+               ~ko:(Printf.sprintf "%s 파일 내보내기 후 열기 중…" ext)
+               ~en:(Printf.sprintf "Exporting & opening %s…" ext))
+            m
+        , [
+            Cmd.Export_artifact
+              {
+                epoch = m.epoch;
+                id = a.id;
+                revision = Some a.revision;
+                filename_stem;
+                ext;
+                content_opt;
+                open_after = true;
+              };
+          ] )
+      in
       match m.nav.overlay with
       | Some (Nav.Settings _) -> (
           match m.config.target with
@@ -2327,12 +2476,10 @@ and execute_action ~now (m : Model.t) action =
                      ~en:"Create new keepers in Settings UI ($EDITOR escape hatch unavailable for new keepers)")
                   m
               , [] ))
-      | Some (Nav.System_gate Nav.Media_viewer) ->
-          ( Model.with_toast ~now ~level:Model.Toast_info
-              (Say.make ~ko:"아티팩트 뷰어가 열려 있습니다 ([Esc] 닫기)"
-                 ~en:"Artifact viewer is already open ([Esc] to close)")
-              m
-          , [] )
+      | Some (Nav.System_gate Nav.Media_viewer) -> (
+          match Knowledge_store.selected_artifact m.knowledge with
+          | Some art -> export_and_open_artifact art
+          | None -> (m, []))
       | Some
           ( Nav.Palette
           | Nav.Incidents
@@ -2376,8 +2523,17 @@ and execute_action ~now (m : Model.t) action =
             | None -> None
           in
           match Model.active_dive m with
-          | Some (Nav.Dive_knowledge (Nav.Artifact_dive _)) ->
-              Update_nav.open_overlay m (Nav.System_gate Nav.Media_viewer)
+          | Some (Nav.Dive_knowledge (Nav.Artifact_dive target)) -> (
+              match
+                Knowledge_store.find_artifact_by_id_or_sha target m.knowledge
+              with
+              | Some a -> export_and_open_artifact a
+              | None ->
+                  ( Model.with_toast ~now ~level:Model.Toast_warning
+                      (Say.make ~ko:"해당 아티팩트를 찾을 수 없음"
+                         ~en:"Artifact not found")
+                      m
+                  , [] ))
           | Some (Nav.Dive_knowledge (Nav.Wiki_dive slug)) ->
               open_url_or_notice (wiki_external_url ~expected_slug:slug ())
           | Some (Nav.Dive_knowledge (Nav.Thread_dive id)) ->
@@ -2451,9 +2607,7 @@ and execute_action ~now (m : Model.t) action =
                   match m.knowledge.active_tab with
                   | Nav.Knowledge_artifacts -> (
                       match Knowledge_store.selected_artifact m.knowledge with
-                      | Some _ ->
-                          Update_nav.open_overlay m
-                            (Nav.System_gate Nav.Media_viewer)
+                      | Some a -> export_and_open_artifact a
                       | None -> open_url_or_notice None)
                   | Nav.Knowledge_wiki -> (
                       match Knowledge_store.selected_wiki_page m.knowledge with
@@ -2495,7 +2649,22 @@ and execute_action ~now (m : Model.t) action =
                         extract_first_http_url txt)
                   in
                   open_url_or_notice url_opt
-              | Nav.Pulse | Nav.Runtime -> (m, []))))
+              | Nav.Runtime -> (
+                  match m.runtime.active_tab with
+                  | Nav.Runtime_addons_browser ->
+                      let url_opt =
+                        Option.bind
+                          (Runtime_store.selected_browser_tab m.runtime)
+                          (fun (tb : Wire_runtime.browser_tab_row) ->
+                            extract_first_http_url tb.url)
+                      in
+                      open_url_or_notice url_opt
+                  | Nav.Runtime_quotas_credits
+                  | Nav.Runtime_efficiency_spend
+                  | Nav.Runtime_failover_lanes
+                  | Nav.Runtime_tools_connectors ->
+                      (m, []))
+              | Nav.Pulse -> (m, []))))
   | Keymap.Toggle_zoom ->
       if Model.sidebar_has_focus m then (m, [])
       else if not (Model.can_zoom_current_view m) then
@@ -2538,8 +2707,7 @@ and execute_action ~now (m : Model.t) action =
                 Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory
             | Nav.Pulse | Nav.Work | Nav.Runtime | Nav.Infra -> false)
       in
-      if not in_memory then (m, [])
-      else
+      if in_memory then
         let knowledge =
           Knowledge_store.cycle_memory_view_mode m.knowledge
         in
@@ -2551,6 +2719,38 @@ and execute_action ~now (m : Model.t) action =
           }
         in
         (next, View_fetches.fetches_for_current_view next)
+      else if
+        Option.is_none m.nav.overlay
+        && Option.is_none (Model.active_dive m)
+        && Nav.equal_workspace m.nav.workspace Nav.Runtime
+        && Nav.equal_runtime_tab m.runtime.active_tab
+             Nav.Runtime_addons_browser
+      then
+        match Runtime_store.selected_browser_client m.runtime with
+        | Some cl ->
+            let runtime =
+              Runtime_store.mark_browser_tabs_loading ~since:now
+                ~client_id:cl.client_id m.runtime
+            in
+            ( Model.with_toast ~now ~level:Model.Toast_info
+                (Say.make
+                   ~ko:("브라우저 탭 목록 새로고침: " ^ cl.client_id)
+                   ~en:("Refreshing browser tabs: " ^ cl.client_id))
+                { m with runtime }
+            , [
+                Cmd.Http_post
+                  {
+                    epoch = m.epoch;
+                    req = Cmd.Post_browser_tabs { client_id = cl.client_id };
+                  };
+              ] )
+        | None ->
+            ( Model.with_toast ~now ~level:Model.Toast_info
+                (Say.make ~ko:"선택된 브라우저 클라이언트가 없습니다"
+                   ~en:"No browser client selected")
+                m
+            , [] )
+      else (m, [])
   | Keymap.Toggle_memory_sort ->
       let in_memory =
         Option.is_none m.nav.overlay
@@ -2581,11 +2781,33 @@ and execute_action ~now (m : Model.t) action =
                 Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory
             | Nav.Pulse | Nav.Work | Nav.Runtime | Nav.Infra -> false)
       in
-      if not in_memory then (m, [])
-      else
+      if in_memory then
         ( {
             m with
             knowledge = Knowledge_store.toggle_memory_facts_sort m.knowledge;
           }
         , [] )
+      else if
+        Option.is_none m.nav.overlay
+        && Option.is_none (Model.active_dive m)
+        && Nav.equal_workspace m.nav.workspace Nav.Infra
+        && Nav.equal_infra_tab m.infra.active_tab Nav.Infra_activity_logs
+      then
+        let infra = Infra_store.cycle_source_filter m.infra in
+        let mode_lbl =
+          match infra.source_filter with
+          | Infra_store.Source_all ->
+              Say.make ~ko:"전체 (로그+이벤트)" ~en:"ALL (Logs+Events)"
+          | Infra_store.Source_logs ->
+              Say.make ~ko:"서버 로그만" ~en:"LOGS only"
+          | Infra_store.Source_events ->
+              Say.make ~ko:"MASC 이벤트만" ~en:"EVENTS only"
+        in
+        ( Model.with_toast ~now ~level:Model.Toast_info
+            (Say.make
+               ~ko:("피드 소스: " ^ Say.resolve Say.Lang_ko mode_lbl)
+               ~en:("Feed source: " ^ Say.resolve Say.Lang_en mode_lbl))
+            { m with infra }
+        , [] )
+      else (m, [])
   | Keymap.Quit_app -> (m, [ Cmd.Quit Exit_reason.Quit_key ])

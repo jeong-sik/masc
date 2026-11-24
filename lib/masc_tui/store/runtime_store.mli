@@ -82,6 +82,8 @@ type t = {
   tools_catalog : Wire_runtime.tool_summary list Observed.t;
   connectors : Wire_runtime.connector_row list Observed.t;
   browser_lane : Wire_runtime.browser_lane_status Observed.t;
+  browser_tabs : Wire_runtime.browser_tabs_response Observed.t String_map.t;
+  lane_addons : Wire_runtime.lane_addons_snapshot Observed.t;
   mcp_clients : Wire_runtime.mcp_client_row list Observed.t;
   keeper_companies : string String_map.t;
   show_outside_lane_probes : bool;
@@ -91,6 +93,13 @@ type t = {
   quota_scroll_offset : int;
   connector_selected_index : int;
   connector_scroll_offset : int;
+  addon_selected_index : int;
+  addon_scroll_offset : int;
+  browser_client_selected_index : int;
+  browser_client_scroll_offset : int;
+  browser_tab_selected_index : int;
+  browser_tab_scroll_offset : int;
+  browser_right_focus : [ `Clients | `Tabs ];
   detail_scroll_offset : int;
   filter_query : string;
 }
@@ -139,8 +148,28 @@ val apply_connectors :
   observed_at:Clock.Mono.t -> Wire_runtime.connector_row list -> t -> t
 val apply_browser_lane :
   observed_at:Clock.Mono.t -> Wire_runtime.browser_lane_status -> t -> t
+val browser_tabs_for :
+  client_id:string -> t -> Wire_runtime.browser_tabs_response Observed.t
+val apply_browser_tabs :
+  observed_at:Clock.Mono.t ->
+  client_id:string ->
+  Wire_runtime.browser_tabs_response ->
+  t ->
+  t
+val mark_browser_tabs_loading :
+  since:Clock.Mono.t -> client_id:string -> t -> t
+val mark_browser_tabs_failed :
+  at:Clock.Mono.t ->
+  client_id:string ->
+  reason:string ->
+  retryable:bool ->
+  t ->
+  t
+val apply_lane_addons :
+  observed_at:Clock.Mono.t -> Wire_runtime.lane_addons_snapshot -> t -> t
 val apply_mcp_clients :
   observed_at:Clock.Mono.t -> Wire_runtime.mcp_client_row list -> t -> t
+val toggle_browser_right_focus : t -> t
 
 val active_and_outside_probes :
   t -> Wire_runtime.provider_probe_row list * Wire_runtime.provider_probe_row list
@@ -274,8 +303,16 @@ val to_fusion_launch_request :
 val filtered_lanes : t -> Wire_runtime.failover_lane list
 val filtered_tools : t -> Wire_runtime.tool_summary list
 val filtered_connectors : t -> Wire_runtime.connector_row list
+val filtered_addon_instances : t -> Wire_runtime.addon_instance list
+val declaration_for_addon :
+  Wire_runtime.addon_instance -> t -> Wire_runtime.addon_declaration option
+val filtered_browser_clients : t -> Wire_runtime.browser_client_row list
+val filtered_browser_tabs : t -> Wire_runtime.browser_tab_row list
 val selected_lane : t -> Wire_runtime.failover_lane option
 val selected_connector : t -> Wire_runtime.connector_row option
+val selected_addon_instance : t -> Wire_runtime.addon_instance option
+val selected_browser_client : t -> Wire_runtime.browser_client_row option
+val selected_browser_tab : t -> Wire_runtime.browser_tab_row option
 val runtime_options : t -> Wire_runtime.runtime_option list
 
 val move_selection :

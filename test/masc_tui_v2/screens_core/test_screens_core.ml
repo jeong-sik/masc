@@ -3019,6 +3019,39 @@ let test_context_tab_keeps_cache_and_cost_first () =
         assert_contains ~label ~needle:"Context per turn" txt)
     [ (60, 18, false); (90, 28, true) ]
 
+let test_feature_wave1_honest_ssot_chrome_transitions () =
+  let base = populated_model ~cols:140 ~rows:40 ~lang:Say.Lang_en in
+  let live_fr =
+    {
+      base.freshness with
+      observer = Health.Live { last_event_ns = Clock.Mono.zero; revision = 1 };
+      fleet = Health.Live { last_event_ns = Clock.Mono.zero; revision = 1 };
+      view_stream = Some (Health.Live { last_event_ns = Clock.Mono.zero; revision = 1 });
+      server_offline = false;
+    }
+  in
+  let m_pulse = { base with freshness = live_fr } in
+  let g_pulse, _ = render_full ~model:m_pulse ~cols:140 ~rows:40 in
+  assert_contains ~label:"Pulse top bar shows LIVE SSE" ~needle:"LIVE SSE"
+    (grid_row_text g_pulse 0);
+  let m_work = { m_pulse with nav = { m_pulse.nav with workspace = Nav.Work } } in
+  let g_work, _ = render_full ~model:m_work ~cols:140 ~rows:40 in
+  assert_contains ~label:"Work top bar shows SYNCED" ~needle:"SYNCED"
+    (grid_row_text g_work 0);
+  assert_not_contains ~label:"Work top bar never claims LIVE SSE" ~needle:"LIVE SSE"
+    (grid_row_text g_work 0);
+  let m_repos =
+    {
+      m_pulse with
+      nav = { m_pulse.nav with workspace = Nav.Infra };
+      infra = Infra_store.set_tab Nav.Infra_repos_changes m_pulse.infra;
+    }
+  in
+  let g_repos, _ = render_full ~model:m_repos ~cols:140 ~rows:40 in
+  assert_contains ~label:"Infra > Repos top bar shows SNAPSHOT" ~needle:"SNAPSHOT"
+    (grid_row_text g_repos 0);
+  assert_not_contains ~label:"Infra > Repos never claims LIVE SSE" ~needle:"LIVE SSE"
+    (grid_row_text g_repos 0)
 let () =
   Alcotest.run "masc_tui_screens_core"
     [
@@ -3038,6 +3071,8 @@ let () =
             `Quick test_round1_local_clock_pills_and_compact_fit;
           Alcotest.test_case "v2.5 body margins, calm top nav & quiet keycap footer"
             `Quick test_v25_chrome_margins_and_keycaps;
+          Alcotest.test_case "Feature Wave 1: honest LIVE SSE vs SYNCED vs SNAPSHOT top bar"
+            `Quick test_feature_wave1_honest_ssot_chrome_transitions;
         ] );
       ( "pulse",
         [

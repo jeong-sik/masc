@@ -32,6 +32,7 @@ type runtime_tab =
   | Runtime_efficiency_spend
   | Runtime_failover_lanes
   | Runtime_tools_connectors
+  | Runtime_addons_browser
 
 type infra_tab =
   | Infra_sandboxes

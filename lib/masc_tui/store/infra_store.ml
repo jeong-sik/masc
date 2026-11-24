@@ -27,6 +27,15 @@ type repo_activity = {
   activity : Wire_infra.repository_activity Observed.t;
 }
 
+type activity_source_filter =
+  | Source_all
+  | Source_logs
+  | Source_events
+
+type timeline_entry =
+  | Entry_log of Wire_infra.system_log_entry
+  | Entry_event of activity_row
+
 type t = {
   active_tab : Nav.infra_tab;
   sandboxes : Wire_infra.sandboxes_snapshot Observed.t;
@@ -40,6 +49,7 @@ type t = {
   stream_gap_count : int;
   log_level_filter : Wire_infra.log_level option;
   log_keeper_filter : string option;
+  source_filter : activity_source_filter;
   activity_events : activity_row list;
   show_raw_json : bool;
   selected_index : int;
@@ -65,6 +75,7 @@ let empty =
     stream_gap_count = 0;
     log_level_filter = None;
     log_keeper_filter = None;
+    source_filter = Source_all;
     activity_events = [];
     show_raw_json = false;
     selected_index = 0;
@@ -366,8 +377,90 @@ let visible_logs t =
       level_ok && keeper_ok && query_ok)
     t.logs
 
+let activity_kind_str = function
+  | Activity_tool_call -> "TOOL"
+  | Activity_turn_complete -> "TURN"
+  | Activity_agent_core -> "CORE"
+  | Activity_stream_gap -> "GAP"
+
+let visible_activity_events t =
+  let q = String.trim t.filter_query in
+  List.filter
+    (fun (ev : activity_row) ->
+      let keeper_ok =
+        match t.log_keeper_filter with
+        | None -> true
+        | Some want -> (
+            match ev.keeper with
+            | Some k -> String.equal k want
+            | None -> false)
+      in
+      let query_ok =
+        if String.equal q "" then true
+        else
+          contains_ci ~needle:q ev.summary
+          || contains_ci ~needle:q (activity_kind_str ev.kind)
+          || (match ev.keeper with Some k -> contains_ci ~needle:q k | None -> false)
+          ||
+          match ev.detail with
+          | Some d -> contains_ci ~needle:q d
+          | None -> false
+      in
+      keeper_ok && query_ok)
+    t.activity_events
+
+let entry_timestamp_unix = function
+  | Entry_log e -> (
+      match Wire_common.parse_rfc3339_unix e.ts with
+      | Ok ts when Float.is_finite ts -> ts
+      | Ok _ | Error _ -> 0.0)
+  | Entry_event ev ->
+      if Float.is_finite ev.at_unix then ev.at_unix else 0.0
+
+let visible_timeline t =
+  match t.source_filter with
+  | Source_logs -> List.map (fun e -> Entry_log e) (visible_logs t)
+  | Source_events ->
+      List.map (fun ev -> Entry_event ev) (visible_activity_events t)
+  | Source_all ->
+      let logs = List.map (fun e -> Entry_log e) (visible_logs t) in
+      let events =
+        List.map (fun ev -> Entry_event ev) (visible_activity_events t)
+      in
+      if events = [] then logs
+      else if logs = [] then events
+      else
+        List.stable_sort
+          (fun a b ->
+            Float.compare (entry_timestamp_unix b) (entry_timestamp_unix a))
+          (logs @ events)
+
+let set_source_filter source_filter t =
+  {
+    t with
+    source_filter;
+    selected_index = 0;
+    scroll_offset = 0;
+    detail_scroll_offset = 0;
+  }
+
+let cycle_source_filter t =
+  let next =
+    match t.source_filter with
+    | Source_all -> Source_logs
+    | Source_logs -> Source_events
+    | Source_events -> Source_all
+  in
+  set_source_filter next t
+
 let set_log_level_filter log_level_filter t =
-  { t with log_level_filter; selected_index = 0; scroll_offset = 0 }
+  {
+    t with
+    log_level_filter;
+    selected_index = 0;
+    scroll_offset = 0;
+    detail_scroll_offset = 0;
+  }
 
 let cycle_log_level_filter t =
   let next =
@@ -552,9 +645,14 @@ let change_preview_rows (fc : Wire_infra.file_change) =
         (Diff.rows ~before:"" ~after:text)
   | Wire_infra.Change_materialize _ -> []
 
-let selected_log t =
-  let vis = visible_logs t in
+let selected_timeline_entry t =
+  let vis = visible_timeline t in
   List.nth_opt vis (clamp_index (List.length vis) t.selected_index)
+
+let selected_log t =
+  match selected_timeline_entry t with
+  | Some (Entry_log e) -> Some e
+  | Some (Entry_event _) | None -> None
 
 let sandbox_inspector_event_count ~keeper t =
   let keeper_logs =
@@ -680,8 +778,8 @@ let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t 
           match max_detail_scroll with
           | Some ms -> max 0 ms
           | None -> (
-              match selected_log t with
-              | Some e ->
+              match selected_timeline_entry t with
+              | Some (Entry_log e) ->
                   let vis = max 1 (Option.value viewport_rows ~default:8) in
                   let total =
                     List.length
@@ -689,6 +787,14 @@ let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t 
                          e.details)
                   in
                   max 0 (total - vis)
+              | Some (Entry_event ev) ->
+                  let vis = max 1 (Option.value viewport_rows ~default:8) in
+                  let detail_lines =
+                    match ev.detail with
+                    | Some d -> List.length (String.split_on_char '\n' d)
+                    | None -> 0
+                  in
+                  max 0 (4 + detail_lines - vis)
               | None -> 0)
         in
         let detail_scroll_offset =
@@ -697,7 +803,7 @@ let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t 
         in
         { t with detail_scroll_offset }
       else
-        let len = List.length (visible_logs t) in
+        let len = List.length (visible_timeline t) in
         let selected_index = clamp_index len (t.selected_index + delta) in
         let scroll_offset =
           adjust_scroll ?viewport_rows ~scroll:t.scroll_offset selected_index

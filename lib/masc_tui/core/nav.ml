@@ -28,6 +28,7 @@ type runtime_tab =
   | Runtime_efficiency_spend
   | Runtime_failover_lanes
   | Runtime_tools_connectors
+  | Runtime_addons_browser
 
 type infra_tab =
   | Infra_sandboxes
@@ -199,6 +200,7 @@ let all_runtime_tabs =
     Runtime_efficiency_spend;
     Runtime_failover_lanes;
     Runtime_tools_connectors;
+    Runtime_addons_browser;
   ]
 
 let runtime_tab_label = function
@@ -206,18 +208,21 @@ let runtime_tab_label = function
   | Runtime_efficiency_spend -> Say.make ~ko:"효율 · 지출" ~en:"Efficiency & Spend"
   | Runtime_failover_lanes -> Say.make ~ko:"페일오버 레인" ~en:"Failover Lanes"
   | Runtime_tools_connectors -> Say.make ~ko:"도구 · 커넥터" ~en:"Tools & Connectors"
+  | Runtime_addons_browser -> Say.make ~ko:"애드온 · 브라우저" ~en:"Addons & Browser"
 
 let next_runtime_tab = function
   | Runtime_quotas_credits -> Runtime_efficiency_spend
   | Runtime_efficiency_spend -> Runtime_failover_lanes
   | Runtime_failover_lanes -> Runtime_tools_connectors
-  | Runtime_tools_connectors -> Runtime_quotas_credits
+  | Runtime_tools_connectors -> Runtime_addons_browser
+  | Runtime_addons_browser -> Runtime_quotas_credits
 
 let prev_runtime_tab = function
-  | Runtime_quotas_credits -> Runtime_tools_connectors
+  | Runtime_quotas_credits -> Runtime_addons_browser
   | Runtime_efficiency_spend -> Runtime_quotas_credits
   | Runtime_failover_lanes -> Runtime_efficiency_spend
   | Runtime_tools_connectors -> Runtime_failover_lanes
+  | Runtime_addons_browser -> Runtime_tools_connectors
 
 let all_infra_tabs =
   [ Infra_sandboxes; Infra_repos_changes; Infra_activity_logs ]
@@ -349,6 +354,7 @@ let runtime_tab_index = function
   | Runtime_efficiency_spend -> 1
   | Runtime_failover_lanes -> 2
   | Runtime_tools_connectors -> 3
+  | Runtime_addons_browser -> 4
 
 let equal_runtime_tab a b =
   Int.equal (runtime_tab_index a) (runtime_tab_index b)
@@ -673,6 +679,12 @@ let all_menu_items =
       shortcut = None;
     };
     {
+      section = Sec_runtime;
+      target = Menu_runtime Runtime_addons_browser;
+      label = runtime_tab_label Runtime_addons_browser;
+      shortcut = None;
+    };
+    {
       section = Sec_infra;
       target = Menu_infra Infra_sandboxes;
       label = infra_tab_label Infra_sandboxes;
@@ -731,13 +743,14 @@ let menu_item_index = function
   | Menu_runtime Runtime_efficiency_spend -> 11
   | Menu_runtime Runtime_failover_lanes -> 12
   | Menu_runtime Runtime_tools_connectors -> 13
-  | Menu_infra Infra_sandboxes -> 14
-  | Menu_infra Infra_repos_changes -> 15
-  | Menu_infra Infra_activity_logs -> 16
-  | Menu_settings -> 17
-  | Menu_incidents -> 18
-  | Menu_queue_context -> 19
-  | Menu_help -> 20
+  | Menu_runtime Runtime_addons_browser -> 14
+  | Menu_infra Infra_sandboxes -> 15
+  | Menu_infra Infra_repos_changes -> 16
+  | Menu_infra Infra_activity_logs -> 17
+  | Menu_settings -> 18
+  | Menu_incidents -> 19
+  | Menu_queue_context -> 20
+  | Menu_help -> 21
 
 let menu_item_of_index idx = List.nth_opt all_menu_items idx
 

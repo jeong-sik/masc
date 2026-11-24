@@ -75,6 +75,7 @@ type t = {
   pulse_scroll_offset : int;
   filter_query : string;
   selected_keeper : string option;
+  selected_collapsed_company : string option;
   collapsed_companies : String_set.t;
   chat_histories : Wire_fleet.chat_history_page Observed.t String_map.t;
   chat_streams : chat_stream_buffer String_map.t;
@@ -110,6 +111,7 @@ let empty =
     pulse_scroll_offset = 0;
     filter_query = "";
     selected_keeper = None;
+    selected_collapsed_company = None;
     collapsed_companies = String_set.empty;
     chat_histories = String_map.empty;
     chat_streams = String_map.empty;
@@ -122,6 +124,15 @@ let empty =
     chat_scroll_offset = 0;
     keeper_dive_tab = Nav.Keeper_chat;
   }
+
+let count_newlines s =
+  let n = ref 0 in
+  String.iter (fun c -> if Char.equal c '\n' then incr n) s;
+  !n
+
+let chat_scroll_delta_for_text ~prev_text ~next_text =
+  let d = count_newlines next_text - count_newlines prev_text in
+  if d > 0 then d else 0
 
 let equal_chat_display_origin a b =
   match a, b with
@@ -298,6 +309,19 @@ let filter_matched_keepers t =
         | Some m -> contains_ci ~needle:q m
         | None -> false)
       base
+
+type companies_nav_row =
+  | Nav_company_collapsed of string
+  | Nav_keeper of Wire_fleet.keeper_summary
+
+let companies_nav_rows t =
+  let groups = Wire_fleet.group_by_company (filter_matched_keepers t) in
+  List.concat_map
+    (fun (g : Wire_fleet.company_group) ->
+      if String_set.mem g.company t.collapsed_companies then
+        [ Nav_company_collapsed g.company ]
+      else List.map (fun k -> Nav_keeper k) g.keepers)
+    groups
 
 let filtered_keepers t =
   let matched = filter_matched_keepers t in
@@ -1148,7 +1172,21 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
                 }
             | Wire_fleet.Chunk_ignored -> prev
           in
-          { t with chat_streams = String_map.add keeper updated t.chat_streams })
+          let chat_scroll_offset =
+            if
+              t.chat_scroll_offset > 0
+              && Option.equal String.equal t.selected_keeper (Some keeper)
+            then
+              t.chat_scroll_offset
+              + chat_scroll_delta_for_text ~prev_text:prev.text
+                  ~next_text:updated.text
+            else t.chat_scroll_offset
+          in
+          {
+            t with
+            chat_streams = String_map.add keeper updated t.chat_streams;
+            chat_scroll_offset;
+          })
 
 let mark_chat_stream_interrupting ~keeper ~request_id ~interrupting t =
   match String_map.find_opt keeper t.chat_streams with
@@ -1199,7 +1237,7 @@ let detach_chat_streams t =
   }
 
 let set_fleet_mode fleet_mode t =
-  let next = { t with fleet_mode } in
+  let next = { t with fleet_mode; selected_collapsed_company = None } in
   sync_selection_after_change ~prev_index:0 ~reset_scroll:true
     ~clear_if_empty:false next
 
@@ -1267,16 +1305,88 @@ let cycle_memory_mode t =
 let toggle_turn_details t =
   { t with chat_turn_details_expanded = not t.chat_turn_details_expanded }
 
+let visual_row_for_collapsed_company t company =
+  let groups = Wire_fleet.group_by_company (filter_matched_keepers t) in
+  let rec walk row = function
+    | [] -> (0, 0)
+    | (g : Wire_fleet.company_group) :: rest ->
+        if String.equal g.company company then (row, row)
+        else
+          let step =
+            if String_set.mem g.company t.collapsed_companies then 1
+            else 1 + List.length g.keepers
+          in
+          walk (row + step) rest
+  in
+  walk 0 groups
+
 let toggle_company_collapsed company t =
   let prev_index = resolve_current_index t (filtered_keepers t) in
+  let was_collapsed = String_set.mem company t.collapsed_companies in
   let collapsed_companies =
-    if String_set.mem company t.collapsed_companies then
-      String_set.remove company t.collapsed_companies
+    if was_collapsed then String_set.remove company t.collapsed_companies
     else String_set.add company t.collapsed_companies
   in
   let next = { t with collapsed_companies } in
-  sync_selection_after_change ~prev_index ~reset_scroll:false
-    ~clear_if_empty:false next
+  if not was_collapsed then
+    let selected_was_in_company =
+      match t.selected_keeper with
+      | None -> true
+      | Some sn ->
+          let groups = Wire_fleet.group_by_company (filter_matched_keepers t) in
+          List.exists
+            (fun (g : Wire_fleet.company_group) ->
+              String.equal g.company company
+              && List.exists
+                   (fun (k : Wire_fleet.keeper_summary) ->
+                     String.equal k.name sn)
+                   g.keepers)
+            groups
+    in
+    let synced =
+      sync_selection_after_change ~prev_index ~reset_scroll:false
+        ~clear_if_empty:false next
+    in
+    let all_collapsed = filtered_keepers next = [] in
+    if selected_was_in_company || all_collapsed then
+      (* Collapsing the active company (or the last open company) anchors cursor
+         on the collapsed company header so the operator can immediately
+         re-expand it with Space/Enter instead of getting trapped outside. *)
+      let header_row, vis_row = visual_row_for_collapsed_company next company in
+      let scroll_offset =
+        adjust_grouped_scroll ~scroll:t.scroll_offset ~header_row vis_row
+      in
+      {
+        synced with
+        selected_collapsed_company = Some company;
+        scroll_offset;
+      }
+    else
+      { synced with selected_collapsed_company = t.selected_collapsed_company }
+  else
+    (* Expanding clears collapsed-header focus and selects the first keeper in
+       this company so the newly revealed members are immediately focused. *)
+    let first_keeper_opt =
+      let groups = Wire_fleet.group_by_company (filter_matched_keepers next) in
+      List.find_map
+        (fun (g : Wire_fleet.company_group) ->
+          if String.equal g.company company then
+            match g.keepers with k :: _ -> Some k.name | [] -> None
+          else None)
+        groups
+    in
+    let next1 =
+      {
+        next with
+        selected_collapsed_company = None;
+        selected_keeper =
+          (match first_keeper_opt with
+          | Some _ as k -> k
+          | None -> next.selected_keeper);
+      }
+    in
+    sync_selection_after_change ~prev_index ~reset_scroll:false
+      ~clear_if_empty:false next1
 
 let select_keeper name t =
   let changed = not (Option.equal String.equal t.selected_keeper (Some name)) in
@@ -1294,40 +1404,124 @@ let select_keeper name t =
       {
         t with
         selected_keeper;
+        selected_collapsed_company = None;
         selected_index = idx;
         scroll_offset;
         chat_scroll_offset;
       }
-  | None -> { t with selected_keeper = Some name; chat_scroll_offset }
+  | None ->
+      {
+        t with
+        selected_keeper = Some name;
+        selected_collapsed_company = None;
+        chat_scroll_offset;
+      }
 
 let move_selection ?viewport_rows ~delta t =
-  let ks = filtered_keepers t in
-  let len = List.length ks in
-  let cur = resolve_current_index t ks in
-  let selected_index = clamp_index len (cur + delta) in
-  let selected_keeper =
-    match List.nth_opt ks selected_index with
-    | Some k -> Some k.name
-    | None -> None
-  in
-  let changed = not (Option.equal String.equal t.selected_keeper selected_keeper) in
-  let chat_scroll_offset = if changed then 0 else t.chat_scroll_offset in
-  let header_row, vis_row =
-    visual_row_for_selection t ~selected_index ~selected_keeper
-  in
-  let scroll_offset =
-    if len = 0 then 0
-    else
-      adjust_grouped_scroll ?viewport_rows ~scroll:t.scroll_offset ~header_row
-        vis_row
-  in
-  {
-    t with
-    selected_index;
-    scroll_offset;
-    selected_keeper;
-    chat_scroll_offset;
-  }
+  match t.fleet_mode with
+  | Nav.Fleet_companies ->
+      let nav_rows = companies_nav_rows t in
+      let nav_len = List.length nav_rows in
+      if nav_len = 0 then { t with selected_collapsed_company = None }
+      else
+        let cur_nav =
+          match t.selected_collapsed_company with
+          | Some c ->
+              let rec find i = function
+                | [] -> 0
+                | Nav_company_collapsed name :: _ when String.equal name c -> i
+                | (Nav_company_collapsed _ | Nav_keeper _) :: rest ->
+                    find (i + 1) rest
+              in
+              find 0 nav_rows
+          | None -> (
+              match t.selected_keeper with
+              | Some sn ->
+                  let rec find i = function
+                    | [] -> clamp_index nav_len t.selected_index
+                    | Nav_keeper k :: _ when String.equal k.name sn -> i
+                    | (Nav_company_collapsed _ | Nav_keeper _) :: rest ->
+                        find (i + 1) rest
+                  in
+                  find 0 nav_rows
+              | None -> clamp_index nav_len t.selected_index)
+        in
+        let next_nav = clamp_index nav_len (cur_nav + delta) in
+        (match List.nth_opt nav_rows next_nav with
+        | Some (Nav_company_collapsed company) ->
+            let header_row, vis_row =
+              visual_row_for_collapsed_company t company
+            in
+            let scroll_offset =
+              adjust_grouped_scroll ?viewport_rows ~scroll:t.scroll_offset
+                ~header_row vis_row
+            in
+            {
+              t with
+              selected_collapsed_company = Some company;
+              scroll_offset;
+            }
+        | Some (Nav_keeper k) ->
+            let ks = filtered_keepers t in
+            let selected_index =
+              match index_of_keeper_name k.name ks with
+              | Some idx -> idx
+              | None -> clamp_index (List.length ks) t.selected_index
+            in
+            let selected_keeper = Some k.name in
+            let changed =
+              not (Option.equal String.equal t.selected_keeper selected_keeper)
+            in
+            let chat_scroll_offset =
+              if changed then 0 else t.chat_scroll_offset
+            in
+            let header_row, vis_row =
+              visual_row_for_selection t ~selected_index ~selected_keeper
+            in
+            let scroll_offset =
+              adjust_grouped_scroll ?viewport_rows ~scroll:t.scroll_offset
+                ~header_row vis_row
+            in
+            {
+              t with
+              selected_index;
+              scroll_offset;
+              selected_keeper;
+              selected_collapsed_company = None;
+              chat_scroll_offset;
+            }
+        | None -> t)
+  | Nav.Fleet_attention | Nav.Fleet_pulse_wall ->
+      let ks = filtered_keepers t in
+      let len = List.length ks in
+      let cur = resolve_current_index t ks in
+      let selected_index = clamp_index len (cur + delta) in
+      let selected_keeper =
+        match List.nth_opt ks selected_index with
+        | Some k -> Some k.name
+        | None -> None
+      in
+      let changed =
+        not (Option.equal String.equal t.selected_keeper selected_keeper)
+      in
+      let chat_scroll_offset = if changed then 0 else t.chat_scroll_offset in
+      let header_row, vis_row =
+        visual_row_for_selection t ~selected_index ~selected_keeper
+      in
+      let scroll_offset =
+        if len = 0 then 0
+        else
+          adjust_grouped_scroll ?viewport_rows ~scroll:t.scroll_offset
+            ~header_row vis_row
+      in
+      {
+        t with
+        selected_index;
+        scroll_offset;
+        selected_keeper;
+        selected_collapsed_company = None;
+        chat_scroll_offset;
+      }
 
 let move_company_selection ?viewport_rows ~delta t =
   let groups = company_groups t in
@@ -1421,7 +1615,7 @@ let move_chat_scroll ?max_scroll ~delta t =
 let reset_chat_scroll t = { t with chat_scroll_offset = 0 }
 
 let set_filter filter_query t =
-  let next = { t with filter_query } in
+  let next = { t with filter_query; selected_collapsed_company = None } in
   sync_selection_after_change ~prev_index:0 ~reset_scroll:true
     ~clear_if_empty:false next
 

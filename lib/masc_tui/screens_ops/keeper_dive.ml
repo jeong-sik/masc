@@ -720,16 +720,18 @@ let build_pending_tx_rows ~(theme : Theme.t) ~(model : Model.t) ~width
           ~right_meta_attrs:Attr.bold ~bg_rgb:base_bg ~full_bleed_bg:true ())
     items
 
-let draw_transcript_rows grid ~(rect : Rect.t) ~(theme : Theme.t) ~pad_x ~scroll
-    rows =
+let draw_transcript_rows grid ~(rect : Rect.t) ~(theme : Theme.t)
+    ~(model : Model.t) ~pad_x ~scroll rows =
   if Rect.is_empty rect then ()
   else
     let total = List.length rows in
     let arr = Array.of_list rows in
     let max_scroll = Int.max 0 (total - rect.h) in
     let clamped_scroll = Int.max 0 (Int.min max_scroll scroll) in
-    let start = Int.max 0 (total - rect.h - clamped_scroll) in
-    let visible = Int.min rect.h (total - start) in
+    let show_follow_cue = clamped_scroll > 0 && rect.h >= 2 in
+    let view_h = if show_follow_cue then rect.h - 1 else rect.h in
+    let start = Int.max 0 (total - view_h - clamped_scroll) in
+    let visible = Int.min view_h (total - start) in
     let content = Card.pad_inner ~pad_x rect in
     (* Cap comfortable prose column at 96 cells for readability on ultra-wide screens *)
     let col_w = Int.min content.w 96 in
@@ -1183,9 +1185,31 @@ let render_chat_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
     if all_rows = [] then
       render_empty_chat_context grid ~rect:body_rect ~theme ~model ~name
         ~hist_obs keeper_opt
-    else
-      draw_transcript_rows grid ~rect:body_rect ~theme ~pad_x
+    else begin
+      draw_transcript_rows grid ~rect:body_rect ~theme ~model ~pad_x
         ~scroll:model.fleet.chat_scroll_offset all_rows;
+      let total_r = List.length all_rows in
+      let max_s = Int.max 0 (total_r - body_rect.h) in
+      let clamped_s = Int.max 0 (Int.min max_s model.fleet.chat_scroll_offset) in
+      if clamped_s > 0 && body_rect.h >= 2 then begin
+        let cue_y = Rect.bottom body_rect - 1 in
+        let cue_r =
+          Rect.make ~x:body_rect.x ~y:cue_y ~w:body_rect.w ~h:1
+        in
+        let cue_bg = Color.of_rgb theme.surface_2 in
+        Cell_grid.fill_rect ~clip:body_rect grid ~rect:cue_r
+          ~style:(Typography.accent ~bg:cue_bg ~bold:true theme) ();
+        let cue_txt =
+          Ops_common.say model
+            ~ko:(Printf.sprintf "↓ 아래 %d줄 · [End] 최신 따라가기" clamped_s)
+            ~en:(Printf.sprintf "↓ %d lines below · [End] Follow" clamped_s)
+        in
+        ignore
+          (Ops_common.put_line ~clip:cue_r grid ~x:(body_rect.x + pad_x)
+             ~y:cue_y ~max_w:(Int.max 0 (body_rect.w - (2 * pad_x)))
+             ~style:(Typography.accent ~bg:cue_bg ~bold:true theme) cue_txt)
+      end
+    end;
     if status_h = 1 then
       draw_keeper_status_strip grid ~rect:status_rect ~theme ~model ~name
         keeper_opt
@@ -2761,17 +2785,29 @@ let render_config_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
         Ops_common.say model ~ko:" · [d] Diff" ~en:" · [d] Diff"
       else ""
     in
+    let config_focused = Model.is_keeper_config_active model in
     let hdr_str =
-      Printf.sprintf "%s %s %s %s %d %s%s"
-        (Ops_common.say model ~ko:"키퍼 설정" ~en:"Keeper Settings")
-        (Glyph.to_utf8 Glyph.Separator_dot)
-        name
-        (Glyph.to_utf8 Glyph.Separator_dot)
-        dirty_n
-        (Ops_common.say model
-           ~ko:"건 변경 대기 · [↑↓] 필드 · [←→] 값 변경 · [Enter] 편집 · [Ctrl+S] 저장 · [[ ]] 탭"
-           ~en:"staged · [↑↓] Field · [←→] Cycle · [Enter] Edit · [Ctrl+S] Save · [[ ]] Tabs")
-        diff_hint
+      if config_focused then
+        Printf.sprintf "%s %s %s %s %d %s%s"
+          (Ops_common.say model ~ko:"키퍼 설정" ~en:"Keeper Settings")
+          (Glyph.to_utf8 Glyph.Separator_dot)
+          name
+          (Glyph.to_utf8 Glyph.Separator_dot)
+          dirty_n
+          (Ops_common.say model
+             ~ko:"건 변경 대기 · [↑↓] 필드 · [←→] 값 변경 · [Enter] 편집 · [Ctrl+S] 저장 · [[ ]] 탭"
+             ~en:"staged · [↑↓] Field · [←→] Cycle · [Enter] Edit · [Ctrl+S] Save · [[ ]] Tabs")
+          diff_hint
+      else
+        Printf.sprintf "%s %s %s %s %d %s"
+          (Ops_common.say model ~ko:"키퍼 설정" ~en:"Keeper Settings")
+          (Glyph.to_utf8 Glyph.Separator_dot)
+          name
+          (Glyph.to_utf8 Glyph.Separator_dot)
+          dirty_n
+          (Ops_common.say model
+             ~ko:"건 변경 대기 · [Tab] 설정 편집 포커스"
+             ~en:"staged · [Tab] Focus settings editor")
     in
     let hdr_st =
       if dirty_n > 0 then Typography.status ~bg ~bold:true theme Theme.Status_attention
@@ -3210,10 +3246,16 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
     let hotkey =
       if embedded then
         if Nav.equal_keeper_tab tab Nav.Keeper_config then
-          Some
-            (Ops_common.say model
-               ~ko:"[←→] 값 · [Enter] 편집 · [d] Diff · [Ctrl+S] 저장 · [[ ]] 탭"
-               ~en:"[←→] Cycle · [Enter] Edit · [d] Diff · [Ctrl+S] Save · [[ ]] Tabs")
+          if Model.is_keeper_config_active model then
+            Some
+              (Ops_common.say model
+                 ~ko:"[←→] 값 · [Enter] 편집 · [d] Diff · [Ctrl+S] 저장 · [[ ]] 탭"
+                 ~en:"[←→] Cycle · [Enter] Edit · [d] Diff · [Ctrl+S] Save · [[ ]] Tabs")
+          else
+            Some
+              (Ops_common.say model
+                 ~ko:"[Tab] 설정 편집 · [Enter] 상세 · [z] 확대"
+                 ~en:"[Tab] Edit Config · [Enter] Dive · [z] Zoom")
         else if memory_diagram_open then
           Some
             (Ops_common.say model
@@ -3275,6 +3317,14 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
     let footer_hint =
       if embedded then
         if
+          Nav.equal_keeper_tab tab Nav.Keeper_config
+          && Model.is_keeper_config_active model
+        then
+          Some
+            (Ops_common.say model
+               ~ko:"[Enter] 편집 · [d] Diff · [Ctrl+S] 저장 · [Tab] 목록"
+               ~en:"[Enter] Edit · [d] Diff · [Ctrl+S] Save · [Tab] Fleet")
+        else if
           Nav.equal_keeper_tab tab Nav.Keeper_memory
           && model.nav.pane_index = 1
         then

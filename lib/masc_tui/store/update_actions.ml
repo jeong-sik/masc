@@ -2593,6 +2593,7 @@ and execute_action ~now (m : Model.t) action =
                                 pane_index = 0;
                                 zoomed = false;
                                 dive_scroll_offset = 0;
+                                json_scroll_offset = 0;
                               };
                             knowledge =
                               m.knowledge
@@ -2877,7 +2878,16 @@ and execute_action ~now (m : Model.t) action =
               (* OAuth switch moved to explicit [a] / [Enter] so Space never POSTs. *)
               (m, [])
           | Some (Nav.Dive_infra _ | Nav.Dive_work _) ->
-              ({ m with infra = Infra_store.toggle_raw_json m.infra }, [])
+              let infra = Infra_store.toggle_raw_json m.infra in
+              let pane_index =
+                if infra.show_raw_json then m.nav.pane_index else 0
+              in
+              ( {
+                  m with
+                  infra;
+                  nav = { m.nav with pane_index; json_scroll_offset = 0 };
+                }
+              , [] )
           | Some
               ( Nav.Dive_keeper
                   {
@@ -2927,16 +2937,26 @@ and execute_action ~now (m : Model.t) action =
                     (* OAuth switch moved to explicit [a] / [Enter] so Space never POSTs. *)
                     (m, [])
                   else if m.nav.pane_index = 0 then
-                    match Fleet_store.selected_keeper_summary m.fleet with
-                    | Some k ->
+                    match m.fleet.selected_collapsed_company with
+                    | Some company ->
                         ( {
                             m with
                             fleet =
-                              Fleet_store.toggle_company_collapsed k.company
+                              Fleet_store.toggle_company_collapsed company
                                 m.fleet;
                           }
                         , [] )
-                    | None -> (m, [])
+                    | None -> (
+                        match Fleet_store.selected_keeper_summary m.fleet with
+                        | Some k ->
+                            ( {
+                                m with
+                                fleet =
+                                  Fleet_store.toggle_company_collapsed k.company
+                                    m.fleet;
+                              }
+                            , [] )
+                        | None -> (m, []))
                   else (m, [])
               | Nav.Knowledge -> (
                   match m.knowledge.active_tab with
@@ -5174,7 +5194,7 @@ and execute_action ~now (m : Model.t) action =
                 open_harness_overrule_for_selected ~verdict:"approve" ~now m
             | Nav.Work
               when Nav.equal_work_tab m.work.active_tab Nav.Work_pipeline -> (
-                if m.nav.pane_index = 1 && Model.work_pipeline_has_linked_card m
+                if m.nav.pane_index = 1 && Model.work_pipeline_verifs_visible m
                 then
                   match Work_store.selected_verification m.work with
                   | Some v ->
@@ -5198,6 +5218,15 @@ and execute_action ~now (m : Model.t) action =
                             };
                         ] )
                   | None -> (m, [])
+                else if
+                  m.nav.pane_index = 1 && Model.work_pipeline_has_linked_card m
+                then
+                  ( Model.with_toast ~now ~level:Model.Toast_warning
+                      (Say.make
+                         ~ko:"화면에 표시된 검증 항목이 없습니다 (창 높이를 늘려주세요)"
+                         ~en:"No verification visible in pane (increase viewport height)")
+                      m
+                  , [] )
                 else
                   match Work_store.selected_goal m.work with
                   | Some g -> goal_action_on_approve ~now m g
@@ -5297,13 +5326,23 @@ and execute_action ~now (m : Model.t) action =
                 | Nav.Work_pipeline -> (
                     if
                       m.nav.pane_index = 1
-                      && Model.work_pipeline_has_linked_card m
+                      && Model.work_pipeline_verifs_visible m
                     then
                       match Work_store.selected_verification m.work with
                       | Some v ->
                           Update_nav.open_inline_modal m
                             (Nav.Verification_reject v.request_id)
                       | None -> (m, [])
+                    else if
+                      m.nav.pane_index = 1
+                      && Model.work_pipeline_has_linked_card m
+                    then
+                      ( Model.with_toast ~now ~level:Model.Toast_warning
+                          (Say.make
+                             ~ko:"화면에 표시된 검증 항목이 없습니다 (창 높이를 늘려주세요)"
+                             ~en:"No verification visible in pane (increase viewport height)")
+                          m
+                      , [] )
                     else
                       match Work_store.selected_goal m.work with
                       | Some g -> goal_action_on_stop ~now m g

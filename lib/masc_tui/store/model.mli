@@ -41,6 +41,7 @@ type nav_state = {
   sidebar_cursor : int;
   sidebar_scroll : int;
   dive_scroll_offset : int;
+  json_scroll_offset : int;
   help_scroll_offset : int;
   queue_scroll_offset : int;
   btw_scroll_offset : int;
@@ -252,6 +253,10 @@ val sync_sidebar_cursor : t -> t
 val body_top_y : t -> int
 val sidebar_rect : t -> Rect.t option
 val body_rect : t -> Rect.t
+val pane_rects : t -> Rect.t list
+(** Exact screen rectangles of interactive panes in focus index order
+    ([0 .. focusable_pane_count m - 1]) for SSOT mouse hit-testing across 2/3/4
+    pane and compact vertical stacked layouts. *)
 val composer_rect : t -> Rect.t option
 (** Exact bottom composer rectangle matching [Chrome.compute_layout], or
     [None] when the composer is auto-folded or gated by Micro/too-small. *)
@@ -260,6 +265,9 @@ val work_pipeline_has_linked_card : t -> bool
 (** [true] iff [2 Work > Pipeline] renders the bottom-left Linked Tasks &
     Verifications card ([inner_body_width >= 96 && inner_body_height >= 15],
     matching [left_rect.h = inner_body_height - 1 >= 14]). *)
+val work_pipeline_verifs_visible : t -> bool
+(** [true] iff [2 Work > Pipeline] pane 1 has both the Linked Card rendered and
+    sufficient vertical space to display at least one verification row. *)
 
 val can_zoom_current_view : t -> bool
 (** [true] iff [z] ([Toggle_zoom]) renders a zoomed view on the active screen

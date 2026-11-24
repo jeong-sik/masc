@@ -134,9 +134,14 @@ let render_opt_in_json_tree grid ~(rect : Rect.t) ~(theme : Theme.t)
            (Ops_common.say model ~ko:"구조화 JSON 트리 [Space]"
               ~en:"Structured Json_tree [Space]"))
       with
-      hotkey = Some "[Space] Hide";
+      footer_hint =
+        Some
+          (if rect.w >= 44 then
+             Ops_common.say model ~ko:"[↑↓] 스크롤 · [Tab] 본문 · [Space] 숨김"
+               ~en:"[↑↓] Scroll · [Tab] Main · [Space] Hide"
+           else "[↑↓] · [Tab] · [Space]");
       elevated = false;
-      focused = false;
+      focused = Model.pane_focused model 1;
     }
   in
   let inner = Card.draw ~cache grid ~rect ~theme spec in
@@ -147,7 +152,7 @@ let render_opt_in_json_tree grid ~(rect : Rect.t) ~(theme : Theme.t)
     let lines = Json_tree.flatten ~max_depth:4 ~redact_secrets:true scrubbed in
     ignore
       (Json_tree.draw grid ~rect:content ~theme
-         ~scroll:model.nav.dive_scroll_offset lines)
+         ~scroll:model.nav.json_scroll_offset lines)
   end
 
 let draw_evidence_checklist ?(scroll = 0) grid ~(rect : Rect.t)
@@ -280,8 +285,12 @@ let render_goal_dive ~goal_id ~(model : Model.t) ~cache ~(rect : Rect.t)
         (Card.default_spec ~title) with
         subtitle = (match g_opt with Some g -> Some g.title | None -> None);
         badge;
-        hotkey = Some "[a] Confirm · [x] Pause · [Space] JSON · [Esc] Back";
-        focused = Model.body_has_focus model;
+        hotkey =
+          Some
+            (Ops_common.say model
+               ~ko:"[a] 전환 · [x] 정지 · [Space] JSON · [Esc] 뒤로"
+               ~en:"[a] Advance · [x] Pause · [Space] JSON · [Esc] Back");
+        focused = Model.pane_focused model 0;
       }
     in
     let inner = Card.draw ~cache grid ~rect:main_card_rect ~theme spec in
@@ -494,9 +503,9 @@ let render_goal_dive ~goal_id ~(model : Model.t) ~cache ~(rect : Rect.t)
                   Ops_common.say model ~ko:"재개" ~en:"Resume"
               | Wire_work.Blocked _ ->
                   Ops_common.say model ~ko:"차단 해제" ~en:"Unblock"
-              | Wire_work.Dropped ->
+              | Wire_work.Completed | Wire_work.Dropped ->
                   Ops_common.say model ~ko:"다시 열기" ~en:"Reopen"
-              | Wire_work.Executing | Wire_work.Verifying | Wire_work.Completed ->
+              | Wire_work.Executing | Wire_work.Verifying ->
                   Ops_common.say model ~ko:"검증 요청" ~en:"Verify"
             in
             let stop_lbl =
@@ -644,8 +653,11 @@ let render_task_dive ~task_id ~(model : Model.t) ~cache ~(rect : Rect.t)
         (Card.default_spec ~title) with
         subtitle = (match tk_opt with Some tk -> Some tk.title | None -> None);
         badge;
-        hotkey = Some "[x] Cancel · [Space] JSON · [Esc] Back";
-        focused = Model.body_has_focus model;
+        hotkey =
+          Some
+            (Ops_common.say model ~ko:"[x] 취소 · [Space] JSON · [Esc] 뒤로"
+               ~en:"[x] Cancel · [Space] JSON · [Esc] Back");
+        focused = Model.pane_focused model 0;
       }
     in
     let inner = Card.draw ~cache grid ~rect:main_card_rect ~theme spec in
@@ -841,8 +853,12 @@ let render_verification_dive ~req_id ~(model : Model.t) ~cache ~(rect : Rect.t)
         (Card.default_spec ~title) with
         subtitle = (match v_opt with Some v -> Some v.task_title | None -> None);
         badge;
-        hotkey = Some "[v] Tab · [a] Approve · [x] Reject · [h] Overrule · [Space] JSON · [Esc] Back";
-        focused = Model.body_has_focus model;
+        hotkey =
+          Some
+            (Ops_common.say model
+               ~ko:"[v] 탭 · [a] 승인 · [x] 반려 · [h] 재정의 · [Space] JSON · [Esc] 뒤로"
+               ~en:"[v] Tab · [a] Approve · [x] Reject · [h] Overrule · [Space] JSON · [Esc] Back");
+        focused = Model.pane_focused model 0;
       }
     in
     let inner = Card.draw ~cache grid ~rect:main_card_rect ~theme spec in

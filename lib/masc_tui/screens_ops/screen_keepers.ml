@@ -576,8 +576,10 @@ let render_narrow_company_rail grid ~(rect : Rect.t) ~(theme : Theme.t)
       let rec find i =
         if i >= total then None
         else
-          match arr.(i), selected_name with
-          | `Keeper k, Some sn when String.equal k.name sn -> Some i
+          match arr.(i), model.fleet.selected_collapsed_company, selected_name with
+          | `Company (grp, true), Some sc, _ when String.equal grp.company sc ->
+              Some i
+          | `Keeper k, None, Some sn when String.equal k.name sn -> Some i
           | _ -> find (i + 1)
       in
       find 0
@@ -593,9 +595,31 @@ let render_narrow_company_rail grid ~(rect : Rect.t) ~(theme : Theme.t)
       let row_rect = Rect.make ~x:rect.x ~y:py ~w:rect.w ~h:1 in
       match arr.(idx) with
       | `Company (grp, collapsed) ->
-          let bg = Color.of_rgb theme.surface_2 in
+          let is_sel_company =
+            collapsed
+            && Option.equal String.equal model.fleet.selected_collapsed_company
+                 (Some grp.company)
+          in
+          let rail_focused = Model.pane_focused model 0 in
+          let bg =
+            if is_sel_company && rail_focused then
+              Color.of_rgb theme.selection_bg
+            else Color.of_rgb theme.surface_2
+          in
           Cell_grid.fill_rect ~clip:rect grid ~rect:row_rect
             ~style:(Typography.structure ~bg theme) ();
+          if is_sel_company && rect.w >= 1 then begin
+            let rail_color =
+              if rail_focused then theme.accent else theme.border_inactive
+            in
+            ignore
+              (Cell_grid.put_text ~clip:row_rect grid ~x:rect.x ~y:py
+                 ~style:
+                   (Style.make ~fg:(Color.of_rgb rail_color) ~bg
+                      ~attrs:(if rail_focused then Attr.bold else Attr.none)
+                      ())
+                 (Glyph.to_utf8 Glyph.Left_rail))
+          end;
           let arrow =
             if collapsed then Glyph.to_utf8 Glyph.Expand_closed
             else Glyph.to_utf8 Glyph.Expand_open
@@ -629,11 +653,15 @@ let render_narrow_company_rail grid ~(rect : Rect.t) ~(theme : Theme.t)
               ~max_w:2 ~style:(Typography.accent ~bg ~bold:true theme)
               (arrow ^ " ")
           in
+          let label_st =
+            if is_sel_company && rail_focused then Typography.anchor ~bg theme
+            else Typography.structure ~bg ~bold:true theme
+          in
           ignore
             (Ops_common.put_line ~clip:row_rect grid
                ~x:(rect.x + 1 + adv_arr) ~y:py
                ~max_w:(Int.max 6 (max_left - adv_arr))
-               ~style:(Typography.structure ~bg ~bold:true theme)
+               ~style:label_st
                (Printf.sprintf "%s (%d)" grp.company (List.length grp.keepers)));
           let rx = ref (Rect.right row_rect - 1) in
           if counts_w > 0 && rect.w > counts_w + 12 then begin
@@ -652,6 +680,8 @@ let render_narrow_company_rail grid ~(rect : Rect.t) ~(theme : Theme.t)
           end
       | `Keeper k ->
           let is_sel =
+            Option.is_none model.fleet.selected_collapsed_company
+            &&
             match selected_name with
             | Some sn -> String.equal k.name sn
             | None -> false
@@ -869,9 +899,18 @@ let render_full_width_roster grid ~(rect : Rect.t) ~(theme : Theme.t)
             groups
         in
         let selected_idx =
-          match selected_name with
-          | None -> None
-          | Some sn ->
+          match model.fleet.selected_collapsed_company, selected_name with
+          | Some c, _ ->
+              let target_id = "company:" ^ c in
+              let rec find i = function
+                | [] -> None
+                | (r : Table.row) :: rest ->
+                    if String.equal r.id target_id then Some i
+                    else find (i + 1) rest
+              in
+              find 0 rows
+          | None, None -> None
+          | None, Some sn ->
               let rec find i = function
                 | [] -> None
                 | (r : Table.row) :: rest ->

@@ -1775,13 +1775,23 @@ let test_verifier_regressions () =
     | Cmd.Quit _ ->
         false
   in
-  let _, cmds_dry =
+  let _, cmds_space =
     Update.step ~now:t0 m_set1 (Msg.Key_event (char_key " "))
+  in
+  let has_space_post =
+    List.exists
+      (function Cmd.Http_post _ -> true | _ -> false)
+      (Cmd.flatten cmds_space)
+  in
+  Alcotest.(check bool) "Space in Settings emits ZERO network POSTs" false
+    has_space_post;
+  let _, cmds_dry =
+    Update.step ~now:t0 m_set1 (Msg.Key_event (char_key "d"))
   in
   let has_dry_run =
     List.exists (is_patch_post ~want_dry_run:true) (Cmd.flatten cmds_dry)
   in
-  Alcotest.(check bool) "Space in Settings triggers dry_run patch" true
+  Alcotest.(check bool) "'d' in Settings triggers dry_run patch" true
     has_dry_run;
   let _, cmds_save =
     Update.step ~now:t0 m_set1 (Msg.Key_event (char_key ~ctrl:true "s"))
@@ -5442,50 +5452,76 @@ let test_nav_fix7_symmetric_viewport_scrolling_all_stores () =
 let test_nav_left_right_subtab_cycling_and_guards () =
   let m0 = Model.initial ~cols:140 ~rows:40 () in
   let step m ev = Update.step ~now:t0 m (Msg.Key_event ev) in
-  (* 1. Keepers: Right cycles Companies -> Attention -> Pulse_wall; Left reverses *)
+  (* 1. Keepers: '['/']' cycle Companies -> Attention -> Pulse_wall; Left/Right move spatially (Sidebar <-> Pane 0 <-> Pane 1) *)
   let m_k = { m0 with nav = { m0.nav with workspace = Nav.Keepers } } in
-  let m_k1, _ = step m_k (key Keymap.Input.Right) in
-  Alcotest.(check bool) "Keepers Right -> Fleet_attention" true
+  let m_k_r, _ = step m_k (key Keymap.Input.Right) in
+  Alcotest.(check bool) "Keepers Right never cycles fleet_mode" true
+    (Nav.equal_keepers_fleet_mode m_k_r.fleet.fleet_mode Nav.Fleet_companies);
+  let m_k_sb, _ = step m_k (key Keymap.Input.Left) in
+  Alcotest.(check bool) "Keepers pane 0 Left enters docked sidebar focus" true
+    (Model.sidebar_has_focus m_k_sb);
+  let m_k1, _ = step m_k (char_key "]") in
+  Alcotest.(check bool) "Keepers ']' -> Fleet_attention" true
     (Nav.equal_keepers_fleet_mode m_k1.fleet.fleet_mode Nav.Fleet_attention);
-  let m_k2, _ = step m_k1 (key Keymap.Input.Right) in
-  Alcotest.(check bool) "Keepers second Right -> Fleet_pulse_wall" true
+  let m_k2, _ = step m_k1 (char_key "]") in
+  Alcotest.(check bool) "Keepers second ']' -> Fleet_pulse_wall" true
     (Nav.equal_keepers_fleet_mode m_k2.fleet.fleet_mode Nav.Fleet_pulse_wall);
-  let m_k3, _ = step m_k2 (key Keymap.Input.Left) in
-  Alcotest.(check bool) "Keepers Left -> Fleet_attention" true
+  let m_k3, _ = step m_k2 (char_key "[") in
+  Alcotest.(check bool) "Keepers '[' -> Fleet_attention" true
     (Nav.equal_keepers_fleet_mode m_k3.fleet.fleet_mode Nav.Fleet_attention);
 
-  (* 2. Work, Knowledge, Runtime, Infra cycle sub-tabs on Right/Left *)
+  (* 2. Work, Knowledge, Runtime, Infra cycle sub-tabs ONLY on '['/']', while Left/Right move spatially across panes & sidebar *)
   let m_w = { m0 with nav = { m0.nav with workspace = Nav.Work } } in
-  let m_w1, _ = step m_w (key Keymap.Input.Right) in
-  Alcotest.(check bool) "Work Right -> Work_tasks" true
+  let m_w_r, _ = step m_w (key Keymap.Input.Right) in
+  Alcotest.(check bool) "Work Right stays on Work_pipeline (spatial pane move)" true
+    (Nav.equal_work_tab m_w_r.work.active_tab Nav.Work_pipeline);
+  Alcotest.(check int) "Work Right moves pane_index 0 -> 1" 1
+    m_w_r.nav.pane_index;
+  let m_w_l, _ = step m_w_r (key Keymap.Input.Left) in
+  Alcotest.(check int) "Work pane 1 Left moves pane_index 1 -> 0" 0
+    m_w_l.nav.pane_index;
+  let m_w_sb, _ = step m_w_l (key Keymap.Input.Left) in
+  Alcotest.(check bool) "Work pane 0 Left enters sidebar focus" true
+    (Model.sidebar_has_focus m_w_sb);
+  let m_w1, _ = step m_w (char_key "]") in
+  Alcotest.(check bool) "Work ']' -> Work_tasks" true
     (Nav.equal_work_tab m_w1.work.active_tab Nav.Work_tasks);
-  let m_w2, _ = step m_w1 (key Keymap.Input.Right) in
-  Alcotest.(check bool) "Work second Right -> Work_schedules" true
+  let m_w2, _ = step m_w1 (char_key "]") in
+  Alcotest.(check bool) "Work second ']' -> Work_schedules" true
     (Nav.equal_work_tab m_w2.work.active_tab Nav.Work_schedules);
-  let m_w0, _ = step m_w1 (key Keymap.Input.Left) in
-  Alcotest.(check bool) "Work Left -> Work_pipeline" true
+  let m_w0, _ = step m_w1 (char_key "[") in
+  Alcotest.(check bool) "Work '[' -> Work_pipeline" true
     (Nav.equal_work_tab m_w0.work.active_tab Nav.Work_pipeline);
 
   let m_kn = { m0 with nav = { m0.nav with workspace = Nav.Knowledge } } in
-  let m_kn1, _ = step m_kn (key Keymap.Input.Right) in
-  Alcotest.(check bool) "Knowledge Right -> Knowledge_wiki" true
+  let m_kn_r, _ = step m_kn (key Keymap.Input.Right) in
+  Alcotest.(check bool) "Knowledge Right stays on Knowledge_board" true
+    (Nav.equal_knowledge_tab m_kn_r.knowledge.active_tab Nav.Knowledge_board);
+  let m_kn1, _ = step m_kn (char_key "]") in
+  Alcotest.(check bool) "Knowledge ']' -> Knowledge_wiki" true
     (Nav.equal_knowledge_tab m_kn1.knowledge.active_tab Nav.Knowledge_wiki);
-  let m_kn2, _ = step m_kn1 (key Keymap.Input.Right) in
-  Alcotest.(check bool) "Knowledge second Right -> Knowledge_artifacts" true
+  let m_kn2, _ = step m_kn1 (char_key "]") in
+  Alcotest.(check bool) "Knowledge second ']' -> Knowledge_artifacts" true
     (Nav.equal_knowledge_tab m_kn2.knowledge.active_tab Nav.Knowledge_artifacts);
 
   let m_rt = { m0 with nav = { m0.nav with workspace = Nav.Runtime } } in
-  let m_rt1, _ = step m_rt (key Keymap.Input.Right) in
-  Alcotest.(check bool) "Runtime Right -> Runtime_efficiency_spend" true
+  let m_rt_r, _ = step m_rt (key Keymap.Input.Right) in
+  Alcotest.(check bool) "Runtime Right stays on initial tab" true
+    (Nav.equal_runtime_tab m_rt_r.runtime.active_tab m_rt.runtime.active_tab);
+  let m_rt1, _ = step m_rt (char_key "]") in
+  Alcotest.(check bool) "Runtime ']' -> Runtime_efficiency_spend" true
     (Nav.equal_runtime_tab m_rt1.runtime.active_tab
        Nav.Runtime_efficiency_spend);
 
   let m_in = { m0 with nav = { m0.nav with workspace = Nav.Infra } } in
-  let m_in1, _ = step m_in (key Keymap.Input.Right) in
-  Alcotest.(check bool) "Infra Right -> Infra_repos_changes" true
+  let m_in_r, _ = step m_in (key Keymap.Input.Right) in
+  Alcotest.(check bool) "Infra Right stays on initial tab" true
+    (Nav.equal_infra_tab m_in_r.infra.active_tab m_in.infra.active_tab);
+  let m_in1, _ = step m_in (char_key "]") in
+  Alcotest.(check bool) "Infra ']' -> Infra_repos_changes" true
     (Nav.equal_infra_tab m_in1.infra.active_tab Nav.Infra_repos_changes);
 
-  (* 3. Dive_keeper unfocused: Right cycles Chat -> Context -> Tool_calls -> Memory; Left reverses *)
+  (* 3. Dive_keeper unfocused: '['/']' cycle Chat -> Context -> Tool_calls; Left enters sidebar *)
   let m_dive =
     {
       m0 with
@@ -5498,29 +5534,36 @@ let test_nav_left_right_subtab_cycling_and_guards () =
         };
     }
   in
-  let m_d1, _ = step m_dive (key Keymap.Input.Right) in
-  Alcotest.(check bool) "Dive_keeper Right -> Keeper_context" true
+  let m_d_r, _ = step m_dive (key Keymap.Input.Right) in
+  Alcotest.(check bool) "Dive_keeper Right does NOT cycle tab" true
+    (Nav.equal_keeper_tab m_d_r.fleet.keeper_dive_tab Nav.Keeper_chat);
+  let m_d1, _ = step m_dive (char_key "]") in
+  Alcotest.(check bool) "Dive_keeper ']' -> Keeper_context" true
     (Nav.equal_keeper_tab m_d1.fleet.keeper_dive_tab Nav.Keeper_context);
-  let m_d2, _ = step m_d1 (key Keymap.Input.Right) in
-  Alcotest.(check bool) "Dive_keeper second Right -> Keeper_tool_calls" true
+  let m_d2, _ = step m_d1 (char_key "]") in
+  Alcotest.(check bool) "Dive_keeper second ']' -> Keeper_tool_calls" true
     (Nav.equal_keeper_tab m_d2.fleet.keeper_dive_tab Nav.Keeper_tool_calls);
-  let m_d0, _ = step m_d1 (key Keymap.Input.Left) in
-  Alcotest.(check bool) "Dive_keeper Left -> Keeper_chat" true
+  let m_d0, _ = step m_d1 (char_key "[") in
+  Alcotest.(check bool) "Dive_keeper '[' -> Keeper_chat" true
     (Nav.equal_keeper_tab m_d0.fleet.keeper_dive_tab Nav.Keeper_chat);
 
-  (* 4. Queue_context overlay cycles tabs on Right/Left *)
+  (* 4. Queue_context overlay cycles tabs on '['/']' and Tab; Left/Right are no-ops *)
   let m_qc =
     {
       m0 with
       nav = { m0.nav with overlay = Some (Nav.Queue_context Nav.Drawer_queue) };
     }
   in
-  let m_qc1, _ = step m_qc (key Keymap.Input.Right) in
-  Alcotest.(check bool) "Queue_context Right -> Drawer_context" true
+  let m_qc_r, _ = step m_qc (key Keymap.Input.Right) in
+  Alcotest.(check bool) "Queue_context Right is no-op (stays Drawer_queue)" true
+    (Option.equal Nav.equal_overlay m_qc_r.nav.overlay
+       (Some (Nav.Queue_context Nav.Drawer_queue)));
+  let m_qc1, _ = step m_qc (char_key "]") in
+  Alcotest.(check bool) "Queue_context ']' -> Drawer_context" true
     (Option.equal Nav.equal_overlay m_qc1.nav.overlay
        (Some (Nav.Queue_context Nav.Drawer_context)));
-  let m_qc0, _ = step m_qc1 (key Keymap.Input.Left) in
-  Alcotest.(check bool) "Queue_context Left -> Drawer_queue" true
+  let m_qc0, _ = step m_qc1 (char_key "[") in
+  Alcotest.(check bool) "Queue_context '[' -> Drawer_queue" true
     (Option.equal Nav.equal_overlay m_qc0.nav.overlay
        (Some (Nav.Queue_context Nav.Drawer_queue)));
 
@@ -7873,8 +7916,7 @@ let test_memory_explorer_store_fetches_reading_and_sse () =
     }
   in
   let m_emb_tab_away, _ =
-    Update.step ~now:t0 m_emb_tab_read
-      (Msg.Key_event { Keymap.Input.key = Keymap.Input.Right; mods = Keymap.Input.no_mods })
+    Update.step ~now:t0 m_emb_tab_read (Msg.Key_event (char_key "]"))
   in
   Alcotest.(check bool) "embedded Keepers sub-tab cycle closes memory_reading" true
     (Option.is_none m_emb_tab_away.knowledge.memory_reading);
@@ -10118,11 +10160,11 @@ let test_unified_navigation_sidebar_focus_ring_and_mouse () =
     (Model.sidebar_has_focus m_shrunk);
   Alcotest.(check bool) "Shrink <132 restores body_has_focus" true
     (Model.body_has_focus m_shrunk);
-  let m_shrunk_right, _ =
-    step m_shrunk (Msg.Key_event (key Keymap.Input.Right))
+  let m_shrunk_next, _ =
+    step m_shrunk (Msg.Key_event (char_key "]"))
   in
-  Alcotest.(check bool) "After shrink, Right cycles Knowledge sub-tab normally" true
-    (Nav.equal_knowledge_tab m_shrunk_right.knowledge.active_tab
+  Alcotest.(check bool) "After shrink, ']' cycles Knowledge sub-tab normally" true
+    (Nav.equal_knowledge_tab m_shrunk_next.knowledge.active_tab
        Nav.Knowledge_memory);
   (* Review regression 2: Mouse Wheel over unfocused docked sidebar focuses it
      and scrolls cleanly onto System overlay items (Settings) without snapping back *)

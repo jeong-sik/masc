@@ -724,8 +724,8 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
                  ~en:"[Tab] Fleet  [←→] Cycle  [[ ]] Tabs")
           else
             Say.resolve lang
-              (Say.make ~ko:"[Tab] 목록  [←→] 탭"
-                 ~en:"[Tab] Fleet  [←→] Tabs")
+              (Say.make ~ko:"[←→] 패널  [[ ]] 탭"
+                 ~en:"[←→] Panes  [[ ]] Tabs")
         in
         (txt, whisper_style)
       else if Model.is_keeper_config_active model then
@@ -739,10 +739,10 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
         (txt, whisper_style)
       else
         let txt =
-          if compact then "[←→]"
+          if compact then "[[ ]]"
           else
             Say.resolve lang
-              (Say.make ~ko:"[/] 검색  [←→] 탭" ~en:"[/] Filter  [←→] Tabs")
+              (Say.make ~ko:"[/] 검색  [[ ]] 탭" ~en:"[/] Filter  [[ ]] Tabs")
         in
         (txt, whisper_style)
     in
@@ -1021,7 +1021,7 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
              in
              draw_tab_list tabs
          | Nav.Keepers -> (
-             (* Sync sub-tab bar with what '['/']'/'←'/'→' actually control:
+             (* Sync sub-tab bar with what '['/']' actually control:
                 when Preview (pane 1 / zoomed) owns focus and a keeper is
                 selected, show the selected keeper's inner preview tabs instead
                 of Fleet modes. *)
@@ -1107,14 +1107,23 @@ let render_approval_strip grid ~(rect : Rect.t) ~(theme : Theme.t)
         Card.draw_left_rail ~bg ~tone:Theme.Status_attention grid ~x:rect.x
           ~y:rect.y ~h:1 ~theme;
         let lang = model.lang in
-        let full_allow =
-          Say.resolve lang (Say.make ~ko:"[Y] 승인" ~en:"[Y] Allow")
+        let is_ask =
+          match entry.payload with
+          | Attention.Payload_ask _ -> true
+          | Attention.Payload_tool_approval _
+          | Attention.Payload_gate _
+          | Attention.Payload_goal_confirmation _ ->
+              false
         in
-        let full_deny =
-          Say.resolve lang (Say.make ~ko:"[N] 거절" ~en:"[N] Deny")
-        in
-        let full_dive =
-          Say.resolve lang (Say.make ~ko:"[J] 상세" ~en:"[J] Dive")
+        let full_allow, full_deny, full_dive =
+          if is_ask then
+            ( Say.resolve lang (Say.make ~ko:"[Y] 질문 답변" ~en:"[Y] Answer Ask")
+            , Say.resolve lang (Say.make ~ko:"[N] 건너뛰기" ~en:"[N] Skip")
+            , Say.resolve lang (Say.make ~ko:"[J] 수신함" ~en:"[J] Inbox") )
+          else
+            ( Say.resolve lang (Say.make ~ko:"[Y] 승인" ~en:"[Y] Allow")
+            , Say.resolve lang (Say.make ~ko:"[N] 거절" ~en:"[N] Deny")
+            , Say.resolve lang (Say.make ~ko:"[J] 상세" ~en:"[J] Dive") )
         in
         let full_actions_w =
           Grapheme.display_width full_allow
@@ -1126,7 +1135,12 @@ let render_approval_strip grid ~(rect : Rect.t) ~(theme : Theme.t)
         let compact_actions = rect.w < full_actions_w + 26 in
         let allow_txt, deny_txt, dive_txt, btn_sep, actions_w =
           if compact_actions then
-            let a = "[Y]" and d = "[N]" and j = "[J]" and sep = "/" in
+            let a, d, j =
+              if is_ask && Say.equal_lang lang Say.Lang_ko && rect.w >= 44 then
+                ("[Y]답", "[N]건", "[J]함")
+              else ("[Y]", "[N]", "[J]")
+            in
+            let sep = "/" in
             let w =
               Grapheme.display_width a
               + Grapheme.display_width sep
@@ -1286,6 +1300,33 @@ let footer_right_status_hint ~(model : Model.t) =
         Say.resolve lang
           (Say.make ~ko:"터미널 >= 40x12 · Ctrl+Q 종료"
              ~en:"Resize >= 40x12 · Ctrl+Q Quit")
+    | Some Nav.Ask_answer -> (
+        match model.ask_modal with
+        | Some md -> (
+            let live = Model.ask_live_status model md.ask.ask_id in
+            match live with
+            | Model.Ask_live_closed ->
+                Say.resolve lang
+                  (Say.make ~ko:"읽기 전용 · C 채팅 · Esc 닫기"
+                     ~en:"Read-only · C chat · Esc close")
+            | Model.Ask_live_in_flight ->
+                Say.resolve lang
+                  (Say.make ~ko:"응답 전송 중 · Esc 닫기"
+                     ~en:"Sending answer · Esc close")
+            | Model.Ask_live_open when md.submitting ->
+                Say.resolve lang
+                  (Say.make ~ko:"응답 전송 중 · Esc 닫기"
+                     ~en:"Sending answer · Esc close")
+            | Model.Ask_live_open when md.editing_free_text ->
+                Say.resolve lang
+                  (Say.make ~ko:"Enter 확정 · Esc 선택으로"
+                     ~en:"Enter confirm · Esc choices")
+            | Model.Ask_live_open ->
+                Say.resolve lang
+                  (Say.make ~ko:"↑↓ 이동 · Space 선택 · Enter 제출"
+                     ~en:"↑↓ move · Space toggle · Enter submit"))
+        | None ->
+            Say.resolve lang (Say.make ~ko:"Esc 닫기" ~en:"Esc close"))
     | Some
         ( Nav.Queue_context _
         | Nav.Inline_action _
@@ -1453,6 +1494,7 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           | Nav.Incidents
           | Nav.Queue_context _
           | Nav.Inline_action _
+          | Nav.Ask_answer
           | Nav.Help
           | Nav.System_gate (Nav.Micro_viewport | Nav.Media_viewer) )
       | None ->
@@ -1466,6 +1508,10 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           | Some (Nav.Settings _) ->
               Config_store.is_two_pane_width ~cols:model.viewport.cols
           | Some (Nav.Palette | Nav.Queue_context _) -> true
+          | Some Nav.Ask_answer -> (
+              match model.ask_modal with
+              | Some md -> List.length md.ask.questions > 1
+              | None -> false)
           | Some (Nav.Inline_action _) -> (
               match model.inline_modal with
               | Some modal ->
@@ -1491,6 +1537,14 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
               | Nav.System_gate _
               | Nav.Queue_context _ ) ->
               false
+          | Some Nav.Ask_answer -> (
+              match model.ask_modal with
+              | Some md ->
+                  (not md.submitting)
+                  && Model.equal_ask_live_status
+                       (Model.ask_live_status model md.ask.ask_id)
+                       Model.Ask_live_open
+              | None -> false)
           | Some
               ( Nav.Palette
               | Nav.Settings _
@@ -1522,6 +1576,7 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           | Some (Nav.Settings _) -> Some ("패널", "Pane")
           | Some (Nav.Queue_context _) -> Some ("탭", "Tab")
           | Some Nav.Palette -> Some ("다음", "Next")
+          | Some Nav.Ask_answer -> Some ("질문", "Q")
           | Some (Nav.Inline_action _ | Nav.Help | Nav.Incidents | Nav.System_gate _) ->
               None
           | None ->
@@ -1546,6 +1601,10 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
         let show_sub_tab_hint =
           match model.nav.overlay with
           | Some (Nav.Settings _ | Nav.Queue_context _) -> true
+          | Some Nav.Ask_answer -> (
+              match model.ask_modal with
+              | Some md -> List.length md.ask.questions > 1
+              | None -> false)
           | Some
               ( Nav.Palette
               | Nav.Incidents

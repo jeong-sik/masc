@@ -139,8 +139,8 @@ let build ~now_unix ~mode (inp : input) =
     | [] ->
         Some
           (Say.make
-             ~ko:"창 내 관측 리비전 없음 · [Space] 창 확대"
-             ~en:"No observed revisions in window · [Space] expand window")
+             ~ko:"창 내 관측 리비전 없음 · [w] 창 확대"
+             ~en:"No observed revisions in window · [w] expand window")
     | [ single ] ->
         Some
           (Say.make

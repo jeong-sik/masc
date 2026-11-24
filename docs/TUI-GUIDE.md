@@ -80,12 +80,14 @@ All shortcuts come from `lib/masc_tui/keymap/keymap.ml`; VT100 control aliases
 |---|---|---|
 | `b` / `Ctrl+B` / `Alt+B` | Unfocused / Global | Toggle or focus the **Collapsible Left Navigation Sidebar** (auto-docked when `cols >= 132`, floating drawer overlay when `cols < 132`): lists all 6 workspaces, every 1st-class sub-tab (including `Work → Harness` and `Infra → Code`), Fleet + specialized Keeper tabs (`Context & Turns`, `Tool Calls`, `Logs`, `Identity`; all 9 Keeper tabs via `[` / `]` in Keepers pane 1 / Dive), and System overlays (31 targets; `↑`/`↓`/`j`/`k` live-preview, `Enter`/`→`/`l` focus body, `Tab`/`Shift+Tab` unified focus ring, `Esc` return to main pane) |
 | `1`–`6` (or `Ctrl+1`–`6`, `Alt+1`–`6`, `F1`–`F6`) | Unfocused / Global | Switch to workspace `1 Pulse`, `2 Work`, `3 Knowledge`, `4 Keepers`, `5 Runtime`, `6 Infra` |
-| `[` / `]` (or `←` / `→` unfocused, `Alt+[` / `Alt+]`) | Unfocused / Global | Cycle sub-tabs (Workspaces, 9-tab Keeper Dive or Keepers split right pane, Queue/Context drawer; inside the composer `←`/`→` move the text cursor, in Settings Tree they collapse/expand categories, and in Settings Inspector or Keeper Config they cycle enum/bool/numeric values while `[` / `]` switch tabs) |
+| `7` / `8` / `9` / `0` | Unfocused | Quick utility overlays: `7` Settings (`,`), `8` Incidents (`I`), `9` Queue/Context (`Ctrl+T`), `0` Help (`?`) — never hijack focused text inputs |
+| `←` / `→` | Unfocused | Spatial pane movement ONLY: move between Left Navigation Sidebar ↔ Pane 0 ↔ Pane 1 across every workspace and dive (never cycles sub-tabs; inside text inputs moves cursor; in Settings Tree collapses/expands categories; in Settings Inspector / Keeper Config cycles enum/bool/numeric values) |
+| `[` / `]` (or `Alt+[` / `Alt+]`) | Unfocused / Overlay / Global | Cycle sub-tabs ONLY (Workspaces, 9-tab Keeper Dive or Keepers split right pane, Settings tabs, Queue/Context drawer, and multi-question Ask modal) |
 | `↑` / `↓` or `j` / `k` | Unfocused / Overlay | Move list selection or scroll Keeper Chat |
 | `PgUp` / `PgDn`, `Home` (`g`) / `End` (`G`) | Unfocused / Overlay | Page scroll or jump to top / bottom (`g` is overridden on Memory screens — World Memory, `Memory_diff_dive`, and `Keeper_memory` — to toggle the Memory Flow Braille chart `Flow ▲/▼` vs `Net Total`, and on `Infra → Code` to cycle Git views; use `Home` to jump to top) |
-| `Tab` / `Shift+Tab` | Unfocused / Overlay | Cycle active focus panes on multi-pane views (omitted on single-pane views and narrow layouts; cycles tabs in Queue/Context, selection in Palette, or Tree / Inspector in Settings) |
-| `Enter` | Unfocused | 1-hop Dive into selected entity (Keeper, Goal, Task, Verification, Board Thread, Wiki, Artifact, Memory Diff, Fusion Run, Tool Detail, Lane, Sandbox, Runtime Trace, Log Detail) or expand/open files, catalog packages, Facts Tree categories, Provider Input Parts, and Tool Results |
-| `Space` | Unfocused | Non-colliding toggle (Board succession chain expand/collapse, Tasks status chip, Addons & Browser Clients/Tabs subfocus, Failover external probes, log level filter, Keeper Identity OAuth switch, Keeper Chat turn details, Settings dry-run diff) |
+| `Tab` / `Shift+Tab` | Unfocused / Overlay | Cycle active focus panes on multi-pane views (omitted on single-pane views and narrow layouts; cycles tabs in Queue/Context, questions in multi-question Ask modal, selection in Palette, or Tree / Inspector in Settings) |
+| `Enter` | Unfocused | Open the **Ask Answer Modal** on pending Asks (`Pulse` / `Work → Inbox`), toggle OAuth on `Keeper → Identity`, 1-hop Dive into selected entity (Keeper, Goal, Task, Verification, Board Thread, Wiki, Artifact, Memory Diff, Fusion Run, Tool Detail, Lane, Sandbox, Runtime Trace, Log Detail), or expand/open files, catalog packages, Facts Tree categories, Provider Input Parts, and Tool Results |
+| `Space` | Unfocused / Overlay | Strictly safe local view/expand/selection toggle — **never sends a network POST** (Board succession chain expand/collapse, Tasks status chip, Addons & Browser Clients/Tabs subfocus, Failover external probes, log level filter, Keeper Chat turn details, multi-select Ask choice toggle, local bool toggle in Settings/Keeper Config; dry-run diff is explicit `d`, Keeper Identity OAuth toggle is `a` / `Enter`) |
 | `v` | Unfocused | Cycle view mode (Artifacts Doc vs Raw, Verification Dive Evidence/Summary/Specs/TLC, Knowledge Memory Diff/Health & Ledger/Context, Keeper Memory Diff/Health/Facts Tree/Journal, Keeper Context sub-tabs, Keeper Logs Metrics vs Sandbox Logs, Runtime Tools Usage/Catalog/Skills, Work Pipeline verification filter) |
 | `/` | Unfocused / Settings / Incidents | Focus inline filter box or in-document search inside Artifact Dive (`n`/`N` step matches; `↑`/`↓` move selection live, `Enter`/`Tab` apply & blur, `Esc` clear & blur; on views without a filter bar such as Pulse or Keeper Chat, focuses the composer with `/`) |
 | `z` | Unfocused | Toggle detail pane zoom (including Knowledge > Artifacts) |
@@ -97,7 +99,7 @@ All shortcuts come from `lib/masc_tui/keymap/keymap.ml`; VT100 control aliases
 ### `Esc` vs `Ctrl+Q`
 
 - **`Esc` never quits MASC TUI.** Pressing `Esc` walks back one layer at a time:
-  1. Cancel inline field editing in Settings, or close an open overlay (Palette, Settings, Incidents, Queue/Context, Help, Inline Action modal, Media Viewer).
+  1. Exit free-text editing inside the Ask Answer Modal (preserving the typed draft), cancel inline field editing in Settings, or close an open overlay (Palette, Settings, Incidents, Queue/Context, Ask Answer Modal, Help, Inline Action modal, Media Viewer).
   2. Exit the `/` filter box or blur the bottom composer (`i`).
   3. In **Keeper Chat** with an active turn/stream running, send a turn-interrupt request (`Post_keeper_turn_interrupt`; `Ctrl+X` also interrupts directly).
   4. Pop one level off the dive stack back to the parent workspace.
@@ -117,11 +119,11 @@ All shortcuts come from `lib/masc_tui/keymap/keymap.ml`; VT100 control aliases
 | `Ctrl+K` | — | Universal Command & Entity Palette (strictly separated from Approvals) |
 | `Ctrl+G` | `/keeper [name]` | Keeper/Chat quick switcher |
 | `Ctrl+L` | `/model [lane]` | Runtime/Model switcher |
-| `,` (unfocused), `Ctrl+,`, `Alt+,`, `F10` | `/config [query]` | 2-pane, 7-category **Settings** overlay (header shows running TUI & Server build version/commit) |
-| `Ctrl+T` | `/queue`, `/context` | 3-tab **Queue / Context / Schedules** drawer; the Context tab shows the selected Keeper's context fill per turn over its last 60 turns, and its latest compaction and history reset |
-| `I` (unfocused), `Alt+I` | `/incidents` | Historical Incidents drawer (`d` dismiss, `c`/`D` clear all, `Space` show dismissed, `o`/`Enter` dive) |
-| `J` (unfocused), `Alt+J` | `/jump` | Teleport to the highest-priority blocked item (Ask, Tool Approval, or Goal Confirmation) |
-| `?` (unfocused) | `/help` | Dynamic keymap help overlay (top bar shows TUI & Server build version/commit and flags commit mismatch) |
+| `7` / `,` (unfocused), `Ctrl+,`, `Alt+,`, `F10` | `/config [query]` | 2-pane, 7-category **Settings** overlay (header shows running TUI & Server build version/commit) |
+| `9` (unfocused), `Ctrl+T` | `/queue`, `/context` | 3-tab **Queue / Context / Schedules** drawer (`[`/`]` or `Tab` switches tabs); the Context tab shows the selected Keeper's context fill per turn over its last 60 turns, and its latest compaction and history reset |
+| `8` / `I` (unfocused), `Alt+I` | `/incidents` | Historical Incidents drawer (`d` dismiss, `c`/`D` clear all, `Space` show dismissed, `o`/`Enter` dive) |
+| `J` (unfocused), `Alt+J` | `/jump` | Teleport to the highest-priority blocked item (for an Ask, jumps to `Work → Inbox` focused on that Ask and opens the **Ask Answer Modal** immediately) |
+| `0` / `?` (unfocused) | `/help` | Dynamic keymap help overlay (top bar shows TUI & Server build version/commit and flags commit mismatch) |
 
 ### Chatting with a Keeper
 
@@ -227,7 +229,7 @@ The organization cockpit (`lib/masc_tui/screens_core/screen_pulse.ml`):
 
 ### `2` Work
 
-Six 1st-class sub-tabs (`[` / `]` or `←` / `→`, and Left Navigation Sidebar `b`):
+Six 1st-class sub-tabs (`[` / `]`, and Left Navigation Sidebar `b`):
 
 1. **Goals** (Goals & Verifications): side-by-side Goals list and
    Verification requests (`Tab` switches pane; `Enter` dives into Goal or
@@ -275,10 +277,8 @@ Pending operator decisions appear in two places:
 - **Fast Approval Strip**: whenever an actionable item is waiting (held Tool
   Approval, Gate request, Ask, or Goal confirmation), a 1-row strip appears
   above the composer on every workspace.
-  - Unfocused: press **`Y`** to approve/accept (or select Ask choice 1) and
-    **`N`** to deny/skip (opens reason modal for Gate rejection).
-  - While typing in the composer: use **`Alt+Y`** and **`Alt+N`** without
-    losing your draft.
+  - For **Tool Approvals** and **Gate** items: press **`Y`** (unfocused) or **`Alt+Y`** (from composer) to approve, and **`N`** / **`Alt+N`** to deny (opening the reason modal for Gate rejection).
+  - For **Asks**: the strip displays honest Ask actions (`[Y] Answer Ask · [N] Skip · [J] Inbox`). Pressing **`Y`** / **`Alt+Y`** opens the dedicated **Ask Answer Modal** (never blindly submitting choice #1, and preserving any composer draft). Pressing **`N`** / **`Alt+N`** skips **all** questions in that Ask honestly.
   - A Tool Approval answer toasts what the server did with it: the waiting
     call took it, the call had stopped waiting and the answer applies when
     the same call is retried, or no call was waiting. In the last case
@@ -288,14 +288,16 @@ Pending operator decisions appear in two places:
     into **Goal Dive** so you can review verified proof and submit the exact
     server-issued `criterion_revision`, `request_id`, `verification_run_id`,
     and `operator_id`.
+- **Dedicated Ask Answer Modal** (opened via `Y`/`Alt+Y` on an Ask, `J` teleport on an Ask, or `Enter` on an Ask in `Pulse` / `2 Work → Inbox`):
+  - Supports **single-select**, **multi-select** (`Space` toggles checkboxes), **multi-question** Asks (`[`/`]` or `Tab`/`Shift+Tab` switch questions with per-question progress chips `✓`/`⊘`/`○`), **UTF-8 free-text** (`i` enters text editing when `allow_free_text` is enabled; `Esc` exits editing while preserving the draft), and **skip** (`⊘`).
+  - Press `↑`/`↓` (`j`/`k`) to move the cursor across all choices (scrollable, never capped at 4), `J`/`K` (or `Shift+↑`/`↓`) to scroll long prompts, quick-pick letters (`a..f`, `h`, `l..z`) to select/toggle choices, `Enter` to confirm/advance/submit, `Ctrl+Enter` / `Alt+Enter` to submit all questions at once, `C` to jump directly to the Keeper's Chat, and `Esc` to close while preserving the underlying view and composer draft.
+  - **Live Status Guard**: if the Ask is already answered, withdrawn, or in-flight in live attention state, the modal displays a clear banner and disables duplicate submission.
 - **Action Inbox (`2 Work → Inbox`)**: press `J` (`Alt+J` or `/jump`) from
-  anywhere to teleport to the highest-priority blocked item. When an Ask is
-  focused, press **`1`–`4`** to submit choices `1`–`4` directly; in-flight
-  submissions stay visibly tracked until acknowledged by the server.
+  anywhere to teleport to the highest-priority blocked item (opening the Ask Answer Modal immediately for an Ask; pressing `Esc` leaves you focused on that Ask in Inbox). When a **single-question, single-select** Ask is focused, press **`a`–`d`** for instant submission (multi-question or multi-select Asks open the Ask Answer Modal pre-selected instead); press **`C`** to jump directly to the Keeper's Chat. In-flight submissions stay visibly tracked until acknowledged by the server.
 
 ### `3` Knowledge
 
-Four 1st-class sub-tabs (`[` / `]` or `←` / `→`, and Left Navigation Sidebar `b`):
+Four 1st-class sub-tabs (`[` / `]`, and Left Navigation Sidebar `b`):
 
 1. **Board**: workspace posts with Signal-only vs All filtering (`s`), Sort
    cycle (`S`: `recent` / `active` / `top`), live Hearth picker (`h` via
@@ -338,7 +340,7 @@ Four 1st-class sub-tabs (`[` / `]` or `←` / `→`, and Left Navigation Sidebar
 
 ### `4` Keepers
 
-Three fleet modes (`[` / `]` or `←` / `→` when pane 0 is focused):
+Three fleet modes (`[` / `]` when pane 0 is focused):
 
 1. **Companies**: Keepers grouped by `keeper.group` (`Space` folds/unfolds the
    selected group).
@@ -391,7 +393,7 @@ or `c` straight into Chat), the top sub-tab bar syncs to all **9 Keeper tabs**
 6. **Sandbox**: Keeper's sandbox backend, network mode, agent socket, shim
    parity, 24h tool metrics, and on-demand probe (`p`).
 7. **Config**: in-place editor of Keeper TOML fields (`↑`/`↓`, `←`/`→`,
-   `Enter`, `Space` dry-run diff, `Ctrl+S` save, `Delete`/`Ctrl+D` remove, `/`
+   `Enter`, `d` dry-run diff, `Ctrl+S` save, `Delete`/`Ctrl+D` remove, `/`
    filter, `e` full Settings). Works identically in both Keeper Dive and the
    `4 Keepers` split preview right pane.
 8. **Logs**: remote-safe HTTP telemetry & sandbox stdout/stderr viewer (`v`
@@ -399,13 +401,13 @@ or `c` straight into Chat), the top sub-tab bar syncs to all **9 Keeper tabs**
    `/api/v1/gate/keeper-sandbox-logs`; zero local filesystem reads).
 9. **Identity**: per-Keeper OAuth & GitHub identity manager (`l` OAuth login or
    GitHub SSE device flow login, `L` poll OAuth attempt status, `r` refresh
-   identity, `Space` switch OAuth enabled/disabled, `U` disconnect OAuth, `K`
+   identity, `a` / `Enter` switch OAuth enabled/disabled, `U` disconnect OAuth, `K`
    masked GitHub PAT modal — secrets are never echoed or logged, `y` copy OAuth
    authorize URL or GitHub device code; graceful `CanAdmin` notice on 401/403).
 
 ### `5` Runtime
 
-Seven 1st-class sub-tabs (`[` / `]` or `←` / `→`, and Left Navigation Sidebar `b`):
+Seven 1st-class sub-tabs (`[` / `]`, and Left Navigation Sidebar `b`):
 
 1. **Quotas & Credits**: provider quota windows, 7-day usage history, and
    unreported accounts toggle (`u`, or `Enter` on the unreported toggle row;
@@ -460,7 +462,7 @@ Seven 1st-class sub-tabs (`[` / `]` or `←` / `→`, and Left Navigation Sideba
 
 ### `6` Infra
 
-Four 1st-class sub-tabs (`[` / `]` or `←` / `→`, and Left Navigation Sidebar `b`):
+Four 1st-class sub-tabs (`[` / `]`, and Left Navigation Sidebar `b`):
 
 1. **Sandboxes**: fleet inventory of MicroVM guests (presence, agent socket,
    shim parity, volume), SSH pools (reachability, active/max sessions), and
@@ -507,7 +509,7 @@ categorized TOML editor backed by `GET /api/v1/config/schema` and
 - **Right Pane (Inspector)**: press `Tab` to focus fields; `←`/`→` (`h`/`l`)
   cycle enum, boolean, and numeric values directly (applying `tui.*` theme and
   language preferences live); `Enter` edits a field inline and stages the
-  change; `Delete` or `Ctrl+D` toggles key removal; **`Space`** runs a
+  change; `Delete` or `Ctrl+D` toggles key removal; **`d`** runs a
   server-side **dry-run diff** preview; **`Ctrl+S`** saves atomically and
   reports the effective reload scope (`hot_reload`, `next_turn`, or
   `restart_required`).
@@ -531,7 +533,7 @@ group = "platform"
 
 For an existing Keeper, edit `keeper.group` directly in **4 Keepers → Dive →
 Config** (or in the `4 Keepers` split preview Config tab: `↑`/`↓` to select,
-`Enter` to edit, `Space` for dry-run diff, `Ctrl+S` to save via
+`Enter` to edit, `d` for dry-run diff, `Ctrl+S` to save via
 `POST /api/v1/config/patch` with `target=keeper:<name>`, `next_turn` reload
 scope), or edit `<base-path>/.masc/config/keepers/<name>.toml`. When creating
 a new Keeper via `n` on **4 Keepers** (or the `4 Keepers & Companies` tab in
@@ -553,7 +555,7 @@ Settings `,`), you can set `keeper.group` directly in the creation form.
   Routing & Failover** (or press `/` and search `addon_exact_lanes` /
   `exact_output_lanes`). The tree lists every `runtime.exact_output_lanes.<id>`
   (`Exact · <id>`) and `runtime.addon_exact_lanes.<id>` (`Addon · <id>`) table
-  from `runtime.toml`. Edit fields with `Enter`, preview with `Space`, and save
+  from `runtime.toml`. Edit fields with `Enter`, preview with `d`, and save
   with `Ctrl+S`.
 - **Addon Lanes & Browser Lane Runtime (`5` Runtime → Addons & Browser)**:
   - **Left pane**: live `GET /api/v1/lane-addons` table (`LIVE`/`RETAINED`,

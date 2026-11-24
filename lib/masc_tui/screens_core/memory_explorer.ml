@@ -421,8 +421,8 @@ let draw_mode_pills ~grid ~(rect : Rect.t) ~(theme : Theme.t) ~(lang : Say.lang)
           Printf.sprintf "[s] %s · [Enter] %s" sort_lbl
             (say lang ~ko:"전문" ~en:"Read")
       | Knowledge_store.View_diff ->
-          say lang ~ko:"[Space] 기간 · [g] 흐름/총량 · [Enter] 전문"
-            ~en:"[Space] Win · [g] Flow/Net · [Enter] Read"
+          say lang ~ko:"[w] 기간 · [g] 흐름/총량 · [Enter] 전문"
+            ~en:"[w] Win · [g] Flow/Net · [Enter] Read"
     in
     let rh_w = Grapheme.display_width right_hint in
     let pills_limit =

@@ -986,7 +986,9 @@ let render_attention_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
           in
           let action_hint =
             match e.kind with
-            | Health.Held_tool_approval _ | Health.Pending_ask _ -> "[Y/N]"
+            | Health.Held_tool_approval _ -> "[Y/N]"
+            | Health.Pending_ask _ ->
+                Say.resolve lang (Say.make ~ko:"[Y] 답변" ~en:"[Y] Answer")
             | Health.Goal_confirmation _ ->
                 Say.resolve lang (Say.make ~ko:"[Enter] 확인" ~en:"[Enter]")
           in

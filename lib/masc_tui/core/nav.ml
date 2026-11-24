@@ -121,6 +121,7 @@ type overlay =
   | Incidents
   | Queue_context of queue_context_tab
   | Inline_action of inline_action_kind
+  | Ask_answer
   | Help
   | System_gate of system_gate_kind
 
@@ -600,18 +601,20 @@ let equal_system_gate_kind a b =
 
 let equal_overlay a b =
   match a, b with
-  | Palette, Palette | Incidents, Incidents | Help, Help -> true
+  | Palette, Palette | Incidents, Incidents | Ask_answer, Ask_answer | Help, Help ->
+      true
   | Settings x, Settings y -> equal_settings_tab x y
   | Queue_context x, Queue_context y -> equal_queue_context_tab x y
   | Inline_action x, Inline_action y -> equal_inline_action_kind x y
   | System_gate x, System_gate y -> equal_system_gate_kind x y
-  | Palette, (Settings _ | Incidents | Queue_context _ | Inline_action _ | Help | System_gate _)
-  | Settings _, (Palette | Incidents | Queue_context _ | Inline_action _ | Help | System_gate _)
-  | Incidents, (Palette | Settings _ | Queue_context _ | Inline_action _ | Help | System_gate _)
-  | Queue_context _, (Palette | Settings _ | Incidents | Inline_action _ | Help | System_gate _)
-  | Inline_action _, (Palette | Settings _ | Incidents | Queue_context _ | Help | System_gate _)
-  | Help, (Palette | Settings _ | Incidents | Queue_context _ | Inline_action _ | System_gate _)
-  | System_gate _, (Palette | Settings _ | Incidents | Queue_context _ | Inline_action _ | Help) ->
+  | Palette, (Settings _ | Incidents | Queue_context _ | Inline_action _ | Ask_answer | Help | System_gate _)
+  | Settings _, (Palette | Incidents | Queue_context _ | Inline_action _ | Ask_answer | Help | System_gate _)
+  | Incidents, (Palette | Settings _ | Queue_context _ | Inline_action _ | Ask_answer | Help | System_gate _)
+  | Queue_context _, (Palette | Settings _ | Incidents | Inline_action _ | Ask_answer | Help | System_gate _)
+  | Inline_action _, (Palette | Settings _ | Incidents | Queue_context _ | Ask_answer | Help | System_gate _)
+  | Ask_answer, (Palette | Settings _ | Incidents | Queue_context _ | Inline_action _ | Help | System_gate _)
+  | Help, (Palette | Settings _ | Incidents | Queue_context _ | Inline_action _ | Ask_answer | System_gate _)
+  | System_gate _, (Palette | Settings _ | Incidents | Queue_context _ | Inline_action _ | Ask_answer | Help) ->
       false
 
 let equal_focus_scope a b =
@@ -885,25 +888,25 @@ let all_menu_items =
       section = Sec_system;
       target = Menu_settings;
       label = Say.make ~ko:"설정" ~en:"Settings";
-      shortcut = Some ",";
+      shortcut = Some "7/,";
     };
     {
       section = Sec_system;
       target = Menu_incidents;
       label = Say.make ~ko:"장애 이력" ~en:"Incidents";
-      shortcut = Some "I";
+      shortcut = Some "8/I";
     };
     {
       section = Sec_system;
       target = Menu_queue_context;
       label = Say.make ~ko:"큐 · 컨텍스트" ~en:"Queue & Ctx";
-      shortcut = Some "^T";
+      shortcut = Some "9/^T";
     };
     {
       section = Sec_system;
       target = Menu_help;
       label = Say.make ~ko:"도움말" ~en:"Help";
-      shortcut = Some "?";
+      shortcut = Some "0/?";
     };
   ]
 

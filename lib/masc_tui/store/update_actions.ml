@@ -467,6 +467,16 @@ let save_settings_config ~now (m : Model.t) =
       ( Model.with_toast ~now ~level:Model.Toast_warning (Say.literal reason) m
       , [] )
 
+let dry_run_settings_config ~now (m : Model.t) =
+  match Config_store.build_patch_request ~dry_run:true m.config with
+  | Ok req ->
+      let config = Config_store.mark_dry_run_loading m.config in
+      ( { m with config }
+      , [ Cmd.Http_post { epoch = m.epoch; req = Cmd.Post_config_patch req } ] )
+  | Error reason ->
+      ( Model.with_toast ~now ~level:Model.Toast_info (Say.literal reason) m
+      , [] )
+
 let step_settings_pane_lr ~now (m : Model.t) (dir : Keymap.move_dir) =
   let two_pane = Config_store.is_two_pane_width ~cols:m.viewport.cols in
   let cfg0 =
@@ -1130,6 +1140,7 @@ let active_artifact_target (m : Model.t) =
       | Nav.Incidents
       | Nav.Queue_context _
       | Nav.Inline_action _
+      | Nav.Ask_answer
       | Nav.Help
       | Nav.System_gate
           (Nav.Micro_viewport | Nav.Auth_gate | Nav.Server_offline) ) ->
@@ -1172,6 +1183,7 @@ let active_keeper_for_context (m : Model.t) =
       | Nav.Incidents
       | Nav.Queue_context (Nav.Drawer_queue | Nav.Drawer_schedules)
       | Nav.Inline_action _
+      | Nav.Ask_answer
       | Nav.Help
       | Nav.System_gate _ ) ->
       None
@@ -1763,6 +1775,17 @@ and execute_action ~now (m : Model.t) action =
                     inline_modal = Some (Model.modal_cycle_field ~delta modal);
                   }
                 , [] ))
+      | Some Nav.Ask_answer -> (
+          match m.ask_modal with
+          | None -> (m, [])
+          | Some modal ->
+              let delta = match dir with Keymap.Next -> 1 | Keymap.Prev -> -1 in
+              let next_modal =
+                modal
+                |> Model.ask_modal_set_editing_free_text false
+                |> Model.ask_modal_step_question ~delta
+              in
+              ({ m with ask_modal = Some next_modal }, []))
       | Some (Nav.Help | Nav.Incidents | Nav.System_gate _) -> (m, [])
       | None ->
           let n = Model.focusable_pane_count m in
@@ -1812,6 +1835,7 @@ and execute_action ~now (m : Model.t) action =
             | Nav.Incidents
             | Nav.Queue_context _
             | Nav.Inline_action _
+            | Nav.Ask_answer
             | Nav.System_gate Nav.Media_viewer )
         | None ->
             let m0 = Update_nav.exit_sidebar_focus m in
@@ -1820,6 +1844,7 @@ and execute_action ~now (m : Model.t) action =
                 m0 with
                 nav;
                 inline_modal = None;
+                ask_modal = None;
                 drafts = Drafts.set_focus true m0.drafts;
               }
             , [] ))
@@ -1841,6 +1866,7 @@ and execute_action ~now (m : Model.t) action =
             ( Nav.Palette
             | Nav.Queue_context _
             | Nav.Inline_action _
+            | Nav.Ask_answer
             | Nav.Help
             | Nav.System_gate _ ) ->
             (m, [])
@@ -1900,6 +1926,73 @@ and execute_action ~now (m : Model.t) action =
         match m.nav.overlay with
         | Some Nav.Palette -> confirm_palette ~now m
         | Some (Nav.Inline_action _) -> Update_nav.submit_inline_modal ~now m
+        | Some Nav.Ask_answer -> (
+            match m.ask_modal with
+            | None -> (m, [])
+            | Some modal -> (
+                let advance_or_submit (m_next : Model.t) =
+                  match m_next.ask_modal with
+                  | None -> (m_next, [])
+                  | Some md -> (
+                      match Model.ask_modal_build_answers md with
+                      | Ok _ -> Update_nav.submit_ask_modal ~now m_next
+                      | Error next_unanswered ->
+                          ( {
+                              m_next with
+                              ask_modal =
+                                Some
+                                  (Model.ask_modal_select_question
+                                     next_unanswered md);
+                            }
+                          , [] ))
+                in
+                if modal.editing_free_text then
+                  let md1, has_text = Model.ask_modal_confirm_free_text modal in
+                  let m1 = { m with ask_modal = Some md1 } in
+                  if has_text then advance_or_submit m1
+                  else
+                    ( Model.with_toast ~now ~level:Model.Toast_info
+                        (Say.make ~ko:"직접 입력 내용이 비어 있습니다"
+                           ~en:"Free-text input is empty")
+                        m1
+                    , [] )
+                else
+                  match
+                    ( Model.ask_modal_current_question modal
+                    , Model.ask_modal_current_row modal )
+                  with
+                  | Some q, Some (Model.Ask_row_choice (idx, _)) -> (
+                      match q.mode with
+                      | Wire_work.Ask_single ->
+                          let md1 =
+                            Model.ask_modal_toggle_or_select_choice idx modal
+                          in
+                          advance_or_submit { m with ask_modal = Some md1 }
+                      | Wire_work.Ask_multi ->
+                          let d = Model.ask_question_draft_for modal q in
+                          if
+                            Model.equal_ask_answer_mode d.mode
+                              Model.Ask_mode_choices
+                            && d.choice_ids <> []
+                          then advance_or_submit m
+                          else
+                            let md1 =
+                              Model.ask_modal_toggle_or_select_choice idx modal
+                            in
+                            ({ m with ask_modal = Some md1 }, []))
+                  | Some q, Some Model.Ask_row_free_text ->
+                      if q.allow_free_text then
+                        ( {
+                            m with
+                            ask_modal =
+                              Some (Model.ask_modal_enter_free_text modal);
+                          }
+                        , [] )
+                      else (m, [])
+                  | Some _, Some Model.Ask_row_skip ->
+                      let md1 = Model.ask_modal_set_skipped modal in
+                      advance_or_submit { m with ask_modal = Some md1 }
+                  | None, _ | Some _, None -> (m, [])))
         | Some (Nav.Settings _) ->
             if Config_store.is_editing_field m.config then (
               let was_new_keeper =
@@ -1924,8 +2017,8 @@ and execute_action ~now (m : Model.t) action =
                               ("New keeper name set: " ^ config.new_keeper_name
                              ^ " (Ctrl+S to save)")
                         else
-                          Say.make ~ko:"변경값이 스테이징됨 (Space: 미리보기)"
-                            ~en:"Staged field change (Space: dry-run diff)"
+                          Say.make ~ko:"변경값이 스테이징됨 (d: 미리보기 · Ctrl+S: 저장)"
+                            ~en:"Staged field change (d: dry-run diff · Ctrl+S: save)"
                       in
                       ( Model.with_toast ~now ~level:Model.Toast_info msg
                           { m with config }
@@ -2087,6 +2180,24 @@ and execute_action ~now (m : Model.t) action =
             else []
           in
           (closed, cmds)
+      | Some Nav.Ask_answer -> (
+          match m.ask_modal with
+          | Some modal when modal.editing_free_text ->
+              ( {
+                  m with
+                  ask_modal =
+                    Some (Model.ask_modal_set_editing_free_text false modal);
+                }
+              , [] )
+          | Some _ | None ->
+              let closed =
+                {
+                  m with
+                  nav = { m.nav with overlay = None; filter_focused = false };
+                  ask_modal = None;
+                }
+              in
+              (closed, []))
       | Some
           ( Nav.Palette
           | Nav.Queue_context _
@@ -2098,6 +2209,7 @@ and execute_action ~now (m : Model.t) action =
               nav = { m.nav with overlay = None; filter_focused = false };
               config = Config_store.cancel_edit_field m.config;
               inline_modal = None;
+              ask_modal = None;
             }
             |> Update_nav.sync_config_for_keeper_view
           in
@@ -2391,7 +2503,13 @@ and execute_action ~now (m : Model.t) action =
   | Keymap.Fast_deny_top -> Update_nav.fast_deny_top ~now m
   | Keymap.Ask_select_choice choice_1based -> (
       match find_actionable_ask m with
-      | Some ask -> Update_nav.submit_ask_choice ~now ask ~choice_1based m
+      | Some ask -> (
+          match ask.questions with
+          | [ q ] when q.mode = Wire_work.Ask_single ->
+              Update_nav.submit_ask_choice ~now ask ~choice_1based m
+          | _ ->
+              Update_nav.open_ask_modal ~preselect_choice_1based:choice_1based
+                m ask)
       | None -> (m, []))
   | Keymap.Open_help -> (
       match m.nav.overlay with
@@ -2402,6 +2520,7 @@ and execute_action ~now (m : Model.t) action =
           | Nav.Incidents
           | Nav.Queue_context _
           | Nav.Inline_action _
+          | Nav.Ask_answer
           | Nav.System_gate _ )
       | None ->
           Update_nav.open_overlay m Nav.Help)
@@ -2431,6 +2550,7 @@ and execute_action ~now (m : Model.t) action =
           | Nav.Settings _
           | Nav.Incidents
           | Nav.Inline_action _
+          | Nav.Ask_answer
           | Nav.Help
           | Nav.System_gate _ )
       | None ->
@@ -2461,6 +2581,7 @@ and execute_action ~now (m : Model.t) action =
               | Nav.Incidents
               | Nav.Queue_context _
               | Nav.Inline_action _
+              | Nav.Ask_answer
               | Nav.Help
               | Nav.System_gate _ )
           | None )
@@ -2476,18 +2597,61 @@ and execute_action ~now (m : Model.t) action =
   | Keymap.Toggle_expand -> (
       match m.nav.overlay with
       | Some (Nav.Settings _) -> (
-          match Config_store.build_patch_request ~dry_run:true m.config with
-          | Ok req ->
-              let config = Config_store.mark_dry_run_loading m.config in
-              ( { m with config }
-              , [
-                  Cmd.Http_post
-                    { epoch = m.epoch; req = Cmd.Post_config_patch req };
-                ] )
-          | Error reason ->
-              ( Model.with_toast ~now ~level:Model.Toast_info
-                  (Say.literal reason) m
-              , [] ))
+          (* Space in Settings is strictly local-only (ZERO HTTP POSTs):
+             expands/collapses tree groups in Pane_tree, or toggles local
+             boolean draft value in Pane_inspector. Dry-run diff is explicit [d]. *)
+          let two_pane = Config_store.is_two_pane_width ~cols:m.viewport.cols in
+          let cfg0 =
+            if not two_pane then
+              Config_store.set_pane Config_store.Pane_inspector m.config
+            else m.config
+          in
+          match cfg0.settings_pane with
+          | Config_store.Pane_tree ->
+              let config = Config_store.toggle_tree_node cfg0 in
+              let nav =
+                { m.nav with overlay = Some (Nav.Settings config.active_tab) }
+              in
+              ({ m with nav; config }, [])
+          | Config_store.Pane_inspector -> (
+              match Config_store.selected_field cfg0 with
+              | Some f when f.writable && f.kind = Wire_config.Field_bool -> (
+                  match Config_store.step_selected_field ~delta:1 cfg0 with
+                  | Ok (config, true) ->
+                      let config =
+                        if not two_pane then
+                          { config with settings_pane = m.config.settings_pane }
+                        else config
+                      in
+                      ({ m with config }, [])
+                  | Ok _ | Error _ -> (m, []))
+              | Some _ | None -> (m, [])))
+      | Some Nav.Ask_answer -> (
+          match m.ask_modal with
+          | None -> (m, [])
+          | Some modal when modal.editing_free_text -> (m, [])
+          | Some modal -> (
+              match Model.ask_modal_current_row modal with
+              | Some (Model.Ask_row_choice (idx, _)) ->
+                  ( {
+                      m with
+                      ask_modal =
+                        Some (Model.ask_modal_toggle_or_select_choice idx modal);
+                    }
+                  , [] )
+              | Some Model.Ask_row_free_text ->
+                  ( {
+                      m with
+                      ask_modal = Some (Model.ask_modal_enter_free_text modal);
+                    }
+                  , [] )
+              | Some Model.Ask_row_skip ->
+                  ( {
+                      m with
+                      ask_modal = Some (Model.ask_modal_toggle_skip modal);
+                    }
+                  , [] )
+              | None -> (m, [])))
       | Some Nav.Incidents ->
           ( { m with incidents = Incidents.toggle_show_dismissed m.incidents }
           , [] )
@@ -2510,44 +2674,10 @@ and execute_action ~now (m : Model.t) action =
                   m.knowledge.keeper_memory_subview
                   Knowledge_store.Kmem_facts_tree
               then Update_nav.keeper_enter_action ~name ~tab:Nav.Keeper_memory m
-              else
-                let knowledge =
-                  Knowledge_store.cycle_memory_diff_window m.knowledge
-                in
-                let next = { m with knowledge } in
-                (next, View_fetches.fetches_for_current_view next)
-          | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_identity }) -> (
-              let ks =
-                Keeper_context_store.get_keeper ~keeper:name m.keeper_context
-              in
-              let entries = Update_nav.keeper_identity_entries m ~name in
-              match
-                List.nth_opt entries
-                  (Update_nav.clamp_index (List.length entries)
-                     ks.identity_selected_idx)
-              with
-              | Some (Update_nav.Identity_oauth { provider; enabled; _ }) ->
-                  let next_enabled = not (Option.value ~default:false enabled) in
-                  ( Model.with_toast ~now ~level:Model.Toast_info
-                      (Say.make
-                         ~ko:
-                           (Printf.sprintf "OAuth 도구 전환: %s -> %s" provider
-                              (if next_enabled then "활성" else "비활성"))
-                         ~en:
-                           (Printf.sprintf "Toggling OAuth tools %s -> %s"
-                              provider
-                              (if next_enabled then "enabled" else "disabled")))
-                      m
-                  , [
-                      Cmd.Http_post
-                        {
-                          epoch = m.epoch;
-                          req =
-                            Cmd.Post_oauth_identity_switch
-                              { keeper = name; provider; enabled = next_enabled };
-                        };
-                    ] )
-              | Some Update_nav.Identity_github | None -> (m, []))
+              else (m, [])
+          | Some (Nav.Dive_keeper { tab = Nav.Keeper_identity; _ }) ->
+              (* OAuth switch moved to explicit [a] / [Enter] so Space never POSTs. *)
+              (m, [])
           | Some (Nav.Dive_infra _ | Nav.Dive_work _) ->
               ({ m with infra = Infra_store.toggle_raw_json m.infra }, [])
           | Some
@@ -2590,65 +2720,14 @@ and execute_action ~now (m : Model.t) action =
                           Update_nav.keeper_enter_action ~name:k.name
                             ~tab:Nav.Keeper_memory m
                       | None -> (m, [])
-                    else
-                      let knowledge =
-                        Knowledge_store.cycle_memory_diff_window m.knowledge
-                      in
-                      let next = { m with knowledge } in
-                      (next, View_fetches.fetches_for_current_view next)
+                    else (m, [])
                   else if
                     (m.nav.pane_index = 1 || m.nav.zoomed)
                     && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
                          Nav.Keeper_identity
-                  then (
-                    match Fleet_store.selected_keeper_summary m.fleet with
-                    | None -> (m, [])
-                    | Some k -> (
-                        let ks =
-                          Keeper_context_store.get_keeper ~keeper:k.name
-                            m.keeper_context
-                        in
-                        let entries =
-                          Update_nav.keeper_identity_entries m ~name:k.name
-                        in
-                        match
-                          List.nth_opt entries
-                            (Update_nav.clamp_index (List.length entries)
-                               ks.identity_selected_idx)
-                        with
-                        | Some
-                            (Update_nav.Identity_oauth { provider; enabled; _ })
-                          ->
-                            let next_enabled =
-                              not (Option.value ~default:false enabled)
-                            in
-                            ( Model.with_toast ~now ~level:Model.Toast_info
-                                (Say.make
-                                   ~ko:
-                                     (Printf.sprintf "OAuth 도구 전환: %s -> %s"
-                                        provider
-                                        (if next_enabled then "활성"
-                                        else "비활성"))
-                                   ~en:
-                                     (Printf.sprintf
-                                        "Toggling OAuth tools %s -> %s" provider
-                                        (if next_enabled then "enabled"
-                                        else "disabled")))
-                                m
-                            , [
-                                Cmd.Http_post
-                                  {
-                                    epoch = m.epoch;
-                                    req =
-                                      Cmd.Post_oauth_identity_switch
-                                        {
-                                          keeper = k.name;
-                                          provider;
-                                          enabled = next_enabled;
-                                        };
-                                  };
-                              ] )
-                        | Some Update_nav.Identity_github | None -> (m, [])))
+                  then
+                    (* OAuth switch moved to explicit [a] / [Enter] so Space never POSTs. *)
+                    (m, [])
                   else if m.nav.pane_index = 0 then
                     match Fleet_store.selected_keeper_summary m.fleet with
                     | Some k ->
@@ -2849,6 +2928,7 @@ and execute_action ~now (m : Model.t) action =
           | Nav.Incidents
           | Nav.Queue_context _
           | Nav.Inline_action _
+          | Nav.Ask_answer
           | Nav.Help
           | Nav.System_gate _ ) ->
           (m, [])
@@ -3137,6 +3217,7 @@ and execute_action ~now (m : Model.t) action =
             | Nav.Settings _
             | Nav.Queue_context _
             | Nav.Inline_action _
+            | Nav.Ask_answer
             | Nav.Incidents
             | Nav.Help
             | Nav.System_gate
@@ -3206,6 +3287,7 @@ and execute_action ~now (m : Model.t) action =
             | Nav.Incidents
             | Nav.Queue_context _
             | Nav.Inline_action _
+            | Nav.Ask_answer
             | Nav.Help
             | Nav.System_gate
                 (Nav.Micro_viewport | Nav.Auth_gate | Nav.Server_offline) ) ->
@@ -3604,6 +3686,7 @@ and execute_action ~now (m : Model.t) action =
           | Nav.Incidents
           | Nav.Queue_context _
           | Nav.Inline_action _
+          | Nav.Ask_answer
           | Nav.Help
           | Nav.System_gate
               (Nav.Micro_viewport | Nav.Auth_gate | Nav.Server_offline) ) ->
@@ -4425,6 +4508,27 @@ and execute_action ~now (m : Model.t) action =
                             m
                         , [] ))
                 | Nav.Work
+                  when Nav.equal_work_tab m.work.active_tab Nav.Work_inbox -> (
+                    match
+                      Attention.current_filtered_item ~query:m.work.filter_query
+                        m.attention
+                    with
+                    | Some { payload = Attention.Payload_ask ask; _ } ->
+                        Update_nav.push_dive m
+                          (Nav.Dive_keeper
+                             { name = ask.keeper; tab = Nav.Keeper_chat })
+                    | Some { payload = Attention.Payload_tool_approval ta; _ } ->
+                        Update_nav.push_dive m
+                          (Nav.Dive_keeper
+                             { name = ta.keeper; tab = Nav.Keeper_chat })
+                    | Some { payload = Attention.Payload_gate g; _ } ->
+                        Update_nav.push_dive m
+                          (Nav.Dive_keeper
+                             { name = g.keeper; tab = Nav.Keeper_chat })
+                    | Some { payload = Attention.Payload_goal_confirmation _; _ }
+                    | None ->
+                        (m, []))
+                | Nav.Work
                   when Nav.equal_work_tab m.work.active_tab Nav.Work_pipeline -> (
                     match Work_store.selected_goal m.work with
                     | Some g ->
@@ -4724,6 +4828,40 @@ and execute_action ~now (m : Model.t) action =
   | Keymap.Entity_approve_or_assign -> (
       if Option.is_some m.nav.overlay then (m, [])
       else
+        match active_keeper_for_tab Nav.Keeper_identity m with
+        | Some keeper -> (
+            let ks =
+              Keeper_context_store.get_keeper ~keeper m.keeper_context
+            in
+            let entries = Update_nav.keeper_identity_entries m ~name:keeper in
+            match
+              List.nth_opt entries
+                (Update_nav.clamp_index (List.length entries)
+                   ks.identity_selected_idx)
+            with
+            | Some (Update_nav.Identity_oauth { provider; enabled; _ }) ->
+                let next_enabled = not (Option.value ~default:false enabled) in
+                ( Model.with_toast ~now ~level:Model.Toast_info
+                    (Say.make
+                       ~ko:
+                         (Printf.sprintf "OAuth 도구 전환: %s -> %s" provider
+                            (if next_enabled then "활성" else "비활성"))
+                       ~en:
+                         (Printf.sprintf "Toggling OAuth tools %s -> %s"
+                            provider
+                            (if next_enabled then "enabled" else "disabled")))
+                    m
+                , [
+                    Cmd.Http_post
+                      {
+                        epoch = m.epoch;
+                        req =
+                          Cmd.Post_oauth_identity_switch
+                            { keeper; provider; enabled = next_enabled };
+                      };
+                  ] )
+            | Some Update_nav.Identity_github | None -> (m, []))
+        | None ->
         match Model.active_dive m with
         | Some (Nav.Dive_work (Nav.Goal_dive goal_id)) -> (
             match

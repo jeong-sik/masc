@@ -170,6 +170,7 @@ let fetches_for_overlay ~force (m : Model.t) =
       | Nav.Incidents
       | Nav.Queue_context (Nav.Drawer_queue | Nav.Drawer_schedules)
       | Nav.Inline_action _
+      | Nav.Ask_answer
       | Nav.Help
       | Nav.System_gate _ )
   | None ->

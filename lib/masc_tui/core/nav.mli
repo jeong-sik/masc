@@ -126,6 +126,7 @@ type overlay =
   | Incidents
   | Queue_context of queue_context_tab
   | Inline_action of inline_action_kind
+  | Ask_answer
   | Help
   | System_gate of system_gate_kind
 

@@ -1151,8 +1151,8 @@ let draw_grouped_section_form grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang
                      (Grapheme.truncate_to_width ~max_width:fw
                         (Say.resolve lang
                            (Say.make
-                              ~ko:"[←→] 값 변경 · [Enter] 편집 · [Space] Dry-run · [Ctrl+S] 저장 · [Tab] 트리"
-                              ~en:"[←→] Cycle · [Enter] Edit · [Space] Dry-run · [Ctrl+S] Save · [Tab] Tree"))))
+                              ~ko:"[←→] 값 변경 · [Enter] 편집 · [d] Dry-run · [Ctrl+S] 저장 · [Tab] 트리"
+                              ~en:"[←→] Cycle · [Enter] Edit · [d] Dry-run · [Ctrl+S] Save · [Tab] Tree"))))
           end;
           let y3 = footer_r.y + 3 in
           if y3 < Rect.bottom footer_r then begin
@@ -1198,8 +1198,8 @@ let draw_grouped_section_form grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang
                    (Grapheme.truncate_to_width ~max_width:fw
                       (Say.resolve lang
                          (Say.make
-                            ~ko:"[←→] 값 변경 · [Enter] 편집 · [Space] Dry-run · [Tab] 트리"
-                            ~en:"[←→] Cycle · [Enter] Edit · [Space] Dry-run · [Tab] Tree"))))
+                            ~ko:"[←→] 값 변경 · [Enter] 편집 · [d] Dry-run · [Tab] 트리"
+                            ~en:"[←→] Cycle · [Enter] Edit · [d] Dry-run · [Tab] Tree"))))
           end
     end
 
@@ -1617,9 +1617,9 @@ let render_settings_inspector_pane grid ~(rect : Rect.t) ~(theme : Theme.t)
               ( Typography.status ~bg:kbg ~bold:true theme Theme.Status_ok
               , Say.resolve lang
                   (Say.make
-                     ~ko:(Printf.sprintf "✓ 새 키퍼: %s  ([n] 변경 · [Space] 검증 · [Ctrl+S] 생성)"
+                     ~ko:(Printf.sprintf "✓ 새 키퍼: %s  ([n] 변경 · [d] 검증 · [Ctrl+S] 생성)"
                             model.config.new_keeper_name)
-                     ~en:(Printf.sprintf "✓ New keeper: %s  ([n] Rename · [Space] Diff · [Ctrl+S] Create)"
+                     ~en:(Printf.sprintf "✓ New keeper: %s  ([n] Rename · [d] Diff · [Ctrl+S] Create)"
                             model.config.new_keeper_name)) )
           in
           ignore
@@ -1849,12 +1849,12 @@ let render_settings grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     let hotkey =
       if modal_r.w < 110 then
         Say.resolve lang
-          (Say.make ~ko:"[^S] 저장 · [Space] 검증 · [Esc] 닫기"
-             ~en:"[^S] Save · [Space] Diff · [Esc] Close")
+          (Say.make ~ko:"[^S] 저장 · [d] 검증 · [Esc] 닫기"
+             ~en:"[^S] Save · [d] Diff · [Esc] Close")
       else
         Say.resolve lang
-          (Say.make ~ko:"[Space] Dry-run · [Ctrl+S] 저장 · [Esc] 닫기"
-             ~en:"[Space] Dry-run · [Ctrl+S] Save · [Esc] Close")
+          (Say.make ~ko:"[d] Dry-run · [Ctrl+S] 저장 · [Esc] 닫기"
+             ~en:"[d] Dry-run · [Ctrl+S] Save · [Esc] Close")
     in
     let footer_hint =
       if modal_r.w >= 74 then
@@ -2430,12 +2430,12 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               (Say.resolve lang
                  (match active_tab with
                   | Nav.Drawer_queue | Nav.Drawer_schedules ->
-                      Say.make ~ko:"[↑↓] 스크롤 · [Tab/←→] 탭 · [Esc] 닫기"
-                        ~en:"[↑↓] Scroll · [Tab/←→] Tabs · [Esc] Close"
+                      Say.make ~ko:"[↑↓] 스크롤 · [[ ]/Tab] 탭 · [Esc] 닫기"
+                        ~en:"[↑↓] Scroll · [[ ]/Tab] Tabs · [Esc] Close"
                   | Nav.Drawer_context ->
                       (* The Context tab does not scroll. *)
-                      Say.make ~ko:"[Tab/←→] 탭 · [Esc] 닫기"
-                        ~en:"[Tab/←→] Tabs · [Esc] Close"));
+                      Say.make ~ko:"[[ ]/Tab] 탭 · [Esc] 닫기"
+                        ~en:"[[ ]/Tab] Tabs · [Esc] Close"));
           focused = true;
           elevated = true;
         }
@@ -3699,8 +3699,8 @@ let compact_help_group ~lang (grp : Keymap.help_group) : Keymap.help_group =
                   keys = [ "j/k"; "↑↓←→" ];
                   desc =
                     Say.resolve lang
-                      (Say.make ~ko:"선택 이동 · 스크롤 (g/G)"
-                         ~en:"Move / scroll (g/G top·bottom)");
+                      (Say.make ~ko:"선택 이동 · 좌/우 패인 이동 (g/G)"
+                         ~en:"Move / spatial pane switch (g/G)");
                   slash_twin = None;
                 }
             end
@@ -3714,8 +3714,8 @@ let compact_help_group ~lang (grp : Keymap.help_group) : Keymap.help_group =
                   keys = [ "a..d" ];
                   desc =
                     Say.resolve lang
-                      (Say.make ~ko:"Ask 다중 선택지 응답 (a..d)"
-                         ~en:"Answer Ask choice (a..d)");
+                      (Say.make ~ko:"Ask 선택지 빠른 응답 (단일 1문항)"
+                         ~en:"Quick Ask choice (single-question)");
                   slash_twin = None;
                 }
             end
@@ -3762,8 +3762,8 @@ let compact_help_group ~lang (grp : Keymap.help_group) : Keymap.help_group =
                 e with
                 desc =
                   Say.resolve lang
-                    (Say.make ~ko:"대기 승인 거절 (사유 입력)"
-                       ~en:"Deny top approval (reason)");
+                    (Say.make ~ko:"대기 승인 거절 / 질문 건너뛰기"
+                       ~en:"Deny top approval / skip Ask");
               }
         | Keymap.Open_external ->
             Some
@@ -4465,6 +4465,554 @@ let render_system_gate grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               Printf.sprintf "Protected drafts: %d · Resize >= 80x24" draft_n );
           ]
 
+(* ---------- Dedicated Question/Ask Answer Modal ---------- *)
+
+let ask_modal_rect ~(rect : Rect.t) =
+  let max_w = Int.max 0 (rect.w - 2) in
+  let max_h = Int.max 0 (rect.h - 2) in
+  let desired_w = Int.max 66 (rect.w * 3 / 4) in
+  let w = Int.min max_w (Int.min 96 desired_w) in
+  let desired_h = Int.max 16 (rect.h - 4) in
+  let h = Int.min max_h (Int.min 32 desired_h) in
+  center_rect ~outer:rect ~w ~h
+
+let split_graphemes_for_caret ~max_w ~cursor text =
+  let norm_text, clusters = Grapheme.segment text in
+  let len = String.length norm_text in
+  let target = Int.max 0 (Int.min len cursor) in
+  let snap =
+    List.fold_left
+      (fun best (c : Grapheme.cluster) ->
+        if c.end_offset <= target then c.end_offset else best)
+      0 clusters
+  in
+  let before_clusters =
+    List.filter (fun (c : Grapheme.cluster) -> c.end_offset <= snap) clusters
+  in
+  let full_before = String.sub norm_text 0 snap in
+  let full_after = String.sub norm_text snap (len - snap) in
+  if max_w <= 1 then ("", "")
+  else
+    let caret_budget = Int.max 0 (max_w - 1) in
+    let w_before = Grapheme.display_width full_before in
+    let w_after = Grapheme.display_width full_after in
+    if w_before + w_after <= caret_budget then (full_before, full_after)
+    else
+      (* Keep cursor visible inside viewport width *)
+      let max_before =
+        Int.min w_before (Int.max 0 (caret_budget - Int.min 6 w_after))
+      in
+      let before_arr = Array.of_list before_clusters in
+      let start_off = ref snap in
+      let bw = ref 0 in
+      let i = ref (Array.length before_arr - 1) in
+      while !i >= 0 do
+        let c = before_arr.(!i) in
+        if !bw + c.cell_width <= max_before then begin
+          start_off := c.start_offset;
+          bw := !bw + c.cell_width;
+          decr i
+        end
+        else i := -1
+      done;
+      let vis_before = String.sub norm_text !start_off (snap - !start_off) in
+      let rem_after = Int.max 0 (caret_budget - !bw) in
+      let vis_after =
+        Grapheme.truncate_to_width ~ellipsis:"" ~max_width:rem_after full_after
+      in
+      (vis_before, vis_after)
+
+let render_ask_answer_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
+    ~(model : Model.t) =
+  match model.ask_modal with
+  | None -> ()
+  | Some modal ->
+      let modal_r = ask_modal_rect ~rect in
+      if Rect.is_empty modal_r then ()
+      else
+        let lang = model.lang in
+        let q_count = List.length modal.ask.questions in
+        let live_status = Model.ask_live_status model modal.ask.ask_id in
+        let all_done = Model.ask_modal_all_answered modal in
+        let title =
+          Say.resolve lang
+            (Say.make
+               ~ko:(Printf.sprintf "@%s · 질문 답변" modal.ask.keeper)
+               ~en:(Printf.sprintf "@%s · Answer Ask" modal.ask.keeper))
+        in
+        let is_sending =
+          modal.submitting
+          || Model.equal_ask_live_status live_status Model.Ask_live_in_flight
+        in
+        let badge_tone =
+          match live_status with
+          | Model.Ask_live_closed -> Theme.Status_critical
+          | Model.Ask_live_in_flight -> Theme.Status_attention
+          | Model.Ask_live_open ->
+              if modal.submitting then Theme.Status_attention
+              else if Option.is_some modal.error then Theme.Status_critical
+              else if all_done then Theme.Status_ok
+              else Theme.Status_attention
+        in
+        let badge_text =
+          Printf.sprintf "Q %d/%d"
+            (Int.min (Int.max 1 q_count) (modal.question_idx + 1))
+            (Int.max 1 q_count)
+        in
+        let hotkey =
+          match live_status with
+          | Model.Ask_live_closed ->
+              Say.resolve lang
+                (Say.make ~ko:"[C] 채팅 · [Esc] 닫기"
+                   ~en:"[C] Chat · [Esc] Close")
+          | Model.Ask_live_in_flight ->
+              Say.resolve lang
+                (Say.make ~ko:"전송 중 · [Esc] 닫기"
+                   ~en:"Sending · [Esc] Close")
+          | Model.Ask_live_open when modal.submitting ->
+              Say.resolve lang
+                (Say.make ~ko:"전송 중 · [Esc] 닫기"
+                   ~en:"Sending · [Esc] Close")
+          | Model.Ask_live_open when modal.editing_free_text ->
+              Say.resolve lang
+                (Say.make ~ko:"[Enter] 확정 · [Esc] 선택으로"
+                   ~en:"[Enter] Confirm · [Esc] Back")
+          | Model.Ask_live_open ->
+              Say.resolve lang
+                (Say.make ~ko:"[Enter] 확인/제출 · [C] 채팅 · [Esc] 닫기"
+                   ~en:"[Enter] Confirm/Submit · [C] Chat · [Esc] Close")
+        in
+        let inner =
+          Card.draw ~cache grid ~rect:modal_r ~theme
+            {
+              (Card.default_spec ~title) with
+              badge =
+                Some
+                  {
+                    Card.glyph = Some Glyph.Action_required;
+                    text = badge_text;
+                    tone = Some badge_tone;
+                  };
+              hotkey = Some hotkey;
+              focused = true;
+              elevated = true;
+            }
+        in
+        if not (Rect.is_empty inner) then begin
+          let pad_x = if inner.w >= 48 then 2 else 1 in
+          let bg = Color.of_rgb theme.surface_2 in
+          let pri_st = Typography.primary ~bg theme in
+          let struct_st = Typography.structure ~bg theme in
+          let whisper_st = Typography.whisper ~bg theme in
+          let acc_st = Typography.accent ~bg ~bold:true theme in
+          let ok_st = Typography.status ~bg ~bold:true theme Theme.Status_ok in
+          let attn_st =
+            Typography.status ~bg ~bold:true theme Theme.Status_attention
+          in
+          let crit_st =
+            Typography.status ~bg ~bold:true theme Theme.Status_critical
+          in
+          let content_w = Int.max 0 (inner.w - (2 * pad_x)) in
+          let x0 = inner.x + pad_x in
+          let y = ref inner.y in
+          let bot = Rect.bottom inner in
+          (* 1. Honest Live Status / Submitting / Error Banner *)
+          let draw_banner ~tone msg =
+            if !y < bot then begin
+              let br = Rect.make ~x:inner.x ~y:!y ~w:inner.w ~h:1 in
+              let b_bg = Color.of_rgb theme.surface_1 in
+              Cell_grid.fill_rect ~clip:br grid ~rect:br
+                ~style:(Typography.primary ~bg:b_bg theme) ();
+              ignore
+                (Cell_grid.put_text ~clip:br grid ~x:x0 ~y:!y
+                   ~style:(Typography.status ~bg:b_bg ~bold:true theme tone)
+                   (Grapheme.truncate_to_width ~max_width:content_w msg));
+              incr y
+            end
+          in
+          (match live_status with
+          | Model.Ask_live_closed ->
+              draw_banner ~tone:Theme.Status_critical
+                (Say.resolve lang
+                   (Say.make
+                      ~ko:"⊘ 이미 응답되었거나 철회된 질문입니다 — 제출 비활성화"
+                      ~en:"⊘ This Ask was already answered or withdrawn — submission disabled"))
+          | Model.Ask_live_in_flight ->
+              draw_banner ~tone:Theme.Status_attention
+                (Say.resolve lang
+                   (Say.make ~ko:"… 응답 전송 중입니다..."
+                      ~en:"… Submission in flight..."))
+          | Model.Ask_live_open when modal.submitting ->
+              draw_banner ~tone:Theme.Status_attention
+                (Say.resolve lang
+                   (Say.make ~ko:"… 응답 전송 중입니다..."
+                      ~en:"… Submission in flight..."))
+          | Model.Ask_live_open -> (
+              match modal.error with
+              | Some err ->
+                  draw_banner ~tone:Theme.Status_critical
+                    (Printf.sprintf "✕ %s" (Say.resolve lang err))
+              | None -> ()));
+          (* 2. Question Progress Chips Row *)
+          if q_count > 0 && !y < bot then begin
+            let chip_r = Rect.make ~x:x0 ~y:!y ~w:content_w ~h:1 in
+            let cx = ref x0 in
+            List.iteri
+              (fun idx (qi : Wire_work.ask_question) ->
+                if !cx < x0 + content_w then begin
+                  let is_act = Int.equal idx modal.question_idx in
+                  let mark, mark_st =
+                    match Model.ask_question_response modal qi with
+                    | Some Wire_work.Ask_skipped -> ("⊘", whisper_st)
+                    | Some (Wire_work.Ask_chose _ | Wire_work.Ask_wrote _) ->
+                        ("✓", ok_st)
+                    | None -> ("○", attn_st)
+                  in
+                  let lbl = Printf.sprintf "Q%d %s" (idx + 1) mark in
+                  if is_act then begin
+                    let a0 =
+                      Cell_grid.put_text ~clip:chip_r grid ~x:!cx ~y:!y
+                        ~style:acc_st (Glyph.to_utf8 Glyph.Left_rail ^ " ")
+                    in
+                    cx := !cx + a0;
+                    let a1 =
+                      Cell_grid.put_text ~clip:chip_r grid ~x:!cx ~y:!y
+                        ~style:(Typography.anchor ~bg ~underline:true theme) lbl
+                    in
+                    cx := !cx + a1 + 2
+                  end
+                  else begin
+                    let a =
+                      Cell_grid.put_text ~clip:chip_r grid ~x:!cx ~y:!y
+                        ~style:mark_st lbl
+                    in
+                    cx := !cx + a + 2
+                  end
+                end)
+              modal.ask.questions;
+            if q_count > 1 then begin
+              let nav_hint =
+                Say.resolve lang
+                  (Say.make ~ko:"[[ ]/Tab] 질문 전환" ~en:"[[ ]/Tab] Questions")
+              in
+              let hw = Grapheme.display_width nav_hint in
+              let hx = x0 + content_w - hw in
+              if hx > !cx then
+                ignore
+                  (Cell_grid.put_text ~clip:chip_r grid ~x:hx ~y:!y
+                     ~style:whisper_st nav_hint)
+            end;
+            incr y;
+            if !y < bot then begin
+              Card.draw_hairline ~pad_x ~bg grid ~rect:inner ~y:!y ~theme;
+              incr y
+            end
+          end;
+          (* 3. Active Question Prompt + Interactive Rows + Footer *)
+          match Model.ask_modal_current_question modal with
+          | None ->
+              if !y < bot then
+                ignore
+                  (Cell_grid.put_text ~clip:inner grid ~x:x0 ~y:!y
+                     ~style:crit_st
+                     (Grapheme.truncate_to_width ~max_width:content_w
+                        (Say.resolve lang
+                           (Say.make ~ko:"표시할 질문이 없습니다."
+                              ~en:"No questions available in this Ask."))))
+          | Some q ->
+              let draft = Model.ask_question_draft_for modal q in
+              let rows = Model.ask_modal_rows q in
+              let total_rows = List.length rows in
+              let footer_h = if bot - !y >= 5 then 1 else 0 in
+              let body_bot = Int.max !y (bot - footer_h) in
+              let body_h = Int.max 0 (body_bot - !y) in
+              let sep_h = if body_h >= 6 then 1 else 0 in
+              let avail_h = Int.max 0 (body_h - sep_h) in
+              let min_rows_h =
+                Int.min (Int.max 2 total_rows) (Int.max 2 ((avail_h + 1) / 2))
+              in
+              let md_h =
+                if avail_h <= min_rows_h then 0
+                else Int.min (avail_h - min_rows_h) (Int.max 2 (avail_h / 3))
+              in
+              let prompt_overflow = ref None in
+              if md_h > 0 then begin
+                let prompt_md =
+                  Model.ask_modal_prompt_markdown ~compact:(md_h <= 4)
+                    modal.ask q
+                in
+                let total_md_lines =
+                  List.length
+                    (Markdown.render_lines ~theme ~width:content_w
+                       ~osc8:caps.osc8_hyperlinks prompt_md)
+                in
+                let md_max_scroll = Int.max 0 (total_md_lines - md_h) in
+                let eff_scroll =
+                  Int.max 0 (Int.min md_max_scroll modal.prompt_scroll)
+                in
+                if total_md_lines > md_h then
+                  prompt_overflow := Some (eff_scroll + 1, md_max_scroll + 1);
+                let md_r = Rect.make ~x:x0 ~y:!y ~w:content_w ~h:md_h in
+                ignore
+                  (Markdown.draw grid ~rect:md_r ~theme
+                     ~osc8:caps.osc8_hyperlinks ~scroll:eff_scroll prompt_md);
+                y := !y + md_h
+              end;
+              if sep_h > 0 && !y < body_bot then begin
+                let base_lbl =
+                  match q.mode with
+                  | Wire_work.Ask_single ->
+                      Say.resolve lang
+                        (Say.make ~ko:"선택지 (단일 선택)"
+                           ~en:"Choices (single-select)")
+                  | Wire_work.Ask_multi ->
+                      Say.resolve lang
+                        (Say.make ~ko:"선택지 (다중 선택 · Space 토글)"
+                           ~en:"Choices (multi-select · Space toggle)")
+                in
+                let mode_lbl =
+                  match !prompt_overflow with
+                  | Some (cur_p, tot_p) ->
+                      Printf.sprintf "%s · %s %d/%d [J/K]" base_lbl
+                        (Say.resolve lang (Say.make ~ko:"본문" ~en:"Prompt"))
+                        cur_p tot_p
+                  | None -> base_lbl
+                in
+                Card.draw_hairline ~pad_x ~bg ~label:mode_lbl grid ~rect:inner
+                  ~y:!y ~theme;
+                incr y
+              end;
+              let list_h = Int.max 0 (body_bot - !y) in
+              let start_idx =
+                if total_rows <= list_h || list_h <= 0 then 0
+                else
+                  let s = modal.cursor - (list_h / 2) in
+                  Int.max 0 (Int.min (total_rows - list_h) s)
+              in
+              let rows_arr = Array.of_list rows in
+              for offset = 0 to list_h - 1 do
+                let row_idx = start_idx + offset in
+                if row_idx < total_rows && !y + offset < body_bot then begin
+                  let ry = !y + offset in
+                  let row_r = Rect.make ~x:inner.x ~y:ry ~w:inner.w ~h:1 in
+                  let is_cur = Int.equal row_idx modal.cursor in
+                  let r_bg =
+                    if is_cur then Color.of_rgb theme.selection_bg else bg
+                  in
+                  Cell_grid.fill_rect ~clip:row_r grid ~rect:row_r
+                    ~style:(Typography.primary ~bg:r_bg theme) ();
+                  if is_cur then
+                    Card.draw_left_rail ~bg:r_bg
+                      ~tone:
+                        (if modal.editing_free_text then Theme.Status_ok
+                         else Theme.Status_active)
+                      grid ~x:(x0 - 1) ~y:ry ~theme ~h:1;
+                  let text_r = Rect.make ~x:x0 ~y:ry ~w:content_w ~h:1 in
+                  let row_pri =
+                    if is_cur then Typography.primary ~bg:r_bg ~bold:true theme
+                    else { pri_st with bg = r_bg }
+                  in
+                  let row_wh = { whisper_st with bg = r_bg } in
+                  let row_ok = { ok_st with bg = r_bg } in
+                  let row_acc = { acc_st with bg = r_bg } in
+                  match rows_arr.(row_idx) with
+                  | Model.Ask_row_choice (idx, ch) ->
+                      let selected =
+                        Model.equal_ask_answer_mode draft.mode
+                          Model.Ask_mode_choices
+                        && List.exists (String.equal ch.choice_id)
+                             draft.choice_ids
+                      in
+                      let mark =
+                        match q.mode with
+                        | Wire_work.Ask_single -> if selected then "●" else "○"
+                        | Wire_work.Ask_multi ->
+                            if selected then "[x]" else "[ ]"
+                      in
+                      let key_s =
+                        match Model.ask_choice_hotkey_char idx with
+                        | Some kc -> Printf.sprintf "[%c] " kc
+                        | None -> ""
+                      in
+                      let cx = ref x0 in
+                      let a0 =
+                        Cell_grid.put_text ~clip:text_r grid ~x:!cx ~y:ry
+                          ~style:(if selected then row_ok else row_acc)
+                          (mark ^ " ")
+                      in
+                      cx := !cx + a0;
+                      let a1 =
+                        Cell_grid.put_text ~clip:text_r grid ~x:!cx ~y:ry
+                          ~style:row_acc key_s
+                      in
+                      cx := !cx + a1;
+                      let rem_w = Int.max 0 (x0 + content_w - !cx) in
+                      let a2 =
+                        Cell_grid.put_text ~clip:text_r grid ~x:!cx ~y:ry
+                          ~style:row_pri
+                          (Grapheme.truncate_to_width ~max_width:rem_w ch.label)
+                      in
+                      cx := !cx + a2;
+                      (match ch.description with
+                      | Some desc
+                        when not (String.equal (String.trim desc) "") ->
+                          let rem2 = Int.max 0 (x0 + content_w - !cx) in
+                          if rem2 > 4 then
+                            ignore
+                              (Cell_grid.put_text ~clip:text_r grid ~x:!cx ~y:ry
+                                 ~style:row_wh
+                                 (Grapheme.truncate_to_width ~max_width:rem2
+                                    (" — " ^ desc)))
+                      | Some _ | None -> ())
+                  | Model.Ask_row_free_text ->
+                      let is_active_ft =
+                        Model.equal_ask_answer_mode draft.mode
+                          Model.Ask_mode_free_text
+                        && not (String.equal (String.trim draft.free_text) "")
+                      in
+                      let prefix =
+                        if modal.editing_free_text then "✎ "
+                        else if is_active_ft then "✓ ✎ "
+                        else "✎ [i] "
+                      in
+                      let cx = ref x0 in
+                      let a0 =
+                        Cell_grid.put_text ~clip:text_r grid ~x:!cx ~y:ry
+                          ~style:
+                            (if modal.editing_free_text || is_active_ft then
+                               row_ok
+                             else row_acc)
+                          prefix
+                      in
+                      cx := !cx + a0;
+                      let rem_w = Int.max 0 (x0 + content_w - !cx) in
+                      if modal.editing_free_text then begin
+                        let vis_before, vis_after =
+                          split_graphemes_for_caret ~max_w:rem_w
+                            ~cursor:draft.free_text_cursor draft.free_text
+                        in
+                        let ab =
+                          Cell_grid.put_text ~clip:text_r grid ~x:!cx ~y:ry
+                            ~style:row_pri vis_before
+                        in
+                        cx := !cx + ab;
+                        let ac =
+                          Cell_grid.put_text ~clip:text_r grid ~x:!cx ~y:ry
+                            ~style:row_ok "│"
+                        in
+                        cx := !cx + ac;
+                        ignore
+                          (Cell_grid.put_text ~clip:text_r grid ~x:!cx ~y:ry
+                             ~style:row_pri vis_after)
+                      end
+                      else if not (String.equal (String.trim draft.free_text) "")
+                      then
+                        ignore
+                          (Cell_grid.put_text ~clip:text_r grid ~x:!cx ~y:ry
+                             ~style:row_pri
+                             (Grapheme.truncate_to_width ~max_width:rem_w
+                                draft.free_text))
+                      else
+                        let ph =
+                          match q.free_text_hint with
+                          | Some h when not (String.equal (String.trim h) "") ->
+                              h
+                          | Some _ | None ->
+                              Say.resolve lang
+                                (Say.make ~ko:"직접 입력 ([i] 또는 [Enter])"
+                                   ~en:"Type custom answer ([i] or [Enter])")
+                        in
+                        ignore
+                          (Cell_grid.put_text ~clip:text_r grid ~x:!cx ~y:ry
+                             ~style:row_wh
+                             (Grapheme.truncate_to_width ~max_width:rem_w ph))
+                  | Model.Ask_row_skip ->
+                      let is_skipped =
+                        Model.equal_ask_answer_mode draft.mode
+                          Model.Ask_mode_skipped
+                      in
+                      let lbl =
+                        Say.resolve lang
+                          (Say.make ~ko:"이 질문 건너뛰기"
+                             ~en:"Skip this question")
+                      in
+                      let txt =
+                        if is_skipped then "⊘ [✓] " ^ lbl else "⊘ " ^ lbl
+                      in
+                      ignore
+                        (Cell_grid.put_text ~clip:text_r grid ~x:x0 ~y:ry
+                           ~style:(if is_skipped then row_ok else row_wh)
+                           (Grapheme.truncate_to_width ~max_width:content_w txt))
+                end
+              done;
+              (* 4. Bottom Keycap Footer *)
+              if footer_h > 0 && body_bot < bot then begin
+                let fr = Rect.make ~x:x0 ~y:body_bot ~w:content_w ~h:1 in
+                let hint =
+                  match live_status with
+                  | Model.Ask_live_closed ->
+                      Say.resolve lang
+                        (Say.make ~ko:"[C] 키퍼 채팅 · [Esc] 닫기"
+                           ~en:"[C] Keeper Chat · [Esc] Close")
+                  | Model.Ask_live_in_flight ->
+                      Say.resolve lang
+                        (Say.make ~ko:"응답 전송 중... · [Esc] 닫기"
+                           ~en:"Submitting... · [Esc] Close")
+                  | Model.Ask_live_open when is_sending ->
+                      Say.resolve lang
+                        (Say.make ~ko:"응답 전송 중... · [Esc] 닫기"
+                           ~en:"Submitting... · [Esc] Close")
+                  | Model.Ask_live_open ->
+                      if modal.editing_free_text then
+                        Say.resolve lang
+                          (Say.make
+                             ~ko:"[←→/Home/End] 커서 · [Enter] 확정 · [Ctrl+Enter] 제출 · [Esc] 선택으로"
+                             ~en:"[←→/Home/End] Cursor · [Enter] Confirm · [Ctrl+Enter] Submit · [Esc] Back")
+                      else
+                        let parts =
+                          [
+                            Say.resolve lang
+                              (Say.make ~ko:"[↑↓/jk] 이동" ~en:"[↑↓/jk] Move");
+                            Say.resolve lang
+                              (Say.make ~ko:"[Space] 선택" ~en:"[Space] Toggle");
+                            Say.resolve lang
+                              (Say.make ~ko:"[Enter] 확인" ~en:"[Enter] Confirm");
+                          ]
+                          @ (if Option.is_some !prompt_overflow then
+                               [
+                                 Say.resolve lang
+                                   (Say.make ~ko:"[J/K] 본문" ~en:"[J/K] Prompt");
+                               ]
+                             else [])
+                          @ (if q.allow_free_text then
+                               [
+                                 Say.resolve lang
+                                   (Say.make ~ko:"[i] 입력" ~en:"[i] Type");
+                               ]
+                             else [])
+                          @ (if q_count > 1 then
+                               [
+                                 Say.resolve lang
+                                   (Say.make ~ko:"[[ ]/Tab] 질문"
+                                      ~en:"[[ ]/Tab] Q");
+                               ]
+                             else [])
+                          @ [
+                              Say.resolve lang
+                                (Say.make ~ko:"[^↵] 전체제출" ~en:"[^↵] Submit");
+                              Say.resolve lang
+                                (Say.make ~ko:"[C] 채팅" ~en:"[C] Chat");
+                            ]
+                        in
+                        String.concat " · " parts
+                in
+                ignore
+                  (Cell_grid.put_text ~clip:fr grid ~x:x0 ~y:body_bot
+                     ~style:struct_st
+                     (Grapheme.truncate_to_width ~max_width:content_w hint))
+              end
+        end
+
 (* ---------- Public Overlay Dispatcher (Exhaustive on Nav.overlay) ---------- *)
 
 let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
@@ -4486,6 +5034,8 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
               ~active_tab
         | Nav.Inline_action kind ->
             render_inline_action_modal grid ~cache ~rect ~theme ~model ~kind
+        | Nav.Ask_answer ->
+            render_ask_answer_modal grid ~cache ~rect ~theme ~model
         | Nav.Help -> render_help_overlay grid ~cache ~rect ~theme ~model
         | Nav.System_gate gate ->
             render_system_gate grid ~cache ~rect ~theme ~model ~gate

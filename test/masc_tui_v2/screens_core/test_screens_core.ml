@@ -1768,7 +1768,7 @@ let test_round1_local_clock_pills_and_compact_fit () =
   let sub_w90 = grid_row_text g_w90 1 in
   assert_contains ~label:"work_90_symmetric_pill" ~needle:" 목표 " sub_w90;
   assert_contains ~label:"work_90_candle_not_clipped" ~needle:"캔들·성과" sub_w90;
-  assert_contains ~label:"work_90_compact_hint" ~needle:"[←→]" sub_w90;
+  assert_contains ~label:"work_90_compact_hint" ~needle:"[[ ]]" sub_w90;
   assert_not_contains ~label:"work_90_no_long_hint" ~needle:"탭 전환" sub_w90;
 
   let m_set_90 =
@@ -3297,6 +3297,213 @@ let test_wave2_sidebar_keepers_sync_and_overlays () =
   let g_mv, _ = render_full ~model:m_mv ~cols:140 ~rows:40 in
   assert_clean_grid ~label:"Wave2/MediaViewer" g_mv
 
+let test_ask_answer_modal_and_honest_ask_surfaces () =
+  let t0 = Clock.Mono.zero in
+  let sample_ask : Wire_work.ask_row =
+    {
+      ask_id = "ask-render-1";
+      keeper = "alpha";
+      asked_at = 1710000000.0;
+      context = Some "Need operator decision before merge.";
+      questions =
+        [
+          {
+            question_id = "q1";
+            header = "Rollout";
+            prompt = "Choose rollout plan:";
+            mode = Wire_work.Ask_multi;
+            allow_free_text = true;
+            free_text_hint = Some "Custom notes";
+            choices =
+              List.init 6 (fun i ->
+                  {
+                    Wire_work.choice_id = Printf.sprintf "opt-%d" (i + 1);
+                    label = Printf.sprintf "Option %d" (i + 1);
+                    description = Some (Printf.sprintf "Details %d" (i + 1));
+                  });
+          };
+          {
+            question_id = "q2";
+            header = "Followup";
+            prompt = "Confirm followup step:";
+            mode = Wire_work.Ask_single;
+            allow_free_text = false;
+            free_text_hint = None;
+            choices =
+              [
+                {
+                  Wire_work.choice_id = "yes";
+                  label = "Proceed";
+                  description = None;
+                };
+              ];
+          };
+        ];
+      resolution = Wire_work.Ask_open;
+    }
+  in
+  List.iter
+    (fun (lang, want_y, want_n, want_j, want_pulse, want_closed) ->
+      let base = populated_model ~cols:140 ~rows:40 ~lang in
+      let m_ask =
+        {
+          base with
+          nav = { base.nav with workspace = Nav.Pulse; overlay = None };
+          work =
+            Work_store.empty
+            |> Work_store.apply_asks ~observed_at:t0 [ sample_ask ];
+        }
+        |> Model.rebuild_attention
+      in
+      (* 1. Honest Approval Strip & Pulse labels at 140x40 and 80x24 *)
+      let g_wide, _ = render_full ~model:m_ask ~cols:140 ~rows:40 in
+      assert_clean_grid ~label:"ask_surface_140x40" g_wide;
+      let txt_wide = grid_all_text g_wide in
+      assert_contains ~label:"approval_strip_y" ~needle:want_y txt_wide;
+      assert_contains ~label:"approval_strip_n" ~needle:want_n txt_wide;
+      assert_contains ~label:"approval_strip_j" ~needle:want_j txt_wide;
+      assert_contains ~label:"pulse_ask_hint" ~needle:want_pulse txt_wide;
+      (* Sidebar scrolled to System section shows 7/, 8/I 9/^T 0/? utility shortcuts *)
+      let m_sb_sys =
+        {
+          m_ask with
+          incidents = Incidents.empty;
+          nav =
+            {
+              m_ask.nav with
+              sidebar_focused = true;
+              sidebar_cursor = Nav.menu_item_index Nav.Menu_help;
+            };
+        }
+      in
+      let g_sb_sys, _ = render_full ~model:m_sb_sys ~cols:140 ~rows:40 in
+      assert_clean_grid ~label:"sidebar_system_140x40" g_sb_sys;
+      let txt_sb = grid_all_text g_sb_sys in
+      assert_contains ~label:"sidebar_7" ~needle:"7/," txt_sb;
+      assert_contains ~label:"sidebar_8" ~needle:"8/I" txt_sb;
+      assert_contains ~label:"sidebar_9" ~needle:"9/^T" txt_sb;
+      assert_contains ~label:"sidebar_0" ~needle:"0/?" txt_sb;
+
+      let g_narrow, _ =
+        render_full
+          ~model:
+            {
+              m_ask with
+              viewport = { cols = 80; rows = 24 };
+              breakpoint = Model.Compact;
+            }
+          ~cols:80 ~rows:24
+      in
+      assert_clean_grid ~label:"ask_surface_80x24" g_narrow;
+
+      (* 2. Open Ask Answer Modal with free-text Korean caret & scrolled choice *)
+      let modal_open =
+        Model.ask_modal_for sample_ask
+        |> Model.ask_modal_toggle_or_select_choice 0
+        |> Model.ask_modal_enter_free_text
+        |> Model.ask_modal_insert_free_text "한글 입력 테스트"
+      in
+      let m_modal =
+        {
+          m_ask with
+          nav = { m_ask.nav with overlay = Some Nav.Ask_answer };
+          ask_modal = Some modal_open;
+        }
+      in
+      List.iter
+        (fun (cols, rows) ->
+          let bp = Model.classify_viewport { cols; rows } in
+          let m_vp =
+            { m_modal with viewport = { cols; rows }; breakpoint = bp }
+          in
+          let g, _ = render_full ~model:m_vp ~cols ~rows in
+          assert_clean_grid
+            ~label:(Printf.sprintf "ask_modal_%dx%d" cols rows)
+            g;
+          let txt = grid_all_text g in
+          assert_contains ~label:"ask_modal_progress" ~needle:"Q 1/2" txt;
+          assert_contains
+            ~label:(Printf.sprintf "ask_modal_prompt_visible_%dx%d" cols rows)
+            ~needle:"Choose rollout plan:" txt;
+          assert_contains ~label:"ask_modal_korean_ft" ~needle:"한글" txt)
+        [ (140, 40); (90, 28); (80, 24); (60, 20) ];
+
+      (* 2b. Overflowing prompt shows [J/K] scroll indicator *)
+      let long_ask =
+        {
+          sample_ask with
+          context =
+            Some
+              (String.concat "\n"
+                 (List.init 10 (fun i ->
+                      Printf.sprintf "Extra context paragraph line %d." (i + 1))));
+        }
+      in
+      let m_long =
+        {
+          m_modal with
+          work = Work_store.empty |> Work_store.apply_asks ~observed_at:t0 [ long_ask ];
+          ask_modal = Some (Model.ask_modal_for long_ask);
+        }
+        |> Model.rebuild_attention
+      in
+      let g_long, _ = render_full ~model:m_long ~cols:80 ~rows:24 in
+      assert_clean_grid ~label:"ask_modal_long_prompt_80x24" g_long;
+      assert_contains ~label:"ask_modal_prompt_scroll_hint" ~needle:"[J/K]"
+        (grid_all_text g_long);
+
+      (* 3. Closed Live Status Guard & Submitting/In-flight read-only hints *)
+      let m_closed =
+        {
+          m_modal with
+          work = Work_store.apply_asks ~observed_at:t0 [] m_modal.work;
+        }
+        |> Model.rebuild_attention
+      in
+      let g_closed, _ = render_full ~model:m_closed ~cols:140 ~rows:40 in
+      assert_clean_grid ~label:"ask_modal_closed" g_closed;
+      let txt_closed = grid_all_text g_closed in
+      assert_contains ~label:"ask_modal_closed_banner" ~needle:want_closed
+        txt_closed;
+      assert_not_contains ~label:"ask_modal_closed_no_submit_hint"
+        ~needle:"[^↵]" txt_closed;
+      assert_not_contains ~label:"ask_modal_closed_no_enter_submit"
+        ~needle:"[Enter]" txt_closed;
+
+      let m_submitting =
+        {
+          m_modal with
+          ask_modal =
+            Some
+              {
+                modal_open with
+                editing_free_text = false;
+                submitting = true;
+              };
+        }
+      in
+      let g_sub, _ = render_full ~model:m_submitting ~cols:140 ~rows:40 in
+      assert_clean_grid ~label:"ask_modal_submitting" g_sub;
+      let txt_sub = grid_all_text g_sub in
+      assert_not_contains ~label:"ask_modal_submitting_no_submit_hint"
+        ~needle:"[^↵]" txt_sub;
+      assert_not_contains ~label:"ask_modal_submitting_no_enter_submit"
+        ~needle:"[Enter]" txt_sub)
+    [
+      ( Say.Lang_ko
+      , "[Y] 질문 답변"
+      , "[N] 건너뛰기"
+      , "[J] 수신함"
+      , "[Y] 답변"
+      , "이미 응답되었거나 철회된 질문입니다" );
+      ( Say.Lang_en
+      , "[Y] Answer Ask"
+      , "[N] Skip"
+      , "[J] Inbox"
+      , "[Y] Answer"
+      , "already answered or withdrawn" );
+    ]
+
 let () =
   Alcotest.run "masc_tui_screens_core"
     [
@@ -3358,6 +3565,8 @@ let () =
             `Quick test_setup_key_inline_modal_masks_secret;
           Alcotest.test_case "Help & Settings render TUI and Server build commit hashes"
             `Quick test_build_commit_display_in_help_and_settings;
+          Alcotest.test_case "Ask Answer Modal & honest Approval Strip / Pulse / Sidebar surfaces"
+            `Quick test_ask_answer_modal_and_honest_ask_surfaces;
         ] );
       ( "memory_explorer",
         [

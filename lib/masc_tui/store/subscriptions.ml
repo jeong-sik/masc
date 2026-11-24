@@ -94,6 +94,7 @@ let is_blocked_by_gate (m : Model.t) =
       | Nav.Incidents
       | Nav.Queue_context _
       | Nav.Inline_action _
+      | Nav.Ask_answer
       | Nav.Help )
   | None ->
       false

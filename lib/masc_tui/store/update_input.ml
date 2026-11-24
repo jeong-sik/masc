@@ -55,8 +55,8 @@ let stage_remove_settings_key ~now (m : Model.t) =
       | Ok config ->
           ( Model.with_toast ~now ~level:Model.Toast_info
               (Say.make
-                 ~ko:"키 삭제 스테이징 토글됨 (Space: 미리보기 · Ctrl+S: 저장)"
-                 ~en:"Toggled key removal (Space: dry-run · Ctrl+S: save)")
+                 ~ko:"키 삭제 스테이징 토글됨 (d: 미리보기 · Ctrl+S: 저장)"
+                 ~en:"Toggled key removal (d: dry-run · Ctrl+S: save)")
               { m with config }
           , [] )
       | Error reason ->
@@ -254,6 +254,8 @@ let dispatch_settings_overlay_key ~now (m : Model.t)
       Some (Update_actions.execute_action ~now m (Keymap.Move Keymap.End))
   | Keymap.Input.Char " " when is_printable_key norm ->
       Some (Update_actions.execute_action ~now m Keymap.Toggle_expand)
+  | Keymap.Input.Char "d" when is_printable_key norm ->
+      Some (Update_actions.dry_run_settings_config ~now m)
   | Keymap.Input.Char "s" when norm.mods.ctrl && not norm.mods.alt ->
       Some (save_settings_config ~now m)
   | Keymap.Input.Char "n" when is_printable_key norm ->
@@ -298,6 +300,358 @@ let dispatch_settings_overlay_key ~now (m : Model.t)
   | Keymap.Input.Page_down
   | Keymap.Input.Function _ ->
       None
+
+let ask_modal_prompt_max_scroll (m : Model.t) (modal : Model.ask_modal) =
+  match Model.ask_modal_current_question modal with
+  | None -> 0
+  | Some q ->
+      let rect_w = Int.max 0 m.viewport.cols in
+      let rect_h = Int.max 0 (m.viewport.rows - 2) in
+      let max_w = Int.max 0 (rect_w - 2) in
+      let max_h = Int.max 0 (rect_h - 2) in
+      let desired_w = Int.max 66 (rect_w * 3 / 4) in
+      let w = Int.min max_w (Int.min 96 desired_w) in
+      let desired_h = Int.max 16 (rect_h - 4) in
+      let h = Int.min max_h (Int.min 32 desired_h) in
+      let inner_w = if w >= 2 && h >= 2 then w - 2 else 0 in
+      let inner_h = if w >= 2 && h >= 2 then h - 2 else 0 in
+      if inner_w <= 0 || inner_h <= 0 then 0
+      else
+        let pad_x = if inner_w >= 48 then 2 else 1 in
+        let content_w = Int.max 1 (inner_w - (2 * pad_x)) in
+        let live_status = Model.ask_live_status m modal.ask.ask_id in
+        let banner_h =
+          match live_status with
+          | Model.Ask_live_closed | Model.Ask_live_in_flight -> 1
+          | Model.Ask_live_open ->
+              if modal.submitting || Option.is_some modal.error then 1 else 0
+        in
+        let chips_h = if modal.ask.questions <> [] then 2 else 0 in
+        let rem0 = Int.max 0 (inner_h - banner_h - chips_h) in
+        let footer_h = if rem0 >= 5 then 1 else 0 in
+        let body_h = Int.max 0 (rem0 - footer_h) in
+        let sep_h = if body_h >= 6 then 1 else 0 in
+        let avail_h = Int.max 0 (body_h - sep_h) in
+        let total_rows = List.length (Model.ask_modal_rows q) in
+        let min_rows_h =
+          Int.min (Int.max 2 total_rows) (Int.max 2 ((avail_h + 1) / 2))
+        in
+        let md_h =
+          if avail_h <= min_rows_h then 0
+          else Int.min (avail_h - min_rows_h) (Int.max 2 (avail_h / 3))
+        in
+        if md_h <= 0 then 0
+        else
+          let theme = Theme.of_preset m.theme_preset in
+          let prompt_md =
+            Model.ask_modal_prompt_markdown ~compact:(md_h <= 4) modal.ask q
+          in
+          let total_lines =
+            List.length
+              (Masc_tui_ui.Markdown.render_lines ~theme ~width:content_w
+                 prompt_md)
+          in
+          Int.max 0 (total_lines - md_h)
+
+let dispatch_ask_answer_overlay_key ~now (m : Model.t)
+    (norm : Keymap.Input.key_event) =
+  match m.ask_modal with
+  | None -> (
+      match norm.key with
+      | Keymap.Input.Escape ->
+          Some (Update_actions.execute_action ~now m Keymap.Pop_back_or_close)
+      | Keymap.Input.Char _
+      | Keymap.Input.Enter
+      | Keymap.Input.Tab
+      | Keymap.Input.Backspace
+      | Keymap.Input.Delete
+      | Keymap.Input.Insert
+      | Keymap.Input.Up
+      | Keymap.Input.Down
+      | Keymap.Input.Left
+      | Keymap.Input.Right
+      | Keymap.Input.Home
+      | Keymap.Input.End
+      | Keymap.Input.Page_up
+      | Keymap.Input.Page_down
+      | Keymap.Input.Function _ ->
+          None)
+  | Some modal when modal.submitting -> (
+      match norm.key with
+      | Keymap.Input.Escape ->
+          Some (Update_actions.execute_action ~now m Keymap.Pop_back_or_close)
+      | Keymap.Input.Char _
+      | Keymap.Input.Enter
+      | Keymap.Input.Tab
+      | Keymap.Input.Backspace
+      | Keymap.Input.Delete
+      | Keymap.Input.Insert
+      | Keymap.Input.Up
+      | Keymap.Input.Down
+      | Keymap.Input.Left
+      | Keymap.Input.Right
+      | Keymap.Input.Home
+      | Keymap.Input.End
+      | Keymap.Input.Page_up
+      | Keymap.Input.Page_down
+      | Keymap.Input.Function _ -> (
+          match Keymap.dispatch ~scope_chain:[ Keymap.Global ] norm with
+          | Some act when Keymap.equal_action act Keymap.Quit_app ->
+              Some (Update_actions.execute_action ~now m Keymap.Quit_app)
+          | Some _ | None -> Some (m, [])))
+  | Some modal when modal.editing_free_text -> (
+      match norm.key with
+      | Keymap.Input.Escape ->
+          Some
+            ( {
+                m with
+                ask_modal =
+                  Some (Model.ask_modal_set_editing_free_text false modal);
+              }
+            , [] )
+      | Keymap.Input.Enter when norm.mods.ctrl || norm.mods.alt ->
+          let modal', _confirmed = Model.ask_modal_confirm_free_text modal in
+          Some
+            (Update_nav.submit_ask_modal ~now { m with ask_modal = Some modal' })
+      | Keymap.Input.Enter ->
+          Some (Update_actions.execute_action ~now m Keymap.Confirm_selected)
+      | Keymap.Input.Backspace ->
+          Some
+            ( {
+                m with
+                ask_modal = Some (Model.ask_modal_backspace_free_text modal);
+              }
+            , [] )
+      | Keymap.Input.Delete ->
+          Some
+            ( {
+                m with
+                ask_modal = Some (Model.ask_modal_delete_free_text modal);
+              }
+            , [] )
+      | Keymap.Input.Left ->
+          Some
+            ( {
+                m with
+                ask_modal =
+                  Some (Model.ask_modal_move_free_text_cursor `Left modal);
+              }
+            , [] )
+      | Keymap.Input.Right ->
+          Some
+            ( {
+                m with
+                ask_modal =
+                  Some (Model.ask_modal_move_free_text_cursor `Right modal);
+              }
+            , [] )
+      | Keymap.Input.Home ->
+          Some
+            ( {
+                m with
+                ask_modal =
+                  Some (Model.ask_modal_move_free_text_cursor `Home modal);
+              }
+            , [] )
+      | Keymap.Input.End ->
+          Some
+            ( {
+                m with
+                ask_modal =
+                  Some (Model.ask_modal_move_free_text_cursor `End modal);
+              }
+            , [] )
+      | Keymap.Input.Char "a" when norm.mods.ctrl && not norm.mods.alt ->
+          Some
+            ( {
+                m with
+                ask_modal =
+                  Some (Model.ask_modal_move_free_text_cursor `Home modal);
+              }
+            , [] )
+      | Keymap.Input.Char "e" when norm.mods.ctrl && not norm.mods.alt ->
+          Some
+            ( {
+                m with
+                ask_modal =
+                  Some (Model.ask_modal_move_free_text_cursor `End modal);
+              }
+            , [] )
+      | Keymap.Input.Char "u" when norm.mods.ctrl && not norm.mods.alt ->
+          Some
+            ( {
+                m with
+                ask_modal = Some (Model.ask_modal_kill_free_text_start modal);
+              }
+            , [] )
+      | Keymap.Input.Tab when (not norm.mods.ctrl) && not norm.mods.alt ->
+          Some
+            (Update_actions.execute_action ~now m
+               (Keymap.Cycle_focus_pane
+                  (if norm.mods.shift then Keymap.Prev else Keymap.Next)))
+      | Keymap.Input.Char s when is_printable_key norm ->
+          Some
+            ( {
+                m with
+                ask_modal = Some (Model.ask_modal_insert_free_text s modal);
+              }
+            , [] )
+      | Keymap.Input.Up
+      | Keymap.Input.Down
+      | Keymap.Input.Page_up
+      | Keymap.Input.Page_down
+      | Keymap.Input.Insert
+      | Keymap.Input.Function _ ->
+          Some (m, [])
+      | Keymap.Input.Char _ | Keymap.Input.Tab -> (
+          match Keymap.dispatch ~scope_chain:[ Keymap.Global ] norm with
+          | Some act when Keymap.equal_action act Keymap.Quit_app ->
+              Some (Update_actions.execute_action ~now m Keymap.Quit_app)
+          | Some _ | None -> Some (m, [])))
+  | Some modal -> (
+      match norm.key with
+      | Keymap.Input.Enter when norm.mods.ctrl || norm.mods.alt ->
+          Some (Update_nav.submit_ask_modal ~now m)
+      | Keymap.Input.Char _
+      | Keymap.Input.Enter
+      | Keymap.Input.Tab
+      | Keymap.Input.Backspace
+      | Keymap.Input.Escape
+      | Keymap.Input.Delete
+      | Keymap.Input.Insert
+      | Keymap.Input.Up
+      | Keymap.Input.Down
+      | Keymap.Input.Left
+      | Keymap.Input.Right
+      | Keymap.Input.Home
+      | Keymap.Input.End
+      | Keymap.Input.Page_up
+      | Keymap.Input.Page_down
+      | Keymap.Input.Function _ -> (
+          let norm = Keymap.replay_ime_event norm in
+          match norm.key with
+          | Keymap.Input.Char "J" when is_printable_key norm ->
+              let max_scroll = ask_modal_prompt_max_scroll m modal in
+              Some
+                ( {
+                    m with
+                    ask_modal =
+                      Some
+                        (Model.ask_modal_scroll_prompt ~max_scroll ~delta:1
+                           modal);
+                  }
+                , [] )
+          | Keymap.Input.Char "K" when is_printable_key norm ->
+              let max_scroll = ask_modal_prompt_max_scroll m modal in
+              Some
+                ( {
+                    m with
+                    ask_modal =
+                      Some
+                        (Model.ask_modal_scroll_prompt ~max_scroll ~delta:(-1)
+                           modal);
+                  }
+                , [] )
+          | Keymap.Input.Down when norm.mods.shift && not norm.mods.ctrl && not norm.mods.alt ->
+              let max_scroll = ask_modal_prompt_max_scroll m modal in
+              Some
+                ( {
+                    m with
+                    ask_modal =
+                      Some
+                        (Model.ask_modal_scroll_prompt ~max_scroll ~delta:1
+                           modal);
+                  }
+                , [] )
+          | Keymap.Input.Up when norm.mods.shift && not norm.mods.ctrl && not norm.mods.alt ->
+              let max_scroll = ask_modal_prompt_max_scroll m modal in
+              Some
+                ( {
+                    m with
+                    ask_modal =
+                      Some
+                        (Model.ask_modal_scroll_prompt ~max_scroll ~delta:(-1)
+                           modal);
+                  }
+                , [] )
+          | Keymap.Input.Char "j" when is_printable_key norm ->
+              Some
+                (Update_actions.execute_action ~now m (Keymap.Move Keymap.Down))
+          | Keymap.Input.Char "k" when is_printable_key norm ->
+              Some
+                (Update_actions.execute_action ~now m (Keymap.Move Keymap.Up))
+          | Keymap.Input.Char "g" when is_printable_key norm ->
+              Some
+                (Update_actions.execute_action ~now m (Keymap.Move Keymap.Home))
+          | Keymap.Input.Char "G" when is_printable_key norm ->
+              Some
+                (Update_actions.execute_action ~now m (Keymap.Move Keymap.End))
+          | Keymap.Input.Char " " when is_printable_key norm ->
+              Some (Update_actions.execute_action ~now m Keymap.Toggle_expand)
+          | Keymap.Input.Char "i" when is_printable_key norm -> (
+              match Model.ask_modal_current_question modal with
+              | Some q when q.allow_free_text ->
+                  Some
+                    ( {
+                        m with
+                        ask_modal = Some (Model.ask_modal_enter_free_text modal);
+                      }
+                    , [] )
+              | Some _ | None -> Some (m, []))
+          | Keymap.Input.Char "C" when is_printable_key norm ->
+              let m_closed =
+                {
+                  m with
+                  nav = { m.nav with overlay = None };
+                  ask_modal = None;
+                }
+              in
+              Some
+                (Update_nav.push_dive m_closed
+                   (Nav.Dive_keeper
+                      { name = modal.ask.keeper; tab = Nav.Keeper_chat }))
+          | Keymap.Input.Char "[" when is_printable_key norm ->
+              Some
+                (Update_actions.execute_action ~now m
+                   (Keymap.Sub_tab Keymap.Prev))
+          | Keymap.Input.Char "]" when is_printable_key norm ->
+              Some
+                (Update_actions.execute_action ~now m
+                   (Keymap.Sub_tab Keymap.Next))
+          | Keymap.Input.Char s
+            when is_printable_key norm && Int.equal (String.length s) 1 -> (
+              match Model.ask_choice_index_of_char s.[0] with
+              | Some idx -> (
+                  match Model.ask_modal_current_question modal with
+                  | Some q when idx >= 0 && idx < List.length q.choices ->
+                      Some
+                        ( {
+                            m with
+                            ask_modal =
+                              Some
+                                (Model.ask_modal_toggle_or_select_choice idx
+                                   modal);
+                          }
+                        , [] )
+                  | Some _ | None -> Some (m, []))
+              | None -> Some (m, []))
+          | Keymap.Input.Char _
+          | Keymap.Input.Enter
+          | Keymap.Input.Tab
+          | Keymap.Input.Backspace
+          | Keymap.Input.Escape
+          | Keymap.Input.Delete
+          | Keymap.Input.Insert
+          | Keymap.Input.Up
+          | Keymap.Input.Down
+          | Keymap.Input.Left
+          | Keymap.Input.Right
+          | Keymap.Input.Home
+          | Keymap.Input.End
+          | Keymap.Input.Page_up
+          | Keymap.Input.Page_down
+          | Keymap.Input.Function _ ->
+              None))
 
 let incidents_detail_max_scroll (m : Model.t) =
   match Incidents.selected_entry m.incidents with
@@ -1847,8 +2201,33 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
               | Some _, Some ("h" | "X") ->
                   Update_nav.open_inline_modal m (Nav.Harness_overrule "")
               | _ -> (m, []))
+          | Nav.Work_inbox -> (
+              match printable_char with
+              | Some "C" -> (
+                  match
+                    Attention.current_filtered_item ~query:m.work.filter_query
+                      m.attention
+                  with
+                  | Some (entry : Attention.entry) -> (
+                      match entry.payload with
+                      | Attention.Payload_ask ask ->
+                          Update_nav.push_dive m
+                            (Nav.Dive_keeper
+                               { name = ask.keeper; tab = Nav.Keeper_chat })
+                      | Attention.Payload_tool_approval ta ->
+                          Update_nav.push_dive m
+                            (Nav.Dive_keeper
+                               { name = ta.keeper; tab = Nav.Keeper_chat })
+                      | Attention.Payload_gate g ->
+                          if not (String.equal (String.trim g.keeper) "") then
+                            Update_nav.push_dive m
+                              (Nav.Dive_keeper
+                                 { name = g.keeper; tab = Nav.Keeper_chat })
+                          else (m, [])
+                      | Attention.Payload_goal_confirmation _ -> (m, []))
+                  | None -> (m, []))
+              | _ -> (m, []))
           | Nav.Work_schedules
-          | Nav.Work_inbox
           | Nav.Work_candle_scorecard
           | Nav.Work_harness ->
               (m, []))
@@ -1899,8 +2278,8 @@ let dispatch_keeper_config_key ~now (m : Model.t)
             Some
               ( Model.with_toast ~now ~level:Model.Toast_info
                   (Say.make
-                     ~ko:"변경값이 스테이징됨 (Ctrl+S: 저장 · Space: 미리보기)"
-                     ~en:"Staged field change (Ctrl+S: save · Space: dry-run)")
+                     ~ko:"변경값이 스테이징됨 (Ctrl+S: 저장 · d: 미리보기)"
+                     ~en:"Staged field change (Ctrl+S: save · d: dry-run)")
                   { m with config }
               , [] )
         | Error reason ->
@@ -1996,30 +2375,16 @@ let dispatch_keeper_config_key ~now (m : Model.t)
         match Config_store.keeper_selected_field ~lang:m.lang m.config with
         | Some f when f.writable && f.kind = Wire_config.Field_bool ->
             step_lr 1
-        | _ ->
-            if Config_store.dirty_count m.config > 0 then
-              match Config_store.build_patch_request ~dry_run:true m.config with
-              | Ok req ->
-                  let config = Config_store.mark_dry_run_loading m.config in
-                  Some
-                    ( { m with config }
-                    , [
-                        Cmd.Http_post
-                          { epoch = m.epoch; req = Cmd.Post_config_patch req };
-                      ] )
-              | Error reason ->
-                  Some
-                    ( Model.with_toast ~now ~level:Model.Toast_info
-                        (Say.literal reason) m
-                    , [] )
-            else
-              Some
-                ( Model.with_toast ~now ~level:Model.Toast_info
-                    (Say.make
-                       ~ko:"변경된 필드가 없습니다 ([←→] 값 변경 · [Enter] 편집)"
-                       ~en:"No staged changes ([←→] cycle · [Enter] edit)")
-                    m
-                , [] ))
+        | Some _ | None ->
+            Some
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make
+                     ~ko:"[d] Dry-run 미리보기 · [Enter] 편집 · [←→] 값 변경"
+                     ~en:"[d] Dry-run diff · [Enter] Edit · [←→] Cycle value")
+                  m
+              , [] ))
+    | Keymap.Input.Char "d" when is_printable_key norm ->
+        Some (Update_actions.dry_run_settings_config ~now m)
     | Keymap.Input.Char "s" when norm.mods.ctrl && not norm.mods.alt ->
         Some (save_settings_config ~now m)
     | Keymap.Input.Delete -> (
@@ -2030,8 +2395,8 @@ let dispatch_keeper_config_key ~now (m : Model.t)
             Some
               ( Model.with_toast ~now ~level:Model.Toast_info
                   (Say.make
-                     ~ko:"키 삭제 스테이징 토글됨 (Space: 미리보기 · Ctrl+S: 저장)"
-                     ~en:"Toggled key removal (Space: dry-run · Ctrl+S: save)")
+                     ~ko:"키 삭제 스테이징 토글됨 (d: 미리보기 · Ctrl+S: 저장)"
+                     ~en:"Toggled key removal (d: dry-run · Ctrl+S: save)")
                   { m with config }
               , [] )
         | Error reason ->
@@ -2047,8 +2412,8 @@ let dispatch_keeper_config_key ~now (m : Model.t)
             Some
               ( Model.with_toast ~now ~level:Model.Toast_info
                   (Say.make
-                     ~ko:"키 삭제 스테이징 토글됨 (Space: 미리보기 · Ctrl+S: 저장)"
-                     ~en:"Toggled key removal (Space: dry-run · Ctrl+S: save)")
+                     ~ko:"키 삭제 스테이징 토글됨 (d: 미리보기 · Ctrl+S: 저장)"
+                     ~en:"Toggled key removal (d: dry-run · Ctrl+S: save)")
                   { m with config }
               , [] )
         | Error reason ->
@@ -2149,6 +2514,7 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
         | Nav.Incidents
         | Nav.Queue_context _
         | Nav.Inline_action _
+        | Nav.Ask_answer
         | Nav.Help )
     | None -> (
         (* 1. Active filter box text capture *)
@@ -2505,6 +2871,16 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                   | None -> (m, [])))
           | Some (Nav.Queue_context _) -> (
               match dispatch_queue_context_overlay_key ~now m norm with
+              | Some res -> res
+              | None -> (
+                  match
+                    Keymap.dispatch ~scope_chain:(Model.focus_scope_chain m)
+                      norm
+                  with
+                  | Some act -> Update_actions.execute_action ~now m act
+                  | None -> (m, [])))
+          | Some Nav.Ask_answer -> (
+              match dispatch_ask_answer_overlay_key ~now m norm with
               | Some res -> res
               | None -> (
                   match
@@ -3168,6 +3544,18 @@ let apply_paste ~now:_ (m : Model.t) text =
     | Some (Nav.Settings _ | Nav.Incidents) when m.nav.filter_focused ->
         let q = Update_nav.current_filter_query m ^ strip_newlines text in
         Update_nav.set_active_filter_query q m
+    | Some Nav.Ask_answer -> (
+        match m.ask_modal with
+        | Some modal when modal.editing_free_text && not modal.submitting ->
+            ( {
+                m with
+                ask_modal =
+                  Some
+                    (Model.ask_modal_insert_free_text (strip_newlines text)
+                       modal);
+              }
+            , [] )
+        | Some _ | None -> (m, []))
     | Some
         ( Nav.Settings _
         | Nav.Incidents

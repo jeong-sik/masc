@@ -95,26 +95,29 @@ let keeper_chat_history_json config name =
 (* Exact pages keep every role in file append order. The role-based transcript
    tail remains separate; a timestamp cannot represent a position after clock
    regression or among rows stamped at the same instant. *)
-let keeper_chat_history_page_json ?max_total config name ~cursor =
+let render_keeper_chat_history_page config name
+    ({ history_messages; next_cursor } : Keeper_chat_store.history_page) =
   let base_dir = (config : Workspace.config).base_path in
-  let open Result.Syntax in
-  let* { Keeper_chat_store.history_messages; next_cursor } =
-    Keeper_chat_store.load_history_page_result ~base_dir ~keeper_name:name
-      ?cursor ?max_total ()
-  in
   let trace_block_by_turn_ref = keeper_chat_trace_blocks config name in
   let messages =
     Keeper_chat_store.to_json_array ~omit_stream_contract:true ~base_dir
       ?trace_block_by_turn_ref history_messages
   in
-  Ok (`Assoc
+  `Assoc
     [ "schema", `String "masc.keeper_chat_history.page.v2"
     ; "messages", messages
     ; "has_more", `Bool (Option.is_some next_cursor)
     ; "next_cursor", (match next_cursor with
         | Some cursor -> `String (Keeper_chat_history_page.cursor_to_string cursor)
         | None -> `Null)
-    ])
+    ]
+;;
+
+let keeper_chat_history_page_json ?max_total config name ~cursor =
+  let base_dir = (config : Workspace.config).base_path in
+  Keeper_chat_store.load_history_page_result ~base_dir ~keeper_name:name
+    ?cursor ?max_total ()
+  |> Result.map (render_keeper_chat_history_page config name)
 ;;
 
 let cached_keeper_chat_history_json config name =
@@ -122,54 +125,23 @@ let cached_keeper_chat_history_json config name =
     ~ttl:Limits.keeper_hot_path_cache_ttl_s ~render:(render_keeper_chat_history config name)
 ;;
 
-let file_stamp_opt path =
-  try
-    let st = Unix.stat path in
-    match st.Unix.st_kind with
-    | Unix.S_REG ->
-      Printf.sprintf "%d:%d:%d:%h:%h"
-        st.st_dev st.st_ino st.st_size st.st_mtime st.st_ctime
-    | Unix.(S_DIR | S_CHR | S_BLK | S_LNK | S_FIFO | S_SOCK) -> "non-reg"
-  with Unix.Unix_error _ -> "absent"
-;;
-
-let active_trajectory_stamp config name =
-  match Keeper_meta_store.read_meta config name with
-  | Ok (Some m) ->
-    let trace_id = Keeper_id.Trace_id.to_string m.runtime.trace_id in
-    let traj_path =
-      Trajectory.trajectory_path (Workspace.masc_dir config) name trace_id
-    in
-    trace_id ^ "\001" ^ file_stamp_opt traj_path
-  | Ok None -> "no-meta"
-  | Error _ -> "meta-error"
-;;
-
-let head_page_freshness_stamp config name =
-  let chat_path =
-    Keeper_chat_store.chat_path ~base_dir:config.Workspace.base_path ~keeper_name:name
-  in
-  match Keeper_chat_history_page.inspect_source ~path:chat_path with
+let head_page_source_stamp ~path =
+  match Keeper_chat_history_page.inspect_source ~path with
   | Error error -> Error error
   | Ok chat_source when not (Keeper_chat_history_page.source_is_present chat_source) ->
     Ok None
-  | Ok chat_source ->
-    let traj_stamp = active_trajectory_stamp config name in
-    Ok
-      (Some
-         (Keeper_chat_history_page.source_fingerprint chat_source
-          ^ "\000"
-          ^ traj_stamp))
+  | Ok chat_source -> Ok (Some (Keeper_chat_history_page.source_fingerprint chat_source))
 ;;
 
-(* Dedicated bounded cache for cursorless head pages ([cursor = None]).
+(* Dedicated bounded cache for cursorless physical head pages. Redaction,
+   trace enrichment, and audio file status are resolved on every response.
    Kept separate from [Dashboard_cache] so page reads cannot evict shared
    fleet/dashboard hot keys, and keyed by clamped page limit ([1, 400])
    matching [Keeper_chat_store.load_history_page_result]. *)
 module Head_page_cache = struct
   type entry =
     { stamp : string
-    ; body : Yojson.Safe.t
+    ; page : Keeper_chat_history_page.page
     ; expires_at : float
     ; seq : int
     }
@@ -246,16 +218,16 @@ module Head_page_cache = struct
     let now = Time_compat.now () in
     with_lock t (fun () ->
       match Hashtbl.find_opt t.entries key with
-      | Some { stamp = cached_stamp; body; expires_at; _ }
+      | Some { stamp = cached_stamp; page; expires_at; _ }
         when now <= expires_at && String.equal cached_stamp stamp ->
-        Some body
+        Some page
       | Some _ ->
         Hashtbl.remove t.entries key;
         None
       | None -> None)
   ;;
 
-  let set t ~key ~stamp ~body =
+  let set t ~key ~stamp ~page =
     let now = Time_compat.now () in
     let expires_at = now +. t.ttl_s in
     with_lock t (fun () ->
@@ -264,7 +236,7 @@ module Head_page_cache = struct
       incr t.next_seq;
       let seq = !(t.next_seq) in
       Queue.add (key, seq) t.order;
-      Hashtbl.replace t.entries key { stamp; body; expires_at; seq };
+      Hashtbl.replace t.entries key { stamp; page; expires_at; seq };
       compact_order_if_needed t ~now)
   ;;
 
@@ -288,45 +260,52 @@ let normalize_page_limit max_total =
   | Some n -> max 1 (min n max_page_limit)
 ;;
 
-let cached_head_page_json ?max_total config name =
+let cached_head_page ?max_total config name =
   let effective_limit = normalize_page_limit max_total in
   let key =
     Printf.sprintf "%s\000%s\000%d" (Workspace.masc_dir config) name effective_limit
   in
+  let path =
+    Keeper_chat_store.chat_path ~base_dir:config.Workspace.base_path ~keeper_name:name
+  in
+  let read () = Keeper_chat_history_page.read ~path ~owner:name ~max_rows:effective_limit () in
+  match head_page_source_stamp ~path with
+  | Error Keeper_chat_history_page.Stale_cursor | Ok None ->
+    (* Fall back on pre-read races and avoid caching absent chat files. *)
+    Head_page_cache.remove head_page_cache ~key;
+    read ()
+  | Error (Keeper_chat_history_page.Invalid_cursor _
+          | Keeper_chat_history_page.Invalid_row _
+          | Keeper_chat_history_page.Row_exceeds_window
+          | Keeper_chat_history_page.Io_error _) as err ->
+    Head_page_cache.remove head_page_cache ~key;
+    err
+  | Ok (Some stamp) ->
+    (match Head_page_cache.get head_page_cache ~key ~stamp with
+     | Some page -> Ok page
+     | None ->
+       (match read () with
+        | Error _ as err ->
+          Head_page_cache.remove head_page_cache ~key;
+          err
+        | Ok page ->
+          (match head_page_source_stamp ~path with
+           | Ok (Some after) when String.equal stamp after ->
+             Head_page_cache.set head_page_cache ~key ~stamp ~page
+           | Ok (Some _ | None) | Error _ ->
+             Head_page_cache.remove head_page_cache ~key);
+          Ok page))
+;;
+
+let cached_head_page_json ?max_total config name =
   Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
-    match head_page_freshness_stamp config name with
-    | Error Keeper_chat_history_page.Stale_cursor ->
-      (* A concurrent append between fstat and stat during pre-read inspection
-         must not turn a cursorless head-page read into 409 Conflict; fall back
-         to a direct uncached read, which tolerates concurrent appends. *)
-      Head_page_cache.remove head_page_cache ~key;
-      keeper_chat_history_page_json ~max_total:effective_limit config name ~cursor:None
-    | Error (Keeper_chat_history_page.Invalid_cursor _
-            | Keeper_chat_history_page.Invalid_row _
-            | Keeper_chat_history_page.Row_exceeds_window
-            | Keeper_chat_history_page.Io_error _) as err ->
-      Head_page_cache.remove head_page_cache ~key;
-      err
-    | Ok None ->
-      (* Never cache absent chat files (e.g. unknown or unstarted keeper names) so
-         probe requests cannot mint cache entries. *)
-      Head_page_cache.remove head_page_cache ~key;
-      keeper_chat_history_page_json ~max_total:effective_limit config name ~cursor:None
-    | Ok (Some stamp) ->
-      (match Head_page_cache.get head_page_cache ~key ~stamp with
-       | Some body -> Ok body
-       | None ->
-         (match keeper_chat_history_page_json ~max_total:effective_limit config name ~cursor:None with
-          | Error _ as err ->
-            Head_page_cache.remove head_page_cache ~key;
-            err
-          | Ok body ->
-            (match head_page_freshness_stamp config name with
-             | Ok (Some after) when String.equal stamp after ->
-               Head_page_cache.set head_page_cache ~key ~stamp ~body
-             | Ok (Some _ | None) | Error _ ->
-               Head_page_cache.remove head_page_cache ~key);
-            Ok body)))
+    let open Result.Syntax in
+    let* page = cached_head_page ?max_total config name in
+    let* page =
+      Keeper_chat_store.project_history_page_result ~base_dir:config.Workspace.base_path
+        ~keeper_name:name page
+    in
+    Ok (render_keeper_chat_history_page config name page))
 ;;
 
 let keeper_chat_initial_reply_json config name =

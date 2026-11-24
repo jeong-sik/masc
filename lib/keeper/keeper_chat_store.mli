@@ -696,6 +696,12 @@ type history_page =
   ; next_cursor : Keeper_chat_history_page.cursor option
   }
 
+val project_history_page_result :
+  base_dir:string -> keeper_name:string -> Keeper_chat_history_page.page ->
+  (history_page, Keeper_chat_history_page.error) result
+(** Strictly decode a physical page read for this Keeper with the current
+    chat redaction policy, keeping its physical continuation cursor. *)
+
 val load_history_page_result :
   base_dir:string -> keeper_name:string ->
   ?cursor:Keeper_chat_history_page.cursor -> ?max_total:int -> unit ->

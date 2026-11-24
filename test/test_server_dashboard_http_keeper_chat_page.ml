@@ -576,6 +576,36 @@ let test_http_page_get_cache_freshness_and_limit_normalization () =
     Alcotest.(check int) "page cache stays separate from Dashboard_cache" 0 (cache_entries ()))
 ;;
 
+let test_http_cached_head_page_refreshes_redaction () =
+  with_history_state (fun state config ->
+    let name = "page-cache-redaction" in
+    let base_dir = config.Workspace.base_path in
+    let secret = "fixture.chat.history.redaction" in
+    let content = "value: " ^ secret in
+    let sensitive_row =
+      `Assoc [ "id", `String "sensitive"; "role", `String "user"; "content", `String content
+             ; "ts", `Float 2. ]
+    in
+    write_lane ~base_dir ~keeper_name:name
+      [ row ~content:"older" (`At 1.); sensitive_row; row ~content:"current" (`At 3.) ];
+    let status, before = get_history_page ~limit:2 state name in
+    Alcotest.(check int) "warm page status" 200 status;
+    Alcotest.(check (list string)) "original page contents" [ content; "current" ]
+      (List.map content_of (messages_of before));
+    Alcotest.(check bool) "older row has a continuation" true (bool_field "has_more" before);
+    let token_file = Keeper_secret_redaction.ssh_remote_token_file ~base_path:base_dir
+        ~keeper_name:name in
+    mkdir_p (Filename.dirname token_file);
+    let oc = open_out_gen [ Open_wronly; Open_creat; Open_excl ] 0o600 token_file in
+    Fun.protect ~finally:(fun () -> close_out oc) (fun () -> output_string oc (secret ^ "\n"));
+    let status, after = get_history_page ~limit:2 state name in
+    Alcotest.(check int) "page after projection change status" 200 status;
+    Alcotest.(check (list string)) "same page reflects new secret" [ "value: [REDACTED]"; "current" ]
+      (List.map content_of (messages_of after));
+    Alcotest.(check bool) "physical continuation is unchanged" true
+      (field "next_cursor" before = field "next_cursor" after))
+;;
+
 let () =
   Server_startup_state.mark_state_ready () |> Result.get_ok;
   Alcotest.run "server_dashboard_http_keeper_chat_page"
@@ -590,6 +620,7 @@ let () =
       ; Alcotest.test_case "adaptive window expands across large rows and cursor anchors" `Quick test_adaptive_window_expands_across_large_rows_and_cursor_anchors
       ; Alcotest.test_case "oversize row fails without skipping" `Quick test_oversize_row_is_an_error_instead_of_exhaustion
       ; Alcotest.test_case "HTTP head page caches fresh reads, invalidates on append, and normalizes limits" `Quick test_http_page_get_cache_freshness_and_limit_normalization
+      ; Alcotest.test_case "HTTP cached head page refreshes secret redaction" `Quick test_http_cached_head_page_refreshes_redaction
       ]
     ; "legacy history truth boundary",
       [ Alcotest.test_case "unknown names never register or cache empty success" `Quick test_unknown_names_never_register_or_cache_empty_history

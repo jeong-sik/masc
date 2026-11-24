@@ -41,27 +41,43 @@ let unreadable_rows (published : Archive.coverage option) archived observed =
   match published with
   | None -> Hashtbl.length observed, false
   | Some coverage ->
+    let visible_by_payload = Hashtbl.create 4 and unanchored_by_payload = Hashtbl.create 4 in
+    let adjust table payload delta =
+      let count = Option.value ~default:0 (Hashtbl.find_opt table payload) in
+      Hashtbl.replace table payload (count + delta) in
     let visible_live = Hashtbl.fold (fun _ (d : Archive.damage) n ->
-        match d.origin with Live_log -> n + 1 | Cold_archive | Cold_fragment -> n)
+        match d.origin with
+        | Live_log -> adjust visible_by_payload d.payload_digest 1; n + 1
+        | Cold_archive | Cold_fragment -> n)
         archived 0 in
     let published_live = Option.fold ~none:0 ~some:(fun (s : Archive.live_damage) -> s.rows)
         coverage.live_damage in
     let hidden_live = max 0 (published_live - visible_live) in
     let distinct, addressable, unanchored = Hashtbl.fold
         (fun key { damage; exact_identity } (distinct, addressable, unanchored) ->
-           if exact_identity && Hashtbl.mem archived key then distinct, addressable, unanchored
+           if exact_identity && Hashtbl.mem archived key then (
+             (match damage.origin with
+              | Live_log -> adjust visible_by_payload damage.payload_digest (-1)
+              | Cold_archive | Cold_fragment -> ());
+             distinct, addressable, unanchored)
            else
              match damage.origin, coverage.live_damage with
              | Live_log, Some archived_live when damage.after_seq <= archived_live.max_after_seq ->
                if exact_identity then distinct, addressable + 1, unanchored
-               else distinct, addressable, unanchored + 1
+               else (
+                 adjust unanchored_by_payload damage.payload_digest 1;
+                 distinct, addressable, unanchored + 1)
              | (Live_log | Cold_archive | Cold_fragment), _ ->
                distinct + 1, addressable, unanchored)
         observed (0, 0, 0) in
-    (* A live row with a comparable identity can overlap only unseen live-origin
-       markers. An unanchored observation can also overlap visible markers. *)
+    (* Reserve exact matches first. Addressable observations can only overlap
+       unseen markers. Unanchored rows can use remaining visible markers with
+       the same payload, or any remaining unseen marker. *)
     let hidden_overlap = min hidden_live addressable in
-    let unanchored_overlap = min unanchored (max 0 (published_live - hidden_overlap)) in
+    let visible_overlap = Hashtbl.fold (fun payload count total ->
+        let available = Option.value ~default:0 (Hashtbl.find_opt visible_by_payload payload) in
+        total + min available count) unanchored_by_payload 0 in
+    let unanchored_overlap = visible_overlap + min (unanchored - visible_overlap) (hidden_live - hidden_overlap) in
     let extras = distinct + addressable - hidden_overlap + unanchored - unanchored_overlap in
     add_counts (max coverage.unreadable_rows (Hashtbl.length archived)) extras,
     hidden_overlap > 0 || unanchored_overlap > 0
@@ -154,7 +170,9 @@ let read ~range ~max_bytes path =
   let cold_events = Hashtbl.create 16 in
   let old_count = ref 0 and cold_head = ref 0 and live_head = ref 0 in
   let observe_damage ~exact_identity (damage : Archive.damage) =
-    Hashtbl.replace observed_damage damage.encoded { damage; exact_identity } in
+    match Hashtbl.find_opt observed_damage damage.encoded with
+    | Some { exact_identity = true; _ } when not exact_identity -> ()
+    | Some _ | None -> Hashtbl.replace observed_damage damage.encoded { damage; exact_identity } in
   let after_fold seq = Option.fold ~none:true
       ~some:(fun (f : Archive.folded) -> seq > f.through_seq) !folded in
   each (fun origin index at raw row ->

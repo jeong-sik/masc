@@ -37,7 +37,12 @@ let damage_origin_of_string = function
   | "archive_fragment" -> Some Cold_fragment
   | _ -> None
 
-type damage = { origin : damage_origin; after_seq : int; encoded : string }
+type damage =
+  { origin : damage_origin
+  ; after_seq : int
+  ; encoded : string
+  ; payload_digest : Agent_core_sha256.t
+  }
 
 module Opaque_rows = Set.Make (struct
   type t = damage
@@ -172,10 +177,12 @@ let cold_row raw =
      | _ -> Invalid)
   | `List [`String "librarian.unreadable.v1"; `String origin; `Int offset;
            `Int after_seq; `String bytes] as marker
-    when offset >= 0 && after_seq >= 0 && Result.is_ok (Base64.decode bytes) ->
-    (match damage_origin_of_string origin with
-     | Some origin -> Opaque { origin; after_seq; encoded = Yojson.Safe.to_string marker }
-     | None -> Invalid)
+    when offset >= 0 && after_seq >= 0 ->
+    (match damage_origin_of_string origin, Base64.decode bytes with
+     | Some origin, Ok raw ->
+       Opaque { origin; after_seq; encoded = Yojson.Safe.to_string marker;
+                payload_digest = Agent_core_sha256.digest_string raw }
+     | None, _ | Some _, Error _ -> Invalid)
   | `Assoc fields as json when List.mem_assoc "seq" fields ->
     (match Change.of_json json with Ok c -> Detail c | Error _ -> Invalid)
   | json -> (match left_of_json json with Ok left -> Left left | Error _ -> Invalid)
@@ -298,7 +305,7 @@ let with_path_lock ~log_path f =
 let damaged_row ~origin ~at ~after_seq raw =
   let encoded = Yojson.Safe.to_string (`List [`String "librarian.unreadable.v1";
     `String (damage_origin_to_string origin); `Int at; `Int after_seq; `String (Base64.encode_string raw)]) in
-  { origin; after_seq; encoded }
+  { origin; after_seq; encoded; payload_digest = Agent_core_sha256.digest_string raw }
 let remember_raw ~origin ~at ~after_seq raw opaque =
   Opaque_rows.add (damaged_row ~origin ~at ~after_seq raw) opaque
 

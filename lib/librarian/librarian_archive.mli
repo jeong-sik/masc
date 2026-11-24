@@ -34,6 +34,7 @@ type damage =
   { origin : damage_origin
   ; after_seq : int
   ; encoded : string
+  ; payload_digest : Agent_core_sha256.t
   }
 
 type live_damage = { rows : int; max_after_seq : int }

@@ -431,6 +431,44 @@ let test_memory_diff_through_compaction () =
   check bool "an old footer keeps legacy prefix uncertainty separate from sequence diagnostics" true
     (legacy.input_limited && legacy.archive_cut.by_rows && not legacy.details_limited
      && Option.is_some legacy.folded);
+  let overlap_path = Filename.concat place.memory_dir "damage-overlap.memory-log.jsonl" in
+  let checkpoint_line seq =
+    let line = match last with
+      | Masc.Librarian_log.Committed commit -> Masc.Librarian_log.Committed { commit with seq }
+      | Masc.Librarian_log.Started _ -> fail "expected a committed baseline" in
+    Yojson.Safe.to_string (Masc.Librarian_log_codec.to_json line) ^ "\n" in
+  let leading = String.make 8192 ' ' ^ checkpoint_line 1 in
+  let replaceable = checkpoint_line 2 in
+  let anchored = String.make 4096 ' ' ^ checkpoint_line 3 in
+  let same_damage = String.make (String.length replaceable - 1) 'x' ^ "\n" in
+  let write_live rows = Out_channel.with_open_bin overlap_path (fun oc -> List.iter (output_string oc) rows) in
+  let full_overlap () = match Archive.history overlap_path with
+    | Ok history -> history
+    | Error e -> fail (Masc.Private_jsonl_scan.error_to_string e) in
+  write_live [leading; replaceable; anchored; same_damage];
+  let overlap_archive = Log_store.archive_path_of_log_path overlap_path in
+  (match Archive.write_history ~archive_path:overlap_archive (full_overlap ()) with
+   | Ok () -> () | Error msg -> fail msg);
+  let archive_bytes = String.length (In_channel.with_open_bin overlap_archive In_channel.input_all) in
+  let live_tail_bytes = String.length replaceable + String.length anchored + String.length same_damage in
+  let max_bytes = max archive_bytes live_tail_bytes in
+  let read_overlap () = match Window.read ~range:at_last ~max_bytes overlap_path with
+    | Ok window ->
+      check bool "fixture clips the live prefix and exposes the entire archive" true
+        (window.live_cut.by_bytes && not window.archive_cut.by_bytes);
+      window
+    | Error e -> fail (Masc.Private_jsonl_scan.error_to_string e) in
+  write_live [leading; same_damage; anchored; same_damage];
+  check int "an exact copy consumes the slot even when the unanchored damage has the same payload"
+    2 (read_overlap ()).unreadable;
+  check int "full history also sees the two physical records with the same payload"
+    2 (full_overlap ()).unreadable;
+  write_live [leading; "unrelated malformed row\n"; anchored];
+  check int "unanchored damage with different bytes cannot reuse a visible archived slot"
+    2 (read_overlap ()).unreadable;
+  write_live [leading; same_damage; anchored];
+  check int "matching bytes may still overlap a visible slot without an exact copy"
+    1 (read_overlap ()).unreadable;
   let all = Diff.project ~range:(Diff.Time (0., Float.of_int recent_seq)) ~current ~revision:recent_seq kept in
   check bool "returned changes retain the most recent events and signal the row bound" true
     (all.events_limited && List.length all.events = max_rows

@@ -376,8 +376,8 @@ let has_device_code_context plain =
   in
   loop 0
 
-let extract_device_codes_from_plain plain =
-  if not (has_device_code_context plain) then []
+let extract_device_codes_from_plain ~has_context plain =
+  if not has_context then []
   else
     let len = String.length plain in
     let rec skip_sep i = if i < len && is_token_separator plain.[i] then skip_sep (i + 1) else i in
@@ -421,14 +421,16 @@ let dedup_strings items =
         true))
     items
 
-let extract_urls_and_codes raw =
+let extract_urls_and_codes ~prior_context raw =
   let plain = strip_ansi raw in
   let urls = dedup_strings (extract_osc8_urls raw @ extract_https_urls_from_plain plain) in
-  let codes = dedup_strings (extract_device_codes_from_plain plain) in
-  urls, codes
+  let saw_context = has_device_code_context plain in
+  let has_context = prior_context || urls <> [] || saw_context in
+  let codes = dedup_strings (extract_device_codes_from_plain ~has_context plain) in
+  urls, codes, saw_context
 
 let extract_auth_hints raw =
-  let urls, codes = extract_urls_and_codes raw in
+  let urls, codes, _ = extract_urls_and_codes ~prior_context:false raw in
   let verification_uri =
     match urls with
     | first :: _ -> Some first
@@ -513,8 +515,11 @@ let run_with interpreter t ~saved_login ~on_auth_hint ~env ~child_env ~cwd ~argv
         let seen_urls = Hashtbl.create 4 in
         let seen_codes = Hashtbl.create 4 in
         let last_auth_url = ref None in
+        let saw_device_context = ref false in
         fun raw ->
-          let urls, codes = extract_urls_and_codes raw in
+          let prior_context = Option.is_some !last_auth_url || !saw_device_context in
+          let urls, codes, saw_context = extract_urls_and_codes ~prior_context raw in
+          if saw_context then saw_device_context := true;
           List.iter
             (fun url ->
               if not (Hashtbl.mem seen_urls url) then (

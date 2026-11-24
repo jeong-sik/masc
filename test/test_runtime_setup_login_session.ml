@@ -238,7 +238,37 @@ let auth_hint_extraction () =
   let userinfo_url = "https://" ^ "operator:" ^ "redacted" ^ "@auth.openai.com/codex/device" in
   check (list hint_testable) "URLs with inline userinfo credentials are rejected"
     []
-    (S.extract_auth_hints ("Open " ^ userinfo_url ^ " and https://operator@auth.openai.com/codex/device\n"))
+    (S.extract_auth_hints ("Open " ^ userinfo_url ^ " and https://operator@auth.openai.com/codex/device\n"));
+  check (list hint_testable) "device code following an auth URL without cue words still extracts"
+    [ S.Auth_url { url = "https://auth.openai.com/codex/device" }
+    ; S.Device_code
+        { code = "A1B2-C3D4E"; verification_uri = Some "https://auth.openai.com/codex/device" }
+    ]
+    (S.extract_auth_hints "https://auth.openai.com/codex/device\nA1B2-C3D4E\n")
+
+let piped_auth_hints_multiline_device_code () = run_process (fun env path session ->
+  let hints = ref [] in
+  let result = S.run session ~env ~child_env:(Unix.environment ()) ~cwd:path
+    ~argv:["python3";"-c";
+           "import sys,time\n"
+           ^ "sys.stdout.write('Status: HTTP-4000 EXIT-CODE\\n')\nsys.stdout.flush()\ntime.sleep(0.03)\n"
+           ^ "sys.stdout.write('2. Enter this one-time code (expires in 15 minutes)\\n')\nsys.stdout.flush()\ntime.sleep(0.05)\n"
+           ^ "sys.stdout.write('   A1B2-C3D4E\\n')\nsys.stdout.flush()\ntime.sleep(0.05)\n"
+           ^ "sys.stdout.write('1. Open https://auth.openai.com/codex/device\\n')\nsys.stdout.flush()\ntime.sleep(0.05)\n"
+           ^ "sys.stdout.write('   WDJB-MJHT\\n')\nsys.stdout.flush()\n"]
+    ~terminal:false ~is_closed:(fun () -> false)
+    ~on_ready:(fun () -> ()) ~on_input_ready:(fun () -> ())
+    ~on_auth_hint:(fun h -> hints := !hints @ [ h ])
+    ~on_output:(fun _ -> ()) in
+  get result;
+  check (list hint_testable) "piped multi-chunk device codes preserve prior cue/URL context while ignoring earlier banners"
+    [ S.Device_code { code = "A1B2-C3D4E"; verification_uri = None }
+    ; S.Auth_url { url = "https://auth.openai.com/codex/device" }
+    ; S.Device_code
+        { code = "WDJB-MJHT"; verification_uri = Some "https://auth.openai.com/codex/device" }
+    ]
+    !hints;
+  Ok ())
 
 let piped_auth_hints_dedup_and_chunk_reassembly () = run_process (fun env path session ->
   let hints = ref [] in
@@ -312,6 +342,7 @@ let () = run "setup-login-session" ["ownership", [test_case "scope and physical 
     test_case "disconnect" `Quick disconnect; test_case "pipe EOF" `Quick pipe_eof; test_case "server shutdown" `Quick server_shutdown];
   "auth hints", [
     test_case "ANSI stripping and structured extraction" `Quick auth_hint_extraction;
+    test_case "piped multi-chunk device code preserves context" `Quick piped_auth_hints_multiline_device_code;
     test_case "piped chunk reassembly and deduplication" `Quick piped_auth_hints_dedup_and_chunk_reassembly;
     test_case "terminal redraws deduplicated per session" `Quick terminal_auth_hints_dedup_across_redraws;
     test_case "terminal split URL does not emit truncated prefix" `Quick terminal_auth_hints_split_url_no_half_emit];

@@ -1,0 +1,258 @@
+import { html } from 'htm/preact'
+import { render } from 'preact'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  resetAuthStateForTests,
+  resourceCache,
+} from '../../core'
+import {
+  CANONICAL_SETTINGS_CATEGORIES,
+  SettingsWorkspace,
+  type ConfigSchemaData,
+  type WorkspaceInspectPayload,
+} from './index'
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  })
+}
+
+async function flushUi(ms = 30): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+const SAMPLE_SCHEMA: ConfigSchemaData = {
+  target: 'runtime',
+  file_exists: true,
+  file_sha256: 'sha256-initial-11111111',
+  categories: [
+    {
+      id: 'general',
+      title: 'General & UI',
+      field_count: 1,
+      fields: [{
+        table: 'server',
+        key: 'log_level',
+        full_key: 'server.log_level',
+        type: 'string',
+        current_value: 'info',
+        default_value: 'info',
+        provenance: 'project',
+        reload_scope: 'hot_reload',
+        secret: false,
+        writable: true,
+        description: '서버 로그 레벨',
+        enum_values: ['debug', 'info', 'warn', 'error'],
+      }],
+    },
+    {
+      id: 'providers',
+      title: 'Providers & Models',
+      field_count: 1,
+      fields: [{
+        table: 'providers.openai',
+        key: 'api_key',
+        full_key: 'providers.openai.api_key',
+        type: 'string',
+        current_value: 'sk-redacted',
+        default_value: null,
+        provenance: 'env',
+        reload_scope: 'restart_required',
+        secret: true,
+        writable: true,
+        description: 'OpenAI API 시크릿 키',
+      }],
+    },
+  ],
+}
+
+describe('workspaces/settings', () => {
+  let container: HTMLDivElement
+  let originalFetch: typeof globalThis.fetch
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch
+    resetAuthStateForTests()
+    resourceCache.clearAll()
+    delete document.documentElement.dataset.theme
+    delete document.documentElement.dataset.contrast
+    localStorage.clear()
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+    resourceCache.clearAll()
+    globalThis.fetch = originalFetch
+    vi.restoreAllMocks()
+  })
+
+  it('renders all 7 TUI categories, Appearance dark/light + static High-Contrast toggles, and executes safe CAS dry_run -> Apply Patch flow', async () => {
+    const patchBodies: Record<string, unknown>[] = []
+
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/config/schema')) {
+        return jsonResponse({
+          schema_version: 1,
+          instance_id: 'inst-1',
+          generated_at_unix: 1_700_000_000,
+          data: SAMPLE_SCHEMA,
+        })
+      }
+      if (url === '/api/v1/config/patch' && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>
+        patchBodies.push(body)
+        const isDryRun = body.dry_run === true
+        return jsonResponse({
+          schema_version: 1,
+          instance_id: 'inst-1',
+          generated_at_unix: 1_700_000_005,
+          data: {
+            applied: !isDryRun,
+            dry_run: isDryRun,
+            target: 'runtime',
+            changed: true,
+            before_sha256: 'sha256-initial-11111111',
+            new_sha256: 'sha256-updated-22222222',
+            snapshot_id: isDryRun ? null : 'snap-20261124-001',
+            reload_scope: 'restart_required',
+            unified_diff: '--- runtime.toml\n+++ runtime.toml\n@@ -1 +1 @@\n-log_level = "info"\n+log_level = "debug"\n',
+            diff_hunks: [],
+            validation_warnings: [],
+          },
+        })
+      }
+      if (url === '/api/v1/world/configuration/export') {
+        return jsonResponse({
+          ok: true,
+          scope: 'authored_configuration_documents',
+          bundle: { runtime: 'log_level = "debug"' },
+          lock_warnings: [],
+        })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    const inspected: WorkspaceInspectPayload[] = []
+    render(
+      html`<${SettingsWorkspace} subroute="" onNavigate=${vi.fn()} onInspect=${(p: WorkspaceInspectPayload) => inspected.push(p)} />`,
+      container,
+    )
+    await flushUi(40)
+
+    // Verify all 7 TUI categories exist in left category rail
+    const navButtons = Array.from(container.querySelectorAll('nav button'))
+    for (const cat of CANONICAL_SETTINGS_CATEGORIES) {
+      expect(navButtons.some((b) => b.textContent?.includes(cat.title))).toBe(true)
+    }
+
+    // Verify Appearance Panel Dark/Light + Static High-Contrast toggles
+    const lightBtn = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('Light · Warm Paper'),
+    ) as HTMLButtonElement
+    lightBtn.click()
+    expect(document.documentElement.dataset.theme).toBe('light')
+
+    const hcBtn = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.trim() === 'High Contrast',
+    ) as HTMLButtonElement
+    hcBtn.click()
+    expect(document.documentElement.dataset.contrast).toBe('high')
+
+    // Stage local edit on server.log_level -> Preview Diff (dry_run: true)
+    const selectEl = container.querySelector('select[aria-label="server.log_level"]') as HTMLSelectElement
+    selectEl.value = 'debug'
+    selectEl.dispatchEvent(new Event('change', { bubbles: true }))
+    await flushUi(20)
+
+    const previewBtn = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('Preview Diff (1)'),
+    ) as HTMLButtonElement
+    expect(previewBtn.disabled).toBe(false)
+    previewBtn.click()
+    await flushUi(40)
+
+    expect(patchBodies).toHaveLength(1)
+    expect(patchBodies[0]!.dry_run).toBe(true)
+    expect(patchBodies[0]!.expected_sha256).toBe('sha256-initial-11111111')
+
+    // Verify unified diff & reload_scope honesty notice rendered
+    expect(container.querySelector('[data-testid="settings-unified-diff"]')!.textContent).toContain('+log_level = "debug"')
+    expect(container.querySelector('[data-testid="settings-reload-scope-notice"]')!.textContent).toContain('restart_required')
+
+    // Apply Patch (dry_run: false) -> renders snapshot_id receipt
+    const applyBtn = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.trim() === 'Apply Patch',
+    ) as HTMLButtonElement
+    applyBtn.click()
+    await flushUi(40)
+
+    expect(patchBodies).toHaveLength(2)
+    expect(patchBodies[1]!.dry_run).toBe(false)
+    expect(container.querySelector('[data-testid="settings-apply-receipt"]')!.textContent).toContain('snap-20261124-001')
+
+    // Export World Config
+    const exportBtn = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('Export World Config'),
+    ) as HTMLButtonElement
+    exportBtn.click()
+    await flushUi(30)
+    expect(inspected).toHaveLength(1)
+    expect(inspected[0]!.kind).toBe('world_config_export')
+  })
+
+  it('handles HTTP 409 conflict_cas with explicit reload recovery', async () => {
+    let schemaFetches = 0
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/config/schema')) {
+        schemaFetches += 1
+        return jsonResponse({
+          schema_version: 1,
+          instance_id: 'inst-1',
+          generated_at_unix: 1_700_000_000,
+          data: { ...SAMPLE_SCHEMA, file_sha256: `sha256-v${schemaFetches}` },
+        })
+      }
+      if (url === '/api/v1/config/patch' && init?.method === 'POST') {
+        return jsonResponse({
+          error: { code: 'conflict_cas', message: 'runtime.toml modified by another operator' },
+        }, 409)
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(
+      html`<${SettingsWorkspace} subroute="" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+      container,
+    )
+    await flushUi(40)
+
+    const selectEl = container.querySelector('select[aria-label="server.log_level"]') as HTMLSelectElement
+    selectEl.value = 'warn'
+    selectEl.dispatchEvent(new Event('change', { bubbles: true }))
+    await flushUi(15)
+
+    const previewBtn = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('Preview Diff (1)'),
+    ) as HTMLButtonElement
+    previewBtn.click()
+    await flushUi(40)
+
+    const conflictBox = container.querySelector('[data-testid="settings-cas-conflict"]')
+    expect(conflictBox).not.toBeNull()
+    expect(conflictBox!.textContent).toContain('409 CAS 충돌')
+
+    const reloadBtn = conflictBox!.querySelector('button') as HTMLButtonElement
+    reloadBtn.click()
+    await flushUi(40)
+
+    expect(schemaFetches).toBe(2)
+    expect(container.querySelector('[data-testid="settings-cas-conflict"]')).toBeNull()
+  })
+})

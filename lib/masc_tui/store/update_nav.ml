@@ -5292,6 +5292,7 @@ let submit_inline_modal ~now (m : Model.t) =
                       {
                         runtime with
                         mcp_call_result = Observed.loading ~since_ns:now;
+                        mcp_call_form_rpc_id = Some rpc_id;
                       }
                     in
                     ( mark_submitting { m with runtime }

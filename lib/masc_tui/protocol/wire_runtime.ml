@@ -4866,11 +4866,8 @@ let decode_tool_quality_failure_cat json =
 let decode_tool_quality json =
   let* _, body = unwrap_v2_or_raw json in
   let* generated_at = required_nonblank_string body "generated_at" in
-  let sampling_mode =
-    match optional_nonblank_string body "sampling_mode" with
-    | Ok (Some s) -> s
-    | Ok None | Error _ -> "recent_n"
-  in
+  let* sampling_mode = optional_nonblank_string body "sampling_mode" in
+  let sampling_mode = Option.value sampling_mode ~default:"recent_n" in
   let* total = required_nonnegative_int_field body "total" in
   let* success = required_nonnegative_int_field body "success" in
   let* failure = required_nonnegative_int_field body "failure" in

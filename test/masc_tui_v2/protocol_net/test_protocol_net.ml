@@ -6277,6 +6277,27 @@ let test_wave4_layer2_wire_codecs () =
             }|}))
   in
   Alcotest.(check int) "tool quality total" 100 tq.total;
+  let tool_quality_fields =
+    [
+      ("generated_at", `String "2026-11-24T09:00:00Z");
+      ("total", `Int 1);
+      ("success", `Int 1);
+      ("failure", `Int 0);
+      ("success_rate", `Float 100.);
+    ]
+  in
+  let decoded_without_sampling_mode =
+    expect_ok "decode_tool_quality without sampling mode"
+      (Wire_runtime.decode_tool_quality (`Assoc tool_quality_fields))
+  in
+  Alcotest.(check string) "missing sampling mode defaults to recent_n"
+    "recent_n" decoded_without_sampling_mode.sampling_mode;
+  (match
+     Wire_runtime.decode_tool_quality
+       (`Assoc (("sampling_mode", `Int 1) :: tool_quality_fields))
+   with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "non-string sampling mode must fail to decode");
   let wi =
     expect_ok "decode_keeper_waiting_inventory"
       (Wire_runtime.decode_keeper_waiting_inventory

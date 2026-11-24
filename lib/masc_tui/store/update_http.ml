@@ -261,6 +261,13 @@ let release_keeper_interrupt ~now ~keeper ~target (m : Model.t) =
             ~interrupting:false m.drafts;
       }
 
+let mcp_call_owns_modal ~rpc_id (m : Model.t) =
+  Option.equal Int.equal m.runtime.mcp_call_form_rpc_id (Some rpc_id)
+  &&
+  match m.inline_modal with
+  | Some { kind = Nav.Tool_execute_form _; submitting = true; _ } -> true
+  | Some _ | None -> false
+
 let apply_http_reply ~now (m : Model.t) reply =
   let failed_slot err slot =
     Observed.fetch_failed ~reason:(Msg.http_error_detail err)
@@ -6038,66 +6045,14 @@ let apply_http_reply ~now (m : Model.t) reply =
                    }))
             ~source:Health.Source_client_http ~ko:"MCP 도구 스키마 조회"
             ~en:"MCP tools/list fetch" err)
-  | Msg.Reply_mcp_tools_call { tool_name; result = Ok res } ->
-      let close_modal =
-        match m.inline_modal with
-        | Some { kind = Nav.Tool_execute_form _; _ } -> true
-        | Some
-            {
-              kind =
-                ( Nav.Btw_query
-                | Nav.Gate_reject _
-                | Nav.Verification_reject _
-                | Nav.Harness_overrule _
-                | Nav.Task_cancel _
-                | Nav.Goal_drop _
-                | Nav.Schedule_form
-                | Nav.Connector_form
-                | Nav.Repo_add_form
-                | Nav.Board_new_post
-                | Nav.Board_comment _
-                | Nav.Github_token_form _
-                | Nav.Code_finder_form
-                | Nav.Code_search_form
-                | Nav.Keeper_control_confirm _
-                | Nav.Keeper_clear_form _
-                | Nav.Keeper_operator_note_form _ );
-              _;
-            }
-        | None ->
-            false
-      in
-      let already_on_tool_dive =
-        match Model.active_dive m with
-        | Some (Nav.Dive_runtime (Nav.Tool_dive tn)) ->
-            String.equal tn tool_name
-        | Some
-            ( Nav.Dive_keeper _
-            | Nav.Dive_work _
-            | Nav.Dive_knowledge _
-            | Nav.Dive_runtime (Nav.Fusion_dive _)
-            | Nav.Dive_infra _ )
-        | None ->
-            false
-      in
-      let nav =
-        if close_modal then
-          let base = { m.nav with overlay = None } in
-          if already_on_tool_dive then base
-          else
-            {
-              base with
-              dive_stack =
-                Nav.Dive_runtime (Nav.Tool_dive tool_name) :: base.dive_stack;
-              pane_index = 0;
-              zoomed = false;
-              dive_scroll_offset = 0;
-            }
-        else m.nav
-      in
-      let inline_modal = if close_modal then None else m.inline_modal in
+  | Msg.Reply_mcp_tools_call { rpc_id; tool_name; result = Ok res } ->
+      let owns_modal = mcp_call_owns_modal ~rpc_id m in
       let runtime =
         Runtime_store.apply_mcp_call_result ~observed_at:now res m.runtime
+      in
+      let runtime =
+        if owns_modal then { runtime with mcp_call_form_rpc_id = None }
+        else runtime
       in
       let level, toast_msg =
         if res.is_error then
@@ -6120,52 +6075,31 @@ let apply_http_reply ~now (m : Model.t) reply =
               ~en:("MCP tool executed: " ^ tool_name) )
       in
       let next =
-        { m with nav; inline_modal; runtime }
-        |> Model.with_toast ~now ~level toast_msg
+        { m with runtime } |> Model.with_toast ~now ~level toast_msg
       in
-      let follow_cmds =
-        if close_modal && not already_on_tool_dive then
-          View_fetches.fetches_for_current_view next
-        else []
-      in
-      (next, follow_cmds)
-  | Msg.Reply_mcp_tools_call { tool_name; result = Error err } ->
+      let dive = Nav.Dive_runtime (Nav.Tool_dive tool_name) in
+      if not owns_modal then (next, [])
+      else if Option.equal Nav.equal_dive (Model.active_dive m) (Some dive) then
+        ({ next with nav = { next.nav with overlay = None }; inline_modal = None }, [])
+      else Update_nav.push_dive next dive
+  | Msg.Reply_mcp_tools_call { rpc_id; tool_name; result = Error err } ->
       let clean_err =
         Chat_transcript.scrub_secrets_in_text (Msg.http_error_detail err)
       in
+      let owns_modal = mcp_call_owns_modal ~rpc_id m in
       let inline_modal =
-        Option.map
-          (fun (modal : Model.inline_modal_state) ->
-            match modal.kind with
-            | Nav.Tool_execute_form _ ->
-                {
-                  modal with
-                  submitting = false;
-                  error = Some clean_err;
-                }
-            | Nav.Btw_query
-            | Nav.Gate_reject _
-            | Nav.Verification_reject _
-            | Nav.Harness_overrule _
-            | Nav.Task_cancel _
-            | Nav.Goal_drop _
-            | Nav.Schedule_form
-            | Nav.Connector_form
-            | Nav.Repo_add_form
-            | Nav.Board_new_post
-            | Nav.Board_comment _
-            | Nav.Github_token_form _
-            | Nav.Code_finder_form
-            | Nav.Code_search_form
-            | Nav.Keeper_control_confirm _
-            | Nav.Keeper_clear_form _
-            | Nav.Keeper_operator_note_form _ ->
-                modal)
-          m.inline_modal
+        if owns_modal then
+          Option.map
+            (fun (modal : Model.inline_modal_state) ->
+              { modal with submitting = false; error = Some clean_err })
+            m.inline_modal
+        else m.inline_modal
       in
       let runtime =
         {
           m.runtime with
+          mcp_call_form_rpc_id =
+            (if owns_modal then None else m.runtime.mcp_call_form_rpc_id);
           mcp_call_result =
             Observed.failed ~reason:clean_err
               ~retryable:(Msg.http_error_retryable err) ~at:now;

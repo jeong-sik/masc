@@ -3108,12 +3108,12 @@ let execute_post t ~epoch req =
                   in
                   Some (Msg.Reply_mcp_tools_list result))
             else None
-        | Cmd.Post_mcp_tools_call { tool_name; _ } ->
+        | Cmd.Post_mcp_tools_call { rpc_id; tool_name; _ } ->
             let result =
               post_mcp_and_decode t ~method_:"tools/call" ~tool_name:(Some tool_name) ~path ~body
                 ~decode:(Wire_runtime.decode_mcp_tools_call_result ~tool_name)
             in
-            Some (Msg.Reply_mcp_tools_call { tool_name; result })
+            Some (Msg.Reply_mcp_tools_call { rpc_id; tool_name; result })
       in
       Option.iter
         (fun reply ->

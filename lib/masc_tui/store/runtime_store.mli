@@ -124,6 +124,7 @@ type t = {
   keeper_waiting_inventory_absent : bool;
   mcp_tools_list : Wire_runtime.mcp_tool_schema_entry list Observed.t;
   mcp_call_result : Wire_runtime.mcp_tool_call_result Observed.t;
+  mcp_call_form_rpc_id : int option;
   mcp_next_rpc_id : int;
   skills : Wire_runtime.skills_snapshot Observed.t;
   tools_subview : tools_subview;

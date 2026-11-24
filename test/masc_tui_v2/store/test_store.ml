@@ -19651,6 +19651,74 @@ let () =
               Alcotest.(check bool) "/exec opens Tool_dive" true
                 (Model.active_dive m_exec
                  = Some (Nav.Dive_runtime (Nav.Tool_dive "masc_status")));
+              let rpc_id cmds =
+                match
+                  List.find_map
+                    (function
+                      | Cmd.Http_post
+                          { req = Cmd.Post_mcp_tools_call { rpc_id; _ }; _ } ->
+                          Some rpc_id
+                      | _ -> None)
+                    (Cmd.flatten cmds)
+                with
+                | Some id -> id
+                | None -> Alcotest.fail "expected MCP tool call"
+              in
+              let m_form, _ =
+                Update_nav.open_inline_modal m_exec
+                  (Nav.Tool_execute_form
+                     { tool_name = "masc_who"; args_json = "{}" })
+              in
+              let m_pending, form_cmds =
+                Update.step ~now:t0 m_form
+                  (Msg.Key_event (key Keymap.Input.Enter))
+              in
+              let m_stale, _ =
+                Update.step ~now:t0 m_pending
+                  (Msg.Http_reply
+                     {
+                       epoch = m_pending.epoch;
+                       reply =
+                         Msg.Reply_mcp_tools_call
+                           {
+                             rpc_id = rpc_id cmds_exec;
+                             tool_name = "masc_status";
+                             result = Error (Msg.Decode_error "older invocation");
+                           };
+                     })
+              in
+              Alcotest.(check bool)
+                "an older slash response leaves the pending form alone" true
+                (match m_stale.inline_modal with
+                 | Some { submitting = true; error = None; _ } -> true
+                 | Some _ | None -> false);
+              let tool_reply =
+                Wire_runtime.decode_mcp_tools_call_result ~tool_name:"masc_who"
+                  (`Assoc [ ("result", `Assoc [ ("isError", `Bool false) ]) ])
+                |> Result.map_error (fun s -> Msg.Decode_error s)
+              in
+              let m_done, _ =
+                Update.step ~now:t0 m_stale
+                  (Msg.Http_reply
+                     {
+                       epoch = m_stale.epoch;
+                       reply =
+                         Msg.Reply_mcp_tools_call
+                           {
+                             rpc_id = rpc_id form_cmds;
+                             tool_name = "masc_who";
+                             result = tool_reply;
+                           };
+                     })
+              in
+              Alcotest.(check bool) "owned reply closes the form" true
+                (Option.is_none m_done.inline_modal);
+              Alcotest.(check bool) "owned reply opens the tool with its return state"
+                true
+                (Model.active_dive m_done
+                 = Some (Nav.Dive_runtime (Nav.Tool_dive "masc_who"))
+                 && List.length m_done.nav.dive_stack
+                    = List.length m_done.nav.dive_return_stack);
               let _, cmds_bad = run_slash m1 "/exec masc_status [1,2,3]" in
               Alcotest.(check bool) "/exec rejects non-object JSON" false
                 (List.exists

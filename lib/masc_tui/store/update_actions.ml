@@ -2353,14 +2353,11 @@ let rec execute_slash ~now (m : Model.t) cmd =
             { runtime with mcp_call_result = Observed.loading ~since_ns:now }
           in
           let m_exec = { m with runtime } in
+          let dive = Nav.Dive_runtime (Nav.Tool_dive tool_name) in
           let m_dive, dive_cmds =
-            if
-              Option.equal Nav.equal_dive (Model.active_dive m_exec)
-                (Some (Nav.Dive_runtime (Nav.Tool_dive tool_name)))
+            if Option.equal Nav.equal_dive (Model.active_dive m_exec) (Some dive)
             then (m_exec, [])
-            else
-              Update_nav.push_dive m_exec
-                (Nav.Dive_runtime (Nav.Tool_dive tool_name))
+            else Update_nav.push_dive m_exec dive
           in
           ( Model.with_toast ~now ~level:Model.Toast_info
               (Say.make ~ko:("MCP 도구 실행 중: " ^ tool_name)

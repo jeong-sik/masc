@@ -642,6 +642,7 @@ type http_reply =
   | Reply_mcp_tools_list of
       (Wire_runtime.mcp_tool_schema_entry list, http_error) result
   | Reply_mcp_tools_call of {
+      rpc_id : int;
       tool_name : string;
       result : (Wire_runtime.mcp_tool_call_result, http_error) result;
     }

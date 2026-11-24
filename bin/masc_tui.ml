@@ -20,6 +20,8 @@ let render_body ~(model : Model.t) ~cache rect grid =
       Screen_work.render_dive ~target ~model ~cache ~rect grid
   | Some (Nav.Dive_knowledge target) ->
       Screen_knowledge.render_dive ~target ~model ~cache ~rect grid
+  | Some (Nav.Dive_runtime target) ->
+      Screen_runtime.render_dive ~target ~model ~cache ~rect grid
   | Some (Nav.Dive_infra target) ->
       Screen_infra.render_dive ~target ~model ~cache ~rect grid
   | None -> (

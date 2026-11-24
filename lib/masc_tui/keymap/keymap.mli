@@ -4,10 +4,11 @@
 
     Design invariants:
     - Zero collisions within any {!scope}.
-    - Bare lowercase [p] and [v] are permanently retired.
+    - Bare lowercase [p] remains unbound in [Unfocused_nav] / [Global] (only
+      bound in [Screen_context] for Sandbox probe).
     - VT100 control aliases ([Ctrl+I], [Ctrl+M], [Ctrl+H]) are never bound.
     - [Ctrl+K] opens the Universal Palette exclusively and never approves.
-    - [Esc] pops overlays/dives/filters/composer focus and never quits.
+    - [Esc] pops overlays/dives/filters/rail/composer focus and never quits.
     - [footer_hints] fits strictly within [max_width] columns with zero
       ["...?"] overflow. *)
 
@@ -67,11 +68,42 @@ type action =
   | Toggle_zoom
   | Cycle_memory_view
   | Toggle_memory_sort
+  | Cycle_signal_or_source
+  | Cycle_sort_or_speak
+  | Cycle_hearth_or_overrule
+  | Cycle_time_window
+  | Cycle_view_mode
+  | Context_primary_action
+  | Toggle_artifact_share
+  | Step_revision of cycle_dir
+  | Step_context_item of cycle_dir
+  | Launch_fusion
+  | Toggle_unreported
+  | Unbind_connector
+  | Entity_approve_or_assign
+  | Entity_reject_or_cancel
+  | Edit_or_export
+  | Configure_provider_key
+  | Account_login
+  | Poll_account_login
+  | Copy_hash
+  | Dismiss_errors
+  | Board_vote of [ `Up | `Down ]
+  | Toggle_memory_scope
+  | Copy_public_url
+  | Probe_sandbox
+  | Refresh_browser_tabs
+  | Open_memory_recovery
+  | Search_prev_match
+  | Toggle_memory_chart
+  | Open_external_editor
+  | Interrupt_turn
   | Quit_app
 
 type scope =
   | Global
   | Unfocused_nav
+  | Screen_context
   | Ask_choice_focused
   | Approval_strip_focused
   | Approval_strip_chords
@@ -150,48 +182,21 @@ val all_scopes : scope list
 val bindings : binding list
 
 val normalize_key_event : Input.key_event -> Input.key_event
-(** Normalize Kitty [CSI u] and legacy VT100 variants of the same keystroke
-    (e.g., uppercase ASCII with or without [shift = true]) to the canonical
-    chord stored in {!bindings}, preserving [shift] on [Ctrl+Shift+<letter>]
-    chords so [Ctrl+Shift+Q] never aliases [Ctrl+Q]. *)
-
 val replay_ime_event : Input.key_event -> Input.key_event
-(** Translate a single printable Korean 2-bulsik Hangul jamo/keystroke into its
-    corresponding normalized Latin command keystroke for unfocused command and
-    overlay hotkey dispatch. Non-single-key or modified events are returned
-    unchanged. *)
 
 val scope_chain_of_focus :
   ?approval_strip_active:bool -> Nav.focus_scope -> scope list
-(** Derive the ordered lookup chain from a {!Nav.focus_scope}. When
-    [approval_strip_active] is [true], fast-approve/deny bindings are enabled
-    without letting bare [Y]/[N] hijack typing inside [Composer_focused]. *)
 
 val dispatch : scope_chain:scope list -> Input.key_event -> action option
-(** Look up the first matching binding across [scope_chain]. Supports single-key
-    Korean 2-bulsik IME replay strictly in unfocused command scopes. *)
-
 val collisions : unit -> collision list
-(** Audit the entire {!bindings} table for duplicate normalized chords within
-    any single {!scope}. Always empty in a valid keymap. *)
 
 val footer_separator : string
-(** [" · "] — 3 terminal cells wide. *)
 
 val footer_hints :
   scope_chain:scope list -> max_width:int -> lang:Say.lang -> footer_hint list
-(** Project deduplicated hints for [scope_chain] sorted by priority and fitted
-    strictly within [max_width] terminal columns, stopping cleanly before any
-    overflow (never emitting ["...?"]). *)
 
 val format_footer_line : footer_hint list -> string
-(** Render {!footer_hint} entries joined by {!footer_separator}. *)
 
 val help_entries : scope_chain:scope list -> lang:Say.lang -> help_group list
-(** Project grouped [?] Help entries for [scope_chain] directly from {!bindings}. *)
-
 val palette_commands : lang:Say.lang -> palette_command list
-(** Project command entries for the [Ctrl+K] Universal Palette from {!bindings}. *)
-
 val render_markdown_reference : ?lang:Say.lang -> unit -> string
-(** Generate a complete deterministic Markdown reference table from {!bindings}. *)

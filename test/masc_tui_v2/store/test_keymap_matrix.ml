@@ -78,6 +78,8 @@ let render_full ~(model : Model.t) =
         Screen_work.render_dive ~target ~model ~cache ~rect g
     | Some (Nav.Dive_knowledge target) ->
         Screen_knowledge.render_dive ~target ~model ~cache ~rect g
+    | Some (Nav.Dive_runtime target) ->
+        Screen_runtime.render_dive ~target ~model ~cache ~rect g
     | Some (Nav.Dive_infra target) ->
         Screen_infra.render_dive ~target ~model ~cache ~rect g
     | None -> (
@@ -774,6 +776,8 @@ let populated_model ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_en)
         channel = Some "eng";
         error = None;
         binding_count = 2;
+        configured_bindings =
+          [ { channel_id = "C01ENG"; keeper_name = "alpha" } ];
       };
       {
         connector_id = "discord-ops";
@@ -782,6 +786,8 @@ let populated_model ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_en)
         channel = Some "ops";
         error = None;
         binding_count = 1;
+        configured_bindings =
+          [ { channel_id = "998877"; keeper_name = "beta" } ];
       };
       {
         connector_id = "github-webhook";
@@ -790,6 +796,7 @@ let populated_model ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_en)
         channel = None;
         error = Some "slow poll";
         binding_count = 3;
+        configured_bindings = [];
       };
     ]
   in
@@ -1121,7 +1128,12 @@ let test_axis_a_screen_dive_matrix () =
       ( "Work/Tasks/Wide"
       , {
           (with_ws Nav.Work base) with
-          work = Work_store.set_tab Nav.Work_tasks_schedules base.work;
+          work = Work_store.set_tab Nav.Work_tasks base.work;
+        } );
+      ( "Work/Schedules/Wide"
+      , {
+          (with_ws Nav.Work base) with
+          work = Work_store.set_tab Nav.Work_schedules base.work;
         } );
       ( "Work/Inbox/Wide"
       , {
@@ -1141,8 +1153,7 @@ let test_axis_a_screen_dive_matrix () =
       ( "Knowledge/Wiki/Wide"
       , {
           (with_ws Nav.Knowledge base) with
-          knowledge =
-            Knowledge_store.set_tab Nav.Knowledge_wiki base.knowledge;
+          knowledge = Knowledge_store.set_tab Nav.Knowledge_wiki base.knowledge;
         } );
       ( "Knowledge/Artifacts/Wide"
       , {
@@ -1177,11 +1188,20 @@ let test_axis_a_screen_dive_matrix () =
           runtime =
             Runtime_store.set_tab Nav.Runtime_failover_lanes base.runtime;
         } );
+      ( "Runtime/Fusion/Wide"
+      , {
+          (with_ws Nav.Runtime base) with
+          runtime = Runtime_store.set_tab Nav.Runtime_fusion base.runtime;
+        } );
       ( "Runtime/Tools/Wide"
       , {
           (with_ws Nav.Runtime base) with
-          runtime =
-            Runtime_store.set_tab Nav.Runtime_tools_connectors base.runtime;
+          runtime = Runtime_store.set_tab Nav.Runtime_tools_usage base.runtime;
+        } );
+      ( "Runtime/Connectors/Wide"
+      , {
+          (with_ws Nav.Runtime base) with
+          runtime = Runtime_store.set_tab Nav.Runtime_connectors base.runtime;
         } );
       ( "Runtime/AddonsBrowser/Wide"
       , {
@@ -1275,7 +1295,7 @@ let test_axis_a_screen_dive_matrix () =
       ("x", char_key "x");
     ]
   in
-  Alcotest.(check int) "Axis A contexts" 35 (List.length contexts);
+  Alcotest.(check int) "Axis A contexts" 38 (List.length contexts);
   Alcotest.(check int) "Axis C keys" 20 (List.length keys);
   List.iter
     (fun (ctx_name, (m : Model.t)) ->
@@ -1397,7 +1417,7 @@ let test_axis_a_screen_dive_matrix () =
               Option.is_none dive_before
               && Option.is_none m.nav.overlay
               && Nav.equal_workspace m.nav.workspace Nav.Work
-              && Nav.equal_work_tab m.work.active_tab Nav.Work_tasks_schedules
+              && Nav.equal_work_tab m.work.active_tab Nav.Work_tasks
             in
             if not is_work_tasks then
               Alcotest.(check bool)
@@ -1418,15 +1438,17 @@ let test_axis_a_screen_dive_matrix () =
                 true
                 (m'.runtime.browser_right_focus = m.runtime.browser_right_focus)
           end;
-          (* Invariant 6: Zero 'f' Fusion bleed outside Runtime_failover_lanes *)
+          (* Invariant 6: Zero 'f' Fusion bleed outside Runtime_failover_lanes / Runtime_fusion *)
           if String.equal kname "f" then begin
-            let is_failover =
+            let is_failover_or_fusion =
               Option.is_none dive_before
               && Nav.equal_workspace m.nav.workspace Nav.Runtime
-              && Nav.equal_runtime_tab m.runtime.active_tab
-                   Nav.Runtime_failover_lanes
+              && (Nav.equal_runtime_tab m.runtime.active_tab
+                    Nav.Runtime_failover_lanes
+                  || Nav.equal_runtime_tab m.runtime.active_tab
+                       Nav.Runtime_fusion)
             in
-            if not is_failover then
+            if not is_failover_or_fusion then
               Alcotest.(check bool) (tag ^ " 'f' never bleeds Fusion modal") true
                 (Option.is_none m'.inline_modal)
           end;
@@ -1439,14 +1461,14 @@ let test_axis_a_screen_dive_matrix () =
               | Nav.Pulse | Nav.Keepers -> true
               | Nav.Work ->
                   Nav.equal_work_tab m.work.active_tab Nav.Work_pipeline
-                  || Nav.equal_work_tab m.work.active_tab
-                       Nav.Work_tasks_schedules
+                  || Nav.equal_work_tab m.work.active_tab Nav.Work_tasks
+                  || Nav.equal_work_tab m.work.active_tab Nav.Work_schedules
               | Nav.Knowledge ->
                   Nav.equal_knowledge_tab m.knowledge.active_tab
                     Nav.Knowledge_board
               | Nav.Runtime ->
                   Nav.equal_runtime_tab m.runtime.active_tab
-                    Nav.Runtime_tools_connectors
+                    Nav.Runtime_connectors
               | Nav.Infra ->
                   Nav.equal_infra_tab m.infra.active_tab
                     Nav.Infra_repos_changes
@@ -1455,7 +1477,7 @@ let test_axis_a_screen_dive_matrix () =
               Alcotest.(check bool) (tag ^ " 'n' never bleeds modal/overlay") true
                 (Option.is_none m'.inline_modal && Option.is_none m'.nav.overlay)
           end;
-          (* Invariant 8: Zero 'o' Open_external_url bleed outside Repos/Artifacts/Dives *)
+          (* Invariant 8: Zero 'o' Open_external_url bleed outside Repos/Wiki/Artifacts/Dives *)
           if String.equal kname "o" then begin
             let is_valid_o =
               match dive_before with
@@ -1466,8 +1488,10 @@ let test_axis_a_screen_dive_matrix () =
                    && Nav.equal_infra_tab m.infra.active_tab
                         Nav.Infra_repos_changes)
                   || (Nav.equal_workspace m.nav.workspace Nav.Knowledge
-                      && Nav.equal_knowledge_tab m.knowledge.active_tab
-                           Nav.Knowledge_wiki)
+                      && (Nav.equal_knowledge_tab m.knowledge.active_tab
+                            Nav.Knowledge_wiki
+                          || Nav.equal_knowledge_tab m.knowledge.active_tab
+                               Nav.Knowledge_artifacts))
                   || (Nav.equal_workspace m.nav.workspace Nav.Runtime
                       && Nav.equal_runtime_tab m.runtime.active_tab
                            Nav.Runtime_addons_browser)
@@ -1754,7 +1778,13 @@ let test_dynamic_rendered_hint_contracts () =
           , {
               m_base with
               nav = { m_base.nav with workspace = Nav.Work };
-              work = Work_store.set_tab Nav.Work_tasks_schedules m_base.work;
+              work = Work_store.set_tab Nav.Work_tasks m_base.work;
+            } );
+          ( "Work/Schedules"
+          , {
+              m_base with
+              nav = { m_base.nav with workspace = Nav.Work };
+              work = Work_store.set_tab Nav.Work_schedules m_base.work;
             } );
           ( "Work/Inbox"
           , {
@@ -1780,7 +1810,14 @@ let test_dynamic_rendered_hint_contracts () =
               m_base with
               nav = { m_base.nav with workspace = Nav.Knowledge };
               knowledge =
-                Knowledge_store.set_tab Nav.Knowledge_wiki
+                Knowledge_store.set_tab Nav.Knowledge_wiki m_base.knowledge;
+            } );
+          ( "Knowledge/Artifacts"
+          , {
+              m_base with
+              nav = { m_base.nav with workspace = Nav.Knowledge };
+              knowledge =
+                Knowledge_store.set_tab Nav.Knowledge_artifacts
                   m_base.knowledge;
             } );
           ( "Knowledge/Memory"
@@ -1806,13 +1843,25 @@ let test_dynamic_rendered_hint_contracts () =
               runtime =
                 Runtime_store.set_tab Nav.Runtime_failover_lanes m_base.runtime;
             } );
+          ( "Runtime/Fusion"
+          , {
+              m_base with
+              nav = { m_base.nav with workspace = Nav.Runtime };
+              runtime = Runtime_store.set_tab Nav.Runtime_fusion m_base.runtime;
+            } );
           ( "Runtime/Tools"
           , {
               m_base with
               nav = { m_base.nav with workspace = Nav.Runtime };
               runtime =
-                Runtime_store.set_tab Nav.Runtime_tools_connectors
-                  m_base.runtime;
+                Runtime_store.set_tab Nav.Runtime_tools_usage m_base.runtime;
+            } );
+          ( "Runtime/Connectors"
+          , {
+              m_base with
+              nav = { m_base.nav with workspace = Nav.Runtime };
+              runtime =
+                Runtime_store.set_tab Nav.Runtime_connectors m_base.runtime;
             } );
           ( "Runtime/AddonsBrowser"
           , {
@@ -2214,20 +2263,21 @@ let test_journeys_tab_multipane_dives_safety () =
   Alcotest.(check bool) "J11 pane 2 Down scrolls detail_scroll_offset" true
     (m_wp_scroll.work.detail_scroll_offset > 0);
 
-  (* J12: Work_tasks_schedules Tab toggles Tasks vs Schedules *)
+  (* J12: Work_tasks & Work_schedules are dedicated 1st-class tabs reachable via ']' *)
   record_case ();
   let m_ts =
     {
       base with
       nav = { base.nav with workspace = Nav.Work };
-      work = Work_store.set_tab Nav.Work_tasks_schedules base.work;
+      work = Work_store.set_tab Nav.Work_tasks base.work;
     }
   in
-  let m_ts_tab, _ = step m_ts (mk_key Keymap.Input.Tab) in
-  Alcotest.(check int) "J12 Tasks->Schedules pane_index=1" 1
-    m_ts_tab.nav.pane_index;
-  Alcotest.(check bool) "J12 selected_index jumped into schedules section" true
-    (m_ts_tab.work.selected_index >= 3);
+  let m_ts_next, _ = step m_ts (char_key "]") in
+  Alcotest.(check bool) "J12 Work_tasks ']' advances to Work_schedules" true
+    (Nav.equal_work_tab m_ts_next.work.active_tab Nav.Work_schedules);
+  let m_ts_dn, _ = step m_ts_next (mk_key Keymap.Input.Down) in
+  Alcotest.(check int) "J12 Work_schedules Down moves schedule selection" 1
+    m_ts_dn.work.selected_index;
 
   (* J13: Work_inbox Down -> Y resolves selected item 1, NEVER item 0! *)
   record_case ();
@@ -2317,8 +2367,8 @@ let test_journeys_tab_multipane_dives_safety () =
     (m_kp_sc.fleet.chat_scroll_offset > 0);
   let m_kp_tab, _ = step m_kp_p1 (char_key "]") in
   Alcotest.(check bool)
-    "J14 Keepers split pane 1 ']' advances embedded dive tab" true
-    (Nav.equal_keeper_tab m_kp_tab.fleet.keeper_dive_tab Nav.Keeper_memory);
+    "J14 Keepers split pane 1 ']' advances embedded dive tab (Chat -> Context)" true
+    (Nav.equal_keeper_tab m_kp_tab.fleet.keeper_dive_tab Nav.Keeper_context);
 
   (* J15: Runtime Quotas independent pane 0 scroll + pane 1 credits *)
   record_case ();
@@ -2934,7 +2984,7 @@ let test_journeys_tab_multipane_dives_safety () =
     (Model.active_dive m_p5c_ent
      = Some (Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_chat }));
 
-  (* R6: z Toggle_zoom scoped to zoomable views & reset on sub-tab/dive/pop/Artifacts *)
+  (* R6: z Toggle_zoom scoped to zoomable views & reset on sub-tab/dive/pop; works on Artifacts too! *)
   record_case ();
   let m_z_pulse, _ = step base (char_key "z") in
   Alcotest.(check bool) "R6 'z' on Pulse is a no-op (zoomed stays false)" false
@@ -2952,13 +3002,13 @@ let test_journeys_tab_multipane_dives_safety () =
   let m_z_space, _ = step m_z_kw1 (char_key " ") in
   Alcotest.(check bool) "R6 Space never switches screens out of Wiki" true
     (Nav.equal_knowledge_tab m_z_space.knowledge.active_tab Nav.Knowledge_wiki);
-  let m_z_art, _ = step m_z_kw1 (char_key "]") in
-  Alcotest.(check bool) "R6 ']' Wiki->Artifacts resets zoomed = false" false
-    m_z_art.nav.zoomed;
-  Alcotest.(check bool) "R6 ']' Wiki->Artifacts lands on Knowledge_artifacts" true
-    (Nav.equal_knowledge_tab m_z_art.knowledge.active_tab Nav.Knowledge_artifacts);
-  let m_z_art2, _ = step m_z_art (char_key "z") in
-  Alcotest.(check bool) "R6 'z' on Artifacts stays false" false
+  let m_z_tab, _ = step m_z_kw1 (char_key "]") in
+  Alcotest.(check bool) "R6 cycle_sub_tab Wiki->Artifacts resets zoomed = false" false
+    m_z_tab.nav.zoomed;
+  Alcotest.(check bool) "R6 ']' from Wiki reaches 1st-class Knowledge_artifacts" true
+    (Nav.equal_knowledge_tab m_z_tab.knowledge.active_tab Nav.Knowledge_artifacts);
+  let m_z_art2, _ = step m_z_tab (char_key "z") in
+  Alcotest.(check bool) "R6 'z' on Knowledge_artifacts toggles zoomed = true" true
     m_z_art2.nav.zoomed;
   let m_z_dive, _ = Update_nav.push_dive m_z_kw1 (Nav.Dive_knowledge (Nav.Wiki_dive "architecture")) in
   Alcotest.(check bool) "R6 push_dive resets zoomed = false" false
@@ -4087,7 +4137,7 @@ let test_pillar2_scroll_bounds_all_surfaces () =
         {
           m_art_tall.nav with
           dive_stack =
-            [ Nav.Dive_knowledge (Nav.Artifact_dive (Printf.sprintf "artifact-%032d" 0)) ];
+            [ Nav.Dive_knowledge (Nav.Artifact_dive (List.hd many_artifacts).id) ];
         };
     }
   in
@@ -5302,7 +5352,9 @@ let test_pillar2_scroll_bounds_all_surfaces () =
       , "Missing artifacts" );
       ("Thread_dive", Nav.Dive_knowledge (Nav.Thread_dive "post-1"), "Comment number 44");
       ("Wiki_dive", Nav.Dive_knowledge (Nav.Wiki_dive "arch-overview"), "FINAL_WIKI_BOTTOM_LINE");
-      ("Artifact_dive", Nav.Dive_knowledge (Nav.Artifact_dive (Printf.sprintf "artifact-%032d" 0)), "Artifact Report 59");
+      ( "Artifact_dive"
+      , Nav.Dive_knowledge (Nav.Artifact_dive (List.hd many_artifacts).id)
+      , "Artifact Report 59" );
       ("Sandbox_dive", Nav.Dive_infra (Nav.Sandbox_dive "alpha"), "DIVE_LOG_01");
       ("Lane_dive", Nav.Dive_infra (Nav.Lane_dive "lane-00"), "DIVE_LOG_00");
       ("Incident_dive (module_name match)", Nav.Dive_infra (Nav.Incident_dive dive_inc_id.id), "DIVE_LOG_00");
@@ -5324,13 +5376,13 @@ let test_pillar3_keeper_chat_empty_loading_and_korean_ime () =
   let base = populated_model ~cols:140 ~rows:40 ~lang:Say.Lang_ko () in
   let theme = Theme.of_preset base.theme_preset in
   let count_surface2_cells (g : Cell_grid.t) =
-    (* Scan the chat transcript canvas (excluding the top header/tab bar y<5
-       and the bottom composer/status bar y>=rows-6) for any floating
-       centered surface_2 rectangle. *)
+    (* Scan the chat transcript canvas (excluding the docked Left Menu Rail on
+       the left, the top header/tab bar y<5, and the bottom composer/status bar
+       y>=rows-6) for any floating centered surface_2 rectangle. *)
     let s2 = Color.of_rgb theme.surface_2 in
     let n = ref 0 in
     for y = 5 to Cell_grid.rows g - 7 do
-      for x = 0 to Cell_grid.cols g - 1 do
+      for x = Model.sidebar_width + Model.sidebar_gap + 1 to Cell_grid.cols g - 1 do
         let c = Cell_grid.get g ~x ~y in
         if Color.equal c.style.bg s2 then incr n
       done
@@ -5486,12 +5538,12 @@ let test_enter_hint_follows_enter_plan () =
   let m_base = populated_model ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
   let no_target_views : (string * Model.t) list =
     [
-      ( "Runtime/Tools"
+      ( "Runtime/Connectors"
       , {
           m_base with
           nav = { m_base.nav with workspace = Nav.Runtime };
           runtime =
-            Runtime_store.set_tab Nav.Runtime_tools_connectors m_base.runtime;
+            Runtime_store.set_tab Nav.Runtime_connectors m_base.runtime;
         } );
       ( "Infra/Repos"
       , {
@@ -5562,6 +5614,715 @@ let test_enter_hint_follows_enter_plan () =
     "edit field"
     (enter_hint_name (Update_nav.enter_hint config_pane))
 
+(* ---------- Wave 2: Automated 100% Menu Reachability Matrix & Zero-Collision Proof ---------- *)
+
+let test_wave2_100pct_menu_reachability_matrix () =
+  (* 0. Keymap.collisions SSOT must be empty across all scopes *)
+  Alcotest.(check int) "Keymap.collisions () = []" 0
+    (List.length (Keymap.collisions ()));
+  let base = populated_model ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
+  let step_keys m keys =
+    List.fold_left (fun cur ev -> fst (step cur ev)) m keys
+  in
+  (* 1. Keyboard reachability from initial startup state:
+        - ALL 6 workspaces via '1'..'6'
+        - ALL 5 Work tabs via '2' + ']'*n
+        - ALL 4 Knowledge tabs via '3' + ']'*n
+        - ALL 3 Keepers fleet modes via '4' + ']'*n
+        - ALL 7 Keeper tabs in BOTH Split right pane ('4' + Tab + ']'*n) AND Dive_keeper ('4' + Enter + ']'*n)
+        - ALL 7 Runtime tabs via '5' + ']'*n
+        - ALL 3 Infra tabs via '6' + ']'*n
+        - ALL overlays: Settings (all 7 tabs via ',' + ']'*n), Incidents ('I'),
+          Queue_context (all 3 tabs via Ctrl+T + ']'*n), Help ('?'), Palette (Ctrl+K) *)
+  let reached_ws = ref [] in
+  List.iteri
+    (fun idx _ws ->
+      record_case ();
+      let m' = step_keys base [ char_key (Int.to_string (idx + 1)) ] in
+      if not (List.exists (Nav.equal_workspace m'.nav.workspace) !reached_ws) then
+        reached_ws := m'.nav.workspace :: !reached_ws)
+    Nav.all_workspaces;
+  Alcotest.(check int) "100% of 6 workspaces reachable via 1..6"
+    (List.length Nav.all_workspaces) (List.length !reached_ws);
+
+  let reach_subtabs ~start_key ~count ~extract ~equal =
+    let m0 = step_keys base start_key in
+    let seen = ref [ extract m0 ] in
+    let cur = ref m0 in
+    for _ = 1 to count - 1 do
+      record_case ();
+      cur := fst (step !cur (char_key "]"));
+      let v = extract !cur in
+      if not (List.exists (equal v) !seen) then seen := v :: !seen
+    done;
+    List.length !seen
+  in
+  Alcotest.(check int) "100% of 5 Work tabs reachable via keyboard"
+    (List.length Nav.all_work_tabs)
+    (reach_subtabs ~start_key:[ char_key "2" ]
+       ~count:(List.length Nav.all_work_tabs)
+       ~extract:(fun m -> m.work.active_tab)
+       ~equal:Nav.equal_work_tab);
+  Alcotest.(check int) "100% of 4 Knowledge tabs reachable via keyboard"
+    (List.length Nav.all_knowledge_tabs)
+    (reach_subtabs ~start_key:[ char_key "3" ]
+       ~count:(List.length Nav.all_knowledge_tabs)
+       ~extract:(fun m -> m.knowledge.active_tab)
+       ~equal:Nav.equal_knowledge_tab);
+  Alcotest.(check int) "100% of 3 Keepers fleet modes reachable via keyboard"
+    (List.length Nav.all_keepers_fleet_modes)
+    (reach_subtabs ~start_key:[ char_key "4" ]
+       ~count:(List.length Nav.all_keepers_fleet_modes)
+       ~extract:(fun m -> m.fleet.fleet_mode)
+       ~equal:Nav.equal_keepers_fleet_mode);
+  Alcotest.(check int) "100% of 7 Keeper tabs reachable in Keepers Split pane 1"
+    (List.length Nav.all_keeper_tabs)
+    (reach_subtabs
+       ~start_key:[ char_key "4"; mk_key Keymap.Input.Tab ]
+       ~count:(List.length Nav.all_keeper_tabs)
+       ~extract:(fun m -> m.fleet.keeper_dive_tab)
+       ~equal:Nav.equal_keeper_tab);
+  Alcotest.(check int) "100% of 7 Keeper tabs reachable in full-screen Dive_keeper"
+    (List.length Nav.all_keeper_tabs)
+    (reach_subtabs
+       ~start_key:[ char_key "4"; mk_key Keymap.Input.Enter ]
+       ~count:(List.length Nav.all_keeper_tabs)
+       ~extract:(fun m ->
+         match Model.active_dive m with
+         | Some (Nav.Dive_keeper { tab; _ }) -> tab
+         | _ -> m.fleet.keeper_dive_tab)
+       ~equal:Nav.equal_keeper_tab);
+  Alcotest.(check int) "100% of 7 Runtime tabs reachable via keyboard"
+    (List.length Nav.all_runtime_tabs)
+    (reach_subtabs ~start_key:[ char_key "5" ]
+       ~count:(List.length Nav.all_runtime_tabs)
+       ~extract:(fun m -> m.runtime.active_tab)
+       ~equal:Nav.equal_runtime_tab);
+  Alcotest.(check int) "100% of 3 Infra tabs reachable via keyboard"
+    (List.length Nav.all_infra_tabs)
+    (reach_subtabs ~start_key:[ char_key "6" ]
+       ~count:(List.length Nav.all_infra_tabs)
+       ~extract:(fun m -> m.infra.active_tab)
+       ~equal:Nav.equal_infra_tab);
+  Alcotest.(check int) "100% of 7 Settings tabs reachable via keyboard"
+    (List.length Nav.all_settings_tabs)
+    (reach_subtabs ~start_key:[ char_key "," ]
+       ~count:(List.length Nav.all_settings_tabs)
+       ~extract:(fun m -> m.config.active_tab)
+       ~equal:Nav.equal_settings_tab);
+  Alcotest.(check int) "100% of 3 Queue_context drawer tabs reachable via Ctrl+T"
+    3
+    (reach_subtabs
+       ~start_key:[ char_key ~ctrl:true "t" ]
+       ~count:3
+       ~extract:(fun m ->
+         match m.nav.overlay with
+         | Some (Nav.Queue_context tab) -> tab
+         | _ -> Nav.Drawer_queue)
+       ~equal:Nav.equal_queue_context_tab);
+  Alcotest.(check bool) "Incidents overlay reachable via I" true
+    (Option.equal Nav.equal_overlay
+       (step_keys base [ char_key ~shift:true "I" ]).nav.overlay
+       (Some Nav.Incidents));
+  Alcotest.(check bool) "Help overlay reachable via ?" true
+    (Option.equal Nav.equal_overlay
+       (step_keys base [ char_key "?" ]).nav.overlay
+       (Some Nav.Help));
+  Alcotest.(check bool) "Palette overlay reachable via Ctrl+K" true
+    (Option.equal Nav.equal_overlay
+       (step_keys base [ char_key ~ctrl:true "k" ]).nav.overlay
+       (Some Nav.Palette));
+
+  (* 2. Left Navigation Sidebar 100% reachability sweep: 'b' + Down*n + Enter for EVERY menu item! *)
+  let menu_items = Nav.all_menu_items in
+  let n_menu = List.length menu_items in
+  Alcotest.(check int) "Left Navigation Sidebar has all 27 unified targets" 27
+    n_menu;
+  let m_rail_focused, _ = step base (char_key "b") in
+  Alcotest.(check bool) "'b' focuses auto-docked Left Sidebar" true
+    (Model.sidebar_visible m_rail_focused && Model.sidebar_has_focus m_rail_focused);
+  let m_rail_esc, _ = step m_rail_focused (mk_key Keymap.Input.Escape) in
+  Alcotest.(check bool) "Esc unfocuses Left Sidebar back to main pane" false
+    (Model.sidebar_has_focus m_rail_esc);
+  List.iteri
+    (fun idx (item : Nav.menu_item) ->
+      record_case ();
+      let m_start =
+        {
+          base with
+          nav =
+            {
+              base.nav with
+              sidebar_open = Some true;
+              sidebar_focused = true;
+              sidebar_cursor = 0;
+              sidebar_scroll = 0;
+            };
+        }
+      in
+      let downs = List.init idx (fun _ -> mk_key Keymap.Input.Down) in
+      let m_at = step_keys m_start downs in
+      let m_jumped, _ = step m_at (mk_key Keymap.Input.Enter) in
+      Alcotest.(check bool)
+        (Printf.sprintf "Sidebar item #%d Enter unfocuses sidebar" idx)
+        false (Model.sidebar_has_focus m_jumped);
+      match item.target with
+      | Nav.Menu_pulse ->
+          Alcotest.(check bool) "Sidebar jumps to Pulse" true
+            (Nav.equal_workspace m_jumped.nav.workspace Nav.Pulse)
+      | Nav.Menu_work tab ->
+          Alcotest.(check bool) "Sidebar jumps to Work tab" true
+            (Nav.equal_workspace m_jumped.nav.workspace Nav.Work
+             && Nav.equal_work_tab m_jumped.work.active_tab tab)
+      | Nav.Menu_knowledge tab ->
+          Alcotest.(check bool) "Sidebar jumps to Knowledge tab" true
+            (Nav.equal_workspace m_jumped.nav.workspace Nav.Knowledge
+             && Nav.equal_knowledge_tab m_jumped.knowledge.active_tab tab)
+      | Nav.Menu_keepers ->
+          Alcotest.(check bool) "Sidebar jumps to Keepers" true
+            (Nav.equal_workspace m_jumped.nav.workspace Nav.Keepers)
+      | Nav.Menu_keeper_tab tab ->
+          Alcotest.(check bool) "Sidebar jumps to Keepers split/dive tab" true
+            (Nav.equal_workspace m_jumped.nav.workspace Nav.Keepers
+             && Nav.equal_keeper_tab m_jumped.fleet.keeper_dive_tab tab)
+      | Nav.Menu_runtime tab ->
+          Alcotest.(check bool) "Sidebar jumps to Runtime tab" true
+            (Nav.equal_workspace m_jumped.nav.workspace Nav.Runtime
+             && Nav.equal_runtime_tab m_jumped.runtime.active_tab tab)
+      | Nav.Menu_infra tab ->
+          Alcotest.(check bool) "Sidebar jumps to Infra tab" true
+            (Nav.equal_workspace m_jumped.nav.workspace Nav.Infra
+             && Nav.equal_infra_tab m_jumped.infra.active_tab tab)
+      | Nav.Menu_settings ->
+          Alcotest.(check bool) "Sidebar opens Settings" true
+            (match m_jumped.nav.overlay with
+             | Some (Nav.Settings _) -> true
+             | _ -> false)
+      | Nav.Menu_incidents ->
+          Alcotest.(check bool) "Sidebar opens Incidents" true
+            (Option.equal Nav.equal_overlay m_jumped.nav.overlay
+               (Some Nav.Incidents))
+      | Nav.Menu_queue_context ->
+          Alcotest.(check bool) "Sidebar opens Queue/Context drawer" true
+            (match m_jumped.nav.overlay with
+             | Some (Nav.Queue_context _) -> true
+             | _ -> false)
+      | Nav.Menu_help ->
+          Alcotest.(check bool) "Sidebar opens Help" true
+            (Option.equal Nav.equal_overlay m_jumped.nav.overlay (Some Nav.Help)))
+    menu_items;
+
+  (* 3. Compact drawer toggle: at cols=100 (<132), 'b' opens & focuses drawer, Esc closes *)
+  let m_cmp = populated_model ~cols:100 ~rows:30 ~lang:Say.Lang_en () in
+  Alcotest.(check bool) "Compact (<132) starts with sidebar hidden" false
+    (Model.sidebar_visible m_cmp);
+  let m_cmp_open, _ = step m_cmp (char_key "b") in
+  Alcotest.(check bool) "Compact 'b' opens & focuses floating drawer" true
+    (Model.sidebar_drawer_open m_cmp_open && Model.sidebar_has_focus m_cmp_open);
+  let m_cmp_closed, _ = step m_cmp_open (mk_key Keymap.Input.Escape) in
+  Alcotest.(check bool) "Compact Esc closes floating drawer" false
+    (Model.sidebar_visible m_cmp_closed || Model.sidebar_has_focus m_cmp_closed);
+
+  (* 4. Zero Space collisions on Board / Memory / Pipeline *)
+  let m_board =
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Knowledge };
+      knowledge =
+        Knowledge_store.set_tab Nav.Knowledge_board base.knowledge
+        |> Knowledge_store.apply_board_hearths ~observed_at:t0
+             [ { name = "ops"; count = 3 }; { name = "goals"; count = 2 } ];
+    }
+  in
+  let sig0 = m_board.knowledge.board_signal_only in
+  let m_b_sp, _ = step m_board (char_key " ") in
+  Alcotest.(check bool) "Board Space does NOT mutate signal_only" sig0
+    m_b_sp.knowledge.board_signal_only;
+  let m_b_s, _ = step m_board (char_key "s") in
+  Alcotest.(check bool) "Board [s] toggles signal_only" (not sig0)
+    m_b_s.knowledge.board_signal_only;
+  let m_b_sort, _ = step m_board (char_key ~shift:true "S") in
+  Alcotest.(check bool) "Board [S] cycles sort_by" true
+    (not (String.equal m_b_sort.knowledge.board_sort_by m_board.knowledge.board_sort_by));
+  let m_b_h, _ = step m_board (char_key "h") in
+  Alcotest.(check (option string)) "Board [h] cycles hearth from live hearths"
+    (Some "ops") m_b_h.knowledge.board_hearth;
+
+  let m_mem =
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Knowledge };
+      knowledge = Knowledge_store.set_tab Nav.Knowledge_memory base.knowledge;
+    }
+  in
+  let m_mem_w, _ = step m_mem (char_key "w") in
+  Alcotest.(check bool) "Memory [w] cycles window (24h -> 7d)" true
+    (not
+       (Knowledge_store.equal_memory_diff_window
+          m_mem.knowledge.memory_diff_window m_mem_w.knowledge.memory_diff_window));
+  let m_mem_m, _ = step m_mem (char_key "m") in
+  Alcotest.(check bool) "Memory [m] toggles World vs Keeper scope" true
+    (Option.is_some m_mem_m.knowledge.memory_diff_keeper);
+  let m_mem_down = { m_mem with knowledge = { m_mem.knowledge with selected_index = 1 } } in
+  let m_mem_k, _ = step m_mem_down (char_key "k") in
+  Alcotest.(check bool) "Memory [k] moves UP instead of toggling scope" true
+    (Option.is_none m_mem_k.knowledge.memory_diff_keeper
+     && m_mem_k.knowledge.selected_index <= m_mem_down.knowledge.selected_index);
+  Alcotest.(check int) "Keymap.collisions () = [] after Toggle_memory_scope -> m" 0
+    (List.length (Keymap.collisions ()));
+  Alcotest.(check string) "Get_keeper_tool_result forwards optional source_id"
+    "/api/v1/keepers/alpha/tool-result?execution_id=exec-1&offset=10&max_bytes=4096&source_id=src-9"
+    (Cmd.get_request_path
+       (Cmd.Get_keeper_tool_result
+          {
+            keeper = "alpha";
+            execution_id = "exec-1";
+            offset = Some 10;
+            max_bytes = Some 4096;
+            source_id = Some "src-9";
+          }));
+  let pre_lines =
+    Masc_tui_ui.Html_doc.render_lines
+      ~theme:(Theme.of_preset base.theme_preset)
+      ~width:60 ~lang:Say.Lang_en
+      "<pre>    indented   code</pre><table><tr><th>A\x1b[31mB</th></tr></table>"
+  in
+  let pre_all =
+    String.concat "\n"
+      (List.map (fun (l : Masc_tui_ui.Html_doc.rendered_line) -> l.text) pre_lines)
+  in
+  let has_sub ~needle hay =
+    let nl = String.length needle and hl = String.length hay in
+    let rec loop i =
+      if i + nl > hl then false
+      else if String.equal (String.sub hay i nl) needle then true
+      else loop (i + 1)
+    in
+    nl = 0 || loop 0
+  in
+  Alcotest.(check bool) "Html_doc <pre> preserves leading & consecutive spaces" true
+    (has_sub ~needle:"      indented   code" pre_all);
+  Alcotest.(check bool) "Html_doc table sanitizes ESC control sequences" false
+    (has_sub ~needle:"\x1b" pre_all);
+
+  let m_pipe =
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Work };
+      work = Work_store.set_tab Nav.Work_pipeline base.work;
+    }
+  in
+  let v0 = m_pipe.work.verification_view in
+  let m_pipe_v, _ = step m_pipe (char_key "v") in
+  Alcotest.(check bool) "Work Pipeline [v] toggles verification_view" true
+    (m_pipe_v.work.verification_view <> v0);
+
+  (* 5. #402 Post-Review Parity Regressions *)
+  (* 5a. Compact drawer Tab closes floating drawer (<132 cols) & [b] badge renders at 80x24 & 90x28 *)
+  let m_cmp_tab, _ = step m_cmp_open (mk_key Keymap.Input.Tab) in
+  Alcotest.(check bool) "Compact Tab closes floating drawer" false
+    (Model.sidebar_visible m_cmp_tab || Model.sidebar_has_focus m_cmp_tab);
+  List.iter
+    (fun (cols, rows) ->
+      let m_sm = populated_model ~cols ~rows ~lang:Say.Lang_en () in
+      let g = Cell_grid.create ~cols ~rows in
+      let cache = Masc_tui_ui.Card.Cache.create () in
+      ignore
+        (Masc_tui_screens_core.Chrome.render_frame ~model:m_sm ~cache
+           ~render_body:(fun _ _ -> ())
+           ~render_overlay:(fun _ _ -> ())
+           g);
+      let buf = Buffer.create cols in
+      for x = 0 to cols - 1 do
+        match (Cell_grid.get g ~x ~y:0).glyph with
+        | Cell_grid.Empty -> Buffer.add_char buf ' '
+        | Cell_grid.Ascii ch -> Buffer.add_char buf ch
+        | Cell_grid.Braille m -> Buffer.add_string buf (Cell_grid.braille_utf8 m)
+        | Cell_grid.Utf8 s -> Buffer.add_string buf s
+        | Cell_grid.Continuation -> ()
+      done;
+      let top_s = Buffer.contents buf in
+      let has_b =
+        let n = String.length "[b]" and h = String.length top_s in
+        let rec find i =
+          if i + n > h then false
+          else if String.sub top_s i n = "[b]" then true
+          else find (i + 1)
+        in
+        find 0
+      in
+      Alcotest.(check bool)
+        (Printf.sprintf "Top bar shows [b] badge at %dx%d (%s)" cols rows top_s)
+        true has_b)
+    [ (80, 24); (90, 28) ];
+
+  (* 5b. armed_vote cleared on switch_workspace and push_dive *)
+  let m_armed, _ = step m_board (char_key "+") in
+  Alcotest.(check bool) "first '+' arms board vote" true
+    (Option.is_some m_armed.knowledge.armed_vote);
+  let m_sw, _ = step m_armed (char_key "1") in
+  Alcotest.(check bool) "switch_workspace clears armed_vote" true
+    (Option.is_none m_sw.knowledge.armed_vote);
+  let m_dive_clr, _ = step m_armed (mk_key Keymap.Input.Enter) in
+  Alcotest.(check bool) "push_dive clears armed_vote" true
+    (Option.is_none m_dive_clr.knowledge.armed_vote);
+
+  (* 5c. Artifact checks keyed by (id, revision) *)
+  let k_chks =
+    Knowledge_store.apply_artifact_checks ~observed_at:t0
+      [
+        {
+          id = "artifact-00112233445566778899aabbccddeeff";
+          revision = 2;
+          body_sha256 = "aaaa";
+          checked = true;
+          change_id = "check-00112233445566778899aabbccddeeff";
+          changed_by = "op";
+          changed_at = "2026-11-23T05:00:00Z";
+        };
+      ]
+      base.knowledge
+  in
+  Alcotest.(check bool) "artifact check matches revision 2" true
+    (Option.is_some
+       (Knowledge_store.artifact_check_for
+          ~id:"artifact-00112233445566778899aabbccddeeff" ~revision:2 k_chks));
+  Alcotest.(check bool) "artifact check does NOT match revision 1" true
+    (Option.is_none
+       (Knowledge_store.artifact_check_for
+          ~id:"artifact-00112233445566778899aabbccddeeff" ~revision:1 k_chks));
+
+  (* 5d. 404 absence caching prevents re-fetch loops on Keeper Context *)
+  let kc0 =
+    Keeper_context_store.empty
+    |> Keeper_context_store.mark_provider_input_absent ~keeper:"alpha"
+         ~turn_ref:"trace#1"
+    |> Keeper_context_store.mark_cache_outcome_absent ~keeper:"alpha"
+         ~turn_ref:"trace#1"
+    |> Keeper_context_store.mark_turn_transcript_absent ~keeper:"alpha"
+         ~turn_ref:"trace#1"
+  in
+  let ks_a = Keeper_context_store.get_keeper ~keeper:"alpha" kc0 in
+  Alcotest.(check bool) "404 marks provider_input absent for turn_ref" true
+    (Option.equal String.equal ks_a.absent_provider_input_ref (Some "trace#1"));
+  Alcotest.(check bool) "404 marks cache_outcome absent for turn_ref" true
+    (Option.equal String.equal ks_a.absent_cache_outcome_ref (Some "trace#1"));
+  Alcotest.(check bool) "404 marks turn_transcript absent for turn_ref" true
+    (Option.equal String.equal ks_a.absent_transcript_ref (Some "trace#1"));
+
+  (* 5e. Unbind_connector sends real channel_id from configured_bindings *)
+  let m_conn =
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Runtime; pane_index = 0 };
+      runtime = Runtime_store.set_tab Nav.Runtime_connectors base.runtime;
+    }
+  in
+  let _, unbind_cmds = step m_conn (char_key ~shift:true "U") in
+  Alcotest.(check bool) "Unbind_connector sends real configured_bindings channel_id"
+    true
+    (List.exists
+       (function
+         | Cmd.Http_post
+             {
+               req =
+                 Cmd.Post_connector_unbind
+                   { connector = "slack-eng"; channel_id = "C01ENG"; _ };
+               _;
+             } ->
+             true
+         | _ -> false)
+       unbind_cmds);
+
+  (* 5f. Harness_overrule dive callsites start empty, reject 63-hex & task IDs, accept exact 64-hex *)
+  let m_vdive_check =
+    {
+      base with
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Work;
+          dive_stack = [ Nav.Dive_work (Nav.Verification_dive "req-1") ];
+        };
+    }
+  in
+  let m_tdive_check =
+    {
+      base with
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Work;
+          dive_stack = [ Nav.Dive_work (Nav.Task_dive "task-9") ];
+        };
+    }
+  in
+  List.iter
+    (fun (label, m_src, k_ev) ->
+      let m_o, _ = step m_src k_ev in
+      Alcotest.(check bool) label true
+        (Option.equal Nav.equal_overlay m_o.nav.overlay
+           (Some (Nav.Inline_action (Nav.Harness_overrule "")))))
+    [
+      ("Verification_dive [h] opens empty Harness_overrule", m_vdive_check, char_key "h");
+      ("Verification_dive [X] opens empty Harness_overrule", m_vdive_check, char_key ~shift:true "X");
+      ("Task_dive [h] opens empty Harness_overrule", m_tdive_check, char_key "h");
+      ("Task_dive [X] opens empty Harness_overrule", m_tdive_check, char_key ~shift:true "X");
+    ];
+  let m_ho, _ = Update_nav.open_inline_modal base (Nav.Harness_overrule "") in
+  let set_ho_hash hash_val =
+    {
+      m_ho with
+      inline_modal =
+        Option.map
+          (fun (md : Model.inline_modal_state) ->
+            {
+              md with
+              fields =
+                List.map
+                  (fun (f : Model.modal_form_field) ->
+                    if String.equal f.key "notes_hash" then
+                      { f with value = hash_val }
+                    else if String.equal f.key "verdict" then
+                      { f with value = "approve" }
+                    else if String.equal f.key "reason" then
+                      { f with value = "override" }
+                    else f)
+                  md.fields;
+            })
+          m_ho.inline_modal;
+    }
+  in
+  let hash63 = String.make 63 'a' in
+  let hash64 =
+    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  in
+  List.iter
+    (fun (label, bad_val) ->
+      let m_err, bad_cmds = step (set_ho_hash bad_val) (mk_key Keymap.Input.Enter) in
+      Alcotest.(check int) (label ^ " emits 0 cmds") 0 (List.length bad_cmds);
+      Alcotest.(check bool) (label ^ " shows 64-hex modal error") true
+        (match m_err.inline_modal with
+        | Some (md : Model.inline_modal_state) ->
+            Option.equal String.equal md.error
+              (Some "notes_hash must be 64 lowercase hex characters")
+        | None -> false))
+    [ ("non-hex task ID", "task-123"); ("63-char hex", hash63) ];
+  let _, ok_cmds = step (set_ho_hash hash64) (mk_key Keymap.Input.Enter) in
+  Alcotest.(check bool) "Harness_overrule accepts valid 64-char lowercase hex"
+    true
+    (List.exists
+       (function
+         | Cmd.Http_post { req = Cmd.Post_harness_overrule { notes_hash; _ }; _ }
+           when String.equal notes_hash hash64 ->
+             true
+         | _ -> false)
+       ok_cmds);
+
+  (* 5g. Keeper_tool_calls JSON detail scrolls via Tab+Down in Dive & PgDn in Split *)
+  let big_fields =
+    List.init 40 (fun i -> (Printf.sprintf "k%02d" i, `String "val"))
+  in
+  let tc_page : Wire_keeper_context.keeper_tool_calls_page =
+    {
+      keeper = "alpha";
+      count = 1;
+      health = Some "healthy";
+      stale_reason = None;
+      coverage_gaps_count = 0;
+      entries =
+        [
+          {
+            ts_unix = 1795252000.0;
+            tool = "masc_board_post";
+            execution_id = Some "exec-big";
+            tool_use_id = None;
+            turn_kind = Some "direct";
+            duration_ms = Some 12.0;
+            ok = Some true;
+            disposition = Some "completed";
+            failure_class = None;
+            execution_mode = None;
+            batch_index = None;
+            batch_size = None;
+            definition_source = Some "builtin";
+            input = `Assoc big_fields;
+            output = "{}";
+            original_bytes = Some 512;
+            truncated_to = None;
+            raw = `Null;
+          };
+        ];
+    }
+  in
+  let kc_big =
+    Keeper_context_store.apply_tool_calls ~observed_at:t0 ~keeper:"alpha"
+      tc_page base.keeper_context
+  in
+  let m_k_dive =
+    {
+      base with
+      keeper_context = kc_big;
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Keepers;
+          dive_stack =
+            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_tool_calls } ];
+          pane_index = 0;
+        };
+    }
+  in
+  let m_k_tab, _ = step m_k_dive (mk_key Keymap.Input.Tab) in
+  Alcotest.(check int) "Dive Keeper_tool_calls Tab focuses JSON detail pane (1)"
+    1 m_k_tab.nav.pane_index;
+  let m_k_dn, _ = step m_k_tab (mk_key Keymap.Input.Down) in
+  Alcotest.(check bool) "Dive Keeper_tool_calls Down on pane 1 scrolls JSON detail"
+    true
+    ((Keeper_context_store.get_keeper ~keeper:"alpha" m_k_dn.keeper_context)
+       .call_detail_scroll_offset
+    > 0);
+
+  (* 5h. Keymap SSOT registers residual hotkeys (A/N/g/Ctrl+E/Ctrl+X) with zero collisions *)
+  Alcotest.(check int) "Keymap.collisions () = 0 after SSOT additions" 0
+    (List.length (Keymap.collisions ()));
+  let all_help_keys =
+    Keymap.help_entries ~scope_chain:Keymap.all_scopes ~lang:Say.Lang_en
+    |> List.concat_map (fun (g : Keymap.help_group) ->
+           List.concat_map (fun (e : Keymap.help_entry) -> e.keys) g.entries)
+  in
+  List.iter
+    (fun k ->
+      Alcotest.(check bool)
+        (Printf.sprintf "Keymap SSOT exposes %s in Help" k)
+        true
+        (List.exists (String.equal k) all_help_keys))
+    [ "A"; "N"; "g"; "Ctrl+E"; "Ctrl+X" ];
+
+  (* 5i. Sidebar focus isolation (P1): l focuses body, g jumps to sidebar top on
+     Memory, and mutating screen-body hotkeys are strict no-ops while sidebar has focus *)
+  let m_sb_mem =
+    let m_mem0 =
+      {
+        base with
+        nav =
+          {
+            base.nav with
+            workspace = Nav.Knowledge;
+            sidebar_open = Some true;
+            sidebar_focused = true;
+            sidebar_cursor = Nav.menu_item_index (Nav.Menu_knowledge Nav.Knowledge_memory);
+          };
+        knowledge = Knowledge_store.set_tab Nav.Knowledge_memory base.knowledge;
+      }
+    in
+    m_mem0
+  in
+  let mode0 = m_sb_mem.knowledge.memory_flow_mode in
+  let m_sb_g, g_cmds = step m_sb_mem (char_key "g") in
+  Alcotest.(check bool) "Sidebar focused: 'g' on Knowledge_memory stays in sidebar & jumps to top (0)"
+    true
+    (Model.sidebar_has_focus m_sb_g && m_sb_g.nav.sidebar_cursor = 0
+     && m_sb_g.knowledge.memory_flow_mode = mode0);
+  ignore g_cmds;
+  let m_sb_rt =
+    {
+      base with
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Runtime;
+          sidebar_open = Some true;
+          sidebar_focused = true;
+          sidebar_cursor = Nav.menu_item_index (Nav.Menu_runtime Nav.Runtime_connectors);
+        };
+      runtime = Runtime_store.set_tab Nav.Runtime_connectors base.runtime;
+    }
+  in
+  let m_sb_l, l_cmds = step m_sb_rt (char_key "l") in
+  Alcotest.(check bool) "Sidebar focused: vim 'l' focuses body instead of triggering Account_login"
+    true
+    ((not (Model.sidebar_has_focus m_sb_l))
+     && Option.is_none m_sb_l.nav.overlay
+     && Nav.equal_workspace m_sb_l.nav.workspace Nav.Runtime);
+  ignore l_cmds;
+  let sidebar_guarded_surfaces =
+    [
+      ( "Runtime_connectors"
+      , m_sb_rt
+      , [ char_key ~shift:true "U"; char_key "n"; char_key ~shift:true "K"; char_key "f" ] );
+      ( "Knowledge_board"
+      , {
+          m_board with
+          nav =
+            {
+              m_board.nav with
+              sidebar_open = Some true;
+              sidebar_focused = true;
+              sidebar_cursor = Nav.menu_item_index (Nav.Menu_knowledge Nav.Knowledge_board);
+            };
+        }
+      , [ char_key "+"; char_key "-"; char_key "h"; char_key "c"; char_key ~shift:true "S"; char_key " " ] );
+      ( "Knowledge_artifacts"
+      , {
+          base with
+          nav =
+            {
+              base.nav with
+              workspace = Nav.Knowledge;
+              sidebar_open = Some true;
+              sidebar_focused = true;
+              sidebar_cursor = Nav.menu_item_index (Nav.Menu_knowledge Nav.Knowledge_artifacts);
+            };
+          knowledge = Knowledge_store.set_tab Nav.Knowledge_artifacts base.knowledge;
+        }
+      , [ char_key ~shift:true "P"; char_key "c"; char_key "e"; char_key "v"; char_key ~shift:true "H" ] );
+      ( "Work_pipeline"
+      , {
+          m_pipe with
+          nav =
+            {
+              m_pipe.nav with
+              sidebar_open = Some true;
+              sidebar_focused = true;
+              sidebar_cursor = Nav.menu_item_index (Nav.Menu_work Nav.Work_pipeline);
+            };
+        }
+      , [ char_key "a"; char_key "x"; char_key "c"; char_key "v"; char_key "h" ] );
+    ]
+  in
+  List.iter
+    (fun (surf, m_s, keys) ->
+      List.iter
+        (fun kev ->
+          let m_after, cmds = step m_s kev in
+          Alcotest.(check int)
+            (Printf.sprintf "Sidebar focus guard %s emits 0 cmds" surf)
+            0 (List.length (Cmd.flatten cmds));
+          Alcotest.(check bool)
+            (Printf.sprintf "Sidebar focus guard %s keeps sidebar focus & no overlay" surf)
+            true
+            (Model.sidebar_has_focus m_after && Option.is_none m_after.nav.overlay))
+        keys)
+    sidebar_guarded_surfaces;
+
+  (* 5j. Compact-viewport Menu_keeper_tab activation pushes Dive_keeper (P2) *)
+  let m_cmp_kp = populated_model ~cols:90 ~rows:28 ~lang:Say.Lang_en () in
+  let m_cmp_preview, _ =
+    Update_nav.navigate_menu_target ~keep_sidebar_focus:true m_cmp_kp
+      (Nav.Menu_keeper_tab Nav.Keeper_context)
+  in
+  Alcotest.(check bool) "Compact live preview does NOT push Dive_keeper prematurely"
+    true (Option.is_none (Model.active_dive m_cmp_preview));
+  let m_cmp_act, _ =
+    Update_nav.navigate_menu_target ~keep_sidebar_focus:false m_cmp_kp
+      (Nav.Menu_keeper_tab Nav.Keeper_context)
+  in
+  Alcotest.(check bool) "Compact Menu_keeper_tab activation pushes Dive_keeper Keeper_context"
+    true
+    (match Model.active_dive m_cmp_act with
+     | Some (Nav.Dive_keeper { tab = Nav.Keeper_context; _ }) -> true
+     | _ -> false)
 let () =
   Alcotest.run "masc_tui_keymap_matrix"
     [
@@ -5572,7 +6333,7 @@ let () =
         ] );
       ( "axis_a_screen_dive_x_keys"
       , [
-          Alcotest.test_case "34 contexts x 20 keys (680 cases)" `Quick
+          Alcotest.test_case "38 contexts x 20 keys (760 cases)" `Quick
             test_axis_a_screen_dive_matrix;
         ] );
       ( "axis_b_overlay_focus_x_isolation"
@@ -5604,5 +6365,11 @@ let () =
           Alcotest.test_case
             "Pillar 3: Keeper chat loading/empty left-align & Korean IME guard"
             `Quick test_pillar3_keeper_chat_empty_loading_and_korean_ime;
+        ] );
+      ( "wave2_parity_reachability"
+      , [
+          Alcotest.test_case
+            "100% Menu Reachability Matrix (Keyboard + Left Menu Rail + Zero Space Collisions)"
+            `Quick test_wave2_100pct_menu_reachability_matrix;
         ] );
     ]

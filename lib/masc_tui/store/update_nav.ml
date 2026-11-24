@@ -420,6 +420,8 @@ let sync_config_for_keeper_tab ~name ~tab (config : Config_store.t) =
         Config_store.set_tab Nav.Settings_keepers_companies config
       else config
   | Nav.Keeper_chat
+  | Nav.Keeper_context
+  | Nav.Keeper_tool_calls
   | Nav.Keeper_memory
   | Nav.Keeper_work_candle
   | Nav.Keeper_sandbox ->
@@ -428,6 +430,8 @@ let sync_config_for_keeper_tab ~name ~tab (config : Config_store.t) =
 let sync_fleet_for_keeper_tab ~name ~tab fleet =
   match tab with
   | Nav.Keeper_chat -> Fleet_store.mark_chat_history_loading ~keeper:name fleet
+  | Nav.Keeper_context
+  | Nav.Keeper_tool_calls
   | Nav.Keeper_memory
   | Nav.Keeper_work_candle
   | Nav.Keeper_sandbox
@@ -452,7 +456,12 @@ let sync_config_for_keeper_view (m : Model.t) =
             config = sync_config_for_keeper_tab ~name ~tab m.config;
             fleet = sync_fleet_for_keeper_tab ~name ~tab m.fleet;
           }
-      | Some (Nav.Dive_work _ | Nav.Dive_knowledge _ | Nav.Dive_infra _) -> m
+      | Some
+          ( Nav.Dive_work _
+          | Nav.Dive_knowledge _
+          | Nav.Dive_runtime _
+          | Nav.Dive_infra _ ) ->
+          m
       | None -> (
           match m.nav.workspace, Fleet_store.selected_keeper_summary m.fleet with
           | Nav.Keepers, Some k ->
@@ -532,7 +541,6 @@ let enter_sidebar_focus (m : Model.t) =
     config = Config_store.cancel_edit_field m.config;
     inline_modal = None;
   }
-
 let switch_workspace (m : Model.t) ws =
   let nav =
     {
@@ -555,6 +563,8 @@ let switch_workspace (m : Model.t) ws =
     |> Knowledge_store.close_memory_reading
     |> Knowledge_store.close_memory_diagram
     |> Knowledge_store.clear_pending_wiki_edit
+    |> Knowledge_store.clear_armed_vote
+    |> Knowledge_store.clear_pending_artifact_revision
   in
   let next =
     { m with nav; drafts; config; knowledge; inline_modal = None }
@@ -653,6 +663,98 @@ let select_settings_tab (m : Model.t) tab =
   let next = { m with nav; config } in
   (next, View_fetches.fetches_for_current_view next)
 
+let push_dive (m : Model.t) dive =
+  let nav =
+    {
+      m.nav with
+      dive_stack = dive :: m.nav.dive_stack;
+      overlay = None;
+      pane_index = 0;
+      zoomed = false;
+      filter_focused = false;
+      sidebar_focused = false;
+      sidebar_open = close_drawer_if_floating m;
+      dive_scroll_offset = 0;
+    }
+  in
+  let drafts =
+    match dive with
+    | Nav.Dive_keeper { name; _ } ->
+        m.drafts |> Drafts.set_active_keeper name |> Drafts.set_focus false
+    | Nav.Dive_work _
+    | Nav.Dive_knowledge _
+    | Nav.Dive_runtime _
+    | Nav.Dive_infra _ ->
+        Drafts.set_focus false m.drafts
+  in
+  let fleet =
+    match dive with
+    | Nav.Dive_keeper { name; tab } ->
+        m.fleet
+        |> Fleet_store.select_keeper name
+        |> Fleet_store.set_keeper_dive_tab tab
+        |> sync_fleet_for_keeper_tab ~name ~tab
+    | Nav.Dive_work _
+    | Nav.Dive_knowledge _
+    | Nav.Dive_runtime _
+    | Nav.Dive_infra _ ->
+        m.fleet
+  in
+  let config =
+    match dive with
+    | Nav.Dive_keeper { name; tab } ->
+        sync_config_for_keeper_tab ~name ~tab m.config
+    | Nav.Dive_work _
+    | Nav.Dive_knowledge _
+    | Nav.Dive_runtime _
+    | Nav.Dive_infra _ ->
+        Config_store.cancel_edit_field m.config
+  in
+  let knowledge =
+    let base =
+      m.knowledge |> Knowledge_store.clear_armed_vote
+      |> Knowledge_store.clear_pending_artifact_revision
+    in
+    match dive with
+    | Nav.Dive_keeper { name; tab = Nav.Keeper_memory } ->
+        base
+        |> Knowledge_store.close_memory_diagram
+        |> Knowledge_store.set_memory_diff_keeper (Some name)
+    | Nav.Dive_knowledge (Nav.Memory_diff_dive { keeper; _ }) ->
+        if Option.equal String.equal base.memory_diff_keeper keeper then
+          base
+          |> Knowledge_store.close_memory_reading
+          |> Knowledge_store.close_memory_diagram
+        else
+          base
+          |> Knowledge_store.close_memory_diagram
+          |> Knowledge_store.set_memory_diff_keeper keeper
+    | Nav.Dive_keeper
+        {
+          tab =
+            ( Nav.Keeper_chat
+            | Nav.Keeper_context
+            | Nav.Keeper_tool_calls
+            | Nav.Keeper_work_candle
+            | Nav.Keeper_sandbox
+            | Nav.Keeper_config );
+          _;
+        }
+    | Nav.Dive_work _
+    | Nav.Dive_knowledge
+        (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
+    | Nav.Dive_runtime _
+    | Nav.Dive_infra _ ->
+        base
+        |> Knowledge_store.close_memory_reading
+        |> Knowledge_store.close_memory_diagram
+        |> Knowledge_store.clear_pending_wiki_edit
+  in
+  let next =
+    { m with nav; drafts; fleet; config; knowledge; inline_modal = None }
+  in
+  (next, View_fetches.fetches_for_current_view next)
+
 let navigate_menu_target ?(keep_sidebar_focus = false) (m : Model.t)
     (target : Nav.menu_target) =
   let preserve_sidebar (next, cmds) =
@@ -692,6 +794,26 @@ let navigate_menu_target ?(keep_sidebar_focus = false) (m : Model.t)
       in
       switch_workspace { m with knowledge } Nav.Knowledge |> preserve_sidebar
   | Nav.Menu_keepers -> switch_workspace m Nav.Keepers |> preserve_sidebar
+  | Nav.Menu_keeper_tab tab ->
+      let fleet = Fleet_store.set_keeper_dive_tab tab m.fleet in
+      let m1, cmds1 = switch_workspace { m with fleet } Nav.Keepers in
+      let next, cmds =
+        match Fleet_store.selected_keeper_summary m1.fleet with
+        | Some _ when Model.focusable_pane_count m1 >= 2 ->
+            let m2 =
+              { m1 with nav = { m1.nav with pane_index = 1 } }
+              |> sync_config_for_keeper_view
+              |> Model.sync_sidebar_cursor
+            in
+            (m2, cmds1 @ View_fetches.fetches_for_current_view m2)
+        | Some k when not keep_sidebar_focus ->
+            let m2, cmds2 =
+              push_dive m1 (Nav.Dive_keeper { name = k.name; tab })
+            in
+            (m2, cmds1 @ cmds2)
+        | Some _ | None -> (m1, cmds1)
+      in
+      preserve_sidebar (next, cmds)
   | Nav.Menu_runtime tab ->
       let runtime =
         if Nav.equal_runtime_tab m.runtime.active_tab tab then m.runtime
@@ -780,11 +902,13 @@ let open_inline_modal (m : Model.t) kind =
     | ( Nav.Btw_query
       | Nav.Gate_reject _
       | Nav.Verification_reject _
+      | Nav.Harness_overrule _
       | Nav.Task_cancel _
       | Nav.Schedule_form
       | Nav.Connector_form
       | Nav.Repo_add_form
-      | Nav.Board_new_post )
+      | Nav.Board_new_post
+      | Nav.Board_comment _ )
       , ( Drafts.Btw_idle
         | Drafts.Btw_sending _
         | Drafts.Btw_streaming _
@@ -836,81 +960,6 @@ let open_palette (m : Model.t) mode =
     | Model.Palette_commands | Model.Palette_keepers -> []
   in
   (next, extra_cmds)
-
-let push_dive (m : Model.t) dive =
-  let nav =
-    {
-      m.nav with
-      dive_stack = dive :: m.nav.dive_stack;
-      overlay = None;
-      pane_index = 0;
-      zoomed = false;
-      filter_focused = false;
-      sidebar_focused = false;
-      sidebar_open = close_drawer_if_floating m;
-      dive_scroll_offset = 0;
-    }
-  in
-  let drafts =
-    match dive with
-    | Nav.Dive_keeper { name; _ } ->
-        m.drafts |> Drafts.set_active_keeper name |> Drafts.set_focus false
-    | Nav.Dive_work _ | Nav.Dive_knowledge _ | Nav.Dive_infra _ ->
-        Drafts.set_focus false m.drafts
-  in
-  let fleet =
-    match dive with
-    | Nav.Dive_keeper { name; tab } ->
-        m.fleet
-        |> Fleet_store.select_keeper name
-        |> Fleet_store.set_keeper_dive_tab tab
-        |> sync_fleet_for_keeper_tab ~name ~tab
-    | Nav.Dive_work _ | Nav.Dive_knowledge _ | Nav.Dive_infra _ -> m.fleet
-  in
-  let config =
-    match dive with
-    | Nav.Dive_keeper { name; tab } ->
-        sync_config_for_keeper_tab ~name ~tab m.config
-    | Nav.Dive_work _ | Nav.Dive_knowledge _ | Nav.Dive_infra _ ->
-        Config_store.cancel_edit_field m.config
-  in
-  let knowledge =
-    match dive with
-    | Nav.Dive_keeper { name; tab = Nav.Keeper_memory } ->
-        m.knowledge
-        |> Knowledge_store.close_memory_diagram
-        |> Knowledge_store.set_memory_diff_keeper (Some name)
-    | Nav.Dive_knowledge (Nav.Memory_diff_dive { keeper; _ }) ->
-        if Option.equal String.equal m.knowledge.memory_diff_keeper keeper then
-          m.knowledge
-          |> Knowledge_store.close_memory_reading
-          |> Knowledge_store.close_memory_diagram
-        else
-          m.knowledge
-          |> Knowledge_store.close_memory_diagram
-          |> Knowledge_store.set_memory_diff_keeper keeper
-    | Nav.Dive_keeper
-        {
-          tab =
-            ( Nav.Keeper_chat
-            | Nav.Keeper_work_candle
-            | Nav.Keeper_sandbox
-            | Nav.Keeper_config );
-          _;
-        }
-    | Nav.Dive_work _
-    | Nav.Dive_knowledge
-        (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
-    | Nav.Dive_infra _ ->
-        m.knowledge
-        |> Knowledge_store.close_memory_reading
-        |> Knowledge_store.close_memory_diagram
-        |> Knowledge_store.clear_pending_wiki_edit
-  in
-  let next =
-    { m with nav; drafts; fleet; config; knowledge; inline_modal = None }
-  in
-  (next, View_fetches.fetches_for_current_view next)
 
 let cycle_sub_tab (m : Model.t) dir =
   match m.nav.overlay with
@@ -979,6 +1028,8 @@ let cycle_sub_tab (m : Model.t) dir =
                 |> Knowledge_store.close_memory_diagram
                 |> Knowledge_store.set_memory_diff_keeper (Some name)
             | Nav.Keeper_chat
+            | Nav.Keeper_context
+            | Nav.Keeper_tool_calls
             | Nav.Keeper_work_candle
             | Nav.Keeper_sandbox
             | Nav.Keeper_config ->
@@ -988,7 +1039,11 @@ let cycle_sub_tab (m : Model.t) dir =
           in
           let next = { m with nav; drafts; fleet; config; knowledge } in
           (next, View_fetches.fetches_for_current_view next)
-      | (Nav.Dive_work _ | Nav.Dive_knowledge _ | Nav.Dive_infra _) :: _ ->
+      | ( Nav.Dive_work _
+        | Nav.Dive_knowledge _
+        | Nav.Dive_runtime _
+        | Nav.Dive_infra _ )
+        :: _ ->
           (m, [])
       | [] -> (
           match m.nav.workspace with
@@ -1049,15 +1104,26 @@ let current_filter_query (m : Model.t) =
       | Nav.Inline_action _
       | Nav.Help
       | Nav.System_gate _ )
-  | None ->
-      if Model.is_keeper_config_active m then m.config.search_query
-      else
-        match m.nav.workspace with
-        | Nav.Pulse | Nav.Keepers -> m.fleet.filter_query
-        | Nav.Work -> m.work.filter_query
-        | Nav.Knowledge -> m.knowledge.filter_query
-        | Nav.Runtime -> m.runtime.filter_query
-        | Nav.Infra -> m.infra.filter_query
+  | None -> (
+      match Model.active_dive m with
+      | Some (Nav.Dive_knowledge (Nav.Artifact_dive _)) ->
+          m.knowledge.artifact_search_query
+      | Some
+          ( Nav.Dive_keeper _
+          | Nav.Dive_work _
+          | Nav.Dive_knowledge
+              (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Memory_diff_dive _)
+          | Nav.Dive_runtime _
+          | Nav.Dive_infra _ )
+      | None ->
+          if Model.is_keeper_config_active m then m.config.search_query
+          else
+            match m.nav.workspace with
+            | Nav.Pulse | Nav.Keepers -> m.fleet.filter_query
+            | Nav.Work -> m.work.filter_query
+            | Nav.Knowledge -> m.knowledge.filter_query
+            | Nav.Runtime -> m.runtime.filter_query
+            | Nav.Infra -> m.infra.filter_query)
 
 (* The changes panel answers for one repository. When a step leaves the
    Repos cursor on a repository the slot does not answer for (a cursor move,
@@ -1101,23 +1167,34 @@ let set_active_filter_query q (m : Model.t) =
         | Nav.Inline_action _
         | Nav.Help
         | Nav.System_gate _ )
-    | None ->
-        if Model.is_keeper_config_active m then
-          {
-            m with
-            nav = { m.nav with dive_scroll_offset = 0 };
-            config = Config_store.set_search_query q m.config;
-          }
-        else
-          match m.nav.workspace with
-          | Nav.Pulse | Nav.Keepers ->
-              { m with fleet = Fleet_store.set_filter q m.fleet }
-          | Nav.Work -> { m with work = Work_store.set_filter q m.work }
-          | Nav.Knowledge ->
-              { m with knowledge = Knowledge_store.set_filter q m.knowledge }
-          | Nav.Runtime ->
-              { m with runtime = Runtime_store.set_filter q m.runtime }
-          | Nav.Infra -> { m with infra = Infra_store.set_filter q m.infra }
+    | None -> (
+        match Model.active_dive m with
+        | Some (Nav.Dive_knowledge (Nav.Artifact_dive _)) ->
+            { m with knowledge = Knowledge_store.set_artifact_search q m.knowledge }
+        | Some
+            ( Nav.Dive_keeper _
+            | Nav.Dive_work _
+            | Nav.Dive_knowledge
+                (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Memory_diff_dive _)
+            | Nav.Dive_runtime _
+            | Nav.Dive_infra _ )
+        | None ->
+            if Model.is_keeper_config_active m then
+              {
+                m with
+                nav = { m.nav with dive_scroll_offset = 0 };
+                config = Config_store.set_search_query q m.config;
+              }
+            else
+              match m.nav.workspace with
+              | Nav.Pulse | Nav.Keepers ->
+                  { m with fleet = Fleet_store.set_filter q m.fleet }
+              | Nav.Work -> { m with work = Work_store.set_filter q m.work }
+              | Nav.Knowledge ->
+                  { m with knowledge = Knowledge_store.set_filter q m.knowledge }
+              | Nav.Runtime ->
+                  { m with runtime = Runtime_store.set_filter q m.runtime }
+              | Nav.Infra -> { m with infra = Infra_store.set_filter q m.infra })
   in
   let max_pane = max 0 (Model.focusable_pane_count updated - 1) in
   follow_selected_repository
@@ -2043,6 +2120,7 @@ let selected_memory_reading ?(force_diff = false) ~keeper_opt
    where the key does something. *)
 type enter_plan =
   | Enter_noop
+  | Enter_keeper_action of Cmd.t list
   | Enter_push of Nav.dive
   | Enter_attention of Attention.entry
   | Enter_toggle_unreported_accounts
@@ -2062,8 +2140,60 @@ let memory_reading_plan ?force_diff ~keeper_opt ~otherwise (m : Model.t) =
     | Some entry -> Enter_open_memory_reading entry
     | None -> otherwise ()
 
+let keeper_enter_plan ~name ~tab (m : Model.t) : enter_plan =
+  let ks = Keeper_context_store.get_keeper ~keeper:name m.keeper_context in
+  match tab with
+  | Nav.Keeper_context
+    when Keeper_context_store.equal_context_subtab ks.subtab
+           Keeper_context_store.Ctx_exact_input -> (
+      match
+        Keeper_context_store.selected_turn_ref ks
+      , Keeper_context_store.selected_provider_part ks
+      with
+      | Some turn_ref, Some part ->
+          Enter_keeper_action
+            [
+              Cmd.Http_get
+                {
+                  epoch = m.epoch;
+                  req =
+                    Cmd.Get_keeper_provider_input_part
+                      { keeper = name; turn_ref; index = part.part_index };
+                };
+            ]
+      | _ -> Enter_noop)
+  | Nav.Keeper_tool_calls -> (
+      match Keeper_context_store.selected_tool_call ks with
+      | Some { execution_id = Some execution_id; _ } ->
+          Enter_keeper_action
+            [
+              Cmd.Http_get
+                {
+                  epoch = m.epoch;
+                  req =
+                    Cmd.Get_keeper_tool_result
+                      {
+                        keeper = name;
+                        execution_id;
+                        offset = Some 0;
+                        max_bytes = Some 16384;
+                        source_id = None;
+                      };
+                };
+            ]
+      | Some { execution_id = None; _ } | None -> Enter_noop)
+  | Nav.Keeper_chat
+  | Nav.Keeper_context
+  | Nav.Keeper_memory
+  | Nav.Keeper_work_candle
+  | Nav.Keeper_sandbox
+  | Nav.Keeper_config ->
+      Enter_noop
+
 let enter_plan (m : Model.t) : enter_plan =
-  (* Never push duplicate or cross-workspace dives when already inside a dive! *)
+  (* Never push duplicate or cross-workspace dives when already inside a dive!
+     Inside Keeper_context (Exact_input) or Keeper_tool_calls, Enter fetches
+     the selected provider-input part or full tool-result. *)
   match Model.active_dive m with
   | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory }) ->
       memory_reading_plan ~keeper_opt:(Some name)
@@ -2080,18 +2210,24 @@ let enter_plan (m : Model.t) : enter_plan =
               m.knowledge;
         }
   | Some
-      ( Nav.Dive_keeper
-          {
-            tab =
-              ( Nav.Keeper_chat
-              | Nav.Keeper_work_candle
-              | Nav.Keeper_sandbox
-              | Nav.Keeper_config );
-            _;
-          }
-      | Nav.Dive_work _
+      (Nav.Dive_keeper
+         { name; tab = (Nav.Keeper_context | Nav.Keeper_tool_calls) as tab }) ->
+      keeper_enter_plan ~name ~tab m
+  | Some
+      (Nav.Dive_keeper
+         {
+           tab =
+             ( Nav.Keeper_chat
+             | Nav.Keeper_work_candle
+             | Nav.Keeper_sandbox
+             | Nav.Keeper_config );
+           _;
+         })
+  | Some
+      ( Nav.Dive_work _
       | Nav.Dive_knowledge
           (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
+      | Nav.Dive_runtime _
       | Nav.Dive_infra _ ) ->
       Enter_noop
   | None -> (
@@ -2119,6 +2255,13 @@ let enter_plan (m : Model.t) : enter_plan =
               | None -> Enter_noop))
       | Nav.Keepers -> (
           match Fleet_store.selected_keeper_summary m.fleet with
+          | Some k
+            when (m.nav.pane_index = 1 || m.nav.zoomed)
+                 && (Nav.equal_keeper_tab m.fleet.keeper_dive_tab
+                       Nav.Keeper_context
+                    || Nav.equal_keeper_tab m.fleet.keeper_dive_tab
+                         Nav.Keeper_tool_calls) ->
+              keeper_enter_plan ~name:k.name ~tab:m.fleet.keeper_dive_tab m
           | Some k ->
               if
                 (m.nav.pane_index = 1 || m.nav.zoomed)
@@ -2147,10 +2290,11 @@ let enter_plan (m : Model.t) : enter_plan =
                   match Work_store.selected_goal m.work with
                   | Some g -> Enter_push (Nav.Dive_work (Nav.Goal_dive g.id))
                   | None -> Enter_noop))
-          | Nav.Work_tasks_schedules -> (
+          | Nav.Work_tasks -> (
               match Work_store.selected_task m.work with
               | Some task -> Enter_push (Nav.Dive_work (Nav.Task_dive task.id))
               | None -> Enter_noop)
+          | Nav.Work_schedules -> Enter_noop
           | Nav.Work_inbox -> (
               match
                 Attention.current_filtered_item ~query:m.work.filter_query
@@ -2245,7 +2389,19 @@ let enter_plan (m : Model.t) : enter_plan =
                     (Nav.Dive_keeper
                        { name = row.keeper; tab = Nav.Keeper_work_candle })
               | None -> Enter_noop)
-          | Nav.Runtime_tools_connectors | Nav.Runtime_addons_browser ->
+          | Nav.Runtime_tools_usage -> (
+              match m.runtime.tools_subview with
+              | Runtime_store.Tools_catalog_tree -> (
+                  match Runtime_store.selected_tool_catalog_entry m.runtime with
+                  | Some entry ->
+                      Enter_push (Nav.Dive_runtime (Nav.Tool_dive entry.name))
+                  | None -> Enter_noop)
+              | Runtime_store.Tools_usage_calls
+              | Runtime_store.Tools_keeper_skills ->
+                  Enter_noop)
+          | Nav.Runtime_fusion
+          | Nav.Runtime_connectors
+          | Nav.Runtime_addons_browser ->
               Enter_noop)
       | Nav.Infra -> (
           match m.infra.active_tab with
@@ -2259,6 +2415,7 @@ let enter_plan (m : Model.t) : enter_plan =
 let dive_selected (m : Model.t) =
   match enter_plan m with
   | Enter_noop -> (m, [])
+  | Enter_keeper_action cmds -> (m, cmds)
   | Enter_push dive -> push_dive m dive
   | Enter_attention entry -> dive_attention_entry m entry
   | Enter_toggle_unreported_accounts ->
@@ -2309,6 +2466,7 @@ let enter_hint (m : Model.t) =
   else
     match enter_plan m with
     | Enter_noop -> Enter_hint_hidden
+    | Enter_keeper_action _
     | Enter_push _ | Enter_attention _ | Enter_toggle_unreported_accounts
     | Enter_fetch_memory_diff | Enter_open_memory_reading _
     | Enter_scope_memory _ ->
@@ -2341,10 +2499,12 @@ let classify_inline_form (modal : Model.inline_modal_state) : inline_form_kind =
   | ( Nav.Btw_query
     | Nav.Gate_reject _
     | Nav.Verification_reject _
+    | Nav.Harness_overrule _
     | Nav.Task_cancel _
     | Nav.Schedule_form
     | Nav.Connector_form
-    | Nav.Repo_add_form ) as std ->
+    | Nav.Repo_add_form
+    | Nav.Board_comment _ ) as std ->
       Form_standard std
 
 (* The Schedule form's operator text. A delay is a whole count and one unit,
@@ -2489,6 +2649,47 @@ let submit_inline_modal ~now (m : Model.t) =
                               };
                         };
                     ] ))
+          | Form_standard (Nav.Harness_overrule default_hash) -> (
+              let notes_hash_raw =
+                String.trim (Model.modal_field_value ~key:"notes_hash" modal)
+              in
+              let notes_hash =
+                if String.equal notes_hash_raw "" then String.trim default_hash
+                else notes_hash_raw
+              in
+              let is_valid_hex_hash s =
+                Int.equal (String.length s) 64
+                && String.for_all
+                     (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false)
+                     s
+              in
+              let verdict_raw =
+                String.lowercase_ascii
+                  (Model.modal_field_value ~key:"verdict" modal)
+              in
+              let reason = Model.modal_field_value ~key:"reason" modal in
+              if not (is_valid_hex_hash notes_hash) then
+                set_modal_error
+                  "notes_hash must be 64 lowercase hex characters"
+              else
+                match verdict_raw with
+                | "approve" | "reject" ->
+                    let verdict =
+                      if String.equal verdict_raw "reject" then `Reject
+                      else `Approve
+                    in
+                    ( mark_submitting m
+                    , [
+                        Cmd.Http_post
+                          {
+                            epoch = m.epoch;
+                            req =
+                              Cmd.Post_harness_overrule
+                                { notes_hash; verdict; reason };
+                          };
+                      ] )
+                | _ ->
+                    set_modal_error "Verdict must be 'approve' or 'reject'")
           | Form_standard (Nav.Task_cancel task_id) -> (
               let reason_raw = Model.modal_field_value ~key:"reason" modal in
               let reason =
@@ -2534,8 +2735,18 @@ let submit_inline_modal ~now (m : Model.t) =
                     ] ))
           | Form_standard Nav.Connector_form ->
               let connector = Model.modal_field_value ~key:"connector" modal in
-              let channel_id = Model.modal_field_value ~key:"channel" modal in
-              let keeper_name = Model.modal_field_value ~key:"keeper" modal in
+              let channel_id =
+                let cid = Model.modal_field_value ~key:"channel_id" modal in
+                if String.equal cid "" then
+                  Model.modal_field_value ~key:"channel" modal
+                else cid
+              in
+              let keeper_name =
+                let kn = Model.modal_field_value ~key:"keeper_name" modal in
+                if String.equal kn "" then
+                  Model.modal_field_value ~key:"keeper" modal
+                else kn
+              in
               ( mark_submitting m
               , [
                   Cmd.Http_post
@@ -2544,6 +2755,17 @@ let submit_inline_modal ~now (m : Model.t) =
                       req =
                         Cmd.Post_connector_bind
                           { connector; channel_id; keeper_name };
+                    };
+                ] )
+          | Form_standard (Nav.Board_comment { post_id; parent_id }) ->
+              let content = Model.modal_field_value ~key:"content" modal in
+              ( mark_submitting m
+              , [
+                  Cmd.Http_post
+                    {
+                      epoch = m.epoch;
+                      req =
+                        Cmd.Post_board_comment { post_id; content; parent_id };
                     };
                 ] )
           | Form_standard Nav.Repo_add_form ->
@@ -2983,14 +3205,17 @@ let estimated_viewport_rows (m : Model.t) =
       | Nav.Work -> (
           match m.work.active_tab with
           | Nav.Work_pipeline -> min 10 (max 4 (rows - 14))
-          | Nav.Work_tasks_schedules -> max 4 (rows - 18)
+          | Nav.Work_tasks | Nav.Work_schedules -> max 4 (rows - 14)
           | Nav.Work_inbox | Nav.Work_candle_scorecard -> max 4 (rows - 12))
       | Nav.Knowledge -> max 4 (rows - 14)
       | Nav.Runtime -> (
           match m.runtime.active_tab with
           | Nav.Runtime_efficiency_spend -> max 4 ((rows - 10) * 40 / 100)
-          | Nav.Runtime_tools_connectors -> max 4 (rows - 21)
-          | Nav.Runtime_addons_browser -> max 4 (rows - 14)
+          | Nav.Runtime_tools_usage -> max 4 (rows - 16)
+          | Nav.Runtime_fusion
+          | Nav.Runtime_connectors
+          | Nav.Runtime_addons_browser ->
+              max 4 (rows - 14)
           | Nav.Runtime_quotas_credits | Nav.Runtime_failover_lanes ->
               max 4 (rows - 11))
       | Nav.Infra -> max 4 (rows - 12))
@@ -3499,6 +3724,36 @@ let help_max_scroll (m : Model.t) =
             | Keymap.Toggle_zoom
             | Keymap.Cycle_memory_view
             | Keymap.Toggle_memory_sort
+            | Keymap.Cycle_signal_or_source
+            | Keymap.Cycle_sort_or_speak
+            | Keymap.Cycle_hearth_or_overrule
+            | Keymap.Cycle_time_window
+            | Keymap.Cycle_view_mode
+            | Keymap.Context_primary_action
+            | Keymap.Toggle_artifact_share
+            | Keymap.Step_revision _
+            | Keymap.Step_context_item _
+            | Keymap.Launch_fusion
+            | Keymap.Toggle_unreported
+            | Keymap.Unbind_connector
+            | Keymap.Entity_approve_or_assign
+            | Keymap.Entity_reject_or_cancel
+            | Keymap.Edit_or_export
+            | Keymap.Configure_provider_key
+            | Keymap.Account_login
+            | Keymap.Poll_account_login
+            | Keymap.Copy_hash
+            | Keymap.Dismiss_errors
+            | Keymap.Board_vote _
+            | Keymap.Toggle_memory_scope
+            | Keymap.Copy_public_url
+            | Keymap.Probe_sandbox
+            | Keymap.Refresh_browser_tabs
+            | Keymap.Open_memory_recovery
+            | Keymap.Search_prev_match
+            | Keymap.Toggle_memory_chart
+            | Keymap.Open_external_editor
+            | Keymap.Interrupt_turn
             | Keymap.Quit_app ->
                 acc + 1)
           0 grp.entries
@@ -3707,9 +3962,12 @@ let knowledge_detail_max_scroll (m : Model.t) =
       match Knowledge_store.selected_artifact k with
       | None -> 0
       | Some a ->
-          let _, right_rect =
-            Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
-              ~left_ratio:0.56 ~top_ratio:0.54 bp body_after_bar
+          let right_rect =
+            if m.nav.zoomed then body_after_bar
+            else
+              snd
+                (Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
+                   ~left_ratio:0.42 ~top_ratio:0.48 bp body_after_bar)
           in
           let inner = ui_card_inner right_rect in
           let band_h = if inner.h >= 7 then 2 else 1 in
@@ -3718,18 +3976,44 @@ let knowledge_detail_max_scroll (m : Model.t) =
               ~h:(max 0 (inner.h - band_h))
             |> ui_pad_content ~bp
           in
-          let content_h = max 1 content.h in
+          let doc_h = max 1 (content.h - 2) in
           let detail_opt = Knowledge_store.artifact_detail_for_entry a k in
-          let preview_lines =
-            Knowledge_store.artifact_preview_lines a detail_opt
+          let raw_body =
+            match detail_opt with Some d -> d.content | None -> ""
           in
-          (* ID, SHA-256, Author, Created, Summary, Actions as Screen_knowledge draws them. *)
-          let meta_rows = 6 in
+          let fmt = Wire_knowledge.artifact_format_of_entry a in
           let body_rows =
-            if preview_lines = [] then 0 else 1 + List.length preview_lines
+            if String.equal (String.trim raw_body) "" then 0
+            else
+              match (k.artifact_view_mode, fmt) with
+              | `Raw_source, (`Html | `Markdown) ->
+                  List.length (String.split_on_char '\n' raw_body)
+              | `Document, `Html ->
+                  List.length
+                    (Masc_tui_ui.Html_doc.render_lines ~width:(max 1 content.w)
+                       ~theme ~lang:m.lang raw_body)
+              | `Document, `Markdown ->
+                  let is_json =
+                    String.starts_with ~prefix:"application/json"
+                      (String.lowercase_ascii (String.trim a.body.mime))
+                    || Filename.check_suffix
+                         (String.lowercase_ascii (String.trim a.title))
+                         ".json"
+                  in
+                  if is_json then
+                    match Yojson.Safe.from_string raw_body with
+                    | json ->
+                        List.length
+                          (String.split_on_char '\n'
+                             (Yojson.Safe.pretty_to_string json))
+                    | exception Yojson.Json_error _ ->
+                        List.length (String.split_on_char '\n' raw_body)
+                  else
+                    List.length
+                      (Masc_tui_ui.Markdown.render_lines ~width:(max 1 content.w)
+                         ~theme raw_body)
           in
-          let total_rows = meta_rows + body_rows in
-          max 0 (total_rows - content_h))
+          max 0 (body_rows - doc_h))
   | Nav.Knowledge_memory ->
       let right_rect =
         if m.nav.zoomed then body_after_bar
@@ -4013,7 +4297,7 @@ let work_detail_max_scroll (m : Model.t) =
                   markdown_max_scroll ~theme ~width:w ~height:md_h
                     (Chat_transcript.rewrite_masc_links_for_markdown
                        (g.measure ^ "\n\n" ^ g.procedure))))
-  | Nav.Work_tasks_schedules | Nav.Work_candle_scorecard -> 0
+  | Nav.Work_tasks | Nav.Work_schedules | Nav.Work_candle_scorecard -> 0
 
 let runtime_detail_max_scroll (m : Model.t) =
   let bp = ui_bp m in
@@ -4087,8 +4371,39 @@ let runtime_detail_max_scroll (m : Model.t) =
               (* gauge (1) + divider (1) = 2 rows before slot probes *)
               let avail_slot_rows = max 1 (body_area.h - 2) in
               max 0 (List.length lane.runtime_ids - avail_slot_rows))
+  | Nav.Runtime_tools_usage -> (
+      match m.runtime.tools_subview with
+      | Runtime_store.Tools_keeper_skills -> (
+          let body_rect =
+            match
+              Masc_tui_ui.Layout.split_v br
+                [ Masc_tui_ui.Layout.Fixed 1; Masc_tui_ui.Layout.Flex 1 ]
+            with
+            | [ _; b ] -> b
+            | _ -> br
+          in
+          let _, right_rect =
+            Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
+              ~left_ratio:0.52 ~top_ratio:0.50 bp body_rect
+          in
+          let rc = ui_card_inner right_rect |> ui_pad_content ~bp in
+          if Rect.is_empty rc then 0
+          else
+            match Observed.to_option m.runtime.skills with
+            | None -> 0
+            | Some sk ->
+                let hdr_rows =
+                  1
+                  + (if sk.rejections <> [] then 1 else 0)
+                  + (if sk.shadows <> [] then 1 else 0)
+                  + 1
+                in
+                let vis = max 1 (rc.h - hdr_rows) in
+                max 0 (List.length sk.surfaces - vis))
+      | Runtime_store.Tools_usage_calls | Runtime_store.Tools_catalog_tree -> 0)
   | Nav.Runtime_efficiency_spend
-  | Nav.Runtime_tools_connectors
+  | Nav.Runtime_fusion
+  | Nav.Runtime_connectors
   | Nav.Runtime_addons_browser ->
       0
 
@@ -4330,7 +4645,11 @@ let keeper_tab_max_scroll ~embedded (m : Model.t) ~name ~tab =
                m.infra.logs)
         in
         max 0 (n_logs - body_logs_h)
-    | Nav.Keeper_chat | Nav.Keeper_config -> 0
+    | Nav.Keeper_chat
+    | Nav.Keeper_context
+    | Nav.Keeper_tool_calls
+    | Nav.Keeper_config ->
+        0
 
 let memory_reading_max_scroll (m : Model.t) =
   match m.knowledge.memory_reading with
@@ -4377,6 +4696,8 @@ let memory_reading_max_scroll (m : Model.t) =
                 {
                   tab =
                     ( Nav.Keeper_chat
+                    | Nav.Keeper_context
+                    | Nav.Keeper_tool_calls
                     | Nav.Keeper_work_candle
                     | Nav.Keeper_sandbox
                     | Nav.Keeper_config );
@@ -4385,6 +4706,7 @@ let memory_reading_max_scroll (m : Model.t) =
             | Nav.Dive_work _
             | Nav.Dive_knowledge
                 (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
+            | Nav.Dive_runtime _
             | Nav.Dive_infra _ ) ->
             (0, 0)
         | None -> (
@@ -4555,36 +4877,108 @@ let dive_max_scroll (m : Model.t) active =
         ~target_slug:(Some slug) m.knowledge
   | Nav.Dive_knowledge (Nav.Artifact_dive target) ->
       let inner = ui_card_inner br in
-      let content = ui_pad_content ~bp inner in
-      let artifacts =
-        match Observed.to_option m.knowledge.artifacts with
-        | Some xs -> xs
-        | None -> []
+      let band_h = if inner.h >= 7 then 2 else 1 in
+      let content =
+        Rect.make ~x:inner.x ~y:(inner.y + band_h) ~w:inner.w
+          ~h:(max 0 (inner.h - band_h))
+        |> ui_pad_content ~bp
       in
+      let fixed_hdr =
+        if not (String.equal (String.trim m.knowledge.artifact_search_query) "")
+        then 3
+        else 2
+      in
+      let doc_h = max 1 (content.h - fixed_hdr) in
       let art_opt =
         Knowledge_store.find_artifact_by_id_or_sha target m.knowledge
       in
-      let detail_rows =
+      let total_rows =
         match art_opt with
         | None -> 0
         | Some a ->
             let detail_opt =
               Knowledge_store.artifact_detail_for_entry a m.knowledge
             in
-            let preview_lines =
-              Knowledge_store.artifact_preview_lines a detail_opt
+            let raw_body =
+              match detail_opt with
+              | Some d -> d.content
+              | None -> ""
             in
-            let meta = 9 in
-            let body =
-              if preview_lines = [] then 0 else 1 + List.length preview_lines
+            let fmt = Wire_knowledge.artifact_format_of_entry a in
+            let body_rows =
+              if String.equal (String.trim raw_body) "" then 0
+              else
+                match (m.knowledge.artifact_view_mode, fmt) with
+                | `Raw_source, (`Html | `Markdown) ->
+                    List.length (String.split_on_char '\n' raw_body)
+                | `Document, `Html ->
+                    List.length
+                      (Masc_tui_ui.Html_doc.render_lines
+                         ~width:(max 1 content.w) ~theme ~lang:m.lang raw_body)
+                | `Document, `Markdown ->
+                    let is_json =
+                      String.starts_with ~prefix:"application/json"
+                        (String.lowercase_ascii (String.trim a.body.mime))
+                      || Filename.check_suffix
+                           (String.lowercase_ascii (String.trim a.title))
+                           ".json"
+                    in
+                    if is_json then
+                      match Yojson.Safe.from_string raw_body with
+                      | json ->
+                          List.length
+                            (String.split_on_char '\n'
+                               (Yojson.Safe.pretty_to_string json))
+                      | exception Yojson.Json_error _ ->
+                          List.length (String.split_on_char '\n' raw_body)
+                    else
+                      List.length
+                        (Masc_tui_ui.Markdown.render_lines
+                           ~width:(max 1 content.w) ~theme raw_body)
             in
-            meta + body
+            let rev_rows =
+              match detail_opt with
+              | Some d when d.revisions <> [] -> 1 + List.length d.revisions
+              | Some _ | None -> (
+                  match Observed.to_option m.knowledge.artifacts with
+                  | Some items when List.length items > 1 ->
+                      1 + List.length items
+                  | Some _ | None -> 0)
+            in
+            if rev_rows = 0 then body_rows
+            else if body_rows = 0 then rev_rows
+            else body_rows + 1 + rev_rows
       in
-      let rev_rows =
-        if artifacts = [] then 0 else 1 + List.length artifacts
+      max 0 (total_rows - doc_h)
+  | Nav.Dive_runtime (Nav.Tool_dive tool_name) -> (
+      let entry_opt =
+        match Observed.to_option m.runtime.tools_dashboard with
+        | Some d ->
+            List.find_opt
+              (fun (e : Wire_runtime.tool_catalog_entry) ->
+                String.equal e.name tool_name)
+              d.entries
+        | None -> None
       in
-      let total = detail_rows + rev_rows in
-      max 0 (total - max 1 content.h)
+      match entry_opt with
+      | None -> 0
+      | Some e -> (
+          let top_h = if br.h >= 20 then 9 else 6 in
+          let meta_rect =
+            match
+              Masc_tui_ui.Layout.split_v_bp bp br
+                [ Masc_tui_ui.Layout.Fixed top_h; Masc_tui_ui.Layout.Flex 1 ]
+            with
+            | a :: _ -> a
+            | [] -> br
+          in
+          let mc = ui_card_inner meta_rect |> ui_pad_content ~bp in
+          let hdr_rows = 1 + if e.doc_refs <> [] then 1 else 0 in
+          let md_h = max 0 (mc.h - hdr_rows) in
+          match e.description with
+          | Some desc when md_h > 0 && mc.w > 0 ->
+              markdown_max_scroll ~theme ~width:mc.w ~height:md_h desc
+          | Some _ | None -> 0))
   | Nav.Dive_work (Nav.Goal_dive goal_id) -> (
       match
         List.find_opt
@@ -5171,11 +5565,13 @@ let apply_move (m : Model.t) dir =
                   false
               | ( ( Nav.Gate_reject _
                   | Nav.Verification_reject _
+                  | Nav.Harness_overrule _
                   | Nav.Task_cancel _
                   | Nav.Schedule_form
                   | Nav.Connector_form
                   | Nav.Repo_add_form
-                  | Nav.Board_new_post )
+                  | Nav.Board_new_post
+                  | Nav.Board_comment _ )
                 , _ ) ->
                   true
             in
@@ -5226,25 +5622,56 @@ let apply_move (m : Model.t) dir =
               let h = min (max 0 (m.viewport.rows - 2)) 15 in
               if w < 2 || h < 2 then 0
               else
+                let inner_w = max 0 (w - 2) in
                 let inner_h = max 0 (h - 2) in
+                let pad_x = if inner_w >= 48 then 2 else 1 in
                 let pad_y = if inner_h >= 7 then 1 else 0 in
+                let content_w = max 1 (inner_w - (2 * pad_x)) in
                 let content_h = max 0 (inner_h - (2 * pad_y)) in
-                if content_h <= 0 then 0
+                let body_h = max 0 (content_h - 3) in
+                if body_h <= 0 then 0
                 else
                   let total_lines =
                     match Model.focused_artifact m with
-                    | None -> 2
-                    | Some art ->
+                    | None -> 0
+                    | Some art -> (
                         let detail_opt =
                           Knowledge_store.artifact_detail_for_entry art
                             m.knowledge
                         in
-                        let preview =
-                          Knowledge_store.artifact_preview_lines art detail_opt
+                        let raw_body =
+                          match detail_opt with
+                          | Some d -> d.content
+                          | None -> ""
                         in
-                        if preview = [] then 5 else 5 + List.length preview
+                        if String.equal (String.trim raw_body) "" then 0
+                        else
+                          let theme = Theme.of_preset m.theme_preset in
+                          match
+                            ( m.knowledge.artifact_view_mode
+                            , Wire_knowledge.artifact_format_of_entry art )
+                          with
+                          | `Document, `Html ->
+                              List.length
+                                (Masc_tui_ui.Html_doc.render_lines ~theme
+                                   ~width:content_w ~lang:m.lang raw_body)
+                          | `Document, `Markdown ->
+                              let is_json = Knowledge_store.is_json_artifact art in
+                              if is_json then
+                                let pretty =
+                                  match Yojson.Safe.from_string raw_body with
+                                  | j -> Yojson.Safe.pretty_to_string j
+                                  | exception Yojson.Json_error _ -> raw_body
+                                in
+                                List.length (String.split_on_char '\n' pretty)
+                              else
+                                List.length
+                                  (Masc_tui_ui.Markdown.render_lines ~theme
+                                     ~width:content_w raw_body)
+                          | `Raw_source, (`Html | `Markdown) ->
+                              List.length (String.split_on_char '\n' raw_body))
                   in
-                  max 0 (total_lines - content_h)
+                  max 0 (total_lines - body_h)
             in
             let detail_scroll_offset =
               Store_scroll.clamp_scroll ~max_scroll
@@ -5280,6 +5707,334 @@ let apply_move (m : Model.t) dir =
         | Keymap.Right -> cycle_sub_tab m Keymap.Next
         | Keymap.Up | Keymap.Down | Keymap.Page_up | Keymap.Page_down
         | Keymap.Home | Keymap.End -> (
+            let move_keeper_context ~embedded ~name =
+              let ks =
+                Keeper_context_store.get_keeper ~keeper:name m.keeper_context
+              in
+              let cw, ch =
+                Chat_transcript.keeper_content_rect_size ~embedded ~model:m
+              in
+              let hdr_h = 2 + if ch >= 6 then 1 else 0 in
+              let body_h = max 1 (ch - hdr_h) in
+              let pad_x = if cw >= 88 then 2 else 1 in
+              let inner_w = max 1 (cw - (2 * pad_x)) in
+              let theme = Theme.of_preset m.theme_preset in
+              let keeper_context =
+                match ks.subtab with
+                | Keeper_context_store.Ctx_exact_input ->
+                    let scroll_part =
+                      ((not embedded) && m.nav.pane_index = 1)
+                      ||
+                      match dir with
+                      | Keymap.Page_up | Keymap.Page_down -> true
+                      | Keymap.Up | Keymap.Down | Keymap.Left | Keymap.Right
+                      | Keymap.Home | Keymap.End ->
+                          false
+                    in
+                    if scroll_part then
+                      let max_scroll =
+                        match
+                          Keeper_context_store.part_content_for_selected ks
+                        with
+                        | None -> 0
+                        | Some pc ->
+                            let cache_rows =
+                              match
+                                Keeper_context_store.cache_outcome_for_selected_turn
+                                  ks
+                              with
+                              | Some _ when body_h > 2 -> 4
+                              | Some _ | None -> 0
+                            in
+                            let parts_h = max 1 (body_h - cache_rows) in
+                            let parts_r =
+                              Rect.make ~x:0 ~y:0 ~w:inner_w ~h:parts_h
+                            in
+                            let right_r =
+                              if parts_r.w >= 72 then
+                                match
+                                  Masc_tui_ui.Layout.split_h ~gap:2 parts_r
+                                    [
+                                      Masc_tui_ui.Layout.Ratio 0.44;
+                                      Masc_tui_ui.Layout.Flex 1;
+                                    ]
+                                with
+                                | [ _; r ] -> r
+                                | _ -> parts_r
+                              else
+                                match
+                                  Masc_tui_ui.Layout.split_v ~gap:1 parts_r
+                                    [
+                                      Masc_tui_ui.Layout.Ratio 0.48;
+                                      Masc_tui_ui.Layout.Flex 1;
+                                    ]
+                                with
+                                | [ _; b ] -> b
+                                | _ -> parts_r
+                            in
+                            let text_h = max 1 (right_r.h - 1) in
+                            markdown_max_scroll ~theme ~width:(max 1 right_r.w)
+                              ~height:text_h pc.text
+                      in
+                      Keeper_context_store.move_scroll ~keeper:name ~max_scroll
+                        ~delta:(scroll_delta dir) m.keeper_context
+                    else
+                      Keeper_context_store.move_part_selection ~keeper:name
+                        ~delta:(move_delta dir) m.keeper_context
+                | Keeper_context_store.Ctx_composition ->
+                    let max_scroll =
+                      match Keeper_context_store.selected_turn_entry ks with
+                      | None -> 0
+                      | Some entry ->
+                          let r = entry.record in
+                          let used = ref 0 in
+                          if body_h > 1 then
+                            used := !used + if body_h >= 14 then 2 else 1;
+                          if !used < body_h then incr used;
+                          (match Observed.to_option ks.turn_records with
+                          | Some page
+                            when List.length page.entries >= 2 && !used < body_h
+                            ->
+                              incr used
+                          | Some _ | None -> ());
+                          if Option.is_some r.model_input_window && !used < body_h
+                          then incr used;
+                          let has_comp =
+                            match r.input_components with
+                            | Some cs ->
+                                List.exists
+                                  (fun (c : Turn_record.input_component) ->
+                                    c.bytes > 0)
+                                  cs
+                            | None ->
+                                List.exists
+                                  (fun (b : Turn_record.prompt_block) ->
+                                    b.bytes > 0)
+                                  r.blocks
+                          in
+                          if has_comp && !used + 1 < body_h then
+                            used := !used + 2;
+                          (match entry.diff_vs_prev with
+                          | Some d
+                            when (d.added <> [] || d.removed <> []
+                                 || d.changed <> [])
+                                 && !used < body_h ->
+                              incr used
+                          | Some _ | None -> ());
+                          if !used + 1 < body_h then incr used;
+                          let avail = max 1 (body_h - !used) in
+                          let forecast_rows =
+                            match ks.next_request with
+                            | Observed.Value { data = fc; _ } ->
+                                1
+                                + List.fold_left
+                                    (fun acc
+                                         (c :
+                                           Wire_keeper_context.forecast_candidate) ->
+                                      let extra =
+                                        match c.assembly with
+                                        | Some (_ :: _) -> 1
+                                        | Some [] | None -> 0
+                                      in
+                                      acc + 1 + extra)
+                                    0 fc.candidates
+                            | Observed.Loading _
+                            | Observed.Absent
+                            | Observed.Unreported
+                            | Observed.Failed _ ->
+                                1
+                          in
+                          max 0 (forecast_rows - avail)
+                    in
+                    Keeper_context_store.move_scroll ~keeper:name ~max_scroll
+                      ~delta:(scroll_delta dir) m.keeper_context
+                | Keeper_context_store.Ctx_input_map ->
+                    let max_scroll =
+                      match Keeper_context_store.selected_turn_entry ks with
+                      | None -> 0
+                      | Some entry ->
+                          let r = entry.record in
+                          let n_rows =
+                            match r.input_components with
+                            | Some cs when cs <> [] -> List.length cs
+                            | Some _ | None -> List.length r.blocks
+                          in
+                          let vis = max 1 (body_h - 2) in
+                          max 0 (n_rows - vis)
+                    in
+                    Keeper_context_store.move_scroll ~keeper:name ~max_scroll
+                      ~delta:(scroll_delta dir) m.keeper_context
+                | Keeper_context_store.Ctx_response ->
+                    let max_scroll =
+                      match Keeper_context_store.selected_turn_entry ks with
+                      | None -> 0
+                      | Some entry ->
+                          let r = entry.record in
+                          let wrap_w = max 12 (inner_w - 4) in
+                          let tr_rows =
+                            match
+                              Keeper_context_store.transcript_for_selected_turn
+                                ks
+                            with
+                            | Some tr when tr.found ->
+                                let sum_lines xs =
+                                  if xs = [] then 0
+                                  else
+                                    1
+                                    + List.fold_left
+                                        (fun acc
+                                             (l :
+                                               Wire_keeper_context.transcript_line) ->
+                                          acc
+                                          + List.length
+                                              (Chat_transcript.wrap_plain_lines
+                                                 ~width:wrap_w l.content))
+                                        0 xs
+                                in
+                                sum_lines tr.user + sum_lines tr.assistant
+                            | Some _ -> 1
+                            | None -> (
+                                match ks.turn_transcript with
+                                | Observed.Loading _ | Observed.Failed _ -> 1
+                                | Observed.Value _
+                                | Observed.Absent
+                                | Observed.Unreported ->
+                                    0)
+                          in
+                          let ev_rows =
+                            if r.execution_ids = [] then 0
+                            else if ks.call_evidence_auth_denied then 2
+                            else
+                              let ev_tbl :
+                                  ( string
+                                  , Wire_keeper_context.tool_call_entry )
+                                  Hashtbl.t =
+                                Hashtbl.create 16
+                              in
+                              (match
+                                 Keeper_context_store.call_evidence_for_selected_turn
+                                   ks
+                               with
+                              | Some calls ->
+                                  List.iter
+                                    (fun (c :
+                                           Wire_keeper_context.tool_call_entry) ->
+                                      match c.execution_id with
+                                      | Some eid -> Hashtbl.replace ev_tbl eid c
+                                      | None -> ())
+                                    calls
+                              | None -> ());
+                              1
+                              + List.fold_left
+                                  (fun acc eid_val ->
+                                    let eid = Ids.Execution_id.to_string eid_val in
+                                    match Hashtbl.find_opt ev_tbl eid with
+                                    | Some c
+                                      when not
+                                             (String.equal (String.trim c.output)
+                                                "") ->
+                                        acc + 2
+                                    | Some _ | None -> acc + 1)
+                                  0 r.execution_ids
+                          in
+                          let total = 1 + tr_rows + ev_rows in
+                          max 0 (total - body_h)
+                    in
+                    Keeper_context_store.move_scroll ~keeper:name ~max_scroll
+                      ~delta:(scroll_delta dir) m.keeper_context
+              in
+              ({ m with keeper_context }, [])
+            in
+            let move_keeper_tool_calls ~embedded ~name =
+              let ks =
+                Keeper_context_store.get_keeper ~keeper:name m.keeper_context
+              in
+              let cw, ch =
+                Chat_transcript.keeper_content_rect_size ~embedded ~model:m
+              in
+              let hdr_h = 1 + if ch >= 6 then 1 else 0 in
+              let body_r = Rect.make ~x:0 ~y:0 ~w:cw ~h:(max 1 (ch - hdr_h)) in
+              let left_r, right_r =
+                if body_r.w >= 76 then
+                  match
+                    Masc_tui_ui.Layout.split_h ~gap:2 body_r
+                      [
+                        Masc_tui_ui.Layout.Ratio 0.50;
+                        Masc_tui_ui.Layout.Flex 1;
+                      ]
+                  with
+                  | [ l; r ] -> (l, r)
+                  | _ -> (body_r, Rect.empty)
+                else
+                  match
+                    Masc_tui_ui.Layout.split_v ~gap:1 body_r
+                      [
+                        Masc_tui_ui.Layout.Ratio 0.46;
+                        Masc_tui_ui.Layout.Flex 1;
+                      ]
+                  with
+                  | [ t; b ] -> (t, b)
+                  | _ -> (body_r, Rect.empty)
+              in
+              let scroll_detail =
+                ((not embedded) && m.nav.pane_index = 1)
+                ||
+                match dir with
+                | Keymap.Page_up | Keymap.Page_down -> true
+                | Keymap.Up | Keymap.Down | Keymap.Left | Keymap.Right
+                | Keymap.Home | Keymap.End ->
+                    false
+              in
+              let keeper_context =
+                if scroll_detail then
+                  let max_scroll =
+                    match Keeper_context_store.selected_tool_call ks with
+                    | None -> 0
+                    | Some call ->
+                        let output_json =
+                          match
+                            Keeper_context_store.tool_result_for_selected_call ks
+                          with
+                          | Some (Wire_keeper_context.Tool_result_page p) -> (
+                              match Yojson.Safe.from_string p.content with
+                              | j -> Wire_keeper_context.unfold_json_strings j
+                              | exception Yojson.Json_error _ ->
+                                  `String p.content)
+                          | Some Wire_keeper_context.Tool_result_pending ->
+                              `String "(tool result pending)"
+                          | Some
+                              (Wire_keeper_context.Tool_result_unavailable r) ->
+                              `String ("(unavailable: " ^ r ^ ")")
+                          | None -> (
+                              match Yojson.Safe.from_string call.output with
+                              | j -> Wire_keeper_context.unfold_json_strings j
+                              | exception Yojson.Json_error _ ->
+                                  `String call.output)
+                        in
+                        let unfolded_in =
+                          Wire_keeper_context.unfold_json_strings call.input
+                        in
+                        let tree_json =
+                          `Assoc
+                            [ ("input", unfolded_in); ("output", output_json) ]
+                        in
+                        let lines =
+                          Masc_tui_ui.Json_tree.flatten ~max_depth:5
+                            ~redact_secrets:true tree_json
+                        in
+                        let tree_h = max 1 (right_r.h - 2) in
+                        max 0 (List.length lines - tree_h)
+                  in
+                  Keeper_context_store.move_call_detail_scroll ~keeper:name
+                    ~max_scroll ~delta:(scroll_delta dir) m.keeper_context
+                else
+                  let list_vis = max 1 (left_r.h - 2) in
+                  Keeper_context_store.move_call_selection ~keeper:name
+                    ~viewport_rows:list_vis ~delta:(move_delta dir)
+                    m.keeper_context
+              in
+              ({ m with keeper_context }, [])
+            in
             match Model.active_dive m with
             | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_chat }) ->
                 let delta = -(move_delta dir) in
@@ -5293,6 +6048,10 @@ let apply_move (m : Model.t) dir =
                       Fleet_store.move_chat_scroll ~max_scroll ~delta m.fleet;
                   }
                 , [] )
+            | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_context }) ->
+                move_keeper_context ~embedded:false ~name
+            | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_tool_calls }) ->
+                move_keeper_tool_calls ~embedded:false ~name
             | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_config }) ->
                 move_keeper_config_selection ~embedded:false ~name
                   ~delta:(move_delta dir) m
@@ -5398,6 +6157,7 @@ let apply_move (m : Model.t) dir =
                  | Nav.Dive_work _
                  | Nav.Dive_knowledge
                      (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
+                 | Nav.Dive_runtime _
                  | Nav.Dive_infra _ ) as active) ->
                 let delta = scroll_delta dir in
                 let max_scroll = dive_max_scroll m active in
@@ -5459,6 +6219,10 @@ let apply_move (m : Model.t) dir =
                                       ~delta:chat_delta m.fleet;
                                 }
                               , [] )
+                          | Nav.Keeper_context ->
+                              move_keeper_context ~embedded ~name:k.name
+                          | Nav.Keeper_tool_calls ->
+                              move_keeper_tool_calls ~embedded ~name:k.name
                           | Nav.Keeper_config ->
                               move_keeper_config_selection ~embedded
                                 ~name:k.name ~delta:(move_delta dir) m
@@ -5629,24 +6393,12 @@ let apply_move (m : Model.t) dir =
                                   ~viewport_rows ~delta m.work;
                             }
                           , [] )
-                    | Nav.Work_tasks_schedules ->
+                    | Nav.Work_tasks | Nav.Work_schedules ->
                         let work =
-                          Work_store.move_selection ~pane_index ~viewport_rows
+                          Work_store.move_selection ~pane_index:0 ~viewport_rows
                             ~delta m.work
                         in
-                        let n_tasks = List.length (Work_store.filtered_tasks work) in
-                        let n_sched =
-                          List.length (Work_store.filtered_schedules work)
-                        in
-                        let next_pane =
-                          if
-                            Model.focusable_pane_count m >= 2
-                            && n_sched > 0
-                            && work.selected_index >= n_tasks
-                          then 1
-                          else 0
-                        in
-                        ({ m with nav = { m.nav with pane_index = next_pane }; work }, [])
+                        ({ m with work }, [])
                     | Nav.Work_pipeline ->
                         let has_linked_card =
                           Model.work_pipeline_has_linked_card m
@@ -5796,7 +6548,9 @@ let apply_move (m : Model.t) dir =
                       | ( ( Nav.Runtime_quotas_credits
                           | Nav.Runtime_efficiency_spend
                           | Nav.Runtime_failover_lanes
-                          | Nav.Runtime_tools_connectors
+                          | Nav.Runtime_fusion
+                          | Nav.Runtime_tools_usage
+                          | Nav.Runtime_connectors
                           | Nav.Runtime_addons_browser )
                         , _ ) ->
                           false
@@ -5994,17 +6748,166 @@ let apply_move (m : Model.t) dir =
                                     col ~id:"url" ~priority:0 ~min_width:16
                                       ~weight:3 ~align:Masc_tui_ui.Table.Left ();
                                   ])
+                      | Nav.Runtime_tools_usage, pane -> (
+                          let bp = ui_bp m in
+                          let br = ui_body_rect m in
+                          let body_rect =
+                            match
+                              Masc_tui_ui.Layout.split_v br
+                                [
+                                  Masc_tui_ui.Layout.Fixed 1;
+                                  Masc_tui_ui.Layout.Flex 1;
+                                ]
+                            with
+                            | [ _; b ] -> b
+                            | _ -> br
+                          in
+                          match rt.tools_subview with
+                          | Runtime_store.Tools_usage_calls ->
+                              let main_rect =
+                                match
+                                  Masc_tui_ui.Layout.split_v body_rect
+                                    [
+                                      Masc_tui_ui.Layout.Fixed 1;
+                                      Masc_tui_ui.Layout.Flex 1;
+                                    ]
+                                with
+                                | [ _; b ] -> b
+                                | _ -> body_rect
+                              in
+                              let charts_h =
+                                if main_rect.h >= 22 then 9
+                                else if main_rect.h >= 14 then 6
+                                else 0
+                              in
+                              let bottom_rect =
+                                if charts_h > 0 then
+                                  match
+                                    Masc_tui_ui.Layout.split_v_bp bp main_rect
+                                      [
+                                        Masc_tui_ui.Layout.Fixed charts_h;
+                                        Masc_tui_ui.Layout.Flex 1;
+                                      ]
+                                  with
+                                  | [ _; b ] -> b
+                                  | _ -> main_rect
+                                else main_rect
+                              in
+                              let tbl_rect =
+                                if bottom_rect.w >= 86 then
+                                  match
+                                    Masc_tui_ui.Layout.split_h_bp bp bottom_rect
+                                      [
+                                        Masc_tui_ui.Layout.Ratio 0.62;
+                                        Masc_tui_ui.Layout.Flex 1;
+                                      ]
+                                  with
+                                  | l :: _ -> l
+                                  | [] -> bottom_rect
+                                else bottom_rect
+                              in
+                              let tbl_inner = ui_card_inner tbl_rect in
+                              max 1 (tbl_inner.h - 2)
+                          | Runtime_store.Tools_catalog_tree ->
+                              let inner = ui_card_inner body_rect in
+                              max 1 (inner.h - 2)
+                          | Runtime_store.Tools_keeper_skills ->
+                              let left_rect, right_rect =
+                                Masc_tui_ui.Layout.adaptive_split_2
+                                  ~stack_on_compact:true ~left_ratio:0.52
+                                  ~top_ratio:0.50 bp body_rect
+                              in
+                              let target_r =
+                                if pane = 1 then right_rect else left_rect
+                              in
+                              let c =
+                                ui_card_inner target_r |> ui_pad_content ~bp
+                              in
+                              max 1 (c.h - 5))
                       | ( ( Nav.Runtime_quotas_credits
                           | Nav.Runtime_efficiency_spend
                           | Nav.Runtime_failover_lanes
-                          | Nav.Runtime_tools_connectors )
+                          | Nav.Runtime_fusion
+                          | Nav.Runtime_connectors )
                         , _ ) ->
                           viewport_rows
                     in
+                    let eff_max_detail_scroll =
+                      match (rt.active_tab, rt.tools_subview, pane_index) with
+                      | ( Nav.Runtime_tools_usage
+                        , Runtime_store.Tools_keeper_skills
+                        , 0 ) -> (
+                          let bp = ui_bp m in
+                          let br = ui_body_rect m in
+                          let body_rect =
+                            match
+                              Masc_tui_ui.Layout.split_v br
+                                [
+                                  Masc_tui_ui.Layout.Fixed 1;
+                                  Masc_tui_ui.Layout.Flex 1;
+                                ]
+                            with
+                            | [ _; b ] -> b
+                            | _ -> br
+                          in
+                          let left_rect, _ =
+                            Masc_tui_ui.Layout.adaptive_split_2
+                              ~stack_on_compact:true ~left_ratio:0.52
+                              ~top_ratio:0.50 bp body_rect
+                          in
+                          let lc =
+                            ui_card_inner left_rect |> ui_pad_content ~bp
+                          in
+                          match Observed.to_option rt.tools_dashboard with
+                          | Some
+                              ({
+                                 effective_keeper_surface =
+                                   Some
+                                     (Wire_runtime.Keeper_surface_available s);
+                                 _;
+                               } as dash) ->
+                              let hdr_rows =
+                                3
+                                + (if s.skills_left_out <> [] then 1 else 0)
+                                + (if s.lane_addon_conflicts <> [] then 1 else 0)
+                                + (if
+                                     Option.is_some dash.volume_gc_summary
+                                     || Option.is_some
+                                          dash.keeper_cleanup_summary
+                                   then 1
+                                   else 0)
+                                + 1
+                              in
+                              let vis = max 1 (lc.h - hdr_rows) in
+                              Some (max 0 (List.length s.tools - vis))
+                          | Some
+                              {
+                                effective_keeper_surface =
+                                  Some
+                                    (Wire_runtime.Keeper_surface_unavailable _)
+                                  | None;
+                                _;
+                              }
+                          | None ->
+                              Some 0)
+                      | ( ( Nav.Runtime_quotas_credits
+                          | Nav.Runtime_efficiency_spend
+                          | Nav.Runtime_failover_lanes
+                          | Nav.Runtime_fusion
+                          | Nav.Runtime_tools_usage
+                          | Nav.Runtime_connectors
+                          | Nav.Runtime_addons_browser )
+                        , ( Runtime_store.Tools_usage_calls
+                          | Runtime_store.Tools_catalog_tree
+                          | Runtime_store.Tools_keeper_skills )
+                        , _ ) ->
+                          max_detail_scroll
+                    in
                     let next_rt =
                       Runtime_store.move_selection ~pane_index
-                        ~viewport_rows:eff_viewport_rows ?max_detail_scroll
-                        ~delta:eff_delta rt
+                        ~viewport_rows:eff_viewport_rows
+                        ?max_detail_scroll:eff_max_detail_scroll ~delta:eff_delta
+                        rt
                     in
                     let tab_cmds =
                       if

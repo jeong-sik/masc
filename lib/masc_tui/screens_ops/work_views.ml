@@ -376,9 +376,11 @@ let render_linked_tasks_card grid ~(rect : Rect.t) ~(theme : Theme.t)
         hotkey =
           Some
             (if verif_focused then
-               Ops_common.say model ~ko:"[a] 승인 · [x] 반려 · [Enter] 상세"
-                 ~en:"[a] Approve · [x] Reject · [Enter] Dive"
-             else Ops_common.say model ~ko:"[Tab] 검증 선택" ~en:"[Tab] Select");
+               Ops_common.say model ~ko:"[a] 승인 · [x] 반려 · [v] 전체/대기 · [Enter] 상세"
+                 ~en:"[a] Approve · [x] Reject · [v] All/Pending · [Enter] Dive"
+             else
+               Ops_common.say model ~ko:"[Tab] 검증 선택 · [v] 전체/대기"
+                 ~en:"[Tab] Select · [v] All/Pending");
         focused = verif_focused;
       }
     in
@@ -1241,16 +1243,15 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
             end
           end
 
-(* --- Sub-Tab 2: Tasks & Schedules --- *)
+(* --- Sub-Tab 2: Tasks --- *)
 
-let render_tasks_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
+let render_tasks ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
   if Rect.is_empty rect then ()
   else
     let theme = Ops_common.theme_of_model model in
     let bp = Ops_common.layout_bp model in
     let bg = Color.of_rgb theme.surface_0 in
     let all_tasks = Work_store.tasks model.work in
-    let all_scheds = Work_store.schedules_list model.work in
     let eff_counts = Work_store.effective_task_counts model.work in
     let v_pass, v_rej, v_wait = Work_store.verification_pass_summary model.work in
     let active_n, verify_n, todo_n, done_n =
@@ -1331,11 +1332,6 @@ let render_tasks_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
             done_n
         , is_status Work_store.Status_done
         , Some Theme.Status_ok );
-        ( Printf.sprintf "%s %d"
-            (Ops_common.say model ~ko:"일정" ~en:"Schedules")
-            (List.length all_scheds)
-        , is_status Work_store.Status_schedules
-        , None );
       ]
     in
     let pill_adv = Ops_common.draw_pills grid ~rect:pill_rect ~theme ~bg pills in
@@ -1356,56 +1352,26 @@ let render_tasks_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
     end;
     if Rect.is_empty body_rect then ()
     else
-      let is_sched_filter = is_status Work_store.Status_schedules in
       let filtered_tasks = Work_store.filtered_tasks model.work in
-      let filtered_scheds = Work_store.filtered_schedules model.work in
       let n_tasks = List.length filtered_tasks in
-      let n_scheds = List.length filtered_scheds in
-      let task_sel_opt, sched_sel_opt =
-        if is_sched_filter then
-          if n_scheds > 0 then
-            ( None
-            , Some
-                (Int.max 0 (Int.min (n_scheds - 1) model.work.selected_index)) )
-          else (None, None)
-        else if model.work.selected_index >= 0 && model.work.selected_index < n_tasks
-        then (Some model.work.selected_index, None)
-        else if n_scheds > 0 && model.work.selected_index >= n_tasks then
-          let s_idx =
-            Int.max 0
-              (Int.min (n_scheds - 1) (model.work.selected_index - n_tasks))
-          in
-          (None, Some s_idx)
-        else if n_tasks > 0 then
-          ( Some (Int.max 0 (Int.min (n_tasks - 1) model.work.selected_index))
-          , None )
-        else (None, None)
+      let task_sel_opt =
+        if n_tasks > 0 then
+          Some (Int.max 0 (Int.min (n_tasks - 1) model.work.selected_index))
+        else None
       in
-      let tasks_rect, detail_rect, sched_rect =
-        if body_rect.w >= 100 then
-          let sched_h =
-            Int.min (Int.max 6 (body_rect.h / 2))
-              (Layout.adaptive_list_height ~items:n_scheds ~overhead:4 ~min_h:6
-                 ~max_h:11 ())
-          in
+      let tasks_rect, detail_rect =
+        if body_rect.w >= 96 then
           match
-            Layout.split_v_bp bp body_rect
-              [ Layout.Flex 1; Layout.Fixed sched_h ]
+            Layout.split_h_bp bp body_rect [ Layout.Ratio 0.54; Layout.Flex 1 ]
           with
-          | [ top; bot ] -> (
-              match
-                Layout.split_h_bp bp top [ Layout.Ratio 0.56; Layout.Flex 1 ]
-              with
-              | [ tl; tr ] -> (tl, tr, bot)
-              | _ -> (top, Rect.empty, bot))
-          | _ -> (body_rect, Rect.empty, Rect.empty)
+          | [ tl; tr ] -> (tl, tr)
+          | _ -> (body_rect, Rect.empty)
         else
           match
-            Layout.split_v_bp bp body_rect
-              [ Layout.Ratio 0.42; Layout.Ratio 0.28; Layout.Flex 1 ]
+            Layout.split_v_bp bp body_rect [ Layout.Ratio 0.52; Layout.Flex 1 ]
           with
-          | [ a; b; c ] -> (a, b, c)
-          | _ -> (body_rect, Rect.empty, Rect.empty)
+          | [ t; b ] -> (t, b)
+          | _ -> (body_rect, Rect.empty)
       in
       (* 1. Tasks Table *)
       let t_spec : Card.spec =
@@ -1418,8 +1384,8 @@ let render_tasks_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
           with
           hotkey =
             Some
-              (Ops_common.say model ~ko:"[Space] 상태 · [Enter] 상세"
-                 ~en:"[Space] Status · [Enter] Dive");
+              (Ops_common.say model ~ko:"[v/Space] 상태 · [x] 취소 · [h] 재정의 · [Enter] 상세"
+                 ~en:"[v/Space] Status · [x] Cancel · [h] Overrule · [Enter] Dive");
           focused = Model.pane_focused model 0;
         }
       in
@@ -1515,89 +1481,36 @@ let render_tasks_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                ?selected:task_sel_opt ~col_gap:(Layout.table_col_gap bp)
                ~columns:cols rows)
       end;
-      (* 2. Task / Schedule Detail Inspector *)
+      (* 2. Task Detail Inspector *)
       if not (Rect.is_empty detail_rect) then begin
         let sel_task = Option.bind task_sel_opt (List.nth_opt filtered_tasks) in
-        let sel_sched =
-          Option.bind sched_sel_opt (List.nth_opt filtered_scheds)
-        in
         let d_title, d_badge =
-          match sel_task, sel_sched with
-          | Some tk, _ ->
+          match sel_task with
+          | Some tk ->
               let g, tok, lbl = Ops_common.task_status_badge tk.status in
               ( Ops_common.say model ~ko:"작업 상세" ~en:"Task Detail"
               , Some { Card.glyph = Some g; text = Say.resolve model.lang lbl; tone = Some tok } )
-          | None, Some sc ->
-              let g, tok, lbl = Ops_common.schedule_status_badge sc.status in
-              ( Ops_common.say model ~ko:"일정 상세" ~en:"Schedule Detail"
-              , Some { Card.glyph = Some g; text = Say.resolve model.lang lbl; tone = Some tok } )
-          | None, None ->
+          | None ->
               (Ops_common.say model ~ko:"작업 상세" ~en:"Task Detail", None)
         in
         let d_spec : Card.spec =
-          { (Card.default_spec ~title:d_title) with badge = d_badge }
+          {
+            (Card.default_spec ~title:d_title) with
+            badge = d_badge;
+            focused = model.nav.pane_index = 1;
+          }
         in
         let d_inner = Card.draw ~cache grid ~rect:detail_rect ~theme d_spec in
         if not (Rect.is_empty d_inner) then
           let pad_x = Ops_common.pad_x_for ~model d_inner in
           let content = Card.pad_inner ~pad_x d_inner in
           let card_bg = Color.of_rgb theme.surface_1 in
-          match sel_task, sel_sched with
-          | None, Some sc ->
-              let y = ref d_inner.y in
-              if d_inner.h >= 6 then begin
-                Card.draw_section_band ~pad_x grid
-                  ~rect:(Rect.make ~x:d_inner.x ~y:!y ~w:d_inner.w ~h:2)
-                  ~theme ~left_title:sc.schedule_id
-                  ~right_meta:sc.recurrence_summary
-                  ~subtitle:
-                    (match sc.payload_keeper_name with
-                    | Some k -> "@" ^ k ^ " · " ^ sc.source
-                    | None -> sc.source)
-                  ();
-                y := !y + 2 + (if d_inner.h >= 10 then 1 else 0)
-              end;
-              let sg, stok, slbl = Ops_common.schedule_status_badge sc.status in
-              Ops_common.draw_kv_row grid ~rect:content ~y:!y ~theme ~bg:card_bg
-                ~label_w:12
-                ~key:(Ops_common.say model ~ko:"일정 상태" ~en:"Schedule")
-                ~value:(Glyph.to_utf8 sg ^ " " ^ Say.resolve model.lang slbl)
-                ~val_fg:(Theme.status_color theme stok) ();
-              incr y;
-              let wake_txt, wake_tok =
-                Ops_common.wake_disposition_text ~lang:model.lang
-                  sc.last_disposition
-              in
-              Ops_common.draw_kv_row grid ~rect:content ~y:!y ~theme ~bg:card_bg
-                ~label_w:12
-                ~key:(Ops_common.say model ~ko:"최근 기상" ~en:"Last Wake")
-                ~value:wake_txt ~val_fg:(Theme.status_color theme wake_tok) ();
-              incr y;
-              (match sc.last_wake_unix with
-              | Some ts ->
-                  Ops_common.draw_kv_row grid ~rect:content ~y:!y ~theme
-                    ~bg:card_bg ~label_w:12
-                    ~key:(Ops_common.say model ~ko:"기상 시각" ~en:"Woke At")
-                    ~value:
-                      (Ops_common.format_age
-                         ~now_unix:model.freshness.last_wall_unix ts
-                         ~lang:model.lang)
-                    ~val_fg:theme.text_muted ~val_attrs:Attr.italic ();
-                  incr y
-              | None -> ());
-              Ops_common.draw_kv_row grid ~rect:content ~y:!y ~theme ~bg:card_bg
-                ~label_w:12
-                ~key:(Ops_common.say model ~ko:"출력 요약" ~en:"Summary")
-                ~value:
-                  (match sc.payload_summary with
-                  | Some s -> s
-                  | None -> Glyph.to_utf8 Glyph.Missing_absent)
-                ()
-          | None, None ->
+          match sel_task with
+          | None ->
               Ops_common.draw_observed_empty grid ~rect:d_inner ~theme
                 ~lang:model.lang model.work.planning
                 ~empty_msg:(Say.make ~ko:"작업을 선택하세요" ~en:"Select a task")
-          | Some tk, _ ->
+          | Some tk ->
               let y = ref d_inner.y in
               let bot = Rect.bottom d_inner in
               if d_inner.h >= 7 then begin
@@ -1701,7 +1614,8 @@ let render_tasks_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                     Rect.make ~x:content.x ~y:!y ~w:content.w ~h:md_avail
                   in
                   let total_md =
-                    Markdown.draw grid ~rect:md_rect ~theme ~osc8:true md_text
+                    Markdown.draw grid ~rect:md_rect ~theme ~osc8:true
+                      ~scroll:model.work.detail_scroll_offset md_text
                   in
                   if total_md > md_avail && md_avail >= 2 then begin
                     let more_n = total_md - (md_avail - 1) in
@@ -1727,7 +1641,6 @@ let render_tasks_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                   end
                   else y := !y + Int.min md_avail total_md
               | Some _ | None -> ());
-              (* Fill spare lower space cleanly with truthful Goal/Verification/Timestamp context *)
               if !y + 3 <= bot then begin
                 incr y;
                 Card.draw_hairline ~pad_x:0 ~bg:card_bg
@@ -1829,130 +1742,262 @@ let render_tasks_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                       (List.take 3 v.completion_contract)
                 | Some _ | None -> ())
               end
-      end;
-      (* 3. Schedules Table *)
-      if not (Rect.is_empty sched_rect) then begin
-        let s_spec : Card.spec =
-          {
-            (Card.default_spec
-               ~title:
-                 (Printf.sprintf "%s (%d)"
-                    (Ops_common.say model ~ko:"예약 일정 · 최근 기상 판정"
-                       ~en:"Schedules & Last Wake Disposition")
-                    n_scheds))
-            with
-            hotkey =
-              Some
-                (Ops_common.say model ~ko:"[n] 일정 추가" ~en:"[n] New Schedule");
-            focused = Model.pane_focused model 1;
-          }
+      end
+
+(* --- Sub-Tab 3: Schedules (1st-class tab — always reachable even when empty) --- *)
+
+let render_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
+  if Rect.is_empty rect then ()
+  else
+    let theme = Ops_common.theme_of_model model in
+    let bp = Ops_common.layout_bp model in
+    let filtered_scheds = Work_store.filtered_schedules model.work in
+    let n_scheds = List.length filtered_scheds in
+    let sched_sel_opt =
+      if n_scheds > 0 then
+        Some (Int.max 0 (Int.min (n_scheds - 1) model.work.selected_index))
+      else None
+    in
+    let sched_rect, detail_rect =
+      if rect.w >= 96 then
+        match
+          Layout.split_h_bp bp rect [ Layout.Ratio 0.60; Layout.Flex 1 ]
+        with
+        | [ l; r ] -> (l, r)
+        | _ -> (rect, Rect.empty)
+      else
+        match
+          Layout.split_v_bp bp rect [ Layout.Ratio 0.58; Layout.Flex 1 ]
+        with
+        | [ t; b ] -> (t, b)
+        | _ -> (rect, Rect.empty)
+    in
+    let s_spec : Card.spec =
+      {
+        (Card.default_spec
+           ~title:
+             (Printf.sprintf "%s (%d)"
+                (Ops_common.say model ~ko:"예약 일정 · 최근 기상 판정"
+                   ~en:"Schedules & Last Wake Disposition")
+                n_scheds))
+        with
+        hotkey =
+          Some
+            (Ops_common.say model ~ko:"[n] 일정 추가 · [/] 필터"
+               ~en:"[n] New Schedule · [/] Filter");
+        focused = Model.pane_focused model 0;
+      }
+    in
+    let s_inner = Card.draw ~cache grid ~rect:sched_rect ~theme s_spec in
+    if not (Rect.is_empty s_inner) then begin
+      if filtered_scheds = [] then
+        Ops_common.draw_observed_empty grid ~rect:s_inner ~theme
+          ~lang:model.lang model.work.schedules
+          ~empty_msg:
+            (Say.make ~ko:"예약된 일정이 없습니다 · [n] 키로 새 일정 추가"
+               ~en:"No scheduled automations · Press [n] to create one")
+      else
+        let cols : Table.column list =
+          [
+            {
+              id = "st";
+              header = Say.make ~ko:"상태" ~en:"Status";
+              priority = 0;
+              min_width = 9;
+              max_width = Some 13;
+              weight = 1;
+              align = Table.Left;
+            };
+            {
+              id = "target";
+              header = Say.make ~ko:"키퍼/대상" ~en:"Keeper";
+              priority = 0;
+              min_width = 12;
+              max_width = Some 20;
+              weight = 2;
+              align = Table.Left;
+            };
+            {
+              id = "rec";
+              header = Say.make ~ko:"주기" ~en:"Recurrence";
+              priority = 2;
+              min_width = 10;
+              max_width = Some 18;
+              weight = 2;
+              align = Table.Left;
+            };
+            {
+              id = "wake";
+              header = Say.make ~ko:"최근 기상 결과" ~en:"Last Wake Disposition";
+              priority = 1;
+              min_width = 14;
+              max_width = Some 26;
+              weight = 3;
+              align = Table.Left;
+            };
+            {
+              id = "out";
+              header = Say.make ~ko:"출력 요약" ~en:"Output Summary";
+              priority = 3;
+              min_width = 14;
+              max_width = None;
+              weight = 4;
+              align = Table.Left;
+            };
+          ]
         in
-        let s_inner = Card.draw ~cache grid ~rect:sched_rect ~theme s_spec in
-        if not (Rect.is_empty s_inner) then begin
-          if filtered_scheds = [] then
-            Ops_common.draw_observed_empty grid ~rect:s_inner ~theme
+        let rows =
+          List.map
+            (fun (sc : Wire_work.schedule_row) ->
+              let sg, stok, slbl = Ops_common.schedule_status_badge sc.status in
+              let target =
+                match sc.payload_keeper_name, sc.payload_target with
+                | Some k, _ -> k
+                | None, Some t -> t
+                | None, None -> sc.source
+              in
+              let wake_txt, wake_tok =
+                Ops_common.wake_disposition_text ~lang:model.lang
+                  sc.last_disposition
+              in
+              let summary =
+                match sc.payload_summary with
+                | Some s -> s
+                | None -> Glyph.to_utf8 Glyph.Missing_absent
+              in
+              {
+                Table.id = sc.schedule_instance_id;
+                cells =
+                  [
+                    ( "st"
+                    , Table.Badge
+                        {
+                          glyph = Some sg;
+                          text = Say.resolve model.lang slbl;
+                          tone = stok;
+                        } );
+                    ("target", Table.text_cell target);
+                    ( "rec"
+                    , Table.text_cell ~fg:(Color.of_rgb theme.text_muted)
+                        ~attrs:Attr.italic sc.recurrence_summary );
+                    ( "wake"
+                    , Table.Badge
+                        { glyph = None; text = wake_txt; tone = wake_tok } );
+                    ("out", Table.text_cell summary);
+                  ];
+              })
+            filtered_scheds
+        in
+        ignore
+          (Table.draw grid ~rect:s_inner ~theme ~caps:Ops_common.default_caps
+             ~lang:model.lang ~scroll:model.work.schedules_scroll_offset
+             ?selected:sched_sel_opt ~col_gap:(Layout.table_col_gap bp)
+             ~columns:cols rows)
+    end;
+    if not (Rect.is_empty detail_rect) then begin
+      let sel_sched = Option.bind sched_sel_opt (List.nth_opt filtered_scheds) in
+      let d_badge =
+        match sel_sched with
+        | Some sc ->
+            let g, tok, lbl = Ops_common.schedule_status_badge sc.status in
+            Some
+              {
+                Card.glyph = Some g;
+                text = Say.resolve model.lang lbl;
+                tone = Some tok;
+              }
+        | None -> None
+      in
+      let d_spec : Card.spec =
+        {
+          (Card.default_spec
+             ~title:(Ops_common.say model ~ko:"일정 상세" ~en:"Schedule Detail"))
+          with
+          badge = d_badge;
+          hotkey = Some (Ops_common.say model ~ko:"[n] 새 일정" ~en:"[n] New");
+          focused = model.nav.pane_index = 1;
+        }
+      in
+      let d_inner = Card.draw ~cache grid ~rect:detail_rect ~theme d_spec in
+      if not (Rect.is_empty d_inner) then
+        let pad_x = Ops_common.pad_x_for ~model d_inner in
+        let content = Card.pad_inner ~pad_x d_inner in
+        let card_bg = Color.of_rgb theme.surface_1 in
+        match sel_sched with
+        | None ->
+            Ops_common.draw_observed_empty grid ~rect:d_inner ~theme
               ~lang:model.lang model.work.schedules
               ~empty_msg:
-                (Say.make ~ko:"예약된 일정이 없습니다" ~en:"No scheduled automations")
-          else
-            let cols : Table.column list =
-              [
-                {
-                  id = "st";
-                  header = Say.make ~ko:"상태" ~en:"Status";
-                  priority = 0;
-                  min_width = 9;
-                  max_width = Some 13;
-                  weight = 1;
-                  align = Table.Left;
-                };
-                {
-                  id = "target";
-                  header = Say.make ~ko:"키퍼/대상" ~en:"Keeper";
-                  priority = 0;
-                  min_width = 12;
-                  max_width = Some 20;
-                  weight = 2;
-                  align = Table.Left;
-                };
-                {
-                  id = "rec";
-                  header = Say.make ~ko:"주기" ~en:"Recurrence";
-                  priority = 2;
-                  min_width = 10;
-                  max_width = Some 18;
-                  weight = 2;
-                  align = Table.Left;
-                };
-                {
-                  id = "wake";
-                  header = Say.make ~ko:"최근 기상 결과" ~en:"Last Wake Disposition";
-                  priority = 1;
-                  min_width = 14;
-                  max_width = Some 26;
-                  weight = 3;
-                  align = Table.Left;
-                };
-                {
-                  id = "out";
-                  header = Say.make ~ko:"출력 요약" ~en:"Output Summary";
-                  priority = 3;
-                  min_width = 14;
-                  max_width = None;
-                  weight = 4;
-                  align = Table.Left;
-                };
-              ]
+                (Say.make ~ko:"일정을 선택하거나 [n]으로 새 일정을 만드세요"
+                   ~en:"Select a schedule or press [n] to create one")
+        | Some sc ->
+            let y = ref d_inner.y in
+            let bot = Rect.bottom d_inner in
+            if d_inner.h >= 6 then begin
+              Card.draw_section_band ~pad_x grid
+                ~rect:(Rect.make ~x:d_inner.x ~y:!y ~w:d_inner.w ~h:2)
+                ~theme ~left_title:sc.schedule_id
+                ~right_meta:sc.recurrence_summary
+                ~subtitle:
+                  (match sc.payload_keeper_name with
+                  | Some k -> "@" ^ k ^ " · " ^ sc.source
+                  | None -> sc.source)
+                ();
+              y := !y + 2 + (if d_inner.h >= 10 then 1 else 0)
+            end;
+            let sg, stok, slbl = Ops_common.schedule_status_badge sc.status in
+            if !y < bot then begin
+              Ops_common.draw_kv_row grid ~rect:content ~y:!y ~theme ~bg:card_bg
+                ~label_w:12
+                ~key:(Ops_common.say model ~ko:"일정 상태" ~en:"Schedule")
+                ~value:(Glyph.to_utf8 sg ^ " " ^ Say.resolve model.lang slbl)
+                ~val_fg:(Theme.status_color theme stok) ();
+              incr y
+            end;
+            let wake_txt, wake_tok =
+              Ops_common.wake_disposition_text ~lang:model.lang
+                sc.last_disposition
             in
-            let rows =
-              List.map
-                (fun (sc : Wire_work.schedule_row) ->
-                  let sg, stok, slbl = Ops_common.schedule_status_badge sc.status in
-                  let target =
-                    match sc.payload_keeper_name, sc.payload_target with
-                    | Some k, _ -> k
-                    | None, Some t -> t
-                    | None, None -> sc.source
-                  in
-                  let wake_txt, wake_tok =
-                    Ops_common.wake_disposition_text ~lang:model.lang
-                      sc.last_disposition
-                  in
-                  let summary =
-                    match sc.payload_summary with
-                    | Some s -> s
-                    | None -> Glyph.to_utf8 Glyph.Missing_absent
-                  in
-                  {
-                    Table.id = sc.schedule_instance_id;
-                    cells =
-                      [
-                        ( "st"
-                        , Table.Badge
-                            {
-                              glyph = Some sg;
-                              text = Say.resolve model.lang slbl;
-                              tone = stok;
-                            } );
-                        ("target", Table.text_cell target);
-                        ( "rec"
-                        , Table.text_cell ~fg:(Color.of_rgb theme.text_muted)
-                            ~attrs:Attr.italic sc.recurrence_summary );
-                        ( "wake"
-                        , Table.Badge
-                            { glyph = None; text = wake_txt; tone = wake_tok } );
-                        ("out", Table.text_cell summary);
-                      ];
-                  })
-                filtered_scheds
-            in
-            ignore
-              (Table.draw grid ~rect:s_inner ~theme ~caps:Ops_common.default_caps
-                 ~lang:model.lang ~scroll:model.work.schedules_scroll_offset
-                 ?selected:sched_sel_opt ~col_gap:(Layout.table_col_gap bp)
-                 ~columns:cols rows)
-        end
-      end
+            if !y < bot then begin
+              Ops_common.draw_kv_row grid ~rect:content ~y:!y ~theme ~bg:card_bg
+                ~label_w:12
+                ~key:(Ops_common.say model ~ko:"최근 기상" ~en:"Last Wake")
+                ~value:wake_txt ~val_fg:(Theme.status_color theme wake_tok) ();
+              incr y
+            end;
+            if !y < bot then begin
+              Ops_common.draw_kv_row grid ~rect:content ~y:!y ~theme ~bg:card_bg
+                ~label_w:12
+                ~key:(Ops_common.say model ~ko:"예정 시각" ~en:"Due At")
+                ~value:
+                  (Ops_common.format_age
+                     ~now_unix:model.freshness.last_wall_unix sc.due_at_unix
+                     ~lang:model.lang)
+                ~val_fg:theme.text_muted ~val_attrs:Attr.italic ();
+              incr y
+            end;
+            (match sc.last_wake_unix with
+            | Some ts when !y < bot ->
+                Ops_common.draw_kv_row grid ~rect:content ~y:!y ~theme
+                  ~bg:card_bg ~label_w:12
+                  ~key:(Ops_common.say model ~ko:"기상 시각" ~en:"Woke At")
+                  ~value:
+                    (Ops_common.format_age
+                       ~now_unix:model.freshness.last_wall_unix ts
+                       ~lang:model.lang)
+                  ~val_fg:theme.text_muted ~val_attrs:Attr.italic ();
+                incr y
+            | Some _ | None -> ());
+            if !y < bot then
+              Ops_common.draw_kv_row grid ~rect:content ~y:!y ~theme ~bg:card_bg
+                ~label_w:12
+                ~key:(Ops_common.say model ~ko:"출력 요약" ~en:"Summary")
+                ~value:
+                  (match sc.payload_summary with
+                  | Some s -> s
+                  | None -> Glyph.to_utf8 Glyph.Missing_absent)
+                ()
+    end
 
 (* --- Sub-Tab 3: Inbox (Rapid-Fire Triage + Clean Empty 24h Audit & Policy) --- *)
 

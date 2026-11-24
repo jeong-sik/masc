@@ -9,6 +9,8 @@
   masc_tui_protocol
   masc_tui_term
   masc_tui_ui
+  masc.masc_types
+  masc.masc_random_id
   masc.sse_event
   masc.sse_wire
   unix

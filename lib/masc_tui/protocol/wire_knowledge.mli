@@ -19,6 +19,11 @@ val board_list_path :
 val board_post_path :
   post_id:string -> ?comment_offset:int -> ?comment_limit:int -> unit -> string
 
+val board_hearths_path : string
+val board_comment_path : string
+val board_vote_path : string
+val board_comment_vote_path : string
+
 val wiki_index_path :
   ?tag:string -> ?source:string -> ?sort:string -> unit -> string
 
@@ -28,6 +33,8 @@ val wiki_search_path : query:string -> ?limit:int -> unit -> string
 val wiki_lint_path : string
 val published_artifacts_path : string
 val published_artifact_detail_path : id:string -> ?revision:int -> unit -> string
+val published_artifact_checks_path : string
+val published_artifact_shares_path : string
 val world_memory_path : string
 val workspace_memory_inventory_path : string
 
@@ -107,6 +114,22 @@ val decode_board_thread :
   observed_at:Clock.Mono.t ->
   Yojson.Safe.t ->
   (board_post * board_comment list, string) result
+
+type board_hearth_entry = {
+  name : string;
+  count : int;
+}
+
+val decode_board_hearths : Yojson.Safe.t -> (board_hearth_entry list, string) result
+
+val encode_board_comment :
+  post_id:string -> content:string -> ?parent_id:string -> unit -> Yojson.Safe.t
+
+val encode_board_vote :
+  post_id:string -> direction:[ `Up | `Down ] -> Yojson.Safe.t
+
+val encode_board_comment_vote :
+  comment_id:string -> direction:[ `Up | `Down ] -> Yojson.Safe.t
 
 (** {1 Wiki ([/api/v1/wiki*])} *)
 
@@ -403,6 +426,49 @@ val artifact_extension : artifact_format -> string
 val decode_artifacts_list : Yojson.Safe.t -> (artifact_entry list, string) result
 val decode_published_artifact_detail :
   Yojson.Safe.t -> (published_artifact_detail, string) result
+
+type artifact_check = {
+  id : string;
+  revision : int;
+  body_sha256 : string;
+  checked : bool;
+  change_id : string;
+  changed_by : string;
+  changed_at : string;
+}
+
+type artifact_share_result = {
+  id : string;
+  shared : bool;
+  version : int;
+  outcome : [ `Applied | `Conflict ];
+}
+
+val decode_artifact_checks : Yojson.Safe.t -> (artifact_check list, string) result
+val decode_artifact_check_reply : Yojson.Safe.t -> (artifact_check, string) result
+
+val encode_artifact_check_request :
+  ?expected_workspace:(string * string) ->
+  id:string ->
+  revision:int ->
+  body_sha256:string ->
+  checked:bool ->
+  expected_change_id:string option ->
+  unit ->
+  Yojson.Safe.t
+
+val encode_artifact_share_request :
+  expected_workspace:(string * string) ->
+  id:string ->
+  shared:bool ->
+  operation_id:string ->
+  expected_version:int ->
+  expected_artifact_revision:int ->
+  expected_artifact_sha256:string ->
+  Yojson.Safe.t
+
+val decode_artifact_share_response :
+  Yojson.Safe.t -> (artifact_share_result, string) result
 
 (** {1 World Memory, Temporal Memory Diff & Keeper Memory Recovery Acts} *)
 

@@ -71,12 +71,6 @@ let compute_layout ~(model : Model.t) ~cols ~rows =
       is_too_small;
     }
   else
-    let show_sub_tab = has_sub_tab_bar model in
-    let sub_h = if show_sub_tab && rows >= 5 then 1 else 0 in
-    let sub_tab_bar =
-      if sub_h = 1 then Some (Rect.make ~x:0 ~y:1 ~w:cols ~h:1) else None
-    in
-    let top_h = top_rail.h + sub_h in
     let sized_model =
       {
         model with
@@ -84,6 +78,13 @@ let compute_layout ~(model : Model.t) ~cols ~rows =
         breakpoint = model_breakpoint_of_layout breakpoint;
       }
     in
+    let show_sub_tab = has_sub_tab_bar model in
+    let sub_h = if show_sub_tab && rows >= 5 then 1 else 0 in
+    let sub_tab_bar =
+      if sub_h = 1 then Some (Rect.make ~x:0 ~y:1 ~w:cols ~h:1)
+      else None
+    in
+    let top_h = top_rail.h + sub_h in
     let comp_state = Render_util.composer_state_of_model sized_model in
     let comp_mode = Model.composer_mode sized_model in
     let composer_folded =
@@ -220,7 +221,9 @@ let render_top_rail grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
     let standard_or_wide = not compact in
     let is_micro = Layout.equal_breakpoint breakpoint Layout.Micro in
     let sep_style = Typography.whisper ~bg ~italic:false theme in
-    let sep = Typography.sep_dot in
+    let sep =
+      if rect.w < 110 then " " else Typography.sep_dot
+    in
     let sep_w = Grapheme.display_width sep in
     (* Left side: 1-cell side margin + clickable [b] Menu toggle + Brand (Wide/Std) + 6 Workspace Tabs *)
     let x = ref (rect.x + 1) in
@@ -421,21 +424,53 @@ let render_top_rail grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
       else None
     in
     let inc_count = Incidents.active_count model.incidents in
-    let inc_item =
-      if inc_count > 0 then
-        (* Channel-3 muted historical count — strictly Status_historical *)
+    let inc_badge =
+      let st =
+        if inc_count > 0 then
+          Typography.status ~bg ~bold:true theme Theme.Status_historical
+        else Typography.whisper ~bg ~italic:false theme
+      in
+      let txt =
+        if inc_count > 0 then
+          if rect.w < 148 then Printf.sprintf "[I]%d" inc_count
+          else Printf.sprintf "[I] Inc(%d)" inc_count
+        else if rect.w < 148 then "[I]"
+        else "[I] Inc"
+      in
+      Some { priority = 3; segments = [ (txt, st) ] }
+    in
+    let qctx_badge =
+      if not is_micro then
+        Some
+          {
+            priority = 5;
+            segments =
+              [
+                ( (if rect.w < 156 then "[^T]" else "[^T] Q/Ctx"),
+                  Typography.whisper ~bg ~italic:false theme );
+              ];
+          }
+      else None
+    in
+    let cfg_badge =
+      if not is_micro then
         Some
           {
             priority = 4;
             segments =
               [
-                ( Printf.sprintf "%s %d"
-                    (Glyph.to_utf8 Glyph.Historical_incident)
-                    inc_count,
-                  Typography.status ~bg theme Theme.Status_historical );
+                ( (if rect.w < 152 then "[,]" else "[,] Cfg"),
+                  Typography.whisper ~bg ~italic:false theme );
               ];
           }
       else None
+    in
+    let help_badge =
+      Some
+        {
+          priority = 3;
+          segments = [ ("[?]", Typography.whisper ~bg ~italic:false theme) ];
+        }
     in
     let ws_item =
       if wide then
@@ -444,7 +479,7 @@ let render_top_rail grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
             let clipped = Grapheme.truncate_to_width ~max_width:14 ws_name in
             Some
               {
-                priority = 6;
+                priority = 7;
                 segments = [ (clipped, Typography.structure ~bg theme) ];
               }
         | None -> None
@@ -458,13 +493,23 @@ let render_top_rail grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
       | Some hhmm ->
           Some
             {
-              priority = 3;
+              priority = 2;
               segments = [ (hhmm, Typography.whisper ~bg theme) ];
             }
       | None -> None
     in
     let raw_items =
-      [ attn_item; Some fresh_item; fleet_item; inc_item; ws_item; clock_item ]
+      [
+        attn_item;
+        Some fresh_item;
+        fleet_item;
+        inc_badge;
+        qctx_badge;
+        cfg_badge;
+        help_badge;
+        ws_item;
+        clock_item;
+      ]
       |> List.filter_map Fun.id
     in
     let measure_items xs =
@@ -531,6 +576,8 @@ let compact_keeper_tab_label ~(lang : Say.lang) ~compact tab =
   else
     match tab with
     | Nav.Keeper_chat -> Say.resolve lang (Say.make ~ko:"대화" ~en:"Chat")
+    | Nav.Keeper_context -> Say.resolve lang (Say.make ~ko:"컨텍스트" ~en:"Ctx")
+    | Nav.Keeper_tool_calls -> Say.resolve lang (Say.make ~ko:"도구" ~en:"Tools")
     | Nav.Keeper_memory -> Say.resolve lang (Say.make ~ko:"기억" ~en:"Mem")
     | Nav.Keeper_work_candle -> Say.resolve lang (Say.make ~ko:"작업" ~en:"Work")
     | Nav.Keeper_sandbox -> Say.resolve lang (Say.make ~ko:"격리" ~en:"Sbox")
@@ -541,7 +588,8 @@ let compact_work_tab_label ~(lang : Say.lang) ~compact tab =
   else
     match tab with
     | Nav.Work_pipeline -> Say.resolve lang (Say.make ~ko:"목표" ~en:"Goals")
-    | Nav.Work_tasks_schedules -> Say.resolve lang (Say.make ~ko:"작업·일정" ~en:"Tasks")
+    | Nav.Work_tasks -> Say.resolve lang (Say.make ~ko:"작업" ~en:"Tasks")
+    | Nav.Work_schedules -> Say.resolve lang (Say.make ~ko:"일정" ~en:"Sched")
     | Nav.Work_inbox -> Say.resolve lang (Say.make ~ko:"수신함" ~en:"Inbox")
     | Nav.Work_candle_scorecard -> Say.resolve lang (Say.make ~ko:"캔들·성과" ~en:"Candle")
 
@@ -558,11 +606,13 @@ let compact_runtime_tab_label ~(lang : Say.lang) ~compact tab =
   if not compact then Say.resolve lang (Nav.runtime_tab_label tab)
   else
     match tab with
-    | Nav.Runtime_quotas_credits -> Say.resolve lang (Say.make ~ko:"할당·크레딧" ~en:"Quotas")
-    | Nav.Runtime_efficiency_spend -> Say.resolve lang (Say.make ~ko:"효율·지출" ~en:"Spend")
-    | Nav.Runtime_failover_lanes -> Say.resolve lang (Say.make ~ko:"페일오버" ~en:"Lanes")
-    | Nav.Runtime_tools_connectors -> Say.resolve lang (Say.make ~ko:"도구·연동" ~en:"Tools")
-    | Nav.Runtime_addons_browser -> Say.resolve lang (Say.make ~ko:"애드온·웹" ~en:"Addons")
+    | Nav.Runtime_quotas_credits -> Say.resolve lang (Say.make ~ko:"할당" ~en:"Quotas")
+    | Nav.Runtime_efficiency_spend -> Say.resolve lang (Say.make ~ko:"지출" ~en:"Spend")
+    | Nav.Runtime_failover_lanes -> Say.resolve lang (Say.make ~ko:"레인" ~en:"Lanes")
+    | Nav.Runtime_fusion -> Say.resolve lang (Say.make ~ko:"퓨전" ~en:"Fusion")
+    | Nav.Runtime_tools_usage -> Say.resolve lang (Say.make ~ko:"도구" ~en:"Tools")
+    | Nav.Runtime_connectors -> Say.resolve lang (Say.make ~ko:"연동" ~en:"Conn")
+    | Nav.Runtime_addons_browser -> Say.resolve lang (Say.make ~ko:"웹" ~en:"Addons")
 
 let compact_infra_tab_label ~(lang : Say.lang) ~compact tab =
   if not compact then Say.resolve lang (Nav.infra_tab_label tab)
@@ -775,6 +825,23 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
              ~style:crumb_style crumb
          in
          x := !x + adv
+     | Some (Nav.Dive_runtime target) ->
+         let label =
+           match target with
+           | Nav.Tool_dive name ->
+               Say.resolve lang (Say.make ~ko:"도구" ~en:"Tool") ^ " " ^ name
+         in
+         let crumb =
+           Printf.sprintf "%s %s %s"
+             (Say.resolve lang (Nav.workspace_label Nav.Runtime))
+             (Glyph.to_utf8 Glyph.Prompt_caret)
+             label
+         in
+         let adv =
+           Cell_grid.put_text ~clip:tabs_clip grid ~x:!x ~y:rect.y
+             ~style:crumb_style crumb
+         in
+         x := !x + adv
      | Some (Nav.Dive_infra target) ->
          let ws_label, label =
            match target with
@@ -816,7 +883,8 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
                      | Nav.Work_inbox when inbox_n > 0 ->
                          Printf.sprintf "%s(%d)" base inbox_n
                      | Nav.Work_pipeline
-                     | Nav.Work_tasks_schedules
+                     | Nav.Work_tasks
+                     | Nav.Work_schedules
                      | Nav.Work_inbox
                      | Nav.Work_candle_scorecard ->
                          base
@@ -836,8 +904,9 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
              draw_tab_list tabs
          | Nav.Keepers -> (
              (* Sync sub-tab bar with what '['/']'/'←'/'→' actually control:
-                when Preview (pane 1 / zoomed) owns focus, show the selected
-                keeper's 5 inner preview tabs instead of Fleet modes. *)
+                when Preview (pane 1 / zoomed) owns focus and a keeper is
+                selected, show the selected keeper's inner preview tabs instead
+                of Fleet modes. *)
              match
                if model.nav.pane_index = 1 || model.nav.zoomed then
                  Fleet_store.selected_keeper_summary model.fleet
@@ -848,17 +917,18 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
                    Printf.sprintf "%s %s %s"
                      (Say.resolve lang (Nav.workspace_label Nav.Keepers))
                      (Glyph.to_utf8 Glyph.Prompt_caret)
-                     (Grapheme.truncate_to_width ~max_width:20 k.name)
+                     (Grapheme.truncate_to_width ~max_width:14 k.name)
                  in
                  let adv =
                    Cell_grid.put_text ~clip:tabs_clip grid ~x:!x ~y:rect.y
                      ~style:crumb_style crumb
                  in
                  x := !x + adv + 2;
+                 let use_compact_kt = compact || rect.w < 150 in
                  let tabs =
                    List.map
                      (fun t ->
-                       ( compact_keeper_tab_label ~lang ~compact t,
+                       ( compact_keeper_tab_label ~lang ~compact:use_compact_kt t,
                          Nav.equal_keeper_tab t model.fleet.keeper_dive_tab ))
                      Nav.all_keeper_tabs
                  in
@@ -873,10 +943,11 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
                  in
                  draw_tab_list tabs)
          | Nav.Runtime ->
+             let use_compact_rt = compact || rect.w < 124 in
              let tabs =
                List.map
                  (fun t ->
-                   ( compact_runtime_tab_label ~lang ~compact t,
+                   ( compact_runtime_tab_label ~lang ~compact:use_compact_rt t,
                      Nav.equal_runtime_tab t model.runtime.active_tab ))
                  Nav.all_runtime_tabs
              in
@@ -1259,8 +1330,11 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           | None -> (
               match Model.active_dive model with
               | Some (Nav.Dive_keeper _) -> true
-              | Some (Nav.Dive_work _ | Nav.Dive_knowledge _ | Nav.Dive_infra _)
-                ->
+              | Some
+                  ( Nav.Dive_work _
+                  | Nav.Dive_knowledge _
+                  | Nav.Dive_runtime _
+                  | Nav.Dive_infra _ ) ->
                   false
               | None -> not (Nav.equal_workspace model.nav.workspace Nav.Pulse))
         in
@@ -1269,6 +1343,7 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           || Option.is_some (Model.active_dive model)
           || Drafts.is_focused model.drafts
           || model.nav.filter_focused
+          || Model.sidebar_has_focus model
           || model.nav.zoomed
         in
         List.filter_map
@@ -1674,11 +1749,13 @@ let render_sidebar grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 | Nav.Menu_pulse
                 | Nav.Menu_work
                     ( Nav.Work_pipeline
-                    | Nav.Work_tasks_schedules
+                    | Nav.Work_tasks
+                    | Nav.Work_schedules
                     | Nav.Work_inbox
                     | Nav.Work_candle_scorecard )
                 | Nav.Menu_knowledge _
                 | Nav.Menu_keepers
+                | Nav.Menu_keeper_tab _
                 | Nav.Menu_runtime _
                 | Nav.Menu_infra _
                 | Nav.Menu_settings

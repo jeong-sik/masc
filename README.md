@@ -234,34 +234,38 @@ prove it. Claims record ownership; they do not lock files.
 ## Terminal UI
 
 Run `masc` on an interactive terminal. The top rail has six workspaces (`1`–`6`,
-or `Ctrl+1`–`6` / `Alt+1`–`6` / `F1`–`F6`):
+or `Ctrl+1`–`6` / `Alt+1`–`6` / `F1`–`F6`), paired with a collapsible **Left Navigation Sidebar**
+(`b` / `Ctrl+B` / `Alt+B`, auto-docked at `>= 132` cols) giving 100%-keyboard access to every
+workspace, sub-tab, and overlay:
 
 | # | Workspace | What you find there |
 |---|---|---|
 | `1` | **Pulse** | Organization overview, KPI hero band, Attention queue, live fleet health, and 24h pulse |
-| `2` | **Work** | Four tabs: Goals (Goals & Verifications), Tasks & Schedules, Action Inbox (Asks, Tool Approvals, Gate), and Candle & Scorecard |
-| `3` | **Knowledge** | Four tabs: Board (Signal/All & Succession Chains), Wiki, Artifacts (HTML/Markdown body preview, `y` raw copy, `e` local export, `o` open in browser, `H` SHA-256), and World Memory (Claims/Conflicts, Braille Memory Flow chart `g`, Temporal Diff Scrubber) |
-| `4` | **Keepers** | Fleet roster (`Companies`, `Attention`, `24h Wall`) and 1-hop 5-tab Keeper Dive (Chat & Stream, Memory with Braille Flow chart, Work & Candle, Sandbox, in-place editable Config) |
-| `5` | **Runtime** | Five tabs: Quotas & Credits, Efficiency & Spend, Failover Lanes (cascades, `exact_lane_runs`, Fusion), Tools & Connectors (Tools, Connectors, Browser/Addons summary, MCP Clients), and Addons & Browser (Addon Lanes table + Browser Clients & Per-Tab listing) |
+| `2` | **Work** | Five tabs: Goals (Goals & Verifications `[v]`), Tasks, Schedules (dedicated tab), Action Inbox (Asks, Tool Approvals, Gate), and Candle & Scorecard |
+| `3` | **Knowledge** | Four tabs: Board (Signal/All `[s]`, Sort `[S]`, Hearth picker `[h]`, Succession Chains `[Space]`, threaded comments `[c]`, armed votes `[+]`/`[-]`), Wiki, Artifacts (structured `Html_doc`/Markdown/JSON preview, `[v]` raw, `{`/`}` revisions, `/` search, `[c]` check, `[P]`/`[Y]` CAS share, `y`/`e`/`o`/`H`), and World Memory (Claims/Conflicts, Braille Memory Flow chart `[g]`, `[w]` temporal diff window, `[m]` scope) |
+| `4` | **Keepers** | Fleet roster (`Companies`, `Attention`, `24h Wall`) and synchronized 7-tab Keeper split & 1-hop Dive: Chat & Stream, Context & Turns (per-turn occupancy/cache/next-request/input-map/response), Tool Calls (hourly stats + unfolded JSON tree), Memory (Braille Flow chart + Retrieval Heat), Work & Candle, Sandbox, and in-place editable Config |
+| `5` | **Runtime** | Seven tabs: Quotas & Credits, Efficiency & Spend, Failover Lanes (cascades & `exact_lane_runs`), Fusion, Tools & Usage (Usage Calls `[w]` 24h/7d/14d, Catalog Tree + Tool Dive, Keeper Surface & Skills), Connectors (Connector bind/unbind, MCP Clients, Browser summary), and Addons & Browser (Addon Lanes table + Browser Clients & Per-Tab listing) |
 | `6` | **Infra** | Three tabs: Sandboxes (MicroVM/SSH/Docker fleet + inspector), Repos & Changes, and Activity & Logs (unified `ALL`/`LOGS`/`EVENTS` timeline `[s]` + structured K/V detail) |
 
 MASC TUI is **monitor-first**: while unfocused, bare keys navigate directly.
-Switch workspaces with `1`–`6`, cycle sub-tabs with `[` / `]` (or `←` / `→`
-unfocused, `Alt+[` / `Alt+]`), move selection or scroll with `↑`/`↓` (`j`/`k`), dive into an item
-with `Enter`, and focus the bottom composer with `i` (or press `c` on a Keeper
-to jump straight into Chat). Inside the composer, `Enter` sends (behind an active turn it waits for that turn to end),
+Switch workspaces with `1`–`6`, toggle/focus the Left Navigation Sidebar with `b` / `Ctrl+B` / `Alt+B`,
+cycle sub-tabs with `[` / `]` (or `←` / `→` unfocused, `Alt+[` / `Alt+]`), move
+selection or scroll with `↑`/`↓` (`j`/`k`), dive into an item with `Enter`, and
+focus the bottom composer with `i` (or press `c` on a Keeper to jump straight
+into Chat). Inside the composer, `Enter` sends (behind an active turn it waits for that turn to end),
 `Alt+Enter` (or `Ctrl+Enter`) steers by cutting your own running request, and `Shift+Enter` (or `Ctrl+J`)
 inserts a newline. Type `/` or `@` inside the composer to open the interactive
 command/mention popup (`↑`/`↓` select, `Tab` complete, `Enter` run/insert,
-`Esc` dismiss). `Esc` blurs the composer, pops a dive, or closes an overlay and
-never quits; `Ctrl+Q` quits cleanly.
+`Esc` dismiss). `Esc` blurs the composer, returns focus from the sidebar, pops
+a dive, or closes an overlay and never quits; `Ctrl+Q` quits cleanly.
 
-Global overlays and tools: `Ctrl+K` command/entity palette, `Ctrl+G` keeper
-switcher, `Ctrl+L` model/runtime switcher, `,` 2-pane Settings overlay (`←`/`→`
-cycle enum/bool/numeric values, `Enter` inline edit, `Space` dry-run diff,
-`Ctrl+S` save — also available directly in Keeper Config), `Ctrl+T`
-Queue/Context/Schedules drawer, `I` historical incidents drawer, `J` jump to the
-most urgent blocked item, and `?` dynamic keymap help. Native terminal
+Global overlays and tools (also accessible via persistent top-chrome badges `[b]` `[I]` `[^T]` `[,]` `[?]`):
+`Ctrl+K` command/entity palette, `Ctrl+G` keeper switcher, `Ctrl+L`
+model/runtime switcher, `,` 2-pane Settings overlay (`←`/`→` cycle
+enum/bool/numeric values, `Enter` inline edit, `Space` dry-run diff, `Ctrl+S`
+save — also available directly in Keeper Config), `Ctrl+T` Queue/Context/Schedules
+drawer (with compact per-turn context inspector), `I` historical incidents
+drawer, `J` jump to the most urgent blocked item, and `?` dynamic keymap help. Native terminal
 drag-select is on by default (mouse capture starts off); press `m` while
 unfocused to toggle mouse-wheel scrolling, and `y` to copy the current selection
 via OSC 52. In chat, `Ctrl+O` (or `/tools compact|results|full`) cycles tool

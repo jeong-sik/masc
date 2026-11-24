@@ -1859,6 +1859,16 @@ let test_v25_chrome_margins_and_keycaps () =
     (Option.is_some l_wide.sidebar && not l_wide.sidebar_is_drawer);
   Alcotest.(check int) "Wide body x after docked sidebar = 26" 26 l_wide.body.x;
   Alcotest.(check int) "Wide body w after docked sidebar = 113" 113 l_wide.body.w;
+  let base_wide_collapsed =
+    { base_wide with nav = { base_wide.nav with sidebar_open = Some false } }
+  in
+  let l_wide_c =
+    Chrome.compute_layout ~model:base_wide_collapsed ~cols:140 ~rows:40
+  in
+  Alcotest.(check int) "Wide collapsed sidebar body inset x = 1" 1
+    l_wide_c.body.x;
+  Alcotest.(check int) "Wide collapsed sidebar body inset w = 138" 138
+    l_wide_c.body.w;
 
   let base_std = populated_model ~cols:110 ~rows:32 ~lang:Say.Lang_en in
   let l_std = Chrome.compute_layout ~model:base_std ~cols:110 ~rows:32 in
@@ -3210,6 +3220,74 @@ let test_build_commit_display_in_help_and_settings () =
         [ (140, 40); (90, 28); (60, 18) ])
     [ Say.Lang_ko; Say.Lang_en ]
 
+let test_wave2_sidebar_keepers_sync_and_overlays () =
+  (* 1. Wide 140x40 renders docked Left Sidebar + Top Chrome persistent utility badges *)
+  let m_wide = populated_model ~cols:140 ~rows:40 ~lang:Say.Lang_en in
+  let l_wide = Chrome.compute_layout ~model:m_wide ~cols:140 ~rows:40 in
+  let g_wide, _ = render_full ~model:m_wide ~cols:140 ~rows:40 in
+  assert_clean_grid ~label:"Wave2/DockedSidebar" g_wide;
+  Alcotest.(check bool) "Wide docked sidebar present and non-drawer" true
+    (Option.is_some l_wide.sidebar && not l_wide.sidebar_is_drawer);
+  let row0 = grid_row_text g_wide 0 in
+  assert_contains ~label:"Top Chrome shows [b] Menu badge" ~needle:"[b]" row0;
+  assert_contains ~label:"Top Chrome shows [?] badge" ~needle:"[?]" row0;
+  let all_wide = grid_all_text g_wide in
+  assert_contains ~label:"Docked sidebar lists Schedules" ~needle:"Schedules" all_wide;
+  assert_contains ~label:"Docked sidebar lists Artifacts" ~needle:"Artifacts" all_wide;
+  assert_contains ~label:"Docked sidebar lists Context & Turns" ~needle:"Context" all_wide;
+  assert_contains ~label:"Docked sidebar lists Fusion" ~needle:"Fusion" all_wide;
+
+  (* 2. Compact 100x30 drawer overlay opens when sidebar_open && sidebar_focused *)
+  let m_cmp =
+    let m0 = populated_model ~cols:100 ~rows:30 ~lang:Say.Lang_en in
+    {
+      m0 with
+      nav = { m0.nav with sidebar_open = Some true; sidebar_focused = true };
+    }
+  in
+  let l_cmp = Chrome.compute_layout ~model:m_cmp ~cols:100 ~rows:30 in
+  let g_cmp, _ = render_full ~model:m_cmp ~cols:100 ~rows:30 in
+  assert_clean_grid ~label:"Wave2/DrawerSidebar" g_cmp;
+  Alcotest.(check bool) "Compact open+focused sidebar is floating drawer" true
+    (Option.is_some l_cmp.sidebar && l_cmp.sidebar_is_drawer);
+
+  (* 3. Keepers Split Sub-Tab Bar Sync: pane_index=0 shows fleet modes; pane_index=1 shows all 7 Keeper tabs *)
+  let m_kp0 =
+    {
+      m_wide with
+      nav = { m_wide.nav with workspace = Nav.Keepers; pane_index = 0 };
+    }
+  in
+  let g_kp0, _ = render_full ~model:m_kp0 ~cols:140 ~rows:40 in
+  let sub0 = grid_row_text g_kp0 1 in
+  assert_contains ~label:"Keepers pane 0 sub-tab shows Companies"
+    ~needle:"Companies" sub0;
+  let m_kp1 = { m_kp0 with nav = { m_kp0.nav with pane_index = 1 } } in
+  let g_kp1, _ = render_full ~model:m_kp1 ~cols:140 ~rows:40 in
+  let sub1 = grid_row_text g_kp1 1 in
+  assert_contains ~label:"Keepers pane 1 sub-tab syncs to Ctx/Context tab"
+    ~needle:"Ctx" sub1;
+  assert_contains ~label:"Keepers pane 1 sub-tab syncs to Tools tab"
+    ~needle:"Tools" sub1;
+
+  (* 4. Upgraded Drawer_context & Rich HTML Media_viewer render cleanly *)
+  let m_ctx_ov =
+    {
+      m_wide with
+      nav = { m_wide.nav with overlay = Some (Nav.Queue_context Nav.Drawer_context) };
+    }
+  in
+  let g_ctx, _ = render_full ~model:m_ctx_ov ~cols:140 ~rows:40 in
+  assert_clean_grid ~label:"Wave2/DrawerContext" g_ctx;
+  let m_mv =
+    {
+      m_wide with
+      nav = { m_wide.nav with overlay = Some (Nav.System_gate Nav.Media_viewer) };
+    }
+  in
+  let g_mv, _ = render_full ~model:m_mv ~cols:140 ~rows:40 in
+  assert_clean_grid ~label:"Wave2/MediaViewer" g_mv
+
 let () =
   Alcotest.run "masc_tui_screens_core"
     [
@@ -3231,6 +3309,8 @@ let () =
             `Quick test_v25_chrome_margins_and_keycaps;
           Alcotest.test_case "Feature Wave 1: honest LIVE SSE vs SYNCED vs SNAPSHOT top bar"
             `Quick test_feature_wave1_honest_ssot_chrome_transitions;
+          Alcotest.test_case "Feature Wave 2: Left Navigation Sidebar, Top Chrome badges, Keepers sub-tab sync & Drawer_context"
+            `Quick test_wave2_sidebar_keepers_sync_and_overlays;
         ] );
       ( "pulse",
         [

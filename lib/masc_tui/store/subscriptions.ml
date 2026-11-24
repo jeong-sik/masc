@@ -108,10 +108,12 @@ let view_scoped_stream (m : Model.t) : stream_id option =
           match m.runtime.active_tab with
           | Nav.Runtime_quotas_credits
           | Nav.Runtime_failover_lanes
+          | Nav.Runtime_fusion
+          | Nav.Runtime_connectors
           | Nav.Runtime_addons_browser ->
               None
           | Nav.Runtime_efficiency_spend -> Some Stream_model_metrics
-          | Nav.Runtime_tools_connectors -> Some Stream_tool_metrics_series)
+          | Nav.Runtime_tools_usage -> Some Stream_tool_metrics_series)
       | Nav.Infra -> (
           match m.infra.active_tab with
           | Nav.Infra_sandboxes | Nav.Infra_repos_changes -> None

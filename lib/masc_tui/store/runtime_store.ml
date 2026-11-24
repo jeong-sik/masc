@@ -51,6 +51,27 @@ type company_spend_group = {
   members : keeper_spend_row list;
 }
 
+type tools_subview =
+  | Tools_usage_calls
+  | Tools_catalog_tree
+  | Tools_keeper_skills
+
+type tools_window =
+  | Tools_win_24h
+  | Tools_win_7d
+  | Tools_win_14d
+
+type tool_family_group = {
+  family : string;
+  tools : Wire_runtime.tool_catalog_entry list;
+}
+
+type tool_domain_group = {
+  domain : string;
+  families : tool_family_group list;
+  total_calls : int;
+}
+
 type t = {
   active_tab : Nav.runtime_tab;
   usage_windows : Wire_runtime.provider_usage_windows Observed.t;
@@ -68,7 +89,16 @@ type t = {
   fusion_runs : Wire_runtime.fusion_run list Observed.t;
   fusion_launch_draft : fusion_draft;
   tool_series : Wire_runtime.tool_series Observed.t;
+  tool_series_summary : Wire_runtime.tool_series_summary Observed.t;
+  tool_detail_series : (string * Wire_runtime.tool_series_summary) Observed.t;
+  tools_dashboard : Wire_runtime.tools_dashboard_snapshot Observed.t;
   tools_catalog : Wire_runtime.tool_summary list Observed.t;
+  skills : Wire_runtime.skills_snapshot Observed.t;
+  tools_subview : tools_subview;
+  tools_window : tools_window;
+  tools_surface_keeper_idx : int;
+  tools_catalog_selected_index : int;
+  tools_catalog_scroll_offset : int;
   connectors : Wire_runtime.connector_row list Observed.t;
   browser_lane : Wire_runtime.browser_lane_status Observed.t;
   browser_tabs : Wire_runtime.browser_tabs_response Observed.t String_map.t;
@@ -80,8 +110,12 @@ type t = {
   selected_index : int;
   scroll_offset : int;
   quota_scroll_offset : int;
+  fusion_selected_index : int;
+  fusion_scroll_offset : int;
   connector_selected_index : int;
   connector_scroll_offset : int;
+  mcp_client_selected_index : int;
+  mcp_client_scroll_offset : int;
   addon_selected_index : int;
   addon_scroll_offset : int;
   browser_client_selected_index : int;
@@ -92,6 +126,38 @@ type t = {
   detail_scroll_offset : int;
   filter_query : string;
 }
+
+let equal_tools_subview a b =
+  match a, b with
+  | Tools_usage_calls, Tools_usage_calls
+  | Tools_catalog_tree, Tools_catalog_tree
+  | Tools_keeper_skills, Tools_keeper_skills ->
+      true
+  | Tools_usage_calls, (Tools_catalog_tree | Tools_keeper_skills)
+  | Tools_catalog_tree, (Tools_usage_calls | Tools_keeper_skills)
+  | Tools_keeper_skills, (Tools_usage_calls | Tools_catalog_tree) ->
+      false
+
+let equal_tools_window a b =
+  match a, b with
+  | Tools_win_24h, Tools_win_24h
+  | Tools_win_7d, Tools_win_7d
+  | Tools_win_14d, Tools_win_14d ->
+      true
+  | Tools_win_24h, (Tools_win_7d | Tools_win_14d)
+  | Tools_win_7d, (Tools_win_24h | Tools_win_14d)
+  | Tools_win_14d, (Tools_win_24h | Tools_win_7d) ->
+      false
+
+let tools_window_params = function
+  | Tools_win_24h -> (`Hour, 24)
+  | Tools_win_7d -> (`Day, 168)
+  | Tools_win_14d -> (`Day, 336)
+
+let tools_window_label = function
+  | Tools_win_24h -> "24h"
+  | Tools_win_7d -> "7d"
+  | Tools_win_14d -> "14d"
 
 let empty_fusion_draft =
   {
@@ -121,7 +187,16 @@ let empty =
     fusion_runs = Observed.unreported;
     fusion_launch_draft = empty_fusion_draft;
     tool_series = Observed.unreported;
+    tool_series_summary = Observed.unreported;
+    tool_detail_series = Observed.absent;
+    tools_dashboard = Observed.unreported;
     tools_catalog = Observed.unreported;
+    skills = Observed.unreported;
+    tools_subview = Tools_usage_calls;
+    tools_window = Tools_win_24h;
+    tools_surface_keeper_idx = 0;
+    tools_catalog_selected_index = 0;
+    tools_catalog_scroll_offset = 0;
     connectors = Observed.unreported;
     browser_lane = Observed.unreported;
     browser_tabs = String_map.empty;
@@ -133,8 +208,12 @@ let empty =
     selected_index = 0;
     scroll_offset = 0;
     quota_scroll_offset = 0;
+    fusion_selected_index = 0;
+    fusion_scroll_offset = 0;
     connector_selected_index = 0;
     connector_scroll_offset = 0;
+    mcp_client_selected_index = 0;
+    mcp_client_scroll_offset = 0;
     addon_selected_index = 0;
     addon_scroll_offset = 0;
     browser_client_selected_index = 0;
@@ -150,6 +229,65 @@ let contains_ci = Store_scroll.contains_ci
 let adjust_grouped_scroll = Store_scroll.adjust_grouped_scroll
 let clamp_index = Store_scroll.clamp_index
 
+let set_tools_subview tools_subview t =
+  {
+    t with
+    tools_subview;
+    scroll_offset = 0;
+    detail_scroll_offset = 0;
+  }
+
+let cycle_tools_subview t =
+  let next =
+    match t.tools_subview with
+    | Tools_usage_calls -> Tools_catalog_tree
+    | Tools_catalog_tree -> Tools_keeper_skills
+    | Tools_keeper_skills -> Tools_usage_calls
+  in
+  set_tools_subview next t
+
+let cycle_tools_window t =
+  let tools_window =
+    match t.tools_window with
+    | Tools_win_24h -> Tools_win_7d
+    | Tools_win_7d -> Tools_win_14d
+    | Tools_win_14d -> Tools_win_24h
+  in
+  {
+    t with
+    tools_window;
+    tool_series = Observed.mark_stale t.tool_series;
+    tool_series_summary = Observed.mark_stale t.tool_series_summary;
+    tool_detail_series = Observed.mark_stale t.tool_detail_series;
+    scroll_offset = 0;
+  }
+
+let selected_tools_surface_keeper ~keeper_names t =
+  let sorted = List.sort String.compare keeper_names in
+  let len = List.length sorted in
+  if len <= 0 then None
+  else List.nth_opt sorted (clamp_index len t.tools_surface_keeper_idx)
+
+let step_tools_surface_keeper ~keeper_names ~delta t =
+  let sorted = List.sort String.compare keeper_names in
+  let len = List.length sorted in
+  if len <= 0 then (t, None)
+  else
+    let next_idx = (t.tools_surface_keeper_idx + delta) mod len in
+    let tools_surface_keeper_idx =
+      if next_idx < 0 then next_idx + len else next_idx
+    in
+    let name = List.nth_opt sorted tools_surface_keeper_idx in
+    let next =
+      {
+        t with
+        tools_surface_keeper_idx;
+        tools_dashboard = Observed.mark_stale t.tools_dashboard;
+        scroll_offset = 0;
+      }
+    in
+    (next, name)
+
 let set_tab active_tab t =
   {
     t with
@@ -157,8 +295,14 @@ let set_tab active_tab t =
     selected_index = 0;
     scroll_offset = 0;
     quota_scroll_offset = 0;
+    fusion_selected_index = 0;
+    fusion_scroll_offset = 0;
     connector_selected_index = 0;
     connector_scroll_offset = 0;
+    mcp_client_selected_index = 0;
+    mcp_client_scroll_offset = 0;
+    tools_catalog_selected_index = 0;
+    tools_catalog_scroll_offset = 0;
     addon_selected_index = 0;
     addon_scroll_offset = 0;
     browser_client_selected_index = 0;
@@ -273,6 +417,36 @@ let apply_fusion_runs ~observed_at runs t =
 let apply_tool_series ~observed_at series t =
   { t with tool_series = Observed.value ~observed_at series }
 
+let apply_tool_series_summary ~observed_at
+    (summary : Wire_runtime.tool_series_summary) t =
+  {
+    t with
+    tool_series_summary = Observed.value ~observed_at summary;
+    tool_series = Observed.value ~observed_at summary.series;
+  }
+
+let apply_tool_detail_series ~observed_at ~tool summary t =
+  { t with tool_detail_series = Observed.value ~observed_at (tool, summary) }
+
+let apply_tools_dashboard ~observed_at
+    (snap : Wire_runtime.tools_dashboard_snapshot) t =
+  let catalog =
+    List.map
+      (fun (e : Wire_runtime.tool_catalog_entry) : Wire_runtime.tool_summary ->
+        {
+          name = e.name;
+          description = e.description;
+          calls = e.calls_count;
+          failure_rate_pct = e.failure_rate_pct;
+        })
+      snap.entries
+  in
+  {
+    t with
+    tools_dashboard = Observed.value ~observed_at snap;
+    tools_catalog = Observed.value ~observed_at catalog;
+  }
+
 let apply_tools_catalog ~observed_at catalog t =
   { t with tools_catalog = Observed.value ~observed_at catalog }
 
@@ -285,6 +459,9 @@ let apply_tools_warming ~observed_at t =
         Observed.loading ~since_ns:observed_at
   in
   { t with tools_catalog }
+
+let apply_skills ~observed_at snap t =
+  { t with skills = Observed.value ~observed_at snap }
 
 let apply_connectors ~observed_at connectors t =
   { t with connectors = Observed.value ~observed_at connectors }
@@ -958,6 +1135,166 @@ let filtered_tools t =
         | None -> false)
       tools
 
+let filtered_tool_catalog_entries t =
+  let entries =
+    match Observed.to_option t.tools_dashboard with
+    | Some dash when dash.entries <> [] -> dash.entries
+    | Some _ | None -> (
+        match Observed.to_option t.tools_catalog with
+        | None -> []
+        | Some xs ->
+            List.map
+              (fun (s : Wire_runtime.tool_summary) :
+                   Wire_runtime.tool_catalog_entry ->
+                let domain, family = Wire_runtime.classify_tool_domain_family s.name in
+                {
+                  name = s.name;
+                  description = s.description;
+                  public_names = [];
+                  calls_count = s.calls;
+                  failure_count = 0;
+                  failure_rate_pct = s.failure_rate_pct;
+                  p95_ms = None;
+                  direct_call_allowed = None;
+                  surfaces = [];
+                  domain;
+                  family;
+                  doc_refs = [];
+                })
+              xs)
+  in
+  let q = String.trim t.filter_query in
+  if String.equal q "" then entries
+  else
+    List.filter
+      (fun (e : Wire_runtime.tool_catalog_entry) ->
+        contains_ci ~needle:q e.name
+        || contains_ci ~needle:q e.domain
+        || contains_ci ~needle:q e.family
+        || List.exists (contains_ci ~needle:q) e.public_names
+        || List.exists (contains_ci ~needle:q) e.surfaces
+        ||
+        match e.description with
+        | Some d -> contains_ci ~needle:q d
+        | None -> false)
+      entries
+
+let domain_rank = function
+  | "board" -> 0
+  | "work" -> 1
+  | "run" -> 2
+  | "keeper ops" -> 3
+  | "keeper self" -> 4
+  | "system" -> 5
+  | _ -> 6
+
+let grouped_tools_catalog t : tool_domain_group list =
+  let entries = filtered_tool_catalog_entries t in
+  let dom_tbl : (string, Wire_runtime.tool_catalog_entry list) Hashtbl.t =
+    Hashtbl.create 16
+  in
+  List.iter
+    (fun (e : Wire_runtime.tool_catalog_entry) ->
+      let prev =
+        match Hashtbl.find_opt dom_tbl e.domain with Some xs -> xs | None -> []
+      in
+      Hashtbl.replace dom_tbl e.domain (e :: prev))
+    entries;
+  let cmp_tool (a : Wire_runtime.tool_catalog_entry)
+      (b : Wire_runtime.tool_catalog_entry) =
+    let ca = Option.value ~default:0 (Observed.to_option a.calls_count) in
+    let cb = Option.value ~default:0 (Observed.to_option b.calls_count) in
+    let c = Int.compare cb ca in
+    if c <> 0 then c else String.compare a.name b.name
+  in
+  Hashtbl.fold
+    (fun domain items acc ->
+      let fam_tbl : (string, Wire_runtime.tool_catalog_entry list) Hashtbl.t =
+        Hashtbl.create 8
+      in
+      List.iter
+        (fun (e : Wire_runtime.tool_catalog_entry) ->
+          let prev =
+            match Hashtbl.find_opt fam_tbl e.family with
+            | Some xs -> xs
+            | None -> []
+          in
+          Hashtbl.replace fam_tbl e.family (e :: prev))
+        items;
+      let families =
+        Hashtbl.fold
+          (fun family tools facc ->
+            { family; tools = List.sort cmp_tool tools } :: facc)
+          fam_tbl []
+        |> List.sort (fun (a : tool_family_group) (b : tool_family_group) ->
+               String.compare a.family b.family)
+      in
+      let total_calls =
+        List.fold_left
+          (fun s (e : Wire_runtime.tool_catalog_entry) ->
+            s + Option.value ~default:0 (Observed.to_option e.calls_count))
+          0 items
+      in
+      { domain; families; total_calls } :: acc)
+    dom_tbl []
+  |> List.sort (fun (a : tool_domain_group) (b : tool_domain_group) ->
+         let r = Int.compare (domain_rank a.domain) (domain_rank b.domain) in
+         if r <> 0 then r else String.compare a.domain b.domain)
+
+let tools_catalog_display_entries t =
+  grouped_tools_catalog t
+  |> List.concat_map (fun (d : tool_domain_group) ->
+         List.concat_map (fun (f : tool_family_group) -> f.tools) d.families)
+
+let selected_tool_catalog_entry t =
+  let xs = tools_catalog_display_entries t in
+  List.nth_opt xs (clamp_index (List.length xs) t.tools_catalog_selected_index)
+
+let filtered_fusion_runs t =
+  let runs =
+    match Observed.to_option t.fusion_runs with Some xs -> xs | None -> []
+  in
+  let q = String.trim t.filter_query in
+  if String.equal q "" then runs
+  else
+    List.filter
+      (fun (r : Wire_runtime.fusion_run) ->
+        contains_ci ~needle:q r.run_id
+        || contains_ci ~needle:q r.keeper
+        || contains_ci ~needle:q r.preset
+        || contains_ci ~needle:q r.stage
+        ||
+        match r.summary with
+        | Some s -> contains_ci ~needle:q s
+        | None -> false)
+      runs
+
+let selected_fusion_run t =
+  let xs = filtered_fusion_runs t in
+  List.nth_opt xs (clamp_index (List.length xs) t.fusion_selected_index)
+
+let filtered_mcp_clients t =
+  let items =
+    match Observed.to_option t.mcp_clients with Some xs -> xs | None -> []
+  in
+  let q = String.trim t.filter_query in
+  if String.equal q "" then items
+  else
+    List.filter
+      (fun (c : Wire_runtime.mcp_client_row) ->
+        contains_ci ~needle:q c.name
+        || contains_ci ~needle:q c.agent_type
+        || contains_ci ~needle:q c.status
+        || (match c.keeper_name with
+            | Some k -> contains_ci ~needle:q k
+            | None -> false)
+        || List.exists (contains_ci ~needle:q) c.capabilities)
+      items
+
+let selected_mcp_client t =
+  let xs = filtered_mcp_clients t in
+  List.nth_opt xs (clamp_index (List.length xs) t.mcp_client_selected_index)
+
 let filtered_connectors t =
   let cs =
     match Observed.to_option t.connectors with
@@ -1145,8 +1482,34 @@ let visual_row_for_selection t ~selected_index =
             else walk (vis_row + 1 + slot_n) (idx + 1) rest
       in
       walk 0 0 lanes
+  | Nav.Runtime_tools_usage ->
+      let groups = grouped_tools_catalog t in
+      let rec walk_dom vis_row item_idx = function
+        | [] -> (selected_index, selected_index)
+        | (d : tool_domain_group) :: d_rest ->
+            let rec walk_fam vr ii first_in_dom = function
+              | [] -> walk_dom vr ii d_rest
+              | (f : tool_family_group) :: f_rest ->
+                  let n = List.length f.tools in
+                  let fam_hdr = vr in
+                  let first_item_row = vr + 1 in
+                  if selected_index < ii + n then
+                    let offset = selected_index - ii in
+                    let row = first_item_row + offset in
+                    let hdr =
+                      if offset = 0 then
+                        if first_in_dom then fam_hdr - 1 else fam_hdr
+                      else row
+                    in
+                    (max 0 hdr, row)
+                  else walk_fam (first_item_row + n) (ii + n) false f_rest
+            in
+            walk_fam (vis_row + 1) item_idx true d.families
+      in
+      walk_dom 0 0 groups
   | Nav.Runtime_quotas_credits
-  | Nav.Runtime_tools_connectors
+  | Nav.Runtime_fusion
+  | Nav.Runtime_connectors
   | Nav.Runtime_addons_browser ->
       (selected_index, selected_index)
 
@@ -1222,8 +1585,130 @@ let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t 
           else 0
         in
         { t with selected_index; scroll_offset; detail_scroll_offset }
-  | Nav.Runtime_tools_connectors ->
+  | Nav.Runtime_fusion ->
       if pane_index = 1 then
+        let max_scroll =
+          match max_detail_scroll with Some ms -> max 0 ms | None -> 20
+        in
+        let detail_scroll_offset =
+          Store_scroll.clamp_scroll ~max_scroll (t.detail_scroll_offset + delta)
+        in
+        { t with detail_scroll_offset }
+      else
+        let len = List.length (filtered_fusion_runs t) in
+        let fusion_selected_index =
+          clamp_index len (t.fusion_selected_index + delta)
+        in
+        let fusion_scroll_offset =
+          Store_scroll.adjust_scroll ?viewport_rows
+            ~scroll:t.fusion_scroll_offset fusion_selected_index
+        in
+        let detail_scroll_offset =
+          if Int.equal fusion_selected_index t.fusion_selected_index then
+            t.detail_scroll_offset
+          else 0
+        in
+        {
+          t with
+          fusion_selected_index;
+          fusion_scroll_offset;
+          detail_scroll_offset;
+        }
+  | Nav.Runtime_tools_usage -> (
+      match t.tools_subview with
+      | Tools_usage_calls ->
+          let buckets_n =
+            match Observed.to_option t.tool_series with
+            | Some ts -> List.length ts.buckets
+            | None -> 0
+          in
+          let max_scroll =
+            match max_detail_scroll with
+            | Some ms -> max 0 ms
+            | None ->
+                let vis = max 1 (Option.value viewport_rows ~default:10) in
+                max 0 (buckets_n - vis)
+          in
+          let scroll_offset =
+            Store_scroll.clamp_scroll ~max_scroll (t.scroll_offset + delta)
+          in
+          { t with scroll_offset }
+      | Tools_catalog_tree ->
+          let len = List.length (tools_catalog_display_entries t) in
+          let tools_catalog_selected_index =
+            clamp_index len (t.tools_catalog_selected_index + delta)
+          in
+          let header_row, vis_row =
+            visual_row_for_selection t
+              ~selected_index:tools_catalog_selected_index
+          in
+          let tools_catalog_scroll_offset =
+            adjust_grouped_scroll ?viewport_rows
+              ~scroll:t.tools_catalog_scroll_offset ~header_row vis_row
+          in
+          {
+            t with
+            tools_catalog_selected_index;
+            tools_catalog_scroll_offset;
+          }
+      | Tools_keeper_skills ->
+          if pane_index = 1 then
+            let max_scroll =
+              match max_detail_scroll with
+              | Some ms -> max 0 ms
+              | None -> (
+                  match Observed.to_option t.skills with
+                  | Some sk ->
+                      let vis = max 1 (Option.value viewport_rows ~default:10) in
+                      max 0
+                        (List.length sk.surfaces + List.length sk.shadows
+                         + List.length sk.rejections + 6 - vis)
+                  | None -> 0)
+            in
+            let detail_scroll_offset =
+              Store_scroll.clamp_scroll ~max_scroll
+                (t.detail_scroll_offset + delta)
+            in
+            { t with detail_scroll_offset }
+          else
+            let max_scroll =
+              match max_detail_scroll with
+              | Some ms -> max 0 ms
+              | None -> (
+                  match Observed.to_option t.tools_dashboard with
+                  | Some
+                      {
+                        effective_keeper_surface =
+                          Some (Wire_runtime.Keeper_surface_available s);
+                        _;
+                      } ->
+                      let vis = max 1 (Option.value viewport_rows ~default:10) in
+                      max 0 (List.length s.tools + 8 - vis)
+                  | Some
+                      {
+                        effective_keeper_surface =
+                          Some (Wire_runtime.Keeper_surface_unavailable _) | None;
+                        _;
+                      }
+                  | None ->
+                      0)
+            in
+            let scroll_offset =
+              Store_scroll.clamp_scroll ~max_scroll (t.scroll_offset + delta)
+            in
+            { t with scroll_offset })
+  | Nav.Runtime_connectors ->
+      if pane_index = 1 then
+        let len = List.length (filtered_mcp_clients t) in
+        let mcp_client_selected_index =
+          clamp_index len (t.mcp_client_selected_index + delta)
+        in
+        let mcp_client_scroll_offset =
+          Store_scroll.adjust_scroll ?viewport_rows
+            ~scroll:t.mcp_client_scroll_offset mcp_client_selected_index
+        in
+        { t with mcp_client_selected_index; mcp_client_scroll_offset }
+      else
         let len = List.length (filtered_connectors t) in
         let connector_selected_index =
           clamp_index len (t.connector_selected_index + delta)
@@ -1233,14 +1718,6 @@ let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t 
             ~scroll:t.connector_scroll_offset connector_selected_index
         in
         { t with connector_selected_index; connector_scroll_offset }
-      else
-        let len = List.length (filtered_tools t) in
-        let selected_index = clamp_index len (t.selected_index + delta) in
-        let scroll_offset =
-          Store_scroll.adjust_scroll ?viewport_rows ~scroll:t.scroll_offset
-            selected_index
-        in
-        { t with selected_index; scroll_offset }
   | Nav.Runtime_addons_browser ->
       if pane_index = 1 then
         match t.browser_right_focus with
@@ -1309,8 +1786,14 @@ let set_filter filter_query t =
     selected_index = 0;
     scroll_offset = 0;
     quota_scroll_offset = 0;
+    fusion_selected_index = 0;
+    fusion_scroll_offset = 0;
     connector_selected_index = 0;
     connector_scroll_offset = 0;
+    mcp_client_selected_index = 0;
+    mcp_client_scroll_offset = 0;
+    tools_catalog_selected_index = 0;
+    tools_catalog_scroll_offset = 0;
     addon_selected_index = 0;
     addon_scroll_offset = 0;
     browser_client_selected_index = 0;
@@ -1336,7 +1819,11 @@ let mark_stale_all t =
     exact_lane_runs = Observed.mark_stale t.exact_lane_runs;
     fusion_runs = Observed.mark_stale t.fusion_runs;
     tool_series = Observed.mark_stale t.tool_series;
+    tool_series_summary = Observed.mark_stale t.tool_series_summary;
+    tool_detail_series = Observed.mark_stale t.tool_detail_series;
+    tools_dashboard = Observed.mark_stale t.tools_dashboard;
     tools_catalog = Observed.mark_stale t.tools_catalog;
+    skills = Observed.mark_stale t.skills;
     connectors = Observed.mark_stale t.connectors;
     browser_lane = Observed.mark_stale t.browser_lane;
     browser_tabs = String_map.map Observed.mark_stale t.browser_tabs;

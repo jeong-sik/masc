@@ -2591,6 +2591,9 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               (Store_scroll.drop skip rows)
         | Nav.Drawer_context ->
             let keeper_opt = Fleet_store.find_keeper ~name:keeper model.fleet in
+            let ctx_st =
+              Keeper_context_store.get_keeper ~keeper model.keeper_context
+            in
             let eff_row =
               match Observed.to_option model.runtime.efficiency with
               | None -> None
@@ -2611,17 +2614,70 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               end
             in
             let say ~ko ~en = Say.resolve lang (Say.make ~ko ~en) in
+            let turn_entry = Keeper_context_store.selected_turn_entry ctx_st in
+            (match (Observed.to_option ctx_st.turn_records, turn_entry) with
+             | Some page, Some e when !y < bottom ->
+                 let r = e.record in
+                 let step_s =
+                   Printf.sprintf "Turn #%d (%d/%d) · %s · %s"
+                     r.absolute_turn (ctx_st.selected_turn_idx + 1)
+                     (List.length page.entries)
+                     (Ids.Turn_ref.to_string r.turn_ref) r.runtime_profile
+                 in
+                 let hint_s =
+                   Say.resolve lang
+                     (Say.make ~ko:"[< >] 턴 · [Enter] 상세"
+                        ~en:"[< >] Turn · [Enter] Dive")
+                 in
+                 let hw = Grapheme.display_width hint_s in
+                 let lw = Int.max 8 (body_r.w - hw - 2) in
+                 let row_r = Rect.make ~x:body_r.x ~y:!y ~w:body_r.w ~h:1 in
+                 ignore
+                   (Cell_grid.put_text ~clip:row_r grid ~x:body_r.x ~y:!y
+                      ~style:(Typography.anchor ~bg theme)
+                      (Grapheme.truncate_to_width ~max_width:lw step_s));
+                 if body_r.w > hw + 10 then
+                   ignore
+                     (Cell_grid.put_text ~clip:row_r grid
+                        ~x:(Rect.right row_r - hw) ~y:!y ~style:acc_st hint_s);
+                 incr y
+             | _ -> ());
             let ctx_used, ctx_hint, ctx_estimated =
               match keeper_opt with
               | Some k -> context_gauge_reading k
               | None -> (Observed.unreported, None, false)
             in
-            if body_r.h >= 3 then begin
+            let used_obs, lim_obs, unit_kind =
+              match turn_entry with
+              | Some e ->
+                  let r = e.record in
+                  let denom =
+                    match r.provider_context_window with
+                    | Some w when w > 0 -> Some w
+                    | Some _ | None -> r.context_window
+                  in
+                  ( (match r.usage.input_tokens with
+                     | Some n ->
+                         Observed.value ~observed_at:Clock.Mono.zero
+                           (float_of_int n)
+                     | None -> Observed.unreported),
+                    (match denom with
+                     | Some n ->
+                         Observed.value ~observed_at:Clock.Mono.zero
+                           (float_of_int n)
+                     | None -> Observed.unreported),
+                    Format_val.Tokens )
+              | None ->
+                  ( ctx_used,
+                    Observed.value ~observed_at:Clock.Mono.zero 100.0,
+                    Format_val.Percent )
+            in
+            if !y + 2 <= bottom then begin
               let gauge_r = Rect.make ~x:body_r.x ~y:!y ~w:body_r.w ~h:2 in
               let spec : Chart.Spec.t =
                 {
                   title =
-                    (if ctx_estimated then
+                    (if ctx_estimated && Option.is_none turn_entry then
                        Say.make ~ko:"컨텍스트 윈도우 점유율 (추정)"
                          ~en:"Context Window Fill (estimate)"
                      else
@@ -2630,9 +2686,9 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                   kind =
                     Chart.Spec.Ratio_gauge
                       {
-                        used = ctx_used;
-                        limit = Observed.value ~observed_at:Clock.Mono.zero 100.0;
-                        unit = Format_val.Percent;
+                        used = used_obs;
+                        limit = lim_obs;
+                        unit = unit_kind;
                         gradient = Chart.Gradient.Thermal;
                         reset_hint = ctx_hint;
                       };
@@ -2642,6 +2698,75 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               ignore (Chart.draw grid ~rect:gauge_r ~theme ~caps ~lang spec);
               y := !y + 3
             end;
+            let draw_turn_composition () =
+              match turn_entry with
+              | Some e when !y + 2 <= bottom ->
+                  let r = e.record in
+                  let prompt_b, tools_b, msgs_b =
+                    match r.input_components with
+                    | Some comps ->
+                        List.fold_left
+                          (fun (pb, tb, mb) (c : Turn_record.input_component) ->
+                            match c.component with
+                            | Turn_record.Prompt_block _ -> (pb + c.bytes, tb, mb)
+                            | Turn_record.Tool_schemas -> (pb, tb + c.bytes, mb)
+                            | Turn_record.Message_user
+                            | Turn_record.Message_system
+                            | Turn_record.Message_assistant_text
+                            | Turn_record.Message_thinking
+                            | Turn_record.Message_redacted_thinking
+                            | Turn_record.Message_tool_use
+                            | Turn_record.Message_tool_result
+                            | Turn_record.Message_image
+                            | Turn_record.Message_document
+                            | Turn_record.Message_audio ->
+                                (pb, tb, mb + c.bytes))
+                          (0, 0, 0) comps
+                    | None ->
+                        ( List.fold_left
+                            (fun acc (b : Turn_record.prompt_block) ->
+                              acc + b.bytes)
+                            0 r.blocks,
+                          0,
+                          0 )
+                  in
+                  if prompt_b + tools_b + msgs_b > 0 then begin
+                    let bar_r = Rect.make ~x:body_r.x ~y:!y ~w:body_r.w ~h:3 in
+                    let spec : Chart.Spec.t =
+                      {
+                        title =
+                          Say.make ~ko:"턴 입력 구성 (바이트)"
+                            ~en:"Turn Input Composition";
+                        kind =
+                          Chart.Spec.Stacked_bar
+                            {
+                              segments =
+                                [
+                                  ( Say.make ~ko:"프롬프트" ~en:"Prompt",
+                                    float_of_int prompt_b,
+                                    Theme.Status_active );
+                                  ( Say.make ~ko:"도구 스키마" ~en:"Tools",
+                                    float_of_int tools_b,
+                                    Theme.Status_ai );
+                                  ( Say.make ~ko:"메시지" ~en:"Messages",
+                                    float_of_int msgs_b,
+                                    Theme.Status_ok );
+                                ];
+                              total_label =
+                                Say.literal
+                                  (Format_val.format_value Format_val.Bytes
+                                     (float_of_int
+                                        (prompt_b + tools_b + msgs_b)));
+                              unit = Format_val.Bytes;
+                            };
+                        hotkey_hint = None;
+                      }
+                    in
+                    ignore (Chart.draw grid ~rect:bar_r ~theme ~caps ~lang spec);
+                    y := !y + 3
+                  end
+              | Some _ | None -> ()
+            in
             (match eff_row with
              | Some r when !y + 3 <= bottom ->
                  let cache_r =
@@ -2700,9 +2825,11 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                  y := !y + 4
              | Some _ -> (* held, but the drawer is too short for the bar *) ()
              | None ->
-                 put_body_line ~style:whisper_st
-                   (say ~ko:"토큰·캐시 효율 스냅샷 대기 중"
-                      ~en:"Awaiting token & cache breakdown snapshot"));
+                 if Option.is_some turn_entry then draw_turn_composition ()
+                 else
+                   put_body_line ~style:whisper_st
+                     (say ~ko:"토큰·캐시 효율 스냅샷 대기 중"
+                        ~en:"Awaiting token & cache breakdown snapshot"));
             (match keeper_opt with
              | Some k ->
                  (* Cost comes from keeper-costs over its trailing window. *)
@@ -2721,6 +2848,106 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                       cost_label
                       (Format_val.format_observed Format_val.Usd cost ~lang))
              | None -> ());
+            if Option.is_some eff_row && Option.is_some turn_entry then
+              draw_turn_composition ();
+            (match Keeper_context_store.cache_outcome_for_selected_turn ctx_st with
+             | Some reading when !y < bottom ->
+                 let diag =
+                   match reading.outcome with
+                   | Keeper_cache_outcome_reading.Turn_not_in_ledger ->
+                       "Cache: turn not in ledger"
+                   | Keeper_cache_outcome_reading.Ledger_row_unreadable e ->
+                       "Cache: ledger err " ^ e
+                   | Keeper_cache_outcome_reading.Not_per_request req ->
+                       Printf.sprintf "Cache: session-scoped (%s)" req.runtime_id
+                   | Keeper_cache_outcome_reading.First_request { earlier; _ } -> (
+                       match earlier with
+                       | Keeper_cache_outcome_reading.No_earlier_request
+                           { horizon_s } ->
+                           Printf.sprintf "Cache: cold (no prev in %.0fs)"
+                             horizon_s
+                       | Keeper_cache_outcome_reading.Earlier
+                           { idle; prefix; _ } ->
+                           let ttl_s =
+                             match idle with
+                             | Keeper_cache_outcome_reading.Idle
+                                 {
+                                   lifetime =
+                                     Keeper_cache_outcome_reading.Lifetime_declared
+                                       { check; _ };
+                                   _;
+                                 } -> (
+                                 match check with
+                                 | Keeper_cache_outcome_reading.Within ->
+                                     "TTL Within"
+                                 | Keeper_cache_outcome_reading.Outlived ->
+                                     "TTL Outlived"
+                                 | Keeper_cache_outcome_reading.Undecided ->
+                                     "TTL Undecided")
+                             | Keeper_cache_outcome_reading.Idle
+                                 {
+                                   lifetime =
+                                     ( Keeper_cache_outcome_reading.Lifetime_unrecorded
+                                     | Keeper_cache_outcome_reading.Provider_default_unknown _ );
+                                   _;
+                                 }
+                             | Keeper_cache_outcome_reading.Start_unrecorded ->
+                                 "TTL ?"
+                           in
+                           let pref_s =
+                             match prefix with
+                             | Keeper_cache_outcome_reading.Compared
+                                 { system_changed; tools_changed; messages } ->
+                                 let m_s =
+                                   match messages with
+                                   | Message_list_change.Appended { kept; added }
+                                     ->
+                                       Printf.sprintf "Appended(%d,+%d)" kept
+                                         added
+                                   | Message_list_change.Tail_removed _ ->
+                                       "Tail_removed"
+                                   | Message_list_change.Block_dropped _ ->
+                                       "Block_dropped"
+                                   | Message_list_change.Rewritten_in_place _ ->
+                                       "Rewritten"
+                                   | Message_list_change.Diverged_at { index; _ }
+                                     ->
+                                       Printf.sprintf "Diverged@%d" index
+                                 in
+                                 Printf.sprintf "sys=%s tools=%s %s"
+                                   (if system_changed then "CHG" else "ok")
+                                   (if tools_changed then "CHG" else "ok")
+                                   m_s
+                             | Keeper_cache_outcome_reading.Not_compared _ ->
+                                 "uncompared"
+                           in
+                           Printf.sprintf "Cache: %s · %s" ttl_s pref_s)
+                 in
+                 put_body_line ~style:acc_st diag
+             | Some _ | None -> ());
+            (match Observed.to_option ctx_st.next_request with
+             | Some fc when !y < bottom ->
+                 let next_s =
+                   match (fc.walk, fc.candidates) with
+                   | Wire_keeper_context.Walk_order { lane_id; _ }, c :: _ ->
+                       let carry =
+                         match c.carried with
+                         | Some cr ->
+                             Printf.sprintf "carry %d/%d (%s)" cr.kept_atoms
+                               c.history_atoms
+                               (Format_val.format_value Format_val.Bytes
+                                  (float_of_int cr.transmitted_bytes))
+                         | None -> Printf.sprintf "%d atoms" c.history_atoms
+                       in
+                       Printf.sprintf "Next: %s -> %s · %s" lane_id c.runtime_id
+                         carry
+                   | Wire_keeper_context.Walk_order { lane_id; _ }, [] ->
+                       Printf.sprintf "Next: %s (no candidates)" lane_id
+                   | Wire_keeper_context.Walk_refused reason, _ ->
+                       "Next refused: " ^ reason
+                 in
+                 put_body_line ~style:struct_st next_s
+             | Some _ | None -> ());
             (* The turn history and compaction facts take the rows left under
                the gauge, cache bar and cost line, so a short drawer drops
                them first. *)
@@ -2950,10 +3177,12 @@ let classify_inline_form (modal : Model.inline_modal_state) : inline_form_kind =
   | ( Nav.Btw_query
     | Nav.Gate_reject _
     | Nav.Verification_reject _
+    | Nav.Harness_overrule _
     | Nav.Task_cancel _
     | Nav.Schedule_form
     | Nav.Connector_form
-    | Nav.Repo_add_form ) as std ->
+    | Nav.Repo_add_form
+    | Nav.Board_comment _ ) as std ->
       Form_standard std
 
 let inline_action_title ~lang ~(modal : Model.inline_modal_state) _kind =
@@ -2990,6 +3219,9 @@ let inline_action_title ~lang ~(modal : Model.inline_modal_state) _kind =
   | Form_standard (Nav.Verification_reject id) ->
       Say.resolve lang
         (Say.make ~ko:("검증 거절 · " ^ id) ~en:("Verification Reject · " ^ id))
+  | Form_standard (Nav.Harness_overrule id) ->
+      Say.resolve lang
+        (Say.make ~ko:("판정 재정의 · " ^ id) ~en:("Harness Overrule · " ^ id))
   | Form_standard (Nav.Task_cancel id) ->
       Say.resolve lang
         (Say.make ~ko:("작업 취소 · " ^ id) ~en:("Cancel Task · " ^ id))
@@ -3001,6 +3233,18 @@ let inline_action_title ~lang ~(modal : Model.inline_modal_state) _kind =
       Say.resolve lang (Say.make ~ko:"저장소 추가" ~en:"Add Repository")
   | Form_standard Nav.Board_new_post ->
       Say.resolve lang (Say.make ~ko:"보드 새 글 작성" ~en:"New Board Post")
+  | Form_standard (Nav.Board_comment { post_id; parent_id }) -> (
+      match parent_id with
+      | Some pid ->
+          Say.resolve lang
+            (Say.make
+               ~ko:(Printf.sprintf "대댓글 작성 (%s)" pid)
+               ~en:(Printf.sprintf "Reply to Comment (%s)" pid))
+      | None ->
+          Say.resolve lang
+            (Say.make
+               ~ko:(Printf.sprintf "타래 댓글 작성 (%s)" post_id)
+               ~en:(Printf.sprintf "Add Comment (%s)" post_id)))
 
 let form_of_inline_modal (modal : Model.inline_modal_state) =
   let fields =
@@ -3039,11 +3283,13 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             13)
     | Nav.Gate_reject _
     | Nav.Verification_reject _
+    | Nav.Harness_overrule _
     | Nav.Task_cancel _
     | Nav.Schedule_form
     | Nav.Connector_form
     | Nav.Repo_add_form
-    | Nav.Board_new_post ->
+    | Nav.Board_new_post
+    | Nav.Board_comment _ ->
         Int.max 7 (List.length modal.fields + 5)
   in
   let h = Int.min (Int.max 0 (rect.h - 2)) desired_h in
@@ -3156,11 +3402,13 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                            (Glyph.to_utf8 Glyph.Live_failing) keeper reason))))
       | Nav.Gate_reject _
       | Nav.Verification_reject _
+      | Nav.Harness_overrule _
       | Nav.Task_cancel _
       | Nav.Schedule_form
       | Nav.Connector_form
       | Nav.Repo_add_form
-      | Nav.Board_new_post ->
+      | Nav.Board_new_post
+      | Nav.Board_comment _ ->
           let status_rows =
             if modal.submitting || Option.is_some modal.error then 1 else 0
           in
@@ -3459,6 +3707,36 @@ let compact_help_group ~lang (grp : Keymap.help_group) : Keymap.help_group =
         | Keymap.Toggle_zoom
         | Keymap.Cycle_memory_view
         | Keymap.Toggle_memory_sort
+        | Keymap.Cycle_signal_or_source
+        | Keymap.Cycle_sort_or_speak
+        | Keymap.Cycle_hearth_or_overrule
+        | Keymap.Cycle_time_window
+        | Keymap.Cycle_view_mode
+        | Keymap.Context_primary_action
+        | Keymap.Toggle_artifact_share
+        | Keymap.Step_revision _
+        | Keymap.Step_context_item _
+        | Keymap.Launch_fusion
+        | Keymap.Toggle_unreported
+        | Keymap.Unbind_connector
+        | Keymap.Entity_approve_or_assign
+        | Keymap.Entity_reject_or_cancel
+        | Keymap.Edit_or_export
+        | Keymap.Configure_provider_key
+        | Keymap.Account_login
+        | Keymap.Poll_account_login
+        | Keymap.Copy_hash
+        | Keymap.Dismiss_errors
+        | Keymap.Board_vote _
+        | Keymap.Toggle_memory_scope
+        | Keymap.Copy_public_url
+        | Keymap.Probe_sandbox
+        | Keymap.Refresh_browser_tabs
+        | Keymap.Open_memory_recovery
+        | Keymap.Search_prev_match
+        | Keymap.Toggle_memory_chart
+        | Keymap.Open_external_editor
+        | Keymap.Interrupt_turn
         | Keymap.Quit_app ->
             Some e)
       grp.entries
@@ -3833,110 +4111,177 @@ let render_system_gate grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               | `Markdown -> ("MD", ".md"))
           | None -> ("MD", ".md")
         in
+        let view_mode_lbl =
+          match model.knowledge.artifact_view_mode with
+          | `Document -> Say.resolve lang (Say.make ~ko:"문서" ~en:"Doc")
+          | `Raw_source -> Say.resolve lang (Say.make ~ko:"원본" ~en:"Raw")
+        in
         let inner =
           Card.draw ~cache grid ~rect:modal_r ~theme
             {
               (Card.default_spec ~title) with
+              badge =
+                Some
+                  {
+                    glyph = None;
+                    text = Printf.sprintf "%s · %s" fmt_tok view_mode_lbl;
+                    tone = Some Theme.Status_active;
+                  };
               hotkey =
                 Some
                   (Say.resolve lang
                      (Say.make
                         ~ko:
                           (Printf.sprintf
-                             "[y] %s 복사 · [e] %s 내보내기 · [o] 열기 · [H] SHA · [Esc] 닫기"
+                             "[v] 문서/원본 · [y] %s 복사 · [e] %s 저장 · [o] 열기 · [H] SHA · [Esc]"
                              fmt_tok ext_tok)
                         ~en:
                           (Printf.sprintf
-                             "[y] Copy %s · [e] Export %s · [o] Open · [H] SHA · [Esc] Close"
+                             "[v] Doc/Raw · [y] Copy %s · [e] Export %s · [o] Open · [H] SHA · [Esc]"
                              fmt_tok ext_tok)));
               focused = true;
               elevated = true;
             }
         in
-        let media_lines =
+        let pad_x = if inner.w >= 48 then 2 else 1 in
+        let content = Card.pad_inner ~pad_x inner in
+        if not (Rect.is_empty content) then begin
           match sel_art with
+          | None ->
+              draw_lines inner ~rail_tone:(Some Theme.Status_active)
+                [
+                  ( whisper_st,
+                    Say.resolve lang
+                      (Say.make ~ko:"선택된 미디어 또는 아티팩트가 없습니다."
+                         ~en:"No media or artifact selected.") );
+                  ( pri_st,
+                    Say.resolve lang
+                      (Say.make ~ko:"[Esc] 돌아가기" ~en:"[Esc] Return") );
+                ]
           | Some art ->
               let detail_opt =
                 Knowledge_store.artifact_detail_for_entry art model.knowledge
               in
-              let preview =
-                Knowledge_store.artifact_preview_lines art detail_opt
+              let raw_body =
+                match detail_opt with Some d -> d.content | None -> ""
               in
-              let header =
-                [
-                  (anchor_st, art.title);
-                  ( struct_st,
-                    Printf.sprintf "ID: %s · r%d · %s · %s" art.id art.revision
-                      art.body.mime
-                      (Format_val.format_value Format_val.Bytes
-                         (float_of_int art.body.bytes)) );
-                  ( whisper_st,
-                    Printf.sprintf "SHA256: %s"
-                      (Grapheme.truncate_to_width ~max_width:40 art.body.sha256) );
-                  ( acc_st,
-                    Say.resolve lang
-                      (Say.make
-                         ~ko:
-                           (Printf.sprintf
-                              "[y] %s 본문 복사 · [e] %s 저장 · [o] 기본 앱 열기 · [H] SHA 복사"
-                              fmt_tok ext_tok)
-                         ~en:
-                           (Printf.sprintf
-                              "[y] Copy %s body · [e] Export %s · [o] Open default · [H] Copy SHA"
-                              fmt_tok ext_tok)) );
-                ]
+              let y = ref content.y and bot = Rect.bottom content in
+              let put_hdr st txt =
+                if !y < bot then begin
+                  let rr = Rect.make ~x:content.x ~y:!y ~w:content.w ~h:1 in
+                  ignore
+                    (Cell_grid.put_text ~clip:rr grid ~x:content.x ~y:!y
+                       ~style:st
+                       (Grapheme.truncate_to_width ~max_width:content.w txt));
+                  incr y
+                end
               in
-              let body_rows =
-                if preview = [] then
+              put_hdr anchor_st art.title;
+              put_hdr struct_st
+                (Printf.sprintf "ID: %s · r%d · %s · %s · SHA: %s" art.id
+                   art.revision art.body.mime
+                   (Format_val.format_value Format_val.Bytes
+                      (float_of_int art.body.bytes))
+                   (Grapheme.truncate_to_width ~max_width:14 art.body.sha256));
+              if !y < bot then begin
+                Card.draw_hairline ~pad_x:0 ~bg grid ~rect:content ~y:!y ~theme;
+                incr y
+              end;
+              let body_r =
+                Rect.make ~x:content.x ~y:!y ~w:content.w
+                  ~h:(Int.max 0 (bot - !y))
+              in
+              if not (Rect.is_empty body_r) then begin
+                if String.equal (String.trim raw_body) "" then
                   match
                     Knowledge_store.artifact_detail_failure_for_entry art
                       model.knowledge
                   with
                   | Some reason ->
-                      [
-                        ( acc_st,
-                          Say.resolve lang
-                            (Say.make
-                               ~ko:
-                                 (Printf.sprintf "본문 조회 실패: %s · [r] 재시도"
-                                    reason)
-                               ~en:
-                                 (Printf.sprintf
-                                    "Body fetch failed: %s · [r] retry" reason))
-                        );
-                      ]
+                      ignore
+                        (Cell_grid.put_text ~clip:body_r grid ~x:body_r.x
+                           ~y:body_r.y ~style:acc_st
+                           (Say.resolve lang
+                              (Say.make
+                                 ~ko:
+                                   (Printf.sprintf "본문 조회 실패: %s · [r] 재시도"
+                                      reason)
+                                 ~en:
+                                   (Printf.sprintf
+                                      "Body fetch failed: %s · [r] retry" reason))))
                   | None ->
-                      [
-                        ( whisper_st,
-                          Say.resolve lang
-                            (Say.make ~ko:"본문 불러오는 중 또는 미리보기 없음"
-                               ~en:"Loading body or no inline preview") );
-                      ]
+                      ignore
+                        (Cell_grid.put_text ~clip:body_r grid ~x:body_r.x
+                           ~y:body_r.y ~style:whisper_st
+                           (Say.resolve lang
+                              (Say.make ~ko:"본문 불러오는 중 또는 미리보기 없음"
+                                 ~en:"Loading body or no inline preview")))
                 else
-                  (whisper_st, "── " ^ fmt_tok ^ " Preview ──")
-                  :: List.map (fun l -> (pri_st, l)) preview
-              in
-              header @ body_rows
-          | None ->
-              [
-                ( whisper_st,
-                  Say.resolve lang
-                    (Say.make ~ko:"선택된 미디어 또는 아티팩트가 없습니다."
-                       ~en:"No media or artifact selected.") );
-                ( pri_st,
-                  Say.resolve lang (Say.make ~ko:"[Esc] 돌아가기" ~en:"[Esc] Return") );
-              ]
-        in
-        let pad_y = if inner.h >= 7 then 1 else 0 in
-        let content_h = Int.max 0 (inner.h - (2 * pad_y)) in
-        let max_scroll =
-          Int.max 0 (List.length media_lines - Int.max 1 content_h)
-        in
-        let skip =
-          Int.min max_scroll (Int.max 0 model.knowledge.detail_scroll_offset)
-        in
-        let visible_lines = List.drop skip media_lines in
-        draw_lines inner ~rail_tone:(Some Theme.Status_active) visible_lines
+                  let scroll = Int.max 0 model.knowledge.detail_scroll_offset in
+                  match
+                    ( model.knowledge.artifact_view_mode
+                    , Wire_knowledge.artifact_format_of_entry art )
+                  with
+                  | `Document, `Html ->
+                      ignore
+                        (Html_doc.draw grid ~rect:body_r ~theme ~lang ~scroll
+                           raw_body)
+                  | `Document, `Markdown ->
+                      let is_json = Knowledge_store.is_json_artifact art in
+                      if is_json then begin
+                        let pretty =
+                          match Yojson.Safe.from_string raw_body with
+                          | j -> Yojson.Safe.pretty_to_string j
+                          | exception Yojson.Json_error _ -> raw_body
+                        in
+                        let lines = String.split_on_char '\n' pretty in
+                        let max_s =
+                          Int.max 0 (List.length lines - Int.max 1 body_r.h)
+                        in
+                        let skip = Int.min max_s scroll in
+                        let by = ref body_r.y in
+                        List.iter
+                          (fun ln ->
+                            if !by < Rect.bottom body_r then begin
+                              let rr =
+                                Rect.make ~x:body_r.x ~y:!by ~w:body_r.w ~h:1
+                              in
+                              ignore
+                                (Cell_grid.put_text ~clip:rr grid ~x:body_r.x
+                                   ~y:!by ~style:pri_st
+                                   (Grapheme.truncate_to_width
+                                      ~max_width:body_r.w ln));
+                              incr by
+                            end)
+                          (Store_scroll.drop skip lines)
+                      end
+                      else
+                        ignore
+                          (Markdown.draw grid ~rect:body_r ~theme
+                             ~osc8:caps.osc8_hyperlinks ~scroll raw_body)
+                  | `Raw_source, _ ->
+                      let lines = String.split_on_char '\n' raw_body in
+                      let max_s =
+                        Int.max 0 (List.length lines - Int.max 1 body_r.h)
+                      in
+                      let skip = Int.min max_s scroll in
+                      let by = ref body_r.y in
+                      List.iter
+                        (fun ln ->
+                          if !by < Rect.bottom body_r then begin
+                            let rr =
+                              Rect.make ~x:body_r.x ~y:!by ~w:body_r.w ~h:1
+                            in
+                            ignore
+                              (Cell_grid.put_text ~clip:rr grid ~x:body_r.x
+                                 ~y:!by ~style:pri_st
+                                 (Grapheme.truncate_to_width ~max_width:body_r.w
+                                    ln));
+                            incr by
+                          end)
+                        (Store_scroll.drop skip lines)
+              end
+        end
     | Nav.Micro_viewport ->
         let title =
           Say.resolve lang

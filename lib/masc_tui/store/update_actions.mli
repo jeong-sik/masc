@@ -21,3 +21,6 @@ val save_settings_config :
 
 val step_settings_pane_lr :
   now:Clock.Mono.t -> Model.t -> Keymap.move_dir -> Model.t * Cmd.t list
+
+val step_artifact_search :
+  now:Clock.Mono.t -> delta:int -> Model.t -> Model.t * Cmd.t list

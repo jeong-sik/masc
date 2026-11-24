@@ -18,7 +18,9 @@ let is_viewing_keeper_chat ~keeper (m : Model.t) =
       ( Nav.Dive_keeper
           {
             tab =
-              ( Nav.Keeper_memory
+              ( Nav.Keeper_context
+              | Nav.Keeper_tool_calls
+              | Nav.Keeper_memory
               | Nav.Keeper_work_candle
               | Nav.Keeper_sandbox
               | Nav.Keeper_config );
@@ -26,6 +28,7 @@ let is_viewing_keeper_chat ~keeper (m : Model.t) =
           }
       | Nav.Dive_work _
       | Nav.Dive_knowledge _
+      | Nav.Dive_runtime _
       | Nav.Dive_infra _ ) ->
       false
 
@@ -38,6 +41,8 @@ let active_memory_keeper (m : Model.t) =
           {
             tab =
               ( Nav.Keeper_chat
+              | Nav.Keeper_context
+              | Nav.Keeper_tool_calls
               | Nav.Keeper_work_candle
               | Nav.Keeper_sandbox
               | Nav.Keeper_config );
@@ -46,6 +51,7 @@ let active_memory_keeper (m : Model.t) =
       | Nav.Dive_work _
       | Nav.Dive_knowledge
           (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
+      | Nav.Dive_runtime _
       | Nav.Dive_infra _ ) ->
       None
   | None -> (
@@ -77,6 +83,8 @@ let is_viewing_memory (m : Model.t) =
           {
             tab =
               ( Nav.Keeper_chat
+              | Nav.Keeper_context
+              | Nav.Keeper_tool_calls
               | Nav.Keeper_work_candle
               | Nav.Keeper_sandbox
               | Nav.Keeper_config );
@@ -85,6 +93,7 @@ let is_viewing_memory (m : Model.t) =
       | Nav.Dive_work _
       | Nav.Dive_knowledge
           (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
+      | Nav.Dive_runtime _
       | Nav.Dive_infra _ ) ->
       false
   | None -> (
@@ -107,8 +116,21 @@ let reads_schedules (m : Model.t) =
   | Some (Nav.Dive_keeper { tab = Nav.Keeper_work_candle; _ }) -> true
   | Some
       (Nav.Dive_keeper
-         { tab = Nav.Keeper_chat | Nav.Keeper_memory | Nav.Keeper_sandbox | Nav.Keeper_config; _ })
-  | Some (Nav.Dive_work _ | Nav.Dive_knowledge _ | Nav.Dive_infra _)
+         {
+           tab =
+             ( Nav.Keeper_chat
+             | Nav.Keeper_context
+             | Nav.Keeper_tool_calls
+             | Nav.Keeper_memory
+             | Nav.Keeper_sandbox
+             | Nav.Keeper_config );
+           _;
+         })
+  | Some
+      ( Nav.Dive_work _
+      | Nav.Dive_knowledge _
+      | Nav.Dive_runtime _
+      | Nav.Dive_infra _ )
   | None -> workspace_reads
 
 let apply_dataset_invalidation (m : Model.t) ds =

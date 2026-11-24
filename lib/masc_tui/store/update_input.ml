@@ -159,6 +159,8 @@ let keeper_config_dry_run_max_scroll (m : Model.t) =
             {
               tab =
                 ( Nav.Keeper_chat
+                | Nav.Keeper_context
+                | Nav.Keeper_tool_calls
                 | Nav.Keeper_memory
                 | Nav.Keeper_work_candle
                 | Nav.Keeper_sandbox );
@@ -166,6 +168,7 @@ let keeper_config_dry_run_max_scroll (m : Model.t) =
             }
         | Nav.Dive_work _
         | Nav.Dive_knowledge _
+        | Nav.Dive_runtime _
         | Nav.Dive_infra _ )
     | None ->
         let zoomed = m.nav.zoomed && Model.can_zoom_current_view m in
@@ -434,6 +437,16 @@ let dispatch_queue_context_overlay_key ~now (m : Model.t)
       Some (Update_actions.execute_action ~now m (Keymap.Sub_tab Keymap.Prev))
   | Keymap.Input.Char "]" when is_printable_key norm ->
       Some (Update_actions.execute_action ~now m (Keymap.Sub_tab Keymap.Next))
+  | Keymap.Input.Char "<" when is_printable_key norm ->
+      Some
+        (Update_actions.execute_action ~now m
+           (Keymap.Step_context_item Keymap.Prev))
+  | Keymap.Input.Char ">" when is_printable_key norm ->
+      Some
+        (Update_actions.execute_action ~now m
+           (Keymap.Step_context_item Keymap.Next))
+  | Keymap.Input.Char "v" when is_printable_key norm ->
+      Some (Update_actions.execute_action ~now m Keymap.Cycle_view_mode)
   | Keymap.Input.Tab when (not norm.mods.ctrl) && not norm.mods.alt ->
       let dir = if norm.mods.shift then Keymap.Prev else Keymap.Next in
       Some (Update_actions.execute_action ~now m (Keymap.Sub_tab dir))
@@ -587,6 +600,8 @@ let dispatch_system_gate_key ~now (m : Model.t) gate
       | None -> Some (m, []))
   | Nav.Media_viewer, Keymap.Input.Char "o" when is_printable_key norm ->
       Some (Update_actions.execute_action ~now m Keymap.Open_external)
+  | Nav.Media_viewer, Keymap.Input.Char "v" when is_printable_key norm ->
+      Some (Update_actions.execute_action ~now m Keymap.Cycle_view_mode)
   | ( ( Nav.Server_offline
       | Nav.Auth_gate
       | Nav.Media_viewer
@@ -613,7 +628,12 @@ let interrupt_active_keeper_turn ~now (m : Model.t) =
   let keeper_opt =
     match Model.active_dive m with
     | Some (Nav.Dive_keeper { name; _ }) -> Some name
-    | Some (Nav.Dive_work _ | Nav.Dive_knowledge _ | Nav.Dive_infra _) | None ->
+    | Some
+        ( Nav.Dive_work _
+        | Nav.Dive_knowledge _
+        | Nav.Dive_runtime _
+        | Nav.Dive_infra _ )
+    | None ->
         Update_nav.resolve_target_keeper m
   in
   match keeper_opt with
@@ -930,6 +950,8 @@ let resolve_memory_act_keeper (m : Model.t) =
           {
             tab =
               ( Nav.Keeper_chat
+              | Nav.Keeper_context
+              | Nav.Keeper_tool_calls
               | Nav.Keeper_work_candle
               | Nav.Keeper_sandbox
               | Nav.Keeper_config );
@@ -937,6 +959,7 @@ let resolve_memory_act_keeper (m : Model.t) =
           }
       | Nav.Dive_work _
       | Nav.Dive_knowledge _
+      | Nav.Dive_runtime _
       | Nav.Dive_infra _ )
   | None -> (
       match m.knowledge.memory_diff_keeper with
@@ -1229,6 +1252,8 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
             ] )
       | Some "x", _ ->
           Update_nav.open_inline_modal m (Nav.Verification_reject req_id)
+      | Some ("h" | "X"), (Some _ | None) ->
+          Update_nav.open_inline_modal m (Nav.Harness_overrule "")
       | _ -> (m, []))
   | Some (Nav.Dive_work (Nav.Goal_dive goal_id)) -> (
       let goal_opt =
@@ -1250,6 +1275,8 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
   | Some (Nav.Dive_work (Nav.Task_dive task_id)) -> (
       match printable_char with
       | Some "x" -> Update_nav.open_inline_modal m (Nav.Task_cancel task_id)
+      | Some ("h" | "X") ->
+          Update_nav.open_inline_modal m (Nav.Harness_overrule "")
       | _ -> (m, []))
   | Some (Nav.Dive_knowledge (Nav.Wiki_dive slug)) ->
       if is_ctrl_e then
@@ -1341,7 +1368,9 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
             m.drafts |> Drafts.set_active_keeper name |> Drafts.set_focus true
           in
           ({ m with drafts }, [])
-      | ( ( Nav.Keeper_memory
+      | ( ( Nav.Keeper_context
+          | Nav.Keeper_tool_calls
+          | Nav.Keeper_memory
           | Nav.Keeper_work_candle
           | Nav.Keeper_sandbox
           | Nav.Keeper_config )
@@ -1385,6 +1414,8 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
       | Nav.Keeper_chat, Some "X" ->
           dismiss_keeper_chat_errors ~now ~keeper:name m
       | ( ( Nav.Keeper_chat
+          | Nav.Keeper_context
+          | Nav.Keeper_tool_calls
           | Nav.Keeper_memory
           | Nav.Keeper_work_candle
           | Nav.Keeper_sandbox
@@ -1402,6 +1433,10 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
                  ~en:"Artifact not found")
               m
           , [] )
+      | Some "N", _
+        when not (String.equal (String.trim m.knowledge.artifact_search_query) "")
+        ->
+          Update_actions.step_artifact_search ~now ~delta:(-1) m
       | Some "e", Some art ->
           let ext =
             Wire_knowledge.artifact_extension
@@ -1440,6 +1475,7 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
       | _ -> (m, []))
   | Some
       ( Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Memory_diff_dive _)
+      | Nav.Dive_runtime _
       | Nav.Dive_infra (Nav.Lane_dive _ | Nav.Incident_dive _) ) ->
       (m, [])
   | None -> (
@@ -1615,6 +1651,8 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
               | None -> (m, []))
           | ( (Some _ | None)
             , ( Nav.Keeper_chat
+              | Nav.Keeper_context
+              | Nav.Keeper_tool_calls
               | Nav.Keeper_memory
               | Nav.Keeper_work_candle
               | Nav.Keeper_sandbox
@@ -1783,14 +1821,19 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
                   | Some "x" ->
                       Update_nav.open_inline_modal m
                         (Nav.Verification_reject v.request_id)
+                  | Some ("h" | "X") ->
+                      Update_nav.open_inline_modal m (Nav.Harness_overrule "")
                   | _ -> (m, []))
               | `None -> (m, []))
-          | Nav.Work_tasks_schedules -> (
+          | Nav.Work_tasks -> (
               match Work_store.selected_task m.work, printable_char with
               | Some task, Some "x" ->
                   Update_nav.open_inline_modal m (Nav.Task_cancel task.id)
+              | Some _, Some ("h" | "X") ->
+                  Update_nav.open_inline_modal m (Nav.Harness_overrule "")
               | _ -> (m, []))
-          | Nav.Work_inbox | Nav.Work_candle_scorecard -> (m, []))
+          | Nav.Work_schedules | Nav.Work_inbox | Nav.Work_candle_scorecard ->
+              (m, []))
       | Nav.Pulse -> (m, [])))
 
 let keeper_config_target_name (m : Model.t) =
@@ -1801,6 +1844,8 @@ let keeper_config_target_name (m : Model.t) =
           {
             tab =
               ( Nav.Keeper_chat
+              | Nav.Keeper_context
+              | Nav.Keeper_tool_calls
               | Nav.Keeper_memory
               | Nav.Keeper_work_candle
               | Nav.Keeper_sandbox );
@@ -1808,6 +1853,7 @@ let keeper_config_target_name (m : Model.t) =
           }
       | Nav.Dive_work _
       | Nav.Dive_knowledge _
+      | Nav.Dive_runtime _
       | Nav.Dive_infra _ ) ->
       None
   | None ->
@@ -2149,11 +2195,13 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                         false
                     | ( ( Nav.Gate_reject _
                         | Nav.Verification_reject _
+                        | Nav.Harness_overrule _
                         | Nav.Task_cancel _
                         | Nav.Schedule_form
                         | Nav.Connector_form
                         | Nav.Repo_add_form
-                        | Nav.Board_new_post )
+                        | Nav.Board_new_post
+                        | Nav.Board_comment _ )
                       , _ ) ->
                         true
                   in
@@ -2417,6 +2465,8 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                   {
                                     tab =
                                       ( Nav.Keeper_chat
+                                      | Nav.Keeper_context
+                                      | Nav.Keeper_tool_calls
                                       | Nav.Keeper_memory
                                       | Nav.Keeper_work_candle
                                       | Nav.Keeper_sandbox
@@ -2425,6 +2475,7 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                   }
                               | Nav.Dive_work _
                               | Nav.Dive_knowledge _
+                              | Nav.Dive_runtime _
                               | Nav.Dive_infra _ )
                           | None )
                         , ( Keymap.Input.Char _
@@ -2458,6 +2509,7 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                       let is_memory_flow_toggle_g =
                         (not (Drafts.is_focused m.drafts))
                         && (not m.nav.filter_focused)
+                        && (not (Model.sidebar_has_focus m))
                         && Option.is_none m.nav.overlay
                         && Option.is_none (Memory_diagram.active_diagram m)
                         && Option.is_none m.knowledge.memory_reading
@@ -2476,12 +2528,15 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                 {
                                   tab =
                                     ( Nav.Keeper_chat
+                                    | Nav.Keeper_context
+                                    | Nav.Keeper_tool_calls
                                     | Nav.Keeper_work_candle
                                     | Nav.Keeper_sandbox
                                     | Nav.Keeper_config );
                                   _;
                                 }
                             | Nav.Dive_work _
+                            | Nav.Dive_runtime _
                             | Nav.Dive_infra _
                             | Nav.Dive_knowledge
                                 ( Nav.Thread_dive _
@@ -2496,6 +2551,109 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                 && Nav.equal_keeper_tab
                                      m.fleet.keeper_dive_tab Nav.Keeper_memory
                                 && m.nav.pane_index = 1)
+                      in
+                      let screen_context_intercept =
+                        if
+                          Drafts.is_focused m.drafts
+                          || m.nav.filter_focused
+                          || Model.sidebar_has_focus m
+                          || Option.is_some m.nav.overlay
+                        then None
+                        else
+                          let replayed = Keymap.replay_ime_event norm in
+                          if not (is_printable_key replayed) then None
+                          else
+                            match key_char_opt replayed.key with
+                            | Some "s"
+                              when Option.is_none (Model.active_dive m)
+                                   && ((Nav.equal_workspace m.nav.workspace
+                                          Nav.Knowledge
+                                        && Nav.equal_knowledge_tab
+                                             m.knowledge.active_tab
+                                             Nav.Knowledge_board)
+                                      || (Nav.equal_workspace m.nav.workspace
+                                            Nav.Infra
+                                          && Nav.equal_infra_tab
+                                               m.infra.active_tab
+                                               Nav.Infra_activity_logs)) ->
+                                Some Keymap.Cycle_signal_or_source
+                            | Some "m"
+                              when Option.is_none (Model.active_dive m)
+                                   && Nav.equal_workspace m.nav.workspace
+                                        Nav.Knowledge
+                                   && Nav.equal_knowledge_tab
+                                        m.knowledge.active_tab
+                                        Nav.Knowledge_memory ->
+                                Some Keymap.Toggle_memory_scope
+                            | Some "Y"
+                              when (match Model.active_dive m with
+                                   | Some
+                                       (Nav.Dive_knowledge (Nav.Artifact_dive _))
+                                     ->
+                                       true
+                                   | Some
+                                       ( Nav.Dive_knowledge
+                                           ( Nav.Thread_dive _
+                                           | Nav.Wiki_dive _
+                                           | Nav.Memory_diff_dive _ )
+                                       | Nav.Dive_keeper _
+                                       | Nav.Dive_work _
+                                       | Nav.Dive_runtime _
+                                       | Nav.Dive_infra _ ) ->
+                                       false
+                                   | None ->
+                                       Nav.equal_workspace m.nav.workspace
+                                         Nav.Knowledge
+                                       && Nav.equal_knowledge_tab
+                                            m.knowledge.active_tab
+                                            Nav.Knowledge_artifacts) ->
+                                Some Keymap.Copy_public_url
+                            | Some "p"
+                              when (match Model.active_dive m with
+                                   | Some
+                                       ( Nav.Dive_infra (Nav.Sandbox_dive _)
+                                       | Nav.Dive_keeper
+                                           { tab = Nav.Keeper_sandbox; _ } ) ->
+                                       true
+                                   | Some
+                                       ( Nav.Dive_infra
+                                           (Nav.Lane_dive _ | Nav.Incident_dive _)
+                                       | Nav.Dive_keeper
+                                           {
+                                             tab =
+                                               ( Nav.Keeper_chat
+                                               | Nav.Keeper_context
+                                               | Nav.Keeper_tool_calls
+                                               | Nav.Keeper_memory
+                                               | Nav.Keeper_work_candle
+                                               | Nav.Keeper_config );
+                                             _;
+                                           }
+                                       | Nav.Dive_work _
+                                       | Nav.Dive_knowledge _
+                                       | Nav.Dive_runtime _ ) ->
+                                       false
+                                   | None ->
+                                       (Nav.equal_workspace m.nav.workspace
+                                          Nav.Infra
+                                       && Nav.equal_infra_tab m.infra.active_tab
+                                            Nav.Infra_sandboxes)
+                                       || (Nav.equal_workspace m.nav.workspace
+                                             Nav.Keepers
+                                          && (m.nav.pane_index = 1
+                                             || m.nav.zoomed)
+                                          && Nav.equal_keeper_tab
+                                               m.fleet.keeper_dive_tab
+                                               Nav.Keeper_sandbox)) ->
+                                Some Keymap.Probe_sandbox
+                            | Some "t"
+                              when Option.is_none (Model.active_dive m)
+                                   && Nav.equal_workspace m.nav.workspace
+                                        Nav.Runtime
+                                   && Nav.equal_runtime_tab m.runtime.active_tab
+                                        Nav.Runtime_addons_browser ->
+                                Some Keymap.Refresh_browser_tabs
+                            | _ -> None
                       in
                       if is_ctrl_x then interrupt_active_keeper_turn ~now m
                       else if is_memory_flow_toggle_g then
@@ -2517,12 +2675,95 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                             { m with knowledge }
                         , [] )
                       else
+                        match screen_context_intercept with
+                        | Some act -> Update_actions.execute_action ~now m act
+                        | None ->
                         (* 3. Single-SSOT Keymap dispatch *)
+                    let sidebar_action_gate :
+                        Keymap.action -> [ `Allow | `Move_right | `Ignore ] =
+                      function
+                      | Keymap.Toggle_sidebar
+                      | Keymap.Move _
+                      | Keymap.Dive_selected
+                      | Keymap.Pop_back_or_close
+                      | Keymap.Cycle_focus_pane _
+                      | Keymap.Switch_workspace _
+                      | Keymap.Sub_tab _
+                      | Keymap.Open_palette
+                      | Keymap.Open_settings
+                      | Keymap.Open_incidents
+                      | Keymap.Open_queue_context
+                      | Keymap.Open_help
+                      | Keymap.Open_keeper_switcher
+                      | Keymap.Open_model_switcher
+                      | Keymap.Teleport_blocked
+                      | Keymap.Focus_composer
+                      | Keymap.Focus_filter
+                      | Keymap.Voice_ptt_toggle
+                      | Keymap.Fast_approve_top
+                      | Keymap.Fast_deny_top
+                      | Keymap.Refresh
+                      | Keymap.Toggle_tool_details
+                      | Keymap.Toggle_thinking
+                      | Keymap.Cycle_origin_mode
+                      | Keymap.Interrupt_turn
+                      | Keymap.Quit_app ->
+                          `Allow
+                      | Keymap.Account_login -> `Move_right
+                      | Keymap.Confirm_selected
+                      | Keymap.Ask_select_choice _
+                      | Keymap.Composer_kill_word
+                      | Keymap.Composer_newline
+                      | Keymap.Submit_steer
+                      | Keymap.Submit_followup
+                      | Keymap.Toggle_expand
+                      | Keymap.Create_new
+                      | Keymap.Copy_selected
+                      | Keymap.Open_external
+                      | Keymap.Toggle_zoom
+                      | Keymap.Cycle_memory_view
+                      | Keymap.Toggle_memory_sort
+                      | Keymap.Cycle_signal_or_source
+                      | Keymap.Cycle_sort_or_speak
+                      | Keymap.Cycle_hearth_or_overrule
+                      | Keymap.Cycle_time_window
+                      | Keymap.Cycle_view_mode
+                      | Keymap.Context_primary_action
+                      | Keymap.Toggle_artifact_share
+                      | Keymap.Step_revision _
+                      | Keymap.Step_context_item _
+                      | Keymap.Launch_fusion
+                      | Keymap.Toggle_unreported
+                      | Keymap.Unbind_connector
+                      | Keymap.Entity_approve_or_assign
+                      | Keymap.Entity_reject_or_cancel
+                      | Keymap.Edit_or_export
+                      | Keymap.Configure_provider_key
+                      | Keymap.Poll_account_login
+                      | Keymap.Copy_hash
+                      | Keymap.Dismiss_errors
+                      | Keymap.Board_vote _
+                      | Keymap.Toggle_memory_scope
+                      | Keymap.Copy_public_url
+                      | Keymap.Probe_sandbox
+                      | Keymap.Refresh_browser_tabs
+                      | Keymap.Open_memory_recovery
+                      | Keymap.Search_prev_match
+                      | Keymap.Toggle_memory_chart
+                      | Keymap.Open_external_editor ->
+                          `Ignore
+                    in
                     match
                       Keymap.dispatch ~scope_chain:(Model.focus_scope_chain m)
                         norm
                     with
-                    | Some act -> Update_actions.execute_action ~now m act
+                    | Some act ->
+                        if Model.sidebar_has_focus m then
+                          match sidebar_action_gate act with
+                          | `Allow -> Update_actions.execute_action ~now m act
+                          | `Move_right -> Update_nav.apply_move m Keymap.Right
+                          | `Ignore -> (m, [])
+                        else Update_actions.execute_action ~now m act
                     | None ->
                         (* 4. Contextual workspace hotkeys & Composer raw editing keys *)
                         if Drafts.is_focused m.drafts then
@@ -2650,11 +2891,13 @@ let apply_paste ~now:_ (m : Model.t) text =
                   false
               | ( ( Nav.Gate_reject _
                   | Nav.Verification_reject _
+                  | Nav.Harness_overrule _
                   | Nav.Task_cancel _
                   | Nav.Schedule_form
                   | Nav.Connector_form
                   | Nav.Repo_add_form
-                  | Nav.Board_new_post )
+                  | Nav.Board_new_post
+                  | Nav.Board_comment _ )
                 , _ ) ->
                   true
             in

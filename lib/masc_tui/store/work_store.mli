@@ -33,10 +33,7 @@ type task_status_filter =
   | Status_todo
   | Status_unlinked
   | Status_done
-  | Status_schedules
-(** Tasks & Schedules status chip. [Status_all] shows tasks and schedules,
-    [Status_schedules] shows only schedules, and every other chip shows only
-    the tasks in that status. *)
+(** Tasks status filter chip on [2 Work > Tasks]. *)
 
 type t = {
   active_tab : Nav.work_tab;
@@ -149,12 +146,11 @@ val move_selection :
   delta:int ->
   t ->
   t
-val jump_tasks_schedules_pane : pane_index:int -> t -> t
 val reset_detail_scroll : t -> t
 val set_filter : string -> t -> t
 val equal_task_status_filter : task_status_filter -> task_status_filter -> bool
 val all_task_status_filters : task_status_filter list
-(** Chip order on the Tasks & Schedules tab. *)
+(** Chip order on the Tasks tab. *)
 
 val set_task_status_filter : task_status_filter -> t -> t
 val cycle_task_status_filter : t -> t

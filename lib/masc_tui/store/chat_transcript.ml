@@ -1101,9 +1101,21 @@ let keeper_content_rect_size ~embedded ~(model : Model.t) =
   in
   let approval_y = rows - footer_h - footer_sep_h - comp_h - approval_h in
   let body_outer_h = Int.max 0 (approval_y - top_h) in
-  let body_outer =
+  let full_body =
     Layout.inset_body breakpoint
       (Rect.make ~x:0 ~y:top_h ~w:cols ~h:body_outer_h)
+  in
+  let body_outer =
+    if
+      Model.sidebar_docked sized_model
+      && full_body.w >= Model.sidebar_width + 20
+    then
+      let sw = Model.sidebar_width in
+      let gap = Model.sidebar_gap in
+      Rect.make ~x:(full_body.x + sw + gap) ~y:full_body.y
+        ~w:(Int.max 0 (full_body.w - sw - gap))
+        ~h:full_body.h
+    else full_body
   in
   let target_rect =
     if

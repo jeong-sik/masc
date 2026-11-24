@@ -1045,6 +1045,7 @@ let make_rich_model ~lang ~cols ~rows =
              channel = Some "masc-ops";
              error = None;
              binding_count = 3;
+             configured_bindings = [];
            };
          ]
     |> Runtime_store.apply_browser_lane ~observed_at:now_mono
@@ -1468,6 +1469,7 @@ let test_knowledge_all_tabs_and_dives () =
                      (lbl ^ " interns OSC 8 wiki hyperlink") true
                      (Option.is_some (Cell_grid.hyperlink_uri grid 1))
                | Nav.Knowledge_artifacts ->
+                   assert_grid_invariants ~label:(lbl ^ "/Artifacts") grid;
                    Alcotest.(check bool)
                      (lbl ^ " renders Artifacts first-class tab") true
                      (contains_sub ~needle:"Artifacts" ~haystack:text
@@ -1618,7 +1620,9 @@ let test_runtime_all_tabs_and_invariants () =
       Nav.Runtime_quotas_credits;
       Nav.Runtime_efficiency_spend;
       Nav.Runtime_failover_lanes;
-      Nav.Runtime_tools_connectors;
+      Nav.Runtime_fusion;
+      Nav.Runtime_tools_usage;
+      Nav.Runtime_connectors;
       Nav.Runtime_addons_browser;
     ]
   in
@@ -1721,11 +1725,22 @@ let test_runtime_all_tabs_and_invariants () =
                         Screen_runtime.render ~model:m_ext ~cache ~rect g)
                   in
                   assert_grid_invariants ~label:(lbl ^ "/ExtOpen") g_ext
-              | Nav.Runtime_tools_connectors ->
+              | Nav.Runtime_fusion ->
                   Alcotest.(check bool)
-                    (lbl ^ " renders 4-bucket error classes") true
+                    (lbl ^ " renders Fusion Runs panel") true
+                    (contains_sub ~needle:"Fusion" ~haystack:text
+                    || contains_sub ~needle:"퓨전" ~haystack:text)
+              | Nav.Runtime_tools_usage ->
+                  Alcotest.(check bool)
+                    (lbl ^ " renders Tools & Usage analytics / error classes") true
                     (contains_sub ~needle:"policy_rejection" ~haystack:text
-                    || contains_sub ~needle:"Slack #masc-ops" ~haystack:text)
+                    || contains_sub ~needle:"CALLS" ~haystack:text
+                    || contains_sub ~needle:"Tools" ~haystack:text)
+              | Nav.Runtime_connectors ->
+                  Alcotest.(check bool)
+                    (lbl ^ " renders Connectors & MCP Clients") true
+                    (contains_sub ~needle:"Slack #masc-ops" ~haystack:text
+                    || contains_sub ~needle:"MCP" ~haystack:text)
               | Nav.Runtime_addons_browser ->
                   Alcotest.(check bool)
                     (lbl ^ " renders Addon Lanes & Browser panels") true
@@ -1966,7 +1981,7 @@ let test_p1_p2_verifier_regressions () =
   let m_unrep_tools =
     {
       m_base with
-      runtime = Runtime_store.set_tab Nav.Runtime_tools_connectors m_base.runtime;
+      runtime = Runtime_store.set_tab Nav.Runtime_tools_usage m_base.runtime;
       infra = { m_base.infra with sandboxes = Observed.unreported };
     }
   in
@@ -2685,8 +2700,7 @@ let test_v25_knowledge_stacked_bar_and_conflict_rails () =
   let m_wiki =
     {
       m_base with
-      knowledge =
-        Knowledge_store.set_tab Nav.Knowledge_wiki m_base.knowledge;
+      knowledge = Knowledge_store.set_tab Nav.Knowledge_wiki m_base.knowledge;
     }
   in
   let g_wiki =
@@ -3794,18 +3808,228 @@ let test_pr54465_p2_render_regressions () =
     (contains_sub ~needle:"Body fetch failed"
        ~haystack:(grid_all_text g_dive_fail))
 
+let test_wave2_tools_artifacts_board_renders () =
+  let m_base = make_rich_model ~lang:Say.Lang_en ~cols:140 ~rows:40 in
+  (* 1. Runtime_tools_usage: all 3 subviews (Usage Calls, Catalog Tree, Keeper Surface & Skills) + Tool_dive *)
+  let live_dash =
+    match
+      Wire_runtime.decode_tools_dashboard ~observed_at:now_mono
+        (Yojson.Safe.from_string
+           {|{
+             "tool_inventory": {
+               "count": 2,
+               "tools": [
+                 { "name": "masc_board_post", "public_names": ["board_post"],
+                   "description": "Post to board", "surfaces": ["keeper", "mcp"],
+                   "direct_call_allowed": true, "visibility": "public" },
+                 { "name": "keeper_memory_search", "public_names": [],
+                   "description": "Search memory", "surfaces": ["keeper"],
+                   "direct_call_allowed": true, "visibility": "public" }
+               ]
+             },
+             "tool_usage": {
+               "registered_count": 2, "distinct_tools_called": 1, "total_calls": 99,
+               "by_tool": [
+                 { "name": "masc_board_post", "public_names": ["board_post"],
+                   "call_count": 99, "success_count": 98, "failure_count": 1, "p95_ms": 45.0 }
+               ]
+             },
+             "effective_keeper_surface": {
+               "status": "available", "keeper_name": "e-masc-the-leader",
+               "runtime_id": "claude-sonnet-4", "tool_delivery": "direct",
+               "tool_surface_bytes": 6400, "skill_tool_surface_bytes": 800,
+               "skill_discovery_bytes": 200, "skill_body_bytes": 400,
+               "tools": [{ "name": "masc_board_post", "origin": "builtin" }]
+             }
+           }|})
+    with
+    | Ok d -> d
+    | Error e -> Alcotest.fail e
+  in
+  let skills =
+    match
+      Wire_runtime.decode_skills_snapshot
+        (Yojson.Safe.from_string
+           {|{ "state": "loaded",
+               "snapshot": { "snapshot_revision": "rev-1", "shadows": [], "rejections": [] },
+               "surfaces": [{ "reference": "ocaml-coding", "kind": "instruction", "summary": "OCaml 5.5" }] }|})
+    with
+    | Ok s -> s
+    | Error e -> Alcotest.fail e
+  in
+  let rt0 =
+    m_base.runtime
+    |> Runtime_store.set_tab Nav.Runtime_tools_usage
+    |> Runtime_store.apply_tools_dashboard ~observed_at:now_mono live_dash
+    |> Runtime_store.apply_skills ~observed_at:now_mono skills
+  in
+  let rt1 = Runtime_store.cycle_tools_subview rt0 in
+  let rt2 = Runtime_store.cycle_tools_subview rt1 in
+  List.iteri
+    (fun idx rt ->
+      let g =
+        render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
+            Screen_runtime.render ~model:{ m_base with runtime = rt } ~cache ~rect gr)
+      in
+      assert_grid_invariants ~label:(Printf.sprintf "Wave2/ToolsSub%d" idx) g;
+      let txt = grid_all_text g in
+      match idx with
+      | 0 ->
+          Alcotest.(check bool) "Tools Usage Calls shows window pills" true
+            (contains_sub ~needle:"24h" ~haystack:txt)
+      | 1 ->
+          Alcotest.(check bool) "Tools Catalog Tree shows masc_board_post & 99" true
+            (contains_sub ~needle:"masc_board_post" ~haystack:txt)
+      | _ ->
+          Alcotest.(check bool) "Tools Keeper Surface & Skills shows ocaml-coding" true
+            (contains_sub ~needle:"ocaml-coding" ~haystack:txt))
+    [ rt0; rt1; rt2 ];
+  (* Tool_dive *)
+  let g_td =
+    render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
+        Screen_runtime.render_dive ~target:(Nav.Tool_dive "masc_board_post")
+          ~model:{ m_base with runtime = rt1 } ~cache ~rect gr)
+  in
+  assert_grid_invariants ~label:"Wave2/ToolDive" g_td;
+  Alcotest.(check bool) "Tool_dive shows masc_board_post" true
+    (contains_sub ~needle:"masc_board_post" ~haystack:(grid_all_text g_td));
+
+  (* 2. Rich HTML Artifact rendering: strips <script>, aligns <table>, toggles [v] Raw, shows Checked/Shared *)
+  let sel_art = Option.get (Knowledge_store.selected_artifact m_base.knowledge) in
+  let html_detail : Wire_knowledge.published_artifact_detail =
+    {
+      artifact = sel_art;
+      content =
+        "<html><body><script>BAD_SCRIPT_TOKEN</script><h1>Wave 2 Table</h1>\
+         <table><tr><th>ColA</th><th>ColB</th></tr><tr><td>Val1</td><td>Val2</td></tr></table></body></html>";
+      revisions =
+        [
+          {
+            revision = 1;
+            title = "v1";
+            summary = "init";
+            format = `Html;
+            author = "alpha";
+            created_at_unix = Some 1795250000.0;
+            sha256 = sel_art.body.sha256;
+            bytes = sel_art.body.bytes;
+            mime_type = "text/html";
+            preview = None;
+            task_id = None;
+            goal_id = None;
+          };
+        ];
+      shared = true;
+      share_version = 1;
+    }
+  in
+  let chk : Wire_knowledge.artifact_check =
+    {
+      id = sel_art.id;
+      revision = sel_art.revision;
+      body_sha256 = sel_art.body.sha256;
+      checked = true;
+      change_id = "chg-1";
+      changed_by = "operator";
+      changed_at = "2026-11-23T05:00:00Z";
+    }
+  in
+  let m_art_doc =
+    {
+      m_base with
+      knowledge =
+        m_base.knowledge
+        |> Knowledge_store.set_tab Nav.Knowledge_artifacts
+        |> Knowledge_store.apply_artifact_detail ~observed_at:now_mono html_detail
+        |> Knowledge_store.apply_artifact_checks ~observed_at:now_mono [ chk ]
+        |> Knowledge_store.set_artifact_search "Val2";
+    }
+  in
+  let g_doc =
+    render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
+        Screen_knowledge.render_dive ~target:(Nav.Artifact_dive sel_art.id)
+          ~model:m_art_doc ~cache ~rect gr)
+  in
+  assert_grid_invariants ~label:"Wave2/ArtifactDiveDoc" g_doc;
+  let txt_doc = grid_all_text g_doc in
+  Alcotest.(check bool) "Artifact_dive Doc strips <script>" false
+    (contains_sub ~needle:"BAD_SCRIPT_TOKEN" ~haystack:txt_doc);
+  Alcotest.(check bool) "Artifact_dive Doc renders table values & Checked/Shared" true
+    (contains_sub ~needle:"Val2" ~haystack:txt_doc
+     && contains_sub ~needle:"Checked" ~haystack:txt_doc
+     && contains_sub ~needle:"Shared" ~haystack:txt_doc);
+  let m_art_raw =
+    {
+      m_art_doc with
+      knowledge = Knowledge_store.toggle_artifact_view_mode m_art_doc.knowledge;
+    }
+  in
+  let g_raw =
+    render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
+        Screen_knowledge.render_dive ~target:(Nav.Artifact_dive sel_art.id)
+          ~model:m_art_raw ~cache ~rect gr)
+  in
+  assert_grid_invariants ~label:"Wave2/ArtifactDiveRaw" g_raw;
+  Alcotest.(check bool) "Artifact_dive Raw shows raw HTML source" true
+    (contains_sub ~needle:"<h1>Wave 2 Table</h1>" ~haystack:(grid_all_text g_raw));
+
+  (* 3. Board Thread_dive threaded comments depth rails + armed vote banner *)
+  let p_root = Option.get (Knowledge_store.selected_post m_base.knowledge) in
+  let c1 : Wire_knowledge.board_comment =
+    {
+      id = "c-1";
+      post_id = p_root.id;
+      parent_id = None;
+      author = "alpha";
+      body = "Top level comment";
+      created_at_unix = 1795252000.0;
+      score = 2;
+    }
+  in
+  let c2 : Wire_knowledge.board_comment =
+    {
+      id = "c-2";
+      post_id = p_root.id;
+      parent_id = Some "c-1";
+      author = "beta";
+      body = "Nested reply comment";
+      created_at_unix = 1795252010.0;
+      score = 1;
+    }
+  in
+  let k_armed =
+    let k0 =
+      m_base.knowledge
+      |> Knowledge_store.apply_thread ~observed_at:now_mono (p_root, [ c1; c2 ])
+    in
+    match
+      Knowledge_store.press_vote ~target:(Knowledge_store.Vote_post p_root.id)
+        ~dir:`Up k0
+    with
+    | `Armed k1 | `Confirmed k1 -> k1
+  in
+  let g_th =
+    render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
+        Screen_knowledge.render_dive ~target:(Nav.Thread_dive p_root.id)
+          ~model:{ m_base with knowledge = k_armed } ~cache ~rect gr)
+  in
+  assert_grid_invariants ~label:"Wave2/ThreadDiveThreaded" g_th;
+  let txt_th = grid_all_text g_th in
+  Alcotest.(check bool) "Thread_dive renders parent & nested reply" true
+    (contains_sub ~needle:"Top level comment" ~haystack:txt_th
+     && contains_sub ~needle:"Nested reply comment" ~haystack:txt_th)
 let () =
   Alcotest.run "masc_tui_screens_domain"
     [
       ( "knowledge"
       , [
-          Alcotest.test_case "3 sub-tabs + 4 dives at 140x40 & 90x28 (KO/EN)"
+          Alcotest.test_case "4 sub-tabs + 4 dives at 140x40 & 90x28 (KO/EN)"
             `Quick test_knowledge_all_tabs_and_dives;
         ] );
       ( "runtime"
       , [
           Alcotest.test_case
-            "4 sub-tabs, Observed cost states, full-width charts & SSOT isolation"
+            "7 sub-tabs, Observed cost states, full-width charts & SSOT isolation"
             `Quick test_runtime_all_tabs_and_invariants;
         ] );
       ( "infra"
@@ -3863,5 +4087,8 @@ let () =
           Alcotest.test_case
             "PR #54465 P2-2/P2-3 render regressions: unmatched dive notice & detail failure"
             `Quick test_pr54465_p2_render_regressions;
+          Alcotest.test_case
+            "Feature Wave 2: Tools 3-subview + Tool_dive, Rich HTML Artifacts & Threaded Board"
+            `Quick test_wave2_tools_artifacts_board_renders;
         ] );
     ]

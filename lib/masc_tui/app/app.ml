@@ -171,7 +171,7 @@ let composer_popup_open (model : Model.t) =
 
 let desired_memory_graphic ~(probe : Probe.observation) ~term_program
     ~(model : Model.t) =
-  if composer_popup_open model then None
+  if composer_popup_open model || Model.sidebar_drawer_open model then None
   else
   let protocol =
     Graphics.protocol_of_probe ~graphics:probe.graphics ~term_program

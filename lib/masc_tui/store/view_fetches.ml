@@ -69,6 +69,71 @@ let dedup_reqs reqs =
   in
   loop [] [] reqs
 
+let fetches_for_keeper_context ~force ~name (m : Model.t) =
+  let ks = Keeper_context_store.get_keeper ~keeper:name m.keeper_context in
+  let base =
+    []
+    |> add_if
+         (needs_fetch ~force ks.turn_records)
+         (Cmd.Get_keeper_context_turn_records
+            { keeper = name; limit = Some 50; turn_ref = None })
+    |> add_if
+         ((force || not ks.next_request_absent)
+          && needs_fetch ~force ks.next_request)
+         (Cmd.Get_keeper_next_request { keeper = name })
+  in
+  match Keeper_context_store.selected_turn_entry ks with
+  | None -> base
+  | Some entry ->
+      let turn_ref = Ids.Turn_ref.to_string entry.record.turn_ref in
+      let is_absent_ref opt =
+        (not force)
+        &&
+        match opt with
+        | Some r -> String.equal r turn_ref
+        | None -> false
+      in
+      let matches_ref obs =
+        match obs with
+        | Observed.Value { data = r, _; stale = false; _ } ->
+            String.equal r turn_ref && not force
+        | Observed.Loading _
+        | Observed.Value { stale = true; _ }
+        | Observed.Absent
+        | Observed.Unreported
+        | Observed.Failed _ ->
+            false
+      in
+      let exec_ids =
+        List.map Ids.Execution_id.to_string entry.record.execution_ids
+      in
+      base
+      |> add_if
+           ((force || not ks.provider_input_auth_denied)
+            && (not (is_absent_ref ks.absent_provider_input_ref))
+            && not (matches_ref ks.provider_input))
+           (Cmd.Get_keeper_provider_input { keeper = name; turn_ref })
+      |> add_if
+           ((not (is_absent_ref ks.absent_cache_outcome_ref))
+            && not (matches_ref ks.cache_outcome))
+           (Cmd.Get_keeper_cache_outcome { keeper = name; turn_ref })
+      |> add_if
+           ((not (is_absent_ref ks.absent_transcript_ref))
+            && not (matches_ref ks.turn_transcript))
+           (Cmd.Get_keeper_turn_transcript { keeper = name; turn_ref })
+      |> add_if
+           ((force || not ks.call_evidence_auth_denied)
+            && (not (is_absent_ref ks.absent_call_evidence_ref))
+            && exec_ids <> []
+            && not (matches_ref ks.call_evidence))
+           (Cmd.Get_keeper_tool_calls
+              {
+                keeper = name;
+                limit = None;
+                execution_ids = Some exec_ids;
+                turn_ref = Some turn_ref;
+              })
+
 let fetches_for_overlay ~force (m : Model.t) =
   match m.nav.overlay with
   | Some (Nav.Settings _) ->
@@ -83,7 +148,23 @@ let fetches_for_overlay ~force (m : Model.t) =
            (schema_target_mismatch || needs_fetch ~force m.config.schema)
            (Cmd.Get_config_schema m.config.target)
   | Some (Nav.Queue_context Nav.Drawer_context) ->
-      fetches_for_context_drawer ~force m
+      let drawer_reqs = fetches_for_context_drawer ~force m in
+      let target =
+        match Drafts.target_keeper_key m.drafts with
+        | k when not (String.equal (String.trim k) "") && not (String.equal k "fleet")
+          ->
+            Some k
+        | _ ->
+            Option.map
+              (fun (k : Wire_fleet.keeper_summary) -> k.name)
+              (Fleet_store.selected_keeper_summary m.fleet)
+      in
+      let ctx_reqs =
+        match target with
+        | Some name -> fetches_for_keeper_context ~force ~name m
+        | None -> []
+      in
+      drawer_reqs @ ctx_reqs
   | Some
       ( Nav.Palette
       | Nav.Incidents
@@ -122,6 +203,25 @@ let keeper_tab_fetches ~force ~name ~tab (m : Model.t) =
            (Cmd.Get_chat_history
               { keeper = name; limit = Some 80; cursor = None }))
       @ cut_reply_reqs ~force ~keeper:name m
+  | Nav.Keeper_context -> fetches_for_keeper_context ~force ~name m
+  | Nav.Keeper_tool_calls ->
+      let ks = Keeper_context_store.get_keeper ~keeper:name m.keeper_context in
+      []
+      |> add_if
+           ((force || not ks.tool_stats_absent)
+            && needs_fetch ~force ks.tool_stats)
+           (Cmd.Get_keeper_tool_stats { keeper = name; window_hours = Some 24 })
+      |> add_if
+           ((force || not ks.tool_calls_auth_denied)
+            && (force || not ks.tool_calls_absent)
+            && needs_fetch ~force ks.tool_calls)
+           (Cmd.Get_keeper_tool_calls
+              {
+                keeper = name;
+                limit = Some 50;
+                execution_ids = None;
+                turn_ref = None;
+              })
   | Nav.Keeper_memory ->
       let diff_needed =
         needs_fetch ~force
@@ -231,6 +331,9 @@ let fetches_for_dive ~force (m : Model.t) =
           in
           []
           |> add_if (needs_fetch ~force m.knowledge.artifacts) Cmd.Get_artifacts
+          |> add_if
+               (needs_fetch ~force m.knowledge.artifact_checks)
+               Cmd.Get_artifact_checks
           |> add_if detail_needed (Cmd.Get_artifact_detail { id = art_id; revision = rev })
       | Nav.Memory_diff_dive { keeper; from_rev; to_rev } ->
           [
@@ -240,6 +343,28 @@ let fetches_for_dive ~force (m : Model.t) =
                 window = Knowledge_store.Window_revs { from_rev; to_rev };
               };
           ])
+  | Some (Nav.Dive_runtime (Nav.Tool_dive tool_name)) ->
+      let bucket, since_hours =
+        Runtime_store.tools_window_params m.runtime.tools_window
+      in
+      let series_needed =
+        match m.runtime.tool_detail_series with
+        | Observed.Value { data = t_name, _; stale = false; _ } ->
+            force || not (String.equal t_name tool_name)
+        | Observed.Loading _
+        | Observed.Value { stale = true; _ }
+        | Observed.Absent
+        | Observed.Unreported
+        | Observed.Failed _ ->
+            true
+      in
+      []
+      |> add_if
+           (needs_fetch ~force m.runtime.tools_dashboard)
+           (Cmd.Get_tools_catalog { keeper = None })
+      |> add_if series_needed
+           (Cmd.Get_tool_series_filtered
+              { bucket; since_hours; tool = Some tool_name })
   | Some (Nav.Dive_infra target) -> (
       match target with
       | Nav.Sandbox_dive keeper -> [ Cmd.Get_keeper_sandbox { keeper } ]
@@ -332,9 +457,10 @@ let fetches_for_workspace ~force (m : Model.t) =
                (needs_fetch ~force m.work.verifications)
                (Cmd.Get_verifications
                   { view = m.work.verification_view; limit = 50; offset = 0 })
-      | Nav.Work_tasks_schedules ->
+      | Nav.Work_tasks ->
+          [] |> add_if (needs_fetch ~force m.work.planning) Cmd.Get_planning
+      | Nav.Work_schedules ->
           []
-          |> add_if (needs_fetch ~force m.work.planning) Cmd.Get_planning
           |> add_if
                (needs_fetch ~force m.work.schedules)
                (Cmd.Get_schedules { cursor = None })
@@ -367,6 +493,9 @@ let fetches_for_workspace ~force (m : Model.t) =
                     limit = Some 50;
                     offset = None;
                   })
+          |> add_if
+               (needs_fetch ~force m.knowledge.board_hearths)
+               Cmd.Get_board_hearths
       | Nav.Knowledge_wiki ->
           ([]
           |> add_if
@@ -405,7 +534,11 @@ let fetches_for_workspace ~force (m : Model.t) =
                       { id = a.id; revision = Some a.revision };
                   ]
           in
-          ([] |> add_if (needs_fetch ~force m.knowledge.artifacts) Cmd.Get_artifacts)
+          ([]
+          |> add_if (needs_fetch ~force m.knowledge.artifacts) Cmd.Get_artifacts
+          |> add_if
+               (needs_fetch ~force m.knowledge.artifact_checks)
+               Cmd.Get_artifact_checks)
           @ selected_artifact_req
       | Nav.Knowledge_memory ->
           let keeper_scoped_reqs =
@@ -528,26 +661,45 @@ let fetches_for_workspace ~force (m : Model.t) =
           |> add_if
                (needs_fetch ~force m.runtime.fusion_runs)
                Cmd.Get_fusion_runs
-      | Nav.Runtime_tools_connectors ->
+      | Nav.Runtime_fusion ->
+          []
+          |> add_if (needs_fetch ~force m.runtime.fusion_runs) Cmd.Get_fusion_runs
+          |> add_if
+               (needs_fetch ~force m.runtime.exact_lane_runs)
+               (Cmd.Get_exact_lane_runs { lane = None; limit = Some 30 })
+      | Nav.Runtime_tools_usage ->
+          let bucket, since_hours =
+            Runtime_store.tools_window_params m.runtime.tools_window
+          in
+          let keeper_names =
+            match Observed.to_option m.fleet.keepers with
+            | Some ks ->
+                List.map (fun (k : Wire_fleet.keeper_summary) -> k.name) ks
+            | None -> []
+          in
+          let surface_keeper =
+            match m.runtime.tools_subview with
+            | Runtime_store.Tools_keeper_skills ->
+                Runtime_store.selected_tools_surface_keeper ~keeper_names
+                  m.runtime
+            | Runtime_store.Tools_usage_calls
+            | Runtime_store.Tools_catalog_tree ->
+                None
+          in
           []
           |> add_if
-               (needs_fetch ~force m.runtime.tool_series)
-               (Cmd.Get_tool_series { bucket = `Hour; since_hours = 24 })
+               (needs_fetch ~force m.runtime.tool_series_summary)
+               (Cmd.Get_tool_series_filtered
+                  { bucket; since_hours; tool = None })
           |> add_if
-               (needs_fetch ~force m.runtime.tools_catalog)
-               (Cmd.Get_tools_catalog { keeper = None })
-          |> add_if
-               (needs_fetch ~force m.runtime.connectors)
-               Cmd.Get_connectors
-          |> add_if
-               (needs_fetch ~force m.runtime.browser_lane)
-               Cmd.Get_browser_lane
-          |> add_if
-               (needs_fetch ~force m.runtime.lane_addons)
-               Cmd.Get_lane_addons
-          |> add_if
-               (needs_fetch ~force m.runtime.mcp_clients)
-               Cmd.Get_mcp_clients
+               (needs_fetch ~force m.runtime.tools_dashboard)
+               (Cmd.Get_tools_catalog { keeper = surface_keeper })
+          |> add_if (needs_fetch ~force m.runtime.skills) Cmd.Get_skills
+      | Nav.Runtime_connectors ->
+          []
+          |> add_if (needs_fetch ~force m.runtime.connectors) Cmd.Get_connectors
+          |> add_if (needs_fetch ~force m.runtime.mcp_clients) Cmd.Get_mcp_clients
+          |> add_if (needs_fetch ~force m.runtime.browser_lane) Cmd.Get_browser_lane
       | Nav.Runtime_addons_browser ->
           []
           |> add_if
@@ -643,11 +795,19 @@ let chat_tab_shown ~keeper (m : Model.t) =
       (Nav.Dive_keeper
          {
            tab =
-             ( Nav.Keeper_memory | Nav.Keeper_work_candle | Nav.Keeper_sandbox
+             ( Nav.Keeper_context
+             | Nav.Keeper_tool_calls
+             | Nav.Keeper_memory
+             | Nav.Keeper_work_candle
+             | Nav.Keeper_sandbox
              | Nav.Keeper_config );
            _;
          })
-  | Some (Nav.Dive_work _ | Nav.Dive_knowledge _ | Nav.Dive_infra _) ->
+  | Some
+      ( Nav.Dive_work _
+      | Nav.Dive_knowledge _
+      | Nav.Dive_runtime _
+      | Nav.Dive_infra _ ) ->
       false
   | None -> (
       Nav.equal_workspace m.nav.workspace Nav.Keepers

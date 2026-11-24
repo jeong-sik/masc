@@ -132,15 +132,28 @@ type wiki_edit_base = {
   tags : string list;
 }
 
+type vote_target =
+  | Vote_post of string
+  | Vote_comment of { post_id : string; comment_id : string }
+
+type threaded_comment = {
+  comment : Wire_knowledge.board_comment;
+  depth : int;
+  is_reply : bool;
+}
+
 type t = {
   active_tab : Nav.knowledge_tab;
   board : Wire_knowledge.board_feed Observed.t;
+  board_hearths : Wire_knowledge.board_hearth_entry list Observed.t;
   board_signal_only : bool;
   board_sort_by : string;
   board_hearth : string option;
   expanded_succession_chains : String_set.t;
   active_thread :
     (Wire_knowledge.board_post * Wire_knowledge.board_comment list) Observed.t;
+  thread_selected_comment : int option;
+  armed_vote : (vote_target * [ `Up | `Down ]) option;
   wiki_index : Wire_knowledge.wiki_index Observed.t;
   wiki_pages : Wire_knowledge.wiki_page_detail Observed.t String_map.t;
   wiki_log : Wire_knowledge.wiki_log_response Observed.t;
@@ -151,6 +164,11 @@ type t = {
   artifacts : Wire_knowledge.artifact_entry list Observed.t;
   active_artifact_detail : Wire_knowledge.published_artifact_detail Observed.t;
   active_artifact_detail_target : string option;
+  pending_artifact_revision : (string * int option) option;
+  artifact_view_mode : [ `Document | `Raw_source ];
+  artifact_checks : Wire_knowledge.artifact_check list Observed.t;
+  artifact_search_query : string;
+  artifact_search_match_idx : int;
   world_memory : Wire_knowledge.world_memory Observed.t;
   memory_diffs : Wire_knowledge.memory_diff Observed.t Memory_diff_map.t;
   memory_os_internals :
@@ -187,11 +205,14 @@ let empty =
   {
     active_tab = Nav.Knowledge_board;
     board = Observed.unreported;
+    board_hearths = Observed.unreported;
     board_signal_only = true;
     board_sort_by = "recent";
     board_hearth = None;
     expanded_succession_chains = String_set.empty;
     active_thread = Observed.absent;
+    thread_selected_comment = None;
+    armed_vote = None;
     wiki_index = Observed.unreported;
     wiki_pages = String_map.empty;
     wiki_log = Observed.unreported;
@@ -202,6 +223,11 @@ let empty =
     artifacts = Observed.unreported;
     active_artifact_detail = Observed.absent;
     active_artifact_detail_target = None;
+    pending_artifact_revision = None;
+    artifact_view_mode = `Document;
+    artifact_checks = Observed.unreported;
+    artifact_search_query = "";
+    artifact_search_match_idx = 0;
     world_memory = Observed.unreported;
     memory_diffs = Memory_diff_map.empty;
     memory_os_internals = String_map.empty;
@@ -286,6 +312,12 @@ let set_keeper_memory_activity ~keeper obs t =
     keeper_memory_activity = String_map.add keeper obs t.keeper_memory_activity;
   }
 
+let equal_vote_target a b =
+  match a, b with
+  | Vote_post x, Vote_post y -> String.equal x y
+  | Vote_comment x, Vote_comment y ->
+      String.equal x.post_id y.post_id && String.equal x.comment_id y.comment_id
+  | Vote_post _, Vote_comment _ | Vote_comment _, Vote_post _ -> false
 let memory_diff_window_query = function
   | Window_24h -> Some "24h"
   | Window_7d -> Some "7d"
@@ -587,6 +619,8 @@ let set_tab active_tab t =
   {
     t with
     active_tab;
+    armed_vote = None;
+    pending_artifact_revision = None;
     selected_index = 0;
     scroll_offset = 0;
     diff_scroll_offset = 0;
@@ -610,12 +644,260 @@ let toggle_signal_only t =
     t with
     board_signal_only = not t.board_signal_only;
     board = Observed.mark_stale t.board;
+    armed_vote = None;
     selected_index = 0;
     scroll_offset = 0;
   }
 
 let set_board_sort board_sort_by t =
-  { t with board_sort_by; board = Observed.mark_stale t.board }
+  {
+    t with
+    board_sort_by;
+    board = Observed.mark_stale t.board;
+    armed_vote = None;
+    selected_index = 0;
+    scroll_offset = 0;
+  }
+
+let cycle_board_sort t =
+  let next =
+    match String.lowercase_ascii (String.trim t.board_sort_by) with
+    | "recent" -> "active"
+    | "active" -> "top"
+    | _ -> "recent"
+  in
+  set_board_sort next t
+
+let set_board_hearth board_hearth t =
+  {
+    t with
+    board_hearth;
+    board = Observed.mark_stale t.board;
+    armed_vote = None;
+    selected_index = 0;
+    scroll_offset = 0;
+  }
+
+let cycle_board_hearth t =
+  let names =
+    match Observed.to_option t.board_hearths with
+    | Some hs when hs <> [] ->
+        List.map (fun (h : Wire_knowledge.board_hearth_entry) -> h.name) hs
+    | Some _ | None -> (
+        match Observed.to_option t.board with
+        | Some f ->
+            f.posts
+            |> List.filter_map (fun (p : Wire_knowledge.board_post) -> p.hearth)
+            |> List.filter (fun s -> not (String.equal (String.trim s) ""))
+            |> unique_strings
+        | None -> [])
+  in
+  let options = None :: List.map Option.some names in
+  let rec find_next = function
+    | [] -> None
+    | [ _ ] -> None
+    | cur :: next :: rest ->
+        if Option.equal String.equal cur t.board_hearth then next
+        else find_next (next :: rest)
+  in
+  set_board_hearth (find_next options) t
+
+let max_comment_depth = 4
+
+let order_comments_threaded (comments : Wire_knowledge.board_comment list) :
+    threaded_comment list =
+  let by_id : (string, Wire_knowledge.board_comment) Hashtbl.t =
+    Hashtbl.create (max 8 (List.length comments))
+  in
+  List.iter
+    (fun (c : Wire_knowledge.board_comment) -> Hashtbl.replace by_id c.id c)
+    comments;
+  let cmp_comment (a : Wire_knowledge.board_comment)
+      (b : Wire_knowledge.board_comment) =
+    let tc = Float.compare a.created_at_unix b.created_at_unix in
+    if tc <> 0 then tc else String.compare a.id b.id
+  in
+  let children_tbl : (string, Wire_knowledge.board_comment list) Hashtbl.t =
+    Hashtbl.create (max 8 (List.length comments))
+  in
+  let roots = ref [] in
+  List.iter
+    (fun (c : Wire_knowledge.board_comment) ->
+      match c.parent_id with
+      | Some pid when Hashtbl.mem by_id pid && not (String.equal pid c.id) ->
+          let prev =
+            match Hashtbl.find_opt children_tbl pid with
+            | Some xs -> xs
+            | None -> []
+          in
+          Hashtbl.replace children_tbl pid (c :: prev)
+      | Some _ | None -> roots := c :: !roots)
+    comments;
+  let visited = Hashtbl.create (max 8 (List.length comments)) in
+  let out = ref [] in
+  let rec emit ~depth (c : Wire_knowledge.board_comment) =
+    if not (Hashtbl.mem visited c.id) then begin
+      Hashtbl.add visited c.id ();
+      let d = min max_comment_depth depth in
+      out := { comment = c; depth = d; is_reply = depth > 0 } :: !out;
+      let kids =
+        match Hashtbl.find_opt children_tbl c.id with
+        | Some xs -> List.sort cmp_comment xs
+        | None -> []
+      in
+      List.iter (emit ~depth:(depth + 1)) kids
+    end
+  in
+  List.iter (emit ~depth:0) (List.sort cmp_comment !roots);
+  (* Any remaining comments belonged to a parent_id cycle: promote safely. *)
+  List.iter
+    (fun (c : Wire_knowledge.board_comment) ->
+      if not (Hashtbl.mem visited c.id) then emit ~depth:0 c)
+    (List.sort cmp_comment comments);
+  List.rev !out
+
+let selected_thread_comment t =
+  match t.thread_selected_comment, Observed.to_option t.active_thread with
+  | Some idx, Some (_, comments) ->
+      let ordered = order_comments_threaded comments in
+      List.nth_opt ordered idx
+  | None, _ | Some _, None -> None
+
+let step_thread_comment ~delta t =
+  match Observed.to_option t.active_thread with
+  | None -> { t with thread_selected_comment = None; armed_vote = None }
+  | Some (_, comments) ->
+      let n = List.length (order_comments_threaded comments) in
+      if n <= 0 then { t with thread_selected_comment = None; armed_vote = None }
+      else
+        let cur = match t.thread_selected_comment with None -> -1 | Some i -> i in
+        let next = cur + delta in
+        let thread_selected_comment =
+          if next < 0 then None
+          else if next >= n then None
+          else Some next
+        in
+        { t with thread_selected_comment; armed_vote = None }
+
+let equal_vote_dir a b =
+  match a, b with
+  | `Up, `Up | `Down, `Down -> true
+  | `Up, `Down | `Down, `Up -> false
+
+let press_vote ~target ~dir t =
+  match t.armed_vote with
+  | Some (prev_target, prev_dir)
+    when equal_vote_target prev_target target && equal_vote_dir prev_dir dir ->
+      `Confirmed { t with armed_vote = None }
+  | Some _ | None -> `Armed { t with armed_vote = Some (target, dir) }
+
+let clear_armed_vote t =
+  match t.armed_vote with None -> t | Some _ -> { t with armed_vote = None }
+
+let toggle_artifact_view_mode t =
+  let artifact_view_mode =
+    match t.artifact_view_mode with
+    | `Document -> `Raw_source
+    | `Raw_source -> `Document
+  in
+  { t with artifact_view_mode; detail_scroll_offset = 0 }
+
+let apply_artifact_checks ~observed_at checks t =
+  { t with artifact_checks = Observed.value ~observed_at checks }
+
+let apply_artifact_check_update ~observed_at
+    (chk : Wire_knowledge.artifact_check) t =
+  let prev =
+    match Observed.to_option t.artifact_checks with Some xs -> xs | None -> []
+  in
+  let without =
+    List.filter
+      (fun (c : Wire_knowledge.artifact_check) ->
+        not (String.equal c.id chk.id && Int.equal c.revision chk.revision))
+      prev
+  in
+  { t with artifact_checks = Observed.value ~observed_at (chk :: without) }
+
+let artifact_check_for ~id ?revision t =
+  match Observed.to_option t.artifact_checks with
+  | None -> None
+  | Some xs -> (
+      match revision with
+      | Some rev ->
+          List.find_opt
+            (fun (c : Wire_knowledge.artifact_check) ->
+              String.equal c.id id && Int.equal c.revision rev)
+            xs
+      | None ->
+          List.find_opt
+            (fun (c : Wire_knowledge.artifact_check) -> String.equal c.id id)
+            xs)
+
+let set_pending_artifact_revision pending_artifact_revision t =
+  { t with pending_artifact_revision }
+
+let clear_pending_artifact_revision t =
+  { t with pending_artifact_revision = None }
+
+let is_json_artifact (a : Wire_knowledge.artifact_entry) =
+  String.starts_with ~prefix:"application/json"
+    (String.lowercase_ascii (String.trim a.body.mime))
+  || Filename.check_suffix (String.lowercase_ascii (String.trim a.title)) ".json"
+
+let matches_pending_artifact_revision ~id ~revision t =
+  match t.pending_artifact_revision with
+  | None -> true
+  | Some (req_id, req_rev_opt) -> (
+      String.equal req_id id
+      &&
+      match req_rev_opt with
+      | None -> true
+      | Some req_rev -> Int.equal req_rev revision)
+
+let apply_artifact_share_result ~observed_at
+    (res : Wire_knowledge.artifact_share_result) t =
+  let active_artifact_detail =
+    match Observed.to_option t.active_artifact_detail with
+    | Some d when String.equal d.artifact.id res.id ->
+        Observed.value ~observed_at
+          { d with shared = res.shared; share_version = res.version }
+    | Some _ | None -> t.active_artifact_detail
+  in
+  { t with active_artifact_detail }
+
+let set_artifact_search query t =
+  { t with artifact_search_query = query; artifact_search_match_idx = 0 }
+
+let step_artifact_search_match ~delta ~match_count t =
+  if match_count <= 0 then { t with artifact_search_match_idx = 0 }
+  else
+    let next = (t.artifact_search_match_idx + delta) mod match_count in
+    let idx = if next < 0 then next + match_count else next in
+    { t with artifact_search_match_idx = idx }
+
+let artifact_revision_step ~delta t =
+  match Observed.to_option t.active_artifact_detail with
+  | None -> None
+  | Some d ->
+      let revs =
+        d.revisions
+        |> List.map (fun (r : Wire_knowledge.artifact_revision_summary) -> r.revision)
+        |> List.sort_uniq Int.compare
+      in
+      let rec index_of i = function
+        | [] -> None
+        | r :: rest ->
+            if Int.equal r d.artifact.revision then Some i else index_of (i + 1) rest
+      in
+      (match index_of 0 revs with
+      | None -> None
+      | Some idx ->
+          let target_idx = idx + delta in
+          if target_idx < 0 || target_idx >= List.length revs then None
+          else
+            Option.map
+              (fun rev -> (d.artifact.id, rev))
+              (List.nth_opt revs target_idx))
 
 let toggle_succession_chain ~root_id t =
   let prev_post = selected_post t in
@@ -1267,8 +1549,16 @@ let apply_board ~observed_at feed t =
     in
     { next with selected_index; scroll_offset }
 
+let apply_board_hearths ~observed_at hearths t =
+  { t with board_hearths = Observed.value ~observed_at hearths }
+
 let apply_thread ~observed_at thread t =
-  { t with active_thread = Observed.value ~observed_at thread }
+  {
+    t with
+    active_thread = Observed.value ~observed_at thread;
+    thread_selected_comment = None;
+    armed_vote = None;
+  }
 
 let apply_wiki_index ~observed_at idx t =
   let on_wiki = Nav.equal_knowledge_tab t.active_tab Nav.Knowledge_wiki in
@@ -1439,6 +1729,7 @@ let apply_artifact_detail ~observed_at detail t =
     t with
     active_artifact_detail = Observed.value ~observed_at detail;
     active_artifact_detail_target = Some detail.artifact.id;
+    pending_artifact_revision = None;
   }
 
 let mark_artifact_detail_failed ?target ~at ~reason ~retryable t =
@@ -1446,6 +1737,7 @@ let mark_artifact_detail_failed ?target ~at ~reason ~retryable t =
     t with
     active_artifact_detail = Observed.failed ~reason ~retryable ~at;
     active_artifact_detail_target = target;
+    pending_artifact_revision = None;
   }
 
 let memory_flow_input_of_diff (diff : Wire_knowledge.memory_diff)
@@ -2033,6 +2325,13 @@ let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t 
           scroll_offset;
           detail_scroll_offset;
           pending_wiki_edit_slug;
+          pending_artifact_revision =
+            (if Int.equal selected_index t.selected_index then
+               t.pending_artifact_revision
+             else None);
+          armed_vote =
+            (if Int.equal selected_index t.selected_index then t.armed_vote
+            else None);
         }
   | Nav.Knowledge_memory ->
       if pane_index = 1 then
@@ -2094,6 +2393,8 @@ let set_filter filter_query t =
   {
     t with
     filter_query;
+    armed_vote = None;
+    pending_artifact_revision = None;
     selected_index = 0;
     scroll_offset = 0;
     diff_scroll_offset = 0;
@@ -2113,6 +2414,7 @@ let mark_stale_all t =
   {
     t with
     board = Observed.mark_stale t.board;
+    board_hearths = Observed.mark_stale t.board_hearths;
     active_thread = Observed.mark_stale t.active_thread;
     wiki_index = Observed.mark_stale t.wiki_index;
     wiki_pages = String_map.map Observed.mark_stale t.wiki_pages;
@@ -2120,6 +2422,8 @@ let mark_stale_all t =
     wiki_lint = Observed.mark_stale t.wiki_lint;
     artifacts = Observed.mark_stale t.artifacts;
     active_artifact_detail = Observed.mark_stale t.active_artifact_detail;
+    pending_artifact_revision = None;
+    artifact_checks = Observed.mark_stale t.artifact_checks;
     world_memory = Observed.mark_stale t.world_memory;
     memory_diffs = Memory_diff_map.map Observed.mark_stale t.memory_diffs;
     memory_os_internals =

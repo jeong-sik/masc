@@ -112,10 +112,14 @@ let test_keymap_retired_p_v_and_vt100_safety () =
       let scope_chain =
         Keymap.scope_chain_of_focus ~approval_strip_active:true focus
       in
-      Alcotest.(check bool) "bare p unbound" true
-        (Option.is_none (Keymap.dispatch ~scope_chain (char_ev 'p')));
-      Alcotest.(check bool) "bare v unbound" true
-        (Option.is_none (Keymap.dispatch ~scope_chain (char_ev 'v')));
+      Alcotest.(check bool) "bare p never triggers legacy Palette" true
+        (not
+           (Option.equal Keymap.equal_action (Some Keymap.Open_palette)
+              (Keymap.dispatch ~scope_chain (char_ev 'p'))));
+      Alcotest.(check bool) "bare v never triggers legacy Voice PTT" true
+        (not
+           (Option.equal Keymap.equal_action (Some Keymap.Voice_ptt_toggle)
+              (Keymap.dispatch ~scope_chain (char_ev 'v'))));
       Alcotest.(check bool) "Ctrl+I unbound (VT100 Tab)" true
         (Option.is_none (Keymap.dispatch ~scope_chain (char_ev ~ctrl:true 'i')));
       Alcotest.(check bool) "Ctrl+M unbound (VT100 Enter)" true
@@ -216,8 +220,11 @@ let test_keymap_scopes_and_3_tiers () =
   Alcotest.(check bool) "F8 voice" true
     (Option.equal Keymap.equal_action (Some Keymap.Voice_ptt_toggle)
        (Keymap.dispatch ~scope_chain:comp_strip_chain (key_ev (Input.Function 8))));
-  Alcotest.(check bool) "Ctrl+B voice" true
+  Alcotest.(check bool) "Alt+V voice" true
     (Option.equal Keymap.equal_action (Some Keymap.Voice_ptt_toggle)
+       (Keymap.dispatch ~scope_chain:comp_strip_chain (char_ev ~alt:true 'v')));
+  Alcotest.(check bool) "Ctrl+B toggles Left Navigation Sidebar" true
+    (Option.equal Keymap.equal_action (Some Keymap.Toggle_sidebar)
        (Keymap.dispatch ~scope_chain:comp_strip_chain (char_ev ~ctrl:true 'b')))
 
 let test_keymap_footer_width_budget () =
@@ -1965,6 +1972,123 @@ let test_memory_flow_braille_chart () =
   in
   Alcotest.(check bool) "Net_total renders mode label" true
     (contains_sub ~needle:"Net Total" ~haystack:txt_net)
+
+let test_wave2_html_doc_renderer () =
+  let theme = Theme.of_preset Theme.Midnight in
+  let html =
+    {|<!doctype html>
+    <html>
+      <head><title>Ignored Head</title><style>.x{color:red}</style></head>
+      <body>
+        <script>alert("XSS_SECRET_SCRIPT");</script>
+        <div hidden>HIDDEN_SECRET</div>
+        <span aria-hidden="true">ARIA_HIDDEN_SECRET</span>
+        <h1>Wave 2 Report</h1>
+        <p>한글과 English가 섞인 문단입니다. See <a href="https://example.invalid/docs">Docs</a>.</p>
+        <table>
+          <thead><tr><th>Metric</th><th>Value</th></tr></thead>
+          <tbody>
+            <tr><td>Cache Hit</td><td>95.2%</td></tr>
+            <tr><td>Latency p95</td><td>42ms</td></tr>
+          </tbody>
+        </table>
+        <ul><li>First bullet</li><li>Second bullet</li></ul>
+        <pre>let ok = true</pre>
+        <img alt="Chart" src="data:image/png;base64,AAAA" />
+      </body>
+    </html>|}
+  in
+  let lines =
+    Masc_tui_ui.Html_doc.render_lines ~theme ~width:60 ~lang:Say.Lang_en
+      ~search_query:"95.2%" html
+  in
+  let joined =
+    lines
+    |> List.map (fun (l : Masc_tui_ui.Html_doc.rendered_line) -> l.text)
+    |> String.concat "\n"
+  in
+  let contains ~needle hay =
+    let nlen = String.length needle and hlen = String.length hay in
+    let rec loop i =
+      if i + nlen > hlen then false
+      else if String.sub hay i nlen = needle then true
+      else loop (i + 1)
+    in
+    loop 0
+  in
+  Alcotest.(check bool) "strips <script>" false
+    (contains ~needle:"XSS_SECRET_SCRIPT" joined);
+  Alcotest.(check bool) "strips <style>" false
+    (contains ~needle:"color:red" joined);
+  Alcotest.(check bool) "strips hidden" false
+    (contains ~needle:"HIDDEN_SECRET" joined);
+  Alcotest.(check bool) "strips aria-hidden" false
+    (contains ~needle:"ARIA_HIDDEN_SECRET" joined);
+  Alcotest.(check bool) "renders H1 heading" true
+    (contains ~needle:"Wave 2 Report" joined);
+  Alcotest.(check bool) "renders aligned table cells" true
+    (contains ~needle:"Cache Hit" joined && contains ~needle:"95.2%" joined);
+  Alcotest.(check bool) "renders link URL" true
+    (contains ~needle:"https://example.invalid/docs" joined);
+  Alcotest.(check bool) "renders <pre> block" true
+    (contains ~needle:"let ok = true" joined);
+  Alcotest.(check bool) "renders embedded image badge" true
+    (contains ~needle:"Chart" joined);
+  let matches =
+    Masc_tui_ui.Html_doc.search_match_lines ~theme ~width:60 ~lang:Say.Lang_en
+      ~query:"95.2%" html
+  in
+  Alcotest.(check bool) "search_match_lines finds 95.2% row" true
+    (List.length matches >= 1);
+  let g = Cell_grid.create ~cols:64 ~rows:24 in
+  let total =
+    Masc_tui_ui.Html_doc.draw g ~rect:(Rect.make ~x:0 ~y:0 ~w:64 ~h:24) ~theme
+      ~lang:Say.Lang_en ~search_query:"95.2%"
+      ~active_match_line:(List.hd matches) html
+  in
+  Alcotest.(check bool) "Html_doc.draw renders >= 8 lines" true (total >= 8);
+
+  (* Long CJK + long ASCII word wrapping must preserve 100% of bytes with zero mid-UTF-8 corruption *)
+  let long_cjk = "가나다라마바사아자차카타파하가나다라마바사아자차카타파하" in
+  let long_ascii = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ" in
+  let wrap_html = Printf.sprintf "<p>%s %s</p>" long_cjk long_ascii in
+  let wrap_lines =
+    Masc_tui_ui.Html_doc.render_lines ~theme ~width:16 ~lang:Say.Lang_ko wrap_html
+  in
+  let wrap_concat =
+    wrap_lines
+    |> List.map (fun (l : Masc_tui_ui.Html_doc.rendered_line) -> String.trim l.text)
+    |> String.concat ""
+  in
+  let expected_no_spaces = long_cjk ^ long_ascii in
+  let actual_no_spaces =
+    String.split_on_char ' ' wrap_concat |> String.concat ""
+  in
+  Alcotest.(check string) "Html_doc wraps CJK + long ASCII with zero dropped bytes"
+    expected_no_spaces actual_no_spaces;
+  List.iter
+    (fun (l : Masc_tui_ui.Html_doc.rendered_line) ->
+      Alcotest.(check bool)
+        (Printf.sprintf "wrapped line fits <= 16 cols (got %d: %s)"
+           (Grapheme.display_width l.text) l.text)
+        true (Grapheme.display_width l.text <= 16))
+    wrap_lines;
+
+  (* Script/style-only HTML must NEVER leak raw script tags or tokens *)
+  let script_only = "<script>LEAK_ME_NEVER();</script><style>body{color:red}</style>" in
+  let empty_lines =
+    Masc_tui_ui.Html_doc.render_lines ~theme ~width:40 ~lang:Say.Lang_en script_only
+  in
+  let empty_joined =
+    empty_lines
+    |> List.map (fun (l : Masc_tui_ui.Html_doc.rendered_line) -> l.text)
+    |> String.concat "\n"
+  in
+  Alcotest.(check bool) "script-only HTML does not leak script content" false
+    (contains ~needle:"LEAK_ME_NEVER" empty_joined);
+  Alcotest.(check bool) "script-only HTML renders honest empty notice" true
+    (contains ~needle:"No visible HTML content" empty_joined)
+
 let () =
   Alcotest.run "masc_tui_keymap_ui"
     [
@@ -2017,6 +2141,8 @@ let () =
             `Quick test_json_tree_telemetry_vs_secrets;
           Alcotest.test_case "Markdown OSC 8 links & fenced code" `Quick
             test_markdown_osc8_and_fence;
+          Alcotest.test_case "Wave 2: Html_doc strips script/style/hidden, aligns tables & search highlights"
+            `Quick test_wave2_html_doc_renderer;
         ] );
       ( "form_and_composer",
         [

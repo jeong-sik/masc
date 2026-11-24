@@ -30,7 +30,11 @@ val models_metrics_stream_path : string
     the chart's snapshot. *)
 val runtime_metrics_path : string
 val tool_series_path : bucket:[ `Hour | `Day ] -> since_hours:int -> string
+val tool_series_filtered_path :
+  bucket:[ `Hour | `Day ] -> since_hours:int -> ?tool:string -> unit -> string
 val dashboard_tools_path : ?keeper:string -> unit -> string
+val skills_path : string
+val connector_unbind_path : connector:string -> string
 val fusion_runs_path : string
 val fusion_launch_path : keeper:string -> string
 val exact_lane_runs_path : ?lane:string -> ?limit:int -> unit -> string
@@ -571,12 +575,114 @@ type tools_catalog =
 val decode_tools_catalog :
   observed_at:Clock.Mono.t -> Yojson.Safe.t -> (tools_catalog, string) result
 
+type tool_series_failure_classes = {
+  dependency_unavailable : int;
+  policy_rejection : int;
+  runtime_failure : int;
+  workflow_rejection : int;
+  operator_cancelled : int;
+  unclassified : int;
+}
+
+type tool_series_summary = {
+  tool_filter : string option;
+  total_calls : int;
+  total_failures : int;
+  total_deferred : int;
+  p50_ms : float option;
+  p95_ms : float option;
+  failure_classes : tool_series_failure_classes;
+  series : tool_series;
+}
+
+val decode_tool_series_summary :
+  Yojson.Safe.t -> (tool_series_summary, string) result
+
+type tool_catalog_entry = {
+  name : string;
+  description : string option;
+  public_names : string list;
+  calls_count : int Observed.t;
+  failure_count : int;
+  failure_rate_pct : float Observed.t;
+  p95_ms : float option;
+  direct_call_allowed : bool option;
+  surfaces : string list;
+  domain : string;
+  family : string;
+  doc_refs : string list;
+}
+
+type effective_keeper_tool_entry = {
+  name : string;
+  origin : string;
+}
+
+type effective_keeper_surface =
+  | Keeper_surface_unavailable of {
+      keeper_name : string;
+      reason : string;
+      detail : string;
+    }
+  | Keeper_surface_available of {
+      keeper_name : string;
+      runtime_id : string;
+      tool_delivery : string;
+      tool_surface_bytes : int;
+      skill_tool_surface_bytes : int;
+      skill_discovery_bytes : int;
+      skill_body_bytes : int;
+      tool_surface_sha256 : string option;
+      tools : effective_keeper_tool_entry list;
+      skills_left_out : string list;
+      lane_addon_conflicts : string list;
+    }
+
+type tools_dashboard_snapshot = {
+  entries : tool_catalog_entry list;
+  total_calls : int;
+  distinct_tools_called : int;
+  registered_count : int;
+  effective_keeper_surface : effective_keeper_surface option;
+  volume_gc_summary : string option;
+  keeper_cleanup_summary : string option;
+}
+
+val decode_tools_dashboard :
+  observed_at:Clock.Mono.t ->
+  Yojson.Safe.t ->
+  (tools_dashboard_snapshot, string) result
+
+val classify_tool_domain_family : string -> string * string
+
+type skill_surface_entry = {
+  reference : string;
+  kind : string; (** ["instruction" | "composition" | "unavailable"] *)
+  summary : string option;
+  error : string option;
+}
+
+type skills_snapshot = {
+  state : string;
+  snapshot_revision : string option;
+  surfaces : skill_surface_entry list;
+  shadows : string list;
+  rejections : string list;
+}
+
+val decode_skills_snapshot : Yojson.Safe.t -> (skills_snapshot, string) result
+
 type connector_connection =
   | Connector_connected
   | Connector_connected_unavailable
   | Connector_disconnected
   | Connector_offline
   | Connector_stale
+
+type connector_binding = {
+  channel_id : string;
+  keeper_name : string;
+}
 
 type connector_row = {
   connector_id : string;
@@ -585,6 +691,7 @@ type connector_row = {
   channel : string option;
   error : string option;
   binding_count : int;
+  configured_bindings : connector_binding list;
 }
 
 val decode_connectors : Yojson.Safe.t -> (connector_row list, string) result

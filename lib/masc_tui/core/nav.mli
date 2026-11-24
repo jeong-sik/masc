@@ -1,4 +1,5 @@
-(** Converged navigation model: 6 Workspaces, Sub-Tabs, 4 Dives, 7 Overlays, and Focus Scope.
+(** Converged navigation model: 6 Workspaces, 1st-class Sub-Tabs (zero hidden
+    submodes), 5 Dives, 7 Overlays, Left Navigation Sidebar Tree SSOT, and Focus Scope.
 
     Closed algebraic types with zero hidden string routes. *)
 
@@ -12,7 +13,8 @@ type workspace =
 
 type work_tab =
   | Work_pipeline
-  | Work_tasks_schedules
+  | Work_tasks
+  | Work_schedules
   | Work_inbox
   | Work_candle_scorecard
 
@@ -31,7 +33,9 @@ type runtime_tab =
   | Runtime_quotas_credits
   | Runtime_efficiency_spend
   | Runtime_failover_lanes
-  | Runtime_tools_connectors
+  | Runtime_fusion
+  | Runtime_tools_usage
+  | Runtime_connectors
   | Runtime_addons_browser
 
 type infra_tab =
@@ -41,6 +45,8 @@ type infra_tab =
 
 type keeper_tab =
   | Keeper_chat
+  | Keeper_context
+  | Keeper_tool_calls
   | Keeper_memory
   | Keeper_work_candle
   | Keeper_sandbox
@@ -57,6 +63,9 @@ type knowledge_dive_target =
   | Artifact_dive of string
   | Memory_diff_dive of { keeper : string option; from_rev : int; to_rev : int }
 
+type runtime_dive_target =
+  | Tool_dive of string
+
 type infra_dive_target =
   | Sandbox_dive of string
   | Lane_dive of string
@@ -66,6 +75,7 @@ type dive =
   | Dive_keeper of { name : string; tab : keeper_tab }
   | Dive_work of work_dive_target
   | Dive_knowledge of knowledge_dive_target
+  | Dive_runtime of runtime_dive_target
   | Dive_infra of infra_dive_target
 
 type settings_tab =
@@ -86,11 +96,13 @@ type inline_action_kind =
   | Btw_query
   | Gate_reject of string
   | Verification_reject of string
+  | Harness_overrule of string
   | Task_cancel of string
   | Schedule_form
   | Connector_form
   | Repo_add_form
   | Board_new_post
+  | Board_comment of { post_id : string; parent_id : string option }
 
 type system_gate_kind =
   | Micro_viewport
@@ -138,6 +150,7 @@ val prev_knowledge_tab : knowledge_tab -> knowledge_tab
 val all_keepers_fleet_modes : keepers_fleet_mode list
 val keepers_fleet_mode_label : keepers_fleet_mode -> Say.t
 val next_keepers_fleet_mode : keepers_fleet_mode -> keepers_fleet_mode
+val prev_keepers_fleet_mode : keepers_fleet_mode -> keepers_fleet_mode
 
 val all_runtime_tabs : runtime_tab list
 val runtime_tab_label : runtime_tab -> Say.t
@@ -173,6 +186,7 @@ val equal_infra_tab : infra_tab -> infra_tab -> bool
 val equal_keeper_tab : keeper_tab -> keeper_tab -> bool
 val equal_work_dive_target : work_dive_target -> work_dive_target -> bool
 val equal_knowledge_dive_target : knowledge_dive_target -> knowledge_dive_target -> bool
+val equal_runtime_dive_target : runtime_dive_target -> runtime_dive_target -> bool
 val equal_infra_dive_target : infra_dive_target -> infra_dive_target -> bool
 val equal_dive : dive -> dive -> bool
 val equal_settings_tab : settings_tab -> settings_tab -> bool
@@ -181,7 +195,6 @@ val equal_inline_action_kind : inline_action_kind -> inline_action_kind -> bool
 val equal_system_gate_kind : system_gate_kind -> system_gate_kind -> bool
 val equal_overlay : overlay -> overlay -> bool
 val equal_focus_scope : focus_scope -> focus_scope -> bool
-
 (** Unified Left Navigation Sidebar & Palette Screen SSOT.
     Every reachable workspace, first-class sub-screen, and system overlay has
     exactly one canonical entry so operators never hunt across hidden submodes. *)
@@ -200,6 +213,7 @@ type menu_target =
   | Menu_work of work_tab
   | Menu_knowledge of knowledge_tab
   | Menu_keepers
+  | Menu_keeper_tab of keeper_tab
   | Menu_runtime of runtime_tab
   | Menu_infra of infra_tab
   | Menu_settings

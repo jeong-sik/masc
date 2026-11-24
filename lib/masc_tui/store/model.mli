@@ -144,6 +144,7 @@ type t = {
   incidents : Incidents.t;
   drafts : Drafts.t;
   fleet : Fleet_store.t;
+  keeper_context : Keeper_context_store.t;
   work : Work_store.t;
   knowledge : Knowledge_store.t;
   runtime : Runtime_store.t;

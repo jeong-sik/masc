@@ -121,15 +121,28 @@ type wiki_edit_base = {
   tags : string list;
 }
 
+type vote_target =
+  | Vote_post of string
+  | Vote_comment of { post_id : string; comment_id : string }
+
+type threaded_comment = {
+  comment : Wire_knowledge.board_comment;
+  depth : int;
+  is_reply : bool;
+}
+
 type t = {
   active_tab : Nav.knowledge_tab;
   board : Wire_knowledge.board_feed Observed.t;
+  board_hearths : Wire_knowledge.board_hearth_entry list Observed.t;
   board_signal_only : bool;
   board_sort_by : string;
   board_hearth : string option;
   expanded_succession_chains : String_set.t;
   active_thread :
     (Wire_knowledge.board_post * Wire_knowledge.board_comment list) Observed.t;
+  thread_selected_comment : int option;
+  armed_vote : (vote_target * [ `Up | `Down ]) option;
   wiki_index : Wire_knowledge.wiki_index Observed.t;
   wiki_pages : Wire_knowledge.wiki_page_detail Observed.t String_map.t;
       (** One slot per page slug. *)
@@ -143,6 +156,11 @@ type t = {
   artifacts : Wire_knowledge.artifact_entry list Observed.t;
   active_artifact_detail : Wire_knowledge.published_artifact_detail Observed.t;
   active_artifact_detail_target : string option;
+  pending_artifact_revision : (string * int option) option;
+  artifact_view_mode : [ `Document | `Raw_source ];
+  artifact_checks : Wire_knowledge.artifact_check list Observed.t;
+  artifact_search_query : string;
+  artifact_search_match_idx : int;
   world_memory : Wire_knowledge.world_memory Observed.t;
   memory_diffs : Wire_knowledge.memory_diff Observed.t Memory_diff_map.t;
   memory_os_internals :
@@ -233,14 +251,55 @@ val equal_memory_diagram_kind :
 val equal_memory_diagram_mode :
   memory_diagram_mode -> memory_diagram_mode -> bool
 val next_memory_diagram_mode : memory_diagram_mode -> memory_diagram_mode
+val equal_vote_target : vote_target -> vote_target -> bool
 
 val set_tab : Nav.knowledge_tab -> t -> t
 val cycle_tab : Keymap.cycle_dir -> t -> t
 
 val toggle_signal_only : t -> t
 val set_board_sort : string -> t -> t
+val cycle_board_sort : t -> t
+val set_board_hearth : string option -> t -> t
+val cycle_board_hearth : t -> t
 val toggle_succession_chain : root_id:string -> t -> t
 val is_succession_chain_expanded : root_id:string -> t -> bool
+
+val order_comments_threaded :
+  Wire_knowledge.board_comment list -> threaded_comment list
+(** Thread comments by [parent_id] up to depth 4, chronologically per parent,
+    promoting orphans and breaking cycles safely. *)
+
+val step_thread_comment : delta:int -> t -> t
+val selected_thread_comment : t -> threaded_comment option
+
+val press_vote :
+  target:vote_target ->
+  dir:[ `Up | `Down ] ->
+  t ->
+  [ `Armed of t | `Confirmed of t ]
+(** Two-press armed vote state machine: first press arms [(target, dir)],
+    matching second press confirms and clears. *)
+
+val clear_armed_vote : t -> t
+
+val toggle_artifact_view_mode : t -> t
+val apply_artifact_checks :
+  observed_at:Clock.Mono.t -> Wire_knowledge.artifact_check list -> t -> t
+val apply_artifact_check_update :
+  observed_at:Clock.Mono.t -> Wire_knowledge.artifact_check -> t -> t
+val artifact_check_for :
+  id:string -> ?revision:int -> t -> Wire_knowledge.artifact_check option
+val set_pending_artifact_revision :
+  (string * int option) option -> t -> t
+val clear_pending_artifact_revision : t -> t
+val is_json_artifact : Wire_knowledge.artifact_entry -> bool
+val matches_pending_artifact_revision :
+  id:string -> revision:int -> t -> bool
+val apply_artifact_share_result :
+  observed_at:Clock.Mono.t -> Wire_knowledge.artifact_share_result -> t -> t
+val set_artifact_search : string -> t -> t
+val step_artifact_search_match : delta:int -> match_count:int -> t -> t
+val artifact_revision_step : delta:int -> t -> (string * int) option
 
 val set_memory_diff_window : memory_diff_window -> t -> t
 val cycle_memory_diff_window : t -> t
@@ -326,6 +385,8 @@ val move_memory_diff_dive_cursor :
 
 val apply_board :
   observed_at:Clock.Mono.t -> Wire_knowledge.board_feed -> t -> t
+val apply_board_hearths :
+  observed_at:Clock.Mono.t -> Wire_knowledge.board_hearth_entry list -> t -> t
 val apply_thread :
   observed_at:Clock.Mono.t ->
   Wire_knowledge.board_post * Wire_knowledge.board_comment list ->

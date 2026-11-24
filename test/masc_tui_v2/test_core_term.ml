@@ -475,18 +475,18 @@ let test_observed_and_format_val () =
 
   (* Nav converged counts *)
   Alcotest.(check int) "6 workspaces" 6 (List.length Nav.all_workspaces);
-  Alcotest.(check int) "4 work tabs" 4 (List.length Nav.all_work_tabs);
+  Alcotest.(check int) "5 work tabs" 5 (List.length Nav.all_work_tabs);
   Alcotest.(check int) "4 knowledge tabs" 4 (List.length Nav.all_knowledge_tabs);
-  Alcotest.(check int) "22 unified menu items" 22 (List.length Nav.all_menu_items);
+  Alcotest.(check int) "27 unified menu items" 27 (List.length Nav.all_menu_items);
   List.iteri
     (fun idx (it : Nav.menu_item) ->
       Alcotest.(check int)
         (Printf.sprintf "menu_item_index round-trip #%d" idx)
         idx (Nav.menu_item_index it.target))
     Nav.all_menu_items;
-  Alcotest.(check int) "5 runtime tabs" 5 (List.length Nav.all_runtime_tabs);
+  Alcotest.(check int) "7 runtime tabs" 7 (List.length Nav.all_runtime_tabs);
   Alcotest.(check int) "3 infra tabs" 3 (List.length Nav.all_infra_tabs);
-  Alcotest.(check int) "5 keeper tabs" 5 (List.length Nav.all_keeper_tabs);
+  Alcotest.(check int) "7 keeper tabs" 7 (List.length Nav.all_keeper_tabs);
   Alcotest.(check int) "7 settings tabs" 7 (List.length Nav.all_settings_tabs);
   Alcotest.(check bool) "strict workspace_of_index 0 = None" true
     (Option.is_none (Nav.workspace_of_index 0));

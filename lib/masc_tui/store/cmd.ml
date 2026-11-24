@@ -35,6 +35,7 @@ type get_request =
       limit : int option;
       offset : int option;
     }
+  | Get_board_hearths
   | Get_board_thread of { post_id : string; comment_limit : int option }
   | Get_wiki_index of {
       tag : string option;
@@ -47,6 +48,7 @@ type get_request =
   | Get_wiki_lint
   | Get_artifacts
   | Get_artifact_detail of { id : string; revision : int option }
+  | Get_artifact_checks
   | Get_world_memory
   | Get_memory_diff of {
       keeper : string option;
@@ -56,6 +58,34 @@ type get_request =
   | Get_keeper_memory_facts of { keeper : string }
   | Get_keeper_memory_activity of { keeper : string; limit : int }
   | Get_keeper_memory_health
+  | Get_keeper_context_turn_records of {
+      keeper : string;
+      limit : int option;
+      turn_ref : string option;
+    }
+  | Get_keeper_provider_input of { keeper : string; turn_ref : string }
+  | Get_keeper_provider_input_part of {
+      keeper : string;
+      turn_ref : string;
+      index : int;
+    }
+  | Get_keeper_cache_outcome of { keeper : string; turn_ref : string }
+  | Get_keeper_next_request of { keeper : string }
+  | Get_keeper_turn_transcript of { keeper : string; turn_ref : string }
+  | Get_keeper_tool_stats of { keeper : string; window_hours : int option }
+  | Get_keeper_tool_calls of {
+      keeper : string;
+      limit : int option;
+      execution_ids : string list option;
+      turn_ref : string option;
+    }
+  | Get_keeper_tool_result of {
+      keeper : string;
+      execution_id : string;
+      offset : int option;
+      max_bytes : int option;
+      source_id : string option;
+    }
   | Get_provider_usage of { days : int }
   | Get_keeper_costs of { window_minutes : int }
   | Get_efficiency of { month : string option }
@@ -69,7 +99,13 @@ type get_request =
   | Get_exact_lane_runs of { lane : string option; limit : int option }
   | Get_fusion_runs
   | Get_tool_series of { bucket : [ `Hour | `Day ]; since_hours : int }
+  | Get_tool_series_filtered of {
+      bucket : [ `Hour | `Day ];
+      since_hours : int;
+      tool : string option;
+    }
   | Get_tools_catalog of { keeper : string option }
+  | Get_skills
   | Get_connectors
   | Get_browser_lane
   | Get_lane_addons
@@ -152,17 +188,55 @@ type post_request =
       body : string;
       hearth : string option;
     }
+  | Post_board_comment of {
+      post_id : string;
+      content : string;
+      parent_id : string option;
+    }
+  | Post_board_vote of { post_id : string; direction : [ `Up | `Down ] }
+  | Post_board_comment_vote of {
+      post_id : string;
+      comment_id : string;
+      direction : [ `Up | `Down ];
+    }
+  | Post_artifact_check of {
+      expected_workspace : (string * string) option;
+      id : string;
+      revision : int;
+      body_sha256 : string;
+      checked : bool;
+      expected_change_id : string option;
+    }
+  | Post_artifact_share of {
+      expected_workspace : string * string;
+      id : string;
+      shared : bool;
+      operation_id : string;
+      expected_version : int;
+      expected_artifact_revision : int;
+      expected_artifact_sha256 : string;
+    }
   | Post_schedule_create of Wire_work.schedule_create_request
   | Post_connector_bind of {
       connector : string;
       channel_id : string;
       keeper_name : string;
     }
+  | Post_connector_unbind of {
+      connector : string;
+      channel_id : string;
+      keeper_name : string option;
+    }
   | Post_repo_add of { url : string; branch : string option }
   | Post_task_cancel of {
       task_id : string;
       reason : string option;
       expected_workspace : Wire_work.expected_workspace;
+    }
+  | Post_harness_overrule of {
+      notes_hash : string;
+      verdict : [ `Approve | `Reject ];
+      reason : string;
     }
   | Post_browser_tabs of { client_id : string }
 
@@ -257,6 +331,7 @@ let get_request_path = function
   | Get_board_feed { sort_by; hearth; signal_only; limit; offset } ->
       Wire_knowledge.board_list_path ~sort_by ?hearth ~signal_only ?limit
         ?offset ()
+  | Get_board_hearths -> Wire_knowledge.board_hearths_path
   | Get_board_thread { post_id; comment_limit } ->
       Wire_knowledge.board_post_path ~post_id ?comment_limit ()
   | Get_wiki_index { tag; source; sort } ->
@@ -270,6 +345,7 @@ let get_request_path = function
   | Get_artifacts -> Wire_knowledge.published_artifacts_path
   | Get_artifact_detail { id; revision } ->
       Wire_knowledge.published_artifact_detail_path ~id ?revision ()
+  | Get_artifact_checks -> Wire_knowledge.published_artifact_checks_path
   | Get_world_memory -> Wire_knowledge.world_memory_path
   | Get_memory_diff { keeper; window } -> (
       match window with
@@ -288,6 +364,26 @@ let get_request_path = function
       Wire_knowledge.keeper_memory_activity_path ~keeper ~limit ()
   | Get_keeper_memory_health ->
       Wire_knowledge.keeper_memory_health_path ()
+  | Get_keeper_context_turn_records { keeper; limit; turn_ref } ->
+      Wire_keeper_context.keeper_turn_records_path ~keeper ?limit ?turn_ref ()
+  | Get_keeper_provider_input { keeper; turn_ref } ->
+      Wire_keeper_context.keeper_provider_input_path ~keeper ~turn_ref
+  | Get_keeper_provider_input_part { keeper; turn_ref; index } ->
+      Wire_keeper_context.keeper_provider_input_part_path ~keeper ~turn_ref
+        ~index
+  | Get_keeper_cache_outcome { keeper; turn_ref } ->
+      Wire_keeper_context.keeper_cache_outcome_path ~keeper ~turn_ref
+  | Get_keeper_next_request { keeper } ->
+      Wire_keeper_context.keeper_next_request_path ~keeper
+  | Get_keeper_turn_transcript { keeper; turn_ref } ->
+      Wire_keeper_context.keeper_turn_transcript_path ~keeper ~turn_ref
+  | Get_keeper_tool_stats { keeper; window_hours } ->
+      Wire_keeper_context.keeper_tool_stats_path ~keeper ?window_hours ()
+  | Get_keeper_tool_calls { keeper; limit; execution_ids; turn_ref = _ } ->
+      Wire_keeper_context.keeper_tool_calls_path ~keeper ?limit ?execution_ids ()
+  | Get_keeper_tool_result { keeper; execution_id; offset; max_bytes; source_id } ->
+      Wire_keeper_context.keeper_tool_result_path ~keeper ~execution_id ?offset
+        ?max_bytes ?source_id ()
   | Get_provider_usage { days } ->
       Wire_runtime.provider_usage_history_path ~days
   | Get_keeper_costs { window_minutes } ->
@@ -307,7 +403,10 @@ let get_request_path = function
   | Get_fusion_runs -> Wire_runtime.fusion_runs_path
   | Get_tool_series { bucket; since_hours } ->
       Wire_runtime.tool_series_path ~bucket ~since_hours
+  | Get_tool_series_filtered { bucket; since_hours; tool } ->
+      Wire_runtime.tool_series_filtered_path ~bucket ~since_hours ?tool ()
   | Get_tools_catalog { keeper } -> Wire_runtime.dashboard_tools_path ?keeper ()
+  | Get_skills -> Wire_runtime.skills_path
   | Get_connectors -> Wire_runtime.connectors_path
   | Get_browser_lane -> Wire_runtime.browser_lane_path
   | Get_lane_addons -> Wire_runtime.lane_addons_path
@@ -343,11 +442,19 @@ let post_request_path = function
   | Post_tui_preference _ -> Wire_config.tui_preferences_path
   | Post_keeper_turn_interrupt _ -> Wire_fleet.keeper_turn_interrupt_path
   | Post_board_create _ -> "/api/v1/tools/masc_board_post"
+  | Post_board_comment _ -> Wire_knowledge.board_comment_path
+  | Post_board_vote _ -> Wire_knowledge.board_vote_path
+  | Post_board_comment_vote _ -> Wire_knowledge.board_comment_vote_path
+  | Post_artifact_check _ -> Wire_knowledge.published_artifact_checks_path
+  | Post_artifact_share _ -> Wire_knowledge.published_artifact_shares_path
   | Post_schedule_create _ -> "/api/v1/tools/masc_schedule_create"
   | Post_connector_bind { connector; _ } ->
       Wire_runtime.connector_bind_path ~connector
+  | Post_connector_unbind { connector; _ } ->
+      Wire_runtime.connector_unbind_path ~connector
   | Post_repo_add _ -> Wire_infra.repositories_path
   | Post_task_cancel _ -> "/api/v1/dashboard/tasks/cancel"
+  | Post_harness_overrule _ -> "/api/v1/dashboard/harness-label"
   | Post_browser_tabs _ -> Wire_runtime.browser_lane_read_path
 
 let post_request_body = function
@@ -400,9 +507,48 @@ let post_request_body = function
         | Some _ | None -> base
       in
       `Assoc fields
+  | Post_board_comment { post_id; content; parent_id } ->
+      Wire_knowledge.encode_board_comment ~post_id ~content ?parent_id ()
+  | Post_board_vote { post_id; direction } ->
+      Wire_knowledge.encode_board_vote ~post_id ~direction
+  | Post_board_comment_vote { post_id = _; comment_id; direction } ->
+      Wire_knowledge.encode_board_comment_vote ~comment_id ~direction
+  | Post_artifact_check
+      {
+        expected_workspace;
+        id;
+        revision;
+        body_sha256;
+        checked;
+        expected_change_id;
+      } ->
+      Wire_knowledge.encode_artifact_check_request ?expected_workspace ~id
+        ~revision ~body_sha256 ~checked ~expected_change_id ()
+  | Post_artifact_share
+      {
+        expected_workspace;
+        id;
+        shared;
+        operation_id;
+        expected_version;
+        expected_artifact_revision;
+        expected_artifact_sha256;
+      } ->
+      Wire_knowledge.encode_artifact_share_request ~expected_workspace ~id
+        ~shared ~operation_id ~expected_version ~expected_artifact_revision
+        ~expected_artifact_sha256
   | Post_schedule_create req -> Wire_work.encode_schedule_create req
   | Post_connector_bind { connector = _; channel_id; keeper_name } ->
       Wire_runtime.encode_connector_bind ~channel_id ~keeper_name
+  | Post_connector_unbind { connector = _; channel_id; keeper_name } ->
+      let base = [ ("channel_id", `String channel_id) ] in
+      let fields =
+        match keeper_name with
+        | Some k when not (String.equal (String.trim k) "") ->
+            base @ [ ("keeper_name", `String (String.trim k)) ]
+        | Some _ | None -> base
+      in
+      `Assoc fields
   | Post_repo_add { url; branch } ->
       let base = [ ("url", `String url) ] in
       let fields =
@@ -414,6 +560,16 @@ let post_request_body = function
       `Assoc fields
   | Post_task_cancel { task_id; reason; expected_workspace } ->
       Wire_work.encode_task_cancel ~task_id ~reason ~expected_workspace
+  | Post_harness_overrule { notes_hash; verdict; reason } ->
+      let verdict_str =
+        match verdict with `Approve -> "approve" | `Reject -> "reject"
+      in
+      `Assoc
+        [
+          ("notes_hash", `String notes_hash);
+          ("verdict", `String verdict_str);
+          ("reason", `String reason);
+        ]
   | Post_browser_tabs { client_id } ->
       Wire_runtime.encode_browser_tabs_request ~client_id
 

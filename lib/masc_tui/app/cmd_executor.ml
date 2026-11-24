@@ -715,6 +715,13 @@ let execute_get t ~epoch req =
                    ~decode:(Wire_knowledge.decode_board_feed ~observed_at))
             in
             Msg.Http_reply { epoch; reply }
+        | Cmd.Get_board_hearths ->
+            let reply =
+              Msg.Reply_board_hearths
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_knowledge.decode_board_hearths)
+            in
+            Msg.Http_reply { epoch; reply }
         | Cmd.Get_board_thread _ ->
             let reply =
               Msg.Reply_board_thread
@@ -773,6 +780,13 @@ let execute_get t ~epoch req =
                     fetch_and_decode_get t ~path
                       ~decode:Wire_knowledge.decode_published_artifact_detail;
                 }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_artifact_checks ->
+            let reply =
+              Msg.Reply_artifact_checks
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_knowledge.decode_artifact_checks)
             in
             Msg.Http_reply { epoch; reply }
         | Cmd.Get_world_memory ->
@@ -847,6 +861,112 @@ let execute_get t ~epoch req =
               Msg.Reply_keeper_memory_health
                 (fetch_and_decode_get t ~path
                    ~decode:Wire_knowledge.decode_keeper_memory_health_fleet)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_keeper_context_turn_records { keeper; _ } ->
+            let reply =
+              Msg.Reply_keeper_context_turn_records
+                {
+                  keeper;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_keeper_context.decode_turn_records;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_keeper_provider_input { keeper; turn_ref } ->
+            let reply =
+              Msg.Reply_keeper_provider_input
+                {
+                  keeper;
+                  turn_ref;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_keeper_context.decode_provider_input_manifest;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_keeper_provider_input_part { keeper; turn_ref; index } ->
+            let reply =
+              Msg.Reply_keeper_provider_input_part
+                {
+                  keeper;
+                  turn_ref;
+                  index;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_keeper_context.decode_provider_input_part;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_keeper_cache_outcome { keeper; turn_ref } ->
+            let reply =
+              Msg.Reply_keeper_cache_outcome
+                {
+                  keeper;
+                  turn_ref;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_keeper_context.decode_cache_outcome;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_keeper_next_request { keeper } ->
+            let reply =
+              Msg.Reply_keeper_next_request
+                {
+                  keeper;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_keeper_context.decode_next_request_forecast;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_keeper_turn_transcript { keeper; turn_ref } ->
+            let reply =
+              Msg.Reply_keeper_turn_transcript
+                {
+                  keeper;
+                  turn_ref;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_keeper_context.decode_turn_transcript;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_keeper_tool_stats { keeper; _ } ->
+            let reply =
+              Msg.Reply_keeper_tool_stats
+                {
+                  keeper;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_keeper_context.decode_keeper_tool_stats;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_keeper_tool_calls { keeper; turn_ref; _ } ->
+            let reply =
+              Msg.Reply_keeper_tool_calls
+                {
+                  keeper;
+                  turn_ref;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_keeper_context.decode_keeper_tool_calls;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_keeper_tool_result { keeper; execution_id; _ } ->
+            let reply =
+              Msg.Reply_keeper_tool_result
+                {
+                  keeper;
+                  execution_id;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_keeper_context.decode_tool_result;
+                }
             in
             Msg.Http_reply { epoch; reply }
         | Cmd.Get_provider_usage _ ->
@@ -940,11 +1060,34 @@ let execute_get t ~epoch req =
                    ~decode:Wire_runtime.decode_tool_series)
             in
             Msg.Http_reply { epoch; reply }
-        | Cmd.Get_tools_catalog _ ->
+        | Cmd.Get_tool_series_filtered { since_hours; tool; _ } ->
             let reply =
-              Msg.Reply_tools_catalog
+              Msg.Reply_tool_series_summary
+                {
+                  tool;
+                  since_hours;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_runtime.decode_tool_series_summary;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_tools_catalog { keeper } ->
+            let reply =
+              Msg.Reply_tools_dashboard
+                {
+                  keeper;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:(Wire_runtime.decode_tools_dashboard ~observed_at);
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_skills ->
+            let reply =
+              Msg.Reply_skills
                 (fetch_and_decode_get t ~path
-                   ~decode:(Wire_runtime.decode_tools_catalog ~observed_at))
+                   ~decode:Wire_runtime.decode_skills_snapshot)
             in
             Msg.Http_reply { epoch; reply }
         | Cmd.Get_connectors ->
@@ -1280,6 +1423,50 @@ let execute_post t ~epoch req =
                    label = Say.make ~ko:"게시글 작성 완료" ~en:"Board post created";
                    result;
                  })
+        | Cmd.Post_board_comment { post_id; _ } ->
+            let result = post_ack t ~path ~body in
+            Some (Msg.Reply_board_comment { post_id; result })
+        | Cmd.Post_board_vote { post_id; _ } ->
+            let result = post_ack t ~path ~body in
+            Some (Msg.Reply_board_vote { post_id; result })
+        | Cmd.Post_board_comment_vote { post_id; _ } ->
+            let result = post_ack t ~path ~body in
+            Some (Msg.Reply_board_vote { post_id; result })
+        | Cmd.Post_artifact_check { id; _ } ->
+            let result =
+              post_and_decode t ~path ~body
+                ~decode:Wire_knowledge.decode_artifact_check_reply
+            in
+            Some (Msg.Reply_artifact_check { id; result })
+        | Cmd.Post_artifact_share { id; _ } ->
+            let ep = Atomic.get t.endpoint in
+            let body_str = Yojson.Safe.to_string body in
+            let result =
+              match
+                Http_client.post_raw ~io:t.io ~clock:t.clock
+                  ~content_type:"application/json" ~body:body_str ep ~path
+              with
+              | Ok raw ->
+                  decode_raw_json t
+                    ~decode:Wire_knowledge.decode_artifact_share_response raw
+              | Error
+                  (Http_client.Http_error { status = 409; body = err_body; _ } as
+                   err) -> (
+                  match
+                    decode_raw_json t
+                      ~decode:Wire_knowledge.decode_artifact_share_response
+                      err_body
+                  with
+                  | Ok ans -> Ok ans
+                  | Error _ -> Error (msg_error_of_http err))
+              | Error
+                  (( Http_client.Http_error _
+                   | Http_client.Transport _
+                   | Http_client.Workspace_mismatch _
+                   | Http_client.Decode_error _ ) as err) ->
+                  Error (msg_error_of_http err)
+            in
+            Some (Msg.Reply_artifact_share { id; result })
         | Cmd.Post_schedule_create _ ->
             let result = post_ack t ~path ~body in
             Some
@@ -1296,6 +1483,14 @@ let execute_post t ~epoch req =
                    label = Say.make ~ko:"커넥터 연결 완료" ~en:"Connector bound";
                    result;
                  })
+        | Cmd.Post_connector_unbind _ ->
+            let result = post_ack t ~path ~body in
+            Some
+              (Msg.Reply_action_ack
+                 {
+                   label = Say.make ~ko:"커넥터 바인딩 해제됨" ~en:"Connector unbound";
+                   result;
+                 })
         | Cmd.Post_repo_add _ ->
             let result = post_ack t ~path ~body in
             Some
@@ -1310,6 +1505,16 @@ let execute_post t ~epoch req =
               (Msg.Reply_action_ack
                  {
                    label = Say.make ~ko:"작업 취소 완료" ~en:"Task cancelled";
+                   result;
+                 })
+        | Cmd.Post_harness_overrule _ ->
+            let result = post_ack t ~path ~body in
+            Some
+              (Msg.Reply_action_ack
+                 {
+                   label =
+                     Say.make ~ko:"판정 재정의 전송됨"
+                       ~en:"Harness overrule submitted";
                    result;
                  })
         | Cmd.Post_browser_tabs { client_id } ->

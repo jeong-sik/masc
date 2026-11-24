@@ -11,4 +11,6 @@
   masc_tui_protocol
   masc_tui_store
   masc_tui_screens_core
+  masc.masc_types
+  masc.agent_core.llm_provider
   yojson))

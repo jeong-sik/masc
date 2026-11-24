@@ -134,6 +134,7 @@ type t = {
   incidents : Incidents.t;
   drafts : Drafts.t;
   fleet : Fleet_store.t;
+  keeper_context : Keeper_context_store.t;
   work : Work_store.t;
   knowledge : Knowledge_store.t;
   runtime : Runtime_store.t;
@@ -265,6 +266,7 @@ let initial ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_ko)
     incidents = Incidents.empty;
     drafts = Drafts.empty;
     fleet = Fleet_store.set_wall_unix last_wall_unix Fleet_store.empty;
+    keeper_context = Keeper_context_store.empty;
     work = Work_store.empty;
     knowledge = Knowledge_store.empty;
     runtime = Runtime_store.empty;
@@ -305,7 +307,9 @@ let is_in_keeper_chat m =
       ( Nav.Dive_keeper
           {
             tab =
-              ( Nav.Keeper_memory
+              ( Nav.Keeper_context
+              | Nav.Keeper_tool_calls
+              | Nav.Keeper_memory
               | Nav.Keeper_work_candle
               | Nav.Keeper_sandbox
               | Nav.Keeper_config );
@@ -313,6 +317,7 @@ let is_in_keeper_chat m =
           }
       | Nav.Dive_work _
       | Nav.Dive_knowledge _
+      | Nav.Dive_runtime _
       | Nav.Dive_infra _ )
   | None ->
       false
@@ -462,7 +467,32 @@ let active_menu_target m =
       | Nav.Pulse -> Nav.Menu_pulse
       | Nav.Work -> Nav.Menu_work m.work.active_tab
       | Nav.Knowledge -> Nav.Menu_knowledge m.knowledge.active_tab
-      | Nav.Keepers -> Nav.Menu_keepers
+      | Nav.Keepers -> (
+          let tab_opt =
+            match active_dive m with
+            | Some (Nav.Dive_keeper { tab; _ }) -> Some tab
+            | Some
+                ( Nav.Dive_work _
+                | Nav.Dive_knowledge _
+                | Nav.Dive_runtime _
+                | Nav.Dive_infra _ ) ->
+                None
+            | None ->
+                if m.nav.pane_index = 1 || m.nav.zoomed then
+                  Some m.fleet.keeper_dive_tab
+                else None
+          in
+          match tab_opt with
+          | Some ((Nav.Keeper_context | Nav.Keeper_tool_calls) as tab) ->
+              Nav.Menu_keeper_tab tab
+          | Some
+              ( Nav.Keeper_chat
+              | Nav.Keeper_memory
+              | Nav.Keeper_work_candle
+              | Nav.Keeper_sandbox
+              | Nav.Keeper_config )
+          | None ->
+              Nav.Menu_keepers)
       | Nav.Runtime -> Nav.Menu_runtime m.runtime.active_tab
       | Nav.Infra -> Nav.Menu_infra m.infra.active_tab)
 
@@ -601,9 +631,11 @@ let can_zoom_current_view m =
     | Nav.Keepers -> Option.is_some (Fleet_store.selected_keeper_summary m.fleet)
     | Nav.Knowledge -> (
         match m.knowledge.active_tab with
-        | Nav.Knowledge_board | Nav.Knowledge_wiki | Nav.Knowledge_memory ->
-            true
-        | Nav.Knowledge_artifacts -> false)
+        | Nav.Knowledge_board
+        | Nav.Knowledge_wiki
+        | Nav.Knowledge_artifacts
+        | Nav.Knowledge_memory ->
+            true)
     | Nav.Pulse | Nav.Work | Nav.Runtime | Nav.Infra -> false
 
 let focusable_pane_count m =
@@ -622,21 +654,41 @@ let focusable_pane_count m =
         | Nav.System_gate _ ) ->
         1
     | None -> (
-        if Option.is_some (active_dive m) || (m.nav.zoomed && can_zoom_current_view m)
-        then 1
-        else
+        match active_dive m with
+        | Some (Nav.Dive_keeper { tab = Nav.Keeper_tool_calls; _ }) -> 2
+        | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_context }) ->
+            let ks = Keeper_context_store.get_keeper ~keeper:name m.keeper_context in
+            if
+              Keeper_context_store.equal_context_subtab ks.subtab
+                Keeper_context_store.Ctx_exact_input
+            then 2
+            else 1
+        | Some
+            ( Nav.Dive_keeper
+                {
+                  tab =
+                    ( Nav.Keeper_chat
+                    | Nav.Keeper_memory
+                    | Nav.Keeper_work_candle
+                    | Nav.Keeper_sandbox
+                    | Nav.Keeper_config );
+                  _;
+                }
+            | Nav.Dive_work _
+            | Nav.Dive_knowledge _
+            | Nav.Dive_runtime _
+            | Nav.Dive_infra _ ) ->
+            1
+        | None ->
+            if m.nav.zoomed && can_zoom_current_view m then 1
+            else
           match m.nav.workspace with
           | Nav.Pulse -> List.length (pulse_panes m)
           | Nav.Work -> (
               match m.work.active_tab with
               | Nav.Work_pipeline ->
                   if work_pipeline_has_linked_card m then 3 else 2
-              | Nav.Work_tasks_schedules ->
-                  if
-                    Work_store.filtered_tasks m.work <> []
-                    && Work_store.filtered_schedules m.work <> []
-                  then 2
-                  else 1
+              | Nav.Work_tasks | Nav.Work_schedules -> 1
               | Nav.Work_inbox ->
                   if
                     Attention.filtered_items ~query:m.work.filter_query
@@ -656,9 +708,16 @@ let focusable_pane_count m =
           | Nav.Runtime -> (
               match m.runtime.active_tab with
               | Nav.Runtime_efficiency_spend -> 1
+              | Nav.Runtime_tools_usage -> (
+                  match m.runtime.tools_subview with
+                  | Runtime_store.Tools_keeper_skills -> 2
+                  | Runtime_store.Tools_usage_calls
+                  | Runtime_store.Tools_catalog_tree ->
+                      1)
               | Nav.Runtime_quotas_credits
               | Nav.Runtime_failover_lanes
-              | Nav.Runtime_tools_connectors
+              | Nav.Runtime_fusion
+              | Nav.Runtime_connectors
               | Nav.Runtime_addons_browser ->
                   2)
           | Nav.Infra -> (
@@ -782,6 +841,8 @@ let active_focus_label m =
             Say.make ~ko:"작업 상세" ~en:"WORK DIVE"
         | Some (Nav.Dive_knowledge _) ->
             Say.make ~ko:"지식 상세" ~en:"KNOWLEDGE DIVE"
+        | Some (Nav.Dive_runtime (Nav.Tool_dive name)) ->
+            Say.make ~ko:("도구 · " ^ name) ~en:("TOOL · " ^ name)
         | Some (Nav.Dive_infra (Nav.Lane_dive id)) ->
             Say.make ~ko:("레인 · " ^ id) ~en:("LANE · " ^ id)
         | Some (Nav.Dive_infra (Nav.Sandbox_dive _ | Nav.Incident_dive _)) ->
@@ -802,10 +863,14 @@ let active_focus_label m =
                     | 1 when work_pipeline_has_linked_card m ->
                         pane_prefix ~ko:"검증" ~en:"Verifs"
                     | _ -> pane_prefix ~ko:"목표 상세" ~en:"Detail")
-                | Nav.Work_tasks_schedules ->
+                | Nav.Work_tasks ->
                     if m.nav.pane_index = 1 then
-                      pane_prefix ~ko:"예약 일정" ~en:"Schedules"
+                      pane_prefix ~ko:"작업 상세" ~en:"Task Detail"
                     else pane_prefix ~ko:"작업 목록" ~en:"Tasks"
+                | Nav.Work_schedules ->
+                    if m.nav.pane_index = 1 then
+                      pane_prefix ~ko:"일정 상세" ~en:"Schedule Detail"
+                    else pane_prefix ~ko:"예약 일정" ~en:"Schedules"
                 | Nav.Work_inbox ->
                     if m.nav.pane_index = 1 then
                       pane_prefix ~ko:"인스펙터" ~en:"Inspector"
@@ -846,10 +911,18 @@ let active_focus_label m =
                     if m.nav.pane_index = 1 then
                       pane_prefix ~ko:"레인 상세" ~en:"Lane Health"
                     else pane_prefix ~ko:"페일오버" ~en:"Lanes"
-                | Nav.Runtime_tools_connectors ->
+                | Nav.Runtime_fusion ->
                     if m.nav.pane_index = 1 then
-                      pane_prefix ~ko:"커넥터·MCP" ~en:"Connectors"
-                    else pane_prefix ~ko:"도구 목록" ~en:"Tools"
+                      pane_prefix ~ko:"퓨전 상세" ~en:"Fusion Detail"
+                    else pane_prefix ~ko:"퓨전 실행" ~en:"Fusion"
+                | Nav.Runtime_tools_usage ->
+                    if m.nav.pane_index = 1 then
+                      pane_prefix ~ko:"도구 상세" ~en:"Tool Detail"
+                    else pane_prefix ~ko:"도구·사용량" ~en:"Tools"
+                | Nav.Runtime_connectors ->
+                    if m.nav.pane_index = 1 then
+                      pane_prefix ~ko:"MCP·브라우저" ~en:"MCP & Browser"
+                    else pane_prefix ~ko:"커넥터" ~en:"Connectors"
                 | Nav.Runtime_addons_browser ->
                     if m.nav.pane_index = 1 then
                       pane_prefix ~ko:"브라우저·탭" ~en:"Browser"
@@ -880,6 +953,8 @@ let is_keeper_config_active m =
           {
             tab =
               ( Nav.Keeper_chat
+              | Nav.Keeper_context
+              | Nav.Keeper_tool_calls
               | Nav.Keeper_memory
               | Nav.Keeper_work_candle
               | Nav.Keeper_sandbox );
@@ -887,6 +962,7 @@ let is_keeper_config_active m =
           }
       | Nav.Dive_work _
       | Nav.Dive_knowledge _
+      | Nav.Dive_runtime _
       | Nav.Dive_infra _ ) ->
       false
   | None ->
@@ -944,6 +1020,30 @@ let inline_modal_for kind =
             secret = false;
           };
         ]
+    | Nav.Harness_overrule notes_hash ->
+        [
+          {
+            key = "notes_hash";
+            label = Say.make ~ko:"노트 해시 (64 hex)" ~en:"Notes hash (64 hex)";
+            value = notes_hash;
+            required = true;
+            secret = false;
+          };
+          {
+            key = "verdict";
+            label = Say.make ~ko:"판정 (approve/reject)" ~en:"Verdict (approve/reject)";
+            value = "approve";
+            required = true;
+            secret = false;
+          };
+          {
+            key = "reason";
+            label = Say.make ~ko:"판정 재정의 사유" ~en:"Overrule reason";
+            value = "";
+            required = true;
+            secret = false;
+          };
+        ]
     | Nav.Task_cancel _ ->
         [
           {
@@ -992,7 +1092,7 @@ let inline_modal_for kind =
         [
           {
             key = "connector";
-            label = Say.make ~ko:"커넥터 종류" ~en:"Connector kind";
+            label = Say.make ~ko:"커넥터 이름 (예: discord)" ~en:"Connector name (e.g. discord)";
             value = "";
             required = true;
             secret = false;
@@ -1053,6 +1153,16 @@ let inline_modal_for kind =
             secret = false;
           };
         ]
+    | Nav.Board_comment _ ->
+        [
+          {
+            key = "content";
+            label = Say.make ~ko:"댓글 내용" ~en:"Comment";
+            value = "";
+            required = true;
+            secret = false;
+          };
+        ]
   in
   { kind; fields; active_field = 0; submitting = false; error = None }
 
@@ -1094,6 +1204,7 @@ let is_viewing_wiki_slug ~slug m =
   | Some
       ( Nav.Dive_keeper _
       | Nav.Dive_work _
+      | Nav.Dive_runtime _
       | Nav.Dive_infra _
       | Nav.Dive_knowledge
           (Nav.Thread_dive _ | Nav.Memory_diff_dive _ | Nav.Artifact_dive _) )
@@ -1191,6 +1302,7 @@ let mark_all_domains_stale m =
   {
     m with
     fleet = Fleet_store.mark_stale_all m.fleet;
+    keeper_context = Keeper_context_store.mark_stale_all m.keeper_context;
     work = Work_store.mark_stale_all m.work;
     knowledge = Knowledge_store.mark_stale_all m.knowledge;
     runtime = Runtime_store.mark_stale_all m.runtime;
@@ -1531,9 +1643,11 @@ let active_view_ssot_mode m =
         match m.nav.workspace with
         | Nav.Runtime -> (
             match m.runtime.active_tab with
-            | Nav.Runtime_efficiency_spend | Nav.Runtime_tools_connectors -> true
+            | Nav.Runtime_efficiency_spend | Nav.Runtime_tools_usage -> true
             | Nav.Runtime_quotas_credits
             | Nav.Runtime_failover_lanes
+            | Nav.Runtime_fusion
+            | Nav.Runtime_connectors
             | Nav.Runtime_addons_browser ->
                 false)
         | Nav.Infra -> (
@@ -1568,6 +1682,31 @@ let active_view_ssot_mode m =
           freshness = m.freshness.fleet;
           live_count;
           planned_count;
+        }
+  | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_context }) ->
+      let ks = Keeper_context_store.get_keeper ~keeper:name m.keeper_context in
+      Synced_snapshot
+        {
+          observer = m.freshness.observer;
+          observed_at =
+            latest_observed_at
+              [
+                observed_at_opt ks.turn_records;
+                observed_at_opt ks.next_request;
+                observed_at_opt ks.cache_outcome;
+              ];
+        }
+  | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_tool_calls }) ->
+      let ks = Keeper_context_store.get_keeper ~keeper:name m.keeper_context in
+      Synced_snapshot
+        {
+          observer = m.freshness.observer;
+          observed_at =
+            latest_observed_at
+              [
+                observed_at_opt ks.tool_stats;
+                observed_at_opt ks.tool_calls;
+              ];
         }
   | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory }) ->
       Synced_snapshot
@@ -1668,6 +1807,17 @@ let active_view_ssot_mode m =
                      ~window:(Knowledge_store.Window_revs { from_rev; to_rev })
                      m.knowledge);
             })
+  | Some (Nav.Dive_runtime (Nav.Tool_dive _)) ->
+      Synced_snapshot
+        {
+          observer = m.freshness.observer;
+          observed_at =
+            latest_observed_at
+              [
+                observed_at_opt m.runtime.tool_detail_series;
+                observed_at_opt m.runtime.tools_dashboard;
+              ];
+        }
   | Some (Nav.Dive_infra target) -> (
       match target with
       | Nav.Sandbox_dive keeper ->
@@ -1716,12 +1866,8 @@ let active_view_ssot_mode m =
                     observed_at_opt m.work.planning;
                     observed_at_opt m.work.verifications;
                   ]
-            | Nav.Work_tasks_schedules ->
-                latest_observed_at
-                  [
-                    observed_at_opt m.work.planning;
-                    observed_at_opt m.work.schedules;
-                  ]
+            | Nav.Work_tasks -> observed_at_opt m.work.planning
+            | Nav.Work_schedules -> observed_at_opt m.work.schedules
             | Nav.Work_inbox ->
                 latest_observed_at
                   [
@@ -1789,7 +1935,7 @@ let active_view_ssot_mode m =
                   live_count;
                   planned_count;
                 }
-          | Nav.Runtime_tools_connectors ->
+          | Nav.Runtime_tools_usage ->
               Live_sse
                 {
                   stream_name = "tool-metrics";
@@ -1818,6 +1964,28 @@ let active_view_ssot_mode m =
                       [
                         observed_at_opt m.runtime.runtime_resolved;
                         observed_at_opt m.runtime.runtime_probe;
+                      ];
+                }
+          | Nav.Runtime_fusion ->
+              Synced_snapshot
+                {
+                  observer = m.freshness.observer;
+                  observed_at =
+                    latest_observed_at
+                      [
+                        observed_at_opt m.runtime.fusion_runs;
+                        observed_at_opt m.runtime.exact_lane_runs;
+                      ];
+                }
+          | Nav.Runtime_connectors ->
+              Synced_snapshot
+                {
+                  observer = m.freshness.observer;
+                  observed_at =
+                    latest_observed_at
+                      [
+                        observed_at_opt m.runtime.connectors;
+                        observed_at_opt m.runtime.mcp_clients;
                       ];
                 }
           | Nav.Runtime_addons_browser ->
@@ -1936,6 +2104,7 @@ let focused_artifact m =
   | Some
       ( Nav.Dive_keeper _
       | Nav.Dive_work _
+      | Nav.Dive_runtime _
       | Nav.Dive_infra _
       | Nav.Dive_knowledge
           (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Memory_diff_dive _) )

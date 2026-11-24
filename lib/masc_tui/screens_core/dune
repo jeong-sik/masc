@@ -10,4 +10,5 @@
   masc_tui_ui
   masc_tui_protocol
   masc_tui_store
+  masc.masc_types
   yojson))

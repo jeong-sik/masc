@@ -47,10 +47,22 @@ let tool_series_path ~bucket ~since_hours =
   Printf.sprintf "/api/v1/tool-metrics/series?bucket=%s&since_hours=%d" b
     (max 1 since_hours)
 
+let tool_series_filtered_path ~bucket ~since_hours ?tool () =
+  let base = tool_series_path ~bucket ~since_hours in
+  match tool with
+  | Some t when not (String.equal (String.trim t) "") ->
+      base ^ "&tool=" ^ percent_encode (String.trim t)
+  | Some _ | None -> base
+
 let dashboard_tools_path ?keeper () =
   match keeper with
   | None -> "/api/v1/dashboard/tools"
   | Some k -> "/api/v1/dashboard/tools?keeper=" ^ percent_encode k
+
+let skills_path = "/api/v1/skills"
+
+let connector_unbind_path ~connector =
+  "/api/v1/gate/connector/unbind?name=" ^ percent_encode (String.trim connector)
 
 let fusion_runs_path = "/api/v1/dashboard/fusion-runs"
 
@@ -69,7 +81,7 @@ let connectors_path = "/api/v1/gate/connectors"
 (* [handle_gate_connector_bind] reads the connector from the [name] query
    parameter and refuses a request without it. *)
 let connector_bind_path ~connector =
-  "/api/v1/gate/connector/bind?name=" ^ percent_encode connector
+  "/api/v1/gate/connector/bind?name=" ^ percent_encode (String.trim connector)
 let browser_lane_path = "/api/v1/dashboard/browser-lane/clients"
 let browser_lane_read_path = "/api/v1/dashboard/browser-lane/read"
 let lane_addons_path = "/api/v1/lane-addons"
@@ -1998,12 +2010,654 @@ let decode_tools_catalog ~observed_at json =
     let* tools = decode_list "tools" decode_tool tool_items in
     Ok (Tools_ready tools)
 
+type tool_series_failure_classes = {
+  dependency_unavailable : int;
+  policy_rejection : int;
+  runtime_failure : int;
+  workflow_rejection : int;
+  operator_cancelled : int;
+  unclassified : int;
+}
+
+type tool_series_summary = {
+  tool_filter : string option;
+  total_calls : int;
+  total_failures : int;
+  total_deferred : int;
+  p50_ms : float option;
+  p95_ms : float option;
+  failure_classes : tool_series_failure_classes;
+  series : tool_series;
+}
+
+let decode_tool_series_summary json =
+  let* series = decode_tool_series json in
+  let* _, body = unwrap_v2_or_raw json in
+  let* tool_filter = optional_nonblank_string body "tool" in
+  let int_or obj k =
+    match optional_int_field obj k with Ok (Some n) -> max 0 n | Ok None | Error _ -> 0
+  in
+  let total_calls, total_failures, total_deferred, p50_ms, p95_ms, failure_classes =
+    match optional_object_field body "total" with
+    | Ok (Some tot) ->
+        let fc =
+          match optional_object_field tot "failure_classes" with
+          | Ok (Some obj) ->
+              {
+                dependency_unavailable = int_or obj "dependency_unavailable";
+                policy_rejection = int_or obj "policy_rejection";
+                runtime_failure = int_or obj "runtime_failure";
+                workflow_rejection = int_or obj "workflow_rejection";
+                operator_cancelled = int_or obj "operator_cancelled";
+                unclassified = int_or tot "failure_unclassified_count";
+              }
+          | Ok None | Error _ ->
+              {
+                dependency_unavailable = 0;
+                policy_rejection = 0;
+                runtime_failure = 0;
+                workflow_rejection = 0;
+                operator_cancelled = 0;
+                unclassified = int_or tot "failure_unclassified_count";
+              }
+        in
+        let p50 =
+          match optional_finite_float tot "p50_ms" with
+          | Ok v -> v
+          | Error _ -> None
+        in
+        let p95 =
+          match optional_finite_float tot "p95_ms" with
+          | Ok v -> v
+          | Error _ -> None
+        in
+        ( int_or tot "call_count",
+          int_or tot "failure_count",
+          int_or tot "deferred_count",
+          p50,
+          p95,
+          fc )
+    | Ok None | Error _ ->
+        let c, f, d, p95 =
+          List.fold_left
+            (fun (c, f, d, pmax) (b : tool_series_bucket) ->
+              match b.activity with
+              | Series_idle -> (c, f, d, pmax)
+              | Series_active { calls; failures; deferred; p95_ms } ->
+                  let next_p =
+                    match pmax with
+                    | None -> Some p95_ms
+                    | Some cur -> Some (Float.max cur p95_ms)
+                  in
+                  (c + calls, f + failures, d + deferred, next_p))
+            (0, 0, 0, None) series.buckets
+        in
+        ( c,
+          f,
+          d,
+          None,
+          p95,
+          {
+            dependency_unavailable = 0;
+            policy_rejection = 0;
+            runtime_failure = 0;
+            workflow_rejection = 0;
+            operator_cancelled = 0;
+            unclassified = 0;
+          } )
+  in
+  Ok
+    {
+      tool_filter;
+      total_calls;
+      total_failures;
+      total_deferred;
+      p50_ms;
+      p95_ms;
+      failure_classes;
+      series;
+    }
+
+type tool_catalog_entry = {
+  name : string;
+  description : string option;
+  public_names : string list;
+  calls_count : int Observed.t;
+  failure_count : int;
+  failure_rate_pct : float Observed.t;
+  p95_ms : float option;
+  direct_call_allowed : bool option;
+  surfaces : string list;
+  domain : string;
+  family : string;
+  doc_refs : string list;
+}
+
+type effective_keeper_tool_entry = {
+  name : string;
+  origin : string;
+}
+
+type effective_keeper_surface =
+  | Keeper_surface_unavailable of {
+      keeper_name : string;
+      reason : string;
+      detail : string;
+    }
+  | Keeper_surface_available of {
+      keeper_name : string;
+      runtime_id : string;
+      tool_delivery : string;
+      tool_surface_bytes : int;
+      skill_tool_surface_bytes : int;
+      skill_discovery_bytes : int;
+      skill_body_bytes : int;
+      tool_surface_sha256 : string option;
+      tools : effective_keeper_tool_entry list;
+      skills_left_out : string list;
+      lane_addon_conflicts : string list;
+    }
+
+type tools_dashboard_snapshot = {
+  entries : tool_catalog_entry list;
+  total_calls : int;
+  distinct_tools_called : int;
+  registered_count : int;
+  effective_keeper_surface : effective_keeper_surface option;
+  volume_gc_summary : string option;
+  keeper_cleanup_summary : string option;
+}
+
+let classify_tool_domain_family name =
+  let lc = String.lowercase_ascii (String.trim name) in
+  let has p = String.starts_with ~prefix:p lc in
+  if has "masc_board" || has "board_" then ("board", "board")
+  else if has "masc_goal" || has "masc_task" || has "masc_schedule" || has "masc_verify" || has "masc_verif" || has "masc_plan" then
+    let fam =
+      if has "masc_goal" then "goals"
+      else if has "masc_task" then "tasks"
+      else if has "masc_schedule" then "schedules"
+      else "verification"
+    in
+    ("work", fam)
+  else if has "masc_run" || has "execute" || has "bash" || has "shell" || has "read" || has "write" || has "edit" || has "grep" || has "glob" || has "web_" || has "browser_" then
+    let fam =
+      if has "browser_" || has "web_" then "web & browser"
+      else if has "read" || has "write" || has "edit" || has "grep" || has "glob" then "files"
+      else "exec"
+    in
+    ("run", fam)
+  else if has "keeper_" && (has "keeper_memory" || has "keeper_journal" || has "keeper_note" || has "keeper_self") then
+    ("keeper self", "memory & reflection")
+  else if has "keeper_" || has "masc_keeper" then ("keeper ops", "keeper")
+  else if has "masc_" then
+    let rest = String.sub lc 5 (String.length lc - 5) in
+    let fam =
+      match String.index_opt rest '_' with
+      | Some idx when idx > 0 -> String.sub rest 0 idx
+      | Some _ | None -> rest
+    in
+    ("system", fam)
+  else ("unsorted", "general")
+
+type usage_row = {
+  u_name : string;
+  u_public_names : string list;
+  u_calls : int;
+  u_failures : int;
+  u_p95_ms : float option;
+}
+
+let decode_usage_row json =
+  let* u_name = required_nonblank_string json "name" in
+  let* u_public_names = optional_string_list json "public_names" in
+  let* u_calls = required_nonnegative_int_field json "call_count" in
+  let* fail_opt = optional_int_field json "failure_count" in
+  let u_failures = max 0 (Option.value ~default:0 fail_opt) in
+  let* u_p95_ms = optional_finite_float json "p95_ms" in
+  Ok { u_name; u_public_names; u_calls; u_failures; u_p95_ms }
+
+let decode_effective_keeper_surface json =
+  match json with
+  | `Null -> Ok None
+  | `Assoc _ -> (
+      let* status = required_nonblank_string json "status" in
+      match status with
+      | "unavailable" ->
+          let* keeper_name = required_nonblank_string json "keeper_name" in
+          let* reason = optional_nonblank_string json "reason" in
+          let* detail = optional_nonblank_string json "detail" in
+          Ok
+            (Some
+               (Keeper_surface_unavailable
+                  {
+                    keeper_name;
+                    reason = Option.value ~default:"unavailable" reason;
+                    detail = Option.value ~default:"" detail;
+                  }))
+      | "available" ->
+          let* keeper_name = required_nonblank_string json "keeper_name" in
+          let* runtime_id_opt = optional_nonblank_string json "runtime_id" in
+          let runtime_id = Option.value ~default:"" runtime_id_opt in
+          let tool_delivery =
+            match member "tool_delivery" json with
+            | `String s -> s
+            | `Assoc _ as obj -> (
+                match optional_nonblank_string obj "status" with
+                | Ok (Some st) -> (
+                    match optional_nonblank_string obj "reason" with
+                    | Ok (Some r) -> Printf.sprintf "%s (%s)" st r
+                    | Ok None | Error _ -> st)
+                | Ok None | Error _ -> (
+                    match optional_nonblank_string obj "mode" with
+                    | Ok (Some m) -> m
+                    | Ok None | Error _ -> (
+                        match optional_nonblank_string obj "kind" with
+                        | Ok (Some k) -> k
+                        | Ok None | Error _ -> "configured")))
+            | _ -> "unknown"
+          in
+          let int_or k =
+            match optional_int_field json k with
+            | Ok (Some n) -> max 0 n
+            | Ok None | Error _ -> 0
+          in
+          let* tool_surface_sha256 =
+            optional_nonblank_string json "tool_surface_sha256"
+          in
+          let* raw_tools = optional_list_field json "tools" in
+          let tools =
+            List.filter_map
+              (fun item ->
+                match optional_nonblank_string item "name" with
+                | Ok (Some name) ->
+                    let origin =
+                      match member "origin" item with
+                      | `String s -> s
+                      | `Assoc _ as obj -> (
+                          match optional_nonblank_string obj "kind" with
+                          | Ok (Some k) -> k
+                          | Ok None | Error _ -> Yojson.Safe.to_string obj)
+                      | _ -> "descriptor"
+                    in
+                    Some { name; origin }
+                | Ok None | Error _ -> None)
+              raw_tools
+          in
+          let* skills_left_out = optional_string_list json "skills_left_out" in
+          let* raw_conflicts = optional_list_field json "lane_addon_conflicts" in
+          let lane_addon_conflicts =
+            List.filter_map
+              (fun c ->
+                match optional_nonblank_string c "name" with
+                | Ok (Some n) -> Some n
+                | Ok None | Error _ -> None)
+              raw_conflicts
+          in
+          Ok
+            (Some
+               (Keeper_surface_available
+                  {
+                    keeper_name;
+                    runtime_id;
+                    tool_delivery;
+                    tool_surface_bytes = int_or "tool_surface_bytes";
+                    skill_tool_surface_bytes = int_or "skill_tool_surface_bytes";
+                    skill_discovery_bytes = int_or "skill_discovery_bytes";
+                    skill_body_bytes = int_or "skill_body_bytes";
+                    tool_surface_sha256;
+                    tools;
+                    skills_left_out;
+                    lane_addon_conflicts;
+                  }))
+      | other -> Error ("unknown effective_keeper_surface status: " ^ other))
+  | bad -> field_type_error "effective_keeper_surface" "object or null" bad
+
+let decode_tools_dashboard ~observed_at json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* inv_opt = optional_object_field body "tool_inventory" in
+  let* usage_opt = optional_object_field body "tool_usage" in
+  let* eff_surface =
+    if has_field body "effective_keeper_surface" then
+      decode_effective_keeper_surface (member "effective_keeper_surface" body)
+    else Ok None
+  in
+  let summary_of_obj keys =
+    let rec find = function
+      | [] -> None
+      | key :: rest -> (
+          match optional_object_field body key with
+          | Ok (Some obj) -> (
+              match optional_nonblank_string obj "outcome" with
+              | Ok (Some s) -> Some s
+              | Ok None | Error _ -> (
+                  match optional_nonblank_string obj "status" with
+                  | Ok (Some s) -> Some s
+                  | Ok None | Error _ -> (
+                      match optional_nonblank_string obj "state" with
+                      | Ok (Some s) -> Some s
+                      | Ok None | Error _ -> (
+                          match optional_nonblank_string obj "kind" with
+                          | Ok (Some s) -> Some s
+                          | Ok None | Error _ -> Some "reported"))))
+          | Ok None | Error _ -> find rest)
+    in
+    find keys
+  in
+  let volume_gc_summary =
+    summary_of_obj [ "sandbox_volume_gc_report"; "volume_gc_periodic" ]
+  in
+  let keeper_cleanup_summary =
+    summary_of_obj [ "keeper_cleanup"; "keeper_cleanup_status" ]
+  in
+  match inv_opt with
+  | Some inv ->
+      let* raw_tools = required_list_field inv "tools" in
+      let* usage_rows, total_calls, distinct_tools_called, registered_count =
+        match usage_opt with
+        | None -> Ok ([], 0, 0, List.length raw_tools)
+        | Some u ->
+            let* by_tool_raw = optional_list_field u "by_tool" in
+            let* by_tool = decode_list "by_tool" decode_usage_row by_tool_raw in
+            let* tc = optional_int_field u "total_calls" in
+            let* dc = optional_int_field u "distinct_tools_called" in
+            let* rc = optional_int_field u "registered_count" in
+            Ok
+              ( by_tool,
+                Option.value ~default:0 tc,
+                Option.value ~default:(List.length by_tool) dc,
+                Option.value ~default:(List.length raw_tools) rc )
+      in
+      let usage_tbl = Hashtbl.create (max 16 (List.length usage_rows * 2)) in
+      List.iter
+        (fun (u : usage_row) ->
+          Hashtbl.replace usage_tbl u.u_name u;
+          List.iter (fun pn -> Hashtbl.replace usage_tbl pn u) u.u_public_names)
+        usage_rows;
+      let decode_inv_item item =
+        let* name = required_nonblank_string item "name" in
+        let* description = optional_nonblank_string item "description" in
+        let* direct_call_allowed = optional_bool_field item "direct_call_allowed" in
+        let* surfaces = optional_string_list item "surfaces" in
+        let* doc_refs = optional_string_list item "doc_refs" in
+        let* domain_opt = optional_nonblank_string item "domain" in
+        let* family_opt = optional_nonblank_string item "family" in
+        let def_dom, def_fam = classify_tool_domain_family name in
+        let domain = Option.value ~default:def_dom domain_opt in
+        let family = Option.value ~default:def_fam family_opt in
+        let calls_count, failure_count, failure_rate_pct, p95_ms, public_names =
+          match Hashtbl.find_opt usage_tbl name with
+          | Some u ->
+              let rate =
+                if u.u_calls > 0 then
+                  float_of_int u.u_failures *. 100.0 /. float_of_int u.u_calls
+                else 0.0
+              in
+              ( Observed.value ~observed_at u.u_calls,
+                u.u_failures,
+                Observed.value ~observed_at rate,
+                u.u_p95_ms,
+                u.u_public_names )
+          | None ->
+              ( Observed.value ~observed_at 0,
+                0,
+                Observed.value ~observed_at 0.0,
+                None,
+                [] )
+        in
+        Ok
+          {
+            name;
+            description;
+            public_names;
+            calls_count;
+            failure_count;
+            failure_rate_pct;
+            p95_ms;
+            direct_call_allowed;
+            surfaces;
+            domain;
+            family;
+            doc_refs;
+          }
+      in
+      let* entries = decode_list "tool_inventory.tools" decode_inv_item raw_tools in
+      Ok
+        {
+          entries;
+          total_calls;
+          distinct_tools_called;
+          registered_count;
+          effective_keeper_surface = eff_surface;
+          volume_gc_summary;
+          keeper_cleanup_summary;
+        }
+  | None ->
+      (* Graceful fallback for legacy flat "tools" fixture *)
+      let* items = required_list_field body "tools" in
+      let decode_flat item =
+        let* name = required_nonblank_string item "name" in
+        let* description = optional_nonblank_string item "description" in
+        let* calls_count = observed_int ~observed_at item "calls_24h" in
+        let* failure_rate_pct = observed_float ~observed_at item "failure_rate_pct" in
+        let* p95_ms = optional_finite_float item "p95_ms" in
+        let* direct_call_allowed = optional_bool_field item "direct_call_allowed" in
+        let* surfaces = optional_string_list item "surfaces" in
+        let domain, family = classify_tool_domain_family name in
+        let failure_count =
+          match Observed.to_option calls_count, Observed.to_option failure_rate_pct with
+          | Some c, Some pct -> int_of_float (Float.round (float_of_int c *. pct /. 100.0))
+          | _ -> 0
+        in
+        Ok
+          {
+            name;
+            description;
+            public_names = [];
+            calls_count;
+            failure_count;
+            failure_rate_pct;
+            p95_ms;
+            direct_call_allowed;
+            surfaces;
+            domain;
+            family;
+            doc_refs = [];
+          }
+      in
+      let* entries = decode_list "tools" decode_flat items in
+      let total_calls =
+        List.fold_left
+          (fun acc (e : tool_catalog_entry) ->
+            acc + Option.value ~default:0 (Observed.to_option e.calls_count))
+          0 entries
+      in
+      Ok
+        {
+          entries;
+          total_calls;
+          distinct_tools_called = List.length entries;
+          registered_count = List.length entries;
+          effective_keeper_surface = eff_surface;
+          volume_gc_summary;
+          keeper_cleanup_summary;
+        }
+
+type skill_surface_entry = {
+  reference : string;
+  kind : string;
+  summary : string option;
+  error : string option;
+}
+
+type skills_snapshot = {
+  state : string;
+  snapshot_revision : string option;
+  surfaces : skill_surface_entry list;
+  shadows : string list;
+  rejections : string list;
+}
+
+let string_of_skill_identity obj =
+  match optional_nonblank_string obj "name" with
+  | Ok (Some name) -> (
+      match optional_nonblank_string obj "package_id" with
+      | Ok (Some pkg) when not (String.equal pkg name) ->
+          Printf.sprintf "%s (%s)" name pkg
+      | Ok _ | Error _ -> name)
+  | Ok None | Error _ -> (
+      match optional_nonblank_string obj "package_id" with
+      | Ok (Some pkg) -> pkg
+      | Ok None | Error _ -> (
+          match optional_nonblank_string obj "source_id" with
+          | Ok (Some src) -> src
+          | Ok None | Error _ -> "skill"))
+
+let string_of_ref_or_obj json =
+  match json with
+  | `String s -> s
+  | `Assoc _ -> (
+      match optional_object_field json "identity" with
+      | Ok (Some id_obj) -> string_of_skill_identity id_obj
+      | Ok None | Error _ -> (
+          match optional_nonblank_string json "name" with
+          | Ok (Some n) -> n
+          | Ok None | Error _ -> (
+              match optional_nonblank_string json "identity" with
+              | Ok (Some id) -> id
+              | Ok None | Error _ -> (
+                  match optional_nonblank_string json "package_id" with
+                  | Ok (Some pkg) -> (
+                      match optional_object_field json "reason" with
+                      | Ok (Some r_obj) -> (
+                          match optional_nonblank_string r_obj "kind" with
+                          | Ok (Some rk) -> Printf.sprintf "%s: %s" pkg rk
+                          | Ok None | Error _ -> pkg)
+                      | Ok None | Error _ -> pkg)
+                  | Ok None | Error _ -> (
+                      match optional_nonblank_string json "source_id" with
+                      | Ok (Some src) -> (
+                          match optional_object_field json "reason" with
+                          | Ok (Some r_obj) -> (
+                              match optional_nonblank_string r_obj "kind" with
+                              | Ok (Some rk) -> Printf.sprintf "%s: %s" src rk
+                              | Ok None | Error _ -> src)
+                          | Ok None | Error _ -> src)
+                      | Ok None | Error _ -> (
+                          match optional_nonblank_string json "id" with
+                          | Ok (Some id) -> id
+                          | Ok None | Error _ -> "entry"))))))
+  | other -> Yojson.Safe.to_string other
+
+let decode_skill_profile_summary item =
+  let extract_from obj =
+    match optional_nonblank_string obj "summary" with
+    | Ok (Some s) -> Some s
+    | Ok None | Error _ -> (
+        match optional_nonblank_string obj "description" with
+        | Ok (Some d) -> Some d
+        | Ok None | Error _ ->
+            let exec_s =
+              match optional_nonblank_string obj "execution" with
+              | Ok v -> v
+              | Error _ -> None
+            in
+            let act_s =
+              match optional_nonblank_string obj "activation_tool" with
+              | Ok v -> v
+              | Error _ -> None
+            in
+            let bytes_s =
+              match optional_object_field obj "context" with
+              | Ok (Some ctx) -> (
+                  match optional_int_field ctx "body_bytes" with
+                  | Ok (Some b) -> Some (Printf.sprintf "%dB" b)
+                  | Ok None | Error _ -> None)
+              | Ok None | Error _ -> None
+            in
+            let parts = List.filter_map Fun.id [ exec_s; act_s; bytes_s ] in
+            if parts = [] then None else Some (String.concat " · " parts))
+  in
+  match optional_object_field item "profile" with
+  | Ok (Some p) -> (
+      match extract_from p with
+      | Some _ as hit -> hit
+      | None -> extract_from item)
+  | Ok None | Error _ -> extract_from item
+
+let decode_skills_snapshot json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* state = required_nonblank_string body "state" in
+  let* snap_opt = optional_object_field body "snapshot" in
+  let snapshot_revision, shadows, rejections =
+    match snap_opt with
+    | None -> (None, [], [])
+    | Some s ->
+        let rev =
+          match optional_nonblank_string s "snapshot_revision" with
+          | Ok v -> v
+          | Error _ -> None
+        in
+        let sh =
+          match optional_list_field s "shadows" with
+          | Ok xs -> List.map string_of_ref_or_obj xs
+          | Error _ -> []
+        in
+        let rej =
+          match optional_list_field s "rejections" with
+          | Ok xs -> List.map string_of_ref_or_obj xs
+          | Error _ -> []
+        in
+        (rev, sh, rej)
+  in
+  let* raw_surfaces = optional_list_field body "surfaces" in
+  let surfaces =
+    List.filter_map
+      (fun item ->
+        let kind_opt =
+          match optional_nonblank_string item "kind" with
+          | Ok (Some k) -> Some k
+          | Ok None | Error _ -> (
+              match optional_object_field item "profile" with
+              | Ok (Some p) -> (
+                  match optional_nonblank_string p "kind" with
+                  | Ok (Some k) -> Some k
+                  | Ok None | Error _ -> (
+                      match optional_nonblank_string p "execution" with
+                      | Ok v -> v
+                      | Error _ -> None))
+              | Ok None | Error _ -> None)
+        in
+        match kind_opt with
+        | Some kind ->
+            let reference =
+              if has_field item "reference" then
+                string_of_ref_or_obj (member "reference" item)
+              else "unknown"
+            in
+            let summary = decode_skill_profile_summary item in
+            let error =
+              match optional_nonblank_string item "error" with
+              | Ok v -> v
+              | Error _ -> None
+            in
+            Some { reference; kind; summary; error }
+        | None -> None)
+      raw_surfaces
+  in
+  Ok { state; snapshot_revision; surfaces; shadows; rejections }
+
 type connector_connection =
   | Connector_connected
   | Connector_connected_unavailable
   | Connector_disconnected
   | Connector_offline
   | Connector_stale
+
+type connector_binding = {
+  channel_id : string;
+  keeper_name : string;
+}
 
 type connector_row = {
   connector_id : string;
@@ -2012,7 +2666,19 @@ type connector_row = {
   channel : string option;
   error : string option;
   binding_count : int;
+  configured_bindings : connector_binding list;
 }
+
+let decode_connector_binding json =
+  match optional_nonblank_string json "channel_id" with
+  | Ok (Some channel_id) ->
+      let keeper_name =
+        match optional_nonblank_string json "keeper_name" with
+        | Ok (Some k) -> k
+        | Ok None | Error _ -> ""
+      in
+      Some { channel_id; keeper_name }
+  | Ok None | Error _ -> None
 
 let decode_connector_row json =
   let* connector_id = required_nonblank_string json "connector_id" in
@@ -2035,7 +2701,10 @@ let decode_connector_row json =
   in
   let* channel = optional_nonblank_string json "channel" in
   let* error = optional_nonblank_string json "error" in
-  let* bindings = optional_list_field json "configured_bindings" in
+  let* bindings_raw = optional_list_field json "configured_bindings" in
+  let configured_bindings =
+    List.filter_map decode_connector_binding bindings_raw
+  in
   Ok
     {
       connector_id;
@@ -2043,7 +2712,8 @@ let decode_connector_row json =
       connection;
       channel;
       error;
-      binding_count = List.length bindings;
+      binding_count = List.length bindings_raw;
+      configured_bindings;
     }
 
 let decode_connectors json =

@@ -4141,6 +4141,623 @@ let test_wire_chat_journal_refusals () =
   | Ok _ -> Alcotest.fail "a bare scope and the cursor pair were misread"
   | Error detail -> Alcotest.failf "a bare scope page was refused: %s" detail
 
+let test_wave2_live_wire_codecs () =
+  (* 1. Turn records (reusing live Turn_record.of_json) *)
+  let tr_json =
+    parse_json
+      {|{
+        "keeper": "alpha",
+        "count": 1,
+        "skipped_rows": 0,
+        "health": "healthy",
+        "live_turn_in_progress": false,
+        "entries": [
+          {
+            "diff_vs_prev": null,
+            "record": {
+              "execution_ids": ["exec-101"],
+            "keeper": "alpha",
+            "agent_name": "alpha",
+            "turn_kind": "direct",
+            "trace_id": "trace-abc",
+            "absolute_turn": 42,
+            "turn_ref": "trace-abc#42",
+            "blocks": [
+              { "block": "keeper_instructions", "bytes": 4200, "digest": "aabbcc11223344556677889900aabbcc11223344556677889900aabbcc112233" },
+              { "block": "active_goals", "bytes": 680, "digest": "ddeeff4455667788990011223344556677889900aabbccddeeff001122334455" }
+            ],
+            "input_components": [
+              { "component": "prompt.keeper_instructions", "bytes": 4200 },
+              { "component": "tool_schemas", "bytes": 8400 },
+              { "component": "message_user", "bytes": 320 }
+            ],
+            "request_observations": [],
+            "runtime_profile": "claude-sonnet-4",
+            "request_runtime_profile": "claude-sonnet-4",
+            "request_body_bytes": 15200,
+            "transmitted_atoms": null,
+            "total_atoms": null,
+            "model_input_measurement": null,
+            "model_input_front": null,
+            "response_observed_model_input": null,
+            "refused_model_input": null,
+            "raw_trace_run_ref": null,
+            "selected_model": "claude-sonnet-4",
+            "finish_reason": "end_turn",
+            "context_window": 200000,
+            "provider_context_window": 200000,
+            "request_latency_ms": 1240,
+            "input_tokens": 24000,
+            "cache_creation_input_tokens": 1200,
+            "cache_read_input_tokens": 18000,
+            "output_tokens": 450,
+            "usage_scope": "per_request",
+            "input_provenance": "measured_request",
+            "ts": 1795252000.0
+            }
+          }
+        ]
+      }|}
+  in
+  let tr_page =
+    expect_ok "decode_turn_records"
+      (Wire_keeper_context.decode_turn_records tr_json)
+  in
+  Alcotest.(check string) "turn_records keeper" "alpha" tr_page.keeper;
+  Alcotest.(check int) "turn_records 1 entry" 1 (List.length tr_page.entries);
+
+  (* 2. Provider input manifest (live nested wire object) + part content *)
+  let pi_json =
+    parse_json
+      {|{
+        "keeper": "alpha",
+        "trace_id": "trace-abc",
+        "absolute_turn": 42,
+        "turn_ref": "trace-abc#42",
+        "runtime_profile": "claude-sonnet-4",
+        "captured_at": 1795252000.0,
+        "wire": {
+          "phase": "settled",
+          "capture_id": "cap-42",
+          "provider": "anthropic",
+          "model": "claude-sonnet-4",
+          "http_codec": "http1",
+          "stream": true,
+          "body_bytes": 15200,
+          "body_sha256": "fedcba9876543210"
+        },
+        "parts": [
+          { "index": 0, "kind": "system_prompt", "bytes": 4200, "sha256": "1111aaaa" },
+          { "index": 1, "kind": "message", "role": "user", "bytes": 320, "sha256": "2222bbbb" },
+          { "index": 2, "kind": "tool_schema", "name": "masc_board_post", "bytes": 8400, "sha256": "3333cccc" }
+        ]
+      }|}
+  in
+  let mf =
+    expect_ok "decode_provider_input_manifest"
+      (Wire_keeper_context.decode_provider_input_manifest pi_json)
+  in
+  Alcotest.(check int) "3 provider input parts" 3 (List.length mf.parts);
+  Alcotest.(check (option int)) "live nested wire.body_bytes decoded" (Some 15200)
+    mf.wire_body_bytes;
+  Alcotest.(check (option string)) "live nested wire.provider decoded" (Some "anthropic")
+    mf.wire_provider;
+  Alcotest.(check (option string)) "live nested wire.model decoded" (Some "claude-sonnet-4")
+    mf.wire_model;
+  Alcotest.(check (option bool)) "live nested wire.stream decoded" (Some true)
+    mf.wire_stream;
+  let part_json =
+    parse_json
+      {|{
+        "keeper": "alpha",
+        "turn_ref": "trace-abc#42",
+        "part": { "index": 0, "kind": "system_prompt", "bytes": 4200, "sha256": "1111aaaa" },
+        "text": "You are alpha keeper."
+      }|}
+  in
+  let part_c =
+    expect_ok "decode_provider_input_part"
+      (Wire_keeper_context.decode_provider_input_part part_json)
+  in
+  Alcotest.(check string) "provider input part text" "You are alpha keeper."
+    part_c.text;
+
+  (* 3. Cache outcome (reusing live Keeper_cache_outcome_reading.of_json) *)
+  let co_json =
+    parse_json
+      {|{
+        "schema": "masc.keeper-cache-outcome.v1",
+        "keeper": "alpha",
+        "turn_ref": "trace-abc#42",
+        "unattributed_rows": 0,
+        "outcome": {
+          "kind": "first_request",
+          "request": {
+            "turn_ref": "trace-abc#42",
+            "runtime_id": "claude-sonnet-4",
+            "scope": "per_request",
+            "ended_at": 1795252005.0,
+            "latency_ms": 1240,
+            "cache_read_tokens": 18000,
+            "cache_creation_tokens": 1200,
+            "cache_write_lifetime": null
+          },
+          "other_runtime_since": null,
+          "earlier": {
+            "kind": "earlier",
+            "request": {
+              "turn_ref": "trace-abc#41",
+              "runtime_id": "claude-sonnet-4",
+              "scope": "per_request",
+              "ended_at": 1795251940.0,
+              "latency_ms": 980,
+              "cache_read_tokens": 17000,
+              "cache_creation_tokens": 0,
+              "cache_write_lifetime": null
+            },
+            "idle": {
+              "kind": "idle",
+              "idle_s": 63.76,
+              "lifetime": { "kind": "declared", "lifetime_s": 300.0, "check": "within" }
+            },
+            "prefix": {
+              "kind": "compared",
+              "system_changed": false,
+              "tools_changed": false,
+              "messages": { "kind": "appended", "kept": 12, "added": 2 }
+            }
+          }
+        }
+      }|}
+  in
+  let co =
+    expect_ok "decode_cache_outcome"
+      (Wire_keeper_context.decode_cache_outcome co_json)
+  in
+  Alcotest.(check string) "cache_outcome keeper" "alpha" co.keeper;
+
+  (* 4. Next request forecast + turn transcript *)
+  let nr_json =
+    parse_json
+      {|{
+        "keeper": "alpha",
+        "trace_id": "trace-abc",
+        "checkpoint_messages": 14,
+        "wake_line_bytes": 180,
+        "walk": { "lane_id": "lane-primary", "declared": ["claude-sonnet-4"] },
+        "candidates": [
+          {
+            "runtime_id": "claude-sonnet-4",
+            "lane": { "kind": "agent_core" },
+            "parts": {
+              "ok": true,
+              "reserved_measured_on_turn": 42,
+              "reserved_bytes": 12600,
+              "instructions_bytes": 4200,
+              "schemas_bytes": 8400,
+              "pinned_measured_on_turn": 42,
+              "pinned_measured_on_runtime": "claude-sonnet-4",
+              "pinned_bytes": 680,
+              "pinned_blocks": [{ "block": "active_goals", "bytes": 680 }]
+            },
+            "history_atoms": 14,
+            "carried": {
+              "first_atom": 0, "kept_atoms": 14, "transmitted_bytes": 9200,
+              "preamble_bytes": 420, "origin": { "kind": "wire_shape" }, "counted_tokens": 22500
+            },
+            "assembly": [
+              { "slot": "system_prompt", "bytes": 4200 },
+              { "slot": "tools", "bytes": 8400 },
+              { "slot": "history", "atoms": 14, "of_atoms": 14, "bytes": 9200 }
+            ],
+            "place": { "walks_at": 0, "declared_at": 0, "rest": { "kind": "serving" } }
+          }
+        ]
+      }|}
+  in
+  let nr =
+    expect_ok "decode_next_request_forecast"
+      (Wire_keeper_context.decode_next_request_forecast nr_json)
+  in
+  Alcotest.(check int) "next_request 1 candidate" 1 (List.length nr.candidates);
+
+  let tt_json =
+    parse_json
+      {|{
+        "keeper": "alpha",
+        "turn_ref": "trace-abc#42",
+        "found": true,
+        "user": [{ "role": "user", "content": "Check wave 2 status", "ts": 1795252000.0 }],
+        "assistant": [{ "role": "assistant", "content": "All green.", "ts": 1795252004.0 }]
+      }|}
+  in
+  let tt =
+    expect_ok "decode_turn_transcript"
+      (Wire_keeper_context.decode_turn_transcript tt_json)
+  in
+  Alcotest.(check bool) "turn_transcript found" true tt.found;
+
+  (* 5. Per-keeper tool stats, tool calls, tool result + unfold_json_strings *)
+  let ts_json =
+    parse_json
+      {|{
+        "keeper": "alpha",
+        "window_hours": 24,
+        "total_entries": 18,
+        "tools": [
+          { "name": "masc_board_post", "call_count": 10, "success_count": 9, "failure_count": 1,
+            "avg_duration_ms": 42, "p95_duration_ms": 110, "max_duration_ms": 200, "last_used_at": "2026-11-23T05:00:00Z" }
+        ],
+        "timeline": [{ "hour": "05:00", "call_count": 6, "error_count": 1 }]
+      }|}
+  in
+  let ts =
+    expect_ok "decode_keeper_tool_stats"
+      (Wire_keeper_context.decode_keeper_tool_stats ts_json)
+  in
+  Alcotest.(check int) "keeper tool stats 18 entries" 18 ts.total_entries;
+
+  let tc_json =
+    parse_json
+      {|{
+        "keeper": "alpha",
+        "count": 2,
+        "coverage_gaps": [],
+        "entries": [
+          {
+            "ts": 1795252001.0,
+            "tool": "masc_board_post",
+            "execution_id": "exec-101",
+            "duration_ms": 42.0,
+            "wire_outcome": "ok",
+            "disposition": "completed",
+            "input": { "payload": "{\"nested\":true,\"n\":3}" },
+            "output": "{\"post_id\":\"p-1\"}",
+            "result_bytes": 18,
+            "truncated_to": null
+          },
+          {
+            "ts": 1795252002.0,
+            "tool": "masc_shell",
+            "execution_id": "exec-102",
+            "duration_ms": 15.0,
+            "wire_outcome": "unknown",
+            "disposition": "deferred",
+            "input": { "cmd": "ls" },
+            "output": "",
+            "result_bytes": 0,
+            "truncated_to": null
+          }
+        ]
+      }|}
+  in
+  let tc =
+    expect_ok "decode_keeper_tool_calls"
+      (Wire_keeper_context.decode_keeper_tool_calls tc_json)
+  in
+  Alcotest.(check int) "keeper tool calls 2 entries" 2 (List.length tc.entries);
+  let tc_post =
+    List.find
+      (fun (e : Wire_keeper_context.tool_call_entry) ->
+        String.equal e.tool "masc_board_post")
+      tc.entries
+  in
+  let tc_shell =
+    List.find
+      (fun (e : Wire_keeper_context.tool_call_entry) ->
+        String.equal e.tool "masc_shell")
+      tc.entries
+  in
+  Alcotest.(check (option bool)) "live wire_outcome='ok' maps to ok=Some true"
+    (Some true) tc_post.ok;
+  Alcotest.(check (option int)) "live result_bytes decoded" (Some 18)
+    tc_post.original_bytes;
+  Alcotest.(check (option bool)) "live wire_outcome='unknown' maps to ok=None"
+    None tc_shell.ok;
+  Alcotest.(check (option string)) "live disposition='deferred' preserved"
+    (Some "deferred") tc_shell.disposition;
+  Alcotest.(check string) "keeper_tool_calls_path deduplicates execution_ids"
+    "/api/v1/keepers/alpha/tool-calls?execution_ids=%5B%22e1%22%2C%22e2%22%5D"
+    (Wire_keeper_context.keeper_tool_calls_path
+       ~execution_ids:[ "e1"; "e2"; "e1" ] ~keeper:"alpha" ());
+  Alcotest.(check string) "keeper_tool_result_path passes optional source_id"
+    "/api/v1/keepers/alpha/tool-result?execution_id=exec-101&offset=10&source_id=src-9"
+    (Wire_keeper_context.keeper_tool_result_path ~keeper:"alpha"
+       ~execution_id:"exec-101" ~offset:10 ~source_id:"src-9" ());
+  let unfolded = Wire_keeper_context.unfold_json_strings tc_post.input in
+  (match unfolded with
+  | `Assoc [ ("payload", `Assoc fields) ] ->
+      Alcotest.(check bool) "unfold_json_strings expands JSON-in-string" true
+        (List.mem_assoc "nested" fields)
+  | _ -> Alcotest.fail "expected unfolded nested Assoc");
+
+  let tr_res_json =
+    parse_json
+      {|{
+        "state": "page",
+        "keeper": "alpha",
+        "execution_id": "exec-101",
+        "source_id": "src-1",
+        "body_sha256": "deadbeef",
+        "recorded_bytes": 18,
+        "is_error": false,
+        "page": {
+          "offset": 0,
+          "next_offset": 18,
+          "total_bytes": 18,
+          "eof": true,
+          "content": "{\"post_id\":\"p-1\"}",
+          "encoding": "utf-8"
+        }
+      }|}
+  in
+  (match
+     expect_ok "decode_tool_result"
+       (Wire_keeper_context.decode_tool_result tr_res_json)
+   with
+  | Wire_keeper_context.Tool_result_page { execution_id = "exec-101"; eof = true; _ } -> ()
+  | _ -> Alcotest.fail "expected Tool_result_page");
+
+  (* 6. P0 LIVE /api/v1/dashboard/tools decoder (tool_inventory x tool_usage.by_tool + effective_keeper_surface) *)
+  let live_tools_json =
+    parse_json
+      {|{
+        "tool_inventory": {
+          "count": 2,
+          "tools": [
+            {
+              "name": "masc_board_post",
+              "public_names": ["board_post"],
+              "description": "Publish a board post",
+              "surfaces": ["keeper", "mcp"],
+              "direct_call_allowed": true,
+              "visibility": "public"
+            },
+            {
+              "name": "keeper_memory_search",
+              "public_names": [],
+              "description": "Search keeper memory",
+              "surfaces": ["keeper"],
+              "direct_call_allowed": true,
+              "visibility": "public"
+            }
+          ]
+        },
+        "tool_usage": {
+          "registered_count": 2,
+          "distinct_tools_called": 1,
+          "total_calls": 42,
+          "by_tool": [
+            {
+              "name": "masc_board_post",
+              "public_names": ["board_post"],
+              "call_count": 42,
+              "success_count": 40,
+              "failure_count": 2,
+              "p95_ms": 85.5
+            }
+          ]
+        },
+        "effective_keeper_surface": {
+          "status": "available",
+          "keeper_name": "alpha",
+          "runtime_id": "claude-sonnet-4",
+          "tool_delivery": { "status": "delivered" },
+          "tool_surface_bytes": 8400,
+          "skill_tool_surface_bytes": 1200,
+          "skill_discovery_bytes": 400,
+          "skill_body_bytes": 600,
+          "tools": [
+            { "name": "masc_board_post", "origin": "builtin" }
+          ]
+        },
+        "sandbox_volume_gc_report": {
+          "outcome": "skipped",
+          "ran_at": 1795251900.0,
+          "removed_count": 0,
+          "reclaimed_bytes": 0
+        },
+        "keeper_cleanup": {
+          "swept_count": 1,
+          "status": "idle"
+        }
+      }|}
+  in
+  let t0 = Clock.Mono.of_ns 10_000_000_000L in
+  let dash =
+    expect_ok "decode_tools_dashboard live shape"
+      (Wire_runtime.decode_tools_dashboard ~observed_at:t0 live_tools_json)
+  in
+  Alcotest.(check int) "live tools dashboard total_calls = 42" 42 dash.total_calls;
+  Alcotest.(check int) "live tools dashboard 2 joined entries" 2 (List.length dash.entries);
+  let e0 = List.hd dash.entries in
+  Alcotest.(check (option int)) "masc_board_post joined calls = 42" (Some 42)
+    (Observed.to_option e0.calls_count);
+  Alcotest.(check bool) "live effective_keeper_surface with tool_delivery object decoded" true
+    (match dash.effective_keeper_surface with
+    | Some
+        (Wire_runtime.Keeper_surface_available
+           {
+             keeper_name = "alpha";
+             tool_delivery = "delivered";
+             tool_surface_bytes = 8400;
+             _;
+           }) ->
+        true
+    | _ -> false);
+  Alcotest.(check (option string)) "live sandbox_volume_gc_report outcome decoded"
+    (Some "skipped") dash.volume_gc_summary;
+  Alcotest.(check (option string)) "live keeper_cleanup status decoded"
+    (Some "idle") dash.keeper_cleanup_summary;
+
+  (* Flat legacy fallback still decodes cleanly *)
+  let legacy_tools_json =
+    parse_json
+      {|{ "tools": [{ "name": "legacy_tool", "calls_24h": 7, "failure_rate_pct": 0.0 }] }|}
+  in
+  let dash_legacy =
+    expect_ok "decode_tools_dashboard legacy flat fallback"
+      (Wire_runtime.decode_tools_dashboard ~observed_at:t0 legacy_tools_json)
+  in
+  Alcotest.(check int) "legacy flat fallback 1 tool" 1 (List.length dash_legacy.entries);
+
+  (* 7. Live /api/v1/skills (nested reference.identity + profile + object rejections/shadows) *)
+  let skills_json =
+    parse_json
+      {|{
+        "state": "ready",
+        "snapshot": {
+          "snapshot_revision": "rev-7",
+          "shadows": [
+            { "name": "dup-skill", "winner": { "source_id": "ws" }, "shadowed": { "source_id": "builtin" } }
+          ],
+          "rejections": [
+            { "path": "/skills/bad", "reason": "missing_name", "detail": "SKILL.md has no name" }
+          ]
+        },
+        "surfaces": [
+          {
+            "reference": {
+              "identity": { "source_id": "ws", "package_id": "core", "name": "ocaml-coding" },
+              "content_revision": "sha1"
+            },
+            "profile": {
+              "execution": "instruction",
+              "activation_tool": null,
+              "context": { "body_bytes": 1820, "discovery_bytes": 120 }
+            }
+          },
+          {
+            "reference": {
+              "identity": { "source_id": "ws", "package_id": "ops", "name": "release-flow" },
+              "content_revision": "sha2"
+            },
+            "profile": {
+              "execution": "composition",
+              "activation_tool": "masc_release_run",
+              "context": { "body_bytes": 940, "discovery_bytes": 80 }
+            }
+          }
+        ]
+      }|}
+  in
+  let sk =
+    expect_ok "decode_skills_snapshot live nested shape"
+      (Wire_runtime.decode_skills_snapshot skills_json)
+  in
+  Alcotest.(check string) "live skills state ready" "ready" sk.state;
+  Alcotest.(check int) "2 skill surfaces" 2 (List.length sk.surfaces);
+  Alcotest.(check string) "live skill ref formatted cleanly" "ocaml-coding (core)"
+    (List.hd sk.surfaces).reference;
+  Alcotest.(check string) "live skill kind instruction" "instruction"
+    (List.hd sk.surfaces).kind;
+  Alcotest.(check string) "live skill 2 kind composition" "composition"
+    (List.nth sk.surfaces 1).kind;
+  Alcotest.(check int) "1 rejected skill formatted without raw JSON" 1
+    (List.length sk.rejections);
+  Alcotest.(check bool) "rejection does not start with {" false
+    (String.starts_with ~prefix:"{" (List.hd sk.rejections));
+  Alcotest.(check int) "1 shadowed skill formatted without raw JSON" 1
+    (List.length sk.shadows);
+  Alcotest.(check bool) "shadow does not start with {" false
+    (String.starts_with ~prefix:"{" (List.hd sk.shadows));
+
+  (* Live /api/v1/gate/connectors configured_bindings decode *)
+  let conns_json =
+    parse_json
+      {|{
+        "connectors": [
+          {
+            "connector_id": "slack",
+            "display_name": "Slack",
+            "status": "connected",
+            "available": true,
+            "connected": true,
+            "channel": "slack",
+            "configured_bindings": [
+              { "channel_id": "C01ALPHA", "keeper_name": "alpha" }
+            ]
+          }
+        ]
+      }|}
+  in
+  let conns =
+    expect_ok "decode_connectors live configured_bindings"
+      (Wire_runtime.decode_connectors conns_json)
+  in
+  Alcotest.(check int) "1 configured binding decoded" 1
+    (List.length (List.hd conns).configured_bindings);
+  Alcotest.(check string) "configured binding channel_id" "C01ALPHA"
+    (List.hd (List.hd conns).configured_bindings).channel_id;
+
+  (* Live board_comment votes_up/votes_down fallback when score absent *)
+  let post_detail_json =
+    parse_json
+      {|{
+        "post": {
+          "id": "p-1", "author": "alpha", "title": "T", "body": "B",
+          "post_kind": "direct", "visibility": "internal", "created_at": 1795252000.0,
+          "votes_up": 5, "votes_down": 1, "comment_count": 1
+        },
+        "comments": [
+          {
+            "id": "c-1", "post_id": "p-1", "parent_id": null, "author": "beta",
+            "body": "Hi", "created_at": 1795252005.0, "votes_up": 7, "votes_down": 2
+          }
+        ]
+      }|}
+  in
+  let _post, comments =
+    expect_ok "decode_board_thread live votes_up/votes_down"
+      (Wire_knowledge.decode_board_thread ~observed_at:t0 post_detail_json)
+  in
+  Alcotest.(check int) "comment score computed from votes_up - votes_down" 5
+    (List.hd comments).score;
+
+  (* Live HTTP 409 Conflict body on POST /api/v1/published-artifact-shares *)
+  let share_conflict_json =
+    parse_json
+      {|{
+        "id": "artifact-00112233445566778899aabbccddeeff",
+        "current": { "shared": true, "version": 4 },
+        "receipt": { "outcome": "conflict" }
+      }|}
+  in
+  let sh_resp =
+    expect_ok "decode_artifact_share_response 409 conflict"
+      (Wire_knowledge.decode_artifact_share_response share_conflict_json)
+  in
+  Alcotest.(check bool) "409 conflict decoded as `Conflict" true
+    (sh_resp.outcome = `Conflict && sh_resp.version = 4 && sh_resp.shared);
+
+  let hearths_json =
+    parse_json {|{ "hearths": [{ "name": "ops", "count": 12 }, { "name": "goals", "count": 4 }] }|}
+  in
+  let hearths =
+    expect_ok "decode_board_hearths"
+      (Wire_knowledge.decode_board_hearths hearths_json)
+  in
+  Alcotest.(check int) "2 board hearths" 2 (List.length hearths);
+
+  let checks_json =
+    parse_json
+      {|{ "checks": [{ "id": "art-1", "revision": 2, "body_sha256": "abc123", "checked": true, "change_id": "chg-9", "changed_by": "operator", "changed_at": "2026-11-23T05:00:00Z" }] }|}
+  in
+  let checks =
+    expect_ok "decode_artifact_checks"
+      (Wire_knowledge.decode_artifact_checks checks_json)
+  in
+  Alcotest.(check int) "1 artifact check" 1 (List.length checks);
+  Alcotest.(check bool) "artifact check checked=true" true (List.hd checks).checked;
+
+  (* Verify connector bind/unbind path builders match live server route query params *)
+  Alcotest.(check string) "connector bind path uses ?name=<connector>"
+    "/api/v1/gate/connector/bind?name=slack"
+    (Wire_runtime.connector_bind_path ~connector:"slack");
+  Alcotest.(check string) "connector unbind path uses ?name=<connector>"
+    "/api/v1/gate/connector/unbind?name=slack"
+    (Wire_runtime.connector_unbind_path ~connector:"slack")
+
 let () =
   Alcotest.run "masc_tui_v2_protocol_net"
     [
@@ -4182,6 +4799,8 @@ let () =
             test_keeper_memory_facts_activity_and_health_decoders;
           Alcotest.test_case "Feature Wave 1: Artifacts, Browser clients/tabs, Lane Addons & observer routing" `Quick
             test_feature_wave1_wire_decoders;
+          Alcotest.test_case "Feature Wave 2: Keeper Context (8 routes), Live Tools P0, Skills, Hearths & Artifact Checks" `Quick
+            test_wave2_live_wire_codecs;
         ] );
       ( "net"
       , [

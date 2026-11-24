@@ -17816,7 +17816,7 @@ let test_keeper_lifecycle_and_addon_crud_requests () =
   Alcotest.(check string) "addon ask-answer path" "/api/v1/lane-addons/ask-answer"
     (Cmd.post_request_path ask_ans_req);
   Alcotest.(check string) "addon ask-answer JSON"
-    {|{"declaration_id":"decl-browser","ask_id":"ask-addon-1","answers":[{"question_id":"q1","response":{"kind":"choices","choice_ids":["c1"]}}]}|}
+    {|{"declaration_id":"decl-browser","ask_id":"ask-addon-1","answers":[{"question_id":"q1","response":{"kind":"chose","choice_ids":["c1"]}}]}|}
     (Yojson.Safe.to_string (Cmd.post_request_body ask_ans_req));
   let set_fields pairs (m : Model.t) =
     match m.inline_modal with

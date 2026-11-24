@@ -3940,6 +3940,84 @@ let test_feature_wave1_wire_decoders () =
    with
   | Ok (Wire_observer.Dataset_changed Wire_observer.Dataset_lane_addons) -> ()
   | _ -> Alcotest.fail "expected browser_observation -> Dataset_lane_addons")
+
+(* A page the TUI cannot read in full is refused, never read around: a new
+   event type could carry text the rebuilt reply would silently miss. *)
+let test_wire_chat_journal_refusals () =
+  let page ?(schema = "masc.keeper_chat_events.v2") ?(operation_id = "op-1")
+      ?(has_more = false) ?(next_since_seq = `Null) events =
+    `Assoc
+      [
+        ("schema", `String schema);
+        ("operation_id", `String operation_id);
+        ( "events",
+          `List
+            (List.map
+               (fun event ->
+                 `Assoc
+                   [
+                     ("v", `Int 2); ("seq", `Int 0); ("ts", `Float 1.0);
+                     ("event", event);
+                   ])
+               events) );
+        ("has_more", `Bool has_more);
+        ("next_since_seq", next_since_seq);
+        ("next_since_offset", `Int 0);
+      ]
+  in
+  let decode json = Wire_chat_journal.decode_page ~operation_id:"op-1" json in
+  let text_delta fields =
+    `Assoc (("type", `String "text_delta") :: ("delta", `String "x") :: fields)
+  in
+  let owner = `Assoc [ ("content_generation", `Int 1); ("stream_scope", `Int 0) ] in
+  ignore (expect_ok "a plain page" (decode (page [ text_delta [] ])));
+  ignore
+    (expect_err "another schema"
+       (decode (page ~schema:"masc.keeper_chat_events.v1" [])));
+  ignore (expect_err "another operation" (decode (page ~operation_id:"op-2" [])));
+  ignore
+    (expect_err "an event type the server does not journal"
+       (decode (page [ `Assoc [ ("type", `String "brand_new_event") ] ])));
+  ignore
+    (expect_err "an owner sent both ways"
+       (decode
+          (page [ text_delta [ ("response", owner); ("stream_scope", `Int 0) ] ])));
+  ignore
+    (expect_err "a response with a third index"
+       (decode
+          (page
+             [
+               text_delta
+                 [
+                   ( "response",
+                     `Assoc
+                       [
+                         ("content_generation", `Int 1);
+                         ("stream_scope", `Int 0);
+                         ("index", `Int 0);
+                       ] );
+                 ];
+             ])));
+  ignore
+    (expect_err "more pages without a seq" (decode (page ~has_more:true [])));
+  match
+    decode
+      (page ~has_more:true ~next_since_seq:(`Int 4)
+         [ text_delta [ ("stream_scope", `Int 3) ] ])
+  with
+  | Ok
+      {
+        events =
+          [
+            Wire_chat_journal.Text_delta
+              { owner = Wire_chat_journal.Unobserved_scope (Some 3); _ };
+          ];
+        next = Some { last_seq = 4; next_offset = 0 };
+      } ->
+      ()
+  | Ok _ -> Alcotest.fail "a bare scope and the cursor pair were misread"
+  | Error detail -> Alcotest.failf "a bare scope page was refused: %s" detail
+
 let () =
   Alcotest.run "masc_tui_v2_protocol_net"
     [
@@ -3951,6 +4029,8 @@ let () =
             test_agui_chat_stream_and_history_provenance;
           Alcotest.test_case "chat_history_speaker" `Quick
             test_chat_history_speaker;
+          Alcotest.test_case "wire_chat_journal refusals" `Quick
+            test_wire_chat_journal_refusals;
           Alcotest.test_case "wire_work" `Quick test_wire_work;
           Alcotest.test_case "wire_knowledge" `Quick test_wire_knowledge;
           Alcotest.test_case "wire_runtime" `Quick test_wire_runtime;

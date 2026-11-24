@@ -883,6 +883,7 @@ let sweep_payload_dirs t ~log_path =
         String_map.empty
         (Store.list_entries t.store)
     in
+    let retired_ids = String_set.of_list (Store.retired_ids t.store) in
     (* These counters belong only to this synchronous startup sweep. Increment
        immediately after each joined operation acknowledges its successful
        effect, so a later failure cannot erase earlier successful removals. *)
@@ -892,7 +893,10 @@ let sweep_payload_dirs t ~log_path =
     let on_unlink () = incr unlinked_entries in
     let on_directory_removed () = incr removed_run_directories in
     let sweep_entry name =
-      match Payload_directory.with_child parent name (fun directory ->
+      if String_set.mem name retired_ids
+      then Ok ()
+      else
+        match Payload_directory.with_child parent name (fun directory ->
         match String_map.find_opt name referenced with
         | None ->
           remove_payload_directory ~parent ~directory ~log_path ~run_id:name

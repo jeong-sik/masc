@@ -184,6 +184,7 @@ module Make (Payload : Payload) = struct
     ; path : string option
     ; mutation_mutex : Cross_context_mutex.t
     ; replay_status : replay_status
+    ; retired_ids : string list
     ; mutable observer_index : observer_index option
     }
 
@@ -218,6 +219,8 @@ module Make (Payload : Payload) = struct
   type replay_snapshot =
     { retained_entries : entry list
     ; rows : event_rows Id_map.t
+    ; retired_rows : int list
+    ; retired_ids : string list
     ; malformed : string list
     ; retired_registrations : int
     ; retired_completions : int
@@ -288,9 +291,11 @@ module Make (Payload : Payload) = struct
     ; mutation_mutex = Cross_context_mutex.create ()
     ; observer_index = None
     ; replay_status = Not_replayed
+    ; retired_ids = []
     }
 
   let replay_status t = t.replay_status
+  let retired_ids (t : t) = t.retired_ids
 
   let event_to_yojson = function
     | Register { id; started_at; registration } ->
@@ -636,6 +641,12 @@ module Make (Payload : Payload) = struct
                selected)
         Row_map.empty
         snapshot.retained_entries
+    in
+    let selected =
+      List.fold_left
+        (fun selected row -> Row_map.add row Original_event selected)
+        selected
+        snapshot.retired_rows
     in
     let result =
       Fs_compat.write_file_atomic_strict_staged path ~write:(fun oc ->
@@ -1025,6 +1036,8 @@ module Make (Payload : Payload) = struct
     let unread =
       { retained_entries = []
       ; rows = Id_map.empty
+      ; retired_rows = []
+      ; retired_ids = []
       ; malformed = []
       ; retired_registrations = 0
       ; retired_completions = 0
@@ -1038,20 +1051,22 @@ module Make (Payload : Payload) = struct
     then unread
     else (
       try
-        let (entries, rows, _registered, _retired, malformed, retired_registrations, retired_completions, line_no), boundary =
+        let (entries, rows, retired_rows, _registered, retired, malformed, retired_registrations, retired_completions, line_no), boundary =
           Fs_compat.fold_appended_lines
             ~path
             ~from:0
-            ~init:([], Id_map.empty, Id_map.empty, Id_map.empty, [], 0, 0, 1)
-            ~f:(fun (entries, rows, registered, retired, malformed, retired_registrations, retired_completions, line_no) line ->
+            ~init:([], Id_map.empty, [], Id_map.empty, Id_map.empty, [], 0, 0, 1)
+            ~f:(fun (entries, rows, retired_rows, registered, retired, malformed, retired_registrations, retired_completions, line_no) line ->
               match parse_event_line ~path ~line_no line with
               | Ok None ->
-                entries, rows, registered, retired, malformed, retired_registrations, retired_completions, line_no + 1
+                entries, rows, retired_rows, registered, retired, malformed, retired_registrations, retired_completions, line_no + 1
               | Ok (Some (Retired_register { id; _ })) ->
                 let entries = List.filter (fun existing -> not (String.equal existing.id id)) entries in
                 let rows = if retain_completed_history then Id_map.empty else Id_map.remove id rows in
+                let retired_rows = if retain_completed_history then [] else line_no :: retired_rows in
                 ( entries
                 , rows
+                , retired_rows
                 , Id_map.remove id registered
                 , Id_map.add id () retired
                 , malformed
@@ -1068,12 +1083,13 @@ module Make (Payload : Payload) = struct
                   then Id_map.empty
                   else Id_map.add id { registration_row = line_no; completion_row = None } rows
                 in
-                entries, rows, registered, retired, malformed, retired_registrations, retired_completions, line_no + 1
+                entries, rows, retired_rows, registered, retired, malformed, retired_registrations, retired_completions, line_no + 1
               | Ok (Some (Live (Complete { id; _ } as event))) ->
                 (* Track all valid registrations, independently of projection
-                   retention. Paired retired completions are counted separately;
-                   a true orphan prevents compaction/sweep and cannot disappear
-                   before a later strict conditional transaction. *)
+                   retention. Paired retired completions are preserved in-place
+                   and counted separately; a true orphan prevents
+                   compaction/sweep and cannot disappear before a later strict
+                   conditional transaction. *)
                 if Id_map.mem id registered
                 then (
                   let entries = apply_event entries event in
@@ -1087,17 +1103,19 @@ module Make (Payload : Payload) = struct
                         (Option.map (fun source -> { source with completion_row = Some line_no }))
                         rows
                   in
-                  entries, rows, registered, retired, malformed, retired_registrations, retired_completions, line_no + 1)
+                  entries, rows, retired_rows, registered, retired, malformed, retired_registrations, retired_completions, line_no + 1)
                 else if Id_map.mem id retired
-                then
+                then (
+                  let retired_rows = if retain_completed_history then [] else line_no :: retired_rows in
                   ( entries
                   , rows
+                  , retired_rows
                   , registered
                   , retired
                   , malformed
                   , retired_registrations
                   , retired_completions + 1
-                  , line_no + 1 )
+                  , line_no + 1 ))
                 else (
                   let malformed =
                     Printf.sprintf "%s:%d: completion has no matching registration" path line_no
@@ -1105,10 +1123,11 @@ module Make (Payload : Payload) = struct
                   in
                   let entries = apply_event entries event in
                   let entries = if retain_completed_history then prune entries else entries in
-                  entries, rows, registered, retired, malformed, retired_registrations, retired_completions, line_no + 1)
+                  entries, rows, retired_rows, registered, retired, malformed, retired_registrations, retired_completions, line_no + 1)
               | Error message ->
                 ( entries
                 , rows
+                , retired_rows
                 , registered
                 , retired
                 , message :: malformed
@@ -1137,8 +1156,11 @@ module Make (Payload : Payload) = struct
           | None -> List.length (List.filter is_running entries)
         in
         let entries = settle_replayed_running entries |> prune in
+        let retired_ids = Id_map.fold (fun id () acc -> id :: acc) retired [] |> List.rev in
         { retained_entries = entries
         ; rows
+        ; retired_rows = List.rev retired_rows
+        ; retired_ids
         ; malformed = List.rev malformed
         ; retired_registrations
         ; retired_completions
@@ -1184,6 +1206,7 @@ module Make (Payload : Payload) = struct
     ; path = Some path
     ; mutation_mutex = Cross_context_mutex.create ()
     ; observer_index = None
+    ; retired_ids = snapshot.retired_ids
     ; replay_status =
         if not existed then Log_absent
         else Replayed

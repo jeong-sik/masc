@@ -211,7 +211,7 @@ let test_retained_history_late_terminal_has_original_registration () = with_path
 
 module Retired_payload = struct
   include Payload
-  let completed_retention = `Latest 10
+  let completed_retention = `Latest 2
   let retired_registration_of_yojson = function
     | `Assoc fields ->
       (match List.assoc_opt "kind" fields with
@@ -231,21 +231,75 @@ module Retired_payload = struct
 end
 module RT = Run_registry_core.Make (Retired_payload)
 
+let register_row_at id started_at input =
+  Yojson.Safe.to_string
+    (`Assoc [ "event", `String "register"; "id", `String id; "started_at", `Float started_at; "registration", input ])
+  ^ "\n"
 let active_reg label = `Assoc ["kind", `String "active"; "label", `String label]
 let retired_reg lane = `Assoc ["kind", `String "retired"; "lane", `String lane]
 
+let contains_substring ~needle haystack =
+  let nlen = String.length needle in
+  let hlen = String.length haystack in
+  let rec loop i =
+    if i + nlen > hlen then false
+    else if String.sub haystack i nlen = needle then true
+    else loop (i + 1)
+  in
+  nlen = 0 || loop 0
+
+let capture_stderr f =
+  let pipe_read, pipe_write = Unix.pipe () in
+  let saved_stderr = Unix.dup Unix.stderr in
+  Unix.dup2 pipe_write Unix.stderr;
+  Unix.close pipe_write;
+  let result =
+    Fun.protect
+      ~finally:(fun () ->
+        flush stderr;
+        Unix.dup2 saved_stderr Unix.stderr;
+        Unix.close saved_stderr)
+      f
+  in
+  Unix.set_nonblock pipe_read;
+  let buf = Buffer.create 256 in
+  let tmp = Bytes.create 256 in
+  let rec read_all () =
+    match Unix.read pipe_read tmp 0 256 with
+    | 0 -> ()
+    | n ->
+      Buffer.add_subbytes buf tmp 0 n;
+      read_all ()
+    | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) -> ()
+  in
+  read_all ();
+  Unix.close pipe_read;
+  result, Buffer.contents buf
+
 let test_retired_pair_is_counted_and_compacted_while_preserving_active () = with_path (fun _ path ->
-  write path
-    (register_row "active-1" (active_reg "a1")
-     ^ complete_row "active-1" (`String "out-1")
-     ^ register_row "retired-1" (retired_reg "librarian_memory")
-     ^ complete_row "retired-1" (`String "retired-out")
-     ^ register_row "active-2" (active_reg "a2")
-     ^ complete_row "active-2" (`String "out-2"));
-  let first = RT.replay path in
+  let evicted_rows =
+    register_row_at "active-evicted" 1. (active_reg "evicted")
+    ^ complete_row "active-evicted" (`String "evicted-out")
+  in
+  let active_1_rows =
+    register_row_at "active-1" 2. (active_reg "a1")
+    ^ complete_row "active-1" (`String "out-1")
+  in
+  let retired_rows =
+    register_row_at "retired-1" 3. (retired_reg "librarian_memory")
+    ^ complete_row "retired-1" (`String "retired-out")
+  in
+  let active_2_rows =
+    register_row_at "active-2" 4. (active_reg "a2")
+    ^ complete_row "active-2" (`String "out-2")
+  in
+  let expected_preserved = active_1_rows ^ retired_rows ^ active_2_rows in
+  let expected_digest = Digest.to_hex (Digest.string expected_preserved) in
+  write path (evicted_rows ^ expected_preserved);
+  let first, first_logs = capture_stderr (fun () -> RT.replay path) in
   (match RT.replay_status first with
    | Run_registry_core.Replayed
-       { lines_read = 6
+       { lines_read = 8
        ; malformed_lines = 0
        ; retired_registrations = 1
        ; retired_completions = 1
@@ -253,6 +307,16 @@ let test_retired_pair_is_counted_and_compacted_while_preserving_active () = with
        ; reached_end = true
        } -> ()
    | _ -> fail "first replay should count retired pair separately from malformed lines");
+  check (list string) "retired_ids exposes preserved retired registration id" [ "retired-1" ] (RT.retired_ids first);
+  let after_first = load path in
+  check string "compaction evicts old active rows while preserving retired pair bytes and event order verbatim"
+    expected_preserved after_first;
+  check string "preserved retired and active rows retain exact digest"
+    expected_digest (Digest.to_hex (Digest.string after_first));
+  check bool "first boot emits aggregate retired summary" true
+    (contains_substring ~needle:"skipped 1 retired registration(s) and 1 paired completion(s) during replay" first_logs);
+  check bool "first boot emits no per-id unknown completion warning" false
+    (contains_substring ~needle:"replay skipped completion for unknown id" first_logs);
   check bool "retired id is absent from projection" true (Option.is_none (RT.get_metadata first ~id:"retired-1"));
   check bool "retired id is absent from strict read" true (RT.read_current_from_log first ~id:"retired-1" = Ok None);
   (match RT.read_current_from_log first ~id:"active-1" with
@@ -263,17 +327,23 @@ let test_retired_pair_is_counted_and_compacted_while_preserving_active () = with
    | Ok (Some { registration; status = RT.Completed (`String "out-2"); _ }) ->
      check json "active-2 registration preserved" (active_reg "a2") registration
    | _ -> fail "active-2 was not preserved");
-  let second = RT.replay path in
-  match RT.replay_status second with
-  | Run_registry_core.Replayed
-      { lines_read = 4
-      ; malformed_lines = 0
-      ; retired_registrations = 0
-      ; retired_completions = 0
-      ; dropped_running = 0
-      ; reached_end = true
-      } -> ()
-  | _ -> fail "second replay after compaction should have zero retired rows")
+  let second, second_logs = capture_stderr (fun () -> RT.replay path) in
+  (match RT.replay_status second with
+   | Run_registry_core.Replayed
+       { lines_read = 6
+       ; malformed_lines = 0
+       ; retired_registrations = 1
+       ; retired_completions = 1
+       ; dropped_running = 0
+       ; reached_end = true
+       } -> ()
+   | _ -> fail "reboot replay should continue observing preserved retired rows with zero malformed lines");
+  check string "reboot compaction keeps identical bytes and digest"
+    expected_digest (Digest.to_hex (Digest.string (load path)));
+  check bool "reboot emits aggregate retired summary" true
+    (contains_substring ~needle:"skipped 1 retired registration(s) and 1 paired completion(s) during replay" second_logs);
+  check bool "reboot emits no per-id unknown completion warning" false
+    (contains_substring ~needle:"replay skipped completion for unknown id" second_logs))
 
 let test_retired_pair_with_retained_history_allows_strict_reads () = with_path (fun _ path ->
   write path

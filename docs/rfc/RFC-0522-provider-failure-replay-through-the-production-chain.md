@@ -17,7 +17,7 @@ related: ["turn-failure-visible-stop", "librarian-gate-waits-on-the-destination-
 - 관련 이슈: #51648(GLM 요청이 응답 머리 전에 끊긴다, 집계 창 2026-11-12 00:00Z~약 09:30Z 동안 21건), #48991(깨진 청크 크기 줄을 완결로 읽고 연결을 캐시에 돌린다), #46722(레인 정체와 provider 무응답 기록), #52403(#52386 스택의 배포 뒤 측정). OpenRouter 계정 크레딧 소진 402(2026-11-13)는 이슈 번호가 없는 세션 기록이다.
 - 비대상(§4): #28072(CLI spawn 결함, HTTP 와이어 없음), #38403(호스트 잠자기 착시).
 - 먼저 있는 결정:
-  - 2026-11-12 사용자 결정: PR·병합당 CI run 수를 늘리는 설계는 하지 않는다(constitution build_and_ci "PR·일반 branch push 로 자동 CI 를 시작하지 않는다"와 같은 방향). 재생 시험은 기존 테스트 binary 안에서만 돈다.
+  - 2026-11-12 사용자 결정: PR·병합당 CI run 수를 늘리는 설계는 하지 않는다(constitution build_and_ci 와 같은 방향). 재생 시험은 기존 테스트 binary 안에서만 돈다.
   - RFC-turn-failure-visible-stop: 실패 면제와 클래스별 예산을 걷어냈고, 각 레인이 소유한 유한한 시도가 끝나 턴이 실패하면 원인 불문 crash 계정에 오른다. 이 RFC 는 그 계정에 오르는 입력을 실측 모양 그대로 만들어 준다. 계정 규칙은 바꾸지 않는다.
   - RFC-0492: provider 연결은 프로세스 하나의 캐시에서 재사용되고, 쓰기 실패는 request_not_delivered/Possibly_delivered 로 갈라 재전송 여부를 정한다. #51648 의 두 와이어 모양은 이 구분의 입력이다.
   - RFC-librarian-gate-waits-on-the-destination-not-on-passes(#52386): 판정 서버 거절은 닫힌 합타입으로 나뉘고 Refusing 중에는 새 시도를 만들지 않는다. 판정 서버 재생은 이 RFC 의 1단계 범위 밖이다(§5 D2).

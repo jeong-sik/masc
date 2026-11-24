@@ -148,11 +148,16 @@ built binary.
 
 ## What CI runs
 
-CI is manual and review comes first. Ordinary stacked PRs use independent
+Review comes first. Ordinary stacked PRs use independent
 function, logic and code-cleanliness reviews; approve when no P0/P1/P2 issue
-remains and collect P3 issues for later. There is no automatic PR/push CI.
-The operator-authorized main minimal build checks every 30 minutes, reusing
-successful build receipts and caches; it does not replace review or release checks.
+remains and collect P3 issues for later. Every pull request runs the required
+`changes` and `type-check` checks (`pr-type-check.yml`); `type-check` runs
+`dune build @check` when a file outside `docs/`, `changelog.d/` and
+`dashboard/` changed. The full build and the regression suites are dispatched
+explicitly.
+The operator-authorized main minimal build runs on each push to main and every
+30 minutes, reusing successful build receipts and caches; it does not replace
+review or release checks.
 
 The MASC leader selects current source-approved heads, prepares a combined
 candidate, then selects CI scopes. `leader-ci.yml` is dispatched on main with

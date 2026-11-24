@@ -6,8 +6,8 @@
 
 ## 1. CI & Release Tiers
 
-- **일반 PR 병합 게이트 (`merge-compile.yml`)**:
-  - 스택 최상단 병합 대상 head에 대한 컴파일·타입 게이트(`merge-compile`)와 현재 head 독립 소스 리뷰를 확인한다.
+- **일반 PR 필수 검사 (`pr-type-check.yml`)**:
+  - `changes`와 `type-check`(`dune build @check`)가 PR마다 돌고, 병합에는 현재 head 독립 소스 리뷰도 필요하다. `merge-compile.yml`은 요청할 때만 도는 선택 관측이다.
 - **릴리스 후보 검증 (`release-candidate.yml` + `config/release-behavior.json`)**:
   - 전체 컴파일/타입 검증, 4개 플랫폼 설치 검증, 그리고 `config/release-behavior.json`(`release-behavior.yml`)에 고정된 핵심 동작 테스트를 실행한다.
 - **일일 및 수동 회귀 검증 (`test.yml`)**:

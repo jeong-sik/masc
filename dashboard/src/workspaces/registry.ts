@@ -75,13 +75,10 @@ export const WORKSPACE_LOADERS: Readonly<Record<WorkspaceId, WorkspaceLoaderEntr
   pulse: {
     id: 'pulse',
     title: '1 Pulse',
-    load: async () => ({
-      default: createWorkspacePlaceholder(
-        'pulse',
-        '1 Pulse — Fleet Overview',
-        '4-KPI Hero Strip, Attention Queue, 24h Keeper Sparklines & Team Handoff Pulse (Layer 5).',
-      ),
-    }),
+    load: async () => {
+      const mod = await import('./pulse/index')
+      return { default: mod.PulseWorkspace }
+    },
   },
   work: {
     id: 'work',
@@ -108,13 +105,10 @@ export const WORKSPACE_LOADERS: Readonly<Record<WorkspaceId, WorkspaceLoaderEntr
   keepers: {
     id: 'keepers',
     title: '4 Keepers',
-    load: async () => ({
-      default: createWorkspacePlaceholder(
-        'keepers',
-        '4 Keepers — Fleet Wall & Live Debug Companion',
-        'Virtualized Keeper Roster, Chat Queue/Steer, Debug Companion, Memory, Portrait & Config CAS (Layer 5).',
-      ),
-    }),
+    load: async () => {
+      const mod = await import('./keepers/index')
+      return { default: mod.KeepersWorkspace }
+    },
   },
   runtime: {
     id: 'runtime',

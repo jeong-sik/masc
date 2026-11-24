@@ -1,0 +1,466 @@
+/**
+ * Entity Tab 5: `Config` (`/keepers/:name/config`)
+ *
+ * - Schema-driven Keeper editor (`/api/v1/config/schema?target=keeper::k`, V2Envelope)
+ * - `POST /api/v1/config/patch` `dry_run: true` unified diff preview + CAS `expected_sha256` apply
+ *   + `reload_scope` badge (`hot_reload | next_turn | restart_required`) + `409 conflict_cas` handling
+ * - Secrets (`POST /api/v1/keepers/:k/secrets`) & OAuth Identity Providers (`/api/v1/keepers/oauth/attached-tools`)
+ */
+
+import { html } from 'htm/preact'
+import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
+import {
+  fetchConfigSchemaApi,
+  fetchKeeperAttachedProvidersApi,
+  mutateKeeperSecretApi,
+  postConfigPatchApi,
+  refreshKeeperIdentityToolsApi,
+  setKeeperIdentitySwitchApi,
+  startKeeperOAuthLoginApi,
+} from './keepers-api'
+import type {
+  ConfigFieldSpec,
+  ConfigPatchChange,
+  ConfigPatchResult,
+  ConfigSchemaData,
+  KeeperAttachedProvider,
+} from './types'
+
+export interface KeeperConfigTabProps {
+  readonly keeperName: string
+  readonly onMutated: () => void
+}
+
+function serializeValue(val: unknown): string {
+  if (val === null || val === undefined) return ''
+  if (Array.isArray(val)) return val.join(', ')
+  return String(val)
+}
+
+function parseFieldInput(field: ConfigFieldSpec, raw: string): unknown {
+  if (field.type === 'bool' || field.type === 'boolean') return raw === 'true'
+  if (field.type === 'int' || field.type === 'integer') {
+    const n = Number.parseInt(raw, 10)
+    return Number.isNaN(n) ? raw : n
+  }
+  if (field.type === 'float' || field.type === 'number') {
+    const n = Number.parseFloat(raw)
+    return Number.isFinite(n) ? n : raw
+  }
+  if (field.type.includes('array') || field.type.includes('list')) {
+    return raw.split(',').map((s) => s.trim()).filter(Boolean)
+  }
+  return raw
+}
+
+export function KeeperConfigTab(props: KeeperConfigTabProps) {
+  const { keeperName } = props
+  const [schema, setSchema] = useState<ConfigSchemaData | null>(null)
+  const [activeCategoryId, setActiveCategoryId] = useState<string>('')
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const [patchResult, setPatchResult] = useState<ConfigPatchResult | null>(null)
+  const [configError, setConfigError] = useState<string | null>(null)
+  const [casConflict, setCasConflict] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  // Secrets & OAuth Identity state
+  const [secretScope, setSecretScope] = useState<'keeper' | 'shared'>('keeper')
+  const [secretName, setSecretName] = useState('')
+  const [secretValue, setSecretValue] = useState('')
+  const [secretStatus, setSecretStatus] = useState<string | null>(null)
+  const [providers, setProviders] = useState<readonly KeeperAttachedProvider[]>([])
+  const [oauthStatus, setOauthStatus] = useState<string | null>(null)
+  const [oauthAuthorizeUrl, setOauthAuthorizeUrl] = useState<string | null>(null)
+
+  const loadSchema = useCallback(async () => {
+    setConfigError(null)
+    setCasConflict(false)
+    const schemaRes = await fetchConfigSchemaApi(`keeper:${keeperName}`)
+    if (!schemaRes.ok) {
+      setConfigError(schemaRes.error.message)
+      return
+    }
+    setSchema(schemaRes.value)
+    setDrafts({})
+    setPatchResult(null)
+    const firstCat = schemaRes.value.categories[0]?.id ?? ''
+    setActiveCategoryId((cur) => cur || firstCat)
+  }, [keeperName])
+
+  const loadProviders = useCallback(async () => {
+    const provRes = await fetchKeeperAttachedProvidersApi(keeperName)
+    if (provRes.ok) setProviders(provRes.value)
+  }, [keeperName])
+
+  useEffect(() => {
+    setOauthAuthorizeUrl(null)
+    void Promise.all([loadSchema(), loadProviders()])
+  }, [loadSchema, loadProviders])
+
+  const allFields = useMemo(
+    () => (schema ? schema.categories.flatMap((c) => c.fields) : []),
+    [schema],
+  )
+
+  const activeCategory = useMemo(
+    () => schema?.categories.find((c) => c.id === activeCategoryId) ?? schema?.categories[0] ?? null,
+    [schema, activeCategoryId],
+  )
+
+  const pendingChanges = useMemo<readonly ConfigPatchChange[]>(() => {
+    const out: ConfigPatchChange[] = []
+    for (const field of allFields) {
+      if (!field.writable) continue
+      const edited = drafts[field.full_key]
+      if (edited === undefined) continue
+      if (edited === serializeValue(field.current_value)) continue
+      out.push({
+        op: 'set',
+        table: field.table,
+        key: field.key,
+        value: parseFieldInput(field, edited),
+      })
+    }
+    return out
+  }, [allFields, drafts])
+
+  const runPatch = async (dryRun: boolean) => {
+    if (!schema || pendingChanges.length === 0) return
+    setBusy(true)
+    setConfigError(null)
+    setCasConflict(false)
+    const res = await postConfigPatchApi({
+      target: `keeper:${keeperName}`,
+      expectedSha256: schema.file_sha256,
+      dryRun,
+      changes: pendingChanges,
+    })
+    setBusy(false)
+    if (!res.ok) {
+      if (res.error.kind === 'conflict_cas' || res.error.status === 409) {
+        setCasConflict(true)
+      }
+      setConfigError(res.error.message)
+      return
+    }
+    setPatchResult(res.value)
+    if (!dryRun && res.value.applied) {
+      await loadSchema()
+      props.onMutated()
+    }
+  }
+
+  const handleSaveSecret = async () => {
+    const name = secretName.trim()
+    if (!name || !secretValue) {
+      setSecretStatus('환경변수 이름과 값을 입력하세요.')
+      return
+    }
+    setSecretStatus(null)
+    const res = await mutateKeeperSecretApi(keeperName, {
+      action: 'set_env',
+      scope: secretScope,
+      name,
+      value: secretValue,
+    })
+    if (!res.ok) {
+      setSecretStatus(`저장 실패: ${res.error.message}`)
+      return
+    }
+    setSecretValue('')
+    setSecretStatus(`${secretScope}:${name} 시크릿 저장 완료 (값은 재표시되지 않습니다).`)
+  }
+
+  const handleDeleteSecret = async () => {
+    const name = secretName.trim()
+    if (!name) return
+    const res = await mutateKeeperSecretApi(keeperName, {
+      action: 'delete_env',
+      scope: secretScope,
+      name,
+    })
+    setSecretStatus(res.ok ? `${secretScope}:${name} 삭제 완료` : `삭제 실패: ${res.error.message}`)
+  }
+
+  const renderDiffLines = (diffText: string) => {
+    if (!diffText) return html`<span class="kp-diff-line">(변경 사항 없음)</span>`
+    return diffText.split('\n').map((line, i) => {
+      const kind = line.startsWith('+') && !line.startsWith('+++')
+        ? 'add'
+        : line.startsWith('-') && !line.startsWith('---')
+          ? 'del'
+          : line.startsWith('@@')
+            ? 'hunk'
+            : 'ctx'
+      return html`<span key=${i} class="kp-diff-line" data-kind=${kind}>${line}</span>`
+    })
+  }
+
+  return html`
+    <div class="kp-scroll-pane" data-keeper-tab="config">
+      <section class="kp-card" aria-label="Schema-Driven Keeper TOML 설정 편집기">
+        <div class="kp-card-head">
+          <h3>Keeper Config Schema (CAS)</h3>
+          <div class="kp-pill-row">
+            <span class="kp-pill">sha256: ${schema?.file_sha256.slice(0, 12) || '없음'}</span>
+            <span class="kp-pill" data-tone=${pendingChanges.length > 0 ? 'brass' : 'default'}>
+              변경 ${pendingChanges.length}건
+            </span>
+            <button type="button" class="btn-ghost" onClick=${() => void loadSchema()}>스키마 다시 읽기</button>
+          </div>
+        </div>
+
+        ${casConflict && html`
+          <div class="ap-error" role="alert" data-cas-conflict="true">
+            CAS 충돌 (409 conflict_cas): 다른 변경이 먼저 적용되었습니다. 스키마를 다시 불러온 뒤 적용하세요.
+          </div>
+        `}
+        ${configError && !casConflict && html`<div class="ap-error" role="alert">${configError}</div>`}
+
+        ${schema && html`
+          <div class="kp-tabs" role="tablist" aria-label="설정 카테고리">
+            ${schema.categories.map((cat) => html`
+              <button
+                key=${cat.id}
+                type="button"
+                role="tab"
+                class="kp-tab"
+                aria-selected=${activeCategory?.id === cat.id ? 'true' : 'false'}
+                onClick=${() => setActiveCategoryId(cat.id)}
+              >
+                ${cat.title} (${cat.field_count})
+              </button>
+            `)}
+          </div>
+
+          ${activeCategory && html`
+            <div>
+              ${activeCategory.fields.map((field) => {
+                const currentText = drafts[field.full_key] ?? serializeValue(field.current_value)
+                return html`
+                  <div key=${field.full_key} class="kp-field-row">
+                    <div>
+                      <div class="kp-roster-name">
+                        ${field.label ?? field.full_key}
+                        <span class="kp-pill" data-tone=${field.reload_scope === 'restart_required' ? 'warn' : 'info'}>
+                          ${field.reload_scope}
+                        </span>
+                      </div>
+                      <div class="kp-roster-sub">${field.description || field.type} · ${field.provenance}</div>
+                    </div>
+                    ${!field.writable
+                      ? html`<span class="kp-pill">읽기 전용 (${serializeValue(field.current_value) || '없음'})</span>`
+                      : field.type === 'bool' || field.type === 'boolean'
+                        ? html`
+                            <select
+                              class="kp-input"
+                              aria-label=${field.full_key}
+                              value=${currentText || 'false'}
+                              onChange=${(e: Event) => setDrafts({ ...drafts, [field.full_key]: (e.currentTarget as HTMLSelectElement).value })}
+                            >
+                              <option value="true">true</option>
+                              <option value="false">false</option>
+                            </select>
+                          `
+                        : field.enum_values && field.enum_values.length > 0
+                          ? html`
+                              <select
+                                class="kp-input"
+                                aria-label=${field.full_key}
+                                value=${currentText}
+                                onChange=${(e: Event) => setDrafts({ ...drafts, [field.full_key]: (e.currentTarget as HTMLSelectElement).value })}
+                              >
+                                ${field.enum_values.map((v) => html`<option key=${v} value=${v}>${v}</option>`)}
+                              </select>
+                            `
+                          : html`
+                              <input
+                                type=${field.secret ? 'password' : 'text'}
+                                class="kp-input"
+                                aria-label=${field.full_key}
+                                value=${currentText}
+                                onInput=${(e: Event) => setDrafts({ ...drafts, [field.full_key]: (e.currentTarget as HTMLInputElement).value })}
+                              />
+                            `}
+                  </div>
+                `
+              })}
+            </div>
+          `}
+        `}
+
+        <div class="kp-lifecycle-bar">
+          <button
+            type="button"
+            class="btn-ghost"
+            disabled=${busy || pendingChanges.length === 0}
+            onClick=${() => void runPatch(true)}
+          >
+            Dry-Run Unified Diff 미리보기
+          </button>
+          <button
+            type="button"
+            class="btn-primary"
+            disabled=${busy || pendingChanges.length === 0}
+            onClick=${() => void runPatch(false)}
+          >
+            CAS 설정 적용 (expected_sha256)
+          </button>
+        </div>
+
+        ${patchResult && html`
+          <div>
+            <div class="kp-pill-row">
+              <span class="kp-pill" data-tone=${patchResult.applied ? 'ok' : 'info'}>
+                ${patchResult.applied ? '적용 완료' : 'Dry-Run 미리보기'}
+              </span>
+              <span class="kp-pill" data-tone=${patchResult.reload_scope === 'restart_required' ? 'warn' : 'brass'}>
+                reload_scope: ${patchResult.reload_scope}
+              </span>
+              ${patchResult.snapshot_id && html`
+                <span class="kp-pill">snapshot: ${patchResult.snapshot_id}</span>
+              `}
+            </div>
+            ${patchResult.validation_warnings.map((w, i) => html`
+              <div key=${i} class="ap-error sev-warn">⚠ ${w}</div>
+            `)}
+            <pre class="kp-diff">${renderDiffLines(patchResult.unified_diff)}</pre>
+          </div>
+        `}
+      </section>
+
+      <!-- Secrets & OAuth Identity Section -->
+      <div class="kp-grid-2">
+        <section class="kp-card" aria-label="Keeper 시크릿 환경변수">
+          <div class="kp-card-head">
+            <h3>Secrets (Write-Only Env)</h3>
+          </div>
+          <select
+            class="kp-input"
+            aria-label="시크릿 범위"
+            value=${secretScope}
+            onChange=${(e: Event) => setSecretScope((e.currentTarget as HTMLSelectElement).value as 'keeper' | 'shared')}
+          >
+            <option value="keeper">keeper (${keeperName})</option>
+            <option value="shared">shared (workspace)</option>
+          </select>
+          <input
+            type="text"
+            class="kp-input"
+            placeholder="ENV_VAR_NAME"
+            aria-label="시크릿 이름"
+            value=${secretName}
+            onInput=${(e: Event) => setSecretName((e.currentTarget as HTMLInputElement).value)}
+          />
+          <input
+            type="password"
+            class="kp-input"
+            placeholder="시크릿 값 (저장 후 재표시되지 않음)"
+            aria-label="시크릿 값"
+            value=${secretValue}
+            onInput=${(e: Event) => setSecretValue((e.currentTarget as HTMLInputElement).value)}
+          />
+          <div class="kp-lifecycle-bar">
+            <button type="button" class="btn-primary" onClick=${() => void handleSaveSecret()}>
+              시크릿 저장
+            </button>
+            <button type="button" class="kp-btn-danger" onClick=${() => void handleDeleteSecret()}>
+              시크릿 삭제
+            </button>
+          </div>
+          ${secretStatus && html`<div class="kp-pill" data-tone="info">${secretStatus}</div>`}
+        </section>
+
+        <section class="kp-card" aria-label="OAuth 연결 계정 및 도구">
+          <div class="kp-card-head">
+            <h3>OAuth Identity & Attached Tools</h3>
+          </div>
+          ${oauthStatus && html`<div class="kp-pill" data-tone="info">${oauthStatus}</div>`}
+          ${oauthAuthorizeUrl && html`
+            <a
+              class="btn-primary"
+              href=${oauthAuthorizeUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              OAuth 인증 페이지 열기 ↗
+            </a>
+          `}
+          ${providers.length === 0
+            ? html`<div class="kp-empty">연결 가능한 OAuth 공급자 없음</div>`
+            : providers.map((prov) => html`
+                <div key=${prov.provider} class="kp-field-row">
+                  <div>
+                    <div class="kp-roster-name">${prov.provider_label}</div>
+                    <div class="kp-roster-sub">
+                      ${prov.problem
+                        ? `⚠ ${prov.problem}`
+                        : prov.attached
+                          ? `연결됨 · 도구 ${prov.tools?.length ?? 0}개`
+                          : '미연결'}
+                    </div>
+                  </div>
+                  <div class="kp-pill-row">
+                    ${prov.attached
+                      ? html`
+                          <button
+                            type="button"
+                            class="btn-ghost"
+                            disabled=${prov.switch_problem != null}
+                            onClick=${async () => {
+                              const next = !(prov.enabled ?? true)
+                              const res = await setKeeperIdentitySwitchApi(keeperName, prov.provider, next)
+                              setOauthStatus(res.ok ? `${prov.provider_label} ${next ? '활성화' : '비활성화'}` : res.error.message)
+                              void loadProviders()
+                            }}
+                          >
+                            ${prov.enabled === false ? '켜기' : '끄기'}
+                          </button>
+                          <button
+                            type="button"
+                            class="btn-ghost"
+                            onClick=${async () => {
+                              const res = await refreshKeeperIdentityToolsApi(keeperName, prov.provider)
+                              setOauthStatus(res.ok ? `${prov.provider_label} 도구 목록 갱신` : res.error.message)
+                              void loadProviders()
+                            }}
+                          >
+                            갱신
+                          </button>
+                        `
+                      : html`
+                          <button
+                            type="button"
+                            class="btn-primary"
+                            onClick=${async () => {
+                              const res = await startKeeperOAuthLoginApi(keeperName, prov.provider)
+                              if (res.ok && res.value.authorize_url) {
+                                try {
+                                  const parsed = new URL(res.value.authorize_url)
+                                  if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+                                    setOauthAuthorizeUrl(parsed.toString())
+                                    setOauthStatus(`${prov.provider_label} 인증 링크가 준비되었습니다.`)
+                                  } else {
+                                    setOauthAuthorizeUrl(null)
+                                    setOauthStatus('유효하지 않은 OAuth URL 스킴입니다.')
+                                  }
+                                } catch {
+                                  setOauthAuthorizeUrl(null)
+                                  setOauthStatus('유효하지 않은 OAuth URL입니다.')
+                                }
+                              } else if (!res.ok) {
+                                setOauthStatus(`OAuth 시작 실패: ${res.error.message}`)
+                              }
+                            }}
+                          >
+                            연결
+                          </button>
+                        `}
+                  </div>
+                </div>
+              `)}
+        </section>
+      </div>
+    </div>
+  `
+}

@@ -34,6 +34,7 @@ import {
 import { TIME_WINDOWS, setTimeWindow, timeWindow } from '../core/time-window'
 import { apiMutate } from '../core/transport'
 import {
+  KEEPER_ENTITY_TAB_LABELS,
   KEEPER_ENTITY_TABS,
   WORKSPACE_NAV_BY_ID,
   currentRoute,
@@ -117,14 +118,6 @@ function provenanceMeta(prov: ViewProvenance): {
       return { glyph: '⚠', tone: 'gap' }
   }
 }
-
-const KEEPER_TAB_LABELS: Readonly<Record<string, string>> = Object.freeze({
-  chat: 'Chat',
-  memory: 'Memory',
-  'portrait-candle': 'Portrait & Candle',
-  'work-sandbox': 'Work & Sandbox',
-  config: 'Config',
-})
 
 function AccountWorkspaceSwitcher(): VNode {
   const [open, setOpen] = useState(false)
@@ -467,7 +460,7 @@ export function TopBar(): VNode {
   const subtabs = route.workspace === 'keepers' && route.entityId
     ? KEEPER_ENTITY_TABS.map((tab) => ({
         id: tab,
-        label: KEEPER_TAB_LABELS[tab] ?? tab,
+        label: KEEPER_ENTITY_TAB_LABELS[tab],
         path: `/keepers/${encodeURIComponent(route.entityId!)}/${tab}`,
         active: route.entityTab === tab,
         locked: false,

@@ -1078,6 +1078,46 @@ let with_loopback_executor ?stream_capacity ~respond run =
     ~on_quit:ignore ~on_restart:ignore () in
   Fun.protect ~finally:(fun () -> Cmd_executor.shutdown exec) (fun () -> run env#clock bus exec)
 
+let test_tool_series_readers_each_receive_the_latest_reply () =
+  let raw = Cmd.Get_tool_series { bucket = `Hour; since_hours = 24 } in
+  let summary = Cmd.Get_tool_series_filtered { bucket = `Hour; since_hours = 24; tool = None } in
+  let path = Cmd.get_request_path raw in
+  Alcotest.(check string) "the two decoders read the same URL" path (Cmd.get_request_path summary);
+  let first, first_arrived = Eio.Promise.create () and second, second_arrived = Eio.Promise.create () in
+  let release_raw, finish_raw = Eio.Promise.create () and release_summary, finish_summary = Eio.Promise.create () in
+  let calls = ref 0 in
+  let respond ~meth ~path:received =
+    Alcotest.(check string) "GET" "GET" meth;
+    Alcotest.(check string) "shared URL" path received;
+    incr calls;
+    let generation = !calls in
+    (match generation with
+     | 1 -> Eio.Promise.resolve first_arrived (); Eio.Promise.await release_raw
+     | 2 -> Eio.Promise.resolve second_arrived (); Eio.Promise.await release_summary
+     | _ -> ());
+    200, `Assoc [ "generated_at", `Float (Float.of_int generation); "bucket", `String "hour";
+                  "buckets", `List [`Assoc ["start", `Int 0; "call_count", `Int 0; "failure_count", `Int 0]] ] in
+  with_loopback_executor ~respond @@ fun clock bus exec ->
+  let get req = Cmd_executor.execute exec (Cmd.Http_get {epoch = Epoch.initial; req}) in
+  let rec wait_for_publications n =
+    let stats = Ui_bus.stats bus in
+    if stats.queued_snapshots + stats.total_coalesced_snapshots < n then
+      (Eio.Time.sleep clock 0.001; wait_for_publications n) in
+  get raw; Eio.Promise.await first;
+  get summary; Eio.Promise.await second;
+  List.iter get [raw; raw; summary; summary];
+  Eio.Promise.resolve finish_raw (); wait_for_publications 2;
+  Eio.Promise.resolve finish_summary (); wait_for_publications 4;
+  Alcotest.(check int) "one original and one follow-up per decoder" 4 !calls;
+  let replies = Ui_bus.drain bus |> List.filter_map (function
+    | Ui_bus.Snapshot (_, Msg.Http_reply {reply = Msg.Reply_tool_series (Ok s); _}) ->
+      Some ("raw", s.generated_at_unix)
+    | Ui_bus.Snapshot (_, Msg.Http_reply {reply = Msg.Reply_tool_series_summary {result = Ok s; _}; _}) ->
+      Some ("summary", s.series.generated_at_unix)
+    | _ -> None) in
+  Alcotest.(check (list (pair string (float 0.)))) "both latest replies survive until the first drain"
+    ["raw", 3.; "summary", 4.] replies
+
 let test_board_replies_survive_epoch_change_and_stream_overflow () =
   let module Q = Board_quarantine in
   let keeper = "alpha" in
@@ -2757,6 +2797,8 @@ let () =
             `Quick test_remote_editor_escape_hatch_blocked;
           Alcotest.test_case "bus_key hash invariant, batch log stream & health readiness"
             `Quick test_bus_key_hash_and_stream_frames;
+          Alcotest.test_case "raw and summary tool series each deliver their latest reply before drain"
+            `Quick test_tool_series_readers_each_receive_the_latest_reply;
           Alcotest.test_case "Board inventory and receipts survive workspace changes and stream bursts"
             `Quick test_board_replies_survive_epoch_change_and_stream_overflow;
           Alcotest.test_case "queue drawer follows HTTP keysets across overlapping refreshes"

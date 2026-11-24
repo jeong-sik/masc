@@ -31,6 +31,14 @@ type nav_state = {
   pane_index : int;
   zoomed : bool;
   filter_focused : bool;
+  sidebar_open : bool option;
+      (** [None] = auto-docked when [cols >= 132] on non-[Micro] non-too-small
+          viewports ([cols >= 132 && rows >= 24]), hidden narrower;
+          [Some true] = explicitly shown (docked or floating drawer);
+          [Some false] = explicitly collapsed. *)
+  sidebar_focused : bool;
+  sidebar_cursor : int;
+  sidebar_scroll : int;
   dive_scroll_offset : int;
   help_scroll_offset : int;
   queue_scroll_offset : int;
@@ -145,10 +153,42 @@ val active_pulse_pane : t -> pulse_pane
     {!pulse_panes}. *)
 
 val inner_body_width : t -> int
-(** Exact inset body width matching [Layout.inset_body] / [Chrome.compute_layout]. *)
+(** Exact inset body width matching [Layout.inset_body] / [Chrome.compute_layout],
+    accounting for the docked Left Navigation Sidebar when visible. *)
 
 val inner_body_height : t -> int
 (** Exact inset body height matching [Chrome.compute_layout]. *)
+
+val sidebar_width : int
+val sidebar_gap : int
+val sidebar_docked_min_cols : int
+val sidebar_docked : t -> bool
+val sidebar_drawer_open : t -> bool
+val sidebar_visible : t -> bool
+val sidebar_has_focus : t -> bool
+(** [true] iff the Left Navigation Sidebar is currently visible and owns
+    keyboard focus (no overlay, filter bar, or composer active). Single source
+    of truth so resizing to a narrower viewport can never trap focus in a
+    hidden sidebar. *)
+
+type sidebar_row =
+  | Sidebar_section of Nav.menu_section
+  | Sidebar_item of {
+      index : int;
+      item : Nav.menu_item;
+    }
+
+val sidebar_visual_rows : sidebar_row list
+val sidebar_cursor_visual_row : cursor:int -> int
+val sidebar_viewport_start : inner_h:int -> scroll:int -> cursor:int -> int
+val active_menu_target : t -> Nav.menu_target
+val sync_sidebar_cursor : t -> t
+val body_top_y : t -> int
+val sidebar_rect : t -> Rect.t option
+val body_rect : t -> Rect.t
+val composer_rect : t -> Rect.t option
+(** Exact bottom composer rectangle matching [Chrome.compute_layout], or
+    [None] when the composer is auto-folded or gated by Micro/too-small. *)
 
 val work_pipeline_has_linked_card : t -> bool
 (** [true] iff [2 Work > Pipeline] renders the bottom-left Linked Tasks &

@@ -3379,6 +3379,7 @@ let compact_help_group ~lang (grp : Keymap.help_group) : Keymap.help_group =
                     (Say.make ~ko:"추론 블록 표시 순환"
                        ~en:"Cycle thinking display");
               }
+        | Keymap.Toggle_sidebar
         | Keymap.Sub_tab _
         | Keymap.Cycle_focus_pane _
         | Keymap.Focus_composer

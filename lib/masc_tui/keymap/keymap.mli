@@ -31,6 +31,7 @@ type cycle_dir =
 
 type action =
   | Switch_workspace of Nav.workspace
+  | Toggle_sidebar
   | Sub_tab of cycle_dir
   | Cycle_focus_pane of cycle_dir
   | Focus_composer

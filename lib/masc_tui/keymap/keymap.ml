@@ -19,6 +19,7 @@ type cycle_dir =
 
 type action =
   | Switch_workspace of Nav.workspace
+  | Toggle_sidebar
   | Sub_tab of cycle_dir
   | Cycle_focus_pane of cycle_dir
   | Focus_composer
@@ -181,6 +182,7 @@ let action_tag = function
   | Cycle_memory_view -> 34
   | Toggle_memory_sort -> 35
   | Quit_app -> 36
+  | Toggle_sidebar -> 37
 
 let equal_action a b =
   if not (Int.equal (action_tag a) (action_tag b)) then false
@@ -222,6 +224,7 @@ let equal_action a b =
     | Toggle_zoom, Toggle_zoom
     | Cycle_memory_view, Cycle_memory_view
     | Toggle_memory_sort, Toggle_memory_sort
+    | Toggle_sidebar, Toggle_sidebar
     | Quit_app, Quit_app ->
         true
     | ( Switch_workspace _
@@ -260,6 +263,7 @@ let equal_action a b =
       | Toggle_zoom
       | Cycle_memory_view
       | Toggle_memory_sort
+      | Toggle_sidebar
       | Quit_app ),
       _ ->
         false
@@ -504,6 +508,11 @@ let bindings : binding list =
         ~action:Dive_selected ~key_display:"Enter" ~hint_label:say_dive
         ~help_desc:(Say.make ~ko:"선택 항목 1-Hop 상세 진입" ~en:"Dive into selected entity")
         ~footer_priority:1 (mk_chord Input.Enter);
+      bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
+        ~action:Toggle_sidebar ~key_display:"b"
+        ~hint_label:(Say.make ~ko:"메뉴" ~en:"Menu")
+        ~help_desc:(Say.make ~ko:"좌측 전체 메뉴 사이드바 열기/포커스/접기" ~en:"Open, focus, or collapse left navigation menu")
+        ~footer_priority:2 (bare_char 'b');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
         ~action:(Sub_tab Prev) ~key_display:"[" ~hint_label:say_sub_prev
         ~help_desc:(Say.make ~ko:"이전 하위 탭으로 이동" ~en:"Previous sub-tab")
@@ -796,6 +805,11 @@ let bindings : binding list =
         ~help_desc:(Say.make ~ko:"추론 블록 표시 순환 (접힘/전체/숨김)" ~en:"Cycle thinking display (folded/full/hidden)")
         ~footer_priority:0 (alt_char 't');
       bind ~scope:Global ~tier:Modern_accel ~category:Cat_navigation
+        ~action:Toggle_sidebar ~key_display:"Alt+B"
+        ~hint_label:(Say.make ~ko:"메뉴" ~en:"Menu")
+        ~help_desc:(Say.make ~ko:"좌측 전체 메뉴 사이드바 열기/포커스/접기" ~en:"Open, focus, or collapse left navigation menu")
+        ~footer_priority:0 (alt_char 'b');
+      bind ~scope:Global ~tier:Modern_accel ~category:Cat_navigation
         ~action:(Sub_tab Prev) ~key_display:"Alt+[" ~hint_label:say_sub_prev
         ~help_desc:(Say.make ~ko:"이전 하위 탭으로 이동" ~en:"Previous sub-tab")
         ~footer_priority:0 (alt_char '[');
@@ -1071,6 +1085,7 @@ let palette_commands ~lang =
           | Pop_back_or_close ->
               false
           | Switch_workspace _
+          | Toggle_sidebar
           | Sub_tab _
           | Cycle_focus_pane _
           | Focus_composer

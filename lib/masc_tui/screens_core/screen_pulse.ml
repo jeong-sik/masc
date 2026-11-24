@@ -1536,7 +1536,7 @@ let render_goals_and_scorecard_panel grid ~cache ~(rect : Rect.t)
           hotkey =
             Some
               (Say.resolve lang
-                 (Say.make ~ko:"[2] 파이프라인" ~en:"[2] Pipeline"));
+                 (Say.make ~ko:"[2] 목표" ~en:"[2] Goals"));
           focused = pane_focused;
         }
     in
@@ -1750,9 +1750,13 @@ let render_goals_and_scorecard_panel grid ~cache ~(rect : Rect.t)
         let ver_part =
           if vp + vr > 0 then
             let pct_s =
-              Printf.sprintf "%.0f%%(%d/%d)"
-                (100.0 *. float_of_int vp /. float_of_int (vp + vr))
-                vp (vp + vr)
+              if content.w >= 52 then
+                Printf.sprintf "%.0f%%(%d/%d)"
+                  (100.0 *. float_of_int vp /. float_of_int (vp + vr))
+                  vp (vp + vr)
+              else
+                Printf.sprintf "%.0f%%"
+                  (100.0 *. float_of_int vp /. float_of_int (vp + vr))
             in
             Say.resolve lang
               (Say.make
@@ -1801,7 +1805,27 @@ let render_goals_and_scorecard_panel grid ~cache ~(rect : Rect.t)
                 unattrib
                 (Say.resolve lang (Say.make ~ko:"미귀속" ~en:"unattributed")),
               attn_st )
-          else candle_hero_display ~lang ~theme ~bg ~model ~hero
+          else
+            let raw_s, raw_st =
+              candle_hero_display ~lang ~theme ~bg ~model ~hero
+            in
+            if
+              Option.is_none hero.candle_circulating_milli
+              && (not (Observed.is_value model.work.candle_ledger))
+              && Grapheme.display_width left_s + 2 + Grapheme.display_width raw_s
+                 > r1.w
+            then
+              let spark = Glyph.to_utf8 Glyph.Ai_spark in
+              let short_m =
+                match model.work.candle_ledger with
+                | Observed.Loading _ -> Glyph.to_utf8 Glyph.Ellipsis
+                | Observed.Absent -> Glyph.to_utf8 Glyph.Missing_absent
+                | Observed.Unreported -> "?"
+                | Observed.Failed _ -> Glyph.to_utf8 Glyph.Live_failing
+                | Observed.Value _ -> ""
+              in
+              (Printf.sprintf "%s %s" spark short_m, raw_st)
+            else (raw_s, raw_st)
         in
         put_left_right grid ~clip:r1 ~y:!cy ~left_text:left_s ~left_style:pri_st
           ~right_text:candle_s ~right_style:candle_st;

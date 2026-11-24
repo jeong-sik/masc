@@ -3288,6 +3288,7 @@ let help_max_scroll (m : Model.t) =
                 else (
                   seen_ask := true;
                   acc + 1)
+            | Keymap.Toggle_sidebar
             | Keymap.Sub_tab _
             | Keymap.Cycle_focus_pane _
             | Keymap.Focus_composer

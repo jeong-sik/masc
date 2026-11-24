@@ -46,6 +46,20 @@ type chart = {
 
 type t = chart
 
+type snapshot = {
+  fact : fact;
+  revision : int;
+  category : string;
+  origin : string;
+  first_seen : float;
+  last_seen : float;
+  activity_entries : int option;
+}
+
+type diagram =
+  | Lineage of chart
+  | Current_snapshot of snapshot
+
 let equal_event_kind a b =
   match a, b with
   | Created, Created
@@ -300,6 +314,37 @@ let mermaid_label ~max_cells text =
   wrap_full_lines ~max_cells text
   |> List.map escape_mermaid
   |> String.concat "<br/>"
+
+let snapshot_lines ?tz_offset_sec ~ko ?now ~max_width (snapshot : snapshot) =
+  let now = Option.value ~default:snapshot.last_seen now in
+  let instant = format_instant ?tz_offset_sec ~now in
+  let text korean english = if ko then korean else english in
+  let claim =
+    match non_empty_claim snapshot.fact.claim with
+    | Some claim -> claim
+    | None -> text "본문 보고 안 됨" "Claim not reported"
+  in
+  let scope =
+    match snapshot.activity_entries with
+    | None -> text "변천 이력 미관측" "Activity unavailable"
+    | Some n ->
+        Printf.sprintf (if ko then "조회된 변천 이력 %d건" else "Activity entries returned: %d") n
+  in
+  [ Printf.sprintf "%s · r%d" (text "현재 스냅샷" "Current snapshot") snapshot.revision;
+    snapshot.fact.memory_id; claim;
+    Printf.sprintf (if ko then "분류: %s · 출처: %s" else "Category: %s · Origin: %s")
+      snapshot.category snapshot.origin;
+    Printf.sprintf (if ko then "최초 %s · 최근 %s" else "First seen %s · Last seen %s")
+      (instant snapshot.first_seen) (instant snapshot.last_seen);
+    scope ]
+  |> List.concat_map (wrap_full_lines ~max_cells:max_width)
+
+let snapshot_mermaid ?tz_offset_sec ~ko ?now snapshot =
+  let label =
+    snapshot_lines ?tz_offset_sec ~ko ?now ~max_width:46 snapshot
+    |> List.map escape_mermaid |> String.concat "<br/>"
+  in
+  Printf.sprintf "flowchart TD\nFact[\"%s\"]\n" label
 
 let kind_label ~ko = function
   | Created -> if ko then "＋ 생성" else "+ Created"

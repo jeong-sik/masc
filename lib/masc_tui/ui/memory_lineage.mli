@@ -52,6 +52,20 @@ type chart = private {
 
 type t = chart
 
+type snapshot = {
+  fact : fact;
+  revision : int;
+  category : string;
+  origin : string;
+  first_seen : float;
+  last_seen : float;
+  activity_entries : int option;
+}
+
+type diagram =
+  | Lineage of chart
+  | Current_snapshot of snapshot
+
 val equal_event_kind : event_kind -> event_kind -> bool
 
 val select : event_id:string -> activity -> chart option
@@ -82,6 +96,13 @@ val format_instant : ?tz_offset_sec:int -> now:float -> float -> string
 (** Pure calendar formatter matching same-day ([HH:MM]), same-year
     ([MM-DD HH:MM]), and cross-year ([YYYY-MM-DD HH:MM]) precision without
     calling [Unix]. *)
+
+val snapshot_lines :
+  ?tz_offset_sec:int -> ko:bool -> ?now:float -> max_width:int -> snapshot -> string list
+
+val snapshot_mermaid :
+  ?tz_offset_sec:int -> ko:bool -> ?now:float -> snapshot -> string
+(** A current fact is one node with no transition and no journal edges. *)
 
 val transition_svg :
   ?tz_offset_sec:int ->

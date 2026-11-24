@@ -8,6 +8,8 @@ module Owner_identity = struct
 end
 
 module Owner_claims = Hashtbl.Make (Owner_identity)
+module String_map = Map.Make (String)
+module String_set = Set.Make (String)
 
 type projection_outcome =
   | No_pending_transition
@@ -42,7 +44,16 @@ type owner_failure =
 
 type owner_budget_error = Invalid_owner_budget of int
 type owner_budget = Owner_budget of int
-type sweep_cursor = Sweep_cursor of string option
+
+type owner_resume =
+  { owner : Persistence.owner_identity
+  ; unvisited : String_set.t
+  }
+
+type sweep_cursor =
+  { after_keeper : string option
+  ; unfinished : owner_resume String_map.t
+  }
 
 type owner_projection =
   { keeper_name : string
@@ -124,7 +135,7 @@ let owner_budget ~max_owners =
   else Error (Invalid_owner_budget max_owners)
 ;;
 
-let initial_sweep_cursor = Sweep_cursor None
+let initial_sweep_cursor = { after_keeper = None; unfinished = String_map.empty }
 
 let owner_claims = Owner_claims.create 16
 let owner_claims_mutex = Mutex.create ()
@@ -236,13 +247,15 @@ let project_transfer_target_result
             { target_keeper = transfer.to_keeper; cause }))
 ;;
 
-module String_set = Set.Make (String)
-
 (* Bound one recovery drain pass so a deep transition outbox cannot pin
    [Executor_pool_ref] / [owner_claims] indefinitely in a single turn. *)
 let max_drain_entries_per_pass = 64
 
-let project_claimed_owner owner =
+let outbox_entry_id (entry : Persistence.outbox_entry) =
+  entry.receipt.transition_id
+;;
+
+let project_claimed_owner owner ~unvisited =
   let base_path = Persistence.owner_identity_base_path owner in
   let keeper_name = Persistence.owner_identity_keeper_name owner in
   let project_open_owner ?target_intake_token ~expected_transition_id () =
@@ -255,7 +268,7 @@ let project_claimed_owner owner =
               String.equal entry.receipt.transition_id expected_transition_id)
            (Keeper_event_queue_state.transition_outbox state)
        with
-       | None -> Ok No_pending_transition
+       | None -> Ok false
        | Some entry ->
          let project_target =
            match entry.receipt.transition, target_intake_token with
@@ -280,158 +293,135 @@ let project_claimed_owner owner =
                  ~keeper_name
                  ~expected_transition_id:entry.receipt.transition_id
              with
-             | Ok () -> Ok Transition_converged
+             | Ok () -> Ok true
              | Error detail -> Error (Ledger_projection_failed detail))))
   in
-  let record_error first_error err =
-    match first_error with
-    | Some _ -> first_error
-    | None -> Some err
+  let step (entry : Persistence.outbox_entry) =
+    let transition_id = outbox_entry_id entry in
+    match entry.receipt.transition with
+    | Persistence.Transfer_accepted transfer ->
+      (match
+         Keeper_shutdown_intake_fence.run_transfer_intake_if_open
+           ~base_path
+           ~from_keeper:keeper_name
+           ~to_keeper:transfer.to_keeper
+           (fun ~source_intake_token:_ ~target_intake_token ->
+              Schedule_store.with_ledger_lock
+                (Workspace.default_config base_path)
+                (fun () ->
+                   project_open_owner ~target_intake_token
+                     ~expected_transition_id:transition_id ()))
+       with
+       | Keeper_shutdown_intake_fence.Transfer_intake_committed result ->
+         `Step result
+       | Keeper_shutdown_intake_fence.Transfer_intake_source_shutdown_reserved
+           operation_id ->
+         `Source_shutdown (Owner_shutdown_reserved operation_id)
+       | Keeper_shutdown_intake_fence.Transfer_intake_target_shutdown_reserved
+           operation_id ->
+         `Step (Error (Owner_shutdown_reserved operation_id)))
+    | Persistence.Cancel_accepted _ | Persistence.Ack_source_terminal _ ->
+      (match
+         Keeper_shutdown_intake_fence.run_durable_intake_if_open
+           ~base_path
+           ~keeper_name
+           (fun _source_intake_token ->
+              project_open_owner ~expected_transition_id:transition_id ())
+       with
+       | Keeper_shutdown_intake_fence.Intake_committed result -> `Step result
+       | Keeper_shutdown_intake_fence.Intake_shutdown_reserved operation_id ->
+         `Source_shutdown (Owner_shutdown_reserved operation_id))
   in
-  let finish ~converged ~first_error =
-    match first_error with
-    | Some err -> Error err
-    | None -> if converged then Ok Transition_converged else Ok No_pending_transition
+  let rec drain ~budget ~first_error ~converged entries =
+    match budget, entries with
+    | 0, _ | _, [] ->
+      let outcome =
+        match first_error with
+        | Some error -> Error error
+        | None ->
+          if converged then Ok Transition_converged else Ok No_pending_transition
+      in
+      outcome, entries
+    | _, entry :: remaining ->
+      (match step entry with
+       | `Source_shutdown error -> Error error, entries
+       | `Step (Ok applied) ->
+         drain ~budget:(budget - 1) ~first_error
+           ~converged:(applied || converged) remaining
+       | `Step (Error error) ->
+         let first_error =
+           match first_error with
+           | Some _ -> first_error
+           | None -> Some error
+         in
+         drain ~budget:(budget - 1) ~first_error ~converged remaining)
   in
-  let rec drain_fifo ~steps ~skipped ~first_error ~converged () =
-    if steps >= max_drain_entries_per_pass
-    then finish ~converged ~first_error
-    else
-      match Persistence.load_state_result ~base_path ~keeper_name with
-      | Error detail -> Error (Outbox_unavailable detail)
-      | Ok state ->
-        let next_entry =
-          List.find_opt
-            (fun (entry : Persistence.outbox_entry) ->
-               not (String_set.mem entry.receipt.transition_id skipped))
-            (Keeper_event_queue_state.transition_outbox state)
-        in
-        (match next_entry with
-         | None -> finish ~converged ~first_error
-         | Some
-             ({ receipt =
-                  { transition_id
-                  ; transition = Persistence.Transfer_accepted transfer
-                  ; _
-                  }
-              ; _
-              }) ->
-           let step =
-             match
-               Keeper_shutdown_intake_fence.run_transfer_intake_if_open
-                 ~base_path
-                 ~from_keeper:keeper_name
-                 ~to_keeper:transfer.to_keeper
-                 (fun ~source_intake_token:_ ~target_intake_token ->
-                    Schedule_store.with_ledger_lock
-                      (Workspace.default_config base_path)
-                      (fun () ->
-                         project_open_owner
-                           ~target_intake_token
-                           ~expected_transition_id:transition_id
-                           ()))
-             with
-             | Keeper_shutdown_intake_fence.Transfer_intake_committed result ->
-               `Step result
-             | Keeper_shutdown_intake_fence.Transfer_intake_source_shutdown_reserved
-                 operation_id ->
-               `Source_shutdown (Owner_shutdown_reserved operation_id)
-             | Keeper_shutdown_intake_fence.Transfer_intake_target_shutdown_reserved
-                 operation_id ->
-               `Step (Error (Owner_shutdown_reserved operation_id))
-           in
-           (match step with
-            | `Source_shutdown err -> Error err
-            | `Step (Ok Transition_converged) ->
-              drain_fifo ~steps:(steps + 1) ~skipped ~first_error ~converged:true ()
-            | `Step (Ok No_pending_transition) ->
-              drain_fifo
-                ~steps:(steps + 1)
-                ~skipped:(String_set.add transition_id skipped)
-                ~first_error
-                ~converged
-                ()
-            | `Step (Ok Claim_busy) -> Ok Claim_busy
-            | `Step (Error err) ->
-              (* Skip a blocked transfer head for this pass so independent
-                 cancellations, ACKs, and healthy-target transfers behind it
-                 are not HoL-starved; surface the first error once unblocked
-                 entries have drained. *)
-              drain_fifo
-                ~steps:(steps + 1)
-                ~skipped:(String_set.add transition_id skipped)
-                ~first_error:(record_error first_error err)
-                ~converged
-                ())
-         | Some
-             ({ receipt =
-                  { transition_id
-                  ; transition =
-                      (Persistence.Cancel_accepted _ | Persistence.Ack_source_terminal _)
-                  ; _
-                  }
-              ; _
-              }) ->
-           let step =
-             match
-               Keeper_shutdown_intake_fence.run_durable_intake_if_open
-                 ~base_path
-                 ~keeper_name
-                 (fun _source_intake_token ->
-                    project_open_owner ~expected_transition_id:transition_id ())
-             with
-             | Keeper_shutdown_intake_fence.Intake_committed result -> `Step result
-             | Keeper_shutdown_intake_fence.Intake_shutdown_reserved operation_id ->
-               `Source_shutdown (Owner_shutdown_reserved operation_id)
-           in
-           (match step with
-            | `Source_shutdown err -> Error err
-            | `Step (Ok Transition_converged) ->
-              drain_fifo ~steps:(steps + 1) ~skipped ~first_error ~converged:true ()
-            | `Step (Ok No_pending_transition) ->
-              drain_fifo
-                ~steps:(steps + 1)
-                ~skipped:(String_set.add transition_id skipped)
-                ~first_error
-                ~converged
-                ()
-            | `Step (Ok Claim_busy) -> Ok Claim_busy
-            | `Step (Error err) ->
-              drain_fifo
-                ~steps:(steps + 1)
-                ~skipped:(String_set.add transition_id skipped)
-                ~first_error:(record_error first_error err)
-                ~converged
-                ()))
-  in
-  drain_fifo ~steps:0 ~skipped:String_set.empty ~first_error:None ~converged:false ()
+  match Persistence.load_state_result ~base_path ~keeper_name with
+  | Error detail -> Error (Outbox_unavailable detail), unvisited
+  | Ok state ->
+    let pending = Keeper_event_queue_state.transition_outbox state in
+    (* Use the current durable order and drop ids another projector retired.
+       Once the saved suffix is exhausted, the next pass retries blocked
+       entries and includes transitions appended after this round began. *)
+    let entries =
+      match
+        List.filter
+          (fun entry -> String_set.mem (outbox_entry_id entry) unvisited)
+          pending
+      with
+      | [] -> pending
+      | remaining -> remaining
+    in
+    let outcome, remaining =
+      drain
+        ~budget:max_drain_entries_per_pass
+        ~first_error:None
+        ~converged:false
+        entries
+    in
+    let unvisited =
+      List.fold_left
+        (fun ids entry -> String_set.add (outbox_entry_id entry) ids)
+        String_set.empty
+        remaining
+    in
+    outcome, unvisited
 ;;
 
-let project_resolved_owner owner =
+let project_resolved_owner owner ~resume =
+  let unvisited =
+    match resume with
+    | Some prior when Owner_identity.equal owner prior.owner -> prior.unvisited
+    | _ -> String_set.empty
+  in
   match
     with_owner_claim owner (fun () ->
-      try project_claimed_owner owner with
+      try project_claimed_owner owner ~unvisited with
       | Eio.Cancel.Cancelled _ as exn ->
         let backtrace = Printexc.get_raw_backtrace () in
         Printexc.raise_with_backtrace exn backtrace
       | exn ->
         let backtrace = Printexc.get_raw_backtrace () in
-        Error (Unexpected_projection_failure (exn, backtrace)))
+        Error (Unexpected_projection_failure (exn, backtrace)), unvisited)
   with
-  | Owner_claim_busy -> Ok Claim_busy
-  | Owner_claim_acquired result -> result
+  | Owner_claim_busy -> Ok Claim_busy, resume
+  | Owner_claim_acquired (outcome, unvisited) ->
+    let resume =
+      if String_set.is_empty unvisited then None else Some { owner; unvisited }
+    in
+    outcome, resume
 ;;
 
-let project_owner_result_inline ~base_path ~keeper_name =
+let project_owner_result_inline ~base_path ~keeper_name ~resume =
   match Persistence.resolve_owner_identity ~base_path ~keeper_name with
-  | Error error -> Error (Owner_unavailable error)
-  | Ok owner -> project_resolved_owner owner
+  | Error error -> Error (Owner_unavailable error), resume
+  | Ok owner -> project_resolved_owner owner ~resume
 ;;
 
 let project_owner_result ~base_path ~keeper_name =
   match
     Executor_pool_ref.submit_strict ~name:__FUNCTION__ (fun () ->
-      project_owner_result_inline ~base_path ~keeper_name)
+      project_owner_result_inline ~base_path ~keeper_name ~resume:None |> fst)
   with
   | Ok outcome -> outcome
   | Error (Executor_pool_ref.Work_failed failure) ->
@@ -443,10 +433,10 @@ let project_owner_result ~base_path ~keeper_name =
     Error (Executor_unavailable error)
 ;;
 
-let ordered_owner_page ~budget:(Owner_budget max_owners) ~cursor:(Sweep_cursor cursor) names =
+let ordered_owner_page ~budget:(Owner_budget max_owners) ~after_keeper names =
   let names = List.sort_uniq String.compare names in
   let ordered =
-    match cursor with
+    match after_keeper with
     | None -> names
     | Some after ->
       let later, earlier =
@@ -461,15 +451,15 @@ let ordered_owner_page ~budget:(Owner_budget max_owners) ~cursor:(Sweep_cursor c
   in
   let selected = take max_owners [] ordered in
   let deferred = List.length names - List.length selected in
-  let next_cursor =
+  let after_keeper =
     if deferred = 0
-    then initial_sweep_cursor
+    then None
     else
       match List.rev selected with
-      | [] -> initial_sweep_cursor
-      | keeper_name :: _ -> Sweep_cursor (Some keeper_name)
+      | [] -> None
+      | keeper_name :: _ -> Some keeper_name
   in
-  names, selected, deferred, next_cursor
+  names, selected, deferred, after_keeper
 ;;
 
 let project_discovery_inline
@@ -477,8 +467,17 @@ let project_discovery_inline
     ~budget
     ~cursor
     (discovery : Persistence.durable_state_discovery) =
-  let names, selected, deferred, next_cursor =
-    ordered_owner_page ~budget ~cursor discovery.keeper_names
+  let names, selected, deferred, after_keeper =
+    ordered_owner_page ~budget ~after_keeper:cursor.after_keeper discovery.keeper_names
+  in
+  let unfinished =
+    match discovery.read_error with
+    | Some _ -> cursor.unfinished
+    | None ->
+      let discovered = String_set.of_list names in
+      String_map.filter
+        (fun keeper_name _ -> String_set.mem keeper_name discovered)
+        cursor.unfinished
   in
   let initial =
     { discovered = List.length names
@@ -496,36 +495,47 @@ let project_discovery_inline
           discovery.read_error
     }
   in
-  let report =
+  let unfinished, report =
     List.fold_left
-      (fun report keeper_name ->
-         let outcome = project_owner_result_inline ~base_path ~keeper_name in
+      (fun (unfinished, report) keeper_name ->
+         let resume = String_map.find_opt keeper_name unfinished in
+         let outcome, resume =
+           project_owner_result_inline ~base_path ~keeper_name ~resume
+         in
+         let unfinished =
+           match resume with
+           | None -> String_map.remove keeper_name unfinished
+           | Some resume -> String_map.add keeper_name resume unfinished
+         in
          let report =
            { report with
              projections = { keeper_name; outcome } :: report.projections
            }
          in
-         match outcome with
-         | Ok No_pending_transition ->
-           { report with no_pending = report.no_pending + 1 }
-         | Ok Transition_converged ->
-           { report with converged = report.converged + 1 }
-         | Ok Claim_busy ->
-           { report with claim_busy = report.claim_busy + 1 }
-         | Error (Owner_shutdown_reserved _) ->
-           { report with shutdown_reserved = report.shutdown_reserved + 1 }
-         | Error
-             (( Owner_unavailable _
-              | Executor_unavailable _
-              | Outbox_unavailable _
-              | Target_transfer_projection_failed _
-              | Paused_transfer_target_projection_failed _
-              | Ledger_projection_failed _
-              | Unexpected_projection_failure _ ) as error) ->
-           { report with
-             failures = { keeper_name; error } :: report.failures
-           })
-      initial
+         let report =
+           match outcome with
+           | Ok No_pending_transition ->
+             { report with no_pending = report.no_pending + 1 }
+           | Ok Transition_converged ->
+             { report with converged = report.converged + 1 }
+           | Ok Claim_busy ->
+             { report with claim_busy = report.claim_busy + 1 }
+           | Error (Owner_shutdown_reserved _) ->
+             { report with shutdown_reserved = report.shutdown_reserved + 1 }
+           | Error
+               (( Owner_unavailable _
+                | Executor_unavailable _
+                | Outbox_unavailable _
+                | Target_transfer_projection_failed _
+                | Paused_transfer_target_projection_failed _
+                | Ledger_projection_failed _
+                | Unexpected_projection_failure _ ) as error) ->
+             { report with
+               failures = { keeper_name; error } :: report.failures
+             }
+         in
+         unfinished, report)
+      (unfinished, initial)
       selected
   in
   { report =
@@ -533,7 +543,7 @@ let project_discovery_inline
         projections = List.rev report.projections
       ; failures = List.rev report.failures
       }
-  ; next_cursor
+  ; next_cursor = { after_keeper; unfinished }
   }
 ;;
 

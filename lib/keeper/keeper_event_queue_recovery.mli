@@ -92,8 +92,10 @@ val project_discovered_bounded :
   cursor:sweep_cursor ->
   sweep_page
 (** Project one deterministic owner page. The next cursor resumes strictly
-    after the last processed canonical keeper name and wraps in lexical order,
-    so repeated maintenance ticks cannot starve a durable owner.
+    after the last processed canonical keeper name and wraps in lexical order
+    when the owner budget is exhausted. It also carries the remaining
+    transition ids for each unfinished owner pass, so blocked entries at the
+    head of an outbox cannot consume every later tick's entry budget.
     [report.projections] contains exactly one typed outcome per selected owner
     in page order. The cursor is process-local and carries no migration or
     persistence contract. Executor unavailability returns an empty page with

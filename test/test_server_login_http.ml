@@ -171,7 +171,7 @@ let parse raw =
        { status; headers = List.map header lines; body })
 ;;
 
-let exchange router ~meth ~path ~headers ~body =
+let exchange_with_authority ~authority router ~meth ~path ~headers ~body =
   Server_request_authority.with_current authority (fun () ->
     let output = Buffer.create 1024 in
     let connection =
@@ -206,6 +206,10 @@ let exchange router ~meth ~path ~headers ~body =
     in
     drain ();
     parse (Buffer.contents output))
+;;
+
+let exchange router ~meth ~path ~headers ~body =
+  exchange_with_authority ~authority router ~meth ~path ~headers ~body
 ;;
 
 (* ---- a browser ---- *)
@@ -3164,7 +3168,47 @@ let preview_return_to_and_http_diagnostic () =
     Alcotest.(check string)
       "resolve_return_to accepts safe relative path with query"
       "/dashboard/keepers?tab=active"
-      (Masc.Auth_preview.resolve_return_to (Some "/dashboard/keepers?tab=active")))
+      (Masc.Auth_preview.resolve_return_to (Some "/dashboard/keepers?tab=active"));
+    let projected_of ~bind_host ~explicit_base_url =
+      match
+        Server_request_authority.make_trust_policy
+          ~bind_host
+          ~bind_port:8935
+          ~https_port:None
+          ~explicit_base_url
+      with
+      | Ok policy -> Server_request_authority.projection_context policy
+      | Error error -> Alcotest.fail (Server_request_authority.trust_policy_error_to_string error)
+    in
+    let remote_http =
+      exchange_with_authority
+        ~authority:
+          (projected_of ~bind_host:"127.0.0.1" ~explicit_base_url:(Some "http://masc.example"))
+        router
+        ~meth:"GET"
+        ~path:"/"
+        ~headers:[]
+        ~body:""
+    in
+    Alcotest.(check bool)
+      "loopback bind behind plain-HTTP public host renders non_https_cookies_dropped alert"
+      true
+      (contains ~sub:{|data-cookie-transport="non_https_cookies_dropped"|} remote_http.body
+       && contains ~sub:{|role="alert"|} remote_http.body);
+    let wildcard_local =
+      exchange_with_authority
+        ~authority:(projected_of ~bind_host:"0.0.0.0" ~explicit_base_url:None)
+        router
+        ~meth:"GET"
+        ~path:"/"
+        ~headers:[]
+        ~body:""
+    in
+    Alcotest.(check bool)
+      "wildcard bind serving loopback 127.0.0.1 renders loopback_http_cookies note"
+      true
+      (contains ~sub:{|data-cookie-transport="loopback_http_cookies"|} wildcard_local.body
+       && contains ~sub:{|role="note"|} wildcard_local.body))
 ;;
 
 let cookie_diagnostic_uses_browser_origin () =

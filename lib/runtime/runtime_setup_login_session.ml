@@ -250,6 +250,7 @@ let normalize_https_url raw =
     match Uri.scheme uri, Uri.host uri with
     | Some scheme, Some host
       when String.equal scheme "https"
+           && Option.is_none (Uri.userinfo uri)
            && String.length host > 0
            && String.for_all is_valid_host_char host
            && (String.contains host '.'
@@ -260,9 +261,10 @@ let normalize_https_url raw =
 let extract_osc8_urls raw =
   let len = String.length raw in
   let rec find_terminator i =
-    if i >= len then len, len
-    else if Char.equal raw.[i] '\007' then i, i + 1
-    else if Char.equal raw.[i] '\027' && i + 1 < len && Char.equal raw.[i + 1] '\\' then i, i + 2
+    if i >= len then None
+    else if Char.equal raw.[i] '\007' then Some (i, i + 1)
+    else if Char.equal raw.[i] '\027' && i + 1 < len && Char.equal raw.[i + 1] '\\' then
+      Some (i, i + 2)
     else find_terminator (i + 1)
   in
   let rec scan i acc =
@@ -273,18 +275,20 @@ let extract_osc8_urls raw =
       && Char.equal raw.[i + 2] '8'
       && Char.equal raw.[i + 3] ';'
     then
-      let term_start, next_i = find_terminator (i + 4) in
-      let payload = String.sub raw (i + 4) (term_start - (i + 4)) in
-      let acc =
-        match String.index_opt payload ';' with
-        | None -> acc
-        | Some sep ->
-          let uri_part = String.sub payload (sep + 1) (String.length payload - sep - 1) in
-          (match normalize_https_url uri_part with
-           | Some url -> url :: acc
-           | None -> acc)
-      in
-      scan next_i acc
+      match find_terminator (i + 4) with
+      | None -> List.rev acc
+      | Some (term_start, next_i) ->
+        let payload = String.sub raw (i + 4) (term_start - (i + 4)) in
+        let acc =
+          match String.index_opt payload ';' with
+          | None -> acc
+          | Some sep ->
+            let uri_part = String.sub payload (sep + 1) (String.length payload - sep - 1) in
+            (match normalize_https_url uri_part with
+             | Some url -> url :: acc
+             | None -> acc)
+        in
+        scan next_i acc
     else scan (i + 1) acc
   in
   scan 0 []
@@ -350,27 +354,62 @@ let is_device_code token =
     && (String.exists is_upper_letter left || String.exists is_upper_letter right)
   | [] | [ _ ] | _ :: _ :: _ :: _ -> false
 
-let extract_device_codes_from_plain plain =
+let is_device_cue_word = function
+  | "code" | "device" | "verify" | "verification" | "one-time" | "enter" | "otp" -> true
+  | _ -> false
+
+let has_device_code_context plain =
   let len = String.length plain in
   let rec skip_sep i = if i < len && is_token_separator plain.[i] then skip_sep (i + 1) else i in
   let rec take_tok i =
     if i < len && not (is_token_separator plain.[i]) then take_tok (i + 1) else i
   in
-  let rec loop i acc =
+  let rec loop i =
     let start = skip_sep i in
-    if start >= len then List.rev acc
+    if start >= len then false
     else
       let stop = take_tok start in
-      let raw = String.sub plain start (stop - start) in
-      let acc =
-        if String_util.contains_substring raw "://" then acc
-        else
-          let cleaned = trim_wrapper_punct raw in
-          if is_device_code cleaned then cleaned :: acc else acc
+      let word =
+        String.sub plain start (stop - start) |> trim_wrapper_punct |> String.lowercase_ascii
       in
-      loop stop acc
+      if is_device_cue_word word then true else loop stop
   in
-  loop 0 []
+  loop 0
+
+let extract_device_codes_from_plain plain =
+  if not (has_device_code_context plain) then []
+  else
+    let len = String.length plain in
+    let rec skip_sep i = if i < len && is_token_separator plain.[i] then skip_sep (i + 1) else i in
+    let rec take_tok i =
+      if i < len && not (is_token_separator plain.[i]) then take_tok (i + 1) else i
+    in
+    let rec loop i acc =
+      let start = skip_sep i in
+      if start >= len then List.rev acc
+      else
+        let stop = take_tok start in
+        let raw = String.sub plain start (stop - start) in
+        let acc =
+          if String_util.contains_substring raw "://" || String.ends_with ~suffix:":" raw then acc
+          else
+            let cleaned = trim_wrapper_punct raw in
+            if is_device_code cleaned then cleaned :: acc else acc
+        in
+        loop stop acc
+    in
+    loop 0 []
+
+let drop_trailing_incomplete_token text =
+  let len = String.length text in
+  if len = 0 || is_token_separator text.[len - 1] then text
+  else
+    let rec find_sep i =
+      if i < 0 then 0
+      else if is_token_separator text.[i] then i + 1
+      else find_sep (i - 1)
+    in
+    String.sub text 0 (find_sep (len - 1))
 
 let dedup_strings items =
   let seen = Hashtbl.create 4 in
@@ -492,6 +531,7 @@ let run_with interpreter t ~saved_login ~on_auth_hint ~env ~child_env ~cwd ~argv
     in
     let stdout_hint_buf = Buffer.create 256 in
     let stderr_hint_buf = Buffer.create 256 in
+    let pending_screen = ref None in
     let feed_pipe_hints buf text =
       if Option.is_some on_auth_hint then (
         Buffer.add_string buf text;
@@ -501,10 +541,12 @@ let run_with interpreter t ~saved_login ~on_auth_hint ~env ~child_env ~cwd ~argv
           let completed = String.sub content 0 (nl + 1) in
           let tail = String.sub content (nl + 1) (String.length content - nl - 1) in
           Buffer.clear buf;
-          if String.length tail <= max_pipe_hint_buffer then Buffer.add_string buf tail;
           emit_hints completed;
           let tlen = String.length tail in
-          if tlen > 0 && is_token_separator tail.[tlen - 1] then emit_hints tail
+          if tlen > max_pipe_hint_buffer then emit_hints tail
+          else (
+            Buffer.add_string buf tail;
+            if tlen > 0 && is_token_separator tail.[tlen - 1] then emit_hints tail)
         | None ->
           let clen = String.length content in
           if clen > max_pipe_hint_buffer then (
@@ -513,7 +555,7 @@ let run_with interpreter t ~saved_login ~on_auth_hint ~env ~child_env ~cwd ~argv
           else if clen > 0 && is_token_separator content.[clen - 1] then
             emit_hints content)
     in
-    let flush_pipe_hints () =
+    let flush_hints () =
       let flush buf =
         if Buffer.length buf > 0 then (
           let pending = Buffer.contents buf in
@@ -521,7 +563,12 @@ let run_with interpreter t ~saved_login ~on_auth_hint ~env ~child_env ~cwd ~argv
           emit_hints pending)
       in
       flush stdout_hint_buf;
-      flush stderr_hint_buf
+      flush stderr_hint_buf;
+      match !pending_screen with
+      | None -> ()
+      | Some rendered ->
+        pending_screen := None;
+        emit_hints rendered
     in
     let draw screen text =
       (* Replies are dropped: see [terminal_screen]. So are requests to the
@@ -532,10 +579,27 @@ let run_with interpreter t ~saved_login ~on_auth_hint ~env ~child_env ~cwd ~argv
       (* A cursor move or a new pen alone changes no row, so nothing new shows. *)
       let changed = Vte.dirty_rows screen <> [] in
       Vte.clear_dirty screen;
+      let chunk_terminated =
+        let len = String.length text in
+        len > 0 && is_token_separator text.[len - 1]
+      in
       if changed then (
         let rendered = screen_text screen in
         on_output (Screen rendered);
-        emit_hints rendered) in
+        if Option.is_some on_auth_hint then
+          if chunk_terminated then (
+            pending_screen := None;
+            emit_hints rendered)
+          else (
+            pending_screen := Some rendered;
+            emit_hints (drop_trailing_incomplete_token rendered)))
+      else if chunk_terminated then
+        match !pending_screen with
+        | None -> ()
+        | Some rendered ->
+          pending_screen := None;
+          emit_hints rendered
+    in
     let rec receive () =
       let json = Yojson.Safe.from_string (Eio.Buf_read.line reader) in
       match json with
@@ -554,10 +618,10 @@ let run_with interpreter t ~saved_login ~on_auth_hint ~env ~child_env ~cwd ~argv
             | Some (`String "terminal"), Some (`String text), Some screen -> draw screen text; receive ()
             | _ -> Error Transport_failed)
          | Some (`String "input_ready") ->
-           flush_pipe_hints ();
+           flush_hints ();
            Atomic.set t.input_pending false; on_input_ready (); receive ()
          | Some (`String "exited") ->
-           flush_pipe_hints ();
+           flush_hints ();
            (match List.assoc_opt "code" fields with
             | Some (`Int 0) -> Ok () | Some (`Int code) -> Error (Process_failed code)
             | _ -> Error Transport_failed)

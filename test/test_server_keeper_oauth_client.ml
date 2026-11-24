@@ -346,6 +346,7 @@ let test_callback_completion_page_signals_opener_under_csp () =
         { Server_keeper_oauth_http.For_testing.ok = true
         ; keeper = "keeper-\"<1>"
         ; provider = "linear"
+        ; auto_close = true
         }
       ~title:"masc"
       ~heading:"Attached"
@@ -369,11 +370,31 @@ let test_callback_completion_page_signals_opener_under_csp () =
     (contains_sub ~sub:{|data-keeper="keeper-&quot;&lt;1&gt;"|} body);
   check Alcotest.bool "provider in data attribute" true
     (contains_sub ~sub:{|data-provider="linear"|} body);
+  check Alcotest.bool "auto_close=true enables auto-close" true
+    (contains_sub ~sub:{|data-auto-close="true"|} body
+     && contains_sub ~sub:{|el.getAttribute("data-auto-close")==="true"|} body);
   check Alcotest.bool "same-origin postMessage completion signal" true
     (contains_sub ~sub:{|masc:oauth-complete|} body
      && contains_sub ~sub:{|window.opener.postMessage(payload,window.location.origin)|} body);
-  check Alcotest.bool "auto-closes popup window" true
+  check Alcotest.bool "auto-closes popup window when gated" true
     (contains_sub ~sub:{|window.close()|} body);
+  let _warn_headers, warn_body =
+    Server_keeper_oauth_http.For_testing.render_page
+      ~completion:
+        { Server_keeper_oauth_http.For_testing.ok = true
+        ; keeper = "keeper-1"
+        ; provider = "linear"
+        ; auto_close = false
+        }
+      ~title:"masc"
+      ~heading:"Attached with warning"
+      ~detail:"Token expires without renewal."
+      ()
+  in
+  check Alcotest.bool "warning/discovery-failure disables auto-close while still signaling opener"
+    true
+    (contains_sub ~sub:{|data-auto-close="false"|} warn_body
+     && contains_sub ~sub:{|masc:oauth-complete|} warn_body);
   let err_headers, err_body =
     Server_keeper_oauth_http.For_testing.render_page
       ~title:"masc"

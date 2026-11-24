@@ -75,28 +75,25 @@ let redirect_uri () =
   match Env_config_core.masc_http_base_url_opt () with
   | Some base_url -> Ok (base_url ^ callback_path)
   | None ->
-    (match Env_config_core.masc_host_opt () with
-     | None ->
-       (* Zero-config local launch: when neither MASC_HTTP_BASE_URL nor
-          MASC_HOST is configured and the server runs on its default loopback
-          bind, fall back to the local loopback callback so Server_callback
-          providers work locally without manual env exports. *)
-       (match loopback_redirect_uri () with
-        | Ok url -> Ok url
-        | Error message ->
-          Error (Printf.sprintf "this server does not know its own base URL: %s" message))
-     | Some host when Masc_network_defaults.is_unspecified_host host ->
-       (* Wildcard bind (0.0.0.0 / ::) is not a valid OAuth callback host;
-          project to local loopback just like RFC 8252 providers. *)
-       (match loopback_redirect_uri () with
-        | Ok url -> Ok url
-        | Error message ->
-          Error (Printf.sprintf "this server does not know its own base URL: %s" message))
-     | Some _ ->
-       (match Env_config_core.masc_http_base_url_result () with
-        | Ok base_url -> Ok (base_url ^ callback_path)
-        | Error message ->
-          Error (Printf.sprintf "this server does not know its own base URL: %s" message)))
+    (* Zero-config local launch: when MASC_HTTP_BASE_URL is unset and MASC_HOST
+       is unset or a wildcard bind (0.0.0.0 / ::), fall back to the local
+       loopback callback so Server_callback providers work locally without
+       manual env exports. *)
+    let use_loopback =
+      match Env_config_core.masc_host_opt () with
+      | None -> true
+      | Some host -> Masc_network_defaults.is_unspecified_host host
+    in
+    let resolved =
+      if use_loopback then loopback_redirect_uri ()
+      else
+        Result.map
+          (fun base_url -> base_url ^ callback_path)
+          (Env_config_core.masc_http_base_url_result ())
+    in
+    Result.map_error
+      (fun message -> Printf.sprintf "this server does not know its own base URL: %s" message)
+      resolved
 ;;
 
 let redirect_uri_for (provider : Provider.t) =

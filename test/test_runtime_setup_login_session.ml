@@ -228,7 +228,17 @@ let auth_hint_extraction () =
     ; S.Device_code
         { code = "WDJB-MJHT"; verification_uri = Some "https://github.com/login/device" }
     ]
-    (S.extract_auth_hints github_box)
+    (S.extract_auth_hints github_box);
+  check (list hint_testable) "uppercase hyphenated banners without OAuth/device context produce no device code"
+    []
+    (S.extract_auth_hints "Status: HTTP-4000 UTF8-JSON EXIT-CODE AUTH-CODE USER-CODE:\n");
+  check (list hint_testable) "label token ending in colon is ignored while device code is extracted"
+    [ S.Device_code { code = "WDJB-MJHT"; verification_uri = None } ]
+    (S.extract_auth_hints "Enter USER-CODE: WDJB-MJHT\n");
+  let userinfo_url = "https://" ^ "operator:" ^ "redacted" ^ "@auth.openai.com/codex/device" in
+  check (list hint_testable) "URLs with inline userinfo credentials are rejected"
+    []
+    (S.extract_auth_hints ("Open " ^ userinfo_url ^ " and https://operator@auth.openai.com/codex/device\n"))
 
 let piped_auth_hints_dedup_and_chunk_reassembly () = run_process (fun env path session ->
   let hints = ref [] in
@@ -272,6 +282,27 @@ let terminal_auth_hints_dedup_across_redraws () = run_process (fun env path sess
     !hints;
   Ok ())
 
+let terminal_auth_hints_split_url_no_half_emit () = run_process (fun env path session ->
+  let hints = ref [] in
+  let result = S.run session ~env ~child_env:(Unix.environment ()) ~cwd:path
+    ~argv:["python3";"-c";
+           "import sys,time\n"
+           ^ "sys.stdout.write('Visit https://auth.openai')\nsys.stdout.flush()\ntime.sleep(0.05)\n"
+           ^ "sys.stdout.write('.com/codex/device')\nsys.stdout.flush()\ntime.sleep(0.05)\n"
+           ^ "sys.stdout.write('\\r\\nCode: A1B2-C3D4E\\r\\n')\nsys.stdout.flush()\n"]
+    ~terminal:true ~is_closed:(fun () -> false)
+    ~on_ready:(fun () -> ()) ~on_input_ready:(fun () -> ())
+    ~on_auth_hint:(fun h -> hints := !hints @ [ h ])
+    ~on_output:(fun _ -> ()) in
+  get result;
+  check (list hint_testable) "PTY split URL waits for completion and never emits truncated prefix"
+    [ S.Auth_url { url = "https://auth.openai.com/codex/device" }
+    ; S.Device_code
+        { code = "A1B2-C3D4E"; verification_uri = Some "https://auth.openai.com/codex/device" }
+    ]
+    !hints;
+  Ok ())
+
 let () = run "setup-login-session" ["ownership", [test_case "scope and physical account locks" `Quick isolated_scope];
   "process lifetime", [test_case "normal exit" `Quick normal_exit;
     test_case "saved login closes input and reaps client" `Quick saved_login_closes_input;
@@ -282,7 +313,8 @@ let () = run "setup-login-session" ["ownership", [test_case "scope and physical 
   "auth hints", [
     test_case "ANSI stripping and structured extraction" `Quick auth_hint_extraction;
     test_case "piped chunk reassembly and deduplication" `Quick piped_auth_hints_dedup_and_chunk_reassembly;
-    test_case "terminal redraws deduplicated per session" `Quick terminal_auth_hints_dedup_across_redraws];
+    test_case "terminal redraws deduplicated per session" `Quick terminal_auth_hints_dedup_across_redraws;
+    test_case "terminal split URL does not emit truncated prefix" `Quick terminal_auth_hints_split_url_no_half_emit];
   "interpreter", [test_case "bundled release preferred" `Quick python_prefers_the_bundled_release;
     test_case "PATH fallback" `Quick python_falls_back_to_path;
     test_case "relative PATH cannot change with the workspace" `Quick

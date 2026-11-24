@@ -29,6 +29,7 @@ module For_testing : sig
     { ok : bool
     ; keeper : string
     ; provider : string
+    ; auto_close : bool
     }
 
   val render_page

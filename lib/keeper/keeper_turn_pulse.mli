@@ -84,6 +84,12 @@ val record :
 val get : base_path:string -> keeper_name:string -> pulse option
 (** [None] when the keeper was neither seeded nor recorded. *)
 
+val turns_in_window : now:float -> pulse -> int
+(** Count [ok + failed] turns across the 48 half-hour slots ending at
+    [slot_start now] ({!window_seconds}). Slots older than that window or
+    stamped after [slot_start now] do not count, so a keeper that has been
+    quiet for more than a day reports [0] rather than its last active day. *)
+
 val recent_turns_json : base_path:string -> keeper_name:string -> Yojson.Safe.t
 (** A keeper row's [recent_turns] field: [{known_since, slots}] with one
     object per slot, newest first, or [null] when the keeper has no pulse. The

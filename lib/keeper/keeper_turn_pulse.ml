@@ -163,6 +163,19 @@ let record ~base_path ~keeper_name ~at ~cause outcome =
 
 let get ~base_path ~keeper_name = KeyMap.find_opt (base_path, keeper_name) (Atomic.get state)
 
+let turns_in_window ~now (pulse : pulse) =
+  let current_slot = slot_start now in
+  let slots_per_window = window_seconds / slot_seconds in
+  let window_start = current_slot - ((slots_per_window - 1) * slot_seconds) in
+  List.fold_left
+    (fun total (slot : slot) ->
+      if slot.starts_at >= window_start && slot.starts_at <= current_slot
+      then total + slot.tally.ok + slot.tally.failed
+      else total)
+    0
+    pulse.slots
+;;
+
 let slot_to_json { starts_at; tally = { ok; rested; failed }; causes } =
   let { scheduled; reacted; chat; own; unknown } = causes in
   `Assoc

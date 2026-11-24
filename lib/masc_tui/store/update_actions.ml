@@ -569,8 +569,10 @@ let open_custom_inline_modal (m : Model.t) (fields : Model.modal_form_field list
     {
       m.nav with
       overlay = Some (Nav.Inline_action Nav.Board_new_post);
+      return_overlay = None;
       filter_focused = false;
       sidebar_focused = false;
+      modal_edit_cursor = String.length (Model.modal_active_field_value modal);
     }
   in
   let drafts = Drafts.set_focus false m.drafts in
@@ -912,8 +914,10 @@ let open_harness_overrule_for_selected ~verdict ~now (m : Model.t) =
     {
       m.nav with
       overlay = Some (Nav.Inline_action (Nav.Harness_overrule seed_hash));
+      return_overlay = None;
       filter_focused = false;
       sidebar_focused = false;
+      modal_edit_cursor = String.length (Model.modal_active_field_value modal);
     }
   in
   let drafts = Drafts.set_focus false m.drafts in
@@ -965,8 +969,10 @@ let open_connector_form_populated (m : Model.t) =
     {
       m.nav with
       overlay = Some (Nav.Inline_action Nav.Connector_form);
+      return_overlay = None;
       filter_focused = false;
       sidebar_focused = false;
+      modal_edit_cursor = String.length (Model.modal_active_field_value modal);
     }
   in
   let drafts = Drafts.set_focus false m.drafts in
@@ -1503,13 +1509,64 @@ and submit_composer ~now ~mode (m : Model.t) =
       if String.equal trimmed "" then (m, [])
       else if Char.equal trimmed.[0] '/' then submit_slash_text ~now m trimmed
       else
+        let leading_mention_opt =
+          if Char.equal trimmed.[0] '@' then
+            let len = String.length trimmed in
+            let sp_idx =
+              let rec scan i =
+                if i >= len then len
+                else if
+                  Char.equal trimmed.[i] ' '
+                  || Char.equal trimmed.[i] '\t'
+                  || Char.equal trimmed.[i] '\n'
+                then i
+                else scan (i + 1)
+              in
+              scan 1
+            in
+            let candidate = String.sub trimmed 1 (sp_idx - 1) in
+            let rest =
+              if sp_idx < len then
+                String.trim (String.sub trimmed sp_idx (len - sp_idx))
+              else ""
+            in
+            match Fleet_store.find_keeper ~name:candidate m.fleet with
+            | Some k -> Some (k.name, rest)
+            | None -> None
+          else None
+        in
+        match leading_mention_opt with
+        | Some (mentioned_keeper, "") ->
+            let drafts =
+              m.drafts
+              |> Drafts.clear_current_draft
+              |> Drafts.set_active_keeper mentioned_keeper
+            in
+            ( Model.with_toast ~now ~level:Model.Toast_info
+                (Say.make
+                   ~ko:("대상 키퍼 전환됨: @" ^ mentioned_keeper)
+                   ~en:("Target keeper switched to @" ^ mentioned_keeper))
+                { m with drafts }
+            , [] )
+        | Some (mentioned_keeper, rest) ->
+            let drafts_switched =
+              m.drafts
+              |> Drafts.clear_current_draft
+              |> Drafts.set_active_keeper mentioned_keeper
+              |> Drafts.set_current_text rest
+            in
+            submit_composer ~now ~mode { m with drafts = drafts_switched }
+        | None ->
         match Update_nav.resolve_target_keeper m with
         | None ->
+            let opened, cmds =
+              Update_nav.open_palette m Model.Palette_keepers
+            in
             ( Model.with_toast ~now ~level:Model.Toast_warning
                 (Say.make ~ko:"대상 키퍼를 먼저 선택하세요"
                    ~en:"Select a target keeper first")
-                m
-            , [] )
+                opened
+            , cmds )
         | Some keeper -> (
             let prior_user_msg_ids =
               match
@@ -1722,9 +1779,10 @@ and execute_action ~now (m : Model.t) action =
                     ( { m1 with config = Config_store.toggle_pane m1.config }
                     , cmds )
                 | None -> ({ m with config = Config_store.toggle_pane c }, []))
-            | Error _ ->
-                let cfg0 = Config_store.cancel_edit_field m.config in
-                ({ m with config = Config_store.toggle_pane cfg0 }, [])
+            | Error reason ->
+                ( Model.with_toast ~now ~level:Model.Toast_warning
+                    (Say.literal reason) m
+                , [] )
           else ({ m with config = Config_store.toggle_pane m.config }, [])
       | Some Nav.Palette ->
           let len = Update_nav.palette_len m in
@@ -1733,7 +1791,22 @@ and execute_action ~now (m : Model.t) action =
             let delta = match dir with Keymap.Next -> 1 | Keymap.Prev -> -1 in
             let cur = Update_nav.clamp_index len m.palette.selected in
             let selected = (cur + delta + len) mod len in
-            ({ m with palette = { m.palette with selected } }, [])
+            let list_h =
+              let modal_h = min (max 0 (m.viewport.rows - 4)) 22 in
+              let inner_h = max 0 (modal_h - 2) in
+              max 1 (inner_h - 3)
+            in
+            let palette_scroll_offset, _ =
+              Masc_tui_ui.Table.compute_viewport ~total_rows:(max 1 len)
+                ~viewport_rows:list_h ~scroll:m.nav.palette_scroll_offset
+                ~selected:(Some selected)
+            in
+            ( {
+                m with
+                palette = { m.palette with selected };
+                nav = { m.nav with palette_scroll_offset };
+              }
+            , [] )
       | Some (Nav.Queue_context _) -> Update_nav.cycle_sub_tab m dir
       | Some (Nav.Inline_action _) -> (
           match m.inline_modal with
@@ -1770,9 +1843,14 @@ and execute_action ~now (m : Model.t) action =
                 let delta =
                   match dir with Keymap.Next -> 1 | Keymap.Prev -> -1
                 in
+                let next_modal = Model.modal_cycle_field ~delta modal in
+                let modal_edit_cursor =
+                  String.length (Model.modal_active_field_value next_modal)
+                in
                 ( {
                     m with
-                    inline_modal = Some (Model.modal_cycle_field ~delta modal);
+                    inline_modal = Some next_modal;
+                    nav = { m.nav with modal_edit_cursor };
                   }
                 , [] ))
       | Some Nav.Ask_answer -> (
@@ -1925,7 +2003,39 @@ and execute_action ~now (m : Model.t) action =
       else
         match m.nav.overlay with
         | Some Nav.Palette -> confirm_palette ~now m
-        | Some (Nav.Inline_action _) -> Update_nav.submit_inline_modal ~now m
+        | Some (Nav.Inline_action Nav.Btw_query) -> (
+            match m.drafts.btw with
+            | Drafts.Btw_answered _ | Drafts.Btw_failed _ ->
+                ( {
+                    m with
+                    nav =
+                      {
+                        m.nav with
+                        overlay = None;
+                        filter_focused = false;
+                        btw_scroll_offset = 0;
+                      };
+                    drafts = Drafts.clear_btw m.drafts;
+                    inline_modal = None;
+                  }
+                , [] )
+            | Drafts.Btw_idle | Drafts.Btw_sending _ | Drafts.Btw_streaming _ ->
+                Update_nav.submit_inline_modal ~now m)
+        | Some
+            (Nav.Inline_action
+               ( Nav.Gate_reject _
+               | Nav.Verification_reject _
+               | Nav.Harness_overrule _
+               | Nav.Task_cancel _
+               | Nav.Schedule_form
+               | Nav.Connector_form
+               | Nav.Repo_add_form
+               | Nav.Board_new_post
+               | Nav.Board_comment _
+               | Nav.Github_token_form _
+               | Nav.Code_finder_form
+               | Nav.Code_search_form )) ->
+            Update_nav.submit_inline_modal ~now m
         | Some Nav.Ask_answer -> (
             match m.ask_modal with
             | None -> (m, [])
@@ -2093,13 +2203,42 @@ and execute_action ~now (m : Model.t) action =
                 config = Config_store.set_search_query "" m.config;
               }
             , [] )
+          else if
+            Config_store.dirty_count m.config > 0
+            && not m.config.discard_confirm_armed
+          then
+            let n = Config_store.dirty_count m.config in
+            let config = Config_store.arm_discard_confirm m.config in
+            ( Model.with_toast ~now ~level:Model.Toast_warning
+                (Say.make
+                   ~ko:
+                     (Printf.sprintf
+                        "저장하지 않은 변경 %d건 — [Ctrl+S] 저장 · [Esc] 다시 눌러 버리고 닫기"
+                        n)
+                   ~en:
+                     (Printf.sprintf
+                        "%d unsaved change(s) — [Ctrl+S] save · press [Esc] again to discard"
+                        n))
+                { m with config }
+            , [] )
           else
           let close_overlay_and_resync (base_m : Model.t) =
+            let cfg_clean =
+              if base_m.config.discard_confirm_armed then
+                Config_store.clear_dirty base_m.config
+              else Config_store.disarm_discard_confirm base_m.config
+            in
             let closed =
               {
                 base_m with
-                nav = { base_m.nav with overlay = None; filter_focused = false };
-                config = Config_store.cancel_edit_field base_m.config;
+                nav =
+                  {
+                    base_m.nav with
+                    overlay = None;
+                    return_overlay = None;
+                    filter_focused = false;
+                  };
+                config = Config_store.cancel_edit_field cfg_clean;
                 inline_modal = None;
               }
               |> Update_nav.sync_config_for_keeper_view
@@ -2198,15 +2337,45 @@ and execute_action ~now (m : Model.t) action =
                 }
               in
               (closed, []))
+      | Some Nav.Help ->
+          let closed =
+            {
+              m with
+              nav =
+                {
+                  m.nav with
+                  overlay = m.nav.return_overlay;
+                  return_overlay = None;
+                  filter_focused = false;
+                };
+              config = Config_store.cancel_edit_field m.config;
+              inline_modal = None;
+            }
+            |> Update_nav.sync_config_for_keeper_view
+          in
+          let cmds =
+            if
+              not
+                (Config_store.equal_config_target m.config.target
+                   closed.config.target)
+            then View_fetches.fetches_for_current_view closed
+            else []
+          in
+          (closed, cmds)
       | Some
           ( Nav.Palette
           | Nav.Queue_context _
-          | Nav.Help
           | Nav.System_gate Nav.Media_viewer ) ->
           let closed =
             {
               m with
-              nav = { m.nav with overlay = None; filter_focused = false };
+              nav =
+                {
+                  m.nav with
+                  overlay = None;
+                  return_overlay = None;
+                  filter_focused = false;
+                };
               config = Config_store.cancel_edit_field m.config;
               inline_modal = None;
               ask_modal = None;
@@ -2513,7 +2682,17 @@ and execute_action ~now (m : Model.t) action =
       | None -> (m, []))
   | Keymap.Open_help -> (
       match m.nav.overlay with
-      | Some Nav.Help -> ({ m with nav = { m.nav with overlay = None } }, [])
+      | Some Nav.Help ->
+          ( {
+              m with
+              nav =
+                {
+                  m.nav with
+                  overlay = m.nav.return_overlay;
+                  return_overlay = None;
+                };
+            }
+          , [] )
       | Some
           ( Nav.Palette
           | Nav.Settings _
@@ -2615,17 +2794,36 @@ and execute_action ~now (m : Model.t) action =
               ({ m with nav; config }, [])
           | Config_store.Pane_inspector -> (
               match Config_store.selected_field cfg0 with
-              | Some f when f.writable && f.kind = Wire_config.Field_bool -> (
+              | Some ({ writable = true; kind = Wire_config.Field_bool; _ } as f) -> (
                   match Config_store.step_selected_field ~delta:1 cfg0 with
-                  | Ok (config, true) ->
+                  | Ok (config, true) -> (
                       let config =
                         if not two_pane then
                           { config with settings_pane = m.config.settings_pane }
                         else config
                       in
-                      ({ m with config }, [])
+                      match
+                        apply_staged_tui_pref_if_needed ~now ~key:f.full_key m
+                          config
+                      with
+                      | Some res -> res
+                      | None -> ({ m with config }, []))
                   | Ok _ | Error _ -> (m, []))
-              | Some _ | None -> (m, [])))
+              | Some
+                  {
+                    kind =
+                      ( Wire_config.Field_bool
+                      | Wire_config.Field_int _
+                      | Wire_config.Field_float _
+                      | Wire_config.Field_string
+                      | Wire_config.Field_enum _
+                      | Wire_config.Field_string_list
+                      | Wire_config.Field_structured
+                      | Wire_config.Field_secret );
+                    _;
+                  }
+              | None ->
+                  (m, [])))
       | Some Nav.Ask_answer -> (
           match m.ask_modal with
           | None -> (m, [])
@@ -3017,7 +3215,10 @@ and execute_action ~now (m : Model.t) action =
                         {
                           m.nav with
                           overlay = Some (Nav.Inline_action Nav.Board_new_post);
+                          return_overlay = None;
                           filter_focused = false;
+                          modal_edit_cursor =
+                            String.length (Model.modal_active_field_value modal);
                         }
                       in
                       let drafts = Drafts.set_focus false m.drafts in
@@ -3280,13 +3481,39 @@ and execute_action ~now (m : Model.t) action =
       in
       let text_opt =
         match m.nav.overlay with
+        | Some (Nav.Inline_action Nav.Btw_query) -> (
+            match m.drafts.btw with
+            | Drafts.Btw_answered { reply; _ }
+              when not (String.equal (String.trim reply) "") ->
+                Some reply
+            | Drafts.Btw_streaming { buffer; _ }
+              when not (String.equal (String.trim buffer) "") ->
+                Some buffer
+            | Drafts.Btw_answered _
+            | Drafts.Btw_streaming _
+            | Drafts.Btw_idle
+            | Drafts.Btw_sending _
+            | Drafts.Btw_failed _ ->
+                None)
         | Some (Nav.System_gate Nav.Media_viewer) -> None
         | Some
             ( Nav.Palette
             | Nav.Settings _
             | Nav.Incidents
             | Nav.Queue_context _
-            | Nav.Inline_action _
+            | Nav.Inline_action
+                ( Nav.Gate_reject _
+                | Nav.Verification_reject _
+                | Nav.Harness_overrule _
+                | Nav.Task_cancel _
+                | Nav.Schedule_form
+                | Nav.Connector_form
+                | Nav.Repo_add_form
+                | Nav.Board_new_post
+                | Nav.Board_comment _
+                | Nav.Github_token_form _
+                | Nav.Code_finder_form
+                | Nav.Code_search_form )
             | Nav.Ask_answer
             | Nav.Help
             | Nav.System_gate

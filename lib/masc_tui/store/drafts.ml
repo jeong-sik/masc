@@ -257,8 +257,15 @@ let set_active_keeper name t =
               t.by_keeper
               |> String_map.remove default_keeper_key
               |> String_map.add trimmed d
-          | Some _, _ | None, _ -> t.by_keeper)
-      | Some _ -> t.by_keeper
+          | Some d, Some existing
+            when String.equal existing.text "" && not (String.equal d.text "")
+            ->
+              t.by_keeper
+              |> String_map.remove default_keeper_key
+              |> String_map.add trimmed d
+          | Some _, _ -> String_map.remove default_keeper_key t.by_keeper
+          | None, _ -> t.by_keeper)
+      | Some _ -> String_map.remove default_keeper_key t.by_keeper
     in
     {
       t with
@@ -283,8 +290,11 @@ let other_keepers_draft_count t =
   let active = target_keeper_key t in
   String_map.fold
     (fun k d acc ->
-      if (not (String.equal k active)) && not (String.equal d.text "") then
-        acc + 1
+      if
+        (not (String.equal k active))
+        && (not (String.equal k default_keeper_key))
+        && not (String.equal d.text "")
+      then acc + 1
       else acc)
     t.by_keeper 0
 
@@ -393,6 +403,62 @@ let move_cursor dir t =
         | `Right -> next_utf8_boundary d.text c
         | `Home -> 0
         | `End -> len
+      in
+      { d with cursor })
+    t
+
+let move_cursor_vertical dir t =
+  with_current_draft ~reset_popup:false
+    (fun d ->
+      let s = d.text in
+      let len = String.length s in
+      let c = clamp_cursor s d.cursor in
+      let line_start i =
+        let rec scan k =
+          if k <= 0 then 0
+          else if Char.equal s.[k - 1] '\n' then k
+          else scan (k - 1)
+        in
+        scan i
+      in
+      let line_end i =
+        let rec scan k =
+          if k >= len || Char.equal s.[k] '\n' then k else scan (k + 1)
+        in
+        scan i
+      in
+      let cur_start = line_start c in
+      let cur_end = line_end c in
+      let target_col =
+        let rec count_chars i acc =
+          if i >= c then acc
+          else count_chars (next_utf8_boundary s i) (acc + 1)
+        in
+        count_chars cur_start 0
+      in
+      let advance_chars start limit n =
+        let rec step i rem =
+          if rem <= 0 || i >= limit then i
+          else
+            let nxt = next_utf8_boundary s i in
+            if nxt > limit then i else step nxt (rem - 1)
+        in
+        step start n
+      in
+      let cursor =
+        match dir with
+        | `Up ->
+            if cur_start = 0 then 0
+            else
+              let prev_end = cur_start - 1 in
+              let prev_start = line_start prev_end in
+              advance_chars prev_start prev_end target_col
+        | `Down ->
+            if cur_end >= len then len
+            else
+              let next_start = cur_end + 1 in
+              let next_end = line_end next_start in
+              advance_chars next_start next_end target_col
       in
       { d with cursor })
     t

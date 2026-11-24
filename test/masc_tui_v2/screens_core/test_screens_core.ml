@@ -3504,6 +3504,123 @@ let test_ask_answer_modal_and_honest_ask_surfaces () =
       , "already answered or withdrawn" );
     ]
 
+let test_pr54557_form_cursor_insertion_and_settings_secret_mask () =
+  let base = populated_model ~cols:140 ~rows:40 ~lang:Say.Lang_en in
+  (* 1. Form.draw inserts cursor glyph without overwriting following ASCII or CJK chars *)
+  let mk_modal_model ~value ~cursor =
+    let modal : Model.inline_modal_state =
+      {
+        kind = Nav.Board_new_post;
+        fields =
+          [
+            {
+              key = "title";
+              label = Say.literal "Title";
+              value;
+              required = true;
+              secret = false;
+            };
+          ];
+        active_field = 0;
+        submitting = false;
+        error = None;
+      }
+    in
+    {
+      base with
+      nav =
+        {
+          base.nav with
+          overlay = Some (Nav.Inline_action Nav.Board_new_post);
+          modal_edit_cursor = cursor;
+        };
+      inline_modal = Some modal;
+    }
+  in
+  let g_ascii, _ =
+    render_full ~model:(mk_modal_model ~value:"abc" ~cursor:1) ~cols:120 ~rows:36
+  in
+  assert_clean_grid ~label:"PR54557/FormCursorASCII" g_ascii;
+  assert_contains ~label:"PR54557/FormCursorASCII preserves 'b' after cursor"
+    ~needle:"a▏bc" (grid_all_text g_ascii);
+  let g_cjk, _ =
+    render_full ~model:(mk_modal_model ~value:"가나" ~cursor:3) ~cols:120 ~rows:36
+  in
+  assert_clean_grid ~label:"PR54557/FormCursorCJK no orphan continuation" g_cjk;
+  assert_contains ~label:"PR54557/FormCursorCJK preserves '나' after cursor"
+    ~needle:"가▏나" (grid_all_text g_cjk);
+
+  (* 2. Settings grouped inspector never leaks unrevealed Secret_val during inline editing *)
+  let secret_plain = "sk-ant-super-secret-999" in
+  let secret_field : Wire_config.schema_field =
+    {
+      table = "providers.anthropic";
+      key = "api_key";
+      full_key = "providers.anthropic.api_key";
+      label = "API Key";
+      env = Some "ANTHROPIC_API_KEY";
+      description = None;
+      kind = Wire_config.Field_secret;
+      value = Wire_config.Val_string secret_plain;
+      default_value = None;
+      provenance = Wire_config.Prov_project;
+      reload_scope = Wire_config.Hot_reload;
+      secret = true;
+      writable = true;
+    }
+  in
+  let schema : Wire_config.config_schema =
+    {
+      target = Wire_config.Target_runtime;
+      keeper = None;
+      file_exists = true;
+      file_sha256 = "sha256-secret-test";
+      sections =
+        [
+          {
+            id = "providers.anthropic";
+            category = Wire_config.Cat_providers_models;
+            title = "Anthropic";
+            fields = [ secret_field ];
+          };
+        ];
+    }
+  in
+  let cfg_editing =
+    let c0 =
+      Config_store.empty
+      |> Config_store.set_tab Nav.Settings_providers_models
+      |> Config_store.apply_schema ~observed_at:Clock.Mono.zero schema
+    in
+    {
+      c0 with
+      editing_field_key = Some "providers.anthropic.api_key";
+      editing_buffer = secret_plain;
+      editing_cursor = String.length secret_plain;
+    }
+  in
+  let m_set =
+    {
+      base with
+      nav =
+        {
+          base.nav with
+          overlay = Some (Nav.Settings Nav.Settings_providers_models);
+          pane_index = 1;
+        };
+      config = cfg_editing;
+    }
+  in
+  let g_set, _ = render_full ~model:m_set ~cols:140 ~rows:40 in
+  assert_clean_grid ~label:"PR54557/SettingsSecretEdit" g_set;
+  let txt_set = grid_all_text g_set in
+  Alcotest.(check bool)
+    "PR54557/SettingsSecretEdit renders masked cursor while editing secret" true
+    (Store_scroll.contains_ci ~needle:"▏" txt_set);
+  Alcotest.(check bool)
+    "PR54557/SettingsSecretEdit must never leak plaintext secret" false
+    (Store_scroll.contains_ci ~needle:secret_plain txt_set)
+
 let () =
   Alcotest.run "masc_tui_screens_core"
     [
@@ -3567,6 +3684,8 @@ let () =
             `Quick test_build_commit_display_in_help_and_settings;
           Alcotest.test_case "Ask Answer Modal & honest Approval Strip / Pulse / Sidebar surfaces"
             `Quick test_ask_answer_modal_and_honest_ask_surfaces;
+          Alcotest.test_case "PR #54557: Form cursor insertion (ASCII/CJK) & Settings secret edit masking"
+            `Quick test_pr54557_form_cursor_insertion_and_settings_secret_mask;
         ] );
       ( "memory_explorer",
         [

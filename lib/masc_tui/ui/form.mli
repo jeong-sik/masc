@@ -146,6 +146,8 @@ val draw :
   ?show_row_badges:bool ->
   ?show_help_footer:bool ->
   ?focused:bool ->
+  ?elevated:bool ->
+  ?edit_cursor:int ->
   state ->
   int
 (** Paint fields, calm [selection_bg] + [▎] focus indicator, optional

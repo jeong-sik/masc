@@ -26,6 +26,7 @@ let palette_modal_rect ~(rect : Rect.t) =
 
 type palette_row =
   | Palette_header of string
+  | Palette_overflow of string
   | Palette_item of {
       selectable_idx : int option;
       badge : string;
@@ -83,9 +84,29 @@ let equal_palette_section a b =
 
 let build_universal_palette_rows (m : Model.t) =
   let lang = m.lang in
-  let entries = Update_nav.palette_entries m in
+  let entries, overflow = Update_nav.palette_entries_with_overflow m in
+  let overflow_for sec =
+    List.find_map
+      (fun (s, n) -> if equal_palette_section s sec then Some n else None)
+      overflow
+  in
   let rows = ref [] in
   let prev_sec = ref None in
+  let flush_overflow () =
+    match !prev_sec with
+    | None -> ()
+    | Some sec -> (
+        match overflow_for sec with
+        | Some n when n > 0 ->
+            let msg =
+              Say.resolve lang
+                (Say.make
+                   ~ko:(Printf.sprintf "  +%d개 더 있음 — 검색어를 입력해 좁히세요" n)
+                   ~en:(Printf.sprintf "  +%d more — type to narrow" n))
+            in
+            rows := Palette_overflow msg :: !rows
+        | Some _ | None -> ())
+  in
   List.iteri
     (fun idx (e : Update_nav.palette_entry) ->
       let changed =
@@ -94,6 +115,7 @@ let build_universal_palette_rows (m : Model.t) =
         | None -> true
       in
       if changed then begin
+        flush_overflow ();
         rows := Palette_header (palette_section_header ~lang e.section) :: !rows;
         prev_sec := Some e.section
       end;
@@ -108,6 +130,7 @@ let build_universal_palette_rows (m : Model.t) =
           }
         :: !rows)
     entries;
+  flush_overflow ();
   List.rev !rows
 
 let render_palette grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
@@ -195,9 +218,48 @@ let render_palette grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
           Cell_grid.put_ascii ~clip:q_row grid ~x:cur_x ~y:inner.y
             ~style:cursor_style ' '
       end;
-      if inner.h >= 2 then
+      let show_mode_bar = inner.h >= 4 in
+      if show_mode_bar then begin
+        let mode_y = inner.y + 1 in
+        let mode_r = Rect.make ~x:q_left ~y:mode_y ~w:q_w ~h:1 in
+        let modes =
+          [
+            ( Model.Palette_commands
+            , Say.resolve lang (Say.make ~ko:"^K 명령·전체" ~en:"^K Commands") );
+            ( Model.Palette_keepers
+            , Say.resolve lang (Say.make ~ko:"^G 키퍼" ~en:"^G Keepers") );
+            ( Model.Palette_models
+            , Say.resolve lang (Say.make ~ko:"^L 모델" ~en:"^L Models") );
+          ]
+        in
+        let mx = ref q_left in
+        List.iteri
+          (fun idx (md, lbl) ->
+            if idx > 0 then begin
+              let sep = "  " ^ Glyph.to_utf8 Glyph.Separator_dot ^ "  " in
+              let adv =
+                Cell_grid.put_text ~clip:mode_r grid ~x:!mx ~y:mode_y
+                  ~style:whisper_st sep
+              in
+              mx := !mx + adv
+            end;
+            let active = Model.equal_palette_mode model.palette.mode md in
+            let st =
+              if active then Typography.anchor ~bg ~underline:true theme
+              else Typography.structure ~bg theme
+            in
+            let prefix = if active then Glyph.to_utf8 Glyph.Left_rail ^ " " else "" in
+            let adv =
+              Cell_grid.put_text ~clip:mode_r grid ~x:!mx ~y:mode_y ~style:st
+                (prefix ^ lbl)
+            in
+            mx := !mx + adv)
+          modes;
+        Card.draw_hairline ~pad_x ~bg grid ~rect:inner ~y:(inner.y + 2) ~theme
+      end
+      else if inner.h >= 2 then
         Card.draw_hairline ~pad_x ~bg grid ~rect:inner ~y:(inner.y + 1) ~theme;
-      let list_y = inner.y + 2 in
+      let list_y = inner.y + if show_mode_bar then 3 else 2 in
       let list_h = Int.max 0 (Rect.bottom inner - list_y) in
       if list_h > 0 then begin
         let rows =
@@ -251,7 +313,9 @@ let render_palette grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               (fun acc row ->
                 match row with
                 | Palette_item { selectable_idx = Some _; _ } -> acc + 1
-                | Palette_header _ | Palette_item { selectable_idx = None; _ } ->
+                | Palette_header _
+                | Palette_overflow _
+                | Palette_item { selectable_idx = None; _ } ->
                     acc)
               0 rows
           in
@@ -266,14 +330,15 @@ let render_palette grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 | Palette_item { selectable_idx = Some si; _ }
                   when selectable_count > 0 && Int.equal si clamped_sel ->
                     i
-                | Palette_header _ | Palette_item _ -> find (i + 1)
+                | Palette_header _ | Palette_overflow _ | Palette_item _ ->
+                    find (i + 1)
             in
             find 0
           in
-          let start =
-            if selected_row_pos >= list_h then
-              Int.min (Int.max 0 (total - list_h)) (selected_row_pos - list_h + 1)
-            else 0
+          let start, _ =
+            Table.compute_viewport ~total_rows:total ~viewport_rows:list_h
+              ~scroll:model.nav.palette_scroll_offset
+              ~selected:(Some selected_row_pos)
           in
           let right_edge = Rect.right inner - pad_x in
           for i = 0 to list_h - 1 do
@@ -285,6 +350,11 @@ let render_palette grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               | Palette_header hdr ->
                   Card.draw_hairline ~pad_x ~label:hdr ~bg grid ~rect:inner
                     ~y:py ~theme
+              | Palette_overflow msg ->
+                  ignore
+                    (Cell_grid.put_text ~clip:row_r grid ~x:q_left ~y:py
+                       ~style:whisper_st
+                       (Grapheme.truncate_to_width ~max_width:q_w msg))
               | Palette_item { selectable_idx; badge; title; meta; tone } ->
                   let is_sel =
                     match selectable_idx with
@@ -540,9 +610,10 @@ let apply_staged_op_to_value ~(kind : Wire_config.field_kind)
       | Wire_config.Field_float _
       | Wire_config.Field_string
       | Wire_config.Field_string_list
-      | Wire_config.Field_structured
+      | Wire_config.Field_structured ->
+          Form.Text_val value
       | Wire_config.Field_secret ->
-          Form.Text_val value)
+          Form.secret_val ~revealed:false value)
 
 let form_field_of_schema_field ~(m : Model.t) (f : Wire_config.schema_field) :
     Form.field =
@@ -574,18 +645,21 @@ let form_field_of_schema_field ~(m : Model.t) (f : Wire_config.schema_field) :
   let value =
     match m.config.editing_field_key with
     | Some ek when String.equal ek f.full_key -> (
-        match f.kind with
-        | Wire_config.Field_int _ ->
-            Form.int_val_of_raw m.config.editing_buffer
-        | Wire_config.Field_float _ ->
-            Form.float_val_of_raw m.config.editing_buffer
-        | Wire_config.Field_bool
-        | Wire_config.Field_string
-        | Wire_config.Field_enum _
-        | Wire_config.Field_string_list
-        | Wire_config.Field_structured
-        | Wire_config.Field_secret ->
-            Form.Text_val m.config.editing_buffer)
+        if f.secret then Form.secret_val ~revealed:false m.config.editing_buffer
+        else
+          match f.kind with
+          | Wire_config.Field_int _ ->
+              Form.int_val_of_raw m.config.editing_buffer
+          | Wire_config.Field_float _ ->
+              Form.float_val_of_raw m.config.editing_buffer
+          | Wire_config.Field_secret ->
+              Form.secret_val ~revealed:false m.config.editing_buffer
+          | Wire_config.Field_bool
+          | Wire_config.Field_string
+          | Wire_config.Field_enum _
+          | Wire_config.Field_string_list
+          | Wire_config.Field_structured ->
+              Form.Text_val m.config.editing_buffer)
     | Some _ | None -> (
         match
           Config_store.String_map.find_opt f.full_key m.config.dirty_fields
@@ -1062,11 +1136,64 @@ let draw_grouped_section_form grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang
             let val_st =
               Style.make ~fg:(Color.of_rgb val_fg) ~bg:rbg ~attrs:val_attrs ()
             in
-            if val_w > 0 then
-              ignore
-                (Cell_grid.put_text ~clip:row_r grid ~x:val_x ~y:!y
-                   ~style:val_st
-                   (Grapheme.truncate_to_width ~max_width:val_w val_str));
+            if val_w > 0 then begin
+              let is_editing_this =
+                is_focused && form_state.editing
+                && Option.equal String.equal model.config.editing_field_key
+                     (Some f.key)
+              in
+              if is_editing_this then begin
+                let raw, cur =
+                  match f.value with
+                  | Form.Secret_val { revealed = false; _ } ->
+                      (val_str, String.length val_str)
+                  | Form.Text_val _
+                  | Form.Multiline_val _
+                  | Form.Int_val _
+                  | Form.Float_val _
+                  | Form.Bool_val _
+                  | Form.Enum_val _
+                  | Form.Secret_val { revealed = true; _ } ->
+                      let buf = model.config.editing_buffer in
+                      (buf, Config_store.clamp_edit_cursor buf model.config.editing_cursor)
+                in
+                let raw_len = String.length raw in
+                let before = String.sub raw 0 cur in
+                let after = String.sub raw cur (raw_len - cur) in
+                let marked = before ^ "▏" ^ after in
+                let rendered =
+                  if Grapheme.display_width marked <= val_w then marked
+                  else
+                    let budget = Int.max 1 (val_w - 1) in
+                    let keep_before = Int.max 1 ((budget * 2) / 3) in
+                    let rec drop_prefix s =
+                      if Grapheme.display_width s <= keep_before then s
+                      else
+                        let sl = String.length s in
+                        if sl <= 0 then ""
+                        else
+                          let d = String.get_utf_8_uchar s 0 in
+                          let step = Int.max 1 (Uchar.utf_decode_length d) in
+                          drop_prefix (String.sub s step (sl - step))
+                    in
+                    let head_s =
+                      if Grapheme.display_width before > keep_before then
+                        "…" ^ drop_prefix before
+                      else before
+                    in
+                    Grapheme.truncate_to_width ~max_width:val_w
+                      (head_s ^ "▏" ^ after)
+                in
+                ignore
+                  (Cell_grid.put_text ~clip:row_r grid ~x:val_x ~y:!y
+                     ~style:val_st rendered)
+              end
+              else
+                ignore
+                  (Cell_grid.put_text ~clip:row_r grid ~x:val_x ~y:!y
+                     ~style:val_st
+                     (Grapheme.truncate_to_width ~max_width:val_w val_str))
+            end;
             (match chip with
              | Some (cs, cst) when show_chip ->
                  ignore
@@ -1857,14 +1984,18 @@ let render_settings grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
              ~en:"[d] Dry-run · [Ctrl+S] Save · [Esc] Close")
     in
     let footer_hint =
-      if modal_r.w >= 74 then
+      if modal_r.w >= 96 then
         Say.resolve lang
-          (Say.make ~ko:"[Tab] 좌/우 전환 · [Enter] 편집 · [Del] 삭제 · [/] 검색"
-             ~en:"[Tab] Switch pane · [Enter] Edit · [Del] Remove · [/] Search")
+          (Say.make ~ko:"[Tab] 좌/우 · [Enter] 편집 · [Del] 삭제 · [^E] $EDITOR · [/] 검색 · [?]"
+             ~en:"[Tab] Pane · [Enter] Edit · [Del] Remove · [^E] $EDITOR · [/] Search · [?]")
+      else if modal_r.w >= 74 then
+        Say.resolve lang
+          (Say.make ~ko:"[Tab] 좌/우 · [Enter] 편집 · [^E] $EDITOR · [/] 검색"
+             ~en:"[Tab] Pane · [Enter] Edit · [^E] $EDITOR · [/] Search")
       else
         Say.resolve lang
-          (Say.make ~ko:"[Enter] 편집 · [Del] 삭제 · [/] 검색"
-             ~en:"[Enter] Edit · [Del] Remove · [/] Search")
+          (Say.make ~ko:"[Enter] 편집 · [^E] $EDITOR · [/] 검색"
+             ~en:"[Enter] Edit · [^E] $EDITOR · [/] Search")
     in
     let inner =
       Card.draw ~cache grid ~rect:modal_r ~theme
@@ -2114,21 +2245,36 @@ let render_incidents_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
            ~en:(Printf.sprintf "%s Incident & Diagnostics Ledger (Ch 3)"
                   (Glyph.to_utf8 Glyph.Historical_incident)))
     in
+    let dismissed_tag =
+      if model.incidents.show_dismissed then
+        Say.resolve lang (Say.make ~ko:" · 숨김 포함" ~en:" · +dismissed")
+      else ""
+    in
     let badge : Card.badge =
-      {
-        glyph = Some Glyph.Historical_incident;
-        text =
-          Say.resolve lang
-            (Say.make
-               ~ko:(Printf.sprintf "활성 %d" active_n)
-               ~en:(Printf.sprintf "%d active" active_n));
-        tone = Some Theme.Status_historical;
-      }
+      if model.incidents.clear_confirm_armed then
+        {
+          glyph = Some Glyph.Warning_triangle;
+          text =
+            Say.resolve lang
+              (Say.make ~ko:"[c/D] 재입력 시 전체 삭제" ~en:"[c/D] again to clear");
+          tone = Some Theme.Status_critical;
+        }
+      else
+        {
+          glyph = Some Glyph.Historical_incident;
+          text =
+            Say.resolve lang
+              (Say.make
+                 ~ko:(Printf.sprintf "활성 %d%s" active_n dismissed_tag)
+                 ~en:(Printf.sprintf "%d active%s" active_n dismissed_tag));
+          tone = Some Theme.Status_historical;
+        }
     in
     let hotkey =
       Say.resolve lang
-        (Say.make ~ko:"[d] 숨김 · [c/D] 전체 비우기 · [o] 리소스 이동 · [Esc]"
-           ~en:"[d] Dismiss · [c/D] Clear · [o] Jump · [Esc]")
+        (Say.make
+           ~ko:"[d] 숨김 · [Space] 숨김표시 · [J/K] 상세 · [c] 비우기 · [o] 이동 · [Esc]"
+           ~en:"[d] Dismiss · [Space] Show hidden · [J/K] Detail · [c] Clear · [o] Jump · [Esc]")
     in
     let inner =
       Card.draw ~cache grid ~rect:drawer_r ~theme
@@ -2155,12 +2301,31 @@ let render_incidents_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
           ~h:1
       in
       let q_inc = String.trim model.incidents.filter_query in
+      let tail_window ~max_w s =
+        if Grapheme.display_width s <= max_w then s
+        else
+          let keep = Int.max 1 (max_w - 1) in
+          let rec drop s =
+            if Grapheme.display_width s <= keep then s
+            else
+              let sl = String.length s in
+              if sl <= 0 then ""
+              else
+                let d = String.get_utf_8_uchar s 0 in
+                let step = Int.max 1 (Uchar.utf_decode_length d) in
+                drop (String.sub s step (sl - step))
+          in
+          "…" ^ drop s
+      in
+      let max_q_w = Int.max 8 (hdr_r.w / 2) in
       let filter_pill, filter_st =
         if model.nav.filter_focused then
-          ( Printf.sprintf " / %s_ " model.incidents.filter_query,
+          ( Printf.sprintf " / %s▏ "
+              (tail_window ~max_w:max_q_w model.incidents.filter_query),
             Typography.anchor ~bg:(Color.of_rgb theme.selection_bg) theme )
         else if not (String.equal q_inc "") then
-          ( Printf.sprintf " / %s (%d) " q_inc (List.length entries),
+          ( Printf.sprintf " / %s (%d) "
+              (tail_window ~max_w:max_q_w q_inc) (List.length entries),
             Typography.accent ~bg:(Color.of_rgb theme.surface_1) ~bold:true theme )
         else
           ( Say.resolve lang (Say.make ~ko:"[/] 필터" ~en:"[/] Filter"),
@@ -2429,13 +2594,9 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             Some
               (Say.resolve lang
                  (match active_tab with
-                  | Nav.Drawer_queue | Nav.Drawer_schedules ->
+                  | Nav.Drawer_queue | Nav.Drawer_context | Nav.Drawer_schedules ->
                       Say.make ~ko:"[↑↓] 스크롤 · [[ ]/Tab] 탭 · [Esc] 닫기"
-                        ~en:"[↑↓] Scroll · [[ ]/Tab] Tabs · [Esc] Close"
-                  | Nav.Drawer_context ->
-                      (* The Context tab does not scroll. *)
-                      Say.make ~ko:"[[ ]/Tab] 탭 · [Esc] 닫기"
-                        ~en:"[[ ]/Tab] Tabs · [Esc] Close"));
+                        ~en:"[↑↓] Scroll · [[ ]/Tab] Tabs · [Esc] Close"));
           focused = true;
           elevated = true;
         }
@@ -2611,44 +2772,49 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                       String.equal r.keeper keeper)
                     eff.keepers
             in
-            let y = ref body_r.y in
+            let skip = Int.max 0 model.nav.queue_scroll_offset in
+            let vy = ref 0 in
             let bottom = Rect.bottom body_r in
+            let screen_y_for v = body_r.y + (v - skip) in
             let put_body_line ~style txt =
-              if !y < bottom then begin
+              let sy = screen_y_for !vy in
+              if !vy >= skip && sy < bottom then
                 ignore
-                  (Cell_grid.put_text ~clip:body_r grid ~x:body_r.x ~y:!y ~style
+                  (Cell_grid.put_text ~clip:body_r grid ~x:body_r.x ~y:sy ~style
                      (Grapheme.truncate_to_width ~max_width:body_r.w txt));
-                incr y
-              end
+              incr vy
             in
             let say ~ko ~en = Say.resolve lang (Say.make ~ko ~en) in
             let turn_entry = Keeper_context_store.selected_turn_entry ctx_st in
             (match (Observed.to_option ctx_st.turn_records, turn_entry) with
-             | Some page, Some e when !y < bottom ->
-                 let r = e.record in
-                 let step_s =
-                   Printf.sprintf "Turn #%d (%d/%d) · %s · %s"
-                     r.absolute_turn (ctx_st.selected_turn_idx + 1)
-                     (List.length page.entries)
-                     (Ids.Turn_ref.to_string r.turn_ref) r.runtime_profile
-                 in
-                 let hint_s =
-                   Say.resolve lang
-                     (Say.make ~ko:"[< >] 턴 · [Enter] 상세"
-                        ~en:"[< >] Turn · [Enter] Dive")
-                 in
-                 let hw = Grapheme.display_width hint_s in
-                 let lw = Int.max 8 (body_r.w - hw - 2) in
-                 let row_r = Rect.make ~x:body_r.x ~y:!y ~w:body_r.w ~h:1 in
-                 ignore
-                   (Cell_grid.put_text ~clip:row_r grid ~x:body_r.x ~y:!y
-                      ~style:(Typography.anchor ~bg theme)
-                      (Grapheme.truncate_to_width ~max_width:lw step_s));
-                 if body_r.w > hw + 10 then
+             | Some page, Some e ->
+                 let sy = screen_y_for !vy in
+                 if !vy >= skip && sy < bottom then begin
+                   let r = e.record in
+                   let step_s =
+                     Printf.sprintf "Turn #%d (%d/%d) · %s · %s"
+                       r.absolute_turn (ctx_st.selected_turn_idx + 1)
+                       (List.length page.entries)
+                       (Ids.Turn_ref.to_string r.turn_ref) r.runtime_profile
+                   in
+                   let hint_s =
+                     Say.resolve lang
+                       (Say.make ~ko:"[< >] 턴 · [Enter] 상세"
+                          ~en:"[< >] Turn · [Enter] Dive")
+                   in
+                   let hw = Grapheme.display_width hint_s in
+                   let lw = Int.max 8 (body_r.w - hw - 2) in
+                   let row_r = Rect.make ~x:body_r.x ~y:sy ~w:body_r.w ~h:1 in
                    ignore
-                     (Cell_grid.put_text ~clip:row_r grid
-                        ~x:(Rect.right row_r - hw) ~y:!y ~style:acc_st hint_s);
-                 incr y
+                     (Cell_grid.put_text ~clip:row_r grid ~x:body_r.x ~y:sy
+                        ~style:(Typography.anchor ~bg theme)
+                        (Grapheme.truncate_to_width ~max_width:lw step_s));
+                   if body_r.w > hw + 10 then
+                     ignore
+                       (Cell_grid.put_text ~clip:row_r grid
+                          ~x:(Rect.right row_r - hw) ~y:sy ~style:acc_st hint_s)
+                 end;
+                 incr vy
              | _ -> ());
             let ctx_used, ctx_hint, ctx_estimated =
               match keeper_opt with
@@ -2680,35 +2846,36 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                     Observed.value ~observed_at:Clock.Mono.zero 100.0,
                     Format_val.Percent )
             in
-            if !y + 2 <= bottom then begin
-              let gauge_r = Rect.make ~x:body_r.x ~y:!y ~w:body_r.w ~h:2 in
-              let spec : Chart.Spec.t =
-                {
-                  title =
-                    (if ctx_estimated && Option.is_none turn_entry then
-                       Say.make ~ko:"컨텍스트 윈도우 점유율 (추정)"
-                         ~en:"Context Window Fill (estimate)"
-                     else
-                       Say.make ~ko:"컨텍스트 윈도우 점유율"
-                         ~en:"Context Window Fill");
-                  kind =
-                    Chart.Spec.Ratio_gauge
-                      {
-                        used = used_obs;
-                        limit = lim_obs;
-                        unit = unit_kind;
-                        gradient = Chart.Gradient.Thermal;
-                        reset_hint = ctx_hint;
-                      };
-                  hotkey_hint = None;
-                }
-              in
-              ignore (Chart.draw grid ~rect:gauge_r ~theme ~caps ~lang spec);
-              y := !y + 3
-            end;
+            (let sy = screen_y_for !vy in
+             if !vy >= skip && sy + 2 <= bottom then begin
+               let gauge_r = Rect.make ~x:body_r.x ~y:sy ~w:body_r.w ~h:2 in
+               let spec : Chart.Spec.t =
+                 {
+                   title =
+                     (if ctx_estimated && Option.is_none turn_entry then
+                        Say.make ~ko:"컨텍스트 윈도우 점유율 (추정)"
+                          ~en:"Context Window Fill (estimate)"
+                      else
+                        Say.make ~ko:"컨텍스트 윈도우 점유율"
+                          ~en:"Context Window Fill");
+                   kind =
+                     Chart.Spec.Ratio_gauge
+                       {
+                         used = used_obs;
+                         limit = lim_obs;
+                         unit = unit_kind;
+                         gradient = Chart.Gradient.Thermal;
+                         reset_hint = ctx_hint;
+                       };
+                   hotkey_hint = None;
+                 }
+               in
+               ignore (Chart.draw grid ~rect:gauge_r ~theme ~caps ~lang spec)
+             end;
+             vy := !vy + 3);
             let draw_turn_composition () =
               match turn_entry with
-              | Some e when !y + 2 <= bottom ->
+              | Some e ->
                   let r = e.record in
                   let prompt_b, tools_b, msgs_b =
                     match r.input_components with
@@ -2739,99 +2906,104 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                           0 )
                   in
                   if prompt_b + tools_b + msgs_b > 0 then begin
-                    let bar_r = Rect.make ~x:body_r.x ~y:!y ~w:body_r.w ~h:3 in
-                    let spec : Chart.Spec.t =
-                      {
-                        title =
-                          Say.make ~ko:"턴 입력 구성 (바이트)"
-                            ~en:"Turn Input Composition";
-                        kind =
-                          Chart.Spec.Stacked_bar
-                            {
-                              segments =
-                                [
-                                  ( Say.make ~ko:"프롬프트" ~en:"Prompt",
-                                    float_of_int prompt_b,
-                                    Theme.Status_active );
-                                  ( Say.make ~ko:"도구 스키마" ~en:"Tools",
-                                    float_of_int tools_b,
-                                    Theme.Status_ai );
-                                  ( Say.make ~ko:"메시지" ~en:"Messages",
-                                    float_of_int msgs_b,
-                                    Theme.Status_ok );
-                                ];
-                              total_label =
-                                Say.literal
-                                  (Format_val.format_value Format_val.Bytes
-                                     (float_of_int
-                                        (prompt_b + tools_b + msgs_b)));
-                              unit = Format_val.Bytes;
-                            };
-                        hotkey_hint = None;
-                      }
-                    in
-                    ignore (Chart.draw grid ~rect:bar_r ~theme ~caps ~lang spec);
-                    y := !y + 3
+                    let sy = screen_y_for !vy in
+                    if !vy >= skip && sy + 3 <= bottom then begin
+                      let bar_r = Rect.make ~x:body_r.x ~y:sy ~w:body_r.w ~h:3 in
+                      let spec : Chart.Spec.t =
+                        {
+                          title =
+                            Say.make ~ko:"턴 입력 구성 (바이트)"
+                              ~en:"Turn Input Composition";
+                          kind =
+                            Chart.Spec.Stacked_bar
+                              {
+                                segments =
+                                  [
+                                    ( Say.make ~ko:"프롬프트" ~en:"Prompt",
+                                      float_of_int prompt_b,
+                                      Theme.Status_active );
+                                    ( Say.make ~ko:"도구 스키마" ~en:"Tools",
+                                      float_of_int tools_b,
+                                      Theme.Status_ai );
+                                    ( Say.make ~ko:"메시지" ~en:"Messages",
+                                      float_of_int msgs_b,
+                                      Theme.Status_ok );
+                                  ];
+                                total_label =
+                                  Say.literal
+                                    (Format_val.format_value Format_val.Bytes
+                                       (float_of_int
+                                          (prompt_b + tools_b + msgs_b)));
+                                unit = Format_val.Bytes;
+                              };
+                          hotkey_hint = None;
+                        }
+                      in
+                      ignore (Chart.draw grid ~rect:bar_r ~theme ~caps ~lang spec)
+                    end;
+                    vy := !vy + 3
                   end
-              | Some _ | None -> ()
+              | None -> ()
             in
             (match eff_row with
-             | Some r when !y + 3 <= bottom ->
-                 let cache_r =
-                   match Observed.to_option r.cache_read_tokens with
-                   | Some v -> float_of_int v
-                   | None -> 0.0
-                 in
-                 let cache_w =
-                   match Observed.to_option r.cache_creation_tokens with
-                   | Some v -> float_of_int v
-                   | None -> 0.0
-                 in
-                 let uncached =
-                   Float.max 0.0
-                     (float_of_int r.input_tokens -. cache_r -. cache_w)
-                 in
-                 let out_tok = float_of_int r.output_tokens in
-                 let bar_r = Rect.make ~x:body_r.x ~y:!y ~w:body_r.w ~h:3 in
-                 let spec : Chart.Spec.t =
-                   {
-                     title =
-                       Say.make ~ko:"프롬프트 캐시 구성"
-                         ~en:"Prompt Cache Breakdown";
-                     kind =
-                       Chart.Spec.Stacked_bar
-                         {
-                           segments =
-                             [
-                               ( Say.make ~ko:"캐시 읽기" ~en:"Cache Read",
-                                 cache_r,
-                                 Theme.Status_ok );
-                               ( Say.make ~ko:"캐시 쓰기" ~en:"Cache Write",
-                                 cache_w,
-                                 Theme.Status_active );
-                               ( Say.make ~ko:"비캐시 입력" ~en:"Uncached",
-                                 uncached,
-                                 Theme.Status_attention );
-                               ( Say.make ~ko:"출력" ~en:"Output",
-                                 out_tok,
-                                 Theme.Status_historical );
-                             ];
-                           total_label =
-                             Say.make
-                               ~ko:(Printf.sprintf "적중률 %s"
-                                      (Format_val.format_observed
-                                         Format_val.Percent r.cache_hit_pct ~lang))
-                               ~en:(Printf.sprintf "Hit %s"
-                                      (Format_val.format_observed
-                                         Format_val.Percent r.cache_hit_pct ~lang));
-                           unit = Format_val.Tokens;
-                         };
-                     hotkey_hint = None;
-                   }
-                 in
-                 ignore (Chart.draw grid ~rect:bar_r ~theme ~caps ~lang spec);
-                 y := !y + 4
-             | Some _ -> (* held, but the drawer is too short for the bar *) ()
+             | Some r ->
+                 let sy = screen_y_for !vy in
+                 if !vy >= skip && sy + 3 <= bottom then begin
+                   let cache_r =
+                     match Observed.to_option r.cache_read_tokens with
+                     | Some v -> float_of_int v
+                     | None -> 0.0
+                   in
+                   let cache_w =
+                     match Observed.to_option r.cache_creation_tokens with
+                     | Some v -> float_of_int v
+                     | None -> 0.0
+                   in
+                   let uncached =
+                     Float.max 0.0
+                       (float_of_int r.input_tokens -. cache_r -. cache_w)
+                   in
+                   let out_tok = float_of_int r.output_tokens in
+                   let bar_r = Rect.make ~x:body_r.x ~y:sy ~w:body_r.w ~h:3 in
+                   let spec : Chart.Spec.t =
+                     {
+                       title =
+                         Say.make ~ko:"프롬프트 캐시 구성"
+                           ~en:"Prompt Cache Breakdown";
+                       kind =
+                         Chart.Spec.Stacked_bar
+                           {
+                             segments =
+                               [
+                                 ( Say.make ~ko:"캐시 읽기" ~en:"Cache Read",
+                                   cache_r,
+                                   Theme.Status_ok );
+                                 ( Say.make ~ko:"캐시 쓰기" ~en:"Cache Write",
+                                   cache_w,
+                                   Theme.Status_active );
+                                 ( Say.make ~ko:"비캐시 입력" ~en:"Uncached",
+                                   uncached,
+                                   Theme.Status_attention );
+                                 ( Say.make ~ko:"출력" ~en:"Output",
+                                   out_tok,
+                                   Theme.Status_historical );
+                               ];
+                             total_label =
+                               Say.make
+                                 ~ko:(Printf.sprintf "적중률 %s"
+                                        (Format_val.format_observed
+                                           Format_val.Percent r.cache_hit_pct ~lang))
+                                 ~en:(Printf.sprintf "Hit %s"
+                                        (Format_val.format_observed
+                                           Format_val.Percent r.cache_hit_pct ~lang));
+                             unit = Format_val.Tokens;
+                           };
+                       hotkey_hint = None;
+                     }
+                   in
+                   ignore (Chart.draw grid ~rect:bar_r ~theme ~caps ~lang spec)
+                 end;
+                 vy := !vy + 4
              | None ->
                  if Option.is_some turn_entry then draw_turn_composition ()
                  else
@@ -2859,7 +3031,7 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             if Option.is_some eff_row && Option.is_some turn_entry then
               draw_turn_composition ();
             (match Keeper_context_store.cache_outcome_for_selected_turn ctx_st with
-             | Some reading when !y < bottom ->
+             | Some reading ->
                  let diag =
                    match reading.outcome with
                    | Keeper_cache_outcome_reading.Turn_not_in_ledger ->
@@ -2932,9 +3104,9 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                            Printf.sprintf "Cache: %s · %s" ttl_s pref_s)
                  in
                  put_body_line ~style:acc_st diag
-             | Some _ | None -> ());
+             | None -> ());
             (match Observed.to_option ctx_st.next_request with
-             | Some fc when !y < bottom ->
+             | Some fc ->
                  let next_s =
                    match (fc.walk, fc.candidates) with
                    | Wire_keeper_context.Walk_order { lane_id; _ }, c :: _ ->
@@ -2955,11 +3127,8 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                        "Next refused: " ^ reason
                  in
                  put_body_line ~style:struct_st next_s
-             | Some _ | None -> ());
-            (* The turn history and compaction facts take the rows left under
-               the gauge, cache bar and cost line, so a short drawer drops
-               them first. *)
-            incr y;
+             | None -> ());
+            incr vy;
             (* Per-turn fill from the keeper's recent turn records. *)
             (match Fleet_store.turn_records_for ~keeper model.fleet with
              | Observed.Value { data; _ } -> (
@@ -2983,15 +3152,15 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                            ~en:"No measured turn in this window")
                   | first :: _ ->
                       let samples = context_history_samples fills in
-                      if !y < bottom then begin
+                      let sy = screen_y_for !vy in
+                      if !vy >= skip && sy < bottom then
                         ignore
                           (Chart.draw_sparkline_run ~clip:body_r grid
-                             ~x:body_r.x ~y:!y
+                             ~x:body_r.x ~y:sy
                              ~width:(Int.min body_r.w (Array.length samples))
                              ~theme ~bg ~unicode:true
                              ~gradient:Chart.Gradient.Thermal samples);
-                        incr y
-                      end;
+                      incr vy;
                       let latest = List.fold_left (fun _ r -> r) first measured in
                       let low = List.fold_left Float.min first measured in
                       let high = List.fold_left Float.max first measured in
@@ -3024,7 +3193,7 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
              | Observed.Absent | Observed.Unreported ->
                  put_body_line ~style:whisper_st
                    (say ~ko:"턴 기록 대기 중" ~en:"Awaiting turn records"));
-            incr y;
+            incr vy;
             (* Latest compaction and history reset facts. *)
             (match
                Knowledge_store.memory_os_internals_for ~keeper model.knowledge
@@ -3076,6 +3245,12 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                  put_body_line ~style:whisper_st
                    (say ~ko:"압축 기록 미보고" ~en:"Compaction facts unreported"))
         | Nav.Drawer_schedules ->
+            let pad_right_width ~width s =
+              let fitted = Grapheme.truncate_to_width ~max_width:width s in
+              let dw = Grapheme.display_width fitted in
+              if dw >= width then fitted
+              else fitted ^ String.make (width - dw) ' '
+            in
             let scheds = Work_store.schedules_list model.work in
             let sorted =
               List.sort
@@ -3092,12 +3267,29 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 scheds
             in
             if sorted = [] then
+              let empty_st, empty_msg =
+                match model.work.schedules with
+                | Observed.Loading _ ->
+                    ( whisper_st
+                    , Say.resolve lang
+                        (Say.make ~ko:"예약 일정 불러오는 중…"
+                           ~en:"Loading schedules…") )
+                | Observed.Failed { reason; _ } ->
+                    ( crit_st
+                    , Say.resolve lang
+                        (Say.make
+                           ~ko:("예약 일정 조회 실패: " ^ reason)
+                           ~en:("Schedules fetch failed: " ^ reason)) )
+                | Observed.Value _ | Observed.Absent | Observed.Unreported ->
+                    ( whisper_st
+                    , Say.resolve lang
+                        (Say.make ~ko:"등록된 예약 일정이 없습니다."
+                           ~en:"No schedules registered.") )
+              in
               ignore
                 (Cell_grid.put_text ~clip:body_r grid ~x:body_r.x ~y:body_r.y
-                   ~style:whisper_st
-                   (Say.resolve lang
-                      (Say.make ~ko:"등록된 예약 일정이 없습니다."
-                         ~en:"No schedules registered.")))
+                   ~style:empty_st
+                   (Grapheme.truncate_to_width ~max_width:body_r.w empty_msg))
             else
               let arr = Array.of_list sorted in
               let total = Array.length arr in
@@ -3139,11 +3331,10 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                       match s.payload_target with Some t -> t | None -> s.source)
                 in
                 let line =
-                  Printf.sprintf "%s %-14s %-12s %s · %s"
+                  Printf.sprintf "%s %s %s %s · %s"
                     (Glyph.to_utf8 g)
-                    (Grapheme.truncate_to_width ~max_width:14 target)
-                    (Grapheme.truncate_to_width ~max_width:12
-                       s.recurrence_summary)
+                    (pad_right_width ~width:14 target)
+                    (pad_right_width ~width:12 s.recurrence_summary)
                     disp
                     (match s.payload_summary with
                      | Some ps -> ps
@@ -3274,7 +3465,8 @@ let form_of_inline_modal (modal : Model.inline_modal_state) =
         let value =
           if f.secret then Form.secret_val f.value else Form.Text_val f.value
         in
-        Form.make_field ~key:f.key ~label:f.label ~validators
+        let help = Model.modal_field_help ~key:f.key in
+        Form.make_field ~key:f.key ~label:f.label ?help ~validators
           ~provenance:Form.Prov_tui_pref ~reload_scope:Form.Hot_reload value)
       modal.fields
   in
@@ -3293,15 +3485,21 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     | Some m -> m
     | None -> Model.inline_modal_for kind
   in
+  let has_focused_help =
+    match List.nth_opt modal.fields modal.active_field with
+    | Some f -> Option.is_some (Model.modal_field_help ~key:f.key)
+    | None -> false
+  in
   let w = Int.min (Int.max 0 (rect.w - 4)) 84 in
   let desired_h =
     match kind with
     | Nav.Btw_query -> (
         match model.drafts.btw with
-        | Drafts.Btw_idle | Drafts.Btw_sending _ -> 7
+        | Drafts.Btw_idle | Drafts.Btw_sending _ ->
+            7 + if Option.is_some modal.error then 1 else 0
         | Drafts.Btw_streaming _ | Drafts.Btw_answered _ | Drafts.Btw_failed _ ->
-            13)
-    | Nav.Code_finder_form -> 14
+            Int.min (Int.max 13 (rect.h * 65 / 100)) (Int.max 7 (rect.h - 4)))
+    | Nav.Code_finder_form -> 14 + if has_focused_help then 1 else 0
     | Nav.Gate_reject _
     | Nav.Verification_reject _
     | Nav.Harness_overrule _
@@ -3313,7 +3511,7 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     | Nav.Board_comment _
     | Nav.Github_token_form _
     | Nav.Code_search_form ->
-        Int.max 7 (List.length modal.fields + 6)
+        Int.max 7 (List.length modal.fields + 6 + if has_focused_help then 1 else 0)
   in
   let h = Int.min (Int.max 0 (rect.h - 2)) desired_h in
   let x = rect.x + ((rect.w - w) / 2) in
@@ -3323,9 +3521,41 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
   else
     let title = inline_action_title ~lang ~modal kind in
     let hotkey =
-      Say.resolve lang
-        (Say.make ~ko:"[Tab] 필드 · [Enter] 제출 · [Esc] 취소"
-           ~en:"[Tab] Field · [Enter] Submit · [Esc] Cancel")
+      match kind with
+      | Nav.Btw_query -> (
+          match model.drafts.btw with
+          | Drafts.Btw_idle ->
+              Say.resolve lang
+                (Say.make ~ko:"[Enter] 질문 · [Esc] 취소"
+                   ~en:"[Enter] Submit · [Esc] Cancel")
+          | Drafts.Btw_sending _ ->
+              Say.resolve lang (Say.make ~ko:"[Esc] 취소" ~en:"[Esc] Cancel")
+          | Drafts.Btw_streaming _ ->
+              Say.resolve lang
+                (Say.make ~ko:"[↑↓] 스크롤 · [y] 복사 · [Esc] 닫기"
+                   ~en:"[↑↓] Scroll · [y] Copy · [Esc] Close")
+          | Drafts.Btw_answered _ ->
+              Say.resolve lang
+                (Say.make ~ko:"[↑↓] 스크롤 · [y] 복사 · [Enter/Esc] 닫기"
+                   ~en:"[↑↓] Scroll · [y] Copy · [Enter/Esc] Close")
+          | Drafts.Btw_failed _ ->
+              Say.resolve lang
+                (Say.make ~ko:"[Enter/Esc] 닫기" ~en:"[Enter/Esc] Close"))
+      | Nav.Gate_reject _
+      | Nav.Verification_reject _
+      | Nav.Harness_overrule _
+      | Nav.Task_cancel _
+      | Nav.Schedule_form
+      | Nav.Connector_form
+      | Nav.Repo_add_form
+      | Nav.Board_new_post
+      | Nav.Board_comment _
+      | Nav.Github_token_form _
+      | Nav.Code_finder_form
+      | Nav.Code_search_form ->
+          Say.resolve lang
+            (Say.make ~ko:"[Tab] 필드 · [Enter] 제출 · [Esc] 취소"
+               ~en:"[Tab] Field · [Enter] Submit · [Esc] Cancel")
     in
     let inner =
       Card.draw ~cache grid ~rect:modal_r ~theme
@@ -3348,14 +3578,48 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         Typography.status ~bg ~bold:true theme Theme.Status_critical
       in
       let padded = Card.pad_inner ~pad_x inner in
+      let draw_btw_header ~style ~max_s header_txt =
+        let scroll_badge =
+          if max_s > 0 then
+            let cur = Int.min max_s (Int.max 0 model.nav.btw_scroll_offset) in
+            Printf.sprintf " [%d/%d]" cur max_s
+          else ""
+        in
+        let bw = Grapheme.display_width scroll_badge in
+        let hdr_w = Int.max 0 (padded.w - bw) in
+        ignore
+          (Cell_grid.put_text ~clip:padded grid ~x:padded.x ~y:padded.y ~style
+             (Grapheme.truncate_to_width ~max_width:hdr_w header_txt));
+        if bw > 0 && padded.w > bw + 4 then
+          ignore
+            (Cell_grid.put_text ~clip:padded grid
+               ~x:(Rect.right padded - bw) ~y:padded.y
+               ~style:(Typography.whisper ~bg theme) scroll_badge)
+      in
       match kind with
       | Nav.Btw_query -> (
           match model.drafts.btw with
           | Drafts.Btw_idle ->
+              let err_rows = if Option.is_some modal.error then 1 else 0 in
+              let form_r =
+                Rect.make ~x:inner.x ~y:inner.y ~w:inner.w
+                  ~h:(Int.max 0 (inner.h - err_rows))
+              in
               let form_st = form_of_inline_modal modal in
               ignore
-                (Form.draw grid ~rect:inner ~theme ~lang ~pad_x
-                   ~show_row_badges:false form_st)
+                (Form.draw grid ~rect:form_r ~theme ~lang ~pad_x
+                   ~elevated:true ~edit_cursor:model.nav.modal_edit_cursor
+                   ~show_row_badges:false form_st);
+              (match modal.error with
+              | Some err when err_rows = 1 ->
+                  let sy = Rect.bottom inner - 1 in
+                  let sr = Rect.make ~x:padded.x ~y:sy ~w:padded.w ~h:1 in
+                  ignore
+                    (Cell_grid.put_text ~clip:sr grid ~x:padded.x ~y:sy
+                       ~style:crit_st
+                       (Grapheme.truncate_to_width ~max_width:padded.w
+                          (Glyph.to_utf8 Glyph.Live_failing ^ " " ^ err)))
+              | Some _ | None -> ())
           | Drafts.Btw_sending { keeper; prompt; _ } ->
               ignore
                 (Cell_grid.put_text ~clip:padded grid ~x:padded.x ~y:padded.y
@@ -3375,12 +3639,11 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                                   (Glyph.to_utf8 Glyph.Transport_reconnecting)
                                   keeper))))
           | Drafts.Btw_streaming { keeper; prompt; buffer; _ } ->
-              ignore
-                (Cell_grid.put_text ~clip:padded grid ~x:padded.x ~y:padded.y
-                   ~style:acc_st
-                   (Grapheme.truncate_to_width ~max_width:padded.w
-                      (Printf.sprintf "%s @%s · %s"
-                         (Glyph.to_utf8 Glyph.Live_working) keeper prompt)));
+              let max_s = Update_nav.btw_max_scroll model in
+              let scroll = Int.min max_s (Int.max 0 model.nav.btw_scroll_offset) in
+              draw_btw_header ~style:acc_st ~max_s
+                (Printf.sprintf "%s @%s · %s"
+                   (Glyph.to_utf8 Glyph.Live_working) keeper prompt);
               if padded.h >= 3 then begin
                 Card.draw_hairline ~pad_x ~bg grid ~rect:inner ~y:(inner.y + 1)
                   ~theme;
@@ -3389,16 +3652,15 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                     ~h:(Int.max 0 (padded.h - 2))
                 in
                 ignore
-                  (Markdown.draw grid ~rect:md_r ~theme
+                  (Markdown.draw grid ~rect:md_r ~theme ~scroll
                      ~osc8:caps.osc8_hyperlinks buffer)
               end
           | Drafts.Btw_answered { keeper; prompt; reply } ->
-              ignore
-                (Cell_grid.put_text ~clip:padded grid ~x:padded.x ~y:padded.y
-                   ~style:ok_st
-                   (Grapheme.truncate_to_width ~max_width:padded.w
-                      (Printf.sprintf "%s @%s · %s"
-                         (Glyph.to_utf8 Glyph.Live_healthy) keeper prompt)));
+              let max_s = Update_nav.btw_max_scroll model in
+              let scroll = Int.min max_s (Int.max 0 model.nav.btw_scroll_offset) in
+              draw_btw_header ~style:ok_st ~max_s
+                (Printf.sprintf "%s @%s · %s"
+                   (Glyph.to_utf8 Glyph.Live_healthy) keeper prompt);
               if padded.h >= 3 then begin
                 Card.draw_hairline ~pad_x ~bg grid ~rect:inner ~y:(inner.y + 1)
                   ~theme;
@@ -3407,7 +3669,7 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                     ~h:(Int.max 0 (padded.h - 2))
                 in
                 ignore
-                  (Markdown.draw grid ~rect:md_r ~theme
+                  (Markdown.draw grid ~rect:md_r ~theme ~scroll
                      ~osc8:caps.osc8_hyperlinks reply)
               end
           | Drafts.Btw_failed { keeper; prompt; reason } ->
@@ -3471,7 +3733,8 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
           in
           let form_st = form_of_inline_modal modal in
           ignore
-            (Form.draw grid ~rect:form_r ~theme ~lang ~pad_x
+            (Form.draw grid ~rect:form_r ~theme ~lang ~pad_x ~elevated:true
+               ~edit_cursor:model.nav.modal_edit_cursor
                ~show_row_badges:false form_st);
           if extra_rows > 0 then begin
             let ey = Rect.bottom form_r in
@@ -4284,11 +4547,11 @@ let render_system_gate grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                      (Say.make
                         ~ko:
                           (Printf.sprintf
-                             "[v] 문서/원본 · [y] %s 복사 · [e] %s 저장 · [o] 열기 · [H] SHA · [Esc]"
+                             "[v] 문서/원본 · [r] 재조회 · [y] %s 복사 · [e] %s 저장 · [o] 열기 · [H] SHA · [Esc]"
                              fmt_tok ext_tok)
                         ~en:
                           (Printf.sprintf
-                             "[v] Doc/Raw · [y] Copy %s · [e] Export %s · [o] Open · [H] SHA · [Esc]"
+                             "[v] Doc/Raw · [r] Retry · [y] Copy %s · [e] Export %s · [o] Open · [H] SHA · [Esc]"
                              fmt_tok ext_tok)));
               focused = true;
               elevated = true;
@@ -4316,6 +4579,42 @@ let render_system_gate grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               let raw_body =
                 match detail_opt with Some d -> d.content | None -> ""
               in
+              let body_h_est = Int.max 0 (content.h - 3) in
+              let total_lines_est =
+                if String.equal (String.trim raw_body) "" then 0
+                else
+                  match
+                    ( model.knowledge.artifact_view_mode
+                    , Wire_knowledge.artifact_format_of_entry art )
+                  with
+                  | `Document, `Html ->
+                      List.length
+                        (Html_doc.render_lines ~theme ~width:content.w ~lang
+                           raw_body)
+                  | `Document, `Markdown ->
+                      if Knowledge_store.is_json_artifact art then
+                        let pretty =
+                          match Yojson.Safe.from_string raw_body with
+                          | j -> Yojson.Safe.pretty_to_string j
+                          | exception Yojson.Json_error _ -> raw_body
+                        in
+                        List.length (String.split_on_char '\n' pretty)
+                      else
+                        List.length
+                          (Markdown.render_lines ~theme ~width:content.w
+                             raw_body)
+                  | `Raw_source, (`Html | `Markdown) ->
+                      List.length (String.split_on_char '\n' raw_body)
+              in
+              let scroll_suffix =
+                if total_lines_est > body_h_est && body_h_est > 0 then
+                  let max_s = Int.max 0 (total_lines_est - body_h_est) in
+                  let cur_line =
+                    1 + Int.min max_s (Int.max 0 model.knowledge.detail_scroll_offset)
+                  in
+                  Printf.sprintf " · [%d/%d]" cur_line total_lines_est
+                else ""
+              in
               let y = ref content.y and bot = Rect.bottom content in
               let put_hdr st txt =
                 if !y < bot then begin
@@ -4329,11 +4628,12 @@ let render_system_gate grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               in
               put_hdr anchor_st art.title;
               put_hdr struct_st
-                (Printf.sprintf "ID: %s · r%d · %s · %s · SHA: %s" art.id
+                (Printf.sprintf "ID: %s · r%d · %s · %s · SHA: %s%s" art.id
                    art.revision art.body.mime
                    (Format_val.format_value Format_val.Bytes
                       (float_of_int art.body.bytes))
-                   (Grapheme.truncate_to_width ~max_width:14 art.body.sha256));
+                   (Grapheme.truncate_to_width ~max_width:14 art.body.sha256)
+                   scroll_suffix);
               if !y < bot then begin
                 Card.draw_hairline ~pad_x:0 ~bg grid ~rect:content ~y:!y ~theme;
                 incr y

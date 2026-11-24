@@ -15,8 +15,113 @@ let drop_last_utf8 s =
     in
     String.sub s 0 (prev (len - 1))
 
+let clamp_utf8_cursor s idx =
+  let len = String.length s in
+  let c = max 0 (min len idx) in
+  let rec align i =
+    if i <= 0 || i >= len then i
+    else if is_utf8_cont (Char.code s.[i]) then align (i - 1)
+    else i
+  in
+  align c
+
+let prev_utf8_boundary s idx =
+  let i = clamp_utf8_cursor s idx in
+  if i <= 0 then 0
+  else
+    let rec walk p =
+      if p <= 0 then 0
+      else if is_utf8_cont (Char.code s.[p]) then walk (p - 1)
+      else p
+    in
+    walk (i - 1)
+
+let next_utf8_boundary s idx =
+  let len = String.length s in
+  let i = clamp_utf8_cursor s idx in
+  if i >= len then len
+  else
+    let rec walk p =
+      if p >= len then len
+      else if is_utf8_cont (Char.code s.[p]) then walk (p + 1)
+      else p
+    in
+    walk (i + 1)
+
+let insert_at_cursor ~text ~cursor ~insert =
+  let len = String.length text in
+  let c = clamp_utf8_cursor text cursor in
+  let before = String.sub text 0 c in
+  let after = String.sub text c (len - c) in
+  (before ^ insert ^ after, c + String.length insert)
+
+let backspace_at_cursor ~text ~cursor =
+  let len = String.length text in
+  let c = clamp_utf8_cursor text cursor in
+  if c <= 0 then (text, 0)
+  else
+    let prev = prev_utf8_boundary text c in
+    (String.sub text 0 prev ^ String.sub text c (len - c), prev)
+
+let delete_at_cursor ~text ~cursor =
+  let len = String.length text in
+  let c = clamp_utf8_cursor text cursor in
+  if c >= len then (text, c)
+  else
+    let next = next_utf8_boundary text c in
+    (String.sub text 0 c ^ String.sub text next (len - next), c)
+
+let move_cursor_utf8 dir ~text ~cursor =
+  let len = String.length text in
+  let c = clamp_utf8_cursor text cursor in
+  match dir with
+  | `Left -> prev_utf8_boundary text c
+  | `Right -> next_utf8_boundary text c
+  | `Home -> 0
+  | `End -> len
+
+let kill_to_start ~text ~cursor =
+  let len = String.length text in
+  let c = clamp_utf8_cursor text cursor in
+  if c <= 0 then (text, 0) else (String.sub text c (len - c), 0)
+
+let kill_word_back ~text ~cursor =
+  let len = String.length text in
+  let c = clamp_utf8_cursor text cursor in
+  if c <= 0 then (text, 0)
+  else
+    let is_sep ch = Char.equal ch ' ' || Char.equal ch '\t' || Char.equal ch '/' in
+    let rec skip_sep i =
+      if i > 0 && is_sep text.[i - 1] then skip_sep (i - 1) else i
+    in
+    let rec skip_word i =
+      if i > 0 && not (is_sep text.[i - 1]) then
+        skip_word (prev_utf8_boundary text i)
+      else i
+    in
+    let start = skip_word (skip_sep c) in
+    (String.sub text 0 start ^ String.sub text c (len - c), start)
+
 let contains_ci = Store_scroll.contains_ci
 let clamp_index = Store_scroll.clamp_index
+
+let utf8_folded_uchars s =
+  let len = String.length s in
+  let rec loop i acc =
+    if i >= len then Array.of_list (List.rev acc)
+    else
+      let d = String.get_utf_8_uchar s i in
+      let n = Uchar.utf_decode_length d in
+      let u = Uchar.utf_decode_uchar d in
+      let code = Uchar.to_int u in
+      let folded =
+        if code >= Char.code 'A' && code <= Char.code 'Z' then
+          Uchar.of_int (code + 32)
+        else u
+      in
+      loop (i + max 1 n) (folded :: acc)
+  in
+  loop 0 []
 
 let fuzzy_score ~query target =
   let q = String.lowercase_ascii (String.trim query) in
@@ -25,21 +130,26 @@ let fuzzy_score ~query target =
   else
     let t = String.lowercase_ascii target in
     let t_len = String.length t in
-    if q_len > t_len then None
-    else if String.equal q t then Some 1000
+    if String.equal q t then Some 1000
     else if String.starts_with ~prefix:q t then Some (800 - (t_len - q_len))
     else if contains_ci ~needle:q t then Some (500 - (t_len - q_len))
     else
-      let rec match_seq qi ti score consecutive =
-        if qi >= q_len then Some (Int.max 1 score)
-        else if ti >= t_len then None
-        else if Char.equal q.[qi] t.[ti] then
-          let bonus = if consecutive then 12 else 4 in
-          let start_bonus = if ti = 0 then 10 else 0 in
-          match_seq (qi + 1) (ti + 1) (score + bonus + start_bonus) true
-        else match_seq qi (ti + 1) (score - 1) false
-      in
-      match_seq 0 0 100 false
+      let qa = utf8_folded_uchars q in
+      let ta = utf8_folded_uchars t in
+      let qn = Array.length qa in
+      let tn = Array.length ta in
+      if qn > tn then None
+      else
+        let rec match_seq qi ti score consecutive =
+          if qi >= qn then Some (Int.max 1 score)
+          else if ti >= tn then None
+          else if Uchar.equal qa.(qi) ta.(ti) then
+            let bonus = if consecutive then 12 else 4 in
+            let start_bonus = if ti = 0 then 10 else 0 in
+            match_seq (qi + 1) (ti + 1) (score + bonus + start_bonus) true
+          else match_seq qi (ti + 1) (score - 1) false
+        in
+        match_seq 0 0 100 false
 
 let trim_left s =
   let len = String.length s in
@@ -343,12 +453,24 @@ let apply_popup_completion (cand : popup_candidate) (m : Model.t) : Model.t =
       let inserted = "@" ^ k.name ^ trailing in
       let next_text = before ^ inserted ^ suffix in
       let next_cursor = String.length before + String.length inserted in
-      {
-        m with
-        drafts =
+      let drafts =
+        if String.equal (String.trim before) "" then
+          (* Leading @mention switches the target keeper directly so pressing
+             Enter routes to the mentioned keeper instead of the previous one. *)
+          let d0 =
+            if String.equal (String.trim suffix) "" then
+              Drafts.clear_current_draft m.drafts
+            else m.drafts
+          in
+          d0
+          |> Drafts.set_active_keeper k.name
+          |> Drafts.set_current_text_and_cursor ~text:next_text
+               ~cursor:next_cursor
+        else
           Drafts.set_current_text_and_cursor ~text:next_text ~cursor:next_cursor
-            m.drafts;
-      }
+            m.drafts
+      in
+      { m with drafts }
 
 type palette_section =
   | Pal_sec_commands
@@ -612,20 +734,52 @@ let open_overlay (m : Model.t) overlay =
     | Nav.System_gate _ ->
         m.nav.queue_scroll_offset
   in
+  let return_overlay =
+    match overlay, m.nav.overlay with
+    | ( Nav.Help
+      , Some
+          ( ( Nav.Settings _
+            | Nav.Incidents
+            | Nav.Queue_context _
+            | Nav.Ask_answer
+            | Nav.System_gate Nav.Media_viewer ) as prev ) ) ->
+        Some prev
+    | Nav.Help, Some Nav.Help -> m.nav.return_overlay
+    | ( Nav.Help
+      , ( Some
+            ( Nav.Palette
+            | Nav.Inline_action _
+            | Nav.System_gate
+                (Nav.Auth_gate | Nav.Server_offline | Nav.Micro_viewport) )
+        | None ) )
+    | ( ( Nav.Palette
+        | Nav.Settings _
+        | Nav.Incidents
+        | Nav.Queue_context _
+        | Nav.Inline_action _
+        | Nav.Ask_answer
+        | Nav.System_gate _ )
+      , (Some _ | None) ) ->
+        None
+  in
   let nav =
     {
       m.nav with
       overlay = Some overlay;
+      return_overlay;
       filter_focused = false;
       sidebar_focused = false;
       sidebar_open = close_drawer_if_floating m;
       help_scroll_offset;
       queue_scroll_offset;
+      btw_scroll_offset = 0;
+      palette_scroll_offset = 0;
+      modal_edit_cursor = 0;
     }
   in
   let drafts = Drafts.set_focus false m.drafts in
   let config =
-    match overlay, m.config.target with
+    (match overlay, m.config.target with
     | Nav.Settings _, Wire_config.Target_keeper_create -> m.config
     | ( ( Nav.Settings _
         | Nav.Palette
@@ -638,8 +792,10 @@ let open_overlay (m : Model.t) overlay =
       , ( Wire_config.Target_runtime
         | Wire_config.Target_keeper _
         | Wire_config.Target_keeper_create ) ) ->
-        Config_store.cancel_edit_field m.config
+        Config_store.cancel_edit_field m.config)
+    |> Config_store.disarm_discard_confirm
   in
+  let incidents = Incidents.disarm_clear_confirm m.incidents in
   let knowledge =
     (match overlay with
     | Nav.System_gate Nav.Media_viewer ->
@@ -669,7 +825,7 @@ let open_overlay (m : Model.t) overlay =
         None
   in
   let next =
-    { m with nav; drafts; config; knowledge; inline_modal = None; ask_modal }
+    { m with nav; drafts; config; incidents; knowledge; inline_modal = None; ask_modal }
     |> Model.sync_sidebar_cursor
   in
   (next, View_fetches.fetches_for_current_view next)
@@ -926,13 +1082,17 @@ let activate_sidebar_cursor (m : Model.t) =
 
 let open_inline_modal (m : Model.t) kind =
   let modal = Model.inline_modal_for kind in
+  let modal_edit_cursor = String.length (Model.modal_active_field_value modal) in
   let nav =
     {
       m.nav with
       overlay = Some (Nav.Inline_action kind);
+      return_overlay = None;
       filter_focused = false;
       sidebar_focused = false;
       sidebar_open = close_drawer_if_floating m;
+      btw_scroll_offset = 0;
+      modal_edit_cursor;
     }
   in
   let drafts =
@@ -985,9 +1145,11 @@ let open_palette (m : Model.t) mode =
     {
       m.nav with
       overlay = Some Nav.Palette;
+      return_overlay = None;
       filter_focused = false;
       sidebar_focused = false;
       sidebar_open = close_drawer_if_floating m;
+      palette_scroll_offset = 0;
     }
   in
   let drafts = Drafts.set_focus false m.drafts in
@@ -1312,10 +1474,19 @@ let palette_filtered_models (m : Model.t) =
         match r.model with Some mdl -> contains_ci ~needle:q mdl | None -> false)
       all
 
-let palette_entries (m : Model.t) : palette_entry list =
+let palette_entries_with_overflow (m : Model.t) :
+    palette_entry list * (palette_section * int) list =
   let lang = m.lang in
   let q = String.trim m.palette.query in
   let fuzzy_opt s = fuzzy_score ~query:q s in
+  let overflow = ref [] in
+  let cap_section sec limit items =
+    let total = List.length items in
+    let shown = take_n limit items in
+    let hidden = total - List.length shown in
+    if hidden > 0 then overflow := (sec, hidden) :: !overflow;
+    shown
+  in
   let cmd_entries =
     palette_filtered_commands m
     |> List.map (fun (c : Keymap.palette_command) ->
@@ -1366,7 +1537,7 @@ let palette_entries (m : Model.t) : palette_entry list =
                    tone = Some Theme.Status_ok;
                    action = Pal_menu_target it.target;
                  })
-    |> take_n (if String.equal q "" then 6 else 12)
+    |> cap_section Pal_sec_workspaces (if String.equal q "" then 6 else 12)
   in
   let keeper_entries =
     Fleet_store.filtered_keepers { m.fleet with filter_query = "" }
@@ -1384,7 +1555,7 @@ let palette_entries (m : Model.t) : palette_entry list =
                    tone = Some tone;
                    action = Pal_dive_keeper k.name;
                  })
-    |> take_n (if String.equal q "" then 3 else 6)
+    |> cap_section Pal_sec_keepers (if String.equal q "" then 3 else 6)
   in
   let company_entries =
     Fleet_store.company_groups m.fleet
@@ -1401,7 +1572,7 @@ let palette_entries (m : Model.t) : palette_entry list =
                    tone = None;
                    action = Pal_select_company g.company;
                  })
-    |> take_n (if String.equal q "" then 2 else 5)
+    |> cap_section Pal_sec_companies (if String.equal q "" then 2 else 5)
   in
   let goal_entries =
     Work_store.goals m.work
@@ -1436,7 +1607,9 @@ let palette_entries (m : Model.t) : palette_entry list =
                  })
   in
   let goals_tasks_entries =
-    take_n (if String.equal q "" then 2 else 5) (goal_entries @ task_entries)
+    cap_section Pal_sec_goals_tasks
+      (if String.equal q "" then 2 else 5)
+      (goal_entries @ task_entries)
   in
   let board_entries =
     Knowledge_store.filtered_posts { m.knowledge with filter_query = "" }
@@ -1474,7 +1647,9 @@ let palette_entries (m : Model.t) : palette_entry list =
                      })
   in
   let board_wiki_entries =
-    take_n (if String.equal q "" then 2 else 5) (board_entries @ wiki_entries)
+    cap_section Pal_sec_board_wiki
+      (if String.equal q "" then 2 else 5)
+      (board_entries @ wiki_entries)
   in
   let sandbox_entries =
     let items =
@@ -1517,7 +1692,7 @@ let palette_entries (m : Model.t) : palette_entry list =
           in
           vms @ sshs
     in
-    take_n (if String.equal q "" then 2 else 4) items
+    cap_section Pal_sec_sandboxes (if String.equal q "" then 2 else 4) items
   in
   let settings_entries =
     let items =
@@ -1545,7 +1720,7 @@ let palette_entries (m : Model.t) : palette_entry list =
                            })
                    s.fields)
     in
-    take_n (if String.equal q "" then 2 else 5) items
+    cap_section Pal_sec_settings (if String.equal q "" then 2 else 5) items
   in
   let slash_entries =
     Slash.filter ~query:q ~lang
@@ -1562,9 +1737,13 @@ let palette_entries (m : Model.t) : palette_entry list =
              action = Pal_slash_spec s;
            })
   in
-  cmd_entries @ ws_entries @ keeper_entries @ company_entries
-  @ goals_tasks_entries @ board_wiki_entries @ sandbox_entries
-  @ settings_entries @ slash_entries
+  ( cmd_entries @ ws_entries @ keeper_entries @ company_entries
+    @ goals_tasks_entries @ board_wiki_entries @ sandbox_entries
+    @ settings_entries @ slash_entries
+  , List.rev !overflow )
+
+let palette_entries (m : Model.t) : palette_entry list =
+  fst (palette_entries_with_overflow m)
 
 let palette_len (m : Model.t) =
   match m.palette.mode with
@@ -1651,7 +1830,10 @@ let start_btw_query ~now ~prompt (m : Model.t) =
           {
             m.nav with
             overlay = Some (Nav.Inline_action Nav.Btw_query);
+            return_overlay = None;
             filter_focused = false;
+            btw_scroll_offset = 0;
+            modal_edit_cursor = 0;
           }
         in
         let next =
@@ -4352,7 +4534,16 @@ let help_max_scroll (m : Model.t) =
   else
     let pad_x = if inner_w >= 72 then 2 else 1 in
     let content_w = max 0 (inner_w - (2 * pad_x)) in
-    let content_h = max 1 inner_h in
+    let tui_lbl = Model.tui_build_label m in
+    let server_lbl = Model.server_build_label m in
+    let has_build_bar =
+      ((not (String.equal tui_lbl "")) || Option.is_some server_lbl)
+      && inner_h >= 4
+    in
+    let header_h =
+      if not has_build_bar then 0 else if inner_h >= 6 then 2 else 1
+    in
+    let content_h = max 1 (inner_h - header_h) in
     let compact_count (grp : Keymap.help_group) =
       let seen_ws = ref false in
       let seen_move = ref false in
@@ -4469,6 +4660,32 @@ let help_max_scroll (m : Model.t) =
     in
     max 0 (total - content_h)
 
+let btw_max_scroll (m : Model.t) =
+  let body_opt =
+    match m.drafts.btw with
+    | Drafts.Btw_streaming { buffer; _ } -> Some buffer
+    | Drafts.Btw_answered { reply; _ } -> Some reply
+    | Drafts.Btw_idle | Drafts.Btw_sending _ | Drafts.Btw_failed _ -> None
+  in
+  match body_opt with
+  | None -> 0
+  | Some body ->
+      let overlay_h = max 0 (m.viewport.rows - 2) in
+      let w = min (max 0 (m.viewport.cols - 4)) 84 in
+      let desired_h =
+        min (max 13 (overlay_h * 65 / 100)) (max 7 (overlay_h - 4))
+      in
+      let h = min (max 0 (overlay_h - 2)) desired_h in
+      let inner_w = if w >= 2 && h >= 2 then w - 2 else 0 in
+      let inner_h = if w >= 2 && h >= 2 then h - 2 else 0 in
+      if inner_w <= 0 || inner_h < 3 then 0
+      else
+        let pad_x = if inner_w >= 48 then 2 else 1 in
+        let padded_w = max 1 (inner_w - (2 * pad_x)) in
+        let md_h = max 1 (inner_h - 2) in
+        let theme = Theme.of_preset m.theme_preset in
+        markdown_max_scroll ~theme ~width:padded_w ~height:md_h body
+
 let queue_context_max_scroll (m : Model.t) tab =
   let modal_h = min (max 0 (m.viewport.rows - 4)) 24 in
   let inner_h = if modal_h >= 2 then modal_h - 2 else 0 in
@@ -4485,7 +4702,52 @@ let queue_context_max_scroll (m : Model.t) tab =
         let others = Drafts.other_keepers_draft_count m.drafts in
         1 + max 1 (List.length txs) + 1 + 1 + 1 + (if others > 0 then 1 else 0)
     | Nav.Drawer_schedules -> List.length (Work_store.schedules_list m.work)
-    | Nav.Drawer_context -> 0
+    | Nav.Drawer_context ->
+        let keeper_opt = Fleet_store.find_keeper ~name:keeper m.fleet in
+        let ctx_st =
+          Keeper_context_store.get_keeper ~keeper m.keeper_context
+        in
+        let eff_row =
+          match Observed.to_option m.runtime.efficiency with
+          | None -> None
+          | Some eff ->
+              List.find_opt
+                (fun (r : Wire_runtime.keeper_efficiency_row) ->
+                  String.equal r.keeper keeper)
+                eff.keepers
+        in
+        let turn_entry = Keeper_context_store.selected_turn_entry ctx_st in
+        let r = ref 0 in
+        (match Observed.to_option ctx_st.turn_records, turn_entry with
+        | Some _, Some _ -> r := !r + 1
+        | _ -> ());
+        (* Ratio gauge + spacer *)
+        r := !r + 3;
+        (* Cache bar / fallback turn composition *)
+        (match eff_row with
+        | Some _ -> r := !r + 4
+        | None -> r := !r + (if Option.is_some turn_entry then 3 else 1));
+        if Option.is_some keeper_opt then r := !r + 1;
+        if Option.is_some eff_row && Option.is_some turn_entry then r := !r + 3;
+        if Option.is_some (Keeper_context_store.cache_outcome_for_selected_turn ctx_st)
+        then r := !r + 1;
+        if Option.is_some (Observed.to_option ctx_st.next_request) then
+          r := !r + 1;
+        (* Spacer + turn history section *)
+        r := !r + 1;
+        (match Fleet_store.turn_records_for ~keeper m.fleet with
+        | Observed.Value { data; _ } ->
+            let measured =
+              List.filter_map Wire_fleet.turn_record_context_fill data.rows
+            in
+            r := !r + 1 + (if measured = [] then 1 else 2)
+            + if data.skipped_rows > 0 then 1 else 0
+        | Observed.Loading _ | Observed.Failed _ | Observed.Absent
+        | Observed.Unreported ->
+            r := !r + 1);
+        (* Spacer + compaction facts *)
+        r := !r + 2;
+        !r
   in
   max 0 (total_rows - body_h)
 
@@ -7349,7 +7611,22 @@ let apply_move (m : Model.t) dir =
         let delta = move_delta dir in
         let len = palette_len m in
         let selected = clamp_index len (m.palette.selected + delta) in
-        ({ m with palette = { m.palette with selected } }, [])
+        let list_h =
+          let modal_h = min (max 0 (m.viewport.rows - 4)) 22 in
+          let inner_h = max 0 (modal_h - 2) in
+          max 1 (inner_h - 3)
+        in
+        let palette_scroll_offset, _ =
+          Masc_tui_ui.Table.compute_viewport ~total_rows:(max 1 len)
+            ~viewport_rows:list_h ~scroll:m.nav.palette_scroll_offset
+            ~selected:(Some selected)
+        in
+        ( {
+            m with
+            palette = { m.palette with selected };
+            nav = { m.nav with palette_scroll_offset };
+          }
+        , [] )
     | Some (Nav.Settings _) ->
         let two_pane = Config_store.is_two_pane_width ~cols:m.viewport.cols in
         let cfg0 =
@@ -7410,7 +7687,29 @@ let apply_move (m : Model.t) dir =
                 , _ ) ->
                   true
             in
-            if not editable then (m, [])
+            if not editable then
+              match modal.kind with
+              | Nav.Btw_query ->
+                  let delta = scroll_delta dir in
+                  let max_scroll = btw_max_scroll m in
+                  let btw_scroll_offset =
+                    Store_scroll.clamp_scroll ~max_scroll
+                      (m.nav.btw_scroll_offset + delta)
+                  in
+                  ({ m with nav = { m.nav with btw_scroll_offset } }, [])
+              | Nav.Gate_reject _
+              | Nav.Verification_reject _
+              | Nav.Harness_overrule _
+              | Nav.Task_cancel _
+              | Nav.Schedule_form
+              | Nav.Connector_form
+              | Nav.Repo_add_form
+              | Nav.Board_new_post
+              | Nav.Board_comment _
+              | Nav.Github_token_form _
+              | Nav.Code_finder_form
+              | Nav.Code_search_form ->
+                  (m, [])
             else
               let next_modal =
                 match dir with
@@ -7424,7 +7723,24 @@ let apply_move (m : Model.t) dir =
                 | Keymap.Page_down ->
                     modal
               in
-              ({ m with inline_modal = Some next_modal }, []))
+              let modal_edit_cursor =
+                match dir with
+                | Keymap.Up | Keymap.Down ->
+                    String.length (Model.modal_active_field_value next_modal)
+                | Keymap.Left
+                | Keymap.Right
+                | Keymap.Home
+                | Keymap.End
+                | Keymap.Page_up
+                | Keymap.Page_down ->
+                    m.nav.modal_edit_cursor
+              in
+              ( {
+                  m with
+                  inline_modal = Some next_modal;
+                  nav = { m.nav with modal_edit_cursor };
+                }
+              , [] ))
     | Some Nav.Ask_answer -> (
         match m.ask_modal with
         | None -> (m, [])
@@ -7484,9 +7800,8 @@ let apply_move (m : Model.t) dir =
                 let inner_w = max 0 (w - 2) in
                 let inner_h = max 0 (h - 2) in
                 let pad_x = if inner_w >= 48 then 2 else 1 in
-                let pad_y = if inner_h >= 7 then 1 else 0 in
                 let content_w = max 1 (inner_w - (2 * pad_x)) in
-                let content_h = max 0 (inner_h - (2 * pad_y)) in
+                let content_h = inner_h in
                 let body_h = max 0 (content_h - 3) in
                 if body_h <= 0 then 0
                 else

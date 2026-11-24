@@ -1688,11 +1688,16 @@ let apply_http_reply ~now (m : Model.t) reply =
       in
       (Model.with_toast ~now ~level msg { m with knowledge }, [])
   | Msg.Reply_memory_act { keeper; result = Error err } ->
-      err_reply
-        (* A recovery act is a write: the incident carries the failure. *)
-        ~fail:Fun.id
-        ~source:(Health.Source_keeper keeper) ~ko:"사서 기억 복구"
-        ~en:"Memory recovery act" err
+      let next, cmds =
+        err_reply
+          (* A recovery act is a write: the incident carries the failure. *)
+          ~fail:Fun.id
+          ~source:(Health.Source_keeper keeper) ~ko:"사서 기억 복구"
+          ~en:"Memory recovery act" err
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , cmds )
   | Msg.Reply_keeper_context_turn_records { keeper; result = Ok page } ->
       let keeper_context =
         Keeper_context_store.apply_turn_records ~observed_at:now ~keeper page
@@ -2854,30 +2859,78 @@ let apply_http_reply ~now (m : Model.t) reply =
       ( Model.with_toast ~now ~level:Model.Toast_error
           (Msg.http_error_summary err) next
       , cmds )
-  | Msg.Reply_action_ack { label; result = Ok () } ->
-      let nav =
-        match m.nav.overlay with
-        | Some (Nav.Inline_action _) -> { m.nav with overlay = None }
-        | Some
-            ( Nav.Palette
-            | Nav.Settings _
-            | Nav.Incidents
-            | Nav.Queue_context _
-            | Nav.Ask_answer
-            | Nav.Help
-            | Nav.System_gate _ )
-        | None ->
-            m.nav
+  | Msg.Reply_action_ack { label; ack_scope; result = Ok () } ->
+      let closes_modal =
+        match ack_scope with
+        | Msg.Ack_close_modal | Msg.Ack_close_modal_and_refresh -> true
+        | Msg.Ack_toast_only | Msg.Ack_refresh_view | Msg.Ack_editor_saved ->
+            false
       in
-      ( Model.with_toast ~now ~level:Model.Toast_success label
-          { m with nav; inline_modal = None }
-      , [] )
-  | Msg.Reply_action_ack { label; result = Error err } ->
+      let should_refresh =
+        match ack_scope with
+        | Msg.Ack_refresh_view
+        | Msg.Ack_close_modal_and_refresh
+        | Msg.Ack_editor_saved ->
+            true
+        | Msg.Ack_toast_only | Msg.Ack_close_modal -> false
+      in
+      let nav, inline_modal =
+        if not closes_modal then (m.nav, m.inline_modal)
+        else
+          let nav' =
+            match m.nav.overlay with
+            | Some (Nav.Inline_action _) ->
+                { m.nav with overlay = m.nav.return_overlay; return_overlay = None }
+            | Some
+                ( Nav.Palette
+                | Nav.Settings _
+                | Nav.Incidents
+                | Nav.Queue_context _
+                | Nav.Ask_answer
+                | Nav.Help
+                | Nav.System_gate _ )
+            | None ->
+                m.nav
+          in
+          (nav', None)
+      in
+      let config =
+        match ack_scope with
+        | Msg.Ack_editor_saved -> Config_store.clear_dirty m.config
+        | Msg.Ack_toast_only
+        | Msg.Ack_close_modal
+        | Msg.Ack_refresh_view
+        | Msg.Ack_close_modal_and_refresh ->
+            m.config
+      in
+      let next =
+        Model.with_toast ~now ~level:Model.Toast_success label
+          { m with nav; inline_modal; config }
+      in
+      let cmds =
+        if should_refresh then
+          View_fetches.fetches_for_current_view ~force:true next
+        else []
+      in
+      (next, cmds)
+  | Msg.Reply_action_ack { label; ack_scope; result = Error err } ->
+      let touches_modal =
+        match ack_scope with
+        | Msg.Ack_close_modal | Msg.Ack_close_modal_and_refresh -> true
+        | Msg.Ack_toast_only | Msg.Ack_refresh_view | Msg.Ack_editor_saved ->
+            false
+      in
       let inline_modal =
-        Option.map
-          (fun (modal : Model.inline_modal_state) ->
-            { modal with submitting = false; error = Some (Msg.http_error_detail err) })
-          m.inline_modal
+        if not touches_modal then m.inline_modal
+        else
+          Option.map
+            (fun (modal : Model.inline_modal_state) ->
+              {
+                modal with
+                submitting = false;
+                error = Some (Msg.http_error_detail err);
+              })
+            m.inline_modal
       in
       let next, cmds =
         record_http_incident ~now ~source:Health.Source_client_http

@@ -46,22 +46,59 @@ let contains_ci ~needle haystack =
       in
       scan 0
 
+let utf8_scalars_lower s =
+  let len = String.length s in
+  let acc = ref [] in
+  let i = ref 0 in
+  while !i < len do
+    let d = String.get_utf_8_uchar s !i in
+    let step = Uchar.utf_decode_length d in
+    let code = Uchar.to_int (Uchar.utf_decode_uchar d) in
+    let folded = if code >= 65 && code <= 90 then code + 32 else code in
+    acc := folded :: !acc;
+    i := !i + Int.max 1 step
+  done;
+  Array.of_list (List.rev !acc)
+
 let fuzzy_score ~query target =
-  let q = String.lowercase_ascii (String.trim query) in
-  let q_len = String.length q in
-  if q_len = 0 then Some 100
+  let q_raw = String.trim query in
+  if String.equal q_raw "" then Some 100
   else
-    let t = String.lowercase_ascii target in
-    let t_len = String.length t in
+    let q = utf8_scalars_lower q_raw in
+    let t = utf8_scalars_lower target in
+    let q_len = Array.length q in
+    let t_len = Array.length t in
     if q_len > t_len then None
-    else if String.equal q t then Some 1000
-    else if String.starts_with ~prefix:q t then Some (800 - (t_len - q_len))
-    else if contains_ci ~needle:q t then Some (500 - (t_len - q_len))
+    else if
+      Int.equal q_len t_len
+      &&
+      let rec eq i =
+        i >= q_len || (Int.equal q.(i) t.(i) && eq (i + 1))
+      in
+      eq 0
+    then Some 1000
+    else if
+      let rec pref i =
+        i >= q_len || (Int.equal q.(i) t.(i) && pref (i + 1))
+      in
+      pref 0
+    then Some (800 - (t_len - q_len))
+    else if
+      let rec has_sub start =
+        if start + q_len > t_len then false
+        else
+          let rec eq i =
+            i >= q_len || (Int.equal q.(i) t.(start + i) && eq (i + 1))
+          in
+          if eq 0 then true else has_sub (start + 1)
+      in
+      has_sub 0
+    then Some (500 - (t_len - q_len))
     else
       let rec match_seq qi ti score consecutive =
         if qi >= q_len then Some (Int.max 1 score)
         else if ti >= t_len then None
-        else if Char.equal q.[qi] t.[ti] then
+        else if Int.equal q.(qi) t.(ti) then
           let bonus = if consecutive then 12 else 4 in
           let start_bonus = if ti = 0 then 10 else 0 in
           match_seq (qi + 1) (ti + 1) (score + bonus + start_bonus) true

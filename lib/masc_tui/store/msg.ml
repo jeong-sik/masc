@@ -74,6 +74,13 @@ let http_error_retryable = function
   | Http_error { status; _ } -> status >= 500 || status = 429
   | Workspace_mismatch _ | Decode_error _ -> false
 
+type ack_effect =
+  | Ack_toast_only
+  | Ack_close_modal
+  | Ack_refresh_view
+  | Ack_close_modal_and_refresh
+  | Ack_editor_saved
+
 type http_reply =
   | Reply_dashboard_shell of (Wire_fleet.dashboard_shell, http_error) result
   | Reply_keepers_roster of (Wire_fleet.keepers_roster, http_error) result
@@ -310,7 +317,11 @@ type http_reply =
       dry_run : bool;
       result : (Wire_config.patch_response, http_error) result;
     }
-  | Reply_action_ack of { label : Say.t; result : (unit, http_error) result }
+  | Reply_action_ack of {
+      label : Say.t;
+      ack_scope : ack_effect;
+      result : (unit, http_error) result;
+    }
   | Reply_fusion_runs_snapshot of
       (Wire_runtime.fusion_runs_snapshot, http_error) result
   | Reply_fusion_run_detail of {

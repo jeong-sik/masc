@@ -395,24 +395,53 @@ let parse raw =
     | "/quit" -> no_arg cmd Quit arg
     | other -> Error (Unknown_command other)
 
-(* Deterministic subsequence score: lower is better; [None] means no match. *)
+(* UTF-8 Unicode scalar decomposition with ASCII case-folding so multi-byte
+   Hangul/CJK syllables never produce byte-prefix false positives. *)
+let utf8_scalars_lower s =
+  let len = String.length s in
+  let acc = ref [] in
+  let i = ref 0 in
+  while !i < len do
+    let d = String.get_utf_8_uchar s !i in
+    let step = Uchar.utf_decode_length d in
+    let u = Uchar.utf_decode_uchar d in
+    let code = Uchar.to_int u in
+    let folded =
+      if code >= 65 && code <= 90 then code + 32 else code
+    in
+    acc := folded :: !acc;
+    i := !i + Int.max 1 step
+  done;
+  Array.of_list (List.rev !acc)
+
+(* Deterministic Unicode-scalar subsequence score: lower is better; [None] means no match. *)
 let fuzzy_score ~needle ~haystack =
-  let n_len = String.length needle in
-  let h_len = String.length haystack in
+  let n_arr = utf8_scalars_lower needle in
+  let h_arr = utf8_scalars_lower haystack in
+  let n_len = Array.length n_arr in
+  let h_len = Array.length h_arr in
   if n_len = 0 then Some 0
   else if n_len > h_len then None
-  else if String.starts_with ~prefix:needle haystack then
-    Some (h_len - n_len)
   else
-    let rec walk ni hi score last_match =
-      if ni >= n_len then Some (100 + score + (h_len - hi))
-      else if hi >= h_len then None
-      else if Char.equal needle.[ni] haystack.[hi] then
-        let gap = if last_match < 0 then hi else hi - last_match - 1 in
-        walk (ni + 1) (hi + 1) (score + (gap * 3)) hi
-      else walk ni (hi + 1) score last_match
+    let starts =
+      let rec chk i =
+        if i >= n_len then true
+        else if Int.equal n_arr.(i) h_arr.(i) then chk (i + 1)
+        else false
+      in
+      chk 0
     in
-    walk 0 0 0 (-1)
+    if starts then Some (h_len - n_len)
+    else
+      let rec walk ni hi score last_match =
+        if ni >= n_len then Some (100 + score + (h_len - hi))
+        else if hi >= h_len then None
+        else if Int.equal n_arr.(ni) h_arr.(hi) then
+          let gap = if last_match < 0 then hi else hi - last_match - 1 in
+          walk (ni + 1) (hi + 1) (score + (gap * 3)) hi
+        else walk ni (hi + 1) score last_match
+      in
+      walk 0 0 0 (-1)
 
 let strip_leading_slash s =
   let trimmed = String.trim s in

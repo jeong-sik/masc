@@ -19,11 +19,14 @@ let open_custom_inline_modal (m : Model.t)
       error = None;
     }
   in
+  let modal_edit_cursor = String.length (Model.modal_active_field_value modal) in
   let nav =
     {
       m.nav with
       overlay = Some (Nav.Inline_action Nav.Board_new_post);
+      return_overlay = None;
       filter_focused = false;
+      modal_edit_cursor;
     }
   in
   let drafts = Drafts.set_focus false m.drafts in
@@ -267,6 +270,23 @@ let dispatch_settings_overlay_key ~now (m : Model.t)
       Some (Update_actions.execute_action ~now m Keymap.Open_external)
   | Keymap.Input.Char "o" when is_printable_key norm ->
       Some (Update_actions.execute_action ~now m Keymap.Open_external)
+  | Keymap.Input.Char "?" when is_printable_key norm ->
+      Some (Update_actions.execute_action ~now m Keymap.Open_help)
+  | Keymap.Input.Char "d" when is_printable_key norm -> (
+      match Config_store.build_patch_request ~dry_run:true m.config with
+      | Ok req ->
+          let config = Config_store.mark_dry_run_loading m.config in
+          Some
+            ( { m with config }
+            , [
+                Cmd.Http_post
+                  { epoch = m.epoch; req = Cmd.Post_config_patch req };
+              ] )
+      | Error reason ->
+          Some
+            ( Model.with_toast ~now ~level:Model.Toast_info (Say.literal reason)
+                m
+            , [] ))
   | Keymap.Input.Char "/" when is_printable_key norm ->
       Some (Update_actions.execute_action ~now m Keymap.Focus_filter)
   | Keymap.Input.Char "[" when is_printable_key norm ->
@@ -740,7 +760,24 @@ let dispatch_incidents_overlay_key ~now (m : Model.t)
   | Keymap.Input.Char "d" when is_printable_key norm ->
       Some ({ m with incidents = Incidents.dismiss_selected m.incidents }, [])
   | Keymap.Input.Char ("c" | "D") when is_printable_key norm ->
-      Some ({ m with incidents = Incidents.clear_all m.incidents }, [])
+      if m.incidents.clear_confirm_armed then
+        Some
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make ~ko:"장애 이력을 모두 비웠습니다"
+                 ~en:"Cleared all incident history")
+              { m with incidents = Incidents.clear_all m.incidents }
+          , [] )
+      else if Incidents.count m.incidents = 0 then Some (m, [])
+      else
+        Some
+          ( Model.with_toast ~now ~level:Model.Toast_warning
+              (Say.make
+                 ~ko:"모든 장애 이력을 삭제하려면 [c] 또는 [D]를 한 번 더 누르세요"
+                 ~en:"Press [c] or [D] again to clear all incidents")
+              { m with incidents = Incidents.arm_clear_confirm m.incidents }
+          , [] )
+  | Keymap.Input.Char "?" when is_printable_key norm ->
+      Some (Update_actions.execute_action ~now m Keymap.Open_help)
   | Keymap.Input.Char "o" when is_printable_key norm -> (
       match Incidents.selected_entry m.incidents with
       | None -> Some (m, [])
@@ -803,6 +840,8 @@ let dispatch_queue_context_overlay_key ~now (m : Model.t)
            (Keymap.Step_context_item Keymap.Next))
   | Keymap.Input.Char "v" when is_printable_key norm ->
       Some (Update_actions.execute_action ~now m Keymap.Cycle_view_mode)
+  | Keymap.Input.Char "?" when is_printable_key norm ->
+      Some (Update_actions.execute_action ~now m Keymap.Open_help)
   | Keymap.Input.Tab when (not norm.mods.ctrl) && not norm.mods.alt ->
       let dir = if norm.mods.shift then Keymap.Prev else Keymap.Next in
       Some (Update_actions.execute_action ~now m (Keymap.Sub_tab dir))
@@ -909,6 +948,32 @@ let dispatch_system_gate_key ~now (m : Model.t) gate
       Some (Update_nav.apply_move m Keymap.Home)
   | Nav.Media_viewer, Keymap.Input.Char "G" when is_printable_key norm ->
       Some (Update_nav.apply_move m Keymap.End)
+  | Nav.Media_viewer, Keymap.Input.Char "?" when is_printable_key norm ->
+      Some (Update_actions.execute_action ~now m Keymap.Open_help)
+  | Nav.Media_viewer, Keymap.Input.Char "r" when is_printable_key norm -> (
+      match Model.focused_artifact m with
+      | Some art ->
+          Some
+            ( Model.with_toast ~now ~level:Model.Toast_info
+                (Say.make ~ko:"아티팩트 본문을 다시 불러오는 중…"
+                   ~en:"Refetching artifact body…")
+                m
+            , [
+                Cmd.Http_get
+                  {
+                    epoch = m.epoch;
+                    req =
+                      Cmd.Get_artifact_detail
+                        { id = art.id; revision = Some art.revision };
+                  };
+              ] )
+      | None ->
+          Some
+            ( Model.with_toast ~now ~level:Model.Toast_warning
+                (Say.make ~ko:"선택된 아티팩트가 없습니다"
+                   ~en:"No artifact selected")
+                m
+            , [] ))
   | Nav.Media_viewer, Keymap.Input.Char "y" when is_printable_key norm ->
       Some (Update_actions.execute_action ~now m Keymap.Copy_selected)
   | Nav.Media_viewer, Keymap.Input.Char "H" when is_printable_key norm -> (
@@ -919,7 +984,13 @@ let dispatch_system_gate_key ~now (m : Model.t) gate
                 (Say.make ~ko:"SHA-256 복사됨" ~en:"Copied SHA-256")
                 m
             , [ Cmd.Copy_clipboard art.body.sha256 ] )
-      | None -> Some (m, []))
+      | None ->
+          Some
+            ( Model.with_toast ~now ~level:Model.Toast_warning
+                (Say.make ~ko:"선택된 아티팩트가 없습니다"
+                   ~en:"No artifact selected")
+                m
+            , [] ))
   | Nav.Media_viewer, Keymap.Input.Char "e" when is_printable_key norm -> (
       match Model.focused_artifact m with
       | Some art ->
@@ -953,7 +1024,13 @@ let dispatch_system_gate_key ~now (m : Model.t) gate
                     open_after = false;
                   };
               ] )
-      | None -> Some (m, []))
+      | None ->
+          Some
+            ( Model.with_toast ~now ~level:Model.Toast_warning
+                (Say.make ~ko:"선택된 아티팩트가 없습니다"
+                   ~en:"No artifact selected")
+                m
+            , [] ))
   | Nav.Media_viewer, Keymap.Input.Char "o" when is_printable_key norm ->
       Some (Update_actions.execute_action ~now m Keymap.Open_external)
   | Nav.Media_viewer, Keymap.Input.Char "v" when is_printable_key norm ->
@@ -1159,34 +1236,28 @@ let open_goal_confirmation_proof_modal (m : Model.t) ~(goal_id : string)
       };
       {
         key = "confirm_criterion_revision";
-        label = Say.make ~ko:"기준 리비전 (criterion_revision)" ~en:"Criterion revision";
+        label = Say.make ~ko:"기준 리비전" ~en:"Criterion revision";
         value = criterion_revision;
         required = true;
         secret = false;
       };
       {
         key = "confirm_request_id";
-        label =
-          Say.make ~ko:"서버 발급 request_id (GET /goals/confirmation)"
-            ~en:"Server-issued request_id (GET /goals/confirmation)";
+        label = Say.make ~ko:"Request ID" ~en:"Request ID";
         value = "";
         required = true;
         secret = false;
       };
       {
         key = "confirm_verification_run_id";
-        label =
-          Say.make ~ko:"서버 발급 verification_run_id"
-            ~en:"Server-issued verification_run_id";
+        label = Say.make ~ko:"검증 실행 ID" ~en:"Verification run ID";
         value = "";
         required = true;
         secret = false;
       };
       {
         key = "confirm_operator_id";
-        label =
-          Say.make ~ko:"운영자 ID (expected_operator_id)"
-            ~en:"Operator ID (expected_operator_id)";
+        label = Say.make ~ko:"운영자 ID" ~en:"Operator ID";
         value = "";
         required = true;
         secret = false;
@@ -1365,18 +1436,14 @@ let open_memory_act_modal (m : Model.t) ~(keeper_default : string) =
       };
       {
         key = "memory_act";
-        label =
-          Say.make ~ko:"복구 액션 (resume|adopt|restart_reading|skip_item|skip_line)"
-            ~en:"Recovery act (resume|adopt|restart_reading|skip_item|skip_line)";
+        label = Say.make ~ko:"복구 액션" ~en:"Recovery act";
         value = "resume";
         required = true;
         secret = false;
       };
       {
         key = "memory_arg";
-        label =
-          Say.make ~ko:"인자 (observed / turn_log:line / offset)"
-            ~en:"Argument (observed / turn_log:line / offset)";
+        label = Say.make ~ko:"인자 (선택)" ~en:"Argument (optional)";
         value = "";
         required = false;
         secret = false;
@@ -1445,9 +1512,7 @@ let open_fusion_launch_modal (m : Model.t) =
       };
       {
         key = "fusion_topology";
-        label =
-          Say.make ~ko:"토폴로지 (선택: simple|refine|conditional|judge_of_judges)"
-            ~en:"Topology (optional: simple|refine|conditional|judge_of_judges)";
+        label = Say.make ~ko:"토폴로지 (선택)" ~en:"Topology (optional)";
         value = topo_default;
         required = false;
         secret = false;
@@ -1467,18 +1532,14 @@ let open_runtime_assign_modal (m : Model.t) ?(keeper_default = "")
     [
       {
         key = "assign_keeper";
-        label =
-          Say.make ~ko:"대상 키퍼 (비우거나 default 입력 시 기본 경로 변경)"
-            ~en:"Target keeper (blank or 'default' sets default route)";
+        label = Say.make ~ko:"대상 키퍼" ~en:"Target keeper";
         value = keeper_default;
         required = false;
         secret = false;
       };
       {
         key = "assign_runtime_id";
-        label =
-          Say.make ~ko:"런타임 또는 레인 ID (키퍼 배정 해제 시 비움)"
-            ~en:"Runtime or lane ID (leave blank to clear keeper assignment)";
+        label = Say.make ~ko:"런타임 / 레인 ID" ~en:"Runtime / lane ID";
         value = runtime_default;
         required = false;
         secret = false;
@@ -1490,9 +1551,7 @@ let open_setup_account_key_modal (m : Model.t) ?(integration_default = "") () =
     [
       {
         key = "setup_key_integration";
-        label =
-          Say.make ~ko:"프로바이더/통합 ID (예: anthropic, openai, gemini)"
-            ~en:"Integration ID (e.g. anthropic, openai, gemini)";
+        label = Say.make ~ko:"통합 ID" ~en:"Integration ID";
         value = integration_default;
         required = true;
         secret = false;
@@ -1511,19 +1570,14 @@ let open_setup_login_modal (m : Model.t) ?(integration_default = "") () =
     [
       {
         key = "setup_login_integration";
-        label =
-          Say.make
-            ~ko:"로그인 통합 ID (예: claude-code, codex, vibe_acp, kimi_acp)"
-            ~en:"Login integration ID (e.g. claude-code, codex, vibe_acp, kimi_acp)";
+        label = Say.make ~ko:"로그인 통합 ID" ~en:"Login integration ID";
         value = integration_default;
         required = true;
         secret = false;
       };
       {
         key = "setup_login_account_ref";
-        label =
-          Say.make ~ko:"기존 계정 참조 (선택, 새 로그인 시 비움)"
-            ~en:"Existing account_ref (optional, blank for new login)";
+        label = Say.make ~ko:"계정 참조 (선택)" ~en:"Account ref (optional)";
         value = "";
         required = false;
         secret = false;
@@ -2269,6 +2323,31 @@ let dispatch_keeper_config_key ~now (m : Model.t)
     | Keymap.Input.Backspace ->
         Some
           ({ m with config = Config_store.backspace_edit_buffer m.config }, [])
+    | Keymap.Input.Delete ->
+        Some ({ m with config = Config_store.delete_edit_forward m.config }, [])
+    | Keymap.Input.Left when (not norm.mods.ctrl) && not norm.mods.alt ->
+        Some
+          ({ m with config = Config_store.move_edit_cursor `Left m.config }, [])
+    | Keymap.Input.Right when (not norm.mods.ctrl) && not norm.mods.alt ->
+        Some
+          ({ m with config = Config_store.move_edit_cursor `Right m.config }, [])
+    | Keymap.Input.Home when (not norm.mods.ctrl) && not norm.mods.alt ->
+        Some
+          ({ m with config = Config_store.move_edit_cursor `Home m.config }, [])
+    | Keymap.Input.End when (not norm.mods.ctrl) && not norm.mods.alt ->
+        Some
+          ({ m with config = Config_store.move_edit_cursor `End m.config }, [])
+    | Keymap.Input.Char "a" when norm.mods.ctrl && not norm.mods.alt ->
+        Some
+          ({ m with config = Config_store.move_edit_cursor `Home m.config }, [])
+    | Keymap.Input.Char "e" when norm.mods.ctrl && not norm.mods.alt ->
+        Some
+          ({ m with config = Config_store.move_edit_cursor `End m.config }, [])
+    | Keymap.Input.Char "u" when norm.mods.ctrl && not norm.mods.alt ->
+        Some
+          ({ m with config = Config_store.kill_edit_line_start m.config }, [])
+    | Keymap.Input.Char "w" when norm.mods.ctrl && not norm.mods.alt ->
+        Some ({ m with config = Config_store.kill_edit_word m.config }, [])
     | Keymap.Input.Char s when is_printable_key norm ->
         Some
           ({ m with config = Config_store.append_edit_char s m.config }, [])
@@ -2300,7 +2379,6 @@ let dispatch_keeper_config_key ~now (m : Model.t)
     | Keymap.Input.Page_down ->
         Some (m, [])
     | Keymap.Input.Char _
-    | Keymap.Input.Delete
     | Keymap.Input.Insert
     | Keymap.Input.Function _ -> (
         match Keymap.dispatch ~scope_chain:[ Keymap.Global ] norm with
@@ -2564,11 +2642,19 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
               match norm.key with
               | Keymap.Input.Backspace ->
                   let query = Update_nav.drop_last_utf8 m.palette.query in
-                  ( { m with palette = { m.palette with query; selected = 0 } }
+                  ( {
+                      m with
+                      palette = { m.palette with query; selected = 0 };
+                      nav = { m.nav with palette_scroll_offset = 0 };
+                    }
                   , [] )
               | Keymap.Input.Char s when is_printable_key norm ->
                   let query = m.palette.query ^ s in
-                  ( { m with palette = { m.palette with query; selected = 0 } }
+                  ( {
+                      m with
+                      palette = { m.palette with query; selected = 0 };
+                      nav = { m.nav with palette_scroll_offset = 0 };
+                    }
                   , [] )
               | Keymap.Input.Char _
               | Keymap.Input.Enter
@@ -2754,42 +2840,131 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                       , (Some _ | None) ) ->
                         None
                   in
+                  let sync_picker_cursor (m_out, cmds) =
+                    let cursor =
+                      match m_out.Model.inline_modal with
+                      | Some mdl ->
+                          String.length (Model.modal_active_field_value mdl)
+                      | None -> 0
+                    in
+                    ( { m_out with nav = { m_out.nav with modal_edit_cursor = cursor } }
+                    , cmds )
+                  in
+                  let cur_val = Model.modal_active_field_value modal in
+                  let cur_pos =
+                    Int.max 0 (Int.min (String.length cur_val) m.nav.modal_edit_cursor)
+                  in
+                  let apply_modal_edit (next_val, next_cur) =
+                    ( {
+                        m with
+                        inline_modal =
+                          Some
+                            (Model.modal_update_active_field
+                               (fun _ -> next_val)
+                               modal);
+                        nav = { m.nav with modal_edit_cursor = next_cur };
+                      }
+                    , [] )
+                  in
                   match norm.key with
-                  | Keymap.Input.Left when editable -> (
+                  | Keymap.Input.Left when editable && (not norm.mods.ctrl) && not norm.mods.alt -> (
                       match cycle_modal_picker ~delta:(-1) with
-                      | Some res -> res
-                      | None -> (m, []))
-                  | Keymap.Input.Right when editable -> (
+                      | Some res -> sync_picker_cursor res
+                      | None ->
+                          let next_cur =
+                            Update_nav.move_cursor_utf8 `Left ~text:cur_val
+                              ~cursor:cur_pos
+                          in
+                          ( { m with nav = { m.nav with modal_edit_cursor = next_cur } }
+                          , [] ))
+                  | Keymap.Input.Right when editable && (not norm.mods.ctrl) && not norm.mods.alt -> (
                       match cycle_modal_picker ~delta:1 with
-                      | Some res -> res
-                      | None -> (m, []))
-                  | Keymap.Input.Tab when editable ->
-                      let delta = if norm.mods.shift then -1 else 1 in
+                      | Some res -> sync_picker_cursor res
+                      | None ->
+                          let next_cur =
+                            Update_nav.move_cursor_utf8 `Right ~text:cur_val
+                              ~cursor:cur_pos
+                          in
+                          ( { m with nav = { m.nav with modal_edit_cursor = next_cur } }
+                          , [] ))
+                  | Keymap.Input.Home when editable && (not norm.mods.ctrl) && not norm.mods.alt ->
+                      ({ m with nav = { m.nav with modal_edit_cursor = 0 } }, [])
+                  | Keymap.Input.End when editable && (not norm.mods.ctrl) && not norm.mods.alt ->
                       ( {
                           m with
-                          inline_modal =
-                            Some (Model.modal_cycle_field ~delta modal);
+                          nav =
+                            {
+                              m.nav with
+                              modal_edit_cursor = String.length cur_val;
+                            };
+                        }
+                      , [] )
+                  | Keymap.Input.Char "a" when editable && norm.mods.ctrl && not norm.mods.alt ->
+                      ({ m with nav = { m.nav with modal_edit_cursor = 0 } }, [])
+                  | Keymap.Input.Char "e" when editable && norm.mods.ctrl && not norm.mods.alt ->
+                      ( {
+                          m with
+                          nav =
+                            {
+                              m.nav with
+                              modal_edit_cursor = String.length cur_val;
+                            };
+                        }
+                      , [] )
+                  | Keymap.Input.Char "u" when editable && norm.mods.ctrl && not norm.mods.alt ->
+                      apply_modal_edit
+                        (Update_nav.kill_to_start ~text:cur_val ~cursor:cur_pos)
+                  | Keymap.Input.Char "w" when editable && norm.mods.ctrl && not norm.mods.alt ->
+                      apply_modal_edit
+                        (Update_nav.kill_word_back ~text:cur_val ~cursor:cur_pos)
+                  | Keymap.Input.Delete when editable ->
+                      apply_modal_edit
+                        (Update_nav.delete_at_cursor ~text:cur_val ~cursor:cur_pos)
+                  | Keymap.Input.Tab when editable ->
+                      let delta = if norm.mods.shift then -1 else 1 in
+                      let next_modal = Model.modal_cycle_field ~delta modal in
+                      let modal_edit_cursor =
+                        String.length (Model.modal_active_field_value next_modal)
+                      in
+                      ( {
+                          m with
+                          inline_modal = Some next_modal;
+                          nav = { m.nav with modal_edit_cursor };
                         }
                       , [] )
                   | Keymap.Input.Backspace when editable ->
-                      ( {
-                          m with
-                          inline_modal =
-                            Some
-                              (Model.modal_update_active_field
-                                 Update_nav.drop_last_utf8 modal);
-                        }
-                      , [] )
+                      apply_modal_edit
+                        (Update_nav.backspace_at_cursor ~text:cur_val
+                           ~cursor:cur_pos)
                   | Keymap.Input.Char s when editable && is_printable_key norm ->
-                      ( {
-                          m with
-                          inline_modal =
-                            Some
-                              (Model.modal_update_active_field
-                                 (fun v -> v ^ s)
-                                 modal);
-                        }
-                      , [] )
+                      apply_modal_edit
+                        (Update_nav.insert_at_cursor ~text:cur_val ~cursor:cur_pos
+                           ~insert:s)
+                  | Keymap.Input.Char "y"
+                    when (not editable)
+                         && Nav.equal_inline_action_kind modal.kind Nav.Btw_query
+                         && is_printable_key norm ->
+                      Update_actions.execute_action ~now m Keymap.Copy_selected
+                  | Keymap.Input.Char "j"
+                    when (not editable)
+                         && Nav.equal_inline_action_kind modal.kind Nav.Btw_query
+                         && is_printable_key norm ->
+                      Update_nav.apply_move m Keymap.Down
+                  | Keymap.Input.Char "k"
+                    when (not editable)
+                         && Nav.equal_inline_action_kind modal.kind Nav.Btw_query
+                         && is_printable_key norm ->
+                      Update_nav.apply_move m Keymap.Up
+                  | Keymap.Input.Char "g"
+                    when (not editable)
+                         && Nav.equal_inline_action_kind modal.kind Nav.Btw_query
+                         && is_printable_key norm ->
+                      Update_nav.apply_move m Keymap.Home
+                  | Keymap.Input.Char "G"
+                    when (not editable)
+                         && Nav.equal_inline_action_kind modal.kind Nav.Btw_query
+                         && is_printable_key norm ->
+                      Update_nav.apply_move m Keymap.End
                   | Keymap.Input.Char _
                   | Keymap.Input.Enter
                   | Keymap.Input.Tab
@@ -2820,6 +2995,57 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                       config = Config_store.backspace_edit_buffer m.config;
                     }
                   , [] )
+              | Keymap.Input.Delete ->
+                  ( {
+                      m with
+                      config = Config_store.delete_edit_forward m.config;
+                    }
+                  , [] )
+              | Keymap.Input.Left when (not norm.mods.ctrl) && not norm.mods.alt ->
+                  ( {
+                      m with
+                      config = Config_store.move_edit_cursor `Left m.config;
+                    }
+                  , [] )
+              | Keymap.Input.Right when (not norm.mods.ctrl) && not norm.mods.alt ->
+                  ( {
+                      m with
+                      config = Config_store.move_edit_cursor `Right m.config;
+                    }
+                  , [] )
+              | Keymap.Input.Home when (not norm.mods.ctrl) && not norm.mods.alt ->
+                  ( {
+                      m with
+                      config = Config_store.move_edit_cursor `Home m.config;
+                    }
+                  , [] )
+              | Keymap.Input.End when (not norm.mods.ctrl) && not norm.mods.alt ->
+                  ( {
+                      m with
+                      config = Config_store.move_edit_cursor `End m.config;
+                    }
+                  , [] )
+              | Keymap.Input.Char "a" when norm.mods.ctrl && not norm.mods.alt ->
+                  ( {
+                      m with
+                      config = Config_store.move_edit_cursor `Home m.config;
+                    }
+                  , [] )
+              | Keymap.Input.Char "e" when norm.mods.ctrl && not norm.mods.alt ->
+                  ( {
+                      m with
+                      config = Config_store.move_edit_cursor `End m.config;
+                    }
+                  , [] )
+              | Keymap.Input.Char "u" when norm.mods.ctrl && not norm.mods.alt ->
+                  ( {
+                      m with
+                      config = Config_store.kill_edit_line_start m.config;
+                    }
+                  , [] )
+              | Keymap.Input.Char "w" when norm.mods.ctrl && not norm.mods.alt ->
+                  ( { m with config = Config_store.kill_edit_word m.config }
+                  , [] )
               | Keymap.Input.Char s when is_printable_key norm ->
                   ( { m with config = Config_store.append_edit_char s m.config }
                   , [] )
@@ -2840,7 +3066,6 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
               | Keymap.Input.Enter
               | Keymap.Input.Tab
               | Keymap.Input.Escape
-              | Keymap.Input.Delete
               | Keymap.Input.Insert
               | Keymap.Input.Function _ -> (
                   match
@@ -2850,6 +3075,11 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                   | Some act -> Update_actions.execute_action ~now m act
                   | None -> (m, [])))
           | Some (Nav.Settings _) -> (
+              let m =
+                if Keymap.Input.equal_key norm.key Keymap.Input.Escape then m
+                else
+                  { m with config = Config_store.disarm_discard_confirm m.config }
+              in
               match dispatch_settings_overlay_key ~now m norm with
               | Some res -> res
               | None -> (
@@ -2860,6 +3090,19 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                   | Some act -> Update_actions.execute_action ~now m act
                   | None -> (m, [])))
           | Some Nav.Incidents -> (
+              let is_clear_key =
+                is_printable_key norm
+                && (Keymap.Input.equal_key norm.key (Keymap.Input.Char "c")
+                   || Keymap.Input.equal_key norm.key (Keymap.Input.Char "D"))
+              in
+              let m =
+                if is_clear_key then m
+                else
+                  {
+                    m with
+                    incidents = Incidents.disarm_clear_confirm m.incidents;
+                  }
+              in
               match dispatch_incidents_overlay_key ~now m norm with
               | Some res -> res
               | None -> (
@@ -3464,6 +3707,24 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                   drafts = Drafts.insert_text s m.drafts;
                                 }
                               , [] )
+                          | Keymap.Input.Up
+                            when (not norm.mods.ctrl) && (not norm.mods.alt)
+                                 && Drafts.current_draft_is_multiline m.drafts ->
+                              ( {
+                                  m with
+                                  drafts =
+                                    Drafts.move_cursor_vertical `Up m.drafts;
+                                }
+                              , [] )
+                          | Keymap.Input.Down
+                            when (not norm.mods.ctrl) && (not norm.mods.alt)
+                                 && Drafts.current_draft_is_multiline m.drafts ->
+                              ( {
+                                  m with
+                                  drafts =
+                                    Drafts.move_cursor_vertical `Down m.drafts;
+                                }
+                              , [] )
                           | Keymap.Input.Char _
                           | Keymap.Input.Enter
                           | Keymap.Input.Tab
@@ -3492,7 +3753,12 @@ let apply_paste ~now:_ (m : Model.t) text =
         (m, [])
     | Some Nav.Palette ->
         let query = m.palette.query ^ strip_newlines text in
-        ({ m with palette = { m.palette with query; selected = 0 } }, [])
+        ( {
+            m with
+            palette = { m.palette with query; selected = 0 };
+            nav = { m.nav with palette_scroll_offset = 0 };
+          }
+        , [] )
     | Some (Nav.Inline_action _) -> (
         match m.inline_modal with
         | None -> (m, [])
@@ -3525,13 +3791,22 @@ let apply_paste ~now:_ (m : Model.t) text =
             in
             if not editable then (m, [])
             else
+              let cur_val = Model.modal_active_field_value modal in
+              let cur_pos =
+                Int.max 0 (Int.min (String.length cur_val) m.nav.modal_edit_cursor)
+              in
+              let next_val, next_cur =
+                Update_nav.insert_at_cursor ~text:cur_val ~cursor:cur_pos
+                  ~insert:text
+              in
               ( {
                   m with
                   inline_modal =
                     Some
                       (Model.modal_update_active_field
-                         (fun v -> v ^ text)
+                         (fun _ -> next_val)
                          modal);
+                  nav = { m.nav with modal_edit_cursor = next_cur };
                 }
               , [] ))
     | Some (Nav.Settings _) when Config_store.is_editing_field m.config ->

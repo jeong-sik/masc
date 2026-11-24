@@ -840,12 +840,71 @@ let draw_focused_help_footer ~pad_x grid ~(rect : Rect.t) ~(theme : Theme.t)
                    (Grapheme.truncate_to_width ~max_width:iw hint))
           end
 
+let is_utf8_cont b = b land 0xC0 = 0x80
+
+let clamp_utf8_cursor s c =
+  let len = String.length s in
+  let c = Int.max 0 (Int.min len c) in
+  let rec align i =
+    if i <= 0 || i >= len then i
+    else if is_utf8_cont (Char.code s.[i]) then align (i - 1)
+    else i
+  in
+  align c
+
+(* Compute horizontally scrolled before/after slices keeping the 1-column
+   editing cursor inside [max_w] display columns (reserving 1 column for the
+   cursor glyph and 1 column for ["‹"] when scrolled past column 0). *)
+let slice_editing_value ~max_w ~cursor_byte raw =
+  if max_w <= 1 then ("", "")
+  else
+    let len = String.length raw in
+    let c = clamp_utf8_cursor raw cursor_byte in
+    let before = String.sub raw 0 c in
+    let after = String.sub raw c (len - c) in
+    let before_w = Grapheme.display_width before in
+    let avail = max_w - 1 in
+    if before_w <= avail then
+      let rem_w = avail - before_w in
+      let vis_after =
+        if rem_w > 0 then Grapheme.truncate_to_width ~max_width:rem_w after
+        else ""
+      in
+      (before, vis_after)
+    else
+      let ind = "‹" in
+      let ind_w = Grapheme.display_width ind in
+      if avail <= ind_w then (ind, "")
+      else
+        let tail_budget = avail - ind_w in
+        (* Walk UTF-8 boundaries in [before] until suffix fits in [tail_budget]. *)
+        let rec drop_from i =
+          if i >= c then c
+          else
+            let sub = String.sub before i (c - i) in
+            if Grapheme.display_width sub <= tail_budget then i
+            else
+              let d = String.get_utf_8_uchar before i in
+              drop_from (i + Int.max 1 (Uchar.utf_decode_length d))
+        in
+        let start = drop_from 0 in
+        let visible_before = String.sub before start (c - start) in
+        let rem_w =
+          Int.max 0 (tail_budget - Grapheme.display_width visible_before)
+        in
+        let visible_after =
+          if rem_w > 0 then Grapheme.truncate_to_width ~max_width:rem_w after
+          else ""
+        in
+        (ind ^ visible_before, visible_after)
+
 let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang ?pad_x ?label_width
     ?section_header ?show_row_badges ?show_help_footer ?(focused = true)
-    (st : state) =
+    ?(elevated = false) ?edit_cursor (st : state) =
   if Rect.is_empty rect then 0
   else
-    let surface_card = Color.of_rgb theme.surface_1 in
+    let base_bg_rgb = if elevated then theme.surface_2 else theme.surface_1 in
+    let surface_card = Color.of_rgb base_bg_rgb in
     Cell_grid.fill_rect ~clip:rect grid ~rect
       ~style:(Typography.primary ~bg:surface_card theme) ();
     let eff_pad_x =
@@ -948,7 +1007,7 @@ let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang ?pad_x ?label_width
         let bg_rgb =
           if is_focused then theme.selection_bg
           else if is_selected then theme.surface_2
-          else theme.surface_1
+          else base_bg_rgb
         in
         let bg = Color.of_rgb bg_rgb in
         let row_rect = Rect.make ~x:fields_rect.x ~y:!y ~w:fields_rect.w ~h:1 in
@@ -1029,10 +1088,67 @@ let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang ?pad_x ?label_width
                 Attr.none
         in
         let val_style = Style.make ~fg:(Color.of_rgb val_fg) ~bg ~attrs:val_attrs () in
-        if val_w > 0 then
-          ignore
-            (Cell_grid.put_text ~clip:row_rect grid ~x:val_x ~y:!y ~style:val_style
-               (Grapheme.truncate_to_width ~max_width:val_w val_str));
+        if val_w > 0 then begin
+          let is_text_editing =
+            is_focused && st.editing
+            &&
+            match f.value with
+            | Text_val _ | Multiline_val _ | Int_val _ | Float_val _
+            | Secret_val _ ->
+                true
+            | Bool_val _ | Enum_val _ -> false
+          in
+          if is_text_editing then begin
+            let cursor_byte =
+              match f.value with
+              | Secret_val { revealed = false; _ } -> String.length val_str
+              | Text_val _
+              | Multiline_val _
+              | Int_val _
+              | Float_val _
+              | Bool_val _
+              | Enum_val _
+              | Secret_val { revealed = true; _ } -> (
+                  match edit_cursor with
+                  | Some c -> c
+                  | None -> String.length val_str)
+            in
+            let vis_before, vis_after =
+              slice_editing_value ~max_w:val_w ~cursor_byte val_str
+            in
+            let adv_before =
+              if String.length vis_before > 0 then
+                Cell_grid.put_text ~clip:row_rect grid ~x:val_x ~y:!y
+                  ~style:val_style vis_before
+              else 0
+            in
+            let cx = val_x + adv_before in
+            let adv_cur =
+              if cx < val_x + val_w && cx < Rect.right row_rect then
+                let cur_st =
+                  Style.make ~fg:(Color.of_rgb theme.accent) ~bg
+                    ~attrs:Attr.bold ()
+                in
+                Cell_grid.put_text ~clip:row_rect grid ~x:cx ~y:!y
+                  ~style:cur_st "▏"
+              else 0
+            in
+            let ax = cx + adv_cur in
+            if
+              String.length vis_after > 0
+              && ax < val_x + val_w
+              && ax < Rect.right row_rect
+            then
+              ignore
+                (Cell_grid.put_text ~clip:row_rect grid ~x:ax ~y:!y
+                   ~style:val_style vis_after)
+          end
+          else
+            ignore
+              (Cell_grid.put_text ~clip:row_rect grid ~x:val_x ~y:!y
+                 ~style:val_style
+                 (Grapheme.truncate_to_width ~max_width:val_w val_str))
+        end;
         (match chip with
          | Some (chip_str, chip_style) when show_chip ->
              let bx = right_edge - chip_w in

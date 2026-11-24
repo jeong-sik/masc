@@ -965,6 +965,7 @@ let test_remote_editor_escape_hatch_blocked () =
                     | Msg.Reply_action_ack
                         {
                           label;
+                          ack_scope = _;
                           result = Error (Msg.Transport (Health.Other_io detail));
                         } ->
                         Some (label, detail, msg)
@@ -1898,7 +1899,13 @@ let test_feature_wave1_osc52_and_artifact_export_safety () =
         List.find_map
           (function
             | Ui_bus.Stream_event
-                (Msg.Http_reply { reply = Msg.Reply_action_ack { label; result = Ok () }; _ }) ->
+                (Msg.Http_reply
+                   {
+                     reply =
+                       Msg.Reply_action_ack
+                         { label; ack_scope = _; result = Ok () };
+                     _;
+                   }) ->
                 Some (Say.resolve Say.Lang_en label)
             | Ui_bus.Stream_event _ | Ui_bus.Snapshot _ | Ui_bus.Stream_gap _ -> None)
           items

@@ -523,6 +523,7 @@ let fork_safe t fn =
                          label =
                            Say.make ~ko:"비동기 요청 오류"
                              ~en:"Async command error";
+                         ack_scope = Msg.Ack_toast_only;
                          result =
                            Error
                              (Msg.Transport
@@ -1617,6 +1618,7 @@ let execute_post t ~epoch req =
               (Msg.Reply_action_ack
                  {
                    label = Say.make ~ko:"목표 상태 변경됨" ~en:"Goal transitioned";
+                   ack_scope = Msg.Ack_refresh_view;
                    result;
                  })
         | Cmd.Post_goal_confirmation confirm ->
@@ -1720,6 +1722,7 @@ let execute_post t ~epoch req =
                    label =
                      Say.make ~ko:"샌드박스 프로브 요청됨"
                        ~en:"Sandbox probe requested";
+                   ack_scope = Msg.Ack_refresh_view;
                    result;
                  })
         | Cmd.Post_config_patch patch_req ->
@@ -1735,6 +1738,7 @@ let execute_post t ~epoch req =
               (Msg.Reply_action_ack
                  {
                    label = Say.make ~ko:"TUI 설정 저장됨" ~en:"Preferences saved";
+                   ack_scope = Msg.Ack_toast_only;
                    result;
                  })
         | Cmd.Post_keeper_turn_interrupt { keeper; _ } ->
@@ -1749,6 +1753,7 @@ let execute_post t ~epoch req =
               (Msg.Reply_action_ack
                  {
                    label = Say.make ~ko:"게시글 작성 완료" ~en:"Board post created";
+                   ack_scope = Msg.Ack_close_modal_and_refresh;
                    result;
                  })
         | Cmd.Post_board_comment { post_id; _ } ->
@@ -1801,6 +1806,7 @@ let execute_post t ~epoch req =
               (Msg.Reply_action_ack
                  {
                    label = Say.make ~ko:"일정 생성 완료" ~en:"Schedule created";
+                   ack_scope = Msg.Ack_close_modal_and_refresh;
                    result;
                  })
         | Cmd.Post_connector_bind _ ->
@@ -1809,6 +1815,7 @@ let execute_post t ~epoch req =
               (Msg.Reply_action_ack
                  {
                    label = Say.make ~ko:"커넥터 연결 완료" ~en:"Connector bound";
+                   ack_scope = Msg.Ack_close_modal_and_refresh;
                    result;
                  })
         | Cmd.Post_connector_unbind _ ->
@@ -1817,6 +1824,7 @@ let execute_post t ~epoch req =
               (Msg.Reply_action_ack
                  {
                    label = Say.make ~ko:"커넥터 바인딩 해제됨" ~en:"Connector unbound";
+                   ack_scope = Msg.Ack_refresh_view;
                    result;
                  })
         | Cmd.Post_repo_add _ ->
@@ -1825,6 +1833,7 @@ let execute_post t ~epoch req =
               (Msg.Reply_action_ack
                  {
                    label = Say.make ~ko:"저장소 추가 완료" ~en:"Repository added";
+                   ack_scope = Msg.Ack_close_modal_and_refresh;
                    result;
                  })
         | Cmd.Post_task_cancel _ ->
@@ -1833,6 +1842,7 @@ let execute_post t ~epoch req =
               (Msg.Reply_action_ack
                  {
                    label = Say.make ~ko:"작업 취소 완료" ~en:"Task cancelled";
+                   ack_scope = Msg.Ack_close_modal_and_refresh;
                    result;
                  })
         | Cmd.Post_harness_overrule _ ->
@@ -1843,6 +1853,7 @@ let execute_post t ~epoch req =
                    label =
                      Say.make ~ko:"판정 재정의 전송됨"
                        ~en:"Harness overrule submitted";
+                   ack_scope = Msg.Ack_close_modal_and_refresh;
                    result;
                  })
         | Cmd.Post_browser_tabs { client_id } ->
@@ -2248,9 +2259,10 @@ let remote_editor_blocked_message =
 let execute_editor_escape_hatch t target =
   let epoch = Atomic.get t.stream_epoch in
   let ko = Say.equal_lang t.cli.lang Say.Lang_ko in
-  let emit_ack ~label result =
+  let emit_ack ?(ack_scope = Msg.Ack_toast_only) ~label result =
     Ui_bus.publish_stream t.bus
-      (Msg.Http_reply { epoch; reply = Msg.Reply_action_ack { label; result } })
+      (Msg.Http_reply
+         { epoch; reply = Msg.Reply_action_ack { label; ack_scope; result } })
   in
   match target with
   | Cmd.Edit_runtime_toml | Cmd.Edit_keeper_toml _ ->
@@ -2284,7 +2296,7 @@ let execute_editor_escape_hatch t target =
                 Fs_compat.mkdir_p (Filename.dirname path);
                 match Fs_compat.save_file_atomic path edited with
                 | Ok () ->
-                    emit_ack
+                    emit_ack ~ack_scope:Msg.Ack_editor_saved
                       ~label:
                         (Say.make ~ko:"TOML 파일 저장 완료"
                            ~en:"Saved TOML file")
@@ -2718,7 +2730,12 @@ let publish_clipboard_outcome t ~epoch ~bytes outcome =
   in
   Ui_bus.publish_stream t.bus
     (Msg.Http_reply
-       { epoch; reply = Msg.Reply_action_ack { label; result = Ok () } })
+       {
+         epoch;
+         reply =
+           Msg.Reply_action_ack
+             { label; ack_scope = Msg.Ack_toast_only; result = Ok () };
+       })
 let rec execute t = function
   | Cmd.Batch cmds -> List.iter (execute t) cmds
   | Cmd.Http_get { epoch; req } -> execute_get t ~epoch req
@@ -2746,6 +2763,7 @@ let rec execute t = function
                      {
                        label =
                          Say.make ~ko:"SSE 스트림 동기화" ~en:"SSE stream sync";
+                       ack_scope = Msg.Ack_toast_only;
                        result = Error (Msg.Transport (Health.Protocol_error msg));
                      };
                }))
@@ -2810,6 +2828,7 @@ let rec execute t = function
                            label =
                              Say.make ~ko:"아티팩트 본문 복사"
                                ~en:"Copy artifact body";
+                           ack_scope = Msg.Ack_toast_only;
                            result = Error err;
                          };
                    }))
@@ -2850,6 +2869,7 @@ let rec execute t = function
                            label =
                              Say.make ~ko:"아티팩트 내보내기"
                                ~en:"Export artifact";
+                           ack_scope = Msg.Ack_toast_only;
                            result = Error err;
                          };
                    })
@@ -2924,7 +2944,13 @@ let rec execute t = function
                     (Msg.Http_reply
                        {
                          epoch;
-                         reply = Msg.Reply_action_ack { label; result = Ok () };
+                         reply =
+                           Msg.Reply_action_ack
+                             {
+                               label;
+                               ack_scope = Msg.Ack_toast_only;
+                               result = Ok ();
+                             };
                        })
               | Error detail ->
                   Ui_bus.publish_stream t.bus
@@ -2937,6 +2963,7 @@ let rec execute t = function
                                label =
                                  Say.make ~ko:"아티팩트 내보내기"
                                    ~en:"Export artifact";
+                               ack_scope = Msg.Ack_toast_only;
                                result =
                                  Error (Msg.Transport (Health.Other_io detail));
                              };
@@ -2957,6 +2984,7 @@ let rec execute t = function
                              label =
                                Say.make ~ko:"외부 링크 열기"
                                  ~en:"Open external URL";
+                             ack_scope = Msg.Ack_toast_only;
                              result =
                                Error (Msg.Transport (Health.Other_io detail));
                            };

@@ -66,6 +66,9 @@ type t = {
   field_meta : Wire_config.field_entity_meta String_map.t;
   search_query : string;
   dirty_fields : Wire_config.patch_op String_map.t;
+  dirty_by_target :
+    (Wire_config.config_target * Wire_config.patch_op String_map.t) list;
+  discard_confirm_armed : bool;
   dry_run_preview : dry_run_state;
   dry_run_scroll_offset : int;
   save_state : save_state;
@@ -80,6 +83,7 @@ type t = {
   scroll_offset : int;
   editing_field_key : string option;
   editing_buffer : string;
+  editing_cursor : int;
 }
 
 val empty : t
@@ -175,6 +179,8 @@ val stage_patch : full_key:string -> Wire_config.patch_op -> t -> t
 val unstage_patch : full_key:string -> t -> t
 val clear_dirty : t -> t
 val dirty_count : t -> int
+val arm_discard_confirm : t -> t
+val disarm_discard_confirm : t -> t
 
 val step_field :
   delta:int -> Wire_config.schema_field -> t -> (t * bool, string) result
@@ -219,6 +225,11 @@ val stage_remove_keeper_selected : ?lang:Say.lang -> t -> (t, string) result
 val update_edit_buffer : string -> t -> t
 val append_edit_char : string -> t -> t
 val backspace_edit_buffer : t -> t
+val delete_edit_forward : t -> t
+val kill_edit_line_start : t -> t
+val clamp_edit_cursor : string -> int -> int
+val kill_edit_word : t -> t
+val move_edit_cursor : [ `Left | `Right | `Home | `End ] -> t -> t
 val cancel_edit_field : t -> t
 val commit_edit_field : t -> (t, string) result
 (** Strictly parse [editing_buffer] against the selected field's

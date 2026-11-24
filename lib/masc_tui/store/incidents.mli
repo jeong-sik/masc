@@ -18,6 +18,7 @@ type t = {
   filter_query : string;
   show_dismissed : bool;
   unread_count : int;
+  clear_confirm_armed : bool;
 }
 
 val empty : t
@@ -36,6 +37,8 @@ val push :
 val dismiss : id:int -> t -> t
 val dismiss_selected : t -> t
 val clear_all : t -> t
+val arm_clear_confirm : t -> t
+val disarm_clear_confirm : t -> t
 val mark_all_read : t -> t
 
 val visible_entries : t -> Health.incident list

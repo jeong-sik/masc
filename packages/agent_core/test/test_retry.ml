@@ -555,11 +555,12 @@ let test_zai_glm_error_codes_ssot_parity () =
        check bool (Printf.sprintf "Backend_glm.is_context_overflow_code %s" code) false
          (Glm.is_context_overflow_code code);
        let body = Printf.sprintf {|{"error":{"code":%S,"message":"quota exhausted"}}|} code in
+       (* The GLM codec reads the code ([Complete_common.provider_refusal]);
+          the provider-neutral HTTP tables do not, since the same digits from
+          another provider mean something else. *)
        match Retry.classify_structured_refusal ~retry_after_header:None ~status:429 ~body with
-       | Some (Retry.Structured_account_quota _) -> ()
-       | Some (Retry.Structured_context_overflow _) ->
-         failf "Z.AI code %s misclassified as context overflow" code
-       | None -> failf "Z.AI quota code %s not recognized by Retry" code)
+       | None -> ()
+       | Some _ -> failf "Z.AI code %s read by the provider-neutral HTTP tables" code)
     quota_codes;
   check bool "Backend_glm.is_context_overflow_code 1261" true
     (Glm.is_context_overflow_code "1261");
@@ -570,8 +571,8 @@ let test_zai_glm_error_codes_ssot_parity () =
        ~status:400
        ~body:{|{"error":{"code":"1261","message":"Prompt exceeds max length"}}|}
    with
-   | Some (Retry.Structured_context_overflow _) -> ()
-   | _ -> fail "Z.AI code 1261 must classify as Structured_context_overflow");
+   | None -> ()
+   | Some _ -> fail "Z.AI code 1261 read by the provider-neutral HTTP tables");
   List.iter
     (fun code ->
        check bool (Printf.sprintf "non-quota transient Z.AI code %s" code) false

@@ -710,13 +710,15 @@ let http_signals_of_body (body : string) : error_signals =
   | Error _ -> empty_signals
 ;;
 
+(* The GLM codec interprets Z.AI numeric codes through
+   [Complete_common.provider_refusal] before the common HTTP classifier runs. *)
 let is_http_context_overflow_code code =
   match code with
   | "context_length_exceeded"
   | "string_above_max_length"
   | "model_context_window_exceeded"
   | "3200" -> true
-  | _ -> Backend_glm.is_context_overflow_code code
+  | _ -> false
 ;;
 
 let is_http_context_overflow_type = function
@@ -739,7 +741,7 @@ let is_http_quota_code code =
   | "usage_limit_exceeded"
   (* Mistral API: billing_api_budget_exhausted (code 2303). *)
   | "2303" -> true
-  | _ -> Backend_glm.is_quota_code code
+  | _ -> false
 ;;
 
 let is_http_quota_type = function

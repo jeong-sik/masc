@@ -296,19 +296,18 @@ let test_reference_integrity () = with_fixture @@ fun artifact call ->
   |> failed "invalid_skill_validation_request"
 ;;
 
-let test_absent_draft_matches_absent_artifact_failure_class () =
+(* Drafts were composition drafts. With compositions retired (#54361) the tool
+   takes only [artifact]: [Keeper_skill_validate.resolve_source] ignores
+   [draft_context] and the input parser requires [artifact], so a
+   [draft_sha256]-only request is refused before any draft lookup. Keep the
+   artifact half, which still pins [artifact_not_found] and its failure class. *)
+let test_absent_artifact_failure_class () =
   with_fixture @@ fun _artifact call ->
   let sha256 = String.make 64 '0' in
   let absent_artifact = call (`Assoc [ "artifact", `String sha256; "package_id", `String "proposed" ]) in
-  let absent_draft = call (`Assoc [ "draft_sha256", `String sha256; "package_id", `String "proposed" ]) in
   failed "artifact_not_found" absent_artifact;
-  failed "composition_draft_rejected" absent_draft;
-  check string "absent draft error kind" "draft_not_found"
-    Yojson.Safe.Util.(member "draft_error" (snd absent_draft) |> member "kind" |> to_string);
-  check bool "absent draft is a workflow rejection" true
-    ((fst absent_draft).Keeper_tool_execution.disposition = Tool_result.Failed Tool_result.Workflow_rejection);
-  check bool "absent draft and absent artifact return the same failure class" true
-    ((fst absent_draft).Keeper_tool_execution.disposition = (fst absent_artifact).Keeper_tool_execution.disposition)
+  check bool "absent artifact is a workflow rejection" true
+    ((fst absent_artifact).Keeper_tool_execution.disposition = Tool_result.Failed Tool_result.Workflow_rejection)
 ;;
 
 let test_unreadable_artifact () = with_fixture ~damage_exports:true @@ fun artifact call ->
@@ -376,8 +375,8 @@ let () =
       ; test_case "invalid request" `Quick test_invalid_request
       ; test_case "shared authoring size limit" `Quick test_size_limit
       ; test_case "artifact reference integrity" `Quick test_reference_integrity
-      ; test_case "absent draft matches absent artifact failure class" `Quick
-          test_absent_draft_matches_absent_artifact_failure_class
+      ; test_case "absent artifact failure class" `Quick
+          test_absent_artifact_failure_class
       ; test_case "damaged artifact is a runtime failure" `Quick test_unreadable_artifact
       ; test_case "repeated success reuses the parse" `Quick test_repeated_success_cached
       ; test_case "repeated failure reuses the parse" `Quick test_repeated_failure_cached

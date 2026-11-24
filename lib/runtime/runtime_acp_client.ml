@@ -2939,6 +2939,8 @@ let start ~sw ~proc_mgr ~clock ?fs ~(config : config) ?mcp_server ?native_postur
   then Error (Invalid_config "cli_path must be non-empty")
   else if String.trim config.cwd = ""
   then Error (Invalid_config "cwd must be non-empty")
+  else if config.driver = Muse_code && Option.is_some config.oauth_source
+  then Error (Invalid_config "ACP driver muse_code requires host sign-in with the credential file binding unset")
   else if
     native_posture = Some Runtime_native_tools.Native_none && not profile.enforces_native_none
   then

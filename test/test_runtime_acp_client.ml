@@ -365,7 +365,7 @@ let test_muse_profile_and_native_none () =
      = Runtime_native_tools.Native_read)
 ;;
 
-let test_muse_refuses_native_none_before_spawn () =
+let test_muse_refuses_unsupported_config_before_spawn () =
   let cwd = Filename.temp_dir "masc-muse-native-none-" "" in
   Fun.protect ~finally:(fun () -> Unix.rmdir cwd) (fun () ->
     Eio_main.run (fun env ->
@@ -382,14 +382,23 @@ let test_muse_refuses_native_none_before_spawn () =
             (fun fmt e -> Format.pp_print_string fmt (Runtime_acp_client.error_to_string e))
             ( = )
         in
+        let start ~config ~native_posture =
+          Runtime_acp_client.start ~sw ~proc_mgr ~clock ~fs:(Eio.Stdenv.fs env) ~config
+            ~native_posture () |> Result.map Runtime_acp_client.close
+        in
         check
           (result unit error)
           "refuses native none before attempting to spawn the missing executable"
           (Error (Runtime_acp_client.Invalid_config
                     "ACP driver muse_code cannot enforce the native tool posture 'none'"))
-          (Runtime_acp_client.start ~sw ~proc_mgr ~clock ~fs:(Eio.Stdenv.fs env) ~config
-             ~native_posture:Runtime_native_tools.Native_none ()
-           |> Result.map Runtime_acp_client.close))))
+          (start ~config ~native_posture:Runtime_native_tools.Native_none);
+        check
+          (result unit error)
+          "rejects an explicit credential file before falling back to host sign-in"
+          (Error (Runtime_acp_client.Invalid_config
+                    "ACP driver muse_code requires host sign-in with the credential file binding unset"))
+          (start ~config:{ config with oauth_source = Some (Filename.concat cwd "missing-credential") }
+             ~native_posture:Runtime_native_tools.Native_read))))
 ;;
 
 let test_muse_argv_and_environment () =
@@ -4996,8 +5005,8 @@ let () =
       , [ test_case "closed driver profiles" `Quick test_driver_profiles
         ; test_case "muse profile and native-none support" `Quick
             test_muse_profile_and_native_none
-        ; test_case "muse rejects native none before spawn" `Quick
-            test_muse_refuses_native_none_before_spawn
+        ; test_case "muse rejects unsupported config before spawn" `Quick
+            test_muse_refuses_unsupported_config_before_spawn
         ] )
     ; "environment", [ test_case "env strip and override" `Quick test_build_environment ]
     ; ( "argv_and_posture"

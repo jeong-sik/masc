@@ -806,13 +806,13 @@ let execute_get t ~epoch req =
                    ~decode:Wire_knowledge.decode_board_hearths)
             in
             Msg.Http_reply { epoch; reply }
-        | Cmd.Get_board_thread _ ->
-            let reply =
-              Msg.Reply_board_thread
-                (fetch_and_decode_get t ~path
-                   ~decode:(Wire_knowledge.decode_board_thread ~observed_at))
+        | Cmd.Get_board_thread { post_id; _ } ->
+            let result =
+              fetch_and_decode_get t ~path
+                ~decode:(Wire_knowledge.decode_board_thread ~observed_at)
             in
-            Msg.Http_reply { epoch; reply }
+            Msg.Http_reply
+              { epoch; reply = Msg.Reply_board_thread { post_id; result } }
         | Cmd.Get_wiki_index _ ->
             let reply =
               Msg.Reply_wiki_index
@@ -1699,14 +1699,27 @@ let execute_post t ~epoch req =
                    keeper = None;
                    result;
                  })
-        | Cmd.Post_goal_transition _ ->
+        | Cmd.Post_goal_transition { goal_id; action; _ } ->
             let result = post_ack t ~path ~body in
+            let ack_scope, for_modal =
+              match action with
+              | Wire_work.Drop ->
+                  ( Msg.Ack_close_modal_and_refresh
+                  , Some (Nav.Goal_drop goal_id) )
+              | Wire_work.Request_complete
+              | Wire_work.Pause
+              | Wire_work.Resume
+              | Wire_work.Block
+              | Wire_work.Unblock
+              | Wire_work.Reopen ->
+                  (Msg.Ack_refresh_view, None)
+            in
             Some
               (Msg.Reply_action_ack
                  {
                    label = Say.make ~ko:"목표 상태 변경됨" ~en:"Goal transitioned";
-                   ack_scope = Msg.Ack_refresh_view;
-                   for_modal = None;
+                   ack_scope;
+                   for_modal;
                    result;
                  })
         | Cmd.Post_goal_confirmation confirm ->

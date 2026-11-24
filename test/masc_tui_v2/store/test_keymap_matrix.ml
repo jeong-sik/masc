@@ -1353,8 +1353,18 @@ let test_axis_a_screen_dive_matrix () =
                 expected m'.nav.pane_index
             end
           end;
-          (* Invariant 3: Enter inside any Dive never pushes duplicate/nested dive *)
-          if String.equal kname "Enter" && Option.is_some dive_before then
+          (* Invariant 3: Enter inside non-drillable Dives never pushes duplicate/nested dive;
+             Goal_dive and Task_dive intentionally drill into linked Task_dive / Verification_dive. *)
+          let dive_allows_drill =
+            match dive_before with
+            | Some (Nav.Dive_work (Nav.Goal_dive _ | Nav.Task_dive _)) -> true
+            | Some _ | None -> false
+          in
+          if
+            String.equal kname "Enter"
+            && Option.is_some dive_before
+            && not dive_allows_drill
+          then
             Alcotest.(check bool)
               (tag ^ " Dive Enter never deepens dive_stack")
               true
@@ -1674,10 +1684,15 @@ let test_axis_b_overlay_isolation_matrix () =
           if String.equal kname "Ctrl+Shift+Q" then
             Alcotest.(check bool) (tag ^ " Ctrl+Shift+Q never quits") false
               (has_cmd (function Cmd.Quit _ -> true | _ -> false) cmds);
-          (* Invariant 2: Ctrl+Q ALWAYS emits Quit *)
-          if String.equal kname "Ctrl+Q" then
-            Alcotest.(check bool) (tag ^ " Ctrl+Q always quits") true
-              (has_cmd (function Cmd.Quit _ -> true | _ -> false) cmds);
+          (* Invariant 2: Ctrl+Q arms on 1st press and ALWAYS quits on 2nd press within 2.5s *)
+          if String.equal kname "Ctrl+Q" then begin
+            Alcotest.(check bool) (tag ^ " 1st Ctrl+Q arms without quitting") true
+              (Option.is_some m'.quit_armed_at
+               && not (has_cmd (function Cmd.Quit _ -> true | _ -> false) cmds));
+            let _, cmds2 = step m' ev in
+            Alcotest.(check bool) (tag ^ " 2nd Ctrl+Q always quits") true
+              (has_cmd (function Cmd.Quit _ -> true | _ -> false) cmds2)
+          end;
           (* Invariant 3: Tab / Shift+Tab NEVER leaks to background pane_index *)
           if
             (String.equal kname "Tab" || String.equal kname "Shift+Tab")
@@ -5320,30 +5335,34 @@ let test_pillar2_scroll_bounds_all_surfaces () =
     }
   in
   let dives_with_sentinels =
+    let dive_off (m : Model.t) = m.nav.dive_scroll_offset in
     [
-      ("Goal_dive", Nav.Dive_work (Nav.Goal_dive "goal-1"), "GD_TASK_34");
-      ("Task_dive", Nav.Dive_work (Nav.Task_dive "task-01"), "TD_DESC_39");
+      ( "Goal_dive"
+      , Nav.Dive_work (Nav.Goal_dive "goal-1")
+      , "GD_TASK_34"
+      , fun (m : Model.t) -> m.work.goal_dive_task_index );
+      ("Task_dive", Nav.Dive_work (Nav.Task_dive "task-01"), "TD_DESC_39", dive_off);
       ( "Verification_dive"
       , Nav.Dive_work (Nav.Verification_dive "verif-1")
-      , "Missing artifacts" );
-      ("Thread_dive", Nav.Dive_knowledge (Nav.Thread_dive "post-1"), "Comment number 44");
-      ("Wiki_dive", Nav.Dive_knowledge (Nav.Wiki_dive "arch-overview"), "FINAL_WIKI_BOTTOM_LINE");
+      , "Missing artifacts"
+      , dive_off );
+      ("Thread_dive", Nav.Dive_knowledge (Nav.Thread_dive "post-1"), "Comment number 44", dive_off);
+      ("Wiki_dive", Nav.Dive_knowledge (Nav.Wiki_dive "arch-overview"), "FINAL_WIKI_BOTTOM_LINE", dive_off);
       ( "Artifact_dive"
       , Nav.Dive_knowledge (Nav.Artifact_dive (List.hd many_artifacts).id)
-      , "Artifact Report 59" );
-      ("Sandbox_dive", Nav.Dive_infra (Nav.Sandbox_dive "alpha"), "DIVE_LOG_01");
-      ("Lane_dive", Nav.Dive_infra (Nav.Lane_dive "lane-00"), "DIVE_LOG_00");
-      ("Incident_dive (module_name match)", Nav.Dive_infra (Nav.Incident_dive dive_inc_id.id), "DIVE_LOG_00");
+      , "Artifact Report 59"
+      , dive_off );
+      ("Sandbox_dive", Nav.Dive_infra (Nav.Sandbox_dive "alpha"), "DIVE_LOG_01", dive_off);
+      ("Lane_dive", Nav.Dive_infra (Nav.Lane_dive "lane-00"), "DIVE_LOG_00", dive_off);
+      ("Incident_dive (module_name match)", Nav.Dive_infra (Nav.Incident_dive dive_inc_id.id), "DIVE_LOG_00", dive_off);
     ]
   in
   List.iter
-    (fun (dname, dive, needle) ->
+    (fun (dname, dive, needle, get_off) ->
       let md0 =
         { m_dives_base with nav = { m_dives_base.nav with dive_stack = [ dive ] } }
       in
-      assert_scroll_exact ~label:dname ~needle
-        ~get_off:(fun m -> m.nav.dive_scroll_offset)
-        md0)
+      assert_scroll_exact ~label:dname ~needle ~get_off md0)
     dives_with_sentinels
 
 (* ---------- Pillar 3: Centered-Rectangle Keeper Chat UX & Korean IME Guard ---------- *)
@@ -6044,7 +6063,8 @@ let test_wave2_100pct_menu_reachability_matrix () =
          | _ -> false)
        unbind_cmds);
 
-  (* 5f. Harness_overrule dive callsites start empty, reject 63-hex & task IDs, accept exact 64-hex *)
+  (* 5f. Harness_overrule dive callsites refuse empty modal when no 64-hex verdict is linked,
+     and reject 63-hex & task IDs while accepting exact 64-hex *)
   let m_vdive_check =
     {
       base with
@@ -6071,13 +6091,12 @@ let test_wave2_100pct_menu_reachability_matrix () =
     (fun (label, m_src, k_ev) ->
       let m_o, _ = step m_src k_ev in
       Alcotest.(check bool) label true
-        (Option.equal Nav.equal_overlay m_o.nav.overlay
-           (Some (Nav.Inline_action (Nav.Harness_overrule "")))))
+        (Option.is_none m_o.nav.overlay && Option.is_some m_o.toast))
     [
-      ("Verification_dive [h] opens empty Harness_overrule", m_vdive_check, char_key "h");
-      ("Verification_dive [X] opens empty Harness_overrule", m_vdive_check, char_key ~shift:true "X");
-      ("Task_dive [h] opens empty Harness_overrule", m_tdive_check, char_key "h");
-      ("Task_dive [X] opens empty Harness_overrule", m_tdive_check, char_key ~shift:true "X");
+      ("Verification_dive [h] warns instead of opening empty modal", m_vdive_check, char_key "h");
+      ("Verification_dive [X] warns instead of opening empty modal", m_vdive_check, char_key ~shift:true "X");
+      ("Task_dive [h] warns instead of opening empty modal", m_tdive_check, char_key "h");
+      ("Task_dive [X] warns instead of opening empty modal", m_tdive_check, char_key ~shift:true "X");
     ];
   let m_ho, _ = Update_nav.open_inline_modal base (Nav.Harness_overrule "") in
   let set_ho_hash hash_val =
@@ -6490,10 +6509,10 @@ let test_wave3_surfaces_scroll_bounds_guards_and_secrets () =
        (Some (Nav.Inline_action (Nav.Harness_overrule valid_hash))));
   let m_hh_bad = fst (step m_hh (mk_key Keymap.Input.Down)) in
   let m_hh_bad_n, _ = step m_hh_bad (char_key "n") in
-  Alcotest.(check bool) "Work_harness [n] leaves invalid notes_hash empty (never pre-seeds garbage)"
+  Alcotest.(check bool)
+    "Work_harness [n] refuses empty modal when notes_hash is invalid (warns instead)"
     true
-    (Option.equal Nav.equal_overlay m_hh_bad_n.nav.overlay
-       (Some (Nav.Inline_action (Nav.Harness_overrule ""))));
+    (Option.is_none m_hh_bad_n.nav.overlay && Option.is_some m_hh_bad_n.toast);
 
   (* Verification_dive [v] cycles all 4 tabs + CanAdmin 403 notice *)
   let m_vdive =

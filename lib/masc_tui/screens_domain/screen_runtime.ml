@@ -4796,8 +4796,8 @@ let render_addons_browser ~(model : Model.t) ~cache ~(rect : Rect.t)
         (H.card_spec ~focused:(Model.pane_focused model 1)
            ~hotkey:
              (Say.resolve lang
-                (Say.make ~ko:"[↑↓] 스크롤 · [p] 런타임"
-                   ~en:"[↑↓] Scroll · [p] Runtime"))
+                (Say.make ~ko:"[→/Tab] 스크롤 · [↑↓] 이동 · [p] 런타임"
+                   ~en:"[→/Tab] Scroll · [↑↓] Move · [p] Runtime"))
            (Say.resolve lang
               (Say.make ~ko:"패키지 미리보기" ~en:"Package Preview")))
     in
@@ -5076,8 +5076,8 @@ let render_addons_browser ~(model : Model.t) ~cache ~(rect : Rect.t)
               "SNAPSHOT · [r]")
          ~hotkey:
            (Say.resolve lang
-              (Say.make ~ko:"[t] 탭 · [y] URL · [o] 열기"
-                 ~en:"[t] Tabs · [y] URL · [o] Open"))
+              (Say.make ~ko:"[→/Tab] 포커스 · [t] 탭 · [y] URL · [o] 열기"
+                 ~en:"[→/Tab] Focus · [t] Tabs · [y] URL · [o] Open"))
          (Say.resolve lang
             (Say.make ~ko:"브라우저 레인 클라이언트 · 탭"
                ~en:"Browser Clients & Open Tabs")))

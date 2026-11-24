@@ -791,6 +791,30 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
         | _ -> (left_rect, Rect.empty)
       else (left_rect, Rect.empty)
     in
+    let filter_badge_lbl =
+      match model.work.goal_phase_filter with
+      | Work_store.Goal_filter_all -> Ops_common.say model ~ko:"전체" ~en:"All"
+      | Work_store.Goal_filter_active -> Ops_common.say model ~ko:"진행" ~en:"Active"
+      | Work_store.Goal_filter_verifying ->
+          Ops_common.say model ~ko:"검증" ~en:"Verifying"
+      | Work_store.Goal_filter_held -> Ops_common.say model ~ko:"보류" ~en:"Held"
+      | Work_store.Goal_filter_closed -> Ops_common.say model ~ko:"종료" ~en:"Closed"
+    in
+    let sort_badge_lbl =
+      match model.work.goal_sort_mode with
+      | Work_store.Goal_sort_default -> Ops_common.say model ~ko:"기본순" ~en:"Default"
+      | Work_store.Goal_sort_phase -> Ops_common.say model ~ko:"단계순" ~en:"Phase"
+      | Work_store.Goal_sort_progress ->
+          Ops_common.say model ~ko:"진행률순" ~en:"Progress"
+      | Work_store.Goal_sort_recent -> Ops_common.say model ~ko:"최신순" ~en:"Recent"
+    in
+    let filter_tone =
+      if
+        Work_store.equal_goal_phase_filter model.work.goal_phase_filter
+          Work_store.Goal_filter_all
+      then None
+      else Some Theme.Status_active
+    in
     let left_spec : Card.spec =
       {
         (Card.default_spec
@@ -799,7 +823,18 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                 (Ops_common.say model ~ko:"목표 파이프라인" ~en:"Goals Pipeline")
                 done_goals (List.length goals)))
         with
-        hotkey = Some (Ops_common.say model ~ko:"[n] 새 목표" ~en:"[n] New");
+        badge =
+          Some
+            {
+              Card.glyph = None;
+              text = Printf.sprintf "%s · %s" filter_badge_lbl sort_badge_lbl;
+              tone = filter_tone;
+            };
+        hotkey =
+          Some
+            (Ops_common.say model
+               ~ko:"[Space] 단계 필터 · [S] 정렬 · [/] 검색 · [n] 새 목표"
+               ~en:"[Space] Filter · [S] Sort · [/] Search · [n] New");
         focused = Model.pane_focused model 0;
       }
     in
@@ -944,7 +979,9 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                     tone = Some ptok;
                   };
               hotkey =
-                Some (Ops_common.say model ~ko:"[Enter] 상세" ~en:"[Enter] Dive");
+                Some
+                  (Ops_common.say model ~ko:"[→/Tab] 상세 스크롤 · [Enter] 상세"
+                     ~en:"[→/Tab] Scroll Detail · [Enter] Dive");
               focused =
                 Model.body_has_focus model
                 &&
@@ -2459,9 +2496,8 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
               filtered_attn
           in
           let sel_attn =
-            Int.max 0
-              (Int.min (List.length filtered_attn - 1)
-                 model.attention.triage_index)
+            Attention.selected_index_in_filtered ~query:model.work.filter_query
+              model.attention
           in
           ignore
             (Table.draw grid ~rect:l_inner ~theme ~caps:Ops_common.default_caps
@@ -3931,7 +3967,10 @@ let render_harness ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
              (Ops_common.say model ~ko:"판정 상세 · 교정 지표"
                 ~en:"Verdict Detail & Calibration"))
         with
-        hotkey = Some "[y] Approve · [n] Reject · [Tab] Scroll";
+        hotkey =
+          Some
+            (Ops_common.say model ~ko:"[→/Tab] 상세 스크롤 · [y] 승인 · [n] 반려"
+               ~en:"[→/Tab] Scroll Detail · [y] Approve · [n] Reject");
         focused = Model.pane_focused model 1;
       }
     in

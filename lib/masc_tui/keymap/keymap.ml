@@ -794,7 +794,9 @@ let bindings : binding list =
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Cycle_sort_or_speak ~key_display:"S"
         ~hint_label:(Say.make ~ko:"정렬" ~en:"Sort")
-        ~help_desc:(Say.make ~ko:"보드 정렬(recent|active|top)" ~en:"Board sort cycle (recent|active|top)")
+        ~help_desc:
+          (Say.make ~ko:"목표 정렬(단계/진행률/최신) / 보드 정렬(recent|active|top)"
+             ~en:"Cycle Goals sort (phase/progress/recent) or Board sort (recent|active|top)")
         ~footer_priority:0 (bare_char 'S');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Cycle_hearth_or_overrule ~key_display:"h"
@@ -1083,7 +1085,9 @@ let bindings : binding list =
         ~footer_priority:0 (ctrl_char 'f');
       bind ~scope:Global ~tier:Universal_ctrl ~category:Cat_actions
         ~action:Quit_app ~key_display:"Ctrl+Q" ~hint_label:say_quit
-        ~help_desc:(Say.make ~ko:"MASC TUI 안전 종료" ~en:"Quit MASC TUI cleanly")
+        ~help_desc:
+          (Say.make ~ko:"MASC TUI 안전 종료 (2회 눌러 확인)"
+             ~en:"Quit MASC TUI cleanly (press twice to confirm)")
         ~slash_twin:"/quit" ~footer_priority:0 (ctrl_char 'q');
       (* --- Modern Accelerators (CSI u / Alt+ / Function keys) --- *)
       bind ~scope:Global ~tier:Modern_accel ~category:Cat_overlays

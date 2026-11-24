@@ -100,6 +100,7 @@ type inline_action_kind =
   | Verification_reject of string
   | Harness_overrule of string
   | Task_cancel of string
+  | Goal_drop of string
   | Schedule_form
   | Connector_form
   | Repo_add_form
@@ -545,14 +546,15 @@ let inline_action_tag = function
   | Verification_reject _ -> 2
   | Harness_overrule _ -> 3
   | Task_cancel _ -> 4
-  | Schedule_form -> 5
-  | Connector_form -> 6
-  | Repo_add_form -> 7
-  | Board_new_post -> 8
-  | Board_comment _ -> 9
-  | Github_token_form _ -> 10
-  | Code_finder_form -> 11
-  | Code_search_form -> 12
+  | Goal_drop _ -> 5
+  | Schedule_form -> 6
+  | Connector_form -> 7
+  | Repo_add_form -> 8
+  | Board_new_post -> 9
+  | Board_comment _ -> 10
+  | Github_token_form _ -> 11
+  | Code_finder_form -> 12
+  | Code_search_form -> 13
 
 let equal_inline_action_kind a b =
   if not (Int.equal (inline_action_tag a) (inline_action_tag b)) then false
@@ -570,6 +572,7 @@ let equal_inline_action_kind a b =
     | Verification_reject x, Verification_reject y
     | Harness_overrule x, Harness_overrule y
     | Task_cancel x, Task_cancel y
+    | Goal_drop x, Goal_drop y
     | Github_token_form x, Github_token_form y ->
         String.equal x y
     | Board_comment x, Board_comment y ->
@@ -580,6 +583,7 @@ let equal_inline_action_kind a b =
       | Verification_reject _
       | Harness_overrule _
       | Task_cancel _
+      | Goal_drop _
       | Schedule_form
       | Connector_form
       | Repo_add_form

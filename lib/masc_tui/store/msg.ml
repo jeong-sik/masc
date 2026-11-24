@@ -25,6 +25,88 @@ let transport_error_detail = function
   | Health.Protocol_error s -> "protocol error: " ^ s
   | Health.Other_io s -> "I/O error: " ^ s
 
+let rec extract_json_error_text (json : Yojson.Safe.t) : string option =
+  let nonblank s =
+    let t = String.trim s in
+    if String.equal t "" then None else Some t
+  in
+  let unwrap_maybe_json_string s =
+    match nonblank s with
+    | None -> None
+    | Some t ->
+        if String.length t >= 2 && Char.equal t.[0] '{' then
+          match Yojson.Safe.from_string t with
+          | inner -> (
+              match extract_json_error_text inner with
+              | Some reason -> Some reason
+              | None -> Some t)
+          | exception Yojson.Json_error _ -> Some t
+        else Some t
+  in
+  match json with
+  | `Assoc fields -> (
+      let lookup k = List.assoc_opt k fields in
+      let from_field k =
+        match lookup k with
+        | Some (`String s) -> unwrap_maybe_json_string s
+        | Some (`Assoc _ as sub) -> extract_json_error_text sub
+        | Some _ | None -> None
+      in
+      match from_field "message" with
+      | Some _ as ok -> ok
+      | None -> (
+          match from_field "error" with
+          | Some _ as ok -> ok
+          | None -> (
+              match from_field "operator_action" with
+              | Some _ as ok -> ok
+              | None -> (
+                  match from_field "detail" with
+                  | Some _ as ok -> ok
+                  | None -> (
+                      match from_field "code" with
+                      | Some _ as ok -> ok
+                      | None -> from_field "error_code")))))
+  | `String s -> unwrap_maybe_json_string s
+  | `List _ | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Null -> None
+
+let extract_http_error_reason ~body ~(api_error : Wire_common.api_error option)
+    : string option =
+  let sanitize s =
+    let s =
+      String.map
+        (fun c -> if Char.equal c '\n' || Char.equal c '\r' || Char.equal c '\t' then ' ' else c)
+        (String.trim s)
+    in
+    if String.equal s "" then None
+    else if Masc_tui_term.Grapheme.display_width s > 140 then
+      Some (Masc_tui_term.Grapheme.truncate_to_width ~max_width:140 s)
+    else Some s
+  in
+  let from_api =
+    match api_error with
+    | Some err -> (
+        match extract_json_error_text (`String err.message) with
+        | Some reason -> sanitize reason
+        | None -> sanitize err.message)
+    | None -> None
+  in
+  match from_api with
+  | Some _ as ok -> ok
+  | None -> (
+      let trimmed = String.trim body in
+      if String.equal trimmed "" then None
+      else
+        match Yojson.Safe.from_string trimmed with
+        | json -> (
+            match extract_json_error_text json with
+            | Some reason -> sanitize reason
+            | None -> None)
+        | exception Yojson.Json_error _ ->
+            (* Only surface short plain-text bodies, never raw HTML pages. *)
+            if String.length trimmed > 0 && Char.equal trimmed.[0] '<' then None
+            else sanitize trimmed)
+
 let http_error_summary = function
   | Transport Health.Connect_refused ->
       Say.make ~ko:"서버 연결 거부" ~en:"Server connection refused"
@@ -41,10 +123,16 @@ let http_error_summary = function
   | Workspace_mismatch _ ->
       Say.make ~ko:"워크스페이스 불일치 · 재동기화"
         ~en:"Workspace mismatch · resyncing"
-  | Http_error { status; _ } ->
-      Say.make
-        ~ko:(Printf.sprintf "API 오류 (HTTP %d)" status)
-        ~en:(Printf.sprintf "API error (HTTP %d)" status)
+  | Http_error { status; body; api_error } -> (
+      match extract_http_error_reason ~body ~api_error with
+      | Some reason ->
+          Say.make
+            ~ko:(Printf.sprintf "HTTP %d: %s" status reason)
+            ~en:(Printf.sprintf "HTTP %d: %s" status reason)
+      | None ->
+          Say.make
+            ~ko:(Printf.sprintf "API 오류 (HTTP %d)" status)
+            ~en:(Printf.sprintf "API error (HTTP %d)" status))
   | Decode_error _ ->
       Say.make ~ko:"응답 디코드 오류" ~en:"Response decode error"
 
@@ -149,10 +237,13 @@ type http_reply =
   | Reply_board_feed of (Wire_knowledge.board_feed, http_error) result
   | Reply_board_hearths of
       (Wire_knowledge.board_hearth_entry list, http_error) result
-  | Reply_board_thread of
-      ( Wire_knowledge.board_post * Wire_knowledge.board_comment list
-      , http_error )
-      result
+  | Reply_board_thread of {
+      post_id : string;
+      result :
+        ( Wire_knowledge.board_post * Wire_knowledge.board_comment list
+        , http_error )
+        result;
+    }
   | Reply_board_comment of { post_id : string; result : (unit, http_error) result }
   | Reply_board_vote of { post_id : string; result : (unit, http_error) result }
   | Reply_wiki_index of (Wire_knowledge.wiki_index, http_error) result

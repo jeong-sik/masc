@@ -675,6 +675,7 @@ let switch_workspace (m : Model.t) ws =
       m.nav with
       workspace = ws;
       dive_stack = [];
+      dive_return_stack = [];
       overlay = None;
       pane_index = 0;
       zoomed = false;
@@ -695,6 +696,14 @@ let switch_workspace (m : Model.t) ws =
     |> Knowledge_store.clear_armed_vote
     |> Knowledge_store.clear_pending_artifact_revision
   in
+  let attention =
+    match ws with
+    | Nav.Work when Nav.equal_work_tab m.work.active_tab Nav.Work_inbox ->
+        Attention.sync_selection ~query:m.work.filter_query m.attention
+    | Nav.Pulse -> Attention.sync_selection ~query:"" m.attention
+    | Nav.Work | Nav.Knowledge | Nav.Keepers | Nav.Runtime | Nav.Infra ->
+        m.attention
+  in
   let next =
     {
       m with
@@ -702,6 +711,7 @@ let switch_workspace (m : Model.t) ws =
       drafts;
       config;
       knowledge;
+      attention;
       inline_modal = None;
       ask_modal = None;
     }
@@ -881,6 +891,7 @@ let push_dive (m : Model.t) dive =
     {
       m.nav with
       dive_stack = dive :: m.nav.dive_stack;
+      dive_return_stack = (m.nav.pane_index, m.nav.zoomed) :: m.nav.dive_return_stack;
       overlay = None;
       pane_index = 0;
       zoomed = false;
@@ -890,6 +901,17 @@ let push_dive (m : Model.t) dive =
       dive_scroll_offset = 0;
       json_scroll_offset = 0;
     }
+  in
+  let work =
+    match dive with
+    | Nav.Dive_work (Nav.Goal_dive _) -> Work_store.reset_goal_dive_state m.work
+    | Nav.Dive_work (Nav.Task_dive _) -> Work_store.reset_task_dive_scroll m.work
+    | Nav.Dive_work (Nav.Verification_dive _)
+    | Nav.Dive_keeper _
+    | Nav.Dive_knowledge _
+    | Nav.Dive_runtime _
+    | Nav.Dive_infra _ ->
+        m.work
   in
   let drafts =
     match dive with
@@ -944,6 +966,13 @@ let push_dive (m : Model.t) dive =
           base
           |> Knowledge_store.close_memory_diagram
           |> Knowledge_store.set_memory_diff_keeper keeper
+    | Nav.Dive_knowledge (Nav.Thread_dive post_id) ->
+        base
+        |> Knowledge_store.mark_thread_loading ~post_id
+             ~since_ns:m.freshness.last_mono
+        |> Knowledge_store.close_memory_reading
+        |> Knowledge_store.close_memory_diagram
+        |> Knowledge_store.clear_pending_wiki_edit
     | Nav.Dive_keeper
         {
           tab =
@@ -958,8 +987,7 @@ let push_dive (m : Model.t) dive =
           _;
         }
     | Nav.Dive_work _
-    | Nav.Dive_knowledge
-        (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
+    | Nav.Dive_knowledge (Nav.Wiki_dive _ | Nav.Artifact_dive _)
     | Nav.Dive_runtime _
     | Nav.Dive_infra _ ->
         base
@@ -973,6 +1001,7 @@ let push_dive (m : Model.t) dive =
       nav;
       drafts;
       fleet;
+      work;
       config;
       knowledge;
       infra;
@@ -1135,6 +1164,7 @@ let open_inline_modal (m : Model.t) kind =
       | Nav.Verification_reject _
       | Nav.Harness_overrule _
       | Nav.Task_cancel _
+      | Nav.Goal_drop _
       | Nav.Schedule_form
       | Nav.Connector_form
       | Nav.Repo_add_form
@@ -1312,8 +1342,15 @@ let cycle_sub_tab (m : Model.t) dir =
           | Nav.Pulse -> (m, [])
           | Nav.Work ->
               let work = Work_store.cycle_tab dir m.work in
+              let attention =
+                if Nav.equal_work_tab work.active_tab Nav.Work_inbox then
+                  Attention.sync_selection ~query:work.filter_query m.attention
+                else m.attention
+              in
               let nav = { m.nav with pane_index = 0; zoomed = false } in
-              let next = { m with nav; work } |> Model.sync_sidebar_cursor in
+              let next =
+                { m with nav; work; attention } |> Model.sync_sidebar_cursor
+              in
               (next, View_fetches.fetches_for_current_view next)
           | Nav.Knowledge ->
               let knowledge = Knowledge_store.cycle_tab dir m.knowledge in
@@ -1453,7 +1490,15 @@ let set_active_filter_query q (m : Model.t) =
               match m.nav.workspace with
               | Nav.Pulse | Nav.Keepers ->
                   { m with fleet = Fleet_store.set_filter q m.fleet }
-              | Nav.Work -> { m with work = Work_store.set_filter q m.work }
+              | Nav.Work ->
+                  let work = Work_store.set_filter q m.work in
+                  let attention =
+                    if Nav.equal_work_tab work.active_tab Nav.Work_inbox then
+                      Attention.sync_selection ~query:work.filter_query
+                        m.attention
+                    else m.attention
+                  in
+                  { m with work; attention }
               | Nav.Knowledge ->
                   { m with knowledge = Knowledge_store.set_filter q m.knowledge }
               | Nav.Runtime ->
@@ -1942,6 +1987,15 @@ let submit_ask_choice ~now (ask : Wire_work.ask_row) ~choice_1based (m : Model.t
           in
           (next, [ cmd ]))
 
+let active_attention_query (m : Model.t) =
+  if
+    Option.is_none m.nav.overlay
+    && m.nav.dive_stack = []
+    && Nav.equal_workspace m.nav.workspace Nav.Work
+    && Nav.equal_work_tab m.work.active_tab Nav.Work_inbox
+  then m.work.filter_query
+  else ""
+
 let skip_all_ask_questions ~now (ask : Wire_work.ask_row) (m : Model.t) =
   match ask.questions with
   | [] -> (m, [])
@@ -1953,7 +2007,10 @@ let skip_all_ask_questions ~now (ask : Wire_work.ask_row) (m : Model.t) =
             (q.question_id, Wire_work.Ask_skipped))
           questions
       in
-      let attention = Attention.mark_in_flight ~id:attn_id m.attention in
+      let attention =
+        Attention.mark_in_flight ~id:attn_id m.attention
+        |> Attention.advance_past_in_flight ~query:(active_attention_query m)
+      in
       let cmd =
         Cmd.Http_post
           {
@@ -2066,7 +2123,7 @@ let actionable_approval_item (m : Model.t) =
   else if on_pulse_attention then
     match Attention.current_filtered_item ~query:"" m.attention with
     | Some e when not (Attention.is_in_flight ~id:e.id m.attention) -> Some e
-    | Some _ | None -> Attention.top_fast_path m.attention
+    | Some _ | None -> None
   else Model.fast_approval_strip_item m
 
 let fast_approve_top ~now (m : Model.t) =
@@ -2075,7 +2132,10 @@ let fast_approve_top ~now (m : Model.t) =
   | Some entry -> (
       match entry.payload with
       | Attention.Payload_tool_approval ta ->
-          let attention = Attention.mark_in_flight ~id:entry.id m.attention in
+          let attention =
+            Attention.mark_in_flight ~id:entry.id m.attention
+            |> Attention.advance_past_in_flight ~query:(active_attention_query m)
+          in
           let cmd =
             Cmd.Http_post
               {
@@ -2093,7 +2153,10 @@ let fast_approve_top ~now (m : Model.t) =
           in
           ({ m with attention }, [ cmd ])
       | Attention.Payload_gate g ->
-          let attention = Attention.mark_in_flight ~id:entry.id m.attention in
+          let attention =
+            Attention.mark_in_flight ~id:entry.id m.attention
+            |> Attention.advance_past_in_flight ~query:(active_attention_query m)
+          in
           let cmd =
             Cmd.Http_post
               {
@@ -2124,7 +2187,10 @@ let fast_deny_top ~now (m : Model.t) =
   | Some entry -> (
       match entry.payload with
       | Attention.Payload_tool_approval ta ->
-          let attention = Attention.mark_in_flight ~id:entry.id m.attention in
+          let attention =
+            Attention.mark_in_flight ~id:entry.id m.attention
+            |> Attention.advance_past_in_flight ~query:(active_attention_query m)
+          in
           let cmd =
             Cmd.Http_post
               {
@@ -2169,7 +2235,8 @@ let focus_attention_entry_in_inbox (m : Model.t) (entry : Attention.entry) =
   in
   let attention =
     match find_idx 0 filtered with
-    | Some idx -> Attention.select_triage_index idx m.attention
+    | Some idx ->
+        Attention.select_triage_index ~query:work1.filter_query idx m.attention
     | None -> m.attention
   in
   let work =
@@ -2913,9 +2980,40 @@ let enter_plan (m : Model.t) : enter_plan =
              | Nav.Keeper_config
              | Nav.Keeper_logs );
            _;
-         })
+         }) ->
+      Enter_noop
+  | Some (Nav.Dive_work (Nav.Goal_dive goal_id)) ->
+      if
+        Option.equal Int.equal (Model.dive_work_json_pane_index m)
+          (Some m.nav.pane_index)
+      then Enter_noop
+      else if m.nav.pane_index = 1 then
+        match Work_store.selected_goal_dive_verification ~goal_id m.work with
+        | Some v -> Enter_push (Nav.Dive_work (Nav.Verification_dive v.request_id))
+        | None -> Enter_noop
+      else
+        (match Work_store.selected_goal_dive_task ~goal_id m.work with
+        | Some tk -> Enter_push (Nav.Dive_work (Nav.Task_dive tk.id))
+        | None -> Enter_noop)
+  | Some (Nav.Dive_work (Nav.Task_dive task_id)) ->
+      if
+        Option.equal Int.equal (Model.dive_work_json_pane_index m)
+          (Some m.nav.pane_index)
+      then Enter_noop
+      else
+        let on_verif_pane =
+          if Model.task_dive_has_two_main_panes m task_id then
+            m.nav.pane_index = 1
+          else m.nav.pane_index = 0
+        in
+        if on_verif_pane then
+          match Work_store.verification_for_task ~task_id m.work with
+          | Some v ->
+              Enter_push (Nav.Dive_work (Nav.Verification_dive v.request_id))
+          | None -> Enter_noop
+        else Enter_noop
   | Some
-      ( Nav.Dive_work _
+      ( Nav.Dive_work (Nav.Verification_dive _)
       | Nav.Dive_knowledge
           (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
       | Nav.Dive_runtime (Nav.Tool_dive _)
@@ -3352,6 +3450,7 @@ let classify_inline_form (modal : Model.inline_modal_state) : inline_form_kind =
     | Nav.Verification_reject _
     | Nav.Harness_overrule _
     | Nav.Task_cancel _
+    | Nav.Goal_drop _
     | Nav.Schedule_form
     | Nav.Connector_form
     | Nav.Repo_add_form
@@ -3451,6 +3550,10 @@ let submit_inline_modal ~now (m : Model.t) =
               let reason = Model.modal_field_value ~key:"reason" modal in
               let attention =
                 Attention.mark_in_flight ~id:("gate:" ^ id) m.attention
+                |> Attention.advance_past_in_flight
+                     ~query:
+                       (active_attention_query
+                          { m with nav = { m.nav with overlay = None } })
               in
               ( close_with_inflight_toast
                   ~msg:
@@ -3558,6 +3661,29 @@ let submit_inline_modal ~now (m : Model.t) =
                           req =
                             Cmd.Post_task_cancel
                               { task_id; reason; expected_workspace };
+                        };
+                    ] ))
+          | Form_standard (Nav.Goal_drop goal_id) -> (
+              let note = Model.modal_field_value ~key:"note" modal in
+              match expected_workspace_of m with
+              | None ->
+                  set_modal_error
+                    "Server workspace identity must be loaded before \
+                     dropping a goal"
+              | Some expected_workspace ->
+                  ( mark_submitting m
+                  , [
+                      Cmd.Http_post
+                        {
+                          epoch = m.epoch;
+                          req =
+                            Cmd.Post_goal_transition
+                              {
+                                goal_id;
+                                action = Wire_work.Drop;
+                                note = Some note;
+                                expected_workspace;
+                              };
                         };
                     ] ))
           | Form_standard Nav.Schedule_form -> (
@@ -5903,23 +6029,42 @@ let knowledge_detail_max_scroll (m : Model.t) =
               ~h:(max 0 (inner.h - band_h))
             |> ui_pad_content ~bp
           in
+          let vote_used =
+            match k.armed_vote with
+            | Some (Knowledge_store.Vote_post pid, _)
+              when String.equal pid p.id && content.h > 0 ->
+                1
+            | Some ((Knowledge_store.Vote_post _ | Knowledge_store.Vote_comment _), _)
+            | None ->
+                0
+          in
+          let after_vote = max 0 (content.h - vote_used) in
           let header_used =
             match p.succession_chain_root_id, p.chain_depth with
-            | Some _, Some d when d > 1 -> 2
-            | _ -> if content.h >= 6 then 1 else 0
+            | Some _, Some d when d > 1 && after_vote > 0 ->
+                if after_vote >= 2 then 2 else 1
+            | _ -> if after_vote >= 6 then 1 else 0
           in
-          let rem = max 0 (content.h - header_used) in
+          let rem = max 0 (after_vote - header_used) in
           let comments =
             match Observed.to_option k.active_thread with
             | Some (tp, cs) when String.equal tp.id p.id -> cs
             | Some _ | None -> []
           in
-          let comment_rows =
-            if comments = [] || rem < 6 then 0
-            else min 5 (1 + List.length comments)
+          let body_lines =
+            if content.w <= 0 then 0
+            else
+              List.length
+                (Masc_tui_ui.Markdown.render_lines ~width:content.w ~theme p.body)
           in
-          let md_h = max 0 (rem - comment_rows) in
-          markdown_max_scroll ~theme ~width:content.w ~height:md_h p.body)
+          let threaded = Knowledge_store.order_comments_threaded comments in
+          let comment_lines =
+            if threaded = [] then 0 else 1 + (List.length threaded * 2)
+          in
+          let total_lines = body_lines + comment_lines in
+          let has_indicator = total_lines > rem && rem >= 2 in
+          let eff_h = if has_indicator then rem - 1 else rem in
+          max 0 (total_lines - max 1 eff_h))
   | Nav.Knowledge_wiki ->
       let right_rect =
         if m.nav.zoomed then body_after_bar
@@ -7032,7 +7177,7 @@ let dive_max_scroll (m : Model.t) active =
       let post_opt, comments =
         match Observed.to_option m.knowledge.active_thread with
         | Some (tp, cs) when String.equal tp.id post_id -> (Some tp, cs)
-        | active_opt -> (
+        | Some _ | None -> (
             let all_posts =
               match Observed.to_option m.knowledge.board with
               | Some f -> f.posts
@@ -7045,10 +7190,7 @@ let dive_max_scroll (m : Model.t) active =
                 all_posts
             with
             | Some p -> (Some p, [])
-            | None -> (
-                match active_opt with
-                | Some (tp, cs) -> (Some tp, cs)
-                | None -> (None, [])))
+            | None -> (None, []))
       in
       match post_opt with
       | None -> 0
@@ -7753,23 +7895,519 @@ let clamp_for_pane (m : Model.t) =
               }
           | Nav.Pulse | Nav.Keepers -> m))
 
+let task_dive_scroll_bounds (m : Model.t) (tk : Wire_work.task) : int * int =
+  let bp = ui_bp m in
+  let br = ui_body_rect m in
+  let theme = Theme.of_preset m.theme_preset in
+  let main_card_rect, _ =
+    split_dive_with_json_store ~bp ~show_raw_json:m.infra.show_raw_json br
+  in
+  let inner = ui_card_inner main_card_rect in
+  if Rect.is_empty inner then (0, 0)
+  else
+    let content = ops_pad_content inner in
+    let y = ref inner.y in
+    let bot = Rect.bottom inner in
+    if inner.h >= 8 then begin
+      let has_who =
+        match tk.status with
+        | Wire_work.Todo -> false
+        | Wire_work.Claimed _
+        | Wire_work.InProgress _
+        | Wire_work.AwaitingVerification _
+        | Wire_work.Done _
+        | Wire_work.Cancelled _ ->
+            true
+      in
+      let band_h = if has_who then 2 else 1 in
+      y := !y + band_h + if inner.h >= 14 then 1 else 0
+    end;
+    let action_h = if bot - !y >= 6 then 1 else 0 in
+    let body_bot = bot - action_h in
+    (* stepper + assignee + started_at + goal_link = 4 rows *)
+    y := min body_bot (!y + 4);
+    let v_opt = Work_store.verification_for_task ~task_id:tk.id m.work in
+    let rest_h = max 0 (body_bot - !y) in
+    let desc_h =
+      if rest_h <= 0 then 0
+      else
+        match tk.description, v_opt with
+        | Some _, Some _ -> min rest_h (max 1 (rest_h / 2))
+        | Some _, None -> rest_h
+        | None, _ -> 0
+    in
+    let md_max =
+      match tk.description with
+      | Some d when desc_h > 0 ->
+          let hdr = if desc_h >= 3 then 1 else 0 in
+          y := !y + hdr;
+          let actual_h = max 0 (min (desc_h - hdr) (body_bot - !y)) in
+          y := !y + actual_h;
+          markdown_max_scroll ~theme ~width:content.w ~height:actual_h
+            (Chat_transcript.rewrite_masc_links_for_markdown d)
+      | Some _ | None -> 0
+    in
+    let verif_max =
+      match v_opt with
+      | Some v when !y < body_bot ->
+          incr y;
+          let vr =
+            Rect.make ~x:content.x ~y:!y ~w:content.w ~h:(max 0 (body_bot - !y))
+          in
+          let chk_r, diff_r =
+            match
+              Masc_tui_ui.Layout.split_v ~gap:0 vr
+                [
+                  Masc_tui_ui.Layout.Ratio 0.45;
+                  Masc_tui_ui.Layout.Flex 1;
+                ]
+            with
+            | [ a; b ] -> (a, b)
+            | _ -> (vr, Rect.empty)
+          in
+          let cm =
+            if Rect.is_empty chk_r then 0
+            else max 0 (evidence_checklist_row_count v - max 1 chk_r.h)
+          in
+          let dm =
+            if Rect.is_empty diff_r then 0
+            else max 0 (rejection_diff_row_count ~lang:m.lang v - diff_r.h)
+          in
+          max cm dm
+      | Some _ | None -> 0
+    in
+    (md_max, verif_max)
+
+let open_harness_overrule_for_context ~verdict ~now (m : Model.t) =
+  if
+    Option.is_none (Model.active_dive m)
+    && Nav.equal_workspace m.nav.workspace Nav.Work
+    && Nav.equal_work_tab m.work.active_tab Nav.Work_pipeline
+    && m.nav.pane_index = 1
+    && Model.work_pipeline_has_linked_card m
+    && not (Model.work_pipeline_verifs_visible m)
+  then
+    ( Model.with_toast ~now ~level:Model.Toast_warning
+        (Say.make
+           ~ko:"화면에 표시된 검증 항목이 없습니다 (창 높이를 늘려주세요)"
+           ~en:"No verification visible in pane (increase viewport height)")
+        m
+    , [] )
+  else
+  let valid_hash_of (v : Wire_work.harness_verdict_row) =
+    if Wire_work.is_valid_notes_hash v.notes_hash then Some v.notes_hash
+    else None
+  in
+  let find_hash_for_task_ids task_ids =
+    if task_ids = [] then None
+    else
+      List.find_map
+        (fun (hv : Wire_work.harness_verdict_row) ->
+          if List.exists (String.equal hv.task_id) task_ids then
+            valid_hash_of hv
+          else None)
+        (Work_store.harness_verdicts_list m.work)
+  in
+  let resolved_hash =
+    match Model.active_dive m with
+    | Some (Nav.Dive_work (Nav.Verification_dive req_id)) -> (
+        match
+          List.find_opt
+            (fun (v : Wire_work.verification_request) ->
+              String.equal v.request_id req_id)
+            (Work_store.verifications_list m.work)
+        with
+        | Some v -> find_hash_for_task_ids [ v.task_id ]
+        | None -> None)
+    | Some (Nav.Dive_work (Nav.Task_dive task_id)) ->
+        find_hash_for_task_ids [ task_id ]
+    | Some (Nav.Dive_work (Nav.Goal_dive goal_id)) -> (
+        let preferred_ids =
+          if m.nav.pane_index = 1 then
+            match Work_store.selected_goal_dive_verification ~goal_id m.work with
+            | Some v -> [ v.task_id ]
+            | None -> []
+          else
+            match Work_store.selected_goal_dive_task ~goal_id m.work with
+            | Some tk -> [ tk.id ]
+            | None -> []
+        in
+        match find_hash_for_task_ids preferred_ids with
+        | Some _ as hit -> hit
+        | None ->
+            let tids =
+              Work_store.goal_linked_tasks ~goal_id m.work
+              |> List.map (fun (tk : Wire_work.task) -> tk.id)
+            in
+            find_hash_for_task_ids tids)
+    | Some
+        ( Nav.Dive_keeper _
+        | Nav.Dive_knowledge _
+        | Nav.Dive_runtime _
+        | Nav.Dive_infra _ ) ->
+        None
+    | None -> (
+        match m.nav.workspace, m.work.active_tab with
+        | Nav.Work, Nav.Work_harness -> (
+            match Work_store.selected_harness_verdict m.work with
+            | Some hv -> valid_hash_of hv
+            | None -> None)
+        | Nav.Work, Nav.Work_pipeline ->
+            if m.nav.pane_index = 1 && Model.work_pipeline_verifs_visible m then
+              match Work_store.selected_verification m.work with
+              | Some v -> find_hash_for_task_ids [ v.task_id ]
+              | None -> None
+            else (
+              match Work_store.selected_goal m.work with
+              | Some g ->
+                  let tids =
+                    Work_store.goal_linked_tasks ~goal_id:g.id m.work
+                    |> List.map (fun (tk : Wire_work.task) -> tk.id)
+                  in
+                  find_hash_for_task_ids tids
+              | None -> None)
+        | Nav.Work, Nav.Work_tasks -> (
+            match Work_store.selected_task m.work with
+            | Some tk -> find_hash_for_task_ids [ tk.id ]
+            | None -> None)
+        | ( Nav.Work
+          , ( Nav.Work_schedules
+            | Nav.Work_inbox
+            | Nav.Work_candle_scorecard ) )
+        | ( ( Nav.Pulse
+            | Nav.Knowledge
+            | Nav.Keepers
+            | Nav.Runtime
+            | Nav.Infra )
+          , _ ) ->
+            None)
+  in
+  match resolved_hash with
+  | Some seed_hash ->
+      let modal0 = Model.inline_modal_for (Nav.Harness_overrule seed_hash) in
+      let fields =
+        List.map
+          (fun (f : Model.modal_form_field) ->
+            if String.equal f.key "verdict" then { f with value = verdict }
+            else f)
+          modal0.fields
+      in
+      let active_field =
+        let rec find idx = function
+          | [] -> 0
+          | (f : Model.modal_form_field) :: rest ->
+              if String.equal f.key "reason" then idx else find (idx + 1) rest
+        in
+        find 0 fields
+      in
+      let modal = { modal0 with fields; active_field } in
+      let nav =
+        {
+          m.nav with
+          overlay = Some (Nav.Inline_action (Nav.Harness_overrule seed_hash));
+          return_overlay = None;
+          filter_focused = false;
+          sidebar_focused = false;
+          sidebar_open = close_drawer_if_floating m;
+          modal_edit_cursor = String.length (Model.modal_active_field_value modal);
+        }
+      in
+      let drafts = Drafts.set_focus false m.drafts in
+      let config = Config_store.cancel_edit_field m.config in
+      ({ m with nav; drafts; config; inline_modal = Some modal; ask_modal = None }, [])
+  | None ->
+      let msg =
+        match m.work.harness_health with
+        | Observed.Value _ ->
+            Say.make
+              ~ko:
+                "이 항목에 연결된 유효한 64-hex 하네스 판정(notes_hash)이 없습니다"
+              ~en:
+                "No valid 64-hex harness verdict (notes_hash) is linked to this item"
+        | Observed.Loading _
+        | Observed.Absent
+        | Observed.Unreported
+        | Observed.Failed _ ->
+            Say.make
+              ~ko:
+                "하네스 판정 데이터가 없어 재정의할 수 없습니다 (Work > 하네스 탭 확인)"
+              ~en:
+                "No harness verdict loaded to overrule (open Work > Harness first)"
+      in
+      (Model.with_toast ~now ~level:Model.Toast_warning msg m, [])
+
+let open_schedule_form_populated (m : Model.t) =
+  let modal0 = Model.inline_modal_for Nav.Schedule_form in
+  let keeper_default = Option.value (resolve_target_keeper m) ~default:"" in
+  let fields =
+    List.map
+      (fun (f : Model.modal_form_field) ->
+        if String.equal f.key "keeper" then { f with value = keeper_default }
+        else f)
+      modal0.fields
+  in
+  let active_field =
+    if String.equal (String.trim keeper_default) "" then 0 else 2
+  in
+  let modal = { modal0 with fields; active_field } in
+  let nav =
+    {
+      m.nav with
+      overlay = Some (Nav.Inline_action Nav.Schedule_form);
+      return_overlay = None;
+      filter_focused = false;
+      sidebar_focused = false;
+      sidebar_open = close_drawer_if_floating m;
+      modal_edit_cursor = String.length (Model.modal_active_field_value modal);
+    }
+  in
+  let drafts = Drafts.set_focus false m.drafts in
+  let config = Config_store.cancel_edit_field m.config in
+  ({ m with nav; drafts; config; inline_modal = Some modal; ask_modal = None }, [])
+
+let check_verification_verdict_precondition (m : Model.t)
+    (v : Wire_work.verification_request) : (unit, Say.t) result =
+  let review_check =
+    match v.review_observation with
+    | None -> Ok ()
+    | Some obs -> (
+        match obs.state with
+        | Wire_work.Review_approved ->
+            Error
+              (Say.make ~ko:"이미 승인된 검증 요청입니다"
+                 ~en:"Verification request is already approved")
+        | Wire_work.Review_rejected ->
+            Error
+              (Say.make ~ko:"이미 반려된 검증 요청입니다"
+                 ~en:"Verification request is already rejected")
+        | Wire_work.Review_superseded ->
+            Error
+              (Say.make ~ko:"최신 제출로 대체(superseded)된 검증 요청입니다"
+                 ~en:"Verification request was superseded by a newer submission")
+        | Wire_work.Review_failed
+        | Wire_work.Review_cancelled
+        | Wire_work.Review_unobserved
+        | Wire_work.Review_running
+        | Wire_work.Review_unavailable
+        | Wire_work.Review_not_reviewed
+        | Wire_work.Review_execution_pending
+        | Wire_work.Review_execution_repair_required
+        | Wire_work.Review_commit_failed ->
+            Ok ())
+  in
+  match review_check with
+  | Error _ as e -> e
+  | Ok () -> (
+      match
+        List.find_opt
+          (fun (tk : Wire_work.task) -> String.equal tk.id v.task_id)
+          (Work_store.tasks m.work)
+      with
+      | None -> Ok ()
+      | Some tk -> (
+          match tk.status with
+          | Wire_work.AwaitingVerification { verification_id = vid; _ }
+            when not (String.equal vid v.request_id) ->
+              Error
+                (Say.make
+                   ~ko:"작업이 더 최신 검증 요청을 대기 중입니다 (superseded)"
+                   ~en:"Task is awaiting a newer verification request (superseded)")
+          | Wire_work.AwaitingVerification _ -> Ok ()
+          | Wire_work.Done _ ->
+              Error
+                (Say.make
+                   ~ko:"연결된 작업이 이미 완료(Done)되어 판정할 수 없습니다"
+                   ~en:"Linked task is already Done; cannot submit verdict")
+          | Wire_work.Cancelled _ ->
+              Error
+                (Say.make
+                   ~ko:"연결된 작업이 이미 취소(Cancelled)되어 판정할 수 없습니다"
+                   ~en:"Linked task is already Cancelled; cannot submit verdict")
+          | Wire_work.Todo | Wire_work.Claimed _ | Wire_work.InProgress _ ->
+              Error
+                (Say.make
+                   ~ko:"연결된 작업이 검증 대기(AwaitingVerification) 상태가 아닙니다"
+                   ~en:"Linked task is not in AwaitingVerification status")))
+
+let approve_verification_request ~now (m : Model.t)
+    (v : Wire_work.verification_request) =
+  match check_verification_verdict_precondition m v with
+  | Error msg -> (Model.with_toast ~now ~level:Model.Toast_info msg m, [])
+  | Ok () ->
+      ( Model.with_toast ~now ~level:Model.Toast_info
+          (Say.make
+             ~ko:("검증 승인 전송: " ^ v.task_title)
+             ~en:("Approving verification: " ^ v.task_title))
+          m
+      , [
+          Cmd.Http_post
+            {
+              epoch = m.epoch;
+              req =
+                Cmd.Post_verification_verdict
+                  {
+                    task_id = v.task_id;
+                    verification_id = v.request_id;
+                    verdict = Wire_work.Verdict_approve;
+                    notes = None;
+                  };
+            };
+        ] )
+
+let reject_verification_request ~now (m : Model.t)
+    (v : Wire_work.verification_request) =
+  match check_verification_verdict_precondition m v with
+  | Error msg -> (Model.with_toast ~now ~level:Model.Toast_info msg m, [])
+  | Ok () -> open_inline_modal m (Nav.Verification_reject v.request_id)
+
+let request_goal_complete_guarded ~now (m : Model.t) (g : Wire_work.goal) =
+  match g.phase with
+  | Wire_work.Executing -> (
+      match expected_workspace_of m with
+      | Some expected_workspace ->
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make
+                 ~ko:("목표 완료 검증 요청: " ^ g.title)
+                 ~en:("Requesting goal completion verification: " ^ g.title))
+              m
+          , [
+              Cmd.Http_post
+                {
+                  epoch = m.epoch;
+                  req =
+                    Cmd.Post_goal_transition
+                      {
+                        goal_id = g.id;
+                        action = Wire_work.Request_complete;
+                        note = None;
+                        expected_workspace;
+                      };
+                };
+            ] )
+      | None ->
+          ( Model.with_toast ~now ~level:Model.Toast_warning
+              (Say.make
+                 ~ko:"목표 상태를 바꾸려면 서버 워크스페이스 정보가 필요합니다"
+                 ~en:"Goal transitions need the server workspace identity")
+              m
+          , [] ))
+  | Wire_work.Verifying ->
+      ( Model.with_toast ~now ~level:Model.Toast_info
+          (Say.make ~ko:"목표가 이미 검증 진행 중입니다"
+             ~en:"Goal is already verifying")
+          m
+      , [] )
+  | Wire_work.Awaiting_confirmation ->
+      ( Model.with_toast ~now ~level:Model.Toast_info
+          (Say.make ~ko:"검증 완료 — [a] 키로 최종 완료 확정하세요"
+             ~en:"Verification passed — press [a] to confirm completion")
+          m
+      , [] )
+  | Wire_work.Paused _ ->
+      ( Model.with_toast ~now ~level:Model.Toast_info
+          (Say.make ~ko:"일시정지된 목표입니다 — 먼저 [a]로 재개하세요"
+             ~en:"Goal is paused — press [a] to resume first")
+          m
+      , [] )
+  | Wire_work.Blocked _ ->
+      ( Model.with_toast ~now ~level:Model.Toast_info
+          (Say.make ~ko:"차단된 목표입니다 — 먼저 [a]로 차단 해제하세요"
+             ~en:"Goal is blocked — press [a] to unblock first")
+          m
+      , [] )
+  | Wire_work.Completed ->
+      ( Model.with_toast ~now ~level:Model.Toast_info
+          (Say.make ~ko:"이미 완료된 목표입니다 ([a] 다시 열기)"
+             ~en:"Goal is already completed ([a] to reopen)")
+          m
+      , [] )
+  | Wire_work.Dropped ->
+      ( Model.with_toast ~now ~level:Model.Toast_info
+          (Say.make ~ko:"이미 중단된 목표입니다 ([a] 다시 열기)"
+             ~en:"Goal is already dropped ([a] to reopen)")
+          m
+      , [] )
+
 let apply_move (m : Model.t) dir =
   let allow_in_filter =
     match dir with
     | Keymap.Up | Keymap.Down | Keymap.Page_up | Keymap.Page_down -> true
     | Keymap.Left | Keymap.Right | Keymap.Home | Keymap.End -> false
   in
+  let is_page_scroll =
+    match dir with
+    | Keymap.Page_up | Keymap.Page_down -> true
+    | Keymap.Up | Keymap.Down | Keymap.Left | Keymap.Right
+    | Keymap.Home | Keymap.End ->
+        false
+  in
   if m.nav.filter_focused && not allow_in_filter then (m, [])
   else if Option.is_none m.nav.overlay && Drafts.is_focused m.drafts then
-    let drafts =
-      match dir with
-      | Keymap.Left -> Drafts.move_cursor `Left m.drafts
-      | Keymap.Right -> Drafts.move_cursor `Right m.drafts
-      | Keymap.Home -> Drafts.move_cursor `Home m.drafts
-      | Keymap.End -> Drafts.move_cursor `End m.drafts
-      | Keymap.Up | Keymap.Down | Keymap.Page_up | Keymap.Page_down -> m.drafts
-    in
-    ({ m with drafts }, [])
+    if not is_page_scroll then
+      let drafts =
+        match dir with
+        | Keymap.Left -> Drafts.move_cursor `Left m.drafts
+        | Keymap.Right -> Drafts.move_cursor `Right m.drafts
+        | Keymap.Home -> Drafts.move_cursor `Home m.drafts
+        | Keymap.End -> Drafts.move_cursor `End m.drafts
+        | Keymap.Up | Keymap.Down | Keymap.Page_up | Keymap.Page_down ->
+            m.drafts
+      in
+      ({ m with drafts }, [])
+    else
+      let chat_delta = -(move_delta dir) in
+      match Model.active_dive m with
+      | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_chat }) ->
+          let max_scroll =
+            Chat_transcript.max_scroll_for_model ~model:m ~keeper:name
+          in
+          ( {
+              m with
+              fleet =
+                Fleet_store.move_chat_scroll ~max_scroll ~delta:chat_delta
+                  m.fleet;
+            }
+          , [] )
+      | None
+        when Nav.equal_workspace m.nav.workspace Nav.Keepers
+             && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_chat
+             && (Model.focusable_pane_count m >= 2
+                || (m.nav.zoomed && Model.can_zoom_current_view m)) -> (
+          let embedded = not (m.nav.zoomed && Model.can_zoom_current_view m) in
+          match Fleet_store.selected_keeper_summary m.fleet with
+          | Some k ->
+              let max_scroll =
+                Chat_transcript.max_scroll_for_model_in ~embedded ~model:m
+                  ~keeper:k.name
+              in
+              ( {
+                  m with
+                  fleet =
+                    Fleet_store.move_chat_scroll ~max_scroll ~delta:chat_delta
+                      m.fleet;
+                }
+              , [] )
+          | None -> (m, []))
+      | Some
+          ( Nav.Dive_keeper
+              {
+                tab =
+                  ( Nav.Keeper_context
+                  | Nav.Keeper_tool_calls
+                  | Nav.Keeper_memory
+                  | Nav.Keeper_work_candle
+                  | Nav.Keeper_sandbox
+                  | Nav.Keeper_config
+                  | Nav.Keeper_logs
+                  | Nav.Keeper_identity );
+                _;
+              }
+          | Nav.Dive_work _
+          | Nav.Dive_knowledge _
+          | Nav.Dive_runtime _
+          | Nav.Dive_infra _ )
+      | None ->
+          (m, [])
   else
     let viewport_rows = estimated_viewport_rows m in
     match m.nav.overlay with
@@ -7842,6 +8480,7 @@ let apply_move (m : Model.t) dir =
                   | Nav.Verification_reject _
                   | Nav.Harness_overrule _
                   | Nav.Task_cancel _
+                  | Nav.Goal_drop _
                   | Nav.Schedule_form
                   | Nav.Connector_form
                   | Nav.Repo_add_form
@@ -7867,6 +8506,7 @@ let apply_move (m : Model.t) dir =
               | Nav.Verification_reject _
               | Nav.Harness_overrule _
               | Nav.Task_cancel _
+              | Nav.Goal_drop _
               | Nav.Schedule_form
               | Nav.Connector_form
               | Nav.Repo_add_form
@@ -8613,22 +9253,84 @@ let apply_move (m : Model.t) dir =
                   in
                   ( { m with nav = { m.nav with dive_scroll_offset }; knowledge }
                   , [] )
-            | Some (Nav.Dive_work _ as active) ->
-                let delta = scroll_delta dir in
-                if m.infra.show_raw_json && m.nav.pane_index = 1 then
+            | Some (Nav.Dive_work target as active) -> (
+                let sd = scroll_delta dir in
+                if
+                  Option.equal Int.equal (Model.dive_work_json_pane_index m)
+                    (Some m.nav.pane_index)
+                then
                   let max_scroll = dive_max_scroll m active in
                   let json_scroll_offset =
                     Store_scroll.clamp_scroll ~max_scroll
-                      (m.nav.json_scroll_offset + delta)
+                      (m.nav.json_scroll_offset + sd)
                   in
                   ({ m with nav = { m.nav with json_scroll_offset } }, [])
                 else
-                  let max_scroll = dive_max_scroll m active in
-                  let dive_scroll_offset =
-                    Store_scroll.clamp_scroll ~max_scroll
-                      (m.nav.dive_scroll_offset + delta)
-                  in
-                  ({ m with nav = { m.nav with dive_scroll_offset } }, [])
+                  match target with
+                  | Nav.Goal_dive goal_id ->
+                      let delta = move_delta dir in
+                      let work =
+                        if m.nav.pane_index = 1 then
+                          Work_store.move_goal_dive_verif ~goal_id
+                            ~viewport_rows ~delta m.work
+                        else
+                          Work_store.move_goal_dive_task ~goal_id
+                            ~viewport_rows ~delta m.work
+                      in
+                      ({ m with work }, [])
+                  | Nav.Task_dive task_id -> (
+                      match
+                        List.find_opt
+                          (fun (tk : Wire_work.task) ->
+                            String.equal tk.id task_id)
+                          (Work_store.tasks m.work)
+                      with
+                      | None -> (m, [])
+                      | Some tk ->
+                          let desc_max, verif_max =
+                            task_dive_scroll_bounds m tk
+                          in
+                          let has_verif =
+                            Option.is_some
+                              (Work_store.verification_for_task ~task_id m.work)
+                          in
+                          let two_main =
+                            Model.task_dive_has_two_main_panes m task_id
+                          in
+                          let scroll_verif =
+                            has_verif
+                            && ((two_main && m.nav.pane_index = 1)
+                               || ((not two_main) && m.nav.pane_index = 0))
+                          in
+                          let work =
+                            if scroll_verif then
+                              Work_store.scroll_task_dive_verif
+                                ~max_scroll:verif_max ~delta:sd m.work
+                            else
+                              Work_store.scroll_task_dive_desc
+                                ~max_scroll:desc_max ~delta:sd m.work
+                          in
+                          let nav =
+                            if not scroll_verif then
+                              {
+                                m.nav with
+                                dive_scroll_offset = work.task_dive_desc_scroll;
+                              }
+                            else if not two_main then
+                              {
+                                m.nav with
+                                dive_scroll_offset = work.task_dive_verif_scroll;
+                              }
+                            else m.nav
+                          in
+                          ({ m with work; nav }, []))
+                  | Nav.Verification_dive _ ->
+                      let max_scroll = dive_max_scroll m active in
+                      let dive_scroll_offset =
+                        Store_scroll.clamp_scroll ~max_scroll
+                          (m.nav.dive_scroll_offset + sd)
+                      in
+                      ({ m with nav = { m.nav with dive_scroll_offset } }, []))
             | Some
                 (( Nav.Dive_keeper
                      {
@@ -9057,6 +9759,11 @@ let apply_move (m : Model.t) dir =
                           true
                       | Knowledge_store.View_diff -> false
                     in
+                    let prev_post_id =
+                      match Knowledge_store.selected_post m.knowledge with
+                      | Some p -> Some p.id
+                      | None -> None
+                    in
                     let prev_art_id =
                       match Knowledge_store.selected_artifact m.knowledge with
                       | Some a -> Some a.id
@@ -9094,18 +9801,21 @@ let apply_move (m : Model.t) dir =
                           ~viewport_rows ?max_detail_scroll ~delta:eff_delta
                           m.knowledge
                     in
-                    let next = { m with knowledge } in
-                    let nav_cmds =
+                    let next0 = { m with knowledge } in
+                    let next, nav_cmds =
                       match knowledge.active_tab, eff_pane with
                       | Nav.Knowledge_wiki, 0 ->
-                          View_fetches.selected_wiki_page_fetch next
+                          (next0, View_fetches.selected_wiki_page_fetch next0)
                       | Nav.Knowledge_memory, 0 ->
-                          if
-                            not
-                              (Option.equal String.equal prev_mem_keeper
-                                 knowledge.memory_diff_keeper)
-                          then View_fetches.fetches_for_current_view next
-                          else []
+                          let cmds =
+                            if
+                              not
+                                (Option.equal String.equal prev_mem_keeper
+                                   knowledge.memory_diff_keeper)
+                            then View_fetches.fetches_for_current_view next0
+                            else []
+                          in
+                          (next0, cmds)
                       | Nav.Knowledge_artifacts, 0 -> (
                           match Knowledge_store.selected_artifact knowledge with
                           | Some a ->
@@ -9114,28 +9824,71 @@ let apply_move (m : Model.t) dir =
                                   (Knowledge_store.artifact_detail_for_entry a
                                      knowledge)
                               in
+                              let cmds =
+                                if
+                                  (not
+                                     (Option.equal String.equal prev_art_id
+                                        (Some a.id)))
+                                  || not loaded_matches
+                                then
+                                  [
+                                    Cmd.Http_get
+                                      {
+                                        epoch = m.epoch;
+                                        req =
+                                          Cmd.Get_artifact_detail
+                                            { id = a.id; revision = Some a.revision };
+                                      };
+                                  ]
+                                else []
+                              in
+                              (next0, cmds)
+                          | None -> (next0, []))
+                      | Nav.Knowledge_board, 0 -> (
+                          match Knowledge_store.selected_post knowledge with
+                          | Some p ->
+                              let thread_matches =
+                                match knowledge.active_thread with
+                                | Observed.Value { data = tp, _; stale = false; _ } ->
+                                    String.equal tp.id p.id
+                                | Observed.Failed { retryable = false; _ }
+                                | Observed.Loading _ ->
+                                    Option.equal String.equal
+                                      knowledge.active_thread_target (Some p.id)
+                                | Observed.Value { stale = true; _ }
+                                | Observed.Absent
+                                | Observed.Unreported
+                                | Observed.Failed { retryable = true; _ } ->
+                                    false
+                              in
                               if
                                 (not
-                                   (Option.equal String.equal prev_art_id
-                                      (Some a.id)))
-                                || not loaded_matches
+                                   (Option.equal String.equal prev_post_id
+                                      (Some p.id)))
+                                || not thread_matches
                               then
-                                [
-                                  Cmd.Http_get
-                                    {
-                                      epoch = m.epoch;
-                                      req =
-                                        Cmd.Get_artifact_detail
-                                          { id = a.id; revision = Some a.revision };
-                                    };
-                                ]
-                              else []
-                          | None -> [])
+                                let knowledge' =
+                                  Knowledge_store.mark_thread_loading
+                                    ~post_id:p.id
+                                    ~since_ns:m.freshness.last_mono knowledge
+                                in
+                                ( { next0 with knowledge = knowledge' }
+                                , [
+                                    Cmd.Http_get
+                                      {
+                                        epoch = m.epoch;
+                                        req =
+                                          Cmd.Get_board_thread
+                                            { post_id = p.id; comment_limit = Some 100 };
+                                      };
+                                  ] )
+                              else (next0, [])
+                          | None -> (next0, []))
                       | Nav.Knowledge_wiki, _
                       | Nav.Knowledge_artifacts, _
                       | Nav.Knowledge_board, _
                       | Nav.Knowledge_memory, _ ->
-                          []
+                          (next0, [])
                     in
                     (next, nav_cmds)
                 | Nav.Runtime ->

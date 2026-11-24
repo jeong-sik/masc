@@ -141,7 +141,10 @@ let render_opt_in_json_tree grid ~(rect : Rect.t) ~(theme : Theme.t)
                ~en:"[↑↓] Scroll · [Tab] Main · [Space] Hide"
            else "[↑↓] · [Tab] · [Space]");
       elevated = false;
-      focused = Model.pane_focused model 1;
+      focused =
+        (match Model.dive_work_json_pane_index model with
+        | Some idx -> Model.pane_focused model idx
+        | None -> false);
     }
   in
   let inner = Card.draw ~cache grid ~rect ~theme spec in
@@ -280,17 +283,52 @@ let render_goal_dive ~goal_id ~(model : Model.t) ~cache ~(rect : Rect.t)
             }
       | None -> None
     in
+    let main_focused =
+      Model.body_has_focus model
+      &&
+      match Model.dive_work_json_pane_index model with
+      | Some idx -> not (Model.pane_focused model idx)
+      | None -> true
+    in
+    let header_hotkey =
+      match g_opt with
+      | None ->
+          Ops_common.say model ~ko:"[Space] JSON · [Esc] 뒤로"
+            ~en:"[Space] JSON · [Esc] Back"
+      | Some g -> (
+          match g.phase with
+          | Wire_work.Awaiting_confirmation ->
+              Ops_common.say model
+                ~ko:"[a] 완료 확정 · [x] 일시정지 · [Space] JSON · [Esc] 뒤로"
+                ~en:"[a] Confirm · [x] Pause · [Space] JSON · [Esc] Back"
+          | Wire_work.Paused _ ->
+              Ops_common.say model
+                ~ko:"[a] 재개 · [x] 중단 · [Space] JSON · [Esc] 뒤로"
+                ~en:"[a] Resume · [x] Drop · [Space] JSON · [Esc] Back"
+          | Wire_work.Blocked _ ->
+              Ops_common.say model
+                ~ko:"[a] 차단 해제 · [x] 일시정지 · [Space] JSON · [Esc] 뒤로"
+                ~en:"[a] Unblock · [x] Pause · [Space] JSON · [Esc] Back"
+          | Wire_work.Executing ->
+              Ops_common.say model
+                ~ko:"[a] 검증 요청 · [x] 일시정지 · [Space] JSON · [Esc] 뒤로"
+                ~en:"[a] Verify · [x] Pause · [Space] JSON · [Esc] Back"
+          | Wire_work.Verifying ->
+              Ops_common.say model
+                ~ko:"[x] 일시정지 · [Space] JSON · [Esc] 뒤로"
+                ~en:"[x] Pause · [Space] JSON · [Esc] Back"
+          | Wire_work.Completed | Wire_work.Dropped ->
+              Ops_common.say model
+                ~ko:"[a] 다시 열기 · [Space] JSON · [Esc] 뒤로"
+                ~en:"[a] Reopen · [Space] JSON · [Esc] Back")
+    in
     let spec : Card.spec =
       {
         (Card.default_spec ~title) with
         subtitle = (match g_opt with Some g -> Some g.title | None -> None);
         badge;
-        hotkey =
-          Some
-            (Ops_common.say model
-               ~ko:"[a] 전환 · [x] 정지 · [Space] JSON · [Esc] 뒤로"
-               ~en:"[a] Advance · [x] Pause · [Space] JSON · [Esc] Back");
-        focused = Model.pane_focused model 0;
+        hotkey = Some header_hotkey;
+        focused = main_focused;
       }
     in
     let inner = Card.draw ~cache grid ~rect:main_card_rect ~theme spec in
@@ -384,6 +422,9 @@ let render_goal_dive ~goal_id ~(model : Model.t) ~cache ~(rect : Rect.t)
               ~h:(Int.max 0 (body_bot - !y))
           in
           if not (Rect.is_empty rest_rect) then begin
+            let tasks_focused = Model.pane_focused model 0 in
+            let verifs_focused = Model.pane_focused model 1 in
+            let focus_prefix f = if f then "▸ " else "" in
             let tasks_r, verif_r =
               match
                 Layout.split_v ~gap:0 rest_rect [ Layout.Ratio 0.42; Layout.Flex 1 ]
@@ -391,16 +432,36 @@ let render_goal_dive ~goal_id ~(model : Model.t) ~cache ~(rect : Rect.t)
               | [ t; b ] -> (t, b)
               | _ -> (rest_rect, Rect.empty)
             in
-            Card.draw_hairline ~pad_x:0 ~bg
-              ~label:
-                (Printf.sprintf "%s (%d)"
-                   (Ops_common.say model ~ko:"연결 작업" ~en:"Linked Tasks")
-                   (List.length linked))
-              grid ~rect:tasks_r ~y:tasks_r.y ~theme;
             let t_body =
               Rect.make ~x:tasks_r.x ~y:(tasks_r.y + 1) ~w:tasks_r.w
                 ~h:(Int.max 0 (tasks_r.h - 1))
             in
+            let t_total = List.length linked in
+            let t_sel =
+              Store_scroll.clamp_index t_total model.work.goal_dive_task_index
+            in
+            let t_skip =
+              if t_total <= 0 || t_body.h <= 0 then 0
+              else
+                let max_s = Int.max 0 (t_total - t_body.h) in
+                let s0 = Int.min max_s (Int.max 0 model.work.goal_dive_task_scroll) in
+                if t_sel < s0 then t_sel
+                else if t_sel >= s0 + t_body.h then Int.min max_s (t_sel - t_body.h + 1)
+                else s0
+            in
+            let t_pos_suffix =
+              if t_total > t_body.h && t_body.h > 0 then
+                Printf.sprintf " · %d/%d" (t_sel + 1) t_total
+              else ""
+            in
+            Card.draw_hairline ~pad_x:0 ~bg
+              ~label:
+                (Printf.sprintf "%s%s (%d)%s · [Enter] %s"
+                   (focus_prefix tasks_focused)
+                   (Ops_common.say model ~ko:"연결 작업" ~en:"Linked Tasks")
+                   t_total t_pos_suffix
+                   (Ops_common.say model ~ko:"상세" ~en:"Dive"))
+              grid ~rect:tasks_r ~y:tasks_r.y ~theme;
             if linked = [] && not (Rect.is_empty t_body) then begin
               Card.draw_left_rail ~bg ~tone:Theme.Status_attention grid
                 ~x:t_body.x ~y:t_body.y ~h:1 ~theme;
@@ -413,15 +474,30 @@ let render_goal_dive ~goal_id ~(model : Model.t) ~cache ~(rect : Rect.t)
                         ~en:"No tasks linked to this goal"))
             end
             else
-              let linked_skip =
-                Int.min
-                  (Int.max 0 (List.length linked - Int.max 1 t_body.h))
-                  (Int.max 0 model.nav.dive_scroll_offset)
-              in
               List.iteri
                 (fun idx (tk : Wire_work.task) ->
                   let py = t_body.y + idx in
                   if py < Rect.bottom t_body then begin
+                    let abs_idx = t_skip + idx in
+                    let is_sel = Int.equal abs_idx t_sel in
+                    let rbg =
+                      if is_sel && tasks_focused then Color.of_rgb theme.selection_bg
+                      else if is_sel then Color.of_rgb theme.surface_2
+                      else bg
+                    in
+                    let row_r =
+                      Rect.make ~x:t_body.x ~y:py ~w:t_body.w ~h:1
+                    in
+                    if is_sel then begin
+                      Cell_grid.fill_rect ~clip:t_body grid ~rect:row_r
+                        ~style:(Typography.primary ~bg:rbg theme) ();
+                      if tasks_focused then
+                        Card.draw_left_rail ~bg:rbg ~tone:Theme.Status_active
+                          grid ~x:t_body.x ~y:py ~h:1 ~theme
+                      else
+                        Card.draw_left_rail ~bg:rbg ~color:theme.border_inactive
+                          grid ~x:t_body.x ~y:py ~h:1 ~theme
+                    end;
                     let tg, ttok, tlbl = Ops_common.task_status_badge tk.status in
                     let who =
                       match Ops_common.task_assignee_opt tk.status with
@@ -432,37 +508,53 @@ let render_goal_dive ~goal_id ~(model : Model.t) ~cache ~(rect : Rect.t)
                       Printf.sprintf "%s %s  " (Glyph.to_utf8 tg)
                         (Say.resolve model.lang tlbl)
                     in
+                    let start_x = t_body.x + 2 in
+                    let avail_w = Int.max 0 (t_body.w - 2) in
                     let adv =
-                      Ops_common.put_line ~clip:t_body grid ~x:t_body.x ~y:py
-                        ~max_w:t_body.w
-                        ~style:(Typography.status ~bg ~bold:true theme ttok)
+                      Ops_common.put_line ~clip:row_r grid ~x:start_x ~y:py
+                        ~max_w:avail_w
+                        ~style:(Typography.status ~bg:rbg ~bold:true theme ttok)
                         badge_s
                     in
                     let line = Printf.sprintf "%s  %s" tk.id tk.title in
                     let who_w = Grapheme.display_width who in
                     let mid_w =
-                      Int.max 0 (t_body.w - adv - (if who_w > 0 then who_w + 1 else 0))
+                      Int.max 0
+                        (avail_w - adv - (if who_w > 0 then who_w + 1 else 0))
+                    in
+                    let title_st =
+                      if is_sel && tasks_focused then Typography.anchor ~bg:rbg theme
+                      else Typography.primary ~bg:rbg theme
                     in
                     ignore
-                      (Ops_common.put_line ~clip:t_body grid ~x:(t_body.x + adv)
-                         ~y:py ~max_w:mid_w ~style:(Typography.primary ~bg theme)
-                         line);
-                    if who_w > 0 && t_body.w > adv + who_w + 4 then
+                      (Ops_common.put_line ~clip:row_r grid ~x:(start_x + adv)
+                         ~y:py ~max_w:mid_w ~style:title_st line);
+                    if who_w > 0 && avail_w > adv + who_w + 4 then
                       ignore
-                        (Ops_common.put_line ~clip:t_body grid
-                           ~x:(Rect.right t_body - who_w)
+                        (Ops_common.put_line ~clip:row_r grid
+                           ~x:(Rect.right row_r - who_w)
                            ~y:py ~max_w:who_w
-                           ~style:(Typography.whisper ~bg theme)
+                           ~style:(Typography.whisper ~bg:rbg theme)
                            who)
                   end)
-                (Store_scroll.drop linked_skip linked |> List.take t_body.h);
+                (Store_scroll.drop t_skip linked |> List.take t_body.h);
             if not (Rect.is_empty verif_r) then begin
+              let v_total = List.length verifs in
+              let v_sel =
+                Store_scroll.clamp_index v_total model.work.goal_dive_verif_index
+              in
+              let v_pos_suffix =
+                if v_total > 1 then Printf.sprintf " · %d/%d" (v_sel + 1) v_total
+                else ""
+              in
               Card.draw_hairline ~pad_x:0 ~bg
                 ~label:
-                  (Printf.sprintf "%s (%d)"
-                     (Ops_common.say model ~ko:"검증 실행 · 증거 · 반려 Diff"
-                        ~en:"Verifier Runs, Evidence & Rejection Diff")
-                     (List.length verifs))
+                  (Printf.sprintf "%s%s (%d)%s · [Enter] %s"
+                     (focus_prefix verifs_focused)
+                     (Ops_common.say model ~ko:"검증 실행 · 증거"
+                        ~en:"Verifier Runs & Evidence")
+                     v_total v_pos_suffix
+                     (Ops_common.say model ~ko:"상세" ~en:"Dive"))
                 grid ~rect:verif_r ~y:verif_r.y ~theme;
               let v_body =
                 Rect.make ~x:verif_r.x ~y:(verif_r.y + 1) ~w:verif_r.w
@@ -477,58 +569,165 @@ let render_goal_dive ~goal_id ~(model : Model.t) ~cache ~(rect : Rect.t)
                          ~style:(Typography.whisper ~bg theme)
                          (Ops_common.say model ~ko:"기록된 검증 실행이 없습니다"
                             ~en:"No verifier runs recorded yet"))
-              | v :: _ ->
-                  let check_r, diff_r =
-                    match
-                      Layout.split_v ~gap:0 v_body [ Layout.Ratio 0.45; Layout.Flex 1 ]
-                    with
-                    | [ a; b ] -> (a, b)
-                    | _ -> (v_body, Rect.empty)
+              | _ :: _ ->
+                  let list_h =
+                    if v_body.h <= 3 then v_body.h
+                    else Int.min (Int.max 2 v_total) (Int.max 2 (v_body.h / 2))
                   in
-                  draw_evidence_checklist ~scroll:model.nav.dive_scroll_offset
-                    grid ~rect:check_r ~theme ~model v;
-                  if not (Rect.is_empty diff_r) then
-                    ignore
-                      (Diff.draw grid ~rect:diff_r ~theme
-                         ~scroll:model.nav.dive_scroll_offset
-                         (Work_views.build_rejection_diff_rows ~model v))
+                  let vlist_r =
+                    Rect.make ~x:v_body.x ~y:v_body.y ~w:v_body.w ~h:list_h
+                  in
+                  let preview_r =
+                    Rect.make ~x:v_body.x ~y:(v_body.y + list_h) ~w:v_body.w
+                      ~h:(Int.max 0 (v_body.h - list_h))
+                  in
+                  let v_skip =
+                    if v_total <= 0 || vlist_r.h <= 0 then 0
+                    else
+                      let max_s = Int.max 0 (v_total - vlist_r.h) in
+                      let s0 =
+                        Int.min max_s (Int.max 0 model.work.goal_dive_verif_scroll)
+                      in
+                      if v_sel < s0 then v_sel
+                      else if v_sel >= s0 + vlist_r.h then
+                        Int.min max_s (v_sel - vlist_r.h + 1)
+                      else s0
+                  in
+                  List.iteri
+                    (fun idx (vr : Wire_work.verification_request) ->
+                      let py = vlist_r.y + idx in
+                      if py < Rect.bottom vlist_r then begin
+                        let abs_idx = v_skip + idx in
+                        let is_sel = Int.equal abs_idx v_sel in
+                        let rbg =
+                          if is_sel && verifs_focused then
+                            Color.of_rgb theme.selection_bg
+                          else if is_sel then Color.of_rgb theme.surface_2
+                          else bg
+                        in
+                        let row_r =
+                          Rect.make ~x:vlist_r.x ~y:py ~w:vlist_r.w ~h:1
+                        in
+                        if is_sel then begin
+                          Cell_grid.fill_rect ~clip:vlist_r grid ~rect:row_r
+                            ~style:(Typography.primary ~bg:rbg theme) ();
+                          if verifs_focused then
+                            Card.draw_left_rail ~bg:rbg ~tone:Theme.Status_active
+                              grid ~x:vlist_r.x ~y:py ~h:1 ~theme
+                          else
+                            Card.draw_left_rail ~bg:rbg
+                              ~color:theme.border_inactive grid ~x:vlist_r.x
+                              ~y:py ~h:1 ~theme
+                        end;
+                        let vg, vtok, vlbl =
+                          match vr.review_observation with
+                          | Some obs -> Ops_common.review_state_badge obs.state
+                          | None ->
+                              ( Glyph.Action_required
+                              , Theme.Status_attention
+                              , Say.make ~ko:"검증대기" ~en:"Pending" )
+                        in
+                        let start_x = vlist_r.x + 2 in
+                        let avail_w = Int.max 0 (vlist_r.w - 2) in
+                        let badge_s =
+                          Printf.sprintf "%s %s  " (Glyph.to_utf8 vg)
+                            (Say.resolve model.lang vlbl)
+                        in
+                        let adv =
+                          Ops_common.put_line ~clip:row_r grid ~x:start_x ~y:py
+                            ~max_w:avail_w
+                            ~style:
+                              (Typography.status ~bg:rbg ~bold:true theme vtok)
+                            badge_s
+                        in
+                        let by_s = " @" ^ vr.submitted_by in
+                        let by_w = Grapheme.display_width by_s in
+                        let mid_w =
+                          Int.max 0
+                            (avail_w - adv - (if by_w > 0 then by_w + 1 else 0))
+                        in
+                        let line = Printf.sprintf "%s  %s" vr.request_id vr.task_title in
+                        let title_st =
+                          if is_sel && verifs_focused then
+                            Typography.anchor ~bg:rbg theme
+                          else Typography.primary ~bg:rbg theme
+                        in
+                        ignore
+                          (Ops_common.put_line ~clip:row_r grid
+                             ~x:(start_x + adv) ~y:py ~max_w:mid_w
+                             ~style:title_st line);
+                        if by_w > 0 && avail_w > adv + by_w + 4 then
+                          ignore
+                            (Ops_common.put_line ~clip:row_r grid
+                               ~x:(Rect.right row_r - by_w)
+                               ~y:py ~max_w:by_w
+                               ~style:(Typography.whisper ~bg:rbg theme)
+                               by_s)
+                      end)
+                    (Store_scroll.drop v_skip verifs |> List.take vlist_r.h);
+                  (match List.nth_opt verifs v_sel with
+                  | Some v when not (Rect.is_empty preview_r) ->
+                      let check_r, diff_r =
+                        match
+                          Layout.split_v ~gap:0 preview_r
+                            [ Layout.Ratio 0.50; Layout.Flex 1 ]
+                        with
+                        | [ a; b ] -> (a, b)
+                        | _ -> (preview_r, Rect.empty)
+                      in
+                      draw_evidence_checklist ~scroll:0 grid ~rect:check_r ~theme
+                        ~model v;
+                      if not (Rect.is_empty diff_r) then
+                        ignore
+                          (Diff.draw grid ~rect:diff_r ~theme ~scroll:0
+                             (Work_views.build_rejection_diff_rows ~model v))
+                  | Some _ | None -> ())
             end
           end;
           if action_h = 1 then
-            let primary_lbl =
+            let phase_keys =
               match g.phase with
               | Wire_work.Awaiting_confirmation ->
-                  Ops_common.say model ~ko:"완료 확정" ~en:"Confirm"
+                  [
+                    ("a", Ops_common.say model ~ko:"완료 확정" ~en:"Confirm");
+                    ("x", Ops_common.say model ~ko:"일시정지" ~en:"Pause");
+                  ]
               | Wire_work.Paused _ ->
-                  Ops_common.say model ~ko:"재개" ~en:"Resume"
+                  [
+                    ("a", Ops_common.say model ~ko:"재개" ~en:"Resume");
+                    ("x", Ops_common.say model ~ko:"중단" ~en:"Drop");
+                  ]
               | Wire_work.Blocked _ ->
-                  Ops_common.say model ~ko:"차단 해제" ~en:"Unblock"
+                  [
+                    ("a", Ops_common.say model ~ko:"차단 해제" ~en:"Unblock");
+                    ("x", Ops_common.say model ~ko:"일시정지" ~en:"Pause");
+                  ]
+              | Wire_work.Executing ->
+                  [
+                    ("a", Ops_common.say model ~ko:"검증 요청" ~en:"Verify");
+                    ("x", Ops_common.say model ~ko:"일시정지" ~en:"Pause");
+                  ]
+              | Wire_work.Verifying ->
+                  [ ("x", Ops_common.say model ~ko:"일시정지" ~en:"Pause") ]
               | Wire_work.Completed | Wire_work.Dropped ->
-                  Ops_common.say model ~ko:"다시 열기" ~en:"Reopen"
-              | Wire_work.Executing | Wire_work.Verifying ->
-                  Ops_common.say model ~ko:"검증 요청" ~en:"Verify"
+                  [ ("a", Ops_common.say model ~ko:"다시 열기" ~en:"Reopen") ]
             in
-            let stop_lbl =
-              match g.phase with
-              | Wire_work.Paused _ -> Ops_common.say model ~ko:"중단" ~en:"Drop"
-              | Wire_work.Executing
-              | Wire_work.Verifying
-              | Wire_work.Awaiting_confirmation
-              | Wire_work.Blocked _
-              | Wire_work.Completed
-              | Wire_work.Dropped ->
-                  Ops_common.say model ~ko:"일시정지" ~en:"Pause"
+            let nav_keys =
+              [
+                ("←/→/Tab", Ops_common.say model ~ko:"섹션" ~en:"Section");
+                ("↑↓", Ops_common.say model ~ko:"선택" ~en:"Select");
+                ("Enter", Ops_common.say model ~ko:"상세 진입" ~en:"Dive");
+              ]
+              @ phase_keys
+              @ [
+                  ("Space", "JSON");
+                  ("Esc", Ops_common.say model ~ko:"뒤로" ~en:"Back");
+                ]
             in
             ignore
               (Ops_common.draw_keycap_bar grid
                  ~rect:(Rect.make ~x:content.x ~y:(bot - 1) ~w:content.w ~h:1)
-                 ~theme ~bg
-                 [
-                   ("a", primary_lbl);
-                   ("x", stop_lbl);
-                   ("Space", "JSON");
-                   ("Esc", Ops_common.say model ~ko:"돌아가기" ~en:"Back");
-                 ])
+                 ~theme ~bg nav_keys)
   end;
   match g_opt with
   | Some g when not (Rect.is_empty json_card_rect) ->
@@ -648,6 +847,13 @@ let render_task_dive ~task_id ~(model : Model.t) ~cache ~(rect : Rect.t)
             }
       | None -> None
     in
+    let task_main_focused =
+      Model.body_has_focus model
+      &&
+      match Model.dive_work_json_pane_index model with
+      | Some idx -> not (Model.pane_focused model idx)
+      | None -> true
+    in
     let spec : Card.spec =
       {
         (Card.default_spec ~title) with
@@ -657,7 +863,7 @@ let render_task_dive ~task_id ~(model : Model.t) ~cache ~(rect : Rect.t)
           Some
             (Ops_common.say model ~ko:"[x] 취소 · [Space] JSON · [Esc] 뒤로"
                ~en:"[x] Cancel · [Space] JSON · [Esc] Back");
-        focused = Model.pane_focused model 0;
+        focused = task_main_focused;
       }
     in
     let inner = Card.draw ~cache grid ~rect:main_card_rect ~theme spec in
@@ -738,11 +944,14 @@ let render_task_dive ~task_id ~(model : Model.t) ~cache ~(rect : Rect.t)
               ~value:gl_s ~val_fg:gl_fg ();
             incr y
           end;
-          let v_opt =
-            List.find_opt
-              (fun (v : Wire_work.verification_request) ->
-                String.equal v.task_id tk.id)
-              (Work_store.verifications_list model.work)
+          let v_opt = Work_store.verification_for_task ~task_id:tk.id model.work in
+          let has_two_panes =
+            Option.is_some tk.description && Option.is_some v_opt
+          in
+          let desc_focused = has_two_panes && Model.pane_focused model 0 in
+          let verif_focused =
+            (has_two_panes && Model.pane_focused model 1)
+            || ((not has_two_panes) && Option.is_some v_opt && Model.pane_focused model 0)
           in
           let rest_h = Int.max 0 (body_bot - !y) in
           let desc_h =
@@ -755,59 +964,116 @@ let render_task_dive ~task_id ~(model : Model.t) ~cache ~(rect : Rect.t)
           in
           (match tk.description with
           | Some d when desc_h > 0 ->
-              if desc_h >= 3 then begin
+              let md_src = Ops_common.rewrite_masc_links_for_markdown d in
+              let total_lines =
+                if content.w <= 0 then 0
+                else List.length (Markdown.render_lines ~width:content.w ~theme md_src)
+              in
+              let hdr_rows = if desc_h >= 3 then 1 else 0 in
+              let actual_h =
+                Int.max 0 (Int.min (desc_h - hdr_rows) (body_bot - !y - hdr_rows))
+              in
+              let max_d_scroll = Int.max 0 (total_lines - Int.max 1 actual_h) in
+              let d_scroll =
+                Int.min max_d_scroll (Int.max 0 model.work.task_dive_desc_scroll)
+              in
+              if hdr_rows = 1 then begin
+                let prefix = if desc_focused then "▸ " else "" in
+                let base_lbl =
+                  Ops_common.say model ~ko:"작업 설명" ~en:"Description"
+                in
+                let pos_lbl =
+                  if total_lines > actual_h && actual_h > 0 then
+                    let vis_start = d_scroll + 1 in
+                    let vis_end = Int.min total_lines (d_scroll + actual_h) in
+                    let rem = Int.max 0 (total_lines - vis_end) in
+                    if rem > 0 then
+                      Ops_common.say model
+                        ~ko:(Printf.sprintf " · L%d-%d/%d · ↓ +%d줄" vis_start vis_end total_lines rem)
+                        ~en:(Printf.sprintf " · L%d-%d/%d · ↓ +%dL" vis_start vis_end total_lines rem)
+                    else
+                      Printf.sprintf " · L%d-%d/%d" vis_start vis_end total_lines
+                  else ""
+                in
                 Card.draw_hairline ~pad_x:0 ~bg
-                  ~label:(Ops_common.say model ~ko:"작업 설명" ~en:"Description")
+                  ~label:(prefix ^ base_lbl ^ pos_lbl)
                   grid ~rect:content ~y:!y ~theme;
                 incr y
               end;
-              let actual_h = Int.max 0 (Int.min desc_h (body_bot - !y)) in
               let dr =
                 Rect.make ~x:content.x ~y:!y ~w:content.w ~h:actual_h
               in
               ignore
                 (Markdown.draw grid ~rect:dr ~theme ~osc8:true
-                   ~scroll:model.nav.dive_scroll_offset
-                   (Ops_common.rewrite_masc_links_for_markdown d));
+                   ~scroll:d_scroll md_src);
               y := !y + actual_h
           | Some _ | None -> ());
           (match v_opt with
           | Some v when !y < body_bot ->
-              Card.draw_hairline ~pad_x:0 ~bg
-                ~label:
-                  (Ops_common.say model ~ko:"검증 증거 · 반려 Diff"
-                     ~en:"Verification Evidence & Rejection Diff")
-                grid ~rect:content ~y:!y ~theme;
-              incr y;
-              let vr =
-                Rect.make ~x:content.x ~y:!y ~w:content.w
-                  ~h:(Int.max 0 (body_bot - !y))
-              in
+              let v_scroll = Int.max 0 model.work.task_dive_verif_scroll in
+              let vr_h = Int.max 0 (body_bot - !y - 1) in
+              let diff_rows = Work_views.build_rejection_diff_rows ~model v in
               let chk_r, diff_r =
+                let vr = Rect.make ~x:content.x ~y:(!y + 1) ~w:content.w ~h:vr_h in
                 match
                   Layout.split_v ~gap:0 vr [ Layout.Ratio 0.45; Layout.Flex 1 ]
                 with
                 | [ a; b ] -> (a, b)
                 | _ -> (vr, Rect.empty)
               in
-              draw_evidence_checklist ~scroll:model.nav.dive_scroll_offset grid
-                ~rect:chk_r ~theme ~model v;
+              let v_prefix = if verif_focused then "▸ " else "" in
+              let v_overflow =
+                let total_d = List.length diff_rows in
+                if not (Rect.is_empty diff_r) && total_d > diff_r.h && diff_r.h > 0
+                then
+                  let cs = Int.min (Int.max 0 (total_d - diff_r.h)) v_scroll in
+                  let vis_end = Int.min total_d (cs + diff_r.h) in
+                  let rem = Int.max 0 (total_d - vis_end) in
+                  if rem > 0 then
+                    Printf.sprintf " · L%d-%d/%d · ↓ +%d" (cs + 1) vis_end total_d rem
+                  else Printf.sprintf " · L%d-%d/%d" (cs + 1) vis_end total_d
+                else ""
+              in
+              Card.draw_hairline ~pad_x:0 ~bg
+                ~label:
+                  (Printf.sprintf "%s%s%s · [Enter] %s" v_prefix
+                     (Ops_common.say model ~ko:"검증 증거 · 반려 Diff"
+                        ~en:"Verification Evidence & Rejection Diff")
+                     v_overflow
+                     (Ops_common.say model ~ko:"검증 상세" ~en:"Verif Dive"))
+                grid ~rect:content ~y:!y ~theme;
+              incr y;
+              draw_evidence_checklist ~scroll:v_scroll grid ~rect:chk_r ~theme
+                ~model v;
               if not (Rect.is_empty diff_r) then
                 ignore
-                  (Diff.draw grid ~rect:diff_r ~theme
-                     ~scroll:model.nav.dive_scroll_offset
-                     (Work_views.build_rejection_diff_rows ~model v))
+                  (Diff.draw grid ~rect:diff_r ~theme ~scroll:v_scroll diff_rows)
           | Some _ | None -> ());
           if action_h = 1 then
+            let keys =
+              (if has_two_panes then
+                 [
+                   ("←/→/Tab", Ops_common.say model ~ko:"섹션" ~en:"Section");
+                   ("↑↓/PgDn", Ops_common.say model ~ko:"스크롤" ~en:"Scroll");
+                   ("Enter", Ops_common.say model ~ko:"검증 상세" ~en:"Verif");
+                 ]
+               else if Option.is_some v_opt then
+                 [
+                   ("↑↓/PgDn", Ops_common.say model ~ko:"스크롤" ~en:"Scroll");
+                   ("Enter", Ops_common.say model ~ko:"검증 상세" ~en:"Verif");
+                 ]
+               else
+                 [ ("↑↓/PgDn", Ops_common.say model ~ko:"스크롤" ~en:"Scroll") ])
+              @ [
+                  ("x", Ops_common.say model ~ko:"작업 취소" ~en:"Cancel");
+                  ("Space", "JSON");
+                  ("Esc", Ops_common.say model ~ko:"뒤로" ~en:"Back");
+                ]
+            in
             ignore
               (Ops_common.draw_keycap_bar grid
                  ~rect:(Rect.make ~x:content.x ~y:(bot - 1) ~w:content.w ~h:1)
-                 ~theme ~bg
-                 [
-                   ("x", Ops_common.say model ~ko:"작업 취소" ~en:"Cancel");
-                   ("Space", "JSON");
-                   ("Esc", Ops_common.say model ~ko:"돌아가기" ~en:"Back");
-                 ])
+                 ~theme ~bg keys)
   end;
   match tk_opt with
   | Some tk when not (Rect.is_empty json_card_rect) ->
@@ -848,6 +1114,19 @@ let render_verification_dive ~req_id ~(model : Model.t) ~cache ~(rect : Rect.t)
             }
       | Some { review_observation = None; _ } | None -> None
     in
+    let can_verdict_header =
+      match v_opt with
+      | Some v ->
+          Result.is_ok (Update_nav.check_verification_verdict_precondition model v)
+      | None -> false
+    in
+    let verif_main_focused =
+      Model.body_has_focus model
+      &&
+      match Model.dive_work_json_pane_index model with
+      | Some idx -> not (Model.pane_focused model idx)
+      | None -> true
+    in
     let spec : Card.spec =
       {
         (Card.default_spec ~title) with
@@ -855,10 +1134,15 @@ let render_verification_dive ~req_id ~(model : Model.t) ~cache ~(rect : Rect.t)
         badge;
         hotkey =
           Some
-            (Ops_common.say model
-               ~ko:"[v] 탭 · [a] 승인 · [x] 반려 · [h] 재정의 · [Space] JSON · [Esc] 뒤로"
-               ~en:"[v] Tab · [a] Approve · [x] Reject · [h] Overrule · [Space] JSON · [Esc] Back");
-        focused = Model.pane_focused model 0;
+            (if can_verdict_header then
+               Ops_common.say model
+                 ~ko:"[v] 탭 · [a] 승인 · [x] 반려 · [h] 재정의 · [Space] JSON · [Esc] 뒤로"
+                 ~en:"[v] Tab · [a] Approve · [x] Reject · [h] Overrule · [Space] JSON · [Esc] Back"
+             else
+               Ops_common.say model
+                 ~ko:"[v] 탭 · [h] 재정의 · [Space] JSON · [Esc] 뒤로"
+                 ~en:"[v] Tab · [h] Overrule · [Space] JSON · [Esc] Back");
+        focused = verif_main_focused;
       }
     in
     let inner = Card.draw ~cache grid ~rect:main_card_rect ~theme spec in
@@ -993,44 +1277,84 @@ let render_verification_dive ~req_id ~(model : Model.t) ~cache ~(rect : Rect.t)
                 | _ -> (rest, Rect.empty)
               in
               if not (Rect.is_empty chk_r) then begin
-                Card.draw_hairline ~pad_x:0 ~bg
-                  ~label:
-                    (Ops_common.say model ~ko:"검증 증거 번들 (/verification/evidence)"
-                       ~en:"Verification Evidence Bundle")
-                  grid ~rect:chk_r ~y:chk_r.y ~theme;
                 let ev_r =
                   Rect.make ~x:chk_r.x ~y:(chk_r.y + 1) ~w:chk_r.w
                     ~h:(Int.max 0 (chk_r.h - 1))
                 in
+                let total_ev = List.length tab_lines in
+                let ev_pos =
+                  if total_ev > ev_r.h && ev_r.h > 0 then
+                    let s =
+                      Int.min (Int.max 0 (total_ev - ev_r.h))
+                        (Int.max 0 model.nav.dive_scroll_offset)
+                    in
+                    let ve = Int.min total_ev (s + ev_r.h) in
+                    let rem = Int.max 0 (total_ev - ve) in
+                    if rem > 0 then
+                      Printf.sprintf " · L%d-%d/%d · ↓ +%d" (s + 1) ve total_ev rem
+                    else Printf.sprintf " · L%d-%d/%d" (s + 1) ve total_ev
+                  else ""
+                in
+                Card.draw_hairline ~pad_x:0 ~bg
+                  ~label:
+                    (Ops_common.say model ~ko:"검증 증거 번들 (/verification/evidence)"
+                       ~en:"Verification Evidence Bundle"
+                    ^ ev_pos)
+                  grid ~rect:chk_r ~y:chk_r.y ~theme;
                 draw_tab_lines ~rect:ev_r tab_lines
               end;
               if not (Rect.is_empty diff_r) then begin
-                Card.draw_hairline ~pad_x:0 ~bg
-                  ~label:
-                    (Ops_common.say model ~ko:"구조화 반려 Diff"
-                       ~en:"Structured Rejection Diff")
-                  grid ~rect:diff_r ~y:diff_r.y ~theme;
                 let dr =
                   Rect.make ~x:diff_r.x ~y:(diff_r.y + 1) ~w:diff_r.w
                     ~h:(Int.max 0 (diff_r.h - 1))
                 in
+                let diff_rows = Work_views.build_rejection_diff_rows ~model v in
+                let total_d = List.length diff_rows in
+                let d_pos =
+                  if total_d > dr.h && dr.h > 0 then
+                    let s =
+                      Int.min (Int.max 0 (total_d - dr.h))
+                        (Int.max 0 model.nav.dive_scroll_offset)
+                    in
+                    let ve = Int.min total_d (s + dr.h) in
+                    let rem = Int.max 0 (total_d - ve) in
+                    if rem > 0 then
+                      Printf.sprintf " · L%d-%d/%d · ↓ +%d" (s + 1) ve total_d rem
+                    else Printf.sprintf " · L%d-%d/%d" (s + 1) ve total_d
+                  else ""
+                in
+                Card.draw_hairline ~pad_x:0 ~bg
+                  ~label:
+                    (Ops_common.say model ~ko:"구조화 반려 Diff"
+                       ~en:"Structured Rejection Diff"
+                    ^ d_pos)
+                  grid ~rect:diff_r ~y:diff_r.y ~theme;
                 ignore
                   (Diff.draw grid ~rect:dr ~theme
-                     ~scroll:model.nav.dive_scroll_offset
-                     (Work_views.build_rejection_diff_rows ~model v))
+                     ~scroll:model.nav.dive_scroll_offset diff_rows)
               end);
           if action_h = 1 then
+            let can_verdict =
+              Result.is_ok (Update_nav.check_verification_verdict_precondition model v)
+            in
+            let verdict_keys =
+              if can_verdict then
+                [
+                  ("a", Ops_common.say model ~ko:"승인" ~en:"Approve");
+                  ("x", Ops_common.say model ~ko:"반려" ~en:"Reject");
+                ]
+              else []
+            in
             ignore
               (Ops_common.draw_keycap_bar grid
                  ~rect:(Rect.make ~x:content.x ~y:(bot - 1) ~w:content.w ~h:1)
                  ~theme ~bg
-                 [
-                   ("v", Ops_common.say model ~ko:"증거탭" ~en:"Tab");
-                   ("a", Ops_common.say model ~ko:"승인" ~en:"Approve");
-                   ("x", Ops_common.say model ~ko:"반려" ~en:"Reject");
-                   ("Space", "JSON");
-                   ("Esc", Ops_common.say model ~ko:"돌아가기" ~en:"Back");
-                 ])
+                 ([ ("v", Ops_common.say model ~ko:"증거탭" ~en:"Tab") ]
+                 @ verdict_keys
+                 @ [
+                     ("Space", "JSON");
+                     ("Esc", Ops_common.say model ~ko:"돌아가기" ~en:"Back");
+                   ]))
   end;
   match v_opt with
   | Some v when not (Rect.is_empty json_card_rect) ->

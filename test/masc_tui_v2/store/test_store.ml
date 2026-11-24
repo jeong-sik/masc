@@ -3242,7 +3242,14 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
       title = "Task 100";
       description = Some "See https://example.com/pr/100";
       priority = 1;
-      status = Wire_work.Todo;
+      status =
+        Wire_work.AwaitingVerification
+          {
+            assignee = "alpha";
+            started_at = "2026-01-01T00:00:00Z";
+            submitted_at = "2026-01-01T01:00:00Z";
+            verification_id = "ver-100";
+          };
       goal_link = Wire_work.Linked "goal-100";
       created_at = None;
       updated_at = None;
@@ -3388,21 +3395,71 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
     true
     (Option.is_none m_vrej_done.inline_modal
      && Option.is_none m_vrej_done.nav.overlay);
-  let m_hov, _ = step m_vdive (char_key "h") in
-  Alcotest.(check bool) "Verification_dive [h] opens Harness_overrule modal with empty hash" true
-    (Option.equal Nav.equal_overlay m_hov.nav.overlay
-       (Some (Nav.Inline_action (Nav.Harness_overrule ""))));
   let valid_hash64 =
     "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
   in
-  let m_hov_hash =
-    String.fold_left
-      (fun acc ch -> fst (step acc (char_key (String.make 1 ch))))
-      m_hov valid_hash64
+  let m_hov_no_hh, _ = step m_vdive (char_key "h") in
+  Alcotest.(check bool)
+    "Verification_dive [h] warns instead of opening empty modal when no harness verdict"
+    true
+    (Option.is_none m_hov_no_hh.nav.overlay && Option.is_some m_hov_no_hh.toast);
+  let hh_snap_for_task : Wire_work.harness_health =
+    {
+      generated_at = 1795254000.0;
+      scope_note = "last 7d";
+      evaluator_status = "healthy";
+      fallback_ratio = 0.0;
+      last_signal_at = Some 1795253900.0;
+      calibration =
+        {
+          total_verdicts = 1;
+          approve_count = 1;
+          reject_count = 0;
+          labeled_count = 1;
+          false_positive_count = 0;
+          false_negative_count = 0;
+          agreement_rate = 1.0;
+          fallback_count = 0;
+          distinct_runtime_count = 1;
+          verdicts_with_generator_runtime = 1;
+          distinct_runtime_rate = Some 1.0;
+          recent_fallback_reasons = [];
+          unreadable_record_count = 0;
+        };
+      recent_verdicts =
+        [
+          {
+            timestamp = 1700000000.0;
+            task_id = "task-100";
+            task_title = "Task 100";
+            agent_name = "alpha";
+            gate = "completion";
+            verdict = "approve";
+            evaluator_runtime = "glm";
+            fallback_reason = None;
+            notes_hash = valid_hash64;
+          };
+        ];
+      unreadable_verdicts_count = 0;
+    }
   in
-  let m_hov_f1, _ = step m_hov_hash (key Keymap.Input.Down) in
-  let m_hov_f2, _ = step m_hov_f1 (key Keymap.Input.Down) in
-  let m_hov_typed, _ = step m_hov_f2 (char_key "r") in
+  let m_vdive_hh =
+    {
+      m_vdive with
+      work = Work_store.apply_harness_health ~observed_at:t0 hh_snap_for_task m_vdive.work;
+    }
+  in
+  let m_hov, _ = step m_vdive_hh (char_key "h") in
+  Alcotest.(check bool)
+    "Verification_dive [h] auto-seeds linked 64-hex notes_hash and focuses reason"
+    true
+    (Option.equal Nav.equal_overlay m_hov.nav.overlay
+       (Some (Nav.Inline_action (Nav.Harness_overrule valid_hash64)))
+     &&
+     match m_hov.inline_modal with
+     | Some md -> md.active_field = 2
+     | None -> false);
+  let m_hov_typed, _ = step m_hov (char_key "r") in
   let _, cmds_hov = step m_hov_typed (key Keymap.Input.Enter) in
   Alcotest.(check bool) "Harness_overrule submit emits Post_harness_overrule" true
     (has_cmd
@@ -11700,15 +11757,19 @@ let test_ux_batch1_focus_resize_micro_zoom_and_cli_prefs () =
     (Drafts.draft_for ~keeper:"alpha" m_micro_typed.drafts).text;
   Alcotest.(check int) "UX-02 Micro blocks Enter submission" 0
     (List.length cmds_micro_enter);
-  let _, cmds_micro_quit =
-    Update.step ~now:t0 m_micro_typed
-      (Msg.Key_event
-         {
-           Keymap.Input.key = Keymap.Input.Char "q";
-           mods = { ctrl = true; alt = false; shift = false };
-         })
+  let ctrl_q_ev =
+    Msg.Key_event
+      {
+        Keymap.Input.key = Keymap.Input.Char "q";
+        mods = { ctrl = true; alt = false; shift = false };
+      }
   in
-  Alcotest.(check bool) "UX-02 Micro still allows Ctrl+Q Quit" true
+  let m_micro_armed, cmds_micro_arm = Update.step ~now:t0 m_micro_typed ctrl_q_ev in
+  Alcotest.(check bool) "UX-02 Micro 1st Ctrl+Q arms quit without exiting" true
+    (Option.is_some m_micro_armed.quit_armed_at
+     && not (List.exists (function Cmd.Quit _ -> true | _ -> false) cmds_micro_arm));
+  let _, cmds_micro_quit = Update.step ~now:t0 m_micro_armed ctrl_q_ev in
+  Alcotest.(check bool) "UX-02 Micro 2nd Ctrl+Q still allows Quit" true
     (List.exists (function Cmd.Quit _ -> true | _ -> false) cmds_micro_quit);
   let m_micro_help, _ =
     Update.step ~now:t0 m_micro_typed (Msg.Key_event (char_key "?"))
@@ -12389,11 +12450,55 @@ let test_ux_batch2_modals_settings_overlays () =
     (Option.is_none m_wiki_modal.nav.return_overlay);
 
   (* Harness overrule opener initializes modal_edit_cursor and clears return_overlay *)
+  let hh_valid_sample : Wire_work.harness_health =
+    {
+      generated_at = 1000.0;
+      scope_note = "test";
+      evaluator_status = "healthy";
+      fallback_ratio = 0.0;
+      last_signal_at = None;
+      calibration =
+        {
+          total_verdicts = 1;
+          approve_count = 0;
+          reject_count = 1;
+          labeled_count = 0;
+          false_positive_count = 0;
+          false_negative_count = 0;
+          agreement_rate = 1.0;
+          fallback_count = 0;
+          distinct_runtime_count = 1;
+          verdicts_with_generator_runtime = 1;
+          distinct_runtime_rate = Some 1.0;
+          recent_fallback_reasons = [];
+          unreadable_record_count = 0;
+        };
+      recent_verdicts =
+        [
+          {
+            timestamp = 1000.0;
+            task_id = "tk-sample";
+            task_title = "Sample";
+            agent_name = "alpha";
+            gate = "harness";
+            verdict = "reject";
+            evaluator_runtime = "claude";
+            fallback_reason = None;
+            notes_hash =
+              "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+          };
+        ];
+      unreadable_verdicts_count = 0;
+    }
+  in
   let m_harness_base =
     {
       m_stale_cursor with
       nav = { m_stale_cursor.nav with workspace = Nav.Work };
-      work = Work_store.set_tab Nav.Work_harness m_stale_cursor.work;
+      work =
+        m_stale_cursor.work
+        |> Work_store.apply_harness_health ~observed_at:t0 hh_valid_sample
+        |> Work_store.set_tab Nav.Work_harness;
     }
   in
   let m_overrule, _ = step m_harness_base (char_key "n") in
@@ -13623,15 +13728,25 @@ let test_freeze_fixes_epoch_locks_micro_inline_and_cut_reply () =
   in
   Alcotest.(check bool) "Esc clears orphaned Inline_action overlay" true
     (Option.is_none m_orphan_esc.nav.overlay);
+  let quit_emitted cmds =
+    List.exists (function Cmd.Quit _ -> true | _ -> false) (Cmd.flatten cmds)
+  in
   let m_orphan_quit, cmds_orphan_quit =
     Update.step ~now:t0 m_orphan (char_key ~ctrl:true "q")
   in
-  Alcotest.(check bool) "Ctrl+Q clears orphan and emits Quit" true
+  Alcotest.(check bool)
+    "1st Ctrl+Q clears the orphan overlay and arms quit without exiting" true
     (Option.is_none m_orphan_quit.nav.overlay
-     && List.exists
-          (function Cmd.Quit _ -> true | _ -> false)
-          (Cmd.flatten cmds_orphan_quit));
-  (* P2-9 in Micro breakpoint: orphaned Inline_action must quit on FIRST Ctrl+Q *)
+     && Option.is_some m_orphan_quit.quit_armed_at
+     && not (quit_emitted cmds_orphan_quit));
+  let _, cmds_orphan_quit2 =
+    Update.step ~now:t0 m_orphan_quit (char_key ~ctrl:true "q")
+  in
+  Alcotest.(check bool)
+    "2nd Ctrl+Q after the orphan overlay was cleared emits Quit" true
+    (quit_emitted cmds_orphan_quit2);
+  (* P2-9 in Micro breakpoint: the first Ctrl+Q clears the orphaned
+     Inline_action and arms quit, the second one quits *)
   let m_micro_orphan =
     let m0 = Model.initial ~cols:100 ~rows:20 () in
     {
@@ -13648,11 +13763,16 @@ let test_freeze_fixes_epoch_locks_micro_inline_and_cut_reply () =
     Update.step ~now:t0 m_micro_orphan (char_key ~ctrl:true "q")
   in
   Alcotest.(check bool)
-    "Micro orphaned Inline_action quits on FIRST Ctrl+Q press" true
+    "Micro orphaned Inline_action: 1st Ctrl+Q clears it and arms quit" true
     (Option.is_none m_micro_orphan_quit.nav.overlay
-     && List.exists
-          (function Cmd.Quit _ -> true | _ -> false)
-          (Cmd.flatten cmds_micro_orphan_quit));
+     && Option.is_some m_micro_orphan_quit.quit_armed_at
+     && not (quit_emitted cmds_micro_orphan_quit));
+  let _, cmds_micro_orphan_quit2 =
+    Update.step ~now:t0 m_micro_orphan_quit (char_key ~ctrl:true "q")
+  in
+  Alcotest.(check bool)
+    "Micro orphaned Inline_action: 2nd Ctrl+Q emits Quit" true
+    (quit_emitted cmds_micro_orphan_quit2);
 
   (* P2-10: Duplicate Enter on submitting inline modal + scoped Reply_action_ack *)
   let m_comment, _ =
@@ -14092,6 +14212,1424 @@ let test_keeper_board_quarantine_recovery () =
   Alcotest.(check bool) "an inventory returned for another Keeper is rejected" true
     (Result.is_error (Q.inventory_of_json ~keeper (Q.inventory_to_json (inventory [item "beta" "A"]))))
 
+let test_ux_sweep_12_fixes () =
+  let t0 = Clock.Mono.of_ns 10_000_000_000L in
+  let step_at ~now m k = Update.step ~now m (Msg.Key_event k) in
+  let step m k = step_at ~now:t0 m k in
+  let mk_key ?(ctrl = false) ?(alt = false) ?(shift = false) k =
+    { Keymap.Input.key = k; mods = { ctrl; alt; shift } }
+  in
+  let char_k ?(ctrl = false) ?(alt = false) ?(shift = false) c =
+    mk_key ~ctrl ~alt ~shift (Keymap.Input.Char c)
+  in
+  let has_cmd pred cmds =
+    List.exists pred (Cmd.flatten cmds)
+  in
+  let ws_id : Wire_common.workspace_identity =
+    {
+      instance_id = Some "inst-1";
+      base_path = "/tmp/ws";
+      masc_root = "/tmp/ws/.masc";
+      workspace_sha256 =
+        Some "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    }
+  in
+  let base_with_ws =
+    let m0 = Model.initial ~cols:150 ~rows:42 () in
+    {
+      m0 with
+      server_identity =
+        {
+          m0.server_identity with
+          workspace = Some ws_id;
+          observer_instance_id = Some "inst-1";
+        };
+    }
+  in
+
+  (* === 1. Pulse Human Attention selection truthfulness (Y/N/J/Enter) === *)
+  let ta0 : Wire_work.held_tool_approval =
+    {
+      approval_id = "ta-0";
+      tool_call_id = "tc-0";
+      keeper = "alpha";
+      tool = "bash";
+      args_preview = "ls";
+      question = "Allow ls?";
+      because = None;
+      asked_at = 100.0;
+      timeout_sec = 60.0;
+    }
+  in
+  let ask1 : Wire_work.ask_row =
+    {
+      ask_id = "ask-1";
+      keeper = "beta";
+      context = Some "ctx";
+      asked_at = 200.0;
+      questions =
+        [
+          {
+            question_id = "q1";
+            header = "Choice";
+            prompt = "Choose approach";
+            choices =
+              [
+                { choice_id = "c1"; label = "Option A"; description = None };
+                { choice_id = "c2"; label = "Option B"; description = None };
+              ];
+            mode = Wire_work.Ask_single;
+            allow_free_text = true;
+            free_text_hint = None;
+          };
+        ];
+      resolution = Wire_work.Ask_open;
+    }
+  in
+  let goal2 : Wire_work.goal =
+    {
+      id = "goal-2";
+      title = "Ship feature";
+      measure = "Tests pass";
+      procedure = "Run dune";
+      priority = 1;
+      phase = Wire_work.Awaiting_confirmation;
+      due_date = None;
+      created_at = Some "2026-01-01T00:00:00Z";
+      updated_at = Some "2026-01-02T00:00:00Z";
+      criterion_verdict = Wire_work.Criterion_valid;
+      criterion_revision = Some "rev-1";
+      last_review_note = None;
+      last_review_at = None;
+      linked_task_count = Observed.value ~observed_at:t0 0;
+    }
+  in
+  let m_pulse =
+    let work =
+      base_with_ws.work
+      |> Work_store.apply_tool_approvals ~observed_at:t0 [ ta0 ]
+      |> Work_store.apply_asks ~observed_at:t0 [ ask1 ]
+      |> Work_store.apply_planning ~observed_at:t0
+           { goals = [ goal2 ]; tasks = [] }
+    in
+    Model.rebuild_attention { base_with_ws with work }
+  in
+  (* Move cursor to row 1 (ask-1) *)
+  let m_p1, _ = step m_pulse (mk_key Keymap.Input.Down) in
+  Alcotest.(check bool) "Item 1: strip shows exact selected row 1 (ask-1)" true
+    (match Model.fast_approval_strip_item m_p1 with
+     | Some { payload = Attention.Payload_ask a; _ } -> String.equal a.ask_id "ask-1"
+     | _ -> false);
+  let m_p1_y, cmds_p1_y = step m_p1 (char_k ~shift:true "Y") in
+  Alcotest.(check bool) "Item 1: Y on selected ask-1 opens Ask_answer (never approves ta-0)"
+    true
+    (Option.equal Nav.equal_overlay m_p1_y.nav.overlay (Some Nav.Ask_answer)
+     && (match m_p1_y.ask_modal with
+         | Some am -> String.equal am.ask.ask_id "ask-1"
+         | None -> false)
+     && not
+          (has_cmd
+             (function
+               | Cmd.Http_post { req = Cmd.Post_tool_approval _; _ } -> true
+               | _ -> false)
+             cmds_p1_y));
+  let _, cmds_p1_n = step m_p1 (char_k ~shift:true "N") in
+  Alcotest.(check bool) "Item 1: N on selected ask-1 skips ask-1" true
+    (has_cmd
+       (function
+         | Cmd.Http_post { req = Cmd.Post_ask_answer { ask_id = "ask-1"; _ }; _ } -> true
+         | _ -> false)
+       cmds_p1_n);
+  let m_p1_enter, _ = step m_p1 (mk_key Keymap.Input.Enter) in
+  Alcotest.(check bool) "Item 1: Enter on selected ask-1 opens Ask_answer" true
+    (Option.equal Nav.equal_overlay m_p1_enter.nav.overlay (Some Nav.Ask_answer));
+  let m_p1_j, _ = step m_p1 (char_k ~shift:true "J") in
+  Alcotest.(check bool) "Item 1: J on selected ask-1 opens Ask_answer for ask-1" true
+    (Option.equal Nav.equal_overlay m_p1_j.nav.overlay (Some Nav.Ask_answer)
+     && match m_p1_j.ask_modal with
+        | Some am -> String.equal am.ask.ask_id "ask-1"
+        | None -> false);
+  (* Move cursor to row 2 (goal-2) *)
+  let m_p2, _ = step m_p1 (mk_key Keymap.Input.Down) in
+  let m_p2_y, _ = step m_p2 (char_k ~shift:true "Y") in
+  let m_p2_enter, _ = step m_p2 (mk_key Keymap.Input.Enter) in
+  let m_p2_j, _ = step m_p2 (char_k ~shift:true "J") in
+  List.iter
+    (fun (lbl, m_res) ->
+      Alcotest.(check bool) lbl true
+        (match Model.active_dive m_res with
+         | Some (Nav.Dive_work (Nav.Goal_dive "goal-2")) -> true
+         | _ -> false))
+    [
+      ("Item 1: Y on selected goal-2 pushes Goal_dive", m_p2_y);
+      ("Item 1: Enter on selected goal-2 pushes Goal_dive", m_p2_enter);
+      ("Item 1: J on selected goal-2 pushes Goal_dive", m_p2_j);
+    ];
+  (* Mark selected row 2 in-flight: Y must NOT silently jump to row 0 (ta-0)! *)
+  let m_p2_inflight =
+    {
+      m_p2 with
+      attention = Attention.mark_in_flight ~id:"goal:goal-2" m_p2.attention;
+    }
+  in
+  Alcotest.(check bool) "Item 1: in-flight selected row does not jump strip to row 0"
+    true
+    (Option.is_none (Model.fast_approval_strip_item m_p2_inflight));
+  let _, cmds_inflight_y = step m_p2_inflight (char_k ~shift:true "Y") in
+  Alcotest.(check int) "Item 1: Y on in-flight row 2 never approves row 0" 0
+    (List.length (Cmd.flatten cmds_inflight_y));
+
+  (* === 2. Chat Composer PgUp/PgDn scrolling with draft & cursor preserved === *)
+  let chat_msgs =
+    List.init 60 (fun i ->
+        {
+          Wire_fleet.id = Printf.sprintf "m-%d" i;
+          role = (if i mod 2 = 0 then Wire_fleet.Role_user else Wire_fleet.Role_assistant);
+          content = Printf.sprintf "Message line %d with enough text to wrap and scroll cleanly" i;
+          ts_unix = 1000.0 +. Float.of_int i;
+          turn_ref = None;
+          model_used = None;
+          tool_call_id = None;
+          tool_call_name = None;
+          execution_id = None;
+          provenance = None;
+          failure_kind = None;
+        })
+  in
+  let keeper_alpha : Wire_fleet.keeper_summary =
+    {
+      name = "alpha";
+      group = Some "core";
+      company = "core";
+      health = Wire_fleet.Keeper_healthy;
+      paused = false;
+      keepalive_running = true;
+      activation_mode = Wire_fleet.Activation_autonomous;
+      runtime_id = "glm";
+      model_id = Some "glm";
+      current_task_id = None;
+      context = Observed.unreported;
+      total_turns = Observed.value ~observed_at:t0 5;
+      last_turn_at_unix = None;
+      active_turn = None;
+    }
+  in
+  let fleet_chat =
+    Fleet_store.empty
+    |> Fleet_store.apply_roster ~observed_at:t0
+         { keepers = [ keeper_alpha ]; unreadable = [] }
+    |> Fleet_store.select_keeper "alpha"
+    |> Fleet_store.set_keeper_dive_tab Nav.Keeper_chat
+    |> Fleet_store.apply_chat_history ~observed_at:t0 ~keeper:"alpha"
+         { messages = chat_msgs; next_cursor = None; has_more = false }
+  in
+  let drafts_focused =
+    Drafts.empty
+    |> Drafts.set_active_keeper "alpha"
+    |> Drafts.set_focus true
+    |> Drafts.insert_text "hello draft"
+    |> Drafts.move_cursor `Left
+    |> Drafts.move_cursor `Left
+  in
+  let expected_cursor = (Drafts.current_draft drafts_focused).cursor in
+  let m_dive_chat =
+    {
+      base_with_ws with
+      nav =
+        {
+          base_with_ws.nav with
+          workspace = Nav.Keepers;
+          dive_stack = [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_chat } ];
+        };
+      fleet = fleet_chat;
+      drafts = drafts_focused;
+    }
+  in
+  let m_dc_up, _ = step m_dive_chat (mk_key Keymap.Input.Page_up) in
+  Alcotest.(check bool) "Item 2: Dive_keeper Chat PgUp scrolls while composer focused"
+    true
+    (m_dc_up.fleet.chat_scroll_offset > 0
+     && Drafts.is_focused m_dc_up.drafts
+     && String.equal (Drafts.current_draft m_dc_up.drafts).text "hello draft"
+     && Int.equal (Drafts.current_draft m_dc_up.drafts).cursor expected_cursor);
+  let m_dc_dn, _ = step m_dc_up (mk_key Keymap.Input.Page_down) in
+  Alcotest.(check bool) "Item 2: Dive_keeper Chat PgDn scrolls back down" true
+    (m_dc_dn.fleet.chat_scroll_offset < m_dc_up.fleet.chat_scroll_offset
+     && Drafts.is_focused m_dc_dn.drafts);
+  let m_split_chat =
+    {
+      base_with_ws with
+      nav = { base_with_ws.nav with workspace = Nav.Keepers; pane_index = 0 };
+      fleet = fleet_chat;
+      drafts = drafts_focused;
+    }
+  in
+  let m_sc_up, _ = step m_split_chat (mk_key Keymap.Input.Page_up) in
+  Alcotest.(check bool)
+    "Item 2: Keepers embedded split Chat PgUp scrolls even from pane 0 with draft intact"
+    true
+    (m_sc_up.fleet.chat_scroll_offset > 0
+     && Drafts.is_focused m_sc_up.drafts
+     && String.equal (Drafts.current_draft m_sc_up.drafts).text "hello draft"
+     && Int.equal (Drafts.current_draft m_sc_up.drafts).cursor expected_cursor);
+
+  (* === 3. Ctrl+Q 2-press armed confirmation guard === *)
+  let ctrl_q = char_k ~ctrl:true "q" in
+  let m_q1, cmds_q1 = step_at ~now:t0 base_with_ws ctrl_q in
+  Alcotest.(check bool) "Item 3: 1st Ctrl+Q arms quit and emits 0 Quit cmds" true
+    (Option.is_some m_q1.quit_armed_at
+     && Option.is_some m_q1.toast
+     && not (has_cmd (function Cmd.Quit _ -> true | _ -> false) cmds_q1));
+  let m_q2, cmds_q2 = step_at ~now:(Clock.Mono.after_s t0 1.0) m_q1 ctrl_q in
+  Alcotest.(check bool) "Item 3: 2nd Ctrl+Q within 2.5s quits cleanly" true
+    (Option.is_none m_q2.quit_armed_at
+     && has_cmd (function Cmd.Quit Exit_reason.Quit_key -> true | _ -> false) cmds_q2);
+  let m_q_tick, _ =
+    Update.step ~now:(Clock.Mono.after_s t0 3.0) m_q1
+      (Msg.Tick { wall_unix = 1000.0 })
+  in
+  Alcotest.(check bool) "Item 3: Tick past 2.5s disarms quit_armed_at" true
+    (Option.is_none m_q_tick.quit_armed_at);
+  let m_q_rearm, cmds_q_rearm =
+    step_at ~now:(Clock.Mono.after_s t0 3.1) m_q_tick ctrl_q
+  in
+  Alcotest.(check bool) "Item 3: Ctrl+Q after expiry re-arms instead of quitting" true
+    (Option.is_some m_q_rearm.quit_armed_at
+     && not (has_cmd (function Cmd.Quit _ -> true | _ -> false) cmds_q_rearm));
+  let m_p_arm, _ = step_at ~now:t0 m_pulse ctrl_q in
+  let m_q_cancel, _ =
+    step_at ~now:(Clock.Mono.after_s t0 0.4) m_p_arm (char_k "j")
+  in
+  Alcotest.(check bool)
+    "Item 3: non-Esc key 'j' disarms quit_armed_at, clears arm toast AND executes normal Move Down"
+    true
+    (Option.is_none m_q_cancel.quit_armed_at
+     && Option.is_none m_q_cancel.toast
+     && Int.equal m_q_cancel.attention.triage_index 1);
+  let m_comp_arm, _ = step_at ~now:t0 m_dive_chat ctrl_q in
+  let m_comp_typed, _ =
+    step_at ~now:(Clock.Mono.after_s t0 0.4) m_comp_arm (char_k "x")
+  in
+  Alcotest.(check bool)
+    "Item 3: typing 'x' in focused composer while quit-armed disarms AND inserts 'x'"
+    true
+    (Option.is_none m_comp_typed.quit_armed_at
+     && Option.is_none m_comp_typed.toast
+     && String.equal (Drafts.current_draft m_comp_typed.drafts).text
+          "hello draxft");
+
+  (* === 4. Esc dive pop restores exact return_pane & return_zoomed === *)
+  let m_from_p2 =
+    { base_with_ws with nav = { base_with_ws.nav with workspace = Nav.Pulse; pane_index = 2 } }
+  in
+  let m_dived_p2, _ =
+    Update_nav.push_dive m_from_p2 (Nav.Dive_knowledge (Nav.Thread_dive "p1"))
+  in
+  let m_popped_p2, _ = step m_dived_p2 (mk_key Keymap.Input.Escape) in
+  Alcotest.(check int) "Item 4: Esc restores exact Pulse pane_index=2" 2
+    m_popped_p2.nav.pane_index;
+  Alcotest.(check int) "Item 4: dive_return_stack stays synchronized" 0
+    (List.length m_popped_p2.nav.dive_return_stack);
+  let m_zoom_know =
+    {
+      base_with_ws with
+      nav =
+        {
+          base_with_ws.nav with
+          workspace = Nav.Knowledge;
+          pane_index = 1;
+          zoomed = true;
+        };
+    }
+  in
+  let m_z_dived, _ =
+    Update_nav.push_dive m_zoom_know (Nav.Dive_knowledge (Nav.Thread_dive "p1"))
+  in
+  let m_z_popped, _ = step m_z_dived (mk_key Keymap.Input.Escape) in
+  Alcotest.(check bool) "Item 4: Esc restores exact zoomed=true state" true
+    m_z_popped.nav.zoomed;
+  let m_sw, _ = Update_nav.switch_workspace m_z_dived Nav.Pulse in
+  Alcotest.(check bool) "Item 4: switch_workspace clears dive_return_stack" true
+    (m_sw.nav.dive_stack = [] && m_sw.nav.dive_return_stack = []);
+
+  (* === 6 & 7. Work > Goals phase filter/sort & Goal_dive 2-section Enter drill === *)
+  let mk_goal id phase priority updated_at =
+    { goal2 with id; title = "Goal " ^ id; phase; priority; updated_at = Some updated_at }
+  in
+  let g_exec = mk_goal "g-exec" Wire_work.Executing 2 "2026-01-01T00:00:00Z" in
+  let g_ver = mk_goal "g-ver" Wire_work.Verifying 1 "2026-01-03T00:00:00Z" in
+  let g_paused =
+    mk_goal "g-paused" (Wire_work.Paused Wire_work.Resume_executing) 3
+      "2026-01-02T00:00:00Z"
+  in
+  let g_done = mk_goal "g-done" Wire_work.Completed 4 "2026-01-04T00:00:00Z" in
+  let mk_task id gid status desc =
+    {
+      Wire_work.id;
+      title = "Task " ^ id;
+      description = Some desc;
+      status;
+      priority = 1;
+      goal_link = Wire_work.Linked gid;
+      created_at = None;
+      updated_at = None;
+    }
+  in
+  let long_desc =
+    String.concat "\n"
+      (List.init 65 (fun i -> Printf.sprintf "Description paragraph line %d with details." i))
+  in
+  let tk1 =
+    mk_task "tk-1" "g-exec"
+      (Wire_work.AwaitingVerification
+         {
+           assignee = "alpha";
+           started_at = "2026-01-01T00:00:00Z";
+           submitted_at = "2026-01-01T01:00:00Z";
+           verification_id = "ver-1";
+         })
+      long_desc
+  in
+  let tk2 =
+    mk_task "tk-2" "g-exec"
+      (Wire_work.Done
+         {
+           assignee = "alpha";
+           completed_at = "2026-01-01T02:00:00Z";
+           notes = None;
+         })
+      "Short"
+  in
+  let mk_verif req_id task_id obs =
+    {
+      Wire_work.request_id = req_id;
+      task_id;
+      task_title = "Task " ^ task_id;
+      submitted_by = "alpha";
+      created_at_unix = Some 1000.0;
+      completion_contract = [ "check-1" ];
+      required_artifacts = [ "art-1" ];
+      submitted_evidence = [ "ev-1" ];
+      evidence_projection_error = None;
+      review_observation = obs;
+    }
+  in
+  let v1 = mk_verif "ver-1" "tk-1" None in
+  let v2 =
+    mk_verif "ver-2" "tk-2"
+      (Some
+         {
+           Wire_work.state = Wire_work.Review_approved;
+           actor = "verifier";
+           detail = "looks good";
+         })
+  in
+  let m_work =
+    let work =
+      base_with_ws.work
+      |> Work_store.set_tab Nav.Work_pipeline
+      |> Work_store.apply_planning ~observed_at:t0
+           { goals = [ g_exec; g_ver; g_paused; g_done ]; tasks = [ tk1; tk2 ] }
+      |> Work_store.apply_verifications ~observed_at:t0 [ v1; v2 ]
+    in
+    { base_with_ws with nav = { base_with_ws.nav with workspace = Nav.Work }; work }
+  in
+  (* Item 6: Space cycles phase filter (0 POSTs) and Esc resets to All *)
+  let m_f1, cmds_f1 = step m_work (char_k " ") in
+  Alcotest.(check bool) "Item 6: Space filters to Active (Executing only, 0 POSTs)" true
+    (Work_store.equal_goal_phase_filter m_f1.work.goal_phase_filter
+       Work_store.Goal_filter_active
+     && List.length (Work_store.filtered_goals m_f1.work) = 1
+     && List.length (Cmd.flatten cmds_f1) = 0);
+  let m_f2, _ = step m_f1 (char_k " ") in
+  Alcotest.(check bool) "Item 6: 2nd Space filters to Verifying" true
+    (Work_store.equal_goal_phase_filter m_f2.work.goal_phase_filter
+       Work_store.Goal_filter_verifying
+     && List.length (Work_store.filtered_goals m_f2.work) = 1);
+  let m_f_esc, _ = step m_f2 (mk_key Keymap.Input.Escape) in
+  Alcotest.(check bool) "Item 6: Esc resets non-All goal filter back to All" true
+    (Work_store.equal_goal_phase_filter m_f_esc.work.goal_phase_filter
+       Work_store.Goal_filter_all
+     && List.length (Work_store.filtered_goals m_f_esc.work) = 4);
+  (* Item 6: S cycles sort Default -> Phase -> Progress -> Recent -> Default *)
+  let m_s1, _ = step m_work (char_k ~shift:true "S") in
+  let m_s2, _ = step m_s1 (char_k ~shift:true "S") in
+  let m_s3, _ = step m_s2 (char_k ~shift:true "S") in
+  Alcotest.(check bool) "Item 6: S cycles Goal sort Default -> Phase -> Progress -> Recent" true
+    (Work_store.equal_goal_sort_mode m_work.work.goal_sort_mode
+       Work_store.Goal_sort_default
+     && Work_store.equal_goal_sort_mode m_s1.work.goal_sort_mode
+          Work_store.Goal_sort_phase
+     && (match Work_store.filtered_goals m_s1.work with
+        | first :: _ -> String.equal first.id "g-ver"
+        | [] -> false)
+     && Work_store.equal_goal_sort_mode m_s2.work.goal_sort_mode
+          Work_store.Goal_sort_progress
+     && Work_store.equal_goal_sort_mode m_s3.work.goal_sort_mode
+          Work_store.Goal_sort_recent
+     && match Work_store.filtered_goals m_s3.work with
+        | first :: _ -> String.equal first.id "g-done"
+        | [] -> false);
+
+  (* Item 7: Goal_dive 2 sections (Linked Tasks & Verifier Runs) + Enter drill *)
+  let m_gd, _ = Update_nav.push_dive m_work (Nav.Dive_work (Nav.Goal_dive "g-exec")) in
+  Alcotest.(check int) "Item 7: Goal_dive has 2 focusable panes" 2
+    (Model.focusable_pane_count m_gd);
+  let m_gd_down, _ = step m_gd (mk_key Keymap.Input.Down) in
+  Alcotest.(check int) "Item 7: Goal_dive pane 0 Down moves task cursor to 1" 1
+    m_gd_down.work.goal_dive_task_index;
+  let m_gd_td, _ = step m_gd_down (mk_key Keymap.Input.Enter) in
+  Alcotest.(check bool) "Item 7: Goal_dive pane 0 Enter pushes Task_dive tk-2" true
+    (match Model.active_dive m_gd_td with
+     | Some (Nav.Dive_work (Nav.Task_dive "tk-2")) -> true
+     | _ -> false);
+  let m_gd_tab, _ = step m_gd (mk_key Keymap.Input.Tab) in
+  Alcotest.(check int) "Item 7: Goal_dive Tab focuses pane 1 (Verifier Runs)" 1
+    m_gd_tab.nav.pane_index;
+  let m_gd_vdown, _ = step m_gd_tab (mk_key Keymap.Input.Down) in
+  Alcotest.(check int) "Item 7: Goal_dive pane 1 Down selects 2nd verifier run" 1
+    m_gd_vdown.work.goal_dive_verif_index;
+  let m_gd_vd, _ = step m_gd_vdown (mk_key Keymap.Input.Enter) in
+  Alcotest.(check bool) "Item 7: Goal_dive pane 1 Enter pushes Verification_dive ver-2"
+    true
+    (match Model.active_dive m_gd_vd with
+     | Some (Nav.Dive_work (Nav.Verification_dive "ver-2")) -> true
+     | _ -> false);
+  let m_gd_back, _ = step m_gd_vd (mk_key Keymap.Input.Escape) in
+  Alcotest.(check int) "Item 4+7: Esc from nested Verification_dive restores Goal_dive pane 1"
+    1 m_gd_back.nav.pane_index;
+
+  (* === 8. Harness_overrule auto-seed + missing-hash block + Schedule_form prefill === *)
+  let hash64 =
+    "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+  in
+  let m_gd_nohh_h, _ = step m_gd (char_k "h") in
+  Alcotest.(check bool) "Item 8: Goal_dive [h] without harness verdict warns, no empty modal"
+    true
+    (Option.is_none m_gd_nohh_h.nav.overlay && Option.is_some m_gd_nohh_h.toast);
+  let hh_linked : Wire_work.harness_health =
+    {
+      generated_at = 1795254000.0;
+      scope_note = "last 7d";
+      evaluator_status = "healthy";
+      fallback_ratio = 0.0;
+      last_signal_at = Some 1795253900.0;
+      calibration =
+        {
+          total_verdicts = 1;
+          approve_count = 1;
+          reject_count = 0;
+          labeled_count = 1;
+          false_positive_count = 0;
+          false_negative_count = 0;
+          agreement_rate = 1.0;
+          fallback_count = 0;
+          distinct_runtime_count = 1;
+          verdicts_with_generator_runtime = 1;
+          distinct_runtime_rate = Some 1.0;
+          recent_fallback_reasons = [];
+          unreadable_record_count = 0;
+        };
+      recent_verdicts =
+        [
+          {
+            timestamp = 1700000000.0;
+            task_id = "tk-1";
+            task_title = "Task tk-1";
+            agent_name = "alpha";
+            gate = "completion";
+            verdict = "approve";
+            evaluator_runtime = "glm";
+            fallback_reason = None;
+            notes_hash = hash64;
+          };
+        ];
+      unreadable_verdicts_count = 0;
+    }
+  in
+  let m_gd_hh =
+    { m_gd with work = Work_store.apply_harness_health ~observed_at:t0 hh_linked m_gd.work }
+  in
+  let m_gd_hh_h, _ = step m_gd_hh (char_k "h") in
+  Alcotest.(check bool)
+    "Item 8: Goal_dive [h] auto-seeds linked 64-hex hash and starts on reason (field 2)"
+    true
+    (Option.equal Nav.equal_overlay m_gd_hh_h.nav.overlay
+       (Some (Nav.Inline_action (Nav.Harness_overrule hash64)))
+     && match m_gd_hh_h.inline_modal with
+        | Some md -> md.active_field = 2
+        | None -> false);
+  let m_sched_tab =
+    {
+      m_work with
+      work = Work_store.set_tab Nav.Work_schedules m_work.work;
+      drafts = Drafts.set_active_keeper "alpha" m_work.drafts;
+    }
+  in
+  let m_sched_modal, _ = step m_sched_tab (char_k "n") in
+  Alcotest.(check bool) "Item 8: Schedule_form pre-fills active keeper and jumps to field 2"
+    true
+    (match m_sched_modal.inline_modal with
+     | Some md ->
+         String.equal (Model.modal_field_value ~key:"keeper" md) "alpha"
+         && md.active_field = 2
+     | None -> false);
+
+  (* === 9. Eliminate 'a'/'x' HTTP 400 + Goal_drop note modal + error extraction === *)
+  (* 9a. Already-approved verification 'a' and 'x' emit 0 HTTP POSTs *)
+  let m_vd_done, _ =
+    Update_nav.push_dive m_work (Nav.Dive_work (Nav.Verification_dive "ver-2"))
+  in
+  let m_vd_done_a, cmds_vda = step m_vd_done (char_k "a") in
+  let m_vd_done_x, cmds_vdx = step m_vd_done (char_k "x") in
+  Alcotest.(check bool) "Item 9: 'a' on approved verification blocked locally (0 POSTs)"
+    true
+    (Option.is_some m_vd_done_a.toast && List.length (Cmd.flatten cmds_vda) = 0);
+  Alcotest.(check bool) "Item 9: 'x' on approved verification blocked locally (no modal)"
+    true
+    (Option.is_none m_vd_done_x.nav.overlay && List.length (Cmd.flatten cmds_vdx) = 0);
+  (* 9b. Goal 'c' on Paused / Completed emits 0 POSTs *)
+  let m_gd_paused, _ =
+    Update_nav.push_dive m_work (Nav.Dive_work (Nav.Goal_dive "g-paused"))
+  in
+  let m_gp_c, cmds_gpc = step m_gd_paused (char_k "c") in
+  Alcotest.(check bool) "Item 9: 'c' on Paused goal blocked locally (0 POSTs)" true
+    (Option.is_some m_gp_c.toast && List.length (Cmd.flatten cmds_gpc) = 0);
+  (* 9c. Goal 'x' on Paused opens Goal_drop modal and submits non-empty note *)
+  let m_gp_x, cmds_gpx = step m_gd_paused (char_k "x") in
+  Alcotest.(check bool) "Item 9: 'x' on Paused goal opens Goal_drop modal (0 immediate POSTs)"
+    true
+    (Option.equal Nav.equal_overlay m_gp_x.nav.overlay
+       (Some (Nav.Inline_action (Nav.Goal_drop "g-paused")))
+     && List.length (Cmd.flatten cmds_gpx) = 0);
+  let m_gp_empty_err, cmds_gp_empty = step m_gp_x (mk_key Keymap.Input.Enter) in
+  Alcotest.(check bool) "Item 9: Goal_drop refuses blank note" true
+    (List.length (Cmd.flatten cmds_gp_empty) = 0
+     && match m_gp_empty_err.inline_modal with
+        | Some md -> Option.is_some md.error
+        | None -> false);
+  let m_gp_typed =
+    String.fold_left
+      (fun acc ch -> fst (step acc (char_k (String.make 1 ch))))
+      m_gp_x "obsolete"
+  in
+  let m_gp_sub, cmds_gp_ok = step m_gp_typed (mk_key Keymap.Input.Enter) in
+  Alcotest.(check bool) "Item 9: Goal_drop submit sends Drop with non-empty note" true
+    (has_cmd
+       (function
+         | Cmd.Http_post
+             {
+               req =
+                 Cmd.Post_goal_transition
+                   {
+                     goal_id = "g-paused";
+                     action = Wire_work.Drop;
+                     note = Some "obsolete";
+                     _;
+                   };
+               _;
+             } ->
+             true
+         | _ -> false)
+       cmds_gp_ok);
+  Alcotest.(check bool) "Item 9 (Finding #10): Goal_drop marks submitting while in flight" true
+    (match m_gp_sub.inline_modal with
+     | Some md -> md.submitting && String.equal (Model.modal_field_value ~key:"note" md) "obsolete"
+     | None -> false);
+  let m_gp_err, _ =
+    Update.step ~now:t0 m_gp_sub
+      (Msg.Http_reply
+         {
+           epoch = m_gp_sub.epoch;
+           reply =
+             Msg.Reply_action_ack
+               {
+                 label = Say.make ~ko:"목표 상태 변경됨" ~en:"Goal transitioned";
+                 ack_scope = Msg.Ack_close_modal_and_refresh;
+                 for_modal = Some (Nav.Goal_drop "g-paused");
+                 result =
+                   Error
+                     (Msg.Http_error
+                        { status = 400; body = {|{"error":"conflict"}|}; api_error = None });
+               };
+         })
+  in
+  Alcotest.(check bool)
+    "Item 9 (Finding #10): Goal_drop Error preserves typed note and surfaces error"
+    true
+    (match m_gp_err.inline_modal with
+     | Some md ->
+         (not md.submitting)
+         && Option.is_some md.error
+         && String.equal (Model.modal_field_value ~key:"note" md) "obsolete"
+     | None -> false);
+  let m_gp_closed, _ =
+    Update.step ~now:t0 m_gp_sub
+      (Msg.Http_reply
+         {
+           epoch = m_gp_sub.epoch;
+           reply =
+             Msg.Reply_action_ack
+               {
+                 label = Say.make ~ko:"목표 상태 변경됨" ~en:"Goal transitioned";
+                 ack_scope = Msg.Ack_close_modal_and_refresh;
+                 for_modal = Some (Nav.Goal_drop "g-paused");
+                 result = Ok ();
+               };
+         })
+  in
+  Alcotest.(check bool) "Item 9 (Finding #10): Goal_drop Ok closes modal cleanly" true
+    (Option.is_none m_gp_closed.inline_modal && Option.is_none m_gp_closed.nav.overlay);
+  (* 9d. HTTP 400 JSON error extraction (plain + nested tool_result JSON + UTF-8 Korean) *)
+  let sum_plain =
+    Say.resolve Say.Lang_en
+      (Msg.http_error_summary
+         (Msg.Http_error
+            {
+              status = 400;
+              body = {|{"ok":false,"error":"task is not awaiting verification"}|};
+              api_error = None;
+            }))
+  in
+  Alcotest.(check string) "Item 9: extracts {\"error\":\"...\"} from HTTP 400"
+    "HTTP 400: task is not awaiting verification" sum_plain;
+  let sum_nested =
+    Say.resolve Say.Lang_en
+      (Msg.http_error_summary
+         (Msg.Http_error
+            {
+              status = 400;
+              body =
+                {|{"ok":false,"message":"{\"error_code\":\"validation_error\",\"message\":\"drop needs a note\"}"}|};
+              api_error = None;
+            }))
+  in
+  Alcotest.(check string) "Item 9: unwraps nested tool_result JSON error message"
+    "HTTP 400: drop needs a note" sum_nested;
+  let long_ko_err =
+    String.concat " "
+      (List.init 15 (fun _ -> "검증요청상태오류확인필요"))
+  in
+  let sum_ko =
+    Say.resolve Say.Lang_ko
+      (Msg.http_error_summary
+         (Msg.Http_error
+            {
+              status = 400;
+              body = Printf.sprintf {|{"ok":false,"error":"%s"}|} long_ko_err;
+              api_error = None;
+            }))
+  in
+  Alcotest.(check bool)
+    "Item 9 (Finding #11): long Korean error truncates cleanly with valid UTF-8"
+    true
+    (String.is_valid_utf_8 sum_ko
+     && Masc_tui_term.Grapheme.display_width sum_ko <= 160
+     && Store_scroll.contains_ci ~needle:"검증요청상태오류" sum_ko);
+  (* 9e. Finding #6: Review_failed + AwaitingVerification allows human recovery *)
+  let tk_fail =
+    mk_task "tk-fail" "g-exec"
+      (Wire_work.AwaitingVerification
+         {
+           assignee = "alpha";
+           started_at = "2026-01-01T00:00:00Z";
+           submitted_at = "2026-01-01T01:00:00Z";
+           verification_id = "ver-fail";
+         })
+      "Needs human recovery"
+  in
+  let v_fail =
+    mk_verif "ver-fail" "tk-fail"
+      (Some
+         {
+           Wire_work.state = Wire_work.Review_failed;
+           actor = "verifier";
+           detail = "harness crashed";
+         })
+  in
+  let m_vfail =
+    let work =
+      m_work.work
+      |> Work_store.apply_planning ~observed_at:t0
+           { goals = [ g_exec ]; tasks = [ tk_fail ] }
+      |> Work_store.apply_verifications ~observed_at:t0 [ v_fail ]
+    in
+    let m0 = { m_work with work } in
+    fst (Update_nav.push_dive m0 (Nav.Dive_work (Nav.Verification_dive "ver-fail")))
+  in
+  Alcotest.(check bool)
+    "Item 9 (Finding #6): Review_failed + AwaitingVerification passes precondition"
+    true
+    (Result.is_ok (Update_nav.check_verification_verdict_precondition m_vfail v_fail));
+  let _, cmds_vfail_a = step m_vfail (char_k "a") in
+  Alcotest.(check bool)
+    "Item 9 (Finding #6): 'a' approves Review_failed task still in AwaitingVerification"
+    true
+    (has_cmd
+       (function
+         | Cmd.Http_post
+             { req = Cmd.Post_verification_verdict { verification_id = "ver-fail"; _ }; _ } ->
+             true
+         | _ -> false)
+       cmds_vfail_a);
+  (* 9f. Finding #8: Goal_dive [h] prioritizes selected task's hash over first task *)
+  let hash_tk1 =
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  in
+  let hash_tk2 =
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  in
+  let mk_hv tid h : Wire_work.harness_verdict_row =
+    {
+      timestamp = 1000.0;
+      task_id = tid;
+      task_title = "Title " ^ tid;
+      agent_name = "alpha";
+      gate = "harness";
+      verdict = "reject";
+      evaluator_runtime = "claude";
+      fallback_reason = None;
+      notes_hash = h;
+    }
+  in
+  let hh_two : Wire_work.harness_health =
+    {
+      generated_at = 1000.0;
+      scope_note = "test";
+      evaluator_status = "healthy";
+      fallback_ratio = 0.0;
+      last_signal_at = None;
+      calibration =
+        {
+          total_verdicts = 2;
+          approve_count = 0;
+          reject_count = 2;
+          labeled_count = 0;
+          false_positive_count = 0;
+          false_negative_count = 0;
+          agreement_rate = 1.0;
+          fallback_count = 0;
+          distinct_runtime_count = 1;
+          verdicts_with_generator_runtime = 2;
+          distinct_runtime_rate = Some 1.0;
+          recent_fallback_reasons = [];
+          unreadable_record_count = 0;
+        };
+      recent_verdicts = [ mk_hv "tk-1" hash_tk1; mk_hv "tk-2" hash_tk2 ];
+      unreadable_verdicts_count = 0;
+    }
+  in
+  let m_gd_two =
+    let m0 =
+      {
+        m_work with
+        work = Work_store.apply_harness_health ~observed_at:t0 hh_two m_work.work;
+      }
+    in
+    let m1, _ = Update_nav.push_dive m0 (Nav.Dive_work (Nav.Goal_dive "g-exec")) in
+    fst (step m1 (mk_key Keymap.Input.Down))
+  in
+  let m_gd_two_h, _ = step m_gd_two (char_k "h") in
+  Alcotest.(check string)
+    "Item 8 (Finding #8): Goal_dive [h] on selected tk-2 seeds tk-2's hash (not tk-1)"
+    hash_tk2
+    (match m_gd_two_h.inline_modal with
+     | Some md -> Model.modal_field_value ~key:"notes_hash" md
+     | None -> "");
+  Alcotest.(check (option string))
+    "P3: open_harness_overrule_for_context focuses 'reason' field dynamically"
+    (Some "reason")
+    (match m_gd_two_h.inline_modal with
+     | Some md ->
+         Option.map
+           (fun (f : Model.modal_form_field) -> f.key)
+           (List.nth_opt md.fields md.active_field)
+     | None -> None);
+  (* 9g. Finding #7: Goal_dive Raw JSON scrolls json_scroll_offset on wide & <88 cols *)
+  let m_gd_json =
+    let m1, _ = Update_nav.push_dive m_work (Nav.Dive_work (Nav.Goal_dive "g-exec")) in
+    {
+      m1 with
+      viewport = { Model.cols = 140; rows = 16 };
+      infra = { m1.infra with show_raw_json = true };
+    }
+  in
+  Alcotest.(check int) "Item 7 (Finding #7): Goal_dive wide + Raw JSON has 3 panes" 3
+    (Model.focusable_pane_count m_gd_json);
+  let m_gd_j2 = { m_gd_json with nav = { m_gd_json.nav with pane_index = 2 } } in
+  let m_gd_j2_dn, _ = step m_gd_j2 (mk_key Keymap.Input.Down) in
+  Alcotest.(check bool)
+    "Item 7 (Finding #7): Goal_dive pane 2 Down scrolls json_scroll_offset without moving task cursor"
+    true
+    (m_gd_j2_dn.nav.json_scroll_offset > 0
+     && m_gd_j2_dn.work.goal_dive_task_index = 0);
+  let m_gd_narrow_json =
+    {
+      m_gd_json with
+      viewport = { Model.cols = 80; rows = 13 };
+      breakpoint = Model.Compact;
+      nav = { m_gd_json.nav with pane_index = 0 };
+    }
+  in
+  let m_gd_nj_dn, _ = step m_gd_narrow_json (mk_key Keymap.Input.Down) in
+  Alcotest.(check bool)
+    "Item 7 (Finding #7): Goal_dive <88 cols Raw JSON scrolls JSON and leaves task cursor at 0"
+    true
+    (Model.focusable_pane_count m_gd_narrow_json = 1
+     && m_gd_nj_dn.nav.json_scroll_offset > 0
+     && m_gd_nj_dn.work.goal_dive_task_index = 0);
+
+  (* === 10. Task_dive independent Description & Verification scroll + Enter === *)
+  let m_td1, _ = Update_nav.push_dive m_work (Nav.Dive_work (Nav.Task_dive "tk-1")) in
+  Alcotest.(check int) "Item 10: Task_dive with linked verification has 2 panes" 2
+    (Model.focusable_pane_count m_td1);
+  let desc_max, _ = Update_nav.task_dive_scroll_bounds m_td1 tk1 in
+  Alcotest.(check bool) "Item 10: long Description yields positive desc_max" true
+    (desc_max > 0);
+  let m_td1_dn, _ = step m_td1 (mk_key Keymap.Input.Page_down) in
+  Alcotest.(check bool) "Item 10: PgDn on pane 0 scrolls task_dive_desc_scroll independently"
+    true
+    (m_td1_dn.work.task_dive_desc_scroll > 0
+     && m_td1_dn.work.task_dive_verif_scroll = 0);
+  let m_td1_p1, _ = step m_td1_dn (mk_key Keymap.Input.Tab) in
+  Alcotest.(check int) "Item 10: Tab focuses Task_dive pane 1 (Verification)" 1
+    m_td1_p1.nav.pane_index;
+  let m_td1_enter, _ = step m_td1_p1 (mk_key Keymap.Input.Enter) in
+  Alcotest.(check bool) "Item 10: Enter on Task_dive pane 1 pushes Verification_dive"
+    true
+    (match Model.active_dive m_td1_enter with
+     | Some (Nav.Dive_work (Nav.Verification_dive "ver-1")) -> true
+     | _ -> false);
+
+  (* === 11. Knowledge > Board pane 1 unified comment PgDn scroll & thread fetch === *)
+  let mk_post id title body =
+    {
+      Wire_knowledge.id;
+      title;
+      body;
+      author = "alpha";
+      hearth = Some "general";
+      visibility = None;
+      post_kind = Some Wire_knowledge.Human_post;
+      score = 5;
+      comment_count = 20;
+      author_karma = Observed.unreported;
+      created_at_unix = 1000.0;
+      updated_at_unix = None;
+      is_signal = true;
+      succession_chain_root_id = None;
+      chain_depth = None;
+    }
+  in
+  let post1 = mk_post "post-1" "Short Post" "Short two-line body.\nLine 2." in
+  let post2 = mk_post "post-2" "Second Post" "Another post body." in
+  let many_comments =
+    List.init 20 (fun i ->
+        {
+          Wire_knowledge.id = Printf.sprintf "c-%d" i;
+          post_id = "post-1";
+          parent_id = None;
+          author = "beta";
+          body = Printf.sprintf "Comment #%d discussing details." i;
+          score = 1;
+          created_at_unix = 1100.0 +. Float.of_int i;
+        })
+  in
+  let m_board =
+    let k0 =
+      Knowledge_store.empty |> Knowledge_store.set_tab Nav.Knowledge_board
+    in
+    let knowledge =
+      {
+        k0 with
+        board =
+          Observed.value ~observed_at:t0
+            {
+              Wire_knowledge.posts = [ post1; post2 ];
+              count = 2;
+              sort_by = "recent";
+              signal_only = true;
+            };
+        active_thread = Observed.value ~observed_at:t0 (post1, many_comments);
+      }
+    in
+    {
+      base_with_ws with
+      nav = { base_with_ws.nav with workspace = Nav.Knowledge; pane_index = 0 };
+      knowledge;
+    }
+  in
+  let m_board_p1, _ = step m_board (mk_key Keymap.Input.Right) in
+  Alcotest.(check int) "Item 11: Right focuses Knowledge > Board detail pane 1" 1
+    m_board_p1.nav.pane_index;
+  let m_board_pgdn, _ = step m_board_p1 (mk_key Keymap.Input.Page_down) in
+  Alcotest.(check bool)
+    "Item 11: PgDn on Knowledge > Board pane 1 scrolls comments even with short post body"
+    true
+    (m_board_pgdn.knowledge.detail_scroll_offset > 0);
+  let _, cmds_sel_next = step m_board (mk_key Keymap.Input.Down) in
+  Alcotest.(check bool)
+    "Item 11: Moving Knowledge > Board pane 0 selection fetches Get_board_thread for post-2"
+    true
+    (has_cmd
+       (function
+         | Cmd.Http_get { req = Cmd.Get_board_thread { post_id = "post-2"; _ }; _ } -> true
+         | _ -> false)
+       cmds_sel_next);
+
+  (* === Verifier Findings #1, #2, #4, #5, #9 extra regression coverage === *)
+  (* Finding #1: Composer focused PgUp/PgDn never leaks into non-chat views *)
+  let m_comp_nonchat =
+    let m0 =
+      {
+        m_board with
+        drafts =
+          m_board.drafts
+          |> Drafts.set_active_keeper "alpha"
+          |> Drafts.set_focus true
+          |> Drafts.insert_text "keep me";
+      }
+    in
+    m0
+  in
+  let m_comp_nc_dn, cmds_nc_dn = step m_comp_nonchat (mk_key Keymap.Input.Page_down) in
+  Alcotest.(check bool)
+    "Finding #1: Composer PgDn on Knowledge > Board never moves selection or fires fetches"
+    true
+    (m_comp_nc_dn.knowledge.selected_index = 0
+     && List.length (Cmd.flatten cmds_nc_dn) = 0
+     && Drafts.is_focused m_comp_nc_dn.drafts
+     && String.equal (Drafts.current_draft m_comp_nc_dn.drafts).text "keep me");
+  let m_comp_compact_k =
+    {
+      m_split_chat with
+      viewport = { Model.cols = 90; rows = 28 };
+      breakpoint = Model.Compact;
+      nav = { m_split_chat.nav with workspace = Nav.Keepers; dive_stack = []; zoomed = false };
+      fleet = { m_split_chat.fleet with keeper_dive_tab = Nav.Keeper_chat; chat_scroll_offset = 0 };
+      drafts = m_split_chat.drafts |> Drafts.set_focus true;
+    }
+  in
+  let m_comp_ck_up, cmds_ck_up = step m_comp_compact_k (mk_key Keymap.Input.Page_up) in
+  Alcotest.(check bool)
+    "Finding #1: Compact unzoomed Keepers > Chat (1 pane) PgUp never scrolls hidden chat"
+    true
+    (m_comp_ck_up.fleet.chat_scroll_offset = 0 && List.length (Cmd.flatten cmds_ck_up) = 0);
+
+  (* Finding #2: Reply_board_feed auto-fetches selected post; non-retryable 404 prevents refetch *)
+  let m_board_cold =
+    {
+      base_with_ws with
+      nav = { base_with_ws.nav with workspace = Nav.Knowledge; pane_index = 0 };
+      knowledge = Knowledge_store.empty |> Knowledge_store.set_tab Nav.Knowledge_board;
+    }
+  in
+  let m_board_loaded, cmds_cold =
+    Update.step ~now:t0 m_board_cold
+      (Msg.Http_reply
+         {
+           epoch = m_board_cold.epoch;
+           reply =
+             Msg.Reply_board_feed
+               (Ok
+                  {
+                    Wire_knowledge.posts = [ post1; post2 ];
+                    count = 2;
+                    sort_by = "recent";
+                    signal_only = true;
+                  });
+         })
+  in
+  Alcotest.(check bool)
+    "Finding #2: Reply_board_feed (Ok _) emits Get_board_thread for initial post-1"
+    true
+    (has_cmd
+       (function
+         | Cmd.Http_get { req = Cmd.Get_board_thread { post_id = "post-1"; _ }; _ } -> true
+         | _ -> false)
+       cmds_cold);
+  let m_board_404, _ =
+    Update.step ~now:t0 m_board_loaded
+      (Msg.Http_reply
+         {
+           epoch = m_board_loaded.epoch;
+           reply =
+             Msg.Reply_board_thread
+               {
+                 post_id = "post-1";
+                 result =
+                   Error
+                     (Msg.Http_error
+                        { status = 404; body = {|{"error":"not found"}|}; api_error = None });
+               };
+         })
+  in
+  let fetches_after_404 = View_fetches.fetches_for_current_view m_board_404 in
+  let _, cmds_boundary_up = step m_board_404 (mk_key Keymap.Input.Up) in
+  let is_thread_get = function
+    | Cmd.Http_get { req = Cmd.Get_board_thread { post_id = "post-1"; _ }; _ } -> true
+    | _ -> false
+  in
+  Alcotest.(check bool)
+    "Finding #2: non-retryable 404 sets active_thread_target and blocks refetch loops"
+    true
+    (Option.equal String.equal m_board_404.knowledge.active_thread_target (Some "post-1")
+     && (not (has_cmd is_thread_get fetches_after_404))
+     && not (has_cmd is_thread_get cmds_boundary_up));
+
+  (* Finding #4: Esc consumes quit arm & clears arm toast without popping active dive *)
+  let m_dive_arm0, _ = Update_nav.push_dive m_work (Nav.Dive_work (Nav.Goal_dive "g-exec")) in
+  let m_dive_arm1, _ = step_at ~now:t0 m_dive_arm0 (char_k ~ctrl:true "q") in
+  let m_dive_esc, _ = step_at ~now:t0 m_dive_arm1 (mk_key Keymap.Input.Escape) in
+  Alcotest.(check bool)
+    "Finding #4: Esc disarms Ctrl+Q and clears arm toast without popping Goal_dive"
+    true
+    (Option.is_none m_dive_esc.quit_armed_at
+     && Option.is_none m_dive_esc.toast
+     && match Model.active_dive m_dive_esc with
+        | Some (Nav.Dive_work (Nav.Goal_dive "g-exec")) -> true
+        | _ -> false);
+
+  (* Finding #5: advance_past_in_flight ~query honors Work_inbox filter & Ask skip advances *)
+  let m_skip_next, _ = step m_p1 (char_k ~shift:true "N") in
+  Alcotest.(check bool)
+    "Finding #5: Ask skip (N) advances triage_index past in-flight Ask so strip stays live"
+    true
+    (Option.is_some (Model.fast_approval_strip_item m_skip_next));
+
+  (* Finding #9: Task_dive pane 1 PgDn + description=None single-pane Verification *)
+  let many_reqs = List.init 30 (fun i -> Printf.sprintf "required-artifact-%02d" i) in
+  let v1_big = { v1 with required_artifacts = many_reqs } in
+  let tk_nodesc : Wire_work.task =
+    { tk1 with id = "tk-nodesc"; description = None }
+  in
+  let v_nodesc = { v1_big with request_id = "ver-nodesc"; task_id = "tk-nodesc" } in
+  let m_td_big =
+    let work =
+      m_work.work
+      |> Work_store.apply_planning ~observed_at:t0
+           { goals = [ g_exec ]; tasks = [ tk1; tk_nodesc ] }
+      |> Work_store.apply_verifications ~observed_at:t0 [ v1_big; v_nodesc ]
+    in
+    { m_work with work }
+  in
+  let m_td_v2, _ = Update_nav.push_dive m_td_big (Nav.Dive_work (Nav.Task_dive "tk-1")) in
+  let m_td_v2_p1, _ = step m_td_v2 (mk_key Keymap.Input.Tab) in
+  let m_td_v2_pgdn, _ = step m_td_v2_p1 (mk_key Keymap.Input.Page_down) in
+  Alcotest.(check bool)
+    "Finding #9: Task_dive pane 1 PgDn increments task_dive_verif_scroll"
+    true
+    (m_td_v2_pgdn.work.task_dive_verif_scroll > 0);
+  let m_td_nd, _ =
+    Update_nav.push_dive m_td_big (Nav.Dive_work (Nav.Task_dive "tk-nodesc"))
+  in
+  let m_td_nd_dn, _ = step m_td_nd (mk_key Keymap.Input.Page_down) in
+  let m_td_nd_enter, _ = step m_td_nd (mk_key Keymap.Input.Enter) in
+  Alcotest.(check bool)
+    "Finding #9: Task_dive description=None + v_opt=Some has 1 pane, scrolls verif & Enter dives"
+    true
+    (Model.focusable_pane_count m_td_nd = 1
+     && m_td_nd_dn.work.task_dive_verif_scroll > 0
+     && match Model.active_dive m_td_nd_enter with
+        | Some (Nav.Dive_work (Nav.Verification_dive "ver-nodesc")) -> true
+        | _ -> false);
+
+  (* Round-2 Verifier Fixes (#496 / #497 / #498):
+     1. Space Raw JSON clamp at 80x24 from pane_index = 1 in Goal_dive & 2-pane Task_dive
+     2. Filtered Work > Inbox Gate_reject advance_past_in_flight
+     3. Expired quit_armed_at (>2.5s) does NOT swallow Esc *)
+  let m_gd_80 =
+    let m1, _ = Update_nav.push_dive m_work (Nav.Dive_work (Nav.Goal_dive "g-exec")) in
+    {
+      m1 with
+      viewport = { Model.cols = 80; rows = 24 };
+      breakpoint = Model.Compact;
+      nav = { m1.nav with sidebar_open = Some false };
+    }
+  in
+  let m_gd_80_p1, _ = step m_gd_80 (mk_key Keymap.Input.Tab) in
+  let m_gd_80_sp, _ = step m_gd_80_p1 (char_k " ") in
+  let m_gd_80_dn, _ = step m_gd_80_sp (mk_key Keymap.Input.Down) in
+  let m_gd_80_ent, _ = step m_gd_80_sp (mk_key Keymap.Input.Enter) in
+  Alcotest.(check bool)
+    "Round-2 #497 P1: Goal_dive 80x24 Tab -> Space clamps pane_index=0, leaves hidden verif untouched & Enter stays in Goal_dive"
+    true
+    (m_gd_80_p1.nav.pane_index = 1
+     && m_gd_80_sp.infra.show_raw_json
+     && m_gd_80_sp.nav.pane_index = 0
+     && m_gd_80_dn.work.goal_dive_verif_index = 0
+     && match Model.active_dive m_gd_80_ent with
+        | Some (Nav.Dive_work (Nav.Goal_dive "g-exec")) -> true
+        | _ -> false);
+  let m_td_80 =
+    let m1, _ = Update_nav.push_dive m_td_big (Nav.Dive_work (Nav.Task_dive "tk-1")) in
+    {
+      m1 with
+      viewport = { Model.cols = 80; rows = 24 };
+      breakpoint = Model.Compact;
+      nav = { m1.nav with sidebar_open = Some false };
+    }
+  in
+  let m_td_80_p1, _ = step m_td_80 (mk_key Keymap.Input.Tab) in
+  let m_td_80_sp, _ = step m_td_80_p1 (char_k " ") in
+  let m_td_80_dn, _ = step m_td_80_sp (mk_key Keymap.Input.Down) in
+  let m_td_80_ent, _ = step m_td_80_sp (mk_key Keymap.Input.Enter) in
+  Alcotest.(check bool)
+    "Round-2 #497 P1: 2-pane Task_dive 80x24 Tab -> Space clamps pane_index=0 & Enter does not dive hidden Verification"
+    true
+    (m_td_80_p1.nav.pane_index = 1
+     && m_td_80_sp.infra.show_raw_json
+     && m_td_80_sp.nav.pane_index = 0
+     && m_td_80_dn.work.task_dive_verif_scroll = 0
+     && match Model.active_dive m_td_80_ent with
+        | Some (Nav.Dive_work (Nav.Task_dive "tk-1")) -> true
+        | _ -> false);
+
+  (* Round-2 #496 P2: Filtered Work > Inbox Gate_reject submit advances within filtered list *)
+  let g_beta1 : Wire_work.gate_pending =
+    {
+      id = "gate-b1";
+      keeper = "beta";
+      tool_name = "shell";
+      input_preview = Some "beta cmd 1";
+      waiting_s = Some 10.0;
+      phase = "pending";
+    }
+  in
+  let g_beta2 : Wire_work.gate_pending =
+    { g_beta1 with id = "gate-b2"; input_preview = Some "beta cmd 2" }
+  in
+  let m_inbox_filt =
+    let attn =
+      Attention.rebuild ~asks:[] ~tool_approvals:[ ta0 ]
+        ~gate_pending:[ g_beta1; g_beta2 ] ~goals:[] Attention.empty
+    in
+    {
+      base_with_ws with
+      nav = { base_with_ws.nav with workspace = Nav.Work; pane_index = 0 };
+      work =
+        base_with_ws.work
+        |> Work_store.set_tab Nav.Work_inbox
+        |> Work_store.set_filter "beta";
+      attention = attn;
+    }
+  in
+  let m_gr_modal, _ = step m_inbox_filt (char_k ~shift:true "N") in
+  let m_gr_typed = fst (step m_gr_modal (char_k "r")) in
+  let m_gr_sub, _ = step m_gr_typed (mk_key Keymap.Input.Enter) in
+  Alcotest.(check (option string))
+    "Round-2 #496 P2: Filtered Work > Inbox Gate_reject advances triage to gate:gate-b2"
+    (Some "gate:gate-b2")
+    (Option.map
+       (fun (e : Attention.entry) -> e.id)
+       (Model.fast_approval_strip_item m_gr_sub));
+
+  (* Round-2 #496 hardening: expired quit_armed_at (>2.5s) clears arm AND lets Esc pop dive *)
+  let t_expired = Clock.Mono.of_ns 15_000_000_000L in
+  let m_dive_exp_esc, _ = step_at ~now:t_expired m_dive_arm1 (mk_key Keymap.Input.Escape) in
+  Alcotest.(check bool)
+    "Round-2 #496: expired quit_armed_at (>2.5s) does NOT swallow Esc (pops Goal_dive)"
+    true
+    (Option.is_none m_dive_exp_esc.quit_armed_at
+     && Option.is_none (Model.active_dive m_dive_exp_esc));
+
+  (* === Round-3 GitHub CR Fixes (P2 #1, P2 #2, P2 #3) === *)
+  (* CR P2 #1: Thread_dive B with stale active_thread A never shows/scrolls A or votes on A's comment *)
+  let long_post_a =
+    mk_post "post-a" "Post A"
+      (String.concat "\n"
+         (List.init 60 (fun i -> Printf.sprintf "Post A body line %d" i)))
+  in
+  let m_thread_a =
+    let k0 = Knowledge_store.empty |> Knowledge_store.set_tab Nav.Knowledge_board in
+    let knowledge =
+      {
+        k0 with
+        board =
+          Observed.value ~observed_at:t0
+            {
+              Wire_knowledge.posts = [ long_post_a ];
+              count = 1;
+              sort_by = "recent";
+              signal_only = true;
+            };
+        active_thread = Observed.value ~observed_at:t0 (long_post_a, many_comments);
+        active_thread_target = Some "post-a";
+        thread_selected_comment = Some 0;
+      }
+    in
+    {
+      base_with_ws with
+      nav = { base_with_ws.nav with workspace = Nav.Knowledge; pane_index = 0 };
+      knowledge;
+    }
+  in
+  (* Entering Thread_dive "post-b" (not in board feed) marks active_thread Loading for post-b *)
+  let m_dive_b, cmds_dive_b =
+    Update_nav.push_dive m_thread_a (Nav.Dive_knowledge (Nav.Thread_dive "post-b"))
+  in
+  Alcotest.(check bool)
+    "CR P2 #1: push_dive Thread_dive B marks active_thread Loading for B & clears comment selection"
+    true
+    (Observed.is_loading m_dive_b.knowledge.active_thread
+     && Option.equal String.equal m_dive_b.knowledge.active_thread_target (Some "post-b")
+     && Option.is_none m_dive_b.knowledge.thread_selected_comment
+     && has_cmd
+          (function
+            | Cmd.Http_get { req = Cmd.Get_board_thread { post_id = "post-b"; _ }; _ } -> true
+            | _ -> false)
+          cmds_dive_b);
+  (* Even if active_thread still holds stale Post A + selected comment 0 while in Thread_dive B:
+     - selected_thread_comment ~post_id:"post-b" is None
+     - PgDn yields dive_scroll_offset = 0 (never uses Post A's long body/comments)
+     - Board_vote NEVER constructs Post_board_comment_vote { post_id = "post-b"; comment_id = "c-0" }
+     - Board_comment NEVER sets parent_id = Some "c-0" from Post A *)
+  let m_dive_b_stale =
+    {
+      m_dive_b with
+      knowledge =
+        {
+          m_dive_b.knowledge with
+          active_thread = Observed.value ~observed_at:t0 (long_post_a, many_comments);
+          active_thread_target = Some "post-a";
+          thread_selected_comment = Some 0;
+        };
+    }
+  in
+  Alcotest.(check bool)
+    "CR P2 #1: selected_thread_comment ~post_id:B returns None when active_thread holds A"
+    true
+    (Option.is_none
+       (Knowledge_store.selected_thread_comment ~post_id:"post-b"
+          m_dive_b_stale.knowledge));
+  let m_dive_b_pgdn, _ = step m_dive_b_stale (mk_key Keymap.Input.Page_down) in
+  Alcotest.(check int)
+    "CR P2 #1: Thread_dive B PgDn does not scroll stale Post A's body/comments"
+    0 m_dive_b_pgdn.nav.dive_scroll_offset;
+  let m_vote_arm, _ = step m_dive_b_stale (char_k "+") in
+  let _, cmds_vote_confirm = step m_vote_arm (char_k "+") in
+  Alcotest.(check bool)
+    "CR P2 #1: Board_vote in Thread_dive B never votes on Post A's comment under post-b"
+    true
+    (not
+       (has_cmd
+          (function
+            | Cmd.Http_post { req = Cmd.Post_board_comment_vote _; _ } -> true
+            | _ -> false)
+          cmds_vote_confirm)
+     && has_cmd
+          (function
+            | Cmd.Http_post
+                { req = Cmd.Post_board_vote { post_id = "post-b"; direction = `Up }; _ } ->
+                true
+            | _ -> false)
+          cmds_vote_confirm);
+  let m_comment_b, _ = step m_dive_b_stale (char_k "c") in
+  Alcotest.(check bool)
+    "CR P2 #1: Board_comment in Thread_dive B never attaches Post A's comment as parent_id"
+    true
+    (match m_comment_b.nav.overlay with
+     | Some (Nav.Inline_action (Nav.Board_comment { post_id = "post-b"; parent_id = None })) ->
+         true
+     | _ -> false);
+  (* mark_thread_loading preserves matching loaded Value and settled non-retryable 404 unless force=true *)
+  let k_keep_loaded =
+    Knowledge_store.mark_thread_loading ~post_id:"post-a" ~since_ns:t0
+      m_thread_a.knowledge
+  in
+  let k_keep_404 =
+    Knowledge_store.mark_thread_loading ~post_id:"post-1" ~since_ns:t0
+      m_board_404.knowledge
+  in
+  let k_force_404 =
+    Knowledge_store.mark_thread_loading ~force:true ~post_id:"post-1" ~since_ns:t0
+      m_board_404.knowledge
+  in
+  Alcotest.(check bool)
+    "CR P2 #1: mark_thread_loading keeps loaded same-post Value & settled 404 unless force=true"
+    true
+    (Observed.is_value k_keep_loaded.active_thread
+     && (not (Observed.is_loading k_keep_404.active_thread))
+     && Observed.is_loading k_force_404.active_thread);
+  (* Switching Board selection from post-1 to post-2 marks active_thread Loading for post-2 *)
+  let m_board_sel2, _ = step m_board (mk_key Keymap.Input.Down) in
+  Alcotest.(check bool)
+    "CR P2 #1: Board pane 0 Down to post-2 marks active_thread Loading for post-2"
+    true
+    (Observed.is_loading m_board_sel2.knowledge.active_thread
+     && Option.equal String.equal m_board_sel2.knowledge.active_thread_target
+          (Some "post-2"));
+
+  (* CR P2 #3: Attention ID-anchored selection across Work > Inbox filter clear & workspace switch *)
+  let m_inbox_3 =
+    let attn =
+      Attention.rebuild ~asks:[] ~tool_approvals:[ ta0 ]
+        ~gate_pending:[ g_beta1; g_beta2 ] ~goals:[] Attention.empty
+    in
+    {
+      base_with_ws with
+      nav = { base_with_ws.nav with workspace = Nav.Work; pane_index = 0 };
+      work = base_with_ws.work |> Work_store.set_tab Nav.Work_inbox;
+      attention = attn;
+    }
+  in
+  (* Scenario A: filter "beta" -> Down selects gate-b2 -> clear filter "" -> gate-b2 stays selected & Y approves gate-b2 *)
+  let m_f_beta, _ = Update_nav.set_active_filter_query "beta" m_inbox_3 in
+  let m_f_b2, _ = step m_f_beta (mk_key Keymap.Input.Down) in
+  Alcotest.(check (option string))
+    "CR P2 #3: Down on filtered Inbox selects gate:gate-b2"
+    (Some "gate:gate-b2")
+    (Option.map (fun (e : Attention.entry) -> e.id)
+       (Attention.current_filtered_item ~query:m_f_b2.work.filter_query
+          m_f_b2.attention));
+  (* Opening an overlay (Help) over filtered Inbox never falls back to unfiltered Alpha (ta0) *)
+  let m_f_b2_help, _ = Update_nav.open_overlay m_f_b2 Nav.Help in
+  Alcotest.(check (option string))
+    "CR P2 #3: overlay over filtered Inbox keeps strip on gate:gate-b2 (never Alpha)"
+    (Some "gate:gate-b2")
+    (Option.map (fun (e : Attention.entry) -> e.id)
+       (Model.fast_approval_strip_item m_f_b2_help));
+  let m_f_cleared, _ = Update_nav.set_active_filter_query "" m_f_b2 in
+  Alcotest.(check int)
+    "CR P2 #3: clearing filter syncs selected_index_in_filtered to 2 (gate:gate-b2)"
+    2
+    (Attention.selected_index_in_filtered ~query:"" m_f_cleared.attention);
+  Alcotest.(check (option string))
+    "CR P2 #3: clearing filter keeps gate:gate-b2 selected (not Alpha or Beta1)"
+    (Some "gate:gate-b2")
+    (Option.map (fun (e : Attention.entry) -> e.id)
+       (Attention.current_filtered_item ~query:"" m_f_cleared.attention));
+  let _, cmds_approve_b2 = step m_f_cleared (char_k ~shift:true "Y") in
+  Alcotest.(check bool)
+    "CR P2 #3: Y after filter clear approves gate-b2 (never Alpha ta-0 or gate-b1)"
+    true
+    (has_cmd
+       (function
+         | Cmd.Http_post
+             { req = Cmd.Post_gate_resolution { id = "gate-b2"; approved = true; _ }; _ } ->
+             true
+         | _ -> false)
+       cmds_approve_b2
+     && not
+          (has_cmd
+             (function
+               | Cmd.Http_post { req = Cmd.Post_tool_approval _; _ } -> true
+               | _ -> false)
+             cmds_approve_b2));
+  (* Scenario B: acting on Beta1 (Gate_reject auto-advances to Beta2), then clearing filter & switching to Pulse keeps Beta2 *)
+  let m_gr_cleared, _ = Update_nav.set_active_filter_query "" m_gr_sub in
+  let m_gr_pulse, _ = Update_nav.switch_workspace m_gr_sub Nav.Pulse in
+  Alcotest.(check (option string))
+    "CR P2 #3: clearing filter after Gate_reject auto-advance stays on gate:gate-b2"
+    (Some "gate:gate-b2")
+    (Option.map (fun (e : Attention.entry) -> e.id)
+       (Model.fast_approval_strip_item m_gr_cleared));
+  Alcotest.(check (option string))
+    "CR P2 #3: switching to Pulse after filtered auto-advance keeps gate:gate-b2 selected"
+    (Some "gate:gate-b2")
+    (Option.map (fun (e : Attention.entry) -> e.id)
+       (Attention.current_filtered_item ~query:"" m_gr_pulse.attention))
+
 let () =
   Alcotest.run "masc_tui_store"
     [
@@ -14270,5 +15808,8 @@ let () =
           Alcotest.test_case
             "Freeze fixes: epoch lock resets, Micro J/resize, orphan/dup Inline_action & Cut_reply loop guard"
             `Quick test_freeze_fixes_epoch_locks_micro_inline_and_cut_reply;
+          Alcotest.test_case
+            "UX Sweep 12 Fixes: Attention sync, Composer PgUp/PgDn, Ctrl+Q 2-press, Dive return, Goals filter/sort, Goal_dive/Task_dive, Overrule auto-seed, 400 guards, Board comments scroll"
+            `Quick test_ux_sweep_12_fixes;
         ] );
     ]

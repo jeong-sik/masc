@@ -1107,6 +1107,21 @@ let render_approval_strip grid ~(rect : Rect.t) ~(theme : Theme.t)
         Card.draw_left_rail ~bg ~tone:Theme.Status_attention grid ~x:rect.x
           ~y:rect.y ~h:1 ~theme;
         let lang = model.lang in
+        let full_allow, full_deny, full_dive =
+          match entry.payload with
+          | Attention.Payload_ask _ ->
+              ( Say.resolve lang (Say.make ~ko:"[Y] 질문 답변" ~en:"[Y] Answer Ask")
+              , Say.resolve lang (Say.make ~ko:"[N] 건너뛰기" ~en:"[N] Skip")
+              , Say.resolve lang (Say.make ~ko:"[J] 수신함" ~en:"[J] Inbox") )
+          | Attention.Payload_goal_confirmation _ ->
+              ( Say.resolve lang (Say.make ~ko:"[Y/Enter] 확인" ~en:"[Y/Enter] Confirm")
+              , Say.resolve lang (Say.make ~ko:"[N] 보류·중단" ~en:"[N] Hold/Drop")
+              , Say.resolve lang (Say.make ~ko:"[J] 상세" ~en:"[J] Dive") )
+          | Attention.Payload_tool_approval _ | Attention.Payload_gate _ ->
+              ( Say.resolve lang (Say.make ~ko:"[Y] 승인" ~en:"[Y] Allow")
+              , Say.resolve lang (Say.make ~ko:"[N] 거절" ~en:"[N] Deny")
+              , Say.resolve lang (Say.make ~ko:"[J] 상세" ~en:"[J] Dive") )
+        in
         let is_ask =
           match entry.payload with
           | Attention.Payload_ask _ -> true
@@ -1114,16 +1129,6 @@ let render_approval_strip grid ~(rect : Rect.t) ~(theme : Theme.t)
           | Attention.Payload_gate _
           | Attention.Payload_goal_confirmation _ ->
               false
-        in
-        let full_allow, full_deny, full_dive =
-          if is_ask then
-            ( Say.resolve lang (Say.make ~ko:"[Y] 질문 답변" ~en:"[Y] Answer Ask")
-            , Say.resolve lang (Say.make ~ko:"[N] 건너뛰기" ~en:"[N] Skip")
-            , Say.resolve lang (Say.make ~ko:"[J] 수신함" ~en:"[J] Inbox") )
-          else
-            ( Say.resolve lang (Say.make ~ko:"[Y] 승인" ~en:"[Y] Allow")
-            , Say.resolve lang (Say.make ~ko:"[N] 거절" ~en:"[N] Deny")
-            , Say.resolve lang (Say.make ~ko:"[J] 상세" ~en:"[J] Dive") )
         in
         let full_actions_w =
           Grapheme.display_width full_allow
@@ -1783,16 +1788,23 @@ let render_too_small_guard grid ~(rect : Rect.t) ~(theme : Theme.t)
          ~en:(Printf.sprintf "%s Resize >= 40x12 (%dx%d)"
                 (Glyph.to_utf8 Glyph.Warning_triangle) rect.w rect.h))
   in
-  let line2 =
-    if
+  let line2, line2_st =
+    if Option.is_some model.quit_armed_at then
+      ( Say.resolve lang
+          (Say.make ~ko:"한 번 더 Ctrl+Q를 누르면 종료합니다"
+             ~en:"Press Ctrl+Q again to quit")
+      , attn_st )
+    else if
       Drafts.has_non_empty_draft model.drafts
       || Drafts.other_keepers_draft_count model.drafts > 0
     then
-      Say.resolve lang
-        (Say.make ~ko:"초안 안전 보호 중 · Ctrl+Q 종료"
-           ~en:"Draft preserved · Ctrl+Q quit")
+      ( Say.resolve lang
+          (Say.make ~ko:"초안 안전 보호 중 · Ctrl+Q 종료"
+             ~en:"Draft preserved · Ctrl+Q quit")
+      , sec_st )
     else
-      Say.resolve lang (Say.make ~ko:"Ctrl+Q 종료" ~en:"Ctrl+Q quit")
+      ( Say.resolve lang (Say.make ~ko:"Ctrl+Q 종료" ~en:"Ctrl+Q quit")
+      , sec_st )
   in
   let mid_y = rect.y + (rect.h / 2) in
   if rect.h >= 1 then
@@ -1803,7 +1815,8 @@ let render_too_small_guard grid ~(rect : Rect.t) ~(theme : Theme.t)
          (Grapheme.truncate_to_width ~max_width:(Int.max 0 (rect.w - 2)) line1));
   if rect.h >= 2 then
     ignore
-      (Cell_grid.put_text ~clip:rect grid ~x:(rect.x + 1) ~y:mid_y ~style:sec_st
+      (Cell_grid.put_text ~clip:rect grid ~x:(rect.x + 1) ~y:mid_y
+         ~style:line2_st
          (Grapheme.truncate_to_width ~max_width:(Int.max 0 (rect.w - 2)) line2))
 
 let render_micro_cockpit grid ~cache ~(body : Rect.t) ~(theme : Theme.t)

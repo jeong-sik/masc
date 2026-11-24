@@ -241,7 +241,7 @@ workspace, sub-tab, and overlay:
 | # | Workspace | What you find there |
 |---|---|---|
 | `1` | **Pulse** | Organization overview, KPI hero band, Attention queue, live fleet health, and 24h pulse |
-| `2` | **Work** | Six tabs: Goals (Goals & Verifications `[v]`, Verification Dive with Evidence/Summary/Specs/TLC tabs), Tasks, Schedules (dedicated tab), Action Inbox (Asks, Tool Approvals, Gate), Candle & Scorecard, and Harness Health (calibration KPIs, verdict detail with 64-hex `notes_hash`, `[y]`/`[n]` overrule) |
+| `2` | **Work** | Six tabs: Goals (Goals & Verifications `[v]`, phase filter `[Space]`, sort `[S]`, interactive Goal Dive Linked Tasks/Verifier Runs, Verification Dive with Evidence/Summary/Specs/TLC tabs), Tasks (scrollable Description/Verification sections), Schedules (dedicated tab), Action Inbox (Asks, Tool Approvals, Gate), Candle & Scorecard, and Harness Health (calibration KPIs, verdict detail with 64-hex `notes_hash`, `[y]`/`[n]` overrule) |
 | `3` | **Knowledge** | Four tabs: Board (Signal/All `[s]`, Sort `[S]`, Hearth picker `[h]`, Succession Chains `[Space]`, threaded comments `[c]`, armed votes `[+]`/`[-]`), Wiki, Artifacts (structured `Html_doc`/Markdown/JSON preview, `[v]` raw, `{`/`}` revisions, `/` search, `[c]` check, `[P]`/`[Y]` CAS share, `y`/`e`/`o`/`H`), and World Memory (`[v]` Diff & Flow with Braille chart `[g]` / Health & Workspace Ledger / Context, `[w]` temporal diff window, `[m]` scope) |
 | `4` | **Keepers** | Fleet roster (`Companies`, `Attention`, `24h Wall`) and synchronized 9-tab Keeper split & 1-hop Dive: Chat & Stream, Context & Turns (per-turn occupancy/cache/next-request/input-map/response), Tool Calls (hourly stats + unfolded JSON tree), Memory (`[v]` Diff & Flow Braille chart / Health / Facts Tree / Journal), Work & Candle, Sandbox, Config (in-place TOML editor), Logs (`[v]` remote-safe Metrics vs Sandbox Logs), and Identity (OAuth providers/switch/disconnect + GitHub device flow & masked PAT) |
 | `5` | **Runtime** | Seven tabs: Quotas & Credits, Efficiency & Spend, Failover Lanes (cascades & `exact_lane_runs`), Fusion (full detail & Fusion Dive: Question → Panel → Judge → Evidence, seat routes, tool trace, replay warnings, presets, `[e]` board evidence), Tools & Usage (Usage Calls `[w]` 24h/7d/14d, Catalog Tree + Tool Dive, Keeper Surface & Skills), Connectors (live `/connector/names` picker in `[n]` Bind, MCP Clients, Browser summary), and Addons & Browser (Addon Lanes + `[p]` Package Catalog & Preview + Browser Clients & Per-Tab listing) |
@@ -256,11 +256,11 @@ selection or scroll with `↑`/`↓` (`j`/`k`), dive into an item or open the
 dedicated **Ask Answer Modal** with `Enter` (or `Y` on an Ask), and
 focus the bottom composer with `i` (or press `c` on a Keeper to jump straight
 into Chat). Inside the composer, `Enter` sends (behind an active turn it waits for that turn to end),
-`Alt+Enter` (or `Ctrl+Enter`) steers by cutting your own running request, and `Shift+Enter` (or `Ctrl+J`)
-inserts a newline. Type `/` or `@` inside the composer to open the interactive
+`Alt+Enter` (or `Ctrl+Enter`) steers by cutting your own running request, `Shift+Enter` (or `Ctrl+J`)
+inserts a newline, and `PgUp`/`PgDn` scroll the chat transcript while keeping focus and your draft intact. Type `/` or `@` inside the composer to open the interactive
 command/mention popup (`↑`/`↓` select, `Tab` complete, `Enter` run/insert,
 `Esc` dismiss). `Esc` blurs the composer, returns focus from the sidebar, pops
-a dive, or closes an overlay and never quits; `Ctrl+Q` quits cleanly.
+a dive (restoring previous pane & zoom), or closes an overlay and never quits; `Ctrl+Q` pressed twice within 2.5s quits cleanly.
 
 Global overlays and tools (also accessible via persistent top-chrome badges `[b]` `[I]` `[^T]` `[,]` `[?]`):
 `Ctrl+K` command/entity palette, `Ctrl+G` keeper switcher, `Ctrl+L`

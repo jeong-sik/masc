@@ -712,10 +712,7 @@ let goal_action_on_approve ~now (m : Model.t) (g : Wire_work.goal) =
 let goal_action_on_stop ~now (m : Model.t) (g : Wire_work.goal) =
   match g.phase with
   | Wire_work.Paused _ ->
-      request_goal_transition ~now m ~level:Model.Toast_warning
-        ~toast:
-          (Say.make ~ko:("목표 폐기(Drop) 요청: " ^ g.title) ~en:("Dropping goal: " ^ g.title))
-        g Wire_work.Drop
+      Update_nav.open_inline_modal m (Nav.Goal_drop g.id)
   | Wire_work.Executing
   | Wire_work.Verifying
   | Wire_work.Awaiting_confirmation
@@ -897,48 +894,7 @@ let open_fusion_launch_modal (m : Model.t) =
     ]
 
 let open_harness_overrule_for_selected ~verdict ~now (m : Model.t) =
-  let seed_hash, warning_opt =
-    match Work_store.selected_harness_verdict m.work with
-    | Some v when Wire_work.is_valid_notes_hash v.notes_hash ->
-        (v.notes_hash, None)
-    | Some _ ->
-        ( ""
-        , Some
-            (Say.make
-               ~ko:
-                 "선택된 판정에 유효한 64-hex notes_hash 가 없습니다 (직접 입력하세요)"
-               ~en:
-                 "Selected verdict lacks a valid 64-hex notes_hash (enter \
-                  manually)") )
-    | None -> ("", None)
-  in
-  let modal0 = Model.inline_modal_for (Nav.Harness_overrule seed_hash) in
-  let fields =
-    List.map
-      (fun (f : Model.modal_form_field) ->
-        if String.equal f.key "verdict" then { f with value = verdict } else f)
-      modal0.fields
-  in
-  let modal = { modal0 with fields } in
-  let nav =
-    {
-      m.nav with
-      overlay = Some (Nav.Inline_action (Nav.Harness_overrule seed_hash));
-      return_overlay = None;
-      filter_focused = false;
-      sidebar_focused = false;
-      modal_edit_cursor = String.length (Model.modal_active_field_value modal);
-    }
-  in
-  let drafts = Drafts.set_focus false m.drafts in
-  let config = Config_store.cancel_edit_field m.config in
-  let base = { m with nav; drafts; config; inline_modal = Some modal } in
-  let next =
-    match warning_opt with
-    | Some msg -> Model.with_toast ~now ~level:Model.Toast_warning msg base
-    | None -> base
-  in
-  (next, [])
+  Update_nav.open_harness_overrule_for_context ~verdict ~now m
 
 let open_connector_form_populated (m : Model.t) =
   let connector_default =
@@ -1863,6 +1819,7 @@ and execute_action ~now (m : Model.t) action =
                     | Nav.Verification_reject _
                     | Nav.Harness_overrule _
                     | Nav.Task_cancel _
+                    | Nav.Goal_drop _
                     | Nav.Schedule_form
                     | Nav.Connector_form
                     | Nav.Repo_add_form
@@ -2063,6 +2020,7 @@ and execute_action ~now (m : Model.t) action =
                | Nav.Verification_reject _
                | Nav.Harness_overrule _
                | Nav.Task_cancel _
+               | Nav.Goal_drop _
                | Nav.Schedule_form
                | Nav.Connector_form
                | Nav.Repo_add_form
@@ -2326,6 +2284,7 @@ and execute_action ~now (m : Model.t) action =
             | Nav.Verification_reject _
             | Nav.Harness_overrule _
             | Nav.Task_cancel _
+            | Nav.Goal_drop _
             | Nav.Schedule_form
             | Nav.Connector_form
             | Nav.Repo_add_form
@@ -2619,13 +2578,19 @@ and execute_action ~now (m : Model.t) action =
                           }
                         , [] )
                       else
-                        let next =
+                        let (ret_pane, ret_zoom), ret_rest =
+                          match m.nav.dive_return_stack with
+                          | hd :: tl -> (hd, tl)
+                          | [] -> ((0, false), [])
+                        in
+                        let next0 =
                           {
                             m with
                             nav =
                               {
                                 m.nav with
                                 dive_stack = rest;
+                                dive_return_stack = ret_rest;
                                 pane_index = 0;
                                 zoomed = false;
                                 dive_scroll_offset = 0;
@@ -2638,6 +2603,31 @@ and execute_action ~now (m : Model.t) action =
                               |> Knowledge_store.clear_pending_wiki_edit;
                             infra = { m.infra with show_raw_json = false };
                           }
+                        in
+                        let restored_zoom =
+                          ret_zoom && Model.can_zoom_current_view next0
+                        in
+                        let next1 =
+                          {
+                            next0 with
+                            nav =
+                              {
+                                next0.nav with
+                                zoomed = restored_zoom;
+                                pane_index = ret_pane;
+                              };
+                          }
+                        in
+                        let max_pane =
+                          max 0 (Model.focusable_pane_count next1 - 1)
+                        in
+                        let clamped_pane = max 0 (min max_pane ret_pane) in
+                        let next =
+                          {
+                            next1 with
+                            nav = { next1.nav with pane_index = clamped_pane };
+                          }
+                          |> Update_nav.clamp_for_pane
                           |> Update_nav.sync_config_for_keeper_view
                         in
                         (next, View_fetches.fetches_for_current_view next))
@@ -2697,6 +2687,23 @@ and execute_action ~now (m : Model.t) action =
                             work =
                               Work_store.set_task_status_filter
                                 Work_store.Status_all m.work;
+                          }
+                        , [] )
+                      else if
+                        Nav.equal_workspace m.nav.workspace Nav.Work
+                        && Nav.equal_work_tab m.work.active_tab
+                             Nav.Work_pipeline
+                        && not
+                             (Work_store.equal_goal_phase_filter
+                                m.work.goal_phase_filter
+                                Work_store.Goal_filter_all)
+                      then
+                        ( {
+                            m with
+                            nav = { m.nav with pane_index = 0 };
+                            work =
+                              Work_store.set_goal_phase_filter
+                                Work_store.Goal_filter_all m.work;
                           }
                         , [] )
                       else (m, [])))
@@ -2925,12 +2932,15 @@ and execute_action ~now (m : Model.t) action =
               let pane_index =
                 if infra.show_raw_json then m.nav.pane_index else 0
               in
-              ( {
+              let next =
+                {
                   m with
                   infra;
                   nav = { m.nav with pane_index; json_scroll_offset = 0 };
                 }
-              , [] )
+                |> Update_nav.clamp_for_pane
+              in
+              (next, [])
           | Some
               ( Nav.Dive_keeper
                   {
@@ -3058,7 +3068,24 @@ and execute_action ~now (m : Model.t) action =
                         }
                       in
                       (next, [])
-                  | Nav.Work_pipeline
+                  | Nav.Work_pipeline ->
+                      let work = Work_store.cycle_goal_phase_filter m.work in
+                      let lbl =
+                        match work.goal_phase_filter with
+                        | Work_store.Goal_filter_all ->
+                            Say.make ~ko:"목표 필터: 전체" ~en:"Goals filter: All"
+                        | Work_store.Goal_filter_active ->
+                            Say.make ~ko:"목표 필터: 진행 중" ~en:"Goals filter: Active"
+                        | Work_store.Goal_filter_verifying ->
+                            Say.make ~ko:"목표 필터: 검증/확인" ~en:"Goals filter: Verifying"
+                        | Work_store.Goal_filter_held ->
+                            Say.make ~ko:"목표 필터: 보류/차단" ~en:"Goals filter: Held"
+                        | Work_store.Goal_filter_closed ->
+                            Say.make ~ko:"목표 필터: 완료/중단" ~en:"Goals filter: Closed"
+                      in
+                      ( Model.with_toast ~now ~level:Model.Toast_info lbl
+                          { m with work }
+                      , [] )
                   | Nav.Work_schedules
                   | Nav.Work_inbox
                   | Nav.Work_candle_scorecard
@@ -3290,7 +3317,7 @@ and execute_action ~now (m : Model.t) action =
                       let drafts = Drafts.set_focus false m.drafts in
                       ({ m with nav; drafts; inline_modal = Some modal }, [])
                   | Nav.Work_tasks | Nav.Work_schedules ->
-                      Update_nav.open_inline_modal m Nav.Schedule_form
+                      Update_nav.open_schedule_form_populated m
                   | Nav.Work_harness ->
                       open_harness_overrule_for_selected ~verdict:"reject" ~now m
                   | Nav.Work_inbox | Nav.Work_candle_scorecard ->
@@ -3574,6 +3601,7 @@ and execute_action ~now (m : Model.t) action =
                 | Nav.Verification_reject _
                 | Nav.Harness_overrule _
                 | Nav.Task_cancel _
+                | Nav.Goal_drop _
                 | Nav.Schedule_form
                 | Nav.Connector_form
                 | Nav.Repo_add_form
@@ -4462,6 +4490,23 @@ and execute_action ~now (m : Model.t) action =
                           ~en:("Board sort: " ^ knowledge.board_sort_by))
                 in
                 (next, View_fetches.fetches_for_current_view next)
+            | Nav.Work
+              when Nav.equal_work_tab m.work.active_tab Nav.Work_pipeline ->
+                let work = Work_store.cycle_goal_sort_mode m.work in
+                let lbl =
+                  match work.goal_sort_mode with
+                  | Work_store.Goal_sort_default ->
+                      Say.make ~ko:"목표 정렬: 기본순" ~en:"Goals sort: Default"
+                  | Work_store.Goal_sort_phase ->
+                      Say.make ~ko:"목표 정렬: 단계순" ~en:"Goals sort: Phase"
+                  | Work_store.Goal_sort_progress ->
+                      Say.make ~ko:"목표 정렬: 진행률순" ~en:"Goals sort: Progress"
+                  | Work_store.Goal_sort_recent ->
+                      Say.make ~ko:"목표 정렬: 최신순" ~en:"Goals sort: Recent"
+                in
+                ( Model.with_toast ~now ~level:Model.Toast_info lbl
+                    { m with work }
+                , [] )
             | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Keepers | Nav.Runtime
             | Nav.Infra ->
                 (m, [])))
@@ -4469,13 +4514,13 @@ and execute_action ~now (m : Model.t) action =
       if Option.is_some m.nav.overlay then (m, [])
       else
         match Model.active_dive m with
-        | Some (Nav.Dive_work (Nav.Verification_dive _)) ->
-            Update_nav.open_inline_modal m (Nav.Harness_overrule "")
-        | Some (Nav.Dive_work (Nav.Task_dive _)) ->
-            Update_nav.open_inline_modal m (Nav.Harness_overrule "")
         | Some
-            ( Nav.Dive_work (Nav.Goal_dive _)
-            | Nav.Dive_keeper _
+            (Nav.Dive_work
+              (Nav.Verification_dive _ | Nav.Task_dive _ | Nav.Goal_dive _)) ->
+            Update_nav.open_harness_overrule_for_context ~verdict:"approve" ~now
+              m
+        | Some
+            ( Nav.Dive_keeper _
             | Nav.Dive_knowledge _
             | Nav.Dive_runtime _
             | Nav.Dive_infra _ ) ->
@@ -4497,21 +4542,9 @@ and execute_action ~now (m : Model.t) action =
                 (next, View_fetches.fetches_for_current_view next)
             | Nav.Work -> (
                 match m.work.active_tab with
-                | Nav.Work_harness ->
-                    open_harness_overrule_for_selected ~verdict:"approve" ~now m
-                | Nav.Work_pipeline
-                  when m.nav.pane_index = 1
-                       && Model.work_pipeline_has_linked_card m -> (
-                    match Work_store.selected_verification m.work with
-                    | Some _ ->
-                        Update_nav.open_inline_modal m (Nav.Harness_overrule "")
-                    | None -> (m, []))
-                | Nav.Work_tasks -> (
-                    match Work_store.selected_task m.work with
-                    | Some _ ->
-                        Update_nav.open_inline_modal m (Nav.Harness_overrule "")
-                    | None -> (m, []))
-                | Nav.Work_pipeline
+                | Nav.Work_harness | Nav.Work_pipeline | Nav.Work_tasks ->
+                    Update_nav.open_harness_overrule_for_context
+                      ~verdict:"approve" ~now m
                 | Nav.Work_schedules
                 | Nav.Work_inbox
                 | Nav.Work_candle_scorecard ->
@@ -4793,7 +4826,8 @@ and execute_action ~now (m : Model.t) action =
                 let parent_id =
                   Option.map
                     (fun (tc : Knowledge_store.threaded_comment) -> tc.comment.id)
-                    (Knowledge_store.selected_thread_comment m.knowledge)
+                    (Knowledge_store.selected_thread_comment ~post_id
+                       m.knowledge)
                 in
                 Update_nav.open_inline_modal m
                   (Nav.Board_comment { post_id; parent_id })
@@ -4852,13 +4886,7 @@ and execute_action ~now (m : Model.t) action =
                     (fun (g : Wire_work.goal) -> String.equal g.id goal_id)
                     (Work_store.goals m.work)
                 with
-                | Some g ->
-                    request_goal_transition ~now m ~level:Model.Toast_info
-                      ~toast:
-                        (Say.make
-                           ~ko:("목표 완료 검증 요청: " ^ g.title)
-                           ~en:("Requesting goal completion: " ^ g.title))
-                      g Wire_work.Request_complete
+                | Some g -> Update_nav.request_goal_complete_guarded ~now m g
                 | None -> (m, []))
             | Some
                 ( Nav.Dive_work (Nav.Task_dive _ | Nav.Verification_dive _)
@@ -4921,13 +4949,7 @@ and execute_action ~now (m : Model.t) action =
                 | Nav.Work
                   when Nav.equal_work_tab m.work.active_tab Nav.Work_pipeline -> (
                     match Work_store.selected_goal m.work with
-                    | Some g ->
-                        request_goal_transition ~now m ~level:Model.Toast_info
-                          ~toast:
-                            (Say.make
-                               ~ko:("목표 완료 검증 요청: " ^ g.title)
-                               ~en:("Requesting goal completion: " ^ g.title))
-                          g Wire_work.Request_complete
+                    | Some g -> Update_nav.request_goal_complete_guarded ~now m g
                     | None -> (m, []))
                 | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Runtime | Nav.Infra
                   ->
@@ -5028,9 +5050,10 @@ and execute_action ~now (m : Model.t) action =
           if Option.is_some m.nav.overlay then (m, [])
           else
             match Model.active_dive m with
-            | Some (Nav.Dive_knowledge (Nav.Thread_dive _)) ->
+            | Some (Nav.Dive_knowledge (Nav.Thread_dive post_id)) ->
                 let knowledge =
-                  Knowledge_store.step_thread_comment ~delta m.knowledge
+                  Knowledge_store.step_thread_comment ~post_id ~delta
+                    m.knowledge
                 in
                 ({ m with knowledge }, [])
             | Some
@@ -5270,26 +5293,7 @@ and execute_action ~now (m : Model.t) action =
                   String.equal v.request_id req_id)
                 (Work_store.verifications_list m.work)
             with
-            | Some v ->
-                ( Model.with_toast ~now ~level:Model.Toast_info
-                    (Say.make
-                       ~ko:("검증 승인 전송: " ^ v.task_title)
-                       ~en:("Approving verification: " ^ v.task_title))
-                    m
-                , [
-                    Cmd.Http_post
-                      {
-                        epoch = m.epoch;
-                        req =
-                          Cmd.Post_verification_verdict
-                            {
-                              task_id = v.task_id;
-                              verification_id = v.request_id;
-                              verdict = Wire_work.Verdict_approve;
-                              notes = None;
-                            };
-                      };
-                  ] )
+            | Some v -> Update_nav.approve_verification_request ~now m v
             | None -> (m, []))
         | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory }) ->
             ( Model.with_toast ~now ~level:Model.Toast_info
@@ -5342,26 +5346,7 @@ and execute_action ~now (m : Model.t) action =
                 if m.nav.pane_index = 1 && Model.work_pipeline_verifs_visible m
                 then
                   match Work_store.selected_verification m.work with
-                  | Some v ->
-                      ( Model.with_toast ~now ~level:Model.Toast_info
-                          (Say.make
-                             ~ko:("검증 승인 전송: " ^ v.task_title)
-                             ~en:("Approving verification: " ^ v.task_title))
-                          m
-                      , [
-                          Cmd.Http_post
-                            {
-                              epoch = m.epoch;
-                              req =
-                                Cmd.Post_verification_verdict
-                                  {
-                                    task_id = v.task_id;
-                                    verification_id = v.request_id;
-                                    verdict = Wire_work.Verdict_approve;
-                                    notes = None;
-                                  };
-                            };
-                        ] )
+                  | Some v -> Update_nav.approve_verification_request ~now m v
                   | None -> (m, [])
                 else if
                   m.nav.pane_index = 1 && Model.work_pipeline_has_linked_card m
@@ -5467,8 +5452,20 @@ and execute_action ~now (m : Model.t) action =
             | None -> (m, []))
         | Some (Nav.Dive_work (Nav.Task_dive task_id)) ->
             Update_nav.open_inline_modal m (Nav.Task_cancel task_id)
-        | Some (Nav.Dive_work (Nav.Verification_dive req_id)) ->
-            Update_nav.open_inline_modal m (Nav.Verification_reject req_id)
+        | Some (Nav.Dive_work (Nav.Verification_dive req_id)) -> (
+            match
+              List.find_opt
+                (fun (v : Wire_work.verification_request) ->
+                  String.equal v.request_id req_id)
+                (Work_store.verifications_list m.work)
+            with
+            | Some v -> Update_nav.reject_verification_request ~now m v
+            | None ->
+                ( Model.with_toast ~now ~level:Model.Toast_info
+                    (Say.make ~ko:"검증 요청을 찾을 수 없습니다"
+                       ~en:"Verification request not found")
+                    m
+                , [] ))
         | Some
             ( Nav.Dive_keeper _
             | Nav.Dive_knowledge _
@@ -5485,9 +5482,7 @@ and execute_action ~now (m : Model.t) action =
                       && Model.work_pipeline_verifs_visible m
                     then
                       match Work_store.selected_verification m.work with
-                      | Some v ->
-                          Update_nav.open_inline_modal m
-                            (Nav.Verification_reject v.request_id)
+                      | Some v -> Update_nav.reject_verification_request ~now m v
                       | None -> (m, [])
                     else if
                       m.nav.pane_index = 1
@@ -5885,10 +5880,11 @@ and execute_action ~now (m : Model.t) action =
         match Model.active_dive m with
         | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_chat }) ->
             dismiss_keeper_chat_errors ~now ~keeper:name m
-        | Some (Nav.Dive_work (Nav.Verification_dive _)) ->
-            Update_nav.open_inline_modal m (Nav.Harness_overrule "")
-        | Some (Nav.Dive_work (Nav.Task_dive _)) ->
-            Update_nav.open_inline_modal m (Nav.Harness_overrule "")
+        | Some
+            (Nav.Dive_work
+              (Nav.Verification_dive _ | Nav.Task_dive _ | Nav.Goal_dive _)) ->
+            Update_nav.open_harness_overrule_for_context ~verdict:"reject" ~now
+              m
         | Some
             ( Nav.Dive_keeper
                 {
@@ -5903,7 +5899,6 @@ and execute_action ~now (m : Model.t) action =
                     | Nav.Keeper_identity );
                   _;
                 }
-            | Nav.Dive_work (Nav.Goal_dive _)
             | Nav.Dive_knowledge _
             | Nav.Dive_runtime _
             | Nav.Dive_infra _ ) ->
@@ -5918,21 +5913,9 @@ and execute_action ~now (m : Model.t) action =
                 | None -> (m, []))
             | Nav.Work -> (
                 match m.work.active_tab with
-                | Nav.Work_pipeline
-                  when m.nav.pane_index = 1
-                       && Model.work_pipeline_has_linked_card m -> (
-                    match Work_store.selected_verification m.work with
-                    | Some _ ->
-                        Update_nav.open_inline_modal m (Nav.Harness_overrule "")
-                    | None -> (m, []))
-                | Nav.Work_tasks -> (
-                    match Work_store.selected_task m.work with
-                    | Some _ ->
-                        Update_nav.open_inline_modal m (Nav.Harness_overrule "")
-                    | None -> (m, []))
-                | Nav.Work_harness ->
-                    open_harness_overrule_for_selected ~verdict:"reject" ~now m
-                | Nav.Work_pipeline
+                | Nav.Work_pipeline | Nav.Work_tasks | Nav.Work_harness ->
+                    Update_nav.open_harness_overrule_for_context
+                      ~verdict:"reject" ~now m
                 | Nav.Work_schedules
                 | Nav.Work_inbox
                 | Nav.Work_candle_scorecard ->
@@ -5946,7 +5929,9 @@ and execute_action ~now (m : Model.t) action =
         else
           match Model.active_dive m with
           | Some (Nav.Dive_knowledge (Nav.Thread_dive post_id)) -> (
-              match Knowledge_store.selected_thread_comment m.knowledge with
+              match
+                Knowledge_store.selected_thread_comment ~post_id m.knowledge
+              with
               | Some tc ->
                   Some
                     (Knowledge_store.Vote_comment
@@ -6313,4 +6298,22 @@ and execute_action ~now (m : Model.t) action =
                      ~en:("No active turn running for " ^ keeper))
                   m
               , [] )))
-  | Keymap.Quit_app -> (m, [ Cmd.Quit Exit_reason.Quit_key ])
+  | Keymap.Quit_app -> (
+      let is_armed =
+        match m.quit_armed_at with
+        | Some armed_at ->
+            let elapsed = Clock.Mono.seconds_since now ~since:armed_at in
+            elapsed >= 0.0 && elapsed <= Model.quit_arm_window_s
+        | None -> false
+      in
+      if is_armed then
+        ({ m with quit_armed_at = None }, [ Cmd.Quit Exit_reason.Quit_key ])
+      else
+        let next =
+          { m with quit_armed_at = Some now }
+          |> Model.with_toast ~now ~duration_s:Model.quit_arm_window_s
+               ~level:Model.Toast_warning
+               (Say.make ~ko:"한 번 더 Ctrl+Q를 누르면 종료합니다"
+                  ~en:"Press Ctrl+Q again to quit")
+        in
+        (next, []))

@@ -670,7 +670,34 @@ let fetches_for_workspace ~force (m : Model.t) =
   | Nav.Knowledge -> (
       match m.knowledge.active_tab with
       | Nav.Knowledge_board ->
-          []
+          let selected_thread_req =
+            match Knowledge_store.selected_post m.knowledge with
+            | None -> []
+            | Some p ->
+                let thread_matches =
+                  match m.knowledge.active_thread with
+                  | Observed.Value { data = tp, _; stale = false; _ } ->
+                      String.equal tp.id p.id && not force
+                  | Observed.Failed { retryable = false; _ }
+                  | Observed.Loading _
+                    when not force ->
+                      Option.equal String.equal m.knowledge.active_thread_target
+                        (Some p.id)
+                  | Observed.Loading _
+                  | Observed.Value { stale = true; _ }
+                  | Observed.Absent
+                  | Observed.Unreported
+                  | Observed.Failed _ ->
+                      false
+                in
+                if thread_matches then []
+                else
+                  [
+                    Cmd.Get_board_thread
+                      { post_id = p.id; comment_limit = Some 100 };
+                  ]
+          in
+          ([]
           |> add_if
                (needs_fetch ~force m.knowledge.board)
                (Cmd.Get_board_feed
@@ -683,7 +710,8 @@ let fetches_for_workspace ~force (m : Model.t) =
                   })
           |> add_if
                (needs_fetch ~force m.knowledge.board_hearths)
-               Cmd.Get_board_hearths
+               Cmd.Get_board_hearths)
+          @ selected_thread_req
       | Nav.Knowledge_wiki ->
           ([]
           |> add_if

@@ -1303,6 +1303,7 @@ let test_all_7_overlays () =
               Nav.Gate_reject "gate-1";
               Nav.Verification_reject "ver-1";
               Nav.Task_cancel "task-3898";
+              Nav.Goal_drop "goal-1";
               Nav.Schedule_form;
               Nav.Connector_form;
               Nav.Repo_add_form;
@@ -2454,7 +2455,7 @@ let test_v25_round55_attention_bar_5companies_fail_and_settings_polish () =
     }
   in
   List.iter
-    (fun (lang, expected_actions) ->
+    (fun (lang, expected_goal_actions, expected_tool_actions) ->
       List.iter
         (fun (cols, rows) ->
           let base = populated_model ~cols ~rows ~lang in
@@ -2477,12 +2478,12 @@ let test_v25_round55_attention_bar_5companies_fail_and_settings_polish () =
           let row_g = grid_row_text g_goal strip_y_g in
           assert_contains
             ~label:(Printf.sprintf "r55_attn_goal_clean_actions_%dx%d" cols rows)
-            ~needle:expected_actions row_g;
+            ~needle:expected_goal_actions row_g;
           Alcotest.(check bool)
             (Printf.sprintf "r55_attn_goal_ends_with_clean_actions_%dx%d: %S"
                cols rows row_g)
             true
-            (String.ends_with ~suffix:expected_actions row_g);
+            (String.ends_with ~suffix:expected_goal_actions row_g);
           assert_contains
             ~label:(Printf.sprintf "r55_attn_goal_ellipsis_%dx%d" cols rows)
             ~needle:"…" row_g;
@@ -2507,11 +2508,15 @@ let test_v25_round55_attention_bar_5companies_fail_and_settings_polish () =
             (Printf.sprintf "r55_attn_tool_ends_with_clean_actions_%dx%d: %S"
                cols rows row_t)
             true
-            (String.ends_with ~suffix:expected_actions row_t))
+            (String.ends_with ~suffix:expected_tool_actions row_t))
         [ (140, 40); (90, 28) ])
     [
-      (Say.Lang_ko, "  [Y] 승인  [N] 거절  [J] 상세 ");
-      (Say.Lang_en, "  [Y] Allow  [N] Deny  [J] Dive ");
+      ( Say.Lang_ko
+      , "  [Y/Enter] 확인  [N] 보류·중단  [J] 상세 "
+      , "  [Y] 승인  [N] 거절  [J] 상세 " );
+      ( Say.Lang_en
+      , "  [Y/Enter] Confirm  [N] Hold/Drop  [J] Dive "
+      , "  [Y] Allow  [N] Deny  [J] Dive " );
     ];
 
   (* 2. [P2] All 5 Autonomous Companies including Creative & R&D stay visible
@@ -3619,6 +3624,38 @@ let test_pr54557_form_cursor_insertion_and_settings_secret_mask () =
     "PR54557/SettingsSecretEdit must never leak plaintext secret" false
     (Store_scroll.contains_ci ~needle:secret_plain txt_set)
 
+let test_ux_sweep_world_pulse_and_too_small_quit_arm () =
+  (* Finding #3: World Pulse keeps [3] Knowledge discovery visible across 80x24, 120x36, 140x40, 160x40 KO & EN *)
+  List.iter
+    (fun (lang, needle) ->
+      List.iter
+        (fun (cols, rows, empty_attn) ->
+          let m0 = populated_model ~cols ~rows ~lang in
+          let m =
+            if empty_attn then { m0 with attention = Attention.empty } else m0
+          in
+          let g, _ = render_full ~model:m ~cols ~rows in
+          assert_clean_grid
+            ~label:(Printf.sprintf "WorldPulse_%dx%d" cols rows)
+            g;
+          let txt = grid_all_text g in
+          assert_contains
+            ~label:(Printf.sprintf "WorldPulse_%dx%d shows %s" cols rows needle)
+            ~needle txt)
+        [ (80, 24, true); (120, 36, false); (140, 40, false); (160, 40, false) ])
+    [ (Say.Lang_ko, "[3] 지식"); (Say.Lang_en, "[3] Knowledge") ];
+  (* Finding #4: <40x12 too_small_guard displays armed Ctrl+Q confirmation prompt *)
+  let m_small =
+    {
+      (populated_model ~cols:36 ~rows:10 ~lang:Say.Lang_en) with
+      quit_armed_at = Some Clock.Mono.zero;
+    }
+  in
+  let g_small, _ = render_full ~model:m_small ~cols:36 ~rows:10 in
+  let txt_small = grid_all_text g_small in
+  assert_contains ~label:"TooSmallGuard shows armed Ctrl+Q prompt"
+    ~needle:"Press Ctrl+Q again to quit" txt_small
+
 let () =
   Alcotest.run "masc_tui_screens_core"
     [
@@ -3684,6 +3721,8 @@ let () =
             `Quick test_ask_answer_modal_and_honest_ask_surfaces;
           Alcotest.test_case "PR #54557: Form cursor insertion (ASCII/CJK) & Settings secret edit masking"
             `Quick test_pr54557_form_cursor_insertion_and_settings_secret_mask;
+          Alcotest.test_case "UX Sweep Findings #3/#4: World Pulse [3] across viewports & <40x12 Ctrl+Q armed prompt"
+            `Quick test_ux_sweep_world_pulse_and_too_small_quit_arm;
         ] );
       ( "memory_explorer",
         [

@@ -81,7 +81,11 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
   let inner =
     Card.draw ~cache grid ~rect ~theme
       (H.card_spec ?subtitle ?badge
-         ~hotkey:(Say.resolve lang (Say.make ~ko:"[Enter] 상세" ~en:"[Enter] Dive"))
+         ~hotkey:
+           (Say.resolve lang
+              (Say.make
+                 ~ko:"[→/Tab] 댓글 스크롤 · [Enter] 스레드 상세 · [c] 댓글 · [+][-] 투표(2회 확정)"
+                 ~en:"[→/Tab] Scroll Comments · [Enter] Open Thread · [c] Reply · [+][-] Vote (2x)"))
          ~focused title)
   in
   if Rect.is_empty inner then ()
@@ -169,48 +173,124 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
             | Some (tp, cs) when String.equal tp.id p.id -> cs
             | Some _ | None -> []
           in
-          let comment_rows =
-            if comments = [] || bottom - !y < 6 then 0
-            else Int.min 5 (1 + List.length comments)
+          let threaded = Knowledge_store.order_comments_threaded comments in
+          let body_lines =
+            if content.w <= 0 then []
+            else Markdown.render_lines ~width:content.w ~theme p.body
           in
-          let md_h = Int.max 0 (bottom - !y - comment_rows) in
-          if md_h > 0 then begin
-            let md_rect = Rect.make ~x:content.x ~y:!y ~w:content.w ~h:md_h in
+          let body_count = List.length body_lines in
+          let comment_rows_list =
+            if threaded = [] then []
+            else
+              `Divider
+              :: List.concat
+                   (List.map
+                      (fun (tc : Knowledge_store.threaded_comment) ->
+                        let c = tc.comment in
+                        let indent =
+                          if tc.depth <= 0 then ""
+                          else
+                            String.concat ""
+                              (List.init (tc.depth - 1) (fun _ -> "│ "))
+                            ^ "└─ "
+                        in
+                        let c_age = H.format_age ~now_unix c.created_at_unix in
+                        let hdr =
+                          Printf.sprintf "%s@%s · %s%d" indent c.author
+                            (Glyph.to_utf8 Glyph.Delta_up) c.score
+                        in
+                        let body_indent = String.make (tc.depth * 2) ' ' in
+                        [
+                          `Hdr (hdr, c_age);
+                          `Body (body_indent ^ H.sanitize_single_line c.body);
+                        ])
+                      threaded)
+          in
+          let comment_count = List.length comment_rows_list in
+          let total_lines = body_count + comment_count in
+          let rem_h = Int.max 0 (bottom - !y) in
+          let has_indicator = total_lines > rem_h && rem_h >= 2 in
+          let eff_h = if has_indicator then rem_h - 1 else rem_h in
+          let max_s = Int.max 0 (total_lines - Int.max 1 eff_h) in
+          let scroll = Int.min max_s (Int.max 0 k.detail_scroll_offset) in
+          if has_indicator then begin
+            let vis_start = scroll + 1 in
+            let vis_end = Int.min total_lines (scroll + eff_h) in
+            let below = Int.max 0 (total_lines - vis_end) in
+            let ind =
+              if below > 0 then
+                Say.resolve lang
+                  (Say.make
+                     ~ko:(Printf.sprintf "L%d-%d/%d · ↓ +%d줄 ([↑↓/PgDn] 스크롤)"
+                            vis_start vis_end total_lines below)
+                     ~en:(Printf.sprintf "L%d-%d/%d · ↓ +%dL ([↑↓/PgDn] scroll)"
+                            vis_start vis_end total_lines below))
+              else
+                Printf.sprintf "L%d-%d/%d" vis_start vis_end total_lines
+            in
             ignore
-              (Markdown.draw grid ~rect:md_rect ~theme ~osc8:true
-                 ~scroll:k.detail_scroll_offset p.body);
-            y := !y + md_h
+              (H.put_right ~grid ~clip:content
+                 ~right_x:(Rect.right content) ~y:!y ~max_w:content.w
+                 ~style:(H.whisper_style ~theme ()) ind);
+            incr y
           end;
-          if comment_rows > 0 && !y < bottom then begin
-            H.draw_divider ~grid ~rect:content ~y:!y ~theme
-              ~label:
-                (Printf.sprintf "%s (%d)"
-                   (Say.resolve lang (Say.make ~ko:"댓글" ~en:"Comments"))
-                   (List.length comments))
-              ();
-            incr y;
-            List.iter
-              (fun (c : Wire_knowledge.board_comment) ->
-                if !y < bottom then begin
-                  Card.draw_left_rail ~color:theme.border_inactive grid
-                    ~x:content.x ~y:!y ~h:1 ~theme;
-                  let c_age = H.format_age ~now_unix c.created_at_unix in
-                  let aw = Grapheme.display_width c_age in
-                  let body_s =
-                    Printf.sprintf "@%s  %s" c.author
-                      (H.sanitize_single_line c.body)
-                  in
-                  ignore
-                    (H.put_clipped ~grid ~clip:content ~x:(content.x + 2) ~y:!y
-                       ~max_w:(Int.max 6 (content.w - aw - 4))
-                       ~style:(H.secondary_style ~theme ()) body_s);
-                  ignore
-                    (H.put_right ~grid ~clip:content
-                       ~right_x:(Rect.right content) ~y:!y ~max_w:aw
-                       ~style:(H.whisper_style ~theme ()) c_age);
-                  incr y
-                end)
-              (H.safe_take (bottom - !y) comments)
+          let avail_h = Int.max 0 (bottom - !y) in
+          if avail_h > 0 then begin
+            let body_vis =
+              if scroll < body_count then
+                Int.min avail_h (body_count - scroll)
+              else 0
+            in
+            if body_vis > 0 then begin
+              let md_rect = Rect.make ~x:content.x ~y:!y ~w:content.w ~h:body_vis in
+              ignore
+                (Markdown.draw grid ~rect:md_rect ~theme ~osc8:true
+                   ~scroll p.body);
+              y := !y + body_vis
+            end;
+            let c_skip = Int.max 0 (scroll - body_count) in
+            let c_avail = Int.max 0 (bottom - !y) in
+            if c_avail > 0 && comment_count > 0 then
+              List.iter
+                (function
+                  | `Divider ->
+                      if !y < bottom then begin
+                        H.draw_divider ~grid ~rect:content ~y:!y ~theme
+                          ~label:
+                            (Printf.sprintf "%s (%d) · [c] %s"
+                               (Say.resolve lang (Say.make ~ko:"댓글" ~en:"Comments"))
+                               (List.length threaded)
+                               (Say.resolve lang (Say.make ~ko:"댓글" ~en:"Reply")))
+                          ();
+                        incr y
+                      end
+                  | `Hdr (hdr, c_age) ->
+                      if !y < bottom then begin
+                        Card.draw_left_rail ~color:theme.border_inactive grid
+                          ~x:content.x ~y:!y ~h:1 ~theme;
+                        let aw = Grapheme.display_width c_age in
+                        ignore
+                          (H.put_clipped ~grid ~clip:content ~x:(content.x + 2)
+                             ~y:!y ~max_w:(Int.max 6 (content.w - aw - 4))
+                             ~style:(H.accent_style ~theme ~attrs:Attr.bold ())
+                             hdr);
+                        ignore
+                          (H.put_right ~grid ~clip:content
+                             ~right_x:(Rect.right content) ~y:!y ~max_w:aw
+                             ~style:(H.whisper_style ~theme ()) c_age);
+                        incr y
+                      end
+                  | `Body body_s ->
+                      if !y < bottom then begin
+                        Card.draw_left_rail ~color:theme.border_inactive grid
+                          ~x:content.x ~y:!y ~h:1 ~theme;
+                        ignore
+                          (H.put_clipped ~grid ~clip:content ~x:(content.x + 2)
+                             ~y:!y ~max_w:(Int.max 6 (content.w - 2))
+                             ~style:(H.secondary_style ~theme ()) body_s);
+                        incr y
+                      end)
+                (Store_scroll.drop c_skip comment_rows_list |> H.safe_take c_avail)
           end
 
 let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
@@ -352,15 +432,15 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     let space_hint =
       match Knowledge_store.board_space_effect k with
       | Knowledge_store.Board_space_toggle_chain _ ->
-          Say.make ~ko:"[Space] 계승 · [c] 댓글 · [+][-] 투표"
-            ~en:"[Space] Chain · [c] Comment · [+][-] Vote"
+          Say.make ~ko:"[→/Tab] 댓글 · [Space] 계승 · [c] 댓글 · [+][-] 투표(2회)"
+            ~en:"[→/Tab] Comments · [Space] Chain · [c] Reply · [+][-] Vote(2x)"
       | Knowledge_store.Board_space_toggle_signal_only ->
           if k.board_signal_only then
-            Say.make ~ko:"[s] 전체 보기 · [c] 댓글 · [+][-] 투표"
-              ~en:"[s] Show all · [c] Comment · [+][-] Vote"
+            Say.make ~ko:"[→/Tab] 댓글 · [s] 전체 · [c] 댓글 · [+][-] 투표(2회)"
+              ~en:"[→/Tab] Comments · [s] All · [c] Reply · [+][-] Vote(2x)"
           else
-            Say.make ~ko:"[s] 신호만 · [c] 댓글 · [+][-] 투표"
-              ~en:"[s] Signal only · [c] Comment · [+][-] Vote"
+            Say.make ~ko:"[→/Tab] 댓글 · [s] 신호만 · [c] 댓글 · [+][-] 투표(2회)"
+              ~en:"[→/Tab] Comments · [s] Signal · [c] Reply · [+][-] Vote(2x)"
     in
     let list_inner =
       Card.draw ~cache grid ~rect:list_rect ~theme
@@ -703,8 +783,8 @@ let draw_wiki_preview ~show_inline_rail ~target_slug ~scroll ~grid ~cache
                    Say.make ~ko:"[e] 편집 · [Ctrl+E] $EDITOR · [Esc] 뒤로"
                      ~en:"[e] Edit · [Ctrl+E] $EDITOR · [Esc] Back"
                | None ->
-                   Say.make ~ko:"[Enter] 전체보기 · [e] 편집 · [Ctrl+E] $EDITOR"
-                     ~en:"[Enter] Dive · [e] Edit · [Ctrl+E] $EDITOR"))
+                   Say.make ~ko:"[→/Tab] 스크롤 · [Enter] 전체보기 · [e] 편집 · [Ctrl+E] $EDITOR"
+                     ~en:"[→/Tab] Scroll · [Enter] Dive · [e] Edit · [Ctrl+E] $EDITOR"))
          title)
   in
   if Rect.is_empty inner then ()
@@ -721,11 +801,37 @@ let draw_wiki_preview ~show_inline_rail ~target_slug ~scroll ~grid ~cache
             let sub =
               Printf.sprintf "%s · @%s%s" d.slug d.frontmatter.author tags
             in
-            let right_meta =
-              Printf.sprintf "%s · r%d" d.frontmatter.updated
-                d.frontmatter.revision
+            let total_md_lines =
+              let pw =
+                let show_toc =
+                  Layout.equal_breakpoint bp Layout.Wide
+                  && inner.w >= 68
+                  && inner.h >= 10
+                in
+                let base_w = if show_toc then Int.max 20 (inner.w - 23) else inner.w in
+                Int.max 1 (base_w - (2 * pad_x))
+              in
+              List.length (Markdown.render_lines ~width:pw ~theme d.body_markdown)
             in
             let band_h = if inner.h >= 7 then 2 else 1 in
+            let approx_vis = Int.max 1 (inner.h - band_h - 2) in
+            let right_meta =
+              let base =
+                Printf.sprintf "%s · r%d" d.frontmatter.updated
+                  d.frontmatter.revision
+              in
+              if total_md_lines > approx_vis then
+                let cs =
+                  Int.min (Int.max 0 (total_md_lines - approx_vis))
+                    (Int.max 0 scroll)
+                in
+                let ve = Int.min total_md_lines (cs + approx_vis) in
+                let rem = Int.max 0 (total_md_lines - ve) in
+                if rem > 0 then
+                  Printf.sprintf "%s · L%d-%d/%d ↓+%d" base (cs + 1) ve total_md_lines rem
+                else Printf.sprintf "%s · L%d-%d/%d" base (cs + 1) ve total_md_lines
+              else base
+            in
             Card.draw_section_band ~pad_x grid
               ~rect:(Rect.make ~x:inner.x ~y:inner.y ~w:inner.w ~h:band_h)
               ~theme ~left_title:d.frontmatter.title ~right_meta
@@ -1361,11 +1467,11 @@ let draw_rich_artifact_pane ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
         (Say.make
            ~ko:
              (Printf.sprintf
-                "[v] 뷰 · [y] %s · [e] %s · [c] 확인 · [P] 공유 · [Enter] 전체뷰"
+                "[v] 뷰 · [y] %s · [e] %s · [→/Tab] 스크롤 · [c] 확인 · [P] 공유 · [Enter] 전체뷰"
                 fmt_s ext_s)
            ~en:
              (Printf.sprintf
-                "[v] View · [y] %s · [e] %s · [c] Check · [P] Share · [Enter] Dive"
+                "[v] View · [y] %s · [e] %s · [→/Tab] Scroll · [c] Check · [P] Share · [Enter] Dive"
                 fmt_s ext_s))
   in
   let title =
@@ -2725,19 +2831,7 @@ let render_dive_thread ~post_id ~(model : Model.t) ~cache ~(rect : Rect.t)
   let post_and_comments =
     match Observed.to_option k.active_thread with
     | Some (p, cs) when String.equal p.id post_id -> Some (p, cs)
-    | Some (p, cs) -> (
-        match Observed.to_option k.board with
-        | Some f -> (
-            match
-              List.find_opt
-                (fun (bp : Wire_knowledge.board_post) ->
-                  String.equal bp.id post_id)
-                f.posts
-            with
-            | Some bp -> Some (bp, [])
-            | None -> Some (p, cs))
-        | None -> Some (p, cs))
-    | None -> (
+    | Some _ | None -> (
         match Observed.to_option k.board with
         | Some f -> (
             match
@@ -2795,7 +2889,9 @@ let render_dive_thread ~post_id ~(model : Model.t) ~cache ~(rect : Rect.t)
         glyph = None;
       };
       {
-        H.label = "[+][-] Vote";
+        H.label =
+          Say.resolve lang
+            (Say.make ~ko:"[+][-] 투표(2회 확정)" ~en:"[+][-] Vote (2x)");
         active = Option.is_some k.armed_vote;
         tone =
           Some
@@ -2805,7 +2901,7 @@ let render_dive_thread ~post_id ~(model : Model.t) ~cache ~(rect : Rect.t)
       };
       {
         H.label = Say.resolve lang (Say.make ~ko:"[< >] 댓글 선택" ~en:"[< >] Comment");
-        active = Option.is_some k.thread_selected_comment;
+        active = Option.is_some (Knowledge_store.selected_thread_comment ~post_id k);
         tone = Some Theme.Status_ai;
         glyph = None;
       };
@@ -2830,15 +2926,36 @@ let render_dive_thread ~post_id ~(model : Model.t) ~cache ~(rect : Rect.t)
   let inner =
     Card.draw ~cache grid ~rect:body_rect ~theme
       (H.card_spec ?badge ~focused:(Model.body_has_focus model)
-         ~hotkey:(Say.resolve lang (Say.make ~ko:"[Esc] 뒤로" ~en:"[Esc] Back"))
+         ~hotkey:
+           (Say.resolve lang
+              (Say.make
+                 ~ko:"[↑↓/PgDn] 댓글 스크롤 · [c] 댓글 · [+][-] 투표(2회 확정) · [Esc] 뒤로"
+                 ~en:"[↑↓/PgDn] Scroll Comments · [c] Reply · [+][-] Vote (2x) · [Esc] Back"))
          title)
   in
   if Rect.is_empty inner then ()
   else
     match post_and_comments with
     | None ->
+        let slot =
+          match k.active_thread with
+          | Observed.Value { data = tp, _; _ }
+            when not (String.equal tp.id post_id) ->
+              Observed.loading ~since_ns:model.freshness.last_mono
+          | Observed.Failed _
+            when not
+                   (Option.equal String.equal k.active_thread_target
+                      (Some post_id)) ->
+              Observed.loading ~since_ns:model.freshness.last_mono
+          | Observed.Loading _
+          | Observed.Value _
+          | Observed.Absent
+          | Observed.Unreported
+          | Observed.Failed _ ->
+              k.active_thread
+        in
         H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp inner) ~theme
-          ~lang k.active_thread
+          ~lang slot
     | Some (p, comments) ->
         let pad_x = Layout.card_pad_x bp in
         let hearth = match p.hearth with Some h -> "#" ^ h | None -> "#general" in
@@ -2912,14 +3029,6 @@ let render_dive_thread ~post_id ~(model : Model.t) ~cache ~(rect : Rect.t)
             y := !y + body_h
           end;
           if comments_h > 0 && !y < bottom then begin
-            H.draw_divider ~grid ~rect:content ~y:!y ~theme
-              ~label:
-                (Printf.sprintf "%s (%d) · [c] %s"
-                   (Say.resolve lang (Say.make ~ko:"댓글" ~en:"Comments"))
-                   (List.length threaded)
-                   (Say.resolve lang (Say.make ~ko:"답글" ~en:"Reply")))
-              ();
-            incr y;
             let c_lines =
               List.concat
                 (List.mapi
@@ -2948,9 +3057,27 @@ let render_dive_thread ~post_id ~(model : Model.t) ~cache ~(rect : Rect.t)
                      ])
                    threaded)
             in
-            let c_vis_h = Int.max 1 (bottom - !y) in
-            let c_max = Int.max 0 (List.length c_lines - c_vis_h) in
+            let c_vis_h = Int.max 1 (bottom - !y - 1) in
+            let total_cl = List.length c_lines in
+            let c_max = Int.max 0 (total_cl - c_vis_h) in
             let c_skip = Int.min c_max (Int.max 0 (raw_scroll - body_max)) in
+            let scroll_suffix =
+              if c_max > 0 then
+                let ve = Int.min total_cl (c_skip + c_vis_h) in
+                let rem = Int.max 0 (total_cl - ve) in
+                if rem > 0 then
+                  Printf.sprintf " · L%d-%d/%d · ↓ +%d" (c_skip + 1) ve total_cl rem
+                else Printf.sprintf " · L%d-%d/%d" (c_skip + 1) ve total_cl
+              else ""
+            in
+            H.draw_divider ~grid ~rect:content ~y:!y ~theme
+              ~label:
+                (Printf.sprintf "%s (%d)%s · [c] %s"
+                   (Say.resolve lang (Say.make ~ko:"댓글" ~en:"Comments"))
+                   (List.length threaded) scroll_suffix
+                   (Say.resolve lang (Say.make ~ko:"답글" ~en:"Reply")))
+              ();
+            incr y;
             let tx = content.x + 2 and tw = Int.max 0 (content.w - 2) in
             List.iter
               (function

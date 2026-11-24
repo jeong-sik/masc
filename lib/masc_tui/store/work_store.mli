@@ -35,6 +35,21 @@ type task_status_filter =
   | Status_done
 (** Tasks status filter chip on [2 Work > Tasks]. *)
 
+type goal_phase_filter =
+  | Goal_filter_all
+  | Goal_filter_active
+  | Goal_filter_verifying
+  | Goal_filter_held
+  | Goal_filter_closed
+(** Goals phase filter chip on [2 Work > Goals]. *)
+
+type goal_sort_mode =
+  | Goal_sort_default
+  | Goal_sort_phase
+  | Goal_sort_progress
+  | Goal_sort_recent
+(** Goals sort order on [2 Work > Goals]. *)
+
 type verification_dive_tab =
   | Verif_tab_evidence
   | Verif_tab_summary
@@ -69,9 +84,17 @@ type t = {
   verif_scroll_offset : int;
   detail_scroll_offset : int;
   ledger_scroll_offset : int;
+  goal_dive_task_index : int;
+  goal_dive_task_scroll : int;
+  goal_dive_verif_index : int;
+  goal_dive_verif_scroll : int;
+  task_dive_desc_scroll : int;
+  task_dive_verif_scroll : int;
   pulse_goal_index : int;
   schedules_scroll_offset : int;
   filter_query : string;
+  goal_phase_filter : goal_phase_filter;
+  goal_sort_mode : goal_sort_mode;
   task_status_filter : task_status_filter;
   verification_view : [ `Pending | `All ];
   expanded_ids : String_set.t;
@@ -172,6 +195,36 @@ val all_task_status_filters : task_status_filter list
 val set_task_status_filter : task_status_filter -> t -> t
 val cycle_task_status_filter : t -> t
 (** Next chip in {!all_task_status_filters} order, wrapping to [Status_all]. *)
+
+val equal_goal_phase_filter : goal_phase_filter -> goal_phase_filter -> bool
+val all_goal_phase_filters : goal_phase_filter list
+val set_goal_phase_filter : goal_phase_filter -> t -> t
+val cycle_goal_phase_filter : t -> t
+
+val equal_goal_sort_mode : goal_sort_mode -> goal_sort_mode -> bool
+val set_goal_sort_mode : goal_sort_mode -> t -> t
+val cycle_goal_sort_mode : t -> t
+
+val goal_linked_tasks : goal_id:string -> t -> Wire_work.task list
+val goal_linked_verifications :
+  goal_id:string -> t -> Wire_work.verification_request list
+val selected_goal_dive_task : goal_id:string -> t -> Wire_work.task option
+val selected_goal_dive_verification :
+  goal_id:string -> t -> Wire_work.verification_request option
+val reset_goal_dive_state : t -> t
+val move_goal_dive_task :
+  goal_id:string -> ?viewport_rows:int -> delta:int -> t -> t
+val move_goal_dive_verif :
+  goal_id:string -> ?viewport_rows:int -> delta:int -> t -> t
+
+val verification_for_task :
+  task_id:string -> t -> Wire_work.verification_request option
+val reset_task_dive_scroll : t -> t
+val scroll_task_dive_desc : max_scroll:int -> delta:int -> t -> t
+val scroll_task_dive_verif : max_scroll:int -> delta:int -> t -> t
+
+val harness_verdicts_list : t -> Wire_work.harness_verdict_row list
+
 val toggle_verification_view : t -> t
 val toggle_expanded : string -> t -> t
 val mark_stale_all : t -> t

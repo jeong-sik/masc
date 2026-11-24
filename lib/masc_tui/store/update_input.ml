@@ -1350,10 +1350,7 @@ let goal_action_on_approve ~now (m : Model.t) (g : Wire_work.goal) =
 let goal_action_on_stop ~now (m : Model.t) (g : Wire_work.goal) =
   match g.phase with
   | Wire_work.Paused _ ->
-      request_goal_transition ~now m ~level:Model.Toast_warning
-        ~toast:
-          (Say.make ~ko:("목표 폐기(Drop) 요청: " ^ g.title) ~en:("Dropping goal: " ^ g.title))
-        g Wire_work.Drop
+      Update_nav.open_inline_modal m (Nav.Goal_drop g.id)
   | Wire_work.Executing
   | Wire_work.Verifying
   | Wire_work.Awaiting_confirmation
@@ -1642,30 +1639,18 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
           (Work_store.verifications_list m.work)
       in
       match printable_char, ver_opt with
-      | Some "a", Some v ->
+      | Some "a", Some v -> Update_nav.approve_verification_request ~now m v
+      | Some "x", Some v -> Update_nav.reject_verification_request ~now m v
+      | Some "x", None ->
           ( Model.with_toast ~now ~level:Model.Toast_info
-              (Say.make
-                 ~ko:("검증 승인 전송: " ^ v.task_title)
-                 ~en:("Approving verification: " ^ v.task_title))
+              (Say.make ~ko:"검증 요청을 찾을 수 없습니다"
+                 ~en:"Verification request not found")
               m
-          , [
-              Cmd.Http_post
-                {
-                  epoch = m.epoch;
-                  req =
-                    Cmd.Post_verification_verdict
-                      {
-                        task_id = v.task_id;
-                        verification_id = v.request_id;
-                        verdict = Wire_work.Verdict_approve;
-                        notes = None;
-                      };
-                };
-            ] )
-      | Some "x", _ ->
-          Update_nav.open_inline_modal m (Nav.Verification_reject req_id)
-      | Some ("h" | "X"), (Some _ | None) ->
-          Update_nav.open_inline_modal m (Nav.Harness_overrule "")
+          , [] )
+      | Some "h", (Some _ | None) ->
+          Update_nav.open_harness_overrule_for_context ~verdict:"approve" ~now m
+      | Some "X", (Some _ | None) ->
+          Update_nav.open_harness_overrule_for_context ~verdict:"reject" ~now m
       | _ -> (m, []))
   | Some (Nav.Dive_work (Nav.Goal_dive goal_id)) -> (
       let goal_opt =
@@ -1675,20 +1660,20 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
       in
       match printable_char, goal_opt with
       | Some "a", Some g -> goal_action_on_approve ~now m g
-      | Some "c", Some g ->
-          request_goal_transition ~now m ~level:Model.Toast_info
-            ~toast:
-              (Say.make
-                 ~ko:("목표 완료 검증 요청: " ^ g.title)
-                 ~en:("Requesting goal completion: " ^ g.title))
-            g Wire_work.Request_complete
+      | Some "c", Some g -> Update_nav.request_goal_complete_guarded ~now m g
       | Some "x", Some g -> goal_action_on_stop ~now m g
+      | Some "h", (Some _ | None) ->
+          Update_nav.open_harness_overrule_for_context ~verdict:"approve" ~now m
+      | Some "X", (Some _ | None) ->
+          Update_nav.open_harness_overrule_for_context ~verdict:"reject" ~now m
       | _ -> (m, []))
   | Some (Nav.Dive_work (Nav.Task_dive task_id)) -> (
       match printable_char with
       | Some "x" -> Update_nav.open_inline_modal m (Nav.Task_cancel task_id)
-      | Some ("h" | "X") ->
-          Update_nav.open_inline_modal m (Nav.Harness_overrule "")
+      | Some "h" ->
+          Update_nav.open_harness_overrule_for_context ~verdict:"approve" ~now m
+      | Some "X" ->
+          Update_nav.open_harness_overrule_for_context ~verdict:"reject" ~now m
       | _ -> (m, []))
   | Some (Nav.Dive_knowledge (Nav.Wiki_dive slug)) ->
       if is_ctrl_e then
@@ -2210,7 +2195,7 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
               match active_target with
               | `Hidden_verif -> (
                   match printable_char with
-                  | Some ("a" | "x") ->
+                  | Some ("a" | "x" | "h" | "X") ->
                       ( Model.with_toast ~now ~level:Model.Toast_warning
                           (Say.make
                              ~ko:"화면에 표시된 검증 항목이 없습니다 (창 높이를 늘려주세요)"
@@ -2221,50 +2206,37 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
               | `Goal g -> (
                   match printable_char with
                   | Some "a" -> goal_action_on_approve ~now m g
-                  | Some "c" ->
-                      request_goal_transition ~now m ~level:Model.Toast_info
-                        ~toast:
-                          (Say.make
-                             ~ko:("목표 완료 검증 요청: " ^ g.title)
-                             ~en:("Requesting goal completion: " ^ g.title))
-                        g Wire_work.Request_complete
+                  | Some "c" -> Update_nav.request_goal_complete_guarded ~now m g
                   | Some "x" -> goal_action_on_stop ~now m g
+                  | Some "h" ->
+                      Update_nav.open_harness_overrule_for_context
+                        ~verdict:"approve" ~now m
+                  | Some "X" ->
+                      Update_nav.open_harness_overrule_for_context
+                        ~verdict:"reject" ~now m
                   | _ -> (m, []))
               | `Verification v -> (
                   match printable_char with
-                  | Some "a" ->
-                      ( Model.with_toast ~now ~level:Model.Toast_info
-                          (Say.make
-                             ~ko:("검증 승인 전송: " ^ v.task_title)
-                             ~en:("Approving verification: " ^ v.task_title))
-                          m
-                      , [
-                          Cmd.Http_post
-                            {
-                              epoch = m.epoch;
-                              req =
-                                Cmd.Post_verification_verdict
-                                  {
-                                    task_id = v.task_id;
-                                    verification_id = v.request_id;
-                                    verdict = Wire_work.Verdict_approve;
-                                    notes = None;
-                                  };
-                            };
-                        ] )
-                  | Some "x" ->
-                      Update_nav.open_inline_modal m
-                        (Nav.Verification_reject v.request_id)
-                  | Some ("h" | "X") ->
-                      Update_nav.open_inline_modal m (Nav.Harness_overrule "")
+                  | Some "a" -> Update_nav.approve_verification_request ~now m v
+                  | Some "x" -> Update_nav.reject_verification_request ~now m v
+                  | Some "h" ->
+                      Update_nav.open_harness_overrule_for_context
+                        ~verdict:"approve" ~now m
+                  | Some "X" ->
+                      Update_nav.open_harness_overrule_for_context
+                        ~verdict:"reject" ~now m
                   | _ -> (m, []))
               | `None -> (m, []))
           | Nav.Work_tasks -> (
               match Work_store.selected_task m.work, printable_char with
               | Some task, Some "x" ->
                   Update_nav.open_inline_modal m (Nav.Task_cancel task.id)
-              | Some _, Some ("h" | "X") ->
-                  Update_nav.open_inline_modal m (Nav.Harness_overrule "")
+              | Some _, Some "h" ->
+                  Update_nav.open_harness_overrule_for_context ~verdict:"approve"
+                    ~now m
+              | Some _, Some "X" ->
+                  Update_nav.open_harness_overrule_for_context ~verdict:"reject"
+                    ~now m
               | _ -> (m, []))
           | Nav.Work_inbox -> (
               match printable_char with
@@ -2566,6 +2538,59 @@ let dispatch_keeper_config_key ~now (m : Model.t)
 
 let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
   let norm = Keymap.normalize_key_event ev in
+  let is_quit_key =
+    match Keymap.dispatch ~scope_chain:[ Keymap.Global ] norm with
+    | Some act -> Keymap.equal_action act Keymap.Quit_app
+    | None -> false
+  in
+  let is_quit_arm_toast (t : Model.toast) =
+    String.equal t.message.ko "한 번 더 Ctrl+Q를 누르면 종료합니다"
+  in
+  let quit_arm_active =
+    match m.quit_armed_at with
+    | Some armed_at ->
+        let elapsed = Clock.Mono.seconds_since now ~since:armed_at in
+        elapsed >= 0.0 && elapsed <= Model.quit_arm_window_s
+    | None -> false
+  in
+  let m =
+    if Option.is_some m.quit_armed_at && not is_quit_key then
+      let toast =
+        match m.toast with
+        | Some t when is_quit_arm_toast t -> None
+        | other -> other
+      in
+      { m with quit_armed_at = None; toast }
+    else m
+  in
+  let is_plain_escape =
+    (not norm.mods.ctrl)
+    && (not norm.mods.alt)
+    &&
+    match norm.key with
+    | Keymap.Input.Escape -> true
+    | Keymap.Input.Char _
+    | Keymap.Input.Enter
+    | Keymap.Input.Tab
+    | Keymap.Input.Backspace
+    | Keymap.Input.Delete
+    | Keymap.Input.Insert
+    | Keymap.Input.Up
+    | Keymap.Input.Down
+    | Keymap.Input.Left
+    | Keymap.Input.Right
+    | Keymap.Input.Home
+    | Keymap.Input.End
+    | Keymap.Input.Page_up
+    | Keymap.Input.Page_down
+    | Keymap.Input.Function _ ->
+        false
+  in
+  (* Plain Esc consumes only the quit arm without popping an active dive/modal.
+     Every other non-Quit_app key disarms above AND continues normal dispatch
+     so the user's first keypress is never lost. *)
+  if quit_arm_active && (not is_quit_key) && is_plain_escape then (m, [])
+  else
   (* Top-precedence Micro_viewport gate per tui-chat-design/SKILL.md: never
      mutate hidden drafts or underlying overlays. On <40x12 only Quit_app is
      accepted; on Micro (<80x24) only Quit_app, Force_refresh, and
@@ -2752,6 +2777,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                         | Nav.Verification_reject _
                         | Nav.Harness_overrule _
                         | Nav.Task_cancel _
+                        | Nav.Goal_drop _
                         | Nav.Schedule_form
                         | Nav.Connector_form
                         | Nav.Repo_add_form
@@ -2887,6 +2913,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                         | Nav.Verification_reject _
                         | Nav.Harness_overrule _
                         | Nav.Task_cancel _
+                        | Nav.Goal_drop _
                         | Nav.Schedule_form
                         | Nav.Repo_add_form
                         | Nav.Board_comment _
@@ -3684,6 +3711,12 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                     Drafts.move_cursor_vertical `Down m.drafts;
                                 }
                               , [] )
+                          | Keymap.Input.Page_up
+                            when (not norm.mods.ctrl) && not norm.mods.alt ->
+                              Update_nav.apply_move m Keymap.Page_up
+                          | Keymap.Input.Page_down
+                            when (not norm.mods.ctrl) && not norm.mods.alt ->
+                              Update_nav.apply_move m Keymap.Page_down
                           | Keymap.Input.Char _
                           | Keymap.Input.Enter
                           | Keymap.Input.Tab
@@ -3737,6 +3770,7 @@ let apply_paste ~now:_ (m : Model.t) text =
                   | Nav.Verification_reject _
                   | Nav.Harness_overrule _
                   | Nav.Task_cancel _
+                  | Nav.Goal_drop _
                   | Nav.Schedule_form
                   | Nav.Connector_form
                   | Nav.Repo_add_form

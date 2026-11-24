@@ -107,10 +107,13 @@ type http_reply =
   | Reply_board_feed of (Wire_knowledge.board_feed, http_error) result
   | Reply_board_hearths of
       (Wire_knowledge.board_hearth_entry list, http_error) result
-  | Reply_board_thread of
-      ( Wire_knowledge.board_post * Wire_knowledge.board_comment list
-      , http_error )
-      result
+  | Reply_board_thread of {
+      post_id : string;
+      result :
+        ( Wire_knowledge.board_post * Wire_knowledge.board_comment list
+        , http_error )
+        result;
+    }
   | Reply_board_comment of { post_id : string; result : (unit, http_error) result }
   | Reply_board_vote of { post_id : string; result : (unit, http_error) result }
   | Reply_wiki_index of (Wire_knowledge.wiki_index, http_error) result

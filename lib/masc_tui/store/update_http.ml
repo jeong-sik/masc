@@ -710,9 +710,19 @@ let apply_http_reply ~now (m : Model.t) reply =
             ~en:"Candle ledger fetch" err)
   | Msg.Reply_work_mutation
       { label; attention_id; decision_kind; target_id; keeper; result = Ok () } ->
+      let attention_query =
+        if
+          m.nav.dive_stack = []
+          && Nav.equal_workspace m.nav.workspace Nav.Work
+          && Nav.equal_work_tab m.work.active_tab Nav.Work_inbox
+        then m.work.filter_query
+        else ""
+      in
       let attention =
         match attention_id with
-        | Some id -> Attention.advance_after_resolution ~resolved_id:id m.attention
+        | Some id ->
+            Attention.advance_after_resolution ~query:attention_query
+              ~resolved_id:id m.attention
         | None -> m.attention
       in
       let work =
@@ -790,9 +800,17 @@ let apply_http_reply ~now (m : Model.t) reply =
             ~kind:decision_kind ~target_id:approval_id ~keeper:(Some keeper)
             ~summary:(Say.resolve m.lang label) m.work
         in
+        let attention_query =
+          if
+            m.nav.dive_stack = []
+            && Nav.equal_workspace m.nav.workspace Nav.Work
+            && Nav.equal_work_tab m.work.active_tab Nav.Work_inbox
+          then m.work.filter_query
+          else ""
+        in
         let attention =
-          Attention.advance_after_resolution ~resolved_id:attention_id
-            m.attention
+          Attention.advance_after_resolution ~query:attention_query
+            ~resolved_id:attention_id m.attention
         in
         ({ m with attention; work } |> Model.with_toast ~now ~level label, [])
       in
@@ -836,12 +854,56 @@ let apply_http_reply ~now (m : Model.t) reply =
       in
       fail_decision_post ~now ~attention_id:(Some attention_id) ~context err m
   | Msg.Reply_board_feed (Ok feed) ->
-      ( {
+      let next0 =
+        {
           m with
           knowledge = Knowledge_store.apply_board ~observed_at:now feed m.knowledge;
         }
         |> Model.sync_effective_scorecard ~now
-      , [] )
+      in
+      let next, thread_cmds =
+        if
+          Option.is_none (Model.active_dive next0)
+          && Nav.equal_workspace next0.nav.workspace Nav.Knowledge
+          && Nav.equal_knowledge_tab next0.knowledge.active_tab
+               Nav.Knowledge_board
+        then
+          match Knowledge_store.selected_post next0.knowledge with
+          | None -> (next0, [])
+          | Some p ->
+              let already_settled =
+                match next0.knowledge.active_thread with
+                | Observed.Value { data = tp, _; stale = false; _ } ->
+                    String.equal tp.id p.id
+                | Observed.Failed { retryable = false; _ }
+                | Observed.Loading _ ->
+                    Option.equal String.equal
+                      next0.knowledge.active_thread_target (Some p.id)
+                | Observed.Value { stale = true; _ }
+                | Observed.Absent
+                | Observed.Unreported
+                | Observed.Failed { retryable = true; _ } ->
+                    false
+              in
+              if already_settled then (next0, [])
+              else
+                let knowledge =
+                  Knowledge_store.mark_thread_loading ~post_id:p.id
+                    ~since_ns:now next0.knowledge
+                in
+                ( { next0 with knowledge }
+                , [
+                    Cmd.Http_get
+                      {
+                        epoch = m.epoch;
+                        req =
+                          Cmd.Get_board_thread
+                            { post_id = p.id; comment_limit = Some 100 };
+                      };
+                  ] )
+        else (next0, [])
+      in
+      (next, thread_cmds)
   | Msg.Reply_board_feed (Error err) ->
       err_reply
         ~fail:
@@ -849,20 +911,69 @@ let apply_http_reply ~now (m : Model.t) reply =
                { x with board = failed_slot err x.board }))
         ~source:Health.Source_client_http ~ko:"보드 피드 조회"
         ~en:"Board feed fetch" err
-  | Msg.Reply_board_thread (Ok thread) ->
-      ( {
-          m with
-          knowledge =
-            Knowledge_store.apply_thread ~observed_at:now thread m.knowledge;
-        }
-      , [] )
-  | Msg.Reply_board_thread (Error err) ->
-      err_reply
-        ~fail:
-          (on_knowledge (fun (x : Knowledge_store.t) ->
-               { x with active_thread = failed_slot err x.active_thread }))
-        ~source:Health.Source_client_http ~ko:"보드 스레드 조회"
-        ~en:"Board thread fetch" err
+  | Msg.Reply_board_thread { post_id; result = Ok ((tp, _) as thread) } ->
+      let matches_active =
+        match Model.active_dive m with
+        | Some (Nav.Dive_knowledge (Nav.Thread_dive pid)) ->
+            String.equal pid post_id || String.equal pid tp.id
+        | Some
+            ( Nav.Dive_knowledge
+                ( Nav.Wiki_dive _
+                | Nav.Artifact_dive _
+                | Nav.Memory_diff_dive _ )
+            | Nav.Dive_keeper _
+            | Nav.Dive_work _
+            | Nav.Dive_runtime _
+            | Nav.Dive_infra _ ) ->
+            false
+        | None -> (
+            match Knowledge_store.selected_post m.knowledge with
+            | Some p -> String.equal p.id post_id || String.equal p.id tp.id
+            | None -> true)
+      in
+      if not matches_active then (m, [])
+      else
+        ( {
+            m with
+            knowledge =
+              Knowledge_store.apply_thread ~observed_at:now thread m.knowledge;
+          }
+        , [] )
+  | Msg.Reply_board_thread { post_id; result = Error err } ->
+      let matches_active =
+        match Model.active_dive m with
+        | Some (Nav.Dive_knowledge (Nav.Thread_dive pid)) ->
+            String.equal pid post_id
+        | Some
+            ( Nav.Dive_knowledge
+                ( Nav.Wiki_dive _
+                | Nav.Artifact_dive _
+                | Nav.Memory_diff_dive _ )
+            | Nav.Dive_keeper _
+            | Nav.Dive_work _
+            | Nav.Dive_runtime _
+            | Nav.Dive_infra _ ) ->
+            false
+        | None -> (
+            match Knowledge_store.selected_post m.knowledge with
+            | Some p -> String.equal p.id post_id
+            | None -> true)
+      in
+      if not matches_active then (m, [])
+      else
+        let retryable =
+          match err with
+          | Msg.Transport _ -> true
+          | Msg.Http_error { status; _ } -> status >= 500 || status = 429
+          | Msg.Workspace_mismatch _ | Msg.Decode_error _ -> false
+        in
+        err_reply
+          ~fail:
+            (on_knowledge (fun (x : Knowledge_store.t) ->
+                 Knowledge_store.mark_thread_failed ~target:post_id ~at:now
+                   ~reason:(Msg.http_error_detail err) ~retryable x))
+          ~source:Health.Source_client_http ~ko:"보드 스레드 조회"
+          ~en:"Board thread fetch" err
   | Msg.Reply_board_hearths (Ok hs) ->
       ( {
           m with
@@ -891,6 +1002,7 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Verification_reject _
         | Nav.Harness_overrule _
         | Nav.Task_cancel _
+        | Nav.Goal_drop _
         | Nav.Schedule_form
         | Nav.Connector_form
         | Nav.Repo_add_form
@@ -968,6 +1080,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Verification_reject _
             | Nav.Harness_overrule _
             | Nav.Task_cancel _
+            | Nav.Goal_drop _
             | Nav.Schedule_form
             | Nav.Connector_form
             | Nav.Repo_add_form
@@ -2829,6 +2942,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Gate_reject _
             | Nav.Verification_reject _
             | Nav.Task_cancel _
+            | Nav.Goal_drop _
             | Nav.Schedule_form
             | Nav.Connector_form
             | Nav.Repo_add_form
@@ -2843,6 +2957,7 @@ let apply_http_reply ~now (m : Model.t) reply =
              | Nav.Gate_reject _
              | Nav.Verification_reject _
              | Nav.Task_cancel _
+             | Nav.Goal_drop _
              | Nav.Schedule_form
              | Nav.Connector_form
              | Nav.Repo_add_form
@@ -2924,6 +3039,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Gate_reject _
             | Nav.Verification_reject _
             | Nav.Task_cancel _
+            | Nav.Goal_drop _
             | Nav.Schedule_form
             | Nav.Connector_form
             | Nav.Repo_add_form
@@ -2938,6 +3054,7 @@ let apply_http_reply ~now (m : Model.t) reply =
              | Nav.Gate_reject _
              | Nav.Verification_reject _
              | Nav.Task_cancel _
+             | Nav.Goal_drop _
              | Nav.Schedule_form
              | Nav.Connector_form
              | Nav.Repo_add_form

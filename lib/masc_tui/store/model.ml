@@ -21,6 +21,7 @@ type composer_mode =
 type nav_state = {
   workspace : Nav.workspace;
   dive_stack : Nav.dive list;
+  dive_return_stack : (int * bool) list;
   overlay : Nav.overlay option;
   pane_index : int;
   pre_zoom_pane_index : int option;
@@ -196,7 +197,10 @@ type t = {
   inline_modal : inline_modal_state option;
   ask_modal : ask_modal option;
   toast : toast option;
+  quit_armed_at : Clock.Mono.t option;
 }
+
+let quit_arm_window_s = 2.5
 
 let equal_breakpoint a b =
   match a, b with
@@ -285,6 +289,7 @@ let initial ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_ko)
       {
         workspace = Nav.Pulse;
         dive_stack = [];
+        dive_return_stack = [];
         overlay = None;
         pane_index = 0;
         pre_zoom_pane_index = None;
@@ -338,6 +343,7 @@ let initial ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_ko)
     inline_modal = None;
     ask_modal = None;
     toast = None;
+    quit_armed_at = None;
   }
 
 let active_dive m =
@@ -418,8 +424,7 @@ let fast_approval_strip_item m =
         | Nav.Queue_context _
         | Nav.Inline_action _
         | Nav.Ask_answer
-        | Nav.Help ) ->
-        Attention.top_fast_path m.attention
+        | Nav.Help )
     | None ->
         if
           m.nav.dive_stack = []
@@ -441,13 +446,12 @@ let fast_approval_strip_item m =
         else if
           m.nav.dive_stack = []
           && Nav.equal_workspace m.nav.workspace Nav.Pulse
-          && (not (Attention.is_empty m.attention))
-          && Int.equal m.nav.pane_index 0
+          && equal_pulse_pane (active_pulse_pane m) Pulse_attention
         then
           match Attention.current_filtered_item ~query:"" m.attention with
           | Some e when not (Attention.is_in_flight ~id:e.id m.attention) ->
               Some e
-          | Some _ | None -> Attention.top_fast_path m.attention
+          | Some _ | None -> None
         else Attention.top_fast_path m.attention
 
 let composer_mode m =
@@ -739,6 +743,37 @@ let can_zoom_current_view m =
             true)
     | Nav.Pulse | Nav.Work | Nav.Runtime | Nav.Infra -> false
 
+let task_dive_has_two_main_panes m task_id =
+  match
+    List.find_opt
+      (fun (tk : Wire_work.task) -> String.equal tk.id task_id)
+      (Work_store.tasks m.work)
+  with
+  | Some tk ->
+      Option.is_some tk.description
+      && Option.is_some (Work_store.verification_for_task ~task_id m.work)
+  | None -> false
+
+let dive_work_json_pane_index m =
+  if not m.infra.show_raw_json then None
+  else
+    match active_dive m with
+    | Some (Nav.Dive_work target) ->
+        if inner_body_width m < 88 then Some 0
+        else (
+          match target with
+          | Nav.Goal_dive _ -> Some 2
+          | Nav.Task_dive task_id ->
+              Some (if task_dive_has_two_main_panes m task_id then 2 else 1)
+          | Nav.Verification_dive _ -> Some 1)
+    | Some
+        ( Nav.Dive_keeper _
+        | Nav.Dive_knowledge _
+        | Nav.Dive_runtime _
+        | Nav.Dive_infra _ )
+    | None ->
+        None
+
 let focusable_pane_count m =
   if is_too_small_viewport m.viewport || equal_breakpoint m.breakpoint Micro then
     1
@@ -765,7 +800,22 @@ let focusable_pane_count m =
                 Keeper_context_store.Ctx_exact_input
             then 2
             else 1
-        | Some (Nav.Dive_work _) ->
+        | Some (Nav.Dive_work (Nav.Goal_dive _)) ->
+            if m.infra.show_raw_json then
+              if inner_body_width m >= 88 then 3 else 1
+            else 2
+        | Some (Nav.Dive_work (Nav.Task_dive task_id)) ->
+            if m.infra.show_raw_json && inner_body_width m < 88 then 1
+            else
+              let main_panes =
+                if task_dive_has_two_main_panes m task_id then 2 else 1
+              in
+              let json_panes =
+                if m.infra.show_raw_json && inner_body_width m >= 88 then 1
+                else 0
+              in
+              main_panes + json_panes
+        | Some (Nav.Dive_work (Nav.Verification_dive _)) ->
             if m.infra.show_raw_json && inner_body_width m >= 88 then 2 else 1
         | Some
             ( Nav.Dive_keeper
@@ -880,8 +930,15 @@ let pane_rects m =
         let l, r = split2 ~left_ratio:0.38 ~top_ratio:0.42 br in
         [ l; r ]
     | Some (Nav.Dive_work _) ->
-        let l, r = split_h_ratio ~gap:gap_h br 0.58 in
-        [ l; r ]
+        if m.infra.show_raw_json && inner_body_width m >= 88 then
+          let l, r = split_h_ratio ~gap:gap_h br 0.58 in
+          if n >= 3 then
+            let lt, lb = split_v_ratio ~gap:0 l 0.5 in
+            [ lt; lb; r ]
+          else [ l; r ]
+        else
+          let t, b = split_v_ratio ~gap:0 br 0.5 in
+          [ t; b ]
     | Some
         ( Nav.Dive_keeper
             {
@@ -1152,11 +1209,30 @@ let active_focus_label m =
               | Nav.Keeper_identity ->
                   Say.make ~ko:("상세 · " ^ name) ~en:("DIVE · " ^ name)
             else Say.make ~ko:("상세 · " ^ name) ~en:("DIVE · " ^ name))
-        | Some (Nav.Dive_work _) ->
-            if focusable_pane_count m > 1 then
-              if m.nav.pane_index = 1 then pane_prefix ~ko:"JSON 트리" ~en:"JSON Tree"
-              else pane_prefix ~ko:"작업 상세" ~en:"Work Dive"
-            else Say.make ~ko:"작업 상세" ~en:"WORK DIVE"
+        | Some (Nav.Dive_work target) -> (
+            match dive_work_json_pane_index m with
+            | Some j_idx when m.nav.pane_index = j_idx ->
+                if focusable_pane_count m > 1 then
+                  pane_prefix ~ko:"JSON 트리" ~en:"JSON Tree"
+                else Say.make ~ko:"JSON 트리" ~en:"JSON TREE"
+            | Some _ | None -> (
+                match target with
+                | Nav.Goal_dive _ ->
+                    if m.nav.pane_index = 1 then
+                      pane_prefix ~ko:"검증 실행" ~en:"Verifier Runs"
+                    else pane_prefix ~ko:"연결 작업" ~en:"Linked Tasks"
+                | Nav.Task_dive task_id ->
+                    if task_dive_has_two_main_panes m task_id then
+                      if m.nav.pane_index = 1 then
+                        pane_prefix ~ko:"검증 증거" ~en:"Verification"
+                      else pane_prefix ~ko:"작업 설명" ~en:"Description"
+                    else if focusable_pane_count m > 1 then
+                      pane_prefix ~ko:"작업 상세" ~en:"Task Dive"
+                    else Say.make ~ko:"작업 상세" ~en:"TASK DIVE"
+                | Nav.Verification_dive _ ->
+                    if focusable_pane_count m > 1 then
+                      pane_prefix ~ko:"검증 상세" ~en:"Verification"
+                    else Say.make ~ko:"검증 상세" ~en:"VERIF DIVE"))
         | Some (Nav.Dive_knowledge _) ->
             Say.make ~ko:"지식 상세" ~en:"KNOWLEDGE DIVE"
         | Some (Nav.Dive_runtime (Nav.Tool_dive name)) ->
@@ -1408,6 +1484,16 @@ let inline_modal_for kind =
             secret = false;
           };
         ]
+    | Nav.Goal_drop _ ->
+        [
+          {
+            key = "note";
+            label = Say.make ~ko:"목표 중단(Drop) 사유" ~en:"Goal drop reason";
+            value = "";
+            required = true;
+            secret = false;
+          };
+        ]
     | Nav.Schedule_form ->
         [
           {
@@ -1555,7 +1641,28 @@ let inline_modal_for kind =
           };
         ]
   in
-  { kind; fields; active_field = 0; submitting = false; error = None }
+  let active_field =
+    match kind with
+    | Nav.Harness_overrule notes_hash
+      when Wire_work.is_valid_notes_hash notes_hash ->
+        2
+    | Nav.Harness_overrule _
+    | Nav.Btw_query
+    | Nav.Gate_reject _
+    | Nav.Verification_reject _
+    | Nav.Task_cancel _
+    | Nav.Goal_drop _
+    | Nav.Schedule_form
+    | Nav.Connector_form
+    | Nav.Repo_add_form
+    | Nav.Board_new_post
+    | Nav.Board_comment _
+    | Nav.Github_token_form _
+    | Nav.Code_finder_form
+    | Nav.Code_search_form ->
+        0
+  in
+  { kind; fields; active_field; submitting = false; error = None }
 
 let modal_field_value ~key modal =
   match
@@ -2304,6 +2411,14 @@ let rebuild_attention m =
       ~gate_pending:(Work_store.gate_pending_list m.work)
       ~goals:(Work_store.goals m.work)
       m.attention
+  in
+  let attention =
+    if
+      m.nav.dive_stack = []
+      && Nav.equal_workspace m.nav.workspace Nav.Work
+      && Nav.equal_work_tab m.work.active_tab Nav.Work_inbox
+    then Attention.sync_selection ~query:m.work.filter_query attention
+    else attention
   in
   { m with attention }
 

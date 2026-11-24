@@ -111,6 +111,24 @@ val open_global_settings :
   ?search_query:string -> Model.t -> Model.t * Cmd.t list
 val select_settings_tab : Model.t -> Nav.settings_tab -> Model.t * Cmd.t list
 val open_inline_modal : Model.t -> Nav.inline_action_kind -> Model.t * Cmd.t list
+val open_harness_overrule_for_context :
+  verdict:string -> now:Clock.Mono.t -> Model.t -> Model.t * Cmd.t list
+val open_schedule_form_populated : Model.t -> Model.t * Cmd.t list
+val check_verification_verdict_precondition :
+  Model.t -> Wire_work.verification_request -> (unit, Say.t) result
+val approve_verification_request :
+  now:Clock.Mono.t ->
+  Model.t ->
+  Wire_work.verification_request ->
+  Model.t * Cmd.t list
+val reject_verification_request :
+  now:Clock.Mono.t ->
+  Model.t ->
+  Wire_work.verification_request ->
+  Model.t * Cmd.t list
+val request_goal_complete_guarded :
+  now:Clock.Mono.t -> Model.t -> Wire_work.goal -> Model.t * Cmd.t list
+val task_dive_scroll_bounds : Model.t -> Wire_work.task -> int * int
 val open_ask_modal :
   ?preselect_choice_1based:int ->
   Model.t ->

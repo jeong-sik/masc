@@ -30,6 +30,19 @@ type task_status_filter =
   | Status_unlinked
   | Status_done
 
+type goal_phase_filter =
+  | Goal_filter_all
+  | Goal_filter_active
+  | Goal_filter_verifying
+  | Goal_filter_held
+  | Goal_filter_closed
+
+type goal_sort_mode =
+  | Goal_sort_default
+  | Goal_sort_phase
+  | Goal_sort_progress
+  | Goal_sort_recent
+
 type verification_dive_tab =
   | Verif_tab_evidence
   | Verif_tab_summary
@@ -64,9 +77,17 @@ type t = {
   verif_scroll_offset : int;
   detail_scroll_offset : int;
   ledger_scroll_offset : int;
+  goal_dive_task_index : int;
+  goal_dive_task_scroll : int;
+  goal_dive_verif_index : int;
+  goal_dive_verif_scroll : int;
+  task_dive_desc_scroll : int;
+  task_dive_verif_scroll : int;
   pulse_goal_index : int;
   schedules_scroll_offset : int;
   filter_query : string;
+  goal_phase_filter : goal_phase_filter;
+  goal_sort_mode : goal_sort_mode;
   task_status_filter : task_status_filter;
   verification_view : [ `Pending | `All ];
   expanded_ids : String_set.t;
@@ -102,9 +123,17 @@ let empty =
     verif_scroll_offset = 0;
     detail_scroll_offset = 0;
     ledger_scroll_offset = 0;
+    goal_dive_task_index = 0;
+    goal_dive_task_scroll = 0;
+    goal_dive_verif_index = 0;
+    goal_dive_verif_scroll = 0;
+    task_dive_desc_scroll = 0;
+    task_dive_verif_scroll = 0;
     pulse_goal_index = 0;
     schedules_scroll_offset = 0;
     filter_query = "";
+    goal_phase_filter = Goal_filter_all;
+    goal_sort_mode = Goal_sort_default;
     task_status_filter = Status_all;
     verification_view = `Pending;
     expanded_ids = String_set.empty;
@@ -381,16 +410,133 @@ let task_is_awaiting_verification = function
   | Wire_work.Cancelled _ ->
       false
 
+let goal_matches_phase filter (g : Wire_work.goal) =
+  match filter with
+  | Goal_filter_all -> true
+  | Goal_filter_active -> (
+      match g.phase with
+      | Wire_work.Executing -> true
+      | Wire_work.Verifying
+      | Wire_work.Awaiting_confirmation
+      | Wire_work.Paused _
+      | Wire_work.Blocked _
+      | Wire_work.Completed
+      | Wire_work.Dropped ->
+          false)
+  | Goal_filter_verifying -> (
+      match g.phase with
+      | Wire_work.Verifying | Wire_work.Awaiting_confirmation -> true
+      | Wire_work.Executing
+      | Wire_work.Paused _
+      | Wire_work.Blocked _
+      | Wire_work.Completed
+      | Wire_work.Dropped ->
+          false)
+  | Goal_filter_held -> (
+      match g.phase with
+      | Wire_work.Paused _ | Wire_work.Blocked _ -> true
+      | Wire_work.Executing
+      | Wire_work.Verifying
+      | Wire_work.Awaiting_confirmation
+      | Wire_work.Completed
+      | Wire_work.Dropped ->
+          false)
+  | Goal_filter_closed -> (
+      match g.phase with
+      | Wire_work.Completed | Wire_work.Dropped -> true
+      | Wire_work.Executing
+      | Wire_work.Verifying
+      | Wire_work.Awaiting_confirmation
+      | Wire_work.Paused _
+      | Wire_work.Blocked _ ->
+          false)
+
+let goal_phase_rank = function
+  | Wire_work.Awaiting_confirmation -> 0
+  | Wire_work.Verifying -> 1
+  | Wire_work.Executing -> 2
+  | Wire_work.Blocked _ -> 3
+  | Wire_work.Paused _ -> 4
+  | Wire_work.Completed -> 5
+  | Wire_work.Dropped -> 6
+
+let goal_linked_tasks ~goal_id t =
+  List.filter
+    (fun (tk : Wire_work.task) ->
+      match tk.goal_link with
+      | Wire_work.Linked gid -> String.equal gid goal_id
+      | Wire_work.Unlinked -> false)
+    (tasks t)
+
+let goal_linked_verifications ~goal_id t =
+  let linked_ids =
+    List.map (fun (tk : Wire_work.task) -> tk.id) (goal_linked_tasks ~goal_id t)
+  in
+  List.filter
+    (fun (v : Wire_work.verification_request) ->
+      List.exists (String.equal v.task_id) linked_ids)
+    (verifications_list t)
+
+let goal_progress_score t (g : Wire_work.goal) =
+  let linked = goal_linked_tasks ~goal_id:g.id t in
+  let total = List.length linked in
+  if total > 0 then
+    let done_n =
+      List.fold_left
+        (fun acc (tk : Wire_work.task) ->
+          if task_is_done tk.status then acc + 1 else acc)
+        0 linked
+    in
+    Float.of_int done_n /. Float.of_int total
+  else
+    match g.phase with
+    | Wire_work.Completed -> 1.0
+    | Wire_work.Awaiting_confirmation -> 0.85
+    | Wire_work.Verifying -> 0.65
+    | Wire_work.Executing -> 0.25
+    | Wire_work.Paused _ | Wire_work.Blocked _ -> 0.1
+    | Wire_work.Dropped -> 0.0
+
+let goal_recency_key (g : Wire_work.goal) =
+  match g.updated_at with
+  | Some ts when not (String.equal (String.trim ts) "") -> ts
+  | Some _ | None -> (
+      match g.created_at with
+      | Some ts when not (String.equal (String.trim ts) "") -> ts
+      | Some _ | None -> "")
+
 let filtered_goals t =
   let q = String.trim t.filter_query in
-  if String.equal q "" then goals t
-  else
+  let matched =
     List.filter
       (fun (g : Wire_work.goal) ->
-        contains_ci ~needle:q g.title
-        || contains_ci ~needle:q g.id
-        || contains_ci ~needle:q g.measure)
+        goal_matches_phase t.goal_phase_filter g
+        && (String.equal q ""
+           || contains_ci ~needle:q g.title
+           || contains_ci ~needle:q g.id
+           || contains_ci ~needle:q g.measure))
       (goals t)
+  in
+  match t.goal_sort_mode with
+  | Goal_sort_default -> matched
+  | Goal_sort_phase ->
+      List.stable_sort
+        (fun (a : Wire_work.goal) (b : Wire_work.goal) ->
+          let c = Int.compare (goal_phase_rank a.phase) (goal_phase_rank b.phase) in
+          if c <> 0 then c else Int.compare a.priority b.priority)
+        matched
+  | Goal_sort_progress ->
+      List.stable_sort
+        (fun (a : Wire_work.goal) (b : Wire_work.goal) ->
+          let c = Float.compare (goal_progress_score t b) (goal_progress_score t a) in
+          if c <> 0 then c else Int.compare a.priority b.priority)
+        matched
+  | Goal_sort_recent ->
+      List.stable_sort
+        (fun (a : Wire_work.goal) (b : Wire_work.goal) ->
+          let c = String.compare (goal_recency_key b) (goal_recency_key a) in
+          if c <> 0 then c else String.compare b.id a.id)
+        matched
 
 let task_matches_status filter (tk : Wire_work.task) =
   match filter with
@@ -777,6 +923,140 @@ let cycle_task_status_filter t =
     | Status_done -> Status_all
   in
   set_task_status_filter next t
+
+let equal_goal_phase_filter a b =
+  match a, b with
+  | Goal_filter_all, Goal_filter_all
+  | Goal_filter_active, Goal_filter_active
+  | Goal_filter_verifying, Goal_filter_verifying
+  | Goal_filter_held, Goal_filter_held
+  | Goal_filter_closed, Goal_filter_closed ->
+      true
+  | ( ( Goal_filter_all
+      | Goal_filter_active
+      | Goal_filter_verifying
+      | Goal_filter_held
+      | Goal_filter_closed ),
+      _ ) ->
+      false
+
+let all_goal_phase_filters =
+  [
+    Goal_filter_all;
+    Goal_filter_active;
+    Goal_filter_verifying;
+    Goal_filter_held;
+    Goal_filter_closed;
+  ]
+
+let set_goal_phase_filter goal_phase_filter t =
+  {
+    t with
+    goal_phase_filter;
+    selected_index = 0;
+    scroll_offset = 0;
+    detail_scroll_offset = 0;
+  }
+
+let cycle_goal_phase_filter t =
+  let next =
+    match t.goal_phase_filter with
+    | Goal_filter_all -> Goal_filter_active
+    | Goal_filter_active -> Goal_filter_verifying
+    | Goal_filter_verifying -> Goal_filter_held
+    | Goal_filter_held -> Goal_filter_closed
+    | Goal_filter_closed -> Goal_filter_all
+  in
+  set_goal_phase_filter next t
+
+let equal_goal_sort_mode a b =
+  match a, b with
+  | Goal_sort_default, Goal_sort_default
+  | Goal_sort_phase, Goal_sort_phase
+  | Goal_sort_progress, Goal_sort_progress
+  | Goal_sort_recent, Goal_sort_recent ->
+      true
+  | (Goal_sort_default | Goal_sort_phase | Goal_sort_progress | Goal_sort_recent), _ ->
+      false
+
+let set_goal_sort_mode goal_sort_mode t =
+  { t with goal_sort_mode; selected_index = 0; scroll_offset = 0; detail_scroll_offset = 0 }
+
+let cycle_goal_sort_mode t =
+  let next =
+    match t.goal_sort_mode with
+    | Goal_sort_default -> Goal_sort_phase
+    | Goal_sort_phase -> Goal_sort_progress
+    | Goal_sort_progress -> Goal_sort_recent
+    | Goal_sort_recent -> Goal_sort_default
+  in
+  set_goal_sort_mode next t
+
+let selected_goal_dive_task ~goal_id t =
+  let xs = goal_linked_tasks ~goal_id t in
+  List.nth_opt xs (clamp_index (List.length xs) t.goal_dive_task_index)
+
+let selected_goal_dive_verification ~goal_id t =
+  let xs = goal_linked_verifications ~goal_id t in
+  List.nth_opt xs (clamp_index (List.length xs) t.goal_dive_verif_index)
+
+let reset_goal_dive_state t =
+  {
+    t with
+    goal_dive_task_index = 0;
+    goal_dive_task_scroll = 0;
+    goal_dive_verif_index = 0;
+    goal_dive_verif_scroll = 0;
+  }
+
+let move_goal_dive_task ~goal_id ?viewport_rows ~delta t =
+  let len = List.length (goal_linked_tasks ~goal_id t) in
+  if len <= 0 then
+    { t with goal_dive_task_index = 0; goal_dive_task_scroll = 0 }
+  else
+    let goal_dive_task_index = clamp_index len (t.goal_dive_task_index + delta) in
+    let goal_dive_task_scroll =
+      adjust_scroll ?viewport_rows ~scroll:t.goal_dive_task_scroll
+        goal_dive_task_index
+    in
+    { t with goal_dive_task_index; goal_dive_task_scroll }
+
+let move_goal_dive_verif ~goal_id ?viewport_rows ~delta t =
+  let len = List.length (goal_linked_verifications ~goal_id t) in
+  if len <= 0 then
+    { t with goal_dive_verif_index = 0; goal_dive_verif_scroll = 0 }
+  else
+    let goal_dive_verif_index = clamp_index len (t.goal_dive_verif_index + delta) in
+    let goal_dive_verif_scroll =
+      adjust_scroll ?viewport_rows ~scroll:t.goal_dive_verif_scroll
+        goal_dive_verif_index
+    in
+    { t with goal_dive_verif_index; goal_dive_verif_scroll }
+
+let verification_for_task ~task_id t =
+  List.find_opt
+    (fun (v : Wire_work.verification_request) -> String.equal v.task_id task_id)
+    (verifications_list t)
+
+let reset_task_dive_scroll t =
+  { t with task_dive_desc_scroll = 0; task_dive_verif_scroll = 0 }
+
+let scroll_task_dive_desc ~max_scroll ~delta t =
+  let task_dive_desc_scroll =
+    Store_scroll.clamp_scroll ~max_scroll (t.task_dive_desc_scroll + delta)
+  in
+  { t with task_dive_desc_scroll }
+
+let scroll_task_dive_verif ~max_scroll ~delta t =
+  let task_dive_verif_scroll =
+    Store_scroll.clamp_scroll ~max_scroll (t.task_dive_verif_scroll + delta)
+  in
+  { t with task_dive_verif_scroll }
+
+let harness_verdicts_list t =
+  match Observed.to_option t.harness_health with
+  | None -> []
+  | Some hh -> hh.recent_verdicts
 
 let toggle_verification_view t =
   let verification_view =

@@ -53,6 +53,13 @@ jobs:
           src/components/fleet-health-panel.test.ts
           src/components/tool-monitor/tool-monitor-operations.test.ts
           src/components/tool-monitor/tool-monitor-reactivity.test.ts
+          design-system/tokens/source.test.ts
+          src/components/keeper-badge.test.ts
+          src/core/auth.test.ts
+          src/core/transport.test.ts
+          src/core/resource-cache.test.ts
+          src/core/view-stream-slot.test.ts
+          src/components/primitives/primitives.test.ts
 
       - name: Verify production bundle contract
         working-directory: dashboard

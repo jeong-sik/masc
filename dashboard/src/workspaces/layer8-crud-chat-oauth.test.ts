@@ -945,6 +945,12 @@ candidates = ["safe.model"]
           attempt_id: 'att-1',
         })
       }
+      if (url === '/api/v1/keepers/oauth/attempt-status?keeper=sangsu&provider=slack&attempt_id=att-1') {
+        return jsonResponse({
+          kind: attachedSlack ? 'completed' : 'awaiting_consent',
+          tool_discovery: { kind: 'discovered', count: 1 },
+        })
+      }
       if (url === '/api/v1/keepers/sangsu/github-login' && init?.method === 'POST') {
         githubStreamCalled = true
         return sseResponse([
@@ -992,7 +998,7 @@ candidates = ["safe.model"]
     await flushUi(40)
     expect(clientBodies).toEqual([{ provider: 'slack', client_id: 'my-slack-client-id' }])
 
-    // Click Slack OAuth Connect -> popup navigated synchronously; mismatched/missing postMessage ignored; ok:true settles!
+    // Open the Slack popup and wait for the current server attempt to complete.
     const connectButtons = [...container.querySelectorAll('button')].filter((b) =>
       b.textContent?.trim() === 'OAuth 연결',
     ) as HTMLButtonElement[]
@@ -1003,15 +1009,17 @@ candidates = ["safe.model"]
     // Ignored: missing keeper/provider
     window.dispatchEvent(new MessageEvent('message', {
       origin: window.location.origin,
+      source: popupMock as unknown as Window,
       data: { type: 'masc:oauth-complete', ok: true },
     }))
     await flushUi(20)
     expect(popupMock.close).not.toHaveBeenCalled()
 
-    // Settled on exact keeper + provider + ok: true
+    // The popup signal wakes the status read for att-1.
     attachedSlack = true
     window.dispatchEvent(new MessageEvent('message', {
       origin: window.location.origin,
+      source: popupMock as unknown as Window,
       data: { type: 'masc:oauth-complete', ok: true, keeper: 'sangsu', provider: 'slack' },
     }))
     await flushUi(50)
@@ -1105,6 +1113,7 @@ candidates = ["safe.model"]
     finishAlpha!(jsonResponse({ providers: [provider('stale-provider-alpha')] }))
     window.dispatchEvent(new MessageEvent('message', {
       origin: window.location.origin,
+      source: popup as unknown as Window,
       data: { type: 'masc:oauth-complete', ok: true, keeper: 'alpha', provider: 'slack' },
     }))
     await flushUi()
@@ -1115,9 +1124,11 @@ candidates = ["safe.model"]
     expect(reads).toEqual(['alpha', 'alpha', 'beta'])
   })
 
-  it('(C-4) Keeper OAuth edge cases: shell groups[] fallback, postMessage ok:false rejection, and GitHub SSE EOF without complete fails cleanly', async () => {
+  it('(C-4) Keeper OAuth edge cases: shell groups fallback, current attempt status, and incomplete GitHub SSE', async () => {
     const popupMock = { closed: false, close: vi.fn(), location: { href: '' } }
     vi.spyOn(window, 'open').mockImplementation(() => popupMock as unknown as Window)
+    let popupStatus: 'callback_admitted' | 'failed' = 'callback_admitted'
+    let popupStatusReads = 0
 
     // 1) /api/v1/dashboard/shell groups[].keepers fallback when /api/v1/gate/keepers returns empty
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
@@ -1144,6 +1155,10 @@ candidates = ["safe.model"]
           attempt_id: 'att-2',
         })
       }
+      if (url === '/api/v1/keepers/oauth/attempt-status?keeper=sangsu&provider=slack&attempt_id=att-2') {
+        popupStatusReads++
+        return jsonResponse({ kind: popupStatus })
+      }
       return jsonResponse({})
     }) as typeof fetch
 
@@ -1165,7 +1180,7 @@ candidates = ["safe.model"]
       'code-reviewer-sister',
     ])
 
-    // 2) postMessage ok: false fails the popup flow immediately
+    // 2) A popup signal waits for the current attempt's terminal server response.
     const popupStates: ActiveKeeperOAuthFlow[] = []
     let popupSettled: boolean | null = null
     const popupHandle = startKeeperOAuthPopupFlow({
@@ -1176,16 +1191,26 @@ candidates = ["safe.model"]
       onUpdate: (st) => popupStates.push(st),
       onSettled: (ok) => { popupSettled = ok },
     })
-    await flushUi(30)
-    window.dispatchEvent(new MessageEvent('message', {
+    const notifyPopup = (ok: boolean) => window.dispatchEvent(new MessageEvent('message', {
       origin: window.location.origin,
-      data: { type: 'masc:oauth-complete', ok: false, keeper: 'sangsu', provider: 'slack', error: 'access_denied' },
+      source: popupMock as unknown as Window,
+      data: { type: 'masc:oauth-complete', ok, keeper: 'sangsu', provider: 'slack' },
     }))
-    await flushUi(20)
-    popupHandle.cancel()
-    expect(popupSettled).toBe(false)
-    expect(popupStates[popupStates.length - 1]!.phase).toBe('failed')
-    expect(popupStates[popupStates.length - 1]!.message).toContain('access_denied')
+    try {
+      notifyPopup(true)
+      expect(popupSettled).toBeNull()
+      expect(popupStatusReads).toBe(0)
+      await vi.waitFor(() => expect(popupStates.at(-1)).toMatchObject({ phase: 'awaiting_user', attemptId: 'att-2' }))
+      notifyPopup(true)
+      await vi.waitFor(() => expect(popupStates.at(-1)).toMatchObject({ phase: 'completing', attemptId: 'att-2' }))
+      expect(popupSettled).toBeNull()
+      popupStatus = 'failed'
+      notifyPopup(false)
+      await vi.waitFor(() => expect(popupSettled).toBe(false))
+      expect(popupStates.at(-1)).toMatchObject({ phase: 'failed', attemptId: 'att-2' })
+    } finally {
+      popupHandle.cancel()
+    }
 
     // 3) GitHub SSE EOF without event: complete fails cleanly and does NOT chain /oauth-login
     let attachCalled = false

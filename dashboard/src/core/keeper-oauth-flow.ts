@@ -2,10 +2,9 @@
  * Zero-Manual Keeper OAuth Flow Engine (`#131` Flow 2).
  *
  * Shared by BOTH `5 Runtime > Tools (Keeper OAuth)` and `4 Keepers > Config`:
- * 1. Synchronous popup open on click (avoids browser popup blockers) -> navigate to
- *    validated `authorize_url` -> same-origin `postMessage('masc:oauth-complete')`
- *    listener + 1.5s auto-poll `GET /api/v1/keepers/oauth/attempt-status` until
- *    terminal -> auto-refresh attached tools!
+ * 1. Open the popup on click and navigate to the validated `authorize_url`.
+ *    The same-origin popup message wakes an immediate status read for the
+ *    current attempt. Poll that attempt until the server reports its outcome.
  * 2. GitHub CLI SSE device-flow stream (`POST /api/v1/keepers/:k/github-login`)
  *    with automatic ANSI stripping, URL extraction + auto-open, and copyable
  *    one-time device code (`XXXX-XXXX`).
@@ -122,6 +121,7 @@ export function startKeeperOAuthPopupFlow(params: {
   const startEpoch = currentSessionEpoch()
   let disposed = false
   let pollTimer: ReturnType<typeof setInterval> | null = null
+  let pollAttemptStatus: (() => Promise<void>) | undefined
   let popup: Window | null = null
 
   // Open popup synchronously inside user click event so popup blockers allow it!
@@ -181,26 +181,11 @@ export function startKeeperOAuthPopupFlow(params: {
   }
 
   const onPostMessage = (ev: MessageEvent) => {
-    if (disposed || typeof window === 'undefined') return
+    if (disposed || !popup || ev.source !== popup || typeof window === 'undefined') return
     if (ev.origin !== window.location.origin) return
-    if (!isRecord(ev.data) || ev.data.type !== 'masc:oauth-complete') return
-    if (typeof ev.data.keeper !== 'string' || ev.data.keeper !== params.keeper) return
-    if (typeof ev.data.provider !== 'string' || ev.data.provider !== params.provider) return
-    if (ev.data.ok === false) {
-      const errMsg = typeof ev.data.error === 'string' && ev.data.error.trim()
-        ? ev.data.error.trim()
-        : `${params.providerLabel} OAuth 연결이 거부되었거나 실패했습니다.`
-      settle(false, {
-        phase: 'failed',
-        message: errMsg,
-      })
-      return
-    }
-    if (ev.data.ok !== true) return
-    settle(true, {
-      phase: 'completed',
-      message: `${params.providerLabel} OAuth 연결 완료 — 도구 목록을 자동 갱신합니다.`,
-    })
+    if (!isRecord(ev.data) || ev.data.type !== 'masc:oauth-complete' || typeof ev.data.ok !== 'boolean') return
+    if (ev.data.keeper !== params.keeper || ev.data.provider !== params.provider) return
+    void pollAttemptStatus?.()
   }
 
   const unsubEpoch = sessionEpoch.subscribe((ep) => {
@@ -271,7 +256,7 @@ export function startKeeperOAuthPopupFlow(params: {
         : `${params.providerLabel} 인증 링크가 준비되었습니다 (팝업이 차단된 경우 아래 버튼을 클릭하세요).`,
     })
 
-    if (!attemptId) return
+    if (!attemptId || disposed) return
 
     const pollOnce = async () => {
       if (disposed || !isEpochCurrent(startEpoch)) return
@@ -307,6 +292,7 @@ export function startKeeperOAuthPopupFlow(params: {
       }
     }
 
+    pollAttemptStatus = pollOnce
     pollTimer = setInterval(() => {
       void pollOnce()
     }, params.pollIntervalMs ?? 1500)

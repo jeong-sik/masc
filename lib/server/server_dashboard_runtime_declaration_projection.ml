@@ -163,6 +163,12 @@ let runtime_request_config_json (rt : Runtime_instance.t) =
       ; "verified", `Bool false
       ]
   | Runtime_execution.Acp config ->
+    let effective_effort =
+      Runtime_acp_client.resolve_effective_effort
+        ?model_effort:rt.model.reasoning_effort
+        ?provider_effort:config.effort
+        ()
+    in
     `Assoc
       [ "source", `String "official-client-runtime"
       ; "execution", `String ("acp_" ^ Runtime_acp_client.driver_to_string config.driver)
@@ -170,7 +176,7 @@ let runtime_request_config_json (rt : Runtime_instance.t) =
       ; "model", `String (Runtime_acp_client.model_selection_to_string config.model)
       ; ( "effort"
         , Json_util.string_opt_to_json
-            (Option.map Llm_provider.Reasoning_effort.to_string config.effort) )
+            (Option.map Llm_provider.Reasoning_effort.to_string effective_effort) )
       ; "mode", Json_util.string_opt_to_json config.mode
       ; "timeout_s", `Float config.timeout_s
       ; "verified", `Bool false

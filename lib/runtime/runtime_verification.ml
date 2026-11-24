@@ -779,9 +779,10 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ?fs ~cwd ~cwd_path ~timeout_s ~ac
                      ~configured_mode:execution.mode
                  in
                  let effort =
-                   match execution.effort with
-                   | Some _ as e -> e
-                   | None -> runtime.model.reasoning_effort
+                   Runtime_acp_client.resolve_effective_effort
+                     ?model_effort:runtime.model.reasoning_effort
+                     ?provider_effort:execution.effort
+                     ()
                  in
                  Fun.protect
                    ~finally:(fun () ->

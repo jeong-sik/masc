@@ -67,6 +67,15 @@ let effort_values_for_log ~driver =
   | Antigravity | Kimi_code -> Llm_provider.Reasoning_effort.values_for_log
 ;;
 
+let resolve_effective_effort ?turn_effort ?model_effort ?provider_effort () =
+  match turn_effort with
+  | Some _ as eff -> eff
+  | None ->
+    (match model_effort with
+     | Some _ as eff -> eff
+     | None -> provider_effort)
+;;
+
 type mcp_wiring =
   | Session_new_http_mcp
   | Gemini_dir_mcp_config

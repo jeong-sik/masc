@@ -1531,7 +1531,10 @@ let test_setup_login_stream_error_and_single_delivery () =
 
 let test_setup_login_interruption_closes_owned_input () =
   let now = Clock.Mono.zero in
-  let model = ref (Model.initial ()) in
+  let initial = Model.initial () in
+  let model = ref { initial with
+      nav = { initial.nav with workspace = Nav.Runtime; sidebar_focused = false };
+      runtime = Runtime_store.set_tab Nav.Runtime_quotas_credits initial.runtime } in
   let send msg = let next, _ = Update.step ~now !model msg in model := next in
   let reply msg = send (Msg.Http_reply { epoch = !model.epoch; reply = msg }) in
   let frames = ref [] in
@@ -1554,6 +1557,8 @@ let test_setup_login_interruption_closes_owned_input () =
       on_chunk (event "started" {|{"login_id":"one","integration_id":"codex_cli","status":"running"}|});
       on_chunk "event: input_";
       on_chunk "ready\r\ndata: {}\r\n\r\n";
+      let open Masc_tui_keymap.Keymap.Input in
+      send (Msg.Key_event { key = Char "e"; mods = { ctrl = false; alt = false; shift = false } });
       Alcotest.(check bool) "the live login owns the input form" true (input_is_open "one");
       interrupted ~login_id:"older" (Msg.Transport Health.Stream_eof);
       Alcotest.(check bool) "a late interruption preserves another login's input" true (input_is_open "one");

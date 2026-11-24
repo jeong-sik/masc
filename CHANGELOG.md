@@ -1,5 +1,65 @@
 ## [Unreleased]
 
+## [0.83.0] - 2026-11-24
+
+### Added
+
+- Add core Wave 2 frontend foundation modules under `dashboard/src/core/` (`AuthSession` closed union with capability-gated `/health` bootstrap and monotonic `sessionEpoch` fence, mode-aware CSRF/Bearer HTTP transport, `ResourceCache` GET deduplicator with 5-state `Observed<T>` formatting, `2+1 SSE` `ViewStreamSlot`, mode-aware Observer SSE with `observer_resync_required` `STREAM_GAP` provenance, and URL-synced `?win=` `TimeWindow` + shared `uPlot` crosshair bus) (#54562).
+- Add shared Wave 2 UI engine primitives under `dashboard/src/components/primitives/` (`VirtualList`, lazy-loaded Canvas `UPlotChart`, virtualized `DataTable`, `MasterDetail`, `QuickPeekDrawer`, `TargetLockedAction`, and `uFuzzy` + Hangul `command-search`) plus unit tests wired into `.github/workflows/dashboard-artifact.yml` (#54562).
+- Introduce the Proposal A+ 6-Trunk collapsible dashboard shell (`src/shell/`), declarative RBAC router (`src/routes/router.ts`), lazy 8-workspace registry (`src/workspaces/registry.ts`), and unified `/account` Multi-Account & Local Operator workspace (`src/workspaces/account/`), reducing initial first-load bundle from 453.16 KiB gz to 64.19 kB gz (-85.8%) (#54575).
+- Implement the `1 Pulse` Fleet Overview workspace (4-KPI hero strip, attention queue, 24h company sparklines with honest `null` gaps, handoff pulse, goals/memory digest) and `4 Keepers` Fleet Wall & Live Debug Companion workspace (virtualized roster, `2+1 SSE` chat with `cut_reply` journal recovery and binary Voice STT, `⌘.` Debug Companion, 3-way memory, portrait/candle preview, and CAS config editor), wired lazily into `src/workspaces/registry.ts` (#54576).
+- Implement the `5 Runtime` (3-tier Quotas & provider CRUD, 4-panel synced `uPlot` Efficiency suite with `2+1 SSE`, Failover/Exact-Output/Fusion Lanes, Tools/Skills/OAuth, Lane-Addons asks & Browser Lane), `6 Infra` (Sandboxes V2, Repos 24h diffs, virtualized SSE Logs), and schema-driven `Settings` (dry-run CAS TOML diff + Appearance panel) workspaces, wired lazily into `src/workspaces/registry.ts` (#54577).
+- Implement the `2 Work` (closed-sum Goals & strict `TargetLockedAction` confirmation, Tasks & cursor-paginated history/schedules, Unified HITL Inbox, Candle ledger) and `3 Knowledge` (Signal-only virtualized Board, Librarian Wiki CAS editor, sandboxed Lean Artifacts, World Memory & Librarian recovery) workspaces, completing all 8 Proposal A+ workspaces and retiring placeholder loaders (final first-load `64.69 kB gz`, non-map dist `1.31 MB` vs `59.38 MB` baseline) (#54578).
+- Open the current DOS screen from the live DOS machine row in the TUI Addon Lanes view. #54601
+- Emit structured `auth_url` and `device_code` SSE events from provider subscription CLI login sessions that request `auth_hints=1`, preserving the stream expected by existing clients (#54608)
+- Emit secret-free structured startup/preflight reasons (`Server_account_login.disabled_reason`, `preflight_of_config`) and non-HTTPS `__Host-` `Secure` cookie transport diagnostics (`Authz_browser_request.cookie_transport_status`) for multi-account OAuth login (#54608)
+- Add Layer 8 dashboard upgrades on top of Proposal A+: Visual Runtime Lane CRUD (`[runtime.lanes.*]` / `[runtime.exact_output_lanes.*]` create, edit, candidate reorder, delete with `/api/v1/runtime/config/raw/preview` diff & CAS save), Keeper Chat 3-block visibility toggles (`[추론|도구|메모리·내부]` + `Alt+T`) with structured collapsible Thinking/Tool/Memory/Autonomous cards, Zero-Manual Web OAuth across Provider CLI SSE login (`src/core/setup-login-stream.ts`), Keeper OAuth popup/auto-poll/GitHub device SSE/custom app drawer (`src/core/keeper-oauth-flow.ts`), and Account `return_to`, plus `768px` `.kp-pill` overflow clamp and Warm Archival Paper light-mode AA contrast polish (#54610).
+- `driver = "muse_code"` runs a Keeper on `muse acp`, with session resume, MASC tools and skills over the loopback MCP bridge; a Keeper declared `native = "none"` runs at `read` on it because the client reads files without a permission request, and `effort` is refused for it at load (#54613).
+- **TUI Pele/Mermaid unblocking & inline Mermaid Markdown rendering**: fall back to the active TUI theme palette when terminal OSC 11 is absent, resolve `masc-pele` across `PATH` / explicit sibling / `$HOME/.local/bin`, detect Ghostty/WezTerm/Kitty outside `tmux`/`screen` while preserving `Graphics_refused` and `TERM=dumb` guards, auto-reflow horizontal `LR`/`RL` Mermaid diagrams to `TD` on `Too_wide`, enable `.` / `Ctrl+O` across all keeper-scoped Memory subviews, compact `< 104`-col widths, and ordinary facts outside the last 50 activity entries (honest single-fact snapshot), and render inline ```` ```mermaid ```` fences inside Markdown across Board, Wiki, Artifacts, Tasks/Goals, and Keeper Chat with 1-to-1 `measure`/`draw` parity (#54614).
+- Add first-class TUI Runtime Failover and Exact-Output Lane CRUD (`[n]` create, `[e]` edit candidates/order, `[d]` delete with CAS `expected_source_revision` checks) inside `5 Runtime > Failover Lanes` and `Lane_dive` without `$EDITOR` (#54617).
+- Add TUI Tasks (`[n]` create via MCP `masc_add_task`, `[c]` transition via MCP `masc_transition`, `[g]` goalless task link-goal), Goals (`[n]`/`[e]` structured `measure` + `procedure` upsert via MCP `masc_goal_upsert`), and Board (`[R]`/`[a]` reply, `[u]` upvote, `[p]` pin toggle, `[d]` delete confirmation) CRUD actions (#54618).
+- Add TUI Keeper Lifecycle (`[a]` boot/resume, `[x]` pause/shutdown/reset, `[d]` confirmed purge via `/api/v1/keepers/:k/*` and `/api/v1/dashboard/agents/purge`) and Lane-Addon CRUD (`[n]` attach, `[d]` detach, `[e]` invoke declared action, `[c]` answer open asks via `/api/v1/lane-addons/*`) (#54619).
+- Auto-open OAuth authorization and GitHub device URLs in the TUI, stream CLI setup login prompts (`POST /api/v1/setup/accounts/login?auth_hints=1` & `POST /api/v1/setup/accounts/login/:id/input`), and auto-poll active keeper OAuth exchanges on a bounded 2s tick schedule that returns to 0 Hz when settled (#54620).
+
+### Changed
+
+- Replace `effect`, `uuid`, `toml-eslint-parser`, and `@noble/hashes` with lean zero-dependency helpers (`src/lib/{result,wire-schema,uuid,toml-lite,keeper-fsm-labels}.ts`) and add the renewal engine quartet (`uplot`, `@tanstack/preact-table`, `@tanstack/virtual-core`, `@leeoniya/ufuzzy`) with explicit chunk boundaries in `dashboard/vite.config.ts` (#54560).
+- Consolidate the dashboard design system onto a single OKLCH token SSOT (`Tempered Slate + Surgical Hearth` dark default, `Warm Archival Paper` light theme, static `[data-contrast="high"]` and `prefers-contrast: more` APCA Lc >= 90 preset, 0 raw hex) and collapse 90 legacy CSS files into 7 clean stylesheets (`index.css` gzip `195.55 KB -> 24.39 KB`, -87.5%) (#54561).
+- Fix `kSigil` two-letter initials collision for hyphenated Keeper names (`code-reviewer-sister` -> `CS`, `e-masc-the-leader` -> `EL`) and upgrade `<KeeperBadge>` to soft-tinted OKLCH chips with optional portrait thumbnails and slot rings (#54561).
+
+### Removed
+
+- Retire the dashboard IDE shell, Lab diagnostics, document converters, diagram engines, and 136 bundled font assets. Use installed system fonts for display and body text, and keep the two bundled JetBrains Mono subsets for monospace text. The renewal plan is recorded in `ROADMAP.md` (#54560).
+
+### Fixed
+
+- Gate `nav-telemetry` POST emissions on authenticated `AuthSession` (with `x-masc-csrf-token` in `multi_account` mode) to eliminate unauthenticated `401` errors on boot and sign-out (#54562).
+- Reject protocol-relative `baseUrl` (`//...`) in `resolveWorkspaceUrl()` so same-origin session cookies and CSRF tokens never leak across origins (#54575).
+- Resolve `Ctrl+T` Context drawer target Keeper cleanly via `Model.target_keeper` instead of querying the internal `_default` draft key (#54605).
+- Surface hidden `Infra` (`Repos & Changes`, `Code`) and `System` sections with a clickable sidebar overflow footer and bilingual Palette search aliases (`workspace`, `워크스페이스`, `저장소`) (#54605).
+- Fall back to the local loopback callback URI for `Server_callback` Keeper OAuth providers when `MASC_HTTP_BASE_URL` and `MASC_HOST` are unset or wildcard-bound, and emit a CSP-nonce-scoped same-origin `masc:oauth-complete` postMessage + auto-close signal on the callback completion page (#54608)
+- Honor strictly validated relative `?return_to=` targets on multi-account sign-in pages (mapping `/dashboard#account` cleanly through `/accounts/console`) while preserving existing `/accounts/console` defaults (#54608)
+- Keeper TUI approval actions stay bound to the selected Human Attention entry when filtering or a server refresh hides that entry. (#54609)
+- **TUI timeout diagnostics & per-endpoint budgets**: assign exhaustive 12s/30s HTTP timeout budgets across TUI GET/POST endpoints, extend Keeper chat stream header timeout to 45s, and report exact timeout phase, duration, and sanitized endpoint path (stripping credentials, queries, fragments, and control bytes) across KO/EN toasts and incidents (#54612).
+- Setup login waits for complete authentication links in terminal output and keeps piped device-code prompts in their original line order. (#54615)
+- Muse Code reports unsupported provider, model, binding and per-turn reasoning effort instead of silently ignoring it. Set the effort in the Muse provider's process arguments (#54616).
+- TUI memory diagrams show current snapshots without a reobservation event and keep the selected diff entry when related history is unavailable (#54623).
+- A `muse_code` Keeper now gets exactly the tools its native posture allows. The host ran file reads, writes and shell commands without asking MASC, so refusing permission requests did not enforce `none` or `read`. MASC now starts the host with `-c run.toolset`: `none` offers MASC's tools only, `read` adds file read and search, `full` leaves the host's tools. Muse Code can therefore run at `none`, which fusion and verification require (#54624).
+- The Muse Code executable lookup reads `MUSE_INSTALL_DIR`, the variable the Muse installer writes to. Before, MASC searched `PATH` and `~/.local/bin` only, so a client installed elsewhere was not found when MASC ran with the variable set and the directory was not on `PATH`. The lookup serves the ACP client start, `masc runtime-client-path --client muse-code` and the setup login (#54629).
+- Show Keeper chat reasoning, tool activity, reply streaming, and waiting in a fixed row above the input. Keep tool results pending until the stream confirms them (#54632).
+- Clear the previous tool wait in Keeper Chat as soon as the next model response starts. (#54637)
+
+### Performance
+
+- Accelerate Keeper chat history page reads (`GET /api/v1/keepers/:name/chat/history/page`) with adaptive backward chunk windows, freshness-stamped head-page caching, and CPU-pool JSON serialization (#54604).
+- Offload Keeper `/next-request`, `/turn-records`, and `/turn-transcript` reads from the main HTTP serving fiber, add adaptive 8 KiB to 256 KiB reverse chunk scans in `Dated_jsonl`, and add bounded freshness-validated caching for `/provider-input` and settled `/cache-outcome` lookups (#54604).
+- Scope TUI Keeper Context fetches to the active subtab so the default Composition view no longer eagerly triggers `/provider-input`, `/cache-outcome`, `/turn-transcript`, and `/tool-calls` scans on every Keeper switch (#54605).
+- Coalesce concurrent identical TUI `Http_get` requests into single-flight execution with 1-deep dirty follow-up while preserving overlapping timestamped chat queue/status reads (#54605).
+
+### Documentation
+
+- Record the decision to roll long Keeper turns over at the declared input limit and to send finished-turn tool results as markers from the next turn, with the 11-22..24 measurements and the three-model vote, in `RFC-tool-results-age-out-of-context` (#54636).
+
 ## [0.82.0] - 2026-11-24
 
 ### Added

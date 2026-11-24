@@ -3,7 +3,7 @@
 (using menhir 3.0)
 
 (name masc)
-(version 0.82.0)
+(version 0.83.0)
 
 ; Local-sandbox-only: vendor/ocaml-msx carries a copy of the pinned
 ; ocaml-msx package so sandboxes whose opam switch lacks the pin can still

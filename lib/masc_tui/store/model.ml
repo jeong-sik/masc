@@ -107,6 +107,50 @@ type inline_modal_state = {
   error : string option;
 }
 
+module Ask_draft_key = struct
+  type t = string * string
+
+  let compare (a1, q1) (a2, q2) =
+    let c = String.compare a1 a2 in
+    if c <> 0 then c else String.compare q1 q2
+end
+
+module Ask_draft_map = Map.Make (Ask_draft_key)
+
+type ask_answer_mode =
+  | Ask_mode_unanswered
+  | Ask_mode_choices
+  | Ask_mode_free_text
+  | Ask_mode_skipped
+
+type ask_question_draft = {
+  choice_ids : string list;
+  free_text : string;
+  free_text_cursor : int;
+  mode : ask_answer_mode;
+}
+
+type ask_modal_row =
+  | Ask_row_choice of int * Wire_work.ask_choice
+  | Ask_row_free_text
+  | Ask_row_skip
+
+type ask_live_status =
+  | Ask_live_open
+  | Ask_live_in_flight
+  | Ask_live_closed
+
+type ask_modal = {
+  ask : Wire_work.ask_row;
+  question_idx : int;
+  cursor : int;
+  prompt_scroll : int;
+  per_question : ask_question_draft Ask_draft_map.t;
+  editing_free_text : bool;
+  submitting : bool;
+  error : Say.t option;
+}
+
 type toast_level =
   | Toast_info
   | Toast_success
@@ -145,6 +189,7 @@ type t = {
   config : Config_store.t;
   palette : palette_state;
   inline_modal : inline_modal_state option;
+  ask_modal : ask_modal option;
   toast : toast option;
 }
 
@@ -281,6 +326,7 @@ let initial ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_ko)
     config = Config_store.empty;
     palette = { mode = Palette_commands; query = ""; selected = 0 };
     inline_modal = None;
+    ask_modal = None;
     toast = None;
   }
 
@@ -343,6 +389,7 @@ let fast_approval_strip_item m =
         | Nav.Incidents
         | Nav.Queue_context _
         | Nav.Inline_action _
+        | Nav.Ask_answer
         | Nav.Help ) ->
         Attention.top_fast_path m.attention
     | None ->
@@ -482,7 +529,7 @@ let active_menu_target m =
   | Some Nav.Incidents -> Nav.Menu_incidents
   | Some (Nav.Queue_context _) -> Nav.Menu_queue_context
   | Some Nav.Help -> Nav.Menu_help
-  | Some (Nav.Palette | Nav.Inline_action _ | Nav.System_gate _) | None -> (
+  | Some (Nav.Palette | Nav.Inline_action _ | Nav.Ask_answer | Nav.System_gate _) | None -> (
       match m.nav.workspace with
       | Nav.Pulse -> Nav.Menu_pulse
       | Nav.Work -> Nav.Menu_work m.work.active_tab
@@ -671,6 +718,7 @@ let focusable_pane_count m =
         | Nav.Incidents
         | Nav.Queue_context _
         | Nav.Inline_action _
+        | Nav.Ask_answer
         | Nav.Help
         | Nav.System_gate _ ) ->
         1
@@ -856,6 +904,11 @@ let active_focus_label m =
       Say.make ~ko:"오버레이 · 큐/컨텍스트" ~en:"OVERLAY · Queue/Ctx"
   | Some (Nav.Inline_action _) ->
       Say.make ~ko:"입력 모달" ~en:"MODAL"
+  | Some Nav.Ask_answer -> (
+      match m.ask_modal with
+      | Some modal when modal.editing_free_text ->
+          Say.make ~ko:"질문 답변 · 직접 입력" ~en:"ASK · Free-text"
+      | Some _ | None -> Say.make ~ko:"질문 답변" ~en:"ASK ANSWER")
   | Some (Nav.System_gate _) ->
       Say.make ~ko:"시스템 게이트" ~en:"SYSTEM GATE"
   | None -> (
@@ -1062,6 +1115,10 @@ let is_text_capture_active m =
   else
     match m.nav.overlay with
     | Some Nav.Palette | Some (Nav.Inline_action _) -> true
+    | Some Nav.Ask_answer -> (
+        match m.ask_modal with
+        | Some modal -> modal.editing_free_text
+        | None -> false)
     | Some (Nav.Settings _) -> Config_store.is_editing_field m.config
     | Some (Nav.Incidents | Nav.Queue_context _ | Nav.Help | Nav.System_gate _) ->
         false
@@ -1318,6 +1375,505 @@ let modal_cycle_field ~delta modal =
     let next = (modal.active_field + delta) mod len in
     let active_field = if next < 0 then next + len else next in
     { modal with active_field }
+
+let equal_ask_answer_mode a b =
+  match a, b with
+  | Ask_mode_unanswered, Ask_mode_unanswered
+  | Ask_mode_choices, Ask_mode_choices
+  | Ask_mode_free_text, Ask_mode_free_text
+  | Ask_mode_skipped, Ask_mode_skipped ->
+      true
+  | Ask_mode_unanswered, (Ask_mode_choices | Ask_mode_free_text | Ask_mode_skipped)
+  | Ask_mode_choices, (Ask_mode_unanswered | Ask_mode_free_text | Ask_mode_skipped)
+  | Ask_mode_free_text, (Ask_mode_unanswered | Ask_mode_choices | Ask_mode_skipped)
+  | Ask_mode_skipped, (Ask_mode_unanswered | Ask_mode_choices | Ask_mode_free_text) ->
+      false
+
+let equal_ask_live_status a b =
+  match a, b with
+  | Ask_live_open, Ask_live_open
+  | Ask_live_in_flight, Ask_live_in_flight
+  | Ask_live_closed, Ask_live_closed ->
+      true
+  | Ask_live_open, (Ask_live_in_flight | Ask_live_closed)
+  | Ask_live_in_flight, (Ask_live_open | Ask_live_closed)
+  | Ask_live_closed, (Ask_live_open | Ask_live_in_flight) ->
+      false
+
+let ask_choice_letters = "abcdefhlmnopqrstuvwxyz"
+
+let ask_choice_hotkey_char idx =
+  if idx >= 0 && idx < String.length ask_choice_letters then
+    Some ask_choice_letters.[idx]
+  else None
+
+let ask_choice_index_of_char ch =
+  let len = String.length ask_choice_letters in
+  let rec find i =
+    if i >= len then None
+    else if Char.equal ask_choice_letters.[i] ch then Some i
+    else find (i + 1)
+  in
+  find 0
+
+let empty_ask_question_draft : ask_question_draft =
+  {
+    choice_ids = [];
+    free_text = "";
+    free_text_cursor = 0;
+    mode = Ask_mode_unanswered;
+  }
+
+let ask_modal_rows (q : Wire_work.ask_question) : ask_modal_row list =
+  let choices = List.mapi (fun i ch -> Ask_row_choice (i, ch)) q.choices in
+  let free = if q.allow_free_text then [ Ask_row_free_text ] else [] in
+  choices @ free @ [ Ask_row_skip ]
+
+let ask_modal_current_question (modal : ask_modal) : Wire_work.ask_question option =
+  let n = List.length modal.ask.questions in
+  if n <= 0 then None
+  else List.nth_opt modal.ask.questions (Store_scroll.clamp_index n modal.question_idx)
+
+let ask_modal_current_row (modal : ask_modal) : ask_modal_row option =
+  match ask_modal_current_question modal with
+  | None -> None
+  | Some q ->
+      let rows = ask_modal_rows q in
+      List.nth_opt rows (Store_scroll.clamp_index (List.length rows) modal.cursor)
+
+let ask_question_draft_for (modal : ask_modal) (q : Wire_work.ask_question) :
+    ask_question_draft =
+  match Ask_draft_map.find_opt (modal.ask.ask_id, q.question_id) modal.per_question with
+  | Some d -> d
+  | None -> empty_ask_question_draft
+
+let ask_question_response (modal : ask_modal) (q : Wire_work.ask_question) :
+    Wire_work.ask_response option =
+  let d = ask_question_draft_for modal q in
+  match d.mode with
+  | Ask_mode_choices ->
+      if d.choice_ids = [] then None
+      else Some (Wire_work.Ask_chose d.choice_ids)
+  | Ask_mode_free_text ->
+      let trimmed = String.trim d.free_text in
+      if String.equal trimmed "" then None
+      else Some (Wire_work.Ask_wrote trimmed)
+  | Ask_mode_skipped -> Some Wire_work.Ask_skipped
+  | Ask_mode_unanswered -> None
+
+let ask_modal_all_answered (modal : ask_modal) =
+  modal.ask.questions <> []
+  && List.for_all
+       (fun q -> Option.is_some (ask_question_response modal q))
+       modal.ask.questions
+
+let ask_modal_build_answers (modal : ask_modal) =
+  let rec loop idx acc = function
+    | [] ->
+        if acc = [] then Error 0 else Ok (List.rev acc)
+    | (q : Wire_work.ask_question) :: rest -> (
+        match ask_question_response modal q with
+        | Some resp -> loop (idx + 1) ((q.question_id, resp) :: acc) rest
+        | None -> Error idx)
+  in
+  loop 0 [] modal.ask.questions
+
+let ask_live_status (m : t) (ask_id : string) : ask_live_status =
+  let attn_id = "ask:" ^ ask_id in
+  if Attention.is_in_flight ~id:attn_id m.attention then Ask_live_in_flight
+  else
+    let open_in_attention =
+      List.exists
+        (fun (e : Attention.entry) ->
+          match e.payload with
+          | Attention.Payload_ask a -> (
+              String.equal a.ask_id ask_id
+              &&
+              match a.resolution with
+              | Wire_work.Ask_open -> true
+              | Wire_work.Ask_answered _ | Wire_work.Ask_withdrawn _ -> false)
+          | Attention.Payload_tool_approval _
+          | Attention.Payload_gate _
+          | Attention.Payload_goal_confirmation _ ->
+              false)
+        m.attention.items
+    in
+    if open_in_attention then Ask_live_open else Ask_live_closed
+
+let ask_modal_for ?preselect_choice_1based (ask : Wire_work.ask_row) : ask_modal =
+  let per_question, cursor =
+    match preselect_choice_1based, ask.questions with
+    | Some n, q :: _ when n >= 1 -> (
+        match List.nth_opt q.choices (n - 1) with
+        | Some ch ->
+            let draft =
+              {
+                empty_ask_question_draft with
+                choice_ids = [ ch.choice_id ];
+                mode = Ask_mode_choices;
+              }
+            in
+            ( Ask_draft_map.singleton (ask.ask_id, q.question_id) draft
+            , n - 1 )
+        | None -> (Ask_draft_map.empty, 0))
+    | Some _, _ | None, _ -> (Ask_draft_map.empty, 0)
+  in
+  {
+    ask;
+    question_idx = 0;
+    cursor;
+    prompt_scroll = 0;
+    per_question;
+    editing_free_text = false;
+    submitting = false;
+    error = None;
+  }
+
+let with_current_ask_draft f (modal : ask_modal) : ask_modal =
+  match ask_modal_current_question modal with
+  | None -> modal
+  | Some q ->
+      let key = (modal.ask.ask_id, q.question_id) in
+      let prev = ask_question_draft_for modal q in
+      let next = f q prev in
+      {
+        modal with
+        per_question = Ask_draft_map.add key next modal.per_question;
+      }
+
+let ask_modal_set_cursor idx (modal : ask_modal) : ask_modal =
+  match ask_modal_current_question modal with
+  | None -> modal
+  | Some q ->
+      let rows = ask_modal_rows q in
+      let clamped = Store_scroll.clamp_index (List.length rows) idx in
+      let editing_free_text =
+        modal.editing_free_text
+        &&
+        match List.nth_opt rows clamped with
+        | Some Ask_row_free_text -> q.allow_free_text
+        | Some (Ask_row_choice _ | Ask_row_skip) | None -> false
+      in
+      { modal with cursor = clamped; editing_free_text }
+
+let ask_modal_move_cursor ~delta (modal : ask_modal) : ask_modal =
+  ask_modal_set_cursor (modal.cursor + delta) modal
+
+let ask_modal_scroll_prompt ?max_scroll ~delta (modal : ask_modal) : ask_modal =
+  let raw = Int.max 0 (modal.prompt_scroll + delta) in
+  let prompt_scroll =
+    match max_scroll with
+    | Some hi -> Int.min (Int.max 0 hi) raw
+    | None -> raw
+  in
+  { modal with prompt_scroll }
+
+let ask_modal_prompt_markdown ~compact (ask : Wire_work.ask_row)
+    (q : Wire_work.ask_question) : string =
+  let ctx_opt =
+    match ask.context with
+    | Some c ->
+        let t = String.trim c in
+        if String.equal t "" then None else Some t
+    | None -> None
+  in
+  let hdr = String.trim q.header in
+  let pr = String.trim q.prompt in
+  if compact then
+    let head_line =
+      if String.equal hdr "" then pr
+      else if String.equal pr "" then Printf.sprintf "**%s**" hdr
+      else Printf.sprintf "**%s** — %s" hdr pr
+    in
+    match ctx_opt with
+    | Some c -> head_line ^ "\n" ^ c
+    | None -> head_line
+  else
+    let main =
+      if String.equal hdr "" then pr
+      else if String.equal pr "" then Printf.sprintf "**%s**" hdr
+      else Printf.sprintf "**%s**\n%s" hdr pr
+    in
+    match ctx_opt with
+    | Some c -> main ^ "\n\n> " ^ c
+    | None -> main
+
+let ask_modal_select_question idx (modal : ask_modal) : ask_modal =
+  let n = List.length modal.ask.questions in
+  if n <= 0 then modal
+  else
+    let question_idx = Store_scroll.clamp_index n idx in
+    let cursor =
+      match List.nth_opt modal.ask.questions question_idx with
+      | None -> 0
+      | Some q -> (
+          let d = ask_question_draft_for modal q in
+          match d.mode with
+          | Ask_mode_choices -> (
+              match d.choice_ids with
+              | first_id :: _ ->
+                  let rec find i = function
+                    | [] -> 0
+                    | (ch : Wire_work.ask_choice) :: rest ->
+                        if String.equal ch.choice_id first_id then i
+                        else find (i + 1) rest
+                  in
+                  find 0 q.choices
+              | [] -> 0)
+          | Ask_mode_free_text when q.allow_free_text -> List.length q.choices
+          | Ask_mode_free_text -> 0
+          | Ask_mode_skipped ->
+              List.length q.choices + if q.allow_free_text then 1 else 0
+          | Ask_mode_unanswered -> 0)
+    in
+    {
+      modal with
+      question_idx;
+      cursor;
+      prompt_scroll = 0;
+      editing_free_text = false;
+    }
+
+let ask_modal_step_question ~delta (modal : ask_modal) : ask_modal =
+  let n = List.length modal.ask.questions in
+  if n <= 1 then modal
+  else
+    let raw = (modal.question_idx + delta) mod n in
+    let idx = if raw < 0 then raw + n else raw in
+    ask_modal_select_question idx modal
+
+let ask_modal_set_editing_free_text editing (modal : ask_modal) : ask_modal =
+  if not editing then { modal with editing_free_text = false }
+  else
+    match ask_modal_current_question modal with
+    | Some q when q.allow_free_text ->
+        let free_idx = List.length q.choices in
+        { modal with cursor = free_idx; editing_free_text = true }
+    | Some _ | None -> { modal with editing_free_text = false }
+
+let ask_modal_enter_free_text (modal : ask_modal) : ask_modal =
+  ask_modal_set_editing_free_text true modal
+
+let ask_modal_toggle_or_select_choice choice_idx (modal : ask_modal) : ask_modal =
+  match ask_modal_current_question modal with
+  | None -> modal
+  | Some q -> (
+      match List.nth_opt q.choices choice_idx with
+      | None -> modal
+      | Some ch ->
+          let modal1 =
+            { modal with cursor = choice_idx; editing_free_text = false }
+          in
+          with_current_ask_draft
+            (fun (q : Wire_work.ask_question) d ->
+              match q.mode with
+              | Wire_work.Ask_single ->
+                  {
+                    d with
+                    choice_ids = [ ch.choice_id ];
+                    mode = Ask_mode_choices;
+                  }
+              | Wire_work.Ask_multi ->
+                  let already =
+                    List.exists (String.equal ch.choice_id) d.choice_ids
+                  in
+                  let next_set =
+                    if already then
+                      List.filter
+                        (fun id -> not (String.equal id ch.choice_id))
+                        d.choice_ids
+                    else ch.choice_id :: d.choice_ids
+                  in
+                  (* Keep canonical choice order from q.choices *)
+                  let choice_ids =
+                    List.filter_map
+                      (fun (c : Wire_work.ask_choice) ->
+                        if List.exists (String.equal c.choice_id) next_set then
+                          Some c.choice_id
+                        else None)
+                      q.choices
+                  in
+                  let mode =
+                    if choice_ids <> [] then Ask_mode_choices
+                    else if not (String.equal (String.trim d.free_text) "") then
+                      Ask_mode_free_text
+                    else Ask_mode_unanswered
+                  in
+                  { d with choice_ids; mode })
+            modal1)
+
+let ask_modal_toggle_skip (modal : ask_modal) : ask_modal =
+  with_current_ask_draft
+    (fun _q d ->
+      if equal_ask_answer_mode d.mode Ask_mode_skipped then
+        let mode =
+          if d.choice_ids <> [] then Ask_mode_choices
+          else if not (String.equal (String.trim d.free_text) "") then
+            Ask_mode_free_text
+          else Ask_mode_unanswered
+        in
+        { d with mode }
+      else { d with mode = Ask_mode_skipped })
+    { modal with editing_free_text = false }
+
+let ask_modal_set_skipped (modal : ask_modal) : ask_modal =
+  with_current_ask_draft
+    (fun _q d -> { d with mode = Ask_mode_skipped })
+    { modal with editing_free_text = false }
+
+let grapheme_boundaries_of s =
+  let text, clusters = Masc_tui_term.Grapheme.segment s in
+  let ends =
+    List.map (fun (c : Masc_tui_term.Grapheme.cluster) -> c.end_offset) clusters
+  in
+  (text, 0 :: ends)
+
+let clamp_grapheme_cursor text bounds off =
+  let len = String.length text in
+  let target = Int.max 0 (Int.min len off) in
+  List.fold_left
+    (fun best b -> if b <= target then b else best)
+    0 bounds
+
+let prev_grapheme_boundary bounds cursor =
+  List.fold_left
+    (fun best b -> if b < cursor then b else best)
+    0 bounds
+
+let next_grapheme_boundary text bounds cursor =
+  let len = String.length text in
+  match List.find_opt (fun b -> b > cursor) bounds with
+  | Some b -> b
+  | None -> len
+
+let ask_modal_insert_free_text raw (modal : ask_modal) : ask_modal =
+  if not modal.editing_free_text then modal
+  else
+    let flat =
+      raw
+      |> String.map (function '\n' | '\r' | '\t' -> ' ' | c -> c)
+      |> Masc_tui_term.Grapheme.sanitize_controls
+    in
+    if String.equal flat "" then modal
+    else
+      with_current_ask_draft
+        (fun _q d ->
+          let text, bounds = grapheme_boundaries_of d.free_text in
+          let cur = clamp_grapheme_cursor text bounds d.free_text_cursor in
+          let prefix = String.sub text 0 cur in
+          let suffix = String.sub text cur (String.length text - cur) in
+          let free_text = prefix ^ flat ^ suffix in
+          let free_text_cursor = cur + String.length flat in
+          let mode =
+            if not (String.equal (String.trim free_text) "") then
+              Ask_mode_free_text
+            else d.mode
+          in
+          { d with free_text; free_text_cursor; mode })
+        modal
+
+let ask_modal_backspace_free_text (modal : ask_modal) : ask_modal =
+  if not modal.editing_free_text then modal
+  else
+    with_current_ask_draft
+      (fun _q d ->
+        let text, bounds = grapheme_boundaries_of d.free_text in
+        let cur = clamp_grapheme_cursor text bounds d.free_text_cursor in
+        if cur <= 0 then { d with free_text = text; free_text_cursor = 0 }
+        else
+          let prev = prev_grapheme_boundary bounds cur in
+          let prefix = String.sub text 0 prev in
+          let suffix = String.sub text cur (String.length text - cur) in
+          let free_text = prefix ^ suffix in
+          let mode =
+            if not (String.equal (String.trim free_text) "") then
+              Ask_mode_free_text
+            else if d.choice_ids <> [] then Ask_mode_choices
+            else Ask_mode_unanswered
+          in
+          { d with free_text; free_text_cursor = prev; mode })
+      modal
+
+let ask_modal_delete_free_text (modal : ask_modal) : ask_modal =
+  if not modal.editing_free_text then modal
+  else
+    with_current_ask_draft
+      (fun _q d ->
+        let text, bounds = grapheme_boundaries_of d.free_text in
+        let len = String.length text in
+        let cur = clamp_grapheme_cursor text bounds d.free_text_cursor in
+        if cur >= len then { d with free_text = text; free_text_cursor = len }
+        else
+          let next = next_grapheme_boundary text bounds cur in
+          let prefix = String.sub text 0 cur in
+          let suffix = String.sub text next (len - next) in
+          let free_text = prefix ^ suffix in
+          let mode =
+            if not (String.equal (String.trim free_text) "") then
+              Ask_mode_free_text
+            else if d.choice_ids <> [] then Ask_mode_choices
+            else Ask_mode_unanswered
+          in
+          { d with free_text; free_text_cursor = cur; mode })
+      modal
+
+let ask_modal_move_free_text_cursor dir (modal : ask_modal) : ask_modal =
+  if not modal.editing_free_text then modal
+  else
+    with_current_ask_draft
+      (fun _q d ->
+        let text, bounds = grapheme_boundaries_of d.free_text in
+        let len = String.length text in
+        let cur = clamp_grapheme_cursor text bounds d.free_text_cursor in
+        let next_cur =
+          match dir with
+          | `Left -> prev_grapheme_boundary bounds cur
+          | `Right -> next_grapheme_boundary text bounds cur
+          | `Home -> 0
+          | `End -> len
+        in
+        { d with free_text = text; free_text_cursor = next_cur })
+      modal
+
+let ask_modal_kill_free_text_start (modal : ask_modal) : ask_modal =
+  if not modal.editing_free_text then modal
+  else
+    with_current_ask_draft
+      (fun _q d ->
+        let text, bounds = grapheme_boundaries_of d.free_text in
+        let len = String.length text in
+        let cur = clamp_grapheme_cursor text bounds d.free_text_cursor in
+        let free_text = String.sub text cur (len - cur) in
+        let mode =
+          if not (String.equal (String.trim free_text) "") then
+            Ask_mode_free_text
+          else if d.choice_ids <> [] then Ask_mode_choices
+          else Ask_mode_unanswered
+        in
+        { d with free_text; free_text_cursor = 0; mode })
+      modal
+
+let ask_modal_confirm_free_text (modal : ask_modal) : ask_modal * bool =
+  match ask_modal_current_question modal with
+  | None -> ({ modal with editing_free_text = false }, false)
+  | Some q ->
+      let d = ask_question_draft_for modal q in
+      let trimmed = String.trim d.free_text in
+      let has_text = not (String.equal trimmed "") in
+      let next_modal =
+        with_current_ask_draft
+          (fun _q d ->
+            if has_text then
+              { d with mode = Ask_mode_free_text }
+            else
+              let mode =
+                if d.choice_ids <> [] then Ask_mode_choices
+                else Ask_mode_unanswered
+              in
+              { d with mode })
+          { modal with editing_free_text = false }
+      in
+      (next_modal, has_text)
 
 let is_viewing_wiki_slug ~slug m =
   Option.is_none m.nav.overlay
@@ -1760,6 +2316,7 @@ let active_view_ssot_mode m =
         | Nav.Incidents
         | Nav.Queue_context _
         | Nav.Inline_action _
+        | Nav.Ask_answer
         | Nav.Help )
     | None ->
         false

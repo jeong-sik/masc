@@ -2758,7 +2758,7 @@ let render_config_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
     in
     let diff_hint =
       if dirty_n > 0 then
-        Ops_common.say model ~ko:" · [Space] Diff" ~en:" · [Space] Diff"
+        Ops_common.say model ~ko:" · [d] Diff" ~en:" · [d] Diff"
       else ""
     in
     let hdr_str =
@@ -3212,8 +3212,8 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
         if Nav.equal_keeper_tab tab Nav.Keeper_config then
           Some
             (Ops_common.say model
-               ~ko:"[←→] 값 · [Enter] 편집 · [Ctrl+S] 저장 · [[ ]] 탭"
-               ~en:"[←→] Cycle · [Enter] Edit · [Ctrl+S] Save · [[ ]] Tabs")
+               ~ko:"[←→] 값 · [Enter] 편집 · [d] Diff · [Ctrl+S] 저장 · [[ ]] 탭"
+               ~en:"[←→] Cycle · [Enter] Edit · [d] Diff · [Ctrl+S] Save · [[ ]] Tabs")
         else if memory_diagram_open then
           Some
             (Ops_common.say model
@@ -3232,8 +3232,8 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
         else if Nav.equal_keeper_tab tab Nav.Keeper_identity then
           Some
             (Ops_common.say model
-               ~ko:"[l] 로그인 · [Space] 전환 · [K] PAT · [y] 복사"
-               ~en:"[l] Login · [Space] Switch · [K] PAT · [y] Copy")
+               ~ko:"[l] 로그인 · [a/Enter] 전환 · [K] PAT · [y] 복사"
+               ~en:"[l] Login · [a/Enter] Switch · [K] PAT · [y] Copy")
         else
           Some
             (Ops_common.say model ~ko:"[Ctrl+T] 큐 · [z] 확대"
@@ -3241,8 +3241,8 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
       else if Nav.equal_keeper_tab tab Nav.Keeper_config then
         Some
           (Ops_common.say model
-             ~ko:"[←→] 값 변경 · [Enter] 편집 · [Ctrl+S] 저장 · [[ ]] 탭 · [Esc] 목록"
-             ~en:"[←→] Cycle · [Enter] Edit · [Ctrl+S] Save · [[ ]] Tabs · [Esc] Fleet")
+             ~ko:"[←→] 값 변경 · [Enter] 편집 · [d] Diff · [Ctrl+S] 저장 · [[ ]] 탭 · [Esc] 목록"
+             ~en:"[←→] Cycle · [Enter] Edit · [d] Diff · [Ctrl+S] Save · [[ ]] Tabs · [Esc] Fleet")
       else if memory_diagram_open then
         Some
           (Ops_common.say model
@@ -3256,21 +3256,21 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
       else if Nav.equal_keeper_tab tab Nav.Keeper_logs then
         Some
           (Ops_common.say model
-             ~ko:"[v] 메트릭/샌드박스 · [r] 새로고침 · [←→] 탭 · [Esc] 목록"
-             ~en:"[v] Metrics/Sandbox · [r] Refresh · [←→] Tabs · [Esc] Fleet")
+             ~ko:"[v] 메트릭/샌드박스 · [r] 새로고침 · [[ ]] 탭 · [Esc] 목록"
+             ~en:"[v] Metrics/Sandbox · [r] Refresh · [[ ]] Tabs · [Esc] Fleet")
       else if Nav.equal_keeper_tab tab Nav.Keeper_identity then
         Some
           (Ops_common.say model
-             ~ko:"[l] 로그인 · [L] 폴 · [Space] 전환 · [U] 해제 · [K] PAT · [y] 복사"
-             ~en:"[l] Login · [L] Poll · [Space] Switch · [U] Disconnect · [K] PAT · [y] Copy")
+             ~ko:"[l] 로그인 · [L] 폴 · [a/Enter] 전환 · [U] 해제 · [K] PAT · [y] 복사"
+             ~en:"[l] Login · [L] Poll · [a/Enter] Switch · [U] Disconnect · [K] PAT · [y] Copy")
       else if Nav.equal_keeper_tab tab Nav.Keeper_chat && has_running_turn then
         Some
-          (Ops_common.say model ~ko:"[Esc/Ctrl+X] 턴 중단 · [y] 복사 · [←→] 탭"
-             ~en:"[Esc/Ctrl+X] Interrupt · [y] Copy · [←→] Tabs")
+          (Ops_common.say model ~ko:"[Esc/Ctrl+X] 턴 중단 · [y] 복사 · [[ ]] 탭"
+             ~en:"[Esc/Ctrl+X] Interrupt · [y] Copy · [[ ]] Tabs")
       else
         Some
-          (Ops_common.say model ~ko:"[←→] 탭 · [y] 응답 복사 · [Esc] 목록"
-             ~en:"[←→] Tabs · [y] Copy · [Esc] Fleet")
+          (Ops_common.say model ~ko:"[[ ]] 탭 · [y] 응답 복사 · [Esc] 목록"
+             ~en:"[[ ]] Tabs · [y] Copy · [Esc] Fleet")
     in
     let footer_hint =
       if embedded then

@@ -790,8 +790,8 @@ let draw_focused_help_footer ~pad_x grid ~(rect : Rect.t) ~(theme : Theme.t)
                 let fallback =
                   Say.resolve lang
                     (Say.make
-                       ~ko:"[Enter] 편집 · [Space] 검증 · [Ctrl+S] 저장"
-                       ~en:"[Enter] Edit · [Space] Validate · [Ctrl+S] Save")
+                       ~ko:"[Enter] 편집 · [d] 검증 · [Ctrl+S] 저장"
+                       ~en:"[Enter] Edit · [d] Validate · [Ctrl+S] Save")
                 in
                 ignore
                   (Cell_grid.put_text ~clip:r2 grid ~x:ix ~y:y2
@@ -831,8 +831,8 @@ let draw_focused_help_footer ~pad_x grid ~(rect : Rect.t) ~(theme : Theme.t)
               let hint =
                 Say.resolve lang
                   (Say.make
-                     ~ko:"[Enter] 편집 · [Space] 검증 · [Ctrl+S] 저장"
-                     ~en:"[Enter] Edit · [Space] Validate · [Ctrl+S] Save")
+                     ~ko:"[Enter] 편집 · [d] 검증 · [Ctrl+S] 저장"
+                     ~en:"[Enter] Edit · [d] Validate · [Ctrl+S] Save")
               in
               ignore
                 (Cell_grid.put_text ~clip:r3 grid ~x:ix ~y:y3

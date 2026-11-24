@@ -312,6 +312,7 @@ let apply_dataset_invalidation (m : Model.t) ds =
             | Nav.Incidents
             | Nav.Queue_context _
             | Nav.Inline_action _
+            | Nav.Ask_answer
             | Nav.Help
             | Nav.System_gate _ )
         | None -> (

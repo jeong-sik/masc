@@ -2334,26 +2334,49 @@ let test_journeys_tab_multipane_dives_safety () =
   in
   Alcotest.(check bool) "J13 item 1 differs from item 0" true
     (not (String.equal item0_id expected_item1_id));
-  let _, cmds_y = step m_inb_1 (char_key "Y") in
-  Alcotest.(check bool)
-    "J13 Work_inbox item 1 Y resolves selected item (NOT item 0)" true
-    (has_cmd
-       (function
-         | Cmd.Http_post { req = Cmd.Post_ask_answer { ask_id; _ }; _ } ->
-             String.equal ("ask:" ^ ask_id) expected_item1_id
-         | Cmd.Http_post { req = Cmd.Post_tool_approval { approval_id; _ }; _ } ->
-             String.equal ("tool:" ^ approval_id) expected_item1_id
-         | Cmd.Http_post { req = Cmd.Post_gate_resolution { id; _ }; _ } ->
-             String.equal ("gate:" ^ id) expected_item1_id
-         | _ -> false)
-       cmds_y);
+  let m_inb_y, cmds_y = step m_inb_1 (char_key "Y") in
+  let item1_is_ask = String.starts_with ~prefix:"ask:" expected_item1_id in
+  if item1_is_ask then begin
+    Alcotest.(check bool)
+      "J13 Work_inbox item 1 (Ask) Y opens Ask_answer modal (never blind choice 1)"
+      true
+      (Option.equal Nav.equal_overlay m_inb_y.nav.overlay (Some Nav.Ask_answer)
+       &&
+       match m_inb_y.ask_modal with
+       | Some am -> String.equal ("ask:" ^ am.ask.ask_id) expected_item1_id
+       | None -> false);
+    Alcotest.(check bool)
+      "J13 Work_inbox item 1 (Ask) Y emits 0 Post_ask_answer before confirmation"
+      false
+      (has_cmd
+         (function
+           | Cmd.Http_post { req = Cmd.Post_ask_answer _; _ } -> true
+           | _ -> false)
+         cmds_y)
+  end
+  else
+    Alcotest.(check bool)
+      "J13 Work_inbox item 1 Y resolves selected item (NOT item 0)" true
+      (has_cmd
+         (function
+           | Cmd.Http_post { req = Cmd.Post_tool_approval { approval_id; _ }; _ } ->
+               String.equal ("tool:" ^ approval_id) expected_item1_id
+           | Cmd.Http_post { req = Cmd.Post_gate_resolution { id; _ }; _ } ->
+               String.equal ("gate:" ^ id) expected_item1_id
+           | _ -> false)
+         cmds_y);
   let m_inb_p1, _ = step m_inb_1 (mk_key Keymap.Input.Tab) in
   let m_inb_sc, _ = step m_inb_p1 (mk_key Keymap.Input.Down) in
   Alcotest.(check bool) "J13 Work_inbox pane 1 scrolls detail_scroll_offset" true
     (m_inb_sc.work.detail_scroll_offset > 0);
   let m_inb_dive, _ = step m_inb_1 (mk_key Keymap.Input.Enter) in
-  Alcotest.(check bool) "J13 Work_inbox Enter dives selected triage item" true
-    (Option.is_some (Model.active_dive m_inb_dive));
+  Alcotest.(check bool)
+    "J13 Work_inbox Enter opens Ask modal (on Ask) or dives selected triage item"
+    true
+    (if item1_is_ask then
+       Option.equal Nav.equal_overlay m_inb_dive.nav.overlay
+         (Some Nav.Ask_answer)
+     else Option.is_some (Model.active_dive m_inb_dive));
 
   (* J14: Keepers Wide split pane 1 scrolls preview & ']' cycles embedded tab *)
   record_case ();
@@ -3522,9 +3545,16 @@ let test_pillar1_keeper_config_and_settings_lr () =
     Alcotest.(check bool) (label ^ ": Enter commits inline edit") true
       ((not (Config_store.is_editing_field m_edit_c.config))
        && Config_store.dirty_count m_edit_c.config = 1);
-    (* Space on non-bool with dirty_count > 0 emits dry-run Post_config_patch *)
-    let _, cmds_dry = step m_edit_c (char_key " ") in
-    Alcotest.(check bool) (label ^ ": Space emits dry_run Post_config_patch") true
+    (* Space on non-bool emits ZERO POSTs (safe local-only); explicit 'd' emits dry-run Post_config_patch *)
+    let _, cmds_space_kc = step m_edit_c (char_key " ") in
+    Alcotest.(check bool) (label ^ ": Space emits ZERO Post_config_patch") false
+      (has_cmd
+         (function
+           | Cmd.Http_post _ -> true
+           | _ -> false)
+         cmds_space_kc);
+    let _, cmds_dry = step m_edit_c (char_key "d") in
+    Alcotest.(check bool) (label ^ ": 'd' emits dry_run Post_config_patch") true
       (has_cmd
          (function
            | Cmd.Http_post { req = Cmd.Post_config_patch { dry_run = true; _ }; _ } ->
@@ -3654,6 +3684,7 @@ let test_pillar1_keeper_config_and_settings_lr () =
             | Nav.Incidents
             | Nav.Queue_context _
             | Nav.Inline_action _
+            | Nav.Ask_answer
             | Nav.Help
             | Nav.System_gate _ )
         | None ->
@@ -7451,6 +7482,1107 @@ let test_wave3_surfaces_scroll_bounds_guards_and_secrets () =
   Alcotest.(check int) "Reply_workspace_search matching Infra_code focuses pane_index=1" 1
     m_code_match_scope.nav.pane_index
 
+(* ---------- 8. Dedicated Ask Answer Modal & Unified Keymap Consistency ---------- *)
+
+let mk_ask_choice ?description choice_id label : Wire_work.ask_choice =
+  { choice_id; label; description }
+
+let mk_single_ask ?(ask_id = "ask-single-1") ?(keeper = "alpha")
+    ?(allow_free_text = true) () : Wire_work.ask_row =
+  {
+    ask_id;
+    keeper;
+    asked_at = 1710000000.0;
+    context = Some "Review deployment strategy before applying.";
+    questions =
+      [
+        {
+          question_id = "q-deploy";
+          header = "Deployment";
+          prompt = "Which rollout path should we use?";
+          mode = Wire_work.Ask_single;
+          allow_free_text;
+          free_text_hint = Some "Custom rollout notes";
+          choices =
+            [
+              mk_ask_choice ~description:"Gradual 10% rollout" "canary"
+                "Canary first";
+              mk_ask_choice ~description:"Direct full rollout" "full"
+                "Full rollout";
+              mk_ask_choice "hold" "Hold release";
+            ];
+        };
+      ];
+    resolution = Wire_work.Ask_open;
+  }
+
+let mk_multi_question_ask () : Wire_work.ask_row =
+  {
+    ask_id = "ask-multi-q";
+    keeper = "alpha";
+    asked_at = 1710000010.0;
+    context = Some "Multi-step release confirmation.";
+    questions =
+      [
+        {
+          question_id = "q1";
+          header = "Environment";
+          prompt = "Target environment?";
+          mode = Wire_work.Ask_single;
+          allow_free_text = false;
+          free_text_hint = None;
+          choices =
+            [
+              mk_ask_choice "staging" "Staging";
+              mk_ask_choice "prod" "Production";
+            ];
+        };
+        {
+          question_id = "q2";
+          header = "Checks";
+          prompt = "Select verification gates (multi-select or custom note):";
+          mode = Wire_work.Ask_multi;
+          allow_free_text = true;
+          free_text_hint = Some "Enter custom verification notes";
+          choices =
+            [
+              mk_ask_choice "lint" "Lint";
+              mk_ask_choice "unit" "Unit tests";
+              mk_ask_choice "smoke" "Smoke check";
+            ];
+        };
+        {
+          question_id = "q3";
+          header = "Notes";
+          prompt = "Optional release note?";
+          mode = Wire_work.Ask_single;
+          allow_free_text = true;
+          free_text_hint = None;
+          choices = [ mk_ask_choice "auto" "Auto-generate" ];
+        };
+      ];
+    resolution = Wire_work.Ask_open;
+  }
+
+let mk_many_choice_ask () : Wire_work.ask_row =
+  {
+    ask_id = "ask-many";
+    keeper = "alpha";
+    asked_at = 1710000020.0;
+    context = None;
+    questions =
+      [
+        {
+          question_id = "q-many";
+          header = "Select Region";
+          prompt = "Pick one of 8 target regions:";
+          mode = Wire_work.Ask_single;
+          allow_free_text = false;
+          free_text_hint = None;
+          choices =
+            List.init 8 (fun i ->
+                mk_ask_choice
+                  (Printf.sprintf "r-%d" (i + 1))
+                  (Printf.sprintf "Region %d" (i + 1)));
+        };
+      ];
+    resolution = Wire_work.Ask_open;
+  }
+
+let find_ask_post cmds =
+  List.find_map
+    (function
+      | Cmd.Http_post { req = Cmd.Post_ask_answer { keeper; ask_id; answers }; _ }
+        ->
+          Some (keeper, ask_id, answers)
+      | _ -> None)
+    (Cmd.flatten cmds)
+
+let has_any_http_post cmds =
+  List.exists
+    (function Cmd.Http_post _ -> true | _ -> false)
+    (Cmd.flatten cmds)
+
+let test_part1_ask_modal_and_honest_surfaces () =
+  let base = populated_model () in
+  let single_ask = mk_single_ask () in
+  let m_with_asks asks =
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Pulse; overlay = None; dive_stack = [] };
+      work =
+        Work_store.empty
+        |> Work_store.apply_asks ~observed_at:t0 asks;
+    }
+    |> Model.rebuild_attention
+  in
+  let m0 = m_with_asks [ single_ask ] in
+
+  (* 1. Y (Fast_approve_top) on Ask opens Ask_answer modal, NEVER blindly submits choice 1 *)
+  let m_y, cmds_y = step m0 (char_key ~shift:true "Y") in
+  Alcotest.(check bool) "Y on Ask opens Nav.Ask_answer modal" true
+    (Option.equal Nav.equal_overlay m_y.nav.overlay (Some Nav.Ask_answer));
+  Alcotest.(check bool) "Y on Ask emits ZERO Post_ask_answer" false
+    (Option.is_some (find_ask_post cmds_y));
+
+  (* 2. Alt+Y from focused composer opens Ask modal while preserving composer draft *)
+  let m_comp =
+    {
+      m0 with
+      drafts =
+        m0.drafts
+        |> Drafts.set_active_keeper "alpha"
+        |> Drafts.set_focus true
+        |> Drafts.insert_text "keep my draft";
+    }
+  in
+  let m_alty, cmds_alty = step m_comp (char_key ~alt:true "y") in
+  Alcotest.(check bool) "Alt+Y from composer opens Nav.Ask_answer" true
+    (Option.equal Nav.equal_overlay m_alty.nav.overlay (Some Nav.Ask_answer));
+  Alcotest.(check bool) "Alt+Y emits ZERO Post_ask_answer" false
+    (Option.is_some (find_ask_post cmds_alty));
+  let m_alty_esc, _ = step m_alty (mk_key Keymap.Input.Escape) in
+  Alcotest.(check string) "Esc closes Ask modal preserving composer draft"
+    "keep my draft" (Drafts.current_draft m_alty_esc.drafts).text;
+
+  (* 3. J (Teleport_blocked) on Ask jumps to Work > Inbox focused on Ask AND opens modal;
+     Esc lands cleanly on that Ask in Work > Inbox *)
+  let m_j, _ = step m0 (char_key ~shift:true "J") in
+  Alcotest.(check bool) "J on Ask navigates to Work > Inbox" true
+    (Nav.equal_workspace m_j.nav.workspace Nav.Work
+     && Nav.equal_work_tab m_j.work.active_tab Nav.Work_inbox);
+  Alcotest.(check bool) "J on Ask opens Nav.Ask_answer immediately" true
+    (Option.equal Nav.equal_overlay m_j.nav.overlay (Some Nav.Ask_answer));
+  let m_j_esc, _ = step m_j (mk_key Keymap.Input.Escape) in
+  Alcotest.(check bool) "Esc after J leaves user on Work > Inbox with modal closed"
+    true
+    (Option.is_none m_j_esc.nav.overlay
+     && Nav.equal_workspace m_j_esc.nav.workspace Nav.Work
+     && Nav.equal_work_tab m_j_esc.work.active_tab Nav.Work_inbox);
+
+  (* 4. Enter on Ask in Work > Inbox opens Ask modal; 'C' jumps to Keeper_chat *)
+  let m_inb_enter, _ = step m_j_esc (mk_key Keymap.Input.Enter) in
+  Alcotest.(check bool) "Work > Inbox Enter on Ask opens Ask_answer modal" true
+    (Option.equal Nav.equal_overlay m_inb_enter.nav.overlay (Some Nav.Ask_answer));
+  let m_modal_chat, _ = step m_inb_enter (char_key ~shift:true "C") in
+  Alcotest.(check bool) "Ask modal 'C' dives to Keeper_chat" true
+    (Option.is_none m_modal_chat.nav.overlay
+     &&
+     match Model.active_dive m_modal_chat with
+     | Some (Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_chat }) -> true
+     | _ -> false);
+  let m_inb_chat, _ = step m_j_esc (char_key ~shift:true "C") in
+  Alcotest.(check bool) "Work > Inbox 'C' on Ask dives to Keeper_chat" true
+    (match Model.active_dive m_inb_chat with
+     | Some (Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_chat }) -> true
+     | _ -> false);
+
+  (* 5. Quick-pick letter + Enter inside Ask modal sets submitting=true until HTTP Ok ack *)
+  let m_pick_b, cmds_b = step m_y (char_key "b") in
+  Alcotest.(check bool) "Quick-pick 'b' selects without premature submit" false
+    (Option.is_some (find_ask_post cmds_b));
+  let m_sub1, cmds_sub1 = step m_pick_b (mk_key Keymap.Input.Enter) in
+  (match find_ask_post cmds_sub1 with
+  | Some (_, ask_id, answers) ->
+      Alcotest.(check string) "single ask_id" "ask-single-1" ask_id;
+      Alcotest.(check bool) "choice #2 (full) submitted" true
+        (answers = [ ("q-deploy", Wire_work.Ask_chose [ "full" ]) ])
+  | None -> Alcotest.fail "expected Post_ask_answer on Enter after quick-pick");
+  Alcotest.(check bool) "Ask marked in-flight after modal submit" true
+    (Attention.is_in_flight ~id:"ask:ask-single-1" m_sub1.attention);
+  Alcotest.(check bool) "Ask modal stays open with submitting=true until HTTP ack"
+    true
+    (Option.equal Nav.equal_overlay m_sub1.nav.overlay (Some Nav.Ask_answer)
+     &&
+     match m_sub1.ask_modal with
+     | Some am -> am.submitting && Option.is_none am.error
+     | None -> false);
+  let m_sub1_ok, _ =
+    Update.step ~now:t0 m_sub1
+      (Msg.Http_reply
+         {
+           epoch = m_sub1.epoch;
+           reply =
+             Msg.Reply_work_mutation
+               {
+                 label = Say.literal "Ask answered";
+                 attention_id = Some "ask:ask-single-1";
+                 decision_kind = Some Work_store.Decision_ask_answered;
+                 target_id = Some "ask-single-1";
+                 keeper = Some "alpha";
+                 result = Ok ();
+               };
+         })
+  in
+  Alcotest.(check bool) "HTTP Ok ack closes Ask modal cleanly" true
+    (Option.is_none m_sub1_ok.nav.overlay && Option.is_none m_sub1_ok.ask_modal);
+
+  (* 6. Multi-question Ask: Work > Inbox 'a' opens modal pre-selected (no blind partial POST!) *)
+  let mq_ask = mk_multi_question_ask () in
+  let m_mq0 = m_with_asks [ mq_ask ] in
+  let m_mq_inb =
+    {
+      m_mq0 with
+      nav = { m_mq0.nav with workspace = Nav.Work };
+      work = Work_store.set_tab Nav.Work_inbox m_mq0.work;
+    }
+  in
+  let m_mq_a, cmds_mq_a = step m_mq_inb (char_key "a") in
+  Alcotest.(check bool) "Multi-question Inbox 'a' opens Ask modal (not partial POST)"
+    true
+    (Option.equal Nav.equal_overlay m_mq_a.nav.overlay (Some Nav.Ask_answer)
+     && Option.is_none (find_ask_post cmds_mq_a));
+  (* Ctrl+Enter when Q2 & Q3 unanswered jumps to Q2 (index 1) and emits 0 POSTs *)
+  let m_mq_ce, cmds_mq_ce = step m_mq_a (mk_key ~ctrl:true Keymap.Input.Enter) in
+  Alcotest.(check bool) "Incomplete Ctrl+Enter emits 0 POSTs" false
+    (Option.is_some (find_ask_post cmds_mq_ce));
+  Alcotest.(check int) "Incomplete Ctrl+Enter jumps to first unanswered Q2 (idx 1)" 1
+    (match m_mq_ce.ask_modal with Some am -> am.question_idx | None -> -1);
+
+  (* 7. Multi-select (Q2): Enter with 0 selected toggles first choice (never submits []),
+     Space toggles multiple choices preserving canonical order *)
+  let m_ms1, cmds_ms1 = step m_mq_ce (mk_key Keymap.Input.Enter) in
+  Alcotest.(check bool) "Multi-select Enter with 0 toggled never submits empty" false
+    (Option.is_some (find_ask_post cmds_ms1));
+  Alcotest.(check int) "Multi-select Enter with 0 toggled stays on Q2" 1
+    (match m_ms1.ask_modal with Some am -> am.question_idx | None -> -1);
+  let m_ms2, _ =
+    step_keys m_ms1
+      [ mk_key Keymap.Input.Down; mk_key Keymap.Input.Down; char_key " " ]
+  in
+  (* Now 'lint' (0) and 'smoke' (2) are selected; pressing Enter advances to Q3 *)
+  let m_q3, _ = step m_ms2 (mk_key Keymap.Input.Enter) in
+  Alcotest.(check int) "Multi-select Enter with >=1 toggled advances to Q3 (idx 2)" 2
+    (match m_q3.ask_modal with Some am -> am.question_idx | None -> -1);
+
+  (* 8. UTF-8 Korean Free-text on Q3 + digits 7/8/9/0 never open overlays + Esc preserves draft *)
+  let m_ft0, _ = step m_q3 (char_key "i") in
+  Alcotest.(check bool) "'i' enters editing_free_text on Q3" true
+    (match m_ft0.ask_modal with Some am -> am.editing_free_text | None -> false);
+  let m_ft1, _ =
+    step_keys m_ft0
+      [
+        char_key "한";
+        char_key "글";
+        char_key "7";
+        char_key "8";
+        char_key "9";
+        char_key "0";
+        mk_key Keymap.Input.Left;
+        mk_key Keymap.Input.Backspace;
+      ]
+  in
+  Alcotest.(check bool) "Digits 7/8/9/0 inside Ask free-text keep Ask_answer overlay"
+    true
+    (Option.equal Nav.equal_overlay m_ft1.nav.overlay (Some Nav.Ask_answer));
+  (* Esc exits free-text editing while preserving typed draft *)
+  let m_ft_esc, _ = step m_ft1 (mk_key Keymap.Input.Escape) in
+  Alcotest.(check bool) "Esc exits free-text editing without closing modal" true
+    (Option.equal Nav.equal_overlay m_ft_esc.nav.overlay (Some Nav.Ask_answer)
+     &&
+     match m_ft_esc.ask_modal with
+     | Some am ->
+         (not am.editing_free_text)
+         &&
+         (match Model.ask_modal_current_question am with
+         | Some q ->
+             String.equal (Model.ask_question_draft_for am q).free_text
+               "한글780"
+         | None -> false)
+     | None -> false);
+  (* Switch questions back and forth via '[' / ']' and Tab / Shift+Tab preserving all drafts *)
+  let m_prev_q, _ = step m_ft_esc (char_key "[") in
+  Alcotest.(check int) "'[' switches Q3 -> Q2" 1
+    (match m_prev_q.ask_modal with Some am -> am.question_idx | None -> -1);
+  let m_next_q, _ = step m_prev_q (mk_key Keymap.Input.Tab) in
+  Alcotest.(check int) "Tab switches Q2 -> Q3" 2
+    (match m_next_q.ask_modal with Some am -> am.question_idx | None -> -1);
+
+  (* Ctrl+Enter now submits ALL 3 questions (Q1 choice, Q2 multi-select, Q3 UTF-8 free-text),
+     keeps modal open with submitting=true, preserves ALL drafts on HTTP Error, and closes on HTTP Ok *)
+  let m_all_sub, cmds_all = step m_next_q (mk_key ~ctrl:true Keymap.Input.Enter) in
+  (match find_ask_post cmds_all with
+  | Some (_, ask_id, answers) ->
+      Alcotest.(check string) "multi-q ask_id" "ask-multi-q" ask_id;
+      Alcotest.(check int) "all 3 question answers submitted" 3
+        (List.length answers);
+      Alcotest.(check bool) "exact answers payload" true
+        (answers
+         = [
+             ("q1", Wire_work.Ask_chose [ "staging" ]);
+             ("q2", Wire_work.Ask_chose [ "lint"; "smoke" ]);
+             ("q3", Wire_work.Ask_wrote "한글780");
+           ])
+  | None -> Alcotest.fail "expected Post_ask_answer with all 3 answers");
+  Alcotest.(check bool) "Multi-q submit sets submitting=true keeping modal open"
+    true
+    (Option.equal Nav.equal_overlay m_all_sub.nav.overlay (Some Nav.Ask_answer)
+     &&
+     match m_all_sub.ask_modal with Some am -> am.submitting | None -> false);
+  let m_all_err, _ =
+    Update.step ~now:t0 m_all_sub
+      (Msg.Http_reply
+         {
+           epoch = m_all_sub.epoch;
+           reply =
+             Msg.Reply_work_mutation
+               {
+                 label = Say.literal "Ask answer";
+                 attention_id = Some "ask:ask-multi-q";
+                 decision_kind = Some Work_store.Decision_ask_answered;
+                 target_id = Some "ask-multi-q";
+                 keeper = Some "alpha";
+                 result = Error (Msg.Transport Health.Timeout);
+               };
+         })
+  in
+  Alcotest.(check bool)
+    "HTTP POST error keeps modal open, clears submitting, surfaces error, preserves ALL 3 drafts"
+    true
+    (Option.equal Nav.equal_overlay m_all_err.nav.overlay (Some Nav.Ask_answer)
+     && (not (Attention.is_in_flight ~id:"ask:ask-multi-q" m_all_err.attention))
+     &&
+     match m_all_err.ask_modal with
+     | Some am ->
+         (not am.submitting)
+         && Option.is_some am.error
+         && (match Model.ask_modal_build_answers am with
+            | Ok ans ->
+                ans
+                = [
+                    ("q1", Wire_work.Ask_chose [ "staging" ]);
+                    ("q2", Wire_work.Ask_chose [ "lint"; "smoke" ]);
+                    ("q3", Wire_work.Ask_wrote "한글780");
+                  ]
+            | Error _ -> false)
+     | None -> false);
+  (* Retrying Ctrl+Enter after error resends exact preserved drafts and Ok closes modal *)
+  let m_retry, cmds_retry =
+    step m_all_err (mk_key ~ctrl:true Keymap.Input.Enter)
+  in
+  Alcotest.(check bool) "Retry after error emits Post_ask_answer again" true
+    (Option.is_some (find_ask_post cmds_retry));
+  let m_retry_ok, _ =
+    Update.step ~now:t0 m_retry
+      (Msg.Http_reply
+         {
+           epoch = m_retry.epoch;
+           reply =
+             Msg.Reply_work_mutation
+               {
+                 label = Say.literal "Ask answer";
+                 attention_id = Some "ask:ask-multi-q";
+                 decision_kind = Some Work_store.Decision_ask_answered;
+                 target_id = Some "ask-multi-q";
+                 keeper = Some "alpha";
+                 result = Ok ();
+               };
+         })
+  in
+  Alcotest.(check bool) "HTTP Ok after retry closes modal cleanly" true
+    (Option.is_none m_retry_ok.nav.overlay && Option.is_none m_retry_ok.ask_modal);
+  (* Workspace_mismatch closes ask_modal cleanly *)
+  let m_wm, _ =
+    Update.step ~now:t0 m_all_sub
+      (Msg.Http_reply
+         {
+           epoch = m_all_sub.epoch;
+           reply =
+             Msg.Reply_work_mutation
+               {
+                 label = Say.literal "Ask answer";
+                 attention_id = Some "ask:ask-multi-q";
+                 decision_kind = Some Work_store.Decision_ask_answered;
+                 target_id = Some "ask-multi-q";
+                 keeper = Some "alpha";
+                 result =
+                   Error
+                     (Msg.Workspace_mismatch
+                        {
+                          expected_instance = Some "inst-a";
+                          observed_instance = Some "inst-b";
+                          observed_workspace_sha256 = None;
+                          message = "switched workspace";
+                        });
+               };
+         })
+  in
+  Alcotest.(check bool) "Workspace_mismatch closes Ask modal cleanly" true
+    (Option.is_none m_wm.nav.overlay && Option.is_none m_wm.ask_modal);
+
+  (* 9. N (Fast_deny_top) skips ALL 3 questions in a multi-question Ask *)
+  let m_skip_all, cmds_skip_all = step m_mq0 (char_key ~shift:true "N") in
+  (match find_ask_post cmds_skip_all with
+  | Some (_, _, answers) ->
+      Alcotest.(check int) "N skips all 3 questions" 3 (List.length answers);
+      Alcotest.(check bool) "all answers are Ask_skipped" true
+        (List.for_all
+           (fun (_, r) -> r = Wire_work.Ask_skipped)
+           answers)
+  | None -> Alcotest.fail "expected Post_ask_answer skipping all questions");
+  Alcotest.(check bool) "N marks ask in-flight" true
+    (Attention.is_in_flight ~id:"ask:ask-multi-q" m_skip_all.attention);
+
+  (* 10. Live Status Guard: closed or in-flight Ask disables submission *)
+  let m_closed =
+    {
+      m_pick_b with
+      work = Work_store.apply_asks ~observed_at:t0 [] m_pick_b.work;
+    }
+    |> Model.rebuild_attention
+  in
+  Alcotest.(check bool) "ask_live_status = Ask_live_closed when removed" true
+    (Model.equal_ask_live_status
+       (Model.ask_live_status m_closed "ask-single-1")
+       Model.Ask_live_closed);
+  let _, cmds_closed = step m_closed (mk_key ~ctrl:true Keymap.Input.Enter) in
+  Alcotest.(check bool) "Closed Ask refuses submission (0 POSTs)" false
+    (Option.is_some (find_ask_post cmds_closed));
+  let m_inflight =
+    {
+      m_pick_b with
+      attention = Attention.mark_in_flight ~id:"ask:ask-single-1" m_pick_b.attention;
+    }
+  in
+  Alcotest.(check bool) "ask_live_status = Ask_live_in_flight" true
+    (Model.equal_ask_live_status
+       (Model.ask_live_status m_inflight "ask-single-1")
+       Model.Ask_live_in_flight);
+  let _, cmds_inf = step m_inflight (mk_key ~ctrl:true Keymap.Input.Enter) in
+  Alcotest.(check bool) "In-flight Ask refuses duplicate submission (0 POSTs)" false
+    (Option.is_some (find_ask_post cmds_inf));
+
+  (* 11. >4 choices (8 choices) + EVERY letter in Model.ask_choice_letters selects exact index
+     (zero collision with 'g' / 'i' / 'j' / 'k') *)
+  Alcotest.(check bool) "'g' is NOT in Model.ask_choice_letters" false
+    (String.contains Model.ask_choice_letters 'g');
+  let n_letters = String.length Model.ask_choice_letters in
+  let full_alpha_ask : Wire_work.ask_row =
+    {
+      ask_id = "ask-all-letters";
+      keeper = "alpha";
+      asked_at = 1710000030.0;
+      context = Some (String.concat "\n" (List.init 10 (fun i -> Printf.sprintf "Context line %d with detail." i)));
+      questions =
+        [
+          {
+            question_id = "q-alpha";
+            header = "All Hotkeys";
+            prompt = "Pick any choice by its advertised hotkey letter:";
+            mode = Wire_work.Ask_single;
+            allow_free_text = false;
+            free_text_hint = None;
+            choices =
+              List.init n_letters (fun i ->
+                  mk_ask_choice
+                    (Printf.sprintf "ch-%02d" i)
+                    (Printf.sprintf "Choice %02d" i));
+          };
+        ];
+      resolution = Wire_work.Ask_open;
+    }
+  in
+  let m_alpha0 = m_with_asks [ full_alpha_ask ] in
+  let m_alpha_open, _ = step m_alpha0 (char_key ~shift:true "Y") in
+  for idx = 0 to n_letters - 1 do
+    let ch_s = String.make 1 Model.ask_choice_letters.[idx] in
+    let m_sel, _ = step m_alpha_open (char_key ch_s) in
+    match m_sel.ask_modal with
+    | Some am ->
+        Alcotest.(check int)
+          (Printf.sprintf "hotkey '%s' moves cursor to choice index %d" ch_s idx)
+          idx am.cursor;
+        let q = List.hd full_alpha_ask.questions in
+        let d = Model.ask_question_draft_for am q in
+        Alcotest.(check (list string))
+          (Printf.sprintf "hotkey '%s' selects ch-%02d" ch_s idx)
+          [ Printf.sprintf "ch-%02d" idx ]
+          d.choice_ids
+    | None -> Alcotest.fail "expected ask_modal open"
+  done;
+  (* Pressing 'g' moves cursor to 0 (Move Home) without colliding with any advertised choice letter *)
+  let m_at_10, _ = step m_alpha_open (char_key (String.make 1 Model.ask_choice_letters.[10])) in
+  let m_g_home, _ = step m_at_10 (char_key "g") in
+  Alcotest.(check int) "'g' in Ask modal jumps cursor to 0 (Move Home)" 0
+    (match m_g_home.ask_modal with Some am -> am.cursor | None -> -1);
+  (* Prompt scroll J / K works and clamps cleanly *)
+  let m_pj, _ = step m_alpha_open (char_key ~shift:true "J") in
+  Alcotest.(check bool) "'J' increments prompt_scroll on overflowing prompt" true
+    (match m_pj.ask_modal with Some am -> am.prompt_scroll > 0 | None -> false);
+  let m_pk, _ = step m_pj (char_key ~shift:true "K") in
+  Alcotest.(check int) "'K' decrements prompt_scroll back to 0" 0
+    (match m_pk.ask_modal with Some am -> am.prompt_scroll | None -> -1);
+
+  (* 12. Work > Inbox 6-choice multi-question Ask renders ONLY [a]..[d] (never fake [e]/[f]),
+     honest localized header hotkey (never [Y] Approve), and multi-question summary *)
+  let ask_6_mq : Wire_work.ask_row =
+    {
+      ask_id = "ask-inbox-6";
+      keeper = "alpha";
+      asked_at = 1710000040.0;
+      context = None;
+      questions =
+        [
+          {
+            question_id = "q1";
+            header = "Choices";
+            prompt = "Choose one:";
+            mode = Wire_work.Ask_single;
+            allow_free_text = false;
+            free_text_hint = None;
+            choices =
+              List.init 6 (fun i ->
+                  mk_ask_choice (Printf.sprintf "o-%d" (i + 1))
+                    (Printf.sprintf "Opt %d" (i + 1)));
+          };
+          {
+            question_id = "q2";
+            header = "Second";
+            prompt = "Second question:";
+            mode = Wire_work.Ask_single;
+            allow_free_text = false;
+            free_text_hint = None;
+            choices = [ mk_ask_choice "ok" "OK" ];
+          };
+        ];
+      resolution = Wire_work.Ask_open;
+    }
+  in
+  let m_inb6 =
+    let m_base = m_with_asks [ ask_6_mq ] in
+    {
+      m_base with
+      lang = Say.Lang_ko;
+      nav = { m_base.nav with workspace = Nav.Work };
+      work = Work_store.set_tab Nav.Work_inbox m_base.work;
+    }
+  in
+  let inb6_txt = grid_all_text (render_full ~model:m_inb6) in
+  Alcotest.(check bool) "Inbox 6-choice Ask omits fake [e] hotkey" false
+    (Store_scroll.contains_ci ~needle:"[e]" inb6_txt);
+  Alcotest.(check bool) "Inbox 6-choice Ask omits hardcoded [Y] Approve header"
+    false
+    (Store_scroll.contains_ci ~needle:"[Y] Approve" inb6_txt);
+  Alcotest.(check bool) "Inbox multi-q Ask shows multi-question summary notice"
+    true
+    (Store_scroll.contains_ci ~needle:"총 2개 질문" inb6_txt);
+
+  let m_many = m_with_asks [ mk_many_choice_ask () ] in
+  let m_many_open, _ = step m_many (char_key ~shift:true "Y") in
+  let m_many_c7, _ =
+    step_keys m_many_open (List.init 6 (fun _ -> mk_key Keymap.Input.Down))
+  in
+  let _, cmds_c7 = step m_many_c7 (mk_key Keymap.Input.Enter) in
+  match find_ask_post cmds_c7 with
+  | Some (_, _, answers) ->
+      Alcotest.(check bool) "choice #7 (r-7) reachable and submitted" true
+        (answers = [ ("q-many", Wire_work.Ask_chose [ "r-7" ]) ])
+  | None -> Alcotest.fail "expected Post_ask_answer for choice #7"
+
+let test_part2_keymap_consistency_spatial_overlays_and_safe_space () =
+  (* 1. Zero keymap collisions *)
+  Alcotest.(check int) "Keymap.collisions () = []" 0
+    (List.length (Keymap.collisions ()));
+
+  let base = populated_model () in
+
+  (* 2. Spatial <- / -> across ALL 6 workspaces + dive:
+     -> advances pane_index (never cycles sub-tabs), <- moves back to pane 0 then enters sidebar *)
+  List.iter
+    (fun ws ->
+      let m_ws =
+        {
+          base with
+          nav =
+            {
+              base.nav with
+              workspace = ws;
+              pane_index = 0;
+              sidebar_focused = false;
+              overlay = None;
+              dive_stack = [];
+            };
+        }
+      in
+      let ws_lbl = Say.resolve Say.Lang_en (Nav.workspace_label ws) in
+      let m_left, _ = step m_ws (mk_key Keymap.Input.Left) in
+      Alcotest.(check bool)
+        (Printf.sprintf "ws %s pane 0 Left enters docked sidebar" ws_lbl)
+        true (Model.sidebar_has_focus m_left);
+      let m_right, _ = step m_ws (mk_key Keymap.Input.Right) in
+      let panes = Model.focusable_pane_count m_ws in
+      let expected_p = if panes > 1 then 1 else 0 in
+      Alcotest.(check int)
+        (Printf.sprintf "ws %s Right moves spatially to pane %d" ws_lbl
+           expected_p)
+        expected_p m_right.nav.pane_index;
+      Alcotest.(check bool)
+        (Printf.sprintf
+           "ws %s Right never cycles Work/Knowledge/Keepers/Runtime/Infra sub-tabs"
+           ws_lbl)
+        true
+        (Nav.equal_work_tab m_right.work.active_tab m_ws.work.active_tab
+         && Nav.equal_knowledge_tab m_right.knowledge.active_tab
+              m_ws.knowledge.active_tab
+         && Nav.equal_keepers_fleet_mode m_right.fleet.fleet_mode
+              m_ws.fleet.fleet_mode
+         && Nav.equal_runtime_tab m_right.runtime.active_tab
+              m_ws.runtime.active_tab
+         && Nav.equal_infra_tab m_right.infra.active_tab m_ws.infra.active_tab))
+    Nav.all_workspaces;
+
+  (* Sidebar Right on an overlay item exits cleanly to pane 0 (no trap!) *)
+  let settings_idx = Nav.menu_item_index Nav.Menu_settings in
+  let m_sb_ov =
+    {
+      base with
+      nav =
+        {
+          base.nav with
+          sidebar_focused = true;
+          sidebar_cursor = settings_idx;
+          pane_index = 1;
+        };
+    }
+  in
+  let m_sb_exit, _ = step m_sb_ov (mk_key Keymap.Input.Right) in
+  Alcotest.(check bool) "Sidebar Right on overlay target exits sidebar cleanly"
+    true
+    ((not (Model.sidebar_has_focus m_sb_exit))
+     && m_sb_exit.nav.pane_index = 0
+     && Option.is_none m_sb_exit.nav.overlay);
+
+  (* 3. 7 / 8 / 9 / 0 open utility overlays from Unfocused_nav AND from focused sidebar *)
+  let check_digit_overlay label m digit check_ov =
+    let m', _ = step m (char_key digit) in
+    Alcotest.(check bool) (label ^ " '" ^ digit ^ "' opens expected overlay") true
+      (check_ov m'.nav.overlay && not m'.nav.sidebar_focused)
+  in
+  let m_sb = { base with nav = { base.nav with sidebar_focused = true } } in
+  List.iter
+    (fun (lbl, src) ->
+      check_digit_overlay lbl src "7" (function
+        | Some (Nav.Settings _) -> true
+        | _ -> false);
+      check_digit_overlay lbl src "8" (function
+        | Some Nav.Incidents -> true
+        | _ -> false);
+      check_digit_overlay lbl src "9" (function
+        | Some (Nav.Queue_context _) -> true
+        | _ -> false);
+      check_digit_overlay lbl src "0" (function
+        | Some Nav.Help -> true
+        | _ -> false))
+    [ ("unfocused", base); ("sidebar", m_sb) ];
+
+  (* 2b. Dive & zoomed <- -> round-trip preserves dive_stack, zoomed, and emits 0 refetches *)
+  let m_dive_kp =
+    {
+      base with
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Keepers;
+          pane_index = 0;
+          sidebar_focused = false;
+          dive_stack =
+            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_chat } ];
+        };
+      fleet = Fleet_store.set_keeper_dive_tab Nav.Keeper_chat base.fleet;
+    }
+  in
+  let m_dk_l, _ = step m_dive_kp (mk_key Keymap.Input.Left) in
+  Alcotest.(check bool) "Dive_keeper Left enters docked sidebar" true
+    (Model.sidebar_has_focus m_dk_l);
+  let m_dk_rt, cmds_dk_rt = step m_dk_l (mk_key Keymap.Input.Right) in
+  Alcotest.(check bool)
+    "Dive_keeper Left -> Right preserves dive_stack and exits sidebar" true
+    ((not (Model.sidebar_has_focus m_dk_rt))
+     && m_dk_rt.nav.pane_index = 0
+     &&
+     match Model.active_dive m_dk_rt with
+     | Some (Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_chat }) -> true
+     | _ -> false);
+  Alcotest.(check int) "Dive_keeper Left -> Right emits 0 spurious refetches" 0
+    (List.length (Cmd.flatten cmds_dk_rt));
+
+  let m_dive_goal =
+    {
+      base with
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Work;
+          pane_index = 0;
+          sidebar_focused = false;
+          dive_stack = [ Nav.Dive_work (Nav.Goal_dive "g-1") ];
+        };
+    }
+  in
+  let m_dg_l, _ = step m_dive_goal (mk_key Keymap.Input.Left) in
+  let m_dg_rt, cmds_dg_rt = step m_dg_l (mk_key Keymap.Input.Right) in
+  Alcotest.(check bool) "Dive_work Goal_dive Left -> Right preserves dive_stack"
+    true
+    ((not (Model.sidebar_has_focus m_dg_rt))
+     &&
+     match Model.active_dive m_dg_rt with
+     | Some (Nav.Dive_work (Nav.Goal_dive "g-1")) -> true
+     | _ -> false);
+  Alcotest.(check int) "Dive_work Goal_dive Left -> Right emits 0 refetches" 0
+    (List.length (Cmd.flatten cmds_dg_rt));
+
+  let m_zoomed =
+    {
+      base with
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Keepers;
+          pane_index = 0;
+          zoomed = true;
+          sidebar_focused = false;
+        };
+    }
+  in
+  let m_z_l, _ = step m_zoomed (mk_key Keymap.Input.Left) in
+  let m_z_rt, cmds_z_rt = step m_z_l (mk_key Keymap.Input.Right) in
+  Alcotest.(check bool) "Zoomed Keepers Left -> Right preserves zoomed=true"
+    true
+    ((not (Model.sidebar_has_focus m_z_rt)) && m_z_rt.nav.zoomed);
+  Alcotest.(check int) "Zoomed Keepers Left -> Right emits 0 refetches" 0
+    (List.length (Cmd.flatten cmds_z_rt));
+
+  (* Wide Keepers: <- -> Down onto Menu_keeper_tab Keeper_context -> -> lands on pane_index=1 *)
+  let m_kp_wide =
+    {
+      base with
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Keepers;
+          pane_index = 0;
+          zoomed = false;
+          dive_stack = [];
+          sidebar_focused = false;
+        };
+    }
+  in
+  let m_kp_sb, _ = step m_kp_wide (mk_key Keymap.Input.Left) in
+  let m_kp_ctx, _ = step m_kp_sb (mk_key Keymap.Input.Down) in
+  let m_kp_enter_r, _ = step m_kp_ctx (mk_key Keymap.Input.Right) in
+  Alcotest.(check bool)
+    "Wide Keepers Left -> Down (Menu_keeper_tab Keeper_context) -> Right lands on pane_index=1"
+    true
+    ((not (Model.sidebar_has_focus m_kp_enter_r))
+     && m_kp_enter_r.nav.pane_index = 1
+     && Nav.equal_keeper_tab m_kp_enter_r.fleet.keeper_dive_tab
+          Nav.Keeper_context);
+
+  (* Zoomed Keepers on Keeper_identity: <- -> -> preserves zoomed=true with 0 refetches *)
+  let m_z_id =
+    {
+      base with
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Keepers;
+          pane_index = 0;
+          zoomed = true;
+          dive_stack = [];
+          sidebar_focused = false;
+        };
+      fleet = Fleet_store.set_keeper_dive_tab Nav.Keeper_identity base.fleet;
+    }
+  in
+  let m_z_id_l, _ = step m_z_id (mk_key Keymap.Input.Left) in
+  let m_z_id_rt, cmds_z_id_rt = step m_z_id_l (mk_key Keymap.Input.Right) in
+  Alcotest.(check bool)
+    "Zoomed Keepers (Keeper_identity) Left -> Right preserves zoomed=true" true
+    ((not (Model.sidebar_has_focus m_z_id_rt))
+     && m_z_id_rt.nav.zoomed
+     && Nav.equal_keeper_tab m_z_id_rt.fleet.keeper_dive_tab
+          Nav.Keeper_identity);
+  Alcotest.(check int)
+    "Zoomed Keepers (Keeper_identity) Left -> Right emits 0 refetches" 0
+    (List.length (Cmd.flatten cmds_z_id_rt));
+
+  (* 2c. Compact/narrow (<132 cols, sidebar_visible = false) & single-pane <- / -> clamping *)
+  let m_narrow =
+    {
+      base with
+      viewport = { cols = 100; rows = 28 };
+      breakpoint = Model.Compact;
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Work;
+          pane_index = 0;
+          sidebar_focused = false;
+        };
+      work = Work_store.set_tab Nav.Work_schedules base.work;
+    }
+  in
+  Alcotest.(check bool) "Narrow 100 cols has sidebar_visible=false" false
+    (Model.sidebar_visible m_narrow);
+  let m_n_l, _ = step m_narrow (mk_key Keymap.Input.Left) in
+  Alcotest.(check bool) "Narrow pane 0 Left never enters hidden sidebar" false
+    (Model.sidebar_has_focus m_n_l);
+  Alcotest.(check int) "Narrow pane 0 Left clamps at pane 0" 0
+    m_n_l.nav.pane_index;
+  let m_n_r, _ = step m_narrow (mk_key Keymap.Input.Right) in
+  let n_panes = Model.focusable_pane_count m_narrow in
+  Alcotest.(check int) "Narrow Right clamps at focusable_pane_count - 1"
+    (Int.max 0 (n_panes - 1)) m_n_r.nav.pane_index;
+  Alcotest.(check bool) "Narrow Right never cycles sub-tab" true
+    (Nav.equal_work_tab m_n_r.work.active_tab Nav.Work_schedules);
+
+  (* 4. 7 / 8 / 9 / 0 AND '[' / ']' NEVER hijack ANY focused text input *)
+  let m_comp =
+    {
+      base with
+      drafts =
+        base.drafts |> Drafts.set_active_keeper "alpha" |> Drafts.set_focus true;
+    }
+  in
+  let m_comp_d, _ = type_str m_comp "7890[]" in
+  Alcotest.(check string) "Composer types literal 7890[]" "7890[]"
+    (Drafts.current_draft m_comp_d.drafts).text;
+  Alcotest.(check bool) "Composer 7890[] opens 0 overlays" true
+    (Option.is_none m_comp_d.nav.overlay);
+
+  let m_filt =
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Work; filter_focused = true };
+      work = Work_store.set_tab Nav.Work_tasks base.work;
+    }
+  in
+  let m_filt_d, _ = type_str m_filt "7890[]" in
+  Alcotest.(check string) "Filter bar types literal 7890[]" "7890[]"
+    m_filt_d.work.filter_query;
+  Alcotest.(check bool) "Filter bar 7890[] keeps Work_tasks and 0 overlays" true
+    (Option.is_none m_filt_d.nav.overlay
+     && Nav.equal_work_tab m_filt_d.work.active_tab Nav.Work_tasks);
+
+  let m_pal, _ = Update_nav.open_palette base Model.Palette_commands in
+  let m_pal_d, _ = type_str m_pal "7890[]" in
+  Alcotest.(check string) "Palette types literal 7890[]" "7890[]"
+    m_pal_d.palette.query;
+  Alcotest.(check bool) "Palette stays Palette on 7890[]" true
+    (Option.equal Nav.equal_overlay m_pal_d.nav.overlay (Some Nav.Palette));
+
+  let m_inl, _ = Update_nav.open_inline_modal base (Nav.Gate_reject "g-1") in
+  let m_inl_d, _ = type_str m_inl "7890[]" in
+  Alcotest.(check bool) "Inline modal stays open and types 7890[]" true
+    (Option.equal Nav.equal_overlay m_inl_d.nav.overlay
+       (Some (Nav.Inline_action (Nav.Gate_reject "g-1")))
+     &&
+     match m_inl_d.inline_modal with
+     | Some md -> Store_scroll.contains_ci ~needle:"7890[]" (Model.modal_field_value ~key:"reason" md)
+     | None -> false);
+
+  (* Settings inline field edit: 7890[] types literally, no tab switch / overlay *)
+  let m_set_edit =
+    {
+      base with
+      nav =
+        {
+          base.nav with
+          overlay = Some (Nav.Settings Nav.Settings_general_ui);
+        };
+      config =
+        {
+          base.config with
+          active_tab = Nav.Settings_general_ui;
+          settings_pane = Config_store.Pane_inspector;
+          editing_field_key = Some "tui.sample";
+          editing_buffer = "";
+        };
+    }
+  in
+  let m_set_d, _ = type_str m_set_edit "7890[]" in
+  Alcotest.(check string) "Settings field edit types literal 7890[]" "7890[]"
+    m_set_d.config.editing_buffer;
+  Alcotest.(check bool) "Settings field edit stays on Settings_general_ui" true
+    (Option.equal Nav.equal_overlay m_set_d.nav.overlay
+       (Some (Nav.Settings Nav.Settings_general_ui)));
+
+  (* Keeper_config inline field edit: 7890[] types literally, no tab switch / overlay *)
+  let m_kc_edit =
+    {
+      base with
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Keepers;
+          dive_stack =
+            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_config } ];
+        };
+      fleet = Fleet_store.set_keeper_dive_tab Nav.Keeper_config base.fleet;
+      config =
+        {
+          base.config with
+          editing_field_key = Some "keeper.group";
+          editing_buffer = "";
+        };
+    }
+  in
+  let m_kc_d, _ = type_str m_kc_edit "7890[]" in
+  Alcotest.(check string) "Keeper_config field edit types literal 7890[]" "7890[]"
+    m_kc_d.config.editing_buffer;
+  Alcotest.(check bool) "Keeper_config field edit keeps Keeper_config and 0 overlays"
+    true
+    (Option.is_none m_kc_d.nav.overlay && Model.is_keeper_config_active m_kc_d);
+
+  (* Ask free-text edit: 7890[] types literally, no question switch / overlay *)
+  let mq_ft = mk_multi_question_ask () in
+  let m_ask_ft0 =
+    let m_am =
+      Model.ask_modal_for mq_ft
+      |> Model.ask_modal_select_question 1
+      |> Model.ask_modal_enter_free_text
+    in
+    {
+      base with
+      nav = { base.nav with overlay = Some Nav.Ask_answer };
+      ask_modal = Some m_am;
+    }
+  in
+  let m_ask_ft_d, _ = type_str m_ask_ft0 "7890[]" in
+  Alcotest.(check bool) "Ask free-text types literal 7890[] staying on Q2" true
+    (Option.equal Nav.equal_overlay m_ask_ft_d.nav.overlay (Some Nav.Ask_answer)
+     &&
+     match m_ask_ft_d.ask_modal with
+     | Some am ->
+         am.question_idx = 1
+         && am.editing_free_text
+         &&
+         (match Model.ask_modal_current_question am with
+         | Some q ->
+             String.equal (Model.ask_question_draft_for am q).free_text
+               "7890[]"
+         | None -> false)
+     | None -> false);
+
+  (* 5. Space ZERO-POST guarantee in Keeper_identity (Dive & Split) + explicit 'a'/'Enter' toggle *)
+  let sample_oauth_snap : Wire_keeper_context.oauth_attached_tools_snapshot =
+    {
+      keeper = "alpha";
+      providers =
+        [
+          {
+            provider = "openai";
+            provider_label = "OpenAI";
+            attached = true;
+            app_state_kind = "connected";
+            enabled = Some true;
+            switch_problem = None;
+            also_on = [];
+            discovered_at = None;
+            tools = [ "search" ];
+            problem = None;
+          };
+        ];
+    }
+  in
+  let m_id_dive =
+    {
+      base with
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Keepers;
+          dive_stack =
+            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_identity } ];
+        };
+      fleet = Fleet_store.set_keeper_dive_tab Nav.Keeper_identity base.fleet;
+      keeper_context =
+        Keeper_context_store.apply_oauth_attached_tools ~observed_at:t0
+          ~keeper:"alpha" sample_oauth_snap base.keeper_context;
+    }
+  in
+  let _, cmds_id_space = step m_id_dive (char_key " ") in
+  Alcotest.(check bool) "Keeper_identity Space emits ZERO network POSTs" false
+    (has_any_http_post cmds_id_space);
+  let _, cmds_id_a = step m_id_dive (char_key "a") in
+  Alcotest.(check bool) "Keeper_identity 'a' emits Post_oauth_identity_switch" true
+    (has_cmd
+       (function
+         | Cmd.Http_post { req = Cmd.Post_oauth_identity_switch _; _ } -> true
+         | _ -> false)
+       cmds_id_a);
+  let _, cmds_id_ent = step m_id_dive (mk_key Keymap.Input.Enter) in
+  Alcotest.(check bool) "Keeper_identity Dive Enter emits Post_oauth_identity_switch"
+    true
+    (has_cmd
+       (function
+         | Cmd.Http_post { req = Cmd.Post_oauth_identity_switch _; _ } -> true
+         | _ -> false)
+       cmds_id_ent);
+
+  (* Embedded Split Keepers pane_index=1 Keeper_identity: Space=0 POSTs, a/Enter=switch *)
+  let selected_name =
+    match Fleet_store.selected_keeper_summary base.fleet with
+    | Some k -> k.name
+    | None -> "alpha"
+  in
+  let m_id_split =
+    {
+      base with
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Keepers;
+          pane_index = 1;
+          dive_stack = [];
+          sidebar_focused = false;
+        };
+      fleet = Fleet_store.set_keeper_dive_tab Nav.Keeper_identity base.fleet;
+      keeper_context =
+        Keeper_context_store.apply_oauth_attached_tools ~observed_at:t0
+          ~keeper:selected_name
+          { sample_oauth_snap with keeper = selected_name }
+          base.keeper_context;
+    }
+  in
+  let _, cmds_sp_space = step m_id_split (char_key " ") in
+  Alcotest.(check bool) "Keeper_identity Split Space emits ZERO network POSTs"
+    false (has_any_http_post cmds_sp_space);
+  let _, cmds_sp_a = step m_id_split (char_key "a") in
+  Alcotest.(check bool)
+    "Keeper_identity Split 'a' emits Post_oauth_identity_switch" true
+    (has_cmd
+       (function
+         | Cmd.Http_post { req = Cmd.Post_oauth_identity_switch _; _ } -> true
+         | _ -> false)
+       cmds_sp_a);
+  let _, cmds_sp_ent = step m_id_split (mk_key Keymap.Input.Enter) in
+  Alcotest.(check bool)
+    "Keeper_identity Split Enter emits Post_oauth_identity_switch" true
+    (has_cmd
+       (function
+         | Cmd.Http_post { req = Cmd.Post_oauth_identity_switch _; _ } -> true
+         | _ -> false)
+       cmds_sp_ent);
+
+  (* 6. Space ZERO-POST / ZERO-FETCH guarantee in Keeper_memory (non-Facts-Tree view) *)
+  let m_mem_dive =
+    {
+      base with
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Keepers;
+          dive_stack =
+            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_memory } ];
+        };
+      fleet = Fleet_store.set_keeper_dive_tab Nav.Keeper_memory base.fleet;
+    }
+  in
+  let _, cmds_mem_space = step m_mem_dive (char_key " ") in
+  Alcotest.(check int) "Keeper_memory Space emits 0 network cmds outside Facts Tree"
+    0 (List.length (Cmd.flatten cmds_mem_space))
+
 let () =
   Alcotest.run "masc_tui_keymap_matrix"
     [
@@ -7502,5 +8634,14 @@ let () =
           Alcotest.test_case
             "Wave 3: Scroll Bounds, Stale Guards, CanAdmin Notices, Masked PAT & Catalog/Names"
             `Quick test_wave3_surfaces_scroll_bounds_guards_and_secrets;
+        ] );
+      ( "ask_modal_and_keymap_consistency"
+      , [
+          Alcotest.test_case
+            "Part 1: Ask Answer Modal (single/multi-select, multi-q, UTF-8 free-text, skip, live guard, entry points)"
+            `Quick test_part1_ask_modal_and_honest_surfaces;
+          Alcotest.test_case
+            "Part 2: Keymap Consistency (←/→ spatial panes, [/] sub-tabs, 7/8/9/0 overlays, safe Space)"
+            `Quick test_part2_keymap_consistency_spatial_overlays_and_safe_space;
         ] );
     ]

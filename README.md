@@ -248,9 +248,12 @@ workspace, sub-tab, and overlay:
 | `6` | **Infra** | Four tabs: Sandboxes (MicroVM/SSH/Docker fleet + inspector), Repos & Changes, Code (workspace directory tree, `[p]` fuzzy file finder, `[f]` ripgrep search, syntax-highlighted viewer, `[g]` Git status/branches/worktrees/blame/log/diff), and Activity & Logs (backfilled `ALL`/`LOGS`/`EVENTS` timeline `[s]`, `[a]` Acting side-rail, `Enter` Runtime Trace & Log Detail dives) |
 
 MASC TUI is **monitor-first**: while unfocused, bare keys navigate directly.
-Switch workspaces with `1`–`6`, toggle/focus the Left Navigation Sidebar with `b` / `Ctrl+B` / `Alt+B`,
-cycle sub-tabs with `[` / `]` (or `←` / `→` unfocused, `Alt+[` / `Alt+]`), move
-selection or scroll with `↑`/`↓` (`j`/`k`), dive into an item with `Enter`, and
+Switch workspaces with `1`–`6`, open utility overlays with `7`–`0` (`7` Settings,
+`8` Incidents, `9` Queue/Context, `0` Help), toggle/focus the Left Navigation
+Sidebar with `b` / `Ctrl+B` / `Alt+B`, move spatially across Sidebar and panes
+with `←` / `→`, cycle sub-tabs with `[` / `]` (or `Alt+[` / `Alt+]`), move
+selection or scroll with `↑`/`↓` (`j`/`k`), dive into an item or open the
+dedicated **Ask Answer Modal** with `Enter` (or `Y` on an Ask), and
 focus the bottom composer with `i` (or press `c` on a Keeper to jump straight
 into Chat). Inside the composer, `Enter` sends (behind an active turn it waits for that turn to end),
 `Alt+Enter` (or `Ctrl+Enter`) steers by cutting your own running request, and `Shift+Enter` (or `Ctrl+J`)
@@ -261,11 +264,12 @@ a dive, or closes an overlay and never quits; `Ctrl+Q` quits cleanly.
 
 Global overlays and tools (also accessible via persistent top-chrome badges `[b]` `[I]` `[^T]` `[,]` `[?]`):
 `Ctrl+K` command/entity palette, `Ctrl+G` keeper switcher, `Ctrl+L`
-model/runtime switcher, `,` 2-pane Settings overlay (`←`/`→` cycle
-enum/bool/numeric values, `Enter` inline edit, `Space` dry-run diff, `Ctrl+S`
-save — also available directly in Keeper Config), `Ctrl+T` Queue/Context/Schedules
-drawer (with compact per-turn context inspector), `I` historical incidents
-drawer, `J` jump to the most urgent blocked item, and `?` dynamic keymap help. Native terminal
+model/runtime switcher, `7` / `,` 2-pane Settings overlay (`←`/`→` cycle
+enum/bool/numeric values, `Enter` inline edit, `d` dry-run diff, `Ctrl+S`
+save — also available directly in Keeper Config), `9` / `Ctrl+T` Queue/Context/Schedules
+drawer (with compact per-turn context inspector), `8` / `I` historical incidents
+drawer, `J` jump to the most urgent blocked item (opening the Ask Answer Modal
+for pending Asks), and `0` / `?` dynamic keymap help. Native terminal
 drag-select is on by default (mouse capture starts off); press `m` while
 unfocused to toggle mouse-wheel scrolling, and `y` to copy the current selection
 via OSC 52. In chat, `Ctrl+O` (or `/tools compact|results|full`) cycles tool

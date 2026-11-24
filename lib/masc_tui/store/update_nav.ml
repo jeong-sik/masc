@@ -450,6 +450,7 @@ let sync_config_for_keeper_view (m : Model.t) =
       | Nav.Incidents
       | Nav.Queue_context _
       | Nav.Inline_action _
+      | Nav.Ask_answer
       | Nav.Help
       | Nav.System_gate _ )
   | None -> (
@@ -544,6 +545,7 @@ let enter_sidebar_focus (m : Model.t) =
     drafts = Drafts.set_focus false m.drafts;
     config = Config_store.cancel_edit_field m.config;
     inline_modal = None;
+    ask_modal = None;
   }
 let switch_workspace (m : Model.t) ws =
   let nav =
@@ -571,7 +573,15 @@ let switch_workspace (m : Model.t) ws =
     |> Knowledge_store.clear_pending_artifact_revision
   in
   let next =
-    { m with nav; drafts; config; knowledge; inline_modal = None }
+    {
+      m with
+      nav;
+      drafts;
+      config;
+      knowledge;
+      inline_modal = None;
+      ask_modal = None;
+    }
     |> sync_config_for_keeper_view
     |> Model.sync_sidebar_cursor
   in
@@ -586,6 +596,7 @@ let open_overlay (m : Model.t) overlay =
     | Nav.Incidents
     | Nav.Queue_context _
     | Nav.Inline_action _
+    | Nav.Ask_answer
     | Nav.System_gate _ ->
         m.nav.help_scroll_offset
   in
@@ -596,6 +607,7 @@ let open_overlay (m : Model.t) overlay =
     | Nav.Settings _
     | Nav.Incidents
     | Nav.Inline_action _
+    | Nav.Ask_answer
     | Nav.Help
     | Nav.System_gate _ ->
         m.nav.queue_scroll_offset
@@ -620,6 +632,7 @@ let open_overlay (m : Model.t) overlay =
         | Nav.Incidents
         | Nav.Queue_context _
         | Nav.Inline_action _
+        | Nav.Ask_answer
         | Nav.Help
         | Nav.System_gate _ )
       , ( Wire_config.Target_runtime
@@ -636,14 +649,27 @@ let open_overlay (m : Model.t) overlay =
     | Nav.Incidents
     | Nav.Queue_context _
     | Nav.Inline_action _
+    | Nav.Ask_answer
     | Nav.Help
     | Nav.System_gate
         (Nav.Auth_gate | Nav.Server_offline | Nav.Micro_viewport) ->
         m.knowledge)
     |> Knowledge_store.clear_pending_wiki_edit
   in
+  let ask_modal =
+    match overlay with
+    | Nav.Ask_answer -> m.ask_modal
+    | Nav.Palette
+    | Nav.Settings _
+    | Nav.Incidents
+    | Nav.Queue_context _
+    | Nav.Inline_action _
+    | Nav.Help
+    | Nav.System_gate _ ->
+        None
+  in
   let next =
-    { m with nav; drafts; config; knowledge; inline_modal = None }
+    { m with nav; drafts; config; knowledge; inline_modal = None; ask_modal }
     |> Model.sync_sidebar_cursor
   in
   (next, View_fetches.fetches_for_current_view next)
@@ -757,7 +783,16 @@ let push_dive (m : Model.t) dive =
         |> Knowledge_store.clear_pending_wiki_edit
   in
   let next =
-    { m with nav; drafts; fleet; config; knowledge; inline_modal = None }
+    {
+      m with
+      nav;
+      drafts;
+      fleet;
+      config;
+      knowledge;
+      inline_modal = None;
+      ask_modal = None;
+    }
   in
   (next, View_fetches.fetches_for_current_view next)
 
@@ -926,7 +961,23 @@ let open_inline_modal (m : Model.t) kind =
         d0
   in
   let config = Config_store.cancel_edit_field m.config in
-  ({ m with nav; drafts; config; inline_modal = Some modal }, [])
+  ({ m with nav; drafts; config; inline_modal = Some modal; ask_modal = None }, [])
+
+let open_ask_modal ?preselect_choice_1based (m : Model.t)
+    (ask : Wire_work.ask_row) =
+  let modal = Model.ask_modal_for ?preselect_choice_1based ask in
+  let nav =
+    {
+      m.nav with
+      overlay = Some Nav.Ask_answer;
+      filter_focused = false;
+      sidebar_focused = false;
+      sidebar_open = close_drawer_if_floating m;
+    }
+  in
+  let drafts = Drafts.set_focus false m.drafts in
+  let config = Config_store.cancel_edit_field m.config in
+  ({ m with nav; drafts; config; inline_modal = None; ask_modal = Some modal }, [])
 
 let open_palette (m : Model.t) mode =
   let palette = { Model.mode; query = ""; selected = 0 } in
@@ -941,7 +992,9 @@ let open_palette (m : Model.t) mode =
   in
   let drafts = Drafts.set_focus false m.drafts in
   let config = Config_store.cancel_edit_field m.config in
-  let next = { m with nav; drafts; config; palette; inline_modal = None } in
+  let next =
+    { m with nav; drafts; config; palette; inline_modal = None; ask_modal = None }
+  in
   let extra_cmds =
     match mode with
     | Model.Palette_models ->
@@ -995,6 +1048,12 @@ let cycle_sub_tab (m : Model.t) dir =
         }
       in
       (next, View_fetches.fetches_for_current_view next)
+  | Some Nav.Ask_answer -> (
+      match m.ask_modal with
+      | Some modal when not modal.editing_free_text ->
+          let delta = match dir with Keymap.Next -> 1 | Keymap.Prev -> -1 in
+          ({ m with ask_modal = Some (Model.ask_modal_step_question ~delta modal) }, [])
+      | Some _ | None -> (m, []))
   | Some
       ( Nav.Palette
       | Nav.Incidents
@@ -1113,6 +1172,7 @@ let current_filter_query (m : Model.t) =
       ( Nav.Palette
       | Nav.Queue_context _
       | Nav.Inline_action _
+      | Nav.Ask_answer
       | Nav.Help
       | Nav.System_gate _ )
   | None -> (
@@ -1176,6 +1236,7 @@ let set_active_filter_query q (m : Model.t) =
         ( Nav.Palette
         | Nav.Queue_context _
         | Nav.Inline_action _
+        | Nav.Ask_answer
         | Nav.Help
         | Nav.System_gate _ )
     | None -> (
@@ -1669,6 +1730,108 @@ let submit_ask_choice ~now (ask : Wire_work.ask_row) ~choice_1based (m : Model.t
           in
           (next, [ cmd ]))
 
+let skip_all_ask_questions ~now (ask : Wire_work.ask_row) (m : Model.t) =
+  match ask.questions with
+  | [] -> (m, [])
+  | questions ->
+      let attn_id = "ask:" ^ ask.ask_id in
+      let answers =
+        List.map
+          (fun (q : Wire_work.ask_question) ->
+            (q.question_id, Wire_work.Ask_skipped))
+          questions
+      in
+      let attention = Attention.mark_in_flight ~id:attn_id m.attention in
+      let cmd =
+        Cmd.Http_post
+          {
+            epoch = m.epoch;
+            req =
+              Cmd.Post_ask_answer
+                { keeper = ask.keeper; ask_id = ask.ask_id; answers };
+          }
+      in
+      let next =
+        { m with attention }
+        |> Model.with_toast ~now ~level:Model.Toast_info
+             (Say.make
+                ~ko:(Printf.sprintf "@%s 질문 건너뛰기 전송 (%d개 문항)"
+                       ask.keeper (List.length answers))
+                ~en:(Printf.sprintf "Skipping Ask for @%s (%d question(s))"
+                       ask.keeper (List.length answers)))
+      in
+      (next, [ cmd ])
+
+let submit_ask_modal ~now (m : Model.t) =
+  match m.ask_modal with
+  | None -> (m, [])
+  | Some modal -> (
+      match Model.ask_live_status m modal.ask.ask_id with
+      | Model.Ask_live_closed ->
+          ( Model.with_toast ~now ~level:Model.Toast_warning
+              (Say.make ~ko:"이미 응답되었거나 철회된 질문입니다"
+                 ~en:"This Ask was already answered or withdrawn")
+              m
+          , [] )
+      | Model.Ask_live_in_flight ->
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make ~ko:"이미 응답 전송 중입니다"
+                 ~en:"Ask response is already in flight")
+              m
+          , [] )
+      | Model.Ask_live_open when modal.submitting -> (m, [])
+      | Model.Ask_live_open -> (
+          match Model.ask_modal_build_answers modal with
+          | Error first_idx ->
+              let jumped = Model.ask_modal_select_question first_idx modal in
+              let total = List.length modal.ask.questions in
+              ( Model.with_toast ~now ~level:Model.Toast_warning
+                  (Say.make
+                     ~ko:(Printf.sprintf "미응답 질문이 남아 있습니다 (Q %d/%d)"
+                            (first_idx + 1) total)
+                     ~en:(Printf.sprintf "Unanswered question remaining (Q %d/%d)"
+                            (first_idx + 1) total))
+                  { m with ask_modal = Some jumped }
+              , [] )
+          | Ok answers ->
+              let attn_id = "ask:" ^ modal.ask.ask_id in
+              let attention = Attention.mark_in_flight ~id:attn_id m.attention in
+              let cmd =
+                Cmd.Http_post
+                  {
+                    epoch = m.epoch;
+                    req =
+                      Cmd.Post_ask_answer
+                        {
+                          keeper = modal.ask.keeper;
+                          ask_id = modal.ask.ask_id;
+                          answers;
+                        };
+                  }
+              in
+              let submitting_modal =
+                {
+                  modal with
+                  editing_free_text = false;
+                  submitting = true;
+                  error = None;
+                }
+              in
+              let next =
+                {
+                  m with
+                  ask_modal = Some submitting_modal;
+                  attention;
+                }
+                |> Model.with_toast ~now ~level:Model.Toast_info
+                     (Say.make
+                        ~ko:(Printf.sprintf "@%s 질문 응답 전송 중 (%d개 문항)"
+                               modal.ask.keeper (List.length answers))
+                        ~en:(Printf.sprintf "Sending Ask answer to @%s (%d question(s))"
+                               modal.ask.keeper (List.length answers)))
+              in
+              (next, [ cmd ])))
+
 let actionable_approval_item (m : Model.t) =
   let on_work_inbox =
     Option.is_none m.nav.overlay
@@ -1729,7 +1892,10 @@ let fast_approve_top ~now (m : Model.t) =
               }
           in
           ({ m with attention }, [ cmd ])
-      | Attention.Payload_ask ask -> submit_ask_choice ~now ask ~choice_1based:1 m
+      | Attention.Payload_ask ask ->
+          (* NEVER blindly submit choice #1 on Y / Alt+Y — open the dedicated
+             Ask Answer Modal while preserving any composer draft. *)
+          open_ask_modal m ask
       | Attention.Payload_goal_confirmation g ->
           (* Goal completion confirmation requires exact server-issued proof run
              and operator credentials; never fabricate tokens from the strip. *)
@@ -1764,25 +1930,7 @@ let fast_deny_top ~now (m : Model.t) =
           in
           ({ m with attention }, [ cmd ])
       | Attention.Payload_gate g -> open_inline_modal m (Nav.Gate_reject g.id)
-      | Attention.Payload_ask ask -> (
-          match ask.questions with
-          | [] -> (m, [])
-          | q :: _ ->
-              let attention = Attention.mark_in_flight ~id:entry.id m.attention in
-              let cmd =
-                Cmd.Http_post
-                  {
-                    epoch = m.epoch;
-                    req =
-                      Cmd.Post_ask_answer
-                        {
-                          keeper = ask.keeper;
-                          ask_id = ask.ask_id;
-                          answers = [ (q.question_id, Wire_work.Ask_skipped) ];
-                        };
-                  }
-              in
-              ({ m with attention }, [ cmd ]))
+      | Attention.Payload_ask ask -> skip_all_ask_questions ~now ask m
       | Attention.Payload_goal_confirmation g ->
           let next, cmds = push_dive m (Nav.Dive_work (Nav.Goal_dive g.id)) in
           ( Model.with_toast ~now ~level:Model.Toast_info
@@ -1790,6 +1938,47 @@ let fast_deny_top ~now (m : Model.t) =
                  ~en:"Open Goal Dive to pause, block, or reject completion")
               next
           , cmds ))
+
+let focus_attention_entry_in_inbox (m : Model.t) (entry : Attention.entry) =
+  let work0 = Work_store.set_tab Nav.Work_inbox m.work in
+  let visible_under_filter =
+    List.exists
+      (fun (e : Attention.entry) -> String.equal e.id entry.id)
+      (Attention.filtered_items ~query:work0.filter_query m.attention)
+  in
+  let work1 =
+    if visible_under_filter then work0 else Work_store.set_filter "" work0
+  in
+  let filtered = Attention.filtered_items ~query:work1.filter_query m.attention in
+  let rec find_idx i = function
+    | [] -> None
+    | (e : Attention.entry) :: rest ->
+        if String.equal e.id entry.id then Some i else find_idx (i + 1) rest
+  in
+  let attention =
+    match find_idx 0 filtered with
+    | Some idx -> Attention.select_triage_index idx m.attention
+    | None -> m.attention
+  in
+  let work =
+    match entry.payload with
+    | Attention.Payload_ask ask ->
+        let asks = Work_store.open_asks work1 in
+        let rec find_ask i = function
+          | [] -> None
+          | (a : Wire_work.ask_row) :: rest ->
+              if String.equal a.ask_id ask.ask_id then Some i
+              else find_ask (i + 1) rest
+        in
+        (match find_ask 0 asks with
+        | Some idx -> { work1 with selected_index = idx }
+        | None -> work1)
+    | Attention.Payload_tool_approval _
+    | Attention.Payload_gate _
+    | Attention.Payload_goal_confirmation _ ->
+        work1
+  in
+  { m with work; attention }
 
 let teleport_blocked ~now (m : Model.t) =
   let target_opt =
@@ -1810,40 +1999,19 @@ let teleport_blocked ~now (m : Model.t) =
           m
       , [] )
   | Some entry -> (
-      match entry.kind with
-      | Health.Pending_ask _ | Health.Held_tool_approval _ ->
-          let work0 = Work_store.set_tab Nav.Work_inbox m.work in
-          let filtered =
-            Attention.filtered_items ~query:work0.filter_query m.attention
-          in
-          let find_idx items =
-            let rec go i = function
-              | [] -> None
-              | (e : Attention.entry) :: rest ->
-                  if String.equal e.id entry.id then Some i else go (i + 1) rest
-            in
-            go 0 items
-          in
-          let work, target_idx_opt =
-            match find_idx filtered with
-            | Some i -> (work0, Some i)
-            | None ->
-                let work_cleared = Work_store.set_filter "" work0 in
-                let all_items =
-                  Attention.filtered_items ~query:"" m.attention
-                in
-                (work_cleared, find_idx all_items)
-          in
-          let attention =
-            match target_idx_opt with
-            | Some idx -> Attention.select_triage_index idx m.attention
-            | None -> m.attention
-          in
-          switch_workspace { m with work; attention } Nav.Work
-      | Health.Goal_confirmation { goal_id } ->
+      match entry.payload with
+      | Attention.Payload_ask ask ->
+          let m0 = focus_attention_entry_in_inbox m entry in
+          let m1, cmds1 = switch_workspace m0 Nav.Work in
+          let m2, cmds2 = open_ask_modal m1 ask in
+          (m2, cmds1 @ cmds2)
+      | Attention.Payload_tool_approval _ | Attention.Payload_gate _ ->
+          let m0 = focus_attention_entry_in_inbox m entry in
+          switch_workspace m0 Nav.Work
+      | Attention.Payload_goal_confirmation g ->
           let work = Work_store.set_tab Nav.Work_pipeline m.work in
           let m1, cmds1 = switch_workspace { m with work } Nav.Work in
-          let m2, cmds2 = push_dive m1 (Nav.Dive_work (Nav.Goal_dive goal_id)) in
+          let m2, cmds2 = push_dive m1 (Nav.Dive_work (Nav.Goal_dive g.id)) in
           (m2, cmds1 @ cmds2))
 
 let toggle_voice ~now (m : Model.t) =
@@ -1867,8 +2035,7 @@ let dive_attention_entry (m : Model.t) (entry : Attention.entry) =
   match entry.payload with
   | Attention.Payload_goal_confirmation g ->
       push_dive m (Nav.Dive_work (Nav.Goal_dive g.id))
-  | Attention.Payload_ask ask ->
-      push_dive m (Nav.Dive_keeper { name = ask.keeper; tab = Nav.Keeper_chat })
+  | Attention.Payload_ask ask -> open_ask_modal m ask
   | Attention.Payload_tool_approval ta ->
       push_dive m (Nav.Dive_keeper { name = ta.keeper; tab = Nav.Keeper_chat })
   | Attention.Payload_gate g ->
@@ -2404,14 +2571,32 @@ let keeper_enter_plan ~name ~tab (m : Model.t) : enter_plan =
           | Some (cat, _) -> Enter_toggle_fact_category cat
           | None -> Enter_noop)
       | None -> Enter_noop)
+  | Nav.Keeper_identity -> (
+      let entries = keeper_identity_entries m ~name in
+      match
+        List.nth_opt entries
+          (clamp_index (List.length entries) ks.identity_selected_idx)
+      with
+      | Some (Identity_oauth { provider; enabled; _ }) ->
+          let next_enabled = not (Option.value ~default:false enabled) in
+          Enter_keeper_action
+            [
+              Cmd.Http_post
+                {
+                  epoch = m.epoch;
+                  req =
+                    Cmd.Post_oauth_identity_switch
+                      { keeper = name; provider; enabled = next_enabled };
+                };
+            ]
+      | Some Identity_github | None -> Enter_noop)
   | Nav.Keeper_chat
   | Nav.Keeper_context
   | Nav.Keeper_memory
   | Nav.Keeper_work_candle
   | Nav.Keeper_sandbox
   | Nav.Keeper_config
-  | Nav.Keeper_logs
-  | Nav.Keeper_identity ->
+  | Nav.Keeper_logs ->
       Enter_noop
 
 let keeper_enter_action ~name ~tab (m : Model.t) =
@@ -2462,8 +2647,10 @@ let enter_plan (m : Model.t) : enter_plan =
          {
            name;
            tab =
-             (Nav.Keeper_context | Nav.Keeper_tool_calls | Nav.Keeper_memory) as
-             tab;
+             ( Nav.Keeper_context
+             | Nav.Keeper_tool_calls
+             | Nav.Keeper_memory
+             | Nav.Keeper_identity ) as tab;
          }) ->
       keeper_enter_plan ~name ~tab m
   | Some (Nav.Dive_runtime (Nav.Fusion_dive run_id)) -> (
@@ -2500,8 +2687,7 @@ let enter_plan (m : Model.t) : enter_plan =
              | Nav.Keeper_work_candle
              | Nav.Keeper_sandbox
              | Nav.Keeper_config
-             | Nav.Keeper_logs
-             | Nav.Keeper_identity );
+             | Nav.Keeper_logs );
            _;
          })
   | Some
@@ -2542,6 +2728,8 @@ let enter_plan (m : Model.t) : enter_plan =
                        Nav.Keeper_context
                     || Nav.equal_keeper_tab m.fleet.keeper_dive_tab
                          Nav.Keeper_tool_calls
+                    || Nav.equal_keeper_tab m.fleet.keeper_dive_tab
+                         Nav.Keeper_identity
                     || (Nav.equal_keeper_tab m.fleet.keeper_dive_tab
                           Nav.Keeper_memory
                        && Knowledge_store.equal_keeper_memory_subview
@@ -3691,6 +3879,7 @@ let estimated_viewport_rows (m : Model.t) =
       ( Nav.Palette
       | Nav.Queue_context _
       | Nav.Inline_action _
+      | Nav.Ask_answer
       | Nav.Help
       | Nav.System_gate _ ) ->
       max 4 (rows - 10)
@@ -5016,7 +5205,7 @@ let keeper_identity_lines ~width ~name (m : Model.t) : string list =
   let push s = lines := s :: !lines in
   push
     ("── Keeper Identity: " ^ name
-   ^ " ([l] Login · [L] Poll · [r] Refresh · [Space] Toggle · [U] Disconnect \
+   ^ " ([l] Login · [L] Poll · [r] Refresh · [a/Enter] Toggle · [U] Disconnect \
       · [K] GitHub PAT · [y] Copy) ──");
   if ks.oauth_auth_denied then
     push "  [CanAdmin required] OAuth identity endpoints returned 401/403";
@@ -5747,14 +5936,19 @@ let work_detail_max_scroll (m : Model.t) =
                            q.prompt)
                   | None -> ctx_md
                 in
+                let after_meta = max 0 (avail_h - 1) in
+                let keycap_h = if avail_h > 0 then 1 else 0 in
+                let content_h = max 0 (after_meta - keycap_h) in
                 let choices_h =
                   match q_opt with
-                  | Some q -> min 6 (List.length q.choices + 2)
-                  | None -> 1
+                  | Some q ->
+                      let desired = List.length q.choices + 2 in
+                      min (max 3 (content_h / 2)) desired
+                  | None -> 0
                 in
                 let md_h =
-                  if avail_h = 0 then 0
-                  else min avail_h (max 1 (avail_h - choices_h))
+                  if content_h = 0 then 0
+                  else min content_h (max 1 (content_h - choices_h))
                 in
                 markdown_max_scroll ~theme ~width:w ~height:md_h prompt_md
             | Attention.Payload_goal_confirmation g ->
@@ -7231,10 +7425,34 @@ let apply_move (m : Model.t) dir =
                     modal
               in
               ({ m with inline_modal = Some next_modal }, []))
+    | Some Nav.Ask_answer -> (
+        match m.ask_modal with
+        | None -> (m, [])
+        | Some modal ->
+            let next_modal =
+              if modal.editing_free_text then
+                match dir with
+                | Keymap.Left -> Model.ask_modal_move_free_text_cursor `Left modal
+                | Keymap.Right ->
+                    Model.ask_modal_move_free_text_cursor `Right modal
+                | Keymap.Home -> Model.ask_modal_move_free_text_cursor `Home modal
+                | Keymap.End -> Model.ask_modal_move_free_text_cursor `End modal
+                | Keymap.Up | Keymap.Down | Keymap.Page_up | Keymap.Page_down ->
+                    modal
+              else
+                match dir with
+                | Keymap.Up -> Model.ask_modal_move_cursor ~delta:(-1) modal
+                | Keymap.Down -> Model.ask_modal_move_cursor ~delta:1 modal
+                | Keymap.Page_up -> Model.ask_modal_move_cursor ~delta:(-5) modal
+                | Keymap.Page_down -> Model.ask_modal_move_cursor ~delta:5 modal
+                | Keymap.Home -> Model.ask_modal_set_cursor 0 modal
+                | Keymap.End -> Model.ask_modal_set_cursor 100000 modal
+                | Keymap.Left | Keymap.Right -> modal
+            in
+            ({ m with ask_modal = Some next_modal }, []))
     | Some (Nav.Queue_context tab) -> (
         match dir with
-        | Keymap.Left -> cycle_sub_tab m Keymap.Prev
-        | Keymap.Right -> cycle_sub_tab m Keymap.Next
+        | Keymap.Left | Keymap.Right -> (m, [])
         | Keymap.Up | Keymap.Down | Keymap.Page_up | Keymap.Page_down
         | Keymap.Home | Keymap.End ->
             let delta = scroll_delta dir in
@@ -7332,20 +7550,71 @@ let apply_move (m : Model.t) dir =
               move_sidebar m dir
           | Keymap.Right -> (
               match Nav.menu_item_of_index m.nav.sidebar_cursor with
-              | Some it when not (Nav.is_overlay_menu_target it.target) ->
+              | Some it
+                when (not (Nav.is_overlay_menu_target it.target))
+                     && not
+                          (Nav.equal_menu_target it.target
+                             (Model.active_menu_target m)) ->
                   activate_sidebar_cursor m
-              | Some _ | None -> (m, []))
+              | Some it ->
+                  let base = exit_sidebar_focus m in
+                  let target_pane =
+                    match it.target with
+                    | Nav.Menu_keeper_tab _
+                      when Option.is_none (Model.active_dive base)
+                           && (not base.nav.zoomed)
+                           && Model.focusable_pane_count base >= 2 ->
+                        1
+                    | Nav.Menu_keeper_tab _
+                    | Nav.Menu_pulse
+                    | Nav.Menu_work _
+                    | Nav.Menu_knowledge _
+                    | Nav.Menu_keepers
+                    | Nav.Menu_runtime _
+                    | Nav.Menu_infra _
+                    | Nav.Menu_settings
+                    | Nav.Menu_incidents
+                    | Nav.Menu_queue_context
+                    | Nav.Menu_help ->
+                        0
+                  in
+                  ( clamp_for_pane
+                      { base with nav = { base.nav with pane_index = target_pane } }
+                  , [] )
+              | None ->
+                  let base = exit_sidebar_focus m in
+                  ( clamp_for_pane
+                      { base with nav = { base.nav with pane_index = 0 } }
+                  , [] ))
           | Keymap.Left -> (m, [])
         else (
+        let step_spatial_pane next_pane =
+          let next =
+            clamp_for_pane
+              { m with nav = { m.nav with pane_index = next_pane } }
+            |> sync_config_for_keeper_view
+          in
+          let cmds =
+            if
+              not
+                (Config_store.equal_config_target m.config.target
+                   next.config.target)
+            then View_fetches.fetches_for_current_view next
+            else []
+          in
+          (next, cmds)
+        in
         match dir with
         | Keymap.Left ->
-            if
-              Option.is_none (Model.active_dive m)
-              && Nav.equal_workspace m.nav.workspace Nav.Pulse
-              && Model.sidebar_visible m
-            then (enter_sidebar_focus m, [])
-            else cycle_sub_tab m Keymap.Prev
-        | Keymap.Right -> cycle_sub_tab m Keymap.Next
+            if m.nav.pane_index > 0 then
+              step_spatial_pane (m.nav.pane_index - 1)
+            else if Model.sidebar_visible m then (enter_sidebar_focus m, [])
+            else (m, [])
+        | Keymap.Right ->
+            let n = Model.focusable_pane_count m in
+            if m.nav.pane_index + 1 < n then
+              step_spatial_pane (m.nav.pane_index + 1)
+            else (m, [])
         | Keymap.Up | Keymap.Down | Keymap.Page_up | Keymap.Page_down
         | Keymap.Home | Keymap.End -> (
             let move_keeper_context ~embedded ~name =

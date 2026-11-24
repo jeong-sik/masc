@@ -26,6 +26,20 @@ let handle_workspace_mismatch ~now ~expected ~observed ~message (m : Model.t) =
           { expected_instance = exp_s; observed_instance = obs_s };
     }
   in
+  let clear_ask_modal_nav (nav : Model.nav_state) =
+    match nav.overlay with
+    | Some Nav.Ask_answer -> { nav with overlay = None }
+    | Some
+        ( Nav.Palette
+        | Nav.Settings _
+        | Nav.Incidents
+        | Nav.Queue_context _
+        | Nav.Inline_action _
+        | Nav.Help
+        | Nav.System_gate _ )
+    | None ->
+        nav
+  in
   match m.server_identity.mismatch_state with
   | Model.Mismatch_recovering | Model.Mismatch_halted ->
       (* Anti-loop guard: transition to Mismatch_halted so Subscriptions stay
@@ -35,7 +49,15 @@ let handle_workspace_mismatch ~now ~expected ~observed ~message (m : Model.t) =
         { m.server_identity with mismatch_state = Model.Mismatch_halted }
       in
       let next =
-        { m with epoch = next_epoch; incidents; freshness; server_identity }
+        {
+          m with
+          epoch = next_epoch;
+          nav = clear_ask_modal_nav m.nav;
+          ask_modal = None;
+          incidents;
+          freshness;
+          server_identity;
+        }
         |> Model.with_toast ~now ~level:Model.Toast_warning
              (Say.make
                 ~ko:"워크스페이스 불일치가 지속됩니다. 새로고침(r)으로 재시도하세요."
@@ -56,6 +78,8 @@ let handle_workspace_mismatch ~now ~expected ~observed ~message (m : Model.t) =
         {
           m with
           epoch = next_epoch;
+          nav = clear_ask_modal_nav m.nav;
+          ask_modal = None;
           incidents;
           freshness;
           server_identity;
@@ -766,13 +790,53 @@ let apply_http_reply ~now (m : Model.t) reply =
               ~target_id:tid ~keeper ~summary:(Say.resolve m.lang label) m.work
         | None, _ | Some _, None -> m.work
       in
+      let nav, ask_modal =
+        match m.ask_modal, attention_id with
+        | Some modal, Some id
+          when String.equal id ("ask:" ^ modal.ask.ask_id) ->
+            let nav =
+              match m.nav.overlay with
+              | Some Nav.Ask_answer -> { m.nav with overlay = None }
+              | Some
+                  ( Nav.Palette
+                  | Nav.Settings _
+                  | Nav.Incidents
+                  | Nav.Queue_context _
+                  | Nav.Inline_action _
+                  | Nav.Help
+                  | Nav.System_gate _ )
+              | None ->
+                  m.nav
+            in
+            (nav, None)
+        | Some _, _ | None, _ -> (m.nav, m.ask_modal)
+      in
       let next =
-        { m with attention; work }
+        { m with nav; ask_modal; attention; work }
         |> Model.with_toast ~now ~level:Model.Toast_success label
       in
       (next, [])
   | Msg.Reply_work_mutation { label; attention_id; result = Error err; _ } ->
-      fail_decision_post ~now ~attention_id ~context:label err m
+      let failed, cmds =
+        fail_decision_post ~now ~attention_id ~context:label err m
+      in
+      let ask_modal =
+        match err, failed.ask_modal, attention_id with
+        | Msg.Workspace_mismatch _, _, _ -> None
+        | ( (Msg.Transport _ | Msg.Http_error _ | Msg.Decode_error _)
+          , Some modal
+          , Some id )
+          when String.equal id ("ask:" ^ modal.ask.ask_id) ->
+            Some
+              {
+                modal with
+                submitting = false;
+                error = Some (Msg.http_error_summary err);
+              }
+        | (Msg.Transport _ | Msg.Http_error _ | Msg.Decode_error _), _, _ ->
+            failed.ask_modal
+      in
+      ({ failed with ask_modal }, cmds)
   | Msg.Reply_tool_approval
       { keeper; approval_id; attention_id; decision; result = Ok outcome } -> (
       let decision_kind, settled_label, noun_ko, noun_en =
@@ -916,6 +980,7 @@ let apply_http_reply ~now (m : Model.t) reply =
               { m.nav with overlay = None }
           | Some
               ( Nav.Inline_action _
+              | Nav.Ask_answer
               | Nav.Palette
               | Nav.Settings _
               | Nav.Incidents
@@ -2798,6 +2863,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Settings _
             | Nav.Incidents
             | Nav.Queue_context _
+            | Nav.Ask_answer
             | Nav.Help
             | Nav.System_gate _ )
         | None ->

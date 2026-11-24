@@ -1194,8 +1194,8 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
               };
           hotkey =
             Some
-              (Ops_common.say model ~ko:"[Enter] 상세 · [←→] 모드"
-                 ~en:"[Enter] Dive · [←→] Mode");
+              (Ops_common.say model ~ko:"[Enter] 상세 · [[ ]] 모드"
+                 ~en:"[Enter] Dive · [[ ]] Mode");
           focused = Model.body_has_focus model;
         }
       in

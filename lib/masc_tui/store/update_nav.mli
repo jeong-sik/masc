@@ -100,6 +100,14 @@ val open_global_settings :
   ?search_query:string -> Model.t -> Model.t * Cmd.t list
 val select_settings_tab : Model.t -> Nav.settings_tab -> Model.t * Cmd.t list
 val open_inline_modal : Model.t -> Nav.inline_action_kind -> Model.t * Cmd.t list
+val open_ask_modal :
+  ?preselect_choice_1based:int ->
+  Model.t ->
+  Wire_work.ask_row ->
+  Model.t * Cmd.t list
+val submit_ask_modal : now:Clock.Mono.t -> Model.t -> Model.t * Cmd.t list
+val skip_all_ask_questions :
+  now:Clock.Mono.t -> Wire_work.ask_row -> Model.t -> Model.t * Cmd.t list
 val open_palette : Model.t -> Model.palette_mode -> Model.t * Cmd.t list
 val push_dive : Model.t -> Nav.dive -> Model.t * Cmd.t list
 val sync_config_for_keeper_view : Model.t -> Model.t

@@ -2455,7 +2455,38 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                       text = tag;
                       tone = Some tok;
                     };
-                hotkey = Some "[Y] Approve · [N] Deny · [a..d] Choice";
+                hotkey =
+                  Some
+                    (match entry.payload with
+                    | Attention.Payload_ask ask ->
+                        let instant_single =
+                          match ask.questions with
+                          | [ q ] -> (
+                              match q.mode with
+                              | Wire_work.Ask_single -> true
+                              | Wire_work.Ask_multi -> false)
+                          | [] | _ :: _ :: _ -> false
+                        in
+                        if instant_single then
+                          Ops_common.say model
+                            ~ko:"[Enter/Y] 답변 · [N] 건너뛰기 · [a..d]"
+                            ~en:"[Enter/Y] Answer · [N] Skip · [a..d]"
+                        else
+                          Ops_common.say model
+                            ~ko:"[Enter/Y] 답변 모달 · [N] 건너뛰기"
+                            ~en:"[Enter/Y] Answer Modal · [N] Skip"
+                    | Attention.Payload_tool_approval _ ->
+                        Ops_common.say model
+                          ~ko:"[Y] 승인 · [N] 거절"
+                          ~en:"[Y] Approve · [N] Deny"
+                    | Attention.Payload_gate _ ->
+                        Ops_common.say model
+                          ~ko:"[Y] 승인 · [N] 거절 (사유)"
+                          ~en:"[Y] Approve · [N] Reject"
+                    | Attention.Payload_goal_confirmation _ ->
+                        Ops_common.say model
+                          ~ko:"[Enter/Y] 목표 상세"
+                          ~en:"[Enter/Y] Goal Dive");
                 focused = Model.pane_focused model 1;
               }
             in
@@ -2577,6 +2608,7 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                            ("N", Ops_common.say model ~ko:"거절 (사유)" ~en:"Reject");
                          ])
               | Attention.Payload_ask ask ->
+                  let q_total = List.length ask.questions in
                   let ctx_md =
                     match ask.context with
                     | Some c when not (String.equal (String.trim c) "") ->
@@ -2586,6 +2618,40 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                   let q_opt =
                     match ask.questions with q :: _ -> Some q | [] -> None
                   in
+                  if !y < bot then begin
+                    let badges =
+                      match q_opt with
+                      | None -> []
+                      | Some q ->
+                          let mode_b =
+                            match q.mode with
+                            | Wire_work.Ask_multi ->
+                                [ Ops_common.say model ~ko:"[다중 선택]" ~en:"[Multi-select]" ]
+                            | Wire_work.Ask_single -> []
+                          in
+                          let free_b =
+                            if q.allow_free_text then
+                              [ Ops_common.say model ~ko:"[직접 입력 가능]" ~en:"[Free-text]" ]
+                            else []
+                          in
+                          mode_b @ free_b
+                    in
+                    let meta_line =
+                      let base_q =
+                        Ops_common.say model
+                          ~ko:(Printf.sprintf "질문 1/%d · @%s" (Int.max 1 q_total) ask.keeper)
+                          ~en:(Printf.sprintf "Question 1/%d · @%s" (Int.max 1 q_total) ask.keeper)
+                      in
+                      if badges = [] then base_q
+                      else base_q ^ "  " ^ String.concat " " badges
+                    in
+                    ignore
+                      (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
+                         ~max_w:content.w
+                         ~style:(Typography.accent ~bg:card_bg ~bold:true theme)
+                         meta_line);
+                    incr y
+                  end;
                   let prompt_md =
                     match q_opt with
                     | Some q ->
@@ -2593,12 +2659,16 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                           (Ops_common.rewrite_masc_links_for_markdown q.prompt)
                     | None -> ctx_md
                   in
+                  let keycap_h = if bot > r_inner.y then 1 else 0 in
+                  let content_bot = Int.max !y (bot - keycap_h) in
                   let choices_h =
                     match q_opt with
-                    | Some q -> Int.min 6 (List.length q.choices + 2)
-                    | None -> 1
+                    | Some q ->
+                        let desired = List.length q.choices + 2 in
+                        Int.min (Int.max 3 ((content_bot - !y) / 2)) desired
+                    | None -> 0
                   in
-                  let avail_h = Int.max 0 (bot - !y) in
+                  let avail_h = Int.max 0 (content_bot - !y) in
                   let md_h =
                     if avail_h = 0 then 0
                     else Int.min avail_h (Int.max 1 (avail_h - choices_h))
@@ -2615,41 +2685,68 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                   (match q_opt with
                   | None -> ()
                   | Some q ->
-                      if !y < bot then begin
-                        Card.draw_hairline ~pad_x:0 ~bg:card_bg
-                          ~label:
-                            (Ops_common.say model ~ko:"a..d 즉시 선택"
-                               ~en:"Instant a..d Choices")
+                      let instant_single =
+                        Int.equal q_total 1
+                        &&
+                        match q.mode with
+                        | Wire_work.Ask_single -> true
+                        | Wire_work.Ask_multi -> false
+                      in
+                      if !y < content_bot then begin
+                        let lbl =
+                          if instant_single then
+                            Ops_common.say model
+                              ~ko:"선택지 (a..d 즉시 응답 · Enter/Y 모달)"
+                              ~en:"Choices (a..d instant · Enter/Y modal)"
+                          else
+                            Ops_common.say model
+                              ~ko:"선택지 (Enter/Y 질문 답변 모달에서 응답)"
+                              ~en:"Choices (press Enter/Y to answer in modal)"
+                        in
+                        Card.draw_hairline ~pad_x:0 ~bg:card_bg ~label:lbl
                           grid ~rect:content ~y:!y ~theme;
                         incr y
                       end;
+                      let total_choices = List.length q.choices in
+                      let rows_left = Int.max 0 (content_bot - !y) in
+                      let multi_q_h =
+                        if q_total > 1 && rows_left >= 2 then 1 else 0
+                      in
+                      let choice_rows_budget =
+                        Int.max 0 (rows_left - multi_q_h)
+                      in
+                      let max_show, more_count =
+                        if total_choices <= choice_rows_budget then
+                          (total_choices, 0)
+                        else if choice_rows_budget >= 2 then
+                          ( choice_rows_budget - 1
+                          , total_choices - (choice_rows_budget - 1) )
+                        else
+                          ( choice_rows_budget
+                          , total_choices - choice_rows_budget )
+                      in
                       List.iteri
                         (fun idx (ch : Wire_work.ask_choice) ->
-                          if !y < bot then begin
-                            let key_ch = Char.chr (Char.code 'a' + idx) in
-                            let row_bg =
-                              if idx = 0 then Color.of_rgb theme.selection_bg
-                              else card_bg
+                          if idx < max_show && !y < content_bot then begin
+                            let marker =
+                              match q.mode with
+                              | Wire_work.Ask_single -> "○"
+                              | Wire_work.Ask_multi -> "[ ]"
                             in
-                            if idx = 0 then begin
-                              let rr =
-                                Rect.make ~x:content.x ~y:!y ~w:content.w ~h:1
-                              in
-                              Cell_grid.fill_rect ~clip:content grid ~rect:rr
-                                ~style:(Typography.primary ~bg:row_bg theme) ();
-                              Card.draw_left_rail ~bg:row_bg ~color:theme.accent
-                                grid ~x:content.x ~y:!y ~h:1 ~theme
-                            end;
-                            let main_txt = Printf.sprintf "[%c] %s" key_ch ch.label in
-                            let start_x = content.x + 2 in
-                            let max_w = Int.max 0 (content.w - 2) in
-                            let main_st =
-                              if idx = 0 then Typography.anchor ~bg:row_bg theme
-                              else Typography.primary ~bg:row_bg theme
+                            let key_prefix =
+                              if idx < 4 then
+                                Printf.sprintf "%s [%c] " marker
+                                  (Char.chr (Char.code 'a' + idx))
+                              else Printf.sprintf "%s " marker
                             in
+                            let main_txt = key_prefix ^ ch.label in
+                            let start_x = content.x + 1 in
+                            let max_w = Int.max 0 (content.w - 1) in
                             let adv =
                               Ops_common.put_line ~clip:content grid ~x:start_x
-                                ~y:!y ~max_w ~style:main_st main_txt
+                                ~y:!y ~max_w
+                                ~style:(Typography.primary ~bg:card_bg theme)
+                                main_txt
                             in
                             (match ch.description with
                             | Some d when max_w - adv >= 6 ->
@@ -2657,25 +2754,50 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                                   (Ops_common.put_line ~clip:content grid
                                      ~x:(start_x + adv) ~y:!y
                                      ~max_w:(max_w - adv)
-                                     ~style:(Typography.whisper ~bg:row_bg theme)
+                                     ~style:(Typography.whisper ~bg:card_bg theme)
                                      (" — " ^ d))
                             | Some _ | None -> ());
                             incr y
                           end)
-                        (List.take 4 q.choices);
-                      if q.allow_free_text && !y < bot then
-                        let hint =
-                          match q.free_text_hint with
-                          | Some h -> " (" ^ h ^ ")"
-                          | None -> ""
-                        in
+                        q.choices;
+                      if more_count > 0 && !y < content_bot then begin
                         ignore
-                          (Ops_common.put_line ~clip:content grid ~x:content.x
-                             ~y:!y ~max_w:content.w
+                          (Ops_common.put_line ~clip:content grid
+                             ~x:(content.x + 1) ~y:!y
+                             ~max_w:(Int.max 0 (content.w - 1))
                              ~style:(Typography.whisper ~bg:card_bg theme)
                              (Ops_common.say model
-                                ~ko:("[i] 자유 텍스트 응답 가능" ^ hint)
-                                ~en:("[i] Free-text reply allowed" ^ hint))))
+                                ~ko:(Printf.sprintf "+%d개 선택지 더 있음 (Enter/Y 모달에서 전체 보기)" more_count)
+                                ~en:(Printf.sprintf "+%d more choice(s) (open Enter/Y modal to view all)" more_count)));
+                        incr y
+                      end;
+                      if q_total > 1 && !y < content_bot then begin
+                        ignore
+                          (Ops_common.put_line ~clip:content grid
+                             ~x:(content.x + 1) ~y:!y
+                             ~max_w:(Int.max 0 (content.w - 1))
+                             ~style:(Typography.status ~bg:card_bg theme Theme.Status_attention)
+                             (Ops_common.say model
+                                ~ko:(Printf.sprintf "총 %d개 질문 — Enter/Y 모달에서 순서대로 답변하세요" q_total)
+                                ~en:(Printf.sprintf "%d questions total — open Enter/Y modal to answer all" q_total)));
+                        incr y
+                      end);
+                  if keycap_h = 1 then
+                    ignore
+                      (Ops_common.draw_keycap_bar grid
+                         ~rect:
+                           (Rect.make ~x:content.x ~y:(bot - 1) ~w:content.w
+                              ~h:1)
+                         ~theme ~bg:card_bg
+                         [
+                           ( "Enter/Y"
+                           , Ops_common.say model ~ko:"질문 답변 열기"
+                               ~en:"Open Ask Modal" );
+                           ("N", Ops_common.say model ~ko:"건너뛰기" ~en:"Skip");
+                           ( "C"
+                           , Ops_common.say model ~ko:"키퍼 채팅"
+                               ~en:"Keeper Chat" );
+                         ])
               | Attention.Payload_goal_confirmation g ->
                   let step_h =
                     draw_goal_pipeline_stepper grid

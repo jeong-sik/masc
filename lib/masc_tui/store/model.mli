@@ -117,6 +117,47 @@ type inline_modal_state = {
   error : string option;
 }
 
+module Ask_draft_key : sig
+  type t = string * string
+  val compare : t -> t -> int
+end
+
+module Ask_draft_map : Map.S with type key = Ask_draft_key.t
+
+type ask_answer_mode =
+  | Ask_mode_unanswered
+  | Ask_mode_choices
+  | Ask_mode_free_text
+  | Ask_mode_skipped
+
+type ask_question_draft = {
+  choice_ids : string list;
+  free_text : string;
+  free_text_cursor : int;
+  mode : ask_answer_mode;
+}
+
+type ask_modal_row =
+  | Ask_row_choice of int * Wire_work.ask_choice
+  | Ask_row_free_text
+  | Ask_row_skip
+
+type ask_live_status =
+  | Ask_live_open
+  | Ask_live_in_flight
+  | Ask_live_closed
+
+type ask_modal = {
+  ask : Wire_work.ask_row;
+  question_idx : int;
+  cursor : int;
+  prompt_scroll : int;
+  per_question : ask_question_draft Ask_draft_map.t;
+  editing_free_text : bool;
+  submitting : bool;
+  error : Say.t option;
+}
+
 type toast_level =
   | Toast_info
   | Toast_success
@@ -155,6 +196,7 @@ type t = {
   config : Config_store.t;
   palette : palette_state;
   inline_modal : inline_modal_state option;
+  ask_modal : ask_modal option;
   toast : toast option;
 }
 
@@ -286,6 +328,54 @@ val modal_field_value : key:string -> inline_modal_state -> string
 val modal_update_active_field :
   (string -> string) -> inline_modal_state -> inline_modal_state
 val modal_cycle_field : delta:int -> inline_modal_state -> inline_modal_state
+
+(** {1 Dedicated Ask Answer Modal State & Pure Transitions} *)
+
+val equal_ask_answer_mode : ask_answer_mode -> ask_answer_mode -> bool
+val equal_ask_live_status : ask_live_status -> ask_live_status -> bool
+val ask_choice_letters : string
+(** Canonical ordered quick-pick choice letters inside the Ask Answer Modal
+    (["abcdefhlmnopqrstuvwxyz"], skipping [g]/[i]/[j]/[k] reserved for
+    home/free-text/down/up). *)
+val ask_choice_hotkey_char : int -> char option
+val ask_choice_index_of_char : char -> int option
+
+val empty_ask_question_draft : ask_question_draft
+val ask_modal_for :
+  ?preselect_choice_1based:int -> Wire_work.ask_row -> ask_modal
+val ask_modal_current_question : ask_modal -> Wire_work.ask_question option
+val ask_modal_rows : Wire_work.ask_question -> ask_modal_row list
+val ask_modal_current_row : ask_modal -> ask_modal_row option
+val ask_question_draft_for :
+  ask_modal -> Wire_work.ask_question -> ask_question_draft
+val ask_question_response :
+  ask_modal -> Wire_work.ask_question -> Wire_work.ask_response option
+val ask_modal_all_answered : ask_modal -> bool
+val ask_modal_build_answers :
+  ask_modal -> ((string * Wire_work.ask_response) list, int) result
+val ask_live_status : t -> string -> ask_live_status
+(** Derive whether [ask_id] is still open, in-flight, or already
+    answered/withdrawn in live [m.attention]. *)
+
+val ask_modal_move_cursor : delta:int -> ask_modal -> ask_modal
+val ask_modal_set_cursor : int -> ask_modal -> ask_modal
+val ask_modal_scroll_prompt : ?max_scroll:int -> delta:int -> ask_modal -> ask_modal
+val ask_modal_prompt_markdown :
+  compact:bool -> Wire_work.ask_row -> Wire_work.ask_question -> string
+val ask_modal_select_question : int -> ask_modal -> ask_modal
+val ask_modal_step_question : delta:int -> ask_modal -> ask_modal
+val ask_modal_set_editing_free_text : bool -> ask_modal -> ask_modal
+val ask_modal_enter_free_text : ask_modal -> ask_modal
+val ask_modal_toggle_or_select_choice : int -> ask_modal -> ask_modal
+val ask_modal_toggle_skip : ask_modal -> ask_modal
+val ask_modal_set_skipped : ask_modal -> ask_modal
+val ask_modal_insert_free_text : string -> ask_modal -> ask_modal
+val ask_modal_backspace_free_text : ask_modal -> ask_modal
+val ask_modal_delete_free_text : ask_modal -> ask_modal
+val ask_modal_move_free_text_cursor :
+  [ `Left | `Right | `Home | `End ] -> ask_modal -> ask_modal
+val ask_modal_kill_free_text_start : ask_modal -> ask_modal
+val ask_modal_confirm_free_text : ask_modal -> ask_modal * bool
 
 val with_toast :
   now:Clock.Mono.t ->

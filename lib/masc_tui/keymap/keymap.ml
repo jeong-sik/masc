@@ -613,20 +613,20 @@ let bindings : binding list =
       bind ~scope:Approval_strip_focused ~tier:Bare_unfocused
         ~category:Cat_approval ~action:Fast_approve_top ~key_display:"Y"
         ~hint_label:say_approve
-        ~help_desc:(Say.make ~ko:"대기 중 승인 항목 즉시 승인" ~en:"Fast-approve top pending item")
+        ~help_desc:(Say.make ~ko:"대기 승인 즉시 승인 / 질문 답변 모달 열기" ~en:"Fast-approve top item / open Ask answer modal")
         ~footer_priority:1 (bare_char 'Y');
       bind ~scope:Approval_strip_focused ~tier:Bare_unfocused
         ~category:Cat_approval ~action:Fast_deny_top ~key_display:"N"
         ~hint_label:say_deny
-        ~help_desc:(Say.make ~ko:"대기 중 승인 항목 거절(인라인 사유)" ~en:"Fast-deny top pending item")
+        ~help_desc:(Say.make ~ko:"대기 승인 거절 / 질문 건너뛰기" ~en:"Fast-deny top item / skip Ask")
         ~footer_priority:2 (bare_char 'N');
       bind ~scope:Approval_strip_chords ~tier:Modern_accel ~category:Cat_approval
         ~action:Fast_approve_top ~key_display:"Alt+Y" ~hint_label:say_approve
-        ~help_desc:(Say.make ~ko:"대기 중 승인 항목 즉시 승인" ~en:"Fast-approve top pending item")
+        ~help_desc:(Say.make ~ko:"대기 승인 즉시 승인 / 질문 답변 모달 열기" ~en:"Fast-approve top item / open Ask answer modal")
         ~footer_priority:1 (alt_char 'y');
       bind ~scope:Approval_strip_chords ~tier:Modern_accel ~category:Cat_approval
         ~action:Fast_deny_top ~key_display:"Alt+N" ~hint_label:say_deny
-        ~help_desc:(Say.make ~ko:"대기 중 승인 항목 거절(인라인 사유)" ~en:"Fast-deny top pending item")
+        ~help_desc:(Say.make ~ko:"대기 승인 거절 / 질문 건너뛰기" ~en:"Fast-deny top item / skip Ask")
         ~footer_priority:2 (alt_char 'n');
       (* --- Monitor-First Bare Keys (Composer unfocused; bare 'p' unbound here) --- *)
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
@@ -639,11 +639,11 @@ let bindings : binding list =
         ~footer_priority:2 (bare_char 'b');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
         ~action:(Sub_tab Prev) ~key_display:"[" ~hint_label:say_sub_prev
-        ~help_desc:(Say.make ~ko:"이전 하위 탭으로 이동" ~en:"Previous sub-tab")
+        ~help_desc:(Say.make ~ko:"이전 하위 탭" ~en:"Previous sub-tab")
         ~footer_priority:3 (bare_char '[');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
         ~action:(Sub_tab Next) ~key_display:"]" ~hint_label:say_sub_next
-        ~help_desc:(Say.make ~ko:"다음 하위 탭으로 이동" ~en:"Next sub-tab")
+        ~help_desc:(Say.make ~ko:"다음 하위 탭" ~en:"Next sub-tab")
         ~footer_priority:4 (bare_char ']');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_composer
         ~action:Focus_composer ~key_display:"i" ~hint_label:say_composer
@@ -654,6 +654,10 @@ let bindings : binding list =
         ~help_desc:(Say.make ~ko:"현재 목록 필터 또는 산출물 본문 검색" ~en:"Filter list or search artifact document")
         ~footer_priority:6 (bare_char '/');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_overlays
+        ~action:Open_settings ~key_display:"7" ~hint_label:say_settings
+        ~help_desc:(Say.make ~ko:"7-탭 설정 오버레이 열기" ~en:"Open 7-tab Settings overlay")
+        ~slash_twin:"/config" ~footer_priority:0 (bare_char '7');
+      bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_overlays
         ~action:Open_settings ~key_display:"," ~hint_label:say_settings
         ~help_desc:(Say.make ~ko:"7-탭 설정 오버레이 열기" ~en:"Open 7-tab Settings overlay")
         ~slash_twin:"/config" ~footer_priority:6 (bare_char ',');
@@ -662,13 +666,25 @@ let bindings : binding list =
         ~help_desc:(Say.make ~ko:"가장 긴급한 대기/차단 키퍼로 점프" ~en:"Teleport to highest-priority blocked item")
         ~slash_twin:"/jump" ~footer_priority:8 (bare_char 'J');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_overlays
+        ~action:Open_incidents ~key_display:"8" ~hint_label:say_incidents
+        ~help_desc:(Say.make ~ko:"과거 장애·진단 이력 서랍 열기" ~en:"Open Historical Incidents drawer")
+        ~slash_twin:"/incidents" ~footer_priority:0 (bare_char '8');
+      bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_overlays
         ~action:Open_incidents ~key_display:"I" ~hint_label:say_incidents
         ~help_desc:(Say.make ~ko:"과거 장애·진단 이력 서랍 열기" ~en:"Open Historical Incidents drawer")
         ~slash_twin:"/incidents" ~footer_priority:7 (bare_char 'I');
+      bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_overlays
+        ~action:Open_queue_context ~key_display:"9" ~hint_label:say_queue
+        ~help_desc:(Say.make ~ko:"키퍼 큐·컨텍스트·예약 서랍 열기" ~en:"Open Queue & Context drawer")
+        ~slash_twin:"/queue" ~footer_priority:0 (bare_char '9');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Voice_ptt_toggle ~key_display:"V" ~hint_label:say_voice
         ~help_desc:(Say.make ~ko:"음성 입력(PTT) 시작/중지" ~en:"Toggle Voice Push-to-Talk")
         ~slash_twin:"/voice" ~footer_priority:9 (bare_char 'V');
+      bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_overlays
+        ~action:Open_help ~key_display:"0" ~hint_label:say_help
+        ~help_desc:(Say.make ~ko:"동적 단축키 도움말 열기" ~en:"Open dynamic keymap help")
+        ~slash_twin:"/help" ~footer_priority:0 (bare_char '0');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_overlays
         ~action:Open_help ~key_display:"?" ~hint_label:say_help
         ~help_desc:(Say.make ~ko:"동적 단축키 도움말 열기" ~en:"Open dynamic keymap help")
@@ -690,12 +706,12 @@ let bindings : binding list =
         ~help_desc:(Say.make ~ko:"이전 항목으로 이동" ~en:"Move selection up")
         ~footer_priority:0 (mk_chord Input.Up);
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
-        ~action:(Move Left) ~key_display:"←" ~hint_label:(Say.make ~ko:"왼쪽" ~en:"Left")
-        ~help_desc:(Say.make ~ko:"왼쪽으로 이동" ~en:"Move left")
+        ~action:(Move Left) ~key_display:"←" ~hint_label:(Say.make ~ko:"왼쪽 패널" ~en:"Left Pane")
+        ~help_desc:(Say.make ~ko:"왼쪽 패널/사이드바로 이동" ~en:"Move to left pane or sidebar")
         ~footer_priority:0 (mk_chord Input.Left);
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
-        ~action:(Move Right) ~key_display:"→" ~hint_label:(Say.make ~ko:"오른쪽" ~en:"Right")
-        ~help_desc:(Say.make ~ko:"오른쪽으로 이동" ~en:"Move right")
+        ~action:(Move Right) ~key_display:"→" ~hint_label:(Say.make ~ko:"오른쪽 패널" ~en:"Right Pane")
+        ~help_desc:(Say.make ~ko:"오른쪽 패널로 이동" ~en:"Move to right pane")
         ~footer_priority:0 (mk_chord Input.Right);
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
         ~action:(Move Page_up) ~key_display:"PgUp" ~hint_label:(Say.make ~ko:"이전 페이지" ~en:"PgUp")
@@ -736,8 +752,8 @@ let bindings : binding list =
         ~hint_label:(Say.make ~ko:"토글" ~en:"Toggle")
         ~help_desc:
           (Say.make
-             ~ko:"컨텍스트 토글 (접기/펼치기 · 필터 · Diff 창 · 로그 레벨 · 턴 상세)"
-             ~en:"Context toggle (expand/fold · filter · Diff window · Log level · Turn detail)")
+             ~ko:"로컬 토글 (접기·펼치기 · 필터 · 선택 · 턴 상세; 변경 전송 없음)"
+             ~en:"Local toggle (expand/fold · filter · selection · view details; no POST)")
         ~footer_priority:0 (bare_char ' ');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Create_new ~key_display:"n"
@@ -842,8 +858,8 @@ let bindings : binding list =
         ~footer_priority:0 (bare_char 'U');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Entity_approve_or_assign ~key_display:"a"
-        ~hint_label:(Say.make ~ko:"승인/배정/액팅" ~en:"Approve/Acting")
-        ~help_desc:(Say.make ~ko:"목표·검증 승인 / 런타임 배정 / 활동 로그 Acting 레일 토글" ~en:"Approve goal/verification, assign runtime, or toggle Acting rail")
+        ~hint_label:(Say.make ~ko:"승인/배정/전환" ~en:"Approve/Toggle")
+        ~help_desc:(Say.make ~ko:"목표·검증 승인 / 런타임 배정 / OAuth 전환 / 활동 로그 Acting 레일 토글" ~en:"Approve goal/verification, assign runtime, toggle OAuth, or toggle Acting rail")
         ~footer_priority:0 (bare_char 'a');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Entity_reject_or_cancel ~key_display:"x"
@@ -1011,6 +1027,14 @@ let bindings : binding list =
         ~help_desc:(Say.make ~ko:"오버레이 맨 아래로" ~en:"Overlay bottom")
         ~footer_priority:0 (mk_chord Input.End);
       bind ~scope:Overlay_focused ~tier:Bare_unfocused ~category:Cat_navigation
+        ~action:(Sub_tab Prev) ~key_display:"[" ~hint_label:say_sub_prev
+        ~help_desc:(Say.make ~ko:"이전 하위 탭 / 이전 질문" ~en:"Previous sub-tab / question")
+        ~footer_priority:0 (bare_char '[');
+      bind ~scope:Overlay_focused ~tier:Bare_unfocused ~category:Cat_navigation
+        ~action:(Sub_tab Next) ~key_display:"]" ~hint_label:say_sub_next
+        ~help_desc:(Say.make ~ko:"다음 하위 탭 / 다음 질문" ~en:"Next sub-tab / question")
+        ~footer_priority:0 (bare_char ']');
+      bind ~scope:Overlay_focused ~tier:Bare_unfocused ~category:Cat_navigation
         ~action:(Cycle_focus_pane Next) ~key_display:"Tab"
         ~hint_label:(Say.make ~ko:"다음 필드" ~en:"Next")
         ~help_desc:(Say.make ~ko:"다음 필드 또는 탭으로 이동" ~en:"Focus next field")
@@ -1142,6 +1166,7 @@ let scope_chain_of_focus ?(approval_strip_active = false)
       | Nav.Incidents
       | Nav.Queue_context _
       | Nav.Inline_action _
+      | Nav.Ask_answer
       | Nav.Help
       | Nav.System_gate Nav.Media_viewer ) ->
       [ Overlay_focused; Global ]

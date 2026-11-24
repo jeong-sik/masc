@@ -161,6 +161,7 @@ let apply_server_health ~now (m : Model.t)
             | Nav.Incidents
             | Nav.Queue_context _
             | Nav.Inline_action _
+            | Nav.Ask_answer
             | Nav.Help )
         | None ->
             m.nav.overlay
@@ -191,7 +192,7 @@ let apply_server_health ~now (m : Model.t)
       let m1, _ =
         Update_http.record_http_incident ~now ~source:Health.Source_client_http
           ~context:(Say.make ~ko:"서버 헬스 확인" ~en:"Server health check")
-          err { m with freshness; nav; inline_modal = None }
+          err { m with freshness; nav; inline_modal = None; ask_modal = None }
       in
       if not m1.server_identity.autostart_attempted then
         let server_identity =

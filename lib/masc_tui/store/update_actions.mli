@@ -19,6 +19,9 @@ val apply_staged_tui_pref_if_needed :
 val save_settings_config :
   now:Clock.Mono.t -> Model.t -> Model.t * Cmd.t list
 
+val dry_run_settings_config :
+  now:Clock.Mono.t -> Model.t -> Model.t * Cmd.t list
+
 val step_settings_pane_lr :
   now:Clock.Mono.t -> Model.t -> Keymap.move_dir -> Model.t * Cmd.t list
 

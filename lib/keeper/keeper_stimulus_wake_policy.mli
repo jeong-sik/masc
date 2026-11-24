@@ -23,8 +23,10 @@ type input_kind =
 (** Producer-selected wake policy (#54342):
     - [Now]: wake immediately (or steer if a turn is already active).
     - [At_tick]: coalesce onto the Keeper's deterministic staggered tick grid.
-    - [Carry]: durably queue to ride the next reactive or spontaneous turn
-      without forcing an extra wakeup. *)
+    - [Carry]: persist the input without notifying the Keeper. An independently
+      opened turn can carry it. At a due periodic boundary, a queued approved
+      Task is served even when spontaneous activity is disabled for the Keeper
+      (RFC keeper-reaction-and-queue §4.2 and §5.5). *)
 type stimulus_wake_policy =
   | Now
   | At_tick

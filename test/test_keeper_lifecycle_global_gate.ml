@@ -207,8 +207,16 @@ let test_approved_task_rides_the_next_eligible_turn () =
   let decision wake obs = WO.keeper_cycle_decision ~wake ~meta (with_approval obs) in
   check bool "a late wake hint does not start a turn for an approval" false
     (decision WO.Attention_wake base_obs).should_run;
-  check bool "a due boundary serves the queued approval for an on-demand keeper" true
-    (decision WO.Periodic_tick base_obs).should_run;
+  check bool "an empty periodic cycle leaves the on-demand keeper idle" false
+    (WO.keeper_cycle_decision ~wake:WO.Periodic_tick ~meta base_obs).should_run;
+  let due = decision WO.Periodic_tick base_obs in
+  check bool "a due boundary serves the queued approval on the scheduled channel" true
+    (due.should_run && due.channel = WO.Scheduled_autonomous);
+  (match due.verdict with
+   | WO.Run { reasons = first, rest } ->
+     check bool "the queued approval is visible on that turn" true
+       (List.mem WO.Task_outcome_pending (first :: rest))
+   | WO.Skip _ -> fail "a due periodic boundary skipped a waiting approval");
   let mention = decision WO.Attention_wake mention_obs in
   check bool "a mention can open the turn that carries the approval" true
     (mention.should_run && mention.channel = WO.Reactive)

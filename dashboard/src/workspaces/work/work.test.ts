@@ -24,6 +24,7 @@ vi.mock('uplot', () => {
 import { authSession, bumpSessionEpoch, resetAuthStateForTests } from '../../core/auth'
 import { resetObserverStateForTests } from '../../core/observer'
 import { resourceCache } from '../../core/resource-cache'
+import { resetPortraitCacheForTests } from '../../lib/portrait-cache'
 import {
   WorkWorkspace,
   buildCandleTrendSeries,
@@ -73,6 +74,7 @@ describe('workspaces/work', () => {
   beforeEach(() => {
     resetAuthStateForTests()
     resetObserverStateForTests()
+    resetPortraitCacheForTests()
     resourceCache.clearAll()
     vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(480)
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(600)
@@ -101,6 +103,7 @@ describe('workspaces/work', () => {
     globalThis.fetch = origFetch
     vi.restoreAllMocks()
     resourceCache.clearAll()
+    resetPortraitCacheForTests()
     resetAuthStateForTests()
     resetObserverStateForTests()
   })
@@ -349,6 +352,9 @@ describe('workspaces/work', () => {
     await flushUi()
 
     expect(container.textContent).toContain('Finish Layer 6 Work & Knowledge')
+    expect(container.querySelector('.wk-subbar')).toBeNull()
+    expect(container.querySelector('.wk-goal-row')).not.toBeNull()
+    expect(container.querySelector('.wk-goal-measure')).not.toBeNull()
     // Unrelated verification MUST NOT appear under goal-1
     expect(container.textContent).not.toContain('Unrelated Goal Task')
     expect(container.textContent).not.toContain('vr-unrelated-999')
@@ -819,9 +825,24 @@ describe('workspaces/work', () => {
       expect(trend.decayedSupply[1]!).toBeLessThan(50)
     }
 
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:sangsu-candle-portrait')
+
     const releaseCalls: { url: string; body: unknown }[] = []
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
+      if (url.includes('/portrait.png')) {
+        return new Response(new Blob(['png'], { type: 'image/png' }), {
+          status: 200,
+          headers: { 'Content-Type': 'image/png' },
+        })
+      }
       if (url.startsWith('/api/v1/candle/ledger')) {
         return jsonResponse({ schema_version: 1, instance_id: 'i1', generated_at_unix: 1, data: samplePayload })
       }
@@ -841,7 +862,9 @@ describe('workspaces/work', () => {
     expect(container.textContent).toContain('42.501')
     expect(container.textContent).toContain('0.000')
     expect(container.textContent).toContain('sangsu')
-    expect(container.querySelector('img.kb-portrait')).not.toBeNull()
+    const portraitImg = container.querySelector('img.kb-portrait') as HTMLImageElement | null
+    expect(portraitImg).not.toBeNull()
+    expect(portraitImg?.getAttribute('src')).toBe('blob:sangsu-candle-portrait')
     const progressEl = container.querySelector('progress.wk-gauge') as HTMLProgressElement | null
     expect(progressEl).not.toBeNull()
     expect(progressEl!.getAttribute('style')).toBeNull()

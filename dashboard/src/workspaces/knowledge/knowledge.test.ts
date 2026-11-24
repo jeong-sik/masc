@@ -158,10 +158,14 @@ describe('workspaces/knowledge', () => {
       supported_reaction_emojis: ['👍', '🔥', '🎉', '👀'],
     }))
 
+    const manyHearths = [
+      { name: 'engineering', count: 250 },
+      ...Array.from({ length: 12 }, (_, idx) => ({ name: `topic-${idx + 1}`, count: 20 - idx })),
+    ]
     const reactCalls: unknown[] = []
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
-      if (url.startsWith('/api/v1/board/hearths')) return jsonResponse({ hearths: [{ name: 'engineering', count: 250 }] })
+      if (url.startsWith('/api/v1/board/hearths')) return jsonResponse({ hearths: manyHearths })
       if (url.startsWith('/api/v1/board/sub-boards')) return jsonResponse({ sub_boards: [] })
       if (url === '/api/v1/board/reactions' && init?.method === 'POST') {
         reactCalls.push(JSON.parse(String(init.body)))
@@ -183,6 +187,11 @@ describe('workspaces/knowledge', () => {
     // DOM bound < 1,200 nodes even with 250 posts!
     const totalDomNodes = container.querySelectorAll('*').length
     expect(totalDomNodes).toBeLessThan(1200)
+
+    // No redundant in-page L1 sub-tab bar; hearth strip caps to top 6 + select dropdown
+    expect(container.querySelector('.kn-subbar')).toBeNull()
+    expect(container.querySelectorAll('.kn-hearth-strip .kn-chip')).toHaveLength(7) // '전체 Hearth' + top 6
+    expect(container.querySelector('select.kn-hearth-select')).not.toBeNull()
 
     // Zero-count emojis are collapsed behind [+☺] trigger (only 👍 is inline!)
     const reactionBar = container.querySelector('.kn-reactions')!

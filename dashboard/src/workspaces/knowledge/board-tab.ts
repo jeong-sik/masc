@@ -450,6 +450,32 @@ export function BoardTab(props: WorkspaceViewProps) {
     await loadBoard('manual')
   }
 
+  const TOP_HEARTH_CHIP_LIMIT = 6
+  const allHearthOptions = useMemo(() => {
+    const sortedHearths = [...bundle.hearths]
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+      .map((h) => ({ key: `h:${h.name}`, value: h.name, label: `#${h.name}`, count: h.count, title: h.name }))
+    const subBoardItems = bundle.subBoards.map((sb) => ({
+      key: `sb:${sb.id}`,
+      value: sb.slug,
+      label: `/${sb.slug}`,
+      count: sb.postCount,
+      title: sb.description || sb.name,
+    }))
+    return [...sortedHearths, ...subBoardItems]
+  }, [bundle.hearths, bundle.subBoards])
+
+  const visibleHearthChips = useMemo(() => {
+    const top = allHearthOptions.slice(0, TOP_HEARTH_CHIP_LIMIT)
+    if (selectedHearth && !top.some((item) => item.value === selectedHearth)) {
+      const activeOption = allHearthOptions.find((item) => item.value === selectedHearth)
+      if (activeOption) return [...top, activeOption]
+    }
+    return top
+  }, [allHearthOptions, selectedHearth])
+
+  const overflowHearthCount = Math.max(0, allHearthOptions.length - TOP_HEARTH_CHIP_LIMIT)
+
   const masterPane = html`
     <div class="kn-pane-col">
       <div class="kn-pane-head">
@@ -506,39 +532,45 @@ export function BoardTab(props: WorkspaceViewProps) {
           aria-label="게시판 검색"
         />
 
-        ${(bundle.hearths.length > 0 || bundle.subBoards.length > 0) && html`
-          <div class="kn-chips" role="group" aria-label="Hearth 및 Sub-board 필터">
-            <button
-              type="button"
-              class="kn-chip"
-              aria-pressed=${selectedHearth === ''}
-              onClick=${() => setSelectedHearth('')}
-            >
-              전체 Hearth
-            </button>
-            ${bundle.hearths.map((h) => html`
+        ${allHearthOptions.length > 0 && html`
+          <div class="kn-hearth-bar">
+            <div class="kn-hearth-strip" role="group" aria-label="Hearth 및 Sub-board 필터">
               <button
-                key=${`h:${h.name}`}
                 type="button"
                 class="kn-chip"
-                aria-pressed=${selectedHearth === h.name}
-                onClick=${() => setSelectedHearth(h.name)}
+                aria-pressed=${selectedHearth === ''}
+                onClick=${() => setSelectedHearth('')}
               >
-                #${h.name} <span class="kn-chip-count">${h.count}</span>
+                전체 Hearth
               </button>
-            `)}
-            ${bundle.subBoards.map((sb) => html`
-              <button
-                key=${`sb:${sb.id}`}
-                type="button"
-                class="kn-chip"
-                aria-pressed=${selectedHearth === sb.slug}
-                onClick=${() => setSelectedHearth(sb.slug)}
-                title=${sb.description || sb.name}
+              ${visibleHearthChips.map((item) => html`
+                <button
+                  key=${item.key}
+                  type="button"
+                  class="kn-chip"
+                  aria-pressed=${selectedHearth === item.value}
+                  onClick=${() => setSelectedHearth(item.value)}
+                  title=${item.title}
+                >
+                  ${item.label} <span class="kn-chip-count">${item.count}</span>
+                </button>
+              `)}
+            </div>
+            ${overflowHearthCount > 0 && html`
+              <select
+                class="kn-select kn-hearth-select"
+                aria-label="전체 Hearth 선택"
+                value=${selectedHearth}
+                onChange=${(e: Event) => setSelectedHearth((e.target as HTMLSelectElement).value)}
               >
-                /${sb.slug} <span class="kn-chip-count">${sb.postCount}</span>
-              </button>
-            `)}
+                <option value="">더보기 (+${overflowHearthCount})</option>
+                ${allHearthOptions.map((item) => html`
+                  <option key=${item.key} value=${item.value}>
+                    ${item.label} (${item.count})
+                  </option>
+                `)}
+              </select>
+            `}
           </div>
         `}
       </div>
@@ -592,7 +624,7 @@ export function BoardTab(props: WorkspaceViewProps) {
                 return html`
                   <button
                     type="button"
-                    class="kn-row-btn"
+                    class="kn-row-btn kn-board-row"
                     data-selected=${selectedPostId === p.id ? 'true' : 'false'}
                     onClick=${() => setSelectedPostId(p.id)}
                   >
@@ -631,7 +663,7 @@ export function BoardTab(props: WorkspaceViewProps) {
           <div class="kn-section-head">
             <div class="kn-min-w-0">
               <div class="kn-row-meta">
-                <${KeeperBadge} id=${activePost.author} portrait=${true} size="sm" />
+                <${KeeperBadge} id=${activePost.author} size="sm" />
                 ${activePost.hearth && html`<span class="kn-badge">#${activePost.hearth}</span>`}
                 ${activePost.pinned && html`<span class="kn-badge kn-badge--info">Pinned</span>`}
                 <span>${formatRelativeTime(activePost.createdAt)}</span>

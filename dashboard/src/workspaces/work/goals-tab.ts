@@ -598,7 +598,7 @@ export function GoalsTab(props: WorkspaceViewProps) {
         : html`
             <${VirtualList}
               items=${filteredGoals}
-              estimateSize=${76}
+              estimateSize=${96}
               height="100%"
               ariaLabel="목표 목록"
               getItemKey=${(g: GoalItem) => g.id}
@@ -606,20 +606,22 @@ export function GoalsTab(props: WorkspaceViewProps) {
               renderItem=${(g: GoalItem) => html`
                 <button
                   type="button"
-                  class="wk-row-btn"
+                  class="wk-row-btn wk-goal-row"
                   data-selected=${selectedGoal?.id === g.id ? 'true' : 'false'}
                   onClick=${() => setSelectedGoalId(g.id)}
                 >
                   <div class="wk-row-top">
-                    <span class="wk-row-title">${g.title}</span>
+                    <span class="wk-row-title" title=${g.title}>${g.title}</span>
                     <span class=${`wk-badge wk-badge--${goalPhaseTone(g.phase)}`}>
                       ${goalPhaseLabel(g.phase)}
                       ${g.resumePhase ? ` ↩ ${g.resumePhase}` : ''}
                     </span>
                   </div>
+                  ${g.measureText && html`
+                    <div class="wk-goal-measure" title=${g.measureText}>${g.measureText}</div>
+                  `}
                   <div class="wk-row-meta">
                     <span class="mono">P${g.priority}</span>
-                    <span>${g.measureText}</span>
                     <span class="tnum">Tasks: ${formatObserved(g.linkedTaskCount)}</span>
                     ${g.criterionVerdict.kind === 'viable' && html`<span class="wk-badge wk-badge--ok">기준 적합</span>`}
                     ${g.criterionVerdict.kind === 'needs_revision' && html`<span class="wk-badge wk-badge--err">기준 수정 필요</span>`}

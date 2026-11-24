@@ -612,9 +612,10 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
 
                     ${blocks.thinkingText && blockPrefs.thinking !== 'hidden' && html`
                       <details
+                        key=${`think:${blockPrefs.thinking}`}
                         class="kp-block-card kp-msg-thinking"
                         data-testid="chat-thinking-card"
-                        open=${blockPrefs.thinking === 'expanded'}
+                        open=${blockPrefs.thinking === 'expanded' ? true : undefined}
                       >
                         <summary class="kp-block-summary">
                           <span>추론 (Thinking)</span>
@@ -628,10 +629,10 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                       <div class="kp-block-stack">
                         ${blocks.toolBlocks.map((tb, idx) => html`
                           <details
-                            key=${`${tb.id ?? tb.name}-${idx}`}
+                            key=${`${tb.id ?? tb.name}-${idx}:${blockPrefs.tools}`}
                             class="kp-block-card kp-block-card--tool"
                             data-testid="chat-tool-card"
-                            open=${blockPrefs.tools === 'full'}
+                            open=${blockPrefs.tools === 'full' ? true : undefined}
                           >
                             <summary class="kp-block-summary">
                               <span class="kp-pill" data-tone=${tb.status === 'error' ? 'bad' : 'info'}>도구 · ${tb.name}</span>

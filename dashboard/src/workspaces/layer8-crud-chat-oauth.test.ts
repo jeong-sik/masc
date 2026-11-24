@@ -10,7 +10,11 @@ import {
   resetAuthStateForTests,
   resetObserverStateForTests,
   resourceCache,
+  startKeeperGithubDeviceFlow,
+  startKeeperOAuthPopupFlow,
+  streamSetupAccountLogin,
   stripAnsi,
+  type ActiveKeeperOAuthFlow,
 } from '../core'
 import {
   buildLaneUnifiedDiff,
@@ -260,6 +264,98 @@ describe('Layer 8 — Visual Lane CRUD, Chat 3-Block Toggles & Zero-Manual Web O
     ])
   })
 
+  it('(A-2) Quote-aware TOML scanner handles # and ] inside strings/comments and preview fails closed on validation.issues', async () => {
+    const trickyToml = `[runtime]
+default = "coding"
+
+[runtime.lanes.coding] # keep ] comment [safe]
+candidates = [
+  "provider#alpha.model-1", # inline comment with ] bracket
+  'provider.model]beta',
+]
+
+[runtime.lanes.other]
+candidates = ["safe.model"]
+`
+    const parsed = parseLanesFromToml(trickyToml)
+    expect(parsed).toEqual([
+      { kind: 'failover', id: 'coding', candidates: ['provider#alpha.model-1', 'provider.model]beta'] },
+      { kind: 'failover', id: 'other', candidates: ['safe.model'] },
+    ])
+
+    const updated = upsertLaneInToml(trickyToml, {
+      kind: 'failover',
+      id: 'coding',
+      candidates: ['provider.model]beta', 'provider#alpha.model-1'],
+    })
+    expect(updated.ok).toBe(true)
+    if (updated.ok) {
+      expect(parseLanesFromToml(updated.value)).toEqual([
+        { kind: 'failover', id: 'coding', candidates: ['provider.model]beta', 'provider#alpha.model-1'] },
+        { kind: 'failover', id: 'other', candidates: ['safe.model'] },
+      ])
+    }
+
+    // Fail-closed preview when can_save is false (or omitted) and validation.issues is present
+    const shaRev = 'c'.repeat(64)
+    let rawSaveCalls = 0
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/api/v1/runtime/resolved') {
+        return jsonResponse({ default_route: 'coding', lanes: [], runtimes: [], assignments: [] })
+      }
+      if (url.startsWith('/api/v1/dashboard/runtime-probe')) {
+        return jsonResponse({ refresh_state: 'fresh', cache_hit: true, probe: { providers: [] } })
+      }
+      if (url === '/api/v1/runtime/config/raw' && (!init?.method || init.method === 'GET')) {
+        return jsonResponse({ ok: true, source_revision: shaRev, path: '/ws/runtime.toml', source_text: SAMPLE_RUNTIME_TOML })
+      }
+      if (url === '/api/v1/runtime/config/raw/preview' && init?.method === 'POST') {
+        return jsonResponse({
+          ok: true,
+          can_save: false,
+          runtime_validation: null,
+          validation: {
+            issues: [{ severity: 'error', key: 'runtime.lanes.coding', detail: 'unknown runtime id' }],
+          },
+        })
+      }
+      if (url === '/api/v1/runtime/config/raw' && init?.method === 'POST') {
+        rawSaveCalls += 1
+        return jsonResponse({ ok: true })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(
+      html`<${RuntimeWorkspace} subroute="lanes" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+      container,
+    )
+    await flushUi(50)
+
+    const editBtn = container.querySelector('[data-lane-row="failover:coding"] button') as HTMLButtonElement
+    editBtn.click()
+    await flushUi(20)
+
+    const previewBtn = [...container.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes('Diff 미리보기'),
+    ) as HTMLButtonElement
+    previewBtn.click()
+    await flushUi(40)
+
+    const diffBox = container.querySelector('[data-testid="lane-diff-preview"]')!
+    expect(diffBox.querySelector('[data-testid="lane-validation-issues"]')!.textContent).toContain(
+      '[error] runtime.lanes.coding: unknown runtime id',
+    )
+    const applyBtn = [...diffBox.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes('변경 적용 (CAS Save)'),
+    ) as HTMLButtonElement
+    expect(applyBtn.disabled).toBe(true)
+    applyBtn.click()
+    await flushUi(20)
+    expect(rawSaveCalls).toBe(0)
+  })
+
   it('(B) Chat 3-block toggles (Alt+T Thinking, Tools summary/full/hidden, Memory & Autonomous hidden/shown) render structured collapsible cards', async () => {
     const rawToolMsg: ChatTranscriptEntry = {
       id: 'm-tool',
@@ -325,6 +421,15 @@ describe('Layer 8 — Visual Lane CRUD, Chat 3-Block Toggles & Zero-Manual Web O
     // Toolbar shows hidden internal count (2)
     expect(container.querySelector('[data-testid="chat-toggle-internal"]')!.textContent).toContain('(2)')
 
+    // Manually opening a collapsed <details> card persists across unrelated re-renders (never snapped shut)
+    thinkingCard.open = true
+    const btwToggleBtn = [...container.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes('/btw 사이드 질의'),
+    ) as HTMLButtonElement
+    btwToggleBtn.click()
+    await flushUi(20)
+    expect((container.querySelector('[data-testid="chat-thinking-card"]') as HTMLDetailsElement).open).toBe(true)
+
     // Alt+T cycles Thinking: collapsed -> expanded -> hidden
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 't', altKey: true, bubbles: true }))
     await flushUi(20)
@@ -351,7 +456,7 @@ describe('Layer 8 — Visual Lane CRUD, Chat 3-Block Toggles & Zero-Manual Web O
     expect(container.querySelector('[data-testid="chat-autonomous-card"]')!.textContent).toContain('Patrolled open PRs')
   })
 
-  it('(C-1) Provider CLI OAuth reads SSE stream, auto-opens extracted URL, surfaces device code + /input prompt, and auto-verifies on complete', async () => {
+  it('(C-1) Provider CLI OAuth reads SSE stream, auto-opens URL, surfaces /input, skips /verify in single-user mode, and auto-verifies in multi-account mode', async () => {
     expect(stripAnsi('\x1b[32mhttps://auth.openai.com/device\x1b[0m')).toBe('https://auth.openai.com/device')
     expect(extractOAuthUrl('Visit \x1b[4mhttps://auth.openai.com/authorize?state=123\x1b[0m to continue.')).toBe(
       'https://auth.openai.com/authorize?state=123',
@@ -367,7 +472,7 @@ describe('Layer 8 — Visual Lane CRUD, Chat 3-Block Toggles & Zero-Manual Web O
     const inputBodies: unknown[] = []
     const verifyBodies: unknown[] = []
     let releaseStream!: () => void
-    const streamGate = new Promise<void>((r) => { releaseStream = r })
+    let streamGate = new Promise<void>((r) => { releaseStream = r })
 
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
@@ -379,6 +484,11 @@ describe('Layer 8 — Visual Lane CRUD, Chat 3-Block Toggles & Zero-Manual Web O
       if (url === '/api/v1/setup/inventory') {
         return jsonResponse({
           integrations: [{ id: 'codex_subscription', display_name: 'Codex Subscription', enabled: true, credential_kind: 'login' }],
+        })
+      }
+      if (url === '/api/v1/auth/provider-accounts') {
+        return jsonResponse({
+          provider_accounts: [{ provider_account_id: 'acct-ref-77', integration_id: 'codex_subscription', display_name: 'Codex Personal' }],
         })
       }
       if (url === '/api/v1/runtime/config/raw') {
@@ -414,11 +524,14 @@ describe('Layer 8 — Visual Lane CRUD, Chat 3-Block Toggles & Zero-Manual Web O
       return jsonResponse({})
     }) as typeof fetch
 
+    // 1) Single-user mode: NO "검증" button & NO /api/v1/setup/accounts/verify 404 on complete!
     render(
       html`<${RuntimeWorkspace} subroute="quotas" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
       container,
     )
     await flushUi(50)
+
+    expect([...container.querySelectorAll('button')].some((b) => b.textContent?.trim() === '검증')).toBe(false)
 
     const cliOAuthBtn = [...container.querySelectorAll('button')].find((b) =>
       b.textContent?.trim() === 'CLI OAuth',
@@ -440,15 +553,63 @@ describe('Layer 8 — Visual Lane CRUD, Chat 3-Block Toggles & Zero-Manual Web O
     await flushUi(60)
 
     expect(inputBodies).toEqual([{ kind: 'text', text: 'paste-code-42' }])
+    expect(verifyBodies).toEqual([])
+    expect([...container.querySelectorAll('button')].some((b) => b.textContent?.trim() === '계정 검증')).toBe(false)
+
+    // 2) Multi-account mode: auto-verifies via POST /api/v1/setup/accounts/verify on complete
+    render(null, container)
+    resourceCache.clearAll()
+    streamGate = Promise.resolve()
+    authSession.value = {
+      kind: 'multi_account_signed_in',
+      mode: 'multi_account',
+      accountId: 'u1',
+      email: 'op@masc.dev',
+      displayName: 'Operator',
+      role: 'admin',
+      csrfToken: 'csrf-123',
+      authMethods: { google: true, github: true, dev_token: false },
+      workspaceId: 'ws-default',
+    }
+    render(
+      html`<${RuntimeWorkspace} subroute="quotas" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+      container,
+    )
+    await flushUi(50)
+
+    const reAuthBtn = [...container.querySelectorAll('button')].find((b) =>
+      b.textContent?.trim() === 'Re-auth',
+    ) as HTMLButtonElement
+    expect(reAuthBtn).toBeDefined()
+    reAuthBtn.click()
+    await flushUi(60)
     expect(verifyBodies).toEqual([{ provider_account_id: 'acct-ref-77', model: 'gpt-5-codex' }])
+
+    // 3) Premature EOF on setup login SSE invokes onError instead of silently stopping
+    const eofErrors: string[] = []
+    const eofResult = await streamSetupAccountLogin({
+      integrationId: 'codex_subscription',
+      fetchImpl: (async () => sseResponse([
+        { event: 'started', data: { login_id: 'login-cut', integration_id: 'codex_subscription', status: 'running' } },
+        { event: 'output', data: { stream: 'stdout', text: 'Waiting…\n' } },
+      ])) as unknown as typeof fetch,
+      callbacks: {
+        onError: (msg) => eofErrors.push(msg),
+      },
+    })
+    expect(eofResult.completed).toBe(false)
+    expect(eofResult.error).toContain('완료 확인 없이 종료')
+    expect(eofErrors).toHaveLength(1)
   })
 
-  it('(C-2 & C-3) Keeper OAuth uses real Keeper selector, synchronous popup + postMessage/poll auto-refresh, GitHub device SSE, oauth/client drawer, and Account return_to', async () => {
+  it('(C-2 & C-3) Keeper OAuth loads keepers via /gate/keepers & shell groups fallback, strict postMessage, GitHub complete+attach, Config callback URL, and Account return_to', async () => {
     const popupMock = { closed: false, close: vi.fn(), location: { href: '' } }
     vi.spyOn(window, 'open').mockImplementation(() => popupMock as unknown as Window)
 
     const clientBodies: unknown[] = []
+    const oauthLoginBodies: unknown[] = []
     let attachedSlack = false
+    let attachedGithub = false
     let githubStreamCalled = false
 
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -460,7 +621,7 @@ describe('Layer 8 — Visual Lane CRUD, Chat 3-Block Toggles & Zero-Manual Web O
         })
       }
       if (url === '/api/v1/dashboard/tools') return jsonResponse({ tools: [] })
-      if (url === '/api/v1/dashboard/shell') {
+      if (url === '/api/v1/gate/keepers') {
         return jsonResponse({ keepers: [{ name: 'sangsu' }, { name: 'code-reviewer-sister' }] })
       }
       if (url.startsWith('/api/v1/keepers/oauth/attached-tools')) {
@@ -469,11 +630,22 @@ describe('Layer 8 — Visual Lane CRUD, Chat 3-Block Toggles & Zero-Manual Web O
           callback: { url: 'http://127.0.0.1:8935/oauth/callback' },
           providers: [
             { provider: 'slack', provider_label: 'Slack', attached: attachedSlack, enabled: true, tools: attachedSlack ? ['slack_post'] : [] },
-            { provider: 'github', provider_label: 'GitHub', attached: false },
+            { provider: 'github', provider_label: 'GitHub', attached: attachedGithub, enabled: true, tools: attachedGithub ? ['gh_pr_view'] : [] },
           ],
         })
       }
       if (url === '/api/v1/keepers/sangsu/oauth-login' && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as { provider?: string }
+        oauthLoginBodies.push(body)
+        if (body.provider === 'github') {
+          attachedGithub = true
+          return jsonResponse({
+            keeper: 'sangsu',
+            provider: 'github',
+            attached: true,
+            message: 'GitHub MCP 도구 1개 연결 완료',
+          })
+        }
         return jsonResponse({
           keeper: 'sangsu',
           provider: 'slack',
@@ -486,6 +658,7 @@ describe('Layer 8 — Visual Lane CRUD, Chat 3-Block Toggles & Zero-Manual Web O
         githubStreamCalled = true
         return sseResponse([
           { event: 'output', data: { stream: 'stdout', text: 'Open https://github.com/login/device and enter code GHAB-5678\n' } },
+          { event: 'complete', data: { observation: { authenticated: true } } },
         ])
       }
       if (url === '/api/v1/keepers/oauth/client' && init?.method === 'POST') {
@@ -507,7 +680,7 @@ describe('Layer 8 — Visual Lane CRUD, Chat 3-Block Toggles & Zero-Manual Web O
     oauthTab.click()
     await flushUi(50)
 
-    // Real keeper selector populated with 'sangsu' (NEVER hardcoded 'default'!)
+    // Real keeper selector populated via /api/v1/gate/keepers with 'sangsu' (NEVER hardcoded 'default'!)
     const keeperSelect = container.querySelector('select[aria-label="OAuth 대상 Keeper"]') as HTMLSelectElement
     expect(keeperSelect).not.toBeNull()
     expect(keeperSelect.value).toBe('sangsu')
@@ -528,7 +701,7 @@ describe('Layer 8 — Visual Lane CRUD, Chat 3-Block Toggles & Zero-Manual Web O
     await flushUi(40)
     expect(clientBodies).toEqual([{ provider: 'slack', client_id: 'my-slack-client-id' }])
 
-    // Click Slack OAuth Connect -> popup navigated synchronously + postMessage settles & auto-refreshes!
+    // Click Slack OAuth Connect -> popup navigated synchronously; mismatched/missing postMessage ignored; ok:true settles!
     const connectButtons = [...container.querySelectorAll('button')].filter((b) =>
       b.textContent?.trim() === 'OAuth 연결',
     ) as HTMLButtonElement[]
@@ -536,29 +709,47 @@ describe('Layer 8 — Visual Lane CRUD, Chat 3-Block Toggles & Zero-Manual Web O
     await flushUi(40)
     expect(popupMock.location.href).toBe('https://slack.com/oauth/v2/authorize?state=st-1')
 
+    // Ignored: missing keeper/provider
+    window.dispatchEvent(new MessageEvent('message', {
+      origin: window.location.origin,
+      data: { type: 'masc:oauth-complete', ok: true },
+    }))
+    await flushUi(20)
+    expect(popupMock.close).not.toHaveBeenCalled()
+
+    // Settled on exact keeper + provider + ok: true
     attachedSlack = true
     window.dispatchEvent(new MessageEvent('message', {
       origin: window.location.origin,
-      data: { type: 'masc:oauth-complete', keeper: 'sangsu', provider: 'slack' },
+      data: { type: 'masc:oauth-complete', ok: true, keeper: 'sangsu', provider: 'slack' },
     }))
     await flushUi(50)
     expect(popupMock.close).toHaveBeenCalled()
     expect(container.textContent).toContain('연결됨 · 도구 1개')
 
-    // Click GitHub OAuth Connect -> streams /github-login SSE device flow!
+    // Click GitHub OAuth Connect -> streams /github-login SSE + waits for event:complete + chains /oauth-login {provider:'github'}!
     const ghConnectBtn = [...container.querySelectorAll('button')].find((b) =>
       b.textContent?.trim() === 'OAuth 연결',
     ) as HTMLButtonElement
     ghConnectBtn.click()
-    await flushUi(50)
+    await flushUi(60)
     expect(githubStreamCalled).toBe(true)
+    expect(oauthLoginBodies).toContainEqual({ provider: 'github' })
     expect(container.querySelector('[data-testid="tools-oauth-device-code"]')!.textContent).toBe('GHAB-5678')
 
-    // KeeperConfigTab also exposes guided OAuth App drawer + Disconnect
+    // KeeperConfigTab also exposes guided OAuth App drawer WITH copyable Callback URL
     render(null, container)
     render(html`<${KeeperConfigTab} keeperName="sangsu" onMutated=${vi.fn()} />`, container)
     await flushUi(40)
     expect(container.textContent).toContain('Slack')
+    const cfgAppBtn = [...container.querySelectorAll('button')].find((b) =>
+      b.textContent?.trim() === '앱 설정',
+    ) as HTMLButtonElement
+    cfgAppBtn.click()
+    await flushUi(20)
+    expect(container.querySelector('[data-testid="keeper-oauth-callback-url"]')!.textContent).toContain(
+      'http://127.0.0.1:8935/oauth/callback',
+    )
 
     // Flow 3: AccountWorkspace sign-in link preserves ?return_to=%2Fdashboard%23account
     authSession.value = {
@@ -574,5 +765,100 @@ describe('Layer 8 — Visual Lane CRUD, Chat 3-Block Toggles & Zero-Manual Web O
     await flushUi(20)
     const signInLink = container.querySelector('[data-testid="multi-account-signin-link"]') as HTMLAnchorElement
     expect(signInLink.getAttribute('href')).toBe('/?return_to=%2Fdashboard%23account')
+  })
+
+  it('(C-4) Keeper OAuth edge cases: shell groups[] fallback, postMessage ok:false rejection, and GitHub SSE EOF without complete fails cleanly', async () => {
+    const popupMock = { closed: false, close: vi.fn(), location: { href: '' } }
+    vi.spyOn(window, 'open').mockImplementation(() => popupMock as unknown as Window)
+
+    // 1) /api/v1/dashboard/shell groups[].keepers fallback when /api/v1/gate/keepers returns empty
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/tool-metrics/series')) {
+        return jsonResponse({ buckets: [], total: { call_count: 0, failure_count: 0, failure_rate: 0, p95_ms: null } })
+      }
+      if (url === '/api/v1/dashboard/tools') return jsonResponse({ tools: [] })
+      if (url === '/api/v1/gate/keepers') return jsonResponse({ keepers: [] })
+      if (url === '/api/v1/dashboard/shell') {
+        return jsonResponse({
+          groups: [
+            { group: 'core', keeper_count: 2, keepers: ['e-masc-the-leader', 'sangsu'] },
+            { group: 'review', keeper_count: 1, keepers: ['sangsu', 'code-reviewer-sister'] },
+          ],
+        })
+      }
+      if (url.startsWith('/api/v1/keepers/oauth/attached-tools')) {
+        return jsonResponse({ keeper: 'e-masc-the-leader', providers: [] })
+      }
+      if (url === '/api/v1/keepers/sangsu/oauth-login') {
+        return jsonResponse({
+          authorize_url: 'https://slack.com/oauth/v2/authorize?state=st-2',
+          attempt_id: 'att-2',
+        })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(
+      html`<${RuntimeWorkspace} subroute="tools" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+      container,
+    )
+    await flushUi(40)
+    const oauthTab = [...container.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes('Keeper OAuth'),
+    ) as HTMLButtonElement
+    oauthTab.click()
+    await flushUi(50)
+    const keeperSelect = container.querySelector('select[aria-label="OAuth 대상 Keeper"]') as HTMLSelectElement
+    expect(keeperSelect.value).toBe('e-masc-the-leader')
+    expect([...keeperSelect.options].map((o) => o.value)).toEqual([
+      'e-masc-the-leader',
+      'sangsu',
+      'code-reviewer-sister',
+    ])
+
+    // 2) postMessage ok: false fails the popup flow immediately
+    const popupStates: ActiveKeeperOAuthFlow[] = []
+    let popupSettled: boolean | null = null
+    const popupHandle = startKeeperOAuthPopupFlow({
+      keeper: 'sangsu',
+      provider: 'slack',
+      providerLabel: 'Slack',
+      pollIntervalMs: 60_000,
+      onUpdate: (st) => popupStates.push(st),
+      onSettled: (ok) => { popupSettled = ok },
+    })
+    await flushUi(30)
+    window.dispatchEvent(new MessageEvent('message', {
+      origin: window.location.origin,
+      data: { type: 'masc:oauth-complete', ok: false, keeper: 'sangsu', provider: 'slack', error: 'access_denied' },
+    }))
+    await flushUi(20)
+    popupHandle.cancel()
+    expect(popupSettled).toBe(false)
+    expect(popupStates[popupStates.length - 1]!.phase).toBe('failed')
+    expect(popupStates[popupStates.length - 1]!.message).toContain('access_denied')
+
+    // 3) GitHub SSE EOF without event: complete fails cleanly and does NOT chain /oauth-login
+    let attachCalled = false
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('/oauth-login')) attachCalled = true
+      return jsonResponse({})
+    }) as typeof fetch
+    const ghStates: ActiveKeeperOAuthFlow[] = []
+    let ghSettled: boolean | null = null
+    startKeeperGithubDeviceFlow({
+      keeper: 'sangsu',
+      fetchImpl: (async () => sseResponse([
+        { event: 'output', data: { stream: 'stdout', text: 'Open https://github.com/login/device\n' } },
+      ])) as unknown as typeof fetch,
+      onUpdate: (st) => ghStates.push(st),
+      onSettled: (ok) => { ghSettled = ok },
+    })
+    await flushUi(50)
+    expect(ghSettled).toBe(false)
+    expect(attachCalled).toBe(false)
+    expect(ghStates[ghStates.length - 1]!.phase).toBe('failed')
+    expect(ghStates[ghStates.length - 1]!.message).toContain('완료 확인 없이 종료')
   })
 })

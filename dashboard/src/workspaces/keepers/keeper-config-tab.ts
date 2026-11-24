@@ -26,7 +26,7 @@ import {
   type ConfigSchemaData,
 } from '../../api/config-schema'
 import {
-  fetchKeeperAttachedProvidersApi,
+  fetchKeeperOAuthAttachedToolsApi,
   mutateKeeperSecretApi,
   refreshKeeperIdentityToolsApi,
   setKeeperIdentitySwitchApi,
@@ -78,6 +78,7 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
   const [secretValue, setSecretValue] = useState('')
   const [secretStatus, setSecretStatus] = useState<string | null>(null)
   const [providers, setProviders] = useState<readonly KeeperAttachedProvider[]>([])
+  const [oauthCallbackUrl, setOauthCallbackUrl] = useState<string | null>(null)
   const [oauthStatus, setOauthStatus] = useState<string | null>(null)
   const [activeOAuthFlow, setActiveOAuthFlow] = useState<ActiveKeeperOAuthFlow | null>(null)
   const [clientDrawer, setClientDrawer] = useState<{
@@ -110,8 +111,11 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
   }, [keeperName])
 
   const loadProviders = useCallback(async () => {
-    const provRes = await fetchKeeperAttachedProvidersApi(keeperName)
-    if (provRes.ok) setProviders(provRes.value)
+    const provRes = await fetchKeeperOAuthAttachedToolsApi(keeperName)
+    if (provRes.ok) {
+      setProviders(provRes.value.providers)
+      setOauthCallbackUrl(provRes.value.callbackUrl)
+    }
   }, [keeperName])
 
   useEffect(() => {
@@ -461,6 +465,24 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
                 <strong>내 OAuth 앱 등록 · ${clientDrawer.providerLabel}</strong>
                 <button type="button" class="btn-ghost" onClick=${() => setClientDrawer(null)}>닫기</button>
               </div>
+              ${oauthCallbackUrl && html`
+                <div class="kp-pill-row" data-testid="keeper-oauth-callback-url" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-2)' }}>
+                  <span>Callback URL:</span>
+                  <code class="mono" style=${{ overflowWrap: 'anywhere' }}>${oauthCallbackUrl}</code>
+                  <button
+                    type="button"
+                    class="btn-ghost"
+                    onClick=${() => {
+                      if (typeof navigator !== 'undefined' && navigator.clipboard) {
+                        void navigator.clipboard.writeText(oauthCallbackUrl)
+                        setOauthStatus('Callback URL 복사 완료')
+                      }
+                    }}
+                  >
+                    복사
+                  </button>
+                </div>
+              `}
               <input
                 type="text"
                 class="kp-input"

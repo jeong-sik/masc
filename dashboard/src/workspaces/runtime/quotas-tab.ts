@@ -417,7 +417,8 @@ export function QuotasTab(props: WorkspaceViewProps) {
           setActionBanner({ kind: 'ok', text: `${integrationId} CLI OAuth 로그인이 완료되었습니다.` })
           loadAll('manual')
           const ref = receipt.accountRef
-          if (ref && resolveModelForIntegration(integrationId)) {
+          // POST /api/v1/setup/accounts/verify is only mounted in multi_account mode (server_login_http.mli:79)
+          if (accountMode === 'multi_account' && ref && resolveModelForIntegration(integrationId)) {
             void handleVerifyAccount(integrationId, ref)
           }
         },
@@ -499,6 +500,13 @@ export function QuotasTab(props: WorkspaceViewProps) {
   }
 
   const handleVerifyAccount = async (providerId: string, providerAccountId?: string) => {
+    if (accountMode !== 'multi_account') {
+      setActionBanner({
+        kind: 'err',
+        text: '계정 검증(/api/v1/setup/accounts/verify)은 multi_account 모드에서만 지원됩니다.',
+      })
+      return
+    }
     const acctId = (providerAccountId ?? '').trim()
     const model = resolveModelForIntegration(providerId)
     if (!acctId || !model) {
@@ -996,7 +1004,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
                 영수증 상태 새로고침
               </button>
             `}
-            ${loginReceipt.accountRef && html`
+            ${accountMode === 'multi_account' && loginReceipt.accountRef && html`
               <button
                 type="button"
                 class="btn-primary"
@@ -1093,9 +1101,6 @@ export function QuotasTab(props: WorkspaceViewProps) {
                         </button>
                         <button type="button" class="btn-ghost" onClick=${() => void handleStartOAuthLogin(integ.id)}>
                           CLI OAuth
-                        </button>
-                        <button type="button" class="btn-ghost" onClick=${() => void handleVerifyAccount(integ.id)}>
-                          검증
                         </button>
                         <button type="button" class="btn-ghost" onClick=${() => props.onNavigate(`/settings?key=providers.${encodeURIComponent(integ.id)}`)}>
                           Open Config Key

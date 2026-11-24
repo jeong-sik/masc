@@ -58,8 +58,48 @@ interface TableSpan {
   readonly endLine: number // exclusive
 }
 
+/**
+ * Strips a trailing `# ...` TOML comment while respecting single- and double-quoted strings.
+ */
+function stripTomlComment(line: string): string {
+  let quote: 'none' | 'double' | 'single' = 'none'
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]!
+    if (quote === 'none') {
+      if (ch === '#') return line.slice(0, i)
+      if (ch === '"') quote = 'double'
+      else if (ch === "'") quote = 'single'
+    } else if (quote === 'double') {
+      if (ch === '\\') i += 1
+      else if (ch === '"') quote = 'none'
+    } else if (ch === "'") {
+      quote = 'none'
+    }
+  }
+  return line
+}
+
+function unquoteBasicString(raw: string): string {
+  let out = ''
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i]!
+    if (ch === '\\' && i + 1 < raw.length) {
+      const next = raw[i + 1]!
+      i += 1
+      if (next === '"' || next === '\\') out += next
+      else if (next === 'n') out += '\n'
+      else if (next === 't') out += '\t'
+      else if (next === 'r') out += '\r'
+      else out += next
+    } else {
+      out += ch
+    }
+  }
+  return out
+}
+
 function parseTableHeader(line: string): { readonly kind: EditableLaneKind; readonly id: string } | null {
-  const stripped = line.replace(/#.*$/, '').trim()
+  const stripped = stripTomlComment(line).trim()
   if (!stripped.startsWith('[') || stripped.startsWith('[[') || !stripped.endsWith(']')) {
     return null
   }
@@ -82,40 +122,167 @@ function parseTableHeader(line: string): { readonly kind: EditableLaneKind; read
 }
 
 function isAnyTableHeader(line: string): boolean {
-  const stripped = line.replace(/#.*$/, '').trim()
+  const stripped = stripTomlComment(line).trim()
   return stripped.startsWith('[') && stripped.endsWith(']')
+}
+
+/**
+ * Quote-aware bracket delta for a single line outside strings and `#` comments.
+ */
+function scanLineBracketDelta(line: string): number {
+  let quote: 'none' | 'double' | 'single' = 'none'
+  let delta = 0
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]!
+    if (quote === 'none') {
+      if (ch === '#') break
+      if (ch === '"') quote = 'double'
+      else if (ch === "'") quote = 'single'
+      else if (ch === '[') delta += 1
+      else if (ch === ']') delta -= 1
+    } else if (quote === 'double') {
+      if (ch === '\\') i += 1
+      else if (ch === '"') quote = 'none'
+    } else if (ch === "'") {
+      quote = 'none'
+    }
+  }
+  return delta
 }
 
 function findLaneTableSpans(lines: readonly string[]): readonly TableSpan[] {
   const spans: TableSpan[] = []
-  for (let i = 0; i < lines.length; i++) {
+  let i = 0
+  while (i < lines.length) {
     const parsed = parseTableHeader(lines[i]!)
-    if (!parsed) continue
+    if (!parsed) {
+      i += 1
+      continue
+    }
     let end = i + 1
-    while (end < lines.length && !isAnyTableHeader(lines[end]!)) {
+    let openArrayDepth = 0
+    while (end < lines.length) {
+      const curLine = lines[end]!
+      if (openArrayDepth === 0 && isAnyTableHeader(curLine)) break
+      openArrayDepth = Math.max(0, openArrayDepth + scanLineBracketDelta(curLine))
       end += 1
     }
     spans.push({ kind: parsed.kind, id: parsed.id, startLine: i, endLine: end })
+    i = end
   }
   return spans
 }
 
-function extractStringArray(blockText: string, keyName: string): readonly string[] {
-  const re = new RegExp(`^\\s*${keyName}\\s*=\\s*\\[([\\s\\S]*?)\\]`, 'm')
-  const match = re.exec(blockText)
-  if (!match) return []
-  const body = match[1]!.replace(/#[^\n]*/g, '')
-  const out: string[] = []
-  const strRe = /"((?:\\.|[^"\\])*)"|'([^']*)'/g
-  let m: RegExpExecArray | null
-  while ((m = strRe.exec(body)) !== null) {
-    const value = m[1] !== undefined
-      ? m[1].replace(/\\"/g, '"').replace(/\\\\/g, '\\')
-      : (m[2] ?? '')
-    const trimmed = value.trim()
-    if (trimmed) out.push(trimmed)
+interface ScannedTomlArray {
+  readonly startLine: number
+  readonly endLine: number
+  readonly items: readonly string[]
+}
+
+/**
+ * Quote-aware scanner for a `key = [...]` string array inside table body lines.
+ * Safely handles `#` and `]` inside both double-quoted (`"..."`) and single-quoted
+ * (`'...'`) TOML strings as well as comments containing brackets or quotes.
+ */
+function scanTomlStringArray(bodyLines: readonly string[], keyName: string): ScannedTomlArray | null {
+  const keyRe = new RegExp(`^\\s*${keyName}\\s*=`)
+  let openArrayDepth = 0
+
+  for (let i = 0; i < bodyLines.length; i++) {
+    const line = bodyLines[i]!
+    if (openArrayDepth > 0) {
+      openArrayDepth = Math.max(0, openArrayDepth + scanLineBracketDelta(line))
+      continue
+    }
+    const match = keyRe.exec(line)
+    if (!match) {
+      openArrayDepth = Math.max(0, openArrayDepth + scanLineBracketDelta(line))
+      continue
+    }
+
+    const eqIdx = match[0].length
+    let depth = 0
+    let started = false
+    const items: string[] = []
+
+    for (let j = i; j < bodyLines.length; j++) {
+      const cur = bodyLines[j]!
+      let col = j === i ? eqIdx : 0
+      while (col < cur.length) {
+        const ch = cur[col]!
+        if (ch === '#') break
+        if (!started) {
+          if (ch === '[') {
+            started = true
+            depth = 1
+          }
+          col += 1
+          continue
+        }
+        if (ch === '[') {
+          depth += 1
+          col += 1
+          continue
+        }
+        if (ch === ']') {
+          depth -= 1
+          col += 1
+          if (depth === 0) {
+            return { startLine: i, endLine: j, items }
+          }
+          continue
+        }
+        if (ch === '"') {
+          let raw = ''
+          col += 1
+          while (col < cur.length) {
+            const c = cur[col]!
+            if (c === '\\' && col + 1 < cur.length) {
+              raw += c + cur[col + 1]!
+              col += 2
+              continue
+            }
+            if (c === '"') {
+              col += 1
+              break
+            }
+            raw += c
+            col += 1
+          }
+          if (depth === 1) {
+            const trimmed = unquoteBasicString(raw).trim()
+            if (trimmed) items.push(trimmed)
+          }
+          continue
+        }
+        if (ch === "'") {
+          let raw = ''
+          col += 1
+          while (col < cur.length && cur[col] !== "'") {
+            raw += cur[col]!
+            col += 1
+          }
+          if (col < cur.length && cur[col] === "'") col += 1
+          if (depth === 1) {
+            const trimmed = raw.trim()
+            if (trimmed) items.push(trimmed)
+          }
+          continue
+        }
+        col += 1
+      }
+      if (!started) {
+        // Key was not assigned an array; stop scanning for this match
+        return { startLine: i, endLine: i, items: [] }
+      }
+    }
+    return { startLine: i, endLine: bodyLines.length - 1, items }
   }
-  return out
+  return null
+}
+
+function extractStringArray(bodyLines: readonly string[], keyName: string): readonly string[] {
+  return scanTomlStringArray(bodyLines, keyName)?.items ?? []
 }
 
 function extractIntKey(blockText: string, keyName: string): number | undefined {
@@ -137,9 +304,10 @@ export function parseLanesFromToml(sourceText: string): readonly ParsedTomlLane[
   const lines = sourceText.split(/\r?\n/)
   const spans = findLaneTableSpans(lines)
   return spans.map((span) => {
-    const body = lines.slice(span.startLine + 1, span.endLine).join('\n')
+    const bodyLines = lines.slice(span.startLine + 1, span.endLine)
+    const body = bodyLines.join('\n')
     const keyName = span.kind === 'failover' ? 'candidates' : 'slots'
-    const candidates = extractStringArray(body, keyName)
+    const candidates = extractStringArray(bodyLines, keyName)
     if (span.kind === 'exact_output') {
       return {
         kind: 'exact_output',
@@ -199,22 +367,9 @@ function replaceOrInsertArrayKey(
   values: readonly string[],
 ): string[] {
   const rendered = renderTomlStringArray(keyName, values)
-  const keyRe = new RegExp(`^\\s*${keyName}\\s*=`)
-  for (let i = 0; i < bodyLines.length; i++) {
-    if (!keyRe.test(bodyLines[i]!)) continue
-    let end = i
-    // Consume multi-line [...] array if opening bracket isn't closed on line i
-    let depth = 0
-    for (let j = i; j < bodyLines.length; j++) {
-      const stripped = bodyLines[j]!.replace(/#.*$/, '')
-      for (const ch of stripped) {
-        if (ch === '[') depth += 1
-        else if (ch === ']') depth -= 1
-      }
-      end = j
-      if (depth <= 0 && stripped.includes(']')) break
-    }
-    return [...bodyLines.slice(0, i), ...rendered, ...bodyLines.slice(end + 1)]
+  const scanned = scanTomlStringArray(bodyLines, keyName)
+  if (scanned) {
+    return [...bodyLines.slice(0, scanned.startLine), ...rendered, ...bodyLines.slice(scanned.endLine + 1)]
   }
   return [...rendered, ...bodyLines]
 }

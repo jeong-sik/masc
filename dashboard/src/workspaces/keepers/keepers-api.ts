@@ -1785,24 +1785,48 @@ export function fetchKeeperSandboxApi(keeper: string): Promise<Result<KeeperSand
 
 // ── Schema Config CAS & Secrets / OAuth Identity (#36) ───────────────────
 
+export interface KeeperAttachedToolsSnapshot {
+  readonly providers: readonly KeeperAttachedProvider[]
+  readonly callbackUrl: string | null
+}
+
+function decodeKeeperAttachedProviders(raw: unknown): readonly KeeperAttachedProvider[] {
+  const list = isRecord(raw) && Array.isArray(raw.providers) ? raw.providers : []
+  return list.filter(isRecord).map((p) => ({
+    provider: asStr(p.provider) ?? '',
+    provider_label: asStr(p.provider_label) ?? asStr(p.provider) ?? '',
+    attached: p.attached === true,
+    enabled: typeof p.enabled === 'boolean' ? p.enabled : undefined,
+    tools: Array.isArray(p.tools)
+      ? p.tools.filter((x): x is string => typeof x === 'string')
+      : undefined,
+    problem: asStr(p.problem) ?? undefined,
+    switch_problem: asStr(p.switch_problem) ?? undefined,
+  })).filter((p) => p.provider.length > 0)
+}
+
+export function fetchKeeperOAuthAttachedToolsApi(
+  keeper: string,
+): Promise<Result<KeeperAttachedToolsSnapshot, ApiError>> {
+  return apiGet<KeeperAttachedToolsSnapshot>(
+    `/api/v1/keepers/oauth/attached-tools?keeper=${encodeURIComponent(keeper)}`,
+    {
+      decode: (raw) => {
+        const callback = isRecord(raw) && isRecord(raw.callback) ? raw.callback : null
+        return {
+          providers: decodeKeeperAttachedProviders(raw),
+          callbackUrl: callback ? asStr(callback.url) : null,
+        }
+      },
+    },
+  )
+}
+
 export function fetchKeeperAttachedProvidersApi(keeper: string): Promise<Result<readonly KeeperAttachedProvider[], ApiError>> {
   return apiGet<readonly KeeperAttachedProvider[]>(
     `/api/v1/keepers/oauth/attached-tools?keeper=${encodeURIComponent(keeper)}`,
     {
-      decode: (raw) => {
-        const list = isRecord(raw) && Array.isArray(raw.providers) ? raw.providers : []
-        return list.filter(isRecord).map((p) => ({
-          provider: asStr(p.provider) ?? '',
-          provider_label: asStr(p.provider_label) ?? asStr(p.provider) ?? '',
-          attached: p.attached === true,
-          enabled: typeof p.enabled === 'boolean' ? p.enabled : undefined,
-          tools: Array.isArray(p.tools)
-            ? p.tools.filter((x): x is string => typeof x === 'string')
-            : undefined,
-          problem: asStr(p.problem) ?? undefined,
-          switch_problem: asStr(p.switch_problem) ?? undefined,
-        })).filter((p) => p.provider.length > 0)
-      },
+      decode: decodeKeeperAttachedProviders,
     },
   )
 }

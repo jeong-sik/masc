@@ -350,6 +350,13 @@ export async function streamSetupAccountLogin(params: {
       reader.releaseLock()
     }
 
+    if (!terminal && !controller.signal.aborted && isEpochCurrent(startEpoch)) {
+      const msg = '로그인 스트림이 완료 확인 없이 종료되었습니다. 영수증 상태를 새로고침하거나 다시 시도하세요.'
+      lastError = msg
+      params.callbacks.onError?.(msg, null)
+      return { terminal: false, completed: false, loginId: currentLoginId, error: msg }
+    }
+
     return { terminal, completed, loginId: currentLoginId, error: lastError }
   } catch (e: unknown) {
     if (controller.signal.aborted) {

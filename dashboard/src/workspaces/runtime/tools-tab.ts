@@ -229,15 +229,49 @@ export function ToolsTab(_props: WorkspaceViewProps) {
         { ttlMs: 15_000, topics: ['clients'], reason: 'mount' },
       )
     } else if (section === 'oauth') {
+      let cancelled = false
       void (async () => {
         let targetKeeper = oauthKeeper.trim()
         if (keeperOptions.length === 0) {
-          const shellRes = await apiGet<{ readonly keepers?: readonly { readonly name?: string }[] }>('/api/v1/dashboard/shell')
-          const names = shellRes.ok && Array.isArray(shellRes.value.keepers)
-            ? shellRes.value.keepers
-                .map((k) => (typeof k.name === 'string' ? k.name.trim() : ''))
-                .filter(Boolean)
-            : []
+          const seen = new Set<string>()
+          const names: string[] = []
+          const addName = (raw: unknown) => {
+            if (typeof raw !== 'string') return
+            const t = raw.trim()
+            if (t && !seen.has(t)) {
+              seen.add(t)
+              names.push(t)
+            }
+          }
+
+          // Primary canonical roster endpoint: GET /api/v1/gate/keepers
+          const gateRes = await apiGet<{ readonly keepers?: readonly { readonly name?: string }[] }>('/api/v1/gate/keepers')
+          if (cancelled) return
+          if (gateRes.ok && Array.isArray(gateRes.value.keepers)) {
+            for (const k of gateRes.value.keepers) addName(k?.name)
+          }
+
+          // Fallback: flatten groups[].keepers (and optional top-level keepers) from /api/v1/dashboard/shell
+          if (names.length === 0) {
+            const shellRes = await apiGet<{
+              readonly groups?: readonly { readonly keepers?: readonly string[] }[]
+              readonly keepers?: readonly { readonly name?: string }[]
+            }>('/api/v1/dashboard/shell')
+            if (cancelled) return
+            if (shellRes.ok) {
+              if (Array.isArray(shellRes.value.groups)) {
+                for (const g of shellRes.value.groups) {
+                  if (Array.isArray(g?.keepers)) {
+                    for (const k of g.keepers) addName(k)
+                  }
+                }
+              }
+              if (Array.isArray(shellRes.value.keepers)) {
+                for (const k of shellRes.value.keepers) addName(k?.name)
+              }
+            }
+          }
+
           if (names.length > 0) {
             setKeeperOptions(names)
             if (!targetKeeper || !names.includes(targetKeeper)) {
@@ -246,11 +280,15 @@ export function ToolsTab(_props: WorkspaceViewProps) {
             }
           }
         }
-        if (targetKeeper) {
+        if (!cancelled && targetKeeper) {
           void loadKeeperOAuth(targetKeeper)
         }
       })()
+      return () => {
+        cancelled = true
+      }
     }
+    return undefined
   }, [section])
 
   const loadKeeperOAuth = async (keeperName: string) => {

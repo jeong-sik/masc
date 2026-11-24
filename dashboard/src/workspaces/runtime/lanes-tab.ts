@@ -136,6 +136,9 @@ export function LanesTab(props: WorkspaceViewProps) {
     readonly diff: string
     readonly canSave: boolean
     readonly runtimeValidation: string | null
+    readonly validationIssues: readonly string[]
+    readonly expectedSourceRevision: string
+    readonly expectedSourcePath: string
     readonly label: string
   } | null>(null)
   const [laneCasConflict, setLaneCasConflict] = useState<string | null>(null)
@@ -377,7 +380,8 @@ export function LanesTab(props: WorkspaceViewProps) {
   }, [resolvedData, probeData])
 
   const previewProposedLaneToml = async (nextToml: string, label: string) => {
-    if (!rawConfig) {
+    const snapshot = rawConfig
+    if (!snapshot) {
       setBanner({ kind: 'err', text: 'runtime.toml 원본을 불러오지 못해 미리보기를 실행할 수 없습니다.' })
       return
     }
@@ -388,18 +392,44 @@ export function LanesTab(props: WorkspaceViewProps) {
       readonly ok?: boolean
       readonly can_save?: boolean
       readonly runtime_validation?: string | null
+      readonly validation?: {
+        readonly issues?: readonly {
+          readonly severity?: string
+          readonly key?: string
+          readonly detail?: string
+          readonly message?: string
+        }[]
+      }
     }>('POST', '/api/v1/runtime/config/raw/preview', { source_text: nextToml })
     setBusy(null)
     if (!res.ok) {
       setBanner({ kind: 'err', text: `레인 검증 미리보기 실패: ${res.error.message}` })
       return
     }
-    const diff = buildLaneUnifiedDiff(rawConfig.sourceText, nextToml, rawConfig.sourcePath)
+    const rawIssues = Array.isArray(res.value.validation?.issues) ? res.value.validation.issues : []
+    const validationIssues = rawIssues
+      .map((issue) => {
+        const sev = typeof issue.severity === 'string' && issue.severity.trim() ? `[${issue.severity.trim()}] ` : ''
+        const key = typeof issue.key === 'string' && issue.key.trim() ? `${issue.key.trim()}: ` : ''
+        const detail = typeof issue.detail === 'string' && issue.detail.trim()
+          ? issue.detail.trim()
+          : typeof issue.message === 'string' && issue.message.trim()
+            ? issue.message.trim()
+            : ''
+        return `${sev}${key}${detail}`.trim()
+      })
+      .filter(Boolean)
+    const diff = buildLaneUnifiedDiff(snapshot.sourceText, nextToml, snapshot.sourcePath)
     setLanePreview({
       nextToml,
       diff,
-      canSave: res.value.can_save !== false,
-      runtimeValidation: typeof res.value.runtime_validation === 'string' ? res.value.runtime_validation : null,
+      canSave: res.value.can_save === true,
+      runtimeValidation: typeof res.value.runtime_validation === 'string' && res.value.runtime_validation.trim()
+        ? res.value.runtime_validation.trim()
+        : null,
+      validationIssues,
+      expectedSourceRevision: snapshot.sourceRevision,
+      expectedSourcePath: snapshot.sourcePath,
       label,
     })
   }
@@ -445,14 +475,14 @@ export function LanesTab(props: WorkspaceViewProps) {
   }
 
   const handleApplyLanePreview = async () => {
-    if (!lanePreview || !rawConfig) return
+    if (!lanePreview || !lanePreview.canSave) return
     setBusy('lane-apply')
     setBanner(null)
     setLaneCasConflict(null)
     const res = await apiMutate<unknown>('POST', '/api/v1/runtime/config/raw', {
       source_text: lanePreview.nextToml,
-      expected_source_revision: rawConfig.sourceRevision,
-      expected_source_path: rawConfig.sourcePath,
+      expected_source_revision: lanePreview.expectedSourceRevision,
+      expected_source_path: lanePreview.expectedSourcePath,
     })
     setBusy(null)
     if (!res.ok) {
@@ -1104,6 +1134,16 @@ export function LanesTab(props: WorkspaceViewProps) {
                 </div>
                 ${lanePreview.runtimeValidation && html`
                   <div class="ap-error" role="alert">런타임 검증 오류: ${lanePreview.runtimeValidation}</div>
+                `}
+                ${lanePreview.validationIssues.length > 0 && html`
+                  <div class="ap-error" role="alert" data-testid="lane-validation-issues">
+                    ${lanePreview.validationIssues.map((issue, idx) => html`
+                      <div key=${idx}>스키마 검증 오류: ${issue}</div>
+                    `)}
+                  </div>
+                `}
+                ${!lanePreview.canSave && !lanePreview.runtimeValidation && lanePreview.validationIssues.length === 0 && html`
+                  <div class="ap-error" role="alert">서버 미리보기 검증(can_save=false)을 통과하지 못해 저장할 수 없습니다.</div>
                 `}
                 <pre
                   class="mono"

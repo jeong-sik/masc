@@ -183,8 +183,19 @@ export function startKeeperOAuthPopupFlow(params: {
     if (disposed || typeof window === 'undefined') return
     if (ev.origin !== window.location.origin) return
     if (!isRecord(ev.data) || ev.data.type !== 'masc:oauth-complete') return
-    if (ev.data.keeper && ev.data.keeper !== params.keeper) return
-    if (ev.data.provider && ev.data.provider !== params.provider) return
+    if (typeof ev.data.keeper !== 'string' || ev.data.keeper !== params.keeper) return
+    if (typeof ev.data.provider !== 'string' || ev.data.provider !== params.provider) return
+    if (ev.data.ok === false) {
+      const errMsg = typeof ev.data.error === 'string' && ev.data.error.trim()
+        ? ev.data.error.trim()
+        : `${params.providerLabel} OAuth 연결이 거부되었거나 실패했습니다.`
+      settle(false, {
+        phase: 'failed',
+        message: errMsg,
+      })
+      return
+    }
+    if (ev.data.ok !== true) return
     settle(true, {
       phase: 'completed',
       message: `${params.providerLabel} OAuth 연결 완료 — 도구 목록을 자동 갱신합니다.`,
@@ -361,6 +372,7 @@ export function startKeeperGithubDeviceFlow(params: {
     }
 
     let streamError: string | null = null
+    let sawComplete = false
     try {
       const res = await fetchImpl(
         resolveWorkspaceUrl(`/api/v1/keepers/${encodeURIComponent(params.keeper)}/github-login`),
@@ -402,6 +414,11 @@ export function startKeeperGithubDeviceFlow(params: {
           parsed = JSON.parse(dataLines.join('\n'))
         } catch {
           parsed = null
+        }
+
+        if (evName === 'complete') {
+          sawComplete = true
+          return
         }
 
         if (evName === 'error') {
@@ -461,10 +478,42 @@ export function startKeeperGithubDeviceFlow(params: {
       if (disposed || !isEpochCurrent(startEpoch)) return
       if (streamError) {
         params.onSettled(false)
-      } else {
-        emit({ phase: 'completed', message: 'GitHub CLI 인증 완료 — 연결 도구를 자동 갱신합니다.' })
-        params.onSettled(true)
+        return
       }
+      if (!sawComplete) {
+        emit({
+          phase: 'failed',
+          message: 'GitHub 로그인 스트림이 완료 확인 없이 종료되었습니다. 다시 시도하세요.',
+        })
+        params.onSettled(false)
+        return
+      }
+
+      // Server requires POST /api/v1/keepers/:k/oauth-login { provider: 'github' }
+      // after CLI device auth completes to attach GitHub MCP tools (server_keeper_oauth.ml:235-252).
+      emit({
+        phase: 'completing',
+        message: 'GitHub CLI 인증 완료 — GitHub MCP 도구를 연결하는 중…',
+      })
+      const attachRes = await apiMutate<Record<string, unknown>>(
+        'POST',
+        `/api/v1/keepers/${encodeURIComponent(params.keeper)}/oauth-login`,
+        { provider: 'github' },
+      )
+      if (disposed || !isEpochCurrent(startEpoch)) return
+      if (!attachRes.ok) {
+        emit({
+          phase: 'failed',
+          message: `GitHub CLI 인증은 완료되었으나 MCP 도구 연결 실패: ${attachRes.error.message}`,
+        })
+        params.onSettled(false)
+        return
+      }
+      const attachMsg = typeof attachRes.value.message === 'string' && attachRes.value.message.trim()
+        ? attachRes.value.message.trim()
+        : 'GitHub CLI 인증 및 MCP 도구 연결 완료 — 도구 목록을 자동 갱신합니다.'
+      emit({ phase: 'completed', message: attachMsg })
+      params.onSettled(true)
     } catch (e: unknown) {
       if (disposed || controller.signal.aborted) return
       const msg = e instanceof Error ? e.message : String(e)

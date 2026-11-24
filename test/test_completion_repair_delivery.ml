@@ -662,6 +662,33 @@ let test_approval_enqueue_before_ack_is_idempotent () =
     check_done config;
     reconcile config ~delivered:0 ~retained:0)
 
+let test_prior_immediate_approval_replays_without_an_extra_wake () =
+  with_workspace (fun config ->
+    persist_producer config;
+    let verification_id = "vrf-before-carry" in
+    let outcome : Keeper_event_queue.task_outcome =
+      { to_task_id = task_id; to_verification_id = verification_id;
+        to_producer = producer; to_authority = system }
+    in
+    let committed : Keeper_event_queue.stimulus =
+      { post_id = Keeper_event_queue.task_outcome_post_id outcome;
+        urgency = Immediate; arrived_at = 1.; payload = Task_outcome outcome }
+    in
+    ok (Masc.Keeper_registry_event_queue.enqueue_durable_result
+          ~base_path:config.W.base_path producer committed);
+    (match Task_wake.wake_approved_producer ~config ~producer ~task_id ~verification_id ~authority:system with
+     | Queued_for_later _ -> ()
+     | _ -> Alcotest.fail "the same approved verification did not replay");
+    Alcotest.(check bool) "the original ACK source survives replay" true (queue config = [committed]);
+    Alcotest.(check bool) "old priority does not schedule a tick" true
+      (Masc.Keeper_stimulus_wake_policy.effective_urgency committed = Low);
+    Alcotest.(check bool) "old priority does not force a follow-up" true
+      (Masc.Keeper_arrived_stimuli.inbound_mode_of_stimulus committed = Coalesce);
+    match Task_wake.wake_approved_producer ~config ~producer ~task_id ~verification_id ~authority:human with
+    | Durable_queue_failed _ -> ()
+    | _ -> Alcotest.fail "a different verdict authority was accepted as a replay")
+;;
+
 let test_unroutable_approval_stays_completed () =
   with_workspace (fun config ->
     let verification_id = "vrf-approved-no-keeper" in
@@ -1002,6 +1029,8 @@ let () =
           (test_daemon_delivery ~approve:true ~start_before_commit:true)
       ; Alcotest.test_case "approval survives projection failure and restart" `Quick test_approval_projection_failure_recovers_after_restart
       ; Alcotest.test_case "approval queue failure retains delivery" `Quick test_approval_queue_failure_retains_obligation
+      ; Alcotest.test_case "earlier immediate approval replays without another wake" `Quick
+          test_prior_immediate_approval_replays_without_an_extra_wake
       ; Alcotest.test_case "approval enqueue before ack deduplicates" `Quick test_approval_enqueue_before_ack_is_idempotent
       ; Alcotest.test_case "unroutable approval remains Done" `Quick test_unroutable_approval_stays_completed
       ; Alcotest.test_case "approval codec fails closed" `Quick test_approval_codec_fails_closed

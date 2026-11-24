@@ -1829,10 +1829,10 @@ let keeper_cycle_decision
     List.fold_left (fun (wakes, carried) (event : pending_board_event) ->
       match event.event_kind with
       | Task_outcome outcome ->
-        (match Keeper_keepalive_signal.task_verdict_wake_policy
-                 ~input_kind:Keeper_keepalive_signal.Task_outcome_approved outcome.to_authority with
-         | Keeper_keepalive_signal.Carry -> wakes, true
-         | Keeper_keepalive_signal.Now | Keeper_keepalive_signal.At_tick -> true, carried)
+        (match Keeper_stimulus_wake_policy.task_verdict_wake_policy
+                 ~input_kind:Keeper_stimulus_wake_policy.Task_outcome_approved outcome.to_authority with
+         | Keeper_stimulus_wake_policy.Carry -> wakes, true
+         | Keeper_stimulus_wake_policy.Now | Keeper_stimulus_wake_policy.At_tick -> true, carried)
       | _ -> wakes, carried) (false, false) observation.pending_board_events
   in
   let add_observed_reason ~pending reason triggers =

@@ -18,7 +18,7 @@ let inbound_mode_rank = function
 let inbound_mode_of_stimulus (stimulus : Keeper_event_queue.stimulus)
   : inbound_queue_mode
   =
-  match stimulus.urgency, stimulus.payload with
+  match Keeper_stimulus_wake_policy.effective_urgency stimulus, stimulus.payload with
   | ( Keeper_event_queue.Immediate
     , ( Keeper_event_queue.Workspace_message _
       | Keeper_event_queue.Connector_attention _

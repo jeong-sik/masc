@@ -1000,7 +1000,7 @@ let pending_at_tick_stimulus_remains ~ctx ~keeper_name =
       keeper_name
       ~now:(Time_compat.now ())
       ~ready:(fun (stimulus : Keeper_event_queue.stimulus) ->
-        match stimulus.urgency with
+        match Keeper_stimulus_wake_policy.effective_urgency stimulus with
         | Keeper_event_queue.Immediate | Keeper_event_queue.Normal -> true
         | Keeper_event_queue.Low -> false)
   with

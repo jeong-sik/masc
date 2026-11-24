@@ -2009,6 +2009,31 @@ let execute_post t ~epoch req =
     post_and_decode ~timeout_sec t ~path ~body ~decode
   in
   let post_ack t ~path ~body = post_ack ~timeout_sec t ~path ~body in
+  let post_mcp_ack tool_name =
+    let ep = Atomic.get t.endpoint in
+    let body_str = Yojson.Safe.to_string body in
+    let extra_headers =
+      [
+        ("Accept", "application/json, text/event-stream");
+        ("Mcp-Protocol-Version", Wire_work.mcp_protocol_version);
+        ("Mcp-Method", "tools/call");
+        ("Mcp-Name", tool_name);
+        ("X-Masc-Force-Json", "true");
+      ]
+    in
+    match
+      Http_client.post_raw ~io:t.io ~clock:t.clock ~timeout_sec ~extra_headers
+        ~content_type:"application/json" ~body:body_str ep ~path
+    with
+    | Error err -> Error (msg_error_of_http err)
+    | Ok raw -> (
+        match Wire_work.decode_mcp_tool_call_ack raw with
+        | Ok () -> Ok ()
+        | Error detail ->
+            Error
+              (Msg.Http_error
+                 { status = 400; body = detail; api_error = None }))
+  in
   fork_safe t (fun () ->
       let reply_opt =
         match req with
@@ -2400,31 +2425,7 @@ let execute_post t ~epoch req =
             in
             Some (Msg.Reply_github_token_save { keeper; result })
         | Cmd.Post_task_create _ ->
-            let result =
-              let ep = Atomic.get t.endpoint in
-              let body_str = Yojson.Safe.to_string body in
-              let extra_headers =
-                [
-                  ("Accept", "application/json, text/event-stream");
-                  ("Mcp-Protocol-Version", Wire_work.mcp_protocol_version);
-                  ("Mcp-Method", "tools/call");
-                  ("Mcp-Name", "masc_add_task");
-                  ("X-Masc-Force-Json", "true");
-                ]
-              in
-              match
-                Http_client.post_raw ~io:t.io ~clock:t.clock ~extra_headers
-                  ~content_type:"application/json" ~body:body_str ep ~path
-              with
-              | Error err -> Error (msg_error_of_http err)
-              | Ok raw -> (
-                  match Wire_work.decode_mcp_tool_call_ack raw with
-                  | Ok () -> Ok ()
-                  | Error detail ->
-                      Error
-                        (Msg.Http_error
-                           { status = 400; body = detail; api_error = None }))
-            in
+            let result = post_mcp_ack "masc_add_task" in
             Some
               (Msg.Reply_action_ack
                  {
@@ -2434,31 +2435,7 @@ let execute_post t ~epoch req =
                    result;
                  })
         | Cmd.Post_task_transition { task_id; _ } ->
-            let result =
-              let ep = Atomic.get t.endpoint in
-              let body_str = Yojson.Safe.to_string body in
-              let extra_headers =
-                [
-                  ("Accept", "application/json, text/event-stream");
-                  ("Mcp-Protocol-Version", Wire_work.mcp_protocol_version);
-                  ("Mcp-Method", "tools/call");
-                  ("Mcp-Name", "masc_transition");
-                  ("X-Masc-Force-Json", "true");
-                ]
-              in
-              match
-                Http_client.post_raw ~io:t.io ~clock:t.clock ~extra_headers
-                  ~content_type:"application/json" ~body:body_str ep ~path
-              with
-              | Error err -> Error (msg_error_of_http err)
-              | Ok raw -> (
-                  match Wire_work.decode_mcp_tool_call_ack raw with
-                  | Ok () -> Ok ()
-                  | Error detail ->
-                      Error
-                        (Msg.Http_error
-                           { status = 400; body = detail; api_error = None }))
-            in
+            let result = post_mcp_ack "masc_transition" in
             Some
               (Msg.Reply_action_ack
                  {
@@ -2482,31 +2459,7 @@ let execute_post t ~epoch req =
                    result;
                  })
         | Cmd.Post_goal_upsert { id; _ } ->
-            let result =
-              let ep = Atomic.get t.endpoint in
-              let body_str = Yojson.Safe.to_string body in
-              let extra_headers =
-                [
-                  ("Accept", "application/json, text/event-stream");
-                  ("Mcp-Protocol-Version", Wire_work.mcp_protocol_version);
-                  ("Mcp-Method", "tools/call");
-                  ("Mcp-Name", "masc_goal_upsert");
-                  ("X-Masc-Force-Json", "true");
-                ]
-              in
-              match
-                Http_client.post_raw ~io:t.io ~clock:t.clock ~extra_headers
-                  ~content_type:"application/json" ~body:body_str ep ~path
-              with
-              | Error err -> Error (msg_error_of_http err)
-              | Ok raw -> (
-                  match Wire_work.decode_mcp_tool_call_ack raw with
-                  | Ok () -> Ok ()
-                  | Error detail ->
-                      Error
-                        (Msg.Http_error
-                           { status = 400; body = detail; api_error = None }))
-            in
+            let result = post_mcp_ack "masc_goal_upsert" in
             let label =
               match id with
               | Some _ -> Say.make ~ko:"목표 수정 완료" ~en:"Goal updated"

@@ -671,14 +671,22 @@ def _exempt_numbers() -> set[int]:
     return out
 
 
-def missing(base: str, head: str, directory: pathlib.Path, strict: bool = False) -> int:
+def missing(
+    base: str,
+    head: str,
+    directory: pathlib.Path,
+    strict: bool = False,
+    changelog: pathlib.Path | None = None,
+) -> int:
     """Report PRs merged since `base` whose history carries no fragment.
 
-    A PR not yet folded still carries its own changelog.d/<N>.md on main, so a
-    missing number means either a squash that merged without a fragment or a
-    fragment already folded away by an earlier release. Scanning from the
-    last tag limits the second case to entries written before that tag's
-    CHANGELOG section existed, which #39079 and #39095 were still backfilling.
+    A PR is accounted for when any of these holds:
+    - its `changelog.d/<N>.md` file still sits on disk awaiting the next fold,
+    - its number already owns an entry in `CHANGELOG.md` (terminal `OWNER_CITE`
+      — a passing mention inside another entry does not count), or
+    - its merge commit carried a valid `### Exempt` fragment (which an
+      intervening fold deletes without writing to `CHANGELOG.md`).
+
     A file whose name is not <PR number>.md proves nothing about any PR, so it
     is ignored here; `check` is the mode that refuses it, and bump-version.sh
     runs check before this.
@@ -688,10 +696,23 @@ def missing(base: str, head: str, directory: pathlib.Path, strict: bool = False)
         match = FRAGMENT_NAME.match(path.name)
         if match is not None:
             have.add(int(match.group(1)))
+    if changelog is not None:
+        if not changelog.is_file():
+            raise FragmentError(f"changelog not found: {changelog}")
+        owners = entry_owners(changelog)
+    else:
+        sibling = directory.parent / CHANGELOG
+        changelog_path = sibling if sibling.is_file() else pathlib.Path(CHANGELOG)
+        owners = entry_owners(changelog_path) if changelog_path.is_file() else {}
     unfragmented: list[tuple[int, str]] = []
-    for number, subject in merged_squashes(base, head):
-        if number not in have:
-            unfragmented.append((number, subject))
+    for number, sha, subject in merged_squashes_with_sha(base, head):
+        if (
+            number in have
+            or number in owners
+            or _commit_has_exempt_fragment(sha, number)
+        ):
+            continue
+        unfragmented.append((number, subject))
     if not unfragmented:
         print(f"every pull request merged since {base} has a changelog fragment")
         return 0
@@ -880,6 +901,8 @@ def main() -> int:
     miss.add_argument("--strict", action="store_true",
                         help="exit 3 when any non-exempt merged pull request lacks a fragment")
     miss.add_argument("--dir", default=FRAGMENT_DIR)
+    miss.add_argument("--changelog", default=None,
+                        help="CHANGELOG.md path for already-folded owner check")
     guard = sub.add_parser("pr-guard")
     guard.add_argument("--base", required=True)
     guard.add_argument("--head", default="HEAD")
@@ -908,8 +931,17 @@ def main() -> int:
             return folded(pathlib.Path(args.dir), pathlib.Path(args.changelog),
                           delete=args.delete, strict=args.strict)
         if args.mode == "missing":
-            return missing(base=args.base, head=args.head, strict=args.strict,
-                           directory=pathlib.Path(args.dir))
+            return missing(
+                base=args.base,
+                head=args.head,
+                strict=args.strict,
+                directory=pathlib.Path(args.dir),
+                changelog=(
+                    pathlib.Path(args.changelog)
+                    if args.changelog is not None
+                    else None
+                ),
+            )
         if args.mode == "release-coverage":
             return release_coverage(
                 version=args.version,

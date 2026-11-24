@@ -194,7 +194,7 @@ export function resolveWorkspaceUrl(path: string): string {
   if (!rawBase) return path
 
   const normalizedPath = path.startsWith('/') ? path : `/${path}`
-  if (rawBase.startsWith('/')) {
+  if (rawBase.startsWith('/') && !rawBase.startsWith('//')) {
     const cleanPrefix = rawBase.replace(/\/+$/, '')
     return `${cleanPrefix}${normalizedPath}`
   }

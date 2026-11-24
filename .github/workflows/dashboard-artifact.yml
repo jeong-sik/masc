@@ -60,6 +60,10 @@ jobs:
           src/core/resource-cache.test.ts
           src/core/view-stream-slot.test.ts
           src/components/primitives/primitives.test.ts
+          src/routes/router.test.ts
+          src/shell/shell.test.ts
+          src/workspaces/account/account.test.ts
+          src/app.test.ts
 
       - name: Verify production bundle contract
         working-directory: dashboard

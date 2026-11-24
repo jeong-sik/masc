@@ -837,6 +837,8 @@ let test_cmd_executor_dispatch_and_cancellation () =
                  | Msg.Memory_diagram_rendered _
                  | Msg.Github_login_chunk _
                  | Msg.Github_login_done _
+                 | Msg.Setup_login_output _
+                 | Msg.Setup_login_input_ready _
                  | Msg.Stream_gap _ ->
                      ())
              | Ui_bus.Snapshot _ | Ui_bus.Stream_gap _ -> ())
@@ -987,6 +989,8 @@ let test_remote_editor_escape_hatch_blocked () =
                 | Msg.Memory_diagram_rendered _
                 | Msg.Github_login_chunk _
                 | Msg.Github_login_done _
+                | Msg.Setup_login_output _
+                | Msg.Setup_login_input_ready _
                 | Msg.Voice_event _
                 | Msg.Stream_gap _ ->
                     None)
@@ -1325,6 +1329,8 @@ let test_bus_key_hash_and_stream_frames () =
             | Msg.Memory_diagram_rendered _
             | Msg.Github_login_chunk _
             | Msg.Github_login_done _
+            | Msg.Setup_login_output _
+            | Msg.Setup_login_input_ready _
             | Msg.Voice_event _
             | Msg.Stream_gap _ ) ) ->
             None)
@@ -1437,6 +1443,8 @@ let test_bus_key_hash_and_stream_frames () =
   | Msg.Memory_diagram_rendered _
   | Msg.Github_login_chunk _
   | Msg.Github_login_done _
+  | Msg.Setup_login_output _
+  | Msg.Setup_login_input_ready _
   | Msg.Voice_event _
   | Msg.Stream_gap _ ->
       Alcotest.fail "expected Sse_models_metrics_snapshot");
@@ -1519,6 +1527,90 @@ let test_setup_login_stream_error_and_single_delivery () =
   (match empty_ok with
   | [ Error (Msg.Decode_error _) ] -> ()
   | _ -> Alcotest.fail "expected single Decode_error on empty login stream")
+
+let test_setup_login_stream_output_auth_url_input_ready_and_oauth_tick_gate () =
+  let sse_event name json = "event: " ^ name ^ "\ndata: " ^ json ^ "\n\n" in
+  let started_json =
+    {|{"login_id":"login-042","integration_id":"codex_cli","status":"running","account":"keyring_host"}|}
+  in
+  let complete_json =
+    {|{"login_id":"login-042","integration_id":"codex_cli","status":"complete","account":"keyring_host","authentication":"login_completed"}|}
+  in
+  let receipts = ref [] in
+  let outputs = ref [] in
+  let inputs_ready = ref [] in
+  Cmd_executor.run_setup_login_stream
+    ~on_output:(fun ~text ~auth_url ~device_code ->
+      outputs := (text, auth_url, device_code) :: !outputs)
+    ~on_input_ready:(fun ~login_id ->
+      inputs_ready := login_id :: !inputs_ready)
+    ~publish:(fun res -> receipts := res :: !receipts)
+    ~stream:(fun ~on_chunk ->
+      on_chunk (sse_event "started" started_json);
+      on_chunk
+        (sse_event "output"
+           {|{"stream":"stdout","text":"\u001b[36mVisit https://auth.openai (split) HTTP-4000 2026-1124\u001b[0m"}|});
+      on_chunk
+        (sse_event "auth_url"
+           {|{"login_id":"login-042","url":"https://auth.example.com/authorize?state=abc"}|});
+      on_chunk
+        (sse_event "device_code"
+           {|{"login_id":"login-042","code":"ABCD-1234","verification_uri":"https://auth.example.com/verify"}|});
+      on_chunk (sse_event "screen" {|{"text":"Paste code below:"}|});
+      on_chunk (sse_event "input_ready" {|{"login_id":"login-042"}|});
+      on_chunk (sse_event "complete" complete_json);
+      Ok ());
+  let outputs = List.rev !outputs in
+  let inputs_ready = List.rev !inputs_ready in
+  let receipts = List.rev !receipts in
+  Alcotest.(check int) "started + complete emit 2 receipts" 2
+    (List.length receipts);
+  Alcotest.(check int) "4 output/auth_url/device_code/screen events delivered" 4
+    (List.length outputs);
+  (match outputs with
+  | [ (_, u1, c1); (_, u2, c2); (_, u3, c3); (t4, u4, c4) ] ->
+      Alcotest.(check (option string))
+        "raw output chunk does not race ?auth_hints=1 with half-URL scrape"
+        None u1;
+      Alcotest.(check (option string))
+        "raw output chunk does not scrape unguarded device code" None c1;
+      Alcotest.(check (option string)) "typed auth_url frame"
+        (Some "https://auth.example.com/authorize?state=abc") u2;
+      Alcotest.(check (option string)) "auth_url has no code" None c2;
+      Alcotest.(check (option string)) "typed device_code verification_uri"
+        (Some "https://auth.example.com/verify") u3;
+      Alcotest.(check (option string)) "typed device_code code"
+        (Some "ABCD-1234") c3;
+      Alcotest.(check string) "screen text forwarded" "Paste code below:" t4;
+      Alcotest.(check (option string)) "screen has no URL" None u4;
+      Alcotest.(check (option string)) "screen has no code" None c4
+  | _ -> Alcotest.fail "expected 4 output events");
+  Alcotest.(check (list (option string))) "input_ready carries login_id"
+    [ Some "login-042" ] inputs_ready;
+  (* App.should_emit_tick: idle stays 0 Hz; active OAuth poll deadline wakes on time *)
+  let t0 = 5_000_000_000L in
+  let due_idle, dl_idle =
+    App.should_emit_tick ~oauth_poll_deadline_ns:None ~now_ns:t0
+      ~last_voice_tick_ns:0L ~toast_expires_ns:None ~voice_recording:false
+  in
+  Alcotest.(check bool) "idle oauth deadline emits no tick" false due_idle;
+  Alcotest.(check (option int64)) "idle oauth deadline stays 0 Hz" None dl_idle;
+  let future_dl = Int64.add t0 2_000_000_000L in
+  let due_wait, dl_wait =
+    App.should_emit_tick ~oauth_poll_deadline_ns:(Some future_dl) ~now_ns:t0
+      ~last_voice_tick_ns:0L ~toast_expires_ns:None ~voice_recording:false
+  in
+  Alcotest.(check bool) "future oauth deadline does not emit immediately" false
+    due_wait;
+  Alcotest.(check (option int64)) "future oauth deadline scheduled"
+    (Some future_dl) dl_wait;
+  let due_now, dl_now =
+    App.should_emit_tick ~oauth_poll_deadline_ns:(Some t0) ~now_ns:t0
+      ~last_voice_tick_ns:0L ~toast_expires_ns:None ~voice_recording:false
+  in
+  Alcotest.(check bool) "elapsed oauth deadline emits tick immediately" true
+    due_now;
+  Alcotest.(check (option int64)) "elapsed oauth deadline consumed" None dl_now
 
 let test_app_ctrl_c_and_voice_tick_gate () =
   (* P1-3: Kitty CSI u Ctrl+C (\x1b[99;5u) is recognized as Ctrl+C. *)
@@ -2805,6 +2897,8 @@ let () =
             `Quick test_queue_drawer_walks_all_http_pages;
           Alcotest.test_case "setup login stream propagates non-terminal error & delivers terminal receipt once"
             `Quick test_setup_login_stream_error_and_single_delivery;
+          Alcotest.test_case "setup login stream output/auth_url/device_code/input_ready & OAuth tick gate"
+            `Quick test_setup_login_stream_output_auth_url_input_ready_and_oauth_tick_gate;
           Alcotest.test_case "chat stream reattach decision" `Quick
             test_chat_reattach_decision;
           Alcotest.test_case "github login stream catches non-cancel exceptions and emits done"

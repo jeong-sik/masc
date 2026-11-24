@@ -138,6 +138,7 @@ type inline_action_kind =
       instance_id : string;
       action_names : string list;
     }
+  | Setup_login_input_form of { login_id : string }
 
 type system_gate_kind =
   | Micro_viewport
@@ -597,6 +598,7 @@ let inline_action_tag = function
   | Addon_attach_form -> 24
   | Addon_detach_confirm _ -> 25
   | Addon_invoke_action _ -> 26
+  | Setup_login_input_form _ -> 27
 
 let equal_inline_action_kind a b =
   if not (Int.equal (inline_action_tag a) (inline_action_tag b)) then false
@@ -648,6 +650,8 @@ let equal_inline_action_kind a b =
     | Addon_invoke_action x, Addon_invoke_action y ->
         String.equal x.instance_id y.instance_id
         && List.equal String.equal x.action_names y.action_names
+    | Setup_login_input_form x, Setup_login_input_form y ->
+        String.equal x.login_id y.login_id
     | ( Btw_query
       | Gate_reject _
       | Verification_reject _
@@ -674,7 +678,8 @@ let equal_inline_action_kind a b =
       | Keeper_purge_confirm _
       | Addon_attach_form
       | Addon_detach_confirm _
-      | Addon_invoke_action _ ), _ ->
+      | Addon_invoke_action _
+      | Setup_login_input_form _ ), _ ->
         false
 
 let system_gate_index = function

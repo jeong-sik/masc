@@ -95,6 +95,10 @@ type t = {
   runtime_config_raw : Wire_runtime.runtime_config_raw_meta Observed.t;
   setup_inventory : Wire_runtime.setup_inventory Observed.t;
   setup_login_receipt : Wire_runtime.setup_login_receipt option;
+  setup_login_auth_url : string option;
+  setup_login_device_code : string option;
+  setup_login_input_ready : bool;
+  setup_login_output_lines : string list;
   runtime_probe : Wire_runtime.runtime_probe_snapshot Observed.t;
   exact_lane_runs : Wire_runtime.exact_lane_run list Observed.t;
   fusion_runs : Wire_runtime.fusion_run list Observed.t;
@@ -189,6 +193,15 @@ val apply_runtime_config_raw :
 val apply_setup_inventory :
   observed_at:Clock.Mono.t -> Wire_runtime.setup_inventory -> t -> t
 val apply_setup_login_receipt : Wire_runtime.setup_login_receipt -> t -> t
+val apply_setup_login_output :
+  text:string ->
+  auth_url:string option ->
+  device_code:string option ->
+  t ->
+  t
+val mark_setup_login_input_ready : bool -> t -> t
+val active_setup_login_id : t -> string option
+(** [Some login_id] when the latest setup login receipt is non-terminal. *)
 val apply_runtime_probe :
   observed_at:Clock.Mono.t -> Wire_runtime.runtime_probe_snapshot -> t -> t
 val apply_exact_lane_runs :

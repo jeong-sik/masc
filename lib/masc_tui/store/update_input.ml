@@ -2652,7 +2652,8 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                         | Nav.Keeper_purge_confirm _
                         | Nav.Addon_attach_form
                         | Nav.Addon_detach_confirm _
-                        | Nav.Addon_invoke_action _ )
+                        | Nav.Addon_invoke_action _
+                        | Nav.Setup_login_input_form _ )
                       , _ ) ->
                         true
                   in
@@ -2870,7 +2871,8 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                         | Nav.Board_delete_post _
                         | Nav.Keeper_purge_confirm _
                         | Nav.Addon_attach_form
-                        | Nav.Addon_detach_confirm _ )
+                        | Nav.Addon_detach_confirm _
+                        | Nav.Setup_login_input_form _ )
                       , (Some _ | None) ) ->
                         None
                   in
@@ -3798,7 +3800,8 @@ let apply_paste ~now:_ (m : Model.t) text =
                   | Nav.Keeper_purge_confirm _
                   | Nav.Addon_attach_form
                   | Nav.Addon_detach_confirm _
-                  | Nav.Addon_invoke_action _ )
+                  | Nav.Addon_invoke_action _
+                  | Nav.Setup_login_input_form _ )
                 , _ ) ->
                   true
             in

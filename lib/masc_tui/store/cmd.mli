@@ -250,6 +250,10 @@ type post_request =
       integration_id : string;
       account_ref : string option;
     }
+  | Post_setup_login_input of {
+      login_id : string;
+      input : Wire_runtime.setup_login_input;
+    }
   | Post_sandbox_probe of [ `All | `Keeper of string | `Ssh_pool of string ]
   | Post_config_patch of Wire_config.patch_request
   | Post_tui_preference of Wire_config.tui_preference_change

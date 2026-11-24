@@ -229,6 +229,7 @@ let timeout_sec_for_post : Cmd.post_request -> float = function
   | Cmd.Post_runtime_lane_update _
   | Cmd.Post_runtime_lane_delete _
   | Cmd.Post_setup_account_key _
+  | Cmd.Post_setup_login_input _
   | Cmd.Post_tui_preference _
   | Cmd.Post_keeper_turn_interrupt _
   | Cmd.Post_keeper_lifecycle _
@@ -1976,10 +1977,14 @@ let rec execute_get t ~epoch req =
 
 let is_terminal_setup_login_status status =
   match String.lowercase_ascii (String.trim status) with
-  | "complete" | "completed" | "failed" | "cancelled" | "interrupted" -> true
+  | "complete" | "completed" | "failed" | "canceled" | "cancelled"
+  | "interrupted" ->
+      true
   | _ -> false
 
 let run_setup_login_stream
+    ?(on_output = fun ~text:_ ~auth_url:_ ~device_code:_ -> ())
+    ?(on_input_ready = fun ~login_id:_ -> ())
     ~(publish :
        (Wire_runtime.setup_login_receipt, Msg.http_error) result -> unit)
     ~(stream : on_chunk:(string -> unit) -> (unit, Msg.http_error) result) :
@@ -1987,22 +1992,126 @@ let run_setup_login_stream
   let sse_decoder = Sse_wire.create_decoder () in
   let saw_receipt = ref false in
   let terminal_published = ref false in
+  let last_login_id = ref None in
+  let string_field fields key =
+    match List.assoc_opt key fields with
+    | Some (`String s) when not (String.equal (String.trim s) "") ->
+        Some (String.trim s)
+    | Some _ | None -> None
+  in
+  let first_string_field fields keys =
+    List.find_map (fun k -> string_field fields k) keys
+  in
+  let update_login_id fields =
+    match string_field fields "login_id" with
+    | Some id -> last_login_id := Some id
+    | None -> ()
+  in
   let on_chunk raw =
     let frames = Sse_wire.feed sse_decoder raw in
     List.iter
       (fun (frame : Sse_wire.frame) ->
-        match Yojson.Safe.from_string frame.data with
-        | json -> (
-            match Wire_runtime.decode_setup_login_receipt json with
-            | Ok receipt ->
-                saw_receipt := true;
-                if is_terminal_setup_login_status receipt.status then (
-                  if not !terminal_published then (
-                    terminal_published := true;
-                    publish (Ok receipt)))
-                else if not !terminal_published then publish (Ok receipt)
-            | Error _ -> ())
-        | exception Yojson.Json_error _ -> ())
+        let ev_name =
+          Option.map
+            (fun s -> String.lowercase_ascii (String.trim s))
+            frame.event
+        in
+        match ev_name with
+        | Some "input_ready" ->
+            (match Yojson.Safe.from_string frame.data with
+            | `Assoc fields -> update_login_id fields
+            | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _
+            | `List _ ->
+                ()
+            | exception Yojson.Json_error _ -> ());
+            on_input_ready ~login_id:!last_login_id
+        | Some "auth_url" -> (
+            match Yojson.Safe.from_string frame.data with
+            | `Assoc fields ->
+                update_login_id fields;
+                let text =
+                  Option.value (string_field fields "text") ~default:""
+                in
+                let auth_url =
+                  match first_string_field fields [ "url"; "auth_url" ] with
+                  | Some _ as u -> u
+                  | None -> Wire_runtime.extract_https_url text
+                in
+                if (not (String.equal text "")) || Option.is_some auth_url then
+                  on_output ~text ~auth_url ~device_code:None
+            | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _
+            | `List _ ->
+                ()
+            | exception Yojson.Json_error _ -> ())
+        | Some "device_code" -> (
+            match Yojson.Safe.from_string frame.data with
+            | `Assoc fields ->
+                update_login_id fields;
+                let text =
+                  Option.value (string_field fields "text") ~default:""
+                in
+                let device_code =
+                  match first_string_field fields [ "code"; "device_code" ] with
+                  | Some _ as c -> c
+                  | None -> Wire_runtime.extract_device_code text
+                in
+                let auth_url =
+                  match
+                    first_string_field fields
+                      [ "verification_uri"; "url"; "auth_url" ]
+                  with
+                  | Some _ as u -> u
+                  | None -> Wire_runtime.extract_https_url text
+                in
+                if
+                  (not (String.equal text ""))
+                  || Option.is_some auth_url
+                  || Option.is_some device_code
+                then on_output ~text ~auth_url ~device_code
+            | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _
+            | `List _ ->
+                ()
+            | exception Yojson.Json_error _ -> ())
+        | Some _ | None -> (
+            match Yojson.Safe.from_string frame.data with
+            | json -> (
+                match Wire_runtime.decode_setup_login_receipt json with
+                | Ok receipt ->
+                    saw_receipt := true;
+                    last_login_id := Some receipt.login_id;
+                    if is_terminal_setup_login_status receipt.status then (
+                      if not !terminal_published then (
+                        terminal_published := true;
+                        publish (Ok receipt)))
+                    else if not !terminal_published then publish (Ok receipt)
+                | Error _ -> (
+                    match json with
+                    | `Assoc fields -> (
+                        update_login_id fields;
+                        match
+                          ( ev_name
+                          , first_string_field fields [ "error"; "message" ] )
+                        with
+                        | Some "error", Some err_msg ->
+                            if not !terminal_published then (
+                              terminal_published := true;
+                              publish
+                                (Error (Msg.Transport (Health.Other_io err_msg))))
+                        | (Some _ | None), (Some _ | None) ->
+                            (* With ?auth_hints=1 enabled, rely exclusively on
+                               server-side auth_url / device_code SSE events so
+                               partial PTY/pipe chunks never race ahead with
+                               truncated URLs or false-positive device codes. *)
+                            let text =
+                              Option.value (string_field fields "text")
+                                ~default:""
+                            in
+                            if not (String.equal text "") then
+                              on_output ~text ~auth_url:None ~device_code:None)
+                    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _
+                    | `String _ | `List _ ->
+                        ()))
+            | exception Yojson.Json_error _ -> ()))
       frames
   in
   let stream_res = stream ~on_chunk in
@@ -2221,7 +2330,15 @@ let execute_post t ~epoch req =
                 (Msg.Http_reply
                    { epoch; reply = Msg.Reply_setup_login_receipt res })
             in
-            run_setup_login_stream ~publish
+            let on_output ~text ~auth_url ~device_code =
+              Ui_bus.publish_stream t.bus
+                (Msg.Setup_login_output { epoch; text; auth_url; device_code })
+            in
+            let on_input_ready ~login_id =
+              Ui_bus.publish_stream t.bus
+                (Msg.Setup_login_input_ready { epoch; login_id })
+            in
+            run_setup_login_stream ~on_output ~on_input_ready ~publish
               ~stream:(fun ~on_chunk ->
                 Http_client.post_stream ~io:t.io ~clock:t.clock
                   ~content_type:"application/json" ~body:body_str
@@ -2229,6 +2346,18 @@ let execute_post t ~epoch req =
                   ~on_chunk ep ~path
                 |> Result.map_error msg_error_of_http);
             None
+        | Cmd.Post_setup_login_input { login_id; _ } ->
+            let result = post_ack t ~path ~body in
+            Some
+              (Msg.Reply_action_ack
+                 {
+                   label =
+                     Say.make ~ko:"로그인 입력 전송됨"
+                       ~en:"Login input submitted";
+                   ack_scope = Msg.Ack_close_modal;
+                   for_modal = Some (Nav.Setup_login_input_form { login_id });
+                   result;
+                 })
         | Cmd.Post_sandbox_probe _ ->
             let result = post_ack t ~path ~body in
             Some

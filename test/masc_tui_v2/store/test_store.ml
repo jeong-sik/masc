@@ -1790,6 +1790,7 @@ let test_verifier_regressions () =
         | Cmd.Post_runtime_lane_delete _
         | Cmd.Post_setup_account_key _
         | Cmd.Post_setup_login_start _
+        | Cmd.Post_setup_login_input _
         | Cmd.Post_sandbox_probe _
         | Cmd.Post_tui_preference _
         | Cmd.Post_keeper_turn_interrupt _
@@ -18223,6 +18224,473 @@ let test_keeper_lifecycle_and_addon_crud_requests () =
            | _ -> false)
          (Cmd.flatten ask_done_cmds))
 
+let test_oauth_auto_open_input_and_tick_poll () =
+  let t0 = Clock.Mono.of_ns 10_000_000_000L in
+  let t1 = Clock.Mono.after_s t0 1.0 in
+  let t3 = Clock.Mono.after_s t0 2.5 in
+  let t10 = Clock.Mono.after_s t0 10.0 in
+  (* 1. Wire contracts: ANSI-safe URL/code extraction & exact 2-field login input *)
+  Alcotest.(check (option string)) "extract_https_url strips ANSI and trailing punct"
+    (Some "https://auth.openai.com/oauth/authorize?code_challenge=xyz")
+    (Wire_runtime.extract_https_url
+       "\027[1;34mOpen https://auth.openai.com/oauth/authorize?code_challenge=xyz).\027[0m");
+  Alcotest.(check (option string)) "extract_device_code extracts hyphenated code"
+    (Some "ABCD-1234")
+    (Wire_runtime.extract_device_code "Enter one-time code: ABCD-1234 now");
+  Alcotest.(check (option string)) "extract_device_code rejects pure digits date"
+    None
+    (Wire_runtime.extract_device_code "Enter code on 2026-1124");
+  Alcotest.(check (option string)) "extract_device_code rejects unguarded HTTP-4000"
+    None
+    (Wire_runtime.extract_device_code "Status: HTTP-4000 OK");
+  Alcotest.(check (option string)) "extract_device_code rejects colon label"
+    None
+    (Wire_runtime.extract_device_code "Enter AUTH-CODE: pending");
+  Alcotest.(check string) "setup login start path opts into auth_hints=1"
+    "/api/v1/setup/accounts/login?auth_hints=1"
+    (Cmd.post_request_path
+       (Cmd.Post_setup_login_start
+          { integration_id = "codex_cli"; account_ref = None }));
+  let txt_req =
+    Cmd.Post_setup_login_input
+      {
+        login_id = "login-9";
+        input = Wire_runtime.Setup_login_text "123456";
+      }
+  in
+  Alcotest.(check string) "setup login input path"
+    "/api/v1/setup/accounts/login/login-9/input"
+    (Cmd.post_request_path txt_req);
+  Alcotest.(check string) "setup login text JSON (exact 2 fields)"
+    {|{"kind":"text","text":"123456"}|}
+    (Yojson.Safe.to_string (Cmd.post_request_body txt_req));
+  let key_req =
+    Cmd.Post_setup_login_input
+      {
+        login_id = "login-9";
+        input = Wire_runtime.Setup_login_key Wire_runtime.Login_key_enter;
+      }
+  in
+  Alcotest.(check string) "setup login key JSON (exact 2 fields)"
+    {|{"kind":"key","key":"enter"}|}
+    (Yojson.Safe.to_string (Cmd.post_request_body key_req));
+  (* 2. Setup_login_output auto-opens first https:// URL once & deduplicates subsequent URLs *)
+  let m0 = Model.initial () in
+  let m1, out1_cmds =
+    Update.step ~now:t0 m0
+      (Msg.Setup_login_output
+         {
+           epoch = m0.epoch;
+           text = "Visit https://auth.example.com/device Code: WXYZ-4321";
+           auth_url = Some "https://auth.example.com/device";
+           device_code = Some "WXYZ-4321";
+         })
+  in
+  Alcotest.(check (option string)) "setup_login_auth_url recorded"
+    (Some "https://auth.example.com/device") m1.runtime.setup_login_auth_url;
+  Alcotest.(check (option string)) "setup_login_device_code recorded"
+    (Some "WXYZ-4321") m1.runtime.setup_login_device_code;
+  Alcotest.(check bool) "first Setup_login_output emits Open_external_url" true
+    (List.exists
+       (function
+         | Cmd.Open_external_url "https://auth.example.com/device" -> true
+         | _ -> false)
+       (Cmd.flatten out1_cmds));
+  let _, out2_cmds =
+    Update.step ~now:t1 m1
+      (Msg.Setup_login_output
+         {
+           epoch = m1.epoch;
+           text = "Repeated https://auth.example.com/other";
+           auth_url = Some "https://auth.example.com/other";
+           device_code = None;
+         })
+  in
+  Alcotest.(check int) "subsequent Setup_login_output does not re-open browser" 0
+    (List.length (Cmd.flatten out2_cmds));
+  (* 3. Setup_login_input_ready is a post-write ack (no auto-open loop); [e] on Runtime > Quotas opens input modal; terminal 'interrupted'/'complete' closes modal *)
+  let m_running, _ =
+    Update.step ~now:t0
+      {
+        m1 with
+        nav = { m1.nav with workspace = Nav.Runtime; sidebar_focused = false };
+        runtime = Runtime_store.set_tab Nav.Runtime_quotas_credits m1.runtime;
+      }
+      (Msg.Http_reply
+         {
+           epoch = m1.epoch;
+           reply =
+             Msg.Reply_setup_login_receipt
+               (Ok
+                  {
+                    login_id = "login-9";
+                    integration_id = "codex_cli";
+                    status = "running";
+                    account = None;
+                    account_ref = None;
+                    authentication = None;
+                  });
+         })
+  in
+  let m_ack_ready, ack_ready_cmds =
+    Update.step ~now:t0 m_running
+      (Msg.Setup_login_input_ready
+         { epoch = m_running.epoch; login_id = Some "login-9" })
+  in
+  Alcotest.(check bool) "setup_login_input_ready marked true without auto-opening modal"
+    true
+    (m_ack_ready.runtime.setup_login_input_ready
+    && Option.is_none m_ack_ready.nav.overlay
+    && Cmd.flatten ack_ready_cmds = []);
+  let m_in_open, _ =
+    Update.step ~now:t0 m_ack_ready (Msg.Key_event (char_key "e"))
+  in
+  (match m_in_open.nav.overlay with
+  | Some (Nav.Inline_action (Nav.Setup_login_input_form { login_id = "login-9" })) ->
+      ()
+  | _ -> Alcotest.fail "[e] on Runtime > Quotas during active login must open Setup_login_input_form");
+  let m_typed =
+    match m_in_open.inline_modal with
+    | None -> Alcotest.fail "expected inline_modal"
+    | Some st ->
+        let fields =
+          List.map
+            (fun (f : Model.modal_form_field) ->
+              if String.equal f.key "setup_login_input" then
+                { f with value = "987654" }
+              else f)
+            st.fields
+        in
+        { m_in_open with inline_modal = Some { st with fields } }
+  in
+  let m_sub, sub_cmds =
+    Update.step ~now:t0 m_typed (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool) "submitting login input clears ready flag" false
+    m_sub.runtime.setup_login_input_ready;
+  Alcotest.(check bool) "submitting text emits Post_setup_login_input(Setup_login_text)"
+    true
+    (List.exists
+       (function
+         | Cmd.Http_post
+             {
+               req =
+                 Cmd.Post_setup_login_input
+                   {
+                     login_id = "login-9";
+                     input = Wire_runtime.Setup_login_text "987654";
+                   };
+               _;
+             } ->
+             true
+         | _ -> false)
+       (Cmd.flatten sub_cmds));
+  let _, blank_cmds =
+    Update.step ~now:t0 m_in_open (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool) "blank Enter emits Setup_login_key(Login_key_enter)" true
+    (List.exists
+       (function
+         | Cmd.Http_post
+             {
+               req =
+                 Cmd.Post_setup_login_input
+                   {
+                     login_id = "login-9";
+                     input =
+                       Wire_runtime.Setup_login_key Wire_runtime.Login_key_enter;
+                   };
+               _;
+             } ->
+             true
+         | _ -> false)
+       (Cmd.flatten blank_cmds));
+  let m_interrupted, _ =
+    Update.step ~now:t1 m_in_open
+      (Msg.Http_reply
+         {
+           epoch = m_in_open.epoch;
+           reply =
+             Msg.Reply_setup_login_receipt
+               (Ok
+                  {
+                    login_id = "login-9";
+                    integration_id = "codex_cli";
+                    status = "interrupted";
+                    account = None;
+                    account_ref = None;
+                    authentication = None;
+                  });
+         })
+  in
+  Alcotest.(check bool) "interrupted setup login receipt auto-closes modal with error toast"
+    true
+    (Option.is_none m_interrupted.inline_modal
+    && Option.is_none m_interrupted.nav.overlay
+    && match m_interrupted.toast with
+       | Some { level = Model.Toast_error; _ } -> true
+       | _ -> false);
+  let m_term, _ =
+    Update.step ~now:t1 m_in_open
+      (Msg.Http_reply
+         {
+           epoch = m_in_open.epoch;
+           reply =
+             Msg.Reply_setup_login_receipt
+               (Ok
+                  {
+                    login_id = "login-9";
+                    integration_id = "codex_cli";
+                    status = "complete";
+                    account = Some "keyring_host";
+                    account_ref = None;
+                    authentication = Some "login_completed";
+                  });
+         })
+  in
+  Alcotest.(check bool) "terminal setup login receipt auto-closes open input modal"
+    true
+    (Option.is_none m_term.inline_modal && Option.is_none m_term.nav.overlay);
+  (* 4. Keeper OAuth exchange auto-opens authorize_url & ticks poll every 2s until settled *)
+  let _, idle_tick_cmds =
+    Update.step ~now:t0 m0 (Msg.Tick { wall_unix = 100.0 })
+  in
+  Alcotest.(check int) "idle Tick emits zero HTTP polling commands" 0
+    (List.length (Cmd.flatten idle_tick_cmds));
+  let m_oauth, oauth_cmds =
+    Update.step ~now:t0 m0
+      (Msg.Http_reply
+         {
+           epoch = m0.epoch;
+           reply =
+             Msg.Reply_oauth_login
+               {
+                 keeper = "sangsu";
+                 result =
+                   Ok
+                     (Wire_keeper_context.Oauth_login_exchange
+                        {
+                          provider = "github";
+                          provider_label = "GitHub";
+                          authorize_url =
+                            "https://github.com/login/oauth/authorize?state=s1";
+                          attempt_id = "att-7";
+                          expires_at = None;
+                        });
+               };
+         })
+  in
+  Alcotest.(check bool) "Oauth_login_exchange immediately emits Open_external_url"
+    true
+    (List.exists
+       (function
+         | Cmd.Open_external_url
+             "https://github.com/login/oauth/authorize?state=s1" ->
+             true
+         | _ -> false)
+       (Cmd.flatten oauth_cmds));
+  let m_poll1, poll1_cmds =
+    Update.step ~now:t0 m_oauth (Msg.Tick { wall_unix = 101.0 })
+  in
+  Alcotest.(check bool) "first Tick emits Get_oauth_attempt_status" true
+    (List.exists
+       (function
+         | Cmd.Http_get
+             {
+               req =
+                 Cmd.Get_oauth_attempt_status
+                   {
+                     keeper = "sangsu";
+                     provider = "github";
+                     attempt_id = "att-7";
+                   };
+               _;
+             } ->
+             true
+         | _ -> false)
+       (Cmd.flatten poll1_cmds));
+  let m_poll_cool, cool_cmds =
+    Update.step ~now:t1 m_poll1 (Msg.Tick { wall_unix = 102.0 })
+  in
+  Alcotest.(check int) "Tick within 2s cooldown emits no duplicate poll" 0
+    (List.length (Cmd.flatten cool_cmds));
+  let m_poll2, poll2_cmds =
+    Update.step ~now:t3 m_poll_cool (Msg.Tick { wall_unix = 104.0 })
+  in
+  Alcotest.(check bool) "Tick after 2s cooldown polls attempt status again" true
+    (List.exists
+       (function
+         | Cmd.Http_get
+             {
+               req =
+                 Cmd.Get_oauth_attempt_status
+                   {
+                     keeper = "sangsu";
+                     provider = "github";
+                     attempt_id = "att-7";
+                   };
+               _;
+             } ->
+             true
+         | _ -> false)
+       (Cmd.flatten poll2_cmds));
+  let m_settled, settled_cmds =
+    Update.step ~now:t3 m_poll2
+      (Msg.Http_reply
+         {
+           epoch = m_poll2.epoch;
+           reply =
+             Msg.Reply_oauth_attempt_status
+               {
+                 keeper = "sangsu";
+                 result =
+                   Ok
+                     {
+                       kind = "completed";
+                       expires_at = None;
+                       detail = None;
+                     };
+               };
+         })
+  in
+  Alcotest.(check bool) "completed attempt refreshes attached tools" true
+    (List.exists
+       (function
+         | Cmd.Http_get
+             { req = Cmd.Get_oauth_attached_tools { keeper = "sangsu" }; _ } ->
+             true
+         | _ -> false)
+       (Cmd.flatten settled_cmds));
+  let _, after_settled_cmds =
+    Update.step ~now:t10 m_settled (Msg.Tick { wall_unix = 110.0 })
+  in
+  Alcotest.(check int) "settled attempt stops Tick auto-polling (0 Hz)" 0
+    (List.length (Cmd.flatten after_settled_cmds));
+  Alcotest.(check (option int64)) "settled attempt clears OAuth tick deadline" None
+    (Keeper_context_store.next_oauth_poll_deadline_ns
+       ~now_ns:(Clock.Mono.to_ns t10) m_settled.keeper_context);
+  (* All server terminal kinds settle immediately (0 Hz) *)
+  List.iter
+    (fun kind ->
+      Alcotest.(check bool) ("settled terminal kind: " ^ kind) true
+        (Keeper_context_store.is_oauth_attempt_settled kind))
+    [ "unavailable"; "superseded"; "credential_publication_incomplete" ];
+  (* Wall-clock expires_at cap halts polling *)
+  let m_exp, _ =
+    Update.step ~now:t0 m0
+      (Msg.Http_reply
+         {
+           epoch = m0.epoch;
+           reply =
+             Msg.Reply_oauth_login
+               {
+                 keeper = "sangsu";
+                 result =
+                   Ok
+                     (Wire_keeper_context.Oauth_login_exchange
+                        {
+                          provider = "github";
+                          provider_label = "GitHub";
+                          authorize_url = "https://github.com/login/oauth/authorize";
+                          attempt_id = "att-exp";
+                          expires_at = Some 500.0;
+                        });
+               };
+         })
+  in
+  let _, exp_cmds =
+    Update.step ~now:t10 m_exp (Msg.Tick { wall_unix = 501.0 })
+  in
+  Alcotest.(check int) "expired expires_at stops Tick polling" 0
+    (List.length (Cmd.flatten exp_cmds));
+  Alcotest.(check (option int64)) "expired expires_at clears deadline" None
+    (Keeper_context_store.next_oauth_poll_deadline_ns
+       ~now_ns:(Clock.Mono.to_ns t10) ~wall_unix:501.0 m_exp.keeper_context);
+  (* 5 consecutive 5xx poll errors cap retries to preserve 0 Hz idle *)
+  let m_5xx =
+    let rec fail_n n m =
+      if n <= 0 then m
+      else
+        let m', _ =
+          Update.step ~now:t3 m
+            (Msg.Http_reply
+               {
+                 epoch = m.epoch;
+                 reply =
+                   Msg.Reply_oauth_attempt_status
+                     {
+                       keeper = "sangsu";
+                       result =
+                         Error
+                           (Msg.Http_error
+                              { status = 502; body = "bad gateway"; api_error = None });
+                     };
+               })
+        in
+        fail_n (n - 1) m'
+    in
+    fail_n 5 m_poll2
+  in
+  let _, after_5xx_cmds =
+    Update.step ~now:t10 m_5xx (Msg.Tick { wall_unix = 112.0 })
+  in
+  Alcotest.(check int) "5 consecutive 5xx errors halt Tick auto-polling" 0
+    (List.length (Cmd.flatten after_5xx_cmds));
+  Alcotest.(check (option int64)) "5 consecutive 5xx errors clear OAuth deadline" None
+    (Keeper_context_store.next_oauth_poll_deadline_ns
+       ~now_ns:(Clock.Mono.to_ns t10) m_5xx.keeper_context);
+  (* 404 attempt status error also clears pending poll to avoid infinite retries *)
+  let m_err404, _ =
+    Update.step ~now:t3 m_poll2
+      (Msg.Http_reply
+         {
+           epoch = m_poll2.epoch;
+           reply =
+             Msg.Reply_oauth_attempt_status
+               {
+                 keeper = "sangsu";
+                 result =
+                   Error
+                     (Msg.Http_error
+                        { status = 404; body = "not found"; api_error = None });
+               };
+         })
+  in
+  let _, after_404_cmds =
+    Update.step ~now:t10 m_err404 (Msg.Tick { wall_unix = 111.0 })
+  in
+  Alcotest.(check int) "404 attempt error halts Tick auto-polling" 0
+    (List.length (Cmd.flatten after_404_cmds));
+  (* 5. Github_login_chunk auto-opens first device_url once *)
+  let m_gh1, gh1_cmds =
+    Update.step ~now:t0 m0
+      (Msg.Github_login_chunk
+         {
+           epoch = m0.epoch;
+           keeper = "sangsu";
+           text =
+             "First copy your one-time code: ABCD-5678\nOpen https://github.com/login/device";
+         })
+  in
+  Alcotest.(check bool) "first Github_login_chunk with device URL emits Open_external_url"
+    true
+    (List.exists
+       (function
+         | Cmd.Open_external_url "https://github.com/login/device" -> true
+         | _ -> false)
+       (Cmd.flatten gh1_cmds));
+  let _, gh2_cmds =
+    Update.step ~now:t1 m_gh1
+      (Msg.Github_login_chunk
+         {
+           epoch = m_gh1.epoch;
+           keeper = "sangsu";
+           text = "Still waiting on https://github.com/login/device";
+         })
+  in
+  Alcotest.(check int) "subsequent Github_login_chunk does not re-open browser" 0
+    (List.length (Cmd.flatten gh2_cmds))
+
 let () =
   Alcotest.run "masc_tui_store"
     [
@@ -18245,6 +18713,12 @@ let () =
       , [
           Alcotest.test_case "keeper lifecycle/purge & lane-addon attach/detach/action/asks"
             `Quick test_keeper_lifecycle_and_addon_crud_requests;
+        ] );
+      ( "oauth_auto_open_and_tick_poll"
+      , [
+          Alcotest.test_case
+            "setup login URL/input_ready, keeper OAuth auto-open & bounded Tick poll, GitHub device auto-open"
+            `Quick test_oauth_auto_open_input_and_tick_poll;
         ] );
       ("Board recovery", [Alcotest.test_case "recover the viewed keeper and exact quarantine generation" `Quick test_keeper_board_quarantine_recovery]);
       ("exact chat lookup", [Alcotest.test_case "retain and dismiss scoped absent operations" `Quick test_exact_operation_absence_recovery]);

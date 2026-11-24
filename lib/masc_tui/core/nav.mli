@@ -143,6 +143,7 @@ type inline_action_kind =
       instance_id : string;
       action_names : string list;
     }
+  | Setup_login_input_form of { login_id : string }
 
 type system_gate_kind =
   | Micro_viewport

@@ -541,3 +541,13 @@ type t =
       observation : Wire_keeper_context.github_identity_observation option;
       error : string option;
     }
+  | Setup_login_output of {
+      epoch : Epoch.t;
+      text : string;
+      auth_url : string option;
+      device_code : string option;
+    }
+  | Setup_login_input_ready of {
+      epoch : Epoch.t;
+      login_id : string option;
+    }

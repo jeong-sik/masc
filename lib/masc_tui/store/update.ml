@@ -282,7 +282,8 @@ let step_raw ~now (m : Model.t) = function
   | Msg.Resize { cols; rows } -> apply_resize ~now m ~cols ~rows
   | Msg.Tick { wall_unix } ->
       (* Zero idle HTTP polling: ticks only record wall time, expire toasts,
-         and update voice recording elapsed seconds. *)
+         update voice recording elapsed seconds, and advance active unsettled
+         keeper OAuth attempt polls on a bounded 2s cooldown. *)
       let wall_advanced =
         Float.is_finite wall_unix && wall_unix > m.freshness.last_wall_unix
       in
@@ -301,14 +302,40 @@ let step_raw ~now (m : Model.t) = function
             else Some armed_at
         | None -> None
       in
-      let next =
+      let next0 =
         let m' =
           { m with freshness; fleet; drafts; quit_armed_at }
           |> Model.expire_toast ~now
         in
         if wall_advanced then Model.sync_effective_scorecard ~now m' else m'
       in
-      (next, [])
+      let due_oauth =
+        Keeper_context_store.pending_oauth_polls ~now ~wall_unix
+          next0.keeper_context
+      in
+      (match due_oauth with
+      | [] -> (next0, [])
+      | _ :: _ ->
+          let keeper_context, poll_cmds =
+            List.fold_left
+              (fun (kc, acc) (keeper, provider, attempt_id) ->
+                let kc' =
+                  Keeper_context_store.mark_oauth_polled ~now ~keeper kc
+                in
+                let cmd =
+                  Cmd.Http_get
+                    {
+                      epoch = next0.epoch;
+                      req =
+                        Cmd.Get_oauth_attempt_status
+                          { keeper; provider; attempt_id };
+                    }
+                in
+                (kc', cmd :: acc))
+              (next0.keeper_context, [])
+              due_oauth
+          in
+          ({ next0 with keeper_context }, List.rev poll_cmds))
   | Msg.Server_health_result { epoch; result } ->
       if not (Epoch.is_current ~current:m.epoch ~reply:epoch) then (m, [])
       else apply_server_health ~now m result
@@ -373,11 +400,34 @@ let step_raw ~now (m : Model.t) = function
   | Msg.Github_login_chunk { epoch; keeper; text } ->
       if not (Epoch.is_current ~current:m.epoch ~reply:epoch) then (m, [])
       else
+        let prev_url =
+          (Keeper_context_store.get_keeper ~keeper m.keeper_context)
+            .github_login
+            .device_url
+        in
         let keeper_context =
           Keeper_context_store.append_github_login_output ~keeper ~line:text
             m.keeper_context
         in
-        ({ m with keeper_context }, [])
+        let next_login =
+          (Keeper_context_store.get_keeper ~keeper keeper_context).github_login
+        in
+        let m1 = { m with keeper_context } in
+        (match (prev_url, next_login.device_url) with
+        | None, Some url ->
+            let toast =
+              match next_login.device_code with
+              | Some code ->
+                  Say.make
+                    ~ko:("GitHub 브라우저 인증 열기 (코드: " ^ code ^ ")")
+                    ~en:("Opening GitHub device auth (code: " ^ code ^ ")")
+              | None ->
+                  Say.make ~ko:"GitHub 브라우저 인증 여는 중"
+                    ~en:"Opening GitHub device auth in browser"
+            in
+            ( Model.with_toast ~now ~level:Model.Toast_info toast m1
+            , [ Cmd.Open_external_url url ] )
+        | Some _, (Some _ | None) | None, None -> (m1, []))
   | Msg.Github_login_done { epoch; keeper; observation; error } ->
       if not (Epoch.is_current ~current:m.epoch ~reply:epoch) then (m, [])
       else
@@ -410,6 +460,42 @@ let step_raw ~now (m : Model.t) = function
             Cmd.Http_get
               { epoch = m.epoch; req = Cmd.Get_github_identity { keeper } };
           ] )
+  | Msg.Setup_login_output { epoch; text; auth_url; device_code } ->
+      if not (Epoch.is_current ~current:m.epoch ~reply:epoch) then (m, [])
+      else
+        let prev_url = m.runtime.setup_login_auth_url in
+        let runtime =
+          Runtime_store.apply_setup_login_output ~text ~auth_url ~device_code
+            m.runtime
+        in
+        let m1 = { m with runtime } in
+        (match (prev_url, runtime.setup_login_auth_url) with
+        | None, Some url ->
+            let toast =
+              match runtime.setup_login_device_code with
+              | Some code ->
+                  Say.make
+                    ~ko:("CLI 인증 URL 브라우저로 열기 (코드: " ^ code ^ ")")
+                    ~en:("Opening CLI login URL in browser (code: " ^ code ^ ")")
+              | None ->
+                  Say.make ~ko:"CLI 인증 URL 브라우저로 여는 중"
+                    ~en:"Opening CLI login URL in browser"
+            in
+            ( Model.with_toast ~now ~level:Model.Toast_info toast m1
+            , [ Cmd.Open_external_url url ] )
+        | Some _, (Some _ | None) | None, None -> (m1, []))
+  | Msg.Setup_login_input_ready { epoch; login_id = _ } ->
+      (* Server emits [input_ready] as a post-write ack after consuming a
+         submitted [/input] write (not as an initial CLI prompt signal), so
+         record readiness without re-opening the input modal in a loop.
+         Operators open [Setup_login_input_form] explicitly via [e] during an
+         active login session. *)
+      if not (Epoch.is_current ~current:m.epoch ~reply:epoch) then (m, [])
+      else
+        let runtime =
+          Runtime_store.mark_setup_login_input_ready true m.runtime
+        in
+        ({ m with runtime }, [])
 
 (* A new epoch is a new handshake, and the server behind it may be another
    process. Every path that moves the epoch returns through [step], so what

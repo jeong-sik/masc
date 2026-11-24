@@ -14,6 +14,7 @@ val setup_inventory_path : string
 val setup_credential_path : string
 val setup_accounts_login_path : string
 val setup_accounts_login_status_path : login_id:string -> string
+val setup_accounts_login_input_path : login_id:string -> string
 val runtime_probe_path : ?force:bool -> unit -> string
 val provider_usage_history_path : days:int -> string
 val keeper_costs_path : window_minutes:int -> string
@@ -981,6 +982,29 @@ type setup_login_receipt = {
 
 val decode_setup_login_receipt :
   Yojson.Safe.t -> (setup_login_receipt, string) result
+
+type setup_login_key =
+  | Login_key_enter
+  | Login_key_up
+  | Login_key_down
+  | Login_key_tab
+  | Login_key_eof
+
+type setup_login_input =
+  | Setup_login_text of string
+  | Setup_login_key of setup_login_key
+
+val encode_setup_login_input : setup_login_input -> Yojson.Safe.t
+(** Exact 2-field payload for [POST /api/v1/setup/accounts/login/:id/input]
+    matching [Runtime_setup_login_session.input_of_json]. *)
+
+val extract_https_url : string -> string option
+(** Extract the first [https://...] URL from CLI login output/screen text,
+    stripping ANSI escapes and trailing punctuation. *)
+
+val extract_device_code : string -> string option
+(** Extract a hyphenated uppercase device code (e.g. [ABCD-1234]) when present
+    in CLI login output/screen text. *)
 
 val encode_setup_credential :
   provider_id:string -> secret:string -> source_revision:string -> Yojson.Safe.t

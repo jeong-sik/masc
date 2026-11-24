@@ -1185,7 +1185,8 @@ let open_inline_modal (m : Model.t) kind =
       | Nav.Keeper_purge_confirm _
       | Nav.Addon_attach_form
       | Nav.Addon_detach_confirm _
-      | Nav.Addon_invoke_action _ )
+      | Nav.Addon_invoke_action _
+      | Nav.Setup_login_input_form _ )
       , ( Drafts.Btw_idle
         | Drafts.Btw_sending _
         | Drafts.Btw_streaming _
@@ -3722,7 +3723,8 @@ let classify_inline_form (modal : Model.inline_modal_state) : inline_form_kind =
     | Nav.Keeper_purge_confirm _
     | Nav.Addon_attach_form
     | Nav.Addon_detach_confirm _
-    | Nav.Addon_invoke_action _ ) as std ->
+    | Nav.Addon_invoke_action _
+    | Nav.Setup_login_input_form _ ) as std ->
       Form_standard std
 
 (* The Schedule form's operator text. A delay is a whole count and one unit,
@@ -5069,6 +5071,40 @@ let submit_inline_modal ~now (m : Model.t) =
                               };
                         };
                     ] ))
+          | Form_standard (Nav.Setup_login_input_form { login_id }) ->
+              let trimmed =
+                String.trim
+                  (Model.modal_field_value ~key:"setup_login_input" modal)
+              in
+              let input =
+                match String.lowercase_ascii trimmed with
+                | "" | "key:enter" ->
+                    Wire_runtime.Setup_login_key Wire_runtime.Login_key_enter
+                | "key:up" ->
+                    Wire_runtime.Setup_login_key Wire_runtime.Login_key_up
+                | "key:down" ->
+                    Wire_runtime.Setup_login_key Wire_runtime.Login_key_down
+                | "key:tab" ->
+                    Wire_runtime.Setup_login_key Wire_runtime.Login_key_tab
+                | "key:eof" ->
+                    Wire_runtime.Setup_login_key Wire_runtime.Login_key_eof
+                | _ -> Wire_runtime.Setup_login_text trimmed
+              in
+              let m1 =
+                {
+                  m with
+                  runtime =
+                    Runtime_store.mark_setup_login_input_ready false m.runtime;
+                }
+              in
+              ( mark_submitting m1
+              , [
+                  Cmd.Http_post
+                    {
+                      epoch = m.epoch;
+                      req = Cmd.Post_setup_login_input { login_id; input };
+                    };
+                ] )
           | Form_setup_login_start ->
               let integration_id =
                 String.trim
@@ -9373,7 +9409,8 @@ let apply_move (m : Model.t) dir =
                   | Nav.Keeper_purge_confirm _
                   | Nav.Addon_attach_form
                   | Nav.Addon_detach_confirm _
-                  | Nav.Addon_invoke_action _ )
+                  | Nav.Addon_invoke_action _
+                  | Nav.Setup_login_input_form _ )
                 , _ ) ->
                   true
             in
@@ -9412,7 +9449,8 @@ let apply_move (m : Model.t) dir =
               | Nav.Keeper_purge_confirm _
               | Nav.Addon_attach_form
               | Nav.Addon_detach_confirm _
-              | Nav.Addon_invoke_action _ ->
+              | Nav.Addon_invoke_action _
+              | Nav.Setup_login_input_form _ ->
                   (m, [])
             else
               let next_modal =

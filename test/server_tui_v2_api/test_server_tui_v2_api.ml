@@ -1524,21 +1524,15 @@ let test_config_schema_redaction_and_patch_roundtrip () =
            "local.sample2"
            (Runtime.get_default_route ()));
     (* 4. POST /api/v1/config/patch dry_run:true -> unified diff, no mutation *)
-    let dry_run_body =
-      Yojson.Safe.to_string
-        (`Assoc
-          [ "target", `String "keeper:alpha"
-          ; "expected_sha256", `String initial_sha
-          ; "dry_run", `Bool true
-          ; ( "changes"
-            , `List
-                [ `Assoc
-                    [ "key", `String "keeper.activation_mode"
-                    ; "value", `String "autonomous"
-                    ]
-                ] )
-          ])
+    let module Wire = Masc_tui_protocol.Wire_config in
+    let activation_patch ~dry_run =
+      Wire.encode_patch_request
+        { target = Target_keeper "alpha"; keeper_name = Some "alpha";
+          expected_sha256 = Some initial_sha; dry_run;
+          ops = [Set_scalar { table = "keeper"; key = "activation_mode"; value = "autonomous" }] }
+      |> Yojson.Safe.to_string
     in
+    let dry_run_body = activation_patch ~dry_run:true in
     let dry_resp =
       Candle_cfg_api.config_patch_json ~config ~actor:"tester" ~body_str:dry_run_body ()
       |> ok_or_fail "POST patch dry_run"
@@ -1597,21 +1591,7 @@ let test_config_schema_redaction_and_patch_roundtrip () =
        Alcotest.(check int) "invalid value 422" 422 (Httpun.Status.to_code status)
      | Ok _ -> Alcotest.fail "invalid activation_mode must fail with 422");
     (* 7. dry_run:false -> atomic write via save_file_atomic + comment preservation + snapshot_id *)
-    let apply_body =
-      Yojson.Safe.to_string
-        (`Assoc
-          [ "target", `String "keeper:alpha"
-          ; "expected_sha256", `String initial_sha
-          ; "dry_run", `Bool false
-          ; ( "changes"
-            , `List
-                [ `Assoc
-                    [ "key", `String "keeper.activation_mode"
-                    ; "value", `String "autonomous"
-                    ]
-                ] )
-          ])
-    in
+    let apply_body = activation_patch ~dry_run:false in
     let apply_resp =
       Candle_cfg_api.config_patch_json ~config ~actor:"tester" ~body_str:apply_body ()
       |> ok_or_fail "POST patch apply"
@@ -1629,10 +1609,20 @@ let test_config_schema_redaction_and_patch_roundtrip () =
       (contains_substr
          ~needle:"# Important header comment that must survive patch"
          disk_after_apply);
-    Alcotest.(check bool)
-      "updated activation_mode written to disk"
-      true
-      (contains_substr ~needle:"\"autonomous\"" disk_after_apply))
+    let saved =
+      Candle_cfg_api.config_schema_json ~base_path ~target:(Target_keeper "alpha") ()
+      |> ok_or_fail "read saved Keeper configuration"
+      |> Wire.decode_config_schema
+      |> Result.fold ~ok:Fun.id ~error:(fun detail -> Alcotest.fail detail)
+    in
+    Alcotest.(check string) "the read-back revision matches the commit"
+      (json_string_exn "new_sha256" apply_resp) saved.file_sha256;
+    let saved_field =
+      List.concat_map (fun (section : Wire.schema_section) -> section.fields) saved.sections
+      |> List.find_opt (fun (field : Wire.schema_field) -> field.full_key = "keeper.activation_mode")
+    in
+    Alcotest.(check bool) "the saved Keeper now uses autonomous activation" true
+      (Option.map (fun (field : Wire.schema_field) -> field.value) saved_field = Some (Wire.Val_string "autonomous")))
 ;;
 
 let test_config_schema_registry_and_routing_failover () =

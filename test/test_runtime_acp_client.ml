@@ -502,6 +502,24 @@ for line in sys.stdin:
       (host_args ~tool_names:[] Runtime_native_tools.Native_read))
 ;;
 
+(* The names behind the toolset glob come from the specs a bridge serves. A
+   spec a client could not call, one with no string [name], gives no name. *)
+let test_tool_spec_names_skip_specs_a_client_cannot_call () =
+  let named name = `Assoc [ "name", `String name; "description", `String "d" ] in
+  check (list string) "names, in order"
+    [ "masc_status"; "keeper_skill" ]
+    (Runtime_official_client_mcp_http.tool_spec_names [ named "masc_status"; named "keeper_skill" ]);
+  check (list string) "no spec, no name" [] (Runtime_official_client_mcp_http.tool_spec_names []);
+  check (list string) "a spec without a string name is left out"
+    [ "masc_status" ]
+    (Runtime_official_client_mcp_http.tool_spec_names
+       [ `Assoc [ "description", `String "no name" ]
+       ; `Assoc [ "name", `Int 1 ]
+       ; `String "not an object"
+       ; named "masc_status"
+       ])
+;;
+
 let test_muse_permission_grammar () =
   let allowed_tool_names = [ "masc_probe_ping"; "keeper_skill" ] in
   let mcp_only =
@@ -5299,6 +5317,8 @@ let () =
       , [ test_case "muse argv and environment" `Quick test_muse_argv_and_environment
         ; test_case "muse start spawns the host with the posture toolset" `Quick
             test_muse_start_spawns_the_host_with_the_posture_toolset
+        ; test_case "tool spec names skip specs a client cannot call" `Quick
+            test_tool_spec_names_skip_specs_a_client_cannot_call
         ; test_case "muse MCP grammar and permission policy" `Quick
             test_muse_permission_grammar
         ; test_case "kimi --skills-dir order & strict permission posture" `Quick

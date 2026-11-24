@@ -4,7 +4,7 @@
     {1 Core invariants}
     - {b Immutable anchors with lossless pointers}: each compaction epoch folds
       only the newly evicted turn span into an immutable {!compaction_anchor}
-      whose verified facts/files and decisions carry canonical {!Ids.Turn_id.t}
+      whose source-attributed transcript observations carry canonical {!Ids.Turn_id.t}
       pointers back to archived raw turns stored verbatim in per-Keeper SQLite
       WAL ([<keepers_dir>/<keeper_id>.compaction.db]).
     - {b Structural triggers only}: compaction triggers strictly from an
@@ -23,7 +23,7 @@ module Turn_id := Ids.Turn_id
 (** Immutable structured anchor carried across compaction epochs
     (Factory.ai / pi.dev / LCM pattern).
 
-    When accumulated facts, decisions, or open threads exceed the provider's
+    When accumulated transcript observations exceed the provider's
     structural anchor budget, oldest entries roll off the pinned anchor into
     the immutable per-Keeper SQLite [compaction_epochs] / [archived_turns]
     history and [archived_epochs_through] records the highest epoch rolled off
@@ -34,9 +34,7 @@ type compaction_anchor =
   ; covers_through_turn : Turn_id.t
   ; archived_epochs_through : int option
   ; active_intent : string
-  ; verified_facts_and_files : (string * Turn_id.t) list
-  ; decisions_made : (string * Turn_id.t) list
-  ; open_threads : string list
+  ; observations : (Keeper_compaction_observation.t * Turn_id.t) list
   }
 
 (** Closed sum of lawful compaction triggers. Only explicit provider context
@@ -153,7 +151,7 @@ val anchor_to_message : compaction_anchor -> Agent_core.Types.message
 (** {1 Pure Incremental Anchored Fold} *)
 
 (** Incrementally fold only [evicted_turns] onto [previous_anchor] via a caller
-    summarizer callback, enforcing monotonic [epoch_id], canonical
+    summarizer callback (which returns observations from the supplied span), enforcing monotonic [epoch_id], canonical
     [covers_through_turn], and preservation of prior lossless turn pointers. *)
 val fold_evicted_span
   :  ?previous_anchor:compaction_anchor
@@ -165,8 +163,8 @@ val fold_evicted_span
   -> unit
   -> (compaction_anchor, string) result
 
-(** Deterministic pure structural folder extracting typed [ToolUse] file/action
-    observations, user intents, and assistant conclusions with canonical
+(** Deterministic pure structural folder extracting tool requests, typed tool
+    responses and attributed assistant statements in the supplied span with canonical
     {!Ids.Turn_id.t} pointers. Used when no LLM summarizer is attached or as
     a deterministic structural baseline. *)
 val deterministic_fold
@@ -185,8 +183,7 @@ val default_anchor_max_bytes : int
 val anchor_budget_for_window : capacity_bytes:int -> reserved_bytes:int -> int
 
 (** Pure lossless roll-off: when [measure_message_bytes (anchor_to_message anchor)]
-    exceeds [max_anchor_bytes], drop oldest entries from the heaviest anchor
-    section (recording [archived_epochs_through]) so the pinned anchor fits
+    exceeds [max_anchor_bytes], drop oldest entries from the heaviest observation type (recording [archived_epochs_through]) so the pinned anchor fits
     within [max_anchor_bytes] while earlier epochs remain losslessly retrievable
     from SQLite via {!load_archived_turn} / {!load_archived_turns_for_epoch}. *)
 val bound_anchor_to_budget

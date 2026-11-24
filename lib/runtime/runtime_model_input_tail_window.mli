@@ -99,8 +99,11 @@ val compaction_anchor_metadata : Agent_core.Types.metadata
     {!compaction_anchor_marker_key} alone. *)
 
 val is_compaction_anchor : Agent_core.Types.message -> bool
-(** Whether the message carries {!compaction_anchor_marker_key}. Such a message
-    is {!Pinned}. *)
+(** Recognizes current and historical host-marked compaction boundaries. *)
+
+val for_compaction_replay : Agent_core.Types.message list -> Agent_core.Types.message list
+(** Replace an old inline, untyped host summary with a pinned archive notice.
+    This preserves caller-input positions while removing unsupported claims. *)
 
 type label =
   | Pinned

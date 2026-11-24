@@ -764,9 +764,7 @@ type compaction_internals = {
   latest_epoch_id : int option;
   covers_through_turn : string option;
   archived_epochs_through : int option;
-  verified_facts_count : int;
-  decisions_count : int;
-  open_threads_count : int;
+  observations_count : int option;
   read_error : string option;
 }
 

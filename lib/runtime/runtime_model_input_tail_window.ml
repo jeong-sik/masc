@@ -41,12 +41,31 @@ let is_working_state (message : Agent_core.Types.message) =
   && List.mem_assoc working_state_marker_key message.metadata
 ;;
 
-let compaction_anchor_marker_key = "masc.compaction_anchor.v1"
+let compaction_anchor_marker_key = "masc.compaction_anchor.v2"
 let compaction_anchor_metadata = [ (compaction_anchor_marker_key, `Bool true) ]
 
-let is_compaction_anchor (message : Agent_core.Types.message) =
-  message.origin = Agent_core.Types.Agent_instruction
-  && List.mem_assoc compaction_anchor_marker_key message.metadata
+let is_untyped_compaction_anchor (msg : Agent_core.Types.message) =
+  (msg.origin = Agent_core.Types.Agent_instruction || msg.origin = Historical_system_context)
+  && List.assoc_opt "masc.compaction_anchor.v1" msg.metadata = Some (`Bool true)
+;;
+
+let is_compaction_anchor (msg : Agent_core.Types.message) =
+  (msg.origin = Agent_core.Types.Outside_context
+   && List.assoc_opt compaction_anchor_marker_key msg.metadata = Some (`Bool true))
+  || is_untyped_compaction_anchor msg
+;;
+
+let for_compaction_replay messages =
+  if List.exists is_untyped_compaction_anchor messages then
+    List.map
+      (fun (msg : Agent_core.Types.message) ->
+         if is_untyped_compaction_anchor msg then
+           ({ origin = Outside_context; role = User; name = None; tool_call_id = None; metadata = []
+           ; content = [ Text "Earlier turns are available in the Keeper compaction archive." ]
+            } : Agent_core.Types.message)
+         else msg)
+      messages
+  else messages
 ;;
 
 type budget_error =
@@ -191,7 +210,7 @@ let annotate_by message_of values =
   (List.rev labelled_rev, atom_count)
 ;;
 
-let annotate messages = annotate_by Fun.id messages
+let annotate messages = annotate_by Fun.id (for_compaction_replay messages)
 
 (* The atom's position is its index plus the message that opens it: the
    first message [annotate] labels with that index, a [User] or [Assistant]
@@ -273,6 +292,7 @@ type measured_history =
       }
 
 let measure_history ~measure_message_bytes messages =
+  let messages = for_compaction_replay messages in
   let rejected_bytes, measured_rev =
     List.fold_left
       (fun (total, measured) message ->
@@ -446,7 +466,8 @@ let project_with_drop
     (messages : Agent_core.Types.message list)
   : (projection, budget_error) result
   =
-  let labelled, atom_count = annotate messages in
+  let messages = for_compaction_replay messages in
+  let labelled, atom_count = annotate_by Fun.id messages in
   (* Everything the cut cannot remove is charged before any atom is
      considered. Pinned messages are re-assembled fresh each turn by the
      keeper hooks, and the preamble is prepended whenever a cut lands on a
@@ -539,7 +560,8 @@ let kept_atom_bytes ~measure_message_bytes ~drop labelled =
 
 let project_from_atom ?(allow_empty_history = false)
     ?(history_already_announced = false) ~measure_message_bytes ~first_atom messages =
-  let labelled, atom_count = annotate messages in
+  let messages = for_compaction_replay messages in
+  let labelled, atom_count = annotate_by Fun.id messages in
   let pinned_bytes = pinned_bytes_of ~measure_message_bytes labelled in
   if atom_count = 0
   then { messages; dropped_atoms = 0; atom_count }, pinned_bytes

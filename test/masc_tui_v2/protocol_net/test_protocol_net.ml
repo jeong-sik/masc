@@ -2678,7 +2678,7 @@ let test_tui_memory_os_and_runtime_setup_codecs () =
           "present": true, "epoch_count": 2, "archived_turns_count": 14,
           "anchor_bytes": 2048, "latest_epoch_id": 2,
           "covers_through_turn": "turn-14", "archived_epochs_through": 1,
-          "verified_facts_count": 5, "decisions_count": 3, "open_threads_count": 1
+          "observations_count": 9
         },
         "canonical_turns": {
           "present": true, "turn_count": 18, "latest_turn_id": "turn-18",
@@ -2702,6 +2702,7 @@ let test_tui_memory_os_and_runtime_setup_codecs () =
       (Wire_knowledge.decode_memory_os_internals internals_json) in
   Alcotest.(check string) "internals keeper" "alpha" mi.keeper;
   Alcotest.(check int) "compaction epochs" 2 mi.compaction.epoch_count;
+  Alcotest.(check (option int)) "typed observation count" (Some 9) mi.compaction.observations_count;
   Alcotest.(check (option string)) "canonical runtime_kind" (Some "acp_cli")
     mi.canonical_turns.latest_runtime_kind;
   Alcotest.(check (option int)) "digest revision" (Some 7) mi.memory_digest.revision;

@@ -1735,9 +1735,7 @@ let make_compaction_anchor_msg epoch_id =
     ; covers_through_turn = Ids.Turn_id.of_string (Printf.sprintf "turn-ep-%d" epoch_id)
     ; archived_epochs_through = None
     ; active_intent = "post-compaction intent"
-    ; verified_facts_and_files = []
-    ; decisions_made = []
-    ; open_threads = []
+    ; observations = []
     }
 ;;
 

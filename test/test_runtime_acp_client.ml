@@ -1234,7 +1234,7 @@ let test_acp_80_pct_rollover_marker_and_overflow_classification () =
   in
   let existing_anchor_msg =
     { (conv_msg User [ Text "preserve existing anchor" ]) with
-      origin = Agent_core.Llm_provider.Types.Agent_instruction
+      origin = Agent_core.Llm_provider.Types.Outside_context
     ; metadata = Runtime_model_input_tail_window.compaction_anchor_metadata
     }
   in

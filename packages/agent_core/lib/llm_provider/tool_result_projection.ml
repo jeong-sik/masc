@@ -27,12 +27,14 @@ type active_batch =
   ; consumed : string Id_map.t
   }
 
-type resolved_message =
-  { original : Types.message
-  ; content : (Types.content_block * string option) list
+type 'media occurrence =
+  { original : 'media Types.message_with
+  ; content : ('media Types.content_block_with * string option) list
   }
 
-type t = resolved_message list
+type 'media projection = 'media occurrence list
+type t = Types.media_source projection
+type resolved_message = Types.media_source occurrence
 
 let error_to_string = function
   | Duplicate_tool_use_id { tool_use_id; tool_name } ->
@@ -160,7 +162,7 @@ let of_messages messages =
      no provider serializer owns a cursor or scans backward through history. *)
   let rec loop active resolved = function
     | [] -> Ok (List.rev resolved)
-    | (message : Types.message) :: rest ->
+    | (message : _ Types.message_with) :: rest ->
       let next =
         match message.role with
         | Assistant ->

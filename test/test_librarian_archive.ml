@@ -199,7 +199,7 @@ let test_memory_diff_through_compaction () =
   let revision = (Store.memory store).revision in
   let path = log_path place in
   let read () = match Archive.history path with
-    | Ok h -> h | Error e -> fail (Private_jsonl_scan.error_to_string e) in
+    | Ok h -> h | Error e -> fail (Masc.Private_jsonl_scan.error_to_string e) in
   let project range = Diff.project ~range ~current ~revision (read ()) in
   let time = Diff.Time (200., 205.) in
   let before = project time in

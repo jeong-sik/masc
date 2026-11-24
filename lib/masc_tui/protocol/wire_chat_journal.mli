@@ -33,6 +33,17 @@ type text_owner =
       (** No observed response: the bare [stream_scope] when the producer
           sent one. *)
 
+val decode_text_owner_fields :
+  owner_field:string ->
+  scope_field:string ->
+  (string * Yojson.Safe.t) list ->
+  (text_owner, string) result
+(** Decode text ownership metadata from a JSON object's field list, naming the
+    observed-response object key ([owner_field], e.g. ["response"] or
+    ["textResponse"]) and bare-scope integer key ([scope_field], e.g.
+    ["stream_scope"] or ["textStreamScope"]). Rejects duplicate or conflicting
+    fields and invalid/negative values. *)
+
 type event =
   | Run_started
   | Runtime_attempt_started  (** [agent_core_runtime_attempt_started] *)

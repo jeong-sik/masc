@@ -46,9 +46,11 @@ type chat_stream_buffer = {
   interrupting : bool;
   prior_msg_ids : String_set.t;
   text : string;
+  text_ownership : Cut_reply.ownership;
   thinking : string;
   tools : active_tool_call list;
   active : bool;
+  ended : bool;
   last_error : string option;
 }
 
@@ -774,9 +776,11 @@ let fresh_stream_buffer ~keeper ~request_id t =
     interrupting = false;
     prior_msg_ids = snapshot_history_ids ~keeper t;
     text = "";
+    text_ownership = Cut_reply.fresh_ownership;
     thinking = "";
     tools = [];
     active = true;
+    ended = false;
     last_error = None;
   }
 
@@ -788,7 +792,9 @@ let merge_opt_op prev_op incoming_op =
   match incoming_op with Some _ as x -> x | None -> prev_op
 
 let is_explicit_execution_start = function
-  | Wire_fleet.Chunk_run_started _ -> true
+  | Wire_fleet.Chunk_run_started _
+  | Wire_fleet.Chunk_runtime_attempt_started _ ->
+      true
   | Wire_fleet.Chunk_accepted { state = Wire_fleet.Accepted_running; _ } -> true
   | Wire_fleet.Chunk_accepted
       {
@@ -823,6 +829,7 @@ let is_queued_acceptance = function
         _;
       }
   | Wire_fleet.Chunk_run_started _
+  | Wire_fleet.Chunk_runtime_attempt_started _
   | Wire_fleet.Chunk_text_delta _
   | Wire_fleet.Chunk_thinking_delta _
   | Wire_fleet.Chunk_thinking_snapshot _
@@ -841,6 +848,7 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
   | Wire_fleet.Chunk_ignored -> t
   | ( Wire_fleet.Chunk_accepted _
     | Wire_fleet.Chunk_run_started _
+    | Wire_fleet.Chunk_runtime_attempt_started _
     | Wire_fleet.Chunk_text_delta _
     | Wire_fleet.Chunk_thinking_delta _
     | Wire_fleet.Chunk_thinking_snapshot _
@@ -856,6 +864,7 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
             update_chat_control_token ~keeper ~token:tok t
         | Wire_fleet.Chunk_accepted { control_token = None; _ }
         | Wire_fleet.Chunk_run_started _
+        | Wire_fleet.Chunk_runtime_attempt_started _
         | Wire_fleet.Chunk_text_delta _
         | Wire_fleet.Chunk_thinking_delta _
         | Wire_fleet.Chunk_thinking_snapshot _
@@ -884,6 +893,7 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
       in
       match prev_opt with
       | None -> t
+      | Some prev when prev.ended -> t
       | Some prev ->
           let updated =
             match chunk with
@@ -908,27 +918,60 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
                   | Wire_fleet.Accepted_cancelled ->
                       false
                 in
+                let ended =
+                  match state with
+                  | Wire_fleet.Accepted_queued | Wire_fleet.Accepted_running ->
+                      prev.ended
+                  | Wire_fleet.Accepted_succeeded
+                  | Wire_fleet.Accepted_failed
+                  | Wire_fleet.Accepted_cancelled ->
+                      true
+                in
                 {
                   prev with
                   operation_id = Some operation_id;
                   run_started;
                   active;
+                  ended;
                 }
             | Wire_fleet.Chunk_run_started { operation_id } ->
                 {
                   prev with
                   operation_id = merge_opt_op prev.operation_id operation_id;
                   run_started = true;
+                  text = "";
+                  text_ownership = Cut_reply.fresh_ownership;
+                  thinking = "";
                   active = true;
                 }
-            | Wire_fleet.Chunk_text_delta { operation_id; delta } ->
+            | Wire_fleet.Chunk_runtime_attempt_started { operation_id } ->
                 {
                   prev with
                   operation_id = merge_opt_op prev.operation_id operation_id;
                   run_started = true;
-                  text = prev.text ^ delta;
+                  text = "";
+                  text_ownership = Cut_reply.retire_attempt prev.text_ownership;
+                  thinking = "";
                   active = true;
                 }
+            | Wire_fleet.Chunk_text_delta { operation_id; delta; owner } -> (
+                match Cut_reply.admit prev.text_ownership owner with
+                | Cut_reply.Append text_ownership ->
+                    {
+                      prev with
+                      operation_id = merge_opt_op prev.operation_id operation_id;
+                      run_started = true;
+                      text = prev.text ^ delta;
+                      text_ownership;
+                      active = true;
+                    }
+                | Cut_reply.Drop ->
+                    {
+                      prev with
+                      operation_id = merge_opt_op prev.operation_id operation_id;
+                      run_started = true;
+                      active = true;
+                    })
             | Wire_fleet.Chunk_thinking_delta { operation_id; delta } ->
                 {
                   prev with
@@ -1074,6 +1117,7 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
                     | None -> prev.turn_ref);
                   text;
                   active = false;
+                  ended = true;
                   interrupting = false;
                 }
             | Wire_fleet.Chunk_error { operation_id; message; code = _ } ->
@@ -1081,6 +1125,7 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
                   prev with
                   operation_id = merge_opt_op prev.operation_id operation_id;
                   active = false;
+                  ended = true;
                   interrupting = false;
                   last_error = Some message;
                 }
@@ -1115,6 +1160,7 @@ let finish_chat_stream ~keeper ~request_id ~error t =
         {
           b with
           active = false;
+          ended = true;
           interrupting = false;
           last_error =
             (match error with Some _ as e -> e | None -> b.last_error);
@@ -1129,7 +1175,9 @@ let detach_chat_streams t =
     chat_streams =
       String_map.map
         (fun (b : chat_stream_buffer) ->
-          if b.active then { b with active = false; interrupting = false } else b)
+          if b.active then
+            { b with active = false; ended = true; interrupting = false }
+          else b)
         t.chat_streams;
   }
 

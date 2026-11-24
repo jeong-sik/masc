@@ -996,8 +996,12 @@ let apply_chat_stream_chunk ~now ~keeper ~request_id ~is_btw ~chunk (m : Model.t
   if is_btw then
     let drafts =
       match chunk with
-      | Wire_fleet.Chunk_text_delta { delta; _ } ->
-          Drafts.append_btw_delta ~request_id ~delta m.drafts
+      | Wire_fleet.Chunk_run_started _ ->
+          Drafts.reset_btw_run ~request_id m.drafts
+      | Wire_fleet.Chunk_runtime_attempt_started _ ->
+          Drafts.retire_btw_attempt ~request_id m.drafts
+      | Wire_fleet.Chunk_text_delta { delta; owner; _ } ->
+          Drafts.append_btw_delta ~owner ~request_id ~delta m.drafts
       | Wire_fleet.Chunk_reply_details { reply; _ } ->
           if String.equal (String.trim reply) "" then m.drafts
           else Drafts.finish_btw ~request_id ~reply m.drafts
@@ -1008,7 +1012,6 @@ let apply_chat_stream_chunk ~now ~keeper ~request_id ~is_btw ~chunk (m : Model.t
       | Wire_fleet.Chunk_error { message; _ } ->
           Drafts.fail_btw ~request_id ~reason:message m.drafts
       | Wire_fleet.Chunk_accepted _
-      | Wire_fleet.Chunk_run_started _
       | Wire_fleet.Chunk_thinking_delta _
       | Wire_fleet.Chunk_thinking_snapshot _
       | Wire_fleet.Chunk_tool_start _
@@ -1077,6 +1080,7 @@ let apply_chat_stream_chunk ~now ~keeper ~request_id ~is_btw ~chunk (m : Model.t
           in
           (d1, extra_cmds)
       | Wire_fleet.Chunk_run_started { operation_id }
+      | Wire_fleet.Chunk_runtime_attempt_started { operation_id }
       | Wire_fleet.Chunk_text_delta { operation_id; _ }
       | Wire_fleet.Chunk_thinking_delta { operation_id; _ }
       | Wire_fleet.Chunk_thinking_snapshot { operation_id; _ }

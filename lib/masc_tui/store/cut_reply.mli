@@ -16,6 +16,19 @@
 open Masc_tui_core
 open Masc_tui_protocol
 
+type ownership
+(** Live and journal response-ownership state mirroring
+    [Keeper_chat_response_ownership.t]. *)
+
+val fresh_ownership : ownership
+
+type admission =
+  | Append of ownership
+  | Drop  (** The bytes of a superseded response. *)
+
+val admit : ownership -> Wire_chat_journal.text_owner -> admission
+val retire_attempt : ownership -> ownership
+
 type t
 
 val start : t

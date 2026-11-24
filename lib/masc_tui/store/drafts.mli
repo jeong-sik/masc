@@ -5,6 +5,7 @@
     Drafts are preserved across every workspace, dive, and overlay switch. *)
 
 open Masc_tui_core
+open Masc_tui_protocol
 
 module String_map : Map.S with type key = string
 
@@ -75,6 +76,7 @@ type btw_status =
       keeper : string;
       prompt : string;
       buffer : string;
+      ownership : Cut_reply.ownership;
     }
   | Btw_answered of { keeper : string; prompt : string; reply : string }
   | Btw_failed of { keeper : string; prompt : string; reason : string }
@@ -235,7 +237,14 @@ val start_btw :
 (** Start an ephemeral [/btw] side-query, returning the updated store and fresh
     [request_id] without touching the keeper's main composer draft. *)
 
-val append_btw_delta : request_id:string -> delta:string -> t -> t
+val reset_btw_run : request_id:string -> t -> t
+val retire_btw_attempt : request_id:string -> t -> t
+val append_btw_delta :
+  ?owner:Wire_chat_journal.text_owner ->
+  request_id:string ->
+  delta:string ->
+  t ->
+  t
 val finish_btw : request_id:string -> reply:string -> t -> t
 val finalize_btw_eof : request_id:string -> t -> t
 (** Resolve an in-flight [/btw] query when its stream closes cleanly without an

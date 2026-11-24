@@ -1529,7 +1529,11 @@ let test_verifier_regressions () =
            is_btw = true;
            chunk =
              Wire_fleet.Chunk_text_delta
-               { operation_id = Some "op-b"; delta = "pong" };
+               {
+                 operation_id = Some "op-b";
+                 delta = "pong";
+                 owner = Wire_chat_journal.Unobserved_scope None;
+               };
          })
   in
   let m_btw3, _ =
@@ -3891,7 +3895,11 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
       |> Fleet_store.start_chat_stream ~keeper:"alpha" ~request_id:"old-req"
       |> Fleet_store.apply_chat_stream_chunk ~keeper:"alpha" ~request_id:"old-req"
            (Wire_fleet.Chunk_text_delta
-              { operation_id = Some "op-old"; delta = "Stale previous stream text" })
+              {
+                operation_id = Some "op-old";
+                delta = "Stale previous stream text";
+                owner = Wire_chat_journal.Unobserved_scope None;
+              })
       |> Fleet_store.finish_chat_stream ~keeper:"alpha" ~request_id:"old-req"
            ~error:None
     in
@@ -6299,7 +6307,13 @@ let test_agui_chat_stream_lifecycle_15_bugs () =
            keeper = "alpha-leader";
            request_id = tx_a.request_id;
            is_btw = false;
-           chunk = Wire_fleet.Chunk_text_delta { operation_id = None; delta = "OK" };
+           chunk =
+             Wire_fleet.Chunk_text_delta
+               {
+                 operation_id = None;
+                 delta = "OK";
+                 owner = Wire_chat_journal.Unobserved_scope None;
+               };
          })
   in
   Alcotest.(check bool) "phase -> Phase_streaming" true
@@ -6470,7 +6484,13 @@ let test_agui_chat_stream_lifecycle_15_bugs () =
            keeper = "alpha-leader";
            request_id = tx_b.request_id;
            is_btw = false;
-           chunk = Wire_fleet.Chunk_text_delta { operation_id = None; delta = "응답 B" };
+           chunk =
+             Wire_fleet.Chunk_text_delta
+               {
+                 operation_id = None;
+                 delta = "응답 B";
+                 owner = Wire_chat_journal.Unobserved_scope None;
+               };
          })
   in
   let m_late_err, cmds_late_err =
@@ -8461,7 +8481,11 @@ let test_busy_enter_queues_and_steer_cuts_only_own_request () =
   let m2, _ =
     feed m1 ~request_id:a.request_id
       (Wire_fleet.Chunk_text_delta
-         { operation_id = Some a.request_id; delta = "partial reply" })
+         {
+           operation_id = Some a.request_id;
+           delta = "partial reply";
+           owner = Wire_chat_journal.Unobserved_scope None;
+         })
   in
   let m2 = with_turn ~interrupt_token:"turn-of-a" m2 in
   (* Busy with A: Enter queues B behind A and keeps A streaming. *)
@@ -10033,6 +10057,120 @@ let test_cut_reply_failure_after_the_first_page () =
     [ ("op-long", "start") ]
     (journal_gets (View_fetches.fetches_for_current_view down))
 
+let test_live_chat_runtime_attempt_and_text_ownership () =
+  let keeper = "alpha" in
+  let req = "req-retry-1" in
+  let obs gen scope =
+    Wire_chat_journal.Observed_response
+      { content_generation = gen; stream_scope = scope }
+  in
+  let delta ~owner text =
+    Wire_fleet.Chunk_text_delta { operation_id = Some req; delta = text; owner }
+  in
+  let f0 =
+    Fleet_store.empty
+    |> Fleet_store.start_chat_stream ~keeper ~request_id:req
+    |> Fleet_store.apply_chat_stream_chunk ~keeper ~request_id:req
+         (Wire_fleet.Chunk_run_started { operation_id = Some req })
+    |> Fleet_store.apply_chat_stream_chunk ~keeper ~request_id:req
+         (Wire_fleet.Chunk_thinking_delta
+            { operation_id = Some req; delta = "attempt 1 thought" })
+    |> Fleet_store.apply_chat_stream_chunk ~keeper ~request_id:req
+         (Wire_fleet.Chunk_tool_start
+            {
+              operation_id = Some req;
+              tool_use_id = "tu-1";
+              tool_name = "read_file";
+              args_preview = Some "a.ml";
+            })
+    |> Fleet_store.apply_chat_stream_chunk ~keeper ~request_id:req
+         (Wire_fleet.Chunk_tool_end
+            {
+              operation_id = Some req;
+              tool_use_id = "tu-1";
+              tool_name = Some "read_file";
+              ok = Some true;
+              output_preview = Some "ok";
+            })
+    |> Fleet_store.apply_chat_stream_chunk ~keeper ~request_id:req
+         (delta ~owner:(obs 1 0) "Attempt 1 partial ")
+  in
+  let f1 =
+    Fleet_store.apply_chat_stream_chunk ~keeper ~request_id:req
+      (Wire_fleet.Chunk_runtime_attempt_started { operation_id = Some req })
+      f0
+  in
+  let buf1 = Fleet_store.String_map.find keeper f1.chat_streams in
+  Alcotest.(check string) "attempt boundary discards unfinished text" "" buf1.text;
+  Alcotest.(check string) "attempt boundary discards unfinished thinking" ""
+    buf1.thinking;
+  Alcotest.(check int) "attempt boundary preserves completed tools" 1
+    (List.length buf1.tools);
+  (* Late delta from retired attempt 1 is dropped; attempt 2 text is accepted. *)
+  let f2 =
+    f1
+    |> Fleet_store.apply_chat_stream_chunk ~keeper ~request_id:req
+         (delta ~owner:(obs 1 0) "STALE_LATE_TEXT")
+    |> Fleet_store.apply_chat_stream_chunk ~keeper ~request_id:req
+         (delta ~owner:(obs 2 0) "Attempt 2 ")
+    |> Fleet_store.apply_chat_stream_chunk ~keeper ~request_id:req
+         (delta ~owner:(Wire_chat_journal.Unobserved_scope (Some 2)) "scope ")
+    |> Fleet_store.apply_chat_stream_chunk ~keeper ~request_id:req
+         (delta ~owner:(obs 2 1) "PRECEDING_SCOPE_DROPPED")
+    |> Fleet_store.apply_chat_stream_chunk ~keeper ~request_id:req
+         (delta ~owner:(obs 2 2) "final.")
+  in
+  let buf2 = Fleet_store.String_map.find keeper f2.chat_streams in
+  Alcotest.(check string)
+    "stale retired and out-of-scope deltas dropped while attempt 2 accepted"
+    "Attempt 2 scope final." buf2.text;
+  (* Post-RUN_FINISHED late delta is ignored and does not resurrect buffer. *)
+  let f3 =
+    f2
+    |> Fleet_store.apply_chat_stream_chunk ~keeper ~request_id:req
+         (Wire_fleet.Chunk_turn_done
+            { operation_id = Some req; turn_ref = None; reply = None })
+    |> Fleet_store.apply_chat_stream_chunk ~keeper ~request_id:req
+         (delta ~owner:(obs 3 0) "LATE_AFTER_DONE")
+  in
+  let buf3 = Fleet_store.String_map.find keeper f3.chat_streams in
+  Alcotest.(check string) "late delta after RUN_FINISHED ignored"
+    "Attempt 2 scope final." buf3.text;
+  Alcotest.(check bool) "buffer stays inactive after late delta" false buf3.active;
+  Alcotest.(check bool) "buffer stays ended after late delta" true buf3.ended;
+  (* /btw side-query also honors runtime attempt retry and response ownership. *)
+  let t0 = Clock.Mono.zero in
+  let drafts0, btw_id =
+    Drafts.start_btw ~now:t0 ~keeper ~prompt:"status?" Drafts.empty
+  in
+  let m0 = { (Model.initial ()) with drafts = drafts0 } in
+  let feed_btw m chunk =
+    fst
+      (Update.step ~now:t0 m
+         (Msg.Chat_stream_chunk
+            { epoch = m.epoch; keeper; request_id = btw_id; is_btw = true; chunk }))
+  in
+  let m_btw =
+    m0
+    |> (fun m -> feed_btw m (Wire_fleet.Chunk_run_started { operation_id = Some btw_id }))
+    |> (fun m -> feed_btw m (delta ~owner:(obs 1 0) "btw attempt 1"))
+    |> (fun m ->
+         feed_btw m (Wire_fleet.Chunk_runtime_attempt_started { operation_id = Some btw_id }))
+    |> (fun m -> feed_btw m (delta ~owner:(obs 1 0) "stale btw"))
+    |> (fun m -> feed_btw m (delta ~owner:(obs 2 0) "btw clean"))
+    |> (fun m ->
+         feed_btw m
+           (Wire_fleet.Chunk_turn_done
+              { operation_id = Some btw_id; turn_ref = None; reply = None }))
+  in
+  match m_btw.drafts.btw with
+  | Drafts.Btw_answered { reply; _ } ->
+      Alcotest.(check string) "/btw retires attempt 1 and keeps attempt 2"
+        "btw clean" reply
+  | Drafts.Btw_idle | Drafts.Btw_sending _ | Drafts.Btw_streaming _
+  | Drafts.Btw_failed _ ->
+      Alcotest.fail "expected Btw_answered"
+
 let () =
   Alcotest.run "masc_tui_store"
     [
@@ -10180,5 +10318,8 @@ let () =
           Alcotest.test_case
             "A failure after the first page replaces the partial read"
             `Quick test_cut_reply_failure_after_the_first_page;
+          Alcotest.test_case
+            "Live chat and /btw honor runtime attempt boundary and text ownership"
+            `Quick test_live_chat_runtime_attempt_and_text_ownership;
         ] );
     ]

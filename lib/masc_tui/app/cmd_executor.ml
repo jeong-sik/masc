@@ -1446,6 +1446,7 @@ let execute_post_stream t ~epoch req =
                         publish_chunk chunk
                     | Ok
                         (( Wire_fleet.Chunk_run_started _
+                         | Wire_fleet.Chunk_runtime_attempt_started _
                          | Wire_fleet.Chunk_text_delta _
                          | Wire_fleet.Chunk_thinking_delta _
                          | Wire_fleet.Chunk_thinking_snapshot _

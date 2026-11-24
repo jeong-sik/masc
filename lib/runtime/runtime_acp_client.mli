@@ -159,6 +159,10 @@ type driver_profile =
   }
 
 val profile_of_driver : driver -> driver_profile
+
+val validate_session_effort :
+  driver:driver -> Llm_provider.Reasoning_effort.t option -> (unit, string) result
+(** Check whether the driver accepts a request to set reasoning effort on a session. *)
 val mode_of_posture : driver -> Runtime_native_tools.posture -> string
 
 val resolve_mode_for_posture

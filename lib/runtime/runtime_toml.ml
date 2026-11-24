@@ -592,6 +592,22 @@ let validate_ollama_only_binding_fields
     bindings
 ;;
 
+let validate_acp_binding_efforts (config : Runtime_schema.config) =
+  List.concat_map
+    (fun (binding : Runtime_schema.binding) ->
+       match Runtime_schema.provider_of_id config binding.provider_id,
+             Runtime_schema.model_of_id config binding.model_id with
+       | Some { acp = Some options; _ }, Some model ->
+         let effort =
+           match binding.effort with Some _ as bound -> bound | None -> model.reasoning_effort
+         in
+         (match Runtime_acp_client.validate_session_effort ~driver:options.driver effort with
+          | Ok () -> []
+          | Error detail -> error (Runtime_schema.binding_key binding) detail)
+       | _ -> [])
+    config.bindings
+;;
+
 (* [admission-priority-run-limit] orders the queue for an account's permits.
    Only an HTTP request admitted through [max-concurrent] waits in that
    queue: official-client runtimes run outside it, and a binding without
@@ -1076,32 +1092,34 @@ let parse_table ~home (toml : Otoml.t) : (Runtime_schema.config, parse_error lis
     let browser = extract_after_all_errors_guard ~label:(Ns.key Ns.Browser) browser_result in
     let machines = extract_after_all_errors_guard ~label:(Ns.key Ns.Machines) machines_result in
     let typesafeai = extract_after_all_errors_guard ~label:(Ns.(key Typesafeai)) typesafeai_result in
+    let config =
+      { Runtime_schema.providers
+      ; models
+      ; bindings
+      ; default_runtime_id = runtime_section.default_runtime_id
+      ; keeper_assignments
+      ; media_failover = runtime_section.media_failover
+      ; media_readers
+      ; lane_decls
+      ; exact_output_lane_decls
+      ; exec_ssh_endpoints
+      ; egress_allowlists
+      ; lsp_servers
+      ; typesafeai
+      ; browser
+      ; machines
+      }
+    in
     (* Cross-table Gates: whether a declaration can take effect depends on
        another table -- a binding field on its provider's request builder, a
        provider's run limit on its bindings' permit queue. *)
     match
       validate_ollama_only_binding_fields providers bindings
       @ validate_priority_run_limit_providers providers bindings
+      @ validate_acp_binding_efforts config
     with
     | _ :: _ as errors -> Error errors
-    | [] ->
-      Ok
-        { Runtime_schema.providers
-        ; models
-        ; bindings
-        ; default_runtime_id = runtime_section.default_runtime_id
-        ; keeper_assignments
-        ; media_failover = runtime_section.media_failover
-        ; media_readers
-        ; lane_decls
-        ; exact_output_lane_decls
-        ; exec_ssh_endpoints
-        ; egress_allowlists
-        ; lsp_servers
-        ; typesafeai
-        ; browser
-        ; machines
-        })
+    | [] -> Ok config)
 ;;
 
 (* [home] is what a ["~/"] credential path expands under. It is the one thing

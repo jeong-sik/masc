@@ -258,6 +258,17 @@ let profile_of_driver = function
     }
 ;;
 
+let validate_session_effort ~driver effort =
+  match effort, (profile_of_driver driver).effort_config_id with
+  | Some requested, None ->
+    Error
+      (Printf.sprintf
+         "%s takes reasoning effort at process start. Set -c reasoning_effort=\"%s\" in the provider args."
+         (driver_to_string driver)
+         (Llm_provider.Reasoning_effort.to_string requested))
+  | None, _ | Some _, Some _ -> Ok ()
+;;
+
 let mode_of_posture driver (posture : Runtime_native_tools.posture) =
   let profile = profile_of_driver driver in
   match posture with
@@ -3606,7 +3617,13 @@ let apply_session_options
   Ok { info with current_mode_id; current_model_id; config_options }
 ;;
 
+let check_requested_effort t effort =
+  validate_session_effort ~driver:t.driver effort
+  |> Result.map_error (fun detail -> Invalid_config detail)
+;;
+
 let reconfigure_session t info ?mode ?model ?effort () =
+  let* () = check_requested_effort t effort in
   let merged = merge_with_cached_session_catalog t info in
   apply_session_options t merged ~mode ~model ~effort
 ;;
@@ -3640,6 +3657,7 @@ let new_session
       ?effort
       ()
   =
+  let* () = check_requested_effort t effort in
   register_stderr_secrets t mcp_server;
   let profile = profile_of_driver t.driver in
   let meta_fields =
@@ -3703,6 +3721,7 @@ let attach_existing_session
       ?effort
       ()
   =
+  let* () = check_requested_effort t effort in
   register_stderr_secrets t mcp_server;
   let extra_dir_fields = extra_dir_fields_for_client t additional_directories in
   let params =

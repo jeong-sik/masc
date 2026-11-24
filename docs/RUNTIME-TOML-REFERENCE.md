@@ -132,7 +132,8 @@ credential naming an absolute path (`oauth_source` for Antigravity); `env` and
   and MASC MCP tools are allowed; writes, shell and fetch are refused unless the
   Keeper declares `full`. Fusion and runtime verification require `none` and
   refuse Muse Code before starting its process.
-- `effort` is refused at load, because the client has no effort option. Put
+- Muse bindings reject provider and binding `effort`, model `reasoning-effort`, and
+  effort variants at load. Per-turn effort overrides are also refused. Put
   `-c reasoning_effort="<level>"` in `args`, for example
   `args = ["acp", "-c", "reasoning_effort=\"low\""]`.
 - Sessions live under `$XDG_DATA_HOME/muse` (default `~/.local/share/muse`), the

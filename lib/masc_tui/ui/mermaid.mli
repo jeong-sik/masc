@@ -247,6 +247,11 @@ val render : cols:int -> string -> (string list, failure) result
     carries no trailing spaces; rows are not padded. Use {!render_with_status}
     when the caller needs to preserve accepted but undrawn content. *)
 
+val render_adaptive : cols:int -> string -> (string list, failure) result
+(** Like {!render}, but when a horizontal graph ([Left_right] or [Right_left])
+    fails with {!Too_wide}, automatically retries vertically in {!Top_down}
+    orientation before returning a failure. *)
+
 type source_placement = Before_diagram | After_diagram
 type undrawn_source = { source_start : int; source_end : int; placement : source_placement }
 (** A half-open byte range in the input source, for content not drawn. *)

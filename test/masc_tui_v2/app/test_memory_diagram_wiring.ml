@@ -688,10 +688,15 @@ let test_cmd_executor_render_decisions () =
   | Knowledge_store.Diagram_text _ | Knowledge_store.Diagram_pele_png _ ->
       fail "expected Diagram_text fallback with note when graphics unsupported");
 
-  (* Auto + Kitty + missing palette on SVG card -> Mermaid fallback with note *)
+  (* Auto + Kitty + missing terminal OSC 11 palette on SVG card -> falls back to active TUI Theme
+     palette and STILL emits Diagram_pele_png! *)
+  let no_pal_scene = ref None in
   let payload_no_pal =
     Cmd_executor.render_memory_diagram_payload
-      ~run_pele:(fun _ -> Ok png)
+      ~run_pele:(fun sc ->
+        no_pal_scene := Some sc;
+        Ok png)
+      ~theme_preset:Theme.Paper_light
       ~probe:{ kitty_probe with palette = None }
       ~term_program:None ~palette:None ~keeper:"alpha"
       ~kind:Knowledge_store.Diagram_pele_card
@@ -699,9 +704,40 @@ let test_cmd_executor_render_decisions () =
       ~now_unix:1_700_000_500.0 ~max_width:100 ~chart ()
   in
   (match payload_no_pal with
-  | Knowledge_store.Diagram_text { lines = _ :: _; note = Some _ } -> ()
-  | Knowledge_store.Diagram_text _ | Knowledge_store.Diagram_pele_png _ ->
-      fail "expected Diagram_text fallback when palette absent");
+  | Knowledge_store.Diagram_pele_png
+      { pixel_size = Some (1240, 540); format_label = "Pele SVG"; _ } ->
+      ()
+  | Knowledge_store.Diagram_pele_png _ | Knowledge_store.Diagram_text _ ->
+      fail "expected Diagram_pele_png using Theme fallback palette when OSC 11 palette is None");
+  let expected_paper_colors =
+    Pele.colors_of_palette (Palette.of_theme (Theme.of_preset Theme.Paper_light))
+  in
+  (match !no_pal_scene with
+  | Some sc ->
+      check (option (pair string string))
+        "Pele scene uses active Theme fallback colors"
+        (Some expected_paper_colors) sc.colors
+  | None -> fail "expected Pele scene to be invoked with fallback theme palette");
+
+  (* Auto + Ghostty TERM_PROGRAM with probe.graphics=None -> Kitty_protocol -> Pele SVG PNG *)
+  let ghostty_called = ref 0 in
+  let payload_ghostty =
+    Cmd_executor.render_memory_diagram_payload
+      ~run_pele:(fun _ ->
+        incr ghostty_called;
+        Ok png)
+      ~probe:Probe.empty_observation ~term_program:(Some "ghostty")
+      ~palette:None ~keeper:"alpha"
+      ~kind:Knowledge_store.Diagram_pele_card
+      ~mode:Knowledge_store.Diagram_mode_auto ~ko:false ~tz_offset_sec:0
+      ~now_unix:1_700_000_500.0 ~max_width:100 ~chart ()
+  in
+  check int "Ghostty fallback invokes Pele without startup probe reply" 1
+    !ghostty_called;
+  (match payload_ghostty with
+  | Knowledge_store.Diagram_pele_png { pixel_size = Some (1240, 540); _ } -> ()
+  | Knowledge_store.Diagram_pele_png _ | Knowledge_store.Diagram_text _ ->
+      fail "expected Diagram_pele_png on Ghostty when probe.graphics = None");
 
   (* Auto + Kitty + Pele error on Formation Tree -> Memory_tree fallback with note *)
   let payload_tree_err =
@@ -1073,14 +1109,29 @@ let test_term_dumb_masks_term_program () =
       ~term_program ~in_tmux:false ~model:m_png ~full_repaint:false
   in
   check string "TERM=dumb emits zero OSC 1337 bytes" ""
-    step_dumb.post_present_bytes
+    step_dumb.post_present_bytes;
+  let step_tmux_ghostty =
+    App.step_memory_graphic ~active:None ~probe:Probe.empty_observation
+      ~term_program:(Some "ghostty") ~in_tmux:true ~model:m_png
+      ~full_repaint:false
+  in
+  check string "tmux with graphics=None emits zero Kitty APC bytes even for ghostty"
+    "" step_tmux_ghostty.post_present_bytes;
+  let step_direct_ghostty =
+    App.step_memory_graphic ~active:None ~probe:Probe.empty_observation
+      ~term_program:(Some "ghostty") ~in_tmux:false ~model:m_png
+      ~full_repaint:false
+  in
+  check bool "direct Ghostty with graphics=None emits Kitty APC bytes" true
+    (String.length step_direct_ghostty.post_present_bytes > 0)
 
 (* 7. Hidden diagram on narrow 4 Keepers / Micro does not hijack Esc/y/v,
       Enter is no-op in 3 -> Memory when diagram open,
       [r] retries failed diagram, Msg.Resize re-layouts open text diagram *)
 
 let test_visibility_enter_refresh_and_resize () =
-  (* 7a. Narrow 4 Keepers non-zoomed hides memory pane -> active_diagram = None, no key hijack *)
+  (* 7a. Compact (< 104 cols) 4 Keepers > Memory renders open diagram in full body card;
+         switching away from Keeper_memory tab (or Micro viewport) hides diagram without key hijack *)
   let m0 =
     Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_ko
       ~wall_unix:1_700_000_500.0 ()
@@ -1101,35 +1152,62 @@ let test_visibility_enter_refresh_and_resize () =
          (Observed.value ~observed_at:now0 (sample_facts ~keeper:"alpha"))
   in
   let m_kp0, _ = Update_nav.switch_workspace { m0 with fleet; knowledge } Nav.Keepers in
+  (* Compact width (cols=80 < 104) on 4 Keepers > Memory opens diagram cleanly in full body card *)
+  let m_compact0, _ =
+    Update.step ~now:now0 m_kp0 (Msg.Resize { cols = 80; rows = 30 })
+  in
+  let m_compact_open, cmds_compact_open =
+    Update.step ~now:now0 m_compact0 (Msg.Key_event (key_char "."))
+  in
+  check bool "diagram active on compact (< 104) 4 Keepers > Memory" true
+    (Option.is_some (Memory_diagram.active_diagram m_compact_open));
+  check bool "compact 4 Keepers > Memory dispatches Render_memory_diagram" true
+    (Option.is_some (find_render_cmd cmds_compact_open));
+  let m_compact_v, _ =
+    Update.step ~now:now0 m_compact_open (Msg.Key_event (key_char "v"))
+  in
+  check bool "v cycles mode on compact 4 Keepers > Memory" true
+    (Knowledge_store.equal_memory_diagram_mode
+       (Option.get m_compact_v.knowledge.memory_diagram).mode
+       Knowledge_store.Diagram_mode_mermaid);
+  let m_compact_esc, _ =
+    Update.step ~now:now0 m_compact_v (Msg.Key_event (key_special Keymap.Input.Escape))
+  in
+  check bool "Esc closes compact 4 Keepers > Memory diagram cleanly" true
+    (Option.is_none m_compact_esc.knowledge.memory_diagram);
+
+  (* Hidden diagram when tab is switched away from Keeper_memory does NOT hijack v / y / Esc *)
   let m_kp_open, _ = Update.step ~now:now0 m_kp0 (Msg.Key_event (key_char ".")) in
   check bool "diagram active on wide split 4 Keepers" true
     (Option.is_some (Memory_diagram.active_diagram m_kp_open));
-  (* Shrink to narrow Compact (cols=80, rows=30) where Screen_keepers hides split right pane *)
-  let m_narrow, _ =
-    Update.step ~now:now0 m_kp_open (Msg.Resize { cols = 80; rows = 30 })
+  let m_hidden =
+    {
+      m_kp_open with
+      fleet = Fleet_store.set_keeper_dive_tab Nav.Keeper_chat m_kp_open.fleet;
+    }
   in
-  check bool "narrow unsplit 4 Keepers hides active_memory_keeper" true
-    (Option.is_none (Memory_diagram.active_memory_keeper m_narrow));
-  check bool "narrow unsplit 4 Keepers hides active_diagram" true
-    (Option.is_none (Memory_diagram.active_diagram m_narrow));
-  let m_narrow_v, cmds_narrow_v =
-    Update.step ~now:now0 m_narrow (Msg.Key_event (key_char "v"))
+  check bool "non-Memory tab hides active_memory_keeper" true
+    (Option.is_none (Memory_diagram.active_memory_keeper m_hidden));
+  check bool "non-Memory tab hides active_diagram" true
+    (Option.is_none (Memory_diagram.active_diagram m_hidden));
+  let m_hidden_v, cmds_hidden_v =
+    Update.step ~now:now0 m_hidden (Msg.Key_event (key_char "v"))
   in
-  check bool "v does not re-render hidden diagram on narrow 4 Keepers" true
-    (Option.is_none (find_render_cmd cmds_narrow_v));
+  check bool "v does not re-render hidden diagram" true
+    (Option.is_none (find_render_cmd cmds_hidden_v));
   check bool "hidden diagram mode unchanged by v" true
     (Knowledge_store.equal_memory_diagram_mode
-       (Option.get m_narrow_v.knowledge.memory_diagram).mode
+       (Option.get m_hidden_v.knowledge.memory_diagram).mode
        Knowledge_store.Diagram_mode_auto);
-  let _, cmds_narrow_y =
-    Update.step ~now:now0 m_narrow (Msg.Key_event (key_char "y"))
+  let _, cmds_hidden_y =
+    Update.step ~now:now0 m_hidden (Msg.Key_event (key_char "y"))
   in
   let copied_hidden =
     List.exists
       (function
         | Cmd.Copy_clipboard s ->
             String.equal s
-              (Option.get m_narrow.knowledge.memory_diagram).copy_source
+              (Option.get m_hidden.knowledge.memory_diagram).copy_source
         | Cmd.Batch _
         | Cmd.Http_get _
         | Cmd.Http_post _
@@ -1149,15 +1227,14 @@ let test_visibility_enter_refresh_and_resize () =
         | Cmd.Restart_tui
         | Cmd.Quit _ ->
             false)
-      (Cmd.flatten cmds_narrow_y)
+      (Cmd.flatten cmds_hidden_y)
   in
-  check bool "y does not copy hidden diagram on narrow 4 Keepers" false
-    copied_hidden;
-  let m_narrow_esc, _ =
-    Update.step ~now:now0 m_narrow (Msg.Key_event (key_special Keymap.Input.Escape))
+  check bool "y does not copy hidden diagram" false copied_hidden;
+  let m_hidden_esc, _ =
+    Update.step ~now:now0 m_hidden (Msg.Key_event (key_special Keymap.Input.Escape))
   in
-  check bool "Esc does not hijack/close hidden diagram on narrow 4 Keepers" true
-    (Option.is_some m_narrow_esc.knowledge.memory_diagram);
+  check bool "Esc does not hijack/close hidden diagram" true
+    (Option.is_some m_hidden_esc.knowledge.memory_diagram);
 
   (* Micro viewport also hides active_diagram on Dive_keeper *)
   let m_dive = model_in_keeper_memory_dive ~keeper:"alpha" in
@@ -1396,6 +1473,151 @@ let test_pele_cooperative_cancellation () =
   check bool "Markdown reference documents Formation Tree on Ctrl+O" true
     (has_substring md_ref "Formation Tree"))
 
+let test_all_subviews_and_orphan_fact_snapshot () =
+  let m0 = model_in_keeper_memory_dive ~keeper:"alpha" in
+
+  (* 1. All keeper-scoped subviews in Dive_keeper allow '.' and Ctrl+O,
+        and Esc restores the exact prior subview *)
+  let check_keeper_subview label subview =
+    let m_sv =
+      { m0 with knowledge = { m0.knowledge with keeper_memory_subview = subview } }
+    in
+    let m_open, cmds_open =
+      Update.step ~now:now0 m_sv (Msg.Key_event (key_char "."))
+    in
+    check bool (label ^ ": '.' opens diagram") true
+      (Option.is_some (Memory_diagram.active_diagram m_open));
+    check bool (label ^ ": '.' dispatches Render_memory_diagram") true
+      (Option.is_some (find_render_cmd cmds_open));
+    let m_tree, _ =
+      Update.step ~now:now0 m_open (Msg.Key_event (key_char ~ctrl:true "o"))
+    in
+    check bool (label ^ ": Ctrl+O switches to Formation Tree") true
+      (Knowledge_store.equal_memory_diagram_kind
+         (Option.get m_tree.knowledge.memory_diagram).kind
+         Knowledge_store.Diagram_formation_tree);
+    let m_esc, _ =
+      Update.step ~now:now0 m_tree (Msg.Key_event (key_special Keymap.Input.Escape))
+    in
+    check bool (label ^ ": Esc closes diagram") true
+      (Option.is_none m_esc.knowledge.memory_diagram);
+    check bool (label ^ ": Esc preserves exact prior keeper_memory_subview") true
+      (Knowledge_store.equal_keeper_memory_subview
+         m_esc.knowledge.keeper_memory_subview subview)
+  in
+  check_keeper_subview "Kmem_facts_tree" Knowledge_store.Kmem_facts_tree;
+  check_keeper_subview "Kmem_health" Knowledge_store.Kmem_health;
+  check_keeper_subview "Kmem_journal" Knowledge_store.Kmem_journal;
+
+  (* 2. Non-Diff_flow subviews in 3 Knowledge -> Memory (Mem_health_ledger, Mem_context)
+        allow '.' and Ctrl+O when a keeper is selected *)
+  let m_k_base =
+    let m_init =
+      Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_en
+        ~wall_unix:1_700_000_500.0 ()
+    in
+    let knowledge =
+      Knowledge_store.empty
+      |> Knowledge_store.set_tab Nav.Knowledge_memory
+      |> Knowledge_store.set_memory_diff_keeper (Some "alpha")
+      |> Knowledge_store.set_keeper_memory_activity ~keeper:"alpha"
+           (Observed.value ~observed_at:now0 (sample_activity ~keeper:"alpha"))
+      |> Knowledge_store.set_keeper_memory_facts ~keeper:"alpha"
+           (Observed.value ~observed_at:now0 (sample_facts ~keeper:"alpha"))
+    in
+    fst (Update_nav.switch_workspace { m_init with knowledge } Nav.Knowledge)
+  in
+  List.iter
+    (fun (label, subview) ->
+      let m_sv =
+        { m_k_base with knowledge = { m_k_base.knowledge with memory_subview = subview } }
+      in
+      let m_open, cmds_open =
+        Update.step ~now:now0 m_sv (Msg.Key_event (key_char "."))
+      in
+      check bool (label ^ ": '.' opens diagram") true
+        (Option.is_some (Memory_diagram.active_diagram m_open));
+      check bool (label ^ ": '.' emits Render_memory_diagram") true
+        (Option.is_some (find_render_cmd cmds_open));
+      let m_esc, _ =
+        Update.step ~now:now0 m_open
+          (Msg.Key_event (key_special Keymap.Input.Escape))
+      in
+      check bool (label ^ ": Esc closes diagram") true
+        (Option.is_none m_esc.knowledge.memory_diagram);
+      check bool (label ^ ": Esc preserves exact prior memory_subview") true
+        (Knowledge_store.equal_memory_subview m_esc.knowledge.memory_subview
+           subview))
+    [
+      ("Mem_health_ledger", Knowledge_store.Mem_health_ledger);
+      ("Mem_context", Knowledge_store.Mem_context);
+    ];
+
+  (* 3. Ordinary fact absent from last 50 activity events (m-orphan) opens an honest
+        single-fact current-snapshot chart instead of rejecting with a toast! *)
+  let m_facts_en =
+    let m_en =
+      Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_en
+        ~wall_unix:1_700_000_500.0 ()
+    in
+    let fleet = m0.fleet in
+    let knowledge =
+      m0.knowledge
+      |> Knowledge_store.set_memory_view_mode Knowledge_store.View_facts
+    in
+    let m1, _ =
+      Update_nav.push_dive { m_en with fleet; knowledge }
+        (Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_memory })
+    in
+    (* Move selection down twice to reach m-orphan (index 2: m-1, m-3, m-orphan) *)
+    let m2, _ = Update.step ~now:now0 m1 (Msg.Key_event (key_char "j")) in
+    let m3, _ = Update.step ~now:now0 m2 (Msg.Key_event (key_char "j")) in
+    m3
+  in
+  let m_orphan_open, orphan_cmds =
+    Update.step ~now:now0 m_facts_en (Msg.Key_event (key_char "."))
+  in
+  let d_orphan =
+    match m_orphan_open.knowledge.memory_diagram with
+    | Some d -> d
+    | None ->
+        fail
+          "expected honest current-snapshot diagram for ordinary fact absent from activity"
+  in
+  check string "orphan fact snapshot event_identity" "snapshot:m-orphan"
+    d_orphan.event_identity;
+  check bool "orphan fact snapshot uses Diagram_source_fact_snapshot" true
+    (match d_orphan.source with
+    | Knowledge_store.Diagram_source_fact_snapshot id ->
+        String.equal id "m-orphan"
+    | Knowledge_store.Diagram_source_event _ -> false);
+  (match find_render_cmd orphan_cmds with
+  | Some (Cmd.Render_memory_diagram { chart; _ }) ->
+      check int "snapshot chart has zero fabricated before facts" 0
+        (List.length chart.selected.before);
+      check int "snapshot chart has exactly 1 current after fact" 1
+        (List.length chart.selected.after);
+      check string "snapshot chart preserves exact claim"
+        "Fact with no activity event"
+        (Memory_lineage.fact_claim_text ~ko:false chart
+           (List.hd chart.selected.after));
+      check bool "snapshot chart reason marks Current snapshot" true
+        (match chart.selected.reason with
+        | Some r -> has_substring r "Current snapshot"
+        | None -> false)
+  | Some _ | None ->
+      fail "expected Render_memory_diagram command for orphan fact snapshot");
+  (* Cycling [v] on snapshot diagram works cleanly (Auto -> Mermaid -> Tree) *)
+  let m_orphan_v1, cmds_v1 =
+    Update.step ~now:now0 m_orphan_open (Msg.Key_event (key_char "v"))
+  in
+  check bool "v cycles snapshot diagram to Mermaid" true
+    (Knowledge_store.equal_memory_diagram_mode
+       (Option.get m_orphan_v1.knowledge.memory_diagram).mode
+       Knowledge_store.Diagram_mode_mermaid);
+  check bool "v re-dispatches Render_memory_diagram for snapshot" true
+    (Option.is_some (find_render_cmd cmds_v1))
+
 let () =
   run "masc_tui_v2_memory_diagram_wiring"
     [
@@ -1415,8 +1637,11 @@ let () =
           test_case "TERM=dumb masks TERM_PROGRAM=iTerm.app everywhere" `Quick
             test_term_dumb_masks_term_program;
           test_case
-            "Narrow/Micro non-hijack, 3->Memory Enter no-op, [r] retry & Resize relayout"
+            "Compact 4 Keepers, hidden tab non-hijack, 3->Memory Enter no-op, [r] retry & Resize relayout"
             `Quick test_visibility_enter_refresh_and_resize;
+          test_case
+            "All keeper-scoped subviews & orphan ordinary fact current-snapshot chart"
+            `Quick test_all_subviews_and_orphan_fact_snapshot;
           test_case "Pele cooperative cancellation kills sleeping helper promptly"
             `Quick test_pele_cooperative_cancellation;
         ] );

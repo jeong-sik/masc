@@ -13579,6 +13579,7 @@ let test_freeze_fixes_epoch_locks_micro_inline_and_cut_reply () =
         request_id = 1;
         keeper = "alpha";
         event_identity = "ev-1";
+        source = Knowledge_store.Diagram_source_event "ev-1";
         revision = 1;
         kind = Knowledge_store.Diagram_pele_card;
         mode = Knowledge_store.Diagram_mode_auto;

@@ -74,6 +74,84 @@ let chart_of_activity ~keeper ~(activity : Wire_knowledge.keeper_memory_activity
     in
     Memory_lineage.select ~event_id:selected.identity lineage_activity
 
+let chart_of_ordinary_fact ?(tz_offset_sec = 0) ~ko ?now ~revision
+    ~(activity : Wire_knowledge.keeper_memory_activity option)
+    (fact : Wire_knowledge.keeper_ordinary_fact) =
+  let recorded_at =
+    if Float.is_finite fact.last_seen_unix && fact.last_seen_unix > 0.0 then
+      fact.last_seen_unix
+    else fact.first_seen_unix
+  in
+  let now_ts =
+    match now with
+    | Some ts when Float.is_finite ts && ts > 0.0 -> ts
+    | Some _ | None -> recorded_at
+  in
+  let first_str =
+    Memory_lineage.format_instant ~tz_offset_sec ~now:now_ts fact.first_seen_unix
+  in
+  let last_str =
+    Memory_lineage.format_instant ~tz_offset_sec ~now:now_ts fact.last_seen_unix
+  in
+  let cat_str = Wire_knowledge.memory_fact_category_to_string fact.category in
+  let origin_str = Wire_knowledge.memory_fact_origin_to_string fact.origin in
+  let reason =
+    if ko then
+      Printf.sprintf
+        "현재 스냅샷 (최근 변천 이력 없음) · 분류: %s · 출처: %s · r%d · 최초 %s · 최근 %s"
+        cat_str origin_str revision first_str last_str
+    else
+      Printf.sprintf
+        "Current snapshot (no recent transition history) · category: %s · origin: %s · r%d · first %s · last %s"
+        cat_str origin_str revision first_str last_str
+  in
+  let journal_lines, limit, snapshot_note =
+    match activity with
+    | Some act ->
+        let note =
+          if ko then
+            Printf.sprintf
+              "현재 스냅샷 표시 — 최근 %d건 변천 이력에 연결된 전이가 없어 이전 이력을 생성하지 않았습니다"
+              act.limit
+          else
+            Printf.sprintf
+              "Current snapshot — no transition in the latest %d activity entries; no prior history fabricated"
+              act.limit
+        in
+        (act.journal_lines, act.limit, note)
+    | None ->
+        let note =
+          if ko then
+            "현재 스냅샷 표시 — 최근 변천 이력 미관측 · 이전 이력을 생성하지 않았습니다"
+          else
+            "Current snapshot — activity log unavailable; no prior history fabricated"
+        in
+        (0, 50, note)
+  in
+  let event_id = "snapshot:" ^ fact.memory_id in
+  let snapshot_event : Memory_lineage.event =
+    {
+      identity = event_id;
+      recorded_at;
+      revision;
+      kind = Memory_lineage.Reobserved;
+      before = [];
+      after = [ { Memory_lineage.memory_id = fact.memory_id; claim = Some fact.claim } ];
+      reason = Some reason;
+    }
+  in
+  let lineage_activity : Memory_lineage.activity =
+    {
+      events = [ snapshot_event ];
+      limit;
+      journal_lines;
+      notes = [ snapshot_note ];
+    }
+  in
+  match Memory_lineage.select ~event_id lineage_activity with
+  | Some chart -> chart
+  | None -> assert false
+
 let event_references_fact ~memory_id (ev : Wire_knowledge.memory_activity_event)
     =
   let has_id xs =
@@ -150,7 +228,7 @@ let mermaid_failure_note ~ko = function
 let render_mermaid_fallback ?tz_offset_sec ~ko ?now ~max_width ~kind chart =
   let cols = Int.max 12 max_width in
   let src = mermaid_source ?tz_offset_sec ~ko ?now ~kind chart in
-  match Mermaid.render ~cols src with
+  match Mermaid.render_adaptive ~cols src with
   | Ok rows -> (rows, None)
   | Error failure ->
       let note = mermaid_failure_note ~ko failure in
@@ -306,11 +384,7 @@ let keeper_memory_content_of_tabs_body ~bp ~embedded ~has_keeper
         if subbar_h = 1 then snd (Rect.split_v content_rect ~top_h:1)
         else content_rect
       in
-      let footer_h = if after_subbar.h >= 7 then 2 else 0 in
-      let mem_body, _ =
-        Rect.split_v after_subbar ~top_h:(Int.max 0 (after_subbar.h - footer_h))
-      in
-      Card.pad_inner ~pad_x mem_body
+      Card.pad_inner ~pad_x after_subbar
 
 let active_memory_content_rect (m : Model.t) =
   if Option.is_some m.nav.overlay then None
@@ -320,21 +394,14 @@ let active_memory_content_rect (m : Model.t) =
     | Some (bp, body) -> (
         match Model.active_dive m with
         | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory }) ->
-            if
-              not
-                (Knowledge_store.equal_keeper_memory_subview
-                   m.knowledge.keeper_memory_subview
-                   Knowledge_store.Kmem_diff_flow)
-            then None
-            else
-              let has_keeper =
-                Option.is_some (Fleet_store.find_keeper ~name m.fleet)
-              in
-              let content =
-                keeper_memory_content_of_tabs_body ~bp ~embedded:false ~has_keeper
-                  body
-              in
-              if Rect.is_empty content then None else Some (name, content)
+            let has_keeper =
+              Option.is_some (Fleet_store.find_keeper ~name m.fleet)
+            in
+            let content =
+              keeper_memory_content_of_tabs_body ~bp ~embedded:false ~has_keeper
+                body
+            in
+            if Rect.is_empty content then None else Some (name, content)
         | Some
             ( Nav.Dive_keeper
                 {
@@ -358,54 +425,23 @@ let active_memory_content_rect (m : Model.t) =
             match m.nav.workspace with
             | Nav.Keepers
               when Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory
-                   && Knowledge_store.equal_keeper_memory_subview
-                        m.knowledge.keeper_memory_subview
-                        Knowledge_store.Kmem_diff_flow
               -> (
                 match Fleet_store.selected_keeper_summary m.fleet with
                 | None -> None
                 | Some k ->
-                    if m.nav.zoomed then
-                      let content =
-                        keeper_memory_content_of_tabs_body ~bp ~embedded:false
-                          ~has_keeper:true body
-                      in
-                      if Rect.is_empty content then None
-                      else Some (k.name, content)
-                    else if
-                      (Layout.equal_breakpoint bp Layout.Wide
-                       || Layout.equal_breakpoint bp Layout.Standard)
-                      && body.w >= 104
-                    then
-                      let split_gap = Layout.card_gap_x bp in
-                      let split_budget = Int.max 0 (body.w - split_gap) in
-                      let left_w =
-                        Int.max 34
-                          (Int.min 46
-                             (int_of_float
-                                (Float.floor
-                                   (float_of_int split_budget *. 0.36))))
-                      in
-                      let right_rect =
-                        match
-                          Layout.split_h_bp bp body
-                            [ Layout.Fixed left_w; Layout.Flex 1 ]
-                        with
-                        | [ _; r ] -> r
-                        | _ -> Rect.empty
-                      in
-                      let content =
-                        keeper_memory_content_of_tabs_body ~bp ~embedded:true
-                          ~has_keeper:true right_rect
-                      in
-                      if Rect.is_empty content then None
-                      else Some (k.name, content)
-                    else None)
+                    (* Open Memory Diagrams on [4 Keepers > Memory] always
+                       expand into the full body card ([~embedded:false]), so
+                       compact widths (< 104 cols) and wide panes share the
+                       exact same geometry and never drop [.] / [Ctrl+O]. *)
+                    let content =
+                      keeper_memory_content_of_tabs_body ~bp ~embedded:false
+                        ~has_keeper:true body
+                    in
+                    if Rect.is_empty content then None
+                    else Some (k.name, content))
             | Nav.Knowledge
               when Nav.equal_knowledge_tab m.knowledge.active_tab
                      Nav.Knowledge_memory
-                   && Knowledge_store.equal_memory_subview
-                        m.knowledge.memory_subview Knowledge_store.Mem_diff_flow
               -> (
                 match m.knowledge.memory_diff_keeper with
                 | None -> None
@@ -420,14 +456,10 @@ let active_memory_content_rect (m : Model.t) =
                       | [ _; b ] -> b
                       | _ -> k_body
                     in
-                    let right_rect =
-                      if m.nav.zoomed then mem_body
-                      else
-                        snd
-                          (Layout.adaptive_split_2 ~stack_on_compact:true
-                             ~left_ratio:0.48 ~top_ratio:0.48 bp mem_body)
-                    in
-                    let inner = Card.inner_rect right_rect in
+                    (* Open Memory Diagrams in [3 Knowledge > Memory] expand
+                       into the full [mem_body] card across all subviews
+                       (Diff/Flow, Health & Ledger, Context). *)
+                    let inner = Card.inner_rect mem_body in
                     let content =
                       Card.pad_inner ~pad_x:(Layout.card_pad_x bp) ~pad_y:0
                         inner

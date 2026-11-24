@@ -186,6 +186,7 @@ val editor_file_path : base_path:string -> Cmd.editor_target -> string option
 
 val render_memory_diagram_payload :
   ?run_pele:(Pele.scene -> (string, string) result) ->
+  ?theme_preset:Masc_tui_core.Theme.preset ->
   probe:Masc_tui_term.Probe.observation ->
   term_program:string option ->
   palette:Masc_tui_term.Palette.t option ->
@@ -200,13 +201,15 @@ val render_memory_diagram_payload :
   unit ->
   Knowledge_store.memory_diagram_payload
 (** Resolve a memory diagram render request according to [kind], [mode],
-    observed terminal graphics capabilities, and observed terminal palette.
-    Forced [Diagram_mode_mermaid] and [Diagram_mode_tree] render purely in
-    memory without calling [run_pele]. [Diagram_mode_auto] attempts Pele SVG
-    (for [Diagram_pele_card]) or Pele Graph JSON (for [Diagram_formation_tree])
-    when graphics (and palette for SVG) are available, automatically falling
-    back to Mermaid or Formation Tree text with a 1-line diagnostic note on
-    any capability gap or Pele failure. *)
+    observed terminal graphics capabilities, and observed terminal palette (with
+    automatic {!Masc_tui_term.Palette.of_theme} fallback from [theme_preset]
+    when OSC 10/11 palette replies were not observed). Forced
+    [Diagram_mode_mermaid] and [Diagram_mode_tree] render purely in memory
+    without calling [run_pele]. [Diagram_mode_auto] attempts Pele SVG (for
+    [Diagram_pele_card]) or Pele Graph JSON (for [Diagram_formation_tree]) when
+    graphics are available, automatically falling back to Mermaid or Formation
+    Tree text with a 1-line diagnostic note on any capability gap or Pele
+    failure. *)
 
 (** {1 Executor Lifecycle & Command Dispatch} *)
 

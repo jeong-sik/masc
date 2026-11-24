@@ -2321,83 +2321,234 @@ let dive_attention_entry (m : Model.t) (entry : Attention.entry) =
   | Attention.Payload_gate g ->
       push_dive m (Nav.Dive_keeper { name = g.keeper; tab = Nav.Keeper_chat })
 
-let launch_memory_diagram ~now ~keeper ~(content_rect : Rect.t) ~kind ~mode
-    ~(activity : Wire_knowledge.keeper_memory_activity)
-    ~(selected : Wire_knowledge.memory_activity_event) (m : Model.t) =
-  let facts =
-    Observed.to_option
-      (Knowledge_store.keeper_memory_facts_for ~keeper m.knowledge)
+let keeper_facts_categories (facts : Wire_knowledge.keeper_memory_facts) :
+    (string * Wire_knowledge.keeper_ordinary_fact list) list =
+  let ordinary_facts =
+    match facts.ordinary with
+    | Wire_knowledge.Memory_store_present om -> om.facts
+    | Wire_knowledge.Memory_store_absent
+    | Wire_knowledge.Memory_store_read_error _ ->
+        []
   in
-  match Memory_diagram.chart_of_activity ~keeper ~activity ~facts ~selected with
+  let tbl : (string, Wire_knowledge.keeper_ordinary_fact list) Hashtbl.t =
+    Hashtbl.create 8
+  in
+  List.iter
+    (fun (f : Wire_knowledge.keeper_ordinary_fact) ->
+      let raw_cat = Wire_knowledge.memory_fact_category_to_string f.category in
+      let cat =
+        if String.equal (String.trim raw_cat) "" then "general" else raw_cat
+      in
+      let prev = Option.value ~default:[] (Hashtbl.find_opt tbl cat) in
+      Hashtbl.replace tbl cat (f :: prev))
+    ordinary_facts;
+  Hashtbl.fold (fun cat xs acc -> (cat, List.rev xs) :: acc) tbl []
+  |> List.sort (fun (a, _) (b, _) -> String.compare a b)
+
+type diagram_launch_target =
+  | Launch_event of {
+      activity : Wire_knowledge.keeper_memory_activity;
+      selected : Wire_knowledge.memory_activity_event;
+    }
+  | Launch_fact_snapshot of {
+      revision : int;
+      fact : Wire_knowledge.keeper_ordinary_fact;
+      activity : Wire_knowledge.keeper_memory_activity option;
+    }
+
+let effective_activity_for ~keeper (k : Knowledge_store.t) =
+  Observed.to_option (Knowledge_store.keeper_memory_activity_for ~keeper k)
+
+let ordinary_fact_by_id ~keeper ~memory_id (k : Knowledge_store.t) =
+  match Observed.to_option (Knowledge_store.keeper_memory_facts_for ~keeper k) with
+  | Some { ordinary = Wire_knowledge.Memory_store_present om; _ } ->
+      List.find_opt
+        (fun (f : Wire_knowledge.keeper_ordinary_fact) ->
+          String.equal f.memory_id memory_id)
+        om.facts
+      |> Option.map (fun f -> (om.revision, f))
+  | Some
+      {
+        ordinary =
+          Wire_knowledge.Memory_store_absent
+          | Wire_knowledge.Memory_store_read_error _;
+        _;
+      }
   | None ->
-      ( Model.with_toast ~now ~level:Model.Toast_warning
-          (Say.make
-             ~ko:"선택한 변천 이벤트의 기억 계보를 구성할 수 없습니다"
-             ~en:"Could not build lineage chart for selected evolution event")
-          m
-      , [] )
-  | Some chart ->
+      None
+
+let first_ordinary_fact ~keeper (k : Knowledge_store.t) =
+  match Observed.to_option (Knowledge_store.keeper_memory_facts_for ~keeper k) with
+  | Some
+      {
+        ordinary = Wire_knowledge.Memory_store_present ({ facts = f :: _; _ } as om);
+        _;
+      } ->
+      Some (om.revision, f)
+  | Some
+      {
+        ordinary =
+          Wire_knowledge.Memory_store_present { facts = []; _ }
+          | Wire_knowledge.Memory_store_absent
+          | Wire_knowledge.Memory_store_read_error _;
+        _;
+      }
+  | None ->
+      None
+
+let selected_facts_tree_ordinary_fact ~keeper (k : Knowledge_store.t) =
+  match Observed.to_option (Knowledge_store.keeper_memory_facts_for ~keeper k) with
+  | Some ({ ordinary = Wire_knowledge.Memory_store_present om; _ } as facts) -> (
+      let cats = keeper_facts_categories facts in
+      match
+        List.nth_opt cats (clamp_index (List.length cats) k.facts_selected_index)
+      with
+      | Some (_, f :: _) -> Some (om.revision, f)
+      | Some (_, []) | None -> first_ordinary_fact ~keeper k)
+  | Some
+      {
+        ordinary =
+          Wire_knowledge.Memory_store_absent
+          | Wire_knowledge.Memory_store_read_error _;
+        _;
+      }
+  | None ->
+      None
+
+let target_for_ordinary_fact ~act_opt ~revision
+    (fact : Wire_knowledge.keeper_ordinary_fact) =
+  match
+    Option.bind act_opt (fun act ->
+        Memory_diagram.find_latest_event_for_fact ~memory_id:fact.memory_id act
+        |> Option.map (fun ev -> (act, ev)))
+  with
+  | Some (activity, selected) -> Launch_event { activity; selected }
+  | None -> Launch_fact_snapshot { revision; fact; activity = act_opt }
+
+let selected_event_of_activity ~keeper (act : Wire_knowledge.keeper_memory_activity)
+    (k : Knowledge_store.t) =
+  match Knowledge_store.selected_activity_event_for ~keeper k with
+  | Some ev -> Some ev
+  | None -> (
+      match act.events with
+      | [] -> None
+      | evs ->
+          List.nth_opt evs
+            (clamp_index (List.length evs) k.selected_activity_index))
+
+let launch_memory_diagram_chart ~now ~keeper ~(content_rect : Rect.t) ~kind
+    ~mode ~source ~event_identity ~revision ~chart (m : Model.t) =
+  let ko = Say.equal_lang m.lang Say.Lang_ko in
+  let max_width = Int.max 24 content_rect.w in
+  let now_unix = m.freshness.last_wall_unix in
+  let copy_source =
+    Memory_diagram.copy_source_of_chart ~tz_offset_sec:m.tz_offset_sec ~ko
+      ~now:now_unix ~keeper_name:keeper ~max_width ~kind ~mode chart
+  in
+  let request_id =
+    Knowledge_store.next_memory_diagram_request_id m.knowledge
+  in
+  let state : Knowledge_store.memory_diagram_state =
+    {
+      request_id;
+      keeper;
+      event_identity;
+      source;
+      revision;
+      kind;
+      mode;
+      payload = Observed.loading ~since_ns:now;
+      scroll = 0;
+      copy_source;
+    }
+  in
+  let knowledge = Knowledge_store.open_memory_diagram state m.knowledge in
+  let nav =
+    match Model.active_dive m, m.nav.workspace with
+    | None, (Nav.Knowledge | Nav.Keepers)
+      when (not m.nav.zoomed) && Model.focusable_pane_count m > 1 ->
+        { m.nav with pane_index = 1 }
+    | ( None
+      , ( Nav.Pulse
+        | Nav.Work
+        | Nav.Knowledge
+        | Nav.Keepers
+        | Nav.Runtime
+        | Nav.Infra ) )
+    | ( Some _
+      , ( Nav.Pulse
+        | Nav.Work
+        | Nav.Knowledge
+        | Nav.Keepers
+        | Nav.Runtime
+        | Nav.Infra ) ) ->
+        m.nav
+  in
+  let cmd =
+    Cmd.Render_memory_diagram
+      {
+        epoch = m.epoch;
+        request_id;
+        keeper;
+        event_identity;
+        kind;
+        mode;
+        theme_preset = m.theme_preset;
+        ko;
+        tz_offset_sec = m.tz_offset_sec;
+        now_unix;
+        max_width;
+        chart;
+      }
+  in
+  ({ m with nav; knowledge }, [ cmd ])
+
+let launch_memory_diagram_target ~now ~keeper ~(content_rect : Rect.t) ~kind
+    ~mode ~target (m : Model.t) =
+  match target with
+  | Launch_event { activity; selected } -> (
+      let facts =
+        Observed.to_option
+          (Knowledge_store.keeper_memory_facts_for ~keeper m.knowledge)
+      in
+      match Memory_diagram.chart_of_activity ~keeper ~activity ~facts ~selected with
+      | None ->
+          ( Model.with_toast ~now ~level:Model.Toast_warning
+              (Say.make
+                 ~ko:"선택한 변천 이벤트의 기억 계보를 구성할 수 없습니다"
+                 ~en:"Could not build lineage chart for selected evolution event")
+              m
+          , [] )
+      | Some chart ->
+          launch_memory_diagram_chart ~now ~keeper ~content_rect ~kind ~mode
+            ~source:(Knowledge_store.Diagram_source_event selected.identity)
+            ~event_identity:selected.identity ~revision:selected.revision ~chart
+            m)
+  | Launch_fact_snapshot { revision; fact; activity } ->
       let ko = Say.equal_lang m.lang Say.Lang_ko in
-      let max_width = Int.max 24 content_rect.w in
       let now_unix = m.freshness.last_wall_unix in
-      let copy_source =
-        Memory_diagram.copy_source_of_chart ~tz_offset_sec:m.tz_offset_sec ~ko
-          ~now:now_unix ~keeper_name:keeper ~max_width ~kind ~mode chart
+      let chart =
+        Memory_diagram.chart_of_ordinary_fact ~tz_offset_sec:m.tz_offset_sec ~ko
+          ~now:now_unix ~revision ~activity fact
       in
-      let request_id =
-        Knowledge_store.next_memory_diagram_request_id m.knowledge
-      in
-      let state : Knowledge_store.memory_diagram_state =
-        {
-          request_id;
-          keeper;
-          event_identity = selected.identity;
-          revision = selected.revision;
-          kind;
-          mode;
-          payload = Observed.loading ~since_ns:now;
-          scroll = 0;
-          copy_source;
-        }
-      in
-      let knowledge = Knowledge_store.open_memory_diagram state m.knowledge in
-      let nav =
-        match Model.active_dive m, m.nav.workspace with
-        | None, (Nav.Knowledge | Nav.Keepers) when not m.nav.zoomed ->
-            { m.nav with pane_index = 1 }
-        | ( None
-          , ( Nav.Pulse
-            | Nav.Work
-            | Nav.Knowledge
-            | Nav.Keepers
-            | Nav.Runtime
-            | Nav.Infra ) )
-        | ( Some _
-          , ( Nav.Pulse
-            | Nav.Work
-            | Nav.Knowledge
-            | Nav.Keepers
-            | Nav.Runtime
-            | Nav.Infra ) ) ->
-            m.nav
-      in
-      let cmd =
-        Cmd.Render_memory_diagram
-          {
-            epoch = m.epoch;
-            request_id;
-            keeper;
-            event_identity = selected.identity;
-            kind;
-            mode;
-            ko;
-            tz_offset_sec = m.tz_offset_sec;
-            now_unix;
-            max_width;
-            chart;
-          }
-      in
-      ({ m with nav; knowledge }, [ cmd ])
+      launch_memory_diagram_chart ~now ~keeper ~content_rect ~kind ~mode
+        ~source:(Knowledge_store.Diagram_source_fact_snapshot fact.memory_id)
+        ~event_identity:("snapshot:" ^ fact.memory_id) ~revision ~chart m
+
+let resolve_source_target ~keeper ~source (m : Model.t) =
+  let act_opt = effective_activity_for ~keeper m.knowledge in
+  match source with
+  | Knowledge_store.Diagram_source_event ev_id ->
+      Option.bind act_opt (fun activity ->
+          List.find_opt
+            (fun (ev : Wire_knowledge.memory_activity_event) ->
+              String.equal ev.identity ev_id)
+            activity.events
+          |> Option.map (fun selected -> Launch_event { activity; selected }))
+  | Knowledge_store.Diagram_source_fact_snapshot fact_id ->
+      ordinary_fact_by_id ~keeper ~memory_id:fact_id m.knowledge
+      |> Option.map (fun (revision, fact) ->
+             Launch_fact_snapshot { revision; fact; activity = act_opt })
 
 let open_memory_diagram ~now ~kind (m : Model.t) =
   match Memory_diagram.active_memory_content_rect m with
@@ -2418,136 +2569,221 @@ let open_memory_diagram ~now ~kind (m : Model.t) =
         , [] )
       else (m, [])
   | Some (keeper, content_rect) -> (
-      match
-        Observed.to_option
-          (Knowledge_store.keeper_memory_activity_for ~keeper m.knowledge)
-      with
-      | Some act -> (
-          let selected_opt, empty_toast =
-            match Memory_diagram.active_diagram m with
-            | Some d ->
-                ( List.find_opt
-                    (fun (ev : Wire_knowledge.memory_activity_event) ->
-                      String.equal ev.identity d.event_identity)
-                    act.events
-                , Say.make ~ko:"선택한 변천 이벤트를 찾을 수 없습니다"
-                    ~en:"Selected memory evolution event no longer in log" )
-            | None -> (
-                match m.knowledge.memory_view_mode with
-                | Knowledge_store.View_evolution ->
-                    ( Knowledge_store.selected_activity_event_for ~keeper
-                        m.knowledge
-                    , Say.make ~ko:"다이어그램을 열 변천 이벤트가 없습니다"
-                        ~en:"No memory evolution event selected" )
-                | Knowledge_store.View_facts -> (
-                    match
-                      Knowledge_store.selected_memory_fact_row ~keeper
-                        m.knowledge
-                    with
-                    | Some (Knowledge_store.Fact_ordinary { fact; _ }) ->
-                        ( Memory_diagram.find_latest_event_for_fact
-                            ~memory_id:fact.memory_id act
-                        , Say.make
-                            ~ko:"선택한 기억 사실과 연결된 변천 이벤트가 최근 이력에 없습니다"
-                            ~en:"No recent evolution event references the selected fact"
-                        )
-                    | Some
-                        ( Knowledge_store.Fact_source _
-                        | Knowledge_store.Fact_source_invalidation _ )
-                    | None ->
-                        ( None
-                        , Say.make
-                            ~ko:"다이어그램을 열 일반 기억 사실을 선택하세요"
-                            ~en:"Select an ordinary memory fact to open its diagram"
-                        ))
-                | Knowledge_store.View_diff ->
-                    let diff_match =
-                      match
-                        Knowledge_store.selected_memory_diff_item_for
-                          ~keeper_opt:(Some keeper) m.knowledge
-                      with
-                      | Some (Knowledge_store.Keeper_added f) ->
-                          Memory_diagram.find_latest_event_for_fact
-                            ~memory_id:f.memory_id act
-                      | Some (Knowledge_store.Keeper_updated u) -> (
-                          match
-                            Memory_diagram.find_latest_event_for_fact
-                              ~memory_id:u.after.memory_id act
-                          with
-                          | Some _ as ev -> ev
-                          | None ->
-                              Memory_diagram.find_latest_event_for_fact
-                                ~memory_id:u.before.memory_id act)
-                      | Some (Knowledge_store.Keeper_retracted r) ->
-                          Memory_diagram.find_latest_event_for_fact
-                            ~memory_id:r.memory_id act
-                      | Some (Knowledge_store.Keeper_invalidated inv) ->
-                          Memory_diagram.find_latest_event_for_fact
-                            ~memory_id:inv.memory_id act
-                      | Some
-                          ( Knowledge_store.World_added _
-                          | Knowledge_store.World_updated _
-                          | Knowledge_store.World_retracted _ )
-                      | None ->
-                          None
-                    in
-                    let resolved =
-                      match diff_match with
-                      | Some _ as ev -> ev
-                      | None ->
-                          Knowledge_store.selected_activity_event_for ~keeper
-                            m.knowledge
-                    in
-                    ( resolved
-                    , Say.make ~ko:"다이어그램을 열 변천 이벤트가 없습니다"
-                        ~en:"No memory evolution event available for diagram" ))
-          in
-          match selected_opt with
-          | None ->
-              (Model.with_toast ~now ~level:Model.Toast_info empty_toast m, [])
-          | Some selected ->
-              let mode =
-                match Memory_diagram.active_diagram m with
-                | Some d -> d.mode
-                | None -> Knowledge_store.Diagram_mode_auto
-              in
-              launch_memory_diagram ~now ~keeper ~content_rect ~kind ~mode
-                ~activity:act ~selected m)
-      | None ->
-          ( Model.with_toast ~now ~level:Model.Toast_info
-              (Say.make
-                 ~ko:"기억 변천 이력을 불러오는 중입니다..."
-                 ~en:"Loading memory evolution activity...")
-              m
-          , [
+      let act_opt = effective_activity_for ~keeper m.knowledge in
+      let facts_loaded =
+        Option.is_some
+          (Observed.to_option
+             (Knowledge_store.keeper_memory_facts_for ~keeper m.knowledge))
+      in
+      let fetch_missing_cmds () =
+        let act_cmd =
+          if Option.is_none act_opt then
+            [
               Cmd.Http_get
                 {
                   epoch = m.epoch;
                   req = Cmd.Get_keeper_memory_activity { keeper; limit = 50 };
                 };
-            ] ))
+            ]
+          else []
+        in
+        let facts_cmd =
+          if not facts_loaded then
+            [
+              Cmd.Http_get
+                {
+                  epoch = m.epoch;
+                  req = Cmd.Get_keeper_memory_facts { keeper };
+                };
+            ]
+          else []
+        in
+        act_cmd @ facts_cmd
+      in
+      let fallback_any_target () =
+        match
+          Option.bind act_opt (fun activity ->
+              selected_event_of_activity ~keeper activity m.knowledge
+              |> Option.map (fun selected -> Launch_event { activity; selected }))
+        with
+        | Some _ as t -> t
+        | None ->
+            first_ordinary_fact ~keeper m.knowledge
+            |> Option.map (fun (revision, fact) ->
+                   Launch_fact_snapshot { revision; fact; activity = act_opt })
+      in
+      let resolve_diff_flow () =
+        match m.knowledge.memory_view_mode with
+        | Knowledge_store.View_evolution ->
+            ( fallback_any_target ()
+            , false
+            , Say.make ~ko:"다이어그램을 열 기억 변천 또는 사실이 없습니다"
+                ~en:"No memory evolution event or fact available for diagram" )
+        | Knowledge_store.View_facts -> (
+            match Knowledge_store.selected_memory_fact_row ~keeper m.knowledge with
+            | Some (Knowledge_store.Fact_ordinary { revision; fact }) ->
+                ( Some (target_for_ordinary_fact ~act_opt ~revision fact)
+                , false
+                , Say.make ~ko:"다이어그램을 열 일반 기억 사실을 선택하세요"
+                    ~en:"Select an ordinary memory fact to open its diagram" )
+            | Some
+                ( Knowledge_store.Fact_source _
+                | Knowledge_store.Fact_source_invalidation _ ) ->
+                ( None
+                , true
+                , Say.make ~ko:"다이어그램을 열 일반 기억 사실을 선택하세요"
+                    ~en:"Select an ordinary memory fact to open its diagram" )
+            | None ->
+                ( None
+                , facts_loaded
+                , Say.make ~ko:"다이어그램을 열 일반 기억 사실을 선택하세요"
+                    ~en:"Select an ordinary memory fact to open its diagram" ))
+        | Knowledge_store.View_diff ->
+            let diff_target =
+              let by_id memory_id =
+                match
+                  Option.bind act_opt (fun activity ->
+                      Memory_diagram.find_latest_event_for_fact ~memory_id
+                        activity
+                      |> Option.map (fun selected ->
+                             Launch_event { activity; selected }))
+                with
+                | Some _ as t -> t
+                | None ->
+                    ordinary_fact_by_id ~keeper ~memory_id m.knowledge
+                    |> Option.map (fun (revision, fact) ->
+                           Launch_fact_snapshot
+                             { revision; fact; activity = act_opt })
+              in
+              match
+                Knowledge_store.selected_memory_diff_item_for
+                  ~keeper_opt:(Some keeper) m.knowledge
+              with
+              | Some (Knowledge_store.Keeper_added f) -> by_id f.memory_id
+              | Some (Knowledge_store.Keeper_updated u) -> (
+                  match by_id u.after.memory_id with
+                  | Some _ as t -> t
+                  | None -> by_id u.before.memory_id)
+              | Some (Knowledge_store.Keeper_retracted r) -> by_id r.memory_id
+              | Some (Knowledge_store.Keeper_invalidated inv) ->
+                  by_id inv.memory_id
+              | Some
+                  ( Knowledge_store.World_added _
+                  | Knowledge_store.World_updated _
+                  | Knowledge_store.World_retracted _ )
+              | None ->
+                  None
+            in
+            let resolved =
+              match diff_target with
+              | Some _ as t -> t
+              | None -> fallback_any_target ()
+            in
+            ( resolved
+            , false
+            , Say.make ~ko:"다이어그램을 열 기억 변천 또는 사실이 없습니다"
+                ~en:"No memory evolution event or fact available for diagram" )
+      in
+      match Memory_diagram.active_diagram m with
+      | Some d -> (
+          match resolve_source_target ~keeper ~source:d.source m with
+          | Some target ->
+              launch_memory_diagram_target ~now ~keeper ~content_rect ~kind
+                ~mode:d.mode ~target m
+          | None ->
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make ~ko:"선택한 기억 대상을 찾을 수 없습니다"
+                     ~en:"Selected memory diagram subject is no longer available")
+                  m
+              , [] ))
+      | None ->
+          let is_keeper_surface =
+            match Model.active_dive m with
+            | Some (Nav.Dive_keeper { tab = Nav.Keeper_memory; _ }) -> true
+            | Some
+                ( Nav.Dive_keeper
+                    {
+                      tab =
+                        ( Nav.Keeper_chat
+                        | Nav.Keeper_context
+                        | Nav.Keeper_tool_calls
+                        | Nav.Keeper_work_candle
+                        | Nav.Keeper_sandbox
+                        | Nav.Keeper_config
+                        | Nav.Keeper_logs
+                        | Nav.Keeper_identity );
+                      _;
+                    }
+                | Nav.Dive_work _
+                | Nav.Dive_knowledge _
+                | Nav.Dive_runtime _
+                | Nav.Dive_infra _ ) ->
+                false
+            | None -> Nav.equal_workspace m.nav.workspace Nav.Keepers
+          in
+          let target_opt, explicit_reject, empty_toast =
+            if is_keeper_surface then
+              match m.knowledge.keeper_memory_subview with
+              | Knowledge_store.Kmem_diff_flow -> resolve_diff_flow ()
+              | Knowledge_store.Kmem_facts_tree -> (
+                  match selected_facts_tree_ordinary_fact ~keeper m.knowledge with
+                  | Some (revision, fact) ->
+                      ( Some (target_for_ordinary_fact ~act_opt ~revision fact)
+                      , false
+                      , Say.make ~ko:"다이어그램을 열 기억 사실이 없습니다"
+                          ~en:"No ordinary memory fact available for diagram" )
+                  | None ->
+                      ( fallback_any_target ()
+                      , false
+                      , Say.make ~ko:"다이어그램을 열 기억 사실이 없습니다"
+                          ~en:"No ordinary memory fact available for diagram" ))
+              | Knowledge_store.Kmem_health | Knowledge_store.Kmem_journal ->
+                  ( fallback_any_target ()
+                  , false
+                  , Say.make ~ko:"다이어그램을 열 기억 변천 또는 사실이 없습니다"
+                      ~en:"No memory evolution event or fact available for diagram"
+                  )
+            else
+              match m.knowledge.memory_subview with
+              | Knowledge_store.Mem_diff_flow -> resolve_diff_flow ()
+              | Knowledge_store.Mem_health_ledger | Knowledge_store.Mem_context
+                ->
+                  ( fallback_any_target ()
+                  , false
+                  , Say.make ~ko:"다이어그램을 열 기억 변천 또는 사실이 없습니다"
+                      ~en:"No memory evolution event or fact available for diagram"
+                  )
+          in
+          match target_opt with
+          | Some target ->
+              launch_memory_diagram_target ~now ~keeper ~content_rect ~kind
+                ~mode:Knowledge_store.Diagram_mode_auto ~target m
+          | None -> (
+              if explicit_reject then
+                (Model.with_toast ~now ~level:Model.Toast_info empty_toast m, [])
+              else
+                match fetch_missing_cmds () with
+                | _ :: _ as cmds ->
+                    ( Model.with_toast ~now ~level:Model.Toast_info
+                        (Say.make
+                           ~ko:"기억 변천 이력을 불러오는 중입니다..."
+                           ~en:"Loading memory evolution activity...")
+                        m
+                    , cmds )
+                | [] ->
+                    ( Model.with_toast ~now ~level:Model.Toast_info empty_toast m
+                    , [] )))
 
 let cycle_memory_diagram_mode ~now (m : Model.t) =
   match
     Memory_diagram.active_diagram m, Memory_diagram.active_memory_content_rect m
   with
   | Some d, Some (keeper, content_rect) when String.equal d.keeper keeper -> (
-      match
-        Observed.to_option
-          (Knowledge_store.keeper_memory_activity_for ~keeper m.knowledge)
-      with
-      | Some act -> (
-          match
-            List.find_opt
-              (fun (ev : Wire_knowledge.memory_activity_event) ->
-                String.equal ev.identity d.event_identity)
-              act.events
-          with
-          | Some selected ->
-              let mode = Knowledge_store.next_memory_diagram_mode d.mode in
-              launch_memory_diagram ~now ~keeper ~content_rect ~kind:d.kind
-                ~mode ~activity:act ~selected m
-          | None -> (m, []))
+      match resolve_source_target ~keeper ~source:d.source m with
+      | Some target ->
+          let mode = Knowledge_store.next_memory_diagram_mode d.mode in
+          launch_memory_diagram_target ~now ~keeper ~content_rect ~kind:d.kind
+            ~mode ~target m
       | None -> (m, []))
   | (Some _ | None), (Some _ | None) -> (m, [])
 
@@ -2556,21 +2792,10 @@ let refresh_open_memory_diagram ~now (m : Model.t) =
     Memory_diagram.active_diagram m, Memory_diagram.active_memory_content_rect m
   with
   | Some d, Some (keeper, content_rect) when String.equal d.keeper keeper -> (
-      match
-        Observed.to_option
-          (Knowledge_store.keeper_memory_activity_for ~keeper m.knowledge)
-      with
-      | Some act -> (
-          match
-            List.find_opt
-              (fun (ev : Wire_knowledge.memory_activity_event) ->
-                String.equal ev.identity d.event_identity)
-              act.events
-          with
-          | Some selected ->
-              launch_memory_diagram ~now ~keeper ~content_rect ~kind:d.kind
-                ~mode:d.mode ~activity:act ~selected m
-          | None -> (m, []))
+      match resolve_source_target ~keeper ~source:d.source m with
+      | Some target ->
+          launch_memory_diagram_target ~now ~keeper ~content_rect ~kind:d.kind
+            ~mode:d.mode ~target m
       | None -> (m, []))
   | (Some _ | None), (Some _ | None) -> (m, [])
 
@@ -2650,30 +2875,6 @@ let acting_keepers (m : Model.t) : string list =
         keepers
   | None -> ());
   List.rev !acc
-
-let keeper_facts_categories (facts : Wire_knowledge.keeper_memory_facts) :
-    (string * Wire_knowledge.keeper_ordinary_fact list) list =
-  let ordinary_facts =
-    match facts.ordinary with
-    | Wire_knowledge.Memory_store_present om -> om.facts
-    | Wire_knowledge.Memory_store_absent
-    | Wire_knowledge.Memory_store_read_error _ ->
-        []
-  in
-  let tbl : (string, Wire_knowledge.keeper_ordinary_fact list) Hashtbl.t =
-    Hashtbl.create 8
-  in
-  List.iter
-    (fun (f : Wire_knowledge.keeper_ordinary_fact) ->
-      let raw_cat = Wire_knowledge.memory_fact_category_to_string f.category in
-      let cat =
-        if String.equal (String.trim raw_cat) "" then "general" else raw_cat
-      in
-      let prev = Option.value ~default:[] (Hashtbl.find_opt tbl cat) in
-      Hashtbl.replace tbl cat (f :: prev))
-    ordinary_facts;
-  Hashtbl.fold (fun cat xs acc -> (cat, List.rev xs) :: acc) tbl []
-  |> List.sort (fun (a, _) (b, _) -> String.compare a b)
 
 let code_fuzzy_matches ~query (m : Model.t) : string list =
   let files =
@@ -2906,9 +3107,10 @@ let keeper_enter_action ~name ~tab (m : Model.t) =
       (m, [])
 
 let enter_plan (m : Model.t) : enter_plan =
-  (* Never push duplicate or cross-workspace dives when already inside a dive!
-     Inside Keeper_context (Exact_input), Keeper_tool_calls, or Keeper_memory
-     (Facts Tree), Enter fetches the selected part/result or toggles category. *)
+  (* Never push duplicate or cross-workspace dives when already inside a dive,
+     and never hijack Enter behind an open Memory Diagram. *)
+  if Option.is_some (Memory_diagram.active_diagram m) then Enter_noop
+  else
   match Model.active_dive m with
   | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory })
     when Knowledge_store.equal_keeper_memory_subview
@@ -9120,7 +9322,15 @@ let apply_move (m : Model.t) dir =
                 in
                 ({ m with keeper_context }, [])
             | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory }) ->
-                if
+                if Option.is_some (Memory_diagram.active_diagram m) then
+                  let sd = scroll_delta dir in
+                  let max_scroll = memory_diagram_max_scroll m in
+                  let knowledge =
+                    Knowledge_store.scroll_memory_diagram ~max_scroll ~delta:sd
+                      m.knowledge
+                  in
+                  ({ m with knowledge }, [])
+                else if
                   not
                     (Knowledge_store.equal_keeper_memory_subview
                        m.knowledge.keeper_memory_subview
@@ -9161,9 +9371,6 @@ let apply_move (m : Model.t) dir =
                     }
                   , [] )
                 else
-                  let has_matching_diagram =
-                    Option.is_some (Memory_diagram.active_diagram m)
-                  in
                   let has_matching_reading =
                     match m.knowledge.memory_reading with
                     | Some entry ->
@@ -9171,15 +9378,7 @@ let apply_move (m : Model.t) dir =
                           ~keeper_opt:(Some name) entry
                     | None -> false
                   in
-                  if has_matching_diagram then
-                    let sd = scroll_delta dir in
-                    let max_scroll = memory_diagram_max_scroll m in
-                    let knowledge =
-                      Knowledge_store.scroll_memory_diagram ~max_scroll ~delta:sd
-                        m.knowledge
-                    in
-                    ({ m with knowledge }, [])
-                  else if has_matching_reading then
+                  if has_matching_reading then
                     let sd = scroll_delta dir in
                     let max_scroll = memory_reading_max_scroll m in
                     let knowledge =
@@ -9379,6 +9578,15 @@ let apply_move (m : Model.t) dir =
                         in
                         ({ m with knowledge }, []))
                 | Nav.Keepers ->
+                    if Option.is_some (Memory_diagram.active_diagram m) then
+                      let sd = scroll_delta dir in
+                      let max_scroll = memory_diagram_max_scroll m in
+                      let knowledge =
+                        Knowledge_store.scroll_memory_diagram ~max_scroll
+                          ~delta:sd m.knowledge
+                      in
+                      ({ m with knowledge }, [])
+                    else
                     let zoomed_keeper =
                       m.nav.zoomed && Model.can_zoom_current_view m
                     in
@@ -9489,9 +9697,6 @@ let apply_move (m : Model.t) dir =
                                   }
                                 , [] )
                               else
-                                let has_matching_diagram =
-                                  Option.is_some (Memory_diagram.active_diagram m)
-                                in
                                 let has_matching_reading =
                                   match m.knowledge.memory_reading with
                                   | Some entry ->
@@ -9499,15 +9704,7 @@ let apply_move (m : Model.t) dir =
                                         ~keeper_opt:(Some k.name) entry
                                   | None -> false
                                 in
-                                if has_matching_diagram then
-                                  let sd = scroll_delta dir in
-                                  let max_scroll = memory_diagram_max_scroll m in
-                                  let knowledge =
-                                    Knowledge_store.scroll_memory_diagram
-                                      ~max_scroll ~delta:sd m.knowledge
-                                  in
-                                  ({ m with knowledge }, [])
-                                else if has_matching_reading then
+                                if has_matching_reading then
                                   let sd = scroll_delta dir in
                                   let max_scroll = memory_reading_max_scroll m in
                                   let knowledge =
@@ -9784,7 +9981,11 @@ let apply_move (m : Model.t) dir =
                       else None
                     in
                     let knowledge =
-                      if
+                      if has_matching_diagram then
+                        let max_scroll = memory_diagram_max_scroll m in
+                        Knowledge_store.scroll_memory_diagram ~max_scroll
+                          ~delta:(scroll_delta dir) m.knowledge
+                      else if
                         Nav.equal_knowledge_tab m.knowledge.active_tab
                           Nav.Knowledge_memory
                         && eff_pane = 1

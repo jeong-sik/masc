@@ -223,6 +223,38 @@ let of_responses ~foreground ~background ~ansi =
       Some { foreground; background; ansi }
   | Some _, None | None, Some _ | None, None -> None
 
+let rgb_of_theme_color (c : Masc_tui_core.Theme.rgb) =
+  make_rgb ~red:(Masc_tui_core.Theme.red c)
+    ~green:(Masc_tui_core.Theme.green c) ~blue:(Masc_tui_core.Theme.blue c)
+
+let of_theme (theme : Masc_tui_core.Theme.t) =
+  let c = rgb_of_theme_color in
+  let ansi =
+    [|
+      Some (c theme.surface_0);
+      Some (c theme.status_critical);
+      Some (c theme.status_ok);
+      Some (c theme.status_attention);
+      Some (c theme.status_active);
+      Some (c theme.status_ai);
+      Some (c theme.accent);
+      Some (c theme.text_secondary);
+      Some (c theme.surface_2);
+      Some (c theme.status_critical);
+      Some (c theme.status_ok);
+      Some (c theme.status_attention);
+      Some (c theme.status_active);
+      Some (c theme.status_ai);
+      Some (c theme.accent);
+      Some (c theme.text_bright);
+    |]
+  in
+  {
+    foreground = c theme.text_primary;
+    background = c theme.surface_1;
+    ansi;
+  }
+
 type snapshot = {
   palette : t option;
   generation : int;

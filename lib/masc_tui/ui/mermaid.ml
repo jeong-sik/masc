@@ -1562,6 +1562,29 @@ let render ~cols text =
   let* rendered = render_diagram_internal ~trace:false ~cols diagram in
   Ok rendered.canvas_rows
 
+let render_adaptive ~cols text =
+  let* diagram = parse_internal text in
+  match diagram with
+  | Graph ({ direction = Left_right | Right_left; _ } as graph) -> (
+      match render_graph_internal ~trace:false ~cols graph with
+      | Ok rendered -> Ok rendered.canvas_rows
+      | Error (Too_wide _ as orig_err) -> (
+          match
+            render_graph_internal ~trace:false ~cols
+              { graph with direction = Top_down }
+          with
+          | Ok rendered -> Ok rendered.canvas_rows
+          | Error (Too_wide { cells; cols; _ }) ->
+              Error (Too_wide { cells; cols; turning_it_fits = None })
+          | Error (Unsupported _ | Parse_error _) -> Error orig_err)
+      | Error ((Unsupported _ | Parse_error _) as err) -> Error err)
+  | Graph ({ direction = Top_down | Bottom_up; _ } as graph) ->
+      Result.map (fun r -> r.canvas_rows)
+        (render_diagram_internal ~trace:false ~cols (Graph graph))
+  | Sequence _ as seq ->
+      Result.map (fun r -> r.canvas_rows)
+        (render_diagram_internal ~trace:false ~cols seq)
+
 type rendered_with_sources = {
   rendered_rows : string list;
   rendered_positions : semantic_position option array array;

@@ -1427,6 +1427,14 @@ let render_memory_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t
       in
       ignore (Ops_common.draw_pills grid ~rect:subbar_rect ~theme ~bg sub_pills)
     end;
+    match model.knowledge.memory_diagram with
+    | Some diagram
+      when Knowledge_store.memory_diagram_matches_scope
+             ~keeper_opt:(Some name) diagram ->
+        let content = Card.pad_inner ~pad_x rect in
+        Masc_tui_screens_core.Memory_explorer.render_memory_diagram ~grid
+          ~rect:content ~theme ~lang:model.lang ~diagram
+    | Some _ | None ->
     if
       not
         (Knowledge_store.equal_keeper_memory_subview

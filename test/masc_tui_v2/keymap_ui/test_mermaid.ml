@@ -325,6 +325,53 @@ let test_quoted_semicolons_and_class_attachment () =
   | Mermaid.Unsupported _ | Mermaid.Too_wide _ ->
       Alcotest.fail "expected Parse_error for empty ::: class name"
 
+let test_render_adaptive_lr_to_td_fallback () =
+  let lr_src =
+    "flowchart LR\n\
+     A[\"Problem and issue\"] --> B[\"Branch change\"]\n\
+     B --> C[\"Independent review\"]\n\
+     C --> D[\"Land on main\"]"
+  in
+  (* Strict Mermaid.render at cols=48 refuses horizontal LR as Too_wide *)
+  (match Mermaid.render ~cols:48 lr_src with
+  | Error (Mermaid.Too_wide { turning_it_fits = Some Mermaid.Top_down; _ }) -> ()
+  | Ok _ | Error (Mermaid.Too_wide _ | Mermaid.Unsupported _ | Mermaid.Parse_error _) ->
+      Alcotest.fail "expected Too_wide suggesting Top_down at cols=48 for LR");
+  (* render_adaptive automatically retries as TD and fits strictly within 48 cells *)
+  (match Mermaid.render_adaptive ~cols:48 lr_src with
+  | Ok rows ->
+      Alcotest.(check bool) "adaptive TD renders multiple rows" true
+        (List.length rows >= 8);
+      List.iter
+        (fun row ->
+          Alcotest.(check bool) "each adaptive row fits <= 48 cells" true
+            (Grapheme.display_width row <= 48))
+        rows;
+      let joined = String.concat "\n" rows in
+      Alcotest.(check bool) "rendered diagram keeps node labels" true
+        (contains "Problem and issue" joined && contains "Land on main" joined);
+      Alcotest.(check bool) "rendered diagram draws box borders" true
+        (contains "\xe2\x94\x8c" joined || contains "\xe2\x95\xad" joined)
+  | Error _ -> Alcotest.fail "expected render_adaptive to fit LR as TD at cols=48");
+  (* graph RL also adapts to TD cleanly *)
+  (match
+     Mermaid.render_adaptive ~cols:48
+       "graph RL\nX[Collector] --> Y[Normalizer]\nY --> Z[Renderer]"
+   with
+  | Ok rows ->
+      Alcotest.(check bool) "RL adapts to TD at cols=48" true (rows <> []);
+      List.iter
+        (fun row ->
+          Alcotest.(check bool) "RL adaptive row <= 48 cells" true
+            (Grapheme.display_width row <= 48))
+        rows
+  | Error _ -> Alcotest.fail "expected graph RL to adapt to TD at cols=48");
+  (* When even TD cannot fit (cols=8), render_adaptive still fails honestly with Too_wide *)
+  match Mermaid.render_adaptive ~cols:8 lr_src with
+  | Error (Mermaid.Too_wide { turning_it_fits = None; _ }) -> ()
+  | Ok _ | Error (Mermaid.Too_wide _ | Mermaid.Unsupported _ | Mermaid.Parse_error _) ->
+      Alcotest.fail "expected honest Too_wide when even TD exceeds cols=8"
+
 let () =
   Alcotest.run "masc_tui_v2_mermaid"
     [
@@ -344,5 +391,7 @@ let () =
             test_canvas_source_positions_and_undrawn;
           Alcotest.test_case "quoted semicolons & :::className suffixes" `Quick
             test_quoted_semicolons_and_class_attachment;
+          Alcotest.test_case "render_adaptive auto-retries LR/RL as TD on Too_wide"
+            `Quick test_render_adaptive_lr_to_td_fallback;
         ] );
     ]

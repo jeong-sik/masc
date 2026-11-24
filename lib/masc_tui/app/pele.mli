@@ -65,6 +65,18 @@ val scene :
 (** Freeze original source, layout metrics, timestamp, and optional palette
     colors into an immutable scene. Raster requests never relayout a scene. *)
 
+val resolve_executable :
+  ?getenv:(string -> string option) ->
+  ?executable_name:string ->
+  string ->
+  string
+(** Resolve a helper executable name. Paths containing ['/'] are returned
+    unchanged. For bare command names (e.g. ["masc-pele"]), searches in order:
+    (1) regular executable files ([Unix.S_REG] + [Unix.X_OK]) in [PATH],
+    (2) a sibling binary next to [executable_name] (default
+    [Sys.executable_name]), and (3) [$HOME/.local/bin/<name>]. Returns the
+    original name unchanged if no candidate matches. *)
+
 val command_runner : ?executable:string -> run:(string -> ending) -> runner
 (** Run [executable] (default ["masc-pele"]) with its three temp files through
     a supplied shell command runner. *)

@@ -184,19 +184,29 @@ type graphics_protocol =
 
 val equal_graphics_protocol : graphics_protocol -> graphics_protocol -> bool
 
+val in_multiplexer : getenv:(string -> string option) -> bool
+(** [true] iff [TMUX] or [STY] is set to a non-empty value, indicating that
+    terminal graphics escapes must be confirmed by an explicit probe reply
+    rather than inferred from inherited [TERM_PROGRAM]. *)
+
 val effective_term_program :
   getenv:(string -> string option) -> string option
 (** Read [TERM_PROGRAM] only when [TERM] is set to a non-empty value other than
-    ["dumb"] (case-insensitive). Returns [None] when [TERM] is missing, blank,
-    or ["dumb"], preventing inherited [TERM_PROGRAM=iTerm.app] from emitting
-    OSC 1337 graphics escapes on dumb terminals. *)
+    ["dumb"] (case-insensitive) and the session is not inside [tmux]/[screen]
+    ({!in_multiplexer}). When [TERM_PROGRAM] is unset or blank on a direct
+    ["xterm-kitty"] or ["xterm-ghostty"] session, infers ["kitty"] / ["ghostty"]
+    respectively. *)
 
 val protocol_of_probe :
   graphics:Probe.graphics_reply option ->
   term_program:string option ->
   graphics_protocol
 (** Derive the active graphics transport from observed startup {!Probe} output
-    and [TERM_PROGRAM] fallback. Explicit Kitty refusal falls back cleanly. *)
+    and [TERM_PROGRAM] fallback. Explicit {!Probe.Graphics_refused} never emits
+    Kitty APC (allowing only iTerm2's independent OSC 1337 protocol). When
+    [graphics = None], recognizes Kitty-graphics-native [TERM_PROGRAM] values
+    (["ghostty"], ["wezterm"], ["kitty"], case-insensitive) as
+    {!Kitty_protocol} and ["iTerm.app"] as {!ITerm2_protocol}. *)
 
 val iterm2_place : data:string -> placement -> string
 (** Inline image placement using iTerm2 OSC 1337 with [preserveAspectRatio=1].

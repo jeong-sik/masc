@@ -87,6 +87,7 @@ type stream_projection = {
   show_thinking : bool;
   show_tools : bool;
   show_text : bool;
+  show_waiting : bool;
   show_error : string option;
 }
 

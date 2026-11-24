@@ -1618,8 +1618,7 @@ and submit_composer ~now ~mode (m : Model.t) =
                   Drafts.mark_sending ~now ~request_id:tx.request_id drafts1
                 in
                 let fleet0 =
-                  if Fleet_store.has_active_chat_stream ~keeper m.fleet then
-                    m.fleet
+                  if keeper_is_busy then m.fleet
                   else
                     Fleet_store.start_chat_stream ~keeper
                       ~request_id:tx.request_id m.fleet

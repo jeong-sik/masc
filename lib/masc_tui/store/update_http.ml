@@ -331,7 +331,80 @@ let apply_http_reply ~now (m : Model.t) reply =
       in
       (next, [])
   | Msg.Reply_keeper_turns (Ok rows) ->
-      ({ m with fleet = Fleet_store.apply_turns ~observed_at:now rows m.fleet }, [])
+      let fleet0 = Fleet_store.apply_turns ~observed_at:now rows m.fleet in
+      let fleet, drafts, history_keepers =
+        List.fold_left
+          (fun (fl, dr, hist_ks) (r : Wire_fleet.keeper_turn_row) ->
+            match r.state with
+            | Wire_fleet.Turn_active _ | Wire_fleet.Turn_unavailable _ ->
+                (fl, dr, hist_ks)
+            | Wire_fleet.Turn_idle ->
+                let keeper = r.keeper_name in
+                let stream_was_interrupting, fl' =
+                  match Fleet_store.String_map.find_opt keeper fl.chat_streams with
+                  | Some b when b.interrupting && (b.run_started || not b.active)
+                    ->
+                      ( true
+                      , Fleet_store.finish_chat_stream ~keeper
+                          ~request_id:b.request_id ~error:None fl )
+                  | Some _ | None -> (false, fl)
+                in
+                let dr', settled_tx =
+                  List.fold_left
+                    (fun (d_acc, settled) (tx : Drafts.pending_message) ->
+                      match tx.state with
+                      | Drafts.Interrupting
+                        when stream_was_interrupting
+                             || Clock.Mono.seconds_since now ~since:tx.updated_at
+                                >= 1.0 ->
+                          ( Drafts.mark_confirming ~now
+                              ~request_id:tx.request_id d_acc
+                          , true )
+                      | Drafts.Interrupting
+                      | Drafts.Queued
+                      | Drafts.Sending
+                      | Drafts.Pending_processing
+                      | Drafts.Confirming_delivery
+                      | Drafts.Delivered
+                      | Drafts.Failed_retryable _ ->
+                          (d_acc, settled))
+                    (dr, false)
+                    (Drafts.pending_txs_for_keeper ~keeper dr)
+                in
+                let fl'' =
+                  if settled_tx && not stream_was_interrupting then
+                    match
+                      Fleet_store.String_map.find_opt keeper fl'.chat_streams
+                    with
+                    | Some b when b.interrupting ->
+                        Fleet_store.finish_chat_stream ~keeper
+                          ~request_id:b.request_id ~error:None fl'
+                    | Some _ | None -> fl'
+                  else fl'
+                in
+                let hist_ks' =
+                  if
+                    (stream_was_interrupting || settled_tx)
+                    && not (List.exists (String.equal keeper) hist_ks)
+                  then keeper :: hist_ks
+                  else hist_ks
+                in
+                (fl'', dr', hist_ks'))
+          (fleet0, m.drafts, []) rows
+      in
+      let cmds =
+        List.rev_map
+          (fun keeper ->
+            Cmd.Http_get
+              {
+                epoch = m.epoch;
+                req =
+                  Cmd.Get_chat_history
+                    { keeper; limit = Some 80; cursor = None };
+              })
+          history_keepers
+      in
+      ({ m with fleet; drafts }, cmds)
   | Msg.Reply_keeper_turns (Error err) ->
       err_reply
         ~fail:
@@ -542,8 +615,22 @@ let apply_http_reply ~now (m : Model.t) reply =
               ~ko:("턴 중단 신호 전송됨: " ^ keeper)
               ~en:("Turn interrupt signalled: " ^ keeper) )
         else if resp.paused then
-          ( fleet0
-          , m.drafts
+          let fleet1 =
+            (match Fleet_store.String_map.find_opt keeper fleet0.chat_streams with
+            | Some b when b.interrupting ->
+                Fleet_store.mark_chat_stream_interrupting ~keeper
+                  ~request_id:b.request_id ~interrupting:false fleet0
+            | Some _ | None -> fleet0)
+            |> Fleet_store.clear_turn_interrupting ~keeper
+          in
+          let drafts1 =
+            match Drafts.active_tx_for_keeper ~keeper m.drafts with
+            | Some tx ->
+                Drafts.clear_interrupting ~now ~request_id:tx.request_id m.drafts
+            | None -> m.drafts
+          in
+          ( fleet1
+          , drafts1
           , Model.Toast_info
           , Say.make
               ~ko:("대기 요청 일시 정지됨: " ^ keeper)

@@ -1106,7 +1106,7 @@ let apply_chat_stream_chunk ~now ~keeper ~request_id ~is_btw ~chunk (m : Model.t
             | Keeper_chat_operation.State_name.Running ->
                 ( Drafts.mark_accepted ~now ~request_id
                     ~operation_id:(Some operation_id) d0
-                , [] )
+                , [ get_cmd m.epoch Cmd.Get_keeper_turns ] )
             | Keeper_chat_operation.State_name.Succeeded | Keeper_chat_operation.State_name.Cancelled ->
                 let d_conf =
                   Drafts.mark_accepted ~now ~request_id

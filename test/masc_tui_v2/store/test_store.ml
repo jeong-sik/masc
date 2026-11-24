@@ -16062,7 +16062,269 @@ let test_active_turn_preview_visibility_and_queued_followup () =
     Say.resolve Say.Lang_en (Chat_transcript.active_turn_detail_summary failed_turn)
   in
   Alcotest.(check string) "Preview_failed strips runtime_id and normalizes failure detail"
-    "auto · Attempt failed · timeout 30s" failed_en
+    "auto · Attempt failed · timeout 30s" failed_en;
+  (* 8. Submitting while busy preserves a prior unpersisted stream buffer (tools/text)
+     instead of wiping it with start_chat_stream. *)
+  let prior_tool_buf : Fleet_store.chat_stream_buffer =
+    {
+      request_id = "prior-req";
+      operation_id = Some "prior-req";
+      turn_ref = None;
+      run_started = true;
+      interrupting = false;
+      prior_msg_ids = Fleet_store.String_set.empty;
+      text = "Prior streamed answer";
+      text_ownership = Cut_reply.fresh_ownership;
+      thinking = "";
+      tools =
+        [
+          {
+            tool_use_id = "tu-1";
+            tool_name = "Read";
+            args_preview = Some "README.md";
+            completed = true;
+            ok = Some true;
+            output_preview = None;
+          };
+        ];
+      active = false;
+      ended = true;
+      last_error = None;
+    }
+  in
+  let m0_with_prior =
+    {
+      m0 with
+      fleet =
+        {
+          m0.fleet with
+          chat_streams =
+            Fleet_store.String_map.add keeper prior_tool_buf m0.fleet.chat_streams;
+        };
+      drafts = Drafts.insert_text "go on" m0.drafts;
+    }
+  in
+  let m_busy_sent, _ =
+    Update.execute_action ~now:t1 m0_with_prior Keymap.Submit_followup
+  in
+  let kept_buf = Fleet_store.String_map.find keeper m_busy_sent.fleet.chat_streams in
+  Alcotest.(check string)
+    "submitting while busy preserves prior stream buffer request_id"
+    "prior-req" kept_buf.request_id;
+  Alcotest.(check int)
+    "submitting while busy preserves prior stream tool cards"
+    1 (List.length kept_buf.tools);
+  (* 9. Active stream after completed tools (before text deltas) sets show_waiting
+     and accounts for +1 row in count_transcript_rows. *)
+  let tool_done_active : Fleet_store.chat_stream_buffer =
+    { prior_tool_buf with text = ""; active = true; ended = false }
+  in
+  let tool_done_inactive : Fleet_store.chat_stream_buffer =
+    { tool_done_active with active = false; ended = true }
+  in
+  let m_stream_wait =
+    {
+      m0 with
+      fleet =
+        {
+          m0.fleet with
+          turns = Observed.value ~observed_at:t1 [];
+          chat_streams =
+            Fleet_store.String_map.add keeper tool_done_active
+              m0.fleet.chat_streams;
+        };
+    }
+  in
+  let m_stream_idle =
+    {
+      m_stream_wait with
+      fleet =
+        {
+          m_stream_wait.fleet with
+          chat_streams =
+            Fleet_store.String_map.add keeper tool_done_inactive
+              m_stream_wait.fleet.chat_streams;
+        };
+    }
+  in
+  Alcotest.(check bool) "active stream with completed tools sets show_waiting = true"
+    true
+    (List.exists
+       (function
+         | Chat_transcript.Section_stream sp -> sp.show_waiting
+         | Chat_transcript.Section_history _
+         | Chat_transcript.Section_active_turn _
+         | Chat_transcript.Section_pending _ ->
+             false)
+       (Chat_transcript.project_transcript ~model:m_stream_wait ~keeper));
+  Alcotest.(check int) "show_waiting adds exactly 1 row to count_transcript_rows"
+    (Chat_transcript.count_transcript_rows ~model:m_stream_idle ~keeper ~width:80 + 1)
+    (Chat_transcript.count_transcript_rows ~model:m_stream_wait ~keeper ~width:80);
+  (* 10. Accepted_running emits Get_keeper_turns for live preview during wait. *)
+  let _, cmds_acc_run =
+    Update.step ~now:t1 m1
+      (Msg.Chat_stream_chunk
+         {
+           epoch = m1.epoch;
+           keeper;
+           request_id = tx_q.request_id;
+           is_btw = false;
+           chunk =
+             Wire_fleet.Chunk_accepted
+               {
+                 operation_id = tx_q.request_id;
+                 queued_count = 0;
+                 state = Wire_fleet.Accepted_running;
+                 interactive_outcome = None;
+                 control_token = None;
+               };
+         })
+  in
+  Alcotest.(check bool) "Accepted_running refreshes Get_keeper_turns" true
+    (List.exists
+       (function
+         | Cmd.Http_get { req = Cmd.Get_keeper_turns; _ } -> true
+         | _ -> false)
+       (Cmd.flatten cmds_acc_run));
+  (* 11. Reply_turn_interrupt with paused=true clears Phase_interrupting cleanly. *)
+  let m_chat_run =
+    let base = Model.initial ~cols:120 ~rows:36 () in
+    let base =
+      {
+        base with
+        nav =
+          {
+            base.nav with
+            workspace = Nav.Keepers;
+            dive_stack =
+              [ Nav.Dive_keeper { name = keeper; tab = Nav.Keeper_chat } ];
+          };
+        drafts =
+          base.drafts |> Drafts.set_active_keeper keeper
+          |> Drafts.insert_text "hello" |> Drafts.set_focus false;
+      }
+    in
+    let m_sub, _ = Update.execute_action ~now:t0 base Keymap.Submit_steer in
+    let tx_s =
+      match Drafts.active_tx_for_keeper ~keeper m_sub.drafts with
+      | Some tx -> tx
+      | None -> Alcotest.fail "missing submitted tx"
+    in
+    let m_acc, _ =
+      Update.step ~now:t0 m_sub
+        (Msg.Chat_stream_chunk
+           {
+             epoch = m_sub.epoch;
+             keeper;
+             request_id = tx_s.request_id;
+             is_btw = false;
+             chunk =
+               Wire_fleet.Chunk_accepted
+                 {
+                   operation_id = tx_s.request_id;
+                   queued_count = 0;
+                   state = Wire_fleet.Accepted_running;
+                   interactive_outcome = None;
+                   control_token = None;
+                 };
+           })
+    in
+    m_acc
+  in
+  let m_esc_int, _ =
+    Update.step ~now:t1 m_chat_run (Msg.Key_event (key Keymap.Input.Escape))
+  in
+  Alcotest.(check bool) "Esc on running chat turn enters Phase_interrupting" true
+    (Chat_transcript.equal_live_chat_phase
+       (Chat_transcript.live_chat_phase ~model:m_esc_int ~keeper)
+       Chat_transcript.Phase_interrupting);
+  let m_paused, _ =
+    Update.step ~now:t1 m_esc_int
+      (Msg.Http_reply
+         {
+           epoch = m_esc_int.epoch;
+           reply =
+             Msg.Reply_turn_interrupt
+               {
+                 keeper;
+                 result =
+                   Ok
+                     {
+                       signalled = false;
+                       paused = true;
+                       chat_control_token = None;
+                       reason = Some "admission_paused";
+                     };
+               };
+         })
+  in
+  Alcotest.(check bool) "Reply_turn_interrupt paused=true clears Phase_interrupting"
+    false
+    (Chat_transcript.equal_live_chat_phase
+       (Chat_transcript.live_chat_phase ~model:m_paused ~keeper)
+       Chat_transcript.Phase_interrupting);
+  (* 12. Turn_idle reply and bounded Tick rechecks unstick Drafts.Interrupting. *)
+  let m_turn_idle, cmds_idle =
+    Update.step ~now:t2 m_esc_int
+      (Msg.Http_reply
+         {
+           epoch = m_esc_int.epoch;
+           reply =
+             Msg.Reply_keeper_turns
+               (Ok
+                  [
+                    {
+                      keeper_name = keeper;
+                      chat_control_token = None;
+                      state = Wire_fleet.Turn_idle;
+                    };
+                  ]);
+         })
+  in
+  Alcotest.(check bool) "Reply_keeper_turns Turn_idle clears Phase_interrupting"
+    false
+    (Chat_transcript.equal_live_chat_phase
+       (Chat_transcript.live_chat_phase ~model:m_turn_idle ~keeper)
+       Chat_transcript.Phase_interrupting);
+  Alcotest.(check bool) "Reply_keeper_turns Turn_idle fetches Get_chat_history"
+    true
+    (List.exists
+       (function
+         | Cmd.Http_get { req = Cmd.Get_chat_history { keeper = k; _ }; _ }
+           when String.equal k keeper ->
+             true
+         | _ -> false)
+       (Cmd.flatten cmds_idle));
+  let step_tick sec m =
+    let ts = Clock.Mono.of_ns (Int64.mul (Int64.of_int sec) 1_000_000_000L) in
+    Update.step ~now:ts m (Msg.Tick { wall_unix = float_of_int sec })
+  in
+  let m_tk1, _ = step_tick 6 m_esc_int in
+  let m_tk2, _ = step_tick 10 m_tk1 in
+  let m_tk3, _ = step_tick 14 m_tk2 in
+  let m_tk4, _ = step_tick 18 m_tk3 in
+  Alcotest.(check bool) "Bounded Tick rechecks unstick Drafts.Interrupting"
+    false
+    (Chat_transcript.equal_live_chat_phase
+       (Chat_transcript.live_chat_phase ~model:m_tk4 ~keeper)
+       Chat_transcript.Phase_interrupting);
+  (* 13. Esc closes an orphaned Inline_action overlay when inline_modal = None. *)
+  let m_orphan_modal =
+    {
+      m0 with
+      nav =
+        {
+          m0.nav with
+          overlay = Some (Nav.Inline_action Nav.Board_new_post);
+        };
+      inline_modal = None;
+    }
+  in
+  let m_escaped, _ =
+    Update.step ~now:t1 m_orphan_modal (Msg.Key_event (key Keymap.Input.Escape))
+  in
+  Alcotest.(check bool) "Esc closes orphaned Inline_action overlay" true
+    (Option.is_none m_escaped.nav.overlay)
 
 let () =
   Alcotest.run "masc_tui_store"

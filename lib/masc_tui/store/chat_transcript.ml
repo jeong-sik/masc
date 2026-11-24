@@ -761,8 +761,14 @@ let active_turn_detail_summary (turn : Wire_fleet.active_turn) =
                           ~en:("Waiting for model · last tool: " ^ tool)
                     | None ->
                         Say.make ~ko:"응답 대기 중" ~en:"Waiting for model")
-                | Wire_fleet.Preview_streaming ->
-                    Say.make ~ko:"응답 생성 중…" ~en:"Streaming…"
+                | Wire_fleet.Preview_streaming -> (
+                    match p.last_tool with
+                    | Some tool ->
+                        Say.make
+                          ~ko:("응답 생성 중… · 최근 도구: " ^ tool)
+                          ~en:("Streaming… · last tool: " ^ tool)
+                    | None ->
+                        Say.make ~ko:"응답 생성 중…" ~en:"Streaming…")
                 | Wire_fleet.Preview_tool_observed -> (
                     match p.last_tool with
                     | Some tool ->
@@ -1106,6 +1112,7 @@ type stream_projection = {
   show_thinking : bool;
   show_tools : bool;
   show_text : bool;
+  show_waiting : bool;
   show_error : string option;
 }
 
@@ -1166,6 +1173,11 @@ let project_transcript ~(model : Model.t) ~keeper =
           in
           let show_tools = buf.tools <> [] in
           let show_text = not (String.equal (String.trim buf.text) "") in
+          let has_running_tool =
+            List.exists
+              (fun (tc : Fleet_store.active_tool_call) -> not tc.completed)
+              buf.tools
+          in
           let show_error =
             match buf.last_error with
             | None -> None
@@ -1197,11 +1209,25 @@ let project_transcript ~(model : Model.t) ~keeper =
                 in
                 if matched_by_pending || superseded then None else Some err
           in
+          let show_waiting =
+            buf.active && (not show_text) && (not has_running_tool)
+            && Option.is_none show_error
+            && (show_tools || buf.interrupting)
+          in
           if
             (not show_thinking) && (not show_tools) && (not show_text)
             && Option.is_none show_error
           then None
-          else Some { buf; show_thinking; show_tools; show_text; show_error }
+          else
+            Some
+              {
+                buf;
+                show_thinking;
+                show_tools;
+                show_text;
+                show_waiting;
+                show_error;
+              }
   in
   let add_if_nonempty sec acc =
     match sec with
@@ -1588,8 +1614,9 @@ let count_transcript_rows ~(model : Model.t) ~keeper ~width =
         + count_markdown_rows ~theme ~width ~rail_present:false ~prefix:"  "
             buf.text
     in
+    let wait_r = if sp.show_waiting then 1 else 0 in
     let err_r = match sp.show_error with Some _ -> 1 | None -> 0 in
-    think_r + tools_r + text_r + err_r
+    think_r + tools_r + text_r + wait_r + err_r
   in
   let sections = project_transcript ~model ~keeper in
   let _, total =

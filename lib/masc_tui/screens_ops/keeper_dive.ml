@@ -610,6 +610,36 @@ let build_stream_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
       (markdown_rows ~theme ~width ~prefix:"  " ~cont_prefix:"  " ~prefix_fg:fg
          ~bg_rgb:base_bg buf.text)
   end;
+  (* 3b. Active-stream waiting indicator (e.g. after completed tools before text deltas) *)
+  if sp.show_waiting then begin
+    let fg, status_lbl, right_lbl =
+      if buf.interrupting then
+        ( theme.status_attention
+        , Ops_common.say model ~ko:"중단 요청 중…" ~en:"Interrupting…"
+        , Ops_common.say model ~ko:"중단" ~en:"stopping" )
+      else
+        let act =
+          match Fleet_store.active_turn_for ~keeper:keeper_name model.fleet with
+          | Some turn ->
+              Say.resolve model.lang
+                (Chat_transcript.active_turn_short_activity turn)
+          | None ->
+              Ops_common.say model ~ko:"응답 대기 중…" ~en:"Waiting for model…"
+        in
+        (theme.status_active, act, Ops_common.say model ~ko:"진행 중" ~en:"running")
+    in
+    let line_text = Printf.sprintf "@%s · %s" keeper_name status_lbl in
+    push
+      (single_span_row ~rail_rgb:fg
+         ~prefix:(Glyph.to_utf8 Glyph.Live_working ^ " ") ~prefix_fg:fg
+         ~prefix_attrs:Attr.bold
+         ~text:
+           (Grapheme.truncate_to_width ~max_width:(Int.max 12 (width - 20))
+              line_text)
+         ~text_fg:theme.text_secondary ~attrs:Attr.italic
+         ~right_meta:right_lbl ~right_meta_fg:fg ~right_meta_attrs:Attr.italic
+         ~bg_rgb:base_bg ())
+  end;
   (* 4. Explicit Stream Error (Coral left rail, non-italic Bold) *)
   (match sp.show_error with
   | Some err ->

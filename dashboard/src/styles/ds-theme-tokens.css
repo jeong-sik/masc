@@ -13,16 +13,6 @@
    bridge aliases in variables.css.
    ══════════════════════════════════════════════════════════════ */
 
-/* Local display font — served from dashboard/public/assets/fonts via Vite.
-   Body text uses system/Pretendard/Noto fallback stacks; do not declare the
-   9.9MB local Noto Sans KR TTF on the hot path. */
-@font-face {
-  font-family: 'Cinzel';
-  src: url('/dashboard/assets/fonts/Cinzel-Regular.ttf') format('truetype');
-  font-weight: 400 700;
-  font-display: swap;
-}
-
 /* ── Dark Fantasy (default) — Visceral · decay-forward ── */
 :root,
 [data-theme="dark-fantasy"] {

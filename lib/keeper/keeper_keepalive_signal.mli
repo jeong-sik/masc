@@ -215,18 +215,7 @@ type idle_backoff_stage =
   | Idle_1h
   | Idle_2h
 
-(** Whether a reaction turn ran since the last self-wake. The next self-wake
-    reads it: after a reaction the interval stays at the start, after none it
-    doubles up to the cap (RFC keeper-reaction-and-queue §4.4). *)
-type idle_activity =
-  | Quiet_since_self_wake
-  | Reacted_since_self_wake
-
-type adaptive_idle_state =
-  { stage : idle_backoff_stage
-  ; next_spontaneous_at : float
-  ; since_self_wake : idle_activity
-  }
+type adaptive_idle_state
 
 val default_stagger_tick_sec : float
 val adaptive_idle_30m_sec : float
@@ -274,32 +263,35 @@ val adaptive_idle_interval :
 
 val adaptive_idle_init : now:float -> warmup_sec:float -> adaptive_idle_state
 val adaptive_idle_after_self_wake :
-  ?base_interval_sec:float -> now:float -> adaptive_idle_state -> adaptive_idle_state
+  now:float -> adaptive_idle_state -> adaptive_idle_state
 (** A self-wake served the due boundary. The stage returns to [Idle_30m] when a
     reaction ran since the previous self-wake, and otherwise advances one step
     up to [Idle_2h]. The turn's result does not matter: a failed self-wake
     backs off the same way. *)
 
 val adaptive_idle_after_served_boundary :
-  ?base_interval_sec:float -> now:float -> adaptive_idle_state -> adaptive_idle_state
+  now:float -> adaptive_idle_state -> adaptive_idle_state
 (** A completed due schedule served the boundary (#54338). The stage returns to
     [Idle_30m] and the next self-wake is one start interval after [now]. A
-    schedule turn is not a reaction, so it keeps [since_self_wake]. *)
+    schedule turn is not a reaction, so it preserves any earlier reaction. *)
 
 val adaptive_idle_after_reaction_at_boundary :
-  ?base_interval_sec:float -> now:float -> unit -> adaptive_idle_state
+  now:float -> adaptive_idle_state
 (** A reaction turn opened at the due boundary and served it. The stage
     returns to [Idle_30m], the next self-wake is one start interval after
     [now], and that self-wake sees the reaction. *)
 
 val adaptive_idle_pull_in_on_reactive :
-  ?base_interval_sec:float -> now:float -> adaptive_idle_state -> adaptive_idle_state
+  now:float -> adaptive_idle_state -> adaptive_idle_state
 (** A reaction cycle off the boundary, whether its turn finished or failed. The
     stage returns to [Idle_30m] and the next self-wake moves to
     [min next_spontaneous_at (now + start)]. It never moves later, so a
     boundary that came due during the reaction is still served. *)
-val adaptive_idle_remaining : now:float -> adaptive_idle_state -> float
-val adaptive_idle_is_due : now:float -> adaptive_idle_state -> bool
+val adaptive_idle_stage : adaptive_idle_state -> idle_backoff_stage
+val adaptive_idle_hold_stage : now:float -> adaptive_idle_state -> adaptive_idle_state
+val adaptive_idle_due_at : base_interval_sec:float -> adaptive_idle_state -> float
+val adaptive_idle_remaining : now:float -> base_interval_sec:float -> adaptive_idle_state -> float
+val adaptive_idle_is_due : now:float -> base_interval_sec:float -> adaptive_idle_state -> bool
 
 val input_kind_of_stimulus_payload :
   Keeper_event_queue.stimulus_payload -> input_kind

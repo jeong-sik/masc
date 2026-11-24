@@ -198,8 +198,8 @@ type keepalive_turn_outcome = {
       (** The loop reads it to serve the periodic boundary
           ({!For_testing.periodic_cadence_after_cycle}). *)
   decided_channel : Keeper_world_observation.keeper_cycle_channel option;
-      (** The channel the cycle decision chose; [None] when the cycle ended
-          before a decision ({!For_testing.adaptive_idle_after_cycle}). *)
+      (** The opened turn's channel, or the scheduled channel for an empty
+          self-wake. A rejection before dispatch has no channel. *)
 }
 
 (** Record a swallowed keepalive-cycle exception as a turn failure:
@@ -486,7 +486,6 @@ module For_testing : sig
     cycle_status:keepalive_cycle_status ->
     decided_channel:Keeper_world_observation.keeper_cycle_channel option ->
     due_schedule:due_schedule_service ->
-    base_interval_sec:float ->
     now:float ->
     Keeper_keepalive_signal.adaptive_idle_state ->
     Keeper_keepalive_signal.adaptive_idle_state

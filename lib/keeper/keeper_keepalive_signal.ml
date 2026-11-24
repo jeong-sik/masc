@@ -212,8 +212,9 @@ type idle_activity =
   | Reacted_since_self_wake
 
 type adaptive_idle_state =
-  { stage : idle_backoff_stage
-  ; next_spontaneous_at : float
+  { boundary : periodic_cadence
+  ; boundary_stage : idle_backoff_stage
+  ; first_reaction_at : float option
   ; since_self_wake : idle_activity
   }
 
@@ -356,71 +357,71 @@ let adaptive_idle_interval ~base_interval_sec stage =
 ;;
 
 let adaptive_idle_init ~now ~warmup_sec =
-  { stage = Idle_30m
-  ; next_spontaneous_at = now +. Float.max 0.0 warmup_sec
+  { boundary = Initial_due (now +. Float.max 0.0 warmup_sec)
+  ; boundary_stage = Idle_30m
+  ; first_reaction_at = None
   ; since_self_wake = Quiet_since_self_wake
   }
 ;;
 
-let adaptive_idle_after_self_wake
-      ?(base_interval_sec = adaptive_idle_30m_sec)
-      ~now
-      state
-  =
+let adaptive_idle_stage state =
+  match state.first_reaction_at with
+  | Some _ -> Idle_30m
+  | None -> state.boundary_stage
+;;
+
+let serve_idle_boundary ~now boundary_stage since_self_wake =
+  { boundary = consume_periodic ~now; boundary_stage; first_reaction_at = None; since_self_wake }
+;;
+
+let adaptive_idle_hold_stage ~now state =
+  serve_idle_boundary ~now (adaptive_idle_stage state) state.since_self_wake
+;;
+
+let adaptive_idle_after_self_wake ~now state =
   let next_stage =
-    match state.since_self_wake, state.stage with
+    match state.since_self_wake, adaptive_idle_stage state with
     | Reacted_since_self_wake, (Idle_30m | Idle_1h | Idle_2h) -> Idle_30m
     | Quiet_since_self_wake, Idle_30m -> Idle_1h
     | Quiet_since_self_wake, (Idle_1h | Idle_2h) -> Idle_2h
   in
-  { stage = next_stage
-  ; next_spontaneous_at = now +. adaptive_idle_interval ~base_interval_sec next_stage
-  ; since_self_wake = Quiet_since_self_wake
-  }
+  serve_idle_boundary ~now next_stage Quiet_since_self_wake
 ;;
 
-let adaptive_idle_after_served_boundary
-      ?(base_interval_sec = adaptive_idle_30m_sec)
-      ~now
-      state
-  =
-  { stage = Idle_30m
-  ; next_spontaneous_at = now +. adaptive_idle_interval ~base_interval_sec Idle_30m
-  ; since_self_wake = state.since_self_wake
-  }
+let adaptive_idle_after_served_boundary ~now state =
+  serve_idle_boundary ~now Idle_30m state.since_self_wake
 ;;
 
-let adaptive_idle_after_reaction_at_boundary
-      ?(base_interval_sec = adaptive_idle_30m_sec)
-      ~now
-      ()
-  =
-  { stage = Idle_30m
-  ; next_spontaneous_at = now +. adaptive_idle_interval ~base_interval_sec Idle_30m
-  ; since_self_wake = Reacted_since_self_wake
-  }
+let adaptive_idle_after_reaction_at_boundary ~now =
+  serve_idle_boundary ~now Idle_30m Reacted_since_self_wake
 ;;
 
-(* A reaction only ever brings the next self-wake closer. A deadline that came
-   due while the reaction ran stays due, so the boundary is served on the next
-   cycle instead of slipping one start interval per crossing reaction. *)
-let adaptive_idle_pull_in_on_reactive
-      ?(base_interval_sec = adaptive_idle_30m_sec)
-      ~now
-      state
-  =
-  let pulled_deadline = now +. adaptive_idle_interval ~base_interval_sec Idle_30m in
-  { stage = Idle_30m
-  ; next_spontaneous_at = Float.min state.next_spontaneous_at pulled_deadline
-  ; since_self_wake = Reacted_since_self_wake
-  }
+let adaptive_idle_pull_in_on_reactive ~now state =
+  let first_reaction_at =
+    match state.first_reaction_at with
+    | Some _ as first -> first
+    | None -> Some now
+  in
+  { state with first_reaction_at; since_self_wake = Reacted_since_self_wake }
 ;;
 
-let adaptive_idle_remaining ~now state =
-  Float.max 0.0 (state.next_spontaneous_at -. now)
+(* Both deadlines are relative to completed work. Re-reading the setting can
+   change which one is earlier. Later reactions cannot postpone either one. *)
+let adaptive_idle_due_at ~base_interval_sec state =
+  let interval = adaptive_idle_interval ~base_interval_sec state.boundary_stage in
+  let periodic_at = periodic_due_at ~interval state.boundary in
+  match state.first_reaction_at with
+  | None -> periodic_at
+  | Some at -> Float.min periodic_at (at +. adaptive_idle_interval ~base_interval_sec Idle_30m)
 ;;
 
-let adaptive_idle_is_due ~now state = now >= state.next_spontaneous_at
+let adaptive_idle_remaining ~now ~base_interval_sec state =
+  Float.max 0.0 (adaptive_idle_due_at ~base_interval_sec state -. now)
+;;
+
+let adaptive_idle_is_due ~now ~base_interval_sec state =
+  now >= adaptive_idle_due_at ~base_interval_sec state
+;;
 
 let input_kind_of_stimulus_payload = function
   | Keeper_event_queue.Workspace_message _ -> Direct_message

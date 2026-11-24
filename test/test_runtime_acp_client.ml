@@ -545,6 +545,88 @@ default = "muse_eff.m"
   | Ok _ -> fail "muse_code has no effort option, so effort must be refused at parse time"
 ;;
 
+let test_muse_binding_effort_admission () =
+  let parse ~driver ~model_fields ~binding_model ~binding_fields =
+    Runtime_toml.parse_string
+      (Printf.sprintf
+         {|[providers.p]
+protocol = "acp"
+driver = "%s"
+command = "cli"
+is-non-interactive = true
+args = ["acp", "-c", "reasoning_effort=\"low\""]
+[models.m]
+api-name = "m"
+max-context = 1000
+%s
+[p.%s]
+%s
+[runtime]
+default = "p.%s"
+|} driver model_fields binding_model binding_fields binding_model)
+  in
+  let rejects label model_fields binding_model binding_fields key =
+    match parse ~driver:"muse_code" ~model_fields ~binding_model ~binding_fields with
+    | Error [ e ] -> check string label key e.path
+    | Error _ -> fail (label ^ ": expected one binding diagnostic")
+    | Ok _ -> fail (label ^ ": unsupported session effort was accepted")
+  in
+  rejects "model effort" {|reasoning-effort = "high"|} "m" "" "p.m";
+  rejects "binding effort" "" "m" {|effort = "none"|} "p.m";
+  rejects "expanded model effort" {|efforts = ["low"]|} "m-low" "" "p.m-low";
+  rejects "expanded binding effort" {|efforts = ["low"]|} "m" {|efforts = ["low"]|} "p.m-low";
+  check bool "Muse accepts its process effort without a session override" true
+    (Result.is_ok (parse ~driver:"muse_code" ~model_fields:"" ~binding_model:"m" ~binding_fields:""));
+  check bool "a driver with session effort accepts the same model declaration" true
+    (Result.is_ok (parse ~driver:"kimi_code" ~model_fields:{|reasoning-effort = "high"|}
+       ~binding_model:"m" ~binding_fields:""))
+;;
+
+let test_muse_turn_effort_refused_before_session_rpc () =
+  let cwd = Filename.temp_dir "muse-effort-rpc-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree cwd) (fun () ->
+    let script = Filename.concat cwd "host.py" and trace = Filename.concat cwd "methods" in
+    Out_channel.with_open_text script (fun oc -> output_string oc
+      {|import json, sys
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request["method"]
+    with open(sys.argv[1], "a") as trace:
+        trace.write(method + "\n")
+    if "id" in request:
+        result = ({"protocolVersion": 1, "agentCapabilities": {"loadSession": True}}
+                  if method == "initialize" else {"sessionId": "muse-1", "configOptions": []})
+        print(json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": result}), flush=True)
+|});
+    Eio_main.run @@ fun env ->
+    Eio.Switch.run @@ fun sw ->
+    let clock = Eio.Stdenv.clock env in
+    let proc_mgr = Runtime_acp_client.foreground_process_mgr ~clock () in
+    let config = { (Runtime_acp_client.default_config ~driver:Muse_code ~cwd) with
+                   cli_path = "python3"; args = [script; trace] } in
+    let unwrap = function
+      | Ok value -> value
+      | Error err -> fail (Runtime_acp_client.error_to_string err) in
+    let client = Runtime_acp_client.start ~sw ~proc_mgr ~clock ~fs:(Eio.Stdenv.fs env)
+        ~config ~native_posture:Runtime_native_tools.Native_read () |> unwrap in
+    Fun.protect ~finally:(fun () -> Runtime_acp_client.close client) (fun () ->
+      let session = Runtime_acp_client.new_session client ~cwd () |> unwrap in
+      let methods () = In_channel.with_open_text trace In_channel.input_lines in
+      let before = methods () in
+      let effort = Llm_provider.Reasoning_effort.High in
+      let refusal = match Runtime_acp_client.validate_session_effort ~driver:Muse_code (Some effort) with
+        | Error detail -> Runtime_acp_client.Invalid_config detail
+        | Ok () -> fail "Muse must reject the session effort" in
+      let refused label = function
+        | Error err -> check bool (label ^ " returned the configuration refusal") true (err = refusal)
+        | Ok _ -> fail (label ^ " accepted an unsupported turn effort") in
+      refused "new" (Runtime_acp_client.new_session client ~cwd ~effort ());
+      refused "resume" (Runtime_acp_client.resume_session client ~session_id:session.session_id ~cwd ~effort ());
+      refused "load" (Runtime_acp_client.load_session client ~session_id:session.session_id ~cwd ~effort ());
+      refused "reuse" (Runtime_acp_client.reconfigure_session client session ~effort ());
+      check (list string) "rejected efforts issued no session RPC" before (methods ())))
+;;
+
 let test_unknown_driver_rejected () =
   let bad =
     {|
@@ -5007,6 +5089,8 @@ let () =
             test_muse_profile_and_native_none
         ; test_case "muse rejects unsupported config before spawn" `Quick
             test_muse_refuses_unsupported_config_before_spawn
+        ; test_case "Muse turn effort is refused before session RPC" `Quick
+            test_muse_turn_effort_refused_before_session_rpc
         ] )
     ; "environment", [ test_case "env strip and override" `Quick test_build_environment ]
     ; ( "argv_and_posture"
@@ -5077,6 +5161,7 @@ let () =
       , [ test_case "all three drivers materialize" `Quick test_toml_materialization_all_three_drivers
         ; test_case "muse_code row materializes and refuses effort" `Quick
             test_muse_toml_row_and_effort
+        ; test_case "Muse model and binding effort admission" `Quick test_muse_binding_effort_admission
         ; test_case "unknown driver rejected" `Quick test_unknown_driver_rejected
         ; test_case "typed ACP effort and default model_selection TOML boundary" `Quick
             test_typed_acp_effort_and_model_selection_toml

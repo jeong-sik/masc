@@ -356,22 +356,12 @@ let parse_acp_options ~home ~(path : string) (tbl : Otoml.t)
         (match antigravity_optional_string ~path tbl "effort" with
          | Error _ as err -> err
          | Ok None -> Ok None
-         | Ok (Some _)
-           when Option.is_none
-                  (Runtime_acp_client.profile_of_driver driver).Runtime_acp_client.effort_config_id
-           ->
-           (* No session option carries effort, so a per-session value would
-              be dropped without a trace. *)
-           Error
-             (error
-                (path ^ ".effort")
-                (Printf.sprintf
-                   "%s takes reasoning effort as a process setting, not an ACP session \
-                    option; remove effort and put -c reasoning_effort=\"<level>\" in args"
-                   (Runtime_acp_client.driver_to_string driver)))
          | Ok (Some raw) ->
            (match Runtime_acp_client.effort_of_driver_string ~driver raw with
-            | Some eff -> Ok (Some eff)
+            | Some eff ->
+              (match Runtime_acp_client.validate_session_effort ~driver (Some eff) with
+               | Ok () -> Ok (Some eff)
+               | Error detail -> Error (error (path ^ ".effort") detail))
             | None ->
               Error
                 (error

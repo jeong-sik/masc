@@ -15917,12 +15917,15 @@ let test_live_chat_activity_uses_open_content_and_tool_receipts () =
     (buffer next_response).operation_id (buffer old_run).operation_id;
   let owned_activity = content fresh_run ~scope:3 ~block:0 "thinking" "observed" in
   let matching_start = start owned_activity 3 in
-  let matching_retry = apply matching_start (Wire_fleet.Chunk_runtime_attempt_started { operation_id = None }) in
+  let next_attempt =
+    Wire_fleet.Chunk_runtime_attempt_started
+      { operation_id = None; runtime_id = None; attempt_index = None }
+  in
+  let matching_retry = apply matching_start next_attempt in
   Alcotest.(check string) "retry retires a matching prelude received after content activity alone"
     "" (buffer (delta matching_retry 3 "late")).text;
   let after_owned_start = content (start fresh_run 1) ~scope:3 ~block:0 "thinking" "observed" in
-  let retry_after_match = apply (start after_owned_start 3)
-      (Wire_fleet.Chunk_runtime_attempt_started { operation_id = None }) in
+  let retry_after_match = apply (start after_owned_start 3) next_attempt in
   Alcotest.(check string) "a prior owned prelude cannot mask the retry boundary of a later matching start"
     "" (buffer (delta retry_after_match 3 "late")).text;
   let current_bytes = delta next_response 3 " fresh" in
@@ -15934,7 +15937,19 @@ let test_live_chat_activity_uses_open_content_and_tool_receipts () =
   let late = thoughts late "KEEPER_THINKING_DELTA" "delta" 2 "stale" in
   Alcotest.(check string) "late reasoning cannot replace or append to the current thought"
     "current+" (buffer late).thinking;
-  let retry = apply next_response (Wire_fleet.Chunk_runtime_attempt_started { operation_id = None }) in
+  let retrying =
+    apply next_response
+      (Wire_fleet.Chunk_provider_retry
+         { operation_id = None; runtime_id = None; attempt = 1;
+           max_retries = 2; retry_delay_ms = 125; error_status = None })
+  in
+  let retrying = thoughts retrying "KEEPER_THINKING_DELTA" "delta" 2 "stale" in
+  Alcotest.(check (option string)) "stale reasoning preserves the retry notice"
+    (Some "retry 1/2 (125ms)") (buffer retrying).retry_notice;
+  let resumed = thoughts retrying "KEEPER_THINKING_SNAPSHOT" "snapshot" 3 "resumed" in
+  Alcotest.(check (option string)) "accepted reasoning clears the retry notice"
+    None (buffer resumed).retry_notice;
+  let retry = apply next_response next_attempt in
   Alcotest.(check string) "retry retires a prelude even if that response sent no text"
     "" (buffer (delta retry 3 " late")).text;
   check_phase "replaying a prelude cannot reopen a stopped response"

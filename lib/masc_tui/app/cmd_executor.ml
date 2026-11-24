@@ -3107,9 +3107,9 @@ let combine_fallback_note primary extra =
       primary ^ " · " ^ detail
   | Some _ | None -> primary
 
-let render_memory_diagram_payload ?run_pele ~(probe : Probe.observation)
-    ~term_program ~(palette : Palette.t option) ~keeper ~kind ~mode ~ko
-    ~tz_offset_sec ~now_unix ~max_width ~chart () :
+let render_memory_diagram_payload ?run_pele ?(theme_preset = Theme.Midnight)
+    ~(probe : Probe.observation) ~term_program ~(palette : Palette.t option)
+    ~keeper ~kind ~mode ~ko ~tz_offset_sec ~now_unix ~max_width ~chart () :
     Knowledge_store.memory_diagram_payload =
   let render_mermaid () =
     Memory_diagram.render_mermaid_fallback ~tz_offset_sec ~ko ~now:now_unix
@@ -3138,13 +3138,18 @@ let render_memory_diagram_payload ?run_pele ~(probe : Probe.observation)
           Int64.of_float (now_unix *. 1000.0)
         else 0L
       in
+      let effective_palette =
+        match palette with
+        | Some p -> p
+        | None -> Palette.of_theme (Theme.of_preset theme_preset)
+      in
       let run_scene scene =
         match run_pele with
         | Some f -> f scene
         | None -> Error "Pele runner unavailable"
       in
       match kind with
-      | Knowledge_store.Diagram_pele_card ->
+      | Knowledge_store.Diagram_pele_card -> (
           let fallback_lines, mermaid_note = render_mermaid () in
           if not graphics_supported then
             let reason =
@@ -3156,62 +3161,47 @@ let render_memory_diagram_payload ?run_pele ~(probe : Probe.observation)
                 lines = fallback_lines;
                 note = Some (combine_fallback_note reason mermaid_note);
               }
-          else (
-            match palette with
-            | None ->
-                let reason =
-                  if ko then "터미널 팔레트 미관측 · Mermaid 텍스트 폴백"
-                  else "Terminal palette unavailable · Mermaid fallback"
-                in
-                Knowledge_store.Diagram_text
-                  {
-                    lines = fallback_lines;
-                    note = Some (combine_fallback_note reason mermaid_note);
-                  }
-            | Some pal -> (
-                let svg =
-                  Masc_tui_ui.Memory_lineage.transition_svg ~tz_offset_sec ~ko
-                    ~now:now_unix ~palette:pal chart
-                in
-                let colors = Some (Pele.colors_of_palette pal) in
-                let scene =
-                  Pele.scene ~format:Pele.Svg ~max_width:1240 ~font_size:15
-                    ~now_ms ~colors svg
-                in
-                match run_scene scene with
-                | Ok png -> (
-                    match Memory_diagram.parse_png_dimensions png with
-                    | Some _ as pixel_size ->
-                        Knowledge_store.Diagram_pele_png
-                          {
-                            png;
-                            pixel_size;
-                            format_label = "Pele SVG";
-                            fallback_lines;
-                          }
-                    | None ->
-                        let reason =
-                          if ko then
-                            "Pele PNG 헤더 손상 · Mermaid 텍스트 폴백"
-                          else "Invalid Pele PNG header · Mermaid fallback"
-                        in
-                        Knowledge_store.Diagram_text
-                          {
-                            lines = fallback_lines;
-                            note =
-                              Some (combine_fallback_note reason mermaid_note);
-                          })
-                | Error err ->
+          else
+            let svg =
+              Masc_tui_ui.Memory_lineage.transition_svg ~tz_offset_sec ~ko
+                ~now:now_unix ~palette:effective_palette chart
+            in
+            let colors = Some (Pele.colors_of_palette effective_palette) in
+            let scene =
+              Pele.scene ~format:Pele.Svg ~max_width:1240 ~font_size:15 ~now_ms
+                ~colors svg
+            in
+            match run_scene scene with
+            | Ok png -> (
+                match Memory_diagram.parse_png_dimensions png with
+                | Some _ as pixel_size ->
+                    Knowledge_store.Diagram_pele_png
+                      {
+                        png;
+                        pixel_size;
+                        format_label = "Pele SVG";
+                        fallback_lines;
+                      }
+                | None ->
                     let reason =
-                      if ko then
-                        Printf.sprintf "Pele 불가 (%s) · Mermaid 폴백" err
-                      else Printf.sprintf "Pele unavailable (%s) · Mermaid fallback" err
+                      if ko then "Pele PNG 헤더 손상 · Mermaid 텍스트 폴백"
+                      else "Invalid Pele PNG header · Mermaid fallback"
                     in
                     Knowledge_store.Diagram_text
                       {
                         lines = fallback_lines;
                         note = Some (combine_fallback_note reason mermaid_note);
-                      }))
+                      })
+            | Error err ->
+                let reason =
+                  if ko then Printf.sprintf "Pele 불가 (%s) · Mermaid 폴백" err
+                  else Printf.sprintf "Pele unavailable (%s) · Mermaid fallback" err
+                in
+                Knowledge_store.Diagram_text
+                  {
+                    lines = fallback_lines;
+                    note = Some (combine_fallback_note reason mermaid_note);
+                  })
       | Knowledge_store.Diagram_formation_tree ->
           let tree_lines = render_tree () in
           if not graphics_supported then
@@ -3223,9 +3213,10 @@ let render_memory_diagram_payload ?run_pele ~(probe : Probe.observation)
           else
             let graph_json =
               Masc_tui_ui.Memory_lineage.formation_graph_json ~tz_offset_sec ~ko
-                ~now:now_unix ?palette ~keeper_name:keeper chart
+                ~now:now_unix ~palette:effective_palette ~keeper_name:keeper
+                chart
             in
-            let colors = Option.map Pele.colors_of_palette palette in
+            let colors = Some (Pele.colors_of_palette effective_palette) in
             let scene =
               Pele.scene ~format:Pele.Graph ~max_width:1400 ~font_size:14
                 ~now_ms ~colors graph_json
@@ -3277,7 +3268,7 @@ let cancel_active_memory_diagram t =
   | None -> ()
 
 let execute_render_memory_diagram t ~epoch ~request_id ~keeper ~event_identity
-    ~kind ~mode ~ko ~tz_offset_sec ~now_unix ~max_width ~chart =
+    ~kind ~mode ~theme_preset ~ko ~tz_offset_sec ~now_unix ~max_width ~chart =
   if Atomic.get t.closed then cancel_active_memory_diagram t
   else
     let cancel_flag = Atomic.make false in
@@ -3335,9 +3326,9 @@ let execute_render_memory_diagram t ~epoch ~request_id ~keeper ~event_identity
                                 in
                                 Ok
                                   (render_memory_diagram_payload ~run_pele
-                                     ~probe ~term_program ~palette ~keeper
-                                     ~kind ~mode ~ko ~tz_offset_sec ~now_unix
-                                     ~max_width ~chart ())
+                                     ~theme_preset ~probe ~term_program ~palette
+                                     ~keeper ~kind ~mode ~ko ~tz_offset_sec
+                                     ~now_unix ~max_width ~chart ())
                               with ex -> Error (Printexc.to_string ex))
                       in
                       result_ref := Some res));
@@ -3466,6 +3457,7 @@ let rec execute t = function
         event_identity;
         kind;
         mode;
+        theme_preset;
         ko;
         tz_offset_sec;
         now_unix;
@@ -3473,7 +3465,7 @@ let rec execute t = function
         chart;
       } ->
       execute_render_memory_diagram t ~epoch ~request_id ~keeper ~event_identity
-        ~kind ~mode ~ko ~tz_offset_sec ~now_unix ~max_width ~chart
+        ~kind ~mode ~theme_preset ~ko ~tz_offset_sec ~now_unix ~max_width ~chart
   | Cmd.Cancel_memory_diagram -> cancel_active_memory_diagram t
   | Cmd.Fetch_artifact_and_copy { epoch; id; revision } ->
       fork_safe t (fun () ->

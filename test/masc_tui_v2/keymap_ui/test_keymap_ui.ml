@@ -2143,6 +2143,118 @@ let test_markdown_parse_inline_linear_unmatched_delimiters () =
        elapsed_s)
     true (elapsed_s < 2.0)
 
+let test_markdown_inline_mermaid_blocks () =
+  let theme = Theme.default in
+  let has_sub s sub =
+    let n = String.length s and m = String.length sub in
+    let rec go i =
+      if i + m > n then false
+      else if String.equal (String.sub s i m) sub then true
+      else go (i + 1)
+    in
+    m = 0 || go 0
+  in
+  let line_text (l : Markdown.rendered_line) =
+    String.concat "" (List.map (fun (sp : Markdown.styled_span) -> sp.text) l.spans)
+  in
+  let check_parity ~width md =
+    let lines = Markdown.render_lines ~theme ~width ~osc8:true md in
+    let measured = Markdown.measure ~theme ~width ~osc8:true md in
+    let grid = Cell_grid.create ~cols:width ~rows:(max 4 (measured + 2)) in
+    let drawn =
+      Markdown.draw grid ~rect:(Rect.make ~x:0 ~y:0 ~w:width ~h:(max 4 (measured + 2)))
+        ~theme ~osc8:true md
+    in
+    Alcotest.(check int)
+      (Printf.sprintf "measure == List.length render_lines at w=%d" width)
+      (List.length lines) measured;
+    Alcotest.(check int)
+      (Printf.sprintf "draw total == measure at w=%d" width)
+      measured drawn;
+    List.iter
+      (fun l ->
+        Alcotest.(check bool) "rendered line width <= width" true
+          (Grapheme.display_width (line_text l) <= width))
+      lines;
+    lines
+  in
+
+  (* 1. Horizontal LR flowchart inside ```Mermaid renders as real Unicode box-and-arrow diagram
+        with automatic TD reflow at narrow width=48 *)
+  let md_lr =
+    "Intro paragraph.\n\n```Mermaid\nflowchart LR\n  A[\"Alpha Stage\"] --> B[\"Beta Review\"]\n  B --> C[\"Final Land\"]\n```\n\nAfter."
+  in
+  let lines_48 = check_parity ~width:48 md_lr in
+  let joined_48 = String.concat "\n" (List.map line_text lines_48) in
+  Alcotest.(check bool) "renders Unicode box border (not raw flowchart LR)" true
+    (has_sub joined_48 "\xe2\x94\x8c" && has_sub joined_48 "\xe2\x94\x82");
+  Alcotest.(check bool) "preserves diagram labels" true
+    (has_sub joined_48 "Alpha Stage" && has_sub joined_48 "Final Land");
+  Alcotest.(check bool) "replaces raw mermaid syntax with drawing" false
+    (has_sub joined_48 "flowchart LR");
+  ignore (check_parity ~width:80 md_lr);
+
+  (* 2. Unsupported mermaid kind falls back cleanly to raw fenced code lines with exact parity *)
+  let md_unsupported = "```mermaid\npie title Tasks\n  \"Done\" : 70\n  \"Open\" : 30\n```" in
+  let lines_unsup = check_parity ~width:60 md_unsupported in
+  let joined_unsup = String.concat "\n" (List.map line_text lines_unsup) in
+  Alcotest.(check bool) "unsupported mermaid keeps raw source fallback" true
+    (has_sub joined_unsup "pie title Tasks");
+
+  (* 3. Oversized > 80 lines and > 8192 bytes blocks skip Mermaid layout and fall back safely *)
+  let many_lines =
+    "```mermaid\nflowchart TD\n"
+    ^ String.concat "\n" (List.init 85 (fun i -> Printf.sprintf "N%d --> N%d" i (i + 1)))
+    ^ "\n```"
+  in
+  let lines_many = check_parity ~width:60 many_lines in
+  Alcotest.(check bool) "over-80-line mermaid falls back to source lines" true
+    (has_sub (String.concat "\n" (List.map line_text lines_many)) "N0 --> N1");
+
+  let huge_bytes =
+    "```mermaid\nflowchart TD\nA[\"" ^ String.make 8300 'x' ^ "\"] --> B[end]\n```"
+  in
+  let lines_huge = check_parity ~width:60 huge_bytes in
+  Alcotest.(check bool) "over-8192-byte mermaid falls back safely" true
+    (List.length lines_huge > 10);
+
+  (* 4. Empty width (width <= 0) matches draw = 0; tiny width = 4 falls back with parity *)
+  let empty_grid = Cell_grid.create ~cols:10 ~rows:5 in
+  Alcotest.(check int) "measure ~width:0 == 0" 0
+    (Markdown.measure ~theme ~width:0 ~osc8:true md_lr);
+  Alcotest.(check int) "measure ~width:(-3) == 0" 0
+    (Markdown.measure ~theme ~width:(-3) ~osc8:true md_lr);
+  Alcotest.(check int) "draw empty rect == 0" 0
+    (Markdown.draw empty_grid ~rect:(Rect.make ~x:0 ~y:0 ~w:0 ~h:5) ~theme
+       ~osc8:true md_lr);
+  let lines_w4 = Markdown.render_lines ~theme ~width:4 ~osc8:true md_lr in
+  let meas_w4 = Markdown.measure ~theme ~width:4 ~osc8:true md_lr in
+  let grid_w4 = Cell_grid.create ~cols:4 ~rows:(max 4 (meas_w4 + 2)) in
+  let draw_w4 =
+    Markdown.draw grid_w4 ~rect:(Rect.make ~x:0 ~y:0 ~w:4 ~h:(max 4 (meas_w4 + 2)))
+      ~theme ~osc8:true md_lr
+  in
+  Alcotest.(check int) "width=4 measure == render_lines length"
+    (List.length lines_w4) meas_w4;
+  Alcotest.(check int) "width=4 draw == measure" meas_w4 draw_w4;
+
+  (* 5. Parse-error mermaid falls back cleanly to raw source lines with exact parity *)
+  let md_parse_err = "```mermaid\nflowchart TD\nA[\"bad\"]::: --> B\n```" in
+  let lines_perr = check_parity ~width:60 md_parse_err in
+  Alcotest.(check bool) "parse-error mermaid keeps raw source fallback" true
+    (has_sub (String.concat "\n" (List.map line_text lines_perr)) "A[\"bad\"]::: --> B");
+
+  (* 6. Korean/CJK labels inside ```mermaid render cleanly without width overflow *)
+  let md_cjk =
+    "```mermaid\nflowchart LR\n  A[기억 스냅샷] -->|검증| B[최종 반영]\n```"
+  in
+  let lines_cjk = check_parity ~width:36 md_cjk in
+  let joined_cjk = String.concat "\n" (List.map line_text lines_cjk) in
+  Alcotest.(check bool) "CJK inline mermaid draws box borders" true
+    (has_sub joined_cjk "\xe2\x94\x8c" && has_sub joined_cjk "\xe2\x94\x82");
+  Alcotest.(check bool) "CJK inline mermaid preserves Korean labels" true
+    (has_sub joined_cjk "기억 스냅샷" && has_sub joined_cjk "최종 반영")
+
 let () =
   Alcotest.run "masc_tui_keymap_ui"
     [
@@ -2195,6 +2307,9 @@ let () =
             `Quick test_json_tree_telemetry_vs_secrets;
           Alcotest.test_case "Markdown OSC 8 links & fenced code" `Quick
             test_markdown_osc8_and_fence;
+          Alcotest.test_case
+            "Markdown inline ```mermaid blocks (adaptive LR->TD, parity & guards)"
+            `Quick test_markdown_inline_mermaid_blocks;
           Alcotest.test_case "Markdown O(N) parse_inline on 10k unmatched delimiters"
             `Quick test_markdown_parse_inline_linear_unmatched_delimiters;
           Alcotest.test_case "Wave 2: Html_doc strips script/style/hidden, aligns tables & search highlights"

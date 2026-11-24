@@ -170,12 +170,14 @@ let composer_popup_open (model : Model.t) =
   | Update_nav.Composer_popup_slash _ | Update_nav.Composer_popup_mention _ ->
       true
 
-let desired_memory_graphic ~(probe : Probe.observation) ~term_program
+let desired_memory_graphic ~(probe : Probe.observation) ~term_program ~in_tmux
     ~(model : Model.t) =
   if composer_popup_open model || Model.sidebar_drawer_open model then None
   else
+  let eff_term_program = if in_tmux then None else term_program in
   let protocol =
-    Graphics.protocol_of_probe ~graphics:probe.graphics ~term_program
+    Graphics.protocol_of_probe ~graphics:probe.graphics
+      ~term_program:eff_term_program
   in
   match protocol with
   | Graphics.Unsupported_protocol -> None
@@ -221,7 +223,7 @@ let desired_memory_graphic ~(probe : Probe.observation) ~term_program
       | (Some _ | None), (Some _ | None) -> None)
 
 let plan_memory_graphic_clear ~active ~probe ~term_program ~in_tmux ~model =
-  let desired = desired_memory_graphic ~probe ~term_program ~model in
+  let desired = desired_memory_graphic ~probe ~term_program ~in_tmux ~model in
   match active, desired with
   | None, _ -> ("", false, None)
   | Some prev, Some (next, _, _) when equal_memory_graphic_state prev next ->
@@ -232,7 +234,7 @@ let plan_memory_graphic_clear ~active ~probe ~term_program ~in_tmux ~model =
 
 let plan_memory_graphic_place ~active ~probe ~term_program ~in_tmux ~model
     ~full_repaint =
-  let desired = desired_memory_graphic ~probe ~term_program ~model in
+  let desired = desired_memory_graphic ~probe ~term_program ~in_tmux ~model in
   match active, desired with
   | _, None -> ("", None)
   | Some prev, Some (next, _, _)

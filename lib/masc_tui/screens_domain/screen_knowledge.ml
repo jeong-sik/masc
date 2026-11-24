@@ -2786,15 +2786,25 @@ let render_memory ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             (Say.make ~ko:"[v] 하위뷰 · [M] 차트 · [w] 기간"
                ~en:"[v] View · [M] Flow · [w] Window"))
        pills);
-  let draw_right ~rect ~focused =
-    match k.memory_subview with
-    | Knowledge_store.Mem_diff_flow ->
-        draw_temporal_memory_diff ~is_dive:false ~model ~grid ~cache ~rect
-          ~theme ~bp ~lang ~now_unix ~k ~focused
-    | Knowledge_store.Mem_health_ledger | Knowledge_store.Mem_context ->
-        draw_memory_subview_card ~grid ~cache ~rect ~theme ~bp ~lang ~k ~focused
+  let diagram_open =
+    match k.memory_diff_keeper, k.memory_diagram with
+    | Some kp, Some d ->
+        Knowledge_store.memory_diagram_matches_scope ~keeper_opt:(Some kp) d
+    | (Some _ | None), (Some _ | None) -> false
   in
-  if model.nav.zoomed then
+  let draw_right ~rect ~focused =
+    if diagram_open then
+      draw_temporal_memory_diff ~is_dive:false ~model ~grid ~cache ~rect
+        ~theme ~bp ~lang ~now_unix ~k ~focused
+    else
+      match k.memory_subview with
+      | Knowledge_store.Mem_diff_flow ->
+          draw_temporal_memory_diff ~is_dive:false ~model ~grid ~cache ~rect
+            ~theme ~bp ~lang ~now_unix ~k ~focused
+      | Knowledge_store.Mem_health_ledger | Knowledge_store.Mem_context ->
+          draw_memory_subview_card ~grid ~cache ~rect ~theme ~bp ~lang ~k ~focused
+  in
+  if model.nav.zoomed || diagram_open then
     draw_right ~rect:body_rect ~focused:(Model.body_has_focus model)
   else
     let left_rect, right_rect =

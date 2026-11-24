@@ -68,6 +68,63 @@ let unconfirmed_error detail =
 let scene ~format ~max_width ~font_size ~now_ms ~colors source =
   { format; source; max_width; font_size; now_ms; colors }
 
+let is_regular_executable path =
+  try
+    let st = Unix.stat path in
+    match st.Unix.st_kind with
+    | Unix.S_REG ->
+        Unix.access path [ Unix.X_OK ];
+        true
+    | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
+    | Unix.S_SOCK ->
+        false
+  with Unix.Unix_error _ -> false
+
+let resolve_executable ?(getenv = Sys.getenv_opt)
+    ?(executable_name = Sys.executable_name) executable =
+  if String.equal (String.trim executable) "" || String.contains executable '/'
+  then executable
+  else
+    let from_path =
+      match getenv "PATH" with
+      | None -> None
+      | Some path_env ->
+          String.split_on_char ':' path_env
+          |> List.find_map (fun dir ->
+                 if String.equal dir "" then None
+                 else
+                   let candidate = Filename.concat dir executable in
+                   if is_regular_executable candidate then Some candidate
+                   else None)
+    in
+    match from_path with
+    | Some found -> found
+    | None -> (
+        let sibling =
+          if
+            String.equal (String.trim executable_name) ""
+            || Filename.is_implicit executable_name
+          then None
+          else
+            let candidate =
+              Filename.concat (Filename.dirname executable_name) executable
+            in
+            if is_regular_executable candidate then Some candidate else None
+        in
+        match sibling with
+        | Some found -> found
+        | None -> (
+            match getenv "HOME" with
+            | Some home when not (String.equal (String.trim home) "") ->
+                let candidate =
+                  Filename.concat
+                    (Filename.concat (Filename.concat home ".local") "bin")
+                    executable
+                in
+                if is_regular_executable candidate then candidate
+                else executable
+            | Some _ | None -> executable))
+
 let command_runner ?(executable = "masc-pele") ~run ~input ~output ~errors =
   run
     (Printf.sprintf "%s < %s > %s 2> %s" (Filename.quote executable)
@@ -94,6 +151,7 @@ let process_runner ?(executable = "masc-pele") ?(timeout_s = default_timeout_s)
     ?clock ?(cancelled = fun () -> false) () ~input ~output ~errors =
   if cancelled () then Cancelled
   else
+    let resolved = resolve_executable executable in
     let with_file path flags fn =
       let descriptor = Unix.openfile path flags 0o600 in
       Fun.protect ~finally:(fun () -> safe_close_fd descriptor) (fun () -> fn descriptor)
@@ -104,7 +162,7 @@ let process_runner ?(executable = "masc-pele") ?(timeout_s = default_timeout_s)
             (fun stdout_fd ->
               with_file errors [ Unix.O_WRONLY; Unix.O_TRUNC; Unix.O_CLOEXEC ]
                 (fun stderr_fd ->
-                  Unix.create_process executable [| executable |] stdin_fd
+                  Unix.create_process resolved [| resolved |] stdin_fd
                     stdout_fd stderr_fd)))
     in
     let timeout_s =

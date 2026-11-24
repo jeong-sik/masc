@@ -36,6 +36,20 @@ val chart_of_activity :
     {!Memory_lineage.chart}. Returns [None] when [activity.keeper <> keeper] or
     [selected.identity] is absent from [activity.events]. *)
 
+val chart_of_ordinary_fact :
+  ?tz_offset_sec:int ->
+  ko:bool ->
+  ?now:float ->
+  revision:int ->
+  activity:Wire_knowledge.keeper_memory_activity option ->
+  Wire_knowledge.keeper_ordinary_fact ->
+  Memory_lineage.chart
+(** Construct an honest single-fact current-snapshot {!Memory_lineage.chart}
+    for an ordinary memory fact whose [memory_id] does not appear in the recent
+    activity window. Shows the fact's full claim, category, origin, revision,
+    and observed timestamps, explicitly marked as a current snapshot with no
+    fabricated transition history. *)
+
 val find_latest_event_for_fact :
   memory_id:string ->
   Wire_knowledge.keeper_memory_activity ->
@@ -68,9 +82,11 @@ val render_mermaid_fallback :
   kind:Knowledge_store.memory_diagram_kind ->
   Memory_lineage.chart ->
   string list * string option
-(** Render [chart] via {!Mermaid.render} bounded to [max_width]. If Mermaid
-    refuses the source (e.g. [Too_wide]), returns wrapped raw Mermaid source
-    lines paired with a concise diagnostic note instead of raising. *)
+(** Render [chart] via {!Mermaid.render_adaptive} bounded to [max_width]
+    (automatically retrying horizontal [LR]/[RL] flowcharts as [TD] on
+    [Too_wide]). If Mermaid still refuses the source, returns wrapped raw
+    Mermaid source lines paired with a concise diagnostic note instead of
+    raising. *)
 
 val render_tree_lines :
   ?tz_offset_sec:int ->
@@ -97,11 +113,12 @@ val copy_source_of_chart :
     (Mermaid source or rendered formation tree text). *)
 
 val active_memory_keeper : Model.t -> string option
-(** Resolve the Keeper currently visibly displayed in a Memory Explorer surface
-    ([3 -> 기억], [4 -> Keeper -> 기억] dive, or split/zoomed [4 Keepers] on
-    the Memory tab), derived directly from {!active_memory_content_rect}.
-    Returns [None] on too-small/Micro viewports, unsplit narrow [4 Keepers],
-    open overlays, or non-memory surfaces. *)
+(** Resolve the Keeper currently in scope for a Memory diagram across all
+    keeper-scoped Memory surfaces and subviews ([3 -> 기억], [4 -> Keeper -> 기억]
+    dive, and [4 Keepers] on the Memory tab at any non-Micro width including
+    compact [< 104] cols), derived directly from {!active_memory_content_rect}.
+    Returns [None] on too-small/Micro viewports, open overlays, or non-memory
+    surfaces. *)
 
 val active_diagram : Model.t -> Knowledge_store.memory_diagram_state option
 (** Return [Some d] iff [m.knowledge.memory_diagram] is open and strictly
@@ -110,10 +127,11 @@ val active_diagram : Model.t -> Knowledge_store.memory_diagram_state option
 
 val active_memory_content_rect : Model.t -> (string * Rect.t) option
 (** Exact terminal-grid screen [Rect.t] passed to
-    [Memory_explorer.render_keeper_memory] for the active Keeper memory surface
+    [Memory_explorer.render_memory_diagram] for the active Keeper memory surface
     (matching [Chrome.compute_layout], [Screen_knowledge.render_memory],
-    [Screen_keepers.render], and [Keeper_dive.render_memory_tab], including
-    zoomed mode). Returns [None] on too-small/Micro viewports, open overlays, or
+    [Screen_keepers.render], and [Keeper_dive.render_memory_tab], including all
+    keeper-scoped memory subviews and full-body diagram expansion on compact
+    widths). Returns [None] on too-small/Micro viewports, open overlays, or
     non-memory surfaces. *)
 
 val can_render_png_in_rect :

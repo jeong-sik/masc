@@ -98,10 +98,15 @@ type memory_diagram_payload =
       note : string option;
     }
 
+type memory_diagram_source =
+  | Diagram_source_event of string
+  | Diagram_source_fact_snapshot of string
+
 type memory_diagram_state = {
   request_id : int;
   keeper : string;
   event_identity : string;
+  source : memory_diagram_source;
   revision : int;
   kind : memory_diagram_kind;
   mode : memory_diagram_mode;

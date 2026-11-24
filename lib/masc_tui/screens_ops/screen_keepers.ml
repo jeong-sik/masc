@@ -1117,12 +1117,26 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
     let bp = Ops_common.layout_bp model in
     let all_ks = Fleet_store.filtered_keepers model.fleet in
     let selected_keeper_opt = Fleet_store.selected_keeper_summary model.fleet in
+    let open_memory_diagram_for_selected =
+      Nav.equal_keeper_tab model.fleet.keeper_dive_tab Nav.Keeper_memory
+      &&
+      match selected_keeper_opt, model.knowledge.memory_diagram with
+      | Some k, Some d ->
+          Knowledge_store.memory_diagram_matches_scope ~keeper_opt:(Some k.name)
+            d
+      | (Some _ | None), (Some _ | None) -> false
+    in
     let is_split =
       (Model.equal_breakpoint model.breakpoint Model.Wide
        || Model.equal_breakpoint model.breakpoint Model.Standard)
-      && rect.w >= 104 && not model.nav.zoomed
+      && rect.w >= 104
+      && (not model.nav.zoomed)
+      && not open_memory_diagram_for_selected
     in
-    if model.nav.zoomed && Option.is_some selected_keeper_opt then
+    if
+      (model.nav.zoomed || open_memory_diagram_for_selected)
+      && Option.is_some selected_keeper_opt
+    then
       match selected_keeper_opt with
       | Some k ->
           Keeper_dive.render_tabs_body ~embedded:false ~name:k.name

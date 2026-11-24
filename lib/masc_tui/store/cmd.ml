@@ -346,6 +346,7 @@ type t =
       event_identity : string;
       kind : Knowledge_store.memory_diagram_kind;
       mode : Knowledge_store.memory_diagram_mode;
+      theme_preset : Masc_tui_core.Theme.preset;
       ko : bool;
       tz_offset_sec : int;
       now_unix : float;

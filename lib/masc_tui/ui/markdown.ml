@@ -461,6 +461,86 @@ let is_table_rule line =
   done;
   !valid && !has_dash
 
+let max_inline_mermaid_bytes = 8192
+let max_inline_mermaid_lines = 80
+
+let is_mermaid_lang_tag tag =
+  String.starts_with ~prefix:"mermaid" (String.lowercase_ascii tag)
+
+let is_diagram_line_cluster = function
+  | "\xe2\x94\x80" (* ─ *) | "\xe2\x94\x82" (* │ *) | "\xe2\x94\x8c" (* ┌ *)
+  | "\xe2\x94\x90" (* ┐ *) | "\xe2\x94\x94" (* └ *) | "\xe2\x94\x98" (* ┘ *)
+  | "\xe2\x94\x9c" (* ├ *) | "\xe2\x94\xa4" (* ┤ *) | "\xe2\x94\xac" (* ┬ *)
+  | "\xe2\x94\xb4" (* ┴ *) | "\xe2\x94\xbc" (* ┼ *) | "\xe2\x95\xad" (* ╭ *)
+  | "\xe2\x95\xae" (* ╮ *) | "\xe2\x95\xaf" (* ╯ *) | "\xe2\x95\xb0" (* ╰ *)
+  | "\xe2\x95\x90" (* ═ *) | "\xe2\x95\x91" (* ║ *) | "\xe2\x95\x94" (* ╔ *)
+  | "\xe2\x95\x97" (* ╗ *) | "\xe2\x95\x9a" (* ╚ *) | "\xe2\x95\x9d" (* ╝ *)
+  | "\xe2\x95\xa0" (* ╠ *) | "\xe2\x95\xa3" (* ╣ *) | "\xe2\x95\xa6" (* ╦ *)
+  | "\xe2\x95\xa9" (* ╩ *) | "\xe2\x95\xac" (* ╬ *) | "\xe2\x95\x93" (* ╓ *)
+  | "\xe2\x95\x96" (* ╖ *) | "\xe2\x95\x99" (* ╙ *) | "\xe2\x95\x9c" (* ╜ *)
+  | "\xe2\x95\x9f" (* ╟ *) | "\xe2\x95\xa2" (* ╢ *) | "\xe2\x94\x84" (* ┄ *)
+  | "\xe2\x94\x86" (* ┆ *) | "\xe2\x94\x81" (* ━ *) | "\xe2\x94\x83" (* ┃ *)
+  | "\xe2\x96\xbc" (* ▼ *) | "\xe2\x96\xb2" (* ▲ *) | "\xe2\x96\xb6" (* ▶ *)
+  | "\xe2\x97\x80" (* ◀ *) | "\xe2\x96\xba" (* ► *) | "\xe2\x97\x84" (* ◄ *) ->
+      true
+  | _ -> false
+
+let style_mermaid_row ~line_style ~label_style ~max_width row =
+  let clipped =
+    if Grapheme.display_width row <= max_width then row
+    else Grapheme.truncate_to_width ~max_width row
+  in
+  let spans = ref [] in
+  let cur_buf = Buffer.create (String.length clipped) in
+  let cur_is_line = ref None in
+  let flush () =
+    if Buffer.length cur_buf > 0 then begin
+      let style =
+        match !cur_is_line with
+        | Some true -> line_style
+        | Some false | None -> label_style
+      in
+      spans := { text = Buffer.contents cur_buf; style; hyperlink = None } :: !spans;
+      Buffer.clear cur_buf
+    end
+  in
+  Grapheme.iter_clusters clipped (fun ~text ~start_offset ~end_offset ~cell_width:_ ->
+      let cluster = String.sub text start_offset (end_offset - start_offset) in
+      let is_line = is_diagram_line_cluster cluster in
+      (match !cur_is_line with
+      | Some prev when Bool.equal prev is_line -> ()
+      | Some _ | None ->
+          flush ();
+          cur_is_line := Some is_line);
+      Buffer.add_string cur_buf cluster);
+  flush ();
+  List.rev !spans
+
+let try_render_mermaid_fence ~inner_w body_lines =
+  if inner_w < 8 || List.length body_lines > max_inline_mermaid_lines then None
+  else
+    let code = String.concat "\n" body_lines in
+    if
+      String.length code > max_inline_mermaid_bytes
+      || String.equal (String.trim code) ""
+    then None
+    else
+      match Mermaid.render_adaptive ~cols:inner_w code with
+      | Ok (_ :: _ as rows) -> Some rows
+      | Ok [] | Error _ -> None
+
+let first_info_token info =
+  let trimmed = String.trim info in
+  let len = String.length trimmed in
+  let rec stop i =
+    if i >= len then len
+    else
+      match trimmed.[i] with
+      | ' ' | '\t' -> i
+      | _ -> stop (i + 1)
+  in
+  String.sub trimmed 0 (stop 0)
+
 let render_lines ~(theme : Theme.t) ~width ?(osc8 = true) raw =
   let width = Int.max 8 width in
   let bg = Color.of_rgb theme.surface_1 in
@@ -508,12 +588,7 @@ let render_lines ~(theme : Theme.t) ~width ?(osc8 = true) raw =
                     else collect (l :: acc) tl
               in
               let body_lines, after = collect [] rest in
-              let lang_tag =
-                match String.split_on_char ' ' info with
-                | first :: _ -> first
-                | [] -> ""
-              in
-              let language = Code_lexer.language_of_tag lang_tag in
+              let lang_tag = first_info_token info in
               let code_bg = Color.of_rgb theme.surface_0 in
               let code_pad = Style.make ~fg:(Color.of_rgb theme.text_primary) ~bg:code_bg () in
               let gutter_span =
@@ -523,6 +598,8 @@ let render_lines ~(theme : Theme.t) ~width ?(osc8 = true) raw =
                   hyperlink = None;
                 }
               in
+              let gutter_w = Grapheme.display_width gutter_span.text in
+              let inner_w = Int.max 0 (width - gutter_w) in
               if String.length lang_tag > 0 then begin
                 let hdr_line =
                   pad_line_to_width ~width ~pad_style:code_pad
@@ -540,28 +617,60 @@ let render_lines ~(theme : Theme.t) ~width ?(osc8 = true) raw =
                 in
                 push_lines [ hdr_line ]
               end;
-              let lexed_rows =
-                Code_lexer.rows_of_source ~language (String.concat "\n" body_lines)
+              let rendered_mermaid =
+                if is_mermaid_lang_tag lang_tag then
+                  try_render_mermaid_fence ~inner_w body_lines
+                else None
               in
-              List.iter
-                (fun row_segs ->
-                  let row_spans =
-                    List.map
-                      (fun (seg : Code_lexer.segment) ->
-                        {
-                          text = seg.text;
-                          style = Code_lexer.style_of_token ~theme ~bg:code_bg seg.kind;
-                          hyperlink = None;
-                        })
-                      row_segs
+              (match rendered_mermaid with
+              | Some diagram_rows ->
+                  let line_style =
+                    Style.make ~fg:(Color.of_rgb theme.status_active)
+                      ~bg:code_bg ()
                   in
-                  let wrapped =
-                    wrap_styled_spans ~width ~prefix:[ gutter_span ]
-                      ~continuation:[ gutter_span ] row_spans
-                    |> List.map (pad_line_to_width ~width ~pad_style:code_pad)
+                  let label_style =
+                    Style.make ~fg:(Color.of_rgb theme.text_bright)
+                      ~bg:code_bg ()
                   in
-                  push_lines wrapped)
-                lexed_rows;
+                  List.iter
+                    (fun row ->
+                      let row_spans =
+                        style_mermaid_row ~line_style ~label_style
+                          ~max_width:inner_w row
+                      in
+                      let line_rec =
+                        pad_line_to_width ~width ~pad_style:code_pad
+                          { spans = gutter_span :: row_spans }
+                      in
+                      push_lines [ line_rec ])
+                    diagram_rows
+              | None ->
+                  let language = Code_lexer.language_of_tag lang_tag in
+                  let lexed_rows =
+                    Code_lexer.rows_of_source ~language
+                      (String.concat "\n" body_lines)
+                  in
+                  List.iter
+                    (fun row_segs ->
+                      let row_spans =
+                        List.map
+                          (fun (seg : Code_lexer.segment) ->
+                            {
+                              text = seg.text;
+                              style =
+                                Code_lexer.style_of_token ~theme ~bg:code_bg
+                                  seg.kind;
+                              hyperlink = None;
+                            })
+                          row_segs
+                      in
+                      let wrapped =
+                        wrap_styled_spans ~width ~prefix:[ gutter_span ]
+                          ~continuation:[ gutter_span ] row_spans
+                        |> List.map (pad_line_to_width ~width ~pad_style:code_pad)
+                      in
+                      push_lines wrapped)
+                    lexed_rows);
               walk after
           | None -> (
               match heading_prefix trimmed with
@@ -752,6 +861,9 @@ let render_lines ~(theme : Theme.t) ~width ?(osc8 = true) raw =
   in
   walk raw_lines;
   List.rev !out
+
+let measure ~(theme : Theme.t) ~width ?(osc8 = true) raw =
+  if width <= 0 then 0 else List.length (render_lines ~theme ~width ~osc8 raw)
 
 let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ?(osc8 = true) ?(scroll = 0)
     raw =

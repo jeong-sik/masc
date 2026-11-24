@@ -74,6 +74,11 @@ val of_responses :
   t option
 (** Builds a palette only when both foreground and background were reported. *)
 
+val of_theme : Masc_tui_core.Theme.t -> t
+(** Build a fallback palette directly from the active TUI {!Masc_tui_core.Theme.t}
+    ([text_primary] foreground, [surface_1] background, and semantic ANSI slots)
+    when terminal OSC 10/11 palette replies were not observed. *)
+
 type snapshot
 
 val current : unit -> t option

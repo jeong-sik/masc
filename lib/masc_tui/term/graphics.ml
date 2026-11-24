@@ -296,23 +296,54 @@ let equal_graphics_protocol a b =
   | Unsupported_protocol, (Kitty_protocol | ITerm2_protocol) ->
       false
 
+let non_empty_env ~getenv key =
+  match getenv key with
+  | Some value -> not (String.equal (String.trim value) "")
+  | None -> false
+
+let in_multiplexer ~getenv =
+  non_empty_env ~getenv "TMUX" || non_empty_env ~getenv "STY"
+
 let effective_term_program ~getenv =
-  let term_usable =
+  let term_lc =
     match getenv "TERM" with
     | Some term ->
-        let trimmed = String.trim term in
-        String.length trimmed > 0
-        && not (String.equal (String.lowercase_ascii trimmed) "dumb")
-    | None -> false
+        let trimmed = String.lowercase_ascii (String.trim term) in
+        if String.length trimmed > 0 && not (String.equal trimmed "dumb") then
+          Some trimmed
+        else None
+    | None -> None
   in
-  if not term_usable then None else getenv "TERM_PROGRAM"
+  match term_lc with
+  | None -> None
+  | Some term ->
+      if in_multiplexer ~getenv then None
+      else
+        match getenv "TERM_PROGRAM" with
+        | Some tp when not (String.equal (String.trim tp) "") -> Some tp
+        | Some _ | None -> (
+            match term with
+            | "xterm-kitty" -> Some "kitty"
+            | "xterm-ghostty" -> Some "ghostty"
+            | _ -> None)
+
+let normalized_term_program = function
+  | Some value ->
+      let trimmed = String.lowercase_ascii (String.trim value) in
+      if String.equal trimmed "" then None else Some trimmed
+  | None -> None
 
 let protocol_of_probe ~graphics ~term_program =
   match graphics with
   | Some Probe.Graphics_supported -> Kitty_protocol
-  | Some (Probe.Graphics_refused _) | None -> (
-      match term_program with
-      | Some "iTerm.app" -> ITerm2_protocol
+  | Some (Probe.Graphics_refused _) -> (
+      match normalized_term_program term_program with
+      | Some "iterm.app" -> ITerm2_protocol
+      | Some _ | None -> Unsupported_protocol)
+  | None -> (
+      match normalized_term_program term_program with
+      | Some ("ghostty" | "wezterm" | "kitty") -> Kitty_protocol
+      | Some "iterm.app" -> ITerm2_protocol
       | Some _ | None -> Unsupported_protocol)
 
 let iterm2_place ~data ({ columns; rows } : placement) =

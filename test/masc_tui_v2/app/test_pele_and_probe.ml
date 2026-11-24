@@ -545,6 +545,106 @@ let test_probe_post_grace_expiry_and_input_reader_recovery () =
              | [ k ] -> Input_decoder.equal_key k.key Input_decoder.Up
              | _ -> false)))
 
+let test_pele_executable_resolution () =
+  let root = Filename.temp_dir "tui-pele-resolve-" "" in
+  let rec rm_rf path =
+    match Unix.lstat path with
+    | { Unix.st_kind = Unix.S_DIR; _ } ->
+        Array.iter (fun name -> rm_rf (Filename.concat path name)) (Sys.readdir path);
+        Unix.rmdir path
+    | _ -> Sys.remove path
+    | exception Unix.Unix_error _ -> ()
+  in
+  Fun.protect
+    ~finally:(fun () -> rm_rf root)
+    (fun () ->
+      let path_dir = Filename.concat root "path_bin" in
+      let bad_path_dir = Filename.concat root "bad_bin" in
+      let sibling_dir = Filename.concat root "sibling_bin" in
+      let fake_home = Filename.concat root "fake_home" in
+      let home_local = Filename.concat fake_home ".local" in
+      let home_local_bin = Filename.concat home_local "bin" in
+      List.iter (fun d -> Unix.mkdir d 0o700)
+        [ path_dir; bad_path_dir; sibling_dir; fake_home; home_local; home_local_bin ];
+      (* Directory and non-executable file in PATH must be skipped *)
+      let dir_entry = Filename.concat bad_path_dir "masc-pele" in
+      Unix.mkdir dir_entry 0o700;
+      let non_exec = Filename.concat path_dir "masc-pele" in
+      write_file non_exec "#!/bin/sh\n";
+      Unix.chmod non_exec 0o600;
+      let home_pele = Filename.concat home_local_bin "masc-pele" in
+      write_file home_pele "#!/bin/sh\nexit 0\n";
+      Unix.chmod home_pele 0o700;
+      let env_of pairs k = List.assoc_opt k pairs in
+      let fake_tui = Filename.concat sibling_dir "masc-tui" in
+
+      (* 1. Explicit path containing '/' is returned unchanged *)
+      check string "explicit path kept unchanged" "/custom/path/masc-pele"
+        (Pele.resolve_executable
+           ~getenv:(env_of [ ("HOME", fake_home); ("PATH", path_dir) ])
+           ~executable_name:fake_tui "/custom/path/masc-pele");
+
+      (* 2. Falls through non-exec & dir in PATH + missing sibling to $HOME/.local/bin/masc-pele *)
+      check string "resolves $HOME/.local/bin/masc-pele" home_pele
+        (Pele.resolve_executable
+           ~getenv:
+             (env_of
+                [
+                  ("HOME", fake_home);
+                  ("PATH", bad_path_dir ^ ":" ^ path_dir);
+                ])
+           ~executable_name:fake_tui "masc-pele");
+
+      (* 3. Sibling binary next to Sys.executable_name wins over $HOME/.local/bin *)
+      let sibling_pele = Filename.concat sibling_dir "masc-pele" in
+      write_file sibling_pele "#!/bin/sh\nexit 0\n";
+      Unix.chmod sibling_pele 0o700;
+      check string "sibling next to executable_name wins over $HOME/.local/bin"
+        sibling_pele
+        (Pele.resolve_executable
+           ~getenv:
+             (env_of
+                [
+                  ("HOME", fake_home);
+                  ("PATH", bad_path_dir ^ ":" ^ path_dir);
+                ])
+           ~executable_name:fake_tui "masc-pele");
+
+      (* 3b. Bare implicit executable_name ("masc-tui") MUST NOT probe ./masc-pele in CWD *)
+      let orig_cwd = Sys.getcwd () in
+      Fun.protect
+        ~finally:(fun () -> Sys.chdir orig_cwd)
+        (fun () ->
+          Sys.chdir sibling_dir;
+          check string "implicit executable_name skips CWD sibling and uses $HOME/.local/bin"
+            home_pele
+            (Pele.resolve_executable
+               ~getenv:
+                 (env_of
+                    [
+                      ("HOME", fake_home);
+                      ("PATH", bad_path_dir ^ ":" ^ path_dir);
+                    ])
+               ~executable_name:"masc-tui" "masc-pele"));
+
+      (* 4. Regular executable in PATH wins over sibling and $HOME/.local/bin *)
+      Unix.chmod non_exec 0o700;
+      check string "executable in PATH wins first" non_exec
+        (Pele.resolve_executable
+           ~getenv:
+             (env_of
+                [
+                  ("HOME", fake_home);
+                  ("PATH", bad_path_dir ^ ":" ^ path_dir);
+                ])
+           ~executable_name:fake_tui "masc-pele");
+
+      (* 5. Missing everywhere returns bare command name unchanged *)
+      check string "missing everywhere preserves bare command" "masc-pele"
+        (Pele.resolve_executable
+           ~getenv:(env_of [ ("PATH", bad_path_dir) ])
+           ~executable_name:"/nonexistent/dir/masc-tui" "masc-pele"))
+
 let () =
   run "masc_tui_v2_pele_and_probe"
     [
@@ -556,6 +656,8 @@ let () =
             test_pele_unconfirmed_and_errors;
           test_case "process_runner missing binary & non-protocol output" `Quick
             test_pele_process_runner_timeout_and_missing_binary;
+          test_case "resolve_executable PATH / sibling / $HOME/.local/bin priority"
+            `Quick test_pele_executable_resolution;
         ] );
       ( "startup_probe",
         [

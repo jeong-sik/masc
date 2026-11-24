@@ -258,9 +258,70 @@ let test_deletes_iterm2_tmux_and_protocol () =
        (Graphics.protocol_of_probe
           ~graphics:(Some (Probe.Graphics_refused "NO"))
           ~term_program:(Some "iTerm.app")));
+  List.iter
+    (fun tp ->
+      check bool
+        (Printf.sprintf "Unreported + %s -> Kitty_protocol" tp)
+        true
+        (Graphics.equal_graphics_protocol Graphics.Kitty_protocol
+           (Graphics.protocol_of_probe ~graphics:None ~term_program:(Some tp)));
+      check bool
+        (Printf.sprintf "Explicit Graphics_refused + %s -> Unsupported_protocol"
+           tp)
+        true
+        (Graphics.equal_graphics_protocol Graphics.Unsupported_protocol
+           (Graphics.protocol_of_probe
+              ~graphics:(Some (Probe.Graphics_refused "ENOTSUP"))
+              ~term_program:(Some tp))))
+    [ "ghostty"; "Ghostty"; "WezTerm"; "wezterm"; "kitty"; "KITTY" ];
   check bool "Unreported + other -> Unsupported_protocol" true
     (Graphics.equal_graphics_protocol Graphics.Unsupported_protocol
        (Graphics.protocol_of_probe ~graphics:None ~term_program:(Some "xterm")));
+
+  let env_of pairs k = List.assoc_opt k pairs in
+  check (option string) "Ghostty outside tmux preserves TERM_PROGRAM"
+    (Some "ghostty")
+    (Graphics.effective_term_program
+       ~getenv:
+         (env_of [ ("TERM", "xterm-ghostty"); ("TERM_PROGRAM", "ghostty") ]));
+  check (option string) "xterm-kitty without TERM_PROGRAM infers kitty"
+    (Some "kitty")
+    (Graphics.effective_term_program
+       ~getenv:(env_of [ ("TERM", "xterm-kitty") ]));
+  check (option string) "TMUX masks inherited ghostty TERM_PROGRAM" None
+    (Graphics.effective_term_program
+       ~getenv:
+         (env_of
+            [
+              ("TERM", "tmux-256color");
+              ("TERM_PROGRAM", "ghostty");
+              ("TMUX", "/tmp/tmux-1000/default,123,0");
+            ]));
+  check (option string) "STY (screen) masks inherited wezterm TERM_PROGRAM" None
+    (Graphics.effective_term_program
+       ~getenv:
+         (env_of
+            [
+              ("TERM", "screen-256color");
+              ("TERM_PROGRAM", "WezTerm");
+              ("STY", "1234.pts-0.host");
+            ]));
+  check bool "tmux + graphics=None -> Unsupported_protocol" true
+    (Graphics.equal_graphics_protocol Graphics.Unsupported_protocol
+       (Graphics.protocol_of_probe ~graphics:None
+          ~term_program:
+            (Graphics.effective_term_program
+               ~getenv:
+                 (env_of
+                    [
+                      ("TERM", "tmux-256color");
+                      ("TERM_PROGRAM", "ghostty");
+                      ("TMUX", "/tmp/tmux-1000/default,123,0");
+                    ]))));
+  check bool "tmux + Graphics_supported -> Kitty_protocol" true
+    (Graphics.equal_graphics_protocol Graphics.Kitty_protocol
+       (Graphics.protocol_of_probe ~graphics:(Some Probe.Graphics_supported)
+          ~term_program:None));
 
   let region : Graphics.image_region =
     { top = 4; left = 1; width_cells = 80.; height_cells = 20. }

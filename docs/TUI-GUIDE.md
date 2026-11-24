@@ -94,7 +94,7 @@ All shortcuts come from `lib/masc_tui/keymap/keymap.ml`; VT100 control aliases
 | `r` | Unfocused | Force refresh active view from server SSOT (triggers `force=1` probe on Runtime Quotas/Failover) |
 | `n` | Unfocused / Settings | Create new item in current workspace (Board post, `#goals` proposal, Schedule, Connector bind, Repo, or new Keeper; inside Artifact Dive with active search, steps to next match) |
 | `o` | Unfocused / Settings | Open linked `http(s)` URL externally (Repos, Wiki, Browser Lane tabs), export & open HTML/Markdown artifact in the default browser on Artifacts / Artifact Dive / Media Viewer, or open local TOML in `$EDITOR` from Settings |
-| `.` / `Ctrl+O` / `v` | Memory Explorer (Unfocused) | `.` opens the Pele 3-stage SVG card (with Mermaid fallback) for the selected evolution event/fact; `Ctrl+O` opens the Formation Tree (Pele Graph / `Memory_tree`); while a diagram is open, `v` cycles `Auto (Pele)` → `Mermaid` → `Tree`, `y` copies diagram source, `r` retries, and `Esc` closes |
+| `.` / `Ctrl+O` / `v` | Memory Explorer (Unfocused) | `.` opens the Pele 3-stage SVG card (with adaptive Mermaid fallback) from any keeper-scoped Memory subview (`Diff/Flow`, `Facts Tree`, `Journal`, `Health`, `Context`) and compact widths, including a current-snapshot chart for facts outside the last 50 activity entries; `Ctrl+O` opens the Formation Tree (Pele Graph / `Memory_tree`); while a diagram is open, `v` cycles `Auto (Pele)` → `Mermaid` → `Tree`, `y` copies diagram source, `r` retries, and `Esc` closes back to the prior subview |
 
 ### `Esc` vs `Ctrl+Q`
 
@@ -603,16 +603,27 @@ Settings `,`), you can set `keeper.group` directly in the creation form.
   `Flow ▲/▼` / `Net Total`), **Retrieval Heat** stacked bar (`HOT` / `WARM` /
   `COLD` / `0x` hits), and per-Keeper Librarian recovery.
 - **Pele / Mermaid / Formation Tree Diagrams** (in **`3` Knowledge → Memory**
-  with a Keeper selected, or **`4` Keepers → Keeper → Memory**):
-  - Press **`.`** on an evolution event (or ordinary fact linked to an evolution
-    event) to open the **Pele 3-stage SVG card** (renders live Kitty/iTerm2
-    pixels when supported, and falls back deterministically to `Mermaid` text
-    otherwise).
+  with a Keeper selected, or **`4` Keepers → Keeper → Memory**, across all
+  keeper-scoped subviews — `Diff/Flow`, `Facts Tree`, `Journal`, `Health`,
+  `Context` — and compact widths `< 104` cols):
+  - Press **`.`** on an evolution event or ordinary fact to open the **Pele
+    3-stage SVG card** (renders live Kitty/iTerm2 pixels on Ghostty, WezTerm,
+    Kitty, and iTerm2 — falling back to the active TUI theme palette when
+    terminal `OSC 11` was not observed — and falls back deterministically to
+    adaptive `Mermaid` text with automatic `LR`/`RL` → `TD` reflow otherwise).
+    Ordinary facts outside the last 50 activity events open as an honest
+    single-fact current-snapshot chart with no fabricated transition history.
   - Press **`Ctrl+O`** to open the **Formation Tree** (Pele Graph PNG or
     `Memory_tree` text fallback).
   - Inside an open diagram: press **`v`** to cycle `Auto (Pele)` → `Mermaid` →
     `Tree`, **`j`/`k`/`PgUp`/`PgDn`/`g`/`G`** to scroll text lines, **`y`** to
-    copy diagram source, **`r`** to retry/refresh, and **`Esc`** to close.
+    copy diagram source, **`r`** to retry/refresh, and **`Esc`** to close back
+    to the exact prior Memory subview.
+- **Inline ` ```mermaid ` Markdown Rendering**: fenced `mermaid` code blocks in
+  Board posts/comments, Wiki pages, Artifacts, Tasks/Goals, and Keeper Chat
+  render directly as Unicode box-and-arrow diagrams (with automatic `LR`/`RL` →
+  `TD` reflow on narrow viewports and safe code-block fallback for unsupported
+  or oversized diagrams).
 
 ### Viewing Unified Logs & Live Events
 

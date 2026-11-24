@@ -26,9 +26,21 @@ val render_lines :
   string ->
   rendered_line list
 (** Parse and wrap Markdown into styled terminal lines of at most [width]
-    columns. When [osc8] is [true] (default), links attach their URI to
-    {!styled_span.hyperlink} for OSC 8 interning; when [false], links include
-    a muted italic [" (target)"] preview so the destination stays visible. *)
+    columns. Fenced [mermaid] code blocks within safety bounds are rendered
+    inline via {!Mermaid.render_adaptive} (falling back cleanly to normal code
+    lines on failure or oversized input). When [osc8] is [true] (default),
+    links attach their URI to {!styled_span.hyperlink} for OSC 8 interning;
+    when [false], links include a muted italic [" (target)"] preview so the
+    destination stays visible. *)
+
+val measure :
+  theme:Theme.t ->
+  width:int ->
+  ?osc8:bool ->
+  string ->
+  int
+(** Exact rendered line count projected by {!render_lines} ([0] when
+    [width <= 0]), guaranteed 1-to-1 parity with {!draw}. *)
 
 val draw :
   Cell_grid.t ->

@@ -17,8 +17,9 @@ let dashboard_bundle_assets = "assets/"
 let legacy_bundle_assets = "accounts/assets/"
 
 let policy =
-  "default-src 'none'; script-src 'self'; style-src 'self'; style-src-attr 'none'; img-src 'self' \
-   data:; font-src 'self'; connect-src 'self'; "
+  "default-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self'; \
+   style-src-attr 'unsafe-inline'; object-src 'none'; img-src 'self' data:; font-src 'self'; \
+   connect-src 'self'; "
   ^ Account_page.formless_limits
 ;;
 
@@ -169,13 +170,21 @@ let base_sheet request reqd =
     reqd
 ;;
 
+let favicon (_ : Httpun.Request.t) reqd =
+  Http.Response.bytes
+    ~headers:[ "content-security-policy", "default-src 'none'" ]
+    ~content_type:"image/svg+xml"
+    Server_routes_http_pages.favicon_svg
+    reqd
+;;
+
 let add_routes router =
   router
   |> Server_route.get Server_route.Always_public dashboard_path dashboard_page
   |> Server_route.prefix_get Server_route.Always_public dashboard_assets_prefix dashboard_asset
   |> Server_route.prefix_get Server_route.Always_public dashboard_deep_link_prefix dashboard_deep_link
-  |> Server_route.get Server_route.Always_public "/favicon.ico" Server_routes_http_pages.serve_favicon
-  |> Server_route.get Server_route.Always_public "/favicon.svg" Server_routes_http_pages.serve_favicon
+  |> Server_route.get Server_route.Always_public "/favicon.ico" favicon
+  |> Server_route.get Server_route.Always_public "/favicon.svg" favicon
   |> Server_route.get Server_route.Always_public page_path console_redirect
   |> Server_route.get Server_route.Always_public base_sheet_path base_sheet
   |> Server_route.prefix_get Server_route.Always_public legacy_assets_prefix legacy_console_asset

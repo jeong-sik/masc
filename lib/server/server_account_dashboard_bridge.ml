@@ -139,18 +139,76 @@ let lane_addons_visibility_permitted ~state caller payload =
   | _ -> false
 ;;
 
-let observer_event_visible_to ~state caller payload =
+let board_event_type_is_board = function
+  | "board_changed"
+  | "post_created"
+  | "comment_added"
+  | "post_voted"
+  | "comment_voted"
+  | "reaction_changed"
+  | "post_changed" -> true
+  | _ -> false
+;;
+
+let is_board_notification payload =
+  Option.equal String.equal (non_empty_string_field "method" payload) (Some "notifications/board")
+  ||
   match non_empty_string_field "type" payload with
-  | Some
-      ("keeper_chat_operation_event" | "keeper_chat_appended" | "keeper_turn_preview_changed") ->
-    (match event_keeper_name_of payload with
-     | Some keeper -> List.mem keeper (owned_keeper_names ~state caller)
-     | None -> false)
-  | Some ("operator_snapshot" | "operator_digest" | "operator_action_required") -> is_admin caller
-  | Some "workspace_dataset_changed"
-    when Option.equal String.equal (non_empty_string_field "dataset" payload) (Some "lane_addons")
-    -> lane_addons_visibility_permitted ~state caller payload
-  | Some _ | None -> true
+  | Some event_type -> board_event_type_is_board event_type
+  | None -> false
+;;
+
+let is_opaque_board_changed_params = function
+  | `Assoc fields as params ->
+    List.length fields = 2
+    && Option.equal String.equal (non_empty_string_field "type" params) (Some "board_changed")
+    && Option.equal String.equal (non_empty_string_field "event_type" params) (Some "board.changed")
+  | _ -> false
+;;
+
+let is_opaque_board_changed = function
+  | `Assoc fields as payload ->
+    if Option.equal String.equal (non_empty_string_field "method" payload) (Some "notifications/board")
+    then (
+      match List.assoc_opt "params" fields with
+      | Some params -> is_opaque_board_changed_params params
+      | None -> false)
+    else is_opaque_board_changed_params payload
+  | _ -> false
+;;
+
+let opaque_board_changed_payload =
+  `Assoc
+    [ "jsonrpc", `String "2.0"
+    ; "method", `String "notifications/board"
+    ; ( "params"
+      , `Assoc [ "type", `String "board_changed"; "event_type", `String "board.changed" ] )
+    ]
+;;
+
+let observer_event_visible_to ~state caller payload =
+  if is_board_notification payload
+  then is_opaque_board_changed payload
+  else (
+    match non_empty_string_field "type" payload with
+    | Some
+        ("keeper_chat_operation_event" | "keeper_chat_appended" | "keeper_turn_preview_changed") ->
+      (match event_keeper_name_of payload with
+       | Some keeper -> List.mem keeper (owned_keeper_names ~state caller)
+       | None -> false)
+    | Some ("operator_snapshot" | "operator_digest" | "operator_action_required") -> is_admin caller
+    | Some "workspace_dataset_changed"
+      when Option.equal String.equal (non_empty_string_field "dataset" payload) (Some "lane_addons")
+      -> lane_addons_visibility_permitted ~state caller payload
+    | Some _ | None -> true)
+;;
+
+let project_observer_event ~state caller ~event_id ~frame ~payload =
+  if is_board_notification payload
+  then Some (Sse.format_event_yojson ~id:event_id opaque_board_changed_payload)
+  else if observer_event_visible_to ~state caller payload
+  then Some frame
+  else None
 ;;
 
 let strip_single_user_auth_headers (request : Httpun.Request.t) =
@@ -388,9 +446,17 @@ let handle_observer_events ~sw ~clock ~login ~base_path ~engine_state request re
                    (match active_auth () with
                     | None -> false
                     | Some auth ->
-                      if observer_event_visible_to ~state:auth.state auth.caller delivery.Sse.payload
-                      then if send_frame delivery.Sse.frame then flush rest else false
-                      else flush rest)
+                      (match
+                         project_observer_event
+                           ~state:auth.state
+                           auth.caller
+                           ~event_id:delivery.Sse.event_id
+                           ~frame:delivery.Sse.frame
+                           ~payload:delivery.Sse.payload
+                       with
+                       | Some projected_frame ->
+                         if send_frame projected_frame then flush rest else false
+                       | None -> flush rest))
                in
                flush deliveries
          in
@@ -409,9 +475,16 @@ let handle_observer_events ~sw ~clock ~login ~base_path ~engine_state request re
                      match active_auth () with
                      | None -> Server_sse_pump.Stop
                      | Some auth ->
-                       if observer_event_visible_to ~state:auth.state auth.caller ev.Sse.ext_payload
-                       then Server_sse_pump.Send ev.Sse.ext_frame
-                       else Server_sse_pump.Skip))
+                       (match
+                          project_observer_event
+                            ~state:auth.state
+                            auth.caller
+                            ~event_id:ev.Sse.ext_event_id
+                            ~frame:ev.Sse.ext_frame
+                            ~payload:ev.Sse.ext_payload
+                        with
+                        | Some projected_frame -> Server_sse_pump.Send projected_frame
+                        | None -> Server_sse_pump.Skip)))
                  ~idle:(fun () ->
                    match active_auth () with
                    | Some (_ : authorized) -> Server_sse_pump.Keepalive
@@ -985,16 +1058,22 @@ let handle_logs ~login ~engine_state req reqd =
 ;;
 
 let handle_operator_snapshot ~sw ~clock ~login ~engine_state req reqd =
-  with_engine ~login ~engine_state ~tier:Admin_only req reqd (fun state (_ : authorized) ->
+  with_engine ~login ~engine_state ~tier:Admin_only req reqd (fun state auth ->
     let clean_req = strip_single_user_auth_headers req in
-    let json = Server_dashboard_http.operator_snapshot_http_json ~state ~sw ~clock clean_req in
+    let actor = actor_of_principal auth.caller.Auth_gate.principal in
+    let json =
+      Server_dashboard_http.operator_snapshot_for_actor_http_json ~state ~sw ~clock ~actor clean_req
+    in
     Http.Response.json_value ~compress:true ~request:req json reqd)
 ;;
 
 let handle_operator_digest ~sw ~clock ~login ~engine_state req reqd =
-  with_engine ~login ~engine_state ~tier:Admin_only req reqd (fun state (_ : authorized) ->
+  with_engine ~login ~engine_state ~tier:Admin_only req reqd (fun state auth ->
     let clean_req = strip_single_user_auth_headers req in
-    match Server_dashboard_http.operator_digest_http_json ~state ~sw ~clock clean_req with
+    let actor = actor_of_principal auth.caller.Auth_gate.principal in
+    match
+      Server_dashboard_http.operator_digest_for_actor_http_json ~state ~sw ~clock ~actor clean_req
+    with
     | Ok json -> Http.Response.json_value ~compress:true ~request:req json reqd
     | Error message ->
       Http.Response.json_value

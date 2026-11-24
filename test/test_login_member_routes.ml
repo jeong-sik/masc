@@ -355,11 +355,19 @@ let an_admin_disables_and_enables_a_member () =
     let member_cookie = session_for t.zone member_id in
     let member_str = User_id.to_string member_id in
     let admin_str = User_id.to_string t.admin_id in
-    (* Non-admin, missing auth, CSRF, and cross-origin checks *)
-    Alcotest.(check int)
-      "a Member cannot disable"
-      403
-      (code (M.disable t.routes (request (Some member_cookie)) ~user_id:member_str));
+    (* Non-admin 403 oracle symmetry on disable & enable: existing, missing, and invalid targets *)
+    List.iter
+      (fun (label, target) ->
+        Alcotest.(check int)
+          ("a Member cannot disable " ^ label)
+          403
+          (code (M.disable t.routes (request (Some member_cookie)) ~user_id:target));
+        Alcotest.(check int)
+          ("a Member cannot enable " ^ label)
+          403
+          (code (M.enable t.routes (request (Some member_cookie)) ~user_id:target)))
+      [ "existing member", member_str; "missing user", "missing-user"; "invalid empty id", "" ];
+    (* Missing auth, CSRF, and cross-origin checks *)
     Alcotest.(check int)
       "unauthenticated cannot disable"
       401
@@ -430,16 +438,18 @@ let an_admin_revokes_admin_with_strict_cause () =
       ; "extra member", {|{"cause":"operational","extra":true}|}
       ; "not JSON", "cause=operational"
       ];
-    (* Non-admin forbidden *)
-    Alcotest.(check int)
-      "a Member cannot revoke Admin"
-      403
-      (code
-         (M.revoke_admin
-            t.routes
-            (request (Some member_cookie))
-            ~user_id:second_str
-            ~body:{|{"cause":"operational"}|}));
+    (* Non-admin 403 oracle symmetry on revoke_admin: existing, missing, invalid id, and invalid body *)
+    List.iter
+      (fun (label, target, body) ->
+        Alcotest.(check int)
+          ("a Member cannot revoke Admin (" ^ label ^ ")")
+          403
+          (code (M.revoke_admin t.routes (request (Some member_cookie)) ~user_id:target ~body)))
+      [ "existing admin", second_str, {|{"cause":"operational"}|}
+      ; "missing user", "missing-user", {|{"cause":"operational"}|}
+      ; "invalid empty id", "", {|{"cause":"operational"}|}
+      ; "invalid cause body", second_str, {|{"cause":"bad"}|}
+      ];
     (* Revoking a non-admin member -> 409 *)
     Alcotest.(check int)
       "revoking a non-Admin is 409"

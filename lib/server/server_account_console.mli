@@ -19,7 +19,8 @@
     - [GET /dashboard/assets/<path>]: static files under [assets/] in the
       dashboard bundle, served via {!Server_routes_http_pages.serve_dashboard_asset}
       with {!policy} and strict relative-path traversal validation.
-    - [GET /favicon.ico] and [GET /favicon.svg]: {!Server_routes_http_pages.serve_favicon}.
+    - [GET /favicon.ico] and [GET /favicon.svg]: {!Server_routes_http_pages.favicon_svg}
+      with [content-security-policy: default-src 'none'].
     - [GET /accounts/console]: redirects [303 See Other] to
       [/dashboard#account] with [cache-control: no-store] and
       [referrer-policy: same-origin], keeping bookmarked console links working.
@@ -38,9 +39,11 @@ val dashboard_path : string
 val console_redirect_target : string
 
 (** Strict zero-inline-script content security policy applied to the unified
-    dashboard page and its served assets: scripts, styles, fonts, images (plus
-    [data:] URIs), and same-origin connections only, with no inline scripts,
-    no inline [style] attributes, no forms, and no framing. *)
+    dashboard page and its served assets: scripts, stylesheets, fonts, images
+    (plus [data:] URIs), and same-origin connections only, with
+    [script-src-attr 'none'], [object-src 'none'], [style-src-attr 'unsafe-inline']
+    (for dynamic chart and virtualized row positioning), no inline scripts, no
+    forms, and no framing. *)
 val policy : string
 
 (** Why the bundle cannot give the dashboard page ([index.html]) now, in words

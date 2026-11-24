@@ -2511,31 +2511,50 @@ let dashboard_bridge_rbac_and_sse_matrix () =
            ~headers:(changing ~csrf:admin_csrf ()))
           .status;
       (* Browser_observer_sse (GET /api/v1/auth/events):
-         Anonymous -> 401; Query token even with valid cookie -> 401; PAT -> 403;
-         Cross-origin -> 403; Malformed Last-Event-ID with valid cookie -> 400 (proves auth passed!). *)
+         Anonymous -> 401; Query token even with valid cookie -> 401 with Query_credential error;
+         PAT -> 403; Service credential -> 403; Cross-origin -> 403;
+         Malformed Last-Event-ID with valid cookie -> 400 (proves auth passed!). *)
       Alcotest.(check int)
         "anonymous GET /api/v1/auth/events is 401"
         401
         (send (fresh_browser ()) router ~meth:"GET" ~path:Server_account_dashboard_bridge.observer_events_path)
           .status;
+      let expected_query_cred_error =
+        Some (`String (Masc.Auth_gate.reason_to_string Masc.Auth_gate.Query_credential))
+      in
+      let query_token_reply =
+        send
+          admin
+          router
+          ~meth:"GET"
+          ~path:(Server_account_dashboard_bridge.observer_events_path ^ "?token=secret-must-reject")
+      in
       Alcotest.(check int)
         "query-string ?token= on /api/v1/auth/events is 401 even with valid Admin cookie"
         401
-        (send
-           admin
-           router
-           ~meth:"GET"
-           ~path:(Server_account_dashboard_bridge.observer_events_path ^ "?token=secret-must-reject"))
-          .status;
+        query_token_reply.status;
+      Alcotest.(check bool)
+        "query-string ?token= error body names Query_credential reason"
+        true
+        (Option.equal Yojson.Safe.equal expected_query_cred_error (member "error" query_token_reply));
+      let query_access_token_reply =
+        send
+          admin
+          router
+          ~meth:"GET"
+          ~path:(Server_account_dashboard_bridge.observer_events_path ^ "?access_token=secret-must-reject")
+      in
       Alcotest.(check int)
         "query-string ?access_token= on /api/v1/auth/events is 401 even with valid Admin cookie"
         401
-        (send
-           admin
-           router
-           ~meth:"GET"
-           ~path:(Server_account_dashboard_bridge.observer_events_path ^ "?access_token=secret-must-reject"))
-          .status;
+        query_access_token_reply.status;
+      Alcotest.(check bool)
+        "query-string ?access_token= error body names Query_credential reason"
+        true
+        (Option.equal
+           Yojson.Safe.equal
+           expected_query_cred_error
+           (member "error" query_access_token_reply));
       Alcotest.(check int)
         "PAT bearer on /api/v1/auth/events is 403 (browser session cookie required)"
         403
@@ -2545,6 +2564,37 @@ let dashboard_bridge_rbac_and_sse_matrix () =
            ~meth:"GET"
            ~path:Server_account_dashboard_bridge.observer_events_path
            ~headers:pat_headers)
+          .status;
+      let svc_token =
+        match
+          Authz_service_credential.issue
+            t.routes.R.zone
+            ~service_id:(get_ok (Service_id.of_string "svc-dashboard-reader"))
+            ~draw:(fun () -> "cred-svc-dashboard-1")
+        with
+        | Ok tok -> Authz_credential_token.Service_credential.to_string tok
+        | Error err -> Alcotest.fail (Authz_service_credential.error_to_string err)
+      in
+      let svc_headers = [ "Authorization", "Bearer " ^ svc_token ] in
+      Alcotest.(check int)
+        "service credential on /api/v1/auth/events is 403 (browser session cookie required)"
+        403
+        (send
+           (fresh_browser ())
+           router
+           ~meth:"GET"
+           ~path:Server_account_dashboard_bridge.observer_events_path
+           ~headers:svc_headers)
+          .status;
+      Alcotest.(check int)
+        "service credential on Admin_only /api/v1/config/schema is 403"
+        403
+        (send (fresh_browser ()) router ~meth:"GET" ~path:"/api/v1/config/schema" ~headers:svc_headers)
+          .status;
+      Alcotest.(check int)
+        "service credential on Workspace_read /api/v1/dashboard/shell passes auth (503 engine_starting)"
+        503
+        (send (fresh_browser ()) router ~meth:"GET" ~path:"/api/v1/dashboard/shell" ~headers:svc_headers)
           .status;
       Alcotest.(check int)
         "cross-origin GET /api/v1/auth/events is 403"
@@ -2766,6 +2816,105 @@ let dashboard_bridge_rbac_and_sse_matrix () =
         ~admin_sees:true
         ~worker_sees:true
         (`Assoc [ "type", `String "tui_v2_dataset_changed"; "dataset", `String "wiki" ]);
+      (* P1 board SSE privacy: raw notifications/board payloads (especially post_kind = Direct
+         with title + 200-byte content preview, and comments/votes lacking audience metadata)
+         must NEVER pass verbatim; project_observer_event redacts them to opaque board_changed. *)
+      let direct_board_payload =
+        `Assoc
+          [ "jsonrpc", `String "2.0"
+          ; "method", `String "notifications/board"
+          ; ( "params"
+            , `Assoc
+                [ "type", `String "post_created"
+                ; "event_type", `String "post.created"
+                ; "post_id", `String "direct-secret-post-99"
+                ; "author", `String "alice-author"
+                ; "title", `String "Secret Direct Title"
+                ; "content", `String "Top-secret direct preview that must never leak"
+                ; "post_kind", `String "direct"
+                ] )
+          ]
+      in
+      let comment_board_payload =
+        `Assoc
+          [ "jsonrpc", `String "2.0"
+          ; "method", `String "notifications/board"
+          ; ( "params"
+            , `Assoc
+                [ "type", `String "comment_added"
+                ; "event_type", `String "comment.created"
+                ; "post_id", `String "direct-secret-post-99"
+                ; "comment_id", `String "comment-77"
+                ; "author", `String "alice-author"
+                ] )
+          ]
+      in
+      let opaque_board_payload =
+        `Assoc
+          [ "jsonrpc", `String "2.0"
+          ; "method", `String "notifications/board"
+          ; ( "params"
+            , `Assoc [ "type", `String "board_changed"; "event_type", `String "board.changed" ] )
+          ]
+      in
+      check_sse "raw Direct notifications/board is blocked fail-closed" ~admin_sees:false ~worker_sees:false direct_board_payload;
+      check_sse "raw comment_added notifications/board is blocked fail-closed" ~admin_sees:false ~worker_sees:false comment_board_payload;
+      check_sse "already-opaque board_changed is visible" ~admin_sees:true ~worker_sees:true opaque_board_payload;
+      List.iter
+        (fun (label, (auth : Server_account_dashboard_bridge.authorized)) ->
+          match
+            Server_account_dashboard_bridge.project_observer_event
+              ~state:auth.state
+              auth.caller
+              ~event_id:42
+              ~frame:"raw-direct-frame-must-not-escape"
+              ~payload:direct_board_payload
+          with
+          | None -> Alcotest.failf "%s: expected opaque board_changed invalidation frame" label
+          | Some projected ->
+            Alcotest.(check bool) (label ^ " preserves SSE event id") true (contains ~sub:"id: 42\n" projected);
+            Alcotest.(check bool) (label ^ " emits opaque board_changed") true (contains ~sub:"board_changed" projected);
+            Alcotest.(check bool) (label ^ " emits opaque board.changed") true (contains ~sub:"board.changed" projected);
+            List.iter
+              (fun secret ->
+                Alcotest.(check bool)
+                  (Printf.sprintf "%s does not leak %S" label secret)
+                  false
+                  (contains ~sub:secret projected))
+              [ "Secret Direct Title"
+              ; "Top-secret direct preview"
+              ; "direct-secret-post-99"
+              ; "alice-author"
+              ; "\"direct\""
+              ; "raw-direct-frame-must-not-escape"
+              ])
+        [ "Admin", admin_auth; "Worker", member_auth ];
+      Alcotest.(check (option string))
+        "project_observer_event drops unowned private keeper chat frame for Admin"
+        None
+        (Server_account_dashboard_bridge.project_observer_event
+           ~state:admin_auth.state
+           admin_auth.caller
+           ~event_id:43
+           ~frame:"id: 43\ndata: {}\n\n"
+           ~payload:
+             (`Assoc
+                [ "type", `String "keeper_chat_operation_event"
+                ; "name", `String "member-owned-keeper"
+                ]));
+      Alcotest.(check (option string))
+        "project_observer_event forwards owned private keeper chat frame for owner Worker"
+        (Some "id: 43\ndata: {}\n\n")
+        (Server_account_dashboard_bridge.project_observer_event
+           ~state:member_auth.state
+           member_auth.caller
+           ~event_id:43
+           ~frame:"id: 43\ndata: {}\n\n"
+           ~payload:
+             (`Assoc
+                [ "type", `String "keeper_chat_operation_event"
+                ; "name", `String "member-owned-keeper"
+                ]));
       (* Single-user header/query sanitizer check (P1-3) *)
       let dirty_req =
         Httpun.Request.create
@@ -2912,7 +3061,27 @@ let dashboard_bridge_live_engine_regressions () =
            router
            ~meth:"GET"
            ~path:"/api/v1/dashboard/bootstrap"
-           ~headers:[ "Authorization", "Bearer " ^ read_pat ])))
+           ~headers:[ "Authorization", "Bearer " ^ read_pat ]);
+      (* P2: GET /api/v1/operator and /api/v1/operator/digest bind the Auth_gate Admin
+         principal explicitly (ignoring spoofed X-Masc-Agent / ?actor= query params and
+         never consulting single-user Server_auth). *)
+      let admin_uid_str = User_id.to_string (user_of t admin) in
+      List.iter
+        (fun path ->
+          let reply =
+            send
+              admin
+              router
+              ~meth:"GET"
+              ~path:(path ^ "?actor=spoofed-actor")
+              ~headers:[ "X-Masc-Agent", "spoofed-header-actor" ]
+          in
+          Alcotest.(check int) (path ^ " returns 200: " ^ reply.body) 200 reply.status;
+          Alcotest.(check string)
+            (path ^ " binds query.actor to Auth_gate Admin principal")
+            (Yojson.Safe.to_string (`String admin_uid_str))
+            (Yojson.Safe.to_string (at [ "query"; "actor" ] reply)))
+        [ "/api/v1/operator"; "/api/v1/operator/digest" ]))
 ;;
 
 let () =

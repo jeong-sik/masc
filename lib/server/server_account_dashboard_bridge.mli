@@ -32,11 +32,14 @@
       {!Auth_gate.decide} AND restricted to browser session bindings
       ({!Auth_gate.Session}) with no query-string credentials
       ({!Auth_gate.Query_credential} yields 401) and no cross-origin requests.
-      Every replayed and live frame is filtered by {!observer_event_visible_to}
+      Every replayed and live frame passes through {!project_observer_event}
       against a fresh trusted {!Authz_zone.read} snapshot so private Keeper
-      chat/turn streams never leak to non-owners and signed-out, disabled, or
-      deleted principals are disconnected promptly. Reconnects carrying
-      [Last-Event-ID] replay visible deliveries and emit an explicit
+      chat/turn streams never leak to non-owners, raw [notifications/board]
+      payloads (which carry [Direct] titles, 200-byte content previews, and
+      post/comment ids without audience metadata) are redacted into an opaque
+      [board_changed] invalidation frame, and signed-out, disabled, or deleted
+      principals are disconnected promptly. Reconnects carrying [Last-Event-ID]
+      replay projected visible deliveries and emit an explicit
       [observer_resync_required] event on replay gaps. *)
 
 (** [/api/v1/auth/events]: cookie-authenticated observer SSE endpoint for the
@@ -92,12 +95,30 @@ val can_read_keeper_sandbox
 (** Per-principal SSE visibility predicate for {!observer_events_path}.
     Private Keeper chat/AG-UI/turn-preview events are restricted strictly to
     the Keeper's owner in [state]; operator-only events require [Admin];
-    [lane_addons] visibility fields are enforced fail-closed. *)
+    [lane_addons] visibility fields are enforced fail-closed; raw
+    [notifications/board] payloads (anything richer than opaque
+    [board_changed]) return [false] fail-closed so [Direct] titles and previews
+    can never pass verbatim. *)
 val observer_event_visible_to
   :  state:Authz_state.t
   -> Auth_gate.authenticated
   -> Yojson.Safe.t
   -> bool
+
+(** Projects a single replayed or live SSE delivery for [caller] on
+    {!observer_events_path}. Any [notifications/board] payload (including
+    [Direct] posts, comments, votes, reactions, and post changes) is redacted
+    to an opaque [board_changed] invalidation frame preserving [event_id] with
+    zero title, content preview, author, or post-id fields so clients refetch
+    through {!board_reader_of}. All other events return [Some frame] iff
+    {!observer_event_visible_to} permits them, else [None]. *)
+val project_observer_event
+  :  state:Authz_state.t
+  -> Auth_gate.authenticated
+  -> event_id:int
+  -> frame:string
+  -> payload:Yojson.Safe.t
+  -> string option
 
 (** Strips single-user auth headers ([Authorization], [Cookie],
     [X-Masc-Internal-Token], [X-Masc-Agent], [X-Masc-Agent-Name],

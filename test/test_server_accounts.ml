@@ -1067,9 +1067,11 @@ let console_directives =
   ; "form-action 'none'"
   ; "frame-ancestors 'none'"
   ; "img-src 'self' data:"
+  ; "object-src 'none'"
   ; "script-src 'self'"
+  ; "script-src-attr 'none'"
   ; "style-src 'self'"
-  ; "style-src-attr 'none'"
+  ; "style-src-attr 'unsafe-inline'"
   ]
 ;;
 let console_script = "export const built = 'the console of the case';\n"
@@ -1483,6 +1485,24 @@ let test_serves_its_table_alone () =
             in
             Alcotest.(check int) "the sheet, asked by a browser that holds it" 304 status;
             Alcotest.(check string) "no bytes go again" "" body);
+      (* SVG favicons must carry default-src 'none' CSP so direct SVG navigation cannot script. *)
+      List.iter
+        (fun path ->
+          let status, headers, body = exchange ~net ~port ~meth:"GET" path in
+          Alcotest.(check int) ("GET " ^ path) 200 status;
+          Alcotest.(check (option string))
+            (path ^ " content-type")
+            (Some "image/svg+xml")
+            (header "content-type" headers);
+          Alcotest.(check (option string))
+            (path ^ " carries default-src 'none' CSP")
+            (Some "default-src 'none'")
+            (header "content-security-policy" headers);
+          Alcotest.(check string)
+            (path ^ " serves favicon SVG bytes")
+            Server_routes_http_pages.favicon_svg
+            body)
+        [ "/favicon.ico"; "/favicon.svg" ];
       (* The routes of a person and the dashboard bridge are in the table, and a
          request with no credential (or a query-string token on SSE) is refused. *)
       List.iter

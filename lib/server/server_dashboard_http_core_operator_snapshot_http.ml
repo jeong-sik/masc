@@ -35,11 +35,9 @@ let with_captured_instance ~(scope : Mcp_server.workspace_scope) = function
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
       invalid_arg "Operator Snapshot response must be an object"
 
-let operator_snapshot_http_json ~state ~sw ~clock request =
-  let scope = Mcp_server.workspace_scope state in
-  let config = scope.config in
+let operator_snapshot_with_scope_and_actor ~state ~scope ~sw ~clock ~actor request =
+  let config = scope.Mcp_server.config in
   let owner = Owner.owner_for_scope ~state scope in
-  let actor = dashboard_actor_for_request ~base_path:config.base_path request in
   let view = query_param request "view" in
   let default_summary_request = actor = None
     && query_param request "include_messages" = None
@@ -87,3 +85,16 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
           "message", `String "Operator snapshot timed out after 30s";
           "generated_at", `String (Masc_domain.now_iso ())]
         |> Core_operator_query.with_operator_snapshot_metadata ~config ~query)
+
+let operator_snapshot_http_json ~state ~sw ~clock request =
+  let scope = Mcp_server.workspace_scope state in
+  let actor = dashboard_actor_for_request ~base_path:scope.config.base_path request in
+  operator_snapshot_with_scope_and_actor ~state ~scope ~sw ~clock ~actor request
+
+let operator_snapshot_for_actor_http_json ~state ~sw ~clock ~actor request =
+  let scope = Mcp_server.workspace_scope state in
+  let actor =
+    let trimmed = String.trim actor in
+    if String.equal trimmed "" then None else Some trimmed
+  in
+  operator_snapshot_with_scope_and_actor ~state ~scope ~sw ~clock ~actor request

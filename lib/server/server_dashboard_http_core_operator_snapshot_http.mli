@@ -14,3 +14,15 @@ val operator_snapshot_http_json :
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   Httpun.Request.t ->
   Yojson.Safe.t
+
+(** Like {!operator_snapshot_http_json}, but uses an explicit caller-supplied
+    [actor] instead of calling single-user [Server_auth.dashboard_actor_for_request].
+    Used by multi-account routes that already authenticated the caller via
+    {!Auth_gate}. *)
+val operator_snapshot_for_actor_http_json :
+  state:Mcp_server.server_state ->
+  sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  actor:string ->
+  Httpun.Request.t ->
+  Yojson.Safe.t

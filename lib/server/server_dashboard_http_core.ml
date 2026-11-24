@@ -42,7 +42,13 @@ let start_operator_digest_refresh_loop = Server_dashboard_http_core_digest_refre
 
 let operator_snapshot_http_json = Server_dashboard_http_core_operator_snapshot_http.operator_snapshot_http_json
 
+let operator_snapshot_for_actor_http_json =
+  Server_dashboard_http_core_operator_snapshot_http.operator_snapshot_for_actor_http_json
+
 let operator_digest_http_json = Server_dashboard_http_core_operator_digest_http.operator_digest_http_json
+
+let operator_digest_for_actor_http_json =
+  Server_dashboard_http_core_operator_digest_http.operator_digest_for_actor_http_json
 
 (* Mission owns captured scope, read debt and canonical completion in its
    sibling; the facade carries the same abstract request context. *)

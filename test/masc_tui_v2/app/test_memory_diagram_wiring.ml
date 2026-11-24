@@ -1315,6 +1315,49 @@ let test_visibility_enter_refresh_and_resize () =
   check bool "Enter in 3 -> Memory keeps diagram open" true
     (Option.is_some (Memory_diagram.active_diagram m_k3_enter));
 
+  let missing_id = "m-retracted-outside-activity-window" in
+  let selected_diff =
+    match diff_snap.body with
+    | Wire_knowledge.Keeper_diff body ->
+        let retracted : Wire_knowledge.memory_retracted_fact =
+          {
+            event_order = None;
+            memory_id = missing_id;
+            category = "fact";
+            text = "Retracted memory";
+            removed_at_rev = Some 3;
+            at_unix = Some 1_700_000_300.0;
+            removed_by = None;
+            drop_reason = None;
+          }
+        in
+        { diff_snap with
+          body = Wire_knowledge.Keeper_diff
+            { body with counts = { body.counts with retracted = 1 };
+              retracted = [ retracted ] } }
+    | Wire_knowledge.World_diff _ -> fail "expected a keeper diff fixture"
+  in
+  let selection =
+    m_k3.knowledge
+    |> Knowledge_store.set_memory_view_mode Knowledge_store.View_diff
+    |> Knowledge_store.set_memory_diff ~keeper:(Some "alpha")
+         ~window:Knowledge_store.Window_24h
+         (Observed.value ~observed_at:now0 selected_diff)
+  in
+  check bool "the retracted row is selected" true
+    (match Knowledge_store.selected_memory_diff_item_for
+       ~keeper_opt:(Some "alpha") selection with
+    | Some (Knowledge_store.Keeper_retracted fact) -> String.equal fact.memory_id missing_id
+    | _ -> false);
+  let m_missing, missing_commands =
+    Update.step ~now:now0 { m_k3 with knowledge = selection }
+      (Msg.Key_event (key_char "."))
+  in
+  check bool "missing selected fact cannot open another memory diagram" true
+    (Option.is_none m_missing.knowledge.memory_diagram);
+  check bool "missing selected fact sends no renderer command" true
+    (Option.is_none (find_render_cmd (Cmd.flatten missing_commands)));
+
   (* 7c. [r] retries a Failed diagram with incremented request_id *)
   let req_failed = (Option.get m_dive_open.knowledge.memory_diagram).request_id in
   let m_failed, _ =

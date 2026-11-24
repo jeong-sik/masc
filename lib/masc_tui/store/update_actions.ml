@@ -909,38 +909,12 @@ and execute_action ~now (m : Model.t) action =
         || Model.equal_breakpoint m.breakpoint Model.Micro
       then (m, [])
       else if not (Model.sidebar_visible m) then
-        let cursor = Nav.menu_item_index (Model.active_menu_target m) in
-        ( {
-            m with
-            nav =
-              {
-                m.nav with
-                overlay = None;
-                filter_focused = false;
-                sidebar_open = Some true;
-                sidebar_focused = true;
-                sidebar_cursor = cursor;
-              };
-            drafts = Drafts.set_focus false m.drafts;
-            inline_modal = None;
-          }
-        , [] )
-      else if not m.nav.sidebar_focused then
-        let cursor = Nav.menu_item_index (Model.active_menu_target m) in
-        ( {
-            m with
-            nav =
-              {
-                m.nav with
-                overlay = None;
-                filter_focused = false;
-                sidebar_focused = true;
-                sidebar_cursor = cursor;
-              };
-            drafts = Drafts.set_focus false m.drafts;
-            inline_modal = None;
-          }
-        , [] )
+        let m_open =
+          { m with nav = { m.nav with sidebar_open = Some true } }
+        in
+        (Update_nav.enter_sidebar_focus m_open, [])
+      else if not (Model.sidebar_has_focus m) then
+        (Update_nav.enter_sidebar_focus m, [])
       else
         ( {
             m with
@@ -952,7 +926,9 @@ and execute_action ~now (m : Model.t) action =
               };
           }
         , [] )
-  | Keymap.Sub_tab dir -> Update_nav.cycle_sub_tab m dir
+  | Keymap.Sub_tab dir ->
+      if Model.sidebar_has_focus m then (m, [])
+      else Update_nav.cycle_sub_tab m dir
   | Keymap.Cycle_focus_pane dir -> (
       match m.nav.overlay with
       | Some (Nav.Settings _) ->
@@ -1021,24 +997,45 @@ and execute_action ~now (m : Model.t) action =
       | Some (Nav.Help | Nav.Incidents | Nav.System_gate _) -> (m, [])
       | None ->
           let n = Model.focusable_pane_count m in
-          if n <= 1 then (m, [])
-          else
-            let delta = match dir with Keymap.Next -> 1 | Keymap.Prev -> -1 in
-            let next_pane = (m.nav.pane_index + delta + n) mod n in
+          let sync_work_pane base next_pane =
             let work =
               if
-                m.nav.dive_stack = []
-                && Nav.equal_workspace m.nav.workspace Nav.Work
-                && Nav.equal_work_tab m.work.active_tab
+                base.Model.nav.dive_stack = []
+                && Nav.equal_workspace base.nav.workspace Nav.Work
+                && Nav.equal_work_tab base.work.active_tab
                      Nav.Work_tasks_schedules
-              then Work_store.jump_tasks_schedules_pane ~pane_index:next_pane m.work
-              else m.work
+              then
+                Work_store.jump_tasks_schedules_pane ~pane_index:next_pane
+                  base.work
+              else base.work
             in
-            let next =
-              Update_nav.clamp_for_pane
-                { m with nav = { m.nav with pane_index = next_pane }; work }
+            Update_nav.clamp_for_pane
+              { base with nav = { base.nav with pane_index = next_pane }; work }
+          in
+          if Model.sidebar_has_focus m then
+            let base = Update_nav.exit_sidebar_focus m in
+            let target_pane =
+              match dir with
+              | Keymap.Next -> 0
+              | Keymap.Prev -> Int.max 0 (Model.focusable_pane_count base - 1)
             in
-            (next, []))
+            (sync_work_pane base target_pane, [])
+          else (
+            match dir with
+            | Keymap.Next ->
+                if m.nav.pane_index + 1 < n then
+                  (sync_work_pane m (m.nav.pane_index + 1), [])
+                else if Model.sidebar_visible m then
+                  (Update_nav.enter_sidebar_focus m, [])
+                else if n <= 1 then (m, [])
+                else (sync_work_pane m 0, [])
+            | Keymap.Prev ->
+                if m.nav.pane_index > 0 then
+                  (sync_work_pane m (m.nav.pane_index - 1), [])
+                else if Model.sidebar_visible m then
+                  (Update_nav.enter_sidebar_focus m, [])
+                else if n <= 1 then (m, [])
+                else (sync_work_pane m (n - 1), [])))
   | Keymap.Focus_composer -> (
       if
         Model.is_too_small_viewport m.viewport
@@ -1059,12 +1056,13 @@ and execute_action ~now (m : Model.t) action =
             | Nav.Inline_action _
             | Nav.System_gate Nav.Media_viewer )
         | None ->
-            let nav = { m.nav with overlay = None; filter_focused = false } in
+            let m0 = Update_nav.exit_sidebar_focus m in
+            let nav = { m0.nav with overlay = None; filter_focused = false } in
             ( {
-                m with
+                m0 with
                 nav;
                 inline_modal = None;
-                drafts = Drafts.set_focus true m.drafts;
+                drafts = Drafts.set_focus true m0.drafts;
               }
             , [] ))
   | Keymap.Focus_filter -> (
@@ -1088,7 +1086,9 @@ and execute_action ~now (m : Model.t) action =
             | Nav.Help
             | Nav.System_gate _ ) ->
             (m, [])
-        | None -> (
+        | None ->
+            let m = Update_nav.exit_sidebar_focus m in
+            (
             if Model.is_keeper_config_active m then
               ( {
                   m with
@@ -1118,9 +1118,14 @@ and execute_action ~now (m : Model.t) action =
                           drafts = Drafts.set_focus false m.drafts;
                         }
                       , [] ))))
-  | Keymap.Dive_selected -> Update_nav.dive_selected m
+  | Keymap.Dive_selected ->
+      if Model.sidebar_has_focus m then
+        Update_nav.activate_sidebar_cursor m
+      else Update_nav.dive_selected m
   | Keymap.Confirm_selected -> (
-      if Option.is_none m.nav.overlay && Drafts.is_focused m.drafts then
+      if Model.sidebar_has_focus m then
+        Update_nav.activate_sidebar_cursor m
+      else if Option.is_none m.nav.overlay && Drafts.is_focused m.drafts then
         submit_composer ~now ~mode:Drafts.Mode_follow_up m
       else
         match m.nav.overlay with
@@ -1324,6 +1329,8 @@ and execute_action ~now (m : Model.t) action =
             let cleared, cmds = Update_nav.set_active_filter_query "" m in
             ( { cleared with nav = { cleared.nav with filter_focused = false } },
               cmds )
+          else if Model.sidebar_has_focus m then
+            (Update_nav.exit_sidebar_focus m, [])
           else if Drafts.is_focused m.drafts then
             match Update_nav.resolve_composer_popup m with
             | Update_nav.Composer_popup_slash _
@@ -1644,7 +1651,9 @@ and execute_action ~now (m : Model.t) action =
           | Nav.Help
           | Nav.System_gate _ ) ->
           (m, [])
-      | None -> (
+      | None ->
+          if Model.sidebar_has_focus m then (m, [])
+          else (
           match Model.active_dive m with
           | Some (Nav.Dive_keeper { tab = Nav.Keeper_chat; _ }) ->
               ({ m with fleet = Fleet_store.toggle_turn_details m.fleet }, [])
@@ -1856,7 +1865,9 @@ and execute_action ~now (m : Model.t) action =
           | Nav.Help
           | Nav.System_gate _ ) ->
           (m, [])
-      | None -> (
+      | None ->
+          if Model.sidebar_has_focus m then (m, [])
+          else (
           match Model.active_dive m with
           | Some _ -> (m, [])
           | None -> (
@@ -2486,7 +2497,8 @@ and execute_action ~now (m : Model.t) action =
                   open_url_or_notice url_opt
               | Nav.Pulse | Nav.Runtime -> (m, []))))
   | Keymap.Toggle_zoom ->
-      if not (Model.can_zoom_current_view m) then
+      if Model.sidebar_has_focus m then (m, [])
+      else if not (Model.can_zoom_current_view m) then
         if m.nav.zoomed then ({ m with nav = { m.nav with zoomed = false } }, [])
         else (m, [])
       else
@@ -2499,6 +2511,7 @@ and execute_action ~now (m : Model.t) action =
   | Keymap.Cycle_memory_view ->
       let in_memory =
         Option.is_none m.nav.overlay
+        && (not (Model.sidebar_has_focus m))
         &&
         match Model.active_dive m with
         | Some (Nav.Dive_keeper { tab = Nav.Keeper_memory; _ }) -> true
@@ -2541,6 +2554,7 @@ and execute_action ~now (m : Model.t) action =
   | Keymap.Toggle_memory_sort ->
       let in_memory =
         Option.is_none m.nav.overlay
+        && (not (Model.sidebar_has_focus m))
         &&
         match Model.active_dive m with
         | Some (Nav.Dive_keeper { tab = Nav.Keeper_memory; _ }) -> true

@@ -6,6 +6,7 @@ import { render, fireEvent, waitFor, cleanup } from '@testing-library/preact'
 import { formatObserved, resourceCache } from '../../core/resource-cache'
 import { authSession, resetAuthStateForTests } from '../../core/auth'
 import { resetObserverStateForTests } from '../../core/observer'
+import { resetPortraitCacheForTests } from '../../lib/portrait-cache'
 import {
   buildChatStreamRequestBody,
   buildPortraitPreviewUrl,
@@ -274,6 +275,7 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
   beforeEach(() => {
     resetAuthStateForTests()
     resetObserverStateForTests()
+    resetPortraitCacheForTests()
     resourceCache.clearAll()
     authSession.value = {
       kind: 'single_user_local',
@@ -287,6 +289,7 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
   afterEach(() => {
     cleanup()
     releaseAllViewStreams()
+    resetPortraitCacheForTests()
     vi.restoreAllMocks()
   })
 
@@ -526,21 +529,31 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
         })
       }
       if (url.includes('/api/v1/keepers/turns')) return json({ keepers: [] })
+      if (url.includes('/portrait.png')) {
+        return new Response(new Blob(['png'], { type: 'image/png' }), {
+          status: 200,
+          headers: { 'Content-Type': 'image/png' },
+        })
+      }
       if (url.includes('/chat/history/page')) return json({ messages: [], has_more: false, next_cursor: null })
       if (url.includes('/chat/operations')) return json({ operations: [] })
       return json({})
     })
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() => `blob:portrait-${requestedUrls.length}`)
     vi.stubGlobal('fetch', mockFetch)
 
     const pc = render(html`<${KeeperPortraitCandleTab} keeper=${makeRosterKeeper()} onMutated=${vi.fn()} />`)
     await waitFor(() => expect(pc.container.textContent).toContain('12.500 C'))
-    // Must NOT spoof /mcp purchase; clicking preview updates portrait img to bare `?preview=crown`
+    // Must NOT spoof /mcp purchase; clicking preview updates portrait img to bare `?preview=crown` via authenticated blob fetch
     const previewBtns = pc.getAllByRole('button', { name: '미리보기' })
     fireEvent.click(previewBtns[1]!)
     await waitFor(() => {
-      const img = pc.container.querySelector('.kp-portrait-preview') as HTMLImageElement
-      expect(img.getAttribute('src')).toContain('preview=crown')
+      const img = pc.container.querySelector('img.kp-portrait-preview') as HTMLImageElement | null
+      expect(img).not.toBeNull()
+      expect(img?.getAttribute('data-portrait-url')).toContain('preview=crown')
+      expect(img?.getAttribute('src')).toMatch(/^blob:/)
     })
+    expect(requestedUrls.some((u) => u.includes('preview=crown'))).toBe(true)
     expect(requestedUrls.some((u) => u === '/mcp')).toBe(false)
     pc.unmount()
 

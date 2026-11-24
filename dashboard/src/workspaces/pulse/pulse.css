@@ -42,31 +42,6 @@
   min-width: 0;
 }
 
-.pulse-prov {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-1);
-  padding: var(--sp-1) var(--sp-2);
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--line-1);
-  background: var(--bg-2);
-  font-family: var(--font-mono);
-  font-size: var(--fs-11);
-  color: var(--fg-2);
-}
-
-.pulse-prov[data-state="LIVE SSE"] {
-  border-color: var(--brass-border);
-  background: var(--brass-soft);
-  color: var(--brass-1);
-}
-
-.pulse-prov[data-state="STREAM_GAP"] {
-  border-color: var(--warn-border);
-  background: var(--warn-soft);
-  color: var(--warn-fg);
-}
-
 /* 4-KPI Hero Strip */
 .pulse-kpis {
   display: grid;
@@ -450,6 +425,8 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-2);
+  width: 100%;
+  max-width: 100%;
   padding: var(--sp-2) var(--sp-3);
   border-radius: var(--radius-sm);
   border: 1px solid var(--line-1);
@@ -457,6 +434,7 @@
   text-align: left;
   cursor: pointer;
   min-width: 0;
+  overflow: hidden;
 }
 
 .pulse-goal-row:hover {
@@ -472,7 +450,22 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
-  flex: 1 1 auto;
+  flex: 1 1 0%;
+}
+
+.pulse-goal-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  flex-shrink: 0;
+  max-width: 58%;
+  overflow: hidden;
+}
+
+.pulse-goal-badges .pulse-pill {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 170px;
 }
 
 .pulse-digest-grid {

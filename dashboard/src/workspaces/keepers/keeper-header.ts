@@ -6,6 +6,7 @@ import { html } from 'htm/preact'
 import { useState } from 'preact/hooks'
 import { activeWorkspaceId } from '../../core/auth'
 import { formatObserved } from '../../core/resource-cache'
+import { useAuthenticatedPortrait } from '../../lib/portrait-cache'
 import { keeperPortraitUrl, kSigil } from '../../components/keeper-badge'
 import { TargetLockedAction } from '../../components/primitives/target-locked-action'
 import {
@@ -40,7 +41,9 @@ const PURGE_ARTIFACTS: readonly string[] = [
 
 export function KeeperHeader(props: KeeperHeaderProps) {
   const { keeper } = props
-  const [portraitFailed, setPortraitFailed] = useState(false)
+  const rawPortraitUrl = keeperPortraitUrl(keeper.name, 96)
+  const authenticatedPortraitSrc = useAuthenticatedPortrait(rawPortraitUrl)
+  const [failedSrc, setFailedSrc] = useState<string | null>(null)
   const [busyAction, setBusyAction] = useState<string | null>(null)
   const [statusMessage, setStatusMessage] = useState<{ readonly tone: 'ok' | 'bad'; readonly text: string } | null>(null)
   const [deleteOpen, setDeleteOpen] = useState(false)
@@ -85,13 +88,14 @@ export function KeeperHeader(props: KeeperHeaderProps) {
       <div class="kp-hero-top">
         <div class="kp-hero-id">
           <div class="kp-hero-portrait-ring">
-            ${!portraitFailed
+            ${authenticatedPortraitSrc !== null && failedSrc !== authenticatedPortraitSrc
               ? html`
                   <img
                     class="kp-hero-portrait-img"
-                    src=${keeperPortraitUrl(keeper.name, 96)}
+                    src=${authenticatedPortraitSrc}
+                    data-portrait-url=${rawPortraitUrl}
                     alt=${`${keeper.name} portrait`}
-                    onError=${() => setPortraitFailed(true)}
+                    onError=${() => setFailedSrc(authenticatedPortraitSrc)}
                   />
                 `
               : html`

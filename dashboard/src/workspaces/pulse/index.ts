@@ -20,11 +20,8 @@ import {
 import {
   markViewSynced,
   subscribeObserverFrames,
-  viewProvenance,
 } from '../../core/observer'
 import {
-  TIME_WINDOWS,
-  setTimeWindow,
   timeWindow,
   type TimeWindow,
 } from '../../core/time-window'
@@ -98,7 +95,6 @@ function keeperCtxTone(obs: Observed<number>): 'ok' | 'warn' | 'bad' | 'default'
 
 export function PulseWorkspace(props: WorkspaceViewProps) {
   const win: TimeWindow = timeWindow.value
-  const provenance = viewProvenance.value
   const [bundle, setBundle] = useState<PulseLoadBundle>(initialBundle)
   const [observedAtSec, setObservedAtSec] = useState<number>(() => Math.floor(Date.now() / 1000))
   const [refreshing, setRefreshing] = useState(false)
@@ -151,6 +147,7 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
   )
 
   const keepersList: readonly PulseKeeperRow[] = bundle.keepers.kind === 'value' ? bundle.keepers.data : []
+  const knownKeeperSet = useMemo(() => new Set(keepersList.map((k) => k.name)), [keepersList])
 
   const attentionItems = useMemo<readonly PulseAttentionItem[]>(
     () =>
@@ -210,23 +207,6 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
           <h1>Fleet Pulse</h1>
         </div>
         <div class="pulse-header-meta">
-          <div class="ap-viewseg" role="group" aria-label="시간 구간">
-            ${TIME_WINDOWS.map((w) => html`
-              <button
-                key=${w}
-                type="button"
-                class=${`ap-viewbtn ${win === w ? 'on' : ''}`.trim()}
-                aria-pressed=${win === w ? 'true' : 'false'}
-                onClick=${() => setTimeWindow(w)}
-              >
-                ${w}
-              </button>
-            `)}
-          </div>
-          <span class="pulse-prov" data-state=${provenance}>
-            ${provenance === 'LIVE SSE' ? '●' : provenance === 'SYNCED' ? '◐' : provenance === 'STREAM_GAP' ? '⚠' : '○'}
-            <span>${provenance}</span>
-          </span>
           <button
             type="button"
             class="btn-ghost"
@@ -384,13 +364,13 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
                         class="pulse-handoff-row"
                         onClick=${() => props.onNavigate(h.route)}
                       >
-                        <${KeeperBadge} id=${h.fromKeeper} size="sm" portrait=${true} />
+                        <${KeeperBadge} id=${h.fromKeeper} size="sm" portrait=${knownKeeperSet.has(h.fromKeeper)} />
                         ${h.toKeepers.length > 0 && html`
                           <span class="pulse-handoff-arrow" aria-hidden="true">
                             ${h.kind === 'succession' ? '⇒' : '→'}
                           </span>
                           ${h.toKeepers.map((target) => html`
-                            <${KeeperBadge} key=${target} id=${target} size="sm" portrait=${true} />
+                            <${KeeperBadge} key=${target} id=${target} size="sm" portrait=${knownKeeperSet.has(target)} />
                           `)}
                         `}
                         <span class="pulse-handoff-title">${h.title}</span>
@@ -480,8 +460,8 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
                           onClick=${() => props.onNavigate('/work/goals')}
                         >
                           <span class="pulse-goal-title" title=${g.title}>${g.title}</span>
-                          <div class="pulse-header-meta">
-                            <span class="pulse-pill" data-tone=${goalPhaseTone(g.phase)}>
+                          <div class="pulse-goal-badges">
+                            <span class="pulse-pill" data-tone=${goalPhaseTone(g.phase)} title=${g.phase}>
                               ${g.phase}
                             </span>
                             <span class="pulse-pill">

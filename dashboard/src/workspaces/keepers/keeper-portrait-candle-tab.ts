@@ -13,6 +13,8 @@ import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
 import { formatObserved } from '../../core/resource-cache'
 import { EQUIPMENT_IDS, type KeeperEquipment } from '../../lib/keeper-portrait'
+import { useAuthenticatedPortrait } from '../../lib/portrait-cache'
+import { kSigil } from '../../components/keeper-badge'
 import { DataTable, type DataTableColumn } from '../../components/primitives/data-table'
 import {
   buildPortraitPreviewUrl,
@@ -94,6 +96,8 @@ export function KeeperPortraitCandleTab(props: KeeperPortraitCandleTabProps) {
       ),
     [keeper.name, previewItemId, keeper.portrait_equipment],
   )
+  const authenticatedPortraitSrc = useAuthenticatedPortrait(portraitUrl)
+  const [failedSrc, setFailedSrc] = useState<string | null>(null)
 
   const eventColumns = useMemo<readonly DataTableColumn<CandleLedgerEventRow>[]>(() => [
     { id: 'seq', header: 'Seq', accessor: (r) => r.seq, numeric: true, sortable: true },
@@ -129,11 +133,26 @@ export function KeeperPortraitCandleTab(props: KeeperPortraitCandleTabProps) {
         <!-- Portrait Live Preview + 5-Slot Wardrobe -->
         <section class="kp-card" aria-label="초상화 미리보기 및 5슬롯 장신구">
           <div class="kp-portrait-stage">
-            <img
-              class="kp-portrait-preview"
-              src=${portraitUrl}
-              alt=${`${keeper.name} portrait preview`}
-            />
+            ${authenticatedPortraitSrc !== null && failedSrc !== authenticatedPortraitSrc
+              ? html`
+                  <img
+                    class="kp-portrait-preview"
+                    src=${authenticatedPortraitSrc}
+                    data-portrait-url=${portraitUrl}
+                    alt=${`${keeper.name} portrait preview`}
+                    onError=${() => setFailedSrc(authenticatedPortraitSrc)}
+                  />
+                `
+              : html`
+                  <div
+                    class="kp-portrait-preview kp-hero-portrait-sigil"
+                    data-portrait-url=${portraitUrl}
+                    role="img"
+                    aria-label=${`${keeper.name} portrait preview`}
+                  >
+                    ${kSigil(keeper.name)}
+                  </div>
+                `}
             <div class="kp-pill-row">
               <span class="kp-pill" data-tone="brass">
                 Balance: ${balanceDisplay} C

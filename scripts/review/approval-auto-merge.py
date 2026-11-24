@@ -825,14 +825,24 @@ def freeze_flag(repo):
     The environment is read first, so the trusted workflow can pass the vars
     context for free and tests can pin the flag; without it the variable is
     read from the repository. A missing or unreadable variable is not a
-    freeze: every other admission hold still applies.
+    freeze: every other admission hold still applies. A fallback read that
+    fails names itself on stderr — a fail-open gate must not fail open
+    silently (the #54644 review). Setting the variable to '0' instead of
+    deleting it keeps the ordinary off state off this fallback.
     """
     passed = os.environ.get(FREEZE_VARIABLE, '').strip()
     if passed:
         return passed == '1'
     try:
         value = read(f'repos/{repo}/actions/variables/{FREEZE_VARIABLE}')['value']
-    except (GET.ApiFailure, ValueError, KeyError, TypeError, OSError):
+    except (GET.ApiFailure, ValueError, KeyError, TypeError, OSError) as error:
+        if isinstance(error, GET.ApiFailure):
+            detail = f'HTTP {error.status}: {error.details.get("message", "")}'
+        else:
+            detail = f'{type(error).__name__}: {error}'
+        print(f'approval-auto-merge: the {FREEZE_VARIABLE} repository variable '
+              f'is unreadable ({detail[:200]}); treating the release freeze '
+              f'as off', file=sys.stderr)
         return False
     return value.strip() == '1'
 

@@ -137,13 +137,19 @@ def gh(arguments):
 def freeze_flag(repo):
     """'1' in the MASC_RELEASE_FREEZE repository variable; the environment is
     read first, so a workflow can pass it (and tests can pin it). A missing
-    or unreadable variable is not a freeze."""
+    or unreadable variable is not a freeze, and a fallback read that fails
+    names itself on stderr — a fail-open gate must not fail open silently
+    (the #54644 review)."""
     passed = os.environ.get(FREEZE_VARIABLE, '').strip()
     if passed:
         return passed == '1'
     try:
         value = gh(['api', f'repos/{repo}/actions/variables/{FREEZE_VARIABLE}'])
-    except (ValueError, KeyError, TypeError, OSError):
+    except (ValueError, KeyError, TypeError, OSError) as error:
+        detail = f'{type(error).__name__}: {error}'[:200]
+        print(f'approval-merge-sweep: the {FREEZE_VARIABLE} repository variable '
+              f'is unreadable ({detail}); treating the release freeze as off',
+              file=sys.stderr)
         return False
     return str(value.get('value', '')).strip() == '1'
 

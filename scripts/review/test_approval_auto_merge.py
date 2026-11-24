@@ -2191,24 +2191,32 @@ class ReleaseFreezeGate(unittest.TestCase):
         self.assertEqual(reads[0], PREFIX + '/actions/variables/MASC_RELEASE_FREEZE')
         self.assertEqual(len(github.comments), 1)
 
-    def test_an_unreadable_freeze_variable_is_not_a_freeze(self):
-        environment = {'GITHUB_REPOSITORY': REPO, 'GITHUB_EVENT_NAME': 'workflow_dispatch',
-                       'DISPATCH_PR': '101', 'DISPATCH_RECEIPT': '',
-                       'GITHUB_STEP_SUMMARY': ''}
-        output = io.StringIO()
-        with FakeGitHub() as github:
-            def read(path):
-                if path == PREFIX + '/actions/variables/MASC_RELEASE_FREEZE':
-                    raise MERGE.GET.ApiFailure('variables', 404, {}, 'Not Found')
-                return json.loads(github.output(['gh', 'api', path]))
-            with patch.dict(os.environ, environment), \
-                 patch.object(sys, 'argv', ['auto-merge']), \
-                 patch.object(MERGE, 'read', side_effect=read), \
-                 redirect_stdout(output), redirect_stderr(io.StringIO()):
-                code = MERGE.main()
-        self.assertEqual((code, self.final_json(output.getvalue())['status']),
-                         (0, 'auto_merge_enabled'))
-        self.assertEqual(github.comments, [])
+    def test_an_unreadable_freeze_variable_is_not_a_freeze_but_not_silent(self):
+        """task-4046 review: the fail-open fallback names itself on stderr."""
+        for status, message in ((404, 'Not Found'),
+                                (403, 'Resource not accessible by integration')):
+            environment = {'GITHUB_REPOSITORY': REPO,
+                           'GITHUB_EVENT_NAME': 'workflow_dispatch',
+                           'DISPATCH_PR': '101', 'DISPATCH_RECEIPT': '',
+                           'GITHUB_STEP_SUMMARY': ''}
+            output, errors = io.StringIO(), io.StringIO()
+            with FakeGitHub() as github:
+                def read(path, status=status, message=message):
+                    if path == PREFIX + '/actions/variables/MASC_RELEASE_FREEZE':
+                        raise MERGE.GET.ApiFailure('variables', status, {}, message)
+                    return json.loads(github.output(['gh', 'api', path]))
+                with patch.dict(os.environ, environment), \
+                     patch.object(sys, 'argv', ['auto-merge']), \
+                     patch.object(MERGE, 'read', side_effect=read), \
+                     redirect_stdout(output), redirect_stderr(errors):
+                    code = MERGE.main()
+            self.assertEqual((code, self.final_json(output.getvalue())['status']),
+                             (0, 'auto_merge_enabled'))
+            self.assertEqual(github.comments, [])
+            recorded = errors.getvalue()
+            self.assertIn(f'HTTP {status}', recorded)
+            self.assertIn(message, recorded)
+            self.assertIn('treating the release freeze as off', recorded)
 
 
 class SweepDispatchContract(unittest.TestCase):

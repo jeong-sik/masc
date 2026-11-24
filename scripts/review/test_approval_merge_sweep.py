@@ -615,6 +615,33 @@ class Sweeping(unittest.TestCase):
         walk.assert_not_called()
         self.assertIn('freeze_skipped', output.getvalue())
 
+    def test_an_unreadable_freeze_variable_is_not_a_freeze_but_not_silent(self):
+        """task-4046 review: the sweep's fail-open fallback says so on stderr."""
+        errors = io.StringIO()
+        def gh(arguments):
+            if arguments == ['api', 'repos/owner/repo/actions/variables/'
+                                   'MASC_RELEASE_FREEZE']:
+                raise ValueError('Resource not accessible by integration')
+            raise AssertionError(arguments)
+        with patch.object(SWEEP, 'gh', side_effect=gh), \
+             patch.object(SWEEP, 'open_pulls', return_value=[]), \
+             patch.object(SWEEP, 'quota', return_value=None), \
+             patch.object(SWEEP, 'clean_branches', return_value={'found': 0}), \
+             patch.object(SWEEP, 'close_merged_issues',
+                          return_value={'pull_requests': [], 'not_reached': 0,
+                                        'issues': []}), \
+             patch.dict(os.environ, {'GITHUB_REPOSITORY': 'owner/repo'}), \
+             patch.object(SWEEP.sys, 'argv', ['sweep']), \
+             redirect_stdout(io.StringIO()) as output, redirect_stderr(errors):
+            self.assertEqual(SWEEP.main(), 0)
+        # Not frozen, and the report says the ordinary path ran: only the run
+        # log carries the reason the gate could not be read.
+        self.assertNotIn('freeze_skipped', output.getvalue())
+        recorded = errors.getvalue()
+        self.assertIn('MASC_RELEASE_FREEZE', recorded)
+        self.assertIn('Resource not accessible by integration', recorded)
+        self.assertIn('treating the release freeze as off', recorded)
+
 
 if __name__ == '__main__':
     unittest.main()

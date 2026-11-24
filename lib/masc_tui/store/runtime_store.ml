@@ -84,6 +84,10 @@ type t = {
   runtime_config_raw : Wire_runtime.runtime_config_raw_meta Observed.t;
   setup_inventory : Wire_runtime.setup_inventory Observed.t;
   setup_login_receipt : Wire_runtime.setup_login_receipt option;
+  setup_login_auth_url : string option;
+  setup_login_device_code : string option;
+  setup_login_input_ready : bool;
+  setup_login_output_lines : string list;
   runtime_probe : Wire_runtime.runtime_probe_snapshot Observed.t;
   exact_lane_runs : Wire_runtime.exact_lane_run list Observed.t;
   fusion_runs : Wire_runtime.fusion_run list Observed.t;
@@ -196,6 +200,10 @@ let empty =
     runtime_config_raw = Observed.unreported;
     setup_inventory = Observed.unreported;
     setup_login_receipt = None;
+    setup_login_auth_url = None;
+    setup_login_device_code = None;
+    setup_login_input_ready = false;
+    setup_login_output_lines = [];
     runtime_probe = Observed.unreported;
     exact_lane_runs = Observed.unreported;
     fusion_runs = Observed.unreported;
@@ -429,8 +437,65 @@ let apply_runtime_config_raw ~observed_at meta t =
 let apply_setup_inventory ~observed_at inv t =
   { t with setup_inventory = Observed.value ~observed_at inv }
 
-let apply_setup_login_receipt receipt t =
-  { t with setup_login_receipt = Some receipt }
+let is_terminal_setup_login_status status =
+  match String.lowercase_ascii (String.trim status) with
+  | "complete" | "completed" | "failed" | "canceled" | "cancelled"
+  | "interrupted" ->
+      true
+  | _ -> false
+
+let apply_setup_login_receipt (receipt : Wire_runtime.setup_login_receipt) t =
+  let same_session =
+    match t.setup_login_receipt with
+    | Some prev -> String.equal prev.login_id receipt.login_id
+    | None -> false
+  in
+  let is_terminal = is_terminal_setup_login_status receipt.status in
+  {
+    t with
+    setup_login_receipt = Some receipt;
+    setup_login_auth_url = if same_session then t.setup_login_auth_url else None;
+    setup_login_device_code =
+      if same_session then t.setup_login_device_code else None;
+    setup_login_input_ready =
+      if is_terminal || not same_session then false
+      else t.setup_login_input_ready;
+    setup_login_output_lines =
+      if same_session then t.setup_login_output_lines else [];
+  }
+
+let active_setup_login_id t =
+  match t.setup_login_receipt with
+  | Some r
+    when (not (is_terminal_setup_login_status r.status))
+         && not (String.equal (String.trim r.login_id) "") ->
+      Some r.login_id
+  | Some _ | None -> None
+
+let apply_setup_login_output ~text ~auth_url ~device_code t =
+  let trimmed = String.trim text in
+  let lines =
+    if String.equal trimmed "" then t.setup_login_output_lines
+    else
+      let next = trimmed :: t.setup_login_output_lines in
+      List.filteri (fun i _ -> i < 40) next
+  in
+  {
+    t with
+    setup_login_auth_url =
+      (match (t.setup_login_auth_url, auth_url) with
+      | Some _ as existing, (Some _ | None) -> existing
+      | None, (Some _ as u) -> u
+      | None, None -> None);
+    setup_login_device_code =
+      (match device_code with
+      | Some _ as c -> c
+      | None -> t.setup_login_device_code);
+    setup_login_output_lines = lines;
+  }
+
+let mark_setup_login_input_ready ready t =
+  { t with setup_login_input_ready = ready }
 
 let apply_runtime_probe ~observed_at probe t =
   { t with runtime_probe = Observed.value ~observed_at probe }

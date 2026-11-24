@@ -99,6 +99,18 @@ let handle_workspace_mismatch ~now ~expected ~observed ~message (m : Model.t) =
       in
       (next, cmds)
 
+let close_setup_login_input ~login_id (m : Model.t) =
+  let form = Nav.Setup_login_input_form { login_id } in
+  match m.inline_modal with
+  | Some modal when Nav.equal_inline_action_kind modal.kind form ->
+      let nav =
+        if Option.equal Nav.equal_overlay m.nav.overlay (Some (Nav.Inline_action form))
+        then { m.nav with overlay = m.nav.return_overlay; return_overlay = None }
+        else m.nav
+      in
+      { m with nav; inline_modal = None }
+  | Some _ | None -> m
+
 let record_http_incident ~now ~source ~context err (m : Model.t) =
   match err with
   | Msg.Workspace_mismatch
@@ -1011,7 +1023,8 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Keeper_purge_confirm _
         | Nav.Addon_attach_form
         | Nav.Addon_detach_confirm _
-        | Nav.Addon_invoke_action _ ->
+        | Nav.Addon_invoke_action _
+        | Nav.Setup_login_input_form _ ->
             false
       in
       let matches_modal =
@@ -1102,7 +1115,8 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Keeper_purge_confirm _
             | Nav.Addon_attach_form
             | Nav.Addon_detach_confirm _
-            | Nav.Addon_invoke_action _ ->
+            | Nav.Addon_invoke_action _
+            | Nav.Setup_login_input_form _ ->
                 modal)
           m.inline_modal
       in
@@ -1198,7 +1212,8 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Keeper_purge_confirm _
         | Nav.Addon_attach_form
         | Nav.Addon_detach_confirm _
-        | Nav.Addon_invoke_action _ ->
+        | Nav.Addon_invoke_action _
+        | Nav.Setup_login_input_form _ ->
             false
       in
       let close_modal =
@@ -1298,7 +1313,8 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Keeper_purge_confirm _
             | Nav.Addon_attach_form
             | Nav.Addon_detach_confirm _
-            | Nav.Addon_invoke_action _ ->
+            | Nav.Addon_invoke_action _
+            | Nav.Setup_login_input_form _ ->
                 modal)
           m.inline_modal
       in
@@ -2410,11 +2426,20 @@ let apply_http_reply ~now (m : Model.t) reply =
       let is_done =
         String.equal status_lc "complete" || String.equal status_lc "completed"
       in
+      let is_failed_or_cancelled =
+        String.equal status_lc "failed"
+        || String.equal status_lc "cancelled"
+        || String.equal status_lc "canceled"
+        || String.equal status_lc "interrupted"
+      in
+      let is_terminal = is_done || is_failed_or_cancelled in
       let level =
         if is_done then Model.Toast_success
-        else if String.equal status_lc "failed" || String.equal status_lc "cancelled" then
-          Model.Toast_error
+        else if is_failed_or_cancelled then Model.Toast_error
         else Model.Toast_info
+      in
+      let m =
+        if is_terminal then close_setup_login_input ~login_id:receipt.login_id m else m
       in
       let detail =
         match receipt.account with
@@ -2439,6 +2464,24 @@ let apply_http_reply ~now (m : Model.t) reply =
         else []
       in
       (next, refresh_cmds)
+  | Msg.Reply_setup_login_interrupted { login_id; error } ->
+      let next = close_setup_login_input ~login_id m in
+      let owns_receipt =
+        Option.fold ~none:false
+          ~some:(fun (receipt : Wire_runtime.setup_login_receipt) ->
+            String.equal receipt.login_id login_id)
+          m.runtime.setup_login_receipt
+      in
+      if not owns_receipt && next == m then (m, [])
+      else
+        let runtime = Runtime_store.mark_setup_login_input_ready false next.runtime in
+        let context = Say.make ~ko:"계정 로그인 스트림 중단" ~en:"Account login stream interrupted" in
+        let next, cmds =
+          record_http_incident ~now ~source:(Health.Source_runtime "setup_login")
+            ~context error { next with runtime }
+        in
+        ( Model.with_toast ~now ~level:Model.Toast_error
+            (Say.concat ~sep:": " [context; Msg.http_error_summary error]) next, cmds )
   | Msg.Reply_setup_login_receipt (Error err) ->
       let next, cmds =
         record_http_incident ~now ~source:(Health.Source_runtime "setup_login")
@@ -2535,7 +2578,8 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Keeper_purge_confirm _
         | Nav.Addon_attach_form
         | Nav.Addon_detach_confirm _
-        | Nav.Addon_invoke_action _ ->
+        | Nav.Addon_invoke_action _
+        | Nav.Setup_login_input_form _ ->
             false
       in
       let close_modal =
@@ -2638,7 +2682,8 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Keeper_purge_confirm _
         | Nav.Addon_attach_form
         | Nav.Addon_detach_confirm _
-        | Nav.Addon_invoke_action _ ->
+        | Nav.Addon_invoke_action _
+        | Nav.Setup_login_input_form _ ->
             false
       in
       let is_conflict =
@@ -3178,7 +3223,8 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Keeper_lifecycle_form _
         | Nav.Addon_attach_form
         | Nav.Addon_detach_confirm _
-        | Nav.Addon_invoke_action _ ->
+        | Nav.Addon_invoke_action _
+        | Nav.Setup_login_input_form _ ->
             false
       in
       let close_modal =
@@ -3264,7 +3310,8 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Keeper_lifecycle_form _
             | Nav.Addon_attach_form
             | Nav.Addon_detach_confirm _
-            | Nav.Addon_invoke_action _ ->
+            | Nav.Addon_invoke_action _
+            | Nav.Setup_login_input_form _ ->
                 modal)
           m.inline_modal
       in
@@ -3526,7 +3573,8 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Keeper_purge_confirm _
             | Nav.Addon_attach_form
             | Nav.Addon_detach_confirm _
-            | Nav.Addon_invoke_action _ ->
+            | Nav.Addon_invoke_action _
+            | Nav.Setup_login_input_form _ ->
                 false)
         | Some (Nav.Addon_detach_confirm { instance_id = ack_id; _ }) -> (
             match modal.kind with
@@ -3557,7 +3605,8 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Keeper_lifecycle_form _
             | Nav.Keeper_purge_confirm _
             | Nav.Addon_attach_form
-            | Nav.Addon_invoke_action _ ->
+            | Nav.Addon_invoke_action _
+            | Nav.Setup_login_input_form _ ->
                 false)
         | Some (Nav.Addon_invoke_action { instance_id = ack_id; _ }) -> (
             match modal.kind with
@@ -3588,7 +3637,8 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Keeper_lifecycle_form _
             | Nav.Keeper_purge_confirm _
             | Nav.Addon_attach_form
-            | Nav.Addon_detach_confirm _ ->
+            | Nav.Addon_detach_confirm _
+            | Nav.Setup_login_input_form _ ->
                 false)
         | Some
             (( Nav.Btw_query
@@ -3614,7 +3664,8 @@ let apply_http_reply ~now (m : Model.t) reply =
              | Nav.Board_delete_post _
              | Nav.Keeper_lifecycle_form _
              | Nav.Keeper_purge_confirm _
-             | Nav.Addon_attach_form ) as kind) ->
+             | Nav.Addon_attach_form
+             | Nav.Setup_login_input_form _ ) as kind) ->
             Nav.equal_inline_action_kind modal.kind kind
       in
       let close_inline_modal =
@@ -3709,7 +3760,8 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Keeper_purge_confirm _
             | Nav.Addon_attach_form
             | Nav.Addon_detach_confirm _
-            | Nav.Addon_invoke_action _ ->
+            | Nav.Addon_invoke_action _
+            | Nav.Setup_login_input_form _ ->
                 false)
         | Some (Nav.Addon_detach_confirm { instance_id = ack_id; _ }) -> (
             match modal.kind with
@@ -3740,7 +3792,8 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Keeper_lifecycle_form _
             | Nav.Keeper_purge_confirm _
             | Nav.Addon_attach_form
-            | Nav.Addon_invoke_action _ ->
+            | Nav.Addon_invoke_action _
+            | Nav.Setup_login_input_form _ ->
                 false)
         | Some (Nav.Addon_invoke_action { instance_id = ack_id; _ }) -> (
             match modal.kind with
@@ -3771,7 +3824,8 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Keeper_lifecycle_form _
             | Nav.Keeper_purge_confirm _
             | Nav.Addon_attach_form
-            | Nav.Addon_detach_confirm _ ->
+            | Nav.Addon_detach_confirm _
+            | Nav.Setup_login_input_form _ ->
                 false)
         | Some
             (( Nav.Btw_query
@@ -3797,7 +3851,8 @@ let apply_http_reply ~now (m : Model.t) reply =
              | Nav.Board_delete_post _
              | Nav.Keeper_lifecycle_form _
              | Nav.Keeper_purge_confirm _
-             | Nav.Addon_attach_form ) as kind) ->
+             | Nav.Addon_attach_form
+             | Nav.Setup_login_input_form _ ) as kind) ->
             Nav.equal_inline_action_kind modal.kind kind
       in
       let inline_modal =
@@ -4667,44 +4722,64 @@ let apply_http_reply ~now (m : Model.t) reply =
               { m with keeper_context = { m.keeper_context with by_keeper } })
             ~source:Health.Source_client_http ~ko:"OAuth 도구 조회"
             ~en:"OAuth attached tools fetch" err)
-  | Msg.Reply_oauth_attempt_status { keeper; result = Ok status } ->
-      let keeper_context =
-        Keeper_context_store.set_oauth_attempt_status ~keeper (Some status)
-          m.keeper_context
-      in
-      let m1 = { m with keeper_context } in
-      let next =
-        Model.with_toast ~now ~level:Model.Toast_info
-          (Say.make
-             ~ko:("OAuth 상태: " ^ status.kind)
-             ~en:("OAuth status: " ^ status.kind))
-          m1
-      in
-      let refresh_cmds =
-        if String.equal status.kind "completed" then
-          [
-            Cmd.Http_get
-              { epoch = m.epoch; req = Cmd.Get_oauth_attached_tools { keeper } };
-          ]
-        else []
-      in
-      (next, refresh_cmds)
-  | Msg.Reply_oauth_attempt_status { keeper; result = Error err } -> (
-      match err with
-      | Msg.Http_error { status = 401 | 403; _ } ->
-          let keeper_context =
-            Keeper_context_store.mark_oauth_denied ~at:now ~keeper
-              ~reason:(Msg.http_error_detail err) m.keeper_context
-          in
-          ( Model.with_toast ~now ~level:Model.Toast_warning
-              (Say.make ~ko:"OAuth 상태 확인 권한(CanAdmin) 필요"
-                 ~en:"OAuth status requires CanAdmin auth")
-              { m with keeper_context }
-          , [] )
-      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
-      | Msg.Decode_error _ ->
-          err_reply ~fail:Fun.id ~source:Health.Source_client_http
-            ~ko:"OAuth 로그인 상태 확인" ~en:"OAuth attempt status" err)
+  | Msg.Reply_oauth_attempt_status { keeper; provider; attempt_id; result } ->
+      let ks = Keeper_context_store.get_keeper ~keeper m.keeper_context in
+      (match ks.oauth_pending_login with
+      | Some (Wire_keeper_context.Oauth_login_exchange ex)
+        when String.equal ex.provider provider && String.equal ex.attempt_id attempt_id ->
+          let stop = Keeper_context_store.set_oauth_pending_login ~keeper None in
+          (match result with
+          | Ok status ->
+              let settled = Keeper_context_store.is_oauth_attempt_settled status.kind in
+              let changed =
+                not (Option.fold ~none:false
+                       ~some:(fun (prev : Wire_keeper_context.oauth_attempt_status) ->
+                         String.equal prev.kind status.kind)
+                       ks.oauth_attempt_status)
+              in
+              let keeper_context =
+                Keeper_context_store.set_oauth_attempt_status ~keeper (Some status)
+                  m.keeper_context
+              in
+              let next = { m with keeper_context = if settled then stop keeper_context else keeper_context } in
+              let next =
+                if not changed then next
+                else Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make ~ko:("OAuth 상태: " ^ status.kind) ~en:("OAuth status: " ^ status.kind)) next
+              in
+              let cmds =
+                match String.lowercase_ascii (String.trim status.kind) with
+                | "completed" | "complete" ->
+                    [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_oauth_attached_tools { keeper } } ]
+                | _ -> []
+              in
+              (next, cmds)
+          | Error (Msg.Http_error { status = 401 | 403; _ } as err) ->
+              let keeper_context =
+                stop m.keeper_context
+                |> Keeper_context_store.mark_oauth_denied ~at:now ~keeper
+                     ~reason:(Msg.http_error_detail err)
+              in
+              ( Model.with_toast ~now ~level:Model.Toast_warning
+                  (Say.make ~ko:"OAuth 상태 확인 권한(CanAdmin) 필요"
+                     ~en:"OAuth status requires CanAdmin auth")
+                  { m with keeper_context }
+              , [] )
+          | Error ((Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+                  | Msg.Decode_error _) as err) ->
+              let retry = Msg.http_error_retryable err in
+              let keeper_context =
+                if retry then Keeper_context_store.record_oauth_poll_error ~keeper m.keeper_context
+                else stop m.keeper_context
+              in
+              if retry && ks.oauth_poll_consecutive_errors > 0 then ({ m with keeper_context }, [])
+              else
+                let next, cmds = err_reply ~fail:(fun m0 -> { m0 with keeper_context })
+                  ~source:Health.Source_client_http ~ko:"OAuth 로그인 상태 확인"
+                  ~en:"OAuth attempt status" err in
+                (Model.with_toast ~now ~level:Model.Toast_warning (Msg.http_error_summary err) next, cmds))
+      | Some (Wire_keeper_context.Oauth_login_exchange _ | Oauth_login_direct _) | None ->
+          (m, []))
   | Msg.Reply_oauth_mutation { keeper; label; result = Ok () } ->
       ( Model.with_toast ~now ~level:Model.Toast_success label m
       , [
@@ -4740,11 +4815,20 @@ let apply_http_reply ~now (m : Model.t) reply =
       let m1 = { m with keeper_context } in
       let toast, extra =
         match res with
-        | Wire_keeper_context.Oauth_login_exchange { provider_label; _ } ->
+        | Wire_keeper_context.Oauth_login_exchange
+            { authorize_url; provider_label; _ } ->
+            let open_cmds =
+              if String.equal (String.trim authorize_url) "" then []
+              else [ Cmd.Open_external_url authorize_url ]
+            in
             ( Say.make
-                ~ko:(provider_label ^ " 인증 URL 준비됨 ([y] 복사 · [L] 상태 확인)")
-                ~en:(provider_label ^ " auth URL ready ([y] copy · [L] poll)")
-            , [] )
+                ~ko:
+                  (provider_label
+                   ^ " 브라우저 인증 여는 중 · 자동 상태 확인 ([y] 복사 · [L] 즉시 확인)")
+                ~en:
+                  (provider_label
+                   ^ " opening browser auth · auto-polling ([y] copy · [L] poll now)")
+            , open_cmds )
         | Wire_keeper_context.Oauth_login_direct { provider_label; message; _ } ->
             ( Say.make
                 ~ko:(provider_label ^ ": " ^ message)

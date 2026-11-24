@@ -1957,6 +1957,18 @@ let inline_modal_for kind =
             secret = false;
           };
         ]
+    | Nav.Setup_login_input_form _ ->
+        [
+          {
+            key = "setup_login_input";
+            label =
+              Say.make ~ko:"인증 코드 / CLI 입력 (빈 값=Enter)"
+                ~en:"Auth code / CLI input (blank=Enter)";
+            value = "";
+            required = false;
+            secret = false;
+          };
+        ]
   in
   let active_field =
     match kind with
@@ -1989,7 +2001,8 @@ let inline_modal_for kind =
     | Nav.Keeper_purge_confirm _
     | Nav.Addon_attach_form
     | Nav.Addon_detach_confirm _
-    | Nav.Addon_invoke_action _ ->
+    | Nav.Addon_invoke_action _
+    | Nav.Setup_login_input_form _ ->
         0
   in
   { kind; fields; active_field; submitting = false; error = None }
@@ -2121,6 +2134,11 @@ let modal_field_help ~key =
         (Say.make
            ~ko:"'detach' 또는 인스턴스 ID 입력 후 Enter"
            ~en:"Type 'detach' or instance ID + Enter to detach addon")
+  | "setup_login_input" ->
+      Some
+        (Say.make
+           ~ko:"CLI가 입력을 기다리는 중: 코드 붙여넣기 또는 빈 칸 Enter (key:enter / key:eof)"
+           ~en:"CLI awaits input: paste code or press Enter (blank sends key:enter)")
   | "setup_key_integration" ->
       Some
         (Say.make

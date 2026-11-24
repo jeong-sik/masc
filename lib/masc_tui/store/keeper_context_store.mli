@@ -68,6 +68,9 @@ type keeper_state = {
   oauth_auth_denied : bool;
   oauth_pending_login : Wire_keeper_context.oauth_login_result option;
   oauth_attempt_status : Wire_keeper_context.oauth_attempt_status option;
+  oauth_last_poll_ns : int64 option;
+  oauth_poll_started_ns : int64 option;
+  oauth_poll_consecutive_errors : int;
   github_identity : Wire_keeper_context.github_identity_observation Observed.t;
   github_auth_denied : bool;
   github_login : github_login_session;
@@ -271,6 +274,20 @@ val set_oauth_pending_login :
   keeper:string -> Wire_keeper_context.oauth_login_result option -> t -> t
 val set_oauth_attempt_status :
   keeper:string -> Wire_keeper_context.oauth_attempt_status option -> t -> t
+val is_oauth_attempt_settled : string -> bool
+val mark_oauth_polled : now:Clock.Mono.t -> keeper:string -> t -> t
+val record_oauth_poll_error : keeper:string -> t -> t
+(** Count a transient OAuth status poll error; polling stops after 5
+    consecutive errors to preserve 0 Hz idle on persistent server failures. *)
+val pending_oauth_polls :
+  now:Clock.Mono.t -> ?wall_unix:float -> t -> (string * string * string) list
+(** [(keeper, provider, attempt_id)] triples with an active unsettled OAuth
+    exchange whose poll cooldown (>= 2s) has elapsed and which has not reached
+    its expiry, monotonic window cap, or consecutive-error limit. Empty when idle. *)
+val next_oauth_poll_deadline_ns :
+  now_ns:int64 -> ?wall_unix:float -> t -> int64 option
+(** Earliest monotonic nanosecond deadline for the next active OAuth status
+    poll, or [None] when no keeper has a pollable unsettled OAuth exchange (0 Hz). *)
 val apply_github_identity :
   observed_at:Clock.Mono.t ->
   keeper:string ->
@@ -282,7 +299,8 @@ val start_github_login : keeper:string -> t -> t
 val append_github_login_output : keeper:string -> line:string -> t -> t
 val finish_github_login :
   keeper:string -> error:string option -> t -> t
-val clear_running_github_logins : t -> t
+val clear_epoch_logins : t -> t
+(** Drop process-local OAuth attempts and detach running GitHub logins. *)
 (** Reset [github_login.running = false] across all keepers when leaving an
     epoch whose stream replies are abandoned. *)
 val move_identity_selection :

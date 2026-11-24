@@ -3471,7 +3471,8 @@ let classify_inline_form (modal : Model.inline_modal_state) : inline_form_kind =
     | Nav.Keeper_purge_confirm _
     | Nav.Addon_attach_form
     | Nav.Addon_detach_confirm _
-    | Nav.Addon_invoke_action _ ) as std ->
+    | Nav.Addon_invoke_action _
+    | Nav.Setup_login_input_form _ ) as std ->
       Form_standard std
 
 let inline_action_title ~lang ~(modal : Model.inline_modal_state) _kind =
@@ -3598,6 +3599,10 @@ let inline_action_title ~lang ~(modal : Model.inline_modal_state) _kind =
       Say.resolve lang
         (Say.make ~ko:("애드온 액션 호출 · " ^ instance_id)
            ~en:("Invoke Addon Action · " ^ instance_id))
+  | Form_standard (Nav.Setup_login_input_form { login_id }) ->
+      Say.resolve lang
+        (Say.make ~ko:("OAuth 로그인 입력 · " ^ login_id)
+           ~en:("OAuth Login Input · " ^ login_id))
 
 let form_of_inline_modal (modal : Model.inline_modal_state) =
   let fields =
@@ -3666,7 +3671,8 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     | Nav.Keeper_purge_confirm _
     | Nav.Addon_attach_form
     | Nav.Addon_detach_confirm _
-    | Nav.Addon_invoke_action _ ->
+    | Nav.Addon_invoke_action _
+    | Nav.Setup_login_input_form _ ->
         Int.max 7 (List.length modal.fields + 6 + if has_focused_help then 1 else 0)
   in
   let h = Int.min (Int.max 0 (rect.h - 2)) desired_h in
@@ -3722,7 +3728,8 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       | Nav.Keeper_purge_confirm _
       | Nav.Addon_attach_form
       | Nav.Addon_detach_confirm _
-      | Nav.Addon_invoke_action _ ->
+      | Nav.Addon_invoke_action _
+      | Nav.Setup_login_input_form _ ->
           Say.resolve lang
             (Say.make ~ko:"[Tab] 필드 · [Enter] 제출 · [Esc] 취소"
                ~en:"[Tab] Field · [Enter] Submit · [Esc] Cancel")
@@ -3880,7 +3887,8 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       | Nav.Keeper_purge_confirm _
       | Nav.Addon_attach_form
       | Nav.Addon_detach_confirm _
-      | Nav.Addon_invoke_action _ ->
+      | Nav.Addon_invoke_action _
+      | Nav.Setup_login_input_form _ ->
           let status_rows =
             if modal.submitting || Option.is_some modal.error then 1 else 0
           in
@@ -3924,7 +3932,8 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 | Nav.Keeper_lifecycle_form _
                 | Nav.Keeper_purge_confirm _
                 | Nav.Addon_attach_form
-                | Nav.Addon_detach_confirm _ ) ->
+                | Nav.Addon_detach_confirm _
+                | Nav.Setup_login_input_form _ ) ->
                 0
           in
           let form_r =
@@ -4094,7 +4103,8 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 | Nav.Keeper_lifecycle_form _
                 | Nav.Keeper_purge_confirm _
                 | Nav.Addon_attach_form
-                | Nav.Addon_detach_confirm _ ) ->
+                | Nav.Addon_detach_confirm _
+                | Nav.Setup_login_input_form _ ) ->
                 ()
           end;
           if status_rows = 1 then begin

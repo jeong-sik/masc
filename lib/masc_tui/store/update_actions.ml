@@ -2364,7 +2364,8 @@ and execute_action ~now (m : Model.t) action =
                     | Nav.Keeper_purge_confirm _
                     | Nav.Addon_attach_form
                     | Nav.Addon_detach_confirm _
-                    | Nav.Addon_invoke_action _ )
+                    | Nav.Addon_invoke_action _
+                    | Nav.Setup_login_input_form _ )
                   , _ ) ->
                     true
               in
@@ -2578,7 +2579,8 @@ and execute_action ~now (m : Model.t) action =
                | Nav.Keeper_purge_confirm _
                | Nav.Addon_attach_form
                | Nav.Addon_detach_confirm _
-               | Nav.Addon_invoke_action _ )) ->
+               | Nav.Addon_invoke_action _
+               | Nav.Setup_login_input_form _ )) ->
             Update_nav.submit_inline_modal ~now m
         | Some Nav.Ask_answer -> (
             match m.ask_modal with
@@ -2855,7 +2857,8 @@ and execute_action ~now (m : Model.t) action =
             | Nav.Keeper_purge_confirm _
             | Nav.Addon_attach_form
             | Nav.Addon_detach_confirm _
-            | Nav.Addon_invoke_action _ ->
+            | Nav.Addon_invoke_action _
+            | Nav.Setup_login_input_form _ ->
                 m.drafts
           in
           let closed =
@@ -4050,7 +4053,8 @@ and execute_action ~now (m : Model.t) action =
                 | Nav.Keeper_purge_confirm _
                 | Nav.Addon_attach_form
                 | Nav.Addon_detach_confirm _
-                | Nav.Addon_invoke_action _ )
+                | Nav.Addon_invoke_action _
+                | Nav.Setup_login_input_form _ )
             | Nav.Ask_answer
             | Nav.Help
             | Nav.System_gate
@@ -4710,7 +4714,8 @@ and execute_action ~now (m : Model.t) action =
                                ~en:"Focus Browser Tabs (Tab → Space) to open a tab URL with [o]")
                             m
                         , [] )
-                  | Nav.Runtime_quotas_credits
+                  | Nav.Runtime_quotas_credits ->
+                      open_url_or_notice m.runtime.setup_login_auth_url
                   | Nav.Runtime_efficiency_spend
                   | Nav.Runtime_failover_lanes
                   | Nav.Runtime_fusion
@@ -6391,6 +6396,22 @@ and execute_action ~now (m : Model.t) action =
                       ( Model.with_toast ~now ~level:Model.Toast_info
                           (Say.make ~ko:"액션을 호출할 애드온을 선택하세요"
                              ~en:"Select an addon instance to invoke an action")
+                          m
+                      , [] ))
+                else if
+                  Nav.equal_workspace m.nav.workspace Nav.Runtime
+                  && Nav.equal_runtime_tab m.runtime.active_tab
+                       Nav.Runtime_quotas_credits
+                then (
+                  match Runtime_store.active_setup_login_id m.runtime with
+                  | Some login_id ->
+                      Update_nav.open_inline_modal m
+                        (Nav.Setup_login_input_form { login_id })
+                  | None ->
+                      ( Model.with_toast ~now ~level:Model.Toast_info
+                          (Say.make
+                             ~ko:"진행 중인 CLI 로그인이 없습니다 ([l]로 시작)"
+                             ~en:"No active CLI login session (press [l] to start)")
                           m
                       , [] ))
                 else (m, [])))

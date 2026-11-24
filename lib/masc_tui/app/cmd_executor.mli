@@ -145,14 +145,18 @@ val decode_hub_event_msgs :
     becomes an undecodable observer delivery. *)
 
 val run_setup_login_stream :
+  ?on_output:
+    (text:string -> auth_url:string option -> device_code:string option -> unit) ->
+  ?on_input_ready:(login_id:string option -> unit) ->
+  on_interrupted:(login_id:string -> Msg.http_error -> unit) ->
   publish:
     ((Masc_tui_protocol.Wire_runtime.setup_login_receipt, Msg.http_error) result ->
     unit) ->
   stream:(on_chunk:(string -> unit) -> (unit, Msg.http_error) result) ->
-  unit
+  unit -> unit
 (** Run a setup-login SSE stream, delivering each receipt at most once and
-    propagating stream errors whenever no terminal receipt
-    ([complete]/[completed]/[failed]/[cancelled]/[interrupted]) has arrived. *)
+    closing the input for the observed login ID on error or EOF before a
+    terminal receipt. A stream interruption leaves the server outcome unknown. *)
 
 val run_github_login_stream :
   publish_chunk:(string -> unit) ->

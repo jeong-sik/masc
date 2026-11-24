@@ -243,6 +243,10 @@ type post_request =
       integration_id : string;
       account_ref : string option;
     }
+  | Post_setup_login_input of {
+      login_id : string;
+      input : Wire_runtime.setup_login_input;
+    }
   | Post_sandbox_probe of [ `All | `Keeper of string | `Ssh_pool of string ]
   | Post_config_patch of Wire_config.patch_request
   | Post_tui_preference of Wire_config.tui_preference_change
@@ -637,6 +641,8 @@ let post_request_path = function
       Wire_runtime.runtime_routing_path
   | Post_setup_account_key _ -> Wire_runtime.setup_credential_path
   | Post_setup_login_start _ -> Wire_runtime.setup_accounts_login_path
+  | Post_setup_login_input { login_id; _ } ->
+      Wire_runtime.setup_accounts_login_input_path ~login_id
   | Post_sandbox_probe _ -> Wire_infra.infra_sandboxes_probe_path
   | Post_config_patch _ -> Wire_config.config_patch_path
   | Post_tui_preference _ -> Wire_config.tui_preferences_path
@@ -702,6 +708,7 @@ let mcp_tool_name_of_post_request = function
   | Post_runtime_lane_delete _
   | Post_setup_account_key _
   | Post_setup_login_start _
+  | Post_setup_login_input _
   | Post_sandbox_probe _
   | Post_config_patch _
   | Post_tui_preference _
@@ -775,6 +782,8 @@ let post_request_body = function
   | Post_setup_login_start { integration_id; account_ref } ->
       Wire_runtime.encode_setup_account_login_start ~integration_id ?account_ref
         ()
+  | Post_setup_login_input { login_id = _; input } ->
+      Wire_runtime.encode_setup_login_input input
   | Post_sandbox_probe target -> Wire_infra.encode_sandbox_probe_request target
   | Post_config_patch req -> Wire_config.encode_patch_request req
   | Post_tui_preference change ->

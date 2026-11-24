@@ -382,7 +382,8 @@ let msg_pace = function
   | Msg.Server_start_result _ | Msg.Http_reply _ | Msg.Sse_event _
   | Msg.Sse_freshness _ | Msg.Chat_stream_decode_warning _
   | Msg.Voice_event _ | Msg.Stream_gap _ | Msg.Github_login_chunk _
-  | Msg.Github_login_done _ ->
+  | Msg.Github_login_done _ | Msg.Setup_login_output _
+  | Msg.Setup_login_input_ready _ ->
       Frame_scheduler.Pace_animation
 
 let earliest_opt a b =
@@ -454,8 +455,8 @@ let should_toggle_mouse_capture (m : Model.t) (kev : Input_decoder.key_event) =
   && Option.is_none m.nav.overlay
   && not (Model.is_text_capture_active m)
 
-let should_emit_tick ~now_ns ~last_voice_tick_ns ~toast_expires_ns
-    ~voice_recording =
+let should_emit_tick ~oauth_poll_deadline_ns ~now_ns
+    ~last_voice_tick_ns ~toast_expires_ns ~voice_recording =
   let toast_expired =
     match toast_expires_ns with
     | Some exp -> Int64.compare now_ns exp >= 0
@@ -474,7 +475,18 @@ let should_emit_tick ~now_ns ~last_voice_tick_ns ~toast_expires_ns
         (true, Some (Int64.add now_ns voice_tick_interval_ns))
       else (false, Some next_due)
   in
-  (toast_expired || voice_due, earliest_opt toast_deadline voice_deadline)
+  let oauth_due =
+    match oauth_poll_deadline_ns with
+    | Some due -> Int64.compare now_ns due >= 0
+    | None -> false
+  in
+  let oauth_deadline =
+    match oauth_poll_deadline_ns with
+    | Some due when Int64.compare now_ns due < 0 -> Some due
+    | Some _ | None -> None
+  in
+  ( toast_expired || voice_due || oauth_due
+  , earliest_opt (earliest_opt toast_deadline voice_deadline) oauth_deadline )
 
 let clock_minute_of_unix wall_unix =
   if (not (Float.is_finite wall_unix)) || wall_unix <= 0.0 then 0L
@@ -1058,7 +1070,9 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
             | Msg.Voice_event _
             | Msg.Stream_gap _
             | Msg.Github_login_chunk _
-            | Msg.Github_login_done _ ->
+            | Msg.Github_login_done _
+            | Msg.Setup_login_output _
+            | Msg.Setup_login_input_ready _ ->
                 false
           in
           if toggle_mouse then begin
@@ -1244,12 +1258,17 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                       last_voice_tick_ns := 0L;
                       false
                 in
+                let wall_now = Unix.gettimeofday () in
+                let oauth_poll_deadline_ns =
+                  Keeper_context_store.next_oauth_poll_deadline_ns
+                    ~now_ns:now_after_ns ~wall_unix:wall_now
+                    !model.keeper_context
+                in
                 let emit_tick, extra =
-                  should_emit_tick ~now_ns:now_after_ns
+                  should_emit_tick ~oauth_poll_deadline_ns ~now_ns:now_after_ns
                     ~last_voice_tick_ns:!last_voice_tick_ns ~toast_expires_ns
                     ~voice_recording
                 in
-                let wall_now = Unix.gettimeofday () in
                 let minute_due, cur_minute, minute_deadline =
                   next_minute_tick ~now_ns:now_after_ns ~wall_unix:wall_now
                     ~last_minute:!last_clock_minute
@@ -1273,8 +1292,15 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                           Clock.Mono.to_ns toast.expires_at)
                         !model.toast
                     in
+                    let post_oauth_deadline =
+                      Keeper_context_store.next_oauth_poll_deadline_ns
+                        ~now_ns:now_after_ns ~wall_unix:wall_now
+                        !model.keeper_context
+                    in
                     let _, next_extra =
-                      should_emit_tick ~now_ns:now_after_ns
+                      should_emit_tick
+                        ~oauth_poll_deadline_ns:post_oauth_deadline
+                        ~now_ns:now_after_ns
                         ~last_voice_tick_ns:!last_voice_tick_ns
                         ~toast_expires_ns:post_toast_expires ~voice_recording
                     in

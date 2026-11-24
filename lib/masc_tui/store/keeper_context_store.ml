@@ -68,6 +68,9 @@ type keeper_state = {
   oauth_auth_denied : bool;
   oauth_pending_login : Wire_keeper_context.oauth_login_result option;
   oauth_attempt_status : Wire_keeper_context.oauth_attempt_status option;
+  oauth_last_poll_ns : int64 option;
+  oauth_poll_started_ns : int64 option;
+  oauth_poll_consecutive_errors : int;
   github_identity : Wire_keeper_context.github_identity_observation Observed.t;
   github_auth_denied : bool;
   github_login : github_login_session;
@@ -118,6 +121,9 @@ let empty_keeper_state =
     oauth_auth_denied = false;
     oauth_pending_login = None;
     oauth_attempt_status = None;
+    oauth_last_poll_ns = None;
+    oauth_poll_started_ns = None;
+    oauth_poll_consecutive_errors = 0;
     github_identity = Observed.unreported;
     github_auth_denied = false;
     github_login = empty_github_login;
@@ -756,10 +762,144 @@ let mark_oauth_denied ~at ~keeper ~reason t =
     t
 
 let set_oauth_pending_login ~keeper res t =
-  update_keeper ~keeper (fun ks -> { ks with oauth_pending_login = res }) t
+  update_keeper ~keeper
+    (fun ks ->
+      {
+        ks with
+        oauth_pending_login = res;
+        oauth_attempt_status =
+          (match res with Some _ -> None | None -> ks.oauth_attempt_status);
+        oauth_last_poll_ns = None;
+        oauth_poll_started_ns = None;
+        oauth_poll_consecutive_errors = 0;
+      })
+    t
 
 let set_oauth_attempt_status ~keeper status t =
-  update_keeper ~keeper (fun ks -> { ks with oauth_attempt_status = status }) t
+  update_keeper ~keeper
+    (fun ks ->
+      {
+        ks with
+        oauth_attempt_status = status;
+        oauth_poll_consecutive_errors = 0;
+      })
+    t
+
+let is_oauth_attempt_settled kind =
+  match String.lowercase_ascii (String.trim kind) with
+  | "completed"
+  | "complete"
+  | "failed"
+  | "canceled"
+  | "cancelled"
+  | "expired"
+  | "error"
+  | "denied"
+  | "unavailable"
+  | "superseded"
+  | "credential_publication_incomplete" ->
+      true
+  | _ -> false
+
+let oauth_poll_interval_ns = 2_000_000_000L
+let oauth_poll_max_window_ns = 600_000_000_000L
+let oauth_poll_max_consecutive_errors = 5
+
+let mark_oauth_polled ~now ~keeper t =
+  let now_ns = Clock.Mono.to_ns now in
+  update_keeper ~keeper
+    (fun ks ->
+      {
+        ks with
+        oauth_last_poll_ns = Some now_ns;
+        oauth_poll_started_ns =
+          (match ks.oauth_poll_started_ns with
+          | Some _ as started -> started
+          | None -> Some now_ns);
+      })
+    t
+
+let record_oauth_poll_error ~keeper t =
+  update_keeper ~keeper
+    (fun ks ->
+      {
+        ks with
+        oauth_poll_consecutive_errors = ks.oauth_poll_consecutive_errors + 1;
+      })
+    t
+
+let is_oauth_exchange_pollable ~now_ns ?wall_unix (ks : keeper_state)
+    (expires_at : float option) =
+  let settled =
+    match ks.oauth_attempt_status with
+    | Some st -> is_oauth_attempt_settled st.kind
+    | None -> false
+  in
+  let errors_exhausted =
+    ks.oauth_poll_consecutive_errors >= oauth_poll_max_consecutive_errors
+  in
+  let window_exceeded =
+    match ks.oauth_poll_started_ns with
+    | Some started -> Int64.sub now_ns started >= oauth_poll_max_window_ns
+    | None -> false
+  in
+  let wall_expired =
+    match (expires_at, wall_unix) with
+    | Some exp, Some w when Float.is_finite exp && Float.is_finite w && w > 0.0
+      ->
+        w >= exp
+    | (Some _ | None), (Some _ | None) -> false
+  in
+  let confirmed_active =
+    match ks.oauth_attempt_status with
+    | Some { kind = ("awaiting_consent" | "callback_admitted"); _ } ->
+        ks.oauth_poll_consecutive_errors = 0
+    | Some _ | None -> false
+  in
+  (* An admitted callback can publish after the consent deadline. A healthy
+     status read keeps following the server to its terminal receipt. *)
+  (not settled) && (not errors_exhausted)
+  && (confirmed_active || (not window_exceeded && not wall_expired))
+
+let pending_oauth_polls ~now ?wall_unix t =
+  let now_ns = Clock.Mono.to_ns now in
+  String_map.fold
+    (fun keeper (ks : keeper_state) acc ->
+      match ks.oauth_pending_login with
+      | Some (Wire_keeper_context.Oauth_login_exchange ex) ->
+          let due =
+            match ks.oauth_last_poll_ns with
+            | None -> true
+            | Some prev -> Int64.sub now_ns prev >= oauth_poll_interval_ns
+          in
+          if
+            due
+            && is_oauth_exchange_pollable ~now_ns ?wall_unix ks ex.expires_at
+          then (keeper, ex.provider, ex.attempt_id) :: acc
+          else acc
+      | Some (Wire_keeper_context.Oauth_login_direct _) | None -> acc)
+    t.by_keeper []
+  |> List.rev
+
+let next_oauth_poll_deadline_ns ~now_ns ?wall_unix t =
+  String_map.fold
+    (fun _keeper (ks : keeper_state) acc ->
+      match ks.oauth_pending_login with
+      | Some (Wire_keeper_context.Oauth_login_exchange ex) ->
+          if not (is_oauth_exchange_pollable ~now_ns ?wall_unix ks ex.expires_at)
+          then acc
+          else
+            let due_ns =
+              match ks.oauth_last_poll_ns with
+              | None -> now_ns
+              | Some prev -> Int64.add prev oauth_poll_interval_ns
+            in
+            Some
+              (match acc with
+              | None -> due_ns
+              | Some cur -> if Int64.compare due_ns cur < 0 then due_ns else cur)
+      | Some (Wire_keeper_context.Oauth_login_direct _) | None -> acc)
+    t.by_keeper None
 
 let apply_github_identity ~observed_at ~keeper obs t =
   update_keeper ~keeper
@@ -855,15 +995,19 @@ let finish_github_login ~keeper ~error t =
       })
     t
 
-let clear_running_github_logins t =
+let clear_epoch_logins t =
   {
     t with
     by_keeper =
       String_map.map
         (fun ks ->
-          if ks.github_login.running then
-            { ks with github_login = { ks.github_login with running = false } }
-          else ks)
+          { ks with
+            oauth_pending_login = None;
+            oauth_attempt_status = None;
+            oauth_last_poll_ns = None;
+            oauth_poll_started_ns = None;
+            oauth_poll_consecutive_errors = 0;
+            github_login = { ks.github_login with running = false } })
         t.by_keeper;
   }
 

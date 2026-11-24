@@ -6,6 +6,9 @@ val feed : decoder -> string -> frame list
     BOM, and joined data fields. Unterminated EOF events are not emitted.
     [id] is the explicit field of this frame, not a persisted reconnect cursor. *)
 
+val feed_named : decoder -> string -> (string option * frame) list
+(** Like [feed], retaining the explicit SSE [event] field of each complete frame. *)
+
 val data_payload_line : string -> string option
 (** Read one SSE data field, stripping one optional space after the colon and
     a trailing CR. Bare [data] is an empty field; other fields are ignored. *)

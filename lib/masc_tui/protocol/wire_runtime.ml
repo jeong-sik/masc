@@ -10,10 +10,13 @@ let runtime_assignment_path = "/api/v1/runtime/config/assignment"
 let runtime_routing_path = "/api/v1/runtime/config/routing"
 let setup_inventory_path = "/api/v1/setup/inventory"
 let setup_credential_path = "/api/v1/setup/credential"
-let setup_accounts_login_path = "/api/v1/setup/accounts/login"
+let setup_accounts_login_path = "/api/v1/setup/accounts/login?auth_hints=1"
 
 let setup_accounts_login_status_path ~login_id =
   "/api/v1/setup/accounts/login/" ^ percent_encode login_id
+
+let setup_accounts_login_input_path ~login_id =
+  "/api/v1/setup/accounts/login/" ^ percent_encode login_id ^ "/input"
 
 let runtime_probe_path ?(force = false) () =
   Printf.sprintf "/api/v1/dashboard/runtime-probe?force=%b" force
@@ -3822,6 +3825,149 @@ let encode_setup_account_login_start ~integration_id ?account_ref () =
     | Some r when not (String.equal (String.trim r) "") ->
         [ ("account_ref", `String (String.trim r)) ]
     | Some _ | None -> []))
+
+type setup_login_key =
+  | Login_key_enter
+  | Login_key_up
+  | Login_key_down
+  | Login_key_tab
+  | Login_key_eof
+
+type setup_login_input =
+  | Setup_login_text of string
+  | Setup_login_key of setup_login_key
+
+let setup_login_key_to_string = function
+  | Login_key_enter -> "enter"
+  | Login_key_up -> "up"
+  | Login_key_down -> "down"
+  | Login_key_tab -> "tab"
+  | Login_key_eof -> "eof"
+
+let encode_setup_login_input = function
+  | Setup_login_text text ->
+      `Assoc [ ("kind", `String "text"); ("text", `String text) ]
+  | Setup_login_key key ->
+      `Assoc
+        [
+          ("kind", `String "key");
+          ("key", `String (setup_login_key_to_string key));
+        ]
+
+let strip_ansi_csi s =
+  let len = String.length s in
+  let buf = Buffer.create len in
+  let rec loop i =
+    if i >= len then Buffer.contents buf
+    else if s.[i] = '\027' && i + 1 < len && s.[i + 1] = '[' then
+      let rec skip j =
+        if j >= len then len
+        else
+          let c = s.[j] in
+          if c >= '@' && c <= '~' then j + 1 else skip (j + 1)
+      in
+      loop (skip (i + 2))
+    else (
+      Buffer.add_char buf s.[i];
+      loop (i + 1))
+  in
+  loop 0
+
+let extract_https_url raw =
+  let clean = strip_ansi_csi raw in
+  let len = String.length clean in
+  let prefix = "https://" in
+  let plen = String.length prefix in
+  let rec find_start i =
+    if i + plen > len then None
+    else if String.equal (String.sub clean i plen) prefix then Some i
+    else find_start (i + 1)
+  in
+  let is_url_stop = function
+    | ' ' | '\t' | '\n' | '\r' | '"' | '\'' | '<' | '>' | '\027' -> true
+    | c when Char.code c < 32 || Char.code c = 127 -> true
+    | _ -> false
+  in
+  let is_trailing_punct = function
+    | '.' | ',' | ';' | ')' | ']' | '}' | ':' -> true
+    | _ -> false
+  in
+  match find_start 0 with
+  | None -> None
+  | Some start ->
+      let rec find_end j =
+        if j >= len || is_url_stop clean.[j] then j else find_end (j + 1)
+      in
+      let rec trim_end j =
+        if j > start + plen && is_trailing_punct clean.[j - 1] then
+          trim_end (j - 1)
+        else j
+      in
+      let stop = trim_end (find_end (start + plen)) in
+      if stop > start + plen then Some (String.sub clean start (stop - start))
+      else None
+
+let contains_ascii_ci ~needle haystack =
+  let h = String.lowercase_ascii haystack in
+  let n = String.lowercase_ascii needle in
+  let hlen = String.length h in
+  let nlen = String.length n in
+  if nlen = 0 then true
+  else
+    let rec loop i =
+      if i + nlen > hlen then false
+      else if String.equal (String.sub h i nlen) n then true
+      else loop (i + 1)
+    in
+    loop 0
+
+let has_device_code_context s =
+  List.exists
+    (fun cue -> contains_ascii_ci ~needle:cue s)
+    [ "one-time"; "device"; "verify"; "verification"; "enter"; "code"; "oauth" ]
+
+let extract_device_code raw =
+  let clean = strip_ansi_csi raw in
+  if not (has_device_code_context clean) then None
+  else
+    let len = String.length clean in
+    let is_upper_alpha = function 'A' .. 'Z' -> true | _ -> false in
+    let is_upper_alnum = function 'A' .. 'Z' | '0' .. '9' -> true | _ -> false in
+    let is_boundary i =
+      i < 0 || i >= len
+      ||
+      match clean.[i] with
+      | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '-' | '_' | '/' | ':' -> false
+      | _ -> true
+    in
+    let has_letter s =
+      let slen = String.length s in
+      let rec check k =
+        if k >= slen then false
+        else if is_upper_alpha s.[k] then true
+        else check (k + 1)
+      in
+      check 0
+    in
+    let rec scan i =
+      if i >= len then None
+      else if is_upper_alnum clean.[i] && is_boundary (i - 1) then
+        let rec take_alnum j =
+          if j < len && is_upper_alnum clean.[j] then take_alnum (j + 1) else j
+        in
+        let j1 = take_alnum i in
+        let n1 = j1 - i in
+        if n1 >= 4 && n1 <= 6 && j1 < len && clean.[j1] = '-' then
+          let j2 = take_alnum (j1 + 1) in
+          let n2 = j2 - (j1 + 1) in
+          if n2 >= 4 && n2 <= 6 && is_boundary j2 then
+            let candidate = String.sub clean i (j2 - i) in
+            if has_letter candidate then Some candidate else scan (j2 + 1)
+          else scan (j1 + 1)
+        else scan (j1 + 1)
+      else scan (i + 1)
+    in
+    scan 0
 
 (* --- Wave 3: Fusion Detail, Config Presets, Addon Package Catalog & Connector Names --- *)
 

@@ -89,7 +89,12 @@ val palette_entries : Model.t -> palette_entry list
 val palette_len : Model.t -> int
 
 val switch_workspace : Model.t -> Nav.workspace -> Model.t * Cmd.t list
-val navigate_menu_target : Model.t -> Nav.menu_target -> Model.t * Cmd.t list
+val navigate_menu_target :
+  ?keep_sidebar_focus:bool -> Model.t -> Nav.menu_target -> Model.t * Cmd.t list
+val enter_sidebar_focus : Model.t -> Model.t
+val exit_sidebar_focus : Model.t -> Model.t
+val move_sidebar : Model.t -> Keymap.move_dir -> Model.t * Cmd.t list
+val activate_sidebar_cursor : Model.t -> Model.t * Cmd.t list
 val open_overlay : Model.t -> Nav.overlay -> Model.t * Cmd.t list
 val open_global_settings :
   ?search_query:string -> Model.t -> Model.t * Cmd.t list

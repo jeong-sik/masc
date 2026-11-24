@@ -1125,6 +1125,11 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
   let printable_char =
     if is_printable_key norm then key_char_opt norm.key else None
   in
+  if Model.sidebar_has_focus m then
+    match printable_char with
+    | Some "l" -> Update_nav.apply_move m Keymap.Right
+    | _ -> (m, [])
+  else
   (* 0. Active Memory Diagram & Memory Explorer diagram triggers (., v) *)
   match printable_char with
   | Some "v" when Option.is_some (Memory_diagram.active_diagram m) ->
@@ -2243,7 +2248,8 @@ let apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
               | Some res -> res
               | None ->
                   let pre_dispatch =
-                    if
+                    if Model.sidebar_has_focus m then None
+                    else if
                       Model.is_keeper_config_active m
                       && not (Drafts.is_focused m.drafts)
                     then dispatch_keeper_config_key ~now m norm
@@ -2509,11 +2515,115 @@ let apply_mouse ~now (m : Model.t) (ev : Keymap.Input.mouse_event) =
       else m
     in
     match ev with
-    | Keymap.Input.Wheel { dir = Keymap.Input.Wheel_up; _ } ->
-        Update_actions.execute_action ~now m (Keymap.Move Keymap.Up)
-    | Keymap.Input.Wheel { dir = Keymap.Input.Wheel_down; _ } ->
-        Update_actions.execute_action ~now m (Keymap.Move Keymap.Down)
-    | Keymap.Input.Left_press _
-    | Keymap.Input.Left_drag _
-    | Keymap.Input.Left_release _ ->
-        (m, [])
+    | Keymap.Input.Wheel { dir; col; row } ->
+        let gx = col - 1 in
+        let gy = row - 1 in
+        let move_dir =
+          match dir with
+          | Keymap.Input.Wheel_up -> Keymap.Up
+          | Keymap.Input.Wheel_down -> Keymap.Down
+        in
+        let over_sidebar =
+          Option.is_none m.nav.overlay
+          &&
+          match Model.sidebar_rect m with
+          | Some sr -> Rect.contains sr ~x:gx ~y:gy
+          | None -> false
+        in
+        if over_sidebar then
+          let m_sb =
+            if Model.sidebar_has_focus m then m
+            else Update_nav.enter_sidebar_focus m
+          in
+          Update_nav.move_sidebar m_sb move_dir
+        else
+          let m_target =
+            if Model.sidebar_has_focus m then Update_nav.exit_sidebar_focus m
+            else m
+          in
+          Update_actions.execute_action ~now m_target (Keymap.Move move_dir)
+    | Keymap.Input.Left_press { col; row } -> (
+        if
+          Option.is_some m.nav.overlay
+          || Model.equal_breakpoint m.breakpoint Model.Micro
+        then (m, [])
+        else
+          let gx = col - 1 in
+          let gy = row - 1 in
+          (* 1. Top Rail clickable [b] Menu toggle at cols 1..4, row 0 *)
+          if gy = 0 && gx >= 1 && gx <= 4 then
+            Update_actions.execute_action ~now m Keymap.Toggle_sidebar
+          else
+            match Model.sidebar_rect m with
+            | Some sr when Rect.contains sr ~x:gx ~y:gy ->
+                let inner =
+                  Rect.make ~x:(sr.x + 1) ~y:(sr.y + 1)
+                    ~w:(Int.max 0 (sr.w - 2))
+                    ~h:(Int.max 0 (sr.h - 2))
+                in
+                if gy >= inner.y && gy < Rect.bottom inner then
+                  let effective_cursor =
+                    if Model.sidebar_has_focus m then m.nav.sidebar_cursor
+                    else Nav.menu_item_index (Model.active_menu_target m)
+                  in
+                  let start =
+                    Model.sidebar_viewport_start ~inner_h:inner.h
+                      ~scroll:m.nav.sidebar_scroll ~cursor:effective_cursor
+                  in
+                  let vis_idx = start + (gy - inner.y) in
+                  match List.nth_opt Model.sidebar_visual_rows vis_idx with
+                  | Some (Model.Sidebar_item { index; item }) ->
+                      let m_sel =
+                        {
+                          m with
+                          nav =
+                            {
+                              m.nav with
+                              sidebar_cursor = index;
+                              sidebar_scroll = start;
+                            };
+                        }
+                      in
+                      Update_nav.navigate_menu_target ~keep_sidebar_focus:false
+                        m_sel item.target
+                  | Some (Model.Sidebar_section _) | None ->
+                      (Update_nav.enter_sidebar_focus m, [])
+                else (Update_nav.enter_sidebar_focus m, [])
+            | Some _ | None ->
+                if Model.sidebar_drawer_open m then
+                  (Update_nav.exit_sidebar_focus m, [])
+                else
+                  let body_r = Model.body_rect m in
+                  if Rect.contains body_r ~x:gx ~y:gy then
+                    let m0 =
+                      {
+                        (Update_nav.exit_sidebar_focus m) with
+                        nav =
+                          {
+                            (Update_nav.exit_sidebar_focus m).nav with
+                            filter_focused = false;
+                          };
+                        drafts = Drafts.set_focus false m.drafts;
+                      }
+                    in
+                    let panes = Model.focusable_pane_count m0 in
+                    let next_pane =
+                      if panes <= 1 || body_r.w <= 0 then 0
+                      else if gx < body_r.x + (body_r.w / 2) then 0
+                      else Int.min (panes - 1) 1
+                    in
+                    ( Update_nav.clamp_for_pane
+                        { m0 with nav = { m0.nav with pane_index = next_pane } }
+                    , [] )
+                  else
+                    match Model.composer_rect m with
+                    | Some cr when Rect.contains cr ~x:gx ~y:gy ->
+                        let m0 = Update_nav.exit_sidebar_focus m in
+                        ( {
+                            m0 with
+                            nav = { m0.nav with filter_focused = false };
+                            drafts = Drafts.set_focus true m0.drafts;
+                          }
+                        , [] )
+                    | Some _ | None -> (m, []))
+    | Keymap.Input.Left_drag _ | Keymap.Input.Left_release _ -> (m, [])

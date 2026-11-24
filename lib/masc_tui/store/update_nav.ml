@@ -492,6 +492,47 @@ let sync_config_for_keeper_view (m : Model.t) =
           | (Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Runtime | Nav.Infra), _ ->
               m))
 
+let close_drawer_if_floating (m : Model.t) =
+  if Model.sidebar_drawer_open m then None else m.nav.sidebar_open
+
+let exit_sidebar_focus (m : Model.t) =
+  {
+    m with
+    nav =
+      {
+        m.nav with
+        sidebar_focused = false;
+        sidebar_open = close_drawer_if_floating m;
+      };
+  }
+
+let sidebar_inner_height (m : Model.t) =
+  match Model.sidebar_rect m with
+  | Some sr -> Int.max 1 (sr.h - 2)
+  | None -> Int.max 1 (Model.inner_body_height m - 2)
+
+let enter_sidebar_focus (m : Model.t) =
+  let cursor = Nav.menu_item_index (Model.active_menu_target m) in
+  let inner_h = sidebar_inner_height m in
+  let scroll =
+    Model.sidebar_viewport_start ~inner_h ~scroll:m.nav.sidebar_scroll ~cursor
+  in
+  {
+    m with
+    nav =
+      {
+        m.nav with
+        overlay = None;
+        filter_focused = false;
+        sidebar_focused = true;
+        sidebar_cursor = cursor;
+        sidebar_scroll = scroll;
+      };
+    drafts = Drafts.set_focus false m.drafts;
+    config = Config_store.cancel_edit_field m.config;
+    inline_modal = None;
+  }
+
 let switch_workspace (m : Model.t) ws =
   let nav =
     {
@@ -502,6 +543,8 @@ let switch_workspace (m : Model.t) ws =
       pane_index = 0;
       zoomed = false;
       filter_focused = false;
+      sidebar_focused = false;
+      sidebar_open = close_drawer_if_floating m;
       dive_scroll_offset = 0;
     }
   in
@@ -515,6 +558,7 @@ let switch_workspace (m : Model.t) ws =
   let next =
     { m with nav; drafts; config; knowledge; inline_modal = None }
     |> sync_config_for_keeper_view
+    |> Model.sync_sidebar_cursor
   in
   (next, View_fetches.fetches_for_current_view next)
 
@@ -546,6 +590,8 @@ let open_overlay (m : Model.t) overlay =
       m.nav with
       overlay = Some overlay;
       filter_focused = false;
+      sidebar_focused = false;
+      sidebar_open = close_drawer_if_floating m;
       help_scroll_offset;
       queue_scroll_offset;
     }
@@ -566,7 +612,10 @@ let open_overlay (m : Model.t) overlay =
         | Wire_config.Target_keeper_create ) ) ->
         Config_store.cancel_edit_field m.config
   in
-  let next = { m with nav; drafts; config; inline_modal = None } in
+  let next =
+    { m with nav; drafts; config; inline_modal = None }
+    |> Model.sync_sidebar_cursor
+  in
   (next, View_fetches.fetches_for_current_view next)
 
 let open_global_settings ?search_query (m : Model.t) =
@@ -588,46 +637,124 @@ let select_settings_tab (m : Model.t) tab =
   let next = { m with nav; config } in
   (next, View_fetches.fetches_for_current_view next)
 
-let navigate_menu_target (m : Model.t) (target : Nav.menu_target) =
+let navigate_menu_target ?(keep_sidebar_focus = false) (m : Model.t)
+    (target : Nav.menu_target) =
+  let preserve_sidebar (next, cmds) =
+    if not keep_sidebar_focus then (next, cmds)
+    else
+      let cursor = Nav.menu_item_index target in
+      let inner_h = sidebar_inner_height next in
+      let scroll =
+        Model.sidebar_viewport_start ~inner_h ~scroll:m.nav.sidebar_scroll
+          ~cursor
+      in
+      ( {
+          next with
+          nav =
+            {
+              next.nav with
+              sidebar_open = m.nav.sidebar_open;
+              sidebar_focused = true;
+              sidebar_cursor = cursor;
+              sidebar_scroll = scroll;
+            };
+        }
+      , cmds )
+  in
   match target with
-  | Nav.Menu_pulse -> switch_workspace m Nav.Pulse
+  | Nav.Menu_pulse -> switch_workspace m Nav.Pulse |> preserve_sidebar
   | Nav.Menu_work tab ->
       let work =
         if Nav.equal_work_tab m.work.active_tab tab then m.work
         else Work_store.set_tab tab m.work
       in
-      switch_workspace { m with work } Nav.Work
+      switch_workspace { m with work } Nav.Work |> preserve_sidebar
   | Nav.Menu_knowledge tab ->
       let knowledge =
         if Nav.equal_knowledge_tab m.knowledge.active_tab tab then m.knowledge
         else Knowledge_store.set_tab tab m.knowledge
       in
-      switch_workspace { m with knowledge } Nav.Knowledge
-  | Nav.Menu_keepers -> switch_workspace m Nav.Keepers
+      switch_workspace { m with knowledge } Nav.Knowledge |> preserve_sidebar
+  | Nav.Menu_keepers -> switch_workspace m Nav.Keepers |> preserve_sidebar
   | Nav.Menu_runtime tab ->
       let runtime =
         if Nav.equal_runtime_tab m.runtime.active_tab tab then m.runtime
         else Runtime_store.set_tab tab m.runtime
       in
-      switch_workspace { m with runtime } Nav.Runtime
+      switch_workspace { m with runtime } Nav.Runtime |> preserve_sidebar
   | Nav.Menu_infra tab ->
       let infra =
         if Nav.equal_infra_tab m.infra.active_tab tab then m.infra
         else Infra_store.set_tab tab m.infra
       in
-      switch_workspace { m with infra } Nav.Infra
-  | Nav.Menu_settings -> open_global_settings m
+      switch_workspace { m with infra } Nav.Infra |> preserve_sidebar
+  | Nav.Menu_settings ->
+      if keep_sidebar_focus then (m, []) else open_global_settings m
   | Nav.Menu_incidents ->
-      let incidents = Incidents.mark_all_read m.incidents in
-      open_overlay { m with incidents } Nav.Incidents
+      if keep_sidebar_focus then (m, [])
+      else
+        let incidents = Incidents.mark_all_read m.incidents in
+        open_overlay { m with incidents } Nav.Incidents
   | Nav.Menu_queue_context ->
-      open_overlay m (Nav.Queue_context Nav.Drawer_queue)
-  | Nav.Menu_help -> open_overlay m Nav.Help
+      if keep_sidebar_focus then (m, [])
+      else open_overlay m (Nav.Queue_context Nav.Drawer_queue)
+  | Nav.Menu_help ->
+      if keep_sidebar_focus then (m, []) else open_overlay m Nav.Help
+
+let move_sidebar (m : Model.t) (dir : Keymap.move_dir) =
+  let n = List.length Nav.all_menu_items in
+  if n <= 0 then (m, [])
+  else
+    let next_cursor =
+      match dir with
+      | Keymap.Up -> clamp_index n (m.nav.sidebar_cursor - 1)
+      | Keymap.Down -> clamp_index n (m.nav.sidebar_cursor + 1)
+      | Keymap.Page_up -> clamp_index n (m.nav.sidebar_cursor - 6)
+      | Keymap.Page_down -> clamp_index n (m.nav.sidebar_cursor + 6)
+      | Keymap.Home -> 0
+      | Keymap.End -> n - 1
+      | Keymap.Left | Keymap.Right -> clamp_index n m.nav.sidebar_cursor
+    in
+    let inner_h = sidebar_inner_height m in
+    let scroll =
+      Model.sidebar_viewport_start ~inner_h ~scroll:m.nav.sidebar_scroll
+        ~cursor:next_cursor
+    in
+    let m_moved =
+      {
+        m with
+        nav =
+          {
+            m.nav with
+            sidebar_focused = true;
+            filter_focused = false;
+            sidebar_cursor = next_cursor;
+            sidebar_scroll = scroll;
+          };
+        drafts = Drafts.set_focus false m.drafts;
+      }
+    in
+    match Nav.menu_item_of_index next_cursor with
+    | None -> (m_moved, [])
+    | Some it ->
+        if Nav.is_overlay_menu_target it.target then (m_moved, [])
+        else navigate_menu_target ~keep_sidebar_focus:true m_moved it.target
+
+let activate_sidebar_cursor (m : Model.t) =
+  match Nav.menu_item_of_index m.nav.sidebar_cursor with
+  | None -> (exit_sidebar_focus m, [])
+  | Some it -> navigate_menu_target ~keep_sidebar_focus:false m it.target
 
 let open_inline_modal (m : Model.t) kind =
   let modal = Model.inline_modal_for kind in
   let nav =
-    { m.nav with overlay = Some (Nav.Inline_action kind); filter_focused = false }
+    {
+      m.nav with
+      overlay = Some (Nav.Inline_action kind);
+      filter_focused = false;
+      sidebar_focused = false;
+      sidebar_open = close_drawer_if_floating m;
+    }
   in
   let drafts =
     let d0 = Drafts.set_focus false m.drafts in
@@ -654,7 +781,15 @@ let open_inline_modal (m : Model.t) kind =
 
 let open_palette (m : Model.t) mode =
   let palette = { Model.mode; query = ""; selected = 0 } in
-  let nav = { m.nav with overlay = Some Nav.Palette; filter_focused = false } in
+  let nav =
+    {
+      m.nav with
+      overlay = Some Nav.Palette;
+      filter_focused = false;
+      sidebar_focused = false;
+      sidebar_open = close_drawer_if_floating m;
+    }
+  in
   let drafts = Drafts.set_focus false m.drafts in
   let config = Config_store.cancel_edit_field m.config in
   let next = { m with nav; drafts; config; palette; inline_modal = None } in
@@ -695,6 +830,8 @@ let push_dive (m : Model.t) dive =
       pane_index = 0;
       zoomed = false;
       filter_focused = false;
+      sidebar_focused = false;
+      sidebar_open = close_drawer_if_floating m;
       dive_scroll_offset = 0;
     }
   in
@@ -842,12 +979,14 @@ let cycle_sub_tab (m : Model.t) dir =
           | Nav.Work ->
               let work = Work_store.cycle_tab dir m.work in
               let nav = { m.nav with pane_index = 0; zoomed = false } in
-              let next = { m with nav; work } in
+              let next = { m with nav; work } |> Model.sync_sidebar_cursor in
               (next, View_fetches.fetches_for_current_view next)
           | Nav.Knowledge ->
               let knowledge = Knowledge_store.cycle_tab dir m.knowledge in
               let nav = { m.nav with pane_index = 0; zoomed = false } in
-              let next = { m with nav; knowledge } in
+              let next =
+                { m with nav; knowledge } |> Model.sync_sidebar_cursor
+              in
               (next, View_fetches.fetches_for_current_view next)
           | Nav.Keepers ->
               let zoomed_keeper =
@@ -873,12 +1012,14 @@ let cycle_sub_tab (m : Model.t) dir =
           | Nav.Runtime ->
               let runtime = Runtime_store.cycle_tab dir m.runtime in
               let nav = { m.nav with pane_index = 0; zoomed = false } in
-              let next = { m with nav; runtime } in
+              let next =
+                { m with nav; runtime } |> Model.sync_sidebar_cursor
+              in
               (next, View_fetches.fetches_for_current_view next)
           | Nav.Infra ->
               let infra = Infra_store.cycle_tab dir m.infra in
               let nav = { m.nav with pane_index = 0; zoomed = false } in
-              let next = { m with nav; infra } in
+              let next = { m with nav; infra } |> Model.sync_sidebar_cursor in
               (next, View_fetches.fetches_for_current_view next)))
 
 let current_filter_query (m : Model.t) =
@@ -2127,7 +2268,9 @@ type enter_hint =
    (Update_input.dispatch_keeper_config_key, behind the same condition): Enter
    starts editing the selected field, or confirms the edit in progress. *)
 let enter_hint (m : Model.t) =
-  if Model.is_keeper_config_active m && not (Drafts.is_focused m.drafts) then
+  if Model.sidebar_has_focus m then
+    Enter_hint_dive
+  else if Model.is_keeper_config_active m && not (Drafts.is_focused m.drafts) then
     if Config_store.is_editing_field m.config then Enter_hint_confirm_field
     else Enter_hint_edit_field
   else
@@ -4981,9 +5124,27 @@ let apply_move (m : Model.t) dir =
         in
         ({ m with nav = { m.nav with help_scroll_offset } }, [])
     | Some (Nav.System_gate _) -> (m, [])
-    | None -> (
+    | None ->
+        if Model.sidebar_has_focus m then
+          match dir with
+          | Keymap.Up | Keymap.Down | Keymap.Page_up | Keymap.Page_down
+          | Keymap.Home | Keymap.End ->
+              move_sidebar m dir
+          | Keymap.Right -> (
+              match Nav.menu_item_of_index m.nav.sidebar_cursor with
+              | Some it when not (Nav.is_overlay_menu_target it.target) ->
+                  activate_sidebar_cursor m
+              | Some _ | None -> (m, []))
+          | Keymap.Left -> (m, [])
+        else (
         match dir with
-        | Keymap.Left -> cycle_sub_tab m Keymap.Prev
+        | Keymap.Left ->
+            if
+              Option.is_none (Model.active_dive m)
+              && Nav.equal_workspace m.nav.workspace Nav.Pulse
+              && Model.sidebar_visible m
+            then (enter_sidebar_focus m, [])
+            else cycle_sub_tab m Keymap.Prev
         | Keymap.Right -> cycle_sub_tab m Keymap.Next
         | Keymap.Up | Keymap.Down | Keymap.Page_up | Keymap.Page_down
         | Keymap.Home | Keymap.End -> (

@@ -8468,6 +8468,185 @@ let test_busy_enter_queues_and_steer_cuts_only_own_request () =
     (queued (one_request "late steer" cmds_g1));
   Alcotest.(check bool) "the late steer fallback warns" true (warned g1)
 
+let test_unified_navigation_sidebar_focus_ring_and_mouse () =
+  let t0 = Clock.Mono.of_ns 1_000_000_000L in
+  let m0 = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_ko () in
+  let step m msg = Update.step ~now:t0 m msg in
+  let press_key m k = step m (Msg.Key_event (key k)) in
+  let press_shift_tab m =
+    step m
+      (Msg.Key_event
+         { key = Keymap.Input.Tab; mods = { ctrl = false; alt = false; shift = true } })
+  in
+  let press_char m c = press_key m (Keymap.Input.Char c) in
+  (* 1. Wide docks sidebar automatically; Shift+Tab from pane 0 jumps straight left into Menu *)
+  Alcotest.(check bool) "Wide auto-docks left sidebar" true
+    (Model.sidebar_docked m0);
+  Alcotest.(check bool) "Body owns initial focus" true (Model.body_has_focus m0);
+  let m_sb, _ = press_shift_tab m0 in
+  Alcotest.(check bool) "Shift+Tab from pane 0 enters sidebar" true
+    m_sb.nav.sidebar_focused;
+  Alcotest.(check bool) "Body yields focus when sidebar focused" false
+    (Model.body_has_focus m_sb);
+  (* 2. Down in sidebar live-previews Work > Goals while keeping focus in sidebar *)
+  let m_goals, cmds_goals = press_key m_sb Keymap.Input.Down in
+  Alcotest.(check bool) "Live preview switches to Work workspace" true
+    (Nav.equal_workspace m_goals.nav.workspace Nav.Work);
+  Alcotest.(check bool) "Live preview lands on Goals tab" true
+    (Nav.equal_work_tab m_goals.work.active_tab Nav.Work_pipeline);
+  Alcotest.(check bool) "Focus remains in sidebar during arrow preview" true
+    m_goals.nav.sidebar_focused;
+  Alcotest.(check bool) "Live preview issues view fetches" true
+    (cmds_goals <> []);
+  (* 3. Enter in sidebar hands focus cleanly into Body pane 0 *)
+  let m_body, _ = press_key m_goals Keymap.Input.Enter in
+  Alcotest.(check bool) "Enter transfers focus to body" false
+    m_body.nav.sidebar_focused;
+  Alcotest.(check bool) "Body has focus after Enter" true
+    (Model.body_has_focus m_body);
+  Alcotest.(check int) "Body enters at pane 0" 0 m_body.nav.pane_index;
+  (* 4. System overlay item (Settings) does NOT pop modal on arrow hover; opens on Enter *)
+  let settings_idx = Nav.menu_item_index Nav.Menu_settings in
+  let m_before_sys =
+    {
+      m_sb with
+      nav = { m_sb.nav with sidebar_cursor = settings_idx - 1 };
+    }
+  in
+  let m_hover_sys, _ = press_key m_before_sys Keymap.Input.Down in
+  Alcotest.(check int) "Cursor lands on Settings item" settings_idx
+    m_hover_sys.nav.sidebar_cursor;
+  Alcotest.(check bool) "Hovering Settings does not pop modal" true
+    (Option.is_none m_hover_sys.nav.overlay);
+  let m_open_sys, _ = press_key m_hover_sys Keymap.Input.Enter in
+  Alcotest.(check bool) "Enter on Settings opens Settings overlay" true
+    (match m_open_sys.nav.overlay with Some (Nav.Settings _) -> true | _ -> false);
+  (* 5. 'b' focuses docked sidebar, 2nd 'b' collapses it; compact opens floating drawer *)
+  let m_b1, _ = press_char m0 "b" in
+  Alcotest.(check bool) "First 'b' focuses docked sidebar" true
+    m_b1.nav.sidebar_focused;
+  let m_b2, _ = press_char m_b1 "b" in
+  Alcotest.(check bool) "Second 'b' collapses docked sidebar" false
+    (Model.sidebar_visible m_b2);
+  let m_narrow = Model.initial ~cols:96 ~rows:28 () in
+  Alcotest.(check bool) "Narrow hides sidebar by default" false
+    (Model.sidebar_visible m_narrow);
+  let m_drawer, _ = press_char m_narrow "b" in
+  Alcotest.(check bool) "Narrow 'b' opens floating drawer" true
+    (Model.sidebar_drawer_open m_drawer && m_drawer.nav.sidebar_focused);
+  let m_esc_drawer, _ = press_key m_drawer Keymap.Input.Escape in
+  Alcotest.(check bool) "Esc closes compact floating drawer" false
+    (Model.sidebar_drawer_open m_esc_drawer || m_esc_drawer.nav.sidebar_focused);
+  (* 6. Ctrl+K Palette indexes all 21 screens including Artifacts and Goals *)
+  let m_pal =
+    {
+      m0 with
+      nav = { m0.nav with overlay = Some Nav.Palette };
+      palette = { mode = Model.Palette_commands; query = "Artifacts"; selected = 0 };
+    }
+  in
+  let pal_entries = Update_nav.palette_entries m_pal in
+  Alcotest.(check bool) "Ctrl+K finds first-class Artifacts route" true
+    (List.exists
+       (fun (e : Update_nav.palette_entry) ->
+         match e.action with
+         | Update_nav.Pal_menu_target (Nav.Menu_knowledge Nav.Knowledge_artifacts) -> true
+         | _ -> false)
+       pal_entries);
+  (* 7. Mouse click on Sidebar item navigates directly to Artifacts; clicking right pane focuses pane 1 *)
+  let sr = Option.get (Model.sidebar_rect m0) in
+  let art_idx = Nav.menu_item_index (Nav.Menu_knowledge Nav.Knowledge_artifacts) in
+  let art_vis_row = Model.sidebar_cursor_visual_row ~cursor:art_idx in
+  let click_x_1based = sr.x + 3 + 1 in
+  let click_y_1based = sr.y + 1 + art_vis_row + 1 in
+  let m_clicked_art, cmds_art =
+    step m0
+      (Msg.Mouse_event
+         (Keymap.Input.Left_press { col = click_x_1based; row = click_y_1based }))
+  in
+  Alcotest.(check bool) "Mouse click on Artifacts opens Knowledge > Artifacts" true
+    (Nav.equal_workspace m_clicked_art.nav.workspace Nav.Knowledge
+     && Nav.equal_knowledge_tab m_clicked_art.knowledge.active_tab
+          Nav.Knowledge_artifacts);
+  Alcotest.(check bool) "Mouse click hands focus to body" false
+    m_clicked_art.nav.sidebar_focused;
+  Alcotest.(check bool) "Mouse click triggers view fetches" true (cmds_art <> []);
+  let body_r = Model.body_rect m_clicked_art in
+  let right_col_1based = body_r.x + (body_r.w * 3 / 4) + 1 in
+  let body_row_1based = body_r.y + 4 + 1 in
+  let m_clicked_p1, _ =
+    step m_clicked_art
+      (Msg.Mouse_event
+         (Keymap.Input.Left_press
+            { col = right_col_1based; row = body_row_1based }))
+  in
+  Alcotest.(check int) "Clicking right half of 2-pane body focuses pane 1" 1
+    m_clicked_p1.nav.pane_index;
+  (* Clicking top-left [b] button toggles/focuses sidebar *)
+  let m_clicked_b, _ =
+    step m_clicked_p1
+      (Msg.Mouse_event (Keymap.Input.Left_press { col = 3; row = 1 }))
+  in
+  Alcotest.(check bool) "Clicking top-left [b] focuses sidebar" true
+    m_clicked_b.nav.sidebar_focused;
+  (* Review regression 1: resizing narrower while docked sidebar is focused
+     clears sidebar_focused and returns focus to body without trapping keys *)
+  let m_shrunk, _ = step m_clicked_b (Msg.Resize { cols = 100; rows = 30 }) in
+  Alcotest.(check bool) "Shrink <132 hides auto-docked sidebar" false
+    (Model.sidebar_visible m_shrunk);
+  Alcotest.(check bool) "Shrink <132 clears sidebar_focused" false
+    m_shrunk.nav.sidebar_focused;
+  Alcotest.(check bool) "Shrink <132 clears sidebar_has_focus" false
+    (Model.sidebar_has_focus m_shrunk);
+  Alcotest.(check bool) "Shrink <132 restores body_has_focus" true
+    (Model.body_has_focus m_shrunk);
+  let m_shrunk_right, _ =
+    step m_shrunk (Msg.Key_event (key Keymap.Input.Right))
+  in
+  Alcotest.(check bool) "After shrink, Right cycles Knowledge sub-tab normally" true
+    (Nav.equal_knowledge_tab m_shrunk_right.knowledge.active_tab
+       Nav.Knowledge_memory);
+  (* Review regression 2: Mouse Wheel over unfocused docked sidebar focuses it
+     and scrolls cleanly onto System overlay items (Settings) without snapping back *)
+  let m_infra_logs, _ =
+    Update_nav.navigate_menu_target m0 (Nav.Menu_infra Nav.Infra_activity_logs)
+  in
+  Alcotest.(check bool) "Unfocused docked sidebar on Infra > Logs" false
+    (Model.sidebar_has_focus m_infra_logs);
+  let sr_logs =
+    match Model.sidebar_rect m_infra_logs with
+    | Some r -> r
+    | None -> Alcotest.fail "expected docked sidebar rect on 140x40"
+  in
+  let m_wheel_settings, _ =
+    step m_infra_logs
+      (Msg.Mouse_event
+         (Keymap.Input.Wheel
+            {
+              dir = Keymap.Input.Wheel_down;
+              col = sr_logs.x + 3 + 1;
+              row = sr_logs.y + 3 + 1;
+            }))
+  in
+  Alcotest.(check bool) "Wheel over unfocused sidebar focuses sidebar" true
+    (Model.sidebar_has_focus m_wheel_settings);
+  Alcotest.(check int) "Wheel down from Infra Logs lands on Settings"
+    (Nav.menu_item_index Nav.Menu_settings)
+    m_wheel_settings.nav.sidebar_cursor;
+  Alcotest.(check bool) "Wheel onto Settings does not auto-pop modal" true
+    (Option.is_none m_wheel_settings.nav.overlay);
+  (* Review regression 3: Compact Auto_folded_pill click above footer does NOT
+     falsely focus composer when Model.composer_rect is None *)
+  let m_compact = Model.initial ~cols:85 ~rows:26 ~lang:Say.Lang_ko () in
+  Alcotest.(check bool) "Compact Pulse idle has no composer_rect" true
+    (Option.is_none (Model.composer_rect m_compact));
+  let m_compact_click, _ =
+    step m_compact
+      (Msg.Mouse_event (Keymap.Input.Left_press { col = 10; row = 24 }))
+  in
+  Alcotest.(check bool) "Click when composer auto-folded leaves composer unfocused"
+    false (Drafts.is_focused m_compact_click.drafts)
+
 let () =
   Alcotest.run "masc_tui_store"
     [
@@ -8573,6 +8752,8 @@ let () =
             `Quick test_wiki_index_reply_requests_selected_page;
           Alcotest.test_case "Infra changes follow the selected repository"
             `Quick test_infra_changes_follow_the_selected_repository;
+          Alcotest.test_case "Unified navigation: Left Sidebar, Tab focus ring, live preview, Palette & mouse"
+            `Quick test_unified_navigation_sidebar_focus_ring_and_mouse;
         ] );
       ( "keeper_context_and_cost"
       , [

@@ -1289,23 +1289,42 @@ let test_axis_a_screen_dive_matrix () =
             (tag ^ " pane_index in bounds")
             true
             (m'.nav.pane_index >= 0 && m'.nav.pane_index < panes_after);
-          (* Invariant 2: Tab / Shift+Tab exact cycling vs no-op *)
+          (* Invariant 2: Tab / Shift+Tab unified focus ring (Body panes <-> Sidebar) *)
+          let sb_vis_before = Model.sidebar_visible m in
           if String.equal kname "Tab" then begin
-            let expected =
-              if panes_before <= 1 then 0
-              else (m.nav.pane_index + 1) mod panes_before
-            in
-            Alcotest.(check int) (tag ^ " Tab pane_index") expected
-              m'.nav.pane_index
+            if m.nav.pane_index + 1 < panes_before then begin
+              Alcotest.(check int) (tag ^ " Tab pane_index")
+                (m.nav.pane_index + 1) m'.nav.pane_index;
+              Alcotest.(check bool) (tag ^ " Tab stays in body") false
+                m'.nav.sidebar_focused
+            end
+            else if sb_vis_before then
+              Alcotest.(check bool) (tag ^ " Tab wraps into visible sidebar") true
+                m'.nav.sidebar_focused
+            else begin
+              let expected = if panes_before <= 1 then 0 else 0 in
+              Alcotest.(check int) (tag ^ " Tab pane_index") expected
+                m'.nav.pane_index
+            end
           end;
           if String.equal kname "Shift+Tab" then begin
-            let expected =
-              if panes_before <= 1 then 0
-              else (m.nav.pane_index - 1 + panes_before) mod panes_before
-            in
-            Alcotest.(check int)
-              (tag ^ " Shift+Tab pane_index")
-              expected m'.nav.pane_index
+            if m.nav.pane_index > 0 then begin
+              Alcotest.(check int) (tag ^ " Shift+Tab pane_index")
+                (m.nav.pane_index - 1) m'.nav.pane_index;
+              Alcotest.(check bool) (tag ^ " Shift+Tab stays in body") false
+                m'.nav.sidebar_focused
+            end
+            else if sb_vis_before then
+              Alcotest.(check bool) (tag ^ " Shift+Tab jumps left into sidebar")
+                true m'.nav.sidebar_focused
+            else begin
+              let expected =
+                if panes_before <= 1 then 0 else panes_before - 1
+              in
+              Alcotest.(check int)
+                (tag ^ " Shift+Tab pane_index")
+                expected m'.nav.pane_index
+            end
           end;
           (* Invariant 3: Enter inside any Dive never pushes duplicate/nested dive *)
           if String.equal kname "Enter" && Option.is_some dive_before then
@@ -2349,7 +2368,12 @@ let test_journeys_tab_multipane_dives_safety () =
   let m_kw_sc, _ = step m_kw_p1 (mk_key Keymap.Input.Down) in
   Alcotest.(check bool) "J16 Wiki pane 1 Down scrolls detail_scroll_offset" true
     (m_kw_sc.knowledge.detail_scroll_offset > 0);
-  let m_kw_p0, _ = step m_kw_sc (mk_key Keymap.Input.Tab) in
+  let m_kw_sb, _ = step m_kw_sc (mk_key Keymap.Input.Tab) in
+  Alcotest.(check bool) "J16 Wiki pane 1 Tab enters docked sidebar" true
+    m_kw_sb.nav.sidebar_focused;
+  let m_kw_p0, _ = step m_kw_sb (mk_key Keymap.Input.Tab) in
+  Alcotest.(check bool) "J16 Wiki sidebar Tab returns to pane 0" true
+    ((not m_kw_p0.nav.sidebar_focused) && m_kw_p0.nav.pane_index = 0);
   let m_kw_dn, cmds_wiki = step m_kw_p0 (mk_key Keymap.Input.Down) in
   Alcotest.(check int) "J16 Wiki left move resets detail_scroll_offset to 0" 0
     m_kw_dn.knowledge.detail_scroll_offset;

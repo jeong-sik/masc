@@ -239,8 +239,8 @@ or `Ctrl+1`–`6` / `Alt+1`–`6` / `F1`–`F6`):
 | # | Workspace | What you find there |
 |---|---|---|
 | `1` | **Pulse** | Organization overview, KPI hero band, Attention queue, live fleet health, and 24h pulse |
-| `2` | **Work** | Four tabs: Pipeline (Goals & Verifications), Tasks & Schedules, Action Inbox (Asks, Tool Approvals, Gate), and Candle & Scorecard |
-| `3` | **Knowledge** | Three tabs: Board (Signal/All & Succession Chains), Wiki & Artifacts (`Space` toggles), and World Memory (Claims/Conflicts & Temporal Diff Scrubber) |
+| `2` | **Work** | Four tabs: Goals (Goals & Verifications), Tasks & Schedules, Action Inbox (Asks, Tool Approvals, Gate), and Candle & Scorecard |
+| `3` | **Knowledge** | Four tabs: Board (Signal/All & Succession Chains), Wiki, Artifacts, and World Memory (Claims/Conflicts & Temporal Diff Scrubber) |
 | `4` | **Keepers** | Fleet roster (`Companies`, `Attention`, `24h Wall`) and 1-hop 5-tab Keeper Dive (Chat & Stream, Memory, Work & Candle, Sandbox, in-place editable Config) |
 | `5` | **Runtime** | Four tabs: Quotas & Credits, Efficiency & Spend, Failover Lanes (cascades, `exact_lane_runs`, Fusion), and Tools & Connectors (Tools, Connectors, Browser Lane summary, MCP Clients) |
 | `6` | **Infra** | Three tabs: Sandboxes (MicroVM/SSH/Docker fleet + inspector), Repos & Changes, and Activity & Logs (live system logs + events) |

@@ -18,7 +18,8 @@ type work_tab =
 
 type knowledge_tab =
   | Knowledge_board
-  | Knowledge_wiki_artifacts
+  | Knowledge_wiki
+  | Knowledge_artifacts
   | Knowledge_memory
 
 type keepers_fleet_mode =
@@ -179,3 +180,44 @@ val equal_inline_action_kind : inline_action_kind -> inline_action_kind -> bool
 val equal_system_gate_kind : system_gate_kind -> system_gate_kind -> bool
 val equal_overlay : overlay -> overlay -> bool
 val equal_focus_scope : focus_scope -> focus_scope -> bool
+
+(** Unified Left Navigation Sidebar & Palette Screen SSOT.
+    Every reachable workspace, first-class sub-screen, and system overlay has
+    exactly one canonical entry so operators never hunt across hidden submodes. *)
+
+type menu_section =
+  | Sec_overview
+  | Sec_work
+  | Sec_knowledge
+  | Sec_fleet
+  | Sec_runtime
+  | Sec_infra
+  | Sec_system
+
+type menu_target =
+  | Menu_pulse
+  | Menu_work of work_tab
+  | Menu_knowledge of knowledge_tab
+  | Menu_keepers
+  | Menu_runtime of runtime_tab
+  | Menu_infra of infra_tab
+  | Menu_settings
+  | Menu_incidents
+  | Menu_queue_context
+  | Menu_help
+
+type menu_item = {
+  section : menu_section;
+  target : menu_target;
+  label : Say.t;
+  shortcut : string option;
+}
+
+val all_menu_items : menu_item list
+val menu_section_label : menu_section -> Say.t
+val menu_section_shortcut : menu_section -> string option
+val equal_menu_section : menu_section -> menu_section -> bool
+val equal_menu_target : menu_target -> menu_target -> bool
+val menu_item_index : menu_target -> int
+val menu_item_of_index : int -> menu_item option
+val is_overlay_menu_target : menu_target -> bool

@@ -226,7 +226,7 @@ The organization cockpit (`lib/masc_tui/screens_core/screen_pulse.ml`):
 
 Four sub-tabs (`[` / `]` or `←` / `→`):
 
-1. **Pipeline** (Goals & Verifications): side-by-side Goals list and
+1. **Goals** (Goals & Verifications): side-by-side Goals list and
    Verification requests (`Tab` switches pane; `Enter` dives into Goal or
    Verification detail; `Space` toggles Verification view between `Pending` and
    `All`; `n` opens `#goals` proposal modal).
@@ -277,25 +277,23 @@ Pending operator decisions appear in two places:
 
 ### `3` Knowledge
 
-Three sub-tabs (`[` / `]` or `←` / `→`):
+Four sub-tabs (`[` / `]` or `←` / `→`):
 
 1. **Board**: workspace posts with Signal-only vs All filtering and Succession
    Chain folding (`Space` expands/collapses a selected succession chain, or
    toggles Signal-only/All when no chain is selected; `Enter` opens Thread Dive;
    `n` opens new Board post modal; `y` copies selected post body).
-2. **Wiki & Artifacts**: shared `.masc/wiki/` index, lint status, and published
-   artifacts. Press **`Space`** to toggle between **Wiki** and **Artifacts**.
-   - **Wiki mode**: `Enter` opens Wiki Dive (Markdown body, outgoing links,
-     revision log), `e` opens inline Markdown edit modal (`PUT` with
-     `expected_revision`/`expected_sha256`), `Ctrl+E` opens in `$EDITOR`, `y`
-     copies Markdown body, `o` opens the first `http(s)` URL. A save toasts the
-     revision it wrote, as a warning when the journal or index write failed,
-     and the page is read again.
-   - **Artifacts mode**: `Enter` opens Artifact Dive (title, summary,
-     revision, MIME, size, SHA-256, author, created time, and the list of
-     published artifacts), `o` opens the Media & Artifact Viewer overlay, `y`
-     copies the body SHA-256 via OSC 52.
-3. **Memory**: World Memory overview, Claims/Conflicts, Librarian writer status
+2. **Wiki**: shared `.masc/wiki/` index and lint status. `Enter` opens Wiki
+   Dive (Markdown body, outgoing links, revision log), `e` opens inline
+   Markdown edit modal (`PUT` with `expected_revision`/`expected_sha256`),
+   `Ctrl+E` opens in `$EDITOR`, `y` copies Markdown body, `o` opens the first
+   `http(s)` URL. A save toasts the revision it wrote, as a warning when the
+   journal or index write failed, and the page is read again.
+3. **Artifacts**: published workspace artifacts. `Enter` opens Artifact Dive
+   (title, summary, revision, MIME, size, SHA-256, author, created time, and
+   the list of published artifacts), `o` opens the Media & Artifact Viewer
+   overlay, `y` copies the body SHA-256 via OSC 52.
+4. **Memory**: World Memory overview, Claims/Conflicts, Librarian writer status
    (`a` quick `resume`, `A` recovery act modal supporting `resume`, `adopt`,
    `restart_reading`, `skip_item`, `skip_line`), and the **Temporal Diff
    Scrubber** (`Space` cycles `24h` → `7d` → `30d`; `Enter` dives into
@@ -498,11 +496,11 @@ selected entry. Press `Space` to cycle severity filters (`All` / `ERR` / `WRN`
 
 ### Viewing Artifacts
 
-Open **`3` Knowledge → Wiki & Artifacts**, then press **`Space`** to switch
-from Wiki to **Artifacts**. Press `Enter` for Artifact Dive (title, summary,
-revision, MIME, size, SHA-256, author, created time, and the list of published
-artifacts), `o` to open the **Media & Artifact Viewer** overlay, and **`y`** to
-copy the **SHA-256** of the selected artifact's body via OSC 52.
+Open **`3` Knowledge → Artifacts** (via sub-tab cycling or `Ctrl+K` Palette).
+Press `Enter` for Artifact Dive (title, summary, revision, MIME, size, SHA-256,
+author, created time, and the list of published artifacts), `o` to open the
+**Media & Artifact Viewer** overlay, and **`y`** to copy the **SHA-256** of the
+selected artifact's body via OSC 52.
 
 > **Current boundary:** TUI v2.6 displays artifact metadata and copies SHA-256
 > hashes; inline HTML rendering and full HTML/file content export or copy are

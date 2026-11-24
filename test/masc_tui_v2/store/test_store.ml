@@ -4384,7 +4384,7 @@ let test_nav_fix4_knowledge_board_chains_and_wiki_clusters () =
     (List.map fst clusters);
   let kw0 =
     Knowledge_store.empty
-    |> Knowledge_store.set_tab Nav.Knowledge_wiki_artifacts
+    |> Knowledge_store.set_tab Nav.Knowledge_wiki
     |> Knowledge_store.apply_wiki_index ~observed_at:t0 idx
   in
   let disp_slugs =
@@ -5002,9 +5002,9 @@ let test_nav_left_right_subtab_cycling_and_guards () =
 
   let m_kn = { m0 with nav = { m0.nav with workspace = Nav.Knowledge } } in
   let m_kn1, _ = step m_kn (key Keymap.Input.Right) in
-  Alcotest.(check bool) "Knowledge Right -> Knowledge_wiki_artifacts" true
+  Alcotest.(check bool) "Knowledge Right -> Knowledge_wiki" true
     (Nav.equal_knowledge_tab m_kn1.knowledge.active_tab
-       Nav.Knowledge_wiki_artifacts);
+       Nav.Knowledge_wiki);
 
   let m_rt = { m0 with nav = { m0.nav with workspace = Nav.Runtime } } in
   let m_rt1, _ = step m_rt (key Keymap.Input.Right) in
@@ -5610,7 +5610,7 @@ let test_p2_grouped_top_header_row0_restoration () =
   in
   let kw0 =
     Knowledge_store.empty
-    |> Knowledge_store.set_tab Nav.Knowledge_wiki_artifacts
+    |> Knowledge_store.set_tab Nav.Knowledge_wiki
     |> Knowledge_store.apply_wiki_index ~observed_at:t0
          {
            pages_total = 12;
@@ -7822,7 +7822,7 @@ let test_wiki_index_reply_requests_selected_page () =
       m0 with
       nav = { m0.nav with workspace = Nav.Knowledge; dive_stack = [] };
       knowledge =
-        Knowledge_store.set_tab Nav.Knowledge_wiki_artifacts m0.knowledge;
+        Knowledge_store.set_tab Nav.Knowledge_wiki m0.knowledge;
     }
   in
   Alcotest.(check (list string))
@@ -7843,8 +7843,7 @@ let test_wiki_index_reply_requests_selected_page () =
   let on_artifacts =
     {
       on_wiki_tab with
-      knowledge =
-        Knowledge_store.toggle_wiki_artifacts_submode on_wiki_tab.knowledge;
+      knowledge = Knowledge_store.set_tab Nav.Knowledge_artifacts on_wiki_tab.knowledge;
     }
   in
   Alcotest.(check (list string))

@@ -836,8 +836,8 @@ and confirm_palette ~now (m : Model.t) =
           let m_closed = { m with nav = { m.nav with overlay = None } } in
           match entry.action with
           | Update_nav.Pal_keymap_action act -> execute_action ~now m_closed act
-          | Update_nav.Pal_switch_workspace ws ->
-              Update_nav.switch_workspace m_closed ws
+          | Update_nav.Pal_menu_target target ->
+              Update_nav.navigate_menu_target m_closed target
           | Update_nav.Pal_dive_keeper name ->
               Update_nav.push_dive m_closed
                 (Nav.Dive_keeper { name; tab = Nav.Keeper_chat })
@@ -1668,15 +1668,7 @@ and execute_action ~now (m : Model.t) action =
                           in
                           let next = { m with knowledge } in
                           (next, View_fetches.fetches_for_current_view next))
-                  | Nav.Knowledge_wiki_artifacts ->
-                      ( {
-                          m with
-                          nav = { m.nav with zoomed = false };
-                          knowledge =
-                            Knowledge_store.toggle_wiki_artifacts_submode
-                              m.knowledge;
-                        }
-                      , [] )
+                  | Nav.Knowledge_wiki | Nav.Knowledge_artifacts -> (m, [])
                   | Nav.Knowledge_memory ->
                       let knowledge =
                         Knowledge_store.cycle_memory_diff_window m.knowledge
@@ -1824,7 +1816,9 @@ and execute_action ~now (m : Model.t) action =
                   match m.knowledge.active_tab with
                   | Nav.Knowledge_board ->
                       Update_nav.open_inline_modal m Nav.Board_new_post
-                  | Nav.Knowledge_wiki_artifacts | Nav.Knowledge_memory ->
+                  | Nav.Knowledge_wiki
+                  | Nav.Knowledge_artifacts
+                  | Nav.Knowledge_memory ->
                       (m, []))
               | Nav.Work -> (
                   match m.work.active_tab with
@@ -2138,29 +2132,27 @@ and execute_action ~now (m : Model.t) action =
                         Option.map
                           (fun (p : Wire_knowledge.board_post) -> p.body)
                           (Knowledge_store.selected_post m.knowledge)
-                    | Nav.Knowledge_wiki_artifacts -> (
-                        match m.knowledge.wiki_artifacts_submode with
-                        | `Wiki -> (
-                            match Knowledge_store.selected_wiki_page m.knowledge with
-                            | None -> None
-                            | Some sel -> (
-                                match
-                                  Observed.to_option
-                                    (Knowledge_store.wiki_page_for ~slug:sel.slug
-                                       m.knowledge)
-                                with
-                                | Some detail
-                                  when not
-                                         (String.equal
-                                            (String.trim detail.body_markdown)
-                                            "") ->
-                                    Some detail.body_markdown
-                                | Some _ | None -> Some sel.slug))
-                        | `Artifacts ->
-                            Option.map
-                              (fun (a : Wire_knowledge.artifact_entry) ->
-                                a.body.sha256)
-                              (Knowledge_store.selected_artifact m.knowledge))
+                    | Nav.Knowledge_wiki -> (
+                        match Knowledge_store.selected_wiki_page m.knowledge with
+                        | None -> None
+                        | Some sel -> (
+                            match
+                              Observed.to_option
+                                (Knowledge_store.wiki_page_for ~slug:sel.slug
+                                   m.knowledge)
+                            with
+                            | Some detail
+                              when not
+                                     (String.equal
+                                        (String.trim detail.body_markdown) "")
+                              ->
+                                Some detail.body_markdown
+                            | Some _ | None -> Some sel.slug))
+                    | Nav.Knowledge_artifacts ->
+                        Option.map
+                          (fun (a : Wire_knowledge.artifact_entry) ->
+                            a.body.sha256)
+                          (Knowledge_store.selected_artifact m.knowledge)
                     | Nav.Knowledge_memory -> (
                         match Observed.to_option m.knowledge.world_memory with
                         | Some wm -> (
@@ -2397,20 +2389,18 @@ and execute_action ~now (m : Model.t) action =
                   | Nav.Infra_sandboxes | Nav.Infra_activity_logs -> (m, []))
               | Nav.Knowledge -> (
                   match m.knowledge.active_tab with
-                  | Nav.Knowledge_wiki_artifacts -> (
-                      match m.knowledge.wiki_artifacts_submode with
-                      | `Artifacts -> (
-                          match Knowledge_store.selected_artifact m.knowledge with
-                          | Some _ ->
-                              Update_nav.open_overlay m
-                                (Nav.System_gate Nav.Media_viewer)
-                          | None -> open_url_or_notice None)
-                      | `Wiki -> (
-                          match Knowledge_store.selected_wiki_page m.knowledge with
-                          | Some sel ->
-                              open_url_or_notice
-                                (wiki_external_url ~expected_slug:sel.slug ())
-                          | None -> open_url_or_notice None))
+                  | Nav.Knowledge_artifacts -> (
+                      match Knowledge_store.selected_artifact m.knowledge with
+                      | Some _ ->
+                          Update_nav.open_overlay m
+                            (Nav.System_gate Nav.Media_viewer)
+                      | None -> open_url_or_notice None)
+                  | Nav.Knowledge_wiki -> (
+                      match Knowledge_store.selected_wiki_page m.knowledge with
+                      | Some sel ->
+                          open_url_or_notice
+                            (wiki_external_url ~expected_slug:sel.slug ())
+                      | None -> open_url_or_notice None)
                   | Nav.Knowledge_board ->
                       let url_opt =
                         Option.bind

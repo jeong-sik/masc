@@ -600,11 +600,11 @@ let bindings : binding list =
         ~footer_priority:0 (mk_chord ~shift:true Input.Tab);
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Toggle_expand ~key_display:"Space"
-        ~hint_label:(Say.make ~ko:"전환" ~en:"Toggle")
+        ~hint_label:(Say.make ~ko:"토글" ~en:"Toggle")
         ~help_desc:
           (Say.make
-             ~ko:"컨텍스트 전환 (접기/펼치기 · Wiki↔산출물 · Diff 창 · 로그 레벨)"
-             ~en:"Context toggle (expand · Wiki↔Artifacts · Diff window · Log level)")
+             ~ko:"컨텍스트 토글 (접기/펼치기 · 필터 · Diff 창 · 로그 레벨)"
+             ~en:"Context toggle (expand/fold · filter · Diff window · Log level)")
         ~footer_priority:0 (bare_char ' ');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Create_new ~key_display:"n"

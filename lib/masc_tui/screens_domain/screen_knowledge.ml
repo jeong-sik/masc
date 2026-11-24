@@ -556,7 +556,7 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     draw_board_preview ~grid ~cache ~rect:preview_rect ~theme ~bp ~lang
       ~now_unix ~k selected_post ~focused:(Model.pane_focused model 1)
 
-(* --- 2. Wiki & Artifacts Sub-Tab (38/62 Split + Wide TOC Rail) --- *)
+(* --- 2 & 3. Wiki and Artifacts Sub-Tabs (38/62 Split + Wide TOC Rail) --- *)
 
 let wiki_source_badge ~lang = function
   | Wire_knowledge.Source_direct_experience ->
@@ -883,8 +883,8 @@ let draw_wiki_preview ~target_slug ~scroll ~grid ~cache ~(rect : Rect.t)
                     H.draw_observed_placeholder ~grid ~rect:content ~theme ~lang
                       k.wiki_index)))
 
-let render_wiki_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
-    ~(theme : Theme.t) ~bp grid =
+let render_wiki ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
+    ~bp grid =
   let lang = model.lang in
   let k = model.knowledge in
   let now_unix = model.freshness.last_wall_unix in
@@ -892,9 +892,6 @@ let render_wiki_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
     match Observed.to_option k.wiki_index with
     | Some idx -> idx.pages_total
     | None -> 0
-  in
-  let art_n =
-    match Observed.to_option k.artifacts with Some xs -> List.length xs | None -> 0
   in
   let lint_summary =
     match Observed.to_option k.wiki_lint with
@@ -951,9 +948,6 @@ let render_wiki_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
     | [ a; b ] -> (a, b)
     | _ -> (Rect.empty, rect)
   in
-  let is_wiki =
-    match k.wiki_artifacts_submode with `Wiki -> true | `Artifacts -> false
-  in
   let lint_hint_str =
     match lint_summary with
     | None ->
@@ -983,34 +977,16 @@ let render_wiki_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
           Printf.sprintf "%s (%d)"
             (Say.resolve lang (Say.make ~ko:"위키" ~en:"Wiki"))
             wiki_n;
-        active = is_wiki;
+        active = true;
         tone = Some Theme.Status_active;
         glyph = Some Glyph.Live_healthy;
-      };
-      {
-        H.label =
-          Printf.sprintf "%s (%d)"
-            (Say.resolve lang (Say.make ~ko:"아티팩트" ~en:"Artifacts"))
-            art_n;
-        active = not is_wiki;
-        tone = Some Theme.Status_ok;
-        glyph = Some Glyph.Tool_square;
-      };
-      {
-        H.label =
-          Say.resolve lang (Say.make ~ko:"[Space] 전환" ~en:"[Space] Switch");
-        active = false;
-        tone = Some Theme.Status_historical;
-        glyph = None;
       };
     ]
   in
   ignore
     (H.draw_pills ~grid ~rect:bar_rect ~theme ~right_hint:lint_hint_str
        mode_pills);
-  match k.wiki_artifacts_submode with
-  | `Wiki ->
-      if model.nav.zoomed then
+  if model.nav.zoomed then
         draw_wiki_preview ~target_slug:None ~scroll:k.detail_scroll_offset
           ~grid ~cache ~rect:body_rect ~theme
           ~bp ~lang ~k ~focused:(Model.body_has_focus model)
@@ -1246,8 +1222,34 @@ let render_wiki_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
         draw_wiki_preview ~target_slug:None ~scroll:k.detail_scroll_offset
           ~grid ~cache ~rect:right_rect ~theme ~bp ~lang ~k
           ~focused:(Model.pane_focused model 1)
-  | `Artifacts ->
-      let left_rect, right_rect =
+
+let render_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
+    ~(theme : Theme.t) ~bp grid =
+  let lang = model.lang in
+  let k = model.knowledge in
+  let art_n =
+    match Observed.to_option k.artifacts with Some xs -> List.length xs | None -> 0
+  in
+  let bar_rect, body_rect =
+    match Layout.split_v rect [ Layout.Fixed 1; Layout.Flex 1 ] with
+    | [ a; b ] -> (a, b)
+    | _ -> (Rect.empty, rect)
+  in
+  let pills =
+    [
+      {
+        H.label =
+          Printf.sprintf "%s (%d)"
+            (Say.resolve lang (Say.make ~ko:"산출물" ~en:"Artifacts"))
+            art_n;
+        active = true;
+        tone = Some Theme.Status_ok;
+        glyph = Some Glyph.Tool_square;
+      };
+    ]
+  in
+  ignore (H.draw_pills ~grid ~rect:bar_rect ~theme pills);
+  let left_rect, right_rect =
         Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.56
           ~top_ratio:0.54 bp body_rect
       in
@@ -2130,8 +2132,10 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
     match model.knowledge.active_tab with
     | Nav.Knowledge_board ->
         render_board ~model ~cache ~rect:body ~theme ~bp grid
-    | Nav.Knowledge_wiki_artifacts ->
-        render_wiki_artifacts ~model ~cache ~rect:body ~theme ~bp grid
+    | Nav.Knowledge_wiki ->
+        render_wiki ~model ~cache ~rect:body ~theme ~bp grid
+    | Nav.Knowledge_artifacts ->
+        render_artifacts ~model ~cache ~rect:body ~theme ~bp grid
     | Nav.Knowledge_memory ->
         render_memory ~model ~cache ~rect:body ~theme ~bp grid
 

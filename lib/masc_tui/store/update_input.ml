@@ -1568,27 +1568,24 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
                   in
                   open_memory_act_modal m ~keeper_default
               | _ -> (m, []))
-          | Nav.Knowledge_wiki_artifacts -> (
-              match m.knowledge.wiki_artifacts_submode with
-              | `Wiki -> (
-                  match Knowledge_store.selected_wiki_page m.knowledge with
-                  | None -> (m, [])
-                  | Some p ->
-                      if is_ctrl_e then
-                        ( Model.with_toast ~now ~level:Model.Toast_info
-                            (Say.make
-                               ~ko:("외부 편집기로 위키 열기: " ^ p.slug)
-                               ~en:("Opening wiki page in $EDITOR: " ^ p.slug))
-                            m
-                        , [
-                            Cmd.Open_editor_escape_hatch
-                              (Cmd.Edit_wiki_page p.slug);
-                          ] )
-                      else (
-                        match printable_char with
-                        | Some "e" -> open_wiki_edit_modal ~now m ~slug:p.slug
-                        | _ -> (m, [])))
-              | `Artifacts -> (m, []))
+          | Nav.Knowledge_wiki -> (
+              match Knowledge_store.selected_wiki_page m.knowledge with
+              | None -> (m, [])
+              | Some p ->
+                  if is_ctrl_e then
+                    ( Model.with_toast ~now ~level:Model.Toast_info
+                        (Say.make
+                           ~ko:("외부 편집기로 위키 열기: " ^ p.slug)
+                           ~en:("Opening wiki page in $EDITOR: " ^ p.slug))
+                        m
+                    , [
+                        Cmd.Open_editor_escape_hatch (Cmd.Edit_wiki_page p.slug);
+                      ] )
+                  else (
+                    match printable_char with
+                    | Some "e" -> open_wiki_edit_modal ~now m ~slug:p.slug
+                    | _ -> (m, [])))
+          | Nav.Knowledge_artifacts -> (m, [])
           | Nav.Knowledge_board -> (m, []))
       | Nav.Work -> (
           match m.work.active_tab with

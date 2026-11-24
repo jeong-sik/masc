@@ -1765,7 +1765,7 @@ let test_round1_local_clock_pills_and_compact_fit () =
   let g_w90, _ = render_full ~model:m_work_90 ~cols:90 ~rows:28 in
   assert_clean_grid ~label:"work_90x28_ko" g_w90;
   let sub_w90 = grid_row_text g_w90 1 in
-  assert_contains ~label:"work_90_symmetric_pill" ~needle:" 파이프라인 " sub_w90;
+  assert_contains ~label:"work_90_symmetric_pill" ~needle:" 목표 " sub_w90;
   assert_contains ~label:"work_90_candle_not_clipped" ~needle:"캔들·성과" sub_w90;
   assert_contains ~label:"work_90_compact_hint" ~needle:"[←→]" sub_w90;
   assert_not_contains ~label:"work_90_no_long_hint" ~needle:"탭 전환" sub_w90;

@@ -230,9 +230,12 @@ let fetches_for_dive ~force (m : Model.t) =
    keeps its own page in the same slot, so nothing is asked while one is
    open. *)
 let selected_wiki_page_reqs ~force (m : Model.t) =
-  match (Model.active_dive m, m.knowledge.wiki_artifacts_submode) with
-  | Some _, (`Wiki | `Artifacts) | None, `Artifacts -> []
-  | None, `Wiki -> (
+  match (Model.active_dive m, m.knowledge.active_tab) with
+  | Some _, _
+  | None, (Nav.Knowledge_board | Nav.Knowledge_artifacts | Nav.Knowledge_memory)
+    ->
+      []
+  | None, Nav.Knowledge_wiki -> (
       match Knowledge_store.selected_wiki_page m.knowledge with
       | None -> []
       | Some p ->
@@ -336,14 +339,15 @@ let fetches_for_workspace ~force (m : Model.t) =
                     limit = Some 50;
                     offset = None;
                   })
-      | Nav.Knowledge_wiki_artifacts ->
+      | Nav.Knowledge_wiki ->
           ([]
           |> add_if
                (needs_fetch ~force m.knowledge.wiki_index)
                (Cmd.Get_wiki_index { tag = None; source = None; sort = None })
-          |> add_if (needs_fetch ~force m.knowledge.wiki_lint) Cmd.Get_wiki_lint
-          |> add_if (needs_fetch ~force m.knowledge.artifacts) Cmd.Get_artifacts)
+          |> add_if (needs_fetch ~force m.knowledge.wiki_lint) Cmd.Get_wiki_lint)
           @ selected_wiki_page_reqs ~force m
+      | Nav.Knowledge_artifacts ->
+          [] |> add_if (needs_fetch ~force m.knowledge.artifacts) Cmd.Get_artifacts
       | Nav.Knowledge_memory ->
           let keeper_scoped_reqs =
             match m.knowledge.memory_diff_keeper with
@@ -538,8 +542,7 @@ let overlay_fetches (m : Model.t) =
 let selected_wiki_page_fetch (m : Model.t) =
   let wiki_tab_shown =
     Nav.equal_workspace m.nav.workspace Nav.Knowledge
-    && Nav.equal_knowledge_tab m.knowledge.active_tab
-         Nav.Knowledge_wiki_artifacts
+    && Nav.equal_knowledge_tab m.knowledge.active_tab Nav.Knowledge_wiki
   in
   if wiki_tab_shown then
     List.map

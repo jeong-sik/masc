@@ -130,7 +130,6 @@ type t = {
   expanded_succession_chains : String_set.t;
   active_thread :
     (Wire_knowledge.board_post * Wire_knowledge.board_comment list) Observed.t;
-  wiki_artifacts_submode : [ `Wiki | `Artifacts ];
   wiki_index : Wire_knowledge.wiki_index Observed.t;
   wiki_pages : Wire_knowledge.wiki_page_detail Observed.t String_map.t;
       (** One slot per page slug. *)
@@ -213,7 +212,6 @@ val next_memory_diagram_mode : memory_diagram_mode -> memory_diagram_mode
 
 val set_tab : Nav.knowledge_tab -> t -> t
 val cycle_tab : Keymap.cycle_dir -> t -> t
-val toggle_wiki_artifacts_submode : t -> t
 
 val toggle_signal_only : t -> t
 val set_board_sort : string -> t -> t

@@ -333,7 +333,7 @@ let observe_single_heartbeat_stimulus
          | None -> Stimulus_ask_missing answered.ask_id)
     | Keeper_event_queue.Bootstrap ->
       Log.Keeper.info
-        "turn entry: bootstrap stimulus consumed (keeper=%s)"
+        "turn entry: bootstrap stimulus observed (keeper=%s)"
         meta_after_triage.name;
       Stimulus_observed []
     | Keeper_event_queue.Connector_attention ca ->
@@ -361,7 +361,7 @@ let observe_single_heartbeat_stimulus
        | Ok None -> Stimulus_connector_missing ca.event_id
        | Ok (Some item) ->
          Log.Keeper.info
-           "turn entry: connector attention stimulus consumed event_id=%s (keeper=%s)"
+           "turn entry: connector attention stimulus observed event_id=%s (keeper=%s)"
            ca.event_id
            meta_after_triage.name;
          Stimulus_observed

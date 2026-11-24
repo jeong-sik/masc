@@ -1675,6 +1675,24 @@ let test_login_preflight_reports_structured_reasons_without_secrets () =
     (contains_sub ~sub:"secret_env_missing" rendered);
   Alcotest.(check bool) "preflight JSON names redirect_uri_origin_mismatch" true
     (contains_sub ~sub:"redirect_uri_origin_mismatch" rendered);
+  let malformed_redirect =
+    { Read.google = None
+    ; github =
+        Some
+          { Masc_domain.client_id = "github-id"
+          ; redirect_uri = "https://operator:" ^ sentinel_secret ^ "@masc.example/auth/github/callback"
+          ; client_secret_env = "TEST_GITHUB_SECRET_SET"
+          }
+    }
+  in
+  (match Server_account_login.clients_of_config ~getenv malformed_redirect with
+   | Error refusal ->
+     let message = Server_account_login.refusal_to_string refusal in
+     Alcotest.(check bool) "the boot refusal omits credentials from a malformed URL" false
+       (contains_sub ~sub:sentinel_secret message);
+     Alcotest.(check bool) "the boot refusal retains the malformed redirect code" true
+       (contains_sub ~sub:"redirect_uri_malformed" message)
+   | Ok _ -> Alcotest.fail "the malformed callback origin must be refused");
   let preflight_empty =
     Server_account_login.preflight_of_config
       ~getenv

@@ -3167,6 +3167,31 @@ let preview_return_to_and_http_diagnostic () =
       (Masc.Auth_preview.resolve_return_to (Some "/dashboard/keepers?tab=active")))
 ;;
 
+let cookie_diagnostic_uses_browser_origin () =
+  let check_origin label ~bind_host ~base_url expected =
+    let policy =
+      match
+        Server_request_authority.make_trust_policy
+          ~bind_host ~bind_port:8935 ~https_port:None ~explicit_base_url:base_url
+      with
+      | Ok policy -> policy
+      | Error error -> Alcotest.fail (Server_request_authority.trust_policy_error_to_string error)
+    in
+    let status =
+      Server_request_authority.projection_context policy
+      |> Server_login_http.cookie_transport_of_authority
+      |> Authz_browser_request.cookie_transport_code
+    in
+    Alcotest.(check string) label expected status
+  in
+  check_origin "local browser can use an HTTP loopback origin on a wildcard bind"
+    ~bind_host:"0.0.0.0" ~base_url:None "loopback_http_cookies";
+  check_origin "remote HTTP origin remains remote behind a loopback bind"
+    ~bind_host:"127.0.0.1" ~base_url:(Some "http://masc.example") "non_https_cookies_dropped";
+  check_origin "public HTTPS origin can use Secure cookies behind a loopback bind"
+    ~bind_host:"127.0.0.1" ~base_url:(Some "https://masc.example") "https_secure_cookies"
+;;
+
 let () =
   Alcotest.run
     "server_login_http"
@@ -3177,6 +3202,8 @@ let () =
             "preview return_to validation and loopback HTTP diagnostic"
             `Quick
             preview_return_to_and_http_diagnostic
+        ; Alcotest.test_case "cookie diagnostic uses the browser origin" `Quick
+            cookie_diagnostic_uses_browser_origin
         ; Alcotest.test_case "a PAT acts until it is revoked" `Quick a_pat_acts_until_it_is_revoked
         ; Alcotest.test_case "a person calls MCP" `Quick a_person_calls_mcp
         ; Alcotest.test_case "a person keeps Keepers over MCP" `Quick a_person_keeps_keepers_over_mcp

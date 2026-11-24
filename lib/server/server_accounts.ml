@@ -385,27 +385,6 @@ let run
       log_login_refusal refusal;
       Error (Login_client_refused refusal)
   in
-  (match login_clients with
-   | { Server_account_login.google = None; github = None } ->
-     Log.Server.warn
-       "multi-account login preflight: provider=google status=disabled reason=%s \
-        provider=github status=disabled reason=%s (the login routes answer 404 and nobody logs in)"
-       (Server_account_login.disabled_reason_code Server_account_login.Not_configured)
-       (Server_account_login.disabled_reason_code Server_account_login.Not_configured)
-   | { Server_account_login.google = None; github = Some _ } ->
-     Log.Server.info
-       "multi-account login preflight: provider=google status=disabled reason=%s provider=github \
-        status=enabled"
-       (Server_account_login.disabled_reason_code Server_account_login.Not_configured)
-   | { Server_account_login.google = Some _; github = None } ->
-     Log.Server.info
-       "multi-account login preflight: provider=google status=enabled provider=github \
-        status=disabled reason=%s"
-       (Server_account_login.disabled_reason_code Server_account_login.Not_configured)
-   | { Server_account_login.google = Some _; github = Some _ } ->
-     Log.Server.info
-       "multi-account login preflight: provider=google status=enabled provider=github \
-        status=enabled");
   let login = Server_account_login.routes ~clock ~zone login_clients in
   (* Said once, here: the page that stands in for the console names no reason
      to the browser, and the route is open to everyone, so a request does not
@@ -494,19 +473,33 @@ let run
       Ok ()
   in
   (match login_clients with
+   | { Server_account_login.google = None; github = None } ->
+     Log.Server.warn
+       "multi-account login preflight: provider=google status=disabled reason=%s \
+        provider=github status=disabled reason=%s (the login routes answer 404 and nobody logs in)"
+       (Server_account_login.disabled_reason_code Server_account_login.Not_configured)
+       (Server_account_login.disabled_reason_code Server_account_login.Not_configured)
+   | { Server_account_login.google = None; github = Some _ } ->
+     Log.Server.info
+       "multi-account login preflight: provider=google status=disabled reason=%s provider=github \
+        status=enabled"
+       (Server_account_login.disabled_reason_code Server_account_login.Not_configured)
+   | { Server_account_login.google = Some _; github = None } ->
+     Log.Server.info
+       "multi-account login preflight: provider=google status=enabled provider=github \
+        status=disabled reason=%s"
+       (Server_account_login.disabled_reason_code Server_account_login.Not_configured)
+   | { Server_account_login.google = Some _; github = Some _ } ->
+     Log.Server.info
+       "multi-account login preflight: provider=google status=enabled provider=github \
+        status=enabled");
+  (match login_clients with
    | { Server_account_login.google = None; github = None } -> ()
    | { Server_account_login.google = Some _; github = Some _ | None }
    | { Server_account_login.google = None; github = Some _ } ->
-     let projected = Server_request_authority.projection_context trust_policy in
-     let scheme =
-       match Server_request_authority.scheme projected with
-       | Server_request_authority.Https -> `Https
-       | Server_request_authority.Http -> `Http
-     in
      let transport =
-       Authz_browser_request.cookie_transport_status
-         ~scheme
-         ~is_loopback:(Server_request_authority.listener_is_loopback projected)
+       Server_request_authority.projection_context trust_policy
+       |> Server_login_http.cookie_transport_of_authority
      in
      (match Authz_browser_request.cookie_transport_warning transport with
       | None -> ()

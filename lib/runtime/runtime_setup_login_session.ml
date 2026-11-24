@@ -467,48 +467,51 @@ let run_with interpreter t ~saved_login ~on_auth_hint ~env ~child_env ~cwd ~argv
        byte at most sixfold. This is a wire-frame bound, never a login budget. *)
     let reader = Eio.Buf_read.of_flow ~max_size:(6 * 65536 + 1024) stdout_r in
     let screen = if terminal then Some (terminal_screen ()) else None in
-    let seen_urls = Hashtbl.create 4 in
-    let seen_codes = Hashtbl.create 4 in
-    let last_auth_url = ref None in
-    let emit_hints raw =
-      let urls, codes = extract_urls_and_codes raw in
-      List.iter
-        (fun url ->
-          if not (Hashtbl.mem seen_urls url) then (
-            Hashtbl.add seen_urls url ();
-            last_auth_url := Some url;
-            on_auth_hint (Auth_url { url }))
-          else if Option.is_none !last_auth_url then
-            last_auth_url := Some url)
-        urls;
-      List.iter
-        (fun code ->
-          if not (Hashtbl.mem seen_codes code) then (
-            Hashtbl.add seen_codes code ();
-            on_auth_hint (Device_code { code; verification_uri = !last_auth_url })))
-        codes
+    let emit_hints =
+      match on_auth_hint with
+      | None -> fun _ -> ()
+      | Some on_auth_hint ->
+        let seen_urls = Hashtbl.create 4 in
+        let seen_codes = Hashtbl.create 4 in
+        let last_auth_url = ref None in
+        fun raw ->
+          let urls, codes = extract_urls_and_codes raw in
+          List.iter
+            (fun url ->
+              if not (Hashtbl.mem seen_urls url) then (
+                Hashtbl.add seen_urls url ();
+                last_auth_url := Some url;
+                on_auth_hint (Auth_url { url })))
+            urls;
+          List.iter
+            (fun code ->
+              if not (Hashtbl.mem seen_codes code) then (
+                Hashtbl.add seen_codes code ();
+                on_auth_hint (Device_code { code; verification_uri = !last_auth_url })))
+            codes
     in
     let stdout_hint_buf = Buffer.create 256 in
     let stderr_hint_buf = Buffer.create 256 in
     let feed_pipe_hints buf text =
-      Buffer.add_string buf text;
-      let content = Buffer.contents buf in
-      match String.rindex_opt content '\n' with
-      | Some nl ->
-        let completed = String.sub content 0 (nl + 1) in
-        let tail = String.sub content (nl + 1) (String.length content - nl - 1) in
-        Buffer.clear buf;
-        if String.length tail <= max_pipe_hint_buffer then Buffer.add_string buf tail;
-        emit_hints completed;
-        let tlen = String.length tail in
-        if tlen > 0 && is_token_separator tail.[tlen - 1] then emit_hints tail
-      | None ->
-        let clen = String.length content in
-        if clen > max_pipe_hint_buffer then (
+      if Option.is_some on_auth_hint then (
+        Buffer.add_string buf text;
+        let content = Buffer.contents buf in
+        match String.rindex_opt content '\n' with
+        | Some nl ->
+          let completed = String.sub content 0 (nl + 1) in
+          let tail = String.sub content (nl + 1) (String.length content - nl - 1) in
           Buffer.clear buf;
-          emit_hints content)
-        else if clen > 0 && is_token_separator content.[clen - 1] then
-          emit_hints content
+          if String.length tail <= max_pipe_hint_buffer then Buffer.add_string buf tail;
+          emit_hints completed;
+          let tlen = String.length tail in
+          if tlen > 0 && is_token_separator tail.[tlen - 1] then emit_hints tail
+        | None ->
+          let clen = String.length content in
+          if clen > max_pipe_hint_buffer then (
+            Buffer.clear buf;
+            emit_hints content)
+          else if clen > 0 && is_token_separator content.[clen - 1] then
+            emit_hints content)
     in
     let flush_pipe_hints () =
       let flush buf =
@@ -577,7 +580,7 @@ let run_with interpreter t ~saved_login ~on_auth_hint ~env ~child_env ~cwd ~argv
   | Yojson.Json_error _ | Eio.Buf_read.Buffer_limit_exceeded -> Error Transport_failed
 ;;
 
-let run ?saved_login ?(on_auth_hint = fun (_ : auth_hint) -> ()) t ~env ~child_env ~cwd ~argv ~terminal ~is_closed ~on_ready ~on_input_ready ~on_output =
+let run ?saved_login ?on_auth_hint t ~env ~child_env ~cwd ~argv ~terminal ~is_closed ~on_ready ~on_input_ready ~on_output =
   let binary =
     try Unix.realpath Sys.executable_name with Unix.Unix_error _ | Sys_error _ -> Sys.executable_name
   in

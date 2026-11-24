@@ -148,12 +148,11 @@ let refusal_to_string refusal =
         redirect_origin
         Env_config_core.http_base_url_env_key
         base_url_origin
-    | Redirect_not_read { provider; redirect_uri } ->
+    | Redirect_not_read { provider; redirect_uri = _ } ->
       Printf.sprintf
-        "the redirect_uri of the %s login client of config.json (%S) is not a scheme, a host, an \
-         optional port and a path, with nothing else before the path"
+        "the redirect_uri of the %s login client of config.json was refused: %s"
         (provider_name provider)
-        redirect_uri
+        (disabled_reason_detail reason)
   in
   Printf.sprintf "[%s] %s" code detail
 ;;
@@ -348,7 +347,7 @@ let preflight_to_json { google; github } =
 
 let draw_bytes = 32
 
-let routes ~clock ~zone { google; github } =
+let routes ~clock ~zone ({ google; github } : clients) =
   { Login_routes.zone
   ; transactions = Oidc_login_transaction.create ()
   ; google

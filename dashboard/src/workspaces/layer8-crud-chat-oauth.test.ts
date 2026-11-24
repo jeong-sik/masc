@@ -371,6 +371,7 @@ candidates = ["safe.model"]
     const previewResponses: ((response: Response) => void)[] = []
     const pendingReads: ((response: Response) => void)[] = []
     let delayRead = false
+    let readUnavailable = false
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
       if (url === '/api/v1/runtime/config/raw/preview') {
@@ -381,6 +382,7 @@ candidates = ["safe.model"]
           saves.push(JSON.parse(String(init.body)))
           return jsonResponse({ ok: true })
         }
+        if (readUnavailable) return jsonResponse({ error: 'fixture source offline' }, 503)
         if (delayRead) return new Promise<Response>((resolve) => { pendingReads.push(resolve) })
         return jsonResponse(source)
       }
@@ -458,6 +460,15 @@ candidates = ["safe.model"]
       expected_source_path: source.path,
       expected_source_revision: source.source_revision,
     }]))
+
+    readUnavailable = true
+    button('강제 프로브').click()
+    await vi.waitFor(() => expect(container.textContent).toContain('runtime.toml 원본 조회 실패'))
+    expect(diff()).toBeNull()
+    readUnavailable = false
+    button('강제 프로브').click()
+    await vi.waitFor(() => expect(container.textContent).not.toContain('runtime.toml 원본 조회 실패'))
+    expect(container.textContent).toContain(source.source_revision.slice(0, 12))
   })
 
   it('(B) Chat 3-block toggles (Alt+T Thinking, Tools summary/full/hidden, Memory & Autonomous hidden/shown) render structured collapsible cards', async () => {
@@ -962,6 +973,63 @@ candidates = ["safe.model"]
     await flushUi(20)
     const signInLink = container.querySelector('[data-testid="multi-account-signin-link"]') as HTMLAnchorElement
     expect(signInLink.getAttribute('href')).toBe('/?return_to=%2Fdashboard%23account')
+  })
+
+  it('switching Keepers cancels the old OAuth flow and ignores a late attached-tools read', async () => {
+    const popup = { closed: false, location: { href: '' }, close: vi.fn() }
+    vi.spyOn(window, 'open').mockReturnValue(popup as unknown as Window)
+    let delayAlpha = false
+    let finishAlpha: ((response: Response) => void) | undefined
+    const reads: string[] = []
+    const provider = (name: string) => ({ provider: 'slack', provider_label: name, attached: false, enabled: true })
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/v1/gate/keepers') return jsonResponse({ keepers: [{ name: 'alpha' }, { name: 'beta' }] })
+      if (url.startsWith('/api/v1/keepers/oauth/attached-tools?')) {
+        const keeper = new URL(url, window.location.origin).searchParams.get('keeper')!
+        reads.push(keeper)
+        if (keeper === 'alpha' && delayAlpha) return new Promise<Response>((resolve) => { finishAlpha = resolve })
+        return jsonResponse({ providers: [provider(`provider-${keeper}`)] })
+      }
+      if (url === '/api/v1/keepers/alpha/oauth-login') {
+        return jsonResponse({ authorize_url: 'https://example.invalid/authorize', attempt_id: 'attempt-alpha' })
+      }
+      if (url.startsWith('/api/v1/tool-metrics/series')) return jsonResponse({ buckets: [], total: {} })
+      return jsonResponse({})
+    }) as typeof fetch
+    const click = (text: string) => {
+      const found = [...container.querySelectorAll('button')].find((b) => b.textContent?.trim() === text)
+      if (!found) throw new Error(`Missing button: ${text}`)
+      found.click()
+    }
+    render(html`<${RuntimeWorkspace} subroute="tools" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await vi.waitFor(() => {
+      const tab = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('Keeper OAuth'))
+      if (!tab) throw new Error('OAuth tab not ready')
+      tab.click()
+    })
+    await vi.waitFor(() => expect(container.textContent).toContain('provider-alpha'))
+    click('OAuth 연결')
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="tools-oauth-active-flow"]')).not.toBeNull())
+    delayAlpha = true
+    click('조회')
+    await vi.waitFor(() => expect(finishAlpha).toBeDefined())
+
+    const select = container.querySelector<HTMLSelectElement>('select[aria-label="OAuth 대상 Keeper"]')!
+    select.value = 'beta'
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+    await vi.waitFor(() => expect(container.textContent).toContain('provider-beta'))
+    finishAlpha!(jsonResponse({ providers: [provider('stale-provider-alpha')] }))
+    window.dispatchEvent(new MessageEvent('message', {
+      origin: window.location.origin,
+      data: { type: 'masc:oauth-complete', ok: true, keeper: 'alpha', provider: 'slack' },
+    }))
+    await flushUi()
+    expect(popup.close).toHaveBeenCalledOnce()
+    expect(container.querySelector('[data-testid="tools-oauth-active-flow"]')).toBeNull()
+    expect(container.textContent).toContain('provider-beta')
+    expect(container.textContent).not.toContain('stale-provider-alpha')
+    expect(reads).toEqual(['alpha', 'alpha', 'beta'])
   })
 
   it('(C-4) Keeper OAuth edge cases: shell groups[] fallback, postMessage ok:false rejection, and GitHub SSE EOF without complete fails cleanly', async () => {

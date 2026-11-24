@@ -48,6 +48,7 @@ import {
 } from './types'
 
 type ToolsSubSection = 'catalog' | 'skills' | 'connectors' | 'oauth' | 'clients'
+type OAuthTarget = { readonly keeper: string; readonly epoch: number }
 
 interface SkillSummaryItem {
   readonly identity: { readonly source_id: string; readonly package_id: string; readonly name: string }
@@ -149,9 +150,39 @@ export function ToolsTab(_props: WorkspaceViewProps) {
   const [clientBusy, setClientBusy] = useState(false)
   const oauthFlowRef = useRef<KeeperOAuthFlowHandle | null>(null)
 
-  useEffect(() => () => {
-    oauthFlowRef.current?.cancel()
-  }, [])
+  const selectedOAuthTarget = useRef<OAuthTarget | null>(null)
+  const oauthRead = useRef<AbortController | null>(null)
+
+  const isCurrentOAuthTarget = (target: OAuthTarget | null) =>
+    target !== null && target === selectedOAuthTarget.current && target.epoch === sessionEpoch.peek()
+
+  const selectOAuthKeeper = (name: string) => {
+    const keeper = name.trim()
+    const previous = selectedOAuthTarget.current
+    if (!previous || previous.keeper !== keeper || previous.epoch !== epoch) {
+      selectedOAuthTarget.current = { keeper, epoch }
+      oauthFlowRef.current?.cancel()
+      oauthRead.current?.abort()
+      setActiveOAuthFlow(null)
+      setClientDrawer(null)
+      setClientBusy(false)
+      setOauthProviders([])
+      setOauthCallbackUrl(null)
+      setOauthLoading(false)
+      setBanner(null)
+    }
+    setOauthKeeper(name)
+  }
+
+  useEffect(() => {
+    selectOAuthKeeper('')
+    setKeeperOptions([])
+    return () => {
+      selectedOAuthTarget.current = null
+      oauthFlowRef.current?.cancel()
+      oauthRead.current?.abort()
+    }
+  }, [epoch])
 
   const sinceHours = win === '24h' ? 24 : win === '7d' ? 168 : 720
   const bucket = win === '24h' ? 'hour' : 'day'
@@ -231,8 +262,8 @@ export function ToolsTab(_props: WorkspaceViewProps) {
     } else if (section === 'oauth') {
       let cancelled = false
       void (async () => {
-        let targetKeeper = oauthKeeper.trim()
-        if (keeperOptions.length === 0) {
+        let targetKeeper = selectedOAuthTarget.current?.keeper ?? ''
+        if (keeperOptions.length === 0 || !targetKeeper) {
           const seen = new Set<string>()
           const names: string[] = []
           const addName = (raw: unknown) => {
@@ -272,11 +303,12 @@ export function ToolsTab(_props: WorkspaceViewProps) {
             }
           }
 
+          targetKeeper = selectedOAuthTarget.current?.keeper ?? ''
           if (names.length > 0) {
             setKeeperOptions(names)
             if (!targetKeeper || !names.includes(targetKeeper)) {
               targetKeeper = names[0]!
-              setOauthKeeper(targetKeeper)
+              selectOAuthKeeper(targetKeeper)
             }
           }
         }
@@ -289,17 +321,23 @@ export function ToolsTab(_props: WorkspaceViewProps) {
       }
     }
     return undefined
-  }, [section])
+  }, [section, epoch])
 
   const loadKeeperOAuth = async (keeperName: string) => {
-    if (!keeperName.trim()) return
+    const target = selectedOAuthTarget.current
+    if (!target?.keeper || target.keeper !== keeperName.trim() || !isCurrentOAuthTarget(target)) return
+    oauthRead.current?.abort()
+    const request = new AbortController()
+    oauthRead.current = request
     setOauthLoading(true)
     const res = await apiGet<{
       readonly providers?: readonly KeeperOAuthProviderRow[]
       readonly callback?: { readonly url?: string }
     }>(
-      `/api/v1/keepers/oauth/attached-tools?keeper=${encodeURIComponent(keeperName.trim())}`,
+      `/api/v1/keepers/oauth/attached-tools?keeper=${encodeURIComponent(target.keeper)}`,
+      { signal: request.signal },
     )
+    if (request.signal.aborted || !isCurrentOAuthTarget(target)) return
     setOauthLoading(false)
     if (res.ok) {
       setOauthProviders(res.value.providers ?? [])
@@ -510,34 +548,30 @@ export function ToolsTab(_props: WorkspaceViewProps) {
       setBanner({ kind: 'err', text: '먼저 대상 Keeper를 선택하세요.' })
       return
     }
+    const target = selectedOAuthTarget.current
+    if (!target || target.keeper !== keeper || !isCurrentOAuthTarget(target)) return
     oauthFlowRef.current?.cancel()
     setBanner(null)
     const label = providerRow.provider_label ?? providerRow.provider
-    if (providerRow.provider === 'github') {
-      oauthFlowRef.current = startKeeperGithubDeviceFlow({
-        keeper,
-        providerLabel: label,
-        onUpdate: (st) => setActiveOAuthFlow(st),
-        onSettled: (ok) => {
-          if (ok) void loadKeeperOAuth(keeper)
-        },
-      })
-      return
-    }
-    oauthFlowRef.current = startKeeperOAuthPopupFlow({
+    const options = {
       keeper,
-      provider: providerRow.provider,
       providerLabel: label,
-      onUpdate: (st) => setActiveOAuthFlow(st),
-      onSettled: (ok) => {
-        if (ok) void loadKeeperOAuth(keeper)
+      onUpdate: (state: ActiveKeeperOAuthFlow) => {
+        if (isCurrentOAuthTarget(target)) setActiveOAuthFlow(state)
       },
-    })
+      onSettled: (ok: boolean) => {
+        if (ok && isCurrentOAuthTarget(target)) void loadKeeperOAuth(keeper)
+      },
+    }
+    oauthFlowRef.current = providerRow.provider === 'github'
+      ? startKeeperGithubDeviceFlow(options)
+      : startKeeperOAuthPopupFlow({ ...options, provider: providerRow.provider })
   }
 
   const handleSaveOAuthClient = async (ev: Event) => {
     ev.preventDefault()
     if (!clientDrawer || !clientDrawer.clientId.trim()) return
+    const target = selectedOAuthTarget.current
     setClientBusy(true)
     const res = await saveKeeperOAuthClient({
       provider: clientDrawer.provider,
@@ -545,6 +579,7 @@ export function ToolsTab(_props: WorkspaceViewProps) {
       clientSecret: clientDrawer.clientSecret,
       scopes: clientDrawer.scopes,
     })
+    if (!isCurrentOAuthTarget(target)) return
     setClientBusy(false)
     if (!res.ok) {
       setBanner({ kind: 'err', text: `OAuth 앱 등록 실패: ${res.error.message}` })
@@ -556,11 +591,13 @@ export function ToolsTab(_props: WorkspaceViewProps) {
   }
 
   const handleOAuthSwitch = async (providerId: string, enabled: boolean) => {
+    const target = selectedOAuthTarget.current
     const res = await apiMutate<unknown>(
       'POST',
       `/api/v1/keepers/${encodeURIComponent(oauthKeeper)}/identity-switch`,
       { provider: providerId, enabled },
     )
+    if (!isCurrentOAuthTarget(target)) return
     if (!res.ok) {
       setBanner({ kind: 'err', text: `스위치 전환 실패: ${res.error.message}` })
       return
@@ -569,7 +606,9 @@ export function ToolsTab(_props: WorkspaceViewProps) {
   }
 
   const handleOAuthDisconnect = async (providerId: string) => {
+    const target = selectedOAuthTarget.current
     const res = await disconnectKeeperOAuth(oauthKeeper, providerId)
+    if (!isCurrentOAuthTarget(target)) return
     if (!res.ok) {
       setBanner({ kind: 'err', text: `OAuth 연결 해제 실패: ${res.error.message}` })
       return
@@ -830,7 +869,7 @@ export function ToolsTab(_props: WorkspaceViewProps) {
                     value=${oauthKeeper}
                     onChange=${(e: Event) => {
                       const next = (e.target as HTMLSelectElement).value
-                      setOauthKeeper(next)
+                      selectOAuthKeeper(next)
                       void loadKeeperOAuth(next)
                     }}
                     style=${{ padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
@@ -844,7 +883,7 @@ export function ToolsTab(_props: WorkspaceViewProps) {
                     aria-label="OAuth 대상 Keeper"
                     placeholder="Keeper 이름 입력…"
                     value=${oauthKeeper}
-                    onInput=${(e: Event) => setOauthKeeper((e.target as HTMLInputElement).value)}
+                    onInput=${(e: Event) => selectOAuthKeeper((e.target as HTMLInputElement).value)}
                     style=${{ padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
                   />
                 `}

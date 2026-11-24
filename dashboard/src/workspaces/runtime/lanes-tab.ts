@@ -119,7 +119,7 @@ function statusPillStyle(status: string) {
 export function LanesTab(props: WorkspaceViewProps) {
   const [mode, setMode] = useState<LanesMode>(() => resolveInitialMode(props.entityTab))
   const [probeFilter, setProbeFilter] = useState<'all' | 'active_lane' | 'outside_lane'>('all')
-  const [banner, setBanner] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+  const [banner, setBanner] = useState<{ kind: 'ok' | 'err' | 'lane-source-error'; text: string } | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
 
   // Failover inline routing/assignment form state
@@ -209,7 +209,11 @@ export function LanesTab(props: WorkspaceViewProps) {
       readonly path?: string
     }>('/api/v1/runtime/config/raw', { signal: read.signal }).then((res) => {
       if (read.signal.aborted || !isEpochCurrent(readEpoch)) return
-      if (res.ok && typeof res.value.source_revision === 'string') {
+      if (!res.ok) {
+        setBanner({ kind: 'lane-source-error', text: `runtime.toml 원본 조회 실패: ${res.error.message}` })
+        return
+      }
+      if (typeof res.value.source_revision === 'string') {
         setSourceRevision(res.value.source_revision)
         if (typeof res.value.source_text === 'string' && typeof res.value.path === 'string') {
           setRawConfig({
@@ -219,8 +223,11 @@ export function LanesTab(props: WorkspaceViewProps) {
             epoch: readEpoch,
             signal: read.signal,
           })
+          setBanner((previous) => previous?.kind === 'lane-source-error' ? null : previous)
+          return
         }
       }
+      setBanner({ kind: 'lane-source-error', text: 'runtime.toml 원본의 경로, 리비전 또는 내용을 받지 못했습니다.' })
     })
   }
 
@@ -750,7 +757,7 @@ export function LanesTab(props: WorkspaceViewProps) {
       ${banner && html`
         <div
           role="status"
-          class=${banner.kind === 'err' ? 'ap-error' : 'wka-card'}
+          class=${banner.kind === 'ok' ? 'wka-card' : 'ap-error'}
           style=${banner.kind === 'ok' ? { borderColor: 'var(--ok-border)', background: 'var(--ok-soft)', color: 'var(--ok-fg)' } : undefined}
         >
           ${banner.text}

@@ -1013,8 +1013,11 @@ let close_tool_block tool =
 (* A provider can emit text after a tool block closes, before the tool runs.
    That text takes display precedence while it is open. A later provider
    scope starts after the earlier tool batch has returned. *)
+let tool_from_earlier_scope ~stream_scope tool =
+  Option.exists (fun scope -> scope < stream_scope) tool.stream_scope
+
 let note_tool_during_model_output ~stream_scope tool =
-  if Option.exists (fun scope -> scope < stream_scope) tool.stream_scope then
+  if tool_from_earlier_scope ~stream_scope tool then
     retire_pending_tool tool
   else
     match tool.tool_state with
@@ -1345,9 +1348,18 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
                   }
                 in
                 let tools =
-                  List.filter
-                    (fun (c : active_tool_call) ->
-                      not (String.equal c.tool_use_id tool_use_id))
+                  List.filter_map
+                    (fun tool ->
+                      if String.equal tool.tool_use_id tool_use_id then None
+                      else
+                        let tool =
+                          if Option.exists
+                               (fun stream_scope -> tool_from_earlier_scope ~stream_scope tool)
+                               stream_scope
+                          then retire_pending_tool tool
+                          else tool
+                        in
+                        Some tool)
                     prev.tools
                   @ [ entry ]
                 in

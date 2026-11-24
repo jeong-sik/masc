@@ -15814,6 +15814,12 @@ let test_live_chat_activity_uses_open_content_and_tool_receipts () =
     (Phase_tool_waiting "Read") (stop trailing_text 2);
   check_phase "fresh content can follow an unadmitted tool in the next response"
     Phase_thinking (content args_ended ~scope:3 ~block:1 "thinking" "observed");
+  let next_tool = apply_json args_ended
+      {|{"type":"TOOL_CALL_START","toolStreamScope":3,"toolCallBlockIndex":1,"toolCallName":"Write"}|} in
+  check_phase "a tool-only response also retires the earlier unadmitted tool"
+    Phase_awaiting_turn
+    (custom next_tool "KEEPER_TOOL_RESULT_READY"
+       {|{"toolStreamScope":3,"toolCallBlockIndex":1,"executionId":"exec-write"}|});
   let settled = custom args_ended "KEEPER_TOOL_RESULT_READY"
       {|{"toolStreamScope":2,"toolCallBlockIndex":2,"executionId":"exec-read"}|} in
   check_phase "the matching tool result clears the tool activity" Phase_awaiting_turn settled;

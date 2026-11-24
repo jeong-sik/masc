@@ -610,6 +610,36 @@ let build_stream_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
       (markdown_rows ~theme ~width ~prefix:"  " ~cont_prefix:"  " ~prefix_fg:fg
          ~bg_rgb:base_bg buf.text)
   end;
+  (* 3b. Active-stream waiting indicator (e.g. after completed tools before text deltas) *)
+  if sp.show_waiting then begin
+    let fg, status_lbl, right_lbl =
+      if buf.interrupting then
+        ( theme.status_attention
+        , Ops_common.say model ~ko:"중단 요청 중…" ~en:"Interrupting…"
+        , Ops_common.say model ~ko:"중단" ~en:"stopping" )
+      else
+        let act =
+          match Fleet_store.active_turn_for ~keeper:keeper_name model.fleet with
+          | Some turn ->
+              Say.resolve model.lang
+                (Chat_transcript.active_turn_short_activity turn)
+          | None ->
+              Ops_common.say model ~ko:"응답 대기 중…" ~en:"Waiting for model…"
+        in
+        (theme.status_active, act, Ops_common.say model ~ko:"진행 중" ~en:"running")
+    in
+    let line_text = Printf.sprintf "@%s · %s" keeper_name status_lbl in
+    push
+      (single_span_row ~rail_rgb:fg
+         ~prefix:(Glyph.to_utf8 Glyph.Live_working ^ " ") ~prefix_fg:fg
+         ~prefix_attrs:Attr.bold
+         ~text:
+           (Grapheme.truncate_to_width ~max_width:(Int.max 12 (width - 20))
+              line_text)
+         ~text_fg:theme.text_secondary ~attrs:Attr.italic
+         ~right_meta:right_lbl ~right_meta_fg:fg ~right_meta_attrs:Attr.italic
+         ~bg_rgb:base_bg ())
+  end;
   (* 4. Explicit Stream Error (Coral left rail, non-italic Bold) *)
   (match sp.show_error with
   | Some err ->
@@ -709,6 +739,102 @@ let build_pending_tx_rows ~(theme : Theme.t) ~(model : Model.t) ~width
           ~text_fg:theme.text_primary ~right_meta:pill ~right_meta_fg:state_fg
           ~right_meta_attrs:Attr.bold ~bg_rgb:base_bg ~full_bleed_bg:true ())
     items
+
+let format_active_turn_elapsed ~(model : Model.t) (turn : Wire_fleet.active_turn) =
+  let secs_opt =
+    if
+      model.freshness.last_wall_unix > 0.0
+      && model.freshness.last_wall_unix >= turn.started_at_unix
+    then Some (model.freshness.last_wall_unix -. turn.started_at_unix)
+    else Option.map (fun ms -> ms /. 1000.0) turn.elapsed_ms
+  in
+  match secs_opt with
+  | None -> None
+  | Some raw_s ->
+      let s = Int.max 0 (Int.of_float raw_s) in
+      if s < 60 then Some (Printf.sprintf "%ds" s)
+      else if s < 3600 then Some (Printf.sprintf "%dm %02ds" (s / 60) (s mod 60))
+      else Some (Printf.sprintf "%dh %02dm" (s / 3600) (s mod 3600 / 60))
+
+let short_turn_ref_tag (turn : Wire_fleet.active_turn) =
+  match turn.turn_ref with
+  | None -> None
+  | Some tr -> (
+      match String.rindex_opt tr '#' with
+      | Some idx when idx + 1 < String.length tr ->
+          Some (String.sub tr idx (String.length tr - idx))
+      | Some _ | None -> None)
+
+let build_active_turn_rows ~(theme : Theme.t) ~(model : Model.t) ~width
+    (turn : Wire_fleet.active_turn) =
+  let is_failed =
+    match turn.preview with
+    | Some { activity = Wire_fleet.Preview_failed; _ } -> true
+    | Some
+        {
+          activity =
+            ( Wire_fleet.Preview_preparing
+            | Wire_fleet.Preview_waiting
+            | Wire_fleet.Preview_streaming
+            | Wire_fleet.Preview_tool_observed );
+          _;
+        }
+    | None ->
+        false
+  in
+  let rail_rgb =
+    if is_failed then theme.status_attention else theme.status_active
+  in
+  let summary =
+    Printf.sprintf "%s · %s"
+      (Ops_common.say model ~ko:"현재 작업" ~en:"Active turn")
+      (Say.resolve model.lang (Chat_transcript.active_turn_detail_summary turn))
+  in
+  let hdr_text =
+    Grapheme.truncate_to_width ~max_width:(Int.max 12 (width - 24)) summary
+  in
+  let right_meta =
+    match model.fleet.chat_origin_mode with
+    | Fleet_store.Display_origin_bare ->
+        if is_failed then Ops_common.say model ~ko:"시도 실패" ~en:"failed"
+        else Ops_common.say model ~ko:"진행 중" ~en:"running"
+    | Fleet_store.Display_origin_inline | Fleet_store.Display_origin_row -> (
+        let parts =
+          List.filter_map Fun.id
+            [
+              short_turn_ref_tag turn;
+              format_active_turn_elapsed ~model turn;
+            ]
+        in
+        match parts with
+        | [] ->
+            if is_failed then Ops_common.say model ~ko:"시도 실패" ~en:"failed"
+            else Ops_common.say model ~ko:"진행 중" ~en:"running"
+        | _ :: _ -> String.concat " · " parts)
+  in
+  let hdr_row =
+    single_span_row ~rail_rgb
+      ~prefix:(Glyph.to_utf8 Glyph.Live_working ^ " ")
+      ~prefix_fg:rail_rgb ~prefix_attrs:Attr.bold ~text:hdr_text
+      ~text_fg:theme.text_bright ~attrs:Attr.bold ~right_meta
+      ~right_meta_fg:rail_rgb ~right_meta_attrs:Attr.italic
+      ~bg_rgb:theme.surface_2 ~full_bleed_bg:true ()
+  in
+  let tail_rows =
+    match Chat_transcript.active_turn_preview_tail turn with
+    | None -> []
+    | Some tail ->
+        let snippet =
+          "… "
+          ^ Grapheme.truncate_to_width ~max_width:(Int.max 10 (width - 8)) tail
+        in
+        [
+          single_span_row ~rail_rgb ~prefix:"  " ~prefix_fg:rail_rgb
+            ~text:snippet ~text_fg:theme.text_secondary ~attrs:Attr.italic
+            ~bg_rgb:theme.surface_2 ~full_bleed_bg:true ();
+        ]
+  in
+  hdr_row :: tail_rows
 
 let draw_transcript_rows grid ~(rect : Rect.t) ~(theme : Theme.t)
     ~(model : Model.t) ~pad_x ~scroll rows =
@@ -1006,11 +1132,33 @@ let draw_keeper_status_strip grid ~(rect : Rect.t) ~(theme : Theme.t)
     let base_st = Typography.structure ~bg theme in
     Cell_grid.fill_rect ~clip:rect grid ~rect ~style:base_st ();
     let has_attn = Ops_common.keeper_has_attention model.attention name in
+    let active_turn_opt = Fleet_store.active_turn_for ~keeper:name model.fleet in
     let glyph, tone, act_str, rt_str, ctx_ratio_opt =
       match keeper_opt with
       | Some k ->
           let g, t, _ =
             Ops_common.keeper_live_status ~has_attention:has_attn k
+          in
+          let g, t =
+            if has_attn then (g, t)
+            else
+              match active_turn_opt, k.health with
+              | ( Some _
+                , ( Wire_fleet.Keeper_healthy
+                  | Wire_fleet.Keeper_idle
+                  | Wire_fleet.Keeper_working ) ) ->
+                  (Glyph.Live_working, Theme.Status_active)
+              | ( (Some _ | None)
+                , ( Wire_fleet.Keeper_healthy
+                  | Wire_fleet.Keeper_working
+                  | Wire_fleet.Keeper_idle
+                  | Wire_fleet.Keeper_degraded
+                  | Wire_fleet.Keeper_recovering
+                  | Wire_fleet.Keeper_failing
+                  | Wire_fleet.Keeper_paused
+                  | Wire_fleet.Keeper_offline
+                  | Wire_fleet.Keeper_booting ) ) ->
+                  (g, t)
           in
           let act =
             Say.resolve model.lang (Ops_common.activation_label k.activation_mode)
@@ -1027,8 +1175,13 @@ let draw_keeper_status_strip grid ~(rect : Rect.t) ~(theme : Theme.t)
           in
           (g, t, act, rt, ctx_opt)
       | None ->
-          ( Glyph.Live_idle
-          , Theme.Status_historical
+          let g, t =
+            if Option.is_some active_turn_opt then
+              (Glyph.Live_working, Theme.Status_active)
+            else (Glyph.Live_idle, Theme.Status_historical)
+          in
+          ( g
+          , t
           , Glyph.to_utf8 Glyph.Missing_absent
           , Glyph.to_utf8 Glyph.Missing_absent
           , None )
@@ -1036,6 +1189,15 @@ let draw_keeper_status_strip grid ~(rect : Rect.t) ~(theme : Theme.t)
     let infra_tag, _ = Ops_common.keeper_sandbox_tag ~model name in
     let trail_n = Ops_common.keeper_incident_count model.incidents name in
     let sep = Typography.sep_dot in
+    let turn_part =
+      match active_turn_opt with
+      | Some turn ->
+          Printf.sprintf "%s%s %s" sep
+            (Glyph.to_utf8 Glyph.Live_working)
+            (Say.resolve model.lang
+               (Chat_transcript.active_turn_short_activity turn))
+      | None -> ""
+    in
     let trail_part =
       if trail_n > 0 then
         Printf.sprintf "%s%s%d [I]" sep (Glyph.to_utf8 Glyph.Recovered) trail_n
@@ -1085,8 +1247,8 @@ let draw_keeper_status_strip grid ~(rect : Rect.t) ~(theme : Theme.t)
     in
     cx := !cx + adv_n;
     let rest_str =
-      Printf.sprintf "%s%s%s%s%s%s%s%s" sep act_str sep rt_str sep infra_tag
-        trail_part voice_part
+      Printf.sprintf "%s%s%s%s%s%s%s%s%s" sep act_str turn_part sep rt_str sep
+        infra_tag trail_part voice_part
     in
     ignore
       (Ops_common.put_line ~clip:rect grid ~x:!cx ~y:rect.y
@@ -1155,6 +1317,8 @@ let render_chat_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
               | Chat_transcript.Section_history msgs ->
                   build_history_rows ~theme ~model ~keeper_name:name
                     ~width:prose_w msgs
+              | Chat_transcript.Section_active_turn turn ->
+                  build_active_turn_rows ~theme ~model ~width:prose_w turn
               | Chat_transcript.Section_pending items ->
                   build_pending_tx_rows ~theme ~model ~width:prose_w items
               | Chat_transcript.Section_stream sp ->
@@ -3304,7 +3468,16 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
           (Glyph.to_utf8 Glyph.Prompt_caret)
           name
     in
-    let has_running_turn = Chat_transcript.is_phase_interruptible chat_phase in
+    let has_running_turn =
+      Option.is_some (Chat_transcript.escape_interrupt_target ~model ~keeper:name)
+    in
+    let can_explicit_interrupt =
+      let turn = Fleet_store.active_turn_for ~keeper:name model.fleet in
+      match Chat_transcript.explicit_interrupt_target ~model ~keeper:name turn with
+      | Some target ->
+          not (Chat_transcript.interrupt_target_pending ~model ~keeper:name target)
+      | None -> false
+    in
     let memory_diagram_open =
       Nav.equal_keeper_tab tab Nav.Keeper_memory
       &&
@@ -3379,6 +3552,12 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
         Some
           (Ops_common.say model ~ko:"[Esc/Ctrl+X] 턴 중단 · [y] 복사 · [[ ]] 탭"
              ~en:"[Esc/Ctrl+X] Interrupt · [y] Copy · [[ ]] Tabs")
+      else if
+        Nav.equal_keeper_tab tab Nav.Keeper_chat && can_explicit_interrupt
+      then
+        Some
+          (Ops_common.say model ~ko:"[Ctrl+X] 턴 중단 · [y] 복사 · [Esc] 목록"
+             ~en:"[Ctrl+X] Interrupt · [y] Copy · [Esc] Fleet")
       else
         Some
           (Ops_common.say model ~ko:"[[ ]] 탭 · [y] 응답 복사 · [Esc] 목록"

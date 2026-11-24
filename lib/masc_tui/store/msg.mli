@@ -74,6 +74,7 @@ type http_reply =
     }
   | Reply_turn_interrupt of {
       keeper : string;
+      target : Cmd.keeper_turn_interrupt_target;
       result : (Wire_fleet.turn_interrupt_response, http_error) result;
     }
   (* Work *)

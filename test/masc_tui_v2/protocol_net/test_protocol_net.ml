@@ -245,6 +245,135 @@ let test_wire_fleet () =
   in
   let turns = expect_ok "keeper turns" (Wire_fleet.decode_keeper_turns turns_json) in
   Alcotest.(check int) "2 turn rows" 2 (List.length turns);
+  (* /api/v1/keepers/turns with live server turn.preview & turn_ref *)
+  let turns_with_preview_json =
+    parse_json
+      {|{
+        "keepers": [
+          {
+            "keeper_name": "e-masc-the-leader",
+            "chat_control_token": "ctrl-9",
+            "status": "ok",
+            "turn": {
+              "lane": "autonomous",
+              "turn_ref": "trace-1#15206",
+              "started_at_unix": 1795503055.0,
+              "interrupt_token": "itok-auto-1",
+              "preview": {
+                "status_text": "ollama · waiting for provider response · last observed tool: Execute",
+                "activity": "waiting",
+                "text_tail": "Checking test fixtures\nnext line",
+                "text_position": { "generation": 2, "start_byte": 0 },
+                "last_tool": "Execute",
+                "updated_at_unix": 1795503086.0,
+                "preparation": {
+                  "phase": "prompt",
+                  "turn_ref": "trace-1#15206",
+                  "started_at_unix": 1795503056.0,
+                  "state": "active",
+                  "finished_at_unix": null,
+                  "elapsed_ns": null
+                },
+                "preparation_timeline": null,
+                "execution_scope": null
+              }
+            }
+          }
+        ]
+      }|}
+  in
+  (match
+     expect_ok "keeper turns with preview"
+       (Wire_fleet.decode_keeper_turns turns_with_preview_json)
+   with
+  | [
+      {
+        keeper_name = "e-masc-the-leader";
+        chat_control_token = Some "ctrl-9";
+        state = Wire_fleet.Turn_active turn;
+      };
+    ] -> (
+      Alcotest.(check bool) "autonomous lane decoded" true
+        (Wire_fleet.equal_turn_lane turn.lane Wire_fleet.Lane_proactive);
+      Alcotest.(check (option string)) "turn_ref decoded" (Some "trace-1#15206")
+        turn.turn_ref;
+      match turn.preview with
+      | Some prev -> (
+          Alcotest.(check bool) "preview activity decoded" true
+            (Wire_fleet.equal_turn_preview_activity prev.activity
+               Wire_fleet.Preview_waiting);
+          Alcotest.(check (option string)) "preview last_tool decoded"
+            (Some "Execute") prev.last_tool;
+          Alcotest.(check string) "preview text_tail decoded"
+            "Checking test fixtures\nnext line" prev.text_tail;
+          match prev.preparation with
+          | Some prep ->
+              Alcotest.(check bool) "preparation phase decoded" true
+                (Wire_fleet.equal_turn_preparation_phase prep.phase
+                   Wire_fleet.Prep_prompt);
+              Alcotest.(check bool) "preparation state decoded" true
+                (Wire_fleet.equal_turn_preparation_state prep.state
+                   Wire_fleet.Prep_active)
+          | None -> Alcotest.fail "expected decoded preview preparation")
+      | None -> Alcotest.fail "expected decoded turn.preview")
+  | _ -> Alcotest.fail "expected single active turn row with preview");
+  (* Strict rejection of unknown preview activity / preparation enums *)
+  let bad_activity_json =
+    parse_json
+      {|{
+        "keepers": [
+          {
+            "keeper_name": "k-bad",
+            "status": "ok",
+            "turn": {
+              "lane": "autonomous",
+              "started_at_unix": 1795503055.0,
+              "interrupt_token": "itok-bad",
+              "preview": {
+                "status_text": "bad",
+                "activity": "invented_activity",
+                "text_tail": "",
+                "last_tool": null,
+                "updated_at_unix": 1795503086.0,
+                "preparation": null
+              }
+            }
+          }
+        ]
+      }|}
+  in
+  Alcotest.(check bool) "unknown preview activity fails decode" true
+    (Result.is_error (Wire_fleet.decode_keeper_turns bad_activity_json));
+  let bad_prep_json =
+    parse_json
+      {|{
+        "keepers": [
+          {
+            "keeper_name": "k-bad-prep",
+            "status": "ok",
+            "turn": {
+              "lane": "autonomous",
+              "started_at_unix": 1795503055.0,
+              "interrupt_token": "itok-bad-prep",
+              "preview": {
+                "status_text": "bad",
+                "activity": "preparing",
+                "text_tail": "",
+                "last_tool": null,
+                "updated_at_unix": 1795503086.0,
+                "preparation": {
+                  "phase": "unknown_phase",
+                  "state": "active",
+                  "started_at_unix": 1795503056.0
+                }
+              }
+            }
+          }
+        ]
+      }|}
+  in
+  Alcotest.(check bool) "unknown preparation phase fails decode" true
+    (Result.is_error (Wire_fleet.decode_keeper_turns bad_prep_json));
   (* Strict allowlist on POST /api/v1/keepers/chat/stream *)
   let steer_json =
     Wire_fleet.encode_chat_submit_request
@@ -1248,6 +1377,27 @@ let test_ui_bus () =
       ()
   | _ -> Alcotest.fail "unexpected Ui_bus drain ordering or values");
   Alcotest.(check bool) "bus empty after drain" true (Ui_bus.is_empty bus)
+
+let test_ui_bus_preserves_ordered_receipts () =
+  let bus =
+    Ui_bus.create ~stream_capacity:2 ~key_equal:String.equal ~key_hash:Hashtbl.hash ()
+  in
+  Ui_bus.publish_stream bus "lost delta";
+  Ui_bus.publish_stream_receipt bus "interrupt acknowledged";
+  Ui_bus.publish_stream_receipt bus "chat ended";
+  Ui_bus.publish_stream bus "next turn started";
+  Ui_bus.publish_stream bus "next turn delta";
+  (match Ui_bus.drain_up_to ~max_items:2 bus with
+  | [ Ui_bus.Stream_gap 1; Ui_bus.Stream_event "interrupt acknowledged" ] -> ()
+  | _ -> Alcotest.fail "a displaced receipt is delivered after the real gap");
+  match Ui_bus.drain bus with
+  | [
+      Ui_bus.Stream_event "chat ended";
+      Ui_bus.Stream_event "next turn started";
+      Ui_bus.Stream_event "next turn delta";
+    ] ->
+      ()
+  | _ -> Alcotest.fail "a displaced completion must precede the next turn"
 
 (* 10. Sse_hub (GET-only streams, backoff reset) + Http_client (CTL header sanitization, 409 sha256) *)
 let test_sse_hub_and_http_client () =
@@ -5441,6 +5591,8 @@ let () =
       ( "net"
       , [
           Alcotest.test_case "ui_bus_coalesce_and_512_gap" `Quick test_ui_bus;
+          Alcotest.test_case "ui_bus retains final receipts through overflow" `Quick
+            test_ui_bus_preserves_ordered_receipts;
           Alcotest.test_case "ui_bus_concurrent_no_lost_wakeup" `Quick
             test_ui_bus_concurrent_no_lost_wakeup;
           Alcotest.test_case "sse_hub_diff_and_http_409" `Quick

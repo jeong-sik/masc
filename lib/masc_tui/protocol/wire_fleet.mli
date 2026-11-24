@@ -44,13 +44,55 @@ type turn_lane =
   | Lane_maintenance
   | Lane_internal
 
+type turn_preview_activity =
+  | Preview_preparing
+  | Preview_waiting
+  | Preview_streaming
+  | Preview_tool_observed
+  | Preview_failed
+
+type turn_preparation_phase =
+  | Prep_task
+  | Prep_world
+  | Prep_context
+  | Prep_prompt
+  | Prep_tools
+  | Prep_skills
+  | Prep_lane_inputs
+  | Prep_workspace_memory
+  | Prep_wiki
+
+type turn_preparation_state =
+  | Prep_active
+  | Prep_prepared
+  | Prep_rejected
+  | Prep_raised
+  | Prep_cancelled
+
+type turn_preparation = {
+  phase : turn_preparation_phase;
+  state : turn_preparation_state;
+  started_at_unix : float;
+}
+
+type turn_preview = {
+  status_text : string;
+  activity : turn_preview_activity;
+  text_tail : string;
+  last_tool : string option;
+  updated_at_unix : float;
+  preparation : turn_preparation option;
+}
+
 type active_turn = {
   lane : turn_lane;
+  turn_ref : string option;
   started_at_unix : float;
   interrupt_token : string;
   phase : string option;
   tool_in_flight : string option;
   elapsed_ms : float option;
+  preview : turn_preview option;
 }
 
 type keeper_turn_state =
@@ -289,6 +331,17 @@ val group_by_company :
 val keeper_health_of_string : string -> keeper_health option
 val activation_mode_of_string : string -> activation_mode option
 val turn_lane_of_string : string -> turn_lane option
+val turn_preview_activity_of_string : string -> turn_preview_activity option
+val turn_preparation_phase_of_string : string -> turn_preparation_phase option
+val turn_preparation_state_of_string : string -> turn_preparation_state option
+
+val equal_turn_lane : turn_lane -> turn_lane -> bool
+val equal_turn_preview_activity : turn_preview_activity -> turn_preview_activity -> bool
+val equal_turn_preparation_phase : turn_preparation_phase -> turn_preparation_phase -> bool
+val equal_turn_preparation_state : turn_preparation_state -> turn_preparation_state -> bool
+val equal_turn_preparation : turn_preparation -> turn_preparation -> bool
+val equal_turn_preview : turn_preview -> turn_preview -> bool
+val equal_active_turn : active_turn -> active_turn -> bool
 
 val decode_keepers_roster :
   observed_at:Clock.Mono.t -> Yojson.Safe.t -> (keepers_roster, string) result

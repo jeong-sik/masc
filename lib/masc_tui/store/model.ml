@@ -468,6 +468,7 @@ let composer_mode m =
         let has_tx =
           Drafts.has_active_tx_for ~keeper m.drafts
           || Fleet_store.has_active_chat_stream ~keeper m.fleet
+          || Option.is_some (Fleet_store.active_turn_for ~keeper m.fleet)
         in
         if
           (not (Drafts.has_non_empty_draft m.drafts))

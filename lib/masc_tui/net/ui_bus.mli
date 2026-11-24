@@ -6,7 +6,8 @@
     - Ordered stream chunks/logs append into a bounded ring (default cap 512).
       On extreme burst overflow, the oldest unread entry is evicted and an
       exact {!Stream_gap} count is accumulated and emitted ahead of the
-      surviving tail — zero IO-reader stalls and zero SSE disconnects.
+      surviving events. Terminal receipts displaced from the ring remain in
+      FIFO order until read.
     - Wake coalescing latched under the microsecond-short internal queue mutex
       ensures [on_wake] fires outside the lock at most once per pending burst
       without a cross-domain lost-wakeup race. *)
@@ -45,8 +46,12 @@ val publish_snapshot :
 
 val publish_stream : ('snap_key, 'snap, 'ev) t -> 'ev -> unit
 (** Append an ordered stream event to the bounded ring. On overflow, evicts the
-    oldest unread item and increments the pending {!Stream_gap} counter. Never
-    blocks. *)
+    oldest unread item and counts it as a {!Stream_gap} if it was not a receipt.
+    Never blocks. *)
+
+val publish_stream_receipt : ('snap_key, 'snap, 'ev) t -> 'ev -> unit
+(** Deliver a terminal command or stream receipt in stream order, even if the
+    ring overflows before the consumer drains it. Use for operation outcomes. *)
 
 val drain : ('snap_key, 'snap, 'ev) t -> ('snap_key, 'snap, 'ev) item list
 (** Atomically drain all pending snapshots, any accumulated {!Stream_gap}, and

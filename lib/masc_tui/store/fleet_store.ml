@@ -64,6 +64,7 @@ type t = {
   keepers : Wire_fleet.keeper_summary list Observed.t;
   unreadable_keepers : Wire_fleet.unreadable_keeper list;
   turns : Wire_fleet.keeper_turn_row list Observed.t;
+  interrupting_turn_tokens : string String_map.t;
   turn_records : Wire_fleet.keeper_turn_records Observed.t String_map.t;
   chat_control_tokens : string String_map.t;
   sandbox_profiles : Wire_fleet.keeper_sandbox_profile String_map.t;
@@ -101,6 +102,7 @@ let empty =
     keepers = Observed.loading ~since_ns:Clock.Mono.zero;
     unreadable_keepers = [];
     turns = Observed.unreported;
+    interrupting_turn_tokens = String_map.empty;
     turn_records = String_map.empty;
     chat_control_tokens = String_map.empty;
     sandbox_profiles = String_map.empty;
@@ -173,19 +175,66 @@ let equal_memory_display a b =
   | Memory_full, (Memory_hidden | Memory_summary) ->
       false
 
+let working_detail_of_active_turn (turn_opt : Wire_fleet.active_turn option) =
+  match turn_opt with
+  | None -> Say.make ~ko:"턴 실행 중" ~en:"In turn"
+  | Some turn -> (
+      match turn.tool_in_flight with
+      | Some tool ->
+          Say.make ~ko:("도구 실행: " ^ tool) ~en:("Tool: " ^ tool)
+      | None -> (
+          match turn.preview with
+          | Some p -> (
+              match p.preparation with
+              | Some { state = Wire_fleet.Prep_active; _ } ->
+                  Say.make ~ko:"턴 준비 중" ~en:"Preparing turn"
+              | Some { state = Wire_fleet.Prep_prepared; _ } ->
+                  Say.make ~ko:"준비 완료" ~en:"Prepared"
+              | Some
+                  {
+                    state =
+                      ( Wire_fleet.Prep_rejected
+                      | Wire_fleet.Prep_raised
+                      | Wire_fleet.Prep_cancelled );
+                    _;
+                  } ->
+                  Say.make ~ko:"준비 중단" ~en:"Preparation halted"
+              | None -> (
+                  match p.activity with
+                  | Wire_fleet.Preview_tool_observed -> (
+                      match p.last_tool with
+                      | Some tool ->
+                          Say.make
+                            ~ko:("도구 활동: " ^ tool)
+                            ~en:("Tool activity: " ^ tool)
+                      | None ->
+                          Say.make ~ko:"도구 활동 중" ~en:"Tool activity")
+                  | Wire_fleet.Preview_streaming ->
+                      Say.make ~ko:"응답 생성 중…" ~en:"Streaming…"
+                  | Wire_fleet.Preview_waiting ->
+                      Say.make ~ko:"응답 대기 중" ~en:"Waiting for model"
+                  | Wire_fleet.Preview_preparing ->
+                      Say.make ~ko:"턴 준비 중" ~en:"Preparing turn"
+                  | Wire_fleet.Preview_failed ->
+                      Say.make ~ko:"시도 실패" ~en:"Attempt failed"))
+          | None -> (
+              match turn.phase with
+              | Some phase -> Say.literal phase
+              | None -> Say.make ~ko:"턴 실행 중" ~en:"In turn")))
+
 let keeper_live_state (k : Wire_fleet.keeper_summary) =
   match k.health with
-  | Wire_fleet.Keeper_healthy -> Health.Healthy
+  | Wire_fleet.Keeper_healthy -> (
+      match k.active_turn with
+      | Some _ -> Health.Working { detail = working_detail_of_active_turn k.active_turn }
+      | None -> Health.Healthy)
   | Wire_fleet.Keeper_working ->
-      let detail =
-        match k.active_turn with
-        | Some { tool_in_flight = Some tool; _ } ->
-            Say.make ~ko:("도구 실행: " ^ tool) ~en:("Tool: " ^ tool)
-        | Some { phase = Some phase; _ } -> Say.literal phase
-        | Some _ | None -> Say.make ~ko:"턴 실행 중" ~en:"In turn"
-      in
-      Health.Working { detail }
-  | Wire_fleet.Keeper_idle | Wire_fleet.Keeper_paused -> Health.Idle
+      Health.Working { detail = working_detail_of_active_turn k.active_turn }
+  | Wire_fleet.Keeper_idle -> (
+      match k.active_turn with
+      | Some _ -> Health.Working { detail = working_detail_of_active_turn k.active_turn }
+      | None -> Health.Idle)
+  | Wire_fleet.Keeper_paused -> Health.Idle
   | Wire_fleet.Keeper_booting ->
       Health.Working { detail = Say.make ~ko:"시작 중" ~en:"Booting" }
   | Wire_fleet.Keeper_recovering ->
@@ -276,9 +325,14 @@ let fleet_health_counts (ks : Wire_fleet.keeper_summary list) :
       | Wire_fleet.Keeper_degraded | Wire_fleet.Keeper_recovering ->
           { acc with total; active = acc.active + 1; degraded = acc.degraded + 1 }
       | Wire_fleet.Keeper_healthy ->
-          { acc with total; active = acc.active + 1; healthy = acc.healthy + 1 }
+          if Option.is_some k.active_turn then
+            { acc with total; active = acc.active + 1; working = acc.working + 1 }
+          else
+            { acc with total; active = acc.active + 1; healthy = acc.healthy + 1 }
       | Wire_fleet.Keeper_idle ->
-          if k.keepalive_running then
+          if Option.is_some k.active_turn then
+            { acc with total; active = acc.active + 1; working = acc.working + 1 }
+          else if k.keepalive_running then
             { acc with total; active = acc.active + 1; healthy = acc.healthy + 1 }
           else { acc with total; offline = acc.offline + 1 })
     {
@@ -644,9 +698,31 @@ let sync_selection_after_change ~prev_index ~reset_scroll ~clear_if_empty next =
       selected_collapsed_company;
     }
 
+let overlay_turns_on_keepers (rows : Wire_fleet.keeper_turn_row list)
+    (ks : Wire_fleet.keeper_summary list) =
+  List.map
+    (fun (k : Wire_fleet.keeper_summary) ->
+      match
+        List.find_opt
+          (fun (r : Wire_fleet.keeper_turn_row) ->
+            String.equal r.keeper_name k.name)
+          rows
+      with
+      | Some { state = Wire_fleet.Turn_active turn; _ } ->
+          { k with active_turn = Some turn }
+      | Some { state = Wire_fleet.Turn_idle; _ } ->
+          { k with active_turn = None }
+      | Some { state = Wire_fleet.Turn_unavailable _; _ } | None -> k)
+    ks
+
 let apply_keepers ~observed_at ks t =
   let prev_index = resolve_current_index t (filtered_keepers t) in
-  let next = { t with keepers = Observed.value ~observed_at ks } in
+  let ks_with_turns =
+    match Observed.to_option t.turns with
+    | Some rows -> overlay_turns_on_keepers rows ks
+    | None -> ks
+  in
+  let next = { t with keepers = Observed.value ~observed_at ks_with_turns } in
   sync_selection_after_change ~prev_index ~reset_scroll:false
     ~clear_if_empty:true next
 
@@ -743,25 +819,26 @@ let apply_turns ~observed_at rows t =
         | Some _ | None -> acc)
       t.chat_control_tokens rows
   in
-  let keepers =
-    Observed.map
-      (List.map (fun (k : Wire_fleet.keeper_summary) ->
-           match
-             List.find_opt
-               (fun (r : Wire_fleet.keeper_turn_row) ->
-                 String.equal r.keeper_name k.name)
-               rows
-           with
-           | Some { state = Wire_fleet.Turn_active turn; _ } ->
-               { k with active_turn = Some turn }
-           | Some { state = Wire_fleet.Turn_idle; _ } ->
-               { k with active_turn = None }
-           | Some { state = Wire_fleet.Turn_unavailable _; _ } | None -> k))
-      t.keepers
+  let interrupting_turn_tokens =
+    String_map.filter
+      (fun keeper tok ->
+        match
+          List.find_opt
+            (fun (r : Wire_fleet.keeper_turn_row) ->
+              String.equal r.keeper_name keeper)
+            rows
+        with
+        | Some { state = Wire_fleet.Turn_active turn; _ } ->
+            String.equal turn.interrupt_token tok
+        | Some { state = Wire_fleet.Turn_idle; _ } -> false
+        | Some { state = Wire_fleet.Turn_unavailable _; _ } | None -> true)
+      t.interrupting_turn_tokens
   in
+  let keepers = Observed.map (overlay_turns_on_keepers rows) t.keepers in
   {
     t with
     turns = Observed.value ~observed_at rows;
+    interrupting_turn_tokens;
     chat_control_tokens;
     keepers;
   }
@@ -1207,12 +1284,46 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
             chat_scroll_offset;
           })
 
-let mark_chat_stream_interrupting ~keeper ~request_id ~interrupting t =
+let active_stream_for_operation ~keeper ~operation_id t =
   match String_map.find_opt keeper t.chat_streams with
-  | Some b when String.equal b.request_id request_id && b.active ->
+  | Some b as found
+    when b.active
+         && (String.equal b.request_id operation_id
+            || Option.equal String.equal b.operation_id (Some operation_id)) ->
+      found
+  | Some _ | None -> None
+
+let set_operation_interrupting ~keeper ~operation_id ~interrupting t =
+  match active_stream_for_operation ~keeper ~operation_id t with
+  | Some b ->
       let next = { b with interrupting } in
       { t with chat_streams = String_map.add keeper next t.chat_streams }
-  | Some _ | None -> t
+  | None -> t
+
+let is_operation_interrupting ~keeper ~operation_id t =
+  Option.exists (fun b -> b.interrupting)
+    (active_stream_for_operation ~keeper ~operation_id t)
+
+let mark_turn_interrupting ~keeper ~interrupt_token t =
+  {
+    t with
+    interrupting_turn_tokens =
+      String_map.add keeper interrupt_token t.interrupting_turn_tokens;
+  }
+
+let is_turn_interrupting ~keeper ~interrupt_token t =
+  match String_map.find_opt keeper t.interrupting_turn_tokens with
+  | Some tok -> String.equal tok interrupt_token
+  | None -> false
+
+let clear_turn_interrupting ~keeper ~interrupt_token t =
+  if is_turn_interrupting ~keeper ~interrupt_token t then
+    {
+      t with
+      interrupting_turn_tokens =
+        String_map.remove keeper t.interrupting_turn_tokens;
+    }
+  else t
 
 let clear_inactive_chat_stream_error ~keeper t =
   match String_map.find_opt keeper t.chat_streams with

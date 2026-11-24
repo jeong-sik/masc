@@ -231,6 +231,24 @@ let addon_preview_matches_active (m : Model.t) manifest_path =
     ->
       true
 
+let release_keeper_interrupt ~now ~keeper ~target (m : Model.t) =
+  match target with
+  | `Turn_token interrupt_token ->
+      {
+        m with
+        fleet = Fleet_store.clear_turn_interrupting ~keeper ~interrupt_token m.fleet;
+      }
+  | `Operation_id operation_id ->
+      {
+        m with
+        fleet =
+          Fleet_store.set_operation_interrupting ~keeper ~operation_id
+            ~interrupting:false m.fleet;
+        drafts =
+          Drafts.set_operation_interrupting ~now ~keeper ~operation_id
+            ~interrupting:false m.drafts;
+      }
+
 let apply_http_reply ~now (m : Model.t) reply =
   let failed_slot err slot =
     Observed.fetch_failed ~reason:(Msg.http_error_detail err)
@@ -331,6 +349,8 @@ let apply_http_reply ~now (m : Model.t) reply =
       in
       (next, [])
   | Msg.Reply_keeper_turns (Ok rows) ->
+      (* The Owner slot may be idle while this client's operation still has
+         unread chunks. Its stream and journal settle the exact request. *)
       ({ m with fleet = Fleet_store.apply_turns ~observed_at:now rows m.fleet }, [])
   | Msg.Reply_keeper_turns (Error err) ->
       err_reply
@@ -527,52 +547,33 @@ let apply_http_reply ~now (m : Model.t) reply =
               ~source:(Health.Source_keeper keeper) ~ko:"끊긴 답장 조회"
               ~en:"Cut reply fetch" err
           else (m, []))
-  | Msg.Reply_turn_interrupt { keeper; result = Ok resp } ->
-      let fleet0 =
-        match resp.chat_control_token with
-        | Some tok -> Fleet_store.update_chat_control_token ~keeper ~token:tok m.fleet
-        | None -> m.fleet
-      in
-      let fleet, drafts, toast_level, toast_msg =
+  | Msg.Reply_turn_interrupt { keeper; target; result = Ok resp } ->
+      (* The follow-up turns read refreshes the control token. This older
+         POST's receipt can arrive after a new operation has started. *)
+      let m, toast_level, toast_msg =
         if resp.signalled then
-          ( fleet0
-          , m.drafts
+          ( m
           , Model.Toast_info
           , Say.make
               ~ko:("턴 중단 신호 전송됨: " ^ keeper)
               ~en:("Turn interrupt signalled: " ^ keeper) )
-        else if resp.paused then
-          ( fleet0
-          , m.drafts
-          , Model.Toast_info
-          , Say.make
-              ~ko:("대기 요청 일시 정지됨: " ^ keeper)
-              ~en:("Pending admission paused: " ^ keeper) )
         else
-          let fleet1 =
-            match Fleet_store.String_map.find_opt keeper fleet0.chat_streams with
-            | Some b when b.interrupting ->
-                Fleet_store.mark_chat_stream_interrupting ~keeper
-                  ~request_id:b.request_id ~interrupting:false fleet0
-            | Some _ | None -> fleet0
-          in
-          let drafts1 =
-            match Drafts.active_tx_for_keeper ~keeper m.drafts with
-            | Some tx ->
-                Drafts.clear_interrupting ~now ~request_id:tx.request_id m.drafts
-            | None -> m.drafts
-          in
-          let detail = Option.value resp.reason ~default:"not_signalled" in
-          ( fleet1
-          , drafts1
-          , Model.Toast_warning
-          , Say.make
-              ~ko:(Printf.sprintf "턴 중단 미적용 (%s): %s" keeper detail)
-              ~en:(Printf.sprintf "Turn interrupt not signalled (%s): %s" keeper detail) )
+          let m = release_keeper_interrupt ~now ~keeper ~target m in
+          if resp.paused then
+            ( m
+            , Model.Toast_info
+            , Say.make
+                ~ko:("대기 요청 일시 정지됨: " ^ keeper)
+                ~en:("Pending admission paused: " ^ keeper) )
+          else
+            let detail = Option.value resp.reason ~default:"not_signalled" in
+            ( m
+            , Model.Toast_warning
+            , Say.make
+                ~ko:(Printf.sprintf "턴 중단 미적용 (%s): %s" keeper detail)
+                ~en:(Printf.sprintf "Turn interrupt not signalled (%s): %s" keeper detail) )
       in
-      let next =
-        Model.with_toast ~now ~level:toast_level toast_msg { m with fleet; drafts }
-      in
+      let next = Model.with_toast ~now ~level:toast_level toast_msg m in
       ( next
       , [
           Cmd.Http_get
@@ -583,24 +584,12 @@ let apply_http_reply ~now (m : Model.t) reply =
             };
           Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_keeper_turns };
         ] )
-  | Msg.Reply_turn_interrupt { keeper; result = Error err } ->
-      let fleet =
-        match Fleet_store.String_map.find_opt keeper m.fleet.chat_streams with
-        | Some b when b.interrupting ->
-            Fleet_store.mark_chat_stream_interrupting ~keeper
-              ~request_id:b.request_id ~interrupting:false m.fleet
-        | Some _ | None -> m.fleet
-      in
-      let drafts =
-        match Drafts.active_tx_for_keeper ~keeper m.drafts with
-        | Some tx ->
-            Drafts.clear_interrupting ~now ~request_id:tx.request_id m.drafts
-        | None -> m.drafts
-      in
+  | Msg.Reply_turn_interrupt { keeper; target; result = Error err } ->
+      let m = release_keeper_interrupt ~now ~keeper ~target m in
       let next, inc_cmds =
         record_http_incident ~now ~source:(Health.Source_keeper keeper)
           ~context:(Say.make ~ko:"턴 중단 요청" ~en:"Turn interrupt")
-          err { m with fleet; drafts }
+          err m
       in
       ( Model.with_toast ~now ~level:Model.Toast_error
           (Msg.http_error_summary err) next
@@ -608,11 +597,11 @@ let apply_http_reply ~now (m : Model.t) reply =
         @ [
             Cmd.Http_get
               {
-                epoch = m.epoch;
+                epoch = next.epoch;
                 req =
                   Cmd.Get_chat_history { keeper; limit = Some 80; cursor = None };
               };
-            Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_keeper_turns };
+            Cmd.Http_get { epoch = next.epoch; req = Cmd.Get_keeper_turns };
           ] )
   | Msg.Reply_planning (Ok planning) ->
       let work = Work_store.apply_planning ~observed_at:now planning m.work in

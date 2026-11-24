@@ -68,6 +68,9 @@ type t = {
   unreadable_keepers : Wire_fleet.unreadable_keeper list;
       (** Roster rows whose effective meta did not read, from the last roster. *)
   turns : Wire_fleet.keeper_turn_row list Observed.t;
+  interrupting_turn_tokens : string String_map.t;
+      (** In-flight interrupt token per keeper for observed turns without a
+          local chat stream or pending tx. *)
   turn_records : Wire_fleet.keeper_turn_records Observed.t String_map.t;
       (** Recent turn records per keeper, read for the Ctrl+T Context tab. *)
   chat_control_tokens : string String_map.t;
@@ -243,8 +246,14 @@ val apply_chat_stream_chunk :
     signals explicit execution start ([Chunk_run_started] /
     [Chunk_accepted { state = Running }]). *)
 
-val mark_chat_stream_interrupting :
-  keeper:string -> request_id:string -> interrupting:bool -> t -> t
+val set_operation_interrupting :
+  keeper:string -> operation_id:string -> interrupting:bool -> t -> t
+
+val is_operation_interrupting : keeper:string -> operation_id:string -> t -> bool
+
+val mark_turn_interrupting : keeper:string -> interrupt_token:string -> t -> t
+val clear_turn_interrupting : keeper:string -> interrupt_token:string -> t -> t
+val is_turn_interrupting : keeper:string -> interrupt_token:string -> t -> bool
 
 val clear_inactive_chat_stream_error : keeper:string -> t -> t
 

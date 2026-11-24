@@ -1713,6 +1713,118 @@ let test_live_chat_stream_ownership_roundtrip () =
       (connector_reply events) (tui_live_stream_reply events)
   done
 
+(* GET /api/v1/keepers/turns: Keeper_turn_preview.to_json and
+   Keeper_owner.turn_lane_to_string round-trip cleanly into Wire_fleet.active_turn. *)
+let test_keeper_turns_preview_roundtrip () =
+  let module Preview = Masc.Keeper_turn_preview in
+  let writer =
+    Preview.reset ~base_path:"/tmp/wire-rt" ~keeper_name:"roundtrip-keeper"
+      ~execution_scope:None ~turn_ref:None ~now:1795503000.0
+      ~redaction:Masc.Keeper_secret_redaction.empty
+  in
+  Preview.note_attempt ~writer:(Some writer) ~now:1795503001.0
+    ~runtime_id:"ollama-rt";
+  Preview.note_tool ~writer:(Some writer) ~now:1795503002.0 "Execute";
+  Preview.note_request ~writer:(Some writer) ~now:1795503003.0;
+  Preview.note_text ~writer:(Some writer) ~now:1795503004.0
+    "Streaming summary line";
+  let snap_stream = Preview.snapshot writer in
+  let prep_snap =
+    let prep_writer =
+      Preview.reset ~base_path:"/tmp/wire-rt" ~keeper_name:"roundtrip-prep"
+        ~execution_scope:None ~turn_ref:None ~now:1795503010.0
+        ~redaction:Masc.Keeper_secret_redaction.empty
+    in
+    Preview.with_preparation ~writer:(Some prep_writer) ~turn_ref:None
+      ~phase:Preview.Context_preparation (fun () -> Preview.snapshot prep_writer)
+  in
+  let envelope =
+    `Assoc
+      [
+        ("schema", `String "masc.keeper_turns.v1");
+        ( "keepers"
+        , `List
+            [
+              `Assoc
+                [
+                  ("status", `String "ok");
+                  ("keeper_name", `String "roundtrip-keeper");
+                  ("chat_control_token", `String "ctrl-rt-1");
+                  ( "turn"
+                  , `Assoc
+                      [
+                        ( "lane"
+                        , `String
+                            (Masc.Keeper_owner.turn_lane_to_string
+                               Masc.Keeper_owner.Autonomous) );
+                        ("turn_ref", `String "trace-rt#42");
+                        ("started_at_unix", `Float 1795503000.0);
+                        ("interrupt_token", `String "itok-rt-1");
+                        ("preview", Preview.to_json snap_stream);
+                      ] );
+                ];
+              `Assoc
+                [
+                  ("status", `String "ok");
+                  ("keeper_name", `String "roundtrip-prep");
+                  ("chat_control_token", `String "ctrl-rt-2");
+                  ( "turn"
+                  , `Assoc
+                      [
+                        ( "lane"
+                        , `String
+                            (Masc.Keeper_owner.turn_lane_to_string
+                               Masc.Keeper_owner.Chat_operation) );
+                        ("turn_ref", `Null);
+                        ("started_at_unix", `Float 1795503010.0);
+                        ("interrupt_token", `String "itok-rt-2");
+                        ("preview", Preview.to_json prep_snap);
+                      ] );
+                ];
+            ] );
+      ]
+  in
+  match Wire_fleet.decode_keeper_turns envelope with
+  | Error e -> Alcotest.fail ("decode_keeper_turns roundtrip failed: " ^ e)
+  | Ok [ r1; r2 ] -> (
+      (match r1.state with
+      | Wire_fleet.Turn_active t -> (
+          Alcotest.(check bool) "Autonomous maps to Lane_proactive" true
+            (Wire_fleet.equal_turn_lane t.lane Wire_fleet.Lane_proactive);
+          Alcotest.(check (option string)) "turn_ref preserved"
+            (Some "trace-rt#42") t.turn_ref;
+          match t.preview with
+          | Some p ->
+              Alcotest.(check bool) "stream activity preserved" true
+                (Wire_fleet.equal_turn_preview_activity p.activity
+                   Wire_fleet.Preview_streaming);
+              Alcotest.(check (option string)) "last_tool preserved"
+                (Some "Execute") p.last_tool;
+              Alcotest.(check string) "text_tail preserved"
+                "Streaming summary line" p.text_tail
+          | None -> Alcotest.fail "expected preview on r1")
+      | Wire_fleet.Turn_idle | Wire_fleet.Turn_unavailable _ ->
+          Alcotest.fail "expected Turn_active for r1");
+      match r2.state with
+      | Wire_fleet.Turn_active t -> (
+          Alcotest.(check bool) "Chat_operation maps to Lane_chat" true
+            (Wire_fleet.equal_turn_lane t.lane Wire_fleet.Lane_chat);
+          match t.preview with
+          | Some { preparation = Some prep; _ } ->
+              Alcotest.(check bool) "Context_preparation maps to Prep_context"
+                true
+                (Wire_fleet.equal_turn_preparation_phase prep.phase
+                   Wire_fleet.Prep_context);
+              Alcotest.(check bool) "active preparation maps to Prep_active"
+                true
+                (Wire_fleet.equal_turn_preparation_state prep.state
+                   Wire_fleet.Prep_active)
+          | Some { preparation = None; _ } | None ->
+              Alcotest.fail "expected active preparation on r2")
+      | Wire_fleet.Turn_idle | Wire_fleet.Turn_unavailable _ ->
+          Alcotest.fail "expected Turn_active for r2")
+  | Ok _ -> Alcotest.fail "expected exactly two keeper turn rows"
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1761,6 +1873,9 @@ let () =
           Alcotest.test_case
             "live AG-UI chat stream projection -> Wire_fleet and Fleet_store ownership"
             `Quick test_live_chat_stream_ownership_roundtrip;
+          Alcotest.test_case
+            "Keeper_turn_preview.to_json -> decode_keeper_turns"
+            `Quick test_keeper_turns_preview_roundtrip;
         ] );
       ( "knowledge",
         [

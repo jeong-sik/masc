@@ -169,13 +169,16 @@ val mark_confirming : now:Clock.Mono.t -> request_id:string -> t -> t
 (** Transition a submission to {!Confirming_delivery} while awaiting persisted
     history confirmation. *)
 
-val mark_interrupting : now:Clock.Mono.t -> request_id:string -> t -> t
-(** Transition a non-terminal submission to {!Interrupting} while awaiting
-    server interrupt settlement. *)
+val set_operation_interrupting :
+  now:Clock.Mono.t ->
+  keeper:string ->
+  operation_id:string ->
+  interrupting:bool ->
+  t ->
+  t
+(** Mark or release the submission identified by the interrupt POST. *)
 
-val clear_interrupting : now:Clock.Mono.t -> request_id:string -> t -> t
-(** Restore an {!Interrupting} submission back to {!Pending_processing} when an
-    interrupt request fails or reports no cancellation. *)
+val is_operation_interrupting : keeper:string -> operation_id:string -> t -> bool
 
 val downgrade_mode_to_follow_up : request_id:string -> t -> t
 (** Downgrade a [Mode_steer] submission to [Mode_follow_up] when server

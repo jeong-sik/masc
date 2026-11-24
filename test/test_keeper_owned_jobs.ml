@@ -972,7 +972,7 @@ let test_completion_delivery_failure_and_restart () =
   let inspect () = Intake.pending_board_events_of_stimulus_result
       ~config:(Workspace.default_config fixture.base_path) ~meta_after_triage:fixture.meta selection.source in
   let event = match inspect () with
-    | Intake.Stimulus_consumed [event] -> event
+    | Intake.Stimulus_observed [event] -> event
     | _ -> fail "complete original result was not admitted to the next prompt" in
   (match event.Masc.Keeper_world_observation.event_kind with
    | Owned_job_completed carried ->
@@ -996,7 +996,7 @@ let test_completion_delivery_failure_and_restart () =
    | _ -> fail "unavailable owner was consumed as an empty Board row");
   check int "unreadable result remains durably pending" 1 (List.length (pending_completions fixture));
   write path owner_bytes;
-  (match inspect () with Intake.Stimulus_consumed [_] -> () | _ -> fail "restored original owner cannot resume intake");
+  (match inspect () with Intake.Stimulus_observed [_] -> () | _ -> fail "restored original owner cannot resume intake");
   let forged = {completion with oj_source={completion.oj_source with task_id=Some "task-B"}} in
   let forged_source = {selection.source with payload=Owned_job_completed forged} in
   (match Intake.pending_board_events_of_stimulus_result ~config:(Workspace.default_config fixture.base_path)

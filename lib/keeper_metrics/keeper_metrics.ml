@@ -131,7 +131,7 @@ type t =
   | RegistryUpdateDropped
   | RegistryOrphanThresholdBreached
   | RegistryInvalidEntry
-  | StimulusConsumed
+  | StimulusObserved
   | RestartAttempts
   | RestartOutcomes
   | RuntimeSelected
@@ -320,7 +320,7 @@ let to_string = function
   | RegistryOrphanThresholdBreached ->
     "masc_keeper_registry_orphan_threshold_breached_total"
   | RegistryInvalidEntry -> "masc_keeper_registry_invalid_entry_total"
-  | StimulusConsumed -> "masc_keeper_stimulus_consumed_total"
+  | StimulusObserved -> "masc_keeper_stimulus_observed_total"
   | RestartAttempts -> "masc_keeper_restart_attempts_total"
   | RestartOutcomes -> "masc_keeper_restart_outcomes_total"
   | RuntimeSelected -> "masc_keeper_runtime_selected_total"
@@ -419,7 +419,7 @@ let collection = function
   | InvariantViolations | FsmEdgeTransitions | TurnFsmTransitions | TurnPhaseDuration
   | LifecycleTransitions | LifecycleCallbackFailures | EventBusDrain | SupervisorCleanupFailures
   | RegistryUpdateDropped | RegistryOrphanThresholdBreached | RegistryInvalidEntry
-  | StimulusConsumed | RestartAttempts | RestartOutcomes | RuntimeSelected | ToolUseFailure
+  | StimulusObserved | RestartAttempts | RestartOutcomes | RuntimeSelected | ToolUseFailure
   | ReceiptUnmappedDisposition | ProactiveSkip | UsageTrust | UsageAnomalyReason
   | ConfigEnvParseFailures | PostTurnWireinFailures | TurnCleanupFailures
   | MemoryRecallHistorySwallowedExceptions | MemoryRecallReadErrors | MemoryOsRecallUnavailable

@@ -34,7 +34,6 @@
     background: var(--bg-0);
     color: var(--fg-1);
     font-family: var(--font-sans);
-    font-size: 14px;
     line-height: 1.5;
     word-break: keep-all;
     overflow-wrap: anywhere;
@@ -45,6 +44,7 @@
   body {
     background: var(--bg-0);
     color: var(--fg-1);
+    font-size: var(--fs-14);
     overflow: hidden;
   }
 

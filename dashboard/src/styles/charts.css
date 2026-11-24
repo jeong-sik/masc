@@ -116,7 +116,7 @@
 .u-legend .u-series {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--sp-1);
   cursor: pointer;
 }
 

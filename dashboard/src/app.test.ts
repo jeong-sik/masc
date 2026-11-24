@@ -236,24 +236,23 @@ describe('App v2 header chrome', () => {
   })
 
   it('sets data-mobile based on the viewport width', () => {
-    window.innerWidth = 900
+    window.innerWidth = 767
     renderApp()
     const app = container.querySelector('.v2-app')
-    // The v2 shell emits data-mobile="1" (prototype CSS attribute selector),
-    // not "true".
+    // The shell emits data-mobile="1" below the 768px tablet breakpoint.
     expect(app?.getAttribute('data-mobile')).toBe('1')
   })
 
-  it('does not set data-mobile above the v2 shell breakpoint', () => {
-    window.innerWidth = 901
+  it('does not set data-mobile at or above the 768px tablet breakpoint', () => {
+    window.innerWidth = 768
     renderApp()
     const app = container.querySelector('.v2-app')
-    // Above the breakpoint the attribute is omitted entirely (was "false").
+    // At 768px+ (tablet/desktop) the mobile attribute is omitted entirely.
     expect(app?.hasAttribute('data-mobile')).toBe(false)
   })
 
   it('renders the always-present mobile bottom tab bar below the breakpoint', () => {
-    window.innerWidth = 900
+    window.innerWidth = 767
     renderApp()
 
     // Mobile navigation is NavRailV2's always-present bottom tab bar.

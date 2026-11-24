@@ -3,17 +3,17 @@ import { useEffect, useState } from 'preact/hooks'
 export interface UseIsMobileOptions {
   /**
    * Viewport width threshold in pixels. Widths at or below this value are
-   * considered mobile. Defaults to 900px to align with the keeper-v2 shell
-   * rail/bottom-tab breakpoint.
+   * considered mobile. Defaults to 767px so tablet/desktop viewports (`>=768px`)
+   * keep the rail layout per the 360 / 768 / 1024 / 1440 breakpoint ladder.
    */
   breakpoint?: number
 }
 
-export const DEFAULT_MOBILE_BREAKPOINT = 900
+export const DEFAULT_MOBILE_BREAKPOINT = 767
 
 /**
  * Tracks whether the viewport width is at or below the given breakpoint.
- * Defaults to 900px. Safe to call in SSR / test environments where
+ * Defaults to 767px (`<768px` mobile). Safe to call in SSR / test environments where
  * `window` may be undefined.
  */
 export function useIsMobile(options: UseIsMobileOptions = {}): boolean {

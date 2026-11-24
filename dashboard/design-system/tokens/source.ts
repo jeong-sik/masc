@@ -147,7 +147,8 @@ export const raw: ReadonlyArray<TokenBase> = (() => {
   out.push(t('lh-body', '1.5', 'raw', 'number', 'Hangul-safe body leading'))
   out.push(t('lh-loose', '1.65', 'raw', 'number'))
 
-  // 4px spacing scale (6 tokens)
+  // 4px spacing scale (+ --sp-0 hairline 2px)
+  out.push(t('sp-0', '2px', 'raw', 'dimension'))
   out.push(t('sp-1', '4px', 'raw', 'dimension'))
   out.push(t('sp-2', '8px', 'raw', 'dimension'))
   out.push(t('sp-3', '12px', 'raw', 'dimension'))

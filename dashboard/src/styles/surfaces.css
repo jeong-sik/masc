@@ -15,7 +15,7 @@
   align-items: start;
 }
 
-@media (max-width: 1080px) {
+@media (max-width: 1023px) {
   .ov-2col {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -39,7 +39,7 @@
 }
 
 .ov-head h1 {
-  margin: 2px 0 0;
+  margin: var(--sp-0) 0 0;
   font-size: var(--fs-20);
   font-weight: 600;
   color: var(--fg-1);
@@ -91,7 +91,7 @@
   min-width: 0;
 }
 
-@media (max-width: 960px) {
+@media (max-width: 1023px) {
   .ap-workspace {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -126,7 +126,7 @@
 }
 
 .ap-viewbtn {
-  padding: 5px 10px;
+  padding: var(--sp-1) var(--sp-3);
   border: none;
   background: transparent;
   color: var(--fg-2);
@@ -220,7 +220,7 @@
   min-width: 0;
 }
 
-@media (max-width: 860px) {
+@media (max-width: 767px) {
   .set-shell {
     grid-template-columns: minmax(0, 1fr);
   }

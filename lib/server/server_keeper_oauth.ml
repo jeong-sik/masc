@@ -229,7 +229,7 @@ let start ?transports ?register ~clock ~(config : Workspace.config) ~keeper ~pro
      | Error (Keeper_github_login_lane.Host_identity_unavailable _ as problem) ->
        Error
          (Printf.sprintf
-            "GitHub uses %s's GitHub CLI token (%s). Please switch to the GitHub tab or run 'gh auth login' to authenticate this keeper."
+            "GitHub uses %s's GitHub CLI token (%s). Authenticate this keeper via the dashboard Keeper Identity panel or run 'gh auth login'."
             keeper
             (Keeper_github_login_lane.stored_token_error_to_string problem))
      | Ok _ ->

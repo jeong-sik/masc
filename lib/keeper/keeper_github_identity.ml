@@ -492,7 +492,7 @@ let stored_token ~config ~keeper_name ~hostname =
   | Ok None ->
     Error
       (Printf.sprintf
-         "keeper %S has no GitHub CLI identity; log it in from the GitHub tab first"
+         "keeper %S has no GitHub CLI identity; authenticate it via the dashboard Keeper Identity panel or 'gh auth login' first"
          keeper_name)
   | Ok (Some content) ->
     (match hosts_yaml_stored_tokens content with

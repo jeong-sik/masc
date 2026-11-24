@@ -206,7 +206,7 @@ export function KeeperIdentityPanel({ keeperName }: KeeperIdentityPanelProps) {
                   ${ownApp === provider.provider && html`
                     <div class="mt-1 flex flex-col gap-1">
                       <p class="text-3xs text-[var(--color-fg-muted)]">
-                        Slack, GitHub, Figma 처럼 앱을 직접 만들어야 하는 서비스에 씁니다. 이 값은 Keeper 하나가 아니라 이 masc 전체가 씁니다.
+                        Slack, Figma 처럼 앱을 직접 만들어야 하는 서비스에 씁니다. 이 값은 Keeper 하나가 아니라 이 masc 전체가 씁니다.
                       </p>
                       <input
                         class="kcf-input mono"

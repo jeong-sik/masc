@@ -376,12 +376,57 @@ let test_memory_diff_through_compaction () =
   check bool "bounded detail read reports archived damage and conflict outside its row window" true
     (not damaged.input_limited && damaged.unreadable = 1 && damaged.conflicting = 1);
   check int "publishing the summary preserves the original damage and conflict evidence" 2 (again ()).unreadable;
+  let live_damage = "different damage in the live log\n" in
+  Out_channel.with_open_bin large (fun oc -> output_string oc live_damage);
+  let separate = read_range at_last in
+  check int "new live damage adds to clipped published cold damage" 2 separate.unreadable;
+  check int "the bounded and full readers count the same independent evidence"
+    (again ()).unreadable (Window.undecodable_rows separate);
+  save (again ());
+  let overlap = read_range at_last in
+  check int "a still-visible live row may already be counted by the clipped publication" 2 overlap.unreadable;
+  check bool "possible overlap between live and clipped archived damage is partial" true overlap.input_limited;
+  let live_checkpoint = match last with
+    | Masc.Librarian_log.Committed commit ->
+      Masc.Librarian_log.Committed { commit with seq = recent_seq + 2 }
+    | Masc.Librarian_log.Started _ -> fail "expected a committed baseline" in
+  (match Log_store.rewrite_compacted ~path:large ~at_end:(String.length live_damage) live_checkpoint with
+   | Ok _ -> () | Error _ -> fail "could not install the new baseline");
+  Out_channel.with_open_gen [Open_wronly; Open_append; Open_binary] 0o600 large
+    (fun oc -> output_string oc "damage after the new baseline\n");
+  let newer = read_range at_last in
+  check int "live damage after a newer checkpoint is separate from clipped live-origin evidence"
+    3 newer.unreadable;
+  check int "later distinct evidence agrees with the full reader"
+    (again ()).unreadable (Window.undecodable_rows newer);
+  Out_channel.with_open_bin large ignore;
   let legacy_footer = `List [`String "librarian.folded.v1"; `Int 3; `Int 1; `Int 3; `Float 1.; `Float 3.] in
   let rows = In_channel.with_open_bin large_archive In_channel.input_lines in
-  let legacy_rows = List.rev (List.tl (List.rev rows)) in
-  Out_channel.with_open_bin large_archive (fun oc ->
-    List.iter (fun row -> output_string oc row; output_char oc '\n') legacy_rows;
-    output_string oc (Yojson.Safe.to_string legacy_footer ^ "\n"));
+  let footer, detail, prefix = match List.rev rows with
+    | footer :: detail :: prefix -> footer, detail, List.rev prefix
+    | _ -> fail "expected a footer and detailed history" in
+  let write_rows rows = Out_channel.with_open_bin large_archive (fun oc ->
+    List.iter (fun row -> output_string oc row; output_char oc '\n') rows) in
+  write_rows (prefix @ ["damaged detail slot"; footer]);
+  let malformed = read_range at_last in
+  check bool "a footer cannot certify a malformed detailed slot" true
+    (malformed.details_limited && malformed.input_limited && malformed.unreadable > 0);
+  write_rows (prefix @ [footer; detail]);
+  check bool "a misplaced footer cannot certify coverage" true (read_range at_last).details_limited;
+  let impossible_footer = match Yojson.Safe.from_string footer with
+    | `List (tag :: detail :: unsequenced :: time :: _ :: rest) ->
+      Yojson.Safe.to_string (`List (tag :: detail :: unsequenced :: time :: `Int max_int :: rest))
+    | _ -> fail "expected archive coverage counters" in
+  write_rows (prefix @ [detail; impossible_footer]);
+  Out_channel.with_open_gen [Open_wronly; Open_append; Open_binary] 0o600 large_archive
+    (fun oc -> output_string oc "torn footer suffix");
+  let impossible = read_range at_last in
+  check bool "an impossible count and a torn suffix leave positive damage and partial coverage" true
+    (impossible.input_limited && impossible.unreadable >= 2
+     && Window.undecodable_rows impossible >= impossible.unreadable);
+  check int "combined unreadable and conflict counts cannot wrap" max_int
+    (Window.undecodable_rows { damaged with unreadable = max_int });
+  write_rows (prefix @ [detail; Yojson.Safe.to_string legacy_footer]);
   let legacy = read_range at_last in
   check bool "an old footer keeps legacy prefix uncertainty separate from sequence diagnostics" true
     (legacy.input_limited && legacy.archive_cut.by_rows && not legacy.details_limited

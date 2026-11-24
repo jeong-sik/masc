@@ -830,7 +830,7 @@ let keeper_diff_json ~now ~config ~keeper_id ~range =
            ; "counts", `Assoc [ "total_facts_now", `Int (List.length current); "added", count added; "updated", count updated
                               ; "retracted", count retracted; "invalidated", count invalidated
                               ; "journal_failures_in_window", `Int 0; "journal_quarantines_in_window", `Int 0
-                              ; "undecodable_journal_lines", `Int (history.unreadable + history.conflicting) ]
+                              ; "undecodable_journal_lines", `Int (Librarian_history_window.undecodable_rows history) ]
            ; "retrieval_heat", `Assoc [ "hot", `Int !hot; "warm", `Int !warm; "cold", `Int !cold; "never_retrieved", `Int !never
                                       ; "total_events", `Int total_events; "unreadable_event_lines", `Int unreadable_events ]
            ; "revisions", `List ticks; "added", body added; "updated", body updated; "retracted", body retracted

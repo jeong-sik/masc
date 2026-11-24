@@ -22,3 +22,7 @@ type t =
     Omitting only unsequenced rows can limit input without hiding diagnostics
     derived from the sequenced rows. *)
 val read : range:range -> max_bytes:int -> string -> (t, Private_jsonl_scan.error) result
+
+val undecodable_rows : t -> int
+(** The unreadable rows plus one for each conflicting sequence, saturated
+    at the largest representable count. *)

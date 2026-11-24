@@ -28,11 +28,22 @@ val max_detailed_rows : int
 type folded =
   { through_seq : int; min_revision : int; max_revision : int; min_at : float; max_at : float }
 
+type damage_origin = Live_log | Cold_archive | Cold_fragment
+
+type damage =
+  { origin : damage_origin
+  ; after_seq : int
+  ; encoded : string
+  }
+
+type live_damage = { rows : int; max_after_seq : int }
+
 type coverage =
   { detail_rows : int
   ; unsequenced_rows : int
   ; unsequenced_time : (float * float) option
   ; unreadable_rows : int
+  ; live_damage : live_damage option
   ; conflicting_sequences : int
   ; last_seq : int
   ; folded_detail : folded option
@@ -45,10 +56,10 @@ type cold_row =
   | Detail of Librarian_memory_change.t
   | Folded of folded
   | Coverage of coverage
-  | Opaque of string
+  | Opaque of damage
   | Invalid
 val cold_row : string -> cold_row
-val damaged_row : origin:string -> at:int -> after_seq:int -> string -> string
+val damaged_row : origin:damage_origin -> at:int -> after_seq:int -> string -> damage
 
 type retained
 

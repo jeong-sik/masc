@@ -91,6 +91,34 @@ type turn_record_entry = {
   diff_vs_prev : turn_block_diff option;
 }
 
+type memory_os_fact_item = {
+  memory_id : string;
+  claim : string;
+  category : string;
+  first_seen : float;
+  current : bool;
+}
+
+type memory_os_change = {
+  added : memory_os_fact_item list;
+  removed : memory_os_fact_item list;
+  retained : int;
+  invalidated_count : int;
+}
+
+type memory_os_turn_snapshot = {
+  recall_enabled : bool;
+  revision : int;
+  updated_at : float option;
+  update_source_kind : string option;
+  update_source_trace_id : string option;
+  facts_shown : int;
+  facts_current : int;
+  facts : memory_os_fact_item list;
+  change : memory_os_change;
+  read_errors : string list;
+}
+
 type turn_records_page = {
   keeper : string;
   count : int;
@@ -98,8 +126,94 @@ type turn_records_page = {
   health : string option;
   stale_reason : string option;
   live_turn_in_progress : bool;
+  memory_os : memory_os_turn_snapshot option;
   entries : turn_record_entry list;
 }
+
+let decode_memory_os_fact_item json =
+  let* memory_id = required_nonblank_string json "memory_id" in
+  let* claim = required_string_field json "claim" in
+  let* category_opt = optional_nonblank_string json "category" in
+  let category = Option.value ~default:"fact" category_opt in
+  let* first_seen_opt = optional_finite_float json "first_seen" in
+  let first_seen = Option.value ~default:0.0 first_seen_opt in
+  let* current_opt = optional_bool_field json "current" in
+  let current = Option.value ~default:true current_opt in
+  Ok { memory_id; claim; category; first_seen; current }
+
+let decode_memory_os_turn_snapshot json =
+  let* recall_opt = optional_bool_field json "recall_enabled" in
+  let recall_enabled = Option.value ~default:false recall_opt in
+  let* rev_opt = optional_int_field json "revision" in
+  let revision = Option.value ~default:0 rev_opt in
+  let* updated_at = optional_finite_float json "updated_at" in
+  let* src_opt = optional_object_field json "update_source" in
+  let* update_source_kind, update_source_trace_id =
+    match src_opt with
+    | None -> Ok (None, None)
+    | Some s ->
+        let* k = optional_nonblank_string s "kind" in
+        let* tid = optional_nonblank_string s "trace_id" in
+        Ok (k, tid)
+  in
+  let* err_list = optional_list_field json "read_errors" in
+  let read_errors =
+    List.filter_map
+      (fun item ->
+        match optional_nonblank_string item "error" with
+        | Ok (Some e) -> Some e
+        | Ok None | Error _ -> (
+            match item with `String s when String.trim s <> "" -> Some s | _ -> None))
+      err_list
+  in
+  let* facts_obj = optional_object_field json "facts" in
+  let* facts_shown, facts_current, facts =
+    match facts_obj with
+    | None -> Ok (0, 0, [])
+    | Some fo ->
+        let* shown = optional_int_field fo "shown" in
+        let* cur = optional_int_field fo "current" in
+        let* raw_items = optional_list_field fo "items" in
+        let* items = decode_list "facts.items" decode_memory_os_fact_item raw_items in
+        Ok
+          ( Option.value ~default:(List.length items) shown,
+            Option.value ~default:(List.length items) cur,
+            items )
+  in
+  let* ch_obj = optional_object_field json "change" in
+  let* change =
+    match ch_obj with
+    | None -> Ok { added = []; removed = []; retained = 0; invalidated_count = 0 }
+    | Some ch ->
+        let* raw_add = optional_list_field ch "added" in
+        let* raw_rem = optional_list_field ch "removed" in
+        let* raw_inv = optional_list_field ch "invalidated" in
+        let* ret = optional_int_field ch "retained" in
+        let* added = decode_list "change.added" decode_memory_os_fact_item raw_add in
+        let* removed =
+          decode_list "change.removed" decode_memory_os_fact_item raw_rem
+        in
+        Ok
+          {
+            added;
+            removed;
+            retained = Option.value ~default:0 ret;
+            invalidated_count = List.length raw_inv;
+          }
+  in
+  Ok
+    {
+      recall_enabled;
+      revision;
+      updated_at;
+      update_source_kind;
+      update_source_trace_id;
+      facts_shown;
+      facts_current;
+      facts;
+      change;
+      read_errors;
+    }
 
 let decode_prompt_block json =
   let* block_str = required_nonblank_string json "block" in
@@ -165,6 +279,12 @@ let decode_turn_records json =
   in
   let* count_opt = optional_int_field body "count" in
   let count = Option.value ~default:(List.length entries) count_opt in
+  let* memory_os_obj = optional_object_field body "memory_os" in
+  let* memory_os =
+    match memory_os_obj with
+    | None -> Ok None
+    | Some mo -> Result.map Option.some (decode_memory_os_turn_snapshot mo)
+  in
   Ok
     {
       keeper;
@@ -173,6 +293,7 @@ let decode_turn_records json =
       health;
       stale_reason;
       live_turn_in_progress;
+      memory_os;
       entries;
     }
 
@@ -1364,3 +1485,586 @@ let encode_github_token_body ~token ?hostname () =
     | Some h when not (String.equal (String.trim h) "") ->
         [ ("hostname", `String (String.trim h)) ]
     | Some _ | None -> []))
+
+(* --- Wave 4 Layer 1: Per-Turn Flow, Checkpoints, Operator Note & Control --- *)
+
+let keeper_turn_flow_path ~keeper ~trace_id ~turn_id ?(limit = 500) () =
+  Printf.sprintf "/api/v1/keepers/%s/runtime-trace?trace_id=%s&turn_id=%d&limit=%d"
+    (percent_encode keeper) (percent_encode trace_id) turn_id
+    (max 1 (min 500 limit))
+
+let keeper_checkpoints_path ~keeper =
+  Printf.sprintf "/api/v1/keepers/%s/checkpoints" (percent_encode keeper)
+
+let keeper_operator_note_path ~keeper =
+  Printf.sprintf "/api/v1/keepers/%s/operator-note" (percent_encode keeper)
+
+let keeper_boot_path ~keeper =
+  Printf.sprintf "/api/v1/keepers/%s/boot" (percent_encode keeper)
+
+let keeper_up_path ~keeper =
+  Printf.sprintf "/api/v1/keepers/%s/up" (percent_encode keeper)
+
+let keeper_shutdown_path ~keeper =
+  Printf.sprintf "/api/v1/keepers/%s/shutdown" (percent_encode keeper)
+
+let keeper_reset_path ~keeper =
+  Printf.sprintf "/api/v1/keepers/%s/reset" (percent_encode keeper)
+
+let keeper_clear_path ~keeper =
+  Printf.sprintf "/api/v1/keepers/%s/clear" (percent_encode keeper)
+
+let keeper_directive_path ~keeper =
+  Printf.sprintf "/api/v1/keepers/%s/directive" (percent_encode keeper)
+
+let keeper_run_next_path = "/api/v1/keepers/turn/run-next"
+
+type turn_intake_source = {
+  stimulus_id : string;
+  source_kind : string option;
+  snapshot_ref : string;
+  admitted_revision : string;
+  first_admitted_at : float option;
+}
+
+type turn_intake_state =
+  | Intake_observed of {
+      channel : string option;
+      sources : turn_intake_source list;
+    }
+  | Intake_not_recorded of string
+  | Intake_unavailable of string
+  | Intake_ambiguous of int
+
+type turn_source_receipt = {
+  transition_id : string;
+  event_id : string;
+  applied_at : float;
+  kind : string;
+}
+
+type turn_source_outcome = {
+  stimulus_id : string;
+  snapshot_ref : string;
+  admitted_revision : string;
+  receipts : turn_source_receipt list;
+}
+
+type turn_source_outcomes =
+  | Outcomes_observed of {
+      observed_at : float;
+      coverage_state : string;
+      rows_inspected : int;
+      sources : turn_source_outcome list;
+    }
+  | Outcomes_unavailable of string
+
+type turn_flow_event = {
+  event : string;
+  status : string;
+  runtime_id : string option;
+  routing_action : string option;
+  routing_reason : string option;
+}
+
+type turn_flow = {
+  keeper : string;
+  trace_id : string;
+  turn_id : int;
+  manifest_total_rows : int;
+  manifest_total_rows_exact : bool option;
+  intake : turn_intake_state;
+  outcomes : turn_source_outcomes;
+  events : turn_flow_event list;
+}
+
+let decode_turn_intake_source json =
+  let* stimulus_id = required_nonblank_string json "stimulus_id" in
+  let* source_kind = optional_nonblank_string json "source_kind" in
+  let* snapshot_ref = required_nonblank_string json "source_snapshot_ref" in
+  let* admitted_revision = required_nonblank_string json "admitted_revision" in
+  let* first_admitted_at = optional_finite_float json "first_admitted_at" in
+  Ok { stimulus_id; source_kind; snapshot_ref; admitted_revision; first_admitted_at }
+
+let decode_turn_source_receipt json =
+  let* transition_id = required_nonblank_string json "transition_id" in
+  let* event_id = required_nonblank_string json "event_id" in
+  let* applied_at = required_finite_float json "applied_at" in
+  let* kind = required_nonblank_string json "kind" in
+  Ok { transition_id; event_id; applied_at; kind }
+
+let decode_turn_source_outcome json =
+  let* stimulus_id = required_nonblank_string json "stimulus_id" in
+  let* snapshot_ref = required_nonblank_string json "source_snapshot_ref" in
+  let* admitted_revision = required_nonblank_string json "admitted_revision" in
+  let* raw_receipts = required_list_field json "receipts" in
+  let* receipts = decode_list "receipts" decode_turn_source_receipt raw_receipts in
+  Ok { stimulus_id; snapshot_ref; admitted_revision; receipts }
+
+let decode_turn_source_outcomes raw =
+  match raw with
+  | `Null -> Outcomes_unavailable "source_outcomes not recorded on this server"
+  | `Assoc _ -> (
+      match optional_nonblank_string raw "state" with
+      | Ok (Some "unavailable") ->
+          let reason =
+            match optional_nonblank_string raw "reason" with
+            | Ok (Some r) -> r
+            | Ok None | Error _ -> "unavailable"
+          in
+          Outcomes_unavailable reason
+      | Ok (Some "observed") -> (
+          let res =
+            let* observed_at = required_finite_float raw "observed_at" in
+            let* cov = required_object_field raw "coverage" in
+            let* coverage_state = required_nonblank_string cov "state" in
+            let* rows_inspected = required_nonnegative_int_field cov "rows_inspected" in
+            let* raw_sources = required_list_field raw "sources" in
+            let* sources =
+              decode_list "source_outcomes.sources" decode_turn_source_outcome
+                raw_sources
+            in
+            Ok (Outcomes_observed { observed_at; coverage_state; rows_inspected; sources })
+          in
+          match res with Ok o -> o | Error e -> Outcomes_unavailable e)
+      | Ok (Some other) -> Outcomes_unavailable ("unknown outcomes state: " ^ other)
+      | Ok None | Error _ -> Outcomes_unavailable "malformed source_outcomes")
+  | _ -> Outcomes_unavailable "malformed source_outcomes"
+
+let decode_turn_flow ~keeper ~trace_id ~turn_id json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* resp_keeper = required_nonblank_string body "keeper" in
+  let* resp_trace = required_nonblank_string body "trace_id" in
+  let* resp_turn = optional_int_field body "turn_id" in
+  if
+    not
+      (String.equal resp_keeper keeper
+       && String.equal resp_trace trace_id
+       && Option.equal Int.equal resp_turn (Some turn_id))
+  then
+    Error
+      (Printf.sprintf "runtime-trace mismatch: expected %s %s#%d" keeper
+         trace_id turn_id)
+  else
+    let* manifest_total_rows_opt = optional_int_field body "manifest_total_rows" in
+    let manifest_total_rows = Option.value ~default:0 manifest_total_rows_opt in
+    let* manifest_total_rows_exact =
+      optional_bool_field body "manifest_total_rows_exact"
+    in
+    let* raw_rows = optional_list_field body "manifest_rows" in
+    let* row_checks =
+      decode_list "manifest_rows"
+        (fun row ->
+          let* rk = optional_nonblank_string row "keeper_name" in
+          let* rt = optional_nonblank_string row "trace_id" in
+          let* rturn = optional_int_field row "keeper_turn_id" in
+          let mismatch =
+            (match rk with Some k -> not (String.equal k keeper) | None -> false)
+            || (match rt with Some t -> not (String.equal t trace_id) | None -> false)
+            || (match rturn with Some n -> not (Int.equal n turn_id) | None -> false)
+          in
+          if mismatch then Error "runtime-trace contains a row for another keeper turn"
+          else
+            let* event = required_nonblank_string row "event" in
+            let* status_opt = optional_nonblank_string row "status" in
+            let status = Option.value ~default:"unknown" status_opt in
+            let* runtime_id = optional_nonblank_string row "runtime_id" in
+            let* dec_opt = optional_object_field row "decision" in
+            let* routing_action, routing_reason =
+              match dec_opt with
+              | None -> Ok (None, None)
+              | Some d ->
+                  let* act = optional_nonblank_string d "routing_action" in
+                  let* rsn = optional_nonblank_string d "routing_reason" in
+                  Ok (act, rsn)
+            in
+            Ok
+              ( { event; status; runtime_id; routing_action; routing_reason },
+                dec_opt ))
+        raw_rows
+    in
+    let events = List.map fst row_checks in
+    let starts =
+      List.filter (fun (ev, _) -> String.equal ev.event "turn_started") row_checks
+    in
+    let scanned_starts =
+      match optional_object_field body "runtime_lens" with
+      | Ok (Some lens) -> (
+          match optional_object_field lens "axes" with
+          | Ok (Some axes) -> (
+              match optional_object_field axes "lifecycle" with
+              | Ok (Some lc) -> (
+                  match optional_int_field lc "turn_started_count" with
+                  | Ok (Some n) when n >= 0 -> Some n
+                  | Ok _ | Error _ -> None)
+              | Ok None | Error _ -> None)
+          | Ok None | Error _ -> None)
+      | Ok None | Error _ -> None
+    in
+    let observed_starts =
+      Int.max (List.length starts) (Option.value ~default:0 scanned_starts)
+    in
+    let diag_ok =
+      match optional_object_field body "manifest_scan_diagnostics" with
+      | Ok (Some d) -> (
+          let schema_ok =
+            match optional_nonblank_string d "schema" with
+            | Ok (Some s) ->
+                String.equal s "keeper.runtime_manifest_scan_diagnostics.v1"
+            | Ok None | Error _ -> false
+          in
+          match
+            ( required_nonnegative_int_field d "invalid_manifest_row_count",
+              required_nonnegative_int_field d "invalid_json_row_count",
+              required_nonnegative_int_field d
+                "unsupported_event_unattributed_count" )
+          with
+          | Ok bad1, Ok bad2, Ok bad3 ->
+              schema_ok && bad1 = 0 && bad2 = 0 && bad3 = 0
+          | (Error _, _, _) | (_, Error _, _) | (_, _, Error _) -> false)
+      | Ok None | Error _ -> false
+    in
+    let* intake =
+      if observed_starts > 1 then Ok (Intake_ambiguous observed_starts)
+      else if manifest_total_rows_exact <> Some true then
+        Ok
+          (Intake_unavailable
+             (if manifest_total_rows_exact = Some false then
+                "partial manifest scan: cannot prove single turn start"
+              else "manifest scan completeness unrecorded"))
+      else if not diag_ok then
+        Ok (Intake_unavailable "manifest scan diagnostics report unreadable rows")
+      else
+        match scanned_starts with
+        | Some n when not (Int.equal n (List.length starts)) ->
+            Ok (Intake_unavailable "scanned start count mismatches returned rows")
+        | Some _ | None -> (
+            match starts with
+            | [] -> Ok (Intake_not_recorded "no turn_started row in scan range")
+            | (_, None) :: _ ->
+                Ok (Intake_not_recorded "turn_started decision missing")
+            | (_, Some dec) :: _ ->
+                if not (has_field dec "intake_sources") then
+                  Ok (Intake_not_recorded "no intake_sources recorded")
+                else
+                  let* raw_srcs = required_list_field dec "intake_sources" in
+                  let* sources =
+                    decode_list "intake_sources" decode_turn_intake_source raw_srcs
+                  in
+                  let* channel = optional_nonblank_string dec "channel" in
+                  Ok (Intake_observed { channel; sources }))
+    in
+    let outcomes =
+      match intake with
+      | Intake_observed _ ->
+          if has_field body "source_outcomes" then
+            decode_turn_source_outcomes (member "source_outcomes" body)
+          else Outcomes_unavailable "source_outcomes not recorded"
+      | Intake_not_recorded _ | Intake_unavailable _ | Intake_ambiguous _ ->
+          Outcomes_unavailable "exact turn intake required to join outcomes"
+    in
+    Ok
+      {
+        keeper;
+        trace_id;
+        turn_id;
+        manifest_total_rows;
+        manifest_total_rows_exact;
+        intake;
+        outcomes;
+        events;
+      }
+
+type checkpoint_summary = {
+  snapshot_id : string;
+  source_kind : string;
+  is_current : bool;
+  status : string;
+  created_at : float option;
+  message_count : int option;
+  system_prompt_present : bool option;
+  latest_preview : string option;
+  size_bytes : int option;
+  error_kind : string option;
+  error_detail : string option;
+}
+
+type keeper_checkpoints_inventory = {
+  keeper : string;
+  trace_id : string;
+  current_status : string;
+  current : checkpoint_summary option;
+  current_error_kind : string option;
+  current_error_detail : string option;
+  history : checkpoint_summary list;
+  history_errors : checkpoint_summary list;
+}
+
+type checkpoint_purge_report = {
+  messages_before : int;
+  messages_after : int;
+  bytes_before : int;
+  bytes_after : int;
+  bytes_removed : int;
+  reasoning_blocks_stripped : int;
+  tool_results_cleared : int;
+  messages_dropped_at_structural_break : int;
+}
+
+type checkpoint_purge_result = {
+  action : string;
+  keeper : string;
+  trace_id : string;
+  apply_allowed : bool;
+  applied : bool;
+  backup_path : string option;
+  report : checkpoint_purge_report;
+  warnings : string list;
+  inventory : keeper_checkpoints_inventory option;
+}
+
+type checkpoint_delete_result = {
+  deleted : string list;
+  missing : string list;
+  refused : string list;
+  failed : string list;
+  inventory : keeper_checkpoints_inventory option;
+}
+
+type keeper_operator_note = {
+  keeper : string;
+  pending : bool;
+  text : string;
+  created_at : float;
+  created_by : string;
+  consumed_at : float option;
+  consumed_turn : int option;
+}
+
+type keeper_directive =
+  | Directive_pause
+  | Directive_wakeup
+  | Directive_resume of { operator_operation_id : string }
+
+let string_or_json_opt json key =
+  match member key json with
+  | `Null -> None
+  | `String s ->
+      let t = String.trim s in
+      if String.equal t "" then None else Some t
+  | other -> Some (Yojson.Safe.to_string other)
+
+let decode_checkpoint_summary json =
+  let* snapshot_id = required_nonblank_string json "snapshot_id" in
+  let* source_kind_opt = optional_nonblank_string json "source_kind" in
+  let source_kind = Option.value ~default:"unknown" source_kind_opt in
+  let* is_current_opt = optional_bool_field json "is_current" in
+  let is_current = Option.value ~default:false is_current_opt in
+  let* status_opt = optional_nonblank_string json "status" in
+  let status = Option.value ~default:"unknown" status_opt in
+  let* created_at = optional_finite_float json "created_at" in
+  let* message_count = optional_int_field json "message_count" in
+  let* system_prompt_present = optional_bool_field json "system_prompt_present" in
+  let* latest_preview = optional_nonblank_string json "latest_preview" in
+  let* file_stat = optional_object_field json "file_stat" in
+  let* size_bytes =
+    match file_stat with
+    | Some st -> optional_int_field st "size_bytes"
+    | None -> Ok None
+  in
+  let* error_kind = optional_nonblank_string json "error_kind" in
+  let error_detail = string_or_json_opt json "error_detail" in
+  Ok
+    {
+      snapshot_id;
+      source_kind;
+      is_current;
+      status;
+      created_at;
+      message_count;
+      system_prompt_present;
+      latest_preview;
+      size_bytes;
+      error_kind;
+      error_detail;
+    }
+
+let decode_keeper_checkpoints_inventory json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* keeper = required_nonblank_string body "keeper" in
+  let* trace_id_opt = optional_nonblank_string body "trace_id" in
+  let trace_id = Option.value ~default:"" trace_id_opt in
+  let* current_status_opt = optional_nonblank_string body "current_status" in
+  let current_status = Option.value ~default:"missing" current_status_opt in
+  let* current_obj = optional_object_field body "current" in
+  let* current =
+    match current_obj with
+    | None -> Ok None
+    | Some c -> Result.map Option.some (decode_checkpoint_summary c)
+  in
+  let* cur_err = optional_object_field body "current_error" in
+  let current_error_kind, current_error_detail =
+    match cur_err with
+    | None -> (None, None)
+    | Some e ->
+        let k =
+          match optional_nonblank_string e "kind" with
+          | Ok v -> v
+          | Error _ -> None
+        in
+        let d = string_or_json_opt e "detail" in
+        (k, d)
+  in
+  let* raw_hist = optional_list_field body "history" in
+  let* history = decode_list "history" decode_checkpoint_summary raw_hist in
+  let* raw_errs = optional_list_field body "history_errors" in
+  let* history_errors =
+    decode_list "history_errors" decode_checkpoint_summary raw_errs
+  in
+  Ok
+    {
+      keeper;
+      trace_id;
+      current_status;
+      current;
+      current_error_kind;
+      current_error_detail;
+      history;
+      history_errors;
+    }
+
+let decode_checkpoint_purge_result json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* action_opt = optional_nonblank_string body "action" in
+  let action = Option.value ~default:"preview_purge" action_opt in
+  let* keeper = required_nonblank_string body "keeper" in
+  let* trace_id_opt = optional_nonblank_string body "trace_id" in
+  let trace_id = Option.value ~default:"" trace_id_opt in
+  let* apply_allowed_opt = optional_bool_field body "apply_allowed" in
+  let apply_allowed = Option.value ~default:false apply_allowed_opt in
+  let* applied_opt = optional_bool_field body "applied" in
+  let applied = Option.value ~default:false applied_opt in
+  let* backup_path = optional_nonblank_string body "backup_path" in
+  let* rpt = required_object_field body "report" in
+  let report =
+    {
+      messages_before = int_or_0_kc rpt "messages_before";
+      messages_after = int_or_0_kc rpt "messages_after";
+      bytes_before = int_or_0_kc rpt "bytes_before";
+      bytes_after = int_or_0_kc rpt "bytes_after";
+      bytes_removed = int_or_0_kc rpt "bytes_removed";
+      reasoning_blocks_stripped = int_or_0_kc rpt "reasoning_blocks_stripped";
+      tool_results_cleared = int_or_0_kc rpt "tool_results_cleared";
+      messages_dropped_at_structural_break =
+        int_or_0_kc rpt "messages_dropped_at_structural_break";
+    }
+  in
+  let* warnings = optional_string_list body "warnings" in
+  let* inv_obj = optional_object_field body "inventory" in
+  let inventory =
+    match inv_obj with
+    | None -> None
+    | Some inv -> (
+        match decode_keeper_checkpoints_inventory inv with
+        | Ok i -> Some i
+        | Error _ -> None)
+  in
+  Ok
+    {
+      action;
+      keeper;
+      trace_id;
+      apply_allowed;
+      applied;
+      backup_path;
+      report;
+      warnings;
+      inventory;
+    }
+
+let decode_checkpoint_delete_result json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* deleted = optional_string_list body "deleted_snapshot_ids" in
+  let* missing = optional_string_list body "missing_snapshot_ids" in
+  let* refused = optional_string_list body "refused_snapshot_ids" in
+  let* failed = optional_string_list body "failed_snapshot_ids" in
+  let* inv_obj = optional_object_field body "inventory" in
+  let inventory =
+    match inv_obj with
+    | None -> None
+    | Some inv -> (
+        match decode_keeper_checkpoints_inventory inv with
+        | Ok i -> Some i
+        | Error _ -> None)
+  in
+  Ok { deleted; missing; refused; failed; inventory }
+
+let decode_keeper_operator_note json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* keeper = required_nonblank_string body "keeper" in
+  let* note = required_object_field body "note" in
+  let* text = required_string_field note "text" in
+  let* created_at = required_finite_float note "created_at" in
+  let* created_by_opt = optional_nonblank_string note "created_by" in
+  let created_by = Option.value ~default:"operator" created_by_opt in
+  let* consumed_at = optional_finite_float note "consumed_at" in
+  let* consumed_turn = optional_int_field note "consumed_turn" in
+  let* pending_opt = optional_bool_field body "pending" in
+  let pending = Option.value ~default:(Option.is_none consumed_at) pending_opt in
+  Ok { keeper; pending; text; created_at; created_by; consumed_at; consumed_turn }
+
+let expected_workspace_json (ws : Wire_work.expected_workspace) =
+  `Assoc
+    [
+      ("base_path", `String ws.base_path);
+      ("masc_root", `String ws.masc_root);
+    ]
+
+let encode_keeper_up_body ?expected_workspace () =
+  match expected_workspace with
+  | None -> `Assoc []
+  | Some ws -> `Assoc [ ("expected_workspace", expected_workspace_json ws) ]
+
+let encode_keeper_clear_body ~reason ~preserve_system_prompt =
+  `Assoc
+    [
+      ("reason", `String (String.trim reason));
+      ("preserve_system_prompt", `Bool preserve_system_prompt);
+    ]
+
+let encode_keeper_directive_body ~expected_workspace directive =
+  let base =
+    match directive with
+    | Directive_pause -> [ ("action", `String "pause") ]
+    | Directive_wakeup -> [ ("action", `String "wakeup") ]
+    | Directive_resume { operator_operation_id } ->
+        [
+          ("action", `String "resume");
+          ("operator_operation_id", `String operator_operation_id);
+        ]
+  in
+  `Assoc (base @ [ ("expected_workspace", expected_workspace_json expected_workspace) ])
+
+let encode_checkpoint_purge_body ~apply =
+  `Assoc [ ("action", `String (if apply then "apply_purge" else "preview_purge")) ]
+
+let encode_checkpoint_delete_history_body ~snapshot_ids =
+  `Assoc
+    [
+      ("action", `String "delete_history");
+      ("snapshot_ids", `List (List.map (fun s -> `String s) snapshot_ids));
+    ]
+
+let encode_operator_note_body ~text = `Assoc [ ("text", `String text) ]
+
+let encode_keeper_run_next_body ~keeper ~request_id ?interrupt_token () =
+  let base =
+    [ ("name", `String keeper); ("request_id", `String request_id) ]
+  in
+  let extra =
+    match interrupt_token with
+    | Some tok when not (String.equal (String.trim tok) "") ->
+        [ ("interrupt_token", `String (String.trim tok)) ]
+    | Some _ | None -> []
+  in
+  `Assoc (base @ extra)

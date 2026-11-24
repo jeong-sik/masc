@@ -3171,10 +3171,14 @@ let test_agui_chat_stream_and_history_provenance () =
             }|}))
   in
   (match attempt_started with
-  | Wire_fleet.Chunk_runtime_attempt_started { operation_id = Some "tui-99-1" }
-    ->
+  | Wire_fleet.Chunk_runtime_attempt_started
+      {
+        operation_id = Some "tui-99-1";
+        runtime_id = Some "rt-2";
+        attempt_index = Some 2;
+      } ->
       ()
-  | _ -> Alcotest.fail "expected Chunk_runtime_attempt_started");
+  | _ -> Alcotest.fail "expected Chunk_runtime_attempt_started with runtime_id & attempt_index");
   let text_delta_owned =
     expect_ok "TEXT_MESSAGE_CONTENT decodes textResponse"
       (Wire_fleet.decode_chat_stream_chunk
@@ -5896,6 +5900,236 @@ let test_timeout_diagnostics_and_sanitization () =
     Eio.Switch.fail sw Exit
   with Exit -> ()
 
+let test_wave4_layer1_wire_codecs () =
+  (* 1. AG-UI retry, checkpoint, native tool progress, stream protocol error *)
+  let retry =
+    expect_ok "decode KEEPER_PROVIDER_RETRY"
+      (Wire_fleet.decode_chat_stream_chunk
+         (parse_json
+            {|{
+              "type": "CUSTOM",
+              "runId": "keeper-operation-run-op-1",
+              "name": "KEEPER_PROVIDER_RETRY",
+              "value": {
+                "attempt": { "routing_run_id": "r1", "runtime_id": "claude-main", "lane_attempt_index": 1 },
+                "retry": { "observation_id": "o1", "attempt": 2, "max_retries": 4, "retry_delay_ms": 1500, "error_status": 429 }
+              }
+            }|}))
+  in
+  (match retry with
+  | Wire_fleet.Chunk_provider_retry
+      {
+        operation_id = Some "op-1";
+        runtime_id = Some "claude-main";
+        attempt = 2;
+        max_retries = 4;
+        retry_delay_ms = 1500;
+        error_status = Some 429;
+      } ->
+      ()
+  | _ -> Alcotest.fail "expected Chunk_provider_retry");
+  let ckpt =
+    expect_ok "decode KEEPER_CONTINUATION_CHECKPOINT"
+      (Wire_fleet.decode_chat_stream_chunk
+         (parse_json
+            {|{
+              "type": "CUSTOM",
+              "runId": "keeper-operation-run-op-1",
+              "name": "KEEPER_CONTINUATION_CHECKPOINT",
+              "value": { "message": "saved after tool batch", "request_id": "req-7" }
+            }|}))
+  in
+  (match ckpt with
+  | Wire_fleet.Chunk_continuation_checkpoint
+      {
+        operation_id = Some "op-1";
+        message = "saved after tool batch";
+        request_id = Some "req-7";
+      } ->
+      ()
+  | _ -> Alcotest.fail "expected Chunk_continuation_checkpoint");
+  let prog =
+    expect_ok "decode KEEPER_NATIVE_TOOL_PROGRESS"
+      (Wire_fleet.decode_chat_stream_chunk
+         (parse_json
+            {|{
+              "type": "CUSTOM",
+              "runId": "keeper-operation-run-op-1",
+              "name": "KEEPER_NATIVE_TOOL_PROGRESS",
+              "value": {
+                "toolStreamScope": 1,
+                "toolCallBlockIndex": 0,
+                "toolCallId": "tc-9",
+                "toolCallName": "Bash",
+                "progress": { "kind": "output_observed", "byte_count": 512 }
+              }
+            }|}))
+  in
+  (match prog with
+  | Wire_fleet.Chunk_native_tool_progress
+      {
+        operation_id = Some "op-1";
+        tool_use_id = "scope-1-block-0";
+        tool_name = Some "Bash";
+        progress_label = "512B out";
+      } ->
+      ()
+  | _ -> Alcotest.fail "expected Chunk_native_tool_progress");
+  (* 2. Turn Flow decoder validates exact turn identity and decodes intake + outcomes *)
+  let flow =
+    expect_ok "decode_turn_flow observed"
+      (Wire_keeper_context.decode_turn_flow ~keeper:"alpha" ~trace_id:"tr-1"
+         ~turn_id:4
+         (parse_json
+            {|{
+              "keeper": "alpha",
+              "trace_id": "tr-1",
+              "turn_id": 4,
+              "manifest_total_rows": 2,
+              "manifest_total_rows_exact": true,
+              "manifest_scan_diagnostics": {
+                "schema": "keeper.runtime_manifest_scan_diagnostics.v1",
+                "unsupported_event_count": 0,
+                "unsupported_event_counts": [],
+                "invalid_manifest_row_count": 0,
+                "invalid_json_row_count": 0,
+                "unsupported_event_unattributed_count": 0,
+                "samples": []
+              },
+              "runtime_lens": { "axes": { "lifecycle": { "turn_started_count": 1 } } },
+              "manifest_rows": [
+                {
+                  "keeper_name": "alpha",
+                  "trace_id": "tr-1",
+                  "keeper_turn_id": 4,
+                  "event": "turn_started",
+                  "status": "ok",
+                  "runtime_id": "claude-main",
+                  "decision": {
+                    "channel": "direct",
+                    "routing_action": "dispatch",
+                    "routing_reason": "primary",
+                    "intake_sources": [
+                      {
+                        "stimulus_id": "stim-1",
+                        "source_kind": "chat",
+                        "source_snapshot_ref": "snap-1",
+                        "admitted_revision": "rev-1",
+                        "first_admitted_at": 1795252000.0
+                      }
+                    ]
+                  }
+                }
+              ],
+              "source_outcomes": {
+                "schema": "masc.keeper.turn-source-outcomes/v1",
+                "state": "observed",
+                "observed_at": 1795252005.0,
+                "coverage": {
+                  "state": "read",
+                  "rows_inspected": 1,
+                  "invalid_json_rows": 0,
+                  "invalid_ledger_rows": 0,
+                  "storage_error": false
+                },
+                "sources": [
+                  {
+                    "stimulus_id": "stim-1",
+                    "source_snapshot_ref": "snap-1",
+                    "admitted_revision": "rev-1",
+                    "receipts": [
+                      {
+                        "transition_id": "tx-1",
+                        "event_id": "ev-1",
+                        "applied_at": 1795252004.0,
+                        "kind": "ack_turn_completed"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }|}))
+  in
+  (match flow.intake with
+  | Wire_keeper_context.Intake_observed { channel = Some "direct"; sources = [ s ] } ->
+      Alcotest.(check string) "stimulus_id" "stim-1" s.stimulus_id
+  | _ -> Alcotest.fail "expected Intake_observed");
+  ignore
+    (expect_err "decode_turn_flow rejects wrong turn_id"
+       (Wire_keeper_context.decode_turn_flow ~keeper:"alpha" ~trace_id:"tr-1"
+          ~turn_id:99
+          (parse_json {|{"keeper":"alpha","trace_id":"tr-1","turn_id":4}|}))
+      : string);
+  (* 3. Checkpoints inventory + purge + operator note + directive/clear encoders *)
+  let inv =
+    expect_ok "decode_keeper_checkpoints_inventory"
+      (Wire_keeper_context.decode_keeper_checkpoints_inventory
+         (parse_json
+            {|{
+              "keeper": "alpha",
+              "trace_id": "tr-1",
+              "current_status": "available",
+              "current": {
+                "snapshot_id": "tr-1.json",
+                "source_kind": "agent_core_current",
+                "is_current": true,
+                "status": "available",
+                "message_count": 42,
+                "file_stat": { "size_bytes": 8192, "mtime": 1795252000.0 }
+              },
+              "current_error": null,
+              "history": [],
+              "history_errors": []
+            }|}))
+  in
+  Alcotest.(check string) "ckpt status" "available" inv.current_status;
+  let del_res =
+    expect_ok "decode_checkpoint_delete_result server keys"
+      (Wire_keeper_context.decode_checkpoint_delete_result
+         (parse_json
+            {|{
+              "deleted_snapshot_ids": ["snap-1", "snap-2"],
+              "missing_snapshot_ids": ["snap-missing"],
+              "refused_snapshot_ids": ["snap-cur"],
+              "failed_snapshot_ids": []
+            }|}))
+  in
+  Alcotest.(check (list string)) "deleted_snapshot_ids" [ "snap-1"; "snap-2" ]
+    del_res.deleted;
+  Alcotest.(check (list string)) "missing_snapshot_ids" [ "snap-missing" ]
+    del_res.missing;
+  Alcotest.(check (list string)) "refused_snapshot_ids" [ "snap-cur" ]
+    del_res.refused;
+  let note =
+    expect_ok "decode_keeper_operator_note"
+      (Wire_keeper_context.decode_keeper_operator_note
+         (parse_json
+            {|{
+              "keeper": "alpha",
+              "pending": true,
+              "note": {
+                "text": "focus on P0",
+                "created_at": 1795252000.0,
+                "created_by": "admin",
+                "consumed_at": null,
+                "consumed_turn": null
+              }
+            }|}))
+  in
+  Alcotest.(check bool) "note pending" true note.pending;
+  let ws : Wire_work.expected_workspace =
+    { base_path = "/tmp/ws"; masc_root = "/tmp/ws/.masc" }
+  in
+  let dir_json =
+    Wire_keeper_context.encode_keeper_directive_body ~expected_workspace:ws
+      (Wire_keeper_context.Directive_resume { operator_operation_id = "op-uuid-1" })
+    |> Yojson.Safe.to_string
+  in
+  Alcotest.(check bool) "resume body carries operator_operation_id" true
+    (String.length dir_json > 0
+     && Wire_common.has_field (parse_json dir_json) "operator_operation_id"
+     && Wire_common.has_field (parse_json dir_json) "expected_workspace")
+
 let () =
   Alcotest.run "masc_tui_v2_protocol_net"
     [
@@ -5942,6 +6176,8 @@ let () =
             test_wave2_live_wire_codecs;
           Alcotest.test_case "Feature Wave 3: Fusion, Harness, Verification Evidence, Code/Git, Memory, Keeper Logs & Identity, Addons Catalog, Connector Names" `Quick
             test_wave3_live_wire_codecs;
+          Alcotest.test_case "Feature Wave 4 Layer 1: Turn Flow, Memory OS snapshot, Checkpoints, Operator Note & AG-UI Retry/Progress" `Quick
+            test_wave4_layer1_wire_codecs;
         ] );
       ( "net"
       , [

@@ -1969,6 +1969,80 @@ let inline_modal_for kind =
             secret = false;
           };
         ]
+    | Nav.Keeper_control_confirm { keeper; action } -> (
+        let base_confirm =
+          {
+            key = "confirm";
+            label =
+              Say.make
+                ~ko:(Printf.sprintf "확인: 키퍼 이름(%s)을 정확히 입력" keeper)
+                ~en:(Printf.sprintf "Confirm: type keeper name (%s)" keeper);
+            value = "";
+            required = true;
+            secret = false;
+          }
+        in
+        match action with
+        | Nav.Keeper_act_delete_history ->
+            [
+              {
+                key = "snapshot_ids";
+                label =
+                  Say.make ~ko:"삭제할 스냅샷 ID (쉼표 구분)"
+                    ~en:"Snapshot IDs to delete (comma-separated)";
+                value = "";
+                required = true;
+                secret = false;
+              };
+              base_confirm;
+            ]
+        | Nav.Keeper_act_shutdown
+        | Nav.Keeper_act_reset
+        | Nav.Keeper_act_apply_purge ->
+            [ base_confirm ])
+    | Nav.Keeper_clear_form keeper ->
+        [
+          {
+            key = "reason";
+            label =
+              Say.make ~ko:"초기화 사유 (감사 기록 필수)"
+                ~en:"Clear reason (required for audit trail)";
+            value = "";
+            required = true;
+            secret = false;
+          };
+          {
+            key = "preserve_system_prompt";
+            label =
+              Say.make ~ko:"시스템 프롬프트 유지 (true/false)"
+                ~en:"Preserve system prompt (true/false)";
+            value = "true";
+            required = true;
+            secret = false;
+          };
+          {
+            key = "confirm";
+            label =
+              Say.make
+                ~ko:(Printf.sprintf "확인: 키퍼 이름(%s)을 정확히 입력" keeper)
+                ~en:(Printf.sprintf "Confirm: type keeper name (%s)" keeper);
+            value = "";
+            required = true;
+            secret = false;
+          };
+        ]
+    | Nav.Keeper_operator_note_form _ ->
+        [
+          {
+            key = "text";
+            label =
+              Say.make ~ko:"다음 턴 운영자 노트 (최대 4KB)"
+                ~en:"Next-turn operator note (max 4KB)";
+            value = "";
+            required = true;
+            secret = false;
+          };
+        ]
   in
   let active_field =
     match kind with
@@ -1989,6 +2063,9 @@ let inline_modal_for kind =
     | Nav.Github_token_form _
     | Nav.Code_finder_form
     | Nav.Code_search_form
+    | Nav.Keeper_control_confirm _
+    | Nav.Keeper_clear_form _
+    | Nav.Keeper_operator_note_form _
     | Nav.Runtime_lane_create
     | Nav.Runtime_lane_edit _
     | Nav.Runtime_lane_delete _

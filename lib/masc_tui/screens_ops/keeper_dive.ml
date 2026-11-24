@@ -472,6 +472,40 @@ let build_stream_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
   let rows = ref [] in
   let push r = rows := r :: !rows in
   let push_all rs = List.iter push rs in
+  (* 0. Live Runtime Attempt / Provider Retry / Checkpoint / Protocol Banners *)
+  (match sp.show_retry with
+  | Some retry_s ->
+      push
+        (single_span_row ~rail_rgb:theme.status_attention
+           ~prefix:(Glyph.to_utf8 Glyph.Action_required ^ " ")
+           ~prefix_fg:theme.status_attention ~prefix_attrs:Attr.bold
+           ~text:
+             (Ops_common.say model ~ko:("프로바이더 재시도: " ^ retry_s)
+                ~en:("Provider retry: " ^ retry_s))
+           ~text_fg:theme.status_attention ~bg_rgb:base_bg ~attrs:Attr.bold ())
+  | None -> ());
+  (match sp.show_checkpoint with
+  | Some ckpt_s ->
+      push
+        (single_span_row ~rail_rgb:theme.status_active
+           ~prefix:(Glyph.to_utf8 Glyph.Ai_spark ^ " ")
+           ~prefix_fg:theme.status_active ~prefix_attrs:Attr.bold
+           ~text:
+             (Ops_common.say model ~ko:("체크포인트: " ^ ckpt_s)
+                ~en:("Checkpoint: " ^ ckpt_s))
+           ~text_fg:theme.text_secondary ~bg_rgb:base_bg ~attrs:Attr.italic ())
+  | None -> ());
+  (match sp.show_protocol_warning with
+  | Some warn_s ->
+      push
+        (single_span_row ~rail_rgb:theme.status_critical
+           ~prefix:(Glyph.to_utf8 Glyph.Live_failing ^ " ")
+           ~prefix_fg:theme.status_critical ~prefix_attrs:Attr.bold
+           ~text:
+             (Ops_common.say model ~ko:("스트림 경고: " ^ warn_s)
+                ~en:("Stream protocol notice: " ^ warn_s))
+           ~text_fg:theme.status_critical ~bg_rgb:base_bg ())
+  | None -> ());
   (* 1. Keeper Thinking / Reasoning: Violet ▎ (status_ai) + ✦ (Ai_spark) + Tier-4 italic! *)
   if sp.show_thinking then begin
     let approx_toks = Int.max 1 (String.length buf.thinking / 4) in
@@ -531,11 +565,12 @@ let build_stream_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
           match tc.tool_state with
           | Fleet_store.Tool_pending ->
             ( theme.status_active
-            , Glyph.to_utf8 Glyph.Live_working ^ " run"
+            , Glyph.to_utf8 Glyph.Live_working ^ " " ^ Option.value tc.progress_label ~default:"run"
             , theme.status_active )
           | Fleet_store.Tool_result_pending _ ->
               ( theme.status_active
-              , Ops_common.say model ~ko:"결과 대기" ~en:"Awaiting result"
+              , (let waiting = Ops_common.say model ~ko:"결과 대기" ~en:"Awaiting result" in
+                 Option.fold ~none:waiting ~some:(fun label -> waiting ^ " · " ^ label) tc.progress_label)
               , theme.status_active )
           | Fleet_store.Tool_unfinished ->
               ( theme.border_inactive
@@ -600,9 +635,13 @@ let build_stream_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
   (* 3. Live Assistant Text Delta *)
   if sp.show_text then begin
     let fg = theme.text_secondary in
+    let label = match sp.show_runtime_meta with
+      | Some runtime -> "@" ^ keeper_name ^ " · " ^ runtime
+      | None -> "@" ^ keeper_name
+    in
     push
       (single_span_row ~prefix:(Glyph.to_utf8 Glyph.Live_healthy ^ " ") ~prefix_fg:fg
-         ~prefix_attrs:Attr.bold ~text:("@" ^ keeper_name)
+         ~prefix_attrs:Attr.bold ~text:label
          ~text_fg:theme.text_bright ~attrs:Attr.bold
          ~bg_rgb:base_bg ());
     push_all

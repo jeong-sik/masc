@@ -1,4 +1,4 @@
-(** Converged 22 orthogonal slash commands with strict typed parsing, fuzzy
+(** Converged 23 orthogonal slash commands with strict typed parsing, fuzzy
     filtering, and prefix completion.
 
     Strict parse contract ([constitution.xml#strict_parse_no_default]):
@@ -24,6 +24,7 @@ type command_id =
   | Cmd_btw
   | Cmd_queue
   | Cmd_context
+  | Cmd_ctl
   | Cmd_tools
   | Cmd_clear
   | Cmd_theme
@@ -44,6 +45,22 @@ type tools_mode =
   | Tools_results
   | Tools_full
 
+type keeper_ctl_action =
+  | Ctl_boot
+  | Ctl_up
+  | Ctl_shutdown
+  | Ctl_pause
+  | Ctl_resume
+  | Ctl_wakeup
+  | Ctl_reset
+  | Ctl_clear
+  | Ctl_checkpoints
+  | Ctl_purge_preview
+  | Ctl_purge_apply
+  | Ctl_delete_history
+  | Ctl_note
+  | Ctl_run_next
+
 type parsed =
   | Pulse
   | Work
@@ -60,6 +77,7 @@ type parsed =
   | Btw of string
   | Queue
   | Context
+  | Ctl of { action : keeper_ctl_action; target : string option }
   | Tools of tools_mode option
   | Clear
   | Theme of Theme.preset option
@@ -84,11 +102,12 @@ type spec = {
 }
 
 val all : spec list
-(** All 22 canonical slash command specifications in display order. *)
+(** All 23 canonical slash command specifications in display order. *)
 
 val equal_command_id : command_id -> command_id -> bool
 val equal_category : category -> category -> bool
 val equal_tools_mode : tools_mode -> tools_mode -> bool
+val equal_keeper_ctl_action : keeper_ctl_action -> keeper_ctl_action -> bool
 val equal_parsed : parsed -> parsed -> bool
 val equal_parse_error : parse_error -> parse_error -> bool
 

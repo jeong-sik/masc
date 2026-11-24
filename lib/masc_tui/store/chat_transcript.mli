@@ -99,6 +99,10 @@ val explicit_interrupt_target :
 
 type stream_projection = {
   buf : Fleet_store.chat_stream_buffer;
+  show_runtime_meta : string option;
+  show_retry : string option;
+  show_checkpoint : string option;
+  show_protocol_warning : string option;
   show_thinking : bool;
   show_tools : bool;
   show_text : bool;

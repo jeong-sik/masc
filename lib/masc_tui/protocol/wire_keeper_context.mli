@@ -39,6 +39,17 @@ val keeper_tool_result_path :
 
 val keeper_metrics_path : keeper:string -> string
 val keeper_sandbox_logs_path : keeper:string -> ?tail:int -> unit -> string
+val keeper_turn_flow_path :
+  keeper:string -> trace_id:string -> turn_id:int -> ?limit:int -> unit -> string
+val keeper_checkpoints_path : keeper:string -> string
+val keeper_operator_note_path : keeper:string -> string
+val keeper_boot_path : keeper:string -> string
+val keeper_up_path : keeper:string -> string
+val keeper_shutdown_path : keeper:string -> string
+val keeper_reset_path : keeper:string -> string
+val keeper_clear_path : keeper:string -> string
+val keeper_directive_path : keeper:string -> string
+val keeper_run_next_path : string
 val oauth_providers_path : string
 val oauth_attached_tools_path : keeper:string -> string
 val oauth_attempt_status_path :
@@ -64,6 +75,34 @@ type turn_record_entry = {
   diff_vs_prev : turn_block_diff option;
 }
 
+type memory_os_fact_item = {
+  memory_id : string;
+  claim : string;
+  category : string;
+  first_seen : float;
+  current : bool;
+}
+
+type memory_os_change = {
+  added : memory_os_fact_item list;
+  removed : memory_os_fact_item list;
+  retained : int;
+  invalidated_count : int;
+}
+
+type memory_os_turn_snapshot = {
+  recall_enabled : bool;
+  revision : int;
+  updated_at : float option;
+  update_source_kind : string option;
+  update_source_trace_id : string option;
+  facts_shown : int;
+  facts_current : int;
+  facts : memory_os_fact_item list;
+  change : memory_os_change;
+  read_errors : string list;
+}
+
 type turn_records_page = {
   keeper : string;
   count : int;
@@ -71,6 +110,7 @@ type turn_records_page = {
   health : string option;
   stale_reason : string option;
   live_turn_in_progress : bool;
+  memory_os : memory_os_turn_snapshot option;
   entries : turn_record_entry list; (** Newest-first after decoding. *)
 }
 
@@ -441,3 +481,170 @@ val encode_oauth_disconnect_body :
   keeper:string -> provider:string -> Yojson.Safe.t
 val encode_github_token_body :
   token:string -> ?hostname:string -> unit -> Yojson.Safe.t
+
+(** {1 Wave 4 Layer 1: Per-Turn Flow, Checkpoints, Operator Note & Lifecycle Control} *)
+
+type turn_intake_source = {
+  stimulus_id : string;
+  source_kind : string option;
+  snapshot_ref : string;
+  admitted_revision : string;
+  first_admitted_at : float option;
+}
+
+type turn_intake_state =
+  | Intake_observed of {
+      channel : string option;
+      sources : turn_intake_source list;
+    }
+  | Intake_not_recorded of string
+  | Intake_unavailable of string
+  | Intake_ambiguous of int
+
+type turn_source_receipt = {
+  transition_id : string;
+  event_id : string;
+  applied_at : float;
+  kind : string;
+}
+
+type turn_source_outcome = {
+  stimulus_id : string;
+  snapshot_ref : string;
+  admitted_revision : string;
+  receipts : turn_source_receipt list;
+}
+
+type turn_source_outcomes =
+  | Outcomes_observed of {
+      observed_at : float;
+      coverage_state : string;
+      rows_inspected : int;
+      sources : turn_source_outcome list;
+    }
+  | Outcomes_unavailable of string
+
+type turn_flow_event = {
+  event : string;
+  status : string;
+  runtime_id : string option;
+  routing_action : string option;
+  routing_reason : string option;
+}
+
+type turn_flow = {
+  keeper : string;
+  trace_id : string;
+  turn_id : int;
+  manifest_total_rows : int;
+  manifest_total_rows_exact : bool option;
+  intake : turn_intake_state;
+  outcomes : turn_source_outcomes;
+  events : turn_flow_event list;
+}
+
+val decode_turn_flow :
+  keeper:string ->
+  trace_id:string ->
+  turn_id:int ->
+  Yojson.Safe.t ->
+  (turn_flow, string) result
+
+type checkpoint_summary = {
+  snapshot_id : string;
+  source_kind : string;
+  is_current : bool;
+  status : string;
+  created_at : float option;
+  message_count : int option;
+  system_prompt_present : bool option;
+  latest_preview : string option;
+  size_bytes : int option;
+  error_kind : string option;
+  error_detail : string option;
+}
+
+type keeper_checkpoints_inventory = {
+  keeper : string;
+  trace_id : string;
+  current_status : string;
+  current : checkpoint_summary option;
+  current_error_kind : string option;
+  current_error_detail : string option;
+  history : checkpoint_summary list;
+  history_errors : checkpoint_summary list;
+}
+
+type checkpoint_purge_report = {
+  messages_before : int;
+  messages_after : int;
+  bytes_before : int;
+  bytes_after : int;
+  bytes_removed : int;
+  reasoning_blocks_stripped : int;
+  tool_results_cleared : int;
+  messages_dropped_at_structural_break : int;
+}
+
+type checkpoint_purge_result = {
+  action : string;
+  keeper : string;
+  trace_id : string;
+  apply_allowed : bool;
+  applied : bool;
+  backup_path : string option;
+  report : checkpoint_purge_report;
+  warnings : string list;
+  inventory : keeper_checkpoints_inventory option;
+}
+
+type checkpoint_delete_result = {
+  deleted : string list;
+  missing : string list;
+  refused : string list;
+  failed : string list;
+  inventory : keeper_checkpoints_inventory option;
+}
+
+type keeper_operator_note = {
+  keeper : string;
+  pending : bool;
+  text : string;
+  created_at : float;
+  created_by : string;
+  consumed_at : float option;
+  consumed_turn : int option;
+}
+
+type keeper_directive =
+  | Directive_pause
+  | Directive_wakeup
+  | Directive_resume of { operator_operation_id : string }
+
+val decode_keeper_checkpoints_inventory :
+  Yojson.Safe.t -> (keeper_checkpoints_inventory, string) result
+val decode_checkpoint_purge_result :
+  Yojson.Safe.t -> (checkpoint_purge_result, string) result
+val decode_checkpoint_delete_result :
+  Yojson.Safe.t -> (checkpoint_delete_result, string) result
+val decode_keeper_operator_note :
+  Yojson.Safe.t -> (keeper_operator_note, string) result
+
+val encode_keeper_up_body :
+  ?expected_workspace:Wire_work.expected_workspace -> unit -> Yojson.Safe.t
+val encode_keeper_clear_body :
+  reason:string -> preserve_system_prompt:bool -> Yojson.Safe.t
+val encode_keeper_directive_body :
+  expected_workspace:Wire_work.expected_workspace ->
+  keeper_directive ->
+  Yojson.Safe.t
+val encode_checkpoint_purge_body : apply:bool -> Yojson.Safe.t
+val encode_checkpoint_delete_history_body :
+  snapshot_ids:string list -> Yojson.Safe.t
+val encode_operator_note_body : text:string -> Yojson.Safe.t
+val encode_keeper_run_next_body :
+  keeper:string ->
+  request_id:string ->
+  ?interrupt_token:string ->
+  unit ->
+  Yojson.Safe.t

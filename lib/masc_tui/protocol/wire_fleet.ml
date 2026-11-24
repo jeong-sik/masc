@@ -1643,7 +1643,35 @@ type chat_stream_chunk =
       control_token : string option;
     }
   | Chunk_run_started of { operation_id : string option }
-  | Chunk_runtime_attempt_started of { operation_id : string option }
+  | Chunk_runtime_attempt_started of {
+      operation_id : string option;
+      runtime_id : string option;
+      attempt_index : int option;
+    }
+  | Chunk_provider_retry of {
+      operation_id : string option;
+      runtime_id : string option;
+      attempt : int;
+      max_retries : int;
+      retry_delay_ms : int;
+      error_status : int option;
+    }
+  | Chunk_continuation_checkpoint of {
+      operation_id : string option;
+      message : string;
+      request_id : string option;
+    }
+  | Chunk_native_tool_progress of {
+      operation_id : string option;
+      tool_use_id : string;
+      tool_name : string option;
+      progress_label : string;
+    }
+  | Chunk_stream_protocol_error of {
+      operation_id : string option;
+      kind : string;
+      reason : string option;
+    }
   | Chunk_text_delta of {
       operation_id : string option;
       delta : string;
@@ -1693,7 +1721,9 @@ type chat_stream_chunk =
       ok : bool option;
       output_preview : string option;
     }
-  | Chunk_tool_quarantined of { operation_id : string option; tool_use_id : string }
+  | Chunk_tool_quarantined of {
+      operation_id : string option; tool_use_id : string; kind : string; reason : string option;
+    }
   | Chunk_reply_details of {
       operation_id : string option;
       reply : string;
@@ -2184,20 +2214,136 @@ let decode_custom_chat_chunk json =
              ok;
              output_preview = None;
            })
-  | "KEEPER_RUNTIME_ATTEMPT_STARTED" ->
-      Ok (Chunk_runtime_attempt_started { operation_id = outer_op_id })
-  | "KEEPER_STREAM_PROTOCOL_ERROR" -> (
-      let* value = required_object_field json "value" in
-      let* occurrence = optional_object_field value "quarantined_occurrence" in
-      match occurrence with
+  | "KEEPER_RUNTIME_ATTEMPT_STARTED" -> (
+      let* value_opt = optional_object_field json "value" in
+      match value_opt with
+      | None ->
+          Ok
+            (Chunk_runtime_attempt_started
+               {
+                 operation_id = outer_op_id;
+                 runtime_id = None;
+                 attempt_index = None;
+               })
+      | Some value ->
+          let* runtime_id = optional_nonblank_string value "runtime_id" in
+          let* attempt_index = optional_int_field value "attempt_index" in
+          Ok
+            (Chunk_runtime_attempt_started
+               { operation_id = outer_op_id; runtime_id; attempt_index }))
+  | "KEEPER_PROVIDER_RETRY" -> (
+      let* value_opt = optional_object_field json "value" in
+      match value_opt with
       | None -> Ok Chunk_ignored
+      | Some value ->
+          let* attempt_obj = optional_object_field value "attempt" in
+          let* runtime_id =
+            match attempt_obj with
+            | Some a -> optional_nonblank_string a "runtime_id"
+            | None -> Ok None
+          in
+          let* retry_obj = optional_object_field value "retry" in
+          match retry_obj with
+          | None -> Ok Chunk_ignored
+          | Some r ->
+              let* attempt = optional_int_field r "attempt" in
+              let* max_retries = optional_int_field r "max_retries" in
+              let* retry_delay_ms = optional_int_field r "retry_delay_ms" in
+              let* error_status = optional_int_field r "error_status" in
+              Ok
+                (Chunk_provider_retry
+                   {
+                     operation_id = outer_op_id;
+                     runtime_id;
+                     attempt = Option.value ~default:1 attempt;
+                     max_retries = Option.value ~default:0 max_retries;
+                     retry_delay_ms = Option.value ~default:0 retry_delay_ms;
+                     error_status;
+                   }))
+  | "KEEPER_CONTINUATION_CHECKPOINT" -> (
+      let* value_opt = optional_object_field json "value" in
+      match value_opt with
+      | None -> Ok Chunk_ignored
+      | Some value ->
+          let* msg_opt = optional_nonblank_string value "message" in
+          let* request_id = optional_nonblank_string value "request_id" in
+          match msg_opt with
+          | Some message ->
+              Ok
+                (Chunk_continuation_checkpoint
+                   { operation_id = outer_op_id; message; request_id })
+          | None -> Ok Chunk_ignored)
+  | "KEEPER_NATIVE_TOOL_PROGRESS" -> (
+      let* value_opt = optional_object_field json "value" in
+      match value_opt with
+      | None -> Ok Chunk_ignored
+      | Some value -> (
+          let* tool_use_id = resolve_tool_use_id value in
+          let* tool_name = optional_nonblank_string value "toolCallName" in
+          let* progress_opt = optional_object_field value "progress" in
+          let progress_label =
+            match progress_opt with
+            | None -> None
+            | Some p -> (
+                match optional_nonblank_string p "kind" with
+                | Ok (Some "output_observed") -> (
+                    match optional_int_field p "byte_count" with
+                    | Ok (Some n) -> Some (Printf.sprintf "%dB out" n)
+                    | Ok None | Error _ -> Some "output")
+                | Ok (Some "message_reported") -> (
+                    match optional_nonblank_string p "message" with
+                    | Ok (Some m) -> Some m
+                    | Ok None | Error _ -> Some "progress")
+                | Ok (Some "heartbeat_reported") -> (
+                    match optional_int_field p "elapsed_seconds" with
+                    | Ok (Some s) -> Some (Printf.sprintf "%ds" s)
+                    | Ok None | Error _ -> Some "running")
+                | Ok (Some "retry_reported") -> (
+                    let att =
+                      match optional_int_field p "attempt" with
+                      | Ok (Some n) -> n
+                      | Ok None | Error _ -> 1
+                    in
+                    let max_r =
+                      match optional_int_field p "max_retries" with
+                      | Ok (Some n) -> n
+                      | Ok None | Error _ -> 0
+                    in
+                    let cat =
+                      match optional_nonblank_string p "error_category" with
+                      | Ok (Some c) -> " " ^ c
+                      | Ok None | Error _ -> ""
+                    in
+                    Some (Printf.sprintf "retry %d/%d%s" att max_r cat))
+                | Ok (Some "retry_cleared") -> Some "retry cleared"
+                | Ok (Some other) -> Some other
+                | Ok None | Error _ -> None)
+          in
+          match progress_label with
+          | Some progress_label ->
+              Ok
+                (Chunk_native_tool_progress
+                   {
+                     operation_id = outer_op_id;
+                     tool_use_id;
+                     tool_name;
+                     progress_label;
+                   })
+          | None -> Ok Chunk_ignored))
+  | "KEEPER_STREAM_PROTOCOL_ERROR" ->
+      let* value = required_object_field json "value" in
+      let* kind_opt = optional_nonblank_string value "kind" in
+      let kind = Option.value ~default:"protocol_error" kind_opt in
+      let* reason = optional_nonblank_string value "reason" in
+      let* occurrence = optional_object_field value "quarantined_occurrence" in
+      (match occurrence with
+      | None -> Ok (Chunk_stream_protocol_error { operation_id = outer_op_id; kind; reason })
       | Some occurrence ->
           let* scope = required_nonnegative_int_field occurrence "toolStreamScope" in
           let* block = required_nonnegative_int_field occurrence "toolCallBlockIndex" in
           Ok (Chunk_tool_quarantined
-                { operation_id = outer_op_id; tool_use_id = scoped_tool_use_id scope block }))
+                { operation_id = outer_op_id; tool_use_id = scoped_tool_use_id scope block; kind; reason }))
   | "KEEPER_CONNECTED"
-  | "KEEPER_PROVIDER_RETRY"
   | "KEEPER_STREAM_MESSAGE_DELTA"
   | "KEEPER_STREAM_PING"
   | "KEEPER_CONTENT_BLOCK_START"
@@ -2205,13 +2351,11 @@ let decode_custom_chat_chunk json =
   | "KEEPER_THINKING_SIGNATURE_DELTA"
   | "KEEPER_MEDIA_DELTA"
   | "KEEPER_CHAT_BATCH_BOUND"
-  | "KEEPER_CONTINUATION_CHECKPOINT"
   | "KEEPER_EXTERNAL_EFFECT_COMPLETED"
   | "KEEPER_TOOL_APPROVAL_REQUESTED"
   | "KEEPER_TOOL_APPROVAL_SETTLED"
   | "KEEPER_TOOL_CALL_ADMITTED"
-  | "KEEPER_TOOL_TRANSCRIPT_COMMITTED"
-  | "KEEPER_NATIVE_TOOL_PROGRESS" ->
+  | "KEEPER_TOOL_TRANSCRIPT_COMMITTED" ->
       Ok Chunk_ignored
   | other -> Error (Printf.sprintf "unknown CUSTOM chat stream event %S" other)
 

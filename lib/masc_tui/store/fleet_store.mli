@@ -43,6 +43,7 @@ type active_tool_call = {
   stream_scope : int option;
   tool_name : string;
   args_preview : string option;
+  progress_label : string option;
   tool_state : tool_call_state;
   ok : bool option;
   output_preview : string option;
@@ -68,6 +69,11 @@ type chat_stream_buffer = {
   model_activity : model_activity;
   response_start : response_start option;  (** Evidence from message-start frames in this run. *)
   tools : active_tool_call list;
+  active_runtime_id : string option;
+  attempt_index : int option;
+  retry_notice : string option;
+  checkpoint_notice : string option;
+  protocol_warning : string option;
   active : bool;
   ended : bool;
   last_error : string option;

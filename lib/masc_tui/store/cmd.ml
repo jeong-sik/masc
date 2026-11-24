@@ -169,6 +169,14 @@ type get_request =
   | Get_addon_package_catalog of { directory : string option }
   | Get_addon_package_preview of { manifest_path : string }
   | Get_connector_names of { connector : string; scope : string }
+  | Get_keeper_turn_flow of {
+      keeper : string;
+      trace_id : string;
+      turn_id : int;
+      turn_ref : string;
+    }
+  | Get_keeper_checkpoints of { keeper : string }
+  | Get_keeper_operator_note of { keeper : string }
 
 type keeper_turn_interrupt_target =
   [ `Turn_token of string | `Operation_id of string ]
@@ -382,6 +390,31 @@ type post_request =
       declaration_id : string;
       ask_id : string;
       answers : (string * Wire_work.ask_response) list;
+    }
+  | Post_keeper_control_lifecycle of {
+      keeper : string;
+      action : [ `Boot | `Up | `Shutdown | `Reset ];
+      expected_workspace : Wire_work.expected_workspace option;
+    }
+  | Post_keeper_clear of {
+      keeper : string;
+      reason : string;
+      preserve_system_prompt : bool;
+    }
+  | Post_keeper_directive of {
+      keeper : string;
+      directive : Wire_keeper_context.keeper_directive;
+      expected_workspace : Wire_work.expected_workspace;
+    }
+  | Post_keeper_checkpoints of {
+      keeper : string;
+      action : [ `Preview_purge | `Apply_purge | `Delete_history of string list ];
+    }
+  | Post_keeper_operator_note of { keeper : string; text : string }
+  | Post_keeper_run_next of {
+      keeper : string;
+      request_id : string;
+      interrupt_token : string option;
     }
 
 type put_request =
@@ -622,6 +655,12 @@ let get_request_path = function
       Wire_runtime.lane_addon_package_preview_path ~manifest_path
   | Get_connector_names { connector; scope } ->
       Wire_runtime.connector_names_path ~connector ~scope ()
+  | Get_keeper_turn_flow { keeper; trace_id; turn_id; turn_ref = _ } ->
+      Wire_keeper_context.keeper_turn_flow_path ~keeper ~trace_id ~turn_id ()
+  | Get_keeper_checkpoints { keeper } ->
+      Wire_keeper_context.keeper_checkpoints_path ~keeper
+  | Get_keeper_operator_note { keeper } ->
+      Wire_keeper_context.keeper_operator_note_path ~keeper
 
 let post_request_path = function
   | Post_ask_answer _ -> Wire_work.keeper_ask_answer_path
@@ -688,6 +727,21 @@ let post_request_path = function
   | Post_lane_addon_detach _ -> Wire_runtime.lane_addon_detach_path
   | Post_lane_addon_action _ -> Wire_runtime.lane_addon_actions_path
   | Post_lane_addon_ask_answer _ -> Wire_runtime.lane_addon_ask_answer_path
+  | Post_keeper_control_lifecycle { keeper; action; _ } -> (
+      match action with
+      | `Boot -> Wire_keeper_context.keeper_boot_path ~keeper
+      | `Up -> Wire_keeper_context.keeper_up_path ~keeper
+      | `Shutdown -> Wire_keeper_context.keeper_shutdown_path ~keeper
+      | `Reset -> Wire_keeper_context.keeper_reset_path ~keeper)
+  | Post_keeper_clear { keeper; _ } ->
+      Wire_keeper_context.keeper_clear_path ~keeper
+  | Post_keeper_directive { keeper; _ } ->
+      Wire_keeper_context.keeper_directive_path ~keeper
+  | Post_keeper_checkpoints { keeper; _ } ->
+      Wire_keeper_context.keeper_checkpoints_path ~keeper
+  | Post_keeper_operator_note { keeper; _ } ->
+      Wire_keeper_context.keeper_operator_note_path ~keeper
+  | Post_keeper_run_next _ -> Wire_keeper_context.keeper_run_next_path
 
 let mcp_tool_name_of_post_request = function
   | Post_task_create _ -> Some "masc_add_task"
@@ -740,6 +794,12 @@ let mcp_tool_name_of_post_request = function
   | Post_lane_addon_attach _
   | Post_lane_addon_detach _
   | Post_lane_addon_action _
+  | Post_keeper_control_lifecycle _
+  | Post_keeper_clear _
+  | Post_keeper_directive _
+  | Post_keeper_checkpoints _
+  | Post_keeper_operator_note _
+  | Post_keeper_run_next _
   | Post_lane_addon_ask_answer _ ->
       None
 
@@ -927,6 +987,26 @@ let post_request_body = function
   | Post_lane_addon_ask_answer { declaration_id; ask_id; answers } ->
       Wire_runtime.encode_lane_addon_ask_answer ~declaration_id ~ask_id
         ~answers ()
+  | Post_keeper_control_lifecycle { action = `Up; expected_workspace; _ } ->
+      Wire_keeper_context.encode_keeper_up_body ?expected_workspace ()
+  | Post_keeper_control_lifecycle { action = `Boot | `Shutdown | `Reset; _ } ->
+      `Assoc []
+  | Post_keeper_clear { reason; preserve_system_prompt; _ } ->
+      Wire_keeper_context.encode_keeper_clear_body ~reason ~preserve_system_prompt
+  | Post_keeper_directive { directive; expected_workspace; _ } ->
+      Wire_keeper_context.encode_keeper_directive_body ~expected_workspace
+        directive
+  | Post_keeper_checkpoints { action = `Preview_purge; _ } ->
+      Wire_keeper_context.encode_checkpoint_purge_body ~apply:false
+  | Post_keeper_checkpoints { action = `Apply_purge; _ } ->
+      Wire_keeper_context.encode_checkpoint_purge_body ~apply:true
+  | Post_keeper_checkpoints { action = `Delete_history snapshot_ids; _ } ->
+      Wire_keeper_context.encode_checkpoint_delete_history_body ~snapshot_ids
+  | Post_keeper_operator_note { text; _ } ->
+      Wire_keeper_context.encode_operator_note_body ~text
+  | Post_keeper_run_next { keeper; request_id; interrupt_token } ->
+      Wire_keeper_context.encode_keeper_run_next_body ~keeper ~request_id
+        ?interrupt_token ()
 
 let put_request_path = function
   | Put_wiki_page { page; _ } -> Wire_knowledge.wiki_page_path ~page

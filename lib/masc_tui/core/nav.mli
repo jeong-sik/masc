@@ -99,6 +99,12 @@ type queue_context_tab =
   | Drawer_context
   | Drawer_schedules
 
+type keeper_destructive_action =
+  | Keeper_act_shutdown
+  | Keeper_act_reset
+  | Keeper_act_apply_purge
+  | Keeper_act_delete_history
+
 type inline_action_kind =
   | Btw_query
   | Gate_reject of string
@@ -144,6 +150,12 @@ type inline_action_kind =
       action_names : string list;
     }
   | Setup_login_input_form of { login_id : string }
+  | Keeper_control_confirm of {
+      keeper : string;
+      action : keeper_destructive_action;
+    }
+  | Keeper_clear_form of string
+  | Keeper_operator_note_form of string
 
 type system_gate_kind =
   | Micro_viewport
@@ -233,6 +245,8 @@ val equal_infra_dive_target : infra_dive_target -> infra_dive_target -> bool
 val equal_dive : dive -> dive -> bool
 val equal_settings_tab : settings_tab -> settings_tab -> bool
 val equal_queue_context_tab : queue_context_tab -> queue_context_tab -> bool
+val equal_keeper_destructive_action :
+  keeper_destructive_action -> keeper_destructive_action -> bool
 val equal_inline_action_kind : inline_action_kind -> inline_action_kind -> bool
 val equal_system_gate_kind : system_gate_kind -> system_gate_kind -> bool
 val equal_overlay : overlay -> overlay -> bool

@@ -94,6 +94,12 @@ type queue_context_tab =
   | Drawer_context
   | Drawer_schedules
 
+type keeper_destructive_action =
+  | Keeper_act_shutdown
+  | Keeper_act_reset
+  | Keeper_act_apply_purge
+  | Keeper_act_delete_history
+
 type inline_action_kind =
   | Btw_query
   | Gate_reject of string
@@ -139,6 +145,12 @@ type inline_action_kind =
       action_names : string list;
     }
   | Setup_login_input_form of { login_id : string }
+  | Keeper_control_confirm of {
+      keeper : string;
+      action : keeper_destructive_action;
+    }
+  | Keeper_clear_form of string
+  | Keeper_operator_note_form of string
 
 type system_gate_kind =
   | Micro_viewport
@@ -570,6 +582,16 @@ let queue_context_tab_index = function
 let equal_queue_context_tab a b =
   Int.equal (queue_context_tab_index a) (queue_context_tab_index b)
 
+let keeper_destructive_action_index = function
+  | Keeper_act_shutdown -> 0
+  | Keeper_act_reset -> 1
+  | Keeper_act_apply_purge -> 2
+  | Keeper_act_delete_history -> 3
+
+let equal_keeper_destructive_action a b =
+  Int.equal (keeper_destructive_action_index a)
+    (keeper_destructive_action_index b)
+
 let inline_action_tag = function
   | Btw_query -> 0
   | Gate_reject _ -> 1
@@ -599,6 +621,9 @@ let inline_action_tag = function
   | Addon_detach_confirm _ -> 25
   | Addon_invoke_action _ -> 26
   | Setup_login_input_form _ -> 27
+  | Keeper_control_confirm _ -> 28
+  | Keeper_clear_form _ -> 29
+  | Keeper_operator_note_form _ -> 30
 
 let equal_inline_action_kind a b =
   if not (Int.equal (inline_action_tag a) (inline_action_tag b)) then false
@@ -620,8 +645,13 @@ let equal_inline_action_kind a b =
     | Harness_overrule x, Harness_overrule y
     | Task_cancel x, Task_cancel y
     | Goal_drop x, Goal_drop y
-    | Github_token_form x, Github_token_form y ->
+    | Github_token_form x, Github_token_form y
+    | Keeper_clear_form x, Keeper_clear_form y
+    | Keeper_operator_note_form x, Keeper_operator_note_form y ->
         String.equal x y
+    | Keeper_control_confirm x, Keeper_control_confirm y ->
+        String.equal x.keeper y.keeper
+        && equal_keeper_destructive_action x.action y.action
     | Board_comment x, Board_comment y ->
         String.equal x.post_id y.post_id
         && Option.equal String.equal x.parent_id y.parent_id
@@ -666,6 +696,9 @@ let equal_inline_action_kind a b =
       | Github_token_form _
       | Code_finder_form
       | Code_search_form
+      | Keeper_control_confirm _
+      | Keeper_clear_form _
+      | Keeper_operator_note_form _
       | Runtime_lane_create
       | Runtime_lane_edit _
       | Runtime_lane_delete _

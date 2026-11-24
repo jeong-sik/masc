@@ -619,6 +619,449 @@ let draw_composition_subtab grid ~(rect : Rect.t) ~(theme : Theme.t)
             (Store_scroll.drop skip forecast_rows)
         end
 
+let draw_flow_subtab grid ~(rect : Rect.t) ~(theme : Theme.t)
+    ~(model : Model.t) ~(st : Keeper_context_store.keeper_state) =
+  let bg = Color.of_rgb theme.surface_1 in
+  let pad_x = Ops_common.pad_x_for ~model rect in
+  let content = Card.pad_inner ~pad_x rect in
+  if Rect.is_empty content then ()
+  else
+    let rows_acc = ref [] in
+    let push style txt = rows_acc := (style, txt) :: !rows_acc in
+    let sec_hdr ~ko ~en =
+      push (Typography.accent ~bg ~bold:true theme)
+        ("── " ^ Ops_common.say model ~ko ~en ^ " ──")
+    in
+    (* 1. Selected Turn Intake, Source Outcomes & Runtime Attempts *)
+    (match Keeper_context_store.selected_turn_entry st with
+    | None ->
+        push (Typography.whisper ~bg theme)
+          (Ops_common.say model ~ko:"선택된 턴이 없습니다" ~en:"No turn selected")
+    | Some entry ->
+        let r = entry.record in
+        (* 1a. Turn Latency Waterfall + Sampling & Cost *)
+        sec_hdr ~ko:"턴 지연 워터폴 · 샘플링 · 비용"
+          ~en:"Turn Latency Waterfall · Sampling · Cost";
+        let lat_s =
+          Printf.sprintf "Total %s · TTFRC %s · Profile %s · Model %s · Kind %s"
+            (format_ms_opt r.request_latency_ms)
+            (format_ms_float_opt r.ttfrc_ms)
+            r.runtime_profile
+            (Option.value ~default:"—" r.selected_model)
+            (Turn_record.turn_kind_to_string r.turn_kind)
+        in
+        push (Typography.structure ~bg theme) ("  " ^ lat_s);
+        let samp = r.sampling in
+        let fmt_f opt =
+          match opt with Some f -> Printf.sprintf "%.2f" f | None -> "—"
+        in
+        let fmt_i opt =
+          match opt with Some n -> Int.to_string n | None -> "—"
+        in
+        let fmt_b opt =
+          match opt with Some true -> "on" | Some false -> "off" | None -> "—"
+        in
+        let cost_s =
+          let has_cache_tokens =
+            match
+              ( r.usage.cache_read_input_tokens,
+                r.usage.cache_creation_input_tokens )
+            with
+            | Some cr, _ when cr > 0 -> true
+            | _, Some cc when cc > 0 -> true
+            | (Some _ | None), (Some _ | None) -> false
+          in
+          let measured_input =
+            match r.usage.input_provenance with
+            | Some Turn_input_provenance.Measured_request -> true
+            | Some Turn_input_provenance.Context_estimate | None -> false
+          in
+          match (r.price_input_per_million, r.price_output_per_million) with
+          | Some pin, Some pout -> (
+              match (r.usage.input_tokens, r.usage.output_tokens) with
+              | Some tin, Some tout when measured_input && not has_cache_tokens ->
+                  let usd =
+                    (float_of_int tin *. pin +. float_of_int tout *. pout)
+                    /. 1_000_000.0
+                  in
+                  Printf.sprintf "$%.5f (in $%.2f/M · out $%.2f/M)" usd pin pout
+              | (Some _ | None), (Some _ | None) ->
+                  Printf.sprintf "in $%.2f/M · out $%.2f/M" pin pout)
+          | Some pin, None -> Printf.sprintf "in $%.2f/M" pin
+          | None, Some pout -> Printf.sprintf "out $%.2f/M" pout
+          | None, None -> "—"
+        in
+        push (Typography.whisper ~bg theme)
+          (Printf.sprintf
+             "  temp=%s · top_p=%s · max_tok=%s · thinking=%s · rates=%s"
+             (fmt_f samp.temperature) (fmt_f samp.top_p) (fmt_i samp.max_tokens)
+             (fmt_b samp.enable_thinking) cost_s);
+        (* 1b. Intake & Runtime Flow Events (/runtime-trace) *)
+        sec_hdr ~ko:"인테이크 · 페일오버 흐름 (runtime-trace)"
+          ~en:"Intake · Failover Flow (runtime-trace)";
+        (match Keeper_context_store.turn_flow_for_selected_turn st with
+        | Some flow ->
+            (match flow.intake with
+            | Wire_keeper_context.Intake_observed { channel; sources } ->
+                let ch_s = Option.value ~default:"—" channel in
+                push (Typography.status ~bg ~bold:true theme Theme.Status_ok)
+                  (Printf.sprintf "  Intake observed · channel=%s · %d stimuli"
+                     ch_s (List.length sources));
+                List.iter
+                  (fun (src : Wire_keeper_context.turn_intake_source) ->
+                    let kind_s = Option.value ~default:"stimulus" src.source_kind in
+                    push (Typography.structure ~bg theme)
+                      (Printf.sprintf "    • [%s] %s · snap=%s · rev=%s" kind_s
+                         (short_sha src.stimulus_id) (short_sha src.snapshot_ref)
+                         (short_sha src.admitted_revision)))
+                  (List.take 8 sources);
+                if List.length sources > 8 then
+                  push (Typography.whisper ~bg theme)
+                    (Printf.sprintf "    (+%d more stimuli)"
+                       (List.length sources - 8))
+            | Wire_keeper_context.Intake_not_recorded reason ->
+                push (Typography.whisper ~bg theme)
+                  ("  Intake not recorded: " ^ reason)
+            | Wire_keeper_context.Intake_unavailable reason ->
+                push (Typography.status ~bg theme Theme.Status_attention)
+                  ("  Intake unavailable: " ^ reason)
+            | Wire_keeper_context.Intake_ambiguous n ->
+                push (Typography.status ~bg theme Theme.Status_critical)
+                  (Printf.sprintf "  Intake ambiguous: %d turn_started rows" n));
+            (match flow.outcomes with
+            | Wire_keeper_context.Outcomes_observed
+                { coverage_state; rows_inspected; sources; _ } ->
+                push (Typography.whisper ~bg theme)
+                  (Printf.sprintf "  Outcomes (%s · %d rows · %d sources)"
+                     coverage_state rows_inspected (List.length sources));
+                List.iter
+                  (fun (so : Wire_keeper_context.turn_source_outcome) ->
+                    let rkinds =
+                      List.map
+                        (fun (rc : Wire_keeper_context.turn_source_receipt) ->
+                          rc.kind)
+                        so.receipts
+                    in
+                    let r_s =
+                      if rkinds = [] then "no receipts"
+                      else String.concat ", " rkinds
+                    in
+                    push (Typography.structure ~bg theme)
+                      (Printf.sprintf "    ↳ %s → %s" (short_sha so.stimulus_id) r_s))
+                  (List.take 6 sources);
+                if List.length sources > 6 then
+                  push (Typography.whisper ~bg theme)
+                    (Printf.sprintf "    (+%d more outcome sources)"
+                       (List.length sources - 6))
+            | Wire_keeper_context.Outcomes_unavailable reason ->
+                push (Typography.whisper ~bg theme)
+                  ("  Outcomes unavailable: " ^ reason));
+            if flow.events <> [] then begin
+              push (Typography.whisper ~bg theme)
+                (Printf.sprintf "  Runtime trace events (%d/%d):"
+                   (List.length flow.events) flow.manifest_total_rows);
+              List.iter
+                (fun (ev : Wire_keeper_context.turn_flow_event) ->
+                  let rt = Option.value ~default:"—" ev.runtime_id in
+                  let act =
+                    match (ev.routing_action, ev.routing_reason) with
+                    | Some a, Some rsn -> Printf.sprintf " · %s (%s)" a rsn
+                    | Some a, None -> " · " ^ a
+                    | None, Some rsn -> " · " ^ rsn
+                    | None, None -> ""
+                  in
+                  let tok =
+                    match String.lowercase_ascii ev.status with
+                    | "ok" | "completed" | "succeeded" -> Theme.Status_ok
+                    | "error" | "failed" -> Theme.Status_critical
+                    | _ -> Theme.Status_active
+                  in
+                  push (Typography.status ~bg theme tok)
+                    (Printf.sprintf "    %s [%s] rt=%s%s" ev.event ev.status rt
+                       act))
+                (List.take 16 flow.events);
+              if List.length flow.events > 16 then
+                push (Typography.whisper ~bg theme)
+                  (Printf.sprintf "    (+%d more events)"
+                     (List.length flow.events - 16))
+            end
+        | None -> (
+            match st.turn_flow with
+            | Observed.Absent ->
+                push (Typography.whisper ~bg theme)
+                  ("  "
+                   ^ Ops_common.say model ~ko:"턴 흐름 트레이스 없음"
+                       ~en:"No turn flow trace recorded")
+            | Observed.Failed { reason; _ } ->
+                push (Typography.status ~bg theme Theme.Status_critical)
+                  ("  " ^ Glyph.to_utf8 Glyph.Live_failing ^ " " ^ reason)
+            | Observed.Loading _ | Observed.Value _ | Observed.Unreported ->
+                push (Typography.whisper ~bg theme)
+                  ("  " ^ Glyph.to_utf8 Glyph.Transport_reconnecting ^ " "
+                   ^ Ops_common.say model ~ko:"턴 흐름 트레이스 대기/로딩 중..."
+                       ~en:"Awaiting turn flow trace...")));
+        (* 1c. Request Observations (Per-Runtime-Attempt Journal) *)
+        if r.request_observations <> [] then begin
+          sec_hdr ~ko:"런타임 시도별 요청 관측" ~en:"Runtime Attempt Observations";
+          List.iter
+            (fun (obs : Request_observation.t) ->
+              let detail, tok =
+                match obs.evidence with
+                | Request_observation.Not_dispatched ->
+                    ("not_dispatched", Theme.Status_historical)
+                | Request_observation.No_durable_scope ->
+                    ("no_durable_scope", Theme.Status_historical)
+                | Request_observation.No_matching_call ->
+                    ("no_matching_call", Theme.Status_attention)
+                | Request_observation.Read_failed msg ->
+                    ("read_failed: " ^ msg, Theme.Status_critical)
+                | Request_observation.Recorded { call_id; requests } ->
+                    ( Printf.sprintf "call=%s · %d req(s)" (short_sha call_id)
+                        (List.length requests),
+                      Theme.Status_ok )
+              in
+              push (Typography.status ~bg theme tok)
+                (Printf.sprintf "  #%d %s · %s" obs.attempt obs.runtime_profile
+                   detail))
+            r.request_observations
+        end;
+        (* 1d. Parallel Tool Batches & Per-Call Latency Waterfall *)
+        (match Keeper_context_store.call_evidence_for_selected_turn st with
+        | Some calls when calls <> [] ->
+            sec_hdr ~ko:"병렬 도구 배치 · 호출 지연"
+              ~en:"Parallel Tool Batches · Call Latency";
+            let max_dur =
+              List.fold_left
+                (fun acc (c : Wire_keeper_context.tool_call_entry) ->
+                  match c.duration_ms with
+                  | Some ms -> Float.max acc ms
+                  | None -> acc)
+                1.0 calls
+            in
+            List.iter
+              (fun (c : Wire_keeper_context.tool_call_entry) ->
+                let batch_s =
+                  match (c.batch_index, c.batch_size) with
+                  | Some bi, Some bs when bs > 1 ->
+                      Printf.sprintf "[B%d/%d] " bi bs
+                  | Some bi, Some bs -> Printf.sprintf "[%d/%d] " bi bs
+                  | _ -> ""
+                in
+                let mode_s =
+                  match c.execution_mode with
+                  | Some m -> " (" ^ m ^ ")"
+                  | None -> ""
+                in
+                let bar_w =
+                  match c.duration_ms with
+                  | Some ms ->
+                      Int.max 1
+                        (Int.min 12
+                           (int_of_float (Float.round (ms /. max_dur *. 12.0))))
+                  | None -> 0
+                in
+                let bar =
+                  if bar_w > 0 then String.make bar_w '#' else "-"
+                in
+                let tok =
+                  match c.ok with
+                  | Some true -> Theme.Status_ok
+                  | Some false -> Theme.Status_critical
+                  | None -> Theme.Status_attention
+                in
+                push (Typography.status ~bg theme tok)
+                  (Printf.sprintf "  %s%s%s  %-12s %s" batch_s c.tool mode_s bar
+                     (format_ms_float_opt c.duration_ms)))
+              (List.take 16 calls);
+            if List.length calls > 16 then
+              push (Typography.whisper ~bg theme)
+                (Printf.sprintf "  (+%d more calls)" (List.length calls - 16))
+        | Some _ | None -> ());
+        (* 1e. Full Block Diff Details (prev -> next bytes & digest) *)
+        (match entry.diff_vs_prev with
+        | Some d
+          when d.added <> [] || d.removed <> [] || d.changed <> [] ->
+            sec_hdr ~ko:"프롬프트 블록 Diff 상세" ~en:"Prompt Block Diff Detail";
+            List.iter
+              (fun (b : Turn_record.prompt_block) ->
+                push (Typography.status ~bg theme Theme.Status_ok)
+                  (Printf.sprintf "  + %s  +%s  sha=%s"
+                     (Prompt_block_id.to_string b.block)
+                     (format_bytes b.bytes) (short_sha b.digest)))
+              d.added;
+            List.iter
+              (fun (b : Turn_record.prompt_block) ->
+                push (Typography.status ~bg theme Theme.Status_critical)
+                  (Printf.sprintf "  - %s  -%s  sha=%s"
+                     (Prompt_block_id.to_string b.block)
+                     (format_bytes b.bytes) (short_sha b.digest)))
+              d.removed;
+            List.iter
+              (fun ((prev_b, next_b) :
+                     Turn_record.prompt_block * Turn_record.prompt_block) ->
+                let delta = next_b.bytes - prev_b.bytes in
+                let sign = if delta >= 0 then "+" else "" in
+                push (Typography.status ~bg theme Theme.Status_attention)
+                  (Printf.sprintf "  ~ %s  %s → %s (%s%dB)  %s→%s"
+                     (Prompt_block_id.to_string next_b.block)
+                     (format_bytes prev_b.bytes)
+                     (format_bytes next_b.bytes) sign delta
+                     (short_sha prev_b.digest) (short_sha next_b.digest)))
+              d.changed
+        | Some _ | None -> ()));
+    (* 2. Memory OS Recall Snapshot from Turn Records *)
+    (match Observed.to_option st.turn_records with
+    | Some { memory_os = Some mo; _ } ->
+        sec_hdr ~ko:"Memory OS 리콜 스냅샷" ~en:"Memory OS Recall Snapshot";
+        let src_s =
+          match mo.update_source_kind with Some k -> k | None -> "—"
+        in
+        push (Typography.structure ~bg theme)
+          (Printf.sprintf
+             "  recall=%s · rev=%d · source=%s · facts=%d/%d · Δ +%d -%d ret=%d inv=%d"
+             (if mo.recall_enabled then "on" else "off")
+             mo.revision src_s mo.facts_shown mo.facts_current
+             (List.length mo.change.added) (List.length mo.change.removed)
+             mo.change.retained mo.change.invalidated_count);
+        List.iter
+          (fun err ->
+            push (Typography.status ~bg theme Theme.Status_critical)
+              ("  err: " ^ err))
+          mo.read_errors;
+        List.iter
+          (fun (f : Wire_keeper_context.memory_os_fact_item) ->
+            let claim_clean =
+              Ops_common.scrub_secrets_in_text f.claim
+              |> String.map (function '\n' | '\r' -> ' ' | c -> c)
+            in
+            push (Typography.whisper ~bg theme)
+              (Printf.sprintf "    [%s] %s" f.category
+                 (Grapheme.truncate_to_width
+                    ~max_width:(Int.max 16 (content.w - 14))
+                    claim_clean)))
+          (List.take 5 mo.facts);
+        if List.length mo.facts > 5 then
+          push (Typography.whisper ~bg theme)
+            (Printf.sprintf "    (+%d more facts)" (List.length mo.facts - 5))
+    | Some { memory_os = None; _ } | None -> ());
+    (* 3. Checkpoints & Operator Note & Control Quick Strip *)
+    sec_hdr ~ko:"체크포인트 · 운영자 노트 · 제어 (/ctl)"
+      ~en:"Checkpoints · Operator Note · Control (/ctl)";
+    (if st.checkpoints_auth_denied then
+       push (Typography.status ~bg theme Theme.Status_attention)
+         (Ops_common.say model
+            ~ko:"  체크포인트: CanAdmin 인증 필요"
+            ~en:"  Checkpoints: requires CanAdmin auth")
+     else
+       match st.checkpoints with
+       | Observed.Value { data = inv; _ } ->
+           let cur_s =
+             match inv.current with
+             | Some c ->
+                 Printf.sprintf "%s · %d msgs · %s" c.snapshot_id
+                   (Option.value ~default:0 c.message_count)
+                   (match c.size_bytes with
+                   | Some b -> format_bytes b
+                   | None -> "—")
+             | None ->
+                 Printf.sprintf "%s%s" inv.current_status
+                   (match inv.current_error_kind with
+                   | Some k -> " (" ^ k ^ ")"
+                   | None -> "")
+           in
+           push (Typography.structure ~bg theme)
+             (Printf.sprintf "  Checkpoint: %s · history=%d · errors=%d" cur_s
+                (List.length inv.history) (List.length inv.history_errors));
+           List.iter
+             (fun (h : Wire_keeper_context.checkpoint_summary) ->
+               push (Typography.whisper ~bg theme)
+                 (Printf.sprintf "    hist: %s (%d msgs, %s)" h.snapshot_id
+                    (Option.value ~default:0 h.message_count)
+                    (match h.size_bytes with
+                    | Some b -> format_bytes b
+                    | None -> "—")))
+             (List.take 4 inv.history);
+           if List.length inv.history > 4 then
+             push (Typography.whisper ~bg theme)
+               (Printf.sprintf "    (+%d more history snapshots)"
+                  (List.length inv.history - 4));
+           List.iter
+             (fun (e : Wire_keeper_context.checkpoint_summary) ->
+               push (Typography.status ~bg theme Theme.Status_critical)
+                 (Printf.sprintf "    err [%s]: %s (%s)" e.snapshot_id
+                    (Option.value ~default:"error" e.error_kind)
+                    (Option.value ~default:"" e.error_detail)))
+             (List.take 3 inv.history_errors);
+           if List.length inv.history_errors > 3 then
+             push (Typography.whisper ~bg theme)
+               (Printf.sprintf "    (+%d more history errors)"
+                  (List.length inv.history_errors - 3))
+       | Observed.Loading _ ->
+           push (Typography.whisper ~bg theme) "  Checkpoints: loading..."
+       | Observed.Failed { reason; _ } ->
+           push (Typography.status ~bg theme Theme.Status_critical)
+             ("  Checkpoints err: " ^ reason)
+       | Observed.Absent ->
+           push (Typography.whisper ~bg theme) "  Checkpoints: absent (404)"
+       | Observed.Unreported ->
+           push (Typography.whisper ~bg theme) "  Checkpoints: unreported");
+    (match st.last_purge_preview with
+    | Some p ->
+        let rpt = p.report in
+        push (Typography.status ~bg theme Theme.Status_attention)
+          (Printf.sprintf
+             "  Purge (%s): %d→%d msgs · -%s · reason_stripped=%d · tools_cleared=%d · apply_ok=%b"
+             p.action rpt.messages_before rpt.messages_after
+             (format_bytes rpt.bytes_removed)
+             rpt.reasoning_blocks_stripped rpt.tool_results_cleared
+             p.apply_allowed)
+    | None -> ());
+    (match st.operator_note with
+    | Observed.Value { data = n; _ } ->
+        let st_s =
+          if n.pending then "PENDING"
+          else
+            match n.consumed_turn with
+            | Some t -> Printf.sprintf "consumed @turn #%d" t
+            | None -> "consumed"
+        in
+        let txt_one =
+          Ops_common.scrub_secrets_in_text n.text
+          |> String.map (function '\n' | '\r' -> ' ' | c -> c)
+        in
+        push (Typography.status ~bg theme
+                (if n.pending then Theme.Status_attention else Theme.Status_ok))
+          (Printf.sprintf "  Note [%s · %s]: %s" st_s n.created_by
+             (Grapheme.truncate_to_width
+                ~max_width:(Int.max 16 (content.w - 26))
+                txt_one))
+    | Observed.Absent ->
+        push (Typography.whisper ~bg theme)
+          (Ops_common.say model ~ko:"  운영자 노트: 없음 (/ctl note 로 작성)"
+             ~en:"  Operator note: none (use /ctl note to set)")
+    | Observed.Loading _ ->
+        push (Typography.whisper ~bg theme) "  Operator note: loading..."
+    | Observed.Failed { reason; _ } ->
+        push (Typography.status ~bg theme Theme.Status_critical)
+          ("  Operator note err: " ^ reason)
+    | Observed.Unreported -> ());
+    push (Typography.whisper ~bg theme)
+      "  /ctl boot|up|pause|resume|wakeup|shutdown|reset|clear|purge-preview|purge-apply|delete-history|note|run-next";
+    let rows = List.rev !rows_acc in
+    let vis_h = Int.max 1 content.h in
+    let max_skip = Int.max 0 (List.length rows - vis_h) in
+    let skip = Int.min max_skip (Int.max 0 st.scroll_offset) in
+    let y = ref content.y and bot = Rect.bottom content in
+    List.iter
+      (fun (style, txt) ->
+        if !y < bot then begin
+          ignore
+            (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
+               ~max_w:content.w ~style txt);
+          incr y
+        end)
+      (Store_scroll.drop skip rows)
+
 let draw_exact_input_subtab grid ~(rect : Rect.t) ~(theme : Theme.t)
     ~(model : Model.t) ~(st : Keeper_context_store.keeper_state) =
   let bg = Color.of_rgb theme.surface_1 in
@@ -1205,6 +1648,8 @@ let draw_context_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
       match st.subtab with
       | Keeper_context_store.Ctx_composition ->
           draw_composition_subtab grid ~rect:body_r ~theme ~model ~st
+      | Keeper_context_store.Ctx_flow ->
+          draw_flow_subtab grid ~rect:body_r ~theme ~model ~st
       | Keeper_context_store.Ctx_exact_input ->
           draw_exact_input_subtab grid ~rect:body_r ~theme ~model ~st
       | Keeper_context_store.Ctx_input_map ->
@@ -1399,6 +1844,12 @@ let draw_tool_calls_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
                   Option.value ~default:(Glyph.to_utf8 Glyph.Missing_absent)
                     c.definition_source
                 in
+                let tool_disp =
+                  match (c.batch_index, c.batch_size) with
+                  | Some bi, Some bs when bs > 1 ->
+                      Printf.sprintf "%s [%d/%d]" c.tool bi bs
+                  | _ -> c.tool
+                in
                 {
                   Table.id =
                     Option.value ~default:(Int.to_string idx) c.execution_id;
@@ -1406,7 +1857,7 @@ let draw_tool_calls_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
                     [
                       ( "time"
                       , Table.text_cell ~fg:(Color.of_rgb theme.text_muted) hhmm );
-                      ("tool", Table.text_cell c.tool);
+                      ("tool", Table.text_cell tool_disp);
                       ( "st"
                       , Table.Badge
                           { glyph = None; text = st_txt; tone = st_tone } );
@@ -1459,9 +1910,13 @@ let draw_tool_calls_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
                     Option.value ~default:"—" call.execution_id
                   in
                   let mode_s =
-                    match call.execution_mode with
-                    | Some m -> " · " ^ m
-                    | None -> ""
+                    match (call.execution_mode, call.batch_index, call.batch_size) with
+                    | Some m, Some bi, Some bs ->
+                        Printf.sprintf " · %s [%d/%d]" m bi bs
+                    | Some m, _, _ -> " · " ^ m
+                    | None, Some bi, Some bs ->
+                        Printf.sprintf " · batch [%d/%d]" bi bs
+                    | None, _, _ -> ""
                   in
                   let trunc_s =
                     match (call.original_bytes, call.truncated_to) with

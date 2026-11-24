@@ -40,6 +40,7 @@ type active_tool_call = {
   stream_scope : int option;
   tool_name : string;
   args_preview : string option;
+  progress_label : string option;
   tool_state : tool_call_state;
   ok : bool option;
   output_preview : string option;
@@ -73,6 +74,11 @@ type chat_stream_buffer = {
   model_activity : model_activity;
   response_start : response_start option;
   tools : active_tool_call list;
+  active_runtime_id : string option;
+  attempt_index : int option;
+  retry_notice : string option;
+  checkpoint_notice : string option;
+  protocol_warning : string option;
   active : bool;
   ended : bool;
   last_error : string option;
@@ -1117,6 +1123,11 @@ let fresh_stream_buffer ~request_id =
     model_activity = empty_model_activity;
     response_start = None;
     tools = [];
+    active_runtime_id = None;
+    attempt_index = None;
+    retry_notice = None;
+    checkpoint_notice = None;
+    protocol_warning = None;
     active = true;
     ended = false;
     last_error = None;
@@ -1143,6 +1154,10 @@ let is_explicit_execution_start = function
           | Keeper_chat_operation.State_name.Cancelled );
         _;
       }
+  | Wire_fleet.Chunk_provider_retry _
+  | Wire_fleet.Chunk_continuation_checkpoint _
+  | Wire_fleet.Chunk_native_tool_progress _
+  | Wire_fleet.Chunk_stream_protocol_error _
   | Wire_fleet.Chunk_text_delta _
   | Wire_fleet.Chunk_thinking_delta _
   | Wire_fleet.Chunk_thinking_snapshot _
@@ -1173,6 +1188,10 @@ let is_queued_acceptance = function
       }
   | Wire_fleet.Chunk_run_started _
   | Wire_fleet.Chunk_runtime_attempt_started _
+  | Wire_fleet.Chunk_provider_retry _
+  | Wire_fleet.Chunk_continuation_checkpoint _
+  | Wire_fleet.Chunk_native_tool_progress _
+  | Wire_fleet.Chunk_stream_protocol_error _
   | Wire_fleet.Chunk_text_delta _
   | Wire_fleet.Chunk_thinking_delta _
   | Wire_fleet.Chunk_thinking_snapshot _
@@ -1238,7 +1257,12 @@ let apply_thinking b ~operation_id ~owner ~thought ~update =
         thinking = update b.thinking thought;
         text_ownership;
         model_activity = note_unscoped_delta b.model_activity Content_thinking thought;
+        retry_notice = None;
         active = true }
+
+let protocol_warning kind = function
+  | Some reason -> kind ^ ": " ^ reason
+  | None -> kind
 
 let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
     t =
@@ -1273,9 +1297,37 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
   | Wire_fleet.Chunk_model_response_stop { operation_id; owner } ->
       update_model_activity ~keeper ~request_id ~operation_id
         (fun current -> stop_model_response current owner) t
-  | Wire_fleet.Chunk_tool_quarantined { operation_id; tool_use_id } ->
+  | Wire_fleet.Chunk_provider_retry { operation_id; runtime_id; attempt; max_retries; retry_delay_ms; error_status } ->
+      update_live_stream ~keeper ~request_id ~operation_id
+        (fun buf ->
+          let runtime = Option.fold ~none:"" ~some:(fun id -> id ^ " · ") runtime_id in
+          let status = Option.fold ~none:"" ~some:(Printf.sprintf "HTTP %d · ") error_status in
+          let retry_notice = Some (Printf.sprintf "%s%sretry %d/%d (%dms)"
+              runtime status attempt max_retries retry_delay_ms) in
+          { buf with active_runtime_id = merge_opt_op buf.active_runtime_id runtime_id; retry_notice }) t
+  | Wire_fleet.Chunk_continuation_checkpoint { operation_id; message; request_id = checkpoint_request } ->
+      if Option.for_all (String.equal request_id) checkpoint_request then
+        update_live_stream ~keeper ~request_id ~operation_id
+          (fun buf -> { buf with checkpoint_notice = Some message }) t
+      else t
+  | Wire_fleet.Chunk_native_tool_progress { operation_id; tool_use_id; tool_name; progress_label } ->
       update_stream_tool ~keeper ~request_id ~operation_id ~tool_use_id
-        retire_pending_tool t
+        (fun tool ->
+          match tool.tool_state with
+          | Tool_pending | Tool_result_pending _ ->
+              { tool with progress_label = Some progress_label;
+                          tool_name = Option.value tool_name ~default:tool.tool_name }
+          | Tool_unfinished | Tool_settled -> tool) t
+  | Wire_fleet.Chunk_stream_protocol_error { operation_id; kind; reason } ->
+      update_live_stream ~keeper ~request_id ~operation_id
+        (fun buf -> { buf with protocol_warning = Some (protocol_warning kind reason) }) t
+  | Wire_fleet.Chunk_tool_quarantined { operation_id; tool_use_id; kind; reason } ->
+      update_live_stream ~keeper ~request_id ~operation_id
+        (fun buf ->
+          let tools = List.map (fun tool ->
+              if String.equal tool.tool_use_id tool_use_id then retire_pending_tool tool else tool)
+            buf.tools in
+          { buf with tools; protocol_warning = Some (protocol_warning kind reason) }) t
   | Wire_fleet.Chunk_tool_block_end { operation_id; tool_use_id } ->
       update_stream_tool ~keeper ~request_id ~operation_id ~tool_use_id
         close_tool_block t
@@ -1298,6 +1350,10 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
         | Wire_fleet.Chunk_accepted { control_token = None; _ }
         | Wire_fleet.Chunk_run_started _
         | Wire_fleet.Chunk_runtime_attempt_started _
+        | Wire_fleet.Chunk_provider_retry _
+        | Wire_fleet.Chunk_continuation_checkpoint _
+        | Wire_fleet.Chunk_native_tool_progress _
+        | Wire_fleet.Chunk_stream_protocol_error _
         | Wire_fleet.Chunk_text_delta _
         | Wire_fleet.Chunk_thinking_delta _
         | Wire_fleet.Chunk_thinking_snapshot _
@@ -1384,9 +1440,13 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
                   model_activity = empty_model_activity;
                   response_start = None;
                   tools = retire_pending_tools prev.tools;
+                  retry_notice = None;
+                  checkpoint_notice = None;
+                  protocol_warning = None;
                   active = true;
                 }
-            | Wire_fleet.Chunk_runtime_attempt_started { operation_id } ->
+            | Wire_fleet.Chunk_runtime_attempt_started
+                { operation_id; runtime_id; attempt_index } ->
                 {
                   prev with
                   operation_id = merge_opt_op prev.operation_id operation_id;
@@ -1396,6 +1456,15 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
                   thinking = "";
                   model_activity = retire_model_activity prev.model_activity;
                   tools = retire_pending_tools prev.tools;
+                  active_runtime_id =
+                    (match runtime_id with
+                    | Some _ as r -> r
+                    | None -> prev.active_runtime_id);
+                  attempt_index =
+                    (match attempt_index with
+                    | Some _ as i -> i
+                    | None -> prev.attempt_index);
+                  retry_notice = None;
                   active = true;
                 }
             | Wire_fleet.Chunk_text_delta { operation_id; delta; owner } -> (
@@ -1409,6 +1478,7 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
                       text_ownership;
                       model_activity =
                         note_unscoped_delta prev.model_activity Content_text delta;
+                      retry_notice = None;
                       active = true;
                     }
                 | Cut_reply.Drop -> prev)
@@ -1428,6 +1498,7 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
                     tool_name;
                     args_preview;
                     tool_state = Tool_pending;
+                    progress_label = None;
                     ok = None;
                     output_preview = None;
                   }
@@ -1452,6 +1523,7 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
                   run_started = true;
                   model_activity = stop_model_response prev.model_activity None;
                   tools;
+                  retry_notice = None;
                   active = true;
                 }
             | Wire_fleet.Chunk_tool_args
@@ -1514,6 +1586,7 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
                           tool_name = Option.value tool_name ~default:"tool";
                           args_preview = None;
                           tool_state = Tool_settled;
+                          progress_label = None;
                           ok;
                           output_preview;
                         };
@@ -1576,6 +1649,10 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
             | Wire_fleet.Chunk_model_content _
             | Wire_fleet.Chunk_model_response_start _
             | Wire_fleet.Chunk_model_response_stop _
+            | Wire_fleet.Chunk_provider_retry _
+            | Wire_fleet.Chunk_continuation_checkpoint _
+            | Wire_fleet.Chunk_native_tool_progress _
+            | Wire_fleet.Chunk_stream_protocol_error _
             | Wire_fleet.Chunk_tool_quarantined _
             | Wire_fleet.Chunk_tool_block_end _
             | Wire_fleet.Chunk_ignored -> prev

@@ -113,35 +113,26 @@ export const WORKSPACE_LOADERS: Readonly<Record<WorkspaceId, WorkspaceLoaderEntr
   runtime: {
     id: 'runtime',
     title: '5 Runtime',
-    load: async () => ({
-      default: createWorkspacePlaceholder(
-        'runtime',
-        '5 Runtime — Quotas, Efficiency, Lanes, Tools & Add-ons',
-        '3-tier Provider Quotas, 4-panel synced uPlot Efficiency suite, Failover/Exact/Fusion Lanes & Add-ons (Layer 7).',
-      ),
-    }),
+    load: async () => {
+      const mod = await import('./runtime/index')
+      return { default: mod.RuntimeWorkspace }
+    },
   },
   infra: {
     id: 'infra',
     title: '6 Infra',
-    load: async () => ({
-      default: createWorkspacePlaceholder(
-        'infra',
-        '6 Infra — Sandboxes, Repos & Live SSE Logs',
-        'MicroVM/SSH/Docker Sandboxes, 24h Repo Diffs & Virtualized Live SSE Logs (Layer 7, Admin-only).',
-      ),
-    }),
+    load: async () => {
+      const mod = await import('./infra/index')
+      return { default: mod.InfraWorkspace }
+    },
   },
   settings: {
     id: 'settings',
     title: 'Settings',
-    load: async () => ({
-      default: createWorkspacePlaceholder(
-        'settings',
-        'Settings — Schema-Driven Config & TOML Patch',
-        'Schema-driven runtime config editor with dry-run unified diff & CAS apply (Layer 7, Admin-only).',
-      ),
-    }),
+    load: async () => {
+      const mod = await import('./settings/index')
+      return { default: mod.SettingsWorkspace }
+    },
   },
   account: {
     id: 'account',

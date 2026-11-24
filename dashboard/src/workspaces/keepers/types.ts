@@ -497,59 +497,6 @@ export interface KeeperSandboxData {
 
 // ── Schema Config CAS & OAuth/Secrets (#36) ───────────────────────────────
 
-export type ConfigReloadScope = 'hot_reload' | 'next_turn' | 'restart_required'
-
-export interface ConfigFieldSpec {
-  readonly table: string
-  readonly key: string
-  readonly full_key: string
-  readonly type: string
-  readonly current_value: unknown
-  readonly default_value: unknown
-  readonly provenance: string
-  readonly reload_scope: ConfigReloadScope
-  readonly secret: boolean
-  readonly writable: boolean
-  readonly description: string
-  readonly enum_values?: readonly string[]
-  readonly label?: string
-}
-
-export interface ConfigCategorySpec {
-  readonly id: string
-  readonly title: string
-  readonly field_count: number
-  readonly fields: readonly ConfigFieldSpec[]
-}
-
-export interface ConfigSchemaData {
-  readonly target: string
-  readonly keeper: string | null
-  readonly file_exists: boolean
-  readonly file_sha256: string
-  readonly categories: readonly ConfigCategorySpec[]
-}
-
-export interface ConfigPatchChange {
-  readonly op: 'set' | 'remove'
-  readonly table: string
-  readonly key: string
-  readonly value?: unknown
-}
-
-export interface ConfigPatchResult {
-  readonly applied: boolean
-  readonly dry_run: boolean
-  readonly target: string
-  readonly changed: boolean
-  readonly before_sha256: string
-  readonly new_sha256: string
-  readonly snapshot_id: string | null
-  readonly reload_scope: ConfigReloadScope
-  readonly unified_diff: string
-  readonly validation_warnings: readonly string[]
-}
-
 export interface KeeperAttachedProvider {
   readonly provider: string
   readonly provider_label: string

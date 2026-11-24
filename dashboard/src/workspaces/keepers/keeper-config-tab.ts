@@ -11,18 +11,20 @@ import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
 import {
   fetchConfigSchemaApi,
+  postConfigPatchApi,
+  type ConfigFieldSpec,
+  type ConfigPatchChange,
+  type ConfigPatchResult,
+  type ConfigSchemaData,
+} from '../../api/config-schema'
+import {
   fetchKeeperAttachedProvidersApi,
   mutateKeeperSecretApi,
-  postConfigPatchApi,
   refreshKeeperIdentityToolsApi,
   setKeeperIdentitySwitchApi,
   startKeeperOAuthLoginApi,
 } from './keepers-api'
 import type {
-  ConfigFieldSpec,
-  ConfigPatchChange,
-  ConfigPatchResult,
-  ConfigSchemaData,
   KeeperAttachedProvider,
 } from './types'
 

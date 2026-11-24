@@ -127,7 +127,7 @@ is-non-interactive = true
 %s
 [models.%s]
 api-name = "timeout-fixture"
-max-context = 4096
+max-context = 200000
 tools-support = true
 streaming = true
 %s

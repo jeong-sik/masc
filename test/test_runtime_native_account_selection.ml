@@ -44,7 +44,7 @@ is-non-interactive = true
 %s
 [models.selected]
 api-name = "native-account-fixture-model"
-max-context = 8192
+max-context = 200000
 [native.selected]
 [runtime]
 default = "native.selected"

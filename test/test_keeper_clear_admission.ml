@@ -40,7 +40,7 @@ command = "/fixture-must-not-run-a-model"
 is-non-interactive = true
 [models.model]
 api-name = "clear-fixture"
-max-context = 4096
+max-context = 200000
 [clear_fixture.model]
 |};
   Runtime.init_default ~config_path:runtime_path |> require_ok;

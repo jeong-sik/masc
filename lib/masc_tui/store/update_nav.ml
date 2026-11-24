@@ -1929,6 +1929,15 @@ let start_btw_query ~now ~prompt (m : Model.t) =
               };
           ] )
 
+let active_attention_query (m : Model.t) =
+  if
+    Option.is_none m.nav.overlay
+    && m.nav.dive_stack = []
+    && Nav.equal_workspace m.nav.workspace Nav.Work
+    && Nav.equal_work_tab m.work.active_tab Nav.Work_inbox
+  then m.work.filter_query
+  else ""
+
 let submit_ask_choice ~now (ask : Wire_work.ask_row) ~choice_1based (m : Model.t)
     =
   match ask.questions with
@@ -1950,19 +1959,10 @@ let submit_ask_choice ~now (ask : Wire_work.ask_row) ~choice_1based (m : Model.t
           (* Honest in-flight tracking: mark in-flight and advance triage cursor
              without optimistically deleting the item before server ack. *)
           let attn_id = "ask:" ^ ask.ask_id in
-          let triage_query =
-            if
-              Option.is_none m.nav.overlay
-              && m.nav.dive_stack = []
-              && Nav.equal_workspace m.nav.workspace Nav.Work
-              && Nav.equal_work_tab m.work.active_tab Nav.Work_inbox
-            then m.work.filter_query
-            else ""
-          in
           let attention =
             m.attention
             |> Attention.mark_in_flight ~id:attn_id
-            |> Attention.move_triage ~query:triage_query ~delta:1
+            |> Attention.advance_past_in_flight ~query:(active_attention_query m)
           in
           let cmd =
             Cmd.Http_post
@@ -1986,15 +1986,6 @@ let submit_ask_choice ~now (ask : Wire_work.ask_row) ~choice_1based (m : Model.t
                     ~en:("Sent Ask choice: " ^ choice.label))
           in
           (next, [ cmd ]))
-
-let active_attention_query (m : Model.t) =
-  if
-    Option.is_none m.nav.overlay
-    && m.nav.dive_stack = []
-    && Nav.equal_workspace m.nav.workspace Nav.Work
-    && Nav.equal_work_tab m.work.active_tab Nav.Work_inbox
-  then m.work.filter_query
-  else ""
 
 let skip_all_ask_questions ~now (ask : Wire_work.ask_row) (m : Model.t) =
   match ask.questions with

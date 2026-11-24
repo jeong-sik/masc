@@ -482,6 +482,17 @@ let reserve_board_view_read ~now (m : Model.t) cmds =
 let step ~now m msg =
   let next0, cmds = step_raw ~now m msg in
   let next0 = leave_old_epoch ~now ~before:m next0 in
+  let next0 =
+    if
+      next0.nav.pane_index > 0
+      && Option.is_none next0.nav.overlay
+      && next0.nav.dive_stack = []
+      && Nav.equal_workspace next0.nav.workspace Nav.Work
+      && Nav.equal_work_tab next0.work.active_tab Nav.Work_inbox
+      && Model.focusable_pane_count next0 = 1
+    then { next0 with nav = { next0.nav with pane_index = 0 } }
+    else next0
+  in
   let view_stream_changed =
     not
       (Option.equal Subscriptions.equal_stream_kind

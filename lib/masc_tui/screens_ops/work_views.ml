@@ -2375,8 +2375,14 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
       let filtered_attn =
         Attention.filtered_items ~query:model.work.filter_query model.attention
       in
+      let sel_attn =
+        Attention.selected_index_in_filtered ~query:model.work.filter_query
+          model.attention
+      in
+      let selected_attn = Option.bind sel_attn (List.nth_opt filtered_attn) in
       let left_rect, right_rect =
-        if rect.w >= 96 then
+        if Option.is_none selected_attn then (rect, Rect.empty)
+        else if rect.w >= 96 then
           match
             Layout.split_h_bp bp rect [ Layout.Ratio 0.42; Layout.Flex 1 ]
           with
@@ -2495,21 +2501,14 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                 })
               filtered_attn
           in
-          let sel_attn =
-            Attention.selected_index_in_filtered ~query:model.work.filter_query
-              model.attention
-          in
           ignore
             (Table.draw grid ~rect:l_inner ~theme ~caps:Ops_common.default_caps
                ~lang:model.lang ~scroll:model.attention.triage_scroll_offset
-               ~selected:sel_attn ~focused:(Model.pane_focused model 0)
+               ?selected:sel_attn ~focused:(Model.pane_focused model 0)
                ~col_gap:(Layout.table_col_gap bp) ~columns:cols rows)
       end;
       if not (Rect.is_empty right_rect) then
-        match
-          Attention.current_filtered_item ~query:model.work.filter_query
-            model.attention
-        with
+        match selected_attn with
         | None -> ()
         | Some entry ->
             let tag, tok = attention_tag entry.kind in

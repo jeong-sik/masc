@@ -3649,6 +3649,7 @@ type enter_hint =
   | Enter_hint_hidden
   | Enter_hint_dos_screen
   | Enter_hint_dive
+  | Enter_hint_memory_reading
   | Enter_hint_edit_field
   | Enter_hint_confirm_field
 
@@ -3665,10 +3666,11 @@ let enter_hint (m : Model.t) =
     match enter_plan m with
     | Enter_noop -> Enter_hint_hidden
     | Enter_open_dos_screen -> Enter_hint_dos_screen
+    | Enter_open_memory_reading _ -> Enter_hint_memory_reading
     | Enter_expand_company _
     | Enter_keeper_action _ | Enter_dispatch _
     | Enter_push _ | Enter_attention _ | Enter_toggle_unreported_accounts
-    | Enter_fetch_memory_diff | Enter_open_memory_reading _
+    | Enter_fetch_memory_diff
     | Enter_scope_memory _ | Enter_toggle_fact_category _
     | Enter_code_toggle_dir _ | Enter_code_open_file _
     | Enter_code_jump_match _ ->
@@ -6345,6 +6347,49 @@ let keeper_memory_subview_lines ~width ~name (k : Knowledge_store.t) :
                            al.severity)
                         al.code al.label al.message)))
               row.alerts));
+      (match Observed.to_option (Knowledge_store.memory_os_internals_for ~keeper:name k) with
+      | Some internals when String.equal internals.keeper name ->
+          let compaction = internals.compaction in
+          let compaction_summary =
+            if compaction.present then
+              Printf.sprintf "cmp:%dep/%dt/%dB" compaction.epoch_count
+                compaction.archived_turns_count compaction.anchor_bytes
+            else "cmp:none"
+          in
+          let turns = internals.canonical_turns in
+          let turns_summary =
+            if turns.present then
+              Printf.sprintf "turns:%d(%s,rst:%d)" turns.turn_count
+                (Option.value turns.latest_runtime_kind ~default:"?")
+                turns.history_resets_count
+            else "turns:none"
+          in
+          let digest = internals.memory_digest in
+          let digest_summary =
+            if digest.present then
+              let revision =
+                match digest.revision with Some r -> Printf.sprintf "r%d" r | None -> "r?"
+              in
+              Printf.sprintf "dig:%s/%df/%dB" revision digest.fact_count digest.bytes
+            else "dig:none"
+          in
+          let molt = internals.librarian_molt in
+          let molt_summary =
+            match molt.pending_molt_kind with
+            | None -> "molt:clear"
+            | Some kind ->
+                let categories =
+                  match molt.pending_molt_categories with
+                  | [] -> ""
+                  | categories -> "(" ^ String.concat "," categories ^ ")"
+                in
+                "molt:" ^ kind ^ categories
+          in
+          List.iter push
+            (wrap_lines ~width:w
+               (Printf.sprintf "  OS %s · %s · %s · %s"
+                  compaction_summary turns_summary digest_summary molt_summary))
+      | Some _ | None -> ());
       List.rev !lines
   | Knowledge_store.Kmem_facts_tree ->
       push ("── Facts Tree: " ^ name ^ " ([Space/Enter] fold/expand) ──");

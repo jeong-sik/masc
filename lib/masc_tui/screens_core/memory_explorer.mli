@@ -3,8 +3,6 @@
 
     Renders:
     - Mode switch bar ([변천 과정 (Evolution)] · [전체 기억 (Facts)] · [기간 Diff])
-    - Responsive chart strip (24-bin Fact Age Ladder + Braille [facts_by_hour]
-      time series + Observed/Derived & HOT/WARM/COLD breakdown + Memory OS Internals)
     - Color & glyph-coded Evolution table ([+ ↻ ~ ⊕ - ✕ ! ?])
     - Ordinary + Source-bound Facts explorer with Recency/Retrieved sort toggle
     - Word-wrapped multi-line Temporal Diff
@@ -51,6 +49,16 @@ val render_memory_diagram :
   lang:Say.lang ->
   diagram:Knowledge_store.memory_diagram_state ->
   unit
+
+val render_keeper_health_charts :
+  grid:Cell_grid.t ->
+  rect:Rect.t ->
+  theme:Theme.t ->
+  model:Model.t ->
+  keeper:string ->
+  int
+(** Draw the optional age distribution and trend in spare health view rows.
+    Returns the number of rows used. *)
 
 val render_keeper_memory :
   grid:Cell_grid.t ->

@@ -264,58 +264,6 @@ let freshness_pill ~(model : Model.t) ~compact =
         in
         (Glyph.Live_idle, lbl, Theme.Status_historical)
 
-let footer_ssot_hint ~(model : Model.t) =
-  let lang = model.lang in
-  let dot = Glyph.to_utf8 Glyph.Separator_dot in
-  if model.freshness.server_offline then
-    Say.resolve lang (Say.make ~ko:"오프라인" ~en:"OFFLINE")
-  else
-    match Model.active_view_ssot_mode model with
-    | Model.Live_sse { stream_name; freshness; live_count; planned_count } -> (
-        match freshness with
-        | Health.Live _ ->
-            Printf.sprintf "LIVE SSE %d/%d %s %s" live_count planned_count dot
-              stream_name
-        | Health.Connecting ->
-            Printf.sprintf "SYNC %s %s" dot stream_name
-        | Health.Reconnecting { attempt; _ } ->
-            Printf.sprintf "RECON #%d %s %s" attempt dot stream_name
-        | Health.Stale { age_sec; _ } ->
-            Printf.sprintf "STALE %s %s %s"
-              (Format_val.format_duration_s age_sec)
-              dot stream_name
-        | Health.Disconnected _ ->
-            Printf.sprintf "OFFLINE %s %s" dot stream_name
-        | Health.Workspace_mismatch _ ->
-            Printf.sprintf "MISMATCH %s %s" dot stream_name)
-    | Model.Synced_snapshot { observer; observed_at } ->
-        let age_s =
-          match snapshot_age_str ~model observed_at with
-          | Some a -> " " ^ a
-          | None -> ""
-        in
-        let state_lbl =
-          match observer with
-          | Health.Live _ -> "SYNCED" ^ age_s
-          | Health.Connecting -> "SYNCING"
-          | Health.Reconnecting { attempt; _ } ->
-              Printf.sprintf "RECON #%d" attempt
-          | Health.Stale { age_sec; _ } ->
-              "STALE " ^ Format_val.format_duration_s age_sec
-          | Health.Disconnected _ -> "OFFLINE"
-          | Health.Workspace_mismatch _ -> "MISMATCH"
-        in
-        Printf.sprintf "%s %s [r] %s" state_lbl dot
-          (Say.resolve lang (Say.make ~ko:"새로고침" ~en:"refresh"))
-    | Model.Snapshot_only { observed_at } ->
-        let age_s =
-          match snapshot_age_str ~model observed_at with
-          | Some a -> " " ^ a
-          | None -> ""
-        in
-        Printf.sprintf "SNAPSHOT%s %s [r] %s" age_s dot
-          (Say.resolve lang (Say.make ~ko:"새로고침" ~en:"refresh"))
-
 let attention_kind_tag = function
   | Health.Pending_ask _ -> Say.make ~ko:"질문" ~en:"ASK"
   | Health.Held_tool_approval _ -> Say.make ~ko:"도구" ~en:"TOOL"

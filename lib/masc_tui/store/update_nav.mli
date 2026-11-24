@@ -161,6 +161,7 @@ type enter_hint =
   | Enter_hint_hidden  (** Enter does nothing here. *)
   | Enter_hint_dos_screen
   | Enter_hint_dive  (** Enter dives, toggles, or fetches ([dive_selected]). *)
+  | Enter_hint_memory_reading  (** Enter opens the selected memory record. *)
   | Enter_hint_edit_field  (** Keeper config: Enter edits the selected field. *)
   | Enter_hint_confirm_field
       (** Keeper config: Enter confirms the field being edited. *)

@@ -5578,6 +5578,7 @@ let test_pillar3_keeper_chat_empty_loading_and_korean_ime () =
 let enter_hint_name = function
   | Update_nav.Enter_hint_hidden -> "hidden"
   | Update_nav.Enter_hint_dive -> "dive"
+  | Update_nav.Enter_hint_memory_reading -> "memory reading"
   | Update_nav.Enter_hint_edit_field -> "edit field"
   | Update_nav.Enter_hint_confirm_field -> "confirm field"
   | Update_nav.Enter_hint_dos_screen -> "DOS screen"

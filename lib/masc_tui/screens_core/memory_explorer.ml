@@ -386,7 +386,7 @@ let draw_mode_pills ~grid ~(rect : Rect.t) ~(theme : Theme.t) ~(lang : Say.lang)
     let pills =
       [
         ( Printf.sprintf "[e] %s%s"
-            (say lang ~ko:"변천 과정" ~en:"Evolution")
+            (say lang ~ko:"변천" ~en:"Evolution")
             ev_cnt
         , Knowledge_store.equal_memory_view_mode k.memory_view_mode
             Knowledge_store.View_evolution
@@ -398,7 +398,7 @@ let draw_mode_pills ~grid ~(rect : Rect.t) ~(theme : Theme.t) ~(lang : Say.lang)
             Knowledge_store.View_facts
         , Theme.Status_ok );
         ( Printf.sprintf "[d] %s (%s)"
-            (say lang ~ko:"기간 Diff" ~en:"Diff")
+            (say lang ~ko:"기간 비교" ~en:"Diff")
             win_s
         , Knowledge_store.equal_memory_view_mode k.memory_view_mode
             Knowledge_store.View_diff
@@ -407,26 +407,21 @@ let draw_mode_pills ~grid ~(rect : Rect.t) ~(theme : Theme.t) ~(lang : Say.lang)
     in
     let right_hint =
       match k.memory_view_mode with
-      | Knowledge_store.View_evolution ->
-          say lang ~ko:"[Enter] 전문 · [.] Pele/Mermaid · [Ctrl+O] 형성 트리"
-            ~en:"[Enter] Read · [.] Pele/Mermaid · [Ctrl+O] Tree"
-      | Knowledge_store.View_facts ->
-          let sort_lbl =
-            match k.memory_facts_sort with
-            | Knowledge_store.Sort_recency ->
-                say lang ~ko:"최근순" ~en:"Recency"
-            | Knowledge_store.Sort_retrieved ->
-                say lang ~ko:"조회순" ~en:"Retrieved"
-          in
-          Printf.sprintf "[s] %s · [Enter] %s" sort_lbl
-            (say lang ~ko:"전문" ~en:"Read")
+      | Knowledge_store.View_evolution | Knowledge_store.View_facts -> ""
       | Knowledge_store.View_diff ->
-          say lang ~ko:"[w] 기간 · [M] 흐름/총량 · [Enter] 전문"
-            ~en:"[w] Win · [M] Flow/Net · [Enter] Read"
+          say lang ~ko:"[w] 기간 · [M] 흐름/총량 · [.] 다이어그램"
+            ~en:"[w] Window · [M] Flow/Net · [.] Diagram"
     in
     let rh_w = Grapheme.display_width right_hint in
+    let pills_width =
+      List.fold_left
+        (fun width (label, active, _) ->
+          width + Grapheme.display_width label + (if active then 4 else 2))
+        0 pills
+    in
+    let hint_fits = rh_w > 0 && pills_width + rh_w + 2 <= rect.w in
     let pills_limit =
-      if rect.w > rh_w + 24 then Rect.right rect - rh_w - 2 else Rect.right rect
+      if hint_fits then Rect.right rect - rh_w - 2 else Rect.right rect
     in
     let cx = ref rect.x in
     List.iter
@@ -459,220 +454,78 @@ let draw_mode_pills ~grid ~(rect : Rect.t) ~(theme : Theme.t) ~(lang : Say.lang)
           end
         end)
       pills;
-    if rect.w > rh_w + 24 then
+    if hint_fits then
       ignore
         (put_right ~grid ~clip:rect ~right_x:(Rect.right rect) ~y:rect.y
            ~max_w:rh_w ~style:(Typography.whisper ~bg ~italic:false theme)
            right_hint)
 
-(* --- Responsive Chart Strip (24-bin Age Ladder + facts_by_hour Braille + OS Internals) --- *)
+let draw_keeper_memory_notice ~grid ~(rect : Rect.t) ~theme ~lang ~bg ~keeper k =
+  match Knowledge_store.health_row_for_keeper ~keeper k with
+  | None -> 0
+  | Some row ->
+      let notice =
+        match row.read_error, row.source_read_error with
+        | Some reason, _ ->
+            Some
+              ( Glyph.Live_failing
+              , Theme.Status_critical
+              , say lang ~ko:"스냅샷 읽기 오류" ~en:"Snapshot read error"
+                ^ ": " ^ reason )
+        | None, Some reason ->
+            Some
+              ( Glyph.Warning_triangle
+              , Theme.Status_attention
+              , say lang ~ko:"소스 기억 읽기 오류" ~en:"Source read error"
+                ^ ": " ^ reason )
+        | None, None when row.librarian_failures > 0 || row.alerts <> [] ->
+            Some
+              ( Glyph.Warning_triangle
+              , Theme.Status_attention
+              , say lang ~ko:"기억 헬스 경고" ~en:"Memory health warning" )
+        | None, None when not row.snapshot_present ->
+            Some
+              ( Glyph.Missing_absent
+              , Theme.Status_historical
+              , say lang ~ko:"기억 스냅샷 없음" ~en:"No memory snapshot yet" )
+        | None, None -> None
+      in
+      match notice with
+      | None -> 0
+      | Some (glyph, tone, text) ->
+          ignore
+            (put_clipped ~grid ~clip:rect ~x:rect.x ~y:rect.y ~max_w:rect.w
+               ~style:(Typography.status ~bg theme tone)
+               (Glyph.to_utf8 glyph ^ " " ^ text));
+          1
 
-let draw_os_internals_line ~grid ~clip ~x ~y ~max_w ~theme ~bg ~keeper
-    (k : Knowledge_store.t) =
-  match
-    Observed.to_option (Knowledge_store.memory_os_internals_for ~keeper k)
-  with
-  | Some intr when String.equal intr.keeper keeper ->
-      let comp_s =
-        if intr.compaction.present then
-          Printf.sprintf "cmp:%dep/%dt/%dB" intr.compaction.epoch_count
-            intr.compaction.archived_turns_count intr.compaction.anchor_bytes
-        else "cmp:none"
+let render_keeper_health_charts ~grid ~(rect : Rect.t) ~(theme : Theme.t)
+    ~(model : Model.t) ~keeper =
+  match Knowledge_store.memory_health_for_keeper ~keeper model.knowledge with
+  | Some row when row.snapshot_present && Option.is_none row.read_error
+                  && rect.h >= 3 && not (Rect.is_empty rect) ->
+      let chart_h = Int.min 5 rect.h in
+      let chart_rect = { rect with h = chart_h } in
+      let lang = model.lang in
+      let bg = Color.of_rgb theme.surface_1 in
+      let observed_derived = (row.observed_facts, row.derived_facts) in
+      let draw_age rect =
+        Memory_charts.draw_age_ladder grid ~rect ~theme ~caps:default_caps ~lang
+          ~bg ~observed_derived row.age_bins
       in
-      let ct_s =
-        if intr.canonical_turns.present then
-          let rk =
-            Option.value intr.canonical_turns.latest_runtime_kind ~default:"?"
-          in
-          Printf.sprintf "turns:%d(%s,rst:%d)" intr.canonical_turns.turn_count rk
-            intr.canonical_turns.history_resets_count
-        else "turns:none"
-      in
-      let dig_s =
-        if intr.memory_digest.present then
-          let rev_s =
-            match intr.memory_digest.revision with
-            | Some r -> Printf.sprintf "r%d" r
-            | None -> "r?"
-          in
-          Printf.sprintf "dig:%s/%df/%dB" rev_s intr.memory_digest.fact_count
-            intr.memory_digest.bytes
-        else "dig:none"
-      in
-      let molt_s =
-        match intr.librarian_molt.pending_molt_kind with
-        | Some mk ->
-            let cats =
-              if intr.librarian_molt.pending_molt_categories = [] then ""
-              else
-                "("
-                ^ String.concat "," intr.librarian_molt.pending_molt_categories
-                ^ ")"
-            in
-            "molt:" ^ mk ^ cats
-        | None -> "molt:clear"
-      in
-      let line =
-        Printf.sprintf "OS %s · %s · %s · %s" comp_s ct_s dig_s molt_s
-      in
-      ignore
-        (put_clipped ~grid ~clip ~x ~y ~max_w
-           ~style:(Typography.structure ~bg theme)
-           line);
-      true
-  | Some _ | None -> false
-
-let draw_keeper_chart_strip ~grid ~(rect : Rect.t) ~(theme : Theme.t)
-    ~(lang : Say.lang) ~bg ~keeper ~(k : Knowledge_store.t) : int =
-  if Rect.is_empty rect then 0
-  else
-    let y = ref rect.y in
-    let bottom = Rect.bottom rect in
-    let draw_source_err_if_any (row : Wire_knowledge.keeper_memory_health_row) =
-      match row.source_read_error with
-      | Some serr when !y < bottom ->
-          Card.draw_left_rail ~bg ~tone:Theme.Status_attention grid ~x:rect.x
-            ~y:!y ~h:1 ~theme;
-          let msg =
-            Printf.sprintf "%s %s: %s"
-              (Glyph.to_utf8 Glyph.Warning_triangle)
-              (say lang ~ko:"소스 기억 읽기 오류" ~en:"Source read error")
-              serr
-          in
-          ignore
-            (put_clipped ~grid ~clip:rect ~x:(rect.x + 2) ~y:!y
-               ~max_w:(Int.max 0 (rect.w - 2))
-               ~style:(Typography.status ~bg theme Theme.Status_attention)
-               msg);
-          incr y
-      | Some _ | None -> ()
-    in
-    let health_opt = Knowledge_store.health_row_for_keeper ~keeper k in
-    (match health_opt with
-    | Some row when Option.is_some row.read_error ->
-        let err = Option.value row.read_error ~default:"" in
-        if !y < bottom then begin
-          Card.draw_left_rail ~bg ~tone:Theme.Status_critical grid ~x:rect.x
-            ~y:!y ~h:1 ~theme;
-          let msg =
-            Printf.sprintf "%s %s: %s"
-              (Glyph.to_utf8 Glyph.Live_failing)
-              (say lang ~ko:"스냅샷 읽기 오류" ~en:"Snapshot read error")
-              err
-          in
-          ignore
-            (put_clipped ~grid ~clip:rect ~x:(rect.x + 2) ~y:!y
-               ~max_w:(Int.max 0 (rect.w - 2))
-               ~style:
-                 (Typography.status ~bg ~bold:true theme Theme.Status_critical)
-               msg);
-          incr y
-        end;
-        draw_source_err_if_any row
-    | Some row when not row.snapshot_present ->
-        if !y < bottom then begin
-          let msg =
-            Printf.sprintf "%s %s"
-              (Glyph.to_utf8 Glyph.Missing_absent)
-              (say lang ~ko:"기억 스냅샷 없음 (커밋 대기 중)"
-                 ~en:"No memory snapshot yet")
-          in
-          ignore
-            (put_clipped ~grid ~clip:rect ~x:rect.x ~y:!y ~max_w:rect.w
-               ~style:(Typography.whisper ~bg theme)
-               msg);
-          incr y
-        end;
-        draw_source_err_if_any row
-    | Some row when bottom - !y >= 8 ->
-        let chart_h = if bottom - !y >= 14 then 5 else 4 in
-        let chart_r = Rect.make ~x:rect.x ~y:!y ~w:rect.w ~h:chart_h in
-        let obs_drv = (row.observed_facts, row.derived_facts) in
-        if rect.w >= 62 then begin
-          match
-            Layout.split_h ~gap:2 chart_r [ Layout.Fixed 30; Layout.Flex 1 ]
-          with
-          | [ left_r; right_r ] ->
-              ignore
-                (Memory_charts.draw_age_ladder grid ~rect:left_r ~theme
-                   ~caps:default_caps ~lang ~bg ~observed_derived:obs_drv
-                   row.age_bins);
-              Card.draw_v_hairline ~bg grid ~x:(right_r.x - 1) ~y:chart_r.y
-                ~h:chart_r.h ~theme;
-              ignore
-                (Memory_charts.draw_facts_trend grid ~rect:right_r ~theme
-                   ~caps:default_caps ~lang ~bg ~observed_derived:obs_drv
-                   row.facts_by_hour)
-          | _ ->
-              ignore
-                (Memory_charts.draw_age_ladder grid ~rect:chart_r ~theme
-                   ~caps:default_caps ~lang ~bg ~observed_derived:obs_drv
-                   row.age_bins)
-        end
-        else
-          ignore
-            (Memory_charts.draw_age_ladder grid ~rect:chart_r ~theme
-               ~caps:default_caps ~lang ~bg ~observed_derived:obs_drv
-               row.age_bins);
-        y := !y + chart_h;
-        if !y < bottom then begin
-          let bytes_s =
-            Format_val.format_value Format_val.Bytes
-              (float_of_int row.snapshot_bytes)
-          in
-          let alerts_s =
-            match row.alerts with
-            | [] -> ""
-            | xs -> Printf.sprintf " · %s %d" (Glyph.to_utf8 Glyph.Warning_triangle) (List.length xs)
-          in
-          let fail_s =
-            if row.librarian_failures > 0 then
-              Printf.sprintf " · fail:%d" row.librarian_failures
-            else ""
-          in
-          let stat =
-            Printf.sprintf "r%d · %d %s (%s %d · %s %d) · +%d -%d · %s%s%s"
-              row.revision row.facts
-              (say lang ~ko:"사실" ~en:"facts")
-              (say lang ~ko:"관측" ~en:"obs")
-              row.observed_facts
-              (say lang ~ko:"유도" ~en:"drv")
-              row.derived_facts row.added row.removed bytes_s fail_s alerts_s
-          in
-          let st =
-            if row.librarian_failures > 0 || row.alerts <> [] then
-              Typography.status ~bg theme Theme.Status_attention
-            else Typography.whisper ~bg ~italic:false theme
-          in
-          ignore
-            (put_clipped ~grid ~clip:rect ~x:rect.x ~y:!y ~max_w:rect.w ~style:st
-               stat);
-          incr y
-        end;
-        draw_source_err_if_any row
-    | Some row when bottom - !y >= 5 ->
-        let compact_r = Rect.make ~x:rect.x ~y:!y ~w:rect.w ~h:3 in
-        let used =
-          Memory_charts.draw_age_ladder grid ~rect:compact_r ~theme
-            ~caps:default_caps ~lang ~bg
-            ~observed_derived:(row.observed_facts, row.derived_facts)
-            row.age_bins
-        in
-        y := !y + used;
-        draw_source_err_if_any row
-    | Some _ | None -> ());
-    if !y < bottom then begin
-      if
-        draw_os_internals_line ~grid ~clip:rect ~x:rect.x ~y:!y ~max_w:rect.w
-          ~theme ~bg ~keeper k
-      then incr y
-    end;
-    let consumed = !y - rect.y in
-    if consumed > 0 && !y < bottom then begin
-      Card.draw_hairline ~pad_x:0 ~bg grid ~rect ~y:!y ~theme;
-      incr y
-    end;
-    !y - rect.y
+      if rect.w >= 62 && chart_h >= 4 then
+        match Layout.split_h ~gap:2 chart_rect [ Layout.Fixed 30; Layout.Flex 1 ] with
+        | [ left; right ] ->
+            ignore (draw_age left);
+            Card.draw_v_hairline ~bg grid ~x:(right.x - 1) ~y:chart_rect.y
+              ~h:chart_h ~theme;
+            ignore
+              (Memory_charts.draw_facts_trend grid ~rect:right ~theme
+                 ~caps:default_caps ~lang ~bg ~observed_derived row.facts_by_hour);
+            chart_h
+        | _ -> draw_age chart_rect
+      else draw_age chart_rect
+  | Some _ | None -> 0
 
 (* --- Evolution (Activity) Table View --- *)
 
@@ -686,8 +539,8 @@ let render_evolution_view ~grid ~(rect : Rect.t) ~(theme : Theme.t)
           let y = ref rect.y in
           let bottom = Rect.bottom rect in
           let events = Knowledge_store.filtered_memory_activity_events ~keeper k in
-          (* Summary line *)
-          if !y < bottom then begin
+          let filtering = not (String.equal (String.trim k.filter_query) "") in
+          if !y < bottom && (filtering || stale || act.undecodable_lines > 0) then begin
             let stale_s =
               if stale then " " ^ Glyph.to_utf8 Glyph.Transport_stale else ""
             in
@@ -1506,7 +1359,7 @@ let render_keeper_diff_view ~grid ~(rect : Rect.t) ~(theme : Theme.t)
                 incr y
               end
             end;
-            (* Observed Memory Flow Braille chart (Flow ▲/▼ or [g] Net Total) *)
+            (* Observed Memory Flow Braille chart (Flow ▲/▼ or [M] Net Total) *)
             let flow_h = Memory_flow.chart_height_for ~avail_h:(bottom - !y) in
             if flow_h > 0 then begin
               let flow_r = Rect.make ~x:rect.x ~y:!y ~w:rect.w ~h:flow_h in
@@ -1592,14 +1445,14 @@ let render_keeper_memory ~grid ~(rect : Rect.t) ~(theme : Theme.t)
             let bar_rect, body_rect = Rect.split_v rect ~top_h:1 in
             draw_mode_pills ~grid ~rect:bar_rect ~theme ~lang ~bg ~k ~keeper;
             if not (Rect.is_empty body_rect) then begin
-              let chart_used =
-                draw_keeper_chart_strip ~grid ~rect:body_rect ~theme ~lang ~bg
-                  ~keeper ~k
+              let notice_rows =
+                (* Reserve a header, a possible coverage line, and one record. *)
+                if body_rect.h > 3 then
+                  draw_keeper_memory_notice ~grid ~rect:body_rect ~theme ~lang
+                    ~bg ~keeper k
+                else 0
               in
-              let list_rect =
-                Rect.make ~x:body_rect.x ~y:(body_rect.y + chart_used)
-                  ~w:body_rect.w ~h:(Int.max 0 (body_rect.h - chart_used))
-              in
+              let _, list_rect = Rect.split_v body_rect ~top_h:notice_rows in
               match k.memory_view_mode with
               | Knowledge_store.View_evolution ->
                   render_evolution_view ~grid ~rect:list_rect ~theme ~lang
@@ -1764,7 +1617,7 @@ let render_world_diff_body ~grid ~(rect : Rect.t) ~(theme : Theme.t)
                         y := !y + used
                     | None -> ())
                 | Some _ | None -> ());
-                (* Observed Memory Flow Braille chart (Flow ▲/▼ or [g] Net Total) *)
+                (* Observed Memory Flow Braille chart (Flow ▲/▼ or [M] Net Total) *)
                 let flow_h =
                   Memory_flow.chart_height_for ~avail_h:(bottom - !y)
                 in

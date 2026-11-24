@@ -1899,23 +1899,19 @@ let test_v25_chrome_margins_and_keycaps () =
       false
       (Color.equal c.style.bg (Color.of_rgb theme.selection_bg))
   done;
-  (* Quiet Footer: surface_2 keycaps + italic whisper right status hint, zero middle-dot spam *)
+  (* The footer uses elevated keycaps. *)
   let footer_y = 39 in
   let keycap_bg = Color.of_rgb theme.surface_2 in
   let keycap_runs = ref 0 in
   let in_cap = ref false in
-  let has_italic_hint = ref false in
   for x = 0 to 139 do
     let c = Cell_grid.get g_wide ~x ~y:footer_y in
     let is_cap = Color.equal c.style.bg keycap_bg in
     if is_cap && not !in_cap then incr keycap_runs;
-    in_cap := is_cap;
-    if Attr.has c.style.attrs Attr.italic then has_italic_hint := true
+    in_cap := is_cap
   done;
   Alcotest.(check bool) "footer has elevated keycaps (1..14)" true
     (!keycap_runs >= 1 && !keycap_runs <= 14);
-  Alcotest.(check bool) "footer has Tier-4 italic status hint on Wide" true
-    !has_italic_hint;
   (* P3: Top-rail HH:MM clock uses Tier-4 italic Typography.whisper *)
   let has_italic_clock = ref false in
   for x = 120 to 139 do

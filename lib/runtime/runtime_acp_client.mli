@@ -432,6 +432,7 @@ type error =
       ; code : int
       ; message : string
       ; data : Yojson.Safe.t option
+      ; refusal : Llm_provider.Retry.signal_refusal option
       }
   | Timeout of
       { stage : string
@@ -444,6 +445,16 @@ type error =
   | Client_closed
 
 val error_to_string : error -> string
+
+val rpc_error
+  :  method_name:string
+  -> code:int
+  -> message:string
+  -> data:Yojson.Safe.t option
+  -> error
+(** Decode provider refusal evidence at the RPC boundary. An HTTP status in
+    [code] takes precedence over structured [data]. A string-valued [data]
+    must be a complete JSON object or array. [message] is diagnostic text. *)
 
 type jsonrpc_code =
   | Jsonrpc_parse_error
@@ -459,44 +470,6 @@ val jsonrpc_code_of_int : int -> jsonrpc_code
 (** Partition a JSON-RPC 2.0 error integer into its closed wire taxonomy so
     negative JSON-RPC protocol/server codes ([-32700..-32000]) are never
     conflated with HTTP refusal statuses ([400..599]). *)
-
-val is_context_overflow_rpc_error
-  :  method_name:string
-  -> code:int
-  -> message:string
-  -> data:Yojson.Safe.t option
-  -> bool
-(** True when an ACP JSON-RPC error reports a structured provider/model
-    context-window or prompt-length overflow (via {!Llm_provider.Retry}) that
-    should enter shrink/compaction recovery. Free-form prose without a
-    structured JSON payload or exact wire code returns [false]. *)
-
-type rpc_error_class =
-  | Rpc_context_overflow of { limit : int option }
-  | Rpc_request_body_too_large
-  | Rpc_hard_quota of { retry_after : float option }
-  | Rpc_rate_limited of { retry_after : float option }
-  | Rpc_auth_error
-  | Rpc_authorization_error
-  | Rpc_provider_unavailable
-  | Rpc_unclassified
-
-val classify_rpc_error
-  :  method_name:string
-  -> code:int
-  -> message:string
-  -> data:Yojson.Safe.t option
-  -> rpc_error_class
-(** Classify an upstream ACP JSON-RPC error into a closed provider-refusal
-    class by delegating strictly to {!Llm_provider.Retry}:
-    1. structured JSON [data] ([Retry.classify_structured_json] /
-       [Retry.classify_text]),
-    2. unified text refusal classification on [message] ([Retry.classify_text]),
-    under one HTTP status precedence gate combining {!Jsonrpc_http_status},
-    [data] status fields, and explicit [HTTP <4xx|5xx>] tokens in [message] so
-    HTTP [401]/[402]/[403]/[413]/[429]/[5xx] never downgrade into
-    {!Rpc_context_overflow}. Free-form English prose without structured evidence
-    returns {!Rpc_unclassified}. *)
 
 val image_input_unsupported_detail : driver -> string
 (** Canonical refusal detail when an ACP server advertises

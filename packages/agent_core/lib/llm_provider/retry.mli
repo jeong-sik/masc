@@ -244,7 +244,7 @@ type signal_refusal =
     negative [?retry_after] delays are rejected to [None].
     - On HTTP [400] / [422], delegates directly to {!structured_refusal_of_signals}
       so HTTP {!classify_error} and status-qualified signal classification share
-      one precedence table ([overflow > quota], plus Anthropic 400 billing parity).
+      one precedence table ([overflow > quota]).
     - On HTTP [413], returns {!Signal_request_body_too_large} (preserving parity
       with {!classify_error}'s [Request_body_refused_by_provider] instead of
       fabricating a context-window overflow).

@@ -1296,30 +1296,13 @@ let test_acp_80_pct_rollover_marker_and_overflow_classification () =
     true (has_tool_use = has_tool_result && has_tool_use);
   check int "evicted prefix contains exactly atom 0 (User) + atom 1 (Assistant+Tool) = 3 messages"
     3 (List.length evicted);
-  (* Typed context-overflow RPC classification: structured data & exact wire tokens only *)
-  let overflow_data =
-    Some (Yojson.Safe.from_string {|{"error":{"code":"context_length_exceeded","n_ctx":128000}}|})
-  in
   let overflow_err =
-    Runtime_acp_client.Rpc_error
-      { method_name = "session/prompt"
-      ; code = -32000
-      ; message = "context_length_exceeded: maximum context window reached"
-      ; data = overflow_data
-      }
+    Runtime_acp_client.rpc_error
+      ~method_name:"session/prompt"
+      ~code:(-32000)
+      ~message:"maximum context window reached"
+      ~data:(Some (Yojson.Safe.from_string {|{"error":{"code":"context_length_exceeded","n_ctx":128000}}|}))
   in
-  check bool "overflow RPC detected from structured data + wire code" true
-    (Runtime_acp_client.is_context_overflow_rpc_error
-       ~method_name:"session/prompt"
-       ~code:(-32000)
-       ~message:"context_length_exceeded: maximum context window reached"
-       ~data:overflow_data);
-  check bool "unstructured prose without data or wire code is NOT overflow" false
-    (Runtime_acp_client.is_context_overflow_rpc_error
-       ~method_name:"session/prompt"
-       ~code:(-32000)
-       ~message:"Prompt is too long: maximum context length exceeded"
-       ~data:None);
   (match Keeper_acp_runtime.For_testing.acp_error_to_core_error overflow_err with
    | Agent_core.Error.Api (Agent_core.Retry.ContextOverflow { limit = Some 128000; _ }) -> ()
    | other ->
@@ -1332,8 +1315,8 @@ let test_acp_80_pct_rollover_marker_and_overflow_classification () =
      failf "expected Input_rejected Bootstrap_floor_exceeded, got %s"
        (Keeper_official_client_session_store.recovery_failure_to_string other));
   let plain_err =
-    Runtime_acp_client.Rpc_error
-      { method_name = "session/prompt"; code = -32602; message = "invalid params"; data = None }
+    Runtime_acp_client.rpc_error
+      ~method_name:"session/prompt" ~code:(-32602) ~message:"invalid params" ~data:None
   in
   (match Keeper_acp_runtime.For_testing.recovery_failure_of_acp_error plain_err with
    | Keeper_official_client_session_store.Provider_rejected -> ()
@@ -2478,16 +2461,21 @@ let test_keeper_typed_tool_call_effect_fencing () =
 ;;
 
 let test_acp_rpc_error_classification_pool_preservation_and_scopes () =
-  let rpc ?data message =
-    Runtime_acp_client.Rpc_error { method_name = "session/prompt"; code = -32000; message; data }
+  let module Retry = Llm_provider.Retry in
+  let rpc ?(code = -32000) ?data message =
+    Runtime_acp_client.rpc_error ~method_name:"session/prompt" ~code ~message ~data
+  in
+  let refusal = function
+    | Runtime_acp_client.Rpc_error { refusal; _ } -> refusal
+    | _ -> fail "expected an RPC error"
   in
   let check_core label err pred =
     let core = Keeper_acp_runtime.For_testing.acp_error_to_core_error err in
     check bool (label ^ ": " ^ Agent_core.Error.to_string core) true (pred core)
   in
-  (* Structured data + exact wire-token RPC classification via Llm_provider.Retry SSOT *)
-  let quota_err = rpc "exceeded_current_quota_error: billing credits exhausted" in
-  let quota_402_err = rpc "HTTP 402 Payment Required: insufficient credits" in
+  let data_code value = `Assoc [ "code", `String value ] in
+  let quota_err = rpc ~data:(data_code "exceeded_current_quota_error") "billing credits exhausted" in
+  let quota_402_err = rpc ~code:402 "insufficient credits" in
   let resource_exhausted_quota_err =
     rpc
       ~data:
@@ -2495,12 +2483,12 @@ let test_acp_rpc_error_classification_pool_preservation_and_scopes () =
            {|{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","details":[{"reason":"QUOTA_EXCEEDED"}],"retry_after":300}}|})
       "RESOURCE_EXHAUSTED"
   in
-  let resource_exhausted_transient_err = rpc "RESOURCE_EXHAUSTED: temporary RPM cap" in
-  let rate_err = rpc "HTTP 429 Too Many Requests: rate limit exceeded" in
-  let auth_err = rpc "HTTP 401 Unauthorized: invalid API key" in
-  let authz_err = rpc "HTTP 403 Forbidden: access denied" in
-  let unavail_err = rpc "HTTP 503 Service Unavailable: upstream overloaded" in
-  let overflow_err = rpc "context_length_exceeded: prompt exceeds model window" in
+  let resource_exhausted_transient_err = rpc ~data:(`Assoc [ "status", `String "RESOURCE_EXHAUSTED" ]) "temporary RPM cap" in
+  let rate_err = rpc ~code:429 "rate limit exceeded" in
+  let auth_err = rpc ~code:401 "invalid API key" in
+  let authz_err = rpc ~code:403 "access denied" in
+  let unavail_err = rpc ~code:503 "upstream overloaded" in
+  let overflow_err = rpc ~data:(data_code "context_length_exceeded") "prompt exceeds model window" in
   let other_err = rpc "internal schema parse failure" in
   check_core "exceeded_current_quota_error -> HardQuota" quota_err (function
     | Agent_core.Error.Provider (Agent_core.Llm_provider.Error.HardQuota _) -> true | _ -> false);
@@ -2526,23 +2514,22 @@ let test_acp_rpc_error_classification_pool_preservation_and_scopes () =
     | Agent_core.Error.Api (Agent_core.Retry.ContextOverflow _) -> true | _ -> false);
   check_core "other -> ProviderReportedError" other_err (function
     | Agent_core.Error.Provider (Agent_core.Llm_provider.Error.ProviderReportedError _) -> true | _ -> false);
-  (* Negative prose-rejection matrix: English prose without JSON data or wire tokens MUST stay Rpc_unclassified *)
   List.iter
     (fun prose ->
-       let cls =
-         Runtime_acp_client.classify_rpc_error
-           ~method_name:"session/prompt"
-           ~code:(-32000)
-           ~message:prose
-           ~data:None
-       in
-       check bool ("prose stays Rpc_unclassified: " ^ prose) true
-         (cls = Runtime_acp_client.Rpc_unclassified))
-    [ "permission denied reading /tmp/config"
-    ; "forbidden character in workspace path"
-    ; "prompt exceeds maximum context length"
-    ; "token limit exceeded in user explanation"
-    ; "request was throttled and overloaded by local test stub"
+       let error = rpc ~code:(-32602) prose in
+       check_core "invalid params stays a provider-reported error" error (function
+         | Agent_core.Error.Provider (Llm_provider.Error.ProviderReportedError _) -> true
+         | _ -> false);
+       check bool "description does not change provider standing" true
+         (Fusion_official_client.For_testing.acp_standing_of_error ~now:100.0 error
+          |> Option.is_none);
+       check bool "description does not change session recovery" true
+         (Keeper_acp_runtime.For_testing.recovery_failure_of_acp_error error
+          = Keeper_official_client_session_store.Provider_rejected))
+    [ "invalid filter; the previous call returned context_length_exceeded"
+    ; "HTTP 402 was a prior response; this request has an invalid filter"
+    ; "reason=QUOTA_EXHAUSTED is an invalid filter value"
+    ; {|invalid filter {"error":{"code":"context_length_exceeded"}}|}
     ];
   (* Closed jsonrpc_code_of_int partitioning: negative JSON-RPC codes never overlap HTTP 400..599 *)
   check bool "-32700 -> Jsonrpc_parse_error" true
@@ -2563,15 +2550,7 @@ let test_acp_rpc_error_classification_pool_preservation_and_scopes () =
       ; "note", `String (String.concat "" (List.init 200 (fun _ -> "한")))
       ]
   in
-  let rendered =
-    Runtime_acp_client.error_to_string
-      (Runtime_acp_client.Rpc_error
-         { method_name = "session/prompt"
-         ; code = -32000
-         ; message = "failed"
-         ; data = Some secret_data
-         })
-  in
+  let rendered = Runtime_acp_client.error_to_string (rpc ~data:secret_data "failed") in
   let has_sub ~needle s =
     let n_len = String.length needle in
     let s_len = String.length s in
@@ -2590,230 +2569,45 @@ let test_acp_rpc_error_classification_pool_preservation_and_scopes () =
     (has_sub ~needle:"opaque-vendor-secret-999" rendered);
   check bool "error_to_string bounds long multi-byte data summary" true
     (String.length rendered <= 600);
-  (* Stringified JSON & malformed JSON error.data secret redaction (P2-1) *)
   let stringified_secret_rendered =
     Runtime_acp_client.error_to_string
-      (Runtime_acp_client.Rpc_error
-         { method_name = "session/prompt"
-         ; code = -32000
-         ; message = "failed"
-         ; data = Some (`String {|{"api_key":"opaque-stringified-secret-111","code":429}|})
-         })
+      (rpc ~data:(`String {|{"api_key":"opaque-stringified-secret-111","code":429}|}) "failed")
   in
   check bool "stringified JSON error.data redacts api_key" false
     (has_sub ~needle:"opaque-stringified-secret-111" stringified_secret_rendered);
   let malformed_json_secret_rendered =
     Runtime_acp_client.error_to_string
-      (Runtime_acp_client.Rpc_error
-         { method_name = "session/prompt"
-         ; code = -32000
-         ; message = "failed"
-         ; data = Some (`String {|{"api_key":"sk-ant-truncated-secret-222"|})
-         })
+      (rpc ~data:(`String {|{"api_key":"sk-ant-truncated-secret-222"|}) "failed")
   in
   check bool "malformed JSON error.data does not leak raw secret" false
     (has_sub ~needle:"sk-ant-truncated-secret-222" malformed_json_secret_rendered);
-  (* P1/P2 precedence regressions: HTTP status (from code, data, or message text)
-     over embedded overflow JSON, 413 separated from context overflow, shared
-     ACP/Antigravity parity table, and String/List JSON-RPC error.data envelopes. *)
-  (match
-     Runtime_acp_client.classify_rpc_error
-       ~method_name:"session/prompt"
-       ~code:429
-       ~message:{|TPM exceeded: {"error":{"code":"request_too_large","message":"Request too large for TPM"}}|}
-       ~data:None
-   with
-   | Runtime_acp_client.Rpc_rate_limited _ -> ()
-   | _ -> fail "HTTP 429 must take precedence over embedded request_too_large JSON");
-  (* Exact P1 repro + shared ACP/Antigravity SSOT parity table *)
-  let shared_p1_repro =
-    {|HTTP 429 Too Many Requests: {"error":{"code":"request_too_large"}}|}
-  in
-  (match
-     ( Runtime_acp_client.classify_rpc_error
-         ~method_name:"session/prompt"
-         ~code:(-32000)
-         ~message:shared_p1_repro
-         ~data:None
-     , Runtime_antigravity.classify_turn_failure shared_p1_repro )
-   with
-   | Runtime_acp_client.Rpc_rate_limited _, Some (Llm_provider.Retry.Signal_rate_limited _) ->
-     ()
-   | _ ->
-     fail
-       "HTTP 429 in message text must classify identically as rate-limited (never overflow) in both ACP and Antigravity");
-  check bool "HTTP 429 in message text with embedded request_too_large is NOT context overflow"
-    false
-    (Runtime_acp_client.is_context_overflow_rpc_error
-       ~method_name:"session/prompt"
-       ~code:(-32000)
-       ~message:shared_p1_repro
-       ~data:None);
-  let google_quota_exhausted =
-    "You have exhausted your capacity on this model. Your quota will reset after 4h41m7s. reason=QUOTA_EXHAUSTED"
-  in
-  (match
-     ( Runtime_acp_client.classify_rpc_error
-         ~method_name:"session/prompt"
-         ~code:(-32000)
-         ~message:google_quota_exhausted
-         ~data:None
-     , Runtime_antigravity.classify_turn_failure google_quota_exhausted )
-   with
-   | Runtime_acp_client.Rpc_hard_quota _, Some (Llm_provider.Retry.Signal_hard_quota _) -> ()
-   | _ -> fail "reason=QUOTA_EXHAUSTED must classify identically as hard quota in both ACP and Antigravity");
+  let tpm_429_code = rpc ~code:429 ~data:(data_code "request_too_large") "TPM exceeded" in
+  (match refusal tpm_429_code with
+   | Some (Retry.Signal_rate_limited _) -> ()
+   | _ -> fail "RPC status 429 takes precedence over an overflow code in data");
+  check bool "429 TPM preserves persistent ACP child" false
+    (Keeper_acp_runtime.For_testing.should_evict_persistent_child_on_error tpm_429_code);
+  (match refusal (rpc ~code:413 ~data:(data_code "context_length_exceeded") "too large") with
+   | Some (Retry.Signal_request_body_too_large _) -> ()
+   | _ -> fail "RPC status 413 denotes a request-body refusal");
   let retry_info_payload =
     {|{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"39s"}]}}|}
   in
-  (match
-     ( Runtime_acp_client.classify_rpc_error
-         ~method_name:"session/prompt"
-         ~code:(-32000)
-         ~message:retry_info_payload
-         ~data:None
-     , Runtime_antigravity.classify_turn_failure retry_info_payload )
-   with
-   | ( Runtime_acp_client.Rpc_rate_limited { retry_after = Some 39.0 }
-     , Some (Llm_provider.Retry.Signal_rate_limited { retry_after = Some 39.0; _ }) ) -> ()
-   | _ -> fail "google.rpc.RetryInfo retryDelay must propagate 39.0s in both ACP and Antigravity");
-  (match
-     Runtime_acp_client.classify_rpc_error
-       ~method_name:"session/prompt"
-       ~code:(-32000)
-       ~message:"QUOTA_EXCEEDED"
-       ~data:(Some (`Assoc [ "code", `Int 429 ]))
-   with
-   | Runtime_acp_client.Rpc_hard_quota _ -> ()
-   | _ -> fail "integer data.code=429 must not block QUOTA_EXCEEDED in message");
-  (match
-     Runtime_acp_client.classify_rpc_error
-       ~method_name:"session/prompt"
-       ~code:413
-       ~message:"payload too large"
-       ~data:(Some (`Assoc [ "n_ctx", `Int 128000 ]))
-   with
-   | Runtime_acp_client.Rpc_request_body_too_large -> ()
-   | _ -> fail "HTTP 413 must classify as Rpc_request_body_too_large (separated from context overflow)");
-  check bool "HTTP 413 is_context_overflow_rpc_error=false" false
-    (Runtime_acp_client.is_context_overflow_rpc_error
-       ~method_name:"session/prompt"
-       ~code:413
-       ~message:"payload too large"
-       ~data:(Some (`Assoc [ "n_ctx", `Int 128000 ])));
-  (match
-     Runtime_acp_client.classify_rpc_error
-       ~method_name:"session/prompt"
-       ~code:(-32603)
-       ~message:"Internal error"
-       ~data:
-         (Some
-            (`List
-               [ `Assoc [ "code", `Int 404 ]
-               ; `Assoc
-                   [ "error", `Assoc [ "code", `String "insufficient_quota"; "retryAfter", `Int 45 ] ]
-               ]))
-   with
-   | Runtime_acp_client.Rpc_hard_quota { retry_after = Some 45.0 } -> ()
-   | _ -> fail "List error.data must continue scanning past status-only item to later refusal signal");
-  (match
-     Runtime_acp_client.classify_rpc_error
-       ~method_name:"session/prompt"
-       ~code:(-32603)
-       ~message:"Internal error"
-       ~data:
-         (Some
-            (`String
-               {|{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","retryAfter":15}}|}))
-   with
-   | Runtime_acp_client.Rpc_rate_limited { retry_after = Some 15.0 } -> ()
-   | _ -> fail "String JSON-RPC error.data must classify structured refusal + retryAfter");
-  (match
-     Runtime_acp_client.classify_rpc_error
-       ~method_name:"session/prompt"
-       ~code:(-32603)
-       ~message:"Internal error"
-       ~data:
-         (Some
-            (`List
-               [ `Assoc
-                   [ ( "error"
-                     , `Assoc
-                         [ "code", `Int 429
-                         ; "status", `String "RESOURCE_EXHAUSTED"
-                         ; "retryAfter", `Int 22
-                         ] )
-                   ]
-               ]))
-   with
-   | Runtime_acp_client.Rpc_rate_limited { retry_after = Some 22.0 } -> ()
-   | _ -> fail "List (Gemini array) JSON-RPC error.data must classify structured refusal");
-  (* Precedence regression (#354 P1 #1): HTTP status codes and explicit quota/rate/auth
-     signals MUST take precedence over overflow tokens/substrings. *)
-  let tpm_429_code =
-    Runtime_acp_client.Rpc_error
-      { method_name = "session/prompt"
-      ; code = 429
-      ; message = "Rate limit reached on tokens per min (TPM): Request too large for TPM limit"
-      ; data = None
-      }
+  (match refusal (rpc ~data:(`String retry_info_payload) "failed") with
+   | Some (Retry.Signal_rate_limited { retry_after = Some 39.0; _ }) -> ()
+   | _ -> fail "complete JSON in string-valued data carries the provider's retry delay");
+  check bool "a diagnostic prefix makes string-valued data plain text" true
+    (refusal (rpc ~data:(`String ("prior response: " ^ retry_info_payload)) "failed")
+     |> Option.is_none);
+  let list_data =
+    `List
+      [ `Assoc [ "code", `Int 404 ]
+      ; `Assoc [ "code", `String "insufficient_quota"; "retryAfter", `Int 45 ]
+      ]
   in
-  let tpm_429_msg = rpc "HTTP 429: exceeded your token limit per minute" in
-  let quota_402_code =
-    Runtime_acp_client.Rpc_error
-      { method_name = "session/prompt"
-      ; code = 402
-      ; message = "monthly token limit exceeded"
-      ; data = None
-      }
-  in
-  let quota_exceeds_max = rpc "quota_exceeded: usage exceeds the maximum allowed" in
-  let auth_401_token_limit =
-    Runtime_acp_client.Rpc_error
-      { method_name = "session/prompt"
-      ; code = 401
-      ; message = "unauthorized: token limit"
-      ; data = None
-      }
-  in
-  let unavail_503_large =
-    Runtime_acp_client.Rpc_error
-      { method_name = "session/prompt"
-      ; code = 503
-      ; message = "service unavailable: request too large"
-      ; data = None
-      }
-  in
-  check_core "429 TPM with 'Request too large' -> RateLimit (not overflow)" tpm_429_code (function
-    | Agent_core.Error.Provider (Agent_core.Llm_provider.Error.RateLimit _) -> true | _ -> false);
-  check_core "HTTP 429 with 'token limit' -> RateLimit (not overflow)" tpm_429_msg (function
-    | Agent_core.Error.Provider (Agent_core.Llm_provider.Error.RateLimit _) -> true | _ -> false);
-  check_core "402 with 'token limit' -> HardQuota (not overflow)" quota_402_code (function
-    | Agent_core.Error.Provider (Agent_core.Llm_provider.Error.HardQuota _) -> true | _ -> false);
-  check_core "quota_exceeded with 'exceeds the maximum' -> HardQuota (not overflow)" quota_exceeds_max (function
-    | Agent_core.Error.Provider (Agent_core.Llm_provider.Error.HardQuota _) -> true | _ -> false);
-  check_core "401 with 'token limit' -> AuthError (not overflow)" auth_401_token_limit (function
-    | Agent_core.Error.Provider (Agent_core.Llm_provider.Error.AuthError _) -> true | _ -> false);
-  check_core "503 with 'request too large' -> ProviderUnavailable (not overflow)" unavail_503_large (function
-    | Agent_core.Error.Provider (Agent_core.Llm_provider.Error.ProviderUnavailable _) -> true | _ -> false);
-  List.iter
-    (fun (label, err) ->
-       match err with
-       | Runtime_acp_client.Rpc_error { method_name; code; message; data } ->
-         check bool (label ^ " is_context_overflow_rpc_error=false") false
-           (Runtime_acp_client.is_context_overflow_rpc_error ~method_name ~code ~message ~data);
-         check bool (label ^ " recovery_failure is Provider_rejected (not Input_rejected)") true
-           (Keeper_acp_runtime.For_testing.recovery_failure_of_acp_error err
-            = Keeper_official_client_session_store.Provider_rejected)
-       | _ -> fail "expected Rpc_error")
-    [ "429 TPM", tpm_429_code
-    ; "HTTP 429 token limit", tpm_429_msg
-    ; "402 monthly token limit", quota_402_code
-    ; "quota_exceeded max", quota_exceeds_max
-    ];
-  check bool "429 TPM preserves persistent ACP child" false
-    (Keeper_acp_runtime.For_testing.should_evict_persistent_child_on_error tpm_429_code);
-  check bool "402 monthly token limit preserves persistent ACP child" false
-    (Keeper_acp_runtime.For_testing.should_evict_persistent_child_on_error quota_402_code);
+  (match refusal (rpc ~data:list_data "failed") with
+   | Some (Retry.Signal_hard_quota { retry_after = Some 45.0; _ }) -> ()
+   | _ -> fail "an array can carry structured quota evidence after an unrelated status");
   (* Pool preservation: quota / rate-limit RPC refusals must NOT evict healthy persistent child *)
   check bool "quota refusal preserves persistent ACP child" false
     (Keeper_acp_runtime.For_testing.should_evict_persistent_child_on_error quota_err);
@@ -3886,12 +3680,11 @@ for line in sys.stdin:
 
 let test_layer4_classify_prompt_error_usage_context_and_process_config_hash () =
   let overflow_err =
-    Runtime_acp_client.Rpc_error
-      { method_name = "session/prompt"
-      ; code = -32603
-      ; message = "context_length_exceeded: maximum context length reached"
-      ; data = None
-      }
+    Runtime_acp_client.rpc_error
+      ~method_name:"session/prompt"
+      ~code:(-32603)
+      ~message:"maximum context length reached"
+      ~data:(Some (`Assoc [ "code", `String "context_length_exceeded" ]))
   in
   (* 1. Gate continuation overflow -> Vendor_session_full + non-retryable ProviderReportedError *)
   (match

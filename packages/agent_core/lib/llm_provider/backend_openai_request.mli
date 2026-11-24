@@ -22,12 +22,11 @@ val warn_capability_drop : model_id:string -> field:string -> unit
 val effective_tool_choice : Provider_config.t -> Yojson.Safe.t option
 val effective_tools : Provider_config.t -> Yojson.Safe.t list -> Yojson.Safe.t list
 val structured_schema_of_config : Provider_config.t -> Types.json_schema option
-val capabilities_of_config : Provider_config.t -> Capabilities.capabilities
 
 (** Resolve the output-token budget for optional request envelopes once,
     preserving whether its ceiling came from the model catalog, an explicit
     capability override, or the typed provider default used by
-    {!capabilities_of_config}.
+    {!Input_budget.capabilities_of_config}.
     [Capabilities.max_output_tokens] is a validation ceiling, not a
     request default: caller [Some n] is clamped to it (one-shot WARN on
     clamp); caller [None] resolves to [None] and the emitters omit the

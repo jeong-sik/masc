@@ -937,48 +937,6 @@ let signals_indicate_provider_unavailable (s : error_signals) =
   || List.exists is_structured_unavailable_token s.detail_reasons
 ;;
 
-let contains_substring_ci ~haystack ~needle =
-  let h_len = String.length haystack in
-  let n_len = String.length needle in
-  if n_len = 0
-  then true
-  else if n_len > h_len
-  then false
-  else (
-    let h = String.lowercase_ascii haystack in
-    let n = String.lowercase_ascii needle in
-    let rec scan idx =
-      if idx > h_len - n_len
-      then false
-      else if String.sub h idx n_len = n
-      then true
-      else scan (idx + 1)
-    in
-    scan 0)
-;;
-
-(* Anthropic reports credit exhaustion and workspace API usage-limit
-   refusals on HTTP 400 with [error.type = "invalid_request_error"] and no
-   dedicated billing code (only the canonical refusal message). Classify those
-   exact documented billing/usage-limit messages on HTTP 400 as
-   [Structured_account_quota] so multi-account lanes rest exhausted Claude API
-   accounts instead of hammering them on every turn. *)
-let is_anthropic_400_account_quota_message msg =
-  let needles =
-    [ "credit balance is too low"
-    ; "reached your specified api usage limits"
-    ; "reached your api usage limit"
-    ; "insufficient credit balance"
-    ; "workspace spend limit"
-    ]
-  in
-  List.exists (fun needle -> contains_substring_ci ~haystack:msg ~needle) needles
-;;
-
-let signals_indicate_anthropic_400_account_quota (s : error_signals) ~message =
-  List.exists is_anthropic_400_account_quota_message (message :: s.messages)
-;;
-
 let structured_refusal_of_signals_with
       ~indicates_overflow
       ~indicates_quota
@@ -992,9 +950,7 @@ let structured_refusal_of_signals_with
   | 400 | 422 ->
     if indicates_overflow signals
     then Some (Structured_context_overflow { message; limit = signals.n_ctx })
-    else if
-      indicates_quota signals
-      || (status = 400 && signals_indicate_anthropic_400_account_quota signals ~message)
+    else if indicates_quota signals
     then Some (Structured_account_quota { message; retry_after })
     else None
   | 402 -> Some (Structured_account_quota { message; retry_after })

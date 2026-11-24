@@ -494,24 +494,6 @@ let claude_quota_standing : Runtime_claude_code.quota_block -> Runtime_candidate
     Runtime_candidate_standing.Rate_limited { retry_after = None }
 ;;
 
-let standing_of_rpc_error_class ~now = function
-  | Runtime_acp_client.Rpc_hard_quota { retry_after } ->
-    Some
-      (Runtime_candidate_standing.Hard_quota
-         { source = Runtime_quota_window.Provider_quota_refused
-         ; resets_at = Option.map (fun s -> now +. s) retry_after
-         })
-  | Runtime_acp_client.Rpc_rate_limited { retry_after } ->
-    Some (Runtime_candidate_standing.Rate_limited { retry_after })
-  | Runtime_acp_client.Rpc_auth_error ->
-    Some (Runtime_candidate_standing.Credential_refused { noted_at = now })
-  | Runtime_acp_client.Rpc_context_overflow _
-  | Runtime_acp_client.Rpc_request_body_too_large
-  | Runtime_acp_client.Rpc_authorization_error
-  | Runtime_acp_client.Rpc_provider_unavailable
-  | Runtime_acp_client.Rpc_unclassified -> None
-;;
-
 let standing_of_signal_refusal ~now = function
   | Some (Llm_provider.Retry.Signal_hard_quota { retry_after; _ }) ->
     Some
@@ -554,9 +536,7 @@ let antigravity_standing_of_error ~now :
 let acp_standing_of_error ~now :
   Runtime_acp_client.error -> Runtime_candidate_standing.observation option
   = function
-  | Runtime_acp_client.Rpc_error { method_name; code; message; data } ->
-    Runtime_acp_client.classify_rpc_error ~method_name ~code ~message ~data
-    |> standing_of_rpc_error_class ~now
+  | Runtime_acp_client.Rpc_error { refusal; _ } -> standing_of_signal_refusal ~now refusal
   | Runtime_acp_client.Invalid_config _
   | Runtime_acp_client.Spawn_refused _
   | Runtime_acp_client.Protocol_error _

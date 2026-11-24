@@ -104,17 +104,6 @@ let codex_error_is_binding_rest (error : Runtime_codex_app_server.error) : bool 
   | Runtime_codex_app_server.Timeout _ -> false
 ;;
 
-let rpc_error_class_is_binding_rest = function
-  | Runtime_acp_client.Rpc_hard_quota _
-  | Runtime_acp_client.Rpc_rate_limited _ -> true
-  | Runtime_acp_client.Rpc_context_overflow _
-  | Runtime_acp_client.Rpc_request_body_too_large
-  | Runtime_acp_client.Rpc_auth_error
-  | Runtime_acp_client.Rpc_authorization_error
-  | Runtime_acp_client.Rpc_provider_unavailable
-  | Runtime_acp_client.Rpc_unclassified -> false
-;;
-
 let signal_refusal_is_binding_rest = function
   | Some (Llm_provider.Retry.Signal_hard_quota _ | Llm_provider.Retry.Signal_rate_limited _) ->
     true
@@ -146,9 +135,7 @@ let antigravity_error_is_binding_rest : Runtime_antigravity.error -> bool = func
 ;;
 
 let acp_error_is_binding_rest : Runtime_acp_client.error -> bool = function
-  | Runtime_acp_client.Rpc_error { method_name; code; message; data } ->
-    Runtime_acp_client.classify_rpc_error ~method_name ~code ~message ~data
-    |> rpc_error_class_is_binding_rest
+  | Runtime_acp_client.Rpc_error { refusal; _ } -> signal_refusal_is_binding_rest refusal
   | Runtime_acp_client.Invalid_config _
   | Runtime_acp_client.Spawn_refused _
   | Runtime_acp_client.Protocol_error _
@@ -245,15 +232,16 @@ let refused_for_input_size = function
   | Execution_failed
       { cause =
           Fusion_official_client.Acp_failure
-            (Runtime_acp_client.Rpc_error { method_name; code; message; data })
+            (Runtime_acp_client.Rpc_error { refusal = Some (Llm_provider.Retry.Signal_context_overflow _); _ })
       ; runtime_id = _
-      } -> Runtime_acp_client.is_context_overflow_rpc_error ~method_name ~code ~message ~data
+      } -> true
   | Execution_failed
       { cause =
           Fusion_official_client.Acp_failure
             ( Runtime_acp_client.Invalid_config _
             | Runtime_acp_client.Spawn_refused _
             | Runtime_acp_client.Protocol_error _
+            | Runtime_acp_client.Rpc_error _
             | Runtime_acp_client.Timeout _
             | Runtime_acp_client.Process_exited _
             | Runtime_acp_client.Client_closed )

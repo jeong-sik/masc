@@ -577,6 +577,7 @@ type error =
       ; code : int
       ; message : string
       ; data : Yojson.Safe.t option
+      ; refusal : Llm_provider.Retry.signal_refusal option
       }
   | Timeout of
       { stage : string
@@ -626,7 +627,7 @@ let error_to_string = function
     "failed to start ACP client: " ^ Process_eio.spawn_refusal_to_string refusal
   | Protocol_error { stage; detail } ->
     Printf.sprintf "ACP protocol error (%s): %s" stage detail
-  | Rpc_error { method_name; code; message; data } ->
+  | Rpc_error { method_name; code; message; data; refusal = _ } ->
     (match data with
      | None -> Printf.sprintf "ACP RPC error in %s (code %d): %s" method_name code message
      | Some json ->
@@ -667,109 +668,11 @@ let jsonrpc_code_of_int = function
   | n -> Jsonrpc_other_code n
 ;;
 
-type rpc_error_class =
-  | Rpc_context_overflow of { limit : int option }
-  | Rpc_request_body_too_large
-  | Rpc_hard_quota of { retry_after : float option }
-  | Rpc_rate_limited of { retry_after : float option }
-  | Rpc_auth_error
-  | Rpc_authorization_error
-  | Rpc_provider_unavailable
-  | Rpc_unclassified
-
-let signal_retry_after = function
-  | Llm_provider.Retry.Signal_hard_quota { retry_after; _ }
-  | Llm_provider.Retry.Signal_rate_limited { retry_after; _ } -> retry_after
-  | Llm_provider.Retry.Signal_context_overflow _
-  | Llm_provider.Retry.Signal_request_body_too_large _
-  | Llm_provider.Retry.Signal_auth_error _
-  | Llm_provider.Retry.Signal_authorization_error _
-  | Llm_provider.Retry.Signal_provider_unavailable _ -> None
-;;
-
-let signal_limit = function
-  | Llm_provider.Retry.Signal_context_overflow { limit; _ } -> limit
-  | Llm_provider.Retry.Signal_request_body_too_large _
-  | Llm_provider.Retry.Signal_hard_quota _
-  | Llm_provider.Retry.Signal_rate_limited _
-  | Llm_provider.Retry.Signal_auth_error _
-  | Llm_provider.Retry.Signal_authorization_error _
-  | Llm_provider.Retry.Signal_provider_unavailable _ -> None
-;;
-
-let first_some xs = List.find_map Fun.id xs
-
-let rpc_error_class_of_signal ~retry_after ~limit = function
-  | Llm_provider.Retry.Signal_context_overflow { limit = sig_limit; _ } ->
-    Rpc_context_overflow { limit = first_some [ sig_limit; limit ] }
-  | Llm_provider.Retry.Signal_request_body_too_large _ -> Rpc_request_body_too_large
-  | Llm_provider.Retry.Signal_hard_quota { retry_after = sig_retry; _ } ->
-    Rpc_hard_quota { retry_after = first_some [ sig_retry; retry_after ] }
-  | Llm_provider.Retry.Signal_rate_limited { retry_after = sig_retry; _ } ->
-    Rpc_rate_limited { retry_after = first_some [ sig_retry; retry_after ] }
-  | Llm_provider.Retry.Signal_auth_error _ -> Rpc_auth_error
-  | Llm_provider.Retry.Signal_authorization_error _ -> Rpc_authorization_error
-  | Llm_provider.Retry.Signal_provider_unavailable _ -> Rpc_provider_unavailable
-;;
-
-let extract_data_evidence ~fallback_message (data : Yojson.Safe.t option) =
-  let module R = Llm_provider.Retry in
-  let inspect_assoc obj =
-    let status = R.http_status_of_json obj in
-    let retry = R.retry_after_of_json obj in
-    let signals = R.signals_of_json obj in
-    let field_signal =
-      R.classify_structured_signals ?retry_after:retry ~fallback_message signals
-    in
-    status, retry, signals.n_ctx, field_signal, Some obj
-  in
-  match data with
-  | None -> None, None, None, None, None
-  | Some (`Assoc _ as obj) -> inspect_assoc obj
-  | Some (`List items) ->
-    let rec walk remaining ~best_status ~best_retry ~best_n_ctx ~best_obj items =
-      if remaining <= 0
-      then best_status, best_retry, best_n_ctx, None, best_obj
-      else (
-        match items with
-        | [] -> best_status, best_retry, best_n_ctx, None, best_obj
-        | (`Assoc _ as obj) :: rest ->
-          let status, retry, n_ctx, field_signal, matched_obj = inspect_assoc obj in
-          if Option.is_some field_signal
-          then
-            ( first_some [ status; best_status ]
-            , first_some [ retry; best_retry ]
-            , first_some [ n_ctx; best_n_ctx ]
-            , field_signal
-            , matched_obj )
-          else
-            walk
-              (remaining - 1)
-              ~best_status:(first_some [ best_status; status ])
-              ~best_retry:(first_some [ best_retry; retry ])
-              ~best_n_ctx:(first_some [ best_n_ctx; n_ctx ])
-              ~best_obj:(first_some [ best_obj; matched_obj ])
-              rest
-        | (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) :: rest ->
-          walk (remaining - 1) ~best_status ~best_retry ~best_n_ctx ~best_obj rest)
-    in
-    walk 8 ~best_status:None ~best_retry:None ~best_n_ctx:None ~best_obj:None items
-  | Some (`String raw) ->
-    let str_status = R.http_status_of_machine_tokens raw in
-    let sig_from_str = R.classify_text raw in
-    ( str_status
-    , Option.bind sig_from_str signal_retry_after
-    , Option.bind sig_from_str signal_limit
-    , sig_from_str
-    , None )
-  | Some (`Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) -> None, None, None, None, None
-;;
-
-let classify_rpc_error ~method_name:_ ~code ~message ~data =
-  let module R = Llm_provider.Retry in
-  let code_http_status =
+let rpc_error ~method_name ~code ~message ~data =
+  let module Retry = Llm_provider.Retry in
+  let http_status =
     match jsonrpc_code_of_int code with
-    | Jsonrpc_http_status s -> Some s
+    | Jsonrpc_http_status status -> Some status
     | Jsonrpc_parse_error
     | Jsonrpc_invalid_request
     | Jsonrpc_method_not_found
@@ -778,98 +681,38 @@ let classify_rpc_error ~method_name:_ ~code ~message ~data =
     | Jsonrpc_server_error _
     | Jsonrpc_other_code _ -> None
   in
-  let data_status, data_retry, data_n_ctx, data_field_signal, data_assoc =
-    extract_data_evidence ~fallback_message:message data
+  let classify ?http_status data =
+    Retry.classify_structured_json ?http_status ~fallback_message:message data
   in
-  let msg_http_status = R.http_status_of_machine_tokens message in
-  let effective_http_status =
-    first_some [ code_http_status; data_status; msg_http_status ]
+  let structured_data =
+    match data with
+    | Some (`String raw) ->
+      Llm_provider.Json_util.from_string_bounded raw |> Result.to_option
+    | other -> other
   in
-  let msg_signal =
-    R.classify_text ?http_status:effective_http_status ?retry_after:data_retry message
+  let refusal =
+    match structured_data with
+    | Some (`List items) ->
+      let items = List.take 8 items in
+      (* A status supplied by the RPC code alone can classify any object.
+         Find the actual provider envelope before applying that status. *)
+      let provider_error =
+        List.find_opt (fun item -> Option.is_some (classify item)) items
+      in
+      let evidence =
+        match provider_error with
+        | Some item -> item
+        | None ->
+          Option.value
+            (List.find_opt (fun item -> Option.is_some (Retry.retry_after_of_json item)) items)
+            ~default:`Null
+      in
+      classify ?http_status evidence
+    | Some (`Assoc _ as obj) -> classify ?http_status obj
+    | Some (`String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) | None ->
+      classify ?http_status `Null
   in
-  let best_retry =
-    first_some
-      [ data_retry
-      ; Option.bind data_field_signal signal_retry_after
-      ; Option.bind msg_signal signal_retry_after
-      ]
-  in
-  let best_limit =
-    first_some
-      [ data_n_ctx
-      ; Option.bind data_field_signal signal_limit
-      ; Option.bind msg_signal signal_limit
-      ]
-  in
-  let is_hard_quota = function
-    | Some (R.Signal_hard_quota _) -> true
-    | Some
-        ( R.Signal_context_overflow _
-        | R.Signal_request_body_too_large _
-        | R.Signal_rate_limited _
-        | R.Signal_auth_error _
-        | R.Signal_authorization_error _
-        | R.Signal_provider_unavailable _ )
-    | None -> false
-  in
-  let candidates = [ data_field_signal; msg_signal ] in
-  let best_signal =
-    match List.find_opt is_hard_quota candidates with
-    | Some (Some _ as q) -> q
-    | Some None | None -> first_some candidates
-  in
-  (* Enforce HTTP refusal status precedence across all sources (RPC code,
-     structured data, and message HTTP tokens) so HTTP 401/402/403/413/429/5xx
-     can never misclassify as context overflow (which would falsely clear
-     Native_full effect fences or evict persistent children). *)
-  match effective_http_status with
-  | Some 402 -> Rpc_hard_quota { retry_after = best_retry }
-  | Some 401 -> Rpc_auth_error
-  | Some 403 ->
-    if is_hard_quota best_signal
-    then Rpc_hard_quota { retry_after = best_retry }
-    else Rpc_authorization_error
-  | Some 429 ->
-    if is_hard_quota best_signal
-    then Rpc_hard_quota { retry_after = best_retry }
-    else Rpc_rate_limited { retry_after = best_retry }
-  | Some 413 -> Rpc_request_body_too_large
-  | Some (400 | 422 as status) ->
-    let from_data_status =
-      Option.bind data_assoc (fun obj ->
-        R.classify_structured_json
-          ~http_status:status
-          ?retry_after:best_retry
-          ~fallback_message:message
-          obj)
-    in
-    (match first_some [ from_data_status; msg_signal; data_field_signal ] with
-     | Some s -> rpc_error_class_of_signal ~retry_after:best_retry ~limit:best_limit s
-     | None -> Rpc_unclassified)
-  | Some status ->
-    (match R.server_status_class_of_code status with
-     | Some (R.Overloaded_status | R.Server_error_status) -> Rpc_provider_unavailable
-     | None ->
-       (match best_signal with
-        | Some s -> rpc_error_class_of_signal ~retry_after:best_retry ~limit:best_limit s
-        | None -> Rpc_unclassified))
-  | None ->
-    (match best_signal with
-     | Some s -> rpc_error_class_of_signal ~retry_after:best_retry ~limit:best_limit s
-     | None -> Rpc_unclassified)
-;;
-
-let is_context_overflow_rpc_error ~method_name ~code ~message ~data =
-  match classify_rpc_error ~method_name ~code ~message ~data with
-  | Rpc_context_overflow _ -> true
-  | Rpc_request_body_too_large
-  | Rpc_hard_quota _
-  | Rpc_rate_limited _
-  | Rpc_auth_error
-  | Rpc_authorization_error
-  | Rpc_provider_unavailable
-  | Rpc_unclassified -> false
+  Rpc_error { method_name; code; message; data; refusal }
 ;;
 
 let image_input_unsupported_detail driver =
@@ -2898,7 +2741,7 @@ let rpc_call_with_wait
          decoder.decode json
          |> Result.map_error (fun detail -> Protocol_error { stage = method_name; detail })
        | Rpc_err (code, message, data) ->
-         Error (Rpc_error { method_name; code; message; data })
+         Error (rpc_error ~method_name ~code ~message ~data)
        | Rpc_closed reason ->
          Error (Process_exited { detail = reason; stderr_tail = stderr_tail t })))
 ;;

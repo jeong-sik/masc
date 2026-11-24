@@ -130,7 +130,7 @@ let native_attempt ~sw ~net ~(runtime : Runtime_instance.t) ~provider (params : 
     Runtime_thinking_seed.apply (Runtime_thinking_seed.of_model runtime.model) provider in
   let has_image = List.exists (fun (message : S.sampling_message) ->
     match message.content with S.Image _ -> true | S.Text _ -> false) params.messages in
-  let capabilities = Llm_provider.Backend_openai_request.capabilities_of_config provider in
+  let capabilities = Llm_provider.Input_budget.capabilities_of_config provider in
   let* () = if has_image && not capabilities.supports_image_input then
       Error (Runtime_unavailable "candidate cannot carry the requested image input")
     else Ok () in

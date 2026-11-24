@@ -1396,8 +1396,7 @@ let test_an_unowned_retained_answer_is_refused_and_kept () =
     check bool "the original answer is delivered once it is owned again" true (answered_with question (execute ()));
     check int "one provider call across the refusal" 1 !sends)
 
-(* RFC librarian-ends-waiting-requests-of-a-replaced-declaration 3.2: a
-   request with no result and no open attempt ends when its declaration was
+(* A request with no result and no open attempt ends when its declaration was
    replaced, whether it never ran or only has a deferred attempt. *)
 let replaced_declaration_ends ~steps ~deferred_first id =
   with_root (fun root ->

@@ -7,8 +7,7 @@ blobless fetch of the pull request's merge commit. It prints `true` or `false`
 on stdout and the reason on stderr. Any git failure exits non-zero, so the job
 goes red instead of skipping the type-check.
 
-A native stack is type-checked once, at its top pull request (RFC
-stack-type-check-runs-at-the-top):
+A native stack is type-checked once, at its top pull request:
 
   no stack in the payload   the files this pull request changes decide
   position < size           false; the top pull request checks the stack

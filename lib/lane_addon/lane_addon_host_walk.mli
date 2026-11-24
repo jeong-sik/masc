@@ -1,6 +1,5 @@
 (** One listing of a host cycle, walked in order. A listing is
-    one page or several (RFC
-    librarian-read-waits-and-shrinks-no-further-than-the-refusal-says 3.1).
+    one page or several.
 
     The walk starts each request once. A request that runs beside the walk
     gets its own fiber, and the walk goes on to the next request only while

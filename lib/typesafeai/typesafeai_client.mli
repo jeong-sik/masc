@@ -143,8 +143,7 @@ val on_destination_recovered : (destination_id -> unit) -> unit -> unit
     [Refusing] with a {!Destination_state} refusal and becomes [Answered], or
     a refusal of one request ({!This_request}). It runs on the domain that
     received the response, before {!evaluate} returns, and must only signal.
-    Returns the function that removes it. Any other change calls nothing.
-    RFC librarian-gate-waits-on-the-destination-not-on-passes §3.3. *)
+    Returns the function that removes it. Any other change calls nothing. *)
 
 type failure_kind = Capacity_refused | Other_refusal
 val failure_kind : failure -> failure_kind

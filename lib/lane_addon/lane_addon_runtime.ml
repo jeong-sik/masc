@@ -1457,11 +1457,10 @@ let run_host_cycle m e (port : host_port) =
   let rec pass () =
     check_live ();
     (* One listing is what the worker answers in the package's
-       host_request_listing (RFC
-       librarian-read-waits-and-shrinks-no-further-than-the-refusal-says
-       3.1). A Pages worker is read one page at a time, as the walk reaches
-       each. Every page lists ids above the last id of the page before it, so
-       the listing starts no request twice; an empty page ends it. *)
+       host_request_listing. A Pages worker is read one page at a time, as the
+       walk reaches each. Every page lists ids above the last id of the page
+       before it, so the listing starts no request twice; an empty page ends
+       it. *)
     let read ~after =
       check_live ();
       port.list_requests ~after |> Result.map_error (fun detail -> Listing_failed detail) in

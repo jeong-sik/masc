@@ -598,6 +598,18 @@ let execute_get t ~epoch req =
             in
             Msg.Http_reply
               { epoch; reply = Msg.Reply_chat_history { keeper; result } }
+        | Cmd.Get_chat_operation_events { keeper; operation_id; from } ->
+            let result =
+              fetch_and_decode_get t ~path
+                ~decode:(Wire_chat_journal.decode_page ~operation_id)
+            in
+            Msg.Http_reply
+              {
+                epoch;
+                reply =
+                  Msg.Reply_chat_operation_events
+                    { keeper; operation_id; from; result };
+              }
         | Cmd.Get_planning ->
             let planning_res =
               fetch_planning_with_tasks ~observed_at

@@ -12,6 +12,11 @@ type get_request =
       limit : int option;
       cursor : string option;
     }
+  | Get_chat_operation_events of {
+      keeper : string;
+      operation_id : string;
+      from : Wire_chat_journal.from;
+    }
   | Get_planning
   | Get_verifications of {
       view : [ `Pending | `All ];
@@ -237,6 +242,8 @@ let get_request_path = function
       Wire_fleet.keeper_turn_records_path ~keeper ~limit
   | Get_chat_history { keeper; limit; cursor } ->
       Wire_fleet.keeper_chat_history_page_path ~keeper ?limit ?cursor ()
+  | Get_chat_operation_events { keeper; operation_id; from } ->
+      Wire_chat_journal.path ~keeper ~operation_id ~from
   | Get_planning -> Wire_work.planning_path
   | Get_verifications { view; limit; offset } ->
       let view_str = match view with `Pending -> "awaiting" | `All -> "all" in

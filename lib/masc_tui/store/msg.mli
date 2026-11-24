@@ -46,6 +46,12 @@ type http_reply =
       keeper : string;
       result : (Wire_fleet.chat_history_page, http_error) result;
     }
+  | Reply_chat_operation_events of {
+      keeper : string;
+      operation_id : string;
+      from : Wire_chat_journal.from;  (** The page the request asked for. *)
+      result : (Wire_chat_journal.page, http_error) result;
+    }
   | Reply_turn_interrupt of {
       keeper : string;
       result : (Wire_fleet.turn_interrupt_response, http_error) result;

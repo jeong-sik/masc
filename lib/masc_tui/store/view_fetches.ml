@@ -94,6 +94,20 @@ let fetches_for_overlay ~force (m : Model.t) =
   | None ->
       []
 
+(* Each failure row that stands for a cut reply reads its operation's
+   journal, one page after another, until the reply is rebuilt. *)
+let cut_reply_reqs ~force ~keeper (m : Model.t) =
+  List.filter_map
+    (fun (_row_id, operation_id) ->
+      let slot = Fleet_store.cut_reply_for ~keeper ~operation_id m.fleet in
+      if needs_fetch ~force slot then
+        Option.map
+          (fun from ->
+            Cmd.Get_chat_operation_events { keeper; operation_id; from })
+          (Cut_reply.pending_page slot)
+      else None)
+    (Fleet_store.cut_reply_rows ~keeper m.fleet)
+
 let keeper_tab_fetches ~force ~name ~tab (m : Model.t) =
   match tab with
   | Nav.Keeper_chat ->
@@ -102,11 +116,12 @@ let keeper_tab_fetches ~force ~name ~tab (m : Model.t) =
         | None -> true
         | Some obs -> needs_fetch ~force obs
       in
-      []
+      ([]
       |> add_if (needs_fetch ~force m.fleet.turns) Cmd.Get_keeper_turns
       |> add_if hist_needed
            (Cmd.Get_chat_history
-              { keeper = name; limit = Some 80; cursor = None })
+              { keeper = name; limit = Some 80; cursor = None }))
+      @ cut_reply_reqs ~force ~keeper:name m
   | Nav.Keeper_memory ->
       let diff_needed =
         needs_fetch ~force
@@ -642,6 +657,38 @@ let overlay_fetches (m : Model.t) =
   List.map
     (fun req -> Cmd.Http_get { epoch = m.epoch; req })
     (fetches_for_overlay ~force:false m)
+
+(* The keeper's Chat transcript is on screen: as the top dive's Chat tab, or
+   as the Keepers split's Chat pane for the selected keeper with no dive
+   open. *)
+let chat_tab_shown ~keeper (m : Model.t) =
+  match Model.active_dive m with
+  | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_chat }) ->
+      String.equal name keeper
+  | Some
+      (Nav.Dive_keeper
+         {
+           tab =
+             ( Nav.Keeper_memory | Nav.Keeper_work_candle | Nav.Keeper_sandbox
+             | Nav.Keeper_config );
+           _;
+         })
+  | Some (Nav.Dive_work _ | Nav.Dive_knowledge _ | Nav.Dive_infra _) ->
+      false
+  | None -> (
+      Nav.equal_workspace m.nav.workspace Nav.Keepers
+      && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_chat
+      &&
+      match Fleet_store.selected_keeper_summary m.fleet with
+      | Some k -> String.equal k.name keeper
+      | None -> false)
+
+let cut_reply_fetches ~keeper (m : Model.t) =
+  if chat_tab_shown ~keeper m then
+    List.map
+      (fun req -> Cmd.Http_get { epoch = m.epoch; req })
+      (cut_reply_reqs ~force:false ~keeper m)
+  else []
 
 let selected_wiki_page_fetch (m : Model.t) =
   let wiki_tab_shown =

@@ -11,6 +11,12 @@ val overlay_fetches : Model.t -> Cmd.t list
     workspace or dive, so a reply that leaves its slots stale asks for these
     wherever the overlay is. *)
 
+val cut_reply_fetches : keeper:string -> Model.t -> Cmd.t list
+(** The journal pages [keeper]'s cut replies wait for, when that keeper's Chat
+    transcript is on screen. The Chat tab's fetch list can only name the
+    failure rows once the history has landed, so the history reply asks for
+    these. *)
+
 val selected_wiki_page_fetch : Model.t -> Cmd.t list
 (** The selected Wiki page's GET when the Wiki tab is on screen and the page
     body is not held fresh. The Wiki tab's fetch list can only name a page

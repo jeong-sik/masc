@@ -18,6 +18,11 @@ type get_request =
       limit : int option;
       cursor : string option;
     }
+  | Get_chat_operation_events of {
+      keeper : string;
+      operation_id : string;
+      from : Wire_chat_journal.from;
+    }
   | Get_planning
   | Get_verifications of {
       view : [ `Pending | `All ];

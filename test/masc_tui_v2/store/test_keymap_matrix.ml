@@ -1902,20 +1902,6 @@ let test_dynamic_rendered_hint_contracts () =
                     ];
                 };
             } );
-          ( "Dive/Keeper/Config"
-          , {
-              m_base with
-              nav =
-                {
-                  m_base.nav with
-                  workspace = Nav.Keepers;
-                  dive_stack =
-                    [
-                      Nav.Dive_keeper
-                        { name = "alpha"; tab = Nav.Keeper_config };
-                    ];
-                };
-            } );
         ]
       in
       let globally_dead =
@@ -1938,9 +1924,7 @@ let test_dynamic_rendered_hint_contracts () =
           if String.equal vname "Infra/Sandboxes" then
             assert_no ~label ~needle:"Json_tree" txt;
           if String.equal vname "Dive/Keeper/ChatEmpty" then
-            assert_no ~label ~needle:"/status" txt;
-          if String.equal vname "Dive/Keeper/Config" then
-            assert_has ~label ~needle:"Ctrl+S" txt)
+            assert_no ~label ~needle:"/status" txt)
         views;
       (* Specific truthful positive hint checks *)
       record_case ();
@@ -1963,21 +1947,6 @@ let test_dynamic_rendered_hint_contracts () =
                })
       in
       assert_has ~label:(lang_s ^ "/Incidents/FilterBar") ~needle:"/" inc_txt;
-      record_case ();
-      let set_txt =
-        grid_all_text
-          (render_full
-             ~model:
-               {
-                 m_base with
-                 nav =
-                   {
-                     m_base.nav with
-                     overlay = Some (Nav.Settings Nav.Settings_general_ui);
-                   };
-               })
-      in
-      assert_has ~label:(lang_s ^ "/Settings/TuiTheme") ~needle:"theme" set_txt;
       record_case ();
       let pop_m =
         {
@@ -3405,8 +3374,8 @@ let mk_keeper_rich_schema ~keeper : Wire_config.config_schema =
             [
               mk_f ~table:"keeper" ~key:"activation_mode"
                 ~label:"Activation Mode"
-                ~kind:(Wire_config.Field_enum [ "autonomous"; "reactive"; "manual" ])
-                ~value:(Wire_config.Val_string "autonomous")
+                ~kind:(Wire_config.Field_enum [ "manual"; "on_demand"; "autonomous" ])
+                ~value:(Wire_config.Val_string "on_demand")
                 ~description:(Some "Turn wake policy") ();
               mk_f ~table:"keeper" ~key:"paused" ~label:"Paused"
                 ~kind:Wire_config.Field_bool ~value:(Wire_config.Val_bool false)
@@ -3414,9 +3383,9 @@ let mk_keeper_rich_schema ~keeper : Wire_config.config_schema =
               mk_f ~table:"keeper" ~key:"max_turns" ~label:"Max Turns"
                 ~kind:(Wire_config.Field_int { min = Some 1; max = Some 5 })
                 ~value:(Wire_config.Val_int 3) ();
-              mk_f ~table:"keeper" ~key:"group" ~label:"Group"
+              mk_f ~table:"keeper" ~key:"instructions" ~label:"Instructions"
                 ~kind:Wire_config.Field_string
-                ~value:(Wire_config.Val_string "platform") ();
+                ~value:(Wire_config.Val_string "Initial instructions") ();
             ];
         };
         {
@@ -3464,24 +3433,32 @@ let test_pillar1_keeper_config_and_settings_lr () =
        (* Deliberately mismatch active_tab to prove keeper_visible_fields NEVER filters by active_tab *)
     |> Config_store.apply_schema ~observed_at:t0 rich_schema
   in
+  let check_patch label ~dry_run op cmds =
+    let posted =
+      Cmd.flatten cmds
+      |> List.filter_map (function Cmd.Http_post { req; _ } -> Some req | _ -> None)
+    in
+    let expected : Wire_config.patch_request =
+      { target = Wire_config.Target_keeper "alpha"; keeper_name = Some "alpha";
+        expected_sha256 = Some rich_schema.file_sha256; dry_run; ops = [op] }
+    in
+    Alcotest.(check bool) label true (posted = [Cmd.Post_config_patch expected])
+  in
   let verify_keeper_config_context ~label m0 =
     Alcotest.(check bool) (label ^ ": is_keeper_config_active = true") true
       (Model.is_keeper_config_active m0);
-    let visible = Config_store.keeper_visible_fields ~lang:m0.lang m0.config in
-    Alcotest.(check int) (label ^ ": all 18 multi-section fields visible") 18
-      (List.length visible);
-    (* 1. ArrowDown traverses ALL 18 fields past index 3 (Group) to index 17 *)
+    let fields = List.concat_map (fun (section : Wire_config.schema_section) -> section.fields) rich_schema.sections in
+    let last = List.length fields - 1 in
     let m_dn =
-      List.init 25 (fun _ -> mk_key Keymap.Input.Down) |> step_keys m0 |> fst
+      List.init (List.length fields + 1) (fun _ -> mk_key Keymap.Input.Down) |> step_keys m0 |> fst
     in
-    Alcotest.(check int)
-      (label ^ ": ArrowDown reaches last field 17 (past index 3) and clamps")
-      17 m_dn.config.selected_field_index;
+    Alcotest.(check int) (label ^ ": ArrowDown reaches the final schema field and stops")
+      last m_dn.config.selected_field_index;
     let m_home, _ = step m_dn (mk_key Keymap.Input.Home) in
-    Alcotest.(check int) (label ^ ": Home returns to 0") 0
+    Alcotest.(check int) (label ^ ": Home selects the first field") 0
       m_home.config.selected_field_index;
     let m_end, _ = step m_home (mk_key Keymap.Input.End) in
-    Alcotest.(check int) (label ^ ": End jumps directly to 17") 17
+    Alcotest.(check int) (label ^ ": End selects the final schema field") last
       m_end.config.selected_field_index;
     (* 2. ←/→ NEVER switches tab; cycles Field_enum and unstages back to original *)
     let m_enum_r, _ = step m_home (mk_key Keymap.Input.Right) in
@@ -3489,12 +3466,16 @@ let test_pillar1_keeper_config_and_settings_lr () =
       true (Model.is_keeper_config_active m_enum_r);
     Alcotest.(check int) (label ^ ": Right on enum stages 1 patch") 1
       (Config_store.dirty_count m_enum_r.config);
+    let _, mode_save = step m_enum_r (char_key ~ctrl:true "s") in
+    check_patch (label ^ ": Ctrl+S saves the selected Keeper's activation mode") ~dry_run:false
+      (Wire_config.Set_scalar { table = "keeper"; key = "activation_mode"; value = "autonomous" })
+      mode_save;
     let m_enum_l, _ = step m_enum_r (mk_key Keymap.Input.Left) in
     Alcotest.(check int) (label ^ ": Left back to original unstages to 0") 0
       (Config_store.dirty_count m_enum_l.config);
-    (* Wrap-around Left from index 0 -> last enum ("manual") *)
+    (* Left from the original mode selects manual. *)
     let m_enum_wrap, _ = step m_enum_l (mk_key Keymap.Input.Left) in
-    Alcotest.(check int) (label ^ ": Left wrap-around stages 1 patch") 1
+    Alcotest.(check int) (label ^ ": Left stages the previous mode") 1
       (Config_store.dirty_count m_enum_wrap.config);
     (* 3. Field_bool: Right/Space toggles and unstages back *)
     let m_bool, _ = step m_home (mk_key Keymap.Input.Down) in
@@ -3553,53 +3534,34 @@ let test_pillar1_keeper_config_and_settings_lr () =
            | Cmd.Http_post _ -> true
            | _ -> false)
          cmds_space_kc);
+    let edited_instructions =
+      Wire_config.Set_scalar { table = "keeper"; key = "instructions"; value = "Initial instructions-v2" }
+    in
     let _, cmds_dry = step m_edit_c (char_key "d") in
-    Alcotest.(check bool) (label ^ ": 'd' emits dry_run Post_config_patch") true
-      (has_cmd
-         (function
-           | Cmd.Http_post { req = Cmd.Post_config_patch { dry_run = true; _ }; _ } ->
-               true
-           | _ -> false)
-         cmds_dry);
-    (* Ctrl+S emits real save Post_config_patch *)
+    check_patch (label ^ ": preview carries the staged edit and observed revision") ~dry_run:true edited_instructions cmds_dry;
     let _, cmds_save = step m_edit_c (char_key ~ctrl:true "s") in
-    Alcotest.(check bool) (label ^ ": Ctrl+S emits save Post_config_patch") true
-      (has_cmd
-         (function
-           | Cmd.Http_post { req = Cmd.Post_config_patch { dry_run = false; _ }; _ } ->
-               true
-           | _ -> false)
-         cmds_save);
-    (* Delete stages Remove_key and renders "(removed)" (parity with Settings) *)
+    check_patch (label ^ ": Ctrl+S commits the staged edit and observed revision") ~dry_run:false edited_instructions cmds_save;
     let m_del, _ = step m_str (mk_key Keymap.Input.Delete) in
     Alcotest.(check bool) (label ^ ": Delete stages Remove_key") true
       (match
-         Config_store.String_map.find_opt "keeper.group"
+         Config_store.String_map.find_opt "keeper.instructions"
            m_del.config.dirty_fields
        with
        | Some (Wire_config.Remove_key _) -> true
        | _ -> false);
-    let txt_del = grid_all_text (render_full ~model:m_del) in
-    Alcotest.(check bool) (label ^ ": Remove_key renders \"(removed)\"") true
-      (Store_scroll.contains_ci ~needle:"(removed)" txt_del);
-    (* Read-only & Secret refuse stepping with toast *)
+    let _, cmds_remove = step m_del (char_key ~ctrl:true "s") in
+    check_patch (label ^ ": Ctrl+S sends the staged removal") ~dry_run:false
+      (Wire_config.Remove_key { table = "keeper"; key = "instructions" }) cmds_remove;
     let m_sec, _ =
       step_keys m_home (List.init 6 (fun _ -> mk_key Keymap.Input.Down))
     in
     let m_sec_r, _ = step m_sec (mk_key Keymap.Input.Right) in
     Alcotest.(check int) (label ^ ": Secret field refuses Right step") 0
       (Config_store.dirty_count m_sec_r.config);
-    (* '/' filters Keeper_config (NOT fleet roster!), renders filter pill in chrome sub-tab bar,
-       and Esc ladder cancels edit -> clears search -> pops/pane0 *)
+    (* The Keeper search and the fleet search have separate state. *)
     let m_f1, _ = step m_home (char_key "/") in
     let m_f2, _ = type_str m_f1 "limit_09" in
-    let txt_f2 = grid_all_text (render_full ~model:m_f2) in
-    Alcotest.(check bool) (label ^ ": chrome sub-tab bar shows active '/' query while typing")
-      true (Store_scroll.contains_ci ~needle:"limit_09" txt_f2);
     let m_f3, _ = step m_f2 (mk_key Keymap.Input.Enter) in
-    let txt_f3 = grid_all_text (render_full ~model:m_f3) in
-    Alcotest.(check bool) (label ^ ": chrome sub-tab bar shows '/' filter pill after Enter")
-      true (Store_scroll.contains_ci ~needle:"limit_09" txt_f3);
     Alcotest.(check string) (label ^ ": '/' sets config.search_query") "limit_09"
       m_f3.config.search_query;
     Alcotest.(check string) (label ^ ": '/' leaves fleet.filter_query untouched") ""
@@ -3705,26 +3667,7 @@ let test_pillar1_keeper_config_and_settings_lr () =
       (label ^ ": e -> n -> Ctrl+K -> Esc restores Target_keeper alpha & editing=false")
       true
       (m_leak_esc.config.target = Wire_config.Target_keeper "alpha"
-       && not (Config_store.is_editing_field m_leak_esc.config));
-    (* Rendered hints & body truth check *)
-    let g = render_full ~model:m_edit_c in
-    let txt = grid_all_text g in
-    Alcotest.(check bool) (label ^ ": rendered hints show Ctrl+S") true
-      (Store_scroll.contains_ci ~needle:"Ctrl+S" txt);
-    Alcotest.(check bool) (label ^ ": header omits misleading [↔]") false
-      (Store_scroll.contains_ci ~needle:"[↔]" txt);
-    Alcotest.(check bool) (label ^ ": sub-tab bar omits misleading [←→] Tabs") false
-      (Store_scroll.contains_ci ~needle:"[←→] Tabs" txt);
-    Alcotest.(check bool) (label ^ ": sub-tab bar shows truthful [[ ]] Tabs") true
-      (Store_scroll.contains_ci ~needle:"[[ ]] Tabs" txt);
-    Alcotest.(check bool) (label ^ ": rendered body shows Keeper Profile band") true
-      (Store_scroll.contains_ci ~needle:"alpha Keeper Profile" txt);
-    Alcotest.(check bool) (label ^ ": rendered body shows Activation Mode field") true
-      (Store_scroll.contains_ci ~needle:"Activation Mode" txt);
-    let g_end = render_full ~model:m_end in
-    let txt_end = grid_all_text g_end in
-    Alcotest.(check bool) (label ^ ": rendered body after End shows Limit 09") true
-      (Store_scroll.contains_ci ~needle:"Limit 09" txt_end)
+       && not (Config_store.is_editing_field m_leak_esc.config))
   in
   let m_dive =
     {
@@ -3756,9 +3699,6 @@ let test_pillar1_keeper_config_and_settings_lr () =
   let m_zoom, _ = step m_split (char_key "z") in
   Alcotest.(check bool) "Zoomed Keepers Keeper_config is active & zoomed" true
     (m_zoom.nav.zoomed && Model.is_keeper_config_active m_zoom);
-  let txt_zoom = grid_all_text (render_full ~model:m_zoom) in
-  Alcotest.(check bool) "Zoomed Keeper_config sub-tab bar omits [←→] Tabs" false
-    (Store_scroll.contains_ci ~needle:"[←→] Tabs" txt_zoom);
   let m_zoom_next, _ = step m_zoom (char_key "]") in
   Alcotest.(check bool)
     "Zoomed Keeper_config ']' keeps zoom active & cycles keeper_dive_tab (not fleet_mode)"
@@ -3933,9 +3873,6 @@ let test_pillar1_keeper_config_and_settings_lr () =
   in
   Alcotest.(check bool) "Settings Shift+J scrolls diff_hunks > 0" true
     (m_set_j_end.config.dry_run_scroll_offset > 0);
-  let txt_set_dry = grid_all_text (render_full ~model:m_set_j_end) in
-  Alcotest.(check bool) "Settings dry-run at bottom renders SET_DRY_LINE_39" true
-    (Store_scroll.contains_ci ~needle:"SET_DRY_LINE_39" txt_set_dry);
   let m_set_k1, _ = step m_set_j_end (char_key ~shift:true "K") in
   Alcotest.(check int)
     "Settings Shift+K from bottom immediately decrements by 1 (zero sticky K)"

@@ -15,6 +15,7 @@
   masc
   masc.dashboard
   masc.server
+  masc_tui_protocol
   masc.masc_candle
   masc.masc_candle_config
   masc.masc_candle_store

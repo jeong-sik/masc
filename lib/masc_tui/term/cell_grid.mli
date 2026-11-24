@@ -110,3 +110,14 @@ val fill_rect :
   ?glyph:glyph ->
   unit ->
   unit
+
+val dim_rect :
+  ?clip:Masc_tui_core.Rect.t ->
+  t ->
+  rect:Masc_tui_core.Rect.t ->
+  fg:Color.t ->
+  bg:Color.t ->
+  unit
+(** Recolor existing cells inside [rect] to muted [fg]/[bg] as a backdrop scrim
+    before painting a floating modal or popup, preserving cell glyphs without
+    bright foreground bleed-through. *)

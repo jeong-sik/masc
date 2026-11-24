@@ -1084,9 +1084,9 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
     let hints_right_limit = Int.max !x (right_edge - right_hint_reserve) in
     let remaining_w = Int.max 0 (hints_right_limit - !x) in
     let scope_chain = Model.focus_scope_chain model in
-    (* Request candidate hints generously, then fit max 6-7 elevated keycap pairs
-       strictly within remaining_w with zero clipping. *)
-    let max_pairs = if compact then 6 else 7 in
+    (* Allow Wide/Standard terminals to use their full footer width instead of
+       dropping Tab and overlay discovery keys behind an artificial 7-pair cap. *)
+    let max_pairs = if compact then 6 else 14 in
     let pair_gap = if compact && rect.w < 84 then 1 else 2 in
     let candidates =
       if model.nav.filter_focused then
@@ -1106,7 +1106,7 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
         ]
       else
         let raw =
-          Keymap.footer_hints ~scope_chain ~max_width:(remaining_w + 24)
+          Keymap.footer_hints ~scope_chain ~max_width:(remaining_w + 180)
             ~lang:model.lang
         in
         let show_tab_hint =
@@ -1126,14 +1126,61 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
         let relabel (h : Keymap.footer_hint) ~ko ~en =
           { h with label = Say.resolve model.lang (Say.make ~ko ~en) }
         in
+        let approval_strip_shown =
+          Option.is_none model.nav.overlay
+          && Option.is_some (Model.fast_approval_strip_item model)
+        in
+        let show_sub_tab_hint =
+          match model.nav.overlay with
+          | Some (Nav.Settings _ | Nav.Queue_context _) -> true
+          | Some
+              ( Nav.Palette
+              | Nav.Incidents
+              | Nav.Inline_action _
+              | Nav.Help
+              | Nav.System_gate _ ) ->
+              false
+          | None -> (
+              match Model.active_dive model with
+              | Some (Nav.Dive_keeper _) -> true
+              | Some (Nav.Dive_work _ | Nav.Dive_knowledge _ | Nav.Dive_infra _)
+                ->
+                  false
+              | None -> not (Nav.equal_workspace model.nav.workspace Nav.Pulse))
+        in
+        let show_esc_hint =
+          Option.is_some model.nav.overlay
+          || Option.is_some (Model.active_dive model)
+          || Drafts.is_focused model.drafts
+          || model.nav.filter_focused
+          || model.nav.zoomed
+        in
         List.filter_map
           (fun (h : Keymap.footer_hint) ->
-            let is_tab_hint =
+            let is_pane_cycle =
               Keymap.equal_action h.action (Keymap.Cycle_focus_pane Keymap.Next)
               || Keymap.equal_action h.action
                    (Keymap.Cycle_focus_pane Keymap.Prev)
             in
-            if is_tab_hint && not show_tab_hint then None
+            let is_dup_approval =
+              approval_strip_shown
+              && (Keymap.equal_action h.action Keymap.Fast_approve_top
+                  || Keymap.equal_action h.action Keymap.Fast_deny_top)
+            in
+            let is_sub_tab =
+              Keymap.equal_action h.action (Keymap.Sub_tab Keymap.Prev)
+              || Keymap.equal_action h.action (Keymap.Sub_tab Keymap.Next)
+            in
+            let is_esc =
+              Keymap.equal_action h.action Keymap.Pop_back_or_close
+            in
+            let shown =
+              (show_tab_hint || not is_pane_cycle)
+              && (not is_dup_approval)
+              && (show_sub_tab_hint || not is_sub_tab)
+              && (show_esc_hint || not is_esc)
+            in
+            if not shown then None
             else if not (Keymap.equal_action h.action Keymap.Dive_selected) then
               Some h
             else
@@ -1436,9 +1483,20 @@ let render_frame ~(model : Model.t) ~cache ~render_body ~render_overlay grid =
             Composer.draw grid ~rect:r ~theme ~lang:model.lang
               ~breakpoint:layout.breakpoint comp_st
           in
-          ignore
-            (Composer.draw_popup grid ~anchor:r ~theme ~lang:model.lang
-               comp_st.popup);
+          (match comp_st.popup with
+           | Composer.Popup_none -> ()
+           | Composer.Popup_slash _ | Composer.Popup_mention _ ->
+               let scrim_fg = Color.of_rgb theme.border_subtle in
+               let scrim_bg = Color.of_rgb theme.surface_0 in
+               Cell_grid.dim_rect grid ~rect:layout.body ~fg:scrim_fg
+                 ~bg:scrim_bg;
+               (match layout.approval_strip with
+                | Some ar ->
+                    Cell_grid.dim_rect grid ~rect:ar ~fg:scrim_fg ~bg:scrim_bg
+                | None -> ());
+               ignore
+                 (Composer.draw_popup grid ~anchor:r ~theme ~lang:model.lang
+                    comp_st.popup));
           c
     in
     (* Paint subtle border_subtle hairline separating composer/body from footer
@@ -1468,6 +1526,9 @@ let render_frame ~(model : Model.t) ~cache ~render_body ~render_overlay grid =
           Rect.make ~x:0 ~y:layout.top_rail.h ~w:cols
             ~h:(Int.max 0 (rows - layout.top_rail.h - layout.footer.h))
         in
+        Cell_grid.dim_rect grid ~rect:overlay_rect
+          ~fg:(Color.of_rgb theme.border_subtle)
+          ~bg:(Color.of_rgb theme.surface_0);
         render_overlay overlay_rect grid;
         render_toast_pill grid ~body_rect:overlay_rect ~theme ~model;
         Presenter.hidden_cursor

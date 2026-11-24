@@ -455,7 +455,7 @@ let should_toggle_mouse_capture (m : Model.t) (kev : Input_decoder.key_event) =
   && Option.is_none m.nav.overlay
   && not (Model.is_text_capture_active m)
 
-let should_emit_tick ?(oauth_poll_deadline_ns = None) ~now_ns
+let should_emit_tick ~oauth_poll_deadline_ns ~now_ns
     ~last_voice_tick_ns ~toast_expires_ns ~voice_recording =
   let toast_expired =
     match toast_expires_ns with

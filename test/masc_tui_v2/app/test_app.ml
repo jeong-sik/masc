@@ -1689,15 +1689,15 @@ let test_app_ctrl_c_and_voice_tick_gate () =
   (* P1-5: Voice recording ticks strictly at 100ms cadence; idle stays 0 Hz. *)
   let t0 = 1_000_000_000L in
   let emit_idle, dl_idle =
-    App.should_emit_tick ~now_ns:t0 ~last_voice_tick_ns:0L
-      ~toast_expires_ns:None ~voice_recording:false
+    App.should_emit_tick ~oauth_poll_deadline_ns:None ~now_ns:t0
+      ~last_voice_tick_ns:0L ~toast_expires_ns:None ~voice_recording:false
   in
   Alcotest.(check bool) "idle emits no tick" false emit_idle;
   Alcotest.(check (option int64)) "idle has no deadline (0 Hz)" None dl_idle;
   let t_33ms = Int64.add t0 33_333_333L in
   let emit_33, dl_33 =
-    App.should_emit_tick ~now_ns:t_33ms ~last_voice_tick_ns:t0
-      ~toast_expires_ns:None ~voice_recording:true
+    App.should_emit_tick ~oauth_poll_deadline_ns:None ~now_ns:t_33ms
+      ~last_voice_tick_ns:t0 ~toast_expires_ns:None ~voice_recording:true
   in
   Alcotest.(check bool) "no voice tick at +33ms" false emit_33;
   Alcotest.(check (option int64)) "next voice deadline at +100ms"
@@ -1705,8 +1705,8 @@ let test_app_ctrl_c_and_voice_tick_gate () =
     dl_33;
   let t_100ms = Int64.add t0 App.voice_tick_interval_ns in
   let emit_100, dl_100 =
-    App.should_emit_tick ~now_ns:t_100ms ~last_voice_tick_ns:t0
-      ~toast_expires_ns:None ~voice_recording:true
+    App.should_emit_tick ~oauth_poll_deadline_ns:None ~now_ns:t_100ms
+      ~last_voice_tick_ns:t0 ~toast_expires_ns:None ~voice_recording:true
   in
   Alcotest.(check bool) "voice tick fires at +100ms" true emit_100;
   Alcotest.(check (option int64)) "subsequent deadline at +200ms"

@@ -186,7 +186,7 @@ val can_launch_pending_wiki_editor : Model.t -> bool
     for [$EDITOR]. *)
 
 val should_emit_tick :
-  ?oauth_poll_deadline_ns:int64 option ->
+  oauth_poll_deadline_ns:int64 option ->
   now_ns:int64 ->
   last_voice_tick_ns:int64 ->
   toast_expires_ns:int64 option ->

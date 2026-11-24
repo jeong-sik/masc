@@ -3925,6 +3925,12 @@ let submit_inline_modal ~now (m : Model.t) =
             { m_in with nav; inline_modal = None }
             |> Model.with_toast ~now ~level:Model.Toast_info msg
           in
+          let skill_write_reference reference =
+            match Runtime_store.skill_mutation_target ~reference m.runtime with
+            | Some (Runtime_store.Loaded_skill { access = Wire_runtime.Skill_read_write; reference_json; _ }
+                   | Catalog_skill reference_json) -> Some reference_json
+            | Some (Loaded_skill { access = Skill_read_only; _ }) | None -> None
+          in
           let set_modal_error err =
             ({ m with inline_modal = Some { modal with error = Some err } }, [])
           in
@@ -5430,22 +5436,10 @@ let submit_inline_modal ~now (m : Model.t) =
                 Model.unescape_inline_text
                   (Model.modal_field_raw_value ~key:"source_text" modal)
               in
-              let ref_json_opt =
-                match
-                  Runtime_store.skill_editor_loaded_for ~reference m.runtime
-                with
-                | Some loaded -> Some loaded.reference_json
-                | None -> (
-                    match
-                      Runtime_store.find_skill_surface ~reference m.runtime
-                    with
-                    | Some { reference_json; _ } -> reference_json
-                    | None -> None)
-              in
               if String.equal (String.trim source_text) "" then
                 set_modal_error "source_text is required"
               else
-                match ref_json_opt with
+                match skill_write_reference reference with
                 | None ->
                     set_modal_error
                       "Exact Skill reference JSON unavailable; refresh Skills first"
@@ -5467,19 +5461,7 @@ let submit_inline_modal ~now (m : Model.t) =
               if not (String.equal (String.uppercase_ascii typed) "DELETE") then
                 set_modal_error "Type DELETE to confirm skill deletion"
               else
-                let ref_json_opt =
-                  match
-                    Runtime_store.skill_editor_loaded_for ~reference m.runtime
-                  with
-                  | Some loaded -> Some loaded.reference_json
-                  | None -> (
-                      match
-                        Runtime_store.find_skill_surface ~reference m.runtime
-                      with
-                      | Some { reference_json; _ } -> reference_json
-                      | None -> None)
-                in
-                match ref_json_opt with
+                match skill_write_reference reference with
                 | None ->
                     set_modal_error
                       "Exact Skill reference JSON unavailable; refresh Skills first"

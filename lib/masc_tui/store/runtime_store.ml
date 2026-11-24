@@ -721,7 +721,8 @@ let selected_skill_surface t =
 
 let find_skill_surface ~reference t =
   let needle = String.trim reference in
-  match Observed.to_option t.skills with
+  if String.equal needle "" then None
+  else match Observed.to_option t.skills with
   | None -> None
   | Some sk -> (
       match
@@ -774,6 +775,33 @@ let skill_editor_loaded_for ~reference t =
     when String.equal r reference || String.equal loaded.reference reference ->
       Some loaded
   | Some _ | None -> None
+
+type skill_mutation_target =
+  | Loaded_skill of Wire_runtime.skill_editor_loaded
+  | Catalog_skill of Yojson.Safe.t
+
+let skill_mutation_target ~reference t =
+  if String.equal (String.trim reference) "" then None
+  else
+    let loaded =
+      match Observed.to_option t.skill_editor_loaded with
+      | Some (_, skill) when String.equal skill.reference reference -> Some skill
+      | Some _ | None -> None
+    in
+    let entries =
+      match Observed.to_option t.skills with
+      | None -> []
+      | Some snapshot ->
+          List.filter (fun (entry : Wire_runtime.skill_surface_entry) ->
+              String.equal entry.reference reference) snapshot.surfaces
+    in
+    match entries, loaded with
+    | _ :: _ :: _, _ -> None
+    | [ { reference_json = Some actual; _ } ], Some skill
+      when not (Yojson.Safe.equal actual skill.reference_json) -> None
+    | ([] | [ _ ]), Some skill -> Some (Loaded_skill skill)
+    | [ { reference_json = Some actual; _ } ], None -> Some (Catalog_skill actual)
+    | ([] | [ { reference_json = None; _ } ]), None -> None
 
 let apply_skill_editor_preview ~observed_at preview t =
   { t with skill_editor_preview = Observed.value ~observed_at preview }
@@ -2554,6 +2582,7 @@ let mark_stale_all t =
     prompts_absent = false;
     presets_listing = Observed.mark_stale t.presets_listing;
     presets_absent = false;
+    presets_auth_denied = false;
     preset_detail = Observed.mark_stale t.preset_detail;
     runtime_params = Observed.mark_stale t.runtime_params;
     runtime_params_absent = false;

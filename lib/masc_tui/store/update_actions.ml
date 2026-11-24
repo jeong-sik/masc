@@ -2418,15 +2418,15 @@ let rec execute_slash ~now (m : Model.t) cmd =
       | Slash.Skill_read ref_s ->
           Update_nav.push_dive m (Nav.Dive_runtime (Nav.Skill_dive ref_s))
       | Slash.Skill_edit ref_s -> (
-          match Runtime_store.skill_editor_loaded_for ~reference:ref_s m.runtime with
-          | Some { access = Wire_runtime.Skill_read_only; _ } ->
+          match Runtime_store.skill_mutation_target ~reference:ref_s m.runtime with
+          | Some (Runtime_store.Loaded_skill { access = Wire_runtime.Skill_read_only; _ }) ->
               ( Model.with_toast ~now ~level:Model.Toast_warning
                   (Say.make
                      ~ko:("읽기 전용 스킬 소스입니다 — 편집할 수 없습니다: " ^ ref_s)
                      ~en:("Skill source is read-only — cannot edit: " ^ ref_s))
                   m
               , [] )
-          | Some ({ access = Wire_runtime.Skill_read_write; _ } as loaded) ->
+          | Some (Runtime_store.Loaded_skill ({ access = Wire_runtime.Skill_read_write; _ } as loaded)) ->
               let m1, cmds =
                 Update_nav.open_inline_modal m
                   (Nav.Skill_edit_form { reference = loaded.reference })
@@ -2434,7 +2434,7 @@ let rec execute_slash ~now (m : Model.t) cmd =
               ( prefill_field ~key:"source_text"
                   ~value:(Model.escape_inline_text loaded.source_text) m1
               , cmds )
-          | None ->
+          | Some (Runtime_store.Catalog_skill _) | None ->
               let m1, cmds =
                 Update_nav.push_dive m (Nav.Dive_runtime (Nav.Skill_dive ref_s))
               in
@@ -2445,15 +2445,16 @@ let rec execute_slash ~now (m : Model.t) cmd =
                   m1
               , cmds ))
       | Slash.Skill_delete ref_s -> (
-          match Runtime_store.skill_editor_loaded_for ~reference:ref_s m.runtime with
-          | Some { access = Wire_runtime.Skill_read_only; _ } ->
+          match Runtime_store.skill_mutation_target ~reference:ref_s m.runtime with
+          | Some (Runtime_store.Loaded_skill { access = Wire_runtime.Skill_read_only; _ }) ->
               ( Model.with_toast ~now ~level:Model.Toast_warning
                   (Say.make
                      ~ko:("읽기 전용 스킬 소스입니다 — 삭제할 수 없습니다: " ^ ref_s)
                      ~en:("Skill source is read-only — cannot delete: " ^ ref_s))
                   m
               , [] )
-          | Some { access = Wire_runtime.Skill_read_write; _ } | None ->
+          | Some (Runtime_store.Loaded_skill { access = Wire_runtime.Skill_read_write; _ }
+                 | Runtime_store.Catalog_skill _) | None ->
               Update_nav.open_inline_modal m
                 (Nav.Skill_delete_confirm { reference = ref_s })))
   | Slash.Prompt act -> (

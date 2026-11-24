@@ -19034,9 +19034,94 @@ let test_oauth_auto_open_input_and_tick_poll () =
   Alcotest.(check int) "subsequent Github_login_chunk does not re-open browser" 0
     (List.length (Cmd.flatten gh2_cmds))
 
+let test_skill_mutation_reference () =
+  let now = Clock.Mono.zero in
+  let initial = Model.initial () in
+  let reference_json name source revision =
+    `Assoc [ "identity", `Assoc [ "source_id", `String source; "package_id", `String name; "name", `String name ];
+             "content_revision", `String revision ]
+  in
+  let surface reference source : Wire_runtime.skill_surface_entry =
+    { reference; reference_json = Some (reference_json reference source "rev");
+      kind = "instruction"; summary = None; error = None }
+  in
+  let alpha = surface "compile-alpha" "workshop" and beta = surface "compile-beta" "team" in
+  let catalog surfaces =
+    let snap : Wire_runtime.skills_snapshot =
+      { state = "ready"; snapshot_revision = Some "rev"; surfaces; shadows = []; rejections = [] } in
+    { initial with runtime = Runtime_store.apply_skills ~observed_at:now snap initial.runtime }
+  in
+  let available = catalog [alpha; beta] in
+  let beta_json = reference_json beta.reference "team" "rev" in
+  let loaded reference_json access : Wire_runtime.skill_editor_loaded =
+    { reference = beta.reference; reference_json;
+      snapshot_revision = "rev"; source_text = "before"; access }
+  in
+  let cached ?(reference_json = beta_json) access =
+    { available with runtime = Runtime_store.apply_skill_editor_loaded ~observed_at:now
+        ~reference:"compile" (loaded reference_json access) available.runtime }
+  in
+  let submit m kind text =
+    let opened, _ = Update_nav.open_inline_modal m kind in
+    match opened.inline_modal with
+    | None -> Alcotest.fail "skill form did not open"
+    | Some form ->
+        let typed = Model.modal_update_active_field (fun _ -> text) form in
+        let _, cmds = Update_nav.submit_inline_modal ~now { opened with inline_modal = Some typed } in
+        Cmd.flatten cmds
+  in
+  let mutations m reference =
+    submit m (Nav.Skill_edit_form { reference }) "after",
+    submit m (Nav.Skill_delete_confirm { reference }) "DELETE"
+  in
+  let expect_none m reference =
+    Alcotest.(check bool) ("no save or delete for " ^ reference) true
+      (mutations m reference = ([], []))
+  in
+  let exact =
+    [Cmd.Http_post {epoch = initial.epoch; req = Cmd.Post_skill_editor_save
+         { reference = beta.reference; reference_json = beta_json; source_text = "after" }}],
+    [Cmd.Http_delete {epoch = initial.epoch; req = Cmd.Delete_skill_editor
+         { reference = beta.reference; reference_json = beta_json; confirmed = true }}]
+  in
+  List.iter (fun m ->
+    List.iter (expect_none m) [ "compile"; ""; "  "; "COMPILE-BETA"; " compile-beta " ];
+    Alcotest.(check bool) "exact operations keep the selected structured reference" true
+      (mutations m beta.reference = exact)) [available; cached Wire_runtime.Skill_read_write];
+  let alias = cached Wire_runtime.Skill_read_write in
+  let edit, _ = Update_actions.execute_slash ~now alias (Slash.Skill (Slash.Skill_edit "compile")) in
+  Alcotest.(check bool) "previous read alias cannot open another skill's edit form" true
+    (Option.is_none edit.inline_modal);
+  expect_none (catalog [beta; surface beta.reference "other-source"]) beta.reference;
+  expect_none (cached ~reference_json:(reference_json beta.reference "team" "earlier-revision")
+                 Wire_runtime.Skill_read_write) beta.reference;
+  expect_none (cached Wire_runtime.Skill_read_only) beta.reference
+
+let test_preset_denial_refresh () =
+  let now = Clock.Mono.zero in
+  let initial = Model.initial () in
+  let view, _ = Update_actions.execute_slash ~now initial (Slash.Preset Slash.Preset_list) in
+  let deny (m : Model.t) = fst (Update.step ~now m
+    (Msg.Http_reply {epoch = m.epoch; reply = Msg.Reply_presets
+      (Error (Msg.Http_error {status = 403; body = ""; api_error = None}))})) in
+  let get = Cmd.Http_get {epoch = view.epoch; req = Cmd.Get_presets} in
+  let denied = deny view in
+  Alcotest.(check bool) "denied presets suppress passive reads" true
+    (denied.runtime.presets_auth_denied && not (List.mem get (View_fetches.fetches_for_current_view denied)));
+  let refreshed, cmds = Update_actions.execute_action ~now denied Keymap.Refresh in
+  Alcotest.(check bool) "refresh clears the denial and requests the current presets" true
+    (not refreshed.runtime.presets_auth_denied && List.mem get (Cmd.flatten cmds));
+  let denied_again = deny refreshed in
+  Alcotest.(check bool) "a new denial suppresses subsequent passive reads" true
+    (denied_again.runtime.presets_auth_denied &&
+     not (List.mem get (View_fetches.fetches_for_current_view denied_again)))
+
 let () =
   Alcotest.run "masc_tui_store"
     [
+      ( "runtime_editor_authority",
+        [ Alcotest.test_case "exact skill mutation reference" `Quick test_skill_mutation_reference;
+          Alcotest.test_case "preset access recheck" `Quick test_preset_denial_refresh ] );
       ( "timeout_diagnostics"
       , [
           Alcotest.test_case "Timeout_detail KO/EN formatting, retryable & Update/Update_http parity"

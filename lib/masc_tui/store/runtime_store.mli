@@ -545,6 +545,14 @@ val apply_skill_editor_loaded :
   t
 val skill_editor_loaded_for :
   reference:string -> t -> Wire_runtime.skill_editor_loaded option
+type skill_mutation_target =
+  | Loaded_skill of Wire_runtime.skill_editor_loaded
+  | Catalog_skill of Yojson.Safe.t
+
+val skill_mutation_target : reference:string -> t -> skill_mutation_target option
+(** A saved or deleted target uses an exact, nonblank skill identity. A read
+    alias or ambiguous catalogue name cannot authorize a write. *)
+
 val apply_skill_editor_preview :
   observed_at:Clock.Mono.t -> Wire_runtime.skill_editor_preview -> t -> t
 val filtered_skill_surfaces : t -> Wire_runtime.skill_surface_entry list

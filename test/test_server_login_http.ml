@@ -2190,6 +2190,8 @@ let the_route_table () =
       ; "/api/v1/auth/invites"
       ; "/api/v1/auth/invites/"
       ; "/api/v1/auth/members"
+      ; "/api/v1/auth/members/"
+      ; "/api/v1/auth/members/"
       ; "/api/v1/auth/pats"
       ; "/api/v1/auth/pats"
       ; "/api/v1/auth/pats/"
@@ -2228,6 +2230,383 @@ let the_query_credential () =
     ]
 ;;
 
+let member_lifecycle_over_http () =
+  with_installation (fun t ->
+    let admin = fresh_browser () in
+    Alcotest.(check int)
+      "first Admin signs in"
+      200
+      (sign_in ~fields:[ "invite", admin_token ] t admin ~user_id:101).status;
+    let admin_csrf = csrf_of t admin in
+    let admin_id = User_id.to_string (user_of t admin) in
+    let (_ : string) =
+      registration_of (register t admin ~csrf:admin_csrf {|{"provider":"github","user_id":202}|})
+    in
+    let a_member = fresh_browser () in
+    Alcotest.(check int) "Member joins" 200 (sign_in t a_member ~user_id:202).status;
+    let member_csrf = csrf_of t a_member in
+    let member_id = User_id.to_string (user_of t a_member) in
+    let invite_reply =
+      send
+        admin
+        t.router
+        ~meth:"POST"
+        ~path:"/api/v1/auth/invites"
+        ~headers:(("Content-Type", "application/json") :: changing ~csrf:admin_csrf ())
+        ~body:{|{"role":"admin"}|}
+    in
+    Alcotest.(check int) ("issue second Admin invite: " ^ invite_reply.body) 200 invite_reply.status;
+    let second_invite_token =
+      match member "link" invite_reply with
+      | Some (`String link) ->
+        (match String.split_on_char '#' link with
+         | [ _; token ] -> token
+         | _ -> Alcotest.failf "unexpected invite link %S" link)
+      | _ -> Alcotest.failf "no link in %S" invite_reply.body
+    in
+    let second_admin = fresh_browser () in
+    Alcotest.(check int)
+      "second Admin joins"
+      200
+      (sign_in ~fields:[ "invite", second_invite_token ] t second_admin ~user_id:303).status;
+    let second_admin_id = User_id.to_string (user_of t second_admin) in
+    (* Disable: non-admin 403, missing CSRF 403, valid 200, unknown action 404 *)
+    Alcotest.(check int)
+      "Member cannot disable via HTTP"
+      403
+      (send
+         a_member
+         t.router
+         ~meth:"POST"
+         ~path:("/api/v1/auth/members/" ^ member_id ^ "/disable")
+         ~headers:(changing ~csrf:member_csrf ()))
+        .status;
+    Alcotest.(check int)
+      "Admin without CSRF cannot disable"
+      403
+      (send
+         admin
+         t.router
+         ~meth:"POST"
+         ~path:("/api/v1/auth/members/" ^ member_id ^ "/disable")
+         ~headers:(changing ()))
+        .status;
+    Alcotest.(check int)
+      "unknown member POST action is 404"
+      404
+      (send
+         admin
+         t.router
+         ~meth:"POST"
+         ~path:("/api/v1/auth/members/" ^ member_id ^ "/promote")
+         ~headers:(changing ~csrf:admin_csrf ()))
+        .status;
+    let disabled =
+      send
+        admin
+        t.router
+        ~meth:"POST"
+        ~path:("/api/v1/auth/members/" ^ member_id ^ "/disable")
+        ~headers:(changing ~csrf:admin_csrf ())
+    in
+    Alcotest.(check int) ("disable via HTTP: " ^ disabled.body) 200 disabled.status;
+    (* Enable *)
+    let enabled =
+      send
+        admin
+        t.router
+        ~meth:"POST"
+        ~path:("/api/v1/auth/members/" ^ member_id ^ "/enable")
+        ~headers:(changing ~csrf:admin_csrf ())
+    in
+    Alcotest.(check int) ("enable via HTTP: " ^ enabled.body) 200 enabled.status;
+    (* Revoke-admin: invalid cause 400, valid cause 200, last Admin 409 *)
+    Alcotest.(check int)
+      "invalid revoke-admin cause is 400"
+      400
+      (send
+         admin
+         t.router
+         ~meth:"POST"
+         ~path:("/api/v1/auth/members/" ^ second_admin_id ^ "/revoke-admin")
+         ~headers:(("Content-Type", "application/json") :: changing ~csrf:admin_csrf ())
+         ~body:{|{"cause":"invalid"}|})
+        .status;
+    let revoked =
+      send
+        admin
+        t.router
+        ~meth:"POST"
+        ~path:("/api/v1/auth/members/" ^ second_admin_id ^ "/revoke-admin")
+        ~headers:(("Content-Type", "application/json") :: changing ~csrf:admin_csrf ())
+        ~body:{|{"cause":"operational"}|}
+    in
+    Alcotest.(check int) ("revoke-admin via HTTP: " ^ revoked.body) 200 revoked.status;
+    Alcotest.(check int)
+      "revoking the last Admin is 409"
+      409
+      (send
+         admin
+         t.router
+         ~meth:"POST"
+         ~path:("/api/v1/auth/members/" ^ admin_id ^ "/revoke-admin")
+         ~headers:(("Content-Type", "application/json") :: changing ~csrf:admin_csrf ())
+         ~body:{|{"cause":"security_incident"}|})
+        .status;
+    (* Delete: nested subpath 404, last Admin 409, valid member 204 *)
+    Alcotest.(check int)
+      "DELETE with nested segment is 404"
+      404
+      (send
+         admin
+         t.router
+         ~meth:"DELETE"
+         ~path:("/api/v1/auth/members/" ^ member_id ^ "/extra")
+         ~headers:(changing ~csrf:admin_csrf ()))
+        .status;
+    Alcotest.(check int)
+      "DELETE last Admin is 409"
+      409
+      (send
+         admin
+         t.router
+         ~meth:"DELETE"
+         ~path:("/api/v1/auth/members/" ^ admin_id)
+         ~headers:(changing ~csrf:admin_csrf ()))
+        .status;
+    let deleted =
+      send
+        admin
+        t.router
+        ~meth:"DELETE"
+        ~path:("/api/v1/auth/members/" ^ member_id)
+        ~headers:(changing ~csrf:admin_csrf ())
+    in
+    Alcotest.(check int) ("delete member via HTTP: " ^ deleted.body) 204 deleted.status)
+;;
+
+let dashboard_bridge_rbac_and_sse_matrix () =
+  with_installation (fun t ->
+    Eio.Switch.run (fun sw ->
+      let router =
+        Server_account_dashboard_bridge.add_routes
+          ~sw
+          ~clock:(Eio.Stdenv.clock t.env)
+          ~login:t.routes
+          ~base_path:t.base
+          ~engine_state:(fun () -> None)
+          t.router
+      in
+      let admin = fresh_browser () in
+      Alcotest.(check int)
+        "Admin signs in"
+        200
+        (sign_in ~fields:[ "invite", admin_token ] t admin ~user_id:401).status;
+      let admin_csrf = csrf_of t admin in
+      let (_ : string) =
+        registration_of (register t admin ~csrf:admin_csrf {|{"provider":"github","user_id":402}|})
+      in
+      let a_member = fresh_browser () in
+      Alcotest.(check int) "Worker joins" 200 (sign_in t a_member ~user_id:402).status;
+      let member_csrf = csrf_of t a_member in
+      let pat_reply =
+        send
+          admin
+          router
+          ~meth:"POST"
+          ~path:"/api/v1/auth/pats"
+          ~headers:(("Content-Type", "application/json") :: changing ~csrf:admin_csrf ())
+          ~body:
+            {|{"scope":{"runtimes":"all","channels":["direct"],"allowed_effects":["read_state"]},"expires_at_ms":null}|}
+      in
+      Alcotest.(check int) ("issue read-only PAT: " ^ pat_reply.body) 200 pat_reply.status;
+      let read_pat =
+        match member "token" pat_reply with
+        | Some (`String tok) -> tok
+        | _ -> Alcotest.failf "no PAT token in %S" pat_reply.body
+      in
+      let pat_headers = [ "Authorization", "Bearer " ^ read_pat ] in
+      (* Workspace_read route (/api/v1/dashboard/shell):
+         Anonymous -> 401; Worker/Admin/Read-PAT -> passes Auth_gate and hits 503 engine_starting. *)
+      Alcotest.(check int)
+        "anonymous GET /api/v1/dashboard/shell is 401"
+        401
+        (send (fresh_browser ()) router ~meth:"GET" ~path:"/api/v1/dashboard/shell").status;
+      Alcotest.(check int)
+        "Worker GET /api/v1/dashboard/shell passes auth (503 engine_starting)"
+        503
+        (send a_member router ~meth:"GET" ~path:"/api/v1/dashboard/shell").status;
+      Alcotest.(check int)
+        "Admin GET /api/v1/dashboard/shell passes auth (503 engine_starting)"
+        503
+        (send admin router ~meth:"GET" ~path:"/api/v1/dashboard/shell").status;
+      Alcotest.(check int)
+        "Read-state PAT GET /api/v1/dashboard/shell passes auth (503 engine_starting)"
+        503
+        (send (fresh_browser ()) router ~meth:"GET" ~path:"/api/v1/dashboard/shell" ~headers:pat_headers)
+          .status;
+      Alcotest.(check int)
+        "cross-origin Admin GET /api/v1/dashboard/shell is 403"
+        403
+        (send
+           admin
+           router
+           ~meth:"GET"
+           ~path:"/api/v1/dashboard/shell"
+           ~headers:(changing ~origin:(Some "https://evil.example") ()))
+          .status;
+      (* Admin_only read route (/api/v1/config/schema):
+         Anonymous -> 401; Worker -> 403; Admin PAT -> 403; Admin session -> 503 engine_starting. *)
+      Alcotest.(check int)
+        "anonymous GET /api/v1/config/schema is 401"
+        401
+        (send (fresh_browser ()) router ~meth:"GET" ~path:"/api/v1/config/schema").status;
+      Alcotest.(check int)
+        "Worker GET /api/v1/config/schema is 403"
+        403
+        (send a_member router ~meth:"GET" ~path:"/api/v1/config/schema").status;
+      Alcotest.(check int)
+        "Admin PAT GET /api/v1/config/schema is 403 (PATs never get CanAdmin)"
+        403
+        (send (fresh_browser ()) router ~meth:"GET" ~path:"/api/v1/config/schema" ~headers:pat_headers)
+          .status;
+      Alcotest.(check int)
+        "Admin session GET /api/v1/config/schema passes RBAC (503 engine_starting)"
+        503
+        (send admin router ~meth:"GET" ~path:"/api/v1/config/schema").status;
+      (* Admin_only mutation route (POST /api/v1/config/patch):
+         Worker -> 403; Admin no CSRF -> 403; Admin cross-origin -> 403; Admin + CSRF -> 503. *)
+      Alcotest.(check int)
+        "Worker POST /api/v1/config/patch is 403"
+        403
+        (send
+           a_member
+           router
+           ~meth:"POST"
+           ~path:"/api/v1/config/patch"
+           ~headers:(changing ~csrf:member_csrf ()))
+          .status;
+      Alcotest.(check int)
+        "Admin POST /api/v1/config/patch without CSRF is 403"
+        403
+        (send admin router ~meth:"POST" ~path:"/api/v1/config/patch" ~headers:(changing ())).status;
+      Alcotest.(check int)
+        "Admin POST /api/v1/config/patch cross-origin is 403"
+        403
+        (send
+           admin
+           router
+           ~meth:"POST"
+           ~path:"/api/v1/config/patch"
+           ~headers:(changing ~origin:(Some "https://evil.example") ~csrf:admin_csrf ()))
+          .status;
+      Alcotest.(check int)
+        "Admin POST /api/v1/config/patch with CSRF passes RBAC (503 engine_starting)"
+        503
+        (send
+           admin
+           router
+           ~meth:"POST"
+           ~path:"/api/v1/config/patch"
+           ~headers:(changing ~csrf:admin_csrf ()))
+          .status;
+      (* Browser_observer_sse (GET /api/v1/auth/events):
+         Anonymous -> 401; Query token even with valid cookie -> 401; PAT -> 403;
+         Cross-origin -> 403; Malformed Last-Event-ID with valid cookie -> 400 (proves auth passed!). *)
+      Alcotest.(check int)
+        "anonymous GET /api/v1/auth/events is 401"
+        401
+        (send (fresh_browser ()) router ~meth:"GET" ~path:Server_account_dashboard_bridge.observer_events_path)
+          .status;
+      Alcotest.(check int)
+        "query-string ?token= on /api/v1/auth/events is 401 even with valid Admin cookie"
+        401
+        (send
+           admin
+           router
+           ~meth:"GET"
+           ~path:(Server_account_dashboard_bridge.observer_events_path ^ "?token=secret-must-reject"))
+          .status;
+      Alcotest.(check int)
+        "query-string ?access_token= on /api/v1/auth/events is 401 even with valid Admin cookie"
+        401
+        (send
+           admin
+           router
+           ~meth:"GET"
+           ~path:(Server_account_dashboard_bridge.observer_events_path ^ "?access_token=secret-must-reject"))
+          .status;
+      Alcotest.(check int)
+        "PAT bearer on /api/v1/auth/events is 403 (browser session cookie required)"
+        403
+        (send
+           (fresh_browser ())
+           router
+           ~meth:"GET"
+           ~path:Server_account_dashboard_bridge.observer_events_path
+           ~headers:pat_headers)
+          .status;
+      Alcotest.(check int)
+        "cross-origin GET /api/v1/auth/events is 403"
+        403
+        (send
+           admin
+           router
+           ~meth:"GET"
+           ~path:Server_account_dashboard_bridge.observer_events_path
+           ~headers:(changing ~origin:(Some "https://evil.example") ()))
+          .status;
+      Alcotest.(check int)
+        "authenticated Worker GET /api/v1/auth/events passes auth (malformed Last-Event-ID yields 400)"
+        400
+        (send
+           a_member
+           router
+           ~meth:"GET"
+           ~path:Server_account_dashboard_bridge.observer_events_path
+           ~headers:[ "Last-Event-ID", "not-an-int" ])
+          .status;
+      (* Direct unit check on Server_account_dashboard_bridge.authorize & board_reader_of *)
+      let trusted =
+        match Z.read t.routes.R.zone with
+        | Ok trusted -> trusted
+        | Error uncertain -> Alcotest.fail (Z.uncertain_detail uncertain)
+      in
+      let admin_cookie = List.assoc Q.session_cookie admin.cookies in
+      let sse_req =
+        { Masc.Auth_gate.credentials =
+            { Authz_credential_presentation.authorization = []
+            ; internal_token = []
+            ; session_cookies = [ admin_cookie ]
+            ; query_credential = false
+            }
+        ; method_ = Q.Safe
+        ; origin = Q.No_origin
+        ; csrf = None
+        }
+      in
+      match
+        Server_account_dashboard_bridge.authorize
+          trusted
+          ~now_ms:start_ms
+          Server_account_dashboard_bridge.Browser_observer_sse
+          sse_req
+      with
+      | Error answer -> Alcotest.failf "browser EventSource session refused: %s" answer.R.body
+      | Ok { Server_account_dashboard_bridge.caller; state } ->
+        (match Server_account_dashboard_bridge.board_reader_of ~state caller with
+         | Masc_board_handlers.Board_access.Workspace_member { actor_id; owned_keeper_ids } ->
+           Alcotest.(check string)
+             "board reader actor matches Admin user_id"
+             (User_id.to_string (user_of t admin))
+             actor_id;
+           Alcotest.(check (list string)) "no owned keepers initially" [] owned_keeper_ids
+         | Masc_board_handlers.Board_access.Anonymous
+         | Masc_board_handlers.Board_access.Named _
+         | Masc_board_handlers.Board_access.Operator ->
+           Alcotest.fail "multi-account Admin must never get Operator board access")))
+;;
+
 let () =
   Alcotest.run
     "server_login_http"
@@ -2248,6 +2627,11 @@ let () =
         ; Alcotest.test_case "what the server reads" `Quick what_the_server_reads
         ; Alcotest.test_case "the route table" `Quick the_route_table
         ; Alcotest.test_case "the query credential" `Quick the_query_credential
+        ; Alcotest.test_case "member lifecycle over HTTP" `Quick member_lifecycle_over_http
+        ; Alcotest.test_case
+            "dashboard bridge RBAC and cookie-SSE matrix"
+            `Quick
+            dashboard_bridge_rbac_and_sse_matrix
         ] )
     ]
 ;;

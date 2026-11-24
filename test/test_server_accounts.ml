@@ -65,6 +65,15 @@ let test_table_kinds () =
        public router
        |> Server_route.post (Server_route.Self_authenticated Route_access.Person_mcp) Server_person_mcp.path nothing));
   Alcotest.(check string)
+    "the multi-account dashboard bridge, which judges every request via Auth_gate"
+    "served"
+    (kind_label (fun router ->
+       public router
+       |> Server_route.get
+            (Server_route.Self_authenticated Route_access.Multi_account_dashboard)
+            Server_account_dashboard_bridge.observer_events_path
+            nothing));
+  Alcotest.(check string)
     "a route behind a wrapper of the single-user server"
     {|/api/v1/status is {"kind":"read_auth"}|}
     (kind_label (fun router ->
@@ -1054,8 +1063,10 @@ let console_directives =
   [ "base-uri 'none'"
   ; "connect-src 'self'"
   ; "default-src 'none'"
+  ; "font-src 'self'"
   ; "form-action 'none'"
   ; "frame-ancestors 'none'"
+  ; "img-src 'self' data:"
   ; "script-src 'self'"
   ; "style-src 'self'"
   ; "style-src-attr 'none'"
@@ -1146,17 +1157,29 @@ let test_serves_its_table_alone () =
             build record carries the path of the executable) does not come in
             unnoticed. *)
          Alcotest.(check (list string))
-           "the health answer holds the server, its version and the mode, and no more"
-           [ "account_mode"; "server"; "version" ]
+           "the health answer holds the server, its version, the mode and auth_methods, and no more"
+           [ "account_mode"; "auth_methods"; "server"; "version" ]
            (List.sort String.compare (List.map fst fields));
          Alcotest.(check bool)
-           "every field of the health answer is a string"
+           "auth_methods reports configured OAuth providers and dev_token=false"
+           true
+           (match List.assoc_opt "auth_methods" fields with
+            | Some
+                (`Assoc
+                    [ ("google", `Bool false); ("github", `Bool true); ("dev_token", `Bool false) ])
+              -> true
+            | _ -> false);
+         Alcotest.(check bool)
+           "every scalar field of the health answer is a string"
            true
            (List.for_all
-              (fun ((_ : string), value) ->
-                match value with
-                | `String (_ : string) -> true
-                | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> false)
+              (fun (name, value) ->
+                if String.equal name "auth_methods"
+                then true
+                else (
+                  match value with
+                  | `String (_ : string) -> true
+                  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> false))
               fields);
          (* Clients read account_mode, server, and version from /health to tell
             an account server apart from an operator masc server. *)
@@ -1250,18 +1273,18 @@ let test_serves_its_table_alone () =
             (Ok Account_page_reading.Open)
             (Account_page_reading.login ~start:"/auth/github/start" body))
         [ "/"; Authz_activation.invitation_path ];
-      (* The console of a signed-in person. A bundle that does not hold its
-         build: the page says so with a 503 and runs nothing, and the rest of
-         the table answers as it does. *)
+      (* The unified dashboard SPA and legacy console redirect. A bundle that
+         does not hold index.html answers 503 on /dashboard and runs nothing,
+         while /accounts/console redirects cleanly to /dashboard#account. *)
       with_bundle [] (fun () ->
         let status, headers, body =
-          exchange ~net ~port ~meth:"GET" Server_account_console.page_path
+          exchange ~net ~port ~meth:"GET" Server_account_console.dashboard_path
         in
-        Alcotest.(check int) "the console of a bundle that does not hold it" 503 status;
+        Alcotest.(check int) "the dashboard of a bundle that does not hold it" 503 status;
         (* The reason goes to the log of the server, not to whoever reaches
            the listener. *)
         (match Server_account_console.unreadable () with
-         | None -> Alcotest.fail "a bundle without the console reads as one that has it"
+         | None -> Alcotest.fail "a bundle without index.html reads as one that has it"
          | Some reason ->
            Alcotest.(check bool)
              "the page that stands in does not say why"
@@ -1285,16 +1308,32 @@ let test_serves_its_table_alone () =
           "nothing between the server and the browser keeps the page that stands in"
           (Some "no-store")
           (header "cache-control" headers);
+        let redir_status, redir_headers, (_ : string) =
+          exchange ~net ~port ~meth:"GET" Server_account_console.page_path
+        in
+        Alcotest.(check int) "legacy /accounts/console redirects 303" 303 redir_status;
+        Alcotest.(check (option string))
+          "legacy /accounts/console redirects to /dashboard#account"
+          (Some Server_account_console.console_redirect_target)
+          (header "location" redir_headers);
+        Alcotest.(check (option string))
+          "redirect is not cached"
+          (Some "no-store")
+          (header "cache-control" redir_headers);
         Alcotest.(check int)
-          "a file of a build the bundle does not hold"
+          "a dashboard asset the bundle does not hold"
+          404
+          (fst (request ~net ~port ~meth:"GET" (Server_account_console.dashboard_path ^ "/assets/app.js")));
+        Alcotest.(check int)
+          "a legacy console asset the bundle does not hold"
           404
           (fst (request ~net ~port ~meth:"GET" (Server_account_console.page_path ^ "/assets/app.js")));
         Alcotest.(check int)
-          "the home page of a server whose bundle holds no console"
+          "the home page of a server whose bundle holds no dashboard"
           200
           (fst (request ~net ~port ~meth:"GET" "/")));
-      (* A directory that holds no bundle: the page and the files of the
-         build are a 503, and no answer names where the server looked. *)
+      (* A directory that holds no bundle: the dashboard page and its assets
+         are a 503, and no answer names where the server looked. *)
       with_assets_directory None (fun root ->
         List.iter
           (fun path ->
@@ -1304,9 +1343,11 @@ let test_serves_its_table_alone () =
               ("the answer of " ^ path ^ " names no directory of the server")
               false
               (holds ~part:root body))
-          [ Server_account_console.page_path; Server_account_console.page_path ^ "/assets/app.js" ]);
-      (* A bundle that holds the build of the console beside the operator
-         dashboard. *)
+          [ Server_account_console.dashboard_path
+          ; Server_account_console.dashboard_path ^ "/assets/app.js"
+          ; Server_account_console.page_path ^ "/assets/app.js"
+          ]);
+      (* A bundle that holds the unified dashboard SPA beside legacy console assets. *)
       with_bundle
         [ "accounts/index.html", console_page
         ; "accounts/assets/app.js", console_script
@@ -1315,56 +1356,69 @@ let test_serves_its_table_alone () =
         ]
         (fun () ->
           let status, headers, body =
-            exchange ~net ~port ~meth:"GET" Server_account_console.page_path
+            exchange ~net ~port ~meth:"GET" Server_account_console.dashboard_path
           in
-          Alcotest.(check int) "the console" 200 status;
-          Alcotest.(check string) "it is the page of the build, byte for byte" console_page body;
+          Alcotest.(check int) "the unified dashboard" 200 status;
+          Alcotest.(check string) "it is the dashboard page, byte for byte" operator_page body;
           Alcotest.(check (option (list string)))
-            "the policy of the console"
+            "the strict zero-inline-script CSP of the dashboard"
             (Some console_directives)
             (Option.map directives (header "content-security-policy" headers));
           Alcotest.(check (option string))
-            "a browser does not keep the page"
+            "a browser does not keep the dashboard page"
             (Some "no-store")
             (header "cache-control" headers);
-          (* A link of the console that leaves this origin tells the other
-             site nothing of the address it was followed from. *)
           Alcotest.(check (option string))
             "a link to another site carries no address of this server"
             (Some "same-origin")
             (header "referrer-policy" headers);
           (let status, headers, body =
-             exchange ~net ~port ~meth:"GET" (Server_account_console.page_path ^ "/assets/app.js")
+             exchange ~net ~port ~meth:"GET" (Server_account_console.dashboard_path ^ "/settings")
            in
-           Alcotest.(check int) "a file of the build" 200 status;
-           Alcotest.(check string) "it is the file of the build, byte for byte" console_script body;
+           Alcotest.(check int) "a dashboard SPA deep link" 200 status;
+           Alcotest.(check string) "deep link serves dashboard index.html" operator_page body;
+           Alcotest.(check (option (list string)))
+             "deep link carries the same strict CSP"
+             (Some console_directives)
+             (Option.map directives (header "content-security-policy" headers)));
+          (let status, headers, body =
+             exchange ~net ~port ~meth:"GET" (Server_account_console.dashboard_path ^ "/assets/operator.js")
+           in
+           Alcotest.(check int) "a dashboard asset" 200 status;
+           Alcotest.(check string) "it is the dashboard asset, byte for byte" operator_script body;
            Alcotest.(check (option string))
              "it is answered as a script"
              (Some "application/javascript; charset=utf-8")
              (header "content-type" headers);
-           (* A file of the build that a browser opens as a document runs
-              under the limits of the page. *)
            Alcotest.(check (option (list string)))
-             "a file of the build carries the policy of the console"
+             "a dashboard asset carries the strict CSP"
              (Some console_directives)
              (Option.map directives (header "content-security-policy" headers));
            Alcotest.(check (option string))
-             "a browser keeps a file of the build, which is named after its bytes"
+             "a browser keeps hashed dashboard assets"
              (Some "public, max-age=31536000, immutable")
              (header "cache-control" headers));
-          (* A query names no other file: the page and a file of the build
-             with one are the same bytes as without. *)
+          (let status, headers, body =
+             exchange ~net ~port ~meth:"GET" (Server_account_console.page_path ^ "/assets/app.js")
+           in
+           Alcotest.(check int) "a legacy console asset" 200 status;
+           Alcotest.(check string) "it is the legacy asset, byte for byte" console_script body;
+           Alcotest.(check (option (list string)))
+             "a legacy asset carries the strict CSP"
+             (Some console_directives)
+             (Option.map directives (header "content-security-policy" headers)));
+          (* A query names no other file: the page and assets with one are the
+             same bytes as without. *)
           List.iter
             (fun (path, expected) ->
               let status, body = request ~net ~port ~meth:"GET" path in
               Alcotest.(check int) ("GET " ^ path) 200 status;
               Alcotest.(check string) ("the answer of " ^ path ^ " is the same bytes") expected body)
-            [ Server_account_console.page_path ^ "?from=home", console_page
+            [ Server_account_console.dashboard_path ^ "?from=home", operator_page
+            ; Server_account_console.dashboard_path ^ "/assets/operator.js?v=1", operator_script
             ; Server_account_console.page_path ^ "/assets/app.js?v=1", console_script
             ];
-          (* Nothing else of the bundle has an address on this server: not
-             below the assets of the console, by any spelling of the way up,
-             and not at the addresses of the single-user server. *)
+          (* Traversal attempts and unserved bundle paths stay 404. *)
           List.iter
             (fun path ->
               let status, body = request ~net ~port ~meth:"GET" path in
@@ -1375,7 +1429,14 @@ let test_serves_its_table_alone () =
                 (List.exists
                    (fun part -> holds ~part body)
                    [ console_page; console_script; operator_page; operator_script ]))
-            [ Server_account_console.page_path ^ "/assets/"
+            [ Server_account_console.dashboard_path ^ "/assets/"
+            ; Server_account_console.dashboard_path ^ "/assets//operator.js"
+            ; Server_account_console.dashboard_path ^ "/assets/../index.html"
+            ; Server_account_console.dashboard_path ^ "/assets/../../index.html"
+            ; Server_account_console.dashboard_path ^ "/assets/..%2findex.html"
+            ; Server_account_console.dashboard_path ^ "/assets/%2e%2e/index.html"
+            ; Server_account_console.dashboard_path ^ "/assets/missing.js"
+            ; Server_account_console.page_path ^ "/assets/"
             ; Server_account_console.page_path ^ "/assets//app.js"
             ; Server_account_console.page_path ^ "/assets/../index.html"
             ; Server_account_console.page_path ^ "/assets/../../index.html"
@@ -1385,8 +1446,6 @@ let test_serves_its_table_alone () =
             ; Server_account_console.page_path ^ "/assets/missing.js"
             ; Server_account_console.page_path ^ "/index.html"
             ; "/accounts/index.html"
-            ; "/dashboard"
-            ; "/dashboard/assets/operator.js"
             ];
           (* The sheet the console links is the first part of the sheet of
              the pages the server writes itself, so the two look alike. A
@@ -1424,15 +1483,27 @@ let test_serves_its_table_alone () =
             in
             Alcotest.(check int) "the sheet, asked by a browser that holds it" 304 status;
             Alcotest.(check string) "no bytes go again" "" body);
-      (* The routes of a person are in the table, and a request with no
-         credential is refused by the route. *)
+      (* The routes of a person and the dashboard bridge are in the table, and a
+         request with no credential (or a query-string token on SSE) is refused. *)
       List.iter
         (fun path ->
           Alcotest.(check int)
             ("GET " ^ path ^ " with no credential")
             401
             (fst (request ~net ~port ~meth:"GET" path)))
-        [ "/api/v1/auth/whoami"; Auth_preview.provider_accounts_path; Auth_preview_keeper.keepers_path ];
+        [ "/api/v1/auth/whoami"
+        ; Auth_preview.provider_accounts_path
+        ; Auth_preview_keeper.keepers_path
+        ; Server_account_dashboard_bridge.observer_events_path
+        ; Server_account_dashboard_bridge.observer_events_path ^ "?token=query-cred-rejected"
+        ; "/api/v1/dashboard/shell"
+        ; "/api/v1/dashboard/board"
+        ; "/api/v1/config/schema"
+        ];
+      Alcotest.(check int)
+        "POST /api/v1/config/patch with no credential"
+        401
+        (fst (request ~net ~port ~meth:"POST" "/api/v1/config/patch"));
       Alcotest.(check int)
         "an MCP message with no credential"
         401

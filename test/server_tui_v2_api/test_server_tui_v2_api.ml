@@ -2500,12 +2500,40 @@ let test_track_a_scorecard_and_capabilities () =
     expected_caps
     Server_health_public.capabilities;
   let pub_health =
-    Server_health_public.health_json ~ready:true ~phase:Masc.Server_startup_state.Ready
+    Server_health_public.health_json
+      ~dev_token:true
+      ~ready:true
+      ~phase:Masc.Server_startup_state.Ready
   in
   Alcotest.(check bool)
-    "unauthenticated public health_json stays strictly 5 keys"
+    "unauthenticated public health_json stays strictly 6 keys and omits account_mode"
     true
-    (match pub_health with `Assoc fs -> List.length fs = 5 | _ -> false);
+    (match pub_health with
+     | `Assoc fs ->
+       List.length fs = 6
+       && (not (List.mem_assoc "account_mode" fs))
+       && (match List.assoc_opt "auth_methods" fs with
+           | Some (`Assoc [ ("google", `Bool false); ("github", `Bool false); ("dev_token", `Bool true) ])
+             -> true
+           | _ -> false)
+     | _ -> false);
+  let pub_health_strict =
+    Server_health_public.health_json
+      ~dev_token:false
+      ~ready:true
+      ~phase:Masc.Server_startup_state.Ready
+  in
+  Alcotest.(check bool)
+    "strict single-user public health_json advertises dev_token=false and omits account_mode"
+    true
+    (match pub_health_strict with
+     | `Assoc fs ->
+       (not (List.mem_assoc "account_mode" fs))
+       && (match List.assoc_opt "auth_methods" fs with
+           | Some (`Assoc [ ("google", `Bool false); ("github", `Bool false); ("dev_token", `Bool false) ])
+             -> true
+           | _ -> false)
+     | _ -> false);
   with_temp_workspace (fun config ->
     let boot =
       Server_dashboard_http_core_shell_bootstrap.dashboard_shell_bootstrap_json config

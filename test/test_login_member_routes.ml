@@ -349,6 +349,176 @@ let a_held_member_is_marked () =
     Alcotest.(check bool) "a deleted Member is not listed" true (Option.is_none (fields_of held)))
 ;;
 
+let an_admin_disables_and_enables_a_member () =
+  with_installation (fun t ->
+    let member_id = a_member_joins t 42 in
+    let member_cookie = session_for t.zone member_id in
+    let member_str = User_id.to_string member_id in
+    let admin_str = User_id.to_string t.admin_id in
+    (* Non-admin, missing auth, CSRF, and cross-origin checks *)
+    Alcotest.(check int)
+      "a Member cannot disable"
+      403
+      (code (M.disable t.routes (request (Some member_cookie)) ~user_id:member_str));
+    Alcotest.(check int)
+      "unauthenticated cannot disable"
+      401
+      (code (M.disable t.routes (request None) ~user_id:member_str));
+    Alcotest.(check int)
+      "missing CSRF cannot disable"
+      403
+      (code (M.disable t.routes { (request (Some t.admin)) with Q.csrf = None } ~user_id:member_str));
+    Alcotest.(check int)
+      "other origin cannot disable"
+      403
+      (code (M.disable t.routes (request ~origin:Q.Other_origin (Some t.admin)) ~user_id:member_str));
+    (* Invalid / missing target checks *)
+    Alcotest.(check int)
+      "invalid user_id is 400"
+      400
+      (code (M.disable t.routes (request (Some t.admin)) ~user_id:""));
+    Alcotest.(check int)
+      "missing user_id is 404"
+      404
+      (code (M.disable t.routes (request (Some t.admin)) ~user_id:"missing-user"));
+    (* Last-admin protection *)
+    Alcotest.(check int)
+      "disabling the only active Admin is 409"
+      409
+      (code (M.disable t.routes (request (Some t.admin)) ~user_id:admin_str));
+    (* Disable then double-disable *)
+    let disabled = M.disable t.routes (request (Some t.admin)) ~user_id:member_str in
+    Alcotest.(check int) ("disable member: " ^ disabled.R.body) 200 (code disabled);
+    Alcotest.(check (option json)) "disabled status" (text "disabled") (member "status" disabled);
+    Alcotest.(check int)
+      "disabling an already disabled member is 409"
+      409
+      (code (M.disable t.routes (request (Some t.admin)) ~user_id:member_str));
+    (* Enable then double-enable *)
+    let enabled = M.enable t.routes (request (Some t.admin)) ~user_id:member_str in
+    Alcotest.(check int) ("enable member: " ^ enabled.R.body) 200 (code enabled);
+    Alcotest.(check (option json)) "active status" (text "active") (member "status" enabled);
+    Alcotest.(check int)
+      "enabling an already active member is 409"
+      409
+      (code (M.enable t.routes (request (Some t.admin)) ~user_id:member_str)))
+;;
+
+let an_admin_revokes_admin_with_strict_cause () =
+  with_installation (fun t ->
+    let member_id = a_member_joins t 55 in
+    let member_cookie = session_for t.zone member_id in
+    admin_invitation t.zone ~invite_id:"invite-second-revoke" ~token:second_admin_token;
+    let second_admin =
+      match
+        sign_in t.zone ~invite:(E.Token_digest.of_token second_admin_token) (google "222-revoke")
+      with
+      | Ok (Authz_login.Admitted { user_id; _ }) -> user_id
+      | Ok (Authz_login.Signed_in _) | Error _ -> Alcotest.fail "the second Admin did not join"
+    in
+    let second_str = User_id.to_string second_admin in
+    (* Strict closed-sum cause parsing: unknown / missing / extra / malformed -> 400 *)
+    List.iter
+      (fun (label, body) ->
+        Alcotest.(check int)
+          label
+          400
+          (code (M.revoke_admin t.routes (request (Some t.admin)) ~user_id:second_str ~body)))
+      [ "unknown cause", {|{"cause":"routine"}|}
+      ; "empty cause", {|{"cause":""}|}
+      ; "missing cause", {|{}|}
+      ; "extra member", {|{"cause":"operational","extra":true}|}
+      ; "not JSON", "cause=operational"
+      ];
+    (* Non-admin forbidden *)
+    Alcotest.(check int)
+      "a Member cannot revoke Admin"
+      403
+      (code
+         (M.revoke_admin
+            t.routes
+            (request (Some member_cookie))
+            ~user_id:second_str
+            ~body:{|{"cause":"operational"}|}));
+    (* Revoking a non-admin member -> 409 *)
+    Alcotest.(check int)
+      "revoking a non-Admin is 409"
+      409
+      (code
+         (M.revoke_admin
+            t.routes
+            (request (Some t.admin))
+            ~user_id:(User_id.to_string member_id)
+            ~body:{|{"cause":"operational"}|}));
+    (* Valid revocation succeeds *)
+    let revoked =
+      M.revoke_admin
+        t.routes
+        (request (Some t.admin))
+        ~user_id:second_str
+        ~body:{|{"cause":"security_incident"}|}
+    in
+    Alcotest.(check int) ("revoke second Admin: " ^ revoked.R.body) 200 (code revoked);
+    Alcotest.(check (option json)) "demoted role" (text "member") (member "role" revoked);
+    Alcotest.(check (option json))
+      "recorded cause"
+      (text "security_incident")
+      (member "cause" revoked);
+    (* Last active Admin cannot be revoked *)
+    Alcotest.(check int)
+      "revoking the last active Admin is 409"
+      409
+      (code
+         (M.revoke_admin
+            t.routes
+            (request (Some t.admin))
+            ~user_id:(User_id.to_string t.admin_id)
+            ~body:{|{"cause":"operational"}|})))
+;;
+
+let an_admin_deletes_a_member_and_protects_last_admin () =
+  with_installation (fun t ->
+    let member_id = a_member_joins t 77 in
+    let member_cookie = session_for t.zone member_id in
+    let member_str = User_id.to_string member_id in
+    (* Non-admin gets 403 even for a missing user id (no existence oracle) *)
+    Alcotest.(check int)
+      "a Member gets 403 on missing id"
+      403
+      (code (M.delete t.routes (request (Some member_cookie)) ~user_id:"missing-user"));
+    Alcotest.(check int)
+      "unauthenticated gets 401"
+      401
+      (code (M.delete t.routes (request None) ~user_id:member_str));
+    Alcotest.(check int)
+      "missing CSRF gets 403"
+      403
+      (code (M.delete t.routes { (request (Some t.admin)) with Q.csrf = None } ~user_id:member_str));
+    (* Last-admin protection *)
+    Alcotest.(check int)
+      "deleting the last active Admin is 409"
+      409
+      (code (M.delete t.routes (request (Some t.admin)) ~user_id:(User_id.to_string t.admin_id)));
+    (* Missing user -> 404 *)
+    Alcotest.(check int)
+      "deleting a missing user is 404"
+      404
+      (code (M.delete t.routes (request (Some t.admin)) ~user_id:"missing-user"));
+    (* Delete member -> 204 and removed from list *)
+    let deleted = M.delete t.routes (request (Some t.admin)) ~user_id:member_str in
+    Alcotest.(check int) "delete member is 204" 204 (code deleted);
+    Alcotest.(check string) "204 body is empty" "" deleted.R.body;
+    let remaining = listed (M.list t.routes (read (Some t.admin))) in
+    Alcotest.(check bool)
+      "deleted member is gone from list"
+      true
+      (Option.is_none (List.assoc_opt member_str remaining));
+    Alcotest.(check int)
+      "deleting the same member again is 404"
+      404
+      (code (M.delete t.routes (request (Some t.admin)) ~user_id:member_str)))
+;;
+
 let () =
   Alcotest.run
     "login_member_routes"
@@ -356,6 +526,18 @@ let () =
       , [ Alcotest.test_case "an Admin lists every member" `Quick an_admin_lists_every_member
         ; Alcotest.test_case "a Member does not" `Quick a_member_does_not_list_members
         ; Alcotest.test_case "a held Member is marked" `Quick a_held_member_is_marked
+        ; Alcotest.test_case
+            "an Admin disables and enables a member"
+            `Quick
+            an_admin_disables_and_enables_a_member
+        ; Alcotest.test_case
+            "an Admin revokes Admin with strict cause"
+            `Quick
+            an_admin_revokes_admin_with_strict_cause
+        ; Alcotest.test_case
+            "an Admin deletes a member and protects last Admin"
+            `Quick
+            an_admin_deletes_a_member_and_protects_last_admin
         ] )
     ]
 ;;

@@ -35,6 +35,14 @@ type self_authenticated_reason =
           [Auth_gate.decide], a browser session or a scoped PAT, for the
           method or the tool that the request names. It keeps no MCP session
           and takes no caller name from the request. *)
+  | Multi_account_dashboard
+      (** Operational dashboard API routes and the cookie-authenticated
+          observer SSE stream on the multi-account account server
+          ([Server_account_dashboard_bridge]): each handler judges the request
+          itself via [Auth_gate.decide] against one trusted snapshot of the
+          authorization zone (Read_auth for workspace reads, Admin permission
+          with CSRF for admin operations, same-origin browser session with no
+          query-string token for observer SSE). *)
   | Loopback_dev_token
       (** [/api/v1/dashboard/dev-token]: the handler answers 404 unless the bind
           is loopback and strict auth is off. Past that it runs [with_public_read]

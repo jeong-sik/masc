@@ -3,16 +3,22 @@
 module Http = Http_server_eio
 
 let page_path = Account_page.console_path
-let assets_prefix = page_path ^ "/assets/"
+let dashboard_path = "/dashboard"
+let dashboard_deep_link_prefix = dashboard_path ^ "/"
+let dashboard_assets_prefix = dashboard_path ^ "/assets/"
+let console_redirect_target = dashboard_path ^ "#account"
+let legacy_assets_prefix = page_path ^ "/assets/"
 let base_sheet_path = page_path ^ "/base.css"
 
-(* Where the build of the console lies in the dashboard bundle
-   (dashboard/vite.accounts.config.ts writes it there). *)
-let bundle_page = "accounts/index.html"
-let bundle_assets = "accounts/assets/"
+(* Unified dashboard SPA root inside the dashboard bundle, plus legacy account
+   console assets kept readable for already-loaded tabs. *)
+let dashboard_bundle_page = "index.html"
+let dashboard_bundle_assets = "assets/"
+let legacy_bundle_assets = "accounts/assets/"
 
 let policy =
-  "default-src 'none'; script-src 'self'; style-src 'self'; style-src-attr 'none'; connect-src 'self'; "
+  "default-src 'none'; script-src 'self'; style-src 'self'; style-src-attr 'none'; img-src 'self' \
+   data:; font-src 'self'; connect-src 'self'; "
   ^ Account_page.formless_limits
 ;;
 
@@ -25,7 +31,7 @@ let referrer_policy = "referrer-policy", "same-origin"
 
 let unreadable_reason : Web_dashboard.asset_load_error -> string = function
   | Web_dashboard.Asset_not_manifested ->
-    Printf.sprintf "the dashboard bundle of this server holds no %s" bundle_page
+    Printf.sprintf "the dashboard bundle of this server holds no %s" dashboard_bundle_page
   | Web_dashboard.Asset_build_unavailable -> "this launch has no dashboard bundle"
   | Web_dashboard.Asset_binding_invalid (_ : Build_identity.dashboard_asset_invalid_reason) ->
     "the dashboard bundle bound to this launch is not valid"
@@ -35,12 +41,12 @@ let unreadable_reason : Web_dashboard.asset_load_error -> string = function
 ;;
 
 let unreadable () =
-  match Web_dashboard.load_dashboard_asset bundle_page with
+  match Web_dashboard.load_dashboard_asset dashboard_bundle_page with
   | Ok (_ : Web_dashboard.loaded_asset) -> None
   | Error error -> Some (unreadable_reason error)
 ;;
 
-(* The page that stands in for the console when the bundle cannot give it.
+(* The page that stands in for the dashboard when the bundle cannot give it.
    It names no file and no reason: anyone who reaches the listener reads it.
    The server writes the reason to its log once, when it starts
    ([Server_accounts.run]); a request to this open route writes none, so a
@@ -59,7 +65,7 @@ let unavailable ~nonce reqd =
       ]
     (Account_page.document
        ~nonce
-       ~title:"MASC 내 계정"
+       ~title:"MASC 대시보드"
        (String.concat
           "\n"
           [ "<main>"
@@ -75,14 +81,33 @@ let unavailable ~nonce reqd =
     reqd
 ;;
 
-let page (_ : Httpun.Request.t) reqd =
-  match Web_dashboard.load_dashboard_asset bundle_page with
+let dashboard_page (_ : Httpun.Request.t) reqd =
+  match Web_dashboard.load_dashboard_asset dashboard_bundle_page with
   | Ok { Web_dashboard.body; version = _ } ->
     Http.Response.html
       ~headers:[ no_store; referrer_policy; "content-security-policy", policy ]
       body
       reqd
   | Error (_ : Web_dashboard.asset_load_error) -> unavailable ~nonce:(Csp_nonce.draw ()) reqd
+;;
+
+let dashboard_deep_link request reqd =
+  let req_path = Http.Request.path request in
+  if Server_routes_http_runtime.is_dashboard_spa_deep_link req_path
+  then dashboard_page request reqd
+  else Http.Response.not_found reqd
+;;
+
+let console_redirect (_ : Httpun.Request.t) reqd =
+  let headers =
+    Httpun.Headers.of_list
+      [ "location", console_redirect_target
+      ; no_store
+      ; referrer_policy
+      ; "content-length", "0"
+      ]
+  in
+  Http_reqd.respond_with_string reqd (Httpun.Response.create ~headers `See_other) ""
 ;;
 
 (* A file the bundle cannot give now. The answer of the operator dashboard
@@ -94,14 +119,16 @@ let asset_unavailable reqd =
 (* The path of a request is the target as it came, not decoded
    ([Http.Request.path]), and the check takes it as a list of segments: a
    segment that is empty, "." or ".." is refused, so the name stays below the
-   assets of the console. A file of the build carries the policy of the page:
+   assets prefix. A file of the build carries the policy of the page:
    a browser that opens one as a document (an .html or .svg of a later build)
    runs on this origin under the same limits as the page. *)
-let asset request reqd =
+let serve_prefixed_asset ~route_prefix ~bundle_prefix request reqd =
   let path = Http.Request.path request in
-  let prefix = String.length assets_prefix in
-  let relative = bundle_assets ^ String.sub path prefix (String.length path - prefix) in
-  if Web_dashboard.is_public_asset_relative_path relative
+  let prefix_len = String.length route_prefix in
+  let filename = String.sub path prefix_len (String.length path - prefix_len) in
+  let relative = bundle_prefix ^ filename in
+  if Web_dashboard.is_public_asset_relative_path filename
+     && Web_dashboard.is_public_asset_relative_path relative
   then
     Server_routes_http_pages.serve_dashboard_asset
       ~headers:[ "content-security-policy", policy ]
@@ -110,6 +137,22 @@ let asset request reqd =
       request
       reqd
   else Http.Response.not_found reqd
+;;
+
+let dashboard_asset request reqd =
+  serve_prefixed_asset
+    ~route_prefix:dashboard_assets_prefix
+    ~bundle_prefix:dashboard_bundle_assets
+    request
+    reqd
+;;
+
+let legacy_console_asset request reqd =
+  serve_prefixed_asset
+    ~route_prefix:legacy_assets_prefix
+    ~bundle_prefix:legacy_bundle_assets
+    request
+    reqd
 ;;
 
 let base_sheet_etag = Http.Response.etag_of_body Account_page.base_sheet
@@ -128,7 +171,12 @@ let base_sheet request reqd =
 
 let add_routes router =
   router
-  |> Server_route.get Server_route.Always_public page_path page
+  |> Server_route.get Server_route.Always_public dashboard_path dashboard_page
+  |> Server_route.prefix_get Server_route.Always_public dashboard_assets_prefix dashboard_asset
+  |> Server_route.prefix_get Server_route.Always_public dashboard_deep_link_prefix dashboard_deep_link
+  |> Server_route.get Server_route.Always_public "/favicon.ico" Server_routes_http_pages.serve_favicon
+  |> Server_route.get Server_route.Always_public "/favicon.svg" Server_routes_http_pages.serve_favicon
+  |> Server_route.get Server_route.Always_public page_path console_redirect
   |> Server_route.get Server_route.Always_public base_sheet_path base_sheet
-  |> Server_route.prefix_get Server_route.Always_public assets_prefix asset
+  |> Server_route.prefix_get Server_route.Always_public legacy_assets_prefix legacy_console_asset
 ;;

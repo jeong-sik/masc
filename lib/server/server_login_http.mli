@@ -35,7 +35,10 @@ val max_request_bytes : int
       [DELETE /api/v1/auth/allowlist/<id>]
     - [POST] and [GET /api/v1/auth/invites], and
       [DELETE /api/v1/auth/invites/<id>]
-    - [GET /api/v1/auth/members]
+    - [GET /api/v1/auth/members], [POST /api/v1/auth/members/<id>/disable],
+      [POST /api/v1/auth/members/<id>/enable],
+      [POST /api/v1/auth/members/<id>/revoke-admin], and
+      [DELETE /api/v1/auth/members/<id>]
     - [POST] and [GET /api/v1/auth/pats], and [DELETE /api/v1/auth/pats/<id>]
 
     A form or a query is read as pairs in order, so a field that comes twice
@@ -118,4 +121,23 @@ val add_person_routes
   -> base_path:string
   -> Http_server_eio.Router.t
   -> Http_server_eio.Router.t
+
+(** Shared HTTP adapters reused by {!Server_account_dashboard_bridge} so every
+    multi-account route reads credentials, origin, CSRF, authority, and trusted
+    zone snapshots identically. *)
+
+val now_ms : Login_routes.t -> int
+
+val gate_request
+  :  request_authority:Server_request_authority.authority
+  -> Httpun.Request.t
+  -> Auth_gate.request
+
+val respond : Http_reqd.t -> Login_routes.answer -> unit
+
+val with_authority : Http_reqd.t -> (Server_request_authority.authority -> unit) -> unit
+
+val with_body : ?max_bytes:int -> Http_reqd.t -> (string -> unit) -> unit
+
+val on_trusted : Login_routes.t -> Http_reqd.t -> (Authz_zone.trusted -> unit) -> unit
 

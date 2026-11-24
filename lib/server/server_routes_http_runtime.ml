@@ -264,6 +264,17 @@ let listener_of_protocol = function
 
 let default_listener = listener_of_protocol Transport_metrics.H1
 
+let single_user_dev_token_enabled () =
+  Server_auth.http_auth_bind_is_loopback ()
+  && not (Server_auth.http_auth_strict_enabled ())
+;;
+
+let single_user_auth_methods_json () =
+  Server_health_public.auth_methods_to_json
+    (Server_health_public.single_user_auth_methods
+       ~dev_token:(single_user_dev_token_enabled ()))
+;;
+
 let make_health_probe_fields ?timing ?(listener = default_listener) ?full_health_url
     ?(health_detail = "probe") ~request_authority request =
   let uptime_secs = health_uptime_secs () in
@@ -281,6 +292,7 @@ let make_health_probe_fields ?timing ?(listener = default_listener) ?full_health
   [
       ("server", `String "masc");
       ("version", `String build.release_version);
+      (Server_health_public.auth_methods_field, single_user_auth_methods_json ());
       ("release_version", `String build.release_version);
       ("build", Build_identity.to_yojson build);
       ("health_detail", `String health_detail);
@@ -584,6 +596,7 @@ let make_health_fields ?(listener = default_listener) ?section_timings_ref
   let sections = [
     ("server", `String "masc");
     ("version", `String build.release_version);
+    (Server_health_public.auth_methods_field, single_user_auth_methods_json ());
     ("release_version", `String build.release_version);
     ("build", Build_identity.to_yojson build);
     ("health_detail", `String "full");
@@ -1927,7 +1940,12 @@ let health_handler request reqd =
     Http.Response.json ~extra_headers body reqd
   | Reads_nothing ->
     let ready, phase = public_readiness () in
-    Http.Response.json_value (Server_health_public.health_json ~ready ~phase) reqd
+    Http.Response.json_value
+      (Server_health_public.health_json
+         ~dev_token:(single_user_dev_token_enabled ())
+         ~ready
+         ~phase)
+      reqd
   | Refused error -> Server_auth.respond_auth_error request reqd error
 ;;
 

@@ -7,8 +7,10 @@
 
     A route of the table is [Always_public], or it authenticates the request
     in its own code against the authorization zone
-    ([Self_authenticated Browser_session], and [Self_authenticated Person_mcp]
-    for the MCP endpoint of a person). A route of any other kind reads
+    ([Self_authenticated Browser_session], [Self_authenticated Person_mcp]
+    for the MCP endpoint of a person, and
+    [Self_authenticated Multi_account_dashboard] for the multi-account
+    dashboard and cookie-SSE bridge). A route of any other kind reads
     the credentials of a single user, through a wrapper of [Server_auth] or in
     its own handler.
 

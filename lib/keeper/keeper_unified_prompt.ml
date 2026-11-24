@@ -201,25 +201,97 @@ let rejected_digest_input input =
     |> String_util.to_string
 ;;
 
+(* A turn is rendered as rows in the recorded order. Successful calls that
+   follow one another with the same attribution are one row: the attribution
+   is stated once, and each tool is named once per run with the number of
+   calls in it. No call disappears and the order of the calls is kept; a
+   refused, deferred or unrecorded call ends the run and keeps its own row.
+
+   One saved prompt stated the same attribution 216 times, once per
+   successful call, and those repeats were 31% of its characters. *)
+type own_recent_actions_ok_run =
+  { run_provenance : Keeper_own_recent_actions.provenance
+  ; run_tools_newest_first : (string * int) list
+  }
+
+(* The turn's rows so far: the finished rows newest first, and the run of
+   successful calls that is still open. *)
+type own_recent_actions_rows =
+  { finished_newest_first : string list
+  ; open_run : own_recent_actions_ok_run option
+  }
+
+let same_provenance
+    (a : Keeper_own_recent_actions.provenance)
+    (b : Keeper_own_recent_actions.provenance)
+  =
+  Option.equal String.equal a.Keeper_own_recent_actions.task_id b.Keeper_own_recent_actions.task_id
+  && Option.equal
+       String.equal
+       a.Keeper_own_recent_actions.trace_id
+       b.Keeper_own_recent_actions.trace_id
+;;
+
+let add_tool_to_run run tool =
+  match run.run_tools_newest_first with
+  | (last_tool, count) :: earlier when String.equal last_tool tool ->
+    { run with run_tools_newest_first = (last_tool, count + 1) :: earlier }
+  | tools -> { run with run_tools_newest_first = (tool, 1) :: tools }
+;;
+
 let format_own_recent_actions_turn ~current_task_id (turn : Keeper_own_recent_actions.turn) : string =
   let turn_id = string_of_int turn.turn_id in
-  turn.calls
-  |> List.map (fun (call : Keeper_own_recent_actions.call) ->
-    let provenance = Keeper_own_recent_actions.provenance_to_json
-      ~current_task_id call.provenance |> Yojson.Safe.to_string in
+  let provenance_json provenance =
+    Keeper_own_recent_actions.provenance_to_json ~current_task_id provenance
+    |> Yojson.Safe.to_string
+  in
+  let ok_run_row run =
+    let tools =
+      List.rev run.run_tools_newest_first
+      |> List.map (fun (tool, count) ->
+        if count = 1 then tool else Printf.sprintf "%s ×%d" tool count)
+      |> String.concat ", "
+    in
+    render_fragment
+      Prompt_names.keeper_world_own_recent_actions_turn_ok_row
+      [ "provenance", provenance_json run.run_provenance
+      ; "turn_id", turn_id
+      ; "tools", tools
+      ]
+  in
+  let close_run rows =
+    match rows.open_run with
+    | None -> rows.finished_newest_first
+    | Some run -> ok_run_row run :: rows.finished_newest_first
+  in
+  let add_own_row rows row =
+    { finished_newest_first = row :: close_run rows; open_run = None }
+  in
+  let add_call rows (call : Keeper_own_recent_actions.call) =
+    let provenance = provenance_json call.provenance in
     let open Keeper_own_recent_actions in
     match call.outcome, call.input with
     | Ok_call, (Arguments _ | Artifact_reference | Unstated_input) ->
-      render_fragment
-        Prompt_names.keeper_world_own_recent_actions_turn_ok_row
-        [ "provenance", provenance; "turn_id", turn_id; "tool", call.tool ]
+      (match rows.open_run with
+       | Some run when same_provenance run.run_provenance call.provenance ->
+         { rows with open_run = Some (add_tool_to_run run call.tool) }
+       | Some _ | None ->
+         { finished_newest_first = close_run rows
+         ; open_run =
+             Some
+               { run_provenance = call.provenance
+               ; run_tools_newest_first = [ call.tool, 1 ]
+               }
+         })
     (* The record does not say whether the input was arguments or a stored
        reference, so neither the input nor the refusal text that may print it
        back is shown; the row says that instead of guessing. *)
     | Failed_call (None | Some _), Unstated_input ->
-      render_fragment
-        Prompt_names.keeper_world_own_recent_actions_turn_rejected_unstated_input_row
-        [ "provenance", provenance; "turn_id", turn_id; "tool", call.tool ]
+      add_own_row
+        rows
+        (render_fragment
+           Prompt_names.keeper_world_own_recent_actions_turn_rejected_unstated_input_row
+           [ "provenance", provenance; "turn_id", turn_id; "tool", call.tool ])
     (* The refusal text is left off too, whichever stage refused. Before
        execution it prints the argument object back
        (Agent_core.Tool_input_validation.format_errors_inline), which would put
@@ -227,25 +299,44 @@ let format_own_recent_actions_turn ~current_task_id (turn : Keeper_own_recent_ac
        text about input that was not arguments, and the row already names
        that cause. *)
     | Failed_call (None | Some _), Artifact_reference ->
-      render_fragment
-        Prompt_names.keeper_world_own_recent_actions_turn_rejected_artifact_reference_row
-        [ "provenance", provenance; "turn_id", turn_id; "tool", call.tool ]
+      add_own_row
+        rows
+        (render_fragment
+           Prompt_names.keeper_world_own_recent_actions_turn_rejected_artifact_reference_row
+           [ "provenance", provenance; "turn_id", turn_id; "tool", call.tool ])
     | Failed_call None, Arguments input ->
-      render_fragment
-        Prompt_names.keeper_world_own_recent_actions_turn_rejected_row
-        [ "provenance", provenance; "turn_id", turn_id; "tool", call.tool; "input", input ]
+      add_own_row
+        rows
+        (render_fragment
+           Prompt_names.keeper_world_own_recent_actions_turn_rejected_row
+           [ "provenance", provenance; "turn_id", turn_id; "tool", call.tool; "input", input ])
     | Failed_call (Some detail), Arguments input ->
-      render_fragment
-        Prompt_names.keeper_world_own_recent_actions_turn_rejected_detail_row
-        [ "provenance", provenance; "turn_id", turn_id; "tool", call.tool; "input", input; "detail", detail ]
+      add_own_row
+        rows
+        (render_fragment
+           Prompt_names.keeper_world_own_recent_actions_turn_rejected_detail_row
+           [ "provenance", provenance
+           ; "turn_id", turn_id
+           ; "tool", call.tool
+           ; "input", input
+           ; "detail", detail
+           ])
     | Deferred_call, (Arguments _ | Artifact_reference | Unstated_input) ->
-      render_fragment
-        Prompt_names.keeper_world_own_recent_actions_turn_deferred_row
-        [ "provenance", provenance; "turn_id", turn_id; "tool", call.tool ]
+      add_own_row
+        rows
+        (render_fragment
+           Prompt_names.keeper_world_own_recent_actions_turn_deferred_row
+           [ "provenance", provenance; "turn_id", turn_id; "tool", call.tool ])
     | Unrecorded_call, (Arguments _ | Artifact_reference | Unstated_input) ->
-      render_fragment
-        Prompt_names.keeper_world_own_recent_actions_turn_unrecorded_row
-        [ "provenance", provenance; "turn_id", turn_id; "tool", call.tool ])
+      add_own_row
+        rows
+        (render_fragment
+           Prompt_names.keeper_world_own_recent_actions_turn_unrecorded_row
+           [ "provenance", provenance; "turn_id", turn_id; "tool", call.tool ])
+  in
+  List.fold_left add_call { finished_newest_first = []; open_run = None } turn.calls
+  |> close_run
+  |> List.rev
   |> String.concat "\n"
 ;;
 

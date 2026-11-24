@@ -248,9 +248,9 @@ let test_successful_call_arguments_are_not_replayed () =
   in
   let body = user_message observation in
   let section = own_recent_actions_section body in
-  check bool "the calls are still listed" true
+  check bool "the calls are still listed, counted in one row" true
     (Option.is_some
-       (Astring.String.find_sub ~sub:"[turn 360] keeper_tool_execute -> ok" section));
+       (Astring.String.find_sub ~sub:"[turn 360] keeper_tool_execute ×20 -> ok" section));
   check bool
     (Printf.sprintf "no argument body is replayed (section is %d bytes)"
        (String.length section))
@@ -313,6 +313,43 @@ let test_failure_digest_dedupes_and_counts () =
     (Option.is_some
        (Astring.String.find_sub
           ~sub:"docker_cat_failed: No such file or directory" section))
+;;
+
+(* Successful calls that follow one another with one attribution are one row,
+   so the attribution is not stated once per call. A refused call or another
+   attribution starts a new row, and no call is dropped: the counts in the rows
+   add up to the calls of the turn. *)
+let test_successful_calls_with_one_attribution_share_a_row () =
+  let module Actions = Masc.Keeper_own_recent_actions in
+  let ok tool position =
+    call ~source_position:position ~tool ~input:"{}" ~outcome:Actions.Ok_call
+  in
+  let other_task (c : Actions.call) =
+    { c with
+      Actions.provenance = { task_id = Some "other-task"; trace_id = Some "fixture-trace" }
+    }
+  in
+  let refused =
+    call ~source_position:3 ~tool:"tool_read_file" ~input:"{}"
+      ~outcome:(Actions.Failed_call None)
+  in
+  let observation =
+    { base_observation with
+      WO.own_recent_actions =
+        Ok [ action_turn 77
+               [ ok "a" 0; ok "a" 1; ok "b" 2; refused; ok "a" 4; other_task (ok "a" 5) ]
+           ]
+    }
+  in
+  let section = own_recent_actions_section (user_message observation) in
+  check bool "a run lists its tools in the order called, with counts" true
+    (contains ~needle:"[turn 77] a ×2, b -> ok" section);
+  check bool "a refused call ends the run and keeps its own row" true
+    (contains ~needle:"[turn 77] tool_read_file {} -> REJECTED" section);
+  check int "the run after it, and the run of another attribution, are separate rows" 2
+    (count_occurrences ~needle:"[turn 77] a -> ok" section);
+  check int "each row states its attribution once: four rows for six calls" 4
+    (count_occurrences ~needle:"[turn 77] " section)
 ;;
 
 let test_action_provenance_survives_task_switch () =
@@ -1882,6 +1919,8 @@ let () =
             test_failed_payloads_remain_retrievable;
           test_case "repeated refusals collapse into one digest row" `Quick
             test_failure_digest_dedupes_and_counts;
+          test_case "successful calls with one attribution share a row, none is dropped" `Quick
+            test_successful_calls_with_one_attribution_share_a_row;
           test_case "unknown occurrences and interleaved failures retain source order" `Quick
             test_action_occurrences_keep_source_order;
           test_case "task switch preserves action provenance and separate digests" `Quick

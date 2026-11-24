@@ -72,7 +72,7 @@ instructions = """
 
 | 항목 | 쓰는 곳 | 무엇을 정하나 |
 |---|---:|---|
-| `activation_mode` | — | 수동 시작(`manual`), 요청 시 실행(`on_demand`), 주기 자율 실행(`autonomous`) |
+| `activation_mode` | — | `manual`: 운영자가 켜기 전에는 꺼져 있습니다. `on_demand`: 서버와 함께 켜지고 메시지·멘션·board 글·예약 같은 이벤트가 올 때만 일합니다. `autonomous`: 서버와 함께 켜지고 스스로도 일합니다 |
 | `instructions` | 11/11 | Keeper 의 프롬프트 전부. 비면 거부됩니다 |
 | `sandbox_profile` | 11/11 | `docker`, `microvm`, `remote_ssh` 중 하나. Keeper 는 그 안에서 돌거나 아예 돌지 않습니다 |
 | `group` | — | Pulse·Keepers·Runtime 화면에서 묶어 보여주는 선택적 배포 중립 라벨 (기본값 `"ungrouped"`) |

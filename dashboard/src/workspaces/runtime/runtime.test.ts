@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  OBSERVER_SSE_INSTANCE_HEADER,
   activeViewStreamKey,
   authSession,
   bumpSessionEpoch,
@@ -12,6 +13,7 @@ import {
   resetTimeWindowForTests,
   resourceCache,
   selectWorkspace,
+  setObserverSseInstanceId,
   setTimeWindow,
 } from '../../core'
 import { RuntimeWorkspace, type WorkspaceInspectPayload } from './index'
@@ -238,12 +240,13 @@ describe('workspaces/runtime', () => {
   })
 
   it('enforces 2+1 SSE discipline on 4-panel Efficiency: live SSE ONLY on 24h, snapshot on 7d/30d, clamps keeper-costs?window=1440', async () => {
-    const sseCalls: string[] = []
+    const sseCalls: { url: string; instanceHeader: string | undefined }[] = []
     const keeperCostUrls: string[] = []
-    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
       if (url.includes('/stream')) {
-        sseCalls.push(url)
+        const hdrs = (init?.headers ?? {}) as Record<string, string>
+        sseCalls.push({ url, instanceHeader: hdrs[OBSERVER_SSE_INSTANCE_HEADER] })
         return pendingSseResponse()
       }
       if (url.startsWith('/api/v1/dashboard/keeper-costs')) {
@@ -333,11 +336,20 @@ describe('workspaces/runtime', () => {
       html`<${RuntimeWorkspace} subroute="efficiency" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
       container,
     )
+    await flushUi(30)
+
+    // Before observer x-masc-sse-instance-id arrives: zero premature 400 stream fetches
+    expect(sseCalls).toHaveLength(0)
+
+    // Once observer SSE delivers x-masc-sse-instance-id: opens strictly 1 view SSE with header
+    setObserverSseInstanceId('inst-live-rt.epoch-1')
     await flushUi(40)
 
-    // On 24h: strictly 1 view SSE ('runtime-efficiency') on models/metrics/stream
     expect(activeViewStreamKey.value).toBe('runtime-efficiency')
-    expect(sseCalls).toEqual(['/api/v1/models/metrics/stream?window=1440&bucket_min=60'])
+    expect(sseCalls).toEqual([
+      { url: '/api/v1/models/metrics/stream?window=1440&bucket_min=60', instanceHeader: 'inst-live-rt.epoch-1' },
+    ])
+    expect(container.querySelector('.uplot-grid-2x2')).not.toBeNull()
     expect(container.textContent).toContain('code-reviewer-sister')
     expect(container.textContent).toContain('미보고')
 
@@ -469,9 +481,15 @@ describe('workspaces/runtime', () => {
 
   it('launches Fusion with closed topology union and acquires single runtime-tools SSE on Tools tab', async () => {
     const postCalls: { url: string; body: unknown }[] = []
+    const toolStreamCalls: { url: string; instanceHeader: string | undefined }[] = []
+    setObserverSseInstanceId('inst-tools.42')
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
-      if (url.includes('/tool-metrics/series/stream')) return pendingSseResponse()
+      if (url.includes('/tool-metrics/series/stream')) {
+        const hdrs = (init?.headers ?? {}) as Record<string, string>
+        toolStreamCalls.push({ url, instanceHeader: hdrs[OBSERVER_SSE_INSTANCE_HEADER] })
+        return pendingSseResponse()
+      }
       if (url.startsWith('/api/v1/dashboard/fusion-runs')) {
         return jsonResponse({ generated_at: '2026-11-24T00:00:00Z', count: 0, runs: [] })
       }
@@ -537,6 +555,12 @@ describe('workspaces/runtime', () => {
     )
     await flushUi(35)
     expect(activeViewStreamKey.value).toBe('runtime-tools')
+    expect(toolStreamCalls).toEqual([
+      {
+        url: '/api/v1/tool-metrics/series/stream?since_hours=24&bucket=hour&utc_offset_min=0',
+        instanceHeader: 'inst-tools.42',
+      },
+    ])
     expect(container.textContent).toContain('masc_board_post')
   })
 
@@ -768,14 +792,17 @@ describe('workspaces/runtime', () => {
       },
     }])
 
-    // Verify openViewSseStream honors resolveWorkspaceUrl and drops frames after bumpSessionEpoch
+    // Verify openViewSseStream honors resolveWorkspaceUrl, sends x-masc-sse-instance-id, and drops frames after bumpSessionEpoch
     registerWorkspaceTargets([{ id: 'alpha', label: 'Alpha', baseUrl: '/ws/alpha' }])
     selectWorkspace('alpha')
+    setObserverSseInstanceId('inst-alpha.7')
 
     let fetchedSseUrl = ''
+    let fetchedInstanceHeader: string | undefined
     let streamController: ReadableStreamDefaultController<Uint8Array> | null = null
-    const mockSseFetch = vi.fn(async (input: RequestInfo | URL) => {
+    const mockSseFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       fetchedSseUrl = String(input)
+      fetchedInstanceHeader = ((init?.headers ?? {}) as Record<string, string>)[OBSERVER_SSE_INSTANCE_HEADER]
       const stream = new ReadableStream<Uint8Array>({
         start(ctrl) { streamController = ctrl },
       })
@@ -787,6 +814,7 @@ describe('workspaces/runtime', () => {
     openViewSseStream('/api/v1/models/metrics/stream?window=1440&bucket_min=60', ac.signal, (f) => received.push(f), undefined, mockSseFetch)
     await flushUi(20)
     expect(fetchedSseUrl).toBe('/ws/alpha/api/v1/models/metrics/stream?window=1440&bucket_min=60')
+    expect(fetchedInstanceHeader).toBe('inst-alpha.7')
 
     // Bump epoch BEFORE chunk arrives -> frame MUST be dropped!
     bumpSessionEpoch()

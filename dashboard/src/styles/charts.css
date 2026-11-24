@@ -135,3 +135,17 @@
   color: var(--fg-1);
   font-weight: 500;
 }
+
+/* Balanced 2x2 synchronized chart grid (>=1024px) collapsing to 1-col below */
+.uplot-grid-2x2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+@media (max-width: 1023px) {
+  .uplot-grid-2x2 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

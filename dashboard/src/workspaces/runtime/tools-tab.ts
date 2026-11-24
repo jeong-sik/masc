@@ -18,6 +18,7 @@ import {
   acquireViewStream,
   apiGet,
   apiMutate,
+  observerSseInstanceId,
   resourceCache,
   timeWindow,
 } from '../../core'
@@ -104,6 +105,7 @@ function normalizeToolsPayload(raw: unknown): readonly DashboardToolRow[] {
 
 export function ToolsTab(_props: WorkspaceViewProps) {
   const win = timeWindow.value
+  const sseInstanceId = observerSseInstanceId.value
   const [section, setSection] = useState<ToolsSubSection>('catalog')
   const [search, setSearch] = useState('')
   const [liveSeries, setLiveSeries] = useState<ToolMetricsSeriesPayload | null>(null)
@@ -135,7 +137,7 @@ export function ToolsTab(_props: WorkspaceViewProps) {
   const connectorsObs = resourceCache.observe<{ readonly connectors?: readonly GateConnectorRow[] }>('runtime:gate-connectors').value
   const clientsObs = resourceCache.observe<{ readonly clients?: readonly McpClientRow[] }>('runtime:mcp-clients').value
 
-  // Live SSE for 24h tool series (strict 2+1 SSE via acquireViewStream)
+  // Snapshot load for tool series across 24h | 7d | 30d
   useEffect(() => {
     setLiveSeries(null)
     void resourceCache.fetch<ToolMetricsSeriesPayload>(
@@ -146,8 +148,11 @@ export function ToolsTab(_props: WorkspaceViewProps) {
       ),
       { ttlMs: 15_000, topics: ['tool_metrics'], reason: 'mount' },
     )
+  }, [win])
 
-    if (win !== '24h') {
+  // Live SSE for 24h tool series once observer x-masc-sse-instance-id is populated (strict 2+1 SSE)
+  useEffect(() => {
+    if (win !== '24h' || !sseInstanceId) {
       setStreamLive(false)
       return
     }
@@ -169,7 +174,7 @@ export function ToolsTab(_props: WorkspaceViewProps) {
     return () => {
       handle.release()
     }
-  }, [win])
+  }, [win, sseInstanceId])
 
   // Lazy load active sub-section
   useEffect(() => {

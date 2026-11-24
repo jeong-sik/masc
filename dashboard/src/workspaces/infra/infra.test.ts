@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  OBSERVER_SSE_INSTANCE_HEADER,
   activeViewStreamKey,
   registerWorkspaceTargets,
   releaseAllViewStreams,
@@ -9,6 +10,7 @@ import {
   resetObserverStateForTests,
   resourceCache,
   selectWorkspace,
+  setObserverSseInstanceId,
 } from '../../core'
 import { InfraWorkspace, type WorkspaceInspectPayload } from './index'
 
@@ -215,12 +217,14 @@ describe('workspaces/infra', () => {
 
     registerWorkspaceTargets([{ id: 'ws-ops', label: 'Ops', baseUrl: '/ws/ops' }])
     selectWorkspace('ws-ops')
+    setObserverSseInstanceId('inst-live-infra.9')
 
-    const seenStreamUrls: string[] = []
-    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+    const seenStreamCalls: { url: string; instanceHeader: string | undefined }[] = []
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
       if (url.includes('/api/v1/dashboard/logs/stream')) {
-        seenStreamUrls.push(url)
+        const hdrs = (init?.headers ?? {}) as Record<string, string>
+        seenStreamCalls.push({ url, instanceHeader: hdrs[OBSERVER_SSE_INSTANCE_HEADER] })
         return pendingSseResponse()
       }
       if (url.includes('/api/v1/dashboard/logs')) {
@@ -237,7 +241,9 @@ describe('workspaces/infra', () => {
     await flushUi(50)
 
     expect(activeViewStreamKey.value).toBe('infra-logs')
-    expect(seenStreamUrls).toEqual(['/ws/ops/api/v1/dashboard/logs/stream?limit=200'])
+    expect(seenStreamCalls).toEqual([
+      { url: '/ws/ops/api/v1/dashboard/logs/stream?limit=200', instanceHeader: 'inst-live-infra.9' },
+    ])
     // VirtualList MUST keep DOM strictly under 1,000 nodes even for 300+ log rows!
     expect(container.querySelectorAll('*').length).toBeLessThan(1000)
     const renderedLogRows = container.querySelectorAll('.v2-logs-row').length

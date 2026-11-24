@@ -1,7 +1,9 @@
 import type { ComponentChildren } from 'preact'
 import {
+  OBSERVER_SSE_INSTANCE_HEADER,
   authSession,
   currentSessionEpoch,
+  getObserverSseInstanceId,
   getSingleUserToken,
   isEpochCurrent,
   observedAbsent,
@@ -799,8 +801,16 @@ export function openViewSseStream(
   fetchImpl: typeof fetch = globalThis.fetch,
 ): void {
   const startEpoch = currentSessionEpoch()
+  const sseInstanceId = getObserverSseInstanceId()
+  if (!sseInstanceId) {
+    onStatus?.('closed', 'observer_instance_pending')
+    return
+  }
   const resolvedUrl = resolveWorkspaceUrl(url)
-  const headers: Record<string, string> = { Accept: 'text/event-stream' }
+  const headers: Record<string, string> = {
+    Accept: 'text/event-stream',
+    [OBSERVER_SSE_INSTANCE_HEADER]: sseInstanceId,
+  }
   const session = authSession.peek()
   if (session.kind !== 'multi_account_signed_in') {
     const token = getSingleUserToken()

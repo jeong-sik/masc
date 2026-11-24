@@ -12,12 +12,14 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import {
+  OBSERVER_SSE_INSTANCE_HEADER,
   acquireViewStream,
   apiGet,
   authSession,
   currentSessionEpoch,
   getSingleUserToken,
   isEpochCurrent,
+  observerSseInstanceId,
   parseSseBlock,
   resolveWorkspaceUrl,
   subscribeObserverFrames,
@@ -105,6 +107,7 @@ export function LogsTab(props: WorkspaceViewProps) {
   const [selectedEntry, setSelectedEntry] = useState<TimelineEntry | null>(null)
   const [streamStatus, setStreamStatus] = useState<'connecting' | 'live' | 'error'>('connecting')
   const pausedByVisibility = viewStreamPaused.value
+  const sseInstanceId = observerSseInstanceId.value
 
   useEffect(() => {
     // Initial snapshot load so users immediately see logs before SSE frame arrives
@@ -117,12 +120,52 @@ export function LogsTab(props: WorkspaceViewProps) {
       }
     })
 
-    // Single view-scoped SSE via ViewStreamSlot (auto-pauses on document.hidden!)
-    // Honors resolveWorkspaceUrl() and monotonic sessionEpoch fence.
+    // Interleave Observer SSE EVT entries chronologically
+    const unsubObserver = subscribeObserverFrames((frame) => {
+      const nowSec = Date.now() / 1000
+      const nowIso = new Date(nowSec * 1000).toISOString()
+      const dataObj = frame.data && typeof frame.data === 'object' && !Array.isArray(frame.data)
+        ? (frame.data as Record<string, unknown>)
+        : { raw: frame.raw }
+      const evtEntry: TimelineEntry = {
+        id: `evt:${frame.id ?? nowSec}:${frame.event}:${Math.random().toString(36).slice(2, 7)}`,
+        kind: 'EVT',
+        seq: null,
+        tsUnix: nowSec,
+        tsDisplay: nowIso.replace('T', ' ').slice(11, 19),
+        level: 'INFO',
+        source: 'observer_sse',
+        module: frame.event,
+        keeper: typeof dataObj.keeper === 'string' ? dataObj.keeper : null,
+        message: typeof dataObj.summary === 'string'
+          ? dataObj.summary
+          : typeof dataObj.type === 'string'
+            ? dataObj.type
+            : frame.event,
+        details: dataObj,
+      }
+      setEntries((prev) => mergeTimeline(prev, [evtEntry], false))
+    })
+
+    return () => {
+      unsubObserver()
+    }
+  }, [])
+
+  // Single view-scoped SSE via ViewStreamSlot (auto-pauses on document.hidden!)
+  // Waits for observer x-masc-sse-instance-id so zero premature HTTP 400s fire.
+  useEffect(() => {
+    if (!sseInstanceId) {
+      setStreamStatus('connecting')
+      return
+    }
     const handle = acquireViewStream('infra-logs', (signal) => {
       const startEpoch = currentSessionEpoch()
       const streamUrl = resolveWorkspaceUrl('/api/v1/dashboard/logs/stream?limit=200')
-      const headers: Record<string, string> = { Accept: 'text/event-stream' }
+      const headers: Record<string, string> = {
+        Accept: 'text/event-stream',
+        [OBSERVER_SSE_INSTANCE_HEADER]: sseInstanceId,
+      }
       const session = authSession.peek()
       if (session.kind !== 'multi_account_signed_in') {
         const token = getSingleUserToken()
@@ -172,38 +215,10 @@ export function LogsTab(props: WorkspaceViewProps) {
       })()
     })
 
-    // Interleave Observer SSE EVT entries chronologically
-    const unsubObserver = subscribeObserverFrames((frame) => {
-      const nowSec = Date.now() / 1000
-      const nowIso = new Date(nowSec * 1000).toISOString()
-      const dataObj = frame.data && typeof frame.data === 'object' && !Array.isArray(frame.data)
-        ? (frame.data as Record<string, unknown>)
-        : { raw: frame.raw }
-      const evtEntry: TimelineEntry = {
-        id: `evt:${frame.id ?? nowSec}:${frame.event}:${Math.random().toString(36).slice(2, 7)}`,
-        kind: 'EVT',
-        seq: null,
-        tsUnix: nowSec,
-        tsDisplay: nowIso.replace('T', ' ').slice(11, 19),
-        level: 'INFO',
-        source: 'observer_sse',
-        module: frame.event,
-        keeper: typeof dataObj.keeper === 'string' ? dataObj.keeper : null,
-        message: typeof dataObj.summary === 'string'
-          ? dataObj.summary
-          : typeof dataObj.type === 'string'
-            ? dataObj.type
-            : frame.event,
-        details: dataObj,
-      }
-      setEntries((prev) => mergeTimeline(prev, [evtEntry], false))
-    })
-
     return () => {
       handle.release()
-      unsubObserver()
     }
-  }, [])
+  }, [sseInstanceId])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()

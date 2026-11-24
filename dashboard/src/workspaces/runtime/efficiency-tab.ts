@@ -23,10 +23,9 @@ import {
   observedAbsent,
   observedUnreported,
   observedValue,
+  observerSseInstanceId,
   resourceCache,
-  setTimeWindow,
   subscribeObserverFrames,
-  TIME_WINDOWS,
   timeWindow,
   timeWindowProviderDays,
   type Observed,
@@ -128,11 +127,14 @@ interface JoinedKeeperSpendRow {
 
 export function EfficiencyTab(props: WorkspaceViewProps) {
   const win = timeWindow.value
+  const sseInstanceId = observerSseInstanceId.value
   const params = windowToModelsParams(win)
   const providerDays = timeWindowProviderDays(win)
 
   const [liveMetrics, setLiveMetrics] = useState<ModelsMetricsPayload | null>(null)
-  const [streamStatus, setStreamStatus] = useState<'live' | 'snapshot' | 'error'>(win === '24h' ? 'live' : 'snapshot')
+  const [streamStatus, setStreamStatus] = useState<'live' | 'snapshot' | 'error'>(
+    win === '24h' && sseInstanceId ? 'live' : 'snapshot',
+  )
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const modelsKey = `runtime:models-metrics:${win}`
@@ -206,9 +208,9 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
   }, [win])
 
   // Strict 2+1 SSE invariant (#26 SRE #3):
-  // Acquire single view-scoped SSE ONLY on '24h'; snapshot-only on '7d' | '30d'.
+  // Acquire single view-scoped SSE ONLY on '24h' once observer x-masc-sse-instance-id is populated.
   useEffect(() => {
-    if (win !== '24h') {
+    if (win !== '24h' || !sseInstanceId) {
       setStreamStatus('snapshot')
       return
     }
@@ -231,7 +233,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     return () => {
       handle.release()
     }
-  }, [win])
+  }, [win, sseInstanceId])
 
   // Observer SSE debounced invalidation for secondary bands (Panel 3 & Panel 4) — ZERO 2nd view SSE!
   useEffect(() => {
@@ -485,33 +487,6 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
           </p>
         </div>
         <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
-          <span
-            class="mono"
-            data-testid="efficiency-stream-badge"
-            style=${{
-              padding: 'var(--sp-0) var(--sp-2)',
-              borderRadius: 'var(--radius-pill)',
-              fontSize: 'var(--fs-11)',
-              border: `1px solid ${streamStatus === 'live' ? 'var(--ok-border)' : 'var(--line-2)'}`,
-              background: streamStatus === 'live' ? 'var(--ok-soft)' : 'var(--bg-2)',
-              color: streamStatus === 'live' ? 'var(--ok-fg)' : 'var(--fg-2)',
-            }}
-          >
-            ${streamStatus === 'live' ? '● LIVE SSE (24h)' : `○ SNAPSHOT (${win})`}
-          </span>
-          <div class="ap-viewseg" role="group" aria-label="시간 창 선택">
-            ${TIME_WINDOWS.map((w) => html`
-              <button
-                key=${w}
-                type="button"
-                class=${`ap-viewbtn ${win === w ? 'on' : ''}`}
-                aria-pressed=${win === w}
-                onClick=${() => setTimeWindow(w)}
-              >
-                ${w}
-              </button>
-            `)}
-          </div>
           <button type="button" class="btn-ghost" onClick=${() => loadSnapshots('manual')}>새로고침</button>
         </div>
       </header>
@@ -537,9 +512,9 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
         </div>
       </section>
 
-      <!-- 4-Panel Synchronized uPlot Suite -->
+      <!-- 4-Panel Synchronized uPlot Suite (balanced 2x2 on >=1024px) -->
       <section
-        style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 'var(--sp-3)', minWidth: 0 }}
+        class="uplot-grid-2x2"
         aria-label="4패널 동기화 텔레메트리 차트"
       >
         <!-- Panel 1: Prompt Cache Hit % & Savings -->
@@ -562,8 +537,12 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
         <${UPlotChart}
           id="eff-panel-2-velocity"
           title="2. Token Velocity vs Spend"
-          subtitle=${html`<span class="mono" style=${{ fontSize: 'var(--fs-11)', color: streamStatus === 'live' ? 'var(--ok-fg)' : 'var(--fg-3)' }}>
-            ${win === '24h' ? 'LIVE SSE (models/metrics/stream)' : `스냅샷 (${win})`}
+          subtitle=${html`<span
+            class="mono"
+            data-testid="efficiency-stream-badge"
+            style=${{ fontSize: 'var(--fs-11)', color: win === '24h' && streamStatus === 'live' ? 'var(--ok-fg)' : 'var(--fg-3)' }}
+          >
+            ${win === '24h' && streamStatus === 'live' ? '● LIVE SSE (models/metrics/stream)' : `○ SNAPSHOT (${win})`}
           </span>`}
           data=${velocitySpendChartData}
           series=${VELOCITY_SPEND_SERIES}

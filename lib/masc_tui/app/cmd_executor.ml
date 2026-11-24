@@ -2558,7 +2558,7 @@ let run_cancellable_systhread ~closed fn =
           result_ref := Some res));
   !result_ref
 
-let open_url_sync ?timeout_s ?cancelled url =
+let open_url_sync ?timeout_s ?(cancelled = fun () -> false) url =
   let opener =
     match Executable_path.absolute_on_path "open" with
     | Some bin -> Some bin
@@ -2573,14 +2573,77 @@ let open_url_sync ?timeout_s ?cancelled url =
             ~finally:(fun () ->
               try Unix.close devnull with Unix.Unix_error _ -> ())
             (fun () ->
-              match
-                Unix.create_process bin [| bin; url |] devnull devnull devnull
-              with
-              | pid -> wait_reap_pid ?timeout_s ?cancelled pid
-              | exception Unix.Unix_error (err, fn, _) ->
-                  Error (Printf.sprintf "%s: %s" fn (Unix.error_message err)))
+              if cancelled () then Error "url opener cancelled"
+              else
+                match
+                  Unix.create_process bin [| bin; url |] devnull devnull devnull
+                with
+                | pid -> wait_reap_pid ?timeout_s ~cancelled pid
+                | exception Unix.Unix_error (err, fn, _) ->
+                    Error (Printf.sprintf "%s: %s" fn (Unix.error_message err)))
       | exception Unix.Unix_error (err, fn, _) ->
           Error (Printf.sprintf "%s: %s" fn (Unix.error_message err)))
+
+type dos_screen_file = Empty | Live of string | Released
+
+let remove_dos_screen_file path =
+  try Sys.remove path with Sys_error _ -> ()
+
+let release_dos_screen_file file =
+  match Atomic.exchange file Released with
+  | Live path -> remove_dos_screen_file path
+  | Empty | Released -> ()
+
+let dos_screen_cancelled = "DOS screen opening cancelled"
+
+let open_dos_screen_file ~file ~cancelled png =
+  let cancelled () =
+    cancelled ()
+    || match Atomic.get file with Released -> true | Empty | Live _ -> false
+  in
+  if cancelled () then Error dos_screen_cancelled
+  else
+    try
+      let path, channel =
+        Filename.open_temp_file ~mode:[ Open_binary ] "masc-dos-" ".png"
+      in
+      let written =
+        Fun.protect ~finally:(fun () -> close_out_noerr channel) (fun () ->
+            if Atomic.compare_and_set file Empty (Live path) then begin
+              output_string channel png;
+              flush channel;
+              Ok ()
+            end else begin
+              remove_dos_screen_file path;
+              Error dos_screen_cancelled
+            end)
+      in
+      Result.bind written (fun () -> open_url_sync ~cancelled path)
+    with Sys_error detail -> Error detail
+
+let open_dos_screen ~sw ~closed ~is_current png =
+  let file = Atomic.make Empty in
+  let release () = release_dos_screen_file file in
+  (* A cancelled fiber may never receive the worker's result. *)
+  let hook = Eio.Switch.on_release_cancellable sw release in
+  let keep_file = ref false in
+  Fun.protect
+    ~finally:(fun () ->
+      if not !keep_file then begin
+        Eio.Switch.remove_hook hook;
+        release ()
+      end)
+    (fun () ->
+      match
+        run_cancellable_systhread ~closed (fun ~cancelled ->
+            let cancelled () = cancelled () || not (is_current ()) in
+            open_dos_screen_file ~file ~cancelled png)
+      with
+      | Some (Ok ()) when is_current () ->
+          keep_file := true;
+          Ok ()
+      | Some (Error detail) -> Error detail
+      | Some (Ok ()) | None -> Error dos_screen_cancelled)
 
 let read_file_or_empty path =
   match In_channel.open_bin path with
@@ -3410,6 +3473,47 @@ let rec execute t = function
                                  Error (Msg.Transport (Health.Other_io detail));
                              };
                        })))
+  | Cmd.Open_dos_screen { epoch } ->
+      let is_current () =
+        not (Atomic.get t.closed)
+        && Epoch.equal (Atomic.get t.stream_epoch) epoch
+      in
+      let endpoint = current_endpoint t in
+      fork_safe t (fun () ->
+          if is_current () then begin
+            let response =
+              Http_client.get_raw ~io:t.io ~clock:t.clock endpoint
+                ~path:"/api/v1/play/screen.png"
+            in
+            if is_current () then begin
+              let result =
+                match response with
+                | Error err -> Error (msg_error_of_http err)
+                | Ok png
+                  when not (String.starts_with ~prefix:"\137PNG\r\n\026\n" png) ->
+                    Error (Msg.Decode_error "DOS screen response is not PNG")
+                | Ok png ->
+                    open_dos_screen ~sw:t.sw ~closed:t.closed ~is_current png
+                    |> Result.map_error (fun detail ->
+                           Msg.Transport (Health.Other_io detail))
+              in
+              if is_current () then
+                Ui_bus.publish_stream t.bus
+                  (Msg.Http_reply
+                     {
+                       epoch;
+                       reply =
+                         Msg.Reply_action_ack
+                           {
+                             label =
+                               Say.make ~ko:"DOS 화면 열기" ~en:"Open DOS screen";
+                             ack_scope = Msg.Ack_toast_only;
+                             for_modal = None;
+                             result;
+                           };
+                     })
+            end
+          end)
   | Cmd.Open_external_url url ->
       if is_safe_external_url url then
         fork_safe t (fun () ->

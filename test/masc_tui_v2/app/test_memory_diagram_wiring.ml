@@ -305,6 +305,7 @@ let find_render_cmd cmds =
       | Cmd.Cancel_memory_diagram
       | Cmd.Fetch_artifact_and_copy _
       | Cmd.Export_artifact _
+      | Cmd.Open_dos_screen _
       | Cmd.Open_external_url _
       | Cmd.Open_editor_escape_hatch _
       | Cmd.Start_local_server
@@ -329,6 +330,7 @@ let has_cancel_diagram_cmd cmds =
       | Cmd.Render_memory_diagram _
       | Cmd.Fetch_artifact_and_copy _
       | Cmd.Export_artifact _
+      | Cmd.Open_dos_screen _
       | Cmd.Open_external_url _
       | Cmd.Open_editor_escape_hatch _
       | Cmd.Start_local_server
@@ -513,6 +515,7 @@ let test_store_diagram_keybindings_and_scope_safety () =
         | Cmd.Cancel_memory_diagram
         | Cmd.Fetch_artifact_and_copy _
         | Cmd.Export_artifact _
+        | Cmd.Open_dos_screen _
         | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _
         | Cmd.Start_local_server
@@ -1139,6 +1142,7 @@ let test_visibility_enter_refresh_and_resize () =
         | Cmd.Cancel_memory_diagram
         | Cmd.Fetch_artifact_and_copy _
         | Cmd.Export_artifact _
+        | Cmd.Open_dos_screen _
         | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _
         | Cmd.Start_local_server

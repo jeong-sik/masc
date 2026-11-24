@@ -159,6 +159,7 @@ val refresh_open_memory_diagram :
 
 type enter_hint =
   | Enter_hint_hidden  (** Enter does nothing here. *)
+  | Enter_hint_dos_screen
   | Enter_hint_dive  (** Enter dives, toggles, or fetches ([dive_selected]). *)
   | Enter_hint_edit_field  (** Keeper config: Enter edits the selected field. *)
   | Enter_hint_confirm_field

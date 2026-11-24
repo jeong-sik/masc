@@ -374,6 +374,7 @@ type t =
       content_opt : string option;
       open_after : bool;
     }
+  | Open_dos_screen of { epoch : Epoch.t }
   | Open_external_url of string
   | Open_editor_escape_hatch of editor_target
   | Start_local_server

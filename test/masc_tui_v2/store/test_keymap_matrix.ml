@@ -4368,7 +4368,8 @@ let test_pillar2_scroll_bounds_all_surfaces () =
             {
               runtime_presence = Wire_runtime.Addon_live;
               instance_id = Printf.sprintf "inst-ab-%02d" i;
-              addon_id = Printf.sprintf "addon-ab-%02d" i;
+              addon_id =
+                (if i = 0 then "dos-machine" else Printf.sprintf "addon-ab-%02d" i);
               title = Printf.sprintf "Addon Title %02d" i;
               revision = "r1";
               phase = Wire_runtime.Addon_observing;
@@ -4472,7 +4473,51 @@ let test_pillar2_scroll_bounds_all_surfaces () =
              ~client_id:"ego-client-00" many_tabs;
     }
   in
+  let opens_dos_screen ~epoch cmds =
+    has_cmd
+      (function
+        | Cmd.Open_dos_screen { epoch = requested } -> Epoch.equal epoch requested
+        | _ -> false)
+      cmds
+  in
+  let enter_opens_dos_screen (model : Model.t) =
+    let _, cmds = step model (mk_key Keymap.Input.Enter) in
+    opens_dos_screen ~epoch:model.epoch cmds
+  in
+  Alcotest.(check bool) "Enter opens the selected live DOS screen" true
+    (enter_opens_dos_screen m_ab_base);
+  let _, unfocused_cmds =
+    Update_nav.dive_selected
+      { m_ab_base with nav = { m_ab_base.nav with filter_focused = true } }
+  in
+  Alcotest.(check bool) "Enter's action requires focus on the Addons pane" false
+    (opens_dos_screen ~epoch:m_ab_base.epoch unfocused_cmds);
+  let retained_addons =
+    {
+      many_addons with
+      instances =
+        List.map
+          (fun (addon : Wire_runtime.addon_instance) ->
+            if String.equal addon.addon_id "dos-machine" then
+              { addon with runtime_presence = Wire_runtime.Addon_retained }
+            else addon)
+          many_addons.instances;
+    }
+  in
+  Alcotest.(check bool) "Enter leaves a retained DOS screen closed" false
+    (enter_opens_dos_screen
+       {
+         m_ab_base with
+         runtime =
+           Runtime_store.apply_lane_addons ~observed_at:t0 retained_addons
+             m_ab_base.runtime;
+       });
+  let m_ab_catalog, _ = step m_ab_base (char_key "p") in
+  Alcotest.(check bool) "Enter leaves the DOS screen closed in the package catalog" false
+    (enter_opens_dos_screen m_ab_catalog);
   let m_ab_l_end, _ = step m_ab_base (mk_key Keymap.Input.End) in
+  Alcotest.(check bool) "Enter leaves other add-ons alone" false
+    (enter_opens_dos_screen m_ab_l_end);
   Alcotest.(check int) "AddonsBrowser Left End selects last addon (29)" 29
     m_ab_l_end.runtime.addon_selected_index;
   Alcotest.(check bool) "AddonsBrowser Left End scrolls addon_scroll_offset > 0"
@@ -4483,6 +4528,8 @@ let test_pillar2_scroll_bounds_all_surfaces () =
   let m_ab_cl =
     { m_ab_base with nav = { m_ab_base.nav with pane_index = 1 } }
   in
+  Alcotest.(check bool) "Enter leaves the DOS screen closed in the browser pane" false
+    (enter_opens_dos_screen m_ab_cl);
   let m_ab_cl_end, _ = step m_ab_cl (mk_key Keymap.Input.End) in
   Alcotest.(check int) "AddonsBrowser Right Clients End selects last client (29)"
     29 m_ab_cl_end.runtime.browser_client_selected_index;
@@ -5528,6 +5575,7 @@ let enter_hint_name = function
   | Update_nav.Enter_hint_dive -> "dive"
   | Update_nav.Enter_hint_edit_field -> "edit field"
   | Update_nav.Enter_hint_confirm_field -> "confirm field"
+  | Update_nav.Enter_hint_dos_screen -> "DOS screen"
 
 let test_enter_hint_follows_enter_plan () =
   let m_base = populated_model ~cols:140 ~rows:40 ~lang:Say.Lang_en () in

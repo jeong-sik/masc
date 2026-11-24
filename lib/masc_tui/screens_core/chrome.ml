@@ -2006,10 +2006,13 @@ let render_sidebar grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         Model.sidebar_viewport_start ~inner_h:inner.h
           ~scroll:model.nav.sidebar_scroll ~cursor:effective_cursor
       in
+      let data_rows =
+        Model.sidebar_visible_data_rows ~inner_h:inner.h ~start
+      in
       let attn_n = Attention.count model.attention in
       let inc_n = Incidents.active_count model.incidents in
       let hero = Model.pulse_hero_metrics model in
-      for i = 0 to inner.h - 1 do
+      for i = 0 to data_rows - 1 do
         let row_idx = start + i in
         if row_idx < total then begin
           let py = inner.y + i in
@@ -2144,7 +2147,41 @@ let render_sidebar grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
              ~x:(Rect.right inner - 1) ~y:inner.y
              ~style:(Typography.whisper ~bg ~italic:false theme)
              "▲");
-      if start + inner.h < total && inner.w >= 4 && inner.h >= 2 then
+      if Model.sidebar_has_below_overflow ~inner_h:inner.h ~start then begin
+        let hidden_n =
+          let count = ref 0 in
+          for idx = start + data_rows to total - 1 do
+            match rows.(idx) with
+            | Model.Sidebar_item _ -> incr count
+            | Model.Sidebar_section _ -> ()
+          done;
+          Int.max 1 !count
+        in
+        let hidden_secs =
+          Model.sidebar_hidden_below_sections ~inner_h:inner.h ~start
+          |> List.map (fun sec -> Say.resolve lang (Nav.menu_section_label sec))
+        in
+        let sec_hint =
+          match hidden_secs with
+          | [] -> Say.resolve lang (Say.make ~ko:"더 보기" ~en:"more")
+          | secs -> String.concat "·" secs
+        in
+        let py = Rect.bottom inner - 1 in
+        let footer_r = Rect.make ~x:inner.x ~y:py ~w:inner.w ~h:1 in
+        let footer_bg = Color.of_rgb theme.surface_2 in
+        Cell_grid.fill_rect ~clip:inner grid ~rect:footer_r
+          ~style:(Typography.accent ~bg:footer_bg theme) ();
+        let label =
+          Grapheme.truncate_to_width
+            ~max_width:(Int.max 0 (inner.w - 2))
+            (Printf.sprintf "▼ +%d %s" hidden_n sec_hint)
+        in
+        ignore
+          (Cell_grid.put_text ~clip:footer_r grid ~x:(inner.x + 1) ~y:py
+             ~style:(Typography.accent ~bg:footer_bg ~bold:true theme)
+             label)
+      end
+      else if start + inner.h < total && inner.w >= 4 && inner.h >= 2 then
         ignore
           (Cell_grid.put_text ~clip:inner grid
              ~x:(Rect.right inner - 1) ~y:(Rect.bottom inner - 1)

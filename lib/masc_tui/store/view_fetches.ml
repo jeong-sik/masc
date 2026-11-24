@@ -77,8 +77,14 @@ let dedup_reqs reqs =
   in
   loop [] [] reqs
 
-let fetches_for_keeper_context ~force ~name (m : Model.t) =
+let fetches_for_keeper_context ?(include_cache_outcome = false) ~force ~name
+    (m : Model.t) =
   let ks = Keeper_context_store.get_keeper ~keeper:name m.keeper_context in
+  let needs_next_request =
+    include_cache_outcome
+    || Keeper_context_store.equal_context_subtab ks.subtab
+         Keeper_context_store.Ctx_composition
+  in
   let base =
     []
     |> add_if
@@ -86,7 +92,8 @@ let fetches_for_keeper_context ~force ~name (m : Model.t) =
          (Cmd.Get_keeper_context_turn_records
             { keeper = name; limit = Some 50; turn_ref = None })
     |> add_if
-         ((force || not ks.next_request_absent)
+         (needs_next_request
+          && (force || not ks.next_request_absent)
           && needs_fetch ~force ks.next_request)
          (Cmd.Get_keeper_next_request { keeper = name })
   in
@@ -115,22 +122,35 @@ let fetches_for_keeper_context ~force ~name (m : Model.t) =
       let exec_ids =
         List.map Ids.Execution_id.to_string entry.record.execution_ids
       in
+      let want_provider_input, want_cache_outcome, want_transcript, want_calls =
+        if include_cache_outcome then (false, true, false, false)
+        else
+          match ks.subtab with
+          | Keeper_context_store.Ctx_composition -> (false, false, false, false)
+          | Keeper_context_store.Ctx_exact_input -> (true, true, false, false)
+          | Keeper_context_store.Ctx_input_map -> (true, false, false, false)
+          | Keeper_context_store.Ctx_response -> (false, false, true, true)
+      in
       base
       |> add_if
-           ((force || not ks.provider_input_auth_denied)
+           (want_provider_input
+            && (force || not ks.provider_input_auth_denied)
             && (not (is_absent_ref ks.absent_provider_input_ref))
             && not (matches_ref ks.provider_input))
            (Cmd.Get_keeper_provider_input { keeper = name; turn_ref })
       |> add_if
-           ((not (is_absent_ref ks.absent_cache_outcome_ref))
+           (want_cache_outcome
+            && (not (is_absent_ref ks.absent_cache_outcome_ref))
             && not (matches_ref ks.cache_outcome))
            (Cmd.Get_keeper_cache_outcome { keeper = name; turn_ref })
       |> add_if
-           ((not (is_absent_ref ks.absent_transcript_ref))
+           (want_transcript
+            && (not (is_absent_ref ks.absent_transcript_ref))
             && not (matches_ref ks.turn_transcript))
            (Cmd.Get_keeper_turn_transcript { keeper = name; turn_ref })
       |> add_if
-           ((force || not ks.call_evidence_auth_denied)
+           (want_calls
+            && (force || not ks.call_evidence_auth_denied)
             && (not (is_absent_ref ks.absent_call_evidence_ref))
             && exec_ids <> []
             && not (matches_ref ks.call_evidence))
@@ -175,17 +195,17 @@ let fetches_for_overlay ~force (m : Model.t) =
       let drawer_reqs = fetches_for_context_drawer ~force m in
       let target =
         match Drafts.target_keeper_key m.drafts with
-        | k when not (String.equal (String.trim k) "") && not (String.equal k "fleet")
-          ->
+        | k
+          when not (String.equal (String.trim k) "")
+               && (not (String.equal k "fleet"))
+               && not (String.equal k Drafts.default_keeper_key) ->
             Some k
-        | _ ->
-            Option.map
-              (fun (k : Wire_fleet.keeper_summary) -> k.name)
-              (Fleet_store.selected_keeper_summary m.fleet)
+        | _ -> Model.target_keeper m
       in
       let ctx_reqs =
         match target with
-        | Some name -> fetches_for_keeper_context ~force ~name m
+        | Some name ->
+            fetches_for_keeper_context ~include_cache_outcome:true ~force ~name m
         | None -> []
       in
       drawer_reqs @ ctx_reqs

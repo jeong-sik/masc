@@ -3788,24 +3788,69 @@ let apply_mouse ~now (m : Model.t) (ev : Keymap.Input.mouse_event) =
                     Model.sidebar_viewport_start ~inner_h:inner.h
                       ~scroll:m.nav.sidebar_scroll ~cursor:effective_cursor
                   in
-                  let vis_idx = start + (gy - inner.y) in
-                  match List.nth_opt Model.sidebar_visual_rows vis_idx with
-                  | Some (Model.Sidebar_item { index; item }) ->
-                      let m_sel =
-                        {
-                          m with
-                          nav =
-                            {
-                              m.nav with
-                              sidebar_cursor = index;
-                              sidebar_scroll = start;
-                            };
-                        }
-                      in
-                      Update_nav.navigate_menu_target ~keep_sidebar_focus:false
-                        m_sel item.target
-                  | Some (Model.Sidebar_section _) | None ->
-                      (Update_nav.enter_sidebar_focus m, [])
+                  if
+                    Model.sidebar_has_below_overflow ~inner_h:inner.h ~start
+                    && gy = Rect.bottom inner - 1
+                  then
+                    let total_rows = List.length Model.sidebar_visual_rows in
+                    let max_scroll = Int.max 0 (total_rows - inner.h) in
+                    let step = Int.max 4 (inner.h / 2) in
+                    let sidebar_scroll =
+                      Store_scroll.clamp_scroll ~max_scroll (start + step)
+                    in
+                    let m_focused = Update_nav.enter_sidebar_focus m in
+                    let next_cursor =
+                      if sidebar_scroll >= max_scroll then
+                        let rec last_item acc = function
+                          | [] -> acc
+                          | Model.Sidebar_item { index; _ } :: rest ->
+                              last_item index rest
+                          | Model.Sidebar_section _ :: rest -> last_item acc rest
+                        in
+                        last_item m_focused.nav.sidebar_cursor
+                          Model.sidebar_visual_rows
+                      else
+                        let min_vis_idx = sidebar_scroll + 1 in
+                        let rec first_item_from idx = function
+                          | [] -> m_focused.nav.sidebar_cursor
+                          | Model.Sidebar_item { index; _ } :: _
+                            when idx >= min_vis_idx ->
+                              index
+                          | (Model.Sidebar_section _ | Model.Sidebar_item _)
+                            :: rest ->
+                              first_item_from (idx + 1) rest
+                        in
+                        first_item_from 0 Model.sidebar_visual_rows
+                    in
+                    ( {
+                        m_focused with
+                        nav =
+                          {
+                            m_focused.nav with
+                            sidebar_cursor = next_cursor;
+                            sidebar_scroll;
+                          };
+                      }
+                    , [] )
+                  else
+                    let vis_idx = start + (gy - inner.y) in
+                    match List.nth_opt Model.sidebar_visual_rows vis_idx with
+                    | Some (Model.Sidebar_item { index; item }) ->
+                        let m_sel =
+                          {
+                            m with
+                            nav =
+                              {
+                                m.nav with
+                                sidebar_cursor = index;
+                                sidebar_scroll = start;
+                              };
+                          }
+                        in
+                        Update_nav.navigate_menu_target ~keep_sidebar_focus:false
+                          m_sel item.target
+                    | Some (Model.Sidebar_section _) | None ->
+                        (Update_nav.enter_sidebar_focus m, [])
                 else (Update_nav.enter_sidebar_focus m, [])
             | Some _ | None ->
                 if Model.sidebar_drawer_open m then

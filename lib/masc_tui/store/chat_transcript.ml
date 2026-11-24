@@ -480,6 +480,7 @@ type live_chat_phase =
   | Phase_awaiting_turn
   | Phase_thinking
   | Phase_tool_running of string
+  | Phase_tool_waiting of string
   | Phase_streaming
   | Phase_turn_running of {
       turn : Wire_fleet.active_turn;
@@ -500,134 +501,37 @@ let equal_live_chat_phase a b =
   | Phase_interrupting, Phase_interrupting ->
       true
   | Phase_queued x, Phase_queued y -> Int.equal x y
+  | Phase_tool_waiting x, Phase_tool_waiting y
   | Phase_tool_running x, Phase_tool_running y
   | Phase_failed x, Phase_failed y ->
       String.equal x y
   | Phase_turn_running x, Phase_turn_running y ->
       Wire_fleet.equal_active_turn x.turn y.turn
       && Int.equal x.queued_count y.queued_count
-  | ( Phase_idle
-    , ( Phase_sending
-      | Phase_queued _
-      | Phase_awaiting_turn
-      | Phase_thinking
-      | Phase_tool_running _
-      | Phase_streaming
-      | Phase_turn_running _
-      | Phase_confirming
-      | Phase_interrupting
-      | Phase_failed _ ) )
-  | ( Phase_sending
-    , ( Phase_idle
-      | Phase_queued _
-      | Phase_awaiting_turn
-      | Phase_thinking
-      | Phase_tool_running _
-      | Phase_streaming
-      | Phase_turn_running _
-      | Phase_confirming
-      | Phase_interrupting
-      | Phase_failed _ ) )
-  | ( Phase_queued _
-    , ( Phase_idle
-      | Phase_sending
-      | Phase_awaiting_turn
-      | Phase_thinking
-      | Phase_tool_running _
-      | Phase_streaming
-      | Phase_turn_running _
-      | Phase_confirming
-      | Phase_interrupting
-      | Phase_failed _ ) )
-  | ( Phase_awaiting_turn
-    , ( Phase_idle
-      | Phase_sending
-      | Phase_queued _
-      | Phase_thinking
-      | Phase_tool_running _
-      | Phase_streaming
-      | Phase_turn_running _
-      | Phase_confirming
-      | Phase_interrupting
-      | Phase_failed _ ) )
-  | ( Phase_thinking
-    , ( Phase_idle
-      | Phase_sending
-      | Phase_queued _
-      | Phase_awaiting_turn
-      | Phase_tool_running _
-      | Phase_streaming
-      | Phase_turn_running _
-      | Phase_confirming
-      | Phase_interrupting
-      | Phase_failed _ ) )
-  | ( Phase_tool_running _
-    , ( Phase_idle
+  | ( ( Phase_idle
       | Phase_sending
       | Phase_queued _
       | Phase_awaiting_turn
       | Phase_thinking
+      | Phase_tool_running _
+      | Phase_tool_waiting _
       | Phase_streaming
       | Phase_turn_running _
       | Phase_confirming
       | Phase_interrupting
-      | Phase_failed _ ) )
-  | ( Phase_streaming
+      | Phase_failed _ )
     , ( Phase_idle
       | Phase_sending
       | Phase_queued _
       | Phase_awaiting_turn
       | Phase_thinking
       | Phase_tool_running _
+      | Phase_tool_waiting _
+      | Phase_streaming
       | Phase_turn_running _
       | Phase_confirming
       | Phase_interrupting
-      | Phase_failed _ ) )
-  | ( Phase_turn_running _
-    , ( Phase_idle
-      | Phase_sending
-      | Phase_queued _
-      | Phase_awaiting_turn
-      | Phase_thinking
-      | Phase_tool_running _
-      | Phase_streaming
-      | Phase_confirming
-      | Phase_interrupting
-      | Phase_failed _ ) )
-  | ( Phase_confirming
-    , ( Phase_idle
-      | Phase_sending
-      | Phase_queued _
-      | Phase_awaiting_turn
-      | Phase_thinking
-      | Phase_tool_running _
-      | Phase_streaming
-      | Phase_turn_running _
-      | Phase_interrupting
-      | Phase_failed _ ) )
-  | ( Phase_interrupting
-    , ( Phase_idle
-      | Phase_sending
-      | Phase_queued _
-      | Phase_awaiting_turn
-      | Phase_thinking
-      | Phase_tool_running _
-      | Phase_streaming
-      | Phase_turn_running _
-      | Phase_confirming
-      | Phase_failed _ ) )
-  | ( Phase_failed _
-    , ( Phase_idle
-      | Phase_sending
-      | Phase_queued _
-      | Phase_awaiting_turn
-      | Phase_thinking
-      | Phase_tool_running _
-      | Phase_streaming
-      | Phase_turn_running _
-      | Phase_confirming
-      | Phase_interrupting ) ) ->
-      false
+      | Phase_failed _ ) ) -> false
 
 let turn_lane_label = function
   | Wire_fleet.Lane_chat -> Say.make ~ko:"대화" ~en:"chat"
@@ -677,18 +581,19 @@ let preview_short_activity (p : Wire_fleet.turn_preview) =
       | Wire_fleet.Preview_waiting ->
           Say.make ~ko:"응답 대기 중" ~en:"Waiting"
       | Wire_fleet.Preview_streaming ->
-          Say.make ~ko:"응답 생성 중…" ~en:"Streaming…"
+          Say.make ~ko:"응답 수신" ~en:"Response activity"
       | Wire_fleet.Preview_tool_observed -> (
           match p.last_tool with
           | Some tool ->
-              Say.make ~ko:("도구 · " ^ tool) ~en:("Tool · " ^ tool)
+              Say.make ~ko:("최근 도구 · " ^ tool) ~en:("Last tool · " ^ tool)
           | None -> Say.make ~ko:"도구 활동" ~en:"Tool activity")
       | Wire_fleet.Preview_failed ->
           Say.make ~ko:"시도 실패" ~en:"Attempt failed")
 
 let active_turn_short_activity (turn : Wire_fleet.active_turn) =
   match turn.tool_in_flight with
-  | Some tool -> Say.make ~ko:("도구 · " ^ tool) ~en:("Tool · " ^ tool)
+  | Some tool ->
+      Say.make ~ko:("도구 사용 중 · " ^ tool) ~en:("Using tool · " ^ tool)
   | None -> (
       match turn.preview with
       | Some p -> preview_short_activity p
@@ -765,10 +670,10 @@ let active_turn_detail_summary (turn : Wire_fleet.active_turn) =
                     match p.last_tool with
                     | Some tool ->
                         Say.make
-                          ~ko:("응답 생성 중… · 최근 도구: " ^ tool)
-                          ~en:("Streaming… · last tool: " ^ tool)
+                          ~ko:("응답 수신 · 최근 도구: " ^ tool)
+                          ~en:("Response activity · last tool: " ^ tool)
                     | None ->
-                        Say.make ~ko:"응답 생성 중…" ~en:"Streaming…")
+                        Say.make ~ko:"응답 수신" ~en:"Response activity")
                 | Wire_fleet.Preview_tool_observed -> (
                     match p.last_tool with
                     | Some tool ->
@@ -841,7 +746,8 @@ let turn_running_kind_of_turn (turn : Wire_fleet.active_turn) =
 let turn_running_badge_label ~(turn : Wire_fleet.active_turn) ~queued_count =
   let lane_say = turn_lane_label turn.lane in
   let act_say = active_turn_short_activity turn in
-  let base = Say.concat ~sep:" · " [ lane_say; act_say ] in
+  let observed = Say.make ~ko:"최근 확인" ~en:"Last observed" in
+  let base = Say.concat ~sep:" · " [ observed; act_say; lane_say ] in
   if queued_count > 0 then
     Say.concat ~sep:" · "
       [
@@ -911,19 +817,17 @@ let live_chat_phase ~(model : Model.t) ~keeper =
   else
     match buf_opt with
     | Some b when b.active -> (
-        let running_tool =
-          List.find_opt
-            (fun (tc : Fleet_store.active_tool_call) -> not tc.completed)
-            (List.rev b.tools)
-        in
-        match running_tool with
-        | Some tc -> Phase_tool_running tc.tool_name
-        | None ->
-            if not (String.equal (String.trim b.text) "") then Phase_streaming
-            else if not (String.equal (String.trim b.thinking) "") then
-              Phase_thinking
-            else if b.run_started then Phase_awaiting_turn
-            else (
+        match Fleet_store.current_tool b with
+        | Some { tool_state = Tool_pending; tool_name; _ } ->
+            Phase_tool_running tool_name
+        | Some { tool_state = Tool_result_pending _; tool_name; _ } ->
+            Phase_tool_waiting tool_name
+        | Some { tool_state = (Tool_settled | Tool_unfinished); _ } | None -> (
+            match Fleet_store.current_model_content b with
+            | Some Wire_fleet.Content_text -> Phase_streaming
+            | Some Wire_fleet.Content_thinking -> Phase_thinking
+            | None when b.run_started -> Phase_awaiting_turn
+            | None -> (
               match active_tx_opt with
               | Some { state = Drafts.Sending; _ } -> Phase_sending
               | Some { state = Drafts.Queued; _ } -> (
@@ -944,7 +848,7 @@ let live_chat_phase ~(model : Model.t) ~keeper =
                     _;
                   }
               | None ->
-                  Phase_awaiting_turn))
+                  Phase_awaiting_turn)))
     | Some _ | None -> (
         match active_tx_opt with
         | Some { state = Drafts.Interrupting; _ } -> Phase_interrupting
@@ -960,20 +864,7 @@ let live_chat_phase ~(model : Model.t) ~keeper =
         | Some { state = Drafts.Delivered | Drafts.No_operation_record | Drafts.Failed_retryable _; _ }
         | None -> (
             match active_turn_opt with
-            | Some turn ->
-                if Wire_fleet.equal_turn_lane turn.lane Wire_fleet.Lane_chat then
-                  match turn.tool_in_flight with
-                  | Some tool -> Phase_tool_running tool
-                  | None -> (
-                      match turn.phase with
-                      | Some p
-                        when String.equal
-                               (String.lowercase_ascii (String.trim p))
-                               "thinking" ->
-                          Phase_thinking
-                      | Some _ | None ->
-                          Phase_turn_running { turn; queued_count = 0 })
-                else Phase_turn_running { turn; queued_count = 0 }
+            | Some turn -> Phase_turn_running { turn; queued_count = 0 }
             | None -> (
                 let latest_unpersisted_failed =
                   Drafts.pending_txs_for_keeper ~keeper model.drafts
@@ -1012,66 +903,6 @@ let live_chat_phase ~(model : Model.t) ~keeper =
                         | None -> Phase_idle)
                     | Some _ | None -> Phase_idle))))
 
-let live_chat_phase_badge = function
-  | Phase_idle -> None
-  | Phase_sending ->
-      Some
-        ( Glyph.Live_working
-        , Theme.Status_active
-        , Say.make ~ko:"전송 중" ~en:"Sending" )
-  | Phase_queued n ->
-      Some
-        ( Glyph.Live_working
-        , Theme.Status_attention
-        , Say.make
-            ~ko:(if n > 1 then Printf.sprintf "대기열 %d" n else "전송 대기")
-            ~en:(if n > 1 then Printf.sprintf "Queued %d" n else "Queued") )
-  | Phase_awaiting_turn ->
-      Some
-        ( Glyph.Live_working
-        , Theme.Status_active
-        , Say.make ~ko:"처리 대기" ~en:"Awaiting turn" )
-  | Phase_thinking ->
-      Some
-        ( Glyph.Ai_spark
-        , Theme.Status_ai
-        , Say.make ~ko:"추론 중…" ~en:"Thinking…" )
-  | Phase_tool_running tool ->
-      Some
-        ( Glyph.Tool_square
-        , Theme.Status_active
-        , Say.make ~ko:("도구 실행 · " ^ tool) ~en:("Tool · " ^ tool) )
-  | Phase_streaming ->
-      Some
-        ( Glyph.Live_working
-        , Theme.Status_active
-        , Say.make ~ko:"생성 중…" ~en:"Streaming…" )
-  | Phase_turn_running { turn; queued_count } ->
-      let glyph, tone =
-        match turn_running_kind_of_turn turn with
-        | Composer.Turn_kind_tool -> (Glyph.Tool_square, Theme.Status_active)
-        | Composer.Turn_kind_attention ->
-            (Glyph.Live_working, Theme.Status_attention)
-        | Composer.Turn_kind_active ->
-            (Glyph.Live_working, Theme.Status_active)
-      in
-      Some (glyph, tone, turn_running_badge_label ~turn ~queued_count)
-  | Phase_confirming ->
-      Some
-        ( Glyph.Live_working
-        , Theme.Status_active
-        , Say.make ~ko:"전송 확인 중" ~en:"Confirming" )
-  | Phase_interrupting ->
-      Some
-        ( Glyph.Live_paused
-        , Theme.Status_attention
-        , Say.make ~ko:"중단 요청 중" ~en:"Interrupting" )
-  | Phase_failed _ ->
-      Some
-        ( Glyph.Live_failing
-        , Theme.Status_critical
-        , Say.make ~ko:"전송 실패" ~en:"Send failed" )
-
 let composer_pending_tx_of_phase = function
   | Phase_idle -> Composer.Tx_idle
   | Phase_sending -> Composer.Tx_sending
@@ -1080,6 +911,7 @@ let composer_pending_tx_of_phase = function
   | Phase_awaiting_turn -> Composer.Tx_awaiting_turn
   | Phase_thinking -> Composer.Tx_thinking
   | Phase_tool_running tool -> Composer.Tx_tool_running tool
+  | Phase_tool_waiting tool -> Composer.Tx_tool_waiting tool
   | Phase_streaming -> Composer.Tx_streaming
   | Phase_turn_running { turn; queued_count } ->
       Composer.Tx_turn_running
@@ -1091,11 +923,27 @@ let composer_pending_tx_of_phase = function
   | Phase_interrupting -> Composer.Tx_interrupting
   | Phase_failed reason -> Composer.Tx_failed reason
 
+let live_chat_phase_badge ~model ~keeper =
+  let phase = live_chat_phase ~model ~keeper in
+  let phase =
+    if equal_live_chat_phase phase Phase_awaiting_turn
+       && not (Fleet_store.has_active_chat_stream ~keeper model.fleet)
+    then
+      match Fleet_store.active_turn_for ~keeper model.fleet with
+      | Some turn ->
+          let queued_count = Drafts.queued_count_for_keeper ~keeper model.drafts in
+          Phase_turn_running { turn; queued_count }
+      | None -> phase
+    else phase
+  in
+  Composer.pending_tx_badge (composer_pending_tx_of_phase phase)
+
 let is_phase_interruptible = function
   | Phase_sending
   | Phase_awaiting_turn
   | Phase_thinking
   | Phase_tool_running _
+  | Phase_tool_waiting _
   | Phase_streaming ->
       true
   | Phase_turn_running { turn; queued_count } ->
@@ -1190,7 +1038,6 @@ type stream_projection = {
   show_thinking : bool;
   show_tools : bool;
   show_text : bool;
-  show_waiting : bool;
   show_error : string option;
 }
 
@@ -1251,11 +1098,6 @@ let project_transcript ~(model : Model.t) ~keeper =
           in
           let show_tools = buf.tools <> [] in
           let show_text = not (String.equal (String.trim buf.text) "") in
-          let has_running_tool =
-            List.exists
-              (fun (tc : Fleet_store.active_tool_call) -> not tc.completed)
-              buf.tools
-          in
           let show_error =
             match buf.last_error with
             | None -> None
@@ -1287,14 +1129,9 @@ let project_transcript ~(model : Model.t) ~keeper =
                 in
                 if matched_by_pending || superseded then None else Some err
           in
-          let show_waiting =
-            buf.active && (not show_text) && (not has_running_tool)
-            && Option.is_none show_error
-            && (show_tools || buf.interrupting)
-          in
           if
             (not show_thinking) && (not show_tools) && (not show_text)
-            && (not show_waiting) && Option.is_none show_error
+            && Option.is_none show_error
           then None
           else
             Some
@@ -1303,7 +1140,6 @@ let project_transcript ~(model : Model.t) ~keeper =
                 show_thinking;
                 show_tools;
                 show_text;
-                show_waiting;
                 show_error;
               }
   in
@@ -1476,10 +1312,7 @@ let keeper_content_rect_size ~embedded ~(model : Model.t) =
   in
   let target_rect =
     if
-      embedded && (not model.nav.zoomed)
-      && (Layout.equal_breakpoint breakpoint Layout.Wide
-          || Layout.equal_breakpoint breakpoint Layout.Standard)
-      && body_outer.w >= 104
+      embedded && Model.uses_keeper_split ~width:body_outer.w sized_model
     then
       let split_gap = Layout.card_gap_x breakpoint in
       let split_budget = Int.max 0 (body_outer.w - split_gap) in
@@ -1693,9 +1526,8 @@ let count_transcript_rows ~(model : Model.t) ~keeper ~width =
         + count_markdown_rows ~theme ~width ~rail_present:false ~prefix:"  "
             buf.text
     in
-    let wait_r = if sp.show_waiting then 1 else 0 in
     let err_r = match sp.show_error with Some _ -> 1 | None -> 0 in
-    think_r + tools_r + text_r + wait_r + err_r
+    think_r + tools_r + text_r + err_r
   in
   let sections = project_transcript ~model ~keeper in
   let _, total =

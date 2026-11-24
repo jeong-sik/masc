@@ -582,6 +582,17 @@ type turn_interrupt_response = {
   reason : string option;
 }
 
+type model_content_channel = Content_text | Content_thinking
+
+type model_content_state = Content_observed | Content_ended
+
+type model_content_activity = {
+  owner : Wire_chat_journal.response_owner;
+  block_index : int;
+  channel : model_content_channel;
+  content_state : model_content_state;
+}
+
 type chat_stream_chunk =
   | Chunk_accepted of {
       operation_id : string;
@@ -602,9 +613,18 @@ type chat_stream_chunk =
       operation_id : string option;
       snapshot : string;
     }
+  | Chunk_model_content of {
+      operation_id : string option;
+      activity : model_content_activity;
+    }
+  | Chunk_model_response_stop of {
+      operation_id : string option;
+      owner : Wire_chat_journal.response_owner option;
+    }
   | Chunk_tool_start of {
       operation_id : string option;
       tool_use_id : string;
+      stream_scope : int option;
       tool_name : string;
       args_preview : string option;
     }
@@ -614,6 +634,7 @@ type chat_stream_chunk =
       delta : string option;
       snapshot : string option;
     }
+  | Chunk_tool_block_end of { operation_id : string option; tool_use_id : string }
   | Chunk_tool_end of {
       operation_id : string option;
       tool_use_id : string;
@@ -621,6 +642,7 @@ type chat_stream_chunk =
       ok : bool option;
       output_preview : string option;
     }
+  | Chunk_tool_quarantined of { operation_id : string option; tool_use_id : string }
   | Chunk_reply_details of {
       operation_id : string option;
       reply : string;
@@ -656,7 +678,8 @@ val decode_chat_stream_chunk : Yojson.Safe.t -> (chat_stream_chunk, string) resu
 (** Decode real server AG-UI SSE frames ([CUSTOM], [RUN_STARTED],
     [TEXT_MESSAGE_CONTENT], [TOOL_CALL_*], [RUN_FINISHED], [RUN_ERROR]) as well
     as legacy test aliases. Returns [Ok Chunk_ignored] for known non-visual
-    AG-UI lifecycle/diagnostic frames and [Error] for unknown/malformed frames. *)
+    AG-UI lifecycle/diagnostic frames and [Error] for unknown/malformed frames.
+    A tool block can end before its tool result is observed. *)
 
 val decode_turn_interrupt_response :
   Yojson.Safe.t -> (turn_interrupt_response, string) result

@@ -324,6 +324,7 @@ val target_keeper : t -> string option
 (** The keeper the composer and the Ctrl+T drawer address: the composer's
     active keeper, else the selected roster keeper. *)
 val is_in_keeper_chat : t -> bool
+val uses_keeper_split : width:int -> t -> bool
 val is_keeper_config_active : t -> bool
 (** [true] when [overlay = None] and either [Dive_keeper { tab = Keeper_config }]
     is active, or [4 Keepers] Split [pane 1] / zoomed view has

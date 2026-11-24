@@ -12,11 +12,6 @@ type ownership = {
 
 let fresh_ownership = { admitted = None; closed = None; unobserved_scope = None }
 
-let owner_order (a : Journal.response_owner) (b : Journal.response_owner) =
-  match Int.compare a.content_generation b.content_generation with
-  | 0 -> Int.compare a.stream_scope b.stream_scope
-  | order -> order
-
 type admission =
   | Append of ownership
   | Drop  (** The bytes of a superseded response. *)
@@ -29,13 +24,13 @@ let admit ownership = function
   | Journal.Observed_response owner ->
       let closed_out =
         match ownership.closed with
-        | Some closed -> owner_order owner closed <= 0
+        | Some closed -> Journal.compare_response_owner owner closed <= 0
         | None -> false
       in
       let precedes_current =
         match ownership.admitted with
         | Some current ->
-            owner_order owner current < 0
+            Journal.compare_response_owner owner current < 0
             || Int.equal owner.content_generation current.content_generation
                && (match ownership.unobserved_scope with
                   | Some scope -> owner.stream_scope < scope
@@ -51,7 +46,7 @@ let retire_attempt ownership =
     match ownership.admitted with
     | Some owner -> (
         match ownership.closed with
-        | Some closed when owner_order closed owner >= 0 -> Some closed
+        | Some closed when Journal.compare_response_owner closed owner >= 0 -> Some closed
         | Some _ | None -> Some owner)
     | None -> ownership.closed
   in

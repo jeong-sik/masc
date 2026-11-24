@@ -3304,7 +3304,7 @@ let test_agui_chat_stream_and_history_provenance () =
       ()
   | _ -> Alcotest.fail "expected Chunk_tool_args");
   let tc_end =
-    expect_ok "TOOL_CALL_END without tool_name/ok preserves ok=None"
+    expect_ok "TOOL_CALL_END closes arguments before result settlement"
       (Wire_fleet.decode_chat_stream_chunk
          (parse_json
             {|{
@@ -3316,10 +3316,8 @@ let test_agui_chat_stream_and_history_provenance () =
             }|}))
   in
   (match tc_end with
-  | Wire_fleet.Chunk_tool_end
-      { tool_use_id = "scope-2-block-1"; tool_name = None; ok = None; _ } ->
-      ()
-  | _ -> Alcotest.fail "expected Chunk_tool_end with ok=None");
+  | Wire_fleet.Chunk_tool_block_end { tool_use_id = "scope-2-block-1"; _ } -> ()
+  | _ -> Alcotest.fail "argument end must leave the tool unsettled");
   let tool_res =
     expect_ok "CUSTOM KEEPER_TOOL_RESULT_READY"
       (Wire_fleet.decode_chat_stream_chunk

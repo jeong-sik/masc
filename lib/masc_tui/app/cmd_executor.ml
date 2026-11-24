@@ -2581,9 +2581,13 @@ let execute_post_stream t ~epoch req =
                          | Wire_fleet.Chunk_text_delta _
                          | Wire_fleet.Chunk_thinking_delta _
                          | Wire_fleet.Chunk_thinking_snapshot _
+                         | Wire_fleet.Chunk_model_content _
+                         | Wire_fleet.Chunk_model_response_stop _
                          | Wire_fleet.Chunk_tool_start _
                          | Wire_fleet.Chunk_tool_args _
+                         | Wire_fleet.Chunk_tool_block_end _
                          | Wire_fleet.Chunk_tool_end _
+                         | Wire_fleet.Chunk_tool_quarantined _
                          | Wire_fleet.Chunk_reply_details _ ) as chunk) ->
                         publish_chunk chunk
                     | Error reason -> publish_warning reason)

@@ -30,6 +30,7 @@ type pending_tx =
   | Tx_awaiting_turn
   | Tx_thinking
   | Tx_tool_running of string
+  | Tx_tool_waiting of string
   | Tx_streaming
   | Tx_turn_running of { kind : turn_running_kind; label : Say.t }
   | Tx_confirming
@@ -80,95 +81,24 @@ let equal_pending_tx a b =
   | Tx_interrupting, Tx_interrupting ->
       true
   | Tx_queued_count x, Tx_queued_count y -> Int.equal x y
+  | Tx_tool_waiting x, Tx_tool_waiting y
   | Tx_tool_running x, Tx_tool_running y | Tx_failed x, Tx_failed y ->
       String.equal x y
   | Tx_turn_running x, Tx_turn_running y ->
       equal_turn_running_kind x.kind y.kind && Say.equal x.label y.label
-  | ( Tx_idle
-    , ( Tx_queued
-      | Tx_queued_count _
-      | Tx_sending
-      | Tx_awaiting_turn
-      | Tx_thinking
-      | Tx_tool_running _
-      | Tx_streaming
-      | Tx_turn_running _
-      | Tx_confirming
-      | Tx_interrupting
-      | Tx_failed _ ) )
-  | ( Tx_queued
-    , ( Tx_idle
-      | Tx_queued_count _
-      | Tx_sending
-      | Tx_awaiting_turn
-      | Tx_thinking
-      | Tx_tool_running _
-      | Tx_streaming
-      | Tx_turn_running _
-      | Tx_confirming
-      | Tx_interrupting
-      | Tx_failed _ ) )
-  | ( Tx_queued_count _
-    , ( Tx_idle
-      | Tx_queued
-      | Tx_sending
-      | Tx_awaiting_turn
-      | Tx_thinking
-      | Tx_tool_running _
-      | Tx_streaming
-      | Tx_turn_running _
-      | Tx_confirming
-      | Tx_interrupting
-      | Tx_failed _ ) )
-  | ( Tx_sending
-    , ( Tx_idle
-      | Tx_queued
-      | Tx_queued_count _
-      | Tx_awaiting_turn
-      | Tx_thinking
-      | Tx_tool_running _
-      | Tx_streaming
-      | Tx_turn_running _
-      | Tx_confirming
-      | Tx_interrupting
-      | Tx_failed _ ) )
-  | ( Tx_awaiting_turn
-    , ( Tx_idle
-      | Tx_queued
-      | Tx_queued_count _
-      | Tx_sending
-      | Tx_thinking
-      | Tx_tool_running _
-      | Tx_streaming
-      | Tx_turn_running _
-      | Tx_confirming
-      | Tx_interrupting
-      | Tx_failed _ ) )
-  | ( Tx_thinking
-    , ( Tx_idle
-      | Tx_queued
-      | Tx_queued_count _
-      | Tx_sending
-      | Tx_awaiting_turn
-      | Tx_tool_running _
-      | Tx_streaming
-      | Tx_turn_running _
-      | Tx_confirming
-      | Tx_interrupting
-      | Tx_failed _ ) )
-  | ( Tx_tool_running _
-    , ( Tx_idle
+  | ( ( Tx_idle
       | Tx_queued
       | Tx_queued_count _
       | Tx_sending
       | Tx_awaiting_turn
       | Tx_thinking
+      | Tx_tool_running _
+      | Tx_tool_waiting _
       | Tx_streaming
       | Tx_turn_running _
       | Tx_confirming
       | Tx_interrupting
-      | Tx_failed _ ) )
-  | ( Tx_streaming
+      | Tx_failed _ )
     , ( Tx_idle
       | Tx_queued
       | Tx_queued_count _
@@ -176,59 +106,12 @@ let equal_pending_tx a b =
       | Tx_awaiting_turn
       | Tx_thinking
       | Tx_tool_running _
+      | Tx_tool_waiting _
+      | Tx_streaming
       | Tx_turn_running _
       | Tx_confirming
       | Tx_interrupting
-      | Tx_failed _ ) )
-  | ( Tx_turn_running _
-    , ( Tx_idle
-      | Tx_queued
-      | Tx_queued_count _
-      | Tx_sending
-      | Tx_awaiting_turn
-      | Tx_thinking
-      | Tx_tool_running _
-      | Tx_streaming
-      | Tx_confirming
-      | Tx_interrupting
-      | Tx_failed _ ) )
-  | ( Tx_confirming
-    , ( Tx_idle
-      | Tx_queued
-      | Tx_queued_count _
-      | Tx_sending
-      | Tx_awaiting_turn
-      | Tx_thinking
-      | Tx_tool_running _
-      | Tx_streaming
-      | Tx_turn_running _
-      | Tx_interrupting
-      | Tx_failed _ ) )
-  | ( Tx_interrupting
-    , ( Tx_idle
-      | Tx_queued
-      | Tx_queued_count _
-      | Tx_sending
-      | Tx_awaiting_turn
-      | Tx_thinking
-      | Tx_tool_running _
-      | Tx_streaming
-      | Tx_turn_running _
-      | Tx_confirming
-      | Tx_failed _ ) )
-  | ( Tx_failed _
-    , ( Tx_idle
-      | Tx_queued
-      | Tx_queued_count _
-      | Tx_sending
-      | Tx_awaiting_turn
-      | Tx_thinking
-      | Tx_tool_running _
-      | Tx_streaming
-      | Tx_turn_running _
-      | Tx_confirming
-      | Tx_interrupting ) ) ->
-      false
+      | Tx_failed _ ) ) -> false
 
 let mode_rank = function
   | Auto_folded_pill -> 0
@@ -258,15 +141,38 @@ let pending_tx_label = function
            ~ko:(if n > 1 then Printf.sprintf "대기열 %d" n else "전송 대기")
            ~en:(if n > 1 then Printf.sprintf "Queued %d" n else "Queued"))
   | Tx_sending -> Some (Say.make ~ko:"전송 중" ~en:"Sending")
-  | Tx_awaiting_turn -> Some (Say.make ~ko:"처리 대기" ~en:"Awaiting turn")
+  | Tx_awaiting_turn -> Some (Say.make ~ko:"응답 대기" ~en:"Waiting for response")
   | Tx_thinking -> Some (Say.make ~ko:"추론 중…" ~en:"Thinking…")
   | Tx_tool_running tool ->
-      Some (Say.make ~ko:("도구 실행 · " ^ tool) ~en:("Tool · " ^ tool))
-  | Tx_streaming -> Some (Say.make ~ko:"생성 중…" ~en:"Streaming…")
+      Some (Say.make ~ko:("도구 사용 중 · " ^ tool) ~en:("Using tool · " ^ tool))
+  | Tx_tool_waiting tool ->
+      Some (Say.make ~ko:("도구 결과 대기 · " ^ tool) ~en:("Waiting for tool result · " ^ tool))
+  | Tx_streaming -> Some (Say.make ~ko:"응답 생성 중…" ~en:"Streaming reply…")
   | Tx_turn_running { label; _ } -> Some label
   | Tx_confirming -> Some (Say.make ~ko:"전송 확인 중" ~en:"Confirming")
   | Tx_interrupting -> Some (Say.make ~ko:"중단 요청 중" ~en:"Interrupting")
   | Tx_failed _ -> Some (Say.make ~ko:"전송 실패" ~en:"Send failed")
+
+let pending_tx_badge state =
+  pending_tx_label state
+  |> Option.map (fun label ->
+         let glyph, tone =
+           match state with
+           | Tx_thinking -> (Glyph.Ai_spark, Theme.Status_ai)
+           | Tx_tool_running _ | Tx_tool_waiting _
+           | Tx_turn_running { kind = Turn_kind_tool; _ } ->
+               (Glyph.Tool_square, Theme.Status_active)
+           | Tx_failed _ -> (Glyph.Live_failing, Theme.Status_critical)
+           | Tx_interrupting -> (Glyph.Live_paused, Theme.Status_attention)
+           | Tx_awaiting_turn -> (Glyph.Live_idle, Theme.Status_active)
+           | Tx_queued | Tx_queued_count _
+           | Tx_turn_running { kind = Turn_kind_attention; _ } ->
+               (Glyph.Live_working, Theme.Status_attention)
+           | Tx_turn_running { kind = Turn_kind_active; _ }
+           | Tx_idle | Tx_sending | Tx_streaming | Tx_confirming ->
+               (Glyph.Live_working, Theme.Status_active)
+         in
+         (glyph, tone, label))
 
 let is_voice_active = function
   | Voice_off -> false
@@ -523,7 +429,8 @@ let draw_popup grid ~(anchor : Rect.t) ~(theme : Theme.t) ~lang (popup : popup) 
           done;
           Some pop_rect
 
-let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang ~breakpoint (st : state) =
+let draw ?(show_pending_tx = true) grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang
+    ~breakpoint (st : state) =
   if Rect.is_empty rect then Presenter.hidden_cursor
   else
     let mode = resolve_mode ~breakpoint st in
@@ -584,35 +491,13 @@ let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang ~breakpoint (st : state)
             (badge, Typography.status ~bg ~bold:true theme Theme.Status_attention)
             :: !right_parts
         end;
-        (match pending_tx_label st.pending_tx with
-         | Some lbl ->
-             let glyph, tone =
-               match st.pending_tx with
-               | Tx_thinking -> (Glyph.Ai_spark, Theme.Status_ai)
-               | Tx_tool_running _ -> (Glyph.Tool_square, Theme.Status_active)
-               | Tx_failed _ -> (Glyph.Live_failing, Theme.Status_critical)
-               | Tx_interrupting -> (Glyph.Live_paused, Theme.Status_attention)
-               | Tx_queued | Tx_queued_count _ ->
-                   (Glyph.Live_working, Theme.Status_attention)
-               | Tx_turn_running { kind = Turn_kind_tool; _ } ->
-                   (Glyph.Tool_square, Theme.Status_active)
-               | Tx_turn_running { kind = Turn_kind_attention; _ } ->
-                   (Glyph.Live_working, Theme.Status_attention)
-               | Tx_turn_running { kind = Turn_kind_active; _ }
-               | Tx_idle
-               | Tx_sending
-               | Tx_awaiting_turn
-               | Tx_streaming
-               | Tx_confirming ->
-                   (Glyph.Live_working, Theme.Status_active)
-             in
-             let text =
-               Glyph.to_utf8 glyph ^ " " ^ Say.resolve lang lbl
-             in
-             right_parts :=
-               (text, Typography.status ~bg ~bold:true theme tone)
-               :: !right_parts
-         | None -> ());
+        if show_pending_tx then
+          Option.iter
+            (fun (glyph, tone, label) ->
+              let text = Glyph.to_utf8 glyph ^ " " ^ Say.resolve lang label in
+              right_parts :=
+                (text, Typography.status ~bg ~bold:true theme tone) :: !right_parts)
+            (pending_tx_badge st.pending_tx);
         let right_margin = if rect.w >= 32 then 1 else 0 in
         let right_total_w =
           List.fold_left

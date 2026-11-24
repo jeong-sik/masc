@@ -27,6 +27,10 @@ type response_owner = {
 (** The response a streamed text belongs to
     ([Keeper_chat_events.response_identity]). *)
 
+val compare_response_owner : response_owner -> response_owner -> int
+val decode_response_owner :
+  owner_field:string -> Yojson.Safe.t -> (response_owner, string) result
+
 type text_owner =
   | Observed_response of response_owner
   | Unobserved_scope of int option

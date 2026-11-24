@@ -411,6 +411,10 @@ let is_in_keeper_chat m =
   | None ->
       false
 
+let uses_keeper_split ~width m =
+  (equal_breakpoint m.breakpoint Wide || equal_breakpoint m.breakpoint Standard)
+  && width >= 104 && not m.nav.zoomed
+
 let fast_approval_strip_item m =
   if is_too_small_viewport m.viewport || equal_breakpoint m.breakpoint Micro then
     None

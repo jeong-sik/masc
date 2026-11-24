@@ -24,6 +24,11 @@ type response_owner = {
   stream_scope : int;
 }
 
+let compare_response_owner a b =
+  match Int.compare a.content_generation b.content_generation with
+  | 0 -> Int.compare a.stream_scope b.stream_scope
+  | order -> order
+
 type text_owner =
   | Observed_response of response_owner
   | Unobserved_scope of int option

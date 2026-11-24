@@ -1568,6 +1568,17 @@ type turn_interrupt_response = {
   reason : string option;
 }
 
+type model_content_channel = Content_text | Content_thinking
+
+type model_content_state = Content_observed | Content_ended
+
+type model_content_activity = {
+  owner : Wire_chat_journal.response_owner;
+  block_index : int;
+  channel : model_content_channel;
+  content_state : model_content_state;
+}
+
 type chat_stream_chunk =
   | Chunk_accepted of {
       operation_id : string;
@@ -1588,9 +1599,18 @@ type chat_stream_chunk =
       operation_id : string option;
       snapshot : string;
     }
+  | Chunk_model_content of {
+      operation_id : string option;
+      activity : model_content_activity;
+    }
+  | Chunk_model_response_stop of {
+      operation_id : string option;
+      owner : Wire_chat_journal.response_owner option;
+    }
   | Chunk_tool_start of {
       operation_id : string option;
       tool_use_id : string;
+      stream_scope : int option;
       tool_name : string;
       args_preview : string option;
     }
@@ -1600,6 +1620,7 @@ type chat_stream_chunk =
       delta : string option;
       snapshot : string option;
     }
+  | Chunk_tool_block_end of { operation_id : string option; tool_use_id : string }
   | Chunk_tool_end of {
       operation_id : string option;
       tool_use_id : string;
@@ -1607,6 +1628,7 @@ type chat_stream_chunk =
       ok : bool option;
       output_preview : string option;
     }
+  | Chunk_tool_quarantined of { operation_id : string option; tool_use_id : string }
   | Chunk_reply_details of {
       operation_id : string option;
       reply : string;
@@ -1911,24 +1933,25 @@ let chunk_operation_id json =
       let* run_id = optional_nonblank_string json "runId" in
       Ok (Option.bind run_id operation_id_of_run_id)
 
-let resolve_tool_use_id json =
-  let* tc_id = optional_nonblank_string json "toolCallId" in
-  match tc_id with
-  | Some id -> Ok id
-  | None -> (
-      let* legacy_id = optional_nonblank_string json "tool_use_id" in
-      match legacy_id with
-      | Some id -> Ok id
-      | None -> (
-          let* scope = optional_int_field json "toolStreamScope" in
-          let* block = optional_int_field json "toolCallBlockIndex" in
-          match scope, block with
-          | Some s, Some b -> Ok (Printf.sprintf "scope-%d-block-%d" s b)
-          | None, Some b -> Ok (Printf.sprintf "block-%d" b)
-          | Some s, None -> Ok (Printf.sprintf "scope-%d" s)
-          | None, None ->
-              Error
-                "missing tool call identifier (toolCallId, tool_use_id, or toolStreamScope/toolCallBlockIndex)"))
+let scoped_tool_use_id scope block = Printf.sprintf "scope-%d-block-%d" scope block
+
+let resolve_tool_reference json =
+  let* provider_id = optional_nonblank_string json "toolCallId" in
+  let* scope = optional_int_field json "toolStreamScope" in
+  let* block = optional_int_field json "toolCallBlockIndex" in
+  match scope, block with
+  | Some s, Some b -> Ok (scoped_tool_use_id s b, Some s)
+  | (None, _ | _, None) ->
+      let* direct_id = optional_nonblank_string json "tool_use_id" in
+      match provider_id, direct_id, scope, block with
+      | Some id, _, _, _ | None, Some id, _, _ -> Ok (id, None)
+      | None, None, Some s, _ -> Ok (Printf.sprintf "scope-%d" s, None)
+      | None, None, None, Some b -> Ok (Printf.sprintf "block-%d" b, None)
+      | None, None, None, None ->
+          Error
+            "missing tool call identifier (toolCallId, tool_use_id, or toolStreamScope/toolCallBlockIndex)"
+
+let resolve_tool_use_id json = Result.map fst (resolve_tool_reference json)
 
 let decode_native_completion_ok completion =
   let* kind = optional_nonblank_string completion "kind" in
@@ -1944,6 +1967,33 @@ let decode_native_completion_ok completion =
   | Some ("end_observed" | "completion_unrecorded" | "unrecognized_status") | None ->
       Ok None
   | Some _ -> Ok None
+
+let decode_model_content_activity value =
+  let fields = [ "generation"; "stream_scope"; "block_index"; "channel"; "state" ] in
+  (* The producer owns the response/block coordinates. The optional provider
+     ID is correlation metadata and does not address a block. *)
+  let* fields =
+    match required_member value "provider_message_id" with
+    | Error _ -> Ok fields
+    | Ok _ ->
+        let* _ = required_nonblank_string value "provider_message_id" in
+        Ok ("provider_message_id" :: fields)
+  in
+  let* () = require_exact_object_fields "model content activity" fields value in
+  let* content_generation = required_nonnegative_int_field value "generation" in
+  let* stream_scope = required_nonnegative_int_field value "stream_scope" in
+  let* block_index = required_nonnegative_int_field value "block_index" in
+  let* channel =
+    decode_enum ~field:"channel"
+      (function "text" -> Some Content_text | "thinking" -> Some Content_thinking | _ -> None)
+      value
+  in
+  let* content_state =
+    decode_enum ~field:"state"
+      (function "observed" -> Some Content_observed | "ended" -> Some Content_ended | _ -> None)
+      value
+  in
+  Ok { owner = { content_generation; stream_scope }; block_index; channel; content_state }
 
 let decode_custom_chat_chunk json =
   let* name = required_nonblank_string json "name" in
@@ -1985,6 +2035,20 @@ let decode_custom_chat_chunk json =
       let* value = required_object_field json "value" in
       let* snapshot = required_string_field value "snapshot" in
       Ok (Chunk_thinking_snapshot { operation_id = outer_op_id; snapshot })
+  | "KEEPER_MODEL_CONTENT_ACTIVITY" ->
+      let* value = required_object_field json "value" in
+      let* activity = decode_model_content_activity value in
+      Ok (Chunk_model_content { operation_id = outer_op_id; activity })
+  | "KEEPER_STREAM_MESSAGE_STOP" ->
+      let* value = required_member json "value" in
+      let* owner =
+        match value with
+        | `Null -> Ok None
+        | _ ->
+            let* owner = Wire_chat_journal.decode_response_owner ~owner_field:"value" value in
+            Ok (Some owner)
+      in
+      Ok (Chunk_model_response_stop { operation_id = outer_op_id; owner })
   | "KEEPER_REPLY_DETAILS" ->
       let* value = required_object_field json "value" in
       let* reply = required_string_field value "reply" in
@@ -2007,7 +2071,7 @@ let decode_custom_chat_chunk json =
            })
   | "KEEPER_NATIVE_TOOL_START" ->
       let* value = required_object_field json "value" in
-      let* tool_use_id = resolve_tool_use_id value in
+      let* tool_use_id, stream_scope = resolve_tool_reference value in
       let* name_opt = optional_nonblank_string value "toolCallName" in
       let tool_name = Option.value name_opt ~default:"native_tool" in
       Ok
@@ -2015,6 +2079,7 @@ let decode_custom_chat_chunk json =
            {
              operation_id = outer_op_id;
              tool_use_id;
+             stream_scope;
              tool_name;
              args_preview = None;
            })
@@ -2039,18 +2104,25 @@ let decode_custom_chat_chunk json =
            })
   | "KEEPER_RUNTIME_ATTEMPT_STARTED" ->
       Ok (Chunk_runtime_attempt_started { operation_id = outer_op_id })
+  | "KEEPER_STREAM_PROTOCOL_ERROR" -> (
+      let* value = required_object_field json "value" in
+      let* occurrence = optional_object_field value "quarantined_occurrence" in
+      match occurrence with
+      | None -> Ok Chunk_ignored
+      | Some occurrence ->
+          let* scope = required_nonnegative_int_field occurrence "toolStreamScope" in
+          let* block = required_nonnegative_int_field occurrence "toolCallBlockIndex" in
+          Ok (Chunk_tool_quarantined
+                { operation_id = outer_op_id; tool_use_id = scoped_tool_use_id scope block }))
   | "KEEPER_CONNECTED"
   | "KEEPER_PROVIDER_RETRY"
   | "KEEPER_STREAM_MESSAGE_START"
   | "KEEPER_STREAM_MESSAGE_DELTA"
-  | "KEEPER_STREAM_MESSAGE_STOP"
   | "KEEPER_STREAM_PING"
   | "KEEPER_CONTENT_BLOCK_START"
   | "KEEPER_CONTENT_BLOCK_STOP"
-  | "KEEPER_MODEL_CONTENT_ACTIVITY"
   | "KEEPER_THINKING_SIGNATURE_DELTA"
   | "KEEPER_MEDIA_DELTA"
-  | "KEEPER_STREAM_PROTOCOL_ERROR"
   | "KEEPER_CHAT_BATCH_BOUND"
   | "KEEPER_CONTINUATION_CHECKPOINT"
   | "KEEPER_EXTERNAL_EFFECT_COMPLETED"
@@ -2115,7 +2187,7 @@ let decode_chat_stream_chunk json =
       Ok (Chunk_thinking_delta { operation_id; delta })
   | "tool_start" | "TOOL_CALL_START" ->
       let* operation_id = chunk_operation_id json in
-      let* tool_use_id = resolve_tool_use_id json in
+      let* tool_use_id, stream_scope = resolve_tool_reference json in
       let* name_camel = optional_nonblank_string json "toolCallName" in
       let* tool_name =
         match name_camel with
@@ -2124,7 +2196,7 @@ let decode_chat_stream_chunk json =
       in
       let* args_preview = optional_string_field json "args_preview" in
       Ok
-        (Chunk_tool_start { operation_id; tool_use_id; tool_name; args_preview })
+        (Chunk_tool_start { operation_id; tool_use_id; stream_scope; tool_name; args_preview })
   | "TOOL_CALL_ARGS" ->
       let* operation_id = chunk_operation_id json in
       let* tool_use_id = resolve_tool_use_id json in
@@ -2136,7 +2208,11 @@ let decode_chat_stream_chunk json =
         | other -> Some (Yojson.Safe.to_string other)
       in
       Ok (Chunk_tool_args { operation_id; tool_use_id; delta; snapshot })
-  | "tool_end" | "TOOL_CALL_END" ->
+  | "TOOL_CALL_END" ->
+      let* operation_id = chunk_operation_id json in
+      let* tool_use_id = resolve_tool_use_id json in
+      Ok (Chunk_tool_block_end { operation_id; tool_use_id })
+  | "tool_end" ->
       let* operation_id = chunk_operation_id json in
       let* tool_use_id = resolve_tool_use_id json in
       let* name_camel = optional_nonblank_string json "toolCallName" in

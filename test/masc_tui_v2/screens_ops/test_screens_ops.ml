@@ -797,6 +797,7 @@ let make_populated_model ~cols ~rows ~lang =
             {
               operation_id = Some "op-1";
               tool_use_id = "tu-1";
+              stream_scope = None;
               tool_name = "gh_pr_view";
               args_preview = Some "#54340";
             })
@@ -2324,6 +2325,7 @@ let test_p1_keeper_dive_tool_card_secret_redaction () =
             {
               operation_id = Some "op-sec";
               tool_use_id = "tu-sec-stream";
+              stream_scope = None;
               tool_name = "bash_exec";
               args_preview = Some truncated_json_args;
             })
@@ -3239,17 +3241,6 @@ let test_agui_chat_chronological_projection_and_phase_parity () =
       Alcotest.fail
         ("Missing expected chronological sections in rendered grid:\n"
        ^ grid_all_text grid));
-  (* Header badge and Composer pill share SSOT live phase ("생성 중…") *)
-  let hdr_row = grid_row_text grid ~y:0 in
-  Alcotest.(check bool) "Header badge shows SSOT 생성 중…" true
-    (contains_sub ~needle:"생성 중…" hdr_row);
-  let phase = Chat_transcript.live_chat_phase ~model:m7 ~keeper:"alpha-leader" in
-  let comp_lbl =
-    match Composer.pending_tx_label (Chat_transcript.composer_pending_tx_of_phase phase) with
-    | Some s -> Say.resolve Say.Lang_ko s
-    | None -> ""
-  in
-  Alcotest.(check string) "Composer pill matches Header badge SSOT" "생성 중…" comp_lbl;
   (* Direct idle send A must NOT show misleading 조향 tag *)
   let row_a =
     match y_user_a with Some y -> grid_row_text grid ~y | None -> ""

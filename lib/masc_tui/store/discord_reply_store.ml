@@ -100,7 +100,9 @@ let observe ~epoch ~workspace request result t =
             else Unobserved reason, None
       in
       Some (set ~epoch { a with phase; retry_content } t)
-  | Some _ | None -> None
+  | Some
+      { phase = Awaiting _ | Observed _ | Unobserved _ | Rejected _ | Absent _; _ }
+  | None -> None
 
 let status = function
   | Awaiting { request = Reply.Send _; _ } ->
@@ -135,7 +137,8 @@ let status = function
   | Absent { can_retry = false } ->
       `Failed, Say.make ~ko:"영수증 없음 · Enter로 다시 조회" ~en:"No receipt found · Enter checks again"
 
-let target_of_form = function
+let target_of_form (kind : Nav.inline_action_kind) =
+  match kind with
   | Nav.Discord_reply_form
       { keeper; chat_id; guild_id; channel_id; message_id;
         workspace_base_path; workspace_masc_root } ->
@@ -147,7 +150,58 @@ let target_of_form = function
         { base_path = workspace_base_path; masc_root = workspace_masc_root }
       in
       Some (target, workspace)
-  | _ -> None
+  | Nav.Btw_query
+  | Nav.Gate_reject _
+  | Nav.Verification_reject _
+  | Nav.Harness_overrule _
+  | Nav.Task_cancel _
+  | Nav.Goal_drop _
+  | Nav.Schedule_form
+  | Nav.Connector_form
+  | Nav.Repo_add_form
+  | Nav.Board_new_post
+  | Nav.Board_goal_proposal
+  | Nav.Goal_confirmation_proof
+  | Nav.Memory_act_form
+  | Nav.Wiki_edit_form
+  | Nav.Fusion_launch_form
+  | Nav.Runtime_assign_form
+  | Nav.Setup_account_key_form
+  | Nav.Setup_login_start_form
+  | Nav.Board_comment _
+  | Nav.Github_token_form _
+  | Nav.Code_finder_form
+  | Nav.Code_search_form
+  | Nav.Runtime_lane_create
+  | Nav.Runtime_lane_edit _
+  | Nav.Runtime_lane_delete _
+  | Nav.Task_create_form
+  | Nav.Task_transition_form _
+  | Nav.Task_link_goal _
+  | Nav.Goal_upsert_form _
+  | Nav.Board_delete_post _
+  | Nav.Keeper_lifecycle_form _
+  | Nav.Keeper_purge_confirm _
+  | Nav.Addon_attach_form
+  | Nav.Addon_detach_confirm _
+  | Nav.Addon_invoke_action _
+  | Nav.Setup_login_input_form _
+  | Nav.Keeper_control_confirm _
+  | Nav.Keeper_clear_form _
+  | Nav.Keeper_operator_note_form _
+  | Nav.Tool_execute_form _
+  | Nav.Skill_create_form
+  | Nav.Skill_edit_form _
+  | Nav.Skill_delete_confirm _
+  | Nav.Prompt_override_form _
+  | Nav.Preset_create_form
+  | Nav.Runtime_param_set_form _
+  | Nav.Default_route_edit
+  | Nav.Lane_rename_form _
+  | Nav.Addon_decl_form _
+  | Nav.Addon_act_form _
+  | Nav.Browser_interact_form _ ->
+      None
 
 let phase a = a.phase
 
@@ -158,4 +212,5 @@ let can_compose = function
 
 let rejected_content = function
   | Some { phase = Rejected _; retry_content; _ } -> retry_content
-  | _ -> None
+  | None
+  | Some { phase = Awaiting _ | Observed _ | Unobserved _ | Absent _; _ } -> None

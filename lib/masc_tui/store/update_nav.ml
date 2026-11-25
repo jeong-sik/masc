@@ -1479,7 +1479,58 @@ let open_inline_modal (m : Model.t) kind =
     match kind with
     | Nav.Discord_reply_form _ ->
         { modal with fields = discord_reply_fields (discord_reply_attempt m kind) modal }
-    | _ -> modal
+    | Nav.Btw_query
+    | Nav.Gate_reject _
+    | Nav.Verification_reject _
+    | Nav.Harness_overrule _
+    | Nav.Task_cancel _
+    | Nav.Goal_drop _
+    | Nav.Schedule_form
+    | Nav.Connector_form
+    | Nav.Repo_add_form
+    | Nav.Board_new_post
+    | Nav.Board_goal_proposal
+    | Nav.Goal_confirmation_proof
+    | Nav.Memory_act_form
+    | Nav.Wiki_edit_form
+    | Nav.Fusion_launch_form
+    | Nav.Runtime_assign_form
+    | Nav.Setup_account_key_form
+    | Nav.Setup_login_start_form
+    | Nav.Board_comment _
+    | Nav.Github_token_form _
+    | Nav.Code_finder_form
+    | Nav.Code_search_form
+    | Nav.Runtime_lane_create
+    | Nav.Runtime_lane_edit _
+    | Nav.Runtime_lane_delete _
+    | Nav.Task_create_form
+    | Nav.Task_transition_form _
+    | Nav.Task_link_goal _
+    | Nav.Goal_upsert_form _
+    | Nav.Board_delete_post _
+    | Nav.Keeper_lifecycle_form _
+    | Nav.Keeper_purge_confirm _
+    | Nav.Addon_attach_form
+    | Nav.Addon_detach_confirm _
+    | Nav.Addon_invoke_action _
+    | Nav.Setup_login_input_form _
+    | Nav.Keeper_control_confirm _
+    | Nav.Keeper_clear_form _
+    | Nav.Keeper_operator_note_form _
+    | Nav.Tool_execute_form _
+    | Nav.Skill_create_form
+    | Nav.Skill_edit_form _
+    | Nav.Skill_delete_confirm _
+    | Nav.Prompt_override_form _
+    | Nav.Preset_create_form
+    | Nav.Runtime_param_set_form _
+    | Nav.Default_route_edit
+    | Nav.Lane_rename_form _
+    | Nav.Addon_decl_form _
+    | Nav.Addon_act_form _
+    | Nav.Browser_interact_form _ ->
+        modal
   in
   let modal_edit_cursor = String.length (Model.modal_active_field_value modal) in
   let nav =
@@ -2282,16 +2333,35 @@ let discord_sources_in_history ~keeper (m : Model.t) =
     |> Masc_tui_term.Grapheme.truncate_to_width ~max_width:100
   in
   let source (row : Wire_fleet.chat_message) =
+    let discord_source name origin =
+      if String.equal row.id "" then None
+      else
+        Some ({ target = { keeper; chat_id = row.id; origin };
+                speaker = single_line name; excerpt = single_line row.content }
+              : Model.discord_source)
+    in
     match row.role with
+    | Wire_fleet.Role_user
+    | Wire_fleet.Role_assistant
+    | Wire_fleet.Role_system
+    | Wire_fleet.Role_tool
+    | Wire_fleet.Role_request_failure -> None
     | Wire_fleet.Role_peer
-        { peer = Wire_fleet.Peer_external name;
-          surface = Some (Wire_fleet.Surface_discord (Some origin)) } ->
-        if String.equal row.id "" then None
-        else
-          Some ({ target = { keeper; chat_id = row.id; origin };
-                  speaker = single_line name; excerpt = single_line row.content }
-                : Model.discord_source)
-    | _ -> None
+        { peer = Wire_fleet.Peer_keeper _ | Wire_fleet.Peer_unresolved _;
+          surface = _ } ->
+        None
+    | Wire_fleet.Role_peer { peer = Wire_fleet.Peer_external name; surface } ->
+        (match surface with
+         | Some (Wire_fleet.Surface_discord (Some origin)) -> discord_source name origin
+         | Some (Wire_fleet.Surface_discord None)
+         | Some
+             ( Wire_fleet.Surface_dashboard
+             | Wire_fleet.Surface_agent
+             | Wire_fleet.Surface_broadcast
+             | Wire_fleet.Surface_slack
+             | Wire_fleet.Surface_webhook
+             | Wire_fleet.Surface_gate _ )
+         | None -> None)
   in
   match Option.bind (Fleet_store.String_map.find_opt keeper m.fleet.chat_histories)
           Observed.to_option with
@@ -2311,7 +2381,11 @@ let palette_discord_sources (m : Model.t) =
                (String.concat " " [ speaker; excerpt; origin.channel_id;
                                     origin.original_message_id ])))
         sources
-  | _ -> []
+  | Model.Palette_commands
+  | Model.Palette_keepers
+  | Model.Palette_models
+  | Model.Palette_discord_replies _ ->
+      []
 
 let palette_len (m : Model.t) =
   match m.palette.mode with

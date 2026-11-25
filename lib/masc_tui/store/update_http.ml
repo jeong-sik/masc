@@ -299,8 +299,12 @@ let apply_http_reply ~now (m : Model.t) reply =
           | Error (Msg.Http_error { status = (400 | 401 | 403 | 404 | 409 | 413); _ } as error),
             Wire_discord_reply.Send _ ->
               Error (`Rejected (Msg.http_error_summary error))
-          | Error error, _ -> Error (`Unobserved (Msg.http_error_summary error))
-          | Ok state, _ -> Ok state
+          | Error (Msg.Transport _ | Msg.Workspace_mismatch _ | Msg.Decode_error _
+                   | Msg.Http_error _ as error),
+            (Wire_discord_reply.Send _ | Wire_discord_reply.Status _) ->
+              Error (`Unobserved (Msg.http_error_summary error))
+          | Ok state, (Wire_discord_reply.Send _ | Wire_discord_reply.Status _) ->
+              Ok state
         in
         (match Discord_reply_store.observe ~epoch:m.epoch ~workspace request result m.discord_replies with
          | None -> (m, [])

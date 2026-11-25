@@ -16516,6 +16516,46 @@ let test_active_turn_preview_visibility_and_queued_followup () =
          | Cmd.Http_get { req = Cmd.Get_keeper_turns; _ } -> true
          | _ -> false)
        (Cmd.flatten cmds_sse_other));
+  let m_queue =
+    { m0 with
+      drafts = Drafts.set_active_keeper keeper m0.drafts;
+      nav =
+        { m0.nav with
+          workspace = Nav.Knowledge;
+          dive_stack = [];
+          overlay = Some (Nav.Queue_context Nav.Drawer_queue);
+        };
+    }
+  in
+  let queue_event event =
+    let _, cmds =
+      Update.step ~now:t1 m_queue
+        (Msg.Sse_event
+           {
+             epoch = m_queue.epoch;
+             event =
+               Msg.Sse_observer_delivery
+                 { cursor = None; decoded = Wire_observer.Event event };
+           })
+    in
+    Cmd.flatten cmds
+  in
+  let queue_fetches_turns keeper =
+    queue_event (Wire_observer.Keeper_turn_changed { keeper; preview_only = true })
+    |> List.exists (function
+         | Cmd.Http_get { req = Cmd.Get_keeper_turns; _ } -> true
+         | _ -> false)
+  in
+  Alcotest.(check bool) "queue refreshes the selected Keeper outside Fleet"
+    true (queue_fetches_turns keeper);
+  Alcotest.(check bool) "queue ignores unrelated Keeper previews"
+    false (queue_fetches_turns "unrelated-keeper");
+  Alcotest.(check bool) "queue refreshes Task and Goal observations outside Work"
+    true
+    (queue_event (Wire_observer.Dataset_changed Wire_observer.Dataset_backlog)
+     |> List.exists (function
+          | Cmd.Http_get { req = Cmd.Get_planning; _ } -> true
+          | _ -> false));
   (* 8. Submitting while busy preserves a prior unpersisted stream buffer (tools/text)
      instead of wiping it with start_chat_stream. *)
   let prior_tool_buf : Fleet_store.chat_stream_buffer =
@@ -16660,7 +16700,7 @@ let test_turn_preview_updates_keep_owner_and_skip_fleet_reads () =
   let preview revision text : Wire_fleet.turn_preview =
     { status_text = "streaming"; activity = Preview_streaming; text_tail = text;
       last_tool = None; updated_at_unix = 100.0; revision = Some revision;
-      preparation = None }
+      preparation = None; work_context = None }
   in
   let row ~keeper_name ~token ~ref_id ~revision ~text : Wire_fleet.keeper_turn_row =
     { keeper_name; chat_control_token = Some (keeper_name ^ "-control");

@@ -3,6 +3,12 @@ open Masc_tui_protocol
 
 let get_cmd epoch req = Cmd.Http_get { epoch; req }
 
+let keeper_queue_target (m : Model.t) =
+  if Option.equal Nav.equal_overlay m.nav.overlay
+       (Some (Nav.Queue_context Nav.Drawer_queue))
+  then Model.target_keeper m
+  else None
+
 let is_viewing_keeper_context ~keeper (m : Model.t) =
   match m.nav.overlay with
   | Some (Nav.Queue_context Nav.Drawer_context) -> (
@@ -229,10 +235,14 @@ let apply_dataset_invalidation (m : Model.t) ds =
       let work =
         { m.work with planning = Observed.mark_stale m.work.planning }
       in
+      let wants_planning =
+        Option.is_some (keeper_queue_target m)
+        || (match ws with
+            | Nav.Work | Nav.Pulse -> true
+            | Nav.Knowledge | Nav.Keepers | Nav.Runtime | Nav.Infra -> false)
+      in
       let cmds =
-        match ws with
-        | Nav.Work | Nav.Pulse -> [ get_cmd e Cmd.Get_planning ]
-        | Nav.Knowledge | Nav.Keepers | Nav.Runtime | Nav.Infra -> []
+        if wants_planning then [ get_cmd e Cmd.Get_planning ] else []
       in
       ({ m with work }, cmds)
   | Wire_observer.Dataset_board ->
@@ -770,6 +780,10 @@ let apply_agent_core (m : Model.t) (ev : Wire_observer.agent_core_event) =
 let keeper_turns_changed ?keeper ?(preview_only = false) (m : Model.t) =
   let fleet = { m.fleet with turns = Observed.mark_stale m.fleet.turns } in
   let wants_turns =
+    (match keeper_queue_target m with
+    | Some target -> Option.fold ~none:true ~some:(String.equal target) keeper
+    | None -> false)
+    ||
     match Model.active_dive m with
     | Some (Nav.Dive_keeper { name; _ }) ->
         Option.fold ~none:true ~some:(String.equal name) keeper
@@ -865,8 +879,7 @@ let apply_observer_event (m : Model.t) = function
       let queue = { queue with read = Observed.mark_stale queue.read } in
       let next = { m with fleet = Fleet_store.set_chat_queue ~keeper queue m.fleet } in
       let reads =
-        if Option.equal Nav.equal_overlay m.nav.overlay (Some (Nav.Queue_context Nav.Drawer_queue))
-           && Option.equal String.equal (Model.target_keeper m) (Some keeper)
+        if Option.equal String.equal (keeper_queue_target m) (Some keeper)
         then [get_cmd m.epoch (Cmd.Get_chat_queue { keeper })] else []
       in
       (next, reads @ View_fetches.chat_status_fetches ~keeper next)

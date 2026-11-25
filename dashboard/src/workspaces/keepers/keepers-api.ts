@@ -232,10 +232,7 @@ function deriveCompany(name: string): string {
   return dash > 0 ? name.slice(0, dash) : 'General'
 }
 
-export function decodeKeeperRoster(
-  gateRaw: unknown,
-  turnsByKeeper: ReadonlyMap<string, TurnListItem> = new Map(),
-): KeeperRosterItem[] {
+export function decodeKeeperRoster(gateRaw: unknown): KeeperRosterItem[] {
   const list = isRecord(gateRaw) && Array.isArray(gateRaw.keepers) ? gateRaw.keepers : []
   const items: KeeperRosterItem[] = []
   for (const raw of list) {
@@ -263,7 +260,6 @@ export function decodeKeeperRoster(
       portraitEquipment = raw.portrait.equipment
     }
 
-    const turnRow = turnsByKeeper.get(name)
     const candleVal = typeof raw.candle_balance_milli === 'string' || typeof raw.candle_balance_milli === 'number'
       ? raw.candle_balance_milli
       : null
@@ -289,8 +285,8 @@ export function decodeKeeperRoster(
       turns_24h: turns24h,
       candle_balance_milli: candleVal,
       portrait_equipment: portraitEquipment,
-      chat_control_token: turnRow?.chat_control_token ?? null,
-      active_turn: turnRow?.active ?? null,
+      chat_control_token: null,
+      active_turn: null,
     })
   }
   return items
@@ -344,29 +340,41 @@ export const KEEPER_ROSTER_OBSERVER_TOPICS: readonly string[] = [
 ]
 
 const KEEPER_ROSTER_KEY = 'keepers:roster'
+const KEEPER_TURNS_KEY = 'keepers:turns'
 
-export async function loadKeeperRoster(reason: FetchReason = 'mount'): Promise<Observed<readonly KeeperRosterItem[]>> {
-  if (reason === 'sse') resourceCache.invalidateKey(KEEPER_ROSTER_KEY)
-  return resourceCache.fetch<readonly KeeperRosterItem[]>(
-    KEEPER_ROSTER_KEY,
-    async (signal) => {
-      const [gateRes, turnsRes] = await Promise.all([
-        apiGet<unknown>('/api/v1/gate/keepers?detailed=true', { signal }),
-        apiGet<unknown>('/api/v1/keepers/turns', { signal }),
-      ])
-      if (!gateRes.ok) return gateRes
-      const turnsMap = turnsRes.ok ? decodeTurnsList(turnsRes.value) : new Map<string, TurnListItem>()
-      return ok<readonly KeeperRosterItem[] | null>(decodeKeeperRoster(gateRes.value, turnsMap))
-    },
-    { ttlMs: 10_000, topics: KEEPER_ROSTER_OBSERVER_TOPICS, reason },
+function loadKeeperTurns(reason: FetchReason) {
+  return resourceCache.fetch<ReadonlyMap<string, TurnListItem>>(
+    KEEPER_TURNS_KEY,
+    (signal) => apiGet('/api/v1/keepers/turns', { signal, decode: decodeTurnsList }),
+    { ttlMs: 10_000, topics: ['keeper', 'keeper_turn', 'keeper_lifecycle', 'keeper_turn_changed'], reason },
   )
 }
 
+export function readKeeperRosterSources() {
+  return {
+    roster: resourceCache.observe<readonly KeeperRosterItem[]>(KEEPER_ROSTER_KEY).value,
+    turns: resourceCache.observe<ReadonlyMap<string, TurnListItem>>(KEEPER_TURNS_KEY).value,
+  }
+}
+
+export async function loadKeeperRoster(reason: FetchReason = 'mount'): Promise<void> {
+  if (reason === 'sse') {
+    resourceCache.invalidateKey(KEEPER_ROSTER_KEY)
+    resourceCache.invalidateKey(KEEPER_TURNS_KEY)
+  }
+  await Promise.all([
+    resourceCache.fetch<readonly KeeperRosterItem[]>(
+      KEEPER_ROSTER_KEY,
+      (signal) => apiGet('/api/v1/gate/keepers?detailed=true', { signal, decode: decodeKeeperRoster }),
+      { ttlMs: 10_000, topics: ['keeper', 'keeper_turn', 'keeper_lifecycle', 'keeper_row_changed', 'keeper_roster_changed'], reason },
+    ),
+    loadKeeperTurns(reason),
+  ])
+}
+
 export async function fetchKeeperControlToken(keeperName: string): Promise<string | null> {
-  const res = await apiGet<unknown>('/api/v1/keepers/turns')
-  if (!res.ok) return null
-  const map = decodeTurnsList(res.value)
-  return map.get(keeperName)?.chat_control_token ?? null
+  const turns = await loadKeeperTurns('manual')
+  return turns.kind === 'value' ? turns.data.get(keeperName)?.chat_control_token ?? null : null
 }
 
 // ── Lifecycle Mutations ──────────────────────────────────────────────────

@@ -737,6 +737,8 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
   })
 
   it('renders honest Portrait try-on preview (single bare item id) and KeepersWorkspace 2-pane shell', async () => {
+    let releaseTurns!: () => void
+    const waitForTurns = new Promise<void>((resolve) => { releaseTurns = resolve })
     const requestedUrls: string[] = []
     const mockFetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
@@ -778,7 +780,10 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
           ],
         })
       }
-      if (url.includes('/api/v1/keepers/turns')) return json({ keepers: [] })
+      if (url.includes('/api/v1/keepers/turns')) {
+        await waitForTurns
+        return json({ keepers: [{ keeper_name: 'code-reviewer-sister', turn: { lane: 'chat_operation' } }] })
+      }
       if (url.includes('/portrait.png')) {
         return new Response(new Blob(['png'], { type: 'image/png' }), {
           status: 200,
@@ -814,10 +819,37 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     const ws = render(
       html`<${KeepersWorkspace} subroute="" entityId="code-reviewer-sister" entityTab="chat" onNavigate=${onNavigate} onInspect=${vi.fn()} />`,
     )
-    await waitFor(() => expect(ws.container.textContent).toContain('code-reviewer-sister'))
+    await waitFor(() => expect(ws.getByRole('heading', { name: 'code-reviewer-sister' })).toBeTruthy())
+    expect(ws.queryByText('턴 상태 조회 중…')).toBeTruthy()
     expect(ws.container.querySelectorAll('*').length).toBeLessThan(1200)
     fireEvent.click(ws.getByRole('tab', { name: 'Memory' }))
     expect(onNavigate).toHaveBeenCalledWith('/keepers/code-reviewer-sister/memory')
+
+    releaseTurns()
+    await waitFor(() => expect(ws.queryByText('● Turn (chat_operation)')).toBeTruthy())
+  })
+
+  it('does not send a pending Steer after leaving the Keeper chat', async () => {
+    let releaseTurns!: () => void
+    const waitForTurns = new Promise<void>((resolve) => { releaseTurns = resolve })
+    const mockFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/api/v1/keepers/turns')) await waitForTurns
+      return new Response(JSON.stringify({ keepers: [], messages: [], operations: [] }), {
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+    vi.stubGlobal('fetch', mockFetch)
+    const view = render(html`<${KeeperChatTab}
+      keeper=${makeRosterKeeper({ chat_control_token: null })} onInspect=${vi.fn()} onMutated=${vi.fn()}
+    />`)
+    const input = view.getByLabelText('Keeper 채팅 입력')
+    fireEvent.input(input, { target: { value: 'Steer current Keeper' } })
+    fireEvent.keyDown(input, { key: 'Enter', metaKey: true })
+    await waitFor(() => expect(mockFetch.mock.calls.some(([url]) => String(url).endsWith('/api/v1/keepers/turns'))).toBe(true))
+    view.unmount()
+    await act(async () => releaseTurns())
+    expect(mockFetch.mock.calls.some(([url]) => String(url).includes('/api/v1/keepers/chat/stream'))).toBe(false)
   })
 
   it('sends raw binary audio for Voice STT, decodes diff_vs_prev.changed, guards Clear/Reset with TargetLockedAction, and preserves Config drafts on OAuth toggle', async () => {

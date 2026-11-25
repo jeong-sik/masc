@@ -376,7 +376,7 @@ export function buildPulseKpis(params: {
     if (anyTok) totalTokens = tokSum
   }
 
-  const turnsKpi: PulseKpiCard = shell.kind === 'loading' && keepers.kind === 'loading'
+  const turnsKpi: PulseKpiCard = turnsTotal === null && (shell.kind === 'loading' || keepers.kind === 'loading')
     ? {
         id: 'turns_24h',
         label: 'Turns / 24h',
@@ -412,9 +412,11 @@ export function buildPulseKpis(params: {
 
   // 4. Spend / 24h ($0 Sub / $0 Exhausted / ? Unreported aware; keeper-costs caps at 1440m)
   const shellCost = shell.kind === 'value' ? shell.data.scorecard.cost_24h_usd : null
+  const cls = classifySpendStatus(costs, usage, shellCost)
   const scopeNote = win === '24h' ? '' : ` (비용 24h · 쿼터 ${win === '7d' ? '7d' : '14d'})`
   let spendKpi: PulseKpiCard
-  if (costs.kind === 'loading' && shell.kind === 'loading') {
+  if ((cls.kind === 'absent' || cls.kind === 'unreported')
+      && (costs.kind === 'loading' || shell.kind === 'loading' || usage.kind === 'loading')) {
     spendKpi = {
       id: 'spend_24h',
       label: 'Spend / 24h',
@@ -425,7 +427,6 @@ export function buildPulseKpis(params: {
       route: '/runtime/quotas',
     }
   } else {
-    const cls = classifySpendStatus(costs, usage, shellCost)
     switch (cls.kind) {
       case 'reported':
         spendKpi = {

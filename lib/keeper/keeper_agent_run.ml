@@ -1762,11 +1762,12 @@ let run_turn
                              Some observation)
                       ~on_refused_model_input:
                         (fun refused -> refused_model_input_ref := Some refused)
-                      ~carried_front_seed:(fun () ->
+                      ~carried_front_seed:(fun ~runtime_id ->
                         Keeper_carried_front.read_seed
                           ~config
                           ~keeper_name:meta.name
-                          ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id))
+                          ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+                          ~runtime_id)
                       ~official_client_composed_context:(fun () ->
                         acc.Keeper_run_tools_hook_accumulator.extra_system_context_assembly)
                       ~on_request_attribution:

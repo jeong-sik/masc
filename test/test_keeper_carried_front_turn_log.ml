@@ -154,7 +154,7 @@ let completed_turn config ~turn ~before ~after =
 ;;
 
 let seed_atom config =
-  (Front.read_seed ~config ~keeper_name ~trace_id).Front.seed
+  (Front.read_seed ~config ~keeper_name ~trace_id ~runtime_id:"glm").Front.seed
   |> Option.map (fun (seed : Front.seed) -> seed.first_atom)
 ;;
 
@@ -210,7 +210,7 @@ let test_turn_log_errors_are_not_turn_record_errors () =
   let path = log_path config in
   Fs_compat.mkdir_p (Filename.dirname path);
   Out_channel.with_open_bin path (fun output -> output_string output "{not-json\n");
-  let read = Front.read_seed ~config ~keeper_name ~trace_id in
+  let read = Front.read_seed ~config ~keeper_name ~trace_id ~runtime_id:"glm" in
   check bool "an unread boundary admits no seed" true (Option.is_none read.Front.seed);
   check bool "no TurnRecord was counted unreadable" true (Option.is_none read.Front.unreadable);
   check bool "the turn log failure has its own channel" true

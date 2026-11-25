@@ -260,7 +260,7 @@ let test_restart_rows_restore_only_a_response_observed_front () =
            (Some (5, 110)))
     ]
   in
-  let read = Front.seed_read_of_rows ~trace_id:"trace-1" rows in
+  let read = Front.seed_read_of_rows ~trace_id:"trace-1" ~runtime_id:"glm" rows in
   let first_atom, src = seed read.Front.seed in
   check int "restart restores the answered range" 70 first_atom;
   check source "the refused latest row is skipped"
@@ -279,7 +279,7 @@ let test_a_refusal_stands_until_a_newer_response () =
       (Some (40, 110))
   in
   let read rows =
-    Front.seed_read_of_rows ~trace_id:"trace-1" (List.map Turn_record.to_json rows)
+    Front.seed_read_of_rows ~trace_id:"trace-1" ~runtime_id:"muse" (List.map Turn_record.to_json rows)
   in
   let standing = read [ accepted; refused ] in
   (match standing.Front.refused_start with
@@ -290,9 +290,20 @@ let test_a_refusal_stands_until_a_newer_response () =
    | None -> fail "the newest refusal was not read");
   check int "the accepted range behind it is still the seed" 70
     (fst (seed standing.Front.seed));
-  let answered = read [ accepted; refused; record ~turn:12 (Some (20, 120)) ] in
-  check bool "a newer response ends the refusal" true
-    (Option.is_none answered.Front.refused_start)
+  let answered = read [ accepted; refused; record ~turn:12 ~runtime:"muse" (Some (20, 120)) ] in
+  check bool "a newer response from the refusing runtime ends the refusal" true
+    (Option.is_none answered.Front.refused_start);
+  let failed_over = read [ accepted; refused; record ~turn:12 (Some (20, 120)) ] in
+  check (option int) "another runtime's response leaves it standing (#54719)" (Some 11)
+    (Option.map (fun (r : Front.refused_start) -> r.turn) failed_over.Front.refused_start);
+  check int "and that response is the seed" 100
+    (fst (seed failed_over.Front.seed));
+  let asked_by_another =
+    Front.seed_read_of_rows ~trace_id:"trace-1" ~runtime_id:"glm"
+      (List.map Turn_record.to_json [ accepted; refused ])
+  in
+  check bool "a refusal speaks only for its runtime" true
+    (Option.is_none asked_by_another.Front.refused_start)
 ;;
 
 (* A response-observed range remains valid even when the whole turn later
@@ -315,7 +326,7 @@ let test_the_joined_observation_names_the_runtime () =
         ~response_runtime:"gone" (Some (30, 100)) ]
   in
   let read =
-    Front.seed_read_of_rows ~trace_id:"trace-1"
+    Front.seed_read_of_rows ~trace_id:"trace-1" ~runtime_id:"glm"
       (List.map Turn_record.to_json records)
   in
   check bool "the current response record decodes" true (Option.is_none read.unreadable);
@@ -518,7 +529,7 @@ let test_rows_that_do_not_decode_are_counted_with_the_first_reason () =
     ; without "keeper" (Turn_record.to_json (record ~turn:9 (Some (5, 95))))
     ]
   in
-  let read = Front.seed_read_of_rows ~trace_id:"trace-1" rows in
+  let read = Front.seed_read_of_rows ~trace_id:"trace-1" ~runtime_id:"glm" rows in
   check int "the seed is the record that decodes" 70
     (fst (seed read.Front.seed));
   match read.Front.unreadable with
@@ -529,7 +540,7 @@ let test_rows_that_do_not_decode_are_counted_with_the_first_reason () =
       (Astring.String.is_infix ~affix:"model_input_front" unreadable.Front.first_reason);
     check bool "every row decoding counts nothing" true
       (Option.is_none
-         (Front.seed_read_of_rows ~trace_id:"trace-1" [ current ]).Front.unreadable)
+         (Front.seed_read_of_rows ~trace_id:"trace-1" ~runtime_id:"glm" [ current ]).Front.unreadable)
 ;;
 
 let with_turn_record_store f =
@@ -567,7 +578,7 @@ let test_empty_response_replaces_old_seed_and_validates_the_omitted_end () =
     } in
   List.iter (fun row -> Dated_jsonl.append store (Turn_record.to_json row))
     [ record ~turn:1 (Some (4, 10)); answered ];
-  let selected = Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1"
+  let selected = Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1" ~runtime_id:"glm"
     |> fun read -> Option.get read.seed in
   check int "accepted empty request supersedes the older front" 10 selected.first_atom;
   check bool "the omitted last atom witnesses the boundary" true
@@ -630,7 +641,7 @@ let test_read_seed_keeps_a_response_beyond_unobserved_rows () =
   check int "all rows are still stored" (unobserved_rows + 1) (List.length stored_rows);
   check bool "the observed row was not pruned" true
     (List.exists (Yojson.Safe.equal observed_json) stored_rows);
-  let read = Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1" in
+  let read = Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1" ~runtime_id:"glm" in
   check bool "every visited record decodes" true (Option.is_none read.Front.unreadable);
   check (option int) "the retained response supplies front 8" (Some 8)
     (Option.map (fun (front : Front.seed) -> front.first_atom) read.Front.seed);
@@ -679,7 +690,7 @@ let test_a_restarted_turn_starts_at_the_recorded_accepted_start () =
          model_input_window = Some window
        ; response_observed_model_input = Some { runtime_profile = "glm"; window }
        });
-  let accepted = (Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1").Front.seed in
+  let accepted = (Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1" ~runtime_id:"glm").Front.seed in
   let next_tick = persisted @ [ text_message Types.User "next tick" ] in
   let start ~point ~boundary =
     let continuity =
@@ -708,8 +719,8 @@ let test_a_restarted_turn_starts_at_the_recorded_accepted_start () =
     (start ~point:2 ~boundary:5)
 ;;
 
-(* The store scan reads newest first and stops at the seed, so it meets the
-   refusal only when nothing answered after it. *)
+(* The store scan reads newest first and stops once it holds the seed and the
+   asking runtime's own newest response or refusal. *)
 let test_read_seed_reads_a_refusal_newer_than_every_response () =
   let refused turn =
     record ~turn ~runtime:"muse" ~finish:None ~response_observed:false ~refused:true
@@ -718,22 +729,26 @@ let test_read_seed_reads_a_refusal_newer_than_every_response () =
   let stored records =
     with_turn_record_store @@ fun config store ->
     List.iter (fun row -> Dated_jsonl.append store (Turn_record.to_json row)) records;
-    Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1"
+    Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1" ~runtime_id:"muse"
   in
   let standing = stored [ record ~turn:10 (Some (30, 100)); refused 11; refused 12 ] in
   check (option int) "the newest refusal stands" (Some 12)
     (Option.map (fun (r : Front.refused_start) -> r.turn) standing.Front.refused_start);
   check int "and the accepted range behind it is the seed" 70
     (fst (seed standing.Front.seed));
-  let answered = stored [ refused 11; record ~turn:12 (Some (30, 120)) ] in
-  check bool "a refusal behind a response is not read" true
-    (Option.is_none answered.Front.refused_start)
+  let answered = stored [ refused 11; record ~turn:12 ~runtime:"muse" (Some (30, 120)) ] in
+  check bool "a refusal behind the same runtime's response is not read" true
+    (Option.is_none answered.Front.refused_start);
+  let failed_over = stored [ refused 11; record ~turn:12 (Some (30, 120)) ] in
+  check (option int) "the scan reads past another runtime's response (#54719)" (Some 11)
+    (Option.map (fun (r : Front.refused_start) -> r.turn) failed_over.Front.refused_start);
+  check int "whose range is still the seed" 90 (fst (seed failed_over.Front.seed))
 ;;
 
 (* A direct retry may reuse its turn number, so stored order decides which of
    one turn's records is newer. The row reader and the store scan must agree. *)
 let test_both_readers_take_the_stored_order_within_a_turn () =
-  let response = record ~turn:10 (Some (30, 100)) in
+  let response = record ~turn:10 ~runtime:"muse" (Some (30, 100)) in
   let refusal =
     record ~turn:10 ~runtime:"muse" ~finish:None ~response_observed:false ~refused:true
       (Some (40, 100))
@@ -743,12 +758,12 @@ let test_both_readers_take_the_stored_order_within_a_turn () =
     Option.map (fun (refused : Front.refused_start) -> refused.turn) read.Front.refused_start
   in
   let rows records =
-    Front.seed_read_of_rows ~trace_id:"trace-1" (List.map Turn_record.to_json records)
+    Front.seed_read_of_rows ~trace_id:"trace-1" ~runtime_id:"muse" (List.map Turn_record.to_json records)
   in
   let stored records =
     with_turn_record_store @@ fun config store ->
     List.iter (fun row -> Dated_jsonl.append store (Turn_record.to_json row)) records;
-    Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1"
+    Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1" ~runtime_id:"muse"
   in
   List.iter
     (fun (label, records, expected) ->
@@ -772,7 +787,7 @@ let test_read_seed_uses_the_last_response_when_a_retry_reuses_the_turn () =
     ]
   in
   List.iter (fun row -> Dated_jsonl.append store (Turn_record.to_json row)) records;
-  let read = Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1" in
+  let read = Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1" ~runtime_id:"glm" in
   check int "the latest response on this trace supplies front 85" 85
     (fst (seed read.Front.seed));
   check int "the chronological row reader resolves the same turn the same way" 85
@@ -790,7 +805,7 @@ let test_read_seed_counts_only_unreadable_rows_visited_before_the_response () =
   let older_refusal = without "model_input_front" in
   List.iter (Dated_jsonl.append store)
     [ `Null; current; older_refusal; without "keeper" ];
-  let read = Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1" in
+  let read = Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1" ~runtime_id:"glm" in
   check int "unreadable rows do not hide the response" 70
     (fst (seed read.Front.seed));
   match read.Front.unreadable, Turn_record.of_json older_refusal with
@@ -809,7 +824,7 @@ let test_read_seed_stops_at_previous_trace () =
   Dated_jsonl.append store
     (Turn_record.to_json
        (record ~turn:10 ~finish:None ~response_observed:false None));
-  let read = Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1" in
+  let read = Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1" ~runtime_id:"glm" in
   check bool "the prior trace does not supply a seed" true (Option.is_none read.Front.seed);
   check bool "rows older than the trace boundary are not decoded" true
     (Option.is_none read.Front.unreadable)
@@ -845,7 +860,7 @@ let test_read_seed_stops_at_a_floor_response () =
     }
   in
   Dated_jsonl.append store (Turn_record.to_json floor);
-  let read = Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1" in
+  let read = Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1" ~runtime_id:"glm" in
   check bool "every visited record decodes" true (Option.is_none read.Front.unreadable);
   let front =
     match read.Front.seed with
@@ -903,7 +918,7 @@ let test_history_after_a_floor_is_at_least_the_floor_total_plus_one () =
     }
   in
   Dated_jsonl.append store (Turn_record.to_json floor);
-  let read = Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1" in
+  let read = Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1" ~runtime_id:"glm" in
   let front =
     match read.Front.seed with
     | Some front -> front

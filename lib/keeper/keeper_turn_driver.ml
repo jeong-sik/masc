@@ -2697,7 +2697,7 @@ let run_named
 	     candidates too. Those lanes hold no ledger of their own — it is
 	     written from the usage of a request this process composed — so this
 	     is their whole answer. *)
-	  let official_client_carried_front_seed () : Keeper_carried_front.seed_read =
+	  let official_client_carried_front_seed ~runtime_id : Keeper_carried_front.seed_read =
 	    match !refused_carried_front with
 	    | Some seed ->
 	      (* The front this turn moved replaces the stored seed. A runtime's
@@ -2705,13 +2705,13 @@ let run_named
 	         sit exactly where that runtime was refused. *)
 	      let refused_start =
 	        match carried_front_seed with
-	        | Some read -> (read ()).Keeper_carried_front.refused_start
+	        | Some read -> (read ~runtime_id).Keeper_carried_front.refused_start
 	        | None -> None
 	      in
 	      { Keeper_carried_front.no_seed_read with seed = Some seed; refused_start }
 	    | None ->
 	      (match carried_front_seed with
-	       | Some read -> read ()
+	       | Some read -> read ~runtime_id
 	       | None -> Keeper_carried_front.no_seed_read)
 	  in
 	  (* The official-client branches take the continuity the Agent Core branch
@@ -4256,9 +4256,9 @@ let run_named
                  leaves the first request to that boundary, or to the
                  point. *)
               carried_front_seed =
-                (fun () ->
+                (fun ~runtime_id ->
                    match carried_front_seed with
-                   | Some read -> read ()
+                   | Some read -> read ~runtime_id
                    | None -> Keeper_carried_front.no_seed_read)
             ; carried_front_after_refusal = (fun () -> !refused_carried_front)
             ; hold_carried_front = (fun seed -> refused_carried_front := Some seed)

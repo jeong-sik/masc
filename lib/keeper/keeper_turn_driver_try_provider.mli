@@ -352,7 +352,7 @@ type try_provider_ctx =
             unchanged to Runtime_agent preflight. [None] retains runtime-ID
             lookup for callers without a materialized selection. *)
   ; error_runtime_id : string
-  ; carried_front_seed : unit -> Keeper_carried_front.seed_read
+  ; carried_front_seed : Keeper_carried_front.seed_reader
         (** The durable seed: with no Librarian point, read only when
             neither the pair's ledger nor a refusal in this turn supplies the
             front; with one, the accepted start {!choose_range_start} weighs

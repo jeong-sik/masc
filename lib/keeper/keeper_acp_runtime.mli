@@ -54,7 +54,7 @@ val run :
   ?terminal_effect_state:(unit -> Keeper_tools_agent_core.terminal_effect_state) ->
   ?on_model_input_window_observation:
     (Runtime_model_input_tail_window.window_observation -> unit) ->
-  ?carried_front_seed:(unit -> Keeper_carried_front.seed_read) ->
+  ?carried_front_seed:Keeper_carried_front.seed_reader ->
   ?librarian_front:Keeper_turn_driver_try_provider.continuity ->
   ?on_carried_front:Keeper_official_client_host.carried_front_observer ->
   turn_start:Keeper_carried_front.turn_start ->

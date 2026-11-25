@@ -253,7 +253,7 @@ type try_provider_ctx =
        this (keeper, runtime) pair: the range the newest completed Agent Core
        turn record on the trace measured, whichever runtime ran it. Read once
        per attempt, on that path only. *)
-    carried_front_seed : unit -> Keeper_carried_front.seed_read
+    carried_front_seed : Keeper_carried_front.seed_reader
   ; request_input : request_input
   ; turn_boundary : Keeper_carried_front.turn_start
   ; this_turn_start : int option
@@ -2383,7 +2383,7 @@ let bounded_model_input_projection
   let boundary_anchor_checked = ref false in
   (* The cold-start seed is read once per attempt and only when no ledger
      answers; every response updates the working ledger even without usage. *)
-  let cold_seed = lazy (ctx.carried_front_seed ()) in
+  let cold_seed = lazy (ctx.carried_front_seed ~runtime_id:ctx.runtime_id) in
   (* The binding's unified input-token limit (context window minus codec
      output reservation), which the size signal compares the ledger's counts
      against; read once per attempt. *)

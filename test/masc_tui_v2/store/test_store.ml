@@ -24976,5 +24976,62 @@ let () =
               in
               Alcotest.(check bool) "Artifact_dive '>' steps to revision 3" true
                 (has_rev_get 3 cmds_dive_gt));
+          Alcotest.test_case
+            "Epoch transition clears stuck MCP form/result, pending addon decl, and interrupting turn tokens"
+            `Quick
+            (fun () ->
+              let m0 = Model.initial () in
+              let m1, _ =
+                Update.step ~now:t0 m0
+                  (Msg.Server_health_result
+                     {
+                       epoch = m0.epoch;
+                       result = Ok (sample_health ~instance:"inst-old" ());
+                     })
+              in
+              let m_busy =
+                {
+                  m1 with
+                  fleet =
+                    {
+                      m1.fleet with
+                      interrupting_turn_tokens =
+                        Fleet_store.String_map.singleton "alpha" "itok-stale";
+                    };
+                  runtime =
+                    {
+                      m1.runtime with
+                      mcp_call_form = Some (1, Nav.Schedule_form);
+                      mcp_call_result = Observed.loading ~since_ns:t0;
+                      pending_addon_decl_path = Some "addons/test.toml";
+                    };
+                }
+              in
+              let m_next, _ =
+                Update.step ~now:t1 m_busy
+                  (Msg.Server_health_result
+                     {
+                       epoch = m_busy.epoch;
+                       result =
+                         Error
+                           (Msg.Workspace_mismatch
+                              {
+                                expected_instance = Some "inst-old";
+                                observed_instance = Some "inst-new";
+                                observed_workspace_sha256 = None;
+                                message = "server restarted with new instance";
+                              });
+                     })
+              in
+              Alcotest.(check bool) "epoch incremented on new instance_id" true
+                (not (Epoch.equal m_busy.epoch m_next.epoch));
+              Alcotest.(check bool) "interrupting_turn_tokens cleared" true
+                (Fleet_store.String_map.is_empty m_next.fleet.interrupting_turn_tokens);
+              Alcotest.(check bool) "mcp_call_form cleared" true
+                (Option.is_none m_next.runtime.mcp_call_form);
+              Alcotest.(check bool) "loading mcp_call_result cleared to Absent" true
+                (not (Observed.is_loading m_next.runtime.mcp_call_result));
+              Alcotest.(check bool) "pending_addon_decl_path cleared" true
+                (Option.is_none m_next.runtime.pending_addon_decl_path));
         ] );
     ]

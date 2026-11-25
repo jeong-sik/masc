@@ -4050,6 +4050,54 @@ let test_settings_tui_enum_rendering_and_zero_double_brackets () =
         txt)
     (mk_cases base_ko "ko" @ mk_cases base_en "en")
 
+let test_render_util_redaction_linear_and_embedded_cap () =
+  (* 1. Secrets embedded INSIDE a quoted non-secret field must still be redacted. *)
+  let inner_bearer =
+    Render_util.redact_plain_text_secrets
+      {|"detail":"Upstream failed: Authorization: Bearer sk-INNERBEARER999"|}
+  in
+  assert_not_contains ~label:"inner_bearer_hidden" ~needle:"sk-INNERBEARER999"
+    inner_bearer;
+  assert_contains ~label:"inner_bearer_redacted" ~needle:"[redacted]"
+    inner_bearer;
+  let inner_kv =
+    Render_util.redact_plain_text_secrets
+      {|"message":"retrying with api_key=sk-INNERKEY888 on host"|}
+  in
+  assert_not_contains ~label:"inner_kv_hidden" ~needle:"sk-INNERKEY888" inner_kv;
+  assert_contains ~label:"inner_kv_redacted" ~needle:"[redacted]" inner_kv;
+  (* 2. Pathological repeated escaped quotes + trailing secret stays linear and redacts. *)
+  let repeated = String.concat "" (List.init 2000 (fun _ -> {|\"x|})) in
+  let big_quoted =
+    "\"" ^ repeated ^ " Bearer sk-PATHOLOGICAL777\""
+  in
+  let redacted_big = Render_util.redact_plain_text_secrets big_quoted in
+  assert_not_contains ~label:"pathological_secret_hidden"
+    ~needle:"sk-PATHOLOGICAL777" redacted_big;
+  assert_contains ~label:"pathological_secret_redacted" ~needle:"[redacted]"
+    redacted_big;
+  (* 3. Unterminated trailing quote with subsequent quotes & secret stays linear and redacts. *)
+  let unterminated =
+    "\"" ^ repeated ^ " token=ghp_UNTERMINATED666"
+  in
+  let redacted_unterm = Render_util.redact_plain_text_secrets unterminated in
+  assert_not_contains ~label:"unterminated_secret_hidden"
+    ~needle:"ghp_UNTERMINATED666" redacted_unterm;
+  assert_contains ~label:"unterminated_secret_redacted" ~needle:"[redacted]"
+    redacted_unterm;
+  (* 4. extract_embedded_json caps oversized strings and repeated invalid openings. *)
+  let oversized = "{" ^ String.make 300_000 ' ' ^ "}" in
+  Alcotest.(check bool) "oversized embedded json rejected" true
+    (Option.is_none (Render_util.extract_embedded_json oversized));
+  let many_broken =
+    String.concat "" (List.init 12 (fun _ -> "{bad ")) ^ {|{"ok":true}|}
+  in
+  Alcotest.(check bool) "excessive broken json openings capped" true
+    (Option.is_none (Render_util.extract_embedded_json many_broken));
+  let small_prefixed = {|HTTP 500: {"ok":true}|} in
+  Alcotest.(check bool) "small prefixed json still extracts" true
+    (Option.is_some (Render_util.extract_embedded_json small_prefixed))
+
 let () =
   Alcotest.run "masc_tui_screens_core"
     [
@@ -4057,6 +4105,8 @@ let () =
         [
           Alcotest.test_case "Render_util.string_of_transport_error formats all 5 Timeout_detail phases in KO & EN"
             `Quick test_render_util_timeout_detail_labels;
+          Alcotest.test_case "Render_util redaction stays linear on pathological quotes & caps embedded JSON"
+            `Quick test_render_util_redaction_linear_and_embedded_cap;
           Alcotest.test_case "compact 3-row auto-fold and expand triggers" `Quick
             test_compact_chrome_auto_fold;
           Alcotest.test_case "footer never overflows across 80/90/140/180 KO & EN" `Quick

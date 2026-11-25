@@ -1549,7 +1549,9 @@ let test_worker_and_voice_runner () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let worker = Worker_pool.create ~sw (Eio.Stdenv.domain_mgr env) in
-  Alcotest.(check int) "worker domain_count=1" 1 (Worker_pool.domain_count worker);
+  let worker_domains = Worker_pool.domain_count worker in
+  Alcotest.(check bool) "worker domain_count in 2..4" true
+    (worker_domains >= 2 && worker_domains <= 4);
   let p =
     Worker_pool.submit_result_async worker ~sw ~name:"test_sum" (fun () -> Ok (21 + 21))
   in
@@ -6974,12 +6976,57 @@ let test_keeper_lifecycle_wire_codecs () =
       Alcotest.failf "expected HTTP 202 to succeed, got %s"
         (Http_client.http_error_to_string err)
 
+let test_unfold_json_strings_bounded () =
+  (* 1. Shallow JSON-in-string unfolds cleanly. *)
+  let shallow = `Assoc [ ("payload", `String {|{"ok":true}|}) ] in
+  (match Wire_keeper_context.unfold_json_strings shallow with
+  | `Assoc [ ("payload", `Assoc [ ("ok", `Bool true) ]) ] -> ()
+  | _ -> Alcotest.fail "expected shallow JSON string to unfold");
+  (* 2. Oversized JSON-in-string (>128 KB) stays untouched as a String. *)
+  let big_inner = {|{"blob":"|} ^ String.make 140_000 'a' ^ {|"}|} in
+  (match Wire_keeper_context.unfold_json_strings (`String big_inner) with
+  | `String s -> Alcotest.(check int) "oversized string preserved" (String.length big_inner) (String.length s)
+  | _ -> Alcotest.fail "expected oversized JSON string to remain folded");
+  (* 3. Deeply nested JSON-in-string stops unfolding past depth cap. *)
+  let deep =
+    let rec nest n acc =
+      if n <= 0 then acc
+      else nest (n - 1) (Yojson.Safe.to_string (`Assoc [ ("v", `String acc) ]))
+    in
+    `String (nest 8 {|{"leaf":1}|})
+  in
+  let rec max_depth = function
+    | `Assoc fields ->
+        1 + List.fold_left (fun acc (_, v) -> max acc (max_depth v)) 0 fields
+    | `List items ->
+        1 + List.fold_left (fun acc v -> max acc (max_depth v)) 0 items
+    | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> 0
+  in
+  Alcotest.(check bool) "deep nested unfold bounded by depth cap" true
+    (max_depth (Wire_keeper_context.unfold_json_strings deep) <= 5);
+  (* 4. Wide list of >64 JSON strings stops unfolding once budget is spent. *)
+  let many =
+    `List (List.init 80 (fun i -> `String (Printf.sprintf {|{"i":%d}|} i)))
+  in
+  match Wire_keeper_context.unfold_json_strings many with
+  | `List items ->
+      let unfolded_count =
+        List.fold_left
+          (fun acc -> function `Assoc _ -> acc + 1 | _ -> acc)
+          0 items
+      in
+      Alcotest.(check bool) "wide unfold bounded to <= 64 calls" true
+        (unfolded_count > 0 && unfolded_count <= 64)
+  | _ -> Alcotest.fail "expected list result from unfold_json_strings"
+
 let () =
   Alcotest.run "masc_tui_v2_protocol_net"
     [
       ( "protocol"
       , [
           Alcotest.test_case "wire_common" `Quick test_wire_common;
+          Alcotest.test_case "unfold_json_strings_bounded" `Quick
+            test_unfold_json_strings_bounded;
           Alcotest.test_case "wire_fleet" `Quick test_wire_fleet;
           Alcotest.test_case "queued operation pages" `Quick test_chat_queue_pages;
           Alcotest.test_case "agui_chat_stream_and_history_provenance" `Quick

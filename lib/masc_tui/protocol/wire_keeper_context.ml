@@ -992,23 +992,39 @@ let decode_tool_result json =
            })
   | other -> Error ("unknown tool-result state: " ^ other)
 
-let rec unfold_json_strings (json : Yojson.Safe.t) : Yojson.Safe.t =
-  match json with
-  | `Assoc fields ->
-      `Assoc (List.map (fun (k, v) -> (k, unfold_json_strings v)) fields)
-  | `List items -> `List (List.map unfold_json_strings items)
-  | `String text ->
-      let trimmed = String.trim text in
-      if
-        String.length trimmed >= 2
-        && (Char.equal trimmed.[0] '{' || Char.equal trimmed.[0] '[')
-      then
-        match Yojson.Safe.from_string trimmed with
-        | (`Assoc _ | `List _) as doc -> unfold_json_strings doc
-        | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> json
-        | exception Yojson.Json_error _ -> json
-      else json
-  | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> json
+let max_unfold_depth = 4
+let max_unfold_string_bytes = 131_072
+let max_unfold_calls = 64
+
+let unfold_json_strings (json : Yojson.Safe.t) : Yojson.Safe.t =
+  let remaining = ref max_unfold_calls in
+  let rec go ~depth (node : Yojson.Safe.t) : Yojson.Safe.t =
+    if depth <= 0 || !remaining <= 0 then node
+    else
+      match node with
+      | `Assoc fields ->
+          `Assoc (List.map (fun (k, v) -> (k, go ~depth:(depth - 1) v)) fields)
+      | `List items -> `List (List.map (go ~depth:(depth - 1)) items)
+      | `String text ->
+          let trimmed = String.trim text in
+          let len = String.length trimmed in
+          if
+            len >= 2
+            && len <= max_unfold_string_bytes
+            && !remaining > 0
+            && (Char.equal trimmed.[0] '{' || Char.equal trimmed.[0] '[')
+          then begin
+            decr remaining;
+            match Yojson.Safe.from_string trimmed with
+            | (`Assoc _ | `List _) as doc -> go ~depth:(depth - 1) doc
+            | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null ->
+                node
+            | exception Yojson.Json_error _ -> node
+          end
+          else node
+      | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> node
+  in
+  go ~depth:max_unfold_depth json
 
 (* --- Wave 3: Keeper Logs/Metrics & OAuth/GitHub Identity --- *)
 

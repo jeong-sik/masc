@@ -6,6 +6,25 @@ open Masc_tui_store
 
 module H = Domain_helpers
 
+let cached_code_lexer_mu = Stdlib.Mutex.create ()
+let cached_code_lexer_rows :
+    (string * string * string * Code_lexer.segment list list) option ref =
+  ref None
+
+let cached_rows_of_source ~(path : string) ~(revision : string) ~(content : string) =
+  match
+    Stdlib.Mutex.protect cached_code_lexer_mu (fun () -> !cached_code_lexer_rows)
+  with
+  | Some (p, r, c, rows)
+    when String.equal p path && String.equal r revision && c == content ->
+      rows
+  | Some _ | None ->
+      let lang_opt = Code_lexer.language_of_path path in
+      let rows = Code_lexer.rows_of_source ~language:lang_opt content in
+      Stdlib.Mutex.protect cached_code_lexer_mu (fun () ->
+          cached_code_lexer_rows := Some (path, revision, content, rows));
+      rows
+
 (* --- 1. Sandbox Helpers & Canonical 8-Column Mapping --- *)
 
 let network_mode_label = function
@@ -2493,8 +2512,10 @@ let render_code ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                         ~ko:"왼쪽 트리에서 파일을 선택하거나 [p]로 검색하세요"
                         ~en:"Select a file from the tree or press [p] to fuzzy-find")))
         | Some f ->
-            let lang_opt = Code_lexer.language_of_path f.path in
-            let rows = Code_lexer.rows_of_source ~language:lang_opt f.content in
+            let rows =
+              cached_rows_of_source ~path:f.path ~revision:f.revision
+                ~content:f.content
+            in
             let total = List.length rows in
             let hdr_txt =
               Printf.sprintf "%s · %d lines · rev %s" f.path total

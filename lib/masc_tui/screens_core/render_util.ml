@@ -367,13 +367,16 @@ let strip_trailing_colon s =
     String.trim (String.sub t 0 (len - 1))
   else t
 
+let max_embedded_json_bytes = 262_144
+let max_embedded_json_attempts = 8
+
 let extract_embedded_json raw =
   let trimmed = String.trim raw in
   let len = String.length trimmed in
-  if len < 2 then None
+  if len < 2 || len > max_embedded_json_bytes then None
   else
-    let rec try_from i =
-      if i >= len then None
+    let rec try_from attempts i =
+      if i >= len || attempts >= max_embedded_json_attempts then None
       else if Char.equal trimmed.[i] '{' || Char.equal trimmed.[i] '[' then
         let candidate = String.sub trimmed i (len - i) in
         match parse_json_struct_only candidate with
@@ -386,10 +389,10 @@ let extract_embedded_json raw =
               if String.equal prefix "" then None else Some prefix
             in
             Some (prefix_opt, json)
-        | None -> try_from (i + 1)
-      else try_from (i + 1)
+        | None -> try_from (attempts + 1) (i + 1)
+      else try_from attempts (i + 1)
     in
-    try_from 0
+    try_from 0 0
 
 let is_ident_char = function
   | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' -> true
@@ -423,7 +426,35 @@ let redact_plain_text_secrets raw =
     else if String.equal (String.sub raw from nlen) needle then Some from
     else find_substr ~needle (from + 1)
   in
-  let rec scan i =
+  let rec scan_plain_quoted ~quoted_end i =
+    if i < quoted_end then begin
+      (* Already inside a previously measured quoted span (e.g. an escaped
+         quote or the closing quote): emit the char and keep scanning inside
+         without re-running [skip_quoted_string], preserving O(N) runtime
+         while still redacting embedded key=value / Bearer / PEM secrets. *)
+      Buffer.add_char buf '"';
+      scan ~quoted_end (i + 1)
+    end
+    else
+      let str_end = skip_quoted_string (i + 1) in
+      let has_closing_quote =
+        str_end > i + 1 && Char.equal raw.[str_end - 1] '"'
+      in
+      let inner_len =
+        if has_closing_quote then str_end - i - 2 else str_end - i - 1
+      in
+      let inner =
+        if inner_len > 0 then String.sub raw (i + 1) inner_len else ""
+      in
+      if Json_tree.is_secret_value inner then begin
+        Buffer.add_string buf "\"[redacted]\"";
+        scan ~quoted_end:str_end str_end
+      end
+      else begin
+        Buffer.add_char buf '"';
+        scan ~quoted_end:str_end (i + 1)
+      end
+  and scan ~quoted_end i =
     if i >= len then ()
     else if
       i + 11 <= len && String.equal (String.sub raw i 11) "-----BEGIN "
@@ -434,7 +465,7 @@ let redact_plain_text_secrets raw =
       match find_substr ~needle:"-----END " (i + 11) with
       | Some end_hdr -> (
           match find_substr ~needle:"-----" (end_hdr + 9) with
-          | Some close_dashes -> scan (close_dashes + 5)
+          | Some close_dashes -> scan ~quoted_end (close_dashes + 5)
           | None -> ())
       | None -> ()
     end
@@ -459,52 +490,16 @@ let redact_plain_text_secrets raw =
           if v_start >= len then ()
           else if Char.equal raw.[v_start] '"' then begin
             Buffer.add_string buf "\"[redacted]\"";
-            scan (skip_quoted_string (v_start + 1))
+            let v_end = skip_quoted_string (v_start + 1) in
+            scan ~quoted_end:(Int.max quoted_end v_end) v_end
           end
           else begin
             Buffer.add_string buf "[redacted]";
-            scan (skip_unquoted_value v_start)
+            scan ~quoted_end (skip_unquoted_value v_start)
           end
         end
-        else begin
-          (* Check if the quoted string itself holds a secret token value *)
-          let str_end = skip_quoted_string (i + 1) in
-          let inner_len =
-            if str_end > i + 1 && Char.equal raw.[str_end - 1] '"' then
-              str_end - i - 2
-            else str_end - i - 1
-          in
-          let inner =
-            if inner_len > 0 then String.sub raw (i + 1) inner_len else ""
-          in
-          if Json_tree.is_secret_value inner then begin
-            Buffer.add_string buf "\"[redacted]\"";
-            scan str_end
-          end
-          else begin
-            Buffer.add_char buf '"';
-            scan (i + 1)
-          end
-        end
-      else begin
-        let str_end = skip_quoted_string (i + 1) in
-        let inner_len =
-          if str_end > i + 1 && Char.equal raw.[str_end - 1] '"' then
-            str_end - i - 2
-          else str_end - i - 1
-        in
-        let inner =
-          if inner_len > 0 then String.sub raw (i + 1) inner_len else ""
-        in
-        if Json_tree.is_secret_value inner then begin
-          Buffer.add_string buf "\"[redacted]\"";
-          scan str_end
-        end
-        else begin
-          Buffer.add_char buf '"';
-          scan (i + 1)
-        end
-      end
+        else scan_plain_quoted ~quoted_end i
+      else scan_plain_quoted ~quoted_end i
     end
     else if is_ident_char raw.[i] then begin
       let t_end = skip_unquoted_value i in
@@ -527,7 +522,8 @@ let redact_plain_text_secrets raw =
         if v_start >= len then ()
         else if Char.equal raw.[v_start] '"' then begin
           Buffer.add_string buf "\"[redacted]\"";
-          scan (skip_quoted_string (v_start + 1))
+          let v_end = skip_quoted_string (v_start + 1) in
+          scan ~quoted_end:(Int.max quoted_end v_end) v_end
         end
         else begin
           let v1_end = skip_unquoted_value v_start in
@@ -542,7 +538,7 @@ let redact_plain_text_secrets raw =
             else v1_end
           in
           Buffer.add_string buf "[redacted]";
-          scan final_end
+          scan ~quoted_end final_end
         end
       end
       else if
@@ -553,31 +549,31 @@ let redact_plain_text_secrets raw =
         let tok_end = skip_unquoted_value tok_start in
         if tok_end > tok_start then begin
           Buffer.add_string buf "Bearer [redacted]";
-          scan tok_end
+          scan ~quoted_end tok_end
         end
         else begin
           Buffer.add_substring buf raw i (k_end - i);
-          scan k_end
+          scan ~quoted_end k_end
         end
       end
       else begin
         let token = String.sub raw i (t_end - i) in
         if Json_tree.is_secret_value token then begin
           Buffer.add_string buf "[redacted]";
-          scan t_end
+          scan ~quoted_end t_end
         end
         else begin
           Buffer.add_substring buf raw i (t_end - i);
-          scan t_end
+          scan ~quoted_end t_end
         end
       end
     end
     else begin
       Buffer.add_char buf raw.[i];
-      scan (i + 1)
+      scan ~quoted_end (i + 1)
     end
   in
-  scan 0;
+  scan ~quoted_end:0 0;
   Buffer.contents buf
 
 let string_of_transport_error ~lang = function

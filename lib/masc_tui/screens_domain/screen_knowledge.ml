@@ -1572,13 +1572,26 @@ let draw_rich_artifact_pane ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
             | Some d -> d.content
             | None -> ""
           in
+          let is_json = Knowledge_store.is_json_artifact a in
+          let json_pretty_lines =
+            match (k.artifact_view_mode, fmt) with
+            | `Document, `Markdown
+              when is_json && not (String.equal (String.trim raw_body) "") ->
+                let pretty =
+                  match Yojson.Safe.from_string raw_body with
+                  | j -> Yojson.Safe.pretty_to_string j
+                  | exception Yojson.Json_error _ -> raw_body
+                in
+                Some (String.split_on_char '\n' pretty)
+            | `Document, (`Html | `Markdown) | `Raw_source, (`Html | `Markdown) ->
+                None
+          in
           let search_q =
             if is_dive then String.trim k.artifact_search_query else ""
           in
           let active_match_line =
             if not (String.equal search_q "") && !y < bot then begin
               let matches =
-                let is_json = Knowledge_store.is_json_artifact a in
                 let q_lc = String.lowercase_ascii search_q in
                 let collect_strings lines =
                   let rec collect i acc = function
@@ -1597,12 +1610,7 @@ let draw_rich_artifact_pane ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
                     Html_doc.search_match_lines ~theme ~width:content.w ~lang
                       ~query:search_q raw_body
                 | `Document, `Markdown when is_json ->
-                    let pretty =
-                      match Yojson.Safe.from_string raw_body with
-                      | j -> Yojson.Safe.pretty_to_string j
-                      | exception Yojson.Json_error _ -> raw_body
-                    in
-                    collect_strings (String.split_on_char '\n' pretty)
+                    collect_strings (Option.value ~default:[] json_pretty_lines)
                 | `Document, `Markdown ->
                     let rendered =
                       Markdown.render_lines ~width:content.w ~theme raw_body
@@ -1748,32 +1756,25 @@ let draw_rich_artifact_pane ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
                         (if String.equal search_q "" then None
                          else Some search_q)
                       ?active_match_line raw_body
-                | `Document, `Markdown ->
-                    let is_json = Knowledge_store.is_json_artifact a in
-                    if is_json then begin
-                      let pretty =
-                        match Yojson.Safe.from_string raw_body with
-                        | j -> Yojson.Safe.pretty_to_string j
-                        | exception Yojson.Json_error _ -> raw_body
-                      in
-                      let lines = String.split_on_char '\n' pretty in
-                      let skip = Int.max 0 scroll in
-                      let dy = ref doc_r.y in
-                      List.iter
-                        (fun ln ->
-                          if !dy < Rect.bottom doc_r then begin
-                            ignore
-                              (H.put_clipped ~grid ~clip:doc_r ~x:doc_r.x ~y:!dy
-                                 ~max_w:doc_r.w ~style:(H.text_style ~theme ())
-                                 ln);
-                            incr dy
-                          end)
-                        (Store_scroll.drop skip lines);
-                      List.length lines
-                    end
-                    else
-                      Markdown.draw grid ~rect:doc_r ~theme ~osc8:true
-                        ~scroll:(Int.max 0 scroll) raw_body
+                | `Document, `Markdown -> (
+                    match json_pretty_lines with
+                    | Some lines ->
+                        let skip = Int.max 0 scroll in
+                        let dy = ref doc_r.y in
+                        List.iter
+                          (fun ln ->
+                            if !dy < Rect.bottom doc_r then begin
+                              ignore
+                                (H.put_clipped ~grid ~clip:doc_r ~x:doc_r.x ~y:!dy
+                                   ~max_w:doc_r.w ~style:(H.text_style ~theme ())
+                                   ln);
+                              incr dy
+                            end)
+                          (Store_scroll.drop skip lines);
+                        List.length lines
+                    | None ->
+                        Markdown.draw grid ~rect:doc_r ~theme ~osc8:true
+                          ~scroll:(Int.max 0 scroll) raw_body)
                 | `Raw_source, (`Html | `Markdown) ->
                     let lines = String.split_on_char '\n' raw_body in
                     let skip = Int.max 0 scroll in

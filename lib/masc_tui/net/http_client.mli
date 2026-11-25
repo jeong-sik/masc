@@ -118,6 +118,28 @@ val post_raw :
   path:string ->
   (string, http_error) result
 
+val put_raw :
+  io:Io_domain.t ->
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
+  ?extra_headers:(string * string) list ->
+  content_type:string ->
+  body:string ->
+  endpoint ->
+  path:string ->
+  (string, http_error) result
+
+val delete_raw :
+  io:Io_domain.t ->
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
+  ?extra_headers:(string * string) list ->
+  ?content_type:string ->
+  ?body:string ->
+  endpoint ->
+  path:string ->
+  (string, http_error) result
+
 val post_stream :
   io:Io_domain.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->

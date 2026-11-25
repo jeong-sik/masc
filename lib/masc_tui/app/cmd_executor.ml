@@ -650,14 +650,29 @@ let decode_hub_event_msgs ~epoch ~observed_at ev =
                     | Ok None | Error _ -> "tool series stream: " ^ reason)))
       | Sse_hub.Stream_spec.Observer | Sse_hub.Stream_spec.Fleet -> [])
 
-let publish_hub_event ~bus ~stream_epoch ev =
+let worker_decode_threshold_bytes = 4096
+
+let publish_hub_event ~worker ~bus ~stream_epoch ev =
   let epoch = Atomic.get stream_epoch in
   let observed_at = Clock.Mono.now () in
+  let msgs =
+    match ev with
+    | Sse_hub.Raw_frame { frame; _ }
+      when String.length frame.data > worker_decode_threshold_bytes ->
+        Worker_pool.submit_cpu worker ~name:"tui_sse_frame_decode" (fun () ->
+            decode_hub_event_msgs ~epoch ~observed_at ev)
+    | Sse_hub.Freshness _
+    | Sse_hub.Observer_handshake _
+    | Sse_hub.Observer_delivery _
+    | Sse_hub.Fleet_event _
+    | Sse_hub.Raw_frame _ ->
+        decode_hub_event_msgs ~epoch ~observed_at ev
+  in
   List.iter
     (function
       | Some key, msg -> Ui_bus.publish_snapshot bus ~key msg
       | None, msg -> Ui_bus.publish_stream bus msg)
-    (decode_hub_event_msgs ~epoch ~observed_at ev)
+    msgs
 
 let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
     ?(editor_handoff = noop_editor_handoff) ?(on_editor_ready = fun () -> ())
@@ -682,7 +697,7 @@ let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
   let skill_read_in_flight = Atomic.make None in
   let sse_hub =
     Sse_hub.create ~io ~clock ~endpoint:initial_ep
-      ~on_event:(publish_hub_event ~bus ~stream_epoch)
+      ~on_event:(publish_hub_event ~worker ~bus ~stream_epoch)
   in
   let backend =
     match voice_backend with
@@ -691,7 +706,14 @@ let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
   in
   let voice_runner =
     Voice_runner.create ~sw ~backend ~on_event:(fun ev ->
-        Ui_bus.publish_stream bus (Msg.Voice_event (msg_of_voice_event ev)))
+        let msg = Msg.Voice_event (msg_of_voice_event ev) in
+        match ev with
+        | Voice_runner.Level_meter _ -> Ui_bus.publish_stream bus msg
+        | Voice_runner.Phase_changed _
+        | Voice_runner.Transcript_ready _
+        | Voice_runner.Capabilities _
+        | Voice_runner.Voice_error _ ->
+            Ui_bus.publish_stream_receipt bus msg)
   in
   let closed = Atomic.make false in
   Eio.Switch.on_release sw (fun () ->
@@ -752,7 +774,10 @@ let update_workspace_guard t ~instance_id ~workspace_sha256 =
   Atomic.set t.endpoint next_ep;
   Sse_hub.update_endpoint t.sse_hub next_ep
 
-let worker_decode_threshold_bytes = 4096
+let run_cpu_if_large t ~name ~bytes work =
+  if bytes > worker_decode_threshold_bytes then
+    Worker_pool.submit_cpu t.worker ~name work
+  else work ()
 
 let decode_raw_json t ~decode raw_body =
   let work () =
@@ -760,13 +785,13 @@ let decode_raw_json t ~decode raw_body =
     | json -> (
         match decode json with
         | Ok v -> Ok v
-        | Error msg -> Error (Msg.Decode_error msg))
+        | Error msg -> Error (Msg.Decode_error msg)
+        | exception (Eio.Cancel.Cancelled _ as ex) -> raise ex
+        | exception ex -> Error (Msg.Decode_error (Printexc.to_string ex)))
     | exception Yojson.Json_error msg ->
         Error (Msg.Decode_error ("invalid JSON: " ^ msg))
   in
-  if String.length raw_body > worker_decode_threshold_bytes then
-    Worker_pool.submit_cpu t.worker ~name:"tui_json_decode" work
-  else work ()
+  run_cpu_if_large t ~name:"tui_json_decode" ~bytes:(String.length raw_body) work
 
 let fetch_and_decode_get ~timeout_sec t ~path ~decode =
   let ep = Atomic.get t.endpoint in
@@ -795,6 +820,78 @@ let post_mcp_and_decode ~timeout_sec t ~method_ ~tool_name ~path ~body ~decode =
   | Error err -> Error (msg_error_of_http err)
   | Ok raw -> decode_raw_json t ~decode raw
 
+let parse_post_ack_body raw =
+  let trimmed = String.trim raw in
+  if String.equal trimmed "" then Ok ()
+  else
+    match Yojson.Safe.from_string trimmed with
+    | exception Yojson.Json_error _ -> Ok ()
+    | `Assoc fields -> (
+        let ok_false =
+          match List.assoc_opt "ok" fields with
+          | Some (`Bool false) -> true
+          | Some
+              ( `Bool true
+              | `Null
+              | `Int _
+              | `Intlit _
+              | `Float _
+              | `String _
+              | `List _
+              | `Assoc _ )
+          | None ->
+              false
+        in
+        let err_str key =
+          match List.assoc_opt key fields with
+          | Some (`String s) when not (String.equal (String.trim s) "") ->
+              Some (String.trim s)
+          | Some
+              ( `String _
+              | `Null
+              | `Bool _
+              | `Int _
+              | `Intlit _
+              | `Float _
+              | `List _
+              | `Assoc _ )
+          | None ->
+              None
+        in
+        match (ok_false, err_str "error", err_str "error_code") with
+        | true, Some e, _ -> Error (Msg.Decode_error e)
+        | true, None, Some code -> (
+            let detail =
+              match err_str "detail" with
+              | Some d -> code ^ ": " ^ d
+              | None -> code
+            in
+            Error (Msg.Decode_error detail))
+        | true, None, None -> (
+            let proj =
+              match err_str "projection" with
+              | Some p -> "operation incomplete: " ^ p
+              | None -> "server reported ok=false"
+            in
+            Error (Msg.Decode_error proj))
+        | false, _, Some code -> (
+            let detail =
+              match err_str "detail" with
+              | Some d -> code ^ ": " ^ d
+              | None -> code
+            in
+            Error (Msg.Decode_error detail))
+        | false, Some e, None -> Error (Msg.Decode_error e)
+        | false, None, None -> Ok ())
+    | `Null
+    | `Bool _
+    | `Int _
+    | `Intlit _
+    | `Float _
+    | `String _
+    | `List _ ->
+        Ok ()
+
 let post_ack ~timeout_sec t ~path ~body =
   let ep = Atomic.get t.endpoint in
   let body_str = Yojson.Safe.to_string body in
@@ -803,77 +900,9 @@ let post_ack ~timeout_sec t ~path ~body =
       ~content_type:"application/json" ~body:body_str ep ~path
   with
   | Error err -> Error (msg_error_of_http err)
-  | Ok raw -> (
-      let trimmed = String.trim raw in
-      if String.equal trimmed "" then Ok ()
-      else
-        match Yojson.Safe.from_string trimmed with
-        | exception Yojson.Json_error _ -> Ok ()
-        | `Assoc fields -> (
-            let ok_false =
-              match List.assoc_opt "ok" fields with
-              | Some (`Bool false) -> true
-              | Some
-                  ( `Bool true
-                  | `Null
-                  | `Int _
-                  | `Intlit _
-                  | `Float _
-                  | `String _
-                  | `List _
-                  | `Assoc _ )
-              | None ->
-                  false
-            in
-            let err_str key =
-              match List.assoc_opt key fields with
-              | Some (`String s) when not (String.equal (String.trim s) "") ->
-                  Some (String.trim s)
-              | Some
-                  ( `String _
-                  | `Null
-                  | `Bool _
-                  | `Int _
-                  | `Intlit _
-                  | `Float _
-                  | `List _
-                  | `Assoc _ )
-              | None ->
-                  None
-            in
-            match (ok_false, err_str "error", err_str "error_code") with
-            | true, Some e, _ -> Error (Msg.Decode_error e)
-            | true, None, Some code -> (
-                let detail =
-                  match err_str "detail" with
-                  | Some d -> code ^ ": " ^ d
-                  | None -> code
-                in
-                Error (Msg.Decode_error detail))
-            | true, None, None -> (
-                let proj =
-                  match err_str "projection" with
-                  | Some p -> "operation incomplete: " ^ p
-                  | None -> "server reported ok=false"
-                in
-                Error (Msg.Decode_error proj))
-            | false, _, Some code -> (
-                let detail =
-                  match err_str "detail" with
-                  | Some d -> code ^ ": " ^ d
-                  | None -> code
-                in
-                Error (Msg.Decode_error detail))
-            | false, Some e, None -> Error (Msg.Decode_error e)
-            | false, None, None -> Ok ())
-        | `Null
-        | `Bool _
-        | `Int _
-        | `Intlit _
-        | `Float _
-        | `String _
-        | `List _ ->
-            Ok ())
+  | Ok raw ->
+      run_cpu_if_large t ~name:"tui_post_ack_decode"
+        ~bytes:(String.length raw) (fun () -> parse_post_ack_body raw)
 
 let fork_safe t fn =
   if Atomic.get t.closed then ()
@@ -885,7 +914,7 @@ let fork_safe t fn =
         | exception (Eio.Cancel.Cancelled _ as ex) -> raise ex
         | exception Io_domain.Closed -> ()
         | exception ex ->
-            Ui_bus.publish_stream t.bus
+            Ui_bus.publish_stream_receipt t.bus
               (Msg.Http_reply
                  {
                    epoch = Atomic.get t.stream_epoch;
@@ -922,23 +951,29 @@ let read_chat_queue ~timeout_sec t ~keeper ~partial =
       (Fleet_store.String_set.empty, []) acc |> snd
   in
   let rec read after acc running_batch =
-    let path = Wire_fleet.chat_queue_path ~keeper ~after in
-    let decode json =
-      Result.bind (Wire_fleet.decode_chat_queue ~after json) (fun page ->
-        if Option.is_none after then
-          Result.map (fun batch -> (page, batch)) (Wire_fleet.decode_running_chat_batch json)
-        else Ok (page, running_batch))
-    in
-    let page = match Http_client.get_raw ~io:t.io ~clock:t.clock ~timeout_sec endpoint ~path with
-      | Error err -> Error (msg_error_of_http err)
-      | Ok raw -> decode_raw_json t ~decode raw in
-    match page with
-    | Error err -> rows acc, running_batch, Error err
-    | Ok ([], running_batch) -> rows acc, running_batch, Ok ()
-    | Ok (page, running_batch) ->
-        let acc = List.rev_append page acc in
-        partial (rows acc) running_batch;
-        read (Some (List.hd acc).sequence) acc running_batch
+    if Atomic.get t.closed then
+      rows acc, running_batch, Error (Msg.Transport (Health.Other_io "executor closed"))
+    else
+      let path = Wire_fleet.chat_queue_path ~keeper ~after in
+      let decode json =
+        Result.bind (Wire_fleet.decode_chat_queue ~after json) (fun page ->
+          if Option.is_none after then
+            Result.map (fun batch -> (page, batch)) (Wire_fleet.decode_running_chat_batch json)
+          else Ok (page, running_batch))
+      in
+      let page = match Http_client.get_raw ~io:t.io ~clock:t.clock ~timeout_sec endpoint ~path with
+        | Error err -> Error (msg_error_of_http err)
+        | Ok raw -> decode_raw_json t ~decode raw in
+      match page with
+      | Error err -> rows acc, running_batch, Error err
+      | Ok ([], running_batch) -> rows acc, running_batch, Ok ()
+      | Ok (page, running_batch) ->
+          let acc = List.rev_append page acc in
+          partial (rows acc) running_batch;
+          (* The decoder checked that every sequence advances the requested
+             cursor. Yield to other work and observe cancellation between pages. *)
+          Eio.Fiber.yield ();
+          read (Some (List.hd acc).sequence) acc running_batch
   in
   read None [] None
 
@@ -2561,13 +2596,18 @@ let execute_post t ~epoch req =
         ~content_type:"application/json" ~body:body_str ep ~path
     with
     | Error err -> Error (msg_error_of_http err)
-    | Ok raw -> (
-        match Wire_work.decode_mcp_tool_call_ack raw with
-        | Ok () -> Ok ()
-        | Error detail ->
-            Error
-              (Msg.Http_error
-                 { status = 400; body = detail; api_error = None }))
+    | Ok raw ->
+        run_cpu_if_large t ~name:"tui_mcp_ack_decode"
+          ~bytes:(String.length raw) (fun () ->
+            match Wire_work.decode_mcp_tool_call_ack raw with
+            | Ok () -> Ok ()
+            | Error detail ->
+                Error
+                  (Msg.Http_error
+                     { status = 400; body = detail; api_error = None })
+            | exception (Eio.Cancel.Cancelled _ as ex) -> raise ex
+            | exception ex ->
+                Error (Msg.Decode_error (Printexc.to_string ex)))
   in
   fork_safe t (fun () ->
       let reply_opt =
@@ -2737,7 +2777,7 @@ let execute_post t ~epoch req =
             let ep = Atomic.get t.endpoint in
             let body_str = Yojson.Safe.to_string body in
             let publish res =
-              Ui_bus.publish_stream t.bus
+              Ui_bus.publish_stream_receipt t.bus
                 (Msg.Http_reply
                    { epoch; reply = Msg.Reply_setup_login_receipt res })
             in
@@ -2746,11 +2786,11 @@ let execute_post t ~epoch req =
                 (Msg.Setup_login_output { epoch; text; auth_url; device_code })
             in
             let on_input_ready ~login_id =
-              Ui_bus.publish_stream t.bus
+              Ui_bus.publish_stream_receipt t.bus
                 (Msg.Setup_login_input_ready { epoch; login_id })
             in
             let on_interrupted ~login_id error =
-              Ui_bus.publish_stream t.bus
+              Ui_bus.publish_stream_receipt t.bus
                 (Msg.Http_reply { epoch; reply = Msg.Reply_setup_login_interrupted { login_id; error } })
             in
             run_setup_login_stream ~on_output ~on_input_ready ~on_interrupted ~publish
@@ -3541,7 +3581,7 @@ let execute_post t ~epoch req =
       in
       Option.iter
         (fun reply ->
-          Ui_bus.publish_stream t.bus (Msg.Http_reply { epoch; reply }))
+          Ui_bus.publish_stream_receipt t.bus (Msg.Http_reply { epoch; reply }))
         reply_opt)
 
 let execute_put t ~epoch req =
@@ -3552,12 +3592,26 @@ let execute_put t ~epoch req =
       | Cmd.Put_wiki_page { page; _ } ->
           let ep = Atomic.get t.endpoint in
           let result =
-            Http_client.put_json ~io:t.io ~clock:t.clock
-              ~timeout_sec:standard_timeout_sec ep ~path ~body
-              ~decode:Wire_knowledge.decode_wiki_put_result
-            |> Result.map_error msg_error_of_http
+            match
+              let body_str = Yojson.Safe.to_string body in
+              match
+                Http_client.put_raw ~io:t.io ~clock:t.clock
+                  ~timeout_sec:standard_timeout_sec
+                  ~content_type:"application/json" ~body:body_str ep ~path
+              with
+              | Error err -> Error (msg_error_of_http err)
+              | Ok raw ->
+                  decode_raw_json t ~decode:Wire_knowledge.decode_wiki_put_result
+                    raw
+            with
+            | r -> r
+            | exception (Eio.Cancel.Cancelled _ as ex) -> raise ex
+            | exception Io_domain.Closed ->
+                Error (Msg.Transport (Health.Other_io "IO domain closed"))
+            | exception ex ->
+                Error (Msg.Transport (Health.Other_io (Printexc.to_string ex)))
           in
-          Ui_bus.publish_stream t.bus
+          Ui_bus.publish_stream_receipt t.bus
             (Msg.Http_reply { epoch; reply = Msg.Reply_wiki_put { page; result } }))
 
 let execute_delete t ~epoch req =
@@ -3568,11 +3622,25 @@ let execute_delete t ~epoch req =
       | Cmd.Delete_skill_editor { reference; _ } ->
           let ep = Atomic.get t.endpoint in
           let result =
-            Http_client.delete_json ~io:t.io ~clock:t.clock ~body ep ~path
-              ~decode:Wire_runtime.decode_skill_editor_outcome
-            |> Result.map_error msg_error_of_http
+            match
+              let body_str = Yojson.Safe.to_string body in
+              match
+                Http_client.delete_raw ~io:t.io ~clock:t.clock
+                  ~content_type:"application/json" ~body:body_str ep ~path
+              with
+              | Error err -> Error (msg_error_of_http err)
+              | Ok raw ->
+                  decode_raw_json t
+                    ~decode:Wire_runtime.decode_skill_editor_outcome raw
+            with
+            | r -> r
+            | exception (Eio.Cancel.Cancelled _ as ex) -> raise ex
+            | exception Io_domain.Closed ->
+                Error (Msg.Transport (Health.Other_io "IO domain closed"))
+            | exception ex ->
+                Error (Msg.Transport (Health.Other_io (Printexc.to_string ex)))
           in
-          Ui_bus.publish_stream t.bus
+          Ui_bus.publish_stream_receipt t.bus
             (Msg.Http_reply
                {
                  epoch;
@@ -3840,7 +3908,7 @@ let execute_post_stream t ~epoch req =
               Ui_bus.publish_stream t.bus
                 (Msg.Github_login_chunk { epoch; keeper; text }))
             ~publish_done:(fun ~observation ~error ->
-              Ui_bus.publish_stream t.bus
+              Ui_bus.publish_stream_receipt t.bus
                 (Msg.Github_login_done { epoch; keeper; observation; error }))
             ~stream:(fun ~on_chunk ->
               Http_client.post_stream ~io:t.io ~clock:t.clock
@@ -4066,7 +4134,7 @@ let execute_editor_escape_hatch t target =
   let epoch = Atomic.get t.stream_epoch in
   let ko = Say.equal_lang t.cli.lang Say.Lang_ko in
   let emit_ack ?(ack_scope = Msg.Ack_toast_only) ~label result =
-    Ui_bus.publish_stream t.bus
+    Ui_bus.publish_stream_receipt t.bus
       (Msg.Http_reply
          {
            epoch;
@@ -4203,7 +4271,7 @@ let stop_owned_server_async owned =
 
 let execute_start_local_server t =
   if not t.cli.auto_start then
-    Ui_bus.publish_stream t.bus
+    Ui_bus.publish_stream_receipt t.bus
       (Msg.Server_start_result (Error "auto-start disabled (--no-auto-start)"))
   else
     fork_safe t (fun () ->
@@ -4217,7 +4285,7 @@ let execute_start_local_server t =
         in
         match discovery with
         | Masc_server_lifecycle.Not_found { manual_command } ->
-            Ui_bus.publish_stream t.bus
+            Ui_bus.publish_stream_receipt t.bus
               (Msg.Server_start_result
                  (Error
                     ("masc binary not found; start manually: " ^ manual_command)))
@@ -4231,7 +4299,7 @@ let execute_start_local_server t =
             in
             match start_res with
             | Error err ->
-                Ui_bus.publish_stream t.bus (Msg.Server_start_result (Error err))
+                Ui_bus.publish_stream_receipt t.bus (Msg.Server_start_result (Error err))
             | Ok owned -> (
                 (match Atomic.exchange t.owned_server (Some owned) with
                 | Some prev -> stop_owned_server_async prev
@@ -4268,7 +4336,7 @@ let execute_start_local_server t =
                       Atomic.set t.endpoint next_ep;
                       Sse_hub.update_endpoint t.sse_hub next_ep
                     end;
-                    Ui_bus.publish_stream t.bus (Msg.Server_start_result (Ok ()))
+                    Ui_bus.publish_stream_receipt t.bus (Msg.Server_start_result (Ok ()))
                 | Masc_server_lifecycle.Server_exited report ->
                     ignore (Atomic.exchange t.owned_server None : _ option);
                     let detail =
@@ -4277,7 +4345,7 @@ let execute_start_local_server t =
                            report.last_line)
                         (Masc_server_lifecycle.describe_output report.output)
                     in
-                    Ui_bus.publish_stream t.bus
+                    Ui_bus.publish_stream_receipt t.bus
                       (Msg.Server_start_result (Error detail))
                 | Masc_server_lifecycle.Timed_out attempts ->
                     (match Atomic.exchange t.owned_server None with
@@ -4289,7 +4357,7 @@ let execute_start_local_server t =
                         (Masc_server_lifecycle.describe_output
                            (Masc_server_lifecycle.startup_output owned))
                     in
-                    Ui_bus.publish_stream t.bus
+                    Ui_bus.publish_stream_receipt t.bus
                       (Msg.Server_start_result (Error detail)))))
 
 let pele_timeout_s = 8.0
@@ -4511,34 +4579,59 @@ let execute_render_memory_diagram t ~epoch ~request_id ~keeper ~event_identity
                     ~finally:(fun () -> Eio.Promise.resolve done_u ())
                     (fun () ->
                       let res =
-                        Eio_unix.run_in_systhread (fun () ->
-                            if is_cancelled () then Error "Pele was cancelled"
-                            else
-                              try
-                                let run_pele scene =
-                                  if is_cancelled () then
-                                    Error "Pele was cancelled"
-                                  else
-                                    let cache_dir =
-                                      ensure_pele_cache_dir
-                                        ~base_path:t.cli.base_path
+                        match mode with
+                        | Knowledge_store.Diagram_mode_mermaid
+                        | Knowledge_store.Diagram_mode_tree ->
+                            (* Pure-OCaml diagram rendering: run on Worker_pool
+                               rather than a Domain 0 systhread so it never
+                               contends for Domain 0's runtime lock. *)
+                            Worker_pool.submit_cpu t.worker
+                              ~name:"tui_memory_diagram_text" (fun () ->
+                                if is_cancelled () then
+                                  Error "diagram render cancelled"
+                                else
+                                  try
+                                    Ok
+                                      (render_memory_diagram_payload
+                                         ~theme_preset ~probe ~term_program
+                                         ~palette ~keeper ~kind ~mode ~ko
+                                         ~tz_offset_sec ~now_unix ~max_width
+                                         ~chart ())
+                                  with
+                                  | Eio.Cancel.Cancelled _ as ex -> raise ex
+                                  | ex -> Error (Printexc.to_string ex))
+                        | Knowledge_store.Diagram_mode_auto ->
+                            Eio_unix.run_in_systhread (fun () ->
+                                if is_cancelled () then Error "Pele was cancelled"
+                                else
+                                  try
+                                    let run_pele scene =
+                                      if is_cancelled () then
+                                        Error "Pele was cancelled"
+                                      else
+                                        let cache_dir =
+                                          ensure_pele_cache_dir
+                                            ~base_path:t.cli.base_path
+                                        in
+                                        Pele.render ~cache_dir
+                                          ~timeout_s:pele_timeout_s
+                                          ~cancelled:is_cancelled scene
                                     in
-                                    Pele.render ~cache_dir
-                                      ~timeout_s:pele_timeout_s
-                                      ~cancelled:is_cancelled scene
-                                in
-                                Ok
-                                  (render_memory_diagram_payload ~run_pele
-                                     ~theme_preset ~probe ~term_program ~palette
-                                     ~keeper ~kind ~mode ~ko ~tz_offset_sec
-                                     ~now_unix ~max_width ~chart ())
-                              with ex -> Error (Printexc.to_string ex))
+                                    Ok
+                                      (render_memory_diagram_payload ~run_pele
+                                         ~theme_preset ~probe ~term_program
+                                         ~palette ~keeper ~kind ~mode ~ko
+                                         ~tz_offset_sec ~now_unix ~max_width
+                                         ~chart ())
+                                  with
+                                  | Eio.Cancel.Cancelled _ as ex -> raise ex
+                                  | ex -> Error (Printexc.to_string ex))
                       in
                       result_ref := Some res));
               if not (is_cancelled ()) then
                 match !result_ref with
                 | Some result ->
-                    Ui_bus.publish_stream t.bus
+                    Ui_bus.publish_stream_receipt t.bus
                       (Msg.Memory_diagram_rendered
                          {
                            epoch;
@@ -4591,7 +4684,7 @@ let publish_clipboard_outcome t ~epoch ~bytes outcome =
       ~ko:(Printf.sprintf "%s (%dB)" (Say.resolve Say.Lang_ko say) bytes)
       ~en:(Printf.sprintf "%s (%dB)" (Say.resolve Say.Lang_en say) bytes)
   in
-  Ui_bus.publish_stream t.bus
+  Ui_bus.publish_stream_receipt t.bus
     (Msg.Http_reply
        {
          epoch;
@@ -4627,7 +4720,7 @@ let rec execute t = function
       (match Sse_hub.sync_streams t.sse_hub specs with
       | Ok _ -> ()
       | Error msg ->
-          Ui_bus.publish_stream t.bus
+          Ui_bus.publish_stream_receipt t.bus
             (Msg.Http_reply
                {
                  epoch;
@@ -4694,7 +4787,7 @@ let rec execute t = function
                      ~bytes:(String.length detail.content) outcome
                | None -> ())
           | Error err ->
-              Ui_bus.publish_stream t.bus
+              Ui_bus.publish_stream_receipt t.bus
                 (Msg.Http_reply
                    {
                      epoch;
@@ -4736,7 +4829,7 @@ let rec execute t = function
           in
           match content_res with
           | Error err ->
-              Ui_bus.publish_stream t.bus
+              Ui_bus.publish_stream_receipt t.bus
                 (Msg.Http_reply
                    {
                      epoch;
@@ -4825,7 +4918,7 @@ let rec execute t = function
                         ~ko:("저장됨: " ^ saved_path)
                         ~en:("Exported: " ^ saved_path)
                   in
-                  Ui_bus.publish_stream t.bus
+                  Ui_bus.publish_stream_receipt t.bus
                     (Msg.Http_reply
                        {
                          epoch;
@@ -4839,7 +4932,7 @@ let rec execute t = function
                              };
                        })
               | Error detail ->
-                  Ui_bus.publish_stream t.bus
+                  Ui_bus.publish_stream_receipt t.bus
                     (Msg.Http_reply
                        {
                          epoch;
@@ -4880,7 +4973,7 @@ let rec execute t = function
                            Msg.Transport (Health.Other_io detail))
               in
               if is_current () then
-                Ui_bus.publish_stream t.bus
+                Ui_bus.publish_stream_receipt t.bus
                   (Msg.Http_reply
                      {
                        epoch;
@@ -4905,7 +4998,7 @@ let rec execute t = function
             with
             | Some (Ok ()) | None -> ()
             | Some (Error detail) ->
-                Ui_bus.publish_stream t.bus
+                Ui_bus.publish_stream_receipt t.bus
                   (Msg.Http_reply
                      {
                        epoch = Atomic.get t.stream_epoch;

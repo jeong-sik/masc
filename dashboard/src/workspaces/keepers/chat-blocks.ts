@@ -11,6 +11,7 @@
  */
 
 import type { KeeperChatTranscriptSlot } from '../../keeper-delivery-provenance'
+import { parseToolBlobMarker } from '../../lib/tool-blob-marker'
 import type { ChatToolBlock, ChatTranscriptEntry } from './types'
 
 export type ThinkingViewMode = 'hidden' | 'collapsed' | 'expanded'
@@ -147,6 +148,12 @@ export function prettyFormatPayload(value: unknown): string {
   return JSON.stringify(value, null, 2)
 }
 
+export function toolResultMarkdownPreview(content: string): string | null {
+  const marker = parseToolBlobMarker(content)
+  return marker?.mime.toLowerCase().split(';', 1)[0] === 'text/markdown' && marker.preview.trim()
+    ? marker.preview : null
+}
+
 function extractInlineThinkingTags(content: string): {
   readonly extractedThinking: string | null
   readonly remaining: string
@@ -262,8 +269,8 @@ export function parseChatMessageBlocks(msg: ChatTranscriptEntry): ParsedChatBloc
           } else {
             resVal = jsonObj
           }
-        } else if (cleanedBody) {
-          resVal = cleanedBody
+        } else if (msg.content) {
+          resVal = msg.content
         }
       }
       statusStr = typeof jsonObj?.status === 'string'
@@ -277,7 +284,8 @@ export function parseChatMessageBlocks(msg: ChatTranscriptEntry): ParsedChatBloc
       executionId: msg.executionId,
       name: inferredName,
       args: argsVal !== undefined ? prettyFormatPayload(argsVal) : undefined,
-      result: resVal !== undefined ? prettyFormatPayload(resVal) : undefined,
+      result: typeof resVal === 'string' ? resVal
+        : resVal !== undefined ? prettyFormatPayload(resVal) : undefined,
       status: statusStr,
     })
     bodyText = ''

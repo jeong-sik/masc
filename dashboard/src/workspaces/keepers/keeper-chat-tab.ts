@@ -55,6 +55,7 @@ import {
   nextToolsMode,
   parseChatMessageBlocks,
   prettyFormatPayload,
+  toolResultMarkdownPreview,
   saveChatBlockPrefs,
   shouldRenderChatEntry,
   summarizeCompact,
@@ -1573,6 +1574,9 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     const progressText = formatToolResultProgress(cachedRes)
     const isExpandedPre = expandedPreKeys[preKey] === true
     const isLong = isLongToolOutput(text)
+    const markdown = opts && (cachedRes?.status !== 'loaded' || (cachedRes.eof && !cachedRes.isBinary))
+      ? toolResultMarkdownPreview(text) : null
+    const raw = html`<pre class=${isExpandedPre ? 'kp-block-pre kp-block-pre--expanded' : 'kp-block-pre'}>${text}</pre>`
     const showPager = Boolean(
       executionId
       && cachedRes?.status === 'loaded'
@@ -1613,7 +1617,13 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
           `}
         </div>
       </div>
-      <pre class=${isExpandedPre ? 'kp-block-pre kp-block-pre--expanded' : 'kp-block-pre'}>${text}</pre>
+      ${markdown === null ? raw : html`
+        <${MarkdownContent} text=${markdown} />
+        <details open=${isExpandedPre || undefined}>
+          <summary>저장 참조</summary>
+          ${raw}
+        </details>
+      `}
       ${showPager && html`
         <div class="kp-tool-result-pager" data-testid="tool-result-pager">
           <span class="kp-pill" data-tone="warn">
@@ -1753,11 +1763,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const renderToolCard = (tb: ChatToolBlock, idx: number, keyPrefix: string) => {
     const cachedRes = tb.executionId ? toolResultCache[tb.executionId] : undefined
     const displayArgs = tb.args ? prettyFormatPayload(tb.args) : undefined
-    const displayResult = tb.result
-      ? prettyFormatPayload(tb.result)
-      : cachedRes?.status === 'loaded'
-        ? cachedRes.displayContent
-        : undefined
+    const displayResult = tb.result ?? (cachedRes?.status === 'loaded' ? cachedRes.displayContent : undefined)
     const effectiveStatus =
       cachedRes?.status === 'loaded' && cachedRes.isError ? 'error' : tb.status
     const statusMeta = toolStatusMeta(effectiveStatus)

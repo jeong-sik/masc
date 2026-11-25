@@ -24,6 +24,11 @@ type preset =
   | Muted_green
   | Muted_dusk
   | Muted_graphite
+  | Solarized_dark
+  | Nord
+  | Dracula
+  | Gruvbox_dark
+  | Catppuccin_mocha
 
 type status_token =
   | Status_ok

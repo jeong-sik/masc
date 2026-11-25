@@ -83,6 +83,8 @@ let test_cli_info_flags () =
               "--url";
               "--theme";
               "muted_graphite";
+              "solarized_dark";
+              "catppuccin_mocha";
               "--lang";
               "--no-auto-start";
               "--version";

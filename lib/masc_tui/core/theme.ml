@@ -16,6 +16,11 @@ type preset =
   | Muted_green
   | Muted_dusk
   | Muted_graphite
+  | Solarized_dark
+  | Nord
+  | Dracula
+  | Gruvbox_dark
+  | Catppuccin_mocha
 
 type status_token =
   | Status_ok
@@ -252,7 +257,9 @@ type text_floors = {
    selection background included. [build_theme] lifts a color up to its floor.
    The four original presets share the standard set. The down-tone presets
    share a lower one: body text stays at WCAG 2.1 AAA (7:1) and the other
-   tiers sit lower, so their text is dimmer. *)
+   tiers sit lower, so their text is dimmer. The named palettes (Solarized,
+   Nord, Dracula, Gruvbox, Catppuccin) share [aa_floors]: they keep the colors
+   their authors published, so each tier only has to clear WCAG AA. *)
 let standard_floors =
   {
     bright = 12.0;
@@ -271,10 +278,21 @@ let down_tone_floors =
     selection = 8.5;
   }
 
+let aa_floors =
+  {
+    bright = min_text_contrast;
+    primary = min_text_contrast;
+    secondary = min_text_contrast;
+    muted = min_text_contrast;
+    selection = min_text_contrast;
+  }
+
 let text_floors = function
   | Midnight | Arcade_hi | Paper_light | Mono -> standard_floors
   | Muted | Muted_warm | Muted_green | Muted_dusk | Muted_graphite ->
       down_tone_floors
+  | Solarized_dark | Nord | Dracula | Gruvbox_dark | Catppuccin_mocha ->
+      aa_floors
 
 let build_theme ~preset ~surface_0 ~surface_1 ~surface_2
     ~border_subtle ~border_inactive ~border_focused
@@ -600,6 +618,164 @@ let muted_graphite_theme =
     ~warm_stops:down_tone_warm_stops
     ~ai_stops:down_tone_ai_stops
 
+(* Presets 10 to 14: palettes published by their authors. Each color is the
+   author's hex value, or an Oklab mix of two of them for a role the palette
+   has no value for (surface_1, surface_2, selection_bg, some text tiers, border
+   tints and gradient stops). The comment on a line names the source color, or
+   the two colors and the share of the second.
+
+   - Solarized, Ethan Schoonover, MIT: https://github.com/altercation/solarized
+   - Nord, Sven Greb, MIT: https://github.com/nordtheme/nord
+   - Dracula, Dracula Theme, MIT: https://github.com/dracula/dracula-theme
+   - Gruvbox, morhetz, MIT/X11: https://github.com/morhetz/gruvbox
+   - Catppuccin Mocha, Catppuccin, MIT: https://github.com/catppuccin/palette
+
+   docs/legal/THIRD-PARTY-TUI-PALETTES.md lists the copyright lines. All five
+   use [aa_floors]: a color below WCAG AA on one of the four surfaces is lifted
+   by [build_theme], so the color on screen can be lighter than the one written
+   here. *)
+
+(* Preset 10: Solarized Dark. The text tiers are base2, base1, base0 and base01,
+   one step brighter than Solarized's own roles (base1 emphasis, base0 body,
+   base01 comments). Solarized's body and comment colors are below AA on the
+   lighter surfaces, so [build_theme] lifts primary, secondary and muted to
+   about 4.5:1 and the three end up close in brightness. *)
+let solarized_dark_theme =
+  build_theme
+    ~preset:Solarized_dark
+    ~surface_0:0x002B36 (* base03 *)
+    ~surface_1:0x012E39 (* base03 to base02, 25% *)
+    ~surface_2:0x03313D (* base03 to base02, 55% *)
+    ~border_subtle:0x234651 (* base02 to base01, 30% *)
+    ~border_inactive:0x586E75 (* base01 *)
+    ~border_focused:0x268BD2 (* blue *)
+    ~text_bright:0xEEE8D5 (* base2 *)
+    ~text_primary:0x93A1A1 (* base1 *)
+    ~text_secondary:0x839496 (* base0 *)
+    ~text_muted:0x586E75 (* base01 *)
+    ~status_ok:0x859900 (* green *)
+    ~status_active:0x268BD2 (* blue *)
+    ~status_attention:0xB58900 (* yellow *)
+    ~status_critical:0xDC322F (* red *)
+    ~status_ai:0x6C71C4 (* violet *)
+    ~status_historical:0x657B83 (* base00 *)
+    ~accent:0x268BD2 (* blue *)
+    ~selection_bg:0x093E4F (* base02 to blue, 10% *)
+    ~selection_fg:0xEEE8D5 (* base2 *)
+    ~cool_stops:(0x2AA198, 0x268BD2, 0x93BBD7) (* cyan; blue; blue to base2, 50% *)
+    ~warm_stops:(0x6C71C4, 0xD33682, 0xEA7D6B) (* violet; magenta; red to base2, 35% *)
+    ~ai_stops:(0x6C71C4, 0xA55EA4, 0xA3A7CF) (* violet; violet to magenta, 50%; violet to base2, 45% *)
+
+(* Preset 11: Nord. Polar Night surfaces, Snow Storm text, Frost and Aurora accents. *)
+let nord_theme =
+  build_theme
+    ~preset:Nord
+    ~surface_0:0x2E3440 (* nord0 *)
+    ~surface_1:0x313744 (* nord0 to nord1, 25% *)
+    ~surface_2:0x353C4A (* nord0 to nord1, 55% *)
+    ~border_subtle:0x434C5E (* nord2 *)
+    ~border_inactive:0x4C566A (* nord3 *)
+    ~border_focused:0x88C0D0 (* nord8 *)
+    ~text_bright:0xECEFF4 (* nord6 *)
+    ~text_primary:0xD8DEE9 (* nord4 *)
+    ~text_secondary:0xBDC4D1 (* nord4 to nord3, 18% *)
+    ~text_muted:0xA0A8B7 (* nord4 to nord3, 38% *)
+    ~status_ok:0xA3BE8C (* nord14 *)
+    ~status_active:0x88C0D0 (* nord8 *)
+    ~status_attention:0xEBCB8B (* nord13 *)
+    ~status_critical:0xBF616A (* nord11 *)
+    ~status_ai:0xB48EAD (* nord15 *)
+    ~status_historical:0x8F97A7 (* nord4 to nord3, 50% *)
+    ~accent:0x88C0D0 (* nord8 *)
+    ~selection_bg:0x3F4758 (* nord1 to nord2, 50% *)
+    ~selection_fg:0xECEFF4 (* nord6 *)
+    ~cool_stops:(0x8FBCBB, 0x88C0D0, 0xBBD8E2) (* nord7; nord8; nord8 to nord6, 50% *)
+    ~warm_stops:(0xB48EAD, 0xBF616A, 0xD08770) (* nord15; nord11; nord12 *)
+    ~ai_stops:(0x5E81AC, 0xB48EAD, 0xCEB9CD) (* nord10; nord15; nord15 to nord6, 45% *)
+
+(* Preset 12: Dracula. The comment color is below AA, so muted text and the
+   historical status are lifted. *)
+let dracula_theme =
+  build_theme
+    ~preset:Dracula
+    ~surface_0:0x282A36 (* background *)
+    ~surface_1:0x2D303D (* background to current_line, 20% *)
+    ~surface_2:0x333544 (* background to current_line, 40% *)
+    ~border_subtle:0x3D4051 (* background to current_line, 75% *)
+    ~border_inactive:0x4E5673 (* current_line to comment, 35% *)
+    ~border_focused:0xBD93F9 (* purple *)
+    ~text_bright:0xF8F8F2 (* foreground *)
+    ~text_primary:0xE1E1DD (* foreground to background, 10% *)
+    ~text_secondary:0xB1BAD0 (* foreground to comment, 45% *)
+    ~text_muted:0x7E8CB4 (* comment to foreground, 20% *)
+    ~status_ok:0x50FA7B (* green *)
+    ~status_active:0x8BE9FD (* cyan *)
+    ~status_attention:0xFFB86C (* orange *)
+    ~status_critical:0xFF5555 (* red *)
+    ~status_ai:0xBD93F9 (* purple *)
+    ~status_historical:0x7E8CB4 (* comment to foreground, 20% *)
+    ~accent:0x8BE9FD (* cyan *)
+    ~selection_bg:0x404354 (* background to current_line, 85% *)
+    ~selection_fg:0xF8F8F2 (* foreground *)
+    ~cool_stops:(0x72B5C7, 0x8BE9FD, 0xC6F1F8) (* cyan to background, 25%; cyan; cyan to foreground, 50% *)
+    ~warm_stops:(0xBD93F9, 0xFF79C6, 0xFF9C9F) (* purple; pink; pink to orange, 50% *)
+    ~ai_stops:(0xA582D9, 0xBD93F9, 0xD7C1F8) (* purple to background, 15%; purple; purple to foreground, 45% *)
+
+(* Preset 13: Gruvbox Dark (medium contrast). Surfaces are dark0, dark0_soft and
+   dark1, text is light0 to light3. *)
+let gruvbox_dark_theme =
+  build_theme
+    ~preset:Gruvbox_dark
+    ~surface_0:0x282828 (* dark0 *)
+    ~surface_1:0x32302F (* dark0_soft *)
+    ~surface_2:0x3C3836 (* dark1 *)
+    ~border_subtle:0x504945 (* dark2 *)
+    ~border_inactive:0x665C54 (* dark3 *)
+    ~border_focused:0xFE8019 (* bright_orange *)
+    ~text_bright:0xFBF1C7 (* light0 *)
+    ~text_primary:0xEBDBB2 (* light1 *)
+    ~text_secondary:0xD5C4A1 (* light2 *)
+    ~text_muted:0xBDAE93 (* light3 *)
+    ~status_ok:0xB8BB26 (* bright_green *)
+    ~status_active:0x83A598 (* bright_blue *)
+    ~status_attention:0xFABD2F (* bright_yellow *)
+    ~status_critical:0xFB4934 (* bright_red *)
+    ~status_ai:0xD3869B (* bright_purple *)
+    ~status_historical:0xBDAE93 (* light3 *)
+    ~accent:0x83A598 (* bright_blue *)
+    ~selection_bg:0x46403D (* dark1 to dark2, 50% *)
+    ~selection_fg:0xFBF1C7 (* light0 *)
+    ~cool_stops:(0x8EC07C, 0x83A598, 0xB8C7AD) (* bright_aqua; bright_blue; bright_blue to light0, 45% *)
+    ~warm_stops:(0xD3869B, 0xFB4934, 0xFE8019) (* bright_purple; bright_red; bright_orange *)
+    ~ai_stops:(0xD3869B, 0xDBA0A2, 0xE9BBB1) (* bright_purple; bright_purple to light1, 30%; bright_purple to light0, 50% *)
+
+(* Preset 14: Catppuccin Mocha. The canvas is base, the published background. *)
+let catppuccin_mocha_theme =
+  build_theme
+    ~preset:Catppuccin_mocha
+    ~surface_0:0x1E1E2E (* base *)
+    ~surface_1:0x232333 (* base to surface0, 25% *)
+    ~surface_2:0x28293A (* base to surface0, 55% *)
+    ~border_subtle:0x313244 (* surface0 *)
+    ~border_inactive:0x585B70 (* surface2 *)
+    ~border_focused:0xB4BEFE (* lavender *)
+    ~text_bright:0xCDD6F4 (* text *)
+    ~text_primary:0xBAC2DE (* subtext1 *)
+    ~text_secondary:0xA6ADC8 (* subtext0 *)
+    ~text_muted:0x9399B2 (* overlay2 *)
+    ~status_ok:0xA6E3A1 (* green *)
+    ~status_active:0x89B4FA (* blue *)
+    ~status_attention:0xF9E2AF (* yellow *)
+    ~status_critical:0xF38BA8 (* red *)
+    ~status_ai:0xCBA6F7 (* mauve *)
+    ~status_historical:0x7F849C (* overlay1 *)
+    ~accent:0x89B4FA (* blue *)
+    ~selection_bg:0x343547 (* surface0 to surface1, 15% *)
+    ~selection_fg:0xCDD6F4 (* text *)
+    ~cool_stops:(0x74C7EC, 0x89B4FA, 0xABC5F8) (* sapphire; blue; blue to text, 50% *)
+    ~warm_stops:(0xCBA6F7, 0xF5C2E7, 0xF2CDCD) (* mauve; pink; flamingo *)
+    ~ai_stops:(0xB4BEFE, 0xCBA6F7, 0xF5C2E7) (* lavender; mauve; pink *)
+
 let all_presets =
   [
     Midnight;
@@ -611,6 +787,11 @@ let all_presets =
     Muted_green;
     Muted_dusk;
     Muted_graphite;
+    Solarized_dark;
+    Nord;
+    Dracula;
+    Gruvbox_dark;
+    Catppuccin_mocha;
   ]
 
 let all_status_tokens =
@@ -635,6 +816,11 @@ let preset_name = function
   | Muted_green -> "muted_green"
   | Muted_dusk -> "muted_dusk"
   | Muted_graphite -> "muted_graphite"
+  | Solarized_dark -> "solarized_dark"
+  | Nord -> "nord"
+  | Dracula -> "dracula"
+  | Gruvbox_dark -> "gruvbox_dark"
+  | Catppuccin_mocha -> "catppuccin_mocha"
 
 let preset_label = function
   | Midnight -> Say.make ~ko:"미드나잇" ~en:"Midnight"
@@ -646,6 +832,11 @@ let preset_label = function
   | Muted_green -> Say.make ~ko:"다운톤 녹회색" ~en:"Muted Green"
   | Muted_dusk -> Say.make ~ko:"다운톤 보라회색" ~en:"Muted Dusk"
   | Muted_graphite -> Say.make ~ko:"다운톤 흑연" ~en:"Muted Graphite"
+  | Solarized_dark -> Say.make ~ko:"Solarized Dark" ~en:"Solarized Dark"
+  | Nord -> Say.make ~ko:"Nord" ~en:"Nord"
+  | Dracula -> Say.make ~ko:"Dracula" ~en:"Dracula"
+  | Gruvbox_dark -> Say.make ~ko:"Gruvbox Dark" ~en:"Gruvbox Dark"
+  | Catppuccin_mocha -> Say.make ~ko:"Catppuccin Mocha" ~en:"Catppuccin Mocha"
 
 let preset_of_name name =
   match String.lowercase_ascii (String.trim name) with
@@ -658,6 +849,11 @@ let preset_of_name name =
   | "muted_green" | "muted-green" -> Some Muted_green
   | "muted_dusk" | "muted-dusk" -> Some Muted_dusk
   | "muted_graphite" | "muted-graphite" -> Some Muted_graphite
+  | "solarized_dark" | "solarized-dark" -> Some Solarized_dark
+  | "nord" -> Some Nord
+  | "dracula" -> Some Dracula
+  | "gruvbox_dark" | "gruvbox-dark" -> Some Gruvbox_dark
+  | "catppuccin_mocha" | "catppuccin-mocha" -> Some Catppuccin_mocha
   | _ -> None
 
 let preset_index = function
@@ -670,6 +866,11 @@ let preset_index = function
   | Muted_green -> 6
   | Muted_dusk -> 7
   | Muted_graphite -> 8
+  | Solarized_dark -> 9
+  | Nord -> 10
+  | Dracula -> 11
+  | Gruvbox_dark -> 12
+  | Catppuccin_mocha -> 13
 
 let equal_preset a b = Int.equal (preset_index a) (preset_index b)
 
@@ -683,6 +884,11 @@ let of_preset = function
   | Muted_green -> muted_green_theme
   | Muted_dusk -> muted_dusk_theme
   | Muted_graphite -> muted_graphite_theme
+  | Solarized_dark -> solarized_dark_theme
+  | Nord -> nord_theme
+  | Dracula -> dracula_theme
+  | Gruvbox_dark -> gruvbox_dark_theme
+  | Catppuccin_mocha -> catppuccin_mocha_theme
 
 let default = midnight_theme
 

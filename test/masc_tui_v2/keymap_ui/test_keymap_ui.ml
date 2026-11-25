@@ -524,6 +524,18 @@ let test_slash_36_commands () =
   Alcotest.(check (list string)) "theme arg completion narrows by prefix"
     [ "/theme muted_warm" ]
     (Slash.complete ~prefix:"/theme muted_w");
+  List.iter
+    (fun (typed, full) ->
+      Alcotest.(check (list string)) ("theme arg completion for " ^ typed)
+        [ "/theme " ^ full ]
+        (Slash.complete ~prefix:("/theme " ^ typed)))
+    [
+      ("so", "solarized_dark");
+      ("no", "nord");
+      ("dr", "dracula");
+      ("gr", "gruvbox_dark");
+      ("ca", "catppuccin_mocha");
+    ];
   (* Every name the picker lists is a name /theme accepts. *)
   List.iter
     (fun preset ->

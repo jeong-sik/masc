@@ -1,5 +1,8 @@
 # Candle 지급 설정
 
+Candle Appraiser 연결과 실행기 준비는 [Add-on 설치 안내](web-lane-addons.md#install)를 따른다.
+설치 이후 Keeper 턴에서 확인할 수 있는 값은 [컨텍스트 예시](web-lane-addons.md#keeper-컨텍스트는-어떻게-달라지나)를 참고한다.
+
 현재 지원 범위와 남은 요구사항은 [Candle 전체 요구사항 명세서](../spec/candle-requirements.md)를 참고한다.
 이 가이드는 지급 설정 중심이며, 선물·유통량 연동 가격 등 확장 계약은 명세서에서 구분한다.
 

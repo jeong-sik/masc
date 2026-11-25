@@ -18,12 +18,12 @@ manifest_path = "../packages/my-world-layer/lane.toml"
 sources = []
 ```
 
-Paths resolve from the declaration directory. The package image must already be
-available to Docker. TOML reconciliation installs the package; it does not build
-images, download missing environments, or execute Skill scripts automatically.
-See [installation](lane-addon-toml.md) for reload and removal behavior and
-[output composition](lane-output-composition.md) for connecting one installation
-to another.
+Paths resolve from the declaration directory. Prepare the image in the
+container engine selected by the manifest, or the MCP stdio executable for
+a host-process package. Reconciliation starts the worker using that prepared
+environment. See the [operator guide](web-lane-addons.md) for the installation
+flow and what reaches a Keeper turn, and [output composition](lane-output-composition.md)
+for connecting one installation to another.
 
 ## The connections
 

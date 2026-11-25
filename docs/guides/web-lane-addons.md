@@ -1,25 +1,79 @@
-# Web에서 패키지를 고르고 설정하기
+# Lane Add-on 사용 안내
 
-Lane Add-ons 상단의 **Installed packages**에서 설치 ID·패키지·Run·파일 경로를
-검색하고, 전체·주의 필요·변경 대기·꺼짐·worker 사용 가능 목록을 고른다.
-설치 폼과 설정 편집기는 관측 이력 위에 있으며 기존 이력·수동 attach worker도
-아래에서 계속 볼 수 있다.
+[Manual](#manual) · [Install](#install) · [Management](#management)
 
-**Requested activity**는 파일이 요청한 On/Off다. **Application / worker status**는
-서버의 적용·정리 판정이며 두 값은 다를 수 있다. Off를 요청해도 정리 실패는
-Needs attention이고, 정리가 확인된 `inactive`만 Configured off로 표시한다.
-적용 판정이 없거나 목록이 불완전하면 미확인으로 남긴다. File and revisions에서는
-원문 revision과 worker 입력의 desired/applied revision을 따로 확인한다.
+## Manual
 
-각 설치의 **Edit TOML**과 **On / off**는 해당 파일의 기존 편집 흐름을 연다.
-**Check observation**은 선언 ID·파일·적용 revision·instance·서버 적용 판정이
-모두 일치하는 live worker에만 연결한다. 이전 worker나 retained 이력으로 대신
-연결하지 않는다. 목록을 새로 읽는 중이거나 실패하면 이전 값은 남지만 이 설치 목록의
-Check observation은 Refresh가 성공할 때까지 사용할 수 없다. 아래 worker 상세 표의
-수동 Observe 진단은 별개다. Worker attached는 관측 결과의 성공이나
-실시간 건강 상태를 뜻하지 않는다.
+**Lane Add-on은 MASC에 기능을 추가하는 플러그인 패키지다.** 패키지의 `lane.toml`은 실행할
+worker와 제공할 기능을 선언한다. 예를 들어 MSX 패키지는 `[world.tools]`로 Keeper가 호출할
+화면 도구를, `[world.skills]`로 찾아 읽을 Skill을, `[world.outputs.screen]`으로 구독할 수 있는
+화면 관측 출력을 제공한다. 호스트가 Keeper에게 어떤 도구를 노출할지 결정한다.
 
-Monitoring의 Lane Add-ons에서 **Install package**를 연다. Workspace 폴더의
+연결(Attach)은 패키지를 특정 Workspace의 Run에 연결하고 worker를 시작하는 것이다. Workspace의 설치 선언은
+`id`로 설치를 식별하고, `run_id`로 관측을 묶고, `binding.sources`로 읽을 입력을 지정한다.
+`run_id`는 관측과 출력 연결의 범위다. 접근 권한은 호스트가 확인한다.
+
+서버가 선언을 적용하면 실행마다 별도의 `instance_id`와 incarnation이 생긴다. 설치 ID는
+worker를 교체한 뒤에도 설정과 저장 상태의 소유자를 찾는 데 쓰인다.
+예를 들어 `msx-machine`은 자체 MSX 머신을 띄우고, `msx-observer`는 이미 연결된 머신의
+캡처를 읽는다. `[world]`는 패키지가 제공할 연결을 정의하는 manifest 섹션이다.
+
+| 패키지 | 연결 뒤 생기는 것 | 어디서 확인하나 |
+| --- | --- | --- |
+| [Candle Appraiser](../../addons/candle-appraiser/README.md) | 서버가 사용하는 평가 worker와 `grade`, `relation`, `weights` Exact 출력 | **Lane Add-ons**에서 연결 상태, **Work → Candle**에서 호스트의 지급 결과와 잔액 |
+| [MSX Machine](../../addons/msx-machine/README.md) | MSX 머신, `masc_msx_*` 도구, `msx-observe` 등 Skill과 `screen` 출력 | **Check observation**에서 출력, Keeper의 `masc_msx_screen` 호출 결과에서 PNG |
+| [DOS Machine](../../addons/dos-machine/README.md) | DOS 머신, `masc_dos_*` 도구, `dos-play` 등 Skill과 `screen` 출력 | **Check observation**에서 출력, Keeper의 `masc_dos_screen` 호출 결과에서 PNG |
+| [DOS World](../../addons/dos-world/README.md) | 예제용 카운터 머신, `guest` 출력과 선택적 행동 포트 | **Check observation**에서 카운터 관측, 해당 worker의 **Actions**에서 요청과 결과 |
+
+### Keeper 컨텍스트는 어떻게 달라지나
+
+[MSX Machine 설치 예제](../examples/lane-addons/msx-machine.toml)를 기준으로,
+Keeper에게 “지금 MSX 화면을 읽어줘”라고 요청한다.
+
+1. **설치 전.** 이 설치가 제공하는 화면 도구와 Skill은 아직 카탈로그에 없다.
+2. **worker 적용 후.** 해당 Keeper에게 허용된 `masc_msx_screen`이 사용 가능한 도구에 들어온다.
+   `msx-observe`는 기존 Skill 카탈로그에 읽기 전용으로 등록된다. Keeper가 선택한 Skill의
+   본문은 기존 Skill 로딩을 통해 턴에 들어온다.
+3. **Keeper가 화면을 읽은 턴.** `masc_msx_screen`이 성공하면 도구 응답에 PNG와 `frame` 번호가
+   포함된다. 예를 들어 프레임 128의 PNG에 게임 메뉴가 보이면 Keeper는 “프레임 128에 게임 메뉴가
+   보입니다”라고 답할 수 있다. 화면 조회는 현재 프레임을 읽고, 키 입력은 `masc_msx_press`로 요청한다.
+   이미지 해석은 해당 턴의 모델이 이미지 입력을 지원해야 한다.
+4. **관측을 구독한 경우.** 예제의 `shared-msx` Run, `msx-machine` 설치, `screen` 출력을
+   Keeper에게 구독시키면 읽지 않은 관측의 참조가 다음에 실행되는 턴에 들어온다. Keeper는
+   `masc_lane_updates`의 `read`로 관측 행과 coverage를 받고, 반환된 영수증을
+   `acknowledge`하면 읽은 위치가 전진한다.
+   [구독 설정과 응답 형식](lane-subscriptions.md)
+
+Candle에서는 서버가 운영자 권한으로 평가를 요청하고, 응답을 검증한 뒤 원장에 정산한다.
+평가 요청과 모델 응답은 서버의 Exact 처리 흐름에 속한다. Keeper는 본인의
+`keeper_candle_balance`를 호출하면 그 결과를 해당 턴에서 읽을 수 있다.
+[지급 정책](candle-payout-policy.md)
+
+실제 모델 요청을 확인하려면 Keeper 턴의 **Prompt and actual input**에서 보낸 메시지와 도구 스키마를,
+**Tool results**에서 실행 결과를 본다.
+[Keeper 턴 확인](../KEEPER-USER-MANUAL.md#follow-an-input-through-a-turn)
+
+## Install
+
+### 패키지와 실행기 준비
+
+- **서버가 제공하는 Candle Appraiser와 HITL Auto Judge**는 선언에서 `package`로 선택한다.
+  `masc exact-addon-setup --declared --base-path <base-path>`는 선언에 쓰인 패키지 파일과
+  Docker 이미지를 준비한다. [서버 내장 패키지 설치](lane-addon-toml.md#서버가-가진-exact-패키지)
+- **직접 준비한 패키지**는 `manifest_path`로 선택한다. `lane.toml`의 `runtime`에 맞는
+  실행 환경을 먼저 준비한다. 기본값은 Docker다. Docker 없이 설치하려면 `apple_container`에 맞는
+  이미지 또는 `host_process`를 지원하는 MCP stdio 실행 파일이 필요하다.
+  `host_process`는 현재 ephemeral 패키지 상태를 지원한다. Candle Appraiser와 MSX·DOS Machine은
+  persistent 패키지 상태를 사용한다. [실행기별 요구사항](lane-addon-toml.md#실행기-선택)
+
+TOML로 바로 설치하려면 [설치 위치와 예제](lane-addon-toml.md#설치-위치와-예제)를 따른다.
+[MSX](../examples/lane-addons/msx-machine.toml)·[DOS 머신](../examples/lane-addons/dos-machine.toml)처럼
+binding schema가 없는 패키지는 Dashboard의 **New TOML**을 쓴다. 선언을 저장하면 서버가
+준비된 실행기로 worker 연결을 시작한다.
+
+### Dashboard에서 선언 작성
+
+Dashboard의 **Monitoring → Lane Add-ons**에서 **Install package**를 연다. Workspace 폴더의
 패키지 제목·revision·설명을 보고 Choose를 누르면 manifest와 image 상태를 다시 읽는다.
 폴더를 열어 더 깊은 위치로 이동하거나 manifest 경로를 직접 입력할 수 있다.
 잘못된 manifest와 읽기 실패는 빈 목록 대신 오류로 표시한다.
@@ -41,12 +95,53 @@ Open drafts에서 열린 초안을 전환할 수 있다. 같은 파일 이름의
 서버의 최종 validation과 충돌 검사 결과가 적용되며 저장 성공과 worker 적용 완료는
 별개다. 현재 적용 revision과 정리 상태는 선언 표에서 확인한다.
 
-## 끄고 다시 연결한 결과 확인
+입력은 화면 이동·컴포넌트 재진입·작업공간 왕복 중 보존되지만 브라우저 재시작 후
+복구되는 저장소는 아니다. 작업공간 연결이 바뀌거나 재확인이 실패하면 새 preview를
+받기 전에는 초안을 만들 수 없다. schema가 바뀌면 새 입력 세트를 열고 기존 값은
+**Retained package inputs**에 보존한다.
 
-설치의 **On / off**에서 activity 초안을 바꾸고 **Save activity**를 누른다.
-Off는 선언과 관측 이력을 보존하며 worker 정리를 요청한다. **Read current activity**는
-현재 파일과 서버 관측을 다시 읽는다. 저장 직후에는 서버가 이전 파일 revision을
-관측하고 있을 수 있으므로 그때는 적용 미확인으로 표시한다.
+로컬 파일 탐색은 서버의 선언 디렉터리 경계를 사용한다.
+조회 시 경로 검사는 동시 filesystem writer를 격리하는 원자적 sandbox가 아니다.
+
+## Management
+
+**Installed packages**에서 설치 ID·패키지·Run·파일 경로를 검색하고, 전체·주의 필요·변경 대기·
+꺼짐·worker 사용 가능 목록을 고른다. TUI에서는 **Runtime → Addons & Browser**에서 인스턴스를
+볼 수 있고, `/addon observe <instance_id>`로 worker를 관측할 수 있다.
+
+**Requested activity**는 파일이 요청한 On/Off다. **Application / worker status**는
+서버의 적용·정리 판정이며 두 값은 다를 수 있다. Off를 요청해도 정리 실패는
+Needs attention이고, 정리가 확인된 `inactive`만 Configured off로 표시한다.
+적용 판정이 없거나 목록이 불완전하면 미확인으로 남긴다. File and revisions에서는
+원문 revision과 worker 입력의 desired/applied revision을 따로 확인한다.
+
+각 설치의 **Edit TOML**과 **On / off**는 해당 파일의 기존 편집 흐름을 연다.
+**Check observation**은 선언 ID·파일·적용 revision·instance·서버 적용 판정이
+모두 일치하는 live worker에만 연결한다. 이전 worker나 retained 이력으로 대신
+연결하지 않는다. 목록을 새로 읽는 중이거나 실패하면 이전 값은 남지만 이 설치 목록의
+Check observation은 Refresh가 성공할 때까지 사용할 수 없다. 아래 worker 상세 표의
+수동 Observe 진단은 별개다. Worker attached는 관측 결과의 성공이나
+실시간 건강 상태를 뜻하지 않는다.
+
+### 패키지 업데이트
+
+1. 대상 revision의 manifest와 실행 환경을 준비한다. Exact worker는 서버가 지원하는
+   `world.exact_protocol`과 패키지의 선언을 확인한다. 패키지 revision과 저장 레코드 버전은
+   별도 항목이다. 저장 형식이 바뀌면 해당 패키지의 업그레이드 절차를 먼저 확인한다.
+   [Exact worker 상태 변경 절차](EXACT-WORKER-STATE-HARD-CUT.md)
+2. 지속 상태를 이어 쓸 설치는 Workspace, 설치 ID, 패키지 ID와 실행기를 유지한다.
+   DOS·MSX에서 이어서 플레이하려면 worker 교체 전에 체크포인트를 저장하고 교체 후 복원한다.
+   실행기를 바꿀 때는 새 설치를 사용한다. [머신 저장 상태와 이전 절차](machine-addon-state.md)
+3. **Edit TOML**에서 새 manifest 경로를 선택하고 저장한다. 서버가 제공하는 `package` 선언은
+   선택한 서버 빌드의 revision을 따르므로 해당 빌드의 패키지를 준비한다. **File and revisions**에서
+   desired와 applied revision을 확인하고, **Check observation**으로 새 instance의 결과를 확인한다.
+   기존 입출력 연결은 새 manifest의 schema와 output ID를 기준으로 확인한다.
+   [패키지 인터페이스](lane-addon-interface.md) · [출력 연결](lane-output-composition.md)
+
+### 상태와 인스턴스 확인
+
+**Read current activity**로 현재 파일과 서버 관측을 다시 읽는다. 저장 직후 서버가
+이전 파일 revision을 관측하고 있으면 적용 미확인으로 표시한다.
 
 상태는 서버의 `application` 판정이다. `cleaning`은 정리 대기, `inactive`는 정리 확인,
 `starting`은 시작 대기, `applied`는 실행 중인 worker를 뜻한다. 실패·확인 불가와 불완전한
@@ -64,15 +159,7 @@ instance, incarnation, 설치 revision, 완료된 관측 sequence와 보존된 �
 열지 않으며, 이미 요청한 action의 상태 조회는 원래 identity로 계속 제공한다.
 실행 중이라는 상태와 완료된 관측, action receipt의 성공은 각각 별도 근거다.
 
-입력은 화면 이동·컴포넌트 재진입·작업공간 왕복 중 보존되지만 브라우저 재시작 후
-복구되는 저장소는 아니다. 작업공간 연결이 바뀌거나 재확인이 실패하면 새 preview를
-받기 전에는 초안을 만들 수 없다. schema가 바뀌면 새 입력 세트를 열고 기존 값은
-Retained package inputs에 보존한다. binding schema가 없는 패키지는 New TOML을 쓴다.
-
-로컬 파일 탐색은 서버의 선언 디렉터리 경계를 사용한다.
-조회 시 경로 검사는 동시 filesystem writer를 격리하는 원자적 sandbox가 아니다.
-
-## 설정을 보존하며 켜고 끄기
+### 설정을 보존하며 켜고 끄기
 
 선언 표의 **On / off**를 열면 현재 파일을 읽고 활동 초안을 보여준다.
 스위치를 바꾼 뒤 **Save activity**를 눌러야 저장한다. Off는 선언 파일과 관측 기록을
@@ -95,7 +182,7 @@ worker 정리 완료가 아니다. 현재 설정 읽기는 한 번의 재조회�
 활동 저장이 끝날 때는 현재 마운트된 목록에 갱신을 알린다. 저장 중 화면을 나갔다
 돌아와도 새 화면이 저장 완료를 받아 목록을 다시 읽으며, 이 갱신이 선택·폼을 초기화하지 않는다.
 
-## 목록 새로고침과 Slice 조회
+### 목록 새로고침과 Slice 조회
 
 **Refresh**는 설치 상태와 최신 관측 목록을 다시 읽는다. **Slice**는 입력한 범위의
 관측을 고정해서 보여준다. 두 요청은 동시에 진행할 수 있으며, 활동 저장 뒤 자동

@@ -3088,17 +3088,52 @@ let test_music_launch_args () =
   refused "/nonexistent/masc-music-launch.mid";
   refused (Filename.get_temp_dir_name ())
 
+(* Run [f] with this process's fd 2 pointed at a temp file. Returns what [f]
+   returned and the text written to fd 2 meanwhile. *)
+let with_stderr_in_file f =
+  let path = Filename.temp_file "masc-music-launch-" ".stderr" in
+  let saved = Unix.dup ~cloexec:true Unix.stderr in
+  let capture = Unix.openfile path [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
+  Unix.dup2 capture Unix.stderr;
+  Unix.close capture;
+  let restore () =
+    flush stderr;
+    Unix.dup2 saved Unix.stderr;
+    Unix.close saved
+  in
+  let result = Fun.protect ~finally:restore f in
+  let text = In_channel.with_open_bin path In_channel.input_all in
+  Sys.remove path;
+  (result, text)
+
 let test_music_launch_run () =
   let sh script =
     { Music_launch.executable = "/bin/sh"; args = [ "-c"; script ] }
   in
-  Alcotest.(check (result unit string))
-    "a clean exit is Ok even when the viewer wrote to stderr" (Ok ())
-    (Music_launch.run (sh "echo noise >&2; exit 0"));
+  let result, logged =
+    with_stderr_in_file (fun () ->
+        Music_launch.run (sh "echo 'notice: edits kept at /tmp/x' >&2; exit 0"))
+  in
+  Alcotest.(check (result unit string)) "a clean exit stays Ok" (Ok ()) result;
+  Alcotest.(check string)
+    "what the viewer wrote lands in this process's stderr"
+    "masc-alphatex stderr:\nnotice: edits kept at /tmp/x\n" logged;
+  let result, logged =
+    with_stderr_in_file (fun () -> Music_launch.run (sh "exit 0"))
+  in
+  Alcotest.(check (result unit string)) "a silent exit is Ok" (Ok ()) result;
+  Alcotest.(check string) "a silent viewer leaves the log alone" "" logged;
+  let result, logged =
+    with_stderr_in_file (fun () ->
+        Music_launch.run
+          (sh "echo first >&2; echo 'bad midi' >&2; echo >&2; exit 3"))
+  in
   Alcotest.(check (result unit string))
     "the last non-blank stderr line ends the message"
     (Error "masc-alphatex exited with status 3: bad midi")
-    (Music_launch.run (sh "echo first >&2; echo 'bad midi' >&2; echo >&2; exit 3"));
+    result;
+  Alcotest.(check string) "the whole text reaches the log too"
+    "masc-alphatex stderr:\nfirst\nbad midi\n\n" logged;
   Alcotest.(check (result unit string)) "no stderr, no detail"
     (Error "masc-alphatex exited with status 4")
     (Music_launch.run (sh "exit 4"));

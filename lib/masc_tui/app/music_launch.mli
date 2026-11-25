@@ -29,6 +29,7 @@ val run : command -> (unit, string) result
     spawn, a non-zero exit, or a signal.
 
     The TUI keeps its own stderr pointed at a log file, so the viewer's stderr
-    goes to a temp file instead. After a non-zero exit or a signal the last
-    non-blank line of it, at most 200 bytes, ends the [Error] text. A clean exit
-    drops it. *)
+    goes to a temp file instead. When the viewer exits, that text is copied to
+    this process's stderr, under a [masc-alphatex stderr:] line. After a
+    non-zero exit or a signal the last non-blank line of it, at most 200 bytes,
+    also ends the [Error] text. *)

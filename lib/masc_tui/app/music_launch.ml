@@ -59,8 +59,9 @@ let command ~base_path program =
 
 (* The TUI points its own fd 2 at a log file for the whole run, so a viewer
    that inherits it writes its error where the operator never looks. The
-   viewer's stderr goes to a temp file instead, and the last line of it joins
-   the failure message. *)
+   viewer's stderr goes to a temp file instead. When the viewer exits, the
+   text is copied to this process's stderr, which is that log file, and the
+   last line of it ends a failure message. *)
 let stderr_detail_limit = 200
 
 let unix_error_message error fn =
@@ -99,13 +100,27 @@ let last_line text =
         (if String.length shown < String.length cleaned then shown ^ "…"
          else shown)
 
-let with_detail message stderr_path =
+let with_detail message text =
+  match last_line text with
+  | None -> message
+  | Some line -> Printf.sprintf "%s: %s" message line
+
+let read_stderr stderr_path =
   match In_channel.with_open_bin stderr_path In_channel.input_all with
-  | exception Sys_error _ -> message
-  | text -> (
-      match last_line text with
-      | None -> message
-      | Some line -> Printf.sprintf "%s: %s" message line)
+  | text -> text
+  | exception Sys_error _ -> ""
+
+(* A clean exit raises no toast, so the log is the only place left for a
+   notice such as the path where the viewer kept edits it could not save. *)
+let replay_stderr text =
+  if not (String.equal text "") then (
+    let line_end = if String.ends_with ~suffix:"\n" text then "" else "\n" in
+    match
+      prerr_string (executable_name ^ " stderr:\n" ^ text ^ line_end);
+      flush stderr
+    with
+    | () -> ()
+    | exception Sys_error _ -> ())
 
 let spawn { executable; args } ~stderr_path =
   let flags = [ Unix.O_WRONLY; Unix.O_TRUNC; Unix.O_CLOEXEC ] in
@@ -139,16 +154,19 @@ let run command =
       Fun.protect
         ~finally:(fun () -> remove_quietly stderr_path)
         (fun () ->
-          match Result.bind (spawn command ~stderr_path) wait with
+          let outcome = Result.bind (spawn command ~stderr_path) wait in
+          let text = read_stderr stderr_path in
+          replay_stderr text;
+          match outcome with
           | Error detail -> Error detail
           | Ok (Unix.WEXITED 0) -> Ok ()
           | Ok (Unix.WEXITED code) ->
               Error
                 (with_detail
                    (Printf.sprintf "%s exited with status %d" executable_name code)
-                   stderr_path)
+                   text)
           | Ok (Unix.WSIGNALED signal | Unix.WSTOPPED signal) ->
               Error
                 (with_detail
                    (Printf.sprintf "%s ended on signal %d" executable_name signal)
-                   stderr_path))
+                   text))

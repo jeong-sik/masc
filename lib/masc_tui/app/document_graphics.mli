@@ -8,12 +8,13 @@ type t
 type placement
 
 val create : unit -> t
-val take_dirty : t -> bool
+val next_retry_deadline : t -> Masc_tui_core.Clock.Mono.t option
+val take_dirty : t -> now:Masc_tui_core.Clock.Mono.t -> bool
 
 val prepare :
   t ->
   sw:Eio.Switch.t ->
-  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  now:Masc_tui_core.Clock.Mono.t ->
   base_path:string ->
   endpoint:Masc_tui_net.Http_client.endpoint ->
   fetch_retained:(Masc_tui_net.Http_client.endpoint -> path:string -> max_body_bytes:int ->
@@ -26,8 +27,6 @@ val prepare :
 
 val mask_fallback : Masc_tui_term.Cell_grid.t -> style:Masc_tui_term.Style.t -> placement -> unit
 val cancel_pending : t -> unit
-val retry_failed_retained : t -> unit
-(** Admit another bounded attempt after a connection recovers. *)
 val clear : t -> in_tmux:bool -> string
 val before_present : t -> in_tmux:bool -> placement list -> string
 val after_present : t -> in_tmux:bool -> full_repaint:bool -> placement list -> string

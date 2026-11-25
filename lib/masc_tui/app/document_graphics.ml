@@ -19,7 +19,7 @@ type raster = { png : string; pixels : int * int }
 type preview_result =
   | Preview_ready of raster
   | Budget_limited
-  | Retry_exhausted
+  | Retry_at of Clock.Mono.t
   | Unavailable
 
 type placement = {
@@ -39,15 +39,25 @@ type cached_preview = {
 
 type t = {
   mutable pending : (request * (unit -> unit)) option;
+  mutable retry_deadline : Clock.Mono.t option;
   mutable cached : cached_preview list;
   mutable active : placement list;
   mutable dirty : bool;
 }
 
-let create () = { pending = None; cached = []; active = []; dirty = false }
+let create () = { pending = None; retry_deadline = None; cached = []; active = []; dirty = false }
 
-let take_dirty t =
-  let dirty = t.dirty in
+let next_retry_deadline t = t.retry_deadline
+
+let take_dirty t ~now =
+  let retry_due =
+    match t.retry_deadline with
+    | Some deadline when Clock.Mono.compare now deadline >= 0 ->
+        t.retry_deadline <- None;
+        true
+    | Some _ | None -> false
+  in
+  let dirty = t.dirty || retry_due in
   t.dirty <- false;
   dirty
 
@@ -80,18 +90,10 @@ let clear t ~in_tmux =
   delete_placements ~in_tmux removed
 
 let cancel_pending t =
+  t.retry_deadline <- None;
   Option.iter (fun (_, cancel) -> cancel ()) t.pending
 
-let retry_failed_retained t =
-  t.cached <-
-    List.filter
-      (fun entry ->
-        match entry.result with
-        | Retry_exhausted -> false
-        | Preview_ready _ | Budget_limited | Unavailable -> true)
-      t.cached
-
-let request_preview t ~sw ~clock ~base_path ~fetch_retained ~pixels_left ~bytes_left ~on_ready request =
+let request_preview t ~sw ~base_path ~fetch_retained ~pixels_left ~bytes_left ~on_ready request =
   let cancelled = Atomic.make false in
   let cancel_p, cancel_u = Eio.Promise.create () in
   let cancel () =
@@ -136,20 +138,15 @@ let request_preview t ~sw ~clock ~base_path ~fetch_retained ~pixels_left ~bytes_
             |> preview_of_raster)
     | Retained (endpoint, path) ->
         let max_body_bytes = (bytes_left / 4) * 3 in
-        let fetch () = fetch_retained endpoint ~path ~max_body_bytes in
         let fetched =
           Eio.Fiber.first
             (fun () -> Eio.Promise.await cancel_p; Error Http_client.Unavailable)
-            (fun () ->
-              match fetch () with
-              | Error (Http_client.Retry_after delay) ->
-                  Eio.Time.sleep clock delay;
-                  fetch ()
-              | (Ok _ | Error (Http_client.Limit_exceeded | Http_client.Unavailable)) as first -> first)
+            (fun () -> fetch_retained endpoint ~path ~max_body_bytes)
         in
         match fetched with
         | Error Http_client.Limit_exceeded -> Budget_limited
-        | Error (Http_client.Retry_after _) -> Retry_exhausted
+        | Error (Http_client.Retry_after delay) ->
+            Retry_at (Clock.Mono.after_s (Clock.Mono.now ()) delay)
         | Error Http_client.Unavailable -> Unavailable
         | Ok _ when Atomic.get cancelled -> Unavailable
         | Ok png ->
@@ -193,7 +190,7 @@ let with_pixel_budget ~cached visible =
           | Retained _ -> (
               match cached request with
               | Some { result = Preview_ready { pixels = width, height; _ }; _ } -> width * height
-              | Some { result = (Budget_limited | Retry_exhausted | Unavailable); _ }
+              | Some { result = (Budget_limited | Retry_at _ | Unavailable); _ }
               | None -> 0)
         in
         if pixel_cost > pixels then (pixels, accepted)
@@ -202,8 +199,9 @@ let with_pixel_budget ~cached visible =
   in
   (pixels_left, List.rev accepted)
 
-let prepare t ~sw ~clock ~base_path ~endpoint ~fetch_retained ~on_ready
+let prepare t ~sw ~now ~base_path ~endpoint ~fetch_retained ~on_ready
     ~(probe : Probe.observation) ~theme grid =
+  t.retry_deadline <- None;
   match probe.graphics with
   | None | Some (Probe.Graphics_refused _) ->
       cancel_pending t;
@@ -235,7 +233,7 @@ let prepare t ~sw ~clock ~base_path ~endpoint ~fetch_retained ~on_ready
         List.fold_left
           (fun (bytes, placements) (image_id, (rect : Rect.t), request) ->
             match cached request with
-            | None | Some { result = (Budget_limited | Retry_exhausted | Unavailable); _ } ->
+            | None | Some { result = (Budget_limited | Retry_at _ | Unavailable); _ } ->
                 (bytes, placements)
             | Some { result = Preview_ready raster; _ } ->
                 (* Kitty sends the actual PNG as padded base64. Count its
@@ -254,25 +252,45 @@ let prepare t ~sw ~clock ~base_path ~endpoint ~fetch_retained ~on_ready
       let is_visible request =
         List.exists (fun (_, _, current) -> same_request request current) visible
       in
-      if visible = [] then retry_failed_retained t
-      else t.cached <- List.filter (fun entry -> is_visible entry.requested) t.cached;
+      t.cached <-
+        List.filter
+          (fun entry ->
+            is_visible entry.requested
+            || match entry.result with
+               | Retry_at retry_at -> Clock.Mono.compare now retry_at < 0
+               | Preview_ready _ | Budget_limited | Unavailable -> visible = [])
+          t.cached;
       (match t.pending with
       | Some (request, _) when not (is_visible request) -> cancel_pending t
       | Some _ -> ()
       | None ->
-          visible
-          |> List.find_opt (fun (_, _, request) ->
-                 match request, cached request with
-                 | Retained _, None -> pixels_left > 0 && bytes_left >= 4
-                 | Retained _, Some { result = Budget_limited; pixel_budget; byte_budget; _ } ->
-                     pixels_left > 0 && bytes_left >= 4
-                     && (pixels_left > pixel_budget || bytes_left > byte_budget)
-                 | (Mermaid _ | Embedded _), None -> true
-                 | (Mermaid _ | Embedded _), Some _ -> false
-                 | Retained _, Some { result = (Preview_ready _ | Retry_exhausted | Unavailable); _ } ->
-                     false)
-          |> Option.iter (fun (_, _, request) ->
-                 request_preview t ~sw ~clock ~base_path ~fetch_retained ~pixels_left ~bytes_left ~on_ready request));
+          let retained_fits = pixels_left > 0 && bytes_left >= 4 in
+          let ready (_, _, request) =
+            match request, cached request with
+            | Retained _, None -> retained_fits
+            | Retained _, Some { result = Budget_limited; pixel_budget; byte_budget; _ } ->
+                retained_fits && (pixels_left > pixel_budget || bytes_left > byte_budget)
+            | Retained _, Some { result = Retry_at retry_at; _ } ->
+                retained_fits && Clock.Mono.compare now retry_at >= 0
+            | (Mermaid _ | Embedded _), None -> true
+            | (Mermaid _ | Embedded _), Some _
+            | Retained _, Some { result = (Preview_ready _ | Unavailable); _ } -> false
+          in
+          match List.find_opt ready visible with
+          | Some (_, _, request) ->
+              request_preview t ~sw ~base_path ~fetch_retained ~pixels_left ~bytes_left ~on_ready request
+          | None when retained_fits ->
+              (* A cooling-down image leaves the fetch slot free for other previews. *)
+              t.retry_deadline <-
+                List.fold_left
+                  (fun earliest (_, _, request) ->
+                    match cached request with
+                    | Some { result = Retry_at retry_at; _ } ->
+                        Some (Clock.Mono.min retry_at (Option.value earliest ~default:retry_at))
+                    | Some { result = (Preview_ready _ | Budget_limited | Unavailable); _ }
+                    | None -> earliest)
+                  None visible
+          | None -> ());
       List.rev placements
 
 let mask_fallback grid ~style p = Cell_grid.fill_rect grid ~rect:p.rect ~style ()

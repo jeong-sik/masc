@@ -103,14 +103,14 @@ let test_document_preview_transfer_budget () =
             { Probe.empty_observation with graphics = Some Probe.Graphics_supported;
               cell_pixels = Some (8, 20) }
           in
-          Eio_main.run @@ fun env ->
+          Eio_main.run @@ fun _ ->
           Eio.Switch.run @@ fun sw ->
           let doc = Document.create () in
           let endpoint = Masc_tui_net.Http_client.make_endpoint ~host:"localhost" ~port:1 () in
           let prepare () =
             let ready, signal = Eio.Promise.create () in
             let placements =
-              Document.prepare doc ~sw ~clock:(Eio.Stdenv.clock env) ~base_path
+              Document.prepare doc ~sw ~now:(Masc_tui_core.Clock.Mono.now ()) ~base_path
                 ~probe ~theme:Masc_tui_core.Theme.default
                 ~endpoint
                 ~fetch_retained:(fun _ ~path:_ ~max_body_bytes:_ ->
@@ -145,61 +145,82 @@ let test_retained_preview_recovers () =
   let module Document = Masc_tui_app.Document_graphics in
   let module Grid = Masc_tui_term.Cell_grid in
   let module Http = Masc_tui_net.Http_client in
+  let module Mono = Masc_tui_core.Clock.Mono in
   let endpoint = Http.make_endpoint ~host:"localhost" ~port:1 () in
-  let path = "/api/v1/media/" ^ String.make 64 'a' in
+  let media char = "/api/v1/media/" ^ String.make 64 char in
+  let recovering = media 'a' and available = media 'b' and missing = media 'c' in
   let png = Result.get_ok (Rgb_png.encode_rgba ~width:1 ~height:1 ~rgba:"\000\000\000\255") in
-  let grid = Grid.create ~cols:16 ~rows:1 in
-  let rows = { Grid.source = Grid.Retained_png path; count = 1 } in
-  Grid.register_document_image_part grid
-    ~rect:(Masc_tui_core.Rect.make ~x:0 ~y:0 ~w:16 ~h:1)
-    { rows; index = 0; left_inset = 0 };
+  let grid_with paths =
+    let grid = Grid.create ~cols:16 ~rows:3 in
+    List.iteri
+      (fun y path ->
+        let rows = { Grid.source = Grid.Retained_png path; count = 1 } in
+        Grid.register_document_image_part grid
+          ~rect:(Masc_tui_core.Rect.make ~x:0 ~y ~w:16 ~h:1)
+          { rows; index = 0; left_inset = 0 })
+      paths;
+    grid
+  in
+  let grid = grid_with [ recovering; available; missing ] in
   let probe =
     { Probe.empty_observation with graphics = Some Probe.Graphics_supported }
   in
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  let clock = Eio.Stdenv.clock env in
-  let fetch expected_calls remaining endpoint' ~path:path' ~max_body_bytes =
+  let doc = Document.create () in
+  let requests = ref [] and transient_failures = ref 2 in
+  let fetch endpoint' ~path ~max_body_bytes =
     check bool "current endpoint used" true (endpoint = endpoint');
-    check string "original retained media path" path path';
     check bool "request has enough byte budget" true (max_body_bytes >= String.length png);
-    incr expected_calls;
-    match !remaining with
-    | [] -> fail "unexpected extra image request"
-    | result :: rest ->
-        remaining := rest;
-        result
+    requests := path :: !requests;
+    if String.equal path recovering && !transient_failures > 0 then (
+      decr transient_failures;
+      Error (Http.Retry_after 60.))
+    else if String.equal path missing then Error Http.Unavailable
+    else Ok png
   in
-  let check_recovery outcomes ~initial_attempts ~initial_placements ~recover =
-    let doc = Document.create () in
-    let attempts = ref 0 and remaining = ref outcomes in
-    let prepare on_ready =
-      Document.prepare doc ~sw ~clock ~base_path:"" ~probe ~theme:Masc_tui_core.Theme.default
-        ~endpoint ~fetch_retained:(fetch attempts remaining) ~on_ready grid
-    in
-    let await_attempt () =
-      let ready, signal = Eio.Promise.create () in
-      ignore (prepare (fun () -> Eio.Promise.resolve signal ()));
-      Eio.Promise.await ready
-    in
-    await_attempt ();
-    check int "bounded request count" initial_attempts !attempts;
-    let placements = prepare (fun () -> fail "already settled") in
-    Eio.Fiber.yield ();
-    check int "same viewport does not request again" initial_attempts !attempts;
-    check int "placements before transport recovery" initial_placements (List.length placements);
-    if recover then (
-      Document.retry_failed_retained doc;
-      await_attempt ();
-      check int "transport recovery opens another attempt" (initial_attempts + 1) !attempts;
-      check int "recovered preview becomes a placement" 1
-        (List.length (prepare (fun () -> fail "already recovered"))))
+  let prepare_grid grid now on_ready =
+    Document.prepare doc ~sw ~now ~base_path:"" ~probe ~theme:Masc_tui_core.Theme.default
+      ~endpoint ~fetch_retained:fetch ~on_ready grid
   in
-  let transient = Error (Http.Retry_after 0.) in
-  check_recovery [ transient; Ok png ] ~initial_attempts:2 ~initial_placements:1 ~recover:false;
-  check_recovery [ Error Http.Unavailable ] ~initial_attempts:1 ~initial_placements:0 ~recover:false;
-  check_recovery [ transient; transient; Ok png ]
-    ~initial_attempts:2 ~initial_placements:0 ~recover:true
+  let prepare = prepare_grid grid in
+  let await_attempt now =
+    let ready, signal = Eio.Promise.create () in
+    ignore (prepare now (fun () -> Eio.Promise.resolve signal ()));
+    Eio.Time.with_timeout_exn env#clock 1.0 (fun () -> Eio.Promise.await ready);
+    check bool "completed request makes the frame dirty" true (Document.take_dirty doc ~now)
+  in
+  let settled_placements now =
+    List.length (prepare now (fun () -> fail "another request started too early"))
+  in
+  let next_deadline now =
+    check int "other image visible during cooldown" 1 (settled_placements now);
+    match Document.next_retry_deadline doc with
+    | Some at -> at
+    | None -> fail "visible transient failure must schedule a redraw"
+  in
+  List.iter (fun _ -> await_attempt (Mono.now ())) [ recovering; available; missing ];
+  check (list string) "cooldown leaves room for other images"
+    [ recovering; available; missing ] (List.rev !requests);
+  let first_retry = next_deadline (Mono.now ()) in
+  ignore (prepare_grid (grid_with [ available; missing ]) (Mono.now ())
+    (fun () -> fail "offscreen preview retried"));
+  check bool "offscreen cooldown does not schedule a redraw" true
+    (Option.is_none (Document.next_retry_deadline doc));
+  check bool "scrolling back keeps the original cooldown" true
+    (Mono.equal first_retry (next_deadline (Mono.now ())));
+  check bool "wake only after cooldown" false (Document.take_dirty doc ~now:(Mono.now ()));
+  check bool "deadline makes the same viewport dirty" true (Document.take_dirty doc ~now:first_retry);
+  await_attempt first_retry;
+  let second_retry = next_deadline first_retry in
+  check bool "another temporary error sets a later deadline" true (Mono.compare first_retry second_retry < 0);
+  check bool "second deadline also wakes the viewport" true (Document.take_dirty doc ~now:second_retry);
+  await_attempt second_retry;
+  check int "temporarily unavailable image is eventually visible" 2 (settled_placements second_retry);
+  check bool "settled images do not keep waking the viewport" true
+    (Option.is_none (Document.next_retry_deadline doc));
+  check (list string) "only the transient request was retried"
+    [ recovering; available; missing; recovering; recovering ] (List.rev !requests)
 
 let test_pele_confirmed_protocol_v1 () =
   with_cache (fun cache_dir ->
@@ -813,7 +834,7 @@ let () =
         [
           test_case "document preview caps actual PNG payloads across both sources"
             `Quick test_document_preview_transfer_budget;
-          test_case "retained preview retries a transient fetch once"
+          test_case "visible retained previews retry without occupying the fetch slot"
             `Quick test_retained_preview_recovers;
           test_case "protocol v1 confirmed Mermaid/Svg/Graph + palette colors"
             `Quick test_pele_confirmed_protocol_v1;

@@ -4,7 +4,7 @@
 
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
-import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
+import { useCallback, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import {
   Virtualizer,
   elementScroll,
@@ -33,6 +33,32 @@ export interface UseVirtualListResult {
   readonly measureElement: (el: Element | null) => void
 }
 
+/**
+ * The drawn height of a row, to the fraction of a pixel: rows placed by a
+ * rounded height drift apart by the rounding (a 64.59 px row kept as 65 px
+ * leaves 0.41 px of the list showing under it).
+ *
+ * A row without a layout box (a hidden ancestor, or a DOM that does no layout)
+ * reports 0. That is no height, so the row keeps the size it already has.
+ */
+function measureRow<TScrollElement extends Element>(
+  element: Element,
+  entry: ResizeObserverEntry | undefined,
+  instance: Virtualizer<TScrollElement, Element>,
+): number {
+  const index = instance.indexFromElement(element)
+  const known = instance.itemSizeCache.get(instance.options.getItemKey(index))
+  // Registered again without a resize: its observer reports every later change.
+  if (!entry && known !== undefined) return known
+  const drawn = entry?.borderBoxSize[0]?.blockSize ?? element.getBoundingClientRect().height
+  return drawn > 0 ? drawn : known ?? instance.options.estimateSize(index)
+}
+
+/**
+ * Windows a long list over `getScrollElement()`. To have a row measured, give
+ * its element `data-index` and `ref=${measureElement}`; a row drawn without them
+ * keeps `estimateSize`.
+ */
 export function useVirtualList<TScrollElement extends Element = HTMLDivElement>(
   opts: UseVirtualListOptions<TScrollElement>,
 ): UseVirtualListResult {
@@ -46,6 +72,7 @@ export function useVirtualList<TScrollElement extends Element = HTMLDivElement>(
     overscan: opts.overscan ?? 6,
     initialRect: { width: 0, height: opts.initialHeight ?? 480 },
     scrollToFn: elementScroll,
+    measureElement: measureRow,
     observeElementRect,
     observeElementOffset,
     ...(opts.getItemKey ? { getItemKey: opts.getItemKey } : {}),
@@ -62,16 +89,24 @@ export function useVirtualList<TScrollElement extends Element = HTMLDivElement>(
 
   const virtualizer = virtualizerRef.current
 
-  useEffect(() => virtualizer._didMount(), [virtualizer])
+  useLayoutEffect(() => virtualizer._didMount(), [virtualizer])
 
-  virtualizer._willUpdate()
+  // The scroll element is in the document only once a render has committed, so
+  // the virtualizer attaches to it here. Attached while rendering, it finds no
+  // element on the first render, and a list that is drawn once never hears its
+  // own scrolling.
+  useLayoutEffect(() => {
+    virtualizer._willUpdate()
+  })
 
   return {
     virtualItems: virtualizer.getVirtualItems(),
     totalSize: virtualizer.getTotalSize(),
     scrollToIndex: (index, options) => virtualizer.scrollToIndex(index, options),
     scrollToOffset: (offset, options) => virtualizer.scrollToOffset(offset, options),
-    measureElement: (el) => virtualizer.measureElement(el),
+    // One function for the life of the list: a ref that changes identity is
+    // called again for every drawn row on every render.
+    measureElement: virtualizer.measureElement,
   }
 }
 
@@ -109,7 +144,7 @@ export function VirtualList<T>(props: VirtualListProps<T>) {
     [],
   )
 
-  const { virtualItems, totalSize } = useVirtualList({
+  const { virtualItems, totalSize, measureElement: measureRowElement } = useVirtualList({
     count: props.items.length,
     getScrollElement,
     estimateSize,
@@ -143,6 +178,7 @@ export function VirtualList<T>(props: VirtualListProps<T>) {
           return html`
             <div
               key=${String(vItem.key)}
+              ref=${measureRowElement}
               role="listitem"
               class="vlist-row"
               data-index=${vItem.index}

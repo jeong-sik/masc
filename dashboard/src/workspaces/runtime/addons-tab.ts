@@ -516,6 +516,7 @@ export function AddonsTab(props: WorkspaceViewProps) {
                     onClick=${() => setSelectedId(inst.instance_id)}
                     style=${{
                       width: '100%',
+                      marginBottom: 'var(--sp-2)',
                       textAlign: 'left',
                       padding: 'var(--sp-2)',
                       background: isSel ? 'var(--bg-4)' : 'var(--bg-2)',

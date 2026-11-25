@@ -312,6 +312,191 @@ describe('components/primitives', () => {
     expect(renderedRows.length).toBeLessThan(60)
   })
 
+  // happy-dom does no layout: every box is 0 px tall unless a test says otherwise.
+  function layOut(heights: { readonly viewport: number; readonly row?: number }) {
+    const viewport = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('vlist') || this.classList.contains('dtable-scroll') ? heights.viewport : 0
+    })
+    const row = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      return new DOMRect(0, 0, 0, this.hasAttribute('data-index') ? heights.row ?? 0 : 0)
+    })
+    return () => {
+      viewport.mockRestore()
+      row.mockRestore()
+    }
+  }
+
+  const drawnIndexes = (selector: string) =>
+    [...container.querySelectorAll(selector)].map((row) => Number(row.getAttribute('data-index')))
+
+  it('VirtualList drawn once follows its own scroll', async () => {
+    const restore = layOut({ viewport: 320 })
+    try {
+      const items = Array.from({ length: 500 }, (_, i) => `Row #${i}`)
+      render(
+        html`
+          <${VirtualList}
+            items=${items}
+            estimateSize=${32}
+            height=${320}
+            renderItem=${(item: string) => html`<span>${item}</span>`}
+          />
+        `,
+        container,
+      )
+      await new Promise((r) => setTimeout(r, 0))
+      expect(drawnIndexes('.vlist-row')).toContain(0)
+
+      // Nothing draws the list again here: only the scroll itself can move the window.
+      const scroller = container.querySelector<HTMLElement>('.vlist')!
+      scroller.scrollTop = 3200
+      scroller.dispatchEvent(new Event('scroll'))
+      await new Promise((r) => setTimeout(r, 0))
+
+      const indexes = drawnIndexes('.vlist-row')
+      expect(indexes).toContain(100)
+      expect(indexes).not.toContain(0)
+    } finally {
+      restore()
+    }
+  })
+
+  it('VirtualList places a row after the measured height of the rows before it', async () => {
+    const restore = layOut({ viewport: 320, row: 57.25 })
+    try {
+      const items = Array.from({ length: 40 }, (_, i) => `Row #${i}`)
+      render(
+        html`
+          <${VirtualList}
+            items=${items}
+            estimateSize=${76}
+            height=${320}
+            renderItem=${(item: string) => html`<span>${item}</span>`}
+          />
+        `,
+        container,
+      )
+      await new Promise((r) => setTimeout(r, 0))
+
+      const rows = [...container.querySelectorAll<HTMLElement>('.vlist-row')]
+      // Not rounded: a row kept as 57 px would overlap the next one by a quarter pixel each.
+      expect(rows[1]!.style.transform).toBe('translateY(57.25px)')
+      expect(rows[2]!.style.transform).toBe('translateY(114.5px)')
+    } finally {
+      restore()
+    }
+  })
+
+  it('VirtualList keeps the estimate for a row that has no layout box', async () => {
+    const restore = layOut({ viewport: 320, row: 0 })
+    try {
+      const items = Array.from({ length: 500 }, (_, i) => `Row #${i}`)
+      render(
+        html`
+          <${VirtualList}
+            items=${items}
+            estimateSize=${32}
+            height=${320}
+            renderItem=${(item: string) => html`<span>${item}</span>`}
+          />
+        `,
+        container,
+      )
+      await new Promise((r) => setTimeout(r, 0))
+
+      const rows = [...container.querySelectorAll<HTMLElement>('.vlist-row')]
+      expect(rows[1]!.style.transform).toBe('translateY(32px)')
+      expect(rows.length).toBeLessThan(60)
+    } finally {
+      restore()
+    }
+  })
+
+  interface LongRow {
+    readonly id: string
+    readonly label: string
+  }
+  const longRows: readonly LongRow[] = Array.from({ length: 200 }, (_, i) => ({ id: `r${i}`, label: `Row ${i}` }))
+  const longColumns: readonly DataTableColumn<LongRow>[] = [
+    { id: 'label', header: 'Label', accessor: (r) => r.label },
+  ]
+
+  it('DataTable windowed once follows its own scroll', async () => {
+    const restore = layOut({ viewport: 280 })
+    try {
+      render(
+        html`<${DataTable} data=${longRows} columns=${longColumns} getRowId=${(r: LongRow) => r.id} maxHeight=${280} />`,
+        container,
+      )
+      await new Promise((r) => setTimeout(r, 0))
+      expect(drawnIndexes('tbody tr[data-index]')).toContain(0)
+
+      const scroller = container.querySelector<HTMLElement>('.dtable-scroll')!
+      scroller.scrollTop = 3800
+      scroller.dispatchEvent(new Event('scroll'))
+      await new Promise((r) => setTimeout(r, 0))
+
+      const indexes = drawnIndexes('tbody tr[data-index]')
+      expect(indexes).toContain(100)
+      expect(indexes).not.toContain(0)
+      expect(container.textContent).toContain('Row 100')
+    } finally {
+      restore()
+    }
+  })
+
+  it('DataTable keeps the measured height of the rows it stops drawing', async () => {
+    // Drawn rows are 41.5 px tall; the table guesses 38 px until it has drawn one.
+    const restore = layOut({ viewport: 280, row: 41.5 })
+    try {
+      render(
+        html`<${DataTable} data=${longRows} columns=${longColumns} getRowId=${(r: LongRow) => r.id} maxHeight=${280} />`,
+        container,
+      )
+      await new Promise((r) => setTimeout(r, 0))
+
+      // Row 12 is at the top of the box; with 8 rows kept above it, rows 0-3 leave the DOM.
+      const scroller = container.querySelector<HTMLElement>('.dtable-scroll')!
+      scroller.scrollTop = 41.5 * 12 + 10
+      scroller.dispatchEvent(new Event('scroll'))
+      await new Promise((r) => setTimeout(r, 0))
+
+      expect(drawnIndexes('tbody tr[data-index]')[0]).toBe(4)
+      const spaceAbove = container.querySelector<HTMLElement>('tbody tr[aria-hidden="true"] td')!
+      expect(spaceAbove.style.height).toBe(`${41.5 * 4}px`)
+    } finally {
+      restore()
+    }
+  })
+
+  it('DataTable stops watching the rows of a window once it draws every row', async () => {
+    const watched = new Set<Element>()
+    const observe = vi.spyOn(ResizeObserver.prototype, 'observe').mockImplementation((element) => { watched.add(element) })
+    const unobserve = vi.spyOn(ResizeObserver.prototype, 'unobserve').mockImplementation((element) => { watched.delete(element) })
+    const restore = layOut({ viewport: 280, row: 38 })
+    try {
+      const table = (rows: readonly LongRow[]) =>
+        html`<${DataTable} data=${rows} columns=${longColumns} getRowId=${(r: LongRow) => r.id} maxHeight=${280} />`
+      render(table(longRows), container)
+      await new Promise((r) => setTimeout(r, 0))
+      expect([...watched].some((element) => element.getAttribute('data-index') === '0')).toBe(true)
+
+      // A filter leaves three rows: too few for a window, and they were drawn in it.
+      render(table(longRows.slice(0, 3)), container)
+      await new Promise((r) => setTimeout(r, 0))
+      expect(container.querySelectorAll('tbody tr').length).toBe(3)
+
+      // A watched row is measured by its `data-index`; one in the document
+      // without it would be measured as no row at every resize.
+      const leftBehind = [...watched].filter((element) => element.tagName === 'TR' && element.isConnected && !element.hasAttribute('data-index'))
+      expect(leftBehind).toEqual([])
+    } finally {
+      restore()
+      observe.mockRestore()
+      unobserve.mockRestore()
+    }
+  })
+
   it('command-search matches both fuzzy Latin queries (uFuzzy) and Korean/Hangul labels', () => {
     const searcher = createCommandSearcher([
       { id: 'overview', label: 'Overview 대시보드', keywords: ['home', 'summary'] },

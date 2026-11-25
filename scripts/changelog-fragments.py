@@ -584,6 +584,84 @@ def _disk_has_exempt_fragment(directory: pathlib.Path, number: int) -> bool:
         return False
 
 
+def _git_is_shallow() -> bool:
+    probe = subprocess.run(
+        ["git", "rev-parse", "--is-shallow-repository"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return probe.returncode == 0 and probe.stdout.strip() == "true"
+
+
+def _git_is_ancestor(old: str, new: str) -> bool | None:
+    """True/False for a resolvable probe, None when git cannot answer.
+
+    `git merge-base --is-ancestor` exits 0 for yes, 1 for no, and anything
+    else (unknown revision, corrupt repository) for cannot-answer. Callers
+    decide what cannot-answer means; this wrapper must not flatten it into
+    a plain False.
+    """
+    probe = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", old, new],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if probe.returncode == 0:
+        return True
+    if probe.returncode == 1:
+        return False
+    return None
+
+
+def shallow_truncation_reason(cut: str, head: str) -> str | None:
+    """Why a shallow clone makes `cut..head` incomplete, or None when complete.
+
+    `merged_squashes_with_sha` walks local history only. A shallow clone
+    grafts away everything below its boundary commits, so when a boundary
+    lies strictly inside `cut..head` the walk stops there and post-cut
+    squashes between `cut` and the boundary silently vanish from the count
+    (2026-11-25: a shallow release lane reported 3 missing post-cut pull
+    requests where main carried 11). A boundary at `cut` itself is complete:
+    the walk then stops exactly at the intended range start. Fail closed —
+    an ancestor probe that cannot resolve counts as truncation.
+    """
+    if not _git_is_shallow():
+        return None
+    git_dir = subprocess.run(
+        ["git", "rev-parse", "--git-common-dir"],
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout.strip()
+    # git-common-dir is printed relative to the caller's cwd; a release
+    # coverage run from a subdirectory must still find the shared file.
+    shallow_file = pathlib.Path(git_dir).resolve() / "shallow"
+    if not shallow_file.is_file():
+        # A repository git calls shallow but that lost its graft file cannot
+        # prove the range complete — fail closed like any other probe error.
+        return (
+            f"shallow repository metadata is missing: {shallow_file} does not "
+            f"exist, so {cut[:12]}..{head} completeness cannot be verified"
+        )
+    for boundary in shallow_file.read_text(encoding="utf-8").split():
+        if not boundary:
+            continue
+        in_head = _git_is_ancestor(boundary, head)
+        if in_head is None:
+            return (
+                f"shallow boundary {boundary[:12]} cannot be resolved "
+                f"against {head[:12]}"
+            )
+        if not in_head:
+            continue
+        in_cut = _git_is_ancestor(boundary, cut)
+        if in_cut is not True:
+            return f"shallow boundary {boundary[:12]} lies inside {cut[:12]}..{head}"
+    return None
+
+
 def release_coverage(
     version: str,
     base: str | None,
@@ -603,6 +681,16 @@ def release_coverage(
       both late unfolded fragments and unfragmented post-cut merges.
     """
     cut = base if base is not None else find_version_cut(version, head)
+    truncation = shallow_truncation_reason(cut, head)
+    if truncation is not None:
+        print(
+            f"release-coverage REFUSED: {truncation} — a shallow clone would "
+            f"silently undercount the post-cut pull requests. Fetch the history "
+            f"between {cut[:12]} and {head}, or run from a complete clone, and "
+            f"retry; refusing to report a partial count.",
+            file=sys.stderr,
+        )
+        return 1
     merged = merged_squashes_with_sha(cut, head)
     cited = section_cited_prs(changelog, version)
     legacy_exempt = _exempt_numbers()

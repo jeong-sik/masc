@@ -1118,4 +1118,93 @@ describe('workspaces/knowledge', () => {
     expect(container.textContent).toContain('댓글 더 불러오기 (80 / 120)')
     expect(container.textContent).toContain('Comment #79')
   })
+
+  it('BoardTab preserves >400 loaded comments across SSE refresh and retains existing comments with an alert if a continuation page fails', async () => {
+    const post = { id: 'p-deep-thread', title: 'Deep Thread', body: 'Body', author: 'keeper', post_kind: 'direct' }
+    const allComments = Array.from({ length: 480 }, (_, i) => ({
+      id: `deep-${i}`,
+      post_id: post.id,
+      parent_id: null as string | null,
+      author: 'keeper',
+      content: `DeepComment #${i}`,
+      created_at: '2026-11-25T01:00:00Z',
+    }))
+    const listeners = new Set<observer.ObserverListener>()
+    vi.spyOn(observer, 'subscribeObserverFrames').mockImplementation((listener) => {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
+    })
+
+    let failOffset40 = false
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'http://local')
+      if (url.pathname === '/api/v1/board/hearths') return jsonResponse({ hearths: [] })
+      if (url.pathname === '/api/v1/board/sub-boards') return jsonResponse({ sub_boards: [] })
+      if (url.pathname === '/api/v1/board') return jsonResponse({ posts: [post] })
+      if (url.pathname === `/api/v1/board/${post.id}`) {
+        const offset = Number(url.searchParams.get('comment_offset') ?? '0')
+        if (offset === 40 && failOffset40) {
+          return new Response(JSON.stringify({ error: 'temporary 503 on page 2' }), {
+            status: 503,
+            headers: { 'content-type': 'application/json' },
+          })
+        }
+        const rows = allComments.slice(offset, offset + 40)
+        return jsonResponse({
+          post,
+          comments: rows,
+          comment_page: {
+            offset,
+            returned: rows.length,
+            total: allComments.length,
+            next_offset: offset + rows.length < allComments.length ? offset + rows.length : null,
+          },
+        })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(
+      html`<${KnowledgeWorkspace} subroute="board" entityId=${post.id} onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+      container,
+    )
+    await flushUi(4)
+
+    // Load 10 extra pages (total 440 / 480 comments > previous 400 cap!)
+    for (let loaded = 40; loaded < 440; loaded += 40) {
+      const btn = [...container.querySelectorAll<HTMLButtonElement>('button')].find((b) =>
+        b.textContent?.includes(`댓글 더 불러오기 (${loaded} / 480)`),
+      )!
+      btn.click()
+      await flushUi(3)
+    }
+    expect(container.textContent).toContain('댓글 더 불러오기 (440 / 480)')
+    expect(container.textContent).toContain('DeepComment #439')
+
+    // 1. SSE refresh succeeds across all 11 pages -> preserves all 440 comments & reading window!
+    for (const listener of listeners) {
+      listener({ event: 'board_comment', id: null, data: { post_id: post.id }, raw: '' })
+    }
+    await vi.waitFor(
+      () => {
+        expect(container.textContent).toContain('댓글 더 불러오기 (440 / 480)')
+        expect(container.textContent).toContain('DeepComment #439')
+      },
+      { timeout: 3000 },
+    )
+
+    // 2. SSE refresh encounters 503 on continuation page (offset=40) -> preserves 440 comments & surfaces error alert!
+    failOffset40 = true
+    for (const listener of listeners) {
+      listener({ event: 'board_comment', id: null, data: { post_id: post.id }, raw: '' })
+    }
+    await vi.waitFor(
+      () => {
+        expect(container.textContent).toContain('게시글 상세/댓글 조회 실패')
+      },
+      { timeout: 3000 },
+    )
+    expect(container.textContent).toContain('댓글 더 불러오기 (440 / 480)')
+    expect(container.textContent).toContain('DeepComment #439')
+  })
 })

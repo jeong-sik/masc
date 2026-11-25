@@ -248,7 +248,6 @@ export function BoardTab(props: WorkspaceViewProps) {
 
   const COMMENT_PAGE_LIMIT = 40
   const MAX_RENDERED_COMMENTS = 40
-  const MAX_PRESERVED_COMMENT_RANGE = 400
 
   // CRUD Forms
   const [showCreate, setShowCreate] = useState(false)
@@ -400,7 +399,7 @@ export function BoardTab(props: WorkspaceViewProps) {
       const samePost = existing !== null && existing.post.id === postId
       const targetLoadedCount =
         samePost && !resetWindow
-          ? Math.min(MAX_PRESERVED_COMMENT_RANGE, Math.max(COMMENT_PAGE_LIMIT, existing.comments.length))
+          ? Math.max(COMMENT_PAGE_LIMIT, existing.comments.length)
           : COMMENT_PAGE_LIMIT
 
       detailRefreshingRef.current = true
@@ -463,17 +462,18 @@ export function BoardTab(props: WorkspaceViewProps) {
 
         // When refreshing a post that already had multiple pages loaded, if the
         // server capped `comment_limit` below `targetLoadedCount`, continue
-        // fetching contiguous pages so already-read comments are preserved.
-        const maxExtraPages = Math.ceil(MAX_PRESERVED_COMMENT_RANGE / COMMENT_PAGE_LIMIT)
-        let extraPagesFetched = 0
+        // fetching contiguous pages until the entire previously read range is
+        // restored. On any continuation error or cursor mismatch, preserve the
+        // existing detail & reading window and surface an error rather than
+        // silently replacing with a truncated prefix.
+        let prevExpectedOffset = 0
         while (
           samePost
           && !resetWindow
           && comments.length < targetLoadedCount
           && commentPage !== null
           && commentPage.nextOffset !== null
-          && commentPage.nextOffset >= comments.length
-          && extraPagesFetched < maxExtraPages
+          && commentPage.nextOffset > prevExpectedOffset
         ) {
           const expectedOffset = commentPage.nextOffset
           const pageParams = new URLSearchParams({
@@ -486,9 +486,20 @@ export function BoardTab(props: WorkspaceViewProps) {
             { signal },
           )
           if (signal?.aborted || seq !== detailSeqRef.current) return
-          if (!nextRes.ok || !isRecord(nextRes.value)) break
+          if (!nextRes.ok) {
+            if (nextRes.error.kind === 'aborted' || nextRes.error.kind === 'epoch_stale') return
+            setDetailError(`게시글 상세/댓글 조회 실패: ${nextRes.error.message}`)
+            return
+          }
+          if (!isRecord(nextRes.value)) {
+            setDetailError('게시글 댓글 페이지 응답 형식이 올바르지 않아 기존 목록을 유지합니다.')
+            return
+          }
           const nextPage = decodeCommentPageInfo(nextRes.value.comment_page)
-          if (nextPage !== null && nextPage.offset !== expectedOffset) break
+          if (nextPage !== null && nextPage.offset !== expectedOffset) {
+            setDetailError('게시글 댓글 페이지 순서가 어긋나 기존 목록을 유지합니다.')
+            return
+          }
           const nextRaw = Array.isArray(nextRes.value.comments) ? nextRes.value.comments : []
           let added = 0
           for (const c of nextRaw) {
@@ -500,7 +511,7 @@ export function BoardTab(props: WorkspaceViewProps) {
             }
           }
           commentPage = nextPage
-          extraPagesFetched += 1
+          prevExpectedOffset = expectedOffset
           if (focusId && !focusedComment) {
             focusedComment = comments.find((row) => row.id === focusId && row.postId === postId) ?? null
           }

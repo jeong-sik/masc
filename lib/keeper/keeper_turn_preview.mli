@@ -13,7 +13,9 @@ type response_channel = No_content | Thinking | Text
 
 type tool_stage = Tool_requested | Tool_executing
 (** [Tool_requested]: the model is calling the tool and nothing says it runs.
-    [Tool_executing]: the before-tool hook ran, so the host is executing it. *)
+    [Tool_executing]: it is running. The before-tool hook said so, or the
+    stream opened a native block, which is the official client running its own
+    tool from that block to its stop. *)
 
 type open_response = { channel : response_channel; started_at : float; since : float }
 
@@ -140,13 +142,21 @@ val note_tool_started :
   writer:writer option -> now:float -> tool_use_id:string option -> tool_name:string -> unit
 (** The before-tool hook ran, so the host is executing this call. A call the
     stream already opened moves from requested to executing; one it never
-    showed opens here. Hearing it twice for one call changes nothing. *)
+    showed opens here. The open response ends with that move: the model's
+    message that called the tool is over. Hearing it twice for one call
+    changes nothing. *)
 
 val note_tool_finished :
   writer:writer option -> now:float -> tool_use_id:string option -> tool_name:string -> unit
 (** The after-tool hook ran, with a result or with a failure. The oldest open
-    call that fits ends. A call that was not open only becomes the last
-    observed tool. *)
+    call that fits ends, and when nothing else is open the next response opens
+    with no content yet, counted from here: the result goes back to the model.
+    A call that was not open only becomes the last observed tool. *)
+
+val note_turn_over : writer:writer option -> now:float -> unit
+(** The turn's run ends at a tool boundary, so nothing it began is still
+    open. The agent loop yields there, and no model response or turn text
+    follows to close what the last tool return opened. *)
 
 val note_request : writer:writer option -> now:float -> unit
 (** A provider request of the running attempt goes out. Every earlier tool

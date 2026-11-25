@@ -1487,22 +1487,33 @@ let run_turn
          let cooperative_yield_probe =
            Some
              (fun (_ : Agent_core.Agent.Advanced.tool_boundary) ->
-                try
-                  (* AGENT_CORE invokes this probe after tool results and the
-                     checkpoint have persisted. A descriptor-typed terminal
-                     effect therefore either completes the turn or fails it;
-                     neither state can re-enter the provider loop. *)
-                  tool_boundary_state
-                    ~repetition_execution
-                    (s.terminal_effect_state ())
-                with
-                | Eio.Cancel.Cancelled _ as exn -> raise exn
-                | exn ->
-                  Error
-                    (Agent_core.Error.Internal
-                       (Printf.sprintf
-                          "keeper cooperative-yield probe failed: %s"
-                          (Printexc.to_string exn))))
+                let decision =
+                  try
+                    (* AGENT_CORE invokes this probe after tool results and the
+                       checkpoint have persisted. A descriptor-typed terminal
+                       effect therefore either completes the turn or fails it;
+                       neither state can re-enter the provider loop. *)
+                    tool_boundary_state
+                      ~repetition_execution
+                      (s.terminal_effect_state ())
+                  with
+                  | Eio.Cancel.Cancelled _ as exn -> raise exn
+                  | exn ->
+                    Error
+                      (Agent_core.Error.Internal
+                         (Printf.sprintf
+                            "keeper cooperative-yield probe failed: %s"
+                            (Printexc.to_string exn)))
+                in
+                (match decision with
+                 | Ok (Runtime_agent.Yield _) ->
+                    (* The loop stops at this boundary. No model response or
+                       turn text follows, so nothing else would close the
+                       response that the last tool return opened. *)
+                    Keeper_turn_preview.note_turn_over
+                      ~writer:preview ~now:(Time_compat.now ())
+                 | Ok Runtime_agent.Continue | Error _ -> ());
+                decision)
          in
          let checkpoint_sidecar =
                 ctx_work.checkpoint.Agent_core.Checkpoint.working_context

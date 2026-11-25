@@ -748,7 +748,11 @@ describe('Chat Hierarchy Grouping, Delegate Cards, Live Autonomous Turn & Waitin
     ).toEqual({ kind: 'chat_appended' })
     expect(
       parseKeeperLiveObserverEvent('keeper_waiting_inventory_changed', { queue_kind: 'event_queue' }, 'code-reviewer-sister'),
-    ).toEqual({ kind: 'waiting_changed' })
+    ).toBeNull()
+    expect(
+      parseKeeperLiveObserverEvent('keeper_waiting_inventory_changed',
+        { keeper_name: 'code-reviewer-sister', queue_kind: 'chat_operation' }, 'code-reviewer-sister'),
+    ).toEqual({ kind: 'waiting_changed', queueChanged: true })
   })
 
   it('renders grouped tool activity, accessible delegate jump outside summary, live autonomous preview card, and waiting inventory strip', async () => {

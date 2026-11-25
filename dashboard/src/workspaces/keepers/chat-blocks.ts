@@ -10,6 +10,7 @@
  * payloads, and autonomous turn JSON blobs into clean structured blocks instead of raw JSON.
  */
 
+import type { KeeperChatTranscriptSlot } from '../../keeper-delivery-provenance'
 import type { ChatToolBlock, ChatTranscriptEntry } from './types'
 
 export type ThinkingViewMode = 'hidden' | 'collapsed' | 'expanded'
@@ -812,12 +813,22 @@ export function groupTranscriptEntries(
   return out
 }
 
-function isInFlightOrFailedEntry(entry: ChatTranscriptEntry): boolean {
-  return (
+function isUnconfirmedEntry(entry: ChatTranscriptEntry): boolean {
+  return (entry.operationId !== undefined && entry.deliveryProvenance === undefined) || (
     entry.deliveryState !== undefined
     && entry.deliveryState !== 'Delivered'
     && entry.deliveryState !== 'Cut_recovered'
   )
+}
+
+function operationReceiptId(
+  entry: ChatTranscriptEntry,
+  ...slots: readonly KeeperChatTranscriptSlot['kind'][]
+): string | undefined {
+  const provenance = entry.deliveryProvenance
+  return provenance?.delivery_key.kind === 'operation' && slots.includes(provenance.transcript_slot.kind)
+    ? provenance.delivery_key.operation_id
+    : undefined
 }
 
 /**
@@ -828,28 +839,66 @@ function isInFlightOrFailedEntry(entry: ChatTranscriptEntry): boolean {
 export function mergeLatestHistoryPage(
   prev: readonly ChatTranscriptEntry[],
   incoming: readonly ChatTranscriptEntry[],
+  streaming: { readonly operationId: string; readonly executionId: string } | null = null,
 ): readonly ChatTranscriptEntry[] {
   // An authoritative empty latest page (e.g. after `/clear` or `/reset`) drops
-  // stale persisted entries while preserving any in-flight/failed optimistic rows.
+  // old persisted entries while retaining local requests awaiting a transcript receipt.
   if (incoming.length === 0) {
-    return prev.filter(isInFlightOrFailedEntry)
+    return prev.filter(isUnconfirmedEntry)
   }
-  const loadedIds = new Set(incoming.map((m) => m.id))
+  // Keep the open stream's bubbles at their committed positions so incoming
+  // history cannot reorder them or replace entries that still receive deltas.
+  let stored = incoming
+  if (streaming !== null) {
+    const localEntries = prev.filter((entry) => entry.operationId === streaming.operationId
+      && entry.deliveryProvenance === undefined)
+    const localUser = localEntries.find((entry) => entry.role === 'user')
+    const localReply = localEntries.find((entry) => entry.role === 'assistant')
+    const settledFor = (id: string) => incoming.find((entry) =>
+      operationReceiptId(entry, 'terminal_result', 'settled_failure') === id)
+    const replyReceipt = settledFor(streaming.operationId) ?? settledFor(streaming.executionId)
+    stored = incoming.map((entry) => {
+      if (entry === replyReceipt && localReply) return localReply
+      if (localUser && operationReceiptId(entry, 'accepted_user') === streaming.operationId) return localUser
+      return entry
+    })
+  }
+  const loadedIds = new Set(incoming.map((row) => row.id))
+  const accepted = new Set<string>()
+  const settled = new Set<string>()
+  for (const entry of stored) {
+    loadedIds.add(entry.id)
+    const provenance = entry.deliveryProvenance
+    if (provenance?.delivery_key.kind !== 'operation') continue
+    const operationId = provenance.delivery_key.operation_id
+    switch (provenance.transcript_slot.kind) {
+      case 'accepted_user': accepted.add(operationId); break
+      case 'terminal_result':
+      case 'settled_failure': settled.add(operationId); break
+    }
+  }
+  const keep = (entry: ChatTranscriptEntry) => {
+    if (loadedIds.has(entry.id)) return false
+    if (entry.operationId === undefined || entry.deliveryProvenance !== undefined) return true
+    if (entry.role === 'user') return !accepted.has(entry.operationId)
+    return !settled.has(entry.operationId)
+      && (entry.replyOperationId === undefined || !settled.has(entry.replyOperationId))
+  }
   const firstOverlapIdx = prev.findIndex((m) => loadedIds.has(m.id))
 
   if (firstOverlapIdx >= 0) {
-    const earlier = prev.slice(0, firstOverlapIdx).filter((m) => !loadedIds.has(m.id))
+    const earlier = prev.slice(0, firstOverlapIdx).filter(keep)
     const trailing = prev
       .slice(firstOverlapIdx)
-      .filter((m) => !loadedIds.has(m.id) && isInFlightOrFailedEntry(m))
-    return dedupeHistoryToolRows([...earlier, ...incoming, ...trailing])
+      .filter((m) => keep(m) && isUnconfirmedEntry(m))
+    return dedupeHistoryToolRows([...earlier, ...stored, ...trailing])
   }
 
   // No ID overlap (e.g. initial load or >1 page burst): keep persisted rows ahead
   // of the new head page and keep in-flight/failed optimistic entries trailing.
-  const earlier = prev.filter((m) => !loadedIds.has(m.id) && !isInFlightOrFailedEntry(m))
-  const trailing = prev.filter((m) => !loadedIds.has(m.id) && isInFlightOrFailedEntry(m))
-  return dedupeHistoryToolRows([...earlier, ...incoming, ...trailing])
+  const earlier = prev.filter((m) => keep(m) && !isUnconfirmedEntry(m))
+  const trailing = prev.filter((m) => keep(m) && isUnconfirmedEntry(m))
+  return dedupeHistoryToolRows([...earlier, ...stored, ...trailing])
 }
 
 export function formatTurnLaneLabel(lane: string): string {

@@ -2,10 +2,10 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { html } from 'htm/preact'
-import { render, fireEvent, waitFor, cleanup } from '@testing-library/preact'
+import { act, render, fireEvent, waitFor, cleanup } from '@testing-library/preact'
 import { formatObserved, resourceCache } from '../../core/resource-cache'
 import { authSession, resetAuthStateForTests } from '../../core/auth'
-import { resetObserverStateForTests } from '../../core/observer'
+import { observerConnected, resetObserverStateForTests, startObserverStream } from '../../core/observer'
 import { resetPortraitCacheForTests } from '../../lib/portrait-cache'
 import {
   buildChatStreamRequestBody,
@@ -143,7 +143,7 @@ describe('Keepers Workspace — Pure Contracts & Parsers', () => {
       { kind: 'text_delta', text: 'answer', owner: { kind: 'observed_response', contentGeneration: 1, streamScope: 0 } },
       { kind: 'run_finished' },
     ])
-    expect(recovered).toEqual({ text: 'final answer', finished: true, error: null })
+    expect(recovered).toEqual({ text: 'final answer', finished: true, error: null, executionId: null })
 
     // Server journal tag `event_error` must decode as error and fail recovery
     const errPage = decodeChatJournalPage(
@@ -151,6 +151,8 @@ describe('Keepers Workspace — Pure Contracts & Parsers', () => {
         has_more: false,
         events: [
           { event: { type: 'run_started' } },
+          { event: { type: 'batch_bound', operation_id: 'op-err-1', execution_id: 'op-batch-leader' } },
+          { event: { type: 'batch_bound', operation_id: 'other-op', execution_id: 'other-batch' } },
           { event: { type: 'event_error', detail: 'provider_timeout' } },
         ],
       },
@@ -160,6 +162,7 @@ describe('Keepers Workspace — Pure Contracts & Parsers', () => {
       text: '',
       finished: false,
       error: 'provider_timeout',
+      executionId: 'op-batch-leader',
     })
   })
 
@@ -320,6 +323,140 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
       )
       expect(speakers).toEqual(['Minsu', 'peer-keeper', 'Operator', '사용자'])
     })
+  })
+
+  it('follows an external chat through queue, live preview, and stored replies across observer reconnect', async () => {
+    const keeper = makeRosterKeeper()
+    const encoder = new TextEncoder()
+    let observer: ReadableStreamDefaultController<Uint8Array> | undefined
+    let browserSend: ReadableStreamDefaultController<Uint8Array> | undefined
+    let browserOperationId: string | undefined
+    let holdHistory = false
+    const heldHistoryReads: { signal?: AbortSignal | null; release: () => void }[] = []
+    const frame = (event: object) => encoder.encode(`data: ${JSON.stringify(event)}\n\n`)
+    const json = (data: unknown) => new Response(JSON.stringify(data), {
+      headers: { 'Content-Type': 'application/json' },
+    })
+    const stream = (ready: (controller: ReadableStreamDefaultController<Uint8Array>) => void) =>
+      new Response(new ReadableStream({ start: ready }), {
+        headers: { 'Content-Type': 'text/event-stream' },
+      })
+    let operations: object[] = []
+    const messages: object[] = [{ id: 'before', role: 'assistant', content: 'Stored before opening', ts: 1 }]
+    let queueReads = 0
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/mcp?sse_kind=observer') return stream((c) => { observer = c })
+      if (url.includes('/chat/history/page')) {
+        const response = json({ messages })
+        if (holdHistory) return new Promise<Response>((resolve) => {
+          heldHistoryReads.push({ signal: init?.signal, release: () => resolve(response) })
+        })
+        return response
+      }
+      if (url.includes('/chat/operations')) {
+        queueReads++
+        return json({ operations })
+      }
+      if (url.includes('/api/v1/keepers/chat/stream')) {
+        browserOperationId = JSON.parse(String(init?.body)).request_id
+        return stream((c) => { browserSend = c })
+      }
+      return json({ rows: [] })
+    }))
+
+    const initialObserver = startObserverStream()
+    await waitFor(() => expect(observerConnected.value).toBe(true))
+    const view = render(html`<${KeeperChatTab} keeper=${keeper} onInspect=${vi.fn()} onMutated=${vi.fn()} />`)
+    await waitFor(() => expect(view.queryByText('Stored before opening')).toBeTruthy())
+    const waitingChange = (keeperName: string) => frame({
+      type: 'keeper_waiting_inventory_changed', keeper_name: keeperName, queue_kind: 'chat_operation',
+    })
+    operations = [{ operation_id: 'op-external', state: 'Queued', sequence: '2', created_at: 2,
+      input: { message: 'TUI request' } }]
+    observer!.enqueue(waitingChange('other-keeper'))
+    observer!.enqueue(frame({ type: 'keeper_turn_preview_changed', name: keeper.name,
+      observation: { owner_key: 'owner', preview: {
+        status_text: 'Processing request', activity: 'tool', text_tail: '', updated_at_unix: 2, revision: 1,
+      } },
+    }))
+    await waitFor(() => expect(view.queryByTestId('chat-live-turn-card')).toBeTruthy())
+    expect(view.queryByText('TUI request')).toBeNull()
+
+    observer!.enqueue(waitingChange(keeper.name))
+    await waitFor(() => expect(view.queryByText('TUI request')).toBeTruthy())
+
+    const input = view.getByLabelText('Keeper 채팅 입력')
+    fireEvent.input(input, { target: { value: 'Browser request' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => expect(browserSend).toBeDefined())
+    const beforeQueueChange = queueReads
+    operations = []
+    messages.push({ id: 'external-reply', role: 'assistant', content: 'Reply from the TUI turn', ts: 4 })
+    observer!.enqueue(frame({ type: 'keeper_chat_appended', name: keeper.name }))
+    observer!.enqueue(waitingChange(keeper.name))
+    await waitFor(() => {
+      expect(queueReads).toBeGreaterThan(beforeQueueChange)
+      expect(view.queryByText('TUI request')).toBeNull()
+      expect(view.queryByText('Reply from the TUI turn')).toBeTruthy()
+    })
+
+    const executionId = 'op-batch-leader'
+    browserSend!.enqueue(frame({ type: 'CUSTOM', name: 'KEEPER_CHAT_BATCH_BOUND',
+      value: { operation_id: browserOperationId, execution_id: executionId },
+    }))
+    browserSend!.enqueue(frame({ type: 'TEXT_MESSAGE_CONTENT', delta: 'Shared batch reply' }))
+    await waitFor(() => expect(view.queryByText('Shared batch reply')).toBeTruthy())
+    messages.push(
+      { id: 'browser-user', role: 'user', content: 'Browser request', ts: 5,
+        delivery_key: { kind: 'operation', operation_id: browserOperationId },
+        transcript_slot: { kind: 'accepted_user' } },
+      { id: 'batch-assistant', role: 'assistant', content: 'Shared batch reply', ts: 6,
+        delivery_key: { kind: 'operation', operation_id: executionId },
+        transcript_slot: { kind: 'terminal_result' } },
+      { id: 'another-external', role: 'assistant', content: 'New external reply during batch', ts: 7 },
+    )
+    observer!.enqueue(frame({ type: 'keeper_chat_appended', name: keeper.name }))
+    await waitFor(() => {
+      expect(view.queryByText('New external reply during batch')).toBeTruthy()
+      expect(view.queryAllByText('Shared batch reply')).toHaveLength(1)
+      const replies = Array.from(view.container.querySelectorAll('.kp-msg-body'), (body) => body.textContent)
+      expect(replies.indexOf('Shared batch reply')).toBeLessThan(replies.indexOf('New external reply during batch'))
+    })
+
+    browserSend!.enqueue(frame({ type: 'RUN_FINISHED' }))
+    browserSend!.close()
+    await waitFor(() => {
+      expect(getActiveViewStreamKey()).toBeNull()
+      expect(view.queryAllByText('Shared batch reply')).toHaveLength(1)
+      expect(view.queryAllByText('Browser request')).toHaveLength(1)
+      const replies = Array.from(view.container.querySelectorAll('.kp-msg-body'), (body) => body.textContent)
+      expect(replies.indexOf('Shared batch reply')).toBeLessThan(replies.indexOf('New external reply during batch'))
+    })
+
+    holdHistory = true
+    const historyAppend = frame({ type: 'keeper_chat_appended', name: keeper.name })
+    observer!.enqueue(historyAppend)
+    await waitFor(() => expect(heldHistoryReads).toHaveLength(1))
+    const queueReadsBeforeGap = queueReads
+    observer!.enqueue(historyAppend)
+    observer!.enqueue(waitingChange(keeper.name))
+    await waitFor(() => expect(queueReads).toBeGreaterThan(queueReadsBeforeGap))
+    expect(heldHistoryReads).toHaveLength(1)
+
+    holdHistory = false
+    observer!.close()
+    await initialObserver
+    await waitFor(() => expect(observerConnected.value).toBe(false))
+    messages.push({ id: 'missed-failure', role: 'request_failure', content: 'External request failed while disconnected', ts: 8 })
+    const recoveredObserver = startObserverStream()
+    await waitFor(() => expect(view.queryByText('External request failed while disconnected')).toBeTruthy())
+    expect(heldHistoryReads[0]?.signal?.aborted).toBe(true)
+    await act(async () => heldHistoryReads[0]?.release())
+    expect(view.queryByText('External request failed while disconnected')).toBeTruthy()
+    view.unmount()
+    observer!.close()
+    await recoveredObserver
   })
 
   it('dispatches Queue (Enter) vs Steer (⌘↵) with own operation_id and toggles Debug Companion with ⌘.', async () => {

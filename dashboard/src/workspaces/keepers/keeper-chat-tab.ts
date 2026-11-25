@@ -15,7 +15,7 @@ import { html } from 'htm/preact'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { currentSessionEpoch, isEpochCurrent, sessionEpoch } from '../../core/auth'
 import { formatObserved } from '../../core/resource-cache'
-import { subscribeObserverFrames } from '../../core/observer'
+import { observerConnected, subscribeObserverFrames, subscribeObserverResync } from '../../core/observer'
 import { randomUuid } from '../../lib/uuid'
 import {
   cancelQueuedChatOperation,
@@ -85,6 +85,8 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * 8.5
 const BOTTOM_STICKY_THRESHOLD_PX = 72
 const INITIAL_RENDER_WINDOW = 120
 const MAX_RENDER_WINDOW = 1000
+
+type ChatRead = 'history' | 'queue' | 'waiting'
 
 function formatChatTime(ts: number): string | null {
   if (!Number.isFinite(ts) || ts <= 0) return null
@@ -156,6 +158,8 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const [historyError, setHistoryError] = useState<string | null>(null)
 
   const [queuedOps, setQueuedOps] = useState<readonly QueuedChatOperation[]>([])
+  const [queueError, setQueueError] = useState<string | null>(null)
+  const [queueRefreshing, setQueueRefreshing] = useState(true)
   const [draft, setDraft] = useState('')
   const [attachments, setAttachments] = useState<readonly ChatAttachmentDraft[]>([])
   const [sending, setSending] = useState(false)
@@ -198,6 +202,8 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const streamAbortRef = useRef<AbortController | null>(null)
   const btwAbortRef = useRef<AbortController | null>(null)
   const sendingRef = useRef(false)
+  const sendingOperationRef = useRef<{ operationId: string; executionId: string } | null>(null)
+  const refreshChatRef = useRef<(...reads: ChatRead[]) => void>(() => {})
   const stickToBottomRef = useRef(true)
   const forceScrollBottomRef = useRef(true)
   const pendingPrependAnchorRef = useRef<{ readonly prevScrollHeight: number; readonly prevScrollTop: number } | null>(null)
@@ -281,9 +287,6 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
         abortAllToolFetches()
         requestedExecIdsRef.current.clear()
         setToolResultCache({})
-        setWaitingInventory(null)
-        setLivePreview(null)
-        setLiveToolPulse(null)
       }
     })
   }, [abortAllToolFetches])
@@ -348,131 +351,149 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     setControlToken(keeper.chat_control_token)
   }, [keeper.chat_control_token])
 
-  const refreshWaitingInventory = useCallback(async () => {
-    const targetKeeper = keeper.name
-    const startEpoch = currentSessionEpoch()
-    const res = await fetchKeeperWaitingInventoryApi(targetKeeper)
-    if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) return
-    if (res.ok) {
-      setWaitingInventory(res.value)
-    }
-  }, [keeper.name])
+  useEffect(() => {
+    let controller = new AbortController()
+    let drainScheduled = false
+    const pending = new Set<ChatRead>()
+    const running = new Set<ChatRead>()
 
-  const refreshLatestHistorySilent = useCallback(async () => {
-    if (sendingRef.current) return
-    const targetKeeper = keeper.name
-    const startEpoch = currentSessionEpoch()
-    const [pageRes, opsRes] = await Promise.all([
-      fetchKeeperChatHistoryPageApi(targetKeeper, undefined, 40),
-      fetchQueuedChatOperations(targetKeeper),
-    ])
-    if (
-      !mountedRef.current
-      || activeKeeperRef.current !== targetKeeper
-      || !isEpochCurrent(startEpoch)
-      || sendingRef.current
-    ) {
-      return
+    const refresh = (...reads: ChatRead[]) => {
+      if (controller.signal.aborted) return
+      for (const read of reads) pending.add(read)
+      if (drainScheduled) return
+      drainScheduled = true
+      queueMicrotask(() => {
+        drainScheduled = false
+        if (controller.signal.aborted) return
+        for (const read of pending) {
+          if (running.has(read)) continue
+          pending.delete(read)
+          running.add(read)
+          const signal = controller.signal
+          const epoch = currentSessionEpoch()
+          const current = () => !signal.aborted
+            && activeKeeperRef.current === keeper.name && isEpochCurrent(epoch)
+          void readChat(read, signal, current).finally(() => {
+            if (!current()) return
+            running.delete(read)
+            if (pending.has(read)) refresh()
+          })
+        }
+      })
     }
-    if (pageRes.ok) {
-      setMessages((prev) => mergeLatestHistoryPage(prev, pageRes.value.messages))
-      if (!hasLoadedEarlierRef.current) {
-        setHasMore(pageRes.value.hasMore)
-        setNextCursor(pageRes.value.nextCursor)
+
+    const readChat = async (read: ChatRead, signal: AbortSignal, current: () => boolean) => {
+      switch (read) {
+        case 'history': {
+          const result = await fetchKeeperChatHistoryPageApi(keeper.name, undefined, 40, signal)
+          if (!current()) return
+          setLoadingHistory(false)
+          setHistoryError(result.ok ? null : result.error.message)
+          if (result.ok) {
+            setMessages((previous) => mergeLatestHistoryPage(
+              previous, result.value.messages, sendingOperationRef.current,
+            ))
+            if (!hasLoadedEarlierRef.current) {
+              setHasMore(result.value.hasMore)
+              setNextCursor(result.value.nextCursor)
+            }
+          }
+          return
+        }
+        case 'queue': {
+          const result = await fetchQueuedChatOperations(keeper.name, signal)
+          if (!current()) return
+          setQueueRefreshing(false)
+          setQueueError(result.ok ? null : result.error.message)
+          if (result.ok) setQueuedOps(result.value)
+          return
+        }
+        case 'waiting': {
+          const result = await fetchKeeperWaitingInventoryApi(keeper.name, signal)
+          if (current() && result.ok) setWaitingInventory(result.value)
+          return
+        }
       }
     }
-    if (opsRes.ok) {
-      setQueuedOps(opsRes.value)
-    }
-  }, [keeper.name])
 
-  const loadInitialHistory = useCallback(async () => {
-    const targetKeeper = keeper.name
-    const startEpoch = currentSessionEpoch()
-    hasLoadedEarlierRef.current = false
+    const recover = () => {
+      // The preceding connection's reads cannot settle this observation.
+      controller.abort()
+      controller = new AbortController()
+      running.clear()
+      pending.clear()
+      setQueueRefreshing(true)
+      setLivePreview(null)
+      setLiveToolPulse(null)
+      refresh('history', 'queue', 'waiting')
+    }
+
+    refreshChatRef.current = refresh
+    const unsubscribeFrames = subscribeObserverFrames((frame) => {
+      const event = parseKeeperLiveObserverEvent(frame.event, frame.data, keeper.name)
+      switch (event?.kind) {
+        case 'turn_preview':
+          setLivePreview((prev) => {
+            if (prev !== null && prev.ownerKey === event.ownerKey
+                && prev.preview.revision !== null && event.preview.revision !== null
+                && event.preview.revision < prev.preview.revision) return prev
+            return { ownerKey: event.ownerKey, preview: event.preview }
+          })
+          break
+        case 'turn_ended':
+          setLivePreview(null)
+          setLiveToolPulse(null)
+          break
+        case 'tool_pulse':
+          setLiveToolPulse(event.pulse)
+          break
+        case 'chat_appended':
+          refresh('history')
+          break
+        case 'waiting_changed':
+          refresh('waiting')
+          if (event.queueChanged) refresh('queue')
+          break
+        case undefined:
+          break
+      }
+    })
+    const unsubscribeResync = subscribeObserverResync(recover)
+    let wasConnected = observerConnected.peek()
+    const unsubscribeConnection = observerConnected.subscribe((connected) => {
+      if (connected && !wasConnected) recover()
+      wasConnected = connected
+    })
+    let epoch = currentSessionEpoch()
+    const unsubscribeEpoch = sessionEpoch.subscribe((nextEpoch) => {
+      if (nextEpoch === epoch) return
+      epoch = nextEpoch
+      setMessages([])
+      setQueuedOps([])
+      setHasMore(false)
+      setNextCursor(null)
+      setWaitingInventory(null)
+      setHistoryError(null)
+      setQueueError(null)
+      setLoadingHistory(true)
+      recover()
+    })
     setLoadingHistory(true)
     setHistoryError(null)
-    const [pageRes, opsRes, waitRes] = await Promise.all([
-      fetchKeeperChatHistoryPageApi(targetKeeper, undefined, 40),
-      fetchQueuedChatOperations(targetKeeper),
-      fetchKeeperWaitingInventoryApi(targetKeeper),
-    ])
-    if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) return
-    setLoadingHistory(false)
-    if (!pageRes.ok) {
-      if (pageRes.error.kind !== 'epoch_stale' && pageRes.error.kind !== 'aborted') {
-        setHistoryError(pageRes.error.message)
-      }
-    } else {
-      forceScrollBottomRef.current = true
-      setMessages((prev) => mergeLatestHistoryPage(prev, pageRes.value.messages))
-      setHasMore(pageRes.value.hasMore)
-      setNextCursor(pageRes.value.nextCursor)
-    }
-    if (opsRes.ok) {
-      setQueuedOps(opsRes.value)
-    }
-    if (waitRes.ok) {
-      setWaitingInventory(waitRes.value)
-    }
-  }, [keeper.name])
-
-  useEffect(() => {
-    void loadInitialHistory()
+    setQueueError(null)
+    setQueueRefreshing(true)
+    refresh('history', 'queue', 'waiting')
     return () => {
+      controller.abort()
+      unsubscribeFrames()
+      unsubscribeResync()
+      unsubscribeConnection()
+      unsubscribeEpoch()
+      refreshChatRef.current = () => {}
       streamAbortRef.current?.abort()
       btwAbortRef.current?.abort()
     }
-  }, [loadInitialHistory])
-
-  // Subscribe to shared Observer SSE for autonomous/delegated turn previews,
-  // tool pulses, new appended chat rows, and waiting-inventory updates.
-  useEffect(() => {
-    let historyTimer: ReturnType<typeof setTimeout> | null = null
-    let waitingTimer: ReturnType<typeof setTimeout> | null = null
-    const unsub = subscribeObserverFrames((frame) => {
-      const sig = parseKeeperLiveObserverEvent(frame.event, frame.data, keeper.name)
-      if (!sig) return
-      if (sig.kind === 'turn_preview') {
-        setLivePreview((prev) => {
-          const sameOwner = prev !== null && prev.ownerKey === sig.ownerKey
-          if (
-            sameOwner
-            && prev.preview.revision !== null
-            && sig.preview.revision !== null
-            && sig.preview.revision < prev.preview.revision
-          ) {
-            return prev
-          }
-          return { ownerKey: sig.ownerKey, preview: sig.preview }
-        })
-      } else if (sig.kind === 'turn_ended') {
-        setLivePreview(null)
-        setLiveToolPulse(null)
-      } else if (sig.kind === 'tool_pulse') {
-        setLiveToolPulse(sig.pulse)
-      } else if (sig.kind === 'chat_appended') {
-        if (!historyTimer && !sendingRef.current) {
-          historyTimer = setTimeout(() => {
-            historyTimer = null
-            void refreshLatestHistorySilent()
-          }, 350)
-        }
-      } else if (sig.kind === 'waiting_changed') {
-        if (!waitingTimer) {
-          waitingTimer = setTimeout(() => {
-            waitingTimer = null
-            void refreshWaitingInventory()
-          }, 500)
-        }
-      }
-    })
-    return () => {
-      unsub()
-      if (historyTimer) clearTimeout(historyTimer)
-      if (waitingTimer) clearTimeout(waitingTimer)
-    }
-  }, [keeper.name, refreshLatestHistorySilent, refreshWaitingInventory])
+  }, [keeper.name])
 
   // Global shortcuts: ⌘. / Ctrl+. (Debug Companion) and Alt+T (Thinking block visibility)
   useEffect(() => {
@@ -554,10 +575,12 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     updateAssistantEntry(assistantId, (m) => ({
       ...m,
       content: recovered.value.text || m.content,
+      replyOperationId: recovered.value.executionId ?? m.replyOperationId,
       deliveryState: recovered.value.error ? 'Failed' : 'Cut_recovered',
       cutStream: false,
       errorDetail: recovered.value.error ?? undefined,
     }))
+    refreshChatRef.current('history')
   }
 
   const runBtwQuery = async (promptText: string) => {
@@ -643,6 +666,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     const currentAttachments = [...attachments]
     let acceptedByServer = false
     sendingRef.current = true
+    sendingOperationRef.current = { operationId, executionId: operationId }
     forceScrollBottomRef.current = true
     setMessages((prev) => [...prev, userEntry, assistantEntry])
     setDraft('')
@@ -696,6 +720,11 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
         attachments: currentAttachments,
         signal: abortController.signal,
         callbacks: {
+          onBatchBound: (memberId, executionId) => {
+            if (memberId !== operationId) return
+            sendingOperationRef.current = { operationId, executionId }
+            updateAssistantEntry(assistantId, (entry) => ({ ...entry, replyOperationId: executionId }))
+          },
           onAccepted: (info) => {
             acceptedByServer = true
             if (info.controlToken) setControlToken(info.controlToken)
@@ -1020,7 +1049,10 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       })
     } finally {
       sendingRef.current = false
-      if (mountedRef.current) setSending(false)
+      sendingOperationRef.current = null
+      if (mountedRef.current) {
+        setSending(false)
+      }
     }
 
     if (
@@ -1048,12 +1080,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       return
     }
 
-    const opsRes = await fetchQueuedChatOperations(targetKeeper)
-    if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) {
-      return
-    }
-    if (opsRes.ok) setQueuedOps(opsRes.value)
-    void refreshWaitingInventory()
+    refreshChatRef.current('history', 'queue', 'waiting')
     props.onMutated()
   }
 
@@ -1132,9 +1159,12 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   // Live autonomous / delegated / external turn status from roster + SSE preview override
   const activeTurn = keeper.active_turn
   const effectivePreview: KeeperActiveTurnPreview | null = livePreview?.preview ?? activeTurn?.preview ?? null
-  const showLiveTurnCard = !sending && (activeTurn !== null || effectivePreview !== null)
+  const browserRequestQueued = sending && messages.some((entry) => entry.role === 'assistant'
+    && entry.operationId === sendingOperationRef.current?.operationId && entry.deliveryState === 'Queued')
+  const showLiveTurnCard = (!sending || browserRequestQueued) && (activeTurn !== null || effectivePreview !== null)
   const liveTurnActivity = formatTurnActivityLabel(effectivePreview?.activity)
-  const liveTurnLaneLabel = formatTurnLaneLabel(activeTurn?.lane ?? 'autonomous')
+  const liveTurnLaneLabel = activeTurn ? formatTurnLaneLabel(activeTurn.lane) : 'Keeper 턴'
+  const lastObserved = effectivePreview ? formatChatTime(effectivePreview.updated_at_unix) : null
   const liveTurnElapsedSec = activeTurn
     ? (activeTurn.elapsed_ms !== null && activeTurn.elapsed_ms !== undefined
         ? Math.floor(activeTurn.elapsed_ms / 1000)
@@ -1710,6 +1740,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                     ${liveTurnElapsedSec !== null && html`
                       <span class="kp-pill">${formatElapsedCompact(liveTurnElapsedSec)}</span>
                     `}
+                    ${lastObserved && html`<span class="kp-pill">마지막 진행 ${lastObserved}</span>`}
                   </div>
                 </div>
                 <div class="kp-hierarchy-rail">
@@ -1787,6 +1818,16 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
           `
         })()}
 
+        ${queueError && html`
+          <div class="ap-error" role="status">
+            대기열 조회 실패 · ${queueError}
+            <button type="button" class="btn-ghost" disabled=${queueRefreshing}
+              onClick=${() => {
+                setQueueRefreshing(true)
+                refreshChatRef.current('queue')
+              }}>다시 조회</button>
+          </div>
+        `}
         ${queuedOps.length > 0 && html`
           <div class="kp-queue-strip" aria-label="대기 중인 큐 작업">
             <span class="kp-kv-k">Queued Operations (${queuedOps.length})</span>
@@ -1797,10 +1838,13 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                   <button
                     type="button"
                     class="btn-ghost"
+                    disabled=${queueRefreshing || queueError !== null}
                     onClick=${async () => {
+                      const epoch = currentSessionEpoch()
                       await moveQueuedChatOperationToEndApi(keeper.name, op.operationId)
-                      const next = await fetchQueuedChatOperations(keeper.name)
-                      if (next.ok) setQueuedOps(next.value)
+                      if (activeKeeperRef.current === keeper.name && isEpochCurrent(epoch)) {
+                        refreshChatRef.current('queue', 'waiting')
+                      }
                     }}
                   >
                     뒤로
@@ -1808,10 +1852,13 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                   <button
                     type="button"
                     class="kp-btn-danger"
+                    disabled=${queueRefreshing || queueError !== null}
                     onClick=${async () => {
+                      const epoch = currentSessionEpoch()
                       await cancelQueuedChatOperation(keeper.name, op.operationId)
-                      const next = await fetchQueuedChatOperations(keeper.name)
-                      if (next.ok) setQueuedOps(next.value)
+                      if (activeKeeperRef.current === keeper.name && isEpochCurrent(epoch)) {
+                        refreshChatRef.current('queue', 'waiting')
+                      }
                     }}
                   >
                     취소

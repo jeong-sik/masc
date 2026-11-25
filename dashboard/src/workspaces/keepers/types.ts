@@ -3,6 +3,7 @@
  */
 
 import type { EQUIPMENT_IDS, KeeperEquipment } from '../../lib/keeper-portrait'
+import type { KeeperChatDeliveryProvenance } from '../../keeper-delivery-provenance'
 
 export type RosterMode = 'companies' | 'attention' | 'wall24h'
 
@@ -142,6 +143,8 @@ export interface ChatTranscriptEntry {
   readonly thinking?: string
   readonly ts: number
   readonly operationId?: string
+  readonly replyOperationId?: string
+  readonly deliveryProvenance?: KeeperChatDeliveryProvenance
   readonly turnRef?: string
   readonly executionId?: string
   readonly toolName?: string
@@ -173,6 +176,7 @@ export interface ChatJournalTextOwner {
 
 export type ChatJournalEvent =
   | { readonly kind: 'run_started' }
+  | { readonly kind: 'batch_bound'; readonly executionId: string }
   | { readonly kind: 'runtime_attempt_started' }
   | { readonly kind: 'text_delta'; readonly text: string; readonly owner: ChatJournalTextOwner }
   | { readonly kind: 'run_finished' }

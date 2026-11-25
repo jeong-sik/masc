@@ -11,13 +11,13 @@
  */
 
 import { html } from 'htm/preact'
-import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
-import { currentSessionEpoch } from '../../core/auth'
-import { markViewSynced, subscribeObserverFrames } from '../../core/observer'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { currentSessionEpoch, sessionEpoch } from '../../core/auth'
+import { extractObserverTopics, markViewSynced, observerConnected, subscribeObserverFrames, subscribeObserverResync } from '../../core/observer'
 import { observedLoading, type Observed } from '../../core/resource-cache'
 import { parseKeeperEntityTab, type KeeperEntityTab } from '../../routes/router'
 import type { WorkspaceViewProps } from '../types'
-import { loadKeeperRoster } from './keepers-api'
+import { KEEPER_ROSTER_OBSERVER_TOPICS, loadKeeperRoster } from './keepers-api'
 import { KeeperRoster } from './keeper-roster'
 import { KeeperHeader } from './keeper-header'
 import { KeeperChatTab } from './keeper-chat-tab'
@@ -31,6 +31,7 @@ import './keepers.css'
 export function KeepersWorkspace(props: WorkspaceViewProps) {
   const [roster, setRoster] = useState<Observed<readonly KeeperRosterItem[]>>(() => observedLoading())
   const [localSelectedName, setLocalSelectedName] = useState<string | null>(props.entityId ?? null)
+  const rosterRead = useRef<ReturnType<typeof loadKeeperRoster> | null>(null)
   const activeTab: KeeperEntityTab = parseKeeperEntityTab(props.entityTab)
 
   useEffect(() => {
@@ -39,29 +40,62 @@ export function KeepersWorkspace(props: WorkspaceViewProps) {
     }
   }, [props.entityId])
 
-  const refreshRoster = useCallback(async (reason: 'mount' | 'route' | 'sse' | 'manual') => {
+  const refreshRoster = useCallback(async (reason: 'mount' | 'sse' | 'manual') => {
     const startEpoch = currentSessionEpoch()
-    const next = await loadKeeperRoster(reason)
+    // Start the invalidated read after any existing snapshot settles.
+    if (reason === 'sse' && rosterRead.current) await rosterRead.current
+    if (currentSessionEpoch() !== startEpoch) return
+    const read = loadKeeperRoster(reason)
+    rosterRead.current = read
+    const next = await read
+    if (rosterRead.current === read) rosterRead.current = null
     if (currentSessionEpoch() !== startEpoch) return
     setRoster(next)
     markViewSynced()
   }, [])
 
   useEffect(() => {
-    void refreshRoster('mount')
+    return sessionEpoch.subscribe(() => {
+      setRoster(observedLoading())
+      void refreshRoster('mount')
+    })
   }, [refreshRoster])
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null
-    const unsub = subscribeObserverFrames(() => {
-      if (timer) return
+    let pending = false
+    let running = false
+    let disposed = false
+    const schedule = () => {
+      if (disposed) return
+      pending = true
+      if (running || timer !== null) return
       timer = setTimeout(() => {
         timer = null
-        void refreshRoster('sse')
+        pending = false
+        running = true
+        void refreshRoster('sse').finally(() => {
+          running = false
+          if (pending) schedule()
+        })
       }, 450)
+    }
+    const unsub = subscribeObserverFrames((frame) => {
+      if (extractObserverTopics(frame).some((topic) => KEEPER_ROSTER_OBSERVER_TOPICS.includes(topic))) {
+        schedule()
+      }
+    })
+    const unsubResync = subscribeObserverResync(schedule)
+    let wasConnected = observerConnected.peek()
+    const unsubConnection = observerConnected.subscribe((connected) => {
+      if (connected && !wasConnected) schedule()
+      wasConnected = connected
     })
     return () => {
+      disposed = true
       unsub()
+      unsubResync()
+      unsubConnection()
       if (timer) clearTimeout(timer)
     }
   }, [refreshRoster])

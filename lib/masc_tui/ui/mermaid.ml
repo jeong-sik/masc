@@ -509,7 +509,9 @@ let put_text ?(placement = Reading_text) ?(boundaries = []) ?source canvas r c t
           put start stop width)
     with Canvas_unrenderable -> ()
 
-let put_parts ?(placement = Reading_text) canvas row col parts =
+(* [byte_offset] is where the placed text starts inside its label, for a
+   label drawn one row per line. *)
+let put_parts ?(placement = Reading_text) ?(byte_offset = 0) canvas row col parts =
   let text = String.concat "" (List.map snd parts) in
   let _, boundaries = List.fold_left (fun (offset, boundaries) (_, part) ->
     let stop = offset + String.length part in
@@ -519,7 +521,7 @@ let put_parts ?(placement = Reading_text) canvas row col parts =
     | None -> None
     | Some _ ->
         let positions = Array.concat (List.map (fun (identity, text) ->
-          Array.init (String.length text) (fun byte -> Option.map (fun identity -> {identity; byte}) identity)) parts) in
+          Array.init (String.length text) (fun byte -> Option.map (fun identity -> {identity; byte = byte_offset + byte}) identity)) parts) in
         Some (fun byte -> positions.(byte)) in
   put_text ~placement ~boundaries ?source canvas row col text
 
@@ -632,7 +634,22 @@ let layout_label node =
   | Rect | Round | Asymmetric | Database | Subroutine | Stadium | Circle -> node.label
   | Bar -> ""
 
-let box_width node = display_width (layout_label node) + (2 * box_pad)
+(* A box draws its label one row per line: the grammar keeps a line break
+   of a box label as a newline. Every other shape draws one row. *)
+let box_label_lines node =
+  match node.shape with
+  | Rect | Round -> String.split_on_char '\n' node.label
+  | Diamond | Hexagon | Asymmetric | Database | Subroutine | Stadium | Circle -> [layout_label node]
+  | Bar -> [""]
+
+let box_width node =
+  List.fold_left (fun widest line -> max widest (display_width line)) 0 (box_label_lines node)
+  + (2 * box_pad)
+
+let box_height_of node =
+  match node.shape with
+  | Rect | Round -> List.length (box_label_lines node) + 2
+  | Diamond | Hexagon | Asymmetric | Database | Subroutine | Stadium | Circle | Bar -> box_height
 
 (* A subgraph already laid out: [c_rows] is its drawing, and the scope that
    holds it treats the whole thing as one box. *)
@@ -870,7 +887,7 @@ let rec layout_scope ~trace ~cols ~direction ~node_of ~nodes ~groups ~edges =
             (* Across the flow whichever way the flow runs. *)
             | Bar -> (bar_length, bar_thickness)
             | Rect | Round | Diamond | Hexagon | Asymmetric | Database | Subroutine | Stadium | Circle ->
-                across_and_along (box_width node, box_height))
+                across_and_along (box_width node, box_height_of node))
         | Cluster c -> across_and_along (cluster_width c, cluster_height c)
         | Dummy -> across_and_along (1, 0)
       in
@@ -1095,7 +1112,15 @@ let rec layout_scope ~trace ~cols ~direction ~node_of ~nodes ~groups ~edges =
                     | Diamond -> "⟨", "⟩"
                     | Hexagon -> " ", " "
                     | Rect | Round | Asymmetric | Database | Subroutine | Stadium | Circle | Bar -> "", "" in
-                  put_parts canvas (top + 1) (lft + 2) [None,prefix;identity,node.label;None,suffix]
+                  (* Each label line takes its own row, starting where it
+                     starts inside the label. *)
+                  let byte_offset = ref 0 in
+                  List.iteri
+                    (fun k line ->
+                      put_parts ~byte_offset:!byte_offset canvas (top + 1 + k) (lft + 2)
+                        [None,prefix;identity,line;None,suffix];
+                      byte_offset := !byte_offset + String.length line + 1)
+                    (box_label_lines node)
                 in
                 let glyph r c text = put_text ~placement:Generated_glyph canvas r c text in
                 let mid = (top + bottom) / 2 in

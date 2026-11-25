@@ -186,8 +186,10 @@ let strip_quotes text =
   else text
 
 (* [<br>], [<br/>] and [<br />] are Mermaid's line breaks inside a label.
-   Parsing still normalizes them to spaces; a renderer that subscribes to
-   [on_break] keeps the source when it cannot draw the line break. *)
+   A label drawn on one row takes each break as a space, and a renderer
+   that subscribes to [on_break] keeps the source when it cannot draw the
+   line break. [as_newline] keeps the break as a newline for a label that
+   a box draws one row per line. *)
 type label_source_range = {
   start_byte : int;
   end_byte : int;
@@ -198,7 +200,7 @@ type mapped_label = {
   source_ranges : label_source_range array;
 }
 
-let replace_breaks ?on_span ?on_break text =
+let replace_breaks ?on_span ?on_break ?(as_newline = false) text =
   let out = Buffer.create (String.length text) in
   let n = String.length text in
   let emit_char i =
@@ -210,8 +212,8 @@ let replace_breaks ?on_span ?on_break text =
     else if i + 3 <= n && String.sub text i 3 = "<br" then (
       match String.index_from_opt text i '>' with
       | Some close ->
-          Buffer.add_char out ' ';
-          Option.iter (fun emit -> emit ()) on_break;
+          Buffer.add_char out (if as_newline then '\n' else ' ');
+          if not as_newline then Option.iter (fun emit -> emit ()) on_break;
           Option.iter (fun emit -> emit {start_byte=i; end_byte=close + 1}) on_span;
           walk (close + 1)
       | None ->
@@ -221,7 +223,7 @@ let replace_breaks ?on_span ?on_break text =
   walk 0;
   Buffer.contents out
 
-let normalize_label ?on_span ?on_break raw =
+let normalize_label ?on_span ?on_break ?(as_newline = false) raw =
   let whitespace = function ' ' | '\t' | '\n' | '\r' | '\012' -> true | _ -> false in
   let limit = String.length raw in
   let rec left at = if at < limit && whitespace raw.[at] then left (at + 1) else at in
@@ -232,14 +234,18 @@ let normalize_label ?on_span ?on_break raw =
     then start + 1, stop - 1 else start, stop in
   let on_span = Option.map (fun emit span ->
     emit {start_byte=start + span.start_byte; end_byte=start + span.end_byte}) on_span in
-  replace_breaks ?on_span ?on_break (String.sub raw start (stop - start))
+  replace_breaks ?on_span ?on_break ~as_newline (String.sub raw start (stop - start))
 
-let label_text ?on_break raw = normalize_label ?on_break raw
+let label_text ?on_break ?(as_newline = false) raw =
+  normalize_label ?on_break ~as_newline raw
+
+let map_label_with_source_ranges ~as_newline raw =
+  let ranges = ref [] in
+  let label_text = normalize_label ~as_newline ~on_span:(fun span -> ranges := span :: !ranges) raw in
+  {label_text; source_ranges=Array.of_list (List.rev !ranges)}
 
 let label_with_source_ranges raw =
-  let ranges = ref [] in
-  let label_text = normalize_label ~on_span:(fun span -> ranges := span :: !ranges) raw in
-  {label_text; source_ranges=Array.of_list (List.rev !ranges)}
+  map_label_with_source_ranges ~as_newline:false raw
 
 type label_identity =
   | Node_label of node_id
@@ -263,8 +269,8 @@ type source_mapping =
 
 type parsed_with_sources = { diagram : diagram; source_mapping : source_mapping }
 
-let label_at offset raw =
-  let mapped = label_with_source_ranges raw in
+let label_at ?(as_newline = false) offset raw =
+  let mapped = map_label_with_source_ranges ~as_newline raw in
   {mapped with source_ranges=Array.map (fun span ->
     {start_byte=offset + span.start_byte; end_byte=offset + span.end_byte}) mapped.source_ranges}
 
@@ -468,8 +474,19 @@ let parse_node c declared =
                 | None -> Error (Printf.sprintf "%s after %s is never closed" opener id)
                 | Some stop ->
                     let raw = String.sub c.text start (stop - start) in
-                    let source = Option.map (fun _ -> label_at (c.base_byte + start) raw) declared.on_label in
-                    declare ?source declared (Named id) ~label:(label_text ?on_break:c.on_break raw) ~shape ~explicit:true;
+                    (* A box draws its label one row per line, so its breaks
+                       stay newlines and need no undrawn report. *)
+                    let as_newline =
+                      match shape with
+                      | Rect | Round -> true
+                      | Diamond | Hexagon | Asymmetric | Database | Subroutine
+                      | Stadium | Circle | Bar ->
+                          false
+                    in
+                    let source = Option.map (fun _ -> label_at ~as_newline (c.base_byte + start) raw) declared.on_label in
+                    declare ?source declared (Named id)
+                      ~label:(label_text ?on_break:c.on_break ~as_newline raw)
+                      ~shape ~explicit:true;
                     c.pos <- stop + String.length closer;
                     Ok (Named id)))
           else try_openers rest

@@ -372,6 +372,135 @@ let test_render_adaptive_lr_to_td_fallback () =
   | Ok _ | Error (Mermaid.Too_wide _ | Mermaid.Unsupported _ | Mermaid.Parse_error _) ->
       Alcotest.fail "expected honest Too_wide when even TD exceeds cols=8"
 
+(* A box label's line break: each line takes a row of its own. *)
+let box_side = "\xe2\x94\x82" (* │ *)
+and box_top_left = "\xe2\x94\x8c" (* ┌ *)
+and box_bottom_left = "\xe2\x94\x94" (* └ *)
+and box_rule = "\xe2\x94\x80" (* ─ *)
+
+let index_of pred rows =
+  let rec go i = function
+    | [] -> None
+    | row :: rest -> if pred row then Some i else go (i + 1) rest
+  in
+  go 0 rows
+
+(* The row of a box that shows [text], wherever the box stands in the row. *)
+let has_box_line text row =
+  contains (box_side ^ " " ^ text ^ " ") (String.trim row)
+
+let rows_fit cols rows =
+  List.for_all (fun row -> Grapheme.display_width row <= cols) rows
+
+(* Every glyph of every row is the byte of its label that its position names. *)
+let check_traced_rows source cols =
+  match
+    ( Mermaid.render_with_source_labels ~cols source,
+      Mermaid.render ~cols source )
+  with
+  | Ok traced, Ok plain ->
+      Alcotest.(check (list string)) "traced rows equal plain rows" plain traced.rendered_rows;
+      Alcotest.(check int) "a drawn break leaves no undrawn source" 0
+        (List.length traced.undrawn_sources);
+      (match traced.labels with
+       | Mermaid.Incomplete _ -> Alcotest.fail "expected Complete labels"
+       | Mermaid.Complete labels ->
+           List.iteri
+             (fun row text ->
+               Array.iteri
+                 (fun byte -> function
+                   | None -> ()
+                   | Some (pos : Mermaid.semantic_position) ->
+                       let lbl =
+                         List.find
+                           (fun (l : Mermaid.sourced_label) -> l.identity = pos.identity)
+                           labels
+                       in
+                       Alcotest.(check char) "glyph matches semantic byte" text.[byte]
+                         lbl.text.[pos.byte])
+                 traced.rendered_positions.(row))
+             plain)
+  | _ -> Alcotest.fail ("expected traced render to succeed for: " ^ source)
+
+let test_box_labels_draw_line_breaks () =
+  let src = "flowchart TD\nE[\"one<br/>two words<br/>three\"] --> F(\"a<br/>bb\")" in
+  let labels (g : Mermaid.graph) =
+    List.map (fun (n : Mermaid.node) -> n.label) g.nodes
+  in
+  Alcotest.(check (list string)) "a box label keeps its line breaks"
+    [ "one\ntwo words\nthree"; "a\nbb" ]
+    (labels (parsed src));
+  (* Top down: the lines take consecutive rows of a box as wide as the
+     longest line. *)
+  let rows = render ~cols:40 src in
+  let shown text = index_of (has_box_line text) rows in
+  let row k = List.nth rows k in
+  (match shown "one", shown "two words", shown "three" with
+   | Some a, Some b, Some c ->
+       Alcotest.(check int) "the second line follows the first" 1 (b - a);
+       Alcotest.(check int) "the third line follows the second" 1 (c - b);
+       Alcotest.(check bool) "the box opens above the first line" true
+         (String.starts_with ~prefix:box_top_left (String.trim (row (a - 1))));
+       Alcotest.(check bool) "the box closes below the last line" true
+         (String.starts_with ~prefix:box_bottom_left (String.trim (row (a + 3))));
+       Alcotest.(check int) "the box is as wide as its longest line and the pad" 13
+         (Grapheme.display_width (row (a - 1)));
+       Alcotest.(check bool) "no row is wider than that box" true (rows_fit 13 rows)
+   | _ ->
+       Alcotest.failf "expected the three label lines of the first box in: %s"
+         (String.concat " / " rows));
+  (match shown "a", shown "bb" with
+   | Some a, Some b ->
+       Alcotest.(check int) "a rounded box draws its lines on consecutive rows" 1 (b - a);
+       Alcotest.(check bool) "the rounded box has a rule above its first line" true
+         (contains box_rule (row (a - 1)))
+   | _ ->
+       Alcotest.failf "expected the two label lines of the rounded box in: %s"
+         (String.concat " / " rows));
+  (* Left to right: the flow runs along the rows and the lines still stack. *)
+  let lr =
+    render ~cols:60 "flowchart LR\nA[\"x<br/>yy<br/>zzz\"] --> B(\"q<br/>rr\")"
+  in
+  (* An incoming edge can replace the left border on a label's row. *)
+  let lr_shown text = index_of (contains (" " ^ text ^ " ")) lr in
+  (match lr_shown "x", lr_shown "yy", lr_shown "zzz", lr_shown "q", lr_shown "rr" with
+   | Some a, Some b, Some c, Some d, Some e ->
+       Alcotest.(check (list int)) "lines stack downward under a left-to-right flow"
+         [ 1; 1; 1 ] [ b - a; c - b; e - d ];
+       Alcotest.(check bool) "an arrow still joins the boxes" true (List.exists (contains ">") lr)
+   | _ ->
+       Alcotest.failf "expected the label lines of the left-to-right boxes in: %s"
+         (String.concat " / " lr));
+  (* Nothing changes for a label without a break or for another shape. *)
+  let single = render ~cols:40 "flowchart TD\nA[one two]" in
+  Alcotest.(check int) "a label without a break keeps a three-row box" 3 (List.length single);
+  Alcotest.(check int) "and the width it had" 11 (Grapheme.display_width (List.hd single));
+  Alcotest.(check (list string)) "another shape takes the break as a space" [ "alpha beta" ]
+    (labels (parsed "flowchart TD\nC((alpha<br/>beta))"));
+  Alcotest.(check bool) "and draws it on one row" true
+    (List.exists (contains "alpha beta") (render ~cols:40 "flowchart TD\nC((alpha<br/>beta))"));
+  (* A long fact: the lineage generator wraps it and joins the lines with
+     breaks. Joined into one row it could not fit any pane. *)
+  let wrapped = String.concat "<br/>" (List.init 22 (fun _ -> String.make 40 'x')) in
+  let card =
+    Printf.sprintf "flowchart TD\nE[\"made · r62 · 11-23 21:31\"] --> F(\"%s\")" wrapped
+  in
+  (match Mermaid.render ~cols:60 card with
+   | Ok card_rows ->
+       Alcotest.(check bool) "the wrapped lines fit a 60 column pane" true (rows_fit 60 card_rows);
+       Alcotest.(check bool) "each wrapped line has its own row" true (List.length card_rows >= 24)
+   | Error (Mermaid.Too_wide { cells; cols; _ }) ->
+       Alcotest.failf "%d cells in %d cols: the wrapped lines were joined into one row" cells cols
+   | Error (Mermaid.Unsupported what) -> Alcotest.failf "unsupported: %s" what
+   | Error (Mermaid.Parse_error { line; what }) -> Alcotest.failf "line %d: %s" line what);
+  check_traced_rows src 40;
+  (match Mermaid.render_with_status ~cols:40 src with
+   | Ok { Mermaid.undrawn_sources = []; _ } -> ()
+   | Ok _ -> Alcotest.fail "a drawn break is not undrawn source"
+   | Error (Mermaid.Unsupported what) -> Alcotest.failf "a drawn break needs no source: %s" what
+   | Error (Mermaid.Parse_error { line; what }) -> Alcotest.failf "line %d: %s" line what
+   | Error (Mermaid.Too_wide { cells; cols; _ }) -> Alcotest.failf "%d cells in %d cols" cells cols)
+
 let () =
   Alcotest.run "masc_tui_v2_mermaid"
     [
@@ -393,5 +522,7 @@ let () =
             test_quoted_semicolons_and_class_attachment;
           Alcotest.test_case "render_adaptive auto-retries LR/RL as TD on Too_wide"
             `Quick test_render_adaptive_lr_to_td_fallback;
+          Alcotest.test_case "a box label draws each <br/> line on its own row" `Quick
+            test_box_labels_draw_line_breaks;
         ] );
     ]

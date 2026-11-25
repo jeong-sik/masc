@@ -47,8 +47,8 @@ type direction =
   | Right_left
 
 type shape =
-  | Rect  (** [id[label]] *)
-  | Round  (** [id(label)] *)
+  | Rect  (** [id[label]]; a [\<br/>] in the label starts a new row *)
+  | Round  (** [id(label)]; a [\<br/>] in the label starts a new row *)
   | Diamond  (** [id{label}]; drawn as a box whose label wears ⟨ ⟩ *)
   | Hexagon  (** [id{{label}}] *)
   | Asymmetric  (** [id>label]] *)
@@ -77,6 +77,9 @@ type node_id =
 type node = {
   id : node_id;
   label : string;
+    (** A [Rect] or [Round] node keeps each [\<br/>] of its label as ['\n']
+        and is drawn one row per line. Every other shape, and an edge,
+        takes the break as a space and draws one row. *)
   shape : shape;
 }
 

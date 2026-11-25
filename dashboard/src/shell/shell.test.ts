@@ -32,9 +32,11 @@ import { QueueContextOverlayBody } from './queue-context-overlay'
 import {
   activeOverlay,
   commandPaletteOpen,
+  currentShellOverlay,
   effectiveHitlSourceStatus,
   historicalIncidents,
   inboxPendingCount,
+  installShellObservers,
   openInspectDrawer,
   parseAwaitingGoalsPayload,
   parseGateQueuePayload,
@@ -100,6 +102,21 @@ describe('Proposal A+ Shell components', () => {
     render(null, container)
     container.remove()
     vi.restoreAllMocks()
+  })
+
+  it('withdraws an open inspector when the selected workspace changes', () => {
+    registerWorkspaceTargets([
+      { id: 'default', label: 'Current' },
+      { id: 'other', label: 'Other', baseUrl: '/ws/other' },
+    ])
+    const stopObserving = installShellObservers()
+    try {
+      openInspectDrawer({ title: 'Workspace log', kind: 'log', data: { source: 'previous workspace' } })
+      expect(currentShellOverlay.value?.kind).toBe('inspect')
+      selectWorkspace('other')
+      expect(currentShellOverlay.value).toBeNull()
+      expect(activeOverlay.value).toBeNull()
+    } finally { stopObserving() }
   })
 
   it('NavRail renders 6 trunks + 2 footer anchors, toggles collapse, auto-collapses <=1440px on drawer open, and marks Admin locks for Workers', async () => {

@@ -69,11 +69,16 @@ export const railPreferredExpanded = signal<boolean>(readInitialRailExpanded())
 
 export type ShellOverlay =
   | null
-  | { readonly kind: 'inspect'; readonly payload: WorkspaceInspectPayload }
+  | { readonly kind: 'inspect'; readonly payload: WorkspaceInspectPayload; readonly epoch: number }
   | { readonly kind: 'queue_context' }
   | { readonly kind: 'incidents' }
 
 export const activeOverlay = signal<ShellOverlay>(null)
+// Inspect payloads can contain workspace-owned data and render closures.
+export const currentShellOverlay = computed<ShellOverlay>(() => {
+  const overlay = activeOverlay.value
+  return overlay?.kind === 'inspect' && overlay.epoch !== sessionEpoch.value ? null : overlay
+})
 export const commandPaletteOpen = signal<boolean>(false)
 export const commandPaletteMounted = signal<boolean>(false)
 export const mobileMoreOpen = signal<boolean>(false)
@@ -85,7 +90,7 @@ export const mobileMoreOpen = signal<boolean>(false)
  */
 export const railExpanded = computed<boolean>(() => {
   if (isMobileViewport.value) return false
-  if (isCompactDesktop.value && activeOverlay.value !== null) return false
+  if (isCompactDesktop.value && currentShellOverlay.value !== null) return false
   return railPreferredExpanded.value
 })
 
@@ -109,7 +114,7 @@ export function setRailExpanded(expanded: boolean): void {
 }
 
 export function openInspectDrawer(payload: WorkspaceInspectPayload): void {
-  activeOverlay.value = { kind: 'inspect', payload }
+  activeOverlay.value = { kind: 'inspect', payload, epoch: currentSessionEpoch() }
 }
 
 export function toggleQueueContextOverlay(): void {
@@ -961,6 +966,8 @@ export function installShellObservers(fetchImpl?: typeof fetch): () => void {
   const unsubEpoch = sessionEpoch.subscribe((epoch) => {
     if (epoch === lastEpoch) return
     lastEpoch = epoch
+    const overlay = activeOverlay.peek()
+    if (overlay?.kind === 'inspect' && overlay.epoch !== epoch) activeOverlay.value = null
     if (hitlDebounceTimer) {
       clearTimeout(hitlDebounceTimer)
       hitlDebounceTimer = null

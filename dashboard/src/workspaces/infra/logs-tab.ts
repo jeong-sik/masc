@@ -11,22 +11,26 @@
 
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { fetchWithTimeout } from '../../api/core'
 import {
   OBSERVER_SSE_INSTANCE_HEADER,
   acquireViewStream,
   apiGet,
   authSession,
-  currentSessionEpoch,
   getSingleUserToken,
   isEpochCurrent,
   observerSseInstanceId,
-  parseSseBlock,
   resolveWorkspaceUrl,
   sessionEpoch,
   subscribeObserverFrames,
   viewStreamPaused,
 } from '../../core'
+import { InlineSpinner } from '../../components/common/inline-spinner'
+import { DEFAULT_GET_TIMEOUT_MS } from '../../config/constants'
 import { isRecord } from '../../lib/type-guards'
+import { formatTimestampKo } from '../../lib/format-time'
+import { OBSERVER_IDLE_TIMEOUT_HEADER } from '../../lib/observer-protocol'
+import { readSse } from '../../lib/sse-reader'
 import { VirtualList } from '../../components/primitives'
 import type {
   TimelineEntry,
@@ -38,7 +42,15 @@ const MAX_TIMELINE_ENTRIES = 1000
 
 type KindFilter = 'ALL' | 'LOGS' | 'EVENTS'
 type LevelFilter = 'ALL' | TimelineLevel
-type SnapshotState = { readonly kind: 'loading' | 'ready' } | { readonly kind: 'failed'; readonly message: string }
+type SnapshotState =
+  | { readonly kind: 'loading' }
+  | { readonly kind: 'ready'; readonly observedAt: number }
+  | { readonly kind: 'failed'; readonly message: string }
+
+interface PendingTimeline {
+  readonly entries: readonly TimelineEntry[]
+  readonly resetLogs: boolean
+}
 
 function normalizeLevel(raw: unknown): TimelineLevel {
   const s = typeof raw === 'string' ? raw.toUpperCase() : 'INFO'
@@ -47,13 +59,11 @@ function normalizeLevel(raw: unknown): TimelineLevel {
 }
 
 function parseLogEntriesFromPayload(raw: unknown): { reset: boolean; entries: TimelineEntry[] } {
-  if (!raw || typeof raw !== 'object') return { reset: false, entries: [] }
-  const rec = raw as Record<string, unknown>
-  const reset = rec.reset === true
-  const rawEntries = Array.isArray(rec.entries) ? rec.entries : []
+  if (!isRecord(raw) || !Array.isArray(raw.entries)) return { reset: false, entries: [] }
+  const reset = raw.reset === true
   const out: TimelineEntry[] = []
 
-  for (const item of rawEntries) {
+  for (const item of raw.entries) {
     if (!item || typeof item !== 'object') continue
     const e = item as Record<string, unknown>
     const seq = typeof e.seq === 'number' ? e.seq : null
@@ -64,7 +74,7 @@ function parseLogEntriesFromPayload(raw: unknown): { reset: boolean; entries: Ti
       ? (e.details as Record<string, unknown>)
       : {}
     out.push({
-      id: `log:${seq ?? ts}:${out.length}`,
+      id: seq === null ? `log:unknown:${ts}:${out.length}` : `log:${seq}`,
       kind: 'LOG',
       seq,
       tsUnix,
@@ -103,27 +113,35 @@ function mergeTimeline(prev: readonly TimelineEntry[], incoming: readonly Timeli
 }
 
 export function LogsTab(props: WorkspaceViewProps) {
+  const epoch = sessionEpoch.value
+  return html`<${LogsTimeline} ...${props} key=${epoch} epoch=${epoch} />`
+}
+
+function LogsTimeline({ epoch, ...props }: WorkspaceViewProps & { epoch: number }) {
   const [entries, setEntries] = useState<readonly TimelineEntry[]>([])
   const [kindFilter, setKindFilter] = useState<KindFilter>('ALL')
   const [levelFilter, setLevelFilter] = useState<LevelFilter>('ALL')
   const [query, setQuery] = useState('')
   const [selectedEntry, setSelectedEntry] = useState<TimelineEntry | null>(null)
   const [streamStatus, setStreamStatus] = useState<'connecting' | 'live' | 'error'>('connecting')
+  const [streamAttempt, setStreamAttempt] = useState(0)
   const [snapshot, setSnapshot] = useState<SnapshotState>({ kind: 'loading' })
   const [pausedByUser, setPausedByUser] = useState(false)
   const [bufferedCount, setBufferedCount] = useState(0)
   const pausedByUserRef = useRef(false)
   pausedByUserRef.current = pausedByUser
-  const pendingLiveRef = useRef<TimelineEntry[]>([])
+  const pendingLiveRef = useRef<PendingTimeline>({ entries: [], resetLogs: false })
+  const streamObserved = useRef(false)
   const liveSupported = authSession.value.kind === 'single_user_local'
   const sseInstanceId = liveSupported ? observerSseInstanceId.value : null
   const pausedByVisibility = sseInstanceId !== null && viewStreamPaused.value
-  const epoch = sessionEpoch.value
 
   const enqueueLiveEntries = useCallback((incoming: readonly TimelineEntry[], resetLogs: boolean) => {
     if (pausedByUserRef.current) {
-      pendingLiveRef.current = mergeTimeline(pendingLiveRef.current, incoming, resetLogs)
-      setBufferedCount(pendingLiveRef.current.length)
+      const pending = pendingLiveRef.current
+      const entries = mergeTimeline(pending.entries, incoming, resetLogs)
+      pendingLiveRef.current = { entries, resetLogs: pending.resetLogs || resetLogs }
+      setBufferedCount(entries.length)
       return
     }
     setEntries((prev) => mergeTimeline(prev, incoming, resetLogs))
@@ -132,12 +150,12 @@ export function LogsTab(props: WorkspaceViewProps) {
   const toggleUserPause = useCallback(() => {
     if (pausedByUserRef.current) {
       const flushed = pendingLiveRef.current
-      pendingLiveRef.current = []
+      pendingLiveRef.current = { entries: [], resetLogs: false }
       setBufferedCount(0)
       pausedByUserRef.current = false
       setPausedByUser(false)
-      if (flushed.length > 0) {
-        setEntries((prev) => mergeTimeline(prev, flushed, false))
+      if (flushed.resetLogs || flushed.entries.length > 0) {
+        setEntries((prev) => mergeTimeline(prev, flushed.entries, flushed.resetLogs))
       }
     } else {
       pausedByUserRef.current = true
@@ -148,14 +166,6 @@ export function LogsTab(props: WorkspaceViewProps) {
   useEffect(() => {
     const controller = new AbortController()
     const { signal } = controller
-    pendingLiveRef.current = []
-    setBufferedCount(0)
-    pausedByUserRef.current = false
-    setPausedByUser(false)
-    setEntries([])
-    setSnapshot({ kind: 'loading' })
-    setSelectedEntry(null)
-
     void apiGet('/api/v1/dashboard/logs?limit=200', {
       signal,
       decode: (raw) => {
@@ -165,10 +175,10 @@ export function LogsTab(props: WorkspaceViewProps) {
         return parseLogEntriesFromPayload(raw).entries
       },
     }).then((res) => {
-      if (signal.aborted || !isEpochCurrent(epoch)) return
+      if (signal.aborted || !isEpochCurrent(epoch) || streamObserved.current) return
       if (res.ok) {
-        setSnapshot({ kind: 'ready' })
-        setEntries((prev) => mergeTimeline(prev, res.value, false))
+        setSnapshot({ kind: 'ready', observedAt: Date.now() })
+        enqueueLiveEntries(res.value, false)
       } else {
         setSnapshot({ kind: 'failed', message: res.error.message })
       }
@@ -215,7 +225,6 @@ export function LogsTab(props: WorkspaceViewProps) {
     const handle = acquireViewStream('infra-logs', (signal) => {
       if (authSession.peek().kind !== 'single_user_local') return
       setStreamStatus('connecting')
-      const startEpoch = currentSessionEpoch()
       const streamUrl = resolveWorkspaceUrl('/api/v1/dashboard/logs/stream?limit=200')
       const headers: Record<string, string> = {
         Accept: 'text/event-stream',
@@ -225,45 +234,46 @@ export function LogsTab(props: WorkspaceViewProps) {
       if (token) headers.Authorization = `Bearer ${token}`
       void (async () => {
         try {
-          const res = await fetch(streamUrl, {
+          const res = await fetchWithTimeout(streamUrl, {
             method: 'GET',
             credentials: 'same-origin',
             headers,
             signal,
-          })
-          if (signal.aborted || !isEpochCurrent(startEpoch)) return
-          if (!res.ok || !res.body) {
+          }, DEFAULT_GET_TIMEOUT_MS)
+          const body = res.body
+          if (signal.aborted || !isEpochCurrent(epoch)) {
+            void body?.cancel().catch(() => {})
+            return
+          }
+          const timeout = res.headers.get(OBSERVER_IDLE_TIMEOUT_HEADER)
+          const idleTimeoutMs = timeout !== null && /^[1-9][0-9]*$/.test(timeout) ? Number(timeout) : NaN
+          if (!res.ok || !body
+            || !res.headers.get('content-type')?.toLowerCase().startsWith('text/event-stream')
+            || res.headers.get(OBSERVER_SSE_INSTANCE_HEADER) !== sseInstanceId
+            || !Number.isSafeInteger(idleTimeoutMs) || idleTimeoutMs > 2_147_483_647) {
+            void body?.cancel().catch(() => {})
             setStreamStatus('error')
             return
           }
-          setStreamStatus('live')
-          const reader = res.body.getReader()
-          const decoder = new TextDecoder()
-          let buffer = ''
-          try {
-            while (!signal.aborted && isEpochCurrent(startEpoch)) {
-              const { value, done } = await reader.read()
-              if (done) break
-              if (signal.aborted || !isEpochCurrent(startEpoch)) break
-              buffer += decoder.decode(value, { stream: true })
-              const blocks = buffer.split(/\r?\n\r?\n/)
-              buffer = blocks.pop() ?? ''
-              for (const block of blocks) {
-                if (signal.aborted || !isEpochCurrent(startEpoch)) return
-                const frame = parseSseBlock(block)
-                if (!frame) continue
-                const parsed = parseLogEntriesFromPayload(frame.data)
-                if (parsed.entries.length > 0 || parsed.reset) {
-                  enqueueLiveEntries(parsed.entries, parsed.reset)
-                }
-              }
+          let receivedInitial = false
+          await readSse(body, (_event, data) => {
+            if (signal.aborted || !isEpochCurrent(epoch)) return
+            const sample = parseLogEntriesFromPayload(JSON.parse(data))
+            if (!receivedInitial) {
+              if (!sample.reset) throw new Error('The log stream did not send its initial snapshot')
+              receivedInitial = true
+              streamObserved.current = true
+              setStreamStatus('live')
             }
-          } finally {
-            reader.releaseLock()
-          }
-          if (!signal.aborted && isEpochCurrent(startEpoch)) setStreamStatus('error')
+            if (sample.entries.length > 0 || sample.reset) {
+              setSnapshot({ kind: 'ready', observedAt: Date.now() })
+              enqueueLiveEntries(sample.entries, sample.reset)
+            }
+          }, { signal, idleTimeoutMs })
         } catch {
-          if (!signal.aborted && isEpochCurrent(startEpoch)) setStreamStatus('error')
+          // The previous sample stays available when the stream fails.
+        } finally {
+          if (!signal.aborted && isEpochCurrent(epoch)) setStreamStatus('error')
         }
       })()
     })
@@ -271,18 +281,20 @@ export function LogsTab(props: WorkspaceViewProps) {
     return () => {
       handle.release()
     }
-  }, [sseInstanceId, epoch, enqueueLiveEntries])
+  }, [sseInstanceId, epoch, streamAttempt, enqueueLiveEntries])
 
   const live = sseInstanceId !== null && streamStatus === 'live'
   const connecting = sseInstanceId !== null && streamStatus === 'connecting'
-  const snapshotError = !live && snapshot.kind === 'failed' ? snapshot.message : null
+  const disconnected = sseInstanceId !== null && streamStatus === 'error'
+  const paused = pausedByUser || pausedByVisibility
+  const snapshotError = snapshot.kind === 'failed' ? snapshot.message : null
   const sourceLabel = pausedByUser ? `⏸ PAUSED${bufferedCount > 0 ? ` (+${bufferedCount})` : ''}`
     : pausedByVisibility ? '⏸ PAUSED (hidden)'
     : live ? '● LIVE SSE'
-    : connecting ? '◐ CONNECTING'
+    : connecting ? 'CONNECTING'
     : snapshot.kind === 'ready' ? '○ SNAPSHOT'
     : snapshot.kind === 'failed' ? '○ UNAVAILABLE'
-    : '◐ LOADING'
+    : 'LOADING'
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -299,6 +311,7 @@ export function LogsTab(props: WorkspaceViewProps) {
   }, [entries, kindFilter, levelFilter, query])
 
   const openInspector = (entry: TimelineEntry) => {
+    if (!isEpochCurrent(epoch)) return
     setSelectedEntry(entry)
     props.onInspect({
       title: `${entry.kind} · ${entry.module || entry.source}`,
@@ -335,6 +348,7 @@ export function LogsTab(props: WorkspaceViewProps) {
           <span
             class="mono"
             data-testid="logs-stream-status"
+            role="status"
             style=${{
               padding: 'var(--sp-0) var(--sp-2)',
               borderRadius: 'var(--radius-pill)',
@@ -344,7 +358,13 @@ export function LogsTab(props: WorkspaceViewProps) {
               color: (pausedByUser || pausedByVisibility) ? 'var(--warn-fg)' : live ? 'var(--ok-fg)' : 'var(--fg-2)',
             }}
           >
+            ${!paused && (connecting || (!live && snapshot.kind === 'loading')) && html`<${InlineSpinner} /> `}
             ${sourceLabel}
+            ${!paused && !live && snapshot.kind === 'ready' && html`
+              · <time dateTime=${new Date(snapshot.observedAt).toISOString()} title="마지막 로그 확인">
+                ${formatTimestampKo(snapshot.observedAt / 1000)}
+              </time>
+            `}
           </span>
           <span class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
             ${filtered.length} / ${entries.length}
@@ -353,6 +373,17 @@ export function LogsTab(props: WorkspaceViewProps) {
       </header>
 
       ${snapshotError && html`<div class="ap-error" role="alert">로그 조회 실패: ${snapshotError}</div>`}
+      ${disconnected && !pausedByVisibility && html`
+        <div class="ap-muted">
+          <span role="status">실시간 로그 연결이 끊겼습니다.</span>
+          <button type="button" class="btn-ghost" onClick=${() => {
+            setStreamStatus('connecting')
+            setStreamAttempt(attempt => attempt + 1)
+          }}>
+            다시 연결
+          </button>
+        </div>
+      `}
 
       <section class="v2-logs-panel">
         <div class="v2-logs-toolbar">
@@ -405,7 +436,7 @@ export function LogsTab(props: WorkspaceViewProps) {
             type="button"
             class="btn-ghost"
             onClick=${() => {
-              pendingLiveRef.current = []
+              pendingLiveRef.current = { entries: [], resetLogs: false }
               setBufferedCount(0)
               setEntries([])
             }}

@@ -101,11 +101,10 @@ val reduce_motion : Model.t -> bool
 
 val progress_glyph : Model.t -> Glyph.t
 (** The current progress frame, with a steady glyph under reduced motion. *)
-(** The observed turn, its start decisions, and the referenced Task and Goal. *)
 
 val active_turn_detail_summary : Wire_fleet.active_turn -> Say.t
 (** Single-line progress summary ([<lane> · <activity/preparation/last tool>])
-    for the active-turn transcript observation row. *)
+    for the observed turn and its start decisions. *)
 
 val active_turn_preview_tail : Wire_fleet.active_turn -> string option
 (** Secret-scrubbed single-line preview snippet from [turn.preview.text_tail],

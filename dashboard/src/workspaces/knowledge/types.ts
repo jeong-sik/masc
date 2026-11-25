@@ -989,13 +989,15 @@ export function buildMemoryFlowSeries(diff: WorldDiffViewModel): MemoryFlowSerie
   const spanSec = parsed[parsed.length - 1]!.ts - parsed[0]!.ts
   const bucketSize = spanSec > 3 * 86_400 ? 21_600 : spanSec >= 7200 ? 3600 : 60
 
+  const RETRACT_OPS = new Set(['retracted', 'retract', 'removed', 'remove', 'deleted', 'delete'])
+  const ADD_OPS = new Set(['added', 'add', 'created', 'create', 'inserted', 'insert'])
   const buckets = new Map<number, { added: number; retracted: number }>()
   for (const p of parsed) {
     const key = Math.floor(p.ts / bucketSize) * bucketSize
     const cur = buckets.get(key) ?? { added: 0, retracted: 0 }
-    if (p.op.includes('retract') || p.op.includes('remove') || p.op.includes('delete')) {
+    if (RETRACT_OPS.has(p.op)) {
       cur.retracted += 1
-    } else if (p.op.includes('add') || p.op.includes('create') || p.op.includes('insert')) {
+    } else if (ADD_OPS.has(p.op)) {
       cur.added += 1
     }
     buckets.set(key, cur)

@@ -291,21 +291,6 @@ let dispatch_settings_overlay_key ~now (m : Model.t)
       Some (Update_actions.execute_action ~now m Keymap.Open_external)
   | Keymap.Input.Char "?" when is_printable_key norm ->
       Some (guard_settings_dirty_leave ~now m Keymap.Open_help)
-  | Keymap.Input.Char "d" when is_printable_key norm -> (
-      match Config_store.build_patch_request ~dry_run:true m.config with
-      | Ok req ->
-          let config = Config_store.mark_dry_run_loading m.config in
-          Some
-            ( { m with config }
-            , [
-                Cmd.Http_post
-                  { epoch = m.epoch; req = Cmd.Post_config_patch req };
-              ] )
-      | Error reason ->
-          Some
-            ( Model.with_toast ~now ~level:Model.Toast_info (Say.literal reason)
-                m
-            , [] ))
   | Keymap.Input.Char "/" when is_printable_key norm ->
       Some (Update_actions.execute_action ~now m Keymap.Focus_filter)
   | Keymap.Input.Char "[" when is_printable_key norm ->

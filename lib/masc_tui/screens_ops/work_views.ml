@@ -2751,21 +2751,22 @@ let render_tasks ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
               in
               (match matching_v with
               | Some v when !y < bot ->
-                  let notices =
-                    Ops_common.draw_verification_read_notices grid
-                      ~rect:{ content with y = !y; h = Int.min 2 (bot - !y - 1) }
-                      ~theme ~lang:model.lang model.work
-                  in
-                  y := !y + notices;
                   let ev_str =
                     if v.submitted_evidence = [] then
                       Ops_common.say model ~ko:"증거 없음" ~en:"no evidence"
                     else String.concat ", " v.submitted_evidence
                   in
+                  let value, color =
+                    match verification_notice model with
+                    | None -> ev_str, theme.status_active
+                    | Some notice ->
+                        Say.resolve model.lang notice ^ Typography.sep_dot ^ ev_str,
+                        theme.status_attention
+                  in
                   Ops_common.draw_kv_row grid ~rect:content ~y:!y ~theme
                     ~bg:card_bg ~label_w:12
                     ~key:(Ops_common.say model ~ko:"검증 증거" ~en:"Evidence")
-                    ~value:ev_str ~val_fg:theme.status_active ();
+                    ~value ~val_fg:color ();
                   incr y
               | Some _ | None -> ());
               (match tk.description with

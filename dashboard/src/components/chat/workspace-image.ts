@@ -52,6 +52,7 @@ export function WorkspaceChatImage({ path, caption, workspaceEpoch }: {
 }) {
   const ref = useRef<HTMLElement>(null)
   const [visible, setVisible] = useState(typeof IntersectionObserver === 'undefined')
+  const [attempt, setAttempt] = useState(0)
   const epoch = sessionEpoch.value
   const currentWorkspace = workspaceEpoch === epoch
   const [loaded, setLoaded] = useState<{ path: string; epoch: number; src: string | null } | null>(null)
@@ -98,7 +99,7 @@ export function WorkspaceChatImage({ path, caption, workspaceEpoch }: {
       readImage,
     ).then(image => image ? dataUrl(image) : null).then(store, () => store(null))
     return () => controller.abort()
-  }, [currentWorkspace, epoch, path, visible])
+  }, [attempt, currentWorkspace, epoch, path, visible])
 
   if (!currentWorkspace) return null
   const current = loaded?.path === path && loaded.epoch === epoch ? loaded : null
@@ -109,7 +110,15 @@ export function WorkspaceChatImage({ path, caption, workspaceEpoch }: {
         <img src=${current.src} alt=${alt} class="max-h-96 w-full rounded-[var(--r-1)] object-contain"
           onError=${() => setLoaded({ path, epoch, src: null })} />
       ` : html`
-        <div class="chat-block-media-ph img-ph" role="status">${current ? '이미지를 불러올 수 없습니다' : alt}</div>
+        <div class="chat-block-media-ph img-ph">
+          <span role="status">${current ? '이미지를 불러올 수 없습니다' : alt}</span>
+          ${current && html`
+            <button type="button" class="btn btn-sm" aria-label="이미지 다시 시도" onClick=${() => {
+              setLoaded(null)
+              setAttempt(previous => previous + 1)
+            }}>다시 시도</button>
+          `}
+        </div>
       `}
       ${caption && html`<figcaption>${caption}</figcaption>`}
     </figure>

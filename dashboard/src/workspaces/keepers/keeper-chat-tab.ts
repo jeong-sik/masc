@@ -461,7 +461,9 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
             const { kind, message } = result.error
             const clear = kind === 'unauthorized' || kind === 'forbidden' || kind === 'epoch_stale'
             setQueueRead((previous) => {
-              const operations = clear ? [] : previous?.operations ?? []
+              const operations = !clear && previous?.keeperName === keeper.name && previous.epoch === epoch
+                ? previous.operations
+                : []
               const scope = { keeperName: keeper.name, epoch, operations }
               return anotherReadPending ? { ...scope, kind: 'loading' } : { ...scope, kind: 'error', message }
             })

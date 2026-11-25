@@ -435,6 +435,32 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     await chat.findByText('Pending request 2')
   })
 
+  it('keeps the previous Keeper queue hidden if the next Keeper read fails in the same session', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'http://localhost')
+      if (url.pathname.endsWith('/next-keeper/chat/operations')) {
+        return Response.json({ error: 'queue unavailable' }, { status: 503 })
+      }
+      if (url.pathname.endsWith('/chat/operations')) {
+        return Response.json(queuedOperations(url.searchParams.has('after_sequence') ? [] : [1]))
+      }
+      return Response.json({ messages: [], rows: [] })
+    }))
+    const onInspect = vi.fn()
+    const onMutated = vi.fn()
+    const chat = render(
+      html`<${KeeperChatTab} keeper=${makeRosterKeeper()} onInspect=${onInspect} onMutated=${onMutated} />`,
+    )
+    await chat.findByText('Pending request 1')
+
+    const keeper = makeRosterKeeper({ name: 'next-keeper' })
+    chat.rerender(html`<${KeeperChatTab} keeper=${keeper} onInspect=${onInspect} onMutated=${onMutated} />`)
+    expect(chat.queryByText('Pending request 1')).toBeNull()
+    await chat.findByText('대기열을 불러오지 못했습니다.')
+    expect(chat.queryByText('Pending request 1')).toBeNull()
+    expect(chat.queryByRole('button', { name: '취소' })).toBeNull()
+  })
+
   it('replaces a pending queue read while leaving the concurrent history read in flight', async () => {
     const held = new Map<string, {
       signal: AbortSignal | null | undefined

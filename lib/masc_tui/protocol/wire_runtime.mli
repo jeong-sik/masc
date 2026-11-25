@@ -425,6 +425,9 @@ type runtime_standing = {
   failed_attempt_by : string option;
 }
 
+val standing_restricts_readiness : now_unix:float -> runtime_standing -> bool
+(** An active quota or rate-limit window, or an unanswered credential refusal. *)
+
 val standing_is_degraded : now_unix:float -> runtime_standing -> bool
 (** [true] when the runtime is actively resting on quota, rate-limited,
     credential-refused, or holds an un-cleared failed attempt. *)

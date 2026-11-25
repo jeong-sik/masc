@@ -396,9 +396,9 @@ let probe_quota_status ~now_unix ~runtimes_tbl ~usage_windows
       provider_quota_status ~now_unix ~provider:r.provider_id usage_windows
   | None -> Quota_ok
 
-let is_standing_degraded ~now_unix ~(rt : Runtime_store.t) rid =
+let standing_restricts_readiness ~now_unix ~(rt : Runtime_store.t) rid =
   match Runtime_store.standing_for ~runtime_id:rid rt with
-  | Some st -> Wire_runtime.standing_is_degraded ~now_unix st
+  | Some st -> Wire_runtime.standing_restricts_readiness ~now_unix st
   | None -> false
 
 let standing_override_for ~now_unix ~lang ~(rt : Runtime_store.t) rid =
@@ -455,7 +455,7 @@ let standing_override_for ~now_unix ~lang ~(rt : Runtime_store.t) rid =
 
 let is_probe_effectively_ok ~now_unix ~rt ~runtimes_tbl ~usage_windows
     (p : Wire_runtime.provider_probe_row) =
-  if is_standing_degraded ~now_unix ~rt p.runtime_id then false
+  if standing_restricts_readiness ~now_unix ~rt p.runtime_id then false
   else
     match p.reachable with
     | Some true -> (
@@ -466,7 +466,7 @@ let is_probe_effectively_ok ~now_unix ~rt ~runtimes_tbl ~usage_windows
 
 let is_probe_effectively_failed ~now_unix ~rt ~runtimes_tbl ~usage_windows
     (p : Wire_runtime.provider_probe_row) =
-  if is_standing_degraded ~now_unix ~rt p.runtime_id then true
+  if standing_restricts_readiness ~now_unix ~rt p.runtime_id then true
   else
     match p.reachable with
     | Some false -> true
@@ -3018,7 +3018,7 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
         let reach_n =
           List.fold_left
             (fun acc rid ->
-              if is_standing_degraded ~now_unix ~rt rid then acc
+              if standing_restricts_readiness ~now_unix ~rt rid then acc
               else
                 match slot_quota_st rid with
                 | Quota_cooldown _ | Quota_exhausted -> acc

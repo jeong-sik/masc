@@ -7121,8 +7121,11 @@ let test_layer2_keeper_diagnostics_runtime_standings_and_observer () =
           },
           {
             "id": "rt-refused",
-            "credential_refused_at": 1795253900.0,
-            "failed_attempt": { "noted_at": 1795253900.0, "failure": "401 invalid token", "recorded_by": "alpha" }
+            "credential_refused_at": 1795253900.0
+          },
+          {
+            "id": "rt-attempt",
+            "failed_attempt": { "noted_at": 1795253900.0, "failure": "network_transient", "recorded_by": "alpha" }
           }
         ]
       }|}
@@ -7139,6 +7142,13 @@ let test_layer2_keeper_diagnostics_runtime_standings_and_observer () =
     (Wire_runtime.standing_is_degraded ~now_unix (List.assoc "rt-expired" standings));
   Alcotest.(check bool) "rt-refused degraded on credential_refused_at" true
     (Wire_runtime.standing_is_degraded ~now_unix (List.assoc "rt-refused" standings));
+  Alcotest.(check bool) "the previous request failure remains a diagnostic" true
+    (Wire_runtime.standing_is_degraded ~now_unix (List.assoc "rt-attempt" standings));
+  List.iter (fun (id, restricted) ->
+      Alcotest.(check bool) (id ^ " effective readiness") restricted
+        (Wire_runtime.standing_restricts_readiness ~now_unix (List.assoc id standings)))
+    ["rt-attempt", false; "rt-expired", false; "rt-quota", true; "rt-429", true;
+     "rt-refused", true];
 
   (* 3. Observer distinguishes chat_operation vs non-chat waiting inventory events *)
   let chat_ev_json =

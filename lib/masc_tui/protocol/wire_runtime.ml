@@ -1355,7 +1355,7 @@ type runtime_standing = {
   failed_attempt_by : string option;
 }
 
-let standing_is_degraded ~now_unix (s : runtime_standing) =
+let standing_restricts_readiness ~now_unix (s : runtime_standing) =
   let quota_active =
     match s.quota_rest_cause, s.quota_rest_until_unix with
     | Some _, Some until_u -> Float.is_finite until_u && until_u > now_unix
@@ -1369,9 +1369,10 @@ let standing_is_degraded ~now_unix (s : runtime_standing) =
     | Some until_u -> Float.is_finite until_u && until_u > now_unix
     | None -> true
   in
-  quota_active || rl_active
-  || Option.is_some s.credential_refused_at_unix
-  || Option.is_some s.failed_attempt_failure
+  quota_active || rl_active || Option.is_some s.credential_refused_at_unix
+
+let standing_is_degraded ~now_unix s =
+  standing_restricts_readiness ~now_unix s || Option.is_some s.failed_attempt_failure
 
 let decode_runtime_standing_row json =
   let opt_str obj k =

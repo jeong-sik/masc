@@ -59,6 +59,98 @@ const SPARKLINE_SERIES: readonly UPlotSeriesSpec[] = [
   },
 ]
 
+function isPulseKeeperRow(v: unknown): v is PulseKeeperRow {
+  return typeof v === 'object' && v !== null && typeof (v as { name?: unknown }).name === 'string'
+}
+
+function renderPulseKeeperErrorDetail(row: PulseKeeperRow) {
+  const laneFailures = row.runtime_lane_failures ?? []
+  const hasBlocker = row.runtime_blocker_summary != null
+  const hasIssue = row.directory_issue != null
+  const hasLane = laneFailures.length > 0
+  const hasLast = row.last_failure != null
+  const hasAny = hasBlocker || hasIssue || hasLane || hasLast
+  return html`
+    <div class="pulse-keeper-error">
+      <div class="pulse-kv-grid">
+        <div class="pulse-kv">
+          <span class="pulse-kv-k">Keeper</span>
+          <span class="pulse-kv-v">${row.name}</span>
+        </div>
+        <div class="pulse-kv">
+          <span class="pulse-kv-k">health / phase</span>
+          <span class="pulse-kv-v">${row.health} / ${row.phase}</span>
+        </div>
+        <div class="pulse-kv">
+          <span class="pulse-kv-k">status</span>
+          <span class="pulse-kv-v">${row.status}</span>
+        </div>
+        <div class="pulse-kv">
+          <span class="pulse-kv-k">runtime</span>
+          <span class="pulse-kv-v">${row.runtime_id}</span>
+        </div>
+      </div>
+      ${hasAny
+        ? html`
+          <div class="pulse-keeper-error-body">
+            ${row.runtime_blocker_summary && html`
+              <div class="pulse-keeper-error-row">
+                <strong>차단 사유</strong>: ${row.runtime_blocker_summary}
+                ${row.runtime_blocker_signature ? html` <span class="mono">(${row.runtime_blocker_signature})</span>` : null}
+                ${row.runtime_blocker_class ? html` <span class="mono">[${row.runtime_blocker_class}]</span>` : null}
+              </div>
+            `}
+            ${row.directory_issue && html`
+              <div class="pulse-keeper-error-row"><strong>설정 오류</strong>: ${row.directory_issue}</div>
+            `}
+            ${row.last_failure && html`
+              <div class="pulse-keeper-error-row">
+                <strong>최근 실패</strong>: ${row.last_failure.cause}
+                ${row.last_failure.at_unix != null ? html` <span class="mono">(@${row.last_failure.at_unix})</span>` : null}
+              </div>
+            `}
+            ${hasLane && html`
+              <div class="pulse-keeper-error-row">
+                <strong>폴백 시도</strong>:
+                <div class="pulse-keeper-lane-list">
+                  ${laneFailures.map((f) => html`
+                    <div class="pulse-keeper-lane" key=${`${f.runtime_id ?? 'lane'}:${f.summary}`}>
+                      <div>
+                        <span class="mono">${f.runtime_id ?? 'lane'}${f.fault_kind ? `[${f.fault_kind}]` : ''}${f.dispatch ? ` · ${f.dispatch}` : ''}${f.attempt != null ? ` · attempt ${f.attempt}` : ''}</span>
+                      </div>
+                      <div>${f.summary}</div>
+                      ${f.failure_kind || f.failure_detail || f.provider || f.network_kind
+                        ? html`
+                          <div class="pulse-keeper-lane-meta">
+                            ${f.failure_kind ? html`<span>kind:${f.failure_kind}</span>` : null}
+                            ${f.provider ? html`<span>provider:${f.provider}</span>` : null}
+                            ${f.network_kind ? html`<span>network:${f.network_kind}</span>` : null}
+                            ${f.failure_detail ? html`<span class="mono">${f.failure_detail}</span>` : null}
+                          </div>
+                        `
+                        : null}
+                    </div>
+                  `)}
+                </div>
+              </div>
+            `}
+            ${(row.operator_disposition && row.operator_disposition !== 'pass') || row.next_action
+              ? html`
+                <div class="pulse-keeper-error-row">
+                  ${(row.operator_disposition && row.operator_disposition !== 'pass')
+                    ? html`<span><strong>조치</strong>: ${row.operator_disposition}${row.operator_disposition_reason ? ` (${row.operator_disposition_reason})` : ''}</span>`
+                    : null}
+                  ${row.next_action ? html`<span><strong>다음 단계</strong>: ${row.next_action}</span>` : null}
+                </div>
+              `
+              : null}
+          </div>
+        `
+        : html`<div class="pulse-empty">표시할 오류 상세 없음 (summary/signature/lane/last_failure 모두 없음)</div>`}
+    </div>
+  `
+}
+
 function goalPhaseTone(phase: string): 'ok' | 'warn' | 'bad' | 'info' | 'brass' | 'default' {
   const lower = phase.toLowerCase()
   if (lower === 'completed') return 'ok'
@@ -514,12 +606,25 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
                           <button
                             type="button"
                             class="btn-ghost"
-                            onClick=${() => props.onInspect({
-                              title: item.title,
-                              subtitle: item.keeper,
-                              kind: item.kind,
-                              data: item.raw,
-                            })}
+                            onClick=${() => {
+                              const row = item.raw
+                              if (item.kind === 'keeper_failure' && isPulseKeeperRow(row)) {
+                                props.onInspect({
+                                  title: item.title,
+                                  subtitle: item.keeper,
+                                  kind: item.kind,
+                                  data: row,
+                                  render: () => renderPulseKeeperErrorDetail(row),
+                                })
+                              } else {
+                                props.onInspect({
+                                  title: item.title,
+                                  subtitle: item.keeper,
+                                  kind: item.kind,
+                                  data: row,
+                                })
+                              }
+                            }}
                           >
                             미리보기
                           </button>

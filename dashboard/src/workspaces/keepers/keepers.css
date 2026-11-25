@@ -1368,6 +1368,34 @@ details[open] > .kp-sub-summary::before {
   min-width: 0;
 }
 
+.kp-diag-lane-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin-top: var(--sp-1);
+  min-width: 0;
+}
+
+.kp-diag-lane {
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-1);
+  background: var(--bg-1);
+  min-width: 0;
+}
+
+.kp-diag-lane-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  margin-top: var(--sp-1);
+  font-family: var(--font-mono);
+  font-size: var(--fs-10);
+  color: var(--fg-3);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
 .kp-hidden-input {
   display: none;
 }

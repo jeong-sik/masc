@@ -168,6 +168,7 @@ export function isKeeperFailing(keeper: PulseKeeperRow): boolean {
     || h === 'crashed'
     || s === 'error'
     || keeper.runtime_blocker_summary !== null
+    || (keeper.runtime_lane_failures != null && keeper.runtime_lane_failures.length > 0)
 }
 
 /**

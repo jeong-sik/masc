@@ -123,6 +123,9 @@ export function KeepersWorkspace(props: WorkspaceViewProps) {
     if (wanted) {
       const exact = rosterItems.find((k) => k.name === wanted)
       if (exact) return exact
+      // Entity route with explicit keeper id must not fall back to first roster row
+      // (wrong keeper would hide the requested error detail during load window).
+      if (props.entityId) return null
     }
     return rosterItems[0] ?? null
   }, [rosterItems, props.entityId, localSelectedName])

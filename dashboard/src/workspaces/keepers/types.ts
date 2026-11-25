@@ -67,6 +67,12 @@ export interface KeeperLaneFailure {
   readonly runtime_id: string | null
   readonly summary: string
   readonly fault_kind: string | null
+  readonly attempt?: number | null
+  readonly dispatch?: string | null
+  readonly failure_kind?: string | null
+  readonly failure_detail?: string | null
+  readonly provider?: string | null
+  readonly network_kind?: string | null
 }
 
 export interface KeeperTurnBreakdown {
@@ -99,6 +105,7 @@ export interface KeeperRosterItem {
   readonly context_unavailable_reason: string | null
   readonly runtime_blocker_summary: string | null
   readonly runtime_blocker_signature?: string | null
+  readonly runtime_blocker_class?: string | null
   readonly runtime_path_rest?: KeeperPathRest | null
   readonly operator_disposition?: string | null
   readonly operator_disposition_reason?: string | null

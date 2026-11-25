@@ -545,3 +545,57 @@
   font-size: var(--fs-12);
   text-align: center;
 }
+
+.pulse-keeper-error {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.pulse-keeper-error-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.pulse-keeper-error-row {
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-1);
+  background: var(--bg-2);
+  color: var(--fg-1);
+  font-size: var(--fs-12);
+  line-height: var(--lh-body);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.pulse-keeper-lane-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin-top: var(--sp-1);
+  min-width: 0;
+}
+
+.pulse-keeper-lane {
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-1);
+  background: var(--bg-1);
+  min-width: 0;
+}
+
+.pulse-keeper-lane-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  margin-top: var(--sp-1);
+  font-family: var(--font-mono);
+  font-size: var(--fs-10);
+  color: var(--fg-3);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}

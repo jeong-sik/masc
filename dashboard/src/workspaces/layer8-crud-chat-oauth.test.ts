@@ -229,10 +229,10 @@ describe('Layer 8 — Visual Lane CRUD, Chat 3-Block Toggles & Zero-Manual Web O
       html`<${RuntimeWorkspace} subroute="lanes" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
       container,
     )
-    await flushUi(50)
-
-    expect(container.querySelector('[data-lane-row="failover:coding"]')).not.toBeNull()
-    expect(container.querySelector('[data-lane-row="exact_output:verifier_exact"]')).not.toBeNull()
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-lane-row="failover:coding"]')).not.toBeNull()
+      expect(container.querySelector('[data-lane-row="exact_output:verifier_exact"]')).not.toBeNull()
+    })
 
     // Edit 'coding' lane -> move second candidate UP -> Preview Diff -> CAS Save
     const editBtn = container.querySelector('[data-lane-row="failover:coding"] button') as HTMLButtonElement

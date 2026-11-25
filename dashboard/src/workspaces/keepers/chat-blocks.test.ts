@@ -82,6 +82,17 @@ describe('Chat Blocks & History Decoding — Empty Tool Toggle & Blocks Wire Par
     expect(parsed.bodyText).toBe('')
   })
 
+  it('extracts <think> blocks alongside <thinking>/<thought> into thinkingText so Thinking toggle controls them', () => {
+    const parsed = parseChatMessageBlocks({
+      id: 'msg-think-1',
+      role: 'assistant',
+      content: '<think>\nCheck the failing assertion first.\n</think>\n\nFixed the edge case.',
+      ts: 1_700_000_003,
+    })
+    expect(parsed.thinkingText).toBe('Check the failing assertion first.')
+    expect(parsed.bodyText).toBe('Fixed the edge case.')
+  })
+
   it('preserves full role=tool input parameters including input/output/status keys without hijacking result or status', () => {
     const row = decodeHistoryRow({
       id: 'msg-delegate-1',

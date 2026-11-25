@@ -12,6 +12,7 @@
 import { ok, type Result } from '../../lib/result'
 import { authSession } from '../../core/auth'
 import { apiGet, apiGetV2, type ApiError } from '../../core/transport'
+import { decodeToolApprovalsWire, isOpenKeeperAskRow } from '../../api/hitl-decoders'
 import { observedAbsent, resourceCache, type FetchReason, type Observed } from '../../core/resource-cache'
 import { timeWindowProviderDays, type TimeWindow } from '../../core/time-window'
 import type {
@@ -284,21 +285,16 @@ function decodeProviderUsage(raw: unknown): PulseProviderUsageSnapshot {
 }
 
 function decodeApprovals(raw: unknown): PulseApprovalItem[] {
-  const rec = isRecord(raw) ? raw : {}
-  const list = Array.isArray(rec.pending) ? rec.pending : []
   const out: PulseApprovalItem[] = []
-  for (const item of list) {
-    if (!isRecord(item)) continue
-    const approvalId = asStr(item.approval_id)
-    const keeper = asStr(item.keeper)
-    if (!approvalId || !keeper) continue
+  for (const item of decodeToolApprovalsWire(raw)) {
+    if (!item.hasExplicitApprovalId) continue
     out.push({
-      approval_id: approvalId,
-      keeper,
-      tool_call_id: asStr(item.tool_call_id) ?? '',
-      tool: asStr(item.tool) ?? '',
-      question: asStr(item.question) ?? '',
-      asked_at: asNum(item.asked_at),
+      approval_id: item.approvalId,
+      keeper: item.keeper,
+      tool_call_id: item.toolCallId,
+      tool: item.tool,
+      question: item.question,
+      asked_at: item.askedAt,
     })
   }
   return out
@@ -310,6 +306,7 @@ function decodeAsks(raw: unknown): PulseAskItem[] {
   const out: PulseAskItem[] = []
   for (const item of list) {
     if (!isRecord(item)) continue
+    if (!isOpenKeeperAskRow(item)) continue
     const askId = asStr(item.ask_id) ?? asStr(item.id)
     const keeper = asStr(item.keeper) ?? asStr(item.keeper_name)
     if (!askId || !keeper) continue

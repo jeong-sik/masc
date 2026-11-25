@@ -547,7 +547,10 @@ let record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
         ; display_name
         ; authority = Keeper_chat_store.External
         ; account =
-            (if author_is_user_message then Connector_account_ref.discord_user author_id else None)
+            (if author_is_user_message then
+               Connector_account_ref.discord_user author_id
+               |> Option.map (fun account -> Keeper_external_attention.Account_of_original_message account)
+             else None)
         }
     ; urgency
     ; content_preview = content

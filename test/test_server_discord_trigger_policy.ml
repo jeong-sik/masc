@@ -588,7 +588,7 @@ let test_thread_and_guild_nickname_survive_ingress () =
             Option.map
               (fun account ->
                 Yojson.Safe.Util.(Connector_account_ref.to_json account |> member "user_id" |> to_string))
-              item.actor.account
+              (Keeper_external_attention.original_message_account item)
           in
           message.message_id, (item.actor.actor_id, item.actor.display_name, account)
         | None -> fail "missing Discord message identity")

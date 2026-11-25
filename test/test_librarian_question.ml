@@ -154,7 +154,9 @@ let made ~shows units =
 let ask held units = made ~shows:(With_memory (memory held)) units
 
 let external_person_observation_keeps_its_scope () =
+  let module Attention = Masc.Keeper_external_attention in
   let account_id = "900000000000000001" in
+  let account_ref = Option.get (Masc.Connector_account_ref.discord_user account_id) in
   let surface =
     Masc.Surface_ref.Discord
       { guild_id = Some "guild"
@@ -175,7 +177,7 @@ let external_person_observation_keeps_its_scope () =
         { actor_id = Some account_id
         ; display_name = Some "Nickname"
         ; authority = External
-        ; account = Masc.Connector_account_ref.discord_user account_id
+        ; account = Some (Attention.Account_of_original_message account_ref)
         }
     ; urgency = Mention
     ; content_preview = "I prefer summaries in Korean."
@@ -184,7 +186,7 @@ let external_person_observation_keeps_its_scope () =
     ; metadata = []
     }
   in
-  let unit : Read_unit.t =
+  let unit (item : Attention.item) : Read_unit.t =
     { line = 120
     ; at = item.received_at
     ; kind = Reset { cause = Turn_log.Cleared; items =
@@ -193,28 +195,36 @@ let external_person_observation_keeps_its_scope () =
     ; missing = []
     }
   in
-  let _, text = ask [] [ unit ] in
-  let prefix = "units: " in
-  let line = List.find (String.starts_with ~prefix) (String.split_on_char '\n' text) in
   let open Yojson.Safe.Util in
-  let observation =
+  let observation item =
+    let _, text = ask [] [ unit item ] in
+    let prefix = "units: " in
+    let line = List.find (String.starts_with ~prefix) (String.split_on_char '\n' text) in
     String.sub line (String.length prefix) (String.length line - String.length prefix)
     |> Yojson.Safe.from_string |> index 0 |> member "items" |> index 0
   in
+  let current = observation item in
   check string "actor id" account_id
-    (observation |> member "actor" |> member "id" |> to_string);
-  let account = observation |> member "actor" |> member "account" in
+    (current |> member "actor" |> member "id" |> to_string);
+  let account = current |> member "actor" |> member "account" in
   check string "account kind" "discord_user" (account |> member "kind" |> to_string);
   check int "account version" 1 (account |> member "version" |> to_int);
   check string "account user id" account_id (account |> member "user_id" |> to_string);
   check string "observed name" "Nickname"
-    (observation |> member "actor" |> member "name" |> to_string);
+    (current |> member "actor" |> member "name" |> to_string);
   check string "message id" "message"
-    (observation |> member "external_message_id" |> to_string);
+    (current |> member "external_message_id" |> to_string);
   check string "conversation id" "discord:guild:channel:thread"
-    (observation |> member "conversation_id" |> to_string);
+    (current |> member "conversation_id" |> to_string);
   check bool "complete connector coordinates" true
-    (observation |> member "surface" |> Yojson.Safe.equal (Masc.Surface_ref.to_json surface))
+    (current |> member "surface" |> Yojson.Safe.equal (Masc.Surface_ref.to_json surface));
+  let older = { item with actor = { item.actor with
+    account = Some (Attention.Account_without_original_proof account_ref) } } in
+  let older_actor = observation older |> member "actor" in
+  check string "older observation still shows the actor" account_id
+    (older_actor |> member "id" |> to_string);
+  check bool "older observation supplies no account proof" false
+    (List.mem_assoc "account" (to_assoc older_actor))
 ;;
 
 let same_inputs_same_bytes () =

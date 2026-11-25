@@ -71,11 +71,15 @@ type urgency =
   | System
 [@@deriving enumerate]
 
+type account_evidence =
+  | Account_without_original_proof of Connector_account_ref.t
+  | Account_of_original_message of Connector_account_ref.t
+
 type actor = {
   actor_id : string option;
   display_name : string option;
   authority : Keeper_chat_store.speaker_authority;
-  account : Connector_account_ref.t option;
+  account : account_evidence option;
 }
 
 type item = {
@@ -157,6 +161,8 @@ let external_message_ref_of_json json =
   let* message_id = Json_util.require_string json "message_id" in
   Ok { surface; message_id; reply_to_message_id = Json_util.assoc_string_opt "reply_to_message_id" json }
 
+let original_message_proof = "discord_original_message_v1"
+
 let actor_to_json actor =
   `Assoc
     (Json_util.string_field_if_present "actor_id" actor.actor_id
@@ -167,25 +173,53 @@ let actor_to_json actor =
       ]
     @ (match actor.account with
        | None -> []
-       | Some account -> [ "account", Connector_account_ref.to_json account ]))
+       | Some (Account_without_original_proof account) ->
+         [ "account", Connector_account_ref.to_json account ]
+       | Some (Account_of_original_message account) ->
+         [ "account", Connector_account_ref.to_json account
+         ; "account_proof", `String original_message_proof ]))
 
 let check_actor_account ~surface ~external_message actor =
-  match actor.account, actor.authority, external_message with
-  | None, _, _ -> Ok ()
-  | Some account, Keeper_chat_store.External, Some message
-    when String.trim message.message_id <> ""
-         && Surface_ref.equal surface message.surface
-         && Connector_account_ref.matches_actor account ~surface ~actor_id:actor.actor_id ->
-    Ok ()
-  | Some _, (External | Owner | Keeper), _ ->
-    Error "external attention account requires a matching external actor and original message"
+  match actor.account with
+  | None -> Ok ()
+  | Some (Account_without_original_proof account | Account_of_original_message account) ->
+    (match actor.authority, external_message with
+     | Keeper_chat_store.External, Some message
+       when String.trim message.message_id <> ""
+            && Surface_ref.equal surface message.surface
+            && Connector_account_ref.matches_actor account ~surface ~actor_id:actor.actor_id ->
+       Ok ()
+     | (External | Owner | Keeper), _ ->
+       Error "external attention account requires a matching external actor and original message")
 
-let account_of_actor_json : Yojson.Safe.t -> (Connector_account_ref.t option, string) result =
+let original_message_account item =
+  match item.actor.account with
+  | Some (Account_of_original_message account) ->
+    (match check_actor_account ~surface:item.conversation.surface
+             ~external_message:item.external_message item.actor with
+     | Ok () -> Some account
+     | Error _ -> None)
+  | Some (Account_without_original_proof _) | None -> None
+
+let account_of_actor_json : Yojson.Safe.t -> (account_evidence option, string) result =
   function
   | `Assoc fields ->
-    (match List.filter_map (function "account", value -> Some value | _ -> None) fields with
-     | [] -> Ok None
-     | [ value ] -> Connector_account_ref.of_json value
+    let values key =
+      List.filter_map (fun (name, value) -> if String.equal name key then Some value else None) fields
+    in
+    let* original =
+      match values "account_proof" with
+      | [] -> Ok false
+      | [ `String proof ] -> Ok (String.equal proof original_message_proof)
+      | _ -> Error "invalid external attention account proof"
+    in
+    (match values "account" with
+     | [] -> if original then Error "external attention account proof lacks an account" else Ok None
+     | [ value ] ->
+       let* account = Connector_account_ref.of_json value in
+       Ok (Option.map (fun account ->
+         if original then Account_of_original_message account else Account_without_original_proof account)
+         account)
      | _ -> Error "duplicate external attention account")
   | _ -> Error "invalid external attention actor"
 

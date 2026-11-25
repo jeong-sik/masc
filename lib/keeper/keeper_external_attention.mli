@@ -54,13 +54,19 @@ type urgency =
   | Ambient
   | System
 
+type account_evidence =
+  | Account_without_original_proof of Connector_account_ref.t
+  | Account_of_original_message of Connector_account_ref.t
+  (** The gateway confirmed this is a user-authored original message. *)
+
 type actor = {
   actor_id : string option;
   display_name : string option;
   authority : Keeper_chat_store.speaker_authority;
-  account : Connector_account_ref.t option;
-  (** Account proven by the original connector. When present, the recorded
-      actor and the original message must agree with the conversation surface. *)
+  account : account_evidence option;
+  (** When present, the account and original message must agree with the
+      recorded actor and conversation surface. Older rows can carry an
+      account reference without proving authorship of the original message. *)
 }
 
 type item = {
@@ -77,6 +83,9 @@ type item = {
   received_at : float;
   metadata : (string * string) list;
 }
+
+val original_message_account : item -> Connector_account_ref.t option
+(** Account that this observation can supply as original-message evidence. *)
 
 (** What the store records: an external message arrived and this is what it
     was. Whether a Keeper still owes it an answer is not here. Since #34662 the

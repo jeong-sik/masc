@@ -13,6 +13,7 @@ import {
   selectWorkspace,
   setObserverSseInstanceId,
 } from '../../core'
+import { OBSERVER_IDLE_TIMEOUT_HEADER } from '../../lib/observer-protocol'
 import { InfraWorkspace, type WorkspaceInspectPayload } from './index'
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -22,13 +23,23 @@ function jsonResponse(body: unknown, status = 200): Response {
   })
 }
 
+const TEST_LOG_INSTANCE = 'inst-live-infra.9'
+
+function logsSseHeaders(idleTimeoutMs = 30_000): Record<string, string> {
+  return {
+    'Content-Type': 'text/event-stream',
+    [OBSERVER_SSE_INSTANCE_HEADER]: TEST_LOG_INSTANCE,
+    [OBSERVER_IDLE_TIMEOUT_HEADER]: String(idleTimeoutMs),
+  }
+}
+
 function pendingSseResponse(): Response {
   const stream = new ReadableStream<Uint8Array>({
     start() { /* hold open until aborted */ },
   })
   return new Response(stream, {
     status: 200,
-    headers: { 'Content-Type': 'text/event-stream' },
+    headers: logsSseHeaders(),
   })
 }
 
@@ -436,5 +447,101 @@ describe('workspaces/infra', () => {
     pauseBtn.click()
     await flushUi(10)
     expect(pauseBtn.getAttribute('aria-pressed')).toBe('false')
+  })
+
+  describe('Activity & Logs read overlap', () => {
+    const oldLog = { seq: 10, ts: '2026-11-25T00:00:00Z', message: 'retired fixture row' }
+    const liveLog = { seq: 11, ts: '2026-11-25T00:00:01Z', message: 'current fixture row' }
+
+    function openTimeline(snapshot: Promise<Response>, idleTimeoutMs?: number) {
+      authSession.value = {
+        kind: 'single_user_local',
+        mode: 'single_user',
+        tokenPresent: false,
+        authMethods: { google: false, github: false, dev_token: false },
+        workspaceId: 'default',
+      }
+      setObserverSseInstanceId(TEST_LOG_INSTANCE)
+      let controller!: ReadableStreamDefaultController<Uint8Array>
+      const makeStream = () => new ReadableStream<Uint8Array>({ start: current => { controller = current } })
+      let stream = makeStream()
+      let streamRequests = 0
+      globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).includes('/api/v1/dashboard/logs/stream')) {
+          if (streamRequests++ > 0) stream = makeStream()
+          return new Response(stream, { headers: logsSseHeaders(idleTimeoutMs) })
+        }
+        return snapshot
+      }) as typeof fetch
+      render(html`<${InfraWorkspace} subroute="logs" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+      return {
+        streamRequests: () => streamRequests,
+        send: (reset: boolean, entries: readonly object[]) => {
+          controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ reset, entries })}\n\n`))
+        },
+        close: () => controller.close(),
+      }
+    }
+
+    it('uses the stream after its first sample and keeps one row per log sequence', async () => {
+      let finishSnapshot!: (response: Response) => void
+      const timeline = openTimeline(new Promise(resolve => { finishSnapshot = resolve }))
+
+      timeline.send(true, [liveLog])
+      await vi.waitFor(() => expect(container.textContent).toContain(liveLog.message))
+      finishSnapshot(jsonResponse({ entries: [oldLog] }))
+      timeline.send(false, [
+        { seq: 12, ts: '2026-11-25T00:00:02Z', message: 'next fixture row' },
+        liveLog,
+      ])
+      timeline.close()
+
+      await vi.waitFor(() => expect(container.textContent).toContain('next fixture row'))
+      await flushUi()
+      expect(container.textContent).not.toContain(oldLog.message)
+      const rows = Array.from(container.querySelectorAll('.v2-logs-row'))
+      expect(rows.filter(row => row.textContent?.includes(liveLog.message))).toHaveLength(1)
+      expect(container.querySelector('[data-testid="logs-stream-status"] time')?.getAttribute('datetime')).toBeTruthy()
+    })
+
+    it('applies a buffered stream reset even when no rows follow it', async () => {
+      const timeline = openTimeline(Promise.resolve(jsonResponse({ entries: [oldLog] })))
+      await vi.waitFor(() => expect(container.textContent).toContain(oldLog.message))
+      const pause = container.querySelector<HTMLButtonElement>('[data-testid="logs-pause-toggle"]')!
+      pause.click()
+      await vi.waitFor(() => expect(pause.getAttribute('aria-pressed')).toBe('true'))
+
+      timeline.send(true, [])
+      await flushUi()
+      expect(container.textContent).toContain(oldLog.message)
+      pause.click()
+      await flushUi()
+
+      expect(container.textContent).not.toContain(oldLog.message)
+      timeline.close()
+    })
+
+    it('requires a log sample before LIVE and lets an idle stream be retried', async () => {
+      const timeline = openTimeline(Promise.resolve(jsonResponse({ entries: [oldLog] })), 250)
+      const status = () => container.querySelector('[data-testid="logs-stream-status"]')?.textContent
+      const retry = () => [...container.querySelectorAll('button')].find(button => button.textContent?.includes('다시 연결'))
+
+      await vi.waitFor(() => expect(timeline.streamRequests()).toBe(1))
+      expect(status()).toContain('CONNECTING')
+      await vi.waitFor(() => expect(retry()).toBeDefined())
+      expect(status()).toContain('SNAPSHOT')
+      expect(container.textContent).toContain(oldLog.message)
+      retry()!.click()
+      await vi.waitFor(() => expect(timeline.streamRequests()).toBe(2))
+      expect(status()).toContain('CONNECTING')
+
+      timeline.send(true, [liveLog])
+      await vi.waitFor(() => expect(status()).toContain('LIVE SSE'))
+      expect(container.textContent).toContain(liveLog.message)
+      expect(container.textContent).not.toContain(oldLog.message)
+      await vi.waitFor(() => expect(retry()).toBeDefined())
+      expect(status()).toContain('SNAPSHOT')
+      expect(container.textContent).toContain(liveLog.message)
+    })
   })
 })

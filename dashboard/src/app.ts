@@ -37,10 +37,10 @@ import {
   QueueContextOverlayBody,
   ShellIcon,
   TopBar,
-  activeOverlay,
   closeActiveOverlay,
   commandPaletteMounted,
   commandPaletteOpen,
+  currentShellOverlay,
   dismissShellToast,
   installShellObservers,
   installViewportListener,
@@ -304,7 +304,7 @@ function WorkspaceHost(): VNode {
 }
 
 function QuickPeekHost(): VNode | null {
-  const overlay = activeOverlay.value
+  const overlay = currentShellOverlay.value
   if (overlay === null) return null
 
   if (overlay.kind === 'queue_context') {

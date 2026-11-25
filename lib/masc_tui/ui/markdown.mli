@@ -42,6 +42,11 @@ val render_literal :
   width:int -> base_style:Style.t -> string -> rendered_line list
 (** Wrap plain text with line breaks preserved and without Markdown parsing. *)
 
+val draw_line :
+  Cell_grid.t -> rect:Rect.t -> ?osc8:bool -> rendered_line -> unit
+(** Paint a prepared line in a one-row rectangle without clearing its background.
+    Registers its document image part and, by default, interns its OSC 8 links. *)
+
 val draw :
   Cell_grid.t ->
   rect:Rect.t ->

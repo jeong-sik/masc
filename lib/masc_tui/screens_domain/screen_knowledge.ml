@@ -271,10 +271,8 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
                               Printf.sprintf "%s@%s%s · %s%d" indent c.author
                                 aud_s (Glyph.to_utf8 Glyph.Delta_up) c.score
                             in
-                            let body_indent = String.make (tc.depth * 2) ' ' in
-                            let wrap_w =
-                              Int.max 8 (content.w - 2 - (tc.depth * 2))
-                            in
+                            let body_indent = tc.depth * 2 in
+                            let wrap_w = Int.max 8 (content.w - 2 - body_indent) in
                             let all_wrapped =
                               Markdown.render_lines ~width:wrap_w ~theme c.body
                             in
@@ -284,17 +282,11 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
                               | [] ->
                                   [
                                     `Body
-                                      (body_indent ^ H.sanitize_single_line c.body);
+                                      (body_indent, `Plain (H.sanitize_single_line c.body));
                                   ]
                               | lines ->
-                                  let render_one (ln : Markdown.rendered_line) =
-                                    let txt =
-                                      String.concat ""
-                                        (List.map
-                                           (fun (sp : Markdown.styled_span) -> sp.text)
-                                           ln.spans)
-                                    in
-                                    `Body (body_indent ^ txt)
+                                  let render_one line =
+                                    `Body (body_indent, `Markdown line)
                                   in
                                   if total_wrapped > 12 then
                                     let shown_lines = H.safe_take 11 lines in
@@ -305,7 +297,7 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
                                            ~en:(Printf.sprintf "… (+%d lines)" (total_wrapped - 11)))
                                     in
                                     List.map render_one shown_lines
-                                    @ [ `Body (body_indent ^ more) ]
+                                    @ [ `Body (body_indent, `Plain more) ]
                                   else List.map render_one lines
                             in
                             `Hdr (hdr, c_age) :: body_rows)
@@ -410,14 +402,19 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
                              ~style:(H.whisper_style ~theme ()) c_age);
                         incr y
                       end
-                  | `Body body_s ->
+                  | `Body (indent, body) ->
                       if !y < bottom then begin
                         Card.draw_left_rail ~color:theme.border_inactive grid
                           ~x:content.x ~y:!y ~h:1 ~theme;
-                        ignore
-                          (H.put_clipped ~grid ~clip:content ~x:(content.x + 2)
-                             ~y:!y ~max_w:(Int.max 6 (content.w - 2))
-                             ~style:(H.secondary_style ~theme ()) body_s);
+                        let x = content.x + 2 + indent in
+                        let w = Int.max 0 (Rect.right content - x) in
+                        let row = Rect.make ~x ~y:!y ~w ~h:1 in
+                        (match body with
+                        | `Markdown line -> Markdown.draw_line grid ~rect:row line
+                        | `Plain text ->
+                            ignore
+                              (H.put_clipped ~grid ~clip:row ~x ~y:!y ~max_w:w
+                                 ~style:(H.secondary_style ~theme ()) text));
                         incr y
                       end)
                 (Store_scroll.drop c_skip comment_rows_list |> H.safe_take c_avail)

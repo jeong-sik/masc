@@ -878,6 +878,23 @@ let render_lines ~(theme : Theme.t) ~width ?(osc8 = true) ?base_style raw =
               md_render_cache_bytes := !md_render_cache_bytes + raw_bytes;
             Hashtbl.replace md_render_cache key rendered);
         rendered
+
+let draw_line grid ~(rect : Rect.t) ?(osc8 = true) (line : rendered_line) =
+  let x = ref rect.x in
+  List.iter
+    (fun (span : styled_span) ->
+      if !x < Rect.right rect && String.length span.text > 0 then begin
+        let style =
+          match (osc8, span.hyperlink) with
+          | true, Some uri ->
+              Style.with_hyperlink (Cell_grid.intern_hyperlink grid uri) span.style
+          | _ -> span.style
+        in
+        x := !x + Cell_grid.put_text ~clip:rect grid ~x:!x ~y:rect.y ~style span.text
+      end)
+    line.spans;
+  Option.iter (Cell_grid.register_document_image_part grid ~rect) line.image_part
+
 let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ?(osc8 = true) ?(scroll = 0)
     raw =
   if Rect.is_empty rect then 0
@@ -894,22 +911,6 @@ let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ?(osc8 = true) ?(scroll = 0)
       let py = rect.y + i in
       let row_rect = Rect.make ~x:rect.x ~y:py ~w:rect.w ~h:1 in
       Cell_grid.fill_rect ~clip:rect grid ~rect:row_rect ~style:clear_style ();
-      let cx = ref rect.x in
-      List.iter
-        (fun (sp : styled_span) ->
-          if !cx < Rect.right rect && String.length sp.text > 0 then begin
-            let style =
-              match (osc8, sp.hyperlink) with
-              | true, Some uri ->
-                  let link_id = Cell_grid.intern_hyperlink grid uri in
-                  Style.with_hyperlink link_id sp.style
-              | _ -> sp.style
-            in
-            let adv = Cell_grid.put_text ~clip:row_rect grid ~x:!cx ~y:py ~style sp.text in
-            cx := !cx + adv
-          end)
-        arr.(start + i).spans;
-      Option.iter (Cell_grid.register_document_image_part grid ~rect:row_rect)
-        arr.(start + i).image_part
+      draw_line grid ~rect:row_rect ~osc8 arr.(start + i)
     done;
     total

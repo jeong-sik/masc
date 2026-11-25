@@ -412,6 +412,9 @@ function decodeHistoryRow(raw: unknown): ChatTranscriptEntry | null {
     roleRaw === 'user' || roleRaw === 'assistant' || roleRaw === 'system' || roleRaw === 'tool' || roleRaw === 'request_failure'
       ? roleRaw
       : 'assistant'
+  const speakerLabel = role === 'user'
+    ? asStr(raw.speaker_name) ?? asStr(raw.speaker_id) ?? (raw.speaker_authority === 'owner' ? 'Operator' : undefined)
+    : undefined
   const content = typeof raw.content === 'string' ? raw.content : ''
   const ts = asNum(raw.ts) ?? Date.now() / 1000
   const thinking = asStr(raw.thinking) ?? asStr(raw.reasoning) ?? asStr(raw.reasoning_content) ?? undefined
@@ -449,6 +452,7 @@ function decodeHistoryRow(raw: unknown): ChatTranscriptEntry | null {
   return {
     id,
     role,
+    speakerLabel,
     content,
     thinking,
     ts,

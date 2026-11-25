@@ -84,6 +84,7 @@ export type ChatEntryKind =
 export interface ChatTranscriptEntry {
   readonly id: string
   readonly role: 'user' | 'assistant' | 'system' | 'tool' | 'request_failure'
+  readonly speakerLabel?: string
   readonly content: string
   readonly thinking?: string
   readonly ts: number

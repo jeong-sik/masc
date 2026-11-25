@@ -293,6 +293,34 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     vi.restoreAllMocks()
   })
 
+  it('attributes saved user messages to their recorded speakers', async () => {
+    const messages = [
+      { id: 'external', role: 'user', content: 'External message', ts: 1, speaker_name: ' Minsu ', speaker_id: 'U123', speaker_authority: 'external' },
+      { id: 'peer', role: 'user', content: 'Keeper request', ts: 2, speaker_id: 'peer-keeper', speaker_authority: 'keeper' },
+      { id: 'owner', role: 'user', content: 'Operator message', ts: 3, speaker_authority: 'owner' },
+      { id: 'unattributed', role: 'user', content: 'Older message', ts: 4 },
+    ]
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const payload = String(input).includes('/chat/history/page')
+        ? { messages, has_more: false, next_cursor: null }
+        : { operations: [] }
+      return new Response(JSON.stringify(payload), {
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }))
+
+    const { container } = render(
+      html`<${KeeperChatTab} keeper=${makeRosterKeeper()} onInspect=${vi.fn()} onMutated=${vi.fn()} />`,
+    )
+    await waitFor(() => {
+      const speakers = Array.from(
+        container.querySelectorAll('.kp-msg[data-role="user"] .kp-msg-head > span'),
+        (heading) => heading.textContent?.trim(),
+      )
+      expect(speakers).toEqual(['Minsu', 'peer-keeper', 'Operator', '사용자'])
+    })
+  })
+
   it('dispatches Queue (Enter) vs Steer (⌘↵) with own operation_id and toggles Debug Companion with ⌘.', async () => {
     const streamBodies: Record<string, unknown>[] = []
     const mockFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

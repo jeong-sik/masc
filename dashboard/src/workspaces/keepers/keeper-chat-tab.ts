@@ -281,6 +281,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     const userEntry: ChatTranscriptEntry = {
       id: `user-${operationId}`,
       role: 'user',
+      speakerLabel: 'Operator',
       content: trimmed,
       ts: nowSec,
       operationId,
@@ -583,7 +584,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                     <div class="kp-msg-head">
                       <span>
                         ${msg.role === 'user'
-                          ? 'Operator'
+                          ? (msg.speakerLabel ?? '사용자')
                           : blocks.autonomousSummary !== null
                             ? `${keeper.name} · Autonomous Turn`
                             : blocks.memoryItems.length > 0 && blocks.bodyText.length === 0

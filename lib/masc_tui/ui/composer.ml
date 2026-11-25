@@ -439,9 +439,6 @@ let draw ?(show_pending_tx = true) grid ~(rect : Rect.t) ~(theme : Theme.t) ~lan
     | Collapsed_bar | Expanded_multiline ->
         let bg_rgb = if st.focused then theme.surface_2 else theme.surface_1 in
         let bg = Color.of_rgb bg_rgb in
-        let pill_bg =
-          Color.of_rgb (if st.focused then theme.surface_1 else theme.surface_2)
-        in
         let input_style =
           if st.focused then
             Style.make ~fg:(Color.of_rgb theme.text_bright) ~bg ()
@@ -457,7 +454,6 @@ let draw ?(show_pending_tx = true) grid ~(rect : Rect.t) ~(theme : Theme.t) ~lan
           else Typography.primary ~bg ~bold:true theme
         in
         let placeholder_style = Typography.whisper ~bg theme in
-        let pill_style = Typography.structure ~bg:pill_bg theme in
         let header_y = rect.y in
         let header_r = Rect.make ~x:rect.x ~y:header_y ~w:rect.w ~h:1 in
         let caret_s = Glyph.to_utf8 Glyph.Prompt_caret ^ " " in

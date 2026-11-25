@@ -143,6 +143,7 @@ type acp_options =
   ; skills_dirs : string list
   ; effort : Llm_provider.Reasoning_effort.t option
   ; mode : string option
+  ; contributor_mode : Runtime_acp_client.contributor_mode
   ; timeout_s : float
   ; admission_timeout_s : float
   }

@@ -435,6 +435,7 @@ let process_config_sha256
       ; "args", strings config.args
       ; "strip_env", strings config.strip_env
       ; "skills_dirs", strings skills_dirs
+      ; "contributor_mode", `String (Acp.contributor_mode_to_string config.contributor_mode)
       ; "oauth_source_present", `Bool (Option.is_some config.oauth_source)
       ; "oauth_source", `String (Option.value config.oauth_source ~default:"")
       ; "native_posture", `String (Runtime_native_tools.to_string native_posture)
@@ -845,6 +846,7 @@ let spawn_persistent_entry
                ; args = config.args
                ; strip_env = config.strip_env
                ; skills_dirs
+               ; contributor_mode = config.contributor_mode
                ; cwd = acp_cwd
                ; oauth_source = config.oauth_source
                ; dangerously_skip_permissions = key.dangerously_skip_permissions
@@ -3040,6 +3042,7 @@ let run_without_lifecycle
           ; args = config.args
           ; strip_env = config.strip_env
           ; skills_dirs
+          ; contributor_mode = config.contributor_mode
           ; cwd = acp_cwd
           ; oauth_source = config.oauth_source
           ; dangerously_skip_permissions = key.dangerously_skip_permissions

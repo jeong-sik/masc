@@ -120,6 +120,9 @@ type acp_options =
   ; skills_dirs : string list
   ; effort : Llm_provider.Reasoning_effort.t option
   ; mode : string option
+  ; contributor_mode : Runtime_acp_client.contributor_mode
+        (** [contributor-mode] — [Contributor_off] when the key is absent.
+            Valid only for driver [muse_code]. *)
   ; timeout_s : float
   ; admission_timeout_s : float
   }

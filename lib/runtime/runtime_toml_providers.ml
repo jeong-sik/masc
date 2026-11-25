@@ -277,7 +277,14 @@ let antigravity_cli_options ~(path : string) (tbl : Otoml.t)
 ;;
 
 let acp_exclusive_option_keys =
-  [ "driver"; "args"; "strip-env"; "skills-dirs"; "mode"; Runtime_schema.admission_timeout_s_key ]
+  [ "driver"
+  ; "args"
+  ; "strip-env"
+  ; "skills-dirs"
+  ; "mode"
+  ; "contributor-mode"
+  ; Runtime_schema.admission_timeout_s_key
+  ]
 ;;
 
 let parse_string_list_field ~(path : string) ~(key : string) (tbl : Otoml.t) =
@@ -374,6 +381,31 @@ let parse_acp_options ~home ~(path : string) (tbl : Otoml.t)
                       raw))))
     in
     let mode_result = antigravity_optional_string ~path tbl "mode" in
+    let contributor_mode_result =
+      match driver_result with
+      | Error _ -> Ok Runtime_acp_client.default_contributor_mode
+      | Ok driver ->
+        (match typed_find "a string" path tbl "contributor-mode" Otoml.get_string with
+         | Error _ as err -> err
+         | Ok None -> Ok Runtime_acp_client.default_contributor_mode
+         | Ok (Some raw) ->
+           (match Runtime_acp_client.contributor_mode_of_string raw with
+            | None ->
+              let valid =
+                List.map
+                  Runtime_acp_client.contributor_mode_to_string
+                  Runtime_acp_client.all_contributor_modes
+                |> String.concat ", "
+              in
+              Error
+                (error
+                   (path ^ ".contributor-mode")
+                   (Printf.sprintf "contributor-mode must be one of %s; got %S" valid raw))
+            | Some declared ->
+              (match Runtime_acp_client.validate_contributor_mode ~driver declared with
+               | Ok () -> Ok declared
+               | Error detail -> Error (error (path ^ ".contributor-mode") detail))))
+    in
     let timeout_result =
       match
         strict_float_find path tbl "timeout-s"
@@ -396,22 +428,24 @@ let parse_acp_options ~home ~(path : string) (tbl : Otoml.t)
     in
     (match
        driver_result, args_result, strip_env_result, skills_dirs_result, effort_result,
-       mode_result, timeout_result, admission_timeout_result
+       mode_result, contributor_mode_result, timeout_result, admission_timeout_result
      with
-     | Error e, _, _, _, _, _, _, _
-     | _, Error e, _, _, _, _, _, _
-     | _, _, Error e, _, _, _, _, _
-     | _, _, _, Error e, _, _, _, _
-     | _, _, _, _, Error e, _, _, _
-     | _, _, _, _, _, Error e, _, _
-     | _, _, _, _, _, _, Error e, _
-     | _, _, _, _, _, _, _, Error e -> Error e
+     | Error e, _, _, _, _, _, _, _, _
+     | _, Error e, _, _, _, _, _, _, _
+     | _, _, Error e, _, _, _, _, _, _
+     | _, _, _, Error e, _, _, _, _, _
+     | _, _, _, _, Error e, _, _, _, _
+     | _, _, _, _, _, Error e, _, _, _
+     | _, _, _, _, _, _, Error e, _, _
+     | _, _, _, _, _, _, _, Error e, _
+     | _, _, _, _, _, _, _, _, Error e -> Error e
      | ( Ok driver
        , Ok args
        , Ok strip_env
        , Ok skills_dirs
        , Ok effort
        , Ok mode
+       , Ok contributor_mode
        , Ok timeout_s
        , Ok admission_timeout_s ) ->
        Ok
@@ -422,6 +456,7 @@ let parse_acp_options ~home ~(path : string) (tbl : Otoml.t)
             ; skills_dirs
             ; effort
             ; mode
+            ; contributor_mode
             ; timeout_s
             ; admission_timeout_s
             }))

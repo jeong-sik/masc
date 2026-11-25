@@ -31,6 +31,7 @@ type acp_client =
   ; model : Runtime_acp_client.model_selection
   ; effort : Llm_provider.Reasoning_effort.t option
   ; mode : string option
+  ; contributor_mode : Runtime_acp_client.contributor_mode
   ; oauth_source : string option
   ; timeout_s : float
   ; admission_timeout_s : float

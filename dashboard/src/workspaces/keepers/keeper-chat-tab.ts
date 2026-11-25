@@ -17,10 +17,12 @@ import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { WorkspaceChatImage } from '../../components/chat/workspace-image'
 import { lazy, Suspense } from 'preact/compat'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
-import { currentSessionEpoch, isEpochCurrent, sessionEpoch } from '../../core/auth'
+import { authSession, currentSessionEpoch, isEpochCurrent, sessionEpoch } from '../../core/auth'
 import { formatObserved } from '../../core/resource-cache'
 import { observerConnected, subscribeObserverFrames, subscribeObserverResync } from '../../core/observer'
 import { randomUuid } from '../../lib/uuid'
+import { readDiscordOperator, type DiscordReplyAuthority } from './discord-reply'
+import { DiscordReplyPanel } from './discord-reply-panel'
 import {
   cancelQueuedChatOperation,
   fetchKeeperChatHistoryPageApi,
@@ -214,6 +216,24 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     : null
   const queuedOps = queue?.operations ?? []
   const [draft, setDraft] = useState('')
+  const [discordReplyId, setDiscordReplyId] = useState<string | null>(null)
+  const discordReplyTrigger = useRef<HTMLButtonElement | null>(null)
+  const discordSession = authSession.value
+  const discordEpoch = sessionEpoch.value
+  const [discordAuthority, setDiscordAuthority] = useState<(DiscordReplyAuthority & { epoch: number }) | null>(null)
+  const hasDiscordReplySource = scopedMessages.some(msg => msg.discordReplyOrigin)
+  const hasBearer = discordSession.kind === 'single_user_local' && discordSession.tokenPresent
+  const discordOperator = hasBearer && discordAuthority?.epoch === discordEpoch ? discordAuthority : null
+  useEffect(() => {
+    if (!hasBearer || !hasDiscordReplySource) return
+    let live = true
+    void readDiscordOperator().then(authority => {
+      if (authority && live && isEpochCurrent(discordEpoch)) {
+        setDiscordAuthority({ ...authority, epoch: discordEpoch })
+      }
+    })
+    return () => { live = false }
+  }, [discordEpoch, hasBearer, hasDiscordReplySource])
   const [attachments, setAttachments] = useState<readonly ChatAttachmentDraft[]>([])
   const [sending, setSending] = useState(false)
   const [voiceBusy, setVoiceBusy] = useState(false)
@@ -2219,6 +2239,16 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                                 ${msg.deliveryState}
                               </span>
                             `}
+                            ${discordOperator && msg.discordReplyOrigin && html`
+                              <button type="button" class="btn-ghost"
+                                aria-expanded=${discordReplyId === msg.id ? 'true' : 'false'}
+                                onClick=${(event: MouseEvent) => {
+                                  discordReplyTrigger.current = event.currentTarget as HTMLButtonElement
+                                  setDiscordReplyId(id => id === msg.id ? null : msg.id)
+                                }}>
+                                Discord 답장
+                              </button>
+                            `}
                             ${msg.cutStream && msg.operationId && html`
                               <button
                                 type="button"
@@ -2326,6 +2356,16 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                             path=${image.path} caption=${image.caption} workspaceEpoch=${image.workspaceEpoch} />
                         `)}
                         ${msg.errorDetail && html`<div class="ap-error">${msg.errorDetail}</div>`}
+                        ${discordOperator && msg.discordReplyOrigin && discordReplyId === msg.id && html`
+                          <${DiscordReplyPanel}
+                            key=${JSON.stringify([discordOperator, msg.id])}
+                            target=${{ keeperName: keeper.name, chatId: msg.id, origin: msg.discordReplyOrigin }}
+                            authority=${discordOperator}
+                            onClose=${() => {
+                              setDiscordReplyId(null)
+                              discordReplyTrigger.current?.focus()
+                            }} />
+                        `}
                       </article>
                     `
                   })}

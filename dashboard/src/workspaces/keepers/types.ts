@@ -1,3 +1,4 @@
+import type { DiscordReplyOrigin } from './discord-reply'
 /**
  * Keepers Workspace wire types (#36).
  */
@@ -221,6 +222,7 @@ export interface ChatTranscriptEntry {
   readonly speakerName?: string | null
   readonly speakerId?: string | null
   readonly surface?: string | null
+  readonly discordReplyOrigin?: DiscordReplyOrigin | null
 }
 
 export interface ChatHistoryPage {

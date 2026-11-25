@@ -10,6 +10,7 @@
  * - Flat JSON (`apiGet` / `apiMutate`): all `/keepers/*`, `/gate/keepers`, `/dashboard/agents/purge`, `/voice/transcribe`
  */
 
+import { decodeDiscordReplyOrigin } from './discord-reply'
 import { err, ok, type Result } from '../../lib/result'
 import {
   authSession,
@@ -883,6 +884,9 @@ export function decodeHistoryRow(raw: unknown): ChatTranscriptEntry | null {
     speakerName,
     speakerId,
     surface,
+    discordReplyOrigin: role === 'user' && speakerAuthority === 'external'
+      ? decodeDiscordReplyOrigin(raw.surface, raw.external_message_id)
+      : null,
   }
 }
 

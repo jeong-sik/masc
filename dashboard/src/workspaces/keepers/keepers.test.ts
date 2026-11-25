@@ -8,6 +8,7 @@ import { act, render, fireEvent, waitFor, cleanup } from '@testing-library/preac
 import { formatObserved, resourceCache } from '../../core/resource-cache'
 import { authSession, bumpSessionEpoch, currentSessionEpoch, resetAuthStateForTests } from '../../core/auth'
 import { observerConnected, resetObserverStateForTests, startObserverStream } from '../../core/observer'
+import { setStoredToken } from '../../lib/dashboard-bearer'
 import { resetPortraitCacheForTests } from '../../lib/portrait-cache'
 import {
   buildChatStreamRequestBody,
@@ -463,6 +464,60 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
       )
       expect(speakers).toEqual(['Minsu (외부)', 'Keeper · peer-keeper', 'Operator', 'Mina', '사용자'])
     })
+  })
+
+  it('authorizes native Discord reply in the active Keeper chat from the authenticated shell', async () => {
+    setStoredToken('fixture-admin')
+    const keeper = makeRosterKeeper()
+    const history = [
+      {
+        id: 'discord-row', role: 'user', content: 'Discord source', ts: 1,
+        speaker_authority: 'external', external_message_id: '301',
+        surface: { kind: 'discord', guild_id: '100', channel_id: '200', parent_channel_id: '199', thread_id: '200' },
+      },
+      { id: 'legacy-row', role: 'user', content: 'Legacy Discord source', ts: 2,
+        speaker_authority: 'external', surface: 'discord' },
+    ]
+    const mockFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input), 'http://localhost')
+      if (url.pathname === '/api/v1/dashboard/shell') {
+        return Response.json({
+          paths: { effective_base_path: '/work', effective_masc_root: '/work/.masc' },
+          auth: {
+            enabled: true, require_token: true, token_present: true, token_valid: true,
+            token_agent: 'local-admin', effective_role: 'admin', can_keeper_msg: true,
+          },
+        })
+      }
+      if (url.pathname === '/api/v1/keepers/discord/reply') {
+        const body = JSON.parse(init?.body as string)
+        return Response.json({
+          operation_id: body.operation_id, keeper_name: keeper.name, chat_id: 'discord-row',
+          channel_id: '200', original_message_id: '301', state: 'delivered', message_id: '302',
+        })
+      }
+      if (url.pathname.endsWith('/chat/history/page')) {
+        return Response.json({ messages: history, has_more: false, next_cursor: null })
+      }
+      return Response.json(queuedOperations())
+    })
+    vi.stubGlobal('fetch', mockFetch)
+    const chat = render(html`<${KeeperChatTab} keeper=${keeper} onInspect=${vi.fn()} onMutated=${vi.fn()} />`)
+    fireEvent.click(await chat.findByRole('button', { name: 'Discord 답장' }))
+    fireEvent.input(await chat.findByRole('textbox', { name: 'Discord 답장 내용' }), { target: { value: '답장' } })
+    await waitFor(() => expect(chat.getByRole('button', { name: 'Discord로 보내기' }).hasAttribute('disabled')).toBe(false))
+    fireEvent.click(chat.getByRole('button', { name: 'Discord로 보내기' }))
+    expect((await chat.findByRole('link', { name: '전송한 메시지 열기' })).getAttribute('href'))
+      .toBe('https://discord.com/channels/100/200/302')
+    expect(mockFetch.mock.calls.filter(([input]) => String(input).startsWith('/api/v1/dashboard/shell'))).toHaveLength(1)
+    const request = mockFetch.mock.calls.find(([input]) => String(input) === '/api/v1/keepers/discord/reply')?.[1]
+    expect(new Headers(request?.headers).get('authorization')).toBe('Bearer fixture-admin')
+    expect(mockFetch.mock.calls.some(([input]) => String(input).includes('/health?full=1'))).toBe(false)
+    expect(JSON.parse(request?.body as string)).toMatchObject({
+      chat_id: 'discord-row', keeper_name: keeper.name, content: '답장',
+      expected_workspace: { base_path: '/work', masc_root: '/work/.masc' },
+    })
+    sessionStorage.clear()
   })
 
   it('shows requests beyond the first queue page and keeps the previous rows when refresh fails', async () => {

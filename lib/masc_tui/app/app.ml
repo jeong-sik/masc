@@ -1460,6 +1460,10 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                     let desired_document =
                       Document_graphics.prepare document_graphics ~sw
                         ~base_path:cli.base_path
+                        ~endpoint:(Cmd_executor.current_endpoint executor)
+                        ~fetch_retained:(fun endpoint ~path ~max_body_bytes ->
+                          Http_client.get_raw ~io ~clock ~max_body_bytes endpoint ~path
+                          |> Result.to_option)
                         ~on_ready:(fun () -> Wake_bell.ring bell Wake_bell.Ui_bus)
                         ~probe:probe_obs ~theme grid
                     in

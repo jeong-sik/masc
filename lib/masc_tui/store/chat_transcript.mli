@@ -37,6 +37,12 @@ val markdown_body_lines :
 (** Render chat message body through {!Markdown.render_lines} with the exact
     rail and prefix width subtraction used by [Keeper_dive]. *)
 
+val retained_image_height : model:Model.t -> keeper:string -> width:int -> int
+
+val retained_image_rows :
+  theme:Theme.t -> lang:Say.lang -> width:int -> height:int -> Wire_fleet.retained_image list ->
+  Markdown.rendered_line list
+
 val stream_reply_already_persisted :
   Wire_fleet.chat_message list -> Fleet_store.chat_stream_buffer -> bool
 (** Whether the operation's durable terminal transcript row has arrived. *)

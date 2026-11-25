@@ -307,6 +307,7 @@ let populated_model ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_en)
               provenance = None;
               failure_kind = None;
               thinking = None;
+              retained_images = [];
             });
       has_more = false;
       next_cursor = None;

@@ -193,6 +193,9 @@ val document_png_pixel_budget : int
 val document_png_transfer_budget : int
 (** Aggregate limits for live document images. *)
 
+val complete_document_png_dimensions : string -> (int * int) option
+(** Check document pixel limits and the complete PNG chunk stream. *)
+
 val decode_embedded_png : embedded_png -> string option
 
 type graphics_protocol =

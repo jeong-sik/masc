@@ -201,6 +201,7 @@ let populated_model ~cols ~rows ~lang =
             provenance = None;
             failure_kind = None;
             thinking = None;
+            retained_images = [];
           };
           {
             id = "m2";
@@ -215,6 +216,7 @@ let populated_model ~cols ~rows ~lang =
             provenance = None;
             failure_kind = None;
             thinking = None;
+            retained_images = [];
           };
         ];
       has_more = false;

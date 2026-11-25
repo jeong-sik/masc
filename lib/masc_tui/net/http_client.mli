@@ -102,6 +102,7 @@ val get_raw :
   io:Io_domain.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   ?timeout_sec:float ->
+  ?max_body_bytes:int ->
   ?extra_headers:(string * string) list ->
   endpoint ->
   path:string ->

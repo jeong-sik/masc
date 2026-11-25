@@ -6,7 +6,7 @@ import { resolve } from 'node:path'
 import { html } from 'htm/preact'
 import { act, render, fireEvent, waitFor, cleanup } from '@testing-library/preact'
 import { formatObserved, resourceCache } from '../../core/resource-cache'
-import { authSession, bumpSessionEpoch, resetAuthStateForTests } from '../../core/auth'
+import { authSession, bumpSessionEpoch, currentSessionEpoch, resetAuthStateForTests } from '../../core/auth'
 import { observerConnected, resetObserverStateForTests, startObserverStream } from '../../core/observer'
 import { resetPortraitCacheForTests } from '../../lib/portrait-cache'
 import {
@@ -368,6 +368,54 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     expect(live).toEqual({ terminal: true, error: null })
     expect(onToolResult.mock.calls.map(([id, content]) => [id, content]))
       .toEqual(toolCalls.map((tool, index) => [tool.id, results[index]]))
+  })
+
+  it('keeps stored and completed images while rejecting late response frames', async () => {
+    const before = `/api/v1/media/${'a'.repeat(64)}`
+    const after = `/api/v1/media/${'b'.repeat(64)}`
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      messages: [{
+        id: 'saved', role: 'assistant', content: '',
+        blocks: [
+          { t: 'image', src: after, cap: '보고서' },
+          { t: 'image', src: `//example.com${before}` },
+        ],
+      }],
+    }), { headers: { 'Content-Type': 'application/json' } })))
+    const history = await fetchKeeperChatHistoryPageApi('code-reviewer-sister')
+    const workspaceEpoch = currentSessionEpoch()
+    expect(history.ok && history.value.messages[0]?.retainedImages)
+      .toEqual([{ path: after, caption: '보고서', workspaceEpoch }])
+
+    const media = (contentGeneration: number, path: string) => ({
+      type: 'CUSTOM', name: 'KEEPER_MEDIA_DELTA',
+      value: {
+        index: 0, media_type: 'image/png', source_type: 'base64', media_ref: path,
+        response: { content_generation: contentGeneration, stream_scope: 1 },
+      },
+    })
+    const events = [
+      media(1, before),
+      { type: 'CUSTOM', name: 'KEEPER_RUNTIME_ATTEMPT_STARTED', value: {} },
+      media(2, after),
+      media(1, before),
+      { type: 'CUSTOM', name: 'KEEPER_STREAM_MESSAGE_START', value: { content_generation: 3, stream_scope: 2 } },
+      media(2, before),
+      { type: 'RUN_FINISHED' },
+    ]
+    const onRetainedImages = vi.fn()
+    await streamKeeperChat({
+      keeper: 'code-reviewer-sister', message: 'Draw', operationId: 'op-images', mode: { kind: 'queue' },
+      fetchImpl: vi.fn(async () => new Response(
+        events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''),
+        { headers: { 'Content-Type': 'text/event-stream' } },
+      )),
+      callbacks: { onRetainedImages },
+    })
+    expect(onRetainedImages.mock.calls).toEqual([
+      [[{ path: before, workspaceEpoch }]],
+      [[{ path: before, workspaceEpoch }, { path: after, workspaceEpoch }]],
+    ])
   })
 
   it('attributes saved user messages to their recorded speakers', async () => {

@@ -183,11 +183,18 @@ export interface KeeperToolApprovalModesData {
   readonly restoreError: string | null
 }
 
+export interface RetainedChatImage {
+  readonly path: string
+  readonly caption?: string
+  readonly workspaceEpoch: number
+}
+
 export interface ChatTranscriptEntry {
   readonly id: string
   readonly role: 'user' | 'assistant' | 'system' | 'tool' | 'request_failure'
   readonly speakerLabel?: string
   readonly content: string
+  readonly retainedImages?: readonly RetainedChatImage[]
   readonly thinking?: string
   readonly ts: number
   readonly operationId?: string

@@ -13,6 +13,7 @@
 import type { WorkspaceInspectPayload } from '../types'
 import { html } from 'htm/preact'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
+import { WorkspaceChatImage } from '../../components/chat/workspace-image'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { currentSessionEpoch, isEpochCurrent, sessionEpoch } from '../../core/auth'
 import { formatObserved } from '../../core/resource-cache'
@@ -1036,6 +1037,14 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
               deliveryState: promoteStreaming(m.deliveryState),
             }))
           },
+          onRetainedImages: (retainedImages) => {
+            if (retainedImages.length > 0) markUserDelivered()
+            updateAssistantEntry(assistantId, (m) => ({
+              ...m,
+              retainedImages,
+              deliveryState: retainedImages.length > 0 ? promoteStreaming(m.deliveryState) : m.deliveryState,
+            }))
+          },
           onThinkingSnapshot: (snapshot, blockKey = '0:0:0') => {
             markUserDelivered()
             thinkingByBlock.set(blockKey, snapshot)
@@ -1962,8 +1971,9 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const liveSig = showLiveTurnCard
     ? `live:${effectivePreview?.revision ?? 0}:${effectivePreview?.text_tail.length ?? 0}:${liveToolName ?? ''}`
     : ''
+  const mediaSig = lastVisible?.retainedImages?.map(image => image.path).join(',') ?? ''
   const tailSig = lastVisible
-    ? `${visibleEntries.length}:${lastVisible.id}:${lastVisible.content.length}:${lastVisible.thinking?.length ?? 0}:${lastVisible.toolCalls?.length ?? 0}:${lastVisible.deliveryState ?? ''}:${lastVisible.errorDetail ?? ''}:${liveSig}`
+    ? `${visibleEntries.length}:${lastVisible.id}:${lastVisible.content.length}:${lastVisible.thinking?.length ?? 0}:${lastVisible.toolCalls?.length ?? 0}:${lastVisible.deliveryState ?? ''}:${lastVisible.errorDetail ?? ''}:${mediaSig}:${liveSig}`
     : `${visibleEntries.length}:empty:${liveSig}`
 
   useLayoutEffect(() => {
@@ -2275,6 +2285,10 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                             ? html`<${MarkdownContent} class="kp-msg-body" text=${blocks.bodyText} streaming=${msg.deliveryState === 'Streaming'} />`
                             : html`<div class="kp-msg-body">응답 생성 중…</div>`}
                         `}
+                        ${msg.retainedImages?.map((image, index) => html`
+                          <${WorkspaceChatImage} key=${`${index}:${image.path}`}
+                            path=${image.path} caption=${image.caption} workspaceEpoch=${image.workspaceEpoch} />
+                        `)}
                         ${msg.errorDetail && html`<div class="ap-error">${msg.errorDetail}</div>`}
                       </article>
                     `

@@ -309,6 +309,15 @@ let png_data_offset = String.length png_data_uri_prefix
 let document_png_pixel_budget = 4 * 1024 * 1024
 let document_png_transfer_budget = 2 * 1024 * 1024
 
+let within_document_pixel_budget (width, height) =
+  width <= 4096 && height <= 4096 && width * height <= document_png_pixel_budget
+
+let complete_document_png_dimensions png =
+  match png_dimensions png with
+  | Some size when within_document_pixel_budget size && Rgb_png.has_complete_chunks png ->
+      Some size
+  | Some _ | None -> None
+
 let embedded_png_of_uri data_uri =
   (* Inspect IHDR without decoding the whole image on the UI thread. Limit
      the amount of compressed data and the terminal's eventual pixel buffer. *)
@@ -319,16 +328,14 @@ let embedded_png_of_uri data_uri =
     match Base64.decode ~off:png_data_offset ~len:44 data_uri with
     | Ok header -> (
         match png_dimensions header with
-        | Some (width, height)
-          when width <= 4096 && height <= 4096 && width * height <= document_png_pixel_budget ->
+        | Some ((width, height) as size) when within_document_pixel_budget size ->
             Some { data_uri; width; height }
         | None | Some _ -> None)
     | Error _ -> None
 
 let decode_embedded_png image =
   match Base64.decode ~off:png_data_offset image.data_uri with
-  | Ok png when png_dimensions png = Some (image.width, image.height)
-                && Rgb_png.has_complete_chunks png -> Some png
+  | Ok png when complete_document_png_dimensions png = Some (image.width, image.height) -> Some png
   | Error _ | Ok _ -> None
 
 type graphics_protocol =

@@ -1,5 +1,6 @@
 open Masc_tui_core
 open Masc_tui_term
+open Masc_tui_net
 
 type mermaid_request = {
   source : string;
@@ -11,6 +12,7 @@ type mermaid_request = {
 type request =
   | Mermaid of mermaid_request
   | Embedded of Graphics.embedded_png
+  | Retained of Http_client.endpoint * string
 
 type raster = { png : string; pixels : int * int }
 
@@ -22,9 +24,16 @@ type placement = {
   kitty_cells : int * int;
 }
 
+type cached_preview = {
+  requested : request;
+  result : raster option;
+  pixel_budget : int;
+  byte_budget : int;
+}
+
 type t = {
-  mutable pending : (request * bool Atomic.t) option;
-  mutable cached : (request * raster option) list;
+  mutable pending : (request * (unit -> unit)) option;
+  mutable cached : cached_preview list;
   mutable active : placement list;
   mutable dirty : bool;
 }
@@ -43,7 +52,8 @@ let same_request a b =
       && a.pixel_height = b.pixel_height
       && Pair.equal String.equal String.equal a.colors b.colors
   | Embedded a, Embedded b -> String.equal a.data_uri b.data_uri
-  | (Mermaid _ | Embedded _), _ -> false
+  | Retained (a, path_a), Retained (b, path_b) -> a = b && String.equal path_a path_b
+  | (Mermaid _ | Embedded _ | Retained _), _ -> false
 
 let same_placement a b =
   a.image_id = b.image_id && same_request a.request b.request && Rect.equal a.rect b.rect
@@ -64,11 +74,15 @@ let clear t ~in_tmux =
   delete_placements ~in_tmux removed
 
 let cancel_pending t =
-  Option.iter (fun (_, cancelled) -> Atomic.set cancelled true) t.pending
+  Option.iter (fun (_, cancel) -> cancel ()) t.pending
 
-let request_preview t ~sw ~base_path ~on_ready request =
+let request_preview t ~sw ~base_path ~fetch_retained ~pixels_left ~bytes_left ~on_ready request =
   let cancelled = Atomic.make false in
-  t.pending <- Some (request, cancelled);
+  let cancel_p, cancel_u = Eio.Promise.create () in
+  let cancel () =
+    if not (Atomic.exchange cancelled true) then Eio.Promise.resolve cancel_u ()
+  in
+  t.pending <- Some (request, cancel);
   let raster_mermaid request =
     let max_width = Int.max 320 request.pixel_width in
     let scene =
@@ -94,10 +108,27 @@ let request_preview t ~sw ~base_path ~on_ready request =
   in
   let work () =
     match request with
-    | Mermaid request -> raster_mermaid request
+    | Mermaid request -> Eio_unix.run_in_systhread (fun () -> raster_mermaid request)
     | Embedded image ->
-        Option.map (fun png -> { png; pixels = (image.width, image.height) })
-          (Graphics.decode_embedded_png image)
+        Eio_unix.run_in_systhread (fun () ->
+            Option.map (fun png -> { png; pixels = (image.width, image.height) })
+              (Graphics.decode_embedded_png image))
+    | Retained (endpoint, path) ->
+        let max_body_bytes = (bytes_left / 4) * 3 in
+        let fetched =
+          Eio.Fiber.first
+            (fun () -> Eio.Promise.await cancel_p; None)
+            (fun () -> fetch_retained endpoint ~path ~max_body_bytes)
+        in
+        match fetched with
+        | None -> None
+        | Some _ when Atomic.get cancelled -> None
+        | Some png ->
+            Eio_unix.run_in_systhread (fun () ->
+                match Graphics.complete_document_png_dimensions png with
+                | Some ((width, height) as pixels) when width * height <= pixels_left ->
+                    Some { png; pixels }
+                | Some _ | None -> None)
   in
   Eio.Fiber.fork_daemon ~sw (fun () ->
       let done_p, done_u = Eio.Promise.create () in
@@ -107,33 +138,41 @@ let request_preview t ~sw ~base_path ~on_ready request =
           match Eio.Promise.await done_p with
           | () -> ()
           | exception (Eio.Cancel.Cancelled _ as ex) ->
-              Atomic.set cancelled true;
+              cancel ();
               raise ex)
         (fun () ->
           Fun.protect ~finally:(fun () -> Eio.Promise.resolve done_u ())
-            (fun () -> result := Eio_unix.run_in_systhread work));
+            (fun () -> result := work ()));
       t.pending <- None;
-      if not (Atomic.get cancelled) then t.cached <- (request, !result) :: t.cached;
+      if not (Atomic.get cancelled) then
+        t.cached <-
+          { requested = request; result = !result; pixel_budget = pixels_left; byte_budget = bytes_left }
+          :: List.filter (fun entry -> not (same_request request entry.requested)) t.cached;
       t.dirty <- true;
       on_ready ();
       `Stop_daemon)
 
-let with_pixel_budget visible =
-  let _, accepted =
+let with_pixel_budget ~cached visible =
+  let pixels_left, accepted =
     List.fold_left
       (fun (pixels, accepted) ((_, _, request) as item) ->
         let pixel_cost =
           match request with
           | Mermaid request -> request.pixel_width * request.pixel_height
           | Embedded image -> image.width * image.height
+          | Retained _ -> (
+              match cached request with
+              | Some { result = Some { pixels = width, height; _ }; _ } -> width * height
+              | Some { result = None; _ } | None -> 0)
         in
         if pixel_cost > pixels then (pixels, accepted)
         else (pixels - pixel_cost, item :: accepted))
       (Graphics.document_png_pixel_budget, []) visible
   in
-  List.rev accepted
+  (pixels_left, List.rev accepted)
 
-let prepare t ~sw ~base_path ~on_ready ~(probe : Probe.observation) ~theme grid =
+let prepare t ~sw ~base_path ~endpoint ~fetch_retained ~on_ready
+    ~(probe : Probe.observation) ~theme grid =
   match probe.graphics with
   | None | Some (Probe.Graphics_refused _) ->
       cancel_pending t;
@@ -155,42 +194,51 @@ let prepare t ~sw ~base_path ~on_ready ~(probe : Probe.observation) ~theme grid 
                        { source; pixel_width = pixels rect.w cell_width;
                          pixel_height = pixels rect.h cell_height; colors }
                  | Embedded_png image -> Embedded image
+                 | Retained_png path -> Retained (endpoint, path)
                in
                Graphics.resource_image_id index, rect, request)
-        |> with_pixel_budget
       in
-      let is_visible request =
-        List.exists (fun (_, _, current) -> same_request request current) visible
-      in
-      if visible <> [] then t.cached <- List.filter (fun (r, _) -> is_visible r) t.cached;
-      let cached request = List.find_opt (fun (r, _) -> same_request request r) t.cached in
-      (match t.pending with
-      | Some (request, _) when not (is_visible request) -> cancel_pending t
-      | Some _ -> ()
-      | None ->
-          visible
-          |> List.find_opt (fun (_, _, request) -> Option.is_none (cached request))
-          |> Option.iter (fun (_, _, request) -> request_preview t ~sw ~base_path ~on_ready request));
-      let _, accepted =
+      let cached request = List.find_opt (fun entry -> same_request request entry.requested) t.cached in
+      let pixels_left, visible = with_pixel_budget ~cached visible in
+      let bytes_left, placements =
         List.fold_left
-          (fun (bytes, accepted) (image_id, (rect : Rect.t), request) ->
+          (fun (bytes, placements) (image_id, (rect : Rect.t), request) ->
             match cached request with
-            | None | Some (_, None) -> (bytes, accepted)
-            | Some (_, Some raster) ->
+            | None | Some { result = None; _ } -> (bytes, placements)
+            | Some { result = Some raster; _ } ->
                 (* Kitty sends the actual PNG as padded base64. Count its
                    payload without encoding it a second time. *)
                 let byte_cost = ((String.length raster.png + 2) / 3) * 4 in
-                if byte_cost > bytes then (bytes, accepted)
+                if byte_cost > bytes then (bytes, placements)
                 else
                   let kitty_cells =
                     Graphics.fit_cells ~cell_pixels:probe.cell_pixels
                       ~image_pixels:(Some raster.pixels) ~columns:rect.w ~rows:rect.h
                   in
                   let placement = { image_id; request; raster; rect; kitty_cells } in
-                  (bytes - byte_cost, placement :: accepted))
+                  (bytes - byte_cost, placement :: placements))
           (Graphics.document_png_transfer_budget, []) visible
       in
-      List.rev accepted
+      let is_visible request =
+        List.exists (fun (_, _, current) -> same_request request current) visible
+      in
+      if visible <> [] then t.cached <- List.filter (fun entry -> is_visible entry.requested) t.cached;
+      (match t.pending with
+      | Some (request, _) when not (is_visible request) -> cancel_pending t
+      | Some _ -> ()
+      | None ->
+          visible
+          |> List.find_opt (fun (_, _, request) ->
+                 match request, cached request with
+                 | Retained _, None -> pixels_left > 0 && bytes_left >= 4
+                 | Retained _, Some { result = None; pixel_budget; byte_budget; _ } ->
+                     pixels_left > 0 && bytes_left >= 4
+                     && (pixels_left > pixel_budget || bytes_left > byte_budget)
+                 | (Mermaid _ | Embedded _), None -> true
+                 | _, Some _ -> false)
+          |> Option.iter (fun (_, _, request) ->
+                 request_preview t ~sw ~base_path ~fetch_retained ~pixels_left ~bytes_left ~on_ready request));
+      List.rev placements
 
 let mask_fallback grid ~style p = Cell_grid.fill_rect grid ~rect:p.rect ~style ()
 

@@ -322,14 +322,15 @@ let transport_error_of_failure ?path ?(streaming = false) = function
 let should_autostart_server ~contact ~already_attempted =
   Masc_server_lifecycle.start_due ~contact ~already_attempted
 
-let send_raw ~io ~clock ?(timeout_sec = 10.0) ?extra_headers ?content_type
+let send_raw ~io ~clock ?(timeout_sec = 10.0)
+    ?(max_body_bytes = default_max_body_bytes) ?extra_headers ?content_type
     ~method_ ?body ep ~path =
   let url = build_url ep ~path in
   let headers = build_headers ?extra:extra_headers ?content_type ep in
   let result =
     Io_domain.run io (fun () ->
         Masc_http_client.request ~clock ~timeout_sec
-          ~max_body_bytes:default_max_body_bytes ~method_ ~url ~headers ?body ())
+          ~max_body_bytes ~method_ ~url ~headers ?body ())
   in
   match result with
   | Error failure ->
@@ -346,8 +347,8 @@ let decode_body ~decode body =
   | exception Yojson.Json_error msg ->
       Error (Decode_error ("invalid JSON: " ^ msg))
 
-let get_raw ~io ~clock ?timeout_sec ?extra_headers ep ~path =
-  send_raw ~io ~clock ?timeout_sec ?extra_headers ~method_:`GET ep ~path
+let get_raw ~io ~clock ?timeout_sec ?max_body_bytes ?extra_headers ep ~path =
+  send_raw ~io ~clock ?timeout_sec ?max_body_bytes ?extra_headers ~method_:`GET ep ~path
 
 let post_raw ~io ~clock ?timeout_sec ?extra_headers ~content_type ~body ep ~path =
   send_raw ~io ~clock ?timeout_sec ?extra_headers ~content_type ~method_:`POST

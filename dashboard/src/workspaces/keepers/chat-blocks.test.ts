@@ -642,6 +642,21 @@ describe('Chat Hierarchy Grouping, Delegate Cards, Live Autonomous Turn & Waitin
     expect(formatWaitingSourceLabel('runtime_quota_spent')).toBe('할당 소진')
   })
 
+  it('keeps a response with retained media visible alongside its tool calls', () => {
+    const msg = {
+      ...decodeHistoryRow({
+        id: 'generated-image',
+        role: 'assistant',
+        content: '',
+        blocks: [{ t: 'image', src: '/api/v1/media/' + 'a'.repeat(64), cap: 'Results' }],
+      })!,
+      toolCalls: [{ name: 'generate_image', args: '{}' }],
+    }
+    const entry = { msg, blocks: parseChatMessageBlocks(msg) }
+    expect(entry.blocks.isToolOnly).toBe(true)
+    expect(groupTranscriptEntries([entry])).toEqual([{ kind: 'message', id: msg.id, entry }])
+  })
+
   it('merges latest history head pages without scrambling same-second timestamps or dropping earlier paginated rows', () => {
     const earlier = [
       decodeHistoryRow({ id: 'm1', role: 'user', content: 'old 1', ts: 100 })!,

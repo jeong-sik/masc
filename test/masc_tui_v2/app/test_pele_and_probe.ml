@@ -106,10 +106,12 @@ let test_document_preview_transfer_budget () =
           Eio_main.run @@ fun _ ->
           Eio.Switch.run @@ fun sw ->
           let doc = Document.create () in
+          let endpoint = Masc_tui_net.Http_client.make_endpoint ~host:"localhost" ~port:1 () in
           let prepare () =
             let ready, signal = Eio.Promise.create () in
             let placements =
               Document.prepare doc ~sw ~base_path ~probe ~theme:Masc_tui_core.Theme.default
+                ~endpoint ~fetch_retained:(fun _ ~path:_ ~max_body_bytes:_ -> None)
                 ~on_ready:(fun () -> Eio.Promise.resolve signal ()) grid
             in
             placements, ready

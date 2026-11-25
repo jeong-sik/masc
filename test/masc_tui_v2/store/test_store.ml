@@ -853,6 +853,7 @@ let test_compact_composer_and_drafts () =
                              provenance = None;
                              failure_kind = None;
                              thinking = None;
+                             retained_images = [];
                            };
                          ];
                        has_more = false;
@@ -1526,6 +1527,7 @@ let test_verifier_regressions () =
       provenance = None;
       failure_kind = None;
       thinking = None;
+      retained_images = [];
     }
   in
   let m_hist, _ =
@@ -4504,6 +4506,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
             provenance = None;
             failure_kind = None;
             thinking = None;
+            retained_images = [];
           };
         ];
       has_more = false;
@@ -5253,6 +5256,7 @@ let test_nav_fix5_keeper_chat_scroll_direction_and_home_bound () =
           provenance = None;
           failure_kind = None;
           thinking = None;
+          retained_images = [];
         })
   in
   let m0 = Model.initial ~cols:120 ~rows:30 () in
@@ -5972,6 +5976,7 @@ let test_p1_chat_transcript_ssot_exact_bounds () =
       provenance;
       failure_kind = None;
       thinking = None;
+      retained_images = [];
     }
   in
   let json_1line =
@@ -7183,6 +7188,7 @@ let test_agui_chat_stream_lifecycle_15_bugs () =
       provenance;
       failure_kind;
       thinking = None;
+      retained_images = [];
     }
   in
   let m0 = Model.initial ~cols:120 ~rows:36 () in
@@ -10900,6 +10906,7 @@ let chat_row ~id ~role ?provenance content : Wire_fleet.chat_message =
     provenance;
     failure_kind = None;
     thinking = None;
+    retained_images = [];
   }
 
 let failure_row ~id ~operation_id =
@@ -14934,6 +14941,7 @@ let test_ux_sweep_12_fixes () =
           provenance = None;
           failure_kind = None;
           thinking = None;
+          retained_images = [];
         })
   in
   let keeper_alpha : Wire_fleet.keeper_summary =
@@ -16516,6 +16524,7 @@ let test_active_turn_preview_visibility_and_queued_followup () =
             provenance = None;
             failure_kind = None;
             thinking = None;
+            retained_images = [];
           };
         ];
       has_more = false;

@@ -391,7 +391,7 @@ export function shouldRenderChatEntry(
   blocks: ParsedChatBlocks,
   prefs: ChatBlockPrefs,
 ): boolean {
-  if (msg.errorDetail || msg.deliveryState === 'Streaming') return true
+  if (msg.errorDetail || msg.retainedImages?.length || msg.deliveryState === 'Streaming') return true
   if (blocks.isInternalOnly && prefs.internal === 'hidden') return false
   if (blocks.isToolOnly && prefs.tools === 'hidden') return false
   const hasVisibleBody = blocks.bodyText.length > 0
@@ -813,7 +813,7 @@ export function groupTranscriptEntries(
   }
 
   for (const entry of entries) {
-    if (entry.blocks.isToolOnly && !entry.msg.errorDetail) {
+    if (entry.blocks.isToolOnly && !entry.msg.errorDetail && !entry.msg.retainedImages?.length) {
       run.push(entry)
     } else {
       flushRun()

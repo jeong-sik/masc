@@ -639,7 +639,12 @@ def shallow_truncation_reason(cut: str, head: str) -> str | None:
     # coverage run from a subdirectory must still find the shared file.
     shallow_file = pathlib.Path(git_dir).resolve() / "shallow"
     if not shallow_file.is_file():
-        return None
+        # A repository git calls shallow but that lost its graft file cannot
+        # prove the range complete — fail closed like any other probe error.
+        return (
+            f"shallow repository metadata is missing: {shallow_file} does not "
+            f"exist, so {cut[:12]}..{head} completeness cannot be verified"
+        )
     for boundary in shallow_file.read_text(encoding="utf-8").split():
         if not boundary:
             continue

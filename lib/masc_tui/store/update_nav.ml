@@ -2534,25 +2534,6 @@ let ordinary_fact_by_id ~keeper ~memory_id (k : Knowledge_store.t) =
   | None ->
       None
 
-let first_ordinary_fact ~keeper (k : Knowledge_store.t) =
-  match Observed.to_option (Knowledge_store.keeper_memory_facts_for ~keeper k) with
-  | Some
-      {
-        ordinary = Wire_knowledge.Memory_store_present ({ facts = f :: _; _ } as om);
-        _;
-      } ->
-      Some (om.revision, f)
-  | Some
-      {
-        ordinary =
-          Wire_knowledge.Memory_store_present { facts = []; _ }
-          | Wire_knowledge.Memory_store_absent
-          | Wire_knowledge.Memory_store_read_error _;
-        _;
-      }
-  | None ->
-      None
-
 let selected_facts_tree_ordinary_fact ~keeper (k : Knowledge_store.t) =
   match Observed.to_option (Knowledge_store.keeper_memory_facts_for ~keeper k) with
   | Some ({ ordinary = Wire_knowledge.Memory_store_present om; _ } as facts) -> (
@@ -2561,7 +2542,7 @@ let selected_facts_tree_ordinary_fact ~keeper (k : Knowledge_store.t) =
         List.nth_opt cats (clamp_index (List.length cats) k.facts_selected_index)
       with
       | Some (_, f :: _) -> Some (om.revision, f)
-      | Some (_, []) | None -> first_ordinary_fact ~keeper k)
+      | Some (_, []) | None -> None)
   | Some
       {
         ordinary =
@@ -2756,25 +2737,21 @@ let open_memory_diagram ~now ~kind (m : Model.t) =
         in
         act_cmd @ facts_cmd
       in
-      let fallback_any_target () =
-        match
-          Option.bind act_opt (fun activity ->
-              selected_event_of_activity ~keeper activity m.knowledge
-              |> Option.map (fun selected -> Launch_event { activity; selected }))
-        with
-        | Some _ as t -> t
-        | None ->
-            first_ordinary_fact ~keeper m.knowledge
-            |> Option.map (fun (revision, fact) ->
-                   Launch_fact_snapshot { revision; fact; activity = act_opt })
+      (* [.] draws what the operator selected. With no selected journal
+         event there is nothing to draw; the first stored fact is a memory
+         nobody chose. *)
+      let selected_event_target () =
+        Option.bind act_opt (fun activity ->
+            selected_event_of_activity ~keeper activity m.knowledge
+            |> Option.map (fun selected -> Launch_event { activity; selected }))
       in
       let resolve_diff_flow () =
         match m.knowledge.memory_view_mode with
         | Knowledge_store.View_evolution ->
-            ( fallback_any_target ()
+            ( selected_event_target ()
             , false
-            , Say.make ~ko:"다이어그램을 열 기억 변천 또는 사실이 없습니다"
-                ~en:"No memory evolution event or fact available for diagram" )
+            , Say.make ~ko:"다이어그램을 열 기억 변천 이벤트가 없습니다"
+                ~en:"No memory evolution event available for diagram" )
         | Knowledge_store.View_facts -> (
             match Knowledge_store.selected_memory_fact_row ~keeper m.knowledge with
             | Some (Knowledge_store.Fact_ordinary { revision; fact }) ->
@@ -2828,7 +2805,7 @@ let open_memory_diagram ~now ~kind (m : Model.t) =
                   | Knowledge_store.World_updated _
                   | Knowledge_store.World_retracted _ ) ->
                   None
-              | None -> fallback_any_target ()
+              | None -> selected_event_target ()
             in
             ( diff_target
             , false
@@ -2884,25 +2861,25 @@ let open_memory_diagram ~now ~kind (m : Model.t) =
                       , Say.make ~ko:"다이어그램을 열 기억 사실이 없습니다"
                           ~en:"No ordinary memory fact available for diagram" )
                   | None ->
-                      ( fallback_any_target ()
+                      ( selected_event_target ()
                       , false
                       , Say.make ~ko:"다이어그램을 열 기억 사실이 없습니다"
                           ~en:"No ordinary memory fact available for diagram" ))
               | Knowledge_store.Kmem_health | Knowledge_store.Kmem_journal ->
-                  ( fallback_any_target ()
+                  ( selected_event_target ()
                   , false
-                  , Say.make ~ko:"다이어그램을 열 기억 변천 또는 사실이 없습니다"
-                      ~en:"No memory evolution event or fact available for diagram"
+                  , Say.make ~ko:"다이어그램을 열 기억 변천 이벤트가 없습니다"
+                      ~en:"No memory evolution event available for diagram"
                   )
             else
               match m.knowledge.memory_subview with
               | Knowledge_store.Mem_diff_flow -> resolve_diff_flow ()
               | Knowledge_store.Mem_health_ledger | Knowledge_store.Mem_context
                 ->
-                  ( fallback_any_target ()
+                  ( selected_event_target ()
                   , false
-                  , Say.make ~ko:"다이어그램을 열 기억 변천 또는 사실이 없습니다"
-                      ~en:"No memory evolution event or fact available for diagram"
+                  , Say.make ~ko:"다이어그램을 열 기억 변천 이벤트가 없습니다"
+                      ~en:"No memory evolution event available for diagram"
                   )
           in
           match target_opt with

@@ -95,7 +95,7 @@ All shortcuts come from `lib/masc_tui/keymap/keymap.ml`; VT100 control aliases
 | `r` | Unfocused | Force refresh active view from server SSOT (triggers `force=1` probe on Runtime Quotas/Failover) |
 | `n` | Unfocused / Settings | Create new item in current workspace (Board post, `#goals` proposal, Schedule, Connector bind, Repo, or new Keeper; inside Artifact Dive with active search, steps to next match) |
 | `o` | Unfocused / Settings | Open linked `http(s)` URL externally (Repos, Wiki, Browser Lane tabs), export & open HTML/Markdown artifact in the default browser on Artifacts / Artifact Dive / Media Viewer, or open local TOML in `$EDITOR` from Settings |
-| `.` / `Ctrl+O` / `v` | Memory Explorer (Unfocused) | `.` opens the Pele 3-stage SVG card (with adaptive Mermaid fallback) from any keeper-scoped Memory subview (`Diff/Flow`, `Facts Tree`, `Journal`, `Health`, `Context`) and compact widths for a matching journal event. `Ctrl+O` opens its Formation Tree (Pele Graph / `Memory_tree`). An ordinary fact outside the loaded activity window opens as a single current fact in both views. While a diagram is open, `v` cycles `Auto (Pele)` → `Mermaid` → `Tree`, `y` copies diagram source, `r` retries, and `Esc` closes back to the prior subview |
+| `.` / `Ctrl+O` / `v` | Memory Explorer (Unfocused) | `.` opens the Pele 3-stage SVG card (with adaptive Mermaid fallback) from any keeper-scoped Memory subview (`Diff/Flow`, `Facts Tree`, `Journal`, `Health`, `Context`) and compact widths for a matching journal event. With no journal event or fact selected, `.` opens nothing and reports it. `Ctrl+O` opens its Formation Tree (Pele Graph / `Memory_tree`). An ordinary fact outside the loaded activity window opens as a single current fact in both views. While a diagram is open, `v` cycles `Auto (Pele)` → `Mermaid` → `Tree`, `y` copies diagram source, `r` retries, and `Esc` closes back to the prior subview |
 
 ### `Esc` vs `Ctrl+Q`
 
@@ -645,6 +645,8 @@ Settings `,`), you can set `keeper.group` directly in the creation form.
     adaptive `Mermaid` text with automatic `LR`/`RL` → `TD` reflow otherwise).
     Ordinary facts outside the last 50 activity events open as an honest
     single-fact current-snapshot chart with no fabricated transition history.
+    With no journal event or fact selected, **`.`** opens nothing and reports
+    it instead of drawing an unselected memory.
   - Press **`Ctrl+O`** to open the **Formation Tree** (Pele Graph PNG or
     `Memory_tree` text fallback).
   - Inside an open diagram: press **`v`** to cycle `Auto (Pele)` → `Mermaid` →

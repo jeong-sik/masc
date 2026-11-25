@@ -515,7 +515,11 @@ let apply_dataset_invalidation (m : Model.t) ds =
   | Wire_observer.Dataset_gate ->
       (* Global attention surface always stays fresh. *)
       let work =
-        { m.work with gate_pending = Observed.mark_stale m.work.gate_pending }
+        {
+          m.work with
+          gate_pending = Observed.mark_stale m.work.gate_pending;
+          gate_snapshot = Observed.mark_stale m.work.gate_snapshot;
+        }
       in
       ({ m with work }, [ get_cmd e Cmd.Get_gate_pending ])
   | Wire_observer.Dataset_keepers ->

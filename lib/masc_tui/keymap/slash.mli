@@ -1,4 +1,4 @@
-(** Converged 23 orthogonal slash commands with strict typed parsing, fuzzy
+(** Converged 25 orthogonal slash commands with strict typed parsing, fuzzy
     filtering, and prefix completion.
 
     Strict parse contract ([constitution.xml#strict_parse_no_default]):
@@ -25,6 +25,8 @@ type command_id =
   | Cmd_queue
   | Cmd_context
   | Cmd_ctl
+  | Cmd_gate
+  | Cmd_exec
   | Cmd_tools
   | Cmd_clear
   | Cmd_theme
@@ -61,6 +63,16 @@ type keeper_ctl_action =
   | Ctl_note
   | Ctl_run_next
 
+type gate_action =
+  | Gate_mode_set of string
+  | Gate_external_mode_set of string
+  | Gate_rule_delete of string
+  | Gate_approve_always of string
+  | Gate_retry of string
+  | Gate_keeper_mode_set of { keeper : string; mode : string }
+  | Gate_ack_uncertain of { keeper : string; consume_id : string }
+  | Gate_restore_late
+
 type parsed =
   | Pulse
   | Work
@@ -78,6 +90,8 @@ type parsed =
   | Queue
   | Context
   | Ctl of { action : keeper_ctl_action; target : string option }
+  | Gate of gate_action
+  | Exec of { tool_name : string; args_json : string option }
   | Tools of tools_mode option
   | Clear
   | Theme of Theme.preset option
@@ -102,12 +116,13 @@ type spec = {
 }
 
 val all : spec list
-(** All 23 canonical slash command specifications in display order. *)
+(** All 25 canonical slash command specifications in display order. *)
 
 val equal_command_id : command_id -> command_id -> bool
 val equal_category : category -> category -> bool
 val equal_tools_mode : tools_mode -> tools_mode -> bool
 val equal_keeper_ctl_action : keeper_ctl_action -> keeper_ctl_action -> bool
+val equal_gate_action : gate_action -> gate_action -> bool
 val equal_parsed : parsed -> parsed -> bool
 val equal_parse_error : parse_error -> parse_error -> bool
 
@@ -119,4 +134,4 @@ val filter : query:string -> lang:Say.lang -> spec list
 
 val complete : prefix:string -> string list
 (** Return matching completion candidates for a partial slash input, including
-    typed argument completions for [/theme], [/lang], and [/tools]. *)
+    typed argument completions for [/theme], [/lang], [/tools], [/ctl], and [/gate]. *)

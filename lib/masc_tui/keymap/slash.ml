@@ -18,6 +18,8 @@ type command_id =
   | Cmd_queue
   | Cmd_context
   | Cmd_ctl
+  | Cmd_gate
+  | Cmd_exec
   | Cmd_tools
   | Cmd_clear
   | Cmd_theme
@@ -54,6 +56,16 @@ type keeper_ctl_action =
   | Ctl_note
   | Ctl_run_next
 
+type gate_action =
+  | Gate_mode_set of string
+  | Gate_external_mode_set of string
+  | Gate_rule_delete of string
+  | Gate_approve_always of string
+  | Gate_retry of string
+  | Gate_keeper_mode_set of { keeper : string; mode : string }
+  | Gate_ack_uncertain of { keeper : string; consume_id : string }
+  | Gate_restore_late
+
 type parsed =
   | Pulse
   | Work
@@ -71,6 +83,8 @@ type parsed =
   | Queue
   | Context
   | Ctl of { action : keeper_ctl_action; target : string option }
+  | Gate of gate_action
+  | Exec of { tool_name : string; args_json : string option }
   | Tools of tools_mode option
   | Clear
   | Theme of Theme.preset option
@@ -111,13 +125,15 @@ let command_id_rank = function
   | Cmd_queue -> 13
   | Cmd_context -> 14
   | Cmd_ctl -> 15
-  | Cmd_tools -> 16
-  | Cmd_clear -> 17
-  | Cmd_theme -> 18
-  | Cmd_lang -> 19
-  | Cmd_help -> 20
-  | Cmd_restart -> 21
-  | Cmd_quit -> 22
+  | Cmd_gate -> 16
+  | Cmd_exec -> 17
+  | Cmd_tools -> 18
+  | Cmd_clear -> 19
+  | Cmd_theme -> 20
+  | Cmd_lang -> 21
+  | Cmd_help -> 22
+  | Cmd_restart -> 23
+  | Cmd_quit -> 24
 
 let equal_command_id a b = Int.equal (command_id_rank a) (command_id_rank b)
 
@@ -156,6 +172,42 @@ let keeper_ctl_action_rank = function
 let equal_keeper_ctl_action a b =
   Int.equal (keeper_ctl_action_rank a) (keeper_ctl_action_rank b)
 
+let gate_action_rank = function
+  | Gate_mode_set _ -> 0
+  | Gate_external_mode_set _ -> 1
+  | Gate_rule_delete _ -> 2
+  | Gate_approve_always _ -> 3
+  | Gate_retry _ -> 4
+  | Gate_keeper_mode_set _ -> 5
+  | Gate_ack_uncertain _ -> 6
+  | Gate_restore_late -> 7
+
+let equal_gate_action a b =
+  if not (Int.equal (gate_action_rank a) (gate_action_rank b)) then false
+  else
+    match (a, b) with
+    | Gate_mode_set x, Gate_mode_set y
+    | Gate_external_mode_set x, Gate_external_mode_set y
+    | Gate_rule_delete x, Gate_rule_delete y
+    | Gate_approve_always x, Gate_approve_always y
+    | Gate_retry x, Gate_retry y ->
+        String.equal x y
+    | Gate_keeper_mode_set x, Gate_keeper_mode_set y ->
+        String.equal x.keeper y.keeper && String.equal x.mode y.mode
+    | Gate_ack_uncertain x, Gate_ack_uncertain y ->
+        String.equal x.keeper y.keeper && String.equal x.consume_id y.consume_id
+    | Gate_restore_late, Gate_restore_late -> true
+    | ( Gate_mode_set _
+      | Gate_external_mode_set _
+      | Gate_rule_delete _
+      | Gate_approve_always _
+      | Gate_retry _
+      | Gate_keeper_mode_set _
+      | Gate_ack_uncertain _
+      | Gate_restore_late ),
+      _ ->
+        false
+
 let parsed_tag = function
   | Pulse -> 0
   | Work -> 1
@@ -173,13 +225,15 @@ let parsed_tag = function
   | Queue -> 13
   | Context -> 14
   | Ctl _ -> 15
-  | Tools _ -> 16
-  | Clear -> 17
-  | Theme _ -> 18
-  | Lang _ -> 19
-  | Help -> 20
-  | Restart -> 21
-  | Quit -> 22
+  | Gate _ -> 16
+  | Exec _ -> 17
+  | Tools _ -> 18
+  | Clear -> 19
+  | Theme _ -> 20
+  | Lang _ -> 21
+  | Help -> 22
+  | Restart -> 23
+  | Quit -> 24
 
 let equal_parsed a b =
   if not (Int.equal (parsed_tag a) (parsed_tag b)) then false
@@ -192,6 +246,10 @@ let equal_parsed a b =
     | Ctl x, Ctl y ->
         equal_keeper_ctl_action x.action y.action
         && Option.equal String.equal x.target y.target
+    | Gate x, Gate y -> equal_gate_action x y
+    | Exec x, Exec y ->
+        String.equal x.tool_name y.tool_name
+        && Option.equal String.equal x.args_json y.args_json
     | Tools x, Tools y -> Option.equal equal_tools_mode x y
     | Theme x, Theme y -> Option.equal Theme.equal_preset x y
     | Lang x, Lang y -> Option.equal Say.equal_lang x y
@@ -227,6 +285,8 @@ let equal_parsed a b =
       | Queue
       | Context
       | Ctl _
+      | Gate _
+      | Exec _
       | Tools _
       | Clear
       | Theme _
@@ -306,6 +366,20 @@ let all : spec list =
            ~en:"<boot|up|shutdown|pause|resume|wakeup|reset|clear|checkpoints|purge-preview|purge-apply|delete-history|note|run-next> [target]")
       ~ko:"키퍼 수명주기·체크포인트·운영자 노트·우선실행 제어"
       ~en:"Keeper lifecycle, checkpoints, operator note, and run-next control"
+      Slash_interaction;
+    mk Cmd_gate "/gate"
+      ~arg_hint:
+        (Say.make
+           ~ko:"<mode|external-mode|del-rule|approve-always|retry|keeper-mode|ack-uncertain|restore-late> ..."
+           ~en:"<mode|external-mode|del-rule|approve-always|retry|keeper-mode|ack-uncertain|restore-late> ...")
+      ~ko:"HITL 게이트 모드·규칙·재시도·키퍼 승인모드·지연승인 복구"
+      ~en:"HITL gate mode, always-approve rules, retry, keeper approval mode & recovery"
+      Slash_interaction;
+    mk Cmd_exec "/exec"
+      ~arg_hint:
+        (Say.make ~ko:"<tool_name> [json_args]" ~en:"<tool_name> [json_args]")
+      ~ko:"MCP 도구 대화형 실행 (POST /mcp tools/call)"
+      ~en:"Execute MCP tool interactively via POST /mcp tools/call"
       Slash_interaction;
     mk Cmd_tools "/tools"
       ~arg_hint:(Say.make ~ko:"[compact|results|full]" ~en:"[compact|results|full]")
@@ -457,6 +531,133 @@ let parse raw =
                            ~en:"boot|up|shutdown|pause|resume|wakeup|reset|clear|checkpoints|purge-preview|purge-apply|delete-history|note|run-next";
                        got = act_raw;
                      })))
+    | "/gate" -> (
+        let valid_gate_mode s =
+          match String.lowercase_ascii (String.trim s) with
+          | ("manual" | "auto_judge" | "always_allow") as m -> Some m
+          | _ -> None
+        in
+        let valid_keeper_mode s =
+          match String.lowercase_ascii (String.trim s) with
+          | ("auto" | "yolo") as m -> Some m
+          | _ -> None
+        in
+        let invalid ~expected got =
+          Error (Invalid_argument { command = cmd; expected; got })
+        in
+        match arg with
+        | None ->
+            invalid
+              ~expected:
+                (Say.literal
+                   "mode|external-mode|del-rule|approve-always|retry|keeper-mode|ack-uncertain|restore-late")
+              ""
+        | Some raw_arg -> (
+            let sub_raw, rest = split_command_and_arg raw_arg in
+            let sub = String.lowercase_ascii sub_raw in
+            let require_single_token ~cmd_label value =
+              let first, extra = split_command_and_arg value in
+              match extra with
+              | None -> Ok first
+              | Some tok ->
+                  Error (Unexpected_argument { command = cmd_label; arg = tok })
+            in
+            match (sub, rest) with
+            | "mode", Some m -> (
+                match valid_gate_mode m with
+                | Some mode -> Ok (Gate (Gate_mode_set mode))
+                | None ->
+                    invalid
+                      ~expected:(Say.literal "manual | auto_judge | always_allow")
+                      m)
+            | "mode", None ->
+                invalid
+                  ~expected:(Say.literal "manual | auto_judge | always_allow")
+                  ""
+            | "external-mode", Some m -> (
+                match valid_gate_mode m with
+                | Some mode -> Ok (Gate (Gate_external_mode_set mode))
+                | None ->
+                    invalid
+                      ~expected:(Say.literal "manual | auto_judge | always_allow")
+                      m)
+            | "external-mode", None ->
+                invalid
+                  ~expected:(Say.literal "manual | auto_judge | always_allow")
+                  ""
+            | "del-rule", Some rid_raw -> (
+                match require_single_token ~cmd_label:"/gate del-rule" rid_raw with
+                | Ok rid -> Ok (Gate (Gate_rule_delete rid))
+                | Error _ as err -> err)
+            | "del-rule", None ->
+                invalid ~expected:(Say.literal "<rule_id>") ""
+            | "approve-always", Some aid_raw -> (
+                match
+                  require_single_token ~cmd_label:"/gate approve-always" aid_raw
+                with
+                | Ok aid -> Ok (Gate (Gate_approve_always aid))
+                | Error _ as err -> err)
+            | "approve-always", None ->
+                invalid ~expected:(Say.literal "<approval_id>") ""
+            | "retry", Some aid_raw -> (
+                match require_single_token ~cmd_label:"/gate retry" aid_raw with
+                | Ok aid -> Ok (Gate (Gate_retry aid))
+                | Error _ as err -> err)
+            | "retry", None ->
+                invalid ~expected:(Say.literal "<approval_id>") ""
+            | "keeper-mode", Some km_arg -> (
+                let k, m_opt = split_command_and_arg km_arg in
+                match m_opt with
+                | Some m -> (
+                    match valid_keeper_mode m with
+                    | Some mode ->
+                        Ok (Gate (Gate_keeper_mode_set { keeper = k; mode }))
+                    | None ->
+                        invalid ~expected:(Say.literal "auto | yolo") m)
+                | None ->
+                    invalid ~expected:(Say.literal "<keeper> <auto|yolo>") km_arg)
+            | "keeper-mode", None ->
+                invalid ~expected:(Say.literal "<keeper> <auto|yolo>") ""
+            | "ack-uncertain", Some ack_arg -> (
+                let k, cid_opt = split_command_and_arg ack_arg in
+                match cid_opt with
+                | Some cid_raw -> (
+                    match
+                      require_single_token ~cmd_label:"/gate ack-uncertain"
+                        cid_raw
+                    with
+                    | Ok cid ->
+                        Ok
+                          (Gate
+                             (Gate_ack_uncertain { keeper = k; consume_id = cid }))
+                    | Error _ as err -> err)
+                | None ->
+                    invalid ~expected:(Say.literal "<keeper> <consume_id>")
+                      ack_arg)
+            | "ack-uncertain", None ->
+                invalid ~expected:(Say.literal "<keeper> <consume_id>") ""
+            | "restore-late", None -> Ok (Gate Gate_restore_late)
+            | "restore-late", Some extra ->
+                Error (Unexpected_argument { command = "/gate restore-late"; arg = extra })
+            | other, _ ->
+                invalid
+                  ~expected:
+                    (Say.literal
+                       "mode|external-mode|del-rule|approve-always|retry|keeper-mode|ack-uncertain|restore-late")
+                  other))
+    | "/exec" -> (
+        match arg with
+        | None ->
+            Error
+              (Invalid_argument
+                 {
+                   command = cmd;
+                   expected = Say.literal "<tool_name> [json_args]";
+                   got = "";
+                 })
+        | Some raw_arg ->
+            let tool_name, args_json = split_command_and_arg raw_arg in
+            Ok (Exec { tool_name; args_json }))
     | "/tools" -> (
         match arg with
         | None -> Ok (Tools None)
@@ -625,6 +826,18 @@ let complete ~prefix =
           (List.map Theme.preset_name Theme.all_presets)
     | "/lang" -> complete_args ~cmd ~arg_prefix [ "ko"; "en" ]
     | "/ctl" -> complete_args ~cmd ~arg_prefix keeper_ctl_action_names
+    | "/gate" ->
+        complete_args ~cmd ~arg_prefix
+          [
+            "mode";
+            "external-mode";
+            "del-rule";
+            "approve-always";
+            "retry";
+            "keeper-mode";
+            "ack-uncertain";
+            "restore-late";
+          ]
     | "/tools" ->
         complete_args ~cmd ~arg_prefix [ "compact"; "results"; "full" ]
     | _ -> []

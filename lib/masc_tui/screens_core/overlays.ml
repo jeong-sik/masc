@@ -3489,6 +3489,7 @@ let classify_inline_form (modal : Model.inline_modal_state) : inline_form_kind =
     | Nav.Keeper_control_confirm _
     | Nav.Keeper_clear_form _
     | Nav.Keeper_operator_note_form _
+    | Nav.Tool_execute_form _
     | Nav.Runtime_lane_create
     | Nav.Runtime_lane_edit _
     | Nav.Runtime_lane_delete _
@@ -3659,6 +3660,10 @@ let inline_action_title ~lang ~(modal : Model.inline_modal_state) _kind =
       Say.resolve lang
         (Say.make ~ko:("다음 턴 운영자 노트 · " ^ keeper)
            ~en:("Next-Turn Operator Note · " ^ keeper))
+  | Form_standard (Nav.Tool_execute_form { tool_name; _ }) ->
+      Say.resolve lang
+        (Say.make ~ko:("MCP 도구 실행 · " ^ tool_name)
+           ~en:("Execute MCP Tool · " ^ tool_name))
 
 let form_of_inline_modal (modal : Model.inline_modal_state) =
   let fields =
@@ -3718,6 +3723,7 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     | Nav.Keeper_control_confirm _
     | Nav.Keeper_clear_form _
     | Nav.Keeper_operator_note_form _
+    | Nav.Tool_execute_form _
     | Nav.Runtime_lane_create
     | Nav.Runtime_lane_edit _
     | Nav.Runtime_lane_delete _
@@ -3778,6 +3784,7 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       | Nav.Keeper_control_confirm _
       | Nav.Keeper_clear_form _
       | Nav.Keeper_operator_note_form _
+      | Nav.Tool_execute_form _
       | Nav.Runtime_lane_create
       | Nav.Runtime_lane_edit _
       | Nav.Runtime_lane_delete _
@@ -3940,6 +3947,7 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       | Nav.Keeper_control_confirm _
       | Nav.Keeper_clear_form _
       | Nav.Keeper_operator_note_form _
+      | Nav.Tool_execute_form _
       | Nav.Runtime_lane_create
       | Nav.Runtime_lane_edit _
       | Nav.Runtime_lane_delete _
@@ -3993,6 +4001,7 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 | Nav.Keeper_control_confirm _
                 | Nav.Keeper_clear_form _
                 | Nav.Keeper_operator_note_form _
+                | Nav.Tool_execute_form _
                 | Nav.Runtime_lane_delete _
                 | Nav.Task_transition_form _
                 | Nav.Goal_upsert_form _
@@ -4167,6 +4176,7 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 | Nav.Keeper_control_confirm _
                 | Nav.Keeper_clear_form _
                 | Nav.Keeper_operator_note_form _
+                | Nav.Tool_execute_form _
                 | Nav.Runtime_lane_delete _
                 | Nav.Task_transition_form _
                 | Nav.Goal_upsert_form _
@@ -4183,11 +4193,14 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             let sr = Rect.make ~x:padded.x ~y:sy ~w:padded.w ~h:1 in
             match modal.error with
             | Some err ->
+                let clean_err =
+                  Masc_tui_store.Chat_transcript.scrub_secrets_in_text err
+                in
                 ignore
                   (Cell_grid.put_text ~clip:sr grid ~x:padded.x ~y:sy
                      ~style:crit_st
                      (Grapheme.truncate_to_width ~max_width:padded.w
-                        (Glyph.to_utf8 Glyph.Live_failing ^ " " ^ err)))
+                        (Glyph.to_utf8 Glyph.Live_failing ^ " " ^ clean_err)))
             | None ->
                 if modal.submitting then
                   ignore

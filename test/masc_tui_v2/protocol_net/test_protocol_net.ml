@@ -6130,6 +6130,239 @@ let test_wave4_layer1_wire_codecs () =
      && Wire_common.has_field (parse_json dir_json) "operator_operation_id"
      && Wire_common.has_field (parse_json dir_json) "expected_workspace")
 
+let test_wave4_layer2_wire_codecs () =
+  (* 1. Full Gate snapshot: pending + retry_meta + rules + recent_resolved (server ts/keeper/tool) + hitl *)
+  let snap =
+    expect_ok "decode_gate_snapshot full"
+      (Wire_work.decode_gate_snapshot
+         (parse_json
+            {|{
+              "generated_at": "2026-11-24T09:00:00Z",
+              "approval_queue_state": { "state": "ready" },
+              "approval_queue": [
+                {
+                  "id": "appr-1",
+                  "keeper_name": "alpha",
+                  "tool_name": "Bash",
+                  "input_hash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                  "sequence": 3,
+                  "requested_at": 1795250000.0,
+                  "waiting_s": 12.5,
+                  "input_preview": "{\"cmd\":\"git push\"}",
+                  "phase": "blocked",
+                  "exact_attempt": { "state": "unbound" },
+                  "summary_attempt_disposition": { "code": "identity_unbound", "operator_detail": "No prior attempt" },
+                  "summary_status": {
+                    "status": "available",
+                    "summary": {
+                      "context_summary": "Pushes feature branch",
+                      "judgment": "require_human"
+                    }
+                  }
+                }
+              ],
+              "approval_rules_state": { "state": "ready" },
+              "approval_rules": [
+                {
+                  "id": "rule-1",
+                  "keeper_name": "alpha",
+                  "tool_name": "Bash",
+                  "request_fingerprint": "fp-abc",
+                  "created_at": 1795240000.0,
+                  "created_by": "admin",
+                  "source_approval_id": "appr-0",
+                  "expires_at": null
+                }
+              ],
+              "recent_resolved_state": { "state": "ready" },
+              "recent_resolved": [
+                {
+                  "ts": 1795249000.0,
+                  "event": "resolved",
+                  "id": "appr-0",
+                  "keeper": "alpha",
+                  "tool": "Bash",
+                  "decision": "approve",
+                  "decision_kind": "approve",
+                  "decision_reason": null,
+                  "decision_source": "human_operator",
+                  "authorization_source": "one_shot_resolution",
+                  "actor": "admin"
+                }
+              ],
+              "hitl": {
+                "gate_mode": { "mode": "auto_judge", "configured": true, "state": "ready" },
+                "external_gate_mode": { "mode": "manual", "configured": false, "state": "ready" },
+                "judge_lane": { "status": "available", "lane_id": "exact/hitl_summary", "slots": ["slot-a"] }
+              }
+            }|}))
+  in
+  Alcotest.(check int) "gate pending count" 1 (List.length snap.pending);
+  Alcotest.(check int) "gate retry_meta count" 1 (List.length snap.retry_meta);
+  Alcotest.(check int) "gate rules count" 1 (List.length snap.rules);
+  Alcotest.(check int) "gate recent_resolved count" 1 (List.length snap.recent_resolved);
+  let rm = List.hd snap.retry_meta in
+  Alcotest.(check (option string)) "summary_judgment" (Some "require_human") rm.summary_judgment;
+  let ws : Wire_work.expected_workspace =
+    { base_path = "/tmp/ws"; masc_root = "/tmp/ws/.masc" }
+  in
+  let res_body =
+    Wire_work.encode_gate_resolution_with_policy ~id:"appr-1" ~approved:true
+      ~reason:None ~remember_rule:true ~rule_expires_at:1800000000.0
+      ~expected_workspace:ws ()
+  in
+  Alcotest.(check bool) "remember_rule encoded" true
+    (Wire_common.has_field res_body "remember_rule"
+     && Wire_common.has_field res_body "rule_expires_at"
+     && Wire_common.has_field res_body "expected_workspace");
+  let retry_body = Wire_work.encode_gate_retry ~expected_workspace:ws rm in
+  Alcotest.(check bool) "retry closed fields" true
+    (Wire_common.has_field retry_body "input_hash"
+     && Wire_common.has_field retry_body "sequence"
+     && Wire_common.has_field retry_body "exact_attempt"
+     && Wire_common.has_field retry_body "summary_attempt_disposition");
+  (* 2. Tool approval modes + late approval attempts + ack_uncertain + gate tool events *)
+  let modes =
+    expect_ok "decode_tool_approval_modes"
+      (Wire_work.decode_tool_approval_modes
+         (parse_json
+            {|{"overrides":[{"keeper":"alpha","mode":"yolo"}],"default":"auto","restore_error":null}|}))
+  in
+  Alcotest.(check int) "1 override" 1 (List.length modes.overrides);
+  let attempts =
+    expect_ok "decode_late_approval_attempts"
+      (Wire_work.decode_late_approval_attempts
+         (parse_json
+            {|{"ok":true,"attempts":[{"consume_id":"c-1","keeper_name":"alpha","tool_name":"Bash","args_fingerprint":"fp-1","consumed_at":1795250000.0,"outcome":"unknown"}]}|}))
+  in
+  Alcotest.(check int) "1 late attempt" 1 (List.length attempts);
+  let ack_body =
+    Wire_work.encode_hitl_ack_uncertain ~keeper_name:"alpha" ~consume_id:"c-1"
+  in
+  (match ack_body with
+   | `Assoc fields -> Alcotest.(check int) "ack_uncertain exact 3 fields" 3 (List.length fields)
+   | _ -> Alcotest.fail "expected object");
+  let gte =
+    expect_ok "decode_gate_tool_events"
+      (Wire_work.decode_gate_tool_events
+         (parse_json
+            {|{
+              "generated_at": "2026-11-24T09:00:00Z",
+              "window_minutes": 60,
+              "tool_rejections": [{ "tool": "Bash", "reason": "policy", "count": 4 }],
+              "approval_queue_state": { "state": "ready" },
+              "approval_queue": { "depth": 2, "p50_wait_sec": 3.5, "p95_wait_sec": 10.0, "oldest_pending_sec": 12.0 }
+            }|}))
+  in
+  Alcotest.(check int) "gate tool_rejections" 1 (List.length gte.tool_rejections);
+  (* 3. Tool Quality + Keeper Waiting Inventory + Stateless MCP 2026-07-28 *)
+  let tq =
+    expect_ok "decode_tool_quality"
+      (Wire_runtime.decode_tool_quality
+         (parse_json
+            {|{
+              "generated_at": "2026-11-24T09:00:00Z",
+              "sampling_mode": "recent_n",
+              "total": 100,
+              "success": 92,
+              "failure": 8,
+              "deferred": 1,
+              "unsettled": 0,
+              "malformed": 0,
+              "success_rate": 92.0,
+              "by_tool": [{ "name": "masc_status", "calls": 40, "success_pct": 100.0, "avg_ms": 12.5, "output_truncated_count": 0, "avg_output_chars": 250.0 }],
+              "by_keeper": [{ "name": "alpha", "calls": 60, "success_pct": 95.0 }],
+              "by_runtime": [{ "name": "claude-main", "calls": 100, "success_pct": 92.0 }],
+              "failure_categories": [{ "category": "timeout", "count": 5 }]
+            }|}))
+  in
+  Alcotest.(check int) "tool quality total" 100 tq.total;
+  let tool_quality_fields =
+    [
+      ("generated_at", `String "2026-11-24T09:00:00Z");
+      ("total", `Int 1);
+      ("success", `Int 1);
+      ("failure", `Int 0);
+      ("success_rate", `Float 100.);
+    ]
+  in
+  let decoded_without_sampling_mode =
+    expect_ok "decode_tool_quality without sampling mode"
+      (Wire_runtime.decode_tool_quality (`Assoc tool_quality_fields))
+  in
+  Alcotest.(check string) "missing sampling mode defaults to recent_n"
+    "recent_n" decoded_without_sampling_mode.sampling_mode;
+  (match
+     Wire_runtime.decode_tool_quality
+       (`Assoc (("sampling_mode", `Int 1) :: tool_quality_fields))
+   with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "non-string sampling mode must fail to decode");
+  let wi =
+    expect_ok "decode_keeper_waiting_inventory"
+      (Wire_runtime.decode_keeper_waiting_inventory
+         (parse_json
+            {|{
+              "schema": "masc.dashboard.keeper_waiting_inventory.v4",
+              "keeper_count": 1,
+              "waiting_keeper_count": 1,
+              "row_count": 1,
+              "total_row_count": 1,
+              "oldest_age_seconds": 15.0,
+              "rows": [{ "keeper_name": "alpha", "source": "hitl_pending", "waiting_on": "appr-1", "what": "Waiting for approval", "wake_producer": "hitl_resolution_hook", "since": 1795250000.0, "due_at": null, "next_action": "resolve" }]
+            }|}))
+  in
+  Alcotest.(check int) "waiting inventory rows" 1 (List.length wi.rows);
+  let hdrs = Wire_runtime.mcp_headers ~method_:"tools/call" ~tool_name:"masc_status" () in
+  Alcotest.(check (option string)) "MCP-Protocol-Version" (Some "2026-07-28")
+    (List.assoc_opt "MCP-Protocol-Version" hdrs);
+  Alcotest.(check (option string)) "Mcp-Method" (Some "tools/call")
+    (List.assoc_opt "Mcp-Method" hdrs);
+  Alcotest.(check (option string)) "Mcp-Name" (Some "masc_status")
+    (List.assoc_opt "Mcp-Name" hdrs);
+  Alcotest.(check (option string)) "X-Masc-Force-Json" (Some "true")
+    (List.assoc_opt "X-Masc-Force-Json" hdrs);
+  let mcp_tools =
+    expect_ok "decode_mcp_tools_list"
+      (Wire_runtime.decode_mcp_tools_list
+         (parse_json
+            {|{
+              "jsonrpc": "2.0",
+              "id": 1,
+              "result": {
+                "tools": [
+                  {
+                    "name": "masc_board_list",
+                    "description": "List board posts",
+                    "inputSchema": {
+                      "type": "object",
+                      "properties": { "limit": { "type": "integer" }, "hearth": { "type": "string" } },
+                      "required": ["limit"]
+                    }
+                  }
+                ]
+              }
+            }|}))
+  in
+  Alcotest.(check int) "1 mcp tool" 1 (List.length mcp_tools);
+  Alcotest.(check (list string)) "required params" [ "limit" ]
+    (List.hd mcp_tools).required_params;
+  let mcp_res =
+    expect_ok "decode_mcp_tools_call_result ok"
+      (Wire_runtime.decode_mcp_tools_call_result ~tool_name:"masc_status"
+         (parse_json
+            {|{"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"healthy"}],"isError":false}}|}))
+  in
+  Alcotest.(check bool) "mcp call ok" false mcp_res.is_error;
+  Alcotest.(check (list string)) "mcp call text" [ "healthy" ] mcp_res.content_texts;
+  let mcp_err =
+    expect_ok "decode_mcp_tools_call_result jsonrpc error"
+      (Wire_runtime.decode_mcp_tools_call_result ~tool_name:"masc_status"
+         (parse_json
+            {|{"jsonrpc":"2.0","id":2,"error":{"code":-32602,"message":"bad params"}}|}))
+  in
+  Alcotest.(check bool) "mcp call error flagged" true mcp_err.is_error
+
 let () =
   Alcotest.run "masc_tui_v2_protocol_net"
     [
@@ -6178,6 +6411,8 @@ let () =
             test_wave3_live_wire_codecs;
           Alcotest.test_case "Feature Wave 4 Layer 1: Turn Flow, Memory OS snapshot, Checkpoints, Operator Note & AG-UI Retry/Progress" `Quick
             test_wave4_layer1_wire_codecs;
+          Alcotest.test_case "Feature Wave 4 Layer 2: HITL Gate Policy/Rules/Modes/Retry/Recovery, Tool Quality, Waiting Inventory & Stateless MCP 2026-07-28" `Quick
+            test_wave4_layer2_wire_codecs;
         ] );
       ( "net"
       , [

@@ -194,7 +194,7 @@ let slash_spec_takes_arg (spec : Slash.spec) = Option.is_some spec.arg_hint
 
 let slash_spec_requires_arg (spec : Slash.spec) =
   match spec.id with
-  | Slash.Cmd_btw | Slash.Cmd_ctl -> true
+  | Slash.Cmd_btw | Slash.Cmd_ctl | Slash.Cmd_gate | Slash.Cmd_exec -> true
   | Slash.Cmd_pulse
   | Slash.Cmd_work
   | Slash.Cmd_knowledge
@@ -220,7 +220,8 @@ let slash_spec_requires_arg (spec : Slash.spec) =
 
 let resolve_slash_arg_candidates (m : Model.t) (spec : Slash.spec) ~arg_raw =
   match spec.id with
-  | Slash.Cmd_theme | Slash.Cmd_lang | Slash.Cmd_tools | Slash.Cmd_ctl ->
+  | Slash.Cmd_theme | Slash.Cmd_lang | Slash.Cmd_tools | Slash.Cmd_ctl
+  | Slash.Cmd_gate ->
       let prefix_matches = Slash.complete ~prefix:(spec.name ^ " " ^ arg_raw) in
       let all_for_cmd =
         if prefix_matches <> [] then prefix_matches
@@ -294,6 +295,38 @@ let resolve_slash_arg_candidates (m : Model.t) (spec : Slash.spec) ~arg_raw =
                trigger = full_text;
                label = r.provider;
                detail = r.model;
+             })
+  | Slash.Cmd_exec ->
+      let q = String.trim arg_raw in
+      let names =
+        match Observed.to_option m.runtime.mcp_tools_list with
+        | Some xs when xs <> [] ->
+            List.map
+              (fun (e : Wire_runtime.mcp_tool_schema_entry) ->
+                (e.name, Option.value e.description ~default:"MCP tool"))
+              xs
+        | Some _ | None -> (
+            match Observed.to_option m.runtime.tools_dashboard with
+            | Some d ->
+                List.map
+                  (fun (e : Wire_runtime.tool_catalog_entry) ->
+                    (e.name, Option.value e.description ~default:e.domain))
+                  d.entries
+            | None -> [])
+      in
+      names
+      |> List.filter (fun (name, desc) ->
+             String.equal q ""
+             || contains_ci ~needle:q name
+             || contains_ci ~needle:q desc)
+      |> List.filteri (fun i _ -> i < 20)
+      |> List.map (fun (name, desc) ->
+             let full_text = spec.name ^ " " ^ name in
+             {
+               kind = Popup_slash_arg { spec; arg = name; full_text };
+               trigger = full_text;
+               label = desc;
+               detail = Some "{}";
              })
   | Slash.Cmd_pulse
   | Slash.Cmd_work
@@ -1176,6 +1209,7 @@ let open_inline_modal (m : Model.t) kind =
       | Nav.Keeper_control_confirm _
       | Nav.Keeper_clear_form _
       | Nav.Keeper_operator_note_form _
+      | Nav.Tool_execute_form _
       | Nav.Runtime_lane_create
       | Nav.Runtime_lane_edit _
       | Nav.Runtime_lane_delete _
@@ -2166,11 +2200,16 @@ let actionable_approval_item (m : Model.t) =
     && Model.equal_pulse_pane (Model.active_pulse_pane m) Model.Pulse_attention
   in
   if on_work_inbox then
-    match
-      Attention.current_filtered_item ~query:m.work.filter_query m.attention
-    with
-    | Some e when not (Attention.is_in_flight ~id:e.id m.attention) -> Some e
-    | Some _ | None -> None
+    if
+      Work_store.equal_inbox_subview m.work.inbox_subview
+        Work_store.Inbox_queue
+    then
+      match
+        Attention.current_filtered_item ~query:m.work.filter_query m.attention
+      with
+      | Some e when not (Attention.is_in_flight ~id:e.id m.attention) -> Some e
+      | Some _ | None -> None
+    else None
   else if on_pulse_attention then
     match Attention.current_filtered_item ~query:"" m.attention with
     | Some e when not (Attention.is_in_flight ~id:e.id m.attention) -> Some e
@@ -3351,12 +3390,17 @@ let enter_plan (m : Model.t) : enter_plan =
               | None -> Enter_noop)
           | Nav.Work_schedules -> Enter_noop
           | Nav.Work_inbox -> (
-              match
-                Attention.current_filtered_item ~query:m.work.filter_query
-                  m.attention
-              with
-              | Some entry -> Enter_attention entry
-              | None -> Enter_noop)
+              if
+                Work_store.equal_inbox_subview m.work.inbox_subview
+                  Work_store.Inbox_queue
+              then
+                match
+                  Attention.current_filtered_item ~query:m.work.filter_query
+                    m.attention
+                with
+                | Some entry -> Enter_attention entry
+                | None -> Enter_noop
+              else Enter_noop)
           | Nav.Work_candle_scorecard | Nav.Work_harness -> Enter_noop)
       | Nav.Knowledge -> (
           match m.knowledge.active_tab with
@@ -3457,7 +3501,8 @@ let enter_plan (m : Model.t) : enter_plan =
                       Enter_push (Nav.Dive_runtime (Nav.Tool_dive entry.name))
                   | None -> Enter_noop)
               | Runtime_store.Tools_usage_calls
-              | Runtime_store.Tools_keeper_skills ->
+              | Runtime_store.Tools_keeper_skills
+              | Runtime_store.Tools_quality_gate ->
                   Enter_noop)
           | Nav.Runtime_fusion -> (
               match Runtime_store.selected_fusion_run m.runtime with
@@ -3719,6 +3764,7 @@ let classify_inline_form (modal : Model.inline_modal_state) : inline_form_kind =
     | Nav.Keeper_control_confirm _
     | Nav.Keeper_clear_form _
     | Nav.Keeper_operator_note_form _
+    | Nav.Tool_execute_form _
     | Nav.Runtime_lane_create
     | Nav.Runtime_lane_edit _
     | Nav.Runtime_lane_delete _
@@ -5228,6 +5274,49 @@ let submit_inline_modal ~now (m : Model.t) =
                         req = Cmd.Post_keeper_operator_note { keeper; text };
                       };
                   ] )
+          | Form_standard (Nav.Tool_execute_form _) -> (
+              let tool_name =
+                String.trim (Model.modal_field_value ~key:"tool_name" modal)
+              in
+              let args_raw =
+                String.trim (Model.modal_field_value ~key:"args_json" modal)
+              in
+              let args_str = if String.equal args_raw "" then "{}" else args_raw in
+              if String.equal tool_name "" then
+                set_modal_error "Tool name is required"
+              else
+                match Yojson.Safe.from_string args_str with
+                | `Assoc _ as arguments ->
+                    let runtime, rpc_id =
+                      Runtime_store.next_mcp_rpc_id m.runtime
+                    in
+                    let runtime =
+                      {
+                        runtime with
+                        mcp_call_result = Observed.loading ~since_ns:now;
+                        mcp_call_form = Some (rpc_id, modal.kind);
+                      }
+                    in
+                    ( mark_submitting { m with runtime }
+                    , [
+                        Cmd.Http_post
+                          {
+                            epoch = m.epoch;
+                            req =
+                              Cmd.Post_mcp_tools_call
+                                { rpc_id; tool_name; arguments };
+                          };
+                      ] )
+                | `Null
+                | `Bool _
+                | `Int _
+                | `Intlit _
+                | `Float _
+                | `String _
+                | `List _ ->
+                    set_modal_error "Arguments must be a JSON object ({ ... })"
+                | exception Yojson.Json_error msg ->
+                    set_modal_error ("Invalid JSON arguments: " ^ msg))
           | Form_setup_login_start ->
               let integration_id =
                 String.trim
@@ -7405,6 +7494,7 @@ let work_detail_max_scroll (m : Model.t) =
       with
       | None -> 0
       | Some entry -> (
+          let _, br = Work_store.inbox_subview_rects br in
           let right_rect =
             if br.w >= 96 then
               match
@@ -7735,6 +7825,24 @@ let runtime_detail_max_scroll (m : Model.t) =
                 in
                 let vis = max 1 (rc.h - hdr_rows) in
                 max 0 (List.length sk.surfaces - vis))
+      | Runtime_store.Tools_quality_gate ->
+          let _, right_rect =
+            Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
+              ~left_ratio:0.52 ~top_ratio:0.50 bp body_rect
+          in
+          let rc = ui_card_inner right_rect |> ui_pad_content ~bp in
+          let rej_n =
+            match Observed.to_option m.runtime.gate_tool_events with
+            | Some ev -> List.length ev.tool_rejections
+            | None -> 0
+          in
+          let wait_n =
+            match Observed.to_option m.runtime.keeper_waiting_inventory with
+            | Some (_, inv) -> List.length inv.rows
+            | None -> 0
+          in
+          let total_lines = rej_n + wait_n + 6 in
+          if Rect.is_empty rc then 0 else max 0 (total_lines - rc.h)
       | Runtime_store.Tools_usage_calls | Runtime_store.Tools_catalog_tree -> 0)
   | Nav.Runtime_fusion -> (
       match Runtime_store.selected_fusion_run m.runtime with
@@ -9572,6 +9680,7 @@ let apply_move (m : Model.t) dir =
                   | Nav.Keeper_control_confirm _
                   | Nav.Keeper_clear_form _
                   | Nav.Keeper_operator_note_form _
+                  | Nav.Tool_execute_form _
                   | Nav.Runtime_lane_create
                   | Nav.Runtime_lane_edit _
                   | Nav.Runtime_lane_delete _
@@ -9615,6 +9724,7 @@ let apply_move (m : Model.t) dir =
               | Nav.Keeper_control_confirm _
               | Nav.Keeper_clear_form _
               | Nav.Keeper_operator_note_form _
+              | Nav.Tool_execute_form _
               | Nav.Runtime_lane_create
               | Nav.Runtime_lane_edit _
               | Nav.Runtime_lane_delete _
@@ -10726,6 +10836,18 @@ let apply_move (m : Model.t) dir =
                             }
                           , [] )
                         else if
+                          not
+                            (Work_store.equal_inbox_subview m.work.inbox_subview
+                               Work_store.Inbox_queue)
+                        then
+                          ( {
+                              m with
+                              work =
+                                Work_store.move_selection ~pane_index:0
+                                  ~viewport_rows ~delta m.work;
+                            }
+                          , [] )
+                        else if
                           Attention.filtered_items ~query:m.work.filter_query
                             m.attention
                           <> []
@@ -11319,7 +11441,8 @@ let apply_move (m : Model.t) dir =
                           | Runtime_store.Tools_catalog_tree ->
                               let inner = ui_card_inner body_rect in
                               max 1 (inner.h - 2)
-                          | Runtime_store.Tools_keeper_skills ->
+                          | Runtime_store.Tools_keeper_skills
+                          | Runtime_store.Tools_quality_gate ->
                               let left_rect, right_rect =
                                 Masc_tui_ui.Layout.adaptive_split_2
                                   ~stack_on_compact:true ~left_ratio:0.52
@@ -11342,6 +11465,10 @@ let apply_move (m : Model.t) dir =
                     in
                     let eff_max_detail_scroll =
                       match (rt.active_tab, rt.tools_subview, pane_index) with
+                      | ( Nav.Runtime_tools_usage
+                        , Runtime_store.Tools_quality_gate
+                        , 0 ) ->
+                          None
                       | ( Nav.Runtime_tools_usage
                         , Runtime_store.Tools_keeper_skills
                         , 0 ) -> (
@@ -11407,7 +11534,8 @@ let apply_move (m : Model.t) dir =
                           | Nav.Runtime_addons_browser )
                         , ( Runtime_store.Tools_usage_calls
                           | Runtime_store.Tools_catalog_tree
-                          | Runtime_store.Tools_keeper_skills )
+                          | Runtime_store.Tools_keeper_skills
+                          | Runtime_store.Tools_quality_gate )
                         , _ ) ->
                           max_detail_scroll
                     in

@@ -4166,14 +4166,24 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
         tone = Some Theme.Status_ai;
         glyph = None;
       };
+      {
+        H.label =
+          Say.resolve lang
+            (Say.make ~ko:"품질 · 게이트 · 대기" ~en:"Quality · Gate · Waiting");
+        active =
+          Runtime_store.equal_tools_subview rt.tools_subview
+            Runtime_store.Tools_quality_gate;
+        tone = Some Theme.Status_attention;
+        glyph = None;
+      };
     ]
   in
   ignore
     (H.draw_pills ~grid ~rect:bar_rect ~theme
        ~right_hint:
          (Say.resolve lang
-            (Say.make ~ko:"[v] 하위뷰 · [w] 기간 · [< >] 키퍼"
-               ~en:"[v] View · [w] Window · [< >] Keeper"))
+            (Say.make ~ko:"[v] 하위뷰 · [w] 기간 · [< >] 키퍼 · /exec"
+               ~en:"[v] View · [w] Window · [< >] Keeper · /exec"))
        pills);
   match rt.tools_subview with
   | Runtime_store.Tools_usage_calls -> (
@@ -4196,6 +4206,264 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
       render_tools_catalog_tree ~grid ~cache ~rect:body_rect ~theme ~bp ~model
   | Runtime_store.Tools_keeper_skills ->
       render_tools_keeper_skills ~grid ~cache ~rect:body_rect ~theme ~bp ~model
+  | Runtime_store.Tools_quality_gate ->
+      let left_rect, right_rect =
+        Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.52
+          ~top_ratio:0.50 bp body_rect
+      in
+      let left_inner =
+        Card.draw ~cache grid ~rect:left_rect ~theme
+          (H.card_spec ~focused:(Model.pane_focused model 0)
+             ~hotkey:
+               (Say.resolve lang
+                  (Say.make ~ko:"[j/k] 스크롤 · [r] 새로고침"
+                     ~en:"[j/k] Scroll · [r] Refresh"))
+             (Say.resolve lang
+                (Say.make ~ko:"도구 호출 품질 (Tool Quality)"
+                   ~en:"Tool Call Quality")))
+      in
+      let lc = H.pad_content ~bp left_inner in
+      if not (Rect.is_empty lc) then begin
+        match Observed.to_option rt.tool_quality with
+        | None ->
+            H.draw_observed_placeholder ~grid ~rect:lc ~theme ~lang
+              rt.tool_quality
+        | Some tq ->
+            let lines =
+              [
+                Printf.sprintf
+                  "Total=%d · OK=%d (%.1f%%) · Fail=%d · Deferred=%d · Unsettled=%d · Malformed=%d"
+                  tq.total tq.success tq.success_rate tq.failure tq.deferred
+                  tq.unsettled tq.malformed;
+                Printf.sprintf "Sample=%s · Updated=%s" tq.sampling_mode
+                  tq.generated_at;
+                "";
+                Say.resolve lang
+                  (Say.make ~ko:"── 상위 도구 (호출수 · 성공률 · 평균ms · 절단)"
+                     ~en:"── Top Tools (calls · ok% · avg_ms · trunc)");
+              ]
+              @ List.map
+                  (fun (r : Wire_runtime.tool_quality_tool_row) ->
+                    Printf.sprintf "  %-28s %5d  %5.1f%%  %6.0fms  trunc=%d"
+                      r.name r.calls r.success_pct r.avg_ms
+                      r.output_truncated_count)
+                  (H.safe_take 20 tq.by_tool)
+              @ (if tq.failure_categories = [] then []
+                 else
+                   ""
+                   :: Say.resolve lang
+                        (Say.make ~ko:"── 실패 범주 (Failure Categories)"
+                           ~en:"── Failure Categories")
+                   :: List.map
+                        (fun (fc : Wire_runtime.tool_quality_failure_cat) ->
+                          Printf.sprintf "  [%4d] %s" fc.count
+                            (H.redact_secrets_in_text fc.category))
+                        (H.safe_take 12 tq.failure_categories))
+              @ (if tq.by_keeper = [] then []
+                 else
+                   ""
+                   :: Say.resolve lang
+                        (Say.make ~ko:"── 키퍼별 성공률" ~en:"── By Keeper")
+                   :: List.map
+                        (fun (rk : Wire_runtime.tool_quality_rate_row) ->
+                          Printf.sprintf "  @%-22s %5d  %5.1f%%" rk.name
+                            rk.calls rk.success_pct)
+                        (H.safe_take 10 tq.by_keeper))
+            in
+            let skip =
+              Int.max 0
+                (Int.min (Int.max 0 (List.length lines - lc.h)) rt.scroll_offset)
+            in
+            let bg = Color.of_rgb theme.surface_1 in
+            let st_primary = Typography.primary ~bg theme in
+            let st_accent = Typography.accent ~bg ~bold:true theme in
+            List.iteri
+              (fun idx line ->
+                if idx >= skip && idx - skip < lc.h then
+                  let style =
+                    if String.starts_with ~prefix:"──" line then st_accent
+                    else st_primary
+                  in
+                  ignore
+                    (Cell_grid.put_text ~clip:lc grid ~x:lc.x
+                       ~y:(lc.y + idx - skip) ~style
+                       (Grapheme.truncate_to_width ~max_width:lc.w line)))
+              lines
+      end;
+      let keeper_names =
+        match Observed.to_option model.fleet.keepers with
+        | Some ks ->
+            List.map (fun (k : Wire_fleet.keeper_summary) -> k.name) ks
+        | None -> []
+      in
+      let sel_keeper =
+        Runtime_store.selected_tools_surface_keeper ~keeper_names rt
+      in
+      let right_sub =
+        match sel_keeper with Some k -> Some ("@" ^ k) | None -> None
+      in
+      let right_inner =
+        Card.draw ~cache grid ~rect:right_rect ~theme
+          (H.card_spec ?subtitle:right_sub ~focused:(Model.pane_focused model 1)
+             ~hotkey:
+               (Say.resolve lang
+                  (Say.make ~ko:"[< >] 키퍼 · [j/k] 스크롤"
+                     ~en:"[< >] Keeper · [j/k] Scroll"))
+             (Say.resolve lang
+                (Say.make ~ko:"게이트 거부 · 키퍼 대기 인벤토리"
+                   ~en:"Gate Rejections · Keeper Waiting")))
+      in
+      let rc = H.pad_content ~bp right_inner in
+      if not (Rect.is_empty rc) then begin
+        let gate_lines =
+          match rt.gate_tool_events with
+          | Observed.Loading _ ->
+              [
+                Say.resolve lang
+                  (Say.make ~ko:"게이트 도구 이벤트 불러오는 중…"
+                     ~en:"Loading gate tool events…");
+              ]
+          | Observed.Failed { reason; _ } ->
+              [
+                Say.resolve lang
+                  (Say.make ~ko:"게이트 도구 이벤트 오류: "
+                     ~en:"Gate tool events error: ")
+                ^ H.redact_secrets_in_text reason;
+              ]
+          | Observed.Absent ->
+              [
+                Say.resolve lang
+                  (Say.make ~ko:"게이트 도구 이벤트 엔드포인트 없음 (404)"
+                     ~en:"Gate tool events endpoint absent (404)");
+              ]
+          | Observed.Unreported ->
+              [
+                Say.resolve lang
+                  (Say.make ~ko:"게이트 도구 이벤트: 미보고"
+                     ~en:"Gate tool events: unreported");
+              ]
+          | Observed.Value { data = ev; _ } ->
+              let q_line =
+                match (ev.queue_summary, ev.queue_error) with
+                | Some qs, _ ->
+                    let fmt_opt = function
+                      | Some v -> Printf.sprintf "%.1fs" v
+                      | None -> "—"
+                    in
+                    Printf.sprintf
+                      "Queue depth=%d · p50=%s · p95=%s · oldest=%s (win=%dm)"
+                      qs.depth (fmt_opt qs.p50_wait_sec)
+                      (fmt_opt qs.p95_wait_sec)
+                      (fmt_opt qs.oldest_pending_sec) ev.window_minutes
+                | None, Some err ->
+                    "Queue unavailable: " ^ H.redact_secrets_in_text err
+                | None, None ->
+                    Printf.sprintf "Queue: unreported (win=%dm)"
+                      ev.window_minutes
+              in
+              q_line
+              :: (if ev.tool_rejections = [] then
+                    [
+                      Say.resolve lang
+                        (Say.make ~ko:"  최근 거부된 도구 호출 없음"
+                           ~en:"  No recent tool rejections");
+                    ]
+                  else
+                    Say.resolve lang
+                      (Say.make ~ko:"── 도구 거부 상위" ~en:"── Top Tool Rejections")
+                    :: List.map
+                         (fun (r : Wire_work.gate_tool_rejection_row) ->
+                           Printf.sprintf "  [%3d] %s · %s" r.count r.tool
+                             (H.redact_secrets_in_text r.reason))
+                         (H.safe_take 12 ev.tool_rejections))
+        in
+        let wait_lines =
+          match sel_keeper with
+          | None -> []
+          | Some keeper -> (
+              ""
+              :: Say.resolve lang
+                   (Say.make
+                      ~ko:("── 대기 인벤토리 (@" ^ keeper ^ ")")
+                      ~en:("── Waiting Inventory (@" ^ keeper ^ ")"))
+              ::
+              match rt.keeper_waiting_inventory with
+              | Observed.Value { data = k, inv; _ }
+                when String.equal k keeper ->
+                  let hdr =
+                    let oldest_s =
+                      match inv.oldest_age_seconds with
+                      | Some s -> Printf.sprintf "%.0fs" s
+                      | None -> "—"
+                    in
+                    Printf.sprintf "  rows=%d/%d · waiting_keepers=%d · oldest=%s"
+                      inv.row_count inv.total_row_count inv.waiting_keeper_count
+                      oldest_s
+                  in
+                  if inv.rows = [] then
+                    [
+                      hdr;
+                      Say.resolve lang
+                        (Say.make ~ko:"  대기 중인 항목 없음 (유휴)"
+                           ~en:"  No waiting items (idle)");
+                    ]
+                  else
+                    hdr
+                    :: List.map
+                         (fun (w : Wire_runtime.keeper_waiting_row) ->
+                           Printf.sprintf "  [%s] %s — %s (%s)" w.source
+                             w.waiting_on
+                             (H.redact_secrets_in_text w.what)
+                             (H.redact_secrets_in_text w.next_action))
+                         (H.safe_take 20 inv.rows)
+              | Observed.Loading _ ->
+                  [
+                    Say.resolve lang
+                      (Say.make ~ko:"  대기 인벤토리 불러오는 중…"
+                         ~en:"  Loading waiting inventory…");
+                  ]
+              | Observed.Failed { reason; _ } ->
+                  [
+                    Say.resolve lang
+                      (Say.make ~ko:"  대기 인벤토리 오류: "
+                         ~en:"  Waiting inventory error: ")
+                    ^ H.redact_secrets_in_text reason;
+                  ]
+              | Observed.Absent ->
+                  [
+                    Say.resolve lang
+                      (Say.make ~ko:"  대기 인벤토리 미지원 (404)"
+                         ~en:"  Waiting inventory absent (404)");
+                  ]
+              | Observed.Value _ | Observed.Unreported ->
+                  [
+                    Say.resolve lang
+                      (Say.make ~ko:"  대기 인벤토리 미보고"
+                         ~en:"  Waiting inventory unreported");
+                  ])
+        in
+        let all_lines = gate_lines @ wait_lines in
+        let skip =
+          Int.max 0
+            (Int.min (Int.max 0 (List.length all_lines - rc.h))
+               rt.detail_scroll_offset)
+        in
+        let bg = Color.of_rgb theme.surface_1 in
+        let st_primary = Typography.primary ~bg theme in
+        let st_accent = Typography.accent ~bg ~bold:true theme in
+        List.iteri
+          (fun idx line ->
+            if idx >= skip && idx - skip < rc.h then
+              let style =
+                if String.starts_with ~prefix:"──" line then st_accent
+                else st_primary
+              in
+              ignore
+                (Cell_grid.put_text ~clip:rc grid ~x:rc.x
+                   ~y:(rc.y + idx - skip) ~style
+                   (Grapheme.truncate_to_width ~max_width:rc.w line)))
+          all_lines
+      end
 
 (* --- 6. Sub-Tab 6: Connectors & MCP Clients (Dedicated 2-Pane Screen) --- *)
 
@@ -5482,8 +5750,8 @@ let render_dive ~(target : Nav.runtime_dive_target) ~(model : Model.t) ~cache
             (H.card_spec ?badge ~focused:(Model.body_has_focus model)
                ~hotkey:
                  (Say.resolve lang
-                    (Say.make ~ko:"[w] 기간(24h/7d/14d) · [Esc] 뒤로"
-                       ~en:"[w] Window(24h/7d/14d) · [Esc] Back"))
+                    (Say.make ~ko:"[e] MCP 실행 · [w] 기간(24h/7d/14d) · [Esc] 뒤로"
+                       ~en:"[e] Execute MCP · [w] Window(24h/7d/14d) · [Esc] Back"))
                (Printf.sprintf "%s > %s"
                   (Say.resolve lang (Say.make ~ko:"도구 상세" ~en:"Tool Detail"))
                   tool_name))
@@ -5491,45 +5759,119 @@ let render_dive ~(target : Nav.runtime_dive_target) ~(model : Model.t) ~cache
         let mc = H.pad_content ~bp meta_inner in
         if not (Rect.is_empty mc) then begin
           let y = ref mc.y and bot = Rect.bottom mc in
-          match entry_opt with
-          | None ->
-              H.draw_empty_notice ~grid ~rect:mc ~theme
-                (Printf.sprintf "Tool: %s" tool_name)
-          | Some e ->
-              let direct_s =
-                match e.direct_call_allowed with
-                | Some true -> "yes"
-                | Some false -> "no"
-                | None -> "—"
-              in
-              let surf_s =
-                if e.surfaces = [] then "—" else String.concat ", " e.surfaces
-              in
-              let pub_s =
-                if e.public_names = [] then "—"
-                else String.concat ", " e.public_names
-              in
-              if !y < bot then begin
-                H.put_kv ~grid ~clip:mc ~x:mc.x ~y:!y ~max_w:mc.w ~theme
-                  ~key_w:10 ~key:"Surface"
-                  (Printf.sprintf "%s · Direct=%s · Public: %s" surf_s direct_s
-                     pub_s);
-                incr y
-              end;
-              if e.doc_refs <> [] && !y < bot then begin
-                H.put_kv ~grid ~clip:mc ~x:mc.x ~y:!y ~max_w:mc.w ~theme
-                  ~key_w:10 ~key:"Docs" (String.concat ", " e.doc_refs);
-                incr y
-              end;
-              (match e.description with
-               | Some desc when !y < bot ->
-                   let md_r =
-                     Rect.make ~x:mc.x ~y:!y ~w:mc.w ~h:(Int.max 0 (bot - !y))
-                   in
-                   ignore
-                     (Markdown.draw grid ~rect:md_r ~theme ~osc8:true
-                        ~scroll:model.nav.dive_scroll_offset desc)
-               | Some _ | None -> ())
+          let schema_opt =
+            Runtime_store.mcp_tool_schema_for ~name:tool_name rt
+          in
+          (match entry_opt with
+           | None ->
+               H.put_kv ~grid ~clip:mc ~x:mc.x ~y:!y ~max_w:mc.w ~theme
+                 ~key_w:10 ~key:"Tool" tool_name;
+               incr y
+           | Some e ->
+               let direct_s =
+                 match e.direct_call_allowed with
+                 | Some true -> "yes"
+                 | Some false -> "no"
+                 | None -> "—"
+               in
+               let surf_s =
+                 if e.surfaces = [] then "—" else String.concat ", " e.surfaces
+               in
+               let pub_s =
+                 if e.public_names = [] then "—"
+                 else String.concat ", " e.public_names
+               in
+               if !y < bot then begin
+                 H.put_kv ~grid ~clip:mc ~x:mc.x ~y:!y ~max_w:mc.w ~theme
+                   ~key_w:10 ~key:"Surface"
+                   (Printf.sprintf "%s · Direct=%s · Public: %s" surf_s direct_s
+                      pub_s);
+                 incr y
+               end;
+               if e.doc_refs <> [] && !y < bot then begin
+                 H.put_kv ~grid ~clip:mc ~x:mc.x ~y:!y ~max_w:mc.w ~theme
+                   ~key_w:10 ~key:"Docs" (String.concat ", " e.doc_refs);
+                 incr y
+               end);
+          (match schema_opt with
+           | Some s when !y < bot ->
+               let req_s =
+                 if s.required_params = [] then "none"
+                 else String.concat ", " s.required_params
+               in
+               let all_s =
+                 if s.param_names = [] then "{}"
+                 else String.concat ", " s.param_names
+               in
+               H.put_kv ~grid ~clip:mc ~x:mc.x ~y:!y ~max_w:mc.w ~theme
+                 ~key_w:10 ~key:"Schema"
+                 (Printf.sprintf "req=[%s] · params=[%s]" req_s all_s);
+               incr y
+           | Some _ | None -> ());
+          (match rt.mcp_call_result with
+           | Observed.Loading _ when !y < bot ->
+               H.put_kv ~grid ~clip:mc ~x:mc.x ~y:!y ~max_w:mc.w ~theme
+                 ~key_w:10 ~key:"MCP Run"
+                 (Say.resolve lang
+                    (Say.make ~ko:"실행 중…" ~en:"Executing…"));
+               incr y
+           | Observed.Failed { reason; _ } when !y < bot ->
+               H.put_kv ~grid ~clip:mc ~x:mc.x ~y:!y ~max_w:mc.w ~theme
+                 ~key_w:10 ~key:"MCP Err" (H.redact_secrets_in_text reason);
+               incr y
+           | Observed.Value { data = res; _ }
+             when String.equal res.tool_name tool_name && !y < bot ->
+               let out_body =
+                 match (res.raw_error, res.content_texts, res.structured_json) with
+                 | Some e, _, _ -> "ERR: " ^ H.redact_secrets_in_text e
+                 | None, (_ :: _ as texts), _ ->
+                     let prefix = if res.is_error then "ERR: " else "OK: " in
+                     prefix
+                     ^ H.redact_secrets_in_text (String.concat "\n" texts)
+                 | None, [], Some j ->
+                     let prefix = if res.is_error then "ERR: " else "OK: " in
+                     prefix
+                     ^ H.redact_secrets_in_text (Yojson.Safe.pretty_to_string j)
+                 | None, [], None -> if res.is_error then "ERR" else "OK (empty)"
+               in
+               let out_lines = String.split_on_char '\n' out_body in
+               (match out_lines with
+               | first :: rest ->
+                   H.put_kv ~grid ~clip:mc ~x:mc.x ~y:!y ~max_w:mc.w ~theme
+                     ~key_w:10 ~key:"MCP Out" first;
+                   incr y;
+                   let bg = Color.of_rgb theme.surface_1 in
+                   let st = Typography.primary ~bg theme in
+                   let max_extra = Int.min 6 (List.length rest) in
+                   List.iteri
+                     (fun idx line ->
+                       if idx < max_extra && !y < bot then begin
+                         ignore
+                           (Cell_grid.put_text ~clip:mc grid ~x:(mc.x + 2) ~y:!y
+                              ~style:st
+                              (Grapheme.truncate_to_width
+                                 ~max_width:(Int.max 1 (mc.w - 2))
+                                 line));
+                         incr y
+                       end)
+                     rest
+               | [] -> ())
+           | Observed.Loading _ | Observed.Failed _ | Observed.Value _ | Observed.Absent | Observed.Unreported -> ());
+          (let desc_opt =
+             match entry_opt with
+             | Some e when Option.is_some e.description -> e.description
+             | Some _ | None ->
+                 Option.bind schema_opt (fun s -> s.description)
+           in
+           match desc_opt with
+           | Some desc when !y < bot ->
+               let md_r =
+                 Rect.make ~x:mc.x ~y:!y ~w:mc.w ~h:(Int.max 0 (bot - !y))
+               in
+               ignore
+                 (Markdown.draw grid ~rect:md_r ~theme ~osc8:true
+                    ~scroll:model.nav.dive_scroll_offset desc)
+           | Some _ | None -> ())
         end;
         if not (Rect.is_empty series_rect) then begin
           match Observed.to_option rt.tool_detail_series with

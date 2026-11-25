@@ -33,6 +33,7 @@ val to_option : 'a t -> 'a option
 val is_loading : 'a t -> bool
 val is_value : 'a t -> bool
 val is_stale : 'a t -> bool
+val is_failed : 'a t -> bool
 val mark_stale : 'a t -> 'a t
 (** The question behind the slot changed: new parameters, a reconnect, a
     dataset event. A [Value] keeps its data and is marked stale. A [Failed]

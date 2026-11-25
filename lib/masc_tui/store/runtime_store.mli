@@ -66,6 +66,7 @@ type tools_subview =
   | Tools_usage_calls
   | Tools_catalog_tree
   | Tools_keeper_skills
+  | Tools_quality_gate
 
 type tools_window =
   | Tools_win_24h
@@ -114,6 +115,17 @@ type t = {
   tool_detail_series : (string * Wire_runtime.tool_series_summary) Observed.t;
   tools_dashboard : Wire_runtime.tools_dashboard_snapshot Observed.t;
   tools_catalog : Wire_runtime.tool_summary list Observed.t;
+  tool_quality : Wire_runtime.tool_quality_snapshot Observed.t;
+  tool_quality_absent : bool;
+  gate_tool_events : Wire_work.gate_tool_events_snapshot Observed.t;
+  gate_tool_events_absent : bool;
+  keeper_waiting_inventory :
+    (string * Wire_runtime.keeper_waiting_inventory) Observed.t;
+  keeper_waiting_inventory_absent : bool;
+  mcp_tools_list : Wire_runtime.mcp_tool_schema_entry list Observed.t;
+  mcp_call_result : Wire_runtime.mcp_tool_call_result Observed.t;
+  mcp_call_form : (int * Nav.inline_action_kind) option;
+  mcp_next_rpc_id : int;
   skills : Wire_runtime.skills_snapshot Observed.t;
   tools_subview : tools_subview;
   tools_window : tools_window;
@@ -464,3 +476,23 @@ val apply_connector_names :
   connector_id:string -> Wire_runtime.connector_name_mapping list -> t -> t
 val connector_channel_names :
   connector_id:string -> t -> Wire_runtime.connector_name_mapping list
+
+val apply_tool_quality :
+  observed_at:Clock.Mono.t -> Wire_runtime.tool_quality_snapshot -> t -> t
+val apply_gate_tool_events :
+  observed_at:Clock.Mono.t -> Wire_work.gate_tool_events_snapshot -> t -> t
+val apply_keeper_waiting_inventory :
+  observed_at:Clock.Mono.t ->
+  keeper:string ->
+  Wire_runtime.keeper_waiting_inventory ->
+  t ->
+  t
+val keeper_waiting_inventory_for :
+  keeper:string -> t -> Wire_runtime.keeper_waiting_inventory option
+val apply_mcp_tools_list :
+  observed_at:Clock.Mono.t -> Wire_runtime.mcp_tool_schema_entry list -> t -> t
+val mcp_tool_schema_for :
+  name:string -> t -> Wire_runtime.mcp_tool_schema_entry option
+val apply_mcp_call_result :
+  observed_at:Clock.Mono.t -> Wire_runtime.mcp_tool_call_result -> t -> t
+val next_mcp_rpc_id : t -> t * int

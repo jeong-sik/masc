@@ -55,6 +55,7 @@ type tools_subview =
   | Tools_usage_calls
   | Tools_catalog_tree
   | Tools_keeper_skills
+  | Tools_quality_gate
 
 type tools_window =
   | Tools_win_24h
@@ -103,6 +104,17 @@ type t = {
   tool_detail_series : (string * Wire_runtime.tool_series_summary) Observed.t;
   tools_dashboard : Wire_runtime.tools_dashboard_snapshot Observed.t;
   tools_catalog : Wire_runtime.tool_summary list Observed.t;
+  tool_quality : Wire_runtime.tool_quality_snapshot Observed.t;
+  tool_quality_absent : bool;
+  gate_tool_events : Wire_work.gate_tool_events_snapshot Observed.t;
+  gate_tool_events_absent : bool;
+  keeper_waiting_inventory :
+    (string * Wire_runtime.keeper_waiting_inventory) Observed.t;
+  keeper_waiting_inventory_absent : bool;
+  mcp_tools_list : Wire_runtime.mcp_tool_schema_entry list Observed.t;
+  mcp_call_result : Wire_runtime.mcp_tool_call_result Observed.t;
+  mcp_call_form : (int * Nav.inline_action_kind) option;
+  mcp_next_rpc_id : int;
   skills : Wire_runtime.skills_snapshot Observed.t;
   tools_subview : tools_subview;
   tools_window : tools_window;
@@ -149,11 +161,13 @@ let equal_tools_subview a b =
   match a, b with
   | Tools_usage_calls, Tools_usage_calls
   | Tools_catalog_tree, Tools_catalog_tree
-  | Tools_keeper_skills, Tools_keeper_skills ->
+  | Tools_keeper_skills, Tools_keeper_skills
+  | Tools_quality_gate, Tools_quality_gate ->
       true
-  | Tools_usage_calls, (Tools_catalog_tree | Tools_keeper_skills)
-  | Tools_catalog_tree, (Tools_usage_calls | Tools_keeper_skills)
-  | Tools_keeper_skills, (Tools_usage_calls | Tools_catalog_tree) ->
+  | Tools_usage_calls, (Tools_catalog_tree | Tools_keeper_skills | Tools_quality_gate)
+  | Tools_catalog_tree, (Tools_usage_calls | Tools_keeper_skills | Tools_quality_gate)
+  | Tools_keeper_skills, (Tools_usage_calls | Tools_catalog_tree | Tools_quality_gate)
+  | Tools_quality_gate, (Tools_usage_calls | Tools_catalog_tree | Tools_keeper_skills) ->
       false
 
 let equal_tools_window a b =
@@ -219,6 +233,16 @@ let empty =
     tool_detail_series = Observed.absent;
     tools_dashboard = Observed.unreported;
     tools_catalog = Observed.unreported;
+    tool_quality = Observed.unreported;
+    tool_quality_absent = false;
+    gate_tool_events = Observed.unreported;
+    gate_tool_events_absent = false;
+    keeper_waiting_inventory = Observed.absent;
+    keeper_waiting_inventory_absent = false;
+    mcp_tools_list = Observed.unreported;
+    mcp_call_result = Observed.absent;
+    mcp_call_form = None;
+    mcp_next_rpc_id = 1;
     skills = Observed.unreported;
     tools_subview = Tools_usage_calls;
     tools_window = Tools_win_24h;
@@ -277,7 +301,8 @@ let cycle_tools_subview t =
     match t.tools_subview with
     | Tools_usage_calls -> Tools_catalog_tree
     | Tools_catalog_tree -> Tools_keeper_skills
-    | Tools_keeper_skills -> Tools_usage_calls
+    | Tools_keeper_skills -> Tools_quality_gate
+    | Tools_quality_gate -> Tools_usage_calls
   in
   set_tools_subview next t
 
@@ -294,6 +319,10 @@ let cycle_tools_window t =
     tool_series = Observed.mark_stale t.tool_series;
     tool_series_summary = Observed.mark_stale t.tool_series_summary;
     tool_detail_series = Observed.mark_stale t.tool_detail_series;
+    tool_quality = Observed.mark_stale t.tool_quality;
+    tool_quality_absent = false;
+    gate_tool_events = Observed.mark_stale t.gate_tool_events;
+    gate_tool_events_absent = false;
     scroll_offset = 0;
   }
 
@@ -318,7 +347,11 @@ let step_tools_surface_keeper ~keeper_names ~delta t =
         t with
         tools_surface_keeper_idx;
         tools_dashboard = Observed.mark_stale t.tools_dashboard;
+        keeper_waiting_inventory =
+          Observed.mark_stale t.keeper_waiting_inventory;
+        keeper_waiting_inventory_absent = false;
         scroll_offset = 0;
+        detail_scroll_offset = 0;
       }
     in
     (next, name)
@@ -1874,6 +1907,47 @@ let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t 
             let scroll_offset =
               Store_scroll.clamp_scroll ~max_scroll (t.scroll_offset + delta)
             in
+            { t with scroll_offset }
+      | Tools_quality_gate ->
+          if pane_index = 1 then
+            let max_scroll =
+              match max_detail_scroll with
+              | Some ms -> max 0 ms
+              | None -> (
+                  let rej_n =
+                    match Observed.to_option t.gate_tool_events with
+                    | Some ev -> List.length ev.tool_rejections
+                    | None -> 0
+                  in
+                  let wait_n =
+                    match Observed.to_option t.keeper_waiting_inventory with
+                    | Some (_, inv) -> List.length inv.rows
+                    | None -> 0
+                  in
+                  let vis = max 1 (Option.value viewport_rows ~default:10) in
+                  max 0 (rej_n + wait_n + 10 - vis))
+            in
+            let detail_scroll_offset =
+              Store_scroll.clamp_scroll ~max_scroll
+                (t.detail_scroll_offset + delta)
+            in
+            { t with detail_scroll_offset }
+          else
+            let max_scroll =
+              match max_detail_scroll with
+              | Some ms -> max 0 ms
+              | None -> (
+                  match Observed.to_option t.tool_quality with
+                  | Some tq ->
+                      let vis = max 1 (Option.value viewport_rows ~default:10) in
+                      max 0
+                        (List.length tq.by_tool
+                         + List.length tq.failure_categories + 8 - vis)
+                  | None -> 0)
+            in
+            let scroll_offset =
+              Store_scroll.clamp_scroll ~max_scroll (t.scroll_offset + delta)
+            in
             { t with scroll_offset })
   | Nav.Runtime_connectors ->
       if pane_index = 1 then
@@ -2056,6 +2130,13 @@ let mark_stale_all t =
     tool_detail_series = Observed.mark_stale t.tool_detail_series;
     tools_dashboard = Observed.mark_stale t.tools_dashboard;
     tools_catalog = Observed.mark_stale t.tools_catalog;
+    tool_quality = Observed.mark_stale t.tool_quality;
+    tool_quality_absent = false;
+    gate_tool_events = Observed.mark_stale t.gate_tool_events;
+    gate_tool_events_absent = false;
+    keeper_waiting_inventory = Observed.mark_stale t.keeper_waiting_inventory;
+    keeper_waiting_inventory_absent = false;
+    mcp_tools_list = Observed.mark_stale t.mcp_tools_list;
     skills = Observed.mark_stale t.skills;
     connectors = Observed.mark_stale t.connectors;
     browser_lane = Observed.mark_stale t.browser_lane;
@@ -2183,3 +2264,48 @@ let connector_channel_names ~connector_id t =
   match String_map.find_opt connector_id t.connector_names with
   | Some xs -> xs
   | None -> []
+
+let apply_tool_quality ~observed_at tq t =
+  {
+    t with
+    tool_quality = Observed.value ~observed_at tq;
+    tool_quality_absent = false;
+  }
+
+let apply_gate_tool_events ~observed_at ev t =
+  {
+    t with
+    gate_tool_events = Observed.value ~observed_at ev;
+    gate_tool_events_absent = false;
+  }
+
+let apply_keeper_waiting_inventory ~observed_at ~keeper inv t =
+  {
+    t with
+    keeper_waiting_inventory = Observed.value ~observed_at (keeper, inv);
+    keeper_waiting_inventory_absent = false;
+  }
+
+let keeper_waiting_inventory_for ~keeper t =
+  match Observed.to_option t.keeper_waiting_inventory with
+  | Some (k, inv) when String.equal k keeper -> Some inv
+  | Some _ | None -> None
+
+let apply_mcp_tools_list ~observed_at tools t =
+  { t with mcp_tools_list = Observed.value ~observed_at tools }
+
+let mcp_tool_schema_for ~name t =
+  match Observed.to_option t.mcp_tools_list with
+  | None -> None
+  | Some xs ->
+      List.find_opt
+        (fun (e : Wire_runtime.mcp_tool_schema_entry) ->
+          String.equal e.name name)
+        xs
+
+let apply_mcp_call_result ~observed_at res t =
+  { t with mcp_call_result = Observed.value ~observed_at res }
+
+let next_mcp_rpc_id t =
+  let id = t.mcp_next_rpc_id in
+  ({ t with mcp_next_rpc_id = id + 1 }, id)

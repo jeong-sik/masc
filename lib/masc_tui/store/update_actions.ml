@@ -298,28 +298,31 @@ let find_actionable_ask (m : Model.t) =
     && Nav.equal_workspace m.nav.workspace Nav.Work
     && Nav.equal_work_tab m.work.active_tab Nav.Work_inbox
   in
-  if
-    on_work_inbox
-    && (not (Attention.is_empty m.attention)
-       || Option.is_some m.attention.selected_id)
-  then
-    match
-      Attention.current_filtered_item ~query:m.work.filter_query m.attention
-    with
-    | Some { payload = Attention.Payload_ask ask; id; _ }
-      when not (Attention.is_in_flight ~id m.attention) ->
-        Some ask
-    | Some
-        {
-          payload =
-            ( Attention.Payload_ask _
-            | Attention.Payload_tool_approval _
-            | Attention.Payload_gate _
-            | Attention.Payload_goal_confirmation _ );
-          _;
-        }
-    | None ->
-        None
+  if on_work_inbox then
+    if
+      Work_store.equal_inbox_subview m.work.inbox_subview
+        Work_store.Inbox_queue
+      && (not (Attention.is_empty m.attention)
+         || Option.is_some m.attention.selected_id)
+    then
+      match
+        Attention.current_filtered_item ~query:m.work.filter_query m.attention
+      with
+      | Some { payload = Attention.Payload_ask ask; id; _ }
+        when not (Attention.is_in_flight ~id m.attention) ->
+          Some ask
+      | Some
+          {
+            payload =
+              ( Attention.Payload_ask _
+              | Attention.Payload_tool_approval _
+              | Attention.Payload_gate _
+              | Attention.Payload_goal_confirmation _ );
+            _;
+          }
+      | None ->
+          None
+    else None
   else
     match Attention.current_triage_item m.attention with
     | Some { payload = Attention.Payload_ask ask; id; _ }
@@ -2171,6 +2174,218 @@ let rec execute_slash ~now (m : Model.t) cmd =
                               { keeper; request_id; interrupt_token };
                         };
                     ] ))))
+  | Slash.Gate gate_act -> (
+      let ws_opt =
+        Option.map
+          (fun (w : Wire_common.workspace_identity) : Wire_work.expected_workspace
+            -> { base_path = w.base_path; masc_root = w.masc_root })
+          m.server_identity.workspace
+      in
+      let parse_mode_or_err raw ~external_lane =
+        match Wire_work.gate_mode_of_string raw with
+        | None ->
+            ( Model.with_toast ~now ~level:Model.Toast_error
+                (Say.make
+                   ~ko:("잘못된 Gate 모드: " ^ raw ^ " (manual|auto_judge|always_allow)")
+                   ~en:("Invalid Gate mode: " ^ raw ^ " (manual|auto_judge|always_allow)"))
+                m
+            , [] )
+        | Some mode ->
+            let work =
+              { m.work with gate_snapshot = Observed.mark_stale m.work.gate_snapshot }
+            in
+            ( Model.with_toast ~now ~level:Model.Toast_info
+                (Say.make
+                   ~ko:(Printf.sprintf "%s Gate 모드 변경 중: %s"
+                          (if external_lane then "외부 서비스" else "워크스페이스")
+                          (Wire_work.gate_mode_to_string mode))
+                   ~en:(Printf.sprintf "Updating %s Gate mode: %s"
+                          (if external_lane then "external" else "workspace")
+                          (Wire_work.gate_mode_to_string mode)))
+                { m with work }
+            , [
+                Cmd.Http_post
+                  {
+                    epoch = m.epoch;
+                    req = Cmd.Post_gate_mode { external_lane; mode };
+                  };
+              ] )
+      in
+      match gate_act with
+      | Slash.Gate_mode_set raw -> parse_mode_or_err raw ~external_lane:false
+      | Slash.Gate_external_mode_set raw ->
+          parse_mode_or_err raw ~external_lane:true
+      | Slash.Gate_rule_delete id ->
+          let work =
+            { m.work with gate_snapshot = Observed.mark_stale m.work.gate_snapshot }
+          in
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make ~ko:("Always-Approve 규칙 삭제 중: " ^ id)
+                 ~en:("Deleting Always-Approve rule: " ^ id))
+              { m with work }
+          , [
+              Cmd.Http_post
+                { epoch = m.epoch; req = Cmd.Post_gate_rule_delete { id } };
+            ] )
+      | Slash.Gate_approve_always id ->
+          let work =
+            { m.work with gate_snapshot = Observed.mark_stale m.work.gate_snapshot }
+          in
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make ~ko:("게이트 승인 + Always-Approve 규칙 저장 중: " ^ id)
+                 ~en:("Approving & saving Always-Approve rule: " ^ id))
+              { m with work }
+          , [
+              Cmd.Http_post
+                {
+                  epoch = m.epoch;
+                  req =
+                    Cmd.Post_gate_resolution_policy
+                      {
+                        id;
+                        approved = true;
+                        reason = None;
+                        remember_rule = true;
+                        rule_expires_at = None;
+                        expected_workspace = ws_opt;
+                      };
+                };
+            ] )
+      | Slash.Gate_retry id -> (
+          match Work_store.retry_meta_for_id ~id m.work with
+          | None ->
+              ( Model.with_toast ~now ~level:Model.Toast_warning
+                  (Say.make
+                     ~ko:("재시도 메타데이터가 없는 승인 ID입니다 (먼저 수신함 새로고침): " ^ id)
+                     ~en:("No retry metadata for approval ID (refresh Inbox first): " ^ id))
+                  m
+              , [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_gate_pending } ] )
+          | Some meta ->
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make ~ko:("Auto-Judge 재시도 요청 중: " ^ id)
+                     ~en:("Retrying Auto-Judge for " ^ id))
+                  m
+              , [
+                  Cmd.Http_post
+                    {
+                      epoch = m.epoch;
+                      req =
+                        Cmd.Post_gate_retry { meta; expected_workspace = ws_opt };
+                    };
+                ] ))
+      | Slash.Gate_keeper_mode_set { keeper; mode = raw_mode } -> (
+          match Wire_work.keeper_tool_approval_mode_of_string raw_mode with
+          | None ->
+              ( Model.with_toast ~now ~level:Model.Toast_error
+                  (Say.make
+                     ~ko:("잘못된 키퍼 승인 모드: " ^ raw_mode ^ " (auto|yolo)")
+                     ~en:("Invalid keeper approval mode: " ^ raw_mode ^ " (auto|yolo)"))
+                  m
+              , [] )
+          | Some mode ->
+              let work =
+                {
+                  m.work with
+                  tool_approval_modes =
+                    Observed.mark_stale m.work.tool_approval_modes;
+                }
+              in
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make
+                     ~ko:(Printf.sprintf "키퍼 승인 모드 설정 중: %s=%s" keeper
+                            (Wire_work.keeper_tool_approval_mode_to_string mode))
+                     ~en:(Printf.sprintf "Setting keeper approval mode: %s=%s"
+                            keeper
+                            (Wire_work.keeper_tool_approval_mode_to_string mode)))
+                  { m with work }
+              , [
+                  Cmd.Http_post
+                    {
+                      epoch = m.epoch;
+                      req = Cmd.Post_keeper_tool_approval_mode { keeper; mode };
+                    };
+                ] ))
+      | Slash.Gate_ack_uncertain { keeper; consume_id } ->
+          let work =
+            {
+              m.work with
+              late_approval_attempts =
+                Observed.mark_stale m.work.late_approval_attempts;
+            }
+          in
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make ~ko:("불확실 늦은 승인 확인 요청 중: " ^ consume_id)
+                 ~en:("Acknowledging uncertain late approval: " ^ consume_id))
+              { m with work }
+          , [
+              Cmd.Http_post
+                {
+                  epoch = m.epoch;
+                  req = Cmd.Post_hitl_ack_uncertain { keeper; consume_id };
+                };
+            ] )
+      | Slash.Gate_restore_late ->
+          let work =
+            {
+              m.work with
+              late_approval_attempts =
+                Observed.mark_stale m.work.late_approval_attempts;
+            }
+          in
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make ~ko:"늦은 승인 저널 복원 요청 중…"
+                 ~en:"Restoring late-approval journal…")
+              { m with work }
+          , [
+              Cmd.Http_post
+                { epoch = m.epoch; req = Cmd.Post_hitl_late_approval_restore };
+            ] ))
+  | Slash.Exec { tool_name; args_json } -> (
+      let raw_args =
+        match args_json with
+        | Some s when not (String.equal (String.trim s) "") -> String.trim s
+        | Some _ | None -> "{}"
+      in
+      match Yojson.Safe.from_string raw_args with
+      | `Assoc _ as arguments ->
+          let runtime, rpc_id = Runtime_store.next_mcp_rpc_id m.runtime in
+          let runtime =
+            { runtime with mcp_call_result = Observed.loading ~since_ns:now }
+          in
+          let m_exec = { m with runtime } in
+          let dive = Nav.Dive_runtime (Nav.Tool_dive tool_name) in
+          let m_dive, dive_cmds =
+            if Option.equal Nav.equal_dive (Model.active_dive m_exec) (Some dive)
+            then (m_exec, [])
+            else Update_nav.push_dive m_exec dive
+          in
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make ~ko:("MCP 도구 실행 중: " ^ tool_name)
+                 ~en:("Executing MCP tool: " ^ tool_name))
+              m_dive
+          , dive_cmds
+            @ [
+                Cmd.Http_post
+                  {
+                    epoch = m.epoch;
+                    req =
+                      Cmd.Post_mcp_tools_call { rpc_id; tool_name; arguments };
+                  };
+              ] )
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+          ( Model.with_toast ~now ~level:Model.Toast_error
+              (Say.make
+                 ~ko:"/exec 인자는 JSON 객체({ ... })여야 합니다"
+                 ~en:"/exec arguments must be a JSON object ({ ... })")
+              m
+          , [] )
+      | exception Yojson.Json_error msg ->
+          ( Model.with_toast ~now ~level:Model.Toast_error
+              (Say.make
+                 ~ko:("/exec JSON 파싱 오류: " ^ msg)
+                 ~en:("/exec JSON parse error: " ^ msg))
+              m
+          , [] ))
   | Slash.Tools None ->
       ({ m with fleet = Fleet_store.cycle_tools_mode m.fleet }, [])
   | Slash.Tools (Some mode) ->
@@ -2550,6 +2765,16 @@ and confirm_palette ~now (m : Model.t) =
                   |> Drafts.set_focus true
                 in
                 ({ m_closed with drafts }, [])
+              else if Slash.equal_command_id spec.id Slash.Cmd_gate then
+                let drafts =
+                  m_closed.drafts |> Drafts.set_current_text "/gate "
+                  |> Drafts.set_focus true
+                in
+                ({ m_closed with drafts }, [])
+              else if Slash.equal_command_id spec.id Slash.Cmd_exec then
+                Update_nav.open_inline_modal m_closed
+                  (Nav.Tool_execute_form
+                     { tool_name = "masc_status"; args_json = "{}" })
               else
                 match Slash.parse spec.name with
                 | Ok parsed -> execute_slash ~now m_closed parsed
@@ -2680,6 +2905,7 @@ and execute_action ~now (m : Model.t) action =
                     | Nav.Keeper_control_confirm _
                     | Nav.Keeper_clear_form _
                     | Nav.Keeper_operator_note_form _
+                    | Nav.Tool_execute_form _
                     | Nav.Runtime_lane_create
                     | Nav.Runtime_lane_edit _
                     | Nav.Runtime_lane_delete _
@@ -2898,6 +3124,7 @@ and execute_action ~now (m : Model.t) action =
                | Nav.Keeper_control_confirm _
                | Nav.Keeper_clear_form _
                | Nav.Keeper_operator_note_form _
+               | Nav.Tool_execute_form _
                | Nav.Runtime_lane_create
                | Nav.Runtime_lane_edit _
                | Nav.Runtime_lane_delete _
@@ -3179,6 +3406,7 @@ and execute_action ~now (m : Model.t) action =
             | Nav.Keeper_control_confirm _
             | Nav.Keeper_clear_form _
             | Nav.Keeper_operator_note_form _
+            | Nav.Tool_execute_form _
             | Nav.Runtime_lane_create
             | Nav.Runtime_lane_edit _
             | Nav.Runtime_lane_delete _
@@ -4378,6 +4606,7 @@ and execute_action ~now (m : Model.t) action =
                 | Nav.Keeper_control_confirm _
                 | Nav.Keeper_clear_form _
                 | Nav.Keeper_operator_note_form _
+                | Nav.Tool_execute_form _
                 | Nav.Runtime_lane_create
                 | Nav.Runtime_lane_edit _
                 | Nav.Runtime_lane_delete _
@@ -4727,7 +4956,20 @@ and execute_action ~now (m : Model.t) action =
                               | None -> []
                             in
                             Runtime_store.selected_tools_surface_keeper
-                              ~keeper_names m.runtime)
+                              ~keeper_names m.runtime
+                        | Runtime_store.Tools_quality_gate -> (
+                            match Observed.to_option m.runtime.tool_quality with
+                            | Some tq ->
+                                let idx =
+                                  Update_nav.clamp_index
+                                    (List.length tq.by_tool)
+                                    m.runtime.selected_index
+                                in
+                                Option.map
+                                  (fun (r : Wire_runtime.tool_quality_tool_row) ->
+                                    r.name)
+                                  (List.nth_opt tq.by_tool idx)
+                            | None -> None))
                     | Nav.Runtime_connectors ->
                         Option.map
                           (fun (c : Wire_runtime.connector_row) -> c.connector_id)
@@ -5486,6 +5728,12 @@ and execute_action ~now (m : Model.t) action =
                         let work = Work_store.toggle_verification_view m.work in
                         let next = { m with work } in
                         (next, View_fetches.fetches_for_current_view next)
+                    | Nav.Work
+                      when Nav.equal_work_tab m.work.active_tab Nav.Work_inbox ->
+                        let work = Work_store.cycle_inbox_subview m.work in
+                        let nav = { m.nav with pane_index = 0 } in
+                        let next = { m with nav; work } in
+                        (next, View_fetches.fetches_for_current_view next)
                     | Nav.Knowledge
                       when Nav.equal_knowledge_tab m.knowledge.active_tab
                              Nav.Knowledge_memory ->
@@ -5717,7 +5965,9 @@ and execute_action ~now (m : Model.t) action =
                             m
                         , [] ))
                 | Nav.Work
-                  when Nav.equal_work_tab m.work.active_tab Nav.Work_inbox -> (
+                  when Nav.equal_work_tab m.work.active_tab Nav.Work_inbox
+                       && Work_store.equal_inbox_subview m.work.inbox_subview
+                            Work_store.Inbox_queue -> (
                     match
                       Attention.current_filtered_item ~query:m.work.filter_query
                         m.attention
@@ -5869,9 +6119,12 @@ and execute_action ~now (m : Model.t) action =
                 | Nav.Runtime
                   when Nav.equal_runtime_tab m.runtime.active_tab
                          Nav.Runtime_tools_usage
-                       && Runtime_store.equal_tools_subview
-                            m.runtime.tools_subview
-                            Runtime_store.Tools_keeper_skills ->
+                       && (Runtime_store.equal_tools_subview
+                             m.runtime.tools_subview
+                             Runtime_store.Tools_keeper_skills
+                           || Runtime_store.equal_tools_subview
+                                m.runtime.tools_subview
+                                Runtime_store.Tools_quality_gate) ->
                     let keeper_names =
                       match Observed.to_option m.fleet.keepers with
                       | Some ks ->
@@ -6456,10 +6709,34 @@ and execute_action ~now (m : Model.t) action =
                     | None -> (m, []))
                 | Nav.Work_harness ->
                     open_harness_overrule_for_selected ~verdict:"reject" ~now m
-                | Nav.Work_schedules
-                | Nav.Work_inbox
-                | Nav.Work_candle_scorecard ->
-                    (m, []))
+                | Nav.Work_inbox -> (
+                    match m.work.inbox_subview with
+                    | Work_store.Inbox_rules -> (
+                        match Work_store.selected_gate_rule m.work with
+                        | None -> (m, [])
+                        | Some rule ->
+                            let work =
+                              {
+                                m.work with
+                                gate_snapshot =
+                                  Observed.mark_stale m.work.gate_snapshot;
+                              }
+                            in
+                            ( Model.with_toast ~now ~level:Model.Toast_info
+                                (Say.make
+                                   ~ko:("Always-Approve 규칙 삭제 중: " ^ rule.id)
+                                   ~en:("Deleting Always-Approve rule: " ^ rule.id))
+                                { m with work }
+                            , [
+                                Cmd.Http_post
+                                  {
+                                    epoch = m.epoch;
+                                    req = Cmd.Post_gate_rule_delete { id = rule.id };
+                                  };
+                              ] ))
+                    | Work_store.Inbox_queue | Work_store.Inbox_history ->
+                        (m, []))
+                | Nav.Work_schedules | Nav.Work_candle_scorecard -> (m, []))
             | Nav.Keepers -> (
                 match Fleet_store.selected_keeper_summary m.fleet with
                 | Some k ->
@@ -6588,6 +6865,22 @@ and execute_action ~now (m : Model.t) action =
                 with
                 | Some g -> open_goal_upsert_modal m ~goal:g ()
                 | None -> (m, []))
+            | Some (Nav.Dive_runtime (Nav.Tool_dive tool_name)) ->
+                let skeleton =
+                  match
+                    Runtime_store.mcp_tool_schema_for ~name:tool_name m.runtime
+                  with
+                  | Some s when s.required_params <> [] ->
+                      let fields =
+                        List.map
+                          (fun p -> Printf.sprintf "%S: \"\"" p)
+                          s.required_params
+                      in
+                      "{" ^ String.concat ", " fields ^ "}"
+                  | Some _ | None -> "{}"
+                in
+                Update_nav.open_inline_modal m
+                  (Nav.Tool_execute_form { tool_name; args_json = skeleton })
             | Some
                 ( Nav.Dive_knowledge
                     ( Nav.Thread_dive _
@@ -6605,7 +6898,6 @@ and execute_action ~now (m : Model.t) action =
                       _;
                     }
                 | Nav.Dive_work (Nav.Task_dive _ | Nav.Verification_dive _)
-                | Nav.Dive_runtime (Nav.Tool_dive _)
                 | Nav.Dive_infra
                     ( Nav.Sandbox_dive _
                     | Nav.Incident_dive _

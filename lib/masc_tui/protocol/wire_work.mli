@@ -20,6 +20,16 @@ val keeper_ask_answer_path : string
 val keeper_tool_approvals_path : string
 val keeper_tool_approval_path : string
 val gate_path : string
+val gate_resolve_path : string
+val gate_mode_path : string
+val gate_external_mode_path : string
+val gate_rules_delete_path : string
+val gate_retry_path : string
+val gate_tool_events_path : ?window_minutes:int -> unit -> string
+val keeper_tool_approval_mode_path : string
+val hitl_late_approval_attempts_path : string
+val hitl_late_approval_restore_path : string
+val hitl_approval_recover_path : approval_id:string -> string
 val candle_ledger_path : ?limit:int -> unit -> string
 val harness_health_path : string
 val verification_evidence_path :
@@ -746,3 +756,156 @@ val decode_verification_specs :
   Yojson.Safe.t -> (verification_specs, string) result
 val decode_verification_tlc_results :
   Yojson.Safe.t -> (verification_tlc_results, string) result
+
+(** {1 Wave 4 Layer 2: HITL Gate Policy, Rules CRUD, Modes, Retry & Recovery} *)
+
+type gate_mode =
+  | Gate_manual
+  | Gate_auto_judge
+  | Gate_always_allow
+
+val gate_mode_of_string : string -> gate_mode option
+val gate_mode_to_string : gate_mode -> string
+val equal_gate_mode : gate_mode -> gate_mode -> bool
+
+type gate_mode_status = {
+  mode : gate_mode;
+  configured : bool;
+  state : string;
+  read_error : string option;
+}
+
+type judge_lane_status =
+  | Judge_lane_available of { lane_id : string; slots : string list }
+  | Judge_lane_unavailable of { lane_id : string; reason : string }
+
+type hitl_status = {
+  gate_mode : gate_mode_status;
+  external_gate_mode : gate_mode_status;
+  judge_lane : judge_lane_status;
+}
+
+type gate_retry_meta = {
+  id : string;
+  input_hash : string;
+  sequence : int;
+  exact_attempt : Yojson.Safe.t;
+  summary_attempt_disposition : Yojson.Safe.t;
+  summary_text : string option;
+  summary_judgment : string option;
+}
+
+type gate_rule = {
+  id : string;
+  keeper_name : string;
+  tool_name : string;
+  request_fingerprint : string;
+  created_at : float;
+  created_by : string option;
+  source_approval_id : string option;
+  expires_at : float option;
+}
+
+type gate_resolved_row = {
+  id : string;
+  event : string;
+  keeper : string;
+  tool : string;
+  decision : string;
+  decision_kind : string option;
+  decision_reason : string option;
+  decision_source : string option;
+  authorization_source : string option;
+  actor : string option;
+  ts : float;
+}
+
+type gate_snapshot = {
+  generated_at : string option;
+  pending : gate_pending list;
+  retry_meta : gate_retry_meta list;
+  rules : gate_rule list;
+  rules_error : string option;
+  recent_resolved : gate_resolved_row list;
+  recent_resolved_error : string option;
+  hitl : hitl_status option;
+}
+
+val decode_gate_snapshot : Yojson.Safe.t -> (gate_snapshot, string) result
+
+val encode_gate_resolution_with_policy :
+  id:string ->
+  approved:bool ->
+  reason:string option ->
+  remember_rule:bool ->
+  ?rule_expires_at:float ->
+  ?expected_workspace:expected_workspace ->
+  unit ->
+  Yojson.Safe.t
+
+val encode_gate_mode : mode:gate_mode -> Yojson.Safe.t
+val encode_gate_rule_delete : id:string -> Yojson.Safe.t
+
+val encode_gate_retry :
+  ?expected_workspace:expected_workspace -> gate_retry_meta -> Yojson.Safe.t
+
+type keeper_tool_approval_mode =
+  | Approval_auto
+  | Approval_yolo
+
+val keeper_tool_approval_mode_of_string :
+  string -> keeper_tool_approval_mode option
+val keeper_tool_approval_mode_to_string : keeper_tool_approval_mode -> string
+val equal_keeper_tool_approval_mode :
+  keeper_tool_approval_mode -> keeper_tool_approval_mode -> bool
+
+type tool_approval_modes_snapshot = {
+  overrides : (string * keeper_tool_approval_mode) list;
+  default_mode : keeper_tool_approval_mode;
+  restore_error : string option;
+}
+
+val decode_tool_approval_modes :
+  Yojson.Safe.t -> (tool_approval_modes_snapshot, string) result
+
+val encode_tool_approval_mode_set :
+  keeper:string -> mode:keeper_tool_approval_mode -> Yojson.Safe.t
+
+type late_approval_attempt = {
+  consume_id : string;
+  keeper_name : string;
+  tool_name : string;
+  args_fingerprint : string;
+  consumed_at : float;
+  outcome : string;
+}
+
+val decode_late_approval_attempts :
+  Yojson.Safe.t -> (late_approval_attempt list, string) result
+
+val encode_hitl_ack_uncertain :
+  keeper_name:string -> consume_id:string -> Yojson.Safe.t
+
+type gate_tool_rejection_row = {
+  tool : string;
+  reason : string;
+  count : int;
+}
+
+type gate_queue_latency_summary = {
+  depth : int;
+  p50_wait_sec : float option;
+  p95_wait_sec : float option;
+  oldest_pending_sec : float option;
+}
+
+type gate_tool_events_snapshot = {
+  generated_at : string;
+  window_minutes : int;
+  tool_rejections : gate_tool_rejection_row list;
+  queue_summary : gate_queue_latency_summary option;
+  queue_error : string option;
+}
+
+val decode_gate_tool_events :
+  Yojson.Safe.t -> (gate_tool_events_snapshot, string) result

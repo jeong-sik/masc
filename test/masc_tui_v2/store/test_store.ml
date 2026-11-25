@@ -241,7 +241,12 @@ let has_get_health cmds =
               | Cmd.Get_connector_names _
               | Cmd.Get_keeper_turn_flow _
               | Cmd.Get_keeper_checkpoints _
-              | Cmd.Get_keeper_operator_note _ );
+              | Cmd.Get_keeper_operator_note _
+              | Cmd.Get_tool_approval_modes
+              | Cmd.Get_late_approval_attempts
+              | Cmd.Get_tool_quality _
+              | Cmd.Get_gate_tool_events _
+              | Cmd.Get_keeper_waiting_inventory _ );
             _;
           }
       | Cmd.Batch _
@@ -1822,6 +1827,15 @@ let test_verifier_regressions () =
         | Cmd.Post_keeper_checkpoints _
         | Cmd.Post_keeper_operator_note _
         | Cmd.Post_keeper_run_next _
+        | Cmd.Post_gate_resolution_policy _
+        | Cmd.Post_gate_mode _
+        | Cmd.Post_gate_rule_delete _
+        | Cmd.Post_gate_retry _
+        | Cmd.Post_keeper_tool_approval_mode _
+        | Cmd.Post_hitl_ack_uncertain _
+        | Cmd.Post_hitl_late_approval_restore
+        | Cmd.Post_mcp_tools_list _
+        | Cmd.Post_mcp_tools_call _
         | Cmd.Post_task_create _
         | Cmd.Post_task_transition _
         | Cmd.Post_task_link_goal _
@@ -19449,5 +19463,419 @@ let () =
                 (Keeper_context_store.get_keeper ~keeper:"alpha"
                    m_denied.keeper_context)
                   .checkpoints_auth_denied);
+          Alcotest.test_case
+            "Wave 4 Layer 2: HITL Gate CRUD/modes/retry, Tools quality & MCP executor"
+            `Quick (fun () ->
+              let t0 = Clock.Mono.of_ns 1_000_000L in
+              let m0 = Model.initial ~cols:120 ~rows:40 () in
+              let ws : Wire_common.workspace_identity =
+                {
+                  instance_id = Some "inst-1";
+                  base_path = "/tmp/ws";
+                  masc_root = "/tmp/ws/.masc";
+                  workspace_sha256 = Some "abc";
+                }
+              in
+              let m_ws =
+                {
+                  m0 with
+                  server_identity = { m0.server_identity with workspace = Some ws };
+                }
+              in
+              let gate_snap : Wire_work.gate_snapshot =
+                {
+                  generated_at = Some "2026-11-24T09:00:00Z";
+                  pending =
+                    [
+                      {
+                        id = "appr-1";
+                        keeper = "alpha";
+                        tool_name = "Bash";
+                        input_preview = Some "{}";
+                        waiting_s = Some 4.0;
+                        phase = "blocked";
+                      };
+                    ];
+                  retry_meta =
+                    [
+                      {
+                        id = "appr-1";
+                        input_hash =
+                          "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+                        sequence = 2;
+                        exact_attempt = `Assoc [ ("state", `String "unbound") ];
+                        summary_attempt_disposition =
+                          `Assoc
+                            [
+                              ("code", `String "identity_unbound");
+                              ("operator_detail", `String "No prior attempt");
+                            ];
+                        summary_text = Some "Needs human";
+                        summary_judgment = Some "require_human";
+                      };
+                    ];
+                  rules =
+                    [
+                      {
+                        id = "rule-1";
+                        keeper_name = "alpha";
+                        tool_name = "Bash";
+                        request_fingerprint = "fp-1";
+                        created_at = 1795240000.0;
+                        created_by = Some "admin";
+                        source_approval_id = None;
+                        expires_at = None;
+                      };
+                    ];
+                  rules_error = None;
+                  recent_resolved = [];
+                  recent_resolved_error = None;
+                  hitl = None;
+                }
+              in
+              let m1, _ =
+                Update.step ~now:t0 m_ws
+                  (Msg.Http_reply
+                     { epoch = m_ws.epoch; reply = Msg.Reply_gate_snapshot (Ok gate_snap) })
+              in
+              Alcotest.(check int) "gate_snapshot populates rules" 1
+                (List.length (Work_store.gate_rules_list m1.work));
+              Alcotest.(check int) "gate_snapshot populates pending" 1
+                (List.length (Work_store.gate_pending_list m1.work));
+              (* /gate mode + del-rule + approve-always + retry + keeper-mode *)
+              let run_slash (m : Model.t) cmd_str =
+                match Slash.parse cmd_str with
+                | Ok p ->
+                    let m_next, cmds = Update_actions.execute_slash ~now:t0 m p in
+                    (m_next, Cmd.flatten cmds)
+                | Error _ -> Alcotest.fail ("slash parse failed: " ^ cmd_str)
+              in
+              let _, cmds_mode = run_slash m1 "/gate mode manual" in
+              Alcotest.(check bool) "/gate mode manual emits Post_gate_mode" true
+                (List.exists
+                   (function
+                     | Cmd.Http_post
+                         {
+                           req =
+                             Cmd.Post_gate_mode
+                               {
+                                 external_lane = false;
+                                 mode = Wire_work.Gate_manual;
+                               };
+                           _;
+                         } ->
+                         true
+                     | _ -> false)
+                   cmds_mode);
+              let _, cmds_del = run_slash m1 "/gate del-rule rule-1" in
+              Alcotest.(check bool) "/gate del-rule emits Post_gate_rule_delete"
+                true
+                (List.exists
+                   (function
+                     | Cmd.Http_post
+                         { req = Cmd.Post_gate_rule_delete { id = "rule-1" }; _ }
+                       ->
+                         true
+                     | _ -> false)
+                   cmds_del);
+              let _, cmds_always = run_slash m1 "/gate approve-always appr-1" in
+              Alcotest.(check bool)
+                "/gate approve-always emits Post_gate_resolution_policy remember_rule=true"
+                true
+                (List.exists
+                   (function
+                     | Cmd.Http_post
+                         {
+                           req =
+                             Cmd.Post_gate_resolution_policy
+                               { id = "appr-1"; approved = true; remember_rule = true; _ };
+                           _;
+                         } ->
+                         true
+                     | _ -> false)
+                   cmds_always);
+              let _, cmds_retry = run_slash m1 "/gate retry appr-1" in
+              Alcotest.(check bool) "/gate retry emits Post_gate_retry" true
+                (List.exists
+                   (function
+                     | Cmd.Http_post
+                         { req = Cmd.Post_gate_retry { meta; _ }; _ }
+                       when String.equal meta.id "appr-1" ->
+                         true
+                     | _ -> false)
+                   cmds_retry);
+              let _, cmds_km = run_slash m1 "/gate keeper-mode alpha yolo" in
+              Alcotest.(check bool)
+                "/gate keeper-mode emits Post_keeper_tool_approval_mode" true
+                (List.exists
+                   (function
+                     | Cmd.Http_post
+                         {
+                           req =
+                             Cmd.Post_keeper_tool_approval_mode
+                               {
+                                 keeper = "alpha";
+                                 mode = Wire_work.Approval_yolo;
+                               };
+                           _;
+                         } ->
+                         true
+                     | _ -> false)
+                   cmds_km);
+              (* /exec valid JSON -> Post_mcp_tools_call + Tool_dive; invalid JSON -> 0 POSTs *)
+              let m_exec, cmds_exec =
+                run_slash m1 "/exec masc_status {\"brief\":true}"
+              in
+              Alcotest.(check bool) "/exec emits Post_mcp_tools_call" true
+                (List.exists
+                   (function
+                     | Cmd.Http_post
+                         {
+                           req =
+                             Cmd.Post_mcp_tools_call
+                               { tool_name = "masc_status"; _ };
+                           _;
+                         } ->
+                         true
+                     | _ -> false)
+                   cmds_exec);
+              Alcotest.(check bool) "/exec opens Tool_dive" true
+                (Model.active_dive m_exec
+                 = Some (Nav.Dive_runtime (Nav.Tool_dive "masc_status")));
+              let rpc_id cmds =
+                match
+                  List.find_map
+                    (function
+                      | Cmd.Http_post
+                          { req = Cmd.Post_mcp_tools_call { rpc_id; _ }; _ } ->
+                          Some rpc_id
+                      | _ -> None)
+                    (Cmd.flatten cmds)
+                with
+                | Some id -> id
+                | None -> Alcotest.fail "expected MCP tool call"
+              in
+              let m_form, _ =
+                Update_nav.open_inline_modal m_exec
+                  (Nav.Tool_execute_form
+                     { tool_name = "masc_who"; args_json = "{}" })
+              in
+              let m_pending, form_cmds =
+                Update.step ~now:t0 m_form
+                  (Msg.Key_event (key Keymap.Input.Enter))
+              in
+              let m_stale, _ =
+                Update.step ~now:t0 m_pending
+                  (Msg.Http_reply
+                     {
+                       epoch = m_pending.epoch;
+                       reply =
+                         Msg.Reply_mcp_tools_call
+                           {
+                             rpc_id = rpc_id cmds_exec;
+                             tool_name = "masc_status";
+                             result = Error (Msg.Decode_error "older invocation");
+                           };
+                     })
+              in
+              Alcotest.(check bool)
+                "an older slash response leaves the pending form alone" true
+                (match m_stale.inline_modal with
+                 | Some { submitting = true; error = None; _ } -> true
+                 | Some _ | None -> false);
+              let tool_reply =
+                Wire_runtime.decode_mcp_tools_call_result ~tool_name:"masc_who"
+                  (`Assoc [ ("result", `Assoc [ ("isError", `Bool false) ]) ])
+                |> Result.map_error (fun s -> Msg.Decode_error s)
+              in
+              let m_done, _ =
+                Update.step ~now:t0 m_stale
+                  (Msg.Http_reply
+                     {
+                       epoch = m_stale.epoch;
+                       reply =
+                         Msg.Reply_mcp_tools_call
+                           {
+                             rpc_id = rpc_id form_cmds;
+                             tool_name = "masc_who";
+                             result = tool_reply;
+                           };
+                     })
+              in
+              Alcotest.(check bool) "owned reply closes the form" true
+                (Option.is_none m_done.inline_modal);
+              Alcotest.(check bool) "owned reply opens the tool with its return state"
+                true
+                (Model.active_dive m_done
+                 = Some (Nav.Dive_runtime (Nav.Tool_dive "masc_who"))
+                 && List.length m_done.nav.dive_stack
+                    = List.length m_done.nav.dive_return_stack);
+              let _, cmds_bad = run_slash m1 "/exec masc_status [1,2,3]" in
+              Alcotest.(check bool) "/exec rejects non-object JSON" false
+                (List.exists
+                   (function
+                     | Cmd.Http_post { req = Cmd.Post_mcp_tools_call _; _ } ->
+                         true
+                     | _ -> false)
+                   cmds_bad);
+              (* Reply_gate_mutation refreshes gate *)
+              let _, cmds_ref =
+                Update.step ~now:t0 m1
+                  (Msg.Http_reply
+                     {
+                       epoch = m1.epoch;
+                       reply =
+                         Msg.Reply_gate_mutation
+                           {
+                             label = Say.make ~ko:"ok" ~en:"ok";
+                             refresh_gate = true;
+                             refresh_modes = false;
+                             refresh_late = false;
+                             result = Ok ();
+                           };
+                     })
+              in
+              Alcotest.(check bool) "Reply_gate_mutation refreshes Get_gate_pending"
+                true
+                (List.exists
+                   (function
+                     | Cmd.Http_get { req = Cmd.Get_gate_pending; _ } -> true
+                     | _ -> false)
+                   cmds_ref);
+              (* Runtime_tools_usage Tools_quality_gate fetches quality + gate events + MCP tools/list *)
+              let m_rt =
+                {
+                  m1 with
+                  nav = { m1.nav with workspace = Nav.Runtime };
+                  runtime =
+                    m1.runtime
+                    |> Runtime_store.set_tab Nav.Runtime_tools_usage
+                    |> Runtime_store.set_tools_subview
+                         Runtime_store.Tools_quality_gate;
+                }
+              in
+              let vf = View_fetches.fetches_for_current_view m_rt in
+              Alcotest.(check bool) "Tools_quality_gate fetches tool-quality"
+                true
+                (List.exists
+                   (function
+                     | Cmd.Http_get { req = Cmd.Get_tool_quality _; _ } -> true
+                     | _ -> false)
+                   vf);
+              Alcotest.(check bool) "Tools_quality_gate fetches gate/tool-events"
+                true
+                (List.exists
+                   (function
+                     | Cmd.Http_get { req = Cmd.Get_gate_tool_events _; _ } ->
+                         true
+                     | _ -> false)
+                   vf);
+              Alcotest.(check bool) "Tools_quality_gate fetches MCP tools/list"
+                true
+                (List.exists
+                   (function
+                     | Cmd.Http_post { req = Cmd.Post_mcp_tools_list _; _ } ->
+                         true
+                     | _ -> false)
+                   vf);
+              (* 404 latch prevents refetch loop on tool-quality *)
+              let m_404, _ =
+                Update.step ~now:t0 m_rt
+                  (Msg.Http_reply
+                     {
+                       epoch = m_rt.epoch;
+                       reply =
+                         Msg.Reply_tool_quality
+                           (Error
+                              (Msg.Http_error
+                                 { status = 404; body = "not found"; api_error = None }));
+                     })
+              in
+              Alcotest.(check bool) "tool_quality_absent latched on 404" true
+                m_404.runtime.tool_quality_absent;
+              let vf_404 = View_fetches.fetches_for_current_view m_404 in
+              Alcotest.(check bool) "404 latched tool-quality not refetched"
+                false
+                (List.exists
+                   (function
+                     | Cmd.Http_get { req = Cmd.Get_tool_quality _; _ } -> true
+                     | _ -> false)
+                   vf_404);
+              (* 403 silent auth latch on late-approval-attempts (no incident storm) *)
+              let m_inbox =
+                {
+                  m1 with
+                  nav = { m1.nav with workspace = Nav.Work };
+                  work =
+                    m1.work
+                    |> Work_store.set_tab Nav.Work_inbox
+                    |> Work_store.set_inbox_subview Work_store.Inbox_rules;
+                }
+              in
+              let m_403, _ =
+                Update.step ~now:t0 m_inbox
+                  (Msg.Http_reply
+                     {
+                       epoch = m_inbox.epoch;
+                       reply =
+                         Msg.Reply_late_approval_attempts
+                           (Error
+                              (Msg.Http_error
+                                 { status = 403; body = "forbidden"; api_error = None }));
+                     })
+              in
+              Alcotest.(check bool) "late_approval_auth_denied latched silently"
+                true m_403.work.late_approval_auth_denied;
+              let vf_403 = View_fetches.fetches_for_current_view m_403 in
+              Alcotest.(check bool) "403 late-approval-attempts not refetched"
+                false
+                (List.exists
+                   (function
+                     | Cmd.Http_get { req = Cmd.Get_late_approval_attempts; _ }
+                       ->
+                         true
+                     | _ -> false)
+                   vf_403);
+              (* [x] Entity_reject_or_cancel deletes selected rule on Inbox_rules *)
+              let _, cmds_del_x =
+                Update_actions.execute_action ~now:t0 m_inbox
+                  Keymap.Entity_reject_or_cancel
+              in
+              Alcotest.(check bool) "x on Inbox_rules deletes selected gate rule"
+                true
+                (List.exists
+                   (function
+                     | Cmd.Http_post
+                         { req = Cmd.Post_gate_rule_delete { id = "rule-1" }; _ }
+                       ->
+                         true
+                     | _ -> false)
+                   cmds_del_x);
+              (* Reply_work_mutation for gate decision refreshes Get_gate_pending *)
+              let _, cmds_gate_ref =
+                Update.step ~now:t0 m1
+                  (Msg.Http_reply
+                     {
+                       epoch = m1.epoch;
+                       reply =
+                         Msg.Reply_work_mutation
+                           {
+                             label = Say.make ~ko:"승인" ~en:"Approved";
+                             attention_id = Some "gate:appr-1";
+                             decision_kind = Some Work_store.Decision_gate_approved;
+                             target_id = Some "appr-1";
+                             keeper = Some "alpha";
+                             result = Ok ();
+                           };
+                     })
+              in
+              Alcotest.(check bool)
+                "Reply_work_mutation gate decision refreshes Get_gate_pending"
+                true
+                (List.exists
+                   (function
+                     | Cmd.Http_get { req = Cmd.Get_gate_pending; _ } -> true
+                     | _ -> false)
+                   cmds_gate_ref));
         ] );
     ]

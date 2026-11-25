@@ -151,6 +151,7 @@ type inline_action_kind =
     }
   | Keeper_clear_form of string
   | Keeper_operator_note_form of string
+  | Tool_execute_form of { tool_name : string; args_json : string }
 
 type system_gate_kind =
   | Micro_viewport
@@ -624,6 +625,7 @@ let inline_action_tag = function
   | Keeper_control_confirm _ -> 28
   | Keeper_clear_form _ -> 29
   | Keeper_operator_note_form _ -> 30
+  | Tool_execute_form _ -> 31
 
 let equal_inline_action_kind a b =
   if not (Int.equal (inline_action_tag a) (inline_action_tag b)) then false
@@ -652,6 +654,9 @@ let equal_inline_action_kind a b =
     | Keeper_control_confirm x, Keeper_control_confirm y ->
         String.equal x.keeper y.keeper
         && equal_keeper_destructive_action x.action y.action
+    | Tool_execute_form x, Tool_execute_form y ->
+        String.equal x.tool_name y.tool_name
+        && String.equal x.args_json y.args_json
     | Board_comment x, Board_comment y ->
         String.equal x.post_id y.post_id
         && Option.equal String.equal x.parent_id y.parent_id
@@ -699,6 +704,7 @@ let equal_inline_action_kind a b =
       | Keeper_control_confirm _
       | Keeper_clear_form _
       | Keeper_operator_note_form _
+      | Tool_execute_form _
       | Runtime_lane_create
       | Runtime_lane_edit _
       | Runtime_lane_delete _

@@ -56,8 +56,14 @@ type verification_dive_tab =
   | Verif_tab_specs
   | Verif_tab_tlc
 
+type inbox_subview =
+  | Inbox_queue
+  | Inbox_rules
+  | Inbox_history
+
 type t = {
   active_tab : Nav.work_tab;
+  inbox_subview : inbox_subview;
   planning : Wire_work.planning_snapshot Observed.t;
   backlog_counts : Wire_work.task_backlog_counts option;
   verifications : Wire_work.verification_request list Observed.t;
@@ -75,11 +81,21 @@ type t = {
   asks : Wire_work.ask_row list Observed.t;
   tool_approvals : Wire_work.held_tool_approval list Observed.t;
   gate_pending : Wire_work.gate_pending list Observed.t;
+  gate_snapshot : Wire_work.gate_snapshot Observed.t;
+  tool_approval_modes : Wire_work.tool_approval_modes_snapshot Observed.t;
+  tool_approval_modes_absent : bool;
+  late_approval_attempts : Wire_work.late_approval_attempt list Observed.t;
+  late_approval_absent : bool;
+  late_approval_auth_denied : bool;
   recent_decisions_24h : decision_audit_entry list;
   candle_ledger : Wire_work.candle_ledger Observed.t;
   candle_fallback_404 : bool;
   selected_index : int;
   scroll_offset : int;
+  rule_selected_index : int;
+  rule_scroll_offset : int;
+  history_selected_index : int;
+  history_scroll_offset : int;
   verif_selected_index : int;
   verif_scroll_offset : int;
   detail_scroll_offset : int;
@@ -253,3 +269,28 @@ val apply_verification_specs :
   observed_at:Clock.Mono.t -> Wire_work.verification_specs -> t -> t
 val apply_verification_tlc_results :
   observed_at:Clock.Mono.t -> Wire_work.verification_tlc_results -> t -> t
+
+val equal_inbox_subview : inbox_subview -> inbox_subview -> bool
+val inbox_subview_rects : Rect.t -> Rect.t * Rect.t
+(** The Queue/Rules/History tab bar and the content viewport beneath it. *)
+
+val set_inbox_subview : inbox_subview -> t -> t
+val cycle_inbox_subview : t -> t
+
+val apply_gate_snapshot :
+  observed_at:Clock.Mono.t -> Wire_work.gate_snapshot -> t -> t
+val apply_tool_approval_modes :
+  observed_at:Clock.Mono.t -> Wire_work.tool_approval_modes_snapshot -> t -> t
+val apply_late_approval_attempts :
+  observed_at:Clock.Mono.t -> Wire_work.late_approval_attempt list -> t -> t
+
+val gate_rules_list : t -> Wire_work.gate_rule list
+val filtered_gate_rules : t -> Wire_work.gate_rule list
+val selected_gate_rule : t -> Wire_work.gate_rule option
+val gate_resolved_list : t -> Wire_work.gate_resolved_row list
+val filtered_gate_resolved : t -> Wire_work.gate_resolved_row list
+val late_approval_attempts_list : t -> Wire_work.late_approval_attempt list
+val retry_meta_for_id : id:string -> t -> Wire_work.gate_retry_meta option
+val hitl_status : t -> Wire_work.hitl_status option
+val tool_approval_mode_for :
+  keeper:string -> t -> Wire_work.keeper_tool_approval_mode

@@ -156,6 +156,7 @@ type inline_action_kind =
     }
   | Keeper_clear_form of string
   | Keeper_operator_note_form of string
+  | Tool_execute_form of { tool_name : string; args_json : string }
 
 type system_gate_kind =
   | Micro_viewport

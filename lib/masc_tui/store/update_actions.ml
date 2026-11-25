@@ -3790,24 +3790,34 @@ and execute_action ~now (m : Model.t) action =
         Model.is_too_small_viewport m.viewport
         || Model.equal_breakpoint m.breakpoint Model.Micro
       then (m, [])
-      else if not (Model.sidebar_visible m) then
-        let m_open =
-          { m with nav = { m.nav with sidebar_open = Some true } }
-        in
-        (Update_nav.enter_sidebar_focus m_open, [])
-      else if not (Model.sidebar_has_focus m) then
-        (Update_nav.enter_sidebar_focus m, [])
       else
-        ( {
-            m with
-            nav =
-              {
-                m.nav with
-                sidebar_open = Some false;
-                sidebar_focused = false;
-              };
-          }
-        , [] )
+        let leaving_focus = Model.keeper_dive_focused m in
+        let restored =
+          if leaving_focus then { m with nav = { m.nav with zoomed = false } }
+          else m
+        in
+        let next =
+          if not (Model.sidebar_visible restored) then
+            Update_nav.enter_sidebar_focus
+              { restored with nav = { restored.nav with sidebar_open = Some true } }
+          else if not (Model.sidebar_has_focus restored) then
+            Update_nav.enter_sidebar_focus restored
+          else
+            {
+              restored with
+              nav =
+                {
+                  restored.nav with
+                  sidebar_open = Some false;
+                  sidebar_focused = false;
+                };
+            }
+        in
+        if
+          leaving_focus
+          && not (Int.equal (Model.inner_body_width next) (Model.inner_body_width m))
+        then Update_nav.refresh_open_memory_diagram ~now next
+        else (next, [])
   | Keymap.Sub_tab dir ->
       if Model.sidebar_has_focus m then (m, [])
       else Update_nav.cycle_sub_tab m dir
@@ -6394,8 +6404,11 @@ and execute_action ~now (m : Model.t) action =
         else (m, [])
       else
         let zoomed = not m.nav.zoomed in
+        let in_dive = Option.is_some (Model.active_dive m) in
         let next =
-          if zoomed then
+          if in_dive then
+            { m with nav = { m.nav with zoomed } }
+          else if zoomed then
             {
               m with
               nav =
@@ -6421,7 +6434,11 @@ and execute_action ~now (m : Model.t) action =
             in
             { m0 with nav = { m0.nav with pane_index = restored } }
         in
-        if Option.is_some (Memory_diagram.active_diagram next) then
+        if
+          Option.is_some (Memory_diagram.active_diagram next)
+          && (not in_dive
+             || not (Int.equal (Model.inner_body_width next) (Model.inner_body_width m)))
+        then
           Update_nav.refresh_open_memory_diagram ~now next
         else (next, [])
   | Keymap.Cycle_memory_view ->

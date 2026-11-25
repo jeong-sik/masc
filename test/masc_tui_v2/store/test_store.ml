@@ -12048,6 +12048,30 @@ let test_ux_batch1_focus_resize_micro_zoom_and_cli_prefs () =
   Alcotest.(check string) "UX-08 Dive_keeper Tool Calls pane 1 Focus Pill"
     "2/2 alpha · Detail"
     (Say.resolve Say.Lang_en (Model.active_focus_label m_tc_dive));
+  let with_draft =
+    { m_tc_dive with
+      drafts =
+        m_tc_dive.drafts |> Drafts.set_active_keeper "alpha"
+        |> Drafts.insert_text "unfinished" }
+  in
+  let press m char = Update.step ~now:t0 m (Msg.Key_event (char_key char)) in
+  let focused, focus_cmds = press with_draft "z" in
+  Alcotest.(check bool) "Keeper detail enters focus without moving panes" true
+    (focused.nav.zoomed && Int.equal focused.nav.pane_index 1);
+  Alcotest.(check int) "Keeper focus does not send a request" 0
+    (List.length focus_cmds);
+  let restored, _ = press focused "z" in
+  Alcotest.(check bool) "Second z restores the detail and menu preference" true
+    ((not restored.nav.zoomed)
+     && Int.equal restored.nav.pane_index 1
+     && Option.equal Bool.equal restored.nav.sidebar_open with_draft.nav.sidebar_open
+     && Option.equal Nav.equal_dive (Model.active_dive restored)
+          (Model.active_dive with_draft));
+  let menu, _ = press focused "b" in
+  Alcotest.(check bool) "b exits Keeper focus and hands input to the menu" true
+    ((not menu.nav.zoomed) && Model.sidebar_has_focus menu);
+  Alcotest.(check string) "Focus and menu keep the unsent draft" "unfinished"
+    (Drafts.draft_for ~keeper:"alpha" menu.drafts).text;
   let m_k_ctx_p0 =
     {
       m_keepers_p1 with

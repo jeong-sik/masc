@@ -76,6 +76,11 @@ val live_chat_phase_badge :
 (** Width-1 geometric glyph, status tone, and bilingual label for an active or
     failed {!live_chat_phase}, or [None] when {!Phase_idle}. *)
 
+val show_active_turn_summary :
+  model:Model.t -> keeper:string -> Wire_fleet.active_turn -> bool
+(** Retain an inline summary when it adds information to the status strip,
+    records an attempt failure, or the operator has enabled chat details. *)
+
 val composer_pending_tx_of_phase : live_chat_phase -> Composer.pending_tx
 (** Project {!live_chat_phase} onto {!Composer.pending_tx}. *)
 

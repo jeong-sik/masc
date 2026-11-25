@@ -452,14 +452,10 @@ let render_top_rail grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
       else fresh_item
     in
     let raw_items =
-      [
-        attn_item;
-        Some fresh_item;
-        inc_badge;
-        help_badge;
-        ws_item;
-        clock_item;
-      ]
+      (if Model.keeper_dive_focused model then
+         [ attn_item; Some fresh_item; help_badge ]
+       else
+         [ attn_item; Some fresh_item; inc_badge; help_badge; ws_item; clock_item ])
       |> List.filter_map Fun.id
     in
     let measure_items xs =
@@ -606,6 +602,25 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
     let filter_active =
       model.nav.filter_focused || not (String.equal filter_q "")
     in
+    let keeper_focus_context =
+      (not (Model.is_keeper_config_active model))
+      && Option.is_none model.nav.overlay
+      &&
+      match Model.active_dive model with
+      | Some (Nav.Dive_keeper _) -> true
+      | Some
+          ( Nav.Dive_work _
+          | Nav.Dive_knowledge _
+          | Nav.Dive_runtime _
+          | Nav.Dive_infra _ )
+      | None -> false
+    in
+    let keeper_focus_hint =
+      keeper_focus_context
+      && not filter_active
+      && not (Drafts.is_focused model.drafts)
+      && not (Model.sidebar_has_focus model)
+    in
     let right_text, right_style =
       if model.nav.filter_focused then
         ( Printf.sprintf " / %s_ " filter_q,
@@ -613,6 +628,16 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
       else if not (String.equal filter_q "") then
         ( Printf.sprintf " / %s " filter_q,
           Typography.accent ~bg:pill_bg ~bold:true theme )
+      else if keeper_focus_context then
+        let hint =
+          if keeper_focus_hint then
+            Say.resolve lang
+              (if Model.keeper_dive_focused model then
+                 Say.make ~ko:"[z] 집중 해제" ~en:"[z] Exit focus"
+               else Say.make ~ko:"[z] 집중 보기" ~en:"[z] Focus view")
+          else ""
+        in
+        (hint, whisper_style)
       else if Option.is_some (Model.active_dive model) then
         let txt =
           if Model.is_keeper_config_active model then
@@ -701,7 +726,7 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
     let rw = Grapheme.display_width fitted_right in
     let rx = Int.max (rect.x + left_pad) (Rect.right rect - right_pad - rw) in
     let tabs_clip =
-      if filter_active then
+      if filter_active || keeper_focus_hint then
         Rect.make ~x:rect.x ~y:rect.y ~w:(Int.max 0 (rx - rect.x - 1)) ~h:1
       else rect
     in
@@ -1028,8 +1053,7 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
                  Nav.all_infra_tabs
              in
              draw_tab_list tabs));
-    (* Always anchor active / query_ pill on right; hide idle hint only if tight *)
-    if filter_active || rx > !x + 2 then
+    if filter_active || keeper_focus_hint || rx > !x + 2 then
       ignore
         (Cell_grid.put_text ~clip:rect grid ~x:rx ~y:rect.y ~style:right_style
            fitted_right)

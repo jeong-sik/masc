@@ -866,7 +866,7 @@ export function WikiTab(props: WorkspaceViewProps) {
       hasSelection=${editing || pageDetail !== null || pageLoading || pageError !== null}
       selectionKey=${creatingNew ? '__new__' : selectedSlug}
       masterLabel="Wiki 인덱스"
-      detailLabel="Wiki 본문 및 CAS 편집기"
+      detailLabel="Wiki 본문"
       emptyDetail=${html`<div class="kn-detail-pad"><span class="dtable-absent">Wiki 페이지를 선택하거나 "+ 새 페이지"를 눌러 문서를 작성하세요.</span></div>`}
     />
   `

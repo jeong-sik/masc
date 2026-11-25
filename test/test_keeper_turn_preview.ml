@@ -676,13 +676,15 @@ let test_a_tool_is_open_from_its_call_to_its_return () =
   Preview.note_stream ~writer ~now:4. (block_stop 1);
   Preview.note_stream ~writer ~now:5. Agent_core.Types.MessageStop;
   Alcotest.(check string) "the model's call is open and is not running yet"
-    "tool called: Execute" (Preview.status_text (current ()));
+    "tool called: Execute · last observed tool: Execute"
+    (Preview.status_text (current ()));
   Alcotest.(check bool) "the call outlives the response that made it" true
     ((current ()).open_activities = call Preview.Tool_requested 3.);
   started ~tool_use_id:(Some "toolu_a") writer 6. "Execute";
   Alcotest.(check bool) "the before-tool hook is where it runs" true
     ((current ()).open_activities = call Preview.Tool_executing 6.);
-  Alcotest.(check string) "and the status says so" "tool running: Execute"
+  Alcotest.(check string) "and the status says so"
+    "tool running: Execute · last observed tool: Execute"
     (Preview.status_text (current ()));
   started ~tool_use_id:(Some "toolu_a") writer 6.5 "Execute";
   Alcotest.(check bool) "hearing the hook twice moves nothing" true

@@ -609,7 +609,14 @@ let note_stream ~writer ~now event =
       | Agent_core.Types.ContentBlockStart { index; tool_name = Some name; _ } ->
           Tool_indexes.add index name entry.tools, Some name
       | ContentBlockStop { index } ->
-          Tool_indexes.remove index entry.tools, preview.last_tool
+          (* The call the model finished making is the latest one the turn
+             made, so it is the last observed tool. *)
+          let stopped =
+            match Tool_indexes.find_opt index entry.tools with
+            | Some name -> Some name
+            | None -> preview.last_tool
+          in
+          Tool_indexes.remove index entry.tools, stopped
       | Agent_core.Types.ContentBlockStart _
       | Agent_core.Types.MessageStop | Agent_core.Types.InlineContentReplay _ | Agent_core.Types.ResponsesOutputItems _ | Agent_core.Types.Ping
       | Agent_core.Types.Connected | Agent_core.Types.MessageStart _
@@ -623,7 +630,8 @@ let note_stream ~writer ~now event =
     in
     let open_activities = open_of_event ~now preview event in
     let open_changed = not (open_activities == preview.open_activities) in
-    if (not open_changed) && (not text_changed) then None
+    let tool_changed = not (Option.equal String.equal last_tool preview.last_tool) in
+    if (not open_changed) && (not text_changed) && (not tool_changed) then None
     else
       Some
         { released_entry with tools; preparations = [];

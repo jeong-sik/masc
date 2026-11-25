@@ -780,6 +780,28 @@ let test_a_late_return_ends_only_its_own_call () =
     ((current ()).open_activities = [ call (Some "new") "Execute" 4.; call None "Search" 7. ])
 ;;
 
+let test_starting_an_anonymous_stream_tool_records_its_hook_id () =
+  let module Preview = Keeper_turn_preview in
+  let keeper_name = "open-tools-adopt-id" in
+  let writer = Some (reset keeper_name ~now:1.) in
+  let tool_ids () =
+    (Option.get (Preview.current ~keeper_name)).open_activities
+    |> List.filter_map (function
+         | Preview.Tool_open tool -> tool.tool_use_id
+         | Preview.Response_open _ -> None)
+  in
+  Preview.note_request ~writer ~now:2.;
+  Preview.note_stream ~writer ~now:3. (tool_block 1 None "Search");
+  started ~tool_use_id:(Some "a") writer 4. "Search";
+  started ~tool_use_id:(Some "a") writer 5. "Search";
+  started ~tool_use_id:(Some "b") writer 6. "Search";
+  Alcotest.(check (list string)) "same name keeps the two distinct hook ids"
+    ["a"; "b"] (tool_ids ());
+  finished ~tool_use_id:(Some "b") writer 7. "Search";
+  Alcotest.(check (list string)) "the identified return leaves the other call open"
+    ["a"] (tool_ids ())
+;;
+
 let test_a_new_attempt_a_failure_and_a_new_request_end_open_work () =
   let module Preview = Keeper_turn_preview in
   let keeper_name = "open-work-ends" in
@@ -846,6 +868,8 @@ let test_a_tool_the_stream_never_showed_opens_at_its_hook () =
        ; Preview.Tool_open
            { tool_use_id = Some "late"; tool_name = "Execute"
            ; stage = Preview.Tool_executing; started_at = 3.; since = 3. } ]);
+  Alcotest.(check bool) "the tool takes precedence over an open response" true
+    ((current ()).activity = Preview.Tool_observed);
   finished ~tool_use_id:(Some "late") writer 4. "Execute";
   Alcotest.(check bool) "and its return is the last" true
     ((current ()).open_activities = [ response ])
@@ -895,6 +919,8 @@ let () =
             test_parallel_tools_stay_open_one_by_one
         ; Alcotest.test_case "a late return ends only its own call" `Quick
             test_a_late_return_ends_only_its_own_call
+        ; Alcotest.test_case "an anonymous stream tool adopts the hook id" `Quick
+            test_starting_an_anonymous_stream_tool_records_its_hook_id
         ; Alcotest.test_case "a new attempt, a failure and a new request end open work"
             `Quick test_a_new_attempt_a_failure_and_a_new_request_end_open_work
         ; Alcotest.test_case "the wire carries the open work" `Quick

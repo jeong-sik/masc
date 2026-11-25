@@ -89,9 +89,13 @@ let activity_of (preview : t) =
   match preview.preparation with
   | Some _ -> Preparing
   | None -> (
-      match preview.open_activities with
-      | [] -> if preview.attempt_failed then Failed else Awaiting_response
-      | first :: _ -> activity_of_head first)
+      if List.exists (function Tool_open _ -> true | Response_open _ -> false)
+           preview.open_activities
+      then Tool_observed
+      else
+        match preview.open_activities with
+        | [] -> if preview.attempt_failed then Failed else Awaiting_response
+        | first :: _ -> activity_of_head first)
 
 let open_response ~channel ~now = { channel; started_at = now; since = now }
 
@@ -159,28 +163,58 @@ let tool_requested ~now ~tool_use_id ~tool_name work =
 
 (* The before-tool hook runs once the gates before it said yes, so this is
    where execution starts. Hearing it twice for one call changes nothing. *)
-let tool_executing ~now ~tool_use_id ~tool_name work =
-  match open_tool_of ~tool_use_id ~tool_name work with
-  | Some _ ->
-      change_first
-        (function
-          | Tool_open ({ stage = Tool_requested; _ } as current)
-            when same_tool ~tool_use_id ~tool_name current ->
-              Some (Tool_open { current with stage = Tool_executing; since = now })
-          | Tool_open { stage = Tool_requested; _ }
-          | Tool_open { stage = Tool_executing; _ }
-          | Response_open _ -> None)
-        work
-  | None ->
-      (* The stream never showed this call, so the hook is the first word of it. *)
-      work @ [ Tool_open { tool_use_id; tool_name; stage = Tool_executing; started_at = now; since = now } ]
+let has_tool_id id (tool : open_tool) =
+  Option.equal String.equal (Some id) tool.tool_use_id
 
-(* The after-tool hook ran, with a result or with a failure: the call is over.
-   The first open call that fits is the oldest one. *)
+let tool_executing ~now ~tool_use_id ~tool_name work =
+  let already_started id =
+    List.exists
+      (function
+        | Tool_open ({ stage = Tool_executing; _ } as tool) -> has_tool_id id tool
+        | Tool_open { stage = Tool_requested; _ } | Response_open _ -> false)
+      work
+  in
+  let promote accepts =
+    change_first
+      (function
+        | Tool_open ({ stage = Tool_requested; _ } as current) when accepts current ->
+            let tool_use_id =
+              match tool_use_id with Some _ -> tool_use_id | None -> current.tool_use_id
+            in
+            Some (Tool_open { current with tool_use_id; stage = Tool_executing; since = now })
+        | Tool_open { stage = Tool_requested; _ }
+        | Tool_open { stage = Tool_executing; _ }
+        | Response_open _ -> None)
+      work
+  in
+  let by_name (tool : open_tool) = String.equal tool_name tool.tool_name in
+  match tool_use_id with
+  | Some id when already_started id -> work
+  | Some _ | None ->
+      let promoted =
+        match tool_use_id with
+        | None -> promote by_name
+        | Some id ->
+            let exact = promote (has_tool_id id) in
+            if exact != work then exact
+            else promote (fun tool -> Option.is_none tool.tool_use_id && by_name tool)
+      in
+      if promoted != work then promoted
+      else
+        (* The stream never showed this call, so the hook is the first word of it. *)
+        work @ [ Tool_open { tool_use_id; tool_name; stage = Tool_executing; started_at = now; since = now } ]
+
+(* Match an identified return before trying the oldest anonymous call. *)
 let tool_ended ~tool_use_id ~tool_name work =
-  remove_first
-    (function Tool_open tool -> same_tool ~tool_use_id ~tool_name tool | Response_open _ -> false)
-    work
+  let end_first accepts =
+    remove_first (function Tool_open tool -> accepts tool | Response_open _ -> false) work
+  in
+  match tool_use_id with
+  | None -> end_first (same_tool ~tool_use_id ~tool_name)
+  | Some id ->
+      let exact = end_first (has_tool_id id) in
+      if exact != work then exact
+      else end_first (same_tool ~tool_use_id ~tool_name)
 
 (* What one provider event changes in the open work. *)
 let open_of_event ~now (preview : t) (event : Agent_core.Types.sse_event) =

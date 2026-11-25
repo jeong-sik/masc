@@ -22604,6 +22604,7 @@ let test_keeper_lifecycle_controls_and_guards () =
     "matching R2 ok=true closes modal cleanly" true
     (Option.is_none m_match_ok.inline_modal
     && Option.is_none m_match_ok.nav.overlay)
+
 let test_hidden_music_command () =
   let rejected raw =
     match Slash.parse raw with
@@ -22640,17 +22641,29 @@ let test_hidden_music_command () =
   (match requested "/music midi /tmp/a.mid" with
    | [ Cmd.Open_terminal_program (Cmd.Music_import_midi "/tmp/a.mid") ] -> ()
    | _ -> Alcotest.fail "/music midi PATH requests the import");
-  let popup text =
-    let typed : Model.t =
-      { m with drafts = m.drafts |> Drafts.set_focus true |> Drafts.set_current_text text }
-    in
-    Update_nav.resolve_composer_popup typed
+  let focused : Model.t = { m with drafts = Drafts.set_focus true m.drafts } in
+  let typed text =
+    String.fold_left
+      (fun acc ch ->
+        fst (Update.step ~now:t0 acc (Msg.Key_event (char_key (String.make 1 ch)))))
+      focused text
   in
-  (match popup "/music" with
+  (match Update_nav.resolve_composer_popup (typed "/music") with
    | Update_nav.Composer_popup_none -> ()
    | Update_nav.Composer_popup_slash _ | Update_nav.Composer_popup_mention _ ->
        Alcotest.fail "a typed /music must not open a popup of listed commands");
-  match popup "/mod" with
+  let _, enter_cmds =
+    Update.step ~now:t0 (typed "/music") (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool)
+    "Enter on a typed /music requests the workbench instead of a listed command"
+    true
+    (List.exists
+       (function
+         | Cmd.Open_terminal_program Cmd.Music_workbench -> true
+         | _ -> false)
+       (Cmd.flatten enter_cmds));
+  match Update_nav.resolve_composer_popup (typed "/mod") with
   | Update_nav.Composer_popup_slash _ -> ()
   | Update_nav.Composer_popup_none | Update_nav.Composer_popup_mention _ ->
       Alcotest.fail "a partial listed command keeps its popup"

@@ -123,7 +123,6 @@ let is_viewing_keeper_chat ~keeper (m : Model.t) =
 let active_memory_keeper (m : Model.t) =
   match Model.active_dive m with
   | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory }) -> Some name
-  | Some (Nav.Dive_knowledge (Nav.Memory_diff_dive { keeper; _ })) -> keeper
   | Some
       ( Nav.Dive_keeper
           {
@@ -139,8 +138,7 @@ let active_memory_keeper (m : Model.t) =
             _;
           }
       | Nav.Dive_work _
-      | Nav.Dive_knowledge
-          (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
+      | Nav.Dive_knowledge _
       | Nav.Dive_runtime _
       | Nav.Dive_infra _ ) ->
       None
@@ -165,9 +163,7 @@ let active_memory_keeper (m : Model.t) =
 
 let is_viewing_memory (m : Model.t) =
   match Model.active_dive m with
-  | Some (Nav.Dive_keeper { tab = Nav.Keeper_memory; _ })
-  | Some (Nav.Dive_knowledge (Nav.Memory_diff_dive _)) ->
-      true
+  | Some (Nav.Dive_keeper { tab = Nav.Keeper_memory; _ }) -> true
   | Some
       ( Nav.Dive_keeper
           {

@@ -65,7 +65,6 @@ type knowledge_dive_target =
   | Thread_dive of string
   | Wiki_dive of string
   | Artifact_dive of string
-  | Memory_diff_dive of { keeper : string option; from_rev : int; to_rev : int }
 
 type runtime_dive_target =
   | Tool_dive of string
@@ -73,7 +72,6 @@ type runtime_dive_target =
   | Exact_run_dive of string
 
 type infra_dive_target =
-  | Incident_dive of int
   | Runtime_trace_dive of string
 
 type dive =

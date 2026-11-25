@@ -213,6 +213,7 @@ type t = {
   keeper_memory_journal_auth_denied : String_set.t;
   memory_subview_scroll : int;
   memory_diff_window : memory_diff_window;
+  prev_window_before_pin : memory_diff_window option;
   memory_diff_keeper : string option;
   memory_view_mode : memory_view_mode;
   memory_facts_sort : memory_facts_sort;
@@ -421,24 +422,10 @@ val move_memory_facts :
   keeper:string -> ?viewport_rows:int -> delta:int -> t -> t
 val move_memory_diff_cursor : delta:int -> t -> t
 val toggle_memory_flow_mode : t -> t
-
-val scope_memory_diff_dive :
-  keeper:string option -> from_rev:int -> to_rev:int -> t -> t
-(** [t] reading [keeper]'s diff over [Window_revs { from_rev; to_rev }], the
-    slot a [Memory_diff_dive] fetches into. The result's [memory_diff_keeper]
-    and [memory_diff_window] belong to the dive, not to the Memory tab: keep
-    the original [t] as the model's knowledge. *)
-
-val move_memory_diff_dive_cursor :
-  keeper:string option ->
-  from_rev:int ->
-  to_rev:int ->
-  delta:int ->
-  t ->
-  t
-(** {!move_memory_diff_cursor} over the dive's own diff. Only
-    [selected_diff_index] of [t] changes; the Memory tab's window and keeper
-    stay as they were. *)
+val is_memory_diff_pinned : t -> bool
+val pin_memory_diff_revs :
+  ?keeper:string option -> from_rev:int -> to_rev:int -> t -> t
+val unpin_memory_diff_revs : t -> t
 
 val apply_board :
   observed_at:Clock.Mono.t -> Wire_knowledge.board_feed -> t -> t
@@ -583,7 +570,7 @@ val selected_memory_diff_item : t -> memory_diff_item option
 val memory_diff_entry_count : t -> int
 val memory_diff_line_count : t -> int
 (** Exact flattened visual line count of {!filtered_memory_diff_items} for
-    line-level scrolling in [3 Knowledge > Memory] and [Memory_diff_dive]. *)
+    line-level scrolling in [3 Knowledge > Memory]. *)
 
 val keeper_memory_diff_line_count : name:string -> t -> int
 (** Exact rendered line count of [name]'s diff over [memory_diff_window] in

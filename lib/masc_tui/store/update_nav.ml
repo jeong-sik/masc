@@ -827,6 +827,7 @@ let switch_workspace (m : Model.t) ws =
   let config = Config_store.cancel_edit_field m.config in
   let knowledge =
     m.knowledge
+    |> Knowledge_store.unpin_memory_diff_revs
     |> Knowledge_store.close_memory_reading
     |> Knowledge_store.close_memory_diagram
     |> Knowledge_store.clear_pending_wiki_edit
@@ -1148,15 +1149,6 @@ let push_dive (m : Model.t) dive =
         base
         |> Knowledge_store.close_memory_diagram
         |> Knowledge_store.set_memory_diff_keeper (Some name)
-    | Nav.Dive_knowledge (Nav.Memory_diff_dive { keeper; _ }) ->
-        if Option.equal String.equal base.memory_diff_keeper keeper then
-          base
-          |> Knowledge_store.close_memory_reading
-          |> Knowledge_store.close_memory_diagram
-        else
-          base
-          |> Knowledge_store.close_memory_diagram
-          |> Knowledge_store.set_memory_diff_keeper keeper
     | Nav.Dive_knowledge (Nav.Thread_dive post_id) ->
         base
         |> Knowledge_store.reset_thread_view
@@ -1323,7 +1315,9 @@ let navigate_menu_target ?(keep_sidebar_focus = false) (m : Model.t)
   | Nav.Menu_incidents ->
       if keep_sidebar_focus then (m, [])
       else
-        let incidents = Incidents.mark_all_read m.incidents in
+        let incidents =
+          m.incidents |> Incidents.reset_view |> Incidents.mark_all_read
+        in
         open_overlay { m with incidents } Nav.Incidents
   | Nav.Menu_queue_context ->
       if keep_sidebar_focus then (m, [])
@@ -1548,6 +1542,7 @@ let cycle_sub_tab (m : Model.t) dir =
                 |> Knowledge_store.set_memory_diff_keeper (Some name)
             | Nav.Keeper_work_candle ->
                 m.knowledge
+                |> Knowledge_store.unpin_memory_diff_revs
                 |> Knowledge_store.close_memory_reading
                 |> Knowledge_store.close_memory_diagram
             | Nav.Keeper_chat
@@ -1558,6 +1553,7 @@ let cycle_sub_tab (m : Model.t) dir =
             | Nav.Keeper_logs
             | Nav.Keeper_identity ->
                 m.knowledge
+                |> Knowledge_store.unpin_memory_diff_revs
                 |> Knowledge_store.close_memory_reading
                 |> Knowledge_store.close_memory_diagram
                 |> close_board_recovery
@@ -1629,8 +1625,14 @@ let cycle_sub_tab (m : Model.t) dir =
                     dive_scroll_offset = 0;
                   }
                 in
+                let knowledge =
+                  if Nav.equal_keeper_tab fleet.keeper_dive_tab Nav.Keeper_memory
+                  then m.knowledge
+                  else Knowledge_store.unpin_memory_diff_revs m.knowledge
+                in
                 let next =
-                  { m with nav; drafts; fleet } |> sync_config_for_keeper_view
+                  { m with nav; drafts; fleet; knowledge }
+                  |> sync_config_for_keeper_view
                 in
                 (next, View_fetches.fetches_for_current_view next)
               else
@@ -1710,8 +1712,7 @@ let current_filter_query (m : Model.t) =
       | Some
           ( Nav.Dive_keeper _
           | Nav.Dive_work _
-          | Nav.Dive_knowledge
-              (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Memory_diff_dive _)
+          | Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Wiki_dive _)
           | Nav.Dive_runtime _
           | Nav.Dive_infra _ )
       | None ->
@@ -1785,8 +1786,7 @@ let set_active_filter_query q (m : Model.t) =
         | Some
             ( Nav.Dive_keeper _
             | Nav.Dive_work _
-            | Nav.Dive_knowledge
-                (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Memory_diff_dive _)
+            | Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Wiki_dive _)
             | Nav.Dive_runtime _
             | Nav.Dive_infra _ )
         | None ->
@@ -3354,6 +3354,11 @@ let keeper_identity_entries (m : Model.t) ~name : keeper_identity_entry list =
 type enter_plan =
   | Enter_noop
   | Enter_toggle_zoom
+  | Enter_pin_memory_diff of {
+      keeper : string option;
+      from_rev : int;
+      to_rev : int;
+    }
   | Enter_expand_company of string
   | Enter_keeper_action of Cmd.t list
   | Enter_dispatch of Cmd.t list
@@ -3485,6 +3490,7 @@ let keeper_enter_action ~name ~tab (m : Model.t) =
       , [] )
   | Enter_noop
   | Enter_toggle_zoom
+  | Enter_pin_memory_diff _
   | Enter_expand_company _
   | Enter_dispatch _
   | Enter_open_dos_screen
@@ -3511,16 +3517,6 @@ let enter_plan (m : Model.t) : enter_plan =
       memory_reading_plan ~keeper_opt:(Some name)
         ~otherwise:(fun () -> Enter_noop)
         m
-  | Some
-      (Nav.Dive_knowledge (Nav.Memory_diff_dive { keeper; from_rev; to_rev })) ->
-      memory_reading_plan ~force_diff:true ~keeper_opt:keeper
-        ~otherwise:(fun () -> Enter_noop)
-        {
-          m with
-          knowledge =
-            Knowledge_store.scope_memory_diff_dive ~keeper ~from_rev ~to_rev
-              m.knowledge;
-        }
   | Some
       (Nav.Dive_keeper
          {
@@ -3724,14 +3720,12 @@ let enter_plan (m : Model.t) : enter_plan =
                 in
                 match rev_bounds with
                 | Some (from_rev, to_rev) ->
-                    Enter_push
-                      (Nav.Dive_knowledge
-                         (Nav.Memory_diff_dive
-                            {
-                              keeper = m.knowledge.memory_diff_keeper;
-                              from_rev;
-                              to_rev;
-                            }))
+                    Enter_pin_memory_diff
+                      {
+                        keeper = m.knowledge.memory_diff_keeper;
+                        from_rev;
+                        to_rev;
+                      }
                 | None -> Enter_fetch_memory_diff
               in
               if
@@ -3964,6 +3958,28 @@ let dive_selected (m : Model.t) =
           }
         in
         (next, View_fetches.fetches_for_current_view next)
+  | Enter_pin_memory_diff { keeper; from_rev; to_rev } ->
+      let knowledge =
+        Knowledge_store.pin_memory_diff_revs ~keeper ~from_rev ~to_rev
+          m.knowledge
+      in
+      let m_pinned = { m with knowledge } in
+      let next =
+        if (not m_pinned.nav.zoomed) && Model.can_zoom_current_view m_pinned
+        then
+          {
+            m_pinned with
+            nav =
+              {
+                m_pinned.nav with
+                zoomed = true;
+                pre_zoom_pane_index = Some m_pinned.nav.pane_index;
+                pane_index = 0;
+              };
+          }
+        else m_pinned
+      in
+      (next, View_fetches.fetches_for_current_view next)
   | Enter_expand_company company ->
       ( {
           m with
@@ -4081,6 +4097,7 @@ let enter_hint (m : Model.t) =
     | Enter_open_dos_screen -> Enter_hint_dos_screen
     | Enter_open_memory_reading _ -> Enter_hint_memory_reading
     | Enter_toggle_zoom
+    | Enter_pin_memory_diff _
     | Enter_expand_company _
     | Enter_keeper_action _ | Enter_dispatch _
     | Enter_push _ | Enter_attention _ | Enter_toggle_unreported_accounts
@@ -6117,23 +6134,38 @@ let parse_json_or_wrap_store ~key raw =
     try Yojson.Safe.from_string trimmed
     with Yojson.Json_error _ -> `Assoc [ (key, `String raw) ]
 
+let strip_trailing_colon_store s =
+  let t = String.trim s in
+  let len = String.length t in
+  if len > 0 && Char.equal t.[len - 1] ':' then
+    String.trim (String.sub t 0 (len - 1))
+  else t
+
+let max_embedded_json_bytes_store = 262_144
+let max_embedded_json_attempts_store = 8
+
 let extract_embedded_json_store s =
-  let len = String.length s in
-  let rec find_delim i =
-    if i >= len then None
-    else
-      match s.[i] with
-      | '{' | '[' -> Some i
-      | _ -> find_delim (i + 1)
-  in
-  match find_delim 0 with
-  | None -> None
-  | Some idx -> (
-      let prefix = String.trim (String.sub s 0 idx) in
-      let rest = String.sub s idx (len - idx) in
-      match Yojson.Safe.from_string rest with
-      | json -> Some (prefix, json)
-      | exception Yojson.Json_error _ -> None)
+  let trimmed = String.trim s in
+  let len = String.length trimmed in
+  if len < 2 || len > max_embedded_json_bytes_store then None
+  else
+    let rec try_from attempts i =
+      if i >= len || attempts >= max_embedded_json_attempts_store then None
+      else if Char.equal trimmed.[i] '{' || Char.equal trimmed.[i] '[' then
+        let candidate = String.sub trimmed i (len - i) in
+        match Yojson.Safe.from_string candidate with
+        | (`Assoc _ | `List _) as json ->
+            let prefix =
+              if i = 0 then ""
+              else strip_trailing_colon_store (String.sub trimmed 0 i)
+            in
+            Some (prefix, json)
+        | `Bool _ | `Float _ | `Int _ | `Intlit _ | `Null | `String _ ->
+            try_from (attempts + 1) (i + 1)
+        | exception Yojson.Json_error _ -> try_from (attempts + 1) (i + 1)
+      else try_from attempts (i + 1)
+    in
+    try_from 0 0
 
 let ops_pad_content (r : Rect.t) =
   let pad_x = if r.w >= 60 then 2 else 1 in
@@ -9252,24 +9284,6 @@ let memory_reading_max_scroll (m : Model.t) =
             let ch_after = max 0 (ch - subbar_h) in
             let footer_h = if ch_after >= 7 then 2 else 0 in
             (keeper_padded_w cw, max 0 (ch_after - footer_h))
-        | Some (Nav.Dive_knowledge (Nav.Memory_diff_dive _)) ->
-            let body_after_bar =
-              match
-                Masc_tui_ui.Layout.split_v br
-                  [ Masc_tui_ui.Layout.Fixed 1; Masc_tui_ui.Layout.Flex 1 ]
-              with
-              | [ _; b ] -> b
-              | _ -> br
-            in
-            let right_rect =
-              if m.nav.zoomed then body_after_bar
-              else
-                snd
-                  (Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
-                     ~left_ratio:0.48 ~top_ratio:0.48 bp body_after_bar)
-            in
-            let content = right_rect |> ui_card_inner |> ui_pad_content ~bp in
-            (content.w, content.h)
         | Some
             ( Nav.Dive_keeper
                 {
@@ -9285,8 +9299,7 @@ let memory_reading_max_scroll (m : Model.t) =
                   _;
                 }
             | Nav.Dive_work _
-            | Nav.Dive_knowledge
-                (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
+            | Nav.Dive_knowledge _
             | Nav.Dive_runtime _
             | Nav.Dive_infra _ ) ->
             (0, 0)
@@ -9375,17 +9388,6 @@ let dive_max_scroll (m : Model.t) active =
   match active with
   | Nav.Dive_keeper { name; tab } ->
       keeper_tab_max_scroll ~embedded:false m ~name ~tab
-  | Nav.Dive_knowledge (Nav.Memory_diff_dive { keeper; from_rev; to_rev }) ->
-      let k_scoped =
-        {
-          (Knowledge_store.scope_memory_diff_dive ~keeper ~from_rev ~to_rev
-             m.knowledge)
-          with
-          memory_subview = Knowledge_store.Mem_diff_flow;
-          memory_view_mode = Knowledge_store.View_diff;
-        }
-      in
-      memory_right_pane_max_scroll ~bp ~rect:br k_scoped
   | Nav.Dive_knowledge (Nav.Thread_dive post_id) -> (
       let k = m.knowledge in
       let content = Knowledge_store.thread_reading_rect ~bp k br in
@@ -9872,65 +9874,6 @@ let dive_max_scroll (m : Model.t) active =
                 (json_of_verification_store v)
           in
           max main_max json_max)
-  | Nav.Dive_infra (Nav.Incident_dive incident_id) -> (
-      match Incidents.find_by_id incident_id m.incidents with
-      | None -> 0
-      | Some inc ->
-          let inner = ui_card_inner br in
-          if m.infra.show_raw_json then
-            let detail_lines =
-              match extract_embedded_json_store inc.detail with
-              | Some (_, json) ->
-                  List.length
-                    (Masc_tui_ui.Json_tree.flatten ~max_depth:5
-                       ~redact_secrets:true json)
-              | None -> 1
-            in
-            max 0 (6 + detail_lines - max 1 inner.h)
-          else
-            let band_h = if inner.h >= 6 then 2 else 1 in
-            let content =
-              Rect.make ~x:inner.x ~y:(inner.y + band_h) ~w:inner.w
-                ~h:(max 0 (inner.h - band_h))
-              |> ui_pad_content ~bp
-            in
-            let detail_h = max 1 (content.h / 2) in
-            let detail_max =
-              match extract_embedded_json_store inc.detail with
-              | Some (prefix, parsed_json) ->
-                  let used = if String.equal prefix "" then 0 else 1 in
-                  let tree_h = max 1 (detail_h - used) in
-                  let lines =
-                    Masc_tui_ui.Json_tree.flatten ~max_depth:4
-                      ~redact_secrets:true parsed_json
-                  in
-                  max 0 (List.length lines - tree_h)
-              | None ->
-                  markdown_max_scroll ~theme ~width:content.w ~height:detail_h
-                    inc.detail
-            in
-            let filter_opt =
-              match inc.source with
-              | Health.Source_keeper k -> Some k
-              | Health.Source_sandbox s -> Some s
-              | Health.Source_runtime _
-              | Health.Source_client_http
-              | Health.Source_stream ->
-                  None
-            in
-            let filtered_logs =
-              match filter_opt with
-              | None -> m.infra.logs
-              | Some kp ->
-                  List.filter
-                    (fun (e : Wire_infra.system_log_entry) ->
-                      Option.equal String.equal e.keeper (Some kp)
-                      || String.equal e.module_name kp)
-                    m.infra.logs
-            in
-            let log_h = max 1 (content.h - detail_h - 1) in
-            let log_max = max 0 (List.length filtered_logs - log_h) in
-            detail_max + log_max)
   | Nav.Dive_infra (Nav.Runtime_trace_dive keeper) -> (
       match Infra_store.runtime_trace_for ~keeper m.infra with
       | None -> 0
@@ -10078,6 +10021,19 @@ let capture_workspace_return_frame (m : Model.t) : Model.workspace_return_frame 
     pre_zoom_pane_index = m.nav.pre_zoom_pane_index;
     zoomed = m.nav.zoomed;
     overlay;
+    memory_diff_pin =
+      (match m.knowledge.memory_diff_window with
+       | Knowledge_store.Window_revs { from_rev; to_rev } ->
+           Some
+             {
+               Model.pin_keeper = m.knowledge.memory_diff_keeper;
+               from_rev;
+               to_rev;
+             }
+       | Knowledge_store.Window_24h
+       | Knowledge_store.Window_7d
+       | Knowledge_store.Window_30d ->
+           None);
   }
 
 let jump_to_workspace ?(pane_index = 0) ?(zoomed = false) ?return_from
@@ -10112,6 +10068,7 @@ let jump_to_workspace ?(pane_index = 0) ?(zoomed = false) ?return_from
   let config = Config_store.cancel_edit_field m.config in
   let knowledge =
     m.knowledge
+    |> Knowledge_store.unpin_memory_diff_revs
     |> Knowledge_store.close_memory_reading
     |> Knowledge_store.close_memory_diagram
     |> Knowledge_store.clear_pending_wiki_edit
@@ -10201,14 +10158,30 @@ let pop_workspace_return (m : Model.t) =
           m.knowledge
         else Knowledge_store.set_tab frame.knowledge_tab m.knowledge
       in
-      let knowledge =
+      let knowledge1 =
         knowledge0
+        |> Knowledge_store.unpin_memory_diff_revs
         |> Knowledge_store.close_memory_reading
         |> Knowledge_store.clear_armed_vote
         |> Knowledge_store.clear_pending_artifact_revision
         |> Knowledge_store.close_memory_diagram
         |> Knowledge_store.clear_pending_wiki_edit
         |> close_board_recovery
+      in
+      (* The jump unpinned the revision range; the frame carries it back so
+         [Esc] returns to the same comparison, not the pre-pin window. *)
+      let knowledge =
+        match frame.memory_diff_pin with
+        | None -> knowledge1
+        | Some { Model.pin_keeper; from_rev; to_rev } ->
+            let keeper =
+              if Option.equal String.equal knowledge1.memory_diff_keeper
+                   pin_keeper
+              then None
+              else Some pin_keeper
+            in
+            Knowledge_store.pin_memory_diff_revs ?keeper ~from_rev ~to_rev
+              knowledge1
       in
       let runtime0 =
         if Nav.equal_runtime_tab m.runtime.active_tab frame.runtime_tab then
@@ -10455,7 +10428,121 @@ let scroll_goal_dive_measure ~delta ~goal_id (m : Model.t) =
   in
   { m with nav = { m.nav with dive_scroll_offset } }
 
-let open_memory_diff_dive (m : Model.t) =
+let incidents_detail_max_scroll (m : Model.t) =
+  match Incidents.selected_entry m.incidents with
+  | None -> 0
+  | Some inc ->
+      let overlay_w = max 0 m.viewport.cols in
+      let overlay_h = max 0 (m.viewport.rows - 2) in
+      let drawer_w =
+        if overlay_w >= 110 then min 94 (overlay_w * 2 / 3)
+        else max 0 (overlay_w - 2)
+      in
+      let drawer_h = max 0 (overlay_h - 2) in
+      let inner_w = if drawer_w >= 2 && drawer_h >= 2 then drawer_w - 2 else 0 in
+      let inner_h = if drawer_w >= 2 && drawer_h >= 2 then drawer_h - 2 else 0 in
+      let content_r =
+        Rect.make ~x:0 ~y:0 ~w:inner_w ~h:(max 0 (inner_h - 1))
+      in
+      let pad_x = if inner_w >= 56 then 2 else 1 in
+      let theme = Theme.of_preset m.theme_preset in
+      if m.incidents.zoomed then
+        let d_pad = Masc_tui_ui.Card.pad_inner ~pad_x content_r in
+        if Rect.is_empty d_pad then 0
+        else if m.incidents.show_raw_json then
+          let detail_lines =
+            match extract_embedded_json_store inc.detail with
+            | Some (prefix, json) ->
+                let pref = if String.equal prefix "" then 0 else 1 in
+                pref
+                + List.length
+                    (Masc_tui_ui.Json_tree.flatten ~max_depth:4
+                       ~redact_secrets:true json)
+            | None -> 1
+          in
+          max 0 (6 + detail_lines - max 1 d_pad.h)
+        else
+          let payload_w = max 0 d_pad.w in
+          let payload_h = max 0 (d_pad.h - 1) in
+          if payload_w <= 0 || payload_h <= 0 then 0
+          else
+            let detail_h = max 0 (payload_h / 2) in
+            let detail_max =
+              if detail_h <= 0 then 0
+              else
+                match extract_embedded_json_store inc.detail with
+                | Some (prefix, parsed_json) ->
+                    let used =
+                      if (not (String.equal prefix "")) && detail_h >= 2 then 1
+                      else 0
+                    in
+                    let tree_h = max 1 (detail_h - used) in
+                    let lines =
+                      Masc_tui_ui.Json_tree.flatten ~max_depth:4
+                        ~redact_secrets:true parsed_json
+                    in
+                    max 0 (List.length lines - tree_h)
+                | None ->
+                    markdown_max_scroll ~theme ~width:payload_w ~height:detail_h
+                      inc.detail
+            in
+            let filter_opt =
+              match inc.source with
+              | Health.Source_keeper k -> Some k
+              | Health.Source_sandbox s -> Some s
+              | Health.Source_runtime _
+              | Health.Source_client_http
+              | Health.Source_stream ->
+                  None
+            in
+            let filtered_logs =
+              match filter_opt with
+              | None -> m.infra.logs
+              | Some kp ->
+                  List.filter
+                    (fun (e : Wire_infra.system_log_entry) ->
+                      Option.equal String.equal e.keeper (Some kp)
+                      || String.equal e.module_name kp)
+                    m.infra.logs
+            in
+            let log_h = max 0 (payload_h - detail_h - 1) in
+            let log_max =
+              if log_h > 0 then max 0 (List.length filtered_logs - log_h)
+              else 0
+            in
+            detail_max + log_max
+      else if content_r.h < 10 then 0
+      else
+        let detail_r =
+          match
+            Masc_tui_ui.Layout.split_v ~gap:1 content_r
+              [ Masc_tui_ui.Layout.Ratio 0.45; Masc_tui_ui.Layout.Flex 1 ]
+          with
+          | [ _; d ] -> d
+          | _ -> Rect.empty
+        in
+        let d_pad = Masc_tui_ui.Card.pad_inner ~pad_x detail_r in
+        let payload_w = max 0 d_pad.w in
+        let payload_h = max 0 (d_pad.h - 1) in
+        if payload_w <= 0 || payload_h <= 0 then 0
+        else
+          match extract_embedded_json_store inc.detail with
+          | Some (prefix, json) ->
+              let tree_h =
+                if (not (String.equal prefix "")) && payload_h >= 2 then
+                  payload_h - 1
+                else payload_h
+              in
+              let lines =
+                Masc_tui_ui.Json_tree.flatten ~max_depth:4 ~redact_secrets:true
+                  json
+              in
+              max 0 (List.length lines - tree_h)
+          | None ->
+              markdown_max_scroll ~theme ~width:payload_w ~height:payload_h
+                inc.detail
+
+let pin_memory_diff_range (m : Model.t) =
   let keeper_opt =
     match Model.active_dive m with
     | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory }) -> Some name
@@ -10515,9 +10602,49 @@ let open_memory_diff_dive (m : Model.t) =
   in
   match rev_bounds with
   | Some (from_rev, to_rev) ->
-      push_dive m
-        (Nav.Dive_knowledge
-           (Nav.Memory_diff_dive { keeper = keeper_opt; from_rev; to_rev }))
+      let knowledge =
+        if
+          Option.is_none (Model.active_dive m)
+          && Nav.equal_workspace m.nav.workspace Nav.Knowledge
+        then
+          Knowledge_store.pin_memory_diff_revs ~keeper:keeper_opt ~from_rev
+            ~to_rev m.knowledge
+        else
+          Knowledge_store.pin_memory_diff_revs ~from_rev ~to_rev m.knowledge
+      in
+      let m_pinned =
+        {
+          m with
+          nav =
+            (if Option.is_some (Model.active_dive m) then
+               { m.nav with dive_scroll_offset = 0 }
+             else m.nav);
+          knowledge;
+        }
+      in
+      let next =
+        if
+          Option.is_none (Model.active_dive m_pinned)
+          && (Nav.equal_workspace m_pinned.nav.workspace Nav.Knowledge
+             || (Nav.equal_workspace m_pinned.nav.workspace Nav.Keepers
+                && Nav.equal_keeper_tab m_pinned.fleet.keeper_dive_tab
+                     Nav.Keeper_memory))
+          && (not m_pinned.nav.zoomed)
+          && Model.can_zoom_current_view m_pinned
+        then
+          {
+            m_pinned with
+            nav =
+              {
+                m_pinned.nav with
+                zoomed = true;
+                pre_zoom_pane_index = Some m_pinned.nav.pane_index;
+                pane_index = 0;
+              };
+          }
+        else m_pinned
+      in
+      (next, View_fetches.fetches_for_current_view next)
   | None ->
       ( m
       , [
@@ -11015,13 +11142,23 @@ let apply_move (m : Model.t) dir =
         let nav = { m.nav with overlay = Some (Nav.Settings config.active_tab) } in
         ({ m with nav; config }, [])
     | Some Nav.Incidents ->
-        let delta = move_delta dir in
-        ( {
-            m with
-            incidents =
-              Incidents.move_selection ~viewport_rows ~delta m.incidents;
-          }
-        , [] )
+        if m.incidents.zoomed then
+          let max_scroll = incidents_detail_max_scroll m in
+          ( {
+              m with
+              incidents =
+                Incidents.move_detail_scroll ~max_scroll
+                  ~delta:(scroll_delta dir) m.incidents;
+            }
+          , [] )
+        else
+          let delta = move_delta dir in
+          ( {
+              m with
+              incidents =
+                Incidents.move_selection ~viewport_rows ~delta m.incidents;
+            }
+          , [] )
     | Some (Nav.Inline_action _) -> (
         match m.inline_modal with
         | None -> (m, [])
@@ -11819,38 +11956,6 @@ let apply_move (m : Model.t) dir =
                             knowledge;
                           }
                         , [] ))
-            | Some
-                (Nav.Dive_knowledge
-                   (Nav.Memory_diff_dive { keeper; from_rev; to_rev }) as active)
-              ->
-                let has_matching_reading =
-                  match m.knowledge.memory_reading with
-                  | Some entry ->
-                      Knowledge_store.memory_reading_matches_scope
-                        ~keeper_opt:keeper entry
-                  | None -> false
-                in
-                if has_matching_reading then
-                  let sd = scroll_delta dir in
-                  let max_scroll = memory_reading_max_scroll m in
-                  let knowledge =
-                    Knowledge_store.scroll_memory_reading ~max_scroll ~delta:sd
-                      m.knowledge
-                  in
-                  ({ m with knowledge }, [])
-                else
-                  let delta = scroll_delta dir in
-                  let max_scroll = dive_max_scroll m active in
-                  let dive_scroll_offset =
-                    Store_scroll.clamp_scroll ~max_scroll
-                      (m.nav.dive_scroll_offset + delta)
-                  in
-                  let knowledge =
-                    Knowledge_store.move_memory_diff_dive_cursor ~keeper
-                      ~from_rev ~to_rev ~delta:(move_delta dir) m.knowledge
-                  in
-                  ( { m with nav = { m.nav with dive_scroll_offset }; knowledge }
-                  , [] )
             | Some (Nav.Dive_work target as active) -> (
                 let sd = scroll_delta dir in
                 if
@@ -12231,8 +12336,13 @@ let apply_move (m : Model.t) dir =
                           { m.nav with dive_scroll_offset = 0 }
                         else m.nav
                       in
+                      let knowledge =
+                        if selection_changed then
+                          Knowledge_store.unpin_memory_diff_revs m.knowledge
+                        else m.knowledge
+                      in
                       let next =
-                        { m with nav; fleet; drafts }
+                        { m with nav; fleet; drafts; knowledge }
                         |> sync_config_for_keeper_view
                       in
                       let cmds =

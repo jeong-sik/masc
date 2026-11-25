@@ -2285,6 +2285,100 @@ let incident_status_label ~lang = function
   | Health.Dismissed ->
       (Glyph.Live_idle, Say.resolve lang (Say.make ~ko:"숨김" ~en:"DISMISSED"))
 
+let incident_source_raw = function
+  | Health.Source_keeper k -> ("keeper", Some k)
+  | Health.Source_runtime r -> ("runtime:" ^ r, None)
+  | Health.Source_sandbox s -> ("sandbox:" ^ s, Some s)
+  | Health.Source_client_http -> ("client_http", None)
+  | Health.Source_stream -> ("sse_stream", None)
+
+let incident_log_level_badge = function
+  | Wire_infra.Log_error -> ("ERR", Theme.Status_critical)
+  | Wire_infra.Log_warn -> ("WRN", Theme.Status_attention)
+  | Wire_infra.Log_info -> ("INF", Theme.Status_ok)
+  | Wire_infra.Log_debug -> ("DBG", Theme.Status_historical)
+
+let incident_log_hhmmss ~tz_offset_sec (ts : string) =
+  match Wire_common.parse_rfc3339_unix ts with
+  | Ok unix_ts ->
+      let shifted =
+        Int64.add (Int64.of_float (Float.floor unix_ts))
+          (Int64.of_int tz_offset_sec)
+      in
+      let rem = Int64.rem shifted 86400L in
+      let day_s =
+        Int64.to_int
+          (if Int64.compare rem 0L < 0 then Int64.add rem 86400L else rem)
+      in
+      let h = day_s / 3600 in
+      let m = (day_s mod 3600) / 60 in
+      let s = day_s mod 60 in
+      Printf.sprintf "%02d:%02d:%02d" h m s
+  | Error _ ->
+      if String.length ts >= 19 && Char.equal ts.[10] 'T' then
+        String.sub ts 11 8
+      else Grapheme.truncate_to_width ~max_width:8 ts
+
+let draw_incident_related_logs ~tz_offset_sec ~scroll ~grid ~(rect : Rect.t)
+    ~(theme : Theme.t) ~bg ~lang ~filter_opt
+    (logs : Wire_infra.system_log_entry list) =
+  if Rect.is_empty rect then ()
+  else
+    let matching =
+      match filter_opt with
+      | None -> logs
+      | Some needle ->
+          List.filter
+            (fun (e : Wire_infra.system_log_entry) ->
+              Option.equal String.equal e.keeper (Some needle)
+              || String.equal e.module_name needle)
+            logs
+    in
+    if matching = [] then
+      ignore
+        (Cell_grid.put_text ~clip:rect grid ~x:rect.x ~y:rect.y
+           ~style:(Typography.whisper ~bg theme)
+           (Say.resolve lang
+              (Say.make ~ko:"일치하는 최근 로그 없음" ~en:"No matching tail logs")))
+    else
+      let skip =
+        Int.min
+          (Int.max 0 (List.length matching - rect.h))
+          (Int.max 0 scroll)
+      in
+      let y = ref rect.y and bot = Rect.bottom rect in
+      List.iter
+        (fun (e : Wire_infra.system_log_entry) ->
+          if !y < bot then begin
+            let lvl_s, tone = incident_log_level_badge e.level in
+            let ts = incident_log_hhmmss ~tz_offset_sec e.ts in
+            let row_r = Rect.make ~x:rect.x ~y:!y ~w:rect.w ~h:1 in
+            let tw =
+              Cell_grid.put_text ~clip:row_r grid ~x:rect.x ~y:!y
+                ~style:(Typography.whisper ~bg theme)
+                ts
+            in
+            let lw =
+              Cell_grid.put_text ~clip:row_r grid ~x:(rect.x + tw + 1) ~y:!y
+                ~style:(Typography.status ~bg ~bold:true theme tone)
+                ("[" ^ lvl_s ^ "]")
+            in
+            let msg_x = rect.x + tw + lw + 2 in
+            let msg_w = Int.max 0 (Rect.right row_r - msg_x) in
+            if msg_w > 0 then
+              let raw_msg =
+                Printf.sprintf "%s: %s" e.module_name
+                  (String.map (fun c -> if Char.code c < 32 then ' ' else c)
+                     e.message)
+              in
+              ignore
+                (Cell_grid.put_text ~clip:row_r grid ~x:msg_x ~y:!y
+                   ~style:(Typography.primary ~bg theme)
+                   (Grapheme.truncate_to_width ~max_width:msg_w raw_msg));
+            incr y
+          end)
+        (Store_scroll.drop skip matching)
+
 let render_incidents_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     ~(model : Model.t) =
   let drawer_w =
@@ -2302,13 +2396,24 @@ let render_incidents_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
   else
     let lang = model.lang in
     let active_n = Incidents.active_count model.incidents in
+    let selected_inc = Incidents.selected_entry model.incidents in
+    let zoomed = model.incidents.zoomed && Option.is_some selected_inc in
     let title =
-      Say.resolve lang
-        (Say.make
-           ~ko:(Printf.sprintf "%s 장애 · 진단 이력 (Ch 3)"
-                  (Glyph.to_utf8 Glyph.Historical_incident))
-           ~en:(Printf.sprintf "%s Incident & Diagnostics Ledger (Ch 3)"
-                  (Glyph.to_utf8 Glyph.Historical_incident)))
+      match zoomed, selected_inc with
+      | true, Some inc ->
+          Say.resolve lang
+            (Say.make
+               ~ko:(Printf.sprintf "%s 장애 상세 #%d (Ch 3)"
+                      (Glyph.to_utf8 Glyph.Historical_incident) inc.id)
+               ~en:(Printf.sprintf "%s Incident Detail #%d (Ch 3)"
+                      (Glyph.to_utf8 Glyph.Historical_incident) inc.id))
+      | true, None | false, (Some _ | None) ->
+          Say.resolve lang
+            (Say.make
+               ~ko:(Printf.sprintf "%s 장애 · 진단 이력 (Ch 3)"
+                      (Glyph.to_utf8 Glyph.Historical_incident))
+               ~en:(Printf.sprintf "%s Incident & Diagnostics Ledger (Ch 3)"
+                      (Glyph.to_utf8 Glyph.Historical_incident)))
     in
     let dismissed_tag =
       if model.incidents.show_dismissed then
@@ -2324,6 +2429,17 @@ let render_incidents_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               (Say.make ~ko:"[c/D] 재입력 시 전체 삭제" ~en:"[c/D] again to clear");
           tone = Some Theme.Status_critical;
         }
+      else if zoomed then
+        {
+          glyph = Some Glyph.Historical_incident;
+          text =
+            (if model.incidents.show_raw_json then "[Space] Json_tree ON"
+             else "[Space] Json_tree");
+          tone =
+            Some
+              (if model.incidents.show_raw_json then Theme.Status_active
+               else Theme.Status_historical);
+        }
       else
         {
           glyph = Some Glyph.Historical_incident;
@@ -2336,10 +2452,16 @@ let render_incidents_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         }
     in
     let hotkey =
-      Say.resolve lang
-        (Say.make
-           ~ko:"[d] 숨김 · [Space] 숨김표시 · [J/K] 상세 · [c] 비우기 · [o] 이동 · [Esc]"
-           ~en:"[d] Dismiss · [Space] Show hidden · [J/K] Detail · [c] Clear · [o] Jump · [Esc]")
+      if zoomed then
+        Say.resolve lang
+          (Say.make
+             ~ko:"[Space] JSON · [↑↓] 스크롤 · [o] 이동 · [z/Esc] 목록"
+             ~en:"[Space] JSON · [↑↓] Scroll · [o] Jump · [z/Esc] List")
+      else
+        Say.resolve lang
+          (Say.make
+             ~ko:"[Enter/z] 상세 · [d] 숨김 · [Space] 숨김표시 · [J/K] 스크롤 · [o] 이동 · [Esc]"
+             ~en:"[Enter/z] Expand · [d] Dismiss · [Space] Show hidden · [J/K] Scroll · [o] Jump · [Esc]")
     in
     let inner =
       Card.draw ~cache grid ~rect:drawer_r ~theme
@@ -2365,44 +2487,55 @@ let render_incidents_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
           ~w:(Int.max 0 (inner.w - (2 * pad_x)))
           ~h:1
       in
-      let q_inc = String.trim model.incidents.filter_query in
-      let tail_window ~max_w s =
-        if Grapheme.display_width s <= max_w then s
-        else
-          let keep = Int.max 1 (max_w - 1) in
-          "…" ^ suffix_within_width ~limit:keep s
-      in
-      let max_q_w = Int.max 8 (hdr_r.w / 2) in
-      let filter_pill, filter_st =
-        if model.nav.filter_focused then
-          ( Printf.sprintf " / %s▏ "
-              (tail_window ~max_w:max_q_w model.incidents.filter_query),
-            Typography.anchor ~bg:(Color.of_rgb theme.selection_bg) theme )
-        else if not (String.equal q_inc "") then
-          ( Printf.sprintf " / %s (%d) "
-              (tail_window ~max_w:max_q_w q_inc) (List.length entries),
-            Typography.accent ~bg:(Color.of_rgb theme.surface_1) ~bold:true theme )
-        else
-          ( Say.resolve lang (Say.make ~ko:"[/] 필터" ~en:"[/] Filter"),
-            whisper_st )
-      in
-      let fp_w = Grapheme.display_width filter_pill in
       let note =
         Say.resolve lang
           (Say.make
              ~ko:"과거/해결 이력은 실시간 상태 표시줄을 붉게 물들이지 않습니다."
              ~en:"Historical Channel-3 trail — never taints live SSOT health.")
       in
-      let note_max = Int.max 0 (hdr_r.w - fp_w - 2) in
-      if note_max > 8 then
+      if zoomed then begin
+        if hdr_r.w > 8 then
+          ignore
+            (Cell_grid.put_text ~clip:hdr_r grid ~x:hdr_r.x ~y:inner.y
+               ~style:whisper_st
+               (Grapheme.truncate_to_width ~max_width:hdr_r.w note))
+      end
+      else begin
+        let q_inc = String.trim model.incidents.filter_query in
+        let tail_window ~max_w s =
+          if Grapheme.display_width s <= max_w then s
+          else
+            let keep = Int.max 1 (max_w - 1) in
+            "…" ^ suffix_within_width ~limit:keep s
+        in
+        let max_q_w = Int.max 8 (hdr_r.w / 2) in
+        let filter_pill, filter_st =
+          if model.nav.filter_focused then
+            ( Printf.sprintf " / %s▏ "
+                (tail_window ~max_w:max_q_w model.incidents.filter_query),
+              Typography.anchor ~bg:(Color.of_rgb theme.selection_bg) theme )
+          else if not (String.equal q_inc "") then
+            ( Printf.sprintf " / %s (%d) "
+                (tail_window ~max_w:max_q_w q_inc) (List.length entries),
+              Typography.accent ~bg:(Color.of_rgb theme.surface_1) ~bold:true
+                theme )
+          else
+            ( Say.resolve lang (Say.make ~ko:"[/] 필터" ~en:"[/] Filter"),
+              whisper_st )
+        in
+        let fp_w = Grapheme.display_width filter_pill in
+        let note_max = Int.max 0 (hdr_r.w - fp_w - 2) in
+        if note_max > 8 then
+          ignore
+            (Cell_grid.put_text ~clip:hdr_r grid ~x:hdr_r.x ~y:inner.y
+               ~style:whisper_st
+               (Grapheme.truncate_to_width ~max_width:note_max note));
+        let fpx = Int.max hdr_r.x (Rect.right hdr_r - fp_w) in
         ignore
-          (Cell_grid.put_text ~clip:hdr_r grid ~x:hdr_r.x ~y:inner.y
-             ~style:whisper_st
-             (Grapheme.truncate_to_width ~max_width:note_max note));
-      let fpx = Int.max hdr_r.x (Rect.right hdr_r - fp_w) in
-      ignore
-        (Cell_grid.put_text ~clip:hdr_r grid ~x:fpx ~y:inner.y ~style:filter_st
-           (Grapheme.truncate_to_width ~max_width:hdr_r.w filter_pill));
+          (Cell_grid.put_text ~clip:hdr_r grid ~x:fpx ~y:inner.y
+             ~style:filter_st
+             (Grapheme.truncate_to_width ~max_width:hdr_r.w filter_pill))
+      end;
       let content_r =
         Rect.make ~x:inner.x ~y:(inner.y + 1) ~w:inner.w
           ~h:(Int.max 0 (inner.h - 1))
@@ -2415,6 +2548,187 @@ let render_incidents_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 (Say.make
                    ~ko:(Glyph.to_utf8 Glyph.Live_healthy ^ " 기록된 과거 장애 이력이 없습니다.")
                    ~en:(Glyph.to_utf8 Glyph.Live_healthy ^ " No historical incidents recorded."))))
+      else if zoomed then begin
+        match selected_inc with
+        | None -> ()
+        | Some inc ->
+            let d_pad = Card.pad_inner ~pad_x content_r in
+            if not (Rect.is_empty d_pad) then begin
+              let src_raw, filter_opt = incident_source_raw inc.source in
+              let embedded_json = Render_util.extract_embedded_json inc.detail in
+              if model.incidents.show_raw_json then begin
+                let _, st_lbl = incident_status_label ~lang inc.status in
+                let detail_fields =
+                  match embedded_json with
+                  | Some (prefix_opt, parsed_json) ->
+                      let pref_field =
+                        match prefix_opt with
+                        | Some p when not (String.equal p "") ->
+                            [
+                              ( "detail_prefix"
+                              , `String (Render_util.redact_plain_text_secrets p)
+                              );
+                            ]
+                        | Some _ | None -> []
+                      in
+                      pref_field @ [ ("detail", parsed_json) ]
+                  | None ->
+                      [
+                        ( "detail"
+                        , `String
+                            (Render_util.redact_plain_text_secrets inc.detail) );
+                      ]
+                in
+                let json =
+                  `Assoc
+                    ([
+                       ("id", `Int inc.id);
+                       ( "occurred_at"
+                       , `String
+                           (Wire_common.format_unix_rfc3339 inc.occurred_at_unix)
+                       );
+                       ("source", `String src_raw);
+                       ("status", `String st_lbl);
+                       ("summary", `String (Say.resolve lang inc.summary));
+                     ]
+                    @ detail_fields)
+                in
+                let lines =
+                  Json_tree.flatten ~max_depth:5 ~redact_secrets:true json
+                in
+                ignore
+                  (Json_tree.draw grid ~rect:d_pad ~theme
+                     ~scroll:model.incidents.detail_scroll_offset lines)
+              end
+              else begin
+                let g, st_lbl = incident_status_label ~lang inc.status in
+                let src = incident_source_label ~lang inc.source in
+                let ts_s = Wire_common.format_unix_rfc3339 inc.occurred_at_unix in
+                let head =
+                  Printf.sprintf "%s [%s] %s · %s · %s" (Glyph.to_utf8 g) st_lbl
+                    src (Say.resolve lang inc.summary) ts_s
+                in
+                ignore
+                  (Cell_grid.put_text ~clip:d_pad grid ~x:d_pad.x ~y:d_pad.y
+                     ~style:hist_st
+                     (Grapheme.truncate_to_width ~max_width:d_pad.w head));
+                let payload_r =
+                  Rect.make ~x:d_pad.x ~y:(d_pad.y + 1) ~w:d_pad.w
+                    ~h:(Int.max 0 (d_pad.h - 1))
+                in
+                if not (Rect.is_empty payload_r) then begin
+                  let y = ref payload_r.y and bot = Rect.bottom payload_r in
+                  let rem = Int.max 0 (bot - !y) in
+                  let detail_h = Int.max 0 (rem / 2) in
+                  let detail_max =
+                    if detail_h <= 0 then 0
+                    else
+                      match embedded_json with
+                      | Some (prefix_opt, parsed_json) ->
+                          let used =
+                            match prefix_opt with
+                            | Some p when not (String.equal p "") && detail_h >= 2
+                              ->
+                                1
+                            | Some _ | None -> 0
+                          in
+                          let tree_h = Int.max 1 (detail_h - used) in
+                          let lines =
+                            Json_tree.flatten ~max_depth:4 ~redact_secrets:true
+                              parsed_json
+                          in
+                          Int.max 0 (List.length lines - tree_h)
+                      | None ->
+                          let safe_detail =
+                            Render_util.redact_plain_text_secrets inc.detail
+                          in
+                          let total_md =
+                            List.length
+                              (Markdown.render_lines ~theme ~width:payload_r.w
+                                 ~osc8:caps.osc8_hyperlinks safe_detail)
+                          in
+                          Int.max 0 (total_md - detail_h)
+                  in
+                  let top_scroll =
+                    Int.min detail_max model.incidents.detail_scroll_offset
+                  in
+                  let log_scroll =
+                    Int.max 0 (model.incidents.detail_scroll_offset - detail_max)
+                  in
+                  if detail_h > 0 then begin
+                    (match embedded_json with
+                     | Some (prefix_opt, parsed_json) ->
+                         let used = ref 0 in
+                         (match prefix_opt with
+                          | Some prefix
+                            when not (String.equal prefix "")
+                                 && detail_h >= 2 && !used < detail_h ->
+                              let safe_prefix =
+                                Render_util.redact_plain_text_secrets prefix
+                              in
+                              let prefix_r =
+                                Rect.make ~x:payload_r.x ~y:(!y + !used)
+                                  ~w:payload_r.w ~h:1
+                              in
+                              ignore
+                                (Cell_grid.put_text ~clip:prefix_r grid
+                                   ~x:payload_r.x ~y:(!y + !used)
+                                   ~style:struct_st
+                                   (Grapheme.truncate_to_width
+                                      ~max_width:payload_r.w safe_prefix));
+                              incr used
+                          | Some _ | None -> ());
+                         let tree_h = Int.max 0 (detail_h - !used) in
+                         if tree_h > 0 then begin
+                           let tree_rect =
+                             Rect.make ~x:payload_r.x ~y:(!y + !used)
+                               ~w:payload_r.w ~h:tree_h
+                           in
+                           let lines =
+                             Json_tree.flatten ~max_depth:4 ~redact_secrets:true
+                               parsed_json
+                           in
+                           ignore
+                             (Json_tree.draw grid ~rect:tree_rect ~theme
+                                ~scroll:top_scroll lines)
+                         end
+                     | None ->
+                         let md_rect =
+                           Rect.make ~x:payload_r.x ~y:!y ~w:payload_r.w
+                             ~h:detail_h
+                         in
+                         let safe_detail =
+                           Render_util.redact_plain_text_secrets inc.detail
+                         in
+                         ignore
+                           (Markdown.draw grid ~rect:md_rect ~theme
+                              ~osc8:caps.osc8_hyperlinks ~scroll:top_scroll
+                              safe_detail));
+                    y := !y + detail_h
+                  end;
+                  if !y < bot then begin
+                    let lbl =
+                      Say.resolve lang
+                        (Say.make ~ko:"── 연관 로그 ──" ~en:"── Related Logs ──")
+                    in
+                    ignore
+                      (Cell_grid.put_text ~clip:payload_r grid ~x:payload_r.x
+                         ~y:!y ~style:struct_st
+                         (Grapheme.truncate_to_width ~max_width:payload_r.w lbl));
+                    incr y;
+                    let log_area =
+                      Rect.make ~x:payload_r.x ~y:!y ~w:payload_r.w
+                        ~h:(Int.max 0 (bot - !y))
+                    in
+                    draw_incident_related_logs
+                      ~tz_offset_sec:model.tz_offset_sec ~scroll:log_scroll
+                      ~grid ~rect:log_area ~theme ~bg ~lang ~filter_opt
+                      model.infra.logs
+                  end
+                end
+              end
+            end
+      end
       else
         let list_r, detail_r =
           if content_r.h >= 10 then

@@ -60,7 +60,6 @@ type knowledge_dive_target =
   | Thread_dive of string
   | Wiki_dive of string
   | Artifact_dive of string
-  | Memory_diff_dive of { keeper : string option; from_rev : int; to_rev : int }
 
 type runtime_dive_target =
   | Tool_dive of string
@@ -68,7 +67,6 @@ type runtime_dive_target =
   | Exact_run_dive of string
 
 type infra_dive_target =
-  | Incident_dive of int
   | Runtime_trace_dive of string
 
 type dive =
@@ -538,14 +536,9 @@ let equal_knowledge_dive_target a b =
   | Wiki_dive x, Wiki_dive y
   | Artifact_dive x, Artifact_dive y ->
       String.equal x y
-  | Memory_diff_dive x, Memory_diff_dive y ->
-      Option.equal String.equal x.keeper y.keeper
-      && Int.equal x.from_rev y.from_rev
-      && Int.equal x.to_rev y.to_rev
-  | Thread_dive _, (Wiki_dive _ | Artifact_dive _ | Memory_diff_dive _)
-  | Wiki_dive _, (Thread_dive _ | Artifact_dive _ | Memory_diff_dive _)
-  | Artifact_dive _, (Thread_dive _ | Wiki_dive _ | Memory_diff_dive _)
-  | Memory_diff_dive _, (Thread_dive _ | Wiki_dive _ | Artifact_dive _) ->
+  | Thread_dive _, (Wiki_dive _ | Artifact_dive _)
+  | Wiki_dive _, (Thread_dive _ | Artifact_dive _)
+  | Artifact_dive _, (Thread_dive _ | Wiki_dive _) ->
       false
 
 let equal_runtime_dive_target a b =
@@ -562,10 +555,6 @@ let equal_runtime_dive_target a b =
 let equal_infra_dive_target a b =
   match a, b with
   | Runtime_trace_dive x, Runtime_trace_dive y -> String.equal x y
-  | Incident_dive x, Incident_dive y -> Int.equal x y
-  | Incident_dive _, Runtime_trace_dive _
-  | Runtime_trace_dive _, Incident_dive _ ->
-      false
 
 let equal_dive a b =
   match a, b with

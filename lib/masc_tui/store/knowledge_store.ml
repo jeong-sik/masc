@@ -218,6 +218,7 @@ type t = {
   keeper_memory_journal_auth_denied : String_set.t;
   memory_subview_scroll : int;
   memory_diff_window : memory_diff_window;
+  prev_window_before_pin : memory_diff_window option;
   memory_diff_keeper : string option;
   memory_view_mode : memory_view_mode;
   memory_facts_sort : memory_facts_sort;
@@ -293,6 +294,7 @@ let empty =
     keeper_memory_journal_auth_denied = String_set.empty;
     memory_subview_scroll = 0;
     memory_diff_window = Window_24h;
+    prev_window_before_pin = None;
     memory_diff_keeper = None;
     memory_view_mode = View_evolution;
     memory_facts_sort = Sort_recency;
@@ -694,9 +696,25 @@ let index_of_wiki_slug slug (pages : Wire_knowledge.wiki_page_summary list) =
   find 0 pages
 
 let set_tab active_tab t =
+  let memory_diff_window, prev_window_before_pin =
+    if Nav.equal_knowledge_tab active_tab Nav.Knowledge_memory then
+      (t.memory_diff_window, t.prev_window_before_pin)
+    else
+      match t.memory_diff_window with
+      | Window_revs _ ->
+          let restored =
+            match t.prev_window_before_pin with
+            | Some (Window_24h | Window_7d | Window_30d as w) -> w
+            | Some (Window_revs _) | None -> Window_24h
+          in
+          (restored, None)
+      | Window_24h | Window_7d | Window_30d -> (t.memory_diff_window, None)
+  in
   {
     t with
     active_tab;
+    memory_diff_window;
+    prev_window_before_pin;
     armed_vote = None;
     pending_artifact_revision = None;
     selected_index = 0;
@@ -1088,14 +1106,39 @@ let toggle_succession_chain ~root_id t =
   { next with selected_index; scroll_offset }
 
 let set_memory_diff_window memory_diff_window t =
+  let prev_window_before_pin =
+    match memory_diff_window with
+    | Window_revs _ -> t.prev_window_before_pin
+    | Window_24h | Window_7d | Window_30d -> None
+  in
   {
     t with
     memory_diff_window;
+    prev_window_before_pin;
     selected_diff_index = 0;
     diff_scroll_offset = 0;
     memory_reading = None;
     memory_reading_scroll = 0;
   }
+
+let is_memory_diff_pinned t =
+  match t.memory_diff_window with
+  | Window_revs _ -> true
+  | Window_24h | Window_7d | Window_30d -> false
+
+let unpin_memory_diff_revs t =
+  match t.memory_diff_window with
+  | Window_revs _ ->
+      let restored =
+        match t.prev_window_before_pin with
+        | Some (Window_24h | Window_7d | Window_30d as w) -> w
+        | Some (Window_revs _) | None -> Window_24h
+      in
+      set_memory_diff_window restored { t with prev_window_before_pin = None }
+  | Window_24h | Window_7d | Window_30d ->
+      if Option.is_some t.prev_window_before_pin then
+        { t with prev_window_before_pin = None }
+      else t
 
 let cycle_memory_diff_window t =
   let next =
@@ -1119,22 +1162,25 @@ let set_memory_diff_keeper memory_diff_keeper t =
   let changed =
     not (Option.equal String.equal t.memory_diff_keeper memory_diff_keeper)
   in
+  let base = if changed then unpin_memory_diff_revs t else t in
   {
-    t with
+    base with
     memory_diff_keeper;
     memory_health_keeper =
-      reset_scoped_slot_on_switch ~changed t.memory_health_keeper;
+      reset_scoped_slot_on_switch ~changed base.memory_health_keeper;
     keeper_memory_journal =
-      reset_scoped_slot_on_switch ~changed t.keeper_memory_journal;
-    selected_fact_index = if changed then 0 else t.selected_fact_index;
-    facts_scroll_offset = if changed then 0 else t.facts_scroll_offset;
-    selected_activity_index = if changed then 0 else t.selected_activity_index;
-    activity_scroll_offset = if changed then 0 else t.activity_scroll_offset;
-    selected_diff_index = if changed then 0 else t.selected_diff_index;
-    diff_scroll_offset = if changed then 0 else t.diff_scroll_offset;
-    memory_reading = if changed then None else t.memory_reading;
-    memory_reading_scroll = if changed then 0 else t.memory_reading_scroll;
-    memory_diagram = if changed then None else t.memory_diagram;
+      reset_scoped_slot_on_switch ~changed base.keeper_memory_journal;
+    selected_fact_index = if changed then 0 else base.selected_fact_index;
+    facts_scroll_offset = if changed then 0 else base.facts_scroll_offset;
+    selected_activity_index =
+      if changed then 0 else base.selected_activity_index;
+    activity_scroll_offset =
+      if changed then 0 else base.activity_scroll_offset;
+    selected_diff_index = if changed then 0 else base.selected_diff_index;
+    diff_scroll_offset = if changed then 0 else base.diff_scroll_offset;
+    memory_reading = if changed then None else base.memory_reading;
+    memory_reading_scroll = if changed then 0 else base.memory_reading_scroll;
+    memory_diagram = if changed then None else base.memory_diagram;
   }
 
 let set_memory_view_mode memory_view_mode t =
@@ -2438,23 +2484,29 @@ let move_memory_diff_cursor ~delta t =
   let selected_diff_index = clamp_index len (t.selected_diff_index + delta) in
   { t with selected_diff_index }
 
-(* A [Memory_diff_dive] fetches into the [Window_revs] slot of its own
-   revision range, which is not the slot of the Memory tab's window. Every
-   reader of the dive's diff (render, scroll bound, cursor, Enter) goes
-   through this scope; the tab keeps reading the unscoped [t]. *)
-let scope_memory_diff_dive ~keeper ~from_rev ~to_rev t =
-  {
-    t with
-    memory_diff_keeper = keeper;
-    memory_diff_window = Window_revs { from_rev; to_rev };
-  }
-
-let move_memory_diff_dive_cursor ~keeper ~from_rev ~to_rev ~delta t =
-  let moved =
-    move_memory_diff_cursor ~delta
-      (scope_memory_diff_dive ~keeper ~from_rev ~to_rev t)
+let pin_memory_diff_revs ?keeper ~from_rev ~to_rev t =
+  let base =
+    match keeper with
+    | Some k -> set_memory_diff_keeper k t
+    | None -> t
   in
-  { t with selected_diff_index = moved.selected_diff_index }
+  let prev_window_before_pin =
+    match base.prev_window_before_pin, base.memory_diff_window with
+    | (Some _ as prev), _ -> prev
+    | None, (Window_24h | Window_7d | Window_30d as w) -> Some w
+    | None, Window_revs _ -> Some Window_24h
+  in
+  {
+    base with
+    memory_diff_window = Window_revs { from_rev; to_rev };
+    prev_window_before_pin;
+    memory_view_mode = View_diff;
+    selected_diff_index = 0;
+    diff_scroll_offset = 0;
+    memory_reading = None;
+    memory_reading_scroll = 0;
+    memory_diagram = None;
+  }
 
 let json_has_kv_summary = function
   | `Assoc (_ :: _) -> true

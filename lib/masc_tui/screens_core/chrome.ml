@@ -845,10 +845,7 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
       | Nav.Dive_work _ -> Nav.workspace_label Nav.Work
       | Nav.Dive_knowledge _ -> Nav.workspace_label Nav.Knowledge
       | Nav.Dive_runtime _ -> Nav.workspace_label Nav.Runtime
-      | Nav.Dive_infra (Nav.Incident_dive _) ->
-          Nav.workspace_label model.nav.workspace
-      | Nav.Dive_infra (Nav.Runtime_trace_dive _) ->
-          Nav.workspace_label Nav.Infra
+      | Nav.Dive_infra _ -> Nav.workspace_label Nav.Infra
     in
     let dive_segment_label = function
       | Nav.Dive_keeper { name; _ } ->
@@ -875,23 +872,12 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
           Say.resolve lang (Say.make ~ko:"위키" ~en:"Wiki") ^ " " ^ slug
       | Nav.Dive_knowledge (Nav.Artifact_dive id) ->
           Say.resolve lang (Say.make ~ko:"산출물" ~en:"Artifact") ^ " " ^ id
-      | Nav.Dive_knowledge (Nav.Memory_diff_dive { keeper; from_rev; to_rev }) ->
-          let scope =
-            match keeper with
-            | Some k -> k
-            | None -> Say.resolve lang (Say.make ~ko:"월드" ~en:"World")
-          in
-          Printf.sprintf "%s rev %d..%d" scope from_rev to_rev
       | Nav.Dive_runtime (Nav.Tool_dive name) ->
           Say.resolve lang (Say.make ~ko:"도구" ~en:"Tool") ^ " " ^ name
       | Nav.Dive_runtime (Nav.Skill_dive ref_s) ->
           Say.resolve lang (Say.make ~ko:"스킬" ~en:"Skill") ^ " " ^ ref_s
       | Nav.Dive_runtime (Nav.Exact_run_dive run_id) ->
           Say.resolve lang (Say.make ~ko:"Exact실행" ~en:"Exact Run") ^ " " ^ run_id
-      | Nav.Dive_infra (Nav.Incident_dive id) ->
-          Printf.sprintf "%s #%d"
-            (Say.resolve lang (Say.make ~ko:"이력" ~en:"Incident"))
-            id
       | Nav.Dive_infra (Nav.Runtime_trace_dive keeper) ->
           Say.resolve lang (Say.make ~ko:"런타임 추적" ~en:"Trace")
           ^ " " ^ keeper
@@ -1450,8 +1436,7 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           && (match Model.active_dive model with
               | Some (Nav.Dive_knowledge (Nav.Thread_dive _)) -> true
               | Some
-                  ( Nav.Dive_knowledge
-                      (Nav.Wiki_dive _ | Nav.Artifact_dive _ | Nav.Memory_diff_dive _)
+                  ( Nav.Dive_knowledge (Nav.Wiki_dive _ | Nav.Artifact_dive _)
                   | Nav.Dive_keeper _
                   | Nav.Dive_work _
                   | Nav.Dive_runtime _
@@ -1518,10 +1503,7 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           | Some
               ( Nav.Dive_keeper _
               | Nav.Dive_work _
-              | Nav.Dive_knowledge
-                  ( Nav.Thread_dive _
-                  | Nav.Wiki_dive _
-                  | Nav.Memory_diff_dive _ )
+              | Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Wiki_dive _)
               | Nav.Dive_runtime _
               | Nav.Dive_infra _ ) ->
               true
@@ -1591,6 +1573,14 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           || Model.sidebar_has_focus model
           || Model.sidebar_drawer_open model
           || model.nav.zoomed
+          || (Option.is_none (Model.active_dive model)
+              && Knowledge_store.is_memory_diff_pinned model.knowledge
+              && ((Nav.equal_workspace model.nav.workspace Nav.Knowledge
+                   && Nav.equal_knowledge_tab model.knowledge.active_tab
+                        Nav.Knowledge_memory)
+                  || (Nav.equal_workspace model.nav.workspace Nav.Keepers
+                      && Nav.equal_keeper_tab model.fleet.keeper_dive_tab
+                           Nav.Keeper_memory)))
           || (model.infra.show_raw_json
               && Option.is_none (Model.active_dive model)
               && Model.detail_visible model

@@ -1327,9 +1327,7 @@ let test_axis_a_screen_dive_matrix () =
             match dive_before with
             | Some (Nav.Dive_knowledge (Nav.Thread_dive _)) -> true
             | Some
-                ( Nav.Dive_knowledge
-                    ( Nav.Wiki_dive _ | Nav.Artifact_dive _
-                    | Nav.Memory_diff_dive _ )
+                ( Nav.Dive_knowledge (Nav.Wiki_dive _ | Nav.Artifact_dive _)
                 | Nav.Dive_keeper _
                 | Nav.Dive_work _
                 | Nav.Dive_runtime _
@@ -3168,19 +3166,18 @@ let test_journeys_tab_multipane_dives_safety () =
   let m_pal_tab, _ = step m_pal_hi (mk_key Keymap.Input.Tab) in
   Alcotest.(check int) "R8 Palette Tab clamps stale high selected before wrap" 0
     m_pal_tab.palette.selected;
-  let m_mem_dive =
+  let m_mem_pin =
     {
       base with
-      nav =
-        {
-          base.nav with
-          workspace = Nav.Knowledge;
-          dive_stack =
-            [ Nav.Dive_knowledge (Nav.Memory_diff_dive { keeper = None; from_rev = 1; to_rev = 2 }) ];
-        };
+      nav = { base.nav with workspace = Nav.Knowledge; zoomed = true; pane_index = 0 };
+      knowledge =
+        base.knowledge
+        |> Knowledge_store.set_tab Nav.Knowledge_memory
+        |> Knowledge_store.pin_memory_diff_revs ~keeper:None ~from_rev:1
+             ~to_rev:2;
     }
   in
-  ignore (render_full ~model:m_mem_dive);
+  ignore (render_full ~model:m_mem_pin);
 
   (* R9: Infra_repos_changes follows the selected repository; a stale reply is dropped *)
   record_case ();
@@ -4927,7 +4924,7 @@ let test_pillar2_scroll_bounds_all_surfaces () =
     ~needle:"BOARD_LAST_SENTINEL"
     ~get_off:(fun m -> m.knowledge.detail_scroll_offset)
     m_board_p1;
-  (* 10e. 3 Knowledge > Memory pane 1 & Memory_diff_dive with World_diff (unconditional 2-row heat bar) *)
+  (* 10e. 3 Knowledge > Memory pane 1 & pinned Window_revs with World_diff (unconditional 2-row heat bar) *)
   let world_diff_40 : Wire_knowledge.memory_diff =
     {
       scope = Wire_knowledge.Scope_world;
@@ -4995,32 +4992,24 @@ let test_pillar2_scroll_bounds_all_surfaces () =
     ~needle:"WORLD_CLAIM_LAST_39"
     ~get_off:(fun m -> m.knowledge.diff_scroll_offset)
     m_mem_world;
-  (* The dive fetches into the Window_revs slot of its own range, not the
-     Memory tab's Window_24h slot. *)
-  let m_mem_dive_z =
+  (* Pinned Window_revs slot on zoomed Knowledge > Memory pane 1 *)
+  let m_mem_pin_z =
     {
       m_mem_world with
-      nav =
-        {
-          m_mem_world.nav with
-          zoomed = true;
-          dive_stack =
-            [
-              Nav.Dive_knowledge
-                (Nav.Memory_diff_dive { keeper = None; from_rev = 1; to_rev = 40 });
-            ];
-        };
+      nav = { m_mem_world.nav with zoomed = true; pane_index = 0 };
       knowledge =
-        Knowledge_store.set_memory_diff ~keeper:None
-          ~window:(Knowledge_store.Window_revs { from_rev = 1; to_rev = 40 })
-          (Observed.value ~observed_at:t0 world_diff_40)
-          m_mem_world.knowledge;
+        m_mem_world.knowledge
+        |> Knowledge_store.pin_memory_diff_revs ~keeper:None ~from_rev:1
+             ~to_rev:40
+        |> Knowledge_store.set_memory_diff ~keeper:None
+             ~window:(Knowledge_store.Window_revs { from_rev = 1; to_rev = 40 })
+             (Observed.value ~observed_at:t0 world_diff_40);
     }
   in
-  assert_scroll_exact ~label:"Memory_diff_dive (World_diff + zoomed)"
+  assert_scroll_exact ~label:"Knowledge > Memory (Window_revs pinned + zoomed)"
     ~needle:"WORLD_CLAIM_LAST_39"
-    ~get_off:(fun m -> m.nav.dive_scroll_offset)
-    m_mem_dive_z;
+    ~get_off:(fun m -> m.knowledge.diff_scroll_offset)
+    m_mem_pin_z;
   (* 10f. 6 Infra > Sandboxes pane 1 (microVM + 35 logs), Logs pane 1 (long wrapped msg + 30-key JSON), Repos pane 1 (with sel_repo link_rect) *)
   let sb_35_logs =
     List.init 35 (fun i : Wire_infra.system_log_entry ->
@@ -5478,7 +5467,7 @@ let test_pillar2_scroll_bounds_all_surfaces () =
           details = `Assoc [];
         })
   in
-  let dive_inc, dive_inc_id =
+  let dive_inc, _ =
     Incidents.push ~occurred_at_unix:1700000000.0
       ~source:(Health.Source_keeper "alpha")
       ~summary:(Say.make ~ko:"모듈 로그 매칭" ~en:"module log match")
@@ -5521,7 +5510,6 @@ let test_pillar2_scroll_bounds_all_surfaces () =
       , Nav.Dive_knowledge (Nav.Artifact_dive (List.hd many_artifacts).id)
       , "Artifact Report 59"
       , dive_off );
-      ("Incident_dive (module_name match)", Nav.Dive_infra (Nav.Incident_dive dive_inc_id.id), "DIVE_LOG_00", dive_off);
     ]
   in
   List.iter
@@ -5547,7 +5535,18 @@ let test_pillar2_scroll_bounds_all_surfaces () =
   assert_scroll_exact ~label:"Thread_dive (Comments tab)"
     ~needle:"THREAD_COMMENT_BOTTOM_44"
     ~get_off:(fun (m : Model.t) -> m.knowledge.thread_comment_scroll)
-    m_thread_comments
+    m_thread_comments;
+  let m_inc_zoomed =
+    {
+      m_dives_base with
+      nav = { m_dives_base.nav with overlay = Some Nav.Incidents };
+      incidents = Incidents.set_zoomed true m_dives_base.incidents;
+    }
+  in
+  assert_scroll_exact ~label:"Zoomed Incidents overlay + related logs"
+    ~needle:"DIVE_LOG_00"
+    ~get_off:(fun m -> m.incidents.detail_scroll_offset)
+    m_inc_zoomed
 
 (* ---------- Pillar 3: Centered-Rectangle Keeper Chat UX & Korean IME Guard ---------- *)
 

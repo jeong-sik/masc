@@ -1252,7 +1252,7 @@ let test_visibility_enter_refresh_and_resize () =
   check bool "Micro viewport hides active_diagram" true
     (Option.is_none (Memory_diagram.active_diagram m_micro));
 
-  (* 7b. Enter in 3 -> Memory with open diagram is a no-op (never pushes Memory_diff_dive) *)
+  (* 7b. Enter in 3 -> Memory with open diagram is a no-op (never pins or pushes a dive) *)
   let diff_snap : Wire_knowledge.memory_diff =
     {
       scope = Wire_knowledge.Scope_keeper "alpha";
@@ -1314,7 +1314,7 @@ let test_visibility_enter_refresh_and_resize () =
   let m_k3_enter, _ =
     Update.step ~now:now0 m_k3_open (Msg.Key_event (key_special Keymap.Input.Enter))
   in
-  check bool "Enter in 3 -> Memory does not push Memory_diff_dive" true
+  check bool "Enter in 3 -> Memory does not push a dive" true
     (Option.is_none (Model.active_dive m_k3_enter));
   check bool "Enter in 3 -> Memory keeps diagram open" true
     (Option.is_some (Memory_diagram.active_diagram m_k3_enter));

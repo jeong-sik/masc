@@ -455,7 +455,7 @@ let render_literal ~width ~base_style raw =
          let row = Buffer.create (Int.min width (String.length line)) in
          let push_row () =
            rows :=
-             { spans = [ span base_style (Buffer.contents row) ] }
+             { spans = [ span base_style (Buffer.contents row) ]; image_part = None }
              :: !rows;
            Buffer.clear row;
            cells := 0

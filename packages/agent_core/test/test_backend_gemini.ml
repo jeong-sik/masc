@@ -971,6 +971,9 @@ let test_stranded_carrier_is_a_typed_request_refusal () =
     ]
   in
   let config = gemini_config () in
+  (* Stamped as this model's own reasoning, as a stored response is, so the
+     reasoning projection replays the carrier instead of dropping it. *)
+  let messages = stamp_reasoning_history config messages in
   (match Backend_gemini.build_request_artifact_result ~config ~messages () with
    | Error reason ->
      check string "the builder names the stranded carrier"

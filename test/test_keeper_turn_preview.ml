@@ -671,7 +671,7 @@ let test_a_tool_is_open_from_its_call_to_its_return () =
   Preview.note_request ~writer ~now:2.;
   Preview.note_stream ~writer ~now:3. (tool_block 1 (Some "toolu_a") "Execute");
   Alcotest.(check string) "while the model is still answering, both are named"
-    "waiting for provider response · tool called: Execute"
+    "waiting for provider response · tool called: Execute · last observed tool: Execute"
     (Preview.status_text (current ()));
   Preview.note_stream ~writer ~now:4. (block_stop 1);
   Preview.note_stream ~writer ~now:5. Agent_core.Types.MessageStop;

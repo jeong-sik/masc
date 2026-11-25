@@ -1805,9 +1805,11 @@ let test_keeper_turns_preview_roundtrip () =
           | Some p ->
               Alcotest.(check (option int)) "preview revision preserved"
                 (Some snap_stream.revision) p.revision;
-              Alcotest.(check bool) "stream activity preserved" true
+              (* The turn's text is recorded once the model's turn is over, so
+                 the response has ended and the preview waits (#54744). *)
+              Alcotest.(check bool) "the turn text ends the response" true
                 (Wire_fleet.equal_turn_preview_activity p.activity
-                   Wire_fleet.Preview_streaming);
+                   Wire_fleet.Preview_waiting);
               Alcotest.(check (option string)) "last_tool preserved"
                 (Some "Execute") p.last_tool;
               Alcotest.(check string) "text_tail preserved"

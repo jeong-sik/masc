@@ -513,7 +513,7 @@ let of_answer
                if not (List.for_all (fun id -> Ids.mem id supported_ids) promo.source_fact_ids)
                then Some (op.number, Effects.Successor_unsupported)
                else if
-                 has_private_board_provenance
+                 has_private_provenance
                    ~is_public_board_post
                    ~fact_by_id:supported_by_id
                    promo.source_fact_ids

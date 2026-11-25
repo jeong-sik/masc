@@ -3056,9 +3056,37 @@ let test_timeout_budgets_and_reattach_on_timeout_detail () =
     (Cmd_executor.chat_reattach_delay ~acceptance:running ~terminal_seen:false
        ~reattaches:1 stream_idle_timeout)
 
+let test_music_launch_args () =
+  let base_path = "/ws" in
+  let music_dir =
+    Filename.concat
+      (Common.masc_dir_from_base_path ~base_path)
+      Common.tui_music_dirname
+  in
+  let roots =
+    [
+      "--project-root";
+      Filename.concat music_dir "projects";
+      "--session-root";
+      Filename.concat music_dir "sessions";
+    ]
+  in
+  Alcotest.(check (list string)) "workbench" ("--music" :: roots)
+    (Music_launch.args ~base_path Cmd.Music_workbench);
+  Alcotest.(check (list string)) "midi import"
+    ("--midi-file" :: "/tmp/a.mid" :: roots)
+    (Music_launch.args ~base_path (Cmd.Music_import_midi "/tmp/a.mid"));
+  Alcotest.(check bool) "a missing MIDI file is refused before any spawn" true
+    (Result.is_error
+       (Music_launch.command ~base_path
+          (Cmd.Music_import_midi "/nonexistent/masc-music-launch.mid")))
+
 let () =
   Alcotest.run "masc_tui_app"
     [
+      ( "music_launch"
+      , [ Alcotest.test_case "viewer arguments and missing MIDI input" `Quick
+            test_music_launch_args ] );
       ( "cli_args"
       , [
           Alcotest.test_case "info flags (--version, --build-commit, --help)"

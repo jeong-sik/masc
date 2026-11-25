@@ -2829,6 +2829,7 @@ let rec execute_slash ~now (m : Model.t) cmd =
                 | Cmd.Open_dos_screen _
                 | Cmd.Open_external_url _
                 | Cmd.Open_editor_escape_hatch _
+                | Cmd.Open_terminal_program _
                 | Cmd.Start_local_server
                 | Cmd.Restart_tui
                 | Cmd.Quit _ ->
@@ -3621,6 +3622,13 @@ let rec execute_slash ~now (m : Model.t) cmd =
   | Slash.Help -> Update_nav.open_overlay m Nav.Help
   | Slash.Restart -> (m, [ Cmd.Restart_tui ])
   | Slash.Quit -> (m, [ Cmd.Quit Exit_reason.Quit_key ])
+  | Slash.Music action ->
+      let program =
+        match action with
+        | Slash.Music_workbench -> Cmd.Music_workbench
+        | Slash.Music_import_midi path -> Cmd.Music_import_midi path
+      in
+      (m, [ Cmd.Open_terminal_program program ])
 
 and submit_slash_text ~now (m : Model.t) trimmed =
   match Slash.parse trimmed with
@@ -5591,6 +5599,7 @@ and execute_action ~now (m : Model.t) action =
                   | Cmd.Open_dos_screen _
                   | Cmd.Open_external_url _
                   | Cmd.Open_editor_escape_hatch _
+                  | Cmd.Open_terminal_program _
                   | Cmd.Start_local_server
                   | Cmd.Restart_tui
                   | Cmd.Quit _ ->

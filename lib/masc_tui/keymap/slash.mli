@@ -174,6 +174,12 @@ type browser_action =
     }
   | Browser_command of string
 
+(** Arguments of the unlisted [/music] command: [parse] accepts it, but
+    {!all}, the slash popup and the help overlay do not list it. *)
+type music_action =
+  | Music_workbench
+  | Music_import_midi of string  (** path of a Standard MIDI File *)
+
 type parsed =
   | Pulse
   | Work
@@ -211,6 +217,7 @@ type parsed =
   | Help
   | Restart
   | Quit
+  | Music of music_action
 
 type parse_error =
   | Not_a_slash_command
@@ -241,6 +248,7 @@ val equal_preset_action : preset_action -> preset_action -> bool
 val equal_lane_action : lane_action -> lane_action -> bool
 val equal_addon_action : addon_action -> addon_action -> bool
 val equal_browser_action : browser_action -> browser_action -> bool
+val equal_music_action : music_action -> music_action -> bool
 val equal_parsed : parsed -> parsed -> bool
 val equal_parse_error : parse_error -> parse_error -> bool
 
@@ -248,7 +256,9 @@ val parse : string -> (parsed, parse_error) result
 (** Strictly parse a slash command string (leading/trailing whitespace trimmed). *)
 
 val filter : query:string -> lang:Say.lang -> spec list
-(** Fuzzy-match and rank {!all} against [query] (with or without leading ['/']). *)
+(** Fuzzy-match and rank {!all} against [query] (with or without leading ['/']).
+    An exactly typed unlisted command word matches nothing, so the popup
+    never offers a listed command in its place. *)
 
 val complete : prefix:string -> string list
 (** Return matching completion candidates for a partial slash input, including

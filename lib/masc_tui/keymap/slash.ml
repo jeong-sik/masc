@@ -167,6 +167,12 @@ type browser_action =
     }
   | Browser_command of string
 
+(* Commands that [parse] accepts and [all] does not list, so the slash popup
+   and the help overlay never show them. *)
+type music_action =
+  | Music_workbench
+  | Music_import_midi of string
+
 type parsed =
   | Pulse
   | Work
@@ -204,6 +210,7 @@ type parsed =
   | Help
   | Restart
   | Quit
+  | Music of music_action
 
 type parse_error =
   | Not_a_slash_command
@@ -567,6 +574,12 @@ let equal_browser_action a b =
       _ ->
         false
 
+let equal_music_action a b =
+  match (a, b) with
+  | Music_workbench, Music_workbench -> true
+  | Music_import_midi x, Music_import_midi y -> String.equal x y
+  | (Music_workbench | Music_import_midi _), _ -> false
+
 let parsed_tag = function
   | Pulse -> 0
   | Work -> 1
@@ -604,6 +617,7 @@ let parsed_tag = function
   | Help -> 33
   | Restart -> 34
   | Quit -> 35
+  | Music _ -> 36
 
 let equal_parsed a b =
   if not (Int.equal (parsed_tag a) (parsed_tag b)) then false
@@ -634,6 +648,7 @@ let equal_parsed a b =
     | Tools x, Tools y -> Option.equal equal_tools_mode x y
     | Theme x, Theme y -> Option.equal Theme.equal_preset x y
     | Lang x, Lang y -> Option.equal Say.equal_lang x y
+    | Music x, Music y -> equal_music_action x y
     | Pulse, Pulse
     | Work, Work
     | Knowledge, Knowledge
@@ -685,7 +700,8 @@ let equal_parsed a b =
       | Lang _
       | Help
       | Restart
-      | Quit ),
+      | Quit
+      | Music _ ),
       _ ->
         false
 
@@ -1921,6 +1937,22 @@ let parse raw =
     | "/help" -> no_arg cmd Help arg
     | "/restart" -> no_arg cmd Restart arg
     | "/quit" -> no_arg cmd Quit arg
+    | "/music" -> (
+        match arg with
+        | None -> Ok (Music Music_workbench)
+        | Some raw_arg -> (
+            match split_command_and_arg raw_arg with
+            | "midi", Some path -> Ok (Music (Music_import_midi path))
+            | _ ->
+                Error
+                  (Invalid_argument
+                     {
+                       command = cmd;
+                       expected =
+                         Say.make ~ko:"인자 없음 | midi <파일 경로>"
+                           ~en:"no argument | midi <file path>";
+                       got = raw_arg;
+                     })))
     | other -> Error (Unknown_command other)
 
 (* UTF-8 Unicode scalar decomposition with ASCII case-folding so multi-byte
@@ -1977,9 +2009,18 @@ let strip_leading_slash s =
     String.sub trimmed 1 (String.length trimmed - 1)
   else trimmed
 
+(* An exactly typed unlisted command must not fuzzy-match a listed one:
+   "music" is a subsequence of the description "Open Model/Runtime switcher",
+   and Enter on that popup would run /model instead. *)
+let is_unlisted_word needle =
+  match parse ("/" ^ needle) with
+  | Ok (Music _) -> true
+  | Ok _ | Error _ -> false
+
 let filter ~query ~lang =
   let needle = String.lowercase_ascii (strip_leading_slash query) in
   if String.length needle = 0 then all
+  else if is_unlisted_word needle then []
   else
     let scored =
       List.filter_map

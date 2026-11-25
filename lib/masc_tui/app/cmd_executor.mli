@@ -265,8 +265,8 @@ val wait_reap_pid :
 
 val execute : t -> Cmd.t -> unit
 (** Dispatch one {!Cmd.t}. Asynchronous work forks onto [sw] without blocking
-    the caller; {!Cmd.Open_editor_escape_hatch} coordinates terminal handoff
-    through {!editor_handoff}.
+    the caller; {!Cmd.Open_editor_escape_hatch} and {!Cmd.Open_terminal_program}
+    coordinate terminal handoff through {!editor_handoff}.
 
     {b Local-only invariant}: {!Cmd.Edit_runtime_toml} and
     {!Cmd.Edit_keeper_toml} only launch [$EDITOR] and write local TOML when

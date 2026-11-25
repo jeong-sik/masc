@@ -1161,9 +1161,20 @@ let test_json_worker_cancelled_before_write respond () =
 let worker_json_body = Yojson.Safe.to_string
   (`Assoc ["data", `String (String.make 20000 'x' ^ " 끝단")])
 
+let compute_json_on_worker ~request body reqd =
+  let owner = Domain.self () in
+  Response.json_value_from_cpu ~name:__FUNCTION__ ~request
+    (fun () ->
+      Alcotest.(check bool) "JSON producer runs off the request domain" true
+        (owner <> Domain.self ());
+      `OK, Yojson.Safe.from_string body)
+    reqd
+
 let worker_json_responders =
   [ "value", (fun reqd ->
       Response.json_value_on_cpu (Yojson.Safe.from_string worker_json_body) reqd)
+  ; "computed value", (fun reqd ->
+      compute_json_on_worker ~request:(Masc.Http_reqd.request reqd) worker_json_body reqd)
   ; "string", (fun reqd -> Response.json worker_json_body reqd)
   ; "lazy", (fun reqd ->
       let owner = Domain.self () in
@@ -1185,6 +1196,7 @@ let test_json_worker_wire_parity () =
           (fun () -> body) reqd)
     ; (fun ~request body reqd ->
         Response.json_value_on_cpu ~request (Yojson.Safe.from_string body) reqd)
+    ; compute_json_on_worker
     ] in
   List.iter (fun respond ->
     List.iter (fun encoding ->
@@ -1213,6 +1225,7 @@ let test_workspace_read_receipt_reaches_json_and_conditional_wire () =
           (fun () -> body) reqd)
     ; (fun ~request body reqd ->
         Response.json_value_on_cpu ~request (Yojson.Safe.from_string body) reqd)
+    ; compute_json_on_worker
     ] in
   List.iter (fun respond ->
     let attested ~request body reqd =

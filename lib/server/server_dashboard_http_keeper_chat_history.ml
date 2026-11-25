@@ -298,19 +298,39 @@ let cached_head_page ?max_total config name =
 ;;
 
 let cached_head_page_json ?max_total config name =
-  Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
-    let open Result.Syntax in
-    let* page = cached_head_page ?max_total config name in
-    let* page =
-      Keeper_chat_store.project_history_page_result ~base_dir:config.Workspace.base_path
-        ~keeper_name:name page
-    in
-    Ok (render_keeper_chat_history_page config name page))
+  let open Result.Syntax in
+  let* page = cached_head_page ?max_total config name in
+  let* page =
+    Keeper_chat_store.project_history_page_result ~base_dir:config.Workspace.base_path
+      ~keeper_name:name page
+  in
+  Ok (render_keeper_chat_history_page config name page)
 ;;
 
 let keeper_chat_initial_reply_json config name =
   Server_keeper_chat_history_read.initial_reply_json ~config ~keeper_name:name
     ~render:(fun turn -> `List (Option.to_list (Option.map autonomous_turn_json turn)))
+;;
+
+let history_page_error_response (error : Keeper_chat_history_page.error) =
+  let status : Httpun.Status.t =
+    match error with
+    | Invalid_cursor _ -> `Bad_request
+    | Stale_cursor -> `Conflict
+    | Invalid_row _ | Row_exceeds_window | Io_error _ -> `Internal_server_error
+  in
+  status, Types.error_json (Keeper_chat_history_page.error_to_string error)
+;;
+
+let respond_head_page ?max_total config name request reqd =
+  let extra_headers = Server_auth.admitted_cors_headers request in
+  (* Project and encode the current page under one read worker admission. *)
+  Http.Response.json_value_from_cpu ~name:__FUNCTION__ ~compress:true ~request ~extra_headers
+    (fun () ->
+       match cached_head_page_json ?max_total config name with
+       | Ok page -> `OK, page
+       | Error error -> history_page_error_response error)
+    reqd
 ;;
 
 let handle_page_get state req request reqd name =
@@ -335,27 +355,22 @@ let handle_page_get state req request reqd name =
     | Ok cursor, limit_raw ->
       let max_total = Option.bind limit_raw (fun raw -> int_of_string_opt (String.trim raw)) in
       let config = Mcp_server.workspace_config state in
-      let page =
-        match cursor with
-        | None -> cached_head_page_json ?max_total config name
-        | Some _ ->
+      (match cursor with
+       | None -> respond_head_page ?max_total config name request reqd
+       | Some _ ->
+         let page =
           Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
             keeper_chat_history_page_json ?max_total config name ~cursor)
-      in
-      (match page with
-       | Ok page ->
-         Http.Response.json_value_on_cpu
-           ~status:`OK ~compress:true ~request
-           ~extra_headers:(Server_auth.admitted_cors_headers request)
-           page reqd
-       | Error error ->
-         let status = match error with
-           | Page.Invalid_cursor _ -> `Bad_request
-           | Page.Stale_cursor -> `Conflict
-           | Page.Invalid_row _ | Page.Row_exceeds_window | Page.Io_error _ -> `Internal_server_error
          in
-         Server_auth.respond_json_value_with_cors ~status request reqd
-           (Types.error_json (Page.error_to_string error))))
+         (match page with
+          | Ok page ->
+            Http.Response.json_value_on_cpu
+              ~status:`OK ~compress:true ~request
+              ~extra_headers:(Server_auth.admitted_cors_headers request)
+              page reqd
+          | Error error ->
+            let status, value = history_page_error_response error in
+            Server_auth.respond_json_value_with_cors ~status request reqd value)))
 ;;
 
 let handle_read read state request reqd name =

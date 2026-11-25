@@ -490,16 +490,19 @@ let normalize_key_event (ev : Input.key_event) : Input.key_event =
   | Input.Function _ ->
       ev
 
-let replay_ime_event (ev : Input.key_event) : Input.key_event =
-  let norm = normalize_key_event ev in
+let ime_replay_opt (norm : Input.key_event) : Input.key_event option =
   if (not norm.mods.ctrl) && not norm.mods.alt then
     match norm.key with
     | Input.Char s when String.length s > 1 -> (
         match Input.Ime.single_latin_key s with
         | Some latin ->
-            normalize_key_event
-              { key = Input.Char latin; mods = Input.no_mods }
-        | None -> norm)
+            Some
+              (normalize_key_event
+                 {
+                   key = Input.Char latin;
+                   mods = { Input.no_mods with shift = norm.mods.shift };
+                 })
+        | None -> None)
     | Input.Char _
     | Input.Enter
     | Input.Tab
@@ -516,8 +519,12 @@ let replay_ime_event (ev : Input.key_event) : Input.key_event =
     | Input.Page_up
     | Input.Page_down
     | Input.Function _ ->
-        norm
-  else norm
+        None
+  else None
+
+let replay_ime_event (ev : Input.key_event) : Input.key_event =
+  let norm = normalize_key_event ev in
+  match ime_replay_opt norm with Some replayed -> replayed | None -> norm
 
 let mk_chord ?(ctrl = false) ?(alt = false) ?(shift = false) key : Input.key_event =
   normalize_key_event { key; mods = { ctrl; alt; shift } }
@@ -878,7 +885,7 @@ let bindings : binding list =
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Toggle_unreported ~key_display:"u"
         ~hint_label:(Say.make ~ko:"미보고 계정" ~en:"Unreported")
-        ~help_desc:(Say.make ~ko:"Quotas 미보고 계정 섹션 펼치기/접기" ~en:"Toggle unreported accounts in Quotas")
+        ~help_desc:(Say.make ~ko:"게시판 추천(Upvote) / Quotas 미보고 계정 섹션 펼치기·접기" ~en:"Upvote board post / Toggle unreported accounts in Quotas")
         ~footer_priority:0 (bare_char 'u');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Unbind_connector ~key_display:"U"
@@ -903,7 +910,7 @@ let bindings : binding list =
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Delete_selected ~key_display:"d"
         ~hint_label:(Say.make ~ko:"삭제" ~en:"Delete")
-        ~help_desc:(Say.make ~ko:"선택 레인 삭제 확인 모달 열기" ~en:"Open delete confirmation modal for selected lane")
+        ~help_desc:(Say.make ~ko:"선택 항목 삭제·분리 확인(레인/게시글/애드온/키퍼) / 기억 Diff 보기 / 키퍼 설정 미리보기" ~en:"Delete or detach selected item (lane/post/addon/keeper) / Memory Diff view / Keeper config dry-run")
         ~footer_priority:0 (bare_char 'd');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Configure_provider_key ~key_display:"K"
@@ -918,7 +925,7 @@ let bindings : binding list =
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Poll_account_login ~key_display:"L"
         ~hint_label:(Say.make ~ko:"로그인 확인" ~en:"Poll Login")
-        ~help_desc:(Say.make ~ko:"진행 중인 계정 / OAuth 로그인 상태 조회" ~en:"Poll in-flight account or OAuth login attempt status")
+        ~help_desc:(Say.make ~ko:"키퍼 생명주기 모달 / 진행 중인 계정·OAuth 로그인 상태 조회" ~en:"Keeper lifecycle modal / Poll in-flight account or OAuth login status")
         ~footer_priority:0 (bare_char 'L');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Copy_hash ~key_display:"H"
@@ -1244,35 +1251,7 @@ let find_in_scope scope chord =
 
 let dispatch ~scope_chain ev =
   let norm = normalize_key_event ev in
-  let ime_fallback =
-    if (not norm.mods.ctrl) && not norm.mods.alt then
-      match norm.key with
-      | Input.Char s when String.length s > 1 -> (
-          match Input.Ime.single_latin_key s with
-          | Some latin ->
-              Some
-                (normalize_key_event
-                   { key = Input.Char latin; mods = Input.no_mods })
-          | None -> None)
-      | Input.Char _
-      | Input.Enter
-      | Input.Tab
-      | Input.Backspace
-      | Input.Escape
-      | Input.Delete
-      | Input.Insert
-      | Input.Up
-      | Input.Down
-      | Input.Left
-      | Input.Right
-      | Input.Home
-      | Input.End
-      | Input.Page_up
-      | Input.Page_down
-      | Input.Function _ ->
-          None
-    else None
-  in
+  let ime_fallback = ime_replay_opt norm in
   let rec search = function
     | [] -> None
     | scope :: rest -> (

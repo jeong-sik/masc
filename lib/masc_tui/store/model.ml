@@ -187,9 +187,15 @@ type toast_level =
   | Toast_warning
   | Toast_error
 
+type toast_tag =
+  | Toast_generic
+  | Toast_quit_arm
+  | Toast_keeper_stop_arm
+
 type toast = {
   message : Say.t;
   level : toast_level;
+  tag : toast_tag;
   expires_at : Clock.Mono.t;
 }
 
@@ -229,6 +235,25 @@ type t = {
 }
 
 let quit_arm_window_s = 2.5
+
+let quit_arm_toast_message =
+  Say.make ~ko:"한 번 더 Ctrl+Q를 누르면 종료합니다"
+    ~en:"Press Ctrl+Q again to quit"
+
+let disarm_quit m =
+  match m.quit_armed_at with
+  | None -> m
+  | Some _ ->
+      let toast =
+        match m.toast with
+        | Some t -> (
+            match t.tag with
+            | Toast_quit_arm -> None
+            | Toast_generic | Toast_keeper_stop_arm -> m.toast)
+        | None -> None
+      in
+      { m with quit_armed_at = None; toast }
+
 let keeper_stop_arm_window_s = 2.5
 
 let keeper_stop_arm_toast_message ~name =
@@ -243,14 +268,14 @@ let keeper_stop_arm_toast_message ~name =
 let disarm_keeper_stop m =
   match m.keeper_stop_armed with
   | None -> m
-  | Some (armed_name, _) ->
+  | Some _ ->
       let toast =
         match m.toast with
-        | Some t
-          when Say.equal t.message
-                 (keeper_stop_arm_toast_message ~name:armed_name) ->
-            None
-        | other -> other
+        | Some t -> (
+            match t.tag with
+            | Toast_keeper_stop_arm -> None
+            | Toast_generic | Toast_quit_arm -> m.toast)
+        | None -> None
       in
       { m with keeper_stop_armed = None; toast }
 
@@ -3751,7 +3776,7 @@ let open_wiki_edit_modal_for_detail (d : Wire_knowledge.wiki_page_detail) m =
   let knowledge = Knowledge_store.begin_wiki_edit d m.knowledge in
   { m with nav; drafts; knowledge; inline_modal = Some modal }
 
-let with_toast ~now ?duration_s ~level message m =
+let with_toast ~now ?duration_s ?(tag = Toast_generic) ~level message m =
   let eff_duration =
     match duration_s with
     | Some d -> d
@@ -3773,7 +3798,7 @@ let with_toast ~now ?duration_s ~level message m =
   if keep_existing_error then m
   else
     let expires_at = Clock.Mono.after_s now eff_duration in
-    { m with toast = Some { message; level; expires_at } }
+    { m with toast = Some { message; level; tag; expires_at } }
 
 let with_incident ~source ~summary ~detail ~status m =
   let incidents, _ =

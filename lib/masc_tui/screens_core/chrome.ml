@@ -1572,7 +1572,7 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           || model.nav.filter_focused
           || Model.sidebar_has_focus model
           || Model.sidebar_drawer_open model
-          || model.nav.zoomed
+          || (model.nav.zoomed && Model.can_zoom_current_view model)
           || (Option.is_none (Model.active_dive model)
               && Knowledge_store.is_memory_diff_pinned model.knowledge
               && ((Nav.equal_workspace model.nav.workspace Nav.Knowledge
@@ -1609,9 +1609,7 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
               && Nav.equal_runtime_tab model.runtime.active_tab
                    Nav.Runtime_addons_browser
               && model.runtime.addon_catalog_mode)
-          || (Model.is_keeper_config_active model
-              && (Config_store.is_editing_field model.config
-                  || not (String.equal model.config.search_query "")))
+          || Model.is_keeper_config_active model
           || (match Model.active_dive model with
               | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_work_candle }) ->
                   Board_recovery.shown ~keeper:name model.knowledge.board_recovery
@@ -1807,10 +1805,7 @@ let render_too_small_guard grid ~(rect : Rect.t) ~(theme : Theme.t)
   in
   let line2, line2_st =
     if Option.is_some model.quit_armed_at then
-      ( Say.resolve lang
-          (Say.make ~ko:"한 번 더 Ctrl+Q를 누르면 종료합니다"
-             ~en:"Press Ctrl+Q again to quit")
-      , attn_st )
+      (Say.resolve lang Model.quit_arm_toast_message, attn_st)
     else if
       Drafts.has_non_empty_draft model.drafts
       || Drafts.other_keepers_draft_count model.drafts > 0

@@ -9016,6 +9016,166 @@ let test_p1_shortcut_and_classifier_regressions () =
   check_act "agent.heartbeat -> Activity_agent_core"
     Infra_store.Activity_agent_core (kind_of "agent.heartbeat")
 
+let test_batch_d_toast_tag_ime_and_keymap_ssot () =
+  let t0 = Clock.Mono.of_ns 5_000_000_000L in
+  let m0 = populated_model ~with_attention:false () in
+  let step m kev = Update.step ~now:t0 m (Msg.Key_event kev) in
+  let toast_tag_is expected (m : Model.t) =
+    match m.toast with
+    | Some t -> (
+        match t.tag, expected with
+        | Model.Toast_generic, Model.Toast_generic
+        | Model.Toast_quit_arm, Model.Toast_quit_arm
+        | Model.Toast_keeper_stop_arm, Model.Toast_keeper_stop_arm ->
+            true
+        | ( Model.Toast_generic
+          , (Model.Toast_quit_arm | Model.Toast_keeper_stop_arm) )
+        | ( Model.Toast_quit_arm
+          , (Model.Toast_generic | Model.Toast_keeper_stop_arm) )
+        | ( Model.Toast_keeper_stop_arm
+          , (Model.Toast_generic | Model.Toast_quit_arm) ) ->
+            false)
+    | None -> false
+  in
+
+  (* 1. Typed toast_tag SSOT: disarm_quit and disarm_keeper_stop only clear their own arm toast. *)
+  let m_q1, _ = step m0 (char_key ~ctrl:true "q") in
+  Alcotest.(check bool)
+    "1st Ctrl+Q arms quit with Toast_quit_arm and SSOT message" true
+    (Option.is_some m_q1.quit_armed_at
+     && toast_tag_is Model.Toast_quit_arm m_q1
+     &&
+     match m_q1.toast with
+     | Some t -> Say.equal t.message Model.quit_arm_toast_message
+     | None -> false);
+  let m_q_disarmed = Model.disarm_quit m_q1 in
+  Alcotest.(check bool) "disarm_quit clears quit_armed_at and Toast_quit_arm"
+    true
+    (Option.is_none m_q_disarmed.quit_armed_at
+     && Option.is_none m_q_disarmed.toast);
+  let m_q_generic =
+    Model.with_toast ~now:t0 ~level:Model.Toast_info
+      (Say.make ~ko:"일반 알림" ~en:"Generic notice")
+      m_q1
+  in
+  let m_q_keep = Model.disarm_quit m_q_generic in
+  Alcotest.(check bool)
+    "disarm_quit clears quit_armed_at while preserving Toast_generic" true
+    (Option.is_none m_q_keep.quit_armed_at
+     && toast_tag_is Model.Toast_generic m_q_keep);
+
+  let m_k_view =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Keepers; overlay = None; dive_stack = [] };
+    }
+  in
+  let m_stop1, _ = step m_k_view (char_key ~shift:true "D") in
+  Alcotest.(check bool) "1st [D] arms keeper_stop with Toast_keeper_stop_arm"
+    true
+    (Option.is_some m_stop1.keeper_stop_armed
+     && toast_tag_is Model.Toast_keeper_stop_arm m_stop1);
+  let m_stop_disarmed = Model.disarm_keeper_stop m_stop1 in
+  Alcotest.(check bool)
+    "disarm_keeper_stop clears keeper_stop_armed and Toast_keeper_stop_arm" true
+    (Option.is_none m_stop_disarmed.keeper_stop_armed
+     && Option.is_none m_stop_disarmed.toast);
+  let m_stop_generic =
+    Model.with_toast ~now:t0 ~level:Model.Toast_warning
+      (Say.make ~ko:"다른 경고" ~en:"Other warning")
+      m_stop1
+  in
+  let m_stop_keep = Model.disarm_keeper_stop m_stop_generic in
+  Alcotest.(check bool)
+    "disarm_keeper_stop clears keeper_stop_armed while preserving Toast_generic"
+    true
+    (Option.is_none m_stop_keep.keeper_stop_armed
+     && toast_tag_is Model.Toast_generic m_stop_keep);
+  let m_stop_with_quit_toast =
+    Model.with_toast ~now:t0 ~tag:Model.Toast_quit_arm
+      ~level:Model.Toast_warning Model.quit_arm_toast_message m_stop1
+  in
+  Alcotest.(check bool) "disarm_keeper_stop does not clear Toast_quit_arm" true
+    (toast_tag_is Model.Toast_quit_arm
+       (Model.disarm_keeper_stop m_stop_with_quit_toast));
+
+  (* 2. Keymap.replay_ime_event preserves Shift on Korean 2-bulsik jamo and feeds pre_dispatch. *)
+  let check_ime label ev expected_char =
+    let replayed = Keymap.replay_ime_event ev in
+    Alcotest.(check bool) label true
+      (Keymap.Input.equal_key_event replayed
+         {
+           Keymap.Input.key = Keymap.Input.Char expected_char;
+           mods = Keymap.Input.no_mods;
+         })
+  in
+  check_ime "IME Shift+ㅓ -> J" (char_key ~shift:true "ㅓ") "J";
+  check_ime "IME Shift+ㅏ -> K" (char_key ~shift:true "ㅏ") "K";
+  check_ime "IME Shift+ㅡ -> M" (char_key ~shift:true "ㅡ") "M";
+  check_ime "IME Shift+ㅇ -> D" (char_key ~shift:true "ㅇ") "D";
+  check_ime "IME unshifted ㅓ -> j" (char_key "ㅓ") "j";
+  check_ime "IME double-consonant ㅃ -> Q" (char_key "ㅃ") "Q";
+
+  let m_art =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Knowledge; overlay = None; dive_stack = [] };
+      knowledge = { m0.knowledge with active_tab = Nav.Knowledge_artifacts };
+    }
+  in
+  let m_art_m, _ = step m_art (char_key ~shift:true "ㅡ") in
+  Alcotest.(check bool)
+    "Korean IME Shift+ㅡ (M) on Artifacts opens Media_viewer" true
+    (Option.equal Nav.equal_overlay m_art_m.nav.overlay
+       (Some (Nav.System_gate Nav.Media_viewer)));
+
+  let m_kmem, _ =
+    Update_nav.push_dive m0
+      (Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_memory })
+  in
+  let m_kmem_diff =
+    {
+      m_kmem with
+      keeper_stop_armed = Some ("alpha", t0);
+      knowledge =
+        {
+          m_kmem.knowledge with
+          keeper_memory_subview = Knowledge_store.Kmem_diff_flow;
+        };
+    }
+  in
+  let m_kmem_pin, _ = step m_kmem_diff (char_key ~shift:true "ㅇ") in
+  Alcotest.(check bool)
+    "Korean IME Shift+ㅇ (D) on Kmem_diff_flow disarms stale keeper_stop_armed"
+    true (Option.is_none m_kmem_pin.keeper_stop_armed);
+
+  let m_chat, _ =
+    Update_nav.push_dive m0
+      (Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_chat })
+  in
+  let m_chat_unfocused =
+    { m_chat with drafts = Drafts.set_focus false m_chat.drafts }
+  in
+  let m_chat_ko, _ = step m_chat_unfocused (char_key "ㅎ") in
+  Alcotest.(check bool)
+    "Pillar 3 preserved: Korean input in unfocused Keeper_chat focuses composer"
+    true
+    (Drafts.is_focused m_chat_ko.drafts
+     && String.equal (Drafts.current_draft m_chat_ko.drafts).text "ㅎ");
+
+  (* 3. Delete_selected delegates to Model.is_keeper_config_active on Keepers pane 1. *)
+  let m_kcfg_split =
+    {
+      m_k_view with
+      nav = { m_k_view.nav with pane_index = 1 };
+      fleet = { m_k_view.fleet with keeper_dive_tab = Nav.Keeper_config };
+    }
+  in
+  let m_kcfg_d, _ = step m_kcfg_split (char_key "d") in
+  Alcotest.(check bool)
+    "[d] on Keepers split Keeper_config pane 1 never opens Keeper_purge_confirm"
+    true (Option.is_none m_kcfg_d.nav.overlay)
+
 let () =
   Alcotest.run "masc_tui_keymap_matrix"
     [
@@ -9082,5 +9242,8 @@ let () =
           Alcotest.test_case
             "P1 shortcut priority, Memory [d]/[D], Work [v], Wiki Ctrl+E, and activity wire classifier"
             `Quick test_p1_shortcut_and_classifier_regressions;
+          Alcotest.test_case
+            "Typed toast_tag SSOT, shifted Korean IME replay, and Keeper_config Esc/d guards"
+            `Quick test_batch_d_toast_tag_ime_and_keymap_ssot;
         ] );
     ]

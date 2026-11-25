@@ -9411,30 +9411,13 @@ and execute_action ~now (m : Model.t) action =
                   in
                   let next = { m with nav; knowledge } in
                   (next, View_fetches.fetches_for_current_view next)
+                else if Model.is_keeper_config_active m then (m, [])
                 else
-                  let in_keeper_config =
-                    match Model.active_dive m with
-                    | Some (Nav.Dive_keeper { tab; _ }) ->
-                        Nav.equal_keeper_tab tab Nav.Keeper_config
-                    | Some
-                        ( Nav.Dive_work _
-                        | Nav.Dive_knowledge _
-                        | Nav.Dive_runtime _
-                        | Nav.Dive_infra _ ) ->
-                        false
-                    | None ->
-                        Nav.equal_workspace m.nav.workspace Nav.Keepers
-                        && (m.nav.pane_index = 1 || m.nav.zoomed)
-                        && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
-                             Nav.Keeper_config
-                  in
-                  if in_keeper_config then (m, [])
-                  else
-                    match selected_keeper_name_for_lifecycle m with
-                    | Some keeper ->
-                        Update_nav.open_inline_modal m
-                          (Nav.Keeper_purge_confirm { keeper })
-                    | None -> (m, []))))
+                  match selected_keeper_name_for_lifecycle m with
+                  | Some keeper ->
+                      Update_nav.open_inline_modal m
+                        (Nav.Keeper_purge_confirm { keeper })
+                  | None -> (m, []))))
   | Keymap.Link_task_goal -> (
       if Option.is_some m.nav.overlay || Model.sidebar_has_focus m then (m, [])
       else
@@ -9511,6 +9494,7 @@ and execute_action ~now (m : Model.t) action =
                     { m with keeper_stop_armed = Some (name, now) }
                     |> Model.with_toast ~now
                          ~duration_s:Model.keeper_stop_arm_window_s
+                         ~tag:Model.Toast_keeper_stop_arm
                          ~level:Model.Toast_warning
                          (Model.keeper_stop_arm_toast_message ~name)
                   in
@@ -9524,13 +9508,12 @@ and execute_action ~now (m : Model.t) action =
         | None -> false
       in
       if is_armed then
-        ({ m with quit_armed_at = None }, [ Cmd.Quit Exit_reason.Quit_key ])
+        (Model.disarm_quit m, [ Cmd.Quit Exit_reason.Quit_key ])
       else
         let next =
           { m with quit_armed_at = Some now }
           |> Model.with_toast ~now ~duration_s:Model.quit_arm_window_s
-               ~level:Model.Toast_warning
-               (Say.make ~ko:"한 번 더 Ctrl+Q를 누르면 종료합니다"
-                  ~en:"Press Ctrl+Q again to quit")
+               ~tag:Model.Toast_quit_arm ~level:Model.Toast_warning
+               Model.quit_arm_toast_message
         in
         (next, []))

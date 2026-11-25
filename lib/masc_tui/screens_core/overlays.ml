@@ -4804,7 +4804,7 @@ let render_help_column grid ~(rect : Rect.t) ~(theme : Theme.t) ?(scroll = 0)
             let keys_s =
               let shown_keys =
                 match e.keys with
-                | a :: b :: _ -> [ a; b ]
+                | a :: b :: c :: _ -> [ a; b; c ]
                 | xs -> xs
               in
               " " ^ String.concat "/" shown_keys ^ " "

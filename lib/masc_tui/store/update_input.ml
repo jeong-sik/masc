@@ -2497,9 +2497,6 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
     | Some act -> Keymap.equal_action act Keymap.Quit_app
     | None -> false
   in
-  let is_quit_arm_toast (t : Model.toast) =
-    String.equal t.message.ko "한 번 더 Ctrl+Q를 누르면 종료합니다"
-  in
   let quit_arm_active =
     match m.quit_armed_at with
     | Some armed_at ->
@@ -2530,12 +2527,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
   in
   let m =
     if Option.is_some m.quit_armed_at && not is_quit_key then
-      let toast =
-        match m.toast with
-        | Some t when is_quit_arm_toast t -> None
-        | other -> other
-      in
-      { m with quit_armed_at = None; toast }
+      Model.disarm_quit m
     else m
   in
   let m =
@@ -3465,116 +3457,163 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                          Dive_keeper { tab = Keeper_chat } auto-focuses the
                          composer and inserts the character instead of letting
                          Korean jamo replay trigger centered modals. *)
-                      match Model.active_dive m, norm.key with
-                      | ( Some
-                            (Nav.Dive_keeper
-                               { name; tab = Nav.Keeper_chat })
-                        , Keymap.Input.Char s )
-                        when is_printable_key norm && is_korean_char s
-                             && not (Model.equal_breakpoint m.breakpoint Model.Micro)
-                        ->
-                          let drafts =
-                            m.drafts
-                            |> Drafts.set_active_keeper name
-                            |> Drafts.set_focus true
-                            |> Drafts.insert_text s
-                          in
-                          Some ({ m with drafts }, [])
-                      | ( Some (Nav.Dive_work (Nav.Goal_dive goal_id))
-                        , Keymap.Input.Char "J" )
-                        when is_printable_key norm
-                             && Option.is_none (Model.fast_approval_strip_item m) ->
-                          Some
-                            ( Update_nav.scroll_goal_dive_measure ~delta:1
-                                ~goal_id m
-                            , [] )
-                      | ( Some (Nav.Dive_work (Nav.Goal_dive goal_id))
-                        , Keymap.Input.Char "K" )
-                        when is_printable_key norm ->
-                          Some
-                            ( Update_nav.scroll_goal_dive_measure ~delta:(-1)
-                                ~goal_id m
-                            , [] )
-                      | ( Some (Nav.Dive_work (Nav.Goal_dive goal_id))
-                        , Keymap.Input.Down )
-                        when norm.mods.shift && (not norm.mods.ctrl)
-                             && not norm.mods.alt ->
-                          Some
-                            ( Update_nav.scroll_goal_dive_measure ~delta:1
-                                ~goal_id m
-                            , [] )
-                      | ( Some (Nav.Dive_work (Nav.Goal_dive goal_id))
-                        , Keymap.Input.Up )
-                        when norm.mods.shift && (not norm.mods.ctrl)
-                             && not norm.mods.alt ->
-                          Some
-                            ( Update_nav.scroll_goal_dive_measure ~delta:(-1)
-                                ~goal_id m
-                            , [] )
-                      | ( Some (Nav.Dive_knowledge (Nav.Artifact_dive _))
-                        , Keymap.Input.Char "M" )
-                        when is_printable_key norm
-                             && Option.is_some (Model.focused_artifact m) ->
-                          Some
-                            (Update_nav.open_overlay m
-                               (Nav.System_gate Nav.Media_viewer))
-                      | None, Keymap.Input.Char "M"
-                        when is_printable_key norm
-                             && Nav.equal_workspace m.nav.workspace
-                                  Nav.Knowledge
-                             && Nav.equal_knowledge_tab m.knowledge.active_tab
-                                  Nav.Knowledge_artifacts
-                             && Option.is_some (Model.focused_artifact m) ->
-                          Some
-                            (Update_nav.open_overlay m
-                               (Nav.System_gate Nav.Media_viewer))
-                      | (Some _ | None), Keymap.Input.Char "D"
-                        when is_printable_key norm
-                             && Model.is_memory_diff_pin_surface m ->
-                          Some (Update_nav.pin_memory_diff_range m)
-                      | ( ( Some
-                              ( Nav.Dive_keeper
-                                  {
-                                    tab =
-                                      ( Nav.Keeper_chat
-                                      | Nav.Keeper_context
-                                      | Nav.Keeper_tool_calls
-                                      | Nav.Keeper_memory
-                                      | Nav.Keeper_work_candle
-                                      | Nav.Keeper_sandbox
-                                      | Nav.Keeper_config
-                                      | Nav.Keeper_logs
-                                      | Nav.Keeper_identity );
-                                    _;
-                                  }
-                              | Nav.Dive_work
-                                  ( Nav.Goal_dive _
-                                  | Nav.Task_dive _
-                                  | Nav.Verification_dive _ )
-                              | Nav.Dive_knowledge
-                                  ( Nav.Thread_dive _
-                                  | Nav.Wiki_dive _
-                                  | Nav.Artifact_dive _ )
-                              | Nav.Dive_runtime _
-                              | Nav.Dive_infra _ )
-                          | None )
-                        , ( Keymap.Input.Char _
-                          | Keymap.Input.Enter
-                          | Keymap.Input.Tab
-                          | Keymap.Input.Backspace
-                          | Keymap.Input.Escape
-                          | Keymap.Input.Delete
-                          | Keymap.Input.Insert
-                          | Keymap.Input.Up
-                          | Keymap.Input.Down
-                          | Keymap.Input.Left
-                          | Keymap.Input.Right
-                          | Keymap.Input.Home
-                          | Keymap.Input.End
-                          | Keymap.Input.Page_up
-                          | Keymap.Input.Page_down
-                          | Keymap.Input.Function _ ) ) ->
-                          None
+                      let keeper_chat_korean =
+                        match Model.active_dive m, norm.key with
+                        | ( Some
+                              (Nav.Dive_keeper
+                                 { name; tab = Nav.Keeper_chat })
+                          , Keymap.Input.Char s )
+                          when is_printable_key norm && is_korean_char s
+                               && not
+                                    (Model.equal_breakpoint m.breakpoint
+                                       Model.Micro) ->
+                            let drafts =
+                              m.drafts
+                              |> Drafts.set_active_keeper name
+                              |> Drafts.set_focus true
+                              |> Drafts.insert_text s
+                            in
+                            Some ({ m with drafts }, [])
+                        | ( ( Some
+                                ( Nav.Dive_keeper
+                                    {
+                                      tab =
+                                        ( Nav.Keeper_chat
+                                        | Nav.Keeper_context
+                                        | Nav.Keeper_tool_calls
+                                        | Nav.Keeper_memory
+                                        | Nav.Keeper_work_candle
+                                        | Nav.Keeper_sandbox
+                                        | Nav.Keeper_config
+                                        | Nav.Keeper_logs
+                                        | Nav.Keeper_identity );
+                                      _;
+                                    }
+                                | Nav.Dive_work _
+                                | Nav.Dive_knowledge _
+                                | Nav.Dive_runtime _
+                                | Nav.Dive_infra _ )
+                            | None )
+                          , ( Keymap.Input.Char _
+                            | Keymap.Input.Enter
+                            | Keymap.Input.Tab
+                            | Keymap.Input.Backspace
+                            | Keymap.Input.Escape
+                            | Keymap.Input.Delete
+                            | Keymap.Input.Insert
+                            | Keymap.Input.Up
+                            | Keymap.Input.Down
+                            | Keymap.Input.Left
+                            | Keymap.Input.Right
+                            | Keymap.Input.Home
+                            | Keymap.Input.End
+                            | Keymap.Input.Page_up
+                            | Keymap.Input.Page_down
+                            | Keymap.Input.Function _ ) ) ->
+                            None
+                      in
+                      match keeper_chat_korean with
+                      | Some _ as handled -> handled
+                      | None -> (
+                          let replayed = Keymap.replay_ime_event norm in
+                          match Model.active_dive m, replayed.key with
+                          | ( Some (Nav.Dive_work (Nav.Goal_dive goal_id))
+                            , Keymap.Input.Char "J" )
+                            when is_printable_key replayed
+                                 && Option.is_none
+                                      (Model.fast_approval_strip_item m) ->
+                              Some
+                                ( Update_nav.scroll_goal_dive_measure ~delta:1
+                                    ~goal_id m
+                                , [] )
+                          | ( Some (Nav.Dive_work (Nav.Goal_dive goal_id))
+                            , Keymap.Input.Char "K" )
+                            when is_printable_key replayed ->
+                              Some
+                                ( Update_nav.scroll_goal_dive_measure ~delta:(-1)
+                                    ~goal_id m
+                                , [] )
+                          | ( Some (Nav.Dive_work (Nav.Goal_dive goal_id))
+                            , Keymap.Input.Down )
+                            when replayed.mods.shift && (not replayed.mods.ctrl)
+                                 && not replayed.mods.alt ->
+                              Some
+                                ( Update_nav.scroll_goal_dive_measure ~delta:1
+                                    ~goal_id m
+                                , [] )
+                          | ( Some (Nav.Dive_work (Nav.Goal_dive goal_id))
+                            , Keymap.Input.Up )
+                            when replayed.mods.shift && (not replayed.mods.ctrl)
+                                 && not replayed.mods.alt ->
+                              Some
+                                ( Update_nav.scroll_goal_dive_measure ~delta:(-1)
+                                    ~goal_id m
+                                , [] )
+                          | ( Some (Nav.Dive_knowledge (Nav.Artifact_dive _))
+                            , Keymap.Input.Char "M" )
+                            when is_printable_key replayed
+                                 && Option.is_some (Model.focused_artifact m) ->
+                              Some
+                                (Update_nav.open_overlay m
+                                   (Nav.System_gate Nav.Media_viewer))
+                          | None, Keymap.Input.Char "M"
+                            when is_printable_key replayed
+                                 && Nav.equal_workspace m.nav.workspace
+                                      Nav.Knowledge
+                                 && Nav.equal_knowledge_tab
+                                      m.knowledge.active_tab
+                                      Nav.Knowledge_artifacts
+                                 && Option.is_some (Model.focused_artifact m) ->
+                              Some
+                                (Update_nav.open_overlay m
+                                   (Nav.System_gate Nav.Media_viewer))
+                          | (Some _ | None), Keymap.Input.Char "D"
+                            when is_printable_key replayed
+                                 && Model.is_memory_diff_pin_surface m ->
+                              Some (Update_nav.pin_memory_diff_range m)
+                          | ( ( Some
+                                  ( Nav.Dive_keeper
+                                      {
+                                        tab =
+                                          ( Nav.Keeper_chat
+                                          | Nav.Keeper_context
+                                          | Nav.Keeper_tool_calls
+                                          | Nav.Keeper_memory
+                                          | Nav.Keeper_work_candle
+                                          | Nav.Keeper_sandbox
+                                          | Nav.Keeper_config
+                                          | Nav.Keeper_logs
+                                          | Nav.Keeper_identity );
+                                        _;
+                                      }
+                                  | Nav.Dive_work
+                                      ( Nav.Goal_dive _
+                                      | Nav.Task_dive _
+                                      | Nav.Verification_dive _ )
+                                  | Nav.Dive_knowledge
+                                      ( Nav.Thread_dive _
+                                      | Nav.Wiki_dive _
+                                      | Nav.Artifact_dive _ )
+                                  | Nav.Dive_runtime _
+                                  | Nav.Dive_infra _ )
+                              | None )
+                            , ( Keymap.Input.Char _
+                              | Keymap.Input.Enter
+                              | Keymap.Input.Tab
+                              | Keymap.Input.Backspace
+                              | Keymap.Input.Escape
+                              | Keymap.Input.Delete
+                              | Keymap.Input.Insert
+                              | Keymap.Input.Up
+                              | Keymap.Input.Down
+                              | Keymap.Input.Left
+                              | Keymap.Input.Right
+                              | Keymap.Input.Home
+                              | Keymap.Input.End
+                              | Keymap.Input.Page_up
+                              | Keymap.Input.Page_down
+                              | Keymap.Input.Function _ ) ) ->
+                              None)
                     else None
                   in
                   match pre_dispatch with

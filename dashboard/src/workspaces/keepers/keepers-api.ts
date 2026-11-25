@@ -65,18 +65,22 @@ import type {
   KeeperWaitingInventoryData,
   KeeperWaitingRow,
   KeeperLastPromptData,
+  KeeperLaneFailure,
   KeeperLinkedTask,
   KeeperMemoryFactsData,
   KeeperMemoryJournalData,
   KeeperMemoryJournalEntry,
   KeeperMemoryOsInternalsData,
   KeeperOperatorNoteData,
+  KeeperPathRest,
   KeeperRosterItem,
   KeeperSandboxData,
   KeeperToolCallEntry,
   KeeperToolCallsData,
   KeeperToolStatsData,
+  KeeperTurnBreakdown,
   KeeperTurnRecordsData,
+  KeeperWaitingSummary,
   MemoryActPayload,
   OrdinaryMemoryBranch,
   PortraitSlot,
@@ -126,10 +130,58 @@ export function observeRosterContextPct(item: KeeperRosterItem): Observed<number
   if (typeof item.context_ratio === 'number' && Number.isFinite(item.context_ratio)) {
     return observedValue(Math.max(0, Math.min(100, Math.round(item.context_ratio * 100))))
   }
+  if (
+    item.context_provenance === 'estimated'
+    && typeof item.estimated_context_ratio === 'number'
+    && Number.isFinite(item.estimated_context_ratio)
+  ) {
+    return observedValue(Math.max(0, Math.min(100, Math.round(item.estimated_context_ratio * 100))))
+  }
   if (item.context_unavailable_reason) {
     return observedAbsent(item.context_unavailable_reason)
   }
   return observedAbsent()
+}
+
+export function formatContextDetail(item: Pick<
+  KeeperRosterItem,
+  'context_ratio' | 'context_tokens' | 'context_max' | 'context_provenance' | 'estimated_context_ratio' | 'context_unavailable_reason'
+>): { readonly label: string; readonly tooltip: string; readonly estimated: boolean } {
+  if (typeof item.context_ratio === 'number' && Number.isFinite(item.context_ratio)) {
+    const pct = Math.max(0, Math.min(100, Math.round(item.context_ratio * 100)))
+    const tok = item.context_tokens != null && item.context_max != null
+      ? `${item.context_tokens.toLocaleString('en-US')} / ${item.context_max.toLocaleString('en-US')} tok`
+      : `측정됨 (${pct}%)`
+    return { label: `${pct}%`, tooltip: tok, estimated: false }
+  }
+  if (
+    item.context_provenance === 'estimated'
+    && typeof item.estimated_context_ratio === 'number'
+    && Number.isFinite(item.estimated_context_ratio)
+  ) {
+    const pct = Math.max(0, Math.min(100, Math.round(item.estimated_context_ratio * 100)))
+    return {
+      label: `~${pct}%`,
+      tooltip: `추정 컨텍스트 비율 (~${pct}%)${item.context_unavailable_reason ? ` · ${item.context_unavailable_reason}` : ''}`,
+      estimated: true,
+    }
+  }
+  const reason = item.context_unavailable_reason
+  return {
+    label: '없음',
+    tooltip: reason ? `컨텍스트 미측정 (${reason})` : '컨텍스트 미측정',
+    estimated: false,
+  }
+}
+
+export function isKeeperPathResting(
+  k: Pick<KeeperRosterItem, 'runtime_path_rest' | 'paused' | 'keepalive_running' | 'health' | 'phase'>,
+): boolean {
+  if (k.runtime_path_rest?.status !== 'resting') return false
+  if (k.paused || !k.keepalive_running) return false
+  const h = k.health.toLowerCase()
+  const p = k.phase.toLowerCase()
+  return h !== 'offline' && p !== 'offline' && p !== 'stopped' && p !== 'paused'
 }
 
 /**
@@ -169,6 +221,95 @@ interface TurnListItem {
   readonly keeper_name: string
   readonly chat_control_token: string | null
   readonly active: KeeperRosterItem['active_turn']
+  readonly waiting: KeeperWaitingSummary | null
+}
+
+function formatUnixOrIso(v: unknown): string | null {
+  const s = asStr(v)
+  if (s) return s
+  const n = asNum(v)
+  if (n === null) return null
+  const ms = n < 1_000_000_000_000 ? n * 1000 : n
+  const d = new Date(ms)
+  return Number.isNaN(d.getTime()) ? null : d.toISOString()
+}
+
+function decodeWaitingSummary(raw: unknown): KeeperWaitingSummary | null {
+  const rows = Array.isArray(raw)
+    ? raw
+    : isRecord(raw) && Array.isArray(raw.waiting_heads)
+      ? raw.waiting_heads
+      : isRecord(raw) && Array.isArray(raw.items)
+        ? raw.items
+        : isRecord(raw) && Array.isArray(raw.entries)
+          ? raw.entries
+          : null
+  const topCount = isRecord(raw) ? (asNum(raw.waiting_count) ?? asNum(raw.count) ?? asNum(raw.total)) : null
+  const topDueAt = isRecord(raw) ? formatUnixOrIso(raw.due_at) : null
+  if (rows && rows.length > 0) {
+    const first = isRecord(rows[0]) ? rows[0] : null
+    const primaryReason = first
+      ? (asStr(first.waiting_on) ?? asStr(first.what) ?? asStr(first.source) ?? asStr(first.reason))
+      : null
+    const dueAt = (first ? (formatUnixOrIso(first.due_at) ?? asStr(first.next_action)) : null) ?? topDueAt
+    return { count: topCount !== null && topCount > 0 ? topCount : rows.length, primary_reason: primaryReason, due_at: dueAt }
+  }
+  if (isRecord(raw) && topCount !== null && topCount > 0) {
+    return {
+      count: topCount,
+      primary_reason: asStr(raw.waiting_on) ?? asStr(raw.what) ?? asStr(raw.reason),
+      due_at: topDueAt,
+    }
+  }
+  return null
+}
+
+function decodePathRest(raw: unknown): KeeperPathRest | null {
+  if (!isRecord(raw)) return null
+  const st = asStr(raw.status)?.toLowerCase()
+  if (st !== 'serving' && st !== 'resting') return null
+  return {
+    status: st,
+    runtime_id: asStr(raw.runtime_id),
+    release_at: formatUnixOrIso(raw.release_at) ?? formatUnixOrIso(raw.release_at_unix),
+    release_basis: asStr(raw.release_basis),
+  }
+}
+
+function decodeSingleLaneFailure(row: unknown): KeeperLaneFailure | null {
+  if (!isRecord(row)) return null
+  const summary = asStr(row.summary)
+    ?? (isRecord(row.failure) && isRecord(row.failure.cause) ? asStr(row.failure.cause.detail) : null)
+    ?? asStr(row.detail)
+  if (!summary) return null
+  const faultKind = isRecord(row.api_candidate_fault)
+    ? asStr(row.api_candidate_fault.fact) ?? asStr(row.api_candidate_fault.kind)
+    : isRecord(row.failure) && isRecord(row.failure.cause)
+      ? asStr(row.failure.cause.kind)
+      : null
+  return {
+    runtime_id: asStr(row.runtime_id),
+    summary,
+    fault_kind: faultKind,
+  }
+}
+
+function decodeLaneFailures(raw: unknown): readonly KeeperLaneFailure[] {
+  if (!isRecord(raw)) return []
+  const evidence = isRecord(raw.evidence) ? raw.evidence : raw
+  const failuresRaw = Array.isArray(evidence.failures) ? evidence.failures : []
+  const out: KeeperLaneFailure[] = []
+  for (const row of failuresRaw) {
+    const parsed = decodeSingleLaneFailure(row)
+    if (parsed) out.push(parsed)
+  }
+  if (isRecord(evidence.terminal) && asStr(evidence.terminal.kind) === 'candidate') {
+    const term = decodeSingleLaneFailure(evidence.terminal)
+    if (term && !out.some((f) => f.runtime_id === term.runtime_id && f.summary === term.summary)) {
+      out.push(term)
+    }
+  }
+  return out
 }
 
 function decodeTurnPreview(raw: unknown): KeeperActiveTurnPreview | null {
@@ -207,21 +348,24 @@ function decodeTurnsList(raw: unknown): Map<string, TurnListItem> {
       : isRecord(row.turn)
         ? row.turn
         : null
+    const decodedPreview = activeRaw ? decodeTurnPreview(activeRaw.preview) : null
     const active: KeeperActiveTurn | null = activeRaw
       ? {
           lane: asStr(activeRaw.lane) ?? 'chat',
           turn_ref: asStr(activeRaw.turn_ref),
           started_at_unix: asNum(activeRaw.started_at_unix) ?? asNum(activeRaw.started_at) ?? 0,
           phase: asStr(activeRaw.phase),
-          tool_in_flight: asStr(activeRaw.tool_in_flight) ?? asStr(activeRaw.tool),
+          tool_in_flight: asStr(activeRaw.tool_in_flight) ?? asStr(activeRaw.tool) ?? decodedPreview?.last_tool ?? null,
           elapsed_ms: asNum(activeRaw.elapsed_ms),
-          preview: decodeTurnPreview(activeRaw.preview),
+          preview: decodedPreview,
         }
       : null
+    const waiting = decodeWaitingSummary(row.waiting ?? row.waiting_inventory)
     map.set(name, {
       keeper_name: name,
       chat_control_token: asStr(row.chat_control_token),
       active,
+      waiting,
     })
   }
   return map
@@ -246,13 +390,19 @@ export function decodeKeeperRoster(gateRaw: unknown): KeeperRosterItem[] {
       : null
 
     let turns24h: number | null = null
+    let turnsBreakdown: KeeperTurnBreakdown | null = null
     if (isRecord(raw.recent_turns) && Array.isArray(raw.recent_turns.slots)) {
-      let sum = 0
+      let okCount = 0
+      let restedCount = 0
+      let failedCount = 0
       for (const s of raw.recent_turns.slots) {
         if (!isRecord(s)) continue
-        sum += (asNum(s.ok) ?? 0) + (asNum(s.rested) ?? 0) + (asNum(s.failed) ?? 0)
+        okCount += asNum(s.ok) ?? 0
+        restedCount += asNum(s.rested) ?? 0
+        failedCount += asNum(s.failed) ?? 0
       }
-      turns24h = sum
+      turns24h = okCount + restedCount + failedCount
+      turnsBreakdown = { ok: okCount, rested: restedCount, failed: failedCount }
     }
 
     let portraitEquipment: KeeperEquipment | null = null
@@ -263,6 +413,12 @@ export function decodeKeeperRoster(gateRaw: unknown): KeeperRosterItem[] {
     const candleVal = typeof raw.candle_balance_milli === 'string' || typeof raw.candle_balance_milli === 'number'
       ? raw.candle_balance_milli
       : null
+    const ctxProvRaw = asStr(raw.context_provenance)
+    const contextProvenance = ctxProvRaw === 'measured' || ctxProvRaw === 'estimated' || ctxProvRaw === 'unavailable'
+      ? ctxProvRaw
+      : null
+    const pathRest = decodePathRest(raw.runtime_path_rest)
+    const laneFailures = decodeLaneFailures(raw.runtime_lane_observation)
 
     items.push({
       name,
@@ -278,14 +434,25 @@ export function decodeKeeperRoster(gateRaw: unknown): KeeperRosterItem[] {
       context_ratio: asNum(raw.context_ratio),
       context_tokens: asNum(raw.context_tokens),
       context_max: asNum(raw.context_max),
+      context_provenance: contextProvenance,
+      estimated_context_ratio: asNum(raw.estimated_context_ratio),
       context_unavailable_reason: asStr(raw.context_metrics_unavailable_reason),
       runtime_blocker_summary: asStr(raw.runtime_blocker_summary),
+      runtime_blocker_signature: asStr(raw.runtime_blocker_signature),
+      runtime_path_rest: pathRest,
+      operator_disposition: asStr(raw.operator_disposition),
+      operator_disposition_reason: asStr(raw.operator_disposition_reason),
+      failing_since: asNum(raw.failing_since),
+      next_action: asStr(raw.next_action),
+      runtime_lane_failures: laneFailures,
       last_failure: lf,
       directory_issue: issue,
       turns_24h: turns24h,
+      turns_24h_breakdown: turnsBreakdown,
       candle_balance_milli: candleVal,
       portrait_equipment: portraitEquipment,
       chat_control_token: null,
+      waiting_summary: null,
       active_turn: null,
     })
   }
@@ -310,15 +477,25 @@ export function filterAndSortRoster(
         k.name.toLowerCase().includes(q)
         || k.company.toLowerCase().includes(q)
         || k.runtime_id.toLowerCase().includes(q)
-        || k.health.toLowerCase().includes(q),
+        || k.health.toLowerCase().includes(q)
+        || (k.runtime_blocker_summary?.toLowerCase().includes(q) ?? false),
       )
 
   if (mode === 'attention') {
     return filtered.sort((a, b) => {
-      const aScore = (needsRosterAttention(a) ? 0 : a.paused ? 1 : 2)
-      const bScore = (needsRosterAttention(b) ? 0 : b.paused ? 1 : 2)
+      const score = (k: KeeperRosterItem) =>
+        needsRosterAttention(k) ? 0 : isKeeperPathResting(k) ? 1 : k.paused ? 2 : 3
+      const aScore = score(a)
+      const bScore = score(b)
       if (aScore !== bScore) return aScore - bScore
-      return (b.context_ratio ?? -1) - (a.context_ratio ?? -1) || a.name.localeCompare(b.name)
+      const ctxVal = (k: KeeperRosterItem): number => {
+        if (k.context_ratio !== null) return k.context_ratio
+        if (k.context_provenance === 'estimated' && k.estimated_context_ratio != null) {
+          return k.estimated_context_ratio
+        }
+        return -1
+      }
+      return ctxVal(b) - ctxVal(a) || a.name.localeCompare(b.name)
     })
   }
   if (mode === 'wall24h') {
@@ -334,9 +511,15 @@ export function filterAndSortRoster(
 }
 
 export const KEEPER_ROSTER_OBSERVER_TOPICS: readonly string[] = [
+  'keeper',
   'keeper_roster_changed',
   'keeper_row_changed',
   'keeper_turn_changed',
+  'keeper_turn_complete',
+  'keeper_waiting_inventory_changed',
+  'provider_standing',
+  'keeper_turn',
+  'keeper_lifecycle',
 ]
 
 const KEEPER_ROSTER_KEY = 'keepers:roster'

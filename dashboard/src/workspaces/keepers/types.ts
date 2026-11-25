@@ -56,6 +56,30 @@ export interface KeeperWaitingInventoryData {
   readonly rows: readonly KeeperWaitingRow[]
 }
 
+export interface KeeperPathRest {
+  readonly status: 'serving' | 'resting'
+  readonly runtime_id: string | null
+  readonly release_at: string | null
+  readonly release_basis: string | null
+}
+
+export interface KeeperLaneFailure {
+  readonly runtime_id: string | null
+  readonly summary: string
+  readonly fault_kind: string | null
+}
+
+export interface KeeperTurnBreakdown {
+  readonly ok: number
+  readonly rested: number
+  readonly failed: number
+}
+
+export interface KeeperWaitingSummary {
+  readonly count: number
+  readonly primary_reason: string | null
+  readonly due_at: string | null
+}
 export interface KeeperRosterItem {
   readonly name: string
   readonly status: string
@@ -70,14 +94,25 @@ export interface KeeperRosterItem {
   readonly context_ratio: number | null
   readonly context_tokens: number | null
   readonly context_max: number | null
+  readonly context_provenance?: 'measured' | 'estimated' | 'unavailable' | null
+  readonly estimated_context_ratio?: number | null
   readonly context_unavailable_reason: string | null
   readonly runtime_blocker_summary: string | null
+  readonly runtime_blocker_signature?: string | null
+  readonly runtime_path_rest?: KeeperPathRest | null
+  readonly operator_disposition?: string | null
+  readonly operator_disposition_reason?: string | null
+  readonly failing_since?: number | null
+  readonly next_action?: string | null
+  readonly runtime_lane_failures?: readonly KeeperLaneFailure[]
   readonly last_failure: { readonly cause: string; readonly at_unix: number | null } | null
   readonly directory_issue: string | null
   readonly turns_24h: number | null
+  readonly turns_24h_breakdown?: KeeperTurnBreakdown | null
   readonly candle_balance_milli: string | number | null
   readonly portrait_equipment: KeeperEquipment | null
   readonly chat_control_token: string | null
+  readonly waiting_summary?: KeeperWaitingSummary | null
   readonly active_turn: KeeperActiveTurn | null
 }
 

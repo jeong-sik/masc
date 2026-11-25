@@ -163,6 +163,7 @@ export function BoardTab(props: WorkspaceViewProps) {
   const [selectedPostId, setSelectedPostId] = useState<string | null>(props.entityId ?? null)
   const [detail, setDetail] = useState<BoardDetailData | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
+  const [detailError, setDetailError] = useState<string | null>(null)
   const [expandedChainHeads, setExpandedChainHeads] = useState<Record<string, boolean>>({})
   const detailAbortRef = useRef<AbortController | null>(null)
 
@@ -278,19 +279,34 @@ export function BoardTab(props: WorkspaceViewProps) {
     if (authSession.peek().kind === 'multi_account_signed_in') {
       setDetail(null)
       setDetailLoading(false)
+      setDetailError(null)
       return
     }
     setDetailLoading(true)
+    setDetailError(null)
     const res = await apiGet<unknown>(
       `/api/v1/board/${encodeURIComponent(postId)}?format=flat&comment_limit=100`,
       { signal },
     )
     if (signal?.aborted) return
     setDetailLoading(false)
-    if (!res.ok || !isRecord(res.value)) return
+    if (!res.ok) {
+      setDetail(null)
+      setDetailError(`게시글 상세/댓글 조회 실패: ${res.error.message}`)
+      return
+    }
+    if (!isRecord(res.value)) {
+      setDetail(null)
+      setDetailError('게시글 상세 응답 형식이 올바르지 않습니다.')
+      return
+    }
     const postRaw = isRecord(res.value.post) ? res.value.post : res.value
     const post = decodeBoardPost(postRaw)
-    if (!post) return
+    if (!post) {
+      setDetail(null)
+      setDetailError('게시글 상세 파싱에 실패했습니다.')
+      return
+    }
     const rawComments = Array.isArray(res.value.comments)
       ? res.value.comments
       : Array.isArray(res.value.comment_context)
@@ -312,6 +328,7 @@ export function BoardTab(props: WorkspaceViewProps) {
     if (!selectedPostId) {
       setDetail(null)
       setDetailLoading(false)
+      setDetailError(null)
       return
     }
     const ctrl = new AbortController()
@@ -694,6 +711,7 @@ export function BoardTab(props: WorkspaceViewProps) {
     ? html`
         <div class="kn-detail-pad">
           ${feedback && html`<div class=${`kn-notice kn-notice--${feedback.kind}`} role="status">${feedback.message}</div>`}
+          ${detailError && html`<div class="kn-notice kn-notice--err" role="alert">${detailError}</div>`}
           ${isMultiAccount && html`
             <div class="kn-notice kn-notice--info" role="note">
               멀티-계정 대시보드 세션: <code>/api/v1/dashboard/board</code> 읽기 전용 피드를 표시합니다. 댓글·반응·편집은 단일-사용자 로컬 세션에서 지원됩니다.
@@ -896,7 +914,7 @@ export function BoardTab(props: WorkspaceViewProps) {
           ${selectedPostId
             ? (detailLoading || loading
                 ? html`<span class="dtable-absent">게시글 불러오는 중…</span>`
-                : html`<div class="kn-notice kn-notice--err" role="alert">게시글 <code>${selectedPostId}</code>을 확인할 수 없습니다.</div>`)
+                : html`<div class="kn-notice kn-notice--err" role="alert">${detailError ?? `게시글 ${selectedPostId}을 확인할 수 없습니다.`}</div>`)
             : html`<span class="dtable-absent">게시글을 선택하세요.</span>`}
         </div>
       `}

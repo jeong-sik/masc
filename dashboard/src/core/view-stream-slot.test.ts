@@ -10,6 +10,8 @@ import {
   OBSERVER_SSE_INSTANCE_HEADER,
   extractObserverTopics,
   getObserverSseInstanceId,
+  markStreamGap,
+  markViewSynced,
   observerConnected,
   observerLastEventId,
   observerSseInstanceId,
@@ -148,12 +150,43 @@ describe('core/observer & core/time-window', () => {
     resetAuthStateForTests()
     resetObserverStateForTests()
     resetTimeWindowForTests('24h')
+    resourceCache.clearAll()
   })
 
   afterEach(() => {
     resetObserverStateForTests()
     resetAuthStateForTests()
     resetTimeWindowForTests('24h')
+    resourceCache.clearAll()
+  })
+
+  it('refreshes a published Dashboard observation without reloading Fleet slots for preview frames', async () => {
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    const gate = vi.fn(async () => ok('gate snapshot'))
+    const fleet = vi.fn(async () => ok('fleet slots'))
+    const gateRead = () => resourceCache.fetch('gate:queue', gate, { topics: ['gate'], reason: 'sse' })
+    const fleetRead = () => resourceCache.fetch('keepers:roster', fleet, { topics: ['keeper', 'keeper_turn'], reason: 'sse' })
+    await Promise.all([gateRead(), fleetRead()])
+
+    const observation = { type: 'workspace_dataset_changed', dataset: 'dashboard_observation', topic: 'gate', scope: 'workspace' }
+    const preview = { type: 'keeper_turn_preview_changed', name: 'alpha', observation: { owner_key: 'owner', preview: { revision: 3 } } }
+    const send = async (...payloads: unknown[]) => {
+      const body = payloads.map((data) => `data: ${JSON.stringify(data)}\n\n`).join('')
+      await startObserverStream({ fetchImpl: async () => new Response(body), autoReconnect: false })
+    }
+    await send(preview, preview, { jsonrpc: '2.0', method: 'notifications/message', params: observation })
+    await Promise.all([gateRead(), fleetRead()])
+    expect({ gateReads: gate.mock.calls.length, fleetReads: fleet.mock.calls.length }).toEqual({ gateReads: 2, fleetReads: 1 })
+
+    await send(observation, { type: 'keeper_turn_changed', name: 'alpha' })
+    await Promise.all([gateRead(), fleetRead()])
+    expect({ gateReads: gate.mock.calls.length, fleetReads: fleet.mock.calls.length }).toEqual({ gateReads: 3, fleetReads: 2 })
   })
 
   it('selects /api/v1/auth/events in multi_account and /mcp?sse_kind=observer in single_user', () => {
@@ -311,5 +344,58 @@ describe('core/observer & core/time-window', () => {
     bumpSessionEpoch()
     expect(observerSseInstanceId.value).toBeNull()
     expect(getObserverSseInstanceId()).toBeNull()
+  })
+
+  it('preserves STREAM_GAP across markViewSynced, extracts dataset topics, and auto-reconnects after drop', async () => {
+    // 1. markViewSynced must not erase STREAM_GAP while disconnected
+    markStreamGap('observer_disconnected')
+    expect(viewProvenance.value).toBe('STREAM_GAP')
+    markViewSynced()
+    expect(viewProvenance.value).toBe('STREAM_GAP')
+
+    // 2. extractObserverTopics extracts server dataset + maps aliases
+    const dsFrame = parseSseBlock(
+      'event: workspace_dataset_changed\ndata: {"dataset":"provider_standing","type":"keeper_row_changed"}\n',
+    )!
+    expect(extractObserverTopics(dsFrame)).toEqual(
+      expect.arrayContaining(['workspace_dataset_changed', 'provider_standing', 'keeper_row_changed', 'keeper', 'provider', 'quota']),
+    )
+
+    // 3. Auto-reconnect schedules a retry after transient drop and restores LIVE SSE
+    let calls = 0
+    const fetchMock = vi.fn(async () => {
+      calls += 1
+      if (calls === 1) {
+        return new Response(null, { status: 503 })
+      }
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(': keepalive\n\n'))
+        },
+      })
+      return new Response(stream, {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      })
+    })
+
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    await startObserverStream({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      reconnectBaseDelayMs: 15,
+    })
+    expect(calls).toBe(1)
+    expect(viewProvenance.value).toBe('STREAM_GAP')
+
+    await new Promise((r) => setTimeout(r, 60))
+    expect(calls).toBe(2)
+    expect(observerConnected.value).toBe(true)
+    expect(viewProvenance.value).toBe('LIVE SSE')
   })
 })

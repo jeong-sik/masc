@@ -10,8 +10,9 @@
  */
 
 import { ok, type Result } from '../../lib/result'
+import { authSession } from '../../core/auth'
 import { apiGet, apiGetV2, type ApiError } from '../../core/transport'
-import { resourceCache, type FetchReason, type Observed } from '../../core/resource-cache'
+import { observedAbsent, resourceCache, type FetchReason, type Observed } from '../../core/resource-cache'
 import { timeWindowProviderDays, type TimeWindow } from '../../core/time-window'
 import type {
   PulseApprovalItem,
@@ -20,6 +21,8 @@ import type {
   PulseCandleDigest,
   PulseGoalSummary,
   PulseKeeperCostRow,
+  PulseKeeperLaneFailure,
+  PulseKeeperPathRest,
   PulseKeeperRow,
   PulseProviderUsagePoint,
   PulseProviderUsageSnapshot,
@@ -112,6 +115,64 @@ function decodeTurnSlots(raw: unknown): { known_since: number; slots: PulseTurnS
   return { known_since: knownSince, slots }
 }
 
+function formatPulseUnixOrIso(v: unknown): string | null {
+  const s = asStr(v)
+  if (s) return s
+  const n = asNum(v)
+  if (n === null) return null
+  const ms = n < 1_000_000_000_000 ? n * 1000 : n
+  const d = new Date(ms)
+  return Number.isNaN(d.getTime()) ? null : d.toISOString()
+}
+
+function decodePulsePathRest(raw: unknown): PulseKeeperPathRest | null {
+  if (!isRecord(raw)) return null
+  const st = asStr(raw.status)?.toLowerCase()
+  if (st !== 'serving' && st !== 'resting') return null
+  return {
+    status: st,
+    runtime_id: asStr(raw.runtime_id),
+    release_at: formatPulseUnixOrIso(raw.release_at) ?? formatPulseUnixOrIso(raw.release_at_unix),
+    release_basis: asStr(raw.release_basis),
+  }
+}
+
+function decodeSinglePulseLaneFailure(row: unknown): PulseKeeperLaneFailure | null {
+  if (!isRecord(row)) return null
+  const summary = asStr(row.summary)
+    ?? (isRecord(row.failure) && isRecord(row.failure.cause) ? asStr(row.failure.cause.detail) : null)
+    ?? asStr(row.detail)
+  if (!summary) return null
+  const faultKind = isRecord(row.api_candidate_fault)
+    ? asStr(row.api_candidate_fault.fact) ?? asStr(row.api_candidate_fault.kind)
+    : isRecord(row.failure) && isRecord(row.failure.cause)
+      ? asStr(row.failure.cause.kind)
+      : null
+  return {
+    runtime_id: asStr(row.runtime_id),
+    summary,
+    fault_kind: faultKind,
+  }
+}
+
+function decodePulseLaneFailures(raw: unknown): readonly PulseKeeperLaneFailure[] {
+  if (!isRecord(raw)) return []
+  const evidence = isRecord(raw.evidence) ? raw.evidence : raw
+  const failuresRaw = Array.isArray(evidence.failures) ? evidence.failures : []
+  const out: PulseKeeperLaneFailure[] = []
+  for (const row of failuresRaw) {
+    const parsed = decodeSinglePulseLaneFailure(row)
+    if (parsed) out.push(parsed)
+  }
+  if (isRecord(evidence.terminal) && asStr(evidence.terminal.kind) === 'candidate') {
+    const term = decodeSinglePulseLaneFailure(evidence.terminal)
+    if (term && !out.some((f) => f.runtime_id === term.runtime_id && f.summary === term.summary)) {
+      out.push(term)
+    }
+  }
+  return out
+}
+
 export function decodePulseKeepers(raw: unknown): PulseKeeperRow[] {
   const rec = isRecord(raw) ? raw : {}
   const list = Array.isArray(rec.keepers) ? rec.keepers : []
@@ -130,6 +191,10 @@ export function decodePulseKeepers(raw: unknown): PulseKeeperRow[] {
     const candleVal = typeof item.candle_balance_milli === 'string' || typeof item.candle_balance_milli === 'number'
       ? item.candle_balance_milli
       : null
+    const ctxProvRaw = asStr(item.context_provenance)
+    const contextProvenance = ctxProvRaw === 'measured' || ctxProvRaw === 'estimated' || ctxProvRaw === 'unavailable'
+      ? ctxProvRaw
+      : null
 
     rows.push({
       name,
@@ -143,9 +208,17 @@ export function decodePulseKeepers(raw: unknown): PulseKeeperRow[] {
       context_ratio: asNum(item.context_ratio),
       context_tokens: asNum(item.context_tokens),
       context_max: asNum(item.context_max),
+      context_provenance: contextProvenance,
+      estimated_context_ratio: asNum(item.estimated_context_ratio),
       context_unavailable_reason: asStr(item.context_metrics_unavailable_reason),
       next_action: asStr(item.next_action),
       runtime_blocker_summary: asStr(item.runtime_blocker_summary),
+      runtime_blocker_signature: asStr(item.runtime_blocker_signature),
+      runtime_path_rest: decodePulsePathRest(item.runtime_path_rest),
+      operator_disposition: asStr(item.operator_disposition),
+      operator_disposition_reason: asStr(item.operator_disposition_reason),
+      failing_since: asNum(item.failing_since),
+      runtime_lane_failures: decodePulseLaneFailures(item.runtime_lane_observation),
       last_failure: lastFailure,
       recent_turns: decodeTurnSlots(item.recent_turns),
       candle_balance_milli: candleVal,
@@ -387,13 +460,18 @@ export interface PulseLoadBundle {
 }
 
 export function readPulseBundle(win: TimeWindow): PulseLoadBundle {
+  const isMultiAccount = authSession.value.kind === 'multi_account_signed_in'
   return {
     shell: resourceCache.observe<PulseShellSnapshot>(PULSE_CACHE_KEYS.shell).value,
     keepers: resourceCache.observe<readonly PulseKeeperRow[]>(PULSE_CACHE_KEYS.keepers).value,
     costs: resourceCache.observe<readonly PulseKeeperCostRow[]>(PULSE_CACHE_KEYS.costs).value,
     usage: resourceCache.observe<PulseProviderUsageSnapshot>(PULSE_CACHE_KEYS.usage(win)).value,
-    approvals: resourceCache.observe<readonly PulseApprovalItem[]>(PULSE_CACHE_KEYS.approvals).value,
-    asks: resourceCache.observe<readonly PulseAskItem[]>(PULSE_CACHE_KEYS.asks).value,
+    approvals: isMultiAccount
+      ? observedAbsent<readonly PulseApprovalItem[]>('multi_account_unbridged')
+      : resourceCache.observe<readonly PulseApprovalItem[]>(PULSE_CACHE_KEYS.approvals).value,
+    asks: isMultiAccount
+      ? observedAbsent<readonly PulseAskItem[]>('multi_account_unbridged')
+      : resourceCache.observe<readonly PulseAskItem[]>(PULSE_CACHE_KEYS.asks).value,
     goals: resourceCache.observe<readonly PulseGoalSummary[]>(PULSE_CACHE_KEYS.goals).value,
     board: resourceCache.observe<readonly PulseBoardPost[]>(PULSE_CACHE_KEYS.board).value,
     worldMemory: resourceCache.observe<PulseWorldMemoryDigest>(PULSE_CACHE_KEYS.worldMemory).value,
@@ -406,47 +484,52 @@ export async function loadPulseBundle(
   reason: FetchReason = 'mount',
 ): Promise<void> {
   const usageDays = timeWindowProviderDays(win)
+  const isMultiAccount = authSession.peek().kind === 'multi_account_signed_in'
 
   await Promise.all([
     resourceCache.fetch<PulseShellSnapshot>(
       PULSE_CACHE_KEYS.shell,
       (signal) => wrapResult(apiGet('/api/v1/dashboard/shell', { signal, decode: decodeShell })),
-      { ttlMs: 15_000, topics: ['keeper', 'task', 'goal', 'shell'], reason },
+      { ttlMs: 15_000, topics: ['keeper', 'keeper_row_changed', 'keeper_roster_changed', 'task', 'goal', 'goal_projection_changed', 'shell'], reason },
     ),
     resourceCache.fetch<readonly PulseKeeperRow[]>(
       PULSE_CACHE_KEYS.keepers,
       (signal) => wrapResult(apiGet('/api/v1/gate/keepers?detailed=true', { signal, decode: decodePulseKeepers })),
-      { ttlMs: 12_000, topics: ['keeper', 'keeper_turn', 'keeper_lifecycle'], reason },
+      { ttlMs: 12_000, topics: ['keeper', 'keeper_row_changed', 'keeper_roster_changed', 'keeper_turn_complete', 'provider_standing', 'keeper_turn', 'keeper_lifecycle'], reason },
     ),
     resourceCache.fetch<readonly PulseKeeperCostRow[]>(
       PULSE_CACHE_KEYS.costs,
       (signal) => wrapResult(apiGet(`/api/v1/dashboard/keeper-costs?window=${KEEPER_COSTS_MAX_WINDOW_MINUTES}`, { signal, decode: decodeCosts })),
-      { ttlMs: 30_000, topics: ['keeper_turn', 'cost'], reason },
+      { ttlMs: 30_000, topics: ['keeper_turn', 'keeper_turn_complete', 'cost'], reason },
     ),
     resourceCache.fetch<PulseProviderUsageSnapshot>(
       PULSE_CACHE_KEYS.usage(win),
       (signal) => wrapResult(apiGet(`/api/v1/dashboard/provider-usage-history?days=${usageDays}`, { signal, decode: decodeProviderUsage })),
-      { ttlMs: 60_000, topics: ['provider', 'quota'], reason },
+      { ttlMs: 60_000, topics: ['provider', 'provider_standing', 'provider_usage', 'quota'], reason },
     ),
-    resourceCache.fetch<readonly PulseApprovalItem[]>(
-      PULSE_CACHE_KEYS.approvals,
-      (signal) => wrapResult(apiGet('/api/v1/keepers/tool-approvals', { signal, decode: decodeApprovals })),
-      { ttlMs: 10_000, topics: ['tool_approval', 'keeper_turn'], reason },
-    ),
-    resourceCache.fetch<readonly PulseAskItem[]>(
-      PULSE_CACHE_KEYS.asks,
-      (signal) => wrapResult(apiGet('/api/v1/keepers/asks', { signal, decode: decodeAsks })),
-      { ttlMs: 10_000, topics: ['keeper_ask', 'ask'], reason },
-    ),
+    isMultiAccount
+      ? Promise.resolve(observedAbsent<readonly PulseApprovalItem[]>('multi_account_unbridged'))
+      : resourceCache.fetch<readonly PulseApprovalItem[]>(
+          PULSE_CACHE_KEYS.approvals,
+          (signal) => wrapResult(apiGet('/api/v1/keepers/tool-approvals', { signal, decode: decodeApprovals })),
+          { ttlMs: 10_000, topics: ['tool_approval', 'keeper_tool_approval_waits_changed', 'keeper_turn'], reason },
+        ),
+    isMultiAccount
+      ? Promise.resolve(observedAbsent<readonly PulseAskItem[]>('multi_account_unbridged'))
+      : resourceCache.fetch<readonly PulseAskItem[]>(
+          PULSE_CACHE_KEYS.asks,
+          (signal) => wrapResult(apiGet('/api/v1/keepers/asks', { signal, decode: decodeAsks })),
+          { ttlMs: 10_000, topics: ['keeper_ask', 'keeper_asks_changed', 'ask'], reason },
+        ),
     resourceCache.fetch<readonly PulseGoalSummary[]>(
       PULSE_CACHE_KEYS.goals,
       (signal) => wrapResult(apiGet('/api/v1/dashboard/goals', { signal, decode: decodeGoals })),
-      { ttlMs: 20_000, topics: ['goal', 'task'], reason },
+      { ttlMs: 20_000, topics: ['goal', 'goals', 'goal_projection_changed', 'verification_requests', 'task'], reason },
     ),
     resourceCache.fetch<readonly PulseBoardPost[]>(
       PULSE_CACHE_KEYS.board,
       (signal) => wrapResult(apiGet('/api/v1/dashboard/board?sort_by=recent&limit=24&exclude_system=true', { signal, decode: decodeBoardPosts })),
-      { ttlMs: 20_000, topics: ['board', 'board_post'], reason },
+      { ttlMs: 20_000, topics: ['board', 'board_changed', 'board_post', 'board_comment'], reason },
     ),
     resourceCache.fetch<PulseWorldMemoryDigest>(
       PULSE_CACHE_KEYS.worldMemory,

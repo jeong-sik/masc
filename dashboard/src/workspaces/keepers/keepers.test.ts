@@ -12,9 +12,12 @@ import {
   buildPortraitPreviewUrl,
   decodeChatJournalPage,
   decodeKeeperMemoryFacts,
+  decodeKeeperRoster,
   fetchKeeperTurnRecordsApi,
   filterAndSortRoster,
   formatCandleMilli,
+  formatContextDetail,
+  isKeeperPathResting,
   observeRosterContextPct,
   parseOrdinaryMemoryBranch,
   parseSourceBoundMemoryBranch,
@@ -1164,5 +1167,105 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
 
     expect(isKeeperBooted(makeRosterKeeper({ keepalive_running: false, status: 'crashed', phase: 'crashed', paused: false }))).toBe(false)
     expect(isKeeperBooted(makeRosterKeeper({ keepalive_running: false, status: 'stopped', phase: 'stopped', paused: false }))).toBe(false)
+  })
+
+  it('decodes live numeric release_at, terminal candidate failures, waiting_heads, and KeeperHeader diagnostic banner', () => {
+    const items = decodeKeeperRoster(
+      {
+        keepers: [
+          {
+            name: 'e-masc-the-leader',
+            status: 'active',
+            phase: 'failing',
+            health: 'failing',
+            paused: false,
+            keepalive_running: true,
+            activation_mode: 'autonomous',
+            runtime_id: 'ollama-deepseek-then-glm',
+            context_ratio: null,
+            context_provenance: 'estimated',
+            estimated_context_ratio: 0.61,
+            context_metrics_unavailable_reason: 'usage_scope_unavailable',
+            runtime_blocker_summary: 'Connection reset on glm-5.3-flash',
+            runtime_blocker_signature: 'net:eof',
+            runtime_path_rest: {
+              status: 'resting',
+              runtime_id: 'glm-coding.glm-5.3-flash',
+              release_at: 1_764_036_000,
+              release_basis: 'rate_limit',
+            },
+            operator_disposition: 'retry_later',
+            operator_disposition_reason: 'transient_runtime_retry',
+            failing_since: 1_700_000_000,
+            next_action: 'probe',
+            last_failure: { cause: 'provider', at_unix: 1_700_000_050 },
+            runtime_lane_observation: {
+              evidence: {
+                failures: [
+                  {
+                    runtime_id: 'ollama_cloud.deepseek',
+                    summary: 'session limit reached',
+                    api_candidate_fault: { kind: 'binding', fact: 'rate_limit' },
+                  },
+                ],
+                terminal: {
+                  kind: 'candidate',
+                  runtime_id: 'glm-coding.glm-5.3-flash',
+                  attempt: 2,
+                  summary: 'connection reset by peer',
+                },
+              },
+            },
+            recent_turns: {
+              known_since: 1_700_000_000,
+              slots: [{ starts_at: 1_700_000_000, ok: 2, rested: 1, failed: 4 }],
+            },
+          },
+          {
+            name: 'paused-resting-keeper',
+            status: 'paused',
+            phase: 'paused',
+            health: 'healthy',
+            paused: true,
+            keepalive_running: false,
+            activation_mode: 'autonomous',
+            runtime_id: 'glm-coding.glm-5.3-flash',
+            runtime_path_rest: {
+              status: 'resting',
+              runtime_id: 'glm-coding.glm-5.3-flash',
+              release_at: 1_764_036_000,
+              release_basis: 'rate_limit',
+            },
+          },
+        ],
+      },
+    )
+
+    expect(items).toHaveLength(2)
+    const k = items[0]!
+    const pausedK = items[1]!
+    expect(isKeeperPathResting(k)).toBe(true)
+    expect(isKeeperPathResting(pausedK)).toBe(false)
+    expect(k.runtime_path_rest?.release_at).toContain('2025-11-25')
+    expect(k.turns_24h_breakdown).toEqual({ ok: 2, rested: 1, failed: 4 })
+    expect(k.runtime_lane_failures).toHaveLength(2)
+    expect(formatContextDetail(k).label).toBe('~61%')
+
+    const hdr = render(
+      html`<${KeeperHeader}
+        keeper=${k}
+        activeTab="chat"
+        onSelectTab=${vi.fn()}
+        onLifecycleMutated=${vi.fn()}
+        onDeleted=${vi.fn()}
+      />`,
+    )
+    expect(hdr.container.textContent).toContain('Connection reset on glm-5.3-flash')
+    expect(hdr.container.textContent).toContain('ollama_cloud.deepseek')
+    expect(hdr.container.textContent).toContain('connection reset by peer')
+    expect(hdr.container.textContent).toContain('retry_later')
+    expect(hdr.container.textContent).toContain('성공 2 · 휴식 1 · 실패 4')
+    expect(hdr.container.textContent).toContain('Ctx ~61%')
+    hdr.unmount()
   })
 })

@@ -19,6 +19,7 @@ import {
 import {
   markViewSynced,
   subscribeObserverFrames,
+  subscribeObserverReconnect,
 } from '../../core/observer'
 import {
   timeWindow,
@@ -39,6 +40,7 @@ import {
   formatRelativeAge,
   isKeeperActive,
   isKeeperFailing,
+  isKeeperPathResting,
   observeKeeperContextPct,
 } from './pulse-model'
 import type {
@@ -108,8 +110,12 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
         void refresh('sse')
       }, 450)
     })
+    const unsubReconnect = subscribeObserverReconnect(() => {
+      void refresh('sse')
+    })
     return () => {
       unsub()
+      unsubReconnect()
       if (timer) clearTimeout(timer)
     }
   }, [refresh])
@@ -143,7 +149,6 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
   )
   const attentionSources = [bundle.approvals, bundle.asks, bundle.keepers]
   const attentionPending = attentionSources.some((source) => source.kind === 'loading')
-  const attentionFailed = attentionSources.some((source) => source.kind === 'failed')
 
   const fleetGroups = useMemo(
     () =>
@@ -181,6 +186,17 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
     candleDigest !== null
     && candleDigest.policy_configuration === 'enabled'
     && (candleDigest.total_events > 0 || candleDigest.circulating_milli !== '0')
+
+  const attentionErrors: string[] = []
+  if (bundle.approvals.kind === 'failed') attentionErrors.push(`도구 승인 조회 실패: ${bundle.approvals.error.message}`)
+  if (bundle.asks.kind === 'failed') attentionErrors.push(`Keeper 질문 조회 실패: ${bundle.asks.error.message}`)
+  if (bundle.keepers.kind === 'failed') attentionErrors.push(`Keeper 상태 조회 실패: ${bundle.keepers.error.message}`)
+  const attentionLoading =
+    bundle.approvals.kind === 'loading' && bundle.asks.kind === 'loading' && bundle.keepers.kind === 'loading'
+  const attentionStale =
+    (bundle.approvals.kind === 'value' && bundle.approvals.stale)
+    || (bundle.asks.kind === 'value' && bundle.asks.stale)
+    || (bundle.keepers.kind === 'value' && bundle.keepers.stale)
 
   const worldMemory = bundle.worldMemory.kind === 'value' ? bundle.worldMemory.data : null
 
@@ -236,7 +252,12 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
           <!-- Company Fleet 24h Sparklines -->
           <section class="pulse-card" aria-label="회사별 Keeper 플릿">
             <div class="pulse-card-head">
-              <h2>Company Fleet · 24h Activity</h2>
+              <div class="pulse-card-title-group">
+                <h2>Company Fleet · 24h Activity</h2>
+                ${bundle.keepers.kind === 'value' && bundle.keepers.stale && html`
+                  <span class="pulse-pill" data-tone="warn">지연됨</span>
+                `}
+              </div>
               <button type="button" class="btn-ghost" onClick=${() => props.onNavigate('/keepers')}>
                 전체 Keeper →
               </button>
@@ -251,6 +272,10 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
                       <div class="pulse-fleet-groups">
                         ${fleetGroups.map((group) => {
                           const turnFmt = formatCompactCount(group.turnsInWindow)
+                          const okTurns = group.okTurnsInWindow ?? group.turnsInWindow
+                          const restedTurns = group.restedTurnsInWindow ?? 0
+                          const failedTurns = group.failedTurnsInWindow ?? 0
+                          const restingCount = group.restingCount ?? 0
                           return html`
                             <article key=${group.company} class="pulse-fleet-group">
                               <div class="pulse-fleet-group-head">
@@ -264,7 +289,21 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
                                       ⚠ ${group.failingCount} fault
                                     </span>
                                   `}
-                                  <span class="pulse-pill" data-tone="brass" title=${`정확한 24h 턴 수: ${turnFmt.exact}`}>
+                                  ${restingCount > 0 && html`
+                                    <span class="pulse-pill" data-tone="warn">
+                                      ⏸ ${restingCount} rest
+                                    </span>
+                                  `}
+                                  ${failedTurns > 0 && html`
+                                    <span class="pulse-pill" data-tone="bad" title=${`성공 ${okTurns} · 휴식 ${restedTurns} · 실패 ${failedTurns}`}>
+                                      ✕ ${formatCompactCount(failedTurns).short} fail
+                                    </span>
+                                  `}
+                                  <span
+                                    class="pulse-pill"
+                                    data-tone="brass"
+                                    title=${`24h 턴 총 ${turnFmt.exact} (성공 ${okTurns} · 휴식 ${restedTurns} · 실패 ${failedTurns})`}
+                                  >
                                     ${turnFmt.short} turns/24h
                                   </span>
                                 </div>
@@ -273,14 +312,33 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
                               <div class="pulse-keeper-grid">
                                 ${group.keepers.map((k) => {
                                   const ctxObs = observeKeeperContextPct(k)
-                                  const ctxText = formatObserved(ctxObs, (v) => `${v}%`)
+                                  const isEstimated = k.context_ratio == null && k.context_provenance === 'estimated' && k.estimated_context_ratio != null
+                                  const ctxText = ctxObs.kind === 'value'
+                                    ? `${isEstimated ? '~' : ''}${ctxObs.data}%`
+                                    : formatObserved(ctxObs, (v) => `${v}%`)
+                                  const ctxTitle = k.context_tokens != null && k.context_max != null
+                                    ? `${k.context_tokens.toLocaleString('en-US')} / ${k.context_max.toLocaleString('en-US')} tok`
+                                    : isEstimated
+                                      ? `추정 컨텍스트 (~${ctxObs.kind === 'value' ? ctxObs.data : '?'}%)`
+                                      : k.context_unavailable_reason
+                                        ? `컨텍스트 미측정 (${k.context_unavailable_reason})`
+                                        : 'Context 비율'
                                   const active = isKeeperActive(k)
                                   const failing = isKeeperFailing(k)
+                                  const resting = !failing && isKeeperPathResting(k)
+                                  const tileSub = failing
+                                    ? `⚠ ${k.runtime_blocker_summary ?? k.last_failure?.cause ?? k.directory_issue ?? k.health}`
+                                    : resting
+                                      ? `⏸ 휴식${k.runtime_path_rest?.runtime_id ? ` · ${k.runtime_path_rest.runtime_id}` : ''}`
+                                      : k.paused
+                                        ? 'paused'
+                                        : k.phase
                                   return html`
                                     <button
                                       key=${k.name}
                                       type="button"
                                       class="pulse-keeper-tile"
+                                      title=${tileSub}
                                       onClick=${() => props.onNavigate(`/keepers/${encodeURIComponent(k.name)}/chat`)}
                                     >
                                       <div class="pulse-keeper-tile-left">
@@ -294,16 +352,14 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
                                         <div class="pulse-keeper-tile-meta">
                                           <span class="pulse-keeper-tile-name">${k.name}</span>
                                           <span class="pulse-keeper-tile-sub">
-                                            ${failing ? `⚠ ${k.health}` : k.paused ? 'paused' : k.phase}
+                                            ${tileSub}
                                           </span>
                                         </div>
                                       </div>
                                       <span
                                         class="pulse-pill"
                                         data-tone=${keeperCtxTone(ctxObs)}
-                                        title=${k.context_tokens != null && k.context_max != null
-                                          ? `${k.context_tokens.toLocaleString('en-US')} / ${k.context_max.toLocaleString('en-US')} tok`
-                                          : 'Context 비율'}
+                                        title=${ctxTitle}
                                       >
                                         Ctx ${ctxText}
                                       </span>
@@ -333,16 +389,23 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
           <!-- Multi-Keeper Team Handoff & Succession Strip (Zero Cytoscape) -->
           <section class="pulse-card" aria-label="팀 핸드오프 및 협업 펄스">
             <div class="pulse-card-head">
-              <h2>Team Handoff & Succession Pulse</h2>
+              <div class="pulse-card-title-group">
+                <h2>Team Handoff & Succession Pulse</h2>
+                ${bundle.board.kind === 'value' && bundle.board.stale && html`
+                  <span class="pulse-pill" data-tone="warn">지연됨</span>
+                `}
+              </div>
               <button type="button" class="btn-ghost" onClick=${() => props.onNavigate('/knowledge/board')}>
                 Board 열기 →
               </button>
             </div>
-            ${handoffs.length === 0
-              ? html`<div class="pulse-empty">${bundle.board.kind !== 'value'
-                ? formatObserved(bundle.board)
-                : '최근 다중 Keeper 핸드오프/승계 신호 없음'}</div>`
-              : html`
+            ${bundle.board.kind === 'loading'
+              ? html`<div class="pulse-empty">Board 신호 불러오는 중…</div>`
+              : bundle.board.kind === 'failed'
+                ? html`<div class="ap-error" role="alert">Board 조회 실패: ${bundle.board.error.message}</div>`
+                : handoffs.length === 0
+                  ? html`<div class="pulse-empty">최근 다중 Keeper 핸드오프/승계 신호 없음</div>`
+                  : html`
                   <div class="pulse-handoff-list">
                     ${handoffs.map((h) => html`
                       <button
@@ -375,27 +438,37 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
           <!-- Attention Queue Card -->
           <section class="pulse-card" aria-label="주의 필요 대기열">
             <div class="pulse-card-head">
-              <h2>Attention Queue</h2>
+              <div class="pulse-card-title-group">
+                <h2>Attention Queue</h2>
+                ${attentionStale && html`<span class="pulse-pill" data-tone="warn">지연됨</span>`}
+              </div>
               <div class="pulse-header-meta">
-                <span class="pulse-pill" data-tone=${attentionFailed || attentionItems.length > 0 ? 'warn' : attentionPending ? 'default' : 'ok'}>
-                  ${attentionFailed ? '일부 조회 실패' : attentionPending ? '조회 중…' : `${attentionItems.length}건`}
+                <span class="pulse-pill" data-tone=${attentionErrors.length > 0 ? 'bad' : attentionItems.length > 0 ? 'warn' : attentionPending ? 'default' : 'ok'}>
+                  ${attentionErrors.length > 0 ? '조회 오류' : attentionPending && attentionItems.length === 0 ? '조회 중…' : `${attentionItems.length}건`}
                 </span>
                 <button type="button" class="btn-ghost" onClick=${() => props.onNavigate('/work/inbox')}>
                   Inbox →
                 </button>
               </div>
             </div>
-            ${attentionItems.length === 0
-              ? !attentionFailed && !attentionPending && html`<div class="pulse-empty">대기 중인 승인·질문·오류 없음</div>`
-              : html`
+            ${attentionErrors.length > 0 && html`
+              <div class="ap-error" role="alert">${attentionErrors.join(' · ')}</div>
+            `}
+            ${(attentionLoading || (attentionPending && attentionItems.length === 0 && attentionErrors.length === 0))
+              ? html`<div class="pulse-empty">대기열 불러오는 중…</div>`
+              : attentionItems.length === 0
+                ? (attentionErrors.length > 0
+                    ? html`<div class="pulse-empty">일부 소스 조회 실패로 대기열을 확정할 수 없습니다</div>`
+                    : html`<div class="pulse-empty">대기 중인 승인·질문·오류 없음</div>`)
+                : html`
                   <div class="pulse-attn-list">
                     ${attentionItems.slice(0, 10).map((item) => html`
                       <div key=${item.id} class="pulse-attn-row" data-sev=${item.severity}>
                         <div class="pulse-attn-main">
-                          <span class="pulse-attn-title">
+                          <span class="pulse-attn-title" title=${item.title}>
                             ${item.severity === 'critical' ? '⚠ ' : ''}${item.title}
                           </span>
-                          <span class="pulse-attn-detail">${item.keeper} · ${item.detail}</span>
+                          <span class="pulse-attn-detail" title=${`${item.keeper} · ${item.detail}`}>${item.keeper} · ${item.detail}</span>
                         </div>
                         <div class="pulse-attn-actions">
                           <span class="pulse-pill">${formatRelativeAge(item.ageSec)}</span>
@@ -428,16 +501,23 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
           <!-- Active Goals -->
           <section class="pulse-card" aria-label="진행 중인 Goals">
             <div class="pulse-card-head">
-              <h2>Active Goals</h2>
+              <div class="pulse-card-title-group">
+                <h2>Active Goals</h2>
+                ${bundle.goals.kind === 'value' && bundle.goals.stale && html`
+                  <span class="pulse-pill" data-tone="warn">지연됨</span>
+                `}
+              </div>
               <button type="button" class="btn-ghost" onClick=${() => props.onNavigate('/work/goals')}>
                 Goals →
               </button>
             </div>
-            ${bundle.goals.kind !== 'value'
-              ? html`<div class="pulse-empty">${formatObserved(bundle.goals)}</div>`
-              : activeGoals.length === 0
-                ? html`<div class="pulse-empty">활성 Goal 없음</div>`
-                : html`
+            ${bundle.goals.kind === 'loading'
+              ? html`<div class="pulse-empty">Goal 목록 불러오는 중…</div>`
+              : bundle.goals.kind === 'failed'
+                ? html`<div class="ap-error" role="alert">Goal 조회 실패: ${bundle.goals.error.message}</div>`
+                : activeGoals.length === 0
+                  ? html`<div class="pulse-empty">활성 Goal 없음</div>`
+                  : html`
                     <div class="pulse-goal-list">
                       ${activeGoals.map((g) => html`
                         <button

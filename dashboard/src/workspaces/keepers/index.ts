@@ -13,7 +13,7 @@
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { currentSessionEpoch, sessionEpoch } from '../../core/auth'
-import { extractObserverTopics, markViewSynced, observerConnected, subscribeObserverFrames, subscribeObserverResync } from '../../core/observer'
+import { extractObserverTopics, markViewSynced, observerConnected, subscribeObserverFrames, subscribeObserverReconnect, subscribeObserverResync } from '../../core/observer'
 import { parseKeeperEntityTab, type KeeperEntityTab } from '../../routes/router'
 import type { WorkspaceViewProps } from '../types'
 import { KEEPER_ROSTER_OBSERVER_TOPICS, loadKeeperRoster, readKeeperRosterSources } from './keepers-api'
@@ -36,7 +36,14 @@ export function KeepersWorkspace(props: WorkspaceViewProps) {
       ...listing,
       data: listing.data.map((keeper) => {
         const turn = turns.data.get(keeper.name)
-        return turn ? { ...keeper, active_turn: turn.active, chat_control_token: turn.chat_control_token } : keeper
+        return turn
+          ? {
+              ...keeper,
+              active_turn: turn.active,
+              chat_control_token: turn.chat_control_token,
+              waiting_summary: turn.waiting,
+            }
+          : keeper
       }),
     }
   }, [listing, turns])
@@ -92,6 +99,7 @@ export function KeepersWorkspace(props: WorkspaceViewProps) {
       }
     })
     const unsubResync = subscribeObserverResync(schedule)
+    const unsubReconnect = subscribeObserverReconnect(schedule)
     let wasConnected = observerConnected.peek()
     const unsubConnection = observerConnected.subscribe((connected) => {
       if (connected && !wasConnected) schedule()
@@ -101,6 +109,7 @@ export function KeepersWorkspace(props: WorkspaceViewProps) {
       disposed = true
       unsub()
       unsubResync()
+      unsubReconnect()
       unsubConnection()
       if (timer) clearTimeout(timer)
     }

@@ -253,7 +253,66 @@ describe('Pulse Workspace — Model & Formatters', () => {
     expect(handoffs).toHaveLength(2)
     expect(handoffs[0]!.kind).toBe('handoff')
     expect(handoffs[0]!.toKeepers).toEqual(['code-reviewer-uncle'])
+    expect(handoffs[0]!.route).toBe('/knowledge/board/p1')
     expect(handoffs[1]!.kind).toBe('succession')
+    expect(handoffs[1]!.route).toBe('/knowledge/board/p2')
+  })
+
+  it('surfaces path-resting keepers, failover details, and ok/rested/failed breakdown on Pulse', () => {
+    const now = 1_700_000_000
+    const slotTs = Math.floor(now / 1800) * 1800
+    const restingKeeper = makeKeeper({
+      name: 'resting-keeper',
+      health: 'healthy',
+      keepalive_running: true,
+      paused: false,
+      runtime_path_rest: { status: 'resting', runtime_id: 'ollama_cloud', release_at: '2026-11-25T02:00:00Z', release_basis: 'rate_limit' },
+      recent_turns: {
+        known_since: slotTs - 3600,
+        slots: [{ starts_at: slotTs, ok: 1, rested: 3, failed: 5, scheduled: 0, reacted: 0, chat: 0, own: 0, unknown: 0 }],
+      },
+    })
+    const pausedOnRestingRuntime = makeKeeper({
+      name: 'paused-keeper',
+      health: 'healthy',
+      phase: 'paused',
+      keepalive_running: false,
+      paused: true,
+      runtime_path_rest: { status: 'resting', runtime_id: 'ollama_cloud', release_at: '2026-11-25T02:00:00Z', release_basis: 'rate_limit' },
+    })
+    const failingKeeper = makeKeeper({
+      name: 'failing-keeper',
+      health: 'failing',
+      operator_disposition: 'retry_later',
+      failing_since: now - 180,
+      runtime_lane_failures: [
+        { runtime_id: 'ollama_cloud', summary: 'session limit', fault_kind: 'rate_limit' },
+      ],
+    })
+    const queue = buildAttentionQueue({
+      approvals: [],
+      asks: [],
+      keepers: [restingKeeper, pausedOnRestingRuntime, failingKeeper],
+      nowSec: now,
+    })
+    expect(queue).toHaveLength(2)
+    expect(queue.some((q) => q.keeper === 'paused-keeper')).toBe(false)
+    expect(queue.find((q) => q.keeper === 'resting-keeper')?.title).toContain('경로 휴식')
+    expect(queue.find((q) => q.keeper === 'failing-keeper')?.detail).toContain('ollama_cloud')
+    expect(queue.find((q) => q.keeper === 'failing-keeper')?.detail).toContain('retry_later')
+
+    const groups = buildCompanyFleetGroups({
+      keepers: [restingKeeper, pausedOnRestingRuntime, failingKeeper],
+      shellGroups: [],
+      window: '24h',
+      nowSec: now,
+    })
+    const restGroup = groups.find((g) => g.keepers.some((k) => k.name === 'resting-keeper'))!
+    expect(restGroup.activeCount).toBe(0)
+    expect(restGroup.restingCount).toBe(1)
+    expect(restGroup.okTurnsInWindow).toBe(1)
+    expect(restGroup.restedTurnsInWindow).toBe(3)
+    expect(restGroup.failedTurnsInWindow).toBe(5)
   })
 
   it('formats decimal-string milli-Candle values without float precision loss', () => {

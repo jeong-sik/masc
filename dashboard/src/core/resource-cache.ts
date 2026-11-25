@@ -263,6 +263,19 @@ export class ResourceCache {
     return true
   }
 
+  invalidateAll(): number {
+    let count = 0
+    for (const entry of this.entries.values()) {
+      entry.invalidated = true
+      const cur = entry.state.peek()
+      if (cur.kind === 'value' && !cur.stale) {
+        entry.state.value = { ...cur, stale: true }
+      }
+      count += 1
+    }
+    return count
+  }
+
   clearAll(): void {
     for (const entry of this.entries.values()) {
       entry.abortController?.abort('cache_cleared')

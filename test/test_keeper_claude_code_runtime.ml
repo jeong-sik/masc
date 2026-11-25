@@ -6365,7 +6365,7 @@ let test_a_start_seed_begins_at_the_carried_front () =
   match
     Keeper_claude_code_runtime.For_testing.start_seed_projection ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "alpha" })
       ~capacity_bytes:Keeper_claude_code_runtime.For_testing.unbounded_capacity_bytes
-      ~carried_front_seed:(fun () -> seed_read)
+      ~carried_front_seed:(fun ~runtime_id:_ -> seed_read)
       ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
       ~on_model_input_window_observation:(fun o -> observed := Some o)
       ~keeper_name:"alpha"
@@ -6429,7 +6429,7 @@ let test_the_declared_ceiling_wins_when_it_cuts_deeper () =
   match
     Keeper_claude_code_runtime.For_testing.start_seed_projection ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "alpha" })
       ~capacity_bytes
-      ~carried_front_seed:(fun () -> seed_read)
+      ~carried_front_seed:(fun ~runtime_id:_ -> seed_read)
       ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
       ~on_model_input_window_observation:(fun o -> observed := Some o)
       ~keeper_name:"alpha"
@@ -6461,7 +6461,7 @@ let test_a_cold_start_with_no_completed_turn_carries_everything () =
   match
     Keeper_claude_code_runtime.For_testing.start_seed_projection ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "alpha" })
       ~capacity_bytes:Keeper_claude_code_runtime.For_testing.unbounded_capacity_bytes
-      ~carried_front_seed:(fun () -> seed_read_of [])
+      ~carried_front_seed:(fun ~runtime_id:_ -> seed_read_of [])
       ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
       ~on_model_input_window_observation:(fun o -> observed := Some o)
       ~keeper_name:"alpha"
@@ -6490,7 +6490,7 @@ let test_a_cold_start_begins_at_the_turn_start () =
   match
     Keeper_claude_code_runtime.For_testing.start_seed_projection ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "alpha" })
       ~capacity_bytes:Keeper_claude_code_runtime.For_testing.unbounded_capacity_bytes
-      ~carried_front_seed:(fun () -> seed_read_of [])
+      ~carried_front_seed:(fun ~runtime_id:_ -> seed_read_of [])
       ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 112 })
       ~on_model_input_window_observation:(fun o -> observed := Some o)
       ~keeper_name:"alpha"

@@ -1149,7 +1149,7 @@ let carried ?carried_front_seed ?librarian_front
   | Ok messages -> carried_indices messages
   | Error error -> fail (Agent_core.Error.to_string error)
 
-let seed_at first_atom () =
+let seed_at first_atom ~runtime_id:_ =
   let front_digest =
     match Runtime_model_input_tail_window.atom_opening_digest large_history first_atom with
     | Some digest -> digest
@@ -1260,7 +1260,7 @@ let test_empty_history_keeps_a_fitting_summary () =
         (Option.get (Runtime_model_input_tail_window.atom_opening_digest large_history 63))
     ; source = Keeper_carried_front.Turn_record { turn = 1 }
     } in
-  let carried_front_seed () =
+  let carried_front_seed ~runtime_id:_ =
     { Keeper_carried_front.seed = Some seed; refused_start = None; unreadable = None; boundary_error = None } in
   let goal = "Continue with the new user instruction." in
   successful (run ~initial_messages:large_history ~carried_front_seed ~librarian_front
@@ -1328,7 +1328,7 @@ let test_completion_evidence_without_a_keeper_boundary_keeps_every_atom () =
   let evidence = large_history in
   let sent = Keeper_codex_runtime.For_testing.carried_projection
       ~input_source:Masc.Keeper_request_source.Completion_review ~capacity_bytes:1
-      ~carried_front_seed:(fun () -> incr seed_reads; (seed_at 60) ())
+      ~carried_front_seed:(fun ~runtime_id:_ -> incr seed_reads; seed_at 60 ~runtime_id:"codex")
       ~librarian_front:(Keeper_turn_driver_try_provider.Covered { Keeper_turn_driver_try_provider.end_atom = 62; working_state = Some "Earlier work." })
       ~turn_start:(Keeper_carried_front.Turn_boundary_unknown { reason = "program-owned completion evidence" })
       ~keeper_name:"completion-review-fixture" ~runtime_id:"codex.context" evidence
@@ -1353,7 +1353,7 @@ let test_completion_evidence_reaches_native_writer ~custom_projection () =
   successful (run ~input_source:Keeper_request_source.Completion_review
     ?model_input_projection ~initial_messages:evidence
     ~turn_start:(Keeper_carried_front.Turn_boundary_unknown {reason="independent completion evidence"})
-    ~carried_front_seed:(fun () -> fail "completion evidence read a Keeper seed")
+    ~carried_front_seed:(fun ~runtime_id:_ -> fail "completion evidence read a Keeper seed")
     ~librarian_front:(Keeper_turn_driver_try_provider.Covered { Keeper_turn_driver_try_provider.end_atom = 1; working_state = Some "Earlier work." })
     ~instructions:"Review the supplied evidence." ~world:"" ());
   let rows = read_requests capture in

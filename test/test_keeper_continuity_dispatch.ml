@@ -235,7 +235,7 @@ let test_a_librarian_behind_refusal_resends_from_the_boundary () =
   let recorded : Keeper_carried_front.seed =
     { first_atom = 4; front = Model_input_front.At_atom (Option.get (digest_at 4))
     ; source = Keeper_carried_front.Turn_record { turn = 1 } } in
-  let carried_front_seed () =
+  let carried_front_seed ~runtime_id:_ =
     { Keeper_carried_front.seed = Some recorded; refused_start = None; unreadable = None; boundary_error = None } in
   let (_ : (string * Agent_core.Error.t) list) =
     dispatch ~carried_front_seed ~initial_messages ~sw ~net ~base_path () in
@@ -287,7 +287,7 @@ let test_a_refused_boundary_resends_from_where_this_turn_began () =
   let recorded : Keeper_carried_front.seed =
     { first_atom = 6; front = Model_input_front.At_atom (Option.get (digest_at 6))
     ; source = Keeper_carried_front.Turn_record { turn = 1 } } in
-  let carried_front_seed () =
+  let carried_front_seed ~runtime_id:_ =
     { Keeper_carried_front.seed = Some recorded; refused_start = None; unreadable = None; boundary_error = None } in
   open_turn_log ~config (completed @ failed_turn);
   let (_ : (string * Agent_core.Error.t) list) =

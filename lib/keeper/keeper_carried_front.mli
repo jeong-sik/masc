@@ -195,13 +195,14 @@ type refused_start =
 type seed_read =
   { seed : seed option
   ; refused_start : refused_start option
-        (** Set when the newest observation on this history is a refusal: no
-            response-observed record is stored after it. Stored order, not
-            the turn, decides, because a direct retry may reuse its turn
-            number; a record that carries both answers its own refusal.
-            [seed] is still the newest
-            accepted range behind it, for the runtimes the refusal does not
-            speak for (RFC-librarian-lifecycle §4.10). *)
+        (** The asking runtime's newest refusal, set when no record stored
+            after it carries a response from that same runtime. Stored order,
+            not the turn, decides, because a direct retry may reuse its turn
+            number; a record whose response and refusal are both that
+            runtime's answers its own refusal. Another runtime's response
+            does not end it: it says nothing about this runtime's window
+            (#54719). [seed] is still the newest accepted range behind it
+            (RFC-librarian-lifecycle §4.10). *)
   ; unreadable : unreadable_records option
         (** [None] when every record read decoded. A seed is looked for among
             the records that did, so [seed = None] with [Some _] here is
@@ -212,6 +213,11 @@ type seed_read =
             of order. Kept separate from [unreadable], whose count is only
             for TurnRecord rows. A boundary error admits no seed. *)
   }
+
+type seed_reader = runtime_id:string -> seed_read
+(** Reads the seed and the refusal standing for the runtime about to send.
+    The refusal is scoped to that runtime, so a reader is asked once per
+    runtime, not once per turn. *)
 
 val no_seed_read : seed_read
 (** No seed, unreadable record, or boundary error: a caller that reads no
@@ -230,19 +236,30 @@ val warn_seed_read_failures
 
 val seed_read_of_rows
   :  trace_id:string
+  -> runtime_id:string
   -> Yojson.Safe.t list
   -> seed_read
 (** {!of_records} over the rows that decode as turn records, with the rows
     that do not counted and [refused_start] decided as {!read_seed} decides
     it, rows oldest first. *)
 
+type refusal_scope =
+  | For_runtime of string
+      (** Also read this runtime's standing refusal ([refused_start]). *)
+  | Seed_only
+      (** Read the seed alone, for a reader that sends nothing itself (the
+          next-request forecast); [refused_start] is [None]. *)
+
 val read_seed
   :  config:Workspace.config
   -> keeper_name:string
   -> trace_id:string
+  -> scope:refusal_scope
   -> seed_read
 (** The last stored response observation in the current history generation,
-    scanning newest first until a match, a different trace, or a turn at or
+    and, for [For_runtime], that runtime's standing refusal
+    ([refused_start]), scanning newest
+    first until both are decided, a different trace, or a turn at or
     below the generation boundary the Keeper's turn log states
     (RFC librarian-call-only-proposes §11.2). That boundary is set by the
     last [Reset] of this trace (its [after.trace]) whose cause is

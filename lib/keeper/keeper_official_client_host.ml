@@ -372,7 +372,7 @@ let carried_start_range_on_source
   let seed_read =
     match carried_front_seed with
     | None -> Keeper_carried_front.no_seed_read
-    | Some read -> read ()
+    | Some read -> read ~runtime_id
   in
   let digest_at, history_atom_count =
     Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
@@ -451,10 +451,10 @@ let carried_start_range_on_source
     | Some (accepted, _) -> max accepted first
     | None -> first
   in
-  (* RFC-librarian-lifecycle §4.10: the newest observation on this history is
-     this runtime's own refusal of a range, so the next range opens strictly
-     after where that one opened. Another runtime's refusal says nothing
-     about this one's window. A Librarian position past the refused start
+  (* RFC-librarian-lifecycle §4.10: this runtime refused a range and has not
+     answered since ([seed_read] is read for [runtime_id] alone), so the next
+     range opens strictly after where that one opened. A Librarian position
+     past the refused start
      already names a range the refusal did not cover, and a held seed or a
      lane cut past it is already later. *)
   let librarian_end_atom =
@@ -464,8 +464,7 @@ let carried_start_range_on_source
   in
   let refused_first_atom =
     match seed_read.Keeper_carried_front.refused_start with
-    | Some (refused : Keeper_carried_front.refused_start)
-      when String.equal refused.runtime_profile runtime_id ->
+    | Some (refused : Keeper_carried_front.refused_start) ->
       (match Keeper_carried_front.refused_start_for_history ~digest_at refused with
        | Error dropped ->
          Log.Keeper.info
@@ -491,7 +490,7 @@ let carried_start_range_on_source
          if librarian_is_past || seed_is_past || own_first_atom > refused.first_atom
          then None
          else Some refused.first_atom)
-    | Some _ | None -> None
+    | None -> None
   in
   let past_refused_start =
     match refused_first_atom with
@@ -692,15 +691,15 @@ let window_carried_range
    after the other on the caller's fiber. *)
 let read_seed_once = function
   | None -> None
-  | Some read ->
-    let taken = ref None in
+  | Some (read : Keeper_carried_front.seed_reader) ->
+    let taken = ref [] in
     Some
-      (fun () ->
-         match !taken with
+      (fun ~runtime_id ->
+         match List.assoc_opt runtime_id !taken with
          | Some seed -> seed
          | None ->
-           let seed = read () in
-           taken := Some seed;
+           let seed = read ~runtime_id in
+           taken := (runtime_id, seed) :: !taken;
            seed)
 ;;
 

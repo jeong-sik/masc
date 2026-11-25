@@ -1819,7 +1819,7 @@ let test_appended_gate_reference_is_no_durable_atom () =
   let project =
     carried_projection
       ~on_model_input_window_observation:(fun reading -> observed := Some reading)
-      ~carried_front_seed:(fun () -> seed_read)
+      ~carried_front_seed:(fun ~runtime_id:_ -> seed_read)
       source
   in
   match project history with
@@ -1924,7 +1924,7 @@ let test_seeded_start_matches_the_agent_core_range () =
   let projected =
     project_range
       ~on_model_input_window_observation:(fun reading -> observed := Some reading)
-      ~carried_front_seed:(fun () -> seed_read)
+      ~carried_front_seed:(fun ~runtime_id:_ -> seed_read)
       messages
   in
   check (list string) "the same durable range is carried"
@@ -2072,7 +2072,7 @@ let test_a_front_from_another_history_is_dropped () =
   let seed_read = seed_read_at ~messages:other 53 in
   let projected =
     project_range
-      ~carried_front_seed:(fun () -> seed_read)
+      ~carried_front_seed:(fun ~runtime_id:_ -> seed_read)
       messages
   in
   check (list string) "a mismatched seed restarts from the whole history"

@@ -128,7 +128,7 @@ let accepted_seed messages first_atom =
    source=Keeper_carried_front.Turn_record {turn=1}}
 let test_seed_witness_uses_raw_source_and_dropped_arguments_are_not_written () = with_base @@ fun base ->
   let seed = accepted_seed raw_history 2 and reads = ref 0 and fronts = ref [] in
-  let carried_front_seed () = incr reads; {Keeper_carried_front.no_seed_read with seed=Some seed} in
+  let carried_front_seed ~runtime_id:_ = incr reads; {Keeper_carried_front.no_seed_read with seed=Some seed} in
   let sent = project ?argument_projection:(projection (source base) base) ~carried_front_seed
     ~librarian_front:Choice.No_read_end
     ~on_carried_front:(fun front ~transmitted_bytes:_ ~sends_from:_ -> fronts:=front::!fronts)
@@ -346,7 +346,7 @@ let test_completion_review_preserves_the_full_evidence_without_history_reads () 
         ~input_source:Masc.Keeper_request_source.Completion_review ~argument_projection
         ~measure_message_bytes:(fun message -> incr measured; measure message)
         ~capacity_bytes:1 ~unbounded_capacity_bytes:max_int ~reserved_bytes:0
-        ~carried_front_seed:(fun () -> incr seed_reads;
+        ~carried_front_seed:(fun ~runtime_id:_ -> incr seed_reads;
           { Keeper_carried_front.no_seed_read with seed = Some late_seed })
         ~librarian_front:summarized
         ~on_model_input_window_observation:(fun _ -> incr windows)

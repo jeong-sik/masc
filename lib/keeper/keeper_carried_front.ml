@@ -133,25 +133,33 @@ let refused_start_of_record (record : Turn_record.t) =
     record.Turn_record.refused_model_input
 ;;
 
-(* Whether a refusal is the newest observation, read newest first in stored
-   order: a direct retry may reuse its turn number, so the turn does not order
-   two records of one turn. A response answers every refusal stored before it,
-   the refusal its own record carries too: a lane tries the refused runtime
-   before the candidate that answers. *)
+(* What the stored records say about one runtime's refusal, read newest first
+   in stored order: a direct retry may reuse its turn number, so the turn does
+   not order two records of one turn. Only that runtime's own records decide.
+   A response from it answers every refusal it made before, the one its own
+   record carries too, so a record's response is read before its refusal.
+   Another runtime's response says nothing about this runtime's window
+   (#54719): a lane that fails over and comes back still opens past the
+   refused start. *)
 type refusal_scan =
-  { response_met : bool
-  ; standing : refused_start option
-  }
+  | Undecided
+  | Answered
+  | Refused of refused_start
 
-let refusal_scan_start = { response_met = false; standing = None }
+let scan_refusal ~runtime_id scan (record : Turn_record.t) =
+  match scan with
+  | Answered | Refused _ -> scan
+  | Undecided ->
+    (match record.Turn_record.response_observed_model_input, refused_start_of_record record with
+     | Some { Turn_record.runtime_profile; window = _ }, _
+       when String.equal runtime_profile runtime_id -> Answered
+     | _, Some refused when String.equal refused.runtime_profile runtime_id -> Refused refused
+     | (Some _ | None), (Some _ | None) -> Undecided)
+;;
 
-let scan_refusal scan (record : Turn_record.t) =
-  match record.Turn_record.response_observed_model_input, scan with
-  | Some _, _ -> { scan with response_met = true }
-  | None, { response_met = false; standing = None } ->
-    { scan with standing = refused_start_of_record record }
-  | None, ({ response_met = true; standing = _ } | { response_met = false; standing = Some _ }) ->
-    scan
+let refused_start_of_scan = function
+  | Refused refused -> Some refused
+  | Undecided | Answered -> None
 ;;
 
 type seed_read =
@@ -160,6 +168,8 @@ type seed_read =
   ; unreadable : unreadable_records option
   ; boundary_error : string option
   }
+
+type seed_reader = runtime_id:string -> seed_read
 
 let no_seed_read =
   { seed = None; refused_start = None; unreadable = None; boundary_error = None }
@@ -191,7 +201,7 @@ let warn_seed_read_failures ~keeper_name ~runtime_id (read : seed_read) =
    counted: "no record" and "records that could not be decoded" are different
    answers to why a turn started without a front. A line that is not JSON at
    all never reaches here; [Dated_jsonl.read_recent] skips it uncounted. *)
-let seed_read_of_rows ~trace_id rows =
+let seed_read_of_rows ~trace_id ~runtime_id rows =
   let records_rev, unreadable =
     List.fold_left
       (fun (records, unreadable) json ->
@@ -211,13 +221,13 @@ let seed_read_of_rows ~trace_id rows =
     List.fold_left
       (fun scan (record : Turn_record.t) ->
          if String.equal record.Turn_record.trace_id trace_id
-         then scan_refusal scan record
+         then scan_refusal ~runtime_id scan record
          else scan)
-      refusal_scan_start
+      Undecided
       records_rev
   in
   { seed = of_records ~trace_id records
-  ; refused_start = refusal.standing
+  ; refused_start = refused_start_of_scan refusal
   ; unreadable
   ; boundary_error = None
   }
@@ -398,47 +408,61 @@ let current_generation_floor ~config ~keeper_name ~trace_id =
     Result.map (fun (scan, (_ : int)) -> scan.floor) read
 ;;
 
-let read_seed ~config ~keeper_name ~trace_id =
+type refusal_scope =
+  | For_runtime of string
+  | Seed_only
+
+let read_seed ~config ~keeper_name ~trace_id ~scope =
   let store = Keeper_types_support.keeper_turn_record_store config keeper_name in
   match current_generation_floor ~config ~keeper_name ~trace_id with
   | Error refusal ->
     { no_seed_read with boundary_error = Some (floor_refusal_to_string refusal) }
   | Ok generation_floor ->
     let unreadable = ref None in
-    (* [scan_refusal], seed or not: a response-observed record ends the
-       search for a refusal even when it narrows nothing. *)
-    let refusal = ref refusal_scan_start in
+    let seed = ref None in
+    let refusal = ref Undecided in
     let exception Trace_boundary in
     (* Count observations, not intervening rows. A direct retry may reuse its
        turn number, so the last stored response is the latest observation.
        A different trace is the durable generation boundary; a counted reset
-       in the turn log is the same-trace boundary after a clear. *)
-    let seeds =
-      try
-        Dated_jsonl.collect_matching store 1 ~f:(fun json ->
-          match Turn_record.of_json json with
-          | Ok record when not (String.equal record.Turn_record.trace_id trace_id) ->
-            raise_notrace Trace_boundary
-          | Ok record
-            when (match generation_floor with
-                  | Some floor -> record.Turn_record.absolute_turn <= floor
-                  | None -> false) ->
-            raise_notrace Trace_boundary
-          | Ok record ->
-            refusal := scan_refusal !refusal record;
-            of_records ~trace_id [ record ]
-          | Error first_reason ->
-            let count =
-              match !unreadable with
-              | None -> 1
-              | Some (seen : unreadable_records) -> seen.count + 1
-            in
-            unreadable := Some { count; first_reason };
-            None)
-      with Trace_boundary -> []
-    in
-    { seed = List.nth_opt seeds 0
-    ; refused_start = (!refusal).standing
+       in the turn log is the same-trace boundary after a clear. The scan
+       ends once it holds the seed and, for [For_runtime], that runtime's own
+       newest response or refusal; another runtime's response may stand
+       between the two. *)
+    (try
+       ignore
+         (Dated_jsonl.collect_matching store 1 ~f:(fun json ->
+            match Turn_record.of_json json with
+            | Ok record when not (String.equal record.Turn_record.trace_id trace_id) ->
+              raise_notrace Trace_boundary
+            | Ok record
+              when (match generation_floor with
+                    | Some floor -> record.Turn_record.absolute_turn <= floor
+                    | None -> false) ->
+              raise_notrace Trace_boundary
+            | Ok record ->
+              (match scope with
+               | For_runtime runtime_id ->
+                 refusal := scan_refusal ~runtime_id !refusal record
+               | Seed_only -> ());
+              (match !seed with
+               | Some _ -> ()
+               | None -> seed := of_records ~trace_id [ record ]);
+              (match !seed, scope, !refusal with
+               | Some _, Seed_only, _ | Some _, For_runtime _, (Answered | Refused _) -> Some ()
+               | None, (Seed_only | For_runtime _), _ | Some _, For_runtime _, Undecided -> None)
+            | Error first_reason ->
+              let count =
+                match !unreadable with
+                | None -> 1
+                | Some (seen : unreadable_records) -> seen.count + 1
+              in
+              unreadable := Some { count; first_reason };
+              None)
+          : unit list)
+     with Trace_boundary -> ());
+    { seed = !seed
+    ; refused_start = refused_start_of_scan !refusal
     ; unreadable = !unreadable
     ; boundary_error = None
     }

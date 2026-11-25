@@ -553,7 +553,7 @@ val warn_if_sent_on_unknown_start : keeper_name:string -> carried_start_front ->
 val carried_start_range
   :  keeper_name:string
   -> runtime_id:string
-  -> carried_front_seed:(unit -> Keeper_carried_front.seed_read) option
+  -> carried_front_seed:Keeper_carried_front.seed_reader option
   -> librarian_front:Keeper_turn_driver_try_provider.continuity
   -> own_first_atom:int
   -> turn_start:Keeper_carried_front.turn_start
@@ -613,8 +613,8 @@ val carried_atoms : carried_start -> int
 (** The durable atoms a range carries, before any window. *)
 
 val read_seed_once
-  :  (unit -> Keeper_carried_front.seed_read) option
-  -> (unit -> Keeper_carried_front.seed_read) option
+  :  Keeper_carried_front.seed_reader option
+  -> Keeper_carried_front.seed_reader option
 (** The same seed read, taken at most once, for a lane that composes a range
     more than once in a turn ({!compose_librarian_range}). Sequential use on
     one fiber only. *)
@@ -685,7 +685,7 @@ val start_range_projection :
   unbounded_capacity_bytes:int ->
   reserved_bytes:int ->
   ?on_model_input_window_observation:(Runtime_model_input_tail_window.window_observation -> unit) ->
-  ?carried_front_seed:(unit -> Keeper_carried_front.seed_read) ->
+  ?carried_front_seed:Keeper_carried_front.seed_reader ->
   ?librarian_front:Keeper_turn_driver_try_provider.continuity ->
   ?on_carried_front:carried_front_observer ->
   turn_start:Keeper_carried_front.turn_start ->
@@ -727,7 +727,7 @@ val carried_history_projection :
   input_source:Keeper_request_source.t ->
   ?argument_projection:argument_projection ->
   ?on_model_input_window_observation:(Runtime_model_input_tail_window.window_observation -> unit) ->
-  ?carried_front_seed:(unit -> Keeper_carried_front.seed_read) ->
+  ?carried_front_seed:Keeper_carried_front.seed_reader ->
   ?librarian_front:Keeper_turn_driver_try_provider.continuity ->
   ?on_carried_front:carried_front_observer ->
   turn_start:Keeper_carried_front.turn_start ->

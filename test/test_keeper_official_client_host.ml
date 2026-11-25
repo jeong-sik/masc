@@ -2449,7 +2449,14 @@ let range_after_refusal ?(boundary = 4) refused =
   , start_range
       ~librarian_front:(absorbed ())
       ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = boundary })
-      ~carried_front_seed:(fun () -> refused)
+      ~carried_front_seed:(fun ~runtime_id ->
+        (* The reader contract: a refusal is read only for the runtime that
+           made it. *)
+        match refused.Keeper_carried_front.refused_start with
+        | Some (r : Keeper_carried_front.refused_start)
+          when not (String.equal r.runtime_profile runtime_id) ->
+          { refused with Keeper_carried_front.refused_start = None }
+        | Some _ | None -> refused)
       refused_seed_messages )
 ;;
 
@@ -2481,7 +2488,7 @@ let test_a_refusal_speaks_only_for_its_runtime_and_history () =
   let librarian_end, other_runtime =
     range_after_refusal (refused_at ~runtime_profile:"muse.other" 2)
   in
-  check int "another runtime's refusal leaves the Librarian point" librarian_end
+  check int "the host reads only its own runtime's refusal" librarian_end
     other_runtime.Host.first_atom;
   let _, behind_the_librarian = range_after_refusal (refused_at 1) in
   check int "a refused start the Librarian passed is not read" librarian_end

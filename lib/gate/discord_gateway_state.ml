@@ -136,6 +136,7 @@ type dispatched_event =
                a webhook ([webhook_id] present). Used to suppress
                turn-starts on bot/webhook traffic so two bots in a shared
                thread cannot drive each other into a reply loop. *)
+      ; author_is_user_message : bool
       ; message_reference_channel_id : string option
       ; message_reference_message_id : string option
       ; referenced_message_author_id : string option
@@ -639,6 +640,26 @@ let decode_message_create ~bot_user_id ~payload =
     in
     author_bot_flag || Option.is_some (field_string_opt "webhook_id" payload)
   in
+  let author_is_user_message =
+    match author, assoc_opt "type" payload, assoc_opt "webhook_id" payload with
+    | Some author, Some (`Int (0 | 19)), None ->
+      (* DEFAULT and REPLY carry an author's own message. Keep provenance
+         stricter than the route's loop suppression above. *)
+      let absent_or_false key =
+        match assoc_opt key author with
+        | None | Some (`Bool false) -> true
+        | Some _ -> false
+      in
+      let is_original =
+        match assoc_opt "flags" payload with
+        | None -> true
+        (* Discord IS_CROSSPOST marks a copy from a different channel. *)
+        | Some (`Int flags) -> flags >= 0 && flags land (1 lsl 1) = 0
+        | Some _ -> false
+      in
+      is_original && absent_or_false "bot" && absent_or_false "system"
+    | _ -> false
+  in
   let message_reference = assoc_opt "message_reference" payload in
   let message_reference_channel_id =
     match message_reference with
@@ -676,6 +697,7 @@ let decode_message_create ~bot_user_id ~payload =
            ; mentions_bot
            ; explicit_mentions_bot
            ; author_is_bot
+           ; author_is_user_message
            ; message_reference_channel_id
            ; message_reference_message_id
            ; referenced_message_author_id

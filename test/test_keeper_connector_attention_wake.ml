@@ -128,6 +128,7 @@ let external_attention_item ?(urgency = A.Ambient) ?(preview = "ambient TOKEN-12
         actor_id = Some "user-1";
         display_name = Some "Alex";
         authority = Masc.Keeper_chat_store.External;
+        account = None;
       };
     urgency;
     content_preview = preview;

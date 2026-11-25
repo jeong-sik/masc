@@ -523,7 +523,7 @@ let request_directory_refresh ~sw ~clock ~base_dir =
 let record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
       ~(conversation : Keeper_external_attention.conversation_ref)
       ~message_id ~author_id ~author_name ~display_name ~content ~mentions_bot
-      ~route ~urgency
+      ~author_is_user_message ~route ~urgency
   =
   Option.iter
     (fun name ->
@@ -546,6 +546,8 @@ let record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
         { actor_id = Some author_id
         ; display_name
         ; authority = Keeper_chat_store.External
+        ; account =
+            (if author_is_user_message then Connector_account_ref.discord_user author_id else None)
         }
     ; urgency
     ; content_preview = content
@@ -626,6 +628,7 @@ let accept_message_create ~resolved_binding ~dispatch_for_delivery
       ~(attachments : Discord_gateway_state.inbound_attachment list)
       ~(mentions_bot : bool)
       ~(explicit_mentions_bot : bool)
+      ~author_is_user_message
       ~(message_reference_channel_id : string option)
       ~(message_reference_message_id : string option)
       ~(referenced_message_author_id : string option) () =
@@ -701,7 +704,7 @@ let accept_message_create ~resolved_binding ~dispatch_for_delivery
     let (_ : string option) =
       record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id ~conversation
         ~message_id ~author_id ~author_name ~display_name ~content ~mentions_bot
-        ~route:"triggered" ~urgency
+        ~author_is_user_message ~route:"triggered" ~urgency
     in
     let msg : Channel_gate.inbound_message =
       { channel = State.channel
@@ -810,7 +813,7 @@ let accept_event ~resolved_binding ~dispatch_for_delivery ~base_dir
       ; bot_user_id
       ; mentions_bot
       ; explicit_mentions_bot
-      ; author_is_bot = _
+      ; author_is_user_message
       ; message_reference_channel_id
       ; message_reference_message_id
       ; referenced_message_author_id
@@ -821,7 +824,7 @@ let accept_event ~resolved_binding ~dispatch_for_delivery ~base_dir
     accept_message_create ~resolved_binding ~dispatch_for_delivery ~channel_id
       ~message_id ~author_id
       ~guild_id ~base_dir ~author_name ~guild_nickname ~raw_content ~resolved_mentions
-      ~bot_user_id ~attachments ~mentions_bot ~explicit_mentions_bot
+      ~bot_user_id ~attachments ~mentions_bot ~explicit_mentions_bot ~author_is_user_message
       ~message_reference_channel_id ~message_reference_message_id
       ~referenced_message_author_id ()
   | Gw.Reaction_add _ ->
@@ -858,6 +861,7 @@ let handle_ambient ?resolved_binding ~base_dir
       ~(channel_id : string) ~(guild_id : string option) ~(message_id : string)
       ~(author_id : string) ~(author_name : string option)
       ~guild_nickname
+      ~author_is_user_message
       ~(raw_content : string)
       ~(resolved_mentions : Discord_gateway_state.resolved_mention list)
       ~(bot_user_id : string option)
@@ -909,7 +913,7 @@ let handle_ambient ?resolved_binding ~base_dir
       let attention_event_id =
         record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id ~conversation
           ~message_id ~author_id ~author_name ~display_name ~content
-          ~mentions_bot:false ~route:"ambient"
+          ~mentions_bot:false ~author_is_user_message ~route:"ambient"
           ~urgency:Keeper_external_attention.Ambient
       in
       Keeper_chat_store.append_user_message
@@ -966,6 +970,7 @@ let on_ambient ?resolved_binding ~base_dir (ev : Gw.gateway_event) =
       ; author_id
       ; author_name
       ; guild_nickname
+      ; author_is_user_message
       ; raw_content
       ; resolved_mentions
       ; bot_user_id
@@ -974,7 +979,7 @@ let on_ambient ?resolved_binding ~base_dir (ev : Gw.gateway_event) =
       } ->
     handle_ambient ?resolved_binding ~base_dir ~channel_id ~guild_id
       ~message_id ~author_id ~author_name ~guild_nickname ~raw_content ~resolved_mentions
-      ~bot_user_id ~attachments ()
+      ~bot_user_id ~attachments ~author_is_user_message ()
   | Gw.Ready _ | Gw.Reaction_add _ | Gw.Thread_tracked _ | Gw.Threads_bulk_tracked _ | Gw.Thread_removed _ | Gw.Ignored _ -> ()
 
 let submit_ingress ingress ~lane ~event_id run =

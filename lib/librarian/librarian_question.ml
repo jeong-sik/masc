@@ -79,6 +79,7 @@ let f_external_message_id = "external_message_id"
 let f_tool_call = "tool_call"
 let f_tool_name = "tool_name"
 let f_actor = "actor"
+let f_account = "account"
 let f_urgency = "urgency"
 let f_runtime_context = "runtime_context"
 let f_messages = "messages"
@@ -180,8 +181,14 @@ let task_json : Turn_log.task_evidence -> Yojson.Safe.t = function
 
 (* Who sent a row, as its store typed it. A row written before its store
    recorded senders says so and is not given a guessed kind. *)
-let sender ~authority ~id ~name =
-  tagged (Chat.authority_label authority) [ f_id, text_or_null id; f_name, text_or_null name ]
+let sender ~authority ~id ~name ~account =
+  let fields = [ f_id, text_or_null id; f_name, text_or_null name ] in
+  let fields =
+    match account with
+    | None -> fields
+    | Some account -> fields @ [ f_account, Connector_account_ref.to_json account ]
+  in
+  tagged (Chat.authority_label authority) fields
 ;;
 
 let unknown_sender : Yojson.Safe.t = tagged "unknown" []
@@ -243,7 +250,7 @@ let message_fields (message : Agent_core.Types.message) =
 let chat_speaker : Chat.speaker option -> Yojson.Safe.t = function
   | None -> unknown_sender
   | Some { speaker_id; speaker_name; speaker_authority } ->
-    sender ~authority:speaker_authority ~id:speaker_id ~name:speaker_name
+    sender ~authority:speaker_authority ~id:speaker_id ~name:speaker_name ~account:None
 ;;
 
 let external_chat_coordinates (message : Chat.chat_message) =
@@ -287,7 +294,8 @@ let external_fields (item : Keeper_external_attention.item) =
     , sender
         ~authority:item.actor.authority
         ~id:item.actor.actor_id
-        ~name:item.actor.display_name )
+        ~name:item.actor.display_name
+        ~account:item.actor.account )
   ; f_source, `String item.source_label
   ; f_surface, Surface_ref.to_json item.conversation.surface
   ; f_conversation_id, `String item.conversation.conversation_id

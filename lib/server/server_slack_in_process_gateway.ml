@@ -197,6 +197,7 @@ let record_external_attention ~base_dir ~keeper_name ~team_id ~channel_id
         { actor_id = Some user_id
         ; display_name = user_name
         ; authority = Keeper_chat_store.External
+        ; account = None
         }
     ; urgency
     ; content_preview = content

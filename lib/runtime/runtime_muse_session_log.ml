@@ -570,7 +570,17 @@ let read_observers ~session_directory journals =
               }
           | Error (Run_not_terminated _ | No_run_in_slice) ->
             Ok { observers with running = observers.running + 1 }
-          | Error cause -> Error (Observer_journal { path; cause })))
+          | Error
+              (( Data_root_unavailable
+               | Session_id_invalid _
+               | Session_log_not_found _
+               | Read_failed _
+               | Journal_shrank _
+               | Slice_too_large _
+               | Unsupported_schema _
+               | Malformed_record _
+               | Observer_journal _
+               | Nested_observers ) as cause) -> Error (Observer_journal { path; cause })))
     (Ok no_observers)
     journals
 ;;

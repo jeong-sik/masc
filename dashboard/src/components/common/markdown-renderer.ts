@@ -89,12 +89,14 @@ function followDocumentFragment(event: JSX.TargetedMouseEvent<HTMLDivElement>) {
   const link = event.target instanceof Element
     ? event.target.closest<HTMLAnchorElement>('a[href^="#"]')
     : null
-  if (!link || !root.contains(link)) return
+  if (event.defaultPrevented || !link || !root.contains(link)) return
+
+  const fragment = link.getAttribute('href')?.slice(1) ?? ''
+  if (fragment.startsWith('/')) return
 
   // The application routes on window.location.hash, so fragments in a
   // document must stay scoped to that document.
   event.preventDefault()
-  const fragment = link.getAttribute('href')?.slice(1) ?? ''
   if (!fragment) {
     root.scrollIntoView({ block: 'start' })
     return

@@ -49,14 +49,29 @@ val read_source : login_source -> (t, missing) result
 (** Read and interpret that selected source once, with the existing regular-file
     restriction and IO/error/cancellation boundary. No process cache is used. *)
 
-type observation = {
+type account = {
+  email : t;
+  plan : string list;
+      (** The client's own plan labels, as reported, in a fixed order per
+          client; absent labels are left out. Codex: the ID token's
+          [https://api.openai.com/auth.chatgpt_plan_type]. Claude Code:
+          [oauthAccount.organizationType], [organizationRateLimitTier],
+          [userRateLimitTier] (key names read on 2026-11-25). Antigravity: none.
+          A label that is present but not displayable text makes the read
+          [Source_unrecognized]. Display only, never routing or admission. *)
+}
+
+val read_account : login_source -> (account, missing) result
+(** {!read_source} plus the plan labels, from the same single read. *)
+
+type 'a observation = {
   integration_id : string;
-  email : (t, missing) result;
+  email : ('a, missing) result;
 }
 
 val observe_providers :
-  read:(login_source -> (t, missing) result) ->
-  Runtime_schema.provider list -> observation list
+  read:(login_source -> ('a, missing) result) ->
+  Runtime_schema.provider list -> 'a observation list
 (** Resolve all provider sources before reading their login contents, then read each
     distinct client/file once per invocation. Successes and missing results are
     shared only within that invocation. Provider order and separate rows remain.
@@ -80,13 +95,13 @@ val of_provider : Runtime_schema.provider -> (t, missing) result option
     login is not documented (checked 2026-09-28), so a Codex row names the
     login file's email whatever the environment holds. *)
 
-val row_json : integration_id:string -> (t, missing) result -> Yojson.Safe.t
-(** One setup-inventory row: [{"integration_id", "state": "read", "email"}],
+val row_json : integration_id:string -> (account, missing) result -> Yojson.Safe.t
+(** One setup-inventory row: [{"integration_id", "state": "read", "email", "plan"}],
     or [{"integration_id", "state": "not_read", "cause"}] with [cause] from
     {!missing_to_wire}. *)
 
 val providers_json : Runtime_schema.provider list -> Yojson.Safe.t
-(** {!row_json} for every account from {!observe_providers}, using {!read_source}.
+(** {!row_json} for every account from {!observe_providers}, using {!read_account}.
     A later invocation re-resolves and rereads sources, so sign-in changes and
     previous failures are not hidden by a process-wide cache. *)
 

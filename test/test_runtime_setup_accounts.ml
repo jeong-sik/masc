@@ -364,7 +364,31 @@ let email_batch_provider ~home id =
   | None -> fail "selected account missing"
 
 let email_batch_addresses observations =
-  List.map (fun (observation : Email.observation) -> observation.integration_id, email_of observation.email) observations
+  List.map (fun (observation : _ Email.observation) -> observation.integration_id, email_of observation.email) observations
+
+let plan_labels_ride_with_the_email () = fixture (fun directory _ ->
+  let claude_home = Filename.concat directory "claude-plan" in
+  let codex_home = Filename.concat directory "codex-plan" in
+  List.iter (fun home -> Unix.mkdir home 0o700) [claude_home;codex_home];
+  write (Filename.concat claude_home ".claude.json")
+    {|{"oauthAccount":{"emailAddress":"claude@example.com","organizationType":"claude_team","organizationRateLimitTier":"org_tier","userRateLimitTier":"user_tier"}}|};
+  write (Runtime_verification_codex_home.auth_path ~codex_home)
+    (Printf.sprintf {|{"tokens":{"id_token":%S}}|}
+       (id_token {|{"email":"codex@example.com","https://api.openai.com/auth":{"chatgpt_plan_type":"team"}}|}));
+  let claude = email_batch_provider ~home:claude_home "claude" in
+  let codex = {(email_batch_provider ~home:codex_home "codex") with Runtime_schema.api_format=Codex_app_server_runtime} in
+  let plan_of = function
+    | `Assoc fields ->
+      (match List.assoc_opt "plan" fields with
+       | Some (`List labels) -> List.map (function `String label -> label | _ -> fail "plan label is not text") labels
+       | _ -> fail "row has no plan list")
+    | _ -> fail "row is not an object" in
+  match Email.providers_json [claude;codex] with
+  | `List [claude_row;codex_row] ->
+    check (list string) "Claude plan labels keep the declared order"
+      ["claude_team";"org_tier";"user_tier"] (plan_of claude_row);
+    check (list string) "Codex plan comes from the ID token claim" ["team"] (plan_of codex_row)
+  | _ -> fail "expected two account rows")
 
 let shared_login_observation_and_rotation () = fixture (fun directory _ ->
   let home = Filename.concat directory "shared-login" in
@@ -405,7 +429,7 @@ let failed_login_sharing_and_independent_sources () = fixture (fun directory _ -
     let calls = ref 0 in
     let read source = incr calls; Email.read_source source in
     let observations = Email.observe_providers ~read [first;second;unavailable;inherited;http] in
-    let gap id = match List.find_opt (fun (row : Email.observation) -> row.integration_id=id) observations with
+    let gap id = match List.find_opt (fun (row : _ Email.observation) -> row.integration_id=id) observations with
       | Some row -> missing row.email | None -> fail (id ^ " missing from observations") in
     check int "failed shared file and another file remain two observations" 2 !calls;
     check int "environment refusal remains a row, HTTP has no account row" 4 (List.length observations);
@@ -474,6 +498,7 @@ let cancelled_login_observation_never_retries () = fixture (fun directory _ ->
 
 
 let () = run "setup account references" ["private account",[
+  test_case "plan labels ride with the email" `Quick plan_labels_ride_with_the_email;
   test_case "shared login observation and later rotation" `Quick shared_login_observation_and_rotation;
   test_case "failed source sharing keeps independent sources" `Quick failed_login_sharing_and_independent_sources;
   test_case "same path keeps client interpretations separate" `Quick same_path_client_interpretations_remain_separate;

@@ -79,6 +79,46 @@ let email_in_id_token path json =
     let* claims = id_token_claims token in
     email_at [ "email" ] claims
 
+(* A plan label is the client's own word for the account's plan (for example
+   Codex [promax] or Claude [claude_max]), shown as reported. It is display
+   text only, so it passes the same displayable-text check as an email. *)
+let plan_at paths json =
+  List.fold_right (fun path labels ->
+    let* labels = labels in
+    let* value = at path json in
+    match value with
+    | None -> Ok labels
+    | Some (`String text) ->
+      (match of_string text with
+       | Some label -> Ok (to_string label :: labels)
+       | None -> Error Source_unrecognized)
+    | Some _ -> Error Source_unrecognized) paths (Ok [])
+
+type account = { email : t; plan : string list }
+
+let codex_plan_paths = [ [ "https://api.openai.com/auth"; "chatgpt_plan_type" ] ]
+
+let claude_plan_paths =
+  List.map (fun key -> [ "oauthAccount"; key ])
+    [ "organizationType"; "organizationRateLimitTier"; "userRateLimitTier" ]
+
+let codex_account bytes =
+  let* json = parse bytes in
+  let* token = at [ "tokens"; "id_token" ] json in
+  match token with
+  | None -> Error Not_reported
+  | Some token ->
+    let* claims = id_token_claims token in
+    let* email = email_at [ "email" ] claims in
+    let* plan = plan_at codex_plan_paths claims in
+    Ok { email; plan }
+
+let claude_account bytes =
+  let* json = parse bytes in
+  let* email = email_at [ "oauthAccount"; "emailAddress" ] json in
+  let* plan = plan_at claude_plan_paths json in
+  Ok { email; plan }
+
 let of_codex_auth bytes =
   let* json = parse bytes in
   email_in_id_token [ "tokens"; "id_token" ] json
@@ -163,6 +203,12 @@ let resolve_provider (provider : Runtime_schema.provider) =
 let of_provider provider =
   Option.map (fun selected -> Result.bind selected read_source) (resolve_provider provider)
 
+let read_account = function
+  | Codex_auth path -> read_login_file path codex_account
+  | Claude_account path -> read_login_file path claude_account
+  | Google_oauth path ->
+    read_login_file path (fun bytes -> Result.map (fun email -> { email; plan = [] }) (of_google_oauth bytes))
+
 module Source_map = Map.Make (struct
   type nonrec t = login_source
   let source_rank = function
@@ -179,9 +225,9 @@ module Source_map = Map.Make (struct
       Int.compare (source_rank a) (source_rank b)
 end)
 
-type observation = {
+type 'a observation = {
   integration_id : string;
-  email : (t, missing) result;
+  email : ('a, missing) result;
 }
 
 let observe_providers ~read providers =
@@ -200,13 +246,15 @@ let observe_providers ~read providers =
 let row_json ~integration_id read =
   let state =
     match read with
-    | Ok email -> [ "state", `String "read"; "email", `String (to_string email) ]
+    | Ok { email; plan } ->
+      [ "state", `String "read"; "email", `String (to_string email)
+      ; "plan", `List (List.map (fun label -> `String label) plan) ]
     | Error missing -> [ "state", `String "not_read"; "cause", `String (missing_to_wire missing) ]
   in
   `Assoc (("integration_id", `String integration_id) :: state)
 
 let providers_json providers =
   `List (List.map (fun observation -> row_json ~integration_id:observation.integration_id observation.email)
-    (observe_providers ~read:read_source providers))
+    (observe_providers ~read:read_account providers))
 
 let inventory_json (config : Runtime_schema.config) = providers_json config.providers

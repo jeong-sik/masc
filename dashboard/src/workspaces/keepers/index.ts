@@ -197,6 +197,7 @@ export function KeepersWorkspace(props: WorkspaceViewProps) {
                   <${KeeperChatTab}
                     key=${`chat:${epoch}:${activeKeeper.name}`}
                     keeper=${activeKeeper}
+                    turnSnapshot=${turns}
                     onInspect=${props.onInspect}
                     onSelectKeeper=${handleSelectKeeper}
                     onMutated=${() => void refreshRoster('manual')}

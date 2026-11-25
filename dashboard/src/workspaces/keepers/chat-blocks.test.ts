@@ -3,7 +3,7 @@ import { html } from 'htm/preact'
 import { render, fireEvent, waitFor, cleanup } from '@testing-library/preact'
 import { authSession, resetAuthStateForTests } from '../../core/auth'
 import { resetObserverStateForTests } from '../../core/observer'
-import { resourceCache } from '../../core/resource-cache'
+import { observedValue, resourceCache } from '../../core/resource-cache'
 import { releaseAllViewStreams } from '../../core/view-stream-slot'
 import {
   DEFAULT_CHAT_BLOCK_PREFS,
@@ -31,7 +31,51 @@ import {
   streamKeeperChat,
 } from './keepers-api'
 import { KeeperChatTab } from './keeper-chat-tab'
-import type { KeeperRosterItem } from './types'
+import { previewForObservedTurn, retainTurnPreview, type ReceivedTurnPreview } from './chat-turn-progress'
+import type { KeeperActiveTurn, KeeperRosterItem } from './types'
+
+describe('owner-scoped turn progress', () => {
+  const sample = (ownerKey: string, revision: number, receivedAt: number): ReceivedTurnPreview => ({
+    ownerKey, receivedAt, live: true,
+    preview: { status_text: ownerKey, activity: 'streaming', text_tail: '', last_tool: null,
+      revision, updated_at_unix: receivedAt / 1000 },
+  })
+  const turn = (ownerKey: string, through: number): KeeperActiveTurn => ({
+    lane: 'chat', owner_key: ownerKey, preview_observed_through: through,
+    started_at_unix: 5, tool_in_flight: null,
+  })
+  it('keeps both the displayed preview and the next owner received ahead of its HTTP snapshot', () => {
+    const a = sample('A', 3, 10)
+    const b = sample('B', 11, 20)
+    let seen = retainTurnPreview([], 'A', a)
+    seen = retainTurnPreview(seen, 'A', b)
+    expect(previewForObservedTurn(seen, turn('A', 1), 30)).toBe(a)
+    expect(previewForObservedTurn(seen, turn('B', 10), 30)).toBe(b)
+    seen = retainTurnPreview(seen, 'B', sample('A', 4, 40))
+    expect(previewForObservedTurn(seen, turn('B', 10), 30)).toBe(b)
+    expect(previewForObservedTurn(seen, turn('B', 11), 30)).toBeUndefined()
+    expect(previewForObservedTurn(seen, null, 41)).toBeUndefined()
+  })
+  it('does not renew stale evidence from a duplicate or retired revision', () => {
+    const stale = { ...sample('A', 3, 10), live: false }
+    const seen = [stale]
+    expect(retainTurnPreview(seen, 'A', sample('A', 3, 15))).toBe(seen)
+    expect(retainTurnPreview(seen, 'A', sample('A', 2, 30))).toBe(seen)
+    expect(previewForObservedTurn(seen, null, 9)).toBe(stale)
+    expect(retainTurnPreview(seen, 'A', sample('A', 4, 40))[0]?.live).toBe(true)
+  })
+  it('drops the first late frame of a retired owner and retains the next preview', () => {
+    const retired = new Set(['A'])
+    const late = sample('A', 1, 20)
+    const next = sample('B', 6, 25)
+    const seen = retainTurnPreview([], null, late, retired)
+    expect(seen).toEqual([])
+    const pending = retainTurnPreview(seen, null, next, retired)
+    expect(retainTurnPreview(pending, null, late, retired)).toBe(pending)
+    expect(previewForObservedTurn([late, next], null, 10, retired)).toBe(next)
+    expect(previewForObservedTurn(pending, turn('B', 5), 30, retired)).toBe(next)
+  })
+})
 
 function makeRosterKeeper(overrides: Partial<KeeperRosterItem> = {}): KeeperRosterItem {
   return {
@@ -570,6 +614,25 @@ describe('Chat Hierarchy Grouping, Delegate Cards, Live Autonomous Turn & Waitin
     vi.restoreAllMocks()
   })
 
+  it('updates a disconnected turn timer only when a newer observation arrives', () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response('{}'))
+    const keeper = makeRosterKeeper()
+    const startedAt = 1_700_000_000
+    const active: KeeperActiveTurn = {
+      owner_key: 'A', lane: 'autonomous', started_at_unix: startedAt, tool_in_flight: null,
+    }
+    const at = (elapsed: number) => {
+      const turns = observedValue(new Map([[keeper.name, {
+        keeper_name: keeper.name, status: 'ok' as const, active, chat_control_token: null, waiting: null,
+      }]]), (startedAt + elapsed) * 1000)
+      return html`<${KeeperChatTab} keeper=${keeper} turnSnapshot=${turns} onInspect=${vi.fn()} onMutated=${vi.fn()} />`
+    }
+    const view = render(at(10))
+    expect(view.getByRole('timer').textContent).toBe('10s')
+    view.rerender(at(30))
+    expect(view.getByRole('timer').textContent).toBe('30s')
+  })
+
   it('extracts Keeper Delegate metadata (including status_many operations) and collapses consecutive tool-only rows with stable IDs', () => {
     const delInfo = extractDelegateCardInfo({
       name: 'masc_keeper_delegate',
@@ -732,14 +795,23 @@ describe('Chat Hierarchy Grouping, Delegate Cards, Live Autonomous Turn & Waitin
       parseKeeperLiveObserverEvent('keeper_chat_appended', { type: 'keeper_chat_appended' }, 'code-reviewer-sister'),
     ).toBeNull()
 
-    // Turn completion emits turn_ended so live preview cards clear cleanly
+    // An agent-core iteration can finish before the Keeper's work settles.
     expect(
       parseKeeperLiveObserverEvent(
         'keeper_turn_complete',
         { type: 'keeper_turn_complete', name: 'code-reviewer-sister' },
         'code-reviewer-sister',
       ),
-    ).toEqual({ kind: 'turn_ended' })
+    ).toBeNull()
+
+    const receipt = {
+      type: 'keeper_turn_succeeded', name: 'code-reviewer-sister', elapsed_ms: 75_123, ts_unix: 1_700_000_502,
+    }
+    expect(parseKeeperLiveObserverEvent('message', receipt, 'code-reviewer-sister')).toEqual({
+      kind: 'turn_succeeded', elapsedMs: 75_123, atUnix: 1_700_000_502,
+    })
+    expect(parseKeeperLiveObserverEvent('message', receipt, 'another-keeper')).toBeNull()
+    expect(parseKeeperLiveObserverEvent('message', { ...receipt, elapsed_ms: -1 }, 'code-reviewer-sister')).toBeNull()
 
     const otherKeeperSig = parseKeeperLiveObserverEvent(
       'keeper_turn_preview_changed',
@@ -765,11 +837,10 @@ describe('Chat Hierarchy Grouping, Delegate Cards, Live Autonomous Turn & Waitin
       },
       'code-reviewer-sister',
     )
-    expect(pulseSig?.kind).toBe('tool_pulse')
-    if (pulseSig?.kind === 'tool_pulse') {
-      expect(pulseSig.pulse.executionMode).toBe('concurrent')
-      expect(pulseSig.pulse.batchSize).toBe(4)
-    }
+    expect(pulseSig).toBeNull()
+    expect(parseKeeperLiveObserverEvent('message',
+      { type: 'keeper_turn_changed', name: 'code-reviewer-sister' }, 'code-reviewer-sister'))
+      .toEqual({ kind: 'turn_changed' })
 
     expect(
       parseKeeperLiveObserverEvent('keeper_chat_appended', { keeper_name: 'code-reviewer-sister' }, 'code-reviewer-sister'),
@@ -909,13 +980,14 @@ describe('Chat Hierarchy Grouping, Delegate Cards, Live Autonomous Turn & Waitin
       expect(turnTrace).not.toBeNull()
       expect(turnTrace!.querySelector('[data-testid="chat-turn-tool-group"]')).not.toBeNull()
 
-      // Live autonomous turn preview card uses real `activity: 'tool'` -> '실행 중 · Execute'
+      // The snapshot is retained without a live Observer in this fixture.
       const liveCard = container.querySelector('[data-testid="chat-live-turn-card"]')
       expect(liveCard).not.toBeNull()
       expect(liveCard!.getAttribute('aria-live')).toBeNull()
       expect(liveCard!.textContent).toContain('자율 턴')
-      expect(liveCard!.textContent).toContain('도구 실행 중')
-      expect(liveCard!.textContent).toContain('실행 중 · Execute')
+      expect(container.querySelector('.kp-turn-progress-active')?.textContent).toContain('마지막 확인')
+      expect(container.querySelector('.kp-turn-progress-active')?.textContent).toContain('도구 실행 중')
+      expect(liveCard!.textContent).toContain('최근 도구 · Execute')
       expect(liveCard!.textContent).toContain('Evaluating diff hunks')
 
       // Waiting inventory strip rendered with canonical OCaml source label

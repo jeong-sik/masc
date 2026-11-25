@@ -300,6 +300,10 @@ let handle_keeper_turns_list state request reqd =
                    | None -> `Null | Some turn_ref -> Ids.Turn_ref.to_yojson turn_ref)
               ; ("started_at_unix", `Float turn.started_at)
               ; ("interrupt_token", `String (Keeper_interrupt_token.to_string turn.interrupt_token))
+              ; ( "owner_key"
+                , `String
+                    (Sse_wire.keeper_turn_observation_key
+                       ~interrupt_token:(Keeper_interrupt_token.to_string turn.interrupt_token)) )
               ; ("preview_observed_through", `Int preview_observed_through)
               ; ("preview", preview_json)
               ]

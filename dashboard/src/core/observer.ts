@@ -66,6 +66,7 @@ const SERVER_TOPIC_ALIASES: Readonly<Record<string, readonly string[]>> = {
   // Preview frames carry one Owner's observation. A lifecycle change invalidates the Fleet slots.
   keeper_turn_changed: ['keeper', 'keeper_turn', 'shell'],
   keeper_turn_complete: ['keeper', 'keeper_turn', 'cost', 'shell'],
+  keeper_turn_succeeded: ['keeper', 'keeper_turn'],
   keeper_turns: ['keeper', 'keeper_turn', 'cost', 'shell'],
   keeper_memory_health: ['keeper', 'memory'],
   keeper_waiting_inventory_changed: ['keeper', 'keeper_turn', 'tool_approval', 'approval'],

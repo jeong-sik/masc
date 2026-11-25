@@ -229,6 +229,7 @@ export function buildPortraitPreviewUrl(
 
 interface TurnListItem {
   readonly keeper_name: string
+  readonly status: 'ok' | 'unavailable'
   readonly chat_control_token: string | null
   readonly active: KeeperRosterItem['active_turn']
   readonly waiting: KeeperWaitingSummary | null
@@ -360,27 +361,27 @@ function decodeTurnsList(raw: unknown): Map<string, TurnListItem> {
     if (!isRecord(row)) continue
     const name = asStr(row.keeper_name) ?? asStr(row.name)
     if (!name) continue
-    const activeRaw = isRecord(row.active_turn)
-      ? row.active_turn
-      : isRecord(row.turn)
-        ? row.turn
-        : null
+    const turn = 'active_turn' in row ? row.active_turn : row.turn
+    const status = row.status === 'ok' && (turn === null || isRecord(turn)) ? 'ok' : 'unavailable'
+    const activeRaw = status === 'ok' && isRecord(turn) ? turn : null
     const decodedPreview = activeRaw ? decodeTurnPreview(activeRaw.preview) : null
     const active: KeeperActiveTurn | null = activeRaw
       ? {
           lane: asStr(activeRaw.lane) ?? 'chat',
           turn_ref: asStr(activeRaw.turn_ref),
+          owner_key: asStr(activeRaw.owner_key),
+          preview_observed_through: asNum(activeRaw.preview_observed_through),
           started_at_unix: asNum(activeRaw.started_at_unix) ?? asNum(activeRaw.started_at) ?? 0,
           phase: asStr(activeRaw.phase),
-          tool_in_flight: asStr(activeRaw.tool_in_flight) ?? asStr(activeRaw.tool) ?? decodedPreview?.last_tool ?? null,
+          tool_in_flight: asStr(activeRaw.tool_in_flight) ?? asStr(activeRaw.tool),
           elapsed_ms: asNum(activeRaw.elapsed_ms),
           preview: decodedPreview,
         }
       : null
     const waiting = decodeWaitingSummary(row.waiting ?? row.waiting_inventory)
     map.set(name, {
-      keeper_name: name,
-      chat_control_token: asStr(row.chat_control_token),
+      keeper_name: name, status,
+      chat_control_token: status === 'ok' ? asStr(row.chat_control_token) : null,
       active,
       waiting,
     })
@@ -933,23 +934,14 @@ export function fetchKeeperWaitingInventoryApi(
   )
 }
 
-export interface KeeperLiveToolPulse {
-  readonly toolName: string
-  readonly disposition: string | null
-  readonly durationMs: number | null
-  readonly executionMode: 'concurrent' | 'serial' | null
-  readonly batchSize: number | null
-  readonly updatedAt: number
-}
-
 export type KeeperObserverChatSignal =
   | {
       readonly kind: 'turn_preview'
       readonly ownerKey: string | null
       readonly preview: KeeperActiveTurnPreview
     }
-  | { readonly kind: 'turn_ended' }
-  | { readonly kind: 'tool_pulse'; readonly pulse: KeeperLiveToolPulse }
+  | { readonly kind: 'turn_changed' }
+  | { readonly kind: 'turn_succeeded'; readonly elapsedMs: number; readonly atUnix: number }
   | { readonly kind: 'chat_appended' }
   | { readonly kind: 'waiting_changed'; readonly queueChanged: boolean }
 
@@ -984,22 +976,14 @@ export function parseKeeperLiveObserverEvent(
   if (eventType === 'keeper_chat_appended') {
     return { kind: 'chat_appended' }
   }
-  if (eventType === 'keeper_turn_complete') {
-    return { kind: 'turn_ended' }
+  if (eventType === 'keeper_turn_succeeded' && payload) {
+    const elapsedMs = asNum(payload.elapsed_ms)
+    const atUnix = asNum(payload.ts_unix)
+    if (elapsedMs === null || !Number.isInteger(elapsedMs) || elapsedMs < 0
+      || atUnix === null || atUnix <= 0 || !Number.isFinite(new Date(atUnix * 1000).getTime())) return null
+    return { kind: 'turn_succeeded', elapsedMs, atUnix }
   }
-  if (eventType === 'keeper_turn_changed' && payload) {
-    const status = asStr(payload.status) ?? asStr(payload.phase)
-    if (
-      payload.active_turn === null
-      || payload.turn === null
-      || status === 'idle'
-      || status === 'completed'
-    ) {
-      return { kind: 'turn_ended' }
-    }
-    // Start/in-progress previews arrive via `keeper_turn_preview_changed` and roster `active_turn`.
-    return null
-  }
+  if (eventType === 'keeper_turn_changed') return { kind: 'turn_changed' }
   if (eventType === 'keeper_turn_preview_changed' && payload) {
     const obs = isRecord(payload.observation) ? payload.observation : null
     const previewRaw =
@@ -1011,22 +995,6 @@ export function parseKeeperLiveObserverEvent(
       return { kind: 'turn_preview', ownerKey, preview }
     }
     return null
-  }
-  if ((eventType === 'keeper_tool_call' || eventType === 'masc/keeper_tool_call') && payload) {
-    const toolName = asStr(payload.tool_name) ?? asStr(payload.tool)
-    if (!toolName) return null
-    const execModeRaw = asStr(payload.execution_mode)
-    return {
-      kind: 'tool_pulse',
-      pulse: {
-        toolName,
-        disposition: asStr(payload.disposition),
-        durationMs: asNum(payload.duration_ms),
-        executionMode: execModeRaw === 'concurrent' || execModeRaw === 'serial' ? execModeRaw : null,
-        batchSize: asNum(payload.batch_size),
-        updatedAt: Date.now(),
-      },
-    }
   }
   return null
 }

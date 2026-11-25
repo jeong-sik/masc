@@ -75,6 +75,7 @@ let why_text : Effects.why_not -> string = function
   | Unknown_ref -> "unknown ref"
   | Ref_used_twice -> "ref used twice"
   | Source_outside_question -> "source outside question"
+  | Source_reserved_for_personal_memory -> "source reserved for personal memory"
   | Removed_during_flight { seq } -> Printf.sprintf "removed during flight at %d" seq
   | Not_valid_alone -> "not valid alone"
   | Not_valid_in_room -> "not valid in room"

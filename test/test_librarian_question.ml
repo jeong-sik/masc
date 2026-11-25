@@ -241,7 +241,74 @@ let external_person_observation_keeps_its_scope () =
   check bool "invalid source address supplies no scoped evidence" false
     (List.mem_assoc "account_scope" (to_assoc incomplete));
   check string "invalid source address still shows the actor" account_id
-    (incomplete |> member "actor" |> member "id" |> to_string)
+    (incomplete |> member "actor" |> member "id" |> to_string);
+  let module Answer = Masc.Librarian_answer in
+  let module Plan = Masc.Librarian_plan in
+  let other_id = "900000000000000002" in
+  let other_account = Option.get (Masc.Connector_account_ref.discord_user other_id) in
+  let other_message_id = "930000000000000002" in
+  let other =
+    { item with
+      actor = { item.actor with actor_id = Some other_id;
+                                account = Some (Attention.Account_of_original_message other_account) }
+    ; external_message = Some { surface; message_id = other_message_id; reply_to_message_id = None }
+    }
+  in
+  let row index item : Read_unit.item =
+    { index; name = { store = External; at = index }; body = External_row item }
+  in
+  let question, _ =
+    ask [] [ { (unit item) with
+                kind = Reset { cause = Turn_log.Cleared; items = [ row 0 older; row 1 item; row 2 other ] }
+              }
+           ; { (unit older) with line = 240 } ]
+  in
+  let consent_claim =
+    "prefers Korean summaries here " ^ "sk" ^ "-ant-api03-" ^ "SECRETTOKEN1234567890ABCDEFGH"
+  in
+  let select item_index : Answer.op =
+    Remember_personal { unit_name = "u1"; item_index; claim = consent_claim; category = Preference }
+  in
+  let answer : Answer.t =
+    { question = question.id
+    ; working_state = Set consent_claim
+    ; ops =
+        List.map select [ 0; 1; 2; 3 ]
+        @ [ Add { claim = consent_claim; category = Preference;
+                  basis = Observed Transcript; from_units = [ "u1" ] }
+          ; Add { claim = consent_claim; category = Preference;
+                  basis = Observed Transcript; from_units = [ "u2" ] } ]
+    }
+  in
+  let parsed =
+    match Answer.of_json ~asked:question.id (Answer.to_json answer) with
+    | Ok parsed -> parsed
+    | Error _ -> fail "the personal proposal did not round trip"
+  in
+  let plan =
+    Plan.of_answer ~shown:(Read question.shown) ~personal_sources:question.personal_sources
+      ~facts:[] ~removed_since:[] ~at:item.received_at ~trace_id:"trace-1" parsed
+  in
+  check int "both attested items write distinct facts" 2 (List.length plan.facts);
+  check bool "unattested, unshown and unscoped proposals are refused" true
+    (List.map (fun (op, why, _) -> op, why) plan.effects.not_applied =
+       [ 0, Masc.Librarian_effects.Source_outside_question
+       ; 3, Masc.Librarian_effects.Source_outside_question
+       ; 4, Masc.Librarian_effects.Source_reserved_for_personal_memory
+       ; 5, Masc.Librarian_effects.Source_reserved_for_personal_memory ]);
+  check bool "private storage also redacts the claimed secret" true
+    (List.for_all (fun (fact : Types.fact) -> fact.claim <> consent_claim) plan.facts);
+  check bool "refusal bodies and working state do not copy the personal claim" true
+    (plan.working_state = Kept
+     && List.for_all (fun (_, _, fact) -> Option.is_none fact) plan.effects.not_applied);
+  let evidence_for source =
+    let scope = Option.get (Attention.original_message_scope source) in
+    match List.filter (Types.in_personal_scope scope) plan.facts with
+    | [ { basis = Observed (Personal evidence); _ } ] -> evidence.message_ids
+    | _ -> fail "expected one fact scoped to the selected author"
+  in
+  check (list string) "first account cites its own message" [ message_id ] (evidence_for item);
+  check (list string) "same nickname cites a different message" [ other_message_id ] (evidence_for other)
 ;;
 
 let same_inputs_same_bytes () =

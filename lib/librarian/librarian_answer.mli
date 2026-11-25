@@ -25,6 +25,14 @@ type new_fact =
 
 type op =
   | Add of new_fact
+  | Remember_personal of
+      { unit_name : string
+      ; item_index : int
+      ; claim : string
+      ; category : category
+      }
+  (** The model selects exactly one item in its question. The host binds
+      the original author and destination from that item. *)
   | Drop of
       { ref_ : string
       ; reason : string

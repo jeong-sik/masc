@@ -296,7 +296,8 @@ let cause_text : Log.cause -> string = function
 let not_applied_text (number, (why : Effects.why_not), (_ : Answer.new_fact option)) =
   match why with
   | Removed_during_flight { seq } -> Printf.sprintf "op %d: removed by commit %d" number seq
-  | Unknown_ref | Ref_used_twice | Source_outside_question | Not_valid_alone | Not_valid_in_room
+  | Unknown_ref | Ref_used_twice | Source_outside_question | Source_reserved_for_personal_memory
+  | Not_valid_alone | Not_valid_in_room
   | Successor_unsupported | Promotion_refused -> Printf.sprintf "op %d: another reason" number
 ;;
 
@@ -403,6 +404,7 @@ let question place (value : Machine.t) : Read_result.question =
               (Store.memory store).facts
         ; units = [ "u1", span.line ]
         }
+  ; personal_sources = []
   ; basis = Log.snapshot_after (Store.tail store)
   ; reach = Unread.reach span Whole
   ; trace = "trace-1"

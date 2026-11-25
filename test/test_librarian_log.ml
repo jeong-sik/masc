@@ -126,6 +126,7 @@ let every_why : Effects.why_not list =
   [ Unknown_ref
   ; Ref_used_twice
   ; Source_outside_question
+  ; Source_reserved_for_personal_memory
   ; Removed_during_flight { seq = 7 }
   ; Not_valid_alone
   ; Not_valid_in_room
@@ -326,6 +327,7 @@ let test_pinned_text () =
     [ {|{"kind":"unknown_ref"}|}
     ; {|{"kind":"ref_used_twice"}|}
     ; {|{"kind":"source_outside_question"}|}
+    ; {|{"kind":"source_reserved_for_personal_memory"}|}
     ; {|{"kind":"removed_during_flight","seq":7}|}
     ; {|{"kind":"not_valid_alone"}|}
     ; {|{"kind":"not_valid_in_room"}|}

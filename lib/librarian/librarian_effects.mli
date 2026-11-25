@@ -38,6 +38,9 @@ type why_not =
   | Unknown_ref (** A name the question did not give, or a fact not in Memory. *)
   | Ref_used_twice (** An earlier op of the same answer already named this fact. *)
   | Source_outside_question (** A unit name the question did not give. *)
+  | Source_reserved_for_personal_memory
+  (** The answer used this input for a personal fact. The same input cannot
+      support an ordinary write in that answer. *)
   | Removed_during_flight of { seq : int }
   (** A direct write removed the fact after the question was made. [seq] is
       the commit that removed it. *)
@@ -79,6 +82,9 @@ val ordinary_projection : t -> t
 
 (** Stable token for a metric label or a log field. *)
 val why_not_kind : why_not -> string
+
+val add_facts : fact list -> fact list -> fact list
+(** Add ordinary rows and consolidate observations of the same personal fact. *)
 
 (** Memory after the commit made at [at]: removed facts leave, touched facts
     are seen at [at], added facts follow in order. *)

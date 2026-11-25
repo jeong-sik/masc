@@ -38,6 +38,8 @@ type asked =
 type question =
   { id : Librarian_question_id.t
   ; shown : Librarian_plan.read
+  ; personal_sources : Librarian_plan.personal_source list
+  (** Verified original-message items addressed by the indices in the question. *)
   ; basis : Digest.digest
   (** The snapshot the tail named when the question was made, whether or not
       it showed Memory. A one-item verdict is read only while this is the

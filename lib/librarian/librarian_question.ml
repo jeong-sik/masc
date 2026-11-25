@@ -391,10 +391,28 @@ let unit_json index ({ line = _; at; kind; missing } : Read_unit.t) =
      @ [ f_missing, `List (List.map missing_part_json missing) ])
 ;;
 
+let shown_items ({ kind; _ } : Read_unit.t) =
+  match kind with
+  | Turn { unattributed; own; _ } -> unattributed @ own
+  | Reset { items; _ } -> items
+;;
+
 let has_item ({ kind; _ } : Read_unit.t) =
   match kind with
   | Turn { unattributed; own; _ } -> not (List.is_empty unattributed && List.is_empty own)
   | Reset { items; _ } -> not (List.is_empty items)
+;;
+
+let personal_sources index (unit : Read_unit.t) =
+  let unit_name = unit_name index in
+  List.filter_map
+    (fun ({ index; body; _ } : Read_unit.item) ->
+       match body with
+       | External_row observation
+         when Option.is_some (Keeper_external_attention.original_message_scope observation) ->
+         Some { Librarian_plan.unit_name; item_index = index; observation }
+       | External_row _ | Chat_row _ | Message _ | Fragment _ -> None)
+    (shown_items unit)
 ;;
 
 (* {1 The id} *)
@@ -465,6 +483,7 @@ let make ?world_index ~(lane : Librarian_memory_lane.question_side) ~from ~shows
   else (
     let units_line = json_line label_units (`List (List.mapi unit_json units)) in
     let names = List.mapi (fun index (read : Read_unit.t) -> unit_name index, read.line) units in
+    let personal_sources = List.concat (List.mapi personal_sources units) in
     (* A question of the item alone has neither Memory line, so its front
        half is the question side's alone and Memory changing leaves its id
        as it was (§7.4). When a read-only World Memory Index snapshot is
@@ -485,7 +504,8 @@ let make ?world_index ~(lane : Librarian_memory_lane.question_side) ~from ~shows
     in
     Made
       { question =
-          { id; shown; basis = Librarian_log.snapshot_after from; reach; trace; missing; offered }
+          { id; shown; personal_sources; basis = Librarian_log.snapshot_after from
+          ; reach; trace; missing; offered }
       ; text = text ~lane id (memory_lines @ [ units_line ])
       ; schema
       })

@@ -478,6 +478,30 @@ let no_counts =
   }
 ;;
 
+(* What a slice says about the runs its prompt started. A run without a
+   [terminal] record is a state of the journal, not a failure to read it: the
+   prompt's own reader reports it as an error, an observer's reader as [running]. *)
+type summary =
+  | No_run
+  | Unterminated of { run_id : string }
+  | Summarized of
+      { turn : turn
+      ; observer_journals : string option list
+      }
+
+(* A journal's counts are added once, however many link records name it. Links
+   without a path name no journal, so each of them stays. *)
+let journals_once journals =
+  List.rev
+    (List.fold_left
+       (fun kept journal ->
+          match journal with
+          | Some _ when List.mem journal kept -> kept
+          | Some _ | None -> journal :: kept)
+       []
+       journals)
+;;
+
 (* The prompt's runs are the ones whose [started] record is in the slice. A
    record of another run in the slice, such as the tail of the previous
    prompt's, is not the prompt's. *)
@@ -500,10 +524,10 @@ let summarize records =
       records
   in
   match started with
-  | [] -> Error No_run_in_slice
+  | [] -> No_run
   | _ :: _ ->
     (match List.find_opt (fun run_id -> not (List.mem run_id terminated)) started with
-     | Some run_id -> Error (Run_not_terminated { run_id })
+     | Some run_id -> Unterminated { run_id }
      | None ->
        let turn =
          List.fold_left
@@ -542,8 +566,9 @@ let summarize records =
              | Run_started _
              | Run_terminal _ -> None)
            records
+         |> journals_once
        in
-       Ok (turn, observer_journals))
+       Summarized { turn; observer_journals })
 ;;
 
 (* ── The observers' own journals ──────────────────────────────────────────── *)
@@ -553,18 +578,27 @@ let read_records m =
   decode_lines (complete_lines ~start ~offset:m.offset slice)
 ;;
 
-(* A child session is new for each link, so its journal is read from its first
-   byte. *)
+type observer_state =
+  | Observer_running
+  | Observer_finished of
+      { counts : counts
+      ; cache_write_tokens : int
+      }
+
+(* A child's journal is a file of its own, so it is read from its first byte,
+   not from the parent's mark. A child whose run has not ended may still add
+   requests, so none of its counts is taken. *)
 let read_observer path =
   let* records = read_records { path; offset = 0 } in
-  let* turn, observer_journals = summarize records in
-  match observer_journals with
-  | [] -> Ok (total turn, turn.main_cache_write_tokens)
-  | _ :: _ -> Error Nested_observers
+  match summarize records with
+  | No_run | Unterminated _ -> Ok Observer_running
+  | Summarized { turn; observer_journals = [] } ->
+    Ok
+      (Observer_finished
+         { counts = total turn; cache_write_tokens = turn.main_cache_write_tokens })
+  | Summarized { turn = _; observer_journals = _ :: _ } -> Error Nested_observers
 ;;
 
-(* A child whose run has not ended may still add requests, so none of its
-   counts is taken. *)
 let read_observers ~session_directory journals =
   List.fold_left
     (fun observers journal ->
@@ -574,35 +608,27 @@ let read_observers ~session_directory journals =
        | Some relative ->
          let path = Filename.concat session_directory relative in
          (match read_observer path with
-          | Ok (counts, cache_write_tokens) ->
+          | Ok (Observer_finished { counts; cache_write_tokens }) ->
             Ok
               { observers with
                 counts = add_counts observers.counts counts
               ; cache_write_tokens = observers.cache_write_tokens + cache_write_tokens
               ; finished = observers.finished + 1
               }
-          | Error (Run_not_terminated _ | No_run_in_slice) ->
-            Ok { observers with running = observers.running + 1 }
-          | Error
-              (( Data_root_unavailable
-               | Session_id_invalid _
-               | Session_log_not_found _
-               | Read_failed _
-               | Journal_shrank _
-               | Slice_too_large _
-               | Unsupported_schema _
-               | Malformed_record _
-               | Observer_journal _
-               | Nested_observers ) as cause) -> Error (Observer_journal { path; cause })))
+          | Ok Observer_running -> Ok { observers with running = observers.running + 1 }
+          | Error cause -> Error (Observer_journal { path; cause })))
     (Ok no_observers)
     journals
 ;;
 
 let read_turn m =
   let* records = read_records m in
-  let* turn, observer_journals = summarize records in
-  let* observers =
-    read_observers ~session_directory:(Filename.dirname m.path) observer_journals
-  in
-  Ok { turn with observers }
+  match summarize records with
+  | No_run -> Error No_run_in_slice
+  | Unterminated { run_id } -> Error (Run_not_terminated { run_id })
+  | Summarized { turn; observer_journals } ->
+    let* observers =
+      read_observers ~session_directory:(Filename.dirname m.path) observer_journals
+    in
+    Ok { turn with observers }
 ;;

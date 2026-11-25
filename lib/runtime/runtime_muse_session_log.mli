@@ -55,7 +55,8 @@ type observers =
   ; running : int
         (** Children whose journal has no run yet, or a run without a
             [terminal] record. Their counts may still grow, so none of them is
-            added. *)
+            added, and the next prompt does not add them either: its slice no
+            longer holds their link record. *)
   ; without_journal : int
         (** Children the host linked without a journal path, as it does for
             its bundled [goal-reminder]. None of their counts is added. *)
@@ -155,5 +156,10 @@ val mark : root -> session_id:string -> (mark, error) result
 
     A [child_session_log_path] is read relative to the session's directory. A
     path that is empty, absolute or contains a [..] segment is a
-    {!Malformed_record}. *)
+    {!Malformed_record}. A journal that several link records name is added
+    once.
+
+    An observer's journal that cannot be read, that does not exist, or that
+    links observers of its own gives an {!Observer_journal} error for the whole
+    turn: the prompt's own counts are not returned either. *)
 val read_turn : mark -> (turn, error) result

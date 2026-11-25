@@ -1166,7 +1166,6 @@ let push_dive (m : Model.t) dive =
       config;
       knowledge;
       infra;
-      runtime;
       inline_modal = None;
       ask_modal;
     }

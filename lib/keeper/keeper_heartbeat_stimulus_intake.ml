@@ -1235,12 +1235,24 @@ let heartbeat_event_intake
                 first_withdrawn
                 rest))
     in
-    loop max_events [] [] None selections
+    let observations, admitted, withdrawn, error = loop max_events [] [] None selections in
+    let connector_items =
+      match !connector_snapshot with
+      | None | Some (Error _) -> []
+      | Some (Ok items) ->
+        List.filter_map (fun (selection : Keeper_event_queue_state.pending_selection) ->
+          match connector_attention_event_id selection.source with
+          | None -> None
+          | Some id -> Option.map (fun item -> id, item) (Connector_item_map.find_opt id items))
+          admitted
+    in
+    observations, admitted, withdrawn, error, connector_items
   in
   let ( queued_observations
       , observed_selections
       , first_withdrawn
-      , hard_error )
+      , hard_error
+      , connector_items )
     =
     match
       Keeper_registry_event_queue.intake_selections_result
@@ -1253,18 +1265,21 @@ let heartbeat_event_intake
         keeper_name
         message;
       [], [], None
-      , Some (None, Pending_selection_failed message)
+      , Some (None, Pending_selection_failed message), []
     | Ok pending ->
       let batch = ready_batch pending in
-      let observations, selections, withdrawn, error =
+      let observations, selections, withdrawn, error, connector_items =
         observe_batch batch
       in
       ( observations
       , selections
       , withdrawn
-      , Option.map (fun (selection, error) -> Some selection, error) error )
+      , Option.map (fun (selection, error) -> Some selection, error) error
+      , connector_items )
   in
-  let source_batch = Keeper_heartbeat_source_batch.of_selections observed_selections in
+  let source_batch =
+    Keeper_heartbeat_source_batch.of_selections ~connector_items observed_selections
+  in
   let diagnostic_selection =
     match hard_error, first_withdrawn with
     | Some (Some selection, _), _ -> Some selection

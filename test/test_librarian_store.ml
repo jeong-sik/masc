@@ -196,6 +196,38 @@ let test_personal_evidence_survives_replay () =
   write_file (snapshot_path place) previous_snapshot;
   let reopened = booted ~at:160. place in
   check string "replay restores the exact snapshot" latest_snapshot (file_bytes (snapshot_path place));
+  let module Recall = Masc.Keeper_connector_memory_recall in
+  let connector actor channel message : Masc.Keeper_event_queue.stimulus * Masc.Keeper_continuation_channel.t =
+    let route =
+      Result.get_ok (Masc.Keeper_continuation_channel.discord ~guild_id:(Some "100")
+        ~channel_id:channel ~parent_channel_id:None ~thread_id:None
+        ~reply_to_message_id:message ~user_id:actor ())
+    in
+    { post_id = message; arrived_at = 100.; urgency = Low;
+      payload = Connector_attention { event_id = message; channel = route } }, route
+  in
+  let first_wake, first_route = connector "200" "300" "400" in
+  let same_author, latest_route = connector "200" "300" "403" in
+  let another_author, another_route = connector "201" "300" "401" in
+  let recorded = [ "400", first_item; "401", other_person; "403", next ] in
+  let select ~route stimuli = Recall.select ~keeper_id ~route ~stimuli ~recorded in
+  let confirmed =
+    match select ~route:latest_route [ first_wake; same_author ] with
+    | Some request -> request
+    | None -> fail "the verified same-scope batch was refused"
+  in
+  let recalled = Recall.render ~keepers_dir:place.memory_dir ~keeper_id confirmed in
+  (match recalled with
+   | Ok (Some text) ->
+     check bool "the actual FTS projection contains the selected claim"
+       true (List.mem (Yojson.Safe.to_string (`String claim)) (String.split_on_char '\n' text));
+     check int "one claim is emitted for the matching scope" 1
+       (List.length (List.filter (String.starts_with ~prefix:"\"") (String.split_on_char '\n' text)))
+   | Ok None | Error _ -> fail "scoped search did not recall the stored fact");
+  check bool "different user in the same channel withholds the whole recall" true
+    (Option.is_none (select ~route:another_route [ first_wake; another_author ]));
+  check bool "a stale reply route cannot read memory" true
+    (Option.is_none (select ~route:first_route [ first_wake; same_author ]));
   let read source =
     let scope = Option.get (Attention.original_message_scope source) in
     match Reader.read_personal_facts ~keepers_dir:place.memory_dir ~keeper_id ~scope with

@@ -81,6 +81,7 @@ type runtime_attempt =
   ; runtime_id : string
   ; lane_attempt_index : int
   ; checkpoint_owner : Runtime_execution.checkpoint_owner
+  ; supports_request_only_context : bool
   ; tool_result_inline_ceiling_bytes : int
   ; tool_surface_enabled : bool
   ; usage_report : Runtime_execution.usage_report
@@ -3361,6 +3362,8 @@ let run_named
              ; lane_attempt_index = idx
              ; checkpoint_owner =
                  Runtime_execution.checkpoint_owner runtime.Runtime_instance.execution
+             ; supports_request_only_context =
+                 Runtime_execution.supports_request_only_context runtime.Runtime_instance.execution
              ; tool_result_inline_ceiling_bytes =
                  Runtime_execution.tool_result_inline_ceiling_bytes runtime.Runtime_instance.execution
              ; tool_surface_enabled = surface_enabled

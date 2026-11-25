@@ -73,7 +73,8 @@ type author =
 
 val author_of_layer : layer_id -> author
 
-type unattributed = World_frame | Host_workspace_recall | Direct_turn | Unprojected_input
+type unattributed =
+  | World_frame | Host_workspace_recall | Connector_personal_memory | Direct_turn | Unprojected_input
 
 (** What one span of a rendered world state came from: a typed layer, or text
     the renderer adds around the layers. *)
@@ -132,6 +133,8 @@ val unattributed : unattributed -> string -> rendered
 val singleton : layer_id -> string -> rendered
 (** One producer-owned typed layer, with its exact byte span. *)
 val partition_layer : layer_id -> rendered -> rendered * rendered
+val contains_source : source -> rendered -> bool
+val partition_source : source -> rendered -> rendered * rendered
 (** Split one typed layer from the other spans, preserving each side's source
     order, bytes and row divisions. Both partitions get fresh offsets. *)
 val partition_by_author : rendered -> rendered * rendered

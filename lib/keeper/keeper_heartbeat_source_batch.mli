@@ -2,10 +2,15 @@
     every source envelope and repetition binding without choosing an invocation. *)
 type t
 val empty : t
-val of_selections : Keeper_event_queue_state.pending_selection list -> t
+val of_selections :
+  ?connector_items:(string * Keeper_external_attention.item) list ->
+  Keeper_event_queue_state.pending_selection list -> t
 (** The exact selections one intake admitted. Backlog that was not admitted is
     observation only; it gains no execution or acknowledgement authority. *)
 val selections : t -> Keeper_event_queue_state.pending_selection list
+val connector_items : t -> (string * Keeper_external_attention.item) list
+(** Original-message rows from this intake. They do not enter the durable
+    source batch or reply-route receipts. *)
 val stimuli : t -> Keeper_event_queue.stimulus list
 val count : t -> int
 val first : t -> Keeper_event_queue_state.pending_selection option

@@ -108,6 +108,16 @@ let checkpoint_owner = function
 
 let claude_code_inline_result_bytes = 32_768
 
+let supports_request_only_context = function
+  | Agent_core sealed ->
+    let provider = Runtime_account_access.api_declaration sealed in
+    Option.is_none provider.previous_response_id
+    && (match provider.kind with
+        | Anthropic -> false
+        | OpenAI_compat | Kimi | Ollama | Gemini | Glm -> true)
+  | Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Acp _ -> false
+;;
+
 let tool_result_inline_ceiling_bytes = function
   | Claude_code _ -> claude_code_inline_result_bytes
   | Codex_app_server _ | Antigravity_cli _ | Acp _ ->

@@ -174,6 +174,7 @@ let run_keeper_cycle
   : (turn_success, turn_failure) result
   =
   let wake = Keeper_heartbeat_source_batch.wake turn_input in
+  let continuation_channel = continuation_channel_of_wake wake in
   match
     Keeper_publication_recovery_scope.resolve_turn_resources
       ~provider:publication_recovery_provider
@@ -557,7 +558,23 @@ let run_keeper_cycle
                        (Keeper_own_recent_actions.externalize_failures
                           ~base_path:config.base_path ~keeper_name:meta.name ~tools)
                        observation.own_recent_actions in
-                   (render_prompt ~workspace_memory_access:access own_recent_actions tools).world_partition)) in
+                   let world =
+                     (render_prompt ~workspace_memory_access:access own_recent_actions tools).world_partition
+                   in
+                   match Keeper_request_tool_access.supports_request_only_context access,
+                         turn_decision.channel, continuation_channel with
+                   | true, Keeper_world_observation.Reactive, Some route
+                     when Env_config_keeper.KeeperMemoryOs.recall_enabled () ->
+                     (match Keeper_connector_memory_recall.for_turn ~base_path:config.base_path
+                              ~keeper_id:meta.name ~batch:(Keeper_heartbeat_source_batch.sources turn_input)
+                              ~route with
+                      | Ok (Some text) ->
+                        Keeper_context_layers.append_unattributed world Connector_personal_memory text
+                      | Ok None -> world
+                      | Error _ ->
+                        Log.Keeper.warn ~keeper_name:meta.name "Scoped connector memory read was unavailable";
+                        world)
+                   | (true | false), (Reactive | Scheduled_autonomous), _ -> world)) in
                Eio.Fiber.yield ();
                let base_dir = session_base_dir config in
                (* Ensure session dir tree for trace artifacts. *)
@@ -797,7 +814,7 @@ let run_keeper_cycle
                            ; build_turn_prompt
                            ; channel
                            ; wake
-                           ; continuation_channel = continuation_channel_of_wake wake
+                           ; continuation_channel
                            ; approval_admission = Keeper_approval_origin.Admitted
                                (Keeper_heartbeat_source_batch.selections
                                   (Keeper_heartbeat_source_batch.sources turn_input))

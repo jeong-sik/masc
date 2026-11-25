@@ -1848,7 +1848,10 @@ let run_turn
                                  }
                              ; wire_schema_observation_scope = Schema_observation.current_scope ()
                              ; serialized_observation = serialized
-                             ; wire_projected_messages = projected_messages
+                             ; wire_projected_messages =
+                                 (if Option.exists Keeper_context_assembly.has_connector_personal_memory
+                                       acc.extra_system_context_assembly
+                                  then None else projected_messages)
                              ; wire_system_prompt = Option.bind acc.extra_system_context_assembly
                                  (fun assembly -> Option.map (fun (issued : Keeper_context_assembly.system_prompt) ->
                                      issued.text) assembly.Keeper_context_assembly.system_prompt)

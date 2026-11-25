@@ -150,19 +150,23 @@ let assemble ~dynamic_context_partition ~existing_extra_system_context ~blocks =
     }
 ;;
 
+let existing_prefix assembly =
+  match assembly.extra_system_context, assembly.receipt with
+  | Some carrier, Some receipt ->
+    (match receipt.spans with
+      | { kind = Unattributed Existing_prefix; offset; bytes; _ } :: _ ->
+        Some (String.sub carrier offset bytes)
+       | ({ kind = Block _ | Unattributed Separator; _ } :: _) | [] -> None)
+  | None, _ | Some _, None -> None
+;;
+
 let split_block block assembly =
   let wanted (id, _) = Prompt_block_id.equal id block in
   match List.filter wanted assembly.blocks, assembly.extra_system_context, assembly.receipt with
-  | [ (_, text) ], Some carrier, Some receipt ->
-    let existing_extra_system_context =
-      match receipt.spans with
-      | { kind = Unattributed Existing_prefix; offset; bytes; _ } :: _ ->
-        Some (String.sub carrier offset bytes)
-      | ({ kind = Block _ | Unattributed Separator; _ } :: _) | [] -> None
-    in
+  | [ (_, text) ], Some _, Some _ ->
     let rest =
       assemble ~dynamic_context_partition:assembly.dynamic_context_partition
-        ~existing_extra_system_context
+        ~existing_extra_system_context:(existing_prefix assembly)
         ~blocks:(List.filter (fun block -> not (wanted block)) assembly.blocks)
     in
     Some
@@ -197,6 +201,30 @@ let logical_blocks assembly =
 
 let effective_system_prompt ~base_text assembly =
   match assembly.system_prompt with None -> base_text | Some issued -> issued.text
+;;
+
+let connector_personal_memory = Keeper_context_layers.Unattributed Connector_personal_memory
+
+let has_connector_personal_memory assembly =
+  Option.exists (Keeper_context_layers.contains_source connector_personal_memory)
+    assembly.dynamic_context_partition
+;;
+
+let without_connector_personal_memory assembly =
+  match assembly.dynamic_context_partition with
+  | None -> assembly
+  | Some partition when Keeper_context_layers.contains_source connector_personal_memory partition ->
+      let _, public = Keeper_context_layers.partition_source connector_personal_memory partition in
+      let blocks = List.map (fun (id, text) ->
+        if Prompt_block_id.equal id Dynamic_context
+        then id, Keeper_context_layers.text public
+        else id, text) assembly.blocks in
+      let capture = assemble ~dynamic_context_partition:(Some public)
+        ~existing_extra_system_context:(existing_prefix assembly) ~blocks in
+      { capture with system_prompt = assembly.system_prompt
+      ; proof_state = assembly.proof_state
+      ; admitted_source = assembly.admitted_source }
+  | Some _ -> assembly
 ;;
 
 let system_prompt_override ~previous assembly =

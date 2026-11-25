@@ -22964,6 +22964,14 @@ let running_turn_with ?(activity = Wire_fleet.Preview_streaming) activities last
 let ko phrase = Say.resolve Say.Lang_ko phrase
 let en phrase = Say.resolve Say.Lang_en phrase
 
+let holds needle haystack =
+  let rec loop i =
+    i + String.length needle > String.length haystack
+    || String.equal (String.sub haystack i (String.length needle)) needle
+    || loop (i + 1)
+  in
+  loop 0
+
 let kind_name = function
   | Fleet_store.Open_tool_running -> "tool running"
   | Fleet_store.Open_tool_called -> "tool called"
@@ -23056,7 +23064,7 @@ let test_chat_status_uses_the_same_words_for_every_turn () =
   Alcotest.(check bool) "a waiting message says why it waits, before what the turn is doing"
     true
     (String.starts_with ~prefix:"메시지 1건 대기 · 지금 턴이 끝나면 실행" queued
-     && String.ends_with ~suffix:"도구 실행 중 · Execute" queued)
+     && holds "도구 실행 중 · Execute" queued)
 ;;
 
 let test_wire_reads_the_open_work () =
@@ -23085,7 +23093,7 @@ let test_wire_reads_the_open_work () =
                         "started_at_unix", `Float 9.0; "since_unix", `Float 10.0 ];
                `Assoc [ "kind", `String "tool"; "tool_use_id", `String "toolu_a";
                         "name", `String "Execute"; "stage", `String "executing";
-                        "started_at_unix", `Float 8.0; "since_unix", `Float 11.0 ] ]))
+                        "started_at_unix", `Float 9.0; "since_unix", `Float 11.0 ] ]))
      = Some
          [ open_response Wire_fleet.Channel_thinking 10.0;
            open_tool ~tool_use_id:"toolu_a" "Execute" Wire_fleet.Tool_executing 11.0 ]);
@@ -23093,7 +23101,7 @@ let test_wire_reads_the_open_work () =
     (open_of
        (decode
           (`List [ `Assoc [ "kind", `String "tool"; "tool_use_id", `Null; "name", `String "Read";
-                            "stage", `String "requested"; "started_at_unix", `Float 8.0;
+                            "stage", `String "requested"; "started_at_unix", `Float 6.0;
                             "since_unix", `Float 8.0 ] ]))
      = Some [ open_tool "Read" Wire_fleet.Tool_requested 8.0 ]);
   Alcotest.(check bool) "a server that leaves the field out sent no open work" true

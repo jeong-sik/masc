@@ -269,6 +269,10 @@ let open_activity_since = function
   | Wire_fleet.Open_tool { since_unix; _ } ->
       since_unix
 
+let is_tool_call = function
+  | Wire_fleet.Open_tool _ -> true
+  | Wire_fleet.Open_response _ -> false
+
 let open_work_of_preview (p : Wire_fleet.turn_preview) =
   let reported =
     match p.activity with
@@ -286,35 +290,34 @@ let open_work_of_preview (p : Wire_fleet.turn_preview) =
         ; phrase = Say.make ~ko:"열린 일 없음" ~en:"Nothing open"
         ; since_unix = None
         }
-  | Some (first :: more) ->
-      (* A tool says more than the response that asked for it. *)
-      let named =
-        match
-          List.find_opt
-            (function
-              | Wire_fleet.Open_tool _ -> true
-              | Wire_fleet.Open_response _ -> false)
-            (first :: more)
-        with
-        | Some tool -> tool
-        | None -> first
-      in
-      let phrase =
-        match more with
-        | [] -> open_activity_phrase named
-        | _ :: _ ->
-            Say.concat ~sep:" "
-              [ open_activity_phrase named
-              ; Say.make
-                  ~ko:(Printf.sprintf "외 %d건" (List.length more))
-                  ~en:(Printf.sprintf "+%d more" (List.length more))
-              ]
-      in
-      Some
-        { kind = open_activity_kind named
-        ; phrase
-        ; since_unix = Some (open_activity_since named)
-        }
+  | Some (first :: more) -> (
+      (* A tool says more than the response that asked for it. Other open
+         calls are counted behind the one that is named. *)
+      match List.filter is_tool_call (first :: more) with
+      | named :: others ->
+          let phrase =
+            match others with
+            | [] -> open_activity_phrase named
+            | _ :: _ ->
+                Say.concat ~sep:" "
+                  [ open_activity_phrase named
+                  ; Say.make
+                      ~ko:(Printf.sprintf "외 %d건" (List.length others))
+                      ~en:(Printf.sprintf "+%d more" (List.length others))
+                  ]
+          in
+          Some
+            { kind = open_activity_kind named
+            ; phrase
+            ; since_unix = Some (open_activity_since named)
+            }
+      | [] ->
+          (* The server keeps one response open at a time. *)
+          Some
+            { kind = open_activity_kind first
+            ; phrase = open_activity_phrase first
+            ; since_unix = Some (open_activity_since first)
+            })
 
 let working_detail_of_active_turn (turn_opt : Wire_fleet.active_turn option) =
   match turn_opt with

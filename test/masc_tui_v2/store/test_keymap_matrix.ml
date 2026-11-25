@@ -78,8 +78,6 @@ let render_full ~(model : Model.t) =
         Screen_knowledge.render_dive ~target ~model ~cache ~rect g
     | Some (Nav.Dive_runtime target) ->
         Screen_runtime.render_dive ~target ~model ~cache ~rect g
-    | Some (Nav.Dive_infra target) ->
-        Screen_infra.render_dive ~target ~model ~cache ~rect g
     | None -> (
         match model.nav.workspace with
         | Nav.Pulse -> Screen_pulse.render ~model ~cache ~rect g
@@ -1254,24 +1252,24 @@ let test_axis_a_screen_dive_matrix () =
             |> Fleet_store.set_keeper_dive_tab Nav.Keeper_memory;
           nav = { mk.nav with zoomed = true; pane_index = 0 };
         } );
-      ( "Keepers/Zoom/Work"
+      ( "Keepers/Zoom/WorkSandbox"
       , let mk = with_ws Nav.Keepers base in
         {
           mk with
           fleet =
             mk.fleet
             |> Fleet_store.select_keeper "alpha"
-            |> Fleet_store.set_keeper_dive_tab Nav.Keeper_work_candle;
+            |> Fleet_store.set_keeper_dive_tab Nav.Keeper_work_sandbox;
           nav = { mk.nav with zoomed = true; pane_index = 0 };
         } );
-      ( "Keepers/Zoom/Sandbox"
+      ( "Keepers/Zoom/Trace"
       , let mk = with_ws Nav.Keepers base in
         {
           mk with
           fleet =
             mk.fleet
             |> Fleet_store.select_keeper "alpha"
-            |> Fleet_store.set_keeper_dive_tab Nav.Keeper_sandbox;
+            |> Fleet_store.set_keeper_dive_tab Nav.Keeper_trace;
           nav = { mk.nav with zoomed = true; pane_index = 0 };
         } );
       ( "Keepers/Zoom/Config"
@@ -1359,8 +1357,7 @@ let test_axis_a_screen_dive_matrix () =
             | Some
                 ( Nav.Dive_knowledge (Nav.Wiki_dive _ | Nav.Artifact_dive _)
                 | Nav.Dive_work _
-                | Nav.Dive_runtime _
-                | Nav.Dive_infra _ )
+                | Nav.Dive_runtime _ )
             | None ->
                 false
           in
@@ -2486,8 +2483,8 @@ let test_journeys_tab_multipane_dives_safety () =
     (m_kp_sc.fleet.chat_scroll_offset > 0);
   let m_kp_tab, _ = step m_kp_p1 (char_key "]") in
   Alcotest.(check bool)
-    "J14 Keepers split pane 1 ']' advances embedded dive tab (Chat -> Context)" true
-    (Nav.equal_keeper_tab m_kp_tab.fleet.keeper_dive_tab Nav.Keeper_context);
+    "J14 Keepers split pane 1 ']' advances embedded dive tab (Chat -> Trace)" true
+    (Nav.equal_keeper_tab m_kp_tab.fleet.keeper_dive_tab Nav.Keeper_trace);
 
   (* J15: Runtime Quotas independent pane 0 scroll + pane 1 credits *)
   record_case ();
@@ -4193,7 +4190,7 @@ let test_pillar2_scroll_bounds_all_surfaces () =
       fleet =
         base.fleet
         |> Fleet_store.select_keeper "alpha"
-        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_work_candle;
+        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_work_sandbox;
       nav =
         {
           base.nav with
@@ -4913,7 +4910,7 @@ let test_pillar2_scroll_bounds_all_surfaces () =
       fleet =
         base.fleet
         |> Fleet_store.select_keeper "alpha"
-        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_work_candle;
+        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_work_sandbox;
       nav =
         {
           base.nav with
@@ -6015,7 +6012,7 @@ let test_wave2_100pct_menu_reachability_matrix () =
   (* 2. Left Navigation Sidebar 100% reachability sweep: 'b' + Down*n + Enter for EVERY menu item! *)
   let menu_items = Nav.all_menu_items in
   let n_menu = List.length menu_items in
-  Alcotest.(check int) "Left Navigation Sidebar has all 36 unified targets" 36
+  Alcotest.(check int) "Left Navigation Sidebar has all 33 unified targets" 33
     n_menu;
   let has_menu_target pred =
     List.exists (fun (it : Nav.menu_item) -> pred it.target) menu_items
@@ -6024,8 +6021,8 @@ let test_wave2_100pct_menu_reachability_matrix () =
     (has_menu_target (function Nav.Menu_work Nav.Work_harness -> true | _ -> false));
   Alcotest.(check bool) "Sidebar includes Infra_code" true
     (has_menu_target (function Nav.Menu_infra Nav.Infra_code -> true | _ -> false));
-  Alcotest.(check bool) "Sidebar includes Keeper_logs" true
-    (has_menu_target (function Nav.Menu_keeper_tab Nav.Keeper_logs -> true | _ -> false));
+  Alcotest.(check bool) "Sidebar includes Keeper_trace" true
+    (has_menu_target (function Nav.Menu_keeper_tab Nav.Keeper_trace -> true | _ -> false));
   Alcotest.(check bool) "Sidebar includes Keeper_identity" true
     (has_menu_target (function Nav.Menu_keeper_tab Nav.Keeper_identity -> true | _ -> false));
   let m_rail_focused, _ = step base (char_key "b") in
@@ -6436,6 +6433,8 @@ let test_wave2_100pct_menu_reachability_matrix () =
   let kc_big =
     Keeper_context_store.apply_tool_calls ~observed_at:t0 ~keeper:"alpha"
       tc_page base.keeper_context
+    |> Keeper_context_store.set_trace_section ~keeper:"alpha"
+         Keeper_context_store.Trace_tool_calls
   in
   let m_k_dive =
     {
@@ -6443,7 +6442,7 @@ let test_wave2_100pct_menu_reachability_matrix () =
       fleet =
         base.fleet
         |> Fleet_store.select_keeper "alpha"
-        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_tool_calls;
+        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_trace;
       keeper_context = kc_big;
       nav =
         {
@@ -6591,20 +6590,20 @@ let test_wave2_100pct_menu_reachability_matrix () =
   let m_cmp_kp = populated_model ~cols:90 ~rows:28 ~lang:Say.Lang_en () in
   let m_cmp_preview, _ =
     Update_nav.navigate_menu_target ~keep_sidebar_focus:true m_cmp_kp
-      (Nav.Menu_keeper_tab Nav.Keeper_context)
+      (Nav.Menu_keeper_tab Nav.Keeper_trace)
   in
   Alcotest.(check bool) "Compact live preview does NOT zoom prematurely"
     true ((not m_cmp_preview.nav.zoomed) && Option.is_none (Model.active_dive m_cmp_preview));
   let m_cmp_act, _ =
     Update_nav.navigate_menu_target ~keep_sidebar_focus:false m_cmp_kp
-      (Nav.Menu_keeper_tab Nav.Keeper_context)
+      (Nav.Menu_keeper_tab Nav.Keeper_trace)
   in
-  Alcotest.(check bool) "Compact Menu_keeper_tab activation enters Keepers Focus Mode Keeper_context"
+  Alcotest.(check bool) "Compact Menu_keeper_tab activation enters Keepers Focus Mode Keeper_trace"
     true
     (Nav.equal_workspace m_cmp_act.nav.workspace Nav.Keepers
      && m_cmp_act.nav.zoomed
      && Option.is_none (Model.active_dive m_cmp_act)
-     && Nav.equal_keeper_tab m_cmp_act.fleet.keeper_dive_tab Nav.Keeper_context)
+     && Nav.equal_keeper_tab m_cmp_act.fleet.keeper_dive_tab Nav.Keeper_trace)
 
 (* ---------- Wave 3: Scroll Bounds, Stale Guards, CanAdmin Notices & Secret Masking ---------- *)
 
@@ -7336,16 +7335,18 @@ let test_wave3_surfaces_scroll_bounds_guards_and_secrets () =
   let m_rtrace_nr =
     {
       base with
-      nav =
-        {
-          base.nav with
-          workspace = Nav.Infra;
-          dive_stack = [ Nav.Dive_infra (Nav.Runtime_trace_dive "alpha") ];
-        };
+      fleet =
+        base.fleet
+        |> Fleet_store.select_keeper "alpha"
+        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_trace;
+      keeper_context =
+        Keeper_context_store.set_trace_section ~keeper:"alpha"
+          Keeper_context_store.Trace_runtime base.keeper_context;
+      nav = { base.nav with workspace = Nav.Keepers; zoomed = true };
       infra = { base.infra with runtime_trace = non_retry_fail };
     }
   in
-  Alcotest.(check bool) "Runtime_trace_dive non-retryable fail skips force=false refetch"
+  Alcotest.(check bool) "Keeper_trace Trace_runtime non-retryable fail skips force=false refetch"
     false
     (has_cmd
        (function
@@ -8486,7 +8487,7 @@ let test_part2_keymap_consistency_spatial_overlays_and_safe_space () =
   Alcotest.(check int) "Zoomed Keepers Left -> Right emits 0 refetches" 0
     (List.length (Cmd.flatten cmds_z_rt));
 
-  (* Wide Keepers: <- -> Down onto Menu_keeper_tab Keeper_context -> -> lands on pane_index=1 *)
+  (* Wide Keepers: <- -> Down onto Menu_keeper_tab Keeper_trace -> -> lands on pane_index=1 *)
   let m_kp_wide =
     {
       base with
@@ -8505,12 +8506,12 @@ let test_part2_keymap_consistency_spatial_overlays_and_safe_space () =
   let m_kp_ctx, _ = step m_kp_sb (mk_key Keymap.Input.Down) in
   let m_kp_enter_r, _ = step m_kp_ctx (mk_key Keymap.Input.Right) in
   Alcotest.(check bool)
-    "Wide Keepers Left -> Down (Menu_keeper_tab Keeper_context) -> Right lands on pane_index=1"
+    "Wide Keepers Left -> Down (Menu_keeper_tab Keeper_trace) -> Right lands on pane_index=1"
     true
     ((not (Model.sidebar_has_focus m_kp_enter_r))
      && m_kp_enter_r.nav.pane_index = 1
      && Nav.equal_keeper_tab m_kp_enter_r.fleet.keeper_dive_tab
-          Nav.Keeper_context);
+          Nav.Keeper_trace);
 
   (* Zoomed Keepers on Keeper_identity: <- -> -> preserves zoomed=true with 0 refetches *)
   let m_z_id =

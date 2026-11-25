@@ -525,13 +525,10 @@ let compact_keeper_tab_label ~(lang : Say.lang) ~compact tab =
   else
     match tab with
     | Nav.Keeper_chat -> Say.resolve lang (Say.make ~ko:"대화" ~en:"Chat")
-    | Nav.Keeper_context -> Say.resolve lang (Say.make ~ko:"컨텍스트" ~en:"Ctx")
-    | Nav.Keeper_tool_calls -> Say.resolve lang (Say.make ~ko:"도구" ~en:"Tools")
+    | Nav.Keeper_trace -> Say.resolve lang (Say.make ~ko:"트레이스" ~en:"Trace")
     | Nav.Keeper_memory -> Say.resolve lang (Say.make ~ko:"기억" ~en:"Mem")
-    | Nav.Keeper_work_candle -> Say.resolve lang (Say.make ~ko:"작업" ~en:"Work")
-    | Nav.Keeper_sandbox -> Say.resolve lang (Say.make ~ko:"격리" ~en:"Sbox")
+    | Nav.Keeper_work_sandbox -> Say.resolve lang (Say.make ~ko:"작업·격리" ~en:"Work")
     | Nav.Keeper_config -> Say.resolve lang (Say.make ~ko:"설정" ~en:"Cfg")
-    | Nav.Keeper_logs -> Say.resolve lang (Say.make ~ko:"로그" ~en:"Logs")
     | Nav.Keeper_identity -> Say.resolve lang (Say.make ~ko:"인증" ~en:"Auth")
 
 let compact_work_tab_label ~(lang : Say.lang) ~compact tab =
@@ -815,7 +812,6 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
       | Nav.Dive_work _ -> Nav.workspace_label Nav.Work
       | Nav.Dive_knowledge _ -> Nav.workspace_label Nav.Knowledge
       | Nav.Dive_runtime _ -> Nav.workspace_label Nav.Runtime
-      | Nav.Dive_infra _ -> Nav.workspace_label Nav.Infra
     in
     let dive_segment_label = function
       | Nav.Dive_work (Nav.Goal_dive id) ->
@@ -846,9 +842,6 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
           Say.resolve lang (Say.make ~ko:"스킬" ~en:"Skill") ^ " " ^ ref_s
       | Nav.Dive_runtime (Nav.Exact_run_dive run_id) ->
           Say.resolve lang (Say.make ~ko:"Exact실행" ~en:"Exact Run") ^ " " ^ run_id
-      | Nav.Dive_infra (Nav.Runtime_trace_dive keeper) ->
-          Say.resolve lang (Say.make ~ko:"런타임 추적" ~en:"Trace")
-          ^ " " ^ keeper
     in
     let format_dive_chain () =
       let chain = List.rev model.nav.dive_stack in
@@ -864,8 +857,7 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
      | Some
          ( Nav.Dive_work _
          | Nav.Dive_knowledge _
-         | Nav.Dive_runtime _
-         | Nav.Dive_infra _ ) ->
+         | Nav.Dive_runtime _ ) ->
          let crumb = format_dive_chain () in
          let adv =
            Cell_grid.put_text ~clip:tabs_clip grid ~x:!x ~y:rect.y
@@ -1390,8 +1382,7 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
               | Some
                   ( Nav.Dive_knowledge (Nav.Wiki_dive _ | Nav.Artifact_dive _)
                   | Nav.Dive_work _
-                  | Nav.Dive_runtime _
-                  | Nav.Dive_infra _ )
+                  | Nav.Dive_runtime _ )
               | None -> false)
         in
         let show_tab_hint =
@@ -1454,8 +1445,7 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           | Some
               ( Nav.Dive_work _
               | Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Wiki_dive _)
-              | Nav.Dive_runtime _
-              | Nav.Dive_infra _ ) ->
+              | Nav.Dive_runtime _ ) ->
               true
           | None ->
               Nav.equal_workspace model.nav.workspace Nav.Pulse
@@ -1514,8 +1504,7 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
               | Some
                   ( Nav.Dive_work _
                   | Nav.Dive_knowledge _
-                  | Nav.Dive_runtime _
-                  | Nav.Dive_infra _ ) ->
+                  | Nav.Dive_runtime _ ) ->
                   false
               | None -> not (Nav.equal_workspace model.nav.workspace Nav.Pulse))
         in
@@ -1567,7 +1556,7 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           || (Option.is_none (Model.active_dive model)
               && Nav.equal_workspace model.nav.workspace Nav.Keepers
               && Nav.equal_keeper_tab model.fleet.keeper_dive_tab
-                   Nav.Keeper_work_candle
+                   Nav.Keeper_work_sandbox
               && (model.nav.pane_index >= 1
                  || (model.nav.zoomed && Model.can_zoom_current_view model))
               &&

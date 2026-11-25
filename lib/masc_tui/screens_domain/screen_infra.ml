@@ -3258,7 +3258,7 @@ let render_code ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               code.git_diff)
   end
 
-(* --- 4. Top-Level Infra Render & Dive Render (ZERO Nested Cards!) --- *)
+(* --- 4. Top-Level Infra Render (ZERO Nested Cards!) --- *)
 
 let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
   if Rect.is_empty rect then ()
@@ -3274,88 +3274,3 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
         render_code ~model ~cache ~rect:body ~theme ~bp grid
     | Nav.Infra_activity_logs ->
         render_activity_logs ~model ~cache ~rect:body ~theme ~bp grid
-
-let render_dive_runtime_trace ~keeper ~(model : Model.t) ~cache ~(rect : Rect.t)
-    ~(theme : Theme.t) ~bp grid =
-  let lang = model.lang in
-  let inf = model.infra in
-  let inner =
-    Card.draw ~cache grid ~rect ~theme
-      (H.card_spec ~focused:(Model.body_has_focus model) ~subtitle:("@" ^ keeper)
-         ~hotkey:
-           (Say.resolve lang
-              (Say.make ~ko:"[↑↓] 스크롤 · [r] 새로고침 · [Esc] 뒤로"
-                 ~en:"[↑↓] Scroll · [r] Reload · [Esc] Back"))
-         (Say.resolve lang
-            (Say.make ~ko:"인프라 > 키퍼 런타임 트레이스"
-               ~en:"Infra > Keeper Runtime Trace")))
-  in
-  let content = H.pad_content ~bp inner in
-  if Rect.is_empty content then ()
-  else
-    match Infra_store.runtime_trace_for ~keeper inf with
-    | None ->
-        H.draw_observed_placeholder ~grid ~rect:content ~theme ~lang
-          inf.runtime_trace
-    | Some tr ->
-        let y = ref content.y and bot = Rect.bottom content in
-        if !y < bot then begin
-          ignore
-            (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
-               ~max_w:content.w
-               ~style:(H.accent_style ~theme ~attrs:Attr.bold ())
-               (Printf.sprintf "Keeper: @%s · Trace: %s · Health: %s" tr.keeper
-                  tr.trace_id tr.health));
-          incr y
-        end;
-        if !y < bot then begin
-          let turn_s =
-            match tr.turn_id with
-            | Some t -> Printf.sprintf "#%d" t
-            | None -> "-"
-          in
-          let stale_s =
-            match tr.stale_reason with
-            | Some sr -> " · stale: " ^ sr
-            | None -> ""
-          in
-          ignore
-            (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
-               ~max_w:content.w ~style:(H.secondary_style ~theme ())
-               (Printf.sprintf "Turn: %s · Manifest: %d/%d · Receipts: %d%s"
-                  turn_s tr.manifest_returned_rows tr.manifest_total_rows
-                  tr.receipt_returned_rows stale_s));
-          incr y
-        end;
-        if !y < bot then begin
-          H.draw_divider ~grid ~rect:content ~y:!y ~theme
-            ~label:
-              (Say.resolve lang
-                 (Say.make ~ko:"트레이스 원문 (Json_tree)"
-                    ~en:"Runtime Trace Payload"))
-            ();
-          incr y
-        end;
-        let tree_h = Int.max 0 (bot - !y) in
-        if tree_h > 0 then begin
-          let tree_rect =
-            Rect.make ~x:content.x ~y:!y ~w:content.w ~h:tree_h
-          in
-          let lines =
-            Json_tree.flatten ~max_depth:4 ~redact_secrets:true tr.raw
-          in
-          ignore
-            (Json_tree.draw grid ~rect:tree_rect ~theme
-               ~scroll:model.nav.dive_scroll_offset lines)
-        end
-
-let render_dive ~(target : Nav.infra_dive_target) ~(model : Model.t) ~cache
-    ~(rect : Rect.t) grid =
-  if Rect.is_empty rect then ()
-  else
-    let theme = Theme.of_preset model.theme_preset in
-    let bp = H.layout_bp ~model ~rect in
-    let body = H.body_rect ~bp rect in
-    match target with
-    | Nav.Runtime_trace_dive keeper ->
-        render_dive_runtime_trace ~keeper ~model ~cache ~rect:body ~theme ~bp grid

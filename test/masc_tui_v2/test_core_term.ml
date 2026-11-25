@@ -536,7 +536,7 @@ let test_observed_and_format_val () =
   Alcotest.(check int) "6 workspaces" 6 (List.length Nav.all_workspaces);
   Alcotest.(check int) "6 work tabs" 6 (List.length Nav.all_work_tabs);
   Alcotest.(check int) "4 knowledge tabs" 4 (List.length Nav.all_knowledge_tabs);
-  Alcotest.(check int) "36 unified menu items" 36 (List.length Nav.all_menu_items);
+  Alcotest.(check int) "33 unified menu items" 33 (List.length Nav.all_menu_items);
   List.iteri
     (fun idx (it : Nav.menu_item) ->
       Alcotest.(check int)
@@ -545,7 +545,7 @@ let test_observed_and_format_val () =
     Nav.all_menu_items;
   Alcotest.(check int) "7 runtime tabs" 7 (List.length Nav.all_runtime_tabs);
   Alcotest.(check int) "4 infra tabs" 4 (List.length Nav.all_infra_tabs);
-  Alcotest.(check int) "9 keeper tabs" 9 (List.length Nav.all_keeper_tabs);
+  Alcotest.(check int) "6 keeper tabs" 6 (List.length Nav.all_keeper_tabs);
   Alcotest.(check int) "7 settings tabs" 7 (List.length Nav.all_settings_tabs);
   Alcotest.(check bool) "strict workspace_of_index 0 = None" true
     (Option.is_none (Nav.workspace_of_index 0));

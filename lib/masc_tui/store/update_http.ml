@@ -206,14 +206,24 @@ let verification_evidence_matches_active (m : Model.t) verification_id =
   | Some
       ( Nav.Dive_work (Nav.Goal_dive _ | Nav.Task_dive _)
       | Nav.Dive_knowledge _
-      | Nav.Dive_runtime _
-      | Nav.Dive_infra _ )
+      | Nav.Dive_runtime _ )
   | None ->
       true
 
 let runtime_trace_matches_active (m : Model.t) keeper =
   match Model.active_dive m with
-  | Some (Nav.Dive_infra (Nav.Runtime_trace_dive k)) -> String.equal k keeper
+  | None
+    when Nav.equal_workspace m.nav.workspace Nav.Keepers
+         && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_trace -> (
+      match Model.selected_keeper_name m with
+      | Some k ->
+          let ks = Keeper_context_store.get_keeper ~keeper:k m.keeper_context in
+          if
+            Keeper_context_store.equal_trace_section ks.trace_section
+              Keeper_context_store.Trace_runtime
+          then String.equal k keeper
+          else true
+      | None -> true)
   | Some
       ( Nav.Dive_work _
       | Nav.Dive_knowledge _
@@ -1217,7 +1227,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             ( Nav.Dive_knowledge (Nav.Wiki_dive _ | Nav.Artifact_dive _)
             | Nav.Dive_work _
             | Nav.Dive_runtime _
-            | Nav.Dive_infra _ ) ->
+            ) ->
             false
         | None -> (
             match Knowledge_store.selected_post m.knowledge with
@@ -1243,7 +1253,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             ( Nav.Dive_knowledge (Nav.Wiki_dive _ | Nav.Artifact_dive _)
             | Nav.Dive_work _
             | Nav.Dive_runtime _
-            | Nav.Dive_infra _ ) ->
+            ) ->
             false
         | None -> (
             match Knowledge_store.selected_post m.knowledge with
@@ -1266,7 +1276,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             ( Nav.Dive_knowledge (Nav.Wiki_dive _ | Nav.Artifact_dive _)
             | Nav.Dive_work _
             | Nav.Dive_runtime _
-            | Nav.Dive_infra _ ) ->
+            ) ->
             false
         | None -> (
             match Knowledge_store.selected_post m.knowledge with
@@ -1494,7 +1504,7 @@ let apply_http_reply ~now (m : Model.t) reply =
                 (Nav.Thread_dive _ | Nav.Wiki_dive _ | Nav.Artifact_dive _)
             | Nav.Dive_work _
             | Nav.Dive_runtime _
-            | Nav.Dive_infra _ )
+            )
         | None ->
             []
       in
@@ -1841,7 +1851,6 @@ let apply_http_reply ~now (m : Model.t) reply =
           | Some
               ( Nav.Dive_work _
               | Nav.Dive_runtime _
-              | Nav.Dive_infra _
               | Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Wiki_dive _) ) ->
               None
           | None ->
@@ -1905,7 +1914,6 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Some
             ( Nav.Dive_work _
             | Nav.Dive_runtime _
-            | Nav.Dive_infra _
             | Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Wiki_dive _) )
         | None -> (
             match Knowledge_store.selected_artifact m.knowledge with
@@ -1939,7 +1947,6 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Some
             ( Nav.Dive_work _
             | Nav.Dive_runtime _
-            | Nav.Dive_infra _
             | Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Wiki_dive _) )
         | None -> (
             match Knowledge_store.selected_artifact m.knowledge with
@@ -4241,7 +4248,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             ( Nav.Dive_work _
             | Nav.Dive_knowledge _
             | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _)
-            | Nav.Dive_infra _ )
+            )
         | None ->
             []
       in
@@ -5937,7 +5944,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             ( Nav.Dive_work _
             | Nav.Dive_knowledge _
             | Nav.Dive_runtime _
-            | Nav.Dive_infra _ ) ->
+            ) ->
             false
         | None -> (
             match Model.selected_keeper_name m with
@@ -5960,7 +5967,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             ( Nav.Dive_work _
             | Nav.Dive_knowledge _
             | Nav.Dive_runtime _
-            | Nav.Dive_infra _ ) ->
+            ) ->
             None
         | None -> (
             match Model.selected_keeper_name m with
@@ -5973,7 +5980,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             ( Nav.Dive_work _
             | Nav.Dive_knowledge _
             | Nav.Dive_runtime _
-            | Nav.Dive_infra _ ) ->
+            ) ->
             false
         | None -> (
             match Model.selected_keeper_name m with
@@ -6095,7 +6102,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             ( Nav.Dive_work _
             | Nav.Dive_knowledge _
             | Nav.Dive_runtime _
-            | Nav.Dive_infra _ ) ->
+            ) ->
             false
         | None -> (
             match Model.selected_keeper_name m with
@@ -6118,7 +6125,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             ( Nav.Dive_work _
             | Nav.Dive_knowledge _
             | Nav.Dive_runtime _
-            | Nav.Dive_infra _ ) ->
+            ) ->
             None
         | None -> (
             match Model.selected_keeper_name m with
@@ -6131,7 +6138,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             ( Nav.Dive_work _
             | Nav.Dive_knowledge _
             | Nav.Dive_runtime _
-            | Nav.Dive_infra _ ) ->
+            ) ->
             false
         | None -> (
             match Model.selected_keeper_name m with
@@ -6908,7 +6915,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             ( Nav.Dive_work _
             | Nav.Dive_knowledge _
             | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _)
-            | Nav.Dive_infra _ )
+            )
         | None ->
             false
       in
@@ -6928,7 +6935,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             ( Nav.Dive_work _
             | Nav.Dive_knowledge _
             | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _)
-            | Nav.Dive_infra _ )
+            )
         | None ->
             false
       in
@@ -6969,7 +6976,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             ( Nav.Dive_work _
             | Nav.Dive_knowledge _
             | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _)
-            | Nav.Dive_infra _ )
+            )
         | None ->
             false
       in
@@ -7951,7 +7958,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Dive_knowledge _
             | Nav.Dive_runtime
                 (Nav.Tool_dive _ | Nav.Skill_dive _)
-            | Nav.Dive_infra _ )
+            )
         | None ->
             false
       in
@@ -7974,7 +7981,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Dive_knowledge _
             | Nav.Dive_runtime
                 (Nav.Tool_dive _ | Nav.Skill_dive _)
-            | Nav.Dive_infra _ )
+            )
         | None ->
             false
       in

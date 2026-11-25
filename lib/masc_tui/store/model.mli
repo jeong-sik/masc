@@ -441,8 +441,8 @@ val selected_keeper_name : t -> string option
 
 val is_memory_explorer_surface : t -> bool
 (** [true] iff no overlay is open and the active body surface is Memory
-    Explorer ([Knowledge > Memory], [Keepers] split/zoomed [Keeper_memory], or
-    [Dive_keeper] on [Keeper_memory]), where bare [d] switches to Diff view. *)
+    Explorer ([Knowledge > Memory] or [Keepers] split/zoomed [Keeper_memory]),
+    where bare [d] switches to Diff view. *)
 
 val is_memory_diff_pin_surface : t -> bool
 (** [true] iff {!is_memory_explorer_surface} holds and the active Memory

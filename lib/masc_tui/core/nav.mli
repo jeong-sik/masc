@@ -47,13 +47,10 @@ type infra_tab =
 
 type keeper_tab =
   | Keeper_chat
-  | Keeper_context
-  | Keeper_tool_calls
+  | Keeper_trace
   | Keeper_memory
-  | Keeper_work_candle
-  | Keeper_sandbox
+  | Keeper_work_sandbox
   | Keeper_config
-  | Keeper_logs
   | Keeper_identity
 
 type work_dive_target =
@@ -71,14 +68,10 @@ type runtime_dive_target =
   | Skill_dive of string
   | Exact_run_dive of string
 
-type infra_dive_target =
-  | Runtime_trace_dive of string
-
 type dive =
   | Dive_work of work_dive_target
   | Dive_knowledge of knowledge_dive_target
   | Dive_runtime of runtime_dive_target
-  | Dive_infra of infra_dive_target
 
 type settings_tab =
   | Settings_general_ui
@@ -259,7 +252,6 @@ val equal_keeper_tab : keeper_tab -> keeper_tab -> bool
 val equal_work_dive_target : work_dive_target -> work_dive_target -> bool
 val equal_knowledge_dive_target : knowledge_dive_target -> knowledge_dive_target -> bool
 val equal_runtime_dive_target : runtime_dive_target -> runtime_dive_target -> bool
-val equal_infra_dive_target : infra_dive_target -> infra_dive_target -> bool
 val equal_dive : dive -> dive -> bool
 val equal_settings_tab : settings_tab -> settings_tab -> bool
 val equal_queue_context_tab : queue_context_tab -> queue_context_tab -> bool

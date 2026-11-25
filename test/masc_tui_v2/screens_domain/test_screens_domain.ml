@@ -1831,31 +1831,7 @@ let test_infra_all_tabs_and_dives () =
                     (lbl ^ " redacts secret api_key in Json_tree") false
                     (contains_sub ~needle:"sk-live-secret-should-redact"
                        ~haystack:text))
-            tabs;
-          (* Infra Dive (Runtime_trace) *)
-          let dives = [ Nav.Runtime_trace_dive "e-masc-the-leader" ] in
-          List.iter
-            (fun target ->
-              let g1 =
-                render_into ~cols ~rows (fun ~cache ~rect g ->
-                    Screen_infra.render_dive ~target ~model:m_base ~cache ~rect
-                      g)
-              in
-              assert_grid_invariants
-                ~label:(Printf.sprintf "InfraDive/%dx%d" cols rows)
-                g1;
-              let m_json =
-                { m_base with infra = Infra_store.toggle_raw_json m_base.infra }
-              in
-              let g2 =
-                render_into ~cols ~rows (fun ~cache ~rect g ->
-                    Screen_infra.render_dive ~target ~model:m_json ~cache ~rect
-                      g)
-              in
-              assert_grid_invariants
-                ~label:(Printf.sprintf "InfraDiveJson/%dx%d" cols rows)
-                g2)
-            dives)
+            tabs)
         langs)
     sizes
 

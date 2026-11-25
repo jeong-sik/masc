@@ -1,7 +1,7 @@
 (** Per-Turn Keeper Context Inspector & Per-Keeper Tool Calls views.
 
     Mounts into BOTH [Keepers] Split right pane and zoomed full-screen [Keepers]
-    for [Nav.Keeper_context] and [Nav.Keeper_tool_calls]. Pure [Cell_grid]
+    for [Nav.Keeper_trace] ([Trace_context] and [Trace_tool_calls]). Pure [Cell_grid]
     rendering over {!Masc_tui_ui} primitives with zero raw ANSI. *)
 
 open Masc_tui_core

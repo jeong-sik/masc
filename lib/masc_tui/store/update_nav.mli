@@ -133,6 +133,7 @@ val jump_to_workspace :
     before retargeting a destination tab so [Esc] restores the departure tab. *)
 val jump_to_keeper :
   ?tab:Nav.keeper_tab ->
+  ?trace_section:Keeper_context_store.trace_section ->
   ?zoomed:bool ->
   ?pane_index:int ->
   ?preserve_return:bool ->

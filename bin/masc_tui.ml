@@ -20,8 +20,6 @@ let render_body ~(model : Model.t) ~cache ~history_rows rect grid =
       Screen_knowledge.render_dive ~target ~model ~cache ~rect grid
   | Some (Nav.Dive_runtime target) ->
       Screen_runtime.render_dive ~target ~model ~cache ~rect grid
-  | Some (Nav.Dive_infra target) ->
-      Screen_infra.render_dive ~target ~model ~cache ~rect grid
   | None -> (
       match model.nav.workspace with
       | Nav.Pulse -> Screen_pulse.render ~model ~cache ~rect grid

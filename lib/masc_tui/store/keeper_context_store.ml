@@ -20,6 +20,12 @@ let max_tool_result_cache = 32
 let is_binary_encoding enc =
   String.equal (String.lowercase_ascii (String.trim enc)) "base64"
 
+type trace_section =
+  | Trace_context
+  | Trace_tool_calls
+  | Trace_metrics_logs
+  | Trace_runtime
+
 type context_subtab =
   | Ctx_composition
   | Ctx_flow
@@ -49,6 +55,8 @@ let empty_github_login =
   }
 
 type keeper_state = {
+  trace_section : trace_section;
+  runtime_trace_scroll_offset : int;
   turn_records : Wire_keeper_context.turn_records_page Observed.t;
   selected_turn_idx : int;
   subtab : context_subtab;
@@ -115,6 +123,8 @@ type t = {
 
 let empty_keeper_state =
   {
+    trace_section = Trace_context;
+    runtime_trace_scroll_offset = 0;
     turn_records = Observed.unreported;
     selected_turn_idx = 0;
     subtab = Ctx_composition;
@@ -184,6 +194,63 @@ let get_keeper ~keeper t =
 let update_keeper ~keeper f t =
   let cur = get_keeper ~keeper t in
   { t with by_keeper = String_map.add keeper (f cur) t.by_keeper }
+
+let trace_section_rank = function
+  | Trace_context -> 0
+  | Trace_tool_calls -> 1
+  | Trace_metrics_logs -> 2
+  | Trace_runtime -> 3
+
+let equal_trace_section a b =
+  Int.equal (trace_section_rank a) (trace_section_rank b)
+
+let all_trace_sections =
+  [ Trace_context; Trace_tool_calls; Trace_metrics_logs; Trace_runtime ]
+
+let trace_section_label = function
+  | Trace_context -> Say.make ~ko:"컨텍스트 · 턴" ~en:"Context"
+  | Trace_tool_calls -> Say.make ~ko:"도구 호출" ~en:"Tools"
+  | Trace_metrics_logs -> Say.make ~ko:"로그 · 지표" ~en:"Logs"
+  | Trace_runtime -> Say.make ~ko:"런타임" ~en:"Runtime"
+
+let next_trace_section = function
+  | Trace_context -> Trace_tool_calls
+  | Trace_tool_calls -> Trace_metrics_logs
+  | Trace_metrics_logs -> Trace_runtime
+  | Trace_runtime -> Trace_context
+
+let prev_trace_section = function
+  | Trace_context -> Trace_runtime
+  | Trace_tool_calls -> Trace_context
+  | Trace_metrics_logs -> Trace_tool_calls
+  | Trace_runtime -> Trace_metrics_logs
+
+let set_trace_section ~keeper trace_section t =
+  update_keeper ~keeper
+    (fun ks ->
+      if equal_trace_section ks.trace_section trace_section then ks
+      else { ks with trace_section; runtime_trace_scroll_offset = 0 })
+    t
+
+let cycle_trace_section ~keeper ~delta t =
+  update_keeper ~keeper
+    (fun ks ->
+      let trace_section =
+        if delta < 0 then prev_trace_section ks.trace_section
+        else next_trace_section ks.trace_section
+      in
+      { ks with trace_section; runtime_trace_scroll_offset = 0 })
+    t
+
+let move_runtime_trace_scroll ~keeper ?(max_scroll = 0) ~delta t =
+  update_keeper ~keeper
+    (fun ks ->
+      let runtime_trace_scroll_offset =
+        Store_scroll.clamp_scroll ~max_scroll:(max 0 max_scroll)
+          (ks.runtime_trace_scroll_offset + delta)
+      in
+      { ks with runtime_trace_scroll_offset })
+    t
 
 let subtab_rank = function
   | Ctx_composition -> 0

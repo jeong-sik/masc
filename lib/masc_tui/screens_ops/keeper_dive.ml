@@ -3734,24 +3734,6 @@ let render_trace_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
 
 (* --- Unified 6-Tab Keeper Detail Entrypoint --- *)
 
-let compact_chat_activity ((glyph, tone, _) as badge) =
-  let short ~ko ~en = Some (glyph, tone, Say.make ~ko ~en) in
-  match tone with
-  (* Worked is the last success receipt. The header shows the current Keeper. *)
-  | Theme.Status_ok when glyph = Glyph.Check_mark -> None
-  | Theme.Status_ok -> Some badge
-  | Theme.Status_historical -> short ~ko:"마지막 확인" ~en:"Last seen"
-  | Theme.Status_critical -> short ~ko:"실패" ~en:"Failed"
-  | Theme.Status_attention when glyph = Glyph.Live_paused ->
-      short ~ko:"중단 요청" ~en:"Stopping"
-  | Theme.Status_attention when glyph = Glyph.Live_working ->
-      short ~ko:"대기열" ~en:"Queued"
-  | Theme.Status_attention -> short ~ko:"조치 필요" ~en:"Needs action"
-  | Theme.Status_active when glyph = Glyph.Live_idle -> short ~ko:"응답 대기" ~en:"Waiting"
-  (* Sending and Confirming are already compact. Neither confirms execution. *)
-  | Theme.Status_active when glyph = Glyph.Live_working -> Some badge
-  | Theme.Status_active | Theme.Status_ai -> short ~ko:"작업 중" ~en:"Working"
-
 let render_tabs_body ?history_rows ~embedded ~name ~tab ~(model : Model.t) ~cache
     ~(rect : Rect.t) grid =
   if Rect.is_empty rect then ()
@@ -3774,14 +3756,13 @@ let render_tabs_body ?history_rows ~embedded ~name ~tab ~(model : Model.t) ~cach
                { keeper with active_turn = None; health }
            | Some (Wire_fleet.Turn_unavailable _) | None -> keeper)
     in
-    let chat_activity =
+    let chat_activity, header_activity =
       if Nav.equal_keeper_tab tab Nav.Keeper_chat then
-        Chat_transcript.live_chat_phase_badge ~model ~keeper:name
-      else None
+        Chat_transcript.live_chat_phase_badges ~model ~keeper:name
+      else None, None
     in
     let has_attn = Ops_common.keeper_has_attention model.attention name in
     let badge_opt =
-      let header_activity = Option.bind chat_activity compact_chat_activity in
       let badge =
         if has_attn then Some Ops_common.keeper_attention_badge
         else match keeper_opt with

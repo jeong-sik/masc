@@ -911,18 +911,27 @@ let turn_running_kind_of_turn (turn : Wire_fleet.active_turn) =
               | Wire_fleet.Preview_streaming ->
                   Composer.Turn_kind_active)))
 
-let observed_turn_badge ~model ~keeper (turn : Wire_fleet.active_turn) =
+let observed_turn_badges ~model ~keeper (turn : Wire_fleet.active_turn) =
   let live = live_turn_observed ~model ~keeper turn in
   let label = observed_turn_label ~model ~live turn in
+  let badges glyph tone detail compact = (glyph, tone, detail), (glyph, tone, compact) in
+  let last_seen = Glyph.Live_idle, Theme.Status_historical, Say.make ~ko:"마지막 확인" ~en:"Last seen" in
   if Fleet_store.is_turn_interrupting ~keeper
        ~interrupt_token:turn.interrupt_token model.fleet
   then
-    Glyph.Live_paused, Theme.Status_attention,
-    Say.concat ~sep:" · "
-      [ Say.make ~ko:"중단 요청 중" ~en:"Interrupting"; turn_lane_label turn.lane ]
+    badges Glyph.Live_paused Theme.Status_attention
+      (Say.concat ~sep:" · "
+         [ Say.make ~ko:"중단 요청 중" ~en:"Interrupting"; turn_lane_label turn.lane ])
+      (Say.make ~ko:"중단 요청" ~en:"Stopping")
   else
     match turn_running_kind_of_turn turn with
-    | Composer.Turn_kind_attention -> Glyph.Action_required, Theme.Status_attention, label
+    | Composer.Turn_kind_attention ->
+        let detail = Glyph.Action_required, Theme.Status_attention, label in
+        let header =
+          if live then Glyph.Action_required, Theme.Status_attention, Say.make ~ko:"조치 필요" ~en:"Needs action"
+          else last_seen
+        in
+        detail, header
     | Composer.Turn_kind_active | Composer.Turn_kind_tool ->
         if live then
           (* The model's own work, reasoning included, takes the model's
@@ -957,8 +966,8 @@ let observed_turn_badge ~model ~keeper (turn : Wire_fleet.active_turn) =
                 | None, None ->
                     Theme.Status_active)
           in
-          progress_glyph model, tone, label
-        else Glyph.Live_idle, Theme.Status_historical, label
+          badges (progress_glyph model) tone label (Say.make ~ko:"작업 중" ~en:"Working")
+        else (Glyph.Live_idle, Theme.Status_historical, label), last_seen
 
 let start_reason_label = function
   | "mention_pending" -> Say.make ~ko:"멘션 도착" ~en:"Mention received"
@@ -1062,7 +1071,7 @@ let keeper_work_overview ~(model : Model.t) ~keeper =
             in
             [ labeled ~ko:"시작 계기" ~en:"Started by" source ]
       in
-      Work_status (observed_turn_badge ~model ~keeper turn)
+      Work_status (fst (observed_turn_badges ~model ~keeper turn))
       :: List.map (fun detail -> Work_detail detail) (starts @ task_rows)
 
 let normalize_preview_inline s =
@@ -1352,36 +1361,53 @@ let status_strip_phase ~model ~keeper =
     | None -> phase
   else phase
 
-let live_chat_phase_badge ~(model : Model.t) ~keeper =
+let live_chat_phase_badges ~(model : Model.t) ~keeper =
+  let short ~ko ~en detail =
+    detail, Option.map (fun (glyph, tone, _) -> glyph, tone, Say.make ~ko ~en) detail
+  in
+  let waiting detail =
+    detail, Option.map
+      (fun _ -> Glyph.Live_idle, Theme.Status_active, Say.make ~ko:"응답 대기" ~en:"Waiting") detail
+  in
+  let observed turn queued_count =
+    let (glyph, tone, label), header = observed_turn_badges ~model ~keeper turn in
+    (* The operator's waiting messages come first in the detail line. *)
+    let label =
+      if queued_count = 0 then label
+      else Say.concat ~sep:" · " [ queued_messages_phrase queued_count; label ]
+    in
+    Some (glyph, tone, label), Some header
+  in
+  let pending phase = Composer.pending_tx_badge (composer_pending_tx_of_phase phase) in
+  let active phase =
+    pending phase |> Option.map (fun (_, tone, label) -> progress_glyph model, tone, label)
+  in
   if Option.equal Nav.equal_overlay model.nav.overlay
        (Some (Nav.Queue_context Nav.Drawer_queue))
   then
     match active_turn_for_progress ~model ~keeper with
-    | Some turn -> Some (observed_turn_badge ~model ~keeper turn)
-    | None -> started_chat_wait_badge ~model ~keeper
+    | Some turn -> observed turn 0
+    | None -> waiting (started_chat_wait_badge ~model ~keeper)
   else
-      let phase = status_strip_phase ~model ~keeper in
-      match phase with
-      | Phase_turn_running { turn; queued_count } ->
-          let glyph, tone, label = observed_turn_badge ~model ~keeper turn in
-          (* The operator's waiting message comes first: the line is cut at
-             the pane's edge, and this is what they are waiting to know. *)
-          let label =
-            if queued_count = 0 then label
-            else Say.concat ~sep:" · " [ queued_messages_phrase queued_count; label ]
-          in
-          Some (glyph, tone, label)
-      | Phase_thinking | Phase_tool_running _ | Phase_tool_waiting _ | Phase_streaming ->
-          Composer.pending_tx_badge (composer_pending_tx_of_phase phase)
-          |> Option.map (fun (_, tone, label) -> progress_glyph model, tone, label)
-      | Phase_awaiting_turn ->
-          (match started_chat_wait_badge ~model ~keeper with
-           | Some _ as status -> status
-           | None -> Composer.pending_tx_badge Composer.Tx_awaiting_turn)
-      | Phase_idle -> worked_badge ~model ~keeper
-      | Phase_sending | Phase_queued _
-      | Phase_confirming | Phase_interrupting | Phase_failed _ ->
-          Composer.pending_tx_badge (composer_pending_tx_of_phase phase)
+    let phase = status_strip_phase ~model ~keeper in
+    match phase with
+    | Phase_turn_running { turn; queued_count } -> observed turn queued_count
+    | Phase_thinking | Phase_streaming ->
+        let badge = active phase in badge, badge
+    | Phase_tool_running _ -> short ~ko:"도구 실행" ~en:"Tool running" (active phase)
+    | Phase_tool_waiting _ -> short ~ko:"도구 대기" ~en:"Tool wait" (active phase)
+    | Phase_awaiting_turn ->
+        (match started_chat_wait_badge ~model ~keeper with
+         | Some _ as badge -> waiting badge
+         | None -> waiting (pending phase))
+    | Phase_idle -> worked_badge ~model ~keeper, None
+    | Phase_sending | Phase_confirming ->
+        let badge = pending phase in badge, badge
+    | Phase_queued _ -> short ~ko:"대기열" ~en:"Queued" (pending phase)
+    | Phase_interrupting -> short ~ko:"중단 요청" ~en:"Stopping" (pending phase)
+    | Phase_failed _ -> short ~ko:"실패" ~en:"Failed" (pending phase)
+
+let live_chat_phase_badge ~model ~keeper = fst (live_chat_phase_badges ~model ~keeper)
 
 let show_active_turn_summary ~(model : Model.t) ~keeper
     (turn : Wire_fleet.active_turn) =

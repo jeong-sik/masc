@@ -120,6 +120,12 @@ val live_chat_phase_badge :
 (** Width-1 geometric glyph, status tone, and bilingual label for an active or
     failed {!live_chat_phase}, or the latest confirmed completion when idle. *)
 
+val live_chat_phase_badges :
+  model:Model.t -> keeper:string ->
+  (Glyph.t * Theme.status_token * Say.t) option * (Glyph.t * Theme.status_token * Say.t) option
+(** The detailed strip and compact header from the same phase and observation.
+    Prior successes remain in the detail strip. *)
+
 val show_active_turn_summary :
   model:Model.t -> keeper:string -> Wire_fleet.active_turn -> bool
 (** Retain an inline summary when it adds information to the status strip,

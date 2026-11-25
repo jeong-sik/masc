@@ -617,7 +617,7 @@ let emit_post_edited (post : Board.post) =
     (Post_changed { post_id = Board.Post_id.to_string post.id; change = Post_edited })
 
 let update_post_with_unresolved ~post_id ~editor ~content ?title ?body ?new_author () =
-  let store = backend () in
+  let store = reobserved_backend () in
       match Board.update_post_with_outcome store ~lookup:(recipient_lookup ())
         ~post_id ~editor ~content ?title ?body ?new_author () with
       | Error _ as error -> error
@@ -1167,26 +1167,31 @@ let list_hearths ~reader ?(exclude_system = false) ?(exclude_automation = false)
       let c = Int.compare y x in if c = 0 then String.compare a b else c))
 
 let set_thread_id ~post_id ~thread_id =
-  let store = backend () in
+  let store = reobserved_backend () in
     write_post ~visibility:(visibility_of_post store ~post_id) ~post_id Post_thread_set (fun post_id ->
       Board.set_thread_id store ~post_id ~thread_id)
 
 let set_pinned ~post_id ~pinned =
-  let store = backend () in
+  let store = reobserved_backend () in
     write_post ~visibility:(visibility_of_post store ~post_id) ~post_id (if pinned then Post_pinned else Post_unpinned) (fun post_id ->
       Board.set_pinned store ~post_id ~pinned)
 
-let set_closed ~post_id ~closed_by ~successor ~summary () =
-  let store = backend () in
+let set_closed ?authorize ~post_id ~closed_by ~successor ~summary () =
+  let store = reobserved_backend () in
     write_post ~visibility:(visibility_of_post store ~post_id) ~post_id Post_closed (fun post_id ->
-      Board.set_closed store ~post_id ~closed_by ~successor ~summary ())
+      Board.set_closed ?authorize store ~post_id ~closed_by ~successor ~summary ())
 
-let reopen ~post_id =
-  let store = backend () in
-    write_post ~visibility:(visibility_of_post store ~post_id) ~post_id Post_reopened (fun post_id -> Board.reopen store ~post_id)
+let reopen_post ?authorize ~post_id () =
+  let store = reobserved_backend () in
+  write_post ~visibility:(visibility_of_post store ~post_id) ~post_id Post_reopened (fun post_id ->
+    Board.reopen ?authorize store ~post_id)
+
+let reopen ~post_id = reopen_post ~post_id ()
+
+let reopen_authorized ~authorize ~post_id = reopen_post ~authorize ~post_id ()
 
 let delete_post ~authorization ~post_id =
-  let store = backend () in
+  let store = reobserved_backend () in
   let open Result.Syntax in
   let* pid = Board.Post_id.of_string post_id in
   let post_id = Board.Post_id.to_string pid in
@@ -1299,7 +1304,7 @@ let list_sub_boards ~reader () =
       { board with post_count = (match List.assoc_opt board.slug counts with None -> 0 | Some count -> count) }) boards)
 
 let delete_sub_board ~authorization ~sub_board_id =
-  let store = backend () in
+  let store = reobserved_backend () in
   match Board.delete_sub_board store ~authorization ~sub_board_id with
   | Ok ((Board.Durable_deletion | Board.Deletion_persistence_pending _) as outcome) ->
     emit_board_sse_event ~visibility:None Board_changed;

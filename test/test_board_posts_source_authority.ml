@@ -1148,6 +1148,49 @@ let test_stale_observation_is_reobserved base_path _workspace =
     [ first.body; external_.body; third.body ]
     (List.map (fun (post : Board.post) -> (current fresh post).body) [ first; external_; third ])
 
+let test_dispatch_writes_reobserve base_path _workspace =
+  present_empty_posts base_path;
+  Fun.protect
+    ~finally:(fun () ->
+      Board_dispatch.reset_for_test ();
+      Board.reset_global_for_test ())
+    (fun () ->
+      Result.get_ok (Board_dispatch.init_jsonl ~base_path
+        ~recipient_lookup:Recipient_lookup.none_declared ());
+      let store = Board_dispatch.backend () in
+      let first = require_post (create store "post managed by Dispatch") in
+      let post_id = Board.Post_id.to_string first.id in
+      let cause_stale () =
+        require_pre_effect (create store "refused against the stale cursor");
+        require_stale_cursor_refusal store
+      in
+      let other = reloaded base_path 1 in
+      let external_ = require_post (create other "external append before pin") in
+      cause_stale ();
+      require_board (Board_dispatch.set_pinned ~post_id ~pinned:true);
+      let other = reloaded base_path 2 in
+      let new_author = "new-source-owner" in
+      ignore (require_board (Board.update_post_with_outcome other
+        ~lookup:Recipient_lookup.none_declared ~post_id ~editor:"source-writer"
+        ~content:first.body ~new_author ()));
+      cause_stale ();
+      let authorize (post : Board.post) =
+        if String.equal (Board.Agent_id.to_string post.author) "source-writer" then Ok ()
+        else Error (Board.Unauthorized "post author changed")
+      in
+      (match Board_dispatch.set_closed ~authorize ~post_id ~closed_by:"source-writer"
+         ~successor:Board.No_successor ~summary:"close by the previous owner" () with
+       | Error (Board.Unauthorized _) -> ()
+       | Error error -> Alcotest.fail (Board.show_board_error error)
+       | Ok () -> Alcotest.fail "close accepted the previous owner after reobservation");
+      let fresh = reloaded base_path 2 in
+      let updated = current fresh first in
+      Alcotest.(check bool) "pin survived concurrent edit" true updated.pinned;
+      Alcotest.(check bool) "unauthorized close did not persist" true (Option.is_none updated.closed);
+      Alcotest.(check string) "transferred owner kept" new_author
+        (Board.Agent_id.to_string updated.author);
+      Alcotest.(check string) "external append kept" external_.body (current fresh external_).body)
+
 (* An unknown earlier write is not read clear: reobservation performs no read,
    keeps the evidence and names the cause and the needed restart. *)
 let test_unsettled_reobservation_names_restart base_path _workspace =
@@ -1222,6 +1265,8 @@ let () =
         ; case "Fusion cleanup leaves the origin mutex usable" test_fusion_cleanup_preserves_origin_mutex ]
     ; "stale observation recovery",
         [ case "another writer's append is reobserved once" test_stale_observation_is_reobserved
+        ; case "Dispatch reobserves before pinning and checks the current author"
+            test_dispatch_writes_reobserve
         ; case "unsettled reobservation names the restart"
             test_unsettled_reobservation_names_restart ]
     ; "unknown writes",

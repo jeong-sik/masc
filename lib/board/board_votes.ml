@@ -137,11 +137,9 @@ let summary_is_blank summary =
 ;;
 
 (** Close a post (typed [closed] state, task-1758/#39356). Same durability
-    and rollback shape as [set_pinned]: the caller ([author]/[operator]/a
-    configured moderator) is checked at the HTTP/dispatch boundary, not
-    here -- this function only records who closed it, once permission is
-    already granted. Re-closing an already-closed post overwrites the
-    previous [closed] value (last write wins; no error).
+    and rollback shape as [set_pinned]. The caller supplies authority or a
+    pure check against the current row. Re-closing an already-closed post
+    overwrites the previous [closed] value.
 
     A close must state two things explicitly, and both are enforced here so
     every surface (the author tool and the operator dashboard route) shares
@@ -157,7 +155,7 @@ let summary_is_blank summary =
       before anything is written -- a nonexistent or self-referential
       successor pointer would otherwise sit in posts.jsonl forever with no
       way for a reader to notice. *)
-let set_closed store ~post_id ~closed_by ~successor ~summary ()
+let set_closed ?(authorize = fun _ -> Ok ()) store ~post_id ~closed_by ~successor ~summary ()
   : (unit, board_error) Result.t =
   match Post_id.of_string post_id, Agent_id.of_string closed_by with
   | Error e, _ -> Error e
@@ -181,21 +179,24 @@ let set_closed store ~post_id ~closed_by ~successor ~summary ()
        with_persist_lock store (fun () ->
          let result =
            with_lock store (fun () ->
-             match Hashtbl.find_opt store.posts (Post_id.to_string pid), successor_id with
-             | None, _ -> Error (Post_not_found post_id)
-             | Some _, Some sid
-               when String.equal (Post_id.to_string sid) (Post_id.to_string pid) ->
-               Error
-                 (Validation_error
-                    (Printf.sprintf "post %s cannot be its own successor" post_id))
-             | Some _, Some sid
-               when not (Hashtbl.mem store.posts (Post_id.to_string sid)) ->
-               Error
-                 (Validation_error
-                    (Printf.sprintf
-                       "successor_id %s does not refer to an existing post"
-                       (Post_id.to_string sid)))
-             | Some post, (Some _ | None) ->
+             match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
+             | None -> Error (Post_not_found post_id)
+             | Some post ->
+               let* () = authorize post in
+               let* () =
+                 match successor_id with
+                 | Some sid when String.equal (Post_id.to_string sid) (Post_id.to_string pid) ->
+                   Error
+                     (Validation_error
+                        (Printf.sprintf "post %s cannot be its own successor" post_id))
+                 | Some sid when not (Hashtbl.mem store.posts (Post_id.to_string sid)) ->
+                   Error
+                     (Validation_error
+                        (Printf.sprintf
+                           "successor_id %s does not refer to an existing post"
+                           (Post_id.to_string sid)))
+                 | Some _ | None -> Ok ()
+               in
                let now = Time_compat.now () in
                let closed =
                  Some { closed_by = closed_by_id; closed_at = now; successor_id; summary = Some summary }
@@ -228,8 +229,8 @@ let set_closed store ~post_id ~closed_by ~successor ~summary ()
     appended to posts.jsonl, so calling [reopen] twice does not manufacture
     a second change that a change-cursor or an Updated-sort listing would
     read as new activity (context-reviewer, review 5329575031). Permission
-    is the same caller-side gate as [set_closed]. *)
-let reopen store ~post_id : (unit, board_error) Result.t =
+    is checked against the current row, as in [set_closed]. *)
+let reopen ?(authorize = fun _ -> Ok ()) store ~post_id : (unit, board_error) Result.t =
   match Post_id.of_string post_id with
   | Error e -> Error e
   | Ok pid ->
@@ -238,13 +239,15 @@ let reopen store ~post_id : (unit, board_error) Result.t =
         with_lock store (fun () ->
           match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
           | None -> Error (Post_not_found post_id)
-          | Some post when Option.is_none post.closed -> Ok None
           | Some post ->
-            let now = Time_compat.now () in
-            let updated = { post with closed = None; updated_at = now } in
-            put_post store updated;
-            invalidate_post_caches store;
-            Ok (Some (post, updated)))
+            let* () = authorize post in
+            if Option.is_none post.closed then Ok None
+            else (
+              let now = Time_compat.now () in
+              let updated = { post with closed = None; updated_at = now } in
+              put_post store updated;
+              invalidate_post_caches store;
+              Ok (Some (post, updated))))
       in
       match result with
       | Error e -> Error e

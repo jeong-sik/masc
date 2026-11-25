@@ -2975,7 +2975,7 @@ let test_setup_key_inline_modal_masks_secret () =
   let base = populated_model ~cols:140 ~rows:40 ~lang:Say.Lang_en in
   let modal : Model.inline_modal_state =
     {
-      kind = Nav.Board_new_post;
+      kind = Nav.Setup_account_key_form;
       fields =
         [
           {
@@ -3002,7 +3002,11 @@ let test_setup_key_inline_modal_masks_secret () =
   let m =
     {
       base with
-      nav = { base.nav with overlay = Some (Nav.Inline_action Nav.Board_new_post) };
+      nav =
+        {
+          base.nav with
+          overlay = Some (Nav.Inline_action Nav.Setup_account_key_form);
+        };
       inline_modal = Some modal;
     }
   in
@@ -3010,8 +3014,26 @@ let test_setup_key_inline_modal_masks_secret () =
   assert_clean_grid ~label:"setup_key_modal_secret_masked" g;
   let txt = grid_all_text g in
   assert_contains ~label:"setup_key_provider_visible" ~needle:"gemini" txt;
+  assert_contains ~label:"setup_key_typed_title"
+    ~needle:"Register Provider API Key" txt;
   assert_not_contains ~label:"setup_key_raw_secret_never_rendered"
-    ~needle:"sk-SUPER-SECRET-TOKEN-999" txt
+    ~needle:"sk-SUPER-SECRET-TOKEN-999" txt;
+  List.iter
+    (fun kind ->
+      Alcotest.(check bool) "distinct from Board_new_post" false
+        (Nav.equal_inline_action_kind kind Nav.Board_new_post);
+      Alcotest.(check bool) "reflexive equality" true
+        (Nav.equal_inline_action_kind kind kind))
+    [
+      Nav.Board_goal_proposal;
+      Nav.Goal_confirmation_proof;
+      Nav.Memory_act_form;
+      Nav.Wiki_edit_form;
+      Nav.Fusion_launch_form;
+      Nav.Runtime_assign_form;
+      Nav.Setup_account_key_form;
+      Nav.Setup_login_start_form;
+    ]
 
 let test_memory_activity_journal_window () =
   let keeper = "alpha" in

@@ -2139,6 +2139,45 @@ let inline_modal_for kind =
             secret = false;
           };
         ]
+    | Nav.Board_goal_proposal ->
+        [
+          {
+            key = "proposal_title";
+            label = Say.make ~ko:"제안 제목" ~en:"Proposal title";
+            value = "";
+            required = true;
+            secret = false;
+          };
+          {
+            key = "proposal_measure";
+            label = Say.make ~ko:"검증 기준 (Measure)" ~en:"Measure";
+            value = "";
+            required = true;
+            secret = false;
+          };
+          {
+            key = "proposal_procedure";
+            label = Say.make ~ko:"절차 (선택)" ~en:"Procedure (optional)";
+            value = "";
+            required = false;
+            secret = false;
+          };
+          {
+            key = "proposal_priority";
+            label = Say.make ~ko:"우선순위 (1-5)" ~en:"Priority (1-5)";
+            value = "2";
+            required = false;
+            secret = false;
+          };
+        ]
+    | Nav.Goal_confirmation_proof
+    | Nav.Memory_act_form
+    | Nav.Wiki_edit_form
+    | Nav.Fusion_launch_form
+    | Nav.Runtime_assign_form
+    | Nav.Setup_account_key_form
+    | Nav.Setup_login_start_form ->
+        []
     | Nav.Board_comment _ ->
         [
           {
@@ -2778,6 +2817,14 @@ let inline_modal_for kind =
     | Nav.Connector_form
     | Nav.Repo_add_form
     | Nav.Board_new_post
+    | Nav.Board_goal_proposal
+    | Nav.Goal_confirmation_proof
+    | Nav.Memory_act_form
+    | Nav.Wiki_edit_form
+    | Nav.Fusion_launch_form
+    | Nav.Runtime_assign_form
+    | Nav.Setup_account_key_form
+    | Nav.Setup_login_start_form
     | Nav.Board_comment _
     | Nav.Github_token_form _
     | Nav.Code_finder_form
@@ -3596,7 +3643,7 @@ let is_viewing_wiki_slug ~slug m =
 let open_wiki_edit_modal_for_detail (d : Wire_knowledge.wiki_page_detail) m =
   let modal : inline_modal_state =
     {
-      kind = Nav.Board_new_post;
+      kind = Nav.Wiki_edit_form;
       fields =
         [
           {
@@ -3644,7 +3691,7 @@ let open_wiki_edit_modal_for_detail (d : Wire_knowledge.wiki_page_detail) m =
   let nav =
     {
       m.nav with
-      overlay = Some (Nav.Inline_action Nav.Board_new_post);
+      overlay = Some (Nav.Inline_action Nav.Wiki_edit_form);
       return_overlay = None;
       filter_focused = false;
       modal_edit_cursor = String.length (modal_active_field_value modal);

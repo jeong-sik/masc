@@ -4144,74 +4144,6 @@ let enter_hint (m : Model.t) =
     | Enter_code_jump_match _ ->
         Enter_hint_dive
 
-type inline_form_kind =
-  | Form_standard of Nav.inline_action_kind
-  | Form_board_goal_proposal
-  | Form_goal_confirmation_proof
-  | Form_memory_act
-  | Form_wiki_edit
-  | Form_fusion_launch
-  | Form_runtime_assign
-  | Form_setup_account_key
-  | Form_setup_login_start
-
-let classify_inline_form (modal : Model.inline_modal_state) : inline_form_kind =
-  match modal.kind with
-  | Nav.Board_new_post -> (
-      match modal.fields with
-      | { key = "proposal_title"; _ } :: _ -> Form_board_goal_proposal
-      | { key = "confirm_goal_id"; _ } :: _ -> Form_goal_confirmation_proof
-      | { key = "memory_keeper"; _ } :: _ -> Form_memory_act
-      | { key = "wiki_slug"; _ } :: _ -> Form_wiki_edit
-      | { key = "fusion_keeper"; _ } :: _ -> Form_fusion_launch
-      | { key = "assign_keeper"; _ } :: _ -> Form_runtime_assign
-      | { key = "setup_key_integration"; _ } :: _ -> Form_setup_account_key
-      | { key = "setup_login_integration"; _ } :: _ -> Form_setup_login_start
-      | _ -> Form_standard Nav.Board_new_post)
-  | ( Nav.Btw_query
-    | Nav.Gate_reject _
-    | Nav.Verification_reject _
-    | Nav.Harness_overrule _
-    | Nav.Task_cancel _
-    | Nav.Goal_drop _
-    | Nav.Schedule_form
-    | Nav.Connector_form
-    | Nav.Repo_add_form
-    | Nav.Board_comment _
-    | Nav.Github_token_form _
-    | Nav.Code_finder_form
-    | Nav.Code_search_form
-    | Nav.Keeper_control_confirm _
-    | Nav.Keeper_clear_form _
-    | Nav.Keeper_operator_note_form _
-    | Nav.Tool_execute_form _
-    | Nav.Skill_create_form
-    | Nav.Skill_edit_form _
-    | Nav.Skill_delete_confirm _
-    | Nav.Prompt_override_form _
-    | Nav.Preset_create_form
-    | Nav.Runtime_param_set_form _
-    | Nav.Default_route_edit
-    | Nav.Lane_rename_form _
-    | Nav.Addon_decl_form _
-    | Nav.Addon_act_form _
-    | Nav.Browser_interact_form _
-    | Nav.Runtime_lane_create
-    | Nav.Runtime_lane_edit _
-    | Nav.Runtime_lane_delete _
-    | Nav.Task_create_form
-    | Nav.Task_transition_form _
-    | Nav.Task_link_goal _
-    | Nav.Goal_upsert_form _
-    | Nav.Board_delete_post _
-    | Nav.Keeper_lifecycle_form _
-    | Nav.Keeper_purge_confirm _
-    | Nav.Addon_attach_form
-    | Nav.Addon_detach_confirm _
-    | Nav.Addon_invoke_action _
-    | Nav.Setup_login_input_form _ ) as std ->
-      Form_standard std
-
 (* The Schedule form's operator text. A delay is a whole count and one unit,
    [90s], [10m], [2h] or [1d]; anything else is refused rather than read as
    a guess. *)
@@ -4300,11 +4232,11 @@ let submit_inline_modal ~now (m : Model.t) =
           let set_modal_error err =
             ({ m with inline_modal = Some { modal with error = Some err } }, [])
           in
-          match classify_inline_form modal with
-          | Form_standard Nav.Btw_query ->
+          match modal.kind with
+          | Nav.Btw_query ->
               let prompt = Model.modal_field_value ~key:"prompt" modal in
               start_btw_query ~now ~prompt m
-          | Form_standard (Nav.Gate_reject id) ->
+          | Nav.Gate_reject id ->
               let reason = Model.modal_field_value ~key:"reason" modal in
               let attention =
                 Attention.mark_in_flight ~id:("gate:" ^ id) m.attention
@@ -4328,7 +4260,7 @@ let submit_inline_modal ~now (m : Model.t) =
                           { id; approved = false; reason = Some reason };
                     };
                 ] )
-          | Form_standard (Nav.Verification_reject verification_id) -> (
+          | Nav.Verification_reject verification_id -> (
               let reason = Model.modal_field_value ~key:"reason" modal in
               let notes_raw = Model.modal_field_value ~key:"notes" modal in
               let notes =
@@ -4365,7 +4297,7 @@ let submit_inline_modal ~now (m : Model.t) =
                               };
                         };
                     ] ))
-          | Form_standard (Nav.Harness_overrule notes_hash) -> (
+          | Nav.Harness_overrule notes_hash -> (
               let verdict_raw =
                 String.lowercase_ascii
                   (Model.modal_field_value ~key:"verdict" modal)
@@ -4393,7 +4325,7 @@ let submit_inline_modal ~now (m : Model.t) =
                       ] )
                 | _ ->
                     set_modal_error "Verdict must be 'approve' or 'reject'")
-          | Form_standard (Nav.Task_cancel task_id) -> (
+          | Nav.Task_cancel task_id -> (
               let reason_raw = Model.modal_field_value ~key:"reason" modal in
               let reason =
                 if String.equal reason_raw "" then None else Some reason_raw
@@ -4414,7 +4346,7 @@ let submit_inline_modal ~now (m : Model.t) =
                               { task_id; reason; expected_workspace };
                         };
                     ] ))
-          | Form_standard (Nav.Goal_drop goal_id) -> (
+          | Nav.Goal_drop goal_id -> (
               let note = Model.modal_field_value ~key:"note" modal in
               match expected_workspace_of m with
               | None ->
@@ -4437,7 +4369,7 @@ let submit_inline_modal ~now (m : Model.t) =
                               };
                         };
                     ] ))
-          | Form_standard Nav.Schedule_form -> (
+          | Nav.Schedule_form -> (
               let keeper_name = Model.modal_field_value ~key:"keeper" modal in
               let message = Model.modal_field_value ~key:"prompt" modal in
               match
@@ -4459,7 +4391,7 @@ let submit_inline_modal ~now (m : Model.t) =
                               { keeper_name; message; first_due_in_sec; repeat };
                         };
                     ] ))
-          | Form_standard Nav.Connector_form ->
+          | Nav.Connector_form ->
               let connector = Model.modal_field_value ~key:"connector" modal in
               let channel_id =
                 let cid = Model.modal_field_value ~key:"channel_id" modal in
@@ -4483,7 +4415,7 @@ let submit_inline_modal ~now (m : Model.t) =
                           { connector; channel_id; keeper_name };
                     };
                 ] )
-          | Form_standard (Nav.Board_comment { post_id; parent_id }) ->
+          | Nav.Board_comment { post_id; parent_id } ->
               let content = Model.modal_field_value ~key:"content" modal in
               ( mark_submitting m
               , [
@@ -4494,7 +4426,7 @@ let submit_inline_modal ~now (m : Model.t) =
                         Cmd.Post_board_comment { post_id; content; parent_id };
                     };
                 ] )
-          | Form_standard Nav.Repo_add_form ->
+          | Nav.Repo_add_form ->
               let url = Model.modal_field_value ~key:"url" modal in
               let branch_raw = Model.modal_field_value ~key:"branch" modal in
               let branch =
@@ -4505,7 +4437,7 @@ let submit_inline_modal ~now (m : Model.t) =
                   Cmd.Http_post
                     { epoch = m.epoch; req = Cmd.Post_repo_add { url; branch } };
                 ] )
-          | Form_standard Nav.Board_new_post ->
+          | Nav.Board_new_post ->
               let title = Model.modal_field_value ~key:"title" modal in
               let body = Model.modal_field_value ~key:"body" modal in
               let hearth_raw = Model.modal_field_value ~key:"hearth" modal in
@@ -4520,7 +4452,7 @@ let submit_inline_modal ~now (m : Model.t) =
                       req = Cmd.Post_board_create { title; body; hearth };
                     };
                 ] )
-          | Form_board_goal_proposal -> (
+          | Nav.Board_goal_proposal -> (
               let title = Model.modal_field_value ~key:"proposal_title" modal in
               let measure =
                 Model.modal_field_value ~key:"proposal_measure" modal
@@ -4564,7 +4496,7 @@ let submit_inline_modal ~now (m : Model.t) =
                               };
                         };
                     ] ))
-          | Form_goal_confirmation_proof -> (
+          | Nav.Goal_confirmation_proof -> (
               let goal_id =
                 Model.modal_field_value ~key:"confirm_goal_id" modal
               in
@@ -4610,7 +4542,7 @@ let submit_inline_modal ~now (m : Model.t) =
                   set_modal_error
                     "Server workspace and runtime instance identity must be \
                      loaded before confirming a goal")
-          | Form_memory_act -> (
+          | Nav.Memory_act_form -> (
               let keeper =
                 Model.modal_field_value ~key:"memory_keeper" modal
               in
@@ -4677,7 +4609,7 @@ let submit_inline_modal ~now (m : Model.t) =
                           req = Cmd.Post_memory_act { keeper; act };
                         };
                     ] ))
-          | Form_wiki_edit ->
+          | Nav.Wiki_edit_form ->
               let slug = Model.modal_field_value ~key:"wiki_slug" modal in
               let title = Model.modal_field_value ~key:"wiki_title" modal in
               let summary = Model.modal_field_value ~key:"wiki_summary" modal in
@@ -4729,7 +4661,7 @@ let submit_inline_modal ~now (m : Model.t) =
                       req = Cmd.Put_wiki_page { page = slug; request };
                     };
                 ] )
-          | Form_fusion_launch -> (
+          | Nav.Fusion_launch_form -> (
               let keeper =
                 Model.modal_field_value ~key:"fusion_keeper" modal
               in
@@ -4779,7 +4711,7 @@ let submit_inline_modal ~now (m : Model.t) =
                           req = Cmd.Post_fusion_launch { keeper; request };
                         };
                     ] ))
-          | Form_runtime_assign -> (
+          | Nav.Runtime_assign_form -> (
               let keeper_raw =
                 String.trim (Model.modal_field_value ~key:"assign_keeper" modal)
               in
@@ -4842,7 +4774,7 @@ let submit_inline_modal ~now (m : Model.t) =
                             };
                       };
                   ] ))
-          | Form_setup_account_key -> (
+          | Nav.Setup_account_key_form -> (
               let integration_id =
                 String.trim
                   (Model.modal_field_value ~key:"setup_key_integration" modal)
@@ -4874,7 +4806,7 @@ let submit_inline_modal ~now (m : Model.t) =
                               };
                         };
                     ] ))
-          | Form_standard (Nav.Github_token_form keeper) ->
+          | Nav.Github_token_form keeper ->
               let token = Model.modal_field_value ~key:"token" modal in
               let hostname_raw = Model.modal_field_value ~key:"hostname" modal in
               let hostname =
@@ -4894,7 +4826,7 @@ let submit_inline_modal ~now (m : Model.t) =
                       req = Cmd.Post_github_token { keeper; token; hostname };
                     };
                 ] )
-          | Form_standard Nav.Code_finder_form ->
+          | Nav.Code_finder_form ->
               let query = Model.modal_field_value ~key:"query" modal in
               let scope = m.infra.code.scope in
               let path =
@@ -4923,7 +4855,7 @@ let submit_inline_modal ~now (m : Model.t) =
                       req = Cmd.Get_workspace_file { scope; path };
                     };
                 ] )
-          | Form_standard Nav.Code_search_form ->
+          | Nav.Code_search_form ->
               let query = Model.modal_field_value ~key:"query" modal in
               let qlen = String.length query in
               if qlen < 2 || qlen > 200 then
@@ -4950,7 +4882,7 @@ let submit_inline_modal ~now (m : Model.t) =
                         req = Cmd.Get_workspace_search { scope; query };
                       };
                   ] )
-          | Form_standard Nav.Runtime_lane_create -> (
+          | Nav.Runtime_lane_create -> (
               let raw_lane_id =
                 String.trim (Model.modal_field_value ~key:"lane_id" modal)
               in
@@ -5026,8 +4958,7 @@ let submit_inline_modal ~now (m : Model.t) =
                                       };
                                 };
                             ] )))
-          | Form_standard
-              (Nav.Runtime_lane_edit { lane_id; exact_output; opened_revision })
+          | Nav.Runtime_lane_edit { lane_id; exact_output; opened_revision }
             -> (
               let raw_candidates =
                 Model.modal_field_value ~key:"lane_candidates" modal
@@ -5084,8 +5015,7 @@ let submit_inline_modal ~now (m : Model.t) =
                   | _, Some _ ->
                       set_modal_error
                         "Runtime configuration revision is unavailable or changed while editing; close and reopen [e]")
-          | Form_standard
-              (Nav.Runtime_lane_delete { lane_id; opened_revision }) -> (
+          | Nav.Runtime_lane_delete { lane_id; opened_revision } -> (
               let confirm =
                 String.trim (Model.modal_field_value ~key:"confirm_lane_id" modal)
               in
@@ -5134,7 +5064,7 @@ let submit_inline_modal ~now (m : Model.t) =
                                     };
                               };
                           ] )))
-          | Form_standard Nav.Task_create_form -> (
+          | Nav.Task_create_form -> (
               let title =
                 String.trim (Model.modal_field_value ~key:"task_title" modal)
               in
@@ -5182,7 +5112,7 @@ let submit_inline_modal ~now (m : Model.t) =
                               };
                         };
                     ] ))
-          | Form_standard (Nav.Task_transition_form { task_id }) -> (
+          | Nav.Task_transition_form { task_id } -> (
               let action_raw =
                 String.trim (Model.modal_field_value ~key:"task_action" modal)
               in
@@ -5218,7 +5148,7 @@ let submit_inline_modal ~now (m : Model.t) =
                                   { task_id; action; notes; expected_workspace };
                             };
                         ] )))
-          | Form_standard (Nav.Task_link_goal { task_id }) -> (
+          | Nav.Task_link_goal { task_id } -> (
               let goal_id =
                 String.trim (Model.modal_field_value ~key:"link_goal_id" modal)
               in
@@ -5257,7 +5187,7 @@ let submit_inline_modal ~now (m : Model.t) =
                                   { task_id; goal_id; expected_workspace };
                             };
                         ] )))
-          | Form_standard (Nav.Goal_upsert_form id_opt) -> (
+          | Nav.Goal_upsert_form id_opt -> (
               let title =
                 String.trim (Model.modal_field_value ~key:"goal_title" modal)
               in
@@ -5335,7 +5265,7 @@ let submit_inline_modal ~now (m : Model.t) =
                                     };
                               };
                           ] )))
-          | Form_standard (Nav.Board_delete_post { post_id; _ }) ->
+          | Nav.Board_delete_post { post_id; _ } ->
               let confirm =
                 String.trim
                   (Model.modal_field_value ~key:"confirm_post_delete" modal)
@@ -5358,7 +5288,7 @@ let submit_inline_modal ~now (m : Model.t) =
                         req = Cmd.Post_board_delete { post_id };
                       };
                   ] )
-          | Form_standard (Nav.Keeper_lifecycle_form { keeper }) -> (
+          | Nav.Keeper_lifecycle_form { keeper } -> (
               let action_raw =
                 String.lowercase_ascii
                   (String.trim
@@ -5426,7 +5356,7 @@ let submit_inline_modal ~now (m : Model.t) =
                               };
                         };
                     ] ))
-          | Form_standard (Nav.Keeper_purge_confirm { keeper }) -> (
+          | Nav.Keeper_purge_confirm { keeper } -> (
               let confirm =
                 String.trim
                   (Model.modal_field_value ~key:"confirm_purge_keeper" modal)
@@ -5456,7 +5386,7 @@ let submit_inline_modal ~now (m : Model.t) =
                                 };
                           };
                       ] ))
-          | Form_standard Nav.Addon_attach_form -> (
+          | Nav.Addon_attach_form -> (
               let manifest_path =
                 String.trim
                   (Model.modal_field_value ~key:"addon_manifest_path" modal)
@@ -5490,7 +5420,7 @@ let submit_inline_modal ~now (m : Model.t) =
                               { manifest_path; run_id; binding; from_modal = true };
                         };
                     ] ))
-          | Form_standard (Nav.Addon_detach_confirm { instance_id; _ }) ->
+          | Nav.Addon_detach_confirm { instance_id; _ } ->
               let confirm =
                 String.trim
                   (Model.modal_field_value ~key:"confirm_addon_detach" modal)
@@ -5512,7 +5442,7 @@ let submit_inline_modal ~now (m : Model.t) =
                         req = Cmd.Post_lane_addon_detach { instance_id };
                       };
                   ] )
-          | Form_standard (Nav.Addon_invoke_action { instance_id; _ }) -> (
+          | Nav.Addon_invoke_action { instance_id; _ } -> (
               let action_name =
                 String.trim
                   (Model.modal_field_value ~key:"addon_action_name" modal)
@@ -5559,7 +5489,7 @@ let submit_inline_modal ~now (m : Model.t) =
                               };
                         };
                     ] ))
-          | Form_standard (Nav.Setup_login_input_form { login_id }) ->
+          | Nav.Setup_login_input_form { login_id } ->
               let trimmed =
                 String.trim
                   (Model.modal_field_value ~key:"setup_login_input" modal)
@@ -5593,7 +5523,7 @@ let submit_inline_modal ~now (m : Model.t) =
                       req = Cmd.Post_setup_login_input { login_id; input };
                     };
                 ] )
-          | Form_standard (Nav.Keeper_control_confirm { keeper; action }) -> (
+          | Nav.Keeper_control_confirm { keeper; action } -> (
               let typed = String.trim (Model.modal_field_value ~key:"confirm" modal) in
               if not (String.equal typed keeper) then
                 set_modal_error
@@ -5663,7 +5593,7 @@ let submit_inline_modal ~now (m : Model.t) =
                                   { keeper; action = `Delete_history snapshot_ids };
                             };
                         ] ))
-          | Form_standard (Nav.Keeper_clear_form keeper) -> (
+          | Nav.Keeper_clear_form keeper -> (
               let reason =
                 String.trim (Model.modal_field_value ~key:"reason" modal)
               in
@@ -5695,7 +5625,7 @@ let submit_inline_modal ~now (m : Model.t) =
                 | _ ->
                     set_modal_error
                       "preserve_system_prompt must be 'true' or 'false'")
-          | Form_standard (Nav.Keeper_operator_note_form keeper) ->
+          | Nav.Keeper_operator_note_form keeper ->
               let text = String.trim (Model.modal_field_value ~key:"text" modal) in
               if String.length text > 4096 then
                 set_modal_error "Operator note exceeds 4096-byte server cap"
@@ -5708,7 +5638,7 @@ let submit_inline_modal ~now (m : Model.t) =
                         req = Cmd.Post_keeper_operator_note { keeper; text };
                       };
                   ] )
-          | Form_standard (Nav.Tool_execute_form { tool_name; _ }) -> (
+          | Nav.Tool_execute_form { tool_name; _ } -> (
               let tool_name =
                 match tool_name with
                 | Some name -> name
@@ -5753,7 +5683,7 @@ let submit_inline_modal ~now (m : Model.t) =
                     set_modal_error "Arguments must be a JSON object ({ ... })"
                 | exception Yojson.Json_error msg ->
                     set_modal_error ("Invalid JSON arguments: " ^ msg))
-          | Form_standard Nav.Skill_create_form -> (
+          | Nav.Skill_create_form -> (
               let source_id =
                 String.trim (Model.modal_field_value ~key:"source_id" modal)
               in
@@ -5795,7 +5725,7 @@ let submit_inline_modal ~now (m : Model.t) =
                                 { source_id; package_id; kind; source_text };
                           };
                       ] ))
-          | Form_standard (Nav.Skill_edit_form { reference }) -> (
+          | Nav.Skill_edit_form { reference } -> (
               let source_text =
                 Model.modal_field_raw_value ~key:"source_text" modal
               in
@@ -5817,7 +5747,7 @@ let submit_inline_modal ~now (m : Model.t) =
                                 { reference; reference_json; source_text };
                           };
                       ] ))
-          | Form_standard (Nav.Skill_delete_confirm { reference }) -> (
+          | Nav.Skill_delete_confirm { reference } -> (
               let typed =
                 String.trim (Model.modal_field_value ~key:"confirm" modal)
               in
@@ -5839,7 +5769,7 @@ let submit_inline_modal ~now (m : Model.t) =
                                 { reference; reference_json; confirmed = true };
                           };
                       ] ))
-          | Form_standard (Nav.Prompt_override_form { key }) ->
+          | Nav.Prompt_override_form { key } ->
               let value =
                 Model.modal_field_raw_value ~key:"value" modal
               in
@@ -5855,7 +5785,7 @@ let submit_inline_modal ~now (m : Model.t) =
                           Cmd.Post_prompt_override { key; value = Some value };
                       };
                   ] )
-          | Form_standard Nav.Preset_create_form ->
+          | Nav.Preset_create_form ->
               let name =
                 String.trim (Model.modal_field_value ~key:"name" modal)
               in
@@ -5873,7 +5803,7 @@ let submit_inline_modal ~now (m : Model.t) =
                         req = Cmd.Post_preset_create { name; description };
                       };
                   ] )
-          | Form_standard (Nav.Runtime_param_set_form { param_key }) ->
+          | Nav.Runtime_param_set_form { param_key } ->
               let raw =
                 String.trim (Model.modal_field_value ~key:"value" modal)
               in
@@ -5892,7 +5822,7 @@ let submit_inline_modal ~now (m : Model.t) =
                         req = Cmd.Post_runtime_param_set { param_key; value };
                       };
                   ] )
-          | Form_standard Nav.Default_route_edit -> (
+          | Nav.Default_route_edit -> (
               let runtime_ids = Model.modal_field_value ~key:"runtime_ids" modal
                                 |> Wire_runtime.parse_candidate_runtime_ids in
               match runtime_ids with
@@ -5902,7 +5832,7 @@ let submit_inline_modal ~now (m : Model.t) =
                         { action = Wire_runtime.Route_set_default { runtime_id };
                           label = Say.make ~ko:"기본 라우트 변경 완료" ~en:"Default route updated" } } ] )
               | [] | _ :: _ :: _ -> set_modal_error "Enter exactly one default runtime ID")
-          | Form_standard (Nav.Lane_rename_form { lane }) ->
+          | Nav.Lane_rename_form { lane } ->
               let to_lane = Model.modal_field_value ~key:"to_lane" modal in
               if String.equal to_lane "" then
                 set_modal_error "New lane name is required"
@@ -5925,9 +5855,8 @@ let submit_inline_modal ~now (m : Model.t) =
                             };
                       };
                   ] )
-          | Form_standard
-              (Nav.Addon_decl_form
-                 { file_name = modal_fn; mode; expected_source_revision }) ->
+          | Nav.Addon_decl_form
+                 { file_name = modal_fn; mode; expected_source_revision } ->
               let file_name =
                 match mode with
                 | `Save -> modal_fn
@@ -5972,8 +5901,7 @@ let submit_inline_modal ~now (m : Model.t) =
                             };
                       };
                   ] )
-          | Form_standard
-              (Nav.Addon_act_form { instance_id; expected_incarnation }) -> (
+          | Nav.Addon_act_form { instance_id; expected_incarnation } -> (
               let raw = Model.modal_field_value ~key:"action" modal in
               match Yojson.Safe.from_string raw with
               | `Assoc _ as action ->
@@ -6002,8 +5930,7 @@ let submit_inline_modal ~now (m : Model.t) =
                   set_modal_error
                     ("Invalid action JSON: "
                     ^ Chat_transcript.scrub_secrets_in_text msg))
-          | Form_standard
-              (Nav.Browser_interact_form { client_id; tab_id; expected_url }) ->
+          | Nav.Browser_interact_form { client_id; tab_id; expected_url } ->
               let action =
                 String.lowercase_ascii (Model.modal_field_value ~key:"action" modal)
               in
@@ -6054,7 +5981,7 @@ let submit_inline_modal ~now (m : Model.t) =
                                 };
                           };
                       ] ))
-          | Form_setup_login_start ->
+          | Nav.Setup_login_start_form ->
               let integration_id =
                 String.trim
                   (Model.modal_field_value ~key:"setup_login_integration" modal)
@@ -11102,6 +11029,14 @@ let apply_move (m : Model.t) dir =
                   | Nav.Connector_form
                   | Nav.Repo_add_form
                   | Nav.Board_new_post
+                  | Nav.Board_goal_proposal
+                  | Nav.Goal_confirmation_proof
+                  | Nav.Memory_act_form
+                  | Nav.Wiki_edit_form
+                  | Nav.Fusion_launch_form
+                  | Nav.Runtime_assign_form
+                  | Nav.Setup_account_key_form
+                  | Nav.Setup_login_start_form
                   | Nav.Board_comment _
                   | Nav.Github_token_form _
                   | Nav.Code_finder_form
@@ -11157,6 +11092,14 @@ let apply_move (m : Model.t) dir =
               | Nav.Connector_form
               | Nav.Repo_add_form
               | Nav.Board_new_post
+              | Nav.Board_goal_proposal
+              | Nav.Goal_confirmation_proof
+              | Nav.Memory_act_form
+              | Nav.Wiki_edit_form
+              | Nav.Fusion_launch_form
+              | Nav.Runtime_assign_form
+              | Nav.Setup_account_key_form
+              | Nav.Setup_login_start_form
               | Nav.Board_comment _
               | Nav.Github_token_form _
               | Nav.Code_finder_form

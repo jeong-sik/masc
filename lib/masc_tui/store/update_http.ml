@@ -1331,6 +1331,14 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Connector_form
         | Nav.Repo_add_form
         | Nav.Board_new_post
+        | Nav.Board_goal_proposal
+        | Nav.Goal_confirmation_proof
+        | Nav.Memory_act_form
+        | Nav.Wiki_edit_form
+        | Nav.Fusion_launch_form
+        | Nav.Runtime_assign_form
+        | Nav.Setup_account_key_form
+        | Nav.Setup_login_start_form
         | Nav.Code_finder_form
         | Nav.Code_search_form
         | Nav.Github_token_form _
@@ -1438,6 +1446,14 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Connector_form
             | Nav.Repo_add_form
             | Nav.Board_new_post
+            | Nav.Board_goal_proposal
+            | Nav.Goal_confirmation_proof
+            | Nav.Memory_act_form
+            | Nav.Wiki_edit_form
+            | Nav.Fusion_launch_form
+            | Nav.Runtime_assign_form
+            | Nav.Setup_account_key_form
+            | Nav.Setup_login_start_form
             | Nav.Code_finder_form
             | Nav.Code_search_form
             | Nav.Github_token_form _
@@ -1551,6 +1567,14 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Connector_form
         | Nav.Repo_add_form
         | Nav.Board_new_post
+        | Nav.Board_goal_proposal
+        | Nav.Goal_confirmation_proof
+        | Nav.Memory_act_form
+        | Nav.Wiki_edit_form
+        | Nav.Fusion_launch_form
+        | Nav.Runtime_assign_form
+        | Nav.Setup_account_key_form
+        | Nav.Setup_login_start_form
         | Nav.Board_comment _
         | Nav.Github_token_form _
         | Nav.Code_finder_form
@@ -1667,6 +1691,14 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Connector_form
             | Nav.Repo_add_form
             | Nav.Board_new_post
+            | Nav.Board_goal_proposal
+            | Nav.Goal_confirmation_proof
+            | Nav.Memory_act_form
+            | Nav.Wiki_edit_form
+            | Nav.Fusion_launch_form
+            | Nav.Runtime_assign_form
+            | Nav.Setup_account_key_form
+            | Nav.Setup_login_start_form
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -2657,6 +2689,14 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Connector_form
         | Nav.Repo_add_form
         | Nav.Board_new_post
+        | Nav.Board_goal_proposal
+        | Nav.Goal_confirmation_proof
+        | Nav.Memory_act_form
+        | Nav.Wiki_edit_form
+        | Nav.Fusion_launch_form
+        | Nav.Runtime_assign_form
+        | Nav.Setup_account_key_form
+        | Nav.Setup_login_start_form
         | Nav.Board_comment _
         | Nav.Github_token_form _
         | Nav.Code_finder_form
@@ -2744,6 +2784,14 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Connector_form
             | Nav.Repo_add_form
             | Nav.Board_new_post
+            | Nav.Board_goal_proposal
+            | Nav.Goal_confirmation_proof
+            | Nav.Memory_act_form
+            | Nav.Wiki_edit_form
+            | Nav.Fusion_launch_form
+            | Nav.Runtime_assign_form
+            | Nav.Setup_account_key_form
+            | Nav.Setup_login_start_form
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -2827,6 +2875,14 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Connector_form
                 | Nav.Repo_add_form
                 | Nav.Board_new_post
+                | Nav.Board_goal_proposal
+                | Nav.Goal_confirmation_proof
+                | Nav.Memory_act_form
+                | Nav.Wiki_edit_form
+                | Nav.Fusion_launch_form
+                | Nav.Runtime_assign_form
+                | Nav.Setup_account_key_form
+                | Nav.Setup_login_start_form
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_finder_form
@@ -2923,6 +2979,14 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Connector_form
             | Nav.Repo_add_form
             | Nav.Board_new_post
+            | Nav.Board_goal_proposal
+            | Nav.Goal_confirmation_proof
+            | Nav.Memory_act_form
+            | Nav.Wiki_edit_form
+            | Nav.Fusion_launch_form
+            | Nav.Runtime_assign_form
+            | Nav.Setup_account_key_form
+            | Nav.Setup_login_start_form
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -3001,6 +3065,14 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Connector_form
             | Nav.Repo_add_form
             | Nav.Board_new_post
+            | Nav.Board_goal_proposal
+            | Nav.Goal_confirmation_proof
+            | Nav.Memory_act_form
+            | Nav.Wiki_edit_form
+            | Nav.Fusion_launch_form
+            | Nav.Runtime_assign_form
+            | Nav.Setup_account_key_form
+            | Nav.Setup_login_start_form
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -3078,6 +3150,14 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Connector_form
                 | Nav.Repo_add_form
                 | Nav.Board_new_post
+                | Nav.Board_goal_proposal
+                | Nav.Goal_confirmation_proof
+                | Nav.Memory_act_form
+                | Nav.Wiki_edit_form
+                | Nav.Fusion_launch_form
+                | Nav.Runtime_assign_form
+                | Nav.Setup_account_key_form
+                | Nav.Setup_login_start_form
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_finder_form
@@ -3152,6 +3232,14 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Connector_form
             | Nav.Repo_add_form
             | Nav.Board_new_post
+            | Nav.Board_goal_proposal
+            | Nav.Goal_confirmation_proof
+            | Nav.Memory_act_form
+            | Nav.Wiki_edit_form
+            | Nav.Fusion_launch_form
+            | Nav.Runtime_assign_form
+            | Nav.Setup_account_key_form
+            | Nav.Setup_login_start_form
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -3247,6 +3335,14 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Connector_form
                 | Nav.Repo_add_form
                 | Nav.Board_new_post
+                | Nav.Board_goal_proposal
+                | Nav.Goal_confirmation_proof
+                | Nav.Memory_act_form
+                | Nav.Wiki_edit_form
+                | Nav.Fusion_launch_form
+                | Nav.Runtime_assign_form
+                | Nav.Setup_account_key_form
+                | Nav.Setup_login_start_form
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_finder_form
@@ -3360,6 +3456,14 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Connector_form
             | Nav.Repo_add_form
             | Nav.Board_new_post
+            | Nav.Board_goal_proposal
+            | Nav.Goal_confirmation_proof
+            | Nav.Memory_act_form
+            | Nav.Wiki_edit_form
+            | Nav.Fusion_launch_form
+            | Nav.Runtime_assign_form
+            | Nav.Setup_account_key_form
+            | Nav.Setup_login_start_form
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -3831,6 +3935,14 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Connector_form
         | Nav.Repo_add_form
         | Nav.Board_new_post
+        | Nav.Board_goal_proposal
+        | Nav.Goal_confirmation_proof
+        | Nav.Memory_act_form
+        | Nav.Wiki_edit_form
+        | Nav.Fusion_launch_form
+        | Nav.Runtime_assign_form
+        | Nav.Setup_account_key_form
+        | Nav.Setup_login_start_form
         | Nav.Board_comment _
         | Nav.Github_token_form _
         | Nav.Code_finder_form
@@ -3955,6 +4067,14 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Connector_form
         | Nav.Repo_add_form
         | Nav.Board_new_post
+        | Nav.Board_goal_proposal
+        | Nav.Goal_confirmation_proof
+        | Nav.Memory_act_form
+        | Nav.Wiki_edit_form
+        | Nav.Fusion_launch_form
+        | Nav.Runtime_assign_form
+        | Nav.Setup_account_key_form
+        | Nav.Setup_login_start_form
         | Nav.Board_comment _
         | Nav.Github_token_form _
         | Nav.Code_finder_form
@@ -4525,6 +4645,14 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Connector_form
         | Nav.Repo_add_form
         | Nav.Board_new_post
+        | Nav.Board_goal_proposal
+        | Nav.Goal_confirmation_proof
+        | Nav.Memory_act_form
+        | Nav.Wiki_edit_form
+        | Nav.Fusion_launch_form
+        | Nav.Runtime_assign_form
+        | Nav.Setup_account_key_form
+        | Nav.Setup_login_start_form
         | Nav.Board_comment _
         | Nav.Github_token_form _
         | Nav.Code_finder_form
@@ -4637,6 +4765,14 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Connector_form
             | Nav.Repo_add_form
             | Nav.Board_new_post
+            | Nav.Board_goal_proposal
+            | Nav.Goal_confirmation_proof
+            | Nav.Memory_act_form
+            | Nav.Wiki_edit_form
+            | Nav.Fusion_launch_form
+            | Nav.Runtime_assign_form
+            | Nav.Setup_account_key_form
+            | Nav.Setup_login_start_form
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -4958,6 +5094,14 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Connector_form
             | Nav.Repo_add_form
             | Nav.Board_new_post
+            | Nav.Board_goal_proposal
+            | Nav.Goal_confirmation_proof
+            | Nav.Memory_act_form
+            | Nav.Wiki_edit_form
+            | Nav.Fusion_launch_form
+            | Nav.Runtime_assign_form
+            | Nav.Setup_account_key_form
+            | Nav.Setup_login_start_form
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -5011,6 +5155,14 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Connector_form
             | Nav.Repo_add_form
             | Nav.Board_new_post
+            | Nav.Board_goal_proposal
+            | Nav.Goal_confirmation_proof
+            | Nav.Memory_act_form
+            | Nav.Wiki_edit_form
+            | Nav.Fusion_launch_form
+            | Nav.Runtime_assign_form
+            | Nav.Setup_account_key_form
+            | Nav.Setup_login_start_form
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -5058,6 +5210,14 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Connector_form
             | Nav.Repo_add_form
             | Nav.Board_new_post
+            | Nav.Board_goal_proposal
+            | Nav.Goal_confirmation_proof
+            | Nav.Memory_act_form
+            | Nav.Wiki_edit_form
+            | Nav.Fusion_launch_form
+            | Nav.Runtime_assign_form
+            | Nav.Setup_account_key_form
+            | Nav.Setup_login_start_form
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -5096,6 +5256,14 @@ let apply_http_reply ~now (m : Model.t) reply =
              | Nav.Connector_form
              | Nav.Repo_add_form
              | Nav.Board_new_post
+             | Nav.Board_goal_proposal
+             | Nav.Goal_confirmation_proof
+             | Nav.Memory_act_form
+             | Nav.Wiki_edit_form
+             | Nav.Fusion_launch_form
+             | Nav.Runtime_assign_form
+             | Nav.Setup_account_key_form
+             | Nav.Setup_login_start_form
              | Nav.Board_comment _
              | Nav.Github_token_form _
              | Nav.Code_finder_form
@@ -5128,6 +5296,9 @@ let apply_http_reply ~now (m : Model.t) reply =
              | Nav.Addon_attach_form
              | Nav.Setup_login_input_form _ ) as kind) ->
             Nav.equal_inline_action_kind modal.kind kind
+            || (Nav.equal_inline_action_kind kind Nav.Board_new_post
+                && Nav.equal_inline_action_kind modal.kind
+                     Nav.Board_goal_proposal)
       in
       let close_inline_modal =
         match m.inline_modal with
@@ -5205,6 +5376,14 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Connector_form
             | Nav.Repo_add_form
             | Nav.Board_new_post
+            | Nav.Board_goal_proposal
+            | Nav.Goal_confirmation_proof
+            | Nav.Memory_act_form
+            | Nav.Wiki_edit_form
+            | Nav.Fusion_launch_form
+            | Nav.Runtime_assign_form
+            | Nav.Setup_account_key_form
+            | Nav.Setup_login_start_form
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -5258,6 +5437,14 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Connector_form
             | Nav.Repo_add_form
             | Nav.Board_new_post
+            | Nav.Board_goal_proposal
+            | Nav.Goal_confirmation_proof
+            | Nav.Memory_act_form
+            | Nav.Wiki_edit_form
+            | Nav.Fusion_launch_form
+            | Nav.Runtime_assign_form
+            | Nav.Setup_account_key_form
+            | Nav.Setup_login_start_form
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -5305,6 +5492,14 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Connector_form
             | Nav.Repo_add_form
             | Nav.Board_new_post
+            | Nav.Board_goal_proposal
+            | Nav.Goal_confirmation_proof
+            | Nav.Memory_act_form
+            | Nav.Wiki_edit_form
+            | Nav.Fusion_launch_form
+            | Nav.Runtime_assign_form
+            | Nav.Setup_account_key_form
+            | Nav.Setup_login_start_form
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -5343,6 +5538,14 @@ let apply_http_reply ~now (m : Model.t) reply =
              | Nav.Connector_form
              | Nav.Repo_add_form
              | Nav.Board_new_post
+             | Nav.Board_goal_proposal
+             | Nav.Goal_confirmation_proof
+             | Nav.Memory_act_form
+             | Nav.Wiki_edit_form
+             | Nav.Fusion_launch_form
+             | Nav.Runtime_assign_form
+             | Nav.Setup_account_key_form
+             | Nav.Setup_login_start_form
              | Nav.Board_comment _
              | Nav.Github_token_form _
              | Nav.Code_finder_form
@@ -5375,6 +5578,9 @@ let apply_http_reply ~now (m : Model.t) reply =
              | Nav.Addon_attach_form
              | Nav.Setup_login_input_form _ ) as kind) ->
             Nav.equal_inline_action_kind modal.kind kind
+            || (Nav.equal_inline_action_kind kind Nav.Board_new_post
+                && Nav.equal_inline_action_kind modal.kind
+                     Nav.Board_goal_proposal)
       in
       let inline_modal =
         if not touches_modal then m.inline_modal
@@ -7023,6 +7229,14 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Connector_form
             | Nav.Repo_add_form
             | Nav.Board_new_post
+            | Nav.Board_goal_proposal
+            | Nav.Goal_confirmation_proof
+            | Nav.Memory_act_form
+            | Nav.Wiki_edit_form
+            | Nav.Fusion_launch_form
+            | Nav.Runtime_assign_form
+            | Nav.Setup_account_key_form
+            | Nav.Setup_login_start_form
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -7147,6 +7361,14 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Connector_form
             | Nav.Repo_add_form
             | Nav.Board_new_post
+            | Nav.Board_goal_proposal
+            | Nav.Goal_confirmation_proof
+            | Nav.Memory_act_form
+            | Nav.Wiki_edit_form
+            | Nav.Fusion_launch_form
+            | Nav.Runtime_assign_form
+            | Nav.Setup_account_key_form
+            | Nav.Setup_login_start_form
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -7300,6 +7522,14 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Connector_form
                 | Nav.Repo_add_form
                 | Nav.Board_new_post
+                | Nav.Board_goal_proposal
+                | Nav.Goal_confirmation_proof
+                | Nav.Memory_act_form
+                | Nav.Wiki_edit_form
+                | Nav.Fusion_launch_form
+                | Nav.Runtime_assign_form
+                | Nav.Setup_account_key_form
+                | Nav.Setup_login_start_form
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_finder_form
@@ -7376,6 +7606,14 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Connector_form
             | Nav.Repo_add_form
             | Nav.Board_new_post
+            | Nav.Board_goal_proposal
+            | Nav.Goal_confirmation_proof
+            | Nav.Memory_act_form
+            | Nav.Wiki_edit_form
+            | Nav.Fusion_launch_form
+            | Nav.Runtime_assign_form
+            | Nav.Setup_account_key_form
+            | Nav.Setup_login_start_form
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -7595,6 +7833,14 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Connector_form
                 | Nav.Repo_add_form
                 | Nav.Board_new_post
+                | Nav.Board_goal_proposal
+                | Nav.Goal_confirmation_proof
+                | Nav.Memory_act_form
+                | Nav.Wiki_edit_form
+                | Nav.Fusion_launch_form
+                | Nav.Runtime_assign_form
+                | Nav.Setup_account_key_form
+                | Nav.Setup_login_start_form
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_finder_form
@@ -7664,6 +7910,14 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Connector_form
             | Nav.Repo_add_form
             | Nav.Board_new_post
+            | Nav.Board_goal_proposal
+            | Nav.Goal_confirmation_proof
+            | Nav.Memory_act_form
+            | Nav.Wiki_edit_form
+            | Nav.Fusion_launch_form
+            | Nav.Runtime_assign_form
+            | Nav.Setup_account_key_form
+            | Nav.Setup_login_start_form
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -7748,6 +8002,14 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Connector_form
                 | Nav.Repo_add_form
                 | Nav.Board_new_post
+                | Nav.Board_goal_proposal
+                | Nav.Goal_confirmation_proof
+                | Nav.Memory_act_form
+                | Nav.Wiki_edit_form
+                | Nav.Fusion_launch_form
+                | Nav.Runtime_assign_form
+                | Nav.Setup_account_key_form
+                | Nav.Setup_login_start_form
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_finder_form
@@ -7824,6 +8086,14 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Connector_form
             | Nav.Repo_add_form
             | Nav.Board_new_post
+            | Nav.Board_goal_proposal
+            | Nav.Goal_confirmation_proof
+            | Nav.Memory_act_form
+            | Nav.Wiki_edit_form
+            | Nav.Fusion_launch_form
+            | Nav.Runtime_assign_form
+            | Nav.Setup_account_key_form
+            | Nav.Setup_login_start_form
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -8052,10 +8322,11 @@ let apply_http_reply ~now (m : Model.t) reply =
          proof fields so the operator confirms with Enter instead of typing
          them. Never clobber something the operator already typed, and never
          patch a modal that moved on to another goal. *)
-      let modal_matches modal =
-        String.equal
-          (String.trim (Model.modal_field_raw_value ~key:"confirm_goal_id" modal))
-          (String.trim goal_id)
+      let modal_matches (modal : Model.inline_modal_state) =
+        Nav.equal_inline_action_kind modal.kind Nav.Goal_confirmation_proof
+        && String.equal
+             (String.trim (Model.modal_field_raw_value ~key:"confirm_goal_id" modal))
+             (String.trim goal_id)
       in
       match result with
       | Ok proof -> (
@@ -8205,6 +8476,14 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Connector_form
                 | Nav.Repo_add_form
                 | Nav.Board_new_post
+                | Nav.Board_goal_proposal
+                | Nav.Goal_confirmation_proof
+                | Nav.Memory_act_form
+                | Nav.Wiki_edit_form
+                | Nav.Fusion_launch_form
+                | Nav.Runtime_assign_form
+                | Nav.Setup_account_key_form
+                | Nav.Setup_login_start_form
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_finder_form
@@ -8296,6 +8575,14 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Connector_form
             | Nav.Repo_add_form
             | Nav.Board_new_post
+            | Nav.Board_goal_proposal
+            | Nav.Goal_confirmation_proof
+            | Nav.Memory_act_form
+            | Nav.Wiki_edit_form
+            | Nav.Fusion_launch_form
+            | Nav.Runtime_assign_form
+            | Nav.Setup_account_key_form
+            | Nav.Setup_login_start_form
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -8447,6 +8734,14 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Connector_form
                 | Nav.Repo_add_form
                 | Nav.Board_new_post
+                | Nav.Board_goal_proposal
+                | Nav.Goal_confirmation_proof
+                | Nav.Memory_act_form
+                | Nav.Wiki_edit_form
+                | Nav.Fusion_launch_form
+                | Nav.Runtime_assign_form
+                | Nav.Setup_account_key_form
+                | Nav.Setup_login_start_form
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_finder_form
@@ -8524,6 +8819,14 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Connector_form
             | Nav.Repo_add_form
             | Nav.Board_new_post
+            | Nav.Board_goal_proposal
+            | Nav.Goal_confirmation_proof
+            | Nav.Memory_act_form
+            | Nav.Wiki_edit_form
+            | Nav.Fusion_launch_form
+            | Nav.Runtime_assign_form
+            | Nav.Setup_account_key_form
+            | Nav.Setup_login_start_form
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -8586,6 +8889,14 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Connector_form
                 | Nav.Repo_add_form
                 | Nav.Board_new_post
+                | Nav.Board_goal_proposal
+                | Nav.Goal_confirmation_proof
+                | Nav.Memory_act_form
+                | Nav.Wiki_edit_form
+                | Nav.Fusion_launch_form
+                | Nav.Runtime_assign_form
+                | Nav.Setup_account_key_form
+                | Nav.Setup_login_start_form
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_finder_form
@@ -8659,6 +8970,14 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Connector_form
             | Nav.Repo_add_form
             | Nav.Board_new_post
+            | Nav.Board_goal_proposal
+            | Nav.Goal_confirmation_proof
+            | Nav.Memory_act_form
+            | Nav.Wiki_edit_form
+            | Nav.Fusion_launch_form
+            | Nav.Runtime_assign_form
+            | Nav.Setup_account_key_form
+            | Nav.Setup_login_start_form
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -8877,6 +9196,14 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Connector_form
                 | Nav.Repo_add_form
                 | Nav.Board_new_post
+                | Nav.Board_goal_proposal
+                | Nav.Goal_confirmation_proof
+                | Nav.Memory_act_form
+                | Nav.Wiki_edit_form
+                | Nav.Fusion_launch_form
+                | Nav.Runtime_assign_form
+                | Nav.Setup_account_key_form
+                | Nav.Setup_login_start_form
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_finder_form
@@ -8937,6 +9264,14 @@ let apply_http_reply ~now (m : Model.t) reply =
               | Nav.Connector_form
               | Nav.Repo_add_form
               | Nav.Board_new_post
+              | Nav.Board_goal_proposal
+              | Nav.Goal_confirmation_proof
+              | Nav.Memory_act_form
+              | Nav.Wiki_edit_form
+              | Nav.Fusion_launch_form
+              | Nav.Runtime_assign_form
+              | Nav.Setup_account_key_form
+              | Nav.Setup_login_start_form
               | Nav.Board_comment _
               | Nav.Github_token_form _
               | Nav.Code_finder_form
@@ -9008,6 +9343,14 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Connector_form
             | Nav.Repo_add_form
             | Nav.Board_new_post
+            | Nav.Board_goal_proposal
+            | Nav.Goal_confirmation_proof
+            | Nav.Memory_act_form
+            | Nav.Wiki_edit_form
+            | Nav.Fusion_launch_form
+            | Nav.Runtime_assign_form
+            | Nav.Setup_account_key_form
+            | Nav.Setup_login_start_form
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form

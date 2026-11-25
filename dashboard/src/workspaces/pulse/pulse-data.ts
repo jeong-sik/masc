@@ -386,24 +386,28 @@ export interface PulseLoadBundle {
   readonly candle: Observed<PulseCandleDigest>
 }
 
+export function readPulseBundle(win: TimeWindow): PulseLoadBundle {
+  return {
+    shell: resourceCache.observe<PulseShellSnapshot>(PULSE_CACHE_KEYS.shell).value,
+    keepers: resourceCache.observe<readonly PulseKeeperRow[]>(PULSE_CACHE_KEYS.keepers).value,
+    costs: resourceCache.observe<readonly PulseKeeperCostRow[]>(PULSE_CACHE_KEYS.costs).value,
+    usage: resourceCache.observe<PulseProviderUsageSnapshot>(PULSE_CACHE_KEYS.usage(win)).value,
+    approvals: resourceCache.observe<readonly PulseApprovalItem[]>(PULSE_CACHE_KEYS.approvals).value,
+    asks: resourceCache.observe<readonly PulseAskItem[]>(PULSE_CACHE_KEYS.asks).value,
+    goals: resourceCache.observe<readonly PulseGoalSummary[]>(PULSE_CACHE_KEYS.goals).value,
+    board: resourceCache.observe<readonly PulseBoardPost[]>(PULSE_CACHE_KEYS.board).value,
+    worldMemory: resourceCache.observe<PulseWorldMemoryDigest>(PULSE_CACHE_KEYS.worldMemory).value,
+    candle: resourceCache.observe<PulseCandleDigest>(PULSE_CACHE_KEYS.candle).value,
+  }
+}
+
 export async function loadPulseBundle(
   win: TimeWindow,
   reason: FetchReason = 'mount',
-): Promise<PulseLoadBundle> {
+): Promise<void> {
   const usageDays = timeWindowProviderDays(win)
 
-  const [
-    shell,
-    keepers,
-    costs,
-    usage,
-    approvals,
-    asks,
-    goals,
-    board,
-    worldMemory,
-    candle,
-  ] = await Promise.all([
+  await Promise.all([
     resourceCache.fetch<PulseShellSnapshot>(
       PULSE_CACHE_KEYS.shell,
       (signal) => wrapResult(apiGet('/api/v1/dashboard/shell', { signal, decode: decodeShell })),
@@ -455,17 +459,4 @@ export async function loadPulseBundle(
       { ttlMs: 30_000, topics: ['candle', 'goal'], reason },
     ),
   ])
-
-  return {
-    shell,
-    keepers,
-    costs,
-    usage,
-    approvals,
-    asks,
-    goals,
-    board,
-    worldMemory,
-    candle,
-  }
 }

@@ -291,6 +291,8 @@ describe('PulseWorkspace DOM Integration', () => {
   })
 
   it('renders 4-KPI Hero Strip, Attention Queue, Fleet Groups, and navigates on click with <1200 DOM nodes', async () => {
+    let releaseUsage!: () => void
+    const waitForUsage = new Promise<void>((resolve) => { releaseUsage = resolve })
     const mockFetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       const json = (data: unknown) =>
@@ -314,6 +316,7 @@ describe('PulseWorkspace DOM Integration', () => {
         return json({ keepers: [{ keeper_name: 'code-reviewer-sister', total_cost_usd: null, cost_reported_samples: 0, cost_unreported_samples: 8, total_tokens: 400_000, sample_count: 8 }] })
       }
       if (url.includes('/api/v1/dashboard/provider-usage-history')) {
+        await waitForUsage
         return json({ days: 1, points: [{ scope_id: 'claude', source: 'sub', kind: 'subscription', unit: 'credit_unlimited' }] })
       }
       if (url.includes('/api/v1/keepers/tool-approvals')) {
@@ -345,9 +348,15 @@ describe('PulseWorkspace DOM Integration', () => {
 
     await waitFor(() => {
       expect(container.querySelectorAll('[data-kpi-id]').length).toBe(4)
-      expect(container.textContent).toContain('$0 Sub')
       expect(container.textContent).toContain('Ship Proposal A+')
+      expect(getAllByRole('button', { name: '이동' }).length).toBeGreaterThan(0)
     })
+    expect(container.textContent).not.toContain('$0 Sub')
+    fireEvent.click(getAllByRole('button', { name: '이동' })[0]!)
+    expect(onNavigate).toHaveBeenCalledWith('/work/inbox')
+
+    releaseUsage()
+    await waitFor(() => expect(container.textContent).toContain('$0 Sub'))
 
     // Zero empty 0.000 Candle box when policy is off
     expect(queryByText('0.000 C')).toBeNull()
@@ -361,10 +370,6 @@ describe('PulseWorkspace DOM Integration', () => {
     )
     expect(inlineStyled).toHaveLength(0)
 
-    // Click Attention Queue "이동" button -> navigates to /work/inbox
-    const moveButtons = getAllByRole('button', { name: '이동' })
-    fireEvent.click(moveButtons[0]!)
-    expect(onNavigate).toHaveBeenCalledWith('/work/inbox')
   })
 
   it('clamps /api/v1/dashboard/keeper-costs?window=1440 on 7d and 30d windows (P1-4)', async () => {

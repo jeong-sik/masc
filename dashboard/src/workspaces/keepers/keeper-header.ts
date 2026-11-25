@@ -5,7 +5,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { activeWorkspaceId } from '../../core/auth'
-import { formatObserved } from '../../core/resource-cache'
+import { formatObserved, type Observed } from '../../core/resource-cache'
 import { useAuthenticatedPortrait } from '../../lib/portrait-cache'
 import { keeperPortraitUrl, kSigil } from '../../components/keeper-badge'
 import { TargetLockedAction } from '../../components/primitives/target-locked-action'
@@ -27,6 +27,7 @@ import type { KeeperRosterItem } from './types'
 
 export interface KeeperHeaderProps {
   readonly keeper: KeeperRosterItem
+  readonly turnStatus?: Observed<unknown>['kind']
   readonly activeTab: KeeperEntityTab
   readonly onSelectTab: (tab: KeeperEntityTab) => void
   readonly onLifecycleMutated: () => void
@@ -169,6 +170,8 @@ export function KeeperHeader(props: KeeperHeaderProps) {
                   ● Turn (${keeper.active_turn.lane})
                 </span>
               `}
+              ${props.turnStatus === 'loading' && html`<span class="kp-pill">턴 상태 조회 중…</span>`}
+              ${props.turnStatus === 'failed' && html`<span class="kp-pill" data-tone="warn">턴 상태 조회 실패</span>`}
             </div>
           </div>
         </div>

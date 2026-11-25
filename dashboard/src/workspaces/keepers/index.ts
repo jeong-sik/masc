@@ -14,10 +14,9 @@ import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { currentSessionEpoch, sessionEpoch } from '../../core/auth'
 import { extractObserverTopics, markViewSynced, observerConnected, subscribeObserverFrames, subscribeObserverResync } from '../../core/observer'
-import { observedLoading, type Observed } from '../../core/resource-cache'
 import { parseKeeperEntityTab, type KeeperEntityTab } from '../../routes/router'
 import type { WorkspaceViewProps } from '../types'
-import { KEEPER_ROSTER_OBSERVER_TOPICS, loadKeeperRoster } from './keepers-api'
+import { KEEPER_ROSTER_OBSERVER_TOPICS, loadKeeperRoster, readKeeperRosterSources } from './keepers-api'
 import { KeeperRoster } from './keeper-roster'
 import { KeeperHeader } from './keeper-header'
 import { KeeperChatTab } from './keeper-chat-tab'
@@ -29,7 +28,18 @@ import type { KeeperRosterItem } from './types'
 import './keepers.css'
 
 export function KeepersWorkspace(props: WorkspaceViewProps) {
-  const [roster, setRoster] = useState<Observed<readonly KeeperRosterItem[]>>(() => observedLoading())
+  const epoch = sessionEpoch.value
+  const { roster: listing, turns } = readKeeperRosterSources()
+  const roster = useMemo(() => {
+    if (listing.kind !== 'value' || turns.kind !== 'value') return listing
+    return {
+      ...listing,
+      data: listing.data.map((keeper) => {
+        const turn = turns.data.get(keeper.name)
+        return turn ? { ...keeper, active_turn: turn.active, chat_control_token: turn.chat_control_token } : keeper
+      }),
+    }
+  }, [listing, turns])
   const [localSelectedName, setLocalSelectedName] = useState<string | null>(props.entityId ?? null)
   const rosterRead = useRef<ReturnType<typeof loadKeeperRoster> | null>(null)
   const activeTab: KeeperEntityTab = parseKeeperEntityTab(props.entityTab)
@@ -42,24 +52,20 @@ export function KeepersWorkspace(props: WorkspaceViewProps) {
 
   const refreshRoster = useCallback(async (reason: 'mount' | 'sse' | 'manual') => {
     const startEpoch = currentSessionEpoch()
-    // Start the invalidated read after any existing snapshot settles.
+    // Wait for any superseded read before starting a replacement snapshot.
     if (reason === 'sse' && rosterRead.current) await rosterRead.current
     if (currentSessionEpoch() !== startEpoch) return
     const read = loadKeeperRoster(reason)
     rosterRead.current = read
-    const next = await read
+    await read
     if (rosterRead.current === read) rosterRead.current = null
     if (currentSessionEpoch() !== startEpoch) return
-    setRoster(next)
     markViewSynced()
   }, [])
 
   useEffect(() => {
-    return sessionEpoch.subscribe(() => {
-      setRoster(observedLoading())
-      void refreshRoster('mount')
-    })
-  }, [refreshRoster])
+    void refreshRoster('mount')
+  }, [epoch, refreshRoster])
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null
@@ -167,6 +173,7 @@ export function KeepersWorkspace(props: WorkspaceViewProps) {
               <${KeeperHeader}
                 key=${`hdr:${activeKeeper.name}`}
                 keeper=${activeKeeper}
+                turnStatus=${turns.kind}
                 activeTab=${activeTab}
                 onSelectTab=${handleSelectTab}
                 onLifecycleMutated=${() => void refreshRoster('manual')}
@@ -176,7 +183,7 @@ export function KeepersWorkspace(props: WorkspaceViewProps) {
               <div class="kp-body">
                 ${activeTab === 'chat' && html`
                   <${KeeperChatTab}
-                    key=${`chat:${activeKeeper.name}`}
+                    key=${`chat:${epoch}:${activeKeeper.name}`}
                     keeper=${activeKeeper}
                     onInspect=${props.onInspect}
                     onSelectKeeper=${handleSelectKeeper}

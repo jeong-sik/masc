@@ -14,7 +14,6 @@ import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
 import {
   formatObserved,
-  observedLoading,
   type Observed,
 } from '../../core/resource-cache'
 import {
@@ -25,11 +24,11 @@ import {
   timeWindow,
   type TimeWindow,
 } from '../../core/time-window'
-import { currentSessionEpoch } from '../../core/auth'
+import { currentSessionEpoch, sessionEpoch } from '../../core/auth'
 import { KeeperBadge } from '../../components/keeper-badge'
 import { UPlotChart, type UPlotSeriesSpec } from '../../components/primitives/uplot-chart'
 import type { WorkspaceViewProps } from '../types'
-import { loadPulseBundle, type PulseLoadBundle } from './pulse-data'
+import { loadPulseBundle, readPulseBundle } from './pulse-data'
 import {
   buildAttentionQueue,
   buildCompanyFleetGroups,
@@ -58,21 +57,6 @@ const SPARKLINE_SERIES: readonly UPlotSeriesSpec[] = [
   },
 ]
 
-function initialBundle(): PulseLoadBundle {
-  return {
-    shell: observedLoading(),
-    keepers: observedLoading(),
-    costs: observedLoading(),
-    usage: observedLoading(),
-    approvals: observedLoading(),
-    asks: observedLoading(),
-    goals: observedLoading(),
-    board: observedLoading(),
-    worldMemory: observedLoading(),
-    candle: observedLoading(),
-  }
-}
-
 function goalPhaseTone(phase: string): 'ok' | 'warn' | 'bad' | 'info' | 'brass' | 'default' {
   const lower = phase.toLowerCase()
   if (lower === 'completed') return 'ok'
@@ -92,17 +76,18 @@ function keeperCtxTone(obs: Observed<number>): 'ok' | 'warn' | 'bad' | 'default'
 
 export function PulseWorkspace(props: WorkspaceViewProps) {
   const win: TimeWindow = timeWindow.value
-  const [bundle, setBundle] = useState<PulseLoadBundle>(initialBundle)
+  const epoch = sessionEpoch.value
+  const bundle = readPulseBundle(win)
   const [observedAtSec, setObservedAtSec] = useState<number>(() => Math.floor(Date.now() / 1000))
   const [refreshing, setRefreshing] = useState(false)
 
   const refresh = useCallback(async (reason: 'mount' | 'route' | 'sse' | 'manual') => {
     const startEpoch = currentSessionEpoch()
+    const refreshWindow = timeWindow.peek()
     if (reason === 'manual') setRefreshing(true)
     try {
-      const next = await loadPulseBundle(timeWindow.peek(), reason)
-      if (currentSessionEpoch() !== startEpoch) return
-      setBundle(next)
+      await loadPulseBundle(refreshWindow, reason)
+      if (currentSessionEpoch() !== startEpoch || timeWindow.peek() !== refreshWindow) return
       setObservedAtSec(Math.floor(Date.now() / 1000))
       markViewSynced()
     } finally {
@@ -112,7 +97,7 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
 
   useEffect(() => {
     void refresh('mount')
-  }, [win, refresh])
+  }, [win, epoch, refresh])
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null
@@ -156,6 +141,9 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
       }),
     [bundle.approvals, bundle.asks, keepersList, nowSec],
   )
+  const attentionSources = [bundle.approvals, bundle.asks, bundle.keepers]
+  const attentionPending = attentionSources.some((source) => source.kind === 'loading')
+  const attentionFailed = attentionSources.some((source) => source.kind === 'failed')
 
   const fleetGroups = useMemo(
     () =>
@@ -351,7 +339,9 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
               </button>
             </div>
             ${handoffs.length === 0
-              ? html`<div class="pulse-empty">최근 다중 Keeper 핸드오프/승계 신호 없음</div>`
+              ? html`<div class="pulse-empty">${bundle.board.kind !== 'value'
+                ? formatObserved(bundle.board)
+                : '최근 다중 Keeper 핸드오프/승계 신호 없음'}</div>`
               : html`
                   <div class="pulse-handoff-list">
                     ${handoffs.map((h) => html`
@@ -387,8 +377,8 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
             <div class="pulse-card-head">
               <h2>Attention Queue</h2>
               <div class="pulse-header-meta">
-                <span class="pulse-pill" data-tone=${attentionItems.length > 0 ? 'warn' : 'ok'}>
-                  ${attentionItems.length}건
+                <span class="pulse-pill" data-tone=${attentionFailed || attentionItems.length > 0 ? 'warn' : attentionPending ? 'default' : 'ok'}>
+                  ${attentionFailed ? '일부 조회 실패' : attentionPending ? '조회 중…' : `${attentionItems.length}건`}
                 </span>
                 <button type="button" class="btn-ghost" onClick=${() => props.onNavigate('/work/inbox')}>
                   Inbox →
@@ -396,7 +386,7 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
               </div>
             </div>
             ${attentionItems.length === 0
-              ? html`<div class="pulse-empty">대기 중인 승인·질문·오류 없음</div>`
+              ? !attentionFailed && !attentionPending && html`<div class="pulse-empty">대기 중인 승인·질문·오류 없음</div>`
               : html`
                   <div class="pulse-attn-list">
                     ${attentionItems.slice(0, 10).map((item) => html`
@@ -443,8 +433,8 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
                 Goals →
               </button>
             </div>
-            ${bundle.goals.kind === 'loading'
-              ? html`<div class="pulse-empty">Goal 목록 불러오는 중…</div>`
+            ${bundle.goals.kind !== 'value'
+              ? html`<div class="pulse-empty">${formatObserved(bundle.goals)}</div>`
               : activeGoals.length === 0
                 ? html`<div class="pulse-empty">활성 Goal 없음</div>`
                 : html`

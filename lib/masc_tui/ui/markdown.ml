@@ -15,6 +15,7 @@ type styled_span = {
 
 type rendered_line = {
   spans : styled_span list;
+  image_part : Cell_grid.document_image_part option;
 }
 
 let wrap_styled_spans ~width ~prefix ~continuation spans =
@@ -33,7 +34,7 @@ let wrap_styled_spans ~width ~prefix ~continuation spans =
       0 continuation
   in
   let flush_line () =
-    lines := { spans = List.rev !cur } :: !lines;
+    lines := { spans = List.rev !cur; image_part = None } :: !lines;
     cur := List.rev continuation;
     cur_w := cont_w
   in
@@ -98,7 +99,7 @@ let wrap_styled_spans ~width ~prefix ~continuation spans =
       in
       scan 0)
     spans;
-  lines := { spans = List.rev !cur } :: !lines;
+  lines := { spans = List.rev !cur; image_part = None } :: !lines;
   List.rev !lines
 
 let pad_line_to_width ~width ~pad_style (line : rendered_line) =
@@ -109,6 +110,7 @@ let pad_line_to_width ~width ~pad_style (line : rendered_line) =
   if rem <= 0 then line
   else
     {
+      line with
       spans =
         line.spans
         @ [ { text = String.make rem ' '; style = pad_style; hyperlink = None } ];
@@ -453,7 +455,7 @@ let render_literal ~width ~base_style raw =
          let row = Buffer.create (Int.min width (String.length line)) in
          let push_row () =
            rows :=
-             { spans = [ span base_style (Buffer.contents row) ] }
+             { spans = [ span base_style (Buffer.contents row) ]; image_part = None }
              :: !rows;
            Buffer.clear row;
            cells := 0
@@ -561,7 +563,7 @@ let render_document ~(theme : Theme.t) ~width ~osc8 ~(base_style : Style.t) raw 
     let prefix = prefix layout in
     let count = Int.min requested_width (width - spans_width prefix) in
     let rule = String.concat "" (List.init count (fun _ -> Glyph.to_utf8 Glyph.Box_h)) in
-    push_lines [ { spans = prefix @ [ span hairline_style rule ] } ]
+    push_lines [ { spans = prefix @ [ span hairline_style rule ]; image_part = None } ]
   in
   let draw_code layout code =
     let lang_tag, info_tail =
@@ -593,8 +595,10 @@ let render_document ~(theme : Theme.t) ~width ~osc8 ~(base_style : Style.t) raw 
     in
     if not (String.equal lang_tag "") then
       draw [ [ span (Typography.whisper ~bg:code_bg theme) lang_tag ] ];
+    let body_start = !row_count in
+    let kind = fence_kind lang_tag info_tail in
     let rendered =
-      match fence_kind lang_tag info_tail, closed with
+      match kind, closed with
       | Diagram, true -> (
           match try_render_mermaid_fence ~inner_w body_lines with
           | None -> false
@@ -619,13 +623,31 @@ let render_document ~(theme : Theme.t) ~width ~osc8 ~(base_style : Style.t) raw 
               false)
       | (Diagram | Score _), false | Code, _ -> false
     in
-    if not rendered then
+    if not rendered then begin
       Code_lexer.rows_of_source ~language:(Code_lexer.language_of_tag lang_tag)
         (String.concat "\n" body_lines)
       |> List.map
            (List.map (fun (seg : Code_lexer.segment) ->
                 span (Code_lexer.style_of_token ~theme ~bg:code_bg seg.kind) seg.text))
       |> draw
+    end;
+    (match kind, closed with
+    | Diagram, true
+      when List.length body_lines <= max_inline_mermaid_lines ->
+        let source = String.concat "\n" body_lines in
+        let count = !row_count - body_start in
+        if String.length source <= max_inline_mermaid_bytes && count >= 2 then begin
+          let rows : Cell_grid.document_image_rows = { source = Mermaid source; count } in
+          let left_inset = width - inner_w in
+          let rec attach index = function
+            | line :: tail when index >= 0 ->
+                { line with image_part = Some { rows; index; left_inset } }
+                :: attach (index - 1) tail
+            | tail -> tail
+          in
+          out := attach (count - 1) !out
+        end
+    | (Diagram | Score _ | Code), _ -> ())
   in
   let draw_table layout table =
     let separator = span hairline_style (" " ^ Glyph.to_utf8 Glyph.Box_v ^ " ") in
@@ -662,7 +684,7 @@ let render_document ~(theme : Theme.t) ~width ~osc8 ~(base_style : Style.t) raw 
                 List.split
                   (List.map
                      (function
-                       | [] -> { spans = [] }, []
+                       | [] -> { spans = []; image_part = None }, []
                        | current :: rest -> current, rest)
                      rows)
               in
@@ -678,7 +700,7 @@ let render_document ~(theme : Theme.t) ~width ~osc8 ~(base_style : Style.t) raw 
                 | cell :: rest -> cell @ (separator :: join_cells rest)
               in
               let spans = prefix @ join_cells parts in
-              push_lines [ { spans } ];
+              push_lines [ { spans; image_part = None } ];
               join remaining
         in
         join wrapped
@@ -767,7 +789,7 @@ let render_document ~(theme : Theme.t) ~width ~osc8 ~(base_style : Style.t) raw 
   let layout = { base = base_style; prefixes = [] } in
   render layout (Cmarkit.Doc.block doc);
   match !out with
-  | [] -> [ { spans = [] } ]
+  | [] -> [ { spans = []; image_part = None } ]
   | rows -> List.rev rows
 
 let md_render_cache_mu = Stdlib.Mutex.create ()
@@ -844,6 +866,8 @@ let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ?(osc8 = true) ?(scroll = 0)
             let adv = Cell_grid.put_text ~clip:row_rect grid ~x:!cx ~y:py ~style sp.text in
             cx := !cx + adv
           end)
-        arr.(start + i).spans
+        arr.(start + i).spans;
+      Option.iter (Cell_grid.register_document_image_part grid ~rect:row_rect)
+        arr.(start + i).image_part
     done;
     total

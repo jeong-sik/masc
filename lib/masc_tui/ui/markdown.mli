@@ -17,6 +17,7 @@ type styled_span = {
 
 type rendered_line = {
   spans : styled_span list;
+  image_part : Cell_grid.document_image_part option;
 }
 
 val render_lines :

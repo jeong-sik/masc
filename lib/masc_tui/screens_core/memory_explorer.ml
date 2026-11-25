@@ -240,7 +240,9 @@ let render_full_reading ~grid ~(rect : Rect.t) ~(theme : Theme.t)
                       | Some uri -> Style.with_hyperlink (Cell_grid.intern_hyperlink grid uri) span.style
                     in
                     x := !x + Cell_grid.put_text ~clip:body_rect grid ~x:!x ~y:!y ~style span.text)
-                  line.spans);
+                  line.spans;
+                let rect = Rect.make ~x:tx ~y:!y ~w:(Rect.right body_rect - tx) ~h:1 in
+                Option.iter (Cell_grid.register_document_image_part grid ~rect) line.image_part);
             incr y
           end)
         (Store_scroll.drop skip lines)

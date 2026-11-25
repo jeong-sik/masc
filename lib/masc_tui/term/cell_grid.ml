@@ -68,12 +68,38 @@ module Hit_map = struct
   let entries map = List.rev map
 end
 
+type document_image = Mermaid of string
+
+type document_image_rows = {
+  source : document_image;
+  count : int;
+}
+
+type document_image_part = {
+  rows : document_image_rows;
+  index : int;
+  left_inset : int;
+}
+
+type document_placement = {
+  image : document_image;
+  rect : Rect.t;
+}
+
+type document_image_progress = {
+  rows : document_image_rows;
+  next_index : int;
+  rect : Rect.t;
+}
+
 type t = {
   cols : int;
   rows : int;
   cells : cell array;
   mutable links : string array;
   mutable link_count : int;
+  mutable image_progress : document_image_progress option;
+  mutable document_placements : document_placement list;
 }
 
 let create ~cols ~rows =
@@ -85,6 +111,8 @@ let create ~cols ~rows =
     cells = Array.make (cols * rows) blank_cell;
     links = [||];
     link_count = 0;
+    image_progress = None;
+    document_placements = [];
   }
 
 let cols t = t.cols
@@ -97,7 +125,9 @@ let clear ?(style = Style.default) t =
     else { glyph = Empty; width = 1; style }
   in
   Array.fill t.cells 0 (Array.length t.cells) fill_cell;
-  t.link_count <- 0
+  t.link_count <- 0;
+  t.image_progress <- None;
+  t.document_placements <- []
 
 let resize ~cols ~rows t =
   let cols = Int.max 0 cols in
@@ -117,6 +147,43 @@ let copy_into ~src ~dst =
       Array.blit src.links 0 dst.links 0 src.link_count;
     dst.link_count <- src.link_count
   end
+
+let document_placements t = List.rev t.document_placements
+
+let register_document_image_part t ~(rect : Rect.t) (part : document_image_part) =
+  let rect = Rect.inset ~left:part.left_inset rect in
+  let complete ~next_index ~rect =
+    if next_index = part.rows.count then begin
+      t.document_placements <- { image = part.rows.source; rect } :: t.document_placements;
+      t.image_progress <- None
+    end
+    else t.image_progress <- Some { rows = part.rows; next_index; rect }
+  in
+  if rect.h <> 1 || Rect.is_empty rect
+     || not (Rect.equal rect (Rect.intersect rect (bounds t))) then
+    t.image_progress <- None
+  else if part.index = 0 then complete ~next_index:1 ~rect
+  else
+    match t.image_progress with
+    | Some previous
+      when previous.rows == part.rows && previous.next_index = part.index
+           && Rect.bottom previous.rect = rect.y ->
+        let x = Int.max previous.rect.x rect.x in
+        let right = Int.min (Rect.right previous.rect) (Rect.right rect) in
+        if right <= x then t.image_progress <- None
+        else
+          let rect = Rect.make ~x ~y:previous.rect.y ~w:(right - x)
+              ~h:(previous.rect.h + 1) in
+          complete ~next_index:(part.index + 1) ~rect
+    | None | Some _ -> t.image_progress <- None
+
+let occlude_document_images t ~rect =
+  let overlaps other = not (Rect.is_empty (Rect.intersect other rect)) in
+  t.document_placements <-
+    List.filter (fun (p : document_placement) -> not (overlaps p.rect)) t.document_placements;
+  match t.image_progress with
+  | Some p when overlaps p.rect -> t.image_progress <- None
+  | None | Some _ -> ()
 
 let get t ~x ~y =
   if x < 0 || y < 0 || x >= t.cols || y >= t.rows then blank_cell
@@ -267,6 +334,7 @@ let fill_rect ?clip t ~rect ~style ?(glyph = Empty) () =
   let target = Rect.intersect (effective_clip t clip) rect in
   if Rect.is_empty target then ()
   else
+    let () = occlude_document_images t ~rect:target in
     let fill_cell =
       match glyph with
       | Continuation -> { glyph = Empty; width = 1; style }
@@ -283,6 +351,7 @@ let dim_rect ?clip t ~rect ~fg ~bg =
   let target = Rect.intersect (effective_clip t clip) rect in
   if Rect.is_empty target then ()
   else
+    let () = occlude_document_images t ~rect:target in
     let scrim_style = Style.make ~fg ~bg () in
     for y = target.y to Rect.bottom target - 1 do
       let row_base = y * t.cols in

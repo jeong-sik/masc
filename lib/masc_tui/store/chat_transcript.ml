@@ -504,7 +504,7 @@ let tool_output_display_lines_uncached ~(theme : Theme.t) ~tools_mode ~width raw
                   | Some k -> Printf.sprintf "%s%s: %s" ind k vs
                   | None -> ind ^ vs
                 in
-                ({ spans = [ { text; style; hyperlink = None } ] } : Markdown.rendered_line))
+                ({ spans = [ { text; style; hyperlink = None } ]; image_part = None } : Markdown.rendered_line))
               flat)
       | exception Yojson.Json_error _ ->
           (match Tool_output.decode_from_agent_core raw with

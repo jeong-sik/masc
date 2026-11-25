@@ -1790,6 +1790,7 @@ let render_toast_pill grid ~(body_rect : Rect.t) ~(theme : Theme.t)
           else Rect.bottom body_rect - 1
         in
         let pill_rect = Rect.make ~x:px ~y:py ~w:pw ~h:1 in
+        Cell_grid.occlude_document_images grid ~rect:pill_rect;
         let fg = Color.of_rgb (Theme.status_color theme tone) in
         let bg = Color.of_rgb theme.surface_2 in
         Card.draw_left_rail ~bg ~tone grid ~x:px ~y:py ~h:1 ~theme;

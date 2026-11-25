@@ -157,13 +157,17 @@ let external_person_observation_keeps_its_scope () =
   let module Attention = Masc.Keeper_external_attention in
   let account_id = "900000000000000001" in
   let account_ref = Option.get (Masc.Connector_account_ref.discord_user account_id) in
+  let guild_id = "910000000000000001" in
+  let thread_id = "920000000000000001" in
+  let parent_channel_id = "920000000000000002" in
+  let message_id = "930000000000000001" in
   let surface =
     Masc.Surface_ref.Discord
-      { guild_id = Some "guild"
-      ; channel_id = "thread"
-      ; channel_name = None
-      ; parent_channel_id = Some "channel"
-      ; thread_id = Some "thread"
+      { guild_id = Some guild_id
+      ; channel_id = thread_id
+      ; channel_name = Some "Thread title"
+      ; parent_channel_id = Some parent_channel_id
+      ; thread_id = Some thread_id
       }
   in
   let item : Masc.Keeper_external_attention.item =
@@ -171,7 +175,7 @@ let external_person_observation_keeps_its_scope () =
     ; dedupe_key = "dedupe"
     ; keeper_name = "luna"
     ; conversation = { conversation_id = "discord:guild:channel:thread"; surface }
-    ; external_message = Some { surface; message_id = "message"; reply_to_message_id = None }
+    ; external_message = Some { surface; message_id; reply_to_message_id = None }
     ; source_label = "discord"
     ; actor =
         { actor_id = Some account_id
@@ -212,19 +216,32 @@ let external_person_observation_keeps_its_scope () =
   check string "account user id" account_id (account |> member "user_id" |> to_string);
   check string "observed name" "Nickname"
     (current |> member "actor" |> member "name" |> to_string);
-  check string "message id" "message"
+  check string "message id" message_id
     (current |> member "external_message_id" |> to_string);
   check string "conversation id" "discord:guild:channel:thread"
     (current |> member "conversation_id" |> to_string);
   check bool "complete connector coordinates" true
     (current |> member "surface" |> Yojson.Safe.equal (Masc.Surface_ref.to_json surface));
+  let scope = current |> member "account_scope" in
+  check string "scope uses the thread destination" thread_id
+    (scope |> member "channel_id" |> to_string);
+  check string "scope retains the observed guild" guild_id (scope |> member "guild_id" |> to_string);
+  check bool "scope excludes display and parent metadata" true
+    (scope |> to_assoc |> List.map fst |> List.sort String.compare = [ "channel_id"; "guild_id"; "kind" ]);
   let older = { item with actor = { item.actor with
     account = Some (Attention.Account_without_original_proof account_ref) } } in
   let older_actor = observation older |> member "actor" in
   check string "older observation still shows the actor" account_id
     (older_actor |> member "id" |> to_string);
   check bool "older observation supplies no account proof" false
-    (List.mem_assoc "account" (to_assoc older_actor))
+    (List.mem_assoc "account" (to_assoc older_actor));
+  let invalid_origin = { item with external_message =
+      Some { surface; message_id = "not-a-snowflake"; reply_to_message_id = None } } in
+  let incomplete = observation invalid_origin in
+  check bool "invalid source address supplies no scoped evidence" false
+    (List.mem_assoc "account_scope" (to_assoc incomplete));
+  check string "invalid source address still shows the actor" account_id
+    (incomplete |> member "actor" |> member "id" |> to_string)
 ;;
 
 let same_inputs_same_bytes () =

@@ -484,7 +484,7 @@ let is_korean_jamo_mouse_key (kev : Input_decoder.key_event) =
 
 let should_toggle_mouse_capture (m : Model.t) (kev : Input_decoder.key_event) =
   let on_knowledge_memory =
-    Option.is_none (Model.active_dive m)
+    Option.is_none (Model.active_inspector m)
     && Nav.equal_workspace m.nav.workspace Nav.Knowledge
     && Nav.equal_knowledge_tab m.knowledge.active_tab Nav.Knowledge_memory
   in
@@ -590,14 +590,14 @@ let visible_keeper_progress_interval (m : Model.t) =
         (Some (Nav.Queue_context Nav.Drawer_queue)) then Model.target_keeper m
     else if Option.is_some m.nav.overlay then None
     else
-      match Model.active_dive m with
+      match Model.active_inspector m with
       | None ->
           if Nav.equal_workspace m.nav.workspace Nav.Keepers
              && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_chat
              && (m.nav.zoomed || Model.uses_keeper_split ~width:m.viewport.cols m)
           then Model.selected_keeper_name m
           else None
-      | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> None
+      | Some _ -> None
   in
   (* Only a glyph with an animation frame needs a presentation clock. *)
   (match Option.bind keeper (fun keeper ->
@@ -883,8 +883,8 @@ let can_launch_pending_wiki_editor (m : Model.t) =
   && Option.is_none m.nav.overlay
   && (not (Model.is_text_capture_active m))
   &&
-  match Model.active_dive m with
-  | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> false
+  match Model.active_inspector m with
+  | Some _ -> false
   | None ->
       Nav.equal_workspace m.nav.workspace Nav.Knowledge
       && (match m.knowledge.active_tab with

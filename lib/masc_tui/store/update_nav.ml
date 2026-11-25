@@ -694,8 +694,8 @@ let sync_config_for_keeper_view (m : Model.t) =
       | Nav.Help
       | Nav.System_gate _ )
   | None -> (
-      match Model.active_dive m with
-      | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> m
+      match Model.active_inspector m with
+      | Some _ -> m
       | None -> (
           match m.nav.workspace, Model.selected_keeper_name m with
           | Nav.Keepers, Some name ->
@@ -790,8 +790,8 @@ let switch_workspace (m : Model.t) ws =
     {
       m.nav with
       workspace = ws;
-      dive_stack = [];
-      dive_return_stack = [];
+      inspector = None;
+      inspector_return = None;
       workspace_return_stack = [];
       overlay = None;
       pane_index = 0;
@@ -800,7 +800,8 @@ let switch_workspace (m : Model.t) ws =
       filter_focused = false;
       sidebar_focused = false;
       sidebar_open = close_drawer_if_floating m;
-      dive_scroll_offset = 0;
+      inspector_scroll_offset = 0;
+      keeper_detail_scroll_offset = 0;
       json_scroll_offset = 0;
     }
   in
@@ -872,8 +873,8 @@ let capture_workspace_return_frame (m : Model.t) : Model.workspace_return_frame 
   in
   {
     Model.workspace = m.nav.workspace;
-    dive_stack = m.nav.dive_stack;
-    dive_return_stack = m.nav.dive_return_stack;
+    inspector = m.nav.inspector;
+    inspector_return = m.nav.inspector_return;
     work_tab = m.work.active_tab;
     work_return_entity_id;
     knowledge_tab = m.knowledge.active_tab;
@@ -910,7 +911,7 @@ let jump_to_keeper ?tab ?trace_section ?zoomed ?pane_index
   let should_push_return =
     preserve_return
     && (Option.is_some m.nav.overlay
-        || Option.is_some (Model.active_dive m)
+        || Option.is_some (Model.active_inspector m)
         || not (Nav.equal_workspace m.nav.workspace Nav.Keepers))
   in
   let workspace_return_stack =
@@ -923,8 +924,8 @@ let jump_to_keeper ?tab ?trace_section ?zoomed ?pane_index
     {
       m.nav with
       workspace = Nav.Keepers;
-      dive_stack = [];
-      dive_return_stack = [];
+      inspector = None;
+      inspector_return = None;
       workspace_return_stack;
       overlay = None;
       pane_index = 0;
@@ -933,7 +934,8 @@ let jump_to_keeper ?tab ?trace_section ?zoomed ?pane_index
       filter_focused = false;
       sidebar_focused = false;
       sidebar_open = close_drawer_if_floating m;
-      dive_scroll_offset = 0;
+      inspector_scroll_offset = 0;
+      keeper_detail_scroll_offset = 0;
       json_scroll_offset = 0;
     }
   in
@@ -1051,8 +1053,8 @@ let jump_to_knowledge_thread ?zoomed ?return_from (m : Model.t)
     {
       m.nav with
       workspace = Nav.Knowledge;
-      dive_stack = [];
-      dive_return_stack = [];
+      inspector = None;
+      inspector_return = None;
       workspace_return_stack;
       overlay = None;
       pane_index = 0;
@@ -1061,7 +1063,8 @@ let jump_to_knowledge_thread ?zoomed ?return_from (m : Model.t)
       filter_focused = false;
       sidebar_focused = false;
       sidebar_open = close_drawer_if_floating m;
-      dive_scroll_offset = 0;
+      inspector_scroll_offset = 0;
+      keeper_detail_scroll_offset = 0;
       json_scroll_offset = 0;
     }
   in
@@ -1147,8 +1150,8 @@ let jump_to_knowledge_wiki ?zoomed ?return_from (m : Model.t) (slug : string) =
     {
       m.nav with
       workspace = Nav.Knowledge;
-      dive_stack = [];
-      dive_return_stack = [];
+      inspector = None;
+      inspector_return = None;
       workspace_return_stack;
       overlay = None;
       pane_index = 0;
@@ -1157,7 +1160,8 @@ let jump_to_knowledge_wiki ?zoomed ?return_from (m : Model.t) (slug : string) =
       filter_focused = false;
       sidebar_focused = false;
       sidebar_open = close_drawer_if_floating m;
-      dive_scroll_offset = 0;
+      inspector_scroll_offset = 0;
+      keeper_detail_scroll_offset = 0;
       json_scroll_offset = 0;
     }
   in
@@ -1218,8 +1222,8 @@ let jump_to_goal ?zoomed ?return_from (m : Model.t) (goal_id : string) =
     {
       m.nav with
       workspace = Nav.Work;
-      dive_stack = [];
-      dive_return_stack = [];
+      inspector = None;
+      inspector_return = None;
       workspace_return_stack;
       overlay = None;
       pane_index = 0;
@@ -1228,7 +1232,8 @@ let jump_to_goal ?zoomed ?return_from (m : Model.t) (goal_id : string) =
       filter_focused = false;
       sidebar_focused = false;
       sidebar_open = close_drawer_if_floating m;
-      dive_scroll_offset = 0;
+      inspector_scroll_offset = 0;
+      keeper_detail_scroll_offset = 0;
       json_scroll_offset = 0;
     }
   in
@@ -1298,8 +1303,8 @@ let jump_to_task ?zoomed ?return_from (m : Model.t) (task_id : string) =
     {
       m.nav with
       workspace = Nav.Work;
-      dive_stack = [];
-      dive_return_stack = [];
+      inspector = None;
+      inspector_return = None;
       workspace_return_stack;
       overlay = None;
       pane_index = 0;
@@ -1308,7 +1313,8 @@ let jump_to_task ?zoomed ?return_from (m : Model.t) (task_id : string) =
       filter_focused = false;
       sidebar_focused = false;
       sidebar_open = close_drawer_if_floating m;
-      dive_scroll_offset = 0;
+      inspector_scroll_offset = 0;
+      keeper_detail_scroll_offset = 0;
       json_scroll_offset = 0;
     }
   in
@@ -1542,7 +1548,7 @@ let select_settings_tab (m : Model.t) tab =
   let next = { m with nav; config } in
   (next, View_fetches.fetches_for_current_view next)
 
-let push_dive (m : Model.t) dive =
+let open_inspector (m : Model.t) (insp : Nav.inspector) =
   let return_overlay =
     match m.nav.overlay with
     | Some ((Nav.Incidents | Nav.Queue_context _ | Nav.Ask_answer) as ov) ->
@@ -1556,28 +1562,39 @@ let push_dive (m : Model.t) dive =
     | None ->
         None
   in
+  let inspector_return =
+    match m.nav.inspector, m.nav.inspector_return with
+    | Some _, Some (p, z, prev_ov) ->
+        let ov =
+          if Option.equal Nav.equal_overlay return_overlay (Some Nav.Ask_answer)
+          then Some Nav.Ask_answer
+          else prev_ov
+        in
+        Some (p, z, ov)
+    | Some _, None | None, (Some _ | None) ->
+        Some (m.nav.pane_index, m.nav.zoomed, return_overlay)
+  in
   let nav =
     {
       m.nav with
-      dive_stack = dive :: m.nav.dive_stack;
-      dive_return_stack =
-        (m.nav.pane_index, m.nav.zoomed, return_overlay)
-        :: m.nav.dive_return_stack;
+      inspector = Some insp;
+      inspector_return;
       overlay = None;
       pane_index = 0;
       zoomed = false;
       filter_focused = false;
       sidebar_focused = false;
       sidebar_open = close_drawer_if_floating m;
-      dive_scroll_offset = 0;
+      inspector_scroll_offset = 0;
       json_scroll_offset = 0;
     }
   in
   let work =
-    match dive with
-    | Nav.Dive_work (Nav.Verification_dive _) ->
+    match insp with
+    | Nav.Verification_inspector _ ->
         Work_store.set_verification_dive_tab Work_store.Verif_tab_evidence m.work
-    | Nav.Dive_runtime _ -> m.work
+    | Nav.Tool_inspector _ | Nav.Skill_inspector _ | Nav.Exact_run_inspector _ ->
+        m.work
   in
   let drafts =
     Drafts.set_focus false m.drafts |> clear_btw_if_leaving m
@@ -1597,8 +1614,8 @@ let push_dive (m : Model.t) dive =
     |> Knowledge_store.clear_pending_wiki_edit
   in
   let runtime =
-    match dive with
-    | Nav.Dive_runtime (Nav.Skill_dive ref_s) ->
+    match insp with
+    | Nav.Skill_inspector ref_s ->
         let skill_editor_loaded =
           match m.runtime.skill_editor_loaded with
           | Observed.Value { data = r, loaded; _ }
@@ -1616,7 +1633,7 @@ let push_dive (m : Model.t) dive =
           skill_editor_loaded;
           skill_editor_preview = Observed.absent;
         }
-    | Nav.Dive_runtime (Nav.Exact_run_dive run_id) ->
+    | Nav.Exact_run_inspector run_id ->
         let exact_run_detail =
           match m.runtime.exact_run_detail with
           | Observed.Value { data = rid, _; _ } when String.equal rid run_id ->
@@ -1629,8 +1646,8 @@ let push_dive (m : Model.t) dive =
               Observed.absent
         in
         { m.runtime with exact_run_detail }
-    | Nav.Dive_runtime (Nav.Tool_dive _) -> { m.runtime with scroll_offset = 0 }
-    | Nav.Dive_work _ -> m.runtime
+    | Nav.Tool_inspector _ -> { m.runtime with scroll_offset = 0 }
+    | Nav.Verification_inspector _ -> m.runtime
   in
   let ask_modal =
     if Model.has_preserved_ask_return nav then m.ask_modal else None
@@ -1989,9 +2006,9 @@ let cycle_sub_tab (m : Model.t) dir =
       | Nav.System_gate _ ) ->
       (m, [])
   | None -> (
-      match m.nav.dive_stack with
-      | (Nav.Dive_work _ | Nav.Dive_runtime _) :: _ -> (m, [])
-      | [] -> (
+      match m.nav.inspector with
+      | Some _ -> (m, [])
+      | None -> (
           match m.nav.workspace with
           | Nav.Pulse -> (m, [])
           | Nav.Work ->
@@ -2050,7 +2067,7 @@ let cycle_sub_tab (m : Model.t) dir =
                     m.nav with
                     pane_index = next_pane;
                     filter_focused = false;
-                    dive_scroll_offset = 0;
+                    keeper_detail_scroll_offset = 0;
                   }
                 in
                 let knowledge =
@@ -2151,7 +2168,7 @@ let current_filter_query (m : Model.t) =
 let follow_selected_repository (m : Model.t) =
   let shown =
     Nav.equal_workspace m.nav.workspace Nav.Infra
-    && Option.is_none (Model.active_dive m)
+    && Option.is_none (Model.active_inspector m)
     && Nav.equal_infra_tab m.infra.active_tab Nav.Infra_repos_changes
   in
   let slot_answers_for repo_id =
@@ -2205,7 +2222,7 @@ let set_active_filter_query q (m : Model.t) =
         else if Model.is_keeper_config_active m then
           {
             m with
-            nav = { m.nav with dive_scroll_offset = 0 };
+            nav = { m.nav with keeper_detail_scroll_offset = 0 };
             config = Config_store.set_search_query q m.config;
           }
         else
@@ -2799,7 +2816,7 @@ let start_btw_query ~now ~prompt (m : Model.t) =
 let active_attention_query (m : Model.t) =
   if
     Option.is_none m.nav.overlay
-    && m.nav.dive_stack = []
+    && Option.is_none m.nav.inspector
     && Nav.equal_workspace m.nav.workspace Nav.Work
     && Nav.equal_work_tab m.work.active_tab Nav.Work_inbox
   then m.work.filter_query
@@ -2980,13 +2997,13 @@ let submit_ask_modal ~now (m : Model.t) =
 let actionable_approval_item (m : Model.t) =
   let on_work_inbox =
     Option.is_none m.nav.overlay
-    && m.nav.dive_stack = []
+    && Option.is_none m.nav.inspector
     && Nav.equal_workspace m.nav.workspace Nav.Work
     && Nav.equal_work_tab m.work.active_tab Nav.Work_inbox
   in
   let on_pulse_attention =
     Option.is_none m.nav.overlay
-    && m.nav.dive_stack = []
+    && Option.is_none m.nav.inspector
     && Nav.equal_workspace m.nav.workspace Nav.Pulse
     && Model.equal_pulse_pane (Model.active_pulse_pane m) Model.Pulse_attention
   in
@@ -3146,7 +3163,7 @@ let teleport_blocked ~now (m : Model.t) =
     if
       (not in_micro)
       && Option.is_none m.nav.overlay
-      && m.nav.dive_stack = []
+      && Option.is_none m.nav.inspector
       && Nav.equal_workspace m.nav.workspace Nav.Pulse
       && Model.equal_pulse_pane (Model.active_pulse_pane m)
            Model.Pulse_attention
@@ -3332,7 +3349,7 @@ let launch_memory_diagram_chart ~now ~keeper ~(content_rect : Rect.t) ~kind
   in
   let knowledge = Knowledge_store.open_memory_diagram state m.knowledge in
   let nav =
-    match Model.active_dive m, m.nav.workspace with
+    match Model.active_inspector m, m.nav.workspace with
     | None, (Nav.Knowledge | Nav.Keepers)
       when (not m.nav.zoomed) && Model.focusable_pane_count m > 1 ->
         { m.nav with pane_index = 1 }
@@ -3422,7 +3439,7 @@ let open_memory_diagram ~now ~kind (m : Model.t) =
   | None ->
       let on_world_memory =
         Option.is_none m.nav.overlay
-        && Option.is_none (Model.active_dive m)
+        && Option.is_none (Model.active_inspector m)
         && Nav.equal_workspace m.nav.workspace Nav.Knowledge
         && Nav.equal_knowledge_tab m.knowledge.active_tab Nav.Knowledge_memory
         && Option.is_none m.knowledge.memory_diff_keeper
@@ -3556,8 +3573,8 @@ let open_memory_diagram ~now ~kind (m : Model.t) =
               , [] ))
       | None ->
           let is_keeper_surface =
-            match Model.active_dive m with
-            | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> false
+            match Model.active_inspector m with
+            | Some _ -> false
             | None -> Nav.equal_workspace m.nav.workspace Nav.Keepers
           in
           let target_opt, explicit_reject, empty_toast =
@@ -3824,7 +3841,7 @@ type enter_plan =
     }
   | Enter_dispatch of Cmd.t list
   | Enter_open_dos_screen
-  | Enter_push of Nav.dive
+  | Enter_open_inspector of Nav.inspector
   | Enter_attention of Attention.entry
   | Enter_toggle_unreported_accounts
   | Enter_fetch_memory_diff
@@ -3980,7 +3997,7 @@ let keeper_enter_action ~name ~tab (m : Model.t) =
   | Enter_expand_company _
   | Enter_dispatch _
   | Enter_open_dos_screen
-  | Enter_push _
+  | Enter_open_inspector _
   | Enter_attention _
   | Enter_toggle_unreported_accounts
   | Enter_fetch_memory_diff
@@ -3996,11 +4013,8 @@ let enter_plan (m : Model.t) : enter_plan =
      and never hijack Enter behind an open Memory Diagram. *)
   if Option.is_some (Memory_diagram.active_diagram m) then Enter_noop
   else
-  match Model.active_dive m with
-  | Some
-      ( Nav.Dive_work (Nav.Verification_dive _)
-      | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Skill_dive _ | Nav.Exact_run_dive _) ) ->
-      Enter_noop
+  match Model.active_inspector m with
+  | Some _ -> Enter_noop
   | None -> (
       match m.nav.workspace with
       | Nav.Pulse -> (
@@ -4073,8 +4087,8 @@ let enter_plan (m : Model.t) : enter_plan =
                             ~goal_id:g.id m.work
                         with
                         | Some v ->
-                            Enter_push
-                              (Nav.Dive_work (Nav.Verification_dive v.request_id))
+                            Enter_open_inspector
+                              (Nav.Verification_inspector v.request_id)
                         | None -> Enter_noop
                       else
                         match
@@ -4088,8 +4102,8 @@ let enter_plan (m : Model.t) : enter_plan =
                 | 1 when Model.work_pipeline_has_linked_card m -> (
                     match Work_store.selected_verification m.work with
                     | Some v ->
-                        Enter_push
-                          (Nav.Dive_work (Nav.Verification_dive v.request_id))
+                        Enter_open_inspector
+                          (Nav.Verification_inspector v.request_id)
                     | None -> Enter_noop)
                 | _ -> (
                     match Work_store.selected_goal m.work with
@@ -4115,8 +4129,8 @@ let enter_plan (m : Model.t) : enter_plan =
                           Work_store.verification_for_task ~task_id:tk.id m.work
                         with
                         | Some v ->
-                            Enter_push
-                              (Nav.Dive_work (Nav.Verification_dive v.request_id))
+                            Enter_open_inspector
+                              (Nav.Verification_inspector v.request_id)
                         | None -> Enter_noop
                       else Enter_noop
               else
@@ -4237,14 +4251,13 @@ let enter_plan (m : Model.t) : enter_plan =
               | Runtime_store.Tools_catalog_tree -> (
                   match Runtime_store.selected_tool_catalog_entry m.runtime with
                   | Some entry ->
-                      Enter_push (Nav.Dive_runtime (Nav.Tool_dive entry.name))
+                      Enter_open_inspector (Nav.Tool_inspector entry.name)
                   | None -> Enter_noop)
               | Runtime_store.Tools_keeper_skills
                 when Model.detail_pane_focused ~detail_index:1 m -> (
                   match Runtime_store.selected_skill_surface m.runtime with
                   | Some sf ->
-                      Enter_push
-                        (Nav.Dive_runtime (Nav.Skill_dive sf.reference))
+                      Enter_open_inspector (Nav.Skill_inspector sf.reference)
                   | None -> Enter_noop)
               | Runtime_store.Tools_prompts_presets -> (
                   match m.runtime.pp_section with
@@ -4501,7 +4514,7 @@ let dive_selected (m : Model.t) =
   | Enter_fetch_tool_result { keeper; execution_id; params } ->
       dispatch_tool_result_fetch ~keeper ~execution_id ~params m
   | Enter_open_dos_screen -> (m, [ Cmd.Open_dos_screen { epoch = m.epoch } ])
-  | Enter_push dive -> push_dive m dive
+  | Enter_open_inspector insp -> open_inspector m insp
   | Enter_attention entry -> dive_attention_entry m entry
   | Enter_toggle_unreported_accounts ->
       ( { m with runtime = Runtime_store.toggle_unreported_accounts m.runtime }
@@ -4617,7 +4630,7 @@ let enter_hint (m : Model.t) =
     | Enter_pin_memory_diff _
     | Enter_expand_company _
     | Enter_keeper_action _ | Enter_fetch_tool_result _ | Enter_dispatch _
-    | Enter_push _ | Enter_attention _ | Enter_toggle_unreported_accounts
+    | Enter_open_inspector _ | Enter_attention _ | Enter_toggle_unreported_accounts
     | Enter_fetch_memory_diff
     | Enter_scope_memory _ | Enter_toggle_fact_category _
     | Enter_code_toggle_dir _ | Enter_code_open_file _
@@ -9772,8 +9785,8 @@ let memory_reading_max_scroll (m : Model.t) =
         max 0 (cw - (2 * pad_x))
       in
       let rect_w, rect_h =
-        match Model.active_dive m with
-        | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> (0, 0)
+        match Model.active_inspector m with
+        | Some _ -> (0, 0)
         | None -> (
             match m.nav.workspace with
             | Nav.Keepers
@@ -9857,7 +9870,7 @@ let dive_max_scroll (m : Model.t) active =
   let br = ui_body_rect m in
   let theme = Theme.of_preset m.theme_preset in
   match active with
-  | Nav.Dive_runtime (Nav.Tool_dive tool_name) -> (
+  | Nav.Tool_inspector tool_name -> (
       let entry_opt =
         match Observed.to_option m.runtime.tools_dashboard with
         | Some d ->
@@ -9886,7 +9899,7 @@ let dive_max_scroll (m : Model.t) active =
           | Some desc when md_h > 0 && mc.w > 0 ->
               markdown_max_scroll ~theme ~width:mc.w ~height:md_h desc
           | Some _ | None -> 0))
-  | Nav.Dive_runtime (Nav.Skill_dive ref_s) -> (
+  | Nav.Skill_inspector ref_s -> (
       let content = ui_card_inner br |> ui_pad_content ~bp in
       if Rect.is_empty content then 0
       else
@@ -9895,7 +9908,7 @@ let dive_max_scroll (m : Model.t) active =
             let lines = List.length (String.split_on_char '\n' loaded.source_text) in
             max 0 (lines + 10 - max 1 content.h)
         | None -> 0)
-  | Nav.Dive_runtime (Nav.Exact_run_dive run_id) -> (
+  | Nav.Exact_run_inspector run_id -> (
       let content = ui_card_inner br |> ui_pad_content ~bp in
       if Rect.is_empty content then 0
       else
@@ -9914,7 +9927,7 @@ let dive_max_scroll (m : Model.t) active =
             in
             max 0 (total - max 1 content.h)
         | None -> 0)
-  | Nav.Dive_work (Nav.Verification_dive req_id) -> (
+  | Nav.Verification_inspector req_id -> (
       match
         List.find_opt
           (fun (v : Wire_work.verification_request) ->
@@ -9996,7 +10009,7 @@ let move_keeper_config_selection ~embedded ~name ~delta (m : Model.t) =
     Config_store.move_keeper_selection ~viewport_rows ~lang:m.lang
       ~fallback_count ~delta m.config
   in
-  ({ m with nav = { m.nav with dive_scroll_offset = 0 }; config }, [])
+  ({ m with nav = { m.nav with keeper_detail_scroll_offset = 0 }; config }, [])
 
 let clamp_for_pane (m : Model.t) =
   let pane_count = Model.focusable_pane_count m in
@@ -10013,7 +10026,7 @@ let clamp_for_pane (m : Model.t) =
   match m.nav.overlay with
   | Some _ -> m
   | None -> (
-      match Model.active_dive m with
+      match Model.active_inspector m with
       | Some _ -> m
       | None -> (
           let zoomed = m.nav.zoomed && Model.can_zoom_current_view m in
@@ -10119,8 +10132,8 @@ let jump_to_workspace ?(pane_index = 0) ?(zoomed = false) ?return_from
     {
       m.nav with
       workspace = ws;
-      dive_stack = [];
-      dive_return_stack = [];
+      inspector = None;
+      inspector_return = None;
       workspace_return_stack;
       overlay = None;
       pane_index = 0;
@@ -10129,7 +10142,8 @@ let jump_to_workspace ?(pane_index = 0) ?(zoomed = false) ?return_from
       filter_focused = false;
       sidebar_focused = false;
       sidebar_open = close_drawer_if_floating m;
-      dive_scroll_offset = 0;
+      inspector_scroll_offset = 0;
+      keeper_detail_scroll_offset = 0;
       json_scroll_offset = 0;
     }
   in
@@ -10199,7 +10213,7 @@ let pop_workspace_return (m : Model.t) =
         || Model.has_preserved_ask_return
              {
                m.nav with
-               dive_return_stack = frame.dive_return_stack;
+               inspector_return = frame.inspector_return;
                workspace_return_stack = rest;
              }
       in
@@ -10313,8 +10327,8 @@ let pop_workspace_return (m : Model.t) =
             {
               m.nav with
               workspace = frame.workspace;
-              dive_stack = frame.dive_stack;
-              dive_return_stack = frame.dive_return_stack;
+              inspector = frame.inspector;
+              inspector_return = frame.inspector_return;
               workspace_return_stack = rest;
               overlay = None;
               pane_index = 0;
@@ -10322,7 +10336,8 @@ let pop_workspace_return (m : Model.t) =
               zoomed = false;
               filter_focused = false;
               sidebar_focused = false;
-              dive_scroll_offset = 0;
+              inspector_scroll_offset = 0;
+              keeper_detail_scroll_offset = 0;
               json_scroll_offset = 0;
             };
           drafts;
@@ -10364,6 +10379,89 @@ let pop_workspace_return (m : Model.t) =
         |> Model.sync_sidebar_cursor
       in
       Some (next, View_fetches.fetches_for_current_view next)
+
+let close_inspector (m : Model.t) =
+  match m.nav.inspector with
+  | None -> (m, [])
+  | Some _ ->
+      let ret_pane, ret_zoom, ret_overlay =
+        match m.nav.inspector_return with
+        | Some frame -> frame
+        | None -> (0, false, None)
+      in
+      let nav_cleared =
+        { m.nav with inspector = None; inspector_return = None }
+      in
+      let keep_ask = Model.has_preserved_ask_return nav_cleared in
+      let restored_overlay, restored_ask_modal =
+        match ret_overlay with
+        | Some Nav.Ask_answer ->
+            if Option.is_some m.ask_modal then
+              (Some Nav.Ask_answer, m.ask_modal)
+            else (None, None)
+        | Some
+            (( Nav.Incidents
+             | Nav.Queue_context _
+             | Nav.Palette
+             | Nav.Settings _
+             | Nav.Inline_action _
+             | Nav.Help
+             | Nav.System_gate _ ) as ov) ->
+            (Some ov, if keep_ask then m.ask_modal else None)
+        | None -> (None, if keep_ask then m.ask_modal else None)
+      in
+      let next0 =
+        {
+          m with
+          nav =
+            {
+              nav_cleared with
+              overlay = None;
+              pane_index = 0;
+              zoomed = false;
+              inspector_scroll_offset = 0;
+              json_scroll_offset = 0;
+            };
+          ask_modal = restored_ask_modal;
+          knowledge =
+            {
+              (m.knowledge
+              |> Knowledge_store.unpin_memory_diff_revs
+              |> Knowledge_store.clear_pending_artifact_revision
+              |> Knowledge_store.close_memory_diagram
+              |> Knowledge_store.clear_pending_wiki_edit)
+              with
+              board_recovery =
+                Board_recovery.close m.knowledge.board_recovery;
+            };
+          infra = { m.infra with show_raw_json = false };
+        }
+      in
+      let restored_zoom = ret_zoom && Model.can_zoom_current_view next0 in
+      let next1 =
+        {
+          next0 with
+          nav =
+            {
+              next0.nav with
+              zoomed = restored_zoom;
+              pre_zoom_pane_index =
+                (if restored_zoom then next0.nav.pre_zoom_pane_index else None);
+              pane_index = ret_pane;
+            };
+        }
+      in
+      let max_pane = max 0 (Model.focusable_pane_count next1 - 1) in
+      let clamped_pane = max 0 (min max_pane ret_pane) in
+      let next2 =
+        { next1 with nav = { next1.nav with pane_index = clamped_pane } }
+        |> clamp_for_pane
+      in
+      let next =
+        { next2 with nav = { next2.nav with overlay = restored_overlay } }
+        |> sync_config_for_keeper_view
+      in
+      (next, View_fetches.fetches_for_current_view next)
 
 let task_dive_scroll_bounds (m : Model.t) (tk : Wire_work.task) : int * int =
   let bp = ui_bp m in
@@ -10644,8 +10742,8 @@ let incidents_detail_max_scroll (m : Model.t) =
 
 let pin_memory_diff_range (m : Model.t) =
   let keeper_opt =
-    match Model.active_dive m with
-    | Some (Nav.Dive_work _ | Nav.Dive_runtime _) ->
+    match Model.active_inspector m with
+    | Some _ ->
         m.knowledge.memory_diff_keeper
     | None ->
         if
@@ -10683,7 +10781,7 @@ let pin_memory_diff_range (m : Model.t) =
   | Some (from_rev, to_rev) ->
       let knowledge =
         if
-          Option.is_none (Model.active_dive m)
+          Option.is_none (Model.active_inspector m)
           && Nav.equal_workspace m.nav.workspace Nav.Knowledge
         then
           Knowledge_store.pin_memory_diff_revs ~keeper:keeper_opt ~from_rev
@@ -10695,15 +10793,18 @@ let pin_memory_diff_range (m : Model.t) =
         {
           m with
           nav =
-            (if Option.is_some (Model.active_dive m) then
-               { m.nav with dive_scroll_offset = 0 }
+            (if
+               Option.is_none (Model.active_inspector m)
+               && Nav.equal_workspace m.nav.workspace Nav.Keepers
+               && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory
+             then { m.nav with keeper_detail_scroll_offset = 0 }
              else m.nav);
           knowledge;
         }
       in
       let next =
         if
-          Option.is_none (Model.active_dive m_pinned)
+          Option.is_none (Model.active_inspector m_pinned)
           && (Nav.equal_workspace m_pinned.nav.workspace Nav.Knowledge
              || (Nav.equal_workspace m_pinned.nav.workspace Nav.Keepers
                 && Nav.equal_keeper_tab m_pinned.fleet.keeper_dive_tab
@@ -10741,7 +10842,7 @@ let pin_memory_diff_range (m : Model.t) =
 
 let open_harness_overrule_for_context ~verdict ~now (m : Model.t) =
   if
-    Option.is_none (Model.active_dive m)
+    Option.is_none (Model.active_inspector m)
     && Nav.equal_workspace m.nav.workspace Nav.Work
     && Nav.equal_work_tab m.work.active_tab Nav.Work_pipeline
     && m.nav.pane_index = 1
@@ -10768,8 +10869,8 @@ let open_harness_overrule_for_context ~verdict ~now (m : Model.t) =
         (Work_store.harness_verdicts_list m.work)
   in
   let resolved_hash =
-    match Model.active_dive m with
-    | Some (Nav.Dive_work (Nav.Verification_dive req_id)) -> (
+    match Model.active_inspector m with
+    | Some (Nav.Verification_inspector req_id) -> (
         match
           List.find_opt
             (fun (v : Wire_work.verification_request) ->
@@ -10778,7 +10879,11 @@ let open_harness_overrule_for_context ~verdict ~now (m : Model.t) =
         with
         | Some v -> find_hash_for_task_ids [ v.task_id ]
         | None -> None)
-    | Some (Nav.Dive_runtime _) -> None
+    | Some
+        ( Nav.Tool_inspector _
+        | Nav.Skill_inspector _
+        | Nav.Exact_run_inspector _ ) ->
+        None
     | None -> (
         match m.nav.workspace, m.work.active_tab with
         | Nav.Work, Nav.Work_harness -> (
@@ -11118,7 +11223,7 @@ let apply_move (m : Model.t) dir =
       ({ m with drafts }, [])
     else
       let chat_delta = -(move_delta dir) in
-      match Model.active_dive m with
+      match Model.active_inspector m with
       | None
         when Nav.equal_workspace m.nav.workspace Nav.Keepers
              && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_chat
@@ -11139,7 +11244,7 @@ let apply_move (m : Model.t) dir =
                 }
               , [] )
           | None -> (m, []))
-      | Some (Nav.Dive_work _ | Nav.Dive_runtime _)
+      | Some _
       | None ->
           (m, [])
   else
@@ -11510,7 +11615,7 @@ let apply_move (m : Model.t) dir =
                   let target_pane =
                     match it.target with
                     | Nav.Menu_keeper_tab _
-                      when Option.is_none (Model.active_dive base)
+                      when Option.is_none (Model.active_inspector base)
                            && (not base.nav.zoomed)
                            && Model.focusable_pane_count base >= 2 ->
                         if base.nav.pane_index >= 1 then base.nav.pane_index
@@ -11891,8 +11996,8 @@ let apply_move (m : Model.t) dir =
               in
               ({ m with keeper_context }, [])
             in
-            match Model.active_dive m with
-            | Some (Nav.Dive_work (Nav.Verification_dive _) as active) ->
+            match Model.active_inspector m with
+            | Some (Nav.Verification_inspector _ as active) ->
                 let sd = scroll_delta dir in
                 if
                   Option.equal Int.equal (Model.dive_work_json_pane_index m)
@@ -11906,12 +12011,12 @@ let apply_move (m : Model.t) dir =
                   ({ m with nav = { m.nav with json_scroll_offset } }, [])
                 else
                   let max_scroll = dive_max_scroll m active in
-                  let dive_scroll_offset =
+                  let inspector_scroll_offset =
                     Store_scroll.clamp_scroll ~max_scroll
-                      (m.nav.dive_scroll_offset + sd)
+                      (m.nav.inspector_scroll_offset + sd)
                   in
-                  ({ m with nav = { m.nav with dive_scroll_offset } }, [])
-            | Some (Nav.Dive_runtime (Nav.Tool_dive tool_name) as active) ->
+                  ({ m with nav = { m.nav with inspector_scroll_offset } }, [])
+            | Some (Nav.Tool_inspector tool_name as active) ->
                 let sd = scroll_delta dir in
                 if m.nav.pane_index = 1 then
                   let bp = ui_bp m in
@@ -11945,21 +12050,20 @@ let apply_move (m : Model.t) dir =
                   ({ m with runtime = { m.runtime with scroll_offset } }, [])
                 else
                   let max_scroll = dive_max_scroll m active in
-                  let dive_scroll_offset =
+                  let inspector_scroll_offset =
                     Store_scroll.clamp_scroll ~max_scroll
-                      (m.nav.dive_scroll_offset + sd)
+                      (m.nav.inspector_scroll_offset + sd)
                   in
-                  ({ m with nav = { m.nav with dive_scroll_offset } }, [])
+                  ({ m with nav = { m.nav with inspector_scroll_offset } }, [])
             | Some
-                ((Nav.Dive_runtime (Nav.Skill_dive _ | Nav.Exact_run_dive _)) as
-                 active) ->
+                ((Nav.Skill_inspector _ | Nav.Exact_run_inspector _) as active) ->
                 let delta = scroll_delta dir in
                 let max_scroll = dive_max_scroll m active in
-                let dive_scroll_offset =
+                let inspector_scroll_offset =
                   Store_scroll.clamp_scroll ~max_scroll
-                    (m.nav.dive_scroll_offset + delta)
+                    (m.nav.inspector_scroll_offset + delta)
                 in
-                ({ m with nav = { m.nav with dive_scroll_offset } }, [])
+                ({ m with nav = { m.nav with inspector_scroll_offset } }, [])
             | None -> (
                 let delta = move_delta dir in
                 let pane_index = m.nav.pane_index in
@@ -12116,13 +12220,13 @@ let apply_move (m : Model.t) dir =
                                   | Knowledge_store.Kmem_journal ->
                                       m.knowledge
                                 in
-                                let dive_scroll_offset =
+                                let keeper_detail_scroll_offset =
                                   Store_scroll.clamp_scroll ~max_scroll
-                                    (m.nav.dive_scroll_offset + sd)
+                                    (m.nav.keeper_detail_scroll_offset + sd)
                                 in
                                 ( {
                                     m with
-                                    nav = { m.nav with dive_scroll_offset };
+                                    nav = { m.nav with keeper_detail_scroll_offset };
                                     knowledge;
                                   }
                                 , [] )
@@ -12164,9 +12268,9 @@ let apply_move (m : Model.t) dir =
                                         keeper_tab_max_scroll ~embedded m
                                           ~name ~tab:Nav.Keeper_memory
                                       in
-                                      let dive_scroll_offset =
+                                      let keeper_detail_scroll_offset =
                                         Store_scroll.clamp_scroll ~max_scroll
-                                          (m.nav.dive_scroll_offset + sd)
+                                          (m.nav.keeper_detail_scroll_offset + sd)
                                       in
                                       let knowledge =
                                         Knowledge_store.move_memory_diff_cursor
@@ -12174,7 +12278,7 @@ let apply_move (m : Model.t) dir =
                                       in
                                       ( {
                                           m with
-                                          nav = { m.nav with dive_scroll_offset };
+                                          nav = { m.nav with keeper_detail_scroll_offset };
                                           knowledge;
                                         }
                                       , [] ))
@@ -12184,11 +12288,11 @@ let apply_move (m : Model.t) dir =
                                 keeper_tab_max_scroll ~embedded m ~name
                                   ~tab:Nav.Keeper_work_sandbox
                               in
-                              let dive_scroll_offset =
+                              let keeper_detail_scroll_offset =
                                 Store_scroll.clamp_scroll ~max_scroll
-                                  (m.nav.dive_scroll_offset + sd)
+                                  (m.nav.keeper_detail_scroll_offset + sd)
                               in
-                              ( { m with nav = { m.nav with dive_scroll_offset } }
+                              ( { m with nav = { m.nav with keeper_detail_scroll_offset } }
                               , [] ))
                     else
                       let prev_selected = m.fleet.selected_keeper in
@@ -12207,7 +12311,7 @@ let apply_move (m : Model.t) dir =
                       in
                       let nav =
                         if selection_changed then
-                          { m.nav with dive_scroll_offset = 0 }
+                          { m.nav with keeper_detail_scroll_offset = 0 }
                         else m.nav
                       in
                       let knowledge =

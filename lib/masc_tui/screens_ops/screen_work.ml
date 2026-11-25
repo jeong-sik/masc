@@ -18,5 +18,5 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
     | Nav.Work_harness ->
         Work_views.render_harness ~model ~cache ~rect grid
 
-let render_dive ~target ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
-  Work_dive.render ~target ~model ~cache ~rect grid
+let render_verification ~req_id ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
+  Work_dive.render ~req_id ~model ~cache ~rect grid

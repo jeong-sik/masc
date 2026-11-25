@@ -1,9 +1,9 @@
-(** Breadcrumb deep-inspector view for [Verification_dive]: evidence refs
+(** Depth-1 inspector view for [Verification_inspector]: evidence refs
     ([✓]/[✕]), structured rejection diff ([Diff.draw]), summary/specs/TLC tabs,
     and opt-in [[Space]] [Json_tree] inspector. *)
 
 val render :
-  target:Masc_tui_core.Nav.work_dive_target ->
+  req_id:string ->
   model:Masc_tui_store.Model.t ->
   cache:Masc_tui_ui.Card.Cache.t ->
   rect:Masc_tui_core.Rect.t ->

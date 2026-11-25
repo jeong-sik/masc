@@ -189,7 +189,7 @@ let render_verification_dive ~req_id ~(model : Model.t) ~cache ~(rect : Rect.t)
             if not (Rect.is_empty rect) then
               let max_s = Int.max 0 (List.length lines - Int.max 1 rect.h) in
               let scroll =
-                Int.min max_s (Int.max 0 model.nav.dive_scroll_offset)
+                Int.min max_s (Int.max 0 model.nav.inspector_scroll_offset)
               in
               List.iteri
                 (fun i ln ->
@@ -236,7 +236,7 @@ let render_verification_dive ~req_id ~(model : Model.t) ~cache ~(rect : Rect.t)
                   if total_ev > ev_r.h && ev_r.h > 0 then
                     let s =
                       Int.min (Int.max 0 (total_ev - ev_r.h))
-                        (Int.max 0 model.nav.dive_scroll_offset)
+                        (Int.max 0 model.nav.inspector_scroll_offset)
                     in
                     let ve = Int.min total_ev (s + ev_r.h) in
                     let rem = Int.max 0 (total_ev - ve) in
@@ -264,7 +264,7 @@ let render_verification_dive ~req_id ~(model : Model.t) ~cache ~(rect : Rect.t)
                   if total_d > dr.h && dr.h > 0 then
                     let s =
                       Int.min (Int.max 0 (total_d - dr.h))
-                        (Int.max 0 model.nav.dive_scroll_offset)
+                        (Int.max 0 model.nav.inspector_scroll_offset)
                     in
                     let ve = Int.min total_d (s + dr.h) in
                     let rem = Int.max 0 (total_d - ve) in
@@ -281,7 +281,7 @@ let render_verification_dive ~req_id ~(model : Model.t) ~cache ~(rect : Rect.t)
                   grid ~rect:diff_r ~y:diff_r.y ~theme;
                 ignore
                   (Diff.draw grid ~rect:dr ~theme
-                     ~scroll:model.nav.dive_scroll_offset diff_rows)
+                     ~scroll:model.nav.inspector_scroll_offset diff_rows)
               end);
           if action_h = 1 then
             let can_verdict =
@@ -312,10 +312,8 @@ let render_verification_dive ~req_id ~(model : Model.t) ~cache ~(rect : Rect.t)
         ~cache (json_of_verification v)
   | Some _ | None -> ()
 
-let render ~target ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
+let render ~req_id ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
   if Rect.is_empty rect then ()
   else
     let theme = Ops_common.theme_of_model model in
-    match target with
-    | Nav.Verification_dive req_id ->
-        render_verification_dive ~req_id ~model ~cache ~rect ~theme grid
+    render_verification_dive ~req_id ~model ~cache ~rect ~theme grid

@@ -26,8 +26,8 @@ type memory_diff_pin_frame = {
 
 type workspace_return_frame = {
   workspace : Nav.workspace;
-  dive_stack : Nav.dive list;
-  dive_return_stack : (int * bool * Nav.overlay option) list;
+  inspector : Nav.inspector option;
+  inspector_return : (int * bool * Nav.overlay option) option;
   work_tab : Nav.work_tab;
   work_return_entity_id : string option;
   knowledge_tab : Nav.knowledge_tab;
@@ -42,8 +42,8 @@ type workspace_return_frame = {
 
 type nav_state = {
   workspace : Nav.workspace;
-  dive_stack : Nav.dive list;
-  dive_return_stack : (int * bool * Nav.overlay option) list;
+  inspector : Nav.inspector option;
+  inspector_return : (int * bool * Nav.overlay option) option;
   workspace_return_stack : workspace_return_frame list;
   overlay : Nav.overlay option;
   pane_index : int;
@@ -54,7 +54,8 @@ type nav_state = {
   sidebar_focused : bool;
   sidebar_cursor : int;
   sidebar_scroll : int;
-  dive_scroll_offset : int;
+  inspector_scroll_offset : int;
+  keeper_detail_scroll_offset : int;
   json_scroll_offset : int;
   help_scroll_offset : int;
   queue_scroll_offset : int;
@@ -438,8 +439,8 @@ let initial ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_ko)
     nav =
       {
         workspace = Nav.Pulse;
-        dive_stack = [];
-        dive_return_stack = [];
+        inspector = None;
+        inspector_return = None;
         workspace_return_stack = [];
         overlay = None;
         pane_index = 0;
@@ -450,7 +451,8 @@ let initial ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_ko)
         sidebar_focused = false;
         sidebar_cursor = 0;
         sidebar_scroll = 0;
-        dive_scroll_offset = 0;
+        inspector_scroll_offset = 0;
+        keeper_detail_scroll_offset = 0;
         json_scroll_offset = 0;
         help_scroll_offset = 0;
         queue_scroll_offset = 0;
@@ -502,8 +504,7 @@ let initial ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_ko)
     modal_submission_seq = 1;
   }
 
-let active_dive m =
-  match m.nav.dive_stack with d :: _ -> Some d | [] -> None
+let active_inspector m = m.nav.inspector
 
 let drawer_queue ~keeper m =
   let queue = Fleet_store.chat_queue_for ~keeper m.fleet in
@@ -537,8 +538,8 @@ let target_keeper m =
   | Some _ | None -> selected_keeper_name m
 
 let target_keeper_for_lifecycle m =
-  match active_dive m with
-  | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> target_keeper m
+  match active_inspector m with
+  | Some _ -> target_keeper m
   | None -> (
       match m.nav.workspace with
       | Nav.Keepers -> (
@@ -566,7 +567,7 @@ let active_pulse_pane m =
   | None -> Pulse_companies
 
 let is_in_keeper_chat m =
-  Option.is_none (active_dive m)
+  Option.is_none (active_inspector m)
   && Nav.equal_workspace m.nav.workspace Nav.Keepers
   && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_chat
   && Option.is_some (selected_keeper_name m)
@@ -592,7 +593,7 @@ let fast_approval_strip_item m =
         | Nav.Help )
     | None ->
         if
-          m.nav.dive_stack = []
+          Option.is_none m.nav.inspector
           && Nav.equal_workspace m.nav.workspace Nav.Work
           && Nav.equal_work_tab m.work.active_tab Nav.Work_inbox
         then
@@ -609,7 +610,7 @@ let fast_approval_strip_item m =
               | Attention.Payload_ask _ -> None)
           | Some _ | None -> None
         else if
-          m.nav.dive_stack = []
+          Option.is_none m.nav.inspector
           && Nav.equal_workspace m.nav.workspace Nav.Pulse
           && equal_pulse_pane (active_pulse_pane m) Pulse_attention
         then
@@ -648,7 +649,7 @@ let composer_mode m =
 
 let keeper_dive_focused m =
   m.nav.zoomed
-  && Option.is_none (active_dive m)
+  && Option.is_none (active_inspector m)
   && Nav.equal_workspace m.nav.workspace Nav.Keepers
   && Option.is_some (selected_keeper_name m)
 
@@ -777,8 +778,8 @@ let active_menu_target m =
       | Nav.Knowledge -> Nav.Menu_knowledge m.knowledge.active_tab
       | Nav.Keepers -> (
           let tab_opt =
-            match active_dive m with
-            | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> None
+            match active_inspector m with
+            | Some _ -> None
             | None -> Some m.fleet.keeper_dive_tab
           in
           match tab_opt with
@@ -807,7 +808,7 @@ let inner_body_width m =
   else full
 
 let has_sub_tab_bar_for_model m =
-  match active_dive m with
+  match active_inspector m with
   | Some _ -> true
   | None -> (
       match m.nav.workspace with
@@ -914,8 +915,8 @@ let can_zoom_current_view m =
     || Option.is_some m.nav.overlay
   then false
   else
-    match active_dive m with
-    | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> false
+    match active_inspector m with
+    | Some _ -> false
     | None -> (
         match m.nav.workspace with
         | Nav.Keepers -> Option.is_some (selected_keeper_name m)
@@ -979,35 +980,34 @@ let work_pipeline_verifs_visible m =
 
 let is_work_goal_zoomed m =
   Option.is_none m.nav.overlay
-  && Option.is_none (active_dive m)
+  && Option.is_none (active_inspector m)
   && Nav.equal_workspace m.nav.workspace Nav.Work
   && Nav.equal_work_tab m.work.active_tab Nav.Work_pipeline
   && m.nav.zoomed && can_zoom_current_view m
 
 let is_work_task_zoomed m =
   Option.is_none m.nav.overlay
-  && Option.is_none (active_dive m)
+  && Option.is_none (active_inspector m)
   && Nav.equal_workspace m.nav.workspace Nav.Work
   && Nav.equal_work_tab m.work.active_tab Nav.Work_tasks
   && m.nav.zoomed && can_zoom_current_view m
 
 let has_preserved_ask_return (nav : nav_state) =
-  let has_ask_in_dive_returns stack =
-    List.exists
-      (fun (_, _, ov) -> Option.equal Nav.equal_overlay ov (Some Nav.Ask_answer))
-      stack
+  let has_ask_in_inspector_return = function
+    | Some (_, _, ov) -> Option.equal Nav.equal_overlay ov (Some Nav.Ask_answer)
+    | None -> false
   in
-  has_ask_in_dive_returns nav.dive_return_stack
+  has_ask_in_inspector_return nav.inspector_return
   || List.exists
        (fun (f : workspace_return_frame) ->
          Option.equal Nav.equal_overlay f.overlay (Some Nav.Ask_answer)
-         || has_ask_in_dive_returns f.dive_return_stack)
+         || has_ask_in_inspector_return f.inspector_return)
        nav.workspace_return_stack
 
 let detail_visible m =
   if is_too_small_viewport m.viewport || equal_breakpoint m.breakpoint Micro then
     false
-  else if Option.is_some (active_dive m) then true
+  else if Option.is_some (active_inspector m) then true
   else if
     m.nav.zoomed
     && can_zoom_current_view { m with nav = { m.nav with overlay = None } }
@@ -1073,10 +1073,11 @@ let task_dive_has_two_main_panes m task_id =
 let dive_work_json_pane_index m =
   if not m.infra.show_raw_json then None
   else
-    match active_dive m with
-    | Some (Nav.Dive_work (Nav.Verification_dive _)) ->
+    match active_inspector m with
+    | Some (Nav.Verification_inspector _) ->
         if inner_body_width m < 88 then Some 0 else Some 1
-    | Some (Nav.Dive_runtime _) -> None
+    | Some (Nav.Tool_inspector _ | Nav.Skill_inspector _ | Nav.Exact_run_inspector _) ->
+        None
     | None ->
         if
           is_work_goal_zoomed m
@@ -1116,8 +1117,8 @@ let keeper_preview_has_inner_split m =
 
 let has_active_memory_reading m =
   let scope_opt =
-    match active_dive m with
-    | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> None
+    match active_inspector m with
+    | Some _ -> None
     | None -> (
         match m.nav.workspace with
         | Nav.Knowledge
@@ -1159,11 +1160,11 @@ let focusable_pane_count m =
         | Nav.System_gate _ ) ->
         1
     | None -> (
-        match active_dive m with
-        | Some (Nav.Dive_work (Nav.Verification_dive _)) ->
+        match active_inspector m with
+        | Some (Nav.Verification_inspector _) ->
             if m.infra.show_raw_json && inner_body_width m >= 88 then 2 else 1
-        | Some (Nav.Dive_runtime (Nav.Tool_dive _)) -> 2
-        | Some (Nav.Dive_runtime (Nav.Skill_dive _ | Nav.Exact_run_dive _)) -> 1
+        | Some (Nav.Tool_inspector _) -> 2
+        | Some (Nav.Skill_inspector _ | Nav.Exact_run_inspector _) -> 1
         | None ->
             if m.nav.zoomed && can_zoom_current_view m then
               match m.nav.workspace with
@@ -1334,22 +1335,17 @@ let pane_rects m =
   let n = focusable_pane_count m in
   if n <= 1 || Rect.is_empty br then [ br ]
   else
-    match active_dive m with
-    | Some (Nav.Dive_work _) ->
+    match active_inspector m with
+    | Some (Nav.Verification_inspector _) ->
         if m.infra.show_raw_json && inner_body_width m >= 88 then
           let l, r = split_h_ratio ~gap:gap_h br 0.58 in
-          if n >= 3 then
-            let lt, lb = split_v_ratio ~gap:0 l 0.5 in
-            [ lt; lb; r ]
-          else [ l; r ]
-        else
-          let t, b = split_v_ratio ~gap:0 br 0.5 in
-          [ t; b ]
-    | Some (Nav.Dive_runtime (Nav.Tool_dive _)) ->
+          [ l; r ]
+        else [ br ]
+    | Some (Nav.Tool_inspector _) ->
         let top_h = if br.h >= 20 then 9 else 6 in
         let t, b = split_v_fixed ~gap:gap_v br top_h in
         [ t; b ]
-    | Some (Nav.Dive_runtime (Nav.Skill_dive _ | Nav.Exact_run_dive _)) ->
+    | Some (Nav.Skill_inspector _ | Nav.Exact_run_inspector _) ->
         [ br ]
     | None -> (
         if m.nav.zoomed && can_zoom_current_view m then
@@ -1524,8 +1520,8 @@ let active_focus_scope m =
         else if Drafts.is_focused m.drafts then Nav.Composer_focused
         else if sidebar_has_focus m then Nav.Workspace_focused m.nav.workspace
         else (
-          match active_dive m with
-          | Some d -> Nav.Dive_focused d
+          match active_inspector m with
+          | Some insp -> Nav.Inspector_focused insp
           | None ->
               if
                 Nav.equal_workspace m.nav.workspace Nav.Work
@@ -1567,7 +1563,7 @@ let focus_scope_chain m =
     else if
       (not micro_locked)
       && Option.is_none m.nav.overlay
-      && m.nav.dive_stack = []
+      && Option.is_none m.nav.inspector
       && Nav.equal_workspace m.nav.workspace Nav.Work
       && Nav.equal_work_tab m.work.active_tab Nav.Work_inbox
     then
@@ -1651,8 +1647,8 @@ let active_focus_label m =
       else if sidebar_has_focus m then
         Say.make ~ko:"메뉴" ~en:"MENU"
       else
-        match active_dive m with
-        | Some (Nav.Dive_work (Nav.Verification_dive _)) -> (
+        match active_inspector m with
+        | Some (Nav.Verification_inspector _) -> (
             match dive_work_json_pane_index m with
             | Some j_idx when m.nav.pane_index = j_idx ->
                 if focusable_pane_count m > 1 then
@@ -1662,13 +1658,13 @@ let active_focus_label m =
                 if focusable_pane_count m > 1 then
                   pane_prefix ~ko:"검증 상세" ~en:"Verification"
                 else Say.make ~ko:"검증 상세" ~en:"VERIF DIVE")
-        | Some (Nav.Dive_runtime (Nav.Tool_dive name)) ->
+        | Some (Nav.Tool_inspector name) ->
             if m.nav.pane_index = 1 then
               pane_prefix ~ko:(name ^ " · 시계열") ~en:(name ^ " · Series")
             else pane_prefix ~ko:("도구 · " ^ name) ~en:("Tool · " ^ name)
-        | Some (Nav.Dive_runtime (Nav.Skill_dive ref_s)) ->
+        | Some (Nav.Skill_inspector ref_s) ->
             Say.make ~ko:("스킬 · " ^ ref_s) ~en:("SKILL · " ^ ref_s)
-        | Some (Nav.Dive_runtime (Nav.Exact_run_dive run_id)) ->
+        | Some (Nav.Exact_run_inspector run_id) ->
             Say.make ~ko:("실행 · " ^ run_id) ~en:("RUN · " ^ run_id)
         | None -> (
             match m.nav.workspace with
@@ -1941,14 +1937,14 @@ let active_focus_label m =
 
 let is_board_detail_active m =
   Option.is_none m.nav.overlay
-  && Option.is_none (active_dive m)
+  && Option.is_none (active_inspector m)
   && Nav.equal_workspace m.nav.workspace Nav.Knowledge
   && Nav.equal_knowledge_tab m.knowledge.active_tab Nav.Knowledge_board
   && (m.nav.pane_index >= 1 || (m.nav.zoomed && can_zoom_current_view m))
 
 let is_artifact_doc_search_active m =
   Option.is_none m.nav.overlay
-  && Option.is_none (active_dive m)
+  && Option.is_none (active_inspector m)
   && Nav.equal_workspace m.nav.workspace Nav.Knowledge
   && Nav.equal_knowledge_tab m.knowledge.active_tab Nav.Knowledge_artifacts
   && (m.nav.pane_index >= 1 || (m.nav.zoomed && can_zoom_current_view m))
@@ -1956,8 +1952,8 @@ let is_artifact_doc_search_active m =
 let is_keeper_config_active m =
   Option.is_none m.nav.overlay
   &&
-  match active_dive m with
-  | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> false
+  match active_inspector m with
+  | Some _ -> false
   | None ->
       Nav.equal_workspace m.nav.workspace Nav.Keepers
       && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_config
@@ -1984,15 +1980,15 @@ let is_keeper_lifecycle_surface m =
   && (not (is_text_capture_active m))
   && (not (sidebar_has_focus m))
   &&
-  match active_dive m with
-  | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> false
+  match active_inspector m with
+  | Some _ -> false
   | None -> Nav.equal_workspace m.nav.workspace Nav.Keepers
 
 let is_memory_explorer_surface m =
   Option.is_none m.nav.overlay
   &&
-  match active_dive m with
-  | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> false
+  match active_inspector m with
+  | Some _ -> false
   | None ->
       (Nav.equal_workspace m.nav.workspace Nav.Knowledge
       && Nav.equal_knowledge_tab m.knowledge.active_tab Nav.Knowledge_memory)
@@ -2003,8 +1999,8 @@ let is_memory_explorer_surface m =
 let is_memory_diff_pin_surface m =
   is_memory_explorer_surface m
   &&
-  match active_dive m with
-  | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> false
+  match active_inspector m with
+  | Some _ -> false
   | None ->
       if Nav.equal_workspace m.nav.workspace Nav.Knowledge then
         Knowledge_store.equal_memory_subview m.knowledge.memory_subview
@@ -3686,8 +3682,8 @@ let is_viewing_wiki_slug ~slug m =
   && (not m.nav.filter_focused)
   && (not (Drafts.is_focused m.drafts))
   &&
-  match active_dive m with
-  | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> false
+  match active_inspector m with
+  | Some _ -> false
   | None -> (
       Nav.equal_workspace m.nav.workspace Nav.Knowledge
       && Nav.equal_knowledge_tab m.knowledge.active_tab Nav.Knowledge_wiki
@@ -3806,7 +3802,7 @@ let rebuild_attention m =
   in
   let attention =
     if
-      m.nav.dive_stack = []
+      Option.is_none m.nav.inspector
       && Nav.equal_workspace m.nav.workspace Nav.Work
       && Nav.equal_work_tab m.work.active_tab Nav.Work_inbox
     then Attention.sync_selection ~query:m.work.filter_query attention
@@ -4154,7 +4150,7 @@ let active_view_ssot_mode m =
         false
   in
   let has_view_stream =
-    match active_dive m with
+    match active_inspector m with
     | Some _ -> false
     | None -> (
         match m.nav.workspace with
@@ -4192,8 +4188,8 @@ let active_view_ssot_mode m =
     | Some f -> f
     | None -> Health.Connecting
   in
-  match active_dive m with
-  | Some (Nav.Dive_work _) ->
+  match active_inspector m with
+  | Some (Nav.Verification_inspector _) ->
       Synced_snapshot
         {
           observer = m.freshness.observer;
@@ -4204,7 +4200,7 @@ let active_view_ssot_mode m =
                 observed_at_opt m.work.verifications;
               ];
         }
-  | Some (Nav.Dive_runtime (Nav.Tool_dive _)) ->
+  | Some (Nav.Tool_inspector _) ->
       Synced_snapshot
         {
           observer = m.freshness.observer;
@@ -4215,7 +4211,7 @@ let active_view_ssot_mode m =
                 observed_at_opt m.runtime.tools_dashboard;
               ];
         }
-  | Some (Nav.Dive_runtime (Nav.Skill_dive _)) ->
+  | Some (Nav.Skill_inspector _) ->
       Synced_snapshot
         {
           observer = m.freshness.observer;
@@ -4226,7 +4222,7 @@ let active_view_ssot_mode m =
                 observed_at_opt m.runtime.skills;
               ];
         }
-  | Some (Nav.Dive_runtime (Nav.Exact_run_dive _)) ->
+  | Some (Nav.Exact_run_inspector _) ->
       Synced_snapshot
         {
           observer = m.freshness.observer;

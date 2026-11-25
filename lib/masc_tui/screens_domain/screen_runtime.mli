@@ -1,6 +1,6 @@
 (** [[5] Runtime] workspace renderer (7 sub-tabs: Quotas & Credits, Efficiency
     & Spend, Failover Lanes, Fusion, Tools & Usage, Connectors, Addons &
-    Browser) plus [Tool_dive] detail renderer.
+    Browser) plus Runtime inspector ([Tool] / [Skill] / [Exact Run]) renderer.
 
     Strictly observation-only ([constitution.xml#budget_gate]) and
     Provider/Model-Free: distinguishes [$0 Sub] vs [$0 Exhausted] vs
@@ -14,8 +14,8 @@ val render :
   Masc_tui_term.Cell_grid.t ->
   unit
 
-val render_dive :
-  target:Masc_tui_core.Nav.runtime_dive_target ->
+val render_inspector :
+  target:[ `Tool of string | `Skill of string | `Exact_run of string ] ->
   model:Masc_tui_store.Model.t ->
   cache:Masc_tui_ui.Card.Cache.t ->
   rect:Masc_tui_core.Rect.t ->

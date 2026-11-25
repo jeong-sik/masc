@@ -6677,8 +6677,9 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
     | Nav.Runtime_addons_browser ->
         render_addons_browser ~model ~cache ~rect:body ~theme ~bp grid
 
-let render_dive ~(target : Nav.runtime_dive_target) ~(model : Model.t) ~cache
-    ~(rect : Rect.t) grid =
+let render_inspector
+    ~(target : [ `Tool of string | `Skill of string | `Exact_run of string ])
+    ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
   if Rect.is_empty rect then ()
   else
     let theme = Theme.of_preset model.theme_preset in
@@ -6687,7 +6688,7 @@ let render_dive ~(target : Nav.runtime_dive_target) ~(model : Model.t) ~cache
     let lang = model.lang in
     let rt = model.runtime in
     match target with
-    | Nav.Tool_dive tool_name ->
+    | `Tool tool_name ->
         let entry_opt =
           match Observed.to_option rt.tools_dashboard with
           | Some d ->
@@ -6838,7 +6839,7 @@ let render_dive ~(target : Nav.runtime_dive_target) ~(model : Model.t) ~cache
                in
                ignore
                  (Markdown.draw grid ~rect:md_r ~theme ~osc8:true
-                    ~scroll:model.nav.dive_scroll_offset desc)
+                    ~scroll:model.nav.inspector_scroll_offset desc)
            | Some _ | None -> ())
         end;
         if not (Rect.is_empty series_rect) then begin
@@ -6859,7 +6860,7 @@ let render_dive ~(target : Nav.runtime_dive_target) ~(model : Model.t) ~cache
               H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp inner)
                 ~theme ~lang rt.tool_detail_series
         end
-    | Nav.Skill_dive ref_s ->
+    | `Skill ref_s ->
         let inner =
           Card.draw ~cache grid ~rect:body ~theme
             (H.card_spec ~focused:(Model.body_has_focus model) ~subtitle:ref_s
@@ -6918,7 +6919,7 @@ let render_dive ~(target : Nav.runtime_dive_target) ~(model : Model.t) ~cache
                 Int.max 0
                   (Int.min
                      (Int.max 0 (List.length all_lines - content.h))
-                     model.nav.dive_scroll_offset)
+                     model.nav.inspector_scroll_offset)
               in
               let y = ref content.y and bot = Rect.bottom content in
               List.iter
@@ -6957,7 +6958,7 @@ let render_dive ~(target : Nav.runtime_dive_target) ~(model : Model.t) ~cache
                    ~max_w:content.w ~style:(H.whisper_style ~theme ())
                    sf_summary)
         end
-    | Nav.Exact_run_dive run_id ->
+    | `Exact_run run_id ->
         let inner =
           Card.draw ~cache grid ~rect:body ~theme
             (H.card_spec ~focused:(Model.body_has_focus model) ~subtitle:run_id
@@ -7006,7 +7007,7 @@ let render_dive ~(target : Nav.runtime_dive_target) ~(model : Model.t) ~cache
                 Int.max 0
                   (Int.min
                      (Int.max 0 (List.length all_lines - content.h))
-                     model.nav.dive_scroll_offset)
+                     model.nav.inspector_scroll_offset)
               in
               let y = ref content.y and bot = Rect.bottom content in
               List.iter

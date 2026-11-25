@@ -192,7 +192,7 @@ let refresh_404_fallbacks ~now (m : Model.t) =
   { m with infra; work }
 
 let fusion_detail_matches_active (m : Model.t) run_id =
-  match Model.active_dive m with
+  match Model.active_inspector m with
   | Some _ -> false
   | None -> (
       match Runtime_store.selected_fusion_run m.runtime with
@@ -200,13 +200,18 @@ let fusion_detail_matches_active (m : Model.t) run_id =
       | None -> true)
 
 let verification_evidence_matches_active (m : Model.t) verification_id =
-  match Model.active_dive m with
-  | Some (Nav.Dive_work (Nav.Verification_dive vid)) ->
+  match Model.active_inspector m with
+  | Some (Nav.Verification_inspector vid) ->
       String.equal vid verification_id
-  | Some (Nav.Dive_runtime _) | None -> true
+  | Some
+      ( Nav.Tool_inspector _
+      | Nav.Skill_inspector _
+      | Nav.Exact_run_inspector _ )
+  | None ->
+      true
 
 let runtime_trace_matches_active (m : Model.t) keeper =
-  match Model.active_dive m with
+  match Model.active_inspector m with
   | None
     when Nav.equal_workspace m.nav.workspace Nav.Keepers
          && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_trace -> (
@@ -219,9 +224,7 @@ let runtime_trace_matches_active (m : Model.t) keeper =
           then String.equal k keeper
           else true
       | None -> true)
-  | Some (Nav.Dive_work _ | Nav.Dive_runtime _)
-  | None ->
-      true
+  | Some _ | None -> true
 
 let addon_preview_matches_active (m : Model.t) manifest_path =
   match Runtime_store.selected_addon_catalog_entry m.runtime with
@@ -366,7 +369,7 @@ let apply_http_reply ~now (m : Model.t) reply =
       let cmds =
         if
           Nav.equal_workspace next.nav.workspace Nav.Keepers
-          && next.nav.dive_stack = []
+          && Option.is_none next.nav.inspector
           && Option.is_some fleet.selected_keeper
         then View_fetches.fetches_for_current_view next
         else View_fetches.overlay_fetches next
@@ -1029,7 +1032,7 @@ let apply_http_reply ~now (m : Model.t) reply =
       { label; attention_id; decision_kind; target_id; keeper; result = Ok () } ->
       let attention_query =
         if
-          m.nav.dive_stack = []
+          Option.is_none m.nav.inspector
           && Nav.equal_workspace m.nav.workspace Nav.Work
           && Nav.equal_work_tab m.work.active_tab Nav.Work_inbox
         then m.work.filter_query
@@ -1135,7 +1138,7 @@ let apply_http_reply ~now (m : Model.t) reply =
         in
         let attention_query =
           if
-            m.nav.dive_stack = []
+            Option.is_none m.nav.inspector
             && Nav.equal_workspace m.nav.workspace Nav.Work
             && Nav.equal_work_tab m.work.active_tab Nav.Work_inbox
           then m.work.filter_query
@@ -1196,7 +1199,7 @@ let apply_http_reply ~now (m : Model.t) reply =
       in
       let next, thread_cmds =
         if
-          Option.is_none (Model.active_dive next0)
+          Option.is_none (Model.active_inspector next0)
           && Nav.equal_workspace next0.nav.workspace Nav.Knowledge
           && Nav.equal_knowledge_tab next0.knowledge.active_tab
                Nav.Knowledge_board
@@ -1255,8 +1258,8 @@ let apply_http_reply ~now (m : Model.t) reply =
         ~en:"Board feed fetch" err
   | Msg.Reply_board_thread { post_id; result = Ok ((tp, _) as thread) } ->
       let matches_active =
-        match Model.active_dive m with
-        | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> false
+        match Model.active_inspector m with
+        | Some _ -> false
         | None -> (
             match Knowledge_store.board_detail_post_id m.knowledge with
             | Some id -> String.equal id post_id || String.equal id tp.id
@@ -1274,8 +1277,8 @@ let apply_http_reply ~now (m : Model.t) reply =
         , [] )
   | Msg.Reply_board_thread_meta meta ->
       let matches_active =
-        match Model.active_dive m with
-        | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> false
+        match Model.active_inspector m with
+        | Some _ -> false
         | None -> (
             match Knowledge_store.board_detail_post_id m.knowledge with
             | Some id -> String.equal id meta.post_id
@@ -1290,8 +1293,8 @@ let apply_http_reply ~now (m : Model.t) reply =
         , [] )
   | Msg.Reply_board_thread { post_id; result = Error err } ->
       let matches_active =
-        match Model.active_dive m with
-        | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> false
+        match Model.active_inspector m with
+        | Some _ -> false
         | None -> (
             match Knowledge_store.board_detail_post_id m.knowledge with
             | Some id -> String.equal id post_id
@@ -1521,7 +1524,7 @@ let apply_http_reply ~now (m : Model.t) reply =
       in
       let thread_cmds =
         let viewing_voted_post =
-          Option.is_none (Model.active_dive next)
+          Option.is_none (Model.active_inspector next)
           && Nav.equal_workspace next.nav.workspace Nav.Knowledge
           && Nav.equal_knowledge_tab next.knowledge.active_tab Nav.Knowledge_board
           &&
@@ -1629,7 +1632,7 @@ let apply_http_reply ~now (m : Model.t) reply =
         | None -> false
       in
       let viewing_deleted_post =
-        Option.is_none (Model.active_dive m)
+        Option.is_none (Model.active_inspector m)
         && Nav.equal_workspace m.nav.workspace Nav.Knowledge
         && Nav.equal_knowledge_tab m.knowledge.active_tab Nav.Knowledge_board
         &&
@@ -1908,8 +1911,8 @@ let apply_http_reply ~now (m : Model.t) reply =
       let next = { m with knowledge } in
       let detail_cmds =
         let target_artifact_opt =
-          match Model.active_dive next with
-          | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> None
+          match Model.active_inspector next with
+          | Some _ -> None
           | None ->
               if
                 Nav.equal_workspace next.nav.workspace Nav.Knowledge
@@ -1965,12 +1968,10 @@ let apply_http_reply ~now (m : Model.t) reply =
           || String.equal t detail.artifact.id
           || String.equal t detail.artifact.body.sha256
         in
-        match Model.active_dive m with
-        | Some (Nav.Dive_work _ | Nav.Dive_runtime _) | None -> (
-            match Knowledge_store.selected_artifact m.knowledge with
-            | Some sel ->
-                matches_target sel.id || matches_target sel.body.sha256
-            | None -> true)
+        match Knowledge_store.selected_artifact m.knowledge with
+        | Some sel ->
+            matches_target sel.id || matches_target sel.body.sha256
+        | None -> true
       in
       let matches_rev =
         Knowledge_store.matches_pending_artifact_revision
@@ -1987,12 +1988,10 @@ let apply_http_reply ~now (m : Model.t) reply =
         , [] )
   | Msg.Reply_artifact_detail { id; result = Error err } ->
       let matches_active =
-        match Model.active_dive m with
-        | Some (Nav.Dive_work _ | Nav.Dive_runtime _) | None -> (
-            match Knowledge_store.selected_artifact m.knowledge with
-            | Some sel ->
-                String.equal sel.id id || String.equal sel.body.sha256 id
-            | None -> false)
+        match Knowledge_store.selected_artifact m.knowledge with
+        | Some sel ->
+            String.equal sel.id id || String.equal sel.body.sha256 id
+        | None -> false
       in
       if not matches_active then (m, [])
       else
@@ -4380,12 +4379,13 @@ let apply_http_reply ~now (m : Model.t) reply =
         }
       in
       let followup =
-        match Model.active_dive next with
-        | Some (Nav.Dive_runtime (Nav.Skill_dive _)) ->
+        match Model.active_inspector next with
+        | Some (Nav.Skill_inspector _) ->
             View_fetches.fetches_for_current_view next
         | Some
-            ( Nav.Dive_work _
-            | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _) )
+            ( Nav.Verification_inspector _
+            | Nav.Tool_inspector _
+            | Nav.Exact_run_inspector _ )
         | None ->
             []
       in
@@ -4410,7 +4410,7 @@ let apply_http_reply ~now (m : Model.t) reply =
       let next = { m with runtime } in
       let name_cmds =
         if
-          Option.is_none (Model.active_dive next)
+          Option.is_none (Model.active_inspector next)
           && Nav.equal_workspace next.nav.workspace Nav.Runtime
           && Nav.equal_runtime_tab next.runtime.active_tab
                Nav.Runtime_connectors
@@ -4447,7 +4447,7 @@ let apply_http_reply ~now (m : Model.t) reply =
       let next = { m with runtime } in
       let tab_cmds =
         if
-          Option.is_none (Model.active_dive next)
+          Option.is_none (Model.active_inspector next)
           && Nav.equal_workspace next.nav.workspace Nav.Runtime
           && Nav.equal_runtime_tab next.runtime.active_tab
                Nav.Runtime_addons_browser
@@ -4707,7 +4707,7 @@ let apply_http_reply ~now (m : Model.t) reply =
       in
       let viewing_purged_keeper =
         Nav.equal_workspace m.nav.workspace Nav.Keepers
-        && Option.is_none (Model.active_dive m)
+        && Option.is_none (Model.active_inspector m)
         &&
         match Model.selected_keeper_name m with
         | Some name -> String.equal name keeper
@@ -4720,7 +4720,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             zoomed = false;
             pre_zoom_pane_index = None;
             pane_index = 0;
-            dive_scroll_offset = 0;
+            keeper_detail_scroll_offset = 0;
             filter_focused = false;
           }
         else m.nav
@@ -4850,7 +4850,7 @@ let apply_http_reply ~now (m : Model.t) reply =
       let next = { m with infra } in
       let cmds =
         if
-          Option.is_none (Model.active_dive next)
+          Option.is_none (Model.active_inspector next)
           && Nav.equal_workspace next.nav.workspace Nav.Infra
           && Nav.equal_infra_tab next.infra.active_tab Nav.Infra_sandboxes
         then
@@ -5651,7 +5651,7 @@ let apply_http_reply ~now (m : Model.t) reply =
       let next = { m with runtime } in
       let detail_cmds =
         if
-          Option.is_none (Model.active_dive next)
+          Option.is_none (Model.active_inspector next)
           && Nav.equal_workspace next.nav.workspace Nav.Runtime
           && Nav.equal_runtime_tab next.runtime.active_tab Nav.Runtime_fusion
         then
@@ -6012,7 +6012,7 @@ let apply_http_reply ~now (m : Model.t) reply =
         Infra_store.apply_workspace_search ~observed_at:now ~scope res m.infra
       in
       let focus_results =
-        Option.is_none (Model.active_dive m)
+        Option.is_none (Model.active_inspector m)
         && Nav.equal_workspace m.nav.workspace Nav.Infra
         && Nav.equal_infra_tab m.infra.active_tab Nav.Infra_code
         && Wire_infra.equal_workspace_scope scope m.infra.code.scope
@@ -6172,8 +6172,8 @@ let apply_http_reply ~now (m : Model.t) reply =
         ~en:"Git diff fetch" err
   | Msg.Reply_memory_health_keeper { keeper; result = Ok row } ->
       let matches_keeper =
-        match Model.active_dive m with
-        | Some (Nav.Dive_work _ | Nav.Dive_runtime _) ->
+        match Model.active_inspector m with
+        | Some _ ->
             false
         | None -> (
             match Model.selected_keeper_name m with
@@ -6191,8 +6191,8 @@ let apply_http_reply ~now (m : Model.t) reply =
         , [] )
   | Msg.Reply_memory_health_keeper { keeper; result = Error err } ->
       let active_keeper =
-        match Model.active_dive m with
-        | Some (Nav.Dive_work _ | Nav.Dive_runtime _) ->
+        match Model.active_inspector m with
+        | Some _ ->
             None
         | None -> (
             match Model.selected_keeper_name m with
@@ -6200,8 +6200,8 @@ let apply_http_reply ~now (m : Model.t) reply =
             | None -> m.knowledge.memory_diff_keeper)
       in
       let matches_keeper =
-        match Model.active_dive m with
-        | Some (Nav.Dive_work _ | Nav.Dive_runtime _) ->
+        match Model.active_inspector m with
+        | Some _ ->
             false
         | None -> (
             match Model.selected_keeper_name m with
@@ -6318,8 +6318,8 @@ let apply_http_reply ~now (m : Model.t) reply =
           , cmds ))
   | Msg.Reply_keeper_memory_journal { keeper; result = Ok journal } ->
       let matches_keeper =
-        match Model.active_dive m with
-        | Some (Nav.Dive_work _ | Nav.Dive_runtime _) ->
+        match Model.active_inspector m with
+        | Some _ ->
             false
         | None -> (
             match Model.selected_keeper_name m with
@@ -6337,8 +6337,8 @@ let apply_http_reply ~now (m : Model.t) reply =
         , [] )
   | Msg.Reply_keeper_memory_journal { keeper; result = Error err } -> (
       let active_keeper =
-        match Model.active_dive m with
-        | Some (Nav.Dive_work _ | Nav.Dive_runtime _) ->
+        match Model.active_inspector m with
+        | Some _ ->
             None
         | None -> (
             match Model.selected_keeper_name m with
@@ -6346,8 +6346,8 @@ let apply_http_reply ~now (m : Model.t) reply =
             | None -> m.knowledge.memory_diff_keeper)
       in
       let matches_keeper =
-        match Model.active_dive m with
-        | Some (Nav.Dive_work _ | Nav.Dive_runtime _) ->
+        match Model.active_inspector m with
+        | Some _ ->
             false
         | None -> (
             match Model.selected_keeper_name m with
@@ -6976,11 +6976,11 @@ let apply_http_reply ~now (m : Model.t) reply =
       let next =
         { m with runtime } |> Model.with_toast ~now ~level toast_msg
       in
-      let dive = Nav.Dive_runtime (Nav.Tool_dive tool_name) in
+      let insp = Nav.Tool_inspector tool_name in
       if not owns_modal then (next, [])
-      else if Option.equal Nav.equal_dive (Model.active_dive m) (Some dive) then
+      else if Option.equal Nav.equal_inspector (Model.active_inspector m) (Some insp) then
         ({ next with nav = { next.nav with overlay = None }; inline_modal = None }, [])
-      else Update_nav.push_dive next dive
+      else Update_nav.open_inspector next insp
   | Msg.Reply_mcp_tools_call { rpc_id; tool_name; result = Error err } ->
       let clean_err =
         Chat_transcript.scrub_secrets_in_text (Msg.http_error_detail err)
@@ -7117,12 +7117,13 @@ let apply_http_reply ~now (m : Model.t) reply =
             ~en:"Skill authoring tools fetch" err)
   | Msg.Reply_skill_editor_loaded { reference; result = Ok loaded } ->
       let matches_dive =
-        match Model.active_dive m with
-        | Some (Nav.Dive_runtime (Nav.Skill_dive cur)) ->
+        match Model.active_inspector m with
+        | Some (Nav.Skill_inspector cur) ->
             String.equal cur reference || String.equal cur loaded.reference
         | Some
-            ( Nav.Dive_work _
-            | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _) )
+            ( Nav.Verification_inspector _
+            | Nav.Tool_inspector _
+            | Nav.Exact_run_inspector _ )
         | None ->
             false
       in
@@ -7135,12 +7136,13 @@ let apply_http_reply ~now (m : Model.t) reply =
         ({ m with runtime }, [])
   | Msg.Reply_skill_editor_loaded { reference; result = Error err } -> (
       let matches_dive =
-        match Model.active_dive m with
-        | Some (Nav.Dive_runtime (Nav.Skill_dive cur)) ->
+        match Model.active_inspector m with
+        | Some (Nav.Skill_inspector cur) ->
             String.equal cur reference
         | Some
-            ( Nav.Dive_work _
-            | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _) )
+            ( Nav.Verification_inspector _
+            | Nav.Tool_inspector _
+            | Nav.Exact_run_inspector _ )
         | None ->
             false
       in
@@ -7175,11 +7177,12 @@ let apply_http_reply ~now (m : Model.t) reply =
               ~en:("Skill read: " ^ reference) err)
   | Msg.Reply_skill_editor_preview (Ok preview) ->
       let in_skill_dive =
-        match Model.active_dive m with
-        | Some (Nav.Dive_runtime (Nav.Skill_dive _)) -> true
+        match Model.active_inspector m with
+        | Some (Nav.Skill_inspector _) -> true
         | Some
-            ( Nav.Dive_work _
-            | Nav.Dive_runtime (Nav.Tool_dive _ | Nav.Exact_run_dive _) )
+            ( Nav.Verification_inspector _
+            | Nav.Tool_inspector _
+            | Nav.Exact_run_inspector _ )
         | None ->
             false
       in
@@ -7275,16 +7278,15 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Some { kind; _ } -> is_matching_skill_modal kind
         | None -> false
       in
-      let nav =
-        if close_modal then { m.nav with overlay = None } else m.nav
+      let close_inspector =
+        match action with
+        | `Delete ->
+            Option.equal Nav.equal_inspector m.nav.inspector
+              (Some (Nav.Skill_inspector reference))
+        | `Create | `Save -> false
       in
       let nav =
-        match (action, nav.dive_stack) with
-        | `Delete, top :: rest
-          when Nav.equal_dive top (Nav.Dive_runtime (Nav.Skill_dive reference))
-          ->
-            { nav with dive_stack = rest }
-        | (`Create | `Save | `Delete), ([] | _ :: _) -> nav
+        if close_modal then { m.nav with overlay = None } else m.nav
       in
       let inline_modal = if close_modal then None else m.inline_modal in
       let runtime =
@@ -7333,11 +7335,70 @@ let apply_http_reply ~now (m : Model.t) reply =
       let level =
         if is_warning then Model.Toast_warning else Model.Toast_success
       in
-      let next =
+      let m_base =
         { m with nav; inline_modal; runtime }
         |> Model.with_toast ~now ~level toast
       in
-      (next, [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_skills } ])
+      if close_inspector then
+        if Option.is_none m_base.nav.overlay then
+          let m_closed, close_cmds = Update_nav.close_inspector m_base in
+          let skills_path = Cmd.get_request_path Cmd.Get_skills in
+          let has_get_skills =
+            List.exists
+              (function
+                | Cmd.Http_get { req; _ } ->
+                    String.equal (Cmd.get_request_path req) skills_path
+                | Cmd.Batch _
+                | Cmd.Http_post _
+                | Cmd.Http_put _
+                | Cmd.Http_delete _
+                | Cmd.Http_post_stream _
+                | Cmd.Sync_streams _
+                | Cmd.Update_workspace_guard _
+                | Cmd.Voice_cmd _
+                | Cmd.Copy_clipboard _
+                | Cmd.Render_memory_diagram _
+                | Cmd.Cancel_memory_diagram
+                | Cmd.Fetch_artifact_and_copy _
+                | Cmd.Export_artifact _
+                | Cmd.Open_dos_screen _
+                | Cmd.Open_external_url _
+                | Cmd.Open_editor_escape_hatch _
+                | Cmd.Open_terminal_program _
+                | Cmd.Start_local_server
+                | Cmd.Restart_tui
+                | Cmd.Quit _ ->
+                    false)
+              (Cmd.flatten close_cmds)
+          in
+          let cmds =
+            if has_get_skills then close_cmds
+            else
+              Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_skills }
+              :: close_cmds
+          in
+          (m_closed, cmds)
+        else
+          (* An unrelated overlay (e.g. Palette, Settings, Ask_answer, or a
+             different inline modal) is currently open on top of the deleted
+             skill inspector: close only the underlying inspector without
+             clobbering the active overlay or its modal/ask draft. *)
+          let m_unwrapped, _ =
+            Update_nav.close_inspector
+              { m_base with nav = { m_base.nav with overlay = None } }
+          in
+          let m_closed =
+            {
+              m_unwrapped with
+              nav = { m_unwrapped.nav with overlay = m_base.nav.overlay };
+              inline_modal = m_base.inline_modal;
+              ask_modal =
+                (if Option.is_some m_base.ask_modal then m_base.ask_modal
+                 else m_unwrapped.ask_modal);
+            }
+          in
+          (m_closed, [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_skills } ])
+      else (m_base, [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_skills } ])
   | Msg.Reply_skill_editor_outcome { action; reference; result = Error err } ->
       let clean_err =
         Chat_transcript.scrub_secrets_in_text (Msg.http_error_detail err)
@@ -8225,14 +8286,13 @@ let apply_http_reply ~now (m : Model.t) reply =
             ~en:"Standalone lanes fetch" err)
   | Msg.Reply_exact_lane_run_detail { run_id; result = Ok detail } ->
       let matches_dive =
-        match Model.active_dive m with
-        | Some (Nav.Dive_runtime (Nav.Exact_run_dive cur)) ->
+        match Model.active_inspector m with
+        | Some (Nav.Exact_run_inspector cur) ->
             String.equal cur run_id
         | Some
-            ( Nav.Dive_work _
-            | Nav.Dive_runtime
-                (Nav.Tool_dive _ | Nav.Skill_dive _)
-            )
+            ( Nav.Verification_inspector _
+            | Nav.Tool_inspector _
+            | Nav.Skill_inspector _ )
         | None ->
             false
       in
@@ -8247,14 +8307,13 @@ let apply_http_reply ~now (m : Model.t) reply =
         , [] )
   | Msg.Reply_exact_lane_run_detail { run_id; result = Error err } -> (
       let matches_dive =
-        match Model.active_dive m with
-        | Some (Nav.Dive_runtime (Nav.Exact_run_dive cur)) ->
+        match Model.active_inspector m with
+        | Some (Nav.Exact_run_inspector cur) ->
             String.equal cur run_id
         | Some
-            ( Nav.Dive_work _
-            | Nav.Dive_runtime
-                (Nav.Tool_dive _ | Nav.Skill_dive _)
-            )
+            ( Nav.Verification_inspector _
+            | Nav.Tool_inspector _
+            | Nav.Skill_inspector _ )
         | None ->
             false
       in

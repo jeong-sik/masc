@@ -1212,7 +1212,7 @@ let scope_chain_of_focus ?(approval_strip_active = false)
   | Nav.Global -> approval_chords_only @ [ Global ]
   | Nav.Workspace_focused _ ->
       approval_unfocused @ [ Unfocused_nav; Global ]
-  | Nav.Dive_focused _ ->
+  | Nav.Inspector_focused _ ->
       approval_unfocused @ [ Unfocused_nav; Global ]
   | Nav.Ask_choice_focused ->
       [ Ask_choice_focused ] @ approval_unfocused @ [ Unfocused_nav; Global ]

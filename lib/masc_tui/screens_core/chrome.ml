@@ -22,7 +22,7 @@ type frame_layout = {
 }
 
 let has_sub_tab_bar (model : Model.t) =
-  match Model.active_dive model with
+  match Model.active_inspector model with
   | Some _ -> true
   | None -> (
       match model.nav.workspace with
@@ -608,7 +608,7 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
     let keeper_focus_context =
       (not (Model.is_keeper_config_active model))
       && Option.is_none model.nav.overlay
-      && Option.is_none (Model.active_dive model)
+      && Option.is_none (Model.active_inspector model)
       && Nav.equal_workspace model.nav.workspace Nav.Keepers
       && Option.is_some (Model.selected_keeper_name model)
       && (model.nav.pane_index >= 1 || model.nav.zoomed)
@@ -636,7 +636,7 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
           else ""
         in
         (hint, whisper_style)
-      else if Option.is_some (Model.active_dive model) then
+      else if Option.is_some (Model.active_inspector model) then
         let txt =
           if compact then "[Esc]"
           else Say.resolve lang (Say.make ~ko:"[Esc] 뒤로" ~en:"[Esc] Back")
@@ -661,7 +661,7 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
         in
         (txt, whisper_style)
       else if
-        Option.is_none (Model.active_dive model)
+        Option.is_none (Model.active_inspector model)
         && Nav.equal_workspace model.nav.workspace Nav.Keepers
         && model.nav.pane_index >= 1
         && Option.is_some (Model.selected_keeper_name model)
@@ -810,12 +810,8 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
         end
       end
     in
-    let dive_root_label = function
-      | Nav.Dive_work _ -> Nav.workspace_label Nav.Work
-      | Nav.Dive_runtime _ -> Nav.workspace_label Nav.Runtime
-    in
-    let dive_segment_label = function
-      | Nav.Dive_work (Nav.Verification_dive id) ->
+    let inspector_crumb = function
+      | Nav.Verification_inspector id ->
           let tab_tag =
             match model.work.verification_dive_tab with
             | Work_store.Verif_tab_evidence -> ""
@@ -825,28 +821,29 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
                 " [" ^ Say.resolve lang (Say.make ~ko:"명세" ~en:"Specs") ^ "]"
             | Work_store.Verif_tab_tlc -> " [TLC]"
           in
-          Say.resolve lang (Say.make ~ko:"검증" ~en:"Verify")
-          ^ " " ^ id ^ tab_tag
-      | Nav.Dive_runtime (Nav.Tool_dive name) ->
-          Say.resolve lang (Say.make ~ko:"도구" ~en:"Tool") ^ " " ^ name
-      | Nav.Dive_runtime (Nav.Skill_dive ref_s) ->
-          Say.resolve lang (Say.make ~ko:"스킬" ~en:"Skill") ^ " " ^ ref_s
-      | Nav.Dive_runtime (Nav.Exact_run_dive run_id) ->
-          Say.resolve lang (Say.make ~ko:"Exact실행" ~en:"Exact Run") ^ " " ^ run_id
+          let root = Say.resolve lang (Nav.workspace_label Nav.Work) in
+          let seg =
+            Say.resolve lang (Say.make ~ko:"검증" ~en:"Verify")
+            ^ " " ^ id ^ tab_tag
+          in
+          root ^ " " ^ Glyph.to_utf8 Glyph.Prompt_caret ^ " " ^ seg
+      | Nav.Tool_inspector name ->
+          Say.resolve lang (Nav.workspace_label Nav.Runtime)
+          ^ " " ^ Glyph.to_utf8 Glyph.Prompt_caret ^ " "
+          ^ Say.resolve lang (Say.make ~ko:"도구" ~en:"Tool") ^ " " ^ name
+      | Nav.Skill_inspector ref_s ->
+          Say.resolve lang (Nav.workspace_label Nav.Runtime)
+          ^ " " ^ Glyph.to_utf8 Glyph.Prompt_caret ^ " "
+          ^ Say.resolve lang (Say.make ~ko:"스킬" ~en:"Skill") ^ " " ^ ref_s
+      | Nav.Exact_run_inspector run_id ->
+          Say.resolve lang (Nav.workspace_label Nav.Runtime)
+          ^ " " ^ Glyph.to_utf8 Glyph.Prompt_caret ^ " "
+          ^ Say.resolve lang (Say.make ~ko:"Exact실행" ~en:"Exact Run")
+          ^ " " ^ run_id
     in
-    let format_dive_chain () =
-      let chain = List.rev model.nav.dive_stack in
-      match chain with
-      | [] -> ""
-      | first :: _ ->
-          let sep = " " ^ Glyph.to_utf8 Glyph.Prompt_caret ^ " " in
-          let root = Say.resolve lang (dive_root_label first) in
-          let segs = List.map dive_segment_label chain in
-          String.concat sep (root :: segs)
-    in
-    (match Model.active_dive model with
-     | Some (Nav.Dive_work _ | Nav.Dive_runtime _) ->
-         let crumb = format_dive_chain () in
+    (match Model.active_inspector model with
+     | Some insp ->
+         let crumb = inspector_crumb insp in
          let adv =
            Cell_grid.put_text ~clip:tabs_clip grid ~x:!x ~y:rect.y
              ~style:crumb_style crumb
@@ -1426,8 +1423,8 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           Option.is_none model.nav.overlay
           && (not (Model.is_keeper_config_active model))
           &&
-          match Model.active_dive model with
-          | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> true
+          match Model.active_inspector model with
+          | Some _ -> true
           | None ->
               Nav.equal_workspace model.nav.workspace Nav.Pulse
               || Model.is_in_keeper_chat model
@@ -1477,13 +1474,13 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
               | Nav.System_gate _ ) ->
               false
           | None -> (
-              match Model.active_dive model with
-              | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> false
+              match Model.active_inspector model with
+              | Some _ -> false
               | None -> not (Nav.equal_workspace model.nav.workspace Nav.Pulse))
         in
         let show_esc_hint =
           Option.is_some model.nav.overlay
-          || Option.is_some (Model.active_dive model)
+          || Option.is_some (Model.active_inspector model)
           || Drafts.is_focused model.drafts
           || model.nav.filter_focused
           || Model.sidebar_has_focus model
@@ -1494,7 +1491,7 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
               match model.knowledge.thread_view with
               | Knowledge_store.Thread_comments -> true
               | Knowledge_store.Thread_post -> false)
-          || (Option.is_none (Model.active_dive model)
+          || (Option.is_none (Model.active_inspector model)
               && Knowledge_store.is_memory_diff_pinned model.knowledge
               && ((Nav.equal_workspace model.nav.workspace Nav.Knowledge
                    && Nav.equal_knowledge_tab model.knowledge.active_tab
@@ -1503,7 +1500,7 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
                       && Nav.equal_keeper_tab model.fleet.keeper_dive_tab
                            Nav.Keeper_memory)))
           || (model.infra.show_raw_json
-              && Option.is_none (Model.active_dive model)
+              && Option.is_none (Model.active_inspector model)
               && Model.detail_visible model
               && ((Nav.equal_workspace model.nav.workspace Nav.Work
                    && (Nav.equal_work_tab model.work.active_tab Nav.Work_pipeline
@@ -1522,19 +1519,19 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           || Option.is_some model.keeper_stop_armed
           || Option.is_some model.quit_armed_at
           || Option.is_some model.knowledge.pending_wiki_edit_slug
-          || (Option.is_none (Model.active_dive model)
+          || (Option.is_none (Model.active_inspector model)
               && Nav.equal_workspace model.nav.workspace Nav.Infra
               && Nav.equal_infra_tab model.infra.active_tab Nav.Infra_code
               && not
                    (Infra_store.equal_code_right_mode
                       model.infra.code.right_mode Infra_store.Code_file))
-          || (Option.is_none (Model.active_dive model)
+          || (Option.is_none (Model.active_inspector model)
               && Nav.equal_workspace model.nav.workspace Nav.Runtime
               && Nav.equal_runtime_tab model.runtime.active_tab
                    Nav.Runtime_addons_browser
               && model.runtime.addon_catalog_mode)
           || Model.is_keeper_config_active model
-          || (Option.is_none (Model.active_dive model)
+          || (Option.is_none (Model.active_inspector model)
               && Nav.equal_workspace model.nav.workspace Nav.Keepers
               && Nav.equal_keeper_tab model.fleet.keeper_dive_tab
                    Nav.Keeper_work_sandbox
@@ -2152,7 +2149,7 @@ let render_frame ~(model : Model.t) ~cache ~render_body ~render_overlay grid =
           let progress_in_chat =
             (* The chat needs two inner rows to reserve its status strip. *)
             layout.body.h >= 4
-            && Option.is_none (Model.active_dive model)
+            && Option.is_none (Model.active_inspector model)
             && Nav.equal_workspace model.nav.workspace Nav.Keepers
             && Nav.equal_keeper_tab model.fleet.keeper_dive_tab Nav.Keeper_chat
             && (model.nav.zoomed

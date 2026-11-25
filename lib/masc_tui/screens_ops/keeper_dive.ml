@@ -1886,7 +1886,7 @@ let render_memory_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t
         let _, content = Rect.split_v content ~top_h:chart_rows in
         let max_skip = Int.max 0 (line_count - content.h) in
         let skip =
-          Int.min max_skip (Int.max 0 model.nav.dive_scroll_offset)
+          Int.min max_skip (Int.max 0 model.nav.keeper_detail_scroll_offset)
         in
         let y = ref content.y and bot = Rect.bottom content in
         List.iter
@@ -2056,7 +2056,7 @@ let render_memory_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t
     in
     Masc_tui_screens_core.Memory_explorer.render_keeper_memory ~grid
       ~rect:content ~theme ~bp:(Ops_common.layout_bp model) ~model ~keeper:name
-      ~focused ~diff_scroll:model.nav.dive_scroll_offset;
+      ~focused ~diff_scroll:model.nav.keeper_detail_scroll_offset;
     draw_librarian_footer writer_status_opt
     end
 
@@ -2602,7 +2602,7 @@ let render_work_sandbox_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
     let rows = List.rev !rows_acc in
     let vis_h = Int.max 1 l_content.h in
     let max_skip = Int.max 0 (List.length rows - vis_h) in
-    let skip = Int.min max_skip (Int.max 0 model.nav.dive_scroll_offset) in
+    let skip = Int.min max_skip (Int.max 0 model.nav.keeper_detail_scroll_offset) in
     let y = ref l_content.y in
     let bottom = Rect.bottom l_content in
     List.iter

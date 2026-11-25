@@ -337,8 +337,8 @@ let active_memory_content_rect (m : Model.t) =
     match chrome_body_rect m with
     | None -> None
     | Some (bp, body) -> (
-        match Model.active_dive m with
-        | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> None
+        match Model.active_inspector m with
+        | Some _ -> None
         | None -> (
             match m.nav.workspace with
             | Nav.Keepers

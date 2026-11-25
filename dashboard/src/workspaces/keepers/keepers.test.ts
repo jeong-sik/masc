@@ -1499,7 +1499,9 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
       }
       if (url.includes('/infra/sandboxes')) {
         if (++sandboxReads === 1) return firstSandbox
-        return json({ error: 'No sandbox telemetry' }, 404)
+        if (sandboxReads === 2) return json({ error: 'No sandbox telemetry' }, 404)
+        return json({ schema_version: 1, instance_id: 'i1', generated_at_unix: 1,
+          data: { keeper, probe_state: { kind: 'fresh' }, sandbox: { backend: 'microvm' } } })
       }
       if (url.endsWith('/operator-note')) {
         if (init?.method === 'POST') {
@@ -1514,7 +1516,7 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     const view = render(html`<${KeeperWorkSandboxTab} keeperName=${keeper} onNavigate=${vi.fn()} onInspect=${vi.fn()} />`)
     await view.findByText('Inspect local cache')
     expect(view.getByRole('region', { name: 'Keeper 샌드박스 상태' }).textContent).toContain('샌드박스 불러오는 중')
-    expect(view.queryByText('등록된 샌드박스 텔레메트리 없음')).toBeNull()
+    expect(view.queryByText('현재 조회에서 샌드박스 텔레메트리 행을 찾지 못했습니다.')).toBeNull()
 
     const note = view.getByLabelText('운영자 노트 입력') as HTMLTextAreaElement
     fireEvent.input(note, { target: { value: 'Temporary draft' } })
@@ -1527,7 +1529,10 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     expect(note.value).toBe('')
     await view.findByRole('alert')
     fireEvent.click(view.getByRole('button', { name: '샌드박스 다시 읽기' }))
-    await view.findByText('등록된 샌드박스 텔레메트리 없음')
+    await view.findByText('현재 조회에서 샌드박스 텔레메트리 행을 찾지 못했습니다.')
+    fireEvent.click(view.getByRole('button', { name: '샌드박스 다시 읽기' }))
+    await view.findByText('microvm')
+    expect(sandboxReads).toBe(3)
     expect(mockFetch.mock.calls.filter(([url]) => String(url).includes('/dashboard/execution'))).toHaveLength(1)
 
     fireEvent.input(note, { target: { value: 'Save this draft' } })
@@ -1541,6 +1546,122 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     expect(saves).toEqual([{ text: 'Save this draft' }])
     expect(note.value).toBe('Keep editing during the save')
     expect(view.getByText('저장되지 않은 초안')).toBeTruthy()
+  })
+
+  it.each([
+    { stale: true, partial: true, matching: true },
+    { stale: true, partial: false, matching: false },
+    { stale: false, partial: true, matching: false },
+  ])('qualifies Keeper matches in the workspace sample (stale=$stale, partial=$partial, match=$matching)', async ({ stale, partial, matching }) => {
+    const keeper = 'hermes'
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+      if (String(input).endsWith('/dashboard/execution?light=true')) return Response.json({
+        tasks: [{ id: 't-sample', title: 'Retained review', assignee: matching ? keeper : 'other' }],
+        task_counts: { total: partial ? 25 : 1, shown: 1 },
+        projection_diagnostics: {
+          cache_state: stale ? 'stale' : 'fresh', last_success_at: '2026-11-25T03:00:00Z',
+          stale_reason: stale ? 'refresh unavailable' : null,
+        },
+      })
+      return Response.json({}, { status: 404 })
+    })
+    const view = render(html`<${KeeperWorkSandboxTab} keeperName=${keeper} onNavigate=${vi.fn()} onInspect=${vi.fn()} />`)
+    const region = view.getByRole('region', { name: '연결된 작업' })
+    await waitFor(() => expect(region.textContent).toContain(stale ? 'refresh unavailable' : '작업공간 전체 25건 중 1건 조회'))
+    expect(region.textContent?.includes('2026-11-25T03:00:00Z')).toBe(stale)
+    expect(region.textContent?.includes('작업공간 전체 25건 중 1건 조회')).toBe(partial)
+    expect(region.textContent).not.toContain('Linked Tasks (25)')
+    if (matching) expect(view.getByText('Retained review')).toBeTruthy()
+    else {
+      expect(region.textContent).not.toContain('Linked Tasks (0)')
+      expect(region.textContent).not.toContain('조회된 담당 작업 없음')
+    }
+  })
+
+  it('reads only workspace tasks and sandbox in multi-account mode and offers no local note actions', async () => {
+    authSession.value = {
+      kind: 'multi_account_signed_in', mode: 'multi_account', accountId: 'acct-1', displayName: 'Operator',
+      email: null, role: 'admin', csrfToken: 'csrf-test', workspaceId: 'default',
+      authMethods: { google: true, github: false, dev_token: false },
+    }
+    const paths: string[] = []
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'http://localhost')
+      paths.push(url.pathname + url.search)
+      if (url.pathname.endsWith('/execution')) return Response.json({ tasks: [], task_counts: { total: 0, shown: 0 } })
+      return Response.json({}, { status: 404 })
+    })
+    const work = render(html`<${KeeperWorkSandboxTab} keeperName="hermes" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`)
+    await work.findByText('조회된 담당 작업 없음')
+    await work.findByText('현재 조회에서 샌드박스 텔레메트리 행을 찾지 못했습니다.')
+    expect(work.container.textContent).toContain('단일 계정 모드')
+    expect(work.queryByRole('textbox', { name: '운영자 노트 입력' })).toBeNull()
+    expect(work.queryByRole('button', { name: '운영자 노트 저장' })).toBeNull()
+    expect(paths.sort()).toEqual(['/api/v1/dashboard/execution?light=true', '/api/v1/infra/sandboxes/hermes'])
+  })
+
+  it.each([true, false])('shows tool coverage gaps with only observed rows (rows=%s)', async withRows => {
+    const gap = { stale_reason: 'trajectory append failed' }
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/tool-stats')) return Response.json({
+        health: 'coverage_gap', stale_reason: gap.stale_reason, coverage_gaps: [gap],
+        total_entries: Number(withRows), tools: withRows ? [{ name: 'retained-stat', call_count: 1 }] : [],
+        projection_diagnostics: { cache_state: 'stale', stale_reason: 'cached observation' },
+      })
+      if (url.includes('/tool-calls')) return Response.json({
+        health: 'coverage_gap', stale_reason: 'IO row was dropped', coverage_gaps: [{ stale_reason: 'IO row was dropped' }],
+        count: Number(withRows), entries: withRows ? [{ ts: 1, tool: 'retained-call', wire_outcome: 'ok' }] : [],
+      })
+      return Response.json({}, { status: 404 })
+    })
+    const view = render(html`<${KeeperWorkSandboxTab} keeperName="hermes" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`)
+    const stats = view.getByRole('region', { name: '도구 호출 통계' })
+    const calls = view.getByRole('region', { name: '도구 호출 내역' })
+    await waitFor(() => expect(stats.textContent).toContain(gap.stale_reason))
+    expect(stats.textContent).toContain('cached observation')
+    expect(calls.textContent).toContain('IO row was dropped')
+    if (withRows) {
+      expect(stats.textContent).toContain('retained-stat')
+      expect(calls.textContent).toContain('retained-call')
+    } else {
+      expect(stats.textContent).not.toContain('0 calls')
+      expect(stats.textContent).not.toContain('24h 도구 통계 없음')
+      expect(calls.textContent).not.toContain('Tool Calls (0)')
+      expect(calls.textContent).not.toContain('도구 호출 기록 없음')
+    }
+  })
+
+  it('distinguishes a retained empty stats projection from a fresh empty calls source', async () => {
+    const empty = { health: 'empty', stale_reason: 'no_entries', coverage_gaps: [] }
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/tool-stats')) return Response.json({
+        ...empty, total_entries: 0, tools: [], projection_diagnostics: { cache_state: 'stale', stale_reason: 'refresh interrupted' },
+      })
+      if (url.includes('/tool-calls')) return Response.json({ ...empty, count: 0, entries: [] })
+      return Response.json({}, { status: 404 })
+    })
+    const view = render(html`<${KeeperWorkSandboxTab} keeperName="hermes" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`)
+    await view.findByText('도구 호출 기록 없음')
+    const stats = view.getByRole('region', { name: '도구 호출 통계' })
+    expect(stats.textContent).toContain('refresh interrupted')
+    expect(stats.textContent).not.toContain('0 calls')
+    expect(stats.textContent).not.toContain('24h 도구 통계 없음')
+  })
+
+  it('does not turn recovered tool coverage gaps into a current failure', async () => {
+    const history = { health: 'ok', stale_reason: null, coverage_gaps: [{ stale_reason: 'recovered append error' }] }
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/tool-stats')) return Response.json({ ...history, total_entries: 1, tools: [{ name: 'rg', call_count: 1 }] })
+      if (url.includes('/tool-calls')) return Response.json({ ...history, count: 1, entries: [{ ts: 1, tool: 'rg' }] })
+      return Response.json({}, { status: 404 })
+    })
+    const view = render(html`<${KeeperWorkSandboxTab} keeperName="hermes" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`)
+    await view.findByRole('heading', { name: 'Tool Calls (1)' })
+    expect(view.getByRole('heading', { name: 'Tool Stats (24h · 1 calls)' })).toBeTruthy()
+    expect(view.container.textContent).not.toContain('recovered append error')
   })
 
   it('keeps Keeper facts visible when Journal fails and reports an already absent fact as such', async () => {

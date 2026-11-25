@@ -1708,7 +1708,7 @@ let draw_keeper_status_strip grid ~(rect : Rect.t) ~(theme : Theme.t)
   end
 
 let render_chat_tab ?history_rows grid ~(rect : Rect.t) ~(theme : Theme.t)
-    ~(model : Model.t) ~name keeper_opt =
+    ~(model : Model.t) ~name ~activity keeper_opt =
   if Rect.is_empty rect then ()
   else
     let status_h = if rect.h >= 2 then 1 else 0 in
@@ -1788,7 +1788,6 @@ let render_chat_tab ?history_rows grid ~(rect : Rect.t) ~(theme : Theme.t)
       end
     end;
     if status_h = 1 then
-      let activity = Chat_transcript.live_chat_phase_badge ~model ~keeper:name in
       draw_keeper_status_strip grid ~rect:status_rect ~theme ~model ~activity
 
 (* --- Tab 2: Memory (Rich Explorer + 24-bin Age Ladder + Braille Trend + Librarian) --- *)
@@ -3740,14 +3739,49 @@ let render_tabs_body ?history_rows ~embedded ~name ~tab ~(model : Model.t) ~cach
   if Rect.is_empty rect then ()
   else
     let theme = Ops_common.theme_of_model model in
-    let keeper_opt = Fleet_store.find_keeper ~name model.fleet in
+    let keeper_opt =
+      Fleet_store.find_keeper ~name model.fleet
+      |> Option.map (fun (keeper : Wire_fleet.keeper_summary) ->
+           match Chat_transcript.fresh_turn_state ~model ~keeper:name with
+           | Some (Wire_fleet.Turn_active turn) -> { keeper with active_turn = Some turn }
+           | Some Wire_fleet.Turn_idle ->
+               let health =
+                 match keeper.health with
+                 | Wire_fleet.Keeper_working -> Wire_fleet.Keeper_idle
+                 | ( Wire_fleet.Keeper_healthy | Wire_fleet.Keeper_idle | Wire_fleet.Keeper_degraded
+                   | Wire_fleet.Keeper_recovering | Wire_fleet.Keeper_failing | Wire_fleet.Keeper_paused
+                   | Wire_fleet.Keeper_offline | Wire_fleet.Keeper_booting ) as health -> health
+               in
+               { keeper with active_turn = None; health }
+           | Some (Wire_fleet.Turn_unavailable _) | None -> keeper)
+    in
+    let chat_activity =
+      if Nav.equal_keeper_tab tab Nav.Keeper_chat then
+        Chat_transcript.live_chat_phase_badge ~model ~keeper:name
+      else None
+    in
     let has_attn = Ops_common.keeper_has_attention model.attention name in
     let badge_opt =
+      let badge =
+        match keeper_opt with
+        | None -> chat_activity
+        | Some keeper ->
+            let activity_visible =
+              match keeper.health with
+              | Wire_fleet.Keeper_working | Wire_fleet.Keeper_healthy | Wire_fleet.Keeper_idle ->
+                  not has_attn
+              | Wire_fleet.Keeper_degraded | Wire_fleet.Keeper_recovering | Wire_fleet.Keeper_failing
+              | Wire_fleet.Keeper_paused | Wire_fleet.Keeper_offline | Wire_fleet.Keeper_booting ->
+                  false
+            in
+            match chat_activity with
+            | Some _ when activity_visible -> chat_activity
+            | Some _ | None -> Some (Ops_common.keeper_live_status ~has_attention:has_attn keeper)
+      in
       Option.map
-        (fun k ->
-          let g, tok, lbl = Ops_common.keeper_live_status ~has_attention:has_attn k in
+        (fun (g, tok, lbl) ->
           { Card.glyph = Some g; text = Say.resolve model.lang lbl; tone = Some tok })
-        keeper_opt
+        badge
     in
     let tools_mode_pill =
       if Nav.equal_keeper_tab tab Nav.Keeper_chat then
@@ -4083,7 +4117,7 @@ let render_tabs_body ?history_rows ~embedded ~name ~tab ~(model : Model.t) ~cach
         match tab with
         | Nav.Keeper_chat ->
             render_chat_tab ?history_rows grid ~rect:content_rect ~theme ~model
-              ~name keeper_opt
+              ~name ~activity:chat_activity keeper_opt
         | Nav.Keeper_trace ->
             render_trace_tab grid ~rect:content_rect ~theme ~model ~name
         | Nav.Keeper_memory ->

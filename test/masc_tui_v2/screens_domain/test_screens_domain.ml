@@ -4186,7 +4186,7 @@ let test_wave2_tools_artifacts_board_renders () =
   Alcotest.(check bool) "Artifact_dive Raw shows raw HTML source" true
     (contains_sub ~needle:"<h1>Wave 2 Table</h1>" ~haystack:(grid_all_text g_raw));
 
-  (* 3. Board Thread_dive threaded comments depth rails + armed vote banner *)
+  (* 3. Board thread view and nested comment selection. *)
   let p_root = Option.get (Knowledge_store.selected_post m_base.knowledge) in
   let c1 : Wire_knowledge.board_comment =
     {
@@ -4227,10 +4227,18 @@ let test_wave2_tools_artifacts_board_renders () =
           ~model:{ m_base with knowledge = k_armed } ~cache ~rect gr)
   in
   assert_grid_invariants ~label:"Wave2/ThreadDiveThreaded" g_th;
-  let txt_th = grid_all_text g_th in
-  Alcotest.(check bool) "Thread_dive renders parent & nested reply" true
-    (contains_sub ~needle:"Top level comment" ~haystack:txt_th
-     && contains_sub ~needle:"Nested reply comment" ~haystack:txt_th)
+  let selected_reply =
+    k_armed
+    |> Knowledge_store.toggle_thread_view
+    |> Knowledge_store.step_thread_comment ~post_id:p_root.id ~delta:1
+    |> Knowledge_store.selected_thread_comment ~post_id:p_root.id
+    |> Option.map (fun (row : Knowledge_store.threaded_comment) ->
+           (row.comment.id, row.comment.parent_id))
+  in
+  Alcotest.(check (option (pair string (option string))))
+    "Selecting the nested comment preserves its reply parent"
+    (Some (c2.id, Some c1.id)) selected_reply
+
 let () =
   Alcotest.run "masc_tui_screens_domain"
     [

@@ -704,12 +704,13 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ?fs ~cwd ~cwd_path ~timeout_s ~ac
              | Error err -> map_err err
              | Ok isolated_cwd ->
                let active_client : Runtime_acp_client.t option Atomic.t = Atomic.make None in
+               let mcp_server_name = Runtime_acp_client.bridge_server_name execution.driver in
                let bridge =
                  Runtime_official_client_mcp_http.start
                    ~sw:acp_sw
                    ~net
                    ~secure_random
-                   ~server_name:"masc"
+                   ~server_name:mcp_server_name
                    ~tool_specs:(fun () ->
                      [ `Assoc
                          [ "name", `String tool.name
@@ -806,7 +807,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ?fs ~cwd ~cwd_path ~timeout_s ~ac
                              ~timeout_s:(Some timeout_s)
                              ~permission_policy:
                                (Runtime_acp_client.Allow_masc_mcp_only
-                                  { mcp_server_name = "masc"
+                                  { mcp_server_name
                                   ; allowed_tool_names = [ tool.name ]
                                   })
                              ()

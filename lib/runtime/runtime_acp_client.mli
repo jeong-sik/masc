@@ -139,6 +139,11 @@ type driver_profile =
   ; env_set : (string * string) list
   ; default_strip_env : string list
   ; mcp_wiring : mcp_wiring
+  ; bridge_server_name : string
+      (** The name of the MCP server the session carries, which the host puts
+          in the names of its tools ([mcp__<server>__<tool>] for muse). Only
+          [A-Za-z0-9_] and no [__]: hosts replace other characters in a tool
+          name, and a name with [__] cannot be read back from it. *)
   ; mcp_identifier_syntaxes : mcp_identifier_syntax list
   ; system_prompt_channel : system_prompt_channel
   ; input_accounting : input_accounting
@@ -154,6 +159,13 @@ type driver_profile =
   }
 
 val profile_of_driver : driver -> driver_profile
+
+val bridge_server_name : driver -> string
+(** The name the Keeper, runtime verification and the ACP probe give the MCP
+    bridge they pass to the driver's host: [muse_code] uses [masc_keeper]
+    because its host refuses a session server named like one in the
+    operator's settings, a plugin or a [.mcp.json] it loads, and an entry for
+    MASC's own server can be named [masc]; the other drivers use [masc]. *)
 
 val validate_session_effort :
   driver:driver -> Llm_provider.Reasoning_effort.t option -> (unit, string) result

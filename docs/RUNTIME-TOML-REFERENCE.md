@@ -149,8 +149,8 @@ credential naming an absolute path (`oauth_source` for Antigravity); `env` and
 
   | Keeper `keeper.tools.native` | `run.toolset` | Tools the host offers |
   | --- | --- | --- |
-  | `none` | `["mcp__masc__*"]`, or `[]` when the bridge lists no tool | MASC's tools only |
-  | `read` | `["read_file","search","mcp__masc__*"]`, without the last entry when the bridge lists no tool | file read, file search, MASC's tools |
+  | `none` | `["mcp__masc_keeper__*"]`, or `[]` when the bridge lists no tool | MASC's tools only |
+  | `read` | `["read_file","search","mcp__masc_keeper__*"]`, without the last entry when the bridge lists no tool | file read, file search, MASC's tools |
   | `full` | not set | the host's default tools, among them shell, file writes, memory, cron, sub-agents, web fetch and web search |
 
   `read_file` is not limited to the workspace: a live session read
@@ -160,15 +160,20 @@ credential naming an absolute path (`oauth_source` for Antigravity); `env` and
   turn with `invalid run configuration: unknown tool` when a name in the list
   matches no tool. A server that lists no tool, one that `session/new` did not
   carry and one the host could not connect to all end that way, so MASC lists
-  `mcp__masc__*` only when the bridge lists a tool. The glob also matches the
-  tools of a server named `masc__<x>` from a trusted workspace `.mcp.json` or
-  the operator's muse settings. A server named `masc` in either place makes
-  `session/new` fail with `session MCP server name conflicts with a host or
-  plugin server` (-32030), because the session carries MASC's bridge under that
-  name; MASC gives the host no settings of its own, so Muse Code cannot start
-  a session while such a server exists. `args` must not contain
-  `run.toolset`, because the host refuses to start on a repeated key. Fusion and runtime verification
-  run Muse Code at `none`. MASC's own permission policy applies only to
+  `mcp__masc_keeper__*` only when the bridge lists a tool. The bridge is named
+  `masc_keeper`, not `masc`: the host refuses a session server that has the
+  name of one in the operator's muse settings, in a plugin or in a `.mcp.json`
+  it loads for the workspace (the workspace's own, or that of the repository
+  it is in; `session/new` fails with `session MCP server name conflicts with a
+  host or plugin server`, -32030). An entry for MASC's own server can be named
+  `masc`, as it is in the settings and `.mcp.json` this was measured against.
+  MASC gives the host no settings of its own, so those entries stay loaded:
+  under `none` and `read` the list leaves their tools out, under `full` the
+  host offers them. The glob also matches the tools of a server named
+  `masc_keeper__<x>`, and a server named `masc_keeper` in one of those places
+  still makes `session/new` fail. `args` must not contain `run.toolset`,
+  because the host refuses to start on a repeated key. Fusion and runtime
+  verification run Muse Code at `none`. MASC's own permission policy applies only to
   requests the host forwards. With the operator's muse settings on the
   `:ask-me` profile in `$XDG_CONFIG_HOME/muse/settings.json` (default
   `~/.config/muse/settings.json`) and the client in the `promptUnmatched` mode,

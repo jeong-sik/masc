@@ -6,7 +6,6 @@ module Host = Keeper_official_client_host
 module Session_store = Keeper_official_client_session_store
 module Acp = Runtime_acp_client
 
-let mcp_server_name = "masc"
 let config_error = Host.config_error
 let internal_error = Host.internal_error
 let rollover_threshold = 0.80
@@ -685,12 +684,12 @@ let run_serialized_turn
   | Eio.Mutex.Poisoned _ -> Error (acp_error_to_core_error Acp.Client_closed)
 ;;
 
-let start_mcp_bridge ~sw ~env ~pinned_tool_specs ~turn_slot ~turn_slot_mutex =
+let start_mcp_bridge ~driver ~sw ~env ~pinned_tool_specs ~turn_slot ~turn_slot_mutex =
   Runtime_official_client_mcp_http.start
     ~sw
     ~net:(Eio.Stdenv.net env)
     ~secure_random:(Eio.Stdenv.secure_random env)
-    ~server_name:mcp_server_name
+    ~server_name:(Acp.bridge_server_name driver)
     (* Pool_key pins tool_surface_sha256, so returning the pinned tool schemas
        unconditionally ensures tools/list serves the full MASC tool catalog
        during Acp.start and session/new before any turn_slot is bound. *)
@@ -789,6 +788,7 @@ let spawn_persistent_entry
            | Ok acp_cwd ->
              let bridge =
                start_mcp_bridge
+                 ~driver:config.driver
                  ~sw:keeper_sw
                  ~env
                  ~pinned_tool_specs
@@ -1041,6 +1041,7 @@ let make_stream_projection
       ~on_event
   : stream_projection
   =
+  let mcp_server_name = Acp.bridge_server_name driver in
   let stream_mu = Stdlib.Mutex.create () in
   let message_started = ref false in
   let finished = ref false in
@@ -2627,7 +2628,7 @@ let run_without_lifecycle
       in
       let permission_policy =
         Acp.permission_policy_of_posture
-          ~mcp_server_name
+          ~mcp_server_name:(Acp.bridge_server_name config.driver)
           ~allowed_tool_names
           native_posture
       in
@@ -2813,7 +2814,13 @@ let run_without_lifecycle
         let turn_slot = ref None in
         let turn_slot_mutex = Stdlib.Mutex.create () in
         let bridge =
-          start_mcp_bridge ~sw ~env ~pinned_tool_specs ~turn_slot ~turn_slot_mutex
+          start_mcp_bridge
+            ~driver:config.driver
+            ~sw
+            ~env
+            ~pinned_tool_specs
+            ~turn_slot
+            ~turn_slot_mutex
         in
         let mcp_server = Acp.mcp_http_server_of_bridge bridge in
         let acp_config : Acp.config =
@@ -3553,10 +3560,10 @@ module For_testing = struct
 
   let reconcile_prepared_tools = reconcile_prepared_tools
 
-  let start_mcp_bridge_for_specs ~sw ~env ~pinned_tool_specs =
+  let start_mcp_bridge_for_specs ~driver ~sw ~env ~pinned_tool_specs =
     let turn_slot = ref None in
     let turn_slot_mutex = Stdlib.Mutex.create () in
-    start_mcp_bridge ~sw ~env ~pinned_tool_specs ~turn_slot ~turn_slot_mutex
+    start_mcp_bridge ~driver ~sw ~env ~pinned_tool_specs ~turn_slot ~turn_slot_mutex
   ;;
 
   type pool_key = Pool_key.t =

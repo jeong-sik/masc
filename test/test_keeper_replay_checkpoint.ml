@@ -1184,6 +1184,36 @@ let test_native_response_groups_survive_visible_normalization () =
     (Option.is_none patched.working_context)
 ;;
 
+(* Turn 2764 of a Gemini Keeper (2026-11-25): the response was
+   [Text reply; carrier(target=text); Text ""], the signature riding a final
+   empty text part. The visible-text patch kept the first Text and dropped
+   the rest, so the carrier became the last block and the next request failed
+   before dispatch ("carrier targets text but its adjacent content block is
+   unsupported"). *)
+let test_exact_next_block_carrier_keeps_its_bound_text () =
+  let open Agent_core.Types in
+  let module Gemini = Agent_core.Llm_provider.Backend_gemini in
+  let carrier =
+    RedactedThinking
+      (Gemini.gemini_part_thought_signature_payload
+         ~target:Gemini.Gemini_text_part ~thought_signature:"c2lnbmF0dXJl")
+  in
+  let assistant = message Assistant [ Text "reply"; carrier; Text "" ] in
+  let cp = checkpoint [ message User [ Text "question" ]; assistant ] in
+  let patched =
+    Masc.Keeper_context_core.patch_checkpoint_last_assistant cp
+      ~session_id:"current-session" ~response_text:"collapsed display answer"
+  in
+  Alcotest.(check bool) "the carrier and its bound Text stay exact" true
+    (patched.messages = [ message User [ Text "question" ]; assistant ]);
+  match
+    Gemini.contents_of_messages ~supports_function_response_parts:false patched.messages
+  with
+  | (_ : Yojson.Safe.t list), (_ : Yojson.Safe.t option) -> ()
+  | exception Gemini.Gemini_api_error detail ->
+    Alcotest.fail ("the patched history no longer serializes for Gemini: " ^ detail)
+;;
+
 let test_inline_chat_carrier_survives_finalization_and_restore () =
   let module Provider = Agent_core.Llm_provider in
   let config = Provider.Provider_config.make
@@ -1454,6 +1484,8 @@ let () =
     [ ( "persistence"
       , [ Alcotest.test_case "native output groups preserve history" `Quick
             test_native_response_groups_survive_visible_normalization
+        ; Alcotest.test_case "exact-next-block carrier keeps its bound Text" `Quick
+            test_exact_next_block_carrier_keeps_its_bound_text
         ; Alcotest.test_case "inline Chat carrier survives finalization and disk restore" `Quick
             test_inline_chat_carrier_survives_finalization_and_restore
         ; Alcotest.test_case "default thinking preservation survives disk restore" `Quick

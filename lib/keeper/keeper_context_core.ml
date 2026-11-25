@@ -273,10 +273,15 @@ let patch_checkpoint_last_assistant
           patch_content replaced (block :: acc) rest
     in
     (* Native replay witnesses bind these exact content occurrences. A display
-       projection must not merge or remove the Text blocks they identify. *)
+       projection must not merge or remove the Text blocks they identify. The
+       witness is either message metadata or an [Exact_next_block] carrier in
+       the content itself (a Gemini part thoughtSignature): dropping the Text
+       after such a carrier leaves it bound to nothing, and the next request
+       fails before dispatch. *)
     let content =
       if List.mem_assoc Agent_core.Types.Response_replay.metadata_key msg.metadata
          || List.mem_assoc Agent_core.Types.Inline_content_replay.metadata_key msg.metadata
+         || Llm_provider.Provider_replay.binds_adjacent_block msg.Agent_core.Types.content
       then msg.Agent_core.Types.content
       else patch_content false [] msg.Agent_core.Types.content
     in

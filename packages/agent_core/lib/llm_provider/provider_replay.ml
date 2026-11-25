@@ -92,3 +92,22 @@ let decode data =
     with
     | Yojson.Json_error _ -> Malformed_replay Invalid_json)
 ;;
+
+let binds_adjacent_block (content : 'source Types.content_block_with list) =
+  List.exists
+    (function
+      | Types.RedactedThinking data ->
+        (match decode data with
+         | Replay { retention = Exact_next_block; payload = _ } -> true
+         | Not_replay | Malformed_replay _ -> false)
+      | Types.Text _
+      | Types.Thinking _
+      | Types.ReasoningDetails _
+      | Types.ToolUse _
+      | Types.ToolReference _
+      | Types.ToolResult _
+      | Types.Image _
+      | Types.Document _
+      | Types.Audio _ -> false)
+    content
+;;

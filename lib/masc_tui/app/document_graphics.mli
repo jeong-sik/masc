@@ -1,6 +1,8 @@
 (** Prepares visible Markdown diagrams and embedded PNG images offline.
     The cells containing the diagram remain the text fallback until its raster
-    has arrived. *)
+    fits the current frame's PNG payload budget. Visible raster requests use
+    the pixel budget, and ready placements use the aggregate base64 payload
+    bytes of their PNGs. *)
 
 type t
 type placement

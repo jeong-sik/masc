@@ -36,6 +36,8 @@
   eio_main
   unix
   yojson
+  base64
+  masc.masc_compression
   alcotest))
 
 (test

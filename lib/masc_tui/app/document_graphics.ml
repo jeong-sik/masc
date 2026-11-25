@@ -118,21 +118,18 @@ let request_preview t ~sw ~base_path ~on_ready request =
       on_ready ();
       `Stop_daemon)
 
-let with_preview_budget visible =
-  let _, _, accepted =
+let with_pixel_budget visible =
+  let _, accepted =
     List.fold_left
-      (fun (pixels, bytes, accepted) ((_, _, request) as item) ->
-        let pixel_cost, byte_cost =
+      (fun (pixels, accepted) ((_, _, request) as item) ->
+        let pixel_cost =
           match request with
-          | Mermaid request ->
-              let area = request.pixel_width * request.pixel_height in
-              (area, area * 4)
-          | Embedded image -> (image.width * image.height, String.length image.data_uri)
+          | Mermaid request -> request.pixel_width * request.pixel_height
+          | Embedded image -> image.width * image.height
         in
-        if pixel_cost > pixels || byte_cost > bytes then (pixels, bytes, accepted)
-        else (pixels - pixel_cost, bytes - byte_cost, item :: accepted))
-      (Graphics.document_png_pixel_budget, Graphics.document_png_transfer_budget, [])
-      visible
+        if pixel_cost > pixels then (pixels, accepted)
+        else (pixels - pixel_cost, item :: accepted))
+      (Graphics.document_png_pixel_budget, []) visible
   in
   List.rev accepted
 
@@ -160,7 +157,7 @@ let prepare t ~sw ~base_path ~on_ready ~(probe : Probe.observation) ~theme grid 
                  | Embedded_png image -> Embedded image
                in
                Graphics.resource_image_id index, rect, request)
-        |> with_preview_budget
+        |> with_pixel_budget
       in
       let is_visible request =
         List.exists (fun (_, _, current) -> same_request request current) visible
@@ -174,17 +171,26 @@ let prepare t ~sw ~base_path ~on_ready ~(probe : Probe.observation) ~theme grid 
           visible
           |> List.find_opt (fun (_, _, request) -> Option.is_none (cached request))
           |> Option.iter (fun (_, _, request) -> request_preview t ~sw ~base_path ~on_ready request));
-      List.filter_map
-        (fun (image_id, (rect : Rect.t), request) ->
-          match cached request with
-          | None | Some (_, None) -> None
-          | Some (_, Some raster) ->
-              let kitty_cells =
-                Graphics.fit_cells ~cell_pixels:probe.cell_pixels
-                  ~image_pixels:(Some raster.pixels) ~columns:rect.w ~rows:rect.h
-              in
-              Some { image_id; request; raster; rect; kitty_cells })
-        visible
+      let _, accepted =
+        List.fold_left
+          (fun (bytes, accepted) (image_id, (rect : Rect.t), request) ->
+            match cached request with
+            | None | Some (_, None) -> (bytes, accepted)
+            | Some (_, Some raster) ->
+                (* Kitty sends the actual PNG as padded base64. Count its
+                   payload without encoding it a second time. *)
+                let byte_cost = ((String.length raster.png + 2) / 3) * 4 in
+                if byte_cost > bytes then (bytes, accepted)
+                else
+                  let kitty_cells =
+                    Graphics.fit_cells ~cell_pixels:probe.cell_pixels
+                      ~image_pixels:(Some raster.pixels) ~columns:rect.w ~rows:rect.h
+                  in
+                  let placement = { image_id; request; raster; rect; kitty_cells } in
+                  (bytes - byte_cost, placement :: accepted))
+          (Graphics.document_png_transfer_budget, []) visible
+      in
+      List.rev accepted
 
 let mask_fallback grid ~style p = Cell_grid.fill_rect grid ~rect:p.rect ~style ()
 

@@ -40,6 +40,102 @@ let run_probe ~cache_dir ~ending ~stderr ~stdout =
   let result = Pele.render ~cache_dir ~runner ~raster sample_scene in
   (result, Option.get !request)
 
+let test_document_preview_transfer_budget () =
+  let module Document = Masc_tui_app.Document_graphics in
+  let module Grid = Masc_tui_term.Cell_grid in
+  let module Graphics = Masc_tui_term.Graphics in
+  let module Rect = Masc_tui_core.Rect in
+  let png ~width ~height ~noise_bytes =
+    let random = Random.State.make [| 54707 |] in
+    let rgba = String.init (width * height * 4) (fun index ->
+      if index < noise_bytes then Char.chr (Random.State.int random 256) else '\000')
+    in
+    match Rgb_png.encode_rgba ~width ~height ~rgba with
+    | Ok png -> Base64.encode_string png
+    | Error message -> fail message
+  in
+  let mermaid = png ~width:1024 ~height:600 ~noise_bytes:1_280_000 in
+  let small = png ~width:1 ~height:1 ~noise_bytes:0 in
+  let large = png ~width:350 ~height:240 ~noise_bytes:336_000 in
+  let budget = Graphics.document_png_transfer_budget in
+  check bool "diagram and small PNG fit" true
+    (String.length mermaid + String.length small <= budget);
+  check bool "all three exceed the transfer budget" true
+    (String.length mermaid + String.length small + String.length large > budget);
+  let embedded data =
+    let uri = "data:image/png;base64," ^ data in
+    match Graphics.embedded_png_of_uri uri with
+    | Some image -> Grid.Embedded_png image
+    | None -> fail "fixture PNG is admissible on its own"
+  in
+  let grid = Grid.create ~cols:128 ~rows:32 in
+  let register y count source =
+    let rows = { Grid.source; count } in
+    for index = 0 to count - 1 do
+      let rect = Rect.make ~x:0 ~y:(y + index) ~w:128 ~h:1 in
+      Grid.register_document_image_part grid ~rect { rows; index; left_inset = 0 }
+    done
+  in
+  register 0 30 (Grid.Mermaid "graph TD; A-->B");
+  register 30 1 (embedded small);
+  register 31 1 (embedded large);
+  with_cache (fun base_path ->
+      let png_path = Filename.concat base_path "diagram.png" in
+      let script = Filename.concat base_path "masc-pele" in
+      let cache = Pele.cache_dir ~base_path in
+      let original_path = Sys.getenv_opt "PATH" in
+      Fun.protect
+        ~finally:(fun () ->
+          (match original_path with Some value -> Unix.putenv "PATH" value | None -> Unix.unsetenv "PATH");
+          Sys.remove script;
+          Sys.remove png_path;
+          Unix.rmdir cache;
+          Unix.rmdir (Filename.dirname cache);
+          Unix.rmdir (Filename.dirname (Filename.dirname cache)))
+        (fun () ->
+          write_file png_path (Base64.decode_exn mermaid);
+          write_file script
+            (Printf.sprintf "#!/bin/sh\nprintf 'masc-pele-protocol:1\\n'\nexec cat %s\n"
+               (Filename.quote png_path));
+          Unix.chmod script 0o700;
+          Unix.putenv "PATH" (base_path ^ ":" ^ Option.value original_path ~default:"/usr/bin:/bin");
+          let probe =
+            { Probe.empty_observation with graphics = Some Probe.Graphics_supported;
+              cell_pixels = Some (8, 20) }
+          in
+          Eio_main.run @@ fun _ ->
+          Eio.Switch.run @@ fun sw ->
+          let doc = Document.create () in
+          let prepare () =
+            let ready, signal = Eio.Promise.create () in
+            let placements =
+              Document.prepare doc ~sw ~base_path ~probe ~theme:Masc_tui_core.Theme.default
+                ~on_ready:(fun () -> Eio.Promise.resolve signal ()) grid
+            in
+            placements, ready
+          in
+          let transferred index payload =
+            let prefix = Printf.sprintf "_Gf=100,a=T,i=%d," (Graphics.resource_image_id index) in
+            String.split_on_char '\x1b' payload
+            |> List.exists (String.starts_with ~prefix)
+          in
+          let present placements =
+            Document.after_present doc ~in_tmux:false ~full_repaint:true placements
+          in
+          let _, diagram_ready = prepare () in
+          Eio.Promise.await diagram_ready;
+          let placements, small_ready = prepare () in
+          check bool "1024x600 Mermaid was rasterized and sent" true
+            (transferred 0 (present placements));
+          Eio.Promise.await small_ready;
+          let _, large_ready = prepare () in
+          Eio.Promise.await large_ready;
+          let placements, _ = prepare () in
+          let payload = present placements in
+          check bool "Mermaid payload sent" true (transferred 0 payload);
+          check bool "small embedded payload sent" true (transferred 1 payload);
+          check bool "later embedded payload exceeds remaining bytes" false (transferred 2 payload)))
+
 let test_pele_confirmed_protocol_v1 () =
   with_cache (fun cache_dir ->
       let palette =
@@ -650,6 +746,8 @@ let () =
     [
       ( "pele",
         [
+          test_case "document preview caps actual PNG payloads across both sources"
+            `Quick test_document_preview_transfer_budget;
           test_case "protocol v1 confirmed Mermaid/Svg/Graph + palette colors"
             `Quick test_pele_confirmed_protocol_v1;
           test_case "unconfirmed output, errors, deadline & cancellation" `Quick

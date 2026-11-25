@@ -53,12 +53,11 @@ type account = {
   email : t;
   plan : string list;
       (** The client's own plan labels, as reported, in a fixed order per
-          client; absent labels are left out. Codex: the ID token's
+          client. Absent or invalid labels are omitted. Codex: the ID token's
           [https://api.openai.com/auth.chatgpt_plan_type]. Claude Code:
           [oauthAccount.organizationType], [organizationRateLimitTier],
           [userRateLimitTier] (key names read on 2026-11-25). Antigravity: none.
-          A label that is present but not displayable text makes the read
-          [Source_unrecognized]. Display only, never routing or admission. *)
+          The labels describe the account for display. *)
 }
 
 val read_account : login_source -> (account, missing) result

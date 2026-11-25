@@ -83,16 +83,10 @@ let email_in_id_token path json =
    Codex [promax] or Claude [claude_max]), shown as reported. It is display
    text only, so it passes the same displayable-text check as an email. *)
 let plan_at paths json =
-  List.fold_right (fun path labels ->
-    let* labels = labels in
-    let* value = at path json in
-    match value with
-    | None -> Ok labels
-    | Some (`String text) ->
-      (match of_string text with
-       | Some label -> Ok (to_string label :: labels)
-       | None -> Error Source_unrecognized)
-    | Some _ -> Error Source_unrecognized) paths (Ok [])
+  List.filter_map (fun path ->
+    match at path json with
+    | Ok (Some (`String text)) -> Option.map to_string (of_string text)
+    | Ok (None | Some _) | Error _ -> None) paths
 
 type account = { email : t; plan : string list }
 
@@ -110,14 +104,12 @@ let codex_account bytes =
   | Some token ->
     let* claims = id_token_claims token in
     let* email = email_at [ "email" ] claims in
-    let* plan = plan_at codex_plan_paths claims in
-    Ok { email; plan }
+    Ok { email; plan = plan_at codex_plan_paths claims }
 
 let claude_account bytes =
   let* json = parse bytes in
   let* email = email_at [ "oauthAccount"; "emailAddress" ] json in
-  let* plan = plan_at claude_plan_paths json in
-  Ok { email; plan }
+  Ok { email; plan = plan_at claude_plan_paths json }
 
 let of_codex_auth bytes =
   let* json = parse bytes in

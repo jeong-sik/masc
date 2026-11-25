@@ -370,25 +370,35 @@ let plan_labels_ride_with_the_email () = fixture (fun directory _ ->
   let claude_home = Filename.concat directory "claude-plan" in
   let codex_home = Filename.concat directory "codex-plan" in
   List.iter (fun home -> Unix.mkdir home 0o700) [claude_home;codex_home];
-  write (Filename.concat claude_home ".claude.json")
+  let claude_path = Filename.concat claude_home ".claude.json" in
+  let write_codex_claims claims =
+    write (Runtime_verification_codex_home.auth_path ~codex_home)
+      (Printf.sprintf {|{"tokens":{"id_token":%S}}|} (id_token claims)) in
+  write claude_path
     {|{"oauthAccount":{"emailAddress":"claude@example.com","organizationType":"claude_team","organizationRateLimitTier":"org_tier","userRateLimitTier":"user_tier"}}|};
-  write (Runtime_verification_codex_home.auth_path ~codex_home)
-    (Printf.sprintf {|{"tokens":{"id_token":%S}}|}
-       (id_token {|{"email":"codex@example.com","https://api.openai.com/auth":{"chatgpt_plan_type":"team"}}|}));
+  write_codex_claims {|{"email":"codex@example.com","https://api.openai.com/auth":{"chatgpt_plan_type":"team"}}|};
   let claude = email_batch_provider ~home:claude_home "claude" in
   let codex = {(email_batch_provider ~home:codex_home "codex") with Runtime_schema.api_format=Codex_app_server_runtime} in
-  let plan_of = function
+  let account_of = function
     | `Assoc fields ->
-      (match List.assoc_opt "plan" fields with
-       | Some (`List labels) -> List.map (function `String label -> label | _ -> fail "plan label is not text") labels
-       | _ -> fail "row has no plan list")
+      (match List.assoc_opt "state" fields, List.assoc_opt "email" fields, List.assoc_opt "plan" fields with
+       | Some (`String "read"), Some (`String email), Some (`List labels) ->
+         email, List.map (function `String label -> label | _ -> fail "plan label is not text") labels
+       | _ -> fail "expected a read account with an email and plan list")
     | _ -> fail "row is not an object" in
-  match Email.providers_json [claude;codex] with
-  | `List [claude_row;codex_row] ->
-    check (list string) "Claude plan labels keep the declared order"
-      ["claude_team";"org_tier";"user_tier"] (plan_of claude_row);
-    check (list string) "Codex plan comes from the ID token claim" ["team"] (plan_of codex_row)
-  | _ -> fail "expected two account rows")
+  let check_accounts claude_plan codex_plan =
+    match Email.providers_json [claude;codex] with
+    | `List [claude_row;codex_row] ->
+      check (pair string (list string)) "Claude account"
+        ("claude@example.com", claude_plan) (account_of claude_row);
+      check (pair string (list string)) "Codex account"
+        ("codex@example.com", codex_plan) (account_of codex_row)
+    | _ -> fail "expected two account rows" in
+  check_accounts ["claude_team";"org_tier";"user_tier"] ["team"];
+  write claude_path
+    {|{"oauthAccount":{"emailAddress":"claude@example.com","organizationType":false,"organizationRateLimitTier":"org_tier"}}|};
+  write_codex_claims {|{"email":"codex@example.com","https://api.openai.com/auth":{"chatgpt_plan_type":17}}|};
+  check_accounts ["org_tier"] [])
 
 let shared_login_observation_and_rotation () = fixture (fun directory _ ->
   let home = Filename.concat directory "shared-login" in

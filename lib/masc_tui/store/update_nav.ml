@@ -3361,6 +3361,11 @@ type enter_plan =
     }
   | Enter_expand_company of string
   | Enter_keeper_action of Cmd.t list
+  | Enter_fetch_tool_result of {
+      keeper : string;
+      execution_id : string;
+      params : Keeper_context_store.tool_result_fetch_params;
+    }
   | Enter_dispatch of Cmd.t list
   | Enter_open_dos_screen
   | Enter_push of Nav.dive
@@ -3420,23 +3425,15 @@ let keeper_enter_plan ~name ~tab (m : Model.t) : enter_plan =
       | _ -> Enter_noop)
   | Nav.Keeper_tool_calls -> (
       match Keeper_context_store.selected_tool_call ks with
-      | Some { execution_id = Some execution_id; _ } ->
-          Enter_keeper_action
-            [
-              Cmd.Http_get
-                {
-                  epoch = m.epoch;
-                  req =
-                    Cmd.Get_keeper_tool_result
-                      {
-                        keeper = name;
-                        execution_id;
-                        offset = Some 0;
-                        max_bytes = Some 16384;
-                        source_id = None;
-                      };
-                };
-            ]
+      | Some { execution_id = Some execution_id; _ } -> (
+          match
+            Keeper_context_store.next_tool_result_params
+              ~allow_non_retryable:true ~allow_next_page:true
+              ~refetch_when_eof:true ~execution_id ks
+          with
+          | Some params ->
+              Enter_fetch_tool_result { keeper = name; execution_id; params }
+          | None -> Enter_noop)
       | Some { execution_id = None; _ } | None -> Enter_noop)
   | Nav.Keeper_memory
     when Knowledge_store.equal_keeper_memory_subview
@@ -3479,9 +3476,34 @@ let keeper_enter_plan ~name ~tab (m : Model.t) : enter_plan =
   | Nav.Keeper_logs ->
       Enter_noop
 
+let dispatch_tool_result_fetch ~keeper ~execution_id
+    ~(params : Keeper_context_store.tool_result_fetch_params) (m : Model.t) =
+  let keeper_context =
+    Keeper_context_store.mark_tool_result_inflight ~keeper ~execution_id
+      m.keeper_context
+  in
+  ( { m with keeper_context }
+  , [
+      Cmd.Http_get
+        {
+          epoch = m.epoch;
+          req =
+            Cmd.Get_keeper_tool_result
+              {
+                keeper;
+                execution_id;
+                offset = Some params.offset;
+                max_bytes = Some params.max_bytes;
+                source_id = params.source_id;
+              };
+        };
+    ] )
+
 let keeper_enter_action ~name ~tab (m : Model.t) =
   match keeper_enter_plan ~name ~tab m with
   | Enter_keeper_action cmds -> (m, cmds)
+  | Enter_fetch_tool_result { keeper; execution_id; params } ->
+      dispatch_tool_result_fetch ~keeper ~execution_id ~params m
   | Enter_toggle_fact_category cat ->
       ( {
           m with
@@ -3987,6 +4009,8 @@ let dive_selected (m : Model.t) =
         }
       , [] )
   | Enter_keeper_action cmds | Enter_dispatch cmds -> (m, cmds)
+  | Enter_fetch_tool_result { keeper; execution_id; params } ->
+      dispatch_tool_result_fetch ~keeper ~execution_id ~params m
   | Enter_open_dos_screen -> (m, [ Cmd.Open_dos_screen { epoch = m.epoch } ])
   | Enter_push dive -> push_dive m dive
   | Enter_attention entry -> dive_attention_entry m entry
@@ -4099,7 +4123,7 @@ let enter_hint (m : Model.t) =
     | Enter_toggle_zoom
     | Enter_pin_memory_diff _
     | Enter_expand_company _
-    | Enter_keeper_action _ | Enter_dispatch _
+    | Enter_keeper_action _ | Enter_fetch_tool_result _ | Enter_dispatch _
     | Enter_push _ | Enter_attention _ | Enter_toggle_unreported_accounts
     | Enter_fetch_memory_diff
     | Enter_scope_memory _ | Enter_toggle_fact_category _
@@ -11791,7 +11815,14 @@ let apply_move (m : Model.t) dir =
                         let lines =
                           Chat_transcript.flattened_tool_call_lines ks call
                         in
-                        let tree_h = max 1 (right_r.h - 2) in
+                        let header_rows =
+                          if
+                            Option.is_some call.execution_id
+                            || Option.is_some call.original_bytes
+                          then 3
+                          else 2
+                        in
+                        let tree_h = max 1 (right_r.h - header_rows) in
                         max 0 (List.length lines - tree_h)
                   in
                   Keeper_context_store.move_call_detail_scroll ~keeper:name

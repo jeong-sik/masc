@@ -37,6 +37,7 @@ type active_tool_call = {
   tool_use_id : string;
   stream_scope : int option;
   tool_name : string;
+  execution_id : string option;
   args_preview : string option;
   progress_label : string option;
   tool_state : tool_call_state;

@@ -202,6 +202,8 @@ let populated_model ~cols ~rows ~lang =
             failure_kind = None;
             thinking = None;
             retained_images = [];
+            tool_meta = None;
+            trace_tools = [];
           };
           {
             id = "m2";
@@ -217,6 +219,8 @@ let populated_model ~cols ~rows ~lang =
             failure_kind = None;
             thinking = None;
             retained_images = [];
+            tool_meta = None;
+            trace_tools = [];
           };
         ];
       has_more = false;

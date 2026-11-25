@@ -1611,6 +1611,132 @@ let cut_reply_fetches ~keeper (m : Model.t) =
       (cut_reply_reqs ~force:false ~keeper m)
   else []
 
+let active_chat_keeper (m : Model.t) =
+  match Model.active_dive m with
+  | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_chat }) -> Some name
+  | Some
+      (Nav.Dive_keeper
+         {
+           tab =
+             ( Nav.Keeper_context
+             | Nav.Keeper_tool_calls
+             | Nav.Keeper_memory
+             | Nav.Keeper_work_candle
+             | Nav.Keeper_logs
+             | Nav.Keeper_identity
+             | Nav.Keeper_sandbox
+             | Nav.Keeper_config );
+           _;
+         })
+  | Some
+      ( Nav.Dive_work _
+      | Nav.Dive_knowledge _
+      | Nav.Dive_runtime _
+      | Nav.Dive_infra _ ) ->
+      None
+  | None ->
+      if
+        Nav.equal_workspace m.nav.workspace Nav.Keepers
+        && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_chat
+      then
+        Option.map
+          (fun (k : Wire_fleet.keeper_summary) -> k.name)
+          (Fleet_store.selected_keeper_summary m.fleet)
+      else None
+
+let max_chat_tool_result_fetches = 6
+
+let hydrate_chat_tool_results ?(allow_next_page = false) ?keeper (m : Model.t) =
+  let target_opt =
+    match keeper with
+    | Some k -> if chat_tab_shown ~keeper:k m then Some k else None
+    | None -> active_chat_keeper m
+  in
+  match (target_opt, Chat_transcript.tools_mode m) with
+  | None, _ | Some _, Masc_tui_keymap.Slash.Tools_compact -> (m, [])
+  | ( Some keeper
+    , (Masc_tui_keymap.Slash.Tools_results | Masc_tui_keymap.Slash.Tools_full) ) ->
+      let ks = Keeper_context_store.get_keeper ~keeper m.keeper_context in
+      if ks.tool_result_auth_denied then (m, [])
+      else
+        let sections = Chat_transcript.project_transcript ~model:m ~keeper in
+        let rev_eids = ref [] in
+        let push_eid = function
+          | Some eid when not (String.equal (String.trim eid) "") ->
+              rev_eids := eid :: !rev_eids
+          | Some _ | None -> ()
+        in
+        List.iter
+          (function
+            | Chat_transcript.Section_history msgs ->
+                List.iter
+                  (fun (msg : Wire_fleet.chat_message) ->
+                    (match msg.role with
+                    | Wire_fleet.Role_tool -> push_eid msg.execution_id
+                    | Wire_fleet.Role_user
+                    | Wire_fleet.Role_peer _
+                    | Wire_fleet.Role_assistant
+                    | Wire_fleet.Role_system
+                    | Wire_fleet.Role_request_failure ->
+                        ());
+                    List.iter
+                      (fun (step : Wire_fleet.trace_tool_step) ->
+                        push_eid step.execution_id)
+                      msg.trace_tools)
+                  msgs
+            | Chat_transcript.Section_stream sp ->
+                List.iter
+                  (fun (tc : Fleet_store.active_tool_call) ->
+                    push_eid tc.execution_id)
+                  sp.buf.tools
+            | Chat_transcript.Section_active_turn _
+            | Chat_transcript.Section_pending _ ->
+                ())
+          sections;
+        (* Deduplicate keeping most recent execution_ids first. *)
+        let rec dedup seen acc = function
+          | [] -> List.rev acc
+          | eid :: rest ->
+              if List.exists (String.equal eid) seen then dedup seen acc rest
+              else dedup (eid :: seen) (eid :: acc) rest
+        in
+        let recent_eids = dedup [] [] !rev_eids in
+        let rec plan count ks_store acc = function
+          | [] -> (ks_store, List.rev acc)
+          | _ when count >= max_chat_tool_result_fetches ->
+              (ks_store, List.rev acc)
+          | eid :: rest -> (
+              let cur_ks = Keeper_context_store.get_keeper ~keeper ks_store in
+              match
+                Keeper_context_store.next_tool_result_params ~allow_next_page
+                  ~refetch_when_eof:false ~execution_id:eid cur_ks
+              with
+              | None -> plan count ks_store acc rest
+              | Some params ->
+                  let ks_store =
+                    Keeper_context_store.mark_tool_result_inflight ~keeper
+                      ~execution_id:eid ks_store
+                  in
+                  let cmd =
+                    Cmd.Http_get
+                      {
+                        epoch = m.epoch;
+                        req =
+                          Cmd.Get_keeper_tool_result
+                            {
+                              keeper;
+                              execution_id = eid;
+                              offset = Some params.offset;
+                              max_bytes = Some params.max_bytes;
+                              source_id = params.source_id;
+                            };
+                      }
+                  in
+                  plan (count + 1) ks_store (cmd :: acc) rest)
+        in
+        let keeper_context, cmds = plan 0 m.keeper_context [] recent_eids in
+        ({ m with keeper_context }, cmds)
+
 let selected_wiki_page_fetch (m : Model.t) =
   let wiki_tab_shown =
     Nav.equal_workspace m.nav.workspace Nav.Knowledge

@@ -443,8 +443,8 @@ let tool_output_display_lines_uncached ~(theme : Theme.t) ~tools_mode ~width raw
   let max_preview, max_depth =
     match tools_mode with
     | Slash.Tools_compact -> (0, 2)
-    | Slash.Tools_results -> (8, 2)
-    | Slash.Tools_full -> (48, 4)
+    | Slash.Tools_results -> (12, 3)
+    | Slash.Tools_full -> (200, 6)
   in
   if String.equal trimmed "" || max_preview <= 0 then ([], 0)
   else
@@ -1719,9 +1719,433 @@ let count_history_thinking_rows ~theme ~(mode : Fleet_store.thinking_display) ~w
 
 type 'a tool_group = Single of 'a | Grouped of 'a * 'a list
 
-let tools_mode (model : Model.t) =
-  if model.fleet.chat_turn_details_expanded then Slash.Tools_full
-  else model.fleet.chat_tools_mode
+let tools_mode (model : Model.t) = model.fleet.chat_tools_mode
+
+type tool_detail_section =
+  | Tool_section_label of { text : Say.t; tone : Theme.status_token option }
+  | Tool_section_payload of { raw : string; tools_mode : Slash.tools_mode }
+  | Tool_section_notice of { text : Say.t; tone : Theme.status_token option }
+
+let nonblank_opt s =
+  if String.equal (String.trim s) "" then None else Some s
+
+let nonblank_opt_opt = function
+  | Some s -> nonblank_opt s
+  | None -> None
+
+let format_bytes_short n =
+  if n < 1024 then Printf.sprintf "%dB" n
+  else if n < 1024 * 1024 then
+    Printf.sprintf "%.1fKB" (float_of_int n /. 1024.0)
+  else Printf.sprintf "%.1fMB" (float_of_int n /. (1024.0 *. 1024.0))
+
+let project_tool_details ~(tools_mode : Slash.tools_mode) ~args ~inline_result
+    ~execution_id ~tool_running ~(keeper_state : Keeper_context_store.keeper_state)
+    : tool_detail_section list =
+  match tools_mode with
+  | Slash.Tools_compact -> []
+  | Slash.Tools_results | Slash.Tools_full ->
+      let args_opt = nonblank_opt_opt args in
+      let inline_opt = nonblank_opt_opt inline_result in
+      let payload_or_empty content =
+        match nonblank_opt content with
+        | Some s -> [ Tool_section_payload { raw = s; tools_mode } ]
+        | None ->
+            [
+              Tool_section_notice
+                {
+                  text = Say.make ~ko:"(빈 결과)" ~en:"(empty result)";
+                  tone = None;
+                };
+            ]
+      in
+      let result_is_error, result_sections =
+        match execution_id with
+        | Some eid -> (
+            let inflight =
+              Keeper_context_store.is_tool_result_inflight ~execution_id:eid
+                keeper_state
+            in
+            let page_err =
+              Keeper_context_store.tool_result_page_error ~execution_id:eid
+                keeper_state
+            in
+            let obs =
+              Keeper_context_store.tool_result_for_execution ~execution_id:eid
+                keeper_state
+            in
+            match obs with
+            | Observed.Value
+                { data = Wire_keeper_context.Tool_result_page p; _ } ->
+                let loaded =
+                  Int.max (String.length p.content) p.next_offset
+                in
+                let total = Int.max loaded p.total_bytes in
+                let is_bin = Keeper_context_store.is_binary_encoding p.encoding in
+                let progress_notice =
+                  if inflight then
+                    [
+                      Tool_section_notice
+                        {
+                          text =
+                            Say.make
+                              ~ko:
+                                (Printf.sprintf
+                                   "%s / %s · 다음 페이지 불러오는 중…"
+                                   (format_bytes_short loaded)
+                                   (format_bytes_short total))
+                              ~en:
+                                (Printf.sprintf
+                                   "%s / %s · Loading next page…"
+                                   (format_bytes_short loaded)
+                                   (format_bytes_short total));
+                          tone = Some Theme.Status_active;
+                        };
+                    ]
+                  else
+                    match page_err with
+                    | Some
+                        (Keeper_context_store.Page_continuation_failed
+                           { reason; retryable }) ->
+                        let clean = scrub_secrets_in_text reason in
+                        let detail =
+                          if String.equal (String.trim clean) "" then ""
+                          else " · " ^ clean
+                        in
+                        let retry_ko, retry_en =
+                          if retryable then
+                            match tools_mode with
+                            | Slash.Tools_results ->
+                                ( " · [Ctrl+O] 재시도 · Tool Calls [Enter]"
+                                , " · [Ctrl+O] retry · Tool Calls [Enter]" )
+                            | Slash.Tools_full | Slash.Tools_compact ->
+                                ( " · Tool Calls [Enter] 재시도"
+                                , " · Tool Calls [Enter] retry" )
+                          else
+                            ( " · Tool Calls [Enter] 재시도"
+                            , " · Tool Calls [Enter] retry" )
+                        in
+                        [
+                          Tool_section_notice
+                            {
+                              text =
+                                Say.make
+                                  ~ko:
+                                    (Printf.sprintf
+                                       "%s / %s · 다음 페이지 실패%s%s"
+                                       (format_bytes_short loaded)
+                                       (format_bytes_short total) retry_ko
+                                       detail)
+                                  ~en:
+                                    (Printf.sprintf
+                                       "%s / %s · Next page failed%s%s"
+                                       (format_bytes_short loaded)
+                                       (format_bytes_short total) retry_en
+                                       detail);
+                              tone = Some Theme.Status_attention;
+                            };
+                        ]
+                    | Some (Keeper_context_store.Page_source_changed reason) ->
+                        let clean = scrub_secrets_in_text reason in
+                        let detail =
+                          if String.equal (String.trim clean) "" then ""
+                          else " · " ^ clean
+                        in
+                        [
+                          Tool_section_notice
+                            {
+                              text =
+                                Say.make
+                                  ~ko:
+                                    (Printf.sprintf
+                                       "%s / %s · 원본 결과 변경됨 · Tool Calls [Enter] 처음부터 다시 불러오기%s"
+                                       (format_bytes_short loaded)
+                                       (format_bytes_short total) detail)
+                                  ~en:
+                                    (Printf.sprintf
+                                       "%s / %s · Source changed · Tool Calls [Enter] reload from start%s"
+                                       (format_bytes_short loaded)
+                                       (format_bytes_short total) detail);
+                              tone = Some Theme.Status_attention;
+                            };
+                        ]
+                    | None when is_bin && not p.eof ->
+                        [
+                          Tool_section_notice
+                            {
+                              text =
+                                Say.make
+                                  ~ko:
+                                    (Printf.sprintf
+                                       "%s / %s · 일부 표시 · 바이너리(base64) 구간"
+                                       (format_bytes_short loaded)
+                                       (format_bytes_short total))
+                                  ~en:
+                                    (Printf.sprintf
+                                       "%s / %s · Partial · binary (base64) slice"
+                                       (format_bytes_short loaded)
+                                       (format_bytes_short total));
+                              tone = None;
+                            };
+                        ]
+                    | None when is_bin ->
+                        [
+                          Tool_section_notice
+                            {
+                              text =
+                                Say.make
+                                  ~ko:
+                                    (Printf.sprintf
+                                       "%s · 바이너리(base64) · 전체"
+                                       (format_bytes_short total))
+                                  ~en:
+                                    (Printf.sprintf
+                                       "%s · Binary (base64) · full"
+                                       (format_bytes_short total));
+                              tone = None;
+                            };
+                        ]
+                    | None when not p.eof ->
+                        let hint_ko, hint_en =
+                          match tools_mode with
+                          | Slash.Tools_results ->
+                              ( "[Ctrl+O] 더보기 · Tool Calls [Enter] 이어보기"
+                              , "[Ctrl+O] more · Tool Calls [Enter] load more" )
+                          | Slash.Tools_full | Slash.Tools_compact ->
+                              ( "Tool Calls [Enter] 이어보기"
+                              , "Tool Calls [Enter] load more" )
+                        in
+                        [
+                          Tool_section_notice
+                            {
+                              text =
+                                Say.make
+                                  ~ko:
+                                    (Printf.sprintf "%s / %s · %s"
+                                       (format_bytes_short loaded)
+                                       (format_bytes_short total) hint_ko)
+                                  ~en:
+                                    (Printf.sprintf "%s / %s · %s"
+                                       (format_bytes_short loaded)
+                                       (format_bytes_short total) hint_en);
+                              tone = None;
+                            };
+                        ]
+                    | None -> []
+                in
+                (p.is_error, payload_or_empty p.content @ progress_notice)
+            | Observed.Value
+                { data = Wire_keeper_context.Tool_result_pending; _ } -> (
+                match inline_opt with
+                | Some r -> (false, [ Tool_section_payload { raw = r; tools_mode } ])
+                | None ->
+                    if inflight then
+                      ( false
+                      , [
+                          Tool_section_notice
+                            {
+                              text =
+                                Say.make ~ko:"결과 불러오는 중…"
+                                  ~en:"Loading result…";
+                              tone = Some Theme.Status_active;
+                            };
+                        ] )
+                    else
+                      ( false
+                      , [
+                          Tool_section_notice
+                            {
+                              text =
+                                Say.make ~ko:"결과 기록 대기 중"
+                                  ~en:"Result pending";
+                              tone = Some Theme.Status_active;
+                            };
+                        ] ))
+            | Observed.Value
+                { data = Wire_keeper_context.Tool_result_unavailable reason; _ } -> (
+                match inline_opt with
+                | Some r -> (false, [ Tool_section_payload { raw = r; tools_mode } ])
+                | None ->
+                    if inflight then
+                      ( false
+                      , [
+                          Tool_section_notice
+                            {
+                              text =
+                                Say.make ~ko:"결과 불러오는 중…"
+                                  ~en:"Loading result…";
+                              tone = Some Theme.Status_active;
+                            };
+                        ] )
+                    else
+                      let clean = scrub_secrets_in_text reason in
+                      ( false
+                      , [
+                          Tool_section_notice
+                            {
+                              text =
+                                Say.make
+                                  ~ko:("결과를 불러올 수 없음: " ^ clean)
+                                  ~en:("Result unavailable: " ^ clean);
+                              tone = None;
+                            };
+                        ] ))
+            | Observed.Absent -> (
+                match inline_opt with
+                | Some r -> (false, [ Tool_section_payload { raw = r; tools_mode } ])
+                | None ->
+                    if inflight then
+                      ( false
+                      , [
+                          Tool_section_notice
+                            {
+                              text =
+                                Say.make ~ko:"결과 불러오는 중…"
+                                  ~en:"Loading result…";
+                              tone = Some Theme.Status_active;
+                            };
+                        ] )
+                    else
+                      ( false
+                      , [
+                          Tool_section_notice
+                            {
+                              text =
+                                Say.make ~ko:"저장된 결과 없음"
+                                  ~en:"No stored result";
+                              tone = None;
+                            };
+                        ] ))
+            | Observed.Failed { reason; _ } -> (
+                match inline_opt with
+                | Some r -> (false, [ Tool_section_payload { raw = r; tools_mode } ])
+                | None ->
+                    if inflight then
+                      ( false
+                      , [
+                          Tool_section_notice
+                            {
+                              text =
+                                Say.make ~ko:"결과 불러오는 중…"
+                                  ~en:"Loading result…";
+                              tone = Some Theme.Status_active;
+                            };
+                        ] )
+                    else
+                      let clean = scrub_secrets_in_text reason in
+                      ( false
+                      , [
+                          Tool_section_notice
+                            {
+                              text =
+                                Say.make
+                                  ~ko:("결과 조회 실패: " ^ clean)
+                                  ~en:("Result fetch failed: " ^ clean);
+                              tone = Some Theme.Status_attention;
+                            };
+                        ] ))
+            | Observed.Loading _ -> (
+                match inline_opt with
+                | Some r -> (false, [ Tool_section_payload { raw = r; tools_mode } ])
+                | None ->
+                    ( false
+                    , [
+                        Tool_section_notice
+                          {
+                            text =
+                              Say.make ~ko:"결과 불러오는 중…"
+                                ~en:"Loading result…";
+                            tone = Some Theme.Status_active;
+                          };
+                      ] ))
+            | Observed.Unreported -> (
+                match inline_opt with
+                | Some r -> (false, [ Tool_section_payload { raw = r; tools_mode } ])
+                | None ->
+                    if inflight then
+                      ( false
+                      , [
+                          Tool_section_notice
+                            {
+                              text =
+                                Say.make ~ko:"결과 불러오는 중…"
+                                  ~en:"Loading result…";
+                              tone = Some Theme.Status_active;
+                            };
+                        ] )
+                    else if tool_running then
+                      ( false
+                      , [
+                          Tool_section_notice
+                            {
+                              text =
+                                Say.make ~ko:"실행 중 · 결과 대기"
+                                  ~en:"Running · awaiting result";
+                              tone = Some Theme.Status_active;
+                            };
+                        ] )
+                    else
+                      ( false
+                      , [
+                          Tool_section_notice
+                            {
+                              text =
+                                Say.make ~ko:"결과 미로드 · [Ctrl+O] 조회"
+                                  ~en:"Result not loaded · [Ctrl+O] fetch";
+                              tone = None;
+                            };
+                        ] )))
+        | None -> (
+            match inline_opt with
+            | Some r -> (false, [ Tool_section_payload { raw = r; tools_mode } ])
+            | None ->
+                if tool_running then
+                  ( false
+                  , [
+                      Tool_section_notice
+                        {
+                          text =
+                            Say.make ~ko:"실행 중 · 결과 대기"
+                              ~en:"Running · awaiting result";
+                          tone = Some Theme.Status_active;
+                        };
+                    ] )
+                else (false, []))
+      in
+      let result_label =
+        if result_is_error then
+          Tool_section_label
+            {
+              text = Say.make ~ko:"결과 (오류)" ~en:"Result (error)";
+              tone = Some Theme.Status_critical;
+            }
+        else
+          Tool_section_label
+            { text = Say.make ~ko:"결과" ~en:"Result"; tone = None }
+      in
+      match (args_opt, result_sections) with
+      | Some a, [] -> [ Tool_section_payload { raw = a; tools_mode } ]
+      | Some a, _ :: _ ->
+          [
+            Tool_section_label
+              { text = Say.make ~ko:"입력" ~en:"Args"; tone = None };
+            Tool_section_payload { raw = a; tools_mode };
+            result_label;
+          ]
+          @ result_sections
+      | None, _ :: _ -> result_label :: result_sections
+      | None, [] -> []
+
+let count_tool_detail_rows ~theme ~width sections =
+  List.fold_left
+    (fun acc -> function
+      | Tool_section_label _ | Tool_section_notice _ -> acc + 1
+      | Tool_section_payload { raw; tools_mode } ->
+          let shown, hidden =
+            tool_output_display_lines ~theme ~tools_mode ~width raw
+          in
+          acc + List.length shown + if hidden > 0 then 1 else 0)
+    0 sections
 
 let consecutive_tool_groups ~tools_mode ~same rows =
   match tools_mode with
@@ -2156,10 +2580,6 @@ let chat_viewport_geometry_for ~embedded ~(model : Model.t) =
 let chat_viewport_geometry ~(model : Model.t) =
   chat_viewport_geometry_for ~embedded:false ~model
 
-let count_tool_output_rows ~theme ~tools_mode ~width raw =
-  let shown, hidden = tool_output_display_lines ~theme ~tools_mode ~width raw in
-  List.length shown + if hidden > 0 then 1 else 0
-
 let count_markdown_rows ~theme ~width ~rail_present ~prefix text =
   let lines = markdown_body_lines ~theme ~width ~rail_present ~prefix text in
   Int.max 1 (List.length lines)
@@ -2180,6 +2600,9 @@ let count_transcript_rows ~(model : Model.t) ~keeper ~width =
     | Slash.Tools_compact -> false
     | Slash.Tools_results | Slash.Tools_full -> true
   in
+  let keeper_state =
+    Keeper_context_store.get_keeper ~keeper model.keeper_context
+  in
   let inline_user_prefix =
     Printf.sprintf "00:00 %s " (Glyph.to_utf8 Glyph.Prompt_caret)
   in
@@ -2188,6 +2611,28 @@ let count_transcript_rows ~(model : Model.t) ~keeper ~width =
   in
   let cut_replies = Fleet_store.cut_replies_by_row ~keeper model.fleet in
   let retained_height = retained_image_height ~model ~keeper ~width in
+  let count_trace_tools steps =
+    match steps with
+    | [] -> 0
+    | _ :: _ when not expanded_tools -> 1
+    | _ :: _ ->
+        List.fold_left
+          (fun acc (step : Wire_fleet.trace_tool_step) ->
+            let tool_running =
+              match step.status with
+              | Some Wire_fleet.Trace_tool_pending -> true
+              | Some (Wire_fleet.Trace_tool_ok | Wire_fleet.Trace_tool_err)
+              | None ->
+                  false
+            in
+            let sections =
+              project_tool_details ~tools_mode ~args:step.args
+                ~inline_result:step.result ~execution_id:step.execution_id
+                ~tool_running ~keeper_state
+            in
+            acc + 1 + count_tool_detail_rows ~theme ~width sections)
+          0 steps
+  in
   let count_history hist_msgs =
     let _, total =
       List.fold_left
@@ -2248,7 +2693,8 @@ let count_transcript_rows ~(model : Model.t) ~keeper ~width =
                   count_history_thinking_rows ~theme
                     ~mode:model.fleet.chat_thinking_mode ~width msg.thinking
                 in
-                think_r + hdr
+                let trace_r = count_trace_tools msg.trace_tools in
+                think_r + trace_r + hdr
                 + count_markdown_rows ~theme ~width ~rail_present ~prefix
                     msg.content
             | Wire_fleet.Role_system ->
@@ -2256,11 +2702,24 @@ let count_transcript_rows ~(model : Model.t) ~keeper ~width =
                 + count_markdown_rows ~theme ~width ~rail_present:true
                     ~prefix:"  " msg.content
             | Wire_fleet.Role_tool ->
-                1
-                +
-                if expanded_tools then
-                  count_tool_output_rows ~theme ~tools_mode ~width msg.content
-                else 0
+                let inline_result, tool_running =
+                  match msg.tool_meta with
+                  | Some m ->
+                      ( m.result
+                      , match m.status with
+                        | Some Wire_fleet.Trace_tool_pending -> true
+                        | Some
+                            (Wire_fleet.Trace_tool_ok | Wire_fleet.Trace_tool_err)
+                        | None ->
+                            false )
+                  | None -> (None, false)
+                in
+                let sections =
+                  project_tool_details ~tools_mode ~args:(Some msg.content)
+                    ~inline_result ~execution_id:msg.execution_id ~tool_running
+                    ~keeper_state
+                in
+                1 + count_tool_detail_rows ~theme ~width sections
             | Wire_fleet.Role_request_failure ->
                 let cut_reply_r =
                   match Fleet_store.String_map.find_opt msg.id cut_replies with
@@ -2301,12 +2760,20 @@ let count_transcript_rows ~(model : Model.t) ~keeper ~width =
           (fun acc -> function
             | Grouped _ -> acc + 1
             | Single (tc : Fleet_store.active_tool_call) ->
-            let det =
-              match expanded_tools, tc.output_preview with
-              | true, Some out -> count_tool_output_rows ~theme ~tools_mode ~width out
-              | false, _ | true, None -> 0
-            in
-            acc + 1 + det)
+                let tool_running =
+                  match tc.tool_state with
+                  | Fleet_store.Tool_pending
+                  | Fleet_store.Tool_result_pending _ ->
+                      true
+                  | Fleet_store.Tool_settled | Fleet_store.Tool_unfinished ->
+                      false
+                in
+                let sections =
+                  project_tool_details ~tools_mode ~args:tc.args_preview
+                    ~inline_result:tc.output_preview
+                    ~execution_id:tc.execution_id ~tool_running ~keeper_state
+                in
+                acc + 1 + count_tool_detail_rows ~theme ~width sections)
           0 (stream_tool_groups ~tools_mode buf.tools)
     in
     let text_r =

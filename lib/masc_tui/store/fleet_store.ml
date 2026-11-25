@@ -34,6 +34,7 @@ type active_tool_call = {
   tool_use_id : string;
   stream_scope : int option;
   tool_name : string;
+  execution_id : string option;
   args_preview : string option;
   progress_label : string option;
   tool_state : tool_call_state;
@@ -1632,6 +1633,7 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
                     tool_use_id;
                     stream_scope;
                     tool_name;
+                    execution_id = None;
                     args_preview;
                     tool_state = Tool_pending;
                     progress_label = None;
@@ -1687,7 +1689,14 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
                   active = true;
                 }
             | Wire_fleet.Chunk_tool_end
-                { operation_id; tool_use_id; tool_name; ok; output_preview } ->
+                {
+                  operation_id;
+                  tool_use_id;
+                  tool_name;
+                  execution_id;
+                  ok;
+                  output_preview;
+                } ->
                 let found =
                   List.exists
                     (fun (c : active_tool_call) ->
@@ -1703,6 +1712,10 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
                             c with
                             tool_name =
                               Option.value tool_name ~default:c.tool_name;
+                            execution_id =
+                              (match execution_id with
+                              | Some _ as x -> x
+                              | None -> c.execution_id);
                             tool_state = Tool_settled;
                             ok =
                               (match ok with Some _ as x -> x | None -> c.ok);
@@ -1720,6 +1733,7 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
                           tool_use_id;
                           stream_scope = None;
                           tool_name = Option.value tool_name ~default:"tool";
+                          execution_id;
                           args_preview = None;
                           tool_state = Tool_settled;
                           progress_label = None;
@@ -1963,7 +1977,8 @@ let cycle_origin_mode t =
   in
   { t with chat_origin_mode }
 
-let set_tools_mode chat_tools_mode t = { t with chat_tools_mode }
+let set_tools_mode chat_tools_mode t =
+  { t with chat_tools_mode; chat_turn_details_expanded = false }
 
 let cycle_tools_mode t =
   let chat_tools_mode =
@@ -1972,7 +1987,12 @@ let cycle_tools_mode t =
     | Slash.Tools_results -> Slash.Tools_full
     | Slash.Tools_full -> Slash.Tools_compact
   in
-  { t with chat_tools_mode }
+  let chat_turn_details_expanded =
+    match chat_tools_mode with
+    | Slash.Tools_compact -> false
+    | Slash.Tools_results | Slash.Tools_full -> t.chat_turn_details_expanded
+  in
+  { t with chat_tools_mode; chat_turn_details_expanded }
 
 let cycle_thinking_mode t =
   let chat_thinking_mode =
@@ -1984,7 +2004,25 @@ let cycle_thinking_mode t =
   { t with chat_thinking_mode }
 
 let toggle_turn_details t =
-  { t with chat_turn_details_expanded = not t.chat_turn_details_expanded }
+  let expanded =
+    t.chat_turn_details_expanded
+    ||
+    match t.chat_tools_mode with
+    | Slash.Tools_compact -> false
+    | Slash.Tools_results | Slash.Tools_full -> true
+  in
+  if expanded then
+    {
+      t with
+      chat_turn_details_expanded = false;
+      chat_tools_mode = Slash.Tools_compact;
+    }
+  else
+    {
+      t with
+      chat_turn_details_expanded = true;
+      chat_tools_mode = Slash.Tools_full;
+    }
 
 let visual_row_for_collapsed_company t company =
   let groups = Wire_fleet.group_by_company (filter_matched_keepers t) in

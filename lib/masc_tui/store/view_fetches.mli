@@ -20,6 +20,17 @@ val cut_reply_fetches : keeper:string -> Model.t -> Cmd.t list
     failure rows once the history has landed, so the history reply asks for
     these. *)
 
+val hydrate_chat_tool_results :
+  ?allow_next_page:bool ->
+  ?keeper:string ->
+  Model.t ->
+  Model.t * Cmd.t list
+(** Dispatch bounded on-demand [Get_keeper_tool_result] requests (up to the 6
+    most recent visible uncached [execution_id]s) when the active keeper's
+    Chat transcript is on screen and tools are expanded ([Tools_results] or
+    [Tools_full]). Marks dispatched IDs in-flight in [Keeper_context_store] to
+    prevent duplicate requests. *)
+
 val selected_wiki_page_fetch : Model.t -> Cmd.t list
 (** The selected Wiki page's GET when the Wiki tab is on screen and the page
     body is not held fresh. The Wiki tab's fetch list can only name a page

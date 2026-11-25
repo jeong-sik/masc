@@ -20,12 +20,33 @@ val tool_output_display_lines :
   Markdown.rendered_line list * int
 (** [(shown_lines, hidden_count)] for a tool output payload using
     {!Json_tree.flatten} or a literal rendering. Blob references with a
-    declared Markdown preview also render the preview. The cap is eight
-    lines in [Tools_results] and 48 in [Tools_full]. *)
+    declared Markdown preview also render the preview. The cap is 12 lines
+    (depth 3) in [Tools_results] and 200 lines (depth 6) in [Tools_full]. *)
 
 val thinking_body_lines :
   theme:Theme.t -> width:int -> string -> Markdown.rendered_line list
 (** Wrapped reasoning body shared by paint and scroll geometry. *)
+
+type tool_detail_section =
+  | Tool_section_label of { text : Say.t; tone : Theme.status_token option }
+  | Tool_section_payload of { raw : string; tools_mode : Slash.tools_mode }
+  | Tool_section_notice of { text : Say.t; tone : Theme.status_token option }
+
+val project_tool_details :
+  tools_mode:Slash.tools_mode ->
+  args:string option ->
+  inline_result:string option ->
+  execution_id:string option ->
+  tool_running:bool ->
+  keeper_state:Keeper_context_store.keeper_state ->
+  tool_detail_section list
+(** Single-source-of-truth projection for expanded tool card body rows (Args +
+    hydrated or inline Result + honest loading/pending/unavailable status +
+    multi-page byte progress) shared identically by {!count_transcript_rows}
+    and [Keeper_dive]. *)
+
+val count_tool_detail_rows :
+  theme:Theme.t -> width:int -> tool_detail_section list -> int
 
 val markdown_body_lines :
   theme:Theme.t ->

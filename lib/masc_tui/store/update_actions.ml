@@ -2006,6 +2006,39 @@ let missing_lifecycle_keeper_usage ~now ~cmd (m : Model.t) =
       m
   , [] )
 
+let tools_mode_toast = function
+  | Slash.Tools_compact ->
+      Say.make ~ko:"도구: 축약" ~en:"Tools: compact"
+  | Slash.Tools_results ->
+      Say.make ~ko:"도구: 결과 펼침" ~en:"Tools: results"
+  | Slash.Tools_full ->
+      Say.make ~ko:"도구: 전체 펼침" ~en:"Tools: full"
+
+let finalize_tools_mode_change ~now ~prev_mode (m : Model.t) =
+  let allow_next_page =
+    Slash.equal_tools_mode prev_mode Slash.Tools_results
+    && Slash.equal_tools_mode m.fleet.chat_tools_mode Slash.Tools_full
+  in
+  let m =
+    Model.with_toast ~now ~level:Model.Toast_info
+      (tools_mode_toast m.fleet.chat_tools_mode) m
+  in
+  View_fetches.hydrate_chat_tool_results ~allow_next_page m
+
+let apply_slash_tools ~now mode_opt (m : Model.t) =
+  let prev_mode = m.fleet.chat_tools_mode in
+  let fleet =
+    match mode_opt with
+    | None -> Fleet_store.cycle_tools_mode m.fleet
+    | Some mode -> Fleet_store.set_tools_mode mode m.fleet
+  in
+  finalize_tools_mode_change ~now ~prev_mode { m with fleet }
+
+let apply_toggle_turn_details ~now (m : Model.t) =
+  let prev_mode = m.fleet.chat_tools_mode in
+  let fleet = Fleet_store.toggle_turn_details m.fleet in
+  finalize_tools_mode_change ~now ~prev_mode { m with fleet }
+
 let rec execute_slash ~now (m : Model.t) cmd =
   match cmd with
   | Slash.Pulse -> Update_nav.switch_workspace m Nav.Pulse
@@ -3550,10 +3583,8 @@ let rec execute_slash ~now (m : Model.t) cmd =
                      ~en:("/browser command JSON error: " ^ clean))
                   m
               , [] )))
-  | Slash.Tools None ->
-      ({ m with fleet = Fleet_store.cycle_tools_mode m.fleet }, [])
-  | Slash.Tools (Some mode) ->
-      ({ m with fleet = Fleet_store.set_tools_mode mode m.fleet }, [])
+  | Slash.Tools None -> apply_slash_tools ~now None m
+  | Slash.Tools (Some mode) -> apply_slash_tools ~now (Some mode) m
   | Slash.Clear ->
       let draft_was_empty =
         String.equal (String.trim (Drafts.current_draft m.drafts).text) ""
@@ -5356,7 +5387,7 @@ and execute_action ~now (m : Model.t) action =
       if in_memory_surface then
         Update_nav.open_memory_diagram ~now
           ~kind:Knowledge_store.Diagram_formation_tree m
-      else ({ m with fleet = Fleet_store.cycle_tools_mode m.fleet }, [])
+      else apply_slash_tools ~now None m
   | Keymap.Open_queue_context -> (
       match m.nav.overlay with
       | Some (Nav.Queue_context _) ->
@@ -5502,7 +5533,9 @@ and execute_action ~now (m : Model.t) action =
           else (
           match Model.active_dive m with
           | Some (Nav.Dive_keeper { tab = Nav.Keeper_chat; _ }) ->
-              ({ m with fleet = Fleet_store.toggle_turn_details m.fleet }, [])
+              apply_toggle_turn_details ~now m
+          | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_tool_calls }) ->
+              Update_nav.keeper_enter_action ~name ~tab:Nav.Keeper_tool_calls m
           | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_memory }) ->
               if
                 Knowledge_store.equal_keeper_memory_subview
@@ -5532,7 +5565,6 @@ and execute_action ~now (m : Model.t) action =
                   {
                     tab =
                       ( Nav.Keeper_context
-                      | Nav.Keeper_tool_calls
                       | Nav.Keeper_work_candle
                       | Nav.Keeper_sandbox
                       | Nav.Keeper_config
@@ -5549,9 +5581,17 @@ and execute_action ~now (m : Model.t) action =
                     (m.nav.pane_index = 1 || m.nav.zoomed)
                     && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
                          Nav.Keeper_chat
+                  then apply_toggle_turn_details ~now m
+                  else if
+                    (m.nav.pane_index >= 1 || m.nav.zoomed)
+                    && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
+                         Nav.Keeper_tool_calls
                   then
-                    ( { m with fleet = Fleet_store.toggle_turn_details m.fleet }
-                    , [] )
+                    match Fleet_store.selected_keeper_summary m.fleet with
+                    | Some k ->
+                        Update_nav.keeper_enter_action ~name:k.name
+                          ~tab:Nav.Keeper_tool_calls m
+                    | None -> (m, [])
                   else if
                     (m.nav.pane_index = 1 || m.nav.zoomed)
                     && Nav.equal_keeper_tab m.fleet.keeper_dive_tab

@@ -762,6 +762,8 @@ let make_populated_model ~cols ~rows ~lang =
                  failure_kind = None;
                  thinking = None;
                  retained_images = [];
+                 tool_meta = None;
+                 trace_tools = [];
                };
                {
                  id = "msg-2";
@@ -777,6 +779,8 @@ let make_populated_model ~cols ~rows ~lang =
                  failure_kind = None;
                  thinking = None;
                  retained_images = [];
+                 tool_meta = None;
+                 trace_tools = [];
                };
                {
                  id = "msg-3";
@@ -792,6 +796,8 @@ let make_populated_model ~cols ~rows ~lang =
                  failure_kind = None;
                  thinking = None;
                  retained_images = [];
+                 tool_meta = None;
+                 trace_tools = [];
                };
                {
                  id = "msg-4";
@@ -808,6 +814,8 @@ let make_populated_model ~cols ~rows ~lang =
                  failure_kind = None;
                  thinking = None;
                  retained_images = [];
+                 tool_meta = None;
+                 trace_tools = [];
                };
              ];
            has_more = false;
@@ -836,6 +844,7 @@ let make_populated_model ~cols ~rows ~lang =
               operation_id = Some "op-1";
               tool_use_id = "tu-1";
               tool_name = Some "gh_pr_view";
+              execution_id = None;
               ok = Some true;
               output_preview = Some "state=OPEN reviewDecision=APPROVED";
             })
@@ -1441,6 +1450,8 @@ let test_p1_chat_dedup_untyped_tool_and_code_bg () =
                  failure_kind = None;
                  thinking = None;
                  retained_images = [];
+                 tool_meta = None;
+                 trace_tools = [];
                };
                {
                  id = "msg-asst";
@@ -1456,6 +1467,8 @@ let test_p1_chat_dedup_untyped_tool_and_code_bg () =
                  failure_kind = None;
                  thinking = None;
                  retained_images = [];
+                 tool_meta = None;
+                 trace_tools = [];
                };
                {
                  id = "msg-code";
@@ -1471,6 +1484,8 @@ let test_p1_chat_dedup_untyped_tool_and_code_bg () =
                  failure_kind = None;
                  thinking = None;
                  retained_images = [];
+                 tool_meta = None;
+                 trace_tools = [];
                };
              ];
            has_more = false;
@@ -2326,6 +2341,8 @@ let test_p1_keeper_dive_tool_card_secret_redaction () =
                  failure_kind = None;
                  thinking = None;
                  retained_images = [];
+                 tool_meta = None;
+                 trace_tools = [];
                };
                {
                  id = "sec-2";
@@ -2341,6 +2358,8 @@ let test_p1_keeper_dive_tool_card_secret_redaction () =
                  failure_kind = None;
                  thinking = None;
                  retained_images = [];
+                 tool_meta = None;
+                 trace_tools = [];
                };
                {
                  id = "sec-3";
@@ -2356,6 +2375,8 @@ let test_p1_keeper_dive_tool_card_secret_redaction () =
                  failure_kind = None;
                  thinking = None;
                  retained_images = [];
+                 tool_meta = None;
+                 trace_tools = [];
                };
                {
                  id = "sec-4";
@@ -2374,6 +2395,8 @@ let test_p1_keeper_dive_tool_card_secret_redaction () =
                  failure_kind = None;
                  thinking = None;
                  retained_images = [];
+                 tool_meta = None;
+                 trace_tools = [];
                };
              ];
            has_more = false;
@@ -2398,6 +2421,7 @@ let test_p1_keeper_dive_tool_card_secret_redaction () =
               operation_id = Some "op-sec";
               tool_use_id = "tu-sec-stream";
               tool_name = Some "bash_exec";
+              execution_id = None;
               ok = Some true;
               output_preview = Some raw_non_json_out;
             })
@@ -2445,6 +2469,8 @@ let test_p2_tool_modes_ctrl_o_hint_and_origin_modes () =
                    failure_kind = None;
                    thinking = None;
                    retained_images = [];
+                   tool_meta = None;
+                   trace_tools = [];
                  };
                ];
              has_more = false;
@@ -2457,32 +2483,32 @@ let test_p2_tool_modes_ctrl_o_hint_and_origin_modes () =
          (Screen_keepers.render_dive ~name:"e-masc-the-leader"
             ~tab:Nav.Keeper_chat ~model:m))
   in
-  (* 1. Tools_results caps at 8 lines and displays SSOT [Ctrl+O], NEVER dead [Ctrl+D] *)
+  (* 1. Tools_results caps at 12 lines and displays SSOT [Ctrl+O], NEVER dead [Ctrl+D] *)
   let txt_res = render_with_out ~rows:40 ~mode:Slash.Tools_results (make_lines 16) in
-  Alcotest.(check bool) "Tools_results shows line 08" true
-    (contains_sub ~needle:"tool_output_line_08" txt_res);
+  Alcotest.(check bool) "Tools_results shows line 12" true
+    (contains_sub ~needle:"tool_output_line_12" txt_res);
   Alcotest.(check bool) "Tools_results hides line 14" false
     (contains_sub ~needle:"tool_output_line_14" txt_res);
   Alcotest.(check bool) "Tools_results shows SSOT [Ctrl+O] hint" true
     (contains_sub ~needle:"[Ctrl+O]" txt_res);
   Alcotest.(check bool) "Tools_results never shows dead [Ctrl+D]" false
     (contains_sub ~needle:"[Ctrl+D]" txt_res);
-  (* 2. Tools_full expands beyond 8 lines (16 lines all visible) *)
+  (* 2. Tools_full expands beyond 12 lines (16 lines all visible) *)
   let txt_full_16 = render_with_out ~rows:40 ~mode:Slash.Tools_full (make_lines 16) in
-  Alcotest.(check bool) "Tools_full renders line 14 (> 8 lines)" true
+  Alcotest.(check bool) "Tools_full renders line 14 (> 12 lines)" true
     (contains_sub ~needle:"tool_output_line_14" txt_full_16);
-  (* 3. Tools_full caps huge 60-line output at 48 lines with plain notice (no [Ctrl+O]/[Ctrl+D]) *)
-  let txt_full_60 = render_with_out ~rows:64 ~mode:Slash.Tools_full (make_lines 60) in
-  Alcotest.(check bool) "Tools_full shows line 48" true
-    (contains_sub ~needle:"tool_output_line_48" txt_full_60);
-  Alcotest.(check bool) "Tools_full hides line 55 past 48-line cap" false
-    (contains_sub ~needle:"tool_output_line_55" txt_full_60);
+  (* 3. Tools_full caps huge 220-line output at 200 lines with plain notice (no [Ctrl+O]/[Ctrl+D]) *)
+  let txt_full_220 = render_with_out ~rows:220 ~mode:Slash.Tools_full (make_lines 220) in
+  Alcotest.(check bool) "Tools_full shows line 200" true
+    (contains_sub ~needle:"tool_output_line_200" txt_full_220);
+  Alcotest.(check bool) "Tools_full hides line 210 past 200-line cap" false
+    (contains_sub ~needle:"tool_output_line_210" txt_full_220);
   Alcotest.(check bool) "Tools_full shows plain cap notice" true
-    (contains_sub ~needle:"48-line cap" txt_full_60);
+    (contains_sub ~needle:"200-line cap" txt_full_220);
   Alcotest.(check bool) "Tools_full omits misleading [Ctrl+O] expand hint" false
-    (contains_sub ~needle:"more lines [Ctrl+O]" txt_full_60);
+    (contains_sub ~needle:"more lines [Ctrl+O]" txt_full_220);
   Alcotest.(check bool) "Tools_full never shows dead [Ctrl+D]" false
-    (contains_sub ~needle:"[Ctrl+D]" txt_full_60);
+    (contains_sub ~needle:"[Ctrl+D]" txt_full_220);
   (* 4. Ctrl+F origin modes: Bare, Inline, and Row render 3 distinct views *)
   let render_origin mode =
     let m = { m0 with fleet = { m0.fleet with chat_origin_mode = mode } } in
@@ -2930,6 +2956,8 @@ let test_p1_chat_transcript_render_parity () =
       failure_kind = None;
       thinking = None;
       retained_images = [];
+      tool_meta = None;
+      trace_tools = [];
     }
   in
   let json_1line =
@@ -3133,6 +3161,8 @@ let test_chat_peer_rows_name_their_author () =
       failure_kind = None;
       thinking = None;
       retained_images = [];
+      tool_meta = None;
+      trace_tools = [];
     }
   in
   let broadcast =
@@ -3291,6 +3321,8 @@ let test_agui_chat_chronological_projection_and_phase_parity () =
       failure_kind = None;
       thinking = None;
       retained_images = [];
+      tool_meta = None;
+      trace_tools = [];
     }
   in
   let m1 =
@@ -3435,6 +3467,8 @@ let test_agui_chat_chronological_projection_and_phase_parity () =
                              failure_kind = None;
                              thinking = None;
                              retained_images = [];
+                             tool_meta = None;
+                             trace_tools = [];
                            };
                            {
                              id = "hist-3";
@@ -3450,6 +3484,8 @@ let test_agui_chat_chronological_projection_and_phase_parity () =
                              failure_kind = Some "turn_exception";
                              thinking = None;
                              retained_images = [];
+                             tool_meta = None;
+                             trace_tools = [];
                            };
                          ];
                        has_more = false;
@@ -3984,6 +4020,8 @@ let history_msg ~id ~role ~content ~thinking ~seconds_ago :
     failure_kind = None;
     thinking;
     retained_images = [];
+    tool_meta = None;
+    trace_tools = [];
   }
 
 let apply_history keeper messages fleet =
@@ -4155,11 +4193,739 @@ let test_chat_history_rows_keep_one_slot_per_keeper () =
   Alcotest.(check int) "the other keeper still has its rows" 1 s.hits;
   Alcotest.(check int) "a new message dropped no keeper" 0 s.evictions
 
+let test_tool_expand_live_trace_pagination_and_row_count_parity () =
+  let keeper = "e-masc-the-leader" in
+  let m0 = make_populated_model ~cols:120 ~rows:36 ~lang:Say.Lang_en in
+  (* 1. Live KEEPER_TOOL_RESULT_READY with output_preview=None & ok=None expands to show Args + status/hydrated Result *)
+  let live_fleet =
+    m0.fleet
+    |> Fleet_store.apply_chat_history ~observed_at:now_mono ~keeper
+         { messages = []; has_more = false; next_cursor = None }
+    |> Fleet_store.start_chat_stream ~keeper ~request_id:"req-ready-1"
+    |> Fleet_store.apply_chat_stream_chunk ~keeper ~request_id:"req-ready-1"
+         (Wire_fleet.Chunk_tool_start
+            {
+              operation_id = Some "op-ready-1";
+              tool_use_id = "scope-1-block-0";
+              stream_scope = Some 1;
+              tool_name = "bash";
+              args_preview = Some {|{"cmd":"ls -la"}|};
+            })
+    |> Fleet_store.apply_chat_stream_chunk ~keeper ~request_id:"req-ready-1"
+         (Wire_fleet.Chunk_tool_end
+            {
+              operation_id = Some "op-ready-1";
+              tool_use_id = "scope-1-block-0";
+              tool_name = Some "bash";
+              execution_id = Some "ex-live-1";
+              ok = None;
+              output_preview = None;
+            })
+  in
+  let m_live_loading =
+    {
+      m0 with
+      fleet = Fleet_store.set_tools_mode Slash.Tools_results live_fleet;
+      keeper_context =
+        Keeper_context_store.mark_tool_result_inflight ~keeper
+          ~execution_id:"ex-live-1" m0.keeper_context;
+    }
+  in
+  let txt_live_loading =
+    grid_all_text
+      (render_to_grid ~cols:120 ~rows:36
+         (Screen_keepers.render_dive ~name:keeper ~tab:Nav.Keeper_chat
+            ~model:m_live_loading))
+  in
+  Alcotest.(check bool) "live expanded card uses Expand_open chevron" true
+    (contains_sub ~needle:(Glyph.to_utf8 Glyph.Expand_open) txt_live_loading);
+  Alcotest.(check bool) "live expanded card shows Args section" true
+    (contains_sub ~needle:"Args" txt_live_loading
+     && contains_sub ~needle:"ls -la" txt_live_loading);
+  Alcotest.(check bool) "live expanded card shows honest Loading result notice" true
+    (contains_sub ~needle:"Loading result" txt_live_loading);
+  Alcotest.(check bool) "untyped result receipt does not fabricate ok verdict" false
+    (contains_sub ~needle:(Glyph.to_utf8 Glyph.Live_healthy ^ " ok") txt_live_loading);
+  let m_live_hydrated =
+    {
+      m_live_loading with
+      keeper_context =
+        Keeper_context_store.apply_tool_result ~observed_at:now_mono ~keeper
+          ~execution_id:"ex-live-1"
+          (Wire_keeper_context.Tool_result_page
+             {
+               keeper;
+               execution_id = "ex-live-1";
+               source_id = "src-live-1";
+               body_sha256 = "sha-live";
+               recorded_bytes = 49152;
+               is_error = false;
+               offset = 0;
+               next_offset = 16384;
+               total_bytes = 49152;
+               eof = false;
+               content = "HYDRATED_LIVE_RESULT_BODY";
+               encoding = "utf-8";
+             })
+          m_live_loading.keeper_context;
+    }
+  in
+  let txt_live_hydrated =
+    grid_all_text
+      (render_to_grid ~cols:120 ~rows:36
+         (Screen_keepers.render_dive ~name:keeper ~tab:Nav.Keeper_chat
+            ~model:m_live_hydrated))
+  in
+  Alcotest.(check bool) "live hydrated card renders hydrated Result content" true
+    (contains_sub ~needle:"HYDRATED_LIVE_RESULT_BODY" txt_live_hydrated);
+  Alcotest.(check bool) "live hydrated card shows byte progress when eof=false" true
+    (contains_sub ~needle:"16.0KB / 48.0KB" txt_live_hydrated);
+  (* 2. Chat header mode pill ONLY when non-default + Chat footer keeps [Ctrl+O] *)
+  let m_compact_hdr =
+    { m_live_hydrated with fleet = Fleet_store.set_tools_mode Slash.Tools_compact live_fleet }
+  in
+  let txt_compact_hdr =
+    grid_all_text
+      (render_to_grid ~cols:120 ~rows:36
+         (Screen_keepers.render_dive ~name:keeper ~tab:Nav.Keeper_chat
+            ~model:m_compact_hdr))
+  in
+  Alcotest.(check bool) "compact mode omits default tools:compact header noise" false
+    (contains_sub ~needle:"Tools: compact" txt_compact_hdr);
+  Alcotest.(check bool) "Chat footer keeps [Ctrl+O] visible" true
+    (contains_sub ~needle:"[Ctrl+O]" txt_compact_hdr);
+  Alcotest.(check bool) "Tools_results shows active mode pill in Chat header" true
+    (contains_sub ~needle:"Tools: results" txt_live_hydrated);
+  (* 3. Keeper_tool_calls keeps [Enter/Space] hint after tool_stats loads + byte progress *)
+  let call_row : Wire_keeper_context.tool_call_entry =
+    {
+      ts_unix = now_unix -. 10.0;
+      tool = "bash";
+      execution_id = Some "exec-page-1";
+      tool_use_id = Some "tu-p1";
+      turn_kind = Some "direct";
+      duration_ms = Some 55.0;
+      ok = Some true;
+      disposition = Some "completed";
+      failure_class = None;
+      execution_mode = None;
+      batch_index = None;
+      batch_size = None;
+      definition_source = Some "core";
+      input = `Assoc [ ("cmd", `String "cat out.txt") ];
+      output = "preview";
+      original_bytes = Some 49152;
+      truncated_to = Some 1024;
+      raw = `Assoc [];
+    }
+  in
+  let kc_calls_only =
+    Keeper_context_store.empty
+    |> Keeper_context_store.apply_tool_stats ~observed_at:now_mono ~keeper
+         {
+           keeper;
+           window_hours = 24;
+           total_entries = 12;
+           health = None;
+           stale_reason = None;
+           tools =
+             [
+               {
+                 name = "bash";
+                 call_count = 12;
+                 success_count = 12;
+                 failure_count = 0;
+                 avg_duration_ms = 50;
+                 p95_duration_ms = 90;
+                 max_duration_ms = 120;
+                 last_used_at = "2026-11-25T08:00:00Z";
+               };
+             ];
+           timeline = [ { hour = "08:00"; call_count = 4; error_count = 0 } ];
+         }
+    |> Keeper_context_store.apply_tool_calls ~observed_at:now_mono ~keeper
+         {
+           keeper;
+           count = 1;
+           health = None;
+           stale_reason = None;
+           coverage_gaps_count = 0;
+           entries = [ call_row ];
+         }
+  in
+  let kc_p0 =
+    kc_calls_only
+    |> Keeper_context_store.apply_tool_result ~observed_at:now_mono ~keeper
+         ~execution_id:"exec-page-1"
+         (Wire_keeper_context.Tool_result_page
+            {
+              keeper;
+              execution_id = "exec-page-1";
+              source_id = "src-p1";
+              body_sha256 = "sha-p1";
+              recorded_bytes = 49152;
+              is_error = false;
+              offset = 0;
+              next_offset = 16384;
+              total_bytes = 49152;
+              eof = false;
+              content = "FIRST_PAGE_DATA";
+              encoding = "utf-8";
+            })
+  in
+  let txt_tc_p0 =
+    grid_all_text
+      (render_to_grid ~cols:140 ~rows:36
+         (Screen_keepers.render_dive ~name:keeper ~tab:Nav.Keeper_tool_calls
+            ~model:{ m0 with keeper_context = kc_p0 }))
+  in
+  Alcotest.(check bool) "Keeper_tool_calls header keeps [Enter/Space] hint after tool_stats loads"
+    true (contains_sub ~needle:"[Enter/Space]" txt_tc_p0);
+  Alcotest.(check bool) "Keeper_tool_calls shows byte progress + Next page" true
+    (contains_sub ~needle:"16.0 KiB / 48.0 KiB" txt_tc_p0
+     && contains_sub ~needle:"Next page" txt_tc_p0);
+  let kc_p1 =
+    Keeper_context_store.apply_tool_result ~observed_at:now_mono ~keeper
+      ~execution_id:"exec-page-1"
+      (Wire_keeper_context.Tool_result_page
+         {
+           keeper;
+           execution_id = "exec-page-1";
+           source_id = "src-p1";
+           body_sha256 = "sha-p1";
+           recorded_bytes = 49152;
+           is_error = false;
+           offset = 16384;
+           next_offset = 49152;
+           total_bytes = 49152;
+           eof = true;
+           content = "\nSECOND_PAGE_DATA";
+           encoding = "utf-8";
+         })
+      kc_p0
+  in
+  let txt_tc_p1 =
+    grid_all_text
+      (render_to_grid ~cols:140 ~rows:36
+         (Screen_keepers.render_dive ~name:keeper ~tab:Nav.Keeper_tool_calls
+            ~model:{ m0 with keeper_context = kc_p1 }))
+  in
+  Alcotest.(check bool) "Keeper_tool_calls shows Loaded all after eof=true" true
+    (contains_sub ~needle:"Loaded all" txt_tc_p1);
+  (* P2-6: Keeper_tool_calls right pane surfaces Absent (404), initial Failed,
+     continuation failure (preserving page 0), 409 Source changed (preserving page 0),
+     and honest partial/full binary(base64) status *)
+  let kc_absent =
+    Keeper_context_store.mark_tool_result_absent ~keeper
+      ~execution_id:"exec-page-1" kc_calls_only
+  in
+  let txt_tc_absent =
+    grid_all_text
+      (render_to_grid ~cols:140 ~rows:36
+         (Screen_keepers.render_dive ~name:keeper ~tab:Nav.Keeper_tool_calls
+            ~model:{ m0 with keeper_context = kc_absent }))
+  in
+  Alcotest.(check bool) "Keeper_tool_calls surfaces 404 Absent honestly" true
+    (contains_sub ~needle:"No stored result" txt_tc_absent
+     && contains_sub ~needle:"Retry" txt_tc_absent);
+  let kc_cont_absent =
+    Keeper_context_store.mark_tool_result_absent ~keeper
+      ~execution_id:"exec-page-1" kc_p0
+  in
+  let txt_tc_cont_absent =
+    grid_all_text
+      (render_to_grid ~cols:160 ~rows:36
+         (Screen_keepers.render_dive ~name:keeper ~tab:Nav.Keeper_tool_calls
+            ~model:{ m0 with keeper_context = kc_cont_absent }))
+  in
+  Alcotest.(check bool)
+    "Keeper_tool_calls continuation 404 preserves page 0 content + shows Next page failed (404 Not Found)"
+    true
+    (contains_sub ~needle:"FIRST_PAGE_DATA" txt_tc_cont_absent
+     && contains_sub ~needle:"Next page failed" txt_tc_cont_absent
+     && contains_sub ~needle:"404 Not Found" txt_tc_cont_absent);
+  let kc_initial_failed =
+    Keeper_context_store.mark_tool_result_failed ~at:now_mono ~keeper
+      ~execution_id:"exec-page-1" ~reason:"HTTP 502 bad gateway" ~retryable:true
+      kc_absent
+  in
+  let txt_tc_initial_failed =
+    grid_all_text
+      (render_to_grid ~cols:140 ~rows:36
+         (Screen_keepers.render_dive ~name:keeper ~tab:Nav.Keeper_tool_calls
+            ~model:{ m0 with keeper_context = kc_initial_failed }))
+  in
+  Alcotest.(check bool) "Keeper_tool_calls surfaces initial Failed + Retry honestly" true
+    (contains_sub ~needle:"Fetch failed" txt_tc_initial_failed
+     && contains_sub ~needle:"HTTP 502" txt_tc_initial_failed
+     && contains_sub ~needle:"Retry" txt_tc_initial_failed);
+  let kc_cont_failed =
+    Keeper_context_store.mark_tool_result_failed ~at:now_mono ~keeper
+      ~execution_id:"exec-page-1"
+      ~reason:"HTTP 503 Authorization: Bearer secret_err_tok_99" ~retryable:true
+      kc_p0
+  in
+  let txt_tc_cont_failed =
+    grid_all_text
+      (render_to_grid ~cols:160 ~rows:36
+         (Screen_keepers.render_dive ~name:keeper ~tab:Nav.Keeper_tool_calls
+            ~model:{ m0 with keeper_context = kc_cont_failed }))
+  in
+  Alcotest.(check bool)
+    "Keeper_tool_calls continuation failure preserves page 0 content + shows Next page failed + scrubs secret"
+    true
+    (contains_sub ~needle:"FIRST_PAGE_DATA" txt_tc_cont_failed
+     && contains_sub ~needle:"Next page failed" txt_tc_cont_failed
+     && contains_sub ~needle:"Retry" txt_tc_cont_failed
+     && contains_sub ~needle:"HTTP 503" txt_tc_cont_failed
+     && not (contains_sub ~needle:"secret_err_tok_99" txt_tc_cont_failed));
+  let kc_conflict =
+    Keeper_context_store.mark_tool_result_conflict ~at:now_mono ~keeper
+      ~execution_id:"exec-page-1" ~reason:"source_id mismatch" kc_p0
+  in
+  let txt_tc_conflict =
+    grid_all_text
+      (render_to_grid ~cols:160 ~rows:36
+         (Screen_keepers.render_dive ~name:keeper ~tab:Nav.Keeper_tool_calls
+            ~model:{ m0 with keeper_context = kc_conflict }))
+  in
+  Alcotest.(check bool)
+    "Keeper_tool_calls 409 conflict preserves page 0 content + shows Source changed + Reload from start"
+    true
+    (contains_sub ~needle:"FIRST_PAGE_DATA" txt_tc_conflict
+     && contains_sub ~needle:"Source changed" txt_tc_conflict
+     && contains_sub ~needle:"Reload from start" txt_tc_conflict);
+  let kc_bin_partial =
+    Keeper_context_store.apply_tool_result ~observed_at:now_mono ~keeper
+      ~execution_id:"exec-page-1"
+      (Wire_keeper_context.Tool_result_page
+         {
+           keeper;
+           execution_id = "exec-page-1";
+           source_id = "src-p1";
+           body_sha256 = "sha-p1";
+           recorded_bytes = 49152;
+           is_error = false;
+           offset = 16384;
+           next_offset = 32768;
+           total_bytes = 49152;
+           eof = false;
+           content = "AAECAw==";
+           encoding = "base64";
+         })
+      kc_p0
+  in
+  let txt_tc_bin_partial =
+    grid_all_text
+      (render_to_grid ~cols:160 ~rows:36
+         (Screen_keepers.render_dive ~name:keeper ~tab:Nav.Keeper_tool_calls
+            ~model:{ m0 with keeper_context = kc_bin_partial }))
+  in
+  Alcotest.(check bool)
+    "Keeper_tool_calls partial binary(base64) shows honest Partial status, not Loaded all"
+    true
+    (contains_sub ~needle:"Partial · binary (base64) slice" txt_tc_bin_partial
+     && not (contains_sub ~needle:"Loaded all" txt_tc_bin_partial));
+  let kc_bin_full =
+    Keeper_context_store.apply_tool_result ~observed_at:now_mono ~keeper
+      ~execution_id:"exec-page-1"
+      (Wire_keeper_context.Tool_result_page
+         {
+           keeper;
+           execution_id = "exec-page-1";
+           source_id = "src-p1";
+           body_sha256 = "sha-p1";
+           recorded_bytes = 4096;
+           is_error = false;
+           offset = 0;
+           next_offset = 4096;
+           total_bytes = 4096;
+           eof = true;
+           content = "AAECAw==";
+           encoding = "base64";
+         })
+      kc_p0
+  in
+  let txt_tc_bin_full =
+    grid_all_text
+      (render_to_grid ~cols:160 ~rows:36
+         (Screen_keepers.render_dive ~name:keeper ~tab:Nav.Keeper_tool_calls
+            ~model:{ m0 with keeper_context = kc_bin_full }))
+  in
+  Alcotest.(check bool)
+    "Keeper_tool_calls full binary(base64) shows Binary (base64) · full" true
+    (contains_sub ~needle:"Binary (base64) · full" txt_tc_bin_full);
+  (* 4. 1:1 count_transcript_rows vs Keeper_dive Home/Down parity with expanded Role_tool,
+        Role_assistant trace_tools, and live stream hydrated tool + History_rows invalidation *)
+  let parity_msgs : Wire_fleet.chat_message list =
+    [
+      {
+        Wire_fleet.id = "p-user-top";
+        role = Wire_fleet.Role_user;
+        content = "TOP_EXPANDED_PARITY_001 Please inspect tools";
+        ts_unix = now_unix -. 600.0;
+        turn_ref = Some "tr-p1";
+        model_used = None;
+        tool_call_id = None;
+        tool_call_name = None;
+        execution_id = None;
+        provenance = None;
+        failure_kind = None;
+        thinking = None;
+        retained_images = [];
+        tool_meta = None;
+        trace_tools = [];
+      };
+      {
+        Wire_fleet.id = "p-tool-1";
+        role = Wire_fleet.Role_tool;
+        content = {|{"cmd":"git status"}|};
+        ts_unix = now_unix -. 500.0;
+        turn_ref = Some "tr-p1";
+        model_used = None;
+        tool_call_id = Some "tc-p1";
+        tool_call_name = Some "bash";
+        execution_id = Some "ex-hist-1";
+        provenance = None;
+        failure_kind = None;
+        thinking = None;
+        retained_images = [];
+        tool_meta =
+          Some
+            {
+              Wire_fleet.status = Some Wire_fleet.Trace_tool_ok;
+              dur = Some "18ms";
+              result = None;
+            };
+        trace_tools = [];
+      };
+      {
+        Wire_fleet.id = "p-asst-1";
+        role = Wire_fleet.Role_assistant;
+        content = "Both trace tools completed cleanly across lines.\nSecond paragraph here.";
+        ts_unix = now_unix -. 400.0;
+        turn_ref = Some "tr-p1";
+        model_used = Some "claude-sonnet-4-6";
+        tool_call_id = None;
+        tool_call_name = None;
+        execution_id = None;
+        provenance = None;
+        failure_kind = None;
+        thinking = Some (Wire_fleet.Thinking_visible "Reviewing tool outputs.");
+        retained_images = [];
+        tool_meta = None;
+        trace_tools =
+          [
+            {
+              Wire_fleet.name = "read_file";
+              tool_call_id = Some "tc-tr-1";
+              execution_id = Some "ex-trace-1";
+              status = Some Wire_fleet.Trace_tool_ok;
+              dur = Some "12ms";
+              args = Some {|{"path":"a.ml"}|};
+              result = None;
+            };
+            {
+              Wire_fleet.name = "grep";
+              tool_call_id = Some "tc-tr-2";
+              execution_id = None;
+              status = Some Wire_fleet.Trace_tool_err;
+              dur = Some "5ms";
+              args = Some {|{"pattern":"foo"}|};
+              result = Some "line1\nline2\nline3";
+            };
+          ];
+      };
+    ]
+    @ List.init 8 (fun i ->
+          {
+            Wire_fleet.id = Printf.sprintf "p-pad-%d" i;
+            role =
+              if i mod 2 = 0 then Wire_fleet.Role_user
+              else Wire_fleet.Role_assistant;
+            content =
+              Printf.sprintf "Filler turn %d to exceed viewport height cleanly." i;
+            ts_unix = now_unix -. float_of_int (300 - (i * 20));
+            turn_ref = Some (Printf.sprintf "tr-pad-%d" i);
+            model_used = None;
+            tool_call_id = None;
+            tool_call_name = None;
+            execution_id = None;
+            provenance = None;
+            failure_kind = None;
+            thinking = None;
+            retained_images = [];
+            tool_meta = None;
+            trace_tools = [];
+          })
+  in
+  let kc_parity =
+    m_live_hydrated.keeper_context
+    |> Keeper_context_store.apply_tool_result ~observed_at:now_mono ~keeper
+         ~execution_id:"ex-hist-1"
+         (Wire_keeper_context.Tool_result_page
+            {
+              keeper;
+              execution_id = "ex-hist-1";
+              source_id = "src-h1";
+              body_sha256 = "sha-h1";
+              recorded_bytes = 32768;
+              is_error = false;
+              offset = 0;
+              next_offset = 16384;
+              total_bytes = 32768;
+              eof = false;
+              content =
+                String.concat "\n"
+                  (List.init 15 (fun i -> Printf.sprintf "hist_line_%02d" (i + 1)));
+              encoding = "utf-8";
+            })
+    |> Keeper_context_store.apply_tool_result ~observed_at:now_mono ~keeper
+         ~execution_id:"ex-trace-1"
+         (Wire_keeper_context.Tool_result_page
+            {
+              keeper;
+              execution_id = "ex-trace-1";
+              source_id = "src-t1";
+              body_sha256 = "sha-t1";
+              recorded_bytes = 256;
+              is_error = false;
+              offset = 0;
+              next_offset = 256;
+              total_bytes = 256;
+              eof = true;
+              content = "TRACE_HYDRATED_BODY";
+              encoding = "utf-8";
+            })
+  in
+  let fleet_parity =
+    live_fleet
+    |> Fleet_store.apply_chat_history ~observed_at:now_mono ~keeper
+         { messages = parity_msgs; has_more = false; next_cursor = None }
+  in
+  let parity_cols = 90 in
+  let parity_rows = 24 in
+  let render_dive_chat (m : Model.t) =
+    let geom = Chat_transcript.chat_viewport_geometry ~model:m in
+    let banner_h =
+      Model.keeper_diagnostic_banner_height ~name:keeper
+        ~avail_h:(geom.body_h + 4) m
+    in
+    let rect_h = geom.body_h + 3 + banner_h in
+    let bp = Ops_common.layout_bp m in
+    let body_outer =
+      Layout.inset_body bp (Rect.make ~x:0 ~y:0 ~w:parity_cols ~h:rect_h)
+    in
+    let grid = Cell_grid.create ~cols:parity_cols ~rows:rect_h in
+    let cache = Card.Cache.create () in
+    Screen_keepers.render_dive ~name:keeper ~tab:Nav.Keeper_chat ~model:m
+      ~cache ~rect:body_outer grid;
+    grid_all_text grid
+  in
+  List.iter
+    (fun (mode_lbl, mode) ->
+      let m_base =
+        {
+          m0 with
+          viewport = { Model.cols = parity_cols; rows = parity_rows };
+          breakpoint = Model.Compact;
+          fleet = Fleet_store.set_tools_mode mode fleet_parity;
+          keeper_context = kc_parity;
+          nav =
+            {
+              m0.nav with
+              workspace = Nav.Keepers;
+              dive_stack =
+                [ Nav.Dive_keeper { name = keeper; tab = Nav.Keeper_chat } ];
+            };
+        }
+      in
+      let m_home, _ =
+        Update.step ~now:now_mono m_base
+          (Msg.Key_event
+             { Keymap.Input.key = Keymap.Input.Home; mods = Keymap.Input.no_mods })
+      in
+      let txt_top = render_dive_chat m_home in
+      Alcotest.(check bool)
+        (mode_lbl ^ ": Home reaches TOP_EXPANDED_PARITY_001") true
+        (contains_sub ~needle:"TOP_EXPANDED_PARITY_001" txt_top);
+      let m_dn, _ =
+        Update.step ~now:now_mono m_home
+          (Msg.Key_event
+             { Keymap.Input.key = Keymap.Input.Down; mods = Keymap.Input.no_mods })
+      in
+      let txt_dn = render_dive_chat m_dn in
+      Alcotest.(check bool)
+        (mode_lbl ^ ": single Down immediately scrolls (0 dead presses)") true
+        (not (String.equal txt_top txt_dn)))
+    [
+      ("Tools_compact", Slash.Tools_compact);
+      ("Tools_results", Slash.Tools_results);
+      ("Tools_full", Slash.Tools_full);
+    ];
+  (* History_rows cache invalidates immediately when /tool-result arrives *)
+  let kept = Keeper_dive.History_rows.create ~capacity:2 () in
+  let m_before =
+    {
+      m0 with
+      fleet = Fleet_store.set_tools_mode Slash.Tools_full fleet_parity;
+      keeper_context = Keeper_context_store.empty;
+    }
+  in
+  let g_before = draw_chat ~history_rows:kept ~cols:120 ~name:keeper m_before in
+  let m_after = { m_before with keeper_context = kc_parity } in
+  let g_after = draw_chat ~history_rows:kept ~cols:120 ~name:keeper m_after in
+  Alcotest.(check bool) "History_rows cache invalidates when /tool-result arrives"
+    false (grids_draw_the_same g_before g_after);
+  Alcotest.(check int) "History_rows recorded 2 misses across tool-result arrival" 2
+    (Keeper_dive.History_rows.stats kept).misses;
+  (* Continuation failure invalidates History_rows, preserves page content, shows scrubbed error,
+     and maintains 1:1 count_transcript_rows vs Keeper_dive parity *)
+  let kc_parity_err =
+    Keeper_context_store.mark_tool_result_failed ~at:now_mono ~keeper
+      ~execution_id:"ex-hist-1" ~reason:"HTTP 503 timeout" ~retryable:true
+      kc_parity
+  in
+  let m_top_base =
+    let m_tmp =
+      {
+        m0 with
+        viewport = { Model.cols = parity_cols; rows = parity_rows };
+        breakpoint = Model.Compact;
+        fleet = Fleet_store.set_tools_mode Slash.Tools_full fleet_parity;
+        keeper_context = kc_parity;
+        nav =
+          {
+            m0.nav with
+            workspace = Nav.Keepers;
+            dive_stack =
+              [ Nav.Dive_keeper { name = keeper; tab = Nav.Keeper_chat } ];
+          };
+      }
+    in
+    let m_home, _ =
+      Update.step ~now:now_mono m_tmp
+        (Msg.Key_event
+           { Keymap.Input.key = Keymap.Input.Home; mods = Keymap.Input.no_mods })
+    in
+    m_home
+  in
+  let kept_err = Keeper_dive.History_rows.create ~capacity:2 () in
+  let g_top_ok = draw_chat ~history_rows:kept_err ~cols:120 ~name:keeper m_top_base in
+  let m_err_home = { m_top_base with keeper_context = kc_parity_err } in
+  let g_top_err = draw_chat ~history_rows:kept_err ~cols:120 ~name:keeper m_err_home in
+  Alcotest.(check bool)
+    "History_rows cache invalidates when continuation error is recorded" false
+    (grids_draw_the_same g_top_ok g_top_err);
+  Alcotest.(check int)
+    "History_rows recorded 2 misses across continuation error" 2
+    (Keeper_dive.History_rows.stats kept_err).misses;
+  let txt_top_err = grid_all_text g_top_err in
+  Alcotest.(check bool)
+    "Keeper_chat continuation error preserves page content & renders Next page failed"
+    true
+    (contains_sub ~needle:"hist_line_01" txt_top_err
+     && contains_sub ~needle:"Next page failed" txt_top_err);
+  let txt_err_top = render_dive_chat m_err_home in
+  let m_err_dn, _ =
+    Update.step ~now:now_mono m_err_home
+      (Msg.Key_event
+         { Keymap.Input.key = Keymap.Input.Down; mods = Keymap.Input.no_mods })
+  in
+  Alcotest.(check bool)
+    "Keeper_chat continuation error maintains 1:1 Home/Down scroll parity" true
+    (not (String.equal txt_err_top (render_dive_chat m_err_dn)));
+  (* P3-3: Hydrated /tool-result JSON with bearer tokens in non-secret fields is scrubbed in Keeper_chat *)
+  let hydrated_bearer_inline = "hydrated_jwt_inline_secret_7788" in
+  let hydrated_bearer_nl = "hydrated_jwt_nl_secret_9900" in
+  let kc_bearer_hydrated =
+    Keeper_context_store.empty
+    |> Keeper_context_store.apply_tool_result ~observed_at:now_mono ~keeper
+         ~execution_id:"ex-live-1"
+         (Wire_keeper_context.Tool_result_page
+            {
+              keeper;
+              execution_id = "ex-live-1";
+              source_id = "src-sec-1";
+              body_sha256 = "sha-sec-1";
+              recorded_bytes = 256;
+              is_error = false;
+              offset = 0;
+              next_offset = 256;
+              total_bytes = 256;
+              eof = true;
+              content =
+                Printf.sprintf
+                  {|{"cmd":"curl -H 'Authorization: Bearer %s' https://api.example.invalid","log":"Bearer\n%s","ok":true}|}
+                  hydrated_bearer_inline hydrated_bearer_nl;
+              encoding = "utf-8";
+            })
+  in
+  let txt_hydrated_sec =
+    grid_all_text
+      (render_to_grid ~cols:140 ~rows:36
+         (Screen_keepers.render_dive ~name:keeper ~tab:Nav.Keeper_chat
+            ~model:
+              {
+                m_live_hydrated with
+                fleet = Fleet_store.set_tools_mode Slash.Tools_full live_fleet;
+                keeper_context = kc_bearer_hydrated;
+              }))
+  in
+  Alcotest.(check bool)
+    "hydrated /tool-result scrubs inline Bearer token in non-secret JSON field"
+    false (contains_sub ~needle:hydrated_bearer_inline txt_hydrated_sec);
+  Alcotest.(check bool)
+    "hydrated /tool-result scrubs newline-delimited Bearer token in non-secret JSON field"
+    false (contains_sub ~needle:hydrated_bearer_nl txt_hydrated_sec);
+  Alcotest.(check bool)
+    "hydrated /tool-result renders [redacted] marker" true
+    (contains_sub ~needle:"[redacted]" txt_hydrated_sec);
+  let kc_chat_bin_partial =
+    Keeper_context_store.empty
+    |> Keeper_context_store.apply_tool_result ~observed_at:now_mono ~keeper
+         ~execution_id:"ex-live-1"
+         (Wire_keeper_context.Tool_result_page
+            {
+              keeper;
+              execution_id = "ex-live-1";
+              source_id = "src-bin-1";
+              body_sha256 = "sha-bin-1";
+              recorded_bytes = 49152;
+              is_error = false;
+              offset = 0;
+              next_offset = 16384;
+              total_bytes = 49152;
+              eof = false;
+              content = "AAECAw==";
+              encoding = "base64";
+            })
+  in
+  let txt_chat_bin_partial =
+    grid_all_text
+      (render_to_grid ~cols:140 ~rows:36
+         (Screen_keepers.render_dive ~name:keeper ~tab:Nav.Keeper_chat
+            ~model:
+              {
+                m_live_hydrated with
+                fleet = Fleet_store.set_tools_mode Slash.Tools_results live_fleet;
+                keeper_context = kc_chat_bin_partial;
+              }))
+  in
+  Alcotest.(check bool)
+    "Keeper_chat partial binary(base64) renders honest Partial status, not Loaded all"
+    true
+    (contains_sub ~needle:"Partial · binary (base64) slice" txt_chat_bin_partial
+     && not (contains_sub ~needle:"Loaded all" txt_chat_bin_partial))
+
 let () =
   Alcotest.run "masc_tui_screens_ops"
     [
       ( "keepers"
       , [
+          Alcotest.test_case
+            "TUI tool expand: live READY, trace tools, pagination & 1:1 row-count parity"
+            `Quick test_tool_expand_live_trace_pagination_and_row_count_parity;
           Alcotest.test_case "layer2 due_delta, cadence outcomes, path_rest & diagnostics" `Quick
             test_layer2_ops_due_delta_cadence_outcomes_and_diagnostics;
           Alcotest.test_case "cadence window counts causes" `Quick

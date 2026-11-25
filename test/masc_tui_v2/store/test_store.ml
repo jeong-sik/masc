@@ -854,6 +854,8 @@ let test_compact_composer_and_drafts () =
                              failure_kind = None;
                              thinking = None;
                              retained_images = [];
+                             tool_meta = None;
+                             trace_tools = [];
                            };
                          ];
                        has_more = false;
@@ -1546,6 +1548,8 @@ let test_verifier_regressions () =
       failure_kind = None;
       thinking = None;
       retained_images = [];
+      tool_meta = None;
+      trace_tools = [];
     }
   in
   let m_hist, _ =
@@ -4523,6 +4527,8 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
             failure_kind = None;
             thinking = None;
             retained_images = [];
+            tool_meta = None;
+            trace_tools = [];
           };
         ];
       has_more = false;
@@ -5273,6 +5279,8 @@ let test_nav_fix5_keeper_chat_scroll_direction_and_home_bound () =
           failure_kind = None;
           thinking = None;
           retained_images = [];
+          tool_meta = None;
+          trace_tools = [];
         })
   in
   let m0 = Model.initial ~cols:120 ~rows:30 () in
@@ -5993,10 +6001,12 @@ let test_p1_chat_transcript_ssot_exact_bounds () =
       failure_kind = None;
       thinking = None;
       retained_images = [];
+      tool_meta = None;
+      trace_tools = [];
     }
   in
   let json_1line =
-    "{\"k1\":1,\"k2\":2,\"k3\":3,\"k4\":4,\"k5\":5,\"k6\":6,\"k7\":7,\"k8\":8,\"k9\":9,\"k10\":10}"
+    "{\"k1\":1,\"k2\":2,\"k3\":3,\"k4\":4,\"k5\":5,\"k6\":6,\"k7\":7,\"k8\":8,\"k9\":9,\"k10\":10,\"k11\":11,\"k12\":12,\"k13\":13,\"k14\":14}"
   in
   let md_msgs =
     [
@@ -6046,7 +6056,7 @@ let test_p1_chat_transcript_ssot_exact_bounds () =
         };
     }
   in
-  (* (a) Compact vs Tools_results (8+1 JSON rows) vs Tools_full (11 JSON rows) *)
+  (* (a) Compact vs Tools_results (12+1 JSON rows) vs Tools_full (15 JSON rows) *)
   let m_compact = make_chat_model base_fleet m0.drafts in
   let g_compact = Chat_transcript.chat_viewport_geometry ~model:m_compact in
   let rows_compact =
@@ -6063,8 +6073,8 @@ let test_p1_chat_transcript_ssot_exact_bounds () =
       ~width:g_compact.prose_w
   in
   Alcotest.(check int)
-    "Tools_results expands 1-line JSON via Json_tree.flatten (+8 shown +1 hidden = +9)"
-    (rows_compact + 9) rows_results;
+    "Tools_results expands 1-line JSON via Json_tree.flatten (+12 shown +1 hidden = +13)"
+    (rows_compact + 13) rows_results;
   let m_full =
     make_chat_model
       (Fleet_store.set_tools_mode Slash.Tools_full base_fleet)
@@ -6075,7 +6085,7 @@ let test_p1_chat_transcript_ssot_exact_bounds () =
       ~width:g_compact.prose_w
   in
   Alcotest.(check int)
-    "Tools_full expands all 11 Json_tree lines (+11)" (rows_compact + 11)
+    "Tools_full expands all 15 Json_tree lines (+15)" (rows_compact + 15)
     rows_full;
 
   (* (a2) Delegate summary (incl. status_many + secret scrubbing) + persisted thinking row counts *)
@@ -7205,6 +7215,8 @@ let test_agui_chat_stream_lifecycle_15_bugs () =
       failure_kind;
       thinking = None;
       retained_images = [];
+      tool_meta = None;
+      trace_tools = [];
     }
   in
   let m0 = Model.initial ~cols:120 ~rows:36 () in
@@ -7344,6 +7356,7 @@ let test_agui_chat_stream_lifecycle_15_bugs () =
                  operation_id = None;
                  tool_use_id = "scope-1-block-0";
                  tool_name = None;
+                 execution_id = None;
                  ok = None;
                  output_preview = None;
                };
@@ -10918,6 +10931,8 @@ let chat_row ~id ~role ?provenance content : Wire_fleet.chat_message =
     failure_kind = None;
     thinking = None;
     retained_images = [];
+    tool_meta = None;
+    trace_tools = [];
   }
 
 let failure_row ~id ~operation_id =
@@ -11463,6 +11478,7 @@ let test_live_chat_runtime_attempt_and_text_ownership () =
               operation_id = Some req;
               tool_use_id = "tu-1";
               tool_name = Some "read_file";
+              execution_id = None;
               ok = Some true;
               output_preview = Some "ok";
             })
@@ -15025,6 +15041,8 @@ let test_ux_sweep_12_fixes () =
           failure_kind = None;
           thinking = None;
           retained_images = [];
+          tool_meta = None;
+          trace_tools = [];
         })
   in
   let keeper_alpha : Wire_fleet.keeper_summary =
@@ -16608,6 +16626,8 @@ let test_active_turn_preview_visibility_and_queued_followup () =
             failure_kind = None;
             thinking = None;
             retained_images = [];
+            tool_meta = None;
+            trace_tools = [];
           };
         ];
       has_more = false;
@@ -17052,6 +17072,7 @@ let test_active_turn_preview_visibility_and_queued_followup () =
             tool_use_id = "tu-1";
             stream_scope = None;
             tool_name = "Read";
+            execution_id = None;
             args_preview = Some "README.md";
             progress_label = None;
             tool_state = Tool_settled;
@@ -22849,6 +22870,8 @@ let test_hidden_score_command () =
       failure_kind = None;
       thinking = None;
       retained_images = [];
+      tool_meta = None;
+      trace_tools = [];
     }
   in
   let page : Wire_fleet.chat_history_page =
@@ -25944,5 +25967,1090 @@ let () =
                 (Knowledge_store.equal_memory_diff_window
                    m_p_esc2.knowledge.memory_diff_window
                    Knowledge_store.Window_7d));
+          Alcotest.test_case
+            "TUI tool expand: Space+Ctrl+O parity, bounded /tool-result hydration & multi-page pagination"
+            `Quick
+            (fun () ->
+              let keeper = "alpha-1" in
+              let tool_result_gets cmds =
+                List.filter_map
+                  (function
+                    | Cmd.Http_get
+                        {
+                          req =
+                            Cmd.Get_keeper_tool_result
+                              { keeper = k; execution_id; offset; max_bytes; source_id };
+                          _;
+                        } ->
+                        Some (k, execution_id, offset, max_bytes, source_id)
+                    | _ -> None)
+                  (Cmd.flatten cmds)
+              in
+              let m0 =
+                let base = Model.initial ~cols:120 ~rows:36 () in
+                {
+                  base with
+                  fleet =
+                    Fleet_store.apply_keepers ~observed_at:t0
+                      [ sample_keeper keeper; sample_keeper "beta-2" ]
+                      base.fleet;
+                  nav =
+                    {
+                      base.nav with
+                      workspace = Nav.Keepers;
+                      dive_stack =
+                        [ Nav.Dive_keeper { name = keeper; tab = Nav.Keeper_chat } ];
+                    };
+                }
+              in
+              (* 1. Space + Ctrl+O non-deadlock parity + mode toasts *)
+              let m_sp, _ = Update.step ~now:t0 m0 (Msg.Key_event (char_key " ")) in
+              Alcotest.(check bool) "Space expands chat_tools_mode to Tools_full" true
+                (Slash.equal_tools_mode (Chat_transcript.tools_mode m_sp)
+                   Slash.Tools_full);
+              Alcotest.(check bool) "Space sets chat_turn_details_expanded=true" true
+                m_sp.fleet.chat_turn_details_expanded;
+              Alcotest.(check bool) "Space emits tools mode toast" true
+                (Option.is_some m_sp.toast);
+              let m_co, _ =
+                Update.step ~now:t1 m_sp (Msg.Key_event (char_key ~ctrl:true "o"))
+              in
+              Alcotest.(check bool)
+                "Ctrl+O after Space never deadlocks (cycles to Tools_compact)"
+                true
+                (Slash.equal_tools_mode (Chat_transcript.tools_mode m_co)
+                   Slash.Tools_compact);
+              Alcotest.(check bool)
+                "Ctrl+O to Tools_compact clears chat_turn_details_expanded"
+                false m_co.fleet.chat_turn_details_expanded;
+              let m_sp2, _ = Update.step ~now:t1 m_co (Msg.Key_event (char_key " ")) in
+              let m_slash_cmp, _ =
+                Update.execute_slash ~now:t1 m_sp2
+                  (Slash.Tools (Some Slash.Tools_compact))
+              in
+              Alcotest.(check bool)
+                "/tools compact after Space returns to Tools_compact" true
+                (Slash.equal_tools_mode (Chat_transcript.tools_mode m_slash_cmp)
+                   Slash.Tools_compact
+                 && not m_slash_cmp.fleet.chat_turn_details_expanded);
+              let m_res_mode, _ =
+                Update.step ~now:t1 m_slash_cmp
+                  (Msg.Key_event (char_key ~ctrl:true "o"))
+              in
+              Alcotest.(check bool) "Ctrl+O compact -> results" true
+                (Slash.equal_tools_mode (Chat_transcript.tools_mode m_res_mode)
+                   Slash.Tools_results);
+              let m_sp_collapse, _ =
+                Update.step ~now:t1 m_res_mode (Msg.Key_event (char_key " "))
+              in
+              Alcotest.(check bool) "Space from Tools_results collapses to Tools_compact"
+                true
+                (Slash.equal_tools_mode (Chat_transcript.tools_mode m_sp_collapse)
+                   Slash.Tools_compact);
+              (* 2. Bounded on-demand /tool-result hydration (max 6 most recent) + in-flight & keeper guards *)
+              let mk_tool_msg idx : Wire_fleet.chat_message =
+                {
+                  id = Printf.sprintf "tm-%d" idx;
+                  role = Wire_fleet.Role_tool;
+                  content = Printf.sprintf {|{"idx":%d}|} idx;
+                  ts_unix = 1_700_000_000.0 +. float_of_int idx;
+                  turn_ref = Some (Printf.sprintf "tr-%d" idx);
+                  model_used = None;
+                  tool_call_id = Some (Printf.sprintf "tc-%d" idx);
+                  tool_call_name = Some "bash";
+                  execution_id = Some (Printf.sprintf "ex-%d" idx);
+                  provenance = None;
+                  failure_kind = None;
+                  thinking = None;
+                  retained_images = [];
+                  tool_meta = None;
+                  trace_tools = [];
+                }
+              in
+              let asst_trace_msg : Wire_fleet.chat_message =
+                {
+                  id = "asst-trace-8";
+                  role = Wire_fleet.Role_assistant;
+                  content = "Summary";
+                  ts_unix = 1_700_000_020.0;
+                  turn_ref = Some "tr-8";
+                  model_used = None;
+                  tool_call_id = None;
+                  tool_call_name = None;
+                  execution_id = None;
+                  provenance = None;
+                  failure_kind = None;
+                  thinking = None;
+                  retained_images = [];
+                  tool_meta = None;
+                  trace_tools =
+                    [
+                      {
+                        name = "read_file";
+                        tool_call_id = Some "tc-8";
+                        execution_id = Some "ex-8";
+                        status = Some Wire_fleet.Trace_tool_ok;
+                        dur = Some "15ms";
+                        args = Some {|{"path":"a.ml"}|};
+                        result = None;
+                      };
+                    ];
+                }
+              in
+              let hist_page : Wire_fleet.chat_history_page =
+                {
+                  messages = List.init 7 (fun i -> mk_tool_msg (i + 1)) @ [ asst_trace_msg ];
+                  has_more = false;
+                  next_cursor = None;
+                }
+              in
+              let m_hist_compact, cmds_hist_compact =
+                Update.step ~now:t0 m0
+                  (Msg.Http_reply
+                     {
+                       epoch = m0.epoch;
+                       reply =
+                         Msg.Reply_chat_history { keeper; result = Ok hist_page };
+                     })
+              in
+              Alcotest.(check int) "compact history load dispatches 0 tool-result fetches"
+                0 (List.length (tool_result_gets cmds_hist_compact));
+              let m_exp1, cmds_exp1 =
+                Update.step ~now:t1 m_hist_compact
+                  (Msg.Key_event (char_key ~ctrl:true "o"))
+              in
+              let gets1 = tool_result_gets cmds_exp1 in
+              Alcotest.(check int) "expanding caps on-demand fetches at 6 most recent"
+                6 (List.length gets1);
+              Alcotest.(check (list string))
+                "fetches prioritize newest 6 execution_ids (ex-8..ex-3)"
+                [ "ex-8"; "ex-7"; "ex-6"; "ex-5"; "ex-4"; "ex-3" ]
+                (List.map (fun (_, eid, _, _, _) -> eid) gets1);
+              (* Re-delivering history while inflight emits 0 duplicate fetches for ex-8..ex-3,
+                 and picks up remaining uncached ex-2, ex-1 only (2 fetches). *)
+              let m_hist_again, cmds_hist_again =
+                Update.step ~now:t1 m_exp1
+                  (Msg.Http_reply
+                     {
+                       epoch = m_exp1.epoch;
+                       reply =
+                         Msg.Reply_chat_history { keeper; result = Ok hist_page };
+                     })
+              in
+              let gets_again = tool_result_gets cmds_hist_again in
+              Alcotest.(check (list string))
+                "in-flight guard skips ex-8..ex-3 and only fetches remaining ex-2, ex-1"
+                [ "ex-2"; "ex-1" ]
+                (List.map (fun (_, eid, _, _, _) -> eid) gets_again);
+              (* History reply for another keeper while viewing alpha-1 dispatches 0 fetches *)
+              let _, cmds_other =
+                Update.step ~now:t1 m_hist_again
+                  (Msg.Http_reply
+                     {
+                       epoch = m_hist_again.epoch;
+                       reply =
+                         Msg.Reply_chat_history
+                           { keeper = "beta-2"; result = Ok hist_page };
+                     })
+              in
+              Alcotest.(check int) "keeper switch guard skips inactive keeper history" 0
+                (List.length (tool_result_gets cmds_other));
+              (* Hydrate ex-8 with eof=false, then cycle Tools_results -> Tools_full to fetch page 1 *)
+              let m_ex8_p0, _ =
+                Update.step ~now:t1 m_hist_again
+                  (Msg.Http_reply
+                     {
+                       epoch = m_hist_again.epoch;
+                       reply =
+                         Msg.Reply_keeper_tool_result
+                           {
+                             keeper;
+                             execution_id = "ex-8";
+                             result =
+                               Ok
+                                 (Wire_keeper_context.Tool_result_page
+                                    {
+                                      keeper;
+                                      execution_id = "ex-8";
+                                      source_id = "src-ex8";
+                                      body_sha256 = "sha0";
+                                      recorded_bytes = 32000;
+                                      is_error = false;
+                                      offset = 0;
+                                      next_offset = 16384;
+                                      total_bytes = 32000;
+                                      eof = false;
+                                      content = "PAGE0\n";
+                                      encoding = "utf-8";
+                                    });
+                           };
+                     })
+              in
+              let m_full_cont, cmds_full_cont =
+                Update.step ~now:t1 m_ex8_p0
+                  (Msg.Key_event (char_key ~ctrl:true "o"))
+              in
+              Alcotest.(check bool)
+                "Tools_results -> Tools_full dispatches continuation page for eof=false ex-8"
+                true
+                (List.exists
+                   (function
+                     | k, "ex-8", Some 16384, Some 16384, Some "src-ex8"
+                       when String.equal k keeper ->
+                         true
+                     | _ -> false)
+                   (tool_result_gets cmds_full_cont));
+              (* Live KEEPER_TOOL_RESULT_READY while expanded dispatches /tool-result *)
+              let m_stream =
+                {
+                  m_full_cont with
+                  fleet =
+                    Fleet_store.start_chat_stream ~keeper ~request_id:"req-live-9"
+                      m_full_cont.fleet;
+                }
+              in
+              let m_ready, cmds_ready =
+                Update.step ~now:t1 m_stream
+                  (Msg.Chat_stream_chunk
+                     {
+                       epoch = m_stream.epoch;
+                       keeper;
+                       request_id = "req-live-9";
+                       is_btw = false;
+                       chunk =
+                         Wire_fleet.Chunk_tool_end
+                           {
+                             operation_id = Some "op-live-9";
+                             tool_use_id = "scope-1-block-0";
+                             tool_name = Some "bash";
+                             execution_id = Some "ex-live-9";
+                             ok = None;
+                             output_preview = None;
+                           };
+                     })
+              in
+              Alcotest.(check bool)
+                "live Chunk_tool_end with execution_id while expanded fetches /tool-result"
+                true
+                (List.exists
+                   (function
+                     | k, "ex-live-9", Some 0, Some 16384, None
+                       when String.equal k keeper ->
+                         true
+                     | _ -> false)
+                   (tool_result_gets cmds_ready));
+              let live_buf =
+                Fleet_store.String_map.find keeper m_ready.fleet.chat_streams
+              in
+              Alcotest.(check (option string))
+                "active_tool_call retains execution_id" (Some "ex-live-9")
+                (List.hd live_buf.tools).execution_id;
+              (* 3. Multi-page pagination in Keeper_tool_calls via [Enter] + [Space] & 32-entry LRU *)
+              let call_entry : Wire_keeper_context.tool_call_entry =
+                {
+                  ts_unix = 1_700_000_050.0;
+                  tool = "bash";
+                  execution_id = Some "exec-big";
+                  tool_use_id = Some "tu-big";
+                  turn_kind = Some "direct";
+                  duration_ms = Some 80.0;
+                  ok = Some true;
+                  disposition = Some "completed";
+                  failure_class = None;
+                  execution_mode = None;
+                  batch_index = None;
+                  batch_size = None;
+                  definition_source = Some "core";
+                  input = `Assoc [ ("cmd", `String "cat big.log") ];
+                  output = "truncated";
+                  original_bytes = Some 40000;
+                  truncated_to = Some 1024;
+                  raw = `Assoc [];
+                }
+              in
+              let m_tc0 =
+                let kc =
+                  Keeper_context_store.apply_tool_calls ~observed_at:t0 ~keeper
+                    {
+                      keeper;
+                      count = 1;
+                      health = None;
+                      stale_reason = None;
+                      coverage_gaps_count = 0;
+                      entries = [ call_entry ];
+                    }
+                    Keeper_context_store.empty
+                in
+                {
+                  m0 with
+                  keeper_context = kc;
+                  nav =
+                    {
+                      m0.nav with
+                      dive_stack =
+                        [ Nav.Dive_keeper { name = keeper; tab = Nav.Keeper_tool_calls } ];
+                    };
+                }
+              in
+              let m_tc1, cmds_tc1 =
+                Update.step ~now:t0 m_tc0 (Msg.Key_event (key Keymap.Input.Enter))
+              in
+              Alcotest.(check (list string)) "Enter fetches page 0" [ "exec-big" ]
+                (List.map (fun (_, eid, _, _, _) -> eid) (tool_result_gets cmds_tc1));
+              (* Space while inflight does not duplicate *)
+              let _, cmds_tc_dup =
+                Update.step ~now:t0 m_tc1 (Msg.Key_event (char_key " "))
+              in
+              Alcotest.(check int) "Space while inflight emits 0 duplicate fetches" 0
+                (List.length (tool_result_gets cmds_tc_dup));
+              (* Deliver page 0 *)
+              let m_tc2, _ =
+                Update.step ~now:t1 m_tc1
+                  (Msg.Http_reply
+                     {
+                       epoch = m_tc1.epoch;
+                       reply =
+                         Msg.Reply_keeper_tool_result
+                           {
+                             keeper;
+                             execution_id = "exec-big";
+                             result =
+                               Ok
+                                 (Wire_keeper_context.Tool_result_page
+                                    {
+                                      keeper;
+                                      execution_id = "exec-big";
+                                      source_id = "src-big";
+                                      body_sha256 = "sha-b";
+                                      recorded_bytes = 40000;
+                                      is_error = false;
+                                      offset = 0;
+                                      next_offset = 16384;
+                                      total_bytes = 40000;
+                                      eof = false;
+                                      content = "PART0\n";
+                                      encoding = "utf-8";
+                                    });
+                           };
+                     })
+              in
+              (* Space now requests page 1 with offset=16384 and source_id="src-big" *)
+              let m_tc3, cmds_tc3 =
+                Update.step ~now:t1 m_tc2 (Msg.Key_event (char_key " "))
+              in
+              Alcotest.(check bool)
+                "Space fetches continuation page (offset=16384, source_id=src-big)"
+                true
+                (match tool_result_gets cmds_tc3 with
+                | [ (k, "exec-big", Some 16384, Some 16384, Some "src-big") ] ->
+                    String.equal k keeper
+                | _ -> false);
+              (* Mismatched source_id slice does not corrupt page 0 *)
+              let m_tc_bad, _ =
+                Update.step ~now:t1 m_tc3
+                  (Msg.Http_reply
+                     {
+                       epoch = m_tc3.epoch;
+                       reply =
+                         Msg.Reply_keeper_tool_result
+                           {
+                             keeper;
+                             execution_id = "exec-big";
+                             result =
+                               Ok
+                                 (Wire_keeper_context.Tool_result_page
+                                    {
+                                      keeper;
+                                      execution_id = "exec-big";
+                                      source_id = "src-stale";
+                                      body_sha256 = "sha-x";
+                                      recorded_bytes = 40000;
+                                      is_error = false;
+                                      offset = 16384;
+                                      next_offset = 40000;
+                                      total_bytes = 40000;
+                                      eof = true;
+                                      content = "WRONG\n";
+                                      encoding = "utf-8";
+                                    });
+                           };
+                     })
+              in
+              (* Valid page 1 appends cleanly *)
+              let m_tc4, _ =
+                Update.step ~now:t1 m_tc_bad
+                  (Msg.Http_reply
+                     {
+                       epoch = m_tc_bad.epoch;
+                       reply =
+                         Msg.Reply_keeper_tool_result
+                           {
+                             keeper;
+                             execution_id = "exec-big";
+                             result =
+                               Ok
+                                 (Wire_keeper_context.Tool_result_page
+                                    {
+                                      keeper;
+                                      execution_id = "exec-big";
+                                      source_id = "src-big";
+                                      body_sha256 = "sha-b";
+                                      recorded_bytes = 40000;
+                                      is_error = false;
+                                      offset = 16384;
+                                      next_offset = 40000;
+                                      total_bytes = 40000;
+                                      eof = true;
+                                      content = "PART1\n";
+                                      encoding = "utf-8";
+                                    });
+                           };
+                     })
+              in
+              let ks_final =
+                Keeper_context_store.get_keeper ~keeper m_tc4.keeper_context
+              in
+              (match Keeper_context_store.tool_result_for_selected_call ks_final with
+              | Some
+                  (Wire_keeper_context.Tool_result_page
+                     { offset = 0; next_offset = 40000; eof = true; content; _ }) ->
+                  Alcotest.(check string) "multi-page content accumulated cleanly"
+                    "PART0\nPART1\n" content
+              | _ -> Alcotest.fail "expected accumulated eof=true Tool_result_page");
+              (* Bounded 32-entry LRU eviction *)
+              let kc_lru =
+                List.init 35 (fun i -> Printf.sprintf "lru-%02d" i)
+                |> List.fold_left
+                     (fun acc eid ->
+                       Keeper_context_store.apply_tool_result ~observed_at:t1
+                         ~keeper ~execution_id:eid
+                         Wire_keeper_context.Tool_result_pending acc)
+                     Keeper_context_store.empty
+              in
+              let ks_lru = Keeper_context_store.get_keeper ~keeper kc_lru in
+              Alcotest.(check int) "LRU cache capped at 32 entries" 32
+                (Keeper_context_store.String_map.cardinal ks_lru.tool_results);
+              Alcotest.(check bool) "oldest entry lru-00 evicted" false
+                (Keeper_context_store.String_map.mem "lru-00" ks_lru.tool_results);
+              Alcotest.(check bool) "newest entry lru-34 retained" true
+                (Keeper_context_store.String_map.mem "lru-34" ks_lru.tool_results);
+
+              (* P1-1: Epoch advance (clear_epoch_logins / Server_start_result Ok) clears tool_result_inflight *)
+              let m_inflight =
+                {
+                  m_tc1 with
+                  keeper_context =
+                    Keeper_context_store.mark_tool_result_inflight ~keeper
+                      ~execution_id:"exec-epoch-1" m_tc1.keeper_context;
+                }
+              in
+              Alcotest.(check bool) "inflight set populated before epoch advance" true
+                (Keeper_context_store.is_tool_result_inflight
+                   ~execution_id:"exec-epoch-1"
+                   (Keeper_context_store.get_keeper ~keeper m_inflight.keeper_context));
+              let m_new_epoch, _ =
+                Update.step ~now:t1 m_inflight (Msg.Server_start_result (Ok ()))
+              in
+              Alcotest.(check bool) "epoch advance clears tool_result_inflight" false
+                (Keeper_context_store.is_tool_result_inflight
+                   ~execution_id:"exec-epoch-1"
+                   (Keeper_context_store.get_keeper ~keeper m_new_epoch.keeper_context));
+
+              (* P1-2: Orphan offset>0 slice ignored (never stored headless), zero-progress guard,
+                       and utf-8 -> base64 / offset=0 base64 handling *)
+              let kc_orphan =
+                Keeper_context_store.empty
+                |> Keeper_context_store.mark_tool_result_inflight ~keeper
+                     ~execution_id:"exec-orphan"
+                |> Keeper_context_store.apply_tool_result ~observed_at:t1 ~keeper
+                     ~execution_id:"exec-orphan"
+                     (Wire_keeper_context.Tool_result_page
+                        {
+                          keeper;
+                          execution_id = "exec-orphan";
+                          source_id = "src-o";
+                          body_sha256 = "sha-o";
+                          recorded_bytes = 32768;
+                          is_error = false;
+                          offset = 16384;
+                          next_offset = 32768;
+                          total_bytes = 32768;
+                          eof = true;
+                          content = "HEADLESS_SLICE";
+                          encoding = "utf-8";
+                        })
+              in
+              let ks_orphan = Keeper_context_store.get_keeper ~keeper kc_orphan in
+              Alcotest.(check bool) "orphan offset>0 slice clears inflight" false
+                (Keeper_context_store.is_tool_result_inflight
+                   ~execution_id:"exec-orphan" ks_orphan);
+              Alcotest.(check bool) "orphan offset>0 slice does not populate cache" false
+                (Keeper_context_store.String_map.mem "exec-orphan"
+                   ks_orphan.tool_results);
+
+              (* Zero-progress continuation does not duplicate content *)
+              let kc_zp0 =
+                Keeper_context_store.empty
+                |> Keeper_context_store.apply_tool_result ~observed_at:t1 ~keeper
+                     ~execution_id:"exec-zp"
+                     (Wire_keeper_context.Tool_result_page
+                        {
+                          keeper;
+                          execution_id = "exec-zp";
+                          source_id = "src-zp";
+                          body_sha256 = "sha-zp";
+                          recorded_bytes = 32768;
+                          is_error = false;
+                          offset = 0;
+                          next_offset = 16384;
+                          total_bytes = 32768;
+                          eof = false;
+                          content = "CHUNK0";
+                          encoding = "utf-8";
+                        })
+                |> Keeper_context_store.apply_tool_result ~observed_at:t1 ~keeper
+                     ~execution_id:"exec-zp"
+                     (Wire_keeper_context.Tool_result_page
+                        {
+                          keeper;
+                          execution_id = "exec-zp";
+                          source_id = "src-zp";
+                          body_sha256 = "sha-zp";
+                          recorded_bytes = 32768;
+                          is_error = false;
+                          offset = 16384;
+                          next_offset = 16384;
+                          total_bytes = 32768;
+                          eof = false;
+                          content = "DUP_SHOULD_NOT_APPEND";
+                          encoding = "utf-8";
+                        })
+              in
+              (match
+                 Observed.to_option
+                   (Keeper_context_store.tool_result_for_execution
+                      ~execution_id:"exec-zp"
+                      (Keeper_context_store.get_keeper ~keeper kc_zp0))
+               with
+              | Some (Wire_keeper_context.Tool_result_page { content; eof; _ }) ->
+                  Alcotest.(check string) "zero-progress keeps CHUNK0 without duplicating"
+                    "CHUNK0" content;
+                  Alcotest.(check bool) "zero-progress keeps eof=false" false eof
+              | _ -> Alcotest.fail "expected cached page after zero-progress guard");
+
+              (* Mixed utf-8 -> base64 continuation preserves prior utf-8 + appends marker + keeps honest eof=false while stopping paging *)
+              let kc_mixed =
+                kc_zp0
+                |> Keeper_context_store.apply_tool_result ~observed_at:t1 ~keeper
+                     ~execution_id:"exec-zp"
+                     (Wire_keeper_context.Tool_result_page
+                        {
+                          keeper;
+                          execution_id = "exec-zp";
+                          source_id = "src-zp";
+                          body_sha256 = "sha-zp";
+                          recorded_bytes = 32768;
+                          is_error = false;
+                          offset = 16384;
+                          next_offset = 24576;
+                          total_bytes = 32768;
+                          eof = false;
+                          content = "AAECAw==";
+                          encoding = "base64";
+                        })
+              in
+              let ks_mixed = Keeper_context_store.get_keeper ~keeper kc_mixed in
+              (match
+                 Observed.to_option
+                   (Keeper_context_store.tool_result_for_execution
+                      ~execution_id:"exec-zp" ks_mixed)
+               with
+              | Some
+                  (Wire_keeper_context.Tool_result_page
+                     { content; eof; next_offset; encoding; _ }) ->
+                  Alcotest.(check string)
+                    "utf-8 -> base64 preserves utf-8 and appends binary marker"
+                    "CHUNK0\n\n[binary/base64 · 32768B]" content;
+                  Alcotest.(check bool)
+                    "utf-8 -> base64 preserves honest server eof=false" false eof;
+                  Alcotest.(check int)
+                    "utf-8 -> base64 preserves server next_offset" 24576 next_offset;
+                  Alcotest.(check bool)
+                    "utf-8 -> base64 marks encoding as binary" true
+                    (Keeper_context_store.is_binary_encoding encoding)
+              | _ -> Alcotest.fail "expected mixed utf-8 -> base64 marker page");
+              Alcotest.(check bool)
+                "utf-8 -> base64 stops paging in Chat (next_tool_result_params = None)"
+                true
+                (Option.is_none
+                   (Keeper_context_store.next_tool_result_params
+                      ~allow_next_page:true ~refetch_when_eof:false
+                      ~execution_id:"exec-zp" ks_mixed));
+              Alcotest.(check bool)
+                "utf-8 -> base64 stops paging in Tool Calls (next_tool_result_params = None)"
+                true
+                (Option.is_none
+                   (Keeper_context_store.next_tool_result_params
+                      ~allow_non_retryable:true ~allow_next_page:true
+                      ~refetch_when_eof:true ~execution_id:"exec-zp" ks_mixed));
+
+              (* Single offset=0 base64 page preserves honest server eof while stopping paging *)
+              let kc_b64 =
+                Keeper_context_store.empty
+                |> Keeper_context_store.apply_tool_result ~observed_at:t1 ~keeper
+                     ~execution_id:"exec-b64"
+                     (Wire_keeper_context.Tool_result_page
+                        {
+                          keeper;
+                          execution_id = "exec-b64";
+                          source_id = "src-b64";
+                          body_sha256 = "sha-b64";
+                          recorded_bytes = 32768;
+                          is_error = false;
+                          offset = 0;
+                          next_offset = 4096;
+                          total_bytes = 32768;
+                          eof = false;
+                          content = "AAECAw==";
+                          encoding = "base64";
+                        })
+              in
+              let ks_b64 = Keeper_context_store.get_keeper ~keeper kc_b64 in
+              (match
+                 Observed.to_option
+                   (Keeper_context_store.tool_result_for_execution
+                      ~execution_id:"exec-b64" ks_b64)
+               with
+              | Some (Wire_keeper_context.Tool_result_page { content; eof; _ }) ->
+                  Alcotest.(check string) "offset=0 base64 displays marker"
+                    "[binary/base64 · 32768B]" content;
+                  Alcotest.(check bool)
+                    "offset=0 base64 preserves honest server eof=false" false eof
+              | _ -> Alcotest.fail "expected offset=0 base64 marker page");
+              Alcotest.(check bool)
+                "offset=0 base64 stops further paging (next_tool_result_params = None)"
+                true
+                (Option.is_none
+                   (Keeper_context_store.next_tool_result_params
+                      ~allow_next_page:true ~refetch_when_eof:true
+                      ~execution_id:"exec-b64" ks_b64));
+
+              (* P2 continuation failure (offset > 0 non-409): preserves already-loaded page bytes,
+                 records Page_continuation_failed, and resumes from next_offset + source_id (NOT offset=0) *)
+              let m_cont_503, _ =
+                Update.step ~now:t1 m_tc3
+                  (Msg.Http_reply
+                     {
+                       epoch = m_tc3.epoch;
+                       reply =
+                         Msg.Reply_keeper_tool_result
+                           {
+                             keeper;
+                             execution_id = "exec-big";
+                             result =
+                               Error
+                                 (Msg.Http_error
+                                    {
+                                      status = 503;
+                                      body = "upstream temporarily unavailable";
+                                      api_error = None;
+                                    });
+                           };
+                     })
+              in
+              let ks_503 =
+                Keeper_context_store.get_keeper ~keeper m_cont_503.keeper_context
+              in
+              Alcotest.(check bool) "continuation 503 clears inflight" false
+                (Keeper_context_store.is_tool_result_inflight
+                   ~execution_id:"exec-big" ks_503);
+              (match Keeper_context_store.tool_result_for_selected_call ks_503 with
+              | Some
+                  (Wire_keeper_context.Tool_result_page
+                     { content = "PART0\n"; next_offset = 16384; eof = false; _ })
+                ->
+                  ()
+              | _ ->
+                  Alcotest.fail
+                    "continuation failure must preserve already-loaded page 0 bytes");
+              (match
+                 Keeper_context_store.tool_result_page_error
+                   ~execution_id:"exec-big" ks_503
+               with
+              | Some
+                  (Keeper_context_store.Page_continuation_failed
+                     { retryable = true; _ }) ->
+                  ()
+              | _ ->
+                  Alcotest.fail
+                    "continuation 503 must record retryable Page_continuation_failed");
+              (match
+                 Keeper_context_store.next_tool_result_params
+                   ~allow_next_page:true ~refetch_when_eof:false
+                   ~execution_id:"exec-big" ks_503
+               with
+              | Some
+                  {
+                    offset = 16384;
+                    max_bytes = 16384;
+                    source_id = Some "src-big";
+                  } ->
+                  ()
+              | _ ->
+                  Alcotest.fail
+                    "retryable continuation failure must resume at next_offset + source_id");
+              (* Pressing Space in Tool Calls retries from next_offset=16384, and succeeding clears the error *)
+              let m_retry_503, cmds_retry_503 =
+                Update.step ~now:t1 m_cont_503 (Msg.Key_event (char_key " "))
+              in
+              Alcotest.(check bool)
+                "Tool Calls Space retries continuation at offset=16384, source_id=src-big"
+                true
+                (match tool_result_gets cmds_retry_503 with
+                | [ (k, "exec-big", Some 16384, Some 16384, Some "src-big") ] ->
+                    String.equal k keeper
+                | _ -> false);
+              let m_after_retry, _ =
+                Update.step ~now:t1 m_retry_503
+                  (Msg.Http_reply
+                     {
+                       epoch = m_retry_503.epoch;
+                       reply =
+                         Msg.Reply_keeper_tool_result
+                           {
+                             keeper;
+                             execution_id = "exec-big";
+                             result =
+                               Ok
+                                 (Wire_keeper_context.Tool_result_page
+                                    {
+                                      keeper;
+                                      execution_id = "exec-big";
+                                      source_id = "src-big";
+                                      body_sha256 = "sha-b";
+                                      recorded_bytes = 40000;
+                                      is_error = false;
+                                      offset = 16384;
+                                      next_offset = 40000;
+                                      total_bytes = 40000;
+                                      eof = true;
+                                      content = "PART1_RECOVERED\n";
+                                      encoding = "utf-8";
+                                    });
+                           };
+                     })
+              in
+              let ks_after_retry =
+                Keeper_context_store.get_keeper ~keeper
+                  m_after_retry.keeper_context
+              in
+              Alcotest.(check bool)
+                "successful continuation clears Page_continuation_failed" true
+                (Option.is_none
+                   (Keeper_context_store.tool_result_page_error
+                      ~execution_id:"exec-big" ks_after_retry));
+              (match
+                 Keeper_context_store.tool_result_for_selected_call ks_after_retry
+               with
+              | Some (Wire_keeper_context.Tool_result_page { content; eof = true; _ }) ->
+                  Alcotest.(check string) "recovered continuation appends cleanly"
+                    "PART0\nPART1_RECOVERED\n" content
+              | _ -> Alcotest.fail "expected recovered full Tool_result_page");
+
+              (* Non-retryable continuation failure (HTTP 400): preserves loaded page,
+                 blocks Chat auto-hydration (no loop), allows manual Tool Calls retry *)
+              let m_cont_400, _ =
+                Update.step ~now:t1 m_tc3
+                  (Msg.Http_reply
+                     {
+                       epoch = m_tc3.epoch;
+                       reply =
+                         Msg.Reply_keeper_tool_result
+                           {
+                             keeper;
+                             execution_id = "exec-big";
+                             result =
+                               Error
+                                 (Msg.Http_error
+                                    {
+                                      status = 400;
+                                      body = "bad offset";
+                                      api_error = None;
+                                    });
+                           };
+                     })
+              in
+              let ks_400 =
+                Keeper_context_store.get_keeper ~keeper m_cont_400.keeper_context
+              in
+              Alcotest.(check bool)
+                "Chat auto-hydration stops on non-retryable continuation failure"
+                true
+                (Option.is_none
+                   (Keeper_context_store.next_tool_result_params
+                      ~allow_next_page:true ~refetch_when_eof:false
+                      ~execution_id:"exec-big" ks_400));
+              let _, cmds_manual_400 =
+                Update.step ~now:t1 m_cont_400
+                  (Msg.Key_event (key Keymap.Input.Enter))
+              in
+              Alcotest.(check bool)
+                "Tool Calls manual Enter retries non-retryable continuation at next_offset"
+                true
+                (match tool_result_gets cmds_manual_400 with
+                | [ (k, "exec-big", Some 16384, Some 16384, Some "src-big") ] ->
+                    String.equal k keeper
+                | _ -> false);
+
+              (* Continuation 404 Not Found: preserves already-loaded page, clears inflight,
+                 and records non-retryable Page_continuation_failed ("404 Not Found") *)
+              let m_cont_404, _ =
+                Update.step ~now:t1 m_tc3
+                  (Msg.Http_reply
+                     {
+                       epoch = m_tc3.epoch;
+                       reply =
+                         Msg.Reply_keeper_tool_result
+                           {
+                             keeper;
+                             execution_id = "exec-big";
+                             result =
+                               Error
+                                 (Msg.Http_error
+                                    {
+                                      status = 404;
+                                      body = "not found";
+                                      api_error = None;
+                                    });
+                           };
+                     })
+              in
+              let ks_cont_404 =
+                Keeper_context_store.get_keeper ~keeper
+                  m_cont_404.keeper_context
+              in
+              Alcotest.(check bool) "continuation 404 clears inflight" false
+                (Keeper_context_store.is_tool_result_inflight
+                   ~execution_id:"exec-big" ks_cont_404);
+              (match Keeper_context_store.tool_result_for_selected_call ks_cont_404 with
+              | Some
+                  (Wire_keeper_context.Tool_result_page
+                     { content = "PART0\n"; next_offset = 16384; eof = false; _ })
+                ->
+                  ()
+              | _ ->
+                  Alcotest.fail
+                    "continuation 404 must preserve already-loaded page 0 bytes");
+              (match
+                 Keeper_context_store.tool_result_page_error
+                   ~execution_id:"exec-big" ks_cont_404
+               with
+              | Some
+                  (Keeper_context_store.Page_continuation_failed
+                     { reason = "404 Not Found"; retryable = false }) ->
+                  ()
+              | _ ->
+                  Alcotest.fail
+                    "continuation 404 must record non-retryable Page_continuation_failed (404 Not Found)");
+              Alcotest.(check bool)
+                "Chat auto-hydration stops on continuation 404" true
+                (Option.is_none
+                   (Keeper_context_store.next_tool_result_params
+                      ~allow_next_page:true ~refetch_when_eof:false
+                      ~execution_id:"exec-big" ks_cont_404));
+
+              (* P1-3 / P2: 409 Conflict preserves loaded page content, records Page_source_changed,
+                 and resets next fetch to offset=0, source_id=None *)
+              let m_409, _ =
+                Update.step ~now:t1 m_tc3
+                  (Msg.Http_reply
+                     {
+                       epoch = m_tc3.epoch;
+                       reply =
+                         Msg.Reply_keeper_tool_result
+                           {
+                             keeper;
+                             execution_id = "exec-big";
+                             result =
+                               Error
+                                 (Msg.Http_error
+                                    {
+                                      status = 409;
+                                      body = "source_id mismatch";
+                                      api_error = None;
+                                    });
+                           };
+                     })
+              in
+              let ks_409 = Keeper_context_store.get_keeper ~keeper m_409.keeper_context in
+              Alcotest.(check bool) "409 clears inflight" false
+                (Keeper_context_store.is_tool_result_inflight
+                   ~execution_id:"exec-big" ks_409);
+              (match Keeper_context_store.tool_result_for_selected_call ks_409 with
+              | Some (Wire_keeper_context.Tool_result_page { content = "PART0\n"; _ }) ->
+                  ()
+              | _ ->
+                  Alcotest.fail
+                    "409 Conflict must keep already-loaded page 0 visible");
+              (match
+                 Keeper_context_store.tool_result_page_error
+                   ~execution_id:"exec-big" ks_409
+               with
+              | Some (Keeper_context_store.Page_source_changed _) -> ()
+              | _ ->
+                  Alcotest.fail
+                    "409 Conflict must record Page_source_changed");
+              (match
+                 Keeper_context_store.next_tool_result_params
+                   ~allow_next_page:true ~refetch_when_eof:false
+                   ~execution_id:"exec-big" ks_409
+               with
+              | Some { offset = 0; source_id = None; _ } -> ()
+              | _ ->
+                  Alcotest.fail
+                    "409 Conflict must reset next fetch to offset=0, source_id=None");
+              let ks_stale_cleared =
+                Keeper_context_store.mark_stale_all m_409.keeper_context
+                |> Keeper_context_store.get_keeper ~keeper
+              in
+              Alcotest.(check bool) "mark_stale_all clears tool_result_page_errors"
+                true
+                (Option.is_none
+                   (Keeper_context_store.tool_result_page_error
+                      ~execution_id:"exec-big" ks_stale_cleared));
+
+              (* P2-4: Tool_calls right-pane scroll clamp accounts for the 3rd result-status header row *)
+              let big_input =
+                `Assoc
+                  (List.init 40 (fun i ->
+                       (Printf.sprintf "field_%02d" i, `Int i)))
+              in
+              let tall_call = { call_entry with input = big_input } in
+              let kc_tall =
+                Keeper_context_store.empty
+                |> Keeper_context_store.apply_tool_calls ~observed_at:t0 ~keeper
+                     {
+                       keeper;
+                       count = 1;
+                       health = None;
+                       stale_reason = None;
+                       coverage_gaps_count = 0;
+                       entries = [ tall_call ];
+                     }
+              in
+              let ks_tall = Keeper_context_store.get_keeper ~keeper kc_tall in
+              let total_detail_lines =
+                List.length (Chat_transcript.flattened_tool_call_lines ks_tall tall_call)
+              in
+              let m_tall0 =
+                {
+                  m_tc0 with
+                  viewport = { Model.cols = 120; rows = 24 };
+                  breakpoint = Model.Standard;
+                  keeper_context = kc_tall;
+                  nav = { m_tc0.nav with pane_index = 1 };
+                }
+              in
+              let m_tall_end =
+                let rec scroll_n n m =
+                  if n <= 0 then m
+                  else
+                    let m', _ =
+                      Update.step ~now:t1 m
+                        (Msg.Key_event (key Keymap.Input.Page_down))
+                    in
+                    scroll_n (n - 1) m'
+                in
+                scroll_n 20 m_tall0
+              in
+              let ks_tall_end =
+                Keeper_context_store.get_keeper ~keeper m_tall_end.keeper_context
+              in
+              (* Compare against a call with no execution_id & no original_bytes (2 header rows) *)
+              let call_2hdr =
+                { tall_call with execution_id = None; original_bytes = None }
+              in
+              let m_2hdr0 =
+                {
+                  m_tall0 with
+                  keeper_context =
+                    Keeper_context_store.apply_tool_calls ~observed_at:t0 ~keeper
+                      {
+                        keeper;
+                        count = 1;
+                        health = None;
+                        stale_reason = None;
+                        coverage_gaps_count = 0;
+                        entries = [ call_2hdr ];
+                      }
+                      Keeper_context_store.empty;
+                }
+              in
+              let m_2hdr_end =
+                let rec scroll_n n m =
+                  if n <= 0 then m
+                  else
+                    let m', _ =
+                      Update.step ~now:t1 m
+                        (Msg.Key_event (key Keymap.Input.Page_down))
+                    in
+                    scroll_n (n - 1) m'
+                in
+                scroll_n 20 m_2hdr0
+              in
+              let ks_2hdr_end =
+                Keeper_context_store.get_keeper ~keeper m_2hdr_end.keeper_context
+              in
+              Alcotest.(check bool) "detail lines exceed viewport" true
+                (total_detail_lines > 25);
+              Alcotest.(check int)
+                "3-row header call scrolls 1 row further than 2-row header call"
+                (ks_2hdr_end.call_detail_scroll_offset + 1)
+                ks_tall_end.call_detail_scroll_offset;
+
+              (* P3: mark_tool_result_absent clears legacy ks.tool_result when no page is loaded
+                 & retry-inflight shows Loading *)
+              let kc_abs =
+                m_tc0.keeper_context
+                |> Keeper_context_store.apply_tool_result ~observed_at:t1 ~keeper
+                     ~execution_id:"exec-big"
+                     Wire_keeper_context.Tool_result_pending
+                |> Keeper_context_store.mark_tool_result_absent ~keeper
+                     ~execution_id:"exec-big"
+              in
+              let ks_abs = Keeper_context_store.get_keeper ~keeper kc_abs in
+              Alcotest.(check bool) "mark_tool_result_absent clears legacy tool_result slot"
+                true
+                (match ks_abs.tool_result with
+                | Observed.Absent -> true
+                | _ -> false);
+              let ks_retry_inflight =
+                Keeper_context_store.empty
+                |> Keeper_context_store.apply_tool_result ~observed_at:t1 ~keeper
+                     ~execution_id:"exec-pend"
+                     Wire_keeper_context.Tool_result_pending
+                |> Keeper_context_store.mark_tool_result_inflight ~keeper
+                     ~execution_id:"exec-pend"
+                |> Keeper_context_store.get_keeper ~keeper
+              in
+              let secs_retry =
+                Chat_transcript.project_tool_details
+                  ~tools_mode:Slash.Tools_results ~args:None ~inline_result:None
+                  ~execution_id:(Some "exec-pend") ~tool_running:false
+                  ~keeper_state:ks_retry_inflight
+              in
+              Alcotest.(check bool)
+                "re-fetching Tool_result_pending renders Loading result notice"
+                true
+                (List.exists
+                   (function
+                     | Chat_transcript.Tool_section_notice { text; _ } ->
+                         String.equal
+                           (Say.resolve Say.Lang_en text)
+                           "Loading result…"
+                     | Chat_transcript.Tool_section_label _
+                     | Chat_transcript.Tool_section_payload _ ->
+                         false)
+                   secs_retry));
         ] );
     ]

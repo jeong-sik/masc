@@ -12,6 +12,23 @@ open Masc_tui_core
 open Masc_tui_protocol
 
 module String_map : Map.S with type key = string
+module String_set : Set.S with type elt = string
+
+type tool_result_fetch_params = {
+  offset : int;
+  max_bytes : int;
+  source_id : string option;
+}
+
+type tool_result_page_error =
+  | Page_continuation_failed of { reason : string; retryable : bool }
+  | Page_source_changed of string
+
+val tool_result_page_size : int
+(** Standard 16KB page window for [/api/v1/keepers/:name/tool-result]. *)
+
+val is_binary_encoding : string -> bool
+(** True when a [/tool-result] page encoding is [base64] (case-insensitive). *)
 
 type context_subtab =
   | Ctx_composition
@@ -69,6 +86,10 @@ type keeper_state = {
   call_scroll_offset : int;
   call_detail_scroll_offset : int;
   tool_result : (string * Wire_keeper_context.tool_result_response) Observed.t;
+  tool_results : Wire_keeper_context.tool_result_response Observed.t String_map.t;
+  tool_result_cache_order : string list;
+  tool_result_inflight : String_set.t;
+  tool_result_page_errors : tool_result_page_error String_map.t;
   tool_result_auth_denied : bool;
   metrics : Wire_keeper_context.keeper_metrics_snapshot Observed.t;
   sandbox_logs : Wire_keeper_context.keeper_sandbox_logs Observed.t;
@@ -131,6 +152,45 @@ val turn_flow_for_selected_turn :
 
 val tool_result_for_selected_call :
   keeper_state -> Wire_keeper_context.tool_result_response option
+
+val tool_result_for_execution :
+  execution_id:string ->
+  keeper_state ->
+  Wire_keeper_context.tool_result_response Observed.t
+(** Look up the per-keeper cached [/tool-result] observation for
+    [execution_id], returning [Observed.loading] while an initial fetch is
+    in flight and [Observed.unreported] when never fetched. *)
+
+val is_tool_result_inflight : execution_id:string -> keeper_state -> bool
+
+val tool_result_page_error :
+  execution_id:string -> keeper_state -> tool_result_page_error option
+(** Continuation failure or source rotation error recorded while preserving an
+    already-loaded [Tool_result_page] for [execution_id], or [None] when no
+    continuation error is pending. *)
+
+val tool_results_snapshot :
+  keeper_state ->
+  (string
+  * Wire_keeper_context.tool_result_response Observed.t
+  * bool
+  * tool_result_page_error option)
+  list
+(** Canonical key-sorted snapshot of cached, in-flight, and continuation-errored
+    tool results for structural equality checks (e.g. [Keeper_dive.History_rows]). *)
+
+val next_tool_result_params :
+  ?allow_non_retryable:bool ->
+  allow_next_page:bool ->
+  refetch_when_eof:bool ->
+  execution_id:string ->
+  keeper_state ->
+  tool_result_fetch_params option
+(** Plan the next [/tool-result] page request for [execution_id], returning
+    [None] when already in-flight, binary-encoded, or when no further fetch is
+    needed. [allow_non_retryable] defaults to [false] so automatic Chat
+    hydration never loops on non-retryable continuation failures, while manual
+    Tool Calls retries pass [true]. *)
 
 val cycle_subtab : keeper:string -> t -> t
 val set_subtab : keeper:string -> context_subtab -> t -> t
@@ -241,6 +301,33 @@ val apply_tool_calls :
 
 val mark_tool_calls_denied :
   at:Clock.Mono.t -> keeper:string -> reason:string -> t -> t
+
+val mark_tool_result_inflight :
+  keeper:string -> execution_id:string -> t -> t
+
+val mark_tool_result_absent :
+  keeper:string -> execution_id:string -> t -> t
+
+val mark_tool_result_failed :
+  at:Clock.Mono.t ->
+  keeper:string ->
+  execution_id:string ->
+  reason:string ->
+  retryable:bool ->
+  t ->
+  t
+
+val mark_tool_result_conflict :
+  at:Clock.Mono.t ->
+  keeper:string ->
+  execution_id:string ->
+  reason:string ->
+  t ->
+  t
+(** Record a [409 Conflict] (source rotated mid-pagination): preserves any
+    already-loaded [Tool_result_page] with [Page_source_changed] so the next
+    fetch restarts cleanly from [offset = 0, source_id = None], or records a
+    retryable failure when no page was loaded yet. *)
 
 val apply_tool_result :
   observed_at:Clock.Mono.t ->

@@ -610,31 +610,51 @@ type heat_stats =
   ; heat : retrieval_heat
   }
 
-let build_event_heat_table ?(wanted = fun _ -> true) ~now ~keepers_dir ~keeper_id () =
-  let counts = Hashtbl.create 64 and last_seen = Hashtbl.create 64 in
+type event_heat_table =
+  { by_memory_id : (string, int * float) Hashtbl.t
+  ; total_events : int
+  ; unreadable_events : int
+  }
+
+let read_event_heat_table ?(wanted = fun _ -> true) ~keepers_dir ~keeper_id () =
+  let by_memory_id = Hashtbl.create 64 in
   let record (total, unreadable) = function
     | Error _ -> total, unreadable + 1
     | Ok (ev : Events.event) ->
       if wanted ev.memory_id then (
-        let prior = Option.value ~default:0 (Hashtbl.find_opt counts ev.memory_id) in
-        Hashtbl.replace counts ev.memory_id (prior + 1);
-        let last = Option.value ~default:ev.recorded_at (Hashtbl.find_opt last_seen ev.memory_id) in
-        Hashtbl.replace last_seen ev.memory_id (max last ev.recorded_at));
-      total + 1, unreadable in
-  let total_events, unreadable = match Events.fold ~keepers_dir ~keeper_id ~init:(0, 0) ~f:record with
-    | Ok totals -> totals
-    | Error _ -> Hashtbl.clear counts; Hashtbl.clear last_seen; 0, 0 in
-  let lookup memory_id =
-    let retrieved_count =
-      match Hashtbl.find_opt counts memory_id with
-      | Some n -> n
-      | None -> 0
-    in
-    let last_retrieved_at = Hashtbl.find_opt last_seen memory_id in
-    let heat = classify_retrieval_heat ~now ~retrieved_count ~last_retrieved_at in
-    { retrieved_count; last_retrieved_at; heat }
+        let count, last =
+          Option.value ~default:(0, ev.recorded_at)
+            (Hashtbl.find_opt by_memory_id ev.memory_id)
+        in
+        Hashtbl.replace by_memory_id ev.memory_id (count + 1, max last ev.recorded_at));
+      total + 1, unreadable
   in
-  lookup, total_events, unreadable
+  Events.fold_with_tail ~keepers_dir ~keeper_id ~init:(0, 0) ~f:record
+  |> Result.map (fun ((total_events, unreadable_events), tail) ->
+       { by_memory_id; total_events; unreadable_events }, tail)
+;;
+
+let empty_event_heat_table =
+  { by_memory_id = Hashtbl.create 0; total_events = 0; unreadable_events = 0 }
+;;
+
+let lookup_event_heat ~now table memory_id =
+  let retrieved_count, last_retrieved_at =
+    match Hashtbl.find_opt table.by_memory_id memory_id with
+    | None -> 0, None
+    | Some (count, last) -> count, Some last
+  in
+  let heat = classify_retrieval_heat ~now ~retrieved_count ~last_retrieved_at in
+  { retrieved_count; last_retrieved_at; heat }
+;;
+
+let build_event_heat_table ?wanted ~now ~keepers_dir ~keeper_id () =
+  let table =
+    read_event_heat_table ?wanted ~keepers_dir ~keeper_id ()
+    |> Result.map fst
+    |> Result.value ~default:empty_event_heat_table
+  in
+  lookup_event_heat ~now table, table.total_events, table.unreadable_events
 ;;
 
 let fact_diff_entry_fields ~heat_lookup (fact : Types.fact) =
@@ -880,6 +900,30 @@ let claim_id_of_change_entry (c : Wlog.change_entry) =
     else None
 ;;
 
+(* Cache decoded inputs per Keeper. Heat still uses the request's clock, since
+   a fact can move to another bucket without a write to either file. *)
+let fleet_event_tables : event_heat_table File_version_cache.t = File_version_cache.create ()
+let fleet_current_ids : string list File_version_cache.t = File_version_cache.create ()
+
+let load_fleet_projection cache path ~decode =
+  (* A change to read permission can leave a file's content version intact. *)
+  match Unix.access path [Unix.R_OK] with
+  | () -> File_version_cache.load cache path ~decode
+  | exception Unix.Unix_error _ -> decode ()
+;;
+
+let fleet_event_table ~keepers_dir ~keeper_id =
+  let path = Events.path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let decode () =
+    match read_event_heat_table ~keepers_dir ~keeper_id () with
+    | Ok (table, Events.Complete_rows) -> Ok table
+    | Ok (table, Events.Unterminated_row) -> Error table
+    | Error _ -> Error empty_event_heat_table
+  in
+  match load_fleet_projection fleet_event_tables path ~decode with
+  | Ok table | Error table -> table
+;;
+
 let fleet_retrieval_heat_json ~now ~keepers_dir =
   let keeper_ids = Cur.list_keeper_ids_for_keepers_dir ~keepers_dir in
   let hot = ref 0 in
@@ -889,21 +933,27 @@ let fleet_retrieval_heat_json ~now ~keepers_dir =
   let total_events = ref 0 in
   let unreadable_events = ref 0 in
   List.iter
-    (fun kid ->
-       let lookup, ev_c, unr_c = build_event_heat_table ~now ~keepers_dir ~keeper_id:kid () in
-       total_events := !total_events + ev_c;
-       unreadable_events := !unreadable_events + unr_c;
-       match Cur.read_for_keepers_dir ~keepers_dir ~keeper_id:kid with
-       | Ok (Some snap) ->
-         List.iter
-           (fun fact ->
-              match (lookup (Types.memory_id fact)).heat with
-              | Heat_hot -> incr hot
-              | Heat_warm -> incr warm
-              | Heat_cold -> incr cold
-              | Heat_never -> incr never)
-           snap.facts
-       | Ok None | Error _ -> ())
+    (fun keeper_id ->
+       let table = fleet_event_table ~keepers_dir ~keeper_id in
+       total_events := !total_events + table.total_events;
+       unreadable_events := !unreadable_events + table.unreadable_events;
+       let current_path = Cur.path_for_keepers_dir ~keepers_dir ~keeper_id in
+       let current_ids =
+         load_fleet_projection fleet_current_ids current_path ~decode:(fun () ->
+           Cur.read_for_keepers_dir ~keepers_dir ~keeper_id
+           |> Result.map (function
+                | None -> []
+                | Some (snap : Cur.t) -> List.map Types.memory_id snap.facts))
+         |> Result.value ~default:[]
+       in
+       List.iter
+         (fun memory_id ->
+            match (lookup_event_heat ~now table memory_id).heat with
+            | Heat_hot -> incr hot
+            | Heat_warm -> incr warm
+            | Heat_cold -> incr cold
+            | Heat_never -> incr never)
+         current_ids)
     keeper_ids;
   `Assoc
     [ "hot", `Int !hot
@@ -1313,31 +1363,6 @@ let world_diff_json ~now ~config ~range =
               :: !updated)
          else added := entry_json :: !added)
       selected;
-    (* Fleet-wide retrieval heat rollup across Keeper memory-events sidecars *)
-    let keeper_ids = Cur.list_keeper_ids_for_keepers_dir ~keepers_dir in
-    let hot = ref 0 in
-    let warm = ref 0 in
-    let cold = ref 0 in
-    let never = ref 0 in
-    let total_events = ref 0 in
-    let unreadable_events = ref 0 in
-    List.iter
-      (fun kid ->
-         let lookup, ev_c, unr_c = build_event_heat_table ~now ~keepers_dir ~keeper_id:kid () in
-         total_events := !total_events + ev_c;
-         unreadable_events := !unreadable_events + unr_c;
-         match Cur.read_for_keepers_dir ~keepers_dir ~keeper_id:kid with
-         | Ok (Some snap) ->
-           List.iter
-             (fun fact ->
-                match (lookup (Types.memory_id fact)).heat with
-                | Heat_hot -> incr hot
-                | Heat_warm -> incr warm
-                | Heat_cold -> incr cold
-                | Heat_never -> incr never)
-             snap.facts
-         | Ok None | Error _ -> ())
-      keeper_ids;
     let total_claims_now =
       match ledger_opt with
       | Some ledger -> List.length (Ledger.claims ledger)
@@ -1367,15 +1392,7 @@ let world_diff_json ~now ~config ~range =
               ; "incomplete_batches", `Int (List.length report.incomplete_batches)
               ; "aborted_batches", `Int (List.length report.aborted_batches)
               ] )
-        ; ( "retrieval_heat"
-          , `Assoc
-              [ "hot", `Int !hot
-              ; "warm", `Int !warm
-              ; "cold", `Int !cold
-              ; "never_retrieved", `Int !never
-              ; "total_events", `Int !total_events
-              ; "unreadable_event_lines", `Int !unreadable_events
-              ] )
+        ; "retrieval_heat", fleet_retrieval_heat_json ~now ~keepers_dir
         ; "revisions", `List (List.rev !revisions)
         ; "added", `List (List.rev !added)
         ; "updated", `List (List.rev !updated)

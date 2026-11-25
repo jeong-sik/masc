@@ -187,7 +187,9 @@ let decode_line line =
   | exception Yojson.Json_error message -> Error (Not_json message)
 ;;
 
-let fold ~keepers_dir ~keeper_id ~init ~f =
+type tail_state = Complete_rows | Unterminated_row
+
+let fold_with_tail ~keepers_dir ~keeper_id ~init ~f =
   let path = path_for_keepers_dir ~keepers_dir ~keeper_id in
   let row acc raw = if non_blank raw then f acc (decode_line raw) else acc in
   let error message = Error { path; message } in
@@ -198,8 +200,9 @@ let fold ~keepers_dir ~keeper_id ~init ~f =
      | Snapshot_changed -> error "retrieval sidecar changed during observation")
   | Private_file_succeeded r | Private_file_succeeded_with_cleanup_failure { value = r; _ } ->
     (match r with
-     | Fs_compat.Private_jsonl_fold.Missing -> Ok init
-     | Present { value; rows_end; end_offset } when rows_end = end_offset -> Ok value
+     | Fs_compat.Private_jsonl_fold.Missing -> Ok (init, Complete_rows)
+     | Present { value; rows_end; end_offset } when rows_end = end_offset ->
+       Ok (value, Complete_rows)
      | Present { value; rows_end; end_offset } ->
        (* [read] also decodes a final unterminated row. A concurrent append must
           not turn a prefix of the new row into an event from this observation. *)
@@ -207,9 +210,14 @@ let fold ~keepers_dir ~keeper_id ~init ~f =
        match Fs_compat.load_owned_regular_file_range ~ownership_root:keepers_dir
                ~offset:rows_end ~max_bytes:length path with
        | Ok (Some tail) when tail.snapshot.file_size = end_offset && String.length tail.content = length
-                             && not (String.contains tail.content '\n') -> Ok (row value tail.content)
+                             && not (String.contains tail.content '\n') ->
+         Ok (row value tail.content, Unterminated_row)
        | Ok _ -> error "retrieval sidecar changed during observation"
        | Error e -> error (Fs_compat.owned_regular_file_read_error_to_string e))
+;;
+
+let fold ~keepers_dir ~keeper_id ~init ~f =
+  fold_with_tail ~keepers_dir ~keeper_id ~init ~f |> Result.map fst
 ;;
 
 let read ~keepers_dir ~keeper_id :

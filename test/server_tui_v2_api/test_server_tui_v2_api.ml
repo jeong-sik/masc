@@ -3307,6 +3307,67 @@ let test_world_diff_uses_event_time_classification_and_scope () =
       (json_int_exn "missing_evidence" full_history))
 ;;
 
+let test_world_diff_tracks_retrieval_changes () =
+  with_temp_workspace (fun config ->
+    let module Current = Keeper_memory_os_current in
+    let module Events = Keeper_memory_os_events in
+    let module Types = Keeper_memory_os_types in
+    let base_path = config.Workspace.base_path in
+    let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+    let keeper_id = "alpha" and now = 1_760_000_000.0 in
+    let fact =
+      Types.observed ~claim:"Memory heat fixture" ~category:Fact ~now
+        ~origin:{ kind = Authored; trace_id = "fixture" }
+    in
+    let snapshot : Current.t =
+      { revision = 1; updated_at = now; source = {kind = Explicit_write; trace_id = "fixture"}
+      ; facts = [fact]; change = {added = [fact]; removed = []; retained = 0; invalidated = []} }
+    in
+    let current_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id in
+    let write_snapshot snapshot =
+      write_file_raw current_path (Current.to_json snapshot |> Yojson.Safe.to_string)
+    in
+    write_snapshot snapshot;
+    let require = function
+      | Ok value -> value
+      | Error error -> Alcotest.fail (World_memory_store.error_to_string error)
+    in
+    ignore (World_memory_store.commit_digest ~base_path ~now ~actor:keeper_id () |> require);
+    let check_heat label ~now expected =
+      let heat =
+        Memory_api.diff_json ~now ~config ~scope:Scope_world ~range:(Range_window Window_24h) ()
+        |> ok_or_fail "World Memory diff" |> json_member_exn "data"
+        |> json_member_exn "retrieval_heat"
+      in
+      Alcotest.(check (list int)) label expected
+        (List.map (fun field -> json_int_exn field heat)
+           ["hot"; "warm"; "cold"; "never_retrieved"; "total_events"; "unreadable_event_lines"])
+    in
+    let event : Events.event =
+      { recorded_at = now; memory_id = Types.memory_id fact; trace_id = "fixture"
+      ; kind = Retrieved {query = "heat"} }
+    in
+    let event_path = Events.path_for_keepers_dir ~keepers_dir ~keeper_id in
+    let line = Events.event_to_json event |> Yojson.Safe.to_string in
+    write_file_raw event_path (String.make (String.length line + 1) '{');
+    let pinned = 1_700_000_000. in
+    Unix.utimes event_path pinned pinned;
+    check_heat "a torn final row stays visible as unreadable" ~now [0; 0; 0; 1; 0; 1];
+    (match Events.append ~keepers_dir ~keeper_id event with
+     | Ok () -> ()
+     | Error error -> Alcotest.fail (Events.append_error_to_string error));
+    Unix.utimes event_path pinned pinned;
+    check_heat "same-size torn-tail repair is visible" ~now [1; 0; 0; 0; 1; 0];
+    check_heat "unchanged inputs age from hot to warm"
+      ~now:(now +. 2. *. 86400.) [0; 1; 0; 0; 1; 0];
+    check_heat "unchanged inputs age from warm to cold"
+      ~now:(now +. 8. *. 86400.) [0; 0; 1; 0; 1; 0];
+    write_snapshot {snapshot with revision = 2; facts = []; change =
+      {added = []; removed = [fact]; retained = 0; invalidated = []} };
+    check_heat "atomic snapshot replacement drops the fact from the heat totals" ~now
+      [0; 0; 0; 0; 1; 0])
+;;
+
 let test_memory_os_world_mvcc_and_keeper_internals () =
   with_temp_workspace (fun config ->
     let base_path = config.Workspace.base_path in
@@ -3809,6 +3870,8 @@ let () =
         ; Alcotest.test_case "Track A4 human-readable claim text in world diff" `Quick test_track_a_memory_diff_human_claim_text
         ; Alcotest.test_case "World diff counts event-time facts with typed scope" `Quick
             test_world_diff_uses_event_time_classification_and_scope
+        ; Alcotest.test_case "World diff heat follows clock and file changes" `Quick
+            test_world_diff_tracks_retrieval_changes
         ; Alcotest.test_case "World_memory_store MVCC + keeper Memory OS internals + program_absorption" `Quick
             test_memory_os_world_mvcc_and_keeper_internals
         ] )

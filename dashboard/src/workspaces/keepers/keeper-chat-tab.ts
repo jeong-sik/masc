@@ -738,13 +738,14 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   // Global shortcuts: ⌘. / Ctrl+. (Debug Companion) and Alt+T (Thinking block visibility)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.isComposing || e.keyCode === 229) return
-      if ((e.metaKey || e.ctrlKey) && e.key === '.') {
+      if (e.defaultPrevented || e.isComposing || e.keyCode === 229) return
+      if (typeof document !== 'undefined' && document.querySelector('[role="dialog"][aria-modal="true"]')) return
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key === '.') {
         e.preventDefault()
         setCompanionOpen((prev) => !prev)
         return
       }
-      if (e.altKey && !e.metaKey && !e.ctrlKey && e.key.toLowerCase() === 't') {
+      if (e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey && (e.code === 'KeyT' || e.key.toLowerCase() === 't')) {
         e.preventDefault()
         updateBlockPrefs((cur) => ({ ...cur, thinking: nextThinkingMode(cur.thinking) }))
       }
@@ -1285,7 +1286,9 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
             }))
           },
           onToolApprovalSettled: ({ toolCallId, toolName, outcome: approvalOutcome }) => {
-            const approved = /^approv/i.test(approvalOutcome.trim())
+            const normalizedOutcome = approvalOutcome.trim().toLowerCase()
+            const approved =
+              normalizedOutcome === 'approve' || normalizedOutcome === 'remembered_approve'
             const trimmedId = toolCallId.trim()
             if (trimmedId) {
               liveTools = upsertStreamToolCall(

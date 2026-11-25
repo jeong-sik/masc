@@ -425,9 +425,26 @@ export function CommandPalette(): VNode | null {
 
   useEffect(() => {
     if (!open) return
+    const previousFocus =
+      typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null
     setQuery('')
     setSelectedIdx(0)
     queueMicrotask(() => inputRef.current?.focus())
+    const onWindowKeyDown = (event: KeyboardEvent) => {
+      if (event.isComposing || event.keyCode === 229) return
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        closeCommandPalette()
+      }
+    }
+    window.addEventListener('keydown', onWindowKeyDown, true)
+    return () => {
+      window.removeEventListener('keydown', onWindowKeyDown, true)
+      previousFocus?.focus?.()
+    }
   }, [open])
 
   useEffect(() => {

@@ -358,8 +358,8 @@ export function KeeperHeader(props: KeeperHeaderProps) {
             <div class="kp-diag-row">
               <strong>폴백 시도</strong>: ${laneFailures.map((f) => `${f.runtime_id ?? 'lane'}${f.fault_kind ? `[${f.fault_kind}]` : ''}: ${f.summary}`).join(' → ')}
               <div class="kp-diag-lane-detail">
-                ${laneFailures.map((f) => html`
-                  <div class="kp-diag-lane" key=${`${f.runtime_id ?? 'lane'}:${f.summary}`}>
+                ${laneFailures.map((f, idx) => html`
+                  <div class="kp-diag-lane" key=${`${f.runtime_id ?? 'lane'}:${f.attempt ?? idx}:${f.summary}`}>
                     <span>${f.runtime_id ?? 'lane'}${f.dispatch ? ` · ${f.dispatch}` : ''}${f.attempt != null ? ` · attempt ${f.attempt}` : ''}${f.fault_kind ? ` · ${f.fault_kind}` : ''}</span>
                     ${f.summary ? html`<div>${f.summary}</div>` : null}
                     ${(f.failure_kind || f.failure_detail || f.provider || f.network_kind)

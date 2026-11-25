@@ -430,6 +430,29 @@
 .btn-ghost:hover:not(:disabled) { background: var(--bg-3); border-color: var(--line-2); }
 .btn-ghost:disabled { opacity: 0.45; cursor: not-allowed; }
 
+.img-out {
+  margin: var(--sp-2) 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.img-out > figcaption {
+  font-size: var(--fs-12);
+  color: var(--fg-2);
+}
+.chat-block-media-ph,
+.img-ph {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--line-1);
+  background: var(--bg-2);
+  color: var(--fg-2);
+  font-size: var(--fs-12);
+}
+
 .markdown-content {
   line-height: 1.55;
   min-width: 0;

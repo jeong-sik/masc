@@ -77,6 +77,25 @@ describe('Pulse Workspace — Model & Formatters', () => {
     )
     expect(subZero.kind).toBe('subscription_zero')
 
+    const realWindowSub = classifySpendStatus(
+      observedValue([
+        { keeper_name: 'k1', total_cost_usd: null, cost_reported_samples: 0, cost_unreported_samples: 5, total_tokens: 500, sample_count: 5 },
+      ]),
+      observedValue({
+        state: 'available',
+        days: 1,
+        points: [
+          { scope_id: 'claude', source: 'quota', kind: '5h', unit: 'fraction', value: 0.35, limit: 1, remaining: 0.65 },
+          { scope_id: 'codex', source: 'quota', kind: 'weekly', unit: 'percent', value: 42, limit: 100, remaining: 58 },
+        ],
+      }),
+      0,
+    )
+    expect(realWindowSub.kind).toBe('subscription_zero')
+    if (realWindowSub.kind === 'subscription_zero') {
+      expect(realWindowSub.subscriptionCount).toBe(2)
+    }
+
     const exhaustedZero = classifySpendStatus(
       observedValue([
         { keeper_name: 'k1', total_cost_usd: null, cost_reported_samples: 0, cost_unreported_samples: 3, total_tokens: 500, sample_count: 3 },

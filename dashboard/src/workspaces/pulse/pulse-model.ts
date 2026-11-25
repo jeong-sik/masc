@@ -194,7 +194,11 @@ export function classifySpendStatus(
         exhaustedCount += 1
       } else if (pt.unit === 'credit_balance' && pt.remaining !== null && pt.remaining <= 0) {
         exhaustedCount += 1
-      } else if (pt.unit === 'credit_unlimited' || pt.kind.toLowerCase().includes('sub')) {
+      } else if (
+        pt.unit === 'credit_unlimited'
+        || (pt.unit === 'fraction' && pt.value !== null && pt.value < 0.999)
+        || (pt.unit === 'percent' && pt.value !== null && pt.value < 99.9)
+      ) {
         subscriptionCount += 1
       }
     }

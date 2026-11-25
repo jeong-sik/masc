@@ -66,10 +66,11 @@ function isPulseKeeperRow(v: unknown): v is PulseKeeperRow {
 function renderPulseKeeperErrorDetail(row: PulseKeeperRow) {
   const laneFailures = row.runtime_lane_failures ?? []
   const hasBlocker = row.runtime_blocker_summary != null
+  const hasPathRest = row.runtime_path_rest != null
   const hasIssue = row.directory_issue != null
   const hasLane = laneFailures.length > 0
   const hasLast = row.last_failure != null
-  const hasAny = hasBlocker || hasIssue || hasLane || hasLast
+  const hasAny = hasBlocker || hasPathRest || hasIssue || hasLane || hasLast
   return html`
     <div class="pulse-keeper-error">
       <div class="pulse-kv-grid">
@@ -100,6 +101,13 @@ function renderPulseKeeperErrorDetail(row: PulseKeeperRow) {
                 ${row.runtime_blocker_class ? html` <span class="mono">[${row.runtime_blocker_class}]</span>` : null}
               </div>
             `}
+            ${row.runtime_path_rest && html`
+              <div class="pulse-keeper-error-row">
+                <strong>경로 휴식</strong>: ${row.runtime_path_rest.runtime_id ?? row.runtime_id}
+                ${row.runtime_path_rest.release_at ? ` · 해제 ${row.runtime_path_rest.release_at}` : ''}
+                ${row.runtime_path_rest.release_basis ? ` (${row.runtime_path_rest.release_basis})` : ''}
+              </div>
+            `}
             ${row.directory_issue && html`
               <div class="pulse-keeper-error-row"><strong>설정 오류</strong>: ${row.directory_issue}</div>
             `}
@@ -113,8 +121,8 @@ function renderPulseKeeperErrorDetail(row: PulseKeeperRow) {
               <div class="pulse-keeper-error-row">
                 <strong>폴백 시도</strong>:
                 <div class="pulse-keeper-lane-list">
-                  ${laneFailures.map((f) => html`
-                    <div class="pulse-keeper-lane" key=${`${f.runtime_id ?? 'lane'}:${f.summary}`}>
+                  ${laneFailures.map((f, idx) => html`
+                    <div class="pulse-keeper-lane" key=${`${f.runtime_id ?? 'lane'}:${f.attempt ?? idx}:${f.summary}`}>
                       <div>
                         <span class="mono">${f.runtime_id ?? 'lane'}${f.fault_kind ? `[${f.fault_kind}]` : ''}${f.dispatch ? ` · ${f.dispatch}` : ''}${f.attempt != null ? ` · attempt ${f.attempt}` : ''}</span>
                       </div>

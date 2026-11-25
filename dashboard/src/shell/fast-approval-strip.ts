@@ -63,10 +63,15 @@ export function FastApprovalStrip(): VNode | null {
     if (!headApproval && !headAsk && !headGate && !headGoalConfirm) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return
-      if (event.shiftKey || commandPaletteOpen.peek() || mobileMoreOpen.peek()) return
+      if (commandPaletteOpen.peek() || mobileMoreOpen.peek()) return
       if (typeof document !== 'undefined' && document.querySelector('[role="dialog"][aria-modal="true"]')) return
       if (event.metaKey || event.ctrlKey) return
-      const key = event.key.toLowerCase()
+      const codeKey =
+        event.code === 'KeyY' ? 'y'
+        : event.code === 'KeyN' ? 'n'
+        : event.code === 'KeyJ' ? 'j'
+        : ''
+      const key = event.altKey && codeKey ? codeKey : event.key.toLowerCase()
       const typing = isEditableTarget(event.target)
 
       if (key === 'j' && !typing && !event.altKey) {

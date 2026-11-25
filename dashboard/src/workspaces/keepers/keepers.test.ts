@@ -29,6 +29,7 @@ import {
 } from './keeper-debug-companion'
 import { releaseAllViewStreams, getActiveViewStreamKey } from '../../core/view-stream-slot'
 import { KeeperChatTab } from './keeper-chat-tab'
+import { KeeperHeader, isKeeperBooted } from './keeper-header'
 import { KeeperMemoryTab } from './keeper-memory-tab'
 import { KeeperPortraitCandleTab } from './keeper-portrait-candle-tab'
 import { KeeperWorkSandboxTab } from './keeper-work-sandbox-tab'
@@ -572,6 +573,9 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
 
     const pc = render(html`<${KeeperPortraitCandleTab} keeper=${makeRosterKeeper()} onMutated=${vi.fn()} />`)
     await waitFor(() => expect(pc.container.textContent).toContain('12.500 C'))
+    const policyNote = pc.container.querySelector('[role="note"]')
+    expect(policyNote?.classList.contains('kp-notice')).toBe(true)
+    expect(policyNote?.classList.contains('kp-pill')).toBe(false)
     // Must NOT spoof /mcp purchase; clicking preview updates portrait img to bare `?preview=crown` via authenticated blob fetch
     const previewBtns = pc.getAllByRole('button', { name: '미리보기' })
     fireEvent.click(previewBtns[1]!)
@@ -872,5 +876,40 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     fireEvent.keyDown(btwInput, { key: 'Enter', isComposing: false })
     await waitFor(() => expect(streamCalls).toHaveLength(2))
     expect(streamCalls[1]!.turn_instructions).toContain('/btw')
+  })
+
+  it('hides Boot on already-booted or paused Keepers and shows Boot only when offline/unbooted/stopped', () => {
+    const runningKeeper = makeRosterKeeper({ keepalive_running: true, status: 'running', phase: 'running', paused: false })
+    expect(isKeeperBooted(runningKeeper)).toBe(true)
+    const r1 = render(
+      html`<${KeeperHeader} keeper=${runningKeeper} activeTab="chat" onSelectTab=${vi.fn()} onLifecycleMutated=${vi.fn()} onDeleted=${vi.fn()} />`,
+    )
+    expect(r1.queryByRole('button', { name: 'Boot' })).toBeNull()
+    expect(r1.queryByRole('button', { name: 'Pause' })).not.toBeNull()
+    expect(r1.queryByRole('button', { name: 'Interrupt Turn' })).not.toBeNull()
+    r1.unmount()
+
+    const pausedKeeper = makeRosterKeeper({ keepalive_running: false, status: 'paused', phase: 'paused', paused: true })
+    expect(isKeeperBooted(pausedKeeper)).toBe(true)
+    const r2 = render(
+      html`<${KeeperHeader} keeper=${pausedKeeper} activeTab="chat" onSelectTab=${vi.fn()} onLifecycleMutated=${vi.fn()} onDeleted=${vi.fn()} />`,
+    )
+    expect(r2.queryByRole('button', { name: 'Boot' })).toBeNull()
+    expect(r2.queryByRole('button', { name: 'Resume' })).not.toBeNull()
+    expect(r2.queryByRole('button', { name: 'Pause' })).toBeNull()
+    r2.unmount()
+
+    const unbootedKeeper = makeRosterKeeper({ keepalive_running: false, status: 'unbooted', phase: 'offline', paused: false })
+    expect(isKeeperBooted(unbootedKeeper)).toBe(false)
+    const r3 = render(
+      html`<${KeeperHeader} keeper=${unbootedKeeper} activeTab="chat" onSelectTab=${vi.fn()} onLifecycleMutated=${vi.fn()} onDeleted=${vi.fn()} />`,
+    )
+    expect(r3.queryByRole('button', { name: 'Boot' })).not.toBeNull()
+    expect(r3.queryByRole('button', { name: 'Pause' })).toBeNull()
+    expect(r3.queryByRole('button', { name: 'Interrupt Turn' })).toBeNull()
+    r3.unmount()
+
+    expect(isKeeperBooted(makeRosterKeeper({ keepalive_running: false, status: 'crashed', phase: 'crashed', paused: false }))).toBe(false)
+    expect(isKeeperBooted(makeRosterKeeper({ keepalive_running: false, status: 'stopped', phase: 'stopped', paused: false }))).toBe(false)
   })
 })

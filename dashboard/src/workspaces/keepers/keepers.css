@@ -328,6 +328,26 @@
 .kp-pill[data-tone="info"] { background: var(--info-soft); border-color: var(--info-border); color: var(--info-fg); }
 .kp-pill[data-tone="stalled"] { background: var(--stalled-soft); border-color: var(--stalled-border); color: var(--stalled-fg); }
 
+.kp-notice {
+  display: block;
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-2);
+  background: var(--bg-2);
+  color: var(--fg-2);
+  font-size: var(--fs-12);
+  line-height: var(--lh-body);
+  white-space: normal;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.kp-notice[data-tone="info"] { background: var(--info-soft); border-color: var(--info-border); color: var(--info-fg); }
+.kp-notice[data-tone="ok"] { background: var(--ok-soft); border-color: var(--ok-border); color: var(--ok-fg); }
+.kp-notice[data-tone="warn"] { background: var(--warn-soft); border-color: var(--warn-border); color: var(--warn-fg); }
+.kp-notice[data-tone="bad"] { background: var(--err-soft); border-color: var(--err-border); color: var(--err-fg); }
+
 .kp-lifecycle-bar {
   display: flex;
   flex-wrap: wrap;

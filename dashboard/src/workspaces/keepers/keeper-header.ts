@@ -40,6 +40,19 @@ const PURGE_ARTIFACTS: readonly string[] = [
   '격리 작업 디렉터리 및 토큰',
 ]
 
+const UNBOOTED_PHASES = new Set(['offline', 'stopped', 'crashed'])
+const UNBOOTED_STATUSES = new Set(['unbooted', 'offline', 'stopped', 'crashed', 'dead'])
+const LIVE_PHASES = new Set(['running', 'failing', 'draining', 'restarting', 'paused'])
+
+export function isKeeperBooted(keeper: KeeperRosterItem): boolean {
+  if (keeper.keepalive_running) return true
+  if (keeper.paused) return true
+  const phase = keeper.phase.trim().toLowerCase()
+  const status = keeper.status.trim().toLowerCase()
+  if (UNBOOTED_PHASES.has(phase) || UNBOOTED_STATUSES.has(status)) return false
+  return LIVE_PHASES.has(phase) || status === 'running' || status === 'active'
+}
+
 export function KeeperHeader(props: KeeperHeaderProps) {
   const { keeper } = props
   const rawPortraitUrl = keeperPortraitUrl(keeper.name, 96)
@@ -59,6 +72,11 @@ export function KeeperHeader(props: KeeperHeaderProps) {
   }
 
   useEffect(() => {
+    setStatusMessage(null)
+    closeDeleteModal()
+  }, [keeper.name])
+
+  useEffect(() => {
     if (!deleteOpen) return
     queueMicrotask(() => deleteInputRef.current?.focus())
     const onKeyDown = (event: KeyboardEvent) => {
@@ -76,6 +94,8 @@ export function KeeperHeader(props: KeeperHeaderProps) {
   const ctxObs = observeRosterContextPct(keeper)
   const ctxText = formatObserved(ctxObs, (v) => `${v}%`)
   const failing = needsRosterAttention(keeper)
+  const booted = isKeeperBooted(keeper)
+  const isPaused = keeper.paused || keeper.phase.trim().toLowerCase() === 'paused'
 
   const runLifecycle = async (
     label: string,
@@ -154,15 +174,17 @@ export function KeeperHeader(props: KeeperHeaderProps) {
         </div>
 
         <div class="kp-lifecycle-bar" role="group" aria-label="Keeper 수명주기 제어">
-          <button
-            type="button"
-            class="btn-ghost"
-            disabled=${busyAction !== null}
-            onClick=${() => void runLifecycle('Boot', () => bootKeeperAction(keeper.name))}
-          >
-            Boot
-          </button>
-          ${keeper.paused
+          ${!booted && html`
+            <button
+              type="button"
+              class="btn-primary"
+              disabled=${busyAction !== null}
+              onClick=${() => void runLifecycle('Boot', () => bootKeeperAction(keeper.name))}
+            >
+              Boot
+            </button>
+          `}
+          ${booted && (isPaused
             ? html`
                 <button
                   type="button"
@@ -182,15 +204,17 @@ export function KeeperHeader(props: KeeperHeaderProps) {
                 >
                   Pause
                 </button>
-              `}
-          <button
-            type="button"
-            class="btn-ghost"
-            disabled=${busyAction !== null}
-            onClick=${() => void runLifecycle('Interrupt Turn', () => interruptKeeperTurnAction(keeper.name))}
-          >
-            Interrupt Turn
-          </button>
+              `)}
+          ${(booted || keeper.active_turn !== null) && html`
+            <button
+              type="button"
+              class="btn-ghost"
+              disabled=${busyAction !== null}
+              onClick=${() => void runLifecycle('Interrupt Turn', () => interruptKeeperTurnAction(keeper.name))}
+            >
+              Interrupt Turn
+            </button>
+          `}
           <button
             type="button"
             class="kp-btn-danger"
@@ -204,7 +228,7 @@ export function KeeperHeader(props: KeeperHeaderProps) {
 
       ${statusMessage && html`
         <div
-          class=${statusMessage.tone === 'bad' ? 'ap-error' : 'kp-pill'}
+          class=${statusMessage.tone === 'bad' ? 'ap-error' : 'kp-notice'}
           data-tone=${statusMessage.tone}
           role="status"
         >

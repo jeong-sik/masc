@@ -24,11 +24,12 @@ import {
   type InfraDockerKeeper,
   type InfraMicroVmGuest,
   type InfraSandboxesData,
+  type InfraShimParity,
   type InfraSshPool,
   type WorkspaceViewProps,
 } from './types'
 
-function parityBadgeStyle(status: InfraSandboxesData['shim_parity']['status']) {
+function parityBadgeStyle(status: string) {
   switch (status) {
     case 'matched':
       return { background: 'var(--ok-soft)', border: '1px solid var(--ok-border)', color: 'var(--ok-fg)' }
@@ -38,8 +39,141 @@ function parityBadgeStyle(status: InfraSandboxesData['shim_parity']['status']) {
       return { background: 'var(--idle-soft)', border: '1px solid var(--idle-border)', color: 'var(--fg-3)' }
     case 'unavailable':
       return { background: 'var(--warn-soft)', border: '1px solid var(--warn-border)', color: 'var(--warn-fg)' }
+    default:
+      return { background: 'var(--bg-2)', border: '1px solid var(--line-2)', color: 'var(--fg-2)' }
   }
 }
+
+function presenceStyle(presence: string) {
+  switch (presence) {
+    case 'present':
+    case 'running':
+      return { background: 'var(--ok-soft)', border: '1px solid var(--ok-border)', color: 'var(--ok-fg)' }
+    case 'probe_pending':
+      return { background: 'var(--info-soft)', border: '1px solid var(--info-border)', color: 'var(--info-fg)' }
+    case 'absent':
+    case 'stopped':
+      return { background: 'var(--idle-soft)', border: '1px solid var(--idle-border)', color: 'var(--fg-3)' }
+    case 'unavailable':
+    case 'error':
+      return { background: 'var(--warn-soft)', border: '1px solid var(--warn-border)', color: 'var(--warn-fg)' }
+    default:
+      return { background: 'var(--bg-2)', border: '1px solid var(--line-1)', color: 'var(--fg-2)' }
+  }
+}
+
+function normalizeShimParity(raw: InfraShimParity | string | null | undefined): {
+  readonly status: string
+  readonly tooltip?: string
+} | null {
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim()
+    return trimmed ? { status: trimmed } : null
+  }
+  if (raw && typeof raw === 'object' && typeof raw.status === 'string') {
+    const status = raw.status.trim()
+    if (!status) return null
+    const parts: string[] = []
+    if (raw.build_identity) parts.push(`build: ${raw.build_identity}`)
+    if (raw.shim_identity) parts.push(`shim: ${raw.shim_identity}`)
+    if (raw.server_identity) parts.push(`server: ${raw.server_identity}`)
+    if (raw.detail) parts.push(raw.detail)
+    return { status, tooltip: parts.length > 0 ? parts.join('\n') : undefined }
+  }
+  return null
+}
+
+function resolveMicroVmPresence(r: InfraMicroVmGuest): string | null {
+  const val = r.presence ?? r.state ?? r.status
+  return typeof val === 'string' && val.trim().length > 0 ? val.trim() : null
+}
+
+function resolveMicroVmSocket(r: InfraMicroVmGuest): {
+  readonly label: string
+  readonly tone: 'ok' | 'muted' | 'warn' | 'err'
+  readonly tooltip?: string
+} | null {
+  if (r.agent_socket && typeof r.agent_socket === 'object') {
+    const { status, path_basename, file_kind } = r.agent_socket
+    switch (status) {
+      case 'socket_present':
+        return { label: 'present', tone: 'ok', tooltip: path_basename }
+      case 'socket_absent':
+        return { label: 'absent', tone: 'muted', tooltip: path_basename }
+      case 'non_socket':
+        return { label: 'non_socket', tone: 'err', tooltip: file_kind ?? path_basename }
+      case 'unreadable':
+        return { label: 'unreadable', tone: 'warn', tooltip: path_basename }
+      default:
+        return status ? { label: status, tone: 'muted', tooltip: path_basename } : null
+    }
+  }
+  if (typeof r.socket_present === 'boolean') {
+    return r.socket_present
+      ? { label: 'present', tone: 'ok' }
+      : { label: 'missing', tone: 'err' }
+  }
+  return null
+}
+
+function formatMicroVmSpec(r: InfraMicroVmGuest): string | null {
+  const parts: string[] = []
+  if (r.backend) parts.push(r.backend)
+  const cpus = r.guest_size?.cpus
+  const mem = r.guest_size?.memory_mib
+  if (typeof cpus === 'number' || typeof mem === 'number') {
+    const sizeBits = [
+      typeof cpus === 'number' ? `${cpus}c` : null,
+      typeof mem === 'number' ? `${mem}MiB` : null,
+    ].filter(Boolean)
+    if (sizeBits.length > 0) parts.push(sizeBits.join(' / '))
+  }
+  if (r.network_mode) parts.push(`net:${r.network_mode}`)
+  if (typeof r.pid === 'number') parts.push(`PID ${r.pid}`)
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
+function resolveSshPoolKeepers(r: InfraSshPool): readonly string[] | null {
+  if (Array.isArray(r.keeper_sessions)) {
+    return r.keeper_sessions.map((s) => s.keeper).filter(Boolean)
+  }
+  if (Array.isArray(r.accounts)) {
+    const names: string[] = []
+    for (const acc of r.accounts) {
+      if (Array.isArray(acc.keepers)) {
+        for (const k of acc.keepers) {
+          if (typeof k === 'string' && k) names.push(k)
+        }
+      }
+    }
+    return names
+  }
+  if (Array.isArray(r.keepers)) {
+    return r.keepers
+  }
+  return null
+}
+
+function formatSshHost(r: InfraSshPool): string {
+  if (!r.host) return '없음'
+  const userPrefix = r.unix_user ? `${r.unix_user}@` : ''
+  const portSuffix = typeof r.port === 'number' && r.port !== 22 ? `:${r.port}` : ''
+  return `${userPrefix}${r.host}${portSuffix}`
+}
+
+function formatRttMs(rtt: number): string {
+  return rtt < 10 ? `${rtt.toFixed(1)}ms` : `${Math.round(rtt)}ms`
+}
+
+const PILL_BADGE_BASE = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  padding: '0 var(--sp-2)',
+  borderRadius: 'var(--radius-pill)',
+  fontSize: 'var(--fs-11)',
+  fontWeight: 600,
+  whiteSpace: 'nowrap',
+} as const
 
 function probeStateStyle(kind: InfraSandboxesData['probe_state']['kind']) {
   switch (kind) {
@@ -89,37 +223,121 @@ export function SandboxesTab(props: WorkspaceViewProps) {
       id: 'name',
       header: '게스트 / Keeper',
       sortable: true,
-      sortValue: (r) => r.name ?? r.keeper ?? r.id ?? '',
+      sortValue: (r) => r.keeper ?? r.guest_name ?? r.name ?? r.id ?? '',
       cell: (r) => r.keeper
-        ? html`<${KeeperBadge} id=${r.keeper} size="sm" />`
-        : html`<span class="mono">${r.name ?? r.id ?? '없음'}</span>`,
+        ? html`<span title=${r.guest_name ?? r.keeper}><${KeeperBadge} id=${r.keeper} size="sm" /></span>`
+        : html`<span class="mono">${r.guest_name ?? r.name ?? r.id ?? '없음'}</span>`,
     },
-    { id: 'state', header: '상태', accessor: (r) => r.state ?? r.status ?? null },
+    {
+      id: 'presence',
+      header: '상태',
+      sortable: true,
+      sortValue: (r) => resolveMicroVmPresence(r) ?? '',
+      cell: (r) => {
+        const presence = resolveMicroVmPresence(r)
+        if (!presence) return html`<span class="dtable-absent">없음</span>`
+        return html`<span class="mono" style=${{ ...PILL_BADGE_BASE, ...presenceStyle(presence) }}>${presence}</span>`
+      },
+    },
     {
       id: 'socket',
       header: '소켓',
-      cell: (r) => r.socket_present === undefined
-        ? html`<span class="dtable-absent">미보고</span>`
-        : html`<span class="mono" style=${{ color: r.socket_present ? 'var(--ok-fg)' : 'var(--err-fg)' }}>${r.socket_present ? 'present' : 'missing'}</span>`,
+      sortable: true,
+      sortValue: (r) => resolveMicroVmSocket(r)?.label ?? '',
+      cell: (r) => {
+        const sock = resolveMicroVmSocket(r)
+        if (!sock) return html`<span class="dtable-absent">미보고</span>`
+        const color =
+          sock.tone === 'ok'
+            ? 'var(--ok-fg)'
+            : sock.tone === 'err'
+              ? 'var(--err-fg)'
+              : sock.tone === 'warn'
+                ? 'var(--warn-fg)'
+                : 'var(--fg-3)'
+        return html`<span class="mono" title=${sock.tooltip} style=${{ color }}>${sock.label}</span>`
+      },
     },
-    { id: 'parity', header: 'Shim Parity', accessor: (r) => r.shim_parity ?? null },
     {
-      id: 'pid',
-      header: 'PID',
-      numeric: true,
-      observed: (r) => typeof r.pid === 'number' ? observedValue(r.pid) : observedUnreported(),
+      id: 'parity',
+      header: 'Shim Parity',
+      sortable: true,
+      sortValue: (r) => normalizeShimParity(r.shim_parity)?.status ?? '',
+      cell: (r) => {
+        const parity = normalizeShimParity(r.shim_parity)
+        if (!parity) return html`<span class="dtable-absent">미보고</span>`
+        return html`
+          <span
+            class="mono"
+            title=${parity.tooltip}
+            style=${{ ...PILL_BADGE_BASE, ...parityBadgeStyle(parity.status) }}
+          >
+            ${parity.status}
+          </span>
+        `
+      },
+    },
+    {
+      id: 'spec',
+      header: '백엔드 / 사양',
+      sortable: true,
+      sortValue: (r) => formatMicroVmSpec(r) ?? '',
+      cell: (r) => {
+        const spec = formatMicroVmSpec(r)
+        return spec
+          ? html`<span class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-2)' }}>${spec}</span>`
+          : html`<span class="dtable-absent">미보고</span>`
+      },
     },
   ], [])
 
   const sshPoolColumns = useMemo<readonly DataTableColumn<InfraSshPool>[]>(() => [
-    { id: 'name', header: 'SSH 풀', sortable: true, accessor: (r) => r.name ?? r.id ?? r.host ?? null },
-    { id: 'host', header: '호스트', cell: (r) => html`<span class="mono" style=${{ fontSize: 'var(--fs-12)' }}>${r.host ?? '없음'}</span>` },
+    {
+      id: 'name',
+      header: 'SSH 풀',
+      sortable: true,
+      accessor: (r) => r.pool_name ?? r.name ?? r.id ?? r.host ?? null,
+    },
+    {
+      id: 'host',
+      header: '호스트',
+      sortable: true,
+      sortValue: (r) => formatSshHost(r),
+      cell: (r) => html`
+        <span class="mono" title=${r.remote_root ?? undefined} style=${{ fontSize: 'var(--fs-12)' }}>
+          ${formatSshHost(r)}
+        </span>
+      `,
+    },
     {
       id: 'rtt',
-      header: 'RTT (ms)',
+      header: 'RTT / 도달성',
       numeric: true,
-      observed: (r) => typeof r.rtt_ms === 'number' ? observedValue(r.rtt_ms) : observedUnreported(),
-      formatValue: (v) => `${Math.round(Number(v))}ms`,
+      sortable: true,
+      sortValue: (r) => {
+        if (r.reachability?.status === 'reachable' && typeof r.reachability.rtt_ms === 'number') {
+          return r.reachability.rtt_ms
+        }
+        if (typeof r.rtt_ms === 'number') return r.rtt_ms
+        return Number.POSITIVE_INFINITY
+      },
+      cell: (r) => {
+        if (r.reachability && typeof r.reachability === 'object') {
+          if (r.reachability.status === 'reachable' && typeof r.reachability.rtt_ms === 'number') {
+            return html`<span class="mono tnum" style=${{ color: 'var(--ok-fg)' }}>${formatRttMs(r.reachability.rtt_ms)}</span>`
+          }
+          if (r.reachability.status === 'unreachable') {
+            return html`<span class="mono" title=${r.reachability.detail ?? undefined} style=${{ color: 'var(--err-fg)' }}>연결 불가</span>`
+          }
+          if (r.reachability.status === 'probe_pending') {
+            return html`<span class="dtable-absent">측정 중</span>`
+          }
+        }
+        if (typeof r.rtt_ms === 'number') {
+          return html`<span class="mono tnum">${formatRttMs(r.rtt_ms)}</span>`
+        }
+        return html`<span class="dtable-absent">미보고</span>`
+      },
     },
     {
       id: 'sessions',
@@ -135,7 +353,17 @@ export function SandboxesTab(props: WorkspaceViewProps) {
       id: 'keepers',
       header: '연결 Keeper 수',
       numeric: true,
-      observed: (r) => Array.isArray(r.keepers) ? observedValue(r.keepers.length) : observedUnreported(),
+      sortable: true,
+      sortValue: (r) => resolveSshPoolKeepers(r)?.length ?? -1,
+      cell: (r) => {
+        const keepers = resolveSshPoolKeepers(r)
+        if (!keepers) return html`<span class="dtable-absent">미보고</span>`
+        return html`
+          <span class="mono tnum" title=${keepers.length > 0 ? keepers.join(', ') : undefined}>
+            ${keepers.length}
+          </span>
+        `
+      },
     },
   ], [])
 
@@ -143,11 +371,21 @@ export function SandboxesTab(props: WorkspaceViewProps) {
     {
       id: 'keeper',
       header: 'Keeper',
+      sortable: true,
+      sortValue: (r) => r.keeper ?? '',
       cell: (r) => r.keeper ? html`<${KeeperBadge} id=${r.keeper} size="sm" />` : html`<span class="dtable-absent">없음</span>`,
     },
-    { id: 'container', header: '컨테이너', cell: (r) => html`<span class="mono" style=${{ fontSize: 'var(--fs-11)' }}>${r.container_id ?? '없음'}</span>` },
-    { id: 'image', header: '이미지', cell: (r) => html`<span class="mono" style=${{ fontSize: 'var(--fs-11)' }}>${r.image ?? '없음'}</span>` },
-    { id: 'status', header: '상태', accessor: (r) => r.status ?? null },
+    {
+      id: 'container',
+      header: '백엔드 / 컨테이너',
+      cell: (r) => html`<span class="mono" style=${{ fontSize: 'var(--fs-11)' }}>${r.container_id ?? r.backend ?? '없음'}</span>`,
+    },
+    {
+      id: 'image',
+      header: '네트워크 / 이미지',
+      cell: (r) => html`<span class="mono" style=${{ fontSize: 'var(--fs-11)' }}>${r.image ?? r.network_mode ?? '없음'}</span>`,
+    },
+    { id: 'status', header: '상태', accessor: (r) => r.status ?? (r.backend ? 'declared' : null) },
   ], [])
 
   const data = obs.kind === 'value' ? obs.data : null
@@ -242,7 +480,7 @@ export function SandboxesTab(props: WorkspaceViewProps) {
                 ${data.shim_parity.status}
               </span>
             </div>
-            <div class="mono" style=${{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-3)', fontSize: 'var(--fs-11)', color: 'var(--fg-2)' }}>
+            <div class="mono" style=${{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-3)', fontSize: 'var(--fs-11)', color: 'var(--fg-2)', overflowWrap: 'anywhere' }}>
               <span>build: ${data.shim_parity.build_identity ?? '없음'}</span>
               <span>shim: ${data.shim_parity.shim_identity ?? '없음'}</span>
               <span>server: ${data.shim_parity.server_identity ?? '없음'}</span>
@@ -272,7 +510,7 @@ export function SandboxesTab(props: WorkspaceViewProps) {
             <${DataTable}
               data=${data.microvm_guests}
               columns=${microVmColumns}
-              getRowId=${(r: InfraMicroVmGuest, i: number) => r.id ?? r.name ?? `vm-${i}`}
+              getRowId=${(r: InfraMicroVmGuest, i: number) => r.guest_name ?? r.id ?? r.keeper ?? r.name ?? `vm-${i}`}
               virtualizeThreshold=${30}
               maxHeight=${320}
               emptyLabel="선언된 MicroVM 게스트 없음"
@@ -287,7 +525,7 @@ export function SandboxesTab(props: WorkspaceViewProps) {
             <${DataTable}
               data=${data.ssh_pools}
               columns=${sshPoolColumns}
-              getRowId=${(r: InfraSshPool, i: number) => r.id ?? r.name ?? `ssh-${i}`}
+              getRowId=${(r: InfraSshPool, i: number) => r.pool_name ?? r.id ?? r.name ?? `ssh-${i}`}
               virtualizeThreshold=${30}
               maxHeight=${300}
               emptyLabel="등록된 SSH 풀 없음"
@@ -319,13 +557,13 @@ export function SandboxesTab(props: WorkspaceViewProps) {
                     title: 'Volume GC Report',
                     kind: 'volume_gc',
                     data: data.volume_gc_report,
-                    render: () => html`<pre class="mono" style=${{ margin: 0, fontSize: 'var(--fs-11)', whiteSpace: 'pre-wrap' }}>${JSON.stringify(data.volume_gc_report, null, 2)}</pre>`,
+                    render: () => html`<pre class="mono" style=${{ margin: 0, fontSize: 'var(--fs-11)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>${JSON.stringify(data.volume_gc_report, null, 2)}</pre>`,
                   })}
                 >
                   [⤢] 원본
                 </button>
               </div>
-              <pre class="mono" style=${{ margin: 0, fontSize: 'var(--fs-11)', overflowX: 'auto', whiteSpace: 'pre-wrap', color: 'var(--fg-2)' }}>
+              <pre class="mono" style=${{ margin: 0, fontSize: 'var(--fs-11)', overflowX: 'auto', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', color: 'var(--fg-2)' }}>
                 ${data.volume_gc_report ? JSON.stringify(data.volume_gc_report, null, 2) : '없음'}
               </pre>
             </div>
@@ -340,13 +578,13 @@ export function SandboxesTab(props: WorkspaceViewProps) {
                     title: 'Host Storage',
                     kind: 'host_storage',
                     data: data.host_storage,
-                    render: () => html`<pre class="mono" style=${{ margin: 0, fontSize: 'var(--fs-11)', whiteSpace: 'pre-wrap' }}>${JSON.stringify(data.host_storage, null, 2)}</pre>`,
+                    render: () => html`<pre class="mono" style=${{ margin: 0, fontSize: 'var(--fs-11)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>${JSON.stringify(data.host_storage, null, 2)}</pre>`,
                   })}
                 >
                   [⤢] 원본
                 </button>
               </div>
-              <pre class="mono" style=${{ margin: 0, fontSize: 'var(--fs-11)', overflowX: 'auto', whiteSpace: 'pre-wrap', color: 'var(--fg-2)' }}>
+              <pre class="mono" style=${{ margin: 0, fontSize: 'var(--fs-11)', overflowX: 'auto', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', color: 'var(--fg-2)' }}>
                 ${data.host_storage ? JSON.stringify(data.host_storage, null, 2) : '없음'}
               </pre>
             </div>

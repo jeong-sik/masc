@@ -125,7 +125,7 @@ export function KeeperPortraitCandleTab(props: KeeperPortraitCandleTabProps) {
         </button>
       </div>
 
-      <div class="kp-pill" data-tone="info" role="note">
+      <div class="kp-notice" data-tone="info" role="note">
         Candle 장신구 구매·장착은 Keeper 자율 턴 지갑 정책으로 실행됩니다. 여기서는 실시간 초상화 착용 미리보기(?preview)와 원장 상태를 관측합니다.
       </div>
 

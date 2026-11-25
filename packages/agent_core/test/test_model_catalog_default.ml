@@ -486,6 +486,48 @@ let test_anthropic_rows_price_cache_tokens () =
 (* The cache outcome projection judges an expiry only against a declared
    lifetime. The claude provider declares the documented five minutes
    (checked 2026-11-20). The field takes only a positive number of seconds. *)
+(* Gemini counts cached tokens inside [promptTokenCount], so a turn of 1M
+   prompt tokens with 800K served from the implicit cache pays the input rate
+   on 200K, the cached rate (0.1x) on 800K, and the output rate on thoughts and
+   answer together: 0.15 + 0.06 + 0.375 = 0.585 USD at the 3.8 Flash
+   introductory price (aistudio.google.com/docs/pricing, read 2026-11-25). *)
+let test_gemini_3_8_flash_prices_cached_turn () =
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog ~suite:"gemini 3.8 flash pricing"
+  in
+  let model_id = "gemini-3.8-flash" in
+  match
+    Model_catalog.lookup catalog
+      (Llm_provider.Model_identifiers.Model_id.of_string_exn model_id)
+  with
+  | None -> failf "%s resolves to no catalog row" model_id
+  | Some (entry : Model_catalog.model_entry) ->
+    (match entry.input_per_million, entry.output_per_million with
+     | None, _ | _, None -> failf "%s states no input and output price" model_id
+     | Some input_per_million, Some output_per_million ->
+       let pricing : Llm_provider.Pricing.pricing =
+         { input_per_million
+         ; output_per_million
+         ; cache_write_multiplier = entry.cache_write_multiplier
+         ; cache_write_1h_multiplier = entry.cache_write_1h_multiplier
+         ; cache_read_multiplier = entry.cache_read_multiplier
+         }
+       in
+       (match
+          Llm_provider.Pricing.estimate_cost
+            ~pricing
+            ~cache_writes:Llm_provider.Pricing.Provider_default
+            ~input_tokens:1_000_000
+            ~output_tokens:100_000
+            ~cache_read_input_tokens:800_000
+            ()
+        with
+        | Llm_provider.Pricing.Estimated usd ->
+          check (float 0.000001) "cached Gemini turn cost" 0.585 usd
+        | Llm_provider.Pricing.Incomplete _ ->
+          fail "gemini-3.8-flash leaves a cache component unpriced"))
+;;
+
 let test_provider_default_cache_lifetime () =
   let repo =
     Model_catalog_test_support.load_repo_model_catalog ~suite:"default cache lifetime"
@@ -1835,6 +1877,10 @@ let () =
             "anthropic rows price cache tokens"
             `Quick
             test_anthropic_rows_price_cache_tokens
+        ; test_case
+            "gemini 3.8 flash prices a cached turn"
+            `Quick
+            test_gemini_3_8_flash_prices_cached_turn
         ; test_case
             "providers declare a positive default cache lifetime"
             `Quick

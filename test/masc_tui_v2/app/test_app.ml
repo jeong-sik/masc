@@ -1167,7 +1167,7 @@ let test_board_replies_survive_epoch_change_and_stream_overflow () =
   Alcotest.(check int) "one stream event was evicted" 1 (Ui_bus.stats bus).total_dropped_stream_events
 
 let test_queue_drawer_walks_all_http_pages () =
-  let alpha = "alpha" and beta = "beta" in
+  let alpha = "alpha" and beta = "beta" and stalled = "stalled" in
   let start keeper = "/api/v1/keepers/" ^ keeper ^ "/chat/operations?state=queued" in
   let after keeper sequence = start keeper ^ "&after_sequence=" ^ string_of_int sequence in
   let operation prefix number sequence =
@@ -1185,6 +1185,17 @@ let test_queue_drawer_walks_all_http_pages () =
   let expected_first = List.init 100 (fun i -> Printf.sprintf "alpha-%d" (i + 1)) in
   let expected_all =
     List.filter ((<>) "alpha-2") expected_first @ ["alpha-101"; "alpha-102"; "alpha-103"; "alpha-2"] in
+  let beta_size = 5_001 in
+  let rec beta_pages_from sequence =
+    let path = if sequence = 0 then start beta else after beta sequence in
+    let count = min 100 (beta_size - sequence) in
+    if count = 0 then [path, page []]
+    else
+      let rows = List.init count (fun i ->
+        let n = sequence + i + 1 in operation beta n n) in
+      (path, page rows) :: beta_pages_from (sequence + count) in
+  let beta_pages = beta_pages_from 0 in
+  let expected_beta = List.init beta_size (fun i -> Printf.sprintf "beta-%d" (i + 1)) in
   let seen = ref [] and alpha_reads = ref 0 in
   let held, hold = Eio.Promise.create () and release, resume = Eio.Promise.create () in
   let respond ~meth ~path =
@@ -1197,9 +1208,11 @@ let test_queue_drawer_walks_all_http_pages () =
        | 2 -> Eio.Promise.resolve hold (); Eio.Promise.await release; 503, `Assoc []
        | _ -> 200, page next_page)
     else if path = after alpha 104 then 200, page []
-    else if path = start beta then 200, page [operation beta 1 1]
-    else if path = after beta 1 then 200, page []
-    else Alcotest.failf "unexpected queue path %s" path in
+    else if path = start stalled || path = after stalled 1 then
+      200, page [operation stalled 1 1]
+    else match List.assoc_opt path beta_pages with
+      | Some body -> 200, body
+      | None -> Alcotest.failf "unexpected queue path %s" path in
   with_loopback_executor ~respond @@ fun clock bus exec ->
   let model = ref (Model.initial ()) in
   let dispatch keeper action =
@@ -1239,7 +1252,8 @@ let test_queue_drawer_walks_all_http_pages () =
   await_reply alpha Option.is_none;
   dispatch beta Masc_tui_keymap.Keymap.Refresh;
   await_reply beta complete;
-  Alcotest.(check (list string)) "another Keeper receives its own inventory" ["beta-1"] (ids beta);
+  Alcotest.(check bool) "another Keeper receives all 5,001 ordered operation IDs" true
+    (ids beta = expected_beta);
   dispatch alpha Masc_tui_keymap.Keymap.Refresh;
   await_reply alpha complete;
   Alcotest.(check (list string)) "all 103 durable ids include the operation moved across pages once"
@@ -1252,10 +1266,15 @@ let test_queue_drawer_walks_all_http_pages () =
   await_reply alpha failed;
   Alcotest.(check bool) "an older deferred failure leaves the newer complete read intact" true
     (Observed.to_option (queue alpha).read = Some () && ids alpha = expected_all);
-  Alcotest.(check (list string)) "refreshing alpha preserves beta" ["beta-1"] (ids beta);
+  Alcotest.(check bool) "refreshing alpha preserves beta" true (ids beta = expected_beta);
+  dispatch stalled Masc_tui_keymap.Keymap.Refresh;
+  await_reply stalled (function Some (Error (Msg.Decode_error _)) -> true | _ -> false);
+  Alcotest.(check (list string)) "a repeated cursor stops with the last valid inventory"
+    ["stalled-1"] (ids stalled);
   Alcotest.(check (list string)) "the actual HTTP requests advance by returned sequence and refresh from the beginning"
-    [start alpha; after alpha 100; start alpha; after alpha 100; start beta; after beta 1;
-     start alpha; after alpha 100; after alpha 104] (List.rev !seen)
+    ([start alpha; after alpha 100; start alpha; after alpha 100] @ List.map fst beta_pages
+     @ [start alpha; after alpha 100; after alpha 104; start stalled; after stalled 1])
+    (List.rev !seen)
 
 let test_bus_key_hash_and_stream_frames () =
   (* P1-1: equal Stream_logs keys with differing since_seq MUST hash identically

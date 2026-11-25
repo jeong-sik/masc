@@ -938,14 +938,10 @@ let board_snapshot_key ~epoch ~path ids =
   let scope = string_of_int (Epoch.to_int epoch) :: ids in
   Key_get (path ^ "#" ^ String.concat "/" (List.map Wire_common.percent_encode scope))
 
-let max_chat_queue_pages = 50
-
 let read_chat_queue ~timeout_sec t ~keeper ~partial =
   let endpoint = Atomic.get t.endpoint in
   (* A move to the end assigns a new sequence between pages. Emit each
-     operation at its last observed position. Bound total pages, require strict
-     monotonic sequence progression, and honor shutdown so a stalled/repeating
-     cursor can never loop forever or block exit. *)
+     operation at its last observed position. *)
   let rows acc =
     List.fold_left
       (fun (seen, ordered) (row : Wire_fleet.chat_operation) ->
@@ -954,11 +950,9 @@ let read_chat_queue ~timeout_sec t ~keeper ~partial =
          else Fleet_store.String_set.add id seen, row :: ordered)
       (Fleet_store.String_set.empty, []) acc |> snd
   in
-  let rec read page_num after acc running_batch =
+  let rec read after acc running_batch =
     if Atomic.get t.closed then
       rows acc, running_batch, Error (Msg.Transport (Health.Other_io "executor closed"))
-    else if page_num >= max_chat_queue_pages then
-      rows acc, running_batch, Error (Msg.Decode_error "queued operations exceeded maximum page limit")
     else
       let path = Wire_fleet.chat_queue_path ~keeper ~after in
       let decode json =
@@ -976,13 +970,12 @@ let read_chat_queue ~timeout_sec t ~keeper ~partial =
       | Ok (page, running_batch) ->
           let acc = List.rev_append page acc in
           partial (rows acc) running_batch;
-          let next_seq = (List.hd acc).sequence in
-          match after with
-          | Some prev when Int64.compare next_seq prev <= 0 ->
-              rows acc, running_batch, Error (Msg.Decode_error "queued operations cursor did not advance")
-          | Some _ | None -> read (page_num + 1) (Some next_seq) acc running_batch
+          (* The decoder checked that every sequence advances the requested
+             cursor. Yield to other work and observe cancellation between pages. *)
+          Eio.Fiber.yield ();
+          read (Some (List.hd acc).sequence) acc running_batch
   in
-  read 0 None [] None
+  read None [] None
 
 let get_request_keys ~epoch ~path ~requested_at (req : Cmd.get_request) =
   let base = Printf.sprintf "%d:%s" (Epoch.to_int epoch) path in

@@ -14,7 +14,7 @@ import { InlineSpinner } from '../../components/common/inline-spinner'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { DataTable, type DataTableColumn } from '../../components/primitives/data-table'
 import { TargetLockedAction } from '../../components/primitives/target-locked-action'
-import { activeWorkspaceId, currentSessionEpoch, isEpochCurrent, sessionEpoch } from '../../core/auth'
+import { activeWorkspaceId, currentAccountMode, currentSessionEpoch, isEpochCurrent, sessionEpoch } from '../../core/auth'
 import { KeeperReadNotice, useKeeperRead } from './keeper-read'
 import {
   fetchKeeperMemoryFactsApi,
@@ -50,6 +50,14 @@ function summarizeMemoryValue(v: unknown): string | null {
 }
 
 export function KeeperMemoryTab(props: KeeperMemoryTabProps) {
+  if (currentAccountMode.value === 'multi_account') return html`
+    <section class="kp-scroll-pane" data-keeper-tab="memory" aria-label="Keeper 메모리">
+      <div class="kp-card">
+        <h3>Memory OS · ${props.keeperName}</h3>
+        <p>Keeper 메모리 조회와 복구는 단일 계정 모드에서 사용할 수 있습니다.</p>
+      </div>
+    </section>
+  `
   return html`<${KeeperMemoryView} key=${JSON.stringify([sessionEpoch.value, props.keeperName])} ...${props} />`
 }
 

@@ -1578,7 +1578,7 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     }
   })
 
-  it('reads only workspace tasks and sandbox in multi-account mode and offers no local note actions', async () => {
+  it('reads only workspace tasks and sandbox in multi-account mode and offers no local note or Memory actions', async () => {
     authSession.value = {
       kind: 'multi_account_signed_in', mode: 'multi_account', accountId: 'acct-1', displayName: 'Operator',
       email: null, role: 'admin', csrfToken: 'csrf-test', workspaceId: 'default',
@@ -1592,11 +1592,13 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
       return Response.json({}, { status: 404 })
     })
     const work = render(html`<${KeeperWorkSandboxTab} keeperName="hermes" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`)
+    const memory = render(html`<${KeeperMemoryTab} keeperName="hermes" />`)
     await work.findByText('조회된 담당 작업 없음')
     await work.findByText('현재 조회에서 샌드박스 텔레메트리 행을 찾지 못했습니다.')
     expect(work.container.textContent).toContain('단일 계정 모드')
     expect(work.queryByRole('textbox', { name: '운영자 노트 입력' })).toBeNull()
     expect(work.queryByRole('button', { name: '운영자 노트 저장' })).toBeNull()
+    expect(memory.container.textContent).toContain('단일 계정 모드')
     expect(paths.sort()).toEqual(['/api/v1/dashboard/execution?light=true', '/api/v1/infra/sandboxes/hermes'])
   })
 

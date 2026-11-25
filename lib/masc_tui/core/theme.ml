@@ -12,6 +12,10 @@ type preset =
   | Paper_light
   | Mono
   | Muted
+  | Muted_warm
+  | Muted_green
+  | Muted_dusk
+  | Muted_graphite
 
 type status_token =
   | Status_ok
@@ -246,25 +250,31 @@ type text_floors = {
 
 (* The contrast each text tier keeps on every surface of its preset, the
    selection background included. [build_theme] lifts a color up to its floor.
-   The four original presets share one set. Muted keeps WCAG 2.1 AAA (7:1) for
-   body text and lowers the other tiers, so its text is dimmer than theirs. *)
+   The four original presets share the standard set. The down-tone presets
+   share a lower one: body text stays at WCAG 2.1 AAA (7:1) and the other
+   tiers sit lower, so their text is dimmer. *)
+let standard_floors =
+  {
+    bright = 12.0;
+    primary = 9.0;
+    secondary = 6.5;
+    muted = min_text_contrast;
+    selection = 12.0;
+  }
+
+let down_tone_floors =
+  {
+    bright = 8.5;
+    primary = 7.0;
+    secondary = 5.5;
+    muted = min_text_contrast;
+    selection = 8.5;
+  }
+
 let text_floors = function
-  | Midnight | Arcade_hi | Paper_light | Mono ->
-      {
-        bright = 12.0;
-        primary = 9.0;
-        secondary = 6.5;
-        muted = min_text_contrast;
-        selection = 12.0;
-      }
-  | Muted ->
-      {
-        bright = 8.5;
-        primary = 7.0;
-        secondary = 5.5;
-        muted = min_text_contrast;
-        selection = 8.5;
-      }
+  | Midnight | Arcade_hi | Paper_light | Mono -> standard_floors
+  | Muted | Muted_warm | Muted_green | Muted_dusk | Muted_graphite ->
+      down_tone_floors
 
 let build_theme ~preset ~surface_0 ~surface_1 ~surface_2
     ~border_subtle ~border_inactive ~border_focused
@@ -446,8 +456,16 @@ let mono_theme =
     ~warm_stops:(0xB4B4BC, 0xE4E4E7, 0xFFFFFF)
     ~ai_stops:(0x9A9AA5, 0xC8C8D2, 0xF4F4F5)
 
-(* Preset 5: Muted — Down-tone Slate. Same blue-slate family as Midnight with
-   lower chroma and dimmer text; its contrast floors are in [text_floors]. *)
+(* Presets 5 to 9: the down-tone family. All five use [down_tone_floors] and
+   differ in the hue of surfaces, borders, text and accent. Gradient stops carry
+   a meaning (cool, warm, AI flow) and no surface tint, so the family shares
+   them. *)
+let down_tone_cool_stops = (0x69AABA, 0x7DB1DD, 0xAFD4EA)
+let down_tone_warm_stops = (0xA693C9, 0xD494B8, 0xEFBBC2)
+let down_tone_ai_stops = (0x9F92C8, 0xB89DD9, 0xDBC8EA)
+
+(* Preset 5: Muted: slate blue-gray, the Midnight family with lower chroma and
+   dimmer text. *)
 let muted_theme =
   build_theme
     ~preset:Muted
@@ -470,11 +488,130 @@ let muted_theme =
     ~accent:0x74A7D4
     ~selection_bg:0x23313E
     ~selection_fg:0xCDD3D8
-    ~cool_stops:(0x69AABA, 0x7DB1DD, 0xAFD4EA)
-    ~warm_stops:(0xA693C9, 0xD494B8, 0xEFBBC2)
-    ~ai_stops:(0x9F92C8, 0xB89DD9, 0xDBC8EA)
+    ~cool_stops:down_tone_cool_stops
+    ~warm_stops:down_tone_warm_stops
+    ~ai_stops:down_tone_ai_stops
 
-let all_presets = [ Midnight; Arcade_hi; Paper_light; Mono; Muted ]
+(* Preset 6: Muted Warm: warm gray-brown with a teal accent *)
+let muted_warm_theme =
+  build_theme
+    ~preset:Muted_warm
+    ~surface_0:0x1B1611
+    ~surface_1:0x211C16
+    ~surface_2:0x2A231C
+    ~border_subtle:0x342C24
+    ~border_inactive:0x4C4136
+    ~border_focused:0x62ACB5
+    ~text_bright:0xD5D0CA
+    ~text_primary:0xC4BDB7
+    ~text_secondary:0xB2A89C
+    ~text_muted:0xA59889
+    ~status_ok:0x6FAF8A
+    ~status_active:0x62ADB5
+    ~status_attention:0xBF9C59
+    ~status_critical:0xDF8A8C
+    ~status_ai:0xB196D1
+    ~status_historical:0xAF9F8E
+    ~accent:0x62ADB5
+    ~selection_bg:0x3A2C1F
+    ~selection_fg:0xD5D0CA
+    ~cool_stops:down_tone_cool_stops
+    ~warm_stops:down_tone_warm_stops
+    ~ai_stops:down_tone_ai_stops
+
+(* Preset 7: Muted Green: moss gray-green with a teal accent *)
+let muted_green_theme =
+  build_theme
+    ~preset:Muted_green
+    ~surface_0:0x121916
+    ~surface_1:0x171F1C
+    ~surface_2:0x1D2723
+    ~border_subtle:0x25312C
+    ~border_inactive:0x374841
+    ~border_focused:0x62ADAD
+    ~text_bright:0xCCD5D1
+    ~text_primary:0xB9C3BE
+    ~text_secondary:0x9FAFA8
+    ~text_muted:0x8BA097
+    ~status_ok:0x82AE78
+    ~status_active:0x63AFAE
+    ~status_attention:0xC19E5B
+    ~status_critical:0xE18B8D
+    ~status_ai:0xB397D3
+    ~status_historical:0x90A89D
+    ~accent:0x63AFAE
+    ~selection_bg:0x21342B
+    ~selection_fg:0xCCD5D1
+    ~cool_stops:down_tone_cool_stops
+    ~warm_stops:down_tone_warm_stops
+    ~ai_stops:down_tone_ai_stops
+
+(* Preset 8: Muted Dusk: purple-gray with a periwinkle accent *)
+let muted_dusk_theme =
+  build_theme
+    ~preset:Muted_dusk
+    ~surface_0:0x18161C
+    ~surface_1:0x1E1B22
+    ~surface_2:0x26232B
+    ~border_subtle:0x302C35
+    ~border_inactive:0x47414E
+    ~border_focused:0x829FD4
+    ~text_bright:0xD2CFD6
+    ~text_primary:0xC0BDC5
+    ~text_secondary:0xADA7B4
+    ~text_muted:0x9E97A8
+    ~status_ok:0x6FAE8A
+    ~status_active:0x84A2D7
+    ~status_attention:0xBF9C59
+    ~status_critical:0xDF898C
+    ~status_ai:0xB196D1
+    ~status_historical:0xA69EB1
+    ~accent:0x84A2D7
+    ~selection_bg:0x312C3C
+    ~selection_fg:0xD2CFD6
+    ~cool_stops:down_tone_cool_stops
+    ~warm_stops:down_tone_warm_stops
+    ~ai_stops:down_tone_ai_stops
+
+(* Preset 9: Muted Graphite: neutral graphite with a soft blue accent *)
+let muted_graphite_theme =
+  build_theme
+    ~preset:Muted_graphite
+    ~surface_0:0x161718
+    ~surface_1:0x1C1D1E
+    ~surface_2:0x232526
+    ~border_subtle:0x2C2E30
+    ~border_inactive:0x424446
+    ~border_focused:0x70A4D0
+    ~text_bright:0xD0D2D3
+    ~text_primary:0xBEC0C1
+    ~text_secondary:0xA8ABAD
+    ~text_muted:0x979B9E
+    ~status_ok:0x70B08B
+    ~status_active:0x74A7D3
+    ~status_attention:0xC09D5A
+    ~status_critical:0xE08B8D
+    ~status_ai:0xB297D2
+    ~status_historical:0x9BA3AB
+    ~accent:0x74A7D3
+    ~selection_bg:0x2B3035
+    ~selection_fg:0xD0D2D3
+    ~cool_stops:down_tone_cool_stops
+    ~warm_stops:down_tone_warm_stops
+    ~ai_stops:down_tone_ai_stops
+
+let all_presets =
+  [
+    Midnight;
+    Arcade_hi;
+    Paper_light;
+    Mono;
+    Muted;
+    Muted_warm;
+    Muted_green;
+    Muted_dusk;
+    Muted_graphite;
+  ]
 
 let all_status_tokens =
   [
@@ -494,13 +631,21 @@ let preset_name = function
   | Paper_light -> "paper_light"
   | Mono -> "mono"
   | Muted -> "muted"
+  | Muted_warm -> "muted_warm"
+  | Muted_green -> "muted_green"
+  | Muted_dusk -> "muted_dusk"
+  | Muted_graphite -> "muted_graphite"
 
 let preset_label = function
   | Midnight -> Say.make ~ko:"미드나잇" ~en:"Midnight"
   | Arcade_hi -> Say.make ~ko:"아케이드 하이" ~en:"Arcade Hi"
   | Paper_light -> Say.make ~ko:"페이퍼 라이트" ~en:"Paper Light"
   | Mono -> Say.make ~ko:"모노크롬" ~en:"Mono"
-  | Muted -> Say.make ~ko:"다운톤" ~en:"Muted"
+  | Muted -> Say.make ~ko:"다운톤 청회색" ~en:"Muted Slate"
+  | Muted_warm -> Say.make ~ko:"다운톤 회갈색" ~en:"Muted Warm"
+  | Muted_green -> Say.make ~ko:"다운톤 녹회색" ~en:"Muted Green"
+  | Muted_dusk -> Say.make ~ko:"다운톤 보라회색" ~en:"Muted Dusk"
+  | Muted_graphite -> Say.make ~ko:"다운톤 흑연" ~en:"Muted Graphite"
 
 let preset_of_name name =
   match String.lowercase_ascii (String.trim name) with
@@ -509,6 +654,10 @@ let preset_of_name name =
   | "paper_light" | "paper-light" -> Some Paper_light
   | "mono" -> Some Mono
   | "muted" -> Some Muted
+  | "muted_warm" | "muted-warm" -> Some Muted_warm
+  | "muted_green" | "muted-green" -> Some Muted_green
+  | "muted_dusk" | "muted-dusk" -> Some Muted_dusk
+  | "muted_graphite" | "muted-graphite" -> Some Muted_graphite
   | _ -> None
 
 let preset_index = function
@@ -517,6 +666,10 @@ let preset_index = function
   | Paper_light -> 2
   | Mono -> 3
   | Muted -> 4
+  | Muted_warm -> 5
+  | Muted_green -> 6
+  | Muted_dusk -> 7
+  | Muted_graphite -> 8
 
 let equal_preset a b = Int.equal (preset_index a) (preset_index b)
 
@@ -526,6 +679,10 @@ let of_preset = function
   | Paper_light -> paper_light_theme
   | Mono -> mono_theme
   | Muted -> muted_theme
+  | Muted_warm -> muted_warm_theme
+  | Muted_green -> muted_green_theme
+  | Muted_dusk -> muted_dusk_theme
+  | Muted_graphite -> muted_graphite_theme
 
 let default = midnight_theme
 

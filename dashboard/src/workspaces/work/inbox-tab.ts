@@ -192,6 +192,10 @@ function decodeGatePayload(raw: unknown): {
         taskId: asNonEmptyString(row.task_id),
         goalId: asNonEmptyString(row.goal_id),
         summaryText: sumObj ? asNonEmptyString(sumObj.context_summary) : null,
+        rationale: sumObj ? asNonEmptyString(sumObj.rationale) : null,
+        keyQuestions: Array.isArray(sumObj?.key_questions)
+          ? sumObj.key_questions.flatMap((question) => typeof question === 'string' && question.trim() ? [question] : [])
+          : [],
       })
     }
   }
@@ -800,8 +804,13 @@ export function InboxTab(props: WorkspaceViewProps) {
               </div>
               <${KeeperBadge} id=${selectedEntry.item.keeper} portrait=${true} />
             </div>
-            ${selectedEntry.item.question && html`<div>${selectedEntry.item.question}</div>`}
-            ${selectedEntry.item.because && html`<div class="wk-notice">정책 사유: ${selectedEntry.item.because}</div>`}
+            ${selectedEntry.item.question && html`<${MarkdownContent} class="wk-prose" text=${selectedEntry.item.question} />`}
+            ${selectedEntry.item.because && html`
+              <div class="wk-notice">
+                <strong>정책 사유</strong>
+                <${MarkdownContent} text=${selectedEntry.item.because} />
+              </div>
+            `}
             <pre class="wk-code-preview">${selectedEntry.item.argsPreview}</pre>
             <${TargetLockedAction}
               target=${{
@@ -848,26 +857,28 @@ export function InboxTab(props: WorkspaceViewProps) {
                       ${q.choices.map((c) => {
                         const active = chosenIds.includes(c.choiceId)
                         return html`
-                          <button
-                            key=${c.choiceId}
-                            type="button"
-                            class="wk-chip"
-                            aria-pressed=${active}
-                            onClick=${() => {
-                              const nextIds = q.mode === 'single'
-                                ? (active ? [] : [c.choiceId])
-                                : active
-                                  ? chosenIds.filter((id) => id !== c.choiceId)
-                                  : [...chosenIds, c.choiceId]
-                              setQuestionDraft(
-                                selectedEntry.item.askId,
-                                q.questionId,
-                                nextIds.length === 0 ? null : { kind: 'chose', choiceIds: nextIds },
-                              )
-                            }}
-                          >
-                            ${c.label}
-                          </button>
+                          <div key=${c.choiceId}>
+                            <button
+                              type="button"
+                              class="wk-chip"
+                              aria-pressed=${active}
+                              onClick=${() => {
+                                const nextIds = q.mode === 'single'
+                                  ? (active ? [] : [c.choiceId])
+                                  : active
+                                    ? chosenIds.filter((id) => id !== c.choiceId)
+                                    : [...chosenIds, c.choiceId]
+                                setQuestionDraft(
+                                  selectedEntry.item.askId,
+                                  q.questionId,
+                                  nextIds.length === 0 ? null : { kind: 'chose', choiceIds: nextIds },
+                                )
+                              }}
+                            >
+                              ${c.label}
+                            </button>
+                            ${c.description && html`<${MarkdownContent} class="wk-prose" text=${c.description} />`}
+                          </div>
                         `
                       })}
                     </div>
@@ -932,6 +943,14 @@ export function InboxTab(props: WorkspaceViewProps) {
               <${KeeperBadge} id=${selectedEntry.item.keeper} portrait=${true} />
             </div>
             ${selectedEntry.item.summaryText && html`<${MarkdownContent} class="wk-notice" text=${selectedEntry.item.summaryText} />`}
+            ${selectedEntry.item.keyQuestions.length > 0 && html`
+              <ul class="wk-prose">
+                ${selectedEntry.item.keyQuestions.map((question, index) => html`
+                  <li key=${index}><${MarkdownContent} text=${question} /></li>
+                `)}
+              </ul>
+            `}
+            ${selectedEntry.item.rationale && html`<${MarkdownContent} class="wk-prose" text=${selectedEntry.item.rationale} />`}
             ${selectedEntry.item.inputPreview && html`<pre class="wk-code-preview">${selectedEntry.item.inputPreview}</pre>`}
             <div class="wk-field">
               <label for="gate-reject-reason">거절 사유 (Reject 시 필수)</label>

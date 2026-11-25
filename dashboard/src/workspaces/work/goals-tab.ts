@@ -238,6 +238,10 @@ export function GoalsTab(props: WorkspaceViewProps) {
     () => bundle.goals.find((g) => g.id === selectedGoalId) ?? null,
     [bundle.goals, selectedGoalId],
   )
+  const verification = selectedGoal?.verification
+  const proof = verification?.state === 'stale' ? verification.historical
+    : verification?.state === 'current' && selectedGoal?.phase !== 'Awaiting_confirmation'
+      ? verification.completion : null
 
   const loadConfirmation = useCallback(async (goal: GoalItem, externalSignal?: AbortSignal) => {
     confirmAbortRef.current?.abort()
@@ -787,6 +791,17 @@ export function GoalsTab(props: WorkspaceViewProps) {
                   </button>
                 <//>
               `}
+            </section>
+          `}
+
+          ${(proof?.state === 'proven' || proof?.state === 'refuted') && html`
+            <section class="wk-section" aria-label="목표 검증 증거">
+              <h3 class="wk-section-title">${verification?.state === 'stale' ? '이전 기준의 검증 증거' : '목표 검증 증거'}</h3>
+              <div class="wk-muted-sm">
+                ${proof.state === 'proven' ? '증명됨' : '반증됨'} · ${proof.actor} · ${formatRelativeTime(proof.recordedAt)}
+              </div>
+              <${MarkdownContent} class="wk-prose" text=${proof.evidence} />
+              ${proof.state === 'refuted' && html`<${MarkdownContent} class="wk-notice" text=${proof.reason} />`}
             </section>
           `}
 

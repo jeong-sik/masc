@@ -6,6 +6,7 @@
  */
 
 import { html } from 'htm/preact'
+import { MarkdownContent } from '../components/common/markdown-renderer'
 import type { VNode } from 'preact'
 import { useEffect } from 'preact/hooks'
 import { isAuthenticated, sessionEpoch } from '../core/auth'
@@ -39,6 +40,7 @@ interface ShellQueueSummary {
 interface QuickPeekSchedule {
   readonly id: string
   readonly summary: string
+  readonly summaryIsProse: boolean
   readonly keeper: string | null
   readonly dueAt: string | null
   readonly status: string
@@ -109,9 +111,11 @@ function decodeSchedulesSummary(raw: unknown): QuickPeekScheduleSummary {
     if (!isRecord(r)) continue
     const id = asStr(r.schedule_id)
     if (!id) continue
+    const summary = asStr(r.payload_summary)
     rows.push({
       id,
-      summary: asStr(r.payload_summary) ?? id,
+      summary: summary ?? id,
+      summaryIsProse: summary !== null && r.payload_kind === 'masc.keeper_wake',
       keeper: asStr(r.payload_keeper_name) ?? asStr(r.payload_target),
       dueAt: formatScheduleDue(r.next_due_at_iso, r.next_due_at) ?? formatScheduleDue(r.due_at_iso, r.due_at),
       status: asStr(r.status) ?? 'scheduled',
@@ -239,7 +243,7 @@ export function QueueContextOverlayBody(): VNode {
                               <strong>${item.keeper}</strong>
                               <code class="mono">${item.tool || item.toolCallId}</code>
                             </div>
-                            ${item.question && html`<p class="ap-qpeek-card-text">${item.question}</p>`}
+                            ${item.question && html`<${MarkdownContent} class="ap-qpeek-card-text" text=${item.question} />`}
                             <div class="ap-qpeek-card-meta mono">
                               req=${item.approvalId} · rev=${item.revision}
                             </div>
@@ -280,7 +284,7 @@ export function QueueContextOverlayBody(): VNode {
                               <strong>${ask.keeper}</strong>
                               <span class="mono ap-muted">${ask.askId}</span>
                             </div>
-                            <p class="ap-qpeek-card-text">${ask.prompt}</p>
+                            <${MarkdownContent} class="ap-qpeek-card-text" text=${ask.prompt} />
                           </li>
                         `)}
                       </ul>
@@ -424,7 +428,9 @@ export function QueueContextOverlayBody(): VNode {
                                 <strong>${s.keeper ?? s.id}</strong>
                                 <span class="mono ap-muted">${s.status}</span>
                               </div>
-                              <p class="ap-qpeek-card-text">${s.summary}</p>
+                              ${s.summaryIsProse
+                                ? html`<${MarkdownContent} class="ap-qpeek-card-text" text=${s.summary} />`
+                                : html`<p class="ap-qpeek-card-text">${s.summary}</p>`}
                               ${s.dueAt && html`<div class="ap-qpeek-card-meta mono">due=${s.dueAt}</div>`}
                             </li>
                           `)}

@@ -130,6 +130,8 @@ function decodeSchedulesResponse(raw: unknown): ScheduleProjection {
     const scheduleId = asNonEmptyString(r.schedule_id)
     if (!scheduleId) continue
     const lastWake = isRecord(r.last_wake) ? r.last_wake : null
+    const payload = isRecord(r.payload) && r.payload.kind === 'masc.keeper_wake'
+      && isRecord(r.payload.body) ? r.payload.body : null
     rows.push({
       scheduleId,
       scheduleInstanceId: asString(r.schedule_instance_id, scheduleId),
@@ -141,6 +143,7 @@ function decodeSchedulesResponse(raw: unknown): ScheduleProjection {
       recurrenceSummary: asString(r.recurrence_summary, ''),
       keeperName: asNonEmptyString(r.payload_keeper_name) ?? asNonEmptyString(r.payload_target),
       summary: asNonEmptyString(r.payload_summary),
+      message: typeof payload?.message === 'string' && payload.message.trim() ? payload.message : null,
       lastWakeStatus: lastWake ? asNonEmptyString(lastWake.status) : null,
       lastWakeError: lastWake ? asNonEmptyString(lastWake.error) : null,
     })
@@ -884,6 +887,7 @@ export function TasksTab(props: WorkspaceViewProps) {
                 <span class="wk-kv-v">${selectedSchedule.lastWakeStatus ?? '실행 이력 없음'}</span>
               </div>
             </div>
+            ${selectedSchedule.message && html`<${MarkdownContent} class="wk-prose" text=${selectedSchedule.message} />`}
             ${selectedSchedule.lastWakeError && html`
               <div class="wk-notice wk-notice--err">최근 실패 사유: ${selectedSchedule.lastWakeError}</div>
             `}

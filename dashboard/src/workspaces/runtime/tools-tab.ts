@@ -114,7 +114,7 @@ function normalizeToolsPayload(raw: unknown): readonly DashboardToolRow[] {
     }))
 }
 
-export function ToolsTab(_props: WorkspaceViewProps) {
+export function ToolsTab({ onInspect }: WorkspaceViewProps) {
   const win = timeWindow.value
   const sseInstanceId = authSession.value.kind === 'single_user_local' ? observerSseInstanceId.value : null
   const epoch = sessionEpoch.value
@@ -393,7 +393,16 @@ export function ToolsTab(_props: WorkspaceViewProps) {
     {
       id: 'desc',
       header: '설명',
-      cell: (r) => html`<span style=${{ fontSize: 'var(--fs-12)', color: 'var(--fg-2)' }}>${r.description ?? '없음'}</span>`,
+      cell: (r) => {
+        const description = r.description
+        return description ? html`
+          <button type="button" class="btn-ghost" aria-label=${`${r.name} 설명 읽기`} onClick=${() => onInspect({
+            title: r.name,
+            kind: 'tool-description',
+            render: () => html`<${MarkdownContent} text=${description} />`,
+          })}>설명 읽기</button>
+        ` : '없음'
+      },
     },
     {
       id: 'calls',
@@ -419,7 +428,7 @@ export function ToolsTab(_props: WorkspaceViewProps) {
       observed: (r) => toObservedNumber(r.p95_ms, true),
       formatValue: (v) => formatMs(Number(v)),
     },
-  ], [])
+  ], [onInspect])
 
   const clientColumns = useMemo<readonly DataTableColumn<McpClientRow>[]>(() => [
     { id: 'name', header: '클라이언트', sortable: true, accessor: (r) => r.name },

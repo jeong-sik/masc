@@ -20,6 +20,7 @@ import {
   resourceCache,
 } from '../../core'
 import { currentRoute } from '../../routes/router'
+import { MarkdownContent } from '../../components/common/markdown-renderer'
 import {
   fetchConfigSchemaApi,
   postConfigPatchApi,
@@ -414,7 +415,9 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
         </div>
 
         ${field.description && html`
-          <p style=${{ margin: 0, fontSize: 'var(--fs-12)', color: 'var(--fg-2)' }}>${field.description}</p>
+          <div style=${{ fontSize: 'var(--fs-12)', color: 'var(--fg-2)' }}>
+            <${MarkdownContent} text=${field.description} />
+          </div>
         `}
 
         <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>

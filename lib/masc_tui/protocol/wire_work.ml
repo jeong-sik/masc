@@ -1071,18 +1071,45 @@ let decode_verification_request json =
       review_observation;
     }
 
-(* An unreadable verification backlog answers the awaiting view with an
-   empty queue and [backlog_error] (Dashboard_verification.filter_by_view).
-   An empty list there is not "nothing awaits review", so it is a failed
-   read. The All view carries no backlog fields. *)
+type verification_backlog_issue =
+  | Backlog_recovered of string
+  | Backlog_unreadable of string
+
+type verification_coverage = {
+  backlog_issue : verification_backlog_issue option;
+  awaiting_unresolved_total : int option;
+  unreadable_total : int option;
+  truncated : bool;
+}
+
+type verification_snapshot = {
+  requests : verification_request list;
+  coverage : verification_coverage;
+}
+
+(* The endpoint can report a backlog read failure and verification record
+   coverage in the same receipt. The All view carries no backlog fields. *)
 let decode_verification_snapshot json =
   let* _, body = unwrap_v2_or_raw json in
   let* backlog_error = optional_nonblank_string body "backlog_error" in
-  match backlog_error with
-  | Some reason -> Error ("verification backlog unreadable: " ^ reason)
-  | None ->
-      let* items = required_list_field body "requests" in
-      decode_list "requests" decode_verification_request items
+  let* backlog_recovery = optional_nonblank_string body "backlog_recovery" in
+  let backlog_issue =
+    match backlog_error with
+    | Some reason -> Some (Backlog_unreadable reason)
+    | None -> Option.map (fun reason -> Backlog_recovered reason) backlog_recovery
+  in
+  let* items = required_list_field body "requests" in
+  let* requests = decode_list "requests" decode_verification_request items in
+  let optional_count key =
+    let* count = optional_int_field body key in
+    if Option.exists (fun n -> n < 0) count then
+      Error (Printf.sprintf "field '%s' must be non-negative" key)
+    else Ok count
+  in
+  let* awaiting_unresolved_total = optional_count "awaiting_unresolved_total" in
+  let* unreadable_total = optional_count "unreadable_total" in
+  let* truncated = decode_bool_field_or body "truncated" ~default:false in
+  Ok { requests; coverage = { backlog_issue; awaiting_unresolved_total; unreadable_total; truncated } }
 
 let encode_verification_verdict ~task_id ~verification_id ~verdict ~notes =
   (* Strict allowlist: [task_id; verification_id; verdict; reason; notes]. *)

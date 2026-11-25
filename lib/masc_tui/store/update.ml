@@ -547,7 +547,7 @@ let clear_work_reads (work : Work_store.t) =
     gate_snapshot = clear work.gate_snapshot;
     planning_goals = clear work.planning_goals;
     planning = clear work.planning;
-    verifications = clear work.verifications;
+    verifications = Observed.mark_stale (clear work.verifications);
   }
 
 (* A new epoch is a new handshake, and the server behind it may be another
@@ -660,8 +660,13 @@ let reserve_work_reads ~now (m : Model.t) cmds =
          | Cmd.Get_planning ->
              { work with planning_goals = start (Work_store.goals_read work) }
              |> Work_store.start_planning_tasks ~now
-         | Cmd.Get_verifications { view; _ } when view = work.verification_view ->
-             { work with verifications = start work.verifications }
+         | Cmd.Get_verifications { view; generation; _ }
+           when view = work.verification_view
+                && generation = work.verification_generation + 1 ->
+             { work with
+               verifications = start work.verifications;
+               verification_generation = generation;
+             }
          | _ -> work)
     | _ -> work) [@warning "-4"]
   in

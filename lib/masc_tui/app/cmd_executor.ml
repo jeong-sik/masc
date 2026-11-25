@@ -1344,12 +1344,12 @@ let rec execute_get t ~epoch req =
             in
             let reply = Msg.Reply_planning planning_res in
             Msg.Http_reply { epoch; reply }
-        | Cmd.Get_verifications { view; _ } ->
+        | Cmd.Get_verifications { view; generation; _ } ->
             let result =
               fetch_and_decode_get t ~path
                 ~decode:Wire_work.decode_verification_snapshot
             in
-            Msg.Http_reply { epoch; reply = Msg.Reply_verifications { view; result } }
+            Msg.Http_reply { epoch; reply = Msg.Reply_verifications { view; generation; result } }
         | Cmd.Get_schedules _ ->
             let reply =
               Msg.Reply_schedules

@@ -19,6 +19,10 @@ let key ?(ctrl = false) ?(alt = false) ?(shift = false) k :
 
 let char_key ?ctrl ?alt ?shift s = key ?ctrl ?alt ?shift (Keymap.Input.Char s)
 
+let awaiting_coverage : Wire_work.verification_coverage =
+  { backlog_issue = None; awaiting_unresolved_total = Some 0;
+    unreadable_total = Some 0; truncated = false }
+
 let sample_keeper ?(health = Wire_fleet.Keeper_healthy) name :
     Wire_fleet.keeper_summary =
   {
@@ -2552,7 +2556,7 @@ let test_v25_data_pipeline_and_settings_2pane () =
   Alcotest.(check string) "Get_verifications Pending -> view=awaiting"
     "/api/v1/verification/requests?view=awaiting&limit=50&offset=0"
     (Cmd.get_request_path
-       (Cmd.Get_verifications { view = `Pending; limit = 50; offset = 0 }));
+       (Cmd.Get_verifications { view = `Pending; generation = 1; limit = 50; offset = 0 }));
   (* 2. View_fetches on Pulse fetches telemetry + scorecard sources *)
   let wall_slot = 1_795_251_600 in
   let m0 =
@@ -3456,9 +3460,10 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
         };
       work =
         Work_store.empty
+        |> Work_store.toggle_verification_view
         |> Work_store.apply_planning ~observed_at:t0
              { goals = [ goal_confirm; goal_exec ]; tasks = [ task1 ] }
-        |> Work_store.apply_verifications ~observed_at:t0 [ ver1 ];
+        |> Work_store.apply_verifications ~coverage:awaiting_coverage ~observed_at:t0 [ ver1 ];
     }
   in
   (* [n] on Work_pipeline opens direct Goal_upsert_form (measure + procedure); on Work_schedules opens Schedule *)
@@ -15641,9 +15646,10 @@ let test_ux_sweep_12_fixes () =
   let m_vfail =
     let work =
       m_work.work
+      |> Work_store.toggle_verification_view
       |> Work_store.apply_planning ~observed_at:t0
            { goals = [ g_exec ]; tasks = [ tk_fail ] }
-      |> Work_store.apply_verifications ~observed_at:t0 [ v_fail ]
+      |> Work_store.apply_verifications ~coverage:awaiting_coverage ~observed_at:t0 [ v_fail ]
     in
     let m0 = { m_work with work } in
     fst (Update_nav.open_inspector m0 (Nav.Verification_inspector "ver-fail"))
@@ -15663,6 +15669,38 @@ let test_ux_sweep_12_fixes () =
              true
          | _ -> false)
        cmds_vfail_a);
+  let recovered_work =
+    Work_store.apply_verifications ~observed_at:t0
+      ~coverage:{ Wire_work.backlog_issue = Some (Wire_work.Backlog_recovered "last durable backlog");
+                  awaiting_unresolved_total = Some 3; unreadable_total = Some 1;
+                  truncated = false }
+      [ v_fail ] m_vfail.work
+  in
+  let recovered = { m_vfail with work = recovered_work } in
+  let _, approve_recovered = Update_nav.approve_verification_request ~now:t0 recovered v_fail in
+  Alcotest.(check bool) "recovered rows remain available to read" true
+    (Work_store.verifications_list recovered.work = [v_fail]);
+  Alcotest.(check int) "recovered rows do not send an approval" 0 (List.length approve_recovered);
+  let history_work =
+    Work_store.toggle_verification_view m_vfail.work
+    |> Work_store.apply_verifications ~observed_at:t0 [v_fail]
+  in
+  let _, approve_history =
+    Update_nav.approve_verification_request ~now:t0 { m_vfail with work = history_work } v_fail
+  in
+  Alcotest.(check int) "history rows do not authorize a verdict" 0 (List.length approve_history);
+  let opened, _ = Update_nav.reject_verification_request ~now:t0 m_vfail v_fail in
+  let typed =
+    match opened.inline_modal with
+    | Some modal -> Model.modal_update_active_field (fun _ -> "Missing fixture") modal
+    | None -> Alcotest.fail "expected rejection form with current data"
+  in
+  let ready = { opened with inline_modal = Some typed } in
+  let _, reject_current = Update_nav.submit_inline_modal ~now:t0 ready in
+  Alcotest.(check int) "a current rejection still sends the POST" 1 (List.length reject_current);
+  let waiting = { ready with work = Work_store.invalidate_verifications ready.work } in
+  let _, reject_stale = Update_nav.submit_inline_modal ~now:t0 waiting in
+  Alcotest.(check int) "an open rejection form rechecks shelf life" 0 (List.length reject_stale);
   (* 9f. Finding #8: Goal_dive [h] prioritizes selected task's hash over first task *)
   let hash_tk1 =
     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -21035,7 +21073,7 @@ let test_layer2_pane_scroll_nav_wayfinding () =
            (Nav.Menu_keeper_tab kt)))
     Nav.all_keeper_tabs;
 
-  (* #18b: Work > Pipeline pane 1 empty verifications gives accurate toast (not viewport height) *)
+  (* Work > Pipeline cannot submit a verdict before observing the verification queue. *)
   let m_wp_empty =
     let base = Model.initial ~cols:140 ~rows:30 () in
     {
@@ -21044,14 +21082,12 @@ let test_layer2_pane_scroll_nav_wayfinding () =
       work = Work_store.set_tab Nav.Work_pipeline base.work;
     }
   in
-  let m_wp_a, _ = step_k m_wp_empty (char_key "a") in
-  (match m_wp_a.toast with
-  | Some toast ->
-      Alcotest.(check string)
-        "#18b: Empty verifications toast does not blame viewport height"
-        "No pending verifications"
-        (Say.resolve Say.Lang_en toast.message)
-  | None -> Alcotest.fail "expected toast on empty verifications pane");
+  let m_wp_a, cmds = step_k m_wp_empty (char_key "a") in
+  Alcotest.(check bool) "an unread queue cannot emit a verification verdict" true
+    (m_wp_a.work.verifications = Observed.Unreported
+     && not (List.exists (function
+          | Cmd.Http_post { req = Cmd.Post_verification_verdict _; _ } -> true
+          | _ -> false) (Cmd.flatten cmds)));
 
   (* #18d: Tools_keeper_skills pane 0 preserves scroll_offset when pane 1 skills is empty *)
   let tools_snap : Wire_runtime.tools_dashboard_snapshot =
@@ -24224,27 +24260,79 @@ let () =
               in
               Alcotest.(check (option string)) "a new rank preserves the selected identity"
                 (Some b.id) (selected changed));
-          Alcotest.test_case "Verification replies belong to the current filter"
+          Alcotest.test_case "Verification replies belong to the current filter and request"
             `Quick (fun () ->
-              let initial = Model.initial () in
-              let work = Work_store.toggle_verification_view initial.work in
-              let model = { initial with work } in
-              let receive model view result =
+              let base = Model.initial ~cols:150 ~rows:44 () in
+              let initial =
+                { base with nav = { base.nav with workspace = Nav.Work };
+                  work = Work_store.set_tab Nav.Work_pipeline base.work }
+              in
+              let request_from (next, commands) =
+                let receipt =
+                  List.find_map (function
+                    | Cmd.Http_get { req = Cmd.Get_verifications { view; generation; _ }; _ } ->
+                        Some (view, generation)
+                    | _ -> None) (Cmd.flatten commands)
+                in
+                match receipt with
+                | Some receipt -> next, receipt
+                | None -> Alcotest.fail "expected verification GET"
+              in
+              let toggle model =
+                request_from (Update.step ~now:t0 model (Msg.Key_event (char_key "v")))
+              in
+              let receive model (view, generation) result =
                 Update.step ~now:t0 model
                   (Msg.Http_reply { epoch = initial.epoch;
-                                    reply = Msg.Reply_verifications { view; result } })
+                                    reply = Msg.Reply_verifications { view; generation; result } })
                 |> fst
               in
-              let current = receive model `Pending (Ok []) in
-              let late =
-                receive current `All (Error (Msg.Decode_error "old filter response"))
+              let first_pending, pending_before = toggle initial in
+              let all, all_read = toggle first_pending in
+              let awaiting, pending_now = toggle all in
+              let snapshot =
+                match Wire_work.decode_verification_snapshot
+                        (`Assoc ["requests", `List []; "awaiting_unresolved_total", `Int 1]) with
+                | Ok data -> data
+                | Error message -> Alcotest.fail message
               in
-              Alcotest.(check bool) "late error cannot replace a current empty result"
+              let still_waiting = receive awaiting pending_before (Ok snapshot) in
+              Alcotest.(check bool) "old success cannot settle a newly reopened filter"
+                true (Observed.is_loading still_waiting.work.verifications);
+              let current = receive still_waiting pending_now (Ok snapshot) in
+              let late = receive current all_read (Error (Msg.Decode_error "old filter response")) in
+              let late = receive late pending_before (Error (Msg.Decode_error "superseded request")) in
+              let invalidated, next_read =
+                let dataset_changed =
+                  Wire_observer.Event (Wire_observer.Dataset_changed Wire_observer.Dataset_backlog)
+                in
+                request_from (Update.step ~now:t0 late
+                  (Msg.Sse_event { epoch = late.epoch; event = Msg.Sse_observer_delivery
+                      { cursor = None; decoded = dataset_changed } }))
+              in
+              Alcotest.(check bool) "late errors keep the current coverage"
                 true
                 (match late.work.verifications with
-                 | Observed.Value { data = []; stale = false; _ } -> true
+                 | Observed.Value { data = { requests = []; coverage; _ }; stale = false; _ } ->
+                     coverage.awaiting_unresolved_total = Some 1
                  | Observed.Value _ | Observed.Loading _ | Observed.Failed _
-                 | Observed.Absent | Observed.Unreported -> false));
+                 | Observed.Absent | Observed.Unreported -> false);
+              let result_after_invalidation = receive invalidated pending_now (Ok snapshot) in
+              Alcotest.(check bool) "an invalidation keeps the previous result stale"
+                true (Observed.is_stale result_after_invalidation.work.verifications);
+              let failure =
+                { snapshot with coverage = { snapshot.coverage with
+                    backlog_issue = Some (Wire_work.Backlog_unreadable "current backlog unavailable");
+                    unreadable_total = Some 11 } }
+              in
+              let failed = receive result_after_invalidation next_read (Ok failure) in
+              Alcotest.(check bool) "a newer failure remains visible beside the previous read"
+                true (Observed.is_stale failed.work.verifications
+                      && (match failed.work.verification_failure with
+                         | Some { reason; coverage = Some coverage } ->
+                             String.equal reason "current backlog unavailable"
+                             && coverage.unreadable_total = Some 11
+                         | Some { coverage = None; _ } | None -> false)));
           Alcotest.test_case
             "Wave 4 Layer 2: HITL Gate CRUD/modes/retry, Tools quality & MCP executor"
             `Quick (fun () ->

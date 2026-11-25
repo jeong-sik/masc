@@ -511,6 +511,9 @@ let work_read_notice (model : Model.t) ~label read =
   Ops_common.observed_read_notice ~lang:model.lang read
   |> Option.map (fun notice -> label ^ " " ^ notice)
 
+let verification_notice (model : Model.t) =
+  List.nth_opt (Work_store.verification_read_notices model.work) 0
+
 let criterion_badge_text ~lang = function
   | Wire_work.Criterion_valid ->
       ( Glyph.to_utf8 Glyph.Check_mark ^ " "
@@ -581,10 +584,7 @@ let render_linked_tasks_card grid ~(rect : Rect.t) ~(theme : Theme.t)
       work_read_notice model ~label:(Ops_common.say model ~ko:"작업" ~en:"Tasks")
         model.work.planning
     in
-    let verification_notice =
-      work_read_notice model ~label:(Ops_common.say model ~ko:"검증" ~en:"Verification")
-        model.work.verifications
-    in
+    let verification_notice = verification_notice model in
     let passed_v, failed_v =
       List.fold_left
         (fun (p, f) (v : Wire_work.verification_request) ->
@@ -651,20 +651,18 @@ let render_linked_tasks_card grid ~(rect : Rect.t) ~(theme : Theme.t)
     let all_filtered_verifs = Work_store.filtered_verifications model.work in
     let verif_focused = Model.pane_focused model 1 in
     let card_title =
-      if verif_focused then
-        Ops_common.say model ~ko:"전체 검증" ~en:"All Verifications"
-      else
-        Ops_common.say model ~ko:"연결 작업 · 검증" ~en:"Tasks & Verification"
+      match verif_focused, model.work.verification_view with
+      | true, `Pending -> Ops_common.say model ~ko:"검증 대기열" ~en:"Awaiting Verifications"
+      | true, `All -> Ops_common.say model ~ko:"검증 이력" ~en:"Verification History"
+      | false, _ -> Ops_common.say model ~ko:"연결 작업 · 검증" ~en:"Tasks & Verification"
     in
     let card_subtitle =
       let sources =
-        if verif_focused then [ verification_notice; task_notice ]
-        else [ task_notice; verification_notice ]
+        if verif_focused then [] else [ task_notice ]
       in
       match List.filter_map Fun.id sources with
       | _ :: _ as notices -> Some (String.concat Typography.sep_dot notices)
-      | [] when verif_focused ->
-          Some (Ops_common.say model ~ko:"전체 목표 범위" ~en:"All Goals Scope")
+      | [] when verif_focused -> None
       | [] -> Option.map (fun (g : Wire_work.goal) -> g.id) sel_goal
     in
     let card_badge =
@@ -685,9 +683,15 @@ let render_linked_tasks_card grid ~(rect : Rect.t) ~(theme : Theme.t)
         badge = card_badge;
         hotkey =
           Some
-            (if verif_focused then
+            (if verif_focused && Result.is_ok (Work_store.verification_read_allows_verdict model.work) then
                Ops_common.say model ~ko:"[a] 승인 · [x] 반려 · [v] 전체/대기 · [Enter] 상세"
                  ~en:"[a] Approve · [x] Reject · [v] All/Pending · [Enter] Dive"
+             else if verif_focused then
+               (match model.work.verification_view with
+               | `All -> Ops_common.say model ~ko:"[v] 대기열 · [Enter] 상세"
+                           ~en:"[v] Awaiting · [Enter] Dive"
+               | `Pending -> Ops_common.say model ~ko:"[v] 이력 · [Enter] 상세"
+                               ~en:"[v] History · [Enter] Dive")
              else
                Ops_common.say model ~ko:"[Tab] 검증 선택 · [v] 전체/대기"
                  ~en:"[Tab] Select · [v] All/Pending");
@@ -705,7 +709,19 @@ let render_linked_tasks_card grid ~(rect : Rect.t) ~(theme : Theme.t)
       in
       let footer_h = if show_unlinked_footer then 3 else 0 in
       let body_h = Int.max 0 (content.h - footer_h) in
-      let y = ref content.y in
+      let verifs_to_render =
+        if verif_focused || Option.is_none sel_goal then all_filtered_verifs
+        else related_verifs
+      in
+      let notice_height =
+        if verifs_to_render = [] then body_h else Int.max 1 (body_h - 2)
+      in
+      let notices =
+        Ops_common.draw_verification_read_notices grid
+          ~rect:{ content with h = Int.min body_h notice_height }
+          ~theme ~lang:model.lang model.work
+      in
+      let y = ref (content.y + notices) in
       let body_bot = content.y + body_h in
       let draw_verifs_section verifs =
         if verifs <> [] && !y + 1 < body_bot then begin
@@ -792,20 +808,21 @@ let render_linked_tasks_card grid ~(rect : Rect.t) ~(theme : Theme.t)
           done
         end
       in
-      let verifs_to_render =
-        if verif_focused || Option.is_none sel_goal then all_filtered_verifs
-        else related_verifs
-      in
+      let remaining = { content with y = !y; h = Int.max 0 (body_bot - !y) } in
       (* 1. Linked tasks rows *)
       (match sel_goal with
       | _ when verif_focused && verifs_to_render = [] ->
-          Ops_common.draw_observed_empty grid ~rect:content ~theme
+          Ops_common.draw_observed_empty grid ~rect:remaining ~theme
             ~lang:model.lang model.work.verifications
-            ~empty_msg:(Say.make ~ko:"표시할 검증 항목이 없습니다" ~en:"No verification rows")
+            ~empty_msg:
+              (if Option.is_some verification_notice then
+                 Say.make ~ko:"이 조회에서 표시할 수 있는 검증 항목이 없습니다"
+                   ~en:"This read has no displayable verification rows"
+               else Say.make ~ko:"표시할 검증 항목이 없습니다" ~en:"No verification rows")
       | None ->
           if verifs_to_render <> [] then draw_verifs_section verifs_to_render
           else
-            Ops_common.draw_observed_empty grid ~rect:content ~theme
+            Ops_common.draw_observed_empty grid ~rect:remaining ~theme
               ~lang:model.lang (Work_store.goals_read model.work)
               ~empty_msg:
                 (Say.make ~ko:"목표를 선택하면 연결 작업이 표시됩니다"
@@ -1133,7 +1150,8 @@ let render_goal_zoomed ~sel_goal ~(model : Model.t) ~cache ~(rect : Rect.t)
             Ops_common.observed_read_notice ~lang:model.lang model.work.planning
           in
           let verification_notice =
-            Ops_common.observed_read_notice ~lang:model.lang model.work.verifications
+            List.nth_opt (Work_store.verification_read_notices model.work) 0
+            |> Option.map (Say.resolve model.lang)
           in
           let rem_h = Int.max 0 (body_bot - !y) in
           let md_h =
@@ -1313,6 +1331,12 @@ let render_goal_zoomed ~sel_goal ~(model : Model.t) ~cache ~(rect : Rect.t)
                 Rect.make ~x:verif_r.x ~y:(verif_r.y + 1) ~w:verif_r.w
                   ~h:(Int.max 0 (verif_r.h - 1))
               in
+              let notices =
+                Ops_common.draw_verification_read_notices grid
+                  ~rect:{ v_body with h = Int.min 3 v_body.h }
+                  ~theme ~lang:model.lang model.work
+              in
+              let v_body = { v_body with y = v_body.y + notices; h = v_body.h - notices } in
               match verifs with
               | [] ->
                   Ops_common.draw_observed_empty grid ~rect:v_body ~theme
@@ -1739,6 +1763,16 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
     if not (Rect.is_empty linked_card_rect) then
       render_linked_tasks_card grid ~rect:linked_card_rect ~theme ~model ~cache
         ~sel_goal ~unlinked_n ~total_tasks ~link_warnings;
+    let right_rect =
+      if Rect.is_empty linked_card_rect && not (Rect.is_empty right_rect) then
+        let notices =
+          Ops_common.draw_verification_read_notices grid
+            ~rect:{ right_rect with h = Int.min 3 (Int.max 1 (right_rect.h - 3)) }
+            ~theme ~lang:model.lang model.work
+        in
+        { right_rect with y = right_rect.y + notices; h = right_rect.h - notices }
+      else right_rect
+    in
     (* Right/Bottom: Rich Goal Detail Inspector (54% Wide/Std) *)
     if not (Rect.is_empty right_rect) then
       match sel_goal with
@@ -2275,6 +2309,12 @@ let render_task_zoomed ~sel_task ~(model : Model.t) ~cache ~(rect : Rect.t)
           | Some _ | None -> ());
           (match v_opt with
           | Some v when !y < body_bot ->
+              let notices =
+                Ops_common.draw_verification_read_notices grid
+                  ~rect:{ content with y = !y; h = Int.min 2 (body_bot - !y - 1) }
+                  ~theme ~lang:model.lang model.work
+              in
+              y := !y + notices;
               let v_scroll = Int.max 0 model.work.task_dive_verif_scroll in
               let vr_h = Int.max 0 (body_bot - !y - 1) in
               let diff_rows = build_rejection_diff_rows ~model v in
@@ -2448,7 +2488,8 @@ let render_tasks ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
       ]
     in
     let pill_adv = Ops_common.draw_pills grid ~rect:pill_rect ~theme ~bg pills in
-    if v_pass + v_rej + v_wait > 0 && pill_rect.w - pill_adv >= 22 then begin
+    if Option.is_none (verification_notice model)
+       && v_pass + v_rej + v_wait > 0 && pill_rect.w - pill_adv >= 22 then begin
       let summary =
         Printf.sprintf "%s%d  %s%d  %s%d"
           (Glyph.to_utf8 Glyph.Check_mark) v_pass
@@ -2710,6 +2751,12 @@ let render_tasks ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
               in
               (match matching_v with
               | Some v when !y < bot ->
+                  let notices =
+                    Ops_common.draw_verification_read_notices grid
+                      ~rect:{ content with y = !y; h = Int.min 2 (bot - !y - 1) }
+                      ~theme ~lang:model.lang model.work
+                  in
+                  y := !y + notices;
                   let ev_str =
                     if v.submitted_evidence = [] then
                       Ops_common.say model ~ko:"증거 없음" ~en:"no evidence"
@@ -3289,7 +3336,8 @@ let draw_inbox_queue_status ~(model : Model.t) ~banner_rect
     ~y:banner_rect.y ~h:1 ~theme;
   let vp, vr, vw = Work_store.verification_pass_summary model.work in
   let verify_summary =
-    if show_verifications && vp + vr + vw > 0 && banner_rect.w >= 72 then
+    if show_verifications && Option.is_none (verification_notice model)
+       && vp + vr + vw > 0 && banner_rect.w >= 72 then
       let vs =
         Printf.sprintf "%s %d  ·  %s %d"
           (Ops_common.say model ~ko:"검증 통과" ~en:"Verify pass") vp

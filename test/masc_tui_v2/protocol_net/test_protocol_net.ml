@@ -522,7 +522,24 @@ let test_wire_work () =
               ]
             }|}))
   in
-  Alcotest.(check int) "1 verification req" 1 (List.length ver_reqs);
+  Alcotest.(check int) "1 verification req" 1 (List.length ver_reqs.requests);
+  Alcotest.(check (option int)) "an unreported count stays unknown" None
+    ver_reqs.coverage.unreadable_total;
+  let recovered =
+    expect_ok "recovered verification backlog"
+      (Wire_work.decode_verification_snapshot
+         (parse_json
+            {|{ "requests": [], "backlog_error": null,
+                "backlog_recovery": "last durable backlog", "awaiting_unresolved_total": 7,
+                "awaiting_unresolved": ["one-sampled-id"], "unreadable_total": 2,
+                "truncated": true }|}))
+  in
+  Alcotest.(check bool) "recovery provenance" true
+    (recovered.coverage.backlog_issue = Some (Wire_work.Backlog_recovered "last durable backlog"));
+  Alcotest.(check (option int)) "exact unresolved total outside the current page"
+    (Some 7) recovered.coverage.awaiting_unresolved_total;
+  Alcotest.(check (option int)) "unreadable records" (Some 2) recovered.coverage.unreadable_total;
+  Alcotest.(check bool) "additional rows exist" true recovered.coverage.truncated;
   let verdict_json =
     Wire_work.encode_verification_verdict ~task_id:"task-10"
       ~verification_id:"ver-99"
@@ -574,15 +591,17 @@ let test_wire_work () =
              {|{ "status": "unknown", "schedule_store_known": false,
                  "schedule_store_read_error": "schedule store read failed: lock timeout",
                  "next_cursor": null, "requests": [] }|})));
-  (* Dashboard_verification answers an unreadable backlog the same way. *)
-  ignore
-    (expect_err "verification backlog unreadable"
-       (Wire_work.decode_verification_snapshot
-          (parse_json
-             {|{ "requests": [], "backlog_error": "backlog file corrupt",
-                 "backlog_recovery": null, "awaiting_unresolved_total": 0,
-                 "awaiting_unresolved": [] }|}))
-      : string);
+  let unreadable =
+    expect_ok "unreadable backlog receipt"
+      (Wire_work.decode_verification_snapshot
+         (parse_json
+            {|{ "requests": [], "backlog_error": "backlog file corrupt",
+                "backlog_recovery": null, "awaiting_unresolved_total": 0,
+                "awaiting_unresolved": [], "unreadable_total": 2 }|}))
+  in
+  Alcotest.(check bool) "unreadable backlog keeps the reason and independent scan count" true
+    (unreadable.coverage.backlog_issue = Some (Wire_work.Backlog_unreadable "backlog file corrupt")
+     && unreadable.coverage.unreadable_total = Some 2);
   (* Ask answer uses "name" and tagged response *)
   let ask_ans =
     Wire_work.encode_ask_answer ~keeper:"wkbl-growth" ~ask_id:"ask-1"

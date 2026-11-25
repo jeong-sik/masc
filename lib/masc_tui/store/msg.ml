@@ -231,7 +231,8 @@ type http_reply =
   | Reply_planning_backlog of Wire_work.task_backlog_counts
   | Reply_verifications of {
       view : [ `All | `Pending ];
-      result : (Wire_work.verification_request list, http_error) result;
+      generation : int;
+      result : (Wire_work.verification_snapshot, http_error) result;
     }
   | Reply_schedules of
       (Wire_work.schedule_row list * string option, http_error) result

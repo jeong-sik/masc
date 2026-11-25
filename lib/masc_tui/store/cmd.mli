@@ -28,6 +28,7 @@ type get_request =
   | Get_planning
   | Get_verifications of {
       view : [ `Pending | `All ];
+      generation : int;
       limit : int;
       offset : int;
     }

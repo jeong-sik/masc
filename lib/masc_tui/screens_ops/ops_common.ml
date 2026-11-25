@@ -227,6 +227,23 @@ let observed_read_notice ~lang obs =
   | Observed.Unreported | Observed.Absent -> notice ~ko:"미관측" ~en:"unobserved"
   | Observed.Value { stale = false; _ } -> None
 
+let draw_verification_read_notices grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang
+    (work : Work_store.t) =
+  let notices = List.take (Int.max 0 rect.h) (Work_store.verification_read_notices work) in
+  let tone =
+    match work.verification_failure with
+    | Some _ -> Theme.Status_critical
+    | None when Observed.is_loading work.verifications -> Theme.Status_active
+    | None -> Theme.Status_attention
+  in
+  let bg = Color.of_rgb theme.surface_1 in
+  List.iteri
+    (fun i notice ->
+      ignore (put_line ~clip:rect grid ~x:rect.x ~y:(rect.y + i) ~max_w:rect.w
+        ~style:(Typography.status ~bg ~bold:(i = 0) theme tone) (Say.resolve lang notice)))
+    notices;
+  List.length notices
+
 let draw_observed_empty grid ~(rect : Rect.t) ~(theme : Theme.t) ~lang obs
     ~empty_msg =
   if Rect.is_empty rect then ()

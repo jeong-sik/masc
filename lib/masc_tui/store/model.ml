@@ -4880,7 +4880,11 @@ let keeper_diagnostic_banner ~name (m : t) : keeper_banner_row list =
                     false
               in
               if is_rej then acc + 1 else acc)
-          0 (Work_store.verifications_list m.work)
+          0 (match m.work.verifications with
+             | Observed.Value { stale = false; data = { requests; coverage = { backlog_issue = None; _ } }; _ } ->
+                 requests
+             | Observed.Value _ | Observed.Loading _ | Observed.Absent
+             | Observed.Unreported | Observed.Failed _ -> [])
       in
       match (rejected_n, awaiting_n) with
       | r, a when r > 0 && a > 0 ->

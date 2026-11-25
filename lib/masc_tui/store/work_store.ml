@@ -22,6 +22,11 @@ type decision_audit_entry = {
   summary : string;
 }
 
+type verification_read_failure = {
+  reason : string;
+  coverage : Wire_work.verification_coverage option;
+}
+
 type task_status_filter =
   | Status_all
   | Status_active
@@ -60,7 +65,8 @@ type t = {
   planning : Wire_work.planning_snapshot Observed.t;
   planning_goals : Wire_work.goal list Observed.t;
   backlog_counts : Wire_work.task_backlog_counts option;
-  verifications : Wire_work.verification_request list Observed.t;
+  verifications : Wire_work.verification_snapshot Observed.t;
+  verification_failure : verification_read_failure option;
   harness_health : Wire_work.harness_health Observed.t;
   harness_selected_index : int;
   harness_scroll_offset : int;
@@ -107,6 +113,7 @@ type t = {
   goal_sort_mode : goal_sort_mode;
   task_status_filter : task_status_filter;
   verification_view : [ `Pending | `All ];
+  verification_generation : int;
   expanded_ids : String_set.t;
 }
 
@@ -120,6 +127,7 @@ let empty =
     planning_goals = Observed.unreported;
     backlog_counts = None;
     verifications = Observed.unreported;
+    verification_failure = None;
     harness_health = Observed.unreported;
     harness_selected_index = 0;
     harness_scroll_offset = 0;
@@ -165,6 +173,7 @@ let empty =
     goal_sort_mode = Goal_sort_default;
     task_status_filter = Status_all;
     verification_view = `All;
+    verification_generation = 0;
     expanded_ids = String_set.empty;
   }
 
@@ -205,8 +214,26 @@ let cycle_tab dir t =
 let apply_backlog_counts counts t =
   { t with backlog_counts = Some counts }
 
-let apply_verifications ~observed_at verifications t =
-  { t with verifications = Observed.value ~observed_at verifications }
+let apply_verifications
+    ?(coverage = { Wire_work.backlog_issue = None; awaiting_unresolved_total = None;
+                   unreadable_total = None; truncated = false })
+    ~observed_at requests t =
+  { t with
+    verifications = Observed.value ~observed_at { Wire_work.requests; coverage };
+    verification_failure = None;
+  }
+
+let fail_verifications ?coverage ~now ~reason ~retryable t =
+  { t with
+    verifications = Observed.fetch_failed ~at:now ~reason ~retryable t.verifications;
+    verification_failure = Some { reason; coverage };
+  }
+
+let invalidate_verifications t =
+  { t with
+    verifications = Observed.mark_stale t.verifications;
+    verification_generation = t.verification_generation + 1;
+  }
 
 let apply_schedules ~observed_at schedules t =
   { t with schedules = Observed.value ~observed_at schedules }
@@ -329,7 +356,7 @@ let effective_task_counts t =
 let verification_pass_summary t =
   match Observed.to_option t.verifications with
   | None -> (0, 0, 0)
-  | Some vs ->
+  | Some { requests = vs; _ } ->
       List.fold_left
         (fun (passed, rejected, awaiting) (v : Wire_work.verification_request) ->
           if Option.is_some v.evidence_projection_error then
@@ -385,7 +412,78 @@ let tasks t =
   match Observed.to_option t.planning with Some p -> p.tasks | None -> []
 
 let verifications_list t =
-  match Observed.to_option t.verifications with Some xs -> xs | None -> []
+  match Observed.to_option t.verifications with
+  | Some { requests; _ } -> requests
+  | None -> []
+
+let verification_read_allows_verdict t =
+  match t.verifications with
+  | Observed.Value
+      { stale = false; data = { coverage = { backlog_issue = Some (Backlog_recovered _); _ }; _ }; _ } ->
+      Error (Say.make ~ko:"복구본은 읽기 전용입니다" ~en:"Recovered verification rows are read-only")
+  | Observed.Value { stale = false; data = { coverage = { backlog_issue = None; awaiting_unresolved_total; _ }; _ }; _ } ->
+      (match t.verification_view, awaiting_unresolved_total with
+      | `Pending, Some _ -> Ok ()
+      | `All, _ | `Pending, None ->
+          Error (Say.make ~ko:"대기열에서 현재 검증 요청을 확인한 뒤 판정하세요"
+                   ~en:"Confirm the current request in the awaiting queue before submitting a verdict"))
+  | Observed.Value
+      { data = { coverage = { backlog_issue = Some (Backlog_unreadable _); _ }; _ }; _ }
+  | Observed.Value { stale = true; _ } | Observed.Loading _
+  | Observed.Absent | Observed.Unreported | Observed.Failed _ ->
+      Error (Say.make ~ko:"최신 검증 목록을 읽은 뒤 판정할 수 있습니다"
+               ~en:"Read the current verification list before submitting a verdict")
+
+let verification_read_notices t =
+  let count amount ~ko ~en =
+    match amount with
+    | Some n when n > 0 -> Some (Say.make ~ko:(Printf.sprintf ko n) ~en:(Printf.sprintf en n))
+    | Some _ | None -> None
+  in
+  let status, coverage, failure =
+    match t.verification_failure with
+    | Some { reason; coverage } ->
+        let status =
+          if Observed.is_value t.verifications then
+            Say.make ~ko:"검증 조회 실패 · 마지막 기록 표시" ~en:"Verification read failed · showing last rows"
+          else Say.make ~ko:"검증 조회 실패" ~en:"Verification read failed"
+        in
+        Some status, coverage, Some (Say.literal reason)
+    | None ->
+        (match t.verifications with
+        | Observed.Loading _ ->
+            Some (Say.make ~ko:"검증 목록을 불러오는 중" ~en:"Loading verifications"), None, None
+        | Observed.Failed { reason; _ } ->
+            Some (Say.make ~ko:"검증 조회 실패" ~en:"Verification read failed"), None, Some (Say.literal reason)
+        | Observed.Absent | Observed.Unreported ->
+            Some (Say.make ~ko:"검증 미관측" ~en:"Verifications unobserved"), None, None
+        | Observed.Value { data; stale; _ } ->
+            let status = if stale then
+              Some (Say.make ~ko:"마지막 검증 조회" ~en:"Last verification read") else None in
+            status, Some data.coverage, None)
+  in
+  let recovery, counts =
+    match coverage with
+    | None -> None, None
+    | Some coverage ->
+        let recovery =
+          match coverage.backlog_issue with
+          | Some (Wire_work.Backlog_recovered _) ->
+              Some (Say.make ~ko:"복구본 · 읽기 전용" ~en:"Recovered · read-only")
+          | Some (Wire_work.Backlog_unreadable _) | None -> None
+        in
+        let counts = List.filter_map Fun.id
+          [ count coverage.awaiting_unresolved_total ~ko:"대기 누락 %d" ~en:"%d awaiting missing";
+            count coverage.unreadable_total ~ko:"읽기 불가 %d" ~en:"%d unreadable";
+            (if coverage.truncated then Some (Say.make ~ko:"일부 표시" ~en:"Partial page") else None);
+          ]
+        in
+        recovery, (match counts with [] -> None | counts -> Some (Say.concat ~sep:" · " counts))
+  in
+  List.filter_map Fun.id [ status; recovery; counts; failure ]
+
+let verification_notice_rows ~max_rows t =
+  Int.min (Int.max 0 max_rows) (List.length (verification_read_notices t))
 
 let schedules_list t =
   match Observed.to_option t.schedules with Some (rows, _) -> rows | None -> []
@@ -1295,6 +1393,7 @@ let harness_verdicts_list t =
   | Some hh -> hh.recent_verdicts
 
 let toggle_verification_view t =
+  let t = invalidate_verifications t in
   let verification_view =
     match t.verification_view with `Pending -> `All | `All -> `Pending
   in
@@ -1302,6 +1401,7 @@ let toggle_verification_view t =
     t with
     verification_view;
     verifications = Observed.unreported;
+    verification_failure = None;
     verif_selected_index = 0;
     verif_scroll_offset = 0;
   }
@@ -1314,11 +1414,11 @@ let toggle_expanded id t =
   { t with expanded_ids }
 
 let mark_stale_all t =
+  let t = invalidate_verifications t in
   {
     t with
     planning = Observed.mark_stale t.planning;
     planning_goals = Observed.mark_stale t.planning_goals;
-    verifications = Observed.mark_stale t.verifications;
     harness_health = Observed.mark_stale t.harness_health;
     verification_evidence = Observed.mark_stale t.verification_evidence;
     verification_evidence_auth_denied = false;

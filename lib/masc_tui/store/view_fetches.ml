@@ -27,6 +27,14 @@ let needs_planning ~force (work : Work_store.t) =
   | Observed.Unreported | Observed.Absent ->
       needs_fetch ~force goals || needs_fetch ~force work.planning
 
+let verification_requests_read (work : Work_store.t) =
+  Cmd.Get_verifications
+    { view = work.verification_view;
+      generation = work.verification_generation + 1;
+      limit = 50;
+      offset = 0;
+    }
+
 let add_if cond req acc = if cond then req :: acc else acc
 
 let needs_keeper_turn ~force ~keeper (m : Model.t) =
@@ -553,8 +561,7 @@ let fetches_for_inspector ~force (m : Model.t) =
       |> add_if (needs_planning ~force m.work) Cmd.Get_planning
       |> add_if
            (needs_fetch ~force m.work.verifications)
-           (Cmd.Get_verifications
-              { view = m.work.verification_view; limit = 50; offset = 0 }))
+           (verification_requests_read m.work))
       @ extra
   | Some (Nav.Tool_inspector tool_name) ->
       let bucket, since_hours =
@@ -654,8 +661,7 @@ let fetches_for_workspace ~force (m : Model.t) =
       |> add_if (needs_planning ~force m.work) Cmd.Get_planning
       |> add_if
            (needs_fetch ~force m.work.verifications)
-           (Cmd.Get_verifications
-              { view = m.work.verification_view; limit = 50; offset = 0 })
+           (verification_requests_read m.work)
       |> add_if
            (needs_fetch ~force m.work.schedules)
            (Cmd.Get_schedules { cursor = None })
@@ -692,15 +698,13 @@ let fetches_for_workspace ~force (m : Model.t) =
                (needs_planning ~force m.work) Cmd.Get_planning
           |> add_if
                (needs_fetch ~force m.work.verifications)
-               (Cmd.Get_verifications
-                  { view = m.work.verification_view; limit = 50; offset = 0 })
+               (verification_requests_read m.work)
       | Nav.Work_tasks ->
           []
           |> add_if (needs_planning ~force m.work) Cmd.Get_planning
           |> add_if
                (needs_fetch ~force m.work.verifications)
-               (Cmd.Get_verifications
-                  { view = m.work.verification_view; limit = 50; offset = 0 })
+               (verification_requests_read m.work)
       | Nav.Work_schedules ->
           []
           |> add_if

@@ -26,6 +26,11 @@ type decision_audit_entry = {
   summary : string;
 }
 
+type verification_read_failure = {
+  reason : string;
+  coverage : Wire_work.verification_coverage option;
+}
+
 type task_status_filter =
   | Status_all
   | Status_active
@@ -67,7 +72,8 @@ type t = {
   planning : Wire_work.planning_snapshot Observed.t;
   planning_goals : Wire_work.goal list Observed.t;
   backlog_counts : Wire_work.task_backlog_counts option;
-  verifications : Wire_work.verification_request list Observed.t;
+  verifications : Wire_work.verification_snapshot Observed.t;
+  verification_failure : verification_read_failure option;
   harness_health : Wire_work.harness_health Observed.t;
   harness_selected_index : int;
   harness_scroll_offset : int;
@@ -114,6 +120,7 @@ type t = {
   goal_sort_mode : goal_sort_mode;
   task_status_filter : task_status_filter;
   verification_view : [ `Pending | `All ];
+  verification_generation : int;
   expanded_ids : String_set.t;
 }
 
@@ -133,7 +140,12 @@ val apply_planning_tasks :
 
 val apply_backlog_counts : Wire_work.task_backlog_counts -> t -> t
 val apply_verifications :
+  ?coverage:Wire_work.verification_coverage ->
   observed_at:Clock.Mono.t -> Wire_work.verification_request list -> t -> t
+val invalidate_verifications : t -> t
+val fail_verifications :
+  ?coverage:Wire_work.verification_coverage ->
+  now:Clock.Mono.t -> reason:string -> retryable:bool -> t -> t
 val apply_schedules :
   observed_at:Clock.Mono.t ->
   Wire_work.schedule_row list * string option ->
@@ -182,6 +194,10 @@ val tasks : t -> Wire_work.task list
 val filtered_tasks : t -> Wire_work.task list
 (** Tasks in [task_status_filter] whose title or id contains [filter_query]. *)
 val verifications_list : t -> Wire_work.verification_request list
+val verification_read_allows_verdict : t -> (unit, Say.t) result
+(** The current awaiting join must confirm the request from the primary backlog. *)
+val verification_read_notices : t -> Say.t list
+val verification_notice_rows : max_rows:int -> t -> int
 val filtered_verifications : t -> Wire_work.verification_request list
 val schedules_list : t -> Wire_work.schedule_row list
 val filtered_schedules : t -> Wire_work.schedule_row list

@@ -1963,6 +1963,22 @@ let is_memory_diff_pin_surface m =
         Knowledge_store.equal_keeper_memory_subview
           m.knowledge.keeper_memory_subview Knowledge_store.Kmem_diff_flow
 
+let is_artifact_dive_search_active m =
+  Option.is_none m.nav.overlay
+  && (not (Drafts.is_focused m.drafts))
+  && (not m.nav.filter_focused)
+  && (not (sidebar_has_focus m))
+  && (not (String.equal (String.trim m.knowledge.artifact_search_query) ""))
+  &&
+  match active_dive m with
+  | Some (Nav.Dive_knowledge (Nav.Artifact_dive _)) -> true
+  | Some
+      ( Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Wiki_dive _)
+      | Nav.Dive_work _
+      | Nav.Dive_runtime _ )
+  | None ->
+      false
+
 let inline_modal_for kind =
   let fields =
     match kind with

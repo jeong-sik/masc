@@ -1017,7 +1017,7 @@ let get_request_keys ~epoch ~path ~requested_at (req : Cmd.get_request) =
   | Cmd.Get_keeper_operator_note { modal_prefill_id = None; _ } ->
       (* A post-save readback must be able to complete ahead of an older
          passive Context read in the same Keeper and epoch. *)
-      None, Key_read (base, requested_at)
+      None, Key_read (epoch, path, requested_at)
   | Cmd.Get_tool_series _ -> scoped "#tool-series"
   | Cmd.Get_tool_series_filtered _ -> scoped "#tool-series-filtered"
   | Cmd.Get_planning | Cmd.Get_verifications _ | Cmd.Get_asks _

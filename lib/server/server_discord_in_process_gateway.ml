@@ -531,7 +531,8 @@ let record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
         ~scope:Keeper_connector_names.Person ~id:author_id ~name ())
     author_name;
   let dedupe_key =
-    Printf.sprintf "discord:%s:%s" conversation.conversation_id message_id
+    Keeper_external_attention.discord_message_dedupe_key
+      ~conversation_id:conversation.conversation_id ~message_id
   in
   let event_id = Keeper_external_attention.event_id_of_dedupe_key dedupe_key in
   let item : Keeper_external_attention.item =

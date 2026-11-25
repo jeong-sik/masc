@@ -101,6 +101,7 @@ val original_message_scope : item -> Connector_memory_scope.t option
 type event = Recorded of item
 
 val event_id_of_dedupe_key : string -> string
+val discord_message_dedupe_key : conversation_id:string -> message_id:string -> string
 
 (** {1 Labels and JSON codecs} *)
 
@@ -215,6 +216,11 @@ val load_recent_evidence_events :
 (** Read a bounded recent tail sized for prompt evidence rather than connector
     redelivery. The first and last partial lines are excluded when the file is
     larger than the internal evidence window. This is not a whole-history API. *)
+
+val recent_recorded_item :
+  base_path:string -> keeper_name:string -> event_id:string -> (item option, string) result
+(** Read within the same byte window as ingress duplicate detection. An item
+    outside the window supplies no proof to the hot request path. *)
 
 val store_read_error : base_path:string -> keeper_name:string -> string option
 (** [Some detail] when the store exists and this build cannot decode it, [None]

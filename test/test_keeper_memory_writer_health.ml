@@ -376,6 +376,7 @@ let refused_without_a_size config (input : Masc.Librarian_ask.input)
         ; trace = span.through.trace
         ; missing = []
         ; offered = { units = 1; head_items = 1 }
+        ; personal_sources = []
         }
     ; slots =
         List.map

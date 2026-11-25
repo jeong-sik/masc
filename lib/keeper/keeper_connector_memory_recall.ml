@@ -99,3 +99,38 @@ let for_turn ~base_path ~keeper_id ~batch ~route =
       let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
       render ~keepers_dir ~keeper_id request
 ;;
+
+let select_direct_operation ~base_path ~keeper_id ~route
+      ~(source : Keeper_chat_operation_payload.decoded_source) ~message =
+  let identity =
+    let*? scope = route_scope route in
+    let*? message_id = original_id route in
+    let*? conversation_id = source.conversation_id in
+    if Keeper_continuation_channel.same_route route source.continuation_channel
+       && source.external_message_id = Some message_id
+       && not (String.equal (String.trim message) "")
+    then Some (scope, conversation_id, message_id)
+    else None
+  in
+  match identity with
+  | None -> Ok None
+  | Some (scope, conversation_id, message_id) ->
+    let event_id =
+      Keeper_external_attention.discord_message_dedupe_key ~conversation_id ~message_id
+      |> Keeper_external_attention.event_id_of_dedupe_key
+    in
+    let* recorded =
+      Keeper_external_attention.recent_recorded_item ~base_path ~keeper_name:keeper_id ~event_id
+    in
+    Ok (
+      let*? item = recorded in
+      let*? proof = Keeper_external_attention.original_message_scope item in
+      let*? original_message = item.external_message in
+      if proof = scope
+         && String.equal item.keeper_name keeper_id
+         && String.equal item.conversation.conversation_id conversation_id
+         && String.equal original_message.message_id message_id
+         && String.equal item.content_preview message
+      then Some { scope; query = message }
+      else None)
+;;

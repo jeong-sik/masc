@@ -228,6 +228,39 @@ let test_personal_evidence_survives_replay () =
     (Option.is_none (select ~route:another_route [ first_wake; another_author ]));
   check bool "a stale reply route cannot read memory" true
     (Option.is_none (select ~route:first_route [ first_wake; same_author ]));
+  let base_path = Filename.temp_dir "discord-mention-recall" "" in
+  let module Payload = Masc.Keeper_chat_operation_payload in
+  let conversation = first_item.conversation in
+  let dedupe_key = Attention.discord_message_dedupe_key
+      ~conversation_id:conversation.conversation_id ~message_id:"400" in
+  let item = { first_item with dedupe_key; event_id = Attention.event_id_of_dedupe_key dedupe_key } in
+  check bool "original ingress was recorded" true
+    (Attention.record ~base_path item = `Recorded);
+  let source =
+    let open Result.Syntax in
+    let* json = Payload.source_to_json ~submitted_by:"discord:200"
+        ~thread_id:("keeper:" ^ keeper_id) ~continuation_channel:first_route
+        ~surface:conversation.surface ~channel:"discord" ~channel_user_id:"200"
+        ~channel_user_name:"same nickname" ~channel_workspace_id:"100"
+        ~conversation_id:(Some conversation.conversation_id)
+        ~external_message_id:(Some "400") ~workspace_id:(Some "100")
+        ~extra_mentions:[] ~sender_keeper:None ~user_row_origin:Needs_append in
+    Payload.source_of_json json
+  in
+  let source = match source with Ok source -> source | Error error -> fail error in
+  let direct ~route ~message =
+    Recall.select_direct_operation ~base_path ~keeper_id ~route ~source ~message
+  in
+  (match direct ~route:first_route ~message:claim with
+   | Ok (Some request) ->
+     check (result (option string) string) "the durable direct route recalls the same claim" recalled
+       (Recall.render ~keepers_dir:place.memory_dir ~keeper_id request)
+   | Ok None -> fail "the verified direct operation received no scope"
+   | Error error -> fail error);
+  check bool "a direct operation with different bytes receives no scope" true
+    (direct ~route:first_route ~message:"other message" = Ok None);
+  check bool "a different reply route receives no direct scope" true
+    (direct ~route:latest_route ~message:claim = Ok None);
   let read source =
     let scope = Option.get (Attention.original_message_scope source) in
     match Reader.read_personal_facts ~keepers_dir:place.memory_dir ~keeper_id ~scope with

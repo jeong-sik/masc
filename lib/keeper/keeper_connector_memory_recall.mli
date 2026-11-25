@@ -26,3 +26,14 @@ val for_turn
   -> (string option, string) result
 (** Reuse the original-message rows read at intake and confirm that the
     exact selections still stand before reading Memory. *)
+
+val select_direct_operation
+  :  base_path:string
+  -> keeper_id:string
+  -> route:Keeper_continuation_channel.t
+  -> source:Keeper_chat_operation_payload.decoded_source
+  -> message:string
+  -> (request option, string) result
+(** Match a fresh direct operation and its actual reply route to the recent
+    ingress receipt. Use the original operation body before any prompt
+    annotation or batching. Read Memory separately on each eligible attempt. *)

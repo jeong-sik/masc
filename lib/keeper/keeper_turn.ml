@@ -478,7 +478,6 @@ let run_keeper_invocation_turn_admitted_inner
           | Some operation -> Ok operation
           | None -> Error "direct native admission has no owning operation" in
         let* source = Keeper_chat_operation_payload.source_of_json operation.source in
-        let person_caller = source.person_caller in
         let binding : Keeper_direct_native_continuation.binding =
           { base_path = ctx.config.base_path
           ; keeper_name = meta.name
@@ -490,7 +489,7 @@ let run_keeper_invocation_turn_admitted_inner
         let* admission = Keeper_direct_native_continuation.load ~binding in
         match admission with
         | Keeper_direct_native_continuation.Resume resumed ->
-          Ok (binding, Some resumed, None, person_caller)
+          Ok (binding, Some resumed, None, source, operation)
         | Keeper_direct_native_continuation.Terminal_pending _ ->
           Error "native execution is terminal and awaiting Owner settlement; it cannot be dispatched again"
         | Keeper_direct_native_continuation.No_pending ->
@@ -507,7 +506,7 @@ let run_keeper_invocation_turn_admitted_inner
                ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id
                ~session_dir ~session_id
                |> Result.map (Option.map (fun admission -> Keeper_agent_run.Runtime_continuation admission)))) in
-          Ok (binding, None, direct_resume, person_caller)
+          Ok (binding, None, direct_resume, source, operation)
       in
       (match native_admission with
        | Error detail ->
@@ -516,7 +515,29 @@ let run_keeper_invocation_turn_admitted_inner
            ~turn_ref:(Some turn_ref)
            (Keeper_request_failure.Turn_continuation_unpersisted
               { stage = Keeper_request_failure.Continuation_load; detail })
-       | Ok (native_binding, native_resume, direct_resume, person_caller) ->
+       | Ok (native_binding, native_resume, direct_resume, source, operation) ->
+      let person_caller = source.person_caller in
+      let connector_recall () =
+        match continuation_channel, native_resume, direct_resume,
+              operation.batch_membership, source.external_message_id, operation.input with
+        | Some route, None, None, None, Some _, Some input ->
+          Domain_pool_ref.submit_io_or_inline ~name:"direct_connector_memory_recall" (fun () ->
+            Cancel_safe.protect
+              ~on_exn:(fun _ -> Error "recent connector evidence unavailable")
+              (fun () ->
+                let open Result.Syntax in
+                let* input = Keeper_chat_operation_payload.input_of_json input in
+                let* scoped = Keeper_connector_memory_recall.select_direct_operation
+                    ~base_path:ctx.config.base_path ~keeper_id:meta.name
+                    ~route ~source ~message:input.message in
+                match scoped with
+                | None -> Ok None
+                | Some request ->
+                  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path
+                      ~base_path:ctx.config.base_path in
+                  Keeper_connector_memory_recall.render ~keepers_dir ~keeper_id:meta.name request))
+        | _ -> Ok None
+      in
       let deferred_lane = ref None in
       let produced_checkpoint = ref None in
       let gate_ids = ref [] in
@@ -777,8 +798,19 @@ let run_keeper_invocation_turn_admitted_inner
               { dynamic_context = Keeper_direct_turn_context.project prepared_context
                     ~workspace_memory_access:None;
                 dynamic_context_for_tools = Some (fun access ->
-                  Keeper_direct_turn_context.project_partition prepared_context
-                    ~workspace_memory_access:(Some access)) }
+                  let context = Keeper_direct_turn_context.project_partition prepared_context
+                      ~workspace_memory_access:(Some access) in
+                  if Keeper_request_tool_access.supports_request_only_context access
+                     && Env_config_keeper.KeeperMemoryOs.recall_enabled ()
+                  then
+                    match connector_recall () with
+                    | Ok (Some text) ->
+                      Keeper_context_layers.append_unattributed context Connector_personal_memory text
+                    | Ok None -> context
+                    | Error _ ->
+                      Log.Keeper.warn ~keeper_name:meta.name "Scoped connector memory read was unavailable";
+                      context
+                  else context) }
             in
             Progress.Tracker.step turn_tracker
               ~message:(Printf.sprintf "Executing Agent.run for %s" name) ();

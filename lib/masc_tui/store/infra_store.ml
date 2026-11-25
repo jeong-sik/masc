@@ -113,6 +113,7 @@ type keeper_sandbox_read = {
   observation : Wire_infra.keeper_sandbox_response Observed.t;
   retained : (Wire_infra.keeper_sandbox_response * Clock.Mono.t) option;
   requested_at : Clock.Mono.t option;
+  invalidated_during_read : bool;
 }
 
 type t = {
@@ -409,7 +410,9 @@ let apply_sandboxes_fallback ~observed_at ~wall_unix
 let keeper_sandbox_read_for ~keeper t =
   match String_map.find_opt keeper t.keeper_sandboxes with
   | Some read -> read
-  | None -> { observation = Observed.unreported; retained = None; requested_at = None }
+  | None ->
+      { observation = Observed.unreported; retained = None; requested_at = None;
+        invalidated_during_read = false }
 
 let keeper_sandbox_for ~keeper t = (keeper_sandbox_read_for ~keeper t).observation
 
@@ -419,15 +422,47 @@ let keeper_sandbox_detail read =
   | Observed.Absent | Observed.Unreported | Observed.Loading _ | Observed.Failed _ ->
       read.retained
 
+let keeper_sandbox_notice_rows ~has_displayed_rows read =
+  match read.requested_at, read.observation with
+  | None, Observed.Value { stale = false; _ } -> 0
+  | None, Observed.Value { stale = true; _ } -> 1
+  | None, Observed.Failed _ -> 2
+  | Some _, _ | None, (Observed.Loading _ | Observed.Absent | Observed.Unreported) ->
+      if has_displayed_rows then 2 else 1
+
 let update_keeper_sandbox_read ~keeper read t =
   { t with keeper_sandboxes = String_map.add keeper read t.keeper_sandboxes }
 
-let set_keeper_sandbox ~keeper ?(retain_detail = false) observation t =
-  let retained =
-    if retain_detail then keeper_sandbox_detail (keeper_sandbox_read_for ~keeper t)
-    else None
+let invalidate_sandbox_observation = function
+  | Observed.Absent -> Observed.unreported
+  | Observed.Value _ as observation -> Observed.mark_stale observation
+  | (Observed.Unreported | Observed.Loading _ | Observed.Failed _) as observation ->
+      observation
+
+let invalidate_sandboxes ?keeper t =
+  let invalidate read =
+    { read with
+      observation = invalidate_sandbox_observation read.observation;
+      invalidated_during_read = Option.is_some read.requested_at }
   in
-  update_keeper_sandbox_read ~keeper { observation; retained; requested_at = None } t
+  let keeper_sandboxes =
+    match keeper with
+    | None -> String_map.map invalidate t.keeper_sandboxes
+    | Some keeper ->
+        String_map.update keeper (Option.map invalidate) t.keeper_sandboxes
+  in
+  { t with sandboxes = invalidate_sandbox_observation t.sandboxes; keeper_sandboxes }
+
+let set_keeper_sandbox ~keeper ?(retain_detail = false) observation t =
+  let read = keeper_sandbox_read_for ~keeper t in
+  let retained = if retain_detail then keeper_sandbox_detail read else None in
+  let observation =
+    if read.invalidated_during_read then invalidate_sandbox_observation observation
+    else observation
+  in
+  update_keeper_sandbox_read ~keeper
+    { observation; retained; requested_at = None; invalidated_during_read = false }
+    t
 
 let request_keeper_sandbox ~keeper ~now t =
   let read = keeper_sandbox_read_for ~keeper t in
@@ -436,7 +471,9 @@ let request_keeper_sandbox ~keeper ~now t =
 
 let detach_keeper_sandbox_reads t =
   let keeper_sandboxes =
-    String_map.map (fun read -> { read with requested_at = None }) t.keeper_sandboxes
+    String_map.map
+      (fun read -> { read with requested_at = None; invalidated_during_read = false })
+      t.keeper_sandboxes
   in
   { t with keeper_sandboxes }
 

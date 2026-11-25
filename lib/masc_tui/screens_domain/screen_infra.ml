@@ -695,6 +695,7 @@ let draw_sandbox_inspector ?(scroll = 0) ~grid ~cache ~(rect : Rect.t)
     ~(theme : Theme.t) ~bp ~lang ~(model : Model.t)
     (entry_opt : fleet_sandbox_entry option)
     (obs : Wire_infra.sandboxes_snapshot Observed.t) ~focused =
+  let module U = Masc_tui_screens_core.Render_util in
   let inf = model.infra in
   let resolved_entry_opt =
     match entry_opt with
@@ -710,19 +711,17 @@ let draw_sandbox_inspector ?(scroll = 0) ~grid ~cache ~(rect : Rect.t)
                 resp.sandbox
           | None -> fallback
         in
-        let notice =
-          Masc_tui_screens_core.Render_util.sandbox_detail_notice ~read
-            ~using_fleet:(Option.is_none detail)
+        let source =
+          match detail with
+          | Some _ -> None
+          | None ->
+              Some (if inf.sandboxes_fallback_404 then U.Keeper_roster else U.Fleet_snapshot)
         in
-        Some (entry, notice))
+        Some (entry, read, source))
   in
   let subtitle =
     Option.map
-      (fun (entry, notice) ->
-        let keeper = entry_keeper_name entry in
-        match notice with
-        | None -> keeper
-        | Some (label, _) -> keeper ^ " · " ^ Say.resolve lang label)
+      (fun (entry, _, _) -> entry_keeper_name entry)
       resolved_entry_opt
   in
   let badge =
@@ -751,7 +750,12 @@ let draw_sandbox_inspector ?(scroll = 0) ~grid ~cache ~(rect : Rect.t)
     | None ->
         H.draw_observed_placeholder ~grid ~rect:(H.pad_content ~bp inner) ~theme
           ~lang obs
-    | Some (entry, _) ->
+    | Some (entry, read, fallback) ->
+        let notice_h =
+          U.draw_sandbox_detail_notice grid ~rect:(H.pad_content ~bp inner)
+            ~theme ~lang ~read ~fallback
+        in
+        let _, inner = Rect.split_v inner ~top_h:notice_h in
         if inf.show_raw_json then
           let lines =
             Json_tree.flatten ~max_depth:5 ~redact_secrets:true

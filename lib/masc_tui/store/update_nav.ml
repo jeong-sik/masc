@@ -9520,6 +9520,15 @@ let infra_detail_max_scroll (m : Model.t) =
             with
             | None -> 0
             | Some info ->
+                let read = Infra_store.keeper_sandbox_read_for ~keeper:kp m.infra in
+                let content = ui_pad_content ~bp inner in
+                let notice_h =
+                  if Rect.is_empty content then 0
+                  else
+                    min content.h
+                      (Infra_store.keeper_sandbox_notice_rows ~has_displayed_rows:true read)
+                in
+                let _, inner = Rect.split_v inner ~top_h:notice_h in
                 if m.infra.show_raw_json then
                   let content = ui_pad_content ~bp inner in
                   if Rect.is_empty content then 0

@@ -8998,6 +8998,128 @@ let test_answers_land_on_their_own_target () =
      | Observed.Failed _ ->
          false)
 
+let test_sandbox_fleet_denial_clears_selected_rows () =
+  let m = Model.initial () in
+  let roster_fallback =
+    Infra_store.apply_sandboxes_fallback ~observed_at:t0 ~wall_unix:0.
+      ~keepers:[] ~sandbox_profiles:[ ("alpha", Wire_fleet.Profile_docker) ]
+      ~tool_series_totals:None m.infra
+  in
+  let fleet = Option.get (Observed.to_option roster_fallback.sandboxes) in
+  let reply (m : Model.t) reply =
+    fst (Update.step ~now:t1 m (Msg.Http_reply { epoch = m.epoch; reply }))
+  in
+  let http status = Msg.Http_error { status; body = ""; api_error = None } in
+  let detail : Wire_infra.keeper_sandbox_response =
+    {
+      keeper = "alpha";
+      probe_state = None;
+      sandbox = Wire_infra.Sandbox_docker (List.hd fleet.docker_keepers);
+    }
+  in
+  let authorized =
+    reply (reply m (Msg.Reply_sandboxes (Ok fleet)))
+      (Msg.Reply_keeper_sandbox { keeper = "alpha"; result = Ok detail })
+  in
+  let named_denied =
+    reply authorized
+      (Msg.Reply_keeper_sandbox { keeper = "alpha"; result = Error (http 403) })
+  in
+  let has_detail (m : Model.t) =
+    Infra_store.keeper_sandbox_read_for ~keeper:"alpha" m.infra
+    |> Infra_store.keeper_sandbox_detail |> Option.is_some
+  in
+  Alcotest.(check (option string)) "named denial keeps the authorized fleet row"
+    (Some "alpha") (Infra_store.selected_sandbox_keeper named_denied.infra);
+  Alcotest.(check bool) "named denial clears its cached detail" false
+    (has_detail named_denied);
+  let check_fleet_denial m status =
+    let denied = reply m (Msg.Reply_sandboxes (Error (http status))) in
+    Alcotest.(check (option string)) "fleet denial clears the selected row" None
+      (Infra_store.selected_sandbox_keeper denied.infra);
+    Alcotest.(check bool) "fleet denial disables roster reconstruction" false
+      denied.infra.sandboxes_fallback_404;
+    Alcotest.(check bool) "fleet denial is a terminal failure" true
+      (match denied.infra.sandboxes with
+      | Observed.Failed { retryable = false; _ } -> true
+      | Observed.Failed { retryable = true; _ } | Observed.Value _
+      | Observed.Unreported | Observed.Loading _ | Observed.Absent -> false);
+    denied
+  in
+  let fleet_denied = check_fleet_denial authorized 401 in
+  Alcotest.(check bool) "fleet denial keeps independently authorized detail" true
+    (has_detail fleet_denied);
+  let both_denied = check_fleet_denial named_denied 403 in
+  Alcotest.(check bool) "both denied sources leave no detail" false
+    (has_detail both_denied);
+  ignore (check_fleet_denial { m with infra = roster_fallback } 403 : Model.t)
+
+let test_sandbox_probe_reopens_named_absence () =
+  let initial = Model.initial () in
+  let m =
+    { initial with
+      fleet =
+        initial.fleet
+        |> Fleet_store.apply_keepers ~observed_at:t0 [ sample_keeper "alpha" ]
+        |> Fleet_store.select_keeper "alpha"
+        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_work_sandbox;
+      nav = { initial.nav with workspace = Nav.Keepers; zoomed = true } }
+  in
+  let settle_missing now (m : Model.t) =
+    let api_error =
+      Wire_common.decode_api_error
+        (`Assoc [ "error", `Assoc [
+           "code", `String "sandbox_telemetry_missing";
+           "message", `String "keeper has no telemetry in the served snapshot";
+         ] ])
+      |> Result.to_option
+    in
+    let reply =
+      Msg.Reply_keeper_sandbox
+        { keeper = "alpha";
+          result = Error (Msg.Http_error { status = 404; body = ""; api_error }) }
+    in
+    Update.step ~now m (Msg.Http_reply { epoch = m.epoch; reply })
+  in
+  let observe now (m : Model.t) event =
+    let event =
+      Msg.Sse_observer_delivery { cursor = None; decoded = Wire_observer.Event event }
+    in
+    Update.step ~now m (Msg.Sse_event { epoch = m.epoch; event })
+  in
+  let named_requests cmds =
+    Cmd.flatten cmds
+    |> List.filter_map
+         (function
+           | Cmd.Http_get { req = Cmd.Get_keeper_sandbox { keeper }; _ } -> Some keeper
+           | _ -> None)
+  in
+  let absent, _ = settle_missing t0 m in
+  let scoped_other =
+    Wire_observer.Observation_changed
+      { topic = `Keeper_sandbox; scope = `Keeper "beta" }
+  in
+  let unchanged, unrelated_cmds = observe t0 absent scoped_other in
+  Alcotest.(check (list string)) "another keeper leaves the stopped read alone" []
+    (named_requests unrelated_cmds);
+  Alcotest.(check bool) "another keeper leaves alpha's absence intact" true
+    (Infra_store.keeper_sandbox_for ~keeper:"alpha" unchanged.infra = Observed.Absent);
+  let probe = Wire_observer.Dataset_changed Wire_observer.Dataset_infra_sandboxes in
+  let pending, first = observe t1 unchanged probe in
+  Alcotest.(check (list string)) "sandbox probe rereads the visible keeper" [ "alpha" ]
+    (named_requests first);
+  let pending, during_read = observe t1 pending probe in
+  Alcotest.(check (list string)) "probe during a pending read waits for settlement" []
+    (named_requests during_read);
+  let followup, after_old_reply = settle_missing t2 pending in
+  Alcotest.(check (list string)) "pre-probe absence starts exactly one follow-up"
+    [ "alpha" ] (named_requests after_old_reply);
+  let settled, quiet = settle_missing t2 followup in
+  Alcotest.(check (list string)) "current absence sends no more requests" []
+    (named_requests quiet);
+  Alcotest.(check bool) "current absence settles again" true
+    (Infra_store.keeper_sandbox_for ~keeper:"alpha" settled.infra = Observed.Absent)
+
 (* On a first visit to the Wiki tab the fetch list is built before the index
    lands, so it names no page. The index reply asks for the page it selects. *)
 let test_wiki_index_reply_requests_selected_page () =
@@ -23903,6 +24025,10 @@ let () =
             `Quick test_failure_is_asked_again_for_a_new_question;
           Alcotest.test_case "An answer lands on its own target's slot"
             `Quick test_answers_land_on_their_own_target;
+          Alcotest.test_case "Sandbox fleet denial clears cached selection"
+            `Quick test_sandbox_fleet_denial_clears_selected_rows;
+          Alcotest.test_case "A Sandbox probe reopens visible named absence once"
+            `Quick test_sandbox_probe_reopens_named_absence;
           Alcotest.test_case "The wiki index reply asks for the page it selects"
             `Quick test_wiki_index_reply_requests_selected_page;
           Alcotest.test_case "Infra changes follow the selected repository"

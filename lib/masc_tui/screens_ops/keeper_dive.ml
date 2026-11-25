@@ -2151,7 +2151,8 @@ let find_ssh_pool_for_keeper (model : Model.t) ~name =
             p.keeper_sessions)
         snap.ssh_pools
 
-let resolve_keeper_sandbox (model : Model.t) ~name ~detail =
+let resolve_keeper_sandbox (model : Model.t) ~name
+    ~(detail : Wire_infra.keeper_sandbox_response option) =
   match detail with
   | Some (resp : Wire_infra.keeper_sandbox_response) ->
       let pool_opt =
@@ -2234,17 +2235,18 @@ let render_sandbox_summary grid ~(rect : Rect.t) ~(theme : Theme.t)
     let read = Infra_store.keeper_sandbox_read_for ~keeper:name model.infra in
     let detail = Option.map fst (Infra_store.keeper_sandbox_detail read) in
     let resolved = resolve_keeper_sandbox model ~name ~detail in
-    (match
-       Masc_tui_screens_core.Render_util.sandbox_detail_notice ~read
-         ~using_fleet:(Option.is_none detail && Option.is_some resolved)
-     with
-    | Some (label, tone) when !y < bot ->
-        ignore
-          (Ops_common.put_line ~clip:rect grid ~x:rect.x ~y:!y ~max_w:rect.w
-             ~style:(Typography.status ~bg theme tone)
-             (Say.resolve model.lang label));
-        incr y
-    | Some _ | None -> ());
+    let module U = Masc_tui_screens_core.Render_util in
+    let fallback =
+      if Option.is_none detail && Option.is_some resolved then
+        Some (if model.infra.sandboxes_fallback_404 then U.Keeper_roster else U.Fleet_snapshot)
+      else None
+    in
+    if !y < bot then
+      y :=
+        !y
+        + U.draw_sandbox_detail_notice grid
+            ~rect:(Rect.make ~x:rect.x ~y:!y ~w:rect.w ~h:(bot - !y))
+            ~theme ~lang:model.lang ~read ~fallback;
     if !y < bot then
       match resolved with
       | None -> (
@@ -2252,7 +2254,7 @@ let render_sandbox_summary grid ~(rect : Rect.t) ~(theme : Theme.t)
           | Some _ ->
               let lbl, tone = Ops_common.keeper_sandbox_label ~model name in
               Ops_common.draw_kv_row grid ~rect ~y:!y ~theme ~bg ~label_w:10
-                ~key:(Ops_common.say model ~ko:"플릿 프로필" ~en:"Fleet profile")
+                ~key:(Ops_common.say model ~ko:"목록 프로필" ~en:"Roster profile")
                 ~value:lbl ~val_fg:(Theme.status_color theme tone)
                 ~val_attrs:Attr.bold ()
           | None -> ())

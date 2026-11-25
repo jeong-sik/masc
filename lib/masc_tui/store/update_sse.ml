@@ -101,6 +101,27 @@ let reads_schedules (m : Model.t) =
       | Nav.Pulse | Nav.Work | Nav.Keepers -> true
       | Nav.Knowledge | Nav.Runtime | Nav.Infra -> false)
 
+let apply_sandbox_invalidation ?keeper (m : Model.t) =
+  let infra = Infra_store.invalidate_sandboxes ?keeper m.infra in
+  let next = { m with infra } in
+  let in_infra = Nav.equal_workspace m.nav.workspace Nav.Infra in
+  let fleet_cmds =
+    if in_infra then
+      match infra.sandboxes with
+      | Observed.Failed { retryable = false; _ } -> []
+      | Observed.Failed { retryable = true; _ } | Observed.Value _
+      | Observed.Absent | Observed.Unreported | Observed.Loading _ ->
+          [ get_cmd m.epoch Cmd.Get_sandboxes ]
+    else []
+  in
+  let detail_cmds =
+    if in_infra && Option.is_none (Model.active_inspector m) then
+      (* The fleet reply selects the row before its detail is requested. *)
+      []
+    else View_fetches.sandbox_detail_fetch ?keeper next
+  in
+  (next, fleet_cmds @ detail_cmds)
+
 let apply_dataset_invalidation (m : Model.t) ds =
   let e = m.epoch in
   let ws = m.nav.workspace in
@@ -381,16 +402,7 @@ let apply_dataset_invalidation (m : Model.t) ds =
         | Nav.Pulse | Nav.Work | Nav.Keepers | Nav.Runtime | Nav.Infra -> []
       in
       ({ m with knowledge }, cmds)
-  | Wire_observer.Dataset_infra_sandboxes ->
-      let infra =
-        { m.infra with sandboxes = Observed.mark_stale m.infra.sandboxes }
-      in
-      let cmds =
-        match ws with
-        | Nav.Infra -> [ get_cmd e Cmd.Get_sandboxes ]
-        | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Keepers | Nav.Runtime -> []
-      in
-      ({ m with infra }, cmds)
+  | Wire_observer.Dataset_infra_sandboxes -> apply_sandbox_invalidation m
   | Wire_observer.Dataset_candle_ledger ->
       let work =
         { m.work with candle_ledger = Observed.mark_stale m.work.candle_ledger }
@@ -502,8 +514,11 @@ let apply_observation_changed (m : Model.t)
       in
       let cmds = if wants_turns then [ get_cmd e Cmd.Get_keeper_turns ] else [] in
       ({ m with fleet }, cmds)
-  | `Keeper_sandbox ->
-      apply_dataset_invalidation m Wire_observer.Dataset_infra_sandboxes
+  | `Keeper_sandbox -> (
+      match payload.scope with
+      | `Keeper keeper | `Operation { keeper_name = keeper; _ } ->
+          apply_sandbox_invalidation ~keeper m
+      | `Workspace -> apply_sandbox_invalidation m)
   | `Keeper_memory_health ->
       apply_dataset_invalidation m (Wire_observer.Dataset_memory_health None)
   | `Scheduled_automation ->

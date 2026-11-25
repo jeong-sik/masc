@@ -92,9 +92,11 @@ type keeper_sandbox_read = {
   observation : Wire_infra.keeper_sandbox_response Observed.t;
   retained : (Wire_infra.keeper_sandbox_response * Clock.Mono.t) option;
   requested_at : Clock.Mono.t option;
+  invalidated_during_read : bool;
 }
 (** The latest settlement, a retained detail after a failed refresh, and the
-    dispatch time of the pending read. *)
+    dispatch time of the pending read. The invalidation flag carries a newer
+    sandbox dataset notification across that read's settlement. *)
 
 type t = {
   active_tab : Nav.infra_tab;
@@ -157,6 +159,9 @@ val keeper_sandbox_for :
 val keeper_sandbox_read_for : keeper:string -> t -> keeper_sandbox_read
 val keeper_sandbox_detail :
   keeper_sandbox_read -> (Wire_infra.keeper_sandbox_response * Clock.Mono.t) option
+val keeper_sandbox_notice_rows :
+  has_displayed_rows:bool -> keeper_sandbox_read -> int
+(** Rows reserved for the read status and optional source or error detail. *)
 
 val set_keeper_sandbox :
   keeper:string ->
@@ -165,6 +170,10 @@ val set_keeper_sandbox :
 val request_keeper_sandbox : keeper:string -> now:Clock.Mono.t -> t -> t
 val detach_keeper_sandbox_reads : t -> t
 val keeper_sandbox_needed : force:bool -> keeper:string -> t -> bool
+val invalidate_sandboxes : ?keeper:string -> t -> t
+(** A new sandbox dataset can replace a confirmed absence or a last value.
+    A keeper scope limits named invalidation to that Keeper. A permanent read
+    failure keeps its explicit retry requirement. *)
 val apply_repositories :
   observed_at:Clock.Mono.t -> Wire_infra.repository list -> t -> t
 val apply_repository_pulls :

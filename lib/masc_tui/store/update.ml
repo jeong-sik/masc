@@ -676,21 +676,14 @@ let reserve_work_reads ~now (m : Model.t) cmds =
   let work = List.fold_left reserve m.work (Cmd.flatten cmds) in
   if work == m.work then m else { m with work }
 
-(* The full dive and its workspace can request different Keepers in one step. *)
+(* The Keepers Work·Sandbox tab and the Infra Sandboxes tab each name one Keeper. *)
 let reserve_sandbox_view_reads ~now (m : Model.t) cmds =
   match cmds with
   | [] -> m
   | _ :: _ ->
-      let dive_keeper =
-        match Model.active_dive m with
-        | Some (Nav.Dive_keeper { name; tab }) when Nav.equal_keeper_tab tab Nav.Keeper_sandbox ->
-            Some name
-        | Some (Nav.Dive_keeper _ | Nav.Dive_work _ | Nav.Dive_knowledge _
-                | Nav.Dive_runtime _ | Nav.Dive_infra _) | None -> None
-      in
       let workspace_keeper =
         if Nav.equal_workspace m.nav.workspace Nav.Keepers
-           && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_sandbox then
+           && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_work_sandbox then
           Option.map (fun (k : Wire_fleet.keeper_summary) -> k.name)
             (Fleet_store.selected_keeper_summary m.fleet)
         else if Nav.equal_workspace m.nav.workspace Nav.Infra
@@ -705,7 +698,7 @@ let reserve_sandbox_view_reads ~now (m : Model.t) cmds =
             Infra_store.request_keeper_sandbox ~keeper ~now infra
         | Some _ | None -> infra
       in
-      let infra = reserve (reserve m.infra dive_keeper) workspace_keeper in
+      let infra = reserve m.infra workspace_keeper in
       if infra == m.infra then m else { m with infra }
 
 let step ~now m msg =

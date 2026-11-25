@@ -114,6 +114,11 @@ type QueueRead = {
   | { readonly kind: 'error'; readonly message: string }
 )
 
+type KeeperMessagesState = {
+  readonly keeperName: string
+  readonly entries: readonly ChatTranscriptEntry[]
+}
+
 function formatChatTime(ts: number): string | null {
   if (!Number.isFinite(ts) || ts <= 0) return null
   const ms = ts < 1_000_000_000_000 ? ts * 1000 : ts
@@ -190,7 +195,12 @@ function setBoundedToolResultCache(
 
 export function KeeperChatTab(props: KeeperChatTabProps) {
   const { keeper } = props
-  const [messages, setMessages] = useState<readonly ChatTranscriptEntry[]>([])
+  const [messagesState, setMessagesState] = useState<KeeperMessagesState>(() => ({
+    keeperName: keeper.name,
+    entries: [],
+  }))
+  const isSwitchingKeeper = messagesState.keeperName !== keeper.name
+  const scopedMessages = isSwitchingKeeper ? [] : messagesState.entries
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [hasMore, setHasMore] = useState(false)
   const [loadingHistory, setLoadingHistory] = useState(true)
@@ -421,7 +431,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     setLivePreview(null)
     setLiveToolPulse(null)
     if (switchedKeeper) {
-      setMessages([])
+      setMessagesState({ keeperName: keeper.name, entries: [] })
       setHasMore(false)
       setNextCursor(null)
       setQueueRead(null)
@@ -601,9 +611,14 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
               invalidateEarlierReads()
               hasLoadedEarlierRef.current = false
             }
-            setMessages((previous) => mergeLatestHistoryPage(
-              previous, result.value.messages, sendingOperationRef.current,
-            ))
+            setMessagesState((previous) => ({
+              keeperName: keeper.name,
+              entries: mergeLatestHistoryPage(
+                previous.keeperName === keeper.name ? previous.entries : [],
+                result.value.messages,
+                sendingOperationRef.current,
+              ),
+            }))
             if (authoritativeEmpty || !hasLoadedEarlierRef.current) {
               setHasMore(authoritativeEmpty ? false : result.value.hasMore)
               setNextCursor(authoritativeEmpty ? null : result.value.nextCursor)
@@ -697,7 +712,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     const unsubscribeEpoch = sessionEpoch.subscribe((nextEpoch) => {
       if (nextEpoch === epoch) return
       epoch = nextEpoch
-      setMessages([])
+      setMessagesState({ keeperName: keeper.name, entries: [] })
       setQueueRead(null)
       setHasMore(false)
       setNextCursor(null)
@@ -792,10 +807,14 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     }
     setRenderWindow((cur) => Math.min(MAX_RENDER_WINDOW, cur + res.value.messages.length))
     hasLoadedEarlierRef.current = true
-    setMessages((prev) => {
-      const existingIds = new Set(prev.map((m) => m.id))
+    setMessagesState((prev) => {
+      const baseEntries = prev.keeperName === targetKeeper ? prev.entries : []
+      const existingIds = new Set(baseEntries.map((m) => m.id))
       const fresh = res.value.messages.filter((m) => !existingIds.has(m.id))
-      return [...dedupeHistoryToolRows([...fresh, ...prev])]
+      return {
+        keeperName: targetKeeper,
+        entries: [...dedupeHistoryToolRows([...fresh, ...baseEntries])],
+      }
     })
     setHasMore(res.value.hasMore)
     setNextCursor(res.value.nextCursor)
@@ -805,7 +824,14 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     entryId: string,
     updater: (cur: ChatTranscriptEntry) => ChatTranscriptEntry,
   ) => {
-    setMessages((prev) => prev.map((m) => (m.id === entryId ? updater(m) : m)))
+    const ownerKeeper = keeper.name
+    setMessagesState((prev) => {
+      if (prev.keeperName !== ownerKeeper) return prev
+      return {
+        keeperName: prev.keeperName,
+        entries: prev.entries.map((m) => (m.id === entryId ? updater(m) : m)),
+      }
+    })
   }
 
   const updateAssistantEntry = updateEntryById
@@ -924,7 +950,12 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     sendingRef.current = true
     sendingOperationRef.current = { operationId, executionId: operationId }
     forceScrollBottomRef.current = true
-    setMessages((prev) => [...prev, userEntry, assistantEntry])
+    setMessagesState((prev) => ({
+      keeperName: targetKeeper,
+      entries: prev.keeperName === targetKeeper
+        ? [...prev.entries, userEntry, assistantEntry]
+        : [userEntry, assistantEntry],
+    }))
     setDraft('')
     setAttachments([])
     setSending(true)
@@ -1466,7 +1497,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     : RING_CIRCUMFERENCE
   const ringTone = ctxPct === null ? 'absent' : ctxPct >= 85 ? 'bad' : ctxPct >= 65 ? 'warn' : 'ok'
 
-  const recentSlice = messages.slice(-renderWindow)
+  const recentSlice = scopedMessages.slice(-renderWindow)
   const parsedEntries = recentSlice.map((msg) => ({ msg, blocks: parseChatMessageBlocks(msg) }))
   const hiddenInternalCount = parsedEntries.filter(
     ({ blocks }) => blocks.isInternalOnly && blockPrefs.internal === 'hidden',
@@ -1548,7 +1579,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   // Live autonomous / delegated / external turn status from roster + SSE preview override
   const activeTurn = keeper.active_turn
   const effectivePreview: KeeperActiveTurnPreview | null = livePreview?.preview ?? activeTurn?.preview ?? null
-  const browserRequestQueued = sending && messages.some((entry) => entry.role === 'assistant'
+  const browserRequestQueued = sending && scopedMessages.some((entry) => entry.role === 'assistant'
     && entry.operationId === sendingOperationRef.current?.operationId && entry.deliveryState === 'Queued')
   const showLiveTurnCard = (!sending || browserRequestQueued) && (activeTurn !== null || effectivePreview !== null)
   const liveTurnActivity = formatTurnActivityLabel(effectivePreview?.activity)
@@ -1997,7 +2028,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     prevTailSigRef.current = tailSig
 
     if (forceScrollBottomRef.current) {
-      if (visibleEntries.length > 0 || !loadingHistory) {
+      if (visibleEntries.length > 0 || !(loadingHistory || isSwitchingKeeper)) {
         forceScrollBottomRef.current = false
         scrollToBottom('auto')
       }
@@ -2011,7 +2042,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     } else if (visibleEntries.length > 0) {
       setUnseenBelowCount((c) => c + 1)
     }
-  }, [tailSig, loadingHistory, visibleEntries.length, scrollToBottom])
+  }, [tailSig, loadingHistory, isSwitchingKeeper, visibleEntries.length, scrollToBottom])
 
   return html`
     <div class="kp-chat-shell" data-companion-open=${companionOpen ? 'true' : 'false'}>
@@ -2084,10 +2115,10 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
             onScroll=${handleChatScroll}
           >
             <div class="kp-chat-feed" ref=${chatFeedRef}>
-            ${loadingHistory && messages.length === 0
+            ${(loadingHistory || isSwitchingKeeper) && scopedMessages.length === 0
               ? html`<div class="kp-empty">대화 기록 불러오는 중…</div>`
               : displayItems.length === 0 && !showLiveTurnCard
-                ? html`<div class="kp-empty">${messages.length > 0 ? '현재 블록 필터에 표시할 메시지가 없습니다.' : `${keeper.name}과(와) 대화를 시작하세요.`}</div>`
+                ? html`<div class="kp-empty">${scopedMessages.length > 0 ? '현재 블록 필터에 표시할 메시지가 없습니다.' : `${keeper.name}과(와) 대화를 시작하세요.`}</div>`
                 : displayItems.map((item) => {
                     if (item.kind === 'tool_group') {
                       if (item.toolBlocks.length === 1) {

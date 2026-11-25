@@ -765,7 +765,8 @@ let fetches_for_workspace ~force (m : Model.t) =
       | Nav.Work_harness ->
           []
           |> add_if
-               (needs_fetch ~force m.work.harness_health)
+               ((force || not (Observed.is_loading m.work.harness_read))
+               && needs_fetch ~force m.work.harness_read)
                Cmd.Get_harness_health)
   | Nav.Knowledge -> (
       match m.knowledge.active_tab with

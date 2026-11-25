@@ -7670,6 +7670,42 @@ let harness_verdict_detail_lines ~width (m : Model.t) : string list =
   let w = max 20 width in
   let lines = ref [] in
   let push s = lines := s :: !lines in
+  let say ~ko ~en = Say.resolve m.lang (Say.make ~ko ~en) in
+  (match m.work.harness_read with
+  | Observed.Failed { reason; _ } ->
+      List.iter push
+        (wrap_lines ~width:w
+           (say ~ko:("조회 실패 · [r] 다시 읽기 · " ^ reason)
+              ~en:("Read failed · [r] retry · " ^ reason)))
+  | Observed.Loading _ | Observed.Value _ | Observed.Absent
+  | Observed.Unreported -> ());
+  let sample = Observed.to_option m.work.harness_health in
+  Option.iter
+    (fun (hh : Wire_work.harness_health) ->
+      let old = Observed.is_stale m.work.harness_health in
+      let label =
+        if old then say ~ko:"이전 표본" ~en:"Last sample"
+        else say ~ko:"최근 표본" ~en:"Recent sample"
+      in
+      let age =
+        if hh.generated_at <= 0. || m.freshness.last_wall_unix <= 0. then
+          say ~ko:"수집 시각 미보고" ~en:"sample time unavailable"
+        else
+          let elapsed =
+            Float.max 0. (m.freshness.last_wall_unix -. hh.generated_at)
+            |> Format_val.format_duration_s
+          in
+          say ~ko:(elapsed ^ " 전 수집") ~en:("collected " ^ elapsed ^ " ago")
+      in
+      let n = List.length hh.recent_verdicts in
+      let unreadable = hh.unreadable_verdicts_count in
+      let counts =
+        say
+          ~ko:(Printf.sprintf "%d건 수신 · %d건 읽기 실패" n unreadable)
+          ~en:(Printf.sprintf "%d received · %d unreadable" n unreadable)
+      in
+      List.iter push (wrap_lines ~width:w (label ^ " · " ^ age ^ " · " ^ counts)))
+    sample;
   (match Work_store.selected_harness_verdict m.work with
   | None -> push "No harness verdict selected."
   | Some v ->
@@ -7690,12 +7726,12 @@ let harness_verdict_detail_lines ~width (m : Model.t) : string list =
       push
         "Actions: [y] Approve overrule · [n] Reject overrule · [H] Copy \
          notes_hash");
-  (match Observed.to_option m.work.harness_health with
+  (match sample with
   | Some hh ->
       let c = hh.calibration in
       push "── Evaluator Calibration ──";
       push
-        (Printf.sprintf "Status: %s · Fallback ratio: %.1f%%"
+        (Printf.sprintf "Evaluator at sample: %s · Fallback ratio: %.1f%%"
            hh.evaluator_status (hh.fallback_ratio *. 100.0));
       push
         (Printf.sprintf
@@ -7703,9 +7739,9 @@ let harness_verdict_detail_lines ~width (m : Model.t) : string list =
            c.total_verdicts c.approve_count c.reject_count c.labeled_count
            (c.agreement_rate *. 100.0));
       push
-        (Printf.sprintf "FP=%d · FN=%d · Fallbacks=%d · Unreadable=%d"
+        (Printf.sprintf "FP=%d · FN=%d · Fallbacks=%d · Calibration unreadable=%d"
            c.false_positive_count c.false_negative_count c.fallback_count
-           hh.unreadable_verdicts_count);
+           c.unreadable_record_count);
       (match c.distinct_runtime_rate with
       | Some rate ->
           push

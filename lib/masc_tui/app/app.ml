@@ -582,7 +582,7 @@ let next_minute_tick ~now_ns ~wall_unix ~last_minute =
   in
   (minute_due, cur_min, next_deadline_ns)
 
-let visible_keeper_progress_interval (m : Model.t) =
+let visible_progress_interval (m : Model.t) =
   if Model.is_too_small_viewport m.viewport || Model.equal_breakpoint m.breakpoint Model.Micro
   then None
   else if
@@ -593,6 +593,13 @@ let visible_keeper_progress_interval (m : Model.t) =
   then
     if Chat_transcript.reduce_motion m then None else Some keeper_progress_interval_ns
   else
+    let harness_reading =
+      Option.is_none m.nav.overlay
+      && Option.is_none (Model.active_inspector m)
+      && Nav.equal_workspace m.nav.workspace Nav.Work
+      && Nav.equal_work_tab m.work.active_tab Nav.Work_harness
+      && Observed.is_loading m.work.harness_read
+    in
     let keeper =
       if Option.equal Nav.equal_overlay m.nav.overlay
           (Some (Nav.Queue_context Nav.Drawer_queue)) then Model.target_keeper m
@@ -608,13 +615,17 @@ let visible_keeper_progress_interval (m : Model.t) =
         | Some _ -> None
     in
     (* Only a glyph with an animation frame needs a presentation clock. *)
-    (match Option.bind keeper (fun keeper ->
+    let keeper_working =
+      (match Option.bind keeper (fun keeper ->
             Chat_transcript.live_chat_phase_badge ~model:m ~keeper) with
-    | Some (Glyph.Live_working_frame _, _, _) ->
-        Some
-          (if Chat_transcript.reduce_motion m then keeper_elapsed_interval_ns
-           else keeper_progress_interval_ns)
-    | Some _ | None -> None) [@warning "-4"]
+      | Some (Glyph.Live_working_frame _, _, _) -> true
+      | Some _ | None -> false) [@warning "-4"]
+    in
+    if harness_reading || keeper_working then
+      Some
+        (if Chat_transcript.reduce_motion m then keeper_elapsed_interval_ns
+         else keeper_progress_interval_ns)
+    else None
 
 let set_fd_nonblock fd enabled =
   match
@@ -1502,9 +1513,9 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                       (earliest_opt extra (Some minute_deadline))
                       interrupt_deadline
                 in
-                (* Visible Keeper activity uses a presentation clock without
-                   requesting additional server observations. *)
-                let progress_interval = visible_keeper_progress_interval !model in
+                (* A visible active turn or read uses a presentation clock
+                   without requesting additional server observations. *)
+                let progress_interval = visible_progress_interval !model in
                 (match progress_interval, !keeper_progress_deadline with
                  | None, _ -> keeper_progress_deadline := None
                  | Some _, Some due when Int64.compare now_after_ns due < 0 -> ()
@@ -1533,7 +1544,15 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                       | None -> !model
                       | Some _ ->
                           let m = !model in
-                          { m with freshness = { m.freshness with last_wall_unix = wall_now } }
+                          let freshness =
+                            {
+                              m.freshness with
+                              last_wall_unix = wall_now;
+                              last_mono =
+                                Clock.Mono.max m.freshness.last_mono now_after;
+                            }
+                          in
+                          { m with freshness }
                     in
                     let cursor = render_frame ~model:frame_model ~cache:card_cache grid in
                     let render_us =

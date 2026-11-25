@@ -407,6 +407,7 @@ type http_reply =
       post_id : string;
       result : (Wire_runtime.fusion_evidence_post, http_error) result;
     }
+  | Reply_harness_health_started of Clock.Mono.t
   | Reply_harness_health of (Wire_work.harness_health, http_error) result
   | Reply_verification_evidence of {
       verification_id : string;

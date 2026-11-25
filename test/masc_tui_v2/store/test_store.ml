@@ -13418,7 +13418,52 @@ let test_ux_batch2_modals_settings_overlays () =
     m_overrule.nav.modal_edit_cursor;
   Alcotest.(check bool)
     "PR54557 harness overrule opener clears return_overlay" true
-    (Option.is_none m_overrule.nav.return_overlay)
+    (Option.is_none m_overrule.nav.return_overlay);
+
+  let first = List.hd hh_valid_sample.recent_verdicts in
+  let second =
+    { first with task_id = "tk-new"; notes_hash = String.make 64 'f' }
+  in
+  let apply_verdicts (m : Model.t) recent_verdicts =
+    let reply = Msg.Reply_harness_health (Ok { hh_valid_sample with recent_verdicts }) in
+    fst (Update.step ~now:t1 m (Msg.Http_reply { epoch = m.epoch; reply }))
+  in
+  let overrule_overlay m =
+    let next, _ = step m (char_key "n") in
+    next.nav.overlay
+  in
+  let targets m hash =
+    Option.equal Nav.equal_overlay
+      (Some (Nav.Inline_action (Nav.Harness_overrule hash)))
+      (overrule_overlay m)
+  in
+  let shifted = apply_verdicts m_harness_base [ second; first ] in
+  Alcotest.(check bool) "new verdict keeps the selected overrule target"
+    true (targets shifted first.notes_hash);
+  let removed = apply_verdicts shifted [ second ] in
+  Alcotest.(check bool) "removed verdict clears the overrule target"
+    true (Option.is_none (overrule_overlay removed));
+  let moved, _ = step removed (key Keymap.Input.Down) in
+  Alcotest.(check bool) "explicit selection can target the remaining verdict"
+    true (targets moved second.notes_hash);
+  let filtered =
+    { shifted with work = Work_store.set_filter second.task_id shifted.work }
+  in
+  Alcotest.(check bool) "filtering away the verdict clears the overrule target"
+    true (Option.is_none (overrule_overlay filtered));
+  (* #54796 review: a pane clamp (delta 0) on the list pane keeps an empty
+     selection empty; only an explicit move picks a row. *)
+  let on_list (m : Model.t) = { m with nav = { m.nav with pane_index = 0; zoomed = false } } in
+  List.iter
+    (fun (label, (m : Model.t)) ->
+      let clamped = Update_nav.clamp_for_pane (on_list m) in
+      Alcotest.(check bool) (label ^ ": pane clamp keeps the selection empty") true
+        (Option.is_none (Work_store.selected_harness_verdict clamped.work)
+         && Option.is_none (overrule_overlay clamped)))
+    [ ("removed", removed); ("filtered", filtered) ];
+  let moved_up, _ = step (Update_nav.clamp_for_pane (on_list removed)) (key Keymap.Input.Up) in
+  Alcotest.(check bool) "an explicit Up after the clamp still picks a row" true
+    (targets moved_up second.notes_hash)
 
 let test_ux_batch3_work_keepers_chat_mouse () =
   let m0 = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_en () in

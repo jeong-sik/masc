@@ -2517,6 +2517,70 @@ let test_p2_voice_runner_ffmpeg_and_mouse_capture () =
 (* A chat stream that drops while the server reports its operation queued or
    running is posted again with its last journal seq, and only to the server
    instance that accepted it; anything else ends the submit. *)
+let test_harness_followup_preserves_undrained_sample () =
+  let first, first_started = Eio.Promise.create () in
+  let second, second_started = Eio.Promise.create () in
+  let first_release, finish_first = Eio.Promise.create () in
+  let second_release, finish_second = Eio.Promise.create () in
+  let calls = ref 0 in
+  let respond ~meth:_ ~path:_ =
+    incr calls;
+    if !calls = 1 then (
+      Eio.Promise.resolve first_started ();
+      Eio.Promise.await first_release;
+      (200, `Assoc [
+         "generated_at", `Float 1.;
+         "overview", `Assoc ["evaluator_status", `String "healthy"];
+         "calibration", `Assoc [];
+         "recent_verdicts", `List [
+           `Assoc ["task_id", `String "first-verdict"; "verdict", `String "approve"] ];
+       ]))
+    else (
+      Eio.Promise.resolve second_started ();
+      Eio.Promise.await second_release;
+      (503, `Assoc [ "error", `String "retry later" ]))
+  in
+  with_loopback_executor ~respond @@ fun clock bus exec ->
+  let initial = Model.initial () in
+  let get () =
+    Cmd_executor.execute exec
+      (Cmd.Http_get { epoch = initial.epoch; req = Cmd.Get_harness_health })
+  in
+  let apply model =
+    List.fold_left
+      (fun m -> function
+        | Ui_bus.Snapshot (_, msg) ->
+            fst (Update.step ~now:(Clock.Mono.now ()) m msg)
+        | Ui_bus.Stream_event _ | Ui_bus.Stream_gap _ -> m)
+      model (Ui_bus.drain bus)
+  in
+  let sampled_tasks (m : Model.t) =
+    Work_store.harness_verdicts_list m.work
+    |> List.map (fun (row : Masc_tui_protocol.Wire_work.harness_verdict_row) -> row.task_id)
+  in
+  get ();
+  Eio.Promise.await first;
+  get ();
+  Eio.Promise.resolve finish_first ();
+  Eio.Promise.await second;
+  let reading = apply initial in
+  Alcotest.(check (list string)) "first result survives before the follow-up starts"
+    ["first-verdict"] (sampled_tasks reading);
+  Alcotest.(check bool) "actual second read is pending" true
+    (Observed.is_loading reading.work.harness_read);
+  Eio.Promise.resolve finish_second ();
+  let rec await_terminal () =
+    if (Ui_bus.stats bus).queued_snapshots = 0 then (
+      Eio.Time.sleep clock 0.001;
+      await_terminal ())
+  in
+  await_terminal ();
+  let failed = apply reading in
+  Alcotest.(check bool) "second failure retains the earlier sample" true
+    (Observed.is_failed failed.work.harness_read
+     && sampled_tasks failed = ["first-verdict"]);
+  Alcotest.(check int) "original read and one coalesced follow-up" 2 !calls
+
 let test_chat_reattach_decision () =
   let delay ?(acceptance = Some Keeper_chat_operation.State_name.Running)
       ?(terminal_seen = false) ?(reattaches = 0) result =
@@ -3675,6 +3739,8 @@ let () =
             `Quick test_setup_login_stream_output_auth_url_input_ready_and_oauth_tick_gate;
           Alcotest.test_case "chat stream reattach decision" `Quick
             test_chat_reattach_decision;
+          Alcotest.test_case "Harness follow-up keeps the last settled read"
+            `Quick test_harness_followup_preserves_undrained_sample;
           Alcotest.test_case "github login stream catches non-cancel exceptions and emits done"
             `Quick test_github_login_stream_exception_emits_done;
           Alcotest.test_case "Feature Wave 1: OSC 52 wrapping & safe atomic artifact export"

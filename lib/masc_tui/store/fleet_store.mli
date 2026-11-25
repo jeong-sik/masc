@@ -91,6 +91,7 @@ type t = {
   unreadable_keepers : Wire_fleet.unreadable_keeper list;
       (** Roster rows whose effective meta did not read, from the last roster. *)
   turns : Wire_fleet.keeper_turn_row list Observed.t;
+  turn_preview_updates : Wire_fleet.turn_preview_update String_map.t;
   interrupting_turn_tokens : string String_map.t;
       (** In-flight interrupt token per keeper for observed turns without a
           local chat stream or pending tx. *)
@@ -237,6 +238,13 @@ val enrich_scorecard :
   (Wire_fleet.daily_scorecard -> Wire_fleet.daily_scorecard) -> t -> t
 val apply_turns :
   observed_at:Clock.Mono.t -> Wire_fleet.keeper_turn_row list -> t -> t
+val observe_turn_preview :
+  keeper:string -> Wire_fleet.turn_preview_update -> t -> t
+(** Reconcile a preview only with the matching observed Owner slot. A preview
+    received first is available to the next matching turns response. *)
+val clear_turn_preview_updates : t -> t
+(** [turn_preview_updates] revisions are meaningful within one observer
+    process and workspace. *)
 val apply_fleet_stream_event :
   observed_at:Clock.Mono.t -> Wire_fleet.fleet_stream_event -> t -> t
 val apply_heartbeat :

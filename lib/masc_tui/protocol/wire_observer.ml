@@ -177,6 +177,10 @@ type event =
     }
   | Keeper_roster_changed of string option
   | Keeper_turn_changed of { keeper : string; preview_only : bool }
+  | Keeper_turn_preview of {
+      keeper : string;
+      update : Wire_fleet.turn_preview_update;
+    }
   | Keeper_memory_journal_appended of { keeper : string; at_unix : float }
   | Board_changed of { post_id : string option }
   | Approval_changed of approval_event
@@ -427,7 +431,11 @@ let decode_typed_event type_name json =
         Ok (Keeper_turn_changed { keeper; preview_only = false })
     | "keeper_turn_preview_changed" ->
         let* keeper = required_nonblank_string json "name" in
-        Ok (Keeper_turn_changed { keeper; preview_only = true })
+        if has_field json "observation" then
+          let* observation = required_object_field json "observation" in
+          let* update = Wire_fleet.decode_turn_preview_update observation in
+          Ok (Keeper_turn_preview { keeper; update })
+        else Ok (Keeper_turn_changed { keeper; preview_only = true })
     | "keeper_memory_journal_appended" ->
         let* keeper = required_nonblank_string json "name" in
         let* at_unix = required_finite_float json "ts_unix" in

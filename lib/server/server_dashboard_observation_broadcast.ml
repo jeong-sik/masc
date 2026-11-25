@@ -18,8 +18,7 @@ let observations = function
   | Keeper { keeper = name; change = Turn } ->
       keeper name [`Keeper_turns; `Keeper_composite; `Keeper_runtime_trace]
       @ workspace [`Telemetry]
-  | Keeper { keeper = name; change = Turn_preview } ->
-      keeper name [`Keeper_turns]
+  | Keeper { change = Turn_preview; _ } -> []
   | Keeper { keeper = name; change = Native_tasks | Child_content } ->
       keeper name [`Keeper_runtime_trace; `Keeper_sandbox]
   | Keeper { keeper = name; change = Memory_journal } ->

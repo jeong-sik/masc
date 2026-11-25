@@ -1,3 +1,6 @@
+let keeper_turn_observation_key ~interrupt_token =
+  Digest.BLAKE256.(to_hex (string interrupt_token))
+
 let data_payload_line line =
   let line_len = String.length line in
   let line_len =

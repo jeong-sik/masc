@@ -476,6 +476,19 @@ let test_run_next_ownership_and_started_boundary () =
       ["mine-a";"mine-b";"mine-c";"other-first";"outsider"] (order ()))
 ;;
 
+let test_preview_does_not_invalidate_dashboard_turn_slots () =
+  let has_turns_topic input =
+    Server_dashboard_observation_broadcast.observations input
+    |> List.exists (fun observation ->
+      observation.Sse_event.Types.topic = `Keeper_turns)
+  in
+  let keeper = "fixture-keeper" in
+  Alcotest.(check bool) "preview writes do not reload the Dashboard's owner slots"
+    false (has_turns_topic (Keeper { keeper; change = Turn_preview }));
+  Alcotest.(check bool) "owner slot changes still reload the Dashboard"
+    true (has_turns_topic (Keeper { keeper; change = Turn }))
+;;
+
 let () =
   Alcotest.run "keeper_turns_route"
     [ ( "keeper-turns-route"
@@ -489,6 +502,8 @@ let () =
             test_installed_keeper_rides_as_an_idle_row
         ; Alcotest.test_case "fleet waiting read errors stay public" `Quick
             test_waiting_read_errors_stay_public
+        ; Alcotest.test_case "preview writes preserve the Dashboard owner-slot subscription"
+            `Quick test_preview_does_not_invalidate_dashboard_turn_slots
         ] )
     ]
 ;;

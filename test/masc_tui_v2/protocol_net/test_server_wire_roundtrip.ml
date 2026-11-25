@@ -1795,6 +1795,8 @@ let test_keeper_turns_preview_roundtrip () =
             (Some "trace-rt#42") t.turn_ref;
           match t.preview with
           | Some p ->
+              Alcotest.(check (option int)) "preview revision preserved"
+                (Some snap_stream.revision) p.revision;
               Alcotest.(check bool) "stream activity preserved" true
                 (Wire_fleet.equal_turn_preview_activity p.activity
                    Wire_fleet.Preview_streaming);

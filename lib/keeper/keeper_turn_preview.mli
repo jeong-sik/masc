@@ -60,6 +60,9 @@ type t =
         (** Most recently observed tool name, including requests before validation
             and returned calls. This does not claim a tool is executing. *)
   ; updated_at : float
+  ; revision : int
+        (** Process-local ordering of preview writes, including writer replacement.
+            Wall-clock timestamps can move backwards. *)
   ; runtime_id : string option
   ; activity : activity
   ; last_failure : string option

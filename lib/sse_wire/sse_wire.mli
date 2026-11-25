@@ -29,6 +29,10 @@ val format_event_yojson :
   ?id:int -> ?event_type:string -> Yojson.Safe.t -> string
 (** Frame JSON without allocating an intermediate serialized JSON string. *)
 
+val keeper_turn_observation_key : interrupt_token:string -> string
+(** Correlates an observed preview with an already-read Owner slot without
+    transmitting the interrupt token on the observer stream. *)
+
 (** A JSON value with its compact encoding. Encoding a large value is most of
     the cost of broadcasting it, so a caller can encode once, off its fiber,
     and hand the result on. Only {!encode_json} and {!encoded_object} make one,

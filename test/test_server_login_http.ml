@@ -2814,7 +2814,11 @@ let dashboard_bridge_rbac_and_sse_matrix () =
         ~worker_sees:true
         (`Assoc
            [ "type", `String "keeper_turn_preview_changed"
-           ; "keeper", `String "member-owned-keeper"
+           ; "name", `String "member-owned-keeper"
+           ; "observation", `Assoc
+               [ "owner_key", `String "observation-key"
+               ; "preview", `Assoc [ "text_tail", `String "private preview" ]
+               ]
            ]);
       check_sse
         "operator_snapshot is Admin-only"

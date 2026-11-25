@@ -41,6 +41,7 @@ type t =
   ; text_tail : string
   ; last_tool : string option
   ; updated_at : float
+  ; revision : int
   ; runtime_id : string option
   ; activity : activity
   ; last_failure : string option
@@ -90,6 +91,13 @@ let with_lock f =
   Mutex.lock mutex;
   Fun.protect ~finally:(fun () -> Mutex.unlock mutex) f
 
+(* The same lock orders reads and writes, even when a writer is replaced. *)
+let revision = ref 0
+
+let next_revision () =
+  incr revision;
+  !revision
+
 (* Under the lock: whether the turns answer can read [writer]. It reads the
    installed writer only, and only for the Owner slot that owns it
    ([current_for_turn]), so a writer installed without an owner shows
@@ -106,8 +114,8 @@ let announce = function
 
 let shown_after_write writer = if displayed writer then Some (!writer).shown_as else None
 
-let empty ~execution_scope now =
-  { text_position = {generation=0; start_byte=0}; text_tail = ""; last_tool = None; updated_at = now
+let empty ~execution_scope ~revision now =
+  { text_position = {generation=0; start_byte=0}; text_tail = ""; last_tool = None; updated_at = now; revision
   ; runtime_id = None; activity = Preparing; last_failure = None; preparation = None; preparation_timeline = empty_preparation_timeline; execution_scope }
 
 let current ~keeper_name =
@@ -132,7 +140,7 @@ let change_entry ~writer ~now f =
          match f !writer with
          | None -> None
          | Some entry ->
-           writer := { entry with preview = { entry.preview with updated_at = now } };
+           writer := { entry with preview = { entry.preview with updated_at = now; revision = next_revision () } };
            shown_after_write writer))) writer
 
 let update ~writer ~now f =
@@ -163,7 +171,7 @@ let observe_preparation ~returned ~writer ~turn_ref ~phase operation =
         next_preparation_scope_id=scope_id + 1;
         preparations=(token,span)::entry.preparations;
         preview={entry.preview with preparation=Some preparation;activity=Preparing;
-          updated_at=started_at;
+          updated_at=started_at; revision = next_revision ();
           preparation_timeline=Preparation_scopes.add scope_id span entry.preview.preparation_timeline}};
       span, shown_after_write owned_writer) in
     announce shown;
@@ -175,7 +183,7 @@ let observe_preparation ~returned ~writer ~turn_ref ~phase operation =
         let entry = !owned_writer in
         let timeline = Preparation_scopes.add span.scope_id
             {span with preparation=completed} entry.preview.preparation_timeline in
-        let preview = {entry.preview with preparation_timeline=timeline} in
+        let preview = {entry.preview with preparation_timeline=timeline; revision = next_revision ()} in
         if not (List.exists (fun (owner,_) -> owner == token) entry.preparations) then
           (* Keep the completed span without reopening a superseded live phase
              or advancing provider/Tool activity's own observation clock. *)
@@ -215,12 +223,18 @@ let redacting redaction =
 
 let reset ~base_path ~keeper_name ~execution_scope ~turn_ref ~now ~redaction =
   let shown_as = { base_path; keeper_name } in
-  let writer = ref { preview = empty ~execution_scope now; text_intake = redacting redaction;
-    released_bytes = 0; tools = Tool_indexes.empty; preparations = []; next_preparation_scope_id = 0;
-    owner = Keeper_turn_preview_owner.current (); original_turn_ref = turn_ref; shown_as } in
-  announce (with_lock (fun () ->
-    Hashtbl.replace table keeper_name writer;
-    shown_after_write writer));
+  let text_intake = redacting redaction in
+  let owner = Keeper_turn_preview_owner.current () in
+  let writer, shown =
+    with_lock (fun () ->
+      let preview = empty ~execution_scope ~revision:(next_revision ()) now in
+      let writer = ref { preview; text_intake; released_bytes = 0;
+        tools = Tool_indexes.empty; preparations = []; next_preparation_scope_id = 0;
+        owner; original_turn_ref = turn_ref; shown_as } in
+      Hashtbl.replace table keeper_name writer;
+      writer, shown_after_write writer)
+  in
+  announce shown;
   writer
 
 let original_turn_ref writer = with_lock (fun () -> (!writer).original_turn_ref)
@@ -510,6 +524,7 @@ let to_json ?(include_preparation_timeline = false) preview =
       "start_byte", `Int preview.text_position.start_byte];
     "last_tool", (match preview.last_tool with None -> `Null | Some name -> `String name);
     "updated_at_unix", `Float preview.updated_at;
+    "revision", `Int preview.revision;
     "preparation",Option.fold ~none:`Null ~some:preparation_to_json preview.preparation;
     "preparation_timeline",(if include_preparation_timeline then
       preparation_timeline_to_json preview.preparation_timeline else `Null);

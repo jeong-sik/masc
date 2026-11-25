@@ -115,6 +115,7 @@ type t = {
   keepers : Wire_fleet.keeper_summary list Observed.t;
   unreadable_keepers : Wire_fleet.unreadable_keeper list;
   turns : Wire_fleet.keeper_turn_row list Observed.t;
+  turn_preview_updates : Wire_fleet.turn_preview_update String_map.t;
   interrupting_turn_tokens : string String_map.t;
   turn_records : Wire_fleet.keeper_turn_records Observed.t String_map.t;
   chat_control_tokens : string String_map.t;
@@ -153,6 +154,7 @@ let empty =
     keepers = Observed.loading ~since_ns:Clock.Mono.zero;
     unreadable_keepers = [];
     turns = Observed.unreported;
+    turn_preview_updates = String_map.empty;
     interrupting_turn_tokens = String_map.empty;
     turn_records = String_map.empty;
     chat_control_tokens = String_map.empty;
@@ -766,12 +768,68 @@ let overlay_turns_on_keepers (rows : Wire_fleet.keeper_turn_row list)
       | Some { state = Wire_fleet.Turn_unavailable _; _ } | None -> k)
     ks
 
+let with_newer_preview (preview : Wire_fleet.turn_preview)
+    (turn : Wire_fleet.active_turn) =
+  let current_revision = Option.bind turn.preview (fun preview -> preview.revision) in
+  if Option.compare Int.compare preview.revision current_revision > 0
+  then { turn with preview = Some preview }
+  else turn
+
+let apply_preview (update : Wire_fleet.turn_preview_update)
+    (turn : Wire_fleet.active_turn) =
+  if Wire_fleet.preview_update_belongs_to_turn update turn
+  then with_newer_preview update.preview turn
+  else turn
+
+let map_active_turn f (row : Wire_fleet.keeper_turn_row) =
+  match row.state with
+  | Wire_fleet.Turn_active turn -> { row with state = Wire_fleet.Turn_active (f turn) }
+  | Wire_fleet.Turn_idle | Wire_fleet.Turn_unavailable _ -> row
+
+let apply_row_preview update (row : Wire_fleet.keeper_turn_row) =
+  map_active_turn (apply_preview update) row
+
+let apply_keeper_preview update (keeper : Wire_fleet.keeper_summary) =
+  { keeper with active_turn = Option.map (apply_preview update) keeper.active_turn }
+
+let observe_turn_preview ~keeper (update : Wire_fleet.turn_preview_update) t =
+  let previous_revision =
+    Option.bind (String_map.find_opt keeper t.turn_preview_updates)
+      (fun previous -> previous.preview.revision)
+  in
+  if Option.compare Int.compare update.preview.revision previous_revision <= 0
+  then t
+  else
+    let turn_preview_updates = String_map.add keeper update t.turn_preview_updates in
+    let turns =
+      Observed.map
+        (List.map (fun (row : Wire_fleet.keeper_turn_row) ->
+           if String.equal row.keeper_name keeper then apply_row_preview update row
+           else row))
+        t.turns
+    in
+    let keepers =
+      Observed.map
+        (List.map (fun (row : Wire_fleet.keeper_summary) ->
+           if String.equal row.name keeper then apply_keeper_preview update row
+           else row))
+        t.keepers
+    in
+    { t with turn_preview_updates; turns; keepers }
+
+let clear_turn_preview_updates t =
+  { t with turn_preview_updates = String_map.empty }
+
 let apply_keepers ~observed_at ks t =
   let prev_index = resolve_current_index t (filtered_keepers t) in
   let ks_with_turns =
     match Observed.to_option t.turns with
     | Some rows -> overlay_turns_on_keepers rows ks
-    | None -> ks
+    | None ->
+        List.map (fun (keeper : Wire_fleet.keeper_summary) ->
+          match String_map.find_opt keeper.name t.turn_preview_updates with
+          | Some update -> apply_keeper_preview update keeper
+          | None -> keeper) ks
   in
   let next = { t with keepers = Observed.value ~observed_at ks_with_turns } in
   sync_selection_after_change ~prev_index ~reset_scroll:false
@@ -861,6 +919,21 @@ let enrich_scorecard f t =
   { t with shell; raw_shell_scorecard }
 
 let apply_turns ~observed_at rows t =
+  let preserve_current_preview keeper (turn : Wire_fleet.active_turn) =
+    match active_turn_for ~keeper t with
+    | Some previous when String.equal previous.interrupt_token turn.interrupt_token ->
+        (match previous.preview with
+        | Some preview -> with_newer_preview preview turn
+        | None -> turn)
+    | Some _ | None -> turn
+  in
+  let rows =
+    List.map (fun (row : Wire_fleet.keeper_turn_row) ->
+      let row = map_active_turn (preserve_current_preview row.keeper_name) row in
+      match String_map.find_opt row.keeper_name t.turn_preview_updates with
+      | Some update -> apply_row_preview update row
+      | None -> row) rows
+  in
   let chat_control_tokens =
     List.fold_left
       (fun acc (r : Wire_fleet.keeper_turn_row) ->

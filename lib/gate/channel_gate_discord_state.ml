@@ -394,6 +394,7 @@ type keeper_binding_resolution = {
   incoming_channel_id : string;
   bound_channel_id : string;
   via_parent : bool;
+  parent_channel_id : string option;
 }
 
 let resolve_keeper_for_channel_result ~channel_id =
@@ -403,6 +404,11 @@ let resolve_keeper_for_channel_result ~channel_id =
     match read_bindings_lookup_result () with
     | Error _ as error -> error
     | Ok candidates ->
+      let parent_channel_id =
+        match parent_channel_of_thread ~channel_id:normalized with
+        | Some parent when not (String.equal parent normalized) -> Some parent
+        | Some _ | None -> None
+      in
       (match
          Store.find_binding_by_channel_id candidates ~channel_id:normalized
        with
@@ -413,17 +419,15 @@ let resolve_keeper_for_channel_result ~channel_id =
               ; incoming_channel_id = normalized
               ; bound_channel_id = binding.channel_id
               ; via_parent = false
+              ; parent_channel_id
               })
        | None ->
          let parent_binding =
            Option.bind
-             (parent_channel_of_thread ~channel_id:normalized)
+             parent_channel_id
              (fun parent_channel_id ->
-                if String.equal parent_channel_id normalized
-                then None
-                else
-                  Store.find_binding_by_channel_id candidates
-                    ~channel_id:parent_channel_id)
+                Store.find_binding_by_channel_id candidates
+                  ~channel_id:parent_channel_id)
          in
          Ok
            (Option.map
@@ -432,6 +436,7 @@ let resolve_keeper_for_channel_result ~channel_id =
                  ; incoming_channel_id = normalized
                  ; bound_channel_id = binding.channel_id
                  ; via_parent = true
+                 ; parent_channel_id
                  })
               parent_binding))
 

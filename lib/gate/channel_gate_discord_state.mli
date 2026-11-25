@@ -75,6 +75,9 @@ type keeper_binding_resolution = {
   incoming_channel_id : string;
   bound_channel_id : string;
   via_parent : bool;
+  parent_channel_id : string option;
+  (** The distinct parent observed at this lookup, if the registry knows it.
+      Present even when the thread has its own exact binding. *)
 }
 
 type binding_lookup_error =
@@ -91,8 +94,8 @@ val keeper_for_channel_result :
 val resolve_keeper_for_channel_result :
   channel_id:string ->
   (keeper_binding_resolution option, binding_lookup_error) result
-(** Resolve the keeper for [channel_id]. Exact bindings win. The only
-    parent fallback is an in-process thread-registry observation. *)
+(** Resolve the keeper for [channel_id]. Exact bindings win. The same
+    thread-registry observation supplies the fallback and the returned parent. *)
 
 val bound_channels :
   keeper_name:string ->

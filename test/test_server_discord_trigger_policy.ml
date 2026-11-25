@@ -531,6 +531,13 @@ let test_thread_and_guild_nickname_survive_ingress () =
     Gate_protocol.Reply
       { content = ""; structured = None; stats = None; message_request = None }
   in
+  let release, resolve_release = Eio.Promise.create () in
+  (match Connector_ingress_lane.submit ingress
+           ~lane:(Connector_ingress_lane.Keeper_lane "luna")
+           ~event_id:{ source = "test"; opaque_id = "hold" }
+           (fun () -> Eio.Promise.await release) with
+   | Ok () -> ()
+   | Error error -> fail (Connector_ingress_lane.submit_error_to_string error));
   G.For_testing.submit_ambient_event ingress ~base_dir
     (event ~message_id:"m1" ~author_id:"user-1" ~global_name:"First" ~nickname:"Nickname");
   G.For_testing.submit_ambient_event ingress ~base_dir
@@ -538,6 +545,8 @@ let test_thread_and_guild_nickname_survive_ingress () =
   G.For_testing.submit_triggered_event ~deliver:(fun () -> ()) ingress
     ~dispatch_for_delivery ~base_dir
     (event ~message_id:"m3" ~author_id:"user-1" ~global_name:"First" ~nickname:"New nickname");
+  State.unregister_thread ~thread_id;
+  Eio.Promise.resolve resolve_release ();
   fun () ->
     let observations =
       Keeper_external_attention.load_events ~base_path:base_dir ~keeper_name:"luna"

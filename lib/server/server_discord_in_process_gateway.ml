@@ -96,8 +96,7 @@ let discord_conversation_id ~guild_id ~channel_id =
   in
   Printf.sprintf "discord:%s:channel:%s" guild_label channel_id
 
-let discord_conversation ~guild_id ~channel_id ~channel_name =
-  let parent_channel_id = State.parent_channel_of_thread ~channel_id in
+let discord_conversation ~guild_id ~channel_id ~channel_name ~parent_channel_id =
   let thread_id = Option.map (fun _ -> channel_id) parent_channel_id in
   let conversation : Keeper_external_attention.conversation_ref =
     { conversation_id = discord_conversation_id ~guild_id ~channel_id
@@ -106,7 +105,7 @@ let discord_conversation ~guild_id ~channel_id ~channel_name =
           { guild_id; channel_id; channel_name; parent_channel_id; thread_id }
     }
   in
-  conversation, parent_channel_id, thread_id
+  conversation, thread_id
 
 let discord_delivery ~(conversation : Keeper_external_attention.conversation_ref)
     ~guild_id ~channel_id ~parent_channel_id ~thread_id ~message_id ~author_id :
@@ -659,8 +658,9 @@ let accept_message_create ~resolved_binding ~dispatch_for_delivery
         ~attachments
     in
     let channel_name = resolve_channel_name ~base_dir ~channel_id in
-    let conversation, parent_channel_id, thread_id =
-      discord_conversation ~guild_id ~channel_id ~channel_name
+    let parent_channel_id = resolution.parent_channel_id in
+    let conversation, thread_id =
+      discord_conversation ~guild_id ~channel_id ~channel_name ~parent_channel_id
     in
     let display_name = message_author_name ~author_name guild_nickname in
     let metadata =
@@ -854,7 +854,7 @@ let accept_event ~resolved_binding ~dispatch_for_delivery ~base_dir
    the trigger policy is still conversation the keeper sits in. Persist
    a single user line — no dispatch, no turn. Unbound channels drop, as
    on the dispatch path. *)
-let handle_ambient ?resolved_keeper_name ~base_dir
+let handle_ambient ?resolved_binding ~base_dir
       ~(channel_id : string) ~(guild_id : string option) ~(message_id : string)
       ~(author_id : string) ~(author_name : string option)
       ~guild_nickname
@@ -862,12 +862,12 @@ let handle_ambient ?resolved_keeper_name ~base_dir
       ~(resolved_mentions : Discord_gateway_state.resolved_mention list)
       ~(bot_user_id : string option)
       ~(attachments : Discord_gateway_state.inbound_attachment list) () =
-  let keeper_name =
-    match resolved_keeper_name with
-    | Some keeper_name -> Ok (Some keeper_name)
-    | None -> State.keeper_for_channel_result ~channel_id
+  let binding =
+    match resolved_binding with
+    | Some binding -> Ok (Some binding)
+    | None -> State.resolve_keeper_for_channel_result ~channel_id
   in
-  match keeper_name with
+  match binding with
   | Error error ->
     log_binding_lookup_failure ~channel_id error;
     Discord_observability.record_ambient
@@ -875,7 +875,8 @@ let handle_ambient ?resolved_keeper_name ~base_dir
   | Ok None ->
     Discord_observability.record_ambient
       Discord_observability.Ambient_dropped_unbound
-  | Ok (Some keeper_name) ->
+  | Ok (Some resolution) ->
+    let keeper_name = resolution.State.keeper_name in
     (* A photo with no caption is a message. Trimming the text alone read it
        as empty and dropped it, so a file posted without words never reached
        the Keeper at all. *)
@@ -900,8 +901,9 @@ let handle_ambient ?resolved_keeper_name ~base_dir
       (* Resolved once for this message, so the attention record and the
          durable chat row name the same room. *)
       let channel_name = resolve_channel_name ~base_dir ~channel_id in
-      let conversation, parent_channel_id, thread_id =
-        discord_conversation ~guild_id ~channel_id ~channel_name
+      let parent_channel_id = resolution.parent_channel_id in
+      let conversation, thread_id =
+        discord_conversation ~guild_id ~channel_id ~channel_name ~parent_channel_id
       in
       let display_name = message_author_name ~author_name guild_nickname in
       let attention_event_id =
@@ -955,7 +957,7 @@ let handle_ambient ?resolved_keeper_name ~base_dir
         Discord_observability.Ambient_recorded
     end
 
-let on_ambient ?resolved_keeper_name ~base_dir (ev : Gw.gateway_event) =
+let on_ambient ?resolved_binding ~base_dir (ev : Gw.gateway_event) =
   match ev with
   | Gw.Message_create
       { channel_id
@@ -970,7 +972,7 @@ let on_ambient ?resolved_keeper_name ~base_dir (ev : Gw.gateway_event) =
       ; attachments
       ; _
       } ->
-    handle_ambient ?resolved_keeper_name ~base_dir ~channel_id ~guild_id
+    handle_ambient ?resolved_binding ~base_dir ~channel_id ~guild_id
       ~message_id ~author_id ~author_name ~guild_nickname ~raw_content ~resolved_mentions
       ~bot_user_id ~attachments ()
   | Gw.Ready _ | Gw.Reaction_add _ | Gw.Thread_tracked _ | Gw.Threads_bulk_tracked _ | Gw.Thread_removed _ | Gw.Ignored _ -> ()
@@ -1026,18 +1028,18 @@ let submit_ingress ingress ~lane ~event_id run =
 let submit_ambient_event ingress ~base_dir (ev : Gw.gateway_event) =
   match ev with
   | Gw.Message_create { channel_id; message_id; _ } ->
-    (match State.keeper_for_channel_result ~channel_id with
+    (match State.resolve_keeper_for_channel_result ~channel_id with
      | Error error ->
        log_binding_lookup_failure ~channel_id error;
        Discord_observability.record_ambient
          Discord_observability.Ambient_binding_store_error
      | Ok None -> on_ambient ~base_dir ev
-     | Ok (Some keeper_name) ->
+     | Ok (Some resolution) ->
        submit_ingress
          ingress
-         ~lane:(Connector_ingress_lane.Keeper_lane keeper_name)
+         ~lane:(Connector_ingress_lane.Keeper_lane resolution.State.keeper_name)
          ~event_id:{ source = "discord_ambient"; opaque_id = message_id }
-         (fun () -> on_ambient ~resolved_keeper_name:keeper_name ~base_dir ev))
+         (fun () -> on_ambient ~resolved_binding:resolution ~base_dir ev))
   | Gw.Ready _
   | Gw.Reaction_add _
   | Gw.Thread_tracked _

@@ -7,11 +7,13 @@
     screen. *)
 
 open Masc_tui_core
+module Wire_config = Masc_tui_protocol.Wire_config
 module Wire_knowledge = Masc_tui_protocol.Wire_knowledge
 module Wire_infra = Masc_tui_protocol.Wire_infra
 module Wire_fleet = Masc_tui_protocol.Wire_fleet
 module Wire_runtime = Masc_tui_protocol.Wire_runtime
 module Wire_work = Masc_tui_protocol.Wire_work
+module Config_store = Masc_tui_store.Config_store
 module Stream_route = Server_routes_http_keeper_stream
 module Owner_registry = Masc.Keeper_owner_registry
 module Workspace = Masc.Workspace
@@ -1900,11 +1902,180 @@ let test_keeper_lifecycle_directive_roundtrip () =
     | Error Workspace.Workspace_precondition_failed -> true
     | Error Workspace.Invalid_workspace_precondition | Ok _ -> false)
 
+(* Settings tui.* enum parity: every canonical TUI enum list matches the
+   server's Board_dispatch / Tui_preference parsers and wire codecs 1:1 so
+   adding or renaming an enum on either side fails here immediately. *)
+let test_tui_settings_enum_parity_roundtrip () =
+  let module Bd = Masc.Board_dispatch in
+  let module Tp = Masc.Tui_preference in
+  let sort_uniq xs = List.sort_uniq String.compare xs in
+  (* Exhaustiveness witnesses: adding a constructor on either server or TUI
+     triggers -warn-error +a (Warning 8) here immediately. *)
+  let sort_order_string = function
+    | (Bd.Hot | Bd.Trending | Bd.Recent | Bd.Updated | Bd.Discussed) as o ->
+        Bd.sort_order_to_string o
+  in
+  let candle_string = function
+    | (Tp.Painted | Tp.Dotted) as c -> Tp.candle_to_string c
+  in
+  let server_lang_string = function
+    | (Tp.Lang_ko | Tp.Lang_en) as l -> Tp.language_to_string l
+  in
+  let tui_lang_string = function
+    | (Say.Lang_ko | Say.Lang_en) as l -> Say.lang_code l
+  in
+  (* 1. tui.board_sort <-> Board_dispatch.sort_order & Tui_preference.change_of_yojson *)
+  Alcotest.(check (list string))
+    "Config_store.valid_board_sort_values matches Board_dispatch.valid_sort_order_strings"
+    (sort_uniq Bd.valid_sort_order_strings)
+    (sort_uniq Config_store.valid_board_sort_values);
+  List.iter
+    (fun raw ->
+      (match Bd.sort_order_of_string_opt raw with
+      | Some order ->
+          Alcotest.(check string)
+            ("Board_dispatch round-trip for " ^ raw)
+            raw (sort_order_string order)
+      | None ->
+          Alcotest.fail
+            ("Board_dispatch.sort_order_of_string_opt rejected " ^ raw));
+      let wire_json =
+        Wire_config.encode_tui_preference_change (Wire_config.Pref_board_sort raw)
+      in
+      match Tp.change_of_yojson wire_json with
+      | Ok (Tp.Board_sort_chosen order) ->
+          Alcotest.(check string)
+            ("Tui_preference board_sort wire round-trip for " ^ raw)
+            raw (sort_order_string order)
+      | Ok
+          ( Tp.Chat_visited _
+          | Tp.Theme_chosen _
+          | Tp.Language_chosen _
+          | Tp.Candle_chosen _
+          | Tp.Help_hint_retired ) ->
+          Alcotest.fail ("unexpected preference variant for board_sort " ^ raw)
+      | Error err ->
+          Alcotest.fail
+            (Printf.sprintf "Tui_preference.change_of_yojson rejected board_sort %S: %s"
+               raw err))
+    Config_store.valid_board_sort_values;
+  (* 2. tui.candle <-> Tui_preference.candle & change_of_yojson *)
+  let seen_candles =
+    List.map
+      (fun raw ->
+        let parsed =
+          match Tp.candle_of_string raw with
+          | Some c ->
+              Alcotest.(check string)
+                ("Tui_preference.candle_to_string round-trip for " ^ raw)
+                raw (candle_string c);
+              c
+          | None ->
+              Alcotest.fail ("Tui_preference.candle_of_string rejected " ^ raw)
+        in
+        let wire_json =
+          `Assoc [ ("change", `String "candle"); ("candle", `String raw) ]
+        in
+        (match Tp.change_of_yojson wire_json with
+        | Ok (Tp.Candle_chosen c) ->
+            Alcotest.(check string)
+              ("Tui_preference candle wire round-trip for " ^ raw)
+              raw (candle_string c)
+        | Ok
+            ( Tp.Chat_visited _
+            | Tp.Theme_chosen _
+            | Tp.Language_chosen _
+            | Tp.Board_sort_chosen _
+            | Tp.Help_hint_retired ) ->
+            Alcotest.fail ("unexpected preference variant for candle " ^ raw)
+        | Error err ->
+            Alcotest.fail
+              (Printf.sprintf "Tui_preference.change_of_yojson rejected candle %S: %s"
+                 raw err));
+        parsed)
+      Config_store.valid_candle_values
+  in
+  let server_candle_strings =
+    List.map candle_string [ Tp.Painted; Tp.Dotted ]
+  in
+  Alcotest.(check (list string))
+    "Config_store.valid_candle_values covers every Tui_preference.candle"
+    (sort_uniq server_candle_strings)
+    (sort_uniq (List.map candle_string seen_candles));
+  (* 3. tui.opening <-> Tui_preference.settings_of_reading / opening_of_doc *)
+  let opening_mode_of = function
+    | Tp.Overview -> "overview"
+    | Tp.Last _ -> "last"
+    | Tp.Keeper _ -> "keeper"
+  in
+  let seen_openings =
+    List.map
+      (fun raw ->
+        let toml =
+          if String.equal raw "keeper" then
+            "[tui]\nopening = \"keeper\"\nopening_keeper = \"alpha\"\n"
+          else Printf.sprintf "[tui]\nopening = %S\n" raw
+        in
+        let settings = Tp.settings_of_reading (Ok (Some toml)) in
+        match settings.Tp.opening with
+        | Ok opening ->
+            let mode = opening_mode_of opening in
+            Alcotest.(check string)
+              ("Tui_preference.opening_of_doc mode for " ^ raw)
+              raw mode;
+            mode
+        | Error err ->
+            Alcotest.fail
+              (Printf.sprintf "Tui_preference.settings_of_reading rejected opening %S: %s"
+                 raw err))
+      Config_store.valid_opening_values
+  in
+  Alcotest.(check (list string))
+    "Config_store.valid_opening_values covers overview/last/keeper"
+    [ "keeper"; "last"; "overview" ]
+    (sort_uniq seen_openings);
+  (* 4. tui.language <-> Tui_preference.language & change_of_yojson *)
+  let all_tui_langs = [ Say.Lang_ko; Say.Lang_en ] in
+  let all_server_langs = [ Tp.Lang_ko; Tp.Lang_en ] in
+  Alcotest.(check (list string))
+    "Say.lang covers every Tui_preference.language"
+    (sort_uniq (List.map server_lang_string all_server_langs))
+    (sort_uniq (List.map tui_lang_string all_tui_langs));
+  List.iter
+    (fun lang ->
+      let code = tui_lang_string lang in
+      let wire_json =
+        Wire_config.encode_tui_preference_change (Wire_config.Pref_language lang)
+      in
+      match Tp.change_of_yojson wire_json with
+      | Ok (Tp.Language_chosen parsed) ->
+          Alcotest.(check string)
+            ("Tui_preference language wire round-trip for " ^ code)
+            code (server_lang_string parsed)
+      | Ok
+          ( Tp.Chat_visited _
+          | Tp.Theme_chosen _
+          | Tp.Board_sort_chosen _
+          | Tp.Candle_chosen _
+          | Tp.Help_hint_retired ) ->
+          Alcotest.fail ("unexpected preference variant for language " ^ code)
+      | Error err ->
+          Alcotest.fail
+            (Printf.sprintf "Tui_preference.change_of_yojson rejected language %S: %s"
+               code err))
+    all_tui_langs
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Alcotest.run "server_wire_roundtrip"
     [
+      ( "config",
+        [
+          Alcotest.test_case
+            "tui.* Settings enums -> Board_dispatch & Tui_preference" `Quick
+            test_tui_settings_enum_parity_roundtrip;
+        ] );
       ( "work",
         [
           Alcotest.test_case "schedule wake record -> decode_schedules_snapshot"

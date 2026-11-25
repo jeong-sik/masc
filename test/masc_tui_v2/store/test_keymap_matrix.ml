@@ -1318,10 +1318,45 @@ let test_axis_a_screen_dive_matrix () =
             (tag ^ " pane_index in bounds")
             true
             (m'.nav.pane_index >= 0 && m'.nav.pane_index < panes_after);
-          (* Invariant 2: Tab / Shift+Tab unified focus ring (Body panes <-> Sidebar) *)
+          (* Invariant 2: Tab / Shift+Tab unified focus ring (Body panes <-> Sidebar),
+             except Thread_dive body where Tab/Shift+Tab switches Post <-> Comments tabs. *)
           let sb_vis_before = Model.sidebar_visible m in
+          let is_thread_dive_body =
+            (not m.nav.sidebar_focused)
+            &&
+            match dive_before with
+            | Some (Nav.Dive_knowledge (Nav.Thread_dive _)) -> true
+            | Some
+                ( Nav.Dive_knowledge
+                    ( Nav.Wiki_dive _ | Nav.Artifact_dive _
+                    | Nav.Memory_diff_dive _ )
+                | Nav.Dive_keeper _
+                | Nav.Dive_work _
+                | Nav.Dive_runtime _
+                | Nav.Dive_infra _ )
+            | None ->
+                false
+          in
+          let thread_view_toggled =
+            match (m.knowledge.thread_view, m'.knowledge.thread_view) with
+            | Knowledge_store.Thread_post, Knowledge_store.Thread_comments
+            | Knowledge_store.Thread_comments, Knowledge_store.Thread_post ->
+                true
+            | Knowledge_store.Thread_post, Knowledge_store.Thread_post
+            | Knowledge_store.Thread_comments, Knowledge_store.Thread_comments
+              ->
+                false
+          in
           if String.equal kname "Tab" then begin
-            if m.nav.pane_index + 1 < panes_before then begin
+            if is_thread_dive_body then begin
+              Alcotest.(check bool)
+                (tag ^ " Tab toggles Board thread reading tab")
+                true thread_view_toggled;
+              Alcotest.(check bool)
+                (tag ^ " Tab stays in thread reading body")
+                false m'.nav.sidebar_focused
+            end
+            else if m.nav.pane_index + 1 < panes_before then begin
               Alcotest.(check int) (tag ^ " Tab pane_index")
                 (m.nav.pane_index + 1) m'.nav.pane_index;
               Alcotest.(check bool) (tag ^ " Tab stays in body") false
@@ -1337,7 +1372,15 @@ let test_axis_a_screen_dive_matrix () =
             end
           end;
           if String.equal kname "Shift+Tab" then begin
-            if m.nav.pane_index > 0 then begin
+            if is_thread_dive_body then begin
+              Alcotest.(check bool)
+                (tag ^ " Shift+Tab toggles Board thread reading tab")
+                true thread_view_toggled;
+              Alcotest.(check bool)
+                (tag ^ " Shift+Tab stays in thread reading body")
+                false m'.nav.sidebar_focused
+            end
+            else if m.nav.pane_index > 0 then begin
               Alcotest.(check int) (tag ^ " Shift+Tab pane_index")
                 (m.nav.pane_index - 1) m'.nav.pane_index;
               Alcotest.(check bool) (tag ^ " Shift+Tab stays in body") false
@@ -5355,20 +5398,37 @@ let test_pillar2_scroll_bounds_all_surfaces () =
   (* 10l. Populated long fixtures for ALL 9 non-chat Dives (bottom-row rendered + zero sticky Up!) *)
   let long_comments =
     List.init 45 (fun i : Wire_knowledge.board_comment ->
+        let body =
+          if i = 0 then
+            (List.init 45 (fun j ->
+                 Printf.sprintf "Comment paragraph %02d with verification detail" j)
+             |> String.concat "\n\n")
+            ^ "\n\nTHREAD_COMMENT_BOTTOM_44"
+          else Printf.sprintf "Comment number %02d with verification detail" i
+        in
         {
           id = Printf.sprintf "c-%02d" i;
           post_id = "post-1";
           parent_id = None;
           author = "alpha";
-          body = Printf.sprintf "Comment number %02d with verification detail" i;
+          body;
           created_at_unix = 1700000100.0 +. float_of_int i;
           score = 1;
         })
   in
   let post1 =
-    match Knowledge_store.selected_post base.knowledge with
-    | Some p -> p
-    | None -> mk_post ~id:"post-1" ~title:"Post 1" ~author:"alpha" ~signal:true
+    let base_post =
+      match Knowledge_store.selected_post base.knowledge with
+      | Some p -> p
+      | None -> mk_post ~id:"post-1" ~title:"Post 1" ~author:"alpha" ~signal:true
+    in
+    let body =
+      (List.init 45 (fun i ->
+           Printf.sprintf "Post paragraph %02d with verification detail" i)
+       |> String.concat "\n\n")
+      ^ "\n\nTHREAD_POST_BOTTOM_44"
+    in
+    { base_post with body }
   in
   let dive_tasks =
     List.init 35 (fun i ->
@@ -5455,7 +5515,7 @@ let test_pillar2_scroll_bounds_all_surfaces () =
       , Nav.Dive_work (Nav.Verification_dive "verif-1")
       , "Missing artifacts"
       , dive_off );
-      ("Thread_dive", Nav.Dive_knowledge (Nav.Thread_dive "post-1"), "Comment number 44", dive_off);
+      ("Thread_dive (Post tab)", Nav.Dive_knowledge (Nav.Thread_dive "post-1"), "THREAD_POST_BOTTOM_44", dive_off);
       ("Wiki_dive", Nav.Dive_knowledge (Nav.Wiki_dive "arch-overview"), "FINAL_WIKI_BOTTOM_LINE", dive_off);
       ( "Artifact_dive"
       , Nav.Dive_knowledge (Nav.Artifact_dive (List.hd many_artifacts).id)
@@ -5472,7 +5532,24 @@ let test_pillar2_scroll_bounds_all_surfaces () =
         { m_dives_base with nav = { m_dives_base.nav with dive_stack = [ dive ] } }
       in
       assert_scroll_exact ~label:dname ~needle ~get_off md0)
-    dives_with_sentinels
+    dives_with_sentinels;
+  let m_thread_comments, _ =
+    let md0 =
+      {
+        m_dives_base with
+        nav =
+          {
+            m_dives_base.nav with
+            dive_stack = [ Nav.Dive_knowledge (Nav.Thread_dive "post-1") ];
+          };
+      }
+    in
+    step md0 (mk_key Keymap.Input.Tab)
+  in
+  assert_scroll_exact ~label:"Thread_dive (Comments tab)"
+    ~needle:"THREAD_COMMENT_BOTTOM_44"
+    ~get_off:(fun (m : Model.t) -> m.knowledge.thread_comment_scroll)
+    m_thread_comments
 
 (* ---------- Pillar 3: Centered-Rectangle Keeper Chat UX & Korean IME Guard ---------- *)
 

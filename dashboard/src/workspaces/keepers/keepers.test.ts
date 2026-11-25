@@ -338,6 +338,7 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
       tool: 'publish_artifact',
       duration_ms: 1,
       wire_outcome: 'ok',
+      input: null,
       output: source,
     }
     const view = render(html`<${KeeperToolCallInspector} keeperName=${entry.keeper} entry=${entry} />`)

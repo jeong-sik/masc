@@ -22761,6 +22761,7 @@ let test_hidden_score_command () =
       provenance = None;
       failure_kind = None;
       thinking = None;
+      retained_images = [];
     }
   in
   let page : Wire_fleet.chat_history_page =

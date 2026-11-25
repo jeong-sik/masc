@@ -997,7 +997,7 @@ let get_request_keys ~epoch ~path ~requested_at (req : Cmd.get_request) =
   | Cmd.Get_board_quarantines { generation; _ } ->
       Some (Printf.sprintf "%s#quarantines=%d" base generation),
       board_snapshot_key ~epoch ~path [string_of_int generation]
-  | Cmd.Get_keeper_sandbox _ -> scoped ""
+  | Cmd.Get_sandboxes | Cmd.Get_keeper_sandbox _ -> scoped ""
   | Cmd.Get_keeper_turn_records _ -> scoped "#fleet-turns"
   | Cmd.Get_keeper_context_turn_records _ -> scoped "#context-turns"
   | Cmd.Get_keeper_tool_calls { turn_ref = Some tr; _ } -> scoped ("#turn_ref=" ^ tr)
@@ -1062,7 +1062,6 @@ let get_request_keys ~epoch ~path ~requested_at (req : Cmd.get_request) =
   | Cmd.Get_browser_lane
   | Cmd.Get_lane_addons
   | Cmd.Get_mcp_clients
-  | Cmd.Get_sandboxes
   | Cmd.Get_repositories
   | Cmd.Get_repository_pulls
   | Cmd.Get_repository_detail _

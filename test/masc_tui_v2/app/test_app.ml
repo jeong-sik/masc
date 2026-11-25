@@ -1219,9 +1219,7 @@ let test_planning_retains_completed_tasks_across_refresh () =
   Alcotest.(check (list string)) "failed refresh retains the last Task read" ["t-1"] (tasks ());
   Alcotest.(check (list string)) "failed Execution leaves latest Goals intact" ["g-2"] (goals ())
 
-let test_keeper_sandbox_current_epoch_survives_late_reply () =
-  let keeper = "alpha" in
-  let req = Cmd.Get_keeper_sandbox { keeper } in
+let settle_sandbox_after_late_reply ~req ~current_response (model : Model.t) =
   let first, started = Eio.Promise.create () in
   let release, finish = Eio.Promise.create () in
   let calls = ref 0 in
@@ -1233,10 +1231,7 @@ let test_keeper_sandbox_current_epoch_survives_late_reply () =
       Eio.Promise.resolve started ();
       Eio.Promise.await release;
       503, `Assoc ["error", `String "old workspace"]
-    end else
-      200, `Assoc ["keeper", `String keeper;
-                   "sandbox", `Assoc ["keeper", `String keeper; "backend", `String "ssh";
-                                      "binding_state", `String "unbound"]]
+    end else current_response
   in
   with_loopback_executor ~respond @@ fun clock bus exec ->
   let old = Epoch.initial and current = Epoch.next Epoch.initial in
@@ -1252,17 +1247,39 @@ let test_keeper_sandbox_current_epoch_survives_late_reply () =
   published 1;
   Eio.Promise.resolve finish ();
   published 2;
-  let model = Model.initial () in
-  let pending = { model with epoch = current;
-    infra = Infra_store.request_keeper_sandbox ~now:Clock.Mono.zero ~keeper model.infra } in
-  let settled = List.fold_left (fun m -> function
+  List.fold_left (fun m -> function
     | Ui_bus.Snapshot (_, msg) -> fst (Update.step ~now:Clock.Mono.zero m msg)
-    | Ui_bus.Stream_event _ | Ui_bus.Stream_gap _ -> m) pending (Ui_bus.drain bus) in
+    | Ui_bus.Stream_event _ | Ui_bus.Stream_gap _ -> m)
+    { model with epoch = current } (Ui_bus.drain bus)
+
+let test_keeper_sandbox_current_epoch_survives_late_reply () =
+  let keeper = "alpha" and model = Model.initial () in
+  let pending = { model with infra = Infra_store.request_keeper_sandbox ~now:Clock.Mono.zero ~keeper model.infra } in
+  let body = `Assoc ["keeper", `String keeper;
+                     "sandbox", `Assoc ["keeper", `String keeper; "backend", `String "ssh";
+                                        "binding_state", `String "unbound"]] in
+  let settled = settle_sandbox_after_late_reply ~req:(Cmd.Get_keeper_sandbox { keeper }) ~current_response:(200, body) pending in
   let read = Infra_store.keeper_sandbox_read_for ~keeper settled.infra in
   Alcotest.(check bool) "the late old failure cannot strand the new read" true
     (Option.is_none read.requested_at
      && Option.exists (fun (detail : Masc_tui_protocol.Wire_infra.keeper_sandbox_response) ->
          String.equal detail.keeper keeper) (Observed.to_option read.observation))
+
+let test_fleet_sandbox_current_denial_survives_late_reply () =
+  let model = Model.initial () in
+  let now = Clock.Mono.zero in
+  let infra = Infra_store.apply_sandboxes_fallback ~observed_at:now ~wall_unix:0.
+      ~keepers:[] ~sandbox_profiles:["previous", Masc_tui_protocol.Wire_fleet.Profile_docker]
+      ~tool_series_totals:None model.infra in
+  Alcotest.(check (option int)) "previous fleet row is present" (Some 1)
+    (Option.map (fun (snapshot : Masc_tui_protocol.Wire_infra.sandboxes_snapshot) ->
+         snapshot.docker_keepers_count) (Observed.to_option infra.sandboxes));
+  let settled = settle_sandbox_after_late_reply ~req:Cmd.Get_sandboxes
+      ~current_response:(403, `Assoc ["error", `String "current access denied"]) { model with infra } in
+  Alcotest.(check bool) "current fleet denial clears the last inspected rows" true
+    (match settled.infra.sandboxes with
+     | Observed.Failed { retryable; _ } -> not retryable
+     | Observed.Loading _ | Observed.Value _ | Observed.Absent | Observed.Unreported -> false)
 
 let test_board_replies_survive_epoch_change_and_stream_overflow () =
   let module Q = Board_quarantine in
@@ -3404,6 +3421,8 @@ let () =
             `Quick test_planning_retains_completed_tasks_across_refresh;
           Alcotest.test_case "a Keeper sandbox reply survives a late previous workspace reply"
             `Quick test_keeper_sandbox_current_epoch_survives_late_reply;
+          Alcotest.test_case "a current Fleet sandbox denial survives a late previous workspace reply"
+            `Quick test_fleet_sandbox_current_denial_survives_late_reply;
           Alcotest.test_case "Board inventory and receipts survive workspace changes and stream bursts"
             `Quick test_board_replies_survive_epoch_change_and_stream_overflow;
           Alcotest.test_case "queue drawer follows HTTP keysets across overlapping refreshes"

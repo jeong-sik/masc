@@ -523,13 +523,101 @@ describe('workspaces/work', () => {
     expect(container.textContent).toContain('409 task_history_source_changed')
   })
 
-  it('Unified Inbox wraps Tool Approval in TargetLockedAction, auto-locks on epoch change, and allows clearing Keeper Ask text & multi-choice drafts', async () => {
+  it('Inbox shows ready sources during a slow Gate read and preserves audit availability independently', async () => {
+    let finishGate!: (response: Response) => void
+    let gateRead = new Promise<Response>((resolve) => {
+      finishGate = resolve
+    })
+    const reads: string[] = []
+    let approvalBody: unknown = {
+      pending: [{ approval_id: 'approval-ready', tool_call_id: 'call-ready', keeper: 'fixture-sender', tool: 'fixture-tool' }],
+    }
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      reads.push(url)
+      if (url.startsWith('/api/v1/keepers/tool-approvals')) {
+        return jsonResponse(approvalBody)
+      }
+      if (url.startsWith('/api/v1/keepers/asks')) return jsonResponse({ asks: [] })
+      if (url.startsWith('/api/v1/dashboard/planning')) return jsonResponse({ goals: [] })
+      if (url.startsWith('/api/v1/dashboard/gate')) return (await gateRead).clone()
+      return jsonResponse({})
+    }) as typeof fetch
+    render(
+      html`<${WorkWorkspace} subroute="inbox" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+      container,
+    )
+    const chip = (name: string) => [...container.querySelectorAll<HTMLButtonElement>('.wk-chip')]
+      .find((element) => element.textContent?.trim().startsWith(name))!
+    await flushUi()
+
+    expect(container.querySelector('[aria-label="통합 HITL 대기열"]')?.textContent).toContain('fixture-tool')
+    expect(container.querySelector('[role="status"] [data-inline-spinner]')).not.toBeNull()
+    expect(chip('All Open').textContent).toContain('—')
+    expect(container.querySelector<HTMLButtonElement>('.wk-btn-ok')?.disabled).toBe(false)
+
+    finishGate(jsonResponse({
+      approval_queue_state: { state: 'unavailable', operator_detail: 'Gate queue unavailable' },
+      approval_queue: null,
+      recent_resolved_state: { state: 'ready' },
+      recent_resolved: [],
+    }))
+    await flushUi()
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Gate queue unavailable')
+    expect(container.querySelector('[aria-label="통합 HITL 대기열"]')?.textContent).toContain('fixture-tool')
+
+    chip('24h Decisions').click()
+    await flushUi()
+    expect(container.textContent).toContain('최근 24시간 내 처리된 결정 기록이 없습니다.')
+    expect(container.textContent).not.toContain('Gate queue unavailable')
+
+    const approvalReads = reads.filter((url) => url.startsWith('/api/v1/keepers/tool-approvals')).length
+    gateRead = Promise.resolve(jsonResponse({
+      approval_queue_state: { state: 'ready' },
+      approval_queue: [],
+      recent_resolved_state: { state: 'unavailable', error: 'Audit temporarily unavailable' },
+      recent_resolved: null,
+    }))
+    const refresh = [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((element) => element.textContent?.trim() === '새로고침')!
+    refresh.click()
+    await flushUi()
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Channel Gate 결정 이력 조회 불가')
+    expect(container.textContent).not.toContain('최근 24시간 내 처리된 결정 기록이 없습니다.')
+    expect(reads.filter((url) => url.startsWith('/api/v1/keepers/tool-approvals'))).toHaveLength(approvalReads)
+    chip('Channel Gate').click()
+    await flushUi()
+    expect(container.textContent).toContain('처리가 필요한 항목이 없습니다.')
+
+    gateRead = Promise.resolve(jsonResponse({
+      approval_queue: [],
+      recent_resolved: [],
+      recent_resolved_page: { scan_exhausted: true, truncated: false },
+    }))
+    chip('24h Decisions').click()
+    refresh.click()
+    await flushUi()
+    expect(container.textContent).toContain('조회된 범위에 결정 기록이 없습니다.')
+    expect(container.textContent).not.toContain('최근 24시간 내 처리된 결정 기록이 없습니다.')
+
+    approvalBody = { pending: null }
+    chip('Tool Approvals').click()
+    await flushUi()
+    refresh.click()
+    await flushUi()
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('도구 승인 조회 불가')
+    expect(container.textContent).not.toContain('처리가 필요한 항목이 없습니다.')
+  })
+
+  it('Unified Inbox wraps decisions in TargetLockedAction, drops earlier-epoch evidence, and allows clearing Keeper Ask drafts', async () => {
     const postCalls: { url: string; body: unknown }[] = []
+    let waitForNewEpoch = false
+    let approvalReceipt = { settled: true, remembered: false }
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
       if (init?.method === 'POST') {
         postCalls.push({ url, body: init.body ? JSON.parse(String(init.body)) : null })
-        return jsonResponse({ settled: true })
+        return jsonResponse(approvalReceipt)
       }
       if (url.startsWith('/api/v1/keepers/tool-approvals')) {
         return jsonResponse({
@@ -550,6 +638,7 @@ describe('workspaces/work', () => {
         })
       }
       if (url.startsWith('/api/v1/keepers/asks')) {
+        if (waitForNewEpoch) return new Promise<Response>(() => {})
         return jsonResponse({
           scope: 'fleet',
           open_count: 1,
@@ -636,6 +725,17 @@ describe('workspaces/work', () => {
       },
     })
 
+    expect(container.textContent).toContain('승인됨')
+
+    approvalReceipt = { settled: false, remembered: false }
+    const retryApproval = [...container.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('승인 (Approve)'),
+    )!
+    retryApproval.click()
+    await flushUi()
+    expect(container.textContent).toContain('결정 접수를 확인하지 못했습니다.')
+    expect(container.textContent).not.toContain('승인됨')
+
     // 2. Switch to Keeper Ask and verify clearing free-text & deselecting last multi-choice
     const askRow = [...container.querySelectorAll('button.wk-row-btn')].find((b) =>
       b.textContent?.includes('Pick targets'),
@@ -679,10 +779,13 @@ describe('workspaces/work', () => {
     expect(container.textContent).toContain('미응답 질문이 2개 있습니다.')
     expect(postCalls.some((c) => c.url === '/api/v1/keepers/ask-answer')).toBe(false)
 
-    // 3. Epoch bump auto-locks TargetLockedAction
+    // 3. The prior Ask and its draft disappear while the new epoch reads.
+    waitForNewEpoch = true
     bumpSessionEpoch()
     await flushUi(2)
-    expect(container.querySelector('.tla')!.getAttribute('data-locked')).toBe('true')
+    expect(container.textContent).not.toContain('Pick targets')
+    expect(container.textContent).not.toContain('ask-55')
+    expect(container.textContent).toContain('Keeper 질문 불러오는 중')
   })
 
   it('Unified Inbox skips single-user HITL endpoints in multi_account_signed_in mode (0x 404) while still loading Awaiting_confirmation goals', async () => {
@@ -707,34 +810,6 @@ describe('workspaces/work', () => {
           tasks: [],
         })
       }
-      if (url.startsWith('/health?full=1')) {
-        return jsonResponse({
-          build: { runtime_instance_id: 'inst-ma-1' },
-          paths: { effective_base_path: '/ws/masc', effective_masc_root: '/ws/masc/.masc' },
-        })
-      }
-      if (url.startsWith('/api/v1/goals/confirmation')) {
-        return jsonResponse({
-          inspection_operator_id: 'op-ma',
-          goal: { id: 'goal-await-1', phase: 'Awaiting_confirmation' },
-          verification: {
-            goal_id: 'goal-await-1',
-            completion: {
-              state: 'proof_proven',
-              verdict: {
-                outcome: 'proven',
-                reason: null,
-                request_id: 'vr-ma-1',
-                verification_run_id: 'vrun-ma-1',
-                criterion: { revision: 'crev-ma-1' },
-                authority: { kind: 'system_llm_agent', actor: 'verifier' },
-                evidence: 'green',
-                recorded_at: '2026-11-24T06:00:00Z',
-              },
-            },
-          },
-        })
-      }
       return jsonResponse({ error: 'unexpected route' }, 404)
     }) as typeof fetch
 
@@ -747,6 +822,8 @@ describe('workspaces/work', () => {
     expect(fetchedUrls.some((u) => u.startsWith('/api/v1/keepers/tool-approvals'))).toBe(false)
     expect(fetchedUrls.some((u) => u.startsWith('/api/v1/keepers/asks'))).toBe(false)
     expect(fetchedUrls.some((u) => u.startsWith('/api/v1/dashboard/gate'))).toBe(false)
+    expect(fetchedUrls.some((u) => u.startsWith('/api/v1/goals/confirmation'))).toBe(false)
+    expect(fetchedUrls.some((u) => u.startsWith('/health?full=1'))).toBe(false)
     expect(container.textContent).toContain('Awaiting Confirmation Goal')
     expect(container.textContent).toContain('멀티 계정 모드')
   })

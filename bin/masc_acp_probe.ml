@@ -577,6 +577,7 @@ let muse_observers_to_yojson (o : Runtime_muse_session_log.observers) : Yojson.S
     ; "running", `Int o.Runtime_muse_session_log.running
     ; "without_journal", `Int o.Runtime_muse_session_log.without_journal
     ; "counts", muse_counts_to_yojson o.Runtime_muse_session_log.counts
+    ; "cache_write_tokens", `Int o.Runtime_muse_session_log.cache_write_tokens
     ]
 ;;
 

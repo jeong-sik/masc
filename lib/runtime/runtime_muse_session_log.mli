@@ -47,6 +47,8 @@ type observers =
   { counts : counts
         (** The requests and approval reviews in the journals of the children
             that had finished. *)
+  ; cache_write_tokens : int
+        (** Cache writes of the finished observers' model requests. *)
   ; finished : int
         (** Children whose journal holds a [terminal] record for every run it
             started. *)
@@ -81,6 +83,10 @@ type turn =
 (** The model requests, the approval reviews and the observers' counts of the
     turn added together: what the prompt cost the host. *)
 val total : turn -> counts
+
+(** Cache writes of the prompt's model requests and its finished observers'
+    model requests added together. *)
+val total_cache_write_tokens : turn -> int
 
 type error =
   | Data_root_unavailable

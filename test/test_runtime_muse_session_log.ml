@@ -155,7 +155,7 @@ let turn_t =
          ppf
          "main in=%d out=%d cache_read=%d reasoning=%d write=%d requests=%d last_in=%s | \
           review in=%d out=%d cache_read=%d reasoning=%d calls=%d | \
-          observers in=%d out=%d cache_read=%d reasoning=%d finished=%d running=%d \
+          observers in=%d out=%d cache_read=%d reasoning=%d cache_write=%d finished=%d running=%d \
           without_journal=%d"
          turn.main.input_tokens
          turn.main.output_tokens
@@ -175,6 +175,7 @@ let turn_t =
          turn.observers.counts.output_tokens
          turn.observers.counts.cache_read_tokens
          turn.observers.counts.reasoning_tokens
+         turn.observers.cache_write_tokens
          turn.observers.finished
          turn.observers.running
          turn.observers.without_journal)
@@ -192,7 +193,15 @@ let counts ~input ~output ~cache_read ~reasoning =
 ;;
 
 let nothing = counts ~input:0 ~output:0 ~cache_read:0 ~reasoning:0
-let no_observers = { Log.counts = nothing; finished = 0; running = 0; without_journal = 0 }
+
+let no_observers =
+  { Log.counts = nothing
+  ; cache_write_tokens = 0
+  ; finished = 0
+  ; running = 0
+  ; without_journal = 0
+  }
+;;
 
 (* Run 1: requests of 23241 in / 134 out / 0 cache read / 64 reasoning and
    23429 / 36 / 23156 / 19, and a review of 12628 / 244 / 0 / 112. *)
@@ -270,8 +279,13 @@ let child_cancelled = read_fixture "muse-acp-1.4.25-observer-child-cancelled.jso
 let child_a_counts = counts ~input:1981 ~output:255 ~cache_read:1521 ~reasoning:197
 let both_children_counts = counts ~input:4735 ~output:454 ~cache_read:3298 ~reasoning:338
 
-let observers_of ~observer_counts ~finished ~running ~without_journal =
-  { Log.counts = observer_counts; finished; running; without_journal }
+let observers_of ?(cache_write = 0) ~observer_counts ~finished ~running ~without_journal =
+  { Log.counts = observer_counts
+  ; cache_write_tokens = cache_write
+  ; finished
+  ; running
+  ; without_journal
+  }
 ;;
 
 let both_children_finished =
@@ -800,6 +814,66 @@ let test_ignores_the_observers_of_a_run_the_prompt_did_not_start () =
       (read_ok mark))
 ;;
 
+let test_sums_cache_write_tokens_from_finished_observers () =
+  let with_cache_write rows tokens =
+    List.mapi
+      (fun index row ->
+         if index = 1
+         then set_field row [ "payload"; "event"; "usage"; "cache_write_tokens" ] (`Int tokens)
+         else row)
+      rows
+  in
+  with_data_home (fun data_home ->
+    let mark =
+      send_observers_prompt
+        data_home
+        ~parent:(parent_rows ())
+        ~children:
+          [ child_a_path, with_cache_write child_a 100
+          ; child_b_path, with_cache_write child_b 40
+          ]
+    in
+    let turn = read_ok mark in
+    check
+      turn_t
+      "parent cache_write=0 with finished children 100 and 40"
+      (observers_prompt
+         (observers_of
+            ~cache_write:140
+            ~observer_counts:both_children_counts
+            ~finished:2
+            ~running:0
+            ~without_journal:0))
+      turn;
+    check int "total_cache_write_tokens includes finished observers" 140
+      (Log.total_cache_write_tokens turn));
+  with_data_home (fun data_home ->
+    let parent_request_1 =
+      set_field
+        observers_parent.(2)
+        [ "payload"; "event"; "usage"; "cache_write_tokens" ]
+        (`Int 25)
+    in
+    let child_b_running =
+      List.filteri (fun index _ -> index < 2) (with_cache_write child_b 40)
+    in
+    let mark =
+      send_observers_prompt
+        data_home
+        ~parent:(parent_rows ~edits:[ 2, parent_request_1 ] ())
+        ~children:
+          [ child_a_path, with_cache_write child_a 100
+          ; child_b_path, child_b_running
+          ]
+    in
+    let turn = read_ok mark in
+    check int "main_cache_write_tokens" 25 turn.Log.main_cache_write_tokens;
+    check int "finished observer cache_write_tokens only" 100
+      turn.Log.observers.Log.cache_write_tokens;
+    check int "total_cache_write_tokens adds parent and finished observers" 125
+      (Log.total_cache_write_tokens turn))
+;;
+
 let () =
   run
     "runtime_muse_session_log"
@@ -891,6 +965,10 @@ let () =
             "ignores the observers of a run the prompt did not start"
             `Quick
             test_ignores_the_observers_of_a_run_the_prompt_did_not_start
+        ; test_case
+            "sums cache write tokens from finished observers"
+            `Quick
+            test_sums_cache_write_tokens_from_finished_observers
         ] )
     ]
 ;;

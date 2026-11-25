@@ -13,6 +13,7 @@ type counts =
 
 type observers =
   { counts : counts
+  ; cache_write_tokens : int
   ; finished : int
   ; running : int
   ; without_journal : int
@@ -453,7 +454,18 @@ let add_counts a b =
 
 let total turn = add_counts (add_counts turn.main turn.review) turn.observers.counts
 
-let no_observers = { counts = zero_counts; finished = 0; running = 0; without_journal = 0 }
+let total_cache_write_tokens turn =
+  turn.main_cache_write_tokens + turn.observers.cache_write_tokens
+;;
+
+let no_observers =
+  { counts = zero_counts
+  ; cache_write_tokens = 0
+  ; finished = 0
+  ; running = 0
+  ; without_journal = 0
+  }
+;;
 
 let no_counts =
   { main = zero_counts
@@ -547,7 +559,7 @@ let read_observer path =
   let* records = read_records { path; offset = 0 } in
   let* turn, observer_journals = summarize records in
   match observer_journals with
-  | [] -> Ok (total turn)
+  | [] -> Ok (total turn, turn.main_cache_write_tokens)
   | _ :: _ -> Error Nested_observers
 ;;
 
@@ -562,10 +574,11 @@ let read_observers ~session_directory journals =
        | Some relative ->
          let path = Filename.concat session_directory relative in
          (match read_observer path with
-          | Ok counts ->
+          | Ok (counts, cache_write_tokens) ->
             Ok
               { observers with
                 counts = add_counts observers.counts counts
+              ; cache_write_tokens = observers.cache_write_tokens + cache_write_tokens
               ; finished = observers.finished + 1
               }
           | Error (Run_not_terminated _ | No_run_in_slice) ->

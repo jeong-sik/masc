@@ -4048,7 +4048,7 @@ let usage_of_muse_turn (acp_usage : usage) (turn : Runtime_muse_session_log.turn
   { input_tokens
   ; output_tokens
   ; cached_read_tokens = total.Runtime_muse_session_log.cache_read_tokens
-  ; cached_write_tokens = turn.Runtime_muse_session_log.main_cache_write_tokens
+  ; cached_write_tokens = Runtime_muse_session_log.total_cache_write_tokens turn
   ; thought_tokens = total.Runtime_muse_session_log.reasoning_tokens
   ; total_tokens = input_tokens + output_tokens
   ; context_used =

@@ -33,6 +33,7 @@ import {
   shouldDefaultOpenCompanion,
 } from './keeper-debug-companion'
 import {
+  dedupeHistoryToolRows,
   internalModeLabel,
   loadChatBlockPrefs,
   nextInternalMode,
@@ -322,7 +323,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       setMessages((prev) => {
         const loadedIds = new Set(pageRes.value.messages.map((m) => m.id))
         const optimistic = prev.filter((m) => !loadedIds.has(m.id))
-        return [...pageRes.value.messages, ...optimistic]
+        return [...dedupeHistoryToolRows([...pageRes.value.messages, ...optimistic])]
       })
       setHasMore(pageRes.value.hasMore)
       setNextCursor(pageRes.value.nextCursor)
@@ -383,7 +384,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     setMessages((prev) => {
       const existingIds = new Set(prev.map((m) => m.id))
       const fresh = res.value.messages.filter((m) => !existingIds.has(m.id))
-      return [...fresh, ...prev]
+      return [...dedupeHistoryToolRows([...fresh, ...prev])]
     })
     setHasMore(res.value.hasMore)
     setNextCursor(res.value.nextCursor)
@@ -811,20 +812,43 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
               ),
             }))
           },
-          onToolApprovalSettled: ({ toolCallId, outcome: approvalOutcome }) => {
+          onToolApprovalSettled: ({ toolCallId, toolName, outcome: approvalOutcome }) => {
             const approved = /^approv/i.test(approvalOutcome.trim())
-            updateAssistantEntry(assistantId, (m) => ({
-              ...m,
-              toolCalls: upsertStreamToolCall(
-                m.toolCalls,
-                { toolCallId },
-                (cur) => ({
-                  ...cur,
-                  status: approved ? 'running' : 'error',
-                  progressLabel: approvalOutcome,
-                }),
-              ),
-            }))
+            const trimmedId = toolCallId.trim()
+            updateAssistantEntry(assistantId, (m) => {
+              if (trimmedId) {
+                return {
+                  ...m,
+                  toolCalls: upsertStreamToolCall(
+                    m.toolCalls,
+                    { toolCallId: trimmedId },
+                    (cur) => ({
+                      ...cur,
+                      status: approved ? 'running' : 'error',
+                      progressLabel: approvalOutcome,
+                    }),
+                  ),
+                }
+              }
+              const list = [...(m.toolCalls ?? [])]
+              let targetIdx = -1
+              for (let i = list.length - 1; i >= 0; i -= 1) {
+                const cur = list[i]!
+                if (cur.status !== 'awaiting_approval') continue
+                if (!toolName || cur.name === toolName) {
+                  targetIdx = i
+                  break
+                }
+                if (targetIdx < 0) targetIdx = i
+              }
+              if (targetIdx < 0) return m
+              list[targetIdx] = {
+                ...list[targetIdx]!,
+                status: approved ? 'running' : 'error',
+                progressLabel: approvalOutcome,
+              }
+              return { ...m, toolCalls: list }
+            })
           },
           onReplyDetails: (reply, turnRef) => {
             acceptedByServer = true
@@ -852,7 +876,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
               ...m,
               deliveryState: m.deliveryState === 'Failed' ? 'Failed' : 'Delivered',
               toolCalls: m.toolCalls?.map((tc) =>
-                tc.status === 'running' || tc.status === 'awaiting_result'
+                tc.status === 'running' || tc.status === 'awaiting_result' || tc.status === 'awaiting_approval'
                   ? { ...tc, status: 'completed' }
                   : tc,
               ),

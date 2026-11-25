@@ -387,6 +387,94 @@ export function shouldRenderChatEntry(
   return hasVisibleBody || hasVisibleThinking || hasVisibleTools || hasVisibleInternal
 }
 
+/**
+ * Deduplicates persisted `role: 'tool'` rows against tool calls already decoded
+ * from assistant `blocks[].trace[kind=tool]` (or direct `toolCalls`) sharing the
+ * same `executionId`.
+ *
+ * When both rows exist in the history transcript (which happens because
+ * `Keeper_chat_store.to_json_array` keeps `Role.Tool` rows alongside assistant
+ * trace blocks), we enrich the assistant trace card with any missing `args` or
+ * `name` from the `role: 'tool'` row and suppress the redundant `role: 'tool'`
+ * row so each tool execution renders as a single card. Standalone `role: 'tool'`
+ * rows whose `executionId` does not appear on any assistant row are preserved.
+ */
+export function dedupeHistoryToolRows(
+  entries: readonly ChatTranscriptEntry[],
+): readonly ChatTranscriptEntry[] {
+  const toolRowByExecId = new Map<string, ChatToolBlock>()
+  for (const entry of entries) {
+    if (entry.role !== 'tool') continue
+    const parsed = parseChatMessageBlocks(entry)
+    for (const tb of parsed.toolBlocks) {
+      const eid = tb.executionId?.trim() || entry.executionId?.trim()
+      if (!eid) continue
+      const existing = toolRowByExecId.get(eid)
+      if (!existing) {
+        toolRowByExecId.set(eid, { ...tb, executionId: eid })
+      } else {
+        toolRowByExecId.set(eid, {
+          ...existing,
+          name: existing.name !== 'tool' ? existing.name : tb.name,
+          args: existing.args ?? tb.args,
+          result: existing.result ?? tb.result,
+          status: existing.status ?? tb.status,
+          duration: existing.duration ?? tb.duration,
+        })
+      }
+    }
+  }
+
+  const coveredExecIds = new Set<string>()
+  const enriched: ChatTranscriptEntry[] = entries.map((entry) => {
+    if (entry.role === 'tool' || !entry.toolCalls || entry.toolCalls.length === 0) {
+      return entry
+    }
+    let changed = false
+    const nextToolCalls = entry.toolCalls.map((tc) => {
+      const eid = tc.executionId?.trim()
+      if (!eid) return tc
+      coveredExecIds.add(eid)
+      const sibling = toolRowByExecId.get(eid)
+      if (!sibling) return tc
+      const nextName = tc.name !== 'tool' ? tc.name : sibling.name
+      const nextArgs = tc.args ?? sibling.args
+      const nextResult = tc.result ?? sibling.result
+      const nextStatus = tc.status ?? sibling.status
+      if (
+        nextName !== tc.name
+        || nextArgs !== tc.args
+        || nextResult !== tc.result
+        || nextStatus !== tc.status
+      ) {
+        changed = true
+        return {
+          ...tc,
+          name: nextName,
+          args: nextArgs,
+          result: nextResult,
+          status: nextStatus,
+        }
+      }
+      return tc
+    })
+    return changed ? { ...entry, toolCalls: nextToolCalls } : entry
+  })
+
+  const seenStandaloneToolExecIds = new Set<string>()
+  return enriched.filter((entry) => {
+    if (entry.role !== 'tool') return true
+    const eid =
+      entry.executionId?.trim()
+      || entry.toolCalls?.find((tc) => tc.executionId?.trim())?.executionId?.trim()
+    if (!eid) return true
+    if (coveredExecIds.has(eid)) return false
+    if (seenStandaloneToolExecIds.has(eid)) return false
+    seenStandaloneToolExecIds.add(eid)
+    return true
+  })
+}
+
 // ── Live Stream Tool Matching, Status Labels & Native Tool Formatters ─────
 
 export interface ToolCallMatchRef {

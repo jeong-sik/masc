@@ -36,7 +36,11 @@ import {
 } from '../../core/resource-cache'
 import { isKeeperEquipment, type KeeperEquipment } from '../../lib/keeper-portrait'
 import { randomUuid } from '../../lib/uuid'
-import { formatNativeCompletionSummary, formatNativeProgressLabel } from './chat-blocks'
+import {
+  dedupeHistoryToolRows,
+  formatNativeCompletionSummary,
+  formatNativeProgressLabel,
+} from './chat-blocks'
 import type {
   CandleBalanceRow,
   CandleLedgerEventRow,
@@ -636,9 +640,10 @@ export function fetchKeeperChatHistoryPageApi(
         if (!isRecord(raw) || !Array.isArray(raw.messages)) {
           throw new Error('Invalid chat history page')
         }
-        const messages = raw.messages
+        const decoded = raw.messages
           .map(decodeHistoryRow)
           .filter((m): m is ChatTranscriptEntry => m !== null)
+        const messages = dedupeHistoryToolRows(decoded)
         return {
           messages,
           hasMore: raw.has_more === true,
@@ -982,6 +987,7 @@ export interface StreamKeeperChatCallbacks {
   }) => void
   readonly onToolApprovalSettled?: (info: {
     readonly toolCallId: string
+    readonly toolName?: string
     readonly outcome: string
   }) => void
   readonly onReplyDetails?: (reply: string, turnRef: string | null) => void
@@ -1210,8 +1216,12 @@ export async function streamKeeperChat(params: {
             } else if (name === 'KEEPER_TOOL_APPROVAL_SETTLED' && val) {
               const tcId = asStr(val.tool_call_id) ?? ''
               const outcome = asStr(val.outcome) ?? ''
-              if (tcId && outcome) {
-                params.callbacks.onToolApprovalSettled?.({ toolCallId: tcId, outcome })
+              if (outcome) {
+                params.callbacks.onToolApprovalSettled?.({
+                  toolCallId: tcId,
+                  toolName: asStr(val.tool_call_name) ?? undefined,
+                  outcome,
+                })
               }
             } else if (name === 'KEEPER_CHAT_OPERATION_ACCEPTED' && val) {
               const state = asStr(val.state) ?? 'Queued'

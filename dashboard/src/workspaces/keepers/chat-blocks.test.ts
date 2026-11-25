@@ -6,14 +6,18 @@ import { resetObserverStateForTests } from '../../core/observer'
 import { resourceCache } from '../../core/resource-cache'
 import { releaseAllViewStreams } from '../../core/view-stream-slot'
 import {
+  DEFAULT_CHAT_BLOCK_PREFS,
+  dedupeHistoryToolRows,
   findToolCallIndex,
   formatNativeCompletionSummary,
   formatNativeProgressLabel,
   parseChatMessageBlocks,
+  shouldRenderChatEntry,
   upsertStreamToolCall,
 } from './chat-blocks'
 import {
   decodeHistoryRow,
+  fetchKeeperChatHistoryPageApi,
   fetchKeeperToolResultApi,
   streamKeeperChat,
 } from './keepers-api'
@@ -200,6 +204,122 @@ describe('Chat Blocks & History Decoding — Empty Tool Toggle & Blocks Wire Par
     expect(
       formatNativeCompletionSummary({ kind: 'completion_reported', exit_code: 0 }),
     ).toEqual({ status: 'completed', summary: 'exit 0' })
+  })
+
+  it('deduplicates cross-row role=tool entries against assistant blocks[].trace tool steps sharing execution_id', async () => {
+    const toolRow = decodeHistoryRow({
+      id: 'msg-tool-dup',
+      role: 'tool',
+      content: JSON.stringify({ path: 'lib/foo.ml', start_line: 10 }),
+      ts: 1_700_000_050,
+      tool_call_name: 'Read',
+      execution_id: 'exec-shared-1',
+    })!
+    const assistantRow = decodeHistoryRow({
+      id: 'msg-asst-dup',
+      role: 'assistant',
+      content: 'Read foo.ml and verified the guard.',
+      ts: 1_700_000_051,
+      blocks: [
+        {
+          t: 'trace',
+          trace: [
+            {
+              kind: 'tool',
+              name: 'Read',
+              execution_id: 'exec-shared-1',
+              status: 'ok',
+              dur: '18ms',
+            },
+          ],
+        },
+      ],
+    })!
+    const standaloneToolRow = decodeHistoryRow({
+      id: 'msg-tool-standalone',
+      role: 'tool',
+      content: JSON.stringify({ pattern: 'keep_me' }),
+      ts: 1_700_000_052,
+      tool_call_name: 'Grep',
+      execution_id: 'exec-standalone-2',
+    })!
+
+    const deduped = dedupeHistoryToolRows([toolRow, assistantRow, standaloneToolRow])
+    expect(deduped.map((e) => e.id)).toEqual(['msg-asst-dup', 'msg-tool-standalone'])
+    expect(deduped[0]!.toolCalls).toHaveLength(1)
+    expect(deduped[0]!.toolCalls![0]).toMatchObject({
+      executionId: 'exec-shared-1',
+      name: 'Read',
+      status: 'completed',
+      duration: '18ms',
+    })
+    // Args omitted from the trace step were enriched from the suppressed role=tool row
+    expect(deduped[0]!.toolCalls![0]!.args).toContain('"path": "lib/foo.ml"')
+
+    // Also verify fetchKeeperChatHistoryPageApi applies the same cross-row deduplication end-to-end
+    const mockFetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          messages: [
+            {
+              id: 'msg-tool-dup',
+              role: 'tool',
+              content: JSON.stringify({ path: 'lib/foo.ml' }),
+              ts: 1_700_000_050,
+              tool_call_name: 'Read',
+              execution_id: 'exec-shared-1',
+            },
+            {
+              id: 'msg-asst-dup',
+              role: 'assistant',
+              content: 'Checked.',
+              ts: 1_700_000_051,
+              blocks: [
+                {
+                  t: 'trace',
+                  trace: [
+                    { kind: 'tool', name: 'Read', execution_id: 'exec-shared-1', status: 'ok' },
+                  ],
+                },
+              ],
+            },
+          ],
+          has_more: false,
+          next_cursor: null,
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    )
+    vi.stubGlobal('fetch', mockFetch)
+    try {
+      const pageRes = await fetchKeeperChatHistoryPageApi('code-reviewer-sister', undefined, 40)
+      expect(pageRes.ok).toBe(true)
+      if (pageRes.ok) {
+        expect(pageRes.value.messages).toHaveLength(1)
+        expect(pageRes.value.messages[0]!.id).toBe('msg-asst-dup')
+        expect(pageRes.value.messages[0]!.toolCalls).toHaveLength(1)
+        expect(pageRes.value.messages[0]!.toolCalls![0]!.args).toContain('"path": "lib/foo.ml"')
+      }
+    } finally {
+      vi.restoreAllMocks()
+    }
+  })
+
+  it('hides completely empty non-streaming entries without error detail via shouldRenderChatEntry', () => {
+    const emptyRow = decodeHistoryRow({
+      id: 'msg-empty',
+      role: 'assistant',
+      content: '   ',
+      ts: 1_700_000_060,
+    })!
+    const parsed = parseChatMessageBlocks(emptyRow)
+    expect(shouldRenderChatEntry(emptyRow, parsed, DEFAULT_CHAT_BLOCK_PREFS)).toBe(false)
+    expect(
+      shouldRenderChatEntry({ ...emptyRow, deliveryState: 'Streaming' }, parsed, DEFAULT_CHAT_BLOCK_PREFS),
+    ).toBe(true)
+    expect(
+      shouldRenderChatEntry({ ...emptyRow, errorDetail: 'stream cut' }, parsed, DEFAULT_CHAT_BLOCK_PREFS),
+    ).toBe(true)
   })
 })
 

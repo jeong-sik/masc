@@ -1,6 +1,7 @@
 // Markdown renderer core — uses `marked` + `dompurify` (GFM tables, code fences, <think> blocks).
 
 import { html } from 'htm/preact'
+import type { JSX } from 'preact'
 import { useEffect, useMemo, useRef } from 'preact/hooks'
 import { enhanceRichCode } from './rich-code-preview'
 import { Marked, Renderer, type Tokens } from 'marked'
@@ -83,6 +84,32 @@ const renderMarkdownDocument = memoizeLru(
   { max: MARKDOWN_CACHE_MAX },
 )
 
+function followDocumentFragment(event: JSX.TargetedMouseEvent<HTMLDivElement>) {
+  const root = event.currentTarget
+  const link = event.target instanceof Element
+    ? event.target.closest<HTMLAnchorElement>('a[href^="#"]')
+    : null
+  if (!link || !root.contains(link)) return
+
+  // The application routes on window.location.hash, so fragments in a
+  // document must stay scoped to that document.
+  event.preventDefault()
+  const fragment = link.getAttribute('href')?.slice(1) ?? ''
+  if (!fragment) {
+    root.scrollIntoView({ block: 'start' })
+    return
+  }
+  let anchor = fragment
+  try {
+    anchor = decodeURIComponent(fragment)
+  } catch {
+    // An explicit anchor can contain a literal percent sign.
+  }
+  const target = Array.from(root.querySelectorAll<HTMLElement>('[id], a[name]'))
+    .find((element) => element.id === anchor || element.getAttribute('name') === anchor)
+  target?.scrollIntoView({ block: 'start' })
+}
+
 export function MarkdownContent({
   text,
   class: className,
@@ -101,5 +128,12 @@ export function MarkdownContent({
   }, [htmlStr, streaming])
 
   const classes = ['markdown-content', className].filter(Boolean).join(' ')
-  return html`<div ref=${root} class=${classes} dangerouslySetInnerHTML=${{ __html: htmlStr }}></div>`
+  return html`
+    <div
+      ref=${root}
+      class=${classes}
+      onClick=${document ? followDocumentFragment : undefined}
+      dangerouslySetInnerHTML=${{ __html: htmlStr }}
+    ></div>
+  `
 }

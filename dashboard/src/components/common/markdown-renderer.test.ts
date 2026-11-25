@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
+import { currentRoute, initAPlusRouter } from '../../routes/router'
 import { MarkdownContent, renderMarkdown } from './markdown-renderer'
 
 describe('MarkdownContent', () => {
@@ -138,6 +139,36 @@ describe('MarkdownContent', () => {
     expect(container.querySelector('a')?.hasAttribute('target')).toBe(false)
     expect(container.querySelector('#appendix')?.textContent).toBe('Appendix')
     expect(container.querySelector('details[open] kbd')?.textContent).toBe('Enter')
+  })
+
+  it('scrolls to a document fragment without changing the Dashboard route', () => {
+    const container = document.createElement('div')
+    const previousUrl = window.location.href
+    document.body.append(container)
+    window.history.replaceState(null, '', '#/knowledge/board')
+    const stopRouter = initAPlusRouter()
+    try {
+      render(h(MarkdownContent, {
+        document: true,
+        text: '[Appendix](#appendix)\n\n<h2 id="appendix">Appendix</h2>',
+      }), container)
+      const scrollIntoView = vi.fn()
+      container.querySelector('h2')!.scrollIntoView = scrollIntoView
+
+      const click = new MouseEvent('click', { bubbles: true, cancelable: true })
+      container.querySelector('a')!.dispatchEvent(click)
+
+      expect(click.defaultPrevented).toBe(true)
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' })
+      expect(window.location.hash).toBe('#/knowledge/board')
+      expect(currentRoute.value.path).toBe('/knowledge/board')
+    } finally {
+      stopRouter()
+      window.history.replaceState(null, '', previousUrl)
+      initAPlusRouter()()
+      render(null, container)
+      container.remove()
+    }
   })
 
   it('applies custom class', () => {

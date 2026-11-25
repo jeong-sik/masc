@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -595,7 +597,8 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     await waitFor(() => {
       expect(view.queryByText('New external reply during batch')).toBeTruthy()
       expect(view.queryAllByText('Shared batch reply')).toHaveLength(1)
-      const replies = Array.from(view.container.querySelectorAll('.kp-msg-body'), (body) => body.textContent)
+      const replies = Array.from(view.container.querySelectorAll('.kp-msg-body'), (body) => body.textContent?.trim())
+      expect(replies).toContain('Shared batch reply')
       expect(replies.indexOf('Shared batch reply')).toBeLessThan(replies.indexOf('New external reply during batch'))
     })
 
@@ -605,7 +608,8 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
       expect(getActiveViewStreamKey()).toBeNull()
       expect(view.queryAllByText('Shared batch reply')).toHaveLength(1)
       expect(view.queryAllByText('Browser request')).toHaveLength(1)
-      const replies = Array.from(view.container.querySelectorAll('.kp-msg-body'), (body) => body.textContent)
+      const replies = Array.from(view.container.querySelectorAll('.kp-msg-body'), (body) => body.textContent?.trim())
+      expect(replies).toContain('Shared batch reply')
       expect(replies.indexOf('Shared batch reply')).toBeLessThan(replies.indexOf('New external reply during batch'))
     })
 
@@ -960,7 +964,7 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
         return json({ keepers: [{ keeper_name: 'code-reviewer-sister', turn: { lane: 'chat_operation' } }] })
       }
       if (url.includes('/portrait.png')) {
-        return new Response(new Blob(['png'], { type: 'image/png' }), {
+        return new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), {
           status: 200,
           headers: { 'Content-Type': 'image/png' },
         })

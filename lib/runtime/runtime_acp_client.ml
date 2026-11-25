@@ -29,6 +29,39 @@ let driver_of_string = function
   | _ -> None
 ;;
 
+type contributor_mode =
+  | Contributor_off
+  | Contributor_on
+[@@deriving show, eq]
+
+let all_contributor_modes = [ Contributor_off; Contributor_on ]
+
+let contributor_mode_to_string = function
+  | Contributor_off -> "off"
+  | Contributor_on -> "on"
+;;
+
+let contributor_mode_of_string = function
+  | "off" -> Some Contributor_off
+  | "on" -> Some Contributor_on
+  | _ -> None
+;;
+
+(* A runtime that does not declare [contributor-mode] runs its host with the
+   mode off: the operator's interactive choice must not decide what a Keeper
+   shares (see [muse_contributor_args]). *)
+let default_contributor_mode = Contributor_off
+
+let validate_contributor_mode ~driver (_ : contributor_mode) =
+  match driver with
+  | Muse_code -> Ok ()
+  | (Antigravity | Kimi_code | Mistral_vibe) as other ->
+    Error
+      (Printf.sprintf
+         "contributor-mode is valid only for driver muse_code; driver %s has no contributor mode"
+         (driver_to_string other))
+;;
+
 type model_selection =
   | Keep_cli_default
   | Explicit_model of string
@@ -439,6 +472,7 @@ type config =
   ; args : string list
   ; strip_env : string list
   ; skills_dirs : string list
+  ; contributor_mode : contributor_mode
   ; cwd : string
   ; oauth_source : string option
   ; dangerously_skip_permissions : bool
@@ -452,6 +486,7 @@ let default_config ~driver ~cwd =
   ; args = profile.default_args
   ; strip_env = profile.default_strip_env
   ; skills_dirs = []
+  ; contributor_mode = default_contributor_mode
   ; cwd
   ; oauth_source = None
   ; dangerously_skip_permissions = false
@@ -3023,6 +3058,24 @@ let muse_required_args =
        muse_observer_capability_ids
 ;;
 
+(* muse acp 1.4.25 reads [contributor_mode_enabled] from the operator's
+   settings.json. With it on, the host sends the model as [<model>-contributor]
+   (MUSE_TRANSPORT_TRACE=1, 2026-11-25: a model [muse-ember-1.0] taken from the
+   settings went out as [muse-ember-1.0-contributor]). Ember has no contributor
+   variant, so the provider answered "does not exist or you lack access" and
+   the turn failed with modelError, retryable false (3 of 3 sessions). The same
+   argv plus [--contributor-mode off] sent [muse-ember-1.0] and the turn ended
+   with end_turn. The Model API docs list contributor variants for Spark only
+   (dev.meta.ai/docs/choose-a-model). In contributor mode the plan grants more
+   usage and Meta may train on the content; the docs advise setting the mode
+   with the flag on every headless run, and the flag wins over the
+   MUSE_CONTRIBUTOR_MODE variable (dev.meta.ai/docs/muse-code/subscriptions).
+   The host therefore gets the mode the runtime declares on every start, never
+   the operator's own choice.
+   A second [--contributor-mode] makes the host exit with status 2 ("cannot be
+   used multiple times", 2026-11-25), so an operator [args] must not set it. *)
+let muse_contributor_args mode = [ "--contributor-mode"; contributor_mode_to_string mode ]
+
 (* muse acp 1.4.25 runs its read tool in every mode tried, and workspace
    writes and sandboxed shell commands in the modes tried, without a
    session/request_permission frame, so refusing permission requests cannot
@@ -3125,6 +3178,7 @@ let build_argv ?native_posture ?mcp_server (config : config) ~temp_gemini_dir =
   | Muse_code ->
     (config.cli_path :: base_args)
     @ muse_required_args
+    @ muse_contributor_args config.contributor_mode
     @ muse_toolset_args ?mcp_server native_posture
 ;;
 

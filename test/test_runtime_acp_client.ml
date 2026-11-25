@@ -322,6 +322,8 @@ let muse_observer_flags =
     ]
 ;;
 
+let muse_contributor_flags mode = [ "--contributor-mode"; mode ]
+
 let acp_execution_of_driver driver =
   let config : Runtime_execution.acp_client =
     { driver
@@ -332,6 +334,7 @@ let acp_execution_of_driver driver =
     ; model = Runtime_acp_client.keep_cli_default
     ; effort = None
     ; mode = None
+    ; contributor_mode = Runtime_acp_client.default_contributor_mode
     ; oauth_source = None
     ; timeout_s = 1.
     ; admission_timeout_s = 1.
@@ -407,7 +410,11 @@ let test_muse_argv_and_environment () =
       ~temp_gemini_dir:None
   in
   let toolset names = [ "-c"; "run.toolset=" ^ names ] in
-  let trusted = [ "muse"; "acp"; "--trust-workspace" ] @ muse_observer_flags in
+  let trusted =
+    [ "muse"; "acp"; "--trust-workspace" ]
+    @ muse_observer_flags
+    @ muse_contributor_flags "off"
+  in
   check (list string) "none offers the MCP server's tools only"
     (trusted @ toolset {|["mcp__masc__*"]|})
     (argv ~native_posture:Runtime_native_tools.Native_none ~mcp_server:masc cfg);
@@ -441,8 +448,16 @@ let test_muse_argv_and_environment () =
   check (list string) "operator args replace the defaults and keep the required flags"
     ([ "muse"; "acp"; "-c"; "reasoning_effort=\"low\""; "--trust-workspace" ]
      @ muse_observer_flags
+     @ muse_contributor_flags "off"
      @ toolset {|["read_file","search","mcp__masc__*"]|})
     (argv ~native_posture:Runtime_native_tools.Native_read ~mcp_server:masc effort_cfg);
+  check (list string) "a declared contributor mode is passed on every start"
+    ([ "muse"; "acp"; "--trust-workspace" ]
+     @ muse_observer_flags
+     @ muse_contributor_flags "on"
+     @ toolset {|["mcp__masc__*"]|})
+    (argv ~native_posture:Runtime_native_tools.Native_none ~mcp_server:masc
+       { cfg with contributor_mode = Runtime_acp_client.Contributor_on });
   let env =
     Runtime_acp_client.For_testing.build_environment
       ~base_env:[| "PATH=/usr/bin"; "MUSE_NO_AUTO_UPDATE=0"; "META_API_KEY=key" |]
@@ -495,7 +510,9 @@ for line in sys.stdin:
         Yojson.Safe.from_file argv_file |> Yojson.Safe.Util.to_list
         |> List.map Yojson.Safe.Util.to_string
     in
-    let required = "--trust-workspace" :: muse_observer_flags in
+    let required =
+      ("--trust-workspace" :: muse_observer_flags) @ muse_contributor_flags "off"
+    in
     check (list string) "none"
       (required @ [ "-c"; {|run.toolset=["mcp__masc__*"]|} ])
       (host_args Runtime_native_tools.Native_none);
@@ -746,6 +763,9 @@ default = "muse_test.m_muse"
    | [ ({ execution = Runtime_execution.Acp exec; _ } as runtime) ] ->
      check bool "muse driver" true
        (Runtime_acp_client.equal_driver Runtime_acp_client.Muse_code exec.driver);
+     check bool "a row without contributor-mode runs the host with it off" true
+       (Runtime_acp_client.equal_contributor_mode Runtime_acp_client.Contributor_off
+          exec.contributor_mode);
      check (list string) "operator args are kept as written"
        [ "acp"; "-c"; "reasoning_effort=\"low\"" ] exec.args;
      check (option string) "model id" (Some "muse-ember-1.0")
@@ -4548,6 +4568,7 @@ let test_layer4_classify_prompt_error_usage_context_and_process_config_hash () =
     ; model = Runtime_acp_client.model_selection_of_string "gemini-4-neon-medium"
     ; effort = Some Llm_provider.Reasoning_effort.Medium
     ; mode = Some "default"
+    ; contributor_mode = Runtime_acp_client.default_contributor_mode
     ; oauth_source = Some "/tmp/oauth-a"
     ; timeout_s = 120.0
     ; admission_timeout_s = 30.0

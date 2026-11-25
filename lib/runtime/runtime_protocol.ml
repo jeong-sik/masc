@@ -73,7 +73,15 @@ let acp_editor =
     ; credential_policy = Credentials_optional
     ; requires_non_interactive = true
     ; provider_fields =
-        [ "driver"; "args"; "strip-env"; "skills-dirs"; "effort"; "mode"; "timeout-s" ]
+        [ "driver"
+        ; "args"
+        ; "strip-env"
+        ; "skills-dirs"
+        ; "effort"
+        ; "mode"
+        ; "contributor-mode"
+        ; "timeout-s"
+        ]
     ; required_provider_fields = [ "driver" ]
     }
 ;;

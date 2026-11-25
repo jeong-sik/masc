@@ -78,6 +78,7 @@ let run_adapter client_kind ~base_path ~keeper_name ~runtime_id ~cli_path =
       ; model = Runtime_acp_client.model_selection_of_string "synthetic-model"
       ; effort = None
       ; mode = None
+      ; contributor_mode = Runtime_acp_client.default_contributor_mode
       ; oauth_source = None
       ; timeout_s = 1.
       ; admission_timeout_s = 1.

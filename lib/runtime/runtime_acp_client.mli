@@ -19,6 +19,26 @@ val all_drivers : driver list
 val driver_to_string : driver -> string
 val driver_of_string : string -> driver option
 
+(** Whether the host may use the content of its sessions to train future
+    models. Only [Muse_code] has the setting; the host reads it from the
+    operator's settings unless the process is started with
+    [--contributor-mode]. *)
+type contributor_mode =
+  | Contributor_off
+  | Contributor_on
+[@@deriving show, eq]
+
+val all_contributor_modes : contributor_mode list
+val contributor_mode_to_string : contributor_mode -> string
+val contributor_mode_of_string : string -> contributor_mode option
+
+val default_contributor_mode : contributor_mode
+(** The mode of a runtime that does not declare one: [Contributor_off]. *)
+
+val validate_contributor_mode : driver:driver -> contributor_mode -> (unit, string) result
+(** Check whether the driver has a contributor mode to declare. Only
+    [Muse_code] does. *)
+
 type model_selection = private
   | Keep_cli_default
   | Explicit_model of string
@@ -244,6 +264,9 @@ type config =
   ; args : string list
   ; strip_env : string list
   ; skills_dirs : string list
+  ; contributor_mode : contributor_mode
+      (** Passed to the host as [--contributor-mode] for [Muse_code]; the
+          other drivers ignore it. *)
   ; cwd : string
   ; oauth_source : string option
       (** Optional Antigravity OAuth token file; when [None] on Antigravity,

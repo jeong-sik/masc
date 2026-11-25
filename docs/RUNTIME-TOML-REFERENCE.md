@@ -96,7 +96,7 @@ Optional:
 | `exact-body-timeout-s` | positive float | bound on the whole exact-output request (connect, headers, body). See §7 for when it matters |
 | `is-non-interactive` | bool, default `false` | **required `true`** for every official-client protocol (`claude-code`, `codex-app-server`, `antigravity-cli`, `acp`); otherwise the runtime does not materialize |
 | `timeout-s` (+ `agent`, `effort`, `add-dirs`) | positive float (string; `low`\|`medium`\|`high`; absolute paths) | `antigravity-cli` options (`agent` and `add-dirs` are `antigravity-cli` only; `timeout-s` is **required** on `antigravity-cli` and optional on `acp`; `effort` is optional on both) |
-| `driver` (+ `args`, `strip-env`, `skills-dirs`, `mode`, `admission-timeout-s`) | `antigravity`\|`kimi_code`\|`mistral_vibe`\|`muse_code` (string arrays; string; positive float) | `acp` only — refused on every other protocol. `driver` is **required**; `args`, `strip-env`, `skills-dirs` (absolute paths), `mode`, and `admission-timeout-s` (initialize admission budget in seconds, default `30.0`) are optional |
+| `driver` (+ `args`, `strip-env`, `skills-dirs`, `mode`, `contributor-mode`, `admission-timeout-s`) | `antigravity`\|`kimi_code`\|`mistral_vibe`\|`muse_code` (string arrays; string; `on`\|`off`; positive float) | `acp` only — refused on every other protocol. `driver` is **required**; `args`, `strip-env`, `skills-dirs` (absolute paths), `mode`, `contributor-mode`, and `admission-timeout-s` (initialize admission budget in seconds, default `30.0`) are optional. `contributor-mode` is accepted for `muse_code` only and is `off` when absent |
 | `account-home` | non-empty absolute path | accepted for `claude-code`/`codex-app-server`; refused elsewhere |
 | `admission-priority-run-limit` | positive int | bounds consecutive `Priority` grants while a `Standard` request waits, and combined `Priority`/`Standard` grants while `Background` work (`Librarian`, `Librarian_memory`, `Workspace_memory_curator`) waits. Omitted means strict `Priority` → `Standard` → `Background` ordering (FIFO within each class; `Background` runs only when `Priority` and `Standard` queues are empty). Set only to bound `Background`/`Standard` starvation on an intentionally shared account, not to protect Keepers. Refused on official-client providers and when none of the provider's bindings declares `max-concurrent`. See [provider admission fairness](guides/provider-admission-fairness.md) |
 
@@ -127,8 +127,10 @@ credential naming an absolute path (`oauth_source` for Antigravity); `env` and
   connects the session's MCP server only with it), one
   `-c runtime_capabilities.<id>.enabled=false` per bundled reminder observer,
   and a `-c run.toolset=[...]` that follows the Keeper's native tool posture
-  (next bullet). It also sets `MUSE_NO_AUTO_UPDATE=1`. The host refuses to
-  start when `args` repeats one of those `-c` keys. With the observers on, all
+  (next bullet), and `--contributor-mode` with the runtime's `contributor-mode`
+  (below). It also sets `MUSE_NO_AUTO_UPDATE=1`. The host refuses to start when
+  `args` repeats one of those `-c` keys or sets `--contributor-mode` (exit
+  status 2, "cannot be used multiple times"). With the observers on, all
   5 measured turns (one tool call each) ended with one more model run, a
   prompt of 5.8 to 5.9k tokens by the host's estimate and 1.2 to 2.9 s to its
   tool call. With the observers off the run was absent in 12 of 12 turns (9
@@ -201,6 +203,25 @@ credential naming an absolute path (`oauth_source` for Antigravity); `env` and
     "permissions": { "schema_version": 1, "default_profile": ":ask-me" } }
   ```
 
+- `contributor-mode = "on"` or `"off"` is the mode the host runs in; a runtime
+  that omits it runs the host with `off`. Without the flag the host reads
+  `contributor_mode_enabled` from the operator's `settings.json`, and with it
+  on the host sends the model as `<model>-contributor`. Measured 2026-11-25
+  (`MUSE_TRANSPORT_TRACE=1`, muse 1.4.25, no `--model`, model from the
+  settings): `muse-ember-1.0` went out as `muse-ember-1.0-contributor`, which
+  does not exist, and the turn failed with `modelError`, `retryable: false`, in
+  3 of 3 sessions; the same argv with `--contributor-mode off` sent
+  `muse-ember-1.0` and ended with `end_turn`. The Model API docs list
+  contributor variants for Spark only (`muse-spark-1.3-contributor`,
+  `muse-spark-1.2-contributor`) and call Ember Standard mode only
+  ([choose a model](https://dev.meta.ai/docs/choose-a-model),
+  [Muse Ember](https://dev.meta.ai/docs/muse-ember)). In contributor mode the
+  plan grants more usage in exchange for Meta training on the content of the
+  session, so the default `off` gives up that extra usage; the docs advise
+  setting the mode with the flag on every headless run
+  ([subscriptions](https://dev.meta.ai/docs/muse-code/subscriptions)). `on`
+  with a model that has no contributor variant, Ember for example, fails as
+  measured above. The key is refused on the other drivers.
 - Muse bindings reject provider and binding `effort`, model `reasoning-effort`, and
   effort variants at load. Per-turn effort overrides are also refused. Put
   `-c reasoning_effort="<level>"` in `args`, for example

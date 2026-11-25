@@ -1623,6 +1623,7 @@ let acp_execution (provider : Runtime_schema.provider)
         ; model = Runtime_acp_client.model_selection_of_string spec.api_name
         ; effort = options.effort
         ; mode = options.mode
+        ; contributor_mode = options.contributor_mode
         ; oauth_source
         ; timeout_s = options.timeout_s
         ; admission_timeout_s = options.admission_timeout_s

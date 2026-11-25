@@ -752,6 +752,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ?fs ~cwd ~cwd_path ~timeout_s ~ac
                  ; args = execution.args
                  ; strip_env = execution.strip_env
                  ; skills_dirs = []
+                 ; contributor_mode = execution.contributor_mode
                  ; cwd = isolated_cwd
                  ; oauth_source = execution.oauth_source
                  ; dangerously_skip_permissions = false

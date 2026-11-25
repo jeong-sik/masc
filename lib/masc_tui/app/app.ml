@@ -1513,8 +1513,8 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                       (earliest_opt extra (Some minute_deadline))
                       interrupt_deadline
                 in
-                (* Visible activity uses a presentation clock without
-                   requesting additional server observations. *)
+                (* A visible active turn or read uses a presentation clock
+                   without requesting additional server observations. *)
                 let progress_interval = visible_progress_interval !model in
                 (match progress_interval, !keeper_progress_deadline with
                  | None, _ -> keeper_progress_deadline := None
@@ -1544,7 +1544,15 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                       | None -> !model
                       | Some _ ->
                           let m = !model in
-                          { m with freshness = { m.freshness with last_wall_unix = wall_now } }
+                          let freshness =
+                            {
+                              m.freshness with
+                              last_wall_unix = wall_now;
+                              last_mono =
+                                Clock.Mono.max m.freshness.last_mono now_after;
+                            }
+                          in
+                          { m with freshness }
                     in
                     let cursor = render_frame ~model:frame_model ~cache:card_cache grid in
                     let render_us =

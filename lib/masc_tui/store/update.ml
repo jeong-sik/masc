@@ -562,11 +562,25 @@ let clear_work_reads (work : Work_store.t) =
 let leave_old_epoch ~now ~(before : Model.t) (after : Model.t) =
   if Epoch.equal before.epoch after.epoch then after
   else
+    let clear_harness_overlay =
+      (function
+        | Some (Nav.Inline_action (Nav.Harness_overrule _)) -> None
+        | overlay -> overlay) [@warning "-4"]
+    in
+    let nav =
+      {
+        after.nav with
+        overlay = clear_harness_overlay after.nav.overlay;
+        return_overlay = clear_harness_overlay after.nav.return_overlay;
+      }
+    in
     let inline_modal =
-      Option.map
+      Option.bind after.inline_modal
         (fun (modal : Model.inline_modal_state) ->
-          { modal with submitting = false; note_prefill_id = None })
-        after.inline_modal
+          (match modal.kind with
+          | Nav.Harness_overrule _ -> None
+          | _ -> Some { modal with submitting = false; note_prefill_id = None })
+          [@warning "-4"])
     in
     let ask_modal =
       Option.map
@@ -614,8 +628,8 @@ let leave_old_epoch ~now ~(before : Model.t) (after : Model.t) =
         |> Fleet_store.clear_turn_preview_updates;
       drafts = Drafts.detach_streams ~now after.drafts;
       attention = Attention.clear_all_in_flight after.attention;
-      work =
-        clear_work_reads after.work |> Work_store.clear_pending_harness_read;
+      work = clear_work_reads after.work |> Work_store.detach_harness;
+      nav;
       inline_modal;
       ask_modal;
       config = Config_store.clear_in_flight after.config;

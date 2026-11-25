@@ -294,7 +294,7 @@ val apply_harness_health :
   observed_at:Clock.Mono.t -> Wire_work.harness_health -> t -> t
 val start_harness_read : since_ns:Clock.Mono.t -> t -> t
 val fail_harness_read : at:Clock.Mono.t -> reason:string -> retryable:bool -> t -> t
-val clear_pending_harness_read : t -> t
+val detach_harness : t -> t
 val filtered_harness_verdicts : t -> Wire_work.harness_verdict_row list
 val selected_harness_verdict : t -> Wire_work.harness_verdict_row option
 val apply_verification_evidence :

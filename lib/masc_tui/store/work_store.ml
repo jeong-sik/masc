@@ -1516,10 +1516,14 @@ let fail_harness_read ~at ~reason ~retryable t =
     harness_read = Observed.failed ~at ~reason ~retryable;
   }
 
-let clear_pending_harness_read t =
-  if Observed.is_loading t.harness_read then
-    { t with harness_read = Observed.unreported }
-  else t
+let detach_harness t =
+  {
+    t with
+    harness_health = Observed.unreported;
+    harness_read = Observed.unreported;
+    harness_selected_index = None;
+    harness_scroll_offset = 0;
+  }
 
 let apply_verification_evidence ~observed_at ~verification_id bundle t =
   {

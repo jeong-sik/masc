@@ -1500,6 +1500,70 @@ let test_sse_disconnect_uses_the_subscription_owner () =
       [ Epoch.to_int older; Epoch.to_int current ]
       (List.rev !disconnected))
 
+let test_harness_followup_preserves_undrained_sample () =
+  let first, first_started = Eio.Promise.create () in
+  let second, second_started = Eio.Promise.create () in
+  let first_release, finish_first = Eio.Promise.create () in
+  let second_release, finish_second = Eio.Promise.create () in
+  let calls = ref 0 in
+  let respond ~meth:_ ~path:_ =
+    incr calls;
+    if !calls = 1 then (
+      Eio.Promise.resolve first_started ();
+      Eio.Promise.await first_release;
+      (200, `Assoc [
+         "generated_at", `Float 1.;
+         "overview", `Assoc ["evaluator_status", `String "healthy"];
+         "calibration", `Assoc [];
+         "recent_verdicts", `List [
+           `Assoc ["task_id", `String "first-verdict"; "verdict", `String "approve"] ];
+       ]))
+    else (
+      Eio.Promise.resolve second_started ();
+      Eio.Promise.await second_release;
+      (503, `Assoc [ "error", `String "retry later" ]))
+  in
+  with_loopback_executor ~respond @@ fun clock bus exec ->
+  let initial = Model.initial () in
+  let get () =
+    Cmd_executor.execute exec
+      (Cmd.Http_get { epoch = initial.epoch; req = Cmd.Get_harness_health })
+  in
+  let apply model =
+    List.fold_left
+      (fun m -> function
+        | Ui_bus.Snapshot (_, msg) ->
+            fst (Update.step ~now:(Clock.Mono.now ()) m msg)
+        | Ui_bus.Stream_event _ | Ui_bus.Stream_gap _ -> m)
+      model (Ui_bus.drain bus)
+  in
+  let sampled_tasks (m : Model.t) =
+    Work_store.harness_verdicts_list m.work
+    |> List.map (fun (row : Masc_tui_protocol.Wire_work.harness_verdict_row) -> row.task_id)
+  in
+  get ();
+  Eio.Promise.await first;
+  get ();
+  Eio.Promise.resolve finish_first ();
+  Eio.Promise.await second;
+  let reading = apply initial in
+  Alcotest.(check (list string)) "first result survives before the follow-up starts"
+    ["first-verdict"] (sampled_tasks reading);
+  Alcotest.(check bool) "actual second read is pending" true
+    (Observed.is_loading reading.work.harness_read);
+  Eio.Promise.resolve finish_second ();
+  let rec await_terminal () =
+    if (Ui_bus.stats bus).queued_snapshots = 0 then (
+      Eio.Time.sleep clock 0.001;
+      await_terminal ())
+  in
+  await_terminal ();
+  let failed = apply reading in
+  Alcotest.(check bool) "second failure retains the earlier sample" true
+    (Observed.is_failed failed.work.harness_read
+     && sampled_tasks failed = ["first-verdict"]);
+  Alcotest.(check int) "original read and one coalesced follow-up" 2 !calls
+
 let test_queue_drawer_walks_all_http_pages () =
   let alpha = "alpha" and beta = "beta" and stalled = "stalled" in
   let start keeper = "/api/v1/keepers/" ^ keeper ^ "/chat/operations?state=queued" in
@@ -3667,6 +3731,8 @@ let () =
             `Quick test_roster_replies_survive_an_older_epoch_finishing_last;
           Alcotest.test_case "SSE subscriptions disconnect through their own callbacks"
             `Quick test_sse_disconnect_uses_the_subscription_owner;
+          Alcotest.test_case "Harness follow-up keeps the last settled read"
+            `Quick test_harness_followup_preserves_undrained_sample;
           Alcotest.test_case "setup login stream propagates non-terminal error & delivers terminal receipt once"
             `Quick test_setup_login_stream_error_and_single_delivery;
           Alcotest.test_case "setup login EOF closes only the matching input form"

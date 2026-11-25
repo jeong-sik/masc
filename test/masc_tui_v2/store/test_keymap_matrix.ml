@@ -6868,7 +6868,7 @@ let test_wave3_surfaces_scroll_bounds_guards_and_secrets () =
     (Observed.is_loading reading.work.harness_read
      && Observed.is_stale reading.work.harness_health
      && Work_store.selected_harness_verdict reading.work
-        = List.hd_opt hh_snap.recent_verdicts);
+        = List.nth_opt hh_snap.recent_verdicts 0);
   let harness_get = function
     | Cmd.Http_get { req = Cmd.Get_harness_health; _ } -> true
     | _ -> false
@@ -6901,6 +6901,25 @@ let test_wave3_surfaces_scroll_bounds_guards_and_secrets () =
           (fun (v : Wire_work.harness_health) -> v.unreadable_verdicts_count = 3)
           (Observed.to_option partial.work.harness_health)
      && Option.is_none (Work_store.selected_harness_verdict partial.work));
+  let mismatch =
+    Msg.Workspace_mismatch
+      {
+        expected_instance = Some "first";
+        observed_instance = Some "second";
+        observed_workspace_sha256 = Some "second-workspace";
+        message = "workspace changed";
+      }
+  in
+  let moved = harness_reply m_hh_y (Msg.Reply_harness_health (Error mismatch)) in
+  let moved, _ =
+    Update.step ~now:t0 moved
+      (Msg.Http_reply { epoch = m_hh.epoch; reply = Msg.Reply_harness_health (Ok hh_snap) })
+  in
+  Alcotest.(check bool) "New epoch drops the old sample and its unsent label" true
+    (not (Epoch.equal moved.epoch m_hh.epoch)
+     && Work_store.harness_verdicts_list moved.work = []
+     && Option.is_none (Work_store.selected_harness_verdict moved.work)
+     && Option.is_none moved.inline_modal);
 
   (* Verification_dive [v] cycles all 4 tabs + CanAdmin 403 notice *)
   let m_vdive =

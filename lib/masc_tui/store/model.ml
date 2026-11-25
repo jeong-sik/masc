@@ -146,6 +146,7 @@ type inline_modal_state = {
   active_field : int;
   submitting : bool;
   submission_id : int;
+  note_prefill_id : int option;
   error : string option;
 }
 
@@ -309,7 +310,14 @@ let modal_mark_submitting_with_id (modal : inline_modal_state) m =
   , {
       m1 with
       inline_modal =
-        Some { modal with submitting = true; submission_id = sub_id; error = None };
+        Some
+          {
+            modal with
+            submitting = true;
+            submission_id = sub_id;
+            note_prefill_id = None;
+            error = None;
+          };
     } )
 
 let process_resume_nonce =
@@ -2917,7 +2925,15 @@ let inline_modal_for kind =
     | Nav.Setup_login_input_form _ ->
         0
   in
-  { kind; fields; active_field; submitting = false; submission_id = 0; error = None }
+  {
+    kind;
+    fields;
+    active_field;
+    submitting = false;
+    submission_id = 0;
+    note_prefill_id = None;
+    error = None;
+  }
 
 let modal_field_raw_value ~key modal =
   match
@@ -3134,7 +3150,7 @@ let modal_update_active_field f modal =
         else fld)
       modal.fields
   in
-  { modal with fields; error = None }
+  { modal with fields; note_prefill_id = None; error = None }
 
 let modal_cycle_field ~delta modal =
   let len = List.length modal.fields in
@@ -3737,6 +3753,7 @@ let open_wiki_edit_modal_for_detail (d : Wire_knowledge.wiki_page_detail) m =
       active_field = 0;
       submitting = false;
       submission_id = 0;
+      note_prefill_id = None;
       error = None;
     }
   in

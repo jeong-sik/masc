@@ -6223,7 +6223,7 @@ let test_wave4_layer1_wire_codecs () =
     del_res.refused;
   let note =
     expect_ok "decode_keeper_operator_note"
-      (Wire_keeper_context.decode_keeper_operator_note
+      (Wire_keeper_context.decode_keeper_operator_note ~keeper:"alpha"
          (parse_json
             {|{
               "keeper": "alpha",

@@ -609,6 +609,7 @@ let open_custom_inline_modal ~(kind : Nav.inline_action_kind) (m : Model.t)
       active_field = 0;
       submitting = false;
       submission_id = 0;
+      note_prefill_id = None;
       error = None;
     }
   in
@@ -2268,51 +2269,32 @@ let rec execute_slash ~now (m : Model.t) cmd =
                         m
                     , [] )
                   else
-                    ( Model.with_toast ~now ~level:Model.Toast_info
+                    Model.with_toast ~now ~level:Model.Toast_info
                         (Say.make ~ko:("운영자 노트 저장 중: " ^ keeper)
                            ~en:("Saving operator note for " ^ keeper))
                         m
-                    , [
-                        Cmd.Http_post
-                          {
-                            epoch = m.epoch;
-                            req = Cmd.Post_keeper_operator_note { keeper; text };
-                          };
-                      ] )
+                    |> Update_nav.post_keeper_operator_note ~keeper ~text ~modal_submission_id:None
               | Some _ | None ->
                   let m_open, cmds =
                     Update_nav.open_inline_modal m
                       (Nav.Keeper_operator_note_form keeper)
                   in
-                  let seeded_modal =
-                    match
-                      ( m_open.inline_modal,
-                        Observed.to_option
-                          (Keeper_context_store.get_keeper ~keeper
-                             m.keeper_context)
-                            .operator_note )
-                    with
-                    | Some modal, Some note when note.pending ->
-                        Some
-                          {
-                            modal with
-                            fields =
-                              List.map
-                                (fun (f : Model.modal_form_field) ->
-                                  if String.equal f.key "text" then
-                                    { f with value = note.text }
-                                  else f)
-                                modal.fields;
-                          }
-                    | modal, _ -> modal
+                  let read_id, m_open = Model.next_modal_submission_id m_open in
+                  let inline_modal =
+                    Option.map
+                      (fun (modal : Model.inline_modal_state) ->
+                        { modal with note_prefill_id = Some read_id })
+                      m_open.inline_modal
                   in
-                  ( { m_open with inline_modal = seeded_modal }
+                  ( { m_open with inline_modal }
                   , cmds
                     @ [
                         Cmd.Http_get
                           {
                             epoch = m.epoch;
-                            req = Cmd.Get_keeper_operator_note { keeper };
+                            req =
+                              Cmd.Get_keeper_operator_note
+                                { keeper; modal_prefill_id = Some read_id };
                           };
                       ] )))
       | Slash.Ctl_run_next -> (

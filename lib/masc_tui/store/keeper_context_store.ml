@@ -54,6 +54,13 @@ let empty_github_login =
     error = None;
   }
 
+type operator_note_writes =
+  | No_note_writes
+  | One_note_write
+  | Overlapping_note_writes of int
+
+type note_write_settlement = Isolated_note_write | Await_note_writes | Reread_note
+
 type keeper_state = {
   trace_section : trace_section;
   runtime_trace_scroll_offset : int;
@@ -83,6 +90,8 @@ type keeper_state = {
   last_purge_preview : Wire_keeper_context.checkpoint_purge_result option;
   operator_note : Wire_keeper_context.keeper_operator_note Observed.t;
   operator_note_absent : bool;
+  operator_note_read_after : Clock.Mono.t;
+  operator_note_writes : operator_note_writes;
   scroll_offset : int;
   tool_stats : Wire_keeper_context.keeper_tool_stats Observed.t;
   tool_stats_absent : bool;
@@ -150,6 +159,8 @@ let empty_keeper_state =
     last_purge_preview = None;
     operator_note = Observed.unreported;
     operator_note_absent = false;
+    operator_note_read_after = Clock.Mono.zero;
+    operator_note_writes = No_note_writes;
     scroll_offset = 0;
     tool_stats = Observed.unreported;
     tool_stats_absent = false;
@@ -1438,30 +1449,79 @@ let apply_purge_result ~observed_at ~keeper (res : Wire_keeper_context.checkpoin
       { ks with checkpoints; last_purge_preview = Some res })
     t
 
-let apply_operator_note ~observed_at ~keeper note t =
+let last_operator_note = function
+  | Observed.Value _ as note -> Observed.mark_stale note
+  | Observed.Absent | Observed.Unreported | Observed.Failed _ | Observed.Loading _ ->
+      Observed.unreported
+
+let start_operator_note_write ~keeper t =
+  update_keeper ~keeper
+    (fun ks ->
+      let operator_note_writes =
+        match ks.operator_note_writes with
+        | No_note_writes -> One_note_write
+        | One_note_write -> Overlapping_note_writes 2
+        | Overlapping_note_writes pending -> Overlapping_note_writes (pending + 1)
+      in
+      let operator_note = last_operator_note ks.operator_note in
+      { ks with operator_note_writes; operator_note; operator_note_absent = false })
+    t
+
+(* With overlapping writes, the order of HTTP receipts does not establish which
+   note the server stored last. The last receipt releases one fresh read. *)
+let settle_operator_note_write ~now ~keeper t =
+  let ks = get_keeper ~keeper t in
+  let operator_note_writes, settlement =
+    match ks.operator_note_writes with
+    | One_note_write -> No_note_writes, Isolated_note_write
+    | No_note_writes | Overlapping_note_writes 1 -> No_note_writes, Reread_note
+    | Overlapping_note_writes pending -> Overlapping_note_writes (pending - 1), Await_note_writes
+  in
+  let operator_note =
+    match settlement, ks.operator_note with
+    | (Isolated_note_write | Await_note_writes), note -> note
+    | Reread_note, (Observed.Value _ as note) -> Observed.mark_stale note
+    | Reread_note, (Observed.Absent | Observed.Unreported | Observed.Failed _ | Observed.Loading _) ->
+        Observed.loading ~since_ns:now
+  in
+  let operator_note_read_after = Clock.Mono.max ks.operator_note_read_after now in
+  let t =
+    update_keeper ~keeper
+      (fun ks ->
+        { ks with operator_note_writes; operator_note_read_after; operator_note;
+                  operator_note_absent = ks.operator_note_absent && settlement = Isolated_note_write })
+      t
+  in
+  t, settlement
+
+let apply_operator_note ~observed_at ~requested_at ~keeper note t =
   update_keeper ~keeper
     (fun ks ->
       {
         ks with
         operator_note = Observed.value ~observed_at note;
         operator_note_absent = false;
+        operator_note_read_after = Clock.Mono.max ks.operator_note_read_after requested_at;
       })
     t
 
-let mark_operator_note_absent ~keeper t =
+let mark_operator_note_absent ~requested_at ~keeper t =
   update_keeper ~keeper
     (fun ks ->
       {
         ks with
         operator_note = Observed.absent;
         operator_note_absent = true;
+        operator_note_read_after = Clock.Mono.max ks.operator_note_read_after requested_at;
       })
     t
 
-let mark_operator_note_failed ~at ~keeper ~reason ~retryable t =
+let mark_operator_note_failed ~at ~requested_at ~keeper ~reason ~retryable t =
   update_keeper ~keeper
     (fun ks ->
-      { ks with operator_note = Observed.failed ~reason ~retryable ~at })
+      { ks with operator_note = Observed.fetch_failed ~reason ~retryable ~at ks.operator_note;
+                operator_note_absent = false;
+                operator_note_read_after = Clock.Mono.max ks.operator_note_read_after requested_at })
     t
 
 let equal_logs_subview a b =
@@ -1780,7 +1840,11 @@ let clear_epoch_logins t =
             oauth_poll_started_ns = None;
             oauth_poll_consecutive_errors = 0;
             github_login = { ks.github_login with running = false };
-            tool_result_inflight = String_set.empty })
+            tool_result_inflight = String_set.empty;
+            operator_note = last_operator_note ks.operator_note;
+            operator_note_absent = false;
+            operator_note_writes = No_note_writes;
+            operator_note_read_after = Clock.Mono.zero })
         t.by_keeper;
   }
 

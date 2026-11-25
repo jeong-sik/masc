@@ -24139,44 +24139,221 @@ let () =
                          true
                      | _ -> false)
                    (Cmd.flatten ok_cmds));
-              (* 4. GET operator note loaded must NOT close open note modal *)
-              let m_note_open, _ =
-                Update_nav.open_inline_modal m_ws
-                  (Nav.Keeper_operator_note_form "alpha")
+              (* Operator note reads and saves are owned by the opened draft. *)
+              let open_note m =
+                let next, cmds =
+                  Update.execute_slash ~now:t0 m
+                    (Slash.Ctl { action = Slash.Ctl_note; target = None })
+                in
+                match Cmd.flatten cmds with
+                | [ Cmd.Http_get
+                      { req = Cmd.Get_keeper_operator_note
+                          { keeper = "alpha"; modal_prefill_id = Some id }; _ } ] ->
+                    next, id
+                | _ -> Alcotest.fail "expected an owned note read"
               in
-              let m_after_load, _ =
-                Update.step ~now:t0 m_note_open
-                  (Msg.Http_reply
-                     {
-                       epoch = m_note_open.epoch;
-                       reply =
-                         Msg.Reply_keeper_operator_note_loaded
-                           {
-                             keeper = "alpha";
-                             result =
-                               Ok
-                                 {
-                                   keeper = "alpha";
-                                   pending = true;
-                                   text = "existing note";
-                                   created_at = 1795252000.0;
-                                   created_by = "admin";
-                                   consumed_at = None;
-                                   consumed_turn = None;
-                                 };
-                           };
-                     })
+              let receive_at ~now (m : Model.t) reply =
+                Update.step ~now m (Msg.Http_reply { epoch = m.epoch; reply })
               in
-              Alcotest.(check bool) "loaded note keeps modal open and seeds text"
-                true
-                (match m_after_load.inline_modal with
-                | Some { kind = Nav.Keeper_operator_note_form "alpha"; fields; _ } ->
-                    List.exists
-                      (fun (f : Model.modal_form_field) ->
-                        String.equal f.key "text"
-                        && String.equal f.value "existing note")
-                      fields
-                | _ -> false);
+              let receive m reply = fst (receive_at ~now:t0 m reply) in
+              let note : Wire_keeper_context.keeper_operator_note =
+                {
+                  keeper = "alpha";
+                  pending = true;
+                  text = "existing note";
+                  created_at = 1795252000.0;
+                  created_by = "admin";
+                  consumed_at = None;
+                  consumed_turn = None;
+                }
+              in
+              let read_result ?(keeper = "alpha") ?(requested_at = t0) modal_prefill_id result =
+                Msg.Reply_keeper_operator_note_loaded
+                  { keeper; modal_prefill_id; requested_at; result }
+              in
+              let loaded id = read_result id (Ok note) in
+              let save_result modal_submission_id result =
+                Msg.Reply_keeper_operator_note_saved
+                  { keeper = "alpha"; modal_submission_id; result }
+              in
+              let saved id = save_result (Some id) (Ok note) in
+              let edit value (m : Model.t) =
+                {
+                  m with
+                  inline_modal =
+                    Option.map (Model.modal_update_active_field (fun _ -> value))
+                      m.inline_modal;
+                }
+              in
+              let field (m : Model.t) =
+                Option.map (Model.modal_field_raw_value ~key:"text") m.inline_modal
+              in
+              let submit m expected_text =
+                let next, cmds = Update_nav.submit_inline_modal ~now:t0 m in
+                match Cmd.flatten cmds with
+                | [ Cmd.Http_post
+                      { req = Cmd.Post_keeper_operator_note
+                          { keeper = "alpha"; text; modal_submission_id = Some id }; _ } ] ->
+                    Alcotest.(check string) "submitted draft" expected_text text;
+                    next, id
+                | _ -> Alcotest.fail "expected an owned note save"
+              in
+              let first, first_id = open_note m_ws in
+              Alcotest.(check (option string)) "passive read leaves the form alone"
+                (Some "") (field (receive first (loaded None)));
+              let primed = receive first (loaded (Some first_id)) in
+              Alcotest.(check (option string)) "owned read prefills a pristine draft"
+                (Some note.text) (field primed);
+              let cleared = first |> edit "draft" |> edit "" in
+              Alcotest.(check (option string)) "late read preserves deliberate clear"
+                (Some "") (field (receive cleared (loaded (Some first_id))));
+              let saving, old_save_id = submit primed note.text in
+              let reopened, read_id = open_note saving in
+              Alcotest.(check bool) "reopened note owns a different read"
+                true (not (Int.equal first_id read_id));
+              Alcotest.(check (option string)) "old read cannot prefill reopened note"
+                (Some "") (field (receive reopened (loaded (Some first_id))));
+              let rewritten = edit "new draft" reopened in
+              Alcotest.(check (option string)) "old save preserves reopened draft"
+                (Some "new draft") (field (receive rewritten (saved old_save_id)));
+              let new_saving, new_save_id = submit rewritten "new draft" in
+              let after_old_save = receive new_saving (saved old_save_id) in
+              Alcotest.(check (option string)) "old save does not settle the new save"
+                (Some "new draft") (field after_old_save);
+              Alcotest.(check (option string)) "new save closes its own draft"
+                None (field (receive after_old_save (saved new_save_id)));
+              let slash_save m text =
+                fst (Update.execute_slash ~now:t0 m
+                       (Slash.Ctl { action = Slash.Ctl_note; target = Some text }))
+              in
+              let shared ~keeper (m : Model.t) =
+                let ks = Keeper_context_store.get_keeper ~keeper m.keeper_context in
+                Option.map (fun (n : Wire_keeper_context.keeper_operator_note) -> n.text)
+                  (Observed.to_option ks.operator_note)
+              in
+              let rereads cmds =
+                Cmd.flatten cmds |> List.filter_map (function
+                    | Cmd.Http_get
+                        { req = Cmd.Get_keeper_operator_note { keeper = "alpha"; modal_prefill_id }; _ } ->
+                        Some modal_prefill_id
+                    | _ -> None)
+              in
+              let changed = { note with text = "confirmed write" } in
+              let committed, post_read = receive_at ~now:t1 (slash_save first changed.text)
+                  (save_result None (Ok changed)) in
+              let missing = Error (Msg.Http_error { status = 404; body = ""; api_error = None }) in
+              let unavailable = Error (Msg.Transport (Health.Other_io "disconnected")) in
+              List.iter (fun old_result ->
+                  let late, cmds = receive_at ~now:t2 committed (read_result None old_result) in
+                  Alcotest.(check (option string)) "a pre-save GET cannot overwrite the shared note"
+                    (Some changed.text) (shared ~keeper:"alpha" late);
+                  Alcotest.(check int) "ignored passive read needs no repeat" 0 (List.length cmds))
+                [Ok note; missing; unavailable];
+              let other = { note with keeper = "beta" } in
+              let other_state, _ = receive_at ~now:t2 committed
+                  (read_result ~keeper:"beta" None (Ok other)) in
+              Alcotest.(check (option string)) "write boundary belongs to its Keeper"
+                (Some other.text) (shared ~keeper:"beta" other_state);
+              let waiting, discarded = receive_at ~now:t2 committed
+                  (read_result (Some first_id) missing) in
+              Alcotest.(check (list (option int))) "late original prefill does not duplicate the post-save read"
+                [] (rereads discarded);
+              let fresh_owner previous cmds =
+                match rereads cmds with
+                | [Some id] when not (Int.equal previous id) -> id
+                | _ -> Alcotest.fail "expected one fresh prefill for the still-pristine draft"
+              in
+              let fresh_id = fresh_owner first_id post_read in
+              let receive_latest m reply = fst (receive_at ~now:t2 m reply) in
+              let fresh = read_result ~requested_at:t2 (Some fresh_id) (Ok changed) in
+              Alcotest.(check (option string)) "reissued read settles the pristine draft"
+                (Some changed.text) (field (receive_latest waiting fresh));
+              Alcotest.(check (option string)) "editing before the reissued read protects the draft"
+                (Some "typed") (field (receive_latest (edit "typed" waiting) fresh));
+              let seeded = receive m_ws (loaded None) in
+              let last_read (m : Model.t) =
+                Observed.is_stale (Keeper_context_store.get_keeper ~keeper:"alpha" m.keeper_context).operator_note
+              in
+              let in_flight, saving_id = submit (edit changed.text primed) changed.text in
+              let closed, _ = Update.step ~now:t0 in_flight (Msg.Key_event (key Keymap.Input.Escape)) in
+              Alcotest.(check (option string)) "Escape closes the sending editor" None (field closed);
+              let reopened, pending_id = open_note closed in
+              let before_save = receive reopened (read_result (Some pending_id) (Ok note)) in
+              let before_save = receive before_save (read_result None missing) in
+              Alcotest.(check (option string)) "earlier GET cannot prefill a reopened editor during save"
+                (Some "") (field before_save);
+              Alcotest.(check bool) "the shared observation remains stale during a single save" true
+                (last_read before_save && shared ~keeper:"alpha" before_save = Some note.text);
+              let still_pending, cmds = Update_nav.submit_inline_modal ~now:t0 before_save in
+              Alcotest.(check bool) "Enter on a waiting editor preserves its owner and emits no write" true
+                (cmds = [] && match still_pending.inline_modal with
+                 | Some { note_prefill_id = Some id; error = None; submitting = false; _ } -> Int.equal id pending_id
+                 | Some _ | None -> false);
+              ignore (submit (edit "typed while waiting" before_save) "typed while waiting");
+              List.iter (fun (result, from_disk) ->
+                  let settled, cmds = receive_at ~now:t1 before_save (save_result (Some saving_id) result) in
+                  let readback_id = fresh_owner pending_id cmds in
+                  let settled = receive_latest settled (read_result (Some pending_id) (Ok note)) in
+                  Alcotest.(check (option string)) "only post-settlement read can fill reopened editor"
+                    (Some "") (field settled);
+                  let fresh = read_result ~requested_at:t2 (Some readback_id) (Ok from_disk) in
+                  Alcotest.(check (option string)) "reopened editor settles from disk after success or failure"
+                    (Some from_disk.text) (field (receive_latest settled fresh));
+                  let dirty, cmds = receive_at ~now:t1 (edit "keep typed draft" before_save)
+                      (save_result (Some saving_id) result) in
+                  Alcotest.(check bool) "settling an isolated save keeps a newer typed draft"
+                    true (field dirty = Some "keep typed draft" && rereads cmds = []))
+                [Ok changed, changed; unavailable, note];
+              let overlapping = slash_save (slash_save seeded "first save") "second save" in
+              let draft, draft_id = open_note overlapping in
+              Alcotest.(check bool) "overlap keeps the previous note as last read" true (last_read draft);
+              let mid, first_cmds = receive_at ~now:t1 draft (save_result None (Ok changed)) in
+              Alcotest.(check (option string)) "overlapping save receipt cannot publish the final note"
+                (Some note.text) (shared ~keeper:"alpha" mid);
+              Alcotest.(check (list (option int))) "other write is still unsettled" [] (rereads first_cmds);
+              let deferred, cmds = receive_at ~now:t2 mid (read_result (Some draft_id) (Ok note)) in
+              Alcotest.(check (list (option int))) "overlap defers the owned read until writes settle"
+                [] (rereads cmds);
+              let earlier = { note with text = "earlier write" } in
+              let settled, final_cmds = receive_at ~now:t2 deferred (save_result None (Ok earlier)) in
+              let readback_id = fresh_owner draft_id final_cmds in
+              Alcotest.(check (option string)) "late success still leaves the old observation"
+                (Some note.text) (shared ~keeper:"alpha" settled);
+              Alcotest.(check bool) "readback retains the last observation as stale" true (last_read settled);
+              Alcotest.(check bool) "overlapping success cannot claim the shared value is saved" false
+                (match settled.toast with Some { level = Model.Toast_success; _ } -> true | _ -> false);
+              let authoritative = { note with text = "read from disk" } in
+              let reconciled = receive_latest settled (read_result ~requested_at:t2 (Some readback_id) (Ok authoritative)) in
+              Alcotest.(check (option string)) "fresh GET owns shared note and pristine draft"
+                (Some authoritative.text) (shared ~keeper:"alpha" reconciled);
+              Alcotest.(check (option string)) "fresh GET settles the awaiting draft"
+                (Some authoritative.text) (field reconciled);
+              let after_late_context = receive_latest reconciled (read_result None missing) in
+              Alcotest.(check (option string)) "late Context read cannot replace the reconciled disk note"
+                (Some authoritative.text) (shared ~keeper:"alpha" after_late_context);
+              let failed, cmds = receive_at ~now:t2 (edit "private draft" mid) (save_result None unavailable) in
+              Alcotest.(check (list (option int))) "a later failure still reconciles the first successful save"
+                [None] (rereads cmds);
+              Alcotest.(check (option string)) "passive read-back keeps a typed draft"
+                (Some "private draft")
+                (field (receive_latest failed (read_result ~requested_at:t2 None (Ok authoritative))));
+              let mismatch = Msg.Workspace_mismatch
+                { expected_instance = Some "old"; observed_instance = Some "new";
+                  observed_workspace_sha256 = None; message = "workspace changed" } in
+              let reset, cmds = receive_at ~now:t2 (edit "dirty" first)
+                  (read_result (Some first_id) (Error mismatch)) in
+              Alcotest.(check bool) "discarded draft GET still re-handshakes on mismatch" true
+                (not (Epoch.equal reset.epoch first.epoch) && has_get_health (Cmd.flatten cmds));
+              let wrong_keeper =
+                Wire_keeper_context.decode_keeper_operator_note ~keeper:"alpha"
+                  (Yojson.Safe.from_string {|{"keeper":"beta","note":{"text":"foreign","created_at":1}}|})
+                |> Result.map_error (fun detail -> Msg.Decode_error detail)
+              in
+              Alcotest.(check bool) "mismatched note receipt is rejected" true (Result.is_error wrong_keeper);
+              let rejected = receive seeded (read_result None wrong_keeper) in
+              let rejected = receive (slash_save rejected "write") (save_result None wrong_keeper) in
+              Alcotest.(check (option string)) "foreign GET and POST never replace the Keeper note"
+                (Some note.text) (shared ~keeper:"alpha" rejected);
               (* 5. Checkpoints 403 latches checkpoints_auth_denied without incident storm *)
               let m_denied, _ =
                 Update.step ~now:t0 m_ws

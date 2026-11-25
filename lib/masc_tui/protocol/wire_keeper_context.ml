@@ -2015,9 +2015,13 @@ let decode_checkpoint_delete_result json =
   in
   Ok { deleted; missing; refused; failed; inventory }
 
-let decode_keeper_operator_note json =
+let decode_keeper_operator_note ~keeper:expected_keeper json =
   let* _, body = unwrap_v2_or_raw json in
   let* keeper = required_nonblank_string body "keeper" in
+  let* () =
+    if String.equal keeper expected_keeper then Ok ()
+    else Error "operator note response belongs to a different Keeper"
+  in
   let* note = required_object_field body "note" in
   let* text = required_string_field note "text" in
   let* created_at = required_finite_float note "created_at" in

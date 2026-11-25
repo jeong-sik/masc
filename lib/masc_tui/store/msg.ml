@@ -387,6 +387,8 @@ type http_reply =
     }
   | Reply_keeper_operator_note_loaded of {
       keeper : string;
+      modal_prefill_id : int option;
+      requested_at : Clock.Mono.t;
       result : (Wire_keeper_context.keeper_operator_note, http_error) result;
     }
   | Reply_discord_reply of {
@@ -396,6 +398,7 @@ type http_reply =
     }
   | Reply_keeper_operator_note_saved of {
       keeper : string;
+      modal_submission_id : int option;
       result : (Wire_keeper_context.keeper_operator_note, http_error) result;
     }
   | Reply_keeper_control of {

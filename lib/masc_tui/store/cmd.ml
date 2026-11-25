@@ -178,7 +178,10 @@ type get_request =
       turn_ref : string;
     }
   | Get_keeper_checkpoints of { keeper : string }
-  | Get_keeper_operator_note of { keeper : string }
+  | Get_keeper_operator_note of {
+      keeper : string;
+      modal_prefill_id : int option;
+    }
   | Get_tool_approval_modes
   | Get_late_approval_attempts
   | Get_tool_quality of { n : int option; window_hours : int option }
@@ -444,7 +447,11 @@ type post_request =
       action : [ `Preview_purge | `Apply_purge | `Delete_history of string list ];
     }
   | Post_discord_reply of { request : Wire_discord_reply.request; workspace : Wire_work.expected_workspace }
-  | Post_keeper_operator_note of { keeper : string; text : string }
+  | Post_keeper_operator_note of {
+      keeper : string;
+      text : string;
+      modal_submission_id : int option;
+    }
   | Post_keeper_run_next of {
       keeper : string;
       request_id : string;
@@ -824,7 +831,7 @@ let get_request_path = function
       Wire_keeper_context.keeper_turn_flow_path ~keeper ~trace_id ~turn_id ()
   | Get_keeper_checkpoints { keeper } ->
       Wire_keeper_context.keeper_checkpoints_path ~keeper
-  | Get_keeper_operator_note { keeper } ->
+  | Get_keeper_operator_note { keeper; _ } ->
       Wire_keeper_context.keeper_operator_note_path ~keeper
   | Get_tool_approval_modes -> Wire_work.keeper_tool_approval_mode_path
   | Get_late_approval_attempts -> Wire_work.hitl_late_approval_attempts_path

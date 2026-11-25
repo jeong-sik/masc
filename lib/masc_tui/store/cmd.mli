@@ -186,7 +186,10 @@ type get_request =
       turn_ref : string;
     }
   | Get_keeper_checkpoints of { keeper : string }
-  | Get_keeper_operator_note of { keeper : string }
+  | Get_keeper_operator_note of {
+      keeper : string;
+      modal_prefill_id : int option;
+    }
   (* Wave 4 Layer 2: HITL Gate, Tool Approval Modes, Tool Quality, Waiting Inventory *)
   | Get_tool_approval_modes
   | Get_late_approval_attempts
@@ -456,7 +459,11 @@ type post_request =
       action : [ `Preview_purge | `Apply_purge | `Delete_history of string list ];
     }
   | Post_discord_reply of { request : Wire_discord_reply.request; workspace : Wire_work.expected_workspace }
-  | Post_keeper_operator_note of { keeper : string; text : string }
+  | Post_keeper_operator_note of {
+      keeper : string;
+      text : string;
+      modal_submission_id : int option;
+    }
   | Post_keeper_run_next of {
       keeper : string;
       request_id : string;

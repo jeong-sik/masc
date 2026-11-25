@@ -17,6 +17,7 @@ let open_custom_inline_modal ~(kind : Nav.inline_action_kind) (m : Model.t)
       active_field = 0;
       submitting = false;
       submission_id = 0;
+      note_prefill_id = None;
       error = None;
     }
   in

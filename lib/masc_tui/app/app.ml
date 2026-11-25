@@ -583,30 +583,38 @@ let next_minute_tick ~now_ns ~wall_unix ~last_minute =
   (minute_due, cur_min, next_deadline_ns)
 
 let visible_keeper_progress_interval (m : Model.t) =
-  let keeper =
-    if Model.is_too_small_viewport m.viewport || Model.equal_breakpoint m.breakpoint Model.Micro
-    then None
-    else if Option.equal Nav.equal_overlay m.nav.overlay
-        (Some (Nav.Queue_context Nav.Drawer_queue)) then Model.target_keeper m
-    else if Option.is_some m.nav.overlay then None
-    else
-      match Model.active_inspector m with
-      | None ->
-          if Nav.equal_workspace m.nav.workspace Nav.Keepers
-             && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_chat
-             && (m.nav.zoomed || Model.uses_keeper_split ~width:m.viewport.cols m)
-          then Model.selected_keeper_name m
-          else None
-      | Some _ -> None
-  in
-  (* Only a glyph with an animation frame needs a presentation clock. *)
-  (match Option.bind keeper (fun keeper ->
-          Chat_transcript.live_chat_phase_badge ~model:m ~keeper) with
-  | Some (Glyph.Live_working_frame _, _, _) ->
-      Some
-        (if Chat_transcript.reduce_motion m then keeper_elapsed_interval_ns
-         else keeper_progress_interval_ns)
-  | Some _ | None -> None) [@warning "-4"]
+  if Model.is_too_small_viewport m.viewport || Model.equal_breakpoint m.breakpoint Model.Micro
+  then None
+  else if
+    (match m.nav.overlay, m.inline_modal with
+    | Some (Nav.Inline_action (Nav.Keeper_operator_note_form _)), Some modal ->
+        modal.submitting || Option.is_some modal.note_prefill_id
+    | _ -> false) [@warning "-4"]
+  then
+    if Chat_transcript.reduce_motion m then None else Some keeper_progress_interval_ns
+  else
+    let keeper =
+      if Option.equal Nav.equal_overlay m.nav.overlay
+          (Some (Nav.Queue_context Nav.Drawer_queue)) then Model.target_keeper m
+      else if Option.is_some m.nav.overlay then None
+      else
+        match Model.active_inspector m with
+        | None ->
+            if Nav.equal_workspace m.nav.workspace Nav.Keepers
+               && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_chat
+               && (m.nav.zoomed || Model.uses_keeper_split ~width:m.viewport.cols m)
+            then Model.selected_keeper_name m
+            else None
+        | Some _ -> None
+    in
+    (* Only a glyph with an animation frame needs a presentation clock. *)
+    (match Option.bind keeper (fun keeper ->
+            Chat_transcript.live_chat_phase_badge ~model:m ~keeper) with
+    | Some (Glyph.Live_working_frame _, _, _) ->
+        Some
+          (if Chat_transcript.reduce_motion m then keeper_elapsed_interval_ns
+           else keeper_progress_interval_ns)
+    | Some _ | None -> None) [@warning "-4"]
 
 let set_fd_nonblock fd enabled =
   match
@@ -1494,8 +1502,8 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                       (earliest_opt extra (Some minute_deadline))
                       interrupt_deadline
                 in
-                (* A visible active turn needs a presentation clock. It does
-                   not emit a model tick or request more server observations. *)
+                (* Visible Keeper activity uses a presentation clock without
+                   requesting additional server observations. *)
                 let progress_interval = visible_keeper_progress_interval !model in
                 (match progress_interval, !keeper_progress_deadline with
                  | None, _ -> keeper_progress_deadline := None

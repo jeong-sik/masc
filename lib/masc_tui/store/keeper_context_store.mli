@@ -55,6 +55,13 @@ type github_login_session = {
   error : string option;
 }
 
+type operator_note_writes =
+  | No_note_writes
+  | One_note_write
+  | Overlapping_note_writes of int
+
+type note_write_settlement = Isolated_note_write | Await_note_writes | Reread_note
+
 type keeper_state = {
   trace_section : trace_section;
   runtime_trace_scroll_offset : int;
@@ -84,6 +91,8 @@ type keeper_state = {
   last_purge_preview : Wire_keeper_context.checkpoint_purge_result option;
   operator_note : Wire_keeper_context.keeper_operator_note Observed.t;
   operator_note_absent : bool;
+  operator_note_read_after : Clock.Mono.t;
+  operator_note_writes : operator_note_writes;
   scroll_offset : int;
   tool_stats : Wire_keeper_context.keeper_tool_stats Observed.t;
   tool_stats_absent : bool;
@@ -392,17 +401,24 @@ val apply_purge_result :
   t ->
   t
 
+val start_operator_note_write : keeper:string -> t -> t
+
+val settle_operator_note_write :
+  now:Clock.Mono.t -> keeper:string -> t -> t * note_write_settlement
+
 val apply_operator_note :
   observed_at:Clock.Mono.t ->
+  requested_at:Clock.Mono.t ->
   keeper:string ->
   Wire_keeper_context.keeper_operator_note ->
   t ->
   t
 
-val mark_operator_note_absent : keeper:string -> t -> t
+val mark_operator_note_absent : requested_at:Clock.Mono.t -> keeper:string -> t -> t
 
 val mark_operator_note_failed :
-  at:Clock.Mono.t -> keeper:string -> reason:string -> retryable:bool -> t -> t
+  at:Clock.Mono.t -> requested_at:Clock.Mono.t ->
+  keeper:string -> reason:string -> retryable:bool -> t -> t
 
 val equal_logs_subview : logs_subview -> logs_subview -> bool
 val toggle_logs_subview : keeper:string -> t -> t
@@ -465,9 +481,9 @@ val append_github_login_output : keeper:string -> line:string -> t -> t
 val finish_github_login :
   keeper:string -> error:string option -> t -> t
 val clear_epoch_logins : t -> t
-(** Drop process-local OAuth attempts and detach running GitHub logins. *)
-(** Reset [github_login.running = false] across all keepers when leaving an
-    epoch whose stream replies are abandoned. *)
+(** Drop process-local OAuth attempts and pending tool and note reads, and
+    invalidate note write ordering when leaving the epoch. *)
+
 val move_identity_selection :
   keeper:string -> count:int -> delta:int -> t -> t
 val move_identity_scroll :

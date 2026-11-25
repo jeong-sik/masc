@@ -1001,6 +1001,12 @@ let get_request_keys ~epoch ~path ~requested_at (req : Cmd.get_request) =
   | Cmd.Get_keeper_context_turn_records _ -> scoped "#context-turns"
   | Cmd.Get_keeper_tool_calls { turn_ref = Some tr; _ } -> scoped ("#turn_ref=" ^ tr)
   | Cmd.Get_keeper_tool_calls { turn_ref = None; _ } -> scoped "#tool-calls"
+  | Cmd.Get_keeper_operator_note { modal_prefill_id = Some id; _ } ->
+      scoped (Printf.sprintf "#note-prefill=%d" id)
+  | Cmd.Get_keeper_operator_note { modal_prefill_id = None; _ } ->
+      (* A post-save readback must be able to complete ahead of an older
+         passive Context read in the same Keeper and epoch. *)
+      None, Key_read (base, requested_at)
   | Cmd.Get_tool_series _ -> scoped "#tool-series"
   | Cmd.Get_tool_series_filtered _ -> scoped "#tool-series-filtered"
   | Cmd.Get_planning | Cmd.Get_verifications _ | Cmd.Get_asks _
@@ -1098,7 +1104,6 @@ let get_request_keys ~epoch ~path ~requested_at (req : Cmd.get_request) =
   | Cmd.Get_connector_names _
   | Cmd.Get_keeper_turn_flow _
   | Cmd.Get_keeper_checkpoints _
-  | Cmd.Get_keeper_operator_note _
   | Cmd.Get_tool_approval_modes
   | Cmd.Get_late_approval_attempts
   | Cmd.Get_tool_quality _
@@ -2294,14 +2299,16 @@ let rec execute_get t ~epoch req =
                 }
             in
             Msg.Http_reply { epoch; reply }
-        | Cmd.Get_keeper_operator_note { keeper } ->
+        | Cmd.Get_keeper_operator_note { keeper; modal_prefill_id } ->
             let reply =
               Msg.Reply_keeper_operator_note_loaded
                 {
                   keeper;
+                  modal_prefill_id;
+                  requested_at;
                   result =
                     fetch_and_decode_get t ~path
-                      ~decode:Wire_keeper_context.decode_keeper_operator_note;
+                      ~decode:(Wire_keeper_context.decode_keeper_operator_note ~keeper);
                 }
             in
             Msg.Http_reply { epoch; reply }
@@ -2495,7 +2502,9 @@ let rec execute_get t ~epoch req =
          result. Keep both in arrival order so a completed Tasks read survives
          a subsequent Execution failure as the last observation. *)
       ((match req with
-        | Cmd.Get_planning -> Ui_bus.publish_stream_receipt t.bus msg
+        | Cmd.Get_planning
+        | Cmd.Get_keeper_operator_note { modal_prefill_id = Some _; _ } ->
+            Ui_bus.publish_stream_receipt t.bus msg
         | _ -> Ui_bus.publish_snapshot t.bus ~key:snapshot_key msg)
         [@warning "-4"]);
       completed_ok := true);
@@ -3302,12 +3311,14 @@ let execute_post t ~epoch req =
         | Cmd.Post_discord_reply { request; workspace } ->
             let result = post_and_decode t ~path ~body ~decode:(Wire_discord_reply.decode request) in
             Some (Msg.Reply_discord_reply { request; workspace; result })
-        | Cmd.Post_keeper_operator_note { keeper; _ } ->
+        | Cmd.Post_keeper_operator_note { keeper; modal_submission_id; _ } ->
             let result =
               post_and_decode t ~path ~body
-                ~decode:Wire_keeper_context.decode_keeper_operator_note
+                ~decode:(Wire_keeper_context.decode_keeper_operator_note ~keeper)
             in
-            Some (Msg.Reply_keeper_operator_note_saved { keeper; result })
+            Some
+              (Msg.Reply_keeper_operator_note_saved
+                 { keeper; modal_submission_id; result })
         | Cmd.Post_keeper_run_next { keeper; request_id; _ } ->
             let result = post_ack t ~path ~body in
             Some (Msg.Reply_keeper_run_next { keeper; request_id; result })

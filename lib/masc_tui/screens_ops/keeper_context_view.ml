@@ -1023,7 +1023,7 @@ let draw_flow_subtab grid ~(rect : Rect.t) ~(theme : Theme.t)
              p.apply_allowed)
     | None -> ());
     (match st.operator_note with
-    | Observed.Value { data = n; _ } ->
+    | Observed.Value { data = n; stale; _ } ->
         let st_s =
           if n.pending then "PENDING"
           else
@@ -1035,9 +1035,14 @@ let draw_flow_subtab grid ~(rect : Rect.t) ~(theme : Theme.t)
           Ops_common.scrub_secrets_in_text n.text
           |> String.map (function '\n' | '\r' -> ' ' | c -> c)
         in
-        push (Typography.status ~bg theme
-                (if n.pending then Theme.Status_attention else Theme.Status_ok))
-          (Printf.sprintf "  Note [%s · %s]: %s" st_s n.created_by
+        let status, tone =
+          if stale then
+            (Ops_common.say model ~ko:"마지막 조회" ~en:"Last read" ^ " · " ^ st_s,
+             Theme.Status_historical)
+          else st_s, (if n.pending then Theme.Status_attention else Theme.Status_ok)
+        in
+        push (Typography.status ~bg theme tone)
+          (Printf.sprintf "  Note [%s · %s]: %s" status n.created_by
              (Grapheme.truncate_to_width
                 ~max_width:(Int.max 16 (content.w - 26))
                 txt_one))

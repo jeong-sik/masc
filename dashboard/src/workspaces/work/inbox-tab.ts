@@ -21,6 +21,7 @@ import {
 } from '../../core/observer'
 import { resourceCache } from '../../core/resource-cache'
 import { apiGet, apiMutate } from '../../core/transport'
+import { decodeToolApprovalsWire, isOpenKeeperAskRow } from '../../api/hitl-decoders'
 import { ok } from '../../lib/result'
 import { KeeperBadge } from '../../components/keeper-badge'
 import {
@@ -71,27 +72,20 @@ type AskAnswerDraft =
   | { readonly kind: 'skipped' }
 
 function decodeToolApprovals(raw: unknown): ToolApprovalWait[] {
-  if (!isRecord(raw) || !Array.isArray(raw.pending)) return []
   const out: ToolApprovalWait[] = []
-  for (const row of raw.pending) {
-    if (!isRecord(row)) continue
-    const toolCallId = asNonEmptyString(row.tool_call_id)
-    const keeper = asNonEmptyString(row.keeper)
-    if (!toolCallId || !keeper) continue
-    const approvalId = asNonEmptyString(row.approval_id) ?? toolCallId
-    const askedAt = asFiniteNumber(row.asked_at) ?? 0
-    const revision = asNonEmptyString(row.revision) ?? `t-${askedAt}`
+  for (const row of decodeToolApprovalsWire(raw)) {
+    if (!row.toolCallId) continue
     out.push({
-      approvalId,
-      toolCallId,
-      keeper,
-      tool: asString(row.tool, 'tool'),
-      argsPreview: typeof row.args === 'string' ? row.args : JSON.stringify(row.args ?? {}, null, 2),
-      question: asString(row.question, ''),
-      because: asNonEmptyString(row.because),
-      askedAt,
-      timeoutSec: asFiniteNumber(row.timeout_sec),
-      revision,
+      approvalId: row.approvalId,
+      toolCallId: row.toolCallId,
+      keeper: row.keeper,
+      tool: row.tool || 'tool',
+      argsPreview: row.args || '{}',
+      question: row.question,
+      because: row.because || null,
+      askedAt: row.askedAt ?? 0,
+      timeoutSec: row.timeoutSec,
+      revision: row.revision,
     })
   }
   return out
@@ -102,8 +96,7 @@ function decodeKeeperAsks(raw: unknown): KeeperAskItem[] {
   const out: KeeperAskItem[] = []
   for (const row of raw.asks) {
     if (!isRecord(row)) continue
-    const res = isRecord(row.resolution) ? row.resolution : null
-    if (res && res.state !== 'open') continue
+    if (!isOpenKeeperAskRow(row)) continue
     const askId = asNonEmptyString(row.ask_id)
     const keeper = asNonEmptyString(row.keeper)
     if (!askId || !keeper || !Array.isArray(row.questions)) continue

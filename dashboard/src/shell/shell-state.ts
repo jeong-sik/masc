@@ -22,6 +22,7 @@ import {
   sessionEpoch,
 } from '../core/auth'
 import { apiGet, apiMutate } from '../core/transport'
+import { decodeToolApprovalsWire, isOpenKeeperAskRow } from '../api/hitl-decoders'
 import {
   extractObserverTopics,
   subscribeObserverFrames,
@@ -458,28 +459,20 @@ export function parseToolApprovalsPayload(
   raw: unknown,
   workspaceId: string,
 ): readonly PendingApprovalItem[] {
-  if (!isRecord(raw) || !Array.isArray(raw.pending)) return []
   const items: PendingApprovalItem[] = []
-  for (const row of raw.pending) {
-    if (!isRecord(row)) continue
-    const approvalId = asNonEmptyString(row.approval_id)
-    const keeper = asNonEmptyString(row.keeper)
-    const toolCallId = asNonEmptyString(row.tool_call_id)
-    if (!approvalId || !keeper || !toolCallId) continue
-    const askedAt = typeof row.asked_at === 'number' ? row.asked_at : null
-    const revision = asNonEmptyString(row.revision)
-      ?? (typeof row.revision === 'number' ? String(row.revision) : `${approvalId}:${askedAt ?? 0}`)
+  for (const row of decodeToolApprovalsWire(raw)) {
+    if (!row.hasExplicitApprovalId || !row.toolCallId) continue
     items.push({
-      approvalId,
-      keeper,
-      toolCallId,
-      tool: typeof row.tool === 'string' ? row.tool : '',
-      args: typeof row.args === 'string' ? row.args : '',
-      question: typeof row.question === 'string' ? row.question : '',
-      because: typeof row.because === 'string' ? row.because : '',
-      askedAt,
+      approvalId: row.approvalId,
+      keeper: row.keeper,
+      toolCallId: row.toolCallId,
+      tool: row.tool,
+      args: row.args,
+      question: row.question,
+      because: row.because,
+      askedAt: row.askedAt,
       workspaceId,
-      revision,
+      revision: row.revision,
     })
   }
   return items
@@ -503,13 +496,7 @@ export function parseKeeperAsksPayload(
     const askId = asNonEmptyString(row.ask_id) ?? asNonEmptyString(row.id)
     const keeper = asNonEmptyString(row.keeper) ?? asNonEmptyString(row.name) ?? 'keeper'
     if (!askId) continue
-    const resolutionState = isRecord(row.resolution) && typeof row.resolution.state === 'string'
-      ? row.resolution.state
-      : typeof row.state === 'string'
-        ? row.state
-        : 'open'
-    const state = resolutionState.trim().toLowerCase()
-    if (state === 'answered' || state === 'resolved' || state === 'closed' || state === 'withdrawn') continue
+    if (!isOpenKeeperAskRow(row)) continue
     const askedAt = typeof row.asked_at === 'number'
       ? row.asked_at
       : typeof row.created_at === 'number'

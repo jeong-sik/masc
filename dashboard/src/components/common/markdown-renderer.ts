@@ -77,11 +77,29 @@ function renderMarkdownUncached(text: string): string {
 const MARKDOWN_CACHE_MAX = 256
 export const renderMarkdown = memoizeLru(renderMarkdownUncached, { max: MARKDOWN_CACHE_MAX })
 
+function normalizeDocumentLinks(sanitizedHtml: string): string {
+  if (!sanitizedHtml.includes('<a')) return sanitizedHtml
+  const template = window.document.createElement('template')
+  template.innerHTML = sanitizedHtml
+  for (const anchor of template.content.querySelectorAll('a')) {
+    const href = anchor.getAttribute('href')?.trim() ?? ''
+    if (!href || href.startsWith('#')) {
+      anchor.removeAttribute('target')
+    } else {
+      anchor.setAttribute('target', '_blank')
+      anchor.setAttribute('rel', 'noopener noreferrer')
+    }
+  }
+  return template.innerHTML
+}
+
 const renderMarkdownDocument = memoizeLru(
-  (text: string) => sanitizeHtml(md.parse(text, { async: false }), {
-    USE_PROFILES: { html: true },
-    FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed', 'form'],
-  }),
+  (text: string) => normalizeDocumentLinks(
+    sanitizeHtml(md.parse(text, { async: false }), {
+      USE_PROFILES: { html: true },
+      FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed', 'form'],
+    }),
+  ),
   { max: MARKDOWN_CACHE_MAX },
 )
 

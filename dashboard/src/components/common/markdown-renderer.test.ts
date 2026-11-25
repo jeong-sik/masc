@@ -149,10 +149,20 @@ describe('MarkdownContent', () => {
 
     render(h(MarkdownContent, {
       document: true,
-      text: '[Appendix](#appendix)\n\n<h2 id="appendix">Appendix</h2>\n\n<details open><summary>Key</summary><kbd>Enter</kbd></details>',
+      text: '[Appendix](#appendix) · [Spec](https://example.test/spec) · <a href="https://example.test/raw" target="_blank" rel="opener">RawExt</a> · <a href="#appendix" target="_blank">RawFrag</a>\n\n<h2 id="appendix">Appendix</h2>\n\n<details open><summary>Key</summary><kbd>Enter</kbd></details>',
     }), container)
-    expect(container.querySelector('a')?.getAttribute('href')).toBe('#appendix')
-    expect(container.querySelector('a')?.hasAttribute('target')).toBe(false)
+    const links = Array.from(container.querySelectorAll('a'))
+    expect(links).toHaveLength(4)
+    expect(links[0]?.getAttribute('href')).toBe('#appendix')
+    expect(links[0]?.hasAttribute('target')).toBe(false)
+    expect(links[1]?.getAttribute('href')).toBe('https://example.test/spec')
+    expect(links[1]?.getAttribute('target')).toBe('_blank')
+    expect(links[1]?.getAttribute('rel')).toBe('noopener noreferrer')
+    expect(links[2]?.getAttribute('href')).toBe('https://example.test/raw')
+    expect(links[2]?.getAttribute('target')).toBe('_blank')
+    expect(links[2]?.getAttribute('rel')).toBe('noopener noreferrer')
+    expect(links[3]?.getAttribute('href')).toBe('#appendix')
+    expect(links[3]?.hasAttribute('target')).toBe(false)
     expect(container.querySelector('#appendix')?.textContent).toBe('Appendix')
     expect(container.querySelector('details[open] kbd')?.textContent).toBe('Enter')
   })

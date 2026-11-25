@@ -48,6 +48,10 @@ val reload_votes : store -> (int, board_error) result
     pending. Unknown writes and interrupted model publication remain fail-stop
     and require a fresh store. *)
 
+val reobserve_posts : store -> (unit, board_error) result
+(** See {!Board_store_load.reobserve_posts}. Call outside persistence before a
+    Board operation so a stale posts observation does not refuse it. *)
+
 (** {1 Voting} *)
 
 val current_vote_for_post :
@@ -162,6 +166,7 @@ type close_successor =
     successor is never silently read as "none". *)
 
 val set_closed :
+  ?authorize:(post -> (unit, board_error) Result.t) ->
   store ->
   post_id:string ->
   closed_by:string ->
@@ -170,9 +175,9 @@ val set_closed :
   unit ->
   (unit, board_error) Result.t
 (** Records a typed close (task-1758/#39356): who closed it, the successor
-    decision, and why. Permission (author/operator/configured moderator) is
-    checked by the caller before this runs, the same boundary as
-    [set_pinned]. Persists immediately via [append_post], durable before the
+    decision, and why. Callers can supply a pure authorization check on the
+    current post, evaluated under the same lock as the mutation. Persists
+    immediately via [append_post], durable before the
     call returns. [summary] must be non-empty after trimming and [successor]
     must name a decision; a whitespace-only summary or a missing decision is
     refused as [Validation_error] with no write. A [Successor] id must
@@ -180,9 +185,11 @@ val set_closed :
     is refused as [Validation_error] with no write. *)
 
 val reopen :
+  ?authorize:(post -> (unit, board_error) Result.t) ->
   store -> post_id:string -> (unit, board_error) Result.t
 (** Clears a post's [closed] state back to open. Idempotent: reopening an
-    already-open post is [Ok ()]. Same permission boundary as [set_closed]. *)
+    already-open post is [Ok ()] after any supplied authorization check.
+    Same permission boundary as [set_closed]. *)
 
 type cleanup_conditions
 val cleanup_conditions :

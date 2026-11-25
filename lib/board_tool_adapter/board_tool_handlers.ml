@@ -93,29 +93,22 @@ let configured_board_moderators () =
           | Ok contents -> board_moderators_from_toml ~missing:(Ok default) contents))
 ;;
 
-let require_post_close_actor ~reader ~action ~post_id ~actor =
-  match Board_dispatch.get_post ~reader ~post_id with
-  | Error _ as err -> err
-  | Ok post ->
-    if same_agent_id post.Board.author actor
-    then Ok ()
+let post_close_authorization ~reader ~action ~post_id ~actor =
+  let moderators = configured_board_moderators () in
+  let actor_name = Board.Agent_id.to_string actor in
+  fun (post : Board.post) ->
+    if not (Board_access.can_read ~reader post) then Error (Board.Post_not_found post_id)
+    else if same_agent_id post.author actor then Ok ()
     else
-      (match configured_board_moderators () with
-       | Error _ as err -> err
-       | Ok moderators ->
-         if List.exists
-              (fun name -> String.equal name (Board.Agent_id.to_string actor))
-              moderators
-         then Ok ()
-         else
-           Error
-             (Board.Unauthorized
-                (Printf.sprintf
-                   "agent %s cannot %s post %s owned by %s: not author or configured Board moderator"
-                   (Board.Agent_id.to_string actor)
-                   action
-                   post_id
-                   (Board.Agent_id.to_string post.author))))
+      match moderators with
+      | Error _ as err -> err
+      | Ok names when List.exists (String.equal actor_name) names -> Ok ()
+      | Ok _ ->
+        Error
+          (Board.Unauthorized
+             (Printf.sprintf
+                "agent %s cannot %s post %s owned by %s: not author or configured Board moderator"
+                actor_name action post_id (Board.Agent_id.to_string post.author)))
 ;;
 
 let resolve_board_post_kind (raw_kind : string option)
@@ -498,6 +491,24 @@ let handle_delete ~reader ~tool_name ~start_time args : Tool_result.result =
     | Error e -> refused e)
 ;;
 
+let post_state_change_error ~failure_prefix ~tool_name ~start_time = function
+  | (Board.Unauthorized _ | Board.Post_not_found _) as error ->
+    Board_tool_format.error_of_board_error ~tool_name ~start_time error
+  | ( Board.Invalid_id _
+    | Board.Comment_not_found _
+    | Board.Io_error _
+    | Board.Validation_error _
+    | Board.Already_voted _
+    | Board.Already_exists _
+    | Board.Recipient_lookup_failed _ ) as error ->
+    Tool_result.make_err
+      ~tool_name
+      ~class_:Tool_result.Runtime_failure
+      ~start_time
+      (Printf.sprintf "%s failed: %s" failure_prefix
+         (Board_tool_format.board_error_to_string error))
+;;
+
 (** Close a post (task-1758/#39356). The author or a configured Board
     moderator uses this agent-facing tool; the operator uses the [CanAdmin]
     dashboard route. The storage boundary requires a non-empty [summary]
@@ -515,9 +526,6 @@ let handle_close ~reader ~tool_name ~start_time args : Tool_result.result =
     match agent_id_arg ~field:"closed_by" args with
     | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
     | Ok closed_by ->
-    match require_post_close_actor ~reader ~action:"close" ~post_id ~actor:closed_by with
-    | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
-    | Ok () ->
     let summary = get_string args "summary" "" in
     let successor_id = get_string_opt args "successor_id" in
     let no_successor = Safe_ops.json_bool_opt "no_successor" args in
@@ -541,8 +549,10 @@ let handle_close ~reader ~tool_name ~start_time args : Tool_result.result =
         ~start_time
         msg
     | Ok successor ->
+    let authorize = post_close_authorization ~reader ~action:"close" ~post_id ~actor:closed_by in
     match
       Board_dispatch.set_closed
+        ~authorize
         ~post_id
         ~closed_by:(Board.Agent_id.to_string closed_by)
         ~successor
@@ -555,12 +565,8 @@ let handle_close ~reader ~tool_name ~start_time args : Tool_result.result =
         ~start_time
         ~data:(`String (Printf.sprintf "Closed post %s" post_id))
         ()
-    | Error e ->
-      Tool_result.make_err
-        ~tool_name
-        ~class_:Tool_result.Runtime_failure
-        ~start_time
-        (Printf.sprintf "Close failed: %s" (Board_tool_format.board_error_to_string e)))
+    | Error error ->
+      post_state_change_error ~failure_prefix:"Close" ~tool_name ~start_time error)
 ;;
 
 (** Reopen a closed post (task-1758/#39356). The author or a configured
@@ -579,22 +585,16 @@ let handle_reopen ~reader ~tool_name ~start_time args : Tool_result.result =
     match agent_id_arg ~field:"reopened_by" args with
     | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
     | Ok reopened_by ->
-    match require_post_close_actor ~reader ~action:"reopen" ~post_id ~actor:reopened_by with
-    | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
-    | Ok () ->
-    match Board_dispatch.reopen ~post_id with
+    let authorize = post_close_authorization ~reader ~action:"reopen" ~post_id ~actor:reopened_by in
+    match Board_dispatch.reopen_authorized ~authorize ~post_id with
     | Ok () ->
       Tool_result.make_ok
         ~tool_name
         ~start_time
         ~data:(`String (Printf.sprintf "Reopened post %s" post_id))
         ()
-    | Error e ->
-      Tool_result.make_err
-        ~tool_name
-        ~class_:Tool_result.Runtime_failure
-        ~start_time
-        (Printf.sprintf "Reopen failed: %s" (Board_tool_format.board_error_to_string e)))
+    | Error error ->
+      post_state_change_error ~failure_prefix:"Reopen" ~tool_name ~start_time error)
 ;;
 
 let handle_board_cleanup ~reader ~tool_name ~start_time args : Tool_result.result =

@@ -40,6 +40,24 @@ val require_readable : store -> (unit, board_error) result
 (** Pure: unobserved, refused and unsettled phases never authorize posts.
     An unsettled store retains its unknown-write evidence and rejects further
     source reads and writes. A fresh store loads the actual source instead. *)
+type reobservation =
+  | Reobservation_not_due
+      (** Readable, never observed, or refused for a reason a fresh read of
+          the same file cannot change. No IO was performed. *)
+  | Reobserved of posts_source_read
+      (** The store was refused because the file moved away from its stale
+          observation. The caller installs the read into the model and
+          {!publish_read}s it. *)
+  | Unsettled_write_pending
+      (** An earlier write's outcome is unknown. No IO is performed: a read
+          cannot prove a durability-unknown publication durable, so only a
+          fresh store (server restart) settles it. *)
+
+val reobserve : store -> reobservation
+(** Caller holds persistence. Re-reads the posts file only when a refusal
+    proves the store's observation stale, so a write refused because another
+    writer appended does not refuse every later write. *)
+
 val failure_to_board_error : posts_source_failure -> board_error
 val finish_write : posts_write_outcome -> (unit, board_error) result
 val finish_read : posts_source_read -> unit

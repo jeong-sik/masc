@@ -187,9 +187,8 @@ let finish_write outcome =
   carry_reserved result (reserved_diagnostics (write_diagnostics outcome));
   result
 
-let read store = match store.posts_source with
-  | Posts_unsettled { failure; _ } -> Posts_unavailable { failure; diagnostics = [] }
-  | Posts_unobserved | Posts_readable _ | Posts_refused _ ->
+(* Physical read of the bound posts file, shared by [read] and [reobserve]. *)
+let read_source store =
     let diagnostics = ref [] in
     let add diagnostic = diagnostics := !diagnostics @ [diagnostic] in
     let unavailable failure =
@@ -244,6 +243,10 @@ let read store = match store.posts_source with
         let backtrace = Printexc.get_raw_backtrace () in
         add (Raised_diagnostic { stage = !stage; exception_; backtrace });
         unavailable (Posts_raised { exception_; backtrace })
+
+let read store = match store.posts_source with
+  | Posts_unsettled { failure; _ } -> Posts_unavailable { failure; diagnostics = [] }
+  | Posts_unobserved | Posts_readable _ | Posts_refused _ -> read_source store
 
 let publish_read store outcome = match store.posts_source with
   | Posts_unsettled _ -> ()
@@ -330,6 +333,30 @@ let write store ~pre_write ~kind ~workspace_observation ~bytes ~diagnostics perf
   with exception_ ->
     write_raised store ~pre_write ~kind ~bytes ~diagnostics
       exception_ (Printexc.get_raw_backtrace ())
+
+(* A refusal caused by the file moving away from this store's observation
+   (another writer appended, replaced or rewrote it) proves only that the old
+   observation is stale. Every later write reuses that stale expectation, so
+   without a fresh read the store refuses forever (task-4036). *)
+let stale_observation = function
+  | Posts_transaction_failed error -> contradicts_observation error
+  | Posts_not_observed | Posts_rows_rejected _ | Posts_missing
+  | Posts_source_binding_mismatch | Posts_policy_source_is_posts_source
+  | Posts_snapshot_stale | Posts_workspace_binding_refused _ | Posts_raised _ -> false
+
+type reobservation =
+  | Reobservation_not_due
+  | Reobserved of posts_source_read
+  | Unsettled_write_pending
+
+(* An unsettled store keeps its unknown-write evidence: a read cannot prove a
+   durability-unknown publication durable (the parent-sync case), so only a
+   fresh store settles it. Reobservation reports that instead of re-reading. *)
+let reobserve store = match store.posts_source with
+  | Posts_unobserved | Posts_readable _ -> Reobservation_not_due
+  | Posts_refused { failure; _ } ->
+    if stale_observation failure then Reobserved (read_source store) else Reobservation_not_due
+  | Posts_unsettled _ -> Unsettled_write_pending
 
 let observe_guard_refusal store observation failure =
   match store.posts_source with

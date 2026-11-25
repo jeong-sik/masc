@@ -1098,6 +1098,126 @@ let test_explicit_raise_poisons_persist_only base_path _workspace =
   Alcotest.(check string) "state reads still work"
     "before explicit poison" (current store post).body
 
+(* task-4036: another writer's append left this store's observation stale.
+   The append refusal froze that stale expectation, so every later post and
+   comment returned the same cursor-mismatch pair until a restart. One
+   reobservation must re-read the file, adopt the other writer's rows and
+   accept the next write. *)
+let require_stale_cursor_refusal store =
+  match store.Board.posts_source with
+  | Board.Posts_refused { failure = Board.Posts_transaction_failed (Fs_compat.Cursor_mismatch _); _ } -> ()
+  | Board.Posts_unobserved | Board.Posts_readable _ | Board.Posts_refused _
+  | Board.Posts_unsettled _ ->
+    Alcotest.fail "another writer's append did not refuse the stale observation"
+
+let comment store (post : Board.post) content =
+  Board.add_comment ~reader:Masc_board_handlers.Board_access.Operator store
+    ~lookup:Recipient_lookup.none_declared ~post_id:(Board.Post_id.to_string post.id)
+    ~author:"source-writer" ~content ~ttl_hours:0 ()
+
+let test_stale_observation_is_reobserved base_path _workspace =
+  present_empty_posts base_path;
+  let store = make_store base_path in
+  load_posts store 0;
+  load_comments store 0;
+  let first = require_post (create store "first from this store") in
+  let other = reloaded base_path 1 in
+  let external_ = require_post (create other "appended by another writer") in
+  let disk = read_bytes (Board.persist_path store) in
+  require_pre_effect (create store "refused against the stale cursor");
+  require_stale_cursor_refusal store;
+  (* The frozen state: before reobservation every write keeps refusing. *)
+  require_pre_effect (create store "still refused without a fresh read");
+  require_io_refusal (comment store first "comment gated on posts authority");
+  require_stale_cursor_refusal store;
+  Alcotest.(check string) "refusals wrote nothing" disk (read_bytes (Board.persist_path store));
+  require_board (Board.reobserve_posts store);
+  check_observed_bytes store;
+  Alcotest.(check string) "reobservation adopts the other writer's row"
+    external_.body (current store external_).body;
+  Alcotest.(check string) "reobservation keeps this store's row"
+    first.body (current store first).body;
+  let retained = store.Board.posts_source in
+  require_board (Board.reobserve_posts store);
+  Alcotest.(check bool) "a readable source is not read again" true
+    (store.Board.posts_source == retained);
+  let third = require_post (create store "accepted after reobservation") in
+  ignore (require_board (comment store first "comment accepted after reobservation"));
+  let fresh = reloaded base_path 3 in
+  Alcotest.(check (list string)) "the file holds every writer's post exactly once"
+    [ first.body; external_.body; third.body ]
+    (List.map (fun (post : Board.post) -> (current fresh post).body) [ first; external_; third ])
+
+let test_dispatch_writes_reobserve base_path _workspace =
+  present_empty_posts base_path;
+  Fun.protect
+    ~finally:(fun () ->
+      Board_dispatch.reset_for_test ();
+      Board.reset_global_for_test ())
+    (fun () ->
+      Result.get_ok (Board_dispatch.init_jsonl ~base_path
+        ~recipient_lookup:Recipient_lookup.none_declared ());
+      let store = Board_dispatch.backend () in
+      let first = require_post (create store "post managed by Dispatch") in
+      let post_id = Board.Post_id.to_string first.id in
+      let cause_stale () =
+        require_pre_effect (create store "refused against the stale cursor");
+        require_stale_cursor_refusal store
+      in
+      let other = reloaded base_path 1 in
+      let external_ = require_post (create other "external append before pin") in
+      cause_stale ();
+      require_board (Board_dispatch.set_pinned ~post_id ~pinned:true);
+      let other = reloaded base_path 2 in
+      let new_author = "new-source-owner" in
+      ignore (require_board (Board.update_post_with_outcome other
+        ~lookup:Recipient_lookup.none_declared ~post_id ~editor:"source-writer"
+        ~content:first.body ~new_author ()));
+      cause_stale ();
+      let authorize (post : Board.post) =
+        if String.equal (Board.Agent_id.to_string post.author) "source-writer" then Ok ()
+        else Error (Board.Unauthorized "post author changed")
+      in
+      (match Board_dispatch.set_closed ~authorize ~post_id ~closed_by:"source-writer"
+         ~successor:Board.No_successor ~summary:"close by the previous owner" () with
+       | Error (Board.Unauthorized _) -> ()
+       | Error error -> Alcotest.fail (Board.show_board_error error)
+       | Ok () -> Alcotest.fail "close accepted the previous owner after reobservation");
+      let fresh = reloaded base_path 2 in
+      let updated = current fresh first in
+      Alcotest.(check bool) "pin survived concurrent edit" true updated.pinned;
+      Alcotest.(check bool) "unauthorized close did not persist" true (Option.is_none updated.closed);
+      Alcotest.(check string) "transferred owner kept" new_author
+        (Board.Agent_id.to_string updated.author);
+      Alcotest.(check string) "external append kept" external_.body (current fresh external_).body)
+
+(* An unknown earlier write is not read clear: reobservation performs no read,
+   keeps the evidence and names the cause and the needed restart. *)
+let test_unsettled_reobservation_names_restart base_path _workspace =
+  let store, _, armed, _, fired = fault_store base_path in
+  load_posts store 0;
+  let post = require_post (create store "before unknown rewrite") in
+  armed := true;
+  require_io_refusal (edit store post "published but durability unknown");
+  Alcotest.(check int) "actual post-rename parent-sync hook failed once" 1 !fired;
+  require_unknown_parent_sync store;
+  let retained = store.Board.posts_source in
+  (match Board.reobserve_posts store with
+   | Ok () -> Alcotest.fail "an unknown write was treated as settled"
+   | Error (Board.Io_error detail) ->
+     let mentions needle =
+       let n = String.length needle and m = String.length detail in
+       let rec at i = i + n <= m && (String.equal (String.sub detail i n) needle || at (i + 1)) in
+       at 0 in
+     Alcotest.(check bool) "the refusal names the unknown write" true
+       (mentions "outcome is unknown");
+     Alcotest.(check bool) "the refusal names the needed restart" true
+       (mentions "Restart the server")
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  Alcotest.(check bool) "unsettled evidence is retained unchanged" true
+    (store.Board.posts_source == retained);
+  require_pre_effect (create store "still refused while unsettled")
+
 let () =
   let case name test = Alcotest.test_case name `Quick (with_workspace test) in
   Alcotest.run "board_posts_source_authority"
@@ -1143,6 +1263,12 @@ let () =
         ; case "delete cleanup preserves dependent deletion" test_delete_cleanup_preserves_dependents
         ; case "known nonwrite cleanup leaves reload usable" test_nonwrite_cleanup_preserves_reload
         ; case "Fusion cleanup leaves the origin mutex usable" test_fusion_cleanup_preserves_origin_mutex ]
+    ; "stale observation recovery",
+        [ case "another writer's append is reobserved once" test_stale_observation_is_reobserved
+        ; case "Dispatch reobserves before pinning and checks the current author"
+            test_dispatch_writes_reobserve
+        ; case "unsettled reobservation names the restart"
+            test_unsettled_reobservation_names_restart ]
     ; "unknown writes",
         [ case "reserved unknown keeps the persistence mutex usable"
             test_unknown_reserved_keeps_mutex_usable

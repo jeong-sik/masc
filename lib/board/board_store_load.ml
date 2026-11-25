@@ -162,3 +162,38 @@ let load_persisted_reactions store =
     | exception_ ->
       let outcome = Source.fail_read store outcome exception_ (Printexc.get_raw_backtrace ()) in
       finish outcome)
+
+(* task-4036: a posts write refused by a stale observation (another writer
+   moved the file) must not refuse every later write. Re-read
+   the file once under persistence, install a complete read as the posts model
+   with counts re-derived as at startup, and publish it as the new observation. *)
+let reobserve_posts store =
+  with_persist_lock store (fun () ->
+    let path = Board_paths.persist_path store in
+    match Board_core_persist.require_model_reload_allowed store ~path with
+    | Error (_, exn) -> Error (Io_error (Printexc.to_string exn))
+    | Ok () ->
+      match Board_posts_source.reobserve store with
+      | Board_posts_source.Reobservation_not_due -> Ok ()
+      | Board_posts_source.Unsettled_write_pending ->
+        Error (Io_error (Printf.sprintf
+          "posts source %s has an earlier write whose outcome is unknown, so Board \
+           writes stay refused while listing keeps the loaded posts. Restart the \
+           server to reload the Board from the file." path))
+      | Board_posts_source.Reobserved outcome ->
+        let outcome =
+          try
+            with_lock store (fun () ->
+              (match outcome with
+               | Posts_complete { posts; _ } ->
+                 Board_votes_json.replace_loaded_posts store posts;
+                 recalculate_reply_counts store;
+                 recalculate_vote_counts store
+               | Posts_partial _ | Posts_unavailable _ -> ());
+              publish_posts_read store outcome);
+            outcome
+          with exception_ ->
+            fst (Board_posts_source.fail_read store outcome ~stage:Project_posts
+              exception_ (Printexc.get_raw_backtrace ())) in
+        finish_posts_read outcome;
+        require_posts_source_readable store)

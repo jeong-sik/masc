@@ -1,6 +1,7 @@
 # TOML로 Lane Add-on 설치하기
 
-Web의 패키지 선택·필드 입력·초안 저장은 [Web 설치 안내](web-lane-addons.md)를 참고한다.
+[사용 안내](web-lane-addons.md)에서 연결 뒤 Keeper 턴에 들어가는 내용,
+Dashboard 설치, 패키지 업데이트를 확인할 수 있다.
 
 Lane Add-on은 패키지를 파일로 설치·변경·제거하는 경로다. 기존 MSX 머신,
 Browser 세션, Keeper의 실행과 도구를 재사용한다. 패키지 하나가 여러 관측·관계 Lane을
@@ -569,7 +570,7 @@ repository_id = "masc"
 
 ## 세계와 연결되는 통로
 
-패키지는 TOML 설치, Skill 본문·스크립트·참조 문서 읽기, Docker 환경, 선택적인 행동 포트를 연결한다.
+패키지는 TOML 설치, Skill 본문·스크립트·참조 문서 읽기, manifest가 선택한 실행기와 선택적인 행동 포트를 연결한다.
 [출력 연결](lane-output-composition.md)의 `lane_output` source를 통해 다른 설치의 완료된 관측을
 통계 패키지 입력으로 전달한다. [세계 행동 계약](lane-world-actions.md)의 `[world.actions]`는
 패키지가 광고한 행동을 자신의 worker에서 실행하고 영속 receipt와 근거를 반환한다.

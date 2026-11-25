@@ -954,6 +954,16 @@ Skill receiving-turn evidence is read through
 Its coverage describes the retained trace snapshot, not all historical activity.
 Original invocation and later receipt or action remain separate facts.
 
+## Keeper turns with a Lane Add-on
+
+An attached package can contribute tools available to the Keeper and read-only
+Skills. For example, the Keeper can load `msx-observe` and call
+`masc_msx_screen` to receive a PNG and frame number in the turn's tool result.
+A subscribed output adds a reference for a new observation. The Keeper reads
+the observation using `masc_lane_updates`.
+See the [before-and-after example](guides/web-lane-addons.md#keeper-컨텍스트는-어떻게-달라지나)
+and the [subscription guide](guides/lane-subscriptions.md).
+
 ## When something is wrong
 
 | What you see | What it usually means |

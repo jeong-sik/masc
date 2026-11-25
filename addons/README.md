@@ -12,13 +12,14 @@ step in other Keeper activity.
 | [browser](browser/README.md) | Observes connections in a native browser worker. | Private concurrent host transport foundation; public browser routing and owned browsers remain pending. |
 | [vst-phrase](vst-phrase/README.md) | Retains the native score companion's latest instrument, render and player state. | Reads an explicit local snapshot; native VSTs, licenses and audio playback remain on the user's host. |
 | [web-project](web-project/) | Relates build expectations, deployment receipts, captured documents and feature probes. | Reads supplied observations; does not create or navigate a browser. |
-| [msx-machine](msx-machine/) | Owns MSX tools, screen context and play instructions. | Worker-owned emulator and persistent state volume; source candidate, image unverified. |
-| [dos-machine](dos-machine/) | Owns DOS tools, screen context and play instructions. | Worker-owned emulator and persistent state volume; source candidate, image unverified. |
+| [msx-machine](msx-machine/README.md) | Owns MSX tools, screen context and play instructions. | Worker-owned emulator and persistent state volume. |
+| [dos-machine](dos-machine/README.md) | Owns DOS tools, screen context and play instructions. | Worker-owned emulator and persistent state volume. |
 | [msx-observer](msx-observer/) | Projects captures with the existing MSX frame clock and machine incarnation. | Borrows the attached MSX worker through retained host snapshots; does not send input or own the machine. |
 | [output-statistics](output-statistics/README.md) | Counts rows and row kinds in each supplied completed output. | Owns its worker; no cumulative event count or machine state. |
 | [frame-progress](frame-progress/README.md) | Measures frame differences between supplied MSX captures. | Keeps a baseline in worker memory; restart or missing input requires a fresh baseline. |
 | [value-difference](value-difference/README.md) | Measures signed changes and directions between supplied numeric values, including DOS counters. | Keeps independent source baselines in worker memory; owns no upstream machine. |
 | [wkbl-score-runs](wkbl-score-runs/README.md) | Derives the largest unanswered scoring run from a complete WKBL play-by-play period. | Reads a supplied snapshot; owns no game, database or website state. |
+| [candle-appraiser](candle-appraiser/README.md) | Produces Grade, Relation and Weights judgments through the host's Exact runner. | The worker retains judgment requests and results. The host validates them and settles the Candle ledger. |
 | [dos-world](dos-world/README.md) | Runs a homebrew DOS counter, accepts an optional action and emits guest-state and screen artifacts. | Owns its DOS/WASM machine inside its worker; replacement starts a new machine. |
 | [operator-quiz](operator-quiz/README.md) | Asks the operator multiple-choice questions written from granted Board and repository records, and grades each answer by its key. | Keeps sessions, keys and attempts in a log on its persistent volume; the host retains the read pages, exact outputs, questions and answers. |
 | [operator-lesson](operator-lesson/README.md) | Writes short lesson scenes from granted Board, repository, wiki and pull-request records, each paragraph quoting its record. | Keeps sessions, outline entries and scenes in a log on its persistent volume; the host retains the read pages and exact outputs. |
@@ -41,8 +42,10 @@ selects one of them with `package = "<name>"` instead of `manifest_path`, and
 `masc exact-addon-setup` writes its folder and builds its image
 ([TOML installation](../docs/guides/lane-addon-toml.md)).
 
-Prepare the image in CI and load it into the container engine used by MASC (`[lane_addons] runtime = "docker" | "container"` in `server.toml`, defaulting to `"docker"`). Place the
-package where MASC can read its manifest and bundled Skills, then save the
+For a container package, load the image into the runtime selected by its
+manifest. `runtime` defaults to `docker` and can select `apple_container`.
+A compatible `host_process` manifest instead uses a local MCP stdio executable.
+Place the package where MASC can read its manifest and bundled Skills, then save the
 workspace declaration under `<resolved-config-root>/lane-addons/`. Resolve
 `manifest_path` relative to that declaration's location. Existing reconciliation
 installs, updates and removes its worker; a separate manual Attach request is not
@@ -52,9 +55,10 @@ See [TOML installation](../docs/guides/lane-addon-toml.md), the
 [MSX declaration](../docs/examples/lane-addons/msx-frames.toml) and
 [DOS declaration](dos-world/install.toml).
 
-The [Web package guide](../docs/guides/web-lane-addons.md) covers package selection,
-TOML editing, named connections, activity toggles, Slice and retained evidence.
-New packages use this common surface without adding domain-specific menus.
+The [operator guide](../docs/guides/web-lane-addons.md) covers attachment,
+[changes to a Keeper turn](../docs/guides/web-lane-addons.md#keeper-컨텍스트는-어떻게-달라지나),
+installation and upgrades. Dashboard inventory and observations use a common
+surface for all packages.
 
 [Output composition](../docs/guides/lane-output-composition.md) connects a
 consumer's `binding.sources` to another installation in the same run using
@@ -126,8 +130,9 @@ Observation and derivation packages need no action port.
 
 ## Worker protocol and package tests
 
-Every worker advertises `lane_observe` through MCP `tools/list`. Ordinary
-observation requests contain `{binding, sources}`; acting workers also receive
+Every worker advertises `lane_observe` through MCP `tools/list`. The host checks
+`world.exact_protocol` when loading a manifest with Exact outputs.
+Ordinary observation requests contain `{binding, sources}`; acting workers also receive
 the host's instance/incarnation `context`. Observations return `rows` and
 `coverage` in `structuredContent`. Any package may include the optional
 `artifacts` bytes envelope; it does not require an action contribution. The host

@@ -4,6 +4,7 @@ import { setCanonicalDashboardActor } from './dashboard-session-actor'
 const TOKEN_STORAGE_KEY = 'masc_bearer_token'
 const TOKEN_META_STORAGE_KEY = 'masc_bearer_token_meta'
 const PRINTABLE_ASCII_TOKEN_RE = /^[\x21-\x7E]+$/
+const HEADER_SAFE_ASCII_RE = /^[\x20-\x7E]+$/
 
 export type BearerTokenValidation =
   | { readonly ok: true; readonly token: string | null }
@@ -125,19 +126,42 @@ export function consumeUrlBearerToken(): string | null {
   }
 }
 
-export function getStoredToken(): string | null {
+function normalizeStoredBearerValue(raw: string | null | undefined): BearerTokenValidation {
+  if (raw === null || raw === undefined) return { ok: true, token: null }
+  const trimmed = raw.trim()
+  if (trimmed.length === 0) return { ok: true, token: null }
+  if (!HEADER_SAFE_ASCII_RE.test(trimmed)) {
+    return {
+      ok: false,
+      error: '유효한 ASCII Bearer 토큰이 아닙니다. 공백·한글·특수문자 없이 토큰 문자열만 붙여넣어 주세요.',
+    }
+  }
+  return { ok: true, token: trimmed }
+}
+
+function readRawStoredToken(): {
+  readonly raw: string | null
+  readonly token: string | null
+  readonly invalid: boolean
+} {
   try {
     const raw = sessionStorage.getItem(TOKEN_STORAGE_KEY)
-    if (raw === null) return null
-    const parsed = normalizeBearerToken(raw)
-    if (!parsed.ok) {
-      clearStoredToken()
-      return null
-    }
-    return parsed.token
+    if (raw === null) return { raw: null, token: null, invalid: false }
+    const parsed = normalizeStoredBearerValue(raw)
+    if (!parsed.ok) return { raw, token: null, invalid: true }
+    return { raw, token: parsed.token, invalid: false }
   } catch {
+    return { raw: null, token: null, invalid: false }
+  }
+}
+
+export function getStoredToken(): string | null {
+  const { token, invalid } = readRawStoredToken()
+  if (invalid) {
+    clearStoredToken()
     return null
   }
+  return token
 }
 
 export function getStoredTokenMeta(): StoredTokenMeta | null {
@@ -154,14 +178,14 @@ export function setStoredToken(
   token: string,
   meta: StoredTokenMeta = { source: 'manual' },
 ): void {
-  const parsed = normalizeBearerToken(token)
+  const parsed = normalizeStoredBearerValue(token)
   if (!parsed.ok) return
   const normalizedToken = parsed.token
   if (!normalizedToken) {
     clearStoredToken()
     return
   }
-  const previousToken = getStoredToken()
+  const { token: previousToken, invalid: previousInvalid } = readRawStoredToken()
   const previousMeta = getStoredTokenMeta()
   const nextMeta = normalizeStoredTokenMeta(meta)
   sessionStorage.setItem(TOKEN_STORAGE_KEY, normalizedToken)
@@ -171,7 +195,7 @@ export function setStoredToken(
     sessionStorage.removeItem(TOKEN_META_STORAGE_KEY)
   }
   setCanonicalDashboardActor(null)
-  if (previousToken !== normalizedToken || !storedTokenMetaEquals(previousMeta, nextMeta)) {
+  if (previousInvalid || previousToken !== normalizedToken || !storedTokenMetaEquals(previousMeta, nextMeta)) {
     notifyStoredTokenChange({
       token: normalizedToken,
       meta: nextMeta,
@@ -180,12 +204,14 @@ export function setStoredToken(
 }
 
 export function clearStoredToken(): void {
-  const previousToken = getStoredToken()
+  const { raw, token: previousToken } = readRawStoredToken()
   const previousMeta = getStoredTokenMeta()
-  sessionStorage.removeItem(TOKEN_STORAGE_KEY)
-  sessionStorage.removeItem(TOKEN_META_STORAGE_KEY)
+  try {
+    sessionStorage.removeItem(TOKEN_STORAGE_KEY)
+    sessionStorage.removeItem(TOKEN_META_STORAGE_KEY)
+  } catch { /* storage unavailable */ }
   setCanonicalDashboardActor(null)
-  if (previousToken !== null || previousMeta !== null) {
+  if (raw !== null || previousToken !== null || previousMeta !== null) {
     notifyStoredTokenChange({
       token: null,
       meta: null,

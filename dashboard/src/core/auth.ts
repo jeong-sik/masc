@@ -21,6 +21,7 @@ import {
   getStoredTokenMeta,
   normalizeBearerToken,
   setStoredToken,
+  subscribeStoredTokenChanges,
   type BearerTokenValidation,
   type StoredTokenMeta,
 } from '../lib/dashboard-bearer'
@@ -100,6 +101,26 @@ const DEFAULT_AUTH_METHODS: AuthMethods = Object.freeze({
 // without leaking across tabs or surviving tab close.
 let singleUserBearerToken: string | null = null
 let activeCsrfToken: string | null = null
+let internalBearerWriteDepth = 0
+
+function withInternalBearerWrite<T>(fn: () => T): T {
+  internalBearerWriteDepth += 1
+  try {
+    return fn()
+  } finally {
+    internalBearerWriteDepth -= 1
+  }
+}
+
+function isSessionStorageReadable(): boolean {
+  try {
+    if (typeof sessionStorage === 'undefined') return false
+    sessionStorage.getItem('masc_bearer_token')
+    return true
+  } catch {
+    return false
+  }
+}
 
 function readSessionBearerToken(): string | null {
   return getStoredToken()?.trim() ?? null
@@ -109,10 +130,12 @@ function writeSessionBearerToken(
   token: string | null,
   meta: StoredTokenMeta = { source: 'manual' },
 ): void {
-  try {
-    if (token === null) clearStoredToken()
-    else setStoredToken(token, meta)
-  } catch { /* storage unavailable */ }
+  withInternalBearerWrite(() => {
+    try {
+      if (token === null) clearStoredToken()
+      else setStoredToken(token, meta)
+    } catch { /* storage unavailable */ }
+  })
 }
 
 export const authSession = signal<AuthSession>({ kind: 'probing' })
@@ -121,6 +144,38 @@ export const workspaceTargets = signal<readonly WorkspaceTarget[]>([
   { id: 'default', label: 'Default Workspace' },
 ])
 export const activeWorkspaceId = signal<string>('default')
+
+// Keep the shell's in-memory bearer cache, epoch fence, and single-user session
+// synchronized whenever API modules (e.g. api/dev-token.ts) clear or replace
+// the shared tab-scoped bearer store.
+subscribeStoredTokenChanges(({ token }) => {
+  if (internalBearerWriteDepth > 0) return
+  const prevToken = singleUserBearerToken
+  singleUserBearerToken = token
+  if (prevToken === token) return
+  batch(() => {
+    bumpSessionEpoch()
+    const cur = authSession.peek()
+    if (cur.kind === 'single_user_local' || cur.kind === 'single_user_auth_required') {
+      if (token !== null) {
+        authSession.value = {
+          kind: 'single_user_local',
+          mode: 'single_user',
+          tokenPresent: true,
+          authMethods: cur.authMethods,
+          workspaceId: activeWorkspaceId.peek(),
+        }
+      } else {
+        authSession.value = {
+          kind: 'single_user_auth_required',
+          mode: 'single_user',
+          authMethods: cur.authMethods,
+          reason: 'Token cleared',
+        }
+      }
+    }
+  })
+})
 
 export const isAuthenticated = computed<boolean>(() => {
   const s = authSession.value
@@ -611,13 +666,20 @@ export async function bootstrapAuthSession(
     activeCsrfToken = null
     if (urlToken !== null) {
       persistBearer(urlToken, { source: 'url' })
-    } else if (singleUserBearerToken === null) {
-      const restored = readSessionBearerToken()
-      if (restored !== null) singleUserBearerToken = restored
     } else {
-      const rechecked = normalizeBearerToken(singleUserBearerToken)
-      if (!rechecked.ok) {
-        persistBearer(null)
+      const stored = withInternalBearerWrite(() => readSessionBearerToken())
+      bearerRevision = currentStoredTokenRevision()
+      if (stored !== null) {
+        singleUserBearerToken = stored
+      } else if (singleUserBearerToken !== null) {
+        if (isSessionStorageReadable()) {
+          singleUserBearerToken = null
+        } else {
+          const rechecked = normalizeBearerToken(singleUserBearerToken)
+          if (!rechecked.ok) {
+            persistBearer(null)
+          }
+        }
       }
     }
     if (authMethods.dev_token && singleUserBearerToken === null) {

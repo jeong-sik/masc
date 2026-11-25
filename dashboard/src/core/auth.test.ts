@@ -3,11 +3,14 @@ import { signal } from '@preact/signals'
 import { startNavTelemetry } from '../lib/nav-telemetry'
 import {
   captureDashboardCredentialOwner,
+  clearStoredToken,
   dashboardCredentialOwnerIsCurrent,
+  getStoredToken,
   getStoredTokenMeta,
   setStoredToken,
   subscribeStoredTokenChanges,
 } from '../api/core'
+import { apiGet } from './transport'
 import { currentCanonicalDashboardActor, setCanonicalDashboardActor } from '../lib/dashboard-session-actor'
 import type { RouteState } from '../types'
 import {
@@ -613,5 +616,101 @@ describe('core/auth', () => {
     if (!timedOut.ok) expect(timedOut.error).toContain('시간 초과')
     expect(authSession.value.kind).toBe('single_user_auth_required')
     expect(getSingleUserToken()).toBeNull()
+  })
+
+  it('synchronizes shell bearer cache, authSession, and core/transport immediately when API clears or replaces the shared token', async () => {
+    window.history.replaceState(null, '', '/dashboard/?token=initial-shell-token')
+    const bootstrapFetch = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/health') return jsonResponse({ status: 'ok' })
+      if (String(input) === '/api/v1/dashboard/shell') return jsonResponse({ ok: true })
+      throw new Error(`unexpected url: ${String(input)}`)
+    })
+    const initialSession = await bootstrapAuthSession({ fetchImpl: bootstrapFetch as unknown as typeof fetch })
+    expect(initialSession.kind).toBe('single_user_local')
+    expect(getSingleUserToken()).toBe('initial-shell-token')
+
+    const seenAuthHeaders: (string | undefined)[] = []
+    const transportFetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const hdrs = (init?.headers ?? {}) as Record<string, string>
+      seenAuthHeaders.push(hdrs.Authorization)
+      return jsonResponse({ ok: true })
+    })
+
+    await apiGet('/api/v1/test', { fetchImpl: transportFetch as unknown as typeof fetch })
+    expect(seenAuthHeaders).toEqual(['Bearer initial-shell-token'])
+
+    // API rejection path clears the shared store via clearStoredToken()
+    const epochBeforeClear = currentSessionEpoch()
+    clearStoredToken()
+    expect(getSingleUserToken()).toBeNull()
+    expect(currentSessionEpoch()).toBe(epochBeforeClear + 1)
+    expect(authSession.value.kind).toBe('single_user_auth_required')
+
+    await apiGet('/api/v1/test', { fetchImpl: transportFetch as unknown as typeof fetch })
+    expect(seenAuthHeaders).toEqual(['Bearer initial-shell-token', undefined])
+
+    // Subsequent bootstrapAuthSession must not reuse the retired bearer
+    const postClearShellAuth: (string | undefined)[] = []
+    const postClearBootstrapFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/health') return jsonResponse({ status: 'ok' })
+      if (String(input) === '/api/v1/dashboard/shell') {
+        const hdrs = (init?.headers ?? {}) as Record<string, string>
+        postClearShellAuth.push(hdrs.Authorization)
+        return jsonResponse({ error: 'unauthorized' }, 401)
+      }
+      throw new Error(`unexpected url: ${String(input)}`)
+    })
+    const postClear = await bootstrapAuthSession({ fetchImpl: postClearBootstrapFetch as unknown as typeof fetch })
+    expect(postClear.kind).toBe('single_user_auth_required')
+    expect(postClearShellAuth).toEqual([undefined])
+
+    // API replacement path updates the shared store via setStoredToken()
+    const epochBeforeReplace = currentSessionEpoch()
+    setStoredToken('api-rotated-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    expect(getSingleUserToken()).toBe('api-rotated-token')
+    expect(currentSessionEpoch()).toBe(epochBeforeReplace + 1)
+    expect(authSession.value.kind).toBe('single_user_local')
+
+    await apiGet('/api/v1/test', { fetchImpl: transportFetch as unknown as typeof fetch })
+    expect(seenAuthHeaders).toEqual([
+      'Bearer initial-shell-token',
+      undefined,
+      'Bearer api-rotated-token',
+    ])
+  })
+
+  it('purges corrupted sessionStorage tokens in O(1) without mutual getStoredToken/clearStoredToken recursion', () => {
+    sessionStorage.setItem('masc_bearer_token', '잘못된한글토큰')
+    sessionStorage.setItem('masc_bearer_token_meta', JSON.stringify({ source: 'manual' }))
+    const onChange = vi.fn()
+    const unsub = subscribeStoredTokenChanges(onChange)
+    const getItemSpy = vi.spyOn(sessionStorage, 'getItem')
+    const removeItemSpy = vi.spyOn(sessionStorage, 'removeItem')
+
+    try {
+      expect(getStoredToken()).toBeNull()
+      // Strict bounds prove real reads ran AND zero mutual recursion / stack exhaustion occurred
+      expect(getItemSpy.mock.calls.length).toBeGreaterThanOrEqual(2)
+      expect(getItemSpy.mock.calls.length).toBeLessThanOrEqual(4)
+      expect(removeItemSpy).toHaveBeenCalledWith('masc_bearer_token')
+      expect(removeItemSpy).toHaveBeenCalledWith('masc_bearer_token_meta')
+      expect(onChange).toHaveBeenCalledTimes(1)
+      expect(onChange).toHaveBeenCalledWith({ token: null, meta: null })
+      expect(sessionStorage.getItem('masc_bearer_token')).toBeNull()
+      expect(sessionStorage.getItem('masc_bearer_token_meta')).toBeNull()
+
+      // Overwriting a corrupted value with setStoredToken also completes in O(1) without recursion
+      sessionStorage.setItem('masc_bearer_token', '또다른비ASCII')
+      getItemSpy.mockClear()
+      setStoredToken('clean-ascii-token', { source: 'manual' })
+      expect(getItemSpy.mock.calls.length).toBeGreaterThanOrEqual(2)
+      expect(getItemSpy.mock.calls.length).toBeLessThanOrEqual(4)
+      expect(getStoredToken()).toBe('clean-ascii-token')
+      expect(onChange).toHaveBeenLastCalledWith({ token: 'clean-ascii-token', meta: { source: 'manual' } })
+    } finally {
+      unsub()
+      getItemSpy.mockRestore()
+      removeItemSpy.mockRestore()
+    }
   })
 })

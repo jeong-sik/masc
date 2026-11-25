@@ -424,7 +424,9 @@ let check_traced_rows source cols =
 
 let test_box_labels_draw_line_breaks () =
   let src = "flowchart TD\nE[\"one<br/>two words<br/>three\"] --> F(\"a<br/>bb\")" in
-  let labels g = List.map (fun (n : Mermaid.node) -> n.label) g.nodes in
+  let labels (g : Mermaid.graph) =
+    List.map (fun (n : Mermaid.node) -> n.label) g.nodes
+  in
   Alcotest.(check (list string)) "a box label keeps its line breaks"
     [ "one\ntwo words\nthree"; "a\nbb" ]
     (labels (parsed src));

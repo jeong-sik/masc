@@ -4425,6 +4425,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
                        phase = Some "thinking";
                        tool_in_flight = None;
                        elapsed_ms = Some 500.0;
+                       preview_observed_through = None;
                        preview = None;
                      };
                };
@@ -9186,6 +9187,7 @@ let test_busy_enter_queues_and_steer_cuts_only_own_request () =
             phase = Some "thinking";
             tool_in_flight = None;
             elapsed_ms = Some 500.0;
+            preview_observed_through = None;
             preview = None;
           };
     }
@@ -16109,6 +16111,7 @@ let test_active_turn_preview_visibility_and_queued_followup () =
       phase = None;
       tool_in_flight = None;
       elapsed_ms = None;
+      preview_observed_through = None;
       preview = Some active_preview_waiting;
     }
   in
@@ -16616,7 +16619,16 @@ let test_turn_preview_updates_keep_owner_and_skip_fleet_reads () =
         Turn_active
           { lane = Lane_proactive; turn_ref = Some ref_id; started_at_unix = 90.0;
             interrupt_token = token; phase = None; tool_in_flight = None;
-            elapsed_ms = None; preview = Some (preview revision text) } }
+            elapsed_ms = None; preview_observed_through = Some revision;
+            preview = Some (preview revision text) } }
+  in
+  let missing_preview (turn_row : Wire_fleet.keeper_turn_row) revision =
+    match turn_row.state with
+    | Turn_active turn ->
+        { turn_row with
+          state = Turn_active { turn with preview = None;
+                                 preview_observed_through = Some revision } }
+    | Turn_idle | Turn_unavailable _ -> Alcotest.fail "expected an active turn fixture"
   in
   let send_preview model ~owner_key ~revision ~text =
     frame model
@@ -16669,6 +16681,12 @@ let test_turn_preview_updates_keep_owner_and_skip_fleet_reads () =
   Alcotest.(check (option string)) "the preview preserves the authoritative turn reference"
     (Some "trace#1") (Option.bind (active running keeper) (fun turn -> turn.turn_ref));
   check_preview "other keeper keeps its own preview" (Some "other keeper") running "beta";
+  check_preview "a missing preview observed earlier cannot erase the event"
+    (Some "new response") (reply running [ missing_preview a 8; other ]) keeper;
+  let withdrawn = reply running [ missing_preview a 10; other ] in
+  check_preview "a newer missing preview withdraws the previous text" None withdrawn keeper;
+  check_preview "a delayed response cannot bring back withdrawn text"
+    None (reply withdrawn [ a; other ]) keeper;
   let running, malformed_cmds =
     send_preview running ~owner_key:"invalid" ~revision:9000 ~text:"malformed response"
   in
@@ -16688,6 +16706,13 @@ let test_turn_preview_updates_keep_owner_and_skip_fleet_reads () =
   in
   Alcotest.(check bool) "owner change still requests the authoritative snapshot"
     true (has_fleet_read cmds);
+  let _, gap_cmds = Update.step ~now:t2 delayed (Msg.Stream_gap 1) in
+  Alcotest.(check bool) "a lost lifecycle event requests a snapshot in the visible view"
+    true (has_fleet_read gap_cmds);
+  let hidden = { delayed with nav = { delayed.nav with workspace = Nav.Knowledge } } in
+  let _, hidden_gap_cmds = Update.step ~now:t2 hidden (Msg.Stream_gap 1) in
+  Alcotest.(check bool) "the background fleet waits until its view is opened"
+    false (has_fleet_read hidden_gap_cmds);
   let b = row ~keeper_name:keeper ~token:"second-owner" ~ref_id:"trace#2"
       ~revision:10 ~text:"earlier second response" in
   let next = reply delayed [ b; other ] in

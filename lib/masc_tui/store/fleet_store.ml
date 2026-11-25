@@ -770,9 +770,8 @@ let overlay_turns_on_keepers (rows : Wire_fleet.keeper_turn_row list)
 
 let with_newer_preview (preview : Wire_fleet.turn_preview)
     (turn : Wire_fleet.active_turn) =
-  let current_revision = Option.bind turn.preview (fun preview -> preview.revision) in
-  if Option.compare Int.compare preview.revision current_revision > 0
-  then { turn with preview = Some preview }
+  if Option.compare Int.compare preview.revision turn.preview_observed_through > 0
+  then { turn with preview = Some preview; preview_observed_through = preview.revision }
   else turn
 
 let apply_preview (update : Wire_fleet.turn_preview_update)
@@ -921,10 +920,11 @@ let enrich_scorecard f t =
 let apply_turns ~observed_at rows t =
   let preserve_current_preview keeper (turn : Wire_fleet.active_turn) =
     match active_turn_for ~keeper t with
-    | Some previous when String.equal previous.interrupt_token turn.interrupt_token ->
-        (match previous.preview with
-        | Some preview -> with_newer_preview preview turn
-        | None -> turn)
+    | Some previous when String.equal previous.interrupt_token turn.interrupt_token
+      && Option.compare Int.compare previous.preview_observed_through
+           turn.preview_observed_through > 0 ->
+        { turn with preview = previous.preview;
+          preview_observed_through = previous.preview_observed_through }
     | Some _ | None -> turn
   in
   let rows =

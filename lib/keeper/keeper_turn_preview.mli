@@ -88,6 +88,11 @@ val current_for_turn : keeper_name:string -> interrupt_token:Keeper_interrupt_to
 (** Only the exact Owner slot can read its preview. Before its writer is
     installed, an older writer remains unreadable regardless of update time. *)
 
+val current_for_turn_with_revision :
+  keeper_name:string -> interrupt_token:Keeper_interrupt_token.t -> int * t option
+(** Read under one lock. For an installed preview, return its revision. A
+    missing preview is observed through the latest process preview revision. *)
+
 val note_text : writer:writer option -> now:float -> string -> unit
 (** Record the newest response text's tail, redacted with the snapshot
     {!reset} armed. Blank text is ignored — a tool-only turn must not erase

@@ -375,7 +375,11 @@ let test_owned_turn_survives_bound_read_refusal_and_recovery () =
           Alcotest.(check string) "actual original slot token"
             (Keeper_interrupt_token.to_string slot.interrupt_token)
             (turn |> member "interrupt_token" |> to_string);
-          let prep = turn |> member "preview" |> member "preparation" in
+          let preview = turn |> member "preview" in
+          Alcotest.(check int) "the observation orders preview updates for this Owner"
+            (preview |> member "revision" |> to_int)
+            (turn |> member "preview_observed_through" |> to_int);
+          let prep = preview |> member "preparation" in
           Alcotest.(check string) "actual original preparation turn_ref"
             (Ids.Turn_ref.to_string original)
             (prep |> member "turn_ref" |> to_string);

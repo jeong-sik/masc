@@ -118,6 +118,7 @@ let sample_keepers : Wire_fleet.keeper_summary list =
             phase = Some "retrying";
             tool_in_flight = Some "MascBoardPostGet";
             elapsed_ms = Some 1420.0;
+            preview_observed_through = None;
             preview = None;
           };
     };
@@ -145,6 +146,7 @@ let sample_keepers : Wire_fleet.keeper_summary list =
             phase = Some "reviewing";
             tool_in_flight = Some "git_diff";
             elapsed_ms = Some 380.0;
+            preview_observed_through = None;
             preview = None;
           };
     };

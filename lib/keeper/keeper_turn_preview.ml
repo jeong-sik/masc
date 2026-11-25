@@ -124,12 +124,21 @@ let current ~keeper_name =
 
 let snapshot writer = with_lock (fun () -> (!writer).preview)
 
-let current_for_turn ~keeper_name ~interrupt_token =
+let current_for_turn_with_revision ~keeper_name ~interrupt_token =
   with_lock (fun () ->
-    match Hashtbl.find_opt table keeper_name with
-    | Some writer when Option.exists (Keeper_interrupt_token.equal interrupt_token) (!writer).owner ->
-      Some (!writer).preview
-    | Some _ | None -> None)
+    let preview =
+      match Hashtbl.find_opt table keeper_name with
+      | Some writer when Option.exists (Keeper_interrupt_token.equal interrupt_token) (!writer).owner ->
+        Some (!writer).preview
+      | Some _ | None -> None
+    in
+    let observed_through =
+      match preview with Some snapshot -> snapshot.revision | None -> !revision
+    in
+    observed_through, preview)
+
+let current_for_turn ~keeper_name ~interrupt_token =
+  snd (current_for_turn_with_revision ~keeper_name ~interrupt_token)
 
 (* [f] returns [None] when the note changes nothing, which leaves
    [updated_at] where it was. *)

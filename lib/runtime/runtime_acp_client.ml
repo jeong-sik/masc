@@ -229,17 +229,20 @@ let profile_of_driver = function
        tool_call emits title = name = "mcp__<server>__<tool>" with kind =
        "other"; native tools use plain names ("read_file", kind "read"). The
        host's default permission profile has a model run approve MCP calls and
-       sends no session/request_permission frame. In four sessions each call to
-       a no-argument stub tool, ordered by the prompt, added one reviewer run:
-       the host estimated its prompt at 13.6 to 13.7k tokens (a 4,002-token
-       prefix), and 1.4 to 4.2 s passed from that prompt to the run's tool
-       call. Other tools and arguments were not tried. With settings that
-       selected permissions.default_profile ":ask-me" and the client in
-       promptUnmatched, an MCP call produced a frame in both sessions run that
-       way (the read call in a third produced none). The frame carries only the
-       toolCallId, so the identity comes from the tool_call frame.
-       session/setPermissionProfile and two other method names return -32601,
-       and -c permissions.default_profile is refused. *)
+       sends no session/request_permission frame. In five sessions each call to
+       a no-argument stub tool, ordered by the prompt, added one reviewer run
+       (a 4,002-token prefix in all five): the host estimated its prompt at
+       13.6 to 13.7k tokens in four and 11.6k in the one whose main
+       conversation had a single tool, and 1.4 to 4.8 s passed from that
+       prompt to the run's tool call. Other tools and arguments were not
+       tried, and what the run does with a call it rejects was not observed.
+       With settings that selected permissions.default_profile ":ask-me" and
+       the client in promptUnmatched, an MCP call produced a frame in both
+       sessions run that way (the read call in a third produced none). MASC
+       pins onRequest below, and ":ask-me" with onRequest was not tried. The
+       frame carries only the toolCallId, so the identity comes from the
+       tool_call frame. session/setPermissionProfile and two other method
+       names return -32601, and -c permissions.default_profile is refused. *)
     ; mcp_identifier_syntaxes = [ Mcp_double_underscore ]
     ; system_prompt_channel = Framed_in_first_prompt
     (* muse acp reports no per-turn token counts: the prompt result holds only
@@ -342,7 +345,19 @@ type mcp_http_server =
   { name : string
   ; url : string
   ; headers : (string * string) list
+  ; tool_names : string list
   }
+
+let mcp_http_server_of_bridge bridge =
+  let { Runtime_official_client_mcp_http.url; headers } =
+    Runtime_official_client_mcp_http.endpoint bridge
+  in
+  { name = Runtime_official_client_mcp_http.server_name bridge
+  ; url
+  ; headers
+  ; tool_names = Runtime_official_client_mcp_http.tool_names bridge
+  }
+;;
 
 type config =
   { driver : driver
@@ -2871,14 +2886,18 @@ let install_client_of_driver = function
    reminder observers (the run's one tool is [submit_reminder_decision]). A
    Keeper already carries its own memory, goals and verification, so the host
    runs with every observer off. Measured 2026-11-24 on turns with one tool
-   call (two main model requests): the run was present in 5 of 5 sessions
-   without the six switches below (one of them named a non-existent id
-   instead) and absent in 8 of 8 with them. The host estimated the run's
-   prompt at 5.8 to 5.9k tokens, and 1.2 to 2.9 s passed from that prompt to
-   the run's tool call. The host logged the goal reminder as skipped for lack
-   of a goal in every sample, so the goal reminder did not cause the run;
-   which of the six did was not isolated. With the switches the host
-   registered 34 tools instead of 35, which can be read without a turn.
+   call (two main model requests): all 5 sessions without the six switches
+   below had the run (one of the 5 named a non-existent id instead), and
+   none of the 12 sessions with them did (9 passed them as [-c], 3 set them
+   in settings.json, which the host reads the same way). The host estimated
+   the run's prompt at 5.8 to 5.9k tokens, and 1.2 to 2.9 s passed from that
+   prompt to the run's tool call. Which id matters was measured with the
+   echo provider only, one
+   id at a time: the run's one-tool surface appeared with the goal reminder
+   on and the other five off, and did not appear with only the goal reminder
+   off; the other five changed nothing there. No live session switched one id
+   at a time, so the other five switches stay on that basis: no measurement
+   shows they are unneeded.
    [-c runtime_capabilities.<id>] accepts any id without checking it: the
    session that named an id the host does not have kept the run and logged no
    warning, so a renamed id fails silently and the observer stays on. *)
@@ -2896,10 +2915,18 @@ let muse_observer_capability_ids =
 
 (* [--trust-workspace] is what makes the host connect the MCP servers that
    session/new carries; without it the session starts with none (muse acp
-   1.4.25, live-verified). It also loads the workspace's own skills and rules,
-   which is the Keeper workspace's content. A repeated [-c] key makes the host
-   refuse to run ("one setting, one occurrence"), so an operator [args] must not
-   repeat the observer keys below. *)
+   1.4.25, live-verified). It also loads the workspace's own skills, rules and
+   MCP servers ([.mcp.json]), which is the Keeper workspace's content: [read]
+   and [full] run in the Keeper's repository, [none] in a fresh empty
+   temporary directory (the host also walks up to an ancestor that has a VCS
+   marker, so a temporary directory under a repository would load that
+   ancestor's [.mcp.json]). A server named [masc] in such a [.mcp.json] or in
+   the operator's muse settings ([mcpServers]) makes session/new fail with
+   -32030 ("session MCP server name conflicts with a host or plugin
+   server"), because the session carries MASC's bridge under that name; MASC
+   gives the host no settings of its own. A repeated [-c] key makes the host
+   refuse to run ("one setting, one occurrence"), so an operator [args] must
+   not repeat the observer keys below. *)
 let muse_required_args =
   "--trust-workspace"
   :: List.concat_map
@@ -2907,32 +2934,50 @@ let muse_required_args =
        muse_observer_capability_ids
 ;;
 
-(* muse acp 1.4.25 runs its read tool in every mode tried, workspace writes
-   and sandboxed shell commands in the modes tried, without a
+(* muse acp 1.4.25 runs its read tool in every mode tried, and workspace
+   writes and sandboxed shell commands in the modes tried, without a
    session/request_permission frame, so refusing permission requests cannot
-   keep its native tools off. It offers the main conversation the tools named
-   by the setting [run.toolset]: a JSON array of names, where
-   [mcp__<server>__*] stands for every tool of one MCP server. Anything not
-   named is not offered (echo provider, 2026-11-24: 29 native tools by
-   default, 0 with an empty array, 2 with the two names below).
+   keep its native tools off. The setting [run.toolset], a JSON array of
+   names, names the tools the main conversation is offered; anything not
+   named is not offered (echo provider, 2026-11-24, with the six observer
+   switches: 28 native tools by default, 0 with an empty array, 2 with the two
+   names below; 29 by default without the switches).
    - [none]: the MCP server's tools only.
    - [read]: [read_file] and [search] (workspace file search with ripgrep
-     semantics), plus the MCP server's tools.
+     semantics), plus the MCP server's tools. [read_file] is not confined to
+     the workspace: a live session read [/etc/hosts]. No live session called
+     [search]; a kind other than read, search or think in its tool_call frame
+     would make the Keeper treat the call as outside [read].
    - [full]: no setting, so the host keeps its default native tools, among
      them shell, file writes, memory, cron, sub-agents, web fetch and search.
-   An unstated posture takes the [none] side. The host refuses an unknown
-   plain name when the session starts. A session/new that carries no MCP
-   server of the named name makes the first turn fail with "invalid run
-   configuration: unknown tool" instead of running without MASC's tools.
-   [mcp__<server>__*] matched every tool of a stub server whose tool names
-   contain underscores. A repeated [-c run.toolset] makes the host refuse to
-   run, so an operator [args] must not set it. *)
-let muse_toolset_args ?mcp_server_name posture =
+   An unstated posture takes the [none] side.
+   The MCP server's tools are named by the glob [mcp__<server>__*], which
+   matched every tool of a stub server whose tool names contain underscores.
+   The glob also matches the tools of any server whose name starts with
+   [masc__], which a trusted workspace or the operator's muse settings can
+   define. Exact names would not. The host registers a tool under its name
+   with every character outside [A-Za-z0-9_] replaced by [_] (a tool [a-b]
+   is [mcp__masc__a_b], and [mcp__masc__a-b] is unknown), and a listed name
+   that matches no registered tool fails every turn. The names in
+   config/tools use only [A-Za-z0-9_] and are at most 48 characters
+   (2026-11-24), so the glob matches all of them; dynamic tools from other
+   sources were not checked. The host registers nothing for an empty name or
+   for one whose whole [mcp__<server>__<name>] is longer than 256 characters
+   (names of 245 characters work, 246 fail), so a bridge that lists only
+   such names fails every turn too. The glob stays.
+   The host refuses an unknown plain name when the session starts. A name
+   that matches no tool fails the first turn with "invalid run
+   configuration: unknown tool"; the message gives the name, not the cause.
+   The glob of a server that lists no tool, of one session/new did not carry
+   and of one the host could not connect to all end this way, so a server
+   that lists no tool is left out of the list. A repeated [-c run.toolset]
+   makes the host refuse to run, so an operator [args] must not set it. *)
+let muse_toolset_args ?mcp_server posture =
   let restricted native_tools =
     let mcp_tools =
-      match mcp_server_name with
-      | Some name -> [ Printf.sprintf "mcp__%s__*" name ]
-      | None -> []
+      match mcp_server with
+      | Some { name; tool_names = _ :: _; _ } -> [ Printf.sprintf "mcp__%s__*" name ]
+      | Some { tool_names = []; _ } | None -> []
     in
     let names = List.map (fun tool -> `String tool) (native_tools @ mcp_tools) in
     [ "-c"; "run.toolset=" ^ Yojson.Safe.to_string (`List names) ]
@@ -2943,7 +2988,7 @@ let muse_toolset_args ?mcp_server_name posture =
   | Some Runtime_native_tools.Native_none | None -> restricted []
 ;;
 
-let build_argv ?native_posture ?mcp_server_name (config : config) ~temp_gemini_dir =
+let build_argv ?native_posture ?mcp_server (config : config) ~temp_gemini_dir =
   let profile = profile_of_driver config.driver in
   let base_args = if config.args <> [] then config.args else profile.default_args in
   match config.driver with
@@ -2984,7 +3029,7 @@ let build_argv ?native_posture ?mcp_server_name (config : config) ~temp_gemini_d
   | Muse_code ->
     (config.cli_path :: base_args)
     @ muse_required_args
-    @ muse_toolset_args ?mcp_server_name native_posture
+    @ muse_toolset_args ?mcp_server native_posture
 ;;
 
 let foreground_process_mgr ~clock ?(grace_seconds = default_reap_grace_seconds) () =
@@ -3039,7 +3084,7 @@ let start ~sw ~proc_mgr ~clock ?fs ~(config : config) ?mcp_server ?native_postur
     let argv =
       build_argv
         ?native_posture
-        ?mcp_server_name
+        ?mcp_server
         { config with cli_path = resolved_cli_path }
         ~temp_gemini_dir
     in

@@ -188,6 +188,7 @@ module For_testing : sig
 
   val project_stream_for_testing
     :  ?server_isolation:Runtime_acp_client.mcp_server_isolation
+    -> ?official_turn:int
     -> ?on_effect_attempted:(unit -> unit)
     -> ?on_native_action:
          (official_turn:int
@@ -217,6 +218,14 @@ module For_testing : sig
           -> usage:Agent_core.Types.api_usage option
           -> unit)
        * (unit -> Yojson.Safe.t)
+
+  val reconcile_prepared_tools
+    :  ?account_home:string
+    -> ?continuation:Keeper_semantic_execution.official_client_checkpoint
+    -> native_posture:Runtime_native_tools.posture
+    -> claim_plan:Keeper_official_client_session_store.claim_plan
+    -> Keeper_official_client_host.prepared_turn
+    -> (Keeper_official_client_session_store.claim_plan * string, Agent_core.Error.t) result
 
   val start_mcp_bridge_for_specs
     :  sw:Eio.Switch.t

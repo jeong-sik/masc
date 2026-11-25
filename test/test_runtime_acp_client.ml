@@ -386,33 +386,54 @@ let test_muse_refuses_unsupported_config_before_spawn () =
 
 let test_muse_argv_and_environment () =
   let cfg = Runtime_acp_client.default_config ~driver:Runtime_acp_client.Muse_code ~cwd:"/tmp" in
-  let argv ?native_posture ?mcp_server_name cfg =
-    Runtime_acp_client.For_testing.build_argv ?native_posture ?mcp_server_name cfg
+  let masc =
+    { Runtime_acp_client.name = "masc"
+    ; url = "http://127.0.0.1:9/mcp"
+    ; headers = []
+    ; tool_names = [ "masc_status"; "keeper_skill" ]
+    }
+  in
+  let argv ?native_posture ?mcp_server cfg =
+    Runtime_acp_client.For_testing.build_argv ?native_posture ?mcp_server cfg
       ~temp_gemini_dir:None
   in
   let toolset names = [ "-c"; "run.toolset=" ^ names ] in
   let trusted = [ "muse"; "acp"; "--trust-workspace" ] @ muse_observer_flags in
   check (list string) "none offers the MCP server's tools only"
     (trusted @ toolset {|["mcp__masc__*"]|})
-    (argv ~native_posture:Runtime_native_tools.Native_none ~mcp_server_name:"masc" cfg);
+    (argv ~native_posture:Runtime_native_tools.Native_none ~mcp_server:masc cfg);
   check (list string) "read adds read_file and search"
     (trusted @ toolset {|["read_file","search","mcp__masc__*"]|})
-    (argv ~native_posture:Runtime_native_tools.Native_read ~mcp_server_name:"masc" cfg);
+    (argv ~native_posture:Runtime_native_tools.Native_read ~mcp_server:masc cfg);
+  (* A name that matches no tool fails the host's first turn, and a server that
+     lists no tool matches nothing, so the server is left out of the list. *)
+  check (list string) "a server that lists no tool is left out under none"
+    (trusted @ toolset "[]")
+    (argv ~native_posture:Runtime_native_tools.Native_none
+       ~mcp_server:{ masc with tool_names = [] } cfg);
+  check (list string) "a server that lists no tool is left out under read"
+    (trusted @ toolset {|["read_file","search"]|})
+    (argv ~native_posture:Runtime_native_tools.Native_read
+       ~mcp_server:{ masc with tool_names = [] } cfg);
+  check (list string) "the list names the server the session carries"
+    (trusted @ toolset {|["mcp__other__*"]|})
+    (argv ~native_posture:Runtime_native_tools.Native_none
+       ~mcp_server:{ masc with name = "other" } cfg);
   check (list string) "without an MCP server none offers no tool at all"
     (trusted @ toolset "[]")
     (argv ~native_posture:Runtime_native_tools.Native_none cfg);
   check (list string) "an unstated posture takes the none side"
     (trusted @ toolset {|["mcp__masc__*"]|})
-    (argv ~mcp_server_name:"masc" cfg);
+    (argv ~mcp_server:masc cfg);
   check (list string) "full leaves the host's default tools"
     trusted
-    (argv ~native_posture:Runtime_native_tools.Native_full ~mcp_server_name:"masc" cfg);
+    (argv ~native_posture:Runtime_native_tools.Native_full ~mcp_server:masc cfg);
   let effort_cfg = { cfg with args = [ "acp"; "-c"; "reasoning_effort=\"low\"" ] } in
   check (list string) "operator args replace the defaults and keep the required flags"
     ([ "muse"; "acp"; "-c"; "reasoning_effort=\"low\""; "--trust-workspace" ]
      @ muse_observer_flags
      @ toolset {|["read_file","search","mcp__masc__*"]|})
-    (argv ~native_posture:Runtime_native_tools.Native_read ~mcp_server_name:"masc" effort_cfg);
+    (argv ~native_posture:Runtime_native_tools.Native_read ~mcp_server:masc effort_cfg);
   let env =
     Runtime_acp_client.For_testing.build_environment
       ~base_env:[| "PATH=/usr/bin"; "MUSE_NO_AUTO_UPDATE=0"; "META_API_KEY=key" |]
@@ -425,7 +446,7 @@ let test_muse_argv_and_environment () =
   check (option string) "PATH is kept" (Some "/usr/bin") (find_env "PATH" env)
 ;;
 
-(* [start] hands its posture and its MCP server name to [build_argv]: dropping
+(* [start] hands its posture and its MCP server to [build_argv]: dropping
    either would spawn the host with a different tool list than the posture
    allows, and the argv test above calls [build_argv] directly. A stand-in
    host writes the arguments it was started with. *)
@@ -446,12 +467,17 @@ for line in sys.stdin:
     Eio_main.run @@ fun env ->
     let clock = Eio.Stdenv.clock env in
     let proc_mgr = Runtime_acp_client.foreground_process_mgr ~clock () in
-    let host_args posture =
+    let host_args ?(tool_names = [ "masc_status" ]) posture =
       Eio.Switch.run @@ fun sw ->
       let config = { (Runtime_acp_client.default_config ~driver:Muse_code ~cwd) with
                      cli_path = "python3"; args = [script; argv_file] } in
       let mcp_server =
-        { Runtime_acp_client.name = "masc"; url = "http://127.0.0.1:9/mcp"; headers = [] } in
+        { Runtime_acp_client.name = "masc"
+        ; url = "http://127.0.0.1:9/mcp"
+        ; headers = []
+        ; tool_names
+        }
+      in
       match Runtime_acp_client.start ~sw ~proc_mgr ~clock ~fs:(Eio.Stdenv.fs env) ~config
               ~mcp_server ~native_posture:posture () with
       | Error err -> fail (Runtime_acp_client.error_to_string err)
@@ -467,7 +493,53 @@ for line in sys.stdin:
     check (list string) "read"
       (required @ [ "-c"; {|run.toolset=["read_file","search","mcp__masc__*"]|} ])
       (host_args Runtime_native_tools.Native_read);
-    check (list string) "full" required (host_args Runtime_native_tools.Native_full))
+    check (list string) "full" required (host_args Runtime_native_tools.Native_full);
+    check (list string) "none, server lists no tool"
+      (required @ [ "-c"; "run.toolset=[]" ])
+      (host_args ~tool_names:[] Runtime_native_tools.Native_none);
+    check (list string) "read, server lists no tool"
+      (required @ [ "-c"; {|run.toolset=["read_file","search"]|} ])
+      (host_args ~tool_names:[] Runtime_native_tools.Native_read))
+;;
+
+(* Every field of the server record a host is started with is read from the
+   bridge, so the tool names cannot differ from what the bridge lists. A spec
+   a client could not call, one with no string [name], gives no name. *)
+let test_mcp_http_server_of_bridge_reads_every_field_from_the_bridge () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  let spec name =
+    `Assoc [ "name", `String name; "description", `String "d"
+           ; "inputSchema", `Assoc [ "type", `String "object" ] ] in
+  let started pinned_tool_specs =
+    let bridge =
+      Keeper_acp_runtime.For_testing.start_mcp_bridge_for_specs ~sw ~env ~pinned_tool_specs in
+    bridge, Runtime_acp_client.mcp_http_server_of_bridge bridge in
+  let bridge, server =
+    started [ spec "masc_status"; `Assoc [ "description", `String "no name" ]; spec "keeper_skill" ] in
+  let { Runtime_official_client_mcp_http.url; headers } =
+    Runtime_official_client_mcp_http.endpoint bridge in
+  check string "name" (Runtime_official_client_mcp_http.server_name bridge)
+    server.Runtime_acp_client.name;
+  check string "the Keeper names its bridge masc, the name the glob and the tool policy use"
+    "masc" server.Runtime_acp_client.name;
+  check string "url" url server.Runtime_acp_client.url;
+  check (list (pair string string)) "headers" headers server.Runtime_acp_client.headers;
+  check (list string) "tool names, in order, without the spec that has no name"
+    [ "masc_status"; "keeper_skill" ] server.Runtime_acp_client.tool_names;
+  let _, empty = started [] in
+  check (list string) "a bridge that lists no tool gives no name" []
+    empty.Runtime_acp_client.tool_names;
+  (* The record reaches the Muse argv: the glob for a bridge that lists tools,
+     an empty list for one that lists none. *)
+  let cfg = Runtime_acp_client.default_config ~driver:Runtime_acp_client.Muse_code ~cwd:"/tmp" in
+  let toolset mcp_server =
+    Runtime_acp_client.For_testing.build_argv
+      ~native_posture:Runtime_native_tools.Native_none ~mcp_server cfg ~temp_gemini_dir:None
+    |> List.filter (String.starts_with ~prefix:"run.toolset=") in
+  check (list string) "a bridge that lists tools reaches the Muse argv as the glob"
+    [ {|run.toolset=["mcp__masc__*"]|} ] (toolset server);
+  check (list string) "a bridge that lists no tool reaches the Muse argv as an empty list"
+    [ "run.toolset=[]" ] (toolset empty)
 ;;
 
 let test_muse_permission_grammar () =
@@ -1140,6 +1212,49 @@ let http_post ~sw ~net ~endpoint ~authorization ?protocol_version body =
   status, Eio.Buf_read.take len reader
 ;;
 
+let listed_tools ~sw ~env bridge =
+  let { Runtime_official_client_mcp_http.url; headers } =
+    Runtime_official_client_mcp_http.endpoint bridge
+  in
+  let authorization = List.assoc "Authorization" headers in
+  let pv = "2025-11-25" in
+  let init_status, _ =
+    http_post
+      ~sw
+      ~net:(Eio.Stdenv.net env)
+      ~endpoint:url
+      ~authorization
+      {|{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","clientInfo":{"name":"test","version":"1"},"capabilities":{}}}|}
+  in
+  check int "initialize status" 200 init_status;
+  let notif_status, _ =
+    http_post
+      ~sw
+      ~net:(Eio.Stdenv.net env)
+      ~endpoint:url
+      ~authorization
+      ~protocol_version:pv
+      {|{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}|}
+  in
+  check int "notifications/initialized status" 202 notif_status;
+  let list_status, list_body =
+    http_post
+      ~sw
+      ~net:(Eio.Stdenv.net env)
+      ~endpoint:url
+      ~authorization
+      ~protocol_version:pv
+      {|{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}|}
+  in
+  check int "tools/list status" 200 list_status;
+  let open Yojson.Safe.Util in
+  Yojson.Safe.from_string list_body
+  |> member "result"
+  |> member "tools"
+  |> to_list
+  |> List.map (fun t -> t |> member "name" |> to_string)
+;;
+
 (* Regression for P0: Keeper_acp_runtime's MCP bridge must serve the full pinned
    MASC tool catalog during Acp.start / session/new BEFORE turn_slot is bound. *)
 let test_mcp_bridge_advertises_pinned_tools_before_turn_slot () =
@@ -1161,51 +1276,126 @@ let test_mcp_bridge_advertises_pinned_tools_before_turn_slot () =
       let bridge =
         Keeper_acp_runtime.For_testing.start_mcp_bridge_for_specs ~sw ~env ~pinned_tool_specs
       in
-      let { Runtime_official_client_mcp_http.url; headers } =
-        Runtime_official_client_mcp_http.endpoint bridge
-      in
-      let authorization = List.assoc "Authorization" headers in
-      let pv = "2025-11-25" in
-      let init_status, _ =
-        http_post
-          ~sw
-          ~net:(Eio.Stdenv.net env)
-          ~endpoint:url
-          ~authorization
-          {|{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","clientInfo":{"name":"test","version":"1"},"capabilities":{}}}|}
-      in
-      check int "initialize status" 200 init_status;
-      let notif_status, _ =
-        http_post
-          ~sw
-          ~net:(Eio.Stdenv.net env)
-          ~endpoint:url
-          ~authorization
-          ~protocol_version:pv
-          {|{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}|}
-      in
-      check int "notifications/initialized status" 202 notif_status;
-      let list_status, list_body =
-        http_post
-          ~sw
-          ~net:(Eio.Stdenv.net env)
-          ~endpoint:url
-          ~authorization
-          ~protocol_version:pv
-          {|{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}|}
-      in
-      check int "tools/list status" 200 list_status;
-      let open Yojson.Safe.Util in
-      let names =
-        Yojson.Safe.from_string list_body
-        |> member "result"
-        |> member "tools"
-        |> to_list
-        |> List.map (fun t -> t |> member "name" |> to_string)
-      in
+      let names = listed_tools ~sw ~env bridge in
       check (list string) "pinned MASC tools advertised before turn_slot is bound"
         [ "masc_probe_ping"; "keeper_skill" ]
         names))
+;;
+
+let prepare_tool_choice ~tools ~turn_count choice =
+  let hooks = {Agent_core.Hooks.empty with before_turn_params = Some (function
+      | Agent_core.Hooks.BeforeTurnParams {current_params; _} ->
+          Agent_core.Hooks.AdjustParams {current_params with tool_choice = choice}
+      | _ -> Agent_core.Hooks.Continue)} in
+  match Keeper_official_client_host.prepare_turn
+        ~runtime_label:"Muse" ~keeper_name:"surface" ~turn_count ~system_prompt:"Test Keeper"
+        ~tools ~initial_messages:[] ~model_input_projection:None
+        ~hooks:(Some hooks) ~composed_context:None ~configured_reasoning_effort:None with
+  | Ok prepared -> prepared
+  | Error error -> fail (Agent_core.Error.to_string error)
+;;
+
+let test_hook_selected_surface_pins_the_session_and_bridge () =
+  let module Acp = Keeper_acp_runtime.For_testing in
+  let module Store = Keeper_official_client_session_store in
+  let tool = Agent_core.Tool.create ~name:"status" ~description:"Read status" ~parameters:[]
+      (fun _ -> fail "the listing fixture must never call a tool") in
+  let declared = [tool] in
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  let pool = Acp.Pool.create () in
+  let turn previous ~choice ~names ~reuse =
+    let previous_settlement, turn_count, required_tool_surface_sha256 =
+      match previous with
+      | None -> None, 1, None
+      | Some (digest, count) -> Some {Store.session_id = "session"; turn_id = "turn"}, count + 1, Some digest in
+    let claim_plan : Store.claim_plan = { previous_settlement; turn_count; required_tool_surface_sha256 } in
+    let prepared = prepare_tool_choice ~tools:declared ~turn_count choice in
+    let plan, digest = match Acp.reconcile_prepared_tools
+        ~native_posture:Runtime_native_tools.Native_none ~claim_plan prepared with
+      | Ok surface -> surface
+      | Error error -> fail (Agent_core.Error.to_string error) in
+    check bool "durable resume eligibility" reuse (Option.is_some plan.previous_settlement);
+    check int "reconciled vendor turn ordinal" (if reuse then turn_count else 1) plan.turn_count;
+    Option.iter (fun (old_digest, _) ->
+      let continuation : Keeper_semantic_execution.official_client_checkpoint =
+        {client_kind=Acp; runtime_id="muse.fixture"; session_id="session"; turn_id="turn";
+         tool_surface_sha256=old_digest; frame=Keeper_repetition_snapshot.empty} in
+      check bool "a current Gate accepts exactly the matching prepared catalog" reuse
+        (Result.is_ok (Acp.reconcile_prepared_tools ~continuation
+          ~native_posture:Runtime_native_tools.Native_none ~claim_plan prepared))) previous;
+    let key : Acp.pool_key =
+      { keeper_name = "surface"; runtime_id = "muse.fixture"; tool_surface_sha256 = digest;
+        process_config_sha256 = "fixed"; cwd = "fixed"; dangerously_skip_permissions = false } in
+    let cached = Acp.Pool.find_opt pool key in
+    check bool "reuses the child with the same pinned catalog" reuse (Option.is_some cached);
+    let bridge = match cached with
+      | Some bridge -> bridge
+      | None ->
+          let pinned_tool_specs = List.map (fun (t : Agent_core.Tool.t) ->
+              `Assoc ["name", `String t.schema.name; "description", `String t.schema.description;
+                      "inputSchema", Yojson.Safe.Util.member "input_schema" (Agent_core.Tool.schema_to_json t)])
+              prepared.tools in
+          let fresh = Acp.start_mcp_bridge_for_specs ~sw ~env ~pinned_tool_specs in
+          Acp.Pool.install_for_keeper pool ~key ~fresh ~is_alive:(fun _ -> true) ~close:ignore in
+    check (list string) "HTTP tools/list from the selected child" names (listed_tools ~sw ~env bridge);
+    Some (digest, plan.turn_count)
+  in
+  let empty = turn None ~choice:(Some Agent_core.Types.None_) ~names:[] ~reuse:false in
+  let enabled = turn empty ~choice:None ~names:["status"] ~reuse:false in
+  let same = turn enabled ~choice:(Some Agent_core.Types.Auto) ~names:["status"] ~reuse:true in
+  let disabled = turn same ~choice:(Some Agent_core.Types.None_) ~names:[] ~reuse:false in
+  ignore (turn disabled ~choice:(Some Agent_core.Types.None_) ~names:[] ~reuse:true)
+;;
+
+let test_previous_acp_tool_surface () =
+  let module Store = Keeper_official_client_session_store in
+  let native_posture = Runtime_native_tools.Native_none in
+  let tool = Agent_core.Tool.create ~name:"status" ~description:"Read status" ~parameters:[]
+      (fun _ -> fail "the session fixture must never execute a tool") in
+  let base_path = Filename.temp_dir "masc-acp-surface-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) @@ fun () ->
+  let old_settlement keeper_name ~tools ~resumable =
+    let runtime_id = "muse.fixture" and session_id = "old-session" and turn_id = "old-turn" in
+    let old_digest = Store.tool_surface_sha256 ~native_posture tools in
+    let require = function Ok value -> value | Error detail -> fail detail in
+    let claimed = Store.claim ~base_path ~keeper_name ~expected:None ~client_kind:Acp
+        ~owner_epoch:(Store.process_epoch ()) ~runtime_id ~tool_surface_sha256:old_digest ~updated_at:1. |> require in
+    let active = Store.mark_active ~base_path ~keeper_name ~expected:claimed ~session_id ~updated_at:2. |> require in
+    let starting = Store.mark_turn_starting ~base_path ~keeper_name ~expected:active ~session_id ~updated_at:3. |> require in
+    let inflight = Store.mark_turn_started ~base_path ~keeper_name ~expected:starting ~session_id ~turn_id
+        ~turn_count:starting.turn_count ~updated_at:4. |> require in
+    ignore (Store.settle ~base_path ~keeper_name ~expected:inflight ~session_id ~turn_id ~updated_at:5. |> require);
+    let expected = Store.load ~base_path ~keeper_name |> Result.map_error Store.read_error_to_string |> require in
+    let plan = Store.plan_claim ~expected ~client_kind:Acp ~runtime_id
+        |> Result.map_error Store.claim_error_to_string |> require in
+    let prepared = prepare_tool_choice ~tools ~turn_count:plan.turn_count None in
+    let reconcile ?continuation () = Keeper_acp_runtime.For_testing.reconcile_prepared_tools
+        ?continuation ~native_posture ~claim_plan:plan prepared in
+    let ordinary, digest = reconcile () |> Result.map_error Agent_core.Error.to_string |> require in
+    check bool "the old digest proves this effective catalog" resumable (String.equal old_digest digest);
+    check bool "ordinary cold resume uses a proven catalog" resumable (Option.is_some ordinary.previous_settlement);
+    check int "ordinary turn resets only for the ambiguous surface" (if resumable then 2 else 1) ordinary.turn_count;
+    let checkpoint : Keeper_semantic_execution.official_client_checkpoint =
+      {client_kind=Acp; runtime_id; session_id; turn_id; tool_surface_sha256=old_digest; frame=Keeper_repetition_snapshot.empty} in
+    check bool "the historical Gate still names the exact stored turn" true
+      (Result.is_ok (Store.validate_continuation ~checkpoint ~expected ~client_kind:Acp
+                       ~runtime_id ~tool_surface_sha256:old_digest));
+    (match reconcile ~continuation:checkpoint () with
+    | Ok _ -> check bool "the matching empty Gate continues" true resumable
+    | Error error ->
+        check bool "only an ambiguous historical Gate is refused" false resumable;
+        check bool "the Gate retains its unresumable-session refusal" true
+          (Keeper_official_client_session_refusal.of_core_error error = Some Gate_continuation_unresumable));
+    let next = Store.claim ~base_path ~keeper_name ~expected ~client_kind:Acp
+        ~owner_epoch:(Store.process_epoch ()) ~runtime_id ~tool_surface_sha256:digest ~updated_at:6. |> require in
+    match next.phase with
+    | Store.Start {previous_settlement; _} ->
+        check bool "the claimed vendor session matches the prepared plan" resumable (Option.is_some previous_settlement);
+        check int "the persisted claim uses the reconciled ordinal" ordinary.turn_count next.turn_count
+    | _ -> fail "expected a new ACP claim"
+  in
+  old_settlement "legacy-empty" ~tools:[] ~resumable:true;
+  old_settlement "legacy-nonempty" ~tools:[tool] ~resumable:false
 ;;
 
 type fake_pool_entry =
@@ -2563,7 +2753,7 @@ for line in sys.stdin:
         Runtime_acp_client.foreground_process_mgr ~clock ~grace_seconds:1.0 ()
       in
       let mcp_server : Runtime_acp_client.mcp_http_server =
-        { name = "masc"; url = "http://127.0.0.1:9999/mcp"; headers = [] }
+        { name = "masc"; url = "http://127.0.0.1:9999/mcp"; headers = []; tool_names = [] }
       in
       let cfg =
         { (Runtime_acp_client.default_config ~driver:Antigravity ~cwd:tmp) with
@@ -3915,6 +4105,7 @@ for line in sys.stdin:
           { name = "masc"
           ; url = "http://127.0.0.1:9999/mcp/cap-l3-token987"
           ; headers = [ "Authorization", "Bearer bearer-secret-l3-xyz987654321" ]
+          ; tool_names = []
           }
         in
         let cfg =
@@ -4296,7 +4487,8 @@ let test_layer4_stream_projection_sse_framing_native_tools_and_zero_usage () =
       ~driver:Runtime_acp_client.Antigravity
       ~model:"gemini-4-neon-medium"
       ~session_id:"sess-stream"
-      ~turn_count:3
+      ~turn_count:1
+      ~official_turn:8
       ~native_posture:Runtime_native_tools.Native_read
       ~allowed_tool_names:[ "masc_probe_ping" ]
       ()
@@ -4326,7 +4518,9 @@ let test_layer4_stream_projection_sse_framing_native_tools_and_zero_usage () =
        ; thought_tokens = None
        ; total_tokens = Some 1500
        });
-  check int "nonzero usage reported" 1 (List.length !usage_reports_rev);
+  check (list (pair int string)) "usage joins the completion hook and identifies the fresh vendor turn"
+    [8, "acp:sess-stream:1"]
+    (List.map (fun (r : Keeper_client_usage_report.t) -> r.official_turn, r.response_id) !usage_reports_rev);
   (* Thought -> Text -> MCP tool -> Native tool -> Finish *)
   on_acp_event (Runtime_acp_client.Thought_delta "thinking...");
   on_acp_event (Runtime_acp_client.Text_delta "hello ");
@@ -4400,7 +4594,8 @@ let test_layer4_stream_projection_sse_framing_native_tools_and_zero_usage () =
           }
      :: _ -> ()
    | _ -> fail "expected MessageDelta(delta_usage) + MessageStop at end of stream");
-  check int "native action observed" 1 (List.length !native_actions_rev);
+  check (list int) "native activity joins the same completion hook" [8]
+    (List.map (fun (turn, _, _) -> turn) !native_actions_rev);
   check int "native completion observed" 1 (List.length !native_completions_rev);
   (match !native_completions_rev with
    | [ (_, Some "nat-call-1", { Runtime_native_tools.outcome = Completion_reported; exit_code = None }) ] ->
@@ -5116,7 +5311,7 @@ for line in sys.stdin:
       ~label:"Antigravity without ~mcp_server"
       ();
     let masc_srv : Runtime_acp_client.mcp_http_server =
-      { name = "masc"; url = "http://127.0.0.1:1/mcp"; headers = [] }
+      { name = "masc"; url = "http://127.0.0.1:1/mcp"; headers = []; tool_names = [] }
     in
     run_case
       ~driver:Antigravity
@@ -5144,6 +5339,8 @@ let () =
       , [ test_case "muse argv and environment" `Quick test_muse_argv_and_environment
         ; test_case "muse start spawns the host with the posture toolset" `Quick
             test_muse_start_spawns_the_host_with_the_posture_toolset
+        ; test_case "server record reads every field from the bridge" `Quick
+            test_mcp_http_server_of_bridge_reads_every_field_from_the_bridge
         ; test_case "muse MCP grammar and permission policy" `Quick
             test_muse_permission_grammar
         ; test_case "kimi --skills-dir order & strict permission posture" `Quick
@@ -5162,6 +5359,9 @@ let () =
     ; ( "mcp_bridge"
       , [ test_case "pinned tools advertised before turn_slot is bound" `Quick
             test_mcp_bridge_advertises_pinned_tools_before_turn_slot
+        ; test_case "hook-selected tools pin the session and bridge" `Quick
+            test_hook_selected_surface_pins_the_session_and_bridge
+        ; test_case "previous ACP tool surfaces on a cold resume" `Quick test_previous_acp_tool_surface
         ] )
     ; ( "pool_lifecycle"
       , [ test_case "cancelled turn evicts poisoned entry & recovers" `Quick

@@ -739,13 +739,6 @@ let start_mcp_bridge ~sw ~env ~pinned_tool_specs ~turn_slot ~turn_slot_mutex =
     ()
 ;;
 
-let mcp_server_of_bridge bridge : Acp.mcp_http_server =
-  let { Runtime_official_client_mcp_http.url; headers } =
-    Runtime_official_client_mcp_http.endpoint bridge
-  in
-  { Acp.name = mcp_server_name; url; headers }
-;;
-
 let discover_skills_dirs ~base_path (config : Runtime_execution.acp_client) =
   let candidates =
     config.skills_dirs
@@ -802,7 +795,7 @@ let spawn_persistent_entry
                  ~turn_slot
                  ~turn_slot_mutex
              in
-             let mcp_server = mcp_server_of_bridge bridge in
+             let mcp_server = Acp.mcp_http_server_of_bridge bridge in
              let acp_config : Acp.config =
                { driver = config.driver
                ; cli_path = config.cli_path
@@ -1034,6 +1027,7 @@ let make_stream_projection
       ~model
       ~session_id
       ~turn_count
+      ~official_turn
       ~position
       ~native_posture
       ~allowed_tool_names
@@ -1232,7 +1226,7 @@ let make_stream_projection
       Option.iter
         (fun observe ->
            Runtime_native_tools.observe_exact_action
-             ~official_turn:turn_count
+             ~official_turn
              ~observe
              observation)
         on_native_action;
@@ -1331,7 +1325,7 @@ let make_stream_projection
          if usage_is_nonzero usage
          then
            report
-             { Keeper_client_usage_report.official_turn = turn_count
+             { Keeper_client_usage_report.official_turn
              ; response_id = turn_id
              ; model
              ; conversation_id = session_id
@@ -1725,6 +1719,27 @@ let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id 
 
 (* ── Main Keeper ACP turn execution ───────────────────────────────────────── *)
 
+let reconcile_prepared_tools ?account_home ?continuation ~native_posture ~claim_plan
+      (prepared : Host.prepared_turn) =
+  let digest = Session_store.tool_surface_sha256 ?account_home ~native_posture prepared.tools in
+  let tool_surface_sha256 =
+    match prepared.tools with
+    | [] -> digest
+    | _ :: _ ->
+        (* Prior ACP sessions hashed the declared tools before hooks. A
+           nonempty digest could therefore describe an empty bridge. Old empty
+           digests are conclusive: a hook can remove tools but cannot add any. *)
+        Agent_core_sha256.(digest_string ("masc.acp.prepared-tools.v1\000" ^ digest) |> to_hex)
+  in
+  match continuation with
+  | Some (checkpoint : Keeper_semantic_execution.official_client_checkpoint)
+    when not (String.equal checkpoint.tool_surface_sha256 tool_surface_sha256) ->
+      Error (Keeper_official_client_session_refusal.core_error
+               Keeper_official_client_session_refusal.Gate_continuation_unresumable)
+  | Some _ | None ->
+      Ok (Session_store.reconcile_tool_surface claim_plan ~tool_surface_sha256, tool_surface_sha256)
+;;
+
 let run_without_lifecycle
       ~on_guidance_prepared
       ~result_scope
@@ -1836,25 +1851,18 @@ let run_without_lifecycle
         ~none_supported:(Runtime_execution.supports_native_none (Runtime_execution.Acp config))
   in
   let* () = on_guidance_prepared () in
-  let tool_surface_sha256 =
-    Session_store.tool_surface_sha256
-      ?account_home:config.oauth_source
-      ~native_posture
-      tools
-  in
   let* () =
     match official_client_continuation with
     | None -> Ok ()
-    | Some checkpoint ->
+    | Some (checkpoint : Keeper_semantic_execution.official_client_checkpoint) ->
+      (* Refuse a different stored turn before invoking its hooks. The actual
+         tool surface can be checked only after before_turn_params. *)
       Session_store.validate_continuation
-        ~checkpoint
-        ~expected:stored_session
-        ~client_kind:Acp
-        ~runtime_id
-        ~tool_surface_sha256
+        ~checkpoint ~expected:stored_session ~client_kind:Acp ~runtime_id
+        ~tool_surface_sha256:checkpoint.tool_surface_sha256
       |> Result.map_error (fun (_ : string) ->
-        Keeper_official_client_session_refusal.core_error
-          Keeper_official_client_session_refusal.Gate_continuation_unresumable)
+          Keeper_official_client_session_refusal.core_error
+            Keeper_official_client_session_refusal.Gate_continuation_unresumable)
   in
   let* () =
     match official_task_reference with
@@ -1864,9 +1872,8 @@ let run_without_lifecycle
         (Keeper_official_client_session_refusal.core_error
            Keeper_official_client_session_refusal.Task_reference_unsupported)
   in
-  let claim_plan =
-    Session_store.reconcile_tool_surface claim_plan ~tool_surface_sha256
-  in
+  (* Run hooks once at the planned ordinal. The prepared surface, like the
+     canonical context, can still require a fresh vendor session. *)
   let hook_turn_count = claim_plan.turn_count in
   let* goal_text, goal_images =
     match goal_blocks with
@@ -1899,6 +1906,10 @@ let run_without_lifecycle
       ~initial_messages
       ~model_input_projection:None
       ~hooks:(Some hooks)
+  in
+  let* claim_plan, tool_surface_sha256 =
+    reconcile_prepared_tools ?account_home:config.oauth_source ?continuation:official_client_continuation
+      ~native_posture ~claim_plan prepared
   in
   let initial_non_carried_count =
     List.length (List.filter is_non_carried_message initial_messages)
@@ -2560,6 +2571,7 @@ let run_without_lifecycle
           ~model:effective_model
           ~session_id
           ~turn_count
+          ~official_turn:hook_turn_count
           ~position
           ~native_posture
           ~allowed_tool_names
@@ -2803,7 +2815,7 @@ let run_without_lifecycle
         let bridge =
           start_mcp_bridge ~sw ~env ~pinned_tool_specs ~turn_slot ~turn_slot_mutex
         in
-        let mcp_server = mcp_server_of_bridge bridge in
+        let mcp_server = Acp.mcp_http_server_of_bridge bridge in
         let acp_config : Acp.config =
           { driver = config.driver
           ; cli_path = config.cli_path
@@ -3003,7 +3015,7 @@ let run_without_lifecycle
         (match on_usage_report with
          | Some report when nonzero_usage ->
            report
-             { Keeper_client_usage_report.official_turn = turn_count
+             { Keeper_client_usage_report.official_turn = hook_turn_count
              ; response_id = turn_id
              ; model = effective_model
              ; conversation_id = session_id
@@ -3487,6 +3499,7 @@ module For_testing = struct
 
   let project_stream_for_testing
         ?(server_isolation = Acp.Shared_or_multi_server)
+        ?official_turn
         ?on_effect_attempted
         ?on_native_action
         ?on_native_tool_completion
@@ -3518,6 +3531,7 @@ module For_testing = struct
         ~model
         ~session_id
         ~turn_count
+        ~official_turn:(Option.value official_turn ~default:turn_count)
         ~position:Keeper_usage_resolution.Fresh
         ~native_posture
         ~allowed_tool_names
@@ -3536,6 +3550,8 @@ module For_testing = struct
     , stream.finish
     , stream.observed_tool_calls )
   ;;
+
+  let reconcile_prepared_tools = reconcile_prepared_tools
 
   let start_mcp_bridge_for_specs ~sw ~env ~pinned_tool_specs =
     let turn_slot = ref None in

@@ -996,5 +996,119 @@ class ReleaseCoverageTests(unittest.TestCase):
         self.assertIn("no section '## [0.82.0]'", res.stderr)
 
 
+class ReleaseCoverageShallowTests(unittest.TestCase):
+    """release-coverage must refuse a shallow clone whose boundary truncates the range.
+
+    2026-11-25 reproduction: a shallow release lane (`git rev-list --count HEAD`
+    = 5) ran `release-coverage --base 97f7b5e4` and reported "3 post-cut pull
+    request(s) merged ... are missing" where main carried 11 — a silently
+    truncated count that reads as three quick folds.
+    """
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory(prefix="masc-changelog-shallow-")
+        self.addCleanup(tmp.cleanup)
+        self.base = Path(tmp.name)
+        self.root = self.base / "full"
+        self.root.mkdir()
+        self.env = dict(os.environ)
+        self.env.update(
+            {
+                "GIT_AUTHOR_NAME": "test",
+                "GIT_AUTHOR_EMAIL": "test@example.com",
+                "GIT_COMMITTER_NAME": "test",
+                "GIT_COMMITTER_EMAIL": "test@example.com",
+            }
+        )
+        self._git(self.root, "init", "-b", "main")
+        self._write(self.root, "dune-project", "(lang dune 3.16)\n(version 0.81.0)\n")
+        self._write(
+            self.root,
+            "CHANGELOG.md",
+            "# Changelog\n\n## [Unreleased]\n\n## [0.81.0] - 2026-11-24\n\n"
+            "### Fixed\n\n- Initial 0.81.0 fix (#1).\n",
+        )
+        self._write(self.root, "changelog.d/README.md", "# Fragments\n")
+        self._commit(self.root, "chore(release): bump version to 0.81.0 (#1)")
+        self.cut_sha = self._git(self.root, "rev-parse", "HEAD").strip()
+        self._write(self.root, "lib/a.ml", "let a = 1\n")
+        self._commit(self.root, "fix(a): first post-cut fix (#2)")
+        self._write(self.root, "lib/b.ml", "let b = 2\n")
+        self._commit(self.root, "fix(b): second post-cut fix (#3)")
+
+    def _git(self, root: Path, *args: str) -> str:
+        return subprocess.run(
+            ["git", *args],
+            cwd=root,
+            env=self.env,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout
+
+    def _write(self, root: Path, rel: str, text: str) -> None:
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    def _commit(self, root: Path, subject: str) -> str:
+        self._git(root, "add", "-A")
+        self._git(root, "commit", "-m", subject)
+        return self._git(root, "rev-parse", "HEAD").strip()
+
+    def _shallow_clone(self, depth: int) -> Path:
+        dest = self.base / f"shallow{depth}"
+        self._git(
+            self.root,
+            "clone",
+            "--quiet",
+            "--depth",
+            str(depth),
+            f"file://{self.root}",
+            str(dest),
+        )
+        return dest
+
+    def _run_coverage(self, cwd: Path, *extra: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS / "changelog-fragments.py"),
+                "release-coverage",
+                "--version",
+                "0.81.0",
+                "--changelog",
+                str(cwd / "CHANGELOG.md"),
+                "--dir",
+                str(cwd / "changelog.d"),
+                *extra,
+            ],
+            cwd=cwd,
+            env=self.env,
+            text=True,
+            capture_output=True,
+        )
+
+    def test_refuses_when_boundary_truncates_range(self) -> None:
+        shallow = self._shallow_clone(depth=1)
+        res = self._run_coverage(shallow, "--base", self.cut_sha)
+        self.assertNotEqual(res.returncode, 0, res.stdout + res.stderr)
+        self.assertIn("release-coverage REFUSED", res.stderr)
+        self.assertIn("shallow boundary", res.stderr)
+        # No partial count may be reported as a fact.
+        self.assertNotIn("post-cut pull request(s)", res.stderr)
+
+    def test_boundary_at_cut_still_counts_normally(self) -> None:
+        # A boundary sitting at the cut commit itself leaves the walk complete.
+        shallow = self._shallow_clone(depth=3)
+        res = self._run_coverage(shallow, "--base", self.cut_sha)
+        self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
+        self.assertNotIn("REFUSED", res.stderr)
+        # Both post-cut squashes are counted — nothing was truncated.
+        self.assertIn("2 post-cut pull request(s)", res.stderr)
+        self.assertIn("#2", res.stderr)
+        self.assertIn("#3", res.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

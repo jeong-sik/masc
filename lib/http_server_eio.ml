@@ -336,16 +336,21 @@ module Response = struct
     let status = timeout_envelope_status_override ?status value in
     json ~status ?compress ?extra_headers ?request (Yojson.Safe.to_string value) reqd
 
-  let json_value_on_cpu ?status ?compress ?extra_headers ?request value reqd =
-    let status = timeout_envelope_status_override ?status value in
+  let json_value_from_cpu ~name ?compress ?extra_headers ?request compute reqd =
     let extra_headers = scoped_headers () @ Option.value ~default:[] extra_headers in
     let request = match request with Some request -> request | None -> Http_reqd.request reqd in
     let response, body =
-      Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
+      Executor_pool_ref.submit_or_inline ~name (fun () ->
+        let status, value = compute () in
+        let status = timeout_envelope_status_override ~status value in
         prepare_json ~status ?compress ~extra_headers ~request
           (Yojson.Safe.to_string value))
     in
     Http_reqd.respond_with_string reqd response body
+
+  let json_value_on_cpu ?(status = `OK) ?compress ?extra_headers ?request value reqd =
+    json_value_from_cpu ~name:__FUNCTION__ ?compress ?extra_headers ?request
+      (fun () -> status, value) reqd
 
   (** HTML response with ETag and conditional 304 support.
       For static HTML that only changes on rebuild (e.g. dashboard).

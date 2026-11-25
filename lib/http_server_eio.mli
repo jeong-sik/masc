@@ -260,6 +260,18 @@ module Response : sig
     -> Http_reqd.t
     -> unit
 
+  (** Compute and encode one JSON response in a single CPU executor job.
+      The caller's scoped headers are captured before submitting the job.
+      Only the caller fiber writes the resulting response. *)
+  val json_value_from_cpu
+    :  name:string
+    -> ?compress:bool
+    -> ?extra_headers:(string * string) list
+    -> ?request:Httpun.Request.t
+    -> (unit -> Httpun.Status.t * Yojson.Safe.t)
+    -> Http_reqd.t
+    -> unit
+
   (** HTML response with ETag + conditional 304 support.  When
       the request If-None-Match header matches the quoted etag
       value, returns [`Not_modified] with no body; otherwise

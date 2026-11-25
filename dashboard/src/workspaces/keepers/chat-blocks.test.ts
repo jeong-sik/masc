@@ -8,17 +8,26 @@ import { releaseAllViewStreams } from '../../core/view-stream-slot'
 import {
   DEFAULT_CHAT_BLOCK_PREFS,
   dedupeHistoryToolRows,
+  extractDelegateCardInfo,
   findToolCallIndex,
   formatNativeCompletionSummary,
   formatNativeProgressLabel,
+  formatTurnActivityLabel,
+  formatTurnLaneLabel,
+  formatWaitingSourceLabel,
+  groupTranscriptEntries,
+  mergeLatestHistoryPage,
   parseChatMessageBlocks,
   shouldRenderChatEntry,
+  summarizeToolHistogram,
   upsertStreamToolCall,
 } from './chat-blocks'
 import {
   decodeHistoryRow,
   fetchKeeperChatHistoryPageApi,
   fetchKeeperToolResultApi,
+  fetchKeeperWaitingInventoryApi,
+  parseKeeperLiveObserverEvent,
   streamKeeperChat,
 } from './keepers-api'
 import { KeeperChatTab } from './keeper-chat-tab'
@@ -524,5 +533,382 @@ describe('Keepers AG-UI Live Stream & On-Demand Tool Result Hydration', () => {
       expect(liveCard.textContent).toContain('live tool stdout')
     })
     expect(requestedUrls.some((u) => u.includes('/tool-result?execution_id=exec-live-1'))).toBe(true)
+  })
+})
+
+describe('Chat Hierarchy Grouping, Delegate Cards, Live Autonomous Turn & Waiting Inventory', () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+    resetAuthStateForTests()
+    resetObserverStateForTests()
+    resourceCache.clearAll()
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+  })
+
+  afterEach(() => {
+    cleanup()
+    releaseAllViewStreams()
+    vi.restoreAllMocks()
+  })
+
+  it('extracts Keeper Delegate metadata (including status_many operations) and collapses consecutive tool-only rows with stable IDs', () => {
+    const delInfo = extractDelegateCardInfo({
+      name: 'masc_keeper_delegate',
+      args: JSON.stringify({
+        target: { kind: 'keeper', name: 'worker-alpha' },
+        prompt: 'Verify PR #54678 diff and tests.',
+        artifacts: ['sha256-a', 'sha256-b'],
+      }),
+      result: JSON.stringify({
+        operation_id: 'op-del-7',
+        state: 'Queued',
+        target_turn_age_s: 14.4,
+      }),
+    })
+    expect(delInfo).toEqual({
+      kind: 'delegate',
+      targetKeeper: 'worker-alpha',
+      targetKeepers: ['worker-alpha'],
+      operationCount: 1,
+      prompt: 'Verify PR #54678 diff and tests.',
+      operationId: 'op-del-7',
+      artifactCount: 2,
+      delegateState: 'Queued',
+      targetTurnAgeSec: 14,
+    })
+
+    const statusManyInfo = extractDelegateCardInfo({
+      name: 'masc_keeper_delegate_status_many',
+      args: JSON.stringify({
+        operations: [
+          { target: { kind: 'keeper', name: 'worker-alpha' }, operation_id: 'op-1' },
+          { target: { kind: 'keeper', name: 'worker-beta' }, operation_id: 'op-2' },
+        ],
+      }),
+    })
+    expect(statusManyInfo).toMatchObject({
+      kind: 'delegate_status',
+      targetKeeper: 'worker-alpha',
+      targetKeepers: ['worker-alpha', 'worker-beta'],
+      operationCount: 2,
+      operationId: 'op-1',
+    })
+
+    const rows = [
+      decodeHistoryRow({ id: 'u1', role: 'user', content: 'Review repo', ts: 1 })!,
+      decodeHistoryRow({ id: 't1', role: 'tool', content: '{"path":"a.ts"}', ts: 2, tool_call_name: 'Read' })!,
+      decodeHistoryRow({ id: 't2', role: 'tool', content: '{"path":"b.ts"}', ts: 3, tool_call_name: 'Read' })!,
+      decodeHistoryRow({
+        id: 't3',
+        role: 'tool',
+        content: JSON.stringify({ target: { kind: 'keeper', name: 'worker-alpha' }, prompt: 'Check CI' }),
+        ts: 4,
+        tool_call_name: 'masc_keeper_delegate',
+      })!,
+      decodeHistoryRow({ id: 'a1', role: 'assistant', content: 'Delegated and reviewed.', ts: 5 })!,
+    ]
+    const parsed = rows.map((msg) => ({ msg, blocks: parseChatMessageBlocks(msg) }))
+    const grouped = groupTranscriptEntries(parsed)
+
+    expect(grouped).toHaveLength(3)
+    expect(grouped[0]!.kind).toBe('message')
+    expect(grouped[1]!.kind).toBe('tool_group')
+    expect(grouped[2]!.kind).toBe('message')
+    if (grouped[1]!.kind === 'tool_group') {
+      // Stable group ID anchored to first message ID (does not remount as run grows)
+      expect(grouped[1]!.id).toBe('tool-group:t1')
+      expect(grouped[1]!.toolBlocks).toHaveLength(3)
+      expect(grouped[1]!.toolSummary).toBe('Read ×2 · 위임(@worker-alpha)')
+      expect(grouped[1]!.delegateTargets).toEqual(['worker-alpha'])
+      expect(summarizeToolHistogram(grouped[1]!.toolBlocks)).toBe('Read ×2 · 위임(@worker-alpha)')
+    }
+
+    // Verify canonical OCaml lane, activity, and waiting_source labels
+    expect(formatTurnLaneLabel('chat_operation')).toBe('대화 턴')
+    expect(formatTurnLaneLabel('board_attention')).toBe('보드 턴')
+    expect(formatTurnLaneLabel('maintenance')).toBe('유지보수 턴')
+    expect(formatTurnActivityLabel('tool')).toEqual({ label: '도구 실행 중', tone: 'info' })
+    expect(formatWaitingSourceLabel('event_queue_pending')).toBe('이벤트 큐')
+    expect(formatWaitingSourceLabel('hitl_pending')).toBe('승인 대기')
+    expect(formatWaitingSourceLabel('chat_operation_queued')).toBe('대화 대기')
+    expect(formatWaitingSourceLabel('runtime_quota_spent')).toBe('할당 소진')
+  })
+
+  it('merges latest history head pages without scrambling same-second timestamps or dropping earlier paginated rows', () => {
+    const earlier = [
+      decodeHistoryRow({ id: 'm1', role: 'user', content: 'old 1', ts: 100 })!,
+      decodeHistoryRow({ id: 'm2', role: 'assistant', content: 'old 2', ts: 100 })!,
+      decodeHistoryRow({ id: 'm3', role: 'user', content: 'overlap', ts: 100 })!,
+    ]
+    const optimistic = {
+      id: 'asst-op-live',
+      role: 'assistant' as const,
+      content: 'streaming...',
+      ts: 100,
+      deliveryState: 'Streaming' as const,
+    }
+    const incoming = [
+      decodeHistoryRow({ id: 'm3', role: 'user', content: 'overlap', ts: 100 })!,
+      decodeHistoryRow({ id: 'm4', role: 'assistant', content: 'newest', ts: 100 })!,
+    ]
+    const merged = mergeLatestHistoryPage([...earlier, optimistic], incoming)
+    expect(merged.map((m) => m.id)).toEqual(['m1', 'm2', 'm3', 'm4', 'asst-op-live'])
+  })
+
+  it('parses real OCaml Observer SSE envelopes (observation.preview + owner_key + turn_complete) strictly scoped to active Keeper', () => {
+    const previewSig = parseKeeperLiveObserverEvent(
+      'message',
+      {
+        type: 'keeper_turn_preview_changed',
+        name: 'code-reviewer-sister',
+        ts_unix: 1_700_000_500,
+        observation: {
+          owner_key: 'a'.repeat(64),
+          preview: {
+            status_text: 'Running grep across workspace',
+            activity: 'tool',
+            text_tail: 'Found 3 candidate matches',
+            last_tool: 'Grep',
+            updated_at_unix: 1_700_000_500,
+            revision: 3,
+          },
+        },
+      },
+      'code-reviewer-sister',
+    )
+    expect(previewSig?.kind).toBe('turn_preview')
+    if (previewSig?.kind === 'turn_preview') {
+      expect(previewSig.ownerKey).toBe('a'.repeat(64))
+      expect(previewSig.preview.activity).toBe('tool')
+      expect(previewSig.preview.text_tail).toBe('Found 3 candidate matches')
+      expect(previewSig.preview.revision).toBe(3)
+    }
+
+    // Outer envelope missing `observation.preview` must NOT synthesize a blank ghost preview
+    expect(
+      parseKeeperLiveObserverEvent(
+        'keeper_turn_preview_changed',
+        { type: 'keeper_turn_preview_changed', name: 'code-reviewer-sister', ts_unix: 1_700_000_501 },
+        'code-reviewer-sister',
+      ),
+    ).toBeNull()
+
+    // Unscoped keeper events (missing keeper_name/name) must NOT bleed into an active keeper
+    expect(
+      parseKeeperLiveObserverEvent('keeper_chat_appended', { type: 'keeper_chat_appended' }, 'code-reviewer-sister'),
+    ).toBeNull()
+
+    // Turn completion emits turn_ended so live preview cards clear cleanly
+    expect(
+      parseKeeperLiveObserverEvent(
+        'keeper_turn_complete',
+        { type: 'keeper_turn_complete', name: 'code-reviewer-sister' },
+        'code-reviewer-sister',
+      ),
+    ).toEqual({ kind: 'turn_ended' })
+
+    const otherKeeperSig = parseKeeperLiveObserverEvent(
+      'keeper_turn_preview_changed',
+      {
+        name: 'unrelated-keeper',
+        observation: {
+          owner_key: 'b'.repeat(64),
+          preview: { status_text: 'noop', activity: 'waiting', text_tail: '', updated_at_unix: 1 },
+        },
+      },
+      'code-reviewer-sister',
+    )
+    expect(otherKeeperSig).toBeNull()
+
+    const pulseSig = parseKeeperLiveObserverEvent(
+      'keeper_tool_call',
+      {
+        keeper_name: 'code-reviewer-sister',
+        tool_name: 'Read',
+        execution_mode: 'concurrent',
+        batch_size: 4,
+        disposition: 'completed',
+      },
+      'code-reviewer-sister',
+    )
+    expect(pulseSig?.kind).toBe('tool_pulse')
+    if (pulseSig?.kind === 'tool_pulse') {
+      expect(pulseSig.pulse.executionMode).toBe('concurrent')
+      expect(pulseSig.pulse.batchSize).toBe(4)
+    }
+
+    expect(
+      parseKeeperLiveObserverEvent('keeper_chat_appended', { keeper_name: 'code-reviewer-sister' }, 'code-reviewer-sister'),
+    ).toEqual({ kind: 'chat_appended' })
+    expect(
+      parseKeeperLiveObserverEvent('keeper_waiting_inventory_changed', { queue_kind: 'event_queue' }, 'code-reviewer-sister'),
+    ).toEqual({ kind: 'waiting_changed' })
+  })
+
+  it('renders grouped tool activity, accessible delegate jump outside summary, live autonomous preview card, and waiting inventory strip', async () => {
+    const mockFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/chat/history/page')) {
+        return new Response(
+          JSON.stringify({
+            messages: [
+              { id: 'u-1', role: 'user', content: 'Audit PR', ts: 10 },
+              { id: 't-1', role: 'tool', content: '{"path":"a.ml"}', ts: 11, tool_call_name: 'Read' },
+              {
+                id: 't-2',
+                role: 'tool',
+                content: JSON.stringify({ target: { kind: 'keeper', name: 'worker-alpha' }, prompt: 'Run security check' }),
+                ts: 12,
+                tool_call_name: 'masc_keeper_delegate',
+                execution_id: 'exec-del-pending',
+              },
+              {
+                id: 'a-1',
+                role: 'assistant',
+                content: 'Done auditing.',
+                ts: 13,
+                blocks: [
+                  { t: 'thinking', content: 'Combining findings from both tools.' },
+                  {
+                    t: 'trace',
+                    trace: [
+                      { kind: 'tool', name: 'Read', status: 'ok', args: { path: 'x.ts' } },
+                      { kind: 'tool', name: 'Grep', status: 'ok', args: { pattern: 'foo' } },
+                    ],
+                  },
+                ],
+              },
+            ],
+            has_more: false,
+            next_cursor: null,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      if (url.includes('/tool-result')) {
+        return new Response(
+          JSON.stringify({
+            keeper: 'code-reviewer-sister',
+            execution_id: 'exec-del-pending',
+            state: 'pending',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      if (url.includes('/waiting-inventory')) {
+        return new Response(
+          JSON.stringify({
+            schema: 'masc.keeper_waiting_inventory.v1',
+            keeper_count: 1,
+            waiting_keeper_count: 1,
+            row_count: 1,
+            total_row_count: 1,
+            oldest_age_seconds: 22,
+            rows: [
+              {
+                keeper_name: 'code-reviewer-sister',
+                source: 'event_queue_pending',
+                waiting_on: 'op-del-99',
+                what: 'Waiting for security check reply',
+                wake_producer: 'delegate_completion_wake',
+                since: 1_700_000_000,
+                due_at: null,
+                next_action: 'Wake asker on completion',
+              },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      if (url.includes('/chat/operations')) {
+        return new Response(JSON.stringify({ operations: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response(JSON.stringify({}), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    })
+    vi.stubGlobal('fetch', mockFetch)
+
+    const waitRes = await fetchKeeperWaitingInventoryApi('code-reviewer-sister')
+    expect(waitRes.ok).toBe(true)
+    if (waitRes.ok) {
+      expect(waitRes.value?.rows).toHaveLength(1)
+    }
+
+    const onSelectKeeper = vi.fn()
+    const keeper = makeRosterKeeper({
+      active_turn: {
+        lane: 'autonomous',
+        turn_ref: 'tr-9#4',
+        started_at_unix: Math.floor(Date.now() / 1000) - 10,
+        phase: 'tool',
+        tool_in_flight: null,
+        elapsed_ms: 10_000,
+        preview: {
+          status_text: 'Checking build output',
+          activity: 'tool',
+          text_tail: 'Evaluating diff hunks',
+          last_tool: 'Execute',
+          updated_at_unix: Math.floor(Date.now() / 1000),
+          revision: 2,
+        },
+      },
+    })
+
+    const { container } = render(
+      html`<${KeeperChatTab} keeper=${keeper} onInspect=${vi.fn()} onSelectKeeper=${onSelectKeeper} onMutated=${vi.fn()} />`,
+    )
+
+    await waitFor(() => {
+      // Consecutive tool rows collapsed into a single hierarchical group
+      const group = container.querySelector('[data-testid="chat-tool-group"]')
+      expect(group).not.toBeNull()
+      expect(group!.textContent).toContain('도구 활동 · 2건')
+      expect(group!.textContent).toContain('Read · 위임(@worker-alpha)')
+
+      // Assistant multi-tool trace wrapped inside turn trace rail
+      const turnTrace = container.querySelector('[data-testid="chat-turn-trace"]')
+      expect(turnTrace).not.toBeNull()
+      expect(turnTrace!.querySelector('[data-testid="chat-turn-tool-group"]')).not.toBeNull()
+
+      // Live autonomous turn preview card uses real `activity: 'tool'` -> '실행 중 · Execute'
+      const liveCard = container.querySelector('[data-testid="chat-live-turn-card"]')
+      expect(liveCard).not.toBeNull()
+      expect(liveCard!.getAttribute('aria-live')).toBeNull()
+      expect(liveCard!.textContent).toContain('자율 턴')
+      expect(liveCard!.textContent).toContain('도구 실행 중')
+      expect(liveCard!.textContent).toContain('실행 중 · Execute')
+      expect(liveCard!.textContent).toContain('Evaluating diff hunks')
+
+      // Waiting inventory strip rendered with canonical OCaml source label
+      const waitStrip = container.querySelector('[data-testid="chat-waiting-strip"]')
+      expect(waitStrip).not.toBeNull()
+      expect(waitStrip!.textContent).toContain('대기 · 위임 현황 (1건)')
+      expect(waitStrip!.textContent).toContain('이벤트 큐')
+    })
+
+    // Accessibility: zero <button> elements nested inside <summary>
+    expect(container.querySelectorAll('summary button')).toHaveLength(0)
+
+    // Clicking the delegate jump button navigates to the delegated target Keeper
+    const jumpBtn = container.querySelector('.kp-delegate-jump') as HTMLButtonElement
+    expect(jumpBtn).not.toBeNull()
+    expect(jumpBtn.getAttribute('aria-label')).toContain('worker-alpha')
+    fireEvent.click(jumpBtn)
+    expect(onSelectKeeper).toHaveBeenCalledWith('worker-alpha')
+
+    // Opening the delegate card triggers /tool-result and renders full pending + retry parity
+    const delDetails = container.querySelector('[data-testid="chat-delegate-card"] details') as HTMLDetailsElement
+    expect(delDetails).not.toBeNull()
+    delDetails.open = true
+    fireEvent(delDetails, new Event('toggle'))
+    await waitFor(() => {
+      expect(delDetails.textContent).toContain('도구 실행 중 — 결과 준비 대기 중…')
+      expect(delDetails.textContent).toContain('다시 확인')
+    })
   })
 })

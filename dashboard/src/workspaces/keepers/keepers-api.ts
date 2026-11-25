@@ -55,10 +55,14 @@ import type {
   ChatTranscriptEntry,
   CheckpointInventoryData,
   KeeperAttachedProvider,
+  KeeperActiveTurn,
+  KeeperActiveTurnPreview,
   KeeperCandleLedgerData,
   KeeperCatalogItem,
   KeeperItemsData,
   KeeperToolResultResponse,
+  KeeperWaitingInventoryData,
+  KeeperWaitingRow,
   KeeperLastPromptData,
   KeeperLinkedTask,
   KeeperMemoryFactsData,
@@ -166,6 +170,26 @@ interface TurnListItem {
   readonly active: KeeperRosterItem['active_turn']
 }
 
+function decodeTurnPreview(raw: unknown): KeeperActiveTurnPreview | null {
+  if (!isRecord(raw)) return null
+  if (typeof raw.status_text !== 'string') return null
+  const activity = asStr(raw.activity)
+  const updatedAt = asNum(raw.updated_at_unix)
+  if (!activity || updatedAt === null) return null
+  const statusText = raw.status_text
+  const textTail = typeof raw.text_tail === 'string' ? raw.text_tail : ''
+  const lastTool = asStr(raw.last_tool)
+  const revision = asNum(raw.revision)
+  return {
+    status_text: statusText,
+    activity,
+    text_tail: textTail,
+    last_tool: lastTool,
+    updated_at_unix: updatedAt,
+    revision: revision !== null && Number.isInteger(revision) && revision >= 1 ? revision : null,
+  }
+}
+
 function decodeTurnsList(raw: unknown): Map<string, TurnListItem> {
   const map = new Map<string, TurnListItem>()
   const list = isRecord(raw) && Array.isArray(raw.keepers)
@@ -182,11 +206,15 @@ function decodeTurnsList(raw: unknown): Map<string, TurnListItem> {
       : isRecord(row.turn)
         ? row.turn
         : null
-    const active = activeRaw
+    const active: KeeperActiveTurn | null = activeRaw
       ? {
           lane: asStr(activeRaw.lane) ?? 'chat',
+          turn_ref: asStr(activeRaw.turn_ref),
           started_at_unix: asNum(activeRaw.started_at_unix) ?? asNum(activeRaw.started_at) ?? 0,
+          phase: asStr(activeRaw.phase),
           tool_in_flight: asStr(activeRaw.tool_in_flight) ?? asStr(activeRaw.tool),
+          elapsed_ms: asNum(activeRaw.elapsed_ms),
+          preview: decodeTurnPreview(activeRaw.preview),
         }
       : null
     map.set(name, {
@@ -564,6 +592,147 @@ export function decodeHistoryRow(raw: unknown): ChatTranscriptEntry | null {
     autonomousTurn: autonomousTurn || undefined,
     deliveryState: 'Delivered',
   }
+}
+
+export function fetchKeeperWaitingInventoryApi(
+  keeper: string,
+): Promise<Result<KeeperWaitingInventoryData | null, ApiError>> {
+  return apiGet<KeeperWaitingInventoryData | null>(
+    `/api/v1/keepers/${encodeURIComponent(keeper)}/waiting-inventory`,
+    {
+      decode: (raw) => {
+        const body = isRecord(raw) && isRecord(raw.data) ? raw.data : raw
+        if (!isRecord(body)) return null
+        const rowsRaw = Array.isArray(body.rows) ? body.rows : []
+        const rows: KeeperWaitingRow[] = []
+        for (const item of rowsRaw) {
+          if (!isRecord(item)) continue
+          const source = asStr(item.source)
+          const waitingOn = asStr(item.waiting_on)
+          if (!source || !waitingOn) continue
+          rows.push({
+            keeper_name: asStr(item.keeper_name),
+            source,
+            waiting_on: waitingOn,
+            what: typeof item.what === 'string' ? item.what : '',
+            wake_producer: asStr(item.wake_producer) ?? '',
+            since: asNum(item.since),
+            due_at: asNum(item.due_at),
+            next_action: typeof item.next_action === 'string' ? item.next_action : '',
+          })
+        }
+        return {
+          schema: asStr(body.schema) ?? 'masc.keeper_waiting_inventory',
+          keeper_count: asNum(body.keeper_count) ?? 0,
+          waiting_keeper_count: asNum(body.waiting_keeper_count) ?? 0,
+          row_count: asNum(body.row_count) ?? rows.length,
+          total_row_count: asNum(body.total_row_count) ?? rows.length,
+          oldest_age_seconds: asNum(body.oldest_age_seconds),
+          rows,
+        }
+      },
+    },
+  )
+}
+
+export interface KeeperLiveToolPulse {
+  readonly toolName: string
+  readonly disposition: string | null
+  readonly durationMs: number | null
+  readonly executionMode: 'concurrent' | 'serial' | null
+  readonly batchSize: number | null
+  readonly updatedAt: number
+}
+
+export type KeeperObserverChatSignal =
+  | {
+      readonly kind: 'turn_preview'
+      readonly ownerKey: string | null
+      readonly preview: KeeperActiveTurnPreview
+    }
+  | { readonly kind: 'turn_ended' }
+  | { readonly kind: 'tool_pulse'; readonly pulse: KeeperLiveToolPulse }
+  | { readonly kind: 'chat_appended' }
+  | { readonly kind: 'waiting_changed' }
+
+/**
+ * Pure extractor for shared Observer SSE frames scoped to a single Keeper's
+ * Chat view. Handles both flat event records and JSON-RPC `params` envelopes,
+ * matching the live OCaml broadcast shapes (`server_turn_preview_broadcast.ml`).
+ */
+export function parseKeeperLiveObserverEvent(
+  eventName: string,
+  data: unknown,
+  keeperName: string,
+): KeeperObserverChatSignal | null {
+  const payload = isRecord(data)
+    ? (isRecord(data.params) ? data.params : data)
+    : null
+  const eventType =
+    (payload ? (asStr(payload.type) ?? asStr(payload.event_type) ?? asStr(payload.event)) : null)
+    ?? (eventName !== 'message' ? eventName : null)
+  if (!eventType) return null
+
+  const rowKeeper = payload
+    ? (asStr(payload.keeper_name) ?? asStr(payload.keeper) ?? asStr(payload.name) ?? asStr(payload.agent_name))
+    : null
+
+  // Fleet-wide waiting inventory notifications may omit a keeper name.
+  if (eventType === 'keeper_waiting_inventory_changed') {
+    return !rowKeeper || rowKeeper === keeperName ? { kind: 'waiting_changed' } : null
+  }
+
+  // All other keeper-scoped live signals MUST explicitly match this keeper.
+  if (rowKeeper !== keeperName) return null
+
+  if (eventType === 'keeper_chat_appended') {
+    return { kind: 'chat_appended' }
+  }
+  if (eventType === 'keeper_turn_complete') {
+    return { kind: 'turn_ended' }
+  }
+  if (eventType === 'keeper_turn_changed' && payload) {
+    const status = asStr(payload.status) ?? asStr(payload.phase)
+    if (
+      payload.active_turn === null
+      || payload.turn === null
+      || status === 'idle'
+      || status === 'completed'
+    ) {
+      return { kind: 'turn_ended' }
+    }
+    // Start/in-progress previews arrive via `keeper_turn_preview_changed` and roster `active_turn`.
+    return null
+  }
+  if (eventType === 'keeper_turn_preview_changed' && payload) {
+    const obs = isRecord(payload.observation) ? payload.observation : null
+    const previewRaw =
+      (obs && isRecord(obs.preview) ? obs.preview : null)
+      ?? (isRecord(payload.preview) ? payload.preview : null)
+    const preview = decodeTurnPreview(previewRaw)
+    if (preview) {
+      const ownerKey = (obs ? asStr(obs.owner_key) : null) ?? asStr(payload.owner_key)
+      return { kind: 'turn_preview', ownerKey, preview }
+    }
+    return null
+  }
+  if ((eventType === 'keeper_tool_call' || eventType === 'masc/keeper_tool_call') && payload) {
+    const toolName = asStr(payload.tool_name) ?? asStr(payload.tool)
+    if (!toolName) return null
+    const execModeRaw = asStr(payload.execution_mode)
+    return {
+      kind: 'tool_pulse',
+      pulse: {
+        toolName,
+        disposition: asStr(payload.disposition),
+        durationMs: asNum(payload.duration_ms),
+        executionMode: execModeRaw === 'concurrent' || execModeRaw === 'serial' ? execModeRaw : null,
+        batchSize: asNum(payload.batch_size),
+        updatedAt: Date.now(),
+      },
+    }
+  }
+  return null
 }
 
 export function fetchKeeperToolResultApi(

@@ -145,6 +145,7 @@ export function KeepersWorkspace(props: WorkspaceViewProps) {
                     key=${`chat:${activeKeeper.name}`}
                     keeper=${activeKeeper}
                     onInspect=${props.onInspect}
+                    onSelectKeeper=${handleSelectKeeper}
                     onMutated=${() => void refreshRoster('manual')}
                   />
                 `}

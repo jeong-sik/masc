@@ -625,6 +625,168 @@
   background: var(--warn-soft);
 }
 
+.kp-block-card--delegate {
+  border-color: var(--brass-border);
+  border-left-width: 3px;
+  background: var(--bg-1);
+}
+
+.kp-delegate-prompt {
+  color: var(--fg-1);
+  font-size: var(--fs-12);
+  line-height: var(--lh-body);
+  white-space: pre-wrap;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.kp-delegate-jump {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.kp-sub-details {
+  margin-top: var(--sp-1);
+  padding-top: var(--sp-1);
+  border-top: 1px dashed var(--line-1);
+}
+
+.kp-sub-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  cursor: pointer;
+  font-size: var(--fs-11);
+  color: var(--fg-3);
+  list-style: none;
+}
+
+.kp-collapsible-shell {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.kp-collapsible-details {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.kp-collapsible-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1);
+  flex: 0 0 auto;
+}
+
+/* ── Hierarchical Work Trace, Tool Activity Groups & Live Autonomous Card ── */
+
+.kp-turn-trace {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding-left: var(--sp-3);
+  border-left: 2px solid var(--line-2);
+  min-width: 0;
+}
+
+.kp-hierarchy-rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+  padding-left: var(--sp-3);
+  border-left: 2px solid var(--line-2);
+  min-width: 0;
+}
+
+.kp-activity-single {
+  align-self: stretch;
+  padding-left: var(--sp-3);
+  border-left: 2px solid var(--line-1);
+  min-width: 0;
+}
+
+.kp-activity-group,
+.kp-tool-subgroup {
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-1);
+  background: var(--bg-1);
+  min-width: 0;
+}
+
+.kp-activity-group-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  cursor: pointer;
+  list-style: none;
+  min-width: 0;
+}
+
+.kp-live-turn-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--brass-border);
+  border-left-width: 3px;
+  background: var(--bg-2);
+  min-width: 0;
+}
+
+.kp-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-circle);
+  background: var(--brass-1);
+  box-shadow: 0 0 0 3px var(--brass-soft);
+  flex: 0 0 auto;
+}
+
+.kp-live-turn-status {
+  font-size: var(--fs-12);
+  color: var(--fg-2);
+  line-height: var(--lh-body);
+}
+
+.kp-live-turn-tail {
+  font-size: var(--fs-12);
+  color: var(--fg-3);
+  font-style: italic;
+  white-space: pre-wrap;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.kp-waiting-strip {
+  padding: var(--sp-2) var(--sp-3);
+  border-top: 1px solid var(--line-1);
+  background: var(--bg-1);
+  min-width: 0;
+}
+
+.kp-waiting-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-1);
+  background: var(--bg-2);
+}
+
+.kp-waiting-what {
+  font-size: var(--fs-12);
+  color: var(--fg-2);
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
 .kp-block-summary {
   display: flex;
   align-items: center;
@@ -632,6 +794,30 @@
   cursor: pointer;
   list-style: none;
   min-width: 0;
+}
+
+.kp-block-summary::-webkit-details-marker,
+.kp-activity-group-summary::-webkit-details-marker,
+.kp-sub-summary::-webkit-details-marker {
+  display: none;
+}
+
+.kp-block-summary::before,
+.kp-activity-group-summary::before,
+.kp-sub-summary::before {
+  content: '▸';
+  display: inline-block;
+  flex: 0 0 auto;
+  color: var(--fg-3);
+  font-size: var(--fs-11);
+  transition: transform var(--t-fast) var(--ease);
+}
+
+details[open] > .kp-block-summary::before,
+details[open] > .kp-activity-group-summary::before,
+details[open] > .kp-sub-summary::before {
+  transform: rotate(90deg);
+  color: var(--fg-2);
 }
 
 .kp-block-preview {

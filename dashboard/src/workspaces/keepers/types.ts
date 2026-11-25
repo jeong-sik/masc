@@ -15,6 +15,46 @@ export interface KeeperRosterTurnSlot {
   readonly failed: number
 }
 
+export interface KeeperActiveTurnPreview {
+  readonly status_text: string
+  readonly activity: 'preparing' | 'waiting' | 'streaming' | 'tool' | 'failed' | string
+  readonly text_tail: string
+  readonly last_tool: string | null
+  readonly updated_at_unix: number
+  readonly revision: number | null
+}
+
+export interface KeeperActiveTurn {
+  readonly lane: string
+  readonly turn_ref?: string | null
+  readonly started_at_unix: number
+  readonly phase?: string | null
+  readonly tool_in_flight: string | null
+  readonly elapsed_ms?: number | null
+  readonly preview?: KeeperActiveTurnPreview | null
+}
+
+export interface KeeperWaitingRow {
+  readonly keeper_name: string | null
+  readonly source: string
+  readonly waiting_on: string
+  readonly what: string
+  readonly wake_producer: string
+  readonly since: number | null
+  readonly due_at: number | null
+  readonly next_action: string
+}
+
+export interface KeeperWaitingInventoryData {
+  readonly schema: string
+  readonly keeper_count: number
+  readonly waiting_keeper_count: number
+  readonly row_count: number
+  readonly total_row_count: number
+  readonly oldest_age_seconds: number | null
+  readonly rows: readonly KeeperWaitingRow[]
+}
+
 export interface KeeperRosterItem {
   readonly name: string
   readonly status: string
@@ -37,11 +77,7 @@ export interface KeeperRosterItem {
   readonly candle_balance_milli: string | number | null
   readonly portrait_equipment: KeeperEquipment | null
   readonly chat_control_token: string | null
-  readonly active_turn: {
-    readonly lane: string
-    readonly started_at_unix: number
-    readonly tool_in_flight: string | null
-  } | null
+  readonly active_turn: KeeperActiveTurn | null
 }
 
 // ── Chat Delivery & Transcript ────────────────────────────────────────────

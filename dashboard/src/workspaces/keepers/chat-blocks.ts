@@ -601,3 +601,351 @@ export function formatNativeCompletionSummary(
     summary: parts.length > 0 ? parts.join(' · ') : undefined,
   }
 }
+
+// ── Delegate Extraction & Hierarchical Transcript Grouping ────────────────
+
+export interface DelegateCardInfo {
+  readonly kind: 'delegate' | 'delegate_status' | 'delegate_cancel'
+  readonly targetKeeper: string | null
+  readonly targetKeepers: readonly string[]
+  readonly operationCount: number
+  readonly prompt: string | null
+  readonly operationId: string | null
+  readonly artifactCount: number
+  readonly delegateState: string | null
+  readonly targetTurnAgeSec: number | null
+}
+
+function asNonBlankStr(v: unknown): string | null {
+  return typeof v === 'string' && v.trim().length > 0 ? v.trim() : null
+}
+
+/**
+ * Extracts structured Keeper Delegate fields from `masc_keeper_delegate*` tool
+ * calls (including `masc_keeper_delegate_status_many` `operations` batches) so
+ * the UI renders a clear hierarchical delegation card with target Keeper jumps
+ * instead of raw JSON noise.
+ */
+export function extractDelegateCardInfo(tb: ChatToolBlock): DelegateCardInfo | null {
+  const n = tb.name.trim()
+  let kind: DelegateCardInfo['kind'] | null = null
+  if (n === 'masc_keeper_delegate') kind = 'delegate'
+  else if (n === 'masc_keeper_delegate_status' || n === 'masc_keeper_delegate_status_many') kind = 'delegate_status'
+  else if (n === 'masc_keeper_delegate_cancel') kind = 'delegate_cancel'
+  if (!kind) return null
+
+  const argsObj = tb.args ? tryParseJsonObject(tb.args) : null
+  const resObj = tb.result ? tryParseJsonObject(tb.result) : null
+
+  const extractTarget = (obj: Record<string, unknown> | null): string | null => {
+    if (!obj) return null
+    if (typeof obj.target === 'object' && obj.target !== null && !Array.isArray(obj.target)) {
+      const t = obj.target as Record<string, unknown>
+      const name = asNonBlankStr(t.name)
+      if (name) return name
+    }
+    return asNonBlankStr(obj.target) ?? asNonBlankStr(obj.keeper_name) ?? asNonBlankStr(obj.delegate)
+  }
+
+  const targetSet = new Set<string>()
+  const directTarget = extractTarget(argsObj) ?? extractTarget(resObj)
+  if (directTarget) targetSet.add(directTarget)
+
+  let operationCount = 0
+  let firstBatchOpId: string | null = null
+  const opsArrays: unknown[][] = []
+  if (argsObj && Array.isArray(argsObj.operations)) opsArrays.push(argsObj.operations)
+  if (resObj && Array.isArray(resObj.operations)) opsArrays.push(resObj.operations)
+  if (resObj && Array.isArray(resObj.results)) opsArrays.push(resObj.results)
+
+  for (const arr of opsArrays) {
+    if (arr.length > operationCount) operationCount = arr.length
+    for (const item of arr) {
+      if (typeof item !== 'object' || item === null || Array.isArray(item)) continue
+      const rec = item as Record<string, unknown>
+      const t = extractTarget(rec)
+      if (t) targetSet.add(t)
+      if (!firstBatchOpId) {
+        firstBatchOpId = asNonBlankStr(rec.operation_id) ?? asNonBlankStr(rec.request_id)
+      }
+    }
+  }
+
+  const targetKeepers = Array.from(targetSet)
+  const targetKeeper = targetKeepers[0] ?? null
+  const prompt =
+    (argsObj ? (asNonBlankStr(argsObj.prompt) ?? asNonBlankStr(argsObj.message)) : null)
+    ?? (resObj ? asNonBlankStr(resObj.prompt) : null)
+  const operationId =
+    (argsObj ? (asNonBlankStr(argsObj.operation_id) ?? asNonBlankStr(argsObj.request_id)) : null)
+    ?? (resObj ? (asNonBlankStr(resObj.operation_id) ?? asNonBlankStr(resObj.request_id)) : null)
+    ?? firstBatchOpId
+  if (operationCount === 0 && operationId) operationCount = 1
+  const artifactCount =
+    argsObj && Array.isArray(argsObj.artifacts) ? argsObj.artifacts.length : 0
+  const delegateState =
+    (resObj ? (asNonBlankStr(resObj.state) ?? asNonBlankStr(resObj.status)) : null)
+    ?? (argsObj ? asNonBlankStr(argsObj.state) : null)
+  const targetTurnAgeSec =
+    resObj && typeof resObj.target_turn_age_s === 'number' && Number.isFinite(resObj.target_turn_age_s)
+      ? Math.max(0, Math.round(resObj.target_turn_age_s))
+      : null
+
+  return {
+    kind,
+    targetKeeper,
+    targetKeepers,
+    operationCount,
+    prompt,
+    operationId,
+    artifactCount,
+    delegateState,
+    targetTurnAgeSec,
+  }
+}
+
+export function formatShortToolLabel(tb: ChatToolBlock): string {
+  const del = extractDelegateCardInfo(tb)
+  if (del) {
+    if (del.kind === 'delegate') return del.targetKeeper ? `위임(@${del.targetKeeper})` : '위임'
+    if (del.kind === 'delegate_status') {
+      if (del.targetKeepers.length > 1) {
+        const shown = del.targetKeepers.slice(0, 2).map((t) => `@${t}`).join(',')
+        const rest = del.targetKeepers.length - 2
+        return rest > 0 ? `위임조회(${shown} 외 ${rest})` : `위임조회(${shown})`
+      }
+      if (del.targetKeeper) return `위임조회(@${del.targetKeeper})`
+      return del.operationCount > 1 ? `위임조회(${del.operationCount}건)` : '위임조회'
+    }
+    return del.targetKeeper ? `위임취소(@${del.targetKeeper})` : '위임취소'
+  }
+  return tb.name
+}
+
+/**
+ * Summarizes a list of tool blocks into a compact histogram like
+ * `"Read ×2 · Grep · 위임(@worker-a)"` (capped cleanly to 4 unique entries).
+ */
+export function summarizeToolHistogram(blocks: readonly ChatToolBlock[], maxUnique = 4): string {
+  const counts = new Map<string, number>()
+  for (const tb of blocks) {
+    const label = formatShortToolLabel(tb)
+    counts.set(label, (counts.get(label) ?? 0) + 1)
+  }
+  const entries = Array.from(counts.entries())
+  const shown = entries.slice(0, maxUnique).map(([label, n]) => (n > 1 ? `${label} ×${n}` : label))
+  const rest = entries.length - shown.length
+  if (rest > 0) shown.push(`외 ${rest}종`)
+  return shown.join(' · ')
+}
+
+export interface ParsedTranscriptEntry {
+  readonly msg: ChatTranscriptEntry
+  readonly blocks: ParsedChatBlocks
+}
+
+export type TranscriptDisplayItem =
+  | {
+      readonly kind: 'message'
+      readonly id: string
+      readonly entry: ParsedTranscriptEntry
+    }
+  | {
+      readonly kind: 'tool_group'
+      readonly id: string
+      readonly entries: readonly ParsedTranscriptEntry[]
+      readonly toolBlocks: readonly ChatToolBlock[]
+      readonly toolSummary: string
+      readonly delegateTargets: readonly string[]
+    }
+
+/**
+ * Collapses runs of consecutive tool-only rows (`isToolOnly`) into structured
+ * hierarchical activity groups so multi-tool turns remain calm and scannable.
+ * Preserves chronological order and never absorbs user/assistant messages.
+ */
+export function groupTranscriptEntries(
+  entries: readonly ParsedTranscriptEntry[],
+): readonly TranscriptDisplayItem[] {
+  const out: TranscriptDisplayItem[] = []
+  let run: ParsedTranscriptEntry[] = []
+
+  const flushRun = () => {
+    if (run.length === 0) return
+    const toolBlocks: ChatToolBlock[] = []
+    const delegateTargets = new Set<string>()
+    for (const item of run) {
+      for (const tb of item.blocks.toolBlocks) {
+        toolBlocks.push(tb)
+        const del = extractDelegateCardInfo(tb)
+        if (del) {
+          for (const target of del.targetKeepers) {
+            delegateTargets.add(target)
+          }
+        }
+      }
+    }
+    out.push({
+      kind: 'tool_group',
+      id: `tool-group:${run[0]!.msg.id}`,
+      entries: run,
+      toolBlocks,
+      toolSummary: summarizeToolHistogram(toolBlocks),
+      delegateTargets: Array.from(delegateTargets),
+    })
+    run = []
+  }
+
+  for (const entry of entries) {
+    if (entry.blocks.isToolOnly && !entry.msg.errorDetail) {
+      run.push(entry)
+    } else {
+      flushRun()
+      out.push({
+        kind: 'message',
+        id: entry.msg.id,
+        entry,
+      })
+    }
+  }
+  flushRun()
+  return out
+}
+
+function isInFlightOrFailedEntry(entry: ChatTranscriptEntry): boolean {
+  return (
+    entry.deliveryState !== undefined
+    && entry.deliveryState !== 'Delivered'
+    && entry.deliveryState !== 'Cut_recovered'
+  )
+}
+
+/**
+ * Merges a refreshed latest history head page into the existing transcript
+ * without relying on wall-clock `ts` comparisons (which scramble same-second
+ * rows) and while preserving earlier paginated rows and active optimistic turns.
+ */
+export function mergeLatestHistoryPage(
+  prev: readonly ChatTranscriptEntry[],
+  incoming: readonly ChatTranscriptEntry[],
+): readonly ChatTranscriptEntry[] {
+  // An authoritative empty latest page (e.g. after `/clear` or `/reset`) drops
+  // stale persisted entries while preserving any in-flight/failed optimistic rows.
+  if (incoming.length === 0) {
+    return prev.filter(isInFlightOrFailedEntry)
+  }
+  const loadedIds = new Set(incoming.map((m) => m.id))
+  const firstOverlapIdx = prev.findIndex((m) => loadedIds.has(m.id))
+
+  if (firstOverlapIdx >= 0) {
+    const earlier = prev.slice(0, firstOverlapIdx).filter((m) => !loadedIds.has(m.id))
+    const trailing = prev
+      .slice(firstOverlapIdx)
+      .filter((m) => !loadedIds.has(m.id) && isInFlightOrFailedEntry(m))
+    return dedupeHistoryToolRows([...earlier, ...incoming, ...trailing])
+  }
+
+  // No ID overlap (e.g. initial load or >1 page burst): keep persisted rows ahead
+  // of the new head page and keep in-flight/failed optimistic entries trailing.
+  const earlier = prev.filter((m) => !loadedIds.has(m.id) && !isInFlightOrFailedEntry(m))
+  const trailing = prev.filter((m) => !loadedIds.has(m.id) && isInFlightOrFailedEntry(m))
+  return dedupeHistoryToolRows([...earlier, ...incoming, ...trailing])
+}
+
+export function formatTurnLaneLabel(lane: string): string {
+  switch (lane) {
+    case 'autonomous':
+    case 'proactive':
+      return '자율 턴'
+    case 'delegated':
+    case 'delegate':
+      return '위임 턴'
+    case 'schedule':
+    case 'scheduled':
+      return '예약 턴'
+    case 'board':
+    case 'board_attention':
+      return '보드 턴'
+    case 'chat':
+    case 'chat_operation':
+    case 'direct':
+      return '대화 턴'
+    case 'maintenance':
+      return '유지보수 턴'
+    case 'keepalive':
+      return '유지 턴'
+    case 'task':
+      return '작업 턴'
+    case 'verification':
+      return '검증 턴'
+    case 'internal':
+      return '내부 턴'
+    default:
+      return lane ? `${lane} 턴` : '활성 턴'
+  }
+}
+
+export function formatTurnActivityLabel(activity: string | undefined): {
+  readonly label: string
+  readonly tone: 'info' | 'warn' | 'bad' | 'brass'
+} {
+  switch (activity) {
+    case 'preparing':
+      return { label: '준비 중', tone: 'info' }
+    case 'waiting':
+      return { label: '응답 대기 중', tone: 'warn' }
+    case 'streaming':
+      return { label: '스트리밍 중', tone: 'brass' }
+    case 'tool':
+    case 'tool_observed':
+      return { label: '도구 실행 중', tone: 'info' }
+    case 'failed':
+      return { label: '시도 실패', tone: 'bad' }
+    default:
+      return { label: '진행 중', tone: 'info' }
+  }
+}
+
+export function formatWaitingSourceLabel(source: string): string {
+  switch (source) {
+    case 'event_queue_pending':
+    case 'event_queue':
+      return '이벤트 큐'
+    case 'chat_operation_queued':
+      return '대화 대기'
+    case 'chat_operation_running':
+    case 'chat_operation':
+      return '대화 실행'
+    case 'hitl_pending':
+    case 'approval':
+    case 'approval_count':
+    case 'approval_detail':
+      return '승인 대기'
+    case 'fusion_running':
+      return '퓨전 실행'
+    case 'schedule_waiting':
+      return '예약 대기'
+    case 'owner_shutdown':
+      return '종료 중'
+    case 'operator_pending_confirm':
+      return '운영자 확인'
+    case 'runtime_quota_spent':
+      return '할당 소진'
+    case 'read_error':
+      return '조회 오류'
+    case 'observation_unavailable':
+      return '관측 불가'
+    case 'delegate':
+    case 'keeper_delegate':
+      return '위임'
+    default:
+      return source
+  }
+}
+
+export function formatElapsedCompact(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds))
+  if (s < 60) return `${s}s`
+  if (s < 3600) return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`
+  return `${Math.floor(s / 3600)}h ${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}m`
+}

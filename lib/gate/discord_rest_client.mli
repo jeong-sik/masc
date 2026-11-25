@@ -230,6 +230,7 @@ val send_embed_message :
   token:string ->
   channel_id:string ->
   content:string ->
+  ?reply_to_message_id:string ->
   ?embeds:embed list ->
   unit ->
   (string, error) result
@@ -255,11 +256,11 @@ val build_request :
   unit ->
   string * (string * string) list * string
 (** [(url, headers, body) = build_request ~token ~channel_id ~content
-    ?reply_to_message_id ()].  Headers include Authorization (Bot
-    scheme), Content-Type, a fail-closed [allowed_mentions] object, and a
-    Discord-required User-Agent. When
-    [reply_to_message_id] is provided, the body includes a
-    [message_reference] field so Discord threads the reply. When [nonce] is
+    ?reply_to_message_id ()]. Headers include Authorization (Bot scheme),
+    Content-Type and the required User-Agent. The body includes a fail-closed
+    [allowed_mentions] object. With [reply_to_message_id] it also requires
+    the original message to exist and suppresses the automatic author
+    mention. When [nonce] is
     provided, the body includes [nonce] and [enforce_nonce = true]. *)
 
 val build_typing_request :
@@ -328,6 +329,7 @@ val build_embed_request :
   token:string ->
   channel_id:snowflake ->
   content:string ->
+  ?reply_to_message_id:snowflake ->
   ?embeds:embed list ->
   unit ->
   string * (string * string) list * string

@@ -82,12 +82,25 @@ let auth_headers ~token =
   ; "User-Agent", user_agent
   ]
 
-let allowed_mentions_json user_ids =
-  match user_ids with
-  | [] -> `Assoc [ "parse", `List [] ]
-  | user_ids ->
-    `Assoc
+let allowed_mentions_json ~is_reply user_ids =
+  let fields =
+    match user_ids with
+    | [] -> [ "parse", `List [] ]
+    | user_ids ->
       [ "users", `List (List.map (fun id -> `String (snowflake_to_string id)) user_ids) ]
+  in
+  `Assoc (if is_reply then fields @ [ "replied_user", `Bool false ] else fields)
+
+let add_message_reference reply_to_message_id fields =
+  match reply_to_message_id with
+  | None -> fields
+  | Some ref_id ->
+    ( "message_reference"
+    , `Assoc
+        [ "message_id", `String (snowflake_to_string ref_id)
+        ; "fail_if_not_exists", `Bool true
+        ] )
+    :: fields
 
 let build_request ~token ~channel_id ~content ?reply_to_message_id
     ?(allowed_user_mentions = []) ?nonce () =
@@ -101,7 +114,8 @@ let build_request ~token ~channel_id ~content ?reply_to_message_id
   in
   let fields =
     [ "content", `String content
-    ; "allowed_mentions", allowed_mentions_json allowed_user_mentions
+    ; "allowed_mentions",
+      allowed_mentions_json ~is_reply:(Option.is_some reply_to_message_id) allowed_user_mentions
     ]
   in
   (* Discord checks a nonce for uniqueness only when enforce_nonce is true;
@@ -115,15 +129,7 @@ let build_request ~token ~channel_id ~content ?reply_to_message_id
           ; "enforce_nonce", `Bool true
           ]
   in
-  let fields =
-    match reply_to_message_id with
-    | None -> fields
-    | Some ref_id ->
-        ( "message_reference"
-        , `Assoc
-            [ "message_id", `String (snowflake_to_string ref_id) ] )
-        :: fields
-  in
+  let fields = add_message_reference reply_to_message_id fields in
   let body = Yojson.Safe.to_string (`Assoc fields) in
   (url, headers, body)
 
@@ -545,7 +551,7 @@ let image_embed ~url ~caption =
   ; fields = []
   }
 
-let build_embed_request ~token ~channel_id ~content ?embeds () =
+let build_embed_request ~token ~channel_id ~content ?reply_to_message_id ?embeds () =
   let url =
     Printf.sprintf
       "%s/channels/%s/messages"
@@ -564,19 +570,31 @@ let build_embed_request ~token ~channel_id ~content ?embeds () =
     | None | Some [] -> fields
     | Some es -> ("embeds", `List (List.map embed_to_json es)) :: fields
   in
+  let fields =
+    match reply_to_message_id with
+    | None -> fields
+    | Some _ ->
+      ("allowed_mentions", allowed_mentions_json ~is_reply:true [])
+      :: add_message_reference reply_to_message_id fields
+  in
   let body = Yojson.Safe.to_string (`Assoc fields) in
   (url, headers, body)
 
 let send_embed_message ?clock
     ?(timeout_sec = Masc_http_client.default_request_timeout_sec)
-    ~token ~channel_id ~content ?embeds () =
-  match snowflake_of_string channel_id with
-  | Error message -> Error (Network message)
-  | Ok channel_id ->
-    let (url, headers, body) =
-      build_embed_request ~token ~channel_id ~content ?embeds ()
-    in
-    match Masc_http_client.post_sync ?clock ~timeout_sec ~url ~headers ~body () with
-    | Error msg -> Error (Network msg)
-    | Ok (status, body) ->
-      parse_response ~request_id:(next_request_id "embed") ~status ~body ()
+    ~token ~channel_id ~content ?reply_to_message_id ?embeds () =
+  let open Result.Syntax in
+  let parse_id id = snowflake_of_string id |> Result.map_error (fun message -> Network message) in
+  let* channel_id = parse_id channel_id in
+  let* reply_to_message_id =
+    match reply_to_message_id with
+    | None -> Ok None
+    | Some id -> parse_id id |> Result.map Option.some
+  in
+  let url, headers, body =
+    build_embed_request ~token ~channel_id ~content ?reply_to_message_id ?embeds ()
+  in
+  match Masc_http_client.post_sync ?clock ~timeout_sec ~url ~headers ~body () with
+  | Error msg -> Error (Network msg)
+  | Ok (status, body) ->
+    parse_response ~request_id:(next_request_id "embed") ~status ~body ()

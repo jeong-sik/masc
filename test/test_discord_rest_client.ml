@@ -78,6 +78,29 @@ let test_build_request_allows_only_explicit_users () =
   check bool "broad parse modes absent" true
     (allowed |> member "parse" = `Null)
 
+let test_build_reply_requires_the_original_without_an_author_ping () =
+  let channel_id = sf "101" in
+  let reply_to_message_id = sf "901" in
+  let text = R.build_request ~token:"t" ~channel_id ~content:"answer" ~reply_to_message_id () in
+  let embed = R.image_embed ~url:"https://example.com/image.png" ~caption:None in
+  let image =
+    R.build_embed_request ~token:"t" ~channel_id ~content:"" ~reply_to_message_id
+      ~embeds:[embed] ()
+  in
+  List.iter (fun (url, _, body) ->
+    let open Yojson.Safe.Util in
+    let message = Yojson.Safe.from_string body in
+    let reference = member "message_reference" message in
+    let mentions = member "allowed_mentions" message in
+    check bool "the original thread is the POST target" true
+      (String.ends_with ~suffix:"/channels/101/messages" url);
+    check string "original message" "901" (reference |> member "message_id" |> to_string);
+    check bool "missing original fails delivery" true
+      (reference |> member "fail_if_not_exists" |> to_bool);
+    check bool "no automatic author ping" false
+      (mentions |> member "replied_user" |> to_bool))
+    [text; image]
+
 (* Discord dedupes a repeated create-message request only when the body names
    a nonce of at most 25 characters and sets enforce_nonce. *)
 let test_build_request_nonce_asks_discord_to_dedupe () =
@@ -541,6 +564,8 @@ let () =
             test_build_request_body_is_content_object
         ; test_case "only explicit user mentions are allowed" `Quick
             test_build_request_allows_only_explicit_users
+        ; test_case "reply keeps the original without an author ping" `Quick
+            test_build_reply_requires_the_original_without_an_author_ping
         ; test_case "nonce asks Discord to dedupe" `Quick
             test_build_request_nonce_asks_discord_to_dedupe
         ; test_case "typing URL targets channel" `Quick

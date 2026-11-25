@@ -17,13 +17,14 @@ let pp_error = Discord_rest_client.pp_error
 
 (* ── Text chunking helpers ────────────────────────────────────────── *)
 
-let send_message ?clock ~token ~channel_id ~content () =
+let send_message ?clock ~token ~channel_id ?reply_to_message_id ~content () =
   let content = Observability_redact.redact_text content in
   let limit = Discord_rest_client.message_content_limit in
   let len = String.length content in
   if len = 0 then Ok ()
   else if len <= limit then
-    match Discord_rest_client.send_message ?clock ~token ~channel_id ~content () with
+    match Discord_rest_client.send_message ?clock ~token ~channel_id
+            ?reply_to_message_id ~content () with
     | Ok _msg_id -> Ok ()
     | Error err ->
         let err_str = Format.asprintf "%a" Discord_rest_client.pp_error err in
@@ -43,7 +44,8 @@ let send_message ?clock ~token ~channel_id ~content () =
         let chunk, remaining =
           Discord_rest_client.split_at_codepoint rest ~limit
         in
-        (match Discord_rest_client.send_message ?clock ~token ~channel_id ~content:chunk () with
+        (match Discord_rest_client.send_message ?clock ~token ~channel_id
+                 ?reply_to_message_id ~content:chunk () with
          | Ok _msg_id -> send_chunks first_error remaining
          | Error err ->
              let err_str = Format.asprintf "%a" Discord_rest_client.pp_error err in
@@ -143,49 +145,14 @@ let public_voice_audio_url ?base_url token =
   Masc_network_defaults.normalize_loopback_base_url base
   ^ Masc_network_defaults.voice_audio_path token
 
-let send_link_block ?clock ~token ~channel_id ~url ~title ~description ~image () =
-  let embed =
-    Discord_rest_client.link_embed ~url ~title ~description ~image
-  in
-  match Discord_rest_client.send_embed_message
-          ?clock ~token ~channel_id ~content:"" ~embeds:[embed] ()
-  with
-  | Ok _msg_id -> ()
-  | Error err ->
-      let err_str = Format.asprintf "%a" Discord_rest_client.pp_error err in
-      Log.Keeper.warn
-        "keeper_chat_discord: send_link_block failed: %s" err_str
-
-let send_image_block ?clock ~token ~channel_id ~url ~caption () =
-  let embed = Discord_rest_client.image_embed ~url ~caption in
-  match Discord_rest_client.send_embed_message
-          ?clock ~token ~channel_id ~content:"" ~embeds:[embed] ()
-  with
-  | Ok _msg_id -> ()
-  | Error err ->
-      let err_str = Format.asprintf "%a" Discord_rest_client.pp_error err in
-      Log.Keeper.warn
-        "keeper_chat_discord: send_image_block failed: %s" err_str
-
-let send_audio_block ?clock ~token ~channel_id ~base_url ~audio_token ~message_text
-    ~duration_sec () =
+let audio_block_content ~base_url ~audio_token ~message_text ~duration_sec =
   let url = public_voice_audio_url ?base_url audio_token in
   let duration_prefix =
     match duration_sec with
     | None -> ""
     | Some d -> Printf.sprintf "%.1fs " d
   in
-  let content =
-    Printf.sprintf "🔊 %s%s\n%s" duration_prefix message_text url
-  in
-  (* Rich audio is a side message, not the primary terminal delivery receipt.
-     [send_message] already logs the concrete transport error. *)
-  match send_message ?clock ~token ~channel_id ~content () with
-  | Ok () -> ()
-  | Error err ->
-      Log.Keeper.debug
-        "keeper_chat_discord: audio block delivery returned observed error: %s"
-        (Format.asprintf "%a" Discord_rest_client.pp_error err)
+  Printf.sprintf "🔊 %s%s\n%s" duration_prefix message_text url
 
 let truncate_embed_desc s =
   let max_len = 3900 in
@@ -257,21 +224,6 @@ let rich_embeds_of_text text =
   |> Keeper_chat_blocks.parse_text_to_blocks
   |> List.filter_map rich_embed_of_chat_block
 
-let send_text_rich_embeds ?clock ~token ~channel_id text =
-  rich_embeds_of_text text
-  |> List.iter (fun embed ->
-         match
-           Discord_rest_client.send_embed_message ~token ~channel_id
-             ?clock ~content:"" ~embeds:[ embed ] ()
-         with
-         | Ok _msg_id -> ()
-         | Error err ->
-             let err_str =
-               Format.asprintf "%a" Discord_rest_client.pp_error err
-             in
-             Log.Keeper.warn
-               "keeper_chat_discord: send_text_rich_embed failed: %s" err_str)
-
 (* ── Adapter loop ────────────────────────────────────────────────── *)
 
 (* What one reply knows about its Discord message. The streaming POST, its
@@ -298,8 +250,9 @@ let combine_delivery_results primary overflow =
   | Error _ -> primary
   | Ok () -> overflow
 
-let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
-    ~edit_message ~send_message ?show_activity ?clock ?base_url
+let adapter_loop_with_transport ?reply_to_message_id ~events ~post_message
+    ~edit_message ~send_message ~send_embed
+    ?show_activity ?clock ?base_url
     (* NDT-OK: wall time only paces external Discord edits; tests inject
        [now]. *)
     ?(now = Unix.gettimeofday)
@@ -307,6 +260,20 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
        its value. Tests inject [fresh_nonce]. *)
     ?(fresh_nonce = Discord_rest_client.fresh_nonce)
     ?(on_send_result = fun _ -> ()) () =
+  let post_reply = post_message ~reply_to_message_id in
+  let send_reply = send_message ~reply_to_message_id in
+  let rich_delivery = ref (Ok ()) in
+  let note_rich_delivery outcome =
+    rich_delivery := combine_delivery_results !rich_delivery outcome;
+    match outcome with
+    | Ok () -> ()
+    | Error error ->
+      Log.Keeper.warn "keeper_chat_discord: rich delivery failed: %s"
+        (Format.asprintf "%a" Discord_rest_client.pp_error error)
+  in
+  let send_rich_embed embed =
+    send_embed ~reply_to_message_id embed |> note_rich_delivery
+  in
   let external_effect_completed = ref false in
   let tool_trail = ref (Keeper_chat_tool_trail.create ()) in
   let activity_error_logged = ref false in
@@ -376,13 +343,13 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
            when String.length patch_content = 0 ->
              continue ~ownership ~acc_text ()
          | Not_requested ->
-             (match post_message ~nonce ~content:patch_content with
+             (match post_reply ~nonce ~content:patch_content with
               | Ok created_id ->
                   continue ~ownership ~acc_text ~message:(Created created_id)
                     ~last_edit_time:(now ()) ~last_edited_text:patch_content ()
               | Error err -> post_failed err ~next:Retry_available)
          | Unanswered Retry_available ->
-             (match post_message ~nonce ~content:patch_content with
+             (match post_reply ~nonce ~content:patch_content with
               | Ok created_id ->
                   (* Discord may answer with the message the unanswered
                      attempt created, holding that attempt's shorter text.
@@ -449,7 +416,7 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
         let delivered_text = Keeper_chat_tool_trail.append_to !tool_trail ~text:acc_text in
         let send_overflow = function
           | None -> Ok ()
-          | Some overflow -> send_message ~content:overflow
+          | Some overflow -> send_reply ~content:overflow
         in
         let final_result =
           match message with
@@ -464,7 +431,7 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
           | Not_requested ->
               (* No request of this reply was sent, so Discord holds nothing
                  a nonce could return in place of this message. *)
-              send_message ~content:delivered_text
+              send_reply ~content:delivered_text
           | Unanswered (Retry_available | Retry_spent) ->
               (* An earlier POST of this reply may have landed. Asking again
                  with the reply's nonce returns that message while Discord's
@@ -473,7 +440,7 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
                  second message. *)
               let head, overflow = final_head_and_overflow delivered_text in
               let head_result =
-                match post_message ~nonce ~content:head with
+                match post_reply ~nonce ~content:head with
                 | Ok mid -> edit_message ~message_id:mid ~content:head
                 | Error err ->
                     Log.Keeper.warn
@@ -487,17 +454,24 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
               let patch_result = edit_message ~message_id:mid ~content:head in
               combine_delivery_results patch_result (send_overflow overflow)
         in
+        let final_result =
+          if Option.is_some reply_to_message_id
+          then combine_delivery_results final_result !rich_delivery
+          else final_result
+        in
         on_send_result final_result;
-        send_text_rich_embeds ?clock ~token ~channel_id acc_text;
+        if Option.is_none reply_to_message_id || Result.is_ok final_result then
+          List.iter send_rich_embed (rich_embeds_of_text acc_text);
         Keeper_chat_events.reader_gone events
     | External_effect_completed _ ->
         external_effect_completed := true;
         continue ()
     | Event_error { message } ->
-        on_send_result (send_message ~content:("Keeper error: " ^ message));
+        on_send_result (send_reply ~content:("Keeper error: " ^ message));
         Keeper_chat_events.reader_gone events
     | Run_started { run_id = _; thread_id = _ } ->
         external_effect_completed := false;
+        rich_delivery := Ok ();
         refresh_activity ();
         (* A new run's work is its own; the previous run's trail was delivered
            with the previous run's reply. *)
@@ -526,7 +500,7 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
     | Agent_core_media_delta _ -> continue ()
     | Agent_core_stream_protocol_error error ->
         ignore
-          (send_message
+          (send_reply
              ~content:
                ("Keeper stream protocol: "
                 ^ Keeper_chat_events.stream_protocol_error_summary error)
@@ -552,10 +526,10 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
     | Tool_transcript_committed _
     | Tool_context_block _ -> continue ()
     | Link_block { url; title; description; image } ->
-        send_link_block ?clock ~token ~channel_id ~url ~title ~description ~image ();
+        send_rich_embed (Discord_rest_client.link_embed ~url ~title ~description ~image);
         continue ()
     | Image_block { url; caption } ->
-        send_image_block ?clock ~token ~channel_id ~url ~caption ();
+        send_rich_embed (Discord_rest_client.image_embed ~url ~caption);
         continue ()
     | Status_block { kind } ->
         (match kind with
@@ -571,9 +545,9 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
                 the accumulated text is what Text_message_end and
                 Run_finished deliver. *)
              continue ())
-    | Audio_block { token; mime = _; message_text; duration_sec } ->
-        send_audio_block ?clock ~token ~channel_id ~base_url ~audio_token:token
-          ~message_text ~duration_sec ();
+    | Audio_block { token = audio_token; mime = _; message_text; duration_sec } ->
+        let content = audio_block_content ~base_url ~audio_token ~message_text ~duration_sec in
+        send_reply ~content |> note_rich_delivery;
         continue ()
   in
   let run () =
@@ -594,15 +568,20 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
            refresh_loop ())
   | _ -> run ()
 
-let adapter_loop ~clock ~token ~channel_id ~events ?base_url
+let adapter_loop ~clock ~token ~channel_id ?reply_to_message_id ~events ?base_url
     ?(on_send_result = fun _ -> ()) () =
-  adapter_loop_with_transport ~token ~channel_id ~events
-    ~post_message:(fun ~nonce ~content ->
+  adapter_loop_with_transport ?reply_to_message_id ~events
+    ~post_message:(fun ~reply_to_message_id ~nonce ~content ->
       Discord_rest_client.send_message ~clock ~token ~channel_id ~content
-        ~nonce ())
+        ?reply_to_message_id ~nonce ())
     ~edit_message:(fun ~message_id ~content ->
       edit_message ~clock ~token ~channel_id ~message_id ~content ())
-    ~send_message:(fun ~content -> send_message ~clock ~token ~channel_id ~content ())
+    ~send_message:(fun ~reply_to_message_id ~content ->
+      send_message ~clock ~token ~channel_id ?reply_to_message_id ~content ())
+    ~send_embed:(fun ~reply_to_message_id embed ->
+      Discord_rest_client.send_embed_message ~clock ~token ~channel_id ~content:""
+        ?reply_to_message_id ~embeds:[embed] ()
+      |> Result.map (fun _ -> ()))
     ~show_activity:(fun () ->
       Discord_rest_client.trigger_typing ~clock ~token ~channel_id ())
     ~clock ?base_url ~on_send_result ()

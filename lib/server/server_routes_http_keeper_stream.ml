@@ -2759,7 +2759,7 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                    loop ~terminal_seen:(terminal_seen || is_terminal) projections
                  in
                  loop ~terminal_seen:false (List.map (fun id -> id, Server_keeper_chat_agui_projection.initial) member_ids))
-             | Keeper_continuation_channel.Discord { channel_id; _ } ->
+             | Keeper_continuation_channel.Discord { channel_id; reply_to_message_id; _ } ->
                (match Env_config_discord.bot_token_opt () with
                 | Some token ->
                   fork_adapter (fun () ->
@@ -2767,6 +2767,7 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                       ~clock
                       ~token
                       ~channel_id
+                      ?reply_to_message_id
                       ~events
                       ~on_send_result:(fun result ->
                         settle_delivery

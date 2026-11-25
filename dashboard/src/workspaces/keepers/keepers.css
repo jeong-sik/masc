@@ -865,6 +865,23 @@ details[open] > .kp-sub-summary::before {
   font-style: italic;
 }
 
+.kp-block-subbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.kp-block-subactions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1);
+  flex: 0 0 auto;
+}
+
 .kp-block-pre {
   margin: 0;
   padding: var(--sp-2);
@@ -874,10 +891,62 @@ details[open] > .kp-sub-summary::before {
   color: var(--fg-2);
   font-family: var(--font-mono);
   font-size: var(--fs-11);
-  overflow-x: auto;
+  max-height: 440px;
+  overflow: auto;
   white-space: pre-wrap;
   word-break: keep-all;
   overflow-wrap: anywhere;
+}
+
+.kp-block-pre--expanded {
+  max-height: none;
+  overflow-y: visible;
+}
+
+.kp-tool-result-pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-1);
+  background: var(--bg-2);
+  min-width: 0;
+}
+
+.kp-tool-result-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--err-border);
+  background: var(--err-soft);
+  color: var(--err-fg);
+  font-size: var(--fs-11);
+  min-width: 0;
+}
+
+.kp-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.kp-inspector-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-1);
+  background: var(--bg-1);
+  min-width: 0;
 }
 
 .kp-block-list {
@@ -1319,4 +1388,14 @@ details[open] > .kp-sub-summary::before {
   overflow: visible;
   text-overflow: clip;
   overflow-wrap: anywhere;
+}
+
+.kp-sr-copy-buffer {
+  position: fixed;
+  top: 0;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
 }

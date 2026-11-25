@@ -40,6 +40,7 @@ import {
 import {
   dedupeHistoryToolRows,
   extractDelegateCardInfo,
+  findToolCallIndex,
   formatElapsedCompact,
   formatTurnActivityLabel,
   formatTurnLaneLabel,
@@ -63,6 +64,18 @@ import {
   upsertStreamToolCall,
   type ChatBlockPrefs,
 } from './chat-blocks'
+import {
+  TOOL_RESULT_MAX_PAGES_PER_BURST,
+  TOOL_RESULT_PAGE_BYTES,
+  applyToolResultError,
+  applyToolResultPage,
+  copyTextToClipboard,
+  fetchToolResultContinuation,
+  formatByteSize,
+  formatToolResultProgress,
+  isLongToolOutput,
+  type ToolResultState,
+} from './tool-result-state'
 import type {
   BtwQueryState,
   ChatAttachmentDraft,
@@ -148,15 +161,8 @@ function deliveryBadgeTone(state: ChatDeliveryState | undefined): 'ok' | 'warn' 
   }
 }
 
-interface ToolResultCacheEntry {
-  readonly status: 'loading' | 'loaded' | 'pending' | 'unavailable' | 'error'
-  readonly content?: string
-  readonly isError?: boolean
-  readonly detail?: string
-  readonly truncated?: boolean
-}
-
 const MAX_TOOL_RESULT_CACHE = 50
+const MAX_AUTO_HYDRATE_TOOL_RESULTS = 8
 
 function joinThinkingMap(map: Map<string, string>): string | undefined {
   const ordered = Array.from(map.values()).filter((v) => v.length > 0)
@@ -164,11 +170,11 @@ function joinThinkingMap(map: Map<string, string>): string | undefined {
 }
 
 function setBoundedToolResultCache(
-  prev: Record<string, ToolResultCacheEntry>,
+  prev: Record<string, ToolResultState>,
   key: string,
-  entry: ToolResultCacheEntry,
-): Record<string, ToolResultCacheEntry> {
-  const next: Record<string, ToolResultCacheEntry> = { ...prev }
+  entry: ToolResultState,
+): Record<string, ToolResultState> {
+  const next: Record<string, ToolResultState> = { ...prev }
   delete next[key]
   next[key] = entry
   const keys = Object.keys(next)
@@ -201,11 +207,20 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const [blockPrefs, setBlockPrefs] = useState<ChatBlockPrefs>(() => loadChatBlockPrefs())
 
   const updateBlockPrefs = useCallback((updater: (cur: ChatBlockPrefs) => ChatBlockPrefs) => {
-    setBlockPrefs((cur) => {
-      const next = updater(cur)
-      saveChatBlockPrefs(next)
-      return next
-    })
+    const cur = blockPrefsRef.current
+    const next = updater(cur)
+    blockPrefsRef.current = next
+    saveChatBlockPrefs(next)
+    setBlockPrefs(next)
+    if (next.tools !== cur.tools) {
+      autoOpenedGroupsRef.current.clear()
+      expandedCardKeysRef.current = {}
+      renderedOpenRef.current.clear()
+      setExpandedCardKeys({})
+    }
+    if (next.thinking !== cur.thinking) {
+      setExpandedThinkingKeys({})
+    }
   }, [])
 
   const [btw, setBtw] = useState<BtwQueryState>({
@@ -219,7 +234,11 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const [renderWindow, setRenderWindow] = useState(INITIAL_RENDER_WINDOW)
   const [isNearBottom, setIsNearBottom] = useState(true)
   const [unseenBelowCount, setUnseenBelowCount] = useState(0)
-  const [toolResultCache, setToolResultCache] = useState<Record<string, ToolResultCacheEntry>>({})
+  const [toolResultCache, setToolResultCache] = useState<Record<string, ToolResultState>>({})
+  const [expandedCardKeys, setExpandedCardKeys] = useState<Record<string, boolean>>({})
+  const [expandedThinkingKeys, setExpandedThinkingKeys] = useState<Record<string, boolean>>({})
+  const [expandedPreKeys, setExpandedPreKeys] = useState<Record<string, boolean>>({})
+  const [copiedPreKey, setCopiedPreKey] = useState<string | null>(null)
   const [waitingInventory, setWaitingInventory] = useState<KeeperWaitingInventoryData | null>(null)
   const [livePreview, setLivePreview] = useState<{
     readonly ownerKey: string | null
@@ -247,7 +266,78 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const earlierAbortRef = useRef<AbortController | null>(null)
   const earlierGenRef = useRef(0)
   const requestedExecIdsRef = useRef<Set<string>>(new Set())
-  const toolFetchControllersRef = useRef<Set<AbortController>>(new Set())
+  const toolFetchControllersRef = useRef<Map<string, AbortController>>(new Map())
+  const toolResultCacheRef = useRef<Record<string, ToolResultState>>(toolResultCache)
+  toolResultCacheRef.current = toolResultCache
+  const expandedCardKeysRef = useRef<Record<string, boolean>>(expandedCardKeys)
+  expandedCardKeysRef.current = expandedCardKeys
+  const blockPrefsRef = useRef<ChatBlockPrefs>(blockPrefs)
+  blockPrefsRef.current = blockPrefs
+  const autoOpenedGroupsRef = useRef<Set<string>>(new Set())
+  const renderedOpenRef = useRef<Map<string, boolean>>(new Map())
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // NOTE: Intentionally keep evicted keys in `requestedExecIdsRef` so auto-hydration
+  // never thrash-fetches in an infinite loop when >MAX_TOOL_RESULT_CACHE cards stay open.
+  // Explicit user clicks ("실행 결과 불러오기") and manual re-toggles pass `force = true`.
+  const updateToolResultCache = useCallback((key: string, entry: ToolResultState) => {
+    toolResultCacheRef.current = setBoundedToolResultCache(toolResultCacheRef.current, key, entry)
+    setToolResultCache((prev) => {
+      const next = setBoundedToolResultCache(prev, key, entry)
+      toolResultCacheRef.current = next
+      return next
+    })
+  }, [])
+
+  const resetToolResultCache = useCallback(() => {
+    toolResultCacheRef.current = {}
+    setToolResultCache({})
+  }, [])
+
+  const resetExpandUiState = useCallback(() => {
+    autoOpenedGroupsRef.current.clear()
+    renderedOpenRef.current.clear()
+    expandedCardKeysRef.current = {}
+    setExpandedCardKeys({})
+    setExpandedThinkingKeys({})
+    setExpandedPreKeys({})
+    setCopiedPreKey(null)
+    if (copyTimerRef.current) {
+      clearTimeout(copyTimerRef.current)
+      copyTimerRef.current = null
+    }
+  }, [])
+
+  const setCardExpanded = useCallback((cardKey: string, open: boolean, executionId?: string) => {
+    const trimmedExec = executionId?.trim() || ''
+    const execKey = trimmedExec ? `exec:${trimmedExec}` : ''
+    const curRef = expandedCardKeysRef.current
+    if (curRef[cardKey] !== open || (execKey && curRef[execKey] !== open)) {
+      const syncNext: Record<string, boolean> = { ...curRef, [cardKey]: open }
+      if (execKey) syncNext[execKey] = open
+      expandedCardKeysRef.current = syncNext
+    }
+    setExpandedCardKeys((prev) => {
+      if (prev[cardKey] === open && (!execKey || prev[execKey] === open)) {
+        return prev
+      }
+      const next: Record<string, boolean> = { ...prev, [cardKey]: open }
+      if (execKey) next[execKey] = open
+      expandedCardKeysRef.current = next
+      return next
+    })
+  }, [])
+
+  const handleCopyPre = useCallback(async (preKey: string, text: string) => {
+    const ok = await copyTextToClipboard(text)
+    if (!ok || !mountedRef.current) return
+    setCopiedPreKey(preKey)
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current)
+    copyTimerRef.current = setTimeout(() => {
+      copyTimerRef.current = null
+      if (mountedRef.current) setCopiedPreKey(null)
+    }, 1500)
+  }, [])
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
     const el = chatListRef.current
@@ -273,7 +363,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   }, [])
 
   const abortAllToolFetches = useCallback(() => {
-    for (const ctrl of toolFetchControllersRef.current) {
+    for (const ctrl of toolFetchControllersRef.current.values()) {
       ctrl.abort()
     }
     toolFetchControllersRef.current.clear()
@@ -291,6 +381,10 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       mountedRef.current = false
       invalidateEarlierReads()
       abortAllToolFetches()
+      if (copyTimerRef.current) {
+        clearTimeout(copyTimerRef.current)
+        copyTimerRef.current = null
+      }
     }
   }, [abortAllToolFetches, invalidateEarlierReads])
 
@@ -307,7 +401,8 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     invalidateEarlierReads()
     abortAllToolFetches()
     requestedExecIdsRef.current.clear()
-    setToolResultCache({})
+    resetToolResultCache()
+    resetExpandUiState()
     setWaitingInventory(null)
     setLivePreview(null)
     setLiveToolPulse(null)
@@ -317,7 +412,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       setNextCursor(null)
       setQueueRead(null)
     }
-  }, [keeper.name, abortAllToolFetches, invalidateEarlierReads])
+  }, [keeper.name, abortAllToolFetches, invalidateEarlierReads, resetToolResultCache, resetExpandUiState])
 
   useEffect(() => {
     let lastEpoch = currentSessionEpoch()
@@ -330,10 +425,11 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
         btwAbortRef.current?.abort('session_epoch_changed')
         abortAllToolFetches()
         requestedExecIdsRef.current.clear()
-        setToolResultCache({})
+        resetToolResultCache()
+        resetExpandUiState()
       }
     })
-  }, [abortAllToolFetches, invalidateEarlierReads])
+  }, [abortAllToolFetches, invalidateEarlierReads, resetToolResultCache, resetExpandUiState])
 
   useEffect(() => {
     if (!keeper.active_turn) {
@@ -345,51 +441,85 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const requestToolResult = useCallback(async (executionId: string, force = false) => {
     const trimmed = executionId.trim()
     if (!trimmed) return
-    if (!force && requestedExecIdsRef.current.has(trimmed)) return
+    if (!force && (requestedExecIdsRef.current.has(trimmed) || toolFetchControllersRef.current.has(trimmed))) {
+      return
+    }
+    if (force) {
+      toolFetchControllersRef.current.get(trimmed)?.abort()
+      toolFetchControllersRef.current.delete(trimmed)
+    }
     requestedExecIdsRef.current.add(trimmed)
     const targetKeeper = keeper.name
     const startEpoch = currentSessionEpoch()
     const ctrl = new AbortController()
-    toolFetchControllersRef.current.add(ctrl)
-    setToolResultCache((prev) => setBoundedToolResultCache(prev, trimmed, { status: 'loading' }))
+    toolFetchControllersRef.current.set(trimmed, ctrl)
+    updateToolResultCache(trimmed, { status: 'loading' })
     try {
-      const res = await fetchKeeperToolResultApi(targetKeeper, trimmed, 16_384, ctrl.signal)
-      if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) {
-        requestedExecIdsRef.current.delete(trimmed)
+      const res = await fetchKeeperToolResultApi(targetKeeper, trimmed, TOOL_RESULT_PAGE_BYTES, ctrl.signal)
+      if (
+        !mountedRef.current
+        || activeKeeperRef.current !== targetKeeper
+        || !isEpochCurrent(startEpoch)
+        || toolFetchControllersRef.current.get(trimmed) !== ctrl
+        || ctrl.signal.aborted
+      ) {
+        if (toolFetchControllersRef.current.get(trimmed) === ctrl) {
+          requestedExecIdsRef.current.delete(trimmed)
+        }
         return
       }
       if (!res.ok) {
         requestedExecIdsRef.current.delete(trimmed)
         if (res.error.kind === 'epoch_stale' || res.error.kind === 'aborted') return
-        setToolResultCache((prev) =>
-          setBoundedToolResultCache(prev, trimmed, { status: 'error', detail: res.error.message }),
-        )
+        updateToolResultCache(trimmed, applyToolResultError(undefined, res.error))
         return
       }
       const payload = res.value
       if (payload.state === 'pending') {
         requestedExecIdsRef.current.delete(trimmed)
-        setToolResultCache((prev) => setBoundedToolResultCache(prev, trimmed, { status: 'pending' }))
-        return
       }
-      if (payload.state === 'unavailable') {
-        setToolResultCache((prev) =>
-          setBoundedToolResultCache(prev, trimmed, { status: 'unavailable', detail: payload.reason }),
-        )
-        return
-      }
-      setToolResultCache((prev) =>
-        setBoundedToolResultCache(prev, trimmed, {
-          status: 'loaded',
-          content: prettyFormatPayload(payload.content),
-          isError: payload.isError,
-          truncated: !payload.eof,
-        }),
-      )
+      updateToolResultCache(trimmed, applyToolResultPage(undefined, payload))
     } finally {
-      toolFetchControllersRef.current.delete(ctrl)
+      if (toolFetchControllersRef.current.get(trimmed) === ctrl) {
+        toolFetchControllersRef.current.delete(trimmed)
+      }
     }
-  }, [keeper.name])
+  }, [keeper.name, updateToolResultCache])
+
+  const loadMoreToolResult = useCallback(async (executionId: string, maxPages: number) => {
+    const trimmed = executionId.trim()
+    if (!trimmed) return
+    if (toolFetchControllersRef.current.has(trimmed)) return
+    const current = toolResultCacheRef.current[trimmed]
+    if (!current || current.status !== 'loaded' || current.eof || current.isBinary) return
+    const targetKeeper = keeper.name
+    const startEpoch = currentSessionEpoch()
+    const ctrl = new AbortController()
+    toolFetchControllersRef.current.set(trimmed, ctrl)
+    const isCurrent = () =>
+      mountedRef.current
+      && activeKeeperRef.current === targetKeeper
+      && isEpochCurrent(startEpoch)
+      && toolFetchControllersRef.current.get(trimmed) === ctrl
+      && !ctrl.signal.aborted
+    try {
+      await fetchToolResultContinuation({
+        keeperName: targetKeeper,
+        executionId: trimmed,
+        initialState: current,
+        maxPages,
+        signal: ctrl.signal,
+        isCurrent,
+        onUpdate: (next) => {
+          if (isCurrent()) updateToolResultCache(trimmed, next)
+        },
+      })
+    } finally {
+      if (toolFetchControllersRef.current.get(trimmed) === ctrl) {
+        toolFetchControllersRef.current.delete(trimmed)
+      }
+    }
+  }, [keeper.name, updateToolResultCache])
 
   useEffect(() => {
     setControlToken(keeper.chat_control_token)
@@ -814,6 +944,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       streamAbortRef.current = abortController
 
       const thinkingByBlock = new Map<string, string>()
+      let liveTools: readonly ChatToolBlock[] = []
       const promoteStreaming = (cur: ChatDeliveryState | undefined): ChatDeliveryState =>
         cur === 'Failed' || cur === 'Delivered' ? cur : 'Streaming'
       const markUserDelivered = () => {
@@ -858,6 +989,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
           onAttemptStarted: () => {
             markUserDelivered()
             thinkingByBlock.clear()
+            liveTools = []
             updateAssistantEntry(assistantId, (m) => ({
               ...m,
               content: '',
@@ -902,158 +1034,200 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
             }))
           },
           onToolStart: (toolName, toolCallId, streamKey) => {
+            liveTools = upsertStreamToolCall(
+              liveTools,
+              { toolCallId, streamKey },
+              (cur) => ({
+                ...cur,
+                id: toolCallId ?? cur.id,
+                streamKey: cur.streamKey ?? streamKey,
+                name: toolName || cur.name,
+                status: 'running',
+              }),
+              () => ({
+                id: toolCallId,
+                streamKey,
+                name: toolName,
+                status: 'running',
+              }),
+            )
+            const snapshotTools = liveTools
             updateAssistantEntry(assistantId, (m) => ({
               ...m,
               deliveryState: promoteStreaming(m.deliveryState),
-              toolCalls: upsertStreamToolCall(
-                m.toolCalls,
-                { toolCallId, streamKey },
-                (cur) => ({
-                  ...cur,
-                  id: toolCallId ?? cur.id,
-                  streamKey: streamKey ?? cur.streamKey,
-                  name: toolName || cur.name,
-                  status: 'running',
-                }),
-                () => ({
-                  id: toolCallId,
-                  streamKey,
-                  name: toolName,
-                  status: 'running',
-                }),
-              ),
+              toolCalls: snapshotTools,
             }))
           },
           onToolAdmitted: (toolName, toolCallId, streamKey) => {
+            const prevIdx = findToolCallIndex(liveTools, { toolCallId, streamKey })
+            const prevStreamKey = prevIdx >= 0 ? liveTools[prevIdx]!.streamKey : undefined
+            liveTools = upsertStreamToolCall(
+              liveTools,
+              { toolCallId, streamKey },
+              (cur) => ({
+                ...cur,
+                id: toolCallId ?? cur.id,
+                streamKey: cur.streamKey ?? streamKey,
+                name: toolName,
+              }),
+            )
+            if (prevIdx >= 0 && !prevStreamKey && streamKey) {
+              const oldKey = `${assistantId}:tool:${prevIdx}`
+              const newKey = `${assistantId}:tool:${streamKey}`
+              const prevOpen = expandedCardKeysRef.current[oldKey]
+              if (prevOpen !== undefined) {
+                setCardExpanded(newKey, prevOpen)
+              }
+            }
+            const snapshotTools = liveTools
             updateAssistantEntry(assistantId, (m) => ({
               ...m,
-              toolCalls: upsertStreamToolCall(
-                m.toolCalls,
-                { toolCallId, streamKey },
-                (cur) => ({
-                  ...cur,
-                  id: toolCallId ?? cur.id,
-                  streamKey: streamKey ?? cur.streamKey,
-                  name: toolName,
-                }),
-              ),
+              toolCalls: snapshotTools,
             }))
           },
           onToolArgsDelta: (toolCallId, delta, streamKey) => {
+            liveTools = upsertStreamToolCall(
+              liveTools,
+              { toolCallId, streamKey },
+              (cur) => ({ ...cur, args: (cur.args ?? '') + delta }),
+            )
+            const snapshotTools = liveTools
             updateAssistantEntry(assistantId, (m) => ({
               ...m,
               deliveryState: promoteStreaming(m.deliveryState),
-              toolCalls: upsertStreamToolCall(
-                m.toolCalls,
-                { toolCallId, streamKey },
-                (cur) => ({ ...cur, args: (cur.args ?? '') + delta }),
-              ),
+              toolCalls: snapshotTools,
             }))
           },
           onToolArgsSnapshot: (toolCallId, snapshot, streamKey) => {
+            liveTools = upsertStreamToolCall(
+              liveTools,
+              { toolCallId, streamKey },
+              (cur) => ({ ...cur, args: snapshot }),
+            )
+            const snapshotTools = liveTools
             updateAssistantEntry(assistantId, (m) => ({
               ...m,
               deliveryState: promoteStreaming(m.deliveryState),
-              toolCalls: upsertStreamToolCall(
-                m.toolCalls,
-                { toolCallId, streamKey },
-                (cur) => ({ ...cur, args: snapshot }),
-              ),
+              toolCalls: snapshotTools,
             }))
           },
           onToolEnd: (toolCallId, streamKey) => {
+            liveTools = upsertStreamToolCall(
+              liveTools,
+              { toolCallId, streamKey },
+              (cur) => ({
+                ...cur,
+                status: cur.status === 'running' ? 'awaiting_result' : cur.status,
+              }),
+            )
+            const snapshotTools = liveTools
             updateAssistantEntry(assistantId, (m) => ({
               ...m,
-              toolCalls: upsertStreamToolCall(
-                m.toolCalls,
-                { toolCallId, streamKey },
-                (cur) => ({
-                  ...cur,
-                  status: cur.status === 'running' ? 'awaiting_result' : cur.status,
-                }),
-              ),
+              toolCalls: snapshotTools,
             }))
           },
           onToolResultReady: ({ executionId, toolCallId, streamKey }) => {
+            liveTools = upsertStreamToolCall(
+              liveTools,
+              { toolCallId, streamKey },
+              (cur) => ({
+                ...cur,
+                executionId,
+                status: cur.status === 'error' ? 'error' : 'completed',
+              }),
+              () => ({
+                id: toolCallId,
+                streamKey,
+                executionId,
+                name: 'tool',
+                status: 'completed',
+              }),
+            )
+            const matchedIdx = findToolCallIndex(liveTools, { toolCallId, streamKey })
+            const slotIdx = matchedIdx >= 0 ? matchedIdx : Math.max(0, liveTools.length - 1)
+            const matchedBlock = liveTools[slotIdx]
+            const cardKey = `${assistantId}:tool:${matchedBlock?.streamKey ?? slotIdx}`
+            const explicitOpen = expandedCardKeysRef.current[cardKey]
+            const isCardOpen = explicitOpen !== undefined
+              ? explicitOpen
+              : blockPrefsRef.current.tools === 'full'
+            if (explicitOpen !== undefined) {
+              setCardExpanded(cardKey, explicitOpen, executionId)
+            }
+            const snapshotTools = liveTools
             updateAssistantEntry(assistantId, (m) => ({
               ...m,
-              toolCalls: upsertStreamToolCall(
-                m.toolCalls,
-                { toolCallId, streamKey },
-                (cur) => ({
-                  ...cur,
-                  executionId,
-                  status: cur.status === 'error' ? 'error' : 'completed',
-                }),
-                () => ({
-                  id: toolCallId,
-                  streamKey,
-                  executionId,
-                  name: 'tool',
-                  status: 'completed',
-                }),
-              ),
+              toolCalls: snapshotTools,
             }))
+            if (blockPrefsRef.current.tools !== 'hidden' && isCardOpen && !matchedBlock?.result) {
+              void requestToolResult(executionId)
+            }
           },
           onToolResult: (toolCallId, content, streamKey) => {
+            liveTools = upsertStreamToolCall(
+              liveTools,
+              { toolCallId, streamKey },
+              (cur) => ({ ...cur, result: content, status: 'completed' }),
+              () => ({
+                id: toolCallId || undefined,
+                streamKey,
+                name: 'tool',
+                result: content,
+                status: 'completed',
+              }),
+            )
+            const snapshotTools = liveTools
             updateAssistantEntry(assistantId, (m) => ({
               ...m,
-              toolCalls: upsertStreamToolCall(
-                m.toolCalls,
-                { toolCallId, streamKey },
-                (cur) => ({ ...cur, result: content, status: 'completed' }),
-                () => ({
-                  id: toolCallId || undefined,
-                  streamKey,
-                  name: 'tool',
-                  result: content,
-                  status: 'completed',
-                }),
-              ),
+              toolCalls: snapshotTools,
             }))
           },
           onNativeToolProgress: ({ toolName, toolCallId, streamKey, progressLabel }) => {
+            liveTools = upsertStreamToolCall(
+              liveTools,
+              { toolCallId, streamKey },
+              (cur) => ({
+                ...cur,
+                name: toolName ?? cur.name,
+                progressLabel,
+              }),
+              () => ({
+                id: toolCallId,
+                streamKey,
+                name: toolName ?? 'native_tool',
+                status: 'running',
+                progressLabel,
+              }),
+            )
+            const snapshotTools = liveTools
             updateAssistantEntry(assistantId, (m) => ({
               ...m,
               deliveryState: promoteStreaming(m.deliveryState),
-              toolCalls: upsertStreamToolCall(
-                m.toolCalls,
-                { toolCallId, streamKey },
-                (cur) => ({
-                  ...cur,
-                  name: toolName ?? cur.name,
-                  progressLabel,
-                }),
-                () => ({
-                  id: toolCallId,
-                  streamKey,
-                  name: toolName ?? 'native_tool',
-                  status: 'running',
-                  progressLabel,
-                }),
-              ),
+              toolCalls: snapshotTools,
             }))
           },
           onNativeToolEnd: ({ toolName, toolCallId, streamKey, status, summary }) => {
+            liveTools = upsertStreamToolCall(
+              liveTools,
+              { toolCallId, streamKey },
+              (cur) => ({
+                ...cur,
+                name: toolName ?? cur.name,
+                status,
+                progressLabel: summary ?? cur.progressLabel,
+              }),
+              () => ({
+                id: toolCallId,
+                streamKey,
+                name: toolName ?? 'native_tool',
+                status,
+                progressLabel: summary,
+              }),
+            )
+            const snapshotTools = liveTools
             updateAssistantEntry(assistantId, (m) => ({
               ...m,
-              toolCalls: upsertStreamToolCall(
-                m.toolCalls,
-                { toolCallId, streamKey },
-                (cur) => ({
-                  ...cur,
-                  name: toolName ?? cur.name,
-                  status,
-                  progressLabel: summary ?? cur.progressLabel,
-                }),
-                () => ({
-                  id: toolCallId,
-                  streamKey,
-                  name: toolName ?? 'native_tool',
-                  status,
-                  progressLabel: summary,
-                }),
-              ),
+              toolCalls: snapshotTools,
             }))
           },
           onToolApprovalRequested: ({ toolCallId, toolName, args, question, because }) => {
@@ -1062,49 +1236,47 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
             const matchRef = trimmedId
               ? { toolCallId: trimmedId }
               : { streamKey: `approval:${randomUuid()}` }
+            liveTools = upsertStreamToolCall(
+              liveTools,
+              matchRef,
+              (cur) => ({
+                ...cur,
+                name: toolName || cur.name,
+                args: args ?? cur.args,
+                status: 'awaiting_approval',
+                progressLabel: label,
+              }),
+              () => ({
+                id: trimmedId || undefined,
+                streamKey: matchRef.streamKey,
+                name: toolName,
+                args,
+                status: 'awaiting_approval',
+                progressLabel: label,
+              }),
+            )
+            const snapshotTools = liveTools
             updateAssistantEntry(assistantId, (m) => ({
               ...m,
               deliveryState: promoteStreaming(m.deliveryState),
-              toolCalls: upsertStreamToolCall(
-                m.toolCalls,
-                matchRef,
-                (cur) => ({
-                  ...cur,
-                  name: toolName || cur.name,
-                  args: args ?? cur.args,
-                  status: 'awaiting_approval',
-                  progressLabel: label,
-                }),
-                () => ({
-                  id: trimmedId || undefined,
-                  streamKey: matchRef.streamKey,
-                  name: toolName,
-                  args,
-                  status: 'awaiting_approval',
-                  progressLabel: label,
-                }),
-              ),
+              toolCalls: snapshotTools,
             }))
           },
           onToolApprovalSettled: ({ toolCallId, toolName, outcome: approvalOutcome }) => {
             const approved = /^approv/i.test(approvalOutcome.trim())
             const trimmedId = toolCallId.trim()
-            updateAssistantEntry(assistantId, (m) => {
-              if (trimmedId) {
-                return {
-                  ...m,
-                  toolCalls: upsertStreamToolCall(
-                    m.toolCalls,
-                    { toolCallId: trimmedId },
-                    (cur) => ({
-                      ...cur,
-                      status: approved ? 'running' : 'error',
-                      progressLabel: approvalOutcome,
-                    }),
-                  ),
-                }
-              }
-              const list = [...(m.toolCalls ?? [])]
+            if (trimmedId) {
+              liveTools = upsertStreamToolCall(
+                liveTools,
+                { toolCallId: trimmedId },
+                (cur) => ({
+                  ...cur,
+                  status: approved ? 'running' : 'error',
+                  progressLabel: approvalOutcome,
+                }),
+              )
+            } else {
+              const list = [...liveTools]
               let targetIdx = -1
               for (let i = list.length - 1; i >= 0; i -= 1) {
                 const cur = list[i]!
@@ -1115,14 +1287,20 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                 }
                 if (targetIdx < 0) targetIdx = i
               }
-              if (targetIdx < 0) return m
-              list[targetIdx] = {
-                ...list[targetIdx]!,
-                status: approved ? 'running' : 'error',
-                progressLabel: approvalOutcome,
+              if (targetIdx >= 0) {
+                list[targetIdx] = {
+                  ...list[targetIdx]!,
+                  status: approved ? 'running' : 'error',
+                  progressLabel: approvalOutcome,
+                }
+                liveTools = list
               }
-              return { ...m, toolCalls: list }
-            })
+            }
+            const snapshotTools = liveTools
+            updateAssistantEntry(assistantId, (m) => ({
+              ...m,
+              toolCalls: snapshotTools.length > 0 ? snapshotTools : m.toolCalls,
+            }))
           },
           onReplyDetails: (reply, turnRef) => {
             acceptedByServer = true
@@ -1146,10 +1324,16 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
           },
           onFinished: () => {
             markUserDelivered()
+            liveTools = liveTools.map((tc) =>
+              tc.status === 'running' || tc.status === 'awaiting_result' || tc.status === 'awaiting_approval'
+                ? { ...tc, status: 'completed' }
+                : tc,
+            )
+            const snapshotTools = liveTools.length > 0 ? liveTools : undefined
             updateAssistantEntry(assistantId, (m) => ({
               ...m,
               deliveryState: m.deliveryState === 'Failed' ? 'Failed' : 'Delivered',
-              toolCalls: m.toolCalls?.map((tc) =>
+              toolCalls: snapshotTools ?? m.toolCalls?.map((tc) =>
                 tc.status === 'running' || tc.status === 'awaiting_result' || tc.status === 'awaiting_approval'
                   ? { ...tc, status: 'completed' }
                   : tc,
@@ -1267,6 +1451,75 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   )
   const displayItems = groupTranscriptEntries(visibleEntries)
 
+  // Bounded auto-hydration for `Tools: full` (latest 8 visible cards) plus
+  // immediate hydration for explicitly user-opened cards once `executionId` attaches.
+  const explicitExpandedExecIds: string[] = []
+  const fullModeVisibleExecIds: string[] = []
+  if (blockPrefs.tools !== 'hidden') {
+    const collectHydrationTarget = (
+      tb: ChatToolBlock,
+      idx: number,
+      keyPrefix: string,
+      parentOpen: boolean,
+    ) => {
+      const eid = tb.executionId?.trim()
+      if (!eid || tb.result) return
+      const cardKey = `${keyPrefix}:tool:${tb.streamKey ?? idx}`
+      const explicit = expandedCardKeys[cardKey] ?? expandedCardKeys[`exec:${eid}`]
+      if (explicit === true) {
+        explicitExpandedExecIds.push(eid)
+      } else if (blockPrefs.tools === 'full' && explicit !== false && parentOpen) {
+        fullModeVisibleExecIds.push(eid)
+      }
+    }
+
+    for (const item of displayItems) {
+      if (item.kind === 'tool_group') {
+        if (item.toolBlocks.length === 1) {
+          const singleEntry = item.entries[0]!
+          collectHydrationTarget(singleEntry.blocks.toolBlocks[0]!, 0, singleEntry.msg.id, true)
+        } else {
+          const groupOpen = expandedCardKeys[item.id] ?? (blockPrefs.tools === 'full')
+          for (const entry of item.entries) {
+            entry.blocks.toolBlocks.forEach((tb, tbIdx) => {
+              collectHydrationTarget(tb, tbIdx, entry.msg.id, groupOpen)
+            })
+          }
+        }
+      } else {
+        const { msg, blocks } = item.entry
+        if (blocks.toolBlocks.length === 1) {
+          collectHydrationTarget(blocks.toolBlocks[0]!, 0, msg.id, true)
+        } else if (blocks.toolBlocks.length > 1) {
+          const turnGroupKey = `turn-tools:${msg.id}`
+          const hasInFlight = blocks.toolBlocks.some(
+            (tb) => tb.status === 'running' || tb.status === 'awaiting_result' || tb.status === 'awaiting_approval',
+          )
+          if (hasInFlight) autoOpenedGroupsRef.current.add(turnGroupKey)
+          const groupOpen =
+            expandedCardKeys[turnGroupKey]
+            ?? (blockPrefs.tools === 'full' || autoOpenedGroupsRef.current.has(turnGroupKey))
+          blocks.toolBlocks.forEach((tb, tbIdx) => {
+            collectHydrationTarget(tb, tbIdx, msg.id, groupOpen)
+          })
+        }
+      }
+    }
+  }
+  const boundedFullExecIds = fullModeVisibleExecIds.slice(-MAX_AUTO_HYDRATE_TOOL_RESULTS)
+  const autoHydrateTargets = Array.from(new Set([...explicitExpandedExecIds, ...boundedFullExecIds]))
+  const autoHydrateKey = autoHydrateTargets.join('\0')
+
+  useEffect(() => {
+    if (!autoHydrateKey) return
+    const targets = autoHydrateKey.split('\0').filter(Boolean)
+    for (const eid of targets) {
+      if (!toolResultCacheRef.current[eid] && !requestedExecIdsRef.current.has(eid)) {
+        void requestToolResult(eid)
+      }
+    }
+  }, [autoHydrateKey, keeper.name, blockPrefs.tools, requestToolResult])
+
   // Live autonomous / delegated / external turn status from roster + SSE preview override
   const activeTurn = keeper.active_turn
   const effectivePreview: KeeperActiveTurnPreview | null = livePreview?.preview ?? activeTurn?.preview ?? null
@@ -1294,15 +1547,136 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     || effectivePreview?.activity === 'tool_observed',
   )
 
+  const renderToolPreSection = (
+    label: string,
+    text: string,
+    preKey: string,
+    opts?: {
+      readonly cachedRes?: ToolResultState
+      readonly executionId?: string
+    },
+  ) => {
+    const cachedRes = opts?.cachedRes
+    const executionId = opts?.executionId
+    const progressText = formatToolResultProgress(cachedRes)
+    const isExpandedPre = expandedPreKeys[preKey] === true
+    const isLong = isLongToolOutput(text)
+    const showPager = Boolean(
+      executionId
+      && cachedRes?.status === 'loaded'
+      && !cachedRes.eof
+      && !cachedRes.isBinary,
+    )
+    return html`
+      <div class="kp-block-subbar">
+        <div class="kp-pill-row">
+          <span class="kp-block-sublabel">
+            ${label}${cachedRes?.status === 'loaded' && cachedRes.eof === false ? ' · 일부 표시' : ''}
+          </span>
+          ${progressText && html`
+            <span class="kp-pill" data-tone=${cachedRes?.eof === false ? 'warn' : 'default'}>
+              ${progressText}
+            </span>
+          `}
+          ${cachedRes?.status === 'loaded' && cachedRes.isBinary && html`
+            <span class="kp-pill">바이너리 · ${formatByteSize(cachedRes.totalBytes ?? cachedRes.recordedBytes ?? 0)}</span>
+          `}
+        </div>
+        <div class="kp-block-subactions">
+          <button
+            type="button"
+            class="btn-ghost kp-toggle-btn"
+            onClick=${() => void handleCopyPre(preKey, text)}
+          >
+            ${copiedPreKey === preKey ? '복사됨' : '복사'}
+          </button>
+          ${isLong && html`
+            <button
+              type="button"
+              class="btn-ghost kp-toggle-btn"
+              onClick=${() => setExpandedPreKeys((prev) => ({ ...prev, [preKey]: !prev[preKey] }))}
+            >
+              ${isExpandedPre ? '축소' : '전체 높이'}
+            </button>
+          `}
+        </div>
+      </div>
+      <pre class=${isExpandedPre ? 'kp-block-pre kp-block-pre--expanded' : 'kp-block-pre'}>${text}</pre>
+      ${showPager && html`
+        <div class="kp-tool-result-pager" data-testid="tool-result-pager">
+          <span class="kp-pill" data-tone="warn">
+            ${cachedRes?.loadingMore
+              ? `불러오는 중… (${progressText ?? ''})`
+              : progressText ?? '일부 표시'}
+          </span>
+          <div class="kp-block-subactions">
+            <button
+              type="button"
+              class="btn-ghost kp-toggle-btn"
+              disabled=${cachedRes?.loadingMore === true}
+              onClick=${() => void loadMoreToolResult(executionId!, 1)}
+            >
+              더 불러오기 (+16KB)
+            </button>
+            <button
+              type="button"
+              class="btn-ghost kp-toggle-btn"
+              disabled=${cachedRes?.loadingMore === true}
+              onClick=${() => void loadMoreToolResult(executionId!, TOOL_RESULT_MAX_PAGES_PER_BURST)}
+            >
+              끝까지 불러오기
+            </button>
+          </div>
+        </div>
+      `}
+      ${executionId && cachedRes?.status === 'loaded' && cachedRes.loadMoreError && html`
+        <div class="kp-tool-result-error" role="status" data-testid="tool-result-load-more-error">
+          <span>${cachedRes.loadMoreError}</span>
+          <div class="kp-block-subactions">
+            ${cachedRes.loadMoreConflict
+              ? html`
+                  <button
+                    type="button"
+                    class="btn-ghost kp-toggle-btn"
+                    onClick=${() => void requestToolResult(executionId, true)}
+                  >
+                    처음부터 다시 불러오기
+                  </button>
+                `
+              : html`
+                  <button
+                    type="button"
+                    class="btn-ghost kp-toggle-btn"
+                    onClick=${() => void loadMoreToolResult(executionId, 1)}
+                  >
+                    다시 시도
+                  </button>
+                  <button
+                    type="button"
+                    class="btn-ghost kp-toggle-btn"
+                    onClick=${() => void requestToolResult(executionId, true)}
+                  >
+                    처음부터 다시 불러오기
+                  </button>
+                `}
+          </div>
+        </div>
+      `}
+    `
+  }
+
   const renderToolResultStatus = (
     tb: ChatToolBlock,
-    cachedRes: ToolResultCacheEntry | undefined,
+    cachedRes: ToolResultState | undefined,
     displayArgs: string | undefined,
     displayResult: string | undefined,
     effectiveStatus: string | undefined,
     loadingLabel: string,
     hasInlineSummary: boolean,
   ) => html`
+    ${!displayResult && cachedRes?.status === 'loaded' && html`
+      <div class="kp-block-status">(빈 출력 · 0 B)</div>
+    `}
     ${!displayResult && cachedRes?.status === 'loading' && html`
       <div class="kp-block-status">${loadingLabel}</div>
     `}
@@ -1334,7 +1708,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
             class="btn-ghost kp-toggle-btn"
             onClick=${() => void requestToolResult(tb.executionId!, true)}
           >
-            다시 시도
+            ${cachedRes.sourceChanged ? '처음부터 다시 불러오기' : '다시 시도'}
           </button>
         `}
       </div>
@@ -1344,7 +1718,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
         <button
           type="button"
           class="btn-ghost kp-toggle-btn"
-          onClick=${() => void requestToolResult(tb.executionId!)}
+          onClick=${() => void requestToolResult(tb.executionId!, true)}
         >
           실행 결과 불러오기
         </button>
@@ -1370,7 +1744,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     const displayResult = tb.result
       ? prettyFormatPayload(tb.result)
       : cachedRes?.status === 'loaded'
-        ? cachedRes.content
+        ? cachedRes.displayContent
         : undefined
     const effectiveStatus =
       cachedRes?.status === 'loaded' && cachedRes.isError ? 'error' : tb.status
@@ -1380,18 +1754,27 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       args: displayArgs ?? tb.args,
       result: displayResult ?? tb.result,
     })
-    const stableCardKey = `${tb.streamKey ?? tb.id ?? tb.executionId ?? `${keyPrefix}:${tb.name}-${idx}`}:${blockPrefs.tools}`
+    const cardKey = `${keyPrefix}:tool:${tb.streamKey ?? idx}`
+    const isExpanded =
+      expandedCardKeys[cardKey]
+      ?? (tb.executionId ? expandedCardKeys[`exec:${tb.executionId}`] : undefined)
+      ?? (blockPrefs.tools === 'full')
+    renderedOpenRef.current.set(cardKey, isExpanded)
 
     const handleToggle = (e: Event) => {
       const el = e.currentTarget as HTMLDetailsElement
+      // Ignore programmatic `open` attribute sync events (sync in happy-dom / async in browsers)
+      // so switching `Tools: summary -> full` never triggers an unbounded fetch storm.
+      if (el.open === renderedOpenRef.current.get(cardKey)) return
+      renderedOpenRef.current.set(cardKey, el.open)
+      setCardExpanded(cardKey, el.open, tb.executionId)
       if (
         el.open
         && tb.executionId
         && !displayResult
         && (!cachedRes || cachedRes.status === 'pending' || cachedRes.status === 'error')
       ) {
-        const force = cachedRes?.status === 'pending' || cachedRes?.status === 'error'
-        void requestToolResult(tb.executionId, force)
+        void requestToolResult(tb.executionId, true)
       }
     }
 
@@ -1409,23 +1792,30 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
             ? ` → @${delegateInfo.targetKeeper}`
             : ''
       const delStatus = delegateInfo.delegateState ?? tb.progressLabel ?? statusMeta.label
-      const preview = summarizeCompact(
+      const rawDelegatePreview =
         delegateInfo.prompt
-          ?? (delegateInfo.operationCount > 1 ? `대상 ${delegateInfo.operationCount}건` : null)
-          ?? delegateInfo.operationId
-          ?? delStatus,
+        ?? (delegateInfo.operationCount > 1 ? `대상 ${delegateInfo.operationCount}건` : null)
+        ?? delegateInfo.operationId
+        ?? delStatus
+      const preview = summarizeCompact(
+        typeof rawDelegatePreview === 'string' && rawDelegatePreview.length > 512
+          ? rawDelegatePreview.slice(0, 512)
+          : rawDelegatePreview,
         90,
       )
       const hasInlineSummary = Boolean(delegateInfo.prompt || delegateInfo.operationId || delegateInfo.operationCount > 0)
+      const rawKey = `${cardKey}:raw`
+      const isRawExpanded = expandedCardKeys[rawKey] === true
+      renderedOpenRef.current.set(rawKey, isRawExpanded)
       return html`
         <div
-          key=${stableCardKey}
+          key=${cardKey}
           class="kp-collapsible-shell kp-block-card kp-block-card--delegate"
           data-testid="chat-delegate-card"
         >
           <details
             class="kp-collapsible-details"
-            open=${blockPrefs.tools === 'full' ? true : undefined}
+            open=${isExpanded}
             onToggle=${handleToggle}
           >
             <summary class="kp-block-summary">
@@ -1457,19 +1847,24 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                 `}
               </div>
               ${(displayArgs || displayResult) && html`
-                <details class="kp-sub-details">
+                <details
+                  key=${rawKey}
+                  class="kp-sub-details"
+                  open=${isRawExpanded}
+                  onToggle=${(e: Event) => {
+                    const nextOpen = (e.currentTarget as HTMLDetailsElement).open
+                    if (nextOpen === renderedOpenRef.current.get(rawKey)) return
+                    renderedOpenRef.current.set(rawKey, nextOpen)
+                    setCardExpanded(rawKey, nextOpen)
+                  }}
+                >
                   <summary class="kp-sub-summary">원본 입출력 (JSON)</summary>
                   <div class="kp-block-content">
-                    ${displayArgs && html`
-                      <div class="kp-block-sublabel">입력 (Args)</div>
-                      <pre class="kp-block-pre">${displayArgs}</pre>
-                    `}
-                    ${displayResult && html`
-                      <div class="kp-block-sublabel">
-                        결과 (Result)${cachedRes?.truncated ? ' · 일부 표시' : ''}
-                      </div>
-                      <pre class="kp-block-pre">${displayResult}</pre>
-                    `}
+                    ${displayArgs && renderToolPreSection('입력 (Args)', displayArgs, `${cardKey}:args`)}
+                    ${displayResult && renderToolPreSection('결과 (Result)', displayResult, `${cardKey}:result`, {
+                      cachedRes,
+                      executionId: tb.executionId,
+                    })}
                   </div>
                 </details>
               `}
@@ -1503,16 +1898,19 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       `
     }
 
+    const rawPreviewSource = displayArgs ?? displayResult ?? tb.progressLabel ?? statusMeta.label
     const previewText = summarizeCompact(
-      displayArgs ?? displayResult ?? tb.progressLabel ?? statusMeta.label,
+      typeof rawPreviewSource === 'string' && rawPreviewSource.length > 512
+        ? rawPreviewSource.slice(0, 512)
+        : rawPreviewSource,
       90,
     )
     return html`
       <details
-        key=${stableCardKey}
+        key=${cardKey}
         class="kp-block-card kp-block-card--tool"
         data-testid="chat-tool-card"
-        open=${blockPrefs.tools === 'full' ? true : undefined}
+        open=${isExpanded}
         onToggle=${handleToggle}
       >
         <summary class="kp-block-summary">
@@ -1523,16 +1921,11 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
           <span class="kp-block-preview">${previewText}</span>
         </summary>
         <div class="kp-block-content">
-          ${displayArgs && html`
-            <div class="kp-block-sublabel">입력 (Args)</div>
-            <pre class="kp-block-pre">${displayArgs}</pre>
-          `}
-          ${displayResult && html`
-            <div class="kp-block-sublabel">
-              결과 (Result)${cachedRes?.truncated ? ' · 일부 표시' : ''}
-            </div>
-            <pre class="kp-block-pre">${displayResult}</pre>
-          `}
+          ${displayArgs && renderToolPreSection('입력 (Args)', displayArgs, `${cardKey}:args`)}
+          ${displayResult && renderToolPreSection('결과 (Result)', displayResult, `${cardKey}:result`, {
+            cachedRes,
+            executionId: tb.executionId,
+          })}
           ${renderToolResultStatus(
             tb,
             cachedRes,
@@ -1666,28 +2059,39 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                 : displayItems.map((item) => {
                     if (item.kind === 'tool_group') {
                       if (item.toolBlocks.length === 1) {
+                        const singleEntry = item.entries[0]!
                         return html`
                           <div key=${item.id} class="kp-activity-single" data-testid="chat-tool-single">
-                            ${renderToolCard(item.toolBlocks[0]!, 0, item.id)}
+                            ${renderToolCard(singleEntry.blocks.toolBlocks[0]!, 0, singleEntry.msg.id)}
                           </div>
                         `
                       }
+                      const isGroupExpanded = expandedCardKeys[item.id] ?? (blockPrefs.tools === 'full')
+                      renderedOpenRef.current.set(item.id, isGroupExpanded)
                       return html`
                         <div
-                          key=${`${item.id}:${blockPrefs.tools}`}
+                          key=${item.id}
                           class="kp-collapsible-shell kp-activity-group"
                           data-testid="chat-tool-group"
                         >
                           <details
                             class="kp-collapsible-details"
-                            open=${blockPrefs.tools === 'full' ? true : undefined}
+                            open=${isGroupExpanded}
+                            onToggle=${(e: Event) => {
+                              const nextOpen = (e.currentTarget as HTMLDetailsElement).open
+                              if (nextOpen === renderedOpenRef.current.get(item.id)) return
+                              renderedOpenRef.current.set(item.id, nextOpen)
+                              setCardExpanded(item.id, nextOpen)
+                            }}
                           >
                             <summary class="kp-activity-group-summary">
                               <span class="kp-pill" data-tone="info">도구 활동 · ${item.toolBlocks.length}건</span>
                               <span class="kp-block-preview">${item.toolSummary}</span>
                             </summary>
                             <div class="kp-hierarchy-rail">
-                              ${item.toolBlocks.map((tb, idx) => renderToolCard(tb, idx, item.id))}
+                              ${item.entries.flatMap((entry) =>
+                                entry.blocks.toolBlocks.map((tb, tbIdx) => renderToolCard(tb, tbIdx, entry.msg.id)),
+                              )}
                             </div>
                           </details>
                           ${item.delegateTargets.length > 0 && props.onSelectKeeper && html`
@@ -1719,6 +2123,15 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                     const hasInFlightTool = blocks.toolBlocks.some(
                       (tb) => tb.status === 'running' || tb.status === 'awaiting_result' || tb.status === 'awaiting_approval',
                     )
+                    const thinkingKey = `${msg.id}:thinking`
+                    const isThinkingOpen = expandedThinkingKeys[thinkingKey] ?? (blockPrefs.thinking === 'expanded')
+                    renderedOpenRef.current.set(thinkingKey, isThinkingOpen)
+                    const turnGroupKey = `turn-tools:${msg.id}`
+                    if (hasInFlightTool) autoOpenedGroupsRef.current.add(turnGroupKey)
+                    const isTurnGroupOpen =
+                      expandedCardKeys[turnGroupKey]
+                      ?? (blockPrefs.tools === 'full' || autoOpenedGroupsRef.current.has(turnGroupKey))
+                    renderedOpenRef.current.set(turnGroupKey, isTurnGroupOpen)
 
                     return html`
                       <article key=${msg.id} class="kp-msg" data-role=${msg.role}>
@@ -1757,10 +2170,18 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                           <div class="kp-turn-trace" data-testid="chat-turn-trace">
                             ${showThinking && html`
                               <details
-                                key=${`think:${blockPrefs.thinking}`}
+                                key=${thinkingKey}
                                 class="kp-block-card kp-msg-thinking"
                                 data-testid="chat-thinking-card"
-                                open=${blockPrefs.thinking === 'expanded' ? true : undefined}
+                                open=${isThinkingOpen}
+                                onToggle=${(e: Event) => {
+                                  const nextOpen = (e.currentTarget as HTMLDetailsElement).open
+                                  if (nextOpen === renderedOpenRef.current.get(thinkingKey)) return
+                                  renderedOpenRef.current.set(thinkingKey, nextOpen)
+                                  setExpandedThinkingKeys((prev) =>
+                                    prev[thinkingKey] === nextOpen ? prev : { ...prev, [thinkingKey]: nextOpen },
+                                  )
+                                }}
                               >
                                 <summary class="kp-block-summary">
                                   <span>추론 (Thinking)</span>
@@ -1778,15 +2199,15 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                                 `
                               : html`
                                   <details
-                                    key=${`turn-tools:${msg.id}:${blockPrefs.tools}`}
+                                    key=${turnGroupKey}
                                     class="kp-tool-subgroup"
                                     data-testid="chat-turn-tool-group"
-                                    open=${blockPrefs.tools === 'full' ? true : undefined}
-                                    ref=${(el: HTMLDetailsElement | null) => {
-                                      if (el && hasInFlightTool && !el.dataset.autoOpened) {
-                                        el.dataset.autoOpened = '1'
-                                        el.open = true
-                                      }
+                                    open=${isTurnGroupOpen}
+                                    onToggle=${(e: Event) => {
+                                      const nextOpen = (e.currentTarget as HTMLDetailsElement).open
+                                      if (nextOpen === renderedOpenRef.current.get(turnGroupKey)) return
+                                      renderedOpenRef.current.set(turnGroupKey, nextOpen)
+                                      setCardExpanded(turnGroupKey, nextOpen)
                                     }}
                                   >
                                     <summary class="kp-block-summary">
@@ -1805,7 +2226,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                                 `)}
 
                             ${showMemory && html`
-                              <details class="kp-block-card kp-block-card--memory" data-testid="chat-memory-card">
+                              <details key=${`${msg.id}:memory`} class="kp-block-card kp-block-card--memory" data-testid="chat-memory-card">
                                 <summary class="kp-block-summary">
                                   <span class="kp-pill" data-tone="brass">메모리 회상 (${blocks.memoryItems.length})</span>
                                   <span class="kp-block-preview">${summarizeCompact(blocks.memoryItems[0], 90)}</span>
@@ -1817,7 +2238,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                             `}
 
                             ${showAutonomous && html`
-                              <details class="kp-block-card kp-block-card--auto" data-testid="chat-autonomous-card">
+                              <details key=${`${msg.id}:autonomous`} class="kp-block-card kp-block-card--auto" data-testid="chat-autonomous-card">
                                 <summary class="kp-block-summary">
                                   <span class="kp-pill" data-tone="warn">자율 턴 (Autonomous)</span>
                                   <span class="kp-block-preview">${blocks.autonomousSummary}</span>

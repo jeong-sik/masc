@@ -14,6 +14,7 @@ import type uPlot from 'uplot'
 import { activeWorkspaceId } from '../../core/auth'
 import { UPlotChart, type UPlotSeriesSpec } from '../../components/primitives/uplot-chart'
 import { TargetLockedAction } from '../../components/primitives/target-locked-action'
+import { KeeperToolCallInspector } from './keeper-tool-call-inspector'
 import {
   fetchConfigSchemaApi,
   postConfigPatchApi,
@@ -476,6 +477,13 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
                       subtitle: `${keeperName} · ${Math.round(tc.duration_ms)}ms`,
                       kind: 'tool_call',
                       data: tc,
+                      render: () => html`
+                        <${KeeperToolCallInspector}
+                          key=${`${keeperName}:${tc.execution_id ?? `${tc.ts}-${tc.tool}`}`}
+                          keeperName=${keeperName}
+                          entry=${tc}
+                        />
+                      `,
                     })}
                   >
                     <div class="kp-card-head">

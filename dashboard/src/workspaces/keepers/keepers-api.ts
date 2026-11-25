@@ -1012,16 +1012,28 @@ export function parseKeeperLiveObserverEvent(
   return null
 }
 
+export interface FetchKeeperToolResultOptions {
+  readonly offset?: number
+  readonly sourceId?: string
+}
+
 export function fetchKeeperToolResultApi(
   keeper: string,
   executionId: string,
   maxBytes = 16_384,
   signal?: AbortSignal,
+  opts?: FetchKeeperToolResultOptions,
 ): Promise<Result<KeeperToolResultResponse, ApiError>> {
   const params = new URLSearchParams({
     execution_id: executionId,
     max_bytes: String(maxBytes),
   })
+  if (opts?.offset !== undefined && Number.isFinite(opts.offset) && opts.offset >= 0) {
+    params.set('offset', String(Math.trunc(opts.offset)))
+  }
+  if (opts?.sourceId && opts.sourceId.trim().length > 0) {
+    params.set('source_id', opts.sourceId.trim())
+  }
   return apiGet<KeeperToolResultResponse>(
     `/api/v1/keepers/${encodeURIComponent(keeper)}/tool-result?${params.toString()}`,
     {
@@ -1052,6 +1064,11 @@ export function fetchKeeperToolResultApi(
           const rawContent = typeof body.page.content === 'string' ? body.page.content : ''
           const encoding = asStr(body.page.encoding) ?? 'utf-8'
           const recordedBytes = asNum(body.recorded_bytes) ?? rawContent.length
+          const offset = asNum(body.page.offset) ?? 0
+          const totalBytes = asNum(body.page.total_bytes) ?? recordedBytes
+          const nextOffset = asNum(body.page.next_offset) ?? (offset + rawContent.length)
+          const sourceId = asStr(body.source_id) ?? undefined
+          const bodySha256 = asStr(body.body_sha256) ?? asStr(body.page.sha256) ?? undefined
           const content =
             encoding === 'base64'
               ? `[binary/base64 · ${recordedBytes.toLocaleString('en-US')}B]`
@@ -1059,10 +1076,15 @@ export function fetchKeeperToolResultApi(
           return {
             state: 'page',
             executionId: execId,
+            sourceId,
+            bodySha256,
+            offset,
+            nextOffset,
+            encoding,
             content,
             isError: body.is_error === true,
             recordedBytes,
-            totalBytes: asNum(body.page.total_bytes) ?? rawContent.length,
+            totalBytes,
             eof: body.page.eof !== false,
           }
         }
@@ -1965,6 +1987,7 @@ export function fetchKeeperToolCallsApi(keeper: string, limit = 50): Promise<Res
             task_id: asStr(item.task_id) ?? undefined,
             model: asStr(item.model) ?? undefined,
             result_bytes: asNum(item.result_bytes) ?? undefined,
+            truncated_to: asNum(item.truncated_to) ?? undefined,
             input: item.input,
             output: item.output,
           })

@@ -11,6 +11,7 @@ import type { WorkspaceInspectPayload } from '../types'
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
 import { DataTable, type DataTableColumn } from '../../components/primitives/data-table'
+import { KeeperToolCallInspector } from './keeper-tool-call-inspector'
 import {
   fetchKeeperLinkedTasksApi,
   fetchKeeperOperatorNoteApi,
@@ -261,6 +262,13 @@ export function KeeperWorkSandboxTab(props: KeeperWorkSandboxTabProps) {
             subtitle: `${keeperName} · ${Math.round(row.duration_ms)}ms`,
             kind: 'tool_call',
             data: row,
+            render: () => html`
+              <${KeeperToolCallInspector}
+                key=${`${keeperName}:${row.execution_id ?? `${row.ts}-${row.tool}`}`}
+                keeperName=${keeperName}
+                entry=${row}
+              />
+            `,
           })}
           maxHeight=${320}
           virtualizeThreshold=${30}

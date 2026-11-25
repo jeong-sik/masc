@@ -340,6 +340,10 @@
   flex: 1 1 auto;
 }
 
+.pulse-keeper-tile-left > .kb-root {
+  flex: none;
+}
+
 .pulse-keeper-tile-meta {
   display: flex;
   flex-direction: column;

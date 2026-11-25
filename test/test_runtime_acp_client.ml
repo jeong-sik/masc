@@ -502,6 +502,9 @@ for line in sys.stdin:
       (host_args ~tool_names:[] Runtime_native_tools.Native_read))
 ;;
 
+(* The name the bridge of the Keeper [keeper-a] has under [driver]. *)
+let bridge_name_of driver = Runtime_acp_client.bridge_server_name driver ~owner:"keeper-a"
+
 (* Every field of the server record a host is started with is read from the
    bridge, so the tool names cannot differ from what the bridge lists. A spec
    a client could not call, one with no string [name], gives no name. *)
@@ -510,24 +513,25 @@ let test_mcp_http_server_of_bridge_reads_every_field_from_the_bridge () =
   let spec name =
     `Assoc [ "name", `String name; "description", `String "d"
            ; "inputSchema", `Assoc [ "type", `String "object" ] ] in
-  let started pinned_tool_specs =
+  let started ~keeper_name pinned_tool_specs =
     let bridge =
       Keeper_acp_runtime.For_testing.start_mcp_bridge_for_specs
-        ~driver:Runtime_acp_client.Muse_code ~sw ~env ~pinned_tool_specs in
+        ~driver:Runtime_acp_client.Muse_code ~keeper_name ~sw ~env ~pinned_tool_specs in
     bridge, Runtime_acp_client.mcp_http_server_of_bridge bridge in
   let bridge, server =
-    started [ spec "masc_status"; `Assoc [ "description", `String "no name" ]; spec "keeper_skill" ] in
+    started ~keeper_name:"keeper-a"
+      [ spec "masc_status"; `Assoc [ "description", `String "no name" ]; spec "keeper_skill" ] in
   let { Runtime_official_client_mcp_http.url; headers } =
     Runtime_official_client_mcp_http.endpoint bridge in
   check string "name" (Runtime_official_client_mcp_http.server_name bridge)
     server.Runtime_acp_client.name;
-  check string "the Keeper names a muse_code bridge masc_keeper, so the operator's masc entry cannot conflict"
-    "masc_keeper" server.Runtime_acp_client.name;
+  check string "the Keeper starts a muse_code bridge under the name made from its own name"
+    (bridge_name_of Runtime_acp_client.Muse_code) server.Runtime_acp_client.name;
   check string "url" url server.Runtime_acp_client.url;
   check (list (pair string string)) "headers" headers server.Runtime_acp_client.headers;
   check (list string) "tool names, in order, without the spec that has no name"
     [ "masc_status"; "keeper_skill" ] server.Runtime_acp_client.tool_names;
-  let _, empty = started [] in
+  let _, empty = started ~keeper_name:"keeper-b" [] in
   check (list string) "a bridge that lists no tool gives no name" []
     empty.Runtime_acp_client.tool_names;
   (* The record reaches the Muse argv: the glob for a bridge that lists tools,
@@ -538,57 +542,74 @@ let test_mcp_http_server_of_bridge_reads_every_field_from_the_bridge () =
       ~native_posture:Runtime_native_tools.Native_none ~mcp_server cfg ~temp_gemini_dir:None
     |> List.filter (String.starts_with ~prefix:"run.toolset=") in
   check (list string) "a bridge that lists tools reaches the Muse argv as the glob"
-    [ {|run.toolset=["mcp__masc_keeper__*"]|} ] (toolset server);
+    [ Printf.sprintf {|run.toolset=["mcp__%s__*"]|} server.Runtime_acp_client.name ]
+    (toolset server);
   check (list string) "a bridge that lists no tool reaches the Muse argv as an empty list"
-    [ "run.toolset=[]" ] (toolset empty)
+    [ "run.toolset=[]" ] (toolset empty);
+  check bool "each Keeper's bridge has a name of its own" true
+    (server.Runtime_acp_client.name <> empty.Runtime_acp_client.name)
 ;;
 
 (* The name is a fact of each host. Muse refuses a session server that has the
    name of one in the operator's settings, a plugin or a [.mcp.json] it loads,
-   and an entry for MASC's own server can be named [masc]; the other drivers
-   keep the name their live verification used. A host replaces every
-   character of a tool name outside [A-Za-z0-9_], and the Keeper reads the
-   server back from [mcp__<server>__<tool>] up to the first [__], so a
-   trailing [_] would make it read the server one character short. *)
+   and an operator can write any fixed name, so a Muse bridge is named from
+   its Keeper's name. The other drivers keep the name their live verification
+   used. The history of a session a Keeper resumes after its host restarted
+   names the tools the bridge served, so the expected names are pinned: the
+   first eight hex digits of the SHA-256 of the Keeper's name, computed
+   outside OCaml. A host replaces every character of a tool name outside
+   [A-Za-z0-9_], and the Keeper reads the server back from
+   [mcp__<server>__<tool>] up to the first [__], so a trailing [_] would make
+   it read the server one character short. *)
 let test_bridge_server_names () =
   let name = Runtime_acp_client.bridge_server_name in
-  check string "muse_code does not share the operator's masc entry" "masc_keeper"
-    (name Runtime_acp_client.Muse_code);
+  check string "muse_code names its bridge for the Keeper" "masc_8d902e5f"
+    (name Runtime_acp_client.Muse_code ~owner:"keeper-a");
+  check string "another Keeper has another name" "masc_407ca2ad"
+    (name Runtime_acp_client.Muse_code ~owner:"keeper-b");
   List.iter
     (fun driver ->
        check string
          (Runtime_acp_client.driver_to_string driver ^ " keeps the name it was verified with")
-         "masc" (name driver))
+         "masc" (name driver ~owner:"keeper-a"))
     [ Runtime_acp_client.Antigravity; Runtime_acp_client.Kimi_code; Runtime_acp_client.Mistral_vibe ];
   List.iter
     (fun driver ->
-       let label = Runtime_acp_client.driver_to_string driver in
-       let n = name driver in
-       let host_safe c =
-         (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c = '_'
-       in
-       check bool (label ^ " name is non-empty and host-safe") true
-         (n <> "" && String.for_all host_safe n);
-       let rec has_double i =
-         i + 1 < String.length n && ((n.[i] = '_' && n.[i + 1] = '_') || has_double (i + 1))
-       in
-       check bool (label ^ " name has no double underscore") false (has_double 0);
-       check bool (label ^ " name does not end in an underscore") false
-         (String.ends_with ~suffix:"_" n))
+       List.iter
+         (fun owner ->
+            let label =
+              Printf.sprintf "%s for %S" (Runtime_acp_client.driver_to_string driver) owner
+            in
+            let n = name driver ~owner in
+            let host_safe c =
+              (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c = '_'
+            in
+            check bool (label ^ " name is non-empty and host-safe") true
+              (n <> "" && String.for_all host_safe n);
+            let rec has_double i =
+              i + 1 < String.length n && ((n.[i] = '_' && n.[i + 1] = '_') || has_double (i + 1))
+            in
+            check bool (label ^ " name has no double underscore") false (has_double 0);
+            check bool (label ^ " name does not end in an underscore") false
+              (String.ends_with ~suffix:"_" n))
+         [ ""; "keeper-a"; "a b"; "x__y"; "한글" ])
     Runtime_acp_client.all_drivers
 ;;
 
-(* The Keeper reads the bridge's server name from the driver when it decides
-   whether a call fences a same-turn retry. For a Muse session that name is
-   [masc_keeper]: a call to the bridge's tool passes, and a tool of the same
-   name from the operator's [masc] entry belongs to another server and
-   fences. *)
+(* The stream projection decides whether a call fences a same-turn retry by
+   comparing the call's server with the name it is given: a call to the
+   bridge's tool passes, and a tool of the same name from another server,
+   such as the operator's [masc] entry, belongs to that server and fences.
+   The Keeper gives it the name of the bridge it started; no test drives that
+   wiring. *)
 let test_muse_stream_projection_uses_bridge_server_name () =
+  let bridge_name = bridge_name_of Runtime_acp_client.Muse_code in
   let fenced = ref 0 in
   let on_acp_event, _, _, _, _ =
     Keeper_acp_runtime.For_testing.project_stream_for_testing
       ~on_effect_attempted:(fun () -> incr fenced)
       ~driver:Runtime_acp_client.Muse_code
+      ~mcp_server_name:bridge_name
       ~model:"muse-ember-1.0"
       ~session_id:"sess-muse-bridge-name"
       ~turn_count:1
@@ -611,9 +632,7 @@ let test_muse_stream_projection_uses_bridge_server_name () =
                }
          })
   in
-  call
-    ~tool_call_id:"tc-bridge"
-    ~server:(Runtime_acp_client.bridge_server_name Runtime_acp_client.Muse_code);
+  call ~tool_call_id:"tc-bridge" ~server:bridge_name;
   check int "a call to the bridge's tool does not fence" 0 !fenced;
   call ~tool_call_id:"tc-operator" ~server:"masc";
   check int "the same tool name from the operator's masc entry fences" 1 !fenced
@@ -621,7 +640,7 @@ let test_muse_stream_projection_uses_bridge_server_name () =
 
 let test_muse_permission_grammar () =
   let allowed_tool_names = [ "masc_probe_ping"; "keeper_skill" ] in
-  let mcp_server_name = Runtime_acp_client.bridge_server_name Runtime_acp_client.Muse_code in
+  let mcp_server_name = bridge_name_of Runtime_acp_client.Muse_code in
   let mcp_only =
     Runtime_acp_client.Allow_masc_mcp_only { mcp_server_name; allowed_tool_names }
   in
@@ -1361,7 +1380,8 @@ let test_mcp_bridge_advertises_pinned_tools_before_turn_slot () =
       in
       let bridge =
         Keeper_acp_runtime.For_testing.start_mcp_bridge_for_specs
-          ~driver:Runtime_acp_client.Muse_code ~sw ~env ~pinned_tool_specs
+          ~driver:Runtime_acp_client.Muse_code ~keeper_name:"keeper-a" ~sw ~env
+          ~pinned_tool_specs
       in
       let names = listed_tools ~sw ~env bridge in
       check (list string) "pinned MASC tools advertised before turn_slot is bound"
@@ -1424,7 +1444,8 @@ let test_hook_selected_surface_pins_the_session_and_bridge () =
               prepared.tools in
           let fresh =
             Acp.start_mcp_bridge_for_specs
-              ~driver:Runtime_acp_client.Muse_code ~sw ~env ~pinned_tool_specs in
+              ~driver:Runtime_acp_client.Muse_code ~keeper_name:key.keeper_name ~sw ~env
+              ~pinned_tool_specs in
           Acp.Pool.install_for_keeper pool ~key ~fresh ~is_alive:(fun _ -> true) ~close:ignore in
     check (list string) "HTTP tools/list from the selected child" names (listed_tools ~sw ~env bridge);
     Some (digest, plan.turn_count)
@@ -4574,6 +4595,7 @@ let test_layer4_stream_projection_sse_framing_native_tools_and_zero_usage () =
       ~on_usage_report:(fun report -> usage_reports_rev := report :: !usage_reports_rev)
       ~on_event:(fun ev -> events_rev := ev :: !events_rev)
       ~driver:Runtime_acp_client.Antigravity
+      ~mcp_server_name:(bridge_name_of Runtime_acp_client.Antigravity)
       ~model:"gemini-4-neon-medium"
       ~session_id:"sess-stream"
       ~turn_count:1
@@ -5025,6 +5047,7 @@ for line in sys.stdin:
     Keeper_acp_runtime.For_testing.project_stream_for_testing
       ~on_effect_attempted:(fun () -> incr read_fenced)
       ~driver:Kimi_code
+      ~mcp_server_name:(bridge_name_of Runtime_acp_client.Kimi_code)
       ~model:"kimi-code/k3"
       ~session_id:"sess-read-fence"
       ~turn_count:1
@@ -5077,6 +5100,7 @@ for line in sys.stdin:
       ~on_native_action:(fun ~official_turn:_ ~identity:_ ~tool_name:_ -> incr escalated_native_actions)
       ~on_native_tool_completion:(fun ~block_index:_ ~tool_call_id:_ _ -> incr escalated_native_completions)
       ~driver:Antigravity
+      ~mcp_server_name:(bridge_name_of Runtime_acp_client.Antigravity)
       ~model:"gemini-4-neon-medium"
       ~session_id:"sess-none-fence"
       ~turn_count:1

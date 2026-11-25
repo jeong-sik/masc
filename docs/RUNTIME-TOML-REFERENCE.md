@@ -149,8 +149,8 @@ credential naming an absolute path (`oauth_source` for Antigravity); `env` and
 
   | Keeper `keeper.tools.native` | `run.toolset` | Tools the host offers |
   | --- | --- | --- |
-  | `none` | `["mcp__masc_keeper__*"]`, or `[]` when the bridge lists no tool | MASC's tools only |
-  | `read` | `["read_file","search","mcp__masc_keeper__*"]`, without the last entry when the bridge lists no tool | file read, file search, MASC's tools |
+  | `none` | `["mcp__<bridge>__*"]`, or `[]` when the bridge lists no tool | MASC's tools only |
+  | `read` | `["read_file","search","mcp__<bridge>__*"]`, without the last entry when the bridge lists no tool | file read, file search, MASC's tools |
   | `full` | not set | the host's default tools, among them shell, file writes, memory, cron, sub-agents, web fetch and web search |
 
   `read_file` is not limited to the workspace: a live session read
@@ -160,19 +160,33 @@ credential naming an absolute path (`oauth_source` for Antigravity); `env` and
   turn with `invalid run configuration: unknown tool` when a name in the list
   matches no tool. A server that lists no tool, one that `session/new` did not
   carry and one the host could not connect to all end that way, so MASC lists
-  `mcp__masc_keeper__*` only when the bridge lists a tool. The bridge is named
-  `masc_keeper`, not `masc`: the host refuses a session server that has the
-  name of one in the operator's muse settings or in a `.mcp.json` it loads for
-  the workspace (the workspace's own, or that of the repository it is in;
-  `session/new` fails with `session MCP server name conflicts with a host or
-  plugin server`, -32030; the text also names plugin servers, which were not
-  tried). An entry for MASC's own server can be named `masc`, as it is in the
-  settings and `.mcp.json` this was measured against.
+  `mcp__<bridge>__*` only when the bridge lists a tool. `<bridge>` is `masc_`
+  and the first eight hex digits of the SHA-256 of the Keeper's name (for the
+  Keeper `keeper-a`, `masc_8d902e5f`). The host refuses a session server that
+  has the name of one in the operator's muse settings, in a plugin (one
+  installed at user scope counted, approved or not) or in a `.mcp.json` it
+  loads for the workspace (the workspace's own, or that of the repository it
+  is in; `session/new` fails with `session MCP server name conflicts with a
+  host or plugin server`, -32030). An entry for MASC's own server can be named
+  `masc`, as it is in the settings and `.mcp.json` this was measured against,
+  and an operator can write any other fixed name. The host compares names as
+  written but registers a server name with `-` and `.` replaced by `_` (other
+  characters were not tried): a settings server named `masc-keeper` was
+  accepted next to a bridge with the fixed name `masc_keeper`, both registered
+  under `mcp__masc_keeper__`, and for a tool name they shared the host gave the
+  plain name to the settings server and a hash suffix to the bridge's tool,
+  which the Keeper reads as a tool name its list does not have. No entry has
+  the bridge's name by accident. The digits come from the Keeper's name, which
+  is not secret, so an entry written to match them still conflicts or shares
+  the prefix; keeping such entries out of the host is a matter of its
+  configuration (the settings, plugins and `.mcp.json` it loads), not of this
+  name. The same Keeper gets the same name every time its host starts, so
+  the history of a session the Keeper resumes names the tools the new bridge
+  serves. A session made under one name also loaded under another (echo
+  provider, 2026-11-25).
   MASC gives the host no settings of its own, so those entries stay loaded:
   under `none` and `read` the list leaves their tools out, under `full` the
-  host offers them. The glob also matches the tools of a server named
-  `masc_keeper__<x>`, and a server named `masc_keeper` in one of those places
-  still makes `session/new` fail. `args` must not contain `run.toolset`,
+  host offers them. `args` must not contain `run.toolset`,
   because the host refuses to start on a repeated key. Fusion and runtime
   verification run Muse Code at `none`. MASC's own permission policy applies only to
   requests the host forwards. With the operator's muse settings on the

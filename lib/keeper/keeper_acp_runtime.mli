@@ -205,6 +205,7 @@ module For_testing : sig
          (block_index:int -> tool_call_id:string -> execution_id:Ids.Execution_id.t -> unit)
     -> ?on_event:(Agent_core.Types.sse_event -> unit)
     -> driver:Runtime_acp_client.driver
+    -> mcp_server_name:string
     -> model:string
     -> session_id:string
     -> turn_count:int
@@ -229,6 +230,7 @@ module For_testing : sig
 
   val start_mcp_bridge_for_specs
     :  driver:Runtime_acp_client.driver
+    -> keeper_name:string
     -> sw:Eio.Switch.t
     -> env:Eio_unix.Stdenv.base
     -> pinned_tool_specs:Yojson.Safe.t list

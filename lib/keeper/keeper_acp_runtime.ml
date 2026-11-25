@@ -684,12 +684,15 @@ let run_serialized_turn
   | Eio.Mutex.Poisoned _ -> Error (acp_error_to_core_error Acp.Client_closed)
 ;;
 
-let start_mcp_bridge ~driver ~sw ~env ~pinned_tool_specs ~turn_slot ~turn_slot_mutex =
+let start_mcp_bridge ~driver ~keeper_name ~sw ~env ~pinned_tool_specs ~turn_slot ~turn_slot_mutex =
   Runtime_official_client_mcp_http.start
     ~sw
     ~net:(Eio.Stdenv.net env)
     ~secure_random:(Eio.Stdenv.secure_random env)
-    ~server_name:(Acp.bridge_server_name driver)
+    (* The bridge is named for its Keeper here, once. The policy and the
+       stream projection read the name back from the started bridge, never
+       from the driver. *)
+    ~server_name:(Acp.bridge_server_name driver ~owner:keeper_name)
     (* Pool_key pins tool_surface_sha256, so returning the pinned tool schemas
        unconditionally ensures tools/list serves the full MASC tool catalog
        during Acp.start and session/new before any turn_slot is bound. *)
@@ -789,6 +792,7 @@ let spawn_persistent_entry
              let bridge =
                start_mcp_bridge
                  ~driver:config.driver
+                 ~keeper_name:key.keeper_name
                  ~sw:keeper_sw
                  ~env
                  ~pinned_tool_specs
@@ -1021,6 +1025,7 @@ let native_observation_of_acp ~tool_call_id ~title ~name : Runtime_native_tools.
 
 let make_stream_projection
       ~driver
+      ~mcp_server_name
       ~server_isolation
       ~keeper_name
       ~raw_trace_run
@@ -1041,7 +1046,6 @@ let make_stream_projection
       ~on_event
   : stream_projection
   =
-  let mcp_server_name = Acp.bridge_server_name driver in
   let stream_mu = Stdlib.Mutex.create () in
   let message_started = ref false in
   let finished = ref false in
@@ -2566,6 +2570,7 @@ let run_without_lifecycle
       let stream =
         make_stream_projection
           ~driver:config.driver
+          ~mcp_server_name:(Runtime_official_client_mcp_http.server_name entry.bridge)
           ~server_isolation:(Acp.mcp_server_isolation entry.client)
           ~keeper_name
           ~raw_trace_run
@@ -2628,7 +2633,7 @@ let run_without_lifecycle
       in
       let permission_policy =
         Acp.permission_policy_of_posture
-          ~mcp_server_name:(Acp.bridge_server_name config.driver)
+          ~mcp_server_name:(Runtime_official_client_mcp_http.server_name entry.bridge)
           ~allowed_tool_names
           native_posture
       in
@@ -2816,6 +2821,7 @@ let run_without_lifecycle
         let bridge =
           start_mcp_bridge
             ~driver:config.driver
+            ~keeper_name
             ~sw
             ~env
             ~pinned_tool_specs
@@ -3514,6 +3520,7 @@ module For_testing = struct
         ?on_tool_execution
         ?on_event
         ~driver
+        ~mcp_server_name
         ~model
         ~session_id
         ~turn_count
@@ -3532,6 +3539,7 @@ module For_testing = struct
     let stream =
       make_stream_projection
         ~driver
+        ~mcp_server_name
         ~server_isolation
         ~keeper_name:"test-keeper"
         ~raw_trace_run:None
@@ -3560,10 +3568,10 @@ module For_testing = struct
 
   let reconcile_prepared_tools = reconcile_prepared_tools
 
-  let start_mcp_bridge_for_specs ~driver ~sw ~env ~pinned_tool_specs =
+  let start_mcp_bridge_for_specs ~driver ~keeper_name ~sw ~env ~pinned_tool_specs =
     let turn_slot = ref None in
     let turn_slot_mutex = Stdlib.Mutex.create () in
-    start_mcp_bridge ~driver ~sw ~env ~pinned_tool_specs ~turn_slot ~turn_slot_mutex
+    start_mcp_bridge ~driver ~keeper_name ~sw ~env ~pinned_tool_specs ~turn_slot ~turn_slot_mutex
   ;;
 
   type pool_key = Pool_key.t =

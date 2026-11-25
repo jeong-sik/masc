@@ -1,45 +1,71 @@
-# Release freeze and candidate repair
+# Release candidate scope freeze (not a `main` merge freeze)
 
-Release preparation has a finite scope. Freeze a version's source and included
-changes before complete candidate verification; keep developing the next version on main.
+MASC uses trunk-based development: **`main` stays continuously open for reviewed
+merges.** Release preparation freezes a **candidate snapshot** (its version, SHA,
+and included range) for complete verification — it never freezes `main`.
 
-## Freeze
+## Trunk-based contract: milestone cut, never freeze `main`
 
-The release owner records the version, release branch, initial frozen SHA,
-included changes and known blockers in the release PR. Select one candidate
-SHA for verification. Main advancing is not a reason to change this candidate.
-Do not merge or rebase main, bulk-update dependencies, add features, refactor
-unrelated code, or import unrelated test cleanup into a frozen release.
+- **Never freeze `main` for release prep, RC verification, or publish waiting.**
+  Commits landing on `main` after a cut (`ahead_by > 0`) are normal next-version
+  work, not release drift. Do not chase `ahead == gap` equality checks, regenerate
+  notes to chase moving `main`, or re-freeze `main` while waiting for approval.
+- **Control version scope with milestones and cut timing.** When a specific feature
+  or fix must ship in `vX.Y.0`, wait to cut until those milestone PRs land on
+  `main`. Keep incomplete multi-PR work behind opt-in configuration or feature
+  flags so `main` stays shippable.
+- **Authoritative release-note scope.** Release notes describe the exact range
+  from the previous version tag through the selected candidate SHA (`vPREV...vNEXT`).
+  A tag commit does not need to match `main` tip; `scripts/ci/prepare-release-publication.py`
+  only requires `behind_by == 0` (the tagged commit is an ancestor of `origin/main`).
+- **`MASC_RELEASE_FREEZE` is an operator-explicit emergency brake, not a release step.**
+  Keepers and release leaders must not enable `MASC_RELEASE_FREEZE=1` for routine
+  release cuts or publication waits. Only an explicit operator incident decision
+  may set it (recording incident cause, scope, and lift condition), and it gates
+  the automated submissions in `approval-auto-merge` and `approval-merge-sweep`.
+  The worker also handles requests recorded by `approval-merge-request`. Manual
+  merges remain subject to the repository's usual branch protection rules.
 
-The release PR and its candidate ledger own the selected SHA, admitted repairs,
-run and result. Read that record before preparing a repair or assessing evidence;
-this runbook does not carry a second current-candidate identity.
-An initial freeze, a replacement candidate and a successful verification are
-separate entries; none is inferred from the others.
+## Freeze the candidate snapshot
 
-During the v0.49.0 preparation, the operator explicitly stopped main inflow.
-Historical candidate `1123d7bebf45983f6222caeb171896e8469335a6` and RC
-[37136996120](https://github.com/jeong-sik/masc/actions/runs/37136996120) identify
-that earlier selected scope, not the published candidate or a successful result.
-[v0.49.0](https://github.com/jeong-sik/masc/releases/tag/v0.49.0) has since been
-published. Keep each candidate and its evidence separate; this policy change
-belongs to its own main-targeted PR and does not alter published release assets.
+The release owner records the version, RC ref (`release/vX.Y.Z-rcN`), initial
+candidate SHA, included range, and known blockers in the release ledger/PR.
+Select one `main`-ancestor candidate SHA for verification. **Main advancing is
+not a reason to change this candidate or halt other PRs.**
 
-## Admit only release blockers
+The release ledger owns the selected SHA, admitted repairs, run, and result.
+Read that record before preparing a repair or assessing evidence; this runbook
+does not carry a second current-candidate identity. An initial cut, a
+replacement candidate, and a successful verification are separate entries; none
+is inferred from the others.
 
-A repair must identify a failing candidate scenario, build/type/installation
+Historical note: during v0.49.0 preparation, the operator once explicitly
+stopped `main` inflow (`1123d7bebf45983f6222caeb171896e8469335a6`, RC
+[37136996120](https://github.com/jeong-sik/masc/actions/runs/37136996120));
+that was a one-off operator decision, not the standing release workflow.
+
+## Repair blockers and roll forward cleanly (`0.x` policy)
+
+A blocker repair must identify a failing candidate scenario, build/type/installation
 failure, security defect, or publication defect and explain why it prevents
 this version from shipping. Include the exact failing SHA/run or reproduction,
-the smallest repair and its verification target in the PR. A stale fixture may
+the smallest repair, and its verification target in the PR. A stale fixture may
 be corrected only against the intended product contract; preserve its useful
 behavior assertions. Do not weaken an assertion, skip a failing suite, or raise
 a timeout simply to obtain green CI.
 
-Develop the repair from the release branch or selectively backport a reviewed
-fix with `git cherry-pick -x <commit>`. Review prerequisites individually; a
-dependency on new main features is not permission to merge main wholesale.
-Track unrelated findings as issues for the next version. Carry release-only
-fixes forward to main separately so they are not lost after publication.
+Under the current `0.x` roll-forward policy (matching `check_tag_ancestor`'s
+`behind_by == 0` invariant below):
+1. Land the reviewed blocker fix on `main` first (trunk-first).
+2. Cut a replacement candidate from `main` (creating the new version/changelog
+   cut commit on `main` if needed), record old SHA, new SHA, included delta
+   (including any already-reviewed commits that landed on `main` in between),
+   reason, and old run outcome, and run full RC verification on the new SHA.
+3. Do not cherry-pick onto an unmerged side branch to tag directly — tags must
+   name a `main` ancestor. Track non-blocking findings for the next version.
+   (If a future long-lived maintenance line requires isolated release branches
+   with selective `git cherry-pick -x` backports, extend `check_tag_ancestor`
+   and this guide deliberately in a dedicated PR.)
 
 ## Replace a candidate deliberately
 
@@ -88,10 +114,8 @@ additionally requires every quantitative gate in
 [Production readiness](../PRODUCTION-READINESS-GATES.md). Release tags and published assets identify that verified commit;
 publish its existing RC assets with `rc_run_id`, without a fresh rebuild.
 
-Integration back into main is a separate obligation. Moving main does not
-require recutting the release. If a required merge creates or rebases to a new
-commit that will be tagged, that commit becomes the candidate and requires full
-verification; do not substitute old-head evidence or weaken merge safeguards.
+Moving `main` does not require recutting the release. A replacement candidate
+requires full RC verification at its own SHA before publication.
 Published versions/tags/assets are not replaced to repair a release: issue a
 patch version. A failed unpublished candidate keeps the same version available.
 Public artifact publication and production deployment have separate evidence.

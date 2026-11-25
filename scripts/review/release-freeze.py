@@ -1,12 +1,16 @@
-"""The release freeze flag: one repository variable, one reader, two users.
+"""Emergency auto-merge brake flag: one repository variable, one reader, two users.
+
+MASC follows trunk-based development and does NOT freeze `main` for routine
+release cuts, RC verification, or publish waiting (see docs/guides/RELEASE-FREEZE.md).
+This flag is strictly an operator-explicit emergency brake that holds automated
+submissions in the wired worker and sweep workflows (not `main` itself).
 
 The merge worker and the sweep must agree on the flag's name and its
 precedence, so both load this module with `sibling(...)` instead of keeping
-private copies (#54644 review). The release leader sets
-`gh variable set MASC_RELEASE_FREEZE --body 1` while a freeze is on and sets
-it back to '0' once publishing is over. Only the value '1' freezes: a
-missing variable, an empty value, or anything else leaves the ordinary
-behavior untouched.
+private copies (#54644 review). On an explicit operator incident brake, set
+`gh variable set MASC_RELEASE_FREEZE --body 1` and return it to '0' once the
+incident clears. Only the value '1' holds wired submissions: a missing variable,
+an empty value, or anything else leaves the ordinary behavior untouched.
 """
 from __future__ import annotations
 

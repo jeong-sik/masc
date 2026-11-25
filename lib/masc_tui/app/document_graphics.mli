@@ -1,4 +1,4 @@
-(** Prepares visible Markdown diagrams offline and owns one Kitty placement.
+(** Prepares visible Markdown diagrams and embedded PNG images offline.
     The cells containing the diagram remain the text fallback until its raster
     has arrived. *)
 
@@ -14,14 +14,12 @@ val prepare :
   base_path:string ->
   on_ready:(unit -> unit) ->
   probe:Masc_tui_term.Probe.observation ->
-  term_program:string option ->
-  in_tmux:bool ->
   theme:Masc_tui_core.Theme.t ->
   Masc_tui_term.Cell_grid.t ->
-  placement option
+  placement list
 
 val mask_fallback : Masc_tui_term.Cell_grid.t -> style:Masc_tui_term.Style.t -> placement -> unit
 val cancel_pending : t -> unit
-val clear : t -> in_tmux:bool -> string * bool
-val before_present : t -> in_tmux:bool -> placement option -> string * bool
-val after_present : t -> in_tmux:bool -> full_repaint:bool -> placement option -> string
+val clear : t -> in_tmux:bool -> string
+val before_present : t -> in_tmux:bool -> placement list -> string
+val after_present : t -> in_tmux:bool -> full_repaint:bool -> placement list -> string

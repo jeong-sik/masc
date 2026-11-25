@@ -68,7 +68,9 @@ module Hit_map = struct
   let entries map = List.rev map
 end
 
-type document_image = Mermaid of string
+type document_image =
+  | Mermaid of string
+  | Embedded_png of Graphics.embedded_png
 
 type document_image_rows = {
   source : document_image;

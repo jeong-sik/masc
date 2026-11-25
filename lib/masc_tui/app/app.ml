@@ -1026,7 +1026,7 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
         let document_graphics = Document_graphics.create () in
         let clear_document_graphic () =
           Document_graphics.cancel_pending document_graphics;
-          let bytes, _ = Document_graphics.clear document_graphics ~in_tmux in
+          let bytes = Document_graphics.clear document_graphics ~in_tmux in
           if not (String.equal bytes "") then begin
             Terminal_out.write bytes;
             Terminal_out.flush ()
@@ -1461,13 +1461,13 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                       Document_graphics.prepare document_graphics ~sw
                         ~base_path:cli.base_path
                         ~on_ready:(fun () -> Wake_bell.ring bell Wake_bell.Ui_bus)
-                        ~probe:probe_obs ~term_program ~in_tmux ~theme grid
+                        ~probe:probe_obs ~theme grid
                     in
-                    Option.iter
+                    List.iter
                       (Document_graphics.mask_fallback grid
                          ~style:(Typography.primary ~bg:(Color.of_rgb theme.surface_0) theme))
                       desired_document;
-                    let document_pre, invalidate_for_document =
+                    let document_pre =
                       Document_graphics.before_present document_graphics
                         ~in_tmux desired_document
                     in
@@ -1477,9 +1477,6 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                     in
                     active_memory_graphic := remaining_graphic;
                     let pre_bytes = pre_bytes ^ document_pre in
-                    let invalidate_for_graphic =
-                      invalidate_for_graphic || invalidate_for_document
-                    in
                     if not (String.equal pre_bytes "") then begin
                       Terminal_out.write pre_bytes;
                       Terminal_out.flush ()

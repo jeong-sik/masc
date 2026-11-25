@@ -5,6 +5,7 @@ module Attr = Masc_tui_term.Attr
 module Color = Masc_tui_term.Color
 module Style = Masc_tui_term.Style
 module Grapheme = Masc_tui_term.Grapheme
+module Graphics = Masc_tui_term.Graphics
 module Cell_grid = Masc_tui_term.Cell_grid
 
 type styled_span = {
@@ -225,12 +226,33 @@ let bare_url_end text start =
   in
   trim (scan start 0)
 
+let has_scheme ~name target =
+  let length = String.length name in
+  String.length target >= length
+  && String.equal (String.lowercase_ascii (String.sub target 0 length)) name
+
 let safe_target target =
   not (String.equal target "")
+  && not (has_scheme ~name:"data:" target)
   && String.equal (String.trim target) target
   && String.equal (Grapheme.sanitize_controls target) target
   && (not (Inline.Link.is_unsafe target)
-      || String.starts_with ~prefix:"file:" (String.lowercase_ascii target))
+      || has_scheme ~name:"file:" target)
+
+let inline_image_def defs inline =
+  let image =
+    match inline with
+    | Inline.Link (node, _) -> Inline.Link.text node
+    | other -> other
+  in
+  match image with
+  | Inline.Image (node, _) -> (
+      match Inline.Link.reference_definition defs node with
+      | Some (Cmarkit.Link_definition.Def (definition, _)) ->
+          Option.bind (Cmarkit.Link_definition.dest definition)
+            (fun (data_uri, _) -> Graphics.embedded_png_of_uri data_uri)
+      | _ -> None)
+  | _ -> None
 
 let inline_rows ~(theme : Theme.t) ~defs ~osc8 ~(base : Style.t) inline =
   let rows = ref [] and spans = ref [] in
@@ -559,6 +581,33 @@ let render_document ~(theme : Theme.t) ~width ~osc8 ~(base_style : Style.t) raw 
   let draw_inlines layout inline =
     inline_rows ~theme ~defs ~osc8 ~base:layout.base inline |> draw_rows layout
   in
+  let attach_image ~source ~left_inset ~start =
+    let count = !row_count - start in
+    if count > 0 then begin
+      let rows : Cell_grid.document_image_rows = { source; count } in
+      let rec attach index = function
+        | line :: tail when index >= 0 ->
+            { line with image_part = Some { rows; index; left_inset } }
+            :: attach (index - 1) tail
+        | tail -> tail
+      in
+      out := attach (count - 1) !out
+    end
+  in
+  let draw_embedded_image layout image =
+    let left_inset = spans_width (continuation layout) in
+    let cols = width - left_inset in
+    let start = !row_count in
+    let height =
+      Int.min 8 (Int.max 3 ((cols * image.Graphics.height / image.width + 1) / 2))
+    in
+    let geometry =
+      Printf.sprintf "%d×%d px" image.width image.height
+      |> span (Typography.whisper ~bg theme)
+    in
+    draw_rows layout ([ geometry ] :: List.init (height - 1) (fun _ -> []));
+    attach_image ~source:(Embedded_png image) ~left_inset ~start
+  in
   let draw_rule layout requested_width =
     let prefix = prefix layout in
     let count = Int.min requested_width (width - spans_width prefix) in
@@ -635,18 +684,8 @@ let render_document ~(theme : Theme.t) ~width ~osc8 ~(base_style : Style.t) raw 
     | Diagram, true
       when List.length body_lines <= max_inline_mermaid_lines ->
         let source = String.concat "\n" body_lines in
-        let count = !row_count - body_start in
-        if String.length source <= max_inline_mermaid_bytes && count >= 2 then begin
-          let rows : Cell_grid.document_image_rows = { source = Mermaid source; count } in
-          let left_inset = width - inner_w in
-          let rec attach index = function
-            | line :: tail when index >= 0 ->
-                { line with image_part = Some { rows; index; left_inset } }
-                :: attach (index - 1) tail
-            | tail -> tail
-          in
-          out := attach (count - 1) !out
-        end
+        if String.length source <= max_inline_mermaid_bytes && !row_count - body_start >= 2 then
+          attach_image ~source:(Mermaid source) ~left_inset:(width - inner_w) ~start:body_start
     | (Diagram | Score _ | Code), _ -> ())
   in
   let draw_table layout table =
@@ -719,7 +758,10 @@ let render_document ~(theme : Theme.t) ~width ~osc8 ~(base_style : Style.t) raw 
     | Block.Paragraph (p, meta) -> (
         match table_without_outer_pipes ~defs raw meta with
         | Some table -> render layout table
-        | None -> draw_inlines layout (Block.Paragraph.inline p))
+        | None ->
+            let inline = Block.Paragraph.inline p in
+            draw_inlines layout inline;
+            Option.iter (draw_embedded_image layout) (inline_image_def defs inline))
     | Block.Block_quote (quote, _) ->
         let rail = span quote_rail_style (Glyph.to_utf8 Glyph.Left_rail ^ " ") in
         let quoted = inset layout ~first:rail ~rest:rail in

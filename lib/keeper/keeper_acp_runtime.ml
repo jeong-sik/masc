@@ -2897,8 +2897,15 @@ let run_without_lifecycle
            per turn, summed over every model request (and, on Muse, over
            reviews and observers), so it is no one request's input. A resumed
            session sent no range, so its count describes nothing masc chose. *)
-        (match resumed, !sent_start, Keeper_request_source.trace_id input_source with
-         | false, Some sent, Some session_id ->
+        (* No count, no write: an observation without usage would replace the
+           count the ledger already holds for this pair. *)
+        (match
+           ( resumed
+           , !sent_start
+           , Keeper_request_source.trace_id input_source
+           , prompt_res.usage.Acp.context_used )
+         with
+         | false, Some sent, Some session_id, Some used when used > 0 ->
            let observation =
              Keeper_model_input_ledger.Table.observe
                ~keeper_name
@@ -2912,7 +2919,7 @@ let run_without_lifecycle
                     sent)
                ~usage:
                  (Keeper_model_input_ledger.usage_of_counts
-                    ~input_tokens:(Option.value prompt_res.usage.Acp.context_used ~default:0)
+                    ~input_tokens:used
                     ~cache_read_input_tokens:0)
            in
            Log.Keeper.debug
@@ -2921,9 +2928,10 @@ let run_without_lifecycle
              runtime_id
              (Yojson.Safe.to_string
                 (Keeper_model_input_ledger.observation_to_json observation))
-         | true, (Some _ | None), (Some _ | None)
-         | false, None, (Some _ | None)
-         | false, Some _, None -> ());
+         | true, (Some _ | None), (Some _ | None), (Some _ | None)
+         | false, None, (Some _ | None), (Some _ | None)
+         | false, Some _, None, (Some _ | None)
+         | false, Some _, Some _, (Some _ | None) -> ());
         if Option.is_some rollover
         then (
           close_session_best_effort session_id;
@@ -3444,6 +3452,20 @@ let run_without_lifecycle
     Error final_error
 ;;
 
+(* Named by what the refused attempt sent. A resumed session sent no range,
+   and an uncapped start was refused by the agent alone: both are the
+   provider's overflow against the declared limit. Only a start masc capped
+   carries bytes it measured, and those bytes, never the cap, are what was
+   observed. *)
+let overflow_trigger ~input_limit ~previous_capacity ~refused_sent_bytes ~capacity =
+  match refused_sent_bytes with
+  | Some observed_bytes when previous_capacity <> unbounded_start_capacity_bytes ->
+    Keeper_compaction.Explicit_hard_limit { capacity_bytes = capacity; observed_bytes }
+  | Some _ | None ->
+    Keeper_compaction.Provider_context_overflow
+      { provider_limit_tokens = Some (Llm_provider.Input_budget.to_int input_limit) }
+;;
+
 let compact_once_for_overflow_with
       ?blob_store
       ~already_compacted
@@ -3451,6 +3473,7 @@ let compact_once_for_overflow_with
       ~keeper_id
       ~input_limit
       ~previous_capacity
+      ~refused_sent_bytes
       ~capacity
       ~initial_messages
       ()
@@ -3461,15 +3484,7 @@ let compact_once_for_overflow_with
     if evicted_messages <> []
     then (
       let trigger =
-        if previous_capacity = unbounded_start_capacity_bytes
-        then
-          Keeper_compaction.Provider_context_overflow
-            { provider_limit_tokens =
-                Some (Llm_provider.Input_budget.to_int input_limit)
-            }
-        else
-          Keeper_compaction.Explicit_hard_limit
-            { capacity_bytes = capacity; observed_bytes = previous_capacity }
+        overflow_trigger ~input_limit ~previous_capacity ~refused_sent_bytes ~capacity
       in
       match
         Keeper_compaction.compact_evicted_messages
@@ -3490,6 +3505,7 @@ let compact_once_for_overflow
       ~keeper_id
       ~input_limit
       ~previous_capacity
+      ~refused_sent_bytes
       ~capacity
       ~initial_messages
   =
@@ -3499,6 +3515,7 @@ let compact_once_for_overflow
     ~keeper_id
     ~input_limit
     ~previous_capacity
+    ~refused_sent_bytes
     ~capacity
     ~initial_messages
     ()
@@ -3617,6 +3634,7 @@ let run
                 ~keeper_id:keeper_name
                 ~input_limit
                 ~previous_capacity
+                ~refused_sent_bytes:!sent_start_bytes
                 ~capacity
                 ~initial_messages
                 ();
@@ -3716,6 +3734,7 @@ module For_testing = struct
   let prefer_handoff_for_start = prefer_handoff_for_start
   let hydrate_start_messages = hydrate_start_messages
   let compact_once_for_overflow = compact_once_for_overflow
+  let overflow_trigger = overflow_trigger
 
   let project_stream_for_testing
         ?(server_isolation = Acp.Shared_or_multi_server)

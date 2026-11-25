@@ -1880,6 +1880,28 @@ let test_acp_80_pct_rollover_marker_and_overflow_classification () =
     (Masc.Keeper_compaction.trigger_of_json
        (Masc.Keeper_compaction.trigger_to_json counted)
      = Ok counted);
+  (* A resumed session is refused (nothing sent), the fresh retry under the
+     placeholder cap [max_int / 2] is refused too: the durable trigger must
+     carry the bytes that fresh start sent, never the placeholder cap. *)
+  let trigger =
+    Keeper_acp_runtime.For_testing.overflow_trigger ~input_limit:(limit 400_000)
+  in
+  let trigger_t =
+    testable
+      (fun ppf t -> Format.pp_print_string ppf (Yojson.Safe.to_string (Masc.Keeper_compaction.trigger_to_json t)))
+      ( = )
+  in
+  check trigger_t "a refused resume is the provider's overflow at the declared limit"
+    (Masc.Keeper_compaction.Provider_context_overflow { provider_limit_tokens = Some 400_000 })
+    (trigger ~previous_capacity:max_int ~refused_sent_bytes:None ~capacity:(max_int / 2));
+  check trigger_t "an uncapped start refused by the agent is the provider's overflow"
+    (Masc.Keeper_compaction.Provider_context_overflow { provider_limit_tokens = Some 400_000 })
+    (trigger ~previous_capacity:max_int ~refused_sent_bytes:(Some 1_800_000) ~capacity:900_000);
+  check trigger_t "after a refused resume, the fresh start records the bytes it sent"
+    (Masc.Keeper_compaction.Explicit_hard_limit
+       { capacity_bytes = 900_000; observed_bytes = 1_800_000 })
+    (trigger ~previous_capacity:(max_int / 2) ~refused_sent_bytes:(Some 1_800_000)
+       ~capacity:900_000);
   (* The ledger names the start range by its first atom; the host reports it
      as a message position. The two must agree for every start. *)
   let msg role text : Agent_core.Types.message =
@@ -2401,6 +2423,7 @@ let test_acp_overflow_shrink_handoff_and_vibe_operator_login () =
                 ~model_id:"acp-test"
                 ~max_context_tokens:25_000))
         ~previous_capacity:(if attempt = 1 then max_int else 100_000 / attempt)
+        ~refused_sent_bytes:(Some (100_000 / attempt))
         ~capacity:(50_000 / attempt)
         ~initial_messages
     done;

@@ -97,9 +97,9 @@ val of_provider_config : Provider_config.t -> (t, error) result
 
 (** The input limit of a request an agent process sends on its own (an ACP
     client such as [agy acp] or [kimi acp]). The agent reserves its own
-    output, so no codec reservation is taken off: the limit is the declared
-    window, the smaller of the operator's [max-context] and the window the
-    agent reports. Fails closed with [Non_positive_context_window].
+    output, so no codec reservation is taken off: the limit is
+    [max_context_tokens], the operator's declared [max-context]. Fails closed
+    with [Non_positive_context_window].
     @since 0.234.0 *)
 val of_agent_window : model_id:string -> max_context_tokens:int -> (t, error) result
 

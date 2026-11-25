@@ -188,9 +188,17 @@ module For_testing : sig
     -> keeper_id:string
     -> input_limit:Llm_provider.Input_budget.t
     -> previous_capacity:int
+    -> refused_sent_bytes:int option
     -> capacity:int
     -> initial_messages:Agent_core.Types.message list
     -> unit
+
+  val overflow_trigger
+    :  input_limit:Llm_provider.Input_budget.t
+    -> previous_capacity:int
+    -> refused_sent_bytes:int option
+    -> capacity:int
+    -> Keeper_compaction.compaction_trigger
 
   val project_stream_for_testing
     :  ?server_isolation:Runtime_acp_client.mcp_server_isolation

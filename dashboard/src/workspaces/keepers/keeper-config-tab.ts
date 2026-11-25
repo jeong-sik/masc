@@ -8,6 +8,7 @@
  */
 
 import { html } from 'htm/preact'
+import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import {
   disconnectKeeperOAuth,
@@ -276,7 +277,8 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
                           ${field.reload_scope}
                         </span>
                       </div>
-                      <div class="kp-roster-sub">${field.description || field.type} · ${field.provenance}</div>
+                      ${field.description && html`<${MarkdownContent} class="kp-roster-sub" text=${field.description} />`}
+                      <div class="kp-roster-sub">${field.description ? field.provenance : `${field.type} · ${field.provenance}`}</div>
                     </div>
                     ${!field.writable
                       ? html`<span class="kp-pill">읽기 전용 (${serializeValue(field.current_value) || '없음'})</span>`

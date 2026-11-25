@@ -14,6 +14,8 @@
  */
 
 import type { ComponentChildren } from 'preact'
+import { decodeGoalProof } from '../../api/goal-proof'
+import type { GoalProof } from '../../types/core'
 import { ok, err, type Result } from '../../lib/result'
 import { authSession } from '../../core/auth'
 import { apiGet, apiMutate, type ApiError } from '../../core/transport'
@@ -347,6 +349,7 @@ export interface GoalItem {
   readonly criterionRevision: string | null
   readonly criterionVerdict: GoalCriterionVerdict
   readonly lastReviewNote: string | null
+  readonly verification: GoalProof | null
   readonly linkedTaskCount: Observed<number>
   readonly linkedTasks: readonly GoalLinkedTaskRef[]
   readonly createdAt: string | null
@@ -613,6 +616,7 @@ export function decodeGoalItem(raw: unknown): Result<GoalItem, string> {
     criterionRevision: asNonEmptyString(raw.criterion_revision),
     criterionVerdict: decodeCriterionVerdict(raw.criterion_review),
     lastReviewNote: asNonEmptyString(raw.last_review_note),
+    verification: raw.verification === undefined ? null : decodeGoalProof(raw.verification, id),
     linkedTaskCount,
     linkedTasks,
     createdAt: asNonEmptyString(raw.created_at),
@@ -918,6 +922,7 @@ export interface ScheduleRow {
   readonly recurrenceSummary: string
   readonly keeperName: string | null
   readonly summary: string | null
+  readonly message: string | null
   readonly lastWakeStatus: string | null
   readonly lastWakeError: string | null
 }
@@ -977,6 +982,8 @@ export interface GatePendingItem {
   readonly taskId: string | null
   readonly goalId: string | null
   readonly summaryText: string | null
+  readonly rationale: string | null
+  readonly keyQuestions: readonly string[]
 }
 
 export interface GateResolvedAuditRow {

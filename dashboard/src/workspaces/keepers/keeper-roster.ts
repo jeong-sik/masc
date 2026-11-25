@@ -3,6 +3,7 @@
  */
 
 import { html } from 'htm/preact'
+import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { formatObserved, type Observed } from '../../core/resource-cache'
 import { KeeperBadge } from '../../components/keeper-badge'
@@ -348,7 +349,9 @@ function CreateKeeperModal(props: CreateKeeperModalProps) {
                   <div key=${field.full_key} class="kp-field-row">
                     <div>
                       <div class="kp-roster-name">${field.label ?? field.full_key}</div>
-                      <div class="kp-roster-sub">${field.description || field.type}</div>
+                      ${field.description
+                        ? html`<${MarkdownContent} class="kp-roster-sub" text=${field.description} />`
+                        : html`<div class="kp-roster-sub">${field.type}</div>`}
                     </div>
                     ${field.enum_values && field.enum_values.length > 0
                       ? html`

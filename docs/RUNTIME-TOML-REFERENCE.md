@@ -162,11 +162,12 @@ credential naming an absolute path (`oauth_source` for Antigravity); `env` and
   carry and one the host could not connect to all end that way, so MASC lists
   `mcp__masc_keeper__*` only when the bridge lists a tool. The bridge is named
   `masc_keeper`, not `masc`: the host refuses a session server that has the
-  name of one in the operator's muse settings, in a plugin or in a `.mcp.json`
-  it loads for the workspace (the workspace's own, or that of the repository
-  it is in; `session/new` fails with `session MCP server name conflicts with a
-  host or plugin server`, -32030). An entry for MASC's own server can be named
-  `masc`, as it is in the settings and `.mcp.json` this was measured against.
+  name of one in the operator's muse settings or in a `.mcp.json` it loads for
+  the workspace (the workspace's own, or that of the repository it is in;
+  `session/new` fails with `session MCP server name conflicts with a host or
+  plugin server`, -32030; the text also names plugin servers, which were not
+  tried). An entry for MASC's own server can be named `masc`, as it is in the
+  settings and `.mcp.json` this was measured against.
   MASC gives the host no settings of its own, so those entries stay loaded:
   under `none` and `read` the list leaves their tools out, under `full` the
   host offers them. The glob also matches the tools of a server named

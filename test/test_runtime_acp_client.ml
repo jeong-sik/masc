@@ -548,7 +548,8 @@ let test_mcp_http_server_of_bridge_reads_every_field_from_the_bridge () =
    and an entry for MASC's own server can be named [masc]; the other drivers
    keep the name their live verification used. A host replaces every
    character of a tool name outside [A-Za-z0-9_], and the Keeper reads the
-   server back from [mcp__<server>__<tool>] up to the first [__]. *)
+   server back from [mcp__<server>__<tool>] up to the first [__], so a
+   trailing [_] would make it read the server one character short. *)
 let test_bridge_server_names () =
   let name = Runtime_acp_client.bridge_server_name in
   check string "muse_code does not share the operator's masc entry" "masc_keeper"
@@ -571,8 +572,51 @@ let test_bridge_server_names () =
        let rec has_double i =
          i + 1 < String.length n && ((n.[i] = '_' && n.[i + 1] = '_') || has_double (i + 1))
        in
-       check bool (label ^ " name has no double underscore") false (has_double 0))
+       check bool (label ^ " name has no double underscore") false (has_double 0);
+       check bool (label ^ " name does not end in an underscore") false
+         (String.ends_with ~suffix:"_" n))
     Runtime_acp_client.all_drivers
+;;
+
+(* The Keeper reads the bridge's server name from the driver when it decides
+   whether a call fences a same-turn retry. For a Muse session that name is
+   [masc_keeper]: a call to the bridge's tool passes, and a tool of the same
+   name from the operator's [masc] entry belongs to another server and
+   fences. *)
+let test_muse_stream_projection_uses_bridge_server_name () =
+  let fenced = ref 0 in
+  let on_acp_event, _, _, _, _ =
+    Keeper_acp_runtime.For_testing.project_stream_for_testing
+      ~on_effect_attempted:(fun () -> incr fenced)
+      ~driver:Runtime_acp_client.Muse_code
+      ~model:"muse-ember-1.0"
+      ~session_id:"sess-muse-bridge-name"
+      ~turn_count:1
+      ~native_posture:Runtime_native_tools.Native_none
+      ~allowed_tool_names:[ "masc_probe_ping" ]
+      ()
+  in
+  let call ~tool_call_id ~server =
+    on_acp_event
+      (Runtime_acp_client.Tool_call_started
+         { tool_call_id
+         ; title = "mcp__" ^ server ^ "__masc_probe_ping"
+         ; kind = Some Runtime_acp_client.Tool_other
+         ; status = Runtime_acp_client.Tool_pending
+         ; raw_input = None
+         ; identity =
+             Runtime_acp_client.Mcp_tool
+               { server = Runtime_acp_client.Explicit_server server
+               ; tool_name = "masc_probe_ping"
+               }
+         })
+  in
+  call
+    ~tool_call_id:"tc-bridge"
+    ~server:(Runtime_acp_client.bridge_server_name Runtime_acp_client.Muse_code);
+  check int "a call to the bridge's tool does not fence" 0 !fenced;
+  call ~tool_call_id:"tc-operator" ~server:"masc";
+  check int "the same tool name from the operator's masc entry fences" 1 !fenced
 ;;
 
 let test_muse_permission_grammar () =
@@ -5387,6 +5431,8 @@ let () =
         ; test_case "server record reads every field from the bridge" `Quick
             test_mcp_http_server_of_bridge_reads_every_field_from_the_bridge
         ; test_case "bridge server name per driver" `Quick test_bridge_server_names
+        ; test_case "muse stream projection fences by the bridge's server name" `Quick
+            test_muse_stream_projection_uses_bridge_server_name
         ; test_case "muse MCP grammar and permission policy" `Quick
             test_muse_permission_grammar
         ; test_case "kimi --skills-dir order & strict permission posture" `Quick

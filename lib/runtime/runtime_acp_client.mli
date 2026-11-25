@@ -164,8 +164,8 @@ val bridge_server_name : driver -> string
 (** The name the Keeper, runtime verification and the ACP probe give the MCP
     bridge they pass to the driver's host: [muse_code] uses [masc_keeper]
     because its host refuses a session server named like one in the
-    operator's settings, a plugin or a [.mcp.json] it loads, and an entry for
-    MASC's own server can be named [masc]; the other drivers use [masc]. *)
+    operator's settings or a [.mcp.json] it loads, and an entry for MASC's
+    own server can be named [masc]; the other drivers use [masc]. *)
 
 val validate_session_effort :
   driver:driver -> Llm_provider.Reasoning_effort.t option -> (unit, string) result

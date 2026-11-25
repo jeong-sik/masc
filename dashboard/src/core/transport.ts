@@ -51,6 +51,7 @@ export interface ApiRequestOptions<T> {
   readonly method?: HttpMethod
   readonly path: string
   readonly body?: unknown
+  readonly cache?: RequestCache
   readonly headers?: Record<string, string>
   readonly signal?: AbortSignal
   readonly fetchImpl?: typeof fetch
@@ -235,6 +236,7 @@ export async function apiRequest<T>(opts: ApiRequestOptions<T>): Promise<Result<
       credentials: 'same-origin',
       headers: buildHeaders(method, hasBody, opts.headers),
       signal: attemptController.signal,
+      ...(opts.cache && { cache: opts.cache }),
       ...(hasBody ? { body: typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body) } : {}),
     }
 

@@ -23,9 +23,12 @@ import {
   fetchDashboardScheduledAutomationLookup,
   type DashboardScheduledAutomationLookup,
 } from '../../api/dashboard-scheduled-automation'
+import { isEpochCurrent, sessionEpoch } from '../../core/auth'
 import { replaceRoute, route } from '../../router'
+import { formatTimestampKo } from '../../lib/format-time'
 import { ErrorState, LoadingState } from '../common/feedback-state'
 import { ActionButton } from '../common/button'
+import { InlineSpinner } from '../common/inline-spinner'
 import { StatusChip } from '../common/status-chip'
 import { showToast } from '../common/toast'
 import { KeeperLaneInventoryPanel } from '../tools/keeper-waiting-inventory-panel'
@@ -43,8 +46,7 @@ import {
   toolsData,
 } from '../tools/tool-state'
 import {
-  activeSchedulesError,
-  activeSchedulesProjection,
+  activeScheduleRead,
   loadScheduledAutomation,
   scheduledAutomationError,
   scheduledAutomationLoading,
@@ -58,11 +60,11 @@ type ScheduleView = 'calendar' | 'list'
 
 type ExactScheduleState =
   | { kind: 'idle' }
-  | { kind: 'loading'; scheduleId: string }
+  | { kind: 'loading'; scheduleId: string; epoch: number }
   // `rereadFailure` is why the newest read of this schedule did not replace
   // `lookup`: the answer on screen is then older than the projection beside it.
-  | { kind: 'resolved'; lookup: DashboardScheduledAutomationLookup; rereadFailure: string | null }
-  | { kind: 'failed'; scheduleId: string; reason: string }
+  | { kind: 'resolved'; lookup: DashboardScheduledAutomationLookup; rereadFailure: string | null; epoch: number }
+  | { kind: 'failed'; scheduleId: string; reason: string; epoch: number }
 
 function countLabel(count: number | null): string {
   return count === null ? '—' : count.toLocaleString()
@@ -121,10 +123,8 @@ export function ScheduleSurface() {
   // the 20 soonest schedules, and polling schedules alone can take all of
   // them; this one is every schedule still going to run, up to the server's
   // selected-page limit.
-  const calendarProjection = activeSchedulesProjection.value
-  const calendarAutomation = calendarProjection?.state === 'available' ? calendarProjection.data : null
-  const calendarError = activeSchedulesError.value
-    ?? (calendarProjection?.state === 'unavailable' ? calendarProjection.reason : null)
+  const { observation: calendar, loading: calendarLoading, error: calendarError } = activeScheduleRead.value
+  const calendarAutomation = calendar?.projection.data ?? null
   // What the open view draws its rows from.
   const viewAutomation = view === 'calendar' ? calendarAutomation : automation
   const routeScheduleId = route.value.params.schedule_id ?? null
@@ -150,7 +150,9 @@ export function ScheduleSurface() {
   const [cadenceFilter, setCadenceFilter] = useState<Cadence | null>(null)
   const [pruning, setPruning] = useState(false)
   const selectedScheduleId = routeScheduleId
-  const [exactSchedule, setExactSchedule] = useState<ExactScheduleState>({ kind: 'idle' })
+  const epoch = sessionEpoch.value
+  const [exactState, setExactSchedule] = useState<ExactScheduleState>({ kind: 'idle' })
+  const exactSchedule = exactState.kind !== 'idle' && exactState.epoch === epoch ? exactState : null
   // Keeper-lane wake evidence is a large operator diagnostic (a card per
   // keeper, dozens of lane rows). Collapsed AND unmounted by default so the
   // schedule stays the light, primary content; the panel only mounts when the
@@ -164,7 +166,7 @@ export function ScheduleSurface() {
     return stopScheduleRefresh
   }, [])
 
-  // Only an open calendar reads the active-only page.
+  // The calendar shares its active-only read with the shell preview.
   useEffect(() => {
     if (view !== 'calendar') return undefined
     return subscribeActiveSchedulesRefresh()
@@ -187,29 +189,29 @@ export function ScheduleSurface() {
     // read again with each one. Its last answer stays on screen until the new
     // one arrives.
     setExactSchedule(current =>
-      current.kind === 'resolved' && current.lookup.scheduleId === selectedScheduleId
+      current.kind === 'resolved' && current.epoch === epoch && current.lookup.scheduleId === selectedScheduleId
         ? current
-        : { kind: 'loading', scheduleId: selectedScheduleId })
+        : { kind: 'loading', scheduleId: selectedScheduleId, epoch })
     void fetchDashboardScheduledAutomationLookup(selectedScheduleId, {
       signal: controller.signal,
     })
       .then(lookup => {
-        if (controller.signal.aborted) return
-        setExactSchedule({ kind: 'resolved', lookup, rereadFailure: null })
+        if (controller.signal.aborted || !isEpochCurrent(epoch)) return
+        setExactSchedule({ kind: 'resolved', lookup, rereadFailure: null, epoch })
       })
       .catch((error: unknown) => {
-        if (controller.signal.aborted) return
+        if (controller.signal.aborted || !isEpochCurrent(epoch)) return
         const reason = error instanceof Error ? error.message : String(error)
         // A read that fails after this schedule was answered keeps that answer
         // open and says it was not read again; the next projection reads it
         // once more. Only a schedule never answered has nothing to show.
         setExactSchedule(current =>
-          current.kind === 'resolved' && current.lookup.scheduleId === selectedScheduleId
+          current.kind === 'resolved' && current.epoch === epoch && current.lookup.scheduleId === selectedScheduleId
             ? { ...current, rereadFailure: reason }
-            : { kind: 'failed', scheduleId: selectedScheduleId, reason })
+            : { kind: 'failed', scheduleId: selectedScheduleId, reason, epoch })
       })
     return () => { controller.abort() }
-  }, [selectedScheduleId, projection, inPageRequest !== null])
+  }, [selectedScheduleId, epoch, projection, inPageRequest !== null])
 
   function selectSchedule(scheduleId: string | null) {
     const params = { ...route.value.params }
@@ -227,7 +229,7 @@ export function ScheduleSurface() {
 
   async function handlePrune() {
     if (
-      !window.confirm(
+      blockingError !== null || !window.confirm(
         '완료되었거나 취소/만료된 예약을 정리하시겠습니까?\n연관된 실행 기록도 함께 삭제됩니다.',
       )
     ) {
@@ -236,9 +238,11 @@ export function ScheduleSurface() {
     setPruning(true)
     try {
       const result = await pruneSchedules()
+      if (!isEpochCurrent(epoch)) return
       showToast(`완료된 예약 ${result.pruned_count.toLocaleString()}개를 정리했습니다.`, 'success')
       await loadScheduledAutomation({ fresh: true })
     } catch (error) {
+      if (!isEpochCurrent(epoch)) return
       const message = error instanceof Error ? error.message : String(error)
       console.error('[ScheduleSurface] prune failed:', error)
       showToast(message, 'error')
@@ -249,7 +253,7 @@ export function ScheduleSurface() {
   // In the calendar view the list panel is unmounted, so the surface owns the
   // overlay; the list panel renders its own overlay from the same selection.
   const exactRequest =
-    exactSchedule.kind === 'resolved'
+    exactSchedule?.kind === 'resolved'
     && exactSchedule.lookup.status === 'found'
     && exactSchedule.lookup.scheduleId === selectedScheduleId
       ? exactSchedule.lookup.request
@@ -259,7 +263,7 @@ export function ScheduleSurface() {
       ? inPageRequest ?? exactRequest
       : null
   const exactLookupMessage = (() => {
-    if (selectedScheduleId === null) return null
+    if (selectedScheduleId === null || exactSchedule === null) return null
     if (exactSchedule.kind === 'loading' && exactSchedule.scheduleId === selectedScheduleId) {
       return '정확한 예약을 조회하는 중입니다.'
     }
@@ -303,7 +307,7 @@ export function ScheduleSurface() {
         ${error || projectionError
           ? html`
               <div data-testid=${projectionError ? 'schedule-projection-unavailable' : undefined}>
-                <${ErrorState} message=${error ?? projectionError ?? ''} class="mb-4" />
+                <${ErrorState} message=${`전체 예약 조회 실패 · ${error ?? projectionError ?? ''}`} class="mb-4" />
               </div>
             `
           : null}
@@ -364,13 +368,7 @@ export function ScheduleSurface() {
             `
           : null}
 
-        ${blockingError
-          ? html`
-              <div class="ov-card mb-4 text-sm text-[var(--color-fg-muted)]" data-testid="schedule-ledger-unknown">
-                schedule projection을 확인할 수 없어 예약 수와 일정을 표시할 수 없습니다.
-              </div>
-            `
-          : html`<div class="sch-viewbar" data-testid="schedule-viewbar">
+        <div class="sch-viewbar" data-testid="schedule-viewbar">
           <div class="sch-viewseg" role="tablist" aria-label="예약 뷰">
             <button
               type="button"
@@ -396,25 +394,15 @@ export function ScheduleSurface() {
             variant="danger"
             size="sm"
             onClick=${handlePrune}
-            disabled=${pruning}
+            disabled=${pruning || blockingError !== null}
             ariaBusy=${pruning}
             testId="schedule-prune-btn"
           >
             ${pruning ? '정리 중...' : '완료된 예약 정리'}
           <//>
-        </div>`}
+        </div>
 
-        ${blockingError
-          ? null
-          : loading && !automation
-          ? html`<${LoadingState}>예약 자동화 projection 불러오는 중...<//>`
-          // Without a projection nothing was read. A calendar drawn from no
-          // rows would call the coming days empty (as the cadence counts above
-          // would read zero), so that case goes to the panel, which says there
-          // is no projection. The same holds for the calendar's own page: until
-          // it is read the calendar is not drawn, and a failed read says so
-          // above the last page that was read, if there is one.
-          : view === 'calendar' && automation
+        ${view === 'calendar'
             ? html`
                 ${calendarError
                   ? html`
@@ -423,6 +411,14 @@ export function ScheduleSurface() {
                       </div>
                     `
                   : null}
+                ${calendar && calendarLoading && html`
+                  <p class="ap-muted" role="status"><${InlineSpinner} /> 캘린더 예약 갱신 중…</p>
+                `}
+                ${calendar && (calendarLoading || calendarError) && html`
+                  <p class="ap-muted">마지막 확인 · <time dateTime=${new Date(calendar.observedAt).toISOString()}>
+                    ${formatTimestampKo(calendar.observedAt / 1000)}
+                  </time></p>
+                `}
                 ${calendarAutomation
                   ? html`<${ScheduleCalendar}
                       requests=${calendarAutomation.requests}
@@ -433,9 +429,15 @@ export function ScheduleSurface() {
                     />`
                   : calendarError
                     ? null
-                    : html`<${LoadingState}>캘린더에 쓸 예약 불러오는 중...<//>`}
+                    : calendarLoading
+                      ? html`<${LoadingState}>캘린더에 쓸 예약 불러오는 중…<//>`
+                      : html`<p class="ap-muted">캘린더 예약 조회 대기 중</p>`}
               `
-            : html`<${ScheduledAutomationPanel}
+            : blockingError
+              ? html`<p class="ap-muted" data-testid="schedule-ledger-unknown">전체 예약 목록을 확인할 수 없습니다.</p>`
+              : loading && !automation
+                ? html`<${LoadingState}>전체 예약 불러오는 중…<//>`
+                : html`<${ScheduledAutomationPanel}
                 automation=${automation ? filterAutomationByCadence(automation, cadenceFilter) : automation}
                 variant="v2"
                 selectedScheduleId=${selectedScheduleId}

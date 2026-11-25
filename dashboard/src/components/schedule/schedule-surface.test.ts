@@ -7,6 +7,8 @@ import type {
   DashboardScheduledAutomationProjection,
   DashboardScheduledAutomationRequest,
 } from '../../api'
+import type { ScheduleObservation } from './schedule-state'
+import { bumpSessionEpoch } from '../../core/auth'
 
 type MockToolsResponse = {
   generated_at?: string
@@ -24,8 +26,9 @@ const mocks = vi.hoisted(() => ({
   scheduledAutomationLoading: { value: false },
   scheduledAutomationError: { value: null as string | null },
   subscribeScheduledAutomationRefresh: vi.fn(() => () => {}),
-  activeSchedulesProjection: { value: null as null | DashboardScheduledAutomationProjection },
-  activeSchedulesError: { value: null as string | null },
+  activeScheduleRead: {
+    value: { observation: null as ScheduleObservation | null, loading: false, error: null as string | null },
+  },
   stopActiveSchedulesRefresh: vi.fn(),
   subscribeActiveSchedulesRefresh: vi.fn(),
   pruneSchedules: vi.fn(),
@@ -52,8 +55,7 @@ vi.mock('./schedule-state', () => ({
   scheduledAutomationError: mocks.scheduledAutomationError,
   scheduledAutomationLoading: mocks.scheduledAutomationLoading,
   subscribeScheduledAutomationRefresh: mocks.subscribeScheduledAutomationRefresh,
-  activeSchedulesProjection: mocks.activeSchedulesProjection,
-  activeSchedulesError: mocks.activeSchedulesError,
+  activeScheduleRead: mocks.activeScheduleRead,
   subscribeActiveSchedulesRefresh: mocks.subscribeActiveSchedulesRefresh,
 }))
 
@@ -124,7 +126,7 @@ function sampleAutomation(): DashboardScheduledAutomationAvailableData {
 
 function availableProjection(
   data: DashboardScheduledAutomationAvailableData,
-): DashboardScheduledAutomationProjection {
+): ScheduleObservation['projection'] {
   return {
     state: 'available',
     data,
@@ -139,7 +141,11 @@ function availableProjection(
 
 /** The active-only page, which the calendar draws. */
 function setActiveSchedules(data: DashboardScheduledAutomationAvailableData): void {
-  mocks.activeSchedulesProjection.value = availableProjection(data)
+  mocks.activeScheduleRead.value = {
+    observation: { projection: availableProjection(data), observedAt: Date.now() },
+    loading: false,
+    error: null,
+  }
 }
 
 /** The fleet page. The calendar's page holds the same rows unless a test
@@ -215,8 +221,7 @@ describe('ScheduleSurface', () => {
     mocks.scheduledAutomationProjection.value = null
     mocks.scheduledAutomationLoading.value = false
     mocks.scheduledAutomationError.value = null
-    mocks.activeSchedulesProjection.value = null
-    mocks.activeSchedulesError.value = null
+    mocks.activeScheduleRead.value = { observation: null, loading: false, error: null }
     mocks.stopActiveSchedulesRefresh.mockReset()
     mocks.subscribeActiveSchedulesRefresh.mockReset()
     mocks.subscribeActiveSchedulesRefresh.mockReturnValue(mocks.stopActiveSchedulesRefresh)
@@ -249,7 +254,7 @@ describe('ScheduleSurface', () => {
     expect(container.querySelector('[data-testid="sch-polling-empty"]')).toBeNull()
     // Nor cadence counts, which would read zero.
     expect(container.querySelector('[data-testid="sch-cadsum"]')).toBeNull()
-    expect(container.textContent).toContain('예약 자동화 projection 없음')
+    expect(container.textContent).toContain('캘린더 예약 조회 대기 중')
   })
 
   it('renders backed schedule summary and reuses read-only schedule cards', async () => {
@@ -479,7 +484,8 @@ describe('ScheduleSurface', () => {
       .toContain('schedule store read failed: corrupt ledger')
     expect(Array.from(container.querySelectorAll('.ov-kpi-v')).map(node => node.textContent))
       .toEqual(['—', '—', '—', '—', '—', '—'])
-    expect(container.querySelector('[data-testid="schedule-viewbar"]')).toBeNull()
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="schedule-prune-btn"]')?.disabled).toBe(true)
+    expect(container.querySelector('[data-testid="sch-calendar"]')).toBeNull()
     expect(container.textContent).not.toContain('다가오는 7일에 예정된 예약이 없습니다')
   })
 
@@ -632,7 +638,7 @@ describe('ScheduleSurface', () => {
 
     it('draws no calendar before that page is read', async () => {
       setAutomation(cutFleetPage())
-      mocks.activeSchedulesProjection.value = null
+      mocks.activeScheduleRead.value = { observation: null, loading: true, error: null }
 
       await mount()
 
@@ -647,10 +653,7 @@ describe('ScheduleSurface', () => {
 
     it('says so when that page could not be read, and calls no day empty', async () => {
       setAutomation(cutFleetPage())
-      mocks.activeSchedulesProjection.value = {
-        state: 'unavailable',
-        reason: 'schedule store read failed: fixture',
-      }
+      mocks.activeScheduleRead.value = { observation: null, loading: false, error: 'schedule store read failed: fixture' }
 
       await mount()
 
@@ -661,16 +664,21 @@ describe('ScheduleSurface', () => {
       expect(container.textContent).not.toContain('다가오는 7일에 예정된 예약이 없습니다')
     })
 
-    it('keeps the last page on screen when reading it again fails', async () => {
+    it('keeps the last calendar page even when both schedule observations fail', async () => {
       setAutomation(cutFleetPage())
       setActiveSchedules(wholeActivePage())
-      mocks.activeSchedulesError.value = 'fixture: offline'
+      mocks.activeScheduleRead.value.error = 'fixture: offline'
+      mocks.scheduledAutomationProjection.value = { state: 'unavailable', reason: 'fixture: fleet ledger offline' }
 
       await mount()
 
       expect(container.querySelector('[data-testid="schedule-calendar-unavailable"]')?.textContent)
         .toContain('fixture: offline')
+      expect(container.querySelector('[data-testid="schedule-projection-unavailable"]')?.textContent)
+        .toContain('fixture: fleet ledger offline')
+      expect(container.querySelector('time')?.getAttribute('datetime')).toBeTruthy()
       expect(agendaEvent(later.schedule_id)).not.toBeNull()
+      expect(container.querySelector<HTMLButtonElement>('[data-testid="schedule-prune-btn"]')?.disabled).toBe(true)
     })
   })
 
@@ -906,6 +914,21 @@ describe('ScheduleSurface', () => {
       expect(mocks.fetchScheduledAutomationLookup).toHaveBeenCalledTimes(3)
       expect(panel()?.textContent).toContain('payload after the second refresh')
       expect(lookupStatus()).toBeNull()
+    })
+
+    it('leaves the previous exact result behind when the route keeps the same ID across workspaces', async () => {
+      mocks.fetchScheduledAutomationLookup
+        .mockResolvedValueOnce({ status: 'found', scheduleId: outside.schedule_id, request: outside })
+        .mockRejectedValueOnce(new Error('fixture: new workspace unavailable'))
+      await openOutsidePage()
+      expect(panel()?.textContent).toContain('payload before the refresh')
+
+      bumpSessionEpoch()
+      await refreshProjection()
+
+      expect(mocks.fetchScheduledAutomationLookup).toHaveBeenCalledTimes(2)
+      expect(panel()).toBeNull()
+      expect(lookupStatus()?.textContent).toContain('new workspace unavailable')
     })
 
     it('does not read again when the same projection is drawn again', async () => {

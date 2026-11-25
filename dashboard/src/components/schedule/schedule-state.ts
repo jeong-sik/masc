@@ -13,11 +13,23 @@ import type {
   DashboardScheduledAutomation,
   DashboardScheduledAutomationProjection,
 } from '../../api/dashboard'
+import { sessionEpoch } from '../../core/auth'
 import { createManagedAsyncResource } from '../../lib/async-state'
 import { setupObservationRefresh } from '../../lib/observation-refresh'
 
+export interface ScheduleObservation {
+  readonly projection: Extract<DashboardScheduledAutomationProjection, { state: 'available' }>
+  readonly observedAt: number
+}
+
+interface ScheduleRead {
+  readonly projection: DashboardScheduledAutomationProjection
+  readonly lastAvailable: ScheduleObservation | null
+}
+
 interface ScheduleReader {
   readonly projection: ReadonlySignal<DashboardScheduledAutomationProjection | null>
+  readonly lastAvailable: ReadonlySignal<ScheduleObservation | null>
   readonly error: ReadonlySignal<string | null>
   readonly loading: ReadonlySignal<boolean>
   load(options?: { fresh?: boolean }): Promise<void>
@@ -34,7 +46,7 @@ function createScheduleReader(
   // surfaces re-read on every scheduled_automation observation, and a plain
   // resource would blank the projection on each re-read. The load wrapper below adds single-flight
   // semantics so a slow read retains the last snapshot until the next committed change.
-  const resource = createManagedAsyncResource<DashboardScheduledAutomationProjection>()
+  const resource = createManagedAsyncResource<ScheduleRead>()
 
   let loadInFlight: Promise<void> | null = null
   let freshLoadQueued: Promise<void> | null = null
@@ -56,7 +68,13 @@ function createScheduleReader(
 
     let request: Promise<void>
     request = resource
-      .load(signal => read(signal))
+      .load(async (signal, previous) => {
+        const projection = await read(signal)
+        const lastAvailable = projection.state === 'available'
+          ? { projection, observedAt: Date.now() }
+          : previous?.lastAvailable ?? null
+        return { projection, lastAvailable }
+      })
       .then(() => undefined)
       .finally(() => {
         if (loadInFlight === request) loadInFlight = null
@@ -72,18 +90,31 @@ function createScheduleReader(
   }
 
   let subscriberCount = 0
-  let stopRefresh: (() => void) | null = null
+  let stopObservation: (() => void) | null = null
 
   function subscribe(): () => void {
     subscriberCount += 1
     if (subscriberCount === 1) {
-      stopRefresh = setupObservationRefresh(() => load(), { topics: ['scheduled_automation'], readError: () => resource.readError(), cancelRead, resetRead: () => { cancelRead(); resource.reset() } })
+      let stopRefresh = () => {}
+      const stopEpoch = sessionEpoch.subscribe(() => {
+        stopRefresh()
+        stopRefresh = setupObservationRefresh(() => load(), {
+          topics: ['scheduled_automation'],
+          readError: () => resource.readError(),
+          cancelRead,
+          resetRead: () => { cancelRead(); resource.reset() },
+        })
+      })
+      stopObservation = () => {
+        stopEpoch()
+        stopRefresh()
+      }
     }
     return () => {
       subscriberCount -= 1
       if (subscriberCount === 0) {
-        stopRefresh?.()
-        stopRefresh = null
+        stopObservation?.()
+        stopObservation = null
         // Nothing keeps the page current from here on, so it is not held. A
         // surface that mounts later draws once before its subscription
         // starts, and would draw a page kept here as the current one.
@@ -94,7 +125,8 @@ function createScheduleReader(
   }
 
   return {
-    projection: computed(() => resource.state.value.data),
+    projection: computed(() => resource.state.value.data?.projection ?? null),
+    lastAvailable: computed(() => resource.state.value.data?.lastAvailable ?? null),
     error: computed(() => resource.state.value.error),
     loading: computed(() => resource.state.value.loading),
     load,
@@ -125,12 +157,17 @@ export const subscribeScheduledAutomationRefresh = fleetSchedules.subscribe
 // Every schedule that is still going to run, for the calendar (#52961). The
 // fleet page stops at the 20 soonest, and polling schedules alone can take all
 // of them; this page leaves ended schedules out and holds up to the server's
-// selected-page limit. Only the calendar mounts it, so only an open calendar
-// reads it.
+// selected-page limit. The calendar and the shell preview share this reader.
 const activeSchedules = createScheduleReader(
   signal => fetchDashboardScheduledAutomation({ signal, activeOnly: true }),
 )
 
-export const activeSchedulesProjection = activeSchedules.projection
-export const activeSchedulesError = activeSchedules.error
+export const activeScheduleRead = computed(() => {
+  const projection = activeSchedules.projection.value
+  return {
+    observation: activeSchedules.lastAvailable.value,
+    loading: activeSchedules.loading.value,
+    error: activeSchedules.error.value ?? (projection?.state === 'unavailable' ? projection.reason : null),
+  }
+})
 export const subscribeActiveSchedulesRefresh = activeSchedules.subscribe

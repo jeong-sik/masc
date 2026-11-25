@@ -13,7 +13,7 @@ vi.mock('../../api/dashboard-scheduled-automation', () => ({
 }))
 
 import {
-  activeSchedulesProjection,
+  activeScheduleRead,
   subscribeActiveSchedulesRefresh,
   subscribeScheduledAutomationRefresh,
   loadScheduledAutomation,
@@ -163,7 +163,7 @@ describe('active schedules refresh', () => {
     try {
       await vi.advanceTimersByTimeAsync(0)
       expect(mocks.fetchDashboardScheduledAutomation.mock.calls.map(activeOnlyOf)).toEqual([true])
-      expect(activeSchedulesProjection.value?.state).toBe('available')
+      expect(activeScheduleRead.value.observation?.projection.state).toBe('available')
 
       publishDashboardObservationChange({ topic: 'scheduled_automation' })
       await vi.advanceTimersByTimeAsync(0)
@@ -202,19 +202,19 @@ describe('active schedules refresh', () => {
       .mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
     const stopFirst = subscribeActiveSchedulesRefresh()
     await vi.advanceTimersByTimeAsync(0)
-    expect(activeSchedulesProjection.value?.state).toBe('available')
+    expect(activeScheduleRead.value.observation?.projection.state).toBe('available')
     stopFirst()
     // A calendar that opens again draws once before it subscribes. The page
     // read while it was last open is not there to be drawn as now.
-    expect(activeSchedulesProjection.value).toBeNull()
+    expect(activeScheduleRead.value.observation).toBeNull()
 
     const stopSecond = subscribeActiveSchedulesRefresh()
     try {
       await vi.advanceTimersByTimeAsync(0)
-      expect(activeSchedulesProjection.value).toBeNull()
+      expect(activeScheduleRead.value.observation).toBeNull()
       finish(emptyProjection())
       await vi.advanceTimersByTimeAsync(0)
-      expect(activeSchedulesProjection.value?.state).toBe('available')
+      expect(activeScheduleRead.value.observation?.projection.state).toBe('available')
     } finally { stopSecond() }
   })
 

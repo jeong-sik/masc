@@ -1715,6 +1715,102 @@ let test_all_subviews_and_orphan_fact_snapshot () =
   check bool "v re-dispatches Render_memory_diagram for snapshot" true
     (Option.is_some (find_render_cmd cmds_v1))
 
+let test_dot_without_selected_event_opens_nothing () =
+  (* Facts are stored but the journal holds no event to select. [.] then
+     opens nothing and asks for nothing, instead of drawing the first
+     stored fact. *)
+  let no_events =
+    obs { (sample_activity ~keeper:"alpha") with events = []; journal_lines = 0 }
+  in
+  let press_dot label m =
+    let m_next, cmds = Update.step ~now:now0 m (Msg.Key_event (key_char ".")) in
+    check bool (label ^ ": '.' opens no diagram") true
+      (Option.is_none m_next.knowledge.memory_diagram);
+    check bool (label ^ ": '.' sends no renderer or fetch command") true
+      (Option.is_none (find_render_cmd cmds)
+      && List.for_all
+           (function Cmd.Http_get _ -> false | _ -> true)
+           (Cmd.flatten cmds))
+  in
+  (* Keeper dive: Health and Journal carry no selection of their own. *)
+  let m_dive = model_in_keeper_memory_dive ~keeper:"alpha" in
+  let m_dive =
+    {
+      m_dive with
+      knowledge =
+        Knowledge_store.set_keeper_memory_activity ~keeper:"alpha" no_events
+          m_dive.knowledge;
+    }
+  in
+  List.iter
+    (fun (label, subview) ->
+      press_dot label
+        {
+          m_dive with
+          knowledge = { m_dive.knowledge with keeper_memory_subview = subview };
+        })
+    [
+      ("Kmem_health", Knowledge_store.Kmem_health);
+      ("Kmem_journal", Knowledge_store.Kmem_journal);
+    ];
+  (* Diff/Flow in evolution mode has no event row to stand on. *)
+  press_dot "View_evolution"
+    {
+      m_dive with
+      knowledge =
+        Knowledge_store.set_memory_view_mode Knowledge_store.View_evolution
+          {
+            m_dive.knowledge with
+            keeper_memory_subview = Knowledge_store.Kmem_diff_flow;
+          };
+    };
+  (* 3 Knowledge > Memory: Health & Ledger and Context. *)
+  let m_init =
+    Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_ko
+      ~wall_unix:1_700_000_500.0 ()
+  in
+  let knowledge =
+    Knowledge_store.empty
+    |> Knowledge_store.set_tab Nav.Knowledge_memory
+    |> Knowledge_store.set_memory_diff_keeper (Some "alpha")
+    |> Knowledge_store.set_keeper_memory_activity ~keeper:"alpha" no_events
+    |> Knowledge_store.set_keeper_memory_facts ~keeper:"alpha"
+         (obs (sample_facts ~keeper:"alpha"))
+  in
+  let m_knowledge, _ =
+    Update_nav.switch_workspace { m_init with knowledge } Nav.Knowledge
+  in
+  List.iter
+    (fun (label, subview) ->
+      press_dot label
+        {
+          m_knowledge with
+          knowledge = { m_knowledge.knowledge with memory_subview = subview };
+        })
+    [
+      ("Mem_health_ledger", Knowledge_store.Mem_health_ledger);
+      ("Mem_context", Knowledge_store.Mem_context);
+    ];
+  (* With a selected journal event the same subview opens that event. *)
+  let m_health = model_in_keeper_memory_dive ~keeper:"alpha" in
+  let m_health =
+    {
+      m_health with
+      knowledge =
+        {
+          m_health.knowledge with
+          keeper_memory_subview = Knowledge_store.Kmem_health;
+        };
+    }
+  in
+  let m_opened, _ =
+    Update.step ~now:now0 m_health (Msg.Key_event (key_char "."))
+  in
+  check bool "Kmem_health with a selected event opens that event" true
+    (match m_opened.knowledge.memory_diagram with
+     | Some { source = Knowledge_store.Diagram_source_event "ev-1"; _ } -> true
+     | Some _ | None -> false)
+
 let () =
   run "masc_tui_v2_memory_diagram_wiring"
     [
@@ -1739,6 +1835,9 @@ let () =
           test_case
             "All keeper-scoped subviews & orphan ordinary fact current-snapshot chart"
             `Quick test_all_subviews_and_orphan_fact_snapshot;
+          test_case
+            "'.' without a selected journal event opens no diagram"
+            `Quick test_dot_without_selected_event_opens_nothing;
           test_case "Pele cooperative cancellation kills sleeping helper promptly"
             `Quick test_pele_cooperative_cancellation;
         ] );

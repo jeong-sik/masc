@@ -24152,9 +24152,10 @@ let () =
                     next, id
                 | _ -> Alcotest.fail "expected an owned note read"
               in
-              let receive (m : Model.t) reply =
-                fst (Update.step ~now:t0 m (Msg.Http_reply { epoch = m.epoch; reply }))
+              let receive_at ~now (m : Model.t) reply =
+                Update.step ~now m (Msg.Http_reply { epoch = m.epoch; reply })
               in
+              let receive m reply = fst (receive_at ~now:t0 m reply) in
               let note : Wire_keeper_context.keeper_operator_note =
                 {
                   keeper = "alpha";
@@ -24166,14 +24167,16 @@ let () =
                   consumed_turn = None;
                 }
               in
-              let loaded modal_prefill_id =
+              let read_result ?(keeper = "alpha") ?(requested_at = t0) modal_prefill_id result =
                 Msg.Reply_keeper_operator_note_loaded
-                  { keeper = "alpha"; modal_prefill_id; result = Ok note }
+                  { keeper; modal_prefill_id; requested_at; result }
               in
-              let saved id =
+              let loaded id = read_result id (Ok note) in
+              let save_result modal_submission_id result =
                 Msg.Reply_keeper_operator_note_saved
-                  { keeper = "alpha"; modal_submission_id = Some id; result = Ok note }
+                  { keeper = "alpha"; modal_submission_id; result }
               in
+              let saved id = save_result (Some id) (Ok note) in
               let edit value (m : Model.t) =
                 {
                   m with
@@ -24219,6 +24222,106 @@ let () =
                 (Some "new draft") (field after_old_save);
               Alcotest.(check (option string)) "new save closes its own draft"
                 None (field (receive after_old_save (saved new_save_id)));
+              let slash_save m text =
+                fst (Update.execute_slash ~now:t0 m
+                       (Slash.Ctl { action = Slash.Ctl_note; target = Some text }))
+              in
+              let shared ~keeper (m : Model.t) =
+                let ks = Keeper_context_store.get_keeper ~keeper m.keeper_context in
+                Option.map (fun (n : Wire_keeper_context.keeper_operator_note) -> n.text)
+                  (Observed.to_option ks.operator_note)
+              in
+              let rereads cmds =
+                Cmd.flatten cmds |> List.filter_map (function
+                    | Cmd.Http_get
+                        { req = Cmd.Get_keeper_operator_note { keeper = "alpha"; modal_prefill_id }; _ } ->
+                        Some modal_prefill_id
+                    | _ -> None)
+              in
+              let changed = { note with text = "confirmed write" } in
+              let committed, _ = receive_at ~now:t1 (slash_save first changed.text)
+                  (save_result None (Ok changed)) in
+              let missing = Error (Msg.Http_error { status = 404; body = ""; api_error = None }) in
+              let unavailable = Error (Msg.Transport (Health.Other_io "disconnected")) in
+              List.iter (fun old_result ->
+                  let late, cmds = receive_at ~now:t2 committed (read_result None old_result) in
+                  Alcotest.(check (option string)) "a pre-save GET cannot overwrite the shared note"
+                    (Some changed.text) (shared ~keeper:"alpha" late);
+                  Alcotest.(check int) "ignored passive read needs no repeat" 0 (List.length cmds))
+                [Ok note; missing; unavailable];
+              let other = { note with keeper = "beta" } in
+              let other_state, _ = receive_at ~now:t2 committed
+                  (read_result ~keeper:"beta" None (Ok other)) in
+              Alcotest.(check (option string)) "write boundary belongs to its Keeper"
+                (Some other.text) (shared ~keeper:"beta" other_state);
+              let waiting, reissued = receive_at ~now:t2 committed
+                  (read_result (Some first_id) missing) in
+              let fresh_owner previous cmds =
+                match rereads cmds with
+                | [Some id] when not (Int.equal previous id) -> id
+                | _ -> Alcotest.fail "expected one fresh prefill for the still-pristine draft"
+              in
+              let fresh_id = fresh_owner first_id reissued in
+              let receive_latest m reply = fst (receive_at ~now:t2 m reply) in
+              let fresh = read_result ~requested_at:t2 (Some fresh_id) (Ok changed) in
+              Alcotest.(check (option string)) "reissued read settles the pristine draft"
+                (Some changed.text) (field (receive_latest waiting fresh));
+              Alcotest.(check (option string)) "editing before the reissued read protects the draft"
+                (Some "typed") (field (receive_latest (edit "typed" waiting) fresh));
+              let seeded = receive m_ws (loaded None) in
+              let overlapping = slash_save (slash_save seeded "first save") "second save" in
+              let draft, draft_id = open_note overlapping in
+              let last_read (m : Model.t) =
+                Observed.is_stale (Keeper_context_store.get_keeper ~keeper:"alpha" m.keeper_context).operator_note
+              in
+              Alcotest.(check bool) "overlap keeps the previous note as last read" true (last_read draft);
+              let mid, first_cmds = receive_at ~now:t1 draft (save_result None (Ok changed)) in
+              Alcotest.(check (option string)) "overlapping save receipt cannot publish the final note"
+                (Some note.text) (shared ~keeper:"alpha" mid);
+              Alcotest.(check (list (option int))) "other write is still unsettled" [] (rereads first_cmds);
+              let deferred, cmds = receive_at ~now:t2 mid (read_result (Some draft_id) (Ok note)) in
+              Alcotest.(check (list (option int))) "overlap defers the owned read until writes settle"
+                [] (rereads cmds);
+              let earlier = { note with text = "earlier write" } in
+              let settled, final_cmds = receive_at ~now:t2 deferred (save_result None (Ok earlier)) in
+              let readback_id = fresh_owner draft_id final_cmds in
+              Alcotest.(check (option string)) "late success still leaves the old observation"
+                (Some note.text) (shared ~keeper:"alpha" settled);
+              Alcotest.(check bool) "readback retains the last observation as stale" true (last_read settled);
+              Alcotest.(check bool) "overlapping success cannot claim the shared value is saved" false
+                (match settled.toast with Some { level = Model.Toast_success; _ } -> true | _ -> false);
+              let authoritative = { note with text = "read from disk" } in
+              let reconciled = receive_latest settled (read_result ~requested_at:t2 (Some readback_id) (Ok authoritative)) in
+              Alcotest.(check (option string)) "fresh GET owns shared note and pristine draft"
+                (Some authoritative.text) (shared ~keeper:"alpha" reconciled);
+              Alcotest.(check (option string)) "fresh GET settles the awaiting draft"
+                (Some authoritative.text) (field reconciled);
+              let after_late_context = receive_latest reconciled (read_result None missing) in
+              Alcotest.(check (option string)) "late Context read cannot replace the reconciled disk note"
+                (Some authoritative.text) (shared ~keeper:"alpha" after_late_context);
+              let failed, cmds = receive_at ~now:t2 (edit "private draft" mid) (save_result None unavailable) in
+              Alcotest.(check (list (option int))) "a later failure still reconciles the first successful save"
+                [None] (rereads cmds);
+              Alcotest.(check (option string)) "passive read-back keeps a typed draft"
+                (Some "private draft")
+                (field (receive_latest failed (read_result ~requested_at:t2 None (Ok authoritative))));
+              let mismatch = Msg.Workspace_mismatch
+                { expected_instance = Some "old"; observed_instance = Some "new";
+                  observed_workspace_sha256 = None; message = "workspace changed" } in
+              let reset, cmds = receive_at ~now:t2 (edit "dirty" first)
+                  (read_result (Some first_id) (Error mismatch)) in
+              Alcotest.(check bool) "discarded draft GET still re-handshakes on mismatch" true
+                (not (Epoch.equal reset.epoch first.epoch) && has_get_health (Cmd.flatten cmds));
+              let wrong_keeper =
+                Wire_keeper_context.decode_keeper_operator_note ~keeper:"alpha"
+                  (Yojson.Safe.from_string {|{"keeper":"beta","note":{"text":"foreign","created_at":1}}|})
+                |> Result.map_error (fun detail -> Msg.Decode_error detail)
+              in
+              Alcotest.(check bool) "mismatched note receipt is rejected" true (Result.is_error wrong_keeper);
+              let rejected = receive seeded (read_result None wrong_keeper) in
+              let rejected = receive (slash_save rejected "write") (save_result None wrong_keeper) in
+              Alcotest.(check (option string)) "foreign GET and POST never replace the Keeper note"
+                (Some note.text) (shared ~keeper:"alpha" rejected);
               (* 5. Checkpoints 403 latches checkpoints_auth_denied without incident storm *)
               let m_denied, _ =
                 Update.step ~now:t0 m_ws

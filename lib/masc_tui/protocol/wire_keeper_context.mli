@@ -628,7 +628,7 @@ val decode_checkpoint_purge_result :
 val decode_checkpoint_delete_result :
   Yojson.Safe.t -> (checkpoint_delete_result, string) result
 val decode_keeper_operator_note :
-  Yojson.Safe.t -> (keeper_operator_note, string) result
+  keeper:string -> Yojson.Safe.t -> (keeper_operator_note, string) result
 
 val encode_keeper_up_body :
   ?expected_workspace:Wire_work.expected_workspace -> unit -> Yojson.Safe.t

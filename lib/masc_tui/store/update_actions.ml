@@ -2269,19 +2269,11 @@ let rec execute_slash ~now (m : Model.t) cmd =
                         m
                     , [] )
                   else
-                    ( Model.with_toast ~now ~level:Model.Toast_info
+                    Model.with_toast ~now ~level:Model.Toast_info
                         (Say.make ~ko:("운영자 노트 저장 중: " ^ keeper)
                            ~en:("Saving operator note for " ^ keeper))
                         m
-                    , [
-                        Cmd.Http_post
-                          {
-                            epoch = m.epoch;
-                            req =
-                              Cmd.Post_keeper_operator_note
-                                { keeper; text; modal_submission_id = None };
-                          };
-                      ] )
+                    |> Update_nav.post_keeper_operator_note ~keeper ~text ~modal_submission_id:None
               | Some _ | None ->
                   let m_open, cmds =
                     Update_nav.open_inline_modal m

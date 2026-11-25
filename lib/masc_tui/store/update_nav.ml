@@ -4727,6 +4727,12 @@ let parse_schedule_repeat raw =
         (Printf.sprintf "\"%s\" is not a repeat such as once or every 1h"
            raw)
 
+let post_keeper_operator_note ~keeper ~text ~modal_submission_id (m : Model.t) =
+  let keeper_context = Keeper_context_store.start_operator_note_write ~keeper m.keeper_context in
+  ( { m with keeper_context },
+    [Cmd.Http_post { epoch = m.epoch;
+                     req = Cmd.Post_keeper_operator_note { keeper; text; modal_submission_id } }] )
+
 let submit_inline_modal ~now (m : Model.t) =
   match m.inline_modal with
   | None -> (m, [])
@@ -6198,16 +6204,8 @@ let submit_inline_modal ~now (m : Model.t) =
                 set_modal_error "Operator note exceeds 4096-byte server cap"
               else
                 let sub_id, submitting = Model.modal_mark_submitting_with_id modal m in
-                ( submitting
-                , [
-                    Cmd.Http_post
-                      {
-                        epoch = m.epoch;
-                        req =
-                          Cmd.Post_keeper_operator_note
-                            { keeper; text; modal_submission_id = Some sub_id };
-                      };
-                  ] )
+                post_keeper_operator_note ~keeper ~text ~modal_submission_id:(Some sub_id)
+                  submitting
           | Nav.Tool_execute_form { tool_name; _ } -> (
               let tool_name =
                 match tool_name with

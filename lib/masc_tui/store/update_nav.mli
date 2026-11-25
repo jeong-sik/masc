@@ -282,6 +282,11 @@ val fast_deny_top : now:Clock.Mono.t -> Model.t -> Model.t * Cmd.t list
 val teleport_blocked : now:Clock.Mono.t -> Model.t -> Model.t * Cmd.t list
 val toggle_voice : now:Clock.Mono.t -> Model.t -> Model.t * Cmd.t list
 val submit_inline_modal : now:Clock.Mono.t -> Model.t -> Model.t * Cmd.t list
+
+val post_keeper_operator_note :
+  keeper:string -> text:string -> modal_submission_id:int option ->
+  Model.t -> Model.t * Cmd.t list
+
 val clamp_for_pane : Model.t -> Model.t
 val scroll_goal_dive_measure : delta:int -> goal_id:string -> Model.t -> Model.t
 val incidents_detail_max_scroll : Model.t -> int

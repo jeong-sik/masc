@@ -258,6 +258,123 @@ let mcp_call_owns_modal ~rpc_id (m : Model.t) =
       Int.equal pending_id rpc_id && Nav.equal_inline_action_kind original kind
   | Some _, (Some _ | None) | None, _ -> false
 
+let operator_note_prefill ~keeper (m : Model.t) =
+  Option.bind m.inline_modal (fun (modal : Model.inline_modal_state) ->
+      if Nav.equal_inline_action_kind modal.kind (Nav.Keeper_operator_note_form keeper)
+      then modal.note_prefill_id
+      else None)
+
+let reread_operator_note ~keeper (m : Model.t) =
+  let m, modal_prefill_id =
+    match operator_note_prefill ~keeper m, m.inline_modal with
+    | Some _, Some modal ->
+        let id, next = Model.next_modal_submission_id m in
+        { next with inline_modal = Some { modal with note_prefill_id = Some id } }, Some id
+    | None, _ | Some _, None -> m, None
+  in
+  m, [Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_keeper_operator_note { keeper; modal_prefill_id } }]
+
+let apply_operator_note_read ~now ~keeper ~modal_prefill_id ~requested_at result (m : Model.t) =
+  let context = Say.make ~ko:"운영자 노트 조회" ~en:"Operator note fetch" in
+  let source = Health.Source_keeper keeper in
+  let owns_prefill =
+    Option.is_some modal_prefill_id
+    && Option.equal Int.equal modal_prefill_id (operator_note_prefill ~keeper m)
+  in
+  let ks = Keeper_context_store.get_keeper ~keeper m.keeper_context in
+  let finish_prefill ~text ~error (m : Model.t) =
+    match m.inline_modal with
+    | Some modal when owns_prefill ->
+        let modal = Model.modal_update_active_field (fun _ -> text) modal in
+        { m with
+          nav = { m.nav with modal_edit_cursor = String.length text };
+          inline_modal = Some { modal with error } }
+    | Some _ | None -> m
+  in
+  match result with
+  | Error (Msg.Workspace_mismatch _ as err) -> record_http_incident ~now ~source ~context err m
+  | _ when Option.is_some modal_prefill_id && not owns_prefill -> m, []
+  | _ when (match ks.operator_note_writes with
+            | Keeper_context_store.Overlapping_note_writes _ -> true
+            | Keeper_context_store.No_note_writes | Keeper_context_store.One_note_write -> false) ->
+      (* The last overlapping save re-reads for the still-pristine owner. *)
+      m, []
+  | _ when Clock.Mono.compare requested_at ks.operator_note_read_after < 0 ->
+      if owns_prefill then reread_operator_note ~keeper m else m, []
+  | Ok note ->
+      let keeper_context =
+        Keeper_context_store.apply_operator_note ~observed_at:now ~requested_at ~keeper note
+          m.keeper_context
+      in
+      let text = if note.pending then note.text else "" in
+      finish_prefill ~text ~error:None { m with keeper_context }, []
+  | Error (Msg.Http_error { status = 404; _ }) ->
+      let keeper_context =
+        Keeper_context_store.mark_operator_note_absent ~requested_at ~keeper m.keeper_context
+      in
+      finish_prefill ~text:"" ~error:None { m with keeper_context }, []
+  | Error ((Msg.Http_error _ | Msg.Transport _ | Msg.Decode_error _) as err) ->
+      let reason = Msg.http_error_detail err in
+      let keeper_context =
+        Keeper_context_store.mark_operator_note_failed ~at:now ~requested_at ~keeper
+          ~reason ~retryable:(Msg.http_error_retryable err) m.keeper_context
+      in
+      record_http_incident ~now ~source ~context err
+        (finish_prefill ~text:"" ~error:(Some reason) { m with keeper_context })
+
+let apply_operator_note_save ~now ~keeper ~modal_submission_id result (m : Model.t) =
+  let context = Say.make ~ko:"운영자 노트 저장" ~en:"Operator note save" in
+  let source = Health.Source_keeper keeper in
+  let owns_modal (modal : Model.inline_modal_state) =
+    modal.submitting
+    && Option.equal Int.equal modal_submission_id (Some modal.submission_id)
+    && Nav.equal_inline_action_kind modal.kind (Nav.Keeper_operator_note_form keeper)
+  in
+  let owned = Option.exists owns_modal m.inline_modal in
+  let keeper_context, settlement =
+    Keeper_context_store.settle_operator_note_write ~now ~keeper ~confirmed:(Result.is_ok result)
+      m.keeper_context
+  in
+  let m = { m with keeper_context } in
+  let followup m =
+    match settlement with
+    | Keeper_context_store.Reread_note -> reread_operator_note ~keeper m
+    | Keeper_context_store.Isolated_note_write | Keeper_context_store.Await_note_writes -> m, []
+  in
+  match result with
+  | Error (Msg.Workspace_mismatch _ as err) -> record_http_incident ~now ~source ~context err m
+  | Ok note ->
+      let m = if owned then { m with nav = { m.nav with overlay = None }; inline_modal = None } else m in
+      (match settlement with
+       | Keeper_context_store.Isolated_note_write ->
+           let keeper_context =
+             Keeper_context_store.apply_operator_note ~observed_at:now ~requested_at:now ~keeper note
+               m.keeper_context
+           in
+           let m = { m with keeper_context } in
+           let m =
+             if owned || Option.is_none modal_submission_id then
+               Model.with_toast ~now ~level:Model.Toast_success
+                 (Say.make ~ko:("운영자 노트 저장됨: " ^ keeper)
+                    ~en:("Operator note saved: " ^ keeper)) m
+             else m
+           in
+           m, []
+       | Keeper_context_store.Await_note_writes | Keeper_context_store.Reread_note ->
+           followup m)
+  | Error ((Msg.Transport _ | Msg.Http_error _ | Msg.Decode_error _) as err) ->
+      let inline_modal = Option.map (fun (modal : Model.inline_modal_state) ->
+          if owned then { modal with submitting = false; error = Some (Msg.http_error_detail err) }
+          else modal) m.inline_modal in
+      let m, cmds = record_http_incident ~now ~source ~context err { m with inline_modal } in
+      let m =
+        if owned || Option.is_none modal_submission_id then
+          Model.with_toast ~now ~level:Model.Toast_error (Msg.http_error_summary err) m
+        else m
+      in
+      let m, read_cmds = followup m in
+      m, read_cmds @ cmds
+
 let apply_http_reply ~now (m : Model.t) reply =
   let failed_slot err slot =
     let reason =
@@ -3088,92 +3205,10 @@ let apply_http_reply ~now (m : Model.t) reply =
       ( Model.with_toast ~now ~level:Model.Toast_error
           (Msg.http_error_summary err) next
       , cmds )
-  | Msg.Reply_keeper_operator_note_loaded { keeper; modal_prefill_id; result } ->
-      let owned_modal =
-        Option.bind m.inline_modal (fun (modal : Model.inline_modal_state) ->
-            if Option.is_some modal_prefill_id
-               && Option.equal Int.equal modal.note_prefill_id modal_prefill_id
-               && Nav.equal_inline_action_kind modal.kind
-                    (Nav.Keeper_operator_note_form keeper)
-            then Some modal
-            else None)
-      in
-      if Option.is_some modal_prefill_id && Option.is_none owned_modal then (m, [])
-      else
-        let finish_prefill ~text ~error (m : Model.t) =
-          match owned_modal with
-          | None -> m
-          | Some modal ->
-              let modal = Model.modal_update_active_field (fun _ -> text) modal in
-              {
-                m with
-                nav = { m.nav with modal_edit_cursor = String.length text };
-                inline_modal = Some { modal with error };
-              }
-        in
-        (match result with
-        | Ok note ->
-            let keeper_context =
-              Keeper_context_store.apply_operator_note ~observed_at:now ~keeper note
-                m.keeper_context
-            in
-            let text = if note.pending then note.text else "" in
-            (finish_prefill ~text ~error:None { m with keeper_context }, [])
-        | Error (Msg.Http_error { status = 404; _ }) ->
-            let keeper_context =
-              Keeper_context_store.mark_operator_note_absent ~keeper m.keeper_context
-            in
-            (finish_prefill ~text:"" ~error:None { m with keeper_context }, [])
-        | Error err ->
-            err_reply
-              ~fail:(fun m ->
-                let reason = Msg.http_error_detail err in
-                let keeper_context =
-                  Keeper_context_store.mark_operator_note_failed ~at:now ~keeper
-                    ~reason ~retryable:(Msg.http_error_retryable err) m.keeper_context
-                in
-                finish_prefill ~text:"" ~error:(Some reason) { m with keeper_context })
-              ~source:(Health.Source_keeper keeper) ~ko:"운영자 노트 조회"
-              ~en:"Operator note fetch" err)
+  | Msg.Reply_keeper_operator_note_loaded { keeper; modal_prefill_id; requested_at; result } ->
+      apply_operator_note_read ~now ~keeper ~modal_prefill_id ~requested_at result m
   | Msg.Reply_keeper_operator_note_saved { keeper; modal_submission_id; result } ->
-      let owns_modal (modal : Model.inline_modal_state) =
-        modal.submitting
-        && Option.equal Int.equal modal_submission_id (Some modal.submission_id)
-        && Nav.equal_inline_action_kind modal.kind (Nav.Keeper_operator_note_form keeper)
-      in
-      (match result with
-      | Ok note ->
-          let close_modal = Option.exists owns_modal m.inline_modal in
-          let nav =
-            if close_modal then { m.nav with overlay = None } else m.nav
-          in
-          let inline_modal = if close_modal then None else m.inline_modal in
-          let keeper_context =
-            Keeper_context_store.apply_operator_note ~observed_at:now ~keeper note
-              m.keeper_context
-          in
-          let next =
-            { m with nav; inline_modal; keeper_context }
-            |> Model.with_toast ~now ~level:Model.Toast_success
-                 (Say.make ~ko:("운영자 노트 저장됨: " ^ keeper)
-                    ~en:("Operator note saved: " ^ keeper))
-          in
-          (next, [])
-      | Error err ->
-          let inline_modal =
-            Option.map
-              (fun (modal : Model.inline_modal_state) ->
-                if owns_modal modal then
-                  { modal with submitting = false; error = Some (Msg.http_error_detail err) }
-                else modal)
-              m.inline_modal
-          in
-          let next, cmds =
-            record_http_incident ~now ~source:(Health.Source_keeper keeper)
-              ~context:(Say.make ~ko:"운영자 노트 저장" ~en:"Operator note save")
-              err { m with inline_modal }
-          in
-          (Model.with_toast ~now ~level:Model.Toast_error (Msg.http_error_summary err) next, cmds))
+      apply_operator_note_save ~now ~keeper ~modal_submission_id result m
   | Msg.Reply_keeper_run_next { keeper; result; _ } ->
       let queue = Fleet_store.chat_queue_for ~keeper m.fleet in
       let queue = { queue with read = Observed.loading ~since_ns:now } in

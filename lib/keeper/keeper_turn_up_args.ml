@@ -22,6 +22,8 @@ type parsed_args = {
   microvm_backend_patch : Keeper_microvm_backend.t option option;
   remote_endpoint_opt : string option;
   remote_endpoint_present : bool;
+  group_opt : string option;
+  group_present : bool;
   network_mode_opt : network_mode option;
   egress_allow_opt : string list option;
   skill_names_opt : string list option;
@@ -191,6 +193,19 @@ let parse_remote_endpoint args =
            "remote_endpoint must be a string or null (received %s)"
            (Json_util.kind_name other))
 
+let parse_group args =
+  match Json_util.assoc_member_opt "group" args with
+  | None -> Ok (false, None)
+  | Some `Null -> Ok (true, None)
+  | Some (`String raw) ->
+      let group = String.trim raw in
+      if group = "" then Ok (true, None) else Ok (true, Some group)
+  | Some other ->
+      Error
+        (Printf.sprintf
+           "group must be a string or null (received %s)"
+           (Json_util.kind_name other))
+
 let normalize_max_context_override_value v =
   if v = 0 then Ok None
   else Keeper_config.validate_max_context_override_value v |> Result.map Option.some
@@ -255,6 +270,7 @@ let known_turn_up_args =
   [ "name"
   ; "runtime_id"
   ; "activation_mode"
+  ; "group"
   ; "mention_targets"
   ; "board_interests"
   ; "max_context_override"
@@ -445,6 +461,7 @@ let parse
     | Ok instructions_arg ->
     let max_context_override_res = parse_max_context_override args in
     let remote_endpoint_res = parse_remote_endpoint args in
+    let group_res = parse_group args in
     let egress_allow_opt_res = parse_present_string_list_opt args "egress_allow" in
     match parse_microvm_backend_patch args with
     | Error message -> Error (tool_result_error ~class_:Tool_result.Policy_rejection message)
@@ -464,6 +481,11 @@ let parse
       | Ok value -> value
       | Error _ -> false, None
     in
+    let merge_group_present, merge_group_opt =
+      match group_res with
+      | Ok value -> value
+      | Error _ -> false, None
+    in
     let toml_edits =
       toml_edits_of_patch
         { instructions = instructions_arg
@@ -472,6 +494,8 @@ let parse
         ; mention_targets = mention_targets_opt
         ; board_interests = board_interests_opt
         ; activation_mode = activation_mode_opt
+        ; group_present = merge_group_present
+        ; group = merge_group_opt
         ; sandbox_image = sandbox_image_patch
         ; microvm_backend = microvm_backend_patch
         ; remote_endpoint_present = merge_remote_endpoint_present
@@ -683,14 +707,15 @@ let parse
               Some (Keeper_turn_sandbox_runtime.image_unresolved_message error)))
     in
     match
-      sandbox_profile_error, sandbox_dispatch_error, max_context_override_res
+      sandbox_profile_error, sandbox_dispatch_error, max_context_override_res, group_res
     with
-    | Some msg, _, _
-    | None, Some msg, _ ->
+    | Some msg, _, _, _
+    | None, Some msg, _, _ ->
       Error (tool_result_error ~class_:Tool_result.Policy_rejection msg)
-    | None, None, Error msg ->
+    | None, None, Error msg, _
+    | None, None, Ok _, Error msg ->
       Error (tool_result_error ~class_:Tool_result.Policy_rejection msg)
-    | None, None, Ok (max_context_override_present, max_context_override_opt) ->
+    | None, None, Ok (max_context_override_present, max_context_override_opt), Ok (group_present, group_opt) ->
     let remote_endpoint_present, remote_endpoint_opt =
       match remote_endpoint_res with
       | Ok value -> value
@@ -740,6 +765,8 @@ let parse
       microvm_backend_patch;
       remote_endpoint_opt;
       remote_endpoint_present;
+      group_opt;
+      group_present;
       network_mode_opt;
       egress_allow_opt;
       skill_names_opt;

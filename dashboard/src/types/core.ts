@@ -1773,6 +1773,7 @@ export interface KeeperConfig {
   runtime_sync?: KeeperConfigRuntimeSync
   config_transaction_warnings?: KeeperManifestWarning[]
   activation_mode: KeeperActivationMode
+  group?: string | null
   max_context_override: number | null
   // The server's string, unnormalized. It is not a `SandboxProfile`: when the
   // response omits the field `normalizeKeeperConfig` writes the placeholder

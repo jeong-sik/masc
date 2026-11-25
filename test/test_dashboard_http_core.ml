@@ -6026,6 +6026,13 @@ let test_config_patch_remote_endpoint_shape () =
   check_error "the empty string is not a name" [ "remote_endpoint", `String "" ];
   check_error "a non-string, non-null value is refused"
     [ "remote_endpoint", `Int 1 ];
+  (* [group] clears on blank or null, unlike [remote_endpoint] which refuses
+     a blank name; trimming and removal are decided by
+     [Keeper_turn_up_args.parse] on the apply path. *)
+  check_ok "a group label is accepted" [ "group", `String "platform" ];
+  check_ok "a blank group clears" [ "group", `String "  " ];
+  check_ok "null detaches the group" [ "group", `Null ];
+  check_error "a non-string, non-null group is refused" [ "group", `Int 1 ];
   check_ok "sandbox image override" ["sandbox_image", `String "documents"];
   check_error "an image tag is not a catalog name"
     ["sandbox_image", `String "example/documents:v1"];

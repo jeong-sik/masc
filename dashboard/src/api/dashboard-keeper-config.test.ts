@@ -7,6 +7,21 @@ describe('keeper config source projection', () => {
     vi.unstubAllGlobals()
   })
 
+  it('projects keeper.group and maps an absent group to null', async () => {
+    const read = async (group: unknown) => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+        name: 'rtprobe', activation_mode: 'manual',
+        max_context_override: null, skills: { names: null },
+        config_revision: { manifest: { state: 'missing' }, runtime_assignment: { state: 'runtime_config_missing' } },
+        ...(group === undefined ? {} : { group }),
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+      return (await fetchKeeperConfig('rtprobe')).group
+    }
+    expect(await read('platform')).toBe('platform')
+    expect(await read(null)).toBe(null)
+    expect(await read(undefined)).toBe(null)
+  })
+
   it('preserves a typed workspace prompt failure while rejecting malformed reasons and details', async () => {
     const unavailable = {
       state: 'unavailable', reason: 'workspace_unavailable',

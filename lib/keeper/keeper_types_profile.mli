@@ -164,6 +164,8 @@ type toml_field_patch =
   ; mention_targets : string list option
   ; board_interests : string list option
   ; activation_mode : Keeper_activation_mode.t option
+  ; group_present : bool
+  ; group : string option
   ; sandbox_image : string option option
   ; microvm_backend : Keeper_microvm_backend.t option option
   ; remote_endpoint_present : bool

@@ -29,6 +29,10 @@ type parsed_args =
             selects the parsed backend, only for a microvm profile. *)
   ; remote_endpoint_opt : string option
   ; remote_endpoint_present : bool
+  ; group_opt : string option
+        (** [None] when the arg was absent or [null] or blank; paired
+            [group_present] distinguishes an explicit clear from omission. *)
+  ; group_present : bool
   ; network_mode_opt : network_mode option
   ; egress_allow_opt : string list option
         (** What this keeper may reach in the policy lane, or

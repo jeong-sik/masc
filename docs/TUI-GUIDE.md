@@ -576,9 +576,10 @@ For an existing Keeper, edit `keeper.group` directly in **4 Keepers → Dive →
 Config** (or in the `4 Keepers` split preview Config tab: `↑`/`↓` to select,
 `Enter` to edit, `d` for dry-run diff, `Ctrl+S` to save via
 `POST /api/v1/config/patch` with `target=keeper:<name>`, `next_turn` reload
-scope), or edit `<base-path>/.masc/config/keepers/<name>.toml`. When creating
-a new Keeper via `n` on **4 Keepers** (or the `4 Keepers & Companies` tab in
-Settings `,`), you can set `keeper.group` directly in the creation form.
+scope), in the dashboard Keeper Settings panel (**소속 조직**), or edit
+`<base-path>/.masc/config/keepers/<name>.toml`. When creating a new Keeper
+via `n` on **4 Keepers** (or the `4 Keepers & Companies` tab in Settings `,`),
+you can set `keeper.group` directly in the creation form.
 
 - Whitespace is trimmed; an absent or blank `group` maps to `"ungrouped"` on
   the server (in the TUI fleet list, Keepers without an explicit `keeper.group`

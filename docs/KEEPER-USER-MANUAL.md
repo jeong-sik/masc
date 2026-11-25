@@ -514,9 +514,11 @@ when two or more share one, otherwise `"Other"`).
 use `keeper.group` to organize fleet rows and roll up activity and spend. For
 an existing Keeper, edit `keeper.group` in `.masc/config/keepers/<name>.toml`
 (or via `POST /api/v1/config/patch` with `target=keeper:<name>`, `next_turn`
-reload scope) and inspect it read-only in TUI **4 Keepers → Dive → Config**;
-for a new Keeper, you can set `keeper.group` during creation via `n` on **4
-Keepers** (or the `4 Keepers & Companies` tab in Settings `,`).
+reload scope), in the dashboard Keeper Settings panel under **소속 조직**, or
+in TUI **4 Keepers → Dive → Config** (schema field `keeper.group`); the Dive
+summary row only mirrors it read-only. For a new Keeper, you can set
+`keeper.group` during creation via `n` on **4 Keepers** (or the **4 Keepers &
+Companies** tab in Settings `,`).
 
 `keeper.group` never routes Board mentions, never admits targetless Board
 discovery, and never grants permissions — keep `mention_targets` for exact

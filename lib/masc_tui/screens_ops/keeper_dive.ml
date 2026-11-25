@@ -2884,8 +2884,11 @@ let build_keeper_form_state ~(model : Model.t) ~name ~target_matches
             Form.make_field ~key:"keeper.group"
               ~label:(Say.make ~ko:"소속 회사 / 그룹" ~en:"Company / Group")
               ~provenance:(Form.Prov_keeper_toml name)
-              ~reload_scope:Form.Hot_reload ~read_only:true
-              (Form.Text_val k.company);
+              ~reload_scope:Form.Next_turn ~read_only:true
+              (Form.Text_val
+                 (match k.group with
+                  | Some group -> group
+                  | None -> "ungrouped"));
             Form.make_field ~key:"keeper.runtime_id"
               ~label:(Say.make ~ko:"런타임 캐스케이드" ~en:"Runtime Cascade")
               ~provenance:(Form.Prov_keeper_toml name)

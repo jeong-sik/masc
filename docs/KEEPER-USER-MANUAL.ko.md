@@ -422,8 +422,9 @@ group = "platform"   # 선택 항목; 생략하거나 비우면 "ungrouped"
 **펄스(Pulse)**, **키퍼(Keepers, `회사별` 모드)**, **런타임 → 효율·지출** 화면이
 `keeper.group` 으로 Keeper 를 묶고 활동·지출을 집계합니다. 기존 Keeper 는
 `.masc/config/keepers/<name>.toml` 파일(또는 `target=keeper:<name>` 의
-`POST /api/v1/config/patch`, `next_turn` 반영 범위)에서 수정하고 TUI 의
-**4 키퍼 → 상세 → 설정**에서 읽기 전용으로 확인할 수 있으며, 새 Keeper 를 만들 때는
+`POST /api/v1/config/patch`, `next_turn` 반영 범위), 대시보드 Keeper 설정 패널의
+**소속 조직**, 또는 TUI **4 키퍼 → 상세 → 설정**(스키마 필드 `keeper.group`)에서 수정하고,
+상세 요약 행에서는 읽기 전용으로만 확인할 수 있으며, 새 Keeper 를 만들 때는
 **4 키퍼**(또는 설정 `,` 의 `4 키퍼 · 회사` 탭)에서 `n` 생성 폼에 바로 지정할 수 있습니다.
 
 `keeper.group` 은 보드 멘션 라우팅(`mention_targets`)이나 수신자 없는 글의 관심 주제

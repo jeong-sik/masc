@@ -793,6 +793,7 @@ type dashboard_config_field =
   | Field_sandbox_profile
   | Field_network_mode
   | Field_activation_mode
+  | Field_group
   | Field_mention_targets
   | Field_board_interests
 [@@deriving enumerate]
@@ -811,6 +812,7 @@ let dashboard_config_field_key = function
   | Field_sandbox_profile -> "sandbox_profile"
   | Field_network_mode -> "network_mode"
   | Field_activation_mode -> "activation_mode"
+  | Field_group -> "group"
   | Field_mention_targets -> "mention_targets"
   | Field_board_interests -> "board_interests"
 
@@ -1012,6 +1014,14 @@ let validate_dashboard_config_field field value =
            if String.trim raw = "" then
              Error "remote_endpoint must not be blank (send null to clear it)"
            else Ok ()
+       | `Null -> Ok ()
+       | other -> dashboard_field_type_error key "a string or null" other)
+  | Field_group ->
+    (* Shape only. A blank string clears the group, like [null]; the apply
+       path trims and refuses only non-string, non-null values. *)
+    persisted
+      (match value with
+       | `String _ -> Ok ()
        | `Null -> Ok ()
        | other -> dashboard_field_type_error key "a string or null" other)
   | Field_mention_targets | Field_board_interests ->

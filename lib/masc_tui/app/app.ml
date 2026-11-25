@@ -1190,7 +1190,26 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                Cmd_executor.shutdown ~preserve_owned_server:!restart_requested
                  executor);
 
+        let presented_run_next = ref None in
+        let pending_run_next = ref [] in
+        let same_queue_action (a : Update_nav.queue_run_next) (b : Update_nav.queue_run_next) =
+          String.equal a.keeper b.keeper
+          && String.equal a.request_id b.request_id
+          && String.equal a.body b.body
+          && Option.equal String.equal a.interrupt_token b.interrupt_token
+        in
+        let is_pending epoch keeper request_id (pending_epoch, pending_keeper, pending_id) =
+          Epoch.equal epoch pending_epoch && String.equal keeper pending_keeper
+          && String.equal request_id pending_id
+        in
         let apply_msg ~now msg =
+          (* This receipt releases only the request that reserved the key. *)
+          ((match msg with
+            | Msg.Http_reply { epoch; reply = Msg.Reply_keeper_run_next { keeper; request_id; _ } } ->
+                pending_run_next :=
+                  List.filter (fun pending -> not (is_pending epoch keeper request_id pending))
+                    !pending_run_next
+            | _ -> ()) [@warning "-4"]);
           let toggle_mouse =
             match msg with
             | Msg.Key_event kev -> should_toggle_mouse_capture !model kev
@@ -1238,6 +1257,42 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
           end
           else begin
             let next_model, cmds = Update.step ~now !model msg in
+            let drawer_run_next =
+              Option.equal Nav.equal_overlay !model.nav.overlay
+                (Some (Nav.Queue_context Nav.Drawer_queue))
+              && List.exists
+                   (* Other drawer commands do not use the painted run-next action. *)
+                   ((function
+                     | Cmd.Http_post { req = Cmd.Post_keeper_run_next _; _ } -> true
+                     | _ -> false) [@warning "-4"])
+                   cmds
+            in
+            let next_model, cmds =
+              if drawer_run_next then begin
+                let painted = !presented_run_next in
+                presented_run_next := None;
+                let lost = Terminal_out.take_lost () in
+                if lost then Presenter.invalidate presenter;
+                match painted, Update_nav.queue_run_next_target !model with
+                | Some (epoch, shown), Some current
+                  when not lost && not (Terminal_out.behind ())
+                       && Epoch.equal epoch !model.epoch
+                       && same_queue_action shown current
+                       && not (List.exists
+                                 (is_pending epoch current.keeper current.request_id)
+                                 !pending_run_next) ->
+                    pending_run_next :=
+                      (epoch, current.keeper, current.request_id) :: !pending_run_next;
+                    next_model, cmds
+                | _ ->
+                    ( Model.with_toast ~now ~level:Model.Toast_warning
+                        (Say.make ~ko:"대기 메시지가 바뀌었습니다. 표시된 항목을 다시 확인하세요"
+                           ~en:"The queued message changed. Check the displayed item first")
+                        !model
+                    , [] )
+              end
+              else next_model, cmds
+            in
             model := next_model;
             scheduler :=
               Frame_scheduler.mark_dirty ~pace:(msg_pace msg) !scheduler;
@@ -1331,6 +1386,7 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
             if not !should_quit then begin
               let cur_gen = Signals.resize_generation signals in
               if cur_gen <> !last_resize_gen then begin
+                presented_run_next := None;
                 last_resize_gen := cur_gen;
                 let cols, rows =
                   measure_terminal_size
@@ -1364,6 +1420,7 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
 
               (* Recover from lost terminal writes by forcing full repaint. *)
               if Terminal_out.take_lost () then begin
+                presented_run_next := None;
                 Presenter.invalidate presenter;
                 scheduler :=
                   Frame_scheduler.mark_dirty
@@ -1511,6 +1568,9 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                         ~write:Terminal_out.write
                     in
                     if diff_stats.bytes_emitted > 0 then Terminal_out.flush ();
+                    presented_run_next :=
+                      Option.map (fun target -> frame_model.epoch, target)
+                        (Update_nav.queue_run_next_target frame_model);
                     let post_bytes, next_graphic =
                       plan_memory_graphic_place ~active:!active_memory_graphic
                         ~probe:probe_obs ~term_program ~in_tmux ~model:!model

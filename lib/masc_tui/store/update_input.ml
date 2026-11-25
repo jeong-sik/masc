@@ -862,6 +862,23 @@ let dispatch_queue_context_overlay_key ~now (m : Model.t)
     (norm : Keymap.Input.key_event) =
   let norm = Keymap.replay_ime_event norm in
   match norm.key with
+  | Keymap.Input.Char "n" when is_printable_key norm ->
+      (match Update_nav.queue_run_next_target m with
+       | None -> None
+       | Some { keeper; request_id; interrupt_token; _ } ->
+           let queue = Fleet_store.chat_queue_for ~keeper m.fleet in
+           let queue = { queue with read = Observed.loading ~since_ns:now } in
+           let fleet = Fleet_store.set_chat_queue ~keeper queue m.fleet in
+           let next =
+             Model.with_toast ~now ~level:Model.Toast_info
+               (Say.make ~ko:"대기 메시지 우선 실행 요청 중"
+                  ~en:"Requesting priority for the queued message")
+               { m with fleet }
+           in
+           Some (next,
+             [ Cmd.Http_post
+                 { epoch = m.epoch;
+                   req = Cmd.Post_keeper_run_next { keeper; request_id; interrupt_token } } ]))
   | Keymap.Input.Char "j" when is_printable_key norm ->
       Some (Update_actions.execute_action ~now m (Keymap.Move Keymap.Down))
   | Keymap.Input.Char "k" when is_printable_key norm ->

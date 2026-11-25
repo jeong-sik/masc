@@ -3293,18 +3293,9 @@ let execute_post t ~epoch req =
                 ~decode:Wire_keeper_context.decode_keeper_operator_note
             in
             Some (Msg.Reply_keeper_operator_note_saved { keeper; result })
-        | Cmd.Post_keeper_run_next { keeper; _ } ->
+        | Cmd.Post_keeper_run_next { keeper; request_id; _ } ->
             let result = post_ack t ~path ~body in
-            Some
-              (Msg.Reply_keeper_control
-                 {
-                   keeper;
-                   label =
-                     Say.make ~ko:("대기 요청 우선 실행 지정됨: " ^ keeper)
-                       ~en:("Queued message prioritized (run-next): " ^ keeper);
-                   refresh_roster = false;
-                   result;
-                 })
+            Some (Msg.Reply_keeper_run_next { keeper; request_id; result })
         | Cmd.Post_gate_resolution_policy { id; approved; remember_rule; _ } ->
             let result = post_ack t ~path ~body in
             let label, decision_kind =

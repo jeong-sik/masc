@@ -29,6 +29,7 @@ type turn_report =
   ; stop_reason : string
   ; text_preview : string
   ; usage : Runtime_acp_client.usage
+  ; usage_source : Runtime_acp_client.usage_source
   }
 
 type driver_report =
@@ -430,6 +431,7 @@ let probe_one_driver ~env ~cwd ~timeout_s ~model_override ~posture (driver : Run
                ; stop_reason = Runtime_acp_client.stop_reason_to_string r1.stop_reason
                ; text_preview = truncate_preview r1.text
                ; usage = r1.usage
+               ; usage_source = r1.usage_source
                }
              in
              let ping_reply_verified =
@@ -483,6 +485,7 @@ let probe_one_driver ~env ~cwd ~timeout_s ~model_override ~posture (driver : Run
                   ; stop_reason = Runtime_acp_client.stop_reason_to_string r2.stop_reason
                   ; text_preview = truncate_preview r2.text
                   ; usage = r2.usage
+                  ; usage_source = r2.usage_source
                   }
                 in
                 let skill_reply_verified =
@@ -559,12 +562,48 @@ let normalized_usage_to_yojson (u : Runtime_acp_client.normalized_usage) : Yojso
     ]
 ;;
 
+let muse_counts_to_yojson (c : Runtime_muse_session_log.counts) : Yojson.Safe.t =
+  `Assoc
+    [ "input_tokens", `Int c.Runtime_muse_session_log.input_tokens
+    ; "output_tokens", `Int c.Runtime_muse_session_log.output_tokens
+    ; "cache_read_tokens", `Int c.Runtime_muse_session_log.cache_read_tokens
+    ; "reasoning_tokens", `Int c.Runtime_muse_session_log.reasoning_tokens
+    ]
+;;
+
+(* Where [usage] came from. A Muse turn whose journal could not be read shows
+   the reason here instead of a bare zero in [usage]. *)
+let usage_source_to_yojson (source : Runtime_acp_client.usage_source) : Yojson.Safe.t =
+  match source with
+  | Runtime_acp_client.Usage_from_acp -> `Assoc [ "source", `String "acp" ]
+  | Runtime_acp_client.Usage_from_muse_journal turn ->
+    `Assoc
+      [ "source", `String "muse_session_journal"
+      ; "requests", `Int turn.Runtime_muse_session_log.main_requests
+      ; "main", muse_counts_to_yojson turn.Runtime_muse_session_log.main
+      ; ( "main_cache_write_tokens"
+        , `Int turn.Runtime_muse_session_log.main_cache_write_tokens )
+      ; ( "last_request_input_tokens"
+        , match turn.Runtime_muse_session_log.last_request_input_tokens with
+          | Some n -> `Int n
+          | None -> `Null )
+      ; "reviews", `Int turn.Runtime_muse_session_log.reviews
+      ; "review", muse_counts_to_yojson turn.Runtime_muse_session_log.review
+      ]
+  | Runtime_acp_client.Usage_unreadable err ->
+    `Assoc
+      [ "source", `String "unreadable"
+      ; "reason", `String (Runtime_muse_session_log.error_to_string err)
+      ]
+;;
+
 let turn_report_to_yojson ~driver (t : turn_report) : Yojson.Safe.t =
   `Assoc
     [ "latency_ms", `Int t.latency_ms
     ; "stop_reason", `String t.stop_reason
     ; "text_preview", `String t.text_preview
     ; "usage", usage_to_yojson t.usage
+    ; "usage_source", usage_source_to_yojson t.usage_source
     ; ( "normalized_usage"
       , normalized_usage_to_yojson (Runtime_acp_client.normalize_usage driver t.usage) )
     ]

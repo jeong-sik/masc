@@ -103,6 +103,10 @@ type output_accounting =
   | Inclusive_of_thought
   | Exclusive_of_thought
 
+type usage_channel =
+  | Usage_over_acp
+  | Usage_in_muse_session_journal
+
 type mcp_identifier_syntax =
   | Mcp_call_wrapper
   | Mcp_paren_wrapper
@@ -129,6 +133,7 @@ type driver_profile =
   ; system_prompt_channel : system_prompt_channel
   ; input_accounting : input_accounting
   ; output_accounting : output_accounting
+  ; usage_channel : usage_channel
   ; supports_skills_dir_flag : bool
   ; mode_for_native_none : string
   ; mode_for_native_read : string
@@ -164,6 +169,7 @@ let profile_of_driver = function
        cachedReadTokens + outputTokens (outputTokens already includes thoughtTokens). *)
     ; input_accounting = Exclusive_of_cached
     ; output_accounting = Inclusive_of_thought
+    ; usage_channel = Usage_over_acp
     ; supports_skills_dir_flag = false
     ; mode_for_native_none = "default"
     ; mode_for_native_read = "default"
@@ -187,6 +193,7 @@ let profile_of_driver = function
     ; system_prompt_channel = Framed_in_first_prompt
     ; input_accounting = Inclusive_of_cached
     ; output_accounting = Inclusive_of_thought
+    ; usage_channel = Usage_over_acp
     ; supports_skills_dir_flag = true
     ; mode_for_native_none = "default"
     ; mode_for_native_read = "plan"
@@ -219,6 +226,7 @@ let profile_of_driver = function
        outputTokens (inputTokens already includes cachedReadTokens). *)
     ; input_accounting = Inclusive_of_cached
     ; output_accounting = Inclusive_of_thought
+    ; usage_channel = Usage_over_acp
     ; supports_skills_dir_flag = false
     ; mode_for_native_none = "ask"
     ; mode_for_native_read = "ask"
@@ -290,11 +298,16 @@ let profile_of_driver = function
        names return -32601, and -c permissions.default_profile is refused. *)
     ; mcp_identifier_syntaxes = [ Mcp_double_underscore ]
     ; system_prompt_channel = Framed_in_first_prompt
-    (* muse acp reports no per-turn token counts: the prompt result holds only
-       stopReason and usage_update holds [used]/[size] of the context window.
-       The accounting fields are read only when a usage record exists. *)
+    (* muse acp reports no per-turn token counts over ACP: the prompt result
+       holds only stopReason and usage_update holds [used]/[size] of the
+       context window. The host writes the counts of every model request and
+       every approval review to its session journal, and [prompt] reads them
+       from there. The two accounting fields are the ones the journal's counts
+       follow: input includes the cached tokens, output includes the reasoning
+       tokens ([Runtime_muse_session_log] rejects a record that does not). *)
     ; input_accounting = Inclusive_of_cached
     ; output_accounting = Inclusive_of_thought
+    ; usage_channel = Usage_in_muse_session_journal
     ; supports_skills_dir_flag = false
     (* Modes advertised by session/new: allowAll, promptUnmatched, onRequest
        (default), denyUnmatched. Pinning "onRequest" on every session keeps a
@@ -690,12 +703,18 @@ let permission_policy_of_posture ~mcp_server_name ~allowed_tool_names = function
   | Runtime_native_tools.Native_full -> Allow_all
 ;;
 
+type usage_source =
+  | Usage_from_acp
+  | Usage_from_muse_journal of Runtime_muse_session_log.turn
+  | Usage_unreadable of Runtime_muse_session_log.error
+
 type prompt_result =
   { session_id : string
   ; stop_reason : stop_reason
   ; text : string
   ; thought : string
   ; usage : usage
+  ; usage_source : usage_source
   ; tool_calls_observed : int
   ; wall_duration_s : float
   }
@@ -2311,6 +2330,13 @@ type rpc_response =
   | Rpc_err of int * string * Yojson.Safe.t option
   | Rpc_closed of string
 
+(* Where a host that reports no token counts over ACP writes them, resolved
+   once from the environment the host was started with. *)
+type usage_journal =
+  | No_usage_journal
+  | Muse_usage_journal of
+      (Runtime_muse_session_log.root, Runtime_muse_session_log.error) result
+
 type t =
   { driver : driver
   ; mutable capabilities : agent_capabilities
@@ -2318,6 +2344,7 @@ type t =
   ; managed_schema_root : (string * string) option
   ; mcp_server_name : string option
   ; mcp_server_isolation : mcp_server_isolation
+  ; usage_journal : usage_journal
   ; mutable stderr_secrets : string list
   ; clock : float Eio.Time.clock_ty Eio.Resource.t
   ; signal_term : unit -> unit
@@ -3144,6 +3171,12 @@ let start ~sw ~proc_mgr ~clock ?fs ~(config : config) ?mcp_server ?native_postur
         ~driver:config.driver
         ~extra_strip_env:config.strip_env
     in
+    let usage_journal =
+      match profile.usage_channel with
+      | Usage_over_acp -> No_usage_journal
+      | Usage_in_muse_session_journal ->
+        Muse_usage_journal (Runtime_muse_session_log.root_of_environment env)
+    in
     let resolved_cli_path =
       Runtime_official_cli_install.spawn_path
         (install_client_of_driver config.driver)
@@ -3240,6 +3273,7 @@ let start ~sw ~proc_mgr ~clock ?fs ~(config : config) ?mcp_server ?native_postur
                   ; managed_schema_root
                   ; mcp_server_name
                   ; mcp_server_isolation
+                  ; usage_journal
                   ; stderr_secrets
                   ; clock = (clock :> float Eio.Time.clock_ty Eio.Resource.t)
                   ; signal_term
@@ -4000,6 +4034,29 @@ let resume_session
 
 (* ── Prompt execution with streaming & cancellation ───────────────────────── *)
 
+(* The tokens of a prompt whose host reports none over ACP: its model requests
+   and its approval reviews, read from the host's journal. [acp_usage] keeps
+   the context window the host does report. When the host gave no occupancy,
+   the input of the last request stands in for it: the input of the whole
+   prompt adds up the context of every request and is no occupancy. *)
+let usage_of_muse_turn (acp_usage : usage) (turn : Runtime_muse_session_log.turn) : usage =
+  let total = Runtime_muse_session_log.total turn in
+  let input_tokens = total.Runtime_muse_session_log.input_tokens in
+  let output_tokens = total.Runtime_muse_session_log.output_tokens in
+  { input_tokens
+  ; output_tokens
+  ; cached_read_tokens = total.Runtime_muse_session_log.cache_read_tokens
+  ; cached_write_tokens = turn.Runtime_muse_session_log.main_cache_write_tokens
+  ; thought_tokens = total.Runtime_muse_session_log.reasoning_tokens
+  ; total_tokens = input_tokens + output_tokens
+  ; context_used =
+      (match acp_usage.context_used with
+       | Some used when used > 0 -> acp_usage.context_used
+       | Some _ | None -> turn.Runtime_muse_session_log.last_request_input_tokens)
+  ; context_size = acp_usage.context_size
+  }
+;;
+
 let prompt
       t
       ~session_id
@@ -4121,6 +4178,16 @@ let prompt
         ~in_flight_work:t.in_flight_external_work
         promise
   in
+  (* The journal's length before the prompt is sent: what it gains after that
+     is the prompt's. A journal that cannot be found never stops the prompt. *)
+  let journal_mark =
+    match t.usage_journal with
+    | No_usage_journal -> None
+    | Muse_usage_journal root ->
+      Some
+        (let* root = root in
+         Runtime_muse_session_log.mark root ~session_id)
+  in
   let result =
     Fun.protect ~finally:clear_active_turn (fun () ->
       try
@@ -4141,13 +4208,23 @@ let prompt
   in
   match result with
   | Error _ as err -> err
-  | Ok (stop_reason, usage) ->
+  | Ok (stop_reason, acp_usage) ->
+    let usage, usage_source =
+      match journal_mark with
+      | None -> acp_usage, Usage_from_acp
+      | Some (Error err) -> acp_usage, Usage_unreadable err
+      | Some (Ok mark) ->
+        (match Runtime_muse_session_log.read_turn mark with
+         | Ok turn -> usage_of_muse_turn acp_usage turn, Usage_from_muse_journal turn
+         | Error err -> acp_usage, Usage_unreadable err)
+    in
     Ok
       { session_id
       ; stop_reason
       ; text = Buffer.contents text_buf
       ; thought = Buffer.contents thought_buf
       ; usage
+      ; usage_source
       ; tool_calls_observed = !tool_calls
       ; wall_duration_s = Float.max 0.0 (Time_compat.now () -. started_at)
       }

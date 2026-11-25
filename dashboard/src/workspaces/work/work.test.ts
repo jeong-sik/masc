@@ -385,12 +385,6 @@ describe('workspaces/work', () => {
       },
     })
 
-    // Session epoch change immediately locks Goal Confirmation action
-    bumpSessionEpoch()
-    await flushUi(2)
-    expect(container.querySelector('.tla')!.getAttribute('data-locked')).toBe('true')
-    expect((container.querySelector('.tla fieldset') as HTMLFieldSetElement).disabled).toBe(true)
-
     // Clicking linked task jumps to /work/tasks/task-42
     const taskButtons = [...container.querySelectorAll('button')].filter((b) =>
       b.textContent?.includes('Build Goals tab'),
@@ -398,6 +392,137 @@ describe('workspaces/work', () => {
     expect(taskButtons.length).toBeGreaterThan(0)
     taskButtons[0]!.click()
     expect(onNavigate).toHaveBeenCalledWith('/work/tasks/task-42')
+
+    // The previous workspace's Goal and proof disappear while the new source is pending.
+    const oldFetch = globalThis.fetch
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).startsWith('/api/v1/dashboard/goals')) {
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(init.signal!.reason), { once: true })
+        })
+      }
+      return oldFetch(input, init)
+    }) as typeof fetch
+    bumpSessionEpoch()
+    await flushUi()
+    expect(container.querySelector('.tla')).toBeNull()
+    expect(container.textContent).not.toContain('Finish Layer 6 Work & Knowledge')
+    expect(container.textContent).toContain('목표 목록 불러오는 중')
+  })
+
+  it('Goals shows independent verification progress without treating a failed or partial queue as empty', async () => {
+    const goal = {
+      id: 'goal-visible',
+      title: 'Independent goal',
+      phase: 'Executing',
+      priority: 1,
+      measure: { kind: 'done_when', condition: 'Independent response' },
+      procedure: 'Return the goal first',
+      linked_task_count: 1,
+      tasks: [{ id: 'task-linked', title: 'Linked task', status: 'todo' }],
+    }
+    const request = {
+      request_id: 'verification-live',
+      task_id: 'task-linked',
+      task_title: 'Linked task',
+      review_observation: { state: 'running' },
+    }
+    let resolveVerification!: (response: Response) => void
+    let verification = new Promise<Response>((resolve) => { resolveVerification = resolve })
+    let goalReads = 0
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/dashboard/goals')) {
+        goalReads += 1
+        return jsonResponse({ tree: [goal] })
+      }
+      if (url.startsWith('/api/v1/verification/requests')) return (await verification).clone()
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(html`<${WorkWorkspace} subroute="goals" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi()
+    const panel = container.querySelector('[aria-label="연결 태스크 검증 판정"]')!
+    const refresh = [...panel.querySelectorAll('button')]
+      .find((button) => button.textContent?.trim() === '검증 다시 읽기')!
+    const readAgain = async (body: unknown, status = 200) => {
+      verification = Promise.resolve(jsonResponse(body, status))
+      refresh.click()
+      await flushUi()
+    }
+    const empty = '이 목표에 연결된 태스크의 대기 중인 검증 제출이 없습니다.'
+    expect(container.querySelector('[aria-label="목표 목록"]')?.textContent).toContain(goal.title)
+    expect(panel.querySelector('[role="status"] [data-inline-spinner]')).not.toBeNull()
+    expect(panel.textContent).not.toContain(empty)
+
+    resolveVerification(jsonResponse({ requests: [request], truncated: false }))
+    await flushUi()
+    expect(panel.textContent).toContain('검토 중')
+    expect(panel.querySelector('button.wk-btn-ok')?.hasAttribute('disabled')).toBe(false)
+
+    await readAgain({ requests: [], backlog_error: 'Primary backlog unavailable' })
+    expect(panel.querySelector('[role="alert"]')?.textContent).toContain('Primary backlog unavailable')
+    expect(panel.textContent).toContain(request.request_id)
+    expect(panel.querySelector('button.wk-btn-ok')?.hasAttribute('disabled')).toBe(true)
+    expect(panel.querySelector('[data-inline-spinner]')).toBeNull()
+    expect(panel.textContent).not.toContain(empty)
+
+    await readAgain({ error: { message: 'Verification temporarily unavailable' } }, 503)
+    expect(panel.querySelector('[role="alert"]')?.textContent).toContain('검증 목록 조회 불가')
+    expect(panel.textContent).not.toContain(empty)
+
+    await readAgain({ requests: [], truncated: true })
+    expect(panel.textContent).toContain('읽은 범위에 이 목표의 검증 제출이 없습니다.')
+    expect(panel.textContent).not.toContain(empty)
+
+    await readAgain({ requests: [], truncated: false })
+    expect(panel.textContent).toContain(empty)
+    expect(goalReads).toBe(1)
+  })
+
+  it('Goals keeps a missing selection empty and aborts an action whose read changes during precondition lookup', async () => {
+    const goal = (id: string) => ({
+      id,
+      title: id,
+      phase: 'Executing',
+      priority: 1,
+      measure: { kind: 'done_when', condition: 'Refresh Goal safely' },
+      procedure: 'Invalidate the read before the transition',
+      tasks: [],
+    })
+    let tree = [goal('goal-selected'), goal('goal-other')]
+    let finishHealth!: (response: Response) => void
+    const health = new Promise<Response>((resolve) => { finishHealth = resolve })
+    const writes: string[] = []
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/dashboard/goals')) return jsonResponse({ tree })
+      if (url.startsWith('/api/v1/verification/requests')) return jsonResponse({ requests: [] })
+      if (url.startsWith('/health?full=1')) return (await health).clone()
+      if (init?.method === 'POST') writes.push(url)
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(html`<${WorkWorkspace} subroute="goals" entityId="goal-selected" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi()
+    const transition = container.querySelector('[aria-label="목표 단계 전환"]')!
+    const pause = [...transition.querySelectorAll('button')].find((button) => button.textContent?.trim() === '일시정지')!
+    pause.click()
+    resourceCache.invalidateTopic('goals')
+    finishHealth(jsonResponse({
+      build: { runtime_instance_id: 'test-instance' },
+      paths: { effective_base_path: '/ws/masc', effective_masc_root: '/ws/masc/.masc' },
+    }))
+    await flushUi()
+    expect(writes).toEqual([])
+    expect(container.textContent).toContain('목표 정보가 변경되었습니다.')
+
+    tree = [goal('goal-other')]
+    const refresh = [...container.querySelectorAll('button')].find((button) => button.textContent?.trim() === '새로고침')!
+    refresh.click()
+    await flushUi()
+    expect(container.querySelector('[aria-label="목표 단계 전환"]')).toBeNull()
+    expect(container.querySelector('[aria-label="목표 목록"]')?.textContent).toContain('goal-other')
   })
 
   it('Goals tab skips /api/v1/verification/requests in multi_account_signed_in mode (0x 404)', async () => {
@@ -412,7 +537,7 @@ describe('workspaces/work', () => {
             {
               id: 'goal-ma',
               title: 'Multi-Account Goal',
-              phase: 'Executing',
+              phase: 'Awaiting_confirmation',
               priority: 1,
               measure: { kind: 'done_when', condition: 'Zero 404s' },
               procedure: 'Check network requests',
@@ -432,6 +557,9 @@ describe('workspaces/work', () => {
     await flushUi()
 
     expect(fetchedUrls.some((u) => u.startsWith('/api/v1/verification/requests'))).toBe(false)
+    expect(fetchedUrls.some((u) => u.startsWith('/api/v1/goals/confirmation'))).toBe(false)
+    expect(container.querySelector('[aria-label="목표 단계 전환"]')).toBeNull()
+    expect(container.textContent).not.toContain('+ 새 목표')
     expect(container.textContent).toContain('Multi-Account Goal')
   })
 

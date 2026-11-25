@@ -6,6 +6,7 @@
 
 import { html } from 'htm/preact'
 import './work.css'
+import { sessionEpoch } from '../../core/auth'
 import { GoalsTab } from './goals-tab'
 import { TasksTab } from './tasks-tab'
 import { InboxTab } from './inbox-tab'
@@ -27,7 +28,7 @@ export function WorkWorkspace(props: WorkspaceViewProps) {
   return html`
     <section class="wk-root" aria-label="Work workspace">
       <div class="wk-body">
-        ${activeTab === 'goals' && html`<${GoalsTab} ...${props} />`}
+        ${activeTab === 'goals' && html`<${GoalsTab} key=${sessionEpoch.value} ...${props} />`}
         ${activeTab === 'tasks' && html`<${TasksTab} ...${props} />`}
         ${activeTab === 'inbox' && html`<${InboxTab} ...${props} />`}
         ${activeTab === 'candle' && html`<${CandleTab} ...${props} />`}

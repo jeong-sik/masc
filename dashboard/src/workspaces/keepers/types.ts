@@ -5,6 +5,7 @@ import type { DiscordReplyOrigin } from './discord-reply'
 
 import type { EQUIPMENT_IDS, KeeperEquipment } from '../../lib/keeper-portrait'
 import type { KeeperChatDeliveryProvenance } from '../../keeper-delivery-provenance'
+import type { TelemetryFreshnessMetadata } from '../../api/dashboard-shared'
 
 export type RosterMode = 'companies' | 'attention' | 'wall24h'
 
@@ -343,14 +344,23 @@ export interface KeeperToolCallEntry {
   readonly output: unknown
 }
 
-export interface KeeperToolCallsData {
+export interface KeeperRetainedProjection {
+  readonly lastSuccessAt: string | null
+  readonly reason: string | null
+}
+
+export interface KeeperToolSource extends TelemetryFreshnessMetadata {
+  readonly health: string
+  readonly retained: KeeperRetainedProjection | null
+}
+
+export interface KeeperToolCallsData extends KeeperToolSource {
   readonly keeper: string
   readonly count: number
-  readonly health: string
   readonly entries: readonly KeeperToolCallEntry[]
 }
 
-export interface KeeperToolStatsData {
+export interface KeeperToolStatsData extends KeeperToolSource {
   readonly keeper: string
   readonly window_hours: number
   readonly total_entries: number
@@ -627,6 +637,12 @@ export interface KeeperLinkedTask {
   readonly priority: number
   readonly goal_id: string | null
   readonly updated_at: string | null
+}
+
+export interface KeeperLinkedTasksData {
+  readonly tasks: readonly KeeperLinkedTask[]
+  readonly workspaceScope: { readonly total: number; readonly shown: number } | null
+  readonly retained: KeeperRetainedProjection | null
 }
 
 export interface KeeperOperatorNoteData {

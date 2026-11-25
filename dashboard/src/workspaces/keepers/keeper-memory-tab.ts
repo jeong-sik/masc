@@ -10,10 +10,12 @@
 
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { InlineSpinner } from '../../components/common/inline-spinner'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
-import { activeWorkspaceId } from '../../core/auth'
 import { DataTable, type DataTableColumn } from '../../components/primitives/data-table'
 import { TargetLockedAction } from '../../components/primitives/target-locked-action'
+import { activeWorkspaceId, currentAccountMode, currentSessionEpoch, isEpochCurrent, sessionEpoch } from '../../core/auth'
+import { KeeperReadNotice, useKeeperRead } from './keeper-read'
 import {
   fetchKeeperMemoryFactsApi,
   fetchKeeperMemoryJournalApi,
@@ -21,14 +23,7 @@ import {
   postKeeperMemoryAct,
   postKeeperMemoryRetractions,
 } from './keepers-api'
-import type {
-  KeeperMemoryFactsData,
-  KeeperMemoryJournalData,
-  KeeperMemoryOsInternalsData,
-  MemoryActPayload,
-  OrdinaryMemoryFact,
-  SourceBoundMemoryFact,
-} from './types'
+import type { MemoryActPayload, OrdinaryMemoryFact, SourceBoundMemoryFact } from './types'
 
 export interface KeeperMemoryTabProps {
   readonly keeperName: string
@@ -55,12 +50,45 @@ function summarizeMemoryValue(v: unknown): string | null {
 }
 
 export function KeeperMemoryTab(props: KeeperMemoryTabProps) {
+  if (currentAccountMode.value === 'multi_account') return html`
+    <section class="kp-scroll-pane" data-keeper-tab="memory" aria-label="Keeper 메모리">
+      <div class="kp-card">
+        <h3>Memory OS · ${props.keeperName}</h3>
+        <p>Keeper 메모리 조회와 복구는 단일 계정 모드에서 사용할 수 있습니다.</p>
+      </div>
+    </section>
+  `
+  return html`<${KeeperMemoryView} key=${JSON.stringify([sessionEpoch.value, props.keeperName])} ...${props} />`
+}
+
+type MemoryActionState =
+  | { readonly kind: 'pending' }
+  | { readonly kind: 'ok' | 'error'; readonly text: string }
+
+function MemoryActionNotice({ state, pending }: {
+  readonly state: MemoryActionState | null
+  readonly pending: string
+}) {
+  if (state?.kind === 'pending') return html`<span class="sr-only" role="status">${pending}</span>`
+  if (state?.kind === 'error') return html`<div class="ap-error" role="alert">${state.text}</div>`
+  if (state?.kind === 'ok') return html`<div class="kp-pill" data-tone="ok" role="status">${state.text}</div>`
+  return null
+}
+
+function KeeperMemoryView(props: KeeperMemoryTabProps) {
   const { keeperName } = props
-  const [facts, setFacts] = useState<KeeperMemoryFactsData | null>(null)
-  const [internals, setInternals] = useState<KeeperMemoryOsInternalsData | null>(null)
-  const [journal, setJournal] = useState<KeeperMemoryJournalData | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const factsRead = useKeeperRead(useCallback(
+    (signal: AbortSignal) => fetchKeeperMemoryFactsApi(keeperName, signal), [keeperName],
+  ))
+  const internalsRead = useKeeperRead(useCallback(
+    (signal: AbortSignal) => fetchKeeperMemoryOsInternalsApi(keeperName, signal), [keeperName],
+  ))
+  const journalRead = useKeeperRead(useCallback(
+    (signal: AbortSignal) => fetchKeeperMemoryJournalApi(keeperName, 50, signal), [keeperName],
+  ))
+  const { data: facts } = factsRead
+  const { data: internals } = internalsRead
+  const { data: journal } = journalRead
   const [search, setSearch] = useState('')
   const [showAllJournal, setShowAllJournal] = useState(false)
   const [showAllActivity, setShowAllActivity] = useState(false)
@@ -69,58 +97,26 @@ export function KeeperMemoryTab(props: KeeperMemoryTabProps) {
   const [actKind, setActKind] = useState<'resume' | 'adopt' | 'restart_reading' | 'skip_line' | 'skip_item'>('resume')
   const [actObserved, setActObserved] = useState('')
   const [actOffset, setActOffset] = useState('0')
-  const [actFeedback, setActFeedback] = useState<string | null>(null)
+  const [actFeedback, setActFeedback] = useState<MemoryActionState | null>(null)
 
   // memory/retractions cleanup controls
   const [retractId, setRetractId] = useState('')
   const [retractReason, setRetractReason] = useState('')
-  const [retractFeedback, setRetractFeedback] = useState<string | null>(null)
+  const [retractFeedback, setRetractFeedback] = useState<MemoryActionState | null>(null)
 
-  const loadSeqRef = useRef(0)
-  const loadAbortRef = useRef<AbortController | null>(null)
+  const actRequest = useRef<AbortController | null>(null)
+  const retractRequest = useRef<AbortController | null>(null)
 
-  const loadAll = useCallback(async () => {
-    loadAbortRef.current?.abort()
-    const ctrl = new AbortController()
-    loadAbortRef.current = ctrl
-    const seq = ++loadSeqRef.current
-    setLoading(true)
-    setError(null)
-    const [fRes, iRes, jRes] = await Promise.all([
-      fetchKeeperMemoryFactsApi(keeperName, ctrl.signal),
-      fetchKeeperMemoryOsInternalsApi(keeperName, ctrl.signal),
-      fetchKeeperMemoryJournalApi(keeperName, 50, ctrl.signal),
-    ])
-    if (ctrl.signal.aborted || seq !== loadSeqRef.current) return
-    setLoading(false)
-    const errs: string[] = []
-    if (fRes.ok) setFacts(fRes.value)
-    else if (fRes.error.kind !== 'aborted' && fRes.error.kind !== 'epoch_stale') {
-      errs.push(`memory-facts: ${fRes.error.message}`)
-    }
-    if (iRes.ok) setInternals(iRes.value)
-    else if (iRes.error.kind !== 'aborted' && iRes.error.kind !== 'epoch_stale') {
-      errs.push(`memory-os-internals: ${iRes.error.message}`)
-    }
-    if (jRes.ok) setJournal(jRes.value)
-    else if (jRes.error.kind !== 'aborted' && jRes.error.kind !== 'epoch_stale') {
-      errs.push(`memory-journal: ${jRes.error.message}`)
-    }
-    if (errs.length > 0) setError(errs.join(' · '))
-  }, [keeperName])
+  const loadAll = () => {
+    void factsRead.refresh()
+    void internalsRead.refresh()
+    void journalRead.refresh()
+  }
 
-  useEffect(() => {
-    setFacts(null)
-    setInternals(null)
-    setJournal(null)
-    setShowAllJournal(false)
-    setShowAllActivity(false)
-    setError(null)
-    void loadAll()
-    return () => {
-      loadAbortRef.current?.abort()
-    }
-  }, [keeperName, loadAll])
+  useEffect(() => () => {
+    actRequest.current?.abort()
+    retractRequest.current?.abort()
+  }, [])
 
   const filteredOrdinary = useMemo<readonly OrdinaryMemoryFact[]>(() => {
     if (!facts || facts.ordinary.state !== 'present') return []
@@ -171,7 +167,7 @@ export function KeeperMemoryTab(props: KeeperMemoryTabProps) {
   ], [])
 
   const handleRunAct = async () => {
-    setActFeedback(null)
+    if (actRequest.current) return
     let payload: MemoryActPayload
     if (actKind === 'resume') {
       payload = { action: 'resume' }
@@ -191,34 +187,56 @@ export function KeeperMemoryTab(props: KeeperMemoryTabProps) {
         },
       }
     }
-    const res = await postKeeperMemoryAct(keeperName, payload)
+    const epoch = currentSessionEpoch()
+    const controller = new AbortController()
+    actRequest.current = controller
+    setActFeedback({ kind: 'pending' })
+    const res = await postKeeperMemoryAct(keeperName, payload, controller.signal)
+    if (controller.signal.aborted || !isEpochCurrent(epoch)) return
+    actRequest.current = null
     if (!res.ok) {
-      setActFeedback(`실패: ${res.error.message}`)
+      setActFeedback({ kind: 'error', text: res.error.message })
       return
     }
-    setActFeedback(`memory/act (${actKind}) 완료`)
-    void loadAll()
+    setActFeedback({ kind: 'ok', text: `${payload.action} 적용 완료` })
+    loadAll()
   }
 
   const handleRetract = async () => {
+    if (retractRequest.current) return
     const id = retractId.trim()
     const reason = retractReason.trim()
     if (!id || !reason) {
-      setRetractFeedback('memory_id와 사유를 모두 입력하세요.')
+      setRetractFeedback({ kind: 'error', text: 'memory_id와 사유를 모두 입력하세요.' })
       return
     }
-    setRetractFeedback(null)
-    const res = await postKeeperMemoryRetractions(keeperName, [{ memory_id: id, reason }])
+    const epoch = currentSessionEpoch()
+    const controller = new AbortController()
+    retractRequest.current = controller
+    setRetractFeedback({ kind: 'pending' })
+    const res = await postKeeperMemoryRetractions(keeperName, [{ memory_id: id, reason }], undefined, controller.signal)
+    if (controller.signal.aborted || !isEpochCurrent(epoch)) return
+    retractRequest.current = null
     if (!res.ok) {
-      setRetractFeedback(`Retract 실패: ${res.error.message}`)
+      setRetractFeedback({ kind: 'error', text: res.error.message })
       return
     }
-    setRetractFeedback(`Retract 완료: ${id}`)
-    setRetractId('')
-    void loadAll()
+    const receipt = res.value.find(row => row.memoryId === id)
+    if (!receipt) {
+      setRetractFeedback({ kind: 'error', text: `${id}의 철회 결과를 확인할 수 없습니다.` })
+      return
+    }
+    setRetractFeedback({
+      kind: 'ok',
+      text: receipt.outcome === 'retracted' ? `철회 완료 · ${id}` : `현재 메모리에 없는 항목 · ${id}`,
+    })
+    setRetractId(current => current.trim() === id ? '' : current)
+    loadAll()
   }
 
-  const revision = facts?.ordinary.state === 'present' ? facts.ordinary.revision : 0
+  const revision = factsRead.received && facts?.ordinary.state === 'present'
+    ? facts.ordinary.revision
+    : '미관측'
 
   return html`
     <div class="kp-scroll-pane" data-keeper-tab="memory">
@@ -233,26 +251,14 @@ export function KeeperMemoryTab(props: KeeperMemoryTabProps) {
             value=${search}
             onInput=${(e: Event) => setSearch((e.currentTarget as HTMLInputElement).value)}
           />
-          <button type="button" class="btn-ghost" disabled=${loading} onClick=${() => void loadAll()}>
+          <button type="button" class="btn-ghost" onClick=${loadAll}>
             새로고침
           </button>
         </div>
       </div>
 
-      ${error && html`<div class="ap-error" role="alert">${error}</div>`}
-
-      ${facts && (facts.events_read_error || facts.events_unreadable_lines > 0) && html`
-        <div class="ap-error sev-warn" role="alert">
-          ${facts.events_read_error
-            ? `메모리 이벤트 로그 읽기 오류: ${facts.events_read_error}`
-            : `메모리 이벤트 로그 해독 불가 줄 ${facts.events_unreadable_lines}건 감지`}
-          ${facts.events_read_error && facts.events_unreadable_lines > 0
-            ? ` (해독 불가 ${facts.events_unreadable_lines}줄)`
-            : ''}
-        </div>
-      `}
-
       <!-- Memory OS Internals (4 Sections) -->
+      <${KeeperReadNotice} label="Memory OS 내부 상태" read=${internalsRead} />
       ${internals && (() => {
         const writerStateLabel = summarizeMemoryValue(internals.librarian_molt.writer_state)
         const pendingMoltLabel = summarizeMemoryValue(internals.librarian_molt.pending_molt)
@@ -320,19 +326,29 @@ export function KeeperMemoryTab(props: KeeperMemoryTabProps) {
         `
       })()}
 
+      <${KeeperReadNotice} label="메모리 사실" read=${factsRead} />
+      ${facts && (facts.events_read_error || facts.events_unreadable_lines > 0) && html`
+        <div class="ap-error sev-warn" role="alert">
+          ${facts.events_read_error
+            ? `메모리 이벤트 로그 읽기 오류 · ${facts.events_read_error}`
+            : `메모리 이벤트 로그 해독 불가 줄 ${facts.events_unreadable_lines}건 감지`}
+          ${facts.events_read_error && facts.events_unreadable_lines > 0
+            ? ` (해독 불가 ${facts.events_unreadable_lines}줄)`
+            : ''}
+        </div>
+      `}
+
       <!-- Ordinary Memory Facts (3-way discriminated) -->
       <section class="kp-card" aria-label="Ordinary Memory Facts">
         <div class="kp-card-head">
           <h3>Ordinary Facts</h3>
-          ${facts?.ordinary.state === 'present' && html`
+          ${factsRead.received && facts?.ordinary.state === 'present' && html`
             <span class="kp-pill" data-tone="ok">
               rev ${facts.ordinary.revision} · ${facts.ordinary.facts.length} facts
             </span>
           `}
         </div>
-        ${!facts
-          ? html`<div class="kp-empty">${loading ? '불러오는 중…' : error ? '조회 실패로 표시할 수 없습니다.' : '데이터 없음'}</div>`
-          : facts.ordinary.state === 'absent'
+        ${facts && (facts.ordinary.state === 'absent'
             ? html`<div class="kp-empty" data-branch="absent">스냅샷 없음 (present: false)</div>`
             : facts.ordinary.state === 'read_error'
               ? html`<div class="ap-error" data-branch="read_error" role="alert">Ordinary 읽기 오류: ${facts.ordinary.read_error}</div>`
@@ -350,22 +366,20 @@ export function KeeperMemoryTab(props: KeeperMemoryTabProps) {
                       Support Invalidations: ${facts.ordinary.support_invalidations.length}건
                     </div>
                   `}
-                `}
+                `)}
       </section>
 
       <!-- Source-Bound Memory Facts (3-way discriminated) -->
       <section class="kp-card" aria-label="Source-Bound Memory Facts">
         <div class="kp-card-head">
           <h3>Source-Bound Facts</h3>
-          ${facts?.source_bound.state === 'present' && html`
+          ${factsRead.received && facts?.source_bound.state === 'present' && html`
             <span class="kp-pill" data-tone="info">
               rev ${facts.source_bound.revision} · ${facts.source_bound.facts.length} facts
             </span>
           `}
         </div>
-        ${!facts
-          ? html`<div class="kp-empty">${loading ? '불러오는 중…' : error ? '조회 실패로 표시할 수 없습니다.' : '데이터 없음'}</div>`
-          : facts.source_bound.state === 'absent'
+        ${facts && (facts.source_bound.state === 'absent'
             ? html`<div class="kp-empty" data-branch="absent">Source-bound 스냅샷 없음 (present: false)</div>`
             : facts.source_bound.state === 'read_error'
               ? html`<div class="ap-error" data-branch="read_error" role="alert">Source-bound 읽기 오류: ${facts.source_bound.read_error}</div>`
@@ -383,7 +397,7 @@ export function KeeperMemoryTab(props: KeeperMemoryTabProps) {
                       Source Invalidations: ${facts.source_bound.invalidations.map((i) => `${i.source_path} (${i.reason})`).join(', ')}
                     </div>
                   `}
-                `}
+                `)}
       </section>
 
       <!-- Memory Recovery (memory/act) & Retraction Cleanup (memory/retractions) -->
@@ -422,10 +436,15 @@ export function KeeperMemoryTab(props: KeeperMemoryTabProps) {
               onInput=${(e: Event) => setActOffset((e.currentTarget as HTMLInputElement).value)}
             />
           `}
-          <button type="button" class="btn-primary" onClick=${() => void handleRunAct()}>
-            memory/act 적용
+          <button
+            type="button"
+            class="btn-primary"
+            disabled=${actFeedback?.kind === 'pending'}
+            onClick=${() => void handleRunAct()}
+          >
+            ${actFeedback?.kind === 'pending' ? html`<${InlineSpinner} size="xs" /> 복구 적용 중…` : 'memory/act 적용'}
           </button>
-          ${actFeedback && html`<div class="kp-pill" data-tone="info">${actFeedback}</div>`}
+          <${MemoryActionNotice} state=${actFeedback} pending="메모리 복구 적용 중…" />
         </section>
 
         <section class="kp-card" aria-label="Memory Retraction Cleanup">
@@ -456,29 +475,34 @@ export function KeeperMemoryTab(props: KeeperMemoryTabProps) {
               value=${retractReason}
               onInput=${(e: Event) => setRetractReason((e.currentTarget as HTMLInputElement).value)}
             />
-            <button type="button" class="kp-btn-danger" onClick=${() => void handleRetract()}>
-              Fact 철회 (POST /memory/retractions)
+            <button
+              type="button"
+              class="kp-btn-danger"
+              disabled=${retractFeedback?.kind === 'pending'}
+              onClick=${() => void handleRetract()}
+            >
+              ${retractFeedback?.kind === 'pending'
+                ? html`<${InlineSpinner} size="xs" /> 철회 요청 중…`
+                : 'Fact 철회 (POST /memory/retractions)'}
             </button>
           <//>
-          ${retractFeedback && html`<div class="kp-pill" data-tone="info">${retractFeedback}</div>`}
+          <${MemoryActionNotice} state=${retractFeedback} pending="메모리 철회 요청 중…" />
         </section>
       </div>
 
       <!-- Memory Journal & Activity -->
       <section class="kp-card" aria-label="Memory Journal 및 활동 로그">
         <div class="kp-card-head">
-          <h3>Memory Journal (${journal?.returned ?? 0})</h3>
+          <h3>Memory Journal (${journalRead.received ? journal?.returned ?? '—' : '—'})</h3>
           ${journal && journal.undecodable_lines > 0 && html`
             <span class="kp-pill" data-tone="warn">
               ⚠ undecodable ${journal.undecodable_lines}
             </span>
           `}
         </div>
-        ${!journal
-          ? html`<div class="kp-empty">${loading ? '메모리 저널 불러오는 중…' : error ? '메모리 저널 조회 실패' : '메모리 저널 기록 없음'}</div>`
-          : journal.entries.length === 0
-            ? html`<div class="kp-empty">메모리 저널 기록 없음</div>`
-          : html`
+        <${KeeperReadNotice} label="메모리 저널" read=${journalRead} />
+        ${journalRead.received && journal?.entries.length === 0 && html`<div class="kp-empty">메모리 저널 기록 없음</div>`}
+        ${journal && journal.entries.length > 0 && html`
               ${journal.entries.length > 12 && html`
                 <div class="kp-card-head">
                   <span class="kp-roster-sub">

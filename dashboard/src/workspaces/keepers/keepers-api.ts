@@ -42,6 +42,8 @@ import {
   readQueuedChatOperations,
 } from '../../lib/keeper-chat-queue'
 import { randomUuid } from '../../lib/uuid'
+import { decodeTelemetryFreshnessMetadata } from '../../api/dashboard-shared'
+import { asSafeInt } from '../work/types'
 import { isWorkspaceMediaPath, isWorkspaceRasterMime } from '../../lib/keeper-media'
 import { decodeKeeperChatDeliveryProvenance } from '../../keeper-delivery-provenance'
 import {
@@ -75,18 +77,20 @@ import type {
   KeeperWaitingRow,
   KeeperLastPromptData,
   KeeperLaneFailure,
-  KeeperLinkedTask,
+  KeeperLinkedTasksData,
   KeeperMemoryFactsData,
   KeeperMemoryJournalData,
   KeeperMemoryJournalEntry,
   KeeperMemoryOsInternalsData,
   KeeperOperatorNoteData,
   KeeperPathRest,
+  KeeperRetainedProjection,
   KeeperRosterItem,
   KeeperSandboxData,
   KeeperToolApprovalModesData,
   KeeperToolCallEntry,
   KeeperToolCallsData,
+  KeeperToolSource,
   KeeperToolStatsData,
   KeeperTurnBreakdown,
   KeeperTurnRecordsData,
@@ -1977,13 +1981,26 @@ export function fetchKeeperTurnRecordsApi(keeper: string, limit = 60): Promise<R
   )
 }
 
-export function fetchKeeperToolCallsApi(keeper: string, limit = 50): Promise<Result<KeeperToolCallsData, ApiError>> {
+function retainedProjection(raw: Record<string, unknown>): KeeperRetainedProjection | null {
+  const diagnostics = raw.projection_diagnostics
+  if (!isRecord(diagnostics) || diagnostics.cache_state !== 'stale') return null
+  return { lastSuccessAt: asStr(diagnostics.last_success_at), reason: asStr(diagnostics.stale_reason) }
+}
+
+function decodeToolSource(raw: Record<string, unknown>): KeeperToolSource {
+  const freshness = decodeTelemetryFreshnessMetadata(raw)
+  return { ...freshness, health: freshness.health ?? 'unknown', retained: retainedProjection(raw) }
+}
+
+export function fetchKeeperToolCallsApi(keeper: string, limit = 50, signal?: AbortSignal): Promise<Result<KeeperToolCallsData, ApiError>> {
   return apiGet<KeeperToolCallsData>(
     `/api/v1/keepers/${encodeURIComponent(keeper)}/tool-calls?limit=${limit}`,
     {
+      signal,
       decode: (raw) => {
-        const rec = isRecord(raw) ? raw : {}
-        const list = Array.isArray(rec.entries) ? rec.entries : []
+        if (!isRecord(raw) || !Array.isArray(raw.entries)) throw new Error('도구 호출 응답에 entries가 없습니다.')
+        const rec = raw
+        const list = raw.entries
         const entries: KeeperToolCallEntry[] = []
         for (const item of list) {
           if (!isRecord(item)) continue
@@ -2014,7 +2031,7 @@ export function fetchKeeperToolCallsApi(keeper: string, limit = 50): Promise<Res
         return {
           keeper: asStr(rec.keeper) ?? keeper,
           count: asNum(rec.count) ?? entries.length,
-          health: asStr(rec.health) ?? 'unknown',
+          ...decodeToolSource(rec),
           entries,
         }
       },
@@ -2022,14 +2039,15 @@ export function fetchKeeperToolCallsApi(keeper: string, limit = 50): Promise<Res
   )
 }
 
-export function fetchKeeperToolStatsApi(keeper: string, windowHours = 24): Promise<Result<KeeperToolStatsData, ApiError>> {
+export function fetchKeeperToolStatsApi(keeper: string, windowHours = 24, signal?: AbortSignal): Promise<Result<KeeperToolStatsData, ApiError>> {
   return apiGet<KeeperToolStatsData>(
     `/api/v1/keepers/${encodeURIComponent(keeper)}/tool-stats?window_hours=${windowHours}`,
     {
+      signal,
       decode: (raw) => {
-        const rec = isRecord(raw) ? raw : {}
-        const toolsRaw = Array.isArray(rec.tools) ? rec.tools : []
-        const tools = toolsRaw.filter(isRecord).map((t) => ({
+        if (!isRecord(raw) || !Array.isArray(raw.tools)) throw new Error('도구 통계 응답에 tools가 없습니다.')
+        const rec = raw
+        const tools = raw.tools.filter(isRecord).map((t) => ({
           name: asStr(t.name) ?? 'unknown',
           call_count: asNum(t.call_count) ?? 0,
           success_count: asNum(t.success_count) ?? 0,
@@ -2040,7 +2058,8 @@ export function fetchKeeperToolStatsApi(keeper: string, windowHours = 24): Promi
         return {
           keeper: asStr(rec.keeper) ?? keeper,
           window_hours: asNum(rec.window_hours) ?? windowHours,
-          total_entries: asNum(rec.total_entries) ?? 0,
+          total_entries: asNum(rec.total_entries) ?? tools.reduce((total, tool) => total + tool.call_count, 0),
+          ...decodeToolSource(rec),
           tools,
         }
       },
@@ -2339,28 +2358,28 @@ export function fetchKeeperMemoryJournalApi(
     {
       signal,
       decode: (raw) => {
-        const rec = isRecord(raw) ? raw : {}
-        const entries: KeeperMemoryJournalEntry[] = Array.isArray(rec.entries)
-          ? rec.entries.filter(isRecord).map((e) => {
-              const source = isRecord(e.source) ? e.source : null
-              const change = isRecord(e.change) ? e.change : null
-              const asCount = (v: unknown): number =>
-                Array.isArray(v) ? v.length : (asNum(v) ?? 0)
-              return {
-                structural_id: asStr(e.structural_id) ?? '',
-                ok: e.ok === true,
-                error: asStr(e.error) ?? undefined,
-                recorded_at: asNum(e.recorded_at) ?? undefined,
-                revision: asNum(e.revision) ?? undefined,
-                source_kind: source ? (asStr(source.kind) ?? undefined) : undefined,
-                added: change ? asCount(change.added) : undefined,
-                removed: change ? asCount(change.removed) : undefined,
-                retained: change ? (asNum(change.retained) ?? 0) : undefined,
-                invalidated: change ? asCount(change.invalidated) : undefined,
-              }
-            })
-          : []
-        const actRaw = isRecord(rec.activity) ? rec.activity : null
+        if (!isRecord(raw) || !Array.isArray(raw.entries) || !raw.entries.every(isRecord)) {
+          throw new Error('메모리 저널 응답에 유효한 entries가 없습니다.')
+        }
+        const entries: KeeperMemoryJournalEntry[] = raw.entries.map((e) => {
+          const source = isRecord(e.source) ? e.source : null
+          const change = isRecord(e.change) ? e.change : null
+          const asCount = (v: unknown): number =>
+            Array.isArray(v) ? v.length : (asNum(v) ?? 0)
+          return {
+            structural_id: asStr(e.structural_id) ?? '',
+            ok: e.ok === true,
+            error: asStr(e.error) ?? undefined,
+            recorded_at: asNum(e.recorded_at) ?? undefined,
+            revision: asNum(e.revision) ?? undefined,
+            source_kind: source ? (asStr(source.kind) ?? undefined) : undefined,
+            added: change ? asCount(change.added) : undefined,
+            removed: change ? asCount(change.removed) : undefined,
+            retained: change ? (asNum(change.retained) ?? 0) : undefined,
+            invalidated: change ? asCount(change.invalidated) : undefined,
+          }
+        })
+        const actRaw = isRecord(raw.activity) ? raw.activity : null
         const activity = actRaw
           ? {
               events: Array.isArray(actRaw.events)
@@ -2378,9 +2397,9 @@ export function fetchKeeperMemoryJournalApi(
             }
           : null
         return {
-          keeper: asStr(rec.keeper) ?? keeper,
-          returned: asNum(rec.returned) ?? entries.length,
-          undecodable_lines: asNum(rec.undecodable_lines) ?? 0,
+          keeper: asStr(raw.keeper) ?? keeper,
+          returned: asNum(raw.returned) ?? entries.length,
+          undecodable_lines: asNum(raw.undecodable_lines) ?? 0,
           entries,
           activity,
         }
@@ -2389,25 +2408,56 @@ export function fetchKeeperMemoryJournalApi(
   )
 }
 
-export function postKeeperMemoryAct(keeper: string, payload: MemoryActPayload) {
+export function postKeeperMemoryAct(keeper: string, payload: MemoryActPayload, signal?: AbortSignal) {
   return apiMutate<Record<string, unknown>>(
     'POST',
     `/api/v1/keepers/${encodeURIComponent(keeper)}/memory/act`,
     payload,
+    {
+      signal,
+      decode: (raw) => {
+        if (!isRecord(raw) || raw.ok !== true || raw.keeper !== keeper || raw.action !== payload.action) {
+          throw new Error('메모리 복구 결과를 확인할 수 없습니다.')
+        }
+        return raw
+      },
+    },
   )
+}
+
+type MemoryRetractionReceipt = {
+  readonly memoryId: string
+  readonly outcome: 'retracted' | 'not_current'
 }
 
 export function postKeeperMemoryRetractions(
   keeper: string,
   retractions: readonly { readonly memory_id: string; readonly reason: string }[],
   planId = `dashboard-retract-${randomUuid()}`,
+  signal?: AbortSignal,
 ) {
-  return apiMutate<Record<string, unknown>>(
+  return apiMutate<readonly MemoryRetractionReceipt[]>(
     'POST',
     `/api/v1/keepers/${encodeURIComponent(keeper)}/memory/retractions`,
     {
       plan_id: planId,
       retractions,
+    },
+    {
+      signal,
+      decode: (raw) => {
+        if (!isRecord(raw) || raw.ok !== true || raw.keeper !== keeper || raw.plan_id !== planId
+          || !Array.isArray(raw.retractions)) {
+          throw new Error('메모리 철회 결과를 확인할 수 없습니다.')
+        }
+        return raw.retractions.map((row): MemoryRetractionReceipt => {
+          if (!isRecord(row) || typeof row.memory_id !== 'string'
+            || (row.outcome !== 'retracted' && row.outcome !== 'not_current')) {
+            throw new Error('메모리 철회 응답에 확인 가능한 결과가 없습니다.')
+          }
+          return { memoryId: row.memory_id, outcome: row.outcome }
+        })
+      },
     },
   )
 }
@@ -2529,11 +2579,15 @@ export function fetchKeeperItemsApi(keeper: string): Promise<Result<KeeperItemsD
 
 // ── Work & Sandbox ───────────────────────────────────────────────────────
 
-export function fetchKeeperLinkedTasksApi(keeper: string): Promise<Result<readonly KeeperLinkedTask[], ApiError>> {
-  return apiGet<readonly KeeperLinkedTask[]>('/api/v1/dashboard/execution', {
+export function fetchKeeperLinkedTasksApi(keeper: string, signal?: AbortSignal): Promise<Result<KeeperLinkedTasksData, ApiError>> {
+  return apiGet<KeeperLinkedTasksData>('/api/v1/dashboard/execution?light=true', {
+    signal,
     decode: (raw) => {
-      const list = isRecord(raw) && Array.isArray(raw.tasks) ? raw.tasks : []
-      return list
+      if (!isRecord(raw) || !Array.isArray(raw.tasks)) throw new Error('작업 목록 응답에 tasks가 없습니다.')
+      const counts = isRecord(raw.task_counts) ? raw.task_counts : null
+      const total = asSafeInt(counts?.total)
+      const shown = asSafeInt(counts?.shown)
+      const tasks = raw.tasks
         .filter(isRecord)
         .filter((t) => asStr(t.assignee) === keeper)
         .map((t) => ({
@@ -2545,56 +2599,51 @@ export function fetchKeeperLinkedTasksApi(keeper: string): Promise<Result<readon
           updated_at: asStr(t.updated_at),
         }))
         .filter((t) => t.id.length > 0)
+      return {
+        tasks,
+        workspaceScope: total !== null && shown !== null && shown >= 0 && total >= shown ? { total, shown } : null,
+        retained: retainedProjection(raw),
+      }
     },
   })
 }
 
-export function fetchKeeperOperatorNoteApi(keeper: string): Promise<Result<KeeperOperatorNoteData, ApiError>> {
+function decodeKeeperOperatorNote(raw: unknown, keeper: string): KeeperOperatorNoteData {
+  if (!isRecord(raw) || raw.keeper !== keeper || typeof raw.pending !== 'boolean'
+    || !isRecord(raw.note) || typeof raw.note.text !== 'string') {
+    throw new Error('운영자 노트 응답을 확인할 수 없습니다.')
+  }
+  return {
+    keeper,
+    pending: raw.pending,
+    text: raw.note.text,
+    created_by: asStr(raw.note.created_by) ?? '',
+    created_at: asNum(raw.note.created_at) ?? 0,
+    consumed_turn: asNum(raw.note.consumed_turn),
+  }
+}
+
+export function fetchKeeperOperatorNoteApi(keeper: string, signal?: AbortSignal): Promise<Result<KeeperOperatorNoteData, ApiError>> {
   return apiGet<KeeperOperatorNoteData>(
     `/api/v1/keepers/${encodeURIComponent(keeper)}/operator-note`,
-    {
-      decode: (raw) => {
-        const rec = isRecord(raw) ? raw : {}
-        const note = isRecord(rec.note) ? rec.note : {}
-        return {
-          keeper: asStr(rec.keeper) ?? keeper,
-          pending: rec.pending === true,
-          text: typeof note.text === 'string' ? note.text : '',
-          created_by: asStr(note.created_by) ?? '',
-          created_at: asNum(note.created_at) ?? 0,
-          consumed_turn: asNum(note.consumed_turn),
-        }
-      },
-    },
+    { signal, decode: (raw) => decodeKeeperOperatorNote(raw, keeper) },
   )
 }
 
-export function saveKeeperOperatorNoteApi(keeper: string, text: string): Promise<Result<KeeperOperatorNoteData, ApiError>> {
+export function saveKeeperOperatorNoteApi(keeper: string, text: string, signal?: AbortSignal): Promise<Result<KeeperOperatorNoteData, ApiError>> {
   return apiMutate<KeeperOperatorNoteData>(
     'POST',
     `/api/v1/keepers/${encodeURIComponent(keeper)}/operator-note`,
     { text },
-    {
-      decode: (raw) => {
-        const rec = isRecord(raw) ? raw : {}
-        const note = isRecord(rec.note) ? rec.note : {}
-        return {
-          keeper: asStr(rec.keeper) ?? keeper,
-          pending: rec.pending === true,
-          text: typeof note.text === 'string' ? note.text : text,
-          created_by: asStr(note.created_by) ?? '',
-          created_at: asNum(note.created_at) ?? 0,
-          consumed_turn: asNum(note.consumed_turn),
-        }
-      },
-    },
+    { signal, decode: (raw) => decodeKeeperOperatorNote(raw, keeper) },
   )
 }
 
-export function fetchKeeperSandboxApi(keeper: string): Promise<Result<KeeperSandboxData, ApiError>> {
+export function fetchKeeperSandboxApi(keeper: string, signal?: AbortSignal): Promise<Result<KeeperSandboxData, ApiError>> {
   return apiGetV2<KeeperSandboxData>(
     `/api/v1/infra/sandboxes/${encodeURIComponent(keeper)}`,
     {
+      signal,
       decode: (raw) => {
         const rec = isRecord(raw) ? raw : {}
         const probe = isRecord(rec.probe_state) ? rec.probe_state : {}

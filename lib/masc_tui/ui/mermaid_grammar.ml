@@ -239,10 +239,13 @@ let normalize_label ?on_span ?on_break ?(as_newline = false) raw =
 let label_text ?on_break ?(as_newline = false) raw =
   normalize_label ?on_break ~as_newline raw
 
-let label_with_source_ranges ?(as_newline = false) raw =
+let map_label_with_source_ranges ~as_newline raw =
   let ranges = ref [] in
   let label_text = normalize_label ~as_newline ~on_span:(fun span -> ranges := span :: !ranges) raw in
   {label_text; source_ranges=Array.of_list (List.rev !ranges)}
+
+let label_with_source_ranges raw =
+  map_label_with_source_ranges ~as_newline:false raw
 
 type label_identity =
   | Node_label of node_id
@@ -267,7 +270,7 @@ type source_mapping =
 type parsed_with_sources = { diagram : diagram; source_mapping : source_mapping }
 
 let label_at ?(as_newline = false) offset raw =
-  let mapped = label_with_source_ranges ~as_newline raw in
+  let mapped = map_label_with_source_ranges ~as_newline raw in
   {mapped with source_ranges=Array.map (fun span ->
     {start_byte=offset + span.start_byte; end_byte=offset + span.end_byte}) mapped.source_ranges}
 

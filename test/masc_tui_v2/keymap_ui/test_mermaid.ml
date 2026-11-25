@@ -461,7 +461,8 @@ let test_box_labels_draw_line_breaks () =
   let lr =
     render ~cols:60 "flowchart LR\nA[\"x<br/>yy<br/>zzz\"] --> B(\"q<br/>rr\")"
   in
-  let lr_shown text = index_of (has_box_line text) lr in
+  (* An incoming edge can replace the left border on a label's row. *)
+  let lr_shown text = index_of (contains (" " ^ text ^ " ")) lr in
   (match lr_shown "x", lr_shown "yy", lr_shown "zzz", lr_shown "q", lr_shown "rr" with
    | Some a, Some b, Some c, Some d, Some e ->
        Alcotest.(check (list int)) "lines stack downward under a left-to-right flow"

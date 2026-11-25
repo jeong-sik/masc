@@ -167,8 +167,8 @@ type browser_action =
     }
   | Browser_command of string
 
-(* Commands that [parse] accepts and [all] does not list, so the slash popup
-   and the help overlay never show them. *)
+(* [Music] and [Score] are commands that [parse] accepts and [all] does not
+   list, so the slash popup and the help overlay never show them. *)
 type music_action =
   | Music_workbench
   | Music_import_midi of string
@@ -211,6 +211,7 @@ type parsed =
   | Restart
   | Quit
   | Music of music_action
+  | Score of int
 
 type parse_error =
   | Not_a_slash_command
@@ -618,6 +619,7 @@ let parsed_tag = function
   | Restart -> 34
   | Quit -> 35
   | Music _ -> 36
+  | Score _ -> 37
 
 let equal_parsed a b =
   if not (Int.equal (parsed_tag a) (parsed_tag b)) then false
@@ -649,6 +651,7 @@ let equal_parsed a b =
     | Theme x, Theme y -> Option.equal Theme.equal_preset x y
     | Lang x, Lang y -> Option.equal Say.equal_lang x y
     | Music x, Music y -> equal_music_action x y
+    | Score x, Score y -> Int.equal x y
     | Pulse, Pulse
     | Work, Work
     | Knowledge, Knowledge
@@ -701,7 +704,8 @@ let equal_parsed a b =
       | Help
       | Restart
       | Quit
-      | Music _ ),
+      | Music _
+      | Score _ ),
       _ ->
         false
 
@@ -945,10 +949,11 @@ let split_command_and_arg trimmed =
 
 (* The commands [parse] accepts and [all] does not list. This is the one place
    that names them; [parse] and [filter] both go through it. *)
-type unlisted_word = Music_word
+type unlisted_word = Music_word | Score_word
 
 let unlisted_word_of_command = function
   | "/music" -> Some Music_word
+  | "/score" -> Some Score_word
   | _ -> None
 
 let parse_music ~cmd arg =
@@ -965,6 +970,35 @@ let parse_music ~cmd arg =
                  expected =
                    Say.make ~ko:"인자 없음 | midi <파일 경로>"
                      ~en:"no argument | midi <file path>";
+                 got = raw_arg;
+               }))
+
+(* Digits only: int_of_string_opt would also take 0x10 and 1_0. *)
+let positive_int_of_string raw =
+  let digits = String.trim raw in
+  if
+    String.length digits > 0
+    && String.for_all (function '0' .. '9' -> true | _ -> false) digits
+  then
+    match int_of_string_opt digits with
+    | Some n when n > 0 -> Some n
+    | Some _ | None -> None
+  else None
+
+let parse_score ~cmd arg =
+  match arg with
+  | None -> Ok (Score 1)
+  | Some raw_arg -> (
+      match positive_int_of_string raw_arg with
+      | Some index -> Ok (Score index)
+      | None ->
+          Error
+            (Invalid_argument
+               {
+                 command = cmd;
+                 expected =
+                   Say.make ~ko:"1 이상의 정수 (최신순)"
+                     ~en:"positive integer (newest first)";
                  got = raw_arg;
                }))
 
@@ -1965,6 +1999,7 @@ let parse raw =
     | other -> (
         match unlisted_word_of_command other with
         | Some Music_word -> parse_music ~cmd arg
+        | Some Score_word -> parse_score ~cmd arg
         | None -> Error (Unknown_command other))
 
 (* UTF-8 Unicode scalar decomposition with ASCII case-folding so multi-byte

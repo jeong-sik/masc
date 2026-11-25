@@ -1,6 +1,9 @@
 open Masc_tui_store
 
-type command = { executable : string; args : string list }
+type launch =
+  | Workbench
+  | Import_midi of string
+  | Score of { bundle : string; index : int; cell_pixels : int * int }
 
 let executable_name = "masc-alphatex"
 
@@ -9,13 +12,25 @@ let executable_name = "masc-alphatex"
 let projects_dirname = "projects"
 let sessions_dirname = "sessions"
 
-let args ~base_path program =
-  let music_dir =
-    Filename.concat
-      (Common.masc_dir_from_base_path ~base_path)
-      Common.tui_music_dirname
-  in
-  let roots =
+let score_needs_kitty =
+  "/score requires Kitty graphics and measured terminal cell dimensions \
+   (Ghostty, Kitty or WezTerm)"
+
+let executable () =
+  match Executable_path.absolute_on_path executable_name with
+  | Some path -> Ok path
+  | None ->
+      Error
+        (Printf.sprintf "%s is not installed; run scripts/install-alphatex.sh"
+           executable_name)
+
+let args ~base_path launch =
+  let roots () =
+    let music_dir =
+      Filename.concat
+        (Common.masc_dir_from_base_path ~base_path)
+        Common.tui_music_dirname
+    in
     [
       "--project-root";
       Filename.concat music_dir projects_dirname;
@@ -23,9 +38,20 @@ let args ~base_path program =
       Filename.concat music_dir sessions_dirname;
     ]
   in
-  match program with
-  | Cmd.Music_workbench -> "--music" :: roots
-  | Cmd.Music_import_midi path -> "--midi-file" :: path :: roots
+  match launch with
+  | Workbench -> "--music" :: roots ()
+  | Import_midi path -> "--midi-file" :: path :: roots ()
+  | Score { bundle; index; cell_pixels = (width, height) } ->
+      [
+        "--bundle";
+        bundle;
+        "--index";
+        string_of_int index;
+        "--cell-width";
+        string_of_int width;
+        "--cell-height";
+        string_of_int height;
+      ]
 
 let is_regular_file path =
   match Unix.stat path with
@@ -39,23 +65,42 @@ let is_regular_file path =
       false
   | exception Unix.Unix_error _ -> false
 
-let command ~base_path program =
-  let missing_input =
-    match program with
-    | Cmd.Music_workbench -> None
-    | Cmd.Music_import_midi path ->
-        if is_regular_file path then None
-        else Some (Printf.sprintf "MIDI file not found: %s" path)
-  in
-  match missing_input with
-  | Some detail -> Error detail
-  | None -> (
-      match Executable_path.absolute_on_path executable_name with
-      | None ->
-          Error
-            (Printf.sprintf "%s is not installed; run scripts/install-alphatex.sh"
-               executable_name)
-      | Some executable -> Ok { executable; args = args ~base_path program })
+let remove_quietly path =
+  match Sys.remove path with
+  | () -> ()
+  | exception Sys_error _ -> ()
+
+let write_bundle path sources =
+  Out_channel.with_open_bin path (fun channel ->
+      Yojson.Safe.to_channel channel
+        (`Assoc
+          [ ("sources", `List (List.map (fun source -> `String source) sources)) ]))
+
+(* The file is created with owner-only permissions and removed when [k]
+   returns or raises. *)
+let with_score_bundle sources k =
+  match Filename.temp_file "masc-score-" ".json" with
+  | exception Sys_error detail -> Error detail
+  | path ->
+      Fun.protect
+        ~finally:(fun () -> remove_quietly path)
+        (fun () ->
+          match write_bundle path sources with
+          | () -> k path
+          | exception Sys_error detail -> Error detail)
+
+let with_launch ~cell_pixels program k =
+  match program with
+  | Cmd.Music_workbench -> k Workbench
+  | Cmd.Music_import_midi path ->
+      if is_regular_file path then k (Import_midi path)
+      else Error (Printf.sprintf "MIDI file not found: %s" path)
+  | Cmd.Score_view { sources; index } -> (
+      match cell_pixels with
+      | None -> Error score_needs_kitty
+      | Some cell_pixels ->
+          with_score_bundle sources (fun bundle ->
+              k (Score { bundle; index; cell_pixels })))
 
 (* The TUI points its own fd 2 at a log file for the whole run, so a viewer
    that inherits it writes its error where the operator never looks. The
@@ -71,11 +116,6 @@ let close_quietly fd =
   match Unix.close fd with
   | () -> ()
   | exception Unix.Unix_error _ -> ()
-
-let remove_quietly path =
-  match Sys.remove path with
-  | () -> ()
-  | exception Sys_error _ -> ()
 
 let rec utf8_prefix text length =
   let prefix = String.sub text 0 length in
@@ -122,7 +162,7 @@ let replay_stderr text =
     | () -> ()
     | exception Sys_error _ -> ())
 
-let spawn { executable; args } ~stderr_path =
+let spawn ~executable ~args ~stderr_path =
   let flags = [ Unix.O_WRONLY; Unix.O_TRUNC; Unix.O_CLOEXEC ] in
   match Unix.openfile stderr_path flags 0o600 with
   | exception Unix.Unix_error (error, fn, _) ->
@@ -147,14 +187,16 @@ let rec wait child =
   | exception Unix.Unix_error (error, fn, _) ->
       Error (unix_error_message error fn)
 
-let run command =
+let run ~executable args =
   match Filename.temp_file "masc-alphatex-" ".err" with
   | exception Sys_error detail -> Error detail
   | stderr_path ->
       Fun.protect
         ~finally:(fun () -> remove_quietly stderr_path)
         (fun () ->
-          let outcome = Result.bind (spawn command ~stderr_path) wait in
+          let outcome =
+            Result.bind (spawn ~executable ~args ~stderr_path) wait
+          in
           let text = read_stderr stderr_path in
           replay_stderr text;
           match outcome with

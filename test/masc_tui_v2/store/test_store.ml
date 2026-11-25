@@ -22695,12 +22695,159 @@ let test_hidden_music_command () =
   | Update_nav.Composer_popup_none | Update_nav.Composer_popup_mention _ ->
       Alcotest.fail "a partial listed command keeps its popup"
 
+let test_alphatex_fences () =
+  let check label expected text =
+    Alcotest.(check (list string)) label expected (Alphatex_fences.of_text text)
+  in
+  check "text without a fence" [] "no fence here";
+  check "a closed block between prose" [ "\\title \"a\"" ]
+    "intro\n```alphatex\n\\title \"a\"\n```\noutro";
+  check "a block keeps its lines" [ "\\title \"T\"\n.\n\\tempo 120" ]
+    "```alphatex\n\\title \"T\"\n.\n\\tempo 120\n```";
+  check "tilde fence, atex tag and any case" [ "x"; "y" ]
+    "~~~ATeX\nx\n~~~\n```AlphaTex title=demo\ny\n```";
+  check "an indented fence" [ "x" ] "  ```alphatex\nx\n  ```";
+  check "reading order" [ "one"; "two" ]
+    "```alphatex\none\n```\n```alphatex\ntwo\n```";
+  check "a block that never closes" [] "```alphatex\ncut off";
+  check "an unclosed block after a closed one" [ "kept" ]
+    "```alphatex\nkept\n```\n```alphatex\ncut off";
+  check "another language" [] "```ocaml\nlet x = 1\n```";
+  check "a tag that only starts with alphatex" [] "```alphatexx\nx\n```";
+  check "an alphaTex fence inside a tilde fence" []
+    "~~~markdown\n```alphatex\nx\n```\n~~~"
+
+let test_hidden_score_command () =
+  let rejected raw =
+    match Slash.parse raw with
+    | Error (Slash.Invalid_argument { command; _ }) ->
+        Alcotest.(check string) (raw ^ " names /score") "/score" command
+    | Ok _ | Error _ -> Alcotest.fail (raw ^ " must be rejected")
+  in
+  (match Slash.parse "/score" with
+   | Ok (Slash.Score 1) -> ()
+   | Ok _ | Error _ -> Alcotest.fail "/score opens the newest block");
+  (match Slash.parse "/score 3" with
+   | Ok (Slash.Score 3) -> ()
+   | Ok _ | Error _ -> Alcotest.fail "/score N opens the N-th newest block");
+  List.iter rejected
+    [ "/score 0"; "/score -1"; "/score 0x10"; "/score 1_0"; "/score 1 2"; "/score newest" ];
+  Alcotest.(check bool) "the registry does not list /score" false
+    (List.exists
+       (fun (spec : Slash.spec) -> String.equal spec.name "/score")
+       Slash.all);
+  Alcotest.(check int) "a typed /score matches no listed command" 0
+    (List.length (Slash.filter ~query:"/score" ~lang:Say.Lang_en));
+  let message id content : Wire_fleet.chat_message =
+    {
+      id;
+      role = Wire_fleet.Role_assistant;
+      content;
+      ts_unix = 100.0;
+      turn_ref = None;
+      model_used = None;
+      tool_call_id = None;
+      tool_call_name = None;
+      execution_id = None;
+      provenance = None;
+      failure_kind = None;
+      thinking = None;
+    }
+  in
+  let page : Wire_fleet.chat_history_page =
+    {
+      messages =
+        [
+          message "m1" "first\n```alphatex\none\n```";
+          message "m2" "no score here";
+          message "m3" "```alphatex\ntwo\n```\nand\n```atex\nthree\n```";
+        ];
+      has_more = false;
+      next_cursor = None;
+    }
+  in
+  (* English UI: "score" matches six listed commands there, so only the
+     Slash.filter guard keeps the popup from running one of them. *)
+  let base = Model.initial ~lang:Say.Lang_en () in
+  let viewing : Model.t =
+    {
+      base with
+      nav =
+        {
+          base.nav with
+          workspace = Nav.Keepers;
+          dive_stack =
+            [ Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_chat } ];
+        };
+      fleet =
+        Fleet_store.apply_chat_history ~observed_at:t0 ~keeper:"alpha" page
+          Fleet_store.empty;
+    }
+  in
+  let run (m : Model.t) raw =
+    match Slash.parse raw with
+    | Ok parsed -> Update.execute_slash ~now:t0 m parsed
+    | Error _ -> Alcotest.fail ("failed to parse " ^ raw)
+  in
+  let requested cmds =
+    List.filter_map
+      (function
+        | Cmd.Open_terminal_program (Cmd.Score_view { sources; index }) ->
+            Some (sources, index)
+        | _ -> None)
+      (Cmd.flatten cmds)
+  in
+  let newest_first = [ "three"; "two"; "one" ] in
+  Alcotest.(check (list (pair (list string) int)))
+    "/score opens the newest block" [ (newest_first, 1) ]
+    (requested (snd (run viewing "/score")));
+  Alcotest.(check (list (pair (list string) int)))
+    "/score 3 opens the third newest" [ (newest_first, 3) ]
+    (requested (snd (run viewing "/score 3")));
+  let warned (m : Model.t) =
+    match m.toast with
+    | Some { level = Model.Toast_warning; _ } -> true
+    | _ -> false
+  in
+  let past_end, past_end_cmds = run viewing "/score 4" in
+  Alcotest.(check int) "/score past the last block requests nothing" 0
+    (List.length (Cmd.flatten past_end_cmds));
+  Alcotest.(check bool) "/score past the last block warns" true (warned past_end);
+  let nowhere, nowhere_cmds = run base "/score" in
+  Alcotest.(check int) "/score without an open conversation requests nothing" 0
+    (List.length (Cmd.flatten nowhere_cmds));
+  Alcotest.(check bool) "/score without an open conversation warns" true
+    (warned nowhere);
+  let focused : Model.t =
+    { viewing with drafts = Drafts.set_focus true viewing.drafts }
+  in
+  let typed text =
+    String.fold_left
+      (fun acc ch ->
+        fst (Update.step ~now:t0 acc (Msg.Key_event (char_key (String.make 1 ch)))))
+      focused text
+  in
+  (match Update_nav.resolve_composer_popup (typed "/score") with
+   | Update_nav.Composer_popup_none -> ()
+   | Update_nav.Composer_popup_slash _ | Update_nav.Composer_popup_mention _ ->
+       Alcotest.fail "a typed /score must not open a popup of listed commands");
+  let _, enter_cmds =
+    Update.step ~now:t0 (typed "/score") (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check (list (pair (list string) int)))
+    "Enter on a typed /score opens the viewer" [ (newest_first, 1) ]
+    (requested enter_cmds)
+
 let () =
   Alcotest.run "masc_tui_store"
     [
       ( "hidden_music_command"
       , [ Alcotest.test_case "unlisted /music parses, requests the handoff and keeps the popup out" `Quick
-            test_hidden_music_command ] );
+            test_hidden_music_command;
+          Alcotest.test_case "closed alphaTex blocks of a message" `Quick
+            test_alphatex_fences;
+          Alcotest.test_case "unlisted /score opens the newest alphaTex blocks" `Quick
+            test_hidden_score_command ] );
       ( "runtime_editor_authority",
         [ Alcotest.test_case "exact skill mutation reference" `Quick test_skill_mutation_reference;
           Alcotest.test_case "preset access recheck" `Quick test_preset_denial_refresh ] );

@@ -85,24 +85,26 @@ let extract_first_http_url (text : string) : string option =
   in
   scan 0
 
+(* The keeper whose conversation is on screen: the open keeper dive, or the
+   selected row of the Keepers workspace. *)
+let viewed_keeper_name (m : Model.t) : string option =
+  match Model.active_dive m with
+  | Some (Nav.Dive_keeper { name; _ }) -> Some name
+  | Some
+      ( Nav.Dive_work _
+      | Nav.Dive_knowledge _
+      | Nav.Dive_runtime _
+      | Nav.Dive_infra _ )
+  | None -> (
+      match m.nav.workspace with
+      | Nav.Keepers ->
+          Option.map
+            (fun (k : Wire_fleet.keeper_summary) -> k.name)
+            (Fleet_store.selected_keeper_summary m.fleet)
+      | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Runtime | Nav.Infra -> None)
+
 let latest_keeper_reply_text (m : Model.t) : (string * string) option =
-  let keeper_opt =
-    match Model.active_dive m with
-    | Some (Nav.Dive_keeper { name; _ }) -> Some name
-    | Some
-        ( Nav.Dive_work _
-        | Nav.Dive_knowledge _
-        | Nav.Dive_runtime _
-        | Nav.Dive_infra _ )
-    | None -> (
-        match m.nav.workspace with
-        | Nav.Keepers ->
-            Option.map
-              (fun (k : Wire_fleet.keeper_summary) -> k.name)
-              (Fleet_store.selected_keeper_summary m.fleet)
-        | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Runtime | Nav.Infra -> None)
-  in
-  match keeper_opt with
+  match viewed_keeper_name m with
   | None -> None
   | Some keeper -> (
       let stream_text =
@@ -136,6 +138,24 @@ let latest_keeper_reply_text (m : Model.t) : (string * string) option =
                       | Wire_fleet.Role_request_failure ->
                           None)
                     (List.rev page.messages))))
+
+(* Closed alphaTex blocks of the loaded conversation on screen, newest first.
+   [None] when no keeper conversation is on screen. *)
+let loaded_alphatex_sources (m : Model.t) : string list option =
+  Option.map
+    (fun keeper ->
+      match Fleet_store.String_map.find_opt keeper m.fleet.chat_histories with
+      | None -> []
+      | Some observed -> (
+          match Observed.to_option observed with
+          | None -> []
+          | Some page ->
+              List.rev
+                (List.concat_map
+                   (fun (msg : Wire_fleet.chat_message) ->
+                     Alphatex_fences.of_text msg.content)
+                   page.messages)))
+    (viewed_keeper_name m)
 
 let find_writable_runtime_field (schema : Wire_config.config_schema) =
   List.find_map
@@ -3629,6 +3649,34 @@ let rec execute_slash ~now (m : Model.t) cmd =
         | Slash.Music_import_midi path -> Cmd.Music_import_midi path
       in
       (m, [ Cmd.Open_terminal_program program ])
+  | Slash.Score index -> (
+      match loaded_alphatex_sources m with
+      | None ->
+          ( Model.with_toast ~now ~level:Model.Toast_warning
+              (Say.make ~ko:"/score: 열린 키퍼 대화가 없습니다"
+                 ~en:"/score: no keeper conversation is open")
+              m,
+            [] )
+      | Some sources ->
+          let count = List.length sources in
+          if index > count then
+            ( Model.with_toast ~now ~level:Model.Toast_warning
+                (Say.make
+                   ~ko:
+                     (Printf.sprintf
+                        "/score: 불러온 대화에 닫힌 alphaTex 코드 블록이 %d개 있습니다"
+                        count)
+                   ~en:
+                     (Printf.sprintf
+                        "/score: this loaded conversation has %d closed alphaTex block%s"
+                        count
+                        (if count = 1 then "" else "s")))
+                m,
+              [] )
+          else
+            ( m,
+              [ Cmd.Open_terminal_program (Cmd.Score_view { sources; index }) ]
+            ))
 
 and submit_slash_text ~now (m : Model.t) trimmed =
   match Slash.parse trimmed with

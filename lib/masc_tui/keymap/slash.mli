@@ -218,6 +218,9 @@ type parsed =
   | Restart
   | Quit
   | Music of music_action
+  | Score of int
+      (** The unlisted [/score] command: the [n]-th newest closed alphaTex
+          block of the open conversation, counted from 1. *)
 
 type parse_error =
   | Not_a_slash_command

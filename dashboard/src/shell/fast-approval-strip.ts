@@ -20,6 +20,8 @@ import {
   mobileMoreOpen,
   pendingApprovals,
   pendingAsks,
+  pendingGateApprovals,
+  pendingGoalConfirmations,
   refreshPendingHitl,
   submitFastToolApproval,
 } from './shell-state'
@@ -33,6 +35,8 @@ function isEditableTarget(target: EventTarget | null): boolean {
 export function FastApprovalStrip(): VNode | null {
   const approvals = pendingApprovals.value
   const asks = pendingAsks.value
+  const gates = pendingGateApprovals.value
+  const goalConfirms = pendingGoalConfirmations.value
   const mobile = isMobileViewport.value
   const [submittingId, setSubmittingId] = useState<string | null>(null)
   const [capturedEpoch, setCapturedEpoch] = useState<number>(() => sessionEpoch.peek())
@@ -40,6 +44,8 @@ export function FastApprovalStrip(): VNode | null {
 
   const headApproval = approvals[0] ?? null
   const headAsk = asks[0] ?? null
+  const headGate = gates[0] ?? null
+  const headGoalConfirm = goalConfirms[0] ?? null
 
   useEffect(() => {
     if (headApproval && headApproval.approvalId !== capturedApprovalId) {
@@ -49,7 +55,7 @@ export function FastApprovalStrip(): VNode | null {
   }, [headApproval?.approvalId, capturedApprovalId])
 
   useEffect(() => {
-    if (!headApproval && !headAsk) return
+    if (!headApproval && !headAsk && !headGate && !headGoalConfirm) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return
       if (event.shiftKey || commandPaletteOpen.peek() || mobileMoreOpen.peek()) return
@@ -85,12 +91,12 @@ export function FastApprovalStrip(): VNode | null {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [headApproval, headAsk, capturedEpoch, submittingId])
+  }, [headApproval, headAsk, headGate, headGoalConfirm, capturedEpoch, submittingId])
 
   // 0px when clear!
-  if (!headApproval && !headAsk) return null
+  if (!headApproval && !headAsk && !headGate && !headGoalConfirm) return null
 
-  const totalPending = approvals.length + asks.length
+  const totalPending = approvals.length + asks.length + gates.length + goalConfirms.length
 
   if (headApproval) {
     const busy = submittingId === headApproval.approvalId
@@ -164,18 +170,74 @@ export function FastApprovalStrip(): VNode | null {
     `
   }
 
+  if (headAsk) {
+    return html`
+      <section
+        class=${`ap-fast-strip ap-fast-strip--ask${mobile ? ' is-mobile' : ''}`}
+        role="region"
+        aria-label="Keeper 질문 대기"
+        data-testid="fast-approval-strip"
+      >
+        <div class="ap-fast-row">
+          <div class="ap-fast-summary">
+            <span class="ap-fast-pill">ASK · ${totalPending}</span>
+            <strong class="ap-fast-keeper">${headAsk.keeper}</strong>
+            <span class="ap-fast-question">${headAsk.prompt}</span>
+          </div>
+          <div class="ap-fast-actions">
+            <button
+              type="button"
+              class="btn-primary ap-fast-btn"
+              onClick=${() => navigate('/work/inbox')}
+            >
+              답변하기 <kbd class="ap-kbd">J</kbd>
+            </button>
+          </div>
+        </div>
+      </section>
+    `
+  }
+
+  if (headGate) {
+    return html`
+      <section
+        class=${`ap-fast-strip${mobile ? ' is-mobile' : ''}`}
+        role="region"
+        aria-label="Channel Gate 승인 대기"
+        data-testid="fast-approval-strip"
+      >
+        <div class="ap-fast-row">
+          <div class="ap-fast-summary">
+            <span class="ap-fast-pill">GATE · ${totalPending}</span>
+            <strong class="ap-fast-keeper">${headGate.keeper}</strong>
+            <code class="ap-fast-tool">${headGate.toolName}</code>
+          </div>
+          <div class="ap-fast-actions">
+            <button
+              type="button"
+              class="btn-primary ap-fast-btn"
+              onClick=${() => navigate('/work/inbox')}
+            >
+              Inbox <kbd class="ap-kbd">J</kbd>
+            </button>
+          </div>
+        </div>
+      </section>
+    `
+  }
+
   return html`
     <section
       class=${`ap-fast-strip ap-fast-strip--ask${mobile ? ' is-mobile' : ''}`}
       role="region"
-      aria-label="Keeper 질문 대기"
+      aria-label="Goal 완료 확인 대기"
       data-testid="fast-approval-strip"
     >
       <div class="ap-fast-row">
         <div class="ap-fast-summary">
-          <span class="ap-fast-pill">ASK · ${asks.length}</span>
-          <strong class="ap-fast-keeper">${headAsk!.keeper}</strong>
-          <span class="ap-fast-question">${headAsk!.prompt}</span>
+          <span class="ap-fast-pill">GOAL CONFIRM · ${totalPending}</span>
+          <strong class="ap-fast-keeper">${headGoalConfirm!.goalId}</strong>
+          <span class="ap-fast-question">${headGoalConfirm!.title}</span>
         </div>
         <div class="ap-fast-actions">
           <button
@@ -183,7 +245,7 @@ export function FastApprovalStrip(): VNode | null {
             class="btn-primary ap-fast-btn"
             onClick=${() => navigate('/work/inbox')}
           >
-            답변하기 <kbd class="ap-kbd">J</kbd>
+            확정하기 <kbd class="ap-kbd">J</kbd>
           </button>
         </div>
       </div>

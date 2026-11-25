@@ -8,14 +8,18 @@
 import { html } from 'htm/preact'
 import type { VNode } from 'preact'
 import { useEffect } from 'preact/hooks'
-import { isAuthenticated } from '../core/auth'
+import { isAuthenticated, sessionEpoch } from '../core/auth'
 import { formatObserved, resourceCache } from '../core/resource-cache'
 import { apiGet } from '../core/transport'
 import { navigate } from '../routes/router'
 import {
   closeActiveOverlay,
+  inboxPendingCount,
   pendingApprovals,
   pendingAsks,
+  pendingGateApprovals,
+  pendingGoalConfirmations,
+  pendingVerifications,
   refreshPendingHitl,
 } from './shell-state'
 
@@ -27,7 +31,22 @@ interface ShellQueueSummary {
   readonly pendingAsks: number
 }
 
+interface QuickPeekSchedule {
+  readonly id: string
+  readonly summary: string
+  readonly keeper: string | null
+  readonly dueAt: string | null
+  readonly status: string
+}
+
+interface QuickPeekScheduleSummary {
+  readonly total: number
+  readonly truncated: boolean
+  readonly rows: readonly QuickPeekSchedule[]
+}
+
 const SHELL_CACHE_KEY = 'shell:queue-context'
+const SCHEDULES_CACHE_KEY = 'shell:queue-context:schedules'
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -35,6 +54,10 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 function asNumberOrNull(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null
+}
+
+function asStr(v: unknown): string | null {
+  return typeof v === 'string' && v.trim().length > 0 ? v.trim() : null
 }
 
 function decodeShellSummary(raw: unknown): ShellQueueSummary {
@@ -48,11 +71,66 @@ function decodeShellSummary(raw: unknown): ShellQueueSummary {
   }
 }
 
+const MAX_QPEEK_PREVIEW = 10
+
+function formatScheduleDue(isoRaw: unknown, unixRaw: unknown): string | null {
+  const iso = asStr(isoRaw)
+  if (iso) return iso
+  const unix = asNumberOrNull(unixRaw)
+  if (unix !== null && unix > 0) {
+    try {
+      return new Date(unix * 1000).toISOString()
+    } catch {
+      return null
+    }
+  }
+  return null
+}
+
+function decodeSchedulesSummary(raw: unknown): QuickPeekScheduleSummary {
+  if (!isRecord(raw)) {
+    throw new Error('예약 자동화 응답 형식이 잘못되었습니다.')
+  }
+  const readError = asStr(raw.schedule_store_read_error)
+  if (readError) throw new Error(readError)
+  if (raw.schedule_store_known === false || raw.status === 'unknown') {
+    throw new Error('예약 저장소 상태를 확인할 수 없습니다.')
+  }
+  if (!Array.isArray(raw.requests)) {
+    return { total: 0, truncated: false, rows: [] }
+  }
+  const rows: QuickPeekSchedule[] = []
+  for (const r of raw.requests) {
+    if (!isRecord(r)) continue
+    const id = asStr(r.schedule_id)
+    if (!id) continue
+    rows.push({
+      id,
+      summary: asStr(r.payload_summary) ?? id,
+      keeper: asStr(r.payload_keeper_name) ?? asStr(r.payload_target),
+      dueAt: formatScheduleDue(r.next_due_at_iso, r.next_due_at) ?? formatScheduleDue(r.due_at_iso, r.due_at),
+      status: asStr(r.status) ?? 'scheduled',
+    })
+  }
+  const total = asNumberOrNull(raw.request_count) ?? rows.length
+  return {
+    total,
+    truncated: raw.truncated === true || total > 5 || rows.length > 5,
+    rows: rows.slice(0, 5),
+  }
+}
+
 export function QueueContextOverlayBody(): VNode {
   const authed = isAuthenticated.value
+  const epoch = sessionEpoch.value
   const approvals = pendingApprovals.value
   const asks = pendingAsks.value
+  const gates = pendingGateApprovals.value
+  const goalConfirms = pendingGoalConfirmations.value
+  const verifications = pendingVerifications.value
+  const totalHitl = inboxPendingCount.value
   const observed = resourceCache.observe<ShellQueueSummary>(SHELL_CACHE_KEY).value
+  const schedulesObs = resourceCache.observe<QuickPeekScheduleSummary>(SCHEDULES_CACHE_KEY).value
 
   useEffect(() => {
     if (!authed) return
@@ -64,8 +142,16 @@ export function QueueContextOverlayBody(): VNode {
       }),
       { ttlMs: 10_000, topics: ['workspace_dataset_changed', 'keeper_heartbeat'], reason: 'mount' },
     )
+    void resourceCache.fetch(
+      SCHEDULES_CACHE_KEY,
+      (signal) => apiGet<QuickPeekScheduleSummary>('/api/v1/dashboard/scheduled-automation?active_only=true', {
+        signal,
+        decode: decodeSchedulesSummary,
+      }),
+      { ttlMs: 10_000, topics: ['schedules', 'schedule_store_changed', 'scheduled_automation_changed'], reason: 'mount' },
+    )
     void refreshPendingHitl()
-  }, [authed])
+  }, [authed, epoch])
 
   const formatMetric = (value: number | null | undefined): string => {
     if (observed.kind !== 'value') return formatObserved(observed)
@@ -91,12 +177,17 @@ export function QueueContextOverlayBody(): VNode {
                 <strong class="ap-mini-kpi-v tnum">${formatMetric(observed.kind === 'value' ? observed.data.tasks : null)}</strong>
               </div>
               <div class="ap-mini-kpi">
-                <span class="ap-mini-kpi-k">Approvals</span>
-                <strong class="ap-mini-kpi-v tnum">${String(approvals.length)}</strong>
+                <span class="ap-mini-kpi-k">HITL Queue</span>
+                <strong class="ap-mini-kpi-v tnum">${String(totalHitl)}</strong>
+                ${verifications.length > 0 && html`
+                  <span class="ap-mini-kpi-sub tnum">+${verifications.length} verif</span>
+                `}
               </div>
               <div class="ap-mini-kpi">
-                <span class="ap-mini-kpi-k">Asks</span>
-                <strong class="ap-mini-kpi-v tnum">${String(asks.length)}</strong>
+                <span class="ap-mini-kpi-k">Schedules</span>
+                <strong class="ap-mini-kpi-v tnum">
+                  ${schedulesObs.kind === 'value' ? String(schedulesObs.data.total) : formatObserved(schedulesObs)}
+                </strong>
               </div>
             </div>
 
@@ -115,7 +206,7 @@ export function QueueContextOverlayBody(): VNode {
                 ? html`<p class="ap-muted">대기 중인 도구 승인 요청이 없습니다.</p>`
                 : html`
                     <ul class="ap-qpeek-list">
-                      ${approvals.map((item) => html`
+                      ${approvals.slice(0, MAX_QPEEK_PREVIEW).map((item) => html`
                         <li key=${item.approvalId} class="ap-qpeek-card">
                           <div class="ap-qpeek-card-top">
                             <strong>${item.keeper}</strong>
@@ -128,6 +219,9 @@ export function QueueContextOverlayBody(): VNode {
                         </li>
                       `)}
                     </ul>
+                    ${approvals.length > MAX_QPEEK_PREVIEW && html`
+                      <p class="ap-muted">상위 ${MAX_QPEEK_PREVIEW}건 표시 (전체 ${approvals.length}건)</p>
+                    `}
                   `}
             </section>
 
@@ -146,7 +240,7 @@ export function QueueContextOverlayBody(): VNode {
                 ? html`<p class="ap-muted">대기 중인 Keeper 질문이 없습니다.</p>`
                 : html`
                     <ul class="ap-qpeek-list">
-                      ${asks.map((ask) => html`
+                      ${asks.slice(0, MAX_QPEEK_PREVIEW).map((ask) => html`
                         <li key=${ask.askId} class="ap-qpeek-card">
                           <div class="ap-qpeek-card-top">
                             <strong>${ask.keeper}</strong>
@@ -156,7 +250,134 @@ export function QueueContextOverlayBody(): VNode {
                         </li>
                       `)}
                     </ul>
+                    ${asks.length > MAX_QPEEK_PREVIEW && html`
+                      <p class="ap-muted">상위 ${MAX_QPEEK_PREVIEW}건 표시 (전체 ${asks.length}건)</p>
+                    `}
                   `}
+            </section>
+
+            ${gates.length > 0 && html`
+              <section class="ap-qpeek-section">
+                <header class="ap-qpeek-section-head">
+                  <h3>Channel Gate Approvals (${gates.length})</h3>
+                  <button
+                    type="button"
+                    class="btn-ghost"
+                    onClick=${() => { closeActiveOverlay(); navigate('/work/inbox') }}
+                  >
+                    Open Inbox →
+                  </button>
+                </header>
+                <ul class="ap-qpeek-list">
+                  ${gates.slice(0, MAX_QPEEK_PREVIEW).map((gate) => html`
+                    <li key=${gate.id} class="ap-qpeek-card">
+                      <div class="ap-qpeek-card-top">
+                        <strong>${gate.keeper}</strong>
+                        <code class="mono">${gate.toolName}</code>
+                      </div>
+                      <div class="ap-qpeek-card-meta mono">
+                        phase=${gate.phase}${gate.waitingSec !== null ? ` · wait ${Math.round(gate.waitingSec)}s` : ''}
+                      </div>
+                    </li>
+                  `)}
+                </ul>
+                ${gates.length > MAX_QPEEK_PREVIEW && html`
+                  <p class="ap-muted">상위 ${MAX_QPEEK_PREVIEW}건 표시 (전체 ${gates.length}건)</p>
+                `}
+              </section>
+            `}
+
+            ${goalConfirms.length > 0 && html`
+              <section class="ap-qpeek-section">
+                <header class="ap-qpeek-section-head">
+                  <h3>Goal Confirmations (${goalConfirms.length})</h3>
+                  <button
+                    type="button"
+                    class="btn-ghost"
+                    onClick=${() => { closeActiveOverlay(); navigate('/work/inbox') }}
+                  >
+                    Open Inbox →
+                  </button>
+                </header>
+                <ul class="ap-qpeek-list">
+                  ${goalConfirms.slice(0, MAX_QPEEK_PREVIEW).map((goal) => html`
+                    <li key=${goal.goalId} class="ap-qpeek-card">
+                      <div class="ap-qpeek-card-top">
+                        <strong>${goal.title}</strong>
+                        <span class="mono ap-muted">${goal.goalId}</span>
+                      </div>
+                    </li>
+                  `)}
+                </ul>
+                ${goalConfirms.length > MAX_QPEEK_PREVIEW && html`
+                  <p class="ap-muted">상위 ${MAX_QPEEK_PREVIEW}건 표시 (전체 ${goalConfirms.length}건)</p>
+                `}
+              </section>
+            `}
+
+            ${verifications.length > 0 && html`
+              <section class="ap-qpeek-section">
+                <header class="ap-qpeek-section-head">
+                  <h3>Awaiting Verifications (${verifications.length})</h3>
+                  <button
+                    type="button"
+                    class="btn-ghost"
+                    onClick=${() => { closeActiveOverlay(); navigate('/work/tasks') }}
+                  >
+                    Open Tasks →
+                  </button>
+                </header>
+                <ul class="ap-qpeek-list">
+                  ${verifications.slice(0, MAX_QPEEK_PREVIEW).map((v) => html`
+                    <li key=${v.requestId} class="ap-qpeek-card">
+                      <div class="ap-qpeek-card-top">
+                        <strong>${v.title}</strong>
+                        <span class="mono ap-muted">${v.taskId}</span>
+                      </div>
+                      ${v.worker && html`<div class="ap-qpeek-card-meta mono">by=${v.worker}</div>`}
+                    </li>
+                  `)}
+                </ul>
+                ${verifications.length > MAX_QPEEK_PREVIEW && html`
+                  <p class="ap-muted">상위 ${MAX_QPEEK_PREVIEW}건 표시 (전체 ${verifications.length}건)</p>
+                `}
+              </section>
+            `}
+
+            <section class="ap-qpeek-section">
+              <header class="ap-qpeek-section-head">
+                <h3>Upcoming Schedules (${schedulesObs.kind === 'value' ? schedulesObs.data.total : '…'})</h3>
+                <button
+                  type="button"
+                  class="btn-ghost"
+                  onClick=${() => { closeActiveOverlay(); navigate('/work/tasks?view=schedules') }}
+                >
+                  Open Schedules →
+                </button>
+              </header>
+              ${schedulesObs.kind === 'failed'
+                ? html`<p class="ap-error" role="alert">예약 조회 실패: ${schedulesObs.error.message}</p>`
+                : schedulesObs.kind !== 'value'
+                  ? html`<p class="ap-muted">예약 불러오는 중…</p>`
+                  : schedulesObs.data.rows.length === 0
+                    ? html`<p class="ap-muted">활성 예약 자동화가 없습니다.</p>`
+                    : html`
+                        <ul class="ap-qpeek-list">
+                          ${schedulesObs.data.rows.map((s) => html`
+                            <li key=${s.id} class="ap-qpeek-card">
+                              <div class="ap-qpeek-card-top">
+                                <strong>${s.keeper ?? s.id}</strong>
+                                <span class="mono ap-muted">${s.status}</span>
+                              </div>
+                              <p class="ap-qpeek-card-text">${s.summary}</p>
+                              ${s.dueAt && html`<div class="ap-qpeek-card-meta mono">due=${s.dueAt}</div>`}
+                            </li>
+                          `)}
+                        </ul>
+                        ${schedulesObs.data.truncated && html`
+                          <p class="ap-muted">표시 제한으로 일부 예약만 표시됩니다. 전체 목록은 Schedules에서 확인하세요.</p>
+                        `}
+                      `}
             </section>
           `}
     </div>

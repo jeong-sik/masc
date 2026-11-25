@@ -569,11 +569,13 @@
 
 .kp-msg-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-2);
   font-size: var(--fs-11);
   color: var(--fg-3);
+  min-width: 0;
 }
 
 .kp-msg-body {
@@ -1265,4 +1267,22 @@ details[open] > .kp-sub-summary::before {
 
 .kp-hidden-input {
   display: none;
+}
+
+.kp-mem-toolbar {
+  flex: 1 1 220px;
+  justify-content: flex-end;
+}
+
+.kp-mem-search {
+  width: auto;
+  flex: 1 1 200px;
+  max-width: 320px;
+}
+
+.kp-wrap-text {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
 }

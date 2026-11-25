@@ -170,6 +170,14 @@ export type ChatEntryKind =
   | 'autonomous'
   | 'system_internal'
 
+export type ChatSpeakerAuthority = 'owner' | 'keeper' | 'external'
+
+export interface KeeperToolApprovalModesData {
+  readonly defaultMode: string
+  readonly overrides: Readonly<Record<string, string>>
+  readonly restoreError: string | null
+}
+
 export interface ChatTranscriptEntry {
   readonly id: string
   readonly role: 'user' | 'assistant' | 'system' | 'tool' | 'request_failure'
@@ -190,6 +198,10 @@ export interface ChatTranscriptEntry {
   readonly deliveryState?: ChatDeliveryState
   readonly cutStream?: boolean
   readonly errorDetail?: string
+  readonly speakerAuthority?: ChatSpeakerAuthority | null
+  readonly speakerName?: string | null
+  readonly speakerId?: string | null
+  readonly surface?: string | null
 }
 
 export interface ChatHistoryPage {

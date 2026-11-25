@@ -22,15 +22,24 @@ import { FastApprovalStrip } from './fast-approval-strip'
 import { IncidentsOverlayBody } from './incidents-overlay'
 import { MobileNav } from './mobile-nav'
 import { NavRail } from './nav-rail'
+import { QueueContextOverlayBody } from './queue-context-overlay'
 import {
   activeOverlay,
   commandPaletteOpen,
   historicalIncidents,
+  inboxPendingCount,
   openInspectDrawer,
+  parseAwaitingGoalsPayload,
+  parseGateQueuePayload,
   parseKeeperAsksPayload,
+  parsePendingVerificationsPayload,
   pendingApprovals,
+  pendingGateApprovals,
+  pendingGoalConfirmations,
+  pendingVerifications,
   railExpanded,
   recordIncident,
+  refreshPendingHitl,
   resetShellStateForTests,
   toggleRail,
   unreadIncidentCount,
@@ -327,5 +336,114 @@ describe('Proposal A+ Shell components', () => {
       fireEvent.keyDown(window, { key: 'y' })
     })
     expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('unifies Gate, Goal Confirmation, Verification, and Schedules across inboxPendingCount, FastApprovalStrip, and QueueContextOverlayBody', async () => {
+    const gates = parseGateQueuePayload(
+      { approval_queue: [{ id: 'g-1', keeper_name: 'sangsu', tool_name: 'masc_git_push', phase: 'human_required', waiting_s: 42 }] },
+      'default',
+    )
+    const goals = parseAwaitingGoalsPayload(
+      { goals: [{ id: 'goal-1', title: 'Release v0.83', phase: 'awaiting_confirmation', updated_at: '2026-11-25T00:00:00Z' }] },
+      'default',
+    )
+    const verifs = parsePendingVerificationsPayload(
+      { requests: [{ request_id: 'vr-1', task_id: 't-1', task_title: 'Verify fix', submitted_by: 'dreamer' }] },
+      'default',
+    )
+    expect(gates).toHaveLength(1)
+    expect(goals).toHaveLength(1)
+    expect(verifs[0]?.worker).toBe('dreamer')
+
+    pendingGateApprovals.value = gates
+    pendingGoalConfirmations.value = goals
+    pendingVerifications.value = verifs
+    expect(inboxPendingCount.value).toBe(2)
+
+    await act(async () => {
+      render(h(FastApprovalStrip, {}), container)
+    })
+    expect(container.textContent).toContain('GATE · 2')
+    expect(container.textContent).toContain('masc_git_push')
+
+    pendingGateApprovals.value = []
+    await act(async () => {
+      render(h(FastApprovalStrip, {}), container)
+    })
+    expect(container.textContent).toContain('GOAL CONFIRM · 1')
+    expect(container.textContent).toContain('Release v0.83')
+
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      authMethods: AUTH_METHODS,
+      workspaceId: 'default',
+    }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      const json = (d: unknown) => new Response(JSON.stringify(d), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      if (url.includes('/api/v1/dashboard/shell')) return json({ counts: { keepers: 3, tasks: 7, agents: 2 } })
+      if (url.includes('/api/v1/dashboard/scheduled-automation')) {
+        return json({
+          status: 'ok',
+          schedule_store_known: true,
+          request_count: 1,
+          truncated: true,
+          requests: [
+            {
+              schedule_id: 'sc-1',
+              status: 'scheduled',
+              payload_keeper_name: 'sangsu',
+              payload_summary: 'Nightly patrol',
+              next_due_at: 1795651200,
+              next_due_at_iso: '2026-11-26T00:00:00Z',
+            },
+          ],
+        })
+      }
+      if (url.includes('/api/v1/keepers/tool-approvals')) return json({ pending: [] })
+      if (url.includes('/api/v1/keepers/asks')) return json({ asks: [] })
+      if (url.includes('/api/v1/dashboard/gate')) return json({ approval_queue: [{ id: 'g-1', keeper_name: 'sangsu', tool_name: 'masc_git_push', phase: 'human_required', waiting_s: 42 }] })
+      if (url.includes('/api/v1/dashboard/planning')) return json({ goals: [{ id: 'goal-1', title: 'Release v0.83', phase: 'awaiting_confirmation' }] })
+      if (url.includes('/api/v1/verification/requests')) return json({ requests: [{ request_id: 'vr-1', task_id: 't-1', task_title: 'Verify fix', submitted_by: 'dreamer' }] })
+      return json({})
+    }))
+
+    await act(async () => {
+      render(h(QueueContextOverlayBody, {}), container)
+    })
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 30))
+    })
+    expect(container.textContent).toContain('Channel Gate Approvals (1)')
+    expect(container.textContent).toContain('Goal Confirmations (1)')
+    expect(container.textContent).toContain('Awaiting Verifications (1)')
+    expect(container.textContent).toContain('Nightly patrol')
+    expect(container.textContent).toContain('due=2026-11-26T00:00:00Z')
+    expect(container.textContent).toContain('표시 제한으로 일부 예약만 표시됩니다')
+
+    // Gate unavailable reads operator_detail and deduplicates consecutive identical incidents
+    const unavailFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      const json = (d: unknown) => new Response(JSON.stringify(d), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      if (url.includes('/api/v1/dashboard/gate')) {
+        return json({
+          approval_queue: null,
+          approval_queue_state: { state: 'unavailable', operator_detail: 'gate store locked' },
+        })
+      }
+      if (url.includes('/api/v1/keepers/tool-approvals')) return json({ pending: [] })
+      if (url.includes('/api/v1/keepers/asks')) return json({ asks: [] })
+      if (url.includes('/api/v1/dashboard/planning')) return json({ goals: [] })
+      if (url.includes('/api/v1/verification/requests')) return json({ requests: [] })
+      return json({})
+    })
+    resetShellStateForTests()
+    await refreshPendingHitl(unavailFetch as unknown as typeof fetch)
+    await refreshPendingHitl(unavailFetch as unknown as typeof fetch)
+    expect(historicalIncidents.value).toHaveLength(1)
+    expect(historicalIncidents.value[0]?.detail).toBe('gate store locked')
+    vi.unstubAllGlobals()
   })
 })

@@ -842,4 +842,96 @@ describe('workspaces/knowledge', () => {
       body: { action: 'adopt', observed: 'snapsha999' },
     })
   })
+
+  it('BoardTab renders @audience targets, feed truncation/filtered notice, and comment_page load-more pagination', async () => {
+    const requestedUrls: string[] = []
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      requestedUrls.push(url)
+      if (url.startsWith('/api/v1/board/hearths')) return jsonResponse({ hearths: [{ name: 'ops', count: 1 }] })
+      if (url.startsWith('/api/v1/board/sub-boards')) return jsonResponse({ sub_boards: [] })
+      if (url.startsWith('/api/v1/board/post-aud')) {
+        if (url.includes('comment_offset=1')) {
+          return jsonResponse({
+            id: 'post-aud',
+            title: 'Audience Thread',
+            body: 'Body',
+            author: 'sangsu',
+            hearth: 'ops',
+            post_kind: 'direct',
+            audience: { kind: 'targets', targets: ['code-reviewer'] },
+            created_at: '2026-11-25T00:00:00Z',
+            updated_at: '2026-11-25T01:00:00Z',
+            comment_count: 2,
+            comments: [
+              { id: 'c-2', post_id: 'post-aud', author: 'code-reviewer', content: 'Second page comment', created_at: '2026-11-25T01:00:00Z', audience: { kind: 'targets', targets: ['sangsu'] } },
+            ],
+            comment_page: { offset: 1, returned: 1, total: 2, next_offset: null },
+          })
+        }
+        expect(url).toContain('comment_offset=0')
+        return jsonResponse({
+          id: 'post-aud',
+          title: 'Audience Thread',
+          body: 'Body',
+          author: 'sangsu',
+          hearth: 'ops',
+          post_kind: 'direct',
+          audience: { kind: 'targets', targets: ['code-reviewer'] },
+          created_at: '2026-11-25T00:00:00Z',
+          updated_at: '2026-11-25T01:00:00Z',
+          comment_count: 2,
+          comments: [
+            { id: 'c-1', post_id: 'post-aud', author: 'dreamer', content: 'First page comment', created_at: '2026-11-25T00:30:00Z' },
+          ],
+          comment_page: { offset: 0, returned: 1, total: 2, next_offset: 1 },
+        })
+      }
+      if (url.startsWith('/api/v1/board?')) {
+        expect(url).toContain('signal_only=true')
+        return jsonResponse({
+          posts: [
+            {
+              id: 'post-aud',
+              title: 'Audience Thread',
+              body: 'Body',
+              author: 'sangsu',
+              hearth: 'ops',
+              post_kind: 'direct',
+              audience: { kind: 'targets', targets: ['code-reviewer'] },
+              created_at: '2026-11-25T00:00:00Z',
+              updated_at: '2026-11-25T01:00:00Z',
+              comment_count: 2,
+            },
+          ],
+          has_more: true,
+          filtered_out_count: 14,
+          signal_scan_truncated: true,
+        })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(
+      html`<${KnowledgeWorkspace} subroute="board" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+      container,
+    )
+    await flushUi(4)
+
+    expect(container.textContent).toContain('@code-reviewer')
+    expect(container.textContent).toContain('신호 스캔 상한에 도달')
+    expect(container.textContent).toContain('시스템/비신호 글 14건 숨김')
+    expect(container.textContent).toContain('First page comment')
+
+    const loadMoreBtn = [...container.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes('댓글 더 불러오기 (1 / 2)'),
+    ) as HTMLButtonElement | undefined
+    expect(loadMoreBtn).toBeDefined()
+    loadMoreBtn!.click()
+    await flushUi(4)
+
+    expect(requestedUrls.some((u) => u.includes('comment_offset=1'))).toBe(true)
+    expect(container.textContent).toContain('Second page comment')
+    expect(container.textContent).toContain('@sangsu')
+  })
 })

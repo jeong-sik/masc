@@ -358,6 +358,18 @@
   min-width: 0;
 }
 
+.wk-kv .wk-row-top {
+  flex-wrap: wrap;
+}
+
+.wk-sub-id {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .wk-row-top .wk-badge {
   flex-shrink: 0;
 }

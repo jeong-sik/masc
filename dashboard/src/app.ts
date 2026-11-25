@@ -373,9 +373,7 @@ export function App(): VNode {
       if (session.kind === 'single_user_local' || session.kind === 'multi_account_signed_in') {
         void startObserverStream()
         void probeBuildConnectionInfo()
-        if (session.kind === 'single_user_local') {
-          void refreshPendingHitl()
-        }
+        void refreshPendingHitl()
       }
     })
 

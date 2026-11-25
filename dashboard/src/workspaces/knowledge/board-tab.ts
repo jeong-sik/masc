@@ -14,7 +14,12 @@
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { authSession } from '../../core/auth'
-import { markViewSynced } from '../../core/observer'
+import {
+  extractObserverTopics,
+  markViewSynced,
+  subscribeObserverFrames,
+  subscribeObserverReconnect,
+} from '../../core/observer'
 import { resourceCache } from '../../core/resource-cache'
 import { apiGet, apiMutate } from '../../core/transport'
 import { ok } from '../../lib/result'
@@ -31,7 +36,9 @@ import {
   isRecord,
   partitionReactions,
   renderSanitizedMarkdown,
+  type BoardAudience,
   type BoardCommentItem,
+  type BoardCommentPageInfo,
   type BoardHearthItem,
   type BoardPostItem,
   type BoardReactionSummary,
@@ -44,11 +51,54 @@ interface BoardBundle {
   readonly posts: readonly BoardPostItem[]
   readonly hearths: readonly BoardHearthItem[]
   readonly subBoards: readonly SubBoardItem[]
+  readonly hasMore: boolean
+  readonly filteredOutCount: number
+  readonly signalScanTruncated: boolean
 }
 
 interface BoardDetailData {
   readonly post: BoardPostItem
   readonly comments: readonly BoardCommentItem[]
+  readonly commentPage: BoardCommentPageInfo | null
+}
+
+function decodeCommentPageInfo(raw: unknown): BoardCommentPageInfo | null {
+  if (!isRecord(raw)) return null
+  const offset = asSafeInt(raw.offset)
+  const returned = asSafeInt(raw.returned)
+  const total = asSafeInt(raw.total)
+  if (offset === null || returned === null || total === null) return null
+  return {
+    offset,
+    returned,
+    total,
+    nextOffset: asSafeInt(raw.next_offset),
+  }
+}
+
+function renderAudienceBadges(audience: BoardAudience | null | undefined, compact = false) {
+  if (!audience) return null
+  if (audience.kind === 'targets' && audience.targets.length > 0) {
+    if (compact && audience.targets.length > 1) {
+      return html`
+        <span
+          class="kn-badge kn-badge--info"
+          title=${audience.targets.map((t) => `@${t}`).join(', ')}
+        >
+          @${audience.targets[0]} +${audience.targets.length - 1}
+        </span>
+      `
+    }
+    return html`
+      ${audience.targets.map((target) => html`
+        <span key=${target} class="kn-badge kn-badge--info">@${target}</span>
+      `)}
+    `
+  }
+  if (audience.kind === 'broadcast') {
+    return html`<span class="kn-badge kn-badge--info">@broadcast</span>`
+  }
+  return null
 }
 
 function deriveHearthsFromPosts(posts: readonly BoardPostItem[]): readonly BoardHearthItem[] {
@@ -149,7 +199,14 @@ function ReactionBar(props: {
 
 export function BoardTab(props: WorkspaceViewProps) {
   const isMultiAccount = authSession.value.kind === 'multi_account_signed_in'
-  const [bundle, setBundle] = useState<BoardBundle>({ posts: [], hearths: [], subBoards: [] })
+  const [bundle, setBundle] = useState<BoardBundle>({
+    posts: [],
+    hearths: [],
+    subBoards: [],
+    hasMore: false,
+    filteredOutCount: 0,
+    signalScanTruncated: false,
+  })
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -163,9 +220,18 @@ export function BoardTab(props: WorkspaceViewProps) {
   const [selectedPostId, setSelectedPostId] = useState<string | null>(props.entityId ?? null)
   const [detail, setDetail] = useState<BoardDetailData | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
+  const [loadingMoreComments, setLoadingMoreComments] = useState(false)
   const [detailError, setDetailError] = useState<string | null>(null)
   const [expandedChainHeads, setExpandedChainHeads] = useState<Record<string, boolean>>({})
+  const [commentWindowStart, setCommentWindowStart] = useState(0)
   const detailAbortRef = useRef<AbortController | null>(null)
+  const loadMoreAbortRef = useRef<AbortController | null>(null)
+  const boardSeqRef = useRef(0)
+  const selectedPostIdRef = useRef<string | null>(selectedPostId)
+  selectedPostIdRef.current = selectedPostId
+
+  const COMMENT_PAGE_LIMIT = 40
+  const MAX_RENDERED_COMMENTS = 40
 
   // CRUD Forms
   const [showCreate, setShowCreate] = useState(false)
@@ -179,12 +245,16 @@ export function BoardTab(props: WorkspaceViewProps) {
   const replyTextareaRef = useRef<HTMLTextAreaElement>(null)
   const commentsEndRef = useRef<HTMLDivElement>(null)
 
-  const loadBoard = useCallback(async (reason: 'mount' | 'manual' = 'mount') => {
-    setLoading(true)
+  const loadBoard = useCallback(async (reason: 'mount' | 'manual' | 'sse' = 'mount') => {
+    const seq = ++boardSeqRef.current
+    if (reason !== 'sse') setLoading(true)
     setLoadError(null)
     const multiAccountNow = authSession.peek().kind === 'multi_account_signed_in'
     const params = new URLSearchParams({ sort_by: sortBy, limit: '200' })
-    if (signalOnly) params.set('exclude_system', 'true')
+    if (signalOnly) {
+      params.set('signal_only', 'true')
+      params.set('exclude_system', 'true')
+    }
     if (selectedHearth) params.set('hearth', selectedHearth)
     const cacheKey = `kn:board:${multiAccountNow ? 'ma' : 'local'}:${params.toString()}`
 
@@ -194,9 +264,10 @@ export function BoardTab(props: WorkspaceViewProps) {
         if (multiAccountNow) {
           const postsRes = await apiGet<unknown>(`/api/v1/dashboard/board?${params.toString()}`, { signal })
           if (!postsRes.ok) return postsRes
+          const rawFeed = isRecord(postsRes.value) ? postsRes.value : null
           const posts: BoardPostItem[] = []
-          if (isRecord(postsRes.value) && Array.isArray(postsRes.value.posts)) {
-            for (const raw of postsRes.value.posts) {
+          if (rawFeed && Array.isArray(rawFeed.posts)) {
+            for (const raw of rawFeed.posts) {
               const p = decodeBoardPost(raw)
               if (p) posts.push(p)
             }
@@ -205,6 +276,9 @@ export function BoardTab(props: WorkspaceViewProps) {
             posts,
             hearths: deriveHearthsFromPosts(posts),
             subBoards: [],
+            hasMore: rawFeed?.has_more === true,
+            filteredOutCount: asSafeInt(rawFeed?.filtered_out_count) ?? 0,
+            signalScanTruncated: rawFeed?.signal_scan_truncated === true,
           })
         }
 
@@ -215,9 +289,10 @@ export function BoardTab(props: WorkspaceViewProps) {
         ])
         if (!postsRes.ok) return postsRes
 
+        const rawFeed = isRecord(postsRes.value) ? postsRes.value : null
         const posts: BoardPostItem[] = []
-        if (isRecord(postsRes.value) && Array.isArray(postsRes.value.posts)) {
-          for (const raw of postsRes.value.posts) {
+        if (rawFeed && Array.isArray(rawFeed.posts)) {
+          for (const raw of rawFeed.posts) {
             const p = decodeBoardPost(raw)
             if (p) posts.push(p)
           }
@@ -250,10 +325,18 @@ export function BoardTab(props: WorkspaceViewProps) {
             })
           }
         }
-        return ok({ posts, hearths, subBoards })
+        return ok({
+          posts,
+          hearths,
+          subBoards,
+          hasMore: rawFeed?.has_more === true,
+          filteredOutCount: asSafeInt(rawFeed?.filtered_out_count) ?? 0,
+          signalScanTruncated: rawFeed?.signal_scan_truncated === true,
+        })
       },
       { ttlMs: 10_000, topics: ['board', 'board_post', 'board_comment'], reason },
     )
+    if (seq !== boardSeqRef.current) return
     setLoading(false)
     if (obs.kind === 'value') {
       setBundle(obs.data)
@@ -275,56 +358,174 @@ export function BoardTab(props: WorkspaceViewProps) {
     void loadBoard('mount')
   }, [loadBoard])
 
-  const loadPostDetail = useCallback(async (postId: string, signal?: AbortSignal) => {
-    if (authSession.peek().kind === 'multi_account_signed_in') {
-      setDetail(null)
-      setDetailLoading(false)
+  const loadPostDetail = useCallback(
+    async (
+      postId: string,
+      signal?: AbortSignal,
+      opts?: { readonly preserveOnError?: boolean; readonly resetWindow?: boolean },
+    ) => {
+      const preserveOnError = opts?.preserveOnError ?? false
+      const resetWindow = opts?.resetWindow ?? true
+      loadMoreAbortRef.current?.abort()
+      setLoadingMoreComments(false)
+      if (authSession.peek().kind === 'multi_account_signed_in') {
+        setDetail(null)
+        setDetailLoading(false)
+        setDetailError(null)
+        return
+      }
+      if (!preserveOnError) setDetailLoading(true)
       setDetailError(null)
-      return
+      const res = await apiGet<unknown>(
+        `/api/v1/board/${encodeURIComponent(postId)}?format=flat&comment_limit=${COMMENT_PAGE_LIMIT}&comment_offset=0`,
+        { signal },
+      )
+      if (signal?.aborted) return
+      setDetailLoading(false)
+      if (!res.ok) {
+        if (res.error.kind === 'aborted' || res.error.kind === 'epoch_stale') return
+        if (!preserveOnError) setDetail(null)
+        setDetailError(`게시글 상세/댓글 조회 실패: ${res.error.message}`)
+        return
+      }
+      if (!isRecord(res.value)) {
+        if (!preserveOnError) setDetail(null)
+        setDetailError('게시글 상세 응답 형식이 올바르지 않습니다.')
+        return
+      }
+      const postRaw = isRecord(res.value.post) ? res.value.post : res.value
+      const post = decodeBoardPost(postRaw)
+      if (!post) {
+        if (!preserveOnError) setDetail(null)
+        setDetailError('게시글 상세 파싱에 실패했습니다.')
+        return
+      }
+      const rawComments = Array.isArray(res.value.comments)
+        ? res.value.comments
+        : Array.isArray(res.value.comment_context)
+          ? res.value.comment_context
+          : []
+      const comments: BoardCommentItem[] = []
+      for (const c of rawComments) {
+        const dec = decodeBoardComment(c)
+        if (dec) comments.push(dec)
+      }
+      const commentPage = decodeCommentPageInfo(res.value.comment_page)
+      if (signal?.aborted) return
+      if (resetWindow) {
+        setCommentWindowStart(0)
+      } else {
+        setCommentWindowStart((cur) => Math.min(cur, Math.max(0, comments.length - MAX_RENDERED_COMMENTS)))
+      }
+      setDetail({ post, comments, commentPage })
+    },
+    [],
+  )
+
+  useEffect(() => {
+    const boardTopics = new Set(['board', 'board_post', 'board_comment', 'board_changed', 'notifications/board'])
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let pendingCommentReload = false
+    const unsub = subscribeObserverFrames((frame) => {
+      const topics = extractObserverTopics(frame)
+      if (!topics.some((t) => boardTopics.has(t))) return
+      const eventPostId = isRecord(frame.data)
+        ? (asNonEmptyString(frame.data.post_id)
+          ?? (isRecord(frame.data.payload) ? asNonEmptyString(frame.data.payload.post_id) : null))
+        : null
+      const activeNow = selectedPostIdRef.current
+      if (
+        topics.includes('board_comment')
+        && (!eventPostId || (activeNow !== null && eventPostId === activeNow))
+      ) {
+        pendingCommentReload = true
+      }
+      if (timer) return
+      timer = setTimeout(() => {
+        timer = null
+        const reloadDetail = pendingCommentReload
+        pendingCommentReload = false
+        void loadBoard('sse')
+        const activeId = selectedPostIdRef.current
+        if (reloadDetail && activeId && authSession.peek().kind !== 'multi_account_signed_in') {
+          detailAbortRef.current?.abort()
+          const ctrl = new AbortController()
+          detailAbortRef.current = ctrl
+          void loadPostDetail(activeId, ctrl.signal, { preserveOnError: true, resetWindow: false })
+        }
+      }, 450)
+    })
+    const unsubReconnect = subscribeObserverReconnect(() => {
+      void loadBoard('sse')
+    })
+    return () => {
+      unsub()
+      unsubReconnect()
+      if (timer) clearTimeout(timer)
     }
-    setDetailLoading(true)
+  }, [loadBoard, loadPostDetail])
+
+  const activeDetail = detail && detail.post.id === selectedPostId ? detail : null
+
+  const handleLoadMoreComments = useCallback(async () => {
+    if (!activeDetail || activeDetail.commentPage?.nextOffset == null || loadingMoreComments) return
+    loadMoreAbortRef.current?.abort()
+    const ctrl = new AbortController()
+    loadMoreAbortRef.current = ctrl
+    const targetPostId = activeDetail.post.id
+    setLoadingMoreComments(true)
     setDetailError(null)
-    const res = await apiGet<unknown>(
-      `/api/v1/board/${encodeURIComponent(postId)}?format=flat&comment_limit=100`,
-      { signal },
-    )
-    if (signal?.aborted) return
-    setDetailLoading(false)
-    if (!res.ok) {
-      setDetail(null)
-      setDetailError(`게시글 상세/댓글 조회 실패: ${res.error.message}`)
-      return
+    const nextOffset = activeDetail.commentPage.nextOffset
+    try {
+      const res = await apiGet<unknown>(
+        `/api/v1/board/${encodeURIComponent(targetPostId)}?format=flat&comment_limit=${COMMENT_PAGE_LIMIT}&comment_offset=${nextOffset}`,
+        { signal: ctrl.signal },
+      )
+      if (ctrl.signal.aborted || selectedPostIdRef.current !== targetPostId) return
+      if (!res.ok) {
+        if (res.error.kind === 'aborted' || res.error.kind === 'epoch_stale') return
+        setDetailError(`추가 댓글 조회 실패: ${res.error.message}`)
+        return
+      }
+      if (!isRecord(res.value)) return
+      const rawComments = Array.isArray(res.value.comments) ? res.value.comments : []
+      const nextComments: BoardCommentItem[] = []
+      for (const c of rawComments) {
+        const dec = decodeBoardComment(c)
+        if (dec) nextComments.push(dec)
+      }
+      const nextPage = decodeCommentPageInfo(res.value.comment_page)
+      let mergedLen = 0
+      setDetail((prev) => {
+        if (!prev || prev.post.id !== targetPostId) return prev
+        const seen = new Set(prev.comments.map((c) => c.id))
+        const merged = [...prev.comments]
+        for (const c of nextComments) {
+          if (!seen.has(c.id)) {
+            seen.add(c.id)
+            merged.push(c)
+          }
+        }
+        mergedLen = merged.length
+        return { post: prev.post, comments: merged, commentPage: nextPage }
+      })
+      if (mergedLen > MAX_RENDERED_COMMENTS) {
+        setCommentWindowStart(Math.max(0, mergedLen - MAX_RENDERED_COMMENTS))
+      }
+    } finally {
+      if (loadMoreAbortRef.current === ctrl) {
+        setLoadingMoreComments(false)
+      }
     }
-    if (!isRecord(res.value)) {
-      setDetail(null)
-      setDetailError('게시글 상세 응답 형식이 올바르지 않습니다.')
-      return
-    }
-    const postRaw = isRecord(res.value.post) ? res.value.post : res.value
-    const post = decodeBoardPost(postRaw)
-    if (!post) {
-      setDetail(null)
-      setDetailError('게시글 상세 파싱에 실패했습니다.')
-      return
-    }
-    const rawComments = Array.isArray(res.value.comments)
-      ? res.value.comments
-      : Array.isArray(res.value.comment_context)
-        ? res.value.comment_context
-        : []
-    const comments: BoardCommentItem[] = []
-    for (const c of rawComments) {
-      const dec = decodeBoardComment(c)
-      if (dec) comments.push(dec)
-    }
-    if (signal?.aborted) return
-    setDetail({ post, comments })
-  }, [])
+  }, [activeDetail, loadingMoreComments])
 
   useEffect(() => {
     detailAbortRef.current?.abort()
-    setReplyText('')
+    loadMoreAbortRef.current?.abort()
+    setLoadingMoreComments(false)
+    setCommentWindowStart(0)
     setReplyParentId(null)
+    setReplyText('')
     if (!selectedPostId) {
       setDetail(null)
       setDetailLoading(false)
@@ -333,9 +534,10 @@ export function BoardTab(props: WorkspaceViewProps) {
     }
     const ctrl = new AbortController()
     detailAbortRef.current = ctrl
-    void loadPostDetail(selectedPostId, ctrl.signal)
+    void loadPostDetail(selectedPostId, ctrl.signal, { preserveOnError: false, resetWindow: true })
     return () => {
       ctrl.abort()
+      loadMoreAbortRef.current?.abort()
     }
   }, [selectedPostId, isMultiAccount, loadPostDetail])
 
@@ -665,6 +867,19 @@ export function BoardTab(props: WorkspaceViewProps) {
 
       ${loadError && html`<div class="kn-notice kn-notice--err kn-inset" role="alert">${loadError}</div>`}
 
+      ${(bundle.signalScanTruncated || bundle.hasMore || bundle.filteredOutCount > 0) && html`
+        <div class="kn-notice kn-notice--info kn-inset" role="note">
+          ${bundle.signalScanTruncated
+            ? '신호 스캔 상한에 도달하여 일부 오래된 글이 생략되었을 수 있습니다.'
+            : bundle.hasMore
+              ? '피드에 추가 게시글이 더 있습니다 (최대 200건 표시).'
+              : ''}
+          ${bundle.filteredOutCount > 0
+            ? `${bundle.signalScanTruncated || bundle.hasMore ? ' · ' : ''}시스템/비신호 글 ${bundle.filteredOutCount}건 숨김`
+            : ''}
+        </div>
+      `}
+
       ${loading && bundle.posts.length === 0
         ? html`<div class="kn-detail-pad"><span class="dtable-absent">게시글 불러오는 중…</span></div>`
         : html`
@@ -694,7 +909,8 @@ export function BoardTab(props: WorkspaceViewProps) {
                       <${KeeperBadge} id=${p.author} size="sm" />
                       <span class="tnum">▲ ${p.votes}</span>
                       <span class="tnum">💬 ${p.commentCount}</span>
-                      <span>${formatRelativeTime(p.createdAt)}</span>
+                      <span>${formatRelativeTime(p.updatedAt || p.createdAt)}</span>
+                      ${renderAudienceBadges(p.audience, true)}
                       ${entry.predecessors.length > 0 && html`
                         <span class="kn-badge kn-badge--info">계승 체인 +${entry.predecessors.length}</span>
                       `}
@@ -722,8 +938,12 @@ export function BoardTab(props: WorkspaceViewProps) {
               <div class="kn-row-meta">
                 <${KeeperBadge} id=${activePost.author} size="sm" />
                 ${activePost.hearth && html`<span class="kn-badge">#${activePost.hearth}</span>`}
+                ${renderAudienceBadges(activePost.audience)}
                 ${activePost.pinned && html`<span class="kn-badge kn-badge--info">Pinned</span>`}
                 <span>${formatRelativeTime(activePost.createdAt)}</span>
+                ${activePost.updatedAt && activePost.updatedAt !== activePost.createdAt && html`
+                  <span>· 수정 ${formatRelativeTime(activePost.updatedAt)}</span>
+                `}
               </div>
               <h2 class="kn-heading">${activePost.title}</h2>
             </div>
@@ -819,14 +1039,28 @@ export function BoardTab(props: WorkspaceViewProps) {
 
           ${!isMultiAccount && html`
             <section class="kn-section" aria-label="댓글 스레드">
-              <h3 class="kn-section-title">Comments (${detail?.comments.length ?? activePost.commentCount})</h3>
-              ${detailLoading && !detail && html`<span class="dtable-absent">댓글 불러오는 중…</span>`}
-              ${detail && detail.comments.length === 0 && html`<span class="dtable-absent">아직 댓글이 없습니다.</span>`}
-              ${detail && detail.comments.map((c) => html`
+              <h3 class="kn-section-title">
+                Comments (${activeDetail ? `${activeDetail.comments.length}${activeDetail.commentPage && activeDetail.commentPage.total > activeDetail.comments.length ? ` / ${activeDetail.commentPage.total}` : ''}` : activePost.commentCount})
+              </h3>
+              ${detailLoading && !activeDetail && html`<span class="dtable-absent">댓글 불러오는 중…</span>`}
+              ${activeDetail && activeDetail.comments.length === 0 && html`<span class="dtable-absent">아직 댓글이 없습니다.</span>`}
+              ${activeDetail && commentWindowStart > 0 && html`
+                <div class="kn-actions">
+                  <button
+                    type="button"
+                    class="btn-ghost"
+                    onClick=${() => setCommentWindowStart((s) => Math.max(0, s - MAX_RENDERED_COMMENTS))}
+                  >
+                    이전 댓글 보기 (${commentWindowStart}건 접힘)
+                  </button>
+                </div>
+              `}
+              ${activeDetail && activeDetail.comments.slice(commentWindowStart, commentWindowStart + MAX_RENDERED_COMMENTS).map((c) => html`
                 <div key=${c.id} class=${`kn-comment ${c.parentId ? 'kn-comment--nested' : ''}`.trim()}>
                   <div class="kn-row-top">
                     <div class="kn-row-meta">
                       <${KeeperBadge} id=${c.author} size="sm" />
+                      ${renderAudienceBadges(c.audience)}
                       <span>${formatRelativeTime(c.createdAt)}</span>
                     </div>
                     <div class="kn-actions">
@@ -863,6 +1097,31 @@ export function BoardTab(props: WorkspaceViewProps) {
                   />
                 </div>
               `)}
+              ${activeDetail && (commentWindowStart + MAX_RENDERED_COMMENTS < activeDetail.comments.length) && html`
+                <div class="kn-actions">
+                  <button
+                    type="button"
+                    class="btn-ghost"
+                    onClick=${() => setCommentWindowStart((s) => Math.min(activeDetail.comments.length - MAX_RENDERED_COMMENTS, s + MAX_RENDERED_COMMENTS))}
+                  >
+                    다음 로드된 댓글 보기
+                  </button>
+                </div>
+              `}
+              ${activeDetail && activeDetail.commentPage && activeDetail.commentPage.nextOffset !== null && html`
+                <div class="kn-actions">
+                  <button
+                    type="button"
+                    class="btn-ghost"
+                    disabled=${loadingMoreComments}
+                    onClick=${() => void handleLoadMoreComments()}
+                  >
+                    ${loadingMoreComments
+                      ? '댓글 불러오는 중…'
+                      : `댓글 더 불러오기 (${activeDetail.comments.length} / ${activeDetail.commentPage.total})`}
+                  </button>
+                </div>
+              `}
 
               <div ref=${commentsEndRef} />
 

@@ -22,7 +22,12 @@ import {
   sessionEpoch,
 } from '../core/auth'
 import { apiGet, apiMutate } from '../core/transport'
-import { subscribeObserverFrames, subscribeObserverResync } from '../core/observer'
+import {
+  extractObserverTopics,
+  subscribeObserverFrames,
+  subscribeObserverReconnect,
+  subscribeObserverResync,
+} from '../core/observer'
 import {
   applyContrast,
   applyTheme,
@@ -331,12 +336,43 @@ export interface PendingAskItem {
   readonly revision: string
 }
 
+export interface PendingGateItem {
+  readonly id: string
+  readonly keeper: string
+  readonly toolName: string
+  readonly phase: string
+  readonly waitingSec: number | null
+  readonly workspaceId: string
+}
+
+export interface PendingGoalConfirmItem {
+  readonly goalId: string
+  readonly title: string
+  readonly updatedAt: string | null
+  readonly workspaceId: string
+}
+
+export interface PendingVerificationItem {
+  readonly requestId: string
+  readonly taskId: string
+  readonly title: string
+  readonly worker: string | null
+  readonly workspaceId: string
+}
+
 export const pendingApprovals = signal<readonly PendingApprovalItem[]>([])
 export const pendingAsks = signal<readonly PendingAskItem[]>([])
+export const pendingGateApprovals = signal<readonly PendingGateItem[]>([])
+export const pendingGoalConfirmations = signal<readonly PendingGoalConfirmItem[]>([])
+export const pendingVerifications = signal<readonly PendingVerificationItem[]>([])
 export const hitlLoading = signal<boolean>(false)
 
 export const inboxPendingCount = computed<number>(
-  () => pendingApprovals.value.length + pendingAsks.value.length,
+  () =>
+    pendingApprovals.value.length
+    + pendingAsks.value.length
+    + pendingGateApprovals.value.length
+    + pendingGoalConfirmations.value.length,
 )
 
 export function parseToolApprovalsPayload(
@@ -418,40 +454,170 @@ export function parseKeeperAsksPayload(
   return items
 }
 
+export function parseGateQueuePayload(
+  raw: unknown,
+  workspaceId: string,
+): readonly PendingGateItem[] {
+  if (!isRecord(raw) || !Array.isArray(raw.approval_queue)) return []
+  const items: PendingGateItem[] = []
+  for (const row of raw.approval_queue) {
+    if (!isRecord(row)) continue
+    const id = asNonEmptyString(row.id)
+    const keeper = asNonEmptyString(row.keeper_name) ?? asNonEmptyString(row.keeper)
+    const toolName = asNonEmptyString(row.tool_name) ?? asNonEmptyString(row.tool) ?? 'tool'
+    if (!id || !keeper) continue
+    items.push({
+      id,
+      keeper,
+      toolName,
+      phase: asNonEmptyString(row.phase) ?? 'human_required',
+      waitingSec: typeof row.waiting_s === 'number' && Number.isFinite(row.waiting_s) ? row.waiting_s : null,
+      workspaceId,
+    })
+  }
+  return items
+}
+
+export function parseAwaitingGoalsPayload(
+  raw: unknown,
+  workspaceId: string,
+): readonly PendingGoalConfirmItem[] {
+  if (!isRecord(raw) || !Array.isArray(raw.goals)) return []
+  const items: PendingGoalConfirmItem[] = []
+  for (const row of raw.goals) {
+    if (!isRecord(row)) continue
+    const phase = asNonEmptyString(row.phase)
+    if (!phase || phase.toLowerCase() !== 'awaiting_confirmation') continue
+    const goalId = asNonEmptyString(row.id)
+    const title = asNonEmptyString(row.title)
+    if (!goalId || !title) continue
+    items.push({
+      goalId,
+      title,
+      updatedAt: asNonEmptyString(row.updated_at),
+      workspaceId,
+    })
+  }
+  return items
+}
+
+export function parsePendingVerificationsPayload(
+  raw: unknown,
+  workspaceId: string,
+): readonly PendingVerificationItem[] {
+  if (!isRecord(raw)) return []
+  const list = Array.isArray(raw.requests)
+    ? raw.requests
+    : Array.isArray(raw.items)
+      ? raw.items
+      : []
+  const items: PendingVerificationItem[] = []
+  for (const row of list) {
+    if (!isRecord(row)) continue
+    const requestId = asNonEmptyString(row.request_id) ?? asNonEmptyString(row.id)
+    const taskId = asNonEmptyString(row.task_id)
+    if (!requestId || !taskId) continue
+    items.push({
+      requestId,
+      taskId,
+      title: asNonEmptyString(row.task_title) ?? asNonEmptyString(row.title) ?? taskId,
+      worker: asNonEmptyString(row.submitted_by) ?? asNonEmptyString(row.worker) ?? asNonEmptyString(row.producer),
+      workspaceId,
+    })
+  }
+  return items
+}
+
+let hitlRefreshSeq = 0
+let hitlAbortCtrl: AbortController | null = null
+const hitlIncidentLastSig = new Map<string, string>()
+
 export async function refreshPendingHitl(fetchImpl?: typeof fetch): Promise<void> {
-  // `/api/v1/keepers/tool-approvals` and `/api/v1/keepers/asks` are mounted only on single-user servers;
-  // skip in multi_account mode so boot never fires guaranteed 404s or false Ch3 incidents.
-  if (authSession.peek().kind !== 'single_user_local') {
+  hitlAbortCtrl?.abort()
+  const seq = ++hitlRefreshSeq
+  const sessionKind = authSession.peek().kind
+  if (sessionKind !== 'single_user_local' && sessionKind !== 'multi_account_signed_in') {
+    hitlAbortCtrl = null
+    hitlLoading.value = false
     pendingApprovals.value = []
     pendingAsks.value = []
+    pendingGateApprovals.value = []
+    pendingGoalConfirmations.value = []
+    pendingVerifications.value = []
     return
   }
+  const ctrl = new AbortController()
+  hitlAbortCtrl = ctrl
   const startEpoch = currentSessionEpoch()
   const workspaceId = activeWorkspaceId.peek()
   hitlLoading.value = true
   try {
-    const [approvalsRes, asksRes] = await Promise.all([
-      apiGet<unknown>('/api/v1/keepers/tool-approvals', { fetchImpl }),
-      apiGet<unknown>('/api/v1/keepers/asks', { fetchImpl }),
+    if (sessionKind === 'multi_account_signed_in') {
+      pendingApprovals.value = []
+      pendingAsks.value = []
+      pendingGateApprovals.value = []
+      pendingVerifications.value = []
+      const planRes = await apiGet<unknown>('/api/v1/dashboard/planning', { fetchImpl, signal: ctrl.signal })
+      if (seq !== hitlRefreshSeq || !isEpochCurrent(startEpoch)) return
+      if (planRes.ok) {
+        pendingGoalConfirmations.value = parseAwaitingGoalsPayload(planRes.value, workspaceId)
+      } else if (
+        planRes.error.kind !== 'epoch_stale'
+        && planRes.error.kind !== 'aborted'
+        && planRes.error.kind !== 'forbidden'
+        && planRes.error.kind !== 'not_found'
+      ) {
+        recordIncident({
+          severity: 'warn',
+          source: 'planning',
+          summary: `Goal confirmation queue unavailable (${planRes.error.status ?? planRes.error.kind})`,
+          detail: planRes.error.message,
+        })
+      }
+      return
+    }
+
+    const [approvalsRes, asksRes, gateRes, planRes, verifRes] = await Promise.all([
+      apiGet<unknown>('/api/v1/keepers/tool-approvals', { fetchImpl, signal: ctrl.signal }),
+      apiGet<unknown>('/api/v1/keepers/asks', { fetchImpl, signal: ctrl.signal }),
+      apiGet<unknown>('/api/v1/dashboard/gate', { fetchImpl, signal: ctrl.signal }),
+      apiGet<unknown>('/api/v1/dashboard/planning', { fetchImpl, signal: ctrl.signal }),
+      apiGet<unknown>('/api/v1/verification/requests?view=awaiting', { fetchImpl, signal: ctrl.signal }),
     ])
-    if (!isEpochCurrent(startEpoch)) return
+    if (seq !== hitlRefreshSeq || !isEpochCurrent(startEpoch)) return
+
+    const lastHitlIncidentBySource = hitlIncidentLastSig
+    const recordHitlIncidentOnce = (
+      source: string,
+      summary: string,
+      detail: string,
+    ): void => {
+      const sig = `${summary}|${detail}`
+      if (lastHitlIncidentBySource.get(source) === sig) return
+      lastHitlIncidentBySource.set(source, sig)
+      recordIncident({ severity: 'warn', source, summary, detail })
+    }
+    const clearHitlIncident = (source: string): void => {
+      lastHitlIncidentBySource.delete(source)
+    }
 
     if (approvalsRes.ok) {
+      clearHitlIncident('approvals')
       pendingApprovals.value = parseToolApprovalsPayload(approvalsRes.value, workspaceId)
     } else if (
       approvalsRes.error.kind !== 'epoch_stale'
       && approvalsRes.error.kind !== 'aborted'
       && approvalsRes.error.kind !== 'not_found'
     ) {
-      recordIncident({
-        severity: 'warn',
-        source: 'approvals',
-        summary: `Tool approval queue unavailable (${approvalsRes.error.status ?? approvalsRes.error.kind})`,
-        detail: approvalsRes.error.message,
-      })
+      recordHitlIncidentOnce(
+        'approvals',
+        `Tool approval queue unavailable (${approvalsRes.error.status ?? approvalsRes.error.kind})`,
+        approvalsRes.error.message,
+      )
     }
 
     if (asksRes.ok) {
+      clearHitlIncident('asks')
       pendingAsks.value = parseKeeperAsksPayload(asksRes.value, workspaceId)
     } else if (
       asksRes.error.kind !== 'epoch_stale'
@@ -459,15 +625,88 @@ export async function refreshPendingHitl(fetchImpl?: typeof fetch): Promise<void
       && asksRes.error.kind !== 'forbidden'
       && asksRes.error.kind !== 'not_found'
     ) {
-      recordIncident({
-        severity: 'warn',
-        source: 'asks',
-        summary: `Keeper asks queue unavailable (${asksRes.error.status ?? asksRes.error.kind})`,
-        detail: asksRes.error.message,
-      })
+      recordHitlIncidentOnce(
+        'asks',
+        `Keeper asks queue unavailable (${asksRes.error.status ?? asksRes.error.kind})`,
+        asksRes.error.message,
+      )
+    }
+
+    if (gateRes.ok) {
+      if (
+        isRecord(gateRes.value)
+        && isRecord(gateRes.value.approval_queue_state)
+        && gateRes.value.approval_queue_state.state === 'unavailable'
+      ) {
+        const st = gateRes.value.approval_queue_state
+        recordHitlIncidentOnce(
+          'gate',
+          'Channel gate approval queue unavailable',
+          asNonEmptyString(st.operator_detail)
+            ?? asNonEmptyString(st.detail)
+            ?? asNonEmptyString(st.title)
+            ?? 'gate approval queue reported unavailable',
+        )
+      } else {
+        clearHitlIncident('gate')
+      }
+      pendingGateApprovals.value = parseGateQueuePayload(gateRes.value, workspaceId)
+    } else if (
+      gateRes.error.kind !== 'epoch_stale'
+      && gateRes.error.kind !== 'aborted'
+      && gateRes.error.kind !== 'forbidden'
+      && gateRes.error.kind !== 'not_found'
+    ) {
+      recordHitlIncidentOnce(
+        'gate',
+        `Channel gate queue unavailable (${gateRes.error.status ?? gateRes.error.kind})`,
+        gateRes.error.message,
+      )
+    }
+
+    if (planRes.ok) {
+      clearHitlIncident('planning')
+      pendingGoalConfirmations.value = parseAwaitingGoalsPayload(planRes.value, workspaceId)
+    } else if (
+      planRes.error.kind !== 'epoch_stale'
+      && planRes.error.kind !== 'aborted'
+      && planRes.error.kind !== 'forbidden'
+      && planRes.error.kind !== 'not_found'
+    ) {
+      recordHitlIncidentOnce(
+        'planning',
+        `Goal confirmation queue unavailable (${planRes.error.status ?? planRes.error.kind})`,
+        planRes.error.message,
+      )
+    }
+
+    if (verifRes.ok) {
+      if (isRecord(verifRes.value) && asNonEmptyString(verifRes.value.backlog_error)) {
+        recordHitlIncidentOnce(
+          'verification',
+          'Verification backlog read error',
+          asNonEmptyString(verifRes.value.backlog_error) ?? 'verification backlog error',
+        )
+      } else {
+        clearHitlIncident('verification')
+      }
+      pendingVerifications.value = parsePendingVerificationsPayload(verifRes.value, workspaceId)
+    } else if (
+      verifRes.error.kind !== 'epoch_stale'
+      && verifRes.error.kind !== 'aborted'
+      && verifRes.error.kind !== 'forbidden'
+      && verifRes.error.kind !== 'not_found'
+    ) {
+      recordHitlIncidentOnce(
+        'verification',
+        `Verification queue unavailable (${verifRes.error.status ?? verifRes.error.kind})`,
+        verifRes.error.message,
+      )
     }
   } finally {
-    if (isEpochCurrent(startEpoch)) hitlLoading.value = false
+    if (seq === hitlRefreshSeq && isEpochCurrent(startEpoch)) {
+      hitlLoading.value = false
+    }
   }
 }
 
@@ -554,34 +793,55 @@ export function installShellObservers(fetchImpl?: typeof fetch): () => void {
     })
   })
 
+  const hitlTopics = new Set([
+    'approval',
+    'approvals',
+    'approval:pending',
+    'tool_approval',
+    'tool_approvals',
+    'ask',
+    'asks',
+    'keeper_ask',
+    'keeper_asks',
+    'gate',
+    'gate_approval',
+    'goal',
+    'goals',
+    'goal_projection_changed',
+    'planning',
+    'verification',
+    'verification_requests',
+    'pending_confirms_changed',
+  ])
+  let hitlDebounceTimer: ReturnType<typeof setTimeout> | null = null
+
   const unsubFrames = subscribeObserverFrames((frame) => {
-    const evt = frame.event.toLowerCase()
-    let dataType = ''
-    if (isRecord(frame.data)) {
-      if (typeof frame.data.type === 'string') dataType += ` ${frame.data.type}`
-      if (typeof frame.data.method === 'string') dataType += ` ${frame.data.method}`
-      if (isRecord(frame.data.params)) {
-        if (typeof frame.data.params.type === 'string') dataType += ` ${frame.data.params.type}`
-        if (typeof frame.data.params.event_type === 'string') dataType += ` ${frame.data.params.event_type}`
-      }
-    }
-    const combined = `${evt}${dataType}`.toLowerCase()
-    if (
-      combined.includes('approval')
-      || combined.includes('ask')
-      || combined.includes('pending_confirm')
-    ) {
+    const topics = extractObserverTopics(frame)
+    if (!topics.some((t) => hitlTopics.has(t))) return
+    if (hitlDebounceTimer) return
+    hitlDebounceTimer = setTimeout(() => {
+      hitlDebounceTimer = null
       void refreshPendingHitl(fetchImpl)
-    }
+    }, 350)
   })
 
   let lastEpoch = sessionEpoch.peek()
   const unsubEpoch = sessionEpoch.subscribe((epoch) => {
     if (epoch === lastEpoch) return
     lastEpoch = epoch
+    if (hitlDebounceTimer) {
+      clearTimeout(hitlDebounceTimer)
+      hitlDebounceTimer = null
+    }
+    hitlAbortCtrl?.abort()
+    hitlIncidentLastSig.clear()
     pendingApprovals.value = []
     pendingAsks.value = []
-    if (authSession.peek().kind === 'single_user_local') {
+    pendingGateApprovals.value = []
+    pendingGoalConfirmations.value = []
+    pendingVerifications.value = []
+    const kind = authSession.peek().kind
+    if (kind === 'single_user_local' || kind === 'multi_account_signed_in') {
       void refreshPendingHitl(fetchImpl)
     }
   })
@@ -590,14 +850,31 @@ export function installShellObservers(fetchImpl?: typeof fetch): () => void {
     if (session.kind !== 'single_user_local') {
       pendingApprovals.value = []
       pendingAsks.value = []
+      pendingGateApprovals.value = []
+      pendingVerifications.value = []
+    }
+    if (session.kind !== 'single_user_local' && session.kind !== 'multi_account_signed_in') {
+      pendingGoalConfirmations.value = []
+    }
+  })
+
+  const unsubReconnect = subscribeObserverReconnect(() => {
+    const kind = authSession.peek().kind
+    if (kind === 'single_user_local' || kind === 'multi_account_signed_in') {
+      void refreshPendingHitl(fetchImpl)
     }
   })
 
   return () => {
     unsubResync()
     unsubFrames()
+    unsubReconnect()
     unsubEpoch()
     unsubAuth()
+    if (hitlDebounceTimer) {
+      clearTimeout(hitlDebounceTimer)
+      hitlDebounceTimer = null
+    }
   }
 }
 
@@ -609,8 +886,12 @@ export function resetShellStateForTests(): void {
   commandPaletteMounted.value = false
   mobileMoreOpen.value = false
   incidentsSignal.value = []
+  hitlIncidentLastSig.clear()
   pendingApprovals.value = []
   pendingAsks.value = []
+  pendingGateApprovals.value = []
+  pendingGoalConfirmations.value = []
+  pendingVerifications.value = []
   hitlLoading.value = false
   toastsSignal.value = []
   buildConnectionInfo.value = {

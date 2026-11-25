@@ -15,18 +15,22 @@ import { html } from 'htm/preact'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { currentSessionEpoch, isEpochCurrent, sessionEpoch } from '../../core/auth'
 import { formatObserved } from '../../core/resource-cache'
+import { observerConnected, subscribeObserverFrames, subscribeObserverResync } from '../../core/observer'
 import { randomUuid } from '../../lib/uuid'
 import {
   cancelQueuedChatOperation,
   fetchKeeperChatHistoryPageApi,
   fetchKeeperControlToken,
   fetchKeeperToolResultApi,
+  fetchKeeperWaitingInventoryApi,
   fetchQueuedChatOperations,
   moveQueuedChatOperationToEndApi,
   observeRosterContextPct,
+  parseKeeperLiveObserverEvent,
   recoverCutReplyFromJournal,
   streamKeeperChat,
   transcribeVoiceAudio,
+  type KeeperLiveToolPulse,
 } from './keepers-api'
 import {
   KeeperDebugCompanion,
@@ -34,8 +38,15 @@ import {
 } from './keeper-debug-companion'
 import {
   dedupeHistoryToolRows,
+  extractDelegateCardInfo,
+  formatElapsedCompact,
+  formatTurnActivityLabel,
+  formatTurnLaneLabel,
+  formatWaitingSourceLabel,
+  groupTranscriptEntries,
   internalModeLabel,
   loadChatBlockPrefs,
+  mergeLatestHistoryPage,
   nextInternalMode,
   nextThinkingMode,
   nextToolsMode,
@@ -44,6 +55,7 @@ import {
   saveChatBlockPrefs,
   shouldRenderChatEntry,
   summarizeCompact,
+  summarizeToolHistogram,
   thinkingModeLabel,
   toolsModeLabel,
   toolStatusMeta,
@@ -54,14 +66,18 @@ import type {
   BtwQueryState,
   ChatAttachmentDraft,
   ChatDeliveryState,
+  ChatToolBlock,
   ChatTranscriptEntry,
+  KeeperActiveTurnPreview,
   KeeperRosterItem,
+  KeeperWaitingInventoryData,
   QueuedChatOperation,
 } from './types'
 
 export interface KeeperChatTabProps {
   readonly keeper: KeeperRosterItem
   readonly onInspect: (payload: WorkspaceInspectPayload) => void
+  readonly onSelectKeeper?: (name: string) => void
   readonly onMutated: () => void
 }
 
@@ -69,6 +85,8 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * 8.5
 const BOTTOM_STICKY_THRESHOLD_PX = 72
 const INITIAL_RENDER_WINDOW = 120
 const MAX_RENDER_WINDOW = 1000
+
+type ChatRead = 'history' | 'queue' | 'waiting'
 
 function formatChatTime(ts: number): string | null {
   if (!Number.isFinite(ts) || ts <= 0) return null
@@ -140,6 +158,8 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const [historyError, setHistoryError] = useState<string | null>(null)
 
   const [queuedOps, setQueuedOps] = useState<readonly QueuedChatOperation[]>([])
+  const [queueError, setQueueError] = useState<string | null>(null)
+  const [queueRefreshing, setQueueRefreshing] = useState(true)
   const [draft, setDraft] = useState('')
   const [attachments, setAttachments] = useState<readonly ChatAttachmentDraft[]>([])
   const [sending, setSending] = useState(false)
@@ -168,6 +188,12 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const [isNearBottom, setIsNearBottom] = useState(true)
   const [unseenBelowCount, setUnseenBelowCount] = useState(0)
   const [toolResultCache, setToolResultCache] = useState<Record<string, ToolResultCacheEntry>>({})
+  const [waitingInventory, setWaitingInventory] = useState<KeeperWaitingInventoryData | null>(null)
+  const [livePreview, setLivePreview] = useState<{
+    readonly ownerKey: string | null
+    readonly preview: KeeperActiveTurnPreview
+  } | null>(null)
+  const [liveToolPulse, setLiveToolPulse] = useState<KeeperLiveToolPulse | null>(null)
 
   const chatListRef = useRef<HTMLDivElement>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
@@ -176,12 +202,17 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const streamAbortRef = useRef<AbortController | null>(null)
   const btwAbortRef = useRef<AbortController | null>(null)
   const sendingRef = useRef(false)
+  const sendingOperationRef = useRef<{ operationId: string; executionId: string } | null>(null)
+  const refreshChatRef = useRef<(...reads: ChatRead[]) => void>(() => {})
   const stickToBottomRef = useRef(true)
   const forceScrollBottomRef = useRef(true)
   const pendingPrependAnchorRef = useRef<{ readonly prevScrollHeight: number; readonly prevScrollTop: number } | null>(null)
   const prevTailSigRef = useRef('')
   const mountedRef = useRef(true)
   const activeKeeperRef = useRef(keeper.name)
+  const hasLoadedEarlierRef = useRef(false)
+  const earlierAbortRef = useRef<AbortController | null>(null)
+  const earlierGenRef = useRef(0)
   const requestedExecIdsRef = useRef<Set<string>>(new Set())
   const toolFetchControllersRef = useRef<Set<AbortController>>(new Set())
 
@@ -215,15 +246,23 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     toolFetchControllersRef.current.clear()
   }, [])
 
+  const invalidateEarlierReads = useCallback(() => {
+    earlierGenRef.current += 1
+    earlierAbortRef.current?.abort()
+    earlierAbortRef.current = null
+  }, [])
+
   useEffect(() => {
     mountedRef.current = true
     return () => {
       mountedRef.current = false
+      invalidateEarlierReads()
       abortAllToolFetches()
     }
-  }, [abortAllToolFetches])
+  }, [abortAllToolFetches, invalidateEarlierReads])
 
   useEffect(() => {
+    const switchedKeeper = activeKeeperRef.current !== keeper.name
     activeKeeperRef.current = keeper.name
     stickToBottomRef.current = true
     forceScrollBottomRef.current = true
@@ -231,16 +270,29 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     setRenderWindow(INITIAL_RENDER_WINDOW)
     setIsNearBottom(true)
     setUnseenBelowCount(0)
+    hasLoadedEarlierRef.current = false
+    invalidateEarlierReads()
     abortAllToolFetches()
     requestedExecIdsRef.current.clear()
     setToolResultCache({})
-  }, [keeper.name, abortAllToolFetches])
+    setWaitingInventory(null)
+    setLivePreview(null)
+    setLiveToolPulse(null)
+    if (switchedKeeper) {
+      setMessages([])
+      setHasMore(false)
+      setNextCursor(null)
+      setQueuedOps([])
+    }
+  }, [keeper.name, abortAllToolFetches, invalidateEarlierReads])
 
   useEffect(() => {
     let lastEpoch = currentSessionEpoch()
     return sessionEpoch.subscribe((ep) => {
       if (ep !== lastEpoch) {
         lastEpoch = ep
+        hasLoadedEarlierRef.current = false
+        invalidateEarlierReads()
         streamAbortRef.current?.abort('session_epoch_changed')
         btwAbortRef.current?.abort('session_epoch_changed')
         abortAllToolFetches()
@@ -248,7 +300,14 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
         setToolResultCache({})
       }
     })
-  }, [abortAllToolFetches])
+  }, [abortAllToolFetches, invalidateEarlierReads])
+
+  useEffect(() => {
+    if (!keeper.active_turn) {
+      setLivePreview(null)
+      setLiveToolPulse(null)
+    }
+  }, [keeper.active_turn])
 
   const requestToolResult = useCallback(async (executionId: string, force = false) => {
     const trimmed = executionId.trim()
@@ -303,43 +362,156 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     setControlToken(keeper.chat_control_token)
   }, [keeper.chat_control_token])
 
-  const loadInitialHistory = useCallback(async () => {
-    const targetKeeper = keeper.name
-    const startEpoch = currentSessionEpoch()
+  useEffect(() => {
+    let controller = new AbortController()
+    let drainScheduled = false
+    const pending = new Set<ChatRead>()
+    const running = new Set<ChatRead>()
+
+    const refresh = (...reads: ChatRead[]) => {
+      if (controller.signal.aborted) return
+      for (const read of reads) pending.add(read)
+      if (drainScheduled) return
+      drainScheduled = true
+      queueMicrotask(() => {
+        drainScheduled = false
+        if (controller.signal.aborted) return
+        for (const read of pending) {
+          if (running.has(read)) continue
+          pending.delete(read)
+          running.add(read)
+          const signal = controller.signal
+          const epoch = currentSessionEpoch()
+          const current = () => !signal.aborted
+            && activeKeeperRef.current === keeper.name && isEpochCurrent(epoch)
+          void readChat(read, signal, current).finally(() => {
+            if (!current()) return
+            running.delete(read)
+            if (pending.has(read)) refresh()
+          })
+        }
+      })
+    }
+
+    const readChat = async (read: ChatRead, signal: AbortSignal, current: () => boolean) => {
+      switch (read) {
+        case 'history': {
+          const result = await fetchKeeperChatHistoryPageApi(keeper.name, undefined, 40, signal)
+          if (!current()) return
+          setLoadingHistory(false)
+          setHistoryError(result.ok ? null : result.error.message)
+          if (result.ok) {
+            const authoritativeEmpty = result.value.messages.length === 0
+            if (authoritativeEmpty) {
+              invalidateEarlierReads()
+              hasLoadedEarlierRef.current = false
+            }
+            setMessages((previous) => mergeLatestHistoryPage(
+              previous, result.value.messages, sendingOperationRef.current,
+            ))
+            if (authoritativeEmpty || !hasLoadedEarlierRef.current) {
+              setHasMore(authoritativeEmpty ? false : result.value.hasMore)
+              setNextCursor(authoritativeEmpty ? null : result.value.nextCursor)
+            }
+          }
+          return
+        }
+        case 'queue': {
+          const result = await fetchQueuedChatOperations(keeper.name, signal)
+          if (!current()) return
+          setQueueRefreshing(false)
+          setQueueError(result.ok ? null : result.error.message)
+          if (result.ok) setQueuedOps(result.value)
+          return
+        }
+        case 'waiting': {
+          const result = await fetchKeeperWaitingInventoryApi(keeper.name, signal)
+          if (current() && result.ok) setWaitingInventory(result.value)
+          return
+        }
+      }
+    }
+
+    const recover = () => {
+      // The preceding connection's reads cannot settle this observation.
+      controller.abort()
+      invalidateEarlierReads()
+      controller = new AbortController()
+      running.clear()
+      pending.clear()
+      setQueueRefreshing(true)
+      setLivePreview(null)
+      setLiveToolPulse(null)
+      refresh('history', 'queue', 'waiting')
+    }
+
+    refreshChatRef.current = refresh
+    const unsubscribeFrames = subscribeObserverFrames((frame) => {
+      const event = parseKeeperLiveObserverEvent(frame.event, frame.data, keeper.name)
+      switch (event?.kind) {
+        case 'turn_preview':
+          setLivePreview((prev) => {
+            if (prev !== null && prev.ownerKey === event.ownerKey
+                && prev.preview.revision !== null && event.preview.revision !== null
+                && event.preview.revision < prev.preview.revision) return prev
+            return { ownerKey: event.ownerKey, preview: event.preview }
+          })
+          break
+        case 'turn_ended':
+          setLivePreview(null)
+          setLiveToolPulse(null)
+          break
+        case 'tool_pulse':
+          setLiveToolPulse(event.pulse)
+          break
+        case 'chat_appended':
+          refresh('history')
+          break
+        case 'waiting_changed':
+          refresh('waiting')
+          if (event.queueChanged) refresh('queue')
+          break
+        case undefined:
+          break
+      }
+    })
+    const unsubscribeResync = subscribeObserverResync(recover)
+    let wasConnected = observerConnected.peek()
+    const unsubscribeConnection = observerConnected.subscribe((connected) => {
+      if (connected && !wasConnected) recover()
+      wasConnected = connected
+    })
+    let epoch = currentSessionEpoch()
+    const unsubscribeEpoch = sessionEpoch.subscribe((nextEpoch) => {
+      if (nextEpoch === epoch) return
+      epoch = nextEpoch
+      setMessages([])
+      setQueuedOps([])
+      setHasMore(false)
+      setNextCursor(null)
+      setWaitingInventory(null)
+      setHistoryError(null)
+      setQueueError(null)
+      setLoadingHistory(true)
+      recover()
+    })
     setLoadingHistory(true)
     setHistoryError(null)
-    const [pageRes, opsRes] = await Promise.all([
-      fetchKeeperChatHistoryPageApi(targetKeeper, undefined, 40),
-      fetchQueuedChatOperations(targetKeeper),
-    ])
-    if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) return
-    setLoadingHistory(false)
-    if (!pageRes.ok) {
-      if (pageRes.error.kind !== 'epoch_stale' && pageRes.error.kind !== 'aborted') {
-        setHistoryError(pageRes.error.message)
-      }
-    } else {
-      forceScrollBottomRef.current = true
-      setMessages((prev) => {
-        const loadedIds = new Set(pageRes.value.messages.map((m) => m.id))
-        const optimistic = prev.filter((m) => !loadedIds.has(m.id))
-        return [...dedupeHistoryToolRows([...pageRes.value.messages, ...optimistic])]
-      })
-      setHasMore(pageRes.value.hasMore)
-      setNextCursor(pageRes.value.nextCursor)
-    }
-    if (opsRes.ok) {
-      setQueuedOps(opsRes.value)
-    }
-  }, [keeper.name])
-
-  useEffect(() => {
-    void loadInitialHistory()
+    setQueueError(null)
+    setQueueRefreshing(true)
+    refresh('history', 'queue', 'waiting')
     return () => {
+      controller.abort()
+      invalidateEarlierReads()
+      unsubscribeFrames()
+      unsubscribeResync()
+      unsubscribeConnection()
+      unsubscribeEpoch()
+      refreshChatRef.current = () => {}
       streamAbortRef.current?.abort()
       btwAbortRef.current?.abort()
     }
-  }, [loadInitialHistory])
+  }, [keeper.name, invalidateEarlierReads])
 
   // Global shortcuts: ⌘. / Ctrl+. (Debug Companion) and Alt+T (Thinking block visibility)
   useEffect(() => {
@@ -363,9 +535,24 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     if (!nextCursor || loadingHistory) return
     const targetKeeper = keeper.name
     const startEpoch = currentSessionEpoch()
+    earlierAbortRef.current?.abort()
+    const ctrl = new AbortController()
+    earlierAbortRef.current = ctrl
+    const reqGen = ++earlierGenRef.current
     setLoadingHistory(true)
-    const res = await fetchKeeperChatHistoryPageApi(targetKeeper, nextCursor, 40)
-    if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) return
+    const res = await fetchKeeperChatHistoryPageApi(targetKeeper, nextCursor, 40, ctrl.signal)
+    if (
+      !mountedRef.current
+      || activeKeeperRef.current !== targetKeeper
+      || !isEpochCurrent(startEpoch)
+      || ctrl.signal.aborted
+      || reqGen !== earlierGenRef.current
+    ) {
+      return
+    }
+    if (earlierAbortRef.current === ctrl) {
+      earlierAbortRef.current = null
+    }
     setLoadingHistory(false)
     if (!res.ok) {
       if (res.error.kind !== 'epoch_stale' && res.error.kind !== 'aborted') {
@@ -381,6 +568,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       }
     }
     setRenderWindow((cur) => Math.min(MAX_RENDER_WINDOW, cur + res.value.messages.length))
+    hasLoadedEarlierRef.current = true
     setMessages((prev) => {
       const existingIds = new Set(prev.map((m) => m.id))
       const fresh = res.value.messages.filter((m) => !existingIds.has(m.id))
@@ -420,10 +608,12 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     updateAssistantEntry(assistantId, (m) => ({
       ...m,
       content: recovered.value.text || m.content,
+      replyOperationId: recovered.value.executionId ?? m.replyOperationId,
       deliveryState: recovered.value.error ? 'Failed' : 'Cut_recovered',
       cutStream: false,
       errorDetail: recovered.value.error ?? undefined,
     }))
+    refreshChatRef.current('history')
   }
 
   const runBtwQuery = async (promptText: string) => {
@@ -509,6 +699,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     const currentAttachments = [...attachments]
     let acceptedByServer = false
     sendingRef.current = true
+    sendingOperationRef.current = { operationId, executionId: operationId }
     forceScrollBottomRef.current = true
     setMessages((prev) => [...prev, userEntry, assistantEntry])
     setDraft('')
@@ -562,6 +753,11 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
         attachments: currentAttachments,
         signal: abortController.signal,
         callbacks: {
+          onBatchBound: (memberId, executionId) => {
+            if (memberId !== operationId) return
+            sendingOperationRef.current = { operationId, executionId }
+            updateAssistantEntry(assistantId, (entry) => ({ ...entry, replyOperationId: executionId }))
+          },
           onAccepted: (info) => {
             acceptedByServer = true
             if (info.controlToken) setControlToken(info.controlToken)
@@ -886,7 +1082,10 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       })
     } finally {
       sendingRef.current = false
-      if (mountedRef.current) setSending(false)
+      sendingOperationRef.current = null
+      if (mountedRef.current) {
+        setSending(false)
+      }
     }
 
     if (
@@ -914,11 +1113,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       return
     }
 
-    const opsRes = await fetchQueuedChatOperations(targetKeeper)
-    if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) {
-      return
-    }
-    if (opsRes.ok) setQueuedOps(opsRes.value)
+    refreshChatRef.current('history', 'queue', 'waiting')
     props.onMutated()
   }
 
@@ -992,11 +1187,295 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const visibleEntries = parsedEntries.filter(({ msg, blocks }) =>
     shouldRenderChatEntry(msg, blocks, blockPrefs),
   )
+  const displayItems = groupTranscriptEntries(visibleEntries)
+
+  // Live autonomous / delegated / external turn status from roster + SSE preview override
+  const activeTurn = keeper.active_turn
+  const effectivePreview: KeeperActiveTurnPreview | null = livePreview?.preview ?? activeTurn?.preview ?? null
+  const browserRequestQueued = sending && messages.some((entry) => entry.role === 'assistant'
+    && entry.operationId === sendingOperationRef.current?.operationId && entry.deliveryState === 'Queued')
+  const showLiveTurnCard = (!sending || browserRequestQueued) && (activeTurn !== null || effectivePreview !== null)
+  const liveTurnActivity = formatTurnActivityLabel(effectivePreview?.activity)
+  const liveTurnLaneLabel = activeTurn ? formatTurnLaneLabel(activeTurn.lane) : 'Keeper 턴'
+  const lastObserved = effectivePreview ? formatChatTime(effectivePreview.updated_at_unix) : null
+  const liveTurnElapsedSec = activeTurn
+    ? (activeTurn.elapsed_ms !== null && activeTurn.elapsed_ms !== undefined
+        ? Math.floor(activeTurn.elapsed_ms / 1000)
+        : activeTurn.started_at_unix > 0
+          ? Math.max(0, Math.floor(Date.now() / 1000 - activeTurn.started_at_unix))
+          : null)
+    : null
+  const liveToolName =
+    activeTurn?.tool_in_flight
+    ?? liveToolPulse?.toolName
+    ?? effectivePreview?.last_tool
+    ?? null
+  const isLiveToolInFlight = Boolean(
+    activeTurn?.tool_in_flight
+    || effectivePreview?.activity === 'tool'
+    || effectivePreview?.activity === 'tool_observed',
+  )
+
+  const renderToolResultStatus = (
+    tb: ChatToolBlock,
+    cachedRes: ToolResultCacheEntry | undefined,
+    displayArgs: string | undefined,
+    displayResult: string | undefined,
+    effectiveStatus: string | undefined,
+    loadingLabel: string,
+    hasInlineSummary: boolean,
+  ) => html`
+    ${!displayResult && cachedRes?.status === 'loading' && html`
+      <div class="kp-block-status">${loadingLabel}</div>
+    `}
+    ${!displayResult && cachedRes?.status === 'pending' && html`
+      <div class="kp-block-status">
+        도구 실행 중 — 결과 준비 대기 중…
+        ${tb.executionId && html`
+          ${' '}
+          <button
+            type="button"
+            class="btn-ghost kp-toggle-btn"
+            onClick=${() => void requestToolResult(tb.executionId!, true)}
+          >
+            다시 확인
+          </button>
+        `}
+      </div>
+    `}
+    ${!displayResult && cachedRes?.status === 'unavailable' && html`
+      <div class="kp-block-status">저장된 결과 없음 (${cachedRes.detail ?? 'unavailable'})</div>
+    `}
+    ${!displayResult && cachedRes?.status === 'error' && html`
+      <div class="kp-block-status">
+        결과 조회 실패 (${cachedRes.detail ?? 'error'})
+        ${tb.executionId && html`
+          ${' '}
+          <button
+            type="button"
+            class="btn-ghost kp-toggle-btn"
+            onClick=${() => void requestToolResult(tb.executionId!, true)}
+          >
+            다시 시도
+          </button>
+        `}
+      </div>
+    `}
+    ${!displayResult && !cachedRes && tb.executionId && html`
+      <div class="kp-block-status">
+        <button
+          type="button"
+          class="btn-ghost kp-toggle-btn"
+          onClick=${() => void requestToolResult(tb.executionId!)}
+        >
+          실행 결과 불러오기
+        </button>
+      </div>
+    `}
+    ${!hasInlineSummary && !displayArgs && !displayResult && !cachedRes && !tb.executionId && html`
+      <div class="kp-block-status">
+        ${tb.progressLabel
+          ?? (effectiveStatus === 'running'
+            ? '도구 실행 중…'
+            : effectiveStatus === 'awaiting_result'
+              ? '도구 호출 완료 — 결과 대기 중…'
+              : effectiveStatus === 'awaiting_approval'
+                ? '운영자 승인 대기 중…'
+                : '기록된 입력·결과가 없습니다.')}
+      </div>
+    `}
+  `
+
+  const renderToolCard = (tb: ChatToolBlock, idx: number, keyPrefix: string) => {
+    const cachedRes = tb.executionId ? toolResultCache[tb.executionId] : undefined
+    const displayArgs = tb.args ? prettyFormatPayload(tb.args) : undefined
+    const displayResult = tb.result
+      ? prettyFormatPayload(tb.result)
+      : cachedRes?.status === 'loaded'
+        ? cachedRes.content
+        : undefined
+    const effectiveStatus =
+      cachedRes?.status === 'loaded' && cachedRes.isError ? 'error' : tb.status
+    const statusMeta = toolStatusMeta(effectiveStatus)
+    const delegateInfo = extractDelegateCardInfo({
+      ...tb,
+      args: displayArgs ?? tb.args,
+      result: displayResult ?? tb.result,
+    })
+    const stableCardKey = `${tb.streamKey ?? tb.id ?? tb.executionId ?? `${keyPrefix}:${tb.name}-${idx}`}:${blockPrefs.tools}`
+
+    const handleToggle = (e: Event) => {
+      const el = e.currentTarget as HTMLDetailsElement
+      if (
+        el.open
+        && tb.executionId
+        && !displayResult
+        && (!cachedRes || cachedRes.status === 'pending' || cachedRes.status === 'error')
+      ) {
+        const force = cachedRes?.status === 'pending' || cachedRes?.status === 'error'
+        void requestToolResult(tb.executionId, force)
+      }
+    }
+
+    if (delegateInfo) {
+      const actionTitle =
+        delegateInfo.kind === 'delegate'
+          ? '위임'
+          : delegateInfo.kind === 'delegate_status'
+            ? '위임 조회'
+            : '위임 취소'
+      const targetSuffix =
+        delegateInfo.targetKeepers.length > 1
+          ? ` → @${delegateInfo.targetKeepers[0]} 외 ${delegateInfo.targetKeepers.length - 1}명`
+          : delegateInfo.targetKeeper
+            ? ` → @${delegateInfo.targetKeeper}`
+            : ''
+      const delStatus = delegateInfo.delegateState ?? tb.progressLabel ?? statusMeta.label
+      const preview = summarizeCompact(
+        delegateInfo.prompt
+          ?? (delegateInfo.operationCount > 1 ? `대상 ${delegateInfo.operationCount}건` : null)
+          ?? delegateInfo.operationId
+          ?? delStatus,
+        90,
+      )
+      const hasInlineSummary = Boolean(delegateInfo.prompt || delegateInfo.operationId || delegateInfo.operationCount > 0)
+      return html`
+        <div
+          key=${stableCardKey}
+          class="kp-collapsible-shell kp-block-card kp-block-card--delegate"
+          data-testid="chat-delegate-card"
+        >
+          <details
+            class="kp-collapsible-details"
+            open=${blockPrefs.tools === 'full' ? true : undefined}
+            onToggle=${handleToggle}
+          >
+            <summary class="kp-block-summary">
+              <span class="kp-pill" data-tone="brass">
+                ${actionTitle}${targetSuffix}
+              </span>
+              <span class="kp-pill" data-tone=${statusMeta.tone}>
+                ${delStatus}${tb.duration ? ` · ${tb.duration}` : ''}
+              </span>
+              <span class="kp-block-preview">${preview}</span>
+            </summary>
+            <div class="kp-block-content">
+              ${delegateInfo.prompt && html`
+                <div class="kp-block-sublabel">위임 요청 내용</div>
+                <div class="kp-delegate-prompt">${delegateInfo.prompt}</div>
+              `}
+              <div class="kp-pill-row">
+                ${delegateInfo.operationCount > 1 && html`
+                  <span class="kp-pill">조회 대상 ${delegateInfo.operationCount}건</span>
+                `}
+                ${delegateInfo.operationId && html`
+                  <span class="kp-pill">op: ${delegateInfo.operationId}</span>
+                `}
+                ${delegateInfo.artifactCount > 0 && html`
+                  <span class="kp-pill">아티팩트 ${delegateInfo.artifactCount}개</span>
+                `}
+                ${delegateInfo.targetTurnAgeSec !== null && html`
+                  <span class="kp-pill" data-tone="warn">상대 턴 경과 ${formatElapsedCompact(delegateInfo.targetTurnAgeSec)}</span>
+                `}
+              </div>
+              ${(displayArgs || displayResult) && html`
+                <details class="kp-sub-details">
+                  <summary class="kp-sub-summary">원본 입출력 (JSON)</summary>
+                  <div class="kp-block-content">
+                    ${displayArgs && html`
+                      <div class="kp-block-sublabel">입력 (Args)</div>
+                      <pre class="kp-block-pre">${displayArgs}</pre>
+                    `}
+                    ${displayResult && html`
+                      <div class="kp-block-sublabel">
+                        결과 (Result)${cachedRes?.truncated ? ' · 일부 표시' : ''}
+                      </div>
+                      <pre class="kp-block-pre">${displayResult}</pre>
+                    `}
+                  </div>
+                </details>
+              `}
+              ${renderToolResultStatus(
+                tb,
+                cachedRes,
+                displayArgs,
+                displayResult,
+                effectiveStatus,
+                '위임 응답 불러오는 중…',
+                hasInlineSummary,
+              )}
+            </div>
+          </details>
+          ${delegateInfo.targetKeepers.length > 0 && props.onSelectKeeper && html`
+            <div class="kp-collapsible-actions">
+              ${delegateInfo.targetKeepers.map((target) => html`
+                <button
+                  key=${target}
+                  type="button"
+                  class="btn-ghost kp-toggle-btn kp-delegate-jump"
+                  aria-label=${`${target} Keeper 대화로 이동`}
+                  onClick=${() => props.onSelectKeeper?.(target)}
+                >
+                  @${target} ↗
+                </button>
+              `)}
+            </div>
+          `}
+        </div>
+      `
+    }
+
+    const previewText = summarizeCompact(
+      displayArgs ?? displayResult ?? tb.progressLabel ?? statusMeta.label,
+      90,
+    )
+    return html`
+      <details
+        key=${stableCardKey}
+        class="kp-block-card kp-block-card--tool"
+        data-testid="chat-tool-card"
+        open=${blockPrefs.tools === 'full' ? true : undefined}
+        onToggle=${handleToggle}
+      >
+        <summary class="kp-block-summary">
+          <span class="kp-pill" data-tone=${statusMeta.tone}>도구 · ${tb.name}</span>
+          <span class="kp-pill" data-tone=${statusMeta.tone}>
+            ${tb.progressLabel ?? statusMeta.label}${tb.duration ? ` · ${tb.duration}` : ''}
+          </span>
+          <span class="kp-block-preview">${previewText}</span>
+        </summary>
+        <div class="kp-block-content">
+          ${displayArgs && html`
+            <div class="kp-block-sublabel">입력 (Args)</div>
+            <pre class="kp-block-pre">${displayArgs}</pre>
+          `}
+          ${displayResult && html`
+            <div class="kp-block-sublabel">
+              결과 (Result)${cachedRes?.truncated ? ' · 일부 표시' : ''}
+            </div>
+            <pre class="kp-block-pre">${displayResult}</pre>
+          `}
+          ${renderToolResultStatus(
+            tb,
+            cachedRes,
+            displayArgs,
+            displayResult,
+            effectiveStatus,
+            '결과 불러오는 중…',
+            false,
+          )}
+        </div>
+      </details>
+    `
+  }
 
   const lastVisible = visibleEntries[visibleEntries.length - 1]?.msg
+  const liveSig = showLiveTurnCard
+    ? `live:${effectivePreview?.revision ?? 0}:${effectivePreview?.text_tail.length ?? 0}:${liveToolName ?? ''}`
+    : ''
   const tailSig = lastVisible
-    ? `${visibleEntries.length}:${lastVisible.id}:${lastVisible.content.length}:${lastVisible.thinking?.length ?? 0}:${lastVisible.toolCalls?.length ?? 0}:${lastVisible.deliveryState ?? ''}:${lastVisible.errorDetail ?? ''}`
-    : `${visibleEntries.length}:empty`
+    ? `${visibleEntries.length}:${lastVisible.id}:${lastVisible.content.length}:${lastVisible.thinking?.length ?? 0}:${lastVisible.toolCalls?.length ?? 0}:${lastVisible.deliveryState ?? ''}:${lastVisible.errorDetail ?? ''}:${liveSig}`
+    : `${visibleEntries.length}:empty:${liveSig}`
 
   useLayoutEffect(() => {
     const el = chatListRef.current
@@ -1104,210 +1583,223 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
           >
             ${loadingHistory && messages.length === 0
               ? html`<div class="kp-empty">대화 기록 불러오는 중…</div>`
-              : visibleEntries.length === 0
+              : displayItems.length === 0 && !showLiveTurnCard
                 ? html`<div class="kp-empty">${messages.length > 0 ? '현재 블록 필터에 표시할 메시지가 없습니다.' : `${keeper.name}과(와) 대화를 시작하세요.`}</div>`
-                : visibleEntries.map(({ msg, blocks }) => {
-                    const timeLabel = formatChatTime(msg.ts)
-                    return html`
-                    <article key=${msg.id} class="kp-msg" data-role=${msg.role}>
-                      <div class="kp-msg-head">
-                        <span>
-                          ${msg.role === 'user'
-                            ? (msg.speakerLabel ?? '사용자')
-                            : blocks.autonomousSummary !== null
-                              ? `${keeper.name} · Autonomous Turn`
-                              : blocks.memoryItems.length > 0 && blocks.bodyText.length === 0
-                                ? `${keeper.name} · Memory Recall`
-                                : msg.toolName
-                                  ? `Tool · ${msg.toolName}`
-                                  : keeper.name}
-                        </span>
-                        <div class="kp-pill-row">
-                          ${timeLabel && html`<time class="kp-msg-time tnum">${timeLabel}</time>`}
-                          ${msg.deliveryState && html`
-                            <span class="kp-pill" data-tone=${deliveryBadgeTone(msg.deliveryState)}>
-                              ${msg.deliveryState}
-                            </span>
-                          `}
-                          ${msg.cutStream && msg.operationId && html`
-                            <button
-                              type="button"
-                              class="btn-ghost"
-                              onClick=${() => void handleRecoverCut(msg.id, msg.operationId!)}
-                            >
-                              저널 복구
-                            </button>
+                : displayItems.map((item) => {
+                    if (item.kind === 'tool_group') {
+                      if (item.toolBlocks.length === 1) {
+                        return html`
+                          <div key=${item.id} class="kp-activity-single" data-testid="chat-tool-single">
+                            ${renderToolCard(item.toolBlocks[0]!, 0, item.id)}
+                          </div>
+                        `
+                      }
+                      return html`
+                        <div
+                          key=${`${item.id}:${blockPrefs.tools}`}
+                          class="kp-collapsible-shell kp-activity-group"
+                          data-testid="chat-tool-group"
+                        >
+                          <details
+                            class="kp-collapsible-details"
+                            open=${blockPrefs.tools === 'full' ? true : undefined}
+                          >
+                            <summary class="kp-activity-group-summary">
+                              <span class="kp-pill" data-tone="info">도구 활동 · ${item.toolBlocks.length}건</span>
+                              <span class="kp-block-preview">${item.toolSummary}</span>
+                            </summary>
+                            <div class="kp-hierarchy-rail">
+                              ${item.toolBlocks.map((tb, idx) => renderToolCard(tb, idx, item.id))}
+                            </div>
+                          </details>
+                          ${item.delegateTargets.length > 0 && props.onSelectKeeper && html`
+                            <div class="kp-collapsible-actions">
+                              ${item.delegateTargets.map((target) => html`
+                                <button
+                                  key=${target}
+                                  type="button"
+                                  class="btn-ghost kp-toggle-btn kp-delegate-jump"
+                                  aria-label=${`${target} Keeper 대화로 이동`}
+                                  onClick=${() => props.onSelectKeeper?.(target)}
+                                >
+                                  @${target} ↗
+                                </button>
+                              `)}
+                            </div>
                           `}
                         </div>
-                      </div>
+                      `
+                    }
 
-                    ${blocks.thinkingText && blockPrefs.thinking !== 'hidden' && html`
-                      <details
-                        key=${`think:${blockPrefs.thinking}`}
-                        class="kp-block-card kp-msg-thinking"
-                        data-testid="chat-thinking-card"
-                        open=${blockPrefs.thinking === 'expanded' ? true : undefined}
-                      >
-                        <summary class="kp-block-summary">
-                          <span>추론 (Thinking)</span>
-                          <span class="kp-block-preview">${summarizeCompact(blocks.thinkingText, 80)}</span>
-                        </summary>
-                        <div class="kp-block-content">${blocks.thinkingText}</div>
-                      </details>
-                    `}
+                    const { msg, blocks } = item.entry
+                    const timeLabel = formatChatTime(msg.ts)
+                    const showThinking = Boolean(blocks.thinkingText && blockPrefs.thinking !== 'hidden')
+                    const showTools = blocks.toolBlocks.length > 0 && blockPrefs.tools !== 'hidden'
+                    const showMemory = blocks.memoryItems.length > 0 && blockPrefs.internal === 'shown'
+                    const showAutonomous = blocks.autonomousSummary !== null && blockPrefs.internal === 'shown'
+                    const hasTraceRail = showThinking || showTools || showMemory || showAutonomous
+                    const hasInFlightTool = blocks.toolBlocks.some(
+                      (tb) => tb.status === 'running' || tb.status === 'awaiting_result' || tb.status === 'awaiting_approval',
+                    )
 
-                    ${blocks.toolBlocks.length > 0 && blockPrefs.tools !== 'hidden' && html`
-                      <div class="kp-block-stack">
-                        ${blocks.toolBlocks.map((tb, idx) => {
-                          const cachedRes = tb.executionId ? toolResultCache[tb.executionId] : undefined
-                          const displayArgs = tb.args ? prettyFormatPayload(tb.args) : undefined
-                          const displayResult = tb.result
-                            ? prettyFormatPayload(tb.result)
-                            : cachedRes?.status === 'loaded'
-                              ? cachedRes.content
-                              : undefined
-                          const effectiveStatus =
-                            cachedRes?.status === 'loaded' && cachedRes.isError ? 'error' : tb.status
-                          const statusMeta = toolStatusMeta(effectiveStatus)
-                          const previewText = summarizeCompact(
-                            displayArgs ?? displayResult ?? tb.progressLabel ?? statusMeta.label,
-                            90,
-                          )
-                          return html`
-                            <details
-                              key=${`${tb.streamKey ?? tb.id ?? tb.executionId ?? tb.name}-${idx}:${blockPrefs.tools}`}
-                              class="kp-block-card kp-block-card--tool"
-                              data-testid="chat-tool-card"
-                              open=${blockPrefs.tools === 'full' ? true : undefined}
-                              onToggle=${(e: Event) => {
-                                const el = e.currentTarget as HTMLDetailsElement
-                                if (
-                                  el.open
-                                  && tb.executionId
-                                  && !displayResult
-                                  && (!cachedRes || cachedRes.status === 'pending' || cachedRes.status === 'error')
-                                ) {
-                                  void requestToolResult(tb.executionId, cachedRes?.status === 'pending' || cachedRes?.status === 'error')
-                                }
-                              }}
-                            >
-                              <summary class="kp-block-summary">
-                                <span class="kp-pill" data-tone=${statusMeta.tone}>도구 · ${tb.name}</span>
-                                <span class="kp-pill" data-tone=${statusMeta.tone}>
-                                  ${tb.progressLabel ?? statusMeta.label}${tb.duration ? ` · ${tb.duration}` : ''}
-                                </span>
-                                <span class="kp-block-preview">${previewText}</span>
-                              </summary>
-                              <div class="kp-block-content">
-                                ${displayArgs && html`
-                                  <div class="kp-block-sublabel">입력 (Args)</div>
-                                  <pre class="kp-block-pre">${displayArgs}</pre>
-                                `}
-                                ${displayResult && html`
-                                  <div class="kp-block-sublabel">
-                                    결과 (Result)${cachedRes?.truncated ? ' · 일부 표시' : ''}
-                                  </div>
-                                  <pre class="kp-block-pre">${displayResult}</pre>
-                                `}
-                                ${!displayResult && cachedRes?.status === 'loading' && html`
-                                  <div class="kp-block-status">결과 불러오는 중…</div>
-                                `}
-                                ${!displayResult && cachedRes?.status === 'pending' && html`
-                                  <div class="kp-block-status">
-                                    도구 실행 중 — 결과 준비 대기 중…
-                                    ${tb.executionId && html`
-                                      ${' '}
-                                      <button
-                                        type="button"
-                                        class="btn-ghost kp-toggle-btn"
-                                        onClick=${() => void requestToolResult(tb.executionId!, true)}
-                                      >
-                                        다시 확인
-                                      </button>
-                                    `}
-                                  </div>
-                                `}
-                                ${!displayResult && cachedRes?.status === 'unavailable' && html`
-                                  <div class="kp-block-status">저장된 결과 없음 (${cachedRes.detail ?? 'unavailable'})</div>
-                                `}
-                                ${!displayResult && cachedRes?.status === 'error' && html`
-                                  <div class="kp-block-status">
-                                    결과 조회 실패 (${cachedRes.detail ?? 'error'})
-                                    ${tb.executionId && html`
-                                      ${' '}
-                                      <button
-                                        type="button"
-                                        class="btn-ghost kp-toggle-btn"
-                                        onClick=${() => void requestToolResult(tb.executionId!, true)}
-                                      >
-                                        다시 시도
-                                      </button>
-                                    `}
-                                  </div>
-                                `}
-                                ${!displayResult && !cachedRes && tb.executionId && html`
-                                  <div class="kp-block-status">
-                                    <button
-                                      type="button"
-                                      class="btn-ghost kp-toggle-btn"
-                                      onClick=${() => void requestToolResult(tb.executionId!)}
-                                    >
-                                      실행 결과 불러오기
-                                    </button>
-                                  </div>
-                                `}
-                                ${!displayArgs && !displayResult && !cachedRes && !tb.executionId && html`
-                                  <div class="kp-block-status">
-                                    ${tb.progressLabel
-                                      ?? (effectiveStatus === 'running'
-                                        ? '도구 실행 중…'
-                                        : effectiveStatus === 'awaiting_result'
-                                          ? '도구 호출 완료 — 결과 대기 중…'
-                                          : effectiveStatus === 'awaiting_approval'
-                                            ? '운영자 승인 대기 중…'
-                                            : '기록된 입력·결과가 없습니다.')}
-                                  </div>
-                                `}
-                              </div>
-                            </details>
-                          `
-                        })}
-                      </div>
-                    `}
+                    return html`
+                      <article key=${msg.id} class="kp-msg" data-role=${msg.role}>
+                        <div class="kp-msg-head">
+                          <span>
+                            ${msg.role === 'user'
+                              ? (msg.speakerLabel ?? '사용자')
+                              : blocks.autonomousSummary !== null
+                                ? `${keeper.name} · Autonomous Turn`
+                                : blocks.memoryItems.length > 0 && blocks.bodyText.length === 0
+                                  ? `${keeper.name} · Memory Recall`
+                                  : msg.toolName
+                                    ? `Tool · ${msg.toolName}`
+                                    : keeper.name}
+                          </span>
+                          <div class="kp-pill-row">
+                            ${timeLabel && html`<time class="kp-msg-time tnum">${timeLabel}</time>`}
+                            ${msg.deliveryState && html`
+                              <span class="kp-pill" data-tone=${deliveryBadgeTone(msg.deliveryState)}>
+                                ${msg.deliveryState}
+                              </span>
+                            `}
+                            ${msg.cutStream && msg.operationId && html`
+                              <button
+                                type="button"
+                                class="btn-ghost"
+                                onClick=${() => void handleRecoverCut(msg.id, msg.operationId!)}
+                              >
+                                저널 복구
+                              </button>
+                            `}
+                          </div>
+                        </div>
 
-                    ${blocks.memoryItems.length > 0 && blockPrefs.internal === 'shown' && html`
-                      <details class="kp-block-card kp-block-card--memory" data-testid="chat-memory-card">
-                        <summary class="kp-block-summary">
-                          <span class="kp-pill" data-tone="brass">메모리 회상 (${blocks.memoryItems.length})</span>
-                          <span class="kp-block-preview">${summarizeCompact(blocks.memoryItems[0], 90)}</span>
-                        </summary>
-                        <ul class="kp-block-list">
-                          ${blocks.memoryItems.map((item, idx) => html`<li key=${idx}>${item}</li>`)}
-                        </ul>
-                      </details>
-                    `}
+                        ${hasTraceRail && html`
+                          <div class="kp-turn-trace" data-testid="chat-turn-trace">
+                            ${showThinking && html`
+                              <details
+                                key=${`think:${blockPrefs.thinking}`}
+                                class="kp-block-card kp-msg-thinking"
+                                data-testid="chat-thinking-card"
+                                open=${blockPrefs.thinking === 'expanded' ? true : undefined}
+                              >
+                                <summary class="kp-block-summary">
+                                  <span>추론 (Thinking)</span>
+                                  <span class="kp-block-preview">${summarizeCompact(blocks.thinkingText, 80)}</span>
+                                </summary>
+                                <div class="kp-block-content">${blocks.thinkingText}</div>
+                              </details>
+                            `}
 
-                    ${blocks.autonomousSummary !== null && blockPrefs.internal === 'shown' && html`
-                      <details class="kp-block-card kp-block-card--auto" data-testid="chat-autonomous-card">
-                        <summary class="kp-block-summary">
-                          <span class="kp-pill" data-tone="warn">자율 턴 (Autonomous)</span>
-                          <span class="kp-block-preview">${blocks.autonomousSummary}</span>
-                        </summary>
-                        ${blocks.autonomousDetails && html`
-                          <pre class="kp-block-pre">${blocks.autonomousDetails}</pre>
+                            ${showTools && (blocks.toolBlocks.length === 1
+                              ? html`
+                                  <div class="kp-block-stack">
+                                    ${renderToolCard(blocks.toolBlocks[0]!, 0, msg.id)}
+                                  </div>
+                                `
+                              : html`
+                                  <details
+                                    key=${`turn-tools:${msg.id}:${blockPrefs.tools}`}
+                                    class="kp-tool-subgroup"
+                                    data-testid="chat-turn-tool-group"
+                                    open=${blockPrefs.tools === 'full' ? true : undefined}
+                                    ref=${(el: HTMLDetailsElement | null) => {
+                                      if (el && hasInFlightTool && !el.dataset.autoOpened) {
+                                        el.dataset.autoOpened = '1'
+                                        el.open = true
+                                      }
+                                    }}
+                                  >
+                                    <summary class="kp-block-summary">
+                                      <span class="kp-pill" data-tone=${hasInFlightTool ? 'brass' : 'info'}>
+                                        도구 실행 · ${blocks.toolBlocks.length}건
+                                      </span>
+                                      ${hasInFlightTool && html`
+                                        <span class="kp-pill" data-tone="brass">진행 중</span>
+                                      `}
+                                      <span class="kp-block-preview">${summarizeToolHistogram(blocks.toolBlocks)}</span>
+                                    </summary>
+                                    <div class="kp-hierarchy-rail">
+                                      ${blocks.toolBlocks.map((tb, idx) => renderToolCard(tb, idx, msg.id))}
+                                    </div>
+                                  </details>
+                                `)}
+
+                            ${showMemory && html`
+                              <details class="kp-block-card kp-block-card--memory" data-testid="chat-memory-card">
+                                <summary class="kp-block-summary">
+                                  <span class="kp-pill" data-tone="brass">메모리 회상 (${blocks.memoryItems.length})</span>
+                                  <span class="kp-block-preview">${summarizeCompact(blocks.memoryItems[0], 90)}</span>
+                                </summary>
+                                <ul class="kp-block-list">
+                                  ${blocks.memoryItems.map((item, idx) => html`<li key=${idx}>${item}</li>`)}
+                                </ul>
+                              </details>
+                            `}
+
+                            ${showAutonomous && html`
+                              <details class="kp-block-card kp-block-card--auto" data-testid="chat-autonomous-card">
+                                <summary class="kp-block-summary">
+                                  <span class="kp-pill" data-tone="warn">자율 턴 (Autonomous)</span>
+                                  <span class="kp-block-preview">${blocks.autonomousSummary}</span>
+                                </summary>
+                                ${blocks.autonomousDetails && html`
+                                  <pre class="kp-block-pre">${blocks.autonomousDetails}</pre>
+                                `}
+                              </details>
+                            `}
+                          </div>
                         `}
-                      </details>
-                    `}
 
-                      ${(blocks.bodyText || msg.deliveryState === 'Streaming') && html`
-                        <div class="kp-msg-body">${blocks.bodyText || '응답 생성 중…'}</div>
-                      `}
-                      ${msg.errorDetail && html`<div class="ap-error">${msg.errorDetail}</div>`}
-                    </article>
-                  `
+                        ${(blocks.bodyText || msg.deliveryState === 'Streaming') && html`
+                          <div class="kp-msg-body">${blocks.bodyText || '응답 생성 중…'}</div>
+                        `}
+                        ${msg.errorDetail && html`<div class="ap-error">${msg.errorDetail}</div>`}
+                      </article>
+                    `
                   })}
+
+            ${showLiveTurnCard && html`
+              <section class="kp-live-turn-card" data-testid="chat-live-turn-card">
+                <div class="kp-msg-head">
+                  <div class="kp-pill-row">
+                    <span class="kp-live-dot" aria-hidden="true"></span>
+                    <span class="kp-pill" data-tone="brass">${liveTurnLaneLabel}</span>
+                    <span class="kp-pill" data-tone=${liveTurnActivity.tone}>${liveTurnActivity.label}</span>
+                    ${activeTurn?.turn_ref && html`<span class="kp-pill">${activeTurn.turn_ref}</span>`}
+                  </div>
+                  <div class="kp-pill-row">
+                    ${liveTurnElapsedSec !== null && html`
+                      <span class="kp-pill">${formatElapsedCompact(liveTurnElapsedSec)}</span>
+                    `}
+                    ${lastObserved && html`<span class="kp-pill">마지막 진행 ${lastObserved}</span>`}
+                  </div>
+                </div>
+                <div class="kp-hierarchy-rail">
+                  ${liveToolName && html`
+                    <div class="kp-pill-row">
+                      <span class="kp-pill" data-tone="info">
+                        ${isLiveToolInFlight ? '실행 중' : '최근 도구'} · ${liveToolName}
+                      </span>
+                      ${liveToolPulse?.executionMode === 'concurrent' && html`
+                        <span class="kp-pill" data-tone="brass">
+                          병렬${liveToolPulse.batchSize ? ` ${liveToolPulse.batchSize}건` : ''}
+                        </span>
+                      `}
+                    </div>
+                  `}
+                  ${effectivePreview?.status_text && html`
+                    <div class="kp-live-turn-status">${effectivePreview.status_text}</div>
+                  `}
+                  ${effectivePreview?.text_tail && html`
+                    <div class="kp-live-turn-tail">… ${effectivePreview.text_tail}</div>
+                  `}
+                </div>
+              </section>
+            `}
           </div>
-          ${!isNearBottom && visibleEntries.length > 0 && html`
+          ${!isNearBottom && (visibleEntries.length > 0 || showLiveTurnCard) && html`
             <button
               type="button"
               class="kp-scroll-bottom-btn"
@@ -1320,6 +1812,55 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
           `}
         </div>
 
+        ${waitingInventory && waitingInventory.rows.length > 0 && (() => {
+          const shownRows = waitingInventory.rows.slice(0, 12)
+          const hiddenWaitingCount = Math.max(
+            waitingInventory.rows.length - shownRows.length,
+            waitingInventory.total_row_count - shownRows.length,
+          )
+          return html`
+            <details class="kp-waiting-strip" data-testid="chat-waiting-strip">
+              <summary class="kp-activity-group-summary">
+                <span class="kp-pill" data-tone="warn">대기 · 위임 현황 (${waitingInventory.total_row_count || waitingInventory.rows.length}건)</span>
+                ${waitingInventory.oldest_age_seconds !== null && html`
+                  <span class="kp-pill">최장 ${formatElapsedCompact(waitingInventory.oldest_age_seconds)}</span>
+                `}
+                <span class="kp-block-preview">
+                  ${summarizeCompact(
+                    `${waitingInventory.rows[0]!.waiting_on} — ${waitingInventory.rows[0]!.what}`,
+                    90,
+                  )}
+                </span>
+              </summary>
+              <div class="kp-hierarchy-rail">
+                ${shownRows.map((row, idx) => html`
+                  <div key=${`${row.source}-${row.waiting_on}-${idx}`} class="kp-waiting-row">
+                    <div class="kp-pill-row">
+                      <span class="kp-pill" data-tone="brass">${formatWaitingSourceLabel(row.source)}</span>
+                      <span class="kp-roster-name">${row.waiting_on}</span>
+                    </div>
+                    ${row.what && html`<div class="kp-waiting-what">${row.what}</div>`}
+                    ${row.next_action && html`<div class="kp-block-status">다음 동작: ${row.next_action}</div>`}
+                  </div>
+                `)}
+                ${hiddenWaitingCount > 0 && html`
+                  <div class="kp-block-status">+ ${hiddenWaitingCount}건 더 있음</div>
+                `}
+              </div>
+            </details>
+          `
+        })()}
+
+        ${queueError && html`
+          <div class="ap-error" role="status">
+            대기열 조회 실패 · ${queueError}
+            <button type="button" class="btn-ghost" disabled=${queueRefreshing}
+              onClick=${() => {
+                setQueueRefreshing(true)
+                refreshChatRef.current('queue')
+              }}>다시 조회</button>
+          </div>
+        `}
         ${queuedOps.length > 0 && html`
           <div class="kp-queue-strip" aria-label="대기 중인 큐 작업">
             <span class="kp-kv-k">Queued Operations (${queuedOps.length})</span>
@@ -1330,10 +1871,13 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                   <button
                     type="button"
                     class="btn-ghost"
+                    disabled=${queueRefreshing || queueError !== null}
                     onClick=${async () => {
+                      const epoch = currentSessionEpoch()
                       await moveQueuedChatOperationToEndApi(keeper.name, op.operationId)
-                      const next = await fetchQueuedChatOperations(keeper.name)
-                      if (next.ok) setQueuedOps(next.value)
+                      if (activeKeeperRef.current === keeper.name && isEpochCurrent(epoch)) {
+                        refreshChatRef.current('queue', 'waiting')
+                      }
                     }}
                   >
                     뒤로
@@ -1341,10 +1885,13 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                   <button
                     type="button"
                     class="kp-btn-danger"
+                    disabled=${queueRefreshing || queueError !== null}
                     onClick=${async () => {
+                      const epoch = currentSessionEpoch()
                       await cancelQueuedChatOperation(keeper.name, op.operationId)
-                      const next = await fetchQueuedChatOperations(keeper.name)
-                      if (next.ok) setQueuedOps(next.value)
+                      if (activeKeeperRef.current === keeper.name && isEpochCurrent(epoch)) {
+                        refreshChatRef.current('queue', 'waiting')
+                      }
                     }}
                   >
                     취소

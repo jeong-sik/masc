@@ -36,6 +36,7 @@ import {
 } from '../../core/resource-cache'
 import { isKeeperEquipment, type KeeperEquipment } from '../../lib/keeper-portrait'
 import { randomUuid } from '../../lib/uuid'
+import { decodeKeeperChatDeliveryProvenance } from '../../keeper-delivery-provenance'
 import {
   dedupeHistoryToolRows,
   formatNativeCompletionSummary,
@@ -55,10 +56,14 @@ import type {
   ChatTranscriptEntry,
   CheckpointInventoryData,
   KeeperAttachedProvider,
+  KeeperActiveTurn,
+  KeeperActiveTurnPreview,
   KeeperCandleLedgerData,
   KeeperCatalogItem,
   KeeperItemsData,
   KeeperToolResultResponse,
+  KeeperWaitingInventoryData,
+  KeeperWaitingRow,
   KeeperLastPromptData,
   KeeperLinkedTask,
   KeeperMemoryFactsData,
@@ -166,6 +171,26 @@ interface TurnListItem {
   readonly active: KeeperRosterItem['active_turn']
 }
 
+function decodeTurnPreview(raw: unknown): KeeperActiveTurnPreview | null {
+  if (!isRecord(raw)) return null
+  if (typeof raw.status_text !== 'string') return null
+  const activity = asStr(raw.activity)
+  const updatedAt = asNum(raw.updated_at_unix)
+  if (!activity || updatedAt === null) return null
+  const statusText = raw.status_text
+  const textTail = typeof raw.text_tail === 'string' ? raw.text_tail : ''
+  const lastTool = asStr(raw.last_tool)
+  const revision = asNum(raw.revision)
+  return {
+    status_text: statusText,
+    activity,
+    text_tail: textTail,
+    last_tool: lastTool,
+    updated_at_unix: updatedAt,
+    revision: revision !== null && Number.isInteger(revision) && revision >= 1 ? revision : null,
+  }
+}
+
 function decodeTurnsList(raw: unknown): Map<string, TurnListItem> {
   const map = new Map<string, TurnListItem>()
   const list = isRecord(raw) && Array.isArray(raw.keepers)
@@ -182,11 +207,15 @@ function decodeTurnsList(raw: unknown): Map<string, TurnListItem> {
       : isRecord(row.turn)
         ? row.turn
         : null
-    const active = activeRaw
+    const active: KeeperActiveTurn | null = activeRaw
       ? {
           lane: asStr(activeRaw.lane) ?? 'chat',
+          turn_ref: asStr(activeRaw.turn_ref),
           started_at_unix: asNum(activeRaw.started_at_unix) ?? asNum(activeRaw.started_at) ?? 0,
+          phase: asStr(activeRaw.phase),
           tool_in_flight: asStr(activeRaw.tool_in_flight) ?? asStr(activeRaw.tool),
+          elapsed_ms: asNum(activeRaw.elapsed_ms),
+          preview: decodeTurnPreview(activeRaw.preview),
         }
       : null
     map.set(name, {
@@ -308,9 +337,18 @@ export function filterAndSortRoster(
   })
 }
 
+export const KEEPER_ROSTER_OBSERVER_TOPICS: readonly string[] = [
+  'keeper_roster_changed',
+  'keeper_row_changed',
+  'keeper_turn_changed',
+]
+
+const KEEPER_ROSTER_KEY = 'keepers:roster'
+
 export async function loadKeeperRoster(reason: FetchReason = 'mount'): Promise<Observed<readonly KeeperRosterItem[]>> {
+  if (reason === 'sse') resourceCache.invalidateKey(KEEPER_ROSTER_KEY)
   return resourceCache.fetch<readonly KeeperRosterItem[]>(
-    'keepers:roster',
+    KEEPER_ROSTER_KEY,
     async (signal) => {
       const [gateRes, turnsRes] = await Promise.all([
         apiGet<unknown>('/api/v1/gate/keepers?detailed=true', { signal }),
@@ -320,7 +358,7 @@ export async function loadKeeperRoster(reason: FetchReason = 'mount'): Promise<O
       const turnsMap = turnsRes.ok ? decodeTurnsList(turnsRes.value) : new Map<string, TurnListItem>()
       return ok<readonly KeeperRosterItem[] | null>(decodeKeeperRoster(gateRes.value, turnsMap))
     },
-    { ttlMs: 10_000, topics: ['keeper', 'keeper_turn', 'keeper_lifecycle'], reason },
+    { ttlMs: 10_000, topics: KEEPER_ROSTER_OBSERVER_TOPICS, reason },
   )
 }
 
@@ -555,6 +593,7 @@ export function decodeHistoryRow(raw: unknown): ChatTranscriptEntry | null {
     content,
     thinking,
     ts,
+    deliveryProvenance: decodeKeeperChatDeliveryProvenance(raw.delivery_key, raw.transcript_slot).value ?? undefined,
     turnRef: asStr(raw.turn_ref) ?? undefined,
     executionId: asStr(raw.execution_id) ?? undefined,
     toolName: asStr(raw.tool_call_name) ?? asStr(raw.tool_name) ?? undefined,
@@ -564,6 +603,147 @@ export function decodeHistoryRow(raw: unknown): ChatTranscriptEntry | null {
     autonomousTurn: autonomousTurn || undefined,
     deliveryState: 'Delivered',
   }
+}
+
+export function fetchKeeperWaitingInventoryApi(
+  keeper: string,
+  signal?: AbortSignal,
+): Promise<Result<KeeperWaitingInventoryData | null, ApiError>> {
+  return apiGet<KeeperWaitingInventoryData | null>(
+    `/api/v1/keepers/${encodeURIComponent(keeper)}/waiting-inventory`,
+    {
+      signal,
+      decode: (raw) => {
+        const body = isRecord(raw) && isRecord(raw.data) ? raw.data : raw
+        if (!isRecord(body)) return null
+        const rowsRaw = Array.isArray(body.rows) ? body.rows : []
+        const rows: KeeperWaitingRow[] = []
+        for (const item of rowsRaw) {
+          if (!isRecord(item)) continue
+          const source = asStr(item.source)
+          const waitingOn = asStr(item.waiting_on)
+          if (!source || !waitingOn) continue
+          rows.push({
+            keeper_name: asStr(item.keeper_name),
+            source,
+            waiting_on: waitingOn,
+            what: typeof item.what === 'string' ? item.what : '',
+            wake_producer: asStr(item.wake_producer) ?? '',
+            since: asNum(item.since),
+            due_at: asNum(item.due_at),
+            next_action: typeof item.next_action === 'string' ? item.next_action : '',
+          })
+        }
+        return {
+          schema: asStr(body.schema) ?? 'masc.keeper_waiting_inventory',
+          keeper_count: asNum(body.keeper_count) ?? 0,
+          waiting_keeper_count: asNum(body.waiting_keeper_count) ?? 0,
+          row_count: asNum(body.row_count) ?? rows.length,
+          total_row_count: asNum(body.total_row_count) ?? rows.length,
+          oldest_age_seconds: asNum(body.oldest_age_seconds),
+          rows,
+        }
+      },
+    },
+  )
+}
+
+export interface KeeperLiveToolPulse {
+  readonly toolName: string
+  readonly disposition: string | null
+  readonly durationMs: number | null
+  readonly executionMode: 'concurrent' | 'serial' | null
+  readonly batchSize: number | null
+  readonly updatedAt: number
+}
+
+export type KeeperObserverChatSignal =
+  | {
+      readonly kind: 'turn_preview'
+      readonly ownerKey: string | null
+      readonly preview: KeeperActiveTurnPreview
+    }
+  | { readonly kind: 'turn_ended' }
+  | { readonly kind: 'tool_pulse'; readonly pulse: KeeperLiveToolPulse }
+  | { readonly kind: 'chat_appended' }
+  | { readonly kind: 'waiting_changed'; readonly queueChanged: boolean }
+
+/**
+ * Pure extractor for shared Observer SSE frames scoped to a single Keeper's
+ * Chat view. Handles both flat event records and JSON-RPC `params` envelopes,
+ * matching the live OCaml broadcast shapes (`server_turn_preview_broadcast.ml`).
+ */
+export function parseKeeperLiveObserverEvent(
+  eventName: string,
+  data: unknown,
+  keeperName: string,
+): KeeperObserverChatSignal | null {
+  const payload = isRecord(data)
+    ? (isRecord(data.params) ? data.params : data)
+    : null
+  const eventType =
+    (payload ? (asStr(payload.type) ?? asStr(payload.event_type) ?? asStr(payload.event)) : null)
+    ?? (eventName !== 'message' ? eventName : null)
+  if (!eventType) return null
+
+  const rowKeeper = payload
+    ? (asStr(payload.keeper_name) ?? asStr(payload.keeper) ?? asStr(payload.name) ?? asStr(payload.agent_name))
+    : null
+
+  // A refresh can only be caused by an event addressed to this Keeper.
+  if (rowKeeper !== keeperName) return null
+
+  if (eventType === 'keeper_waiting_inventory_changed') {
+    return { kind: 'waiting_changed', queueChanged: payload?.queue_kind === 'chat_operation' }
+  }
+  if (eventType === 'keeper_chat_appended') {
+    return { kind: 'chat_appended' }
+  }
+  if (eventType === 'keeper_turn_complete') {
+    return { kind: 'turn_ended' }
+  }
+  if (eventType === 'keeper_turn_changed' && payload) {
+    const status = asStr(payload.status) ?? asStr(payload.phase)
+    if (
+      payload.active_turn === null
+      || payload.turn === null
+      || status === 'idle'
+      || status === 'completed'
+    ) {
+      return { kind: 'turn_ended' }
+    }
+    // Start/in-progress previews arrive via `keeper_turn_preview_changed` and roster `active_turn`.
+    return null
+  }
+  if (eventType === 'keeper_turn_preview_changed' && payload) {
+    const obs = isRecord(payload.observation) ? payload.observation : null
+    const previewRaw =
+      (obs && isRecord(obs.preview) ? obs.preview : null)
+      ?? (isRecord(payload.preview) ? payload.preview : null)
+    const preview = decodeTurnPreview(previewRaw)
+    if (preview) {
+      const ownerKey = (obs ? asStr(obs.owner_key) : null) ?? asStr(payload.owner_key)
+      return { kind: 'turn_preview', ownerKey, preview }
+    }
+    return null
+  }
+  if ((eventType === 'keeper_tool_call' || eventType === 'masc/keeper_tool_call') && payload) {
+    const toolName = asStr(payload.tool_name) ?? asStr(payload.tool)
+    if (!toolName) return null
+    const execModeRaw = asStr(payload.execution_mode)
+    return {
+      kind: 'tool_pulse',
+      pulse: {
+        toolName,
+        disposition: asStr(payload.disposition),
+        durationMs: asNum(payload.duration_ms),
+        executionMode: execModeRaw === 'concurrent' || execModeRaw === 'serial' ? execModeRaw : null,
+        batchSize: asNum(payload.batch_size),
+        updatedAt: Date.now(),
+      },
+    }
+  }
+  return null
 }
 
 export function fetchKeeperToolResultApi(
@@ -630,12 +810,14 @@ export function fetchKeeperChatHistoryPageApi(
   keeper: string,
   cursor?: string,
   limit = 40,
+  signal?: AbortSignal,
 ): Promise<Result<ChatHistoryPage, ApiError>> {
   const params = new URLSearchParams({ limit: String(limit) })
   if (cursor) params.set('cursor', cursor)
   return apiGet<ChatHistoryPage>(
     `/api/v1/keepers/${encodeURIComponent(keeper)}/chat/history/page?${params.toString()}`,
     {
+      signal,
       decode: (raw) => {
         if (!isRecord(raw) || !Array.isArray(raw.messages)) {
           throw new Error('Invalid chat history page')
@@ -654,12 +836,18 @@ export function fetchKeeperChatHistoryPageApi(
   )
 }
 
-export function fetchQueuedChatOperations(keeper: string): Promise<Result<readonly QueuedChatOperation[], ApiError>> {
+export function fetchQueuedChatOperations(
+  keeper: string,
+  signal?: AbortSignal,
+): Promise<Result<readonly QueuedChatOperation[], ApiError>> {
   return apiGet<readonly QueuedChatOperation[]>(
     `/api/v1/keepers/${encodeURIComponent(keeper)}/chat/operations?state=queued`,
     {
+      signal,
       decode: (raw) => {
-        if (!isRecord(raw) || !Array.isArray(raw.operations)) return []
+        if (!isRecord(raw) || !Array.isArray(raw.operations)) {
+          throw new Error('Invalid chat queue payload')
+        }
         const ops: QueuedChatOperation[] = []
         for (const item of raw.operations) {
           if (!isRecord(item)) continue
@@ -724,6 +912,11 @@ export function decodeChatJournalPage(raw: unknown, operationId: string): ChatJo
     const type = asStr(ev.type) ?? asStr(item.kind) ?? ''
     if (type === 'RUN_STARTED' || type === 'run_started') {
       events.push({ kind: 'run_started' })
+    } else if (type === 'batch_bound') {
+      const executionId = asStr(ev.execution_id)
+      if (executionId && asStr(ev.operation_id) === operationId) {
+        events.push({ kind: 'batch_bound', executionId })
+      }
     } else if (
       type === 'agent_core_runtime_attempt_started'
       || (type === 'CUSTOM' && asStr(ev.name) === 'KEEPER_RUNTIME_ATTEMPT_STARTED')
@@ -828,17 +1021,20 @@ export function reconstructJournalReply(events: readonly ChatJournalEvent[]): {
   readonly text: string
   readonly finished: boolean
   readonly error: string | null
+  readonly executionId: string | null
 } {
   let pieces: string[] = []
   let ownership: CutReplyOwnership = FRESH_OWNERSHIP
-  let finished = false
-  let error: string | null = null
+  let executionId: string | null = null
 
   for (const ev of events) {
     switch (ev.kind) {
       case 'run_started':
         pieces = []
         ownership = FRESH_OWNERSHIP
+        break
+      case 'batch_bound':
+        executionId = ev.executionId
         break
       case 'runtime_attempt_started':
         pieces = []
@@ -853,22 +1049,20 @@ export function reconstructJournalReply(events: readonly ChatJournalEvent[]): {
         break
       }
       case 'run_finished':
-        finished = true
-        return { text: pieces.join(''), finished, error }
+        return { text: pieces.join(''), finished: true, error: null, executionId }
       case 'error':
-        error = ev.detail
-        return { text: pieces.join(''), finished: false, error }
+        return { text: pieces.join(''), finished: false, error: ev.detail, executionId }
       case 'other':
         break
     }
   }
-  return { text: pieces.join(''), finished, error }
+  return { text: pieces.join(''), finished: false, error: null, executionId }
 }
 
 export async function recoverCutReplyFromJournal(
   keeper: string,
   operationId: string,
-): Promise<Result<{ readonly text: string; readonly finished: boolean; readonly error: string | null }, ApiError>> {
+): Promise<Result<ReturnType<typeof reconstructJournalReply>, ApiError>> {
   const allEvents: ChatJournalEvent[] = []
   let cursor: ChatJournalCursor | null = null
   let pages = 0
@@ -942,6 +1136,7 @@ export function buildChatStreamRequestBody(params: {
 }
 
 export interface StreamKeeperChatCallbacks {
+  readonly onBatchBound?: (operationId: string, executionId: string) => void
   readonly onAccepted?: (info: {
     readonly operationId: string
     readonly state: string
@@ -1223,6 +1418,10 @@ export async function streamKeeperChat(params: {
                   outcome,
                 })
               }
+            } else if (name === 'KEEPER_CHAT_BATCH_BOUND' && val) {
+              const operationId = asStr(val.operation_id)
+              const executionId = asStr(val.execution_id)
+              if (operationId && executionId) params.callbacks.onBatchBound?.(operationId, executionId)
             } else if (name === 'KEEPER_CHAT_OPERATION_ACCEPTED' && val) {
               const state = asStr(val.state) ?? 'Queued'
               const inter = isRecord(val.interactive) ? val.interactive : null

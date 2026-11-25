@@ -4488,8 +4488,11 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       | Nav.Addon_detach_confirm _
       | Nav.Addon_invoke_action _
       | Nav.Setup_login_input_form _ ->
+          let loading_note = Option.is_some modal.note_prefill_id in
           let status_rows =
-            if modal.submitting || Option.is_some modal.error || Option.is_some discord_status then 1 else 0
+            if modal.submitting || loading_note || Option.is_some modal.error
+               || Option.is_some discord_status then 1
+            else 0
           in
           let extra_rows =
             match modal.kind with
@@ -4760,14 +4763,22 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                          (Grapheme.truncate_to_width ~max_width:padded.w (Say.resolve lang label))))
                   discord_status
             | None ->
-                if modal.submitting then
+                if modal.submitting || loading_note then (
+                  let status =
+                    if loading_note then
+                      Say.make ~ko:"운영자 노트 조회 중…" ~en:"Reading operator note…"
+                    else Say.make ~ko:"서버에 전송 중…" ~en:"Submitting…"
+                  in
+                  let glyph =
+                    (match kind with
+                    | Nav.Keeper_operator_note_form _ ->
+                        Masc_tui_store.Chat_transcript.progress_glyph model
+                    | _ -> Glyph.Live_working) [@warning "-4"]
+                  in
                   ignore
                     (Cell_grid.put_text ~clip:sr grid ~x:padded.x ~y:sy
                        ~style:attn_st
-                       (Say.resolve lang
-                          (Say.make
-                             ~ko:(Glyph.to_utf8 Glyph.Live_working ^ " 서버에 전송 중...")
-                             ~en:(Glyph.to_utf8 Glyph.Live_working ^ " Submitting..."))))
+                       (Glyph.to_utf8 glyph ^ " " ^ Say.resolve lang status)))
           end
     end
 

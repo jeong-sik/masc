@@ -98,6 +98,9 @@ type keeper_work_row =
 val keeper_work_overview : model:Model.t -> keeper:string -> keeper_work_row list
 val animation_frames_per_second : int
 val reduce_motion : Model.t -> bool
+
+val progress_glyph : Model.t -> Glyph.t
+(** The current progress frame, with a steady glyph under reduced motion. *)
 (** The observed turn, its start decisions, and the referenced Task and Goal. *)
 
 val active_turn_detail_summary : Wire_fleet.active_turn -> Say.t

@@ -3088,261 +3088,92 @@ let apply_http_reply ~now (m : Model.t) reply =
       ( Model.with_toast ~now ~level:Model.Toast_error
           (Msg.http_error_summary err) next
       , cmds )
-  | Msg.Reply_keeper_operator_note_loaded { keeper; result = Ok note } ->
-      let keeper_context =
-        Keeper_context_store.apply_operator_note ~observed_at:now ~keeper note
-          m.keeper_context
+  | Msg.Reply_keeper_operator_note_loaded { keeper; modal_prefill_id; result } ->
+      let owned_modal =
+        Option.bind m.inline_modal (fun (modal : Model.inline_modal_state) ->
+            if Option.is_some modal_prefill_id
+               && Option.equal Int.equal modal.note_prefill_id modal_prefill_id
+               && Nav.equal_inline_action_kind modal.kind
+                    (Nav.Keeper_operator_note_form keeper)
+            then Some modal
+            else None)
       in
-      let inline_modal =
-        Option.map
-          (fun (modal : Model.inline_modal_state) ->
-            match modal.kind with
-            | Nav.Keeper_operator_note_form k
-              when String.equal k keeper && (not modal.submitting) && note.pending
-              ->
-                let fields =
-                  List.map
-                    (fun (f : Model.modal_form_field) ->
-                      if
-                        String.equal f.key "text"
-                        && String.equal (String.trim f.value) ""
-                      then { f with value = note.text }
-                      else f)
-                    modal.fields
-                in
-                { modal with fields }
-            | Nav.Keeper_operator_note_form _
-            | Nav.Discord_reply_form _
-            | Nav.Btw_query
-            | Nav.Gate_reject _
-            | Nav.Verification_reject _
-            | Nav.Harness_overrule _
-            | Nav.Task_cancel _
-            | Nav.Goal_drop _
-            | Nav.Schedule_form
-            | Nav.Connector_form
-            | Nav.Repo_add_form
-            | Nav.Board_new_post
-            | Nav.Board_goal_proposal
-            | Nav.Goal_confirmation_proof
-            | Nav.Memory_act_form
-            | Nav.Wiki_edit_form
-            | Nav.Fusion_launch_form
-            | Nav.Runtime_assign_form
-            | Nav.Setup_account_key_form
-            | Nav.Setup_login_start_form
-            | Nav.Board_comment _
-            | Nav.Github_token_form _
-            | Nav.Code_finder_form
-            | Nav.Runtime_lane_create
-            | Nav.Task_create_form
-            | Nav.Addon_attach_form
-            | Nav.Runtime_lane_edit _
-            | Nav.Runtime_lane_delete _
-            | Nav.Task_transition_form _
-            | Nav.Task_link_goal _
-            | Nav.Goal_upsert_form _
-            | Nav.Board_delete_post _
-            | Nav.Keeper_lifecycle_form _
-            | Nav.Keeper_purge_confirm _
-            | Nav.Addon_detach_confirm _
-            | Nav.Addon_invoke_action _
-            | Nav.Setup_login_input_form _
-            | Nav.Code_search_form
-            | Nav.Keeper_control_confirm _
-            | Nav.Keeper_clear_form _
-            | Nav.Tool_execute_form _
-            | Nav.Skill_create_form
-            | Nav.Skill_edit_form _
-            | Nav.Skill_delete_confirm _
-            | Nav.Prompt_override_form _
-            | Nav.Preset_create_form
-            | Nav.Runtime_param_set_form _
-            | Nav.Default_route_edit
-            | Nav.Lane_rename_form _
-            | Nav.Addon_decl_form _
-            | Nav.Addon_act_form _
-            | Nav.Browser_interact_form _ ->
-                modal)
-          m.inline_modal
-      in
-      ({ m with inline_modal; keeper_context }, [])
-  | Msg.Reply_keeper_operator_note_loaded { keeper; result = Error err } -> (
-      match err with
-      | Msg.Http_error { status = 404; _ } ->
-          ( {
-              m with
-              keeper_context =
-                Keeper_context_store.mark_operator_note_absent ~keeper
-                  m.keeper_context;
-            }
-          , [] )
-      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
-      | Msg.Decode_error _ ->
-          err_reply
-            ~fail:(fun m ->
+      if Option.is_some modal_prefill_id && Option.is_none owned_modal then (m, [])
+      else
+        let finish_prefill ~text ~error (m : Model.t) =
+          match owned_modal with
+          | None -> m
+          | Some modal ->
+              let modal = Model.modal_update_active_field (fun _ -> text) modal in
               {
                 m with
-                keeper_context =
+                nav = { m.nav with modal_edit_cursor = String.length text };
+                inline_modal = Some { modal with error };
+              }
+        in
+        (match result with
+        | Ok note ->
+            let keeper_context =
+              Keeper_context_store.apply_operator_note ~observed_at:now ~keeper note
+                m.keeper_context
+            in
+            let text = if note.pending then note.text else "" in
+            (finish_prefill ~text ~error:None { m with keeper_context }, [])
+        | Error (Msg.Http_error { status = 404; _ }) ->
+            let keeper_context =
+              Keeper_context_store.mark_operator_note_absent ~keeper m.keeper_context
+            in
+            (finish_prefill ~text:"" ~error:None { m with keeper_context }, [])
+        | Error err ->
+            err_reply
+              ~fail:(fun m ->
+                let reason = Msg.http_error_detail err in
+                let keeper_context =
                   Keeper_context_store.mark_operator_note_failed ~at:now ~keeper
-                    ~reason:(Msg.http_error_detail err)
-                    ~retryable:(Msg.http_error_retryable err) m.keeper_context;
-              })
-            ~source:(Health.Source_keeper keeper) ~ko:"운영자 노트 조회"
-            ~en:"Operator note fetch" err)
-  | Msg.Reply_keeper_operator_note_saved { keeper; result = Ok note } ->
-      let close_modal =
-        match m.inline_modal with
-        | Some { kind = Nav.Keeper_operator_note_form k; _ } ->
-            String.equal k keeper
-        | Some
-            {
-              kind =
-                ( Nav.Btw_query
-                | Nav.Gate_reject _
-                | Nav.Verification_reject _
-                | Nav.Harness_overrule _
-                | Nav.Task_cancel _
-                | Nav.Goal_drop _
-                | Nav.Schedule_form
-                | Nav.Connector_form
-                | Nav.Repo_add_form
-                | Nav.Board_new_post
-                | Nav.Board_goal_proposal
-                | Nav.Goal_confirmation_proof
-                | Nav.Memory_act_form
-                | Nav.Wiki_edit_form
-                | Nav.Fusion_launch_form
-                | Nav.Runtime_assign_form
-                | Nav.Setup_account_key_form
-                | Nav.Setup_login_start_form
-                | Nav.Board_comment _
-                | Nav.Github_token_form _
-                | Nav.Code_finder_form
-                | Nav.Runtime_lane_create
-                | Nav.Task_create_form
-                | Nav.Addon_attach_form
-                | Nav.Runtime_lane_edit _
-                | Nav.Runtime_lane_delete _
-                | Nav.Task_transition_form _
-                | Nav.Task_link_goal _
-                | Nav.Goal_upsert_form _
-                | Nav.Board_delete_post _
-                | Nav.Keeper_lifecycle_form _
-                | Nav.Keeper_purge_confirm _
-                | Nav.Addon_detach_confirm _
-                | Nav.Addon_invoke_action _
-                | Nav.Setup_login_input_form _
-                | Nav.Code_search_form
-                | Nav.Keeper_control_confirm _
-                | Nav.Keeper_clear_form _
-                | Nav.Discord_reply_form _
-                | Nav.Tool_execute_form _
-                | Nav.Skill_create_form
-                | Nav.Skill_edit_form _
-                | Nav.Skill_delete_confirm _
-                | Nav.Prompt_override_form _
-                | Nav.Preset_create_form
-                | Nav.Runtime_param_set_form _
-                | Nav.Default_route_edit
-                | Nav.Lane_rename_form _
-                | Nav.Addon_decl_form _
-                | Nav.Addon_act_form _
-                | Nav.Browser_interact_form _ );
-              _;
-            }
-        | None ->
-            false
+                    ~reason ~retryable:(Msg.http_error_retryable err) m.keeper_context
+                in
+                finish_prefill ~text:"" ~error:(Some reason) { m with keeper_context })
+              ~source:(Health.Source_keeper keeper) ~ko:"운영자 노트 조회"
+              ~en:"Operator note fetch" err)
+  | Msg.Reply_keeper_operator_note_saved { keeper; modal_submission_id; result } ->
+      let owns_modal (modal : Model.inline_modal_state) =
+        modal.submitting
+        && Option.equal Int.equal modal_submission_id (Some modal.submission_id)
+        && Nav.equal_inline_action_kind modal.kind (Nav.Keeper_operator_note_form keeper)
       in
-      let nav =
-        if close_modal then { m.nav with overlay = None } else m.nav
-      in
-      let inline_modal = if close_modal then None else m.inline_modal in
-      let keeper_context =
-        Keeper_context_store.apply_operator_note ~observed_at:now ~keeper note
-          m.keeper_context
-      in
-      let next =
-        { m with nav; inline_modal; keeper_context }
-        |> Model.with_toast ~now ~level:Model.Toast_success
-             (Say.make ~ko:("운영자 노트 저장됨: " ^ keeper)
-                ~en:("Operator note saved: " ^ keeper))
-      in
-      (next, [])
-  | Msg.Reply_keeper_operator_note_saved { keeper; result = Error err } ->
-      let inline_modal =
-        Option.map
-          (fun (modal : Model.inline_modal_state) ->
-            match modal.kind with
-            | Nav.Keeper_operator_note_form k when String.equal k keeper ->
-                {
-                  modal with
-                  submitting = false;
-                  error = Some (Msg.http_error_detail err);
-                }
-            | Nav.Keeper_operator_note_form _
-            | Nav.Discord_reply_form _
-            | Nav.Btw_query
-            | Nav.Gate_reject _
-            | Nav.Verification_reject _
-            | Nav.Harness_overrule _
-            | Nav.Task_cancel _
-            | Nav.Goal_drop _
-            | Nav.Schedule_form
-            | Nav.Connector_form
-            | Nav.Repo_add_form
-            | Nav.Board_new_post
-            | Nav.Board_goal_proposal
-            | Nav.Goal_confirmation_proof
-            | Nav.Memory_act_form
-            | Nav.Wiki_edit_form
-            | Nav.Fusion_launch_form
-            | Nav.Runtime_assign_form
-            | Nav.Setup_account_key_form
-            | Nav.Setup_login_start_form
-            | Nav.Board_comment _
-            | Nav.Github_token_form _
-            | Nav.Code_finder_form
-            | Nav.Runtime_lane_create
-            | Nav.Task_create_form
-            | Nav.Addon_attach_form
-            | Nav.Runtime_lane_edit _
-            | Nav.Runtime_lane_delete _
-            | Nav.Task_transition_form _
-            | Nav.Task_link_goal _
-            | Nav.Goal_upsert_form _
-            | Nav.Board_delete_post _
-            | Nav.Keeper_lifecycle_form _
-            | Nav.Keeper_purge_confirm _
-            | Nav.Addon_detach_confirm _
-            | Nav.Addon_invoke_action _
-            | Nav.Setup_login_input_form _
-            | Nav.Code_search_form
-            | Nav.Keeper_control_confirm _
-            | Nav.Keeper_clear_form _
-            | Nav.Tool_execute_form _
-            | Nav.Skill_create_form
-            | Nav.Skill_edit_form _
-            | Nav.Skill_delete_confirm _
-            | Nav.Prompt_override_form _
-            | Nav.Preset_create_form
-            | Nav.Runtime_param_set_form _
-            | Nav.Default_route_edit
-            | Nav.Lane_rename_form _
-            | Nav.Addon_decl_form _
-            | Nav.Addon_act_form _
-            | Nav.Browser_interact_form _ ->
-                modal)
-          m.inline_modal
-      in
-      let next, cmds =
-        record_http_incident ~now ~source:(Health.Source_keeper keeper)
-          ~context:(Say.make ~ko:"운영자 노트 저장" ~en:"Operator note save")
-          err { m with inline_modal }
-      in
-      ( Model.with_toast ~now ~level:Model.Toast_error
-          (Msg.http_error_summary err) next
-      , cmds )
+      (match result with
+      | Ok note ->
+          let close_modal = Option.exists owns_modal m.inline_modal in
+          let nav =
+            if close_modal then { m.nav with overlay = None } else m.nav
+          in
+          let inline_modal = if close_modal then None else m.inline_modal in
+          let keeper_context =
+            Keeper_context_store.apply_operator_note ~observed_at:now ~keeper note
+              m.keeper_context
+          in
+          let next =
+            { m with nav; inline_modal; keeper_context }
+            |> Model.with_toast ~now ~level:Model.Toast_success
+                 (Say.make ~ko:("운영자 노트 저장됨: " ^ keeper)
+                    ~en:("Operator note saved: " ^ keeper))
+          in
+          (next, [])
+      | Error err ->
+          let inline_modal =
+            Option.map
+              (fun (modal : Model.inline_modal_state) ->
+                if owns_modal modal then
+                  { modal with submitting = false; error = Some (Msg.http_error_detail err) }
+                else modal)
+              m.inline_modal
+          in
+          let next, cmds =
+            record_http_incident ~now ~source:(Health.Source_keeper keeper)
+              ~context:(Say.make ~ko:"운영자 노트 저장" ~en:"Operator note save")
+              err { m with inline_modal }
+          in
+          (Model.with_toast ~now ~level:Model.Toast_error (Msg.http_error_summary err) next, cmds))
   | Msg.Reply_keeper_run_next { keeper; result; _ } ->
       let queue = Fleet_store.chat_queue_for ~keeper m.fleet in
       let queue = { queue with read = Observed.loading ~since_ns:now } in

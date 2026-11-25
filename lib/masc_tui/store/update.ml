@@ -565,7 +565,7 @@ let leave_old_epoch ~now ~(before : Model.t) (after : Model.t) =
     let inline_modal =
       Option.map
         (fun (modal : Model.inline_modal_state) ->
-          if modal.submitting then { modal with submitting = false } else modal)
+          { modal with submitting = false; note_prefill_id = None })
         after.inline_modal
     in
     let ask_modal =

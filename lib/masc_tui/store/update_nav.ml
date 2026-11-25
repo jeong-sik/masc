@@ -6197,12 +6197,15 @@ let submit_inline_modal ~now (m : Model.t) =
               if String.length text > 4096 then
                 set_modal_error "Operator note exceeds 4096-byte server cap"
               else
-                ( mark_submitting m
+                let sub_id, submitting = Model.modal_mark_submitting_with_id modal m in
+                ( submitting
                 , [
                     Cmd.Http_post
                       {
                         epoch = m.epoch;
-                        req = Cmd.Post_keeper_operator_note { keeper; text };
+                        req =
+                          Cmd.Post_keeper_operator_note
+                            { keeper; text; modal_submission_id = Some sub_id };
                       };
                   ] )
           | Nav.Tool_execute_form { tool_name; _ } -> (

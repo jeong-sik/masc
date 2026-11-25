@@ -172,6 +172,9 @@ type inline_modal_state = {
   active_field : int;
   submitting : bool;
   submission_id : int;
+  note_prefill_id : int option;
+  (** [Some id] allows that note read to seed this open draft. [None] means
+      there is no eligible prefill, including after an operator edit. *)
   error : string option;
 }
 
@@ -296,8 +299,8 @@ val next_keeper_lifecycle_seq : t -> int * t
     resume operation id. Never reset across epochs. *)
 
 val next_modal_submission_id : t -> int * t
-(** Mint a strictly monotonic submission identifier for an inline modal POST.
-    Never reset across epochs. *)
+(** Mint a strictly monotonic identifier for a request owned by an inline
+    modal. Never reset across epochs. *)
 
 val modal_mark_submitting_with_id : inline_modal_state -> t -> int * t
 (** Mint a fresh submission id via {!next_modal_submission_id} and mark the

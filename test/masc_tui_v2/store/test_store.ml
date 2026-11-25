@@ -24139,44 +24139,86 @@ let () =
                          true
                      | _ -> false)
                    (Cmd.flatten ok_cmds));
-              (* 4. GET operator note loaded must NOT close open note modal *)
-              let m_note_open, _ =
-                Update_nav.open_inline_modal m_ws
-                  (Nav.Keeper_operator_note_form "alpha")
+              (* Operator note reads and saves are owned by the opened draft. *)
+              let open_note m =
+                let next, cmds =
+                  Update.execute_slash ~now:t0 m
+                    (Slash.Ctl { action = Slash.Ctl_note; target = None })
+                in
+                match Cmd.flatten cmds with
+                | [ Cmd.Http_get
+                      { req = Cmd.Get_keeper_operator_note
+                          { keeper = "alpha"; modal_prefill_id = Some id }; _ } ] ->
+                    next, id
+                | _ -> Alcotest.fail "expected an owned note read"
               in
-              let m_after_load, _ =
-                Update.step ~now:t0 m_note_open
-                  (Msg.Http_reply
-                     {
-                       epoch = m_note_open.epoch;
-                       reply =
-                         Msg.Reply_keeper_operator_note_loaded
-                           {
-                             keeper = "alpha";
-                             result =
-                               Ok
-                                 {
-                                   keeper = "alpha";
-                                   pending = true;
-                                   text = "existing note";
-                                   created_at = 1795252000.0;
-                                   created_by = "admin";
-                                   consumed_at = None;
-                                   consumed_turn = None;
-                                 };
-                           };
-                     })
+              let receive (m : Model.t) reply =
+                fst (Update.step ~now:t0 m (Msg.Http_reply { epoch = m.epoch; reply }))
               in
-              Alcotest.(check bool) "loaded note keeps modal open and seeds text"
-                true
-                (match m_after_load.inline_modal with
-                | Some { kind = Nav.Keeper_operator_note_form "alpha"; fields; _ } ->
-                    List.exists
-                      (fun (f : Model.modal_form_field) ->
-                        String.equal f.key "text"
-                        && String.equal f.value "existing note")
-                      fields
-                | _ -> false);
+              let note : Wire_keeper_context.keeper_operator_note =
+                {
+                  keeper = "alpha";
+                  pending = true;
+                  text = "existing note";
+                  created_at = 1795252000.0;
+                  created_by = "admin";
+                  consumed_at = None;
+                  consumed_turn = None;
+                }
+              in
+              let loaded modal_prefill_id =
+                Msg.Reply_keeper_operator_note_loaded
+                  { keeper = "alpha"; modal_prefill_id; result = Ok note }
+              in
+              let saved id =
+                Msg.Reply_keeper_operator_note_saved
+                  { keeper = "alpha"; modal_submission_id = Some id; result = Ok note }
+              in
+              let edit value (m : Model.t) =
+                {
+                  m with
+                  inline_modal =
+                    Option.map (Model.modal_update_active_field (fun _ -> value))
+                      m.inline_modal;
+                }
+              in
+              let field (m : Model.t) =
+                Option.map (Model.modal_field_raw_value ~key:"text") m.inline_modal
+              in
+              let submit m expected_text =
+                let next, cmds = Update_nav.submit_inline_modal ~now:t0 m in
+                match Cmd.flatten cmds with
+                | [ Cmd.Http_post
+                      { req = Cmd.Post_keeper_operator_note
+                          { keeper = "alpha"; text; modal_submission_id = Some id }; _ } ] ->
+                    Alcotest.(check string) "submitted draft" expected_text text;
+                    next, id
+                | _ -> Alcotest.fail "expected an owned note save"
+              in
+              let first, first_id = open_note m_ws in
+              Alcotest.(check (option string)) "passive read leaves the form alone"
+                (Some "") (field (receive first (loaded None)));
+              let primed = receive first (loaded (Some first_id)) in
+              Alcotest.(check (option string)) "owned read prefills a pristine draft"
+                (Some note.text) (field primed);
+              let cleared = first |> edit "draft" |> edit "" in
+              Alcotest.(check (option string)) "late read preserves deliberate clear"
+                (Some "") (field (receive cleared (loaded (Some first_id))));
+              let saving, old_save_id = submit primed note.text in
+              let reopened, read_id = open_note saving in
+              Alcotest.(check bool) "reopened note owns a different read"
+                true (not (Int.equal first_id read_id));
+              Alcotest.(check (option string)) "old read cannot prefill reopened note"
+                (Some "") (field (receive reopened (loaded (Some first_id))));
+              let rewritten = edit "new draft" reopened in
+              Alcotest.(check (option string)) "old save preserves reopened draft"
+                (Some "new draft") (field (receive rewritten (saved old_save_id)));
+              let new_saving, new_save_id = submit rewritten "new draft" in
+              let after_old_save = receive new_saving (saved old_save_id) in
+              Alcotest.(check (option string)) "old save does not settle the new save"
+                (Some "new draft") (field after_old_save);
+              Alcotest.(check (option string)) "new save closes its own draft"
+                None (field (receive after_old_save (saved new_save_id)));
               (* 5. Checkpoints 403 latches checkpoints_auth_denied without incident storm *)
               let m_denied, _ =
                 Update.step ~now:t0 m_ws

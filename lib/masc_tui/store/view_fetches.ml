@@ -127,7 +127,7 @@ let fetches_for_keeper_context ?(include_cache_outcome = false) ~force ~name
     |> add_if
          ((force || not ks.operator_note_absent)
           && needs_fetch ~force ks.operator_note)
-         (Cmd.Get_keeper_operator_note { keeper = name })
+         (Cmd.Get_keeper_operator_note { keeper = name; modal_prefill_id = None })
   in
   match Keeper_context_store.selected_turn_entry ks with
   | None -> base

@@ -82,6 +82,7 @@ let test_cli_info_flags () =
               "--base-path";
               "--url";
               "--theme";
+              "muted";
               "--lang";
               "--no-auto-start";
               "--version";
@@ -139,6 +140,13 @@ let test_cli_flags_and_urls () =
       Alcotest.(check bool) "auto_start default true" true cfg.auto_start
   | Cli_args.Info _ | Cli_args.Parse_error _ ->
       Alcotest.fail "expected valid URL Run config");
+  (match Cli_args.parse ~env:empty_env ~cwd:"/tmp/cwd" [ "--theme"; "muted" ] with
+  | Cli_args.Run cfg ->
+      Alcotest.(check bool) "muted theme" true
+        (Theme.equal_preset cfg.theme Theme.Muted);
+      Alcotest.(check bool) "muted theme_explicit set" true cfg.theme_explicit
+  | Cli_args.Info _ | Cli_args.Parse_error _ ->
+      Alcotest.fail "expected valid muted Run config");
   (match
      Cli_args.parse ~env:empty_env ~cwd:"/tmp/cwd"
        [ "--url"; "https://masc.example.internal" ]

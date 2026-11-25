@@ -3072,21 +3072,86 @@ let test_music_launch_args () =
     ]
   in
   Alcotest.(check (list string)) "workbench" ("--music" :: roots)
-    (Music_launch.args ~base_path Cmd.Music_workbench);
+    (Music_launch.args ~base_path Music_launch.Workbench);
   Alcotest.(check (list string)) "midi import"
     ("--midi-file" :: "/tmp/a.mid" :: roots)
-    (Music_launch.args ~base_path (Cmd.Music_import_midi "/tmp/a.mid"));
-  (* The file check runs before the PATH lookup, so these messages do not
-     depend on whether masc-alphatex is installed on the machine. *)
-  let refused path =
-    match Music_launch.command ~base_path (Cmd.Music_import_midi path) with
-    | Error detail ->
-        Alcotest.(check string) "refused before any spawn"
-          ("MIDI file not found: " ^ path) detail
-    | Ok _ -> Alcotest.fail ("a MIDI path that is no file must be refused: " ^ path)
+    (Music_launch.args ~base_path (Music_launch.Import_midi "/tmp/a.mid"));
+  Alcotest.(check (list string)) "score view takes no library roots"
+    [ "--bundle"; "/tmp/s.json"; "--index"; "2"; "--cell-width"; "9";
+      "--cell-height"; "18" ]
+    (Music_launch.args ~base_path
+       (Music_launch.Score
+          { bundle = "/tmp/s.json"; index = 2; cell_pixels = (9, 18) }));
+  let refused program ~cell_pixels =
+    let called = ref false in
+    let result =
+      Music_launch.with_launch ~cell_pixels program (fun _ ->
+          called := true;
+          Ok ())
+    in
+    Alcotest.(check bool) "a refused launch never reaches the viewer" false
+      !called;
+    Alcotest.(check bool) "a refused launch is an error" true
+      (Result.is_error result)
   in
-  refused "/nonexistent/masc-music-launch.mid";
-  refused (Filename.get_temp_dir_name ())
+  refused (Cmd.Music_import_midi "/nonexistent/masc-music-launch.mid")
+    ~cell_pixels:None;
+  refused (Cmd.Music_import_midi (Filename.get_temp_dir_name ()))
+    ~cell_pixels:None;
+  Alcotest.(check (result unit string)) "the missing file is named"
+    (Error "MIDI file not found: /nonexistent/masc-music-launch.mid")
+    (Music_launch.with_launch ~cell_pixels:None
+       (Cmd.Music_import_midi "/nonexistent/masc-music-launch.mid")
+       (fun _ -> Ok ()));
+  refused (Cmd.Score_view { sources = [ "\\title \"a\"" ]; index = 1 })
+    ~cell_pixels:None
+
+let test_music_launch_score_bundle () =
+  let sources = [ "\\title \"newest\""; "\\title \"older\"" ] in
+  let seen = ref None in
+  let result =
+    Music_launch.with_launch ~cell_pixels:(Some (9, 18))
+      (Cmd.Score_view { sources; index = 2 })
+      (fun launch ->
+        match launch with
+        | Music_launch.Score { bundle; index; cell_pixels } ->
+            seen := Some bundle;
+            Alcotest.(check int) "index reaches the viewer" 2 index;
+            Alcotest.(check (pair int int)) "cell size reaches the viewer"
+              (9, 18) cell_pixels;
+            let json = Yojson.Safe.from_file bundle in
+            Alcotest.(check (list string))
+              "the bundle lists every source in order" sources
+              (Yojson.Safe.Util.member "sources" json
+              |> Yojson.Safe.Util.to_list
+              |> List.map Yojson.Safe.Util.to_string);
+            Ok ()
+        | Music_launch.Workbench | Music_launch.Import_midi _ ->
+            Error "a score request resolved to another program")
+  in
+  Alcotest.(check (result unit string)) "the launch succeeds" (Ok ()) result;
+  (match !seen with
+   | Some bundle ->
+       Alcotest.(check bool) "the bundle is removed after the viewer exits"
+         false (Sys.file_exists bundle)
+   | None -> Alcotest.fail "the continuation never ran");
+  let kept = ref None in
+  let failed =
+    Music_launch.with_launch ~cell_pixels:(Some (9, 18))
+      (Cmd.Score_view { sources; index = 1 })
+      (fun launch ->
+        (match launch with
+         | Music_launch.Score { bundle; _ } -> kept := Some bundle
+         | Music_launch.Workbench | Music_launch.Import_midi _ -> ());
+        Error "viewer failed")
+  in
+  Alcotest.(check (result unit string)) "the viewer's error comes back"
+    (Error "viewer failed") failed;
+  match !kept with
+  | Some bundle ->
+      Alcotest.(check bool) "the bundle is removed after a failure" false
+        (Sys.file_exists bundle)
+  | None -> Alcotest.fail "the continuation never ran"
 
 (* Run [f] with this process's fd 2 pointed at a temp file. Returns what [f]
    returned and the text written to fd 2 meanwhile. *)
@@ -3107,26 +3172,21 @@ let with_stderr_in_file f =
   (result, text)
 
 let test_music_launch_run () =
-  let sh script =
-    { Music_launch.executable = "/bin/sh"; args = [ "-c"; script ] }
-  in
+  let sh script = Music_launch.run ~executable:"/bin/sh" [ "-c"; script ] in
   let result, logged =
     with_stderr_in_file (fun () ->
-        Music_launch.run (sh "echo 'notice: edits kept at /tmp/x' >&2; exit 0"))
+        sh "echo 'notice: edits kept at /tmp/x' >&2; exit 0")
   in
   Alcotest.(check (result unit string)) "a clean exit stays Ok" (Ok ()) result;
   Alcotest.(check string)
     "what the viewer wrote lands in this process's stderr"
     "masc-alphatex stderr:\nnotice: edits kept at /tmp/x\n" logged;
-  let result, logged =
-    with_stderr_in_file (fun () -> Music_launch.run (sh "exit 0"))
-  in
+  let result, logged = with_stderr_in_file (fun () -> sh "exit 0") in
   Alcotest.(check (result unit string)) "a silent exit is Ok" (Ok ()) result;
   Alcotest.(check string) "a silent viewer leaves the log alone" "" logged;
   let result, logged =
     with_stderr_in_file (fun () ->
-        Music_launch.run
-          (sh "echo first >&2; echo 'bad midi' >&2; echo >&2; exit 3"))
+        sh "echo first >&2; echo 'bad midi' >&2; echo >&2; exit 3")
   in
   Alcotest.(check (result unit string))
     "the last non-blank stderr line ends the message"
@@ -3136,16 +3196,13 @@ let test_music_launch_run () =
     "masc-alphatex stderr:\nfirst\nbad midi\n\n" logged;
   Alcotest.(check (result unit string)) "no stderr, no detail"
     (Error "masc-alphatex exited with status 4")
-    (Music_launch.run (sh "exit 4"));
-  (match Music_launch.run (sh "kill -9 $$") with
+    (sh "exit 4");
+  (match sh "kill -9 $$" with
    | Error detail ->
        Alcotest.(check bool) "a signal is named" true
          (String.starts_with ~prefix:"masc-alphatex ended on signal" detail)
    | Ok () -> Alcotest.fail "a killed viewer is an error");
-  match
-    Music_launch.run
-      { Music_launch.executable = "/nonexistent/masc-alphatex"; args = [] }
-  with
+  match Music_launch.run ~executable:"/nonexistent/masc-alphatex" [] with
   | Error _ -> ()
   | Ok () -> Alcotest.fail "a missing executable is an error"
 
@@ -3155,6 +3212,8 @@ let () =
       ( "music_launch"
       , [ Alcotest.test_case "viewer arguments and missing MIDI input" `Quick
             test_music_launch_args;
+          Alcotest.test_case "score bundle lives only while the viewer runs" `Quick
+            test_music_launch_score_bundle;
           Alcotest.test_case "viewer exit, signal and stderr detail" `Quick
             test_music_launch_run ] );
       ( "cli_args"

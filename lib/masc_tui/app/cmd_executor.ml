@@ -4202,13 +4202,15 @@ let run_editor_roundtrip t ~suffix initial =
           Eio.Cancel.protect t.editor_handoff.resume_terminal;
           Error (Masc_cli_editor.Form_unreadable (Printexc.to_string ex)))
 
-let run_terminal_program t command =
+let run_terminal_program t ~executable args =
   Atomic.set t.editor_active true;
   Fun.protect
     ~finally:(fun () -> Atomic.set t.editor_active false)
     (fun () ->
       t.editor_handoff.pause_terminal ();
-      match Eio_unix.run_in_systhread (fun () -> Music_launch.run command) with
+      match
+        Eio_unix.run_in_systhread (fun () -> Music_launch.run ~executable args)
+      with
       | res ->
           t.editor_handoff.resume_terminal ();
           res
@@ -4219,13 +4221,30 @@ let run_terminal_program t command =
           Eio.Cancel.protect t.editor_handoff.resume_terminal;
           Error (Printexc.to_string ex))
 
+(* The score viewer draws with Kitty graphics and needs the measured size of
+   one terminal cell; [None] when either is missing. *)
+let kitty_cell_pixels () =
+  let probe = Probe.current_observation () in
+  match
+    ( Graphics.protocol_of_probe ~graphics:probe.Probe.graphics
+        ~term_program:(Graphics.effective_term_program ~getenv:Sys.getenv_opt),
+      probe.Probe.cell_pixels )
+  with
+  | Graphics.Kitty_protocol, Some (width, height) when width > 0 && height > 0 ->
+      Some (width, height)
+  | Graphics.Kitty_protocol, (Some _ | None)
+  | (Graphics.ITerm2_protocol | Graphics.Unsupported_protocol), _ ->
+      None
+
 let execute_terminal_program t program =
   if Atomic.get t.editor_active then ()
   else
     match
-      Result.bind
-        (Music_launch.command ~base_path:t.cli.base_path program)
-        (run_terminal_program t)
+      Result.bind (Music_launch.executable ()) (fun executable ->
+          Music_launch.with_launch ~cell_pixels:(kitty_cell_pixels ()) program
+            (fun launch ->
+              run_terminal_program t ~executable
+                (Music_launch.args ~base_path:t.cli.base_path launch)))
     with
     | Ok () -> ()
     | Error detail ->

@@ -609,6 +609,8 @@ type editor_target =
 type terminal_program =
   | Music_workbench
   | Music_import_midi of string  (* path of a Standard MIDI File *)
+  | Score_view of { sources : string list; index : int }
+      (* alphaTex sources, newest first; [index] counts from 1 *)
 
 type t =
   | Batch of t list

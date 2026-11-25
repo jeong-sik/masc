@@ -446,4 +446,55 @@ describe('Proposal A+ Shell components', () => {
     expect(historicalIncidents.value[0]?.detail).toBe('gate store locked')
     vi.unstubAllGlobals()
   })
+
+  it('refreshPendingHitl applies healthy sources immediately while another source hangs, then times out the hung source into an incident', async () => {
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      authMethods: AUTH_METHODS,
+      workspaceId: 'default',
+    }
+    const json = (d: unknown) =>
+      new Response(JSON.stringify(d), { status: 200, headers: { 'content-type': 'application/json' } })
+
+    const hangingFetch = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/api/v1/verification/requests')) {
+        // Simulate a hung endpoint that never responds (even ignores AbortSignal)
+        return new Promise<Response>(() => {})
+      }
+      if (url.includes('/api/v1/keepers/tool-approvals')) {
+        return Promise.resolve(json({
+          pending: [{
+            approval_id: 'apr-fast-1',
+            keeper: 'sangsu',
+            tool_call_id: 'tc-1',
+            tool: 'git_push',
+            args: '{}',
+            question: 'Allow push?',
+            because: 'guard',
+          }],
+        }))
+      }
+      if (url.includes('/api/v1/keepers/asks')) {
+        return Promise.resolve(json({
+          asks: [{ ask_id: 'ask-fast-1', keeper: 'sangsu', resolution: { state: 'open' }, question: 'Proceed?' }],
+        }))
+      }
+      if (url.includes('/api/v1/dashboard/gate')) return Promise.resolve(json({ approval_queue: [] }))
+      if (url.includes('/api/v1/dashboard/planning')) return Promise.resolve(json({ goals: [] }))
+      return Promise.resolve(json({}))
+    })
+
+    const refreshPromise = refreshPendingHitl(hangingFetch as unknown as typeof fetch, { timeoutMs: 60 })
+    // Even BEFORE the 60ms timeout fires on /verification/requests, approvals & asks must already be applied!
+    await new Promise((r) => setTimeout(r, 15))
+    expect(pendingApprovals.value.map((a) => a.approvalId)).toEqual(['apr-fast-1'])
+    expect(inboxPendingCount.value).toBe(2)
+
+    // Once the hung request hits timeoutMs, refresh finishes cleanly and records an explicit timeout incident
+    await refreshPromise
+    expect(historicalIncidents.value.some((inc) => inc.source === 'verification' && inc.summary.includes('timeout'))).toBe(true)
+  })
 })

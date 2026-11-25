@@ -532,7 +532,10 @@ let hitlRefreshSeq = 0
 let hitlAbortCtrl: AbortController | null = null
 const hitlIncidentLastSig = new Map<string, string>()
 
-export async function refreshPendingHitl(fetchImpl?: typeof fetch): Promise<void> {
+export async function refreshPendingHitl(
+  fetchImpl?: typeof fetch,
+  opts?: { readonly timeoutMs?: number },
+): Promise<void> {
   hitlAbortCtrl?.abort()
   const seq = ++hitlRefreshSeq
   const sessionKind = authSession.peek().kind
@@ -550,6 +553,23 @@ export async function refreshPendingHitl(fetchImpl?: typeof fetch): Promise<void
   hitlAbortCtrl = ctrl
   const startEpoch = currentSessionEpoch()
   const workspaceId = activeWorkspaceId.peek()
+  const reqOpts = { fetchImpl, signal: ctrl.signal, timeoutMs: opts?.timeoutMs }
+  const isCurrent = (): boolean => seq === hitlRefreshSeq && isEpochCurrent(startEpoch)
+  const lastHitlIncidentBySource = hitlIncidentLastSig
+  const recordHitlIncidentOnce = (
+    source: string,
+    summary: string,
+    detail: string,
+  ): void => {
+    const sig = `${summary}|${detail}`
+    if (lastHitlIncidentBySource.get(source) === sig) return
+    lastHitlIncidentBySource.set(source, sig)
+    recordIncident({ severity: 'warn', source, summary, detail })
+  }
+  const clearHitlIncident = (source: string): void => {
+    lastHitlIncidentBySource.delete(source)
+  }
+
   hitlLoading.value = true
   try {
     if (sessionKind === 'multi_account_signed_in') {
@@ -557,9 +577,10 @@ export async function refreshPendingHitl(fetchImpl?: typeof fetch): Promise<void
       pendingAsks.value = []
       pendingGateApprovals.value = []
       pendingVerifications.value = []
-      const planRes = await apiGet<unknown>('/api/v1/dashboard/planning', { fetchImpl, signal: ctrl.signal })
-      if (seq !== hitlRefreshSeq || !isEpochCurrent(startEpoch)) return
+      const planRes = await apiGet<unknown>('/api/v1/dashboard/planning', reqOpts)
+      if (!isCurrent()) return
       if (planRes.ok) {
+        clearHitlIncident('planning')
         pendingGoalConfirmations.value = parseAwaitingGoalsPayload(planRes.value, workspaceId)
       } else if (
         planRes.error.kind !== 'epoch_stale'
@@ -567,142 +588,136 @@ export async function refreshPendingHitl(fetchImpl?: typeof fetch): Promise<void
         && planRes.error.kind !== 'forbidden'
         && planRes.error.kind !== 'not_found'
       ) {
-        recordIncident({
-          severity: 'warn',
-          source: 'planning',
-          summary: `Goal confirmation queue unavailable (${planRes.error.status ?? planRes.error.kind})`,
-          detail: planRes.error.message,
-        })
+        recordHitlIncidentOnce(
+          'planning',
+          `Goal confirmation queue unavailable (${planRes.error.status ?? planRes.error.kind})`,
+          planRes.error.message,
+        )
       }
       return
     }
 
-    const [approvalsRes, asksRes, gateRes, planRes, verifRes] = await Promise.all([
-      apiGet<unknown>('/api/v1/keepers/tool-approvals', { fetchImpl, signal: ctrl.signal }),
-      apiGet<unknown>('/api/v1/keepers/asks', { fetchImpl, signal: ctrl.signal }),
-      apiGet<unknown>('/api/v1/dashboard/gate', { fetchImpl, signal: ctrl.signal }),
-      apiGet<unknown>('/api/v1/dashboard/planning', { fetchImpl, signal: ctrl.signal }),
-      apiGet<unknown>('/api/v1/verification/requests?view=awaiting', { fetchImpl, signal: ctrl.signal }),
-    ])
-    if (seq !== hitlRefreshSeq || !isEpochCurrent(startEpoch)) return
-
-    const lastHitlIncidentBySource = hitlIncidentLastSig
-    const recordHitlIncidentOnce = (
-      source: string,
-      summary: string,
-      detail: string,
-    ): void => {
-      const sig = `${summary}|${detail}`
-      if (lastHitlIncidentBySource.get(source) === sig) return
-      lastHitlIncidentBySource.set(source, sig)
-      recordIncident({ severity: 'warn', source, summary, detail })
-    }
-    const clearHitlIncident = (source: string): void => {
-      lastHitlIncidentBySource.delete(source)
-    }
-
-    if (approvalsRes.ok) {
-      clearHitlIncident('approvals')
-      pendingApprovals.value = parseToolApprovalsPayload(approvalsRes.value, workspaceId)
-    } else if (
-      approvalsRes.error.kind !== 'epoch_stale'
-      && approvalsRes.error.kind !== 'aborted'
-      && approvalsRes.error.kind !== 'not_found'
-    ) {
-      recordHitlIncidentOnce(
-        'approvals',
-        `Tool approval queue unavailable (${approvalsRes.error.status ?? approvalsRes.error.kind})`,
-        approvalsRes.error.message,
-      )
-    }
-
-    if (asksRes.ok) {
-      clearHitlIncident('asks')
-      pendingAsks.value = parseKeeperAsksPayload(asksRes.value, workspaceId)
-    } else if (
-      asksRes.error.kind !== 'epoch_stale'
-      && asksRes.error.kind !== 'aborted'
-      && asksRes.error.kind !== 'forbidden'
-      && asksRes.error.kind !== 'not_found'
-    ) {
-      recordHitlIncidentOnce(
-        'asks',
-        `Keeper asks queue unavailable (${asksRes.error.status ?? asksRes.error.kind})`,
-        asksRes.error.message,
-      )
-    }
-
-    if (gateRes.ok) {
-      if (
-        isRecord(gateRes.value)
-        && isRecord(gateRes.value.approval_queue_state)
-        && gateRes.value.approval_queue_state.state === 'unavailable'
+    // Apply each HITL source independently as soon as it settles so one slow
+    // or hung endpoint never blocks the other 4 sources from updating.
+    const approvalsJob = apiGet<unknown>('/api/v1/keepers/tool-approvals', reqOpts).then((approvalsRes) => {
+      if (!isCurrent()) return
+      if (approvalsRes.ok) {
+        clearHitlIncident('approvals')
+        pendingApprovals.value = parseToolApprovalsPayload(approvalsRes.value, workspaceId)
+      } else if (
+        approvalsRes.error.kind !== 'epoch_stale'
+        && approvalsRes.error.kind !== 'aborted'
+        && approvalsRes.error.kind !== 'not_found'
       ) {
-        const st = gateRes.value.approval_queue_state
+        recordHitlIncidentOnce(
+          'approvals',
+          `Tool approval queue unavailable (${approvalsRes.error.status ?? approvalsRes.error.kind})`,
+          approvalsRes.error.message,
+        )
+      }
+    })
+
+    const asksJob = apiGet<unknown>('/api/v1/keepers/asks', reqOpts).then((asksRes) => {
+      if (!isCurrent()) return
+      if (asksRes.ok) {
+        clearHitlIncident('asks')
+        pendingAsks.value = parseKeeperAsksPayload(asksRes.value, workspaceId)
+      } else if (
+        asksRes.error.kind !== 'epoch_stale'
+        && asksRes.error.kind !== 'aborted'
+        && asksRes.error.kind !== 'forbidden'
+        && asksRes.error.kind !== 'not_found'
+      ) {
+        recordHitlIncidentOnce(
+          'asks',
+          `Keeper asks queue unavailable (${asksRes.error.status ?? asksRes.error.kind})`,
+          asksRes.error.message,
+        )
+      }
+    })
+
+    const gateJob = apiGet<unknown>('/api/v1/dashboard/gate', reqOpts).then((gateRes) => {
+      if (!isCurrent()) return
+      if (gateRes.ok) {
+        if (
+          isRecord(gateRes.value)
+          && isRecord(gateRes.value.approval_queue_state)
+          && gateRes.value.approval_queue_state.state === 'unavailable'
+        ) {
+          const st = gateRes.value.approval_queue_state
+          recordHitlIncidentOnce(
+            'gate',
+            'Channel gate approval queue unavailable',
+            asNonEmptyString(st.operator_detail)
+              ?? asNonEmptyString(st.detail)
+              ?? asNonEmptyString(st.title)
+              ?? 'gate approval queue reported unavailable',
+          )
+        } else {
+          clearHitlIncident('gate')
+        }
+        pendingGateApprovals.value = parseGateQueuePayload(gateRes.value, workspaceId)
+      } else if (
+        gateRes.error.kind !== 'epoch_stale'
+        && gateRes.error.kind !== 'aborted'
+        && gateRes.error.kind !== 'forbidden'
+        && gateRes.error.kind !== 'not_found'
+      ) {
         recordHitlIncidentOnce(
           'gate',
-          'Channel gate approval queue unavailable',
-          asNonEmptyString(st.operator_detail)
-            ?? asNonEmptyString(st.detail)
-            ?? asNonEmptyString(st.title)
-            ?? 'gate approval queue reported unavailable',
+          `Channel gate queue unavailable (${gateRes.error.status ?? gateRes.error.kind})`,
+          gateRes.error.message,
         )
-      } else {
-        clearHitlIncident('gate')
       }
-      pendingGateApprovals.value = parseGateQueuePayload(gateRes.value, workspaceId)
-    } else if (
-      gateRes.error.kind !== 'epoch_stale'
-      && gateRes.error.kind !== 'aborted'
-      && gateRes.error.kind !== 'forbidden'
-      && gateRes.error.kind !== 'not_found'
-    ) {
-      recordHitlIncidentOnce(
-        'gate',
-        `Channel gate queue unavailable (${gateRes.error.status ?? gateRes.error.kind})`,
-        gateRes.error.message,
-      )
-    }
+    })
 
-    if (planRes.ok) {
-      clearHitlIncident('planning')
-      pendingGoalConfirmations.value = parseAwaitingGoalsPayload(planRes.value, workspaceId)
-    } else if (
-      planRes.error.kind !== 'epoch_stale'
-      && planRes.error.kind !== 'aborted'
-      && planRes.error.kind !== 'forbidden'
-      && planRes.error.kind !== 'not_found'
-    ) {
-      recordHitlIncidentOnce(
-        'planning',
-        `Goal confirmation queue unavailable (${planRes.error.status ?? planRes.error.kind})`,
-        planRes.error.message,
-      )
-    }
+    const planningJob = apiGet<unknown>('/api/v1/dashboard/planning', reqOpts).then((planRes) => {
+      if (!isCurrent()) return
+      if (planRes.ok) {
+        clearHitlIncident('planning')
+        pendingGoalConfirmations.value = parseAwaitingGoalsPayload(planRes.value, workspaceId)
+      } else if (
+        planRes.error.kind !== 'epoch_stale'
+        && planRes.error.kind !== 'aborted'
+        && planRes.error.kind !== 'forbidden'
+        && planRes.error.kind !== 'not_found'
+      ) {
+        recordHitlIncidentOnce(
+          'planning',
+          `Goal confirmation queue unavailable (${planRes.error.status ?? planRes.error.kind})`,
+          planRes.error.message,
+        )
+      }
+    })
 
-    if (verifRes.ok) {
-      if (isRecord(verifRes.value) && asNonEmptyString(verifRes.value.backlog_error)) {
+    const verificationJob = apiGet<unknown>('/api/v1/verification/requests?view=awaiting', reqOpts).then((verifRes) => {
+      if (!isCurrent()) return
+      if (verifRes.ok) {
+        if (isRecord(verifRes.value) && asNonEmptyString(verifRes.value.backlog_error)) {
+          recordHitlIncidentOnce(
+            'verification',
+            'Verification backlog read error',
+            asNonEmptyString(verifRes.value.backlog_error) ?? 'verification backlog error',
+          )
+        } else {
+          clearHitlIncident('verification')
+        }
+        pendingVerifications.value = parsePendingVerificationsPayload(verifRes.value, workspaceId)
+      } else if (
+        verifRes.error.kind !== 'epoch_stale'
+        && verifRes.error.kind !== 'aborted'
+        && verifRes.error.kind !== 'forbidden'
+        && verifRes.error.kind !== 'not_found'
+      ) {
         recordHitlIncidentOnce(
           'verification',
-          'Verification backlog read error',
-          asNonEmptyString(verifRes.value.backlog_error) ?? 'verification backlog error',
+          `Verification queue unavailable (${verifRes.error.status ?? verifRes.error.kind})`,
+          verifRes.error.message,
         )
-      } else {
-        clearHitlIncident('verification')
       }
-      pendingVerifications.value = parsePendingVerificationsPayload(verifRes.value, workspaceId)
-    } else if (
-      verifRes.error.kind !== 'epoch_stale'
-      && verifRes.error.kind !== 'aborted'
-      && verifRes.error.kind !== 'forbidden'
-      && verifRes.error.kind !== 'not_found'
-    ) {
-      recordHitlIncidentOnce(
-        'verification',
-        `Verification queue unavailable (${verifRes.error.status ?? verifRes.error.kind})`,
-        verifRes.error.message,
-      )
-    }
+    })
+
+    await Promise.all([approvalsJob, asksJob, gateJob, planningJob, verificationJob])
   } finally {
     if (seq === hitlRefreshSeq && isEpochCurrent(startEpoch)) {
       hitlLoading.value = false

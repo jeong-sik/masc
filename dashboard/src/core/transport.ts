@@ -26,6 +26,7 @@ export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 export type ApiErrorKind =
   | 'aborted'
   | 'epoch_stale'
+  | 'timeout'
   | 'network'
   | 'unauthorized'
   | 'forbidden'
@@ -35,6 +36,8 @@ export type ApiErrorKind =
   | 'validation'
   | 'server'
   | 'decode'
+
+export const DEFAULT_API_TIMEOUT_MS = 15_000
 
 export interface ApiError {
   readonly kind: ApiErrorKind
@@ -55,6 +58,8 @@ export interface ApiRequestOptions<T> {
   readonly fetchImpl?: typeof fetch
   readonly decode?: (raw: unknown) => T
   readonly envelope?: 'flat' | 'v2' | 'ok_data'
+  /** Per-attempt total deadline (headers + body). Defaults to 15s; pass 0 to disable. */
+  readonly timeoutMs?: number
 }
 
 export interface V2Envelope<T> {
@@ -200,96 +205,158 @@ export async function apiRequest<T>(opts: ApiRequestOptions<T>): Promise<Result<
     if (!isEpochCurrent(startEpoch)) {
       return err({ kind: 'epoch_stale', status: null, code: 'epoch_stale', message: 'Session epoch changed', retryable: false })
     }
+    if (controller.signal.aborted) {
+      return err({ kind: 'aborted', status: null, code: null, message: 'Request aborted', retryable: false })
+    }
+
+    const timeoutMs = opts.timeoutMs ?? DEFAULT_API_TIMEOUT_MS
+    const attemptController = new AbortController()
+    let timedOut = false
+    const onParentAbort = () => attemptController.abort(controller.signal.reason)
+    controller.signal.addEventListener('abort', onParentAbort, { once: true })
+
+    let timeoutTimer: ReturnType<typeof setTimeout> | null = null
+    const deadlinePromise = new Promise<never>((_resolve, reject) => {
+      const onAttemptAbort = () => {
+        reject(new Error(timedOut ? `Request timed out after ${timeoutMs}ms` : 'Request aborted'))
+      }
+      attemptController.signal.addEventListener('abort', onAttemptAbort, { once: true })
+      if (timeoutMs > 0) {
+        timeoutTimer = setTimeout(() => {
+          timedOut = true
+          attemptController.abort('timeout')
+        }, timeoutMs)
+      }
+    })
+    // Prevent unhandled rejection when request finishes before abort/timeout
+    deadlinePromise.catch(() => {})
 
     const hasBody = opts.body !== undefined
     const init: RequestInit = {
       method,
       credentials: 'same-origin',
       headers: buildHeaders(method, hasBody, opts.headers),
-      signal: controller.signal,
+      signal: attemptController.signal,
       ...(hasBody ? { body: typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body) } : {}),
     }
 
-    let response: Response
     try {
-      response = await fetchImpl(resolveWorkspaceUrl(opts.path), init)
-    } catch (cause) {
-      if (!isEpochCurrent(startEpoch)) {
-        return err({ kind: 'epoch_stale', status: null, code: 'epoch_stale', message: 'Session epoch changed', retryable: false, cause })
-      }
-      if (controller.signal.aborted) {
-        return err({ kind: 'aborted', status: null, code: null, message: 'Request aborted', retryable: false, cause })
-      }
-      return err({
-        kind: 'network',
-        status: null,
-        code: 'network_error',
-        message: cause instanceof Error ? cause.message : String(cause),
-        retryable: true,
-        cause,
-      })
-    }
-
-    if (!isEpochCurrent(startEpoch)) {
-      return err({ kind: 'epoch_stale', status: null, code: 'epoch_stale', message: 'Dropped stale response after epoch change', retryable: false })
-    }
-
-    let parsedBody: unknown = null
-    if (response.status !== 204) {
-      const contentType = response.headers.get('content-type') ?? ''
+      let response: Response
       try {
-        parsedBody = contentType.includes('application/json') || contentType === ''
-          ? await response.json()
-          : await response.text()
+        response = await Promise.race([
+          fetchImpl(resolveWorkspaceUrl(opts.path), init),
+          deadlinePromise,
+        ])
       } catch (cause) {
-        if (!response.ok) {
-          return err(classifyHttpError(response.status, null))
+        if (!isEpochCurrent(startEpoch)) {
+          return err({ kind: 'epoch_stale', status: null, code: 'epoch_stale', message: 'Session epoch changed', retryable: false, cause })
+        }
+        if (timedOut) {
+          return err({
+            kind: 'timeout',
+            status: null,
+            code: 'request_timeout',
+            message: `Request timed out after ${timeoutMs}ms`,
+            retryable: true,
+            cause,
+          })
+        }
+        if (attemptController.signal.aborted || controller.signal.aborted) {
+          return err({ kind: 'aborted', status: null, code: null, message: 'Request aborted', retryable: false, cause })
         }
         return err({
-          kind: 'decode',
-          status: response.status,
-          code: 'invalid_json',
-          message: 'Failed to parse JSON response',
-          retryable: false,
-          cause,
-        })
-      }
-    }
-
-    if (!isEpochCurrent(startEpoch)) {
-      return err({ kind: 'epoch_stale', status: null, code: 'epoch_stale', message: 'Dropped stale response after epoch change', retryable: false })
-    }
-
-    if (!response.ok) {
-      return err(classifyHttpError(response.status, parsedBody))
-    }
-
-    let payload: unknown = parsedBody
-    if (opts.envelope === 'v2') {
-      const unwrapped = unwrapV2Envelope<unknown>(parsedBody)
-      if (!unwrapped.ok) return unwrapped
-      payload = unwrapped.value
-    } else if (opts.envelope === 'ok_data') {
-      const unwrapped = unwrapOkData<unknown>(parsedBody)
-      if (!unwrapped.ok) return unwrapped
-      payload = unwrapped.value
-    }
-
-    if (opts.decode) {
-      try {
-        return ok(opts.decode(payload))
-      } catch (cause) {
-        return err({
-          kind: 'decode',
-          status: response.status,
-          code: 'schema_drift',
+          kind: 'network',
+          status: null,
+          code: 'network_error',
           message: cause instanceof Error ? cause.message : String(cause),
-          retryable: false,
+          retryable: true,
           cause,
         })
       }
+
+      if (!isEpochCurrent(startEpoch)) {
+        return err({ kind: 'epoch_stale', status: null, code: 'epoch_stale', message: 'Dropped stale response after epoch change', retryable: false })
+      }
+
+      let parsedBody: unknown = null
+      if (response.status !== 204) {
+        const contentType = response.headers.get('content-type') ?? ''
+        try {
+          parsedBody = await Promise.race([
+            contentType.includes('application/json') || contentType === ''
+              ? response.json()
+              : response.text(),
+            deadlinePromise,
+          ])
+        } catch (cause) {
+          if (!isEpochCurrent(startEpoch)) {
+            return err({ kind: 'epoch_stale', status: null, code: 'epoch_stale', message: 'Session epoch changed', retryable: false, cause })
+          }
+          if (timedOut) {
+            return err({
+              kind: 'timeout',
+              status: null,
+              code: 'request_timeout',
+              message: `Response body timed out after ${timeoutMs}ms`,
+              retryable: true,
+              cause,
+            })
+          }
+          if (attemptController.signal.aborted || controller.signal.aborted) {
+            return err({ kind: 'aborted', status: null, code: null, message: 'Request aborted', retryable: false, cause })
+          }
+          if (!response.ok) {
+            return err(classifyHttpError(response.status, null))
+          }
+          return err({
+            kind: 'decode',
+            status: response.status,
+            code: 'invalid_json',
+            message: 'Failed to parse JSON response',
+            retryable: false,
+            cause,
+          })
+        }
+      }
+
+      if (!isEpochCurrent(startEpoch)) {
+        return err({ kind: 'epoch_stale', status: null, code: 'epoch_stale', message: 'Dropped stale response after epoch change', retryable: false })
+      }
+
+      if (!response.ok) {
+        return err(classifyHttpError(response.status, parsedBody))
+      }
+
+      let payload: unknown = parsedBody
+      if (opts.envelope === 'v2') {
+        const unwrapped = unwrapV2Envelope<unknown>(parsedBody)
+        if (!unwrapped.ok) return unwrapped
+        payload = unwrapped.value
+      } else if (opts.envelope === 'ok_data') {
+        const unwrapped = unwrapOkData<unknown>(parsedBody)
+        if (!unwrapped.ok) return unwrapped
+        payload = unwrapped.value
+      }
+
+      if (opts.decode) {
+        try {
+          return ok(opts.decode(payload))
+        } catch (cause) {
+          return err({
+            kind: 'decode',
+            status: response.status,
+            code: 'schema_drift',
+            message: cause instanceof Error ? cause.message : String(cause),
+            retryable: false,
+            cause,
+          })
+        }
+      }
+      return ok(payload as T)
+    } finally {
+      if (timeoutTimer !== null) clearTimeout(timeoutTimer)
+      controller.signal.removeEventListener('abort', onParentAbort)
     }
-    return ok(payload as T)
   }
 
   try {

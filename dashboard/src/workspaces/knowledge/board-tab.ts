@@ -231,18 +231,24 @@ export function BoardTab(props: WorkspaceViewProps) {
   const [selectedPostId, setSelectedPostId] = useState<string | null>(props.entityId ?? null)
   const [detail, setDetail] = useState<BoardDetailData | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
+  const [detailRefreshing, setDetailRefreshing] = useState(false)
   const [loadingMoreComments, setLoadingMoreComments] = useState(false)
   const [detailError, setDetailError] = useState<string | null>(null)
   const [expandedChainHeads, setExpandedChainHeads] = useState<Record<string, boolean>>({})
   const [commentWindowStart, setCommentWindowStart] = useState(0)
   const detailAbortRef = useRef<AbortController | null>(null)
   const loadMoreAbortRef = useRef<AbortController | null>(null)
+  const detailSeqRef = useRef(0)
+  const detailRefreshingRef = useRef(false)
+  const detailRef = useRef<BoardDetailData | null>(null)
+  detailRef.current = detail
   const boardSeqRef = useRef(0)
   const selectedPostIdRef = useRef<string | null>(selectedPostId)
   selectedPostIdRef.current = selectedPostId
 
   const COMMENT_PAGE_LIMIT = 40
   const MAX_RENDERED_COMMENTS = 40
+  const MAX_PRESERVED_COMMENT_RANGE = 400
 
   // CRUD Forms
   const [showCreate, setShowCreate] = useState(false)
@@ -379,67 +385,143 @@ export function BoardTab(props: WorkspaceViewProps) {
     ) => {
       const preserveOnError = opts?.preserveOnError ?? false
       const resetWindow = opts?.resetWindow ?? true
+      const seq = ++detailSeqRef.current
       loadMoreAbortRef.current?.abort()
       setLoadingMoreComments(false)
       if (authSession.peek().kind === 'multi_account_signed_in') {
+        detailRefreshingRef.current = false
+        setDetailRefreshing(false)
         setDetail(null)
         setDetailLoading(false)
         setDetailError(null)
         return
       }
+      const existing = detailRef.current
+      const samePost = existing !== null && existing.post.id === postId
+      const targetLoadedCount =
+        samePost && !resetWindow
+          ? Math.min(MAX_PRESERVED_COMMENT_RANGE, Math.max(COMMENT_PAGE_LIMIT, existing.comments.length))
+          : COMMENT_PAGE_LIMIT
+
+      detailRefreshingRef.current = true
+      setDetailRefreshing(true)
       if (!preserveOnError) setDetailLoading(true)
       setDetailError(null)
-      const replyView = replyViewRef.current
-      const focusId = replyView?.postId === postId ? replyView.commentId : null
-      const params = new URLSearchParams({ format: 'flat', comment_limit: String(COMMENT_PAGE_LIMIT), comment_offset: '0' })
-      if (focusId) params.set('comment_focus', focusId)
-      const res = await apiGet<unknown>(`/api/v1/board/${encodeURIComponent(postId)}?${params}`, { signal })
-      if (signal?.aborted) return
-      setDetailLoading(false)
-      if (!res.ok) {
-        if (res.error.kind === 'aborted' || res.error.kind === 'epoch_stale') return
-        if (!preserveOnError) setDetail(null)
-        setDetailError(`게시글 상세/댓글 조회 실패: ${res.error.message}`)
-        return
+      try {
+        const replyView = replyViewRef.current
+        const focusId = replyView?.postId === postId ? replyView.commentId : null
+        const params = new URLSearchParams({
+          format: 'flat',
+          comment_limit: String(targetLoadedCount),
+          comment_offset: '0',
+        })
+        if (focusId) params.set('comment_focus', focusId)
+        const res = await apiGet<unknown>(`/api/v1/board/${encodeURIComponent(postId)}?${params}`, { signal })
+        if (signal?.aborted || seq !== detailSeqRef.current) return
+        setDetailLoading(false)
+        if (!res.ok) {
+          if (res.error.kind === 'aborted' || res.error.kind === 'epoch_stale') return
+          if (!preserveOnError) setDetail(null)
+          setDetailError(`게시글 상세/댓글 조회 실패: ${res.error.message}`)
+          return
+        }
+        if (!isRecord(res.value)) {
+          if (!preserveOnError) setDetail(null)
+          setDetailError('게시글 상세 응답 형식이 올바르지 않습니다.')
+          return
+        }
+        const postRaw = isRecord(res.value.post) ? res.value.post : res.value
+        const post = decodeBoardPost(postRaw)
+        if (!post) {
+          if (!preserveOnError) setDetail(null)
+          setDetailError('게시글 상세 파싱에 실패했습니다.')
+          return
+        }
+        const rawComments = Array.isArray(res.value.comments)
+          ? res.value.comments
+          : Array.isArray(res.value.comment_context)
+            ? res.value.comment_context
+            : []
+        const comments: BoardCommentItem[] = []
+        const seenIds = new Set<string>()
+        for (const c of rawComments) {
+          const dec = decodeBoardComment(c)
+          if (dec && !seenIds.has(dec.id)) {
+            seenIds.add(dec.id)
+            comments.push(dec)
+          }
+        }
+        // Supplemental context contains ancestors and the requested comment. The
+        // numeric page alone owns the forward cursor and loaded-row count.
+        const focusedRaw = focusId && Array.isArray(res.value.comment_context)
+          ? res.value.comment_context.find((row: unknown) => isRecord(row) && row.id === focusId && row.post_id === postId)
+          : null
+        let focusedComment = focusId
+          ? comments.find((row) => row.id === focusId && row.postId === postId) ?? decodeBoardComment(focusedRaw)
+          : null
+        let commentPage = decodeCommentPageInfo(res.value.comment_page)
+
+        // When refreshing a post that already had multiple pages loaded, if the
+        // server capped `comment_limit` below `targetLoadedCount`, continue
+        // fetching contiguous pages so already-read comments are preserved.
+        const maxExtraPages = Math.ceil(MAX_PRESERVED_COMMENT_RANGE / COMMENT_PAGE_LIMIT)
+        let extraPagesFetched = 0
+        while (
+          samePost
+          && !resetWindow
+          && comments.length < targetLoadedCount
+          && commentPage !== null
+          && commentPage.nextOffset !== null
+          && commentPage.nextOffset >= comments.length
+          && extraPagesFetched < maxExtraPages
+        ) {
+          const expectedOffset = commentPage.nextOffset
+          const pageParams = new URLSearchParams({
+            format: 'flat',
+            comment_limit: String(COMMENT_PAGE_LIMIT),
+            comment_offset: String(expectedOffset),
+          })
+          const nextRes = await apiGet<unknown>(
+            `/api/v1/board/${encodeURIComponent(postId)}?${pageParams}`,
+            { signal },
+          )
+          if (signal?.aborted || seq !== detailSeqRef.current) return
+          if (!nextRes.ok || !isRecord(nextRes.value)) break
+          const nextPage = decodeCommentPageInfo(nextRes.value.comment_page)
+          if (nextPage !== null && nextPage.offset !== expectedOffset) break
+          const nextRaw = Array.isArray(nextRes.value.comments) ? nextRes.value.comments : []
+          let added = 0
+          for (const c of nextRaw) {
+            const dec = decodeBoardComment(c)
+            if (dec && !seenIds.has(dec.id)) {
+              seenIds.add(dec.id)
+              comments.push(dec)
+              added += 1
+            }
+          }
+          commentPage = nextPage
+          extraPagesFetched += 1
+          if (focusId && !focusedComment) {
+            focusedComment = comments.find((row) => row.id === focusId && row.postId === postId) ?? null
+          }
+          if (added === 0 || nextPage === null || nextPage.nextOffset === null || nextPage.nextOffset <= expectedOffset) {
+            break
+          }
+        }
+
+        if (signal?.aborted || seq !== detailSeqRef.current) return
+        if (resetWindow) {
+          setCommentWindowStart(0)
+        } else {
+          setCommentWindowStart((cur) => Math.min(cur, Math.max(0, comments.length - MAX_RENDERED_COMMENTS)))
+        }
+        setDetail({ post, comments, commentPage, focusedComment })
+      } finally {
+        if (seq === detailSeqRef.current) {
+          detailRefreshingRef.current = false
+          setDetailRefreshing(false)
+        }
       }
-      if (!isRecord(res.value)) {
-        if (!preserveOnError) setDetail(null)
-        setDetailError('게시글 상세 응답 형식이 올바르지 않습니다.')
-        return
-      }
-      const postRaw = isRecord(res.value.post) ? res.value.post : res.value
-      const post = decodeBoardPost(postRaw)
-      if (!post) {
-        if (!preserveOnError) setDetail(null)
-        setDetailError('게시글 상세 파싱에 실패했습니다.')
-        return
-      }
-      const rawComments = Array.isArray(res.value.comments)
-        ? res.value.comments
-        : Array.isArray(res.value.comment_context)
-          ? res.value.comment_context
-          : []
-      const comments: BoardCommentItem[] = []
-      for (const c of rawComments) {
-        const dec = decodeBoardComment(c)
-        if (dec) comments.push(dec)
-      }
-      // Supplemental context contains ancestors and the requested comment. The
-      // numeric page alone owns the forward cursor and loaded-row count.
-      const focusedRaw = focusId && Array.isArray(res.value.comment_context)
-        ? res.value.comment_context.find((row: unknown) => isRecord(row) && row.id === focusId && row.post_id === postId)
-        : null
-      const focusedComment = focusId
-        ? comments.find((row) => row.id === focusId && row.postId === postId) ?? decodeBoardComment(focusedRaw)
-        : null
-      const commentPage = decodeCommentPageInfo(res.value.comment_page)
-      if (signal?.aborted) return
-      if (resetWindow) {
-        setCommentWindowStart(0)
-      } else {
-        setCommentWindowStart((cur) => Math.min(cur, Math.max(0, comments.length - MAX_RENDERED_COMMENTS)))
-      }
-      setDetail({ post, comments, commentPage, focusedComment })
     },
     [],
   )
@@ -507,20 +589,34 @@ export function BoardTab(props: WorkspaceViewProps) {
   }, [activeDetail])
 
   const handleLoadMoreComments = useCallback(async () => {
-    if (!activeDetail || activeDetail.commentPage?.nextOffset == null || loadingMoreComments) return
+    if (
+      !activeDetail
+      || activeDetail.commentPage?.nextOffset == null
+      || loadingMoreComments
+      || detailRefreshingRef.current
+    ) {
+      return
+    }
     loadMoreAbortRef.current?.abort()
     const ctrl = new AbortController()
     loadMoreAbortRef.current = ctrl
     const targetPostId = activeDetail.post.id
+    const expectedSeq = detailSeqRef.current
+    const expectedOffset = activeDetail.commentPage.nextOffset
     setLoadingMoreComments(true)
     setDetailError(null)
-    const nextOffset = activeDetail.commentPage.nextOffset
     try {
       const res = await apiGet<unknown>(
-        `/api/v1/board/${encodeURIComponent(targetPostId)}?format=flat&comment_limit=${COMMENT_PAGE_LIMIT}&comment_offset=${nextOffset}`,
+        `/api/v1/board/${encodeURIComponent(targetPostId)}?format=flat&comment_limit=${COMMENT_PAGE_LIMIT}&comment_offset=${expectedOffset}`,
         { signal: ctrl.signal },
       )
-      if (ctrl.signal.aborted || selectedPostIdRef.current !== targetPostId) return
+      if (
+        ctrl.signal.aborted
+        || selectedPostIdRef.current !== targetPostId
+        || expectedSeq !== detailSeqRef.current
+      ) {
+        return
+      }
       if (!res.ok) {
         if (res.error.kind === 'aborted' || res.error.kind === 'epoch_stale') return
         setDetailError(`추가 댓글 조회 실패: ${res.error.message}`)
@@ -534,9 +630,15 @@ export function BoardTab(props: WorkspaceViewProps) {
         if (dec) nextComments.push(dec)
       }
       const nextPage = decodeCommentPageInfo(res.value.comment_page)
+      if (nextPage !== null && nextPage.offset !== expectedOffset) return
       let mergedLen = 0
+      let applied = false
       setDetail((prev) => {
         if (!prev || prev.post.id !== targetPostId) return prev
+        if (expectedSeq !== detailSeqRef.current) return prev
+        // Verify contiguous page range: never append offset N onto a refreshed
+        // state whose cursor moved elsewhere (which would permanently skip a gap).
+        if (prev.commentPage?.nextOffset !== expectedOffset) return prev
         const seen = new Set(prev.comments.map((c) => c.id))
         const merged = [...prev.comments]
         for (const c of nextComments) {
@@ -546,9 +648,10 @@ export function BoardTab(props: WorkspaceViewProps) {
           }
         }
         mergedLen = merged.length
+        applied = true
         return { ...prev, comments: merged, commentPage: nextPage }
       })
-      if (mergedLen > MAX_RENDERED_COMMENTS) {
+      if (applied && mergedLen > MAX_RENDERED_COMMENTS) {
         setCommentWindowStart(Math.max(0, mergedLen - MAX_RENDERED_COMMENTS))
       }
     } finally {
@@ -559,8 +662,11 @@ export function BoardTab(props: WorkspaceViewProps) {
   }, [activeDetail, loadingMoreComments])
 
   useEffect(() => {
+    detailSeqRef.current += 1
     detailAbortRef.current?.abort()
     loadMoreAbortRef.current?.abort()
+    detailRefreshingRef.current = false
+    setDetailRefreshing(false)
     setLoadingMoreComments(false)
     setCommentWindowStart(0)
     setReplyParentId(null)
@@ -610,7 +716,7 @@ export function BoardTab(props: WorkspaceViewProps) {
     detailAbortRef.current?.abort()
     const ctrl = new AbortController()
     detailAbortRef.current = ctrl
-    await loadPostDetail(postId, ctrl.signal)
+    await loadPostDetail(postId, ctrl.signal, { preserveOnError: true, resetWindow: false })
   }
 
   const handleCreatePost = async (e: Event) => {
@@ -1158,7 +1264,7 @@ export function BoardTab(props: WorkspaceViewProps) {
                   <button
                     type="button"
                     class="btn-ghost"
-                    disabled=${loadingMoreComments}
+                    disabled=${loadingMoreComments || detailRefreshing}
                     onClick=${() => void handleLoadMoreComments()}
                   >
                     ${loadingMoreComments

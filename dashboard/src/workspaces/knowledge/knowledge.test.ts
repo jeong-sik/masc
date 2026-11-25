@@ -1023,4 +1023,99 @@ describe('workspaces/knowledge', () => {
     expect(container.textContent).toContain('Second page comment')
     expect(container.textContent).toContain('@sangsu')
   })
+
+  it('BoardTab preserves loaded comment range 0-79 across SSE refresh and prevents gapped load-more cursor skips', async () => {
+    const post = { id: 'p-paged-race', title: 'Race Post', body: 'Body', author: 'keeper', post_kind: 'direct' }
+    const allComments = Array.from({ length: 120 }, (_, i) => ({
+      id: `cm-${i}`,
+      post_id: post.id,
+      parent_id: null as string | null,
+      author: 'keeper',
+      content: `Comment #${i}`,
+      created_at: '2026-11-25T01:00:00Z',
+    }))
+    const listeners = new Set<observer.ObserverListener>()
+    vi.spyOn(observer, 'subscribeObserverFrames').mockImplementation((listener) => {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
+    })
+
+    // Simulate a server that caps each page at 40 rows even if comment_limit > 40,
+    // AND let us hold an offset=80 load-more response across an overlapping SSE refresh.
+    let holdOffset80 = false
+    let releaseOffset80!: () => void
+    const requestedOffsets: number[] = []
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'http://local')
+      if (url.pathname === '/api/v1/board/hearths') return jsonResponse({ hearths: [] })
+      if (url.pathname === '/api/v1/board/sub-boards') return jsonResponse({ sub_boards: [] })
+      if (url.pathname === '/api/v1/board') return jsonResponse({ posts: [post] })
+      if (url.pathname === `/api/v1/board/${post.id}`) {
+        const offset = Number(url.searchParams.get('comment_offset') ?? '0')
+        requestedOffsets.push(offset)
+        const respond = () => {
+          const rows = allComments.slice(offset, offset + 40)
+          return jsonResponse({
+            post,
+            comments: rows,
+            comment_page: {
+              offset,
+              returned: rows.length,
+              total: allComments.length,
+              next_offset: offset + rows.length < allComments.length ? offset + rows.length : null,
+            },
+          })
+        }
+        if (offset === 80 && holdOffset80) {
+          holdOffset80 = false
+          return new Promise<Response>((resolve) => {
+            releaseOffset80 = () => resolve(respond())
+          })
+        }
+        return respond()
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(
+      html`<${KnowledgeWorkspace} subroute="board" entityId=${post.id} onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+      container,
+    )
+    await flushUi(6)
+    expect(container.textContent).toContain('댓글 더 불러오기 (40 / 120)')
+
+    // Load page 2 (40..79) -> now 80 comments loaded
+    const moreBtn1 = [...container.querySelectorAll<HTMLButtonElement>('button')].find((b) =>
+      b.textContent?.includes('댓글 더 불러오기 (40 / 120)'),
+    )!
+    moreBtn1.click()
+    await flushUi(6)
+    expect(container.textContent).toContain('댓글 더 불러오기 (80 / 120)')
+
+    // Start loading page 3 (80..119) AND fire an overlapping board_comment SSE refresh
+    holdOffset80 = true
+    const moreBtn2 = [...container.querySelectorAll<HTMLButtonElement>('button')].find((b) =>
+      b.textContent?.includes('댓글 더 불러오기 (80 / 120)'),
+    )!
+    moreBtn2.click()
+    await flushUi(2)
+    expect(requestedOffsets).toContain(80)
+
+    for (const listener of listeners) {
+      listener({ event: 'board_comment', id: null, data: { post_id: post.id }, raw: '' })
+    }
+    // Wait for the 450ms SSE debounce + multi-page refresh (0..39 + 40..79) to complete
+    await vi.waitFor(
+      () => {
+        expect(container.textContent).toContain('댓글 더 불러오기 (80 / 120)')
+      },
+      { timeout: 2500 },
+    )
+    // Now release the stale overlapping offset=80 response (it was aborted / stale seq):
+    // loaded range MUST stay contiguous at 80 / 120 (never drop 40-79 or jump to 120 with a gap!).
+    releaseOffset80()
+    await flushUi(6)
+    expect(container.textContent).toContain('댓글 더 불러오기 (80 / 120)')
+    expect(container.textContent).toContain('Comment #79')
+  })
 })

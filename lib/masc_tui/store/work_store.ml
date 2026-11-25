@@ -725,7 +725,7 @@ let preserve_pipeline_selection previous next =
         in
         match index with
         | Some selected_index -> { next with selected_index }
-        | None -> next
+        | None -> { next with selected_index = -1; detail_scroll_offset = 0 }
 
 let apply_planning_goals ~observed_at goals t =
   preserve_pipeline_selection t
@@ -812,24 +812,26 @@ let move_selection ?(pane_index = 0) ?(has_linked_card = true) ?viewport_rows
           { t with detail_scroll_offset }
       | _ ->
           let len = List.length (filtered_goals t) in
-          let selected_index = clamp_index len (t.selected_index + delta) in
-          let scroll_offset =
-            adjust_scroll ?viewport_rows ~scroll:t.scroll_offset selected_index
-          in
-          let changed = not (Int.equal selected_index t.selected_index) in
-          let detail_scroll_offset =
-            if changed then 0 else t.detail_scroll_offset
-          in
-          let base = { t with selected_index; scroll_offset; detail_scroll_offset } in
-          if changed then
-            {
-              base with
-              goal_dive_task_index = 0;
-              goal_dive_task_scroll = 0;
-              goal_dive_verif_index = 0;
-              goal_dive_verif_scroll = 0;
-            }
-          else base)
+          if len = 0 then t
+          else
+            let selected_index = clamp_index len (t.selected_index + delta) in
+            let scroll_offset =
+              adjust_scroll ?viewport_rows ~scroll:t.scroll_offset selected_index
+            in
+            let changed = not (Int.equal selected_index t.selected_index) in
+            let detail_scroll_offset =
+              if changed then 0 else t.detail_scroll_offset
+            in
+            let base = { t with selected_index; scroll_offset; detail_scroll_offset } in
+            if changed then
+              {
+                base with
+                goal_dive_task_index = 0;
+                goal_dive_task_scroll = 0;
+                goal_dive_verif_index = 0;
+                goal_dive_verif_scroll = 0;
+              }
+            else base)
   | Nav.Work_tasks ->
       if pane_index = 1 then
         let max_scroll =
@@ -1027,11 +1029,13 @@ let move_selection ?(pane_index = 0) ?(has_linked_card = true) ?viewport_rows
           detail_scroll_offset;
         }
 
+let first_row_if_selected t = if t.selected_index < 0 then t.selected_index else 0
+
 let set_filter filter_query t =
   {
     t with
     filter_query;
-    selected_index = 0;
+    selected_index = first_row_if_selected t;
     scroll_offset = 0;
     rule_selected_index = 0;
     rule_scroll_offset = 0;
@@ -1124,7 +1128,7 @@ let set_goal_phase_filter goal_phase_filter t =
   {
     t with
     goal_phase_filter;
-    selected_index = 0;
+    selected_index = first_row_if_selected t;
     scroll_offset = 0;
     detail_scroll_offset = 0;
   }
@@ -1151,7 +1155,8 @@ let equal_goal_sort_mode a b =
       false
 
 let set_goal_sort_mode goal_sort_mode t =
-  { t with goal_sort_mode; selected_index = 0; scroll_offset = 0; detail_scroll_offset = 0 }
+  { t with goal_sort_mode; selected_index = first_row_if_selected t;
+    scroll_offset = 0; detail_scroll_offset = 0 }
 
 let cycle_goal_sort_mode t =
   let next =

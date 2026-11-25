@@ -1507,13 +1507,11 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
         model.work.planning
     in
     let zoomed = model.nav.zoomed && Model.can_zoom_current_view model in
-    let sel_goal_idx =
-      if goals = [] then None
-      else
-        Some
-          (Int.max 0 (Int.min (List.length goals - 1) model.work.selected_index))
+    let sel_goal =
+      let index = model.work.selected_index in
+      if index < 0 then None else List.nth_opt goals index
     in
-    let sel_goal = Option.bind sel_goal_idx (List.nth_opt goals) in
+    let sel_goal_idx = Option.map (fun _ -> model.work.selected_index) sel_goal in
     if zoomed then
       render_goal_zoomed ~sel_goal ~model ~cache ~rect ~theme grid
     else

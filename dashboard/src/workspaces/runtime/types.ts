@@ -177,9 +177,16 @@ export interface SetupIntegration {
   readonly configured_runtime_ids?: readonly string[]
 }
 
+/** One row of the setup inventory's `account_emails`: the email and plan
+ *  labels the client's own login file reports for a provider's account. */
+export type SetupAccountEmail =
+  | { readonly integration_id: string; readonly state: 'read'; readonly email: string; readonly plan?: readonly string[] }
+  | { readonly integration_id: string; readonly state: 'not_read'; readonly cause: string }
+
 export interface SetupInventoryPayload {
   readonly default_runtime_id?: string | null
   readonly integrations: readonly SetupIntegration[]
+  readonly account_emails?: readonly SetupAccountEmail[]
 }
 
 export interface MultiAccountProviderAccount {

@@ -736,8 +736,10 @@ let set_board_sort board_sort_by t =
 let cycle_board_sort t =
   let next =
     match String.lowercase_ascii (String.trim t.board_sort_by) with
-    | "recent" -> "active"
-    | "active" -> "top"
+    | "recent" -> "hot"
+    | "hot" -> "trending"
+    | "trending" -> "updated"
+    | "updated" -> "discussed"
     | _ -> "recent"
   in
   set_board_sort next t

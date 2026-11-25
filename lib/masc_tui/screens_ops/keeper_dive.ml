@@ -3186,8 +3186,8 @@ let render_config_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
           (Glyph.to_utf8 Glyph.Separator_dot)
           dirty_n
           (Ops_common.say model
-             ~ko:"건 변경 대기 · [↑↓] 필드 · [←→] 값 변경 · [Enter] 편집 · [Ctrl+S] 저장 · [[ ]] 탭"
-             ~en:"staged · [↑↓] Field · [←→] Cycle · [Enter] Edit · [Ctrl+S] Save · [[ ]] Tabs")
+             ~ko:"건 변경 대기 · [↑↓] 필드 · [←→] 값 변경 · [Enter] 편집 · [Ctrl+S] 저장 · [ / ] 탭"
+             ~en:"staged · [↑↓] Field · [←→] Cycle · [Enter] Edit · [Ctrl+S] Save · [ / ] Tabs")
           diff_hint
       else
         Printf.sprintf "%s %s %s %s %d %s"
@@ -3631,8 +3631,8 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
           if Model.is_keeper_config_active model then
             Some
               (Ops_common.say model
-                 ~ko:"[←→] 값 · [Enter] 편집 · [d] Diff · [Ctrl+S] 저장 · [[ ]] 탭"
-                 ~en:"[←→] Cycle · [Enter] Edit · [d] Diff · [Ctrl+S] Save · [[ ]] Tabs")
+                 ~ko:"[←→] 값 · [Enter] 편집 · [d] Diff · [Ctrl+S] 저장 · [ / ] 탭"
+                 ~en:"[←→] Cycle · [Enter] Edit · [d] Diff · [Ctrl+S] Save · [ / ] Tabs")
           else
             Some
               (Ops_common.say model
@@ -3660,13 +3660,13 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
       else if Nav.equal_keeper_tab tab Nav.Keeper_config then
         Some
           (Ops_common.say model
-             ~ko:"[←→] 값 변경 · [Enter] 편집 · [d] Diff · [Ctrl+S] 저장 · [[ ]] 탭 · [Esc] 목록"
-             ~en:"[←→] Cycle · [Enter] Edit · [d] Diff · [Ctrl+S] Save · [[ ]] Tabs · [Esc] Fleet")
+             ~ko:"[←→] 값 변경 · [Enter] 편집 · [d] Diff · [Ctrl+S] 저장 · [ / ] 탭 · [Esc] 목록"
+             ~en:"[←→] Cycle · [Enter] Edit · [d] Diff · [Ctrl+S] Save · [ / ] Tabs · [Esc] Fleet")
       else if Nav.equal_keeper_tab tab Nav.Keeper_logs then
         Some
           (Ops_common.say model
-             ~ko:"[v] 메트릭/샌드박스 · [r] 새로고침 · [[ ]] 탭 · [Esc] 목록"
-             ~en:"[v] Metrics/Sandbox · [r] Refresh · [[ ]] Tabs · [Esc] Fleet")
+             ~ko:"[v] 메트릭/샌드박스 · [r] 새로고침 · [ / ] 탭 · [Esc] 목록"
+             ~en:"[v] Metrics/Sandbox · [r] Refresh · [ / ] Tabs · [Esc] Fleet")
       else if Nav.equal_keeper_tab tab Nav.Keeper_identity then
         Some
           (Ops_common.say model
@@ -3688,8 +3688,8 @@ let render_tabs_body ~embedded ~name ~tab ~(model : Model.t) ~cache
              ~en:"[Ctrl+T] Work & Queue · [Ctrl+O] Tool details")
       else
         Some
-          (Ops_common.say model ~ko:"[[ ]] 탭 · [y] 응답 복사 · [Esc] 목록"
-             ~en:"[[ ]] Tabs · [y] Copy · [Esc] Fleet")
+          (Ops_common.say model ~ko:"[ / ] 탭 · [y] 응답 복사 · [Esc] 목록"
+             ~en:"[ / ] Tabs · [y] Copy · [Esc] Fleet")
     in
     let footer_hint =
       let stop_armed_for_here =

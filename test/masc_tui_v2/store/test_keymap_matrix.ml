@@ -1577,9 +1577,12 @@ let test_axis_b_overlay_isolation_matrix () =
   in
   let editing_config =
     let c0 = Config_store.enter_inspector bg.config in
-    match Config_store.begin_edit_selected c0 with
-    | Ok c -> c
-    | Error _ -> c0
+    match Config_store.selected_field c0 with
+    | Some f -> (
+        match Config_store.begin_edit_field ~step_enum:false f c0 with
+        | Ok c -> c
+        | Error _ -> c0)
+    | None -> c0
   in
   let states : (string * Model.t) list =
     [
@@ -2924,7 +2927,7 @@ let test_journeys_tab_multipane_dives_safety () =
   Alcotest.(check int) "R3 Sandboxes 102 cols (inner 100 >= 100) => 2 panes" 2
     (Model.focusable_pane_count m_sb_102);
 
-  (* R4: Settings edit-mode Tab commits tui.* fallback preference cleanly *)
+  (* R4: Settings Enter cycles tui.theme live, and edit-mode Tab commits tui.* preference cleanly *)
   record_case ();
   let m_s_gen =
     let m0, _ = step base (char_key ",") in
@@ -2939,7 +2942,26 @@ let test_journeys_tab_multipane_dives_safety () =
       config = cfg;
     }
   in
-  let m_s_ed, _ = step m_s_gen (mk_key Keymap.Input.Enter) in
+  let m_s_enter, cmds_s_enter = step m_s_gen (mk_key Keymap.Input.Enter) in
+  Alcotest.(check bool) "R4 Settings Enter cycles tui.theme immediately" true
+    (Theme.equal_preset m_s_enter.theme_preset Theme.Arcade_hi
+     && not (Config_store.is_editing_field m_s_enter.config));
+  Alcotest.(check int) "R4 Settings Enter leaves 0 stale dirty_fields for tui.*"
+    0 (Config_store.dirty_count m_s_enter.config);
+  Alcotest.(check bool) "R4 Settings Enter emits Post_tui_preference" true
+    (has_cmd
+       (function
+         | Cmd.Http_post { req = Cmd.Post_tui_preference _; _ } -> true
+         | _ -> false)
+       cmds_s_enter);
+  let m_s_ed =
+    match Config_store.selected_field m_s_gen.config with
+    | Some f -> (
+        match Config_store.begin_edit_field ~step_enum:false f m_s_gen.config with
+        | Ok cfg -> { m_s_gen with config = cfg }
+        | Error err -> Alcotest.fail err)
+    | None -> Alcotest.fail "missing selected field"
+  in
   let m_s_buf =
     {
       m_s_ed with
@@ -3838,7 +3860,8 @@ let test_pillar1_keeper_config_and_settings_lr () =
   let m_set_r, cmds_pref = step m_set_insp (mk_key Keymap.Input.Right) in
   Alcotest.(check bool) "Settings wide Right steps schema-backed tui.theme live"
     true (m_set_r.theme_preset <> theme_before);
-  Alcotest.(check int) "Settings wide Right stages tui.theme dirty=1" 1
+  Alcotest.(check int)
+    "Settings wide Right auto-unstages live-persisted tui.theme (dirty=0)" 0
     (Config_store.dirty_count m_set_r.config);
   Alcotest.(check bool) "Settings wide Right emits Post_tui_preference" true
     (has_cmd
@@ -3848,13 +3871,13 @@ let test_pillar1_keeper_config_and_settings_lr () =
        cmds_pref);
   let m_set_l, cmds_revert = step m_set_r (mk_key Keymap.Input.Left) in
   Alcotest.(check int)
-    "Settings wide Left back to original unstages tui.theme (dirty=0)" 0
+    "Settings wide Left back to original keeps tui.theme clean (dirty=0)" 0
     (Config_store.dirty_count m_set_l.config);
   Alcotest.(check bool)
-    "Settings wide Left back to original STILL reverts live theme_preset" true
+    "Settings wide Left back to original reverts live theme_preset" true
     (m_set_l.theme_preset = theme_before);
   Alcotest.(check bool)
-    "Settings wide Left back to original STILL emits Post_tui_preference revert"
+    "Settings wide Left back to original emits Post_tui_preference revert"
     true
     (has_cmd
        (function
@@ -3872,7 +3895,7 @@ let test_pillar1_keeper_config_and_settings_lr () =
             | Cmd.Http_post { req = Cmd.Post_tui_preference _; _ } -> true
             | _ -> false)
           cmds_sn);
-  (* Wide Settings Left on non-steppable string field returns to Pane_tree *)
+  (* Wide Settings Left on non-steppable string field STAYS in Pane_inspector (never teleports to Pane_tree) *)
   let m_set_str =
     {
       m_set_insp with
@@ -3883,9 +3906,10 @@ let test_pillar1_keeper_config_and_settings_lr () =
         |> fun c -> { c with selected_field_index = 3 };
     }
   in
-  let m_set_back, _ = step m_set_str (mk_key Keymap.Input.Left) in
-  Alcotest.(check bool) "Settings wide Left on Field_string leaves to Pane_tree"
-    true (m_set_back.config.settings_pane = Config_store.Pane_tree);
+  let m_set_stay, _ = step m_set_str (mk_key Keymap.Input.Left) in
+  Alcotest.(check bool)
+    "Settings wide Left on Field_string stays in Pane_inspector (no teleport)"
+    true (m_set_stay.config.settings_pane = Config_store.Pane_inspector);
   (* Settings dry-run diff J/K scrolls dry_run_scroll_offset cleanly for diff_hunks & exact diff_r.h *)
   let set_dry_hunk : Wire_config.diff_hunk =
     {

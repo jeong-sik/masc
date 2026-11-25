@@ -584,7 +584,53 @@ let form_value_of_wire_field (f : Wire_config.schema_field) =
       | Wire_config.Val_null ->
           Form.Text_val "{structured}")
 
-let apply_staged_op_to_value ~(kind : Wire_config.field_kind)
+let tui_theme_enum_val (selected_name : string) =
+  let opts =
+    List.map
+      (fun p -> (Theme.preset_name p, Theme.preset_label p))
+      Theme.all_presets
+  in
+  let target_name =
+    match Theme.preset_of_name selected_name with
+    | Some p -> Theme.preset_name p
+    | None -> selected_name
+  in
+  let selected =
+    let rec find i = function
+      | [] -> 0
+      | p :: _ when String.equal (Theme.preset_name p) target_name -> i
+      | _ :: rest -> find (i + 1) rest
+    in
+    find 0 Theme.all_presets
+  in
+  Form.enum_val ~selected opts
+
+let tui_language_enum_val (selected_code : string) =
+  let selected =
+    if String.equal (String.lowercase_ascii (String.trim selected_code)) "en"
+    then 1
+    else 0
+  in
+  Form.enum_val ~selected
+    [
+      ("ko", Say.make ~ko:"한국어" ~en:"Korean (KO)");
+      ("en", Say.make ~ko:"English" ~en:"English (EN)");
+    ]
+
+let tui_board_sort_enum_val (selected_sort : string) =
+  let allowed = Config_store.valid_board_sort_values in
+  let norm = String.lowercase_ascii (String.trim selected_sort) in
+  let selected =
+    let rec find i = function
+      | [] -> 0
+      | x :: _ when String.equal x norm -> i
+      | _ :: rest -> find (i + 1) rest
+    in
+    find 0 allowed
+  in
+  Form.enum_val ~selected (List.map (fun s -> (s, Say.literal s)) allowed)
+
+let apply_staged_op_to_value ~full_key ~(kind : Wire_config.field_kind)
     (op : Wire_config.patch_op) =
   match op with
   | Wire_config.Set_bool { value; _ } -> Form.Bool_val value
@@ -593,53 +639,49 @@ let apply_staged_op_to_value ~(kind : Wire_config.field_kind)
   | Wire_config.Set_string_array { values; _ } ->
       Form.Text_val (String.concat ", " values)
   | Wire_config.Remove_key _ -> Form.Text_val "(removed)"
-  | Wire_config.Set_scalar { value; _ } -> (
-      match kind with
-      | Wire_config.Field_enum allowed ->
-          let selected =
-            let rec find i = function
-              | [] -> 0
-              | x :: _ when String.equal x value -> i
-              | _ :: rest -> find (i + 1) rest
+  | Wire_config.Set_scalar { value; _ } ->
+      if String.equal full_key "tui.theme" then tui_theme_enum_val value
+      else if String.equal full_key "tui.language" then
+        tui_language_enum_val value
+      else if String.equal full_key "tui.board_sort" then
+        tui_board_sort_enum_val value
+      else
+        (match kind with
+        | Wire_config.Field_enum allowed ->
+            let selected =
+              let rec find i = function
+                | [] -> 0
+                | x :: _ when String.equal x value -> i
+                | _ :: rest -> find (i + 1) rest
+              in
+              find 0 allowed
             in
-            find 0 allowed
-          in
-          Form.enum_val ~selected (List.map (fun s -> (s, Say.literal s)) allowed)
-      | Wire_config.Field_bool
-      | Wire_config.Field_int _
-      | Wire_config.Field_float _
-      | Wire_config.Field_string
-      | Wire_config.Field_string_list
-      | Wire_config.Field_structured ->
-          Form.Text_val value
-      | Wire_config.Field_secret ->
-          Form.secret_val ~revealed:false value)
+            Form.enum_val ~selected
+              (List.map (fun s -> (s, Say.literal s)) allowed)
+        | Wire_config.Field_bool
+        | Wire_config.Field_int _
+        | Wire_config.Field_float _
+        | Wire_config.Field_string
+        | Wire_config.Field_string_list
+        | Wire_config.Field_structured ->
+            Form.Text_val value
+        | Wire_config.Field_secret ->
+            Form.secret_val ~revealed:false value)
 
 let form_field_of_schema_field ~(m : Model.t) (f : Wire_config.schema_field) :
     Form.field =
   let initial =
     if String.equal f.full_key "tui.theme" then
-      let opts =
-        List.map
-          (fun p -> (Theme.preset_name p, Theme.preset_label p))
-          Theme.all_presets
-      in
-      let idx =
-        let rec find i = function
-          | [] -> 0
-          | p :: _ when Theme.equal_preset p m.theme_preset -> i
-          | _ :: rest -> find (i + 1) rest
-        in
-        find 0 Theme.all_presets
-      in
-      Form.enum_val ~selected:idx opts
+      tui_theme_enum_val (Theme.preset_name m.theme_preset)
     else if String.equal f.full_key "tui.language" then
-      let idx = match m.lang with Say.Lang_ko -> 0 | Say.Lang_en -> 1 in
-      Form.enum_val ~selected:idx
-        [
-          ("ko", Say.make ~ko:"한국어" ~en:"Korean (KO)");
-          ("en", Say.make ~ko:"English" ~en:"English (EN)");
-        ]
+      tui_language_enum_val (Say.lang_code m.lang)
+    else if String.equal f.full_key "tui.board_sort" then
+      let live =
+        String.lowercase_ascii (String.trim m.knowledge.board_sort_by)
+      in
+      if List.exists (String.equal live) Config_store.valid_board_sort_values
+      then tui_board_sort_enum_val live
+      else form_value_of_wire_field f
     else form_value_of_wire_field f
   in
   let value =
@@ -664,7 +706,7 @@ let form_field_of_schema_field ~(m : Model.t) (f : Wire_config.schema_field) :
         match
           Config_store.String_map.find_opt f.full_key m.config.dirty_fields
         with
-        | Some op -> apply_staged_op_to_value ~kind:f.kind op
+        | Some op -> apply_staged_op_to_value ~full_key:f.full_key ~kind:f.kind op
         | None -> initial)
   in
   let validators =
@@ -1984,19 +2026,35 @@ let render_settings grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
           (Say.make ~ko:"[d] Dry-run · [Ctrl+S] 저장 · [Esc] 닫기"
              ~en:"[d] Dry-run · [Ctrl+S] Save · [Esc] Close")
     in
+    let tree_focused =
+      modal_r.w >= 74
+      && Config_store.equal_settings_pane model.config.settings_pane
+           Config_store.Pane_tree
+    in
     let footer_hint =
-      if modal_r.w >= 96 then
+      if tree_focused then
+        if modal_r.w >= 96 then
+          Say.resolve lang
+            (Say.make
+               ~ko:"[↑↓] 이동 · [←→] 접기/펼치기 · [Enter] 열기 · [Tab] 검사기 · [/] 검색 · [?]"
+               ~en:"[↑↓] Move · [←→] Fold/Unfold · [Enter] Open · [Tab] Inspector · [/] Search · [?]")
+        else
+          Say.resolve lang
+            (Say.make ~ko:"[↑↓] 이동 · [←→] 접기/펼치기 · [Tab] 검사기"
+               ~en:"[↑↓] Move · [←→] Fold/Unfold · [Tab] Inspector")
+      else if modal_r.w >= 96 then
         Say.resolve lang
-          (Say.make ~ko:"[Tab] 좌/우 · [Enter] 편집 · [Del] 삭제 · [^E] $EDITOR · [/] 검색 · [?]"
-             ~en:"[Tab] Pane · [Enter] Edit · [Del] Remove · [^E] $EDITOR · [/] Search · [?]")
+          (Say.make
+             ~ko:"[↑↓] 항목 · [←→] 값 변경 · [Enter] 편집 · [Tab] 트리 · [Del] 삭제 · [/] 검색 · [?]"
+             ~en:"[↑↓] Field · [←→] Cycle · [Enter] Edit · [Tab] Tree · [Del] Remove · [/] Search · [?]")
       else if modal_r.w >= 74 then
         Say.resolve lang
-          (Say.make ~ko:"[Tab] 좌/우 · [Enter] 편집 · [^E] $EDITOR · [/] 검색"
-             ~en:"[Tab] Pane · [Enter] Edit · [^E] $EDITOR · [/] Search")
+          (Say.make ~ko:"[↑↓] 항목 · [←→] 값 변경 · [Enter] 편집 · [Tab] 트리"
+             ~en:"[↑↓] Field · [←→] Cycle · [Enter] Edit · [Tab] Tree")
       else
         Say.resolve lang
-          (Say.make ~ko:"[Enter] 편집 · [^E] $EDITOR · [/] 검색"
-             ~en:"[Enter] Edit · [^E] $EDITOR · [/] Search")
+          (Say.make ~ko:"[↑↓] 항목 · [←→] 값 변경 · [Enter] 편집 · [/] 검색"
+             ~en:"[↑↓] Field · [←→] Cycle · [Enter] Edit · [/] Search")
     in
     let inner =
       Card.draw ~cache grid ~rect:modal_r ~theme
@@ -2596,8 +2654,8 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               (Say.resolve lang
                  (match active_tab with
                   | Nav.Drawer_queue | Nav.Drawer_context | Nav.Drawer_schedules ->
-                      Say.make ~ko:"[↑↓] 스크롤 · [[ ]/Tab] 탭 · [Esc] 닫기"
-                        ~en:"[↑↓] Scroll · [[ ]/Tab] Tabs · [Esc] Close"));
+                      Say.make ~ko:"[↑↓] 스크롤 · [ / ]·Tab 탭 · [Esc] 닫기"
+                        ~en:"[↑↓] Scroll · [ / ]·Tab Tabs · [Esc] Close"));
           focused = true;
           elevated = true;
         }
@@ -2905,8 +2963,8 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                    in
                    let hint_s =
                      Say.resolve lang
-                       (Say.make ~ko:"[< >] 턴 · [Enter] 상세"
-                          ~en:"[< >] Turn · [Enter] Dive")
+                       (Say.make ~ko:"< / > 턴 · [Enter] 상세"
+                          ~en:"< / > Turn · [Enter] Dive")
                    in
                    let hw = Grapheme.display_width hint_s in
                    let lw = Int.max 8 (body_r.w - hw - 2) in
@@ -5521,7 +5579,7 @@ let render_ask_answer_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             if q_count > 1 then begin
               let nav_hint =
                 Say.resolve lang
-                  (Say.make ~ko:"[[ ]/Tab] 질문 전환" ~en:"[[ ]/Tab] Questions")
+                  (Say.make ~ko:"[ / ]·Tab 질문 전환" ~en:"[ / ]·Tab Questions")
               in
               let hw = Grapheme.display_width nav_hint in
               let hx = x0 + content_w - hw in
@@ -5821,8 +5879,8 @@ let render_ask_answer_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                           @ (if q_count > 1 then
                                [
                                  Say.resolve lang
-                                   (Say.make ~ko:"[[ ]/Tab] 질문"
-                                      ~en:"[[ ]/Tab] Q");
+                                   (Say.make ~ko:"[ / ]·Tab 질문"
+                                      ~en:"[ / ]·Tab Q");
                                ]
                              else [])
                           @ [

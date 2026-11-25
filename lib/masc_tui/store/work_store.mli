@@ -75,6 +75,7 @@ type t = {
   verifications : Wire_work.verification_snapshot Observed.t;
   verification_failure : verification_read_failure option;
   harness_health : Wire_work.harness_health Observed.t;
+  harness_read : unit Observed.t;
   harness_selected_index : int option;
   harness_scroll_offset : int;
   verification_evidence :
@@ -291,6 +292,9 @@ val cycle_verification_dive_tab : t -> t
 val set_verification_dive_tab : verification_dive_tab -> t -> t
 val apply_harness_health :
   observed_at:Clock.Mono.t -> Wire_work.harness_health -> t -> t
+val start_harness_read : since_ns:Clock.Mono.t -> t -> t
+val fail_harness_read : at:Clock.Mono.t -> reason:string -> retryable:bool -> t -> t
+val clear_pending_harness_read : t -> t
 val filtered_harness_verdicts : t -> Wire_work.harness_verdict_row list
 val selected_harness_verdict : t -> Wire_work.harness_verdict_row option
 val apply_verification_evidence :

@@ -614,7 +614,8 @@ let leave_old_epoch ~now ~(before : Model.t) (after : Model.t) =
         |> Fleet_store.clear_turn_preview_updates;
       drafts = Drafts.detach_streams ~now after.drafts;
       attention = Attention.clear_all_in_flight after.attention;
-      work = clear_work_reads after.work;
+      work =
+        clear_work_reads after.work |> Work_store.clear_pending_harness_read;
       inline_modal;
       ask_modal;
       config = Config_store.clear_in_flight after.config;

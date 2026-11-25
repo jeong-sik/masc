@@ -5720,6 +5720,9 @@ let apply_http_reply ~now (m : Model.t) reply =
                }))
         ~source:Health.Source_client_http ~ko:"퓨전 보드 증거 조회"
         ~en:"Fusion board evidence fetch" err
+  | Msg.Reply_harness_health_started since_ns ->
+      ( { m with work = Work_store.start_harness_read ~since_ns m.work }
+      , [] )
   | Msg.Reply_harness_health (Ok hh) ->
       ( {
           m with
@@ -5727,10 +5730,14 @@ let apply_http_reply ~now (m : Model.t) reply =
         }
       , [] )
   | Msg.Reply_harness_health (Error err) ->
+      let reason =
+        Chat_transcript.scrub_secrets_in_text (Msg.http_error_detail err)
+      in
       err_reply
         ~fail:
-          (on_work (fun (x : Work_store.t) ->
-               { x with harness_health = failed_slot err x.harness_health }))
+          (on_work
+             (Work_store.fail_harness_read ~at:now ~reason
+                ~retryable:(Msg.http_error_retryable err)))
         ~source:Health.Source_client_http ~ko:"하네스 상태 조회"
         ~en:"Harness health fetch" err
   | Msg.Reply_verification_evidence { verification_id; result = Ok bundle } ->

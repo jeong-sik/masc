@@ -68,6 +68,7 @@ type t = {
   verifications : Wire_work.verification_snapshot Observed.t;
   verification_failure : verification_read_failure option;
   harness_health : Wire_work.harness_health Observed.t;
+  harness_read : unit Observed.t;
   harness_selected_index : int option;
   harness_scroll_offset : int;
   verification_evidence :
@@ -129,6 +130,7 @@ let empty =
     verifications = Observed.unreported;
     verification_failure = None;
     harness_health = Observed.unreported;
+    harness_read = Observed.unreported;
     harness_selected_index = Some 0;
     harness_scroll_offset = 0;
     verification_evidence = Observed.unreported;
@@ -1451,6 +1453,7 @@ let mark_stale_all t =
     planning = Observed.mark_stale t.planning;
     planning_goals = Observed.mark_stale t.planning_goals;
     harness_health = Observed.mark_stale t.harness_health;
+    harness_read = Observed.mark_stale t.harness_read;
     verification_evidence = Observed.mark_stale t.verification_evidence;
     verification_evidence_auth_denied = false;
     verification_summary = Observed.mark_stale t.verification_summary;
@@ -1493,7 +1496,30 @@ let cycle_verification_dive_tab t =
 
 let apply_harness_health ~observed_at hh t =
   preserve_harness_selection t
-    { t with harness_health = Observed.value ~observed_at hh }
+    {
+      t with
+      harness_health = Observed.value ~observed_at hh;
+      harness_read = Observed.value ~observed_at ();
+    }
+
+let start_harness_read ~since_ns t =
+  {
+    t with
+    harness_health = Observed.mark_stale t.harness_health;
+    harness_read = Observed.loading ~since_ns;
+  }
+
+let fail_harness_read ~at ~reason ~retryable t =
+  {
+    t with
+    harness_health = Observed.mark_stale t.harness_health;
+    harness_read = Observed.failed ~at ~reason ~retryable;
+  }
+
+let clear_pending_harness_read t =
+  if Observed.is_loading t.harness_read then
+    { t with harness_read = Observed.unreported }
+  else t
 
 let apply_verification_evidence ~observed_at ~verification_id bundle t =
   {

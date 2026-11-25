@@ -1021,8 +1021,8 @@ let get_request_keys ~epoch ~path ~requested_at (req : Cmd.get_request) =
   | Cmd.Get_tool_series _ -> scoped "#tool-series"
   | Cmd.Get_tool_series_filtered _ -> scoped "#tool-series-filtered"
   | Cmd.Get_planning | Cmd.Get_verifications _ | Cmd.Get_asks _
-  | Cmd.Get_tool_approvals | Cmd.Get_gate_pending | Cmd.Get_artifacts _ ->
-      scoped ""
+  | Cmd.Get_tool_approvals | Cmd.Get_gate_pending | Cmd.Get_artifacts _
+  | Cmd.Get_harness_health -> scoped ""
   | Cmd.Get_health
   | Cmd.Get_dashboard_shell
   | Cmd.Get_keepers_roster
@@ -1082,7 +1082,6 @@ let get_request_keys ~epoch ~path ~requested_at (req : Cmd.get_request) =
   | Cmd.Get_fusion_run_detail _
   | Cmd.Get_fusion_config
   | Cmd.Get_fusion_board_evidence _
-  | Cmd.Get_harness_health
   | Cmd.Get_verification_evidence _
   | Cmd.Get_verification_summary
   | Cmd.Get_verification_specs
@@ -1984,6 +1983,9 @@ let rec execute_get t ~epoch req =
             in
             Msg.Http_reply { epoch; reply }
         | Cmd.Get_harness_health ->
+            Ui_bus.publish_snapshot t.bus ~key:snapshot_key
+              (Msg.Http_reply
+                 { epoch; reply = Msg.Reply_harness_health_started observed_at });
             let reply =
               Msg.Reply_harness_health
                 (fetch_and_decode_get t ~path

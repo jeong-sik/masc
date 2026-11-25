@@ -5740,25 +5740,39 @@ let render_harness ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
     in
     let hh_opt = Observed.to_option model.work.harness_health in
     let status_badge =
-      match hh_opt with
-      | Some hh ->
-          let tone =
-            if hh.fallback_ratio > 0.2 then Theme.Status_attention
-            else if String.equal (String.lowercase_ascii hh.evaluator_status) "ok"
-                    || String.equal (String.lowercase_ascii hh.evaluator_status) "healthy"
-            then Theme.Status_ok
-            else Theme.Status_active
+      let badge glyph tone text : Card.badge option =
+        Some { glyph = Some glyph; text; tone = Some tone }
+      in
+      match model.work.harness_read, hh_opt with
+      | Observed.Loading { since_ns }, _ ->
+          let elapsed =
+            Clock.Mono.seconds_since model.freshness.last_mono ~since:since_ns
+            |> Float.max 0. |> Format_val.format_duration_s
           in
-          Some
-            {
-              Card.glyph = Some Glyph.Live_healthy;
-              text =
-                Printf.sprintf "%s · agr %.0f%% · fb %.0f%%" hh.evaluator_status
-                  (hh.calibration.agreement_rate *. 100.0)
-                  (hh.fallback_ratio *. 100.0);
-              tone = Some tone;
-            }
-      | None -> None
+          badge (Chat_transcript.progress_glyph model) Theme.Status_active
+            (Ops_common.say model ~ko:("조회 중 · " ^ elapsed)
+               ~en:("Reading · " ^ elapsed))
+      | Observed.Failed _, _ ->
+          badge Glyph.Live_failing Theme.Status_critical
+            (Ops_common.say model ~ko:"조회 실패" ~en:"Read failed")
+      | (Observed.Value _ | Observed.Absent | Observed.Unreported), Some hh ->
+          let stale = Observed.is_stale model.work.harness_health in
+          if stale then
+            badge Glyph.Transport_stale Theme.Status_historical
+              (Ops_common.say model ~ko:"이전 표본" ~en:"Last sample")
+          else if hh.unreadable_verdicts_count > 0 then
+            let count = string_of_int hh.unreadable_verdicts_count in
+            badge Glyph.Warning_triangle Theme.Status_attention
+              (Ops_common.say model ~ko:("표본 누락 " ^ count ^ "건")
+                 ~en:(count ^ " unreadable in sample"))
+          else
+            let age =
+              Ops_common.format_age ~now_unix:model.freshness.last_wall_unix
+                hh.generated_at ~lang:model.lang
+            in
+            badge Glyph.Live_idle Theme.Status_historical
+              (Ops_common.say model ~ko:("표본 · " ^ age) ~en:("Sample · " ^ age))
+      | (Observed.Value _ | Observed.Absent | Observed.Unreported), None -> None
     in
     let left_spec : Card.spec =
       {
@@ -5775,8 +5789,8 @@ let render_harness ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
     let l_inner = Card.draw ~cache grid ~rect:left_rect ~theme left_spec in
     if not (Rect.is_empty l_inner) then begin
       let verdicts = Work_store.filtered_harness_verdicts model.work in
-      match model.work.harness_health with
-      | Observed.Value _ when verdicts <> [] ->
+      match hh_opt, verdicts with
+      | Some _, _ :: _ ->
           let columns : Table.column list =
             [
               {
@@ -5849,21 +5863,31 @@ let render_harness ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                ~scroll:model.work.harness_scroll_offset
                ?selected:model.work.harness_selected_index
                ~focused:(Model.pane_focused model 0) ~columns rows)
-      | Observed.Value _ ->
+      | Some hh, [] ->
+          let empty_msg =
+            match hh.recent_verdicts, hh.unreadable_verdicts_count with
+            | _ :: _, _ ->
+                Say.make ~ko:"표본에 필터와 일치하는 판정이 없습니다"
+                  ~en:"No sample verdicts match the filter"
+            | [], count when count > 0 ->
+                Say.make
+                  ~ko:(Printf.sprintf "읽을 수 있는 판정 없음 · 누락 %d건" count)
+                  ~en:(Printf.sprintf "No readable verdicts · %d unreadable" count)
+            | [], _ when Observed.is_stale model.work.harness_health ->
+                Say.make ~ko:"이전 표본에 판정이 없습니다"
+                  ~en:"No verdicts in the last sample"
+            | [], _ ->
+                Say.make ~ko:"최근 표본에 판정이 없습니다"
+                  ~en:"No verdicts in the recent sample"
+          in
           Ops_common.draw_observed_empty grid ~rect:l_inner ~theme
-            ~lang:model.lang model.work.harness_health
-            ~empty_msg:
-              (Say.make ~ko:"기록된 하네스 판정이 없습니다"
-                 ~en:"No harness verdicts recorded")
-      | ( Observed.Loading _
-        | Observed.Absent
-        | Observed.Unreported
-        | Observed.Failed _ ) as obs ->
+            ~lang:model.lang model.work.harness_health ~empty_msg
+      | None, _ ->
           Ops_common.draw_observed_empty grid ~rect:l_inner ~theme
-            ~lang:model.lang obs
+            ~lang:model.lang model.work.harness_read
             ~empty_msg:
-              (Say.make ~ko:"하네스 헬스 불러오는 중..."
-                 ~en:"Loading harness health...")
+              (Say.make ~ko:"아직 하네스 표본을 받지 못했습니다"
+                 ~en:"No harness sample received yet")
     end;
     let right_spec : Card.spec =
       {
@@ -5872,6 +5896,7 @@ let render_harness ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
              (Ops_common.say model ~ko:"판정 상세 · 교정 지표"
                 ~en:"Verdict Detail & Calibration"))
         with
+        badge = (if Rect.is_empty left_rect then status_badge else None);
         hotkey =
           Some
             (Ops_common.say model ~ko:"[→/Tab] 상세 스크롤 · [y] 승인 · [n] 반려"

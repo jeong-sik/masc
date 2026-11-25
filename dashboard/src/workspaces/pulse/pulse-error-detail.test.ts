@@ -8,11 +8,62 @@ import { resetTimeWindowForTests } from '../../core/time-window'
 import { decodePulseKeepers } from './pulse-data'
 import { buildAttentionQueue } from './pulse-model'
 import { PulseWorkspace } from './index'
-import { decodeKeeperRoster } from '../keepers/keepers-api'
+import { decodeKeeperRoster, needsRosterAttention } from '../keepers/keepers-api'
 import { KeeperHeader } from '../keepers/keeper-header'
 import type { PulseKeeperRow } from './types'
 
 describe('Pulse keeper error detail — typed decode and surfaces', () => {
+  beforeEach(() => {
+    resetAuthStateForTests()
+    resetTimeWindowForTests('24h')
+    resetObserverStateForTests()
+    resourceCache.clearAll()
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it('keeps a healthy Keeper with a recovered lane failure out of Attention Queue', () => {
+    const gate = {
+      keepers: [{
+        name: 'recovered-keeper',
+        status: 'running',
+        phase: 'idle',
+        health: 'healthy',
+        paused: false,
+        keepalive_running: true,
+        runtime_id: 'working-provider',
+        runtime_lane_observation: {
+          evidence: {
+            failures: [{
+              runtime_id: 'prior-provider',
+              attempt: 0,
+              dispatch: 'dispatched',
+              failure: { cause: { kind: 'provider_rate_limited' } },
+              summary: 'The prior provider limited the request',
+            }],
+          },
+        },
+      }],
+    }
+    const keepers = decodePulseKeepers(gate)
+    expect(keepers[0]?.runtime_lane_failures).toHaveLength(1)
+    expect(buildAttentionQueue({ approvals: [], asks: [], keepers, nowSec: 1_700_000_100 })).toEqual([])
+    const roster = decodeKeeperRoster(gate)
+    expect(roster[0]?.runtime_lane_failures).toHaveLength(1)
+    expect(needsRosterAttention(roster[0]!)).toBe(false)
+  })
+
   it('decodes runtime_blocker_class and lane attempt/dispatch/provider without prose matching', () => {
     const rows = decodePulseKeepers({
       keepers: [
@@ -162,24 +213,6 @@ describe('Pulse keeper error detail — typed decode and surfaces', () => {
   })
 
   it('pulse preview render shows byte-verified keeper error without JSON dump and move route stays canonical', async () => {
-    beforeEach(() => {
-      resetAuthStateForTests()
-      resetTimeWindowForTests('24h')
-      resetObserverStateForTests()
-      resourceCache.clearAll()
-      authSession.value = {
-        kind: 'single_user_local',
-        mode: 'single_user',
-        tokenPresent: true,
-        authMethods: { google: false, github: false, dev_token: false },
-        workspaceId: 'default',
-      }
-    })
-    afterEach(() => {
-      cleanup()
-      vi.restoreAllMocks()
-    })
-
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {

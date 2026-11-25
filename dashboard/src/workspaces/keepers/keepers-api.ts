@@ -476,7 +476,6 @@ export function decodeKeeperRoster(gateRaw: unknown): KeeperRosterItem[] {
 
 export function needsRosterAttention(k: KeeperRosterItem): boolean {
   if (k.directory_issue || k.runtime_blocker_summary) return true
-  if (k.runtime_lane_failures != null && k.runtime_lane_failures.length > 0) return true
   const h = k.health.toLowerCase()
   return h === 'failing' || h === 'failed' || h === 'degraded' || h === 'error' || h === 'crashed'
 }

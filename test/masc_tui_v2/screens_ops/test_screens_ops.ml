@@ -3569,6 +3569,9 @@ let test_wave2_keeper_context_tool_calls_and_schedules () =
       | Keeper_context_store.Ctx_composition ->
           Alcotest.(check bool) "Composition shows turn #90 & cache" true
             (contains_sub ~needle:"90" txt)
+      | Keeper_context_store.Ctx_flow ->
+          Alcotest.(check bool) "Flow subtab renders turn flow & control strip" true
+            (contains_sub ~needle:"/ctl" txt || contains_sub ~needle:"Flow" txt)
       | Keeper_context_store.Ctx_exact_input ->
           Alcotest.(check bool) "Exact_input shows Cache Outcome TTL Within" true
             (contains_sub ~needle:"TTL Within" txt

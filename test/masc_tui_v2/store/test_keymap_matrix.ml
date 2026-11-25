@@ -1978,7 +1978,7 @@ let test_dynamic_rendered_hint_contracts () =
         }
       in
       let pop_txt = grid_all_text (render_full ~model:pop_m) in
-      assert_has ~label:(lang_s ^ "/Popup/Counter") ~needle:"1/22" pop_txt;
+      assert_has ~label:(lang_s ^ "/Popup/Counter") ~needle:"1/23" pop_txt;
       assert_has ~label:(lang_s ^ "/Popup/TabHint") ~needle:"Tab" pop_txt;
       record_case ();
       let filt_m =
@@ -2026,11 +2026,14 @@ let test_journeys_slash_palette_filter () =
   let m1_dn, _ = step m1 (mk_key Keymap.Input.Down) in
   Alcotest.(check int) "J1 popup Down -> 1" 1 m1_dn.drafts.popup_selected;
   let m1_up, _ = step m1 (mk_key Keymap.Input.Up) in
-  Alcotest.(check int) "J1 popup Up wraps to 21" 21 m1_up.drafts.popup_selected;
+  let last_command = List.length Slash.all - 1 in
+  Alcotest.(check int) "J1 popup Up wraps to the last registered command" last_command
+    m1_up.drafts.popup_selected;
   let m1_pg, _ = step m1 (mk_key Keymap.Input.Page_down) in
   Alcotest.(check int) "J1 popup PgDn -> 8" 8 m1_pg.drafts.popup_selected;
   let m1_end, _ = step m1 (mk_key Keymap.Input.End) in
-  Alcotest.(check int) "J1 popup End -> 21" 21 m1_end.drafts.popup_selected;
+  Alcotest.(check int) "J1 popup End selects the last registered command" last_command
+    m1_end.drafts.popup_selected;
   let m1_home, _ = step m1_end (mk_key Keymap.Input.Home) in
   Alcotest.(check int) "J1 popup Home -> 0" 0 m1_home.drafts.popup_selected;
   let m1_exec, _ = step m1_home (mk_key Keymap.Input.Enter) in

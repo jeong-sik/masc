@@ -3083,6 +3083,33 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                    put_body_line ~style:whisper_st
                      (say ~ko:"토큰·캐시 효율 스냅샷 대기 중"
                         ~en:"Awaiting token & cache breakdown snapshot"));
+            (let ckpt_s =
+                match Observed.to_option ctx_st.checkpoints with
+                | Some inv ->
+                    Printf.sprintf "ckpt:%s(%d hist)" inv.current_status
+                      (List.length inv.history)
+                | None -> ""
+              in
+              let note_s =
+                match Observed.to_option ctx_st.operator_note with
+                | Some n when n.pending -> "note:PENDING"
+                | Some _ -> "note:consumed"
+                | None -> ""
+              in
+              let mos_s =
+                match Observed.to_option ctx_st.turn_records with
+                | Some { memory_os = Some mo; _ } ->
+                    Printf.sprintf "mem_os:r%d(%df)" mo.revision
+                      mo.facts_current
+                | Some { memory_os = None; _ } | None -> ""
+              in
+              let parts =
+                List.filter
+                  (fun s -> not (String.equal s ""))
+                  [ ckpt_s; note_s; mos_s ]
+              in
+              if parts <> [] then
+                put_body_line ~style:whisper_st (String.concat " · " parts));
             (match keeper_opt with
              | Some k ->
                  (* Cost comes from keeper-costs over its trailing window. *)
@@ -3459,6 +3486,9 @@ let classify_inline_form (modal : Model.inline_modal_state) : inline_form_kind =
     | Nav.Github_token_form _
     | Nav.Code_finder_form
     | Nav.Code_search_form
+    | Nav.Keeper_control_confirm _
+    | Nav.Keeper_clear_form _
+    | Nav.Keeper_operator_note_form _
     | Nav.Runtime_lane_create
     | Nav.Runtime_lane_edit _
     | Nav.Runtime_lane_delete _
@@ -3603,6 +3633,32 @@ let inline_action_title ~lang ~(modal : Model.inline_modal_state) _kind =
       Say.resolve lang
         (Say.make ~ko:("OAuth 로그인 입력 · " ^ login_id)
            ~en:("OAuth Login Input · " ^ login_id))
+  | Form_standard (Nav.Keeper_control_confirm { keeper; action }) -> (
+      match action with
+      | Nav.Keeper_act_shutdown ->
+          Say.resolve lang
+            (Say.make ~ko:("키퍼 종료 확인 · " ^ keeper)
+               ~en:("Confirm Keeper Shutdown · " ^ keeper))
+      | Nav.Keeper_act_reset ->
+          Say.resolve lang
+            (Say.make ~ko:("키퍼 리셋 확인 · " ^ keeper)
+               ~en:("Confirm Keeper Reset · " ^ keeper))
+      | Nav.Keeper_act_apply_purge ->
+          Say.resolve lang
+            (Say.make ~ko:("체크포인트 정리 적용 확인 · " ^ keeper)
+               ~en:("Confirm Checkpoint Purge · " ^ keeper))
+      | Nav.Keeper_act_delete_history ->
+          Say.resolve lang
+            (Say.make ~ko:("체크포인트 이력 삭제 확인 · " ^ keeper)
+               ~en:("Confirm Checkpoint History Delete · " ^ keeper)))
+  | Form_standard (Nav.Keeper_clear_form keeper) ->
+      Say.resolve lang
+        (Say.make ~ko:("키퍼 대화 이력 초기화 · " ^ keeper)
+           ~en:("Clear Keeper History · " ^ keeper))
+  | Form_standard (Nav.Keeper_operator_note_form keeper) ->
+      Say.resolve lang
+        (Say.make ~ko:("다음 턴 운영자 노트 · " ^ keeper)
+           ~en:("Next-Turn Operator Note · " ^ keeper))
 
 let form_of_inline_modal (modal : Model.inline_modal_state) =
   let fields =
@@ -3659,6 +3715,9 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     | Nav.Board_comment _
     | Nav.Github_token_form _
     | Nav.Code_search_form
+    | Nav.Keeper_control_confirm _
+    | Nav.Keeper_clear_form _
+    | Nav.Keeper_operator_note_form _
     | Nav.Runtime_lane_create
     | Nav.Runtime_lane_edit _
     | Nav.Runtime_lane_delete _
@@ -3716,6 +3775,9 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       | Nav.Github_token_form _
       | Nav.Code_finder_form
       | Nav.Code_search_form
+      | Nav.Keeper_control_confirm _
+      | Nav.Keeper_clear_form _
+      | Nav.Keeper_operator_note_form _
       | Nav.Runtime_lane_create
       | Nav.Runtime_lane_edit _
       | Nav.Runtime_lane_delete _
@@ -3875,6 +3937,9 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       | Nav.Github_token_form _
       | Nav.Code_finder_form
       | Nav.Code_search_form
+      | Nav.Keeper_control_confirm _
+      | Nav.Keeper_clear_form _
+      | Nav.Keeper_operator_note_form _
       | Nav.Runtime_lane_create
       | Nav.Runtime_lane_edit _
       | Nav.Runtime_lane_delete _
@@ -3925,6 +3990,9 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_search_form
+                | Nav.Keeper_control_confirm _
+                | Nav.Keeper_clear_form _
+                | Nav.Keeper_operator_note_form _
                 | Nav.Runtime_lane_delete _
                 | Nav.Task_transition_form _
                 | Nav.Goal_upsert_form _
@@ -4096,6 +4164,9 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_search_form
+                | Nav.Keeper_control_confirm _
+                | Nav.Keeper_clear_form _
+                | Nav.Keeper_operator_note_form _
                 | Nav.Runtime_lane_delete _
                 | Nav.Task_transition_form _
                 | Nav.Goal_upsert_form _

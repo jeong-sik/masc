@@ -1035,6 +1035,10 @@ let explicit_interrupt_target ~model ~keeper
 
 type stream_projection = {
   buf : Fleet_store.chat_stream_buffer;
+  show_runtime_meta : string option;
+  show_retry : string option;
+  show_checkpoint : string option;
+  show_protocol_warning : string option;
   show_thinking : bool;
   show_tools : bool;
   show_text : bool;
@@ -1089,6 +1093,20 @@ let project_transcript ~(model : Model.t) ~keeper =
         if (not buf.active) && stream_reply_already_persisted hist_msgs buf then
           None
         else
+          let show_runtime_meta =
+            if not buf.active then None
+            else
+              match (buf.active_runtime_id, buf.attempt_index) with
+              | Some rid, Some idx when idx > 1 ->
+                  Some (Printf.sprintf "%s (attempt #%d)" rid idx)
+              | Some rid, Some _ | Some rid, None -> Some rid
+              | None, Some idx when idx > 1 ->
+                  Some (Printf.sprintf "attempt #%d" idx)
+              | None, (Some _ | None) -> None
+          in
+          let show_retry = if buf.active then buf.retry_notice else None in
+          let show_checkpoint = buf.checkpoint_notice in
+          let show_protocol_warning = buf.protocol_warning in
           let show_thinking =
             (not (String.equal (String.trim buf.thinking) ""))
             &&
@@ -1130,13 +1148,19 @@ let project_transcript ~(model : Model.t) ~keeper =
                 if matched_by_pending || superseded then None else Some err
           in
           if
-            (not show_thinking) && (not show_tools) && (not show_text)
+            Option.is_none show_retry && Option.is_none show_checkpoint
+            && Option.is_none show_protocol_warning
+            && (not show_thinking) && (not show_tools) && (not show_text)
             && Option.is_none show_error
           then None
           else
             Some
               {
                 buf;
+                show_runtime_meta;
+                show_retry;
+                show_checkpoint;
+                show_protocol_warning;
                 show_thinking;
                 show_tools;
                 show_text;
@@ -1526,8 +1550,11 @@ let count_transcript_rows ~(model : Model.t) ~keeper ~width =
         + count_markdown_rows ~theme ~width ~rail_present:false ~prefix:"  "
             buf.text
     in
+    let retry_r = match sp.show_retry with Some _ -> 1 | None -> 0 in
+    let ckpt_r = match sp.show_checkpoint with Some _ -> 1 | None -> 0 in
+    let proto_r = match sp.show_protocol_warning with Some _ -> 1 | None -> 0 in
     let err_r = match sp.show_error with Some _ -> 1 | None -> 0 in
-    think_r + tools_r + text_r + err_r
+    retry_r + ckpt_r + proto_r + think_r + tools_r + text_r + err_r
   in
   let sections = project_transcript ~model ~keeper in
   let _, total =

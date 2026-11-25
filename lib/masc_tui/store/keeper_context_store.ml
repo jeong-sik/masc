@@ -5,6 +5,7 @@ module String_map = Map.Make (String)
 
 type context_subtab =
   | Ctx_composition
+  | Ctx_flow
   | Ctx_exact_input
   | Ctx_input_map
   | Ctx_response
@@ -49,6 +50,14 @@ type keeper_state = {
   call_evidence : (string * Wire_keeper_context.tool_call_entry list) Observed.t;
   call_evidence_auth_denied : bool;
   absent_call_evidence_ref : string option;
+  turn_flow : (string * Wire_keeper_context.turn_flow) Observed.t;
+  absent_turn_flow_ref : string option;
+  checkpoints : Wire_keeper_context.keeper_checkpoints_inventory Observed.t;
+  checkpoints_auth_denied : bool;
+  checkpoints_absent : bool;
+  last_purge_preview : Wire_keeper_context.checkpoint_purge_result option;
+  operator_note : Wire_keeper_context.keeper_operator_note Observed.t;
+  operator_note_absent : bool;
   scroll_offset : int;
   tool_stats : Wire_keeper_context.keeper_tool_stats Observed.t;
   tool_stats_absent : bool;
@@ -102,6 +111,14 @@ let empty_keeper_state =
     call_evidence = Observed.unreported;
     call_evidence_auth_denied = false;
     absent_call_evidence_ref = None;
+    turn_flow = Observed.unreported;
+    absent_turn_flow_ref = None;
+    checkpoints = Observed.unreported;
+    checkpoints_auth_denied = false;
+    checkpoints_absent = false;
+    last_purge_preview = None;
+    operator_note = Observed.unreported;
+    operator_note_absent = false;
     scroll_offset = 0;
     tool_stats = Observed.unreported;
     tool_stats_absent = false;
@@ -145,23 +162,26 @@ let update_keeper ~keeper f t =
 
 let subtab_rank = function
   | Ctx_composition -> 0
-  | Ctx_exact_input -> 1
-  | Ctx_input_map -> 2
-  | Ctx_response -> 3
+  | Ctx_flow -> 1
+  | Ctx_exact_input -> 2
+  | Ctx_input_map -> 3
+  | Ctx_response -> 4
 
 let equal_context_subtab a b = Int.equal (subtab_rank a) (subtab_rank b)
 
 let all_context_subtabs =
-  [ Ctx_composition; Ctx_exact_input; Ctx_input_map; Ctx_response ]
+  [ Ctx_composition; Ctx_flow; Ctx_exact_input; Ctx_input_map; Ctx_response ]
 
 let context_subtab_label = function
   | Ctx_composition -> Say.make ~ko:"구성 · 예측" ~en:"Composition"
+  | Ctx_flow -> Say.make ~ko:"흐름 · 제어" ~en:"Flow & Control"
   | Ctx_exact_input -> Say.make ~ko:"원문 입력 · 캐시" ~en:"Exact Input"
   | Ctx_input_map -> Say.make ~ko:"입력 증명표" ~en:"Input Map"
   | Ctx_response -> Say.make ~ko:"응답 · 도구" ~en:"Response"
 
 let next_context_subtab = function
-  | Ctx_composition -> Ctx_exact_input
+  | Ctx_composition -> Ctx_flow
+  | Ctx_flow -> Ctx_exact_input
   | Ctx_exact_input -> Ctx_input_map
   | Ctx_input_map -> Ctx_response
   | Ctx_response -> Ctx_composition
@@ -220,6 +240,11 @@ let transcript_for_selected_turn ks =
 let call_evidence_for_selected_turn ks =
   match selected_turn_ref ks, Observed.to_option ks.call_evidence with
   | Some tr, Some (stored_tr, rows) when String.equal tr stored_tr -> Some rows
+  | _ -> None
+
+let turn_flow_for_selected_turn ks =
+  match selected_turn_ref ks, Observed.to_option ks.turn_flow with
+  | Some tr, Some (stored_tr, flow) when String.equal tr stored_tr -> Some flow
   | _ -> None
 
 let selected_tool_call ks =
@@ -676,6 +701,13 @@ let mark_stale_all t =
             turn_transcript = Observed.mark_stale ks.turn_transcript;
             call_evidence = Observed.mark_stale ks.call_evidence;
             call_evidence_auth_denied = false;
+            turn_flow = Observed.mark_stale ks.turn_flow;
+            absent_turn_flow_ref = None;
+            checkpoints = Observed.mark_stale ks.checkpoints;
+            checkpoints_auth_denied = false;
+            checkpoints_absent = false;
+            operator_note = Observed.mark_stale ks.operator_note;
+            operator_note_absent = false;
             tool_stats = Observed.mark_stale ks.tool_stats;
             tool_calls = Observed.mark_stale ks.tool_calls;
             tool_calls_auth_denied = false;
@@ -691,6 +723,249 @@ let mark_stale_all t =
         t.by_keeper;
     oauth_providers = Observed.mark_stale t.oauth_providers;
   }
+
+let mark_keeper_context_stale ~keeper t =
+  update_keeper ~keeper
+    (fun ks ->
+      {
+        ks with
+        turn_records = Observed.mark_stale ks.turn_records;
+        next_request = Observed.mark_stale ks.next_request;
+        next_request_absent = false;
+        turn_flow = Observed.mark_stale ks.turn_flow;
+        absent_turn_flow_ref = None;
+        checkpoints =
+          (if ks.checkpoints_auth_denied then ks.checkpoints
+           else Observed.mark_stale ks.checkpoints);
+        checkpoints_absent = false;
+        operator_note = Observed.mark_stale ks.operator_note;
+        operator_note_absent = false;
+        tool_stats = Observed.mark_stale ks.tool_stats;
+        tool_calls = Observed.mark_stale ks.tool_calls;
+      })
+    t
+
+let mark_keeper_tool_calls_stale ~keeper t =
+  update_keeper ~keeper
+    (fun ks ->
+      {
+        ks with
+        tool_stats = Observed.mark_stale ks.tool_stats;
+        tool_calls = Observed.mark_stale ks.tool_calls;
+        call_evidence = Observed.mark_stale ks.call_evidence;
+      })
+    t
+
+let apply_turn_flow ~observed_at ~keeper ~turn_ref flow t =
+  update_keeper ~keeper
+    (fun ks ->
+      let matches =
+        match selected_turn_ref ks with
+        | Some cur -> String.equal cur turn_ref
+        | None -> true
+      in
+      if not matches then ks
+      else
+        {
+          ks with
+          turn_flow = Observed.value ~observed_at (turn_ref, flow);
+          absent_turn_flow_ref = None;
+        })
+    t
+
+let mark_turn_flow_absent ~keeper ~turn_ref t =
+  update_keeper ~keeper
+    (fun ks ->
+      let matches =
+        match selected_turn_ref ks with
+        | Some cur -> String.equal cur turn_ref
+        | None -> true
+      in
+      if not matches then ks
+      else
+        {
+          ks with
+          turn_flow = Observed.absent;
+          absent_turn_flow_ref = Some turn_ref;
+        })
+    t
+
+let mark_turn_flow_failed ~at ~keeper ~turn_ref ~reason ~retryable t =
+  update_keeper ~keeper
+    (fun ks ->
+      let matches =
+        match selected_turn_ref ks with
+        | Some cur -> String.equal cur turn_ref
+        | None -> true
+      in
+      if not matches then ks
+      else
+        {
+          ks with
+          turn_flow = Observed.failed ~reason ~retryable ~at;
+        })
+    t
+
+let apply_checkpoints ~observed_at ~keeper inv t =
+  update_keeper ~keeper
+    (fun ks ->
+      {
+        ks with
+        checkpoints = Observed.value ~observed_at inv;
+        checkpoints_auth_denied = false;
+        checkpoints_absent = false;
+      })
+    t
+
+let mark_checkpoints_denied ~at ~keeper ~reason t =
+  update_keeper ~keeper
+    (fun ks ->
+      {
+        ks with
+        checkpoints = Observed.failed ~reason ~retryable:false ~at;
+        checkpoints_auth_denied = true;
+        checkpoints_absent = false;
+      })
+    t
+
+let mark_checkpoints_absent ~keeper t =
+  update_keeper ~keeper
+    (fun ks ->
+      {
+        ks with
+        checkpoints = Observed.absent;
+        checkpoints_absent = true;
+      })
+    t
+
+let mark_checkpoints_failed ~at ~keeper ~reason ~retryable t =
+  update_keeper ~keeper
+    (fun ks ->
+      { ks with checkpoints = Observed.failed ~reason ~retryable ~at })
+    t
+
+let flow_estimated_rows ks =
+  let turn_rows =
+    match selected_turn_entry ks with
+    | None -> 1
+    | Some entry ->
+        let r = entry.record in
+        let base_rows = 4 in
+        let flow_rows =
+          match turn_flow_for_selected_turn ks with
+          | None -> 1
+          | Some flow ->
+              let intake_n =
+                match flow.intake with
+                | Wire_keeper_context.Intake_observed { sources; _ } ->
+                    let shown = Int.min 8 (List.length sources) in
+                    1 + shown + if List.length sources > 8 then 1 else 0
+                | Wire_keeper_context.Intake_not_recorded _
+                | Wire_keeper_context.Intake_unavailable _
+                | Wire_keeper_context.Intake_ambiguous _ ->
+                    1
+              in
+              let outcomes_n =
+                match flow.outcomes with
+                | Wire_keeper_context.Outcomes_observed { sources; _ } ->
+                    let shown = Int.min 6 (List.length sources) in
+                    1 + shown + if List.length sources > 6 then 1 else 0
+                | Wire_keeper_context.Outcomes_unavailable _ -> 1
+              in
+              let ev_n =
+                if flow.events = [] then 0
+                else
+                  let shown = Int.min 16 (List.length flow.events) in
+                  1 + shown + if List.length flow.events > 16 then 1 else 0
+              in
+              intake_n + outcomes_n + ev_n
+        in
+        let obs_rows =
+          if r.request_observations = [] then 0
+          else 1 + List.length r.request_observations
+        in
+        let call_rows =
+          match call_evidence_for_selected_turn ks with
+          | Some calls when calls <> [] ->
+              let shown = Int.min 16 (List.length calls) in
+              1 + shown + if List.length calls > 16 then 1 else 0
+          | Some _ | None -> 0
+        in
+        let diff_rows =
+          match entry.diff_vs_prev with
+          | Some d
+            when d.added <> [] || d.removed <> [] || d.changed <> [] ->
+              1 + List.length d.added + List.length d.removed
+              + List.length d.changed
+          | Some _ | None -> 0
+        in
+        base_rows + flow_rows + obs_rows + call_rows + diff_rows
+  in
+  let mos_rows =
+    match Observed.to_option ks.turn_records with
+    | Some { memory_os = Some mo; _ } ->
+        let shown = Int.min 5 (List.length mo.facts) in
+        2 + List.length mo.read_errors + shown
+        + if List.length mo.facts > 5 then 1 else 0
+    | Some { memory_os = None; _ } | None -> 0
+  in
+  let ckpt_rows =
+    let inv_n =
+      match ks.checkpoints with
+      | Observed.Value { data = inv; _ } ->
+          let shown_h = Int.min 4 (List.length inv.history) in
+          let shown_e = Int.min 3 (List.length inv.history_errors) in
+          1 + shown_h
+          + (if List.length inv.history > 4 then 1 else 0)
+          + shown_e
+          + if List.length inv.history_errors > 3 then 1 else 0
+      | Observed.Loading _ | Observed.Failed _ | Observed.Absent
+      | Observed.Unreported ->
+          1
+    in
+    let purge_n = match ks.last_purge_preview with Some _ -> 1 | None -> 0 in
+    let note_n = 1 in
+    let ctl_strip_n = 1 in
+    1 + inv_n + purge_n + note_n + ctl_strip_n
+  in
+  turn_rows + mos_rows + ckpt_rows
+
+let apply_purge_result ~observed_at ~keeper (res : Wire_keeper_context.checkpoint_purge_result) t =
+  update_keeper ~keeper
+    (fun ks ->
+      let checkpoints =
+        match res.inventory with
+        | Some inv -> Observed.value ~observed_at inv
+        | None -> ks.checkpoints
+      in
+      { ks with checkpoints; last_purge_preview = Some res })
+    t
+
+let apply_operator_note ~observed_at ~keeper note t =
+  update_keeper ~keeper
+    (fun ks ->
+      {
+        ks with
+        operator_note = Observed.value ~observed_at note;
+        operator_note_absent = false;
+      })
+    t
+
+let mark_operator_note_absent ~keeper t =
+  update_keeper ~keeper
+    (fun ks ->
+      {
+        ks with
+        operator_note = Observed.absent;
+        operator_note_absent = true;
+      })
+    t
+
+let mark_operator_note_failed ~at ~keeper ~reason ~retryable t =
+  update_keeper ~keeper
+    (fun ks ->
+      { ks with operator_note = Observed.failed ~reason ~retryable ~at })
+    t
 
 let equal_logs_subview a b =
   match a, b with

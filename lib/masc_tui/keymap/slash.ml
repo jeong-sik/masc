@@ -17,6 +17,7 @@ type command_id =
   | Cmd_btw
   | Cmd_queue
   | Cmd_context
+  | Cmd_ctl
   | Cmd_tools
   | Cmd_clear
   | Cmd_theme
@@ -37,6 +38,22 @@ type tools_mode =
   | Tools_results
   | Tools_full
 
+type keeper_ctl_action =
+  | Ctl_boot
+  | Ctl_up
+  | Ctl_shutdown
+  | Ctl_pause
+  | Ctl_resume
+  | Ctl_wakeup
+  | Ctl_reset
+  | Ctl_clear
+  | Ctl_checkpoints
+  | Ctl_purge_preview
+  | Ctl_purge_apply
+  | Ctl_delete_history
+  | Ctl_note
+  | Ctl_run_next
+
 type parsed =
   | Pulse
   | Work
@@ -53,6 +70,7 @@ type parsed =
   | Btw of string
   | Queue
   | Context
+  | Ctl of { action : keeper_ctl_action; target : string option }
   | Tools of tools_mode option
   | Clear
   | Theme of Theme.preset option
@@ -92,13 +110,14 @@ let command_id_rank = function
   | Cmd_btw -> 12
   | Cmd_queue -> 13
   | Cmd_context -> 14
-  | Cmd_tools -> 15
-  | Cmd_clear -> 16
-  | Cmd_theme -> 17
-  | Cmd_lang -> 18
-  | Cmd_help -> 19
-  | Cmd_restart -> 20
-  | Cmd_quit -> 21
+  | Cmd_ctl -> 15
+  | Cmd_tools -> 16
+  | Cmd_clear -> 17
+  | Cmd_theme -> 18
+  | Cmd_lang -> 19
+  | Cmd_help -> 20
+  | Cmd_restart -> 21
+  | Cmd_quit -> 22
 
 let equal_command_id a b = Int.equal (command_id_rank a) (command_id_rank b)
 
@@ -118,6 +137,25 @@ let tools_mode_rank = function
 
 let equal_tools_mode a b = Int.equal (tools_mode_rank a) (tools_mode_rank b)
 
+let keeper_ctl_action_rank = function
+  | Ctl_boot -> 0
+  | Ctl_up -> 1
+  | Ctl_shutdown -> 2
+  | Ctl_pause -> 3
+  | Ctl_resume -> 4
+  | Ctl_wakeup -> 5
+  | Ctl_reset -> 6
+  | Ctl_clear -> 7
+  | Ctl_checkpoints -> 8
+  | Ctl_purge_preview -> 9
+  | Ctl_purge_apply -> 10
+  | Ctl_delete_history -> 11
+  | Ctl_note -> 12
+  | Ctl_run_next -> 13
+
+let equal_keeper_ctl_action a b =
+  Int.equal (keeper_ctl_action_rank a) (keeper_ctl_action_rank b)
+
 let parsed_tag = function
   | Pulse -> 0
   | Work -> 1
@@ -134,13 +172,14 @@ let parsed_tag = function
   | Btw _ -> 12
   | Queue -> 13
   | Context -> 14
-  | Tools _ -> 15
-  | Clear -> 16
-  | Theme _ -> 17
-  | Lang _ -> 18
-  | Help -> 19
-  | Restart -> 20
-  | Quit -> 21
+  | Ctl _ -> 15
+  | Tools _ -> 16
+  | Clear -> 17
+  | Theme _ -> 18
+  | Lang _ -> 19
+  | Help -> 20
+  | Restart -> 21
+  | Quit -> 22
 
 let equal_parsed a b =
   if not (Int.equal (parsed_tag a) (parsed_tag b)) then false
@@ -150,6 +189,9 @@ let equal_parsed a b =
     | Model x, Model y -> Option.equal String.equal x y
     | Config x, Config y -> Option.equal String.equal x y
     | Btw x, Btw y -> String.equal x y
+    | Ctl x, Ctl y ->
+        equal_keeper_ctl_action x.action y.action
+        && Option.equal String.equal x.target y.target
     | Tools x, Tools y -> Option.equal equal_tools_mode x y
     | Theme x, Theme y -> Option.equal Theme.equal_preset x y
     | Lang x, Lang y -> Option.equal Say.equal_lang x y
@@ -184,6 +226,7 @@ let equal_parsed a b =
       | Btw _
       | Queue
       | Context
+      | Ctl _
       | Tools _
       | Clear
       | Theme _
@@ -256,6 +299,14 @@ let all : spec list =
       ~en:"Open Keeper Queue drawer" Slash_interaction;
     mk Cmd_context "/context" ~ko:"키퍼 컨텍스트 윈도우 및 캐시 서랍 열기"
       ~en:"Open Keeper Context & Cache drawer" Slash_display;
+    mk Cmd_ctl "/ctl"
+      ~arg_hint:
+        (Say.make
+           ~ko:"<boot|up|shutdown|pause|resume|wakeup|reset|clear|checkpoints|purge-preview|purge-apply|delete-history|note|run-next> [대상]"
+           ~en:"<boot|up|shutdown|pause|resume|wakeup|reset|clear|checkpoints|purge-preview|purge-apply|delete-history|note|run-next> [target]")
+      ~ko:"키퍼 수명주기·체크포인트·운영자 노트·우선실행 제어"
+      ~en:"Keeper lifecycle, checkpoints, operator note, and run-next control"
+      Slash_interaction;
     mk Cmd_tools "/tools"
       ~arg_hint:(Say.make ~ko:"[compact|results|full]" ~en:"[compact|results|full]")
       ~ko:"도구 상세 표시 모드 전환"
@@ -283,6 +334,42 @@ let tools_mode_of_string s =
   | "compact" -> Some Tools_compact
   | "results" -> Some Tools_results
   | "full" -> Some Tools_full
+  | _ -> None
+
+let keeper_ctl_action_names =
+  [
+    "boot";
+    "up";
+    "shutdown";
+    "pause";
+    "resume";
+    "wakeup";
+    "reset";
+    "clear";
+    "checkpoints";
+    "purge-preview";
+    "purge-apply";
+    "delete-history";
+    "note";
+    "run-next";
+  ]
+
+let keeper_ctl_action_of_string s =
+  match String.lowercase_ascii (String.trim s) with
+  | "boot" -> Some Ctl_boot
+  | "up" -> Some Ctl_up
+  | "shutdown" -> Some Ctl_shutdown
+  | "pause" -> Some Ctl_pause
+  | "resume" -> Some Ctl_resume
+  | "wakeup" -> Some Ctl_wakeup
+  | "reset" -> Some Ctl_reset
+  | "clear" -> Some Ctl_clear
+  | "checkpoints" -> Some Ctl_checkpoints
+  | "purge-preview" -> Some Ctl_purge_preview
+  | "purge-apply" -> Some Ctl_purge_apply
+  | "delete-history" -> Some Ctl_delete_history
+  | "note" -> Some Ctl_note
+  | "run-next" -> Some Ctl_run_next
   | _ -> None
 
 let no_arg cmd value rest =
@@ -342,6 +429,34 @@ let parse raw =
                  }))
     | "/queue" -> no_arg cmd Queue arg
     | "/context" -> no_arg cmd Context arg
+    | "/ctl" -> (
+        match arg with
+        | None ->
+            Error
+              (Invalid_argument
+                 {
+                   command = cmd;
+                   expected =
+                     Say.make
+                       ~ko:"boot|up|shutdown|pause|resume|wakeup|reset|clear|checkpoints|purge-preview|purge-apply|delete-history|note|run-next"
+                       ~en:"boot|up|shutdown|pause|resume|wakeup|reset|clear|checkpoints|purge-preview|purge-apply|delete-history|note|run-next";
+                   got = "";
+                 })
+        | Some raw_arg -> (
+            let act_raw, target = split_command_and_arg raw_arg in
+            match keeper_ctl_action_of_string act_raw with
+            | Some action -> Ok (Ctl { action; target })
+            | None ->
+                Error
+                  (Invalid_argument
+                     {
+                       command = cmd;
+                       expected =
+                         Say.make
+                           ~ko:"boot|up|shutdown|pause|resume|wakeup|reset|clear|checkpoints|purge-preview|purge-apply|delete-history|note|run-next"
+                           ~en:"boot|up|shutdown|pause|resume|wakeup|reset|clear|checkpoints|purge-preview|purge-apply|delete-history|note|run-next";
+                       got = act_raw;
+                     })))
     | "/tools" -> (
         match arg with
         | None -> Ok (Tools None)
@@ -509,6 +624,7 @@ let complete ~prefix =
         complete_args ~cmd ~arg_prefix
           (List.map Theme.preset_name Theme.all_presets)
     | "/lang" -> complete_args ~cmd ~arg_prefix [ "ko"; "en" ]
+    | "/ctl" -> complete_args ~cmd ~arg_prefix keeper_ctl_action_names
     | "/tools" ->
         complete_args ~cmd ~arg_prefix [ "compact"; "results"; "full" ]
     | _ -> []

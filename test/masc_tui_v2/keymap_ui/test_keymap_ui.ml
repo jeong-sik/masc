@@ -273,7 +273,7 @@ let test_keymap_footer_width_budget () =
 (* --- 2. Slash Commands Tests --- *)
 
 let test_slash_22_commands () =
-  Alcotest.(check int) "exactly 22 slash commands" 22 (List.length Slash.all);
+  Alcotest.(check int) "exactly 23 slash commands" 23 (List.length Slash.all);
   let cases =
     [
       ("/pulse", Slash.Pulse);
@@ -291,6 +291,9 @@ let test_slash_22_commands () =
       ("/btw what failed?", Slash.Btw "what failed?");
       ("/queue", Slash.Queue);
       ("/context", Slash.Context);
+      ( "/ctl resume alpha",
+        Slash.Ctl { action = Slash.Ctl_resume; target = Some "alpha" } );
+      ("/ctl checkpoints", Slash.Ctl { action = Slash.Ctl_checkpoints; target = None });
       ("/tools full", Slash.Tools (Some Slash.Tools_full));
       ("/clear", Slash.Clear);
       ("/theme arcade_hi", Slash.Theme (Some Theme.Arcade_hi));

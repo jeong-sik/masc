@@ -2640,6 +2640,9 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                         | Nav.Github_token_form _
                         | Nav.Code_finder_form
                         | Nav.Code_search_form
+                        | Nav.Keeper_control_confirm _
+                        | Nav.Keeper_clear_form _
+                        | Nav.Keeper_operator_note_form _
                         | Nav.Runtime_lane_create
                         | Nav.Runtime_lane_edit _
                         | Nav.Runtime_lane_delete _
@@ -2864,6 +2867,9 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                         | Nav.Github_token_form _
                         | Nav.Code_finder_form
                         | Nav.Code_search_form
+                        | Nav.Keeper_control_confirm _
+                        | Nav.Keeper_clear_form _
+                        | Nav.Keeper_operator_note_form _
                         | Nav.Runtime_lane_edit _
                         | Nav.Runtime_lane_delete _
                         | Nav.Task_create_form
@@ -3788,6 +3794,9 @@ let apply_paste ~now:_ (m : Model.t) text =
                   | Nav.Github_token_form _
                   | Nav.Code_finder_form
                   | Nav.Code_search_form
+                  | Nav.Keeper_control_confirm _
+                  | Nav.Keeper_clear_form _
+                  | Nav.Keeper_operator_note_form _
                   | Nav.Runtime_lane_create
                   | Nav.Runtime_lane_edit _
                   | Nav.Runtime_lane_delete _

@@ -1852,6 +1852,325 @@ let rec execute_slash ~now (m : Model.t) cmd =
       Update_nav.open_overlay m (Nav.Queue_context Nav.Drawer_queue)
   | Slash.Context ->
       Update_nav.open_overlay m (Nav.Queue_context Nav.Drawer_context)
+  | Slash.Ctl { action; target } -> (
+      let resolve_keeper () =
+        match target with
+        | Some t when not (String.equal (String.trim t) "") ->
+            Some (String.trim t)
+        | Some _ | None -> Model.target_keeper m
+      in
+      let expected_ws () =
+        Option.map
+          (fun (ws : Wire_common.workspace_identity) ->
+            {
+              Wire_work.base_path = ws.base_path;
+              masc_root = ws.masc_root;
+            })
+          m.server_identity.workspace
+      in
+      let no_keeper () =
+        ( Model.with_toast ~now ~level:Model.Toast_warning
+            (Say.make ~ko:"대상 키퍼를 먼저 선택하거나 이름을 입력하세요"
+               ~en:"Select a target keeper or pass keeper name")
+            m
+        , [] )
+      in
+      let no_workspace () =
+        ( Model.with_toast ~now ~level:Model.Toast_warning
+            (Say.make ~ko:"서버 워크스페이스 정보가 아직 로드되지 않았습니다"
+               ~en:"Server workspace identity not loaded yet")
+            m
+        , [] )
+      in
+      match action with
+      | Slash.Ctl_boot -> (
+          match resolve_keeper () with
+          | None -> no_keeper ()
+          | Some keeper ->
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make ~ko:("키퍼 부팅 요청 중: " ^ keeper)
+                     ~en:("Booting keeper: " ^ keeper))
+                  m
+              , [
+                  Cmd.Http_post
+                    {
+                      epoch = m.epoch;
+                      req =
+                        Cmd.Post_keeper_control_lifecycle
+                          { keeper; action = `Boot; expected_workspace = None };
+                    };
+                ] ))
+      | Slash.Ctl_up -> (
+          match resolve_keeper () with
+          | None -> no_keeper ()
+          | Some keeper ->
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make ~ko:("키퍼 시작(up) 요청 중: " ^ keeper)
+                     ~en:("Starting keeper (up): " ^ keeper))
+                  m
+              , [
+                  Cmd.Http_post
+                    {
+                      epoch = m.epoch;
+                      req =
+                        Cmd.Post_keeper_control_lifecycle
+                          {
+                            keeper;
+                            action = `Up;
+                            expected_workspace = expected_ws ();
+                          };
+                    };
+                ] ))
+      | Slash.Ctl_shutdown -> (
+          match resolve_keeper () with
+          | None -> no_keeper ()
+          | Some keeper ->
+              Update_nav.open_inline_modal m
+                (Nav.Keeper_control_confirm
+                   { keeper; action = Nav.Keeper_act_shutdown }))
+      | Slash.Ctl_reset -> (
+          match resolve_keeper () with
+          | None -> no_keeper ()
+          | Some keeper ->
+              Update_nav.open_inline_modal m
+                (Nav.Keeper_control_confirm
+                   { keeper; action = Nav.Keeper_act_reset }))
+      | Slash.Ctl_clear -> (
+          match resolve_keeper () with
+          | None -> no_keeper ()
+          | Some keeper ->
+              Update_nav.open_inline_modal m (Nav.Keeper_clear_form keeper))
+      | Slash.Ctl_pause -> (
+          match (resolve_keeper (), expected_ws ()) with
+          | None, _ -> no_keeper ()
+          | Some _, None -> no_workspace ()
+          | Some keeper, Some expected_workspace ->
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make ~ko:("키퍼 일시 정지 요청 중: " ^ keeper)
+                     ~en:("Pausing keeper: " ^ keeper))
+                  m
+              , [
+                  Cmd.Http_post
+                    {
+                      epoch = m.epoch;
+                      req =
+                        Cmd.Post_keeper_directive
+                          {
+                            keeper;
+                            directive = Wire_keeper_context.Directive_pause;
+                            expected_workspace;
+                          };
+                    };
+                ] ))
+      | Slash.Ctl_wakeup -> (
+          match (resolve_keeper (), expected_ws ()) with
+          | None, _ -> no_keeper ()
+          | Some _, None -> no_workspace ()
+          | Some keeper, Some expected_workspace ->
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make ~ko:("키퍼 기상 요청 중: " ^ keeper)
+                     ~en:("Waking keeper: " ^ keeper))
+                  m
+              , [
+                  Cmd.Http_post
+                    {
+                      epoch = m.epoch;
+                      req =
+                        Cmd.Post_keeper_directive
+                          {
+                            keeper;
+                            directive = Wire_keeper_context.Directive_wakeup;
+                            expected_workspace;
+                          };
+                    };
+                ] ))
+      | Slash.Ctl_resume -> (
+          match (resolve_keeper (), expected_ws ()) with
+          | None, _ -> no_keeper ()
+          | Some _, None -> no_workspace ()
+          | Some keeper, Some expected_workspace ->
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make ~ko:("키퍼 재개 요청 중: " ^ keeper)
+                     ~en:("Resuming keeper: " ^ keeper))
+                  m
+              , [
+                  Cmd.Http_post
+                    {
+                      epoch = m.epoch;
+                      req =
+                        Cmd.Post_keeper_directive
+                          {
+                            keeper;
+                            directive =
+                              Wire_keeper_context.Directive_resume
+                                { operator_operation_id = Random_id.uuid_v7 () };
+                            expected_workspace;
+                          };
+                    };
+                ] ))
+      | Slash.Ctl_checkpoints -> (
+          match resolve_keeper () with
+          | None -> no_keeper ()
+          | Some keeper ->
+              let keeper_context =
+                Keeper_context_store.set_subtab ~keeper
+                  Keeper_context_store.Ctx_flow m.keeper_context
+              in
+              let m1, cmds1 =
+                Update_nav.push_dive { m with keeper_context }
+                  (Nav.Dive_keeper { name = keeper; tab = Nav.Keeper_context })
+              in
+              ( m1
+              , cmds1
+                @ [
+                    Cmd.Http_get
+                      {
+                        epoch = m1.epoch;
+                        req = Cmd.Get_keeper_checkpoints { keeper };
+                      };
+                  ] ))
+      | Slash.Ctl_purge_preview -> (
+          match resolve_keeper () with
+          | None -> no_keeper ()
+          | Some keeper ->
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make ~ko:("체크포인트 정리 미리보기 계산 중: " ^ keeper)
+                     ~en:("Previewing checkpoint purge: " ^ keeper))
+                  m
+              , [
+                  Cmd.Http_post
+                    {
+                      epoch = m.epoch;
+                      req =
+                        Cmd.Post_keeper_checkpoints
+                          { keeper; action = `Preview_purge };
+                    };
+                ] ))
+      | Slash.Ctl_purge_apply -> (
+          match resolve_keeper () with
+          | None -> no_keeper ()
+          | Some keeper ->
+              Update_nav.open_inline_modal m
+                (Nav.Keeper_control_confirm
+                   { keeper; action = Nav.Keeper_act_apply_purge }))
+      | Slash.Ctl_delete_history -> (
+          match resolve_keeper () with
+          | None -> no_keeper ()
+          | Some keeper ->
+              Update_nav.open_inline_modal m
+                (Nav.Keeper_control_confirm
+                   { keeper; action = Nav.Keeper_act_delete_history }))
+      | Slash.Ctl_note -> (
+          match Model.target_keeper m with
+          | None -> no_keeper ()
+          | Some keeper -> (
+              match target with
+              | Some txt when not (String.equal (String.trim txt) "") ->
+                  let text = String.trim txt in
+                  if String.length text > 4096 then
+                    ( Model.with_toast ~now ~level:Model.Toast_warning
+                        (Say.make ~ko:"운영자 노트는 4096바이트를 초과할 수 없습니다"
+                           ~en:"Operator note cannot exceed 4096 bytes")
+                        m
+                    , [] )
+                  else
+                    ( Model.with_toast ~now ~level:Model.Toast_info
+                        (Say.make ~ko:("운영자 노트 저장 중: " ^ keeper)
+                           ~en:("Saving operator note for " ^ keeper))
+                        m
+                    , [
+                        Cmd.Http_post
+                          {
+                            epoch = m.epoch;
+                            req = Cmd.Post_keeper_operator_note { keeper; text };
+                          };
+                      ] )
+              | Some _ | None ->
+                  let m_open, cmds =
+                    Update_nav.open_inline_modal m
+                      (Nav.Keeper_operator_note_form keeper)
+                  in
+                  let seeded_modal =
+                    match
+                      ( m_open.inline_modal,
+                        Observed.to_option
+                          (Keeper_context_store.get_keeper ~keeper
+                             m.keeper_context)
+                            .operator_note )
+                    with
+                    | Some modal, Some note when note.pending ->
+                        Some
+                          {
+                            modal with
+                            fields =
+                              List.map
+                                (fun (f : Model.modal_form_field) ->
+                                  if String.equal f.key "text" then
+                                    { f with value = note.text }
+                                  else f)
+                                modal.fields;
+                          }
+                    | modal, _ -> modal
+                  in
+                  ( { m_open with inline_modal = seeded_modal }
+                  , cmds
+                    @ [
+                        Cmd.Http_get
+                          {
+                            epoch = m.epoch;
+                            req = Cmd.Get_keeper_operator_note { keeper };
+                          };
+                      ] )))
+      | Slash.Ctl_run_next -> (
+          match Model.target_keeper m with
+          | None -> no_keeper ()
+          | Some keeper -> (
+              let req_id_opt =
+                match target with
+                | Some rid when not (String.equal (String.trim rid) "") ->
+                    Some (String.trim rid)
+                | Some _ | None ->
+                    Drafts.pending_txs_for_keeper ~keeper m.drafts
+                    |> List.find_map (fun (tx : Drafts.pending_message) ->
+                           match tx.state with
+                           | Drafts.Queued -> tx.operation_id
+                           | Drafts.Sending
+                           | Drafts.Pending_processing
+                           | Drafts.Confirming_delivery
+                           | Drafts.Interrupting
+                           | Drafts.Delivered
+                           | Drafts.No_operation_record
+                           | Drafts.Failed_retryable _ ->
+                               None)
+              in
+              match req_id_opt with
+              | None ->
+                  ( Model.with_toast ~now ~level:Model.Toast_warning
+                      (Say.make
+                         ~ko:"우선 실행할 서버 대기 요청 ID가 없습니다 (/ctl run-next <operation_id>)"
+                         ~en:"No server-queued operation found (pass /ctl run-next <operation_id>)")
+                      m
+                  , [] )
+              | Some request_id ->
+                  let interrupt_token =
+                    Option.map
+                      (fun (t : Wire_fleet.active_turn) -> t.interrupt_token)
+                      (Fleet_store.active_turn_for ~keeper m.fleet)
+                  in
+                  ( Model.with_toast ~now ~level:Model.Toast_info
+                      (Say.make
+                         ~ko:("우선 실행(run-next) 요청 중: " ^ request_id)
+                         ~en:("Prioritizing queued message: " ^ request_id))
+                      m
+                  , [
+                      Cmd.Http_post
+                        {
+                          epoch = m.epoch;
+                          req =
+                            Cmd.Post_keeper_run_next
+                              { keeper; request_id; interrupt_token };
+                        };
+                    ] ))))
   | Slash.Tools None ->
       ({ m with fleet = Fleet_store.cycle_tools_mode m.fleet }, [])
   | Slash.Tools (Some mode) ->
@@ -2225,6 +2544,12 @@ and confirm_palette ~now (m : Model.t) =
           | Update_nav.Pal_slash_spec spec ->
               if Slash.equal_command_id spec.id Slash.Cmd_btw then
                 Update_nav.open_inline_modal m_closed Nav.Btw_query
+              else if Slash.equal_command_id spec.id Slash.Cmd_ctl then
+                let drafts =
+                  m_closed.drafts |> Drafts.set_current_text "/ctl "
+                  |> Drafts.set_focus true
+                in
+                ({ m_closed with drafts }, [])
               else
                 match Slash.parse spec.name with
                 | Ok parsed -> execute_slash ~now m_closed parsed
@@ -2352,6 +2677,9 @@ and execute_action ~now (m : Model.t) action =
                     | Nav.Github_token_form _
                     | Nav.Code_finder_form
                     | Nav.Code_search_form
+                    | Nav.Keeper_control_confirm _
+                    | Nav.Keeper_clear_form _
+                    | Nav.Keeper_operator_note_form _
                     | Nav.Runtime_lane_create
                     | Nav.Runtime_lane_edit _
                     | Nav.Runtime_lane_delete _
@@ -2567,6 +2895,9 @@ and execute_action ~now (m : Model.t) action =
                | Nav.Github_token_form _
                | Nav.Code_finder_form
                | Nav.Code_search_form
+               | Nav.Keeper_control_confirm _
+               | Nav.Keeper_clear_form _
+               | Nav.Keeper_operator_note_form _
                | Nav.Runtime_lane_create
                | Nav.Runtime_lane_edit _
                | Nav.Runtime_lane_delete _
@@ -2845,6 +3176,9 @@ and execute_action ~now (m : Model.t) action =
             | Nav.Github_token_form _
             | Nav.Code_finder_form
             | Nav.Code_search_form
+            | Nav.Keeper_control_confirm _
+            | Nav.Keeper_clear_form _
+            | Nav.Keeper_operator_note_form _
             | Nav.Runtime_lane_create
             | Nav.Runtime_lane_edit _
             | Nav.Runtime_lane_delete _
@@ -4041,6 +4375,9 @@ and execute_action ~now (m : Model.t) action =
                 | Nav.Github_token_form _
                 | Nav.Code_finder_form
                 | Nav.Code_search_form
+                | Nav.Keeper_control_confirm _
+                | Nav.Keeper_clear_form _
+                | Nav.Keeper_operator_note_form _
                 | Nav.Runtime_lane_create
                 | Nav.Runtime_lane_edit _
                 | Nav.Runtime_lane_delete _

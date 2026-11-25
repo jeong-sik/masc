@@ -96,6 +96,14 @@ let fetches_for_keeper_context ?(include_cache_outcome = false) ~force ~name
           && (force || not ks.next_request_absent)
           && needs_fetch ~force ks.next_request)
          (Cmd.Get_keeper_next_request { keeper = name })
+    |> add_if
+         ((force || (not ks.checkpoints_auth_denied && not ks.checkpoints_absent))
+          && needs_fetch ~force ks.checkpoints)
+         (Cmd.Get_keeper_checkpoints { keeper = name })
+    |> add_if
+         ((force || not ks.operator_note_absent)
+          && needs_fetch ~force ks.operator_note)
+         (Cmd.Get_keeper_operator_note { keeper = name })
   in
   match Keeper_context_store.selected_turn_entry ks with
   | None -> base
@@ -119,6 +127,18 @@ let fetches_for_keeper_context ?(include_cache_outcome = false) ~force ~name
         | Observed.Failed _ ->
             false
       in
+      let flow_blocked_by_failure =
+        (not force)
+        &&
+        match ks.turn_flow with
+        | Observed.Failed { retryable = false; _ } -> true
+        | Observed.Failed { retryable = true; _ }
+        | Observed.Loading _
+        | Observed.Value _
+        | Observed.Absent
+        | Observed.Unreported ->
+            false
+      in
       let exec_ids =
         List.map Ids.Execution_id.to_string entry.record.execution_ids
       in
@@ -127,11 +147,25 @@ let fetches_for_keeper_context ?(include_cache_outcome = false) ~force ~name
         else
           match ks.subtab with
           | Keeper_context_store.Ctx_composition -> (false, false, false, false)
+          | Keeper_context_store.Ctx_flow -> (false, true, false, true)
           | Keeper_context_store.Ctx_exact_input -> (true, true, false, false)
           | Keeper_context_store.Ctx_input_map -> (true, false, false, false)
           | Keeper_context_store.Ctx_response -> (false, false, true, true)
       in
       base
+      |> add_if
+           (Keeper_context_store.equal_context_subtab ks.subtab
+              Keeper_context_store.Ctx_flow
+            && (not flow_blocked_by_failure)
+            && (not (is_absent_ref ks.absent_turn_flow_ref))
+            && not (matches_ref ks.turn_flow))
+           (Cmd.Get_keeper_turn_flow
+              {
+                keeper = name;
+                trace_id = entry.record.trace_id;
+                turn_id = entry.record.absolute_turn;
+                turn_ref;
+              })
       |> add_if
            (want_provider_input
             && (force || not ks.provider_input_auth_denied)

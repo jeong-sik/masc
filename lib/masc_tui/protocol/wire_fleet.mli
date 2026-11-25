@@ -619,7 +619,35 @@ type chat_stream_chunk =
       control_token : string option;
     }
   | Chunk_run_started of { operation_id : string option }
-  | Chunk_runtime_attempt_started of { operation_id : string option }
+  | Chunk_runtime_attempt_started of {
+      operation_id : string option;
+      runtime_id : string option;
+      attempt_index : int option;
+    }
+  | Chunk_provider_retry of {
+      operation_id : string option;
+      runtime_id : string option;
+      attempt : int;
+      max_retries : int;
+      retry_delay_ms : int;
+      error_status : int option;
+    }
+  | Chunk_continuation_checkpoint of {
+      operation_id : string option;
+      message : string;
+      request_id : string option;
+    }
+  | Chunk_native_tool_progress of {
+      operation_id : string option;
+      tool_use_id : string;
+      tool_name : string option;
+      progress_label : string;
+    }
+  | Chunk_stream_protocol_error of {
+      operation_id : string option;
+      kind : string;
+      reason : string option;
+    }
   | Chunk_text_delta of {
       operation_id : string option;
       delta : string;
@@ -669,7 +697,12 @@ type chat_stream_chunk =
       ok : bool option;
       output_preview : string option;
     }
-  | Chunk_tool_quarantined of { operation_id : string option; tool_use_id : string }
+  | Chunk_tool_quarantined of {
+      operation_id : string option;
+      tool_use_id : string;
+      kind : string;
+      reason : string option;
+    }
   | Chunk_reply_details of {
       operation_id : string option;
       reply : string;

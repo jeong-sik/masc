@@ -3,6 +3,86 @@ open Masc_tui_protocol
 
 let get_cmd epoch req = Cmd.Http_get { epoch; req }
 
+let is_viewing_keeper_context ~keeper (m : Model.t) =
+  match m.nav.overlay with
+  | Some (Nav.Queue_context Nav.Drawer_context) -> (
+      match Model.target_keeper m with
+      | Some target -> String.equal target keeper
+      | None -> false)
+  | Some
+      ( Nav.Palette
+      | Nav.Settings _
+      | Nav.Incidents
+      | Nav.Queue_context (Nav.Drawer_queue | Nav.Drawer_schedules)
+      | Nav.Inline_action _
+      | Nav.Ask_answer
+      | Nav.Help
+      | Nav.System_gate _ ) ->
+      false
+  | None -> (
+      match Model.active_dive m with
+      | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_context }) ->
+          String.equal name keeper
+      | Some
+          ( Nav.Dive_keeper
+              {
+                tab =
+                  ( Nav.Keeper_chat
+                  | Nav.Keeper_tool_calls
+                  | Nav.Keeper_memory
+                  | Nav.Keeper_work_candle
+                  | Nav.Keeper_sandbox
+                  | Nav.Keeper_config
+                  | Nav.Keeper_logs
+                  | Nav.Keeper_identity );
+                _;
+              }
+          | Nav.Dive_work _
+          | Nav.Dive_knowledge _
+          | Nav.Dive_runtime _
+          | Nav.Dive_infra _ ) ->
+          false
+      | None -> (
+          Nav.equal_workspace m.nav.workspace Nav.Keepers
+          && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_context
+          &&
+          match Fleet_store.selected_keeper_summary m.fleet with
+          | Some k -> String.equal k.name keeper
+          | None -> false))
+
+let is_viewing_keeper_tool_calls ~keeper (m : Model.t) =
+  if Option.is_some m.nav.overlay then false
+  else
+    match Model.active_dive m with
+    | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_tool_calls }) ->
+        String.equal name keeper
+    | Some
+        ( Nav.Dive_keeper
+            {
+              tab =
+                ( Nav.Keeper_chat
+                | Nav.Keeper_context
+                | Nav.Keeper_memory
+                | Nav.Keeper_work_candle
+                | Nav.Keeper_sandbox
+                | Nav.Keeper_config
+                | Nav.Keeper_logs
+                | Nav.Keeper_identity );
+              _;
+            }
+        | Nav.Dive_work _
+        | Nav.Dive_knowledge _
+        | Nav.Dive_runtime _
+        | Nav.Dive_infra _ ) ->
+        false
+    | None -> (
+        Nav.equal_workspace m.nav.workspace Nav.Keepers
+        && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_tool_calls
+        &&
+        match Fleet_store.selected_keeper_summary m.fleet with
+        | Some k -> String.equal k.name keeper
+        | None -> false)
+
 let is_viewing_keeper_chat ~keeper (m : Model.t) =
   match Model.active_dive m with
   | Some (Nav.Dive_keeper { name; tab = Nav.Keeper_chat }) ->
@@ -712,7 +792,27 @@ let apply_observer_event (m : Model.t) = function
           }
           m.infra
       in
-      ({ m with infra }, [ get_cmd m.epoch Cmd.Get_dashboard_shell ])
+      let keeper_context =
+        Keeper_context_store.mark_keeper_context_stale ~keeper m.keeper_context
+      in
+      let fleet =
+        {
+          m.fleet with
+          turn_records =
+            Fleet_store.String_map.update keeper
+              (Option.map Observed.mark_stale)
+              m.fleet.turn_records;
+        }
+      in
+      let next = { m with infra; keeper_context; fleet } in
+      let view_cmds =
+        if
+          is_viewing_keeper_context ~keeper next
+          || is_viewing_keeper_tool_calls ~keeper next
+        then View_fetches.fetches_for_current_view next
+        else []
+      in
+      (next, get_cmd m.epoch Cmd.Get_dashboard_shell :: view_cmds)
   | Wire_observer.Keeper_tool_call { keeper; tool; at_unix; _ } ->
       let infra =
         Infra_store.push_activity
@@ -725,7 +825,17 @@ let apply_observer_event (m : Model.t) = function
           }
           m.infra
       in
-      ({ m with infra }, [])
+      let keeper_context =
+        Keeper_context_store.mark_keeper_tool_calls_stale ~keeper
+          m.keeper_context
+      in
+      let next = { m with infra; keeper_context } in
+      let cmds =
+        if is_viewing_keeper_tool_calls ~keeper next then
+          View_fetches.fetches_for_current_view next
+        else []
+      in
+      (next, cmds)
   | Wire_observer.Keeper_chat_queue_changed keeper ->
       let queue = Fleet_store.chat_queue_for ~keeper m.fleet in
       let queue = { queue with read = Observed.mark_stale queue.read } in
@@ -1067,6 +1177,10 @@ let apply_chat_stream_chunk ~now ~keeper ~request_id ~is_btw ~chunk (m : Model.t
       | Wire_fleet.Chunk_error { message; _ } ->
           Drafts.fail_btw ~request_id ~reason:message m.drafts
       | Wire_fleet.Chunk_accepted _
+      | Wire_fleet.Chunk_provider_retry _
+      | Wire_fleet.Chunk_continuation_checkpoint _
+      | Wire_fleet.Chunk_native_tool_progress _
+      | Wire_fleet.Chunk_stream_protocol_error _
       | Wire_fleet.Chunk_thinking_delta _
       | Wire_fleet.Chunk_thinking_snapshot _
       | Wire_fleet.Chunk_model_content _
@@ -1140,7 +1254,7 @@ let apply_chat_stream_chunk ~now ~keeper ~request_id ~is_btw ~chunk (m : Model.t
           in
           (d1, extra_cmds)
       | Wire_fleet.Chunk_run_started { operation_id }
-      | Wire_fleet.Chunk_runtime_attempt_started { operation_id }
+      | Wire_fleet.Chunk_runtime_attempt_started { operation_id; _ }
       | Wire_fleet.Chunk_text_delta { operation_id; _ }
       | Wire_fleet.Chunk_thinking_delta { operation_id; _ }
       | Wire_fleet.Chunk_thinking_snapshot { operation_id; _ }
@@ -1172,6 +1286,10 @@ let apply_chat_stream_chunk ~now ~keeper ~request_id ~is_btw ~chunk (m : Model.t
       | Wire_fleet.Chunk_model_content _
       | Wire_fleet.Chunk_model_response_start _
       | Wire_fleet.Chunk_model_response_stop _
+      | Wire_fleet.Chunk_provider_retry _
+      | Wire_fleet.Chunk_continuation_checkpoint _
+      | Wire_fleet.Chunk_native_tool_progress _
+      | Wire_fleet.Chunk_stream_protocol_error _
       | Wire_fleet.Chunk_tool_quarantined _
       | Wire_fleet.Chunk_tool_block_end _
       | Wire_fleet.Chunk_ignored -> (m.drafts, [])

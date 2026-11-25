@@ -215,6 +215,38 @@ type http_reply =
       execution_id : string;
       result : (Wire_keeper_context.tool_result_response, http_error) result;
     }
+  | Reply_keeper_turn_flow of {
+      keeper : string;
+      turn_ref : string;
+      result : (Wire_keeper_context.turn_flow, http_error) result;
+    }
+  | Reply_keeper_checkpoints of {
+      keeper : string;
+      result :
+        (Wire_keeper_context.keeper_checkpoints_inventory, http_error) result;
+    }
+  | Reply_keeper_checkpoint_purge of {
+      keeper : string;
+      result : (Wire_keeper_context.checkpoint_purge_result, http_error) result;
+    }
+  | Reply_keeper_checkpoint_delete of {
+      keeper : string;
+      result : (Wire_keeper_context.checkpoint_delete_result, http_error) result;
+    }
+  | Reply_keeper_operator_note_loaded of {
+      keeper : string;
+      result : (Wire_keeper_context.keeper_operator_note, http_error) result;
+    }
+  | Reply_keeper_operator_note_saved of {
+      keeper : string;
+      result : (Wire_keeper_context.keeper_operator_note, http_error) result;
+    }
+  | Reply_keeper_control of {
+      keeper : string;
+      label : Say.t;
+      refresh_roster : bool;
+      result : (unit, http_error) result;
+    }
   (* Runtime *)
   | Reply_provider_usage of
       (Wire_runtime.provider_usage_windows, http_error) result

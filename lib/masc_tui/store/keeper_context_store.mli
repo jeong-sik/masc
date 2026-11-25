@@ -1,9 +1,10 @@
 (** Per-keeper Context & Turns Inspector + Tool Calls sub-store.
 
-    Stores per-keeper turn records, turn stepper cursor, 4 context sub-tabs
-    ([Ctx_composition | Ctx_exact_input | Ctx_input_map | Ctx_response]),
+    Stores per-keeper turn records, turn stepper cursor, 5 context sub-tabs
+    ([Ctx_composition | Ctx_flow | Ctx_exact_input | Ctx_input_map | Ctx_response]),
     lazy caches for [provider-input], [provider-input/part], [cache-outcome],
-    [next-request], [turn-transcript], [call_evidence], and per-keeper
+    [next-request], [turn-transcript], [call_evidence], [turn_flow],
+    [checkpoints], [operator_note], and per-keeper
     [tool-stats] / [tool-calls] / [tool-result] — ALL guarded against stale
     [(keeper, turn_ref)] or [(keeper, execution_id)] responses. *)
 
@@ -14,6 +15,7 @@ module String_map : Map.S with type key = string
 
 type context_subtab =
   | Ctx_composition
+  | Ctx_flow
   | Ctx_exact_input
   | Ctx_input_map
   | Ctx_response
@@ -49,6 +51,14 @@ type keeper_state = {
   call_evidence : (string * Wire_keeper_context.tool_call_entry list) Observed.t;
   call_evidence_auth_denied : bool;
   absent_call_evidence_ref : string option;
+  turn_flow : (string * Wire_keeper_context.turn_flow) Observed.t;
+  absent_turn_flow_ref : string option;
+  checkpoints : Wire_keeper_context.keeper_checkpoints_inventory Observed.t;
+  checkpoints_auth_denied : bool;
+  checkpoints_absent : bool;
+  last_purge_preview : Wire_keeper_context.checkpoint_purge_result option;
+  operator_note : Wire_keeper_context.keeper_operator_note Observed.t;
+  operator_note_absent : bool;
   scroll_offset : int;
   tool_stats : Wire_keeper_context.keeper_tool_stats Observed.t;
   tool_stats_absent : bool;
@@ -115,6 +125,9 @@ val transcript_for_selected_turn :
 
 val call_evidence_for_selected_turn :
   keeper_state -> Wire_keeper_context.tool_call_entry list option
+
+val turn_flow_for_selected_turn :
+  keeper_state -> Wire_keeper_context.turn_flow option
 
 val tool_result_for_selected_call :
   keeper_state -> Wire_keeper_context.tool_result_response option
@@ -238,6 +251,63 @@ val apply_tool_result :
   t
 
 val mark_stale_all : t -> t
+val mark_keeper_context_stale : keeper:string -> t -> t
+val mark_keeper_tool_calls_stale : keeper:string -> t -> t
+
+val apply_turn_flow :
+  observed_at:Clock.Mono.t ->
+  keeper:string ->
+  turn_ref:string ->
+  Wire_keeper_context.turn_flow ->
+  t ->
+  t
+
+val mark_turn_flow_absent : keeper:string -> turn_ref:string -> t -> t
+
+val mark_turn_flow_failed :
+  at:Clock.Mono.t ->
+  keeper:string ->
+  turn_ref:string ->
+  reason:string ->
+  retryable:bool ->
+  t ->
+  t
+
+val apply_checkpoints :
+  observed_at:Clock.Mono.t ->
+  keeper:string ->
+  Wire_keeper_context.keeper_checkpoints_inventory ->
+  t ->
+  t
+
+val mark_checkpoints_denied :
+  at:Clock.Mono.t -> keeper:string -> reason:string -> t -> t
+
+val mark_checkpoints_absent : keeper:string -> t -> t
+
+val mark_checkpoints_failed :
+  at:Clock.Mono.t -> keeper:string -> reason:string -> retryable:bool -> t -> t
+
+val flow_estimated_rows : keeper_state -> int
+
+val apply_purge_result :
+  observed_at:Clock.Mono.t ->
+  keeper:string ->
+  Wire_keeper_context.checkpoint_purge_result ->
+  t ->
+  t
+
+val apply_operator_note :
+  observed_at:Clock.Mono.t ->
+  keeper:string ->
+  Wire_keeper_context.keeper_operator_note ->
+  t ->
+  t
+
+val mark_operator_note_absent : keeper:string -> t -> t
+
+val mark_operator_note_failed :
+  at:Clock.Mono.t -> keeper:string -> reason:string -> retryable:bool -> t -> t
 
 val equal_logs_subview : logs_subview -> logs_subview -> bool
 val toggle_logs_subview : keeper:string -> t -> t

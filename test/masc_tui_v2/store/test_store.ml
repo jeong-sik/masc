@@ -238,7 +238,10 @@ let has_get_health cmds =
               | Cmd.Get_github_identity _
               | Cmd.Get_addon_package_catalog _
               | Cmd.Get_addon_package_preview _
-              | Cmd.Get_connector_names _ );
+              | Cmd.Get_connector_names _
+              | Cmd.Get_keeper_turn_flow _
+              | Cmd.Get_keeper_checkpoints _
+              | Cmd.Get_keeper_operator_note _ );
             _;
           }
       | Cmd.Batch _
@@ -1813,6 +1816,12 @@ let test_verifier_regressions () =
         | Cmd.Post_oauth_disconnect _
         | Cmd.Post_board_recovery _
         | Cmd.Post_github_token _
+        | Cmd.Post_keeper_control_lifecycle _
+        | Cmd.Post_keeper_clear _
+        | Cmd.Post_keeper_directive _
+        | Cmd.Post_keeper_checkpoints _
+        | Cmd.Post_keeper_operator_note _
+        | Cmd.Post_keeper_run_next _
         | Cmd.Post_task_create _
         | Cmd.Post_task_transition _
         | Cmd.Post_task_link_goal _
@@ -11042,7 +11051,8 @@ let test_live_chat_runtime_attempt_and_text_ownership () =
   in
   let f1 =
     Fleet_store.apply_chat_stream_chunk ~keeper ~request_id:req
-      (Wire_fleet.Chunk_runtime_attempt_started { operation_id = Some req })
+      (Wire_fleet.Chunk_runtime_attempt_started
+         { operation_id = Some req; runtime_id = Some "rt-2"; attempt_index = Some 2 })
       f0
   in
   let buf1 = Fleet_store.String_map.find keeper f1.chat_streams in
@@ -11100,7 +11110,9 @@ let test_live_chat_runtime_attempt_and_text_ownership () =
     |> (fun m -> feed_btw m (Wire_fleet.Chunk_run_started { operation_id = Some btw_id }))
     |> (fun m -> feed_btw m (delta ~owner:(obs 1 0) "btw attempt 1"))
     |> (fun m ->
-         feed_btw m (Wire_fleet.Chunk_runtime_attempt_started { operation_id = Some btw_id }))
+         feed_btw m
+           (Wire_fleet.Chunk_runtime_attempt_started
+              { operation_id = Some btw_id; runtime_id = None; attempt_index = None }))
     |> (fun m -> feed_btw m (delta ~owner:(obs 1 0) "stale btw"))
     |> (fun m -> feed_btw m (delta ~owner:(obs 2 0) "btw clean"))
     |> (fun m ->
@@ -15905,12 +15917,15 @@ let test_live_chat_activity_uses_open_content_and_tool_receipts () =
     (buffer next_response).operation_id (buffer old_run).operation_id;
   let owned_activity = content fresh_run ~scope:3 ~block:0 "thinking" "observed" in
   let matching_start = start owned_activity 3 in
-  let matching_retry = apply matching_start (Wire_fleet.Chunk_runtime_attempt_started { operation_id = None }) in
+  let next_attempt =
+    Wire_fleet.Chunk_runtime_attempt_started
+      { operation_id = None; runtime_id = None; attempt_index = None }
+  in
+  let matching_retry = apply matching_start next_attempt in
   Alcotest.(check string) "retry retires a matching prelude received after content activity alone"
     "" (buffer (delta matching_retry 3 "late")).text;
   let after_owned_start = content (start fresh_run 1) ~scope:3 ~block:0 "thinking" "observed" in
-  let retry_after_match = apply (start after_owned_start 3)
-      (Wire_fleet.Chunk_runtime_attempt_started { operation_id = None }) in
+  let retry_after_match = apply (start after_owned_start 3) next_attempt in
   Alcotest.(check string) "a prior owned prelude cannot mask the retry boundary of a later matching start"
     "" (buffer (delta retry_after_match 3 "late")).text;
   let current_bytes = delta next_response 3 " fresh" in
@@ -15922,7 +15937,19 @@ let test_live_chat_activity_uses_open_content_and_tool_receipts () =
   let late = thoughts late "KEEPER_THINKING_DELTA" "delta" 2 "stale" in
   Alcotest.(check string) "late reasoning cannot replace or append to the current thought"
     "current+" (buffer late).thinking;
-  let retry = apply next_response (Wire_fleet.Chunk_runtime_attempt_started { operation_id = None }) in
+  let retrying =
+    apply next_response
+      (Wire_fleet.Chunk_provider_retry
+         { operation_id = None; runtime_id = None; attempt = 1;
+           max_retries = 2; retry_delay_ms = 125; error_status = None })
+  in
+  let retrying = thoughts retrying "KEEPER_THINKING_DELTA" "delta" 2 "stale" in
+  Alcotest.(check (option string)) "stale reasoning preserves the retry notice"
+    (Some "retry 1/2 (125ms)") (buffer retrying).retry_notice;
+  let resumed = thoughts retrying "KEEPER_THINKING_SNAPSHOT" "snapshot" 3 "resumed" in
+  Alcotest.(check (option string)) "accepted reasoning clears the retry notice"
+    None (buffer resumed).retry_notice;
+  let retry = apply next_response next_attempt in
   Alcotest.(check string) "retry retires a prelude even if that response sent no text"
     "" (buffer (delta retry 3 " late")).text;
   check_phase "replaying a prelude cannot reopen a stopped response"
@@ -15949,7 +15976,11 @@ let test_live_chat_activity_uses_open_content_and_tool_receipts () =
   let quarantined = custom tool "KEEPER_STREAM_PROTOCOL_ERROR"
       {|{"kind":"sse_stream_incomplete","quarantined_occurrence":{"toolStreamScope":2,"toolCallBlockIndex":2}}|} in
   check_phase "a quarantined tool occurrence is no longer pending" Phase_awaiting_turn quarantined;
-  let retry = apply args_ended (Wire_fleet.Chunk_runtime_attempt_started { operation_id = None }) in
+  let retry =
+    apply args_ended
+      (Wire_fleet.Chunk_runtime_attempt_started
+         { operation_id = None; runtime_id = None; attempt_index = None })
+  in
   check_phase "retry retires pending tools from the previous attempt" Phase_awaiting_turn retry
 
 let test_active_turn_preview_visibility_and_queued_followup () =
@@ -16164,6 +16195,11 @@ let test_active_turn_preview_visibility_and_queued_followup () =
         model_activity = Fleet_store.empty_model_activity;
         response_start = None;
         tools = [];
+        active_runtime_id = None;
+        attempt_index = None;
+        retry_notice = None;
+        checkpoint_notice = None;
+        protocol_warning = None;
         active = false;
         ended = true;
         last_error = None;
@@ -16367,11 +16403,17 @@ let test_active_turn_preview_visibility_and_queued_followup () =
             stream_scope = None;
             tool_name = "Read";
             args_preview = Some "README.md";
+            progress_label = None;
             tool_state = Tool_settled;
             ok = Some true;
             output_preview = None;
           };
         ];
+      active_runtime_id = None;
+      attempt_index = None;
+      retry_notice = None;
+      checkpoint_notice = None;
+      protocol_warning = None;
       active = false;
       ended = true;
       last_error = None;
@@ -19179,5 +19221,233 @@ let () =
           Alcotest.test_case
             "Lazy Keeper Context fetches per subtab & sidebar/palette Workspace/Repos discovery"
             `Quick test_lazy_keeper_context_fetches_and_sidebar_workspace_discovery;
+          Alcotest.test_case
+            "Wave 4 Layer 1: SSE context auto-refresh, live retry/checkpoint stream & /ctl keeper control"
+            `Quick
+            (fun () ->
+              let t0 = Clock.Mono.zero in
+              let m0 = Model.initial () in
+              let ws : Wire_common.workspace_identity =
+                {
+                  base_path = "/tmp/w4";
+                  masc_root = "/tmp/w4/.masc";
+                  workspace_sha256 = Some "abc";
+                  instance_id = Some "inst-1";
+                }
+              in
+              let m_ws =
+                {
+                  m0 with
+                  server_identity =
+                    { m0.server_identity with workspace = Some ws };
+                  nav =
+                    {
+                      m0.nav with
+                      dive_stack =
+                        [
+                          Nav.Dive_keeper
+                            { name = "alpha"; tab = Nav.Keeper_context };
+                        ];
+                    };
+                }
+              in
+              (* 1. SSE Keeper_turn_complete auto-refreshes viewed Keeper_context *)
+              let _m_sse, sse_cmds =
+                Update.step ~now:t0 m_ws
+                  (Msg.Sse_event
+                     {
+                       epoch = m_ws.epoch;
+                       event =
+                         Msg.Sse_observer_delivery
+                           {
+                             cursor = Some 10;
+                             decoded =
+                               Wire_observer.Event
+                                 (Wire_observer.Keeper_turn_complete
+                                    {
+                                      keeper = "alpha";
+                                      turn = Some 7;
+                                      model = Some "claude-sonnet";
+                                      input_tokens = Some 1200;
+                                      cache_read_tokens = None;
+                                      cache_creation_tokens = None;
+                                      output_tokens = Some 300;
+                                      cost_usd = Some 0.01;
+                                      tool_calls = Some 2;
+                                      at_unix = 1795252000.0;
+                                    });
+                           };
+                     })
+              in
+              let has_turn_records_refetch =
+                List.exists
+                  (function
+                    | Cmd.Http_get
+                        {
+                          req =
+                            Cmd.Get_keeper_context_turn_records
+                              { keeper = "alpha"; _ };
+                          _;
+                        } ->
+                        true
+                    | _ -> false)
+                  (Cmd.flatten sse_cmds)
+              in
+              Alcotest.(check bool)
+                "Keeper_turn_complete auto-refreshes viewed Keeper_context"
+                true has_turn_records_refetch;
+              (* 2. /ctl resume emits Post_keeper_directive with non-empty UUID & workspace *)
+              let _m_res, res_cmds =
+                Update.execute_slash ~now:t0 m_ws
+                  (Slash.Ctl { action = Slash.Ctl_resume; target = Some "alpha" })
+              in
+              let resume_ok =
+                List.exists
+                  (function
+                    | Cmd.Http_post
+                        {
+                          req =
+                            Cmd.Post_keeper_directive
+                              {
+                                keeper = "alpha";
+                                directive =
+                                  Wire_keeper_context.Directive_resume
+                                    { operator_operation_id };
+                                expected_workspace;
+                              };
+                          _;
+                        } ->
+                        String.length operator_operation_id > 8
+                        && String.equal expected_workspace.base_path "/tmp/w4"
+                    | _ -> false)
+                  (Cmd.flatten res_cmds)
+              in
+              Alcotest.(check bool)
+                "/ctl resume posts directive with UUID & expected_workspace"
+                true resume_ok;
+              (* 3. /ctl shutdown opens 2-step confirmation modal & blocks mismatched confirm *)
+              let m_shut, shut_cmds =
+                Update.execute_slash ~now:t0 m_ws
+                  (Slash.Ctl { action = Slash.Ctl_shutdown; target = Some "alpha" })
+              in
+              Alcotest.(check int)
+                "/ctl shutdown emits no immediate HTTP POST" 0
+                (List.length shut_cmds);
+              Alcotest.(check bool)
+                "/ctl shutdown opens Keeper_control_confirm modal" true
+                (Option.equal Nav.equal_overlay m_shut.nav.overlay
+                   (Some
+                      (Nav.Inline_action
+                         (Nav.Keeper_control_confirm
+                            {
+                              keeper = "alpha";
+                              action = Nav.Keeper_act_shutdown;
+                            }))));
+              let m_bad_confirm =
+                {
+                  m_shut with
+                  inline_modal =
+                    Option.map
+                      (Model.modal_update_active_field (fun _ -> "wrong"))
+                      m_shut.inline_modal;
+                }
+              in
+              let m_bad_after, bad_cmds =
+                Update_nav.submit_inline_modal ~now:t0 m_bad_confirm
+              in
+              Alcotest.(check int) "mismatched confirm sends no POST" 0
+                (List.length bad_cmds);
+              Alcotest.(check bool) "mismatched confirm sets modal error" true
+                (match m_bad_after.inline_modal with
+                | Some { error = Some _; _ } -> true
+                | _ -> false);
+              let m_good_confirm =
+                {
+                  m_shut with
+                  inline_modal =
+                    Option.map
+                      (Model.modal_update_active_field (fun _ -> "alpha"))
+                      m_shut.inline_modal;
+                }
+              in
+              let _m_ok_after, ok_cmds =
+                Update_nav.submit_inline_modal ~now:t0 m_good_confirm
+              in
+              Alcotest.(check bool) "exact keeper confirmation posts shutdown" true
+                (List.exists
+                   (function
+                     | Cmd.Http_post
+                         {
+                           req =
+                             Cmd.Post_keeper_control_lifecycle
+                               { keeper = "alpha"; action = `Shutdown; _ };
+                           _;
+                         } ->
+                         true
+                     | _ -> false)
+                   (Cmd.flatten ok_cmds));
+              (* 4. GET operator note loaded must NOT close open note modal *)
+              let m_note_open, _ =
+                Update_nav.open_inline_modal m_ws
+                  (Nav.Keeper_operator_note_form "alpha")
+              in
+              let m_after_load, _ =
+                Update.step ~now:t0 m_note_open
+                  (Msg.Http_reply
+                     {
+                       epoch = m_note_open.epoch;
+                       reply =
+                         Msg.Reply_keeper_operator_note_loaded
+                           {
+                             keeper = "alpha";
+                             result =
+                               Ok
+                                 {
+                                   keeper = "alpha";
+                                   pending = true;
+                                   text = "existing note";
+                                   created_at = 1795252000.0;
+                                   created_by = "admin";
+                                   consumed_at = None;
+                                   consumed_turn = None;
+                                 };
+                           };
+                     })
+              in
+              Alcotest.(check bool) "loaded note keeps modal open and seeds text"
+                true
+                (match m_after_load.inline_modal with
+                | Some { kind = Nav.Keeper_operator_note_form "alpha"; fields; _ } ->
+                    List.exists
+                      (fun (f : Model.modal_form_field) ->
+                        String.equal f.key "text"
+                        && String.equal f.value "existing note")
+                      fields
+                | _ -> false);
+              (* 5. Checkpoints 403 latches checkpoints_auth_denied without incident storm *)
+              let m_denied, _ =
+                Update.step ~now:t0 m_ws
+                  (Msg.Http_reply
+                     {
+                       epoch = m_ws.epoch;
+                       reply =
+                         Msg.Reply_keeper_checkpoints
+                           {
+                             keeper = "alpha";
+                             result =
+                               Error
+                                 (Msg.Http_error
+                                    {
+                                      status = 403;
+                                      body = "admin required";
+                                      api_error = None;
+                                    });
+                           };
+                     })
+              in
+              Alcotest.(check bool) "checkpoints 403 latches auth_denied" true
+                (Keeper_context_store.get_keeper ~keeper:"alpha"
+                   m_denied.keeper_context)
+                  .checkpoints_auth_denied);
         ] );
     ]

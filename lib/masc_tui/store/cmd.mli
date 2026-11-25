@@ -176,6 +176,15 @@ type get_request =
   | Get_addon_package_catalog of { directory : string option }
   | Get_addon_package_preview of { manifest_path : string }
   | Get_connector_names of { connector : string; scope : string }
+  (* Wave 4 Layer 1: Per-Turn Flow, Checkpoints, Operator Note *)
+  | Get_keeper_turn_flow of {
+      keeper : string;
+      trace_id : string;
+      turn_id : int;
+      turn_ref : string;
+    }
+  | Get_keeper_checkpoints of { keeper : string }
+  | Get_keeper_operator_note of { keeper : string }
 
 type keeper_turn_interrupt_target =
   [ `Turn_token of string | `Operation_id of string ]
@@ -389,6 +398,32 @@ type post_request =
       declaration_id : string;
       ask_id : string;
       answers : (string * Wire_work.ask_response) list;
+    }
+  (* Wave 4 Layer 1: Keeper Lifecycle, Checkpoints, Operator Note & Run-Next *)
+  | Post_keeper_control_lifecycle of {
+      keeper : string;
+      action : [ `Boot | `Up | `Shutdown | `Reset ];
+      expected_workspace : Wire_work.expected_workspace option;
+    }
+  | Post_keeper_clear of {
+      keeper : string;
+      reason : string;
+      preserve_system_prompt : bool;
+    }
+  | Post_keeper_directive of {
+      keeper : string;
+      directive : Wire_keeper_context.keeper_directive;
+      expected_workspace : Wire_work.expected_workspace;
+    }
+  | Post_keeper_checkpoints of {
+      keeper : string;
+      action : [ `Preview_purge | `Apply_purge | `Delete_history of string list ];
+    }
+  | Post_keeper_operator_note of { keeper : string; text : string }
+  | Post_keeper_run_next of {
+      keeper : string;
+      request_id : string;
+      interrupt_token : string option;
     }
 
 type put_request =

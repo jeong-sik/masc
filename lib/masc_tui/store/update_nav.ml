@@ -194,7 +194,7 @@ let slash_spec_takes_arg (spec : Slash.spec) = Option.is_some spec.arg_hint
 
 let slash_spec_requires_arg (spec : Slash.spec) =
   match spec.id with
-  | Slash.Cmd_btw -> true
+  | Slash.Cmd_btw | Slash.Cmd_ctl -> true
   | Slash.Cmd_pulse
   | Slash.Cmd_work
   | Slash.Cmd_knowledge
@@ -220,7 +220,7 @@ let slash_spec_requires_arg (spec : Slash.spec) =
 
 let resolve_slash_arg_candidates (m : Model.t) (spec : Slash.spec) ~arg_raw =
   match spec.id with
-  | Slash.Cmd_theme | Slash.Cmd_lang | Slash.Cmd_tools ->
+  | Slash.Cmd_theme | Slash.Cmd_lang | Slash.Cmd_tools | Slash.Cmd_ctl ->
       let prefix_matches = Slash.complete ~prefix:(spec.name ^ " " ^ arg_raw) in
       let all_for_cmd =
         if prefix_matches <> [] then prefix_matches
@@ -1173,6 +1173,9 @@ let open_inline_modal (m : Model.t) kind =
       | Nav.Github_token_form _
       | Nav.Code_finder_form
       | Nav.Code_search_form
+      | Nav.Keeper_control_confirm _
+      | Nav.Keeper_clear_form _
+      | Nav.Keeper_operator_note_form _
       | Nav.Runtime_lane_create
       | Nav.Runtime_lane_edit _
       | Nav.Runtime_lane_delete _
@@ -3713,6 +3716,9 @@ let classify_inline_form (modal : Model.inline_modal_state) : inline_form_kind =
     | Nav.Github_token_form _
     | Nav.Code_finder_form
     | Nav.Code_search_form
+    | Nav.Keeper_control_confirm _
+    | Nav.Keeper_clear_form _
+    | Nav.Keeper_operator_note_form _
     | Nav.Runtime_lane_create
     | Nav.Runtime_lane_edit _
     | Nav.Runtime_lane_delete _
@@ -5107,6 +5113,121 @@ let submit_inline_modal ~now (m : Model.t) =
                       req = Cmd.Post_setup_login_input { login_id; input };
                     };
                 ] )
+          | Form_standard (Nav.Keeper_control_confirm { keeper; action }) -> (
+              let typed = String.trim (Model.modal_field_value ~key:"confirm" modal) in
+              if not (String.equal typed keeper) then
+                set_modal_error
+                  (Printf.sprintf "Confirmation mismatch: type %S exactly" keeper)
+              else
+                match action with
+                | Nav.Keeper_act_shutdown ->
+                    ( mark_submitting m
+                    , [
+                        Cmd.Http_post
+                          {
+                            epoch = m.epoch;
+                            req =
+                              Cmd.Post_keeper_control_lifecycle
+                                {
+                                  keeper;
+                                  action = `Shutdown;
+                                  expected_workspace = None;
+                                };
+                          };
+                      ] )
+                | Nav.Keeper_act_reset ->
+                    ( mark_submitting m
+                    , [
+                        Cmd.Http_post
+                          {
+                            epoch = m.epoch;
+                            req =
+                              Cmd.Post_keeper_control_lifecycle
+                                {
+                                  keeper;
+                                  action = `Reset;
+                                  expected_workspace = None;
+                                };
+                          };
+                      ] )
+                | Nav.Keeper_act_apply_purge ->
+                    ( mark_submitting m
+                    , [
+                        Cmd.Http_post
+                          {
+                            epoch = m.epoch;
+                            req =
+                              Cmd.Post_keeper_checkpoints
+                                { keeper; action = `Apply_purge };
+                          };
+                      ] )
+                | Nav.Keeper_act_delete_history ->
+                    let raw_ids =
+                      Model.modal_field_value ~key:"snapshot_ids" modal
+                    in
+                    let snapshot_ids =
+                      String.split_on_char ',' raw_ids
+                      |> List.map String.trim
+                      |> List.filter (fun s -> not (String.equal s ""))
+                    in
+                    if snapshot_ids = [] then
+                      set_modal_error "At least one snapshot_id is required"
+                    else
+                      ( mark_submitting m
+                      , [
+                          Cmd.Http_post
+                            {
+                              epoch = m.epoch;
+                              req =
+                                Cmd.Post_keeper_checkpoints
+                                  { keeper; action = `Delete_history snapshot_ids };
+                            };
+                        ] ))
+          | Form_standard (Nav.Keeper_clear_form keeper) -> (
+              let reason =
+                String.trim (Model.modal_field_value ~key:"reason" modal)
+              in
+              let typed =
+                String.trim (Model.modal_field_value ~key:"confirm" modal)
+              in
+              let pres_raw =
+                String.lowercase_ascii
+                  (String.trim
+                     (Model.modal_field_value ~key:"preserve_system_prompt" modal))
+              in
+              if not (String.equal typed keeper) then
+                set_modal_error
+                  (Printf.sprintf "Confirmation mismatch: type %S exactly" keeper)
+              else
+                match pres_raw with
+                | "true" | "false" ->
+                    let preserve_system_prompt = String.equal pres_raw "true" in
+                    ( mark_submitting m
+                    , [
+                        Cmd.Http_post
+                          {
+                            epoch = m.epoch;
+                            req =
+                              Cmd.Post_keeper_clear
+                                { keeper; reason; preserve_system_prompt };
+                          };
+                      ] )
+                | _ ->
+                    set_modal_error
+                      "preserve_system_prompt must be 'true' or 'false'")
+          | Form_standard (Nav.Keeper_operator_note_form keeper) ->
+              let text = String.trim (Model.modal_field_value ~key:"text" modal) in
+              if String.length text > 4096 then
+                set_modal_error "Operator note exceeds 4096-byte server cap"
+              else
+                ( mark_submitting m
+                , [
+                    Cmd.Http_post
+                      {
+                        epoch = m.epoch;
+                        req = Cmd.Post_keeper_operator_note { keeper; text };
+                      };
+                  ] )
           | Form_setup_login_start ->
               let integration_id =
                 String.trim
@@ -9448,6 +9569,9 @@ let apply_move (m : Model.t) dir =
                   | Nav.Github_token_form _
                   | Nav.Code_finder_form
                   | Nav.Code_search_form
+                  | Nav.Keeper_control_confirm _
+                  | Nav.Keeper_clear_form _
+                  | Nav.Keeper_operator_note_form _
                   | Nav.Runtime_lane_create
                   | Nav.Runtime_lane_edit _
                   | Nav.Runtime_lane_delete _
@@ -9488,6 +9612,9 @@ let apply_move (m : Model.t) dir =
               | Nav.Github_token_form _
               | Nav.Code_finder_form
               | Nav.Code_search_form
+              | Nav.Keeper_control_confirm _
+              | Nav.Keeper_clear_form _
+              | Nav.Keeper_operator_note_form _
               | Nav.Runtime_lane_create
               | Nav.Runtime_lane_edit _
               | Nav.Runtime_lane_delete _
@@ -9863,6 +9990,14 @@ let apply_move (m : Model.t) dir =
                                 1
                           in
                           max 0 (forecast_rows - avail)
+                    in
+                    Keeper_context_store.move_scroll ~keeper:name ~max_scroll
+                      ~delta:(scroll_delta dir) m.keeper_context
+                | Keeper_context_store.Ctx_flow ->
+                    let max_scroll =
+                      max 0
+                        (Keeper_context_store.flow_estimated_rows ks
+                        - max 1 body_h)
                     in
                     Keeper_context_store.move_scroll ~keeper:name ~max_scroll
                       ~delta:(scroll_delta dir) m.keeper_context

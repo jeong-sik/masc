@@ -1011,6 +1011,9 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Code_finder_form
         | Nav.Code_search_form
         | Nav.Github_token_form _
+        | Nav.Keeper_control_confirm _
+        | Nav.Keeper_clear_form _
+        | Nav.Keeper_operator_note_form _
         | Nav.Runtime_lane_create
         | Nav.Runtime_lane_edit _
         | Nav.Runtime_lane_delete _
@@ -1103,6 +1106,9 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Code_finder_form
             | Nav.Code_search_form
             | Nav.Github_token_form _
+            | Nav.Keeper_control_confirm _
+            | Nav.Keeper_clear_form _
+            | Nav.Keeper_operator_note_form _
             | Nav.Runtime_lane_create
             | Nav.Runtime_lane_edit _
             | Nav.Runtime_lane_delete _
@@ -1200,6 +1206,9 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Board_comment _
         | Nav.Github_token_form _
         | Nav.Code_finder_form
+        | Nav.Keeper_control_confirm _
+        | Nav.Keeper_clear_form _
+        | Nav.Keeper_operator_note_form _
         | Nav.Code_search_form
         | Nav.Runtime_lane_create
         | Nav.Runtime_lane_edit _
@@ -1301,6 +1310,9 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
+            | Nav.Keeper_control_confirm _
+            | Nav.Keeper_clear_form _
+            | Nav.Keeper_operator_note_form _
             | Nav.Code_search_form
             | Nav.Runtime_lane_create
             | Nav.Runtime_lane_edit _
@@ -2172,6 +2184,745 @@ let apply_http_reply ~now (m : Model.t) reply =
               m.keeper_context
       in
       ({ m with keeper_context }, [])
+  | Msg.Reply_keeper_turn_flow { keeper; turn_ref; result = Ok flow } ->
+      ( {
+          m with
+          keeper_context =
+            Keeper_context_store.apply_turn_flow ~observed_at:now ~keeper
+              ~turn_ref flow m.keeper_context;
+        }
+      , [] )
+  | Msg.Reply_keeper_turn_flow { keeper; turn_ref; result = Error err } -> (
+      match err with
+      | Msg.Http_error { status = 404; _ } ->
+          ( {
+              m with
+              keeper_context =
+                Keeper_context_store.mark_turn_flow_absent ~keeper ~turn_ref
+                  m.keeper_context;
+            }
+          , [] )
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply
+            ~fail:(fun m ->
+              {
+                m with
+                keeper_context =
+                  Keeper_context_store.mark_turn_flow_failed ~at:now ~keeper
+                    ~turn_ref ~reason:(Msg.http_error_detail err)
+                    ~retryable:(Msg.http_error_retryable err) m.keeper_context;
+              })
+            ~source:(Health.Source_keeper keeper) ~ko:"턴 흐름 트레이스 조회"
+            ~en:"Turn flow trace fetch" err)
+  | Msg.Reply_keeper_checkpoints { keeper; result = Ok inv } ->
+      ( {
+          m with
+          keeper_context =
+            Keeper_context_store.apply_checkpoints ~observed_at:now ~keeper inv
+              m.keeper_context;
+        }
+      , [] )
+  | Msg.Reply_keeper_checkpoints { keeper; result = Error err } -> (
+      match err with
+      | Msg.Http_error { status = 401 | 403; _ } ->
+          ( {
+              m with
+              keeper_context =
+                Keeper_context_store.mark_checkpoints_denied ~at:now ~keeper
+                  ~reason:(Msg.http_error_detail err) m.keeper_context;
+            }
+          , [] )
+      | Msg.Http_error { status = 404; _ } ->
+          ( {
+              m with
+              keeper_context =
+                Keeper_context_store.mark_checkpoints_absent ~keeper
+                  m.keeper_context;
+            }
+          , [] )
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply
+            ~fail:(fun m ->
+              {
+                m with
+                keeper_context =
+                  Keeper_context_store.mark_checkpoints_failed ~at:now ~keeper
+                    ~reason:(Msg.http_error_detail err)
+                    ~retryable:(Msg.http_error_retryable err) m.keeper_context;
+              })
+            ~source:(Health.Source_keeper keeper) ~ko:"키퍼 체크포인트 조회"
+            ~en:"Keeper checkpoints fetch" err)
+  | Msg.Reply_keeper_checkpoint_purge { keeper; result = Ok res } ->
+      let keeper_context =
+        Keeper_context_store.apply_purge_result ~observed_at:now ~keeper res
+          m.keeper_context
+      in
+      let rpt = res.report in
+      let msg =
+        if res.applied then
+          Say.make
+            ~ko:
+              (Printf.sprintf "체크포인트 정리 적용됨 (%s): %d→%d msgs, -%dB"
+                 keeper rpt.messages_before rpt.messages_after rpt.bytes_removed)
+            ~en:
+              (Printf.sprintf "Checkpoint purge applied (%s): %d→%d msgs, -%dB"
+                 keeper rpt.messages_before rpt.messages_after rpt.bytes_removed)
+        else
+          Say.make
+            ~ko:
+              (Printf.sprintf
+                 "체크포인트 정리 미리보기 (%s): %d→%d msgs, -%dB (apply=%b)"
+                 keeper rpt.messages_before rpt.messages_after rpt.bytes_removed
+                 res.apply_allowed)
+            ~en:
+              (Printf.sprintf
+                 "Checkpoint purge preview (%s): %d→%d msgs, -%dB (apply=%b)"
+                 keeper rpt.messages_before rpt.messages_after rpt.bytes_removed
+                 res.apply_allowed)
+      in
+      let matches_purge_modal (kind : Nav.inline_action_kind) =
+        match kind with
+        | Nav.Keeper_control_confirm
+            { keeper = k; action = Nav.Keeper_act_apply_purge } ->
+            String.equal k keeper
+        | Nav.Keeper_control_confirm
+            {
+              action =
+                ( Nav.Keeper_act_shutdown
+                | Nav.Keeper_act_reset
+                | Nav.Keeper_act_delete_history );
+              _;
+            }
+        | Nav.Btw_query
+        | Nav.Gate_reject _
+        | Nav.Verification_reject _
+        | Nav.Harness_overrule _
+        | Nav.Task_cancel _
+        | Nav.Goal_drop _
+        | Nav.Schedule_form
+        | Nav.Connector_form
+        | Nav.Repo_add_form
+        | Nav.Board_new_post
+        | Nav.Board_comment _
+        | Nav.Github_token_form _
+        | Nav.Code_finder_form
+        | Nav.Runtime_lane_create
+        | Nav.Task_create_form
+        | Nav.Addon_attach_form
+        | Nav.Runtime_lane_edit _
+        | Nav.Runtime_lane_delete _
+        | Nav.Task_transition_form _
+        | Nav.Task_link_goal _
+        | Nav.Goal_upsert_form _
+        | Nav.Board_delete_post _
+        | Nav.Keeper_lifecycle_form _
+        | Nav.Keeper_purge_confirm _
+        | Nav.Addon_detach_confirm _
+        | Nav.Addon_invoke_action _
+        | Nav.Setup_login_input_form _
+        | Nav.Code_search_form
+        | Nav.Keeper_clear_form _
+        | Nav.Keeper_operator_note_form _ ->
+            false
+      in
+      let close_modal =
+        match m.inline_modal with
+        | Some modal -> matches_purge_modal modal.kind
+        | None -> false
+      in
+      let nav =
+        if close_modal then { m.nav with overlay = None } else m.nav
+      in
+      let inline_modal = if close_modal then None else m.inline_modal in
+      let refetch_cmds =
+        match res.inventory with
+        | Some _ -> []
+        | None ->
+            [
+              Cmd.Http_get
+                { epoch = m.epoch; req = Cmd.Get_keeper_checkpoints { keeper } };
+            ]
+      in
+      ( { m with nav; inline_modal; keeper_context }
+        |> Model.with_toast ~now ~level:Model.Toast_success msg
+      , refetch_cmds )
+  | Msg.Reply_keeper_checkpoint_purge { keeper; result = Error err } ->
+      let inline_modal =
+        Option.map
+          (fun (modal : Model.inline_modal_state) ->
+            match modal.kind with
+            | Nav.Keeper_control_confirm
+                { keeper = k; action = Nav.Keeper_act_apply_purge } ->
+                if String.equal k keeper then
+                  {
+                    modal with
+                    submitting = false;
+                    error = Some (Msg.http_error_detail err);
+                  }
+                else modal
+            | Nav.Keeper_control_confirm
+                {
+                  action =
+                    ( Nav.Keeper_act_shutdown
+                    | Nav.Keeper_act_reset
+                    | Nav.Keeper_act_delete_history );
+                  _;
+                }
+            | Nav.Btw_query
+            | Nav.Gate_reject _
+            | Nav.Verification_reject _
+            | Nav.Harness_overrule _
+            | Nav.Task_cancel _
+            | Nav.Goal_drop _
+            | Nav.Schedule_form
+            | Nav.Connector_form
+            | Nav.Repo_add_form
+            | Nav.Board_new_post
+            | Nav.Board_comment _
+            | Nav.Github_token_form _
+            | Nav.Code_finder_form
+            | Nav.Runtime_lane_create
+            | Nav.Task_create_form
+            | Nav.Addon_attach_form
+            | Nav.Runtime_lane_edit _
+            | Nav.Runtime_lane_delete _
+            | Nav.Task_transition_form _
+            | Nav.Task_link_goal _
+            | Nav.Goal_upsert_form _
+            | Nav.Board_delete_post _
+            | Nav.Keeper_lifecycle_form _
+            | Nav.Keeper_purge_confirm _
+            | Nav.Addon_detach_confirm _
+            | Nav.Addon_invoke_action _
+            | Nav.Setup_login_input_form _
+            | Nav.Code_search_form
+            | Nav.Keeper_clear_form _
+            | Nav.Keeper_operator_note_form _ ->
+                modal)
+          m.inline_modal
+      in
+      let next, cmds =
+        record_http_incident ~now ~source:(Health.Source_keeper keeper)
+          ~context:
+            (Say.make ~ko:"체크포인트 정리" ~en:"Checkpoint purge")
+          err { m with inline_modal }
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , cmds )
+  | Msg.Reply_keeper_checkpoint_delete { keeper; result = Ok res } ->
+      let keeper_context =
+        match res.inventory with
+        | Some inv ->
+            Keeper_context_store.apply_checkpoints ~observed_at:now ~keeper inv
+              m.keeper_context
+        | None -> m.keeper_context
+      in
+      let close_modal =
+        match m.inline_modal with
+        | Some
+            {
+              kind =
+                Nav.Keeper_control_confirm
+                  { keeper = k; action = Nav.Keeper_act_delete_history };
+              _;
+            } ->
+            String.equal k keeper
+        | Some
+            {
+              kind =
+                ( Nav.Keeper_control_confirm
+                    {
+                      action =
+                        ( Nav.Keeper_act_shutdown
+                        | Nav.Keeper_act_reset
+                        | Nav.Keeper_act_apply_purge );
+                      _;
+                    }
+                | Nav.Btw_query
+                | Nav.Gate_reject _
+                | Nav.Verification_reject _
+                | Nav.Harness_overrule _
+                | Nav.Task_cancel _
+                | Nav.Goal_drop _
+                | Nav.Schedule_form
+                | Nav.Connector_form
+                | Nav.Repo_add_form
+                | Nav.Board_new_post
+                | Nav.Board_comment _
+                | Nav.Github_token_form _
+                | Nav.Code_finder_form
+                | Nav.Runtime_lane_create
+                | Nav.Task_create_form
+                | Nav.Addon_attach_form
+                | Nav.Runtime_lane_edit _
+                | Nav.Runtime_lane_delete _
+                | Nav.Task_transition_form _
+                | Nav.Task_link_goal _
+                | Nav.Goal_upsert_form _
+                | Nav.Board_delete_post _
+                | Nav.Keeper_lifecycle_form _
+                | Nav.Keeper_purge_confirm _
+                | Nav.Addon_detach_confirm _
+                | Nav.Addon_invoke_action _
+                | Nav.Setup_login_input_form _
+                | Nav.Code_search_form
+                | Nav.Keeper_clear_form _
+                | Nav.Keeper_operator_note_form _ );
+              _;
+            }
+        | None ->
+            false
+      in
+      let nav =
+        if close_modal then { m.nav with overlay = None } else m.nav
+      in
+      let inline_modal = if close_modal then None else m.inline_modal in
+      let msg =
+        Say.make
+          ~ko:
+            (Printf.sprintf "체크포인트 이력 삭제 (%s): 삭제 %d · 누락 %d · 거부 %d"
+               keeper (List.length res.deleted) (List.length res.missing)
+               (List.length res.refused))
+          ~en:
+            (Printf.sprintf "Checkpoint history delete (%s): deleted %d · missing %d · refused %d"
+               keeper (List.length res.deleted) (List.length res.missing)
+               (List.length res.refused))
+      in
+      let refetch_cmds =
+        match res.inventory with
+        | Some _ -> []
+        | None ->
+            [
+              Cmd.Http_get
+                { epoch = m.epoch; req = Cmd.Get_keeper_checkpoints { keeper } };
+            ]
+      in
+      ( { m with nav; inline_modal; keeper_context }
+        |> Model.with_toast ~now ~level:Model.Toast_success msg
+      , refetch_cmds )
+  | Msg.Reply_keeper_checkpoint_delete { keeper; result = Error err } ->
+      let inline_modal =
+        Option.map
+          (fun (modal : Model.inline_modal_state) ->
+            match modal.kind with
+            | Nav.Keeper_control_confirm
+                { keeper = k; action = Nav.Keeper_act_delete_history } ->
+                if String.equal k keeper then
+                  {
+                    modal with
+                    submitting = false;
+                    error = Some (Msg.http_error_detail err);
+                  }
+                else modal
+            | Nav.Keeper_control_confirm
+                {
+                  action =
+                    ( Nav.Keeper_act_shutdown
+                    | Nav.Keeper_act_reset
+                    | Nav.Keeper_act_apply_purge );
+                  _;
+                }
+            | Nav.Btw_query
+            | Nav.Gate_reject _
+            | Nav.Verification_reject _
+            | Nav.Harness_overrule _
+            | Nav.Task_cancel _
+            | Nav.Goal_drop _
+            | Nav.Schedule_form
+            | Nav.Connector_form
+            | Nav.Repo_add_form
+            | Nav.Board_new_post
+            | Nav.Board_comment _
+            | Nav.Github_token_form _
+            | Nav.Code_finder_form
+            | Nav.Runtime_lane_create
+            | Nav.Task_create_form
+            | Nav.Addon_attach_form
+            | Nav.Runtime_lane_edit _
+            | Nav.Runtime_lane_delete _
+            | Nav.Task_transition_form _
+            | Nav.Task_link_goal _
+            | Nav.Goal_upsert_form _
+            | Nav.Board_delete_post _
+            | Nav.Keeper_lifecycle_form _
+            | Nav.Keeper_purge_confirm _
+            | Nav.Addon_detach_confirm _
+            | Nav.Addon_invoke_action _
+            | Nav.Setup_login_input_form _
+            | Nav.Code_search_form
+            | Nav.Keeper_clear_form _
+            | Nav.Keeper_operator_note_form _ ->
+                modal)
+          m.inline_modal
+      in
+      let next, cmds =
+        record_http_incident ~now ~source:(Health.Source_keeper keeper)
+          ~context:
+            (Say.make ~ko:"체크포인트 이력 삭제" ~en:"Checkpoint history delete")
+          err { m with inline_modal }
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , cmds )
+  | Msg.Reply_keeper_operator_note_loaded { keeper; result = Ok note } ->
+      let keeper_context =
+        Keeper_context_store.apply_operator_note ~observed_at:now ~keeper note
+          m.keeper_context
+      in
+      let inline_modal =
+        Option.map
+          (fun (modal : Model.inline_modal_state) ->
+            match modal.kind with
+            | Nav.Keeper_operator_note_form k
+              when String.equal k keeper && (not modal.submitting) && note.pending
+              ->
+                let fields =
+                  List.map
+                    (fun (f : Model.modal_form_field) ->
+                      if
+                        String.equal f.key "text"
+                        && String.equal (String.trim f.value) ""
+                      then { f with value = note.text }
+                      else f)
+                    modal.fields
+                in
+                { modal with fields }
+            | Nav.Keeper_operator_note_form _
+            | Nav.Btw_query
+            | Nav.Gate_reject _
+            | Nav.Verification_reject _
+            | Nav.Harness_overrule _
+            | Nav.Task_cancel _
+            | Nav.Goal_drop _
+            | Nav.Schedule_form
+            | Nav.Connector_form
+            | Nav.Repo_add_form
+            | Nav.Board_new_post
+            | Nav.Board_comment _
+            | Nav.Github_token_form _
+            | Nav.Code_finder_form
+            | Nav.Runtime_lane_create
+            | Nav.Task_create_form
+            | Nav.Addon_attach_form
+            | Nav.Runtime_lane_edit _
+            | Nav.Runtime_lane_delete _
+            | Nav.Task_transition_form _
+            | Nav.Task_link_goal _
+            | Nav.Goal_upsert_form _
+            | Nav.Board_delete_post _
+            | Nav.Keeper_lifecycle_form _
+            | Nav.Keeper_purge_confirm _
+            | Nav.Addon_detach_confirm _
+            | Nav.Addon_invoke_action _
+            | Nav.Setup_login_input_form _
+            | Nav.Code_search_form
+            | Nav.Keeper_control_confirm _
+            | Nav.Keeper_clear_form _ ->
+                modal)
+          m.inline_modal
+      in
+      ({ m with inline_modal; keeper_context }, [])
+  | Msg.Reply_keeper_operator_note_loaded { keeper; result = Error err } -> (
+      match err with
+      | Msg.Http_error { status = 404; _ } ->
+          ( {
+              m with
+              keeper_context =
+                Keeper_context_store.mark_operator_note_absent ~keeper
+                  m.keeper_context;
+            }
+          , [] )
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply
+            ~fail:(fun m ->
+              {
+                m with
+                keeper_context =
+                  Keeper_context_store.mark_operator_note_failed ~at:now ~keeper
+                    ~reason:(Msg.http_error_detail err)
+                    ~retryable:(Msg.http_error_retryable err) m.keeper_context;
+              })
+            ~source:(Health.Source_keeper keeper) ~ko:"운영자 노트 조회"
+            ~en:"Operator note fetch" err)
+  | Msg.Reply_keeper_operator_note_saved { keeper; result = Ok note } ->
+      let close_modal =
+        match m.inline_modal with
+        | Some { kind = Nav.Keeper_operator_note_form k; _ } ->
+            String.equal k keeper
+        | Some
+            {
+              kind =
+                ( Nav.Btw_query
+                | Nav.Gate_reject _
+                | Nav.Verification_reject _
+                | Nav.Harness_overrule _
+                | Nav.Task_cancel _
+                | Nav.Goal_drop _
+                | Nav.Schedule_form
+                | Nav.Connector_form
+                | Nav.Repo_add_form
+                | Nav.Board_new_post
+                | Nav.Board_comment _
+                | Nav.Github_token_form _
+                | Nav.Code_finder_form
+                | Nav.Runtime_lane_create
+                | Nav.Task_create_form
+                | Nav.Addon_attach_form
+                | Nav.Runtime_lane_edit _
+                | Nav.Runtime_lane_delete _
+                | Nav.Task_transition_form _
+                | Nav.Task_link_goal _
+                | Nav.Goal_upsert_form _
+                | Nav.Board_delete_post _
+                | Nav.Keeper_lifecycle_form _
+                | Nav.Keeper_purge_confirm _
+                | Nav.Addon_detach_confirm _
+                | Nav.Addon_invoke_action _
+                | Nav.Setup_login_input_form _
+                | Nav.Code_search_form
+                | Nav.Keeper_control_confirm _
+                | Nav.Keeper_clear_form _ );
+              _;
+            }
+        | None ->
+            false
+      in
+      let nav =
+        if close_modal then { m.nav with overlay = None } else m.nav
+      in
+      let inline_modal = if close_modal then None else m.inline_modal in
+      let keeper_context =
+        Keeper_context_store.apply_operator_note ~observed_at:now ~keeper note
+          m.keeper_context
+      in
+      let next =
+        { m with nav; inline_modal; keeper_context }
+        |> Model.with_toast ~now ~level:Model.Toast_success
+             (Say.make ~ko:("운영자 노트 저장됨: " ^ keeper)
+                ~en:("Operator note saved: " ^ keeper))
+      in
+      (next, [])
+  | Msg.Reply_keeper_operator_note_saved { keeper; result = Error err } ->
+      let inline_modal =
+        Option.map
+          (fun (modal : Model.inline_modal_state) ->
+            match modal.kind with
+            | Nav.Keeper_operator_note_form k when String.equal k keeper ->
+                {
+                  modal with
+                  submitting = false;
+                  error = Some (Msg.http_error_detail err);
+                }
+            | Nav.Keeper_operator_note_form _
+            | Nav.Btw_query
+            | Nav.Gate_reject _
+            | Nav.Verification_reject _
+            | Nav.Harness_overrule _
+            | Nav.Task_cancel _
+            | Nav.Goal_drop _
+            | Nav.Schedule_form
+            | Nav.Connector_form
+            | Nav.Repo_add_form
+            | Nav.Board_new_post
+            | Nav.Board_comment _
+            | Nav.Github_token_form _
+            | Nav.Code_finder_form
+            | Nav.Runtime_lane_create
+            | Nav.Task_create_form
+            | Nav.Addon_attach_form
+            | Nav.Runtime_lane_edit _
+            | Nav.Runtime_lane_delete _
+            | Nav.Task_transition_form _
+            | Nav.Task_link_goal _
+            | Nav.Goal_upsert_form _
+            | Nav.Board_delete_post _
+            | Nav.Keeper_lifecycle_form _
+            | Nav.Keeper_purge_confirm _
+            | Nav.Addon_detach_confirm _
+            | Nav.Addon_invoke_action _
+            | Nav.Setup_login_input_form _
+            | Nav.Code_search_form
+            | Nav.Keeper_control_confirm _
+            | Nav.Keeper_clear_form _ ->
+                modal)
+          m.inline_modal
+      in
+      let next, cmds =
+        record_http_incident ~now ~source:(Health.Source_keeper keeper)
+          ~context:(Say.make ~ko:"운영자 노트 저장" ~en:"Operator note save")
+          err { m with inline_modal }
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , cmds )
+  | Msg.Reply_keeper_control { keeper; label; refresh_roster; result = Ok () } ->
+      let close_ctl =
+        match m.inline_modal with
+        | Some
+            {
+              kind =
+                Nav.Keeper_control_confirm
+                  {
+                    keeper = k;
+                    action = Nav.Keeper_act_shutdown | Nav.Keeper_act_reset;
+                  };
+              _;
+            } ->
+            String.equal k keeper
+        | Some { kind = Nav.Keeper_clear_form k; _ } -> String.equal k keeper
+        | Some
+            {
+              kind =
+                ( Nav.Keeper_control_confirm
+                    {
+                      action =
+                        Nav.Keeper_act_apply_purge | Nav.Keeper_act_delete_history;
+                      _;
+                    }
+                | Nav.Btw_query
+                | Nav.Gate_reject _
+                | Nav.Verification_reject _
+                | Nav.Harness_overrule _
+                | Nav.Task_cancel _
+                | Nav.Goal_drop _
+                | Nav.Schedule_form
+                | Nav.Connector_form
+                | Nav.Repo_add_form
+                | Nav.Board_new_post
+                | Nav.Board_comment _
+                | Nav.Github_token_form _
+                | Nav.Code_finder_form
+                | Nav.Runtime_lane_create
+                | Nav.Task_create_form
+                | Nav.Addon_attach_form
+                | Nav.Runtime_lane_edit _
+                | Nav.Runtime_lane_delete _
+                | Nav.Task_transition_form _
+                | Nav.Task_link_goal _
+                | Nav.Goal_upsert_form _
+                | Nav.Board_delete_post _
+                | Nav.Keeper_lifecycle_form _
+                | Nav.Keeper_purge_confirm _
+                | Nav.Addon_detach_confirm _
+                | Nav.Addon_invoke_action _
+                | Nav.Setup_login_input_form _
+                | Nav.Code_search_form
+                | Nav.Keeper_operator_note_form _ );
+              _;
+            }
+        | None ->
+            false
+      in
+      let nav = if close_ctl then { m.nav with overlay = None } else m.nav in
+      let inline_modal = if close_ctl then None else m.inline_modal in
+      let keeper_context =
+        Keeper_context_store.mark_keeper_context_stale ~keeper m.keeper_context
+      in
+      let next =
+        { m with nav; inline_modal; keeper_context }
+        |> Model.with_toast ~now ~level:Model.Toast_success label
+      in
+      let ks_cur = Keeper_context_store.get_keeper ~keeper keeper_context in
+      let cmds =
+        (if refresh_roster then
+           [
+             Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_keepers_roster };
+             Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_dashboard_shell };
+           ]
+         else [])
+        @ [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_keeper_turns } ]
+        @ (if ks_cur.checkpoints_auth_denied then []
+           else
+             [
+               Cmd.Http_get
+                 { epoch = m.epoch; req = Cmd.Get_keeper_checkpoints { keeper } };
+             ])
+        @ [
+            Cmd.Http_get
+              {
+                epoch = m.epoch;
+                req =
+                  Cmd.Get_keeper_context_turn_records
+                    { keeper; limit = Some 50; turn_ref = None };
+              };
+          ]
+      in
+      (next, cmds)
+  | Msg.Reply_keeper_control { keeper; label; refresh_roster = _; result = Error err }
+    ->
+      let inline_modal =
+        Option.map
+          (fun (modal : Model.inline_modal_state) ->
+            match modal.kind with
+            | Nav.Keeper_control_confirm
+                {
+                  keeper = k;
+                  action = Nav.Keeper_act_shutdown | Nav.Keeper_act_reset;
+                } ->
+                if String.equal k keeper then
+                  {
+                    modal with
+                    submitting = false;
+                    error = Some (Msg.http_error_detail err);
+                  }
+                else modal
+            | Nav.Keeper_clear_form k ->
+                if String.equal k keeper then
+                  {
+                    modal with
+                    submitting = false;
+                    error = Some (Msg.http_error_detail err);
+                  }
+                else modal
+            | Nav.Keeper_control_confirm
+                {
+                  action =
+                    Nav.Keeper_act_apply_purge | Nav.Keeper_act_delete_history;
+                  _;
+                }
+            | Nav.Btw_query
+            | Nav.Gate_reject _
+            | Nav.Verification_reject _
+            | Nav.Harness_overrule _
+            | Nav.Task_cancel _
+            | Nav.Goal_drop _
+            | Nav.Schedule_form
+            | Nav.Connector_form
+            | Nav.Repo_add_form
+            | Nav.Board_new_post
+            | Nav.Board_comment _
+            | Nav.Github_token_form _
+            | Nav.Code_finder_form
+            | Nav.Runtime_lane_create
+            | Nav.Task_create_form
+            | Nav.Addon_attach_form
+            | Nav.Runtime_lane_edit _
+            | Nav.Runtime_lane_delete _
+            | Nav.Task_transition_form _
+            | Nav.Task_link_goal _
+            | Nav.Goal_upsert_form _
+            | Nav.Board_delete_post _
+            | Nav.Keeper_lifecycle_form _
+            | Nav.Keeper_purge_confirm _
+            | Nav.Addon_detach_confirm _
+            | Nav.Addon_invoke_action _
+            | Nav.Setup_login_input_form _
+            | Nav.Code_search_form
+            | Nav.Keeper_operator_note_form _ ->
+                modal)
+          m.inline_modal
+      in
+      let next, cmds =
+        record_http_incident ~now ~source:(Health.Source_keeper keeper)
+          ~context:label err { m with inline_modal }
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , cmds )
   | Msg.Reply_keeper_tool_calls { keeper; turn_ref; result = Error err } -> (
       match err with
       | Msg.Http_error { status = 401 | 403; _ } ->
@@ -2568,6 +3319,9 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Board_comment _
         | Nav.Github_token_form _
         | Nav.Code_finder_form
+        | Nav.Keeper_control_confirm _
+        | Nav.Keeper_clear_form _
+        | Nav.Keeper_operator_note_form _
         | Nav.Code_search_form
         | Nav.Task_create_form
         | Nav.Task_transition_form _
@@ -2672,6 +3426,9 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Board_comment _
         | Nav.Github_token_form _
         | Nav.Code_finder_form
+        | Nav.Keeper_control_confirm _
+        | Nav.Keeper_clear_form _
+        | Nav.Keeper_operator_note_form _
         | Nav.Code_search_form
         | Nav.Task_create_form
         | Nav.Task_transition_form _
@@ -3211,6 +3968,9 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Board_comment _
         | Nav.Github_token_form _
         | Nav.Code_finder_form
+        | Nav.Keeper_control_confirm _
+        | Nav.Keeper_clear_form _
+        | Nav.Keeper_operator_note_form _
         | Nav.Code_search_form
         | Nav.Runtime_lane_create
         | Nav.Runtime_lane_edit _
@@ -3298,6 +4058,9 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
+            | Nav.Keeper_control_confirm _
+            | Nav.Keeper_clear_form _
+            | Nav.Keeper_operator_note_form _
             | Nav.Code_search_form
             | Nav.Runtime_lane_create
             | Nav.Runtime_lane_edit _
@@ -3561,6 +4324,9 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Github_token_form _
             | Nav.Code_finder_form
             | Nav.Code_search_form
+            | Nav.Keeper_control_confirm _
+            | Nav.Keeper_clear_form _
+            | Nav.Keeper_operator_note_form _
             | Nav.Runtime_lane_create
             | Nav.Runtime_lane_edit _
             | Nav.Runtime_lane_delete _
@@ -3593,6 +4359,9 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
+            | Nav.Keeper_control_confirm _
+            | Nav.Keeper_clear_form _
+            | Nav.Keeper_operator_note_form _
             | Nav.Code_search_form
             | Nav.Runtime_lane_create
             | Nav.Runtime_lane_edit _
@@ -3625,6 +4394,9 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
+            | Nav.Keeper_control_confirm _
+            | Nav.Keeper_clear_form _
+            | Nav.Keeper_operator_note_form _
             | Nav.Code_search_form
             | Nav.Runtime_lane_create
             | Nav.Runtime_lane_edit _
@@ -3654,6 +4426,9 @@ let apply_http_reply ~now (m : Model.t) reply =
              | Nav.Github_token_form _
              | Nav.Code_finder_form
              | Nav.Code_search_form
+             | Nav.Keeper_control_confirm _
+             | Nav.Keeper_clear_form _
+             | Nav.Keeper_operator_note_form _
              | Nav.Runtime_lane_create
              | Nav.Runtime_lane_edit _
              | Nav.Runtime_lane_delete _
@@ -3748,6 +4523,9 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Github_token_form _
             | Nav.Code_finder_form
             | Nav.Code_search_form
+            | Nav.Keeper_control_confirm _
+            | Nav.Keeper_clear_form _
+            | Nav.Keeper_operator_note_form _
             | Nav.Runtime_lane_create
             | Nav.Runtime_lane_edit _
             | Nav.Runtime_lane_delete _
@@ -3780,6 +4558,9 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
+            | Nav.Keeper_control_confirm _
+            | Nav.Keeper_clear_form _
+            | Nav.Keeper_operator_note_form _
             | Nav.Code_search_form
             | Nav.Runtime_lane_create
             | Nav.Runtime_lane_edit _
@@ -3812,6 +4593,9 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
+            | Nav.Keeper_control_confirm _
+            | Nav.Keeper_clear_form _
+            | Nav.Keeper_operator_note_form _
             | Nav.Code_search_form
             | Nav.Runtime_lane_create
             | Nav.Runtime_lane_edit _
@@ -3841,6 +4625,9 @@ let apply_http_reply ~now (m : Model.t) reply =
              | Nav.Github_token_form _
              | Nav.Code_finder_form
              | Nav.Code_search_form
+             | Nav.Keeper_control_confirm _
+             | Nav.Keeper_clear_form _
+             | Nav.Keeper_operator_note_form _
              | Nav.Runtime_lane_create
              | Nav.Runtime_lane_edit _
              | Nav.Runtime_lane_delete _

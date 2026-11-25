@@ -121,7 +121,8 @@ let timeout_sec_for_get : Cmd.get_request -> float = function
   | Cmd.Get_oauth_providers
   | Cmd.Get_oauth_attached_tools _
   | Cmd.Get_oauth_attempt_status _
-  | Cmd.Get_board_quarantines _ ->
+  | Cmd.Get_board_quarantines _
+  | Cmd.Get_keeper_operator_note _ ->
       standard_timeout_sec
   (* Heavy tier: dashboard/analytics aggregates, disk/git/ripgrep scans,
      memory/keeper context & history reads, probes, and published artifacts *)
@@ -206,7 +207,9 @@ let timeout_sec_for_get : Cmd.get_request -> float = function
   | Cmd.Get_github_identity _
   | Cmd.Get_addon_package_catalog _
   | Cmd.Get_addon_package_preview _
-  | Cmd.Get_connector_names _ ->
+  | Cmd.Get_connector_names _
+  | Cmd.Get_keeper_turn_flow _
+  | Cmd.Get_keeper_checkpoints _ ->
       heavy_timeout_sec
 
 let timeout_sec_for_post : Cmd.post_request -> float = function
@@ -251,7 +254,10 @@ let timeout_sec_for_post : Cmd.post_request -> float = function
   | Cmd.Post_harness_overrule _
   | Cmd.Post_oauth_identity_switch _
   | Cmd.Post_oauth_disconnect _
-  | Cmd.Post_board_recovery _ ->
+  | Cmd.Post_board_recovery _
+  | Cmd.Post_keeper_directive _
+  | Cmd.Post_keeper_operator_note _
+  | Cmd.Post_keeper_run_next _ ->
       standard_timeout_sec
   (* Heavy tier: probes, fusion launches, config patches, memory recovery,
      OAuth/GitHub/repo/browser CLI or external-service calls *)
@@ -264,7 +270,10 @@ let timeout_sec_for_post : Cmd.post_request -> float = function
   | Cmd.Post_browser_tabs _
   | Cmd.Post_setup_login_start _
   | Cmd.Post_repo_add _
-  | Cmd.Post_github_token _ ->
+  | Cmd.Post_github_token _
+  | Cmd.Post_keeper_control_lifecycle _
+  | Cmd.Post_keeper_clear _
+  | Cmd.Post_keeper_checkpoints _ ->
       heavy_timeout_sec
 
 let stream_spec_of_id = function
@@ -712,7 +721,77 @@ let post_ack ~timeout_sec t ~path ~body =
       ~content_type:"application/json" ~body:body_str ep ~path
   with
   | Error err -> Error (msg_error_of_http err)
-  | Ok _ -> Ok ()
+  | Ok raw -> (
+      let trimmed = String.trim raw in
+      if String.equal trimmed "" then Ok ()
+      else
+        match Yojson.Safe.from_string trimmed with
+        | exception Yojson.Json_error _ -> Ok ()
+        | `Assoc fields -> (
+            let ok_false =
+              match List.assoc_opt "ok" fields with
+              | Some (`Bool false) -> true
+              | Some
+                  ( `Bool true
+                  | `Null
+                  | `Int _
+                  | `Intlit _
+                  | `Float _
+                  | `String _
+                  | `List _
+                  | `Assoc _ )
+              | None ->
+                  false
+            in
+            let err_str key =
+              match List.assoc_opt key fields with
+              | Some (`String s) when not (String.equal (String.trim s) "") ->
+                  Some (String.trim s)
+              | Some
+                  ( `String _
+                  | `Null
+                  | `Bool _
+                  | `Int _
+                  | `Intlit _
+                  | `Float _
+                  | `List _
+                  | `Assoc _ )
+              | None ->
+                  None
+            in
+            match (ok_false, err_str "error", err_str "error_code") with
+            | true, Some e, _ -> Error (Msg.Decode_error e)
+            | true, None, Some code -> (
+                let detail =
+                  match err_str "detail" with
+                  | Some d -> code ^ ": " ^ d
+                  | None -> code
+                in
+                Error (Msg.Decode_error detail))
+            | true, None, None -> (
+                let proj =
+                  match err_str "projection" with
+                  | Some p -> "operation incomplete: " ^ p
+                  | None -> "server reported ok=false"
+                in
+                Error (Msg.Decode_error proj))
+            | false, _, Some code -> (
+                let detail =
+                  match err_str "detail" with
+                  | Some d -> code ^ ": " ^ d
+                  | None -> code
+                in
+                Error (Msg.Decode_error detail))
+            | false, Some e, None -> Error (Msg.Decode_error e)
+            | false, None, None -> Ok ())
+        | `Null
+        | `Bool _
+        | `Int _
+        | `Intlit _
+        | `Float _
+        | `String _
+        | `List _ ->
+            Ok ())
 
 let fork_safe t fn =
   if Atomic.get t.closed then ()
@@ -891,7 +970,10 @@ let get_request_keys ~epoch ~path ~requested_at (req : Cmd.get_request) =
   | Cmd.Get_github_identity _
   | Cmd.Get_addon_package_catalog _
   | Cmd.Get_addon_package_preview _
-  | Cmd.Get_connector_names _ ->
+  | Cmd.Get_connector_names _
+  | Cmd.Get_keeper_turn_flow _
+  | Cmd.Get_keeper_checkpoints _
+  | Cmd.Get_keeper_operator_note _ ->
       Some base, Key_get path
 
 let rec execute_get t ~epoch req =
@@ -1962,6 +2044,43 @@ let rec execute_get t ~epoch req =
                 }
             in
             Msg.Http_reply { epoch; reply }
+        | Cmd.Get_keeper_turn_flow { keeper; trace_id; turn_id; turn_ref } ->
+            let reply =
+              Msg.Reply_keeper_turn_flow
+                {
+                  keeper;
+                  turn_ref;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:
+                        (Wire_keeper_context.decode_turn_flow ~keeper ~trace_id
+                           ~turn_id);
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_keeper_checkpoints { keeper } ->
+            let reply =
+              Msg.Reply_keeper_checkpoints
+                {
+                  keeper;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:
+                        Wire_keeper_context.decode_keeper_checkpoints_inventory;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_keeper_operator_note { keeper } ->
+            let reply =
+              Msg.Reply_keeper_operator_note_loaded
+                {
+                  keeper;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_keeper_context.decode_keeper_operator_note;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
       in
       Ui_bus.publish_snapshot t.bus ~key:snapshot_key msg;
       completed_ok := true);
@@ -2707,6 +2826,86 @@ let execute_post t ~epoch req =
             let result = post_ack t ~path ~body in
             Some
               (Msg.Reply_lane_addon_ask_answer { declaration_id; ask_id; result })
+        | Cmd.Post_keeper_control_lifecycle { keeper; action; _ } ->
+            let result = post_ack t ~path ~body in
+            let label =
+              match action with
+              | `Boot ->
+                  Say.make ~ko:("키퍼 부팅 요청 완료: " ^ keeper)
+                    ~en:("Keeper boot applied: " ^ keeper)
+              | `Up ->
+                  Say.make ~ko:("키퍼 시작(up) 완료: " ^ keeper)
+                    ~en:("Keeper up applied: " ^ keeper)
+              | `Shutdown ->
+                  Say.make ~ko:("키퍼 종료 완료: " ^ keeper)
+                    ~en:("Keeper shutdown applied: " ^ keeper)
+              | `Reset ->
+                  Say.make ~ko:("키퍼 리셋 완료: " ^ keeper)
+                    ~en:("Keeper reset applied: " ^ keeper)
+            in
+            Some
+              (Msg.Reply_keeper_control
+                 { keeper; label; refresh_roster = true; result })
+        | Cmd.Post_keeper_clear { keeper; _ } ->
+            let result = post_ack t ~path ~body in
+            Some
+              (Msg.Reply_keeper_control
+                 {
+                   keeper;
+                   label =
+                     Say.make ~ko:("키퍼 대화 이력 초기화 완료: " ^ keeper)
+                       ~en:("Keeper history cleared: " ^ keeper);
+                   refresh_roster = true;
+                   result;
+                 })
+        | Cmd.Post_keeper_directive { keeper; directive; _ } ->
+            let result = post_ack t ~path ~body in
+            let label =
+              match directive with
+              | Wire_keeper_context.Directive_pause ->
+                  Say.make ~ko:("키퍼 일시 정지됨: " ^ keeper)
+                    ~en:("Keeper paused: " ^ keeper)
+              | Wire_keeper_context.Directive_wakeup ->
+                  Say.make ~ko:("키퍼 기상(wakeup) 전송됨: " ^ keeper)
+                    ~en:("Keeper wakeup sent: " ^ keeper)
+              | Wire_keeper_context.Directive_resume _ ->
+                  Say.make ~ko:("키퍼 재개(resume) 완료: " ^ keeper)
+                    ~en:("Keeper resumed: " ^ keeper)
+            in
+            Some
+              (Msg.Reply_keeper_control
+                 { keeper; label; refresh_roster = true; result })
+        | Cmd.Post_keeper_checkpoints { keeper; action = `Preview_purge | `Apply_purge }
+          ->
+            let result =
+              post_and_decode t ~path ~body
+                ~decode:Wire_keeper_context.decode_checkpoint_purge_result
+            in
+            Some (Msg.Reply_keeper_checkpoint_purge { keeper; result })
+        | Cmd.Post_keeper_checkpoints { keeper; action = `Delete_history _ } ->
+            let result =
+              post_and_decode t ~path ~body
+                ~decode:Wire_keeper_context.decode_checkpoint_delete_result
+            in
+            Some (Msg.Reply_keeper_checkpoint_delete { keeper; result })
+        | Cmd.Post_keeper_operator_note { keeper; _ } ->
+            let result =
+              post_and_decode t ~path ~body
+                ~decode:Wire_keeper_context.decode_keeper_operator_note
+            in
+            Some (Msg.Reply_keeper_operator_note_saved { keeper; result })
+        | Cmd.Post_keeper_run_next { keeper; _ } ->
+            let result = post_ack t ~path ~body in
+            Some
+              (Msg.Reply_keeper_control
+                 {
+                   keeper;
+                   label =
+                     Say.make ~ko:("대기 요청 우선 실행 지정됨: " ^ keeper)
+                       ~en:("Queued message prioritized (run-next): " ^ keeper);
+                   refresh_roster = false;
+                   result;
+                 })
       in
       Option.iter
         (fun reply ->
@@ -2910,6 +3109,10 @@ let execute_post_stream t ~epoch req =
                     | Ok
                         (( Wire_fleet.Chunk_run_started _
                          | Wire_fleet.Chunk_runtime_attempt_started _
+                         | Wire_fleet.Chunk_provider_retry _
+                         | Wire_fleet.Chunk_continuation_checkpoint _
+                         | Wire_fleet.Chunk_native_tool_progress _
+                         | Wire_fleet.Chunk_stream_protocol_error _
                          | Wire_fleet.Chunk_text_delta _
                          | Wire_fleet.Chunk_thinking_delta _
                          | Wire_fleet.Chunk_thinking_snapshot _

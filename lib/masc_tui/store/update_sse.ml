@@ -114,12 +114,7 @@ let apply_sandbox_invalidation ?keeper (m : Model.t) =
           [ get_cmd m.epoch Cmd.Get_sandboxes ]
     else []
   in
-  let detail_cmds =
-    if in_infra && Option.is_none (Model.active_inspector m) then
-      (* The fleet reply selects the row before its detail is requested. *)
-      []
-    else View_fetches.sandbox_detail_fetch ?keeper next
-  in
+  let detail_cmds = View_fetches.sandbox_detail_fetch ?keeper next in
   (next, fleet_cmds @ detail_cmds)
 
 let apply_dataset_invalidation (m : Model.t) ds =

@@ -9120,6 +9120,87 @@ let test_sandbox_probe_reopens_named_absence () =
   Alcotest.(check bool) "current absence settles again" true
     (Infra_store.keeper_sandbox_for ~keeper:"alpha" settled.infra = Observed.Absent)
 
+let test_sandbox_infra_probe_reads_selected_detail_with_fleet () =
+  let base = Model.initial () in
+  let initial =
+    { base with
+      nav = { base.nav with workspace = Nav.Infra };
+      infra = { base.infra with active_tab = Nav.Infra_sandboxes } }
+  in
+  let roster =
+    Infra_store.apply_sandboxes_fallback ~observed_at:t0 ~wall_unix:0.
+      ~keepers:[] ~sandbox_profiles:[ ("alpha", Wire_fleet.Profile_docker) ]
+      ~tool_series_totals:None initial.infra
+  in
+  let fleet = Option.get (Observed.to_option roster.sandboxes) in
+  let detail : Wire_infra.keeper_sandbox_response =
+    { keeper = "alpha";
+      probe_state = None;
+      sandbox = Wire_infra.Sandbox_docker (List.hd fleet.docker_keepers) }
+  in
+  let reply ~now (m : Model.t) reply =
+    Update.step ~now m (Msg.Http_reply { epoch = m.epoch; reply })
+  in
+  let settled_fleet = Msg.Reply_sandboxes (Ok fleet) in
+  let settled_detail =
+    Msg.Reply_keeper_sandbox { keeper = "alpha"; result = Ok detail }
+  in
+  let fleet_error status =
+    Msg.Reply_sandboxes (Error (Msg.Http_error { status; body = ""; api_error = None }))
+  in
+  let observe now (m : Model.t) =
+    let event =
+      Msg.Sse_observer_delivery
+        { cursor = None;
+          decoded =
+            Wire_observer.Event
+              (Wire_observer.Dataset_changed Wire_observer.Dataset_infra_sandboxes) }
+    in
+    Update.step ~now m (Msg.Sse_event { epoch = m.epoch; event })
+  in
+  let named_requests cmds =
+    Cmd.flatten cmds
+    |> List.filter_map
+         (function
+           | Cmd.Http_get { epoch; req = Cmd.Get_keeper_sandbox { keeper } } ->
+               Alcotest.(check bool) "named request carries the current epoch" true
+                 (Epoch.equal initial.epoch epoch);
+               Some keeper
+           | _ -> None)
+  in
+  let identified, _ = reply ~now:t0 initial settled_fleet in
+  let observed, _ = reply ~now:t0 identified settled_detail in
+  let pending, reads = observe t1 observed in
+  let get_fleet = Cmd.Http_get { epoch = initial.epoch; req = Cmd.Get_sandboxes } in
+  Alcotest.(check bool) "current Fleet read is requested" true
+    (List.mem get_fleet (Cmd.flatten reads));
+  Alcotest.(check (list string)) "selected detail is already requested with Fleet"
+    [ "alpha" ] (named_requests reads);
+  let _, after_fleet = reply ~now:t2 pending settled_fleet in
+  Alcotest.(check (list string)) "Fleet success coalesces the pending detail read" []
+    (named_requests after_fleet);
+  let failed, after_503 = reply ~now:t2 pending (fleet_error 503) in
+  Alcotest.(check (option string)) "Fleet 503 keeps the previously authorized selection"
+    (Some "alpha") (Infra_store.selected_sandbox_keeper failed.infra);
+  Alcotest.(check (list string)) "Fleet 503 leaves the existing detail read in flight" []
+    (named_requests after_503);
+  let refreshed, _ = reply ~now:t2 failed settled_detail in
+  Alcotest.(check bool) "detail settles fresh despite Fleet 503" true
+    (match Infra_store.keeper_sandbox_for ~keeper:"alpha" refreshed.infra with
+    | Observed.Value { stale = false; observed_at; _ } -> Clock.Mono.equal t2 observed_at
+    | Observed.Value { stale = true; _ } | Observed.Loading _ | Observed.Absent
+    | Observed.Unreported | Observed.Failed _ -> false);
+  let cold, cold_reads = observe t1 initial in
+  Alcotest.(check (list string)) "cold Fleet read has no selected detail" []
+    (named_requests cold_reads);
+  let _, after_first_fleet = reply ~now:t2 cold settled_fleet in
+  Alcotest.(check (list string)) "first Fleet success reads its newly selected detail"
+    [ "alpha" ] (named_requests after_first_fleet);
+  let denied, after_403 = reply ~now:t2 cold (fleet_error 403) in
+  let _, denied_reads = observe t2 denied in
+  Alcotest.(check (list string)) "denied Fleet with no selection emits no detail read" []
+    (named_requests (after_403 @ denied_reads))
+
 (* On a first visit to the Wiki tab the fetch list is built before the index
    lands, so it names no page. The index reply asks for the page it selects. *)
 let test_wiki_index_reply_requests_selected_page () =
@@ -24029,6 +24110,8 @@ let () =
             `Quick test_sandbox_fleet_denial_clears_selected_rows;
           Alcotest.test_case "A Sandbox probe reopens visible named absence once"
             `Quick test_sandbox_probe_reopens_named_absence;
+          Alcotest.test_case "Infra Sandbox probe reads selected detail independently of Fleet"
+            `Quick test_sandbox_infra_probe_reads_selected_detail_with_fleet;
           Alcotest.test_case "The wiki index reply asks for the page it selects"
             `Quick test_wiki_index_reply_requests_selected_page;
           Alcotest.test_case "Infra changes follow the selected repository"

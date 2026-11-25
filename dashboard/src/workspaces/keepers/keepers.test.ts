@@ -36,6 +36,7 @@ import {
 } from './keeper-debug-companion'
 import { releaseAllViewStreams, getActiveViewStreamKey } from '../../core/view-stream-slot'
 import { KeeperChatTab } from './keeper-chat-tab'
+import { KeeperToolCallInspector } from './keeper-tool-call-inspector'
 import { toolResultMarkdownPreview } from './chat-blocks'
 import { KeeperHeader, isKeeperBooted } from './keeper-header'
 import { KeeperMemoryTab } from './keeper-memory-tab'
@@ -43,7 +44,7 @@ import { KeeperPortraitCandleTab } from './keeper-portrait-candle-tab'
 import { KeeperWorkSandboxTab } from './keeper-work-sandbox-tab'
 import { KeeperConfigTab } from './keeper-config-tab'
 import { KeepersWorkspace } from './index'
-import type { KeeperRosterItem, TurnRecordItem } from './types'
+import type { KeeperRosterItem, KeeperToolCallEntry, TurnRecordItem } from './types'
 
 const queuedOperations = (
   sequences: readonly number[] = [],
@@ -326,6 +327,27 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     releaseAllViewStreams()
     resetPortraitCacheForTests()
     vi.restoreAllMocks()
+  })
+
+  it('renders an explicit Markdown preview in the tool inspector and preserves literal logs', async () => {
+    const source = `[masc:blob sha256=${'a'.repeat(64)} bytes=64 mime=text/markdown preview="**Report**"]`
+    const entry: KeeperToolCallEntry = {
+      ts: 100,
+      record_kind: 'tool_call',
+      keeper: 'code-reviewer-sister',
+      tool: 'publish_artifact',
+      duration_ms: 1,
+      wire_outcome: 'ok',
+      output: source,
+    }
+    const view = render(html`<${KeeperToolCallInspector} keeperName=${entry.keeper} entry=${entry} />`)
+    expect(view.container.querySelector('.markdown-content strong')?.textContent).toBe('Report')
+    expect(view.getByTestId('tool-call-inspector-output').textContent).toBe(source)
+
+    const log = '[WARN]: phase\n  * worker[2]\n'
+    view.rerender(html`<${KeeperToolCallInspector} keeperName=${entry.keeper} entry=${{ ...entry, output: log }} />`)
+    expect(view.container.querySelector('.markdown-content')).toBeNull()
+    expect(view.getByTestId('tool-call-inspector-output').textContent).toBe(log)
   })
 
   it('preserves literal tool output and honors stored Markdown in history and live events', async () => {

@@ -234,6 +234,31 @@ let a_replacement_keeping_size_and_mtime_is_read_again () =
     check bool "the replacement is read without an invalidation" true
       (has_named_task (read_backlog filesystem) task new_title))
 
+let prepared_reads_follow_the_cached_filesystem_snapshot () =
+  with_workspace (fun _env filesystem ->
+    let memory, backend = memory_config filesystem in
+    copy_initial_backlog filesystem memory backend;
+    let first_task = create_task filesystem "first task" in
+    let read_prepared config =
+      match Workspace_backlog.read_prepared_backlog_r config with
+      | Ok prepared -> prepared
+      | Error detail -> fail detail
+    in
+    let first = read_prepared filesystem in
+    check bool "raw and prepared reads share the snapshot" true
+      (first.backlog == read_backlog filesystem);
+    let memory_prepared = read_prepared memory in
+    check int "memory projects its own task list" 0 (List.length memory_prepared.backlog.tasks);
+    check bool "filesystem keeps its own prepared index" true
+      (read_prepared filesystem == first);
+    let second_task = create_task filesystem "second task" in
+    let second = read_prepared filesystem in
+    check bool "the next index contains the committed task" true
+      (Workspace_backlog.Task_id_map.mem second_task second.tasks_by_id);
+    check bool "the previous observation keeps the first index" true
+      (Workspace_backlog.Task_id_map.mem first_task first.tasks_by_id
+       && not (Workspace_backlog.Task_id_map.mem second_task first.tasks_by_id)))
+
 let initialization_gate_uses_the_selected_backend () =
   with_workspace (fun _env filesystem ->
     let empty_memory, _ = memory_config filesystem in
@@ -262,6 +287,8 @@ let () =
       ; test_case "invalidation fences an older cache fill" `Quick invalidation_rejects_an_older_inflight_cache_fill
       ; test_case "a same-size same-mtime replacement is read again" `Quick
           a_replacement_keeping_size_and_mtime_is_read_again
+      ; test_case "prepared reads follow the cached filesystem snapshot" `Quick
+          prepared_reads_follow_the_cached_filesystem_snapshot
       ]
     ; "initialization",
       [ test_case "gate follows the selected backend" `Quick initialization_gate_uses_the_selected_backend ]

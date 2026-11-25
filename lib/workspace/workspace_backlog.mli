@@ -16,9 +16,8 @@ type prepared_backlog =
   ; priority_ordered_tasks : Masc_domain.task list
   ; claimable_ordered_tasks : Masc_domain.task list
   }
-(** Immutable derived index built once per decoded backlog snapshot and cached
-    alongside the canonical [backlog] record under the file's version (device,
-    inode, size, modification time).
+(** Immutable derived index built on demand and shared by readers of the same
+    decoded filesystem backlog snapshot through {!File_version_cache}.
     Eliminates repeated $O(T \log T)$ sorting and $O(T)$ linear scans across
     [keeper_tasks_list], [claim_next_r], and [claim_task_r]. *)
 

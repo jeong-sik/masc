@@ -12,7 +12,9 @@ import { TargetLockedAction } from '../../components/primitives/target-locked-ac
 import {
   bootKeeperAction,
   deleteKeeperAction,
+  formatContextDetail,
   interruptKeeperTurnAction,
+  isKeeperPathResting,
   needsRosterAttention,
   observeRosterContextPct,
   pauseKeeperAction,
@@ -93,10 +95,41 @@ export function KeeperHeader(props: KeeperHeaderProps) {
   }, [deleteOpen])
 
   const ctxObs = observeRosterContextPct(keeper)
-  const ctxText = formatObserved(ctxObs, (v) => `${v}%`)
+  const ctxDetail = formatContextDetail(keeper)
+  const ctxText = ctxObs.kind === 'value' ? ctxDetail.label : formatObserved(ctxObs, (v) => `${v}%`)
   const failing = needsRosterAttention(keeper)
   const booted = isKeeperBooted(keeper)
   const isPaused = keeper.paused || keeper.phase.trim().toLowerCase() === 'paused'
+  const resting = isKeeperPathResting(keeper)
+  const turnPreview = keeper.active_turn?.preview
+  const turnDetail =
+    (turnPreview
+      ? [
+          turnPreview.status_text || null,
+          turnPreview.last_tool && !turnPreview.status_text.includes(turnPreview.last_tool) ? turnPreview.last_tool : null,
+          turnPreview.text_tail && turnPreview.text_tail !== turnPreview.status_text ? turnPreview.text_tail : null,
+        ]
+          .filter((p): p is string => Boolean(p))
+          .join(' · ') || null
+      : null)
+    ?? keeper.active_turn?.tool_in_flight
+    ?? null
+  const laneFailures = keeper.runtime_lane_failures ?? []
+  const turnBreakdown = keeper.turns_24h_breakdown
+  const actionableDisposition =
+    keeper.operator_disposition && keeper.operator_disposition !== 'pass'
+      ? keeper.operator_disposition
+      : null
+  const hasDiagnostics = Boolean(
+    keeper.directory_issue
+    || keeper.runtime_blocker_summary
+    || resting
+    || keeper.last_failure
+    || actionableDisposition
+    || laneFailures.length > 0
+    || (keeper.waiting_summary && keeper.waiting_summary.count > 0)
+    || (turnBreakdown && (turnBreakdown.failed > 0 || turnBreakdown.rested > 0)),
+  )
 
   const runLifecycle = async (
     label: string,
@@ -157,17 +190,30 @@ export function KeeperHeader(props: KeeperHeaderProps) {
           <div class="kp-hero-text">
             <h1 class="kp-hero-name">${keeper.name}</h1>
             <div class="kp-pill-row">
-              <span class="kp-pill" data-tone=${failing ? 'bad' : keeper.paused ? 'warn' : 'ok'}>
-                ${failing ? `⚠ ${keeper.health}` : keeper.paused ? 'Paused' : keeper.health}
+              <span class="kp-pill" data-tone=${failing ? 'bad' : resting || keeper.paused ? 'warn' : 'ok'}>
+                ${failing ? `⚠ ${keeper.health}` : resting ? '⏸ 휴식 중' : keeper.paused ? 'Paused' : keeper.health}
               </span>
               <span class="kp-pill" data-tone="info">${keeper.phase}</span>
               <span class="kp-pill">${keeper.runtime_id}</span>
-              <span class="kp-pill" data-tone=${ctxObs.kind === 'value' && ctxObs.data >= 80 ? 'warn' : 'brass'}>
+              <span
+                class="kp-pill"
+                data-tone=${ctxObs.kind === 'value' && ctxObs.data >= 80 ? 'warn' : 'brass'}
+                title=${ctxDetail.tooltip}
+              >
                 Ctx ${ctxText}
               </span>
               ${keeper.active_turn && html`
-                <span class="kp-pill" data-tone="brass">
-                  ● Turn (${keeper.active_turn.lane})
+                <span class="kp-pill" data-tone="brass" title=${turnDetail ?? undefined}>
+                  ● Turn (${keeper.active_turn.lane}${turnDetail ? ` · ${turnDetail}` : ''})
+                </span>
+              `}
+              ${keeper.waiting_summary && keeper.waiting_summary.count > 0 && html`
+                <span
+                  class="kp-pill"
+                  data-tone="warn"
+                  title=${keeper.waiting_summary.primary_reason ?? undefined}
+                >
+                  대기 ${keeper.waiting_summary.count}${keeper.waiting_summary.primary_reason ? ` · ${keeper.waiting_summary.primary_reason}` : ''}
                 </span>
               `}
               ${props.turnStatus === 'loading' && html`<span class="kp-pill">턴 상태 조회 중…</span>`}
@@ -228,6 +274,56 @@ export function KeeperHeader(props: KeeperHeaderProps) {
           </button>
         </div>
       </div>
+
+      ${hasDiagnostics && html`
+        <div
+          class="kp-diag-banner"
+          data-tone=${failing ? 'bad' : resting ? 'warn' : 'info'}
+          role="status"
+          aria-label="Keeper 런타임 진단"
+        >
+          ${keeper.directory_issue && html`
+            <div class="kp-diag-row"><strong>설정 오류</strong>: ${keeper.directory_issue}</div>
+          `}
+          ${keeper.runtime_blocker_summary && html`
+            <div class="kp-diag-row">
+              <strong>차단 사유</strong>: ${keeper.runtime_blocker_summary}
+              ${keeper.runtime_blocker_signature && html` <span class="kp-roster-sub">(${keeper.runtime_blocker_signature})</span>`}
+            </div>
+          `}
+          ${resting && keeper.runtime_path_rest && html`
+            <div class="kp-diag-row">
+              <strong>경로 휴식</strong>: ${keeper.runtime_path_rest.runtime_id ?? keeper.runtime_id}
+              ${keeper.runtime_path_rest.release_at ? ` · 해제 ${keeper.runtime_path_rest.release_at}` : ''}
+              ${keeper.runtime_path_rest.release_basis ? ` (${keeper.runtime_path_rest.release_basis})` : ''}
+            </div>
+          `}
+          ${(keeper.last_failure || actionableDisposition || (keeper.next_action && (failing || resting || keeper.next_action !== 'direct_message'))) && html`
+            <div class="kp-diag-row">
+              ${keeper.last_failure ? `최근 실패: ${keeper.last_failure.cause}` : ''}
+              ${actionableDisposition ? `${keeper.last_failure ? ' · ' : ''}조치: ${actionableDisposition}${keeper.operator_disposition_reason ? ` (${keeper.operator_disposition_reason})` : ''}` : ''}
+              ${keeper.next_action && (failing || resting || keeper.next_action !== 'direct_message') ? `${keeper.last_failure || actionableDisposition ? ' · ' : ''}다음 단계: ${keeper.next_action}` : ''}
+            </div>
+          `}
+          ${keeper.waiting_summary && keeper.waiting_summary.count > 0 && html`
+            <div class="kp-diag-row">
+              <strong>대기 항목</strong>: ${keeper.waiting_summary.count}건
+              ${keeper.waiting_summary.primary_reason ? ` · ${keeper.waiting_summary.primary_reason}` : ''}
+              ${keeper.waiting_summary.due_at ? ` (예정 ${keeper.waiting_summary.due_at})` : ''}
+            </div>
+          `}
+          ${laneFailures.length > 0 && html`
+            <div class="kp-diag-row">
+              <strong>폴백 시도</strong>: ${laneFailures.map((f) => `${f.runtime_id ?? 'lane'}${f.fault_kind ? `[${f.fault_kind}]` : ''}: ${f.summary}`).join(' → ')}
+            </div>
+          `}
+          ${turnBreakdown && (turnBreakdown.failed > 0 || turnBreakdown.rested > 0) && html`
+            <div class="kp-diag-row">
+              <strong>24h 턴 내역</strong>: 성공 ${turnBreakdown.ok} · 휴식 ${turnBreakdown.rested} · 실패 ${turnBreakdown.failed}
+            </div>
+          `}
+        </div>
+      `}
 
       ${statusMessage && html`
         <div

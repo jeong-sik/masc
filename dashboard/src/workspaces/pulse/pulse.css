@@ -149,10 +149,19 @@
 
 .pulse-card-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-2);
   min-width: 0;
+}
+
+.pulse-card-title-group {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .pulse-card-head h2 {
@@ -220,6 +229,7 @@
 
 .pulse-attn-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-3);

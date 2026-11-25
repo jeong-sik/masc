@@ -17,6 +17,19 @@ export interface PulseTurnSlot {
   readonly unknown: number
 }
 
+export interface PulseKeeperPathRest {
+  readonly status: 'serving' | 'resting'
+  readonly runtime_id: string | null
+  readonly release_at: string | null
+  readonly release_basis: string | null
+}
+
+export interface PulseKeeperLaneFailure {
+  readonly runtime_id: string | null
+  readonly summary: string
+  readonly fault_kind: string | null
+}
+
 export interface PulseKeeperRow {
   readonly name: string
   readonly status: string
@@ -29,9 +42,17 @@ export interface PulseKeeperRow {
   readonly context_ratio: number | null
   readonly context_tokens: number | null
   readonly context_max: number | null
+  readonly context_provenance?: 'measured' | 'estimated' | 'unavailable' | null
+  readonly estimated_context_ratio?: number | null
   readonly context_unavailable_reason: string | null
   readonly next_action: string | null
   readonly runtime_blocker_summary: string | null
+  readonly runtime_blocker_signature?: string | null
+  readonly runtime_path_rest?: PulseKeeperPathRest | null
+  readonly operator_disposition?: string | null
+  readonly operator_disposition_reason?: string | null
+  readonly failing_since?: number | null
+  readonly runtime_lane_failures?: readonly PulseKeeperLaneFailure[]
   readonly last_failure: { readonly cause: string; readonly at_unix: number | null } | null
   readonly recent_turns: { readonly known_since: number; readonly slots: readonly PulseTurnSlot[] } | null
   readonly candle_balance_milli: string | number | null
@@ -201,7 +222,11 @@ export interface PulseFleetGroup {
   readonly keepers: readonly PulseKeeperRow[]
   readonly activeCount: number
   readonly failingCount: number
+  readonly restingCount?: number
   readonly turnsInWindow: number
+  readonly okTurnsInWindow?: number
+  readonly restedTurnsInWindow?: number
+  readonly failedTurnsInWindow?: number
   readonly sparklineData: uPlot.AlignedData
   readonly window: '24h'
 }

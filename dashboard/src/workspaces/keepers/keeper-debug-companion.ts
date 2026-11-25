@@ -139,11 +139,13 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
   const [checkpoints, setCheckpoints] = useState<CheckpointInventoryData | null>(null)
   const [compactionEpochs, setCompactionEpochs] = useState<number | null>(null)
   const [contextStatus, setContextStatus] = useState<string | null>(null)
+  const [contextError, setContextError] = useState<string | null>(null)
   const [pendingDanger, setPendingDanger] = useState<'clear' | 'reset' | null>(null)
 
   // Memory quick state
   const [memFacts, setMemFacts] = useState<KeeperMemoryFactsData | null>(null)
   const [memJournal, setMemJournal] = useState<KeeperMemoryJournalData | null>(null)
+  const [memError, setMemError] = useState<string | null>(null)
   const [memActKind, setMemActKind] = useState<'resume' | 'adopt' | 'restart_reading' | 'skip_line' | 'skip_item'>('resume')
   const [memActObserved, setMemActObserved] = useState('')
   const [memActOffset, setMemActOffset] = useState('0')
@@ -161,51 +163,113 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
     if (bodyRef.current) bodyRef.current.scrollTop = 0
   }, [tab, keeperName])
 
+  const traceSeqRef = useRef(0)
+  const contextSeqRef = useRef(0)
+  const memorySeqRef = useRef(0)
+  const cfgSeqRef = useRef(0)
+
+  useEffect(() => {
+    traceSeqRef.current += 1
+    contextSeqRef.current += 1
+    memorySeqRef.current += 1
+    cfgSeqRef.current += 1
+    setTurns(null)
+    setToolCalls(null)
+    setRawTraces([])
+    setRawTracePage(null)
+    setTraceError(null)
+    setLastPrompt(null)
+    setProviderInput(null)
+    setCheckpoints(null)
+    setCompactionEpochs(null)
+    setContextStatus(null)
+    setContextError(null)
+    setPendingDanger(null)
+    setMemFacts(null)
+    setMemJournal(null)
+    setMemError(null)
+    setMemActStatus(null)
+    setCfgSchema(null)
+    setCfgFieldKey('')
+    setCfgFieldValue('')
+    setCfgDiff(null)
+    setCfgError(null)
+  }, [keeperName])
+
   const loadTrace = useCallback(async () => {
+    const seq = ++traceSeqRef.current
     setTraceError(null)
     const [tr, tc, rt] = await Promise.all([
       fetchKeeperTurnRecordsApi(keeperName, 60),
       fetchKeeperToolCallsApi(keeperName, 50),
       fetchKeeperRawTracesApi(keeperName, 12),
     ])
+    if (seq !== traceSeqRef.current) return
+    const errs: string[] = []
     if (tr.ok) setTurns(tr.value)
-    else setTraceError(tr.error.message)
+    else errs.push(`턴 기록: ${tr.error.message}`)
     if (tc.ok) setToolCalls(tc.value)
+    else errs.push(`도구 호출: ${tc.error.message}`)
     if (rt.ok) setRawTraces(rt.value)
+    else errs.push(`원시 추적: ${rt.error.message}`)
+    if (errs.length > 0) setTraceError(errs.join(' · '))
   }, [keeperName])
 
   const loadContext = useCallback(async () => {
+    const seq = ++contextSeqRef.current
+    setContextError(null)
     const [tr, lp, cp, os] = await Promise.all([
       fetchKeeperTurnRecordsApi(keeperName, 60),
       fetchKeeperLastPromptApi(keeperName),
       fetchKeeperCheckpointsApi(keeperName),
       fetchKeeperMemoryOsInternalsApi(keeperName),
     ])
+    if (seq !== contextSeqRef.current) return
+    const errs: string[] = []
     if (tr.ok) {
       setTurns(tr.value)
       const latestTurnRef = tr.value.entries[0]?.record.turn_ref
       if (latestTurnRef) {
         const pi = await fetchKeeperProviderInputApi(keeperName, latestTurnRef)
+        if (seq !== contextSeqRef.current) return
         if (pi.ok) setProviderInput(pi.value)
+        else errs.push(`Provider 입력: ${pi.error.message}`)
+      } else {
+        setProviderInput(null)
       }
+    } else {
+      errs.push(`턴 기록: ${tr.error.message}`)
     }
     if (lp.ok) setLastPrompt(lp.value)
+    else errs.push(`최근 프롬프트: ${lp.error.message}`)
     if (cp.ok) setCheckpoints(cp.value)
+    else errs.push(`체크포인트: ${cp.error.message}`)
     if (os.ok) setCompactionEpochs(os.value.compaction.epoch_count)
+    else errs.push(`Memory OS: ${os.error.message}`)
+    if (errs.length > 0) setContextError(errs.join(' · '))
   }, [keeperName])
 
   const loadMemory = useCallback(async () => {
+    const seq = ++memorySeqRef.current
+    setMemError(null)
     const [mf, mj] = await Promise.all([
       fetchKeeperMemoryFactsApi(keeperName),
       fetchKeeperMemoryJournalApi(keeperName, 20),
     ])
+    if (seq !== memorySeqRef.current) return
+    const errs: string[] = []
     if (mf.ok) setMemFacts(mf.value)
+    else errs.push(`Memory Facts: ${mf.error.message}`)
     if (mj.ok) setMemJournal(mj.value)
+    else errs.push(`Memory Journal: ${mj.error.message}`)
+    if (errs.length > 0) setMemError(errs.join(' · '))
   }, [keeperName])
 
   const loadConfigSchema = useCallback(async () => {
+    const seq = ++cfgSeqRef.current
     setCfgError(null)
     const res = await fetchConfigSchemaApi(`keeper:${keeperName}`)
+    if (seq !== cfgSeqRef.current) return
     if (!res.ok) {
       setCfgError(res.error.message)
       return
@@ -366,7 +430,7 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
 
       <div ref=${bodyRef} class="kp-companion-body">
         ${tab === 'trace' && html`
-          ${traceError && html`<div class="ap-error">${traceError}</div>`}
+          ${traceError && html`<div class="ap-error" role="alert">${traceError}</div>`}
 
           <div class="kp-card">
             <div class="kp-card-head">
@@ -448,6 +512,7 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
         `}
 
         ${tab === 'context' && html`
+          ${contextError && html`<div class="ap-error" role="alert">${contextError}</div>`}
           <${UPlotChart}
             id=${`kp-ctx-${keeperName}`}
             title="60-Turn Context Fill %"
@@ -591,13 +656,16 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
         `}
 
         ${tab === 'memory' && html`
+          ${memError && html`<div class="ap-error" role="alert">${memError}</div>`}
           <div class="kp-card">
             <div class="kp-card-head">
               <h3>Memory Facts Summary</h3>
               <button type="button" class="btn-ghost" onClick=${() => void loadMemory()}>갱신</button>
             </div>
             ${!memFacts
-              ? html`<div class="kp-empty">불러오는 중…</div>`
+              ? (memError
+                  ? html`<div class="kp-empty">Memory Facts 조회 실패</div>`
+                  : html`<div class="kp-empty">불러오는 중…</div>`)
               : html`
                   <div class="kp-grid-2">
                     <div class="kp-kv-box">

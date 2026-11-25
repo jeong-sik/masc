@@ -40,6 +40,7 @@
 
 .kp-roster-top {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-2);
@@ -202,6 +203,12 @@
   align-items: flex-end;
   gap: var(--sp-0);
   flex-shrink: 0;
+  max-width: 104px;
+  overflow: hidden;
+}
+
+.kp-roster-right .kp-roster-sub {
+  max-width: 100%;
 }
 
 /* ── Right Active Keeper Detail Stage ── */
@@ -303,9 +310,8 @@
 }
 
 .kp-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-1);
+  display: inline-block;
+  vertical-align: middle;
   max-width: 100%;
   min-width: 0;
   overflow: hidden;
@@ -317,6 +323,7 @@
   color: var(--fg-2);
   font-family: var(--font-mono);
   font-size: var(--fs-11);
+  line-height: 1.35;
   font-variant-numeric: tabular-nums slashed-zero;
   white-space: nowrap;
 }
@@ -447,6 +454,10 @@
   .kp-chat-shell[data-companion-open="true"] {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) clamp(20%, calc(100% - 26rem), 45%);
+  }
+  .kp-chat-shell[data-companion-open="true"] .kp-companion {
+    border-left: none;
+    border-top: 1px solid var(--line-1);
   }
 }
 
@@ -1255,6 +1266,35 @@ details[open] > .kp-sub-summary::before {
   .kp-field-row {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+.kp-diag-banner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  max-height: 128px;
+  overflow-y: auto;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-2);
+  background: var(--bg-2);
+  color: var(--fg-2);
+  font-size: var(--fs-12);
+  line-height: var(--lh-body);
+  min-width: 0;
+}
+
+.kp-diag-banner[data-tone="bad"] {
+  border-color: var(--err-fg);
+}
+
+.kp-diag-banner[data-tone="warn"] {
+  border-color: var(--warn-fg);
+}
+
+.kp-diag-row {
+  overflow-wrap: anywhere;
+  min-width: 0;
 }
 
 .kp-hidden-input {

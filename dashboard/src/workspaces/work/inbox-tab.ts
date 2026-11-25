@@ -12,7 +12,12 @@
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { activeWorkspaceId, currentSessionEpoch } from '../../core/auth'
-import { markViewSynced, subscribeObserverFrames } from '../../core/observer'
+import {
+  extractObserverTopics,
+  markViewSynced,
+  subscribeObserverFrames,
+  subscribeObserverReconnect,
+} from '../../core/observer'
 import { resourceCache } from '../../core/resource-cache'
 import { apiGet, apiMutate } from '../../core/transport'
 import { ok } from '../../lib/result'
@@ -54,6 +59,7 @@ interface InboxSnapshot {
   readonly awaitingGoals: readonly GoalItem[]
   readonly audit24h: readonly GateResolvedAuditRow[]
   readonly singleUserHitlBridged: boolean
+  readonly sourceErrors: readonly string[]
 }
 
 type InboxFilter = 'all' | 'tool_approval' | 'keeper_ask' | 'channel_gate' | 'goal_confirmation' | 'audit'
@@ -142,11 +148,28 @@ function decodeKeeperAsks(raw: unknown): KeeperAskItem[] {
   return out
 }
 
+function readGateUnavailableReason(stateObj: unknown): string | null {
+  if (!isRecord(stateObj)) return null
+  if (stateObj.state !== 'unavailable') return null
+  return (
+    asNonEmptyString(stateObj.operator_detail)
+    ?? asNonEmptyString(stateObj.detail)
+    ?? asNonEmptyString(stateObj.title)
+    ?? 'unavailable'
+  )
+}
+
 function decodeGatePayload(raw: unknown): {
   pending: GatePendingItem[]
   resolved: GateResolvedAuditRow[]
+  errors: string[]
 } {
-  if (!isRecord(raw)) return { pending: [], resolved: [] }
+  if (!isRecord(raw)) return { pending: [], resolved: [], errors: [] }
+  const errors: string[] = []
+  const queueErr = readGateUnavailableReason(raw.approval_queue_state)
+  if (queueErr) errors.push(`Channel Gate 대기열 조회 불가: ${queueErr}`)
+  const resolvedErr = readGateUnavailableReason(raw.recent_resolved_state)
+  if (resolvedErr) errors.push(`Channel Gate 감사 이력 조회 불가: ${resolvedErr}`)
   const pending: GatePendingItem[] = []
   if (Array.isArray(raw.approval_queue)) {
     for (const row of raw.approval_queue) {
@@ -190,7 +213,7 @@ function decodeGatePayload(raw: unknown): {
       })
     }
   }
-  return { pending, resolved }
+  return { pending, resolved, errors }
 }
 
 export function InboxTab(props: WorkspaceViewProps) {
@@ -201,6 +224,7 @@ export function InboxTab(props: WorkspaceViewProps) {
     awaitingGoals: [],
     audit24h: [],
     singleUserHitlBridged: true,
+    sourceErrors: [],
   })
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -218,9 +242,13 @@ export function InboxTab(props: WorkspaceViewProps) {
   const [busy, setBusy] = useState(false)
   const [feedback, setFeedback] = useState<{ kind: 'ok' | 'err'; message: string } | null>(null)
   const goalConfAbortRef = useRef<AbortController | null>(null)
+  const lastUpdatedAtRef = useRef<number>(0)
+  const hasDriftLockRef = useRef<boolean>(false)
+  const entryKeysRef = useRef<ReadonlySet<string>>(new Set())
+  hasDriftLockRef.current = Object.keys(liveRevisionByKey).length > 0
 
-  const loadInbox = useCallback(async (reason: 'mount' | 'manual' = 'mount') => {
-    setLoading(true)
+  const loadInbox = useCallback(async (reason: 'mount' | 'manual' | 'sse' = 'mount') => {
+    if (reason !== 'sse') setLoading(true)
     setLoadError(null)
     const multiAccount = isMultiAccountSession()
     const obs = await resourceCache.fetch<InboxSnapshot>(
@@ -229,8 +257,9 @@ export function InboxTab(props: WorkspaceViewProps) {
         if (multiAccount) {
           // Multi-account bridge does not expose single-user tool-approvals/asks/gate; skip cleanly (0x 404).
           const planRes = await apiGet<unknown>('/api/v1/dashboard/planning', { signal })
+          if (!planRes.ok) return planRes
           const awaitingGoals: GoalItem[] = []
-          if (planRes.ok && isRecord(planRes.value) && Array.isArray(planRes.value.goals)) {
+          if (isRecord(planRes.value) && Array.isArray(planRes.value.goals)) {
             for (const g of planRes.value.goals) {
               const dec = decodeGoalItem(g)
               if (dec.ok && dec.value.phase === 'Awaiting_confirmation') {
@@ -245,6 +274,7 @@ export function InboxTab(props: WorkspaceViewProps) {
             awaitingGoals,
             audit24h: [],
             singleUserHitlBridged: false,
+            sourceErrors: [],
           })
         }
 
@@ -254,9 +284,21 @@ export function InboxTab(props: WorkspaceViewProps) {
           apiGet<unknown>('/api/v1/dashboard/gate', { signal }),
           apiGet<unknown>('/api/v1/dashboard/planning', { signal }),
         ])
+        if (!approvalsRes.ok && !asksRes.ok && !gateRes.ok && !planRes.ok) {
+          return approvalsRes
+        }
+        const sourceErrors: string[] = []
+        if (!approvalsRes.ok) sourceErrors.push(`도구 승인 조회 실패: ${approvalsRes.error.message}`)
+        if (!asksRes.ok) sourceErrors.push(`Keeper 질문 조회 실패: ${asksRes.error.message}`)
+        if (!gateRes.ok) sourceErrors.push(`Channel Gate 조회 실패: ${gateRes.error.message}`)
+        if (!planRes.ok) sourceErrors.push(`Goal 계획 조회 실패: ${planRes.error.message}`)
+
         const toolApprovals = approvalsRes.ok ? decodeToolApprovals(approvalsRes.value) : []
         const keeperAsks = asksRes.ok ? decodeKeeperAsks(asksRes.value) : []
-        const gateDecoded = gateRes.ok ? decodeGatePayload(gateRes.value) : { pending: [], resolved: [] }
+        const gateDecoded = gateRes.ok
+          ? decodeGatePayload(gateRes.value)
+          : { pending: [], resolved: [], errors: [] }
+        for (const err of gateDecoded.errors) sourceErrors.push(err)
         const awaitingGoals: GoalItem[] = []
         if (planRes.ok && isRecord(planRes.value) && Array.isArray(planRes.value.goals)) {
           for (const g of planRes.value.goals) {
@@ -273,15 +315,39 @@ export function InboxTab(props: WorkspaceViewProps) {
           awaitingGoals,
           audit24h: gateDecoded.resolved,
           singleUserHitlBridged: true,
+          sourceErrors,
         })
       },
-      { ttlMs: 8_000, topics: ['approval', 'ask', 'gate', 'goals', 'tool_approval'], reason },
+      {
+        ttlMs: 8_000,
+        topics: [
+          'approval',
+          'ask',
+          'keeper_ask',
+          'gate',
+          'goals',
+          'goal_projection_changed',
+          'pending_confirms_changed',
+          'tool_approval',
+          'keeper_tool_approval_waits_changed',
+          'keeper_asks_changed',
+          'keeper_waiting_inventory_changed',
+        ],
+        reason,
+      },
     )
     setLoading(false)
     if (obs.kind === 'value') {
+      const isFreshPayload = obs.updatedAt !== lastUpdatedAtRef.current
+      lastUpdatedAtRef.current = obs.updatedAt
       setSnap(obs.data)
-      setCapturedEpoch(currentSessionEpoch())
-      setLiveRevisionByKey({})
+      // Never auto-unlock TargetLockedAction during SSE drift; require explicit manual refresh or mount.
+      if (reason !== 'sse') {
+        setCapturedEpoch(currentSessionEpoch())
+        setLiveRevisionByKey({})
+      } else if (isFreshPayload && !hasDriftLockRef.current) {
+        setCapturedEpoch(currentSessionEpoch())
+      }
       markViewSynced()
     } else if (obs.kind === 'failed') {
       setLoadError(obs.error.message)
@@ -293,29 +359,73 @@ export function InboxTab(props: WorkspaceViewProps) {
   }, [loadInbox])
 
   useEffect(() => {
-    return subscribeObserverFrames((frame) => {
-      if (!isRecord(frame.data)) return
-      const targetId =
-        asNonEmptyString(frame.data.approval_id)
-        ?? asNonEmptyString(frame.data.tool_call_id)
-        ?? asNonEmptyString(frame.data.ask_id)
-        ?? asNonEmptyString(frame.data.goal_id)
-        ?? asNonEmptyString(frame.data.id)
-      if (!targetId) return
-      const nextRev =
-        asNonEmptyString(frame.data.revision)
-        ?? asSafeInt(frame.data.sequence)
-        ?? asNonEmptyString(frame.data.criterion_revision)
-        ?? `sse-${Date.now()}`
-      setLiveRevisionByKey((prev) => ({
-        ...prev,
-        [`tool:${targetId}`]: nextRev,
-        [`ask:${targetId}`]: nextRev,
-        [`gate:${targetId}`]: nextRev,
-        [`goal:${targetId}`]: nextRev,
-      }))
+    const inboxTopics = new Set([
+      'approval',
+      'tool_approval',
+      'ask',
+      'keeper_ask',
+      'gate',
+      'goal',
+      'goals',
+      'goal_projection_changed',
+      'pending_confirms_changed',
+      'keeper_tool_approval_waits_changed',
+      'keeper_asks_changed',
+      'keeper_waiting_inventory_changed',
+      'approval:pending',
+      'approval:resolved',
+      'approval:summary_updated',
+    ])
+    let sseTimer: ReturnType<typeof setTimeout> | null = null
+    const unsub = subscribeObserverFrames((frame) => {
+      const matchedInboxTopic = extractObserverTopics(frame).some((t) => inboxTopics.has(t))
+      let recordedDrift = false
+      if (isRecord(frame.data)) {
+        const specificId =
+          asNonEmptyString(frame.data.approval_id)
+          ?? asNonEmptyString(frame.data.tool_call_id)
+          ?? asNonEmptyString(frame.data.ask_id)
+          ?? asNonEmptyString(frame.data.goal_id)
+        const targetId = specificId ?? (matchedInboxTopic ? asNonEmptyString(frame.data.id) : null)
+        if (targetId) {
+          const candidates = [
+            `tool:${targetId}`,
+            `ask:${targetId}`,
+            `gate:${targetId}`,
+            `goal:${targetId}`,
+          ].filter((k) => entryKeysRef.current.has(k))
+          if (candidates.length > 0) {
+            recordedDrift = true
+            const nextRev =
+              asNonEmptyString(frame.data.revision)
+              ?? asSafeInt(frame.data.sequence)
+              ?? asNonEmptyString(frame.data.criterion_revision)
+              ?? `sse-${Date.now()}`
+            setLiveRevisionByKey((prev) => {
+              const next = { ...prev }
+              for (const k of candidates) next[k] = nextRev
+              return next
+            })
+          }
+        }
+      }
+      if (!matchedInboxTopic && !recordedDrift) return
+      if (!sseTimer) {
+        sseTimer = setTimeout(() => {
+          sseTimer = null
+          void loadInbox('sse')
+        }, 450)
+      }
     })
-  }, [])
+    const unsubReconnect = subscribeObserverReconnect(() => {
+      void loadInbox('sse')
+    })
+    return () => {
+      unsub()
+      unsubReconnect()
+      if (sseTimer) clearTimeout(sseTimer)
+    }
+  }, [loadInbox])
 
   const entries = useMemo<readonly InboxEntry[]>(() => {
     const list: InboxEntry[] = []
@@ -333,6 +443,7 @@ export function InboxTab(props: WorkspaceViewProps) {
     }
     return list
   }, [snap])
+  entryKeysRef.current = new Set(entries.map((e) => e.key))
 
   const filteredEntries = useMemo(() => {
     if (filter === 'all') return entries
@@ -585,6 +696,11 @@ export function InboxTab(props: WorkspaceViewProps) {
         ${chipsBar}
         ${multiAccountNotice}
         ${loadError && html`<div class="wk-notice wk-notice--err" role="alert">${loadError}</div>`}
+        ${snap.sourceErrors.length > 0 && html`
+          <div class="wk-notice wk-notice--err" role="alert">
+            일부 대기열 조회 실패: ${snap.sourceErrors.join(' · ')}
+          </div>
+        `}
         <${DataTable}
           data=${snap.audit24h}
           columns=${auditColumns}
@@ -602,6 +718,11 @@ export function InboxTab(props: WorkspaceViewProps) {
         <h2 class="wk-pane-title">Unified HITL Queue <span class="wk-chip-count">(${filteredEntries.length})</span></h2>
       </div>
       ${loadError && html`<div class="wk-notice wk-notice--err wk-inset" role="alert">${loadError}</div>`}
+      ${snap.sourceErrors.length > 0 && html`
+        <div class="wk-notice wk-notice--err wk-inset" role="alert">
+          일부 대기열 조회 실패: ${snap.sourceErrors.join(' · ')}
+        </div>
+      `}
       ${loading && entries.length === 0
         ? html`<div class="wk-detail-pad"><span class="dtable-absent">승인 대기열 불러오는 중…</span></div>`
         : html`
@@ -611,7 +732,15 @@ export function InboxTab(props: WorkspaceViewProps) {
               height="100%"
               ariaLabel="통합 HITL 대기열"
               getItemKey=${(e: InboxEntry) => e.key}
-              empty=${html`<div class="wk-detail-pad"><span class="dtable-absent">처리가 필요한 항목이 없습니다.</span></div>`}
+              empty=${html`
+                <div class="wk-detail-pad">
+                  <span class="dtable-absent">
+                    ${snap.sourceErrors.length > 0
+                      ? '일부 소스 조회 실패로 대기열이 비어 있는지 확정할 수 없습니다.'
+                      : '처리가 필요한 항목이 없습니다.'}
+                  </span>
+                </div>
+              `}
               renderItem=${(entry: InboxEntry) => {
                 const badgeLabel = entry.kind === 'tool_approval'
                   ? 'Tool Approval'

@@ -253,7 +253,66 @@ describe('Pulse Workspace — Model & Formatters', () => {
     expect(handoffs).toHaveLength(2)
     expect(handoffs[0]!.kind).toBe('handoff')
     expect(handoffs[0]!.toKeepers).toEqual(['code-reviewer-uncle'])
+    expect(handoffs[0]!.route).toBe('/knowledge/board/p1')
     expect(handoffs[1]!.kind).toBe('succession')
+    expect(handoffs[1]!.route).toBe('/knowledge/board/p2')
+  })
+
+  it('surfaces path-resting keepers, failover details, and ok/rested/failed breakdown on Pulse', () => {
+    const now = 1_700_000_000
+    const slotTs = Math.floor(now / 1800) * 1800
+    const restingKeeper = makeKeeper({
+      name: 'resting-keeper',
+      health: 'healthy',
+      keepalive_running: true,
+      paused: false,
+      runtime_path_rest: { status: 'resting', runtime_id: 'ollama_cloud', release_at: '2026-11-25T02:00:00Z', release_basis: 'rate_limit' },
+      recent_turns: {
+        known_since: slotTs - 3600,
+        slots: [{ starts_at: slotTs, ok: 1, rested: 3, failed: 5, scheduled: 0, reacted: 0, chat: 0, own: 0, unknown: 0 }],
+      },
+    })
+    const pausedOnRestingRuntime = makeKeeper({
+      name: 'paused-keeper',
+      health: 'healthy',
+      phase: 'paused',
+      keepalive_running: false,
+      paused: true,
+      runtime_path_rest: { status: 'resting', runtime_id: 'ollama_cloud', release_at: '2026-11-25T02:00:00Z', release_basis: 'rate_limit' },
+    })
+    const failingKeeper = makeKeeper({
+      name: 'failing-keeper',
+      health: 'failing',
+      operator_disposition: 'retry_later',
+      failing_since: now - 180,
+      runtime_lane_failures: [
+        { runtime_id: 'ollama_cloud', summary: 'session limit', fault_kind: 'rate_limit' },
+      ],
+    })
+    const queue = buildAttentionQueue({
+      approvals: [],
+      asks: [],
+      keepers: [restingKeeper, pausedOnRestingRuntime, failingKeeper],
+      nowSec: now,
+    })
+    expect(queue).toHaveLength(2)
+    expect(queue.some((q) => q.keeper === 'paused-keeper')).toBe(false)
+    expect(queue.find((q) => q.keeper === 'resting-keeper')?.title).toContain('경로 휴식')
+    expect(queue.find((q) => q.keeper === 'failing-keeper')?.detail).toContain('ollama_cloud')
+    expect(queue.find((q) => q.keeper === 'failing-keeper')?.detail).toContain('retry_later')
+
+    const groups = buildCompanyFleetGroups({
+      keepers: [restingKeeper, pausedOnRestingRuntime, failingKeeper],
+      shellGroups: [],
+      window: '24h',
+      nowSec: now,
+    })
+    const restGroup = groups.find((g) => g.keepers.some((k) => k.name === 'resting-keeper'))!
+    expect(restGroup.activeCount).toBe(0)
+    expect(restGroup.restingCount).toBe(1)
+    expect(restGroup.okTurnsInWindow).toBe(1)
+    expect(restGroup.restedTurnsInWindow).toBe(3)
+    expect(restGroup.failedTurnsInWindow).toBe(5)
   })
 
   it('formats decimal-string milli-Candle values without float precision loss', () => {
@@ -389,5 +448,82 @@ describe('PulseWorkspace DOM Integration', () => {
     expect(requestedUrls).toContain('/api/v1/dashboard/keeper-costs?window=1440')
     expect(requestedUrls.some((u) => u.includes('keeper-costs?window=43200'))).toBe(false)
     expect(requestedUrls).toContain('/api/v1/dashboard/provider-usage-history?days=14')
+  })
+
+  it('surfaces unbridged approvals/asks honestly in multi_account_signed_in instead of green 0건 empty state', async () => {
+    authSession.value = {
+      kind: 'multi_account_signed_in',
+      mode: 'multi_account',
+      accountId: 'acc-1',
+      email: 'operator@example.com',
+      displayName: 'Operator',
+      role: 'admin',
+      csrfToken: 'csrf-tok-1',
+      authMethods: { google: true, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    const requestedUrls: string[] = []
+    let keeperHealth: 'healthy' | 'failing' = 'healthy'
+    const mockFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      requestedUrls.push(url)
+      const json = (data: unknown) =>
+        new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      if (url.includes('/api/v1/dashboard/shell')) {
+        return json({ counts: { keepers: 1, configured_keepers: 1, tasks_done_24h: 0 }, groups: [] })
+      }
+      if (url.includes('/api/v1/gate/keepers')) {
+        return json({
+          keepers: [
+            {
+              name: 'code-reviewer-sister',
+              status: 'running',
+              phase: 'idle',
+              health: keeperHealth,
+              paused: false,
+              keepalive_running: true,
+              runtime_id: 'claude-code',
+              runtime_blocker_summary: keeperHealth === 'failing' ? 'provider 429' : null,
+            },
+          ],
+        })
+      }
+      return json({ keepers: [], points: [], tree: [], posts: [], data: {} })
+    })
+    vi.stubGlobal('fetch', mockFetch)
+
+    // 1. All keepers healthy, approvals & asks unbridged -> MUST NOT claim green 0건 or empty queue
+    const first = render(
+      html`<${PulseWorkspace} subroute="" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+    )
+    await waitFor(() => {
+      const attn = first.container.querySelector('section[aria-label="주의 필요 대기열"]')
+      expect(attn?.textContent).toContain('일부 미확인')
+      expect(attn?.textContent).toContain('도구 승인 (멀티 계정 미지원)')
+      expect(attn?.textContent).toContain('Keeper 질문 (멀티 계정 미지원)')
+      expect(attn?.textContent).toContain('비어 있음으로 확정할 수 없습니다')
+    })
+    const attn1 = first.container.querySelector('section[aria-label="주의 필요 대기열"]')!
+    const pill1 = attn1.querySelector('.pulse-header-meta .pulse-pill')!
+    expect(pill1.getAttribute('data-tone')).toBe('warn')
+    expect(pill1.textContent?.trim()).toBe('일부 미확인')
+    expect(attn1.textContent).not.toContain('대기 중인 승인·질문·오류 없음')
+    expect(attn1.textContent).toContain('비어 있음으로 확정할 수 없습니다')
+    expect(requestedUrls.some((u) => u.includes('/api/v1/keepers/tool-approvals'))).toBe(false)
+    expect(requestedUrls.some((u) => u.includes('/api/v1/keepers/asks'))).toBe(false)
+    first.unmount()
+
+    // 2. One keeper failing while approvals & asks remain unbridged -> count + partial unchecked notice
+    resourceCache.clearAll()
+    keeperHealth = 'failing'
+    const second = render(
+      html`<${PulseWorkspace} subroute="" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+    )
+    await waitFor(() => {
+      const attn = second.container.querySelector('section[aria-label="주의 필요 대기열"]')
+      expect(attn?.textContent).toContain('1건 · 일부 미확인')
+      expect(attn?.textContent).toContain('provider 429')
+      expect(attn?.querySelector('[data-attention-unchecked="true"]')).not.toBeNull()
+    })
   })
 })

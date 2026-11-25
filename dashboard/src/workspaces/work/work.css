@@ -305,8 +305,13 @@
 .wk-row-btn {
   display: flex;
   flex-direction: column;
+  justify-content: center;
   gap: var(--sp-1);
   width: 100%;
+  height: 76px;
+  max-height: 76px;
+  overflow: hidden;
+  box-sizing: border-box;
   padding: var(--sp-2) var(--sp-3);
   border: none;
   border-bottom: 1px solid var(--line-1);
@@ -377,6 +382,7 @@
   color: var(--fg-3);
 }
 
+.wk-row-btn .wk-row-meta,
 .wk-goal-row .wk-row-meta {
   flex-wrap: nowrap;
   overflow: hidden;

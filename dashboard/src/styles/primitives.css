@@ -262,6 +262,7 @@
 @container master-detail (max-width: 767px) {
   .md-split {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(220px, 42%) minmax(0, 1fr);
   }
 }
 

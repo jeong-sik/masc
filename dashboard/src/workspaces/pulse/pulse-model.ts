@@ -6,6 +6,7 @@
 import type uPlot from 'uplot'
 import {
   observedAbsent,
+  observedFailed,
   observedLoading,
   observedUnreported,
   observedValue,
@@ -109,18 +110,43 @@ export function observeKeeperContextPct(keeper: PulseKeeperRow): Observed<number
     const pct = Math.max(0, Math.min(100, Math.round(keeper.context_ratio * 100)))
     return observedValue(pct)
   }
+  if (
+    keeper.context_provenance === 'estimated'
+    && typeof keeper.estimated_context_ratio === 'number'
+    && Number.isFinite(keeper.estimated_context_ratio)
+  ) {
+    const pct = Math.max(0, Math.min(100, Math.round(keeper.estimated_context_ratio * 100)))
+    return observedValue(pct)
+  }
   if (keeper.context_unavailable_reason) {
     return observedAbsent(keeper.context_unavailable_reason)
   }
   return observedAbsent()
 }
 
+export function isKeeperPathResting(keeper: PulseKeeperRow): boolean {
+  if (keeper.runtime_path_rest?.status !== 'resting') return false
+  if (keeper.paused || !keeper.keepalive_running) return false
+  const h = keeper.health.toLowerCase()
+  const p = keeper.phase.toLowerCase()
+  return h !== 'offline' && p !== 'offline' && p !== 'stopped' && p !== 'paused'
+}
+
 export function isKeeperActive(keeper: PulseKeeperRow): boolean {
-  if (keeper.paused || keeper.directory_issue) return false
+  if (keeper.paused || isKeeperFailing(keeper) || isKeeperPathResting(keeper)) return false
   const h = keeper.health.toLowerCase()
   const p = keeper.phase.toLowerCase()
   const s = keeper.status.toLowerCase()
-  if (h === 'failing' || h === 'failed' || h === 'offline' || p === 'stopped' || p === 'paused') {
+  if (
+    h === 'failing'
+    || h === 'failed'
+    || h === 'offline'
+    || p === 'stopped'
+    || p === 'paused'
+    || p === 'offline'
+    || p === 'crashed'
+    || p === 'failing'
+  ) {
     return false
   }
   return keeper.keepalive_running
@@ -261,15 +287,20 @@ export function buildPulseKpis(params: {
     const total = keepers.data.length
     const active = keepers.data.filter(isKeeperActive).length
     const failing = keepers.data.filter(isKeeperFailing).length
+    const resting = keepers.data.filter((k) => !isKeeperFailing(k) && isKeeperPathResting(k)).length
     const configured = shell.kind === 'value' ? shell.data.counts.configured_keepers : null
     const denom = configured !== null && configured > total ? configured : total
+    const subParts: string[] = []
+    if (failing > 0) subParts.push(`${failing} 주의 필요`)
+    if (resting > 0) subParts.push(`${resting} 경로 휴식`)
+    if (subParts.length === 0) subParts.push(`${total - active} 대기/정지`)
     activeKpi = {
       id: 'active_keepers',
       label: 'Active Keepers',
       value: observedValue(`${active} / ${denom}`),
-      exactTooltip: `실행 중 ${active} · 전체 ${total}${configured !== null ? ` · 설정 ${configured}` : ''}${failing > 0 ? ` · 주의 ${failing}` : ''}`,
-      secondary: failing > 0 ? `${failing} 주의 필요` : `${total - active} 대기/정지`,
-      tone: failing > 0 ? 'warn' : active > 0 ? 'ok' : 'default',
+      exactTooltip: `실행 중 ${active} · 전체 ${total}${configured !== null ? ` · 설정 ${configured}` : ''}${failing > 0 ? ` · 주의 ${failing}` : ''}${resting > 0 ? ` · 경로 휴식 ${resting}` : ''}`,
+      secondary: subParts.join(' · '),
+      tone: failing > 0 || resting > 0 ? 'warn' : active > 0 ? 'ok' : 'default',
       route: '/keepers',
     }
   } else if (keepers.kind === 'loading') {
@@ -312,15 +343,17 @@ export function buildPulseKpis(params: {
     } else {
       const doneFmt = formatCompactCount(done ?? 0)
       const awaitFmt = awaiting !== null ? formatCompactCount(awaiting) : null
+      const rejected = shell.data.scorecard.verifications_rejected_24h ?? 0
+      const secParts: string[] = []
+      secParts.push(awaitFmt !== null ? `검증 대기 ${awaitFmt.short}` : '검증 대기 없음')
+      if (rejected > 0) secParts.push(`거절 ${rejected}`)
       tasksKpi = {
         id: 'tasks_24h',
         label: 'Tasks Done/24h & Verify',
         value: observedValue(doneFmt.short),
-        exactTooltip: `24h 완료 ${doneFmt.exact}건${awaitFmt ? ` · 검증 대기 ${awaitFmt.exact}건` : ''}`,
-        secondary: awaitFmt !== null
-          ? `검증 대기 ${awaitFmt.short}`
-          : '검증 대기 없음',
-        tone: (awaiting ?? 0) > 0 ? 'warn' : (done ?? 0) > 0 ? 'ok' : 'default',
+        exactTooltip: `24h 완료 ${doneFmt.exact}건${awaitFmt ? ` · 검증 대기 ${awaitFmt.exact}건` : ''}${rejected > 0 ? ` · 24h 거절 ${rejected}건` : ''}`,
+        secondary: secParts.join(' · '),
+        tone: rejected > 0 ? 'bad' : (awaiting ?? 0) > 0 ? 'warn' : (done ?? 0) > 0 ? 'ok' : 'default',
         route: '/work/tasks',
       }
     }
@@ -386,6 +419,16 @@ export function buildPulseKpis(params: {
         tone: 'default',
         route: '/runtime/efficiency',
       }
+    : turnsTotal === null && shell.kind === 'failed' && keepers.kind === 'failed'
+      ? {
+          id: 'turns_24h',
+          label: 'Turns / 24h',
+          value: observedFailed(shell.error),
+          exactTooltip: shell.error.message,
+          secondary: '조회 실패',
+          tone: 'bad',
+          route: '/runtime/efficiency',
+        }
     : turnsTotal === null
       ? {
           id: 'turns_24h',
@@ -424,6 +467,16 @@ export function buildPulseKpis(params: {
       exactTooltip: null,
       secondary: null,
       tone: 'default',
+      route: '/runtime/quotas',
+    }
+  } else if (costs.kind === 'failed' && shell.kind === 'failed' && usage.kind !== 'value') {
+    spendKpi = {
+      id: 'spend_24h',
+      label: 'Spend / 24h',
+      value: observedFailed(costs.error),
+      exactTooltip: costs.error.message,
+      secondary: `조회 실패${scopeNote}`,
+      tone: 'bad',
       route: '/runtime/quotas',
     }
   } else {
@@ -533,24 +586,50 @@ export function buildAttentionQueue(params: {
   }
 
   for (const k of keepers) {
-    if (!isKeeperFailing(k)) continue
-    const detail = k.directory_issue
-      ?? k.runtime_blocker_summary
-      ?? (k.last_failure ? `최근 실패: ${k.last_failure.cause}` : `상태: ${k.health}`)
-    const ageSec = k.last_failure?.at_unix != null
-      ? Math.max(0, Math.round(nowSec - k.last_failure.at_unix))
-      : null
-    items.push({
-      id: `keeper:${k.name}`,
-      kind: 'keeper_failure',
-      severity: k.health.toLowerCase() === 'degraded' ? 'warn' : 'critical',
-      keeper: k.name,
-      title: `${k.name} · ${k.directory_issue ? '설정 오류' : k.health}`,
-      detail,
-      ageSec,
-      route: `/keepers/${encodeURIComponent(k.name)}/chat`,
-      raw: k,
-    })
+    if (isKeeperFailing(k)) {
+      const failSummary = k.directory_issue
+        ?? k.runtime_blocker_summary
+        ?? (k.runtime_lane_failures && k.runtime_lane_failures.length > 0
+          ? k.runtime_lane_failures.map((f) => `${f.runtime_id ?? 'lane'}: ${f.summary}`).join(' → ')
+          : null)
+        ?? (k.last_failure ? `최근 실패: ${k.last_failure.cause}` : `상태: ${k.health}`)
+      const actionableDisposition =
+        k.operator_disposition && k.operator_disposition !== 'pass'
+          ? k.operator_disposition
+          : null
+      const detail = actionableDisposition
+        ? `${failSummary} · 조치: ${actionableDisposition}`
+        : failSummary
+      const sinceUnix = k.failing_since ?? k.last_failure?.at_unix ?? null
+      const ageSec = sinceUnix != null
+        ? Math.max(0, Math.round(nowSec - sinceUnix))
+        : null
+      items.push({
+        id: `keeper:${k.name}`,
+        kind: 'keeper_failure',
+        severity: k.health.toLowerCase() === 'degraded' ? 'warn' : 'critical',
+        keeper: k.name,
+        title: `${k.name} · ${k.directory_issue ? '설정 오류' : k.health}`,
+        detail,
+        ageSec,
+        route: `/keepers/${encodeURIComponent(k.name)}/chat`,
+        raw: k,
+      })
+    } else if (isKeeperPathResting(k)) {
+      const rest = k.runtime_path_rest!
+      const detail = `경로 휴식 (${rest.runtime_id ?? k.runtime_id})${rest.release_at ? ` · 해제 ${rest.release_at}` : ''}${rest.release_basis ? ` · ${rest.release_basis}` : ''}`
+      items.push({
+        id: `keeper-rest:${k.name}`,
+        kind: 'keeper_failure',
+        severity: 'warn',
+        keeper: k.name,
+        title: `${k.name} · 경로 휴식`,
+        detail,
+        ageSec: null,
+        route: `/keepers/${encodeURIComponent(k.name)}/chat`,
+        raw: k,
+      })
+    }
   }
 
   const rank: Record<PulseAttentionItem['severity'], number> = { critical: 0, warn: 1, info: 2 }
@@ -581,7 +660,13 @@ export function buildGroupSparklineData(
   keepers: readonly PulseKeeperRow[],
   _win: TimeWindow,
   nowSec: number,
-): { readonly aligned: uPlot.AlignedData; readonly totalTurns: number } {
+): {
+  readonly aligned: uPlot.AlignedData
+  readonly totalTurns: number
+  readonly okTurns: number
+  readonly restedTurns: number
+  readonly failedTurns: number
+} {
   const bucketSeconds = TURN_SLOT_SECONDS
   const bucketCount = 48
   const currentBucket = Math.floor(nowSec / bucketSeconds) * bucketSeconds
@@ -610,6 +695,9 @@ export function buildGroupSparklineData(
   }
 
   let totalTurns = 0
+  let okTurns = 0
+  let restedTurns = 0
+  let failedTurns = 0
   for (const k of keepers) {
     if (!k.recent_turns) continue
     for (const slot of k.recent_turns.slots) {
@@ -619,10 +707,13 @@ export function buildGroupSparklineData(
       const count = slot.ok + slot.rested + slot.failed
       ys[idx] = (ys[idx] ?? 0) + count
       totalTurns += count
+      okTurns += slot.ok
+      restedTurns += slot.rested
+      failedTurns += slot.failed
     }
   }
 
-  return { aligned: [xs, ys], totalTurns }
+  return { aligned: [xs, ys], totalTurns, okTurns, restedTurns, failedTurns }
 }
 
 export function buildCompanyFleetGroups(params: {
@@ -650,13 +741,17 @@ export function buildCompanyFleetGroups(params: {
   const groups: PulseFleetGroup[] = []
   for (const [company, list] of buckets.entries()) {
     const sorted = [...list].sort((a, b) => a.name.localeCompare(b.name))
-    const { aligned, totalTurns } = buildGroupSparklineData(sorted, win, nowSec)
+    const { aligned, totalTurns, okTurns, restedTurns, failedTurns } = buildGroupSparklineData(sorted, win, nowSec)
     groups.push({
       company,
       keepers: sorted,
       activeCount: sorted.filter(isKeeperActive).length,
       failingCount: sorted.filter(isKeeperFailing).length,
+      restingCount: sorted.filter((k) => !isKeeperFailing(k) && isKeeperPathResting(k)).length,
       turnsInWindow: totalTurns,
+      okTurnsInWindow: okTurns,
+      restedTurnsInWindow: restedTurns,
+      failedTurnsInWindow: failedTurns,
       sparklineData: aligned,
       window: '24h',
     })
@@ -716,7 +811,7 @@ export function buildTeamHandoffPulse(
       hearth: post.hearth,
       replyCount: post.reply_count,
       createdAt: post.created_at,
-      route: '/knowledge/board',
+      route: `/knowledge/board/${encodeURIComponent(post.id)}`,
     })
   }
 

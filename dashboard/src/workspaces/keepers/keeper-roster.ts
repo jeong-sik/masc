@@ -16,6 +16,8 @@ import {
 } from '../../api/config-schema'
 import {
   filterAndSortRoster,
+  formatContextDetail,
+  isKeeperPathResting,
   needsRosterAttention,
   observeRosterContextPct,
 } from './keepers-api'
@@ -33,7 +35,7 @@ export interface KeeperRosterProps {
 
 function healthDotTone(k: KeeperRosterItem): 'ok' | 'warn' | 'bad' | 'brass' | 'idle' {
   if (needsRosterAttention(k)) return 'bad'
-  if (k.paused) return 'warn'
+  if (isKeeperPathResting(k) || k.paused) return 'warn'
   if (k.active_turn) return 'brass'
   if (k.keepalive_running) return 'ok'
   return 'idle'
@@ -55,7 +57,12 @@ export function KeeperRoster(props: KeeperRosterProps) {
     <aside class="kp-roster" aria-label="Keeper 로스터">
       <div class="kp-roster-head">
         <div class="kp-roster-top">
-          <h2 class="kp-roster-title">Keepers (${items.length})</h2>
+          <h2 class="kp-roster-title">
+            Keepers (${items.length})
+            ${props.roster.kind === 'value' && props.roster.stale && html`
+              <span class="kp-pill" data-tone="warn">지연됨</span>
+            `}
+          </h2>
           <button
             type="button"
             class="btn-primary"
@@ -117,7 +124,8 @@ export function KeeperRoster(props: KeeperRosterProps) {
                 empty=${html`<div class="kp-empty">일치하는 Keeper 없음</div>`}
                 renderItem=${(k: KeeperRosterItem) => {
                   const ctxObs = observeRosterContextPct(k)
-                  const ctxLabel = formatObserved(ctxObs, (v) => `${v}%`)
+                  const ctxDetail = formatContextDetail(k)
+                  const ctxLabel = ctxObs.kind === 'value' ? ctxDetail.label : formatObserved(ctxObs, (v) => `${v}%`)
                   const ctxTone = ctxObs.kind !== 'value'
                     ? undefined
                     : ctxObs.data >= 85
@@ -125,7 +133,31 @@ export function KeeperRoster(props: KeeperRosterProps) {
                       : ctxObs.data >= 65
                         ? 'warn'
                         : 'ok'
+                  const resting = isKeeperPathResting(k)
+                  const failing = needsRosterAttention(k)
                   const selected = props.selectedKeeper === k.name
+                  const subLine = failing
+                    ? `⚠ ${k.runtime_blocker_summary ?? k.last_failure?.cause ?? k.directory_issue ?? k.health}`
+                    : resting
+                      ? `⏸ 휴식 · ${k.runtime_path_rest?.runtime_id ?? k.runtime_id}`
+                      : k.waiting_summary && k.waiting_summary.count > 0
+                        ? `대기 ${k.waiting_summary.count} · ${k.runtime_id}`
+                        : k.runtime_id
+                  const actionableDisposition =
+                    k.operator_disposition && k.operator_disposition !== 'pass'
+                      ? k.operator_disposition
+                      : null
+                  const rightSub = mode === 'wall24h'
+                    ? (k.turns_24h_breakdown && k.turns_24h_breakdown.failed > 0
+                        ? `${k.turns_24h_breakdown.ok}ok/${k.turns_24h_breakdown.failed}fail`
+                        : k.turns_24h !== null
+                          ? `${k.turns_24h}t/24h`
+                          : '없음')
+                    : mode === 'attention' && failing
+                      ? `⚠ ${actionableDisposition ?? k.health}`
+                      : mode === 'attention' && resting
+                        ? '⏸ 휴식'
+                        : k.company
                   return html`
                     <button
                       type="button"
@@ -147,20 +179,16 @@ export function KeeperRoster(props: KeeperRosterProps) {
                       </span>
                       <span class="kp-roster-info">
                         <span class="kp-roster-name">${k.name}</span>
-                        <span class="kp-roster-sub">
-                          ${k.runtime_id}
+                        <span class="kp-roster-sub" title=${subLine}>
+                          ${subLine}
                         </span>
                       </span>
                       <span class="kp-roster-right">
-                        <span class="kp-pill" data-tone=${ctxTone}>
+                        <span class="kp-pill" data-tone=${ctxTone} title=${ctxDetail.tooltip}>
                           Ctx ${ctxLabel}
                         </span>
-                        <span class="kp-roster-sub">
-                          ${mode === 'wall24h'
-                            ? (k.turns_24h !== null ? `${k.turns_24h}t/24h` : '없음')
-                            : mode === 'attention' && needsRosterAttention(k)
-                              ? `⚠ ${k.health}`
-                              : k.company}
+                        <span class="kp-roster-sub" title=${rightSub}>
+                          ${rightSub}
                         </span>
                       </span>
                     </button>

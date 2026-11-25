@@ -13450,7 +13450,20 @@ let test_ux_batch2_modals_settings_overlays () =
     { shifted with work = Work_store.set_filter second.task_id shifted.work }
   in
   Alcotest.(check bool) "filtering away the verdict clears the overrule target"
-    true (Option.is_none (overrule_overlay filtered))
+    true (Option.is_none (overrule_overlay filtered));
+  (* #54796 review: a pane clamp (delta 0) on the list pane keeps an empty
+     selection empty; only an explicit move picks a row. *)
+  let on_list (m : Model.t) = { m with nav = { m.nav with pane_index = 0; zoomed = false } } in
+  List.iter
+    (fun (label, (m : Model.t)) ->
+      let clamped = Update_nav.clamp_for_pane (on_list m) in
+      Alcotest.(check bool) (label ^ ": pane clamp keeps the selection empty") true
+        (Option.is_none (Work_store.selected_harness_verdict clamped.work)
+         && Option.is_none (overrule_overlay clamped)))
+    [ ("removed", removed); ("filtered", filtered) ];
+  let moved_up, _ = step (Update_nav.clamp_for_pane (on_list removed)) (key Keymap.Input.Up) in
+  Alcotest.(check bool) "an explicit Up after the clamp still picks a row" true
+    (targets moved_up second.notes_hash)
 
 let test_ux_batch3_work_keepers_chat_mouse () =
   let m0 = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_en () in

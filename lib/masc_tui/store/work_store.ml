@@ -1137,13 +1137,18 @@ let move_selection ?(pane_index = 0) ?(has_linked_card = true) ?viewport_rows
         { t with detail_scroll_offset }
       else
         let len = List.length (filtered_harness_verdicts t) in
-        if len = 0 then t
-        else
-          let index =
-            match t.harness_selected_index with
-            | Some index -> clamp_index len (index + delta)
-            | None -> if delta < 0 then len - 1 else 0
-          in
+        (* An empty selection stays empty until an explicit move: [delta = 0]
+           (pane clamps on jumps, returns and focus changes) keeps [None]. *)
+        let next_index =
+          match t.harness_selected_index with
+          | Some index -> Some (clamp_index len (index + delta))
+          | None ->
+              if delta < 0 then Some (len - 1)
+              else if delta > 0 then Some 0
+              else None
+        in
+        match next_index with
+        | Some index when len > 0 ->
           let harness_scroll_offset =
             adjust_scroll ?viewport_rows ~scroll:t.harness_scroll_offset index
           in
@@ -1158,6 +1163,7 @@ let move_selection ?(pane_index = 0) ?(has_linked_card = true) ?viewport_rows
             harness_scroll_offset;
             detail_scroll_offset;
           }
+        | Some _ | None -> t
 
 let first_row_if_selected t = if t.selected_index < 0 then t.selected_index else 0
 

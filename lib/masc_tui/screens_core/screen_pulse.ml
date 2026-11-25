@@ -758,13 +758,15 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
                     | None -> None
                   in
                   let chk_part =
-                    if ver_total > 0 || ver_observed then
-                      Some
-                        (Say.resolve lang
-                           (Say.make
-                              ~ko:(Printf.sprintf "%d 검증" ver_total)
-                              ~en:(Printf.sprintf "%d chk" ver_total)))
-                    else None
+                    match verification_counts with
+                    | Some (passed, rejected) ->
+                        let total = passed + rejected in
+                        Some
+                          (Say.resolve lang
+                             (Say.make
+                                ~ko:(Printf.sprintf "%d 검증" total)
+                                ~en:(Printf.sprintf "%d chk" total)))
+                    | None -> None
                   in
                   String.concat Typography.sep_dot
                     (List.filter_map Fun.id [ wip_part; chk_part ])

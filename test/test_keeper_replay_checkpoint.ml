@@ -1206,8 +1206,15 @@ let test_exact_next_block_carrier_keeps_its_bound_text () =
   in
   Alcotest.(check bool) "the carrier and its bound Text stay exact" true
     (patched.messages = [ message User [ Text "question" ]; assistant ]);
+  let wire_content =
+    Agent_core.History.to_wire_blocks (Agent_core.History.Memory_store.create ())
+      (List.nth patched.messages 1).content
+    |> Result.get_ok
+  in
   match
-    Gemini.contents_of_messages ~supports_function_response_parts:false patched.messages
+    Gemini.contents_of_messages ~supports_function_response_parts:false
+      [ Agent_core.Llm_provider.Types.make_message
+          ~role:Agent_core.Llm_provider.Types.Assistant wire_content ]
   with
   | (_ : Yojson.Safe.t list), (_ : Yojson.Safe.t option) -> ()
   | exception Gemini.Gemini_api_error detail ->

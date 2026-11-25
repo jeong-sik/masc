@@ -1,6 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { signal } from '@preact/signals'
 import { startNavTelemetry } from '../lib/nav-telemetry'
+import {
+  captureDashboardCredentialOwner,
+  dashboardCredentialOwnerIsCurrent,
+  getStoredTokenMeta,
+  setStoredToken,
+  subscribeStoredTokenChanges,
+} from '../api/core'
+import { currentCanonicalDashboardActor, setCanonicalDashboardActor } from '../lib/dashboard-session-actor'
 import type { RouteState } from '../types'
 import {
   activeWorkspaceId,
@@ -418,6 +426,90 @@ describe('core/auth', () => {
       dispose()
       fetchSpy.mockRestore()
     }
+  })
+
+  it('retires the old credential owner on URL login, manual replacement, and clear', async () => {
+    setStoredToken('previous-dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    setCanonicalDashboardActor('previous-actor')
+    const oldOwner = captureDashboardCredentialOwner()
+    const onChange = vi.fn()
+    const unsubscribe = subscribeStoredTokenChanges(onChange)
+
+    try {
+      window.history.replaceState(null, '', '/dashboard/?token=new-url-token')
+      const fetchMock = vi.fn(async () => jsonResponse({ account_mode: 'Single_user' }))
+
+      await bootstrapAuthSession({ fetchImpl: fetchMock, probeShell: false })
+      expect(getStoredTokenMeta()).toEqual({ source: 'url' })
+      expect(currentCanonicalDashboardActor()).toBeNull()
+      expect(dashboardCredentialOwnerIsCurrent(oldOwner)).toBe(false)
+      expect(captureDashboardCredentialOwner().managed).toBe(false)
+
+      setCanonicalDashboardActor('url-actor')
+      setSingleUserToken('manual-token')
+      expect(getStoredTokenMeta()).toEqual({ source: 'manual' })
+      expect(currentCanonicalDashboardActor()).toBeNull()
+
+      setCanonicalDashboardActor('manual-actor')
+      setSingleUserToken(null)
+      expect(getStoredTokenMeta()).toBeNull()
+      expect(currentCanonicalDashboardActor()).toBeNull()
+      expect(onChange.mock.calls).toEqual([
+        [{ token: 'new-url-token', meta: { source: 'url' } }],
+        [{ token: 'manual-token', meta: { source: 'manual' } }],
+        [{ token: null, meta: null }],
+      ])
+    } finally {
+      unsubscribe()
+    }
+  })
+
+  it.each([401, 403])('keeps a newer login when an earlier shell probe returns %i', async status => {
+    setSingleUserToken('old-token')
+    let finishOldProbe!: (response: Response) => void
+    const oldProbe = new Promise<Response>(resolve => { finishOldProbe = resolve })
+    const oldFetch = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/health') return jsonResponse({ account_mode: 'Single_user' })
+      return oldProbe
+    })
+    const oldBootstrap = bootstrapAuthSession({ fetchImpl: oldFetch })
+    await vi.waitFor(() => expect(oldFetch).toHaveBeenCalledTimes(2))
+
+    setSingleUserToken('new-token')
+    const newFetch = vi.fn(async () => jsonResponse({ account_mode: 'Single_user' }))
+    const signedIn = await bootstrapAuthSession({ fetchImpl: newFetch })
+    const currentOwner = captureDashboardCredentialOwner()
+    const epoch = currentSessionEpoch()
+    setCanonicalDashboardActor('new-actor')
+
+    finishOldProbe(jsonResponse({ error: 'denied' }, status))
+    await expect(oldBootstrap).resolves.toEqual(signedIn)
+    expect(getSingleUserToken()).toBe('new-token')
+    expect(getStoredTokenMeta()).toEqual({ source: 'manual' })
+    expect(captureDashboardCredentialOwner().tokenRevision).toBe(currentOwner.tokenRevision)
+    expect(currentCanonicalDashboardActor()).toBe('new-actor')
+    expect(currentSessionEpoch()).toBe(epoch)
+  })
+
+  it('keeps a manual login when an earlier dev-token probe succeeds', async () => {
+    let finishDevProbe!: (response: Response) => void
+    const devProbe = new Promise<Response>(resolve => { finishDevProbe = resolve })
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/health') return jsonResponse({ auth_methods: { dev_token: true } })
+      return devProbe
+    })
+    const oldBootstrap = bootstrapAuthSession({ fetchImpl: fetchMock, probeShell: false })
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+
+    setSingleUserToken('manual-token')
+    const newFetch = vi.fn(async () => jsonResponse({ account_mode: 'Single_user' }))
+    const signedIn = await bootstrapAuthSession({ fetchImpl: newFetch, probeShell: false })
+
+    finishDevProbe(jsonResponse({ token: 'late-dev-token' }))
+    await expect(oldBootstrap).resolves.toEqual(signedIn)
+    expect(getSingleUserToken()).toBe('manual-token')
+    expect(getStoredTokenMeta()).toEqual({ source: 'manual' })
+    expect(captureDashboardCredentialOwner().managed).toBe(false)
   })
 
   it('consumes ?token= from masc login URL, strips URL history, persists in sessionStorage across reload, and clears on 401 or multi_account', async () => {

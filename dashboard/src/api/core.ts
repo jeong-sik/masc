@@ -21,8 +21,24 @@ import {
   managedDashboardRefusal,
   noteManagedCredentialRefusalObservation,
   recordManagedCredentialRefusal,
-  setCanonicalDashboardActor,
 } from '../lib/dashboard-session-actor'
+import {
+  consumeUrlBearerToken,
+  currentStoredTokenRevision,
+  getStoredToken,
+  getStoredTokenMeta,
+  setStoredToken,
+} from '../lib/dashboard-bearer'
+
+export {
+  clearStoredToken,
+  currentStoredTokenRevision,
+  getStoredToken,
+  getStoredTokenMeta,
+  setStoredToken,
+  subscribeStoredTokenChanges,
+} from '../lib/dashboard-bearer'
+export type { StoredTokenChange, StoredTokenMeta } from '../lib/dashboard-bearer'
 
 // --- Auth ---
 // Token is read from ?token= on first load, moved to sessionStorage,
@@ -32,153 +48,13 @@ function getQueryParams(): URLSearchParams {
   return new URLSearchParams(window.location.search)
 }
 
-const TOKEN_STORAGE_KEY = 'masc_bearer_token'
-const TOKEN_META_STORAGE_KEY = 'masc_bearer_token_meta'
 const BEARER_PREFIX = 'Bearer '
 
-export type StoredTokenMeta =
-  | { source: 'dev'; actor: 'dashboard'; role: 'admin' }
-  | { source: 'manual' }
-  | { source: 'url' }
-
-export interface StoredTokenChange {
-  token: string | null
-  meta: StoredTokenMeta | null
-}
-
-type StoredTokenChangeListener = (change: StoredTokenChange) => void
-
-const storedTokenChangeListeners = new Set<StoredTokenChangeListener>()
-let storedTokenRevision = 0
-
-function notifyStoredTokenChange(change: StoredTokenChange): void {
-  storedTokenRevision += 1
-  for (const listener of storedTokenChangeListeners) {
-    try {
-      listener(change)
-    } catch (err) {
-      console.warn('[dashboard-auth] token change listener failed', err)
-    }
-  }
-}
-
-export function currentStoredTokenRevision(): number {
-  return storedTokenRevision
-}
-
-export function subscribeStoredTokenChanges(
-  listener: StoredTokenChangeListener,
-): () => void {
-  storedTokenChangeListeners.add(listener)
-  return () => {
-    storedTokenChangeListeners.delete(listener)
-  }
-}
-
-function normalizeStoredTokenMeta(value: unknown): StoredTokenMeta | null {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
-  const record = value as Record<string, unknown>
-  if (record.source === 'manual') return { source: 'manual' }
-  if (record.source === 'url') return { source: 'url' }
-  if (
-    record.source === 'dev'
-    && record.actor === 'dashboard'
-    && record.role === 'admin'
-  ) {
-    return { source: 'dev', actor: 'dashboard', role: 'admin' }
-  }
-  // A stored 'worker' dev meta from an older build parses as null, which
-  // shouldRefreshDevToken treats as "re-bootstrap" — the migration is a
-  // single silent re-fetch.
-  return null
-}
-
-function storedTokenMetaEquals(
-  left: StoredTokenMeta | null,
-  right: StoredTokenMeta | null,
-): boolean {
-  if (left === null || right === null) return left === right
-  if (left.source !== right.source) return false
-  if (left.source !== 'dev' || right.source !== 'dev') return true
-  return left.actor === right.actor && left.role === right.role
-}
-
-function initTokenFromUrl(): void {
-  const params = new URLSearchParams(window.location.search)
-  const urlToken = params.get('token')
-  if (urlToken) {
-    setStoredToken(urlToken, { source: 'url' })
-    params.delete('token')
-    const cleaned = params.toString()
-    const newUrl = window.location.pathname + (cleaned ? `?${cleaned}` : '') + window.location.hash
-    history.replaceState(null, '', newUrl)
-  }
-}
-
-initTokenFromUrl()
-
-export function getStoredToken(): string | null {
-  try {
-    const token = sessionStorage.getItem(TOKEN_STORAGE_KEY)
-    return typeof token === 'string' && token.trim() !== '' ? token : null
-  } catch {
-    return null
-  }
-}
+const urlBearer = consumeUrlBearerToken()
+if (urlBearer !== null) setStoredToken(urlBearer, { source: 'url' })
 
 export function dashboardBearerToken(): string | null {
   return getStoredToken()
-}
-
-export function getStoredTokenMeta(): StoredTokenMeta | null {
-  try {
-    const raw = sessionStorage.getItem(TOKEN_META_STORAGE_KEY)
-    if (!raw) return null
-    return normalizeStoredTokenMeta(JSON.parse(raw))
-  } catch {
-    return null
-  }
-}
-
-export function setStoredToken(
-  token: string,
-  meta: StoredTokenMeta = { source: 'manual' },
-): void {
-  const normalizedToken = token.trim()
-  if (!normalizedToken) {
-    clearStoredToken()
-    return
-  }
-  const previousToken = getStoredToken()
-  const previousMeta = getStoredTokenMeta()
-  const nextMeta = normalizeStoredTokenMeta(meta)
-  sessionStorage.setItem(TOKEN_STORAGE_KEY, normalizedToken)
-  if (nextMeta) {
-    sessionStorage.setItem(TOKEN_META_STORAGE_KEY, JSON.stringify(nextMeta))
-  } else {
-    sessionStorage.removeItem(TOKEN_META_STORAGE_KEY)
-  }
-  setCanonicalDashboardActor(null)
-  if (previousToken !== normalizedToken || !storedTokenMetaEquals(previousMeta, nextMeta)) {
-    notifyStoredTokenChange({
-      token: normalizedToken,
-      meta: nextMeta,
-    })
-  }
-}
-
-export function clearStoredToken(): void {
-  const previousToken = getStoredToken()
-  const previousMeta = getStoredTokenMeta()
-  sessionStorage.removeItem(TOKEN_STORAGE_KEY)
-  sessionStorage.removeItem(TOKEN_META_STORAGE_KEY)
-  setCanonicalDashboardActor(null)
-  if (previousToken !== null || previousMeta !== null) {
-    notifyStoredTokenChange({
-      token: null,
-      meta: null,
-    })
-  }
 }
 
 export function isLoopbackHostname(hostname: string): boolean {
@@ -450,7 +326,7 @@ async function credentialedFetch(path: string, init: CredentialedRequestInit): P
   const managed = owner.token !== null && getStoredTokenMeta()?.source === 'dev'
   const managedRevision = managedDashboardActorRevision.peek()
   const credentialless = sentBearerToken(requestInit.headers) === null
-    ? credentiallessRequest(requestInit.method, path, storedTokenRevision)
+    ? credentiallessRequest(requestInit.method, path, currentStoredTokenRevision())
     : null
   if (credentialless !== null) {
     const replayed = replayedRefusal(credentialless)

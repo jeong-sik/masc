@@ -8849,6 +8849,173 @@ let test_keeper_lifecycle_keymap_matrix () =
       ("Keeper_config edit", m_kcfg_edit);
     ]
 
+let test_p1_shortcut_and_classifier_regressions () =
+  let t0 = Clock.Mono.of_ns 5_000_000_000L in
+  let m0 = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
+  let step m kev = Update.step ~now:t0 m (Msg.Key_event kev) in
+
+  (* 1. [d] on Keeper_memory & Knowledge_memory switches to View_diff (never Keeper_purge_confirm). *)
+  let m_kmem, _ =
+    Update_nav.push_dive m0
+      (Nav.Dive_keeper { name = "alpha"; tab = Nav.Keeper_memory })
+  in
+  let m_kmem_d, _ = step m_kmem (char_key "d") in
+  Alcotest.(check bool) "[d] on Keeper_memory switches to View_diff" true
+    (Knowledge_store.equal_memory_view_mode m_kmem_d.knowledge.memory_view_mode
+       Knowledge_store.View_diff);
+  Alcotest.(check bool) "[d] on Keeper_memory does not open Keeper_purge_confirm"
+    true (Option.is_none m_kmem_d.nav.overlay);
+
+  let m_know_mem =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Knowledge; overlay = None; dive_stack = [] };
+      knowledge = { m0.knowledge with active_tab = Nav.Knowledge_memory };
+    }
+  in
+  let m_know_d, _ = step m_know_mem (char_key "d") in
+  Alcotest.(check bool) "[d] on Knowledge_memory switches to View_diff" true
+    (Knowledge_store.equal_memory_view_mode m_know_d.knowledge.memory_view_mode
+       Knowledge_store.View_diff);
+
+  (* 2. [D] on Kmem_diff_flow disarms stale keeper_stop_armed and pins diff range. *)
+  let m_diff_armed =
+    {
+      m_kmem with
+      keeper_stop_armed = Some ("alpha", t0);
+      knowledge =
+        {
+          m_kmem.knowledge with
+          keeper_memory_subview = Knowledge_store.Kmem_diff_flow;
+        };
+    }
+  in
+  let m_after_pin, _ = step m_diff_armed (char_key ~shift:true "D") in
+  Alcotest.(check bool) "[D] on Kmem_diff_flow disarms stale keeper_stop_armed"
+    true (Option.is_none m_after_pin.keeper_stop_armed);
+
+  (* 3. Approval Strip [Y] on Artifacts & [J] on Goal_dive take priority over contextual intercepts. *)
+  let m_art_ask =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Knowledge; overlay = None; dive_stack = [] };
+      knowledge = { m0.knowledge with active_tab = Nav.Knowledge_artifacts };
+      work = Work_store.empty |> Work_store.apply_asks ~observed_at:t0 [ mk_single_ask () ];
+    }
+    |> Model.rebuild_attention
+  in
+  let m_art_y, _ = step m_art_ask (char_key ~shift:true "Y") in
+  Alcotest.(check bool) "[Y] on Artifacts with Ask active opens Ask_answer modal"
+    true (Option.equal Nav.equal_overlay m_art_y.nav.overlay (Some Nav.Ask_answer));
+
+  let m_goal_ask, _ =
+    Update_nav.push_dive m_art_ask (Nav.Dive_work (Nav.Goal_dive "goal-1"))
+  in
+  let m_goal_j, _ = step m_goal_ask (char_key ~shift:true "J") in
+  Alcotest.(check bool) "[J] on Goal_dive with Ask active teleports instead of scrolling"
+    false
+    (Option.equal Nav.equal_dive (Model.active_dive m_goal_j)
+       (Some (Nav.Dive_work (Nav.Goal_dive "goal-1"))));
+
+  (* 4. [v] on Work > Tasks cycles task_status_filter matching the [v/Space] hint. *)
+  let m_tasks =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Work; overlay = None; dive_stack = [] };
+      work = { m0.work with active_tab = Nav.Work_tasks };
+    }
+  in
+  let m_tasks_v, _ = step m_tasks (char_key "v") in
+  Alcotest.(check bool) "[v] on Work > Tasks cycles task_status_filter" true
+    (m_tasks_v.work.task_status_filter <> m_tasks.work.task_status_filter);
+
+  (* 5. Keymap.Open_external_editor handles Wiki_dive (from Palette). *)
+  let m_wiki, _ =
+    Update_nav.push_dive m0 (Nav.Dive_knowledge (Nav.Wiki_dive "handbook"))
+  in
+  let _, wiki_cmds =
+    Update_actions.execute_action ~now:t0 m_wiki Keymap.Open_external_editor
+  in
+  Alcotest.(check bool) "Open_external_editor emits Edit_wiki_page on Wiki_dive"
+    true
+    (List.exists
+       (function
+         | Cmd.Open_editor_escape_hatch (Cmd.Edit_wiki_page "handbook") -> true
+         | _ -> false)
+       (Cmd.flatten wiki_cmds));
+
+  (* 6. Infra_store activity backfill classifies keeper.tool_exec and keeper.turn_* wire kinds. *)
+  let mk_ev seq kind : Wire_infra.activity_event_item =
+    {
+      seq;
+      ts_ms = 1795254000000 + (seq * 1000);
+      ts_iso = "";
+      kind;
+      actor_id = Some "alpha";
+      actor_kind = Some "keeper";
+      subject_id = None;
+      tags = [];
+      payload = `Null;
+    }
+  in
+  let inf =
+    Infra_store.empty
+    |> Infra_store.apply_activity_events_backfill
+         [
+           mk_ev 1 "keeper.tool_exec";
+           mk_ev 2 "keeper.turn_completed";
+           mk_ev 3 "keeper.turn_blocked";
+           mk_ev 4 "keeper.turn_input_required";
+           mk_ev 5 "tool.called";
+           mk_ev 6 "agent.heartbeat";
+         ]
+  in
+  let kind_of summary =
+    List.find (fun (r : Infra_store.activity_row) -> String.equal r.summary summary)
+      inf.activity_events
+    |> fun r -> r.kind
+  in
+  let check_act label expected actual =
+    let eq a b =
+      match a, b with
+      | Infra_store.Activity_tool_call, Infra_store.Activity_tool_call
+      | Infra_store.Activity_turn_complete, Infra_store.Activity_turn_complete
+      | Infra_store.Activity_agent_core, Infra_store.Activity_agent_core
+      | Infra_store.Activity_stream_gap, Infra_store.Activity_stream_gap ->
+          true
+      | Infra_store.Activity_tool_call,
+        ( Infra_store.Activity_turn_complete
+        | Infra_store.Activity_agent_core
+        | Infra_store.Activity_stream_gap )
+      | Infra_store.Activity_turn_complete,
+        ( Infra_store.Activity_tool_call
+        | Infra_store.Activity_agent_core
+        | Infra_store.Activity_stream_gap )
+      | Infra_store.Activity_agent_core,
+        ( Infra_store.Activity_tool_call
+        | Infra_store.Activity_turn_complete
+        | Infra_store.Activity_stream_gap )
+      | Infra_store.Activity_stream_gap,
+        ( Infra_store.Activity_tool_call
+        | Infra_store.Activity_turn_complete
+        | Infra_store.Activity_agent_core ) ->
+          false
+    in
+    Alcotest.(check bool) label true (eq expected actual)
+  in
+  check_act "keeper.tool_exec -> Activity_tool_call"
+    Infra_store.Activity_tool_call (kind_of "keeper.tool_exec");
+  check_act "tool.called -> Activity_tool_call"
+    Infra_store.Activity_tool_call (kind_of "tool.called");
+  check_act "keeper.turn_completed -> Activity_turn_complete"
+    Infra_store.Activity_turn_complete (kind_of "keeper.turn_completed");
+  check_act "keeper.turn_blocked -> Activity_turn_complete"
+    Infra_store.Activity_turn_complete (kind_of "keeper.turn_blocked");
+  check_act "keeper.turn_input_required -> Activity_turn_complete"
+    Infra_store.Activity_turn_complete (kind_of "keeper.turn_input_required");
+  check_act "agent.heartbeat -> Activity_agent_core"
+    Infra_store.Activity_agent_core (kind_of "agent.heartbeat")
+
 let () =
   Alcotest.run "masc_tui_keymap_matrix"
     [
@@ -8912,5 +9079,8 @@ let () =
           Alcotest.test_case
             "Keeper lifecycle keymap matrix (0 collisions, workspace scope & overlay isolation)"
             `Quick test_keeper_lifecycle_keymap_matrix;
+          Alcotest.test_case
+            "P1 shortcut priority, Memory [d]/[D], Work [v], Wiki Ctrl+E, and activity wire classifier"
+            `Quick test_p1_shortcut_and_classifier_regressions;
         ] );
     ]

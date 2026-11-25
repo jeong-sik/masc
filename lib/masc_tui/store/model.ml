@@ -1993,6 +1993,71 @@ let is_keeper_lifecycle_surface m =
       false
   | None -> Nav.equal_workspace m.nav.workspace Nav.Keepers
 
+let is_memory_explorer_surface m =
+  Option.is_none m.nav.overlay
+  &&
+  match active_dive m with
+  | Some (Nav.Dive_keeper { tab = Nav.Keeper_memory; _ }) -> true
+  | Some
+      ( Nav.Dive_keeper
+          {
+            tab =
+              ( Nav.Keeper_chat
+              | Nav.Keeper_context
+              | Nav.Keeper_tool_calls
+              | Nav.Keeper_work_candle
+              | Nav.Keeper_sandbox
+              | Nav.Keeper_config
+              | Nav.Keeper_logs
+              | Nav.Keeper_identity );
+            _;
+          }
+      | Nav.Dive_work _
+      | Nav.Dive_knowledge _
+      | Nav.Dive_runtime _
+      | Nav.Dive_infra _ ) ->
+      false
+  | None ->
+      (Nav.equal_workspace m.nav.workspace Nav.Knowledge
+      && Nav.equal_knowledge_tab m.knowledge.active_tab Nav.Knowledge_memory)
+      || (Nav.equal_workspace m.nav.workspace Nav.Keepers
+         && (m.nav.pane_index >= 1 || m.nav.zoomed)
+         && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory)
+
+let is_memory_diff_pin_surface m =
+  is_memory_explorer_surface m
+  &&
+  match active_dive m with
+  | Some (Nav.Dive_keeper { tab = Nav.Keeper_memory; _ }) ->
+      Knowledge_store.equal_keeper_memory_subview
+        m.knowledge.keeper_memory_subview Knowledge_store.Kmem_diff_flow
+  | Some
+      ( Nav.Dive_keeper
+          {
+            tab =
+              ( Nav.Keeper_chat
+              | Nav.Keeper_context
+              | Nav.Keeper_tool_calls
+              | Nav.Keeper_work_candle
+              | Nav.Keeper_sandbox
+              | Nav.Keeper_config
+              | Nav.Keeper_logs
+              | Nav.Keeper_identity );
+            _;
+          }
+      | Nav.Dive_work _
+      | Nav.Dive_knowledge _
+      | Nav.Dive_runtime _
+      | Nav.Dive_infra _ ) ->
+      false
+  | None ->
+      if Nav.equal_workspace m.nav.workspace Nav.Knowledge then
+        Knowledge_store.equal_memory_subview m.knowledge.memory_subview
+          Knowledge_store.Mem_diff_flow
+      else
+        Knowledge_store.equal_keeper_memory_subview
+          m.knowledge.keeper_memory_subview Knowledge_store.Kmem_diff_flow
+
 let inline_modal_for kind =
   let fields =
     match kind with

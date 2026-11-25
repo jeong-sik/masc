@@ -47,6 +47,11 @@ val draw_line :
 (** Paint a prepared line in a one-row rectangle without clearing its background.
     Registers its document image part and, by default, interns its OSC 8 links. *)
 
+val alphatex_code_blocks : string -> string list
+(** Extract the body of every closed fenced CommonMark code block whose info
+    language tag is [alphatex] or [atex] (case-insensitive), in document
+    reading order. Shares the exact {!Cmarkit} parser and fence classification
+    used by {!render_lines}. *)
 val draw :
   Cell_grid.t ->
   rect:Rect.t ->

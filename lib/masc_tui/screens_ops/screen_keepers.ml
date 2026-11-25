@@ -1297,7 +1297,16 @@ let render_with_history_rows
                           ~ko:"[D] 중지 확정 · [Esc] 취소"
                           ~en:"[D] Confirm · [Esc] Cancel"
                   | None ->
-                      if left_rect.w >= 39 then
+                      if Model.is_memory_diff_pin_surface model then
+                        if left_rect.w >= 39 then
+                          Ops_common.say model
+                            ~ko:"[W] 깨우기/온라인 · [D] 비교 구간 고정"
+                            ~en:"[W] Wake/Online · [D] Pin Diff"
+                        else
+                          Ops_common.say model
+                            ~ko:"[W] 깨우기 · [D] 구간 고정"
+                            ~en:"[W] Wake · [D] Pin Diff"
+                      else if left_rect.w >= 39 then
                         Ops_common.say model
                           ~ko:"[W] 깨우기/온라인 · [D] 중지(2회)"
                           ~en:"[W] Wake/Online · [D] Stop(2x)"

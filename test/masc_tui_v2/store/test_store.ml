@@ -22832,7 +22832,17 @@ let test_alphatex_fences () =
   check "another language" [] "```ocaml\nlet x = 1\n```";
   check "a tag that only starts with alphatex" [] "```alphatexx\nx\n```";
   check "an alphaTex fence inside a tilde fence" []
-    "~~~markdown\n```alphatex\nx\n```\n~~~"
+    "~~~markdown\n```alphatex\nx\n```\n~~~";
+  check "a four-backtick alphaTex fence" [ "x" ]
+    "````alphatex\nx\n````";
+  check "a three-backtick alphaTex example inside a four-backtick markdown fence" []
+    "````markdown\n```alphatex\nx\n```\n````";
+  check "tab-delimited info string" [ "x" ]
+    "```alphatex\trhythm\nx\n```";
+  check "four-space indented code block is not a fence" []
+    "    ```alphatex\n    x\n    ```";
+  check "blockquoted alphaTex fence" [ "x" ]
+    "> ```alphatex\n> x\n> ```"
 
 let test_hidden_score_command () =
   let rejected raw =

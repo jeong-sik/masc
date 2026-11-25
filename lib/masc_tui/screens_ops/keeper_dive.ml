@@ -4093,6 +4093,17 @@ let render_tabs_body ?history_rows ~embedded ~name ~tab ~(model : Model.t) ~cach
             (Ops_common.say model
                ~ko:"[Ctrl+O] 도구 펼치기 · [W] 깨우기 · [D] 중지"
                ~en:"[Ctrl+O] Expand tools · [W] Wake · [D] Stop")
+      else if Model.is_memory_diff_pin_surface model then
+        if rect.w >= 54 then
+          Some
+            (Ops_common.say model
+               ~ko:"[W] 깨우기/온라인 · [D] 비교 구간 고정"
+               ~en:"[W] Wake/Online · [D] Pin Diff")
+        else
+          Some
+            (Ops_common.say model
+               ~ko:"[W] 깨우기 · [D] 구간 고정"
+               ~en:"[W] Wake · [D] Pin Diff")
       else if rect.w >= 54 then
         Some
           (Ops_common.say model

@@ -2524,6 +2524,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
   in
   let is_keeper_stop_key =
     Model.is_keeper_lifecycle_surface m
+    && (not (Model.is_memory_diff_pin_surface m))
     &&
     match
       Keymap.dispatch
@@ -3496,7 +3497,8 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                           Some ({ m with drafts }, [])
                       | ( Some (Nav.Dive_work (Nav.Goal_dive goal_id))
                         , Keymap.Input.Char "J" )
-                        when is_printable_key norm ->
+                        when is_printable_key norm
+                             && Option.is_none (Model.fast_approval_strip_item m) ->
                           Some
                             ( Update_nav.scroll_goal_dive_measure ~delta:1
                                 ~goal_id m
@@ -3541,32 +3543,9 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                           Some
                             (Update_nav.open_overlay m
                                (Nav.System_gate Nav.Media_viewer))
-                      | ( Some (Nav.Dive_keeper { tab = Nav.Keeper_memory; _ })
-                        , Keymap.Input.Char "D" )
+                      | (Some _ | None), Keymap.Input.Char "D"
                         when is_printable_key norm
-                             && Knowledge_store.equal_keeper_memory_subview
-                                  m.knowledge.keeper_memory_subview
-                                  Knowledge_store.Kmem_diff_flow ->
-                          Some (Update_nav.pin_memory_diff_range m)
-                      | None, Keymap.Input.Char "D"
-                        when is_printable_key norm
-                             && ((Nav.equal_workspace m.nav.workspace
-                                    Nav.Knowledge
-                                  && Nav.equal_knowledge_tab
-                                       m.knowledge.active_tab
-                                       Nav.Knowledge_memory
-                                  && Knowledge_store.equal_memory_subview
-                                       m.knowledge.memory_subview
-                                       Knowledge_store.Mem_diff_flow)
-                                || (Nav.equal_workspace m.nav.workspace
-                                      Nav.Keepers
-                                    && (m.nav.pane_index >= 1 || m.nav.zoomed)
-                                    && Nav.equal_keeper_tab
-                                         m.fleet.keeper_dive_tab
-                                         Nav.Keeper_memory
-                                    && Knowledge_store.equal_keeper_memory_subview
-                                         m.knowledge.keeper_memory_subview
-                                         Knowledge_store.Kmem_diff_flow)) ->
+                             && Model.is_memory_diff_pin_surface m ->
                           Some (Update_nav.pin_memory_diff_range m)
                       | ( ( Some
                               ( Nav.Dive_keeper
@@ -3659,7 +3638,9 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                         Nav.Knowledge_memory ->
                                 Some Keymap.Toggle_memory_scope
                             | Some "Y"
-                              when (match Model.active_dive m with
+                              when Option.is_none
+                                     (Model.fast_approval_strip_item m)
+                                   && (match Model.active_dive m with
                                    | Some
                                        (Nav.Dive_knowledge (Nav.Artifact_dive _))
                                      ->
@@ -3680,7 +3661,9 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                             Nav.Knowledge_artifacts) ->
                                 Some Keymap.Copy_public_url
                             | Some "N"
-                              when (not
+                              when Option.is_none
+                                     (Model.fast_approval_strip_item m)
+                                   && (not
                                       (String.equal
                                          (String.trim
                                             m.knowledge.artifact_search_query)

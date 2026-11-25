@@ -421,6 +421,16 @@ val is_keeper_lifecycle_surface : t -> bool
     or sidebar focus is active and the operator is on [4 Keepers] or inside a
     [Dive_keeper] view (where bare [W]/[D] lifecycle hotkeys apply). *)
 
+val is_memory_explorer_surface : t -> bool
+(** [true] iff no overlay is open and the active body surface is Memory
+    Explorer ([Knowledge > Memory], [Keepers] split/zoomed [Keeper_memory], or
+    [Dive_keeper] on [Keeper_memory]), where bare [d] switches to Diff view. *)
+
+val is_memory_diff_pin_surface : t -> bool
+(** [true] iff {!is_memory_explorer_surface} holds and the active Memory
+    subview is the diff-flow view ([Mem_diff_flow] / [Kmem_diff_flow]), where
+    uppercase [D] pins the diff range instead of arming keeper stop. *)
+
 val target_keeper_for_lifecycle : t -> string option
 (** Single-SSOT target keeper for lifecycle actions ([W]/[D], slash commands,
     and [Ctrl+K] palette): active [Dive_keeper] name first, then on [4 Keepers]

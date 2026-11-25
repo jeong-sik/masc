@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -798,7 +800,7 @@ describe('workspaces/runtime', () => {
             ask_id: 'ask-9',
             asked_at: 1_700_000_000,
             context: null,
-            questions: [{ id: 'q-space', prompt: 'Workspace name?' }],
+            questions: [{ id: 'q-space', prompt: '**Workspace** name?' }],
             resolution: { state: 'open' },
           }],
         })
@@ -820,7 +822,10 @@ describe('workspaces/runtime', () => {
 
     const asksPanel = container.querySelector('[data-testid="lane-addon-asks-panel"]')
     expect(asksPanel).not.toBeNull()
-    const input = asksPanel!.querySelector('input[aria-label="답변:q-space"]') as HTMLInputElement
+    const input = asksPanel!.querySelector('input[aria-labelledby]') as HTMLInputElement
+    const prompt = document.getElementById(input.getAttribute('aria-labelledby')!)
+    expect(prompt?.querySelector('strong')?.textContent).toBe('Workspace')
+    expect(prompt?.textContent?.trim()).toBe('Workspace name?')
     input.value = 'masc-prod'
     input.dispatchEvent(new Event('input', { bubbles: true }))
     await flushUi(10)

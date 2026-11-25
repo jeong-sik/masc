@@ -10,7 +10,7 @@
  */
 
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useId, useState } from 'preact/hooks'
 import {
   apiGet,
   apiMutate,
@@ -18,6 +18,7 @@ import {
   resourceCache,
 } from '../../core'
 import { MasterDetail, VirtualList } from '../../components/primitives'
+import { MarkdownContent } from '../../components/common/markdown-renderer'
 import type {
   BrowserClientRow,
   BrowserClientsPayload,
@@ -59,6 +60,7 @@ export function AddonsTab(props: WorkspaceViewProps) {
   const [preview, setPreview] = useState<PackagePreviewPayload | null>(null)
   const [attachRunId, setAttachRunId] = useState('default')
   const [actionJson, setActionJson] = useState('{}')
+  const askPromptId = useId()
   const [askAnswersByKey, setAskAnswersByKey] = useState<Readonly<Record<string, string>>>({})
   const [banner, setBanner] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
 
@@ -357,7 +359,7 @@ export function AddonsTab(props: WorkspaceViewProps) {
           <div class="wka-h">
             <h3>열린 Lane-Addon 질문 (${asksObs.data.asks!.length})</h3>
           </div>
-          ${asksObs.data.asks!.map((ask) => html`
+          ${asksObs.data.asks!.map((ask, askIndex) => html`
             <div key=${ask.ask_id} style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', padding: 'var(--sp-2)', background: 'var(--bg-2)', borderRadius: 'var(--radius-sm)' }}>
               <div style=${{ fontWeight: 600, fontSize: 'var(--fs-12)' }}>${ask.title}</div>
               <div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
@@ -366,18 +368,21 @@ export function AddonsTab(props: WorkspaceViewProps) {
               ${ask.questions.map((q, qIdx) => {
                 const qid = q.id ?? q.question_id ?? `q-${qIdx}`
                 const key = `${ask.ask_id}:${qid}`
+                const promptId = `${askPromptId}-${askIndex}-${qIdx}`
                 return html`
-                  <label key=${key} style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)', fontSize: 'var(--fs-12)' }}>
-                    <span>${q.prompt ?? q.text ?? q.label ?? qid}</span>
+                  <div key=${key} style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)', fontSize: 'var(--fs-12)' }}>
+                    <div id=${promptId}>
+                      <${MarkdownContent} text=${q.prompt ?? q.text ?? q.label ?? qid} />
+                    </div>
                     <input
                       type="text"
-                      aria-label=${`답변:${qid}`}
+                      aria-labelledby=${promptId}
                       placeholder="응답 입력 (비우면 skipped)"
                       value=${askAnswersByKey[key] ?? ''}
                       onInput=${(e: Event) => setAskAnswersByKey((prev) => ({ ...prev, [key]: (e.target as HTMLInputElement).value }))}
                       style=${{ padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
                     />
-                  </label>
+                  </div>
                 `
               })}
               <button

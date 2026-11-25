@@ -376,6 +376,31 @@ let test_theme_contrast () =
         (Theme.preset_name preset ^ " body text floor is WCAG AAA") true
         ((Theme.text_floors preset).Theme.primary >= 7.0))
     Theme.[ Muted; Muted_warm; Muted_green; Muted_dusk; Muted_graphite ];
+  (* The named palettes only have to clear AA, so a published color that clears
+     it is shown as published. The background and the brightest text are the
+     anchors: changing either makes the preset a different palette. *)
+  List.iter
+    (fun (preset, background, brightest) ->
+      let name = Theme.preset_name preset in
+      let f = Theme.text_floors preset in
+      Alcotest.(check (list (float 0.0)))
+        (name ^ " text floors are AA")
+        (List.init 5 (fun _ -> Theme.min_text_contrast))
+        [ f.Theme.bright; f.Theme.primary; f.Theme.secondary; f.Theme.muted;
+          f.Theme.selection ];
+      let th = Theme.of_preset preset in
+      Alcotest.(check int) (name ^ " background is the published one")
+        background th.surface_0;
+      Alcotest.(check int) (name ^ " brightest text is the published one")
+        brightest th.text_bright)
+    Theme.
+      [
+        (Solarized_dark, 0x002B36, 0xEEE8D5) (* base03, base2 *);
+        (Nord, 0x2E3440, 0xECEFF4) (* nord0, nord6 *);
+        (Dracula, 0x282A36, 0xF8F8F2) (* Background, Foreground *);
+        (Gruvbox_dark, 0x282828, 0xFBF1C7) (* dark0, light0 *);
+        (Catppuccin_mocha, 0x1E1E2E, 0xCDD6F4) (* base, text *);
+      ];
   (* preset_index is numbered by hand, and equal_preset compares it. *)
   List.iter
     (fun a ->

@@ -295,7 +295,7 @@ let external_fields (item : Keeper_external_attention.item) =
         ~authority:item.actor.authority
         ~id:item.actor.actor_id
         ~name:item.actor.display_name
-        ~account:item.actor.account )
+        ~account:(Keeper_external_attention.original_message_account item) )
   ; f_source, `String item.source_label
   ; f_surface, Surface_ref.to_json item.conversation.surface
   ; f_conversation_id, `String item.conversation.conversation_id

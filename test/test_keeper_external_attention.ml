@@ -90,12 +90,29 @@ let with_temp_base name f =
 let test_account_requires_matching_origin () =
   with_temp_base "keeper-external-attention-account" @@ fun base_path ->
   let user_id = "900000000000000001" in
-  let account = Masc.Connector_account_ref.discord_user user_id in
-  Alcotest.(check bool) "account parsed" true (Option.is_some account);
+  let reference = Option.get (Masc.Connector_account_ref.discord_user user_id) in
+  let account = Some (A.Account_of_original_message reference) in
   let message = external_message "msg-1" in
   let att = item ~external_message:message () in
   let att = { att with actor = { att.actor with actor_id = Some user_id; account } } in
   check_roundtrip "proven account" A.item_to_json A.item_of_json att;
+  Alcotest.(check bool) "original proof can supply the account" true
+    (A.original_message_account att = Some reference);
+  let older = { att with actor = { att.actor with
+    account = Some (A.Account_without_original_proof reference) } } in
+  check_roundtrip "older account without proof of original authorship" A.item_to_json A.item_of_json older;
+  Alcotest.(check bool) "older observation cannot supply original proof" true
+    (Option.is_none (A.original_message_account older));
+  (match record ~base_path att with
+   | `Recorded -> ()
+   | `Duplicate _ -> Alcotest.fail "the first account evidence was already recorded"
+   | `Error detail -> Alcotest.fail detail);
+  (match A.load_events_result ~base_path ~keeper_name:att.keeper_name with
+   | Ok events ->
+     let accounts = List.map (fun (A.Recorded row) -> A.original_message_account row) events in
+     Alcotest.(check bool) "original proof survives a strict store read" true
+       (accounts = [ Some reference ])
+   | Error error -> Alcotest.fail (A.read_error_to_string error));
   let mismatched_actor = { att with actor = { att.actor with actor_id = Some "900000000000000002" } } in
   let wrong_surface = { message with surface = discord_surface "other-channel" } in
   List.iter
@@ -122,12 +139,16 @@ let write_file path contents =
 let test_unsupported_account_does_not_hide_stored_observations () =
   with_temp_base "keeper-external-attention-account-version" @@ fun base_path ->
   let first = item () in
-  let encode account att =
+  let encode ?proof account att =
     match A.item_to_json att with
     | `Assoc fields ->
       (match List.assoc_opt "actor" fields with
        | Some (`Assoc actor_fields) ->
-         let actor = `Assoc (("account", account) :: actor_fields) in
+         let proof_field = match proof with
+           | None -> []
+           | Some value -> [ "account_proof", `String value ]
+         in
+         let actor = `Assoc (("account", account) :: proof_field @ actor_fields) in
          `Assoc [ "event", `String "recorded"
                 ; "item", `Assoc (("actor", actor) :: List.remove_assoc "actor" fields) ]
          |> Yojson.Safe.to_string
@@ -135,15 +156,26 @@ let test_unsupported_account_does_not_hide_stored_observations () =
     | _ -> Alcotest.fail "fixture has no fields"
   in
   let second = item ~dedupe_key:"other-event" () in
+  let user_id = "900000000000000001" in
+  let known_account = Option.get (Masc.Connector_account_ref.discord_user user_id) in
+  let third = item ~dedupe_key:"future-proof-event"
+      ~external_message:(external_message "future-proof-message") () in
+  let third = { third with actor = { third.actor with actor_id = Some user_id } } in
+  let third_without_proof = { third with actor = { third.actor with
+    account = Some (A.Account_without_original_proof known_account) } } in
   let unsupported_version = `Assoc [ "kind", `String "discord_user"; "version", `Int 2 ] in
   let unsupported_kind = `Assoc [ "kind", `String "future_user"; "version", `Int 1 ] in
   let path = A.attention_path ~base_path ~keeper_name:first.keeper_name in
-  let original = encode unsupported_version first ^ "\n" ^ encode unsupported_kind second ^ "\n" in
+  let original = String.concat "\n"
+      [ encode unsupported_version first; encode unsupported_kind second
+      ; encode ~proof:"discord_original_message_v2"
+          (Masc.Connector_account_ref.to_json known_account) third
+      ; "" ] in
   write_file path original;
   (match A.load_events_result ~base_path ~keeper_name:first.keeper_name with
    | Ok events ->
-     Alcotest.(check bool) "both observations remain readable without account evidence" true
-       (events = [ A.Recorded first; A.Recorded second ])
+     Alcotest.(check bool) "all observations remain readable without original proof" true
+       (events = [ A.Recorded first; A.Recorded second; A.Recorded third_without_proof ])
    | Error error -> Alcotest.fail (A.read_error_to_string error));
   Alcotest.(check string) "read preserves original bytes" original (Fs_compat.load_file path);
   let malformed = `Assoc [ "kind", `String "discord_user"; "version", `Int 1 ] in
@@ -219,7 +251,10 @@ let test_record_dedupes_and_reads_pending () =
   let actor_id = "900000000000000001" in
   let att = item ~external_message:(external_message "msg-1") () in
   let att = { att with actor = { att.actor with actor_id = Some actor_id } } in
-  let account = Masc.Connector_account_ref.discord_user actor_id in
+  let account =
+    Masc.Connector_account_ref.discord_user actor_id
+    |> Option.map (fun account -> A.Account_of_original_message account)
+  in
   Alcotest.(check bool) "replay has valid account evidence" true (Option.is_some account);
   let replay = { att with actor = { att.actor with account } } in
   (match record ~base_path att with

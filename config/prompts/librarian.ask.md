@@ -33,7 +33,7 @@ template_variables: []
      - 항목(`items`/`unattributed`/`own`/`closed_after_admission`)은 `index`와 `kind`를 갖습니다:
        - `"message"`: `role`, `speaker`(User일 때) + `content`(`"text"`, `"tool_use"`, `"tool_result"`, `"image"`, `"document"`, `"audio"`; thinking 제외). 단, 런타임이 다시 넣어 준 기억·안내·복구 단서는 내용을 빼고 **`"runtime_context"`** 만 실으므로 **Keeper가 새로 본 관측으로 치지 마세요.**
        - `"chat"`: `role`, `speaker` / `content` / `tool_call`(`id`, `name`). 외부 화자의 원본 좌표가 있으면 `surface`, `workspace_id`, `conversation_id`, `external_message_id`를 싣습니다. 깨진 줄은 `"chat_unreadable"`.
-       - `"external"`: `actor`, `source`, `surface`, `conversation_id`, `urgency`, `content`. 메시지 원본이 있으면 `external_message_id`도 싣습니다. 커넥터가 계정을 확인한 행에는 호스트가 기록한 `actor.account`가 들어 있습니다.
+       - `"external"`: `actor`, `source`, `surface`, `conversation_id`, `urgency`, `content`. 메시지 원본이 있으면 `external_message_id`도 싣습니다. 원본 메시지의 발화 계정을 호스트가 확인한 행에는 `actor.account`가 들어 있습니다.
        - 외부 화자에 대한 기억은 커넥터와 확인된 원본 범위 안의 발화에 근거합니다. 원래 행에 `actor.account`가 없으면 `speaker.id`, `actor.id`, `name`으로 계정 참조를 만들지 마세요. 한 방에서 확인한 선호를 다른 방에 적용하지 마세요.
        - `"tool_observation"`: `tool_name`, `outcome`(`"succeeded"` | `"failed"` | `"unknown"`); `"untagged"`.
      - `Read_item_alone`(단일 항목 초과 시)에는 앞 Memory·`working_state`·`world_index` 없이 `u1` 한 항목만 실립니다.

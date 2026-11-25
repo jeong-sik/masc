@@ -16,6 +16,12 @@ type request =
 
 type raster = { png : string; pixels : int * int }
 
+type preview_result =
+  | Preview_ready of raster
+  | Budget_limited
+  | Retry_exhausted
+  | Unavailable
+
 type placement = {
   image_id : int;
   request : request;
@@ -26,7 +32,7 @@ type placement = {
 
 type cached_preview = {
   requested : request;
-  result : raster option;
+  result : preview_result;
   pixel_budget : int;
   byte_budget : int;
 }
@@ -76,7 +82,16 @@ let clear t ~in_tmux =
 let cancel_pending t =
   Option.iter (fun (_, cancel) -> cancel ()) t.pending
 
-let request_preview t ~sw ~base_path ~fetch_retained ~pixels_left ~bytes_left ~on_ready request =
+let retry_failed_retained t =
+  t.cached <-
+    List.filter
+      (fun entry ->
+        match entry.result with
+        | Retry_exhausted -> false
+        | Preview_ready _ | Budget_limited | Unavailable -> true)
+      t.cached
+
+let request_preview t ~sw ~clock ~base_path ~fetch_retained ~pixels_left ~bytes_left ~on_ready request =
   let cancelled = Atomic.make false in
   let cancel_p, cancel_u = Eio.Promise.create () in
   let cancel () =
@@ -106,33 +121,48 @@ let request_preview t ~sw ~base_path ~fetch_retained ~pixels_left ~bytes_left ~o
     | Error _ -> None
     | exception (Sys_error _ | Unix.Unix_error _) -> None
   in
+  let preview_of_raster = function
+    | Some raster -> Preview_ready raster
+    | None -> Unavailable
+  in
   let work () =
     match request with
-    | Mermaid request -> Eio_unix.run_in_systhread (fun () -> raster_mermaid request)
+    | Mermaid request ->
+        Eio_unix.run_in_systhread (fun () -> preview_of_raster (raster_mermaid request))
     | Embedded image ->
         Eio_unix.run_in_systhread (fun () ->
             Option.map (fun png -> { png; pixels = (image.width, image.height) })
-              (Graphics.decode_embedded_png image))
+              (Graphics.decode_embedded_png image)
+            |> preview_of_raster)
     | Retained (endpoint, path) ->
         let max_body_bytes = (bytes_left / 4) * 3 in
+        let fetch () = fetch_retained endpoint ~path ~max_body_bytes in
         let fetched =
           Eio.Fiber.first
-            (fun () -> Eio.Promise.await cancel_p; None)
-            (fun () -> fetch_retained endpoint ~path ~max_body_bytes)
+            (fun () -> Eio.Promise.await cancel_p; Error Http_client.Unavailable)
+            (fun () ->
+              match fetch () with
+              | Error (Http_client.Retry_after delay) ->
+                  Eio.Time.sleep clock delay;
+                  fetch ()
+              | (Ok _ | Error (Http_client.Limit_exceeded | Http_client.Unavailable)) as first -> first)
         in
         match fetched with
-        | None -> None
-        | Some _ when Atomic.get cancelled -> None
-        | Some png ->
+        | Error Http_client.Limit_exceeded -> Budget_limited
+        | Error (Http_client.Retry_after _) -> Retry_exhausted
+        | Error Http_client.Unavailable -> Unavailable
+        | Ok _ when Atomic.get cancelled -> Unavailable
+        | Ok png ->
             Eio_unix.run_in_systhread (fun () ->
                 match Graphics.complete_document_png_dimensions png with
                 | Some ((width, height) as pixels) when width * height <= pixels_left ->
-                    Some { png; pixels }
-                | Some _ | None -> None)
+                    Preview_ready { png; pixels }
+                | Some _ -> Budget_limited
+                | None -> Unavailable)
   in
   Eio.Fiber.fork_daemon ~sw (fun () ->
       let done_p, done_u = Eio.Promise.create () in
-      let result = ref None in
+      let result = ref Unavailable in
       Eio.Fiber.both
         (fun () ->
           match Eio.Promise.await done_p with
@@ -162,8 +192,9 @@ let with_pixel_budget ~cached visible =
           | Embedded image -> image.width * image.height
           | Retained _ -> (
               match cached request with
-              | Some { result = Some { pixels = width, height; _ }; _ } -> width * height
-              | Some { result = None; _ } | None -> 0)
+              | Some { result = Preview_ready { pixels = width, height; _ }; _ } -> width * height
+              | Some { result = (Budget_limited | Retry_exhausted | Unavailable); _ }
+              | None -> 0)
         in
         if pixel_cost > pixels then (pixels, accepted)
         else (pixels - pixel_cost, item :: accepted))
@@ -171,7 +202,7 @@ let with_pixel_budget ~cached visible =
   in
   (pixels_left, List.rev accepted)
 
-let prepare t ~sw ~base_path ~endpoint ~fetch_retained ~on_ready
+let prepare t ~sw ~clock ~base_path ~endpoint ~fetch_retained ~on_ready
     ~(probe : Probe.observation) ~theme grid =
   match probe.graphics with
   | None | Some (Probe.Graphics_refused _) ->
@@ -204,8 +235,9 @@ let prepare t ~sw ~base_path ~endpoint ~fetch_retained ~on_ready
         List.fold_left
           (fun (bytes, placements) (image_id, (rect : Rect.t), request) ->
             match cached request with
-            | None | Some { result = None; _ } -> (bytes, placements)
-            | Some { result = Some raster; _ } ->
+            | None | Some { result = (Budget_limited | Retry_exhausted | Unavailable); _ } ->
+                (bytes, placements)
+            | Some { result = Preview_ready raster; _ } ->
                 (* Kitty sends the actual PNG as padded base64. Count its
                    payload without encoding it a second time. *)
                 let byte_cost = ((String.length raster.png + 2) / 3) * 4 in
@@ -222,7 +254,8 @@ let prepare t ~sw ~base_path ~endpoint ~fetch_retained ~on_ready
       let is_visible request =
         List.exists (fun (_, _, current) -> same_request request current) visible
       in
-      if visible <> [] then t.cached <- List.filter (fun entry -> is_visible entry.requested) t.cached;
+      if visible = [] then retry_failed_retained t
+      else t.cached <- List.filter (fun entry -> is_visible entry.requested) t.cached;
       (match t.pending with
       | Some (request, _) when not (is_visible request) -> cancel_pending t
       | Some _ -> ()
@@ -231,13 +264,15 @@ let prepare t ~sw ~base_path ~endpoint ~fetch_retained ~on_ready
           |> List.find_opt (fun (_, _, request) ->
                  match request, cached request with
                  | Retained _, None -> pixels_left > 0 && bytes_left >= 4
-                 | Retained _, Some { result = None; pixel_budget; byte_budget; _ } ->
+                 | Retained _, Some { result = Budget_limited; pixel_budget; byte_budget; _ } ->
                      pixels_left > 0 && bytes_left >= 4
                      && (pixels_left > pixel_budget || bytes_left > byte_budget)
                  | (Mermaid _ | Embedded _), None -> true
-                 | _, Some _ -> false)
+                 | (Mermaid _ | Embedded _), Some _ -> false
+                 | Retained _, Some { result = (Preview_ready _ | Retry_exhausted | Unavailable); _ } ->
+                     false)
           |> Option.iter (fun (_, _, request) ->
-                 request_preview t ~sw ~base_path ~fetch_retained ~pixels_left ~bytes_left ~on_ready request));
+                 request_preview t ~sw ~clock ~base_path ~fetch_retained ~pixels_left ~bytes_left ~on_ready request));
       List.rev placements
 
 let mask_fallback grid ~style p = Cell_grid.fill_rect grid ~rect:p.rect ~style ()

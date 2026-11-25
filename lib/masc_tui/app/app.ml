@@ -1214,6 +1214,11 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
           end
           else begin
             let next_model, cmds = Update.step ~now !model msg in
+            let before = !model.freshness and after = next_model.freshness in
+            if (before.server_offline && not after.server_offline)
+               || (not (Health.is_transport_live before.observer)
+                   && Health.is_transport_live after.observer) then
+              Document_graphics.retry_failed_retained document_graphics;
             model := next_model;
             scheduler :=
               Frame_scheduler.mark_dirty ~pace:(msg_pace msg) !scheduler;
@@ -1458,12 +1463,11 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                     let probe_obs = Probe.current_observation () in
                     let theme = Theme.of_preset !model.theme_preset in
                     let desired_document =
-                      Document_graphics.prepare document_graphics ~sw
+                      Document_graphics.prepare document_graphics ~sw ~clock
                         ~base_path:cli.base_path
                         ~endpoint:(Cmd_executor.current_endpoint executor)
                         ~fetch_retained:(fun endpoint ~path ~max_body_bytes ->
-                          Http_client.get_raw ~io ~clock ~max_body_bytes endpoint ~path
-                          |> Result.to_option)
+                          Http_client.get_raw_limited ~io ~clock ~max_body_bytes endpoint ~path)
                         ~on_ready:(fun () -> Wake_bell.ring bell Wake_bell.Ui_bus)
                         ~probe:probe_obs ~theme grid
                     in

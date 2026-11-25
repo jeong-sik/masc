@@ -103,15 +103,18 @@ let test_document_preview_transfer_budget () =
             { Probe.empty_observation with graphics = Some Probe.Graphics_supported;
               cell_pixels = Some (8, 20) }
           in
-          Eio_main.run @@ fun _ ->
+          Eio_main.run @@ fun env ->
           Eio.Switch.run @@ fun sw ->
           let doc = Document.create () in
           let endpoint = Masc_tui_net.Http_client.make_endpoint ~host:"localhost" ~port:1 () in
           let prepare () =
             let ready, signal = Eio.Promise.create () in
             let placements =
-              Document.prepare doc ~sw ~base_path ~probe ~theme:Masc_tui_core.Theme.default
-                ~endpoint ~fetch_retained:(fun _ ~path:_ ~max_body_bytes:_ -> None)
+              Document.prepare doc ~sw ~clock:(Eio.Stdenv.clock env) ~base_path
+                ~probe ~theme:Masc_tui_core.Theme.default
+                ~endpoint
+                ~fetch_retained:(fun _ ~path:_ ~max_body_bytes:_ ->
+                  Error Masc_tui_net.Http_client.Unavailable)
                 ~on_ready:(fun () -> Eio.Promise.resolve signal ()) grid
             in
             placements, ready
@@ -137,6 +140,66 @@ let test_document_preview_transfer_budget () =
           check bool "Mermaid payload sent" true (transferred 0 payload);
           check bool "small embedded payload sent" true (transferred 1 payload);
           check bool "later embedded payload exceeds remaining bytes" false (transferred 2 payload)))
+
+let test_retained_preview_recovers () =
+  let module Document = Masc_tui_app.Document_graphics in
+  let module Grid = Masc_tui_term.Cell_grid in
+  let module Http = Masc_tui_net.Http_client in
+  let endpoint = Http.make_endpoint ~host:"localhost" ~port:1 () in
+  let path = "/api/v1/media/" ^ String.make 64 'a' in
+  let png = Result.get_ok (Rgb_png.encode_rgba ~width:1 ~height:1 ~rgba:"\000\000\000\255") in
+  let grid = Grid.create ~cols:16 ~rows:1 in
+  let rows = { Grid.source = Grid.Retained_png path; count = 1 } in
+  Grid.register_document_image_part grid
+    ~rect:(Masc_tui_core.Rect.make ~x:0 ~y:0 ~w:16 ~h:1)
+    { rows; index = 0; left_inset = 0 };
+  let probe =
+    { Probe.empty_observation with graphics = Some Probe.Graphics_supported }
+  in
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let clock = Eio.Stdenv.clock env in
+  let fetch expected_calls remaining endpoint' ~path:path' ~max_body_bytes =
+    check bool "current endpoint used" true (endpoint = endpoint');
+    check string "original retained media path" path path';
+    check bool "request has enough byte budget" true (max_body_bytes >= String.length png);
+    incr expected_calls;
+    match !remaining with
+    | [] -> fail "unexpected extra image request"
+    | result :: rest ->
+        remaining := rest;
+        result
+  in
+  let check_recovery outcomes ~initial_attempts ~initial_placements ~recover =
+    let doc = Document.create () in
+    let attempts = ref 0 and remaining = ref outcomes in
+    let prepare on_ready =
+      Document.prepare doc ~sw ~clock ~base_path:"" ~probe ~theme:Masc_tui_core.Theme.default
+        ~endpoint ~fetch_retained:(fetch attempts remaining) ~on_ready grid
+    in
+    let await_attempt () =
+      let ready, signal = Eio.Promise.create () in
+      ignore (prepare (fun () -> Eio.Promise.resolve signal ()));
+      Eio.Promise.await ready
+    in
+    await_attempt ();
+    check int "bounded request count" initial_attempts !attempts;
+    let placements = prepare (fun () -> fail "already settled") in
+    Eio.Fiber.yield ();
+    check int "same viewport does not request again" initial_attempts !attempts;
+    check int "placements before transport recovery" initial_placements (List.length placements);
+    if recover then (
+      Document.retry_failed_retained doc;
+      await_attempt ();
+      check int "transport recovery opens another attempt" (initial_attempts + 1) !attempts;
+      check int "recovered preview becomes a placement" 1
+        (List.length (prepare (fun () -> fail "already recovered"))))
+  in
+  let transient = Error (Http.Retry_after 0.) in
+  check_recovery [ transient; Ok png ] ~initial_attempts:2 ~initial_placements:1 ~recover:false;
+  check_recovery [ Error Http.Unavailable ] ~initial_attempts:1 ~initial_placements:0 ~recover:false;
+  check_recovery [ transient; transient; Ok png ]
+    ~initial_attempts:2 ~initial_placements:0 ~recover:true
 
 let test_pele_confirmed_protocol_v1 () =
   with_cache (fun cache_dir ->
@@ -750,6 +813,8 @@ let () =
         [
           test_case "document preview caps actual PNG payloads across both sources"
             `Quick test_document_preview_transfer_budget;
+          test_case "retained preview retries a transient fetch once"
+            `Quick test_retained_preview_recovers;
           test_case "protocol v1 confirmed Mermaid/Svg/Graph + palette colors"
             `Quick test_pele_confirmed_protocol_v1;
           test_case "unconfirmed output, errors, deadline & cancellation" `Quick

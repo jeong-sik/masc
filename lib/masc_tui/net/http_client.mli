@@ -108,6 +108,19 @@ val get_raw :
   path:string ->
   (string, http_error) result
 
+type limited_body_error = Limit_exceeded | Retry_after of float | Unavailable
+
+val get_raw_limited :
+  io:Io_domain.t ->
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  max_body_bytes:int ->
+  endpoint ->
+  path:string ->
+  (string, limited_body_error) result
+(** Read a bounded body and distinguish an oversized response, a failure that
+    can be retried after the indicated delay, and an unavailable resource.
+    The caller owns the retry and cancellation policy. *)
+
 val post_raw :
   io:Io_domain.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->

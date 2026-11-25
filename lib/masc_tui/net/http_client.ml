@@ -157,8 +157,10 @@ let parse_api_error_opt body =
         | Error _ -> None)
     | exception Yojson.Json_error _ -> None
 
+let is_success_status status = status >= 200 && status <= 299
+
 let classify_response ep ~status ~body =
-  if status >= 200 && status <= 299 then Ok body
+  if is_success_status status then Ok body
   else
     let api_error = parse_api_error_opt body in
     match (status, api_error) with
@@ -322,17 +324,21 @@ let transport_error_of_failure ?path ?(streaming = false) = function
 let should_autostart_server ~contact ~already_attempted =
   Masc_server_lifecycle.start_due ~contact ~already_attempted
 
-let send_raw ~io ~clock ?(timeout_sec = 10.0)
-    ?(max_body_bytes = default_max_body_bytes) ?extra_headers ?content_type
-    ~method_ ?body ep ~path =
+let default_raw_timeout_sec = 10.0
+
+let request_raw ~io ~clock ~timeout_sec ~max_body_bytes ?extra_headers
+    ?content_type ~method_ ?body ep ~path =
   let url = build_url ep ~path in
   let headers = build_headers ?extra:extra_headers ?content_type ep in
-  let result =
-    Io_domain.run io (fun () ->
-        Masc_http_client.request ~clock ~timeout_sec
-          ~max_body_bytes ~method_ ~url ~headers ?body ())
-  in
-  match result with
+  Io_domain.run io (fun () ->
+      Masc_http_client.request ~clock ~timeout_sec
+        ~max_body_bytes ~method_ ~url ~headers ?body ())
+
+let send_raw ~io ~clock ?(timeout_sec = default_raw_timeout_sec)
+    ?(max_body_bytes = default_max_body_bytes) ?extra_headers ?content_type
+    ~method_ ?body ep ~path =
+  match request_raw ~io ~clock ~timeout_sec ~max_body_bytes ?extra_headers
+          ?content_type ~method_ ?body ep ~path with
   | Error failure ->
       Error
         (Transport (transport_error_of_failure ~path ~streaming:false failure))
@@ -349,6 +355,45 @@ let decode_body ~decode body =
 
 let get_raw ~io ~clock ?timeout_sec ?max_body_bytes ?extra_headers ep ~path =
   send_raw ~io ~clock ?timeout_sec ?max_body_bytes ?extra_headers ~method_:`GET ep ~path
+
+type limited_body_error = Limit_exceeded | Retry_after of float | Unavailable
+
+let get_raw_limited ~io ~clock ~max_body_bytes ep ~path =
+  let open Masc_http_client.Pool in
+  let default_retry =
+    Error (Retry_after default_config.connect_failure_cooldown_seconds)
+  in
+  let failed_status status =
+    if status = 408 || status = 429 || (status >= 500 && status < 600) then
+      default_retry
+    else Error Unavailable
+  in
+  let failed_connection failure retry =
+    match failure with
+    | Client_failure _ -> Error Unavailable
+    | No_addresses | Dns_failure _ | Tcp_failure _ | Establishment_timeout -> retry
+  in
+  match request_raw ~io ~clock ~timeout_sec:default_raw_timeout_sec
+          ~max_body_bytes ~method_:`GET ep ~path with
+  | Ok response when is_success_status response.status -> Ok response.body
+  | Ok response -> failed_status response.status
+  | Error Masc_http_client.Pool_unavailable -> Error Unavailable
+  | Error (Masc_http_client.Request_failed failure) -> (
+      match failure with
+      | Body_limit_exceeded { status; _ } when is_success_status status ->
+          Error Limit_exceeded
+      | Body_limit_exceeded { status; _ } -> failed_status status
+      | Invalid_request _ -> Error Unavailable
+      | Connect_failed { failure; retry; _ } ->
+          let next =
+            match retry with
+            | Retry_in delay -> Error (Retry_after delay)
+            | Retry_unblocked -> default_retry
+          in
+          failed_connection failure next
+      | Connect_held_back { failure; retry_in_seconds; _ } ->
+          failed_connection failure (Error (Retry_after retry_in_seconds))
+      | Timed_out _ | Idle_timed_out _ | Exchange_failed _ -> default_retry)
 
 let post_raw ~io ~clock ?timeout_sec ?extra_headers ~content_type ~body ep ~path =
   send_raw ~io ~clock ?timeout_sec ?extra_headers ~content_type ~method_:`POST

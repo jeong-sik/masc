@@ -446,7 +446,7 @@
 @media (max-width: 1279px) {
   .kp-chat-shell[data-companion-open="true"] {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr) minmax(0, 45%);
+    grid-template-rows: minmax(0, 1fr) clamp(20%, calc(100% - 26rem), 45%);
   }
 }
 
@@ -947,6 +947,26 @@ details[open] > .kp-sub-summary::before {
   align-items: center;
   gap: var(--sp-2);
   min-width: 0;
+}
+
+@media (max-width: 1279px) {
+  .kp-chat-main {
+    overflow-y: auto;
+  }
+
+  .kp-chat-stage {
+    min-height: min(3.5rem, 15%);
+  }
+
+  .kp-queue-strip:has(.kp-queue-rows > .kp-queue-row) {
+    min-height: min(7.5rem, 35vh);
+  }
+
+  .kp-composer {
+    position: sticky;
+    bottom: 0;
+    z-index: var(--z-sticky);
+  }
 }
 
 .kp-ctx-ring {

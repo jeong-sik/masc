@@ -82,6 +82,8 @@ interface CacheEntry<T> {
   ttlMs: number
   updatedAt: number
   invalidated: boolean
+  invalidationGen: number
+  inFlightGen: number
   epoch: number
   inFlight: Promise<Observed<T>> | null
   abortController: AbortController | null
@@ -110,6 +112,8 @@ export class ResourceCache {
         ttlMs,
         updatedAt: 0,
         invalidated: false,
+        invalidationGen: 0,
+        inFlightGen: -1,
         epoch: currentSessionEpoch(),
         inFlight: null,
         abortController: null,
@@ -149,8 +153,13 @@ export class ResourceCache {
     const entry = this.getOrCreate<T>(key, ttlMs, topics)
     const startEpoch = currentSessionEpoch()
 
-    // Coalesce concurrent callers into the single in-flight request
-    if (entry.inFlight !== null && entry.epoch === startEpoch) {
+    // Coalesce concurrent callers into the single in-flight request ONLY when
+    // no invalidation occurred after that in-flight request started.
+    if (
+      entry.inFlight !== null
+      && entry.epoch === startEpoch
+      && entry.inFlightGen === entry.invalidationGen
+    ) {
       return entry.inFlight
     }
 
@@ -166,8 +175,14 @@ export class ResourceCache {
       return Promise.resolve(cur)
     }
 
+    // Supersede any stale in-flight request started under an older invalidation generation.
+    if (entry.abortController !== null) {
+      entry.abortController.abort('superseded_by_invalidation')
+    }
     const controller = new AbortController()
+    const fetchGen = entry.invalidationGen
     entry.abortController = controller
+    entry.inFlightGen = fetchGen
     entry.epoch = startEpoch
 
     if (cur.kind === 'value') {
@@ -182,7 +197,11 @@ export class ResourceCache {
         try {
           result = await loader(controller.signal)
         } catch (cause) {
-          if (!isEpochCurrent(startEpoch) || controller.signal.aborted) {
+          if (
+            !isEpochCurrent(startEpoch)
+            || controller.signal.aborted
+            || entry.abortController !== controller
+          ) {
             return entry.state.peek()
           }
           const next = observedFailed<T>({
@@ -196,16 +215,23 @@ export class ResourceCache {
           entry.state.value = next
           return next
         }
-        if (!isEpochCurrent(startEpoch) || controller.signal.aborted) {
+        if (
+          !isEpochCurrent(startEpoch)
+          || controller.signal.aborted
+          || entry.abortController !== controller
+        ) {
           return entry.state.peek()
         }
+        const stillCurrentGen = fetchGen === entry.invalidationGen
         if (result.ok) {
           const ts = this.now()
           const next: Observed<T> = result.value === null
             ? observedAbsent<T>()
-            : observedValue<T>(result.value, ts, false)
-          entry.updatedAt = ts
-          entry.invalidated = false
+            : observedValue<T>(result.value, ts, !stillCurrentGen)
+          if (stillCurrentGen) {
+            entry.updatedAt = ts
+            entry.invalidated = false
+          }
           entry.state.value = next
           return next
         }
@@ -214,8 +240,10 @@ export class ResourceCache {
         }
         if (result.error.kind === 'not_found') {
           const next = observedAbsent<T>(result.error.message)
-          entry.updatedAt = this.now()
-          entry.invalidated = false
+          if (stillCurrentGen) {
+            entry.updatedAt = this.now()
+            entry.invalidated = false
+          }
           entry.state.value = next
           return next
         }
@@ -243,6 +271,7 @@ export class ResourceCache {
     for (const entry of this.entries.values()) {
       if (!entry.topics.has(topic)) continue
       entry.invalidated = true
+      entry.invalidationGen += 1
       const cur = entry.state.peek()
       if (cur.kind === 'value' && !cur.stale) {
         entry.state.value = { ...cur, stale: true }
@@ -256,6 +285,7 @@ export class ResourceCache {
     const entry = this.entries.get(key)
     if (!entry) return false
     entry.invalidated = true
+    entry.invalidationGen += 1
     const cur = entry.state.peek()
     if (cur.kind === 'value' && !cur.stale) {
       entry.state.value = { ...cur, stale: true }
@@ -267,6 +297,7 @@ export class ResourceCache {
     let count = 0
     for (const entry of this.entries.values()) {
       entry.invalidated = true
+      entry.invalidationGen += 1
       const cur = entry.state.peek()
       if (cur.kind === 'value' && !cur.stale) {
         entry.state.value = { ...cur, stale: true }
@@ -283,6 +314,7 @@ export class ResourceCache {
       entry.inFlight = null
       entry.updatedAt = 0
       entry.invalidated = true
+      entry.invalidationGen += 1
       entry.state.value = observedLoading()
     }
   }

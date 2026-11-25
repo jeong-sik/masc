@@ -398,4 +398,80 @@ describe('core/observer & core/time-window', () => {
     expect(observerConnected.value).toBe(true)
     expect(viewProvenance.value).toBe('LIVE SSE')
   })
+
+  it('does not coalesce post-invalidation reconnect fetch into stale in-flight request or clear invalidation on stale arrival', async () => {
+    let resolveStale!: (v: ReturnType<typeof ok<string>>) => void
+    const stalePromise = new Promise<ReturnType<typeof ok<string>>>((resolve) => {
+      resolveStale = resolve
+    })
+    let staleAborted = false
+    let fetchCount = 0
+
+    // 1. Pre-reconnect in-flight request begins while SSE is disconnected
+    const p1 = resourceCache.fetch(
+      'inbox:snapshot',
+      (signal) => {
+        fetchCount += 1
+        signal.addEventListener('abort', () => { staleAborted = true })
+        return stalePromise
+      },
+      { ttlMs: 60_000, topics: ['approval', 'ask'], reason: 'mount' },
+    )
+    expect(fetchCount).toBe(1)
+
+    // 2. Observer reconnect calls invalidateAll(), then listener immediately requests a fresh read
+    resourceCache.invalidateAll()
+    const p2 = resourceCache.fetch(
+      'inbox:snapshot',
+      async () => {
+        fetchCount += 1
+        return ok('fresh-after-reconnect')
+      },
+      { ttlMs: 60_000, topics: ['approval', 'ask'], reason: 'sse' },
+    )
+
+    // Must NOT coalesce into p1; must abort p1 and issue fetch #2
+    expect(fetchCount).toBe(2)
+    expect(staleAborted).toBe(true)
+
+    const freshObs = await p2
+    expect(freshObs.kind === 'value' && freshObs.data).toBe('fresh-after-reconnect')
+    expect(freshObs.kind === 'value' && freshObs.stale).toBe(false)
+
+    // Even if the stale pre-disconnect response resolves late, it must NOT overwrite fresh state
+    resolveStale(ok('stale-during-disconnect'))
+    await p1
+    const afterLate = resourceCache.peek<string>('inbox:snapshot')
+    expect(afterLate?.kind === 'value' && afterLate.data).toBe('fresh-after-reconnect')
+    expect(afterLate?.kind === 'value' && afterLate.stale).toBe(false)
+
+    // 3. Also verify: if an in-flight request started BEFORE invalidation settles BEFORE
+    // any new fetch is requested, it must remain marked stale/invalidated so the next fetch still runs.
+    let resolveMid!: (v: ReturnType<typeof ok<string>>) => void
+    const midPromise = new Promise<ReturnType<typeof ok<string>>>((resolve) => {
+      resolveMid = resolve
+    })
+    const p3 = resourceCache.fetch(
+      'inbox:mid',
+      () => midPromise,
+      { ttlMs: 60_000, topics: ['approval'], reason: 'mount' },
+    )
+    resourceCache.invalidateTopic('approval')
+    resolveMid(ok('pre-invalidation-payload'))
+    const midObs = await p3
+    expect(midObs.kind === 'value' && midObs.stale).toBe(true)
+
+    let postCalls = 0
+    const postObs = await resourceCache.fetch(
+      'inbox:mid',
+      async () => {
+        postCalls += 1
+        return ok('post-invalidation-payload')
+      },
+      { ttlMs: 60_000, topics: ['approval'], reason: 'sse' },
+    )
+    expect(postCalls).toBe(1)
+    expect(postObs.kind === 'value' && postObs.data).toBe('post-invalidation-payload')
+    expect(postObs.kind === 'value' && postObs.stale).toBe(false)
+  })
 })

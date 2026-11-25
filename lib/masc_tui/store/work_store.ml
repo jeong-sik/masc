@@ -68,7 +68,7 @@ type t = {
   verifications : Wire_work.verification_snapshot Observed.t;
   verification_failure : verification_read_failure option;
   harness_health : Wire_work.harness_health Observed.t;
-  harness_selected_index : int;
+  harness_selected_index : int option;
   harness_scroll_offset : int;
   verification_evidence :
     (string * Wire_work.verification_evidence_bundle) Observed.t;
@@ -129,7 +129,7 @@ let empty =
     verifications = Observed.unreported;
     verification_failure = None;
     harness_health = Observed.unreported;
-    harness_selected_index = 0;
+    harness_selected_index = Some 0;
     harness_scroll_offset = 0;
     verification_evidence = Observed.unreported;
     verification_evidence_auth_denied = false;
@@ -179,6 +179,46 @@ let empty =
 
 let contains_ci = Store_scroll.contains_ci
 let clamp_index = Store_scroll.clamp_index
+
+let filtered_harness_verdicts t =
+  match Observed.to_option t.harness_health with
+  | None -> []
+  | Some hh ->
+      let q = String.trim t.filter_query in
+      if String.equal q "" then hh.recent_verdicts
+      else
+        List.filter
+          (fun (v : Wire_work.harness_verdict_row) ->
+            contains_ci ~needle:q v.task_id
+            || contains_ci ~needle:q v.task_title
+            || contains_ci ~needle:q v.agent_name
+            || contains_ci ~needle:q v.verdict
+            || contains_ci ~needle:q v.gate)
+          hh.recent_verdicts
+
+let selected_harness_verdict t =
+  Option.bind t.harness_selected_index (fun index ->
+      List.nth_opt (filtered_harness_verdicts t) index)
+
+let preserve_harness_selection previous next =
+  match previous.harness_selected_index, selected_harness_verdict previous with
+  | Some previous_index, Some selected ->
+      let harness_selected_index =
+        List.find_index
+          (fun (v : Wire_work.harness_verdict_row) ->
+            String.equal v.task_id selected.task_id
+            && Float.equal v.timestamp selected.timestamp
+            && String.equal v.notes_hash selected.notes_hash)
+          (filtered_harness_verdicts next)
+      in
+      let harness_scroll_offset =
+        match harness_selected_index with
+        | Some index ->
+            max 0 (previous.harness_scroll_offset + index - previous_index)
+        | None -> 0
+      in
+      { next with harness_selected_index; harness_scroll_offset }
+  | Some _, None | None, (Some _ | None) -> next
 
 let set_tab active_tab t =
   {
@@ -1094,60 +1134,48 @@ let move_selection ?(pane_index = 0) ?(has_linked_card = true) ?viewport_rows
         in
         { t with detail_scroll_offset }
       else
-        let verdicts =
-          match Observed.to_option t.harness_health with
-          | None -> []
-          | Some hh ->
-              let q = String.trim t.filter_query in
-              if String.equal q "" then hh.recent_verdicts
-              else
-                List.filter
-                  (fun (v : Wire_work.harness_verdict_row) ->
-                    contains_ci ~needle:q v.task_id
-                    || contains_ci ~needle:q v.task_title
-                    || contains_ci ~needle:q v.agent_name
-                    || contains_ci ~needle:q v.verdict
-                    || contains_ci ~needle:q v.gate)
-                  hh.recent_verdicts
-        in
-        let len = List.length verdicts in
-        let harness_selected_index =
-          clamp_index len (t.harness_selected_index + delta)
-        in
-        let harness_scroll_offset =
-          adjust_scroll ?viewport_rows ~scroll:t.harness_scroll_offset
-            harness_selected_index
-        in
-        let detail_scroll_offset =
-          if Int.equal harness_selected_index t.harness_selected_index then
-            t.detail_scroll_offset
-          else 0
-        in
-        {
-          t with
-          harness_selected_index;
-          harness_scroll_offset;
-          detail_scroll_offset;
-        }
+        let len = List.length (filtered_harness_verdicts t) in
+        if len = 0 then t
+        else
+          let index =
+            match t.harness_selected_index with
+            | Some index -> clamp_index len (index + delta)
+            | None -> if delta < 0 then len - 1 else 0
+          in
+          let harness_scroll_offset =
+            adjust_scroll ?viewport_rows ~scroll:t.harness_scroll_offset index
+          in
+          let detail_scroll_offset =
+            if Option.equal Int.equal (Some index) t.harness_selected_index then
+              t.detail_scroll_offset
+            else 0
+          in
+          {
+            t with
+            harness_selected_index = Some index;
+            harness_scroll_offset;
+            detail_scroll_offset;
+          }
 
 let first_row_if_selected t = if t.selected_index < 0 then t.selected_index else 0
 
 let set_filter filter_query t =
-  {
-    t with
-    filter_query;
-    selected_index = first_row_if_selected t;
-    scroll_offset = 0;
-    rule_selected_index = 0;
-    rule_scroll_offset = 0;
-    history_selected_index = 0;
-    history_scroll_offset = 0;
-    verif_selected_index = 0;
-    verif_scroll_offset = 0;
-    detail_scroll_offset = 0;
-    ledger_scroll_offset = 0;
-    schedules_scroll_offset = 0;
-  }
+  preserve_harness_selection t
+    {
+      t with
+      filter_query;
+      selected_index = first_row_if_selected t;
+      scroll_offset = 0;
+      rule_selected_index = 0;
+      rule_scroll_offset = 0;
+      history_selected_index = 0;
+      history_scroll_offset = 0;
+      verif_selected_index = 0;
+      verif_scroll_offset = 0;
+      detail_scroll_offset = 0;
+      ledger_scroll_offset = 0;
+      schedules_scroll_offset = 0;
+    }
 
 let equal_task_status_filter a b =
   match a, b with
@@ -1464,32 +1492,8 @@ let cycle_verification_dive_tab t =
   set_verification_dive_tab next t
 
 let apply_harness_health ~observed_at hh t =
-  let len = List.length hh.Wire_work.recent_verdicts in
-  {
-    t with
-    harness_health = Observed.value ~observed_at hh;
-    harness_selected_index = clamp_index len t.harness_selected_index;
-  }
-
-let filtered_harness_verdicts t =
-  match Observed.to_option t.harness_health with
-  | None -> []
-  | Some hh ->
-      let q = String.trim t.filter_query in
-      if String.equal q "" then hh.recent_verdicts
-      else
-        List.filter
-          (fun (v : Wire_work.harness_verdict_row) ->
-            contains_ci ~needle:q v.task_id
-            || contains_ci ~needle:q v.task_title
-            || contains_ci ~needle:q v.agent_name
-            || contains_ci ~needle:q v.verdict
-            || contains_ci ~needle:q v.gate)
-          hh.recent_verdicts
-
-let selected_harness_verdict t =
-  let xs = filtered_harness_verdicts t in
-  List.nth_opt xs (clamp_index (List.length xs) t.harness_selected_index)
+  preserve_harness_selection t
+    { t with harness_health = Observed.value ~observed_at hh }
 
 let apply_verification_evidence ~observed_at ~verification_id bundle t =
   {

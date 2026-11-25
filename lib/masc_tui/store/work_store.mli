@@ -75,7 +75,7 @@ type t = {
   verifications : Wire_work.verification_snapshot Observed.t;
   verification_failure : verification_read_failure option;
   harness_health : Wire_work.harness_health Observed.t;
-  harness_selected_index : int;
+  harness_selected_index : int option;
   harness_scroll_offset : int;
   verification_evidence :
     (string * Wire_work.verification_evidence_bundle) Observed.t;

@@ -5843,14 +5843,11 @@ let render_harness ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                 })
               verdicts
           in
-          let sel =
-            Store_scroll.clamp_index (List.length verdicts)
-              model.work.harness_selected_index
-          in
           ignore
             (Table.draw grid ~rect:l_inner ~theme ~caps:Ops_common.default_caps
                ~lang:model.lang ~col_gap:(Layout.table_col_gap bp)
-               ~scroll:model.work.harness_scroll_offset ~selected:sel
+               ~scroll:model.work.harness_scroll_offset
+               ?selected:model.work.harness_selected_index
                ~focused:(Model.pane_focused model 0) ~columns rows)
       | Observed.Value _ ->
           Ops_common.draw_observed_empty grid ~rect:l_inner ~theme

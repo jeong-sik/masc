@@ -25,7 +25,10 @@ let reset_unowned ~base_path keeper_name =
     ~now:(Unix.gettimeofday ()) ~redaction:Keeper_secret_redaction.empty
 ;;
 
-let note_tool writer tool = Keeper_turn_preview.note_tool ~writer:(Some writer) ~now:(Unix.gettimeofday ()) tool
+(* The before-tool hook: a call starts here and stays open until it returns. *)
+let note_tool writer tool =
+  Keeper_turn_preview.note_tool_started ~writer:(Some writer) ~now:(Unix.gettimeofday ())
+    ~tool_use_id:None ~tool_name:tool
 
 let test_only_the_shown_writer_reports () =
   (* An Owner slot is a fiber binding, so the writers run in Eio. *)

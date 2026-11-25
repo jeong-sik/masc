@@ -135,6 +135,9 @@ val diff_preview : state -> Diff.numbered list
 (** Compute an inline unified diff of all modified fields against their initial
     values. Secret fields always render as ["[redacted]"] in diffs. *)
 
+val inline_text_rows : string -> int
+(** Visible height of a focused inline multiline editor before clipping. *)
+
 val draw :
   Cell_grid.t ->
   rect:Rect.t ->

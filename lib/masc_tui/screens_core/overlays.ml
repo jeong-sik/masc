@@ -3672,10 +3672,12 @@ let inline_action_title ~lang ~(modal : Model.inline_modal_state) _kind =
       Say.resolve lang
         (Say.make ~ko:("다음 턴 운영자 노트 · " ^ keeper)
            ~en:("Next-Turn Operator Note · " ^ keeper))
-  | Form_standard (Nav.Tool_execute_form { tool_name; _ }) ->
+  | Form_standard (Nav.Tool_execute_form { tool_name = Some tool_name; _ }) ->
       Say.resolve lang
         (Say.make ~ko:("MCP 도구 실행 · " ^ tool_name)
            ~en:("Execute MCP Tool · " ^ tool_name))
+  | Form_standard (Nav.Tool_execute_form { tool_name = None; _ }) ->
+      Say.resolve lang (Say.make ~ko:"MCP 도구 실행" ~en:"Execute MCP Tool")
   | Form_standard Nav.Skill_create_form ->
       Say.resolve lang (Say.make ~ko:"새 스킬 생성" ~en:"Create New Skill")
   | Form_standard (Nav.Skill_edit_form { reference }) ->
@@ -3724,7 +3726,9 @@ let form_of_inline_modal (modal : Model.inline_modal_state) =
       (fun (f : Model.modal_form_field) ->
         let validators = if f.required then [ Form.Required ] else [] in
         let value =
-          if f.secret then Form.secret_val f.value else Form.Text_val f.value
+          if f.secret then Form.secret_val f.value
+          else if Model.modal_field_multiline f then Form.Multiline_val f.value
+          else Form.Text_val f.value
         in
         let help = Model.modal_field_help ~key:f.key in
         Form.make_field ~key:f.key ~label:f.label ?help ~validators
@@ -3746,10 +3750,31 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     | Some m -> m
     | None -> Model.inline_modal_for kind
   in
+  let focused_field = List.nth_opt modal.fields modal.active_field in
   let has_focused_help =
-    match List.nth_opt modal.fields modal.active_field with
+    match focused_field with
     | Some f -> Option.is_some (Model.modal_field_help ~key:f.key)
     | None -> false
+  in
+  let editing =
+    not modal.submitting
+    &&
+    (not (Nav.equal_inline_action_kind kind Nav.Btw_query)
+    ||
+    match model.drafts.btw with
+    | Drafts.Btw_idle -> true
+    | Drafts.Btw_sending _ | Drafts.Btw_streaming _ | Drafts.Btw_answered _
+    | Drafts.Btw_failed _ -> false)
+  in
+  let multiline_field =
+    match focused_field with
+    | Some field when editing && Model.modal_field_multiline field -> Some field
+    | Some _ | None -> None
+  in
+  let extra_text_rows =
+    match multiline_field with
+    | Some field -> Form.inline_text_rows field.value - 1
+    | None -> 0
   in
   let w = Int.min (Int.max 0 (rect.w - 4)) 84 in
   let desired_h =
@@ -3804,7 +3829,7 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     | Nav.Setup_login_input_form _ ->
         Int.max 7 (List.length modal.fields + 6 + if has_focused_help then 1 else 0)
   in
-  let h = Int.min (Int.max 0 (rect.h - 2)) desired_h in
+  let h = Int.min (Int.max 0 (rect.h - 2)) (desired_h + extra_text_rows) in
   let x = rect.x + ((rect.w - w) / 2) in
   let y = Int.max rect.y (Rect.bottom rect - h - 1) in
   let modal_r = Rect.make ~x ~y ~w ~h in
@@ -3878,6 +3903,13 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             (Say.make ~ko:"[Tab] 필드 · [Enter] 제출 · [Esc] 취소"
                ~en:"[Tab] Field · [Enter] Submit · [Esc] Cancel")
     in
+    let hotkey =
+      if Option.is_some multiline_field then
+        hotkey
+        ^ Say.resolve lang
+            (Say.make ~ko:" · [Shift+Enter] 줄바꿈" ~en:" · [Shift+Enter] New line")
+      else hotkey
+    in
     let inner =
       Card.draw ~cache grid ~rect:modal_r ~theme
         {
@@ -3900,6 +3932,9 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       in
       let padded = Card.pad_inner ~pad_x inner in
       let draw_btw_header ~style ~max_s header_txt =
+        let header_txt =
+          String.map (function '\r' | '\n' | '\t' -> ' ' | c -> c) header_txt
+        in
         let scroll_badge =
           if max_s > 0 then
             let cur = Int.min max_s (Int.max 0 model.nav.btw_scroll_offset) in
@@ -3942,11 +3977,7 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                           (Glyph.to_utf8 Glyph.Live_failing ^ " " ^ err)))
               | Some _ | None -> ())
           | Drafts.Btw_sending { keeper; prompt; _ } ->
-              ignore
-                (Cell_grid.put_text ~clip:padded grid ~x:padded.x ~y:padded.y
-                   ~style:acc_st
-                   (Grapheme.truncate_to_width ~max_width:padded.w
-                      ("Q: " ^ prompt)));
+              draw_btw_header ~style:acc_st ~max_s:0 ("Q: " ^ prompt);
               if padded.h >= 2 then
                 ignore
                   (Cell_grid.put_text ~clip:padded grid ~x:padded.x
@@ -3994,11 +4025,7 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                      ~osc8:caps.osc8_hyperlinks reply)
               end
           | Drafts.Btw_failed { keeper; prompt; reason } ->
-              ignore
-                (Cell_grid.put_text ~clip:padded grid ~x:padded.x ~y:padded.y
-                   ~style:acc_st
-                   (Grapheme.truncate_to_width ~max_width:padded.w
-                      ("Q: " ^ prompt)));
+              draw_btw_header ~style:acc_st ~max_s:0 ("Q: " ^ prompt);
               if padded.h >= 2 then
                 ignore
                   (Cell_grid.put_text ~clip:padded grid ~x:padded.x

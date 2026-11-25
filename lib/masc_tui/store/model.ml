@@ -1749,15 +1749,8 @@ let inline_modal_for kind =
             secret = false;
           };
         ]
-    | Nav.Harness_overrule notes_hash ->
+    | Nav.Harness_overrule _ ->
         [
-          {
-            key = "notes_hash";
-            label = Say.make ~ko:"노트 해시 (64 hex)" ~en:"Notes hash (64 hex)";
-            value = notes_hash;
-            required = true;
-            secret = false;
-          };
           {
             key = "verdict";
             label = Say.make ~ko:"판정 (approve/reject)" ~en:"Verdict (approve/reject)";
@@ -1878,17 +1871,17 @@ let inline_modal_for kind =
             secret = false;
           };
           {
-            key = "hearth";
-            label = Say.make ~ko:"서브보드" ~en:"Sub-board";
-            value = "";
-            required = false;
-            secret = false;
-          };
-          {
             key = "body";
             label = Say.make ~ko:"내용" ~en:"Body";
             value = "";
             required = true;
+            secret = false;
+          };
+          {
+            key = "hearth";
+            label = Say.make ~ko:"서브보드 (선택)" ~en:"Sub-board (optional)";
+            value = "";
+            required = false;
             secret = false;
           };
         ]
@@ -2299,21 +2292,27 @@ let inline_modal_for kind =
           };
         ]
     | Nav.Tool_execute_form { tool_name; args_json } ->
-        [
-          {
-            key = "tool_name";
-            label = Say.make ~ko:"MCP 도구 이름" ~en:"MCP Tool Name";
-            value = tool_name;
-            required = true;
-            secret = false;
-          };
+        let name_fields =
+          match tool_name with
+          | Some _ -> []
+          | None ->
+              [
+                {
+                  key = "tool_name";
+                  label = Say.make ~ko:"MCP 도구 이름" ~en:"MCP Tool Name";
+                  value = "masc_status";
+                  required = true;
+                  secret = false;
+                };
+              ]
+        in
+        name_fields @ [
           {
             key = "args_json";
             label =
-              Say.make ~ko:"인자 JSON 객체 (예: {\"limit\": 5})"
-                ~en:"Arguments JSON object (e.g. {\"limit\": 5})";
+              Say.make ~ko:"인자 JSON (선택)" ~en:"Arguments JSON (optional)";
             value = args_json;
-            required = true;
+            required = false;
             secret = false;
           };
         ]
@@ -2342,8 +2341,8 @@ let inline_modal_for kind =
           };
           {
             key = "source_text";
-            label = Say.make ~ko:"SKILL.md 본문 (\\n 줄바꿈, \\\\ 백슬래시)" ~en:"SKILL.md source (\\n newline, \\\\ backslash)";
-            value = "---\\nname: new-skill\\ndescription: Skill summary\\n---\\n# Instructions\\n";
+            label = Say.make ~ko:"SKILL.md 본문" ~en:"SKILL.md source";
+            value = "---\nname: new-skill\ndescription: Skill summary\n---\n# Instructions\n";
             required = true;
             secret = false;
           };
@@ -2352,7 +2351,7 @@ let inline_modal_for kind =
         [
           {
             key = "source_text";
-            label = Say.make ~ko:"SKILL.md 본문 (\\n 줄바꿈, \\\\ 백슬래시)" ~en:"SKILL.md source (\\n newline, \\\\ backslash)";
+            label = Say.make ~ko:"SKILL.md 본문" ~en:"SKILL.md source";
             value = "";
             required = true;
             secret = false;
@@ -2371,14 +2370,11 @@ let inline_modal_for kind =
             secret = false;
           };
         ]
-    | Nav.Prompt_override_form { key } ->
+    | Nav.Prompt_override_form _ ->
         [
           {
             key = "value";
-            label =
-              Say.make
-                ~ko:(Printf.sprintf "프롬프트 본문 오버라이드 (%s · \\n 줄바꿈)" key)
-                ~en:(Printf.sprintf "Prompt override text (%s · \\n newline)" key);
+            label = Say.make ~ko:"프롬프트 본문" ~en:"Prompt text";
             value = "";
             required = true;
             secret = false;
@@ -2452,9 +2448,7 @@ let inline_modal_for kind =
               };
               {
                 key = "source_text";
-                label =
-                  Say.make ~ko:"TOML 선언 본문 (\\n 줄바꿈, \\\\ 백슬래시)"
-                    ~en:"TOML declaration source (\\n newline, \\\\ backslash)";
+                label = Say.make ~ko:"TOML 본문" ~en:"TOML source";
                 value = "";
                 required = true;
                 secret = false;
@@ -2464,14 +2458,7 @@ let inline_modal_for kind =
             [
               {
                 key = "source_text";
-                label =
-                  Say.make
-                    ~ko:
-                      (Printf.sprintf
-                         "%s TOML 본문 (\\n 줄바꿈, \\\\ 백슬래시)" file_name)
-                    ~en:
-                      (Printf.sprintf
-                         "%s TOML source (\\n newline, \\\\ backslash)" file_name);
+                label = Say.make ~ko:"TOML 본문" ~en:"TOML source";
                 value = "";
                 required = true;
                 secret = false;
@@ -2527,10 +2514,7 @@ let inline_modal_for kind =
   in
   let active_field =
     match kind with
-    | Nav.Harness_overrule notes_hash
-      when Wire_work.is_valid_notes_hash notes_hash ->
-        2
-    | Nav.Harness_overrule _
+    | Nav.Harness_overrule _ -> 1
     | Nav.Btw_query
     | Nav.Gate_reject _
     | Nav.Verification_reject _
@@ -2588,6 +2572,18 @@ let modal_active_field_value modal =
   match List.nth_opt modal.fields modal.active_field with
   | Some f -> f.value
   | None -> ""
+
+let modal_field_multiline (field : modal_form_field) =
+  not field.secret
+  &&
+  match field.key with
+  | "prompt" | "reason" | "notes" | "note" | "body" | "content" | "text"
+  | "task_description" | "task_notes" | "goal_procedure" | "proposal_procedure"
+  | "wiki_summary" | "wiki_body" | "wiki_note"
+  | "description" | "source_text" | "value" | "args_json" | "addon_binding_json"
+  | "goal_measure_spec"
+  | "addon_action_payload" -> true
+  | _ -> false
 
 let modal_field_help ~key =
   match key with
@@ -2771,41 +2767,6 @@ let modal_field_help ~key =
 
 let modal_field_value ~key modal = String.trim (modal_field_raw_value ~key modal)
 
-let escape_inline_text s =
-  let buf = Buffer.create (String.length s) in
-  String.iter
-    (function
-      | '\\' -> Buffer.add_string buf "\\\\"
-      | '\n' -> Buffer.add_string buf "\\n"
-      | '\r' -> ()
-      | c -> Buffer.add_char buf c)
-    s;
-  Buffer.contents buf
-
-let unescape_inline_text s =
-  let len = String.length s in
-  let buf = Buffer.create len in
-  let rec loop i =
-    if i >= len then ()
-    else if Char.equal s.[i] '\\' && i + 1 < len then
-      match s.[i + 1] with
-      | '\\' ->
-          Buffer.add_char buf '\\';
-          loop (i + 2)
-      | 'n' ->
-          Buffer.add_char buf '\n';
-          loop (i + 2)
-      | next ->
-          Buffer.add_char buf '\\';
-          Buffer.add_char buf next;
-          loop (i + 2)
-    else (
-      Buffer.add_char buf s.[i];
-      loop (i + 1))
-  in
-  loop 0;
-  Buffer.contents buf
-
 let modal_update_active_field f modal =
   let fields =
     List.mapi
@@ -2823,6 +2784,13 @@ let modal_cycle_field ~delta modal =
     let next = (modal.active_field + delta) mod len in
     let active_field = if next < 0 then next + len else next in
     { modal with active_field }
+
+let tool_approval_markdown ~lang (approval : Wire_work.held_tool_approval) =
+  match approval.because with
+  | Some reason when not (String.equal (String.trim reason) "") ->
+      let label = Say.resolve lang (Say.make ~ko:"요청 사유" ~en:"Reason") in
+      approval.question ^ "\n\n**" ^ label ^ "**\n\n" ^ reason
+  | Some _ | None -> approval.question
 
 let equal_ask_answer_mode a b =
   match a, b with
@@ -3404,12 +3372,7 @@ let open_wiki_edit_modal_for_detail (d : Wire_knowledge.wiki_page_detail) m =
           };
           {
             key = "wiki_body";
-            label =
-              if String.contains d.body_markdown '\n' then
-                Say.make
-                  ~ko:"본문 (다중줄 — [Ctrl+E] $EDITOR 권장)"
-                  ~en:"Body (multiline — use [Ctrl+E] $EDITOR)"
-              else Say.make ~ko:"본문 (Markdown)" ~en:"Body (Markdown)";
+            label = Say.make ~ko:"본문 (Markdown)" ~en:"Body (Markdown)";
             value = d.body_markdown;
             required = true;
             secret = false;

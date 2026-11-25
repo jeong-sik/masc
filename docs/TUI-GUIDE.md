@@ -156,6 +156,12 @@ composer dispatches navigation or overlay shortcuts (`1`–`6`, `,`, `I`, `?`,
    - **`Ctrl+X`** — Interrupt the active Keeper turn.
    - **`y`** — Copy the Keeper's latest reply to the clipboard via OSC 52.
 
+### Inline Forms
+
+Use `Tab` to move between fields and `Enter` to submit. In text bodies such as
+Board posts, Wiki pages and operator notes, press `Shift+Enter` or `Ctrl+J` to
+insert a line break. Pasting multiple lines preserves their line breaks.
+
 ### Mouse & Copy
 
 - **Native terminal drag-select is ON by default** (`default_mouse_capture = false`

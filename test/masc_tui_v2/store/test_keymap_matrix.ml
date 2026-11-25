@@ -6180,27 +6180,15 @@ let test_wave2_100pct_menu_reachability_matrix () =
       ("Task_dive [h] warns instead of opening empty modal", m_tdive_check, char_key "h");
       ("Task_dive [X] warns instead of opening empty modal", m_tdive_check, char_key ~shift:true "X");
     ];
-  let m_ho, _ = Update_nav.open_inline_modal base (Nav.Harness_overrule "") in
-  let set_ho_hash hash_val =
+  let open_overrule hash_val =
+    let m_ho, _ =
+      Update_nav.open_inline_modal base (Nav.Harness_overrule hash_val)
+    in
     {
       m_ho with
       inline_modal =
         Option.map
-          (fun (md : Model.inline_modal_state) ->
-            {
-              md with
-              fields =
-                List.map
-                  (fun (f : Model.modal_form_field) ->
-                    if String.equal f.key "notes_hash" then
-                      { f with value = hash_val }
-                    else if String.equal f.key "verdict" then
-                      { f with value = "approve" }
-                    else if String.equal f.key "reason" then
-                      { f with value = "override" }
-                    else f)
-                  md.fields;
-            })
+          (Model.modal_update_active_field (fun _ -> "override"))
           m_ho.inline_modal;
     }
   in
@@ -6210,7 +6198,7 @@ let test_wave2_100pct_menu_reachability_matrix () =
   in
   List.iter
     (fun (label, bad_val) ->
-      let m_err, bad_cmds = step (set_ho_hash bad_val) (mk_key Keymap.Input.Enter) in
+      let m_err, bad_cmds = step (open_overrule bad_val) (mk_key Keymap.Input.Enter) in
       Alcotest.(check int) (label ^ " emits 0 cmds") 0 (List.length bad_cmds);
       Alcotest.(check bool) (label ^ " shows 64-hex modal error") true
         (match m_err.inline_modal with
@@ -6219,7 +6207,7 @@ let test_wave2_100pct_menu_reachability_matrix () =
               (Some "notes_hash must be 64 lowercase hex characters")
         | None -> false))
     [ ("non-hex task ID", "task-123"); ("63-char hex", hash63) ];
-  let _, ok_cmds = step (set_ho_hash hash64) (mk_key Keymap.Input.Enter) in
+  let _, ok_cmds = step (open_overrule hash64) (mk_key Keymap.Input.Enter) in
   Alcotest.(check bool) "Harness_overrule accepts valid 64-char lowercase hex"
     true
     (List.exists

@@ -3129,7 +3129,21 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                       }
                     , [] )
                   in
+                  let insert_newline () =
+                    match List.nth_opt modal.fields modal.active_field with
+                    | Some field
+                      when editable && Model.modal_field_multiline field ->
+                        apply_modal_edit
+                          (Update_nav.insert_at_cursor ~text:cur_val
+                             ~cursor:cur_pos ~insert:"\n")
+                    | Some _ | None -> (m, [])
+                  in
                   match norm.key with
+                  | Keymap.Input.Enter
+                    when norm.mods.shift && is_printable_key norm ->
+                      insert_newline ()
+                  | Keymap.Input.Char "j" when norm.mods.ctrl && not norm.mods.alt ->
+                      insert_newline ()
                   | Keymap.Input.Left when editable && (not norm.mods.ctrl) && not norm.mods.alt -> (
                       match cycle_modal_picker ~delta:(-1) with
                       | Some res -> sync_picker_cursor res

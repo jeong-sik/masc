@@ -153,7 +153,7 @@ type inline_action_kind =
     }
   | Keeper_clear_form of string
   | Keeper_operator_note_form of string
-  | Tool_execute_form of { tool_name : string; args_json : string }
+  | Tool_execute_form of { tool_name : string option; args_json : string }
   | Skill_create_form
   | Skill_edit_form of { reference : string }
   | Skill_delete_confirm of { reference : string }
@@ -700,7 +700,7 @@ let equal_inline_action_kind a b =
         String.equal x.keeper y.keeper
         && equal_keeper_destructive_action x.action y.action
     | Tool_execute_form x, Tool_execute_form y ->
-        String.equal x.tool_name y.tool_name
+        Option.equal String.equal x.tool_name y.tool_name
         && String.equal x.args_json y.args_json
     | Skill_edit_form x, Skill_edit_form y ->
         String.equal x.reference y.reference

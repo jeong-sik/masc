@@ -3117,16 +3117,11 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                     ~value:(Printf.sprintf "%s (@%s)" ta.tool ta.keeper)
                     ~val_fg:theme.status_critical ~val_attrs:Attr.bold ();
                   incr y;
-                  (match ta.because with
-                  | Some b when !y < bot ->
-                      Ops_common.draw_kv_row grid ~rect:content ~y:!y ~theme
-                        ~bg:card_bg ~label_w:12
-                        ~key:(Ops_common.say model ~ko:"사유" ~en:"Reason")
-                        ~value:b ~val_fg:theme.text_muted ~val_attrs:Attr.italic
-                        ();
-                      incr y
-                  | Some _ | None -> ());
-                  let q_h = Int.min 4 (Int.max 0 (bot - !y - 4)) in
+                  let remaining = bot - !y in
+                  let q_h =
+                    if remaining < 2 then 0
+                    else Int.min 4 (Int.max 1 (remaining - 4))
+                  in
                   if q_h >= 1 then begin
                     let q_rect =
                       Rect.make ~x:content.x ~y:!y ~w:content.w ~h:q_h
@@ -3134,7 +3129,8 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                     ignore
                       (Markdown.draw grid ~rect:q_rect ~theme ~osc8:true
                          ~scroll:model.work.detail_scroll_offset
-                         (Ops_common.rewrite_masc_links_for_markdown ta.question));
+                         (Ops_common.rewrite_masc_links_for_markdown
+                            (Model.tool_approval_markdown ~lang:model.lang ta)));
                     y := !y + q_h
                   end;
                   if !y < bot - 2 then begin

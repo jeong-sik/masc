@@ -4073,14 +4073,7 @@ let submit_inline_modal ~now (m : Model.t) =
                               };
                         };
                     ] ))
-          | Form_standard (Nav.Harness_overrule default_hash) -> (
-              let notes_hash_raw =
-                String.trim (Model.modal_field_value ~key:"notes_hash" modal)
-              in
-              let notes_hash =
-                if String.equal notes_hash_raw "" then String.trim default_hash
-                else notes_hash_raw
-              in
+          | Form_standard (Nav.Harness_overrule notes_hash) -> (
               let verdict_raw =
                 String.lowercase_ascii
                   (Model.modal_field_value ~key:"verdict" modal)
@@ -5418,9 +5411,11 @@ let submit_inline_modal ~now (m : Model.t) =
                         req = Cmd.Post_keeper_operator_note { keeper; text };
                       };
                   ] )
-          | Form_standard (Nav.Tool_execute_form _) -> (
+          | Form_standard (Nav.Tool_execute_form { tool_name; _ }) -> (
               let tool_name =
-                String.trim (Model.modal_field_value ~key:"tool_name" modal)
+                match tool_name with
+                | Some name -> name
+                | None -> Model.modal_field_value ~key:"tool_name" modal
               in
               let args_raw =
                 String.trim (Model.modal_field_value ~key:"args_json" modal)
@@ -5473,8 +5468,7 @@ let submit_inline_modal ~now (m : Model.t) =
                   (String.trim (Model.modal_field_value ~key:"kind" modal))
               in
               let source_text =
-                Model.unescape_inline_text
-                  (Model.modal_field_raw_value ~key:"source_text" modal)
+                Model.modal_field_raw_value ~key:"source_text" modal
               in
               let kind_res =
                 match kind_raw with
@@ -5506,8 +5500,7 @@ let submit_inline_modal ~now (m : Model.t) =
                       ] ))
           | Form_standard (Nav.Skill_edit_form { reference }) -> (
               let source_text =
-                Model.unescape_inline_text
-                  (Model.modal_field_raw_value ~key:"source_text" modal)
+                Model.modal_field_raw_value ~key:"source_text" modal
               in
               if String.equal (String.trim source_text) "" then
                 set_modal_error "source_text is required"
@@ -5551,8 +5544,7 @@ let submit_inline_modal ~now (m : Model.t) =
                       ] ))
           | Form_standard (Nav.Prompt_override_form { key }) ->
               let value =
-                Model.unescape_inline_text
-                  (Model.modal_field_raw_value ~key:"value" modal)
+                Model.modal_field_raw_value ~key:"value" modal
               in
               if String.equal (String.trim value) "" then
                 set_modal_error "Prompt text is required (use [x] or /prompt clear to reset)"
@@ -5645,8 +5637,7 @@ let submit_inline_modal ~now (m : Model.t) =
                 | `Create -> Model.modal_field_value ~key:"file_name" modal
               in
               let source_text =
-                Model.unescape_inline_text
-                  (Model.modal_field_raw_value ~key:"source_text" modal)
+                Model.modal_field_raw_value ~key:"source_text" modal
               in
               let cas_ok =
                 match mode with
@@ -7990,7 +7981,8 @@ let work_detail_max_scroll (m : Model.t) =
               | _ -> Rect.empty
           in
           let r_inner = ui_card_inner right_rect in
-          let content_full = ops_pad_content r_inner in
+          let pad_x = Masc_tui_ui.Layout.card_pad_x_for_width bp r_inner.w in
+          let content_full = Masc_tui_ui.Card.pad_inner ~pad_x r_inner in
           if Rect.is_empty content_full then 0
           else
             let band_h =
@@ -8000,14 +7992,13 @@ let work_detail_max_scroll (m : Model.t) =
             let w = content_full.w in
             match entry.payload with
             | Attention.Payload_tool_approval ta ->
-                let used = 1 + if Option.is_some ta.because then 1 else 0 in
-                let rem = max 0 (avail_h - used) in
-                let q_h = min 4 (max 0 (rem - 4)) in
+                let rem = max 0 (avail_h - 1) in
+                let q_h = if rem < 2 then 0 else min 4 (max 1 (rem - 4)) in
                 let q_max =
                   if q_h >= 1 then
                     markdown_max_scroll ~theme ~width:w ~height:q_h
                       (Chat_transcript.rewrite_masc_links_for_markdown
-                         ta.question)
+                         (Model.tool_approval_markdown ~lang:m.lang ta))
                   else 0
                 in
                 let after_q = max 0 (rem - q_h) in
@@ -10058,15 +10049,7 @@ let open_harness_overrule_for_context ~verdict ~now (m : Model.t) =
             else f)
           modal0.fields
       in
-      let active_field =
-        let rec find idx = function
-          | [] -> 0
-          | (f : Model.modal_form_field) :: rest ->
-              if String.equal f.key "reason" then idx else find (idx + 1) rest
-        in
-        find 0 fields
-      in
-      let modal = { modal0 with fields; active_field } in
+      let modal = { modal0 with fields } in
       let nav =
         {
           m.nav with

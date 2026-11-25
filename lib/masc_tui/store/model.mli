@@ -369,19 +369,19 @@ val open_wiki_edit_modal_for_detail :
     as [knowledge.wiki_edit_base] and clearing any pending wiki edit slug. *)
 val modal_field_value : key:string -> inline_modal_state -> string
 val modal_active_field_value : inline_modal_state -> string
+val modal_field_multiline : modal_form_field -> bool
+(** The inline form's body fields accept literal line breaks. *)
 val modal_field_help : key:string -> Say.t option
 (** Concise contextual help / allowed enum values for the focused inline modal
     field, rendered below the input row so short labels never clip options. *)
 val modal_field_raw_value : key:string -> inline_modal_state -> string
 (** Untrimmed field value for body editors (skills, prompt overrides). *)
-val escape_inline_text : string -> string
-(** Lossless escape for single-line modal editors: [\] -> [\\], ['\n'] -> [\n],
-    drops ['\r']. *)
-val unescape_inline_text : string -> string
-(** Inverse of {!escape_inline_text}: [\\] -> [\], [\n] -> ['\n']. *)
 val modal_update_active_field :
   (string -> string) -> inline_modal_state -> inline_modal_state
 val modal_cycle_field : delta:int -> inline_modal_state -> inline_modal_state
+
+val tool_approval_markdown : lang:Say.lang -> Wire_work.held_tool_approval -> string
+(** The full approval request, including the reason when one was supplied. *)
 
 (** {1 Dedicated Ask Answer Modal State & Pure Transitions} *)
 

@@ -158,7 +158,7 @@ type inline_action_kind =
     }
   | Keeper_clear_form of string
   | Keeper_operator_note_form of string
-  | Tool_execute_form of { tool_name : string; args_json : string }
+  | Tool_execute_form of { tool_name : string option; args_json : string }
   | Skill_create_form
   | Skill_edit_form of { reference : string }
   | Skill_delete_confirm of { reference : string }

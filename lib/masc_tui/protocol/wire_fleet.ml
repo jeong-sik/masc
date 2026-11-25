@@ -935,6 +935,15 @@ let decode_turn_open_activity json =
       Ok (Open_tool { tool_use_id; name; stage; started_at_unix; since_unix })
   | other -> Error (Printf.sprintf "unknown open activity kind %S" other)
 
+let decode_turn_open_activities items =
+  let rec loop before = function
+    | [] -> Ok (List.rev before)
+    | item :: rest ->
+        let* activity = decode_turn_open_activity item in
+        loop (activity :: before) rest
+  in
+  loop [] items
+
 let decode_turn_preview json =
   let* status_text = required_string_field json "status_text" in
   let* activity =
@@ -968,7 +977,7 @@ let decode_turn_preview json =
     if not (has_field json "open_activities") then Ok None
     else
       optional_list_field json "open_activities"
-      |> Result.bind (Result.List.map decode_turn_open_activity)
+      |> Result.bind decode_turn_open_activities
       |> Result.map Option.some
   in
   Ok

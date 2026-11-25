@@ -16625,6 +16625,7 @@ let test_active_turn_preview_visibility_and_queued_followup () =
       revision = None;
       preparation = None;
       work_context = None;
+      open_activities = None;
     }
   in
   let active_turn_no_tail : Wire_fleet.active_turn =

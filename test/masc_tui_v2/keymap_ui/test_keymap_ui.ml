@@ -2285,6 +2285,34 @@ let test_markdown_parse_inline_linear_unmatched_delimiters () =
          String.equal s.text "site"
          && Option.equal String.equal s.hyperlink (Some "https://example.com"))
        spans);
+  let list_links =
+    List.init 12 (fun index -> Printf.sprintf "https://example.com/files/%d" index)
+  in
+  let tight_items =
+    List.mapi
+      (fun index target -> Printf.sprintf "- [`file[%d]`](%s)" index target)
+      list_links
+    |> String.concat "\r\n"
+  in
+  let linked_spans =
+    Markdown.render_lines ~theme ~width:120 ~osc8:true tight_items
+    |> List.concat_map (fun (l : Markdown.rendered_line) -> l.spans)
+  in
+  List.iter
+    (fun target ->
+      Alcotest.(check bool) "tight list code link remains an OSC 8 target" true
+        (List.exists
+           (fun (span : Markdown.styled_span) ->
+             Option.equal String.equal span.hyperlink (Some target))
+           linked_spans))
+    list_links;
+  let nested = "- " ^ String.make 20 '[' ^ "[site](https://example.com)" in
+  let fallback =
+    Markdown.render_lines ~theme ~width:120 ~osc8:true nested
+    |> List.concat_map (fun (l : Markdown.rendered_line) -> l.spans)
+  in
+  Alcotest.(check bool) "over-deep labels inside one bullet keep literal source" true
+    (List.for_all (fun (span : Markdown.styled_span) -> Option.is_none span.hyperlink) fallback);
   let pathological =
     [
       String.concat " " (List.init 10_000 (fun _ -> "_a"));

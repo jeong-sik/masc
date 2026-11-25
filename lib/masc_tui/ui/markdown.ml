@@ -369,10 +369,24 @@ let fit_prefix ~width select layout =
 let safe_link_depth raw =
   let max_link_depth = 8 in
   let length = String.length raw in
+  let rec skip_indent i =
+    if i < length && (raw.[i] = ' ' || raw.[i] = '\t') then skip_indent (i + 1)
+    else i
+  in
+  let starts_item i =
+    (i = 0 || raw.[i - 1] = '\n' || raw.[i - 1] = '\r')
+    && i + 1 < length && (raw.[i + 1] = ' ' || raw.[i + 1] = '\t')
+    && let content = skip_indent (i + 1) in
+       content < length && raw.[content] <> '\n' && raw.[content] <> '\r'
+  in
   let rec scan i depth blank opaque =
     if i >= length then true
     else
       match raw.[i] with
+      | ('-' | '+' | '*') when starts_item i ->
+          (* An unindented nonempty bullet interrupts the previous paragraph.
+             Even adjacent tight-list items use independent inline parse state. *)
+          scan (i + 1) 0 false false
       | '[' -> depth < max_link_depth && scan (i + 1) (depth + 1) false opaque
       | ']' ->
           (* These inline atoms may contain a literal closer. Count conservatively
@@ -384,9 +398,13 @@ let safe_link_depth raw =
           (match raw.[i + 1] with
           | '[' | ']' | '\\' -> scan (i + 2) depth false opaque
           | _ -> scan (i + 1) depth false opaque)
-      | '\n' when blank -> scan (i + 1) 0 true false
-      | '\n' -> scan (i + 1) depth true opaque
-      | ' ' | '\t' | '\r' -> scan (i + 1) depth blank opaque
+      | '\n' | '\r' ->
+          let next =
+            if raw.[i] = '\r' && i + 1 < length && raw.[i + 1] = '\n' then i + 2
+            else i + 1
+          in
+          if blank then scan next 0 true false else scan next depth true opaque
+      | ' ' | '\t' -> scan (i + 1) depth blank opaque
       | _ -> scan (i + 1) depth false opaque
   in
   scan 0 0 true false

@@ -4063,16 +4063,62 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
     }
   in
   let m_wiki =
+    let summary : Wire_knowledge.wiki_page_summary =
+      {
+        slug = wiki_page.slug;
+        file = wiki_page.file;
+        title = wiki_page.frontmatter.title;
+        summary = "Operator guide";
+        source = wiki_page.frontmatter.source;
+        author = wiki_page.frontmatter.author;
+        created = wiki_page.frontmatter.created;
+        updated = wiki_page.frontmatter.updated;
+        revision = wiki_page.frontmatter.revision;
+        tags = wiki_page.frontmatter.tags;
+        backlink_count = 0;
+        outgoing_link_count = 0;
+        sources_count = 0;
+        hearsay_count = 0;
+        sha256 = wiki_page.sha256;
+      }
+    in
+    let idx : Wire_knowledge.wiki_index =
+      {
+        pages_total = 1;
+        pages_readable = 1;
+        pages_unreadable = 0;
+        pages = [ summary ];
+        unreadable_pages = [];
+        lint =
+          {
+            total_findings = 0;
+            counts =
+              {
+                broken_link = 0;
+                unsupported_link = 0;
+                orphan = 0;
+                orphan_unconfirmed = 0;
+                missing_sources = 0;
+                hearsay_only = 0;
+                unreadable_page = 0;
+                revision_log_gap = 0;
+                revision_log_hole = 0;
+                duplicate_title_candidates = 0;
+              };
+            log_hole_suppressed = false;
+            orphans = [];
+            duplicate_title_candidates = [];
+            findings = [];
+          };
+      }
+    in
     {
       m0 with
-      nav =
-        {
-          m0.nav with
-          workspace = Nav.Knowledge;
-          dive_stack = [ Nav.Dive_knowledge (Nav.Wiki_dive "guide") ];
-        };
+      nav = { m0.nav with workspace = Nav.Knowledge; zoomed = true };
       knowledge =
         Knowledge_store.empty
+        |> Knowledge_store.set_tab Nav.Knowledge_wiki
+        |> Knowledge_store.apply_wiki_index ~observed_at:t0 idx
         |> Knowledge_store.set_wiki_page ~slug:wiki_page.slug
              (Observed.value ~observed_at:t0 wiki_page);
     }
@@ -4304,11 +4350,10 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
      && Option.equal Nav.equal_overlay m_wtab_help_replied.nav.overlay
           (Some Nav.Help)
      && Option.is_none m_wtab_help_replied.knowledge.pending_wiki_edit_slug);
-  (* P2 #1a: Esc popping Wiki_dive clears pending so returning to same slug on
-     Wiki tab does not auto-open the modal when Reply_wiki_page arrives. *)
-  let m_dive_esc, _ = step m_wagain (key Keymap.Input.Escape) in
-  Alcotest.(check (option string)) "Esc popping Wiki_dive clears pending slug"
-    None m_dive_esc.knowledge.pending_wiki_edit_slug;
+  (* P2 #1a: Esc on zoomed Knowledge_wiki clears pending edit slug before unzooming. *)
+  let m_zoom_esc, _ = step m_wagain (key Keymap.Input.Escape) in
+  Alcotest.(check (option string)) "Esc on zoomed Knowledge_wiki clears pending slug"
+    None m_zoom_esc.knowledge.pending_wiki_edit_slug;
   (* P2 #1b: Esc on Knowledge_wiki tab cancels pending edit intent. *)
   let m_tab_esc, _ = step m_wtab_req (key Keymap.Input.Escape) in
   Alcotest.(check (option string)) "Esc on Wiki tab cancels pending slug"
@@ -9056,28 +9101,24 @@ let test_wiki_index_reply_requests_selected_page () =
   Alcotest.(check (list string))
     "the Artifacts view shows no page body, so none is asked for" []
     (wiki_page_gets (index_reply on_artifacts));
-  let in_wiki_dive =
+  let zoomed_wiki =
     {
       on_wiki_tab with
-      nav =
-        {
-          on_wiki_tab.nav with
-          dive_stack = [ Nav.Dive_knowledge (Nav.Wiki_dive "other-page") ];
-        };
+      nav = { on_wiki_tab.nav with zoomed = true };
     }
   in
   Alcotest.(check (list string))
-    "an open dive keeps its own page in the slot" []
-    (wiki_page_gets (index_reply in_wiki_dive));
-  let dive_with_index, _ =
-    Update.step ~now:t1 in_wiki_dive
+    "zoomed Wiki asks for its selected page on index reply" [ "guide" ]
+    (wiki_page_gets (index_reply zoomed_wiki));
+  let zoomed_with_index, _ =
+    Update.step ~now:t1 zoomed_wiki
       (Msg.Http_reply
-         { epoch = in_wiki_dive.epoch; reply = Msg.Reply_wiki_index (Ok index) })
+         { epoch = zoomed_wiki.epoch; reply = Msg.Reply_wiki_index (Ok index) })
   in
   Alcotest.(check (list string))
-    "a refresh under a Wiki dive asks only for the dive's page"
-    [ "other-page" ]
-    (wiki_page_gets (View_fetches.fetches_for_current_view dive_with_index))
+    "a refresh under zoomed Wiki asks for the selected page"
+    [ "guide" ]
+    (wiki_page_gets (View_fetches.fetches_for_current_view zoomed_with_index))
 
 (* Infra > Repos lists the selected repository's activity and nothing else:
    an answer or a failure for another repository is dropped, and moving the
@@ -10293,7 +10334,7 @@ let test_feature_wave1_store_and_polish_nits () =
        (function Cmd.Copy_clipboard s -> String.equal s "https://example.com/focus-tab" | _ -> false)
        cmds_tb_y);
 
-  (* Item 6: Reply_artifact_detail Error on SHA-targeted Artifact_dive marks detail failed *)
+  (* Item 6: Reply_artifact_detail Error on zoomed Knowledge > Artifacts marks detail failed *)
   let sha_art : Wire_knowledge.artifact_entry =
     {
       id = "artifact-aabbccdd11223344";
@@ -10305,25 +10346,22 @@ let test_feature_wave1_store_and_polish_nits () =
       body = { sha256 = "sha-target-999"; bytes = 128; mime = "text/html" };
     }
   in
-  let m_sha_dive =
+  let m_sha_zoom =
     {
       m0 with
-      nav =
-        {
-          m0.nav with
-          workspace = Nav.Knowledge;
-          dive_stack = [ Nav.Dive_knowledge (Nav.Artifact_dive "sha-target-999") ];
-        };
+      nav = { m0.nav with workspace = Nav.Knowledge; zoomed = true };
       knowledge =
         Knowledge_store.empty
-        |> Knowledge_store.apply_artifacts ~observed_at:t0 [ sha_art ];
+        |> Knowledge_store.set_tab Nav.Knowledge_artifacts
+        |> Knowledge_store.apply_artifacts ~observed_at:t0 [ sha_art ]
+        |> Knowledge_store.select_artifact_by_id ~id_or_sha:"sha-target-999";
     }
   in
   let m_sha_err, _ =
-    Update.step ~now:t1 m_sha_dive
+    Update.step ~now:t1 m_sha_zoom
       (Msg.Http_reply
          {
-           epoch = m_sha_dive.epoch;
+           epoch = m_sha_zoom.epoch;
            reply =
              Msg.Reply_artifact_detail
                {
@@ -10335,7 +10373,7 @@ let test_feature_wave1_store_and_polish_nits () =
   in
   (match m_sha_err.knowledge.active_artifact_detail with
   | Observed.Failed _ -> ()
-  | _ -> Alcotest.fail "Item 6: expected active_artifact_detail = Observed.Failed on SHA-targeted dive")
+  | _ -> Alcotest.fail "Item 6: expected active_artifact_detail = Observed.Failed on zoomed Artifacts")
 
 let test_pr54465_p2_fixes () =
   let m0 = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
@@ -10405,7 +10443,7 @@ let test_pr54465_p2_fixes () =
   | Observed.Absent -> ()
   | _ -> Alcotest.fail "P2-1: expected ego-b browser_tabs slot to stay Absent");
 
-  (* P2-2: Artifact_dive unmatched target must NOT fall back to selected_artifact *)
+  (* P2-2: Filtered-empty Knowledge > Artifacts emits 0 cmds on [y]/[o]/[e]/[H] *)
   let art_a : Wire_knowledge.artifact_entry =
     {
       id = "art-existing";
@@ -10417,33 +10455,26 @@ let test_pr54465_p2_fixes () =
       body = { sha256 = "sha-existing"; bytes = 64; mime = "text/html" };
     }
   in
-  let m_missing_dive =
+  let m_missing_art =
     {
       m0 with
-      nav =
-        {
-          m0.nav with
-          workspace = Nav.Knowledge;
-          dive_stack =
-            [ Nav.Dive_knowledge (Nav.Artifact_dive "art-nonexistent") ];
-        };
+      nav = { m0.nav with workspace = Nav.Knowledge; zoomed = true };
       knowledge =
         Knowledge_store.empty
-        |> Knowledge_store.apply_artifacts ~observed_at:t0 [ art_a ];
+        |> Knowledge_store.set_tab Nav.Knowledge_artifacts
+        |> Knowledge_store.apply_artifacts ~observed_at:t0 [ art_a ]
+        |> Knowledge_store.set_filter "art-nonexistent";
     }
   in
   List.iter
     (fun key ->
-      let m_after, cmds =
-        Update.step ~now:t1 m_missing_dive (Msg.Key_event (char_key key))
+      let _, cmds =
+        Update.step ~now:t1 m_missing_art (Msg.Key_event (char_key key))
       in
       Alcotest.(check int)
-        (Printf.sprintf "P2-2: Artifact_dive [%s] emits 0 cmds on unmatched target"
+        (Printf.sprintf "P2-2: Knowledge_artifacts [%s] emits 0 cmds when filtered empty"
            key)
-        0 (List.length (Cmd.flatten cmds));
-      Alcotest.(check bool)
-        (Printf.sprintf "P2-2: Artifact_dive [%s] shows warning toast" key)
-        true (Option.is_some m_after.toast))
+        0 (List.length (Cmd.flatten cmds)))
     [ "y"; "o"; "e"; "H" ];
 
   (* P2-3 & P3-1: Artifact detail failure is target-scoped and non-retryable skips refire *)
@@ -10532,73 +10563,67 @@ let test_pr54538_reply_artifacts_dive_target_and_p3_guards () =
       body = { sha256 = "sha-beta"; bytes = 128; mime = "text/markdown" };
     }
   in
-  (* P2 #2a: Artifact_dive target != selected_artifact fetches target, not selected_artifact *)
-  let m_dive_b =
+  (* P2 #2a: Knowledge_artifacts filtered to art-beta fetches art-beta, not art-alpha *)
+  let m_art_b =
     {
       m0 with
-      nav =
-        {
-          m0.nav with
-          workspace = Nav.Knowledge;
-          dive_stack = [ Nav.Dive_knowledge (Nav.Artifact_dive "art-beta") ];
-        };
-      knowledge = Knowledge_store.empty;
+      nav = { m0.nav with workspace = Nav.Knowledge; zoomed = true };
+      knowledge =
+        Knowledge_store.empty
+        |> Knowledge_store.set_tab Nav.Knowledge_artifacts
+        |> Knowledge_store.set_filter "Beta";
     }
   in
-  let _, cmds_dive_b =
-    Update.step ~now:t1 m_dive_b
+  let _, cmds_art_b =
+    Update.step ~now:t1 m_art_b
       (Msg.Http_reply
          {
-           epoch = m_dive_b.epoch;
+           epoch = m_art_b.epoch;
            reply = Msg.Reply_artifacts (Ok [ art_a; art_b ]);
          })
   in
   Alcotest.(check bool)
-    "P2 #2: Reply_artifacts in Artifact_dive(art-beta) fetches art-beta" true
+    "P2 #2: Reply_artifacts on Knowledge_artifacts(Beta) fetches art-beta" true
     (has_cmd
        (function
          | Cmd.Http_get
              { req = Cmd.Get_artifact_detail { id = "art-beta"; revision = Some 3 }; _ } ->
              true
          | _ -> false)
-       cmds_dive_b);
+       cmds_art_b);
   Alcotest.(check bool)
-    "P2 #2: Reply_artifacts in Artifact_dive(art-beta) never fetches selected art-alpha"
+    "P2 #2: Reply_artifacts on Knowledge_artifacts(Beta) never fetches art-alpha"
     false
     (has_cmd
        (function
          | Cmd.Http_get { req = Cmd.Get_artifact_detail { id = "art-alpha"; _ }; _ } ->
              true
          | _ -> false)
-       cmds_dive_b);
-  (* P2 #2b: Artifact_dive missing target emits 0 cmds (no silent fallback to selected_artifact) *)
-  let m_dive_missing =
+       cmds_art_b);
+  (* P2 #2b: Knowledge_artifacts with no matching selection emits 0 cmds *)
+  let m_art_missing =
     {
-      m_dive_b with
-      nav =
-        {
-          m_dive_b.nav with
-          dive_stack = [ Nav.Dive_knowledge (Nav.Artifact_dive "art-missing") ];
-        };
+      m_art_b with
+      knowledge = Knowledge_store.set_filter "art-missing" m_art_b.knowledge;
     }
   in
-  let _, cmds_dive_missing =
-    Update.step ~now:t1 m_dive_missing
+  let _, cmds_art_missing =
+    Update.step ~now:t1 m_art_missing
       (Msg.Http_reply
          {
-           epoch = m_dive_missing.epoch;
+           epoch = m_art_missing.epoch;
            reply = Msg.Reply_artifacts (Ok [ art_a; art_b ]);
          })
   in
   Alcotest.(check int)
-    "P2 #2: Reply_artifacts in Artifact_dive(missing) emits 0 cmds" 0
-    (List.length (Cmd.flatten cmds_dive_missing));
+    "P2 #2: Reply_artifacts with unmatched filter emits 0 cmds" 0
+    (List.length (Cmd.flatten cmds_art_missing));
   (* P3-1: Reply_artifacts does not refire non-retryable failed artifact detail *)
   let m_non_retry =
     {
-      m_dive_b with
+      m_art_b with
       knowledge =
-        Knowledge_store.empty
+        m_art_b.knowledge
         |> Knowledge_store.mark_artifact_detail_failed ~target:"art-beta" ~at:t0
              ~reason:"HTTP 404: not found" ~retryable:false;
     }
@@ -11801,7 +11826,9 @@ let test_media_viewer_follows_artifact_dive_target () =
   in
   let knowledge =
     Knowledge_store.empty
+    |> Knowledge_store.set_tab Nav.Knowledge_artifacts
     |> Knowledge_store.apply_artifacts ~observed_at:t0 [ art_list; art_dive ]
+    |> Knowledge_store.select_artifact_by_id ~id_or_sha:art_dive.id
   in
   let m0 =
     let base = Model.initial () in
@@ -11812,13 +11839,13 @@ let test_media_viewer_follows_artifact_dive_target () =
         {
           base.nav with
           workspace = Nav.Knowledge;
-          dive_stack = [ Nav.Dive_knowledge (Nav.Artifact_dive art_dive.id) ];
+          zoomed = true;
           overlay = Some (Nav.System_gate Nav.Media_viewer);
         };
     }
   in
   Alcotest.(check (option string))
-    "focused_artifact resolves Artifact_dive target instead of list selection"
+    "focused_artifact resolves selected Knowledge_artifacts entry"
     (Some art_dive.id)
     (Option.map (fun (a : Wire_knowledge.artifact_entry) -> a.id)
        (Model.focused_artifact m0));
@@ -11828,14 +11855,14 @@ let test_media_viewer_follows_artifact_dive_target () =
          { key = Keymap.Input.Char ch; mods = Keymap.Input.no_mods })
   in
   let _, cmds_h = step_char "H" m0 in
-  Alcotest.(check bool) "Media_viewer [H] copies dive artifact SHA-256" true
+  Alcotest.(check bool) "Media_viewer [H] copies focused artifact SHA-256" true
     (List.exists
        (function
          | Cmd.Copy_clipboard s -> String.equal s art_dive.body.sha256
          | _ -> false)
        (Cmd.flatten cmds_h));
   let _, cmds_e = step_char "e" m0 in
-  Alcotest.(check bool) "Media_viewer [e] exports dive artifact" true
+  Alcotest.(check bool) "Media_viewer [e] exports focused artifact" true
     (List.exists
        (function
          | Cmd.Export_artifact { id; open_after = false; _ } ->
@@ -11843,7 +11870,7 @@ let test_media_viewer_follows_artifact_dive_target () =
          | _ -> false)
        (Cmd.flatten cmds_e));
   let _, cmds_o = step_char "o" m0 in
-  Alcotest.(check bool) "Media_viewer [o] opens dive artifact" true
+  Alcotest.(check bool) "Media_viewer [o] opens focused artifact" true
     (List.exists
        (function
          | Cmd.Export_artifact { id; open_after = true; _ } ->
@@ -11851,39 +11878,12 @@ let test_media_viewer_follows_artifact_dive_target () =
          | _ -> false)
        (Cmd.flatten cmds_o));
   let _, cmds_y = step_char "y" m0 in
-  Alcotest.(check bool) "Media_viewer [y] fetches/copies dive artifact" true
+  Alcotest.(check bool) "Media_viewer [y] fetches/copies focused artifact" true
     (List.exists
        (function
          | Cmd.Fetch_artifact_and_copy { id; _ } -> String.equal id art_dive.id
          | _ -> false)
        (Cmd.flatten cmds_y));
-  (* Missing dive target never falls back to the unrelated list selection. *)
-  let m_missing =
-    {
-      m0 with
-      nav =
-        {
-          m0.nav with
-          dive_stack = [ Nav.Dive_knowledge (Nav.Artifact_dive "missing-art") ];
-        };
-    }
-  in
-  Alcotest.(check bool)
-    "missing Artifact_dive target returns None instead of list selection" true
-    (Option.is_none (Model.focused_artifact m_missing));
-  let m_y_miss, cmds_y_miss = step_char "y" m_missing in
-  Alcotest.(check int) "missing dive [y] emits no copy command" 0
-    (List.length (Cmd.flatten cmds_y_miss));
-  Alcotest.(check bool) "missing dive [y] emits warning toast" true
-    (Option.is_some m_y_miss.toast);
-  let m_o_miss, cmds_o_miss = step_char "o" m_missing in
-  Alcotest.(check int) "missing dive [o] emits no export command" 0
-    (List.length (Cmd.flatten cmds_o_miss));
-  Alcotest.(check bool) "missing dive [o] emits warning toast" true
-    (Option.is_some m_o_miss.toast);
-  (* active_artifact_target under Media_viewer:
-     (a) list filter hiding selected_artifact still lets [v] and share/copy act on Artifact_dive;
-     (b) missing Artifact_dive target never falls back to selected list item. *)
   let ws_id : Wire_common.workspace_identity =
     {
       instance_id = Some "inst-media-test";
@@ -11901,111 +11901,88 @@ let test_media_viewer_follows_artifact_dive_target () =
       share_version = 1;
     }
   in
-  let list_detail : Wire_knowledge.published_artifact_detail =
-    {
-      artifact = art_list;
-      content = "# List";
-      revisions = [];
-      shared = false;
-      share_version = 1;
-    }
-  in
-  let m_filtered =
-    let k_filtered =
-      m0.knowledge
-      |> Knowledge_store.apply_artifact_detail ~observed_at:t0 dive_detail
-      |> Knowledge_store.set_filter "unmatched-filter-xyz"
-    in
+  let m_with_ws =
     {
       m0 with
-      knowledge = k_filtered;
+      knowledge =
+        Knowledge_store.apply_artifact_detail ~observed_at:t0 dive_detail
+          m0.knowledge;
       server_identity = { m0.server_identity with workspace = Some ws_id };
     }
   in
-  Alcotest.(check bool) "filtered artifact list has selected_artifact = None" true
-    (Option.is_none (Knowledge_store.selected_artifact m_filtered.knowledge));
-  let m_v_filt, _ = step_char "v" m_filtered in
-  Alcotest.(check bool)
-    "Media_viewer [v] toggles view mode for Artifact_dive even when list filter empties selected_artifact"
-    true
-    (m_v_filt.knowledge.artifact_view_mode = `Raw_source);
-  let _, cmds_hash_filt =
-    Update_actions.execute_action ~now:t1 m_filtered Keymap.Copy_hash
+  let m_v, _ = step_char "v" m_with_ws in
+  Alcotest.(check bool) "Media_viewer [v] toggles artifact_view_mode" true
+    (m_v.knowledge.artifact_view_mode = `Raw_source);
+  let _, cmds_hash =
+    Update_actions.execute_action ~now:t1 m_with_ws Keymap.Copy_hash
   in
-  Alcotest.(check bool)
-    "Copy_hash under Media_viewer + filtered list copies Artifact_dive SHA-256"
-    true
+  Alcotest.(check bool) "Copy_hash under Media_viewer copies SHA-256" true
     (List.exists
        (function
          | Cmd.Copy_clipboard s -> String.equal s art_dive.body.sha256
          | _ -> false)
-       (Cmd.flatten cmds_hash_filt));
-  let _, cmds_url_filt =
-    Update_actions.execute_action ~now:t1 m_filtered Keymap.Copy_public_url
+       (Cmd.flatten cmds_hash));
+  let _, cmds_url =
+    Update_actions.execute_action ~now:t1 m_with_ws Keymap.Copy_public_url
   in
-  Alcotest.(check bool)
-    "Copy_public_url under Media_viewer + filtered list copies Artifact_dive URL"
-    true
+  Alcotest.(check bool) "Copy_public_url under Media_viewer copies URL" true
     (List.exists
        (function
          | Cmd.Copy_clipboard s ->
              String.equal s ("/published-artifacts/" ^ art_dive.id)
          | _ -> false)
-       (Cmd.flatten cmds_url_filt));
-  let _, cmds_share_filt =
-    Update_actions.execute_action ~now:t1 m_filtered Keymap.Toggle_artifact_share
+       (Cmd.flatten cmds_url));
+  let _, cmds_share =
+    Update_actions.execute_action ~now:t1 m_with_ws Keymap.Toggle_artifact_share
   in
-  Alcotest.(check bool)
-    "Toggle_artifact_share under Media_viewer + filtered list targets Artifact_dive"
+  Alcotest.(check bool) "Toggle_artifact_share under Media_viewer targets artifact"
     true
     (List.exists
        (function
          | Cmd.Http_post { req = Cmd.Post_artifact_share { id; _ }; _ } ->
              String.equal id art_dive.id
          | _ -> false)
-       (Cmd.flatten cmds_share_filt));
-  let m_missing_with_list =
-    let k_list_detail =
-      Knowledge_store.apply_artifact_detail ~observed_at:t0 list_detail
-        m_missing.knowledge
-    in
+       (Cmd.flatten cmds_share));
+  (* Filtered-empty list leaves focused_artifact = None and emits 0 cmds. *)
+  let m_filtered_empty =
     {
-      m_missing with
-      knowledge = k_list_detail;
-      server_identity = { m_missing.server_identity with workspace = Some ws_id };
+      m_with_ws with
+      knowledge =
+        Knowledge_store.set_filter "unmatched-filter-xyz" m_with_ws.knowledge;
     }
   in
-  Alcotest.(check (option string))
-    "unrelated list artifact is selected while Artifact_dive target is missing"
-    (Some art_list.id)
-    (Option.map (fun (a : Wire_knowledge.artifact_entry) -> a.id)
-       (Knowledge_store.selected_artifact m_missing_with_list.knowledge));
-  let m_v_miss, cmds_v_miss = step_char "v" m_missing_with_list in
-  Alcotest.(check bool)
-    "missing Artifact_dive [v] does not toggle artifact_view_mode" true
-    (m_v_miss.knowledge.artifact_view_mode = `Document);
-  Alcotest.(check int) "missing Artifact_dive [v] emits 0 cmds" 0
-    (List.length (Cmd.flatten cmds_v_miss));
-  let _, cmds_share_miss =
-    Update_actions.execute_action ~now:t1 m_missing_with_list
+  Alcotest.(check bool) "filtered-empty list returns None from focused_artifact"
+    true
+    (Option.is_none (Model.focused_artifact m_filtered_empty));
+  let m_v_empty, cmds_v_empty = step_char "v" m_filtered_empty in
+  Alcotest.(check bool) "filtered-empty [v] does not toggle artifact_view_mode"
+    true
+    (m_v_empty.knowledge.artifact_view_mode = `Document);
+  Alcotest.(check int) "filtered-empty [v] emits 0 cmds" 0
+    (List.length (Cmd.flatten cmds_v_empty));
+  let _, cmds_y_empty = step_char "y" m_filtered_empty in
+  Alcotest.(check int) "filtered-empty [y] emits 0 cmds" 0
+    (List.length (Cmd.flatten cmds_y_empty));
+  let _, cmds_o_empty = step_char "o" m_filtered_empty in
+  Alcotest.(check int) "filtered-empty [o] emits 0 cmds" 0
+    (List.length (Cmd.flatten cmds_o_empty));
+  let _, cmds_share_empty =
+    Update_actions.execute_action ~now:t1 m_filtered_empty
       Keymap.Toggle_artifact_share
   in
-  Alcotest.(check int)
-    "missing Artifact_dive Toggle_artifact_share does not touch list artifact" 0
-    (List.length (Cmd.flatten cmds_share_miss));
-  let _, cmds_hash_miss =
-    Update_actions.execute_action ~now:t1 m_missing_with_list Keymap.Copy_hash
+  Alcotest.(check int) "filtered-empty Toggle_artifact_share emits 0 cmds" 0
+    (List.length (Cmd.flatten cmds_share_empty));
+  let _, cmds_hash_empty =
+    Update_actions.execute_action ~now:t1 m_filtered_empty Keymap.Copy_hash
   in
-  Alcotest.(check int)
-    "missing Artifact_dive Copy_hash does not touch list artifact" 0
-    (List.length (Cmd.flatten cmds_hash_miss));
-  let _, cmds_url_miss =
-    Update_actions.execute_action ~now:t1 m_missing_with_list
+  Alcotest.(check int) "filtered-empty Copy_hash emits 0 cmds" 0
+    (List.length (Cmd.flatten cmds_hash_empty));
+  let _, cmds_url_empty =
+    Update_actions.execute_action ~now:t1 m_filtered_empty
       Keymap.Copy_public_url
   in
-  Alcotest.(check int)
-    "missing Artifact_dive Copy_public_url does not touch list artifact" 0
-    (List.length (Cmd.flatten cmds_url_miss))
+  Alcotest.(check int) "filtered-empty Copy_public_url emits 0 cmds" 0
+    (List.length (Cmd.flatten cmds_url_empty))
 
 let test_single_slot_dive_error_target_guards () =
   let ws_mismatch_err =
@@ -15235,7 +15212,7 @@ let test_ux_sweep_12_fixes () =
     { base_with_ws with nav = { base_with_ws.nav with workspace = Nav.Pulse; pane_index = 2 } }
   in
   let m_dived_p2, _ =
-    Update_nav.push_dive m_from_p2 (Nav.Dive_knowledge (Nav.Thread_dive "p1"))
+    Update_nav.push_dive m_from_p2 (Nav.Dive_runtime (Nav.Tool_dive "masc_status"))
   in
   let m_popped_p2, _ = step m_dived_p2 (mk_key Keymap.Input.Escape) in
   Alcotest.(check int) "Item 4: Esc restores exact Pulse pane_index=2" 2
@@ -15255,7 +15232,7 @@ let test_ux_sweep_12_fixes () =
     }
   in
   let m_z_dived, _ =
-    Update_nav.push_dive m_zoom_know (Nav.Dive_knowledge (Nav.Thread_dive "p1"))
+    Update_nav.push_dive m_zoom_know (Nav.Dive_runtime (Nav.Tool_dive "masc_status"))
   in
   let m_z_popped, _ = step m_z_dived (mk_key Keymap.Input.Escape) in
   Alcotest.(check bool) "Item 4: Esc restores exact zoomed=true state" true
@@ -16147,12 +16124,13 @@ let test_ux_sweep_12_fixes () =
      && Option.is_none (Model.active_dive m_dive_exp_esc));
 
   (* === Round-3 GitHub CR Fixes (P2 #1, P2 #2, P2 #3) === *)
-  (* CR P2 #1: Thread_dive B with stale active_thread A never shows/scrolls A or votes on A's comment *)
+  (* CR P2 #1: Board post B with stale active_thread A never shows/scrolls A or votes on A's comment *)
   let long_post_a =
     mk_post "post-a" "Post A"
       (String.concat "\n"
          (List.init 60 (fun i -> Printf.sprintf "Post A body line %d" i)))
   in
+  let short_post_b = mk_post "post-b" "Post B" "Post B short body" in
   let m_thread_a =
     let k0 = Knowledge_store.empty |> Knowledge_store.set_tab Nav.Knowledge_board in
     let knowledge =
@@ -16161,8 +16139,8 @@ let test_ux_sweep_12_fixes () =
         board =
           Observed.value ~observed_at:t0
             {
-              Wire_knowledge.posts = [ long_post_a ];
-              count = 1;
+              Wire_knowledge.posts = [ long_post_a; short_post_b ];
+              count = 2;
               sort_by = "recent";
               signal_only = true;
             };
@@ -16195,19 +16173,20 @@ let test_ux_sweep_12_fixes () =
     }
   in
   let post, _ =
-    Update_nav.push_dive reader (Nav.Dive_knowledge (Nav.Thread_dive "post-a"))
+    Update_nav.jump_to_knowledge_thread ~zoomed:true reader "post-a"
   in
   let post, _ = step post (mk_key Keymap.Input.Page_down) in
-  let comment, switch_cmds = step post (mk_key Keymap.Input.Tab) in
+  let comment, switch_cmds = step post (char_k "v") in
   let comment, _ = step comment (mk_key Keymap.Input.Page_down) in
   Alcotest.(check bool) "thread reader scrolls its full comment without sending"
     true
     (List.is_empty (Cmd.flatten switch_cmds)
      && comment.knowledge.thread_comment_scroll > 0
-     && Int.equal post.nav.dive_scroll_offset comment.nav.dive_scroll_offset);
-  let post_again, _ = step comment (mk_key Keymap.Input.Tab) in
-  let comment_again, _ = step post_again (mk_key Keymap.Input.Tab) in
-  Alcotest.(check int) "Tab restores the selected comment scroll"
+     && Int.equal post.knowledge.detail_scroll_offset
+          comment.knowledge.detail_scroll_offset);
+  let post_again, _ = step comment (char_k "v") in
+  let comment_again, _ = step post_again (char_k "v") in
+  Alcotest.(check int) "[v] restores the selected comment scroll"
     comment.knowledge.thread_comment_scroll
     comment_again.knowledge.thread_comment_scroll;
   let next_comment, _ = step comment_again (char_k ">") in
@@ -16240,32 +16219,32 @@ let test_ux_sweep_12_fixes () =
     (Option.equal String.equal recovered.knowledge.thread_selected_comment (Some "c-1")
      && Int.equal reading.knowledge.thread_comment_scroll
           recovered.knowledge.thread_comment_scroll);
-  (* Entering Thread_dive "post-b" (not in board feed) marks active_thread Loading for post-b *)
-  let m_dive_b, cmds_dive_b =
-    Update_nav.push_dive m_thread_a (Nav.Dive_knowledge (Nav.Thread_dive "post-b"))
+  (* Jumping to post-b marks active_thread Loading for post-b & clears comment selection *)
+  let m_jump_b, cmds_jump_b =
+    Update_nav.jump_to_knowledge_thread ~zoomed:true m_thread_a "post-b"
   in
   Alcotest.(check bool)
-    "CR P2 #1: push_dive Thread_dive B marks active_thread Loading for B & clears comment selection"
+    "CR P2 #1: jump_to_knowledge_thread B marks active_thread Loading for B & clears comment selection"
     true
-    (Observed.is_loading m_dive_b.knowledge.active_thread
-     && Option.equal String.equal m_dive_b.knowledge.active_thread_target (Some "post-b")
-     && Option.is_none m_dive_b.knowledge.thread_selected_comment
+    (Observed.is_loading m_jump_b.knowledge.active_thread
+     && Option.equal String.equal m_jump_b.knowledge.active_thread_target (Some "post-b")
+     && Option.is_none m_jump_b.knowledge.thread_selected_comment
      && has_cmd
           (function
             | Cmd.Http_get { req = Cmd.Get_board_thread { post_id = "post-b"; _ }; _ } -> true
             | _ -> false)
-          cmds_dive_b);
-  (* Even if active_thread still holds stale Post A + selected comment c-0 while in Thread_dive B:
+          cmds_jump_b);
+  (* Even if active_thread still holds stale Post A + selected comment c-0 while viewing post-b:
      - selected_thread_comment ~post_id:"post-b" is None
-     - PgDn yields dive_scroll_offset = 0 (never uses Post A's long body/comments)
+     - PgDn yields detail_scroll_offset = 0 (never uses Post A's long body/comments)
      - Board_vote NEVER constructs Post_board_comment_vote { post_id = "post-b"; comment_id = "c-0" }
      - Board_comment NEVER sets parent_id = Some "c-0" from Post A *)
-  let m_dive_b_stale =
+  let m_jump_b_stale =
     {
-      m_dive_b with
+      m_jump_b with
       knowledge =
         {
-          m_dive_b.knowledge with
+          m_jump_b.knowledge with
           active_thread = Observed.value ~observed_at:t0 (long_post_a, many_comments);
           active_thread_target = Some "post-a";
           thread_selected_comment = Some "c-0";
@@ -16277,15 +16256,15 @@ let test_ux_sweep_12_fixes () =
     true
     (Option.is_none
        (Knowledge_store.selected_thread_comment ~post_id:"post-b"
-          { m_dive_b_stale.knowledge with thread_view = Knowledge_store.Thread_comments }));
-  let m_dive_b_pgdn, _ = step m_dive_b_stale (mk_key Keymap.Input.Page_down) in
+          { m_jump_b_stale.knowledge with thread_view = Knowledge_store.Thread_comments }));
+  let m_jump_b_pgdn, _ = step m_jump_b_stale (mk_key Keymap.Input.Page_down) in
   Alcotest.(check int)
-    "CR P2 #1: Thread_dive B PgDn does not scroll stale Post A's body/comments"
-    0 m_dive_b_pgdn.nav.dive_scroll_offset;
-  let m_vote_arm, _ = step m_dive_b_stale (char_k "+") in
+    "CR P2 #1: zoomed Board post-b PgDn does not scroll stale Post A's body/comments"
+    0 m_jump_b_pgdn.knowledge.detail_scroll_offset;
+  let m_vote_arm, _ = step m_jump_b_stale (char_k "+") in
   let _, cmds_vote_confirm = step m_vote_arm (char_k "+") in
   Alcotest.(check bool)
-    "CR P2 #1: Board_vote in Thread_dive B never votes on Post A's comment under post-b"
+    "CR P2 #1: Board_vote on post-b never votes on Post A's comment under post-b"
     true
     (not
        (has_cmd
@@ -16300,9 +16279,9 @@ let test_ux_sweep_12_fixes () =
                 true
             | _ -> false)
           cmds_vote_confirm);
-  let m_comment_b, _ = step m_dive_b_stale (char_k "c") in
+  let m_comment_b, _ = step m_jump_b_stale (char_k "c") in
   Alcotest.(check bool)
-    "CR P2 #1: Board_comment in Thread_dive B never attaches Post A's comment as parent_id"
+    "CR P2 #1: Board_comment on post-b never attaches Post A's comment as parent_id"
     true
     (match m_comment_b.nav.overlay with
      | Some (Nav.Inline_action (Nav.Board_comment { post_id = "post-b"; parent_id = None })) ->
@@ -18817,22 +18796,15 @@ let test_work_and_board_crud_requests_and_guards () =
              true
          | _ -> false)
        (Cmd.flatten pin_cmds));
-  let m_thread_dive =
-    {
-      m_board with
-      nav =
-        {
-          m_board.nav with
-          dive_stack = [ Nav.Dive_knowledge (Nav.Thread_dive "post-42") ];
-        };
-    }
+  let m_board_zoomed =
+    { m_board with nav = { m_board.nav with zoomed = true } }
   in
   let m_bdel_open, _ =
-    Update.step ~now:t0 m_thread_dive (Msg.Key_event (char_key "d"))
+    Update.step ~now:t0 m_board_zoomed (Msg.Key_event (char_key "d"))
   in
   (match m_bdel_open.nav.overlay with
   | Some (Nav.Inline_action (Nav.Board_delete_post { post_id = "post-42"; _ })) -> ()
-  | _ -> Alcotest.fail "[d] in Thread_dive must open Board_delete_post");
+  | _ -> Alcotest.fail "[d] on zoomed Board must open Board_delete_post");
   let m_bdel_wrong =
     set_fields [ ("confirm_post_delete", "nope") ] m_bdel_open
   in
@@ -18862,10 +18834,10 @@ let test_work_and_board_crud_requests_and_guards () =
            reply = Msg.Reply_board_delete { post_id = "post-42"; result = Ok () };
          })
   in
-  Alcotest.(check bool) "Reply_board_delete Ok closes modal and pops Thread_dive" true
+  Alcotest.(check bool) "Reply_board_delete Ok closes modal and unzooms Board" true
     (Option.is_none m_bdeleted.inline_modal
     && Option.is_none m_bdeleted.nav.overlay
-    && m_bdeleted.nav.dive_stack = []);
+    && not m_bdeleted.nav.zoomed);
   Alcotest.(check bool) "Reply_board_delete Ok refreshes Get_board_feed" true
     (List.exists
        (function
@@ -20243,7 +20215,7 @@ let test_layer1_input_esc_focus_traps () =
   Alcotest.(check bool) "#10: voice transcript does not focus composer on Micro"
     false (Drafts.is_focused m_micro_after.drafts);
 
-  (* #13a: Artifact_dive [N] searches previous match instead of Approval Strip Fast_deny_top *)
+  (* #13a: Knowledge > Artifacts detail/zoomed [N] searches previous match instead of Fast_deny_top *)
   let art : Wire_knowledge.artifact_entry =
     {
       id = "art-search-1";
@@ -20268,6 +20240,7 @@ let test_layer1_input_esc_focus_traps () =
     let base = Model.initial ~cols:140 ~rows:40 () in
     let knowledge =
       Knowledge_store.empty
+      |> Knowledge_store.set_tab Nav.Knowledge_artifacts
       |> Knowledge_store.apply_artifacts ~observed_at:t0 [ art ]
       |> Knowledge_store.apply_artifact_detail ~observed_at:t0 detail
       |> Knowledge_store.set_artifact_search "needle"
@@ -20281,21 +20254,16 @@ let test_layer1_input_esc_focus_traps () =
       base with
       work;
       knowledge;
-      nav =
-        {
-          base.nav with
-          workspace = Nav.Knowledge;
-          dive_stack = [ Nav.Dive_knowledge (Nav.Artifact_dive art.id) ];
-        };
+      nav = { base.nav with workspace = Nav.Knowledge; zoomed = true };
     }
     |> Model.rebuild_attention
   in
   let m_art_after_n, cmds_art_n =
     Update.step ~now:t0 m_art_n (Msg.Key_event (char_key "N"))
   in
-  Alcotest.(check bool) "#13a: [N] in Artifact_dive does not open deny modal"
+  Alcotest.(check bool) "#13a: [N] in zoomed Artifacts does not open deny modal"
     true (Option.is_none m_art_after_n.nav.overlay);
-  Alcotest.(check int) "#13a: [N] in Artifact_dive emits 0 approval POSTs" 0
+  Alcotest.(check int) "#13a: [N] in zoomed Artifacts emits 0 approval POSTs" 0
     (List.length (Cmd.flatten cmds_art_n));
   Alcotest.(check int) "#13a: [N] steps to previous search match (wraps to idx 1)"
     1 m_art_after_n.knowledge.artifact_search_match_idx;
@@ -23401,13 +23369,297 @@ let test_discord_reply_source_and_receipt () =
   Alcotest.(check bool) "server's delivered ID unlocks a fresh compose" true
     (Discord_reply_store.can_compose attempt)
 
+(* #54820 review: a jump to a Board post the feed does not list must show and
+   act on that post, and a wiki jump made before the index lands must still
+   select its page once the index arrives. *)
+let test_uncached_knowledge_jumps () =
+  let post id : Wire_knowledge.board_post =
+    {
+      id;
+      title = "Title " ^ id;
+      body = "body " ^ id;
+      author = "alpha-1";
+      hearth = Some "ops";
+      post_kind = Some Wire_knowledge.Human_post;
+      visibility = Some Wire_knowledge.Vis_public;
+      created_at_unix = 100.0;
+      updated_at_unix = None;
+      score = 1;
+      comment_count = 0;
+      author_karma = Observed.value ~observed_at:t0 10;
+      succession_chain_root_id = None;
+      chain_depth = None;
+      is_signal = true;
+      pinned = false;
+    }
+  in
+  let listed = post "post-listed" in
+  let far = post "post-far" in
+  let m0 = Model.initial () in
+  let on_board board =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Work; dive_stack = [] };
+      knowledge =
+        { (Knowledge_store.set_tab Nav.Knowledge_board m0.knowledge) with board };
+    }
+  in
+  let feed =
+    Observed.value ~observed_at:t0
+      {
+        Wire_knowledge.posts = [ listed ];
+        count = 1;
+        sort_by = "recent";
+        signal_only = true;
+      }
+  in
+  let thread_reply (m : Model.t) post_id result =
+    fst
+      (Update.step ~now:t0 m
+         (Msg.Http_reply
+            { epoch = m.epoch; reply = Msg.Reply_board_thread { post_id; result } }))
+  in
+  let thread_gets cmds =
+    List.filter_map
+      (function
+        | Cmd.Http_get { req = Cmd.Get_board_thread { post_id; _ }; _ } -> Some post_id
+        | _ -> None)
+      (Cmd.flatten cmds)
+  in
+  let detail_id (m : Model.t) =
+    Option.map
+      (fun (p : Wire_knowledge.board_post) -> p.id)
+      (Knowledge_store.board_detail_post m.knowledge)
+  in
+  let crud_id (m : Model.t) =
+    let opened, _ = Update.step ~now:t0 m (Msg.Key_event (char_key "c")) in
+    match opened.nav.overlay with
+    | Some (Nav.Inline_action (Nav.Board_comment { post_id; parent_id = None })) ->
+        Some post_id
+    | Some _ | None -> None
+  in
+  (* Feed loaded, target absent from it. *)
+  let jumped, cmds = Update_nav.jump_to_knowledge_thread (on_board feed) "post-far" in
+  Alcotest.(check (list string)) "the jump asks only for the target thread"
+    [ "post-far" ] (thread_gets cmds);
+  let shown = thread_reply jumped "post-far" (Ok (far, [])) in
+  Alcotest.(check (option string)) "the target thread reply is kept"
+    (Some "post-far")
+    (Option.map
+       (fun ((tp : Wire_knowledge.board_post), _) -> tp.id)
+       (Observed.to_option shown.knowledge.active_thread));
+  Alcotest.(check (option string)) "the detail shows the target" (Some "post-far")
+    (detail_id shown);
+  Alcotest.(check (option string)) "comment and vote act on the target"
+    (Some "post-far") (crud_id shown);
+  let other = thread_reply shown "post-listed" (Ok (listed, [])) in
+  Alcotest.(check (option string)) "a reply for the list selection does not replace it"
+    (Some "post-far") (detail_id other);
+  (* Feed not loaded yet. *)
+  let jumped_absent, _ =
+    Update_nav.jump_to_knowledge_thread (on_board Observed.absent) "post-far"
+  in
+  let shown_absent = thread_reply jumped_absent "post-far" (Ok (far, [])) in
+  Alcotest.(check (option string)) "without a feed the detail shows the loaded thread"
+    (Some "post-far") (detail_id shown_absent);
+  Alcotest.(check (option string)) "without a feed comment and vote act on it"
+    (Some "post-far") (crud_id shown_absent);
+  (* Moving the list selection returns the detail to the list. *)
+  let two_feed =
+    Observed.value ~observed_at:t0
+      {
+        Wire_knowledge.posts = [ listed; post "post-next" ];
+        count = 2;
+        sort_by = "recent";
+        signal_only = true;
+      }
+  in
+  let jumped2, _ = Update_nav.jump_to_knowledge_thread (on_board two_feed) "post-far" in
+  let shown2 = thread_reply jumped2 "post-far" (Ok (far, [])) in
+  let moved =
+    { shown2 with
+      knowledge = Knowledge_store.move_selection ~delta:1 shown2.knowledge }
+  in
+  Alcotest.(check (option string)) "moving the selection shows the listed post"
+    (Some "post-next") (detail_id moved);
+  (* A feed reply before or after the target thread reply keeps the target:
+     the jump itself and an SSE [Board_changed] both refetch the feed. *)
+  let feed_reply (m : Model.t) posts =
+    Update.step ~now:t0 m
+      (Msg.Http_reply
+         {
+           epoch = m.epoch;
+           reply =
+             Msg.Reply_board_feed
+               (Ok
+                  {
+                    Wire_knowledge.posts;
+                    count = List.length posts;
+                    sort_by = "recent";
+                    signal_only = true;
+                  });
+         })
+  in
+  let fed_first, fed_first_cmds = feed_reply jumped [ listed ] in
+  Alcotest.(check (list string)) "jump, feed: the feed asks for no other thread" []
+    (thread_gets fed_first_cmds);
+  Alcotest.(check (option string)) "jump, feed: the target stays the detail"
+    (Some "post-far")
+    (Knowledge_store.board_detail_post_id fed_first.knowledge);
+  let fed_then_thread = thread_reply fed_first "post-far" (Ok (far, [])) in
+  Alcotest.(check (option string)) "jump, feed, thread: the detail shows the target"
+    (Some "post-far") (detail_id fed_then_thread);
+  Alcotest.(check (option string)) "jump, feed, thread: comment acts on the target"
+    (Some "post-far") (crud_id fed_then_thread);
+  let thread_then_fed, thread_then_fed_cmds = feed_reply shown [ listed ] in
+  Alcotest.(check (list string)) "jump, thread, feed: the feed asks for no other thread"
+    [] (thread_gets thread_then_fed_cmds);
+  Alcotest.(check (option string)) "jump, thread, feed: the detail shows the target"
+    (Some "post-far") (detail_id thread_then_fed);
+  Alcotest.(check (option string)) "jump, thread, feed: comment acts on the target"
+    (Some "post-far") (crud_id thread_then_fed);
+  let armed, _ =
+    Update.step ~now:t0
+      { thread_then_fed with nav = { thread_then_fed.nav with pane_index = 1 } }
+      (Msg.Key_event (char_key "+"))
+  in
+  Alcotest.(check (option string)) "a vote in the detail arms on the target"
+    (Some "post-far")
+    (match armed.knowledge.armed_vote with
+     | Some (Knowledge_store.Vote_post id, _) -> Some id
+     | Some (Knowledge_store.Vote_comment _, _) | None -> None);
+  let now_listed, now_listed_cmds = feed_reply shown [ listed; far ] in
+  Alcotest.(check (option string)) "a feed that lists the target selects its row"
+    (Some "post-far")
+    (Option.map
+       (fun (p : Wire_knowledge.board_post) -> p.id)
+       (Knowledge_store.selected_post now_listed.knowledge));
+  Alcotest.(check (option string)) "and the detail keeps the target" (Some "post-far")
+    (detail_id now_listed);
+  Alcotest.(check (list string)) "and no thread is refetched" []
+    (thread_gets now_listed_cmds);
+  (* List Up on the first row and Down on the last row leave the selection
+     where it is, so they must not swap the target for the list post. *)
+  let press (m : Model.t) k = Update.step ~now:t0 m (Msg.Key_event (key k)) in
+  let on_list = { shown with nav = { shown.nav with pane_index = 0 } } in
+  List.iter
+    (fun (label, k) ->
+      let pressed, pressed_cmds = press on_list k in
+      Alcotest.(check (option string)) (label ^ " at the list edge keeps the target")
+        (Some "post-far") (detail_id pressed);
+      Alcotest.(check (list string)) (label ^ " at the list edge asks for no thread") []
+        (thread_gets pressed_cmds))
+    [ ("Up", Keymap.Input.Up); ("Down", Keymap.Input.Down) ];
+  (* The target's comments scroll in the detail pane. *)
+  let long_comment : Wire_knowledge.board_comment =
+    {
+      Wire_knowledge.id = "c-far";
+      post_id = "post-far";
+      parent_id = None;
+      author = "beta";
+      body = String.concat "\n\n" (List.init 50 (Printf.sprintf "Paragraph %d"));
+      score = 1;
+      created_at_unix = 110.0;
+    }
+  in
+  let with_comments = thread_reply jumped "post-far" (Ok (far, [ long_comment ])) in
+  let on_detail_pane =
+    { with_comments with nav = { with_comments.nav with pane_index = 1 } }
+  in
+  let comments_view, _ =
+    Update.step ~now:t0 on_detail_pane (Msg.Key_event (char_key "v"))
+  in
+  Alcotest.(check bool) "the detail switched to the target's comments" true
+    (comments_view.knowledge.thread_view = Knowledge_store.Thread_comments);
+  let scrolled, _ = press comments_view Keymap.Input.Down in
+  Alcotest.(check bool) "Down scrolls the target's comment" true
+    (scrolled.knowledge.thread_comment_scroll > 0);
+  let back, _ = press scrolled Keymap.Input.Up in
+  Alcotest.(check int) "and Up scrolls it back"
+    comments_view.knowledge.thread_comment_scroll back.knowledge.thread_comment_scroll;
+  (* Wiki: the jump lands before the index. *)
+  let summary slug : Wire_knowledge.wiki_page_summary =
+    {
+      slug;
+      file = slug ^ ".md";
+      title = "Title " ^ slug;
+      summary = "Summary " ^ slug;
+      source = Wire_knowledge.Source_research;
+      author = "alpha-1";
+      created = "2026-11-01";
+      updated = "2026-11-22";
+      revision = 1;
+      tags = [];
+      backlink_count = 0;
+      outgoing_link_count = 0;
+      sources_count = 1;
+      hearsay_count = 0;
+      sha256 = "sha-" ^ slug;
+    }
+  in
+  let lint : Wire_knowledge.wiki_index_lint =
+    {
+      total_findings = 0;
+      counts =
+        {
+          broken_link = 0;
+          unsupported_link = 0;
+          orphan = 0;
+          orphan_unconfirmed = 0;
+          missing_sources = 0;
+          hearsay_only = 0;
+          unreadable_page = 0;
+          revision_log_gap = 0;
+          revision_log_hole = 0;
+          duplicate_title_candidates = 0;
+        };
+      log_hole_suppressed = false;
+      orphans = [];
+      duplicate_title_candidates = [];
+      findings = [];
+    }
+  in
+  let index : Wire_knowledge.wiki_index =
+    {
+      pages_total = 3;
+      pages_readable = 3;
+      pages_unreadable = 0;
+      pages = [ summary "alpha"; summary "beta"; summary "gamma" ];
+      unreadable_pages = [];
+      lint;
+    }
+  in
+  let wiki_jumped, _ = Update_nav.jump_to_knowledge_wiki (on_board Observed.absent) "gamma" in
+  Alcotest.(check (option string)) "the jump keeps the slug the index does not list yet"
+    (Some "gamma") wiki_jumped.knowledge.pending_wiki_jump_slug;
+  let indexed, index_cmds =
+    Update.step ~now:t0 wiki_jumped
+      (Msg.Http_reply
+         { epoch = wiki_jumped.epoch; reply = Msg.Reply_wiki_index (Ok index) })
+  in
+  Alcotest.(check (option string)) "the index selects the jumped page" (Some "gamma")
+    (Option.map
+       (fun (p : Wire_knowledge.wiki_page_summary) -> p.slug)
+       (Knowledge_store.selected_wiki_page indexed.knowledge));
+  Alcotest.(check (list string)) "and asks for that page"
+    [ "gamma" ]
+    (List.filter_map
+       (function
+         | Cmd.Http_get { req = Cmd.Get_wiki_page { page }; _ } -> Some page
+         | _ -> None)
+       (Cmd.flatten index_cmds));
+  Alcotest.(check (option string)) "the pending slug is spent" None
+    indexed.knowledge.pending_wiki_jump_slug
+
 let () =
   Alcotest.run "masc_tui_store"
     [
       ( "discord_reply"
       , [ Alcotest.test_case "recorded origin and safe receipt recovery" `Quick
             test_discord_reply_source_and_receipt ] );
-
+      ( "uncached_knowledge_jumps"
+      , [ Alcotest.test_case "uncached Board and wiki jumps show their target" `Quick
+            test_uncached_knowledge_jumps ] );
       ( "hidden_music_command"
       , [ Alcotest.test_case "unlisted /music parses, requests the handoff and keeps the popup out" `Quick
             test_hidden_music_command;
@@ -23608,7 +23860,7 @@ let () =
             "24h pulse sparkline, sums, company rollup & wall sort anchor to now_unix"
             `Quick test_24h_pulse_sparkline_and_sums_use_now_unix;
           Alcotest.test_case
-            "Media_viewer honors Artifact_dive target across actions without list fallback"
+            "Media_viewer honors selected Knowledge_artifacts entry across actions"
             `Quick test_media_viewer_follows_artifact_dive_target;
           Alcotest.test_case
             "Single-slot dive Error replies honor active target ID guard except Workspace_mismatch"
@@ -25837,27 +26089,19 @@ let () =
               in
               Alcotest.(check bool) "Knowledge > Artifacts '}' alias still steps to revision 3"
                 true (has_rev_get 3 cmds_rbrace);
-              let m_dive =
-                {
-                  m_art with
-                  nav =
-                    {
-                      m_art.nav with
-                      dive_stack =
-                        [ Nav.Dive_knowledge (Nav.Artifact_dive "art-rev-1") ];
-                    };
-                }
+              let m_zoomed =
+                { m_art with nav = { m_art.nav with zoomed = true } }
               in
-              let _, cmds_dive_lt =
-                Update.step ~now:t1 m_dive (Msg.Key_event (char_key "<"))
+              let _, cmds_zoom_lt =
+                Update.step ~now:t1 m_zoomed (Msg.Key_event (char_key "<"))
               in
-              Alcotest.(check bool) "Artifact_dive '<' steps to revision 1" true
-                (has_rev_get 1 cmds_dive_lt);
-              let _, cmds_dive_gt =
-                Update.step ~now:t1 m_dive (Msg.Key_event (char_key ">"))
+              Alcotest.(check bool) "Zoomed Artifacts '<' steps to revision 1" true
+                (has_rev_get 1 cmds_zoom_lt);
+              let _, cmds_zoom_gt =
+                Update.step ~now:t1 m_zoomed (Msg.Key_event (char_key ">"))
               in
-              Alcotest.(check bool) "Artifact_dive '>' steps to revision 3" true
-                (has_rev_get 3 cmds_dive_gt));
+              Alcotest.(check bool) "Zoomed Artifacts '>' steps to revision 3" true
+                (has_rev_get 3 cmds_zoom_gt));
           Alcotest.test_case
             "Epoch transition clears stuck MCP form/result, pending addon decl, and interrupting turn tokens"
             `Quick
@@ -27972,5 +28216,193 @@ let () =
                 (Nav.equal_workspace m_sbox_ret.nav.workspace Nav.Keepers
                 && Nav.equal_keeper_tab m_sbox_ret.fleet.keeper_dive_tab
                      Nav.Keeper_work_sandbox));
+          Alcotest.test_case
+            "Wave 3 Layer 1: Knowledge zoom replaces Dive_knowledge (Board [v]/Esc/Tab, Artifacts search, Palette jumps)"
+            `Quick
+            (fun () ->
+              let step_k m ev = Update.step ~now:t0 m (Msg.Key_event ev) in
+              let p1 : Wire_knowledge.board_post =
+                {
+                  id = "w3-p1";
+                  title = "W3 Post";
+                  body = "Body line 1";
+                  author = "alpha";
+                  hearth = Some "ops";
+                  score = 3;
+                  comment_count = 2;
+                  created_at_unix = 1_795_254_000.0;
+                  updated_at_unix = None;
+                  pinned = false;
+                  author_karma = Observed.absent;
+                  is_signal = true;
+                  post_kind = Some Wire_knowledge.Human_post;
+                  visibility = Some Wire_knowledge.Vis_public;
+                  succession_chain_root_id = None;
+                  chain_depth = None;
+                }
+              in
+              let c1 : Wire_knowledge.board_comment =
+                {
+                  id = "w3-c1";
+                  post_id = "w3-p1";
+                  parent_id = None;
+                  author = "beta";
+                  body = "First comment body";
+                  created_at_unix = 1_795_254_100.0;
+                  score = 2;
+                }
+              in
+              let c2 : Wire_knowledge.board_comment =
+                {
+                  id = "w3-c2";
+                  post_id = "w3-p1";
+                  parent_id = Some "w3-c1";
+                  author = "gamma";
+                  body = "Second comment body";
+                  created_at_unix = 1_795_254_200.0;
+                  score = 1;
+                }
+              in
+              let art : Wire_knowledge.artifact_entry =
+                {
+                  id = "w3-art-1";
+                  revision = 1;
+                  title = "W3 Report";
+                  summary = "Summary";
+                  author = "alpha";
+                  created_at_unix = 1_795_254_000.0;
+                  body =
+                    {
+                      sha256 = "sha-w3-art-1";
+                      bytes = 512;
+                      mime = "text/markdown";
+                    };
+                }
+              in
+              let art_body =
+                String.concat "\n"
+                  (List.init 50 (fun i ->
+                       if i = 5 || i = 35 then
+                         Printf.sprintf "needle hit line %d" i
+                       else Printf.sprintf "filler line %d" i))
+              in
+              let art_detail : Wire_knowledge.published_artifact_detail =
+                {
+                  artifact = art;
+                  content = art_body;
+                  revisions = [];
+                  shared = false;
+                  share_version = 1;
+                }
+              in
+              let base0 = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
+              let k0 =
+                Knowledge_store.empty
+                |> Knowledge_store.set_tab Nav.Knowledge_board
+                |> Knowledge_store.apply_board ~observed_at:t0
+                     {
+                       Wire_knowledge.posts = [ p1 ];
+                       count = 1;
+                       sort_by = "recent";
+                       signal_only = true;
+                     }
+                |> Knowledge_store.apply_thread ~observed_at:t0 (p1, [ c1; c2 ])
+                |> Knowledge_store.apply_artifacts ~observed_at:t0 [ art ]
+                |> Knowledge_store.apply_artifact_detail ~observed_at:t0 art_detail
+              in
+              let m_board =
+                {
+                  base0 with
+                  nav = { base0.nav with workspace = Nav.Knowledge; pane_index = 0 };
+                  knowledge = k0;
+                }
+              in
+              (* 1. Board pane 0 [Enter] zooms in with zero dive_stack *)
+              let m_bz, _ = step_k m_board (key Keymap.Input.Enter) in
+              Alcotest.(check bool)
+                "Board [Enter] zooms without pushing dive_stack" true
+                (m_bz.nav.zoomed && Option.is_none (Model.active_dive m_bz));
+              (* 2. [v] enters Thread_comments; Tab stays in unified focus ring (never hijacked!) *)
+              let m_bc, _ = step_k m_bz (char_key "v") in
+              Alcotest.(check bool) "[v] switches Board detail to Thread_comments"
+                true
+                (m_bc.knowledge.thread_view = Knowledge_store.Thread_comments);
+              let m_bc_tab, _ = step_k m_bc (key Keymap.Input.Tab) in
+              Alcotest.(check bool)
+                "Tab in Thread_comments moves to sidebar instead of toggling thread_view"
+                true
+                (m_bc_tab.nav.sidebar_focused
+                 && m_bc_tab.knowledge.thread_view = Knowledge_store.Thread_comments);
+              (* 3. > steps to c2, [y] copies c2 body, 1st Esc returns to Thread_post, 2nd Esc unzooms *)
+              let m_bc2, _ = step_k m_bc (char_key ">") in
+              let _, cmds_y = step_k m_bc2 (char_key "y") in
+              Alcotest.(check bool) "[y] in Thread_comments copies selected comment body"
+                true
+                (List.exists
+                   (function
+                     | Cmd.Copy_clipboard s -> String.equal s "Second comment body"
+                     | _ -> false)
+                   (Cmd.flatten cmds_y));
+              let m_esc1, _ = step_k m_bc2 (key Keymap.Input.Escape) in
+              Alcotest.(check bool) "1st Esc exits Thread_comments while staying zoomed"
+                true
+                (m_esc1.nav.zoomed
+                 && m_esc1.knowledge.thread_view = Knowledge_store.Thread_post);
+              let m_esc2, _ = step_k m_esc1 (key Keymap.Input.Escape) in
+              Alcotest.(check bool) "2nd Esc unzooms Board" false m_esc2.nav.zoomed;
+              (* 4. Artifacts zoomed '/' + [n] updates detail_scroll_offset (never dive_scroll_offset),
+                 1st Esc clears search, 2nd Esc unzooms; pane 0 '/' edits list filter_query *)
+              let m_art_p0 =
+                {
+                  m_board with
+                  knowledge =
+                    Knowledge_store.set_tab Nav.Knowledge_artifacts k0;
+                }
+              in
+              let m_art_p0_f, _ =
+                Update_nav.set_active_filter_query "W3" m_art_p0
+              in
+              Alcotest.(check bool)
+                "Artifacts pane 0 filter edits filter_query, not artifact_search_query"
+                true
+                (String.equal m_art_p0_f.knowledge.filter_query "W3"
+                 && String.equal m_art_p0_f.knowledge.artifact_search_query "");
+              let m_art_z, _ = step_k m_art_p0 (key Keymap.Input.Enter) in
+              let m_art_q, _ =
+                Update_nav.set_active_filter_query "needle" m_art_z
+              in
+              let m_art_n, _ = step_k m_art_q (char_key "n") in
+              Alcotest.(check bool)
+                "Artifacts zoomed [n] scrolls detail_scroll_offset to match and leaves dive_scroll_offset=0"
+                true
+                (m_art_n.knowledge.artifact_search_match_idx = 1
+                 && m_art_n.knowledge.detail_scroll_offset > 0
+                 && m_art_n.nav.dive_scroll_offset = 0);
+              let m_art_esc1, _ = step_k m_art_n (key Keymap.Input.Escape) in
+              Alcotest.(check bool) "1st Esc clears artifact_search_query while staying zoomed"
+                true
+                (m_art_esc1.nav.zoomed
+                 && String.equal m_art_esc1.knowledge.artifact_search_query "");
+              let m_art_esc2, _ = step_k m_art_esc1 (key Keymap.Input.Escape) in
+              Alcotest.(check bool) "2nd Esc unzooms Artifacts" false
+                m_art_esc2.nav.zoomed;
+              (* 5. Cross-workspace jump_to_knowledge_thread from Pulse returns cleanly on Esc *)
+              let m_pulse =
+                { m_board with nav = { m_board.nav with workspace = Nav.Pulse } }
+              in
+              let m_jumped, _ =
+                Update_nav.jump_to_knowledge_thread ~return_from:m_pulse m_pulse
+                  "w3-p1"
+              in
+              Alcotest.(check bool) "jump_to_knowledge_thread lands on Knowledge_board with return stack"
+                true
+                (Nav.equal_workspace m_jumped.nav.workspace Nav.Knowledge
+                 && Nav.equal_knowledge_tab m_jumped.knowledge.active_tab
+                      Nav.Knowledge_board
+                 && Option.is_none (Model.active_dive m_jumped)
+                 && m_jumped.nav.workspace_return_stack <> []);
+              let m_ret, _ = step_k m_jumped (key Keymap.Input.Escape) in
+              Alcotest.(check bool) "Esc returns to Pulse" true
+                (Nav.equal_workspace m_ret.nav.workspace Nav.Pulse));
         ] );
     ]

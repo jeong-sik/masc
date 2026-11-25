@@ -338,11 +338,7 @@ let active_memory_content_rect (m : Model.t) =
     | None -> None
     | Some (bp, body) -> (
         match Model.active_dive m with
-        | Some
-            ( Nav.Dive_work _
-            | Nav.Dive_knowledge _
-            | Nav.Dive_runtime _ ) ->
-            None
+        | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> None
         | None -> (
             match m.nav.workspace with
             | Nav.Keepers

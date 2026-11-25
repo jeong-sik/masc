@@ -574,6 +574,8 @@ let compact_infra_tab_label ~(lang : Say.lang) ~compact tab =
 
 let active_filter_text (m : Model.t) =
   if Model.is_keeper_config_active m then m.config.search_query
+  else if Model.is_artifact_doc_search_active m then
+    m.knowledge.artifact_search_query
   else
     match m.nav.workspace with
     | Nav.Pulse | Nav.Keepers -> m.fleet.filter_query
@@ -810,7 +812,6 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
     in
     let dive_root_label = function
       | Nav.Dive_work _ -> Nav.workspace_label Nav.Work
-      | Nav.Dive_knowledge _ -> Nav.workspace_label Nav.Knowledge
       | Nav.Dive_runtime _ -> Nav.workspace_label Nav.Runtime
     in
     let dive_segment_label = function
@@ -830,12 +831,6 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
           in
           Say.resolve lang (Say.make ~ko:"검증" ~en:"Verify")
           ^ " " ^ id ^ tab_tag
-      | Nav.Dive_knowledge (Nav.Thread_dive id) ->
-          Say.resolve lang (Say.make ~ko:"타래" ~en:"Thread") ^ " " ^ id
-      | Nav.Dive_knowledge (Nav.Wiki_dive slug) ->
-          Say.resolve lang (Say.make ~ko:"위키" ~en:"Wiki") ^ " " ^ slug
-      | Nav.Dive_knowledge (Nav.Artifact_dive id) ->
-          Say.resolve lang (Say.make ~ko:"산출물" ~en:"Artifact") ^ " " ^ id
       | Nav.Dive_runtime (Nav.Tool_dive name) ->
           Say.resolve lang (Say.make ~ko:"도구" ~en:"Tool") ^ " " ^ name
       | Nav.Dive_runtime (Nav.Skill_dive ref_s) ->
@@ -854,10 +849,7 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
           String.concat sep (root :: segs)
     in
     (match Model.active_dive model with
-     | Some
-         ( Nav.Dive_work _
-         | Nav.Dive_knowledge _
-         | Nav.Dive_runtime _ ) ->
+     | Some (Nav.Dive_work _ | Nav.Dive_runtime _) ->
          let crumb = format_dive_chain () in
          let adv =
            Cell_grid.put_text ~clip:tabs_clip grid ~x:!x ~y:rect.y
@@ -1383,16 +1375,6 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           Keymap.footer_hints ~scope_chain ~max_width:(remaining_w + 180)
             ~lang:model.lang
         in
-        let thread_reading =
-          Model.body_has_focus model
-          && (match Model.active_dive model with
-              | Some (Nav.Dive_knowledge (Nav.Thread_dive _)) -> true
-              | Some
-                  ( Nav.Dive_knowledge (Nav.Wiki_dive _ | Nav.Artifact_dive _)
-                  | Nav.Dive_work _
-                  | Nav.Dive_runtime _ )
-              | None -> false)
-        in
         let show_tab_hint =
           match model.nav.overlay with
           | Some (Nav.Help | Nav.Incidents | Nav.System_gate _) -> false
@@ -1418,7 +1400,7 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
                           false)
               | None -> false)
           | None ->
-              thread_reading || Model.focusable_pane_count model > 1
+              Model.focusable_pane_count model > 1
               || Model.sidebar_visible model
         in
         let show_overlay_confirm_hint =
@@ -1449,12 +1431,7 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           && (not (Model.is_keeper_config_active model))
           &&
           match Model.active_dive model with
-          | Some (Nav.Dive_knowledge (Nav.Artifact_dive _)) -> false
-          | Some
-              ( Nav.Dive_work _
-              | Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Wiki_dive _)
-              | Nav.Dive_runtime _ ) ->
-              true
+          | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> true
           | None ->
               Nav.equal_workspace model.nav.workspace Nav.Pulse
               || Model.is_in_keeper_chat model
@@ -1470,10 +1447,6 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           | Some Nav.Ask_answer -> Some ("질문", "Q")
           | Some (Nav.Inline_action _ | Nav.Help | Nav.Incidents | Nav.System_gate _) ->
               None
-          | None when thread_reading -> (
-              match model.knowledge.thread_view with
-              | Knowledge_store.Thread_post -> Some ("댓글", "Comments")
-              | Knowledge_store.Thread_comments -> Some ("본문", "Post"))
           | None ->
               if
                 Model.focusable_pane_count model <= 1
@@ -1509,11 +1482,7 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
               false
           | None -> (
               match Model.active_dive model with
-              | Some
-                  ( Nav.Dive_work _
-                  | Nav.Dive_knowledge _
-                  | Nav.Dive_runtime _ ) ->
-                  false
+              | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> false
               | None -> not (Nav.equal_workspace model.nav.workspace Nav.Pulse))
         in
         let show_esc_hint =
@@ -1524,6 +1493,11 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           || Model.sidebar_has_focus model
           || Model.sidebar_drawer_open model
           || (model.nav.zoomed && Model.can_zoom_current_view model)
+          || (Model.is_board_detail_active model
+              &&
+              match model.knowledge.thread_view with
+              | Knowledge_store.Thread_comments -> true
+              | Knowledge_store.Thread_post -> false)
           || (Option.is_none (Model.active_dive model)
               && Knowledge_store.is_memory_diff_pinned model.knowledge
               && ((Nav.equal_workspace model.nav.workspace Nav.Knowledge

@@ -2619,18 +2619,11 @@ let test_bounded_clipboard_url_opener_and_async_wiki_editor () =
   in
   Alcotest.(check bool) "can_launch on Knowledge_wiki" true
     (App.can_launch_pending_wiki_editor m_wiki);
-  let m_wiki_dive =
-    {
-      m_wiki with
-      nav =
-        {
-          m_wiki.nav with
-          dive_stack = [ Nav.Dive_knowledge (Nav.Wiki_dive "guide") ];
-        };
-    }
+  let m_wiki_zoomed =
+    { m_wiki with nav = { m_wiki.nav with zoomed = true } }
   in
-  Alcotest.(check bool) "can_launch on Wiki_dive" true
-    (App.can_launch_pending_wiki_editor m_wiki_dive);
+  Alcotest.(check bool) "can_launch on zoomed Knowledge_wiki" true
+    (App.can_launch_pending_wiki_editor m_wiki_zoomed);
   Alcotest.(check bool) "blocked after switching to Pulse" false
     (App.can_launch_pending_wiki_editor
        { m_wiki with nav = { m_wiki.nav with workspace = Nav.Pulse } });

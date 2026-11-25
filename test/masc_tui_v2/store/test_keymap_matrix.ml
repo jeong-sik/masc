@@ -74,8 +74,6 @@ let render_full ~(model : Model.t) =
     match Model.active_dive model with
     | Some (Nav.Dive_work target) ->
         Screen_work.render_dive ~target ~model ~cache ~rect g
-    | Some (Nav.Dive_knowledge target) ->
-        Screen_knowledge.render_dive ~target ~model ~cache ~rect g
     | Some (Nav.Dive_runtime target) ->
         Screen_runtime.render_dive ~target ~model ~cache ~rect g
     | None -> (
@@ -1290,14 +1288,20 @@ let test_axis_a_screen_dive_matrix () =
       , with_dive
           (Nav.Dive_work (Nav.Task_dive "task-1"))
           (with_ws Nav.Work base) );
-      ( "Dive/Knowledge/Thread"
-      , with_dive
-          (Nav.Dive_knowledge (Nav.Thread_dive "post-1"))
-          (with_ws Nav.Knowledge base) );
-      ( "Dive/Knowledge/Wiki"
-      , with_dive
-          (Nav.Dive_knowledge (Nav.Wiki_dive "arch-overview"))
-          (with_ws Nav.Knowledge base) );
+      ( "Knowledge/Board/Zoomed"
+      , let mk = with_ws Nav.Knowledge base in
+        {
+          mk with
+          nav = { mk.nav with zoomed = true; pane_index = 0 };
+          knowledge = Knowledge_store.set_tab Nav.Knowledge_board mk.knowledge;
+        } );
+      ( "Knowledge/Wiki/Zoomed"
+      , let mk = with_ws Nav.Knowledge base in
+        {
+          mk with
+          nav = { mk.nav with zoomed = true; pane_index = 0 };
+          knowledge = Knowledge_store.set_tab Nav.Knowledge_wiki mk.knowledge;
+        } );
       ( "Infra/Sandboxes/Zoomed"
       , let mi = with_ws Nav.Infra base in
         { mi with nav = { mi.nav with zoomed = true; pane_index = 0 } } );
@@ -1346,41 +1350,10 @@ let test_axis_a_screen_dive_matrix () =
             (tag ^ " pane_index in bounds")
             true
             (m'.nav.pane_index >= 0 && m'.nav.pane_index < panes_after);
-          (* Invariant 2: Tab / Shift+Tab unified focus ring (Body panes <-> Sidebar),
-             except Thread_dive body where Tab/Shift+Tab switches Post <-> Comments tabs. *)
+          (* Invariant 2: Tab / Shift+Tab unified focus ring (Body panes <-> Sidebar). *)
           let sb_vis_before = Model.sidebar_visible m in
-          let is_thread_dive_body =
-            (not m.nav.sidebar_focused)
-            &&
-            match dive_before with
-            | Some (Nav.Dive_knowledge (Nav.Thread_dive _)) -> true
-            | Some
-                ( Nav.Dive_knowledge (Nav.Wiki_dive _ | Nav.Artifact_dive _)
-                | Nav.Dive_work _
-                | Nav.Dive_runtime _ )
-            | None ->
-                false
-          in
-          let thread_view_toggled =
-            match (m.knowledge.thread_view, m'.knowledge.thread_view) with
-            | Knowledge_store.Thread_post, Knowledge_store.Thread_comments
-            | Knowledge_store.Thread_comments, Knowledge_store.Thread_post ->
-                true
-            | Knowledge_store.Thread_post, Knowledge_store.Thread_post
-            | Knowledge_store.Thread_comments, Knowledge_store.Thread_comments
-              ->
-                false
-          in
           if String.equal kname "Tab" then begin
-            if is_thread_dive_body then begin
-              Alcotest.(check bool)
-                (tag ^ " Tab toggles Board thread reading tab")
-                true thread_view_toggled;
-              Alcotest.(check bool)
-                (tag ^ " Tab stays in thread reading body")
-                false m'.nav.sidebar_focused
-            end
-            else if m.nav.pane_index + 1 < panes_before then begin
+            if m.nav.pane_index + 1 < panes_before then begin
               Alcotest.(check int) (tag ^ " Tab pane_index")
                 (m.nav.pane_index + 1) m'.nav.pane_index;
               Alcotest.(check bool) (tag ^ " Tab stays in body") false
@@ -1396,15 +1369,7 @@ let test_axis_a_screen_dive_matrix () =
             end
           end;
           if String.equal kname "Shift+Tab" then begin
-            if is_thread_dive_body then begin
-              Alcotest.(check bool)
-                (tag ^ " Shift+Tab toggles Board thread reading tab")
-                true thread_view_toggled;
-              Alcotest.(check bool)
-                (tag ^ " Shift+Tab stays in thread reading body")
-                false m'.nav.sidebar_focused
-            end
-            else if m.nav.pane_index > 0 then begin
+            if m.nav.pane_index > 0 then begin
               Alcotest.(check int) (tag ^ " Shift+Tab pane_index")
                 (m.nav.pane_index - 1) m'.nav.pane_index;
               Alcotest.(check bool) (tag ^ " Shift+Tab stays in body") false
@@ -1587,7 +1552,6 @@ let test_axis_a_screen_dive_matrix () =
           if String.equal kname "o" then begin
             let is_valid_o =
               match dive_before with
-              | Some (Nav.Dive_knowledge (Nav.Artifact_dive _)) -> true
               | Some _ -> false
               | None ->
                   (Nav.equal_workspace m.nav.workspace Nav.Infra
@@ -2312,11 +2276,18 @@ let test_journeys_tab_multipane_dives_safety () =
      | Some (Nav.Dive_work (Nav.Goal_dive "goal-1")) -> true
      | _ -> false);
   let p_pane3, _ = step p_pane2 (mk_key Keymap.Input.Tab) in
-  let p_thread_dive, _ = step p_pane3 (mk_key Keymap.Input.Enter) in
-  Alcotest.(check bool) "J10 Pulse pane 3 (World) Enter dives Thread_dive" true
-    (match Model.active_dive p_thread_dive with
-     | Some (Nav.Dive_knowledge (Nav.Thread_dive "post-1")) -> true
-     | _ -> false);
+  let p_thread_jump, _ = step p_pane3 (mk_key Keymap.Input.Enter) in
+  Alcotest.(check bool)
+    "J10 Pulse pane 3 (World) Enter jumps to Knowledge > Board on post-1" true
+    (Option.is_none (Model.active_dive p_thread_jump)
+     && Nav.equal_workspace p_thread_jump.nav.workspace Nav.Knowledge
+     && Nav.equal_knowledge_tab p_thread_jump.knowledge.active_tab
+          Nav.Knowledge_board
+     && p_thread_jump.nav.workspace_return_stack <> []
+     &&
+     match Knowledge_store.selected_post p_thread_jump.knowledge with
+     | Some p -> String.equal p.id "post-1"
+     | None -> false);
 
   (* J11: Work_pipeline 3 panes & empty verifs never corrupts Goals *)
   record_case ();
@@ -3162,7 +3133,7 @@ let test_journeys_tab_multipane_dives_safety () =
   let m_z_art2, _ = step m_z_tab (char_key "z") in
   Alcotest.(check bool) "R6 'z' on Knowledge_artifacts toggles zoomed = true" true
     m_z_art2.nav.zoomed;
-  let m_z_dive, _ = Update_nav.push_dive m_z_kw1 (Nav.Dive_knowledge (Nav.Wiki_dive "architecture")) in
+  let m_z_dive, _ = Update_nav.push_dive m_z_kw1 (Nav.Dive_runtime (Nav.Tool_dive "masc_status")) in
   Alcotest.(check bool) "R6 push_dive resets zoomed = false" false
     m_z_dive.nav.zoomed;
   let m_z_filtered =
@@ -4280,24 +4251,20 @@ let test_pillar2_scroll_bounds_all_surfaces () =
   Alcotest.(check int)
     "Knowledge > Artifacts pane 1 (tall viewport) clamps 5-row detail cleanly to 0"
     0 m_art_tall_end.knowledge.detail_scroll_offset;
-  let m_art_dive =
+  let m_art_zoomed =
     {
       m_art_tall with
-      nav =
-        {
-          m_art_tall.nav with
-          dive_stack =
-            [ Nav.Dive_knowledge (Nav.Artifact_dive (List.hd many_artifacts).id) ];
-        };
+      nav = { m_art_tall.nav with zoomed = true; pane_index = 0 };
     }
   in
-  let m_art_dive_end, _ = step m_art_dive (mk_key Keymap.Input.End) in
+  let m_art_zoomed_end, _ = step m_art_zoomed (mk_key Keymap.Input.End) in
   Alcotest.(check bool)
-    "Knowledge > Artifact_dive End scrolls 60 revisions > 0" true
-    (m_art_dive_end.nav.dive_scroll_offset > 0);
-  let txt_art = grid_all_text (render_full ~model:m_art_dive_end) in
+    "Knowledge > Artifacts zoomed End scrolls 60 published fallback items > 0"
+    true
+    (m_art_zoomed_end.knowledge.detail_scroll_offset > 0);
+  let txt_art = grid_all_text (render_full ~model:m_art_zoomed_end) in
   Alcotest.(check bool)
-    "Knowledge > Artifact_dive at End renders last Artifact Report 59" true
+    "Knowledge > Artifacts zoomed at End renders last Artifact Report 59" true
     (Store_scroll.contains_ci ~needle:"Artifact Report 59" txt_art);
   (* 4b. Knowledge > Wiki pane 1 with wide 22-col TOC rail wraps prose cleanly & reaches exact bottom *)
   let long_wiki_toc =
@@ -5566,12 +5533,6 @@ let test_pillar2_scroll_bounds_all_surfaces () =
       , Nav.Dive_work (Nav.Verification_dive "verif-1")
       , "Missing artifacts"
       , dive_off );
-      ("Thread_dive (Post tab)", Nav.Dive_knowledge (Nav.Thread_dive "post-1"), "THREAD_POST_BOTTOM_44", dive_off);
-      ("Wiki_dive", Nav.Dive_knowledge (Nav.Wiki_dive "arch-overview"), "FINAL_WIKI_BOTTOM_LINE", dive_off);
-      ( "Artifact_dive"
-      , Nav.Dive_knowledge (Nav.Artifact_dive (List.hd many_artifacts).id)
-      , "Artifact Report 59"
-      , dive_off );
     ]
   in
   List.iter
@@ -5581,23 +5542,90 @@ let test_pillar2_scroll_bounds_all_surfaces () =
       in
       assert_scroll_exact ~label:dname ~needle ~get_off md0)
     dives_with_sentinels;
-  let m_thread_comments, _ =
-    let md0 =
-      {
-        m_dives_base with
-        nav =
-          {
-            m_dives_base.nav with
-            dive_stack = [ Nav.Dive_knowledge (Nav.Thread_dive "post-1") ];
-          };
-      }
+  let m_know_board_z =
+    let board_with_long_post1 =
+      match Observed.to_option m_dives_base.knowledge.board with
+      | Some feed ->
+          let posts =
+            List.map
+              (fun (p : Wire_knowledge.board_post) ->
+                if String.equal p.id "post-1" then post1 else p)
+              feed.posts
+          in
+          Knowledge_store.apply_board ~observed_at:t0 { feed with posts }
+            m_dives_base.knowledge
+      | None -> m_dives_base.knowledge
     in
-    step md0 (mk_key Keymap.Input.Tab)
+    {
+      m_dives_base with
+      nav =
+        {
+          m_dives_base.nav with
+          workspace = Nav.Knowledge;
+          zoomed = true;
+          pane_index = 0;
+        };
+      knowledge =
+        board_with_long_post1
+        |> Knowledge_store.select_post_by_id ~since_ns:t0 ~post_id:"post-1"
+        |> Knowledge_store.apply_thread ~observed_at:t0 (post1, long_comments);
+    }
   in
-  assert_scroll_exact ~label:"Thread_dive (Comments tab)"
+  let m_know_board_post_only =
+    {
+      m_know_board_z with
+      knowledge =
+        Knowledge_store.apply_thread ~observed_at:t0 (post1, [])
+          m_know_board_z.knowledge;
+    }
+  in
+  assert_scroll_exact ~label:"Knowledge > Board zoomed (Post view)"
+    ~needle:"THREAD_POST_BOTTOM_44"
+    ~get_off:(fun (m : Model.t) -> m.knowledge.detail_scroll_offset)
+    m_know_board_post_only;
+  let m_thread_comments, _ = step m_know_board_z (char_key "v") in
+  assert_scroll_exact ~label:"Knowledge > Board zoomed (Comments view via [v])"
     ~needle:"THREAD_COMMENT_BOTTOM_44"
     ~get_off:(fun (m : Model.t) -> m.knowledge.thread_comment_scroll)
     m_thread_comments;
+  let m_know_wiki_z =
+    {
+      m_dives_base with
+      nav =
+        {
+          m_dives_base.nav with
+          workspace = Nav.Knowledge;
+          zoomed = true;
+          pane_index = 0;
+        };
+      knowledge =
+        Knowledge_store.select_wiki_slug ~slug:"arch-overview"
+          m_dives_base.knowledge;
+    }
+  in
+  assert_scroll_exact ~label:"Knowledge > Wiki zoomed (66/34 Links+Lint)"
+    ~needle:"FINAL_WIKI_BOTTOM_LINE"
+    ~get_off:(fun (m : Model.t) -> m.knowledge.detail_scroll_offset)
+    m_know_wiki_z;
+  let m_know_art_z =
+    {
+      m_dives_base with
+      nav =
+        {
+          m_dives_base.nav with
+          workspace = Nav.Knowledge;
+          zoomed = true;
+          pane_index = 0;
+        };
+      knowledge =
+        Knowledge_store.select_artifact_by_id
+          ~id_or_sha:(List.hd many_artifacts).id m_dives_base.knowledge;
+    }
+  in
+  assert_scroll_exact ~label:"Knowledge > Artifacts zoomed (Published fallback)"
+    ~needle:"Artifact Report 59"
+    ~get_off:(fun (m : Model.t) -> m.knowledge.detail_scroll_offset)
+    m_know_art_z;
   let m_inc_zoomed =
     {
       m_dives_base with
@@ -9024,14 +9052,30 @@ let test_p1_shortcut_and_classifier_regressions () =
   Alcotest.(check bool) "[v] on Work > Tasks cycles task_status_filter" true
     (m_tasks_v.work.task_status_filter <> m_tasks.work.task_status_filter);
 
-  (* 5. Keymap.Open_external_editor handles Wiki_dive (from Palette). *)
+  (* 5. Keymap.Open_external_editor handles Knowledge_wiki zoomed (from Palette). *)
+  let m0_wiki =
+    {
+      m0 with
+      knowledge =
+        m0.knowledge
+        |> Knowledge_store.apply_wiki_index ~observed_at:t0
+             {
+               pages_total = 1;
+               pages_readable = 1;
+               pages_unreadable = 0;
+               pages = [ mk_wiki_summary ~slug:"handbook" ~title:"Handbook" ];
+               unreadable_pages = [];
+               lint = empty_wiki_lint;
+             };
+    }
+  in
   let m_wiki, _ =
-    Update_nav.push_dive m0 (Nav.Dive_knowledge (Nav.Wiki_dive "handbook"))
+    Update_nav.jump_to_knowledge_wiki ~zoomed:true m0_wiki "handbook"
   in
   let _, wiki_cmds =
     Update_actions.execute_action ~now:t0 m_wiki Keymap.Open_external_editor
   in
-  Alcotest.(check bool) "Open_external_editor emits Edit_wiki_page on Wiki_dive"
+  Alcotest.(check bool) "Open_external_editor emits Edit_wiki_page on zoomed Knowledge_wiki"
     true
     (List.exists
        (function
@@ -9309,12 +9353,28 @@ let test_batch_f2_live_contextual_hotkeys_preserved () =
     (Option.equal Nav.equal_overlay m_k_mem_a.nav.overlay
        (Some (Nav.Inline_action Nav.Memory_act_form)));
 
-  (* 2. Ctrl+E on Wiki_dive and Knowledge > Wiki delegates to Keymap.Open_external_editor. *)
+  (* 2. Ctrl+E on zoomed Knowledge > Wiki delegates to Keymap.Open_external_editor. *)
+  let m0_wiki =
+    {
+      m0 with
+      knowledge =
+        m0.knowledge
+        |> Knowledge_store.apply_wiki_index ~observed_at:t0
+             {
+               pages_total = 1;
+               pages_readable = 1;
+               pages_unreadable = 0;
+               pages = [ mk_wiki_summary ~slug:"handbook" ~title:"Handbook" ];
+               unreadable_pages = [];
+               lint = empty_wiki_lint;
+             };
+    }
+  in
   let m_wiki, _ =
-    Update_nav.push_dive m0 (Nav.Dive_knowledge (Nav.Wiki_dive "handbook"))
+    Update_nav.jump_to_knowledge_wiki ~zoomed:true m0_wiki "handbook"
   in
   let _, wiki_cmds = step m_wiki (char_key ~ctrl:true "e") in
-  Alcotest.(check bool) "Ctrl+E on Wiki_dive emits Edit_wiki_page" true
+  Alcotest.(check bool) "Ctrl+E on zoomed Knowledge > Wiki emits Edit_wiki_page" true
     (List.exists
        (function
          | Cmd.Open_editor_escape_hatch (Cmd.Edit_wiki_page "handbook") -> true

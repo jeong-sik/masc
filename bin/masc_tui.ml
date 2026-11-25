@@ -16,8 +16,6 @@ let render_body ~(model : Model.t) ~cache ~history_rows rect grid =
   match Model.active_dive model with
   | Some (Nav.Dive_work target) ->
       Screen_work.render_dive ~target ~model ~cache ~rect grid
-  | Some (Nav.Dive_knowledge target) ->
-      Screen_knowledge.render_dive ~target ~model ~cache ~rect grid
   | Some (Nav.Dive_runtime target) ->
       Screen_runtime.render_dive ~target ~model ~cache ~rect grid
   | None -> (

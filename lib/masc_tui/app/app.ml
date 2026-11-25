@@ -597,7 +597,7 @@ let visible_keeper_progress_interval (m : Model.t) =
              && (m.nav.zoomed || Model.uses_keeper_split ~width:m.viewport.cols m)
           then Model.selected_keeper_name m
           else None
-      | Some (Nav.Dive_work _ | Nav.Dive_knowledge _ | Nav.Dive_runtime _) -> None
+      | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> None
   in
   (* Only a glyph with an animation frame needs a presentation clock. *)
   (match Option.bind keeper (fun keeper ->
@@ -884,12 +884,7 @@ let can_launch_pending_wiki_editor (m : Model.t) =
   && (not (Model.is_text_capture_active m))
   &&
   match Model.active_dive m with
-  | Some (Nav.Dive_knowledge (Nav.Wiki_dive _)) -> true
-  | Some
-      ( Nav.Dive_knowledge (Nav.Thread_dive _ | Nav.Artifact_dive _)
-      | Nav.Dive_work _
-      | Nav.Dive_runtime _ ) ->
-      false
+  | Some (Nav.Dive_work _ | Nav.Dive_runtime _) -> false
   | None ->
       Nav.equal_workspace m.nav.workspace Nav.Knowledge
       && (match m.knowledge.active_tab with

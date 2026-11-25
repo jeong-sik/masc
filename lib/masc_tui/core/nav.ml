@@ -53,11 +53,6 @@ type work_dive_target =
   | Task_dive of string
   | Verification_dive of string
 
-type knowledge_dive_target =
-  | Thread_dive of string
-  | Wiki_dive of string
-  | Artifact_dive of string
-
 type runtime_dive_target =
   | Tool_dive of string
   | Skill_dive of string
@@ -65,7 +60,6 @@ type runtime_dive_target =
 
 type dive =
   | Dive_work of work_dive_target
-  | Dive_knowledge of knowledge_dive_target
   | Dive_runtime of runtime_dive_target
 
 type settings_tab =
@@ -524,17 +518,6 @@ let equal_work_dive_target a b =
   | Verification_dive _, (Goal_dive _ | Task_dive _) ->
       false
 
-let equal_knowledge_dive_target a b =
-  match a, b with
-  | Thread_dive x, Thread_dive y
-  | Wiki_dive x, Wiki_dive y
-  | Artifact_dive x, Artifact_dive y ->
-      String.equal x y
-  | Thread_dive _, (Wiki_dive _ | Artifact_dive _)
-  | Wiki_dive _, (Thread_dive _ | Artifact_dive _)
-  | Artifact_dive _, (Thread_dive _ | Wiki_dive _) ->
-      false
-
 let equal_runtime_dive_target a b =
   match a, b with
   | Tool_dive x, Tool_dive y
@@ -549,12 +532,8 @@ let equal_runtime_dive_target a b =
 let equal_dive a b =
   match a, b with
   | Dive_work x, Dive_work y -> equal_work_dive_target x y
-  | Dive_knowledge x, Dive_knowledge y -> equal_knowledge_dive_target x y
   | Dive_runtime x, Dive_runtime y -> equal_runtime_dive_target x y
-  | Dive_work _, (Dive_knowledge _ | Dive_runtime _)
-  | Dive_knowledge _, (Dive_work _ | Dive_runtime _)
-  | Dive_runtime _, (Dive_work _ | Dive_knowledge _) ->
-      false
+  | Dive_work _, Dive_runtime _ | Dive_runtime _, Dive_work _ -> false
 
 let settings_tab_index = function
   | Settings_general_ui -> 0

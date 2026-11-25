@@ -175,6 +175,9 @@ type t = {
   wiki_lint : Wire_knowledge.wiki_lint_report Observed.t;
   wiki_edit_base : wiki_edit_base option;
   pending_wiki_edit_slug : string option;
+  pending_wiki_jump_slug : string option;
+      (** A wiki jump whose slug the loaded index did not list yet. The next
+          {!apply_wiki_index} selects it; moving the selection forgets it. *)
       (** Wiki slug whose edit modal should open automatically once its fresh
           page detail arrives (Issue #54490). *)
   artifacts : Wire_knowledge.artifact_entry list Observed.t;
@@ -314,8 +317,9 @@ val toggle_thread_view : t -> t
 val restore_thread_comment : post_id:string -> previous:t -> t -> t
 (** Keep the same comment and scroll position when a thread refresh returns it. *)
 
-val thread_reading_rect : bp:Masc_tui_ui.Layout.breakpoint -> t -> Rect.t -> Rect.t
-(** Markdown area inside a thread with its tab bar, border, and metadata. *)
+val board_comment_reading_rect :
+  bp:Masc_tui_ui.Layout.breakpoint -> t -> Rect.t -> Rect.t
+(** Markdown area inside a Board detail card in [Thread_comments] view. *)
 
 val step_thread_comment : post_id:string -> delta:int -> t -> t
 (** Open the comment reader and advance within the loaded [post_id] thread. *)
@@ -581,6 +585,17 @@ val selected_pulse_thread : t -> Wire_knowledge.board_post option
 val move_pulse_thread : ?viewport_rows:int -> delta:int -> t -> t
 val selected_post : t -> Wire_knowledge.board_post option
 
+val board_detail_post_id : t -> string option
+(** The post the Board detail shows: an [active_thread_target] the feed does
+    not list (set by a jump to an uncached post) until the list selection moves
+    to another row or a feed that lists it arrives ({!apply_board} then selects
+    its row), otherwise the list selection. Feed and thread replies, the
+    detail scroll bound, comment stepping, votes and Board CRUD all read it. *)
+
+val board_detail_post : t -> Wire_knowledge.board_post option
+(** The post of {!board_detail_post_id}. For an uncached jump target it is the
+    loaded thread's post, and [None] while that thread is not loaded. *)
+
 (** What [Space] does on the Board list: it folds the selected post's
     succession chain when the post belongs to one, and otherwise flips the
     Signal-only / All filter. The key handler and the card hint both read this,
@@ -616,8 +631,19 @@ val memory_flow_input_of_diff :
   memory_diff_window ->
   Masc_tui_ui.Memory_flow.input
 
+val select_post_by_id :
+  since_ns:Clock.Mono.t -> post_id:string -> t -> t
+(** Select [post_id] on [Knowledge_board], unfolding its succession chain or
+    clearing blocking filters if needed, resetting thread view, and marking
+    [active_thread] loading. *)
+val select_wiki_slug : slug:string -> t -> t
+(** Select [slug] on [Knowledge_wiki], clearing [filter_query] if hidden. *)
+val select_artifact_by_id : id_or_sha:string -> t -> t
+(** Select [id_or_sha] on [Knowledge_artifacts], clearing [filter_query] if
+    hidden and resetting in-document search state. *)
+
 val artifact_by_id : t -> string -> Wire_knowledge.artifact_entry option
-(** The loaded artifact an [Artifact_dive] names. *)
+(** Look up a loaded artifact by its exact [id]. *)
 
 val move_selection :
   ?pane_index:int ->

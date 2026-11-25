@@ -5543,7 +5543,7 @@ let test_pillar2_scroll_bounds_all_surfaces () =
     }
   in
   assert_scroll_exact ~label:"Zoomed Incidents overlay + related logs"
-    ~needle:"DIVE_LOG_44"
+    ~needle:"DIVE_LOG_00"
     ~get_off:(fun m -> m.incidents.detail_scroll_offset)
     m_inc_zoomed
 

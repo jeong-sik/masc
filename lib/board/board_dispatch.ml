@@ -285,17 +285,6 @@ let visibility_of_post store ~post_id =
   | Ok post -> Some post.visibility
   | Error _ -> None
 
-let write_post ~visibility ~post_id change write =
-  match Board.Post_id.of_string post_id with
-  | Error e -> Error e
-  | Ok pid ->
-    let post_id = Board.Post_id.to_string pid in
-    (match write post_id with
-     | Ok _ as written ->
-       emit_board_sse_event ~visibility (Post_changed { post_id; change });
-       written
-     | Error _ as refused -> refused)
-
 (* The non-positive MASC_BOARD_COMMENT_COUNT_CAP opt-out stays allowed, but
    it must not stay silent (wool-nova FAIL issuecomment-5860167607, P2):
    emit [Limits.cap_warning_message] once at JSONL backend load -- from
@@ -527,6 +516,22 @@ let reobserved_backend () =
      Log.BoardLog.warn "board posts source stays unavailable after reobservation: %s"
        (Board_types.show_board_error error));
   store
+
+(* task-4036: the one entry for a write to an existing post row.  It takes the
+   store itself, after reobservation, so a write added here cannot start from
+   a posts source another writer's append left refused. *)
+let write_post ~post_id change write =
+  let store = reobserved_backend () in
+  match Board.Post_id.of_string post_id with
+  | Error e -> Error e
+  | Ok pid ->
+    let post_id = Board.Post_id.to_string pid in
+    let visibility = visibility_of_post store ~post_id in
+    (match write store post_id with
+     | Ok _ as written ->
+       emit_board_sse_event ~visibility (Post_changed { post_id; change });
+       written
+     | Error _ as refused -> refused)
 
 let resolve_post_dispatch_context () =
   try
@@ -931,7 +936,7 @@ let emit_vote_board_signal ~target ~target_author ~voter ~direction
 
 let vote ~reader ~voter ~post_id ~direction =
   let result =
-    let store = backend () in
+    let store = reobserved_backend () in
         (match Board.vote store ~reader ~voter ~post_id ~direction with
          | Ok _score as ok ->
              (match Board.read_post store ~post_id with
@@ -967,7 +972,7 @@ let current_vote_for_comment ~reader ~voter ~comment_id =
 
 let vote_comment ~reader ~voter ~comment_id ~direction =
   let result =
-    let store = backend () in
+    let store = reobserved_backend () in
         (match Board.vote_comment store ~reader ~voter ~comment_id ~direction with
          | Ok _score as ok ->
              (match Board.get_comment store ~comment_id with
@@ -1067,11 +1072,11 @@ type reaction_write =
   }
 
 let toggle_reaction ~reader ~target_type ~target_id ~user_id ~emoji =
+  let store = reobserved_backend () in
   match readable_reaction_target ~reader ~target_type ~target_id with
   | Error _ as error -> error
   | Ok _ ->
   let result =
-    let store = backend () in
         (match Board.toggle_reaction store ~reader ~target_type ~target_id ~user_id ~emoji with
          | Ok toggled as ok ->
              emit_reaction_board_signal store toggled;
@@ -1167,23 +1172,19 @@ let list_hearths ~reader ?(exclude_system = false) ?(exclude_automation = false)
       let c = Int.compare y x in if c = 0 then String.compare a b else c))
 
 let set_thread_id ~post_id ~thread_id =
-  let store = reobserved_backend () in
-    write_post ~visibility:(visibility_of_post store ~post_id) ~post_id Post_thread_set (fun post_id ->
-      Board.set_thread_id store ~post_id ~thread_id)
+  write_post ~post_id Post_thread_set (fun store post_id ->
+    Board.set_thread_id store ~post_id ~thread_id)
 
 let set_pinned ~post_id ~pinned =
-  let store = reobserved_backend () in
-    write_post ~visibility:(visibility_of_post store ~post_id) ~post_id (if pinned then Post_pinned else Post_unpinned) (fun post_id ->
-      Board.set_pinned store ~post_id ~pinned)
+  write_post ~post_id (if pinned then Post_pinned else Post_unpinned) (fun store post_id ->
+    Board.set_pinned store ~post_id ~pinned)
 
 let set_closed ?authorize ~post_id ~closed_by ~successor ~summary () =
-  let store = reobserved_backend () in
-    write_post ~visibility:(visibility_of_post store ~post_id) ~post_id Post_closed (fun post_id ->
-      Board.set_closed ?authorize store ~post_id ~closed_by ~successor ~summary ())
+  write_post ~post_id Post_closed (fun store post_id ->
+    Board.set_closed ?authorize store ~post_id ~closed_by ~successor ~summary ())
 
 let reopen_post ?authorize ~post_id () =
-  let store = reobserved_backend () in
-  write_post ~visibility:(visibility_of_post store ~post_id) ~post_id Post_reopened (fun post_id ->
+  write_post ~post_id Post_reopened (fun store post_id ->
     Board.reopen ?authorize store ~post_id)
 
 let reopen ~post_id = reopen_post ~post_id ()

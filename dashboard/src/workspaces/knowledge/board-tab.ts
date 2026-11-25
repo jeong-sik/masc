@@ -1360,25 +1360,25 @@ export function BoardTab(props: WorkspaceViewProps) {
           `}
         </div>
       `
-    : null
+    // A post is selected and is not there: the pane says whether it is on its way.
+    : html`
+        <div class="kn-detail-pad">
+          ${detailLoading || loading
+            ? html`<span class="dtable-absent">게시글 불러오는 중…</span>`
+            : html`<div class="kn-notice kn-notice--err" role="alert">${detailError ?? `게시글 ${selectedPostId}을 확인할 수 없습니다.`}</div>`}
+        </div>
+      `
 
   return html`
     <${MasterDetail}
       master=${masterPane}
       detail=${detailPane}
-      hasSelection=${activePost !== null}
+      hasSelection=${selectedPostId !== null}
       selectionKey=${selectedPostId}
+      linkedKey=${props.entityId ?? null}
       masterLabel="게시글 목록"
       detailLabel="게시글 상세"
-      emptyDetail=${html`
-        <div class="kn-detail-pad">
-          ${selectedPostId
-            ? (detailLoading || loading
-                ? html`<span class="dtable-absent">게시글 불러오는 중…</span>`
-                : html`<div class="kn-notice kn-notice--err" role="alert">${detailError ?? `게시글 ${selectedPostId}을 확인할 수 없습니다.`}</div>`)
-            : html`<span class="dtable-absent">게시글을 선택하세요.</span>`}
-        </div>
-      `}
+      emptyDetail=${html`<div class="kn-detail-pad"><span class="dtable-absent">게시글을 선택하세요.</span></div>`}
     />
   `
 }

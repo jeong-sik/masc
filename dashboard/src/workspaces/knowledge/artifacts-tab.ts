@@ -45,8 +45,10 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
   const [selectedId, setSelectedId] = useState<string | null>(props.entityId ?? null)
   const [selectedRevision, setSelectedRevision] = useState<number | null>(null)
   const [doc, setDoc] = useState<ArtifactDocumentData | null>(null)
-  const [docLoading, setDocLoading] = useState(false)
   const [docError, setDocError] = useState<string | null>(null)
+  // A selected artifact with no document and no error is one being read: from
+  // the first render, before the effect that reads it has run.
+  const docLoading = selectedId !== null && doc === null && docError === null
   const [copyNotice, setCopyNotice] = useState<string | null>(null)
   const docAbortRef = useRef<AbortController | null>(null)
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -119,12 +121,10 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
   }, [loadList])
 
   const loadDocument = useCallback(async (id: string, revision: number | null, signal?: AbortSignal) => {
-    setDocLoading(true)
     setDocError(null)
     const revQuery = revision !== null ? `?revision=${revision}` : ''
     const res = await apiGet<unknown>(`/api/v1/published-artifacts/${encodeURIComponent(id)}${revQuery}`, { signal })
     if (signal?.aborted) return
-    setDocLoading(false)
     if (!res.ok) {
       setDocError(res.error.message)
       return
@@ -163,10 +163,7 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
     docAbortRef.current?.abort()
     setCopyNotice(null)
     setDoc(null)
-    if (!selectedId) {
-      setDocLoading(false)
-      return
-    }
+    if (!selectedId) return
     const ctrl = new AbortController()
     docAbortRef.current = ctrl
     void loadDocument(selectedId, selectedRevision, ctrl.signal)
@@ -395,8 +392,9 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
     <${MasterDetail}
       master=${masterPane}
       detail=${detailPane}
-      hasSelection=${doc !== null || docLoading || docError !== null}
+      hasSelection=${selectedId !== null}
       selectionKey=${selectedId}
+      linkedKey=${props.entityId ?? null}
       masterLabel="아티팩트 목록"
       detailLabel="아티팩트 미리보기"
       emptyDetail=${html`<div class="kn-detail-pad"><span class="dtable-absent">HTML 또는 Markdown 아티팩트를 선택해 미리보세요.</span></div>`}

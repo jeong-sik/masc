@@ -7665,6 +7665,71 @@ let apply_http_reply ~now (m : Model.t) reply =
                }))
         ~source:(Health.Source_runtime "verifier") ~ko:"목표 검증 이력 조회"
         ~en:"Goal verification runs fetch" err
+  | Msg.Reply_goal_confirmation { goal_id; result } -> (
+      (* The confirmation modal fires this GET on open; when the reply lands
+         on the still-open modal for the same goal, fill the server-issued
+         proof fields so the operator confirms with Enter instead of typing
+         them. Never clobber something the operator already typed, and never
+         patch a modal that moved on to another goal. *)
+      let modal_matches modal =
+        String.equal
+          (String.trim (Model.modal_field_raw_value ~key:"confirm_goal_id" modal))
+          (String.trim goal_id)
+      in
+      match result with
+      | Ok proof -> (
+          match m.inline_modal with
+          | Some modal when modal_matches modal -> (
+              let fill field_key value_opt (f : Model.modal_form_field) =
+                match value_opt with
+                | Some v when not (String.equal (String.trim v) "") ->
+                    if
+                      String.equal
+                        (String.trim
+                           (Model.modal_field_raw_value ~key:field_key modal))
+                        ""
+                    then { f with value = String.trim v }
+                    else f
+                | _ -> f
+              in
+              let fields =
+                List.map
+                  (fun (f : Model.modal_form_field) ->
+                    match f.key with
+                    | "confirm_criterion_revision" ->
+                        fill f.key (Some proof.criterion_revision) f
+                    | "confirm_request_id" -> fill f.key proof.request_id f
+                    | "confirm_verification_run_id" ->
+                        fill f.key proof.verification_run_id f
+                    | "confirm_operator_id" ->
+                        fill f.key (Some proof.inspection_operator_id) f
+                    | _ -> f)
+                  modal.fields
+              in
+              let error =
+                match proof.state with
+                | "proof_proven" | "human_confirmed" -> None
+                | state ->
+                    Some
+                      (Printf.sprintf
+                         "서버 검증 상태가 %s 입니다. 수동 입력으로 확인하세요."
+                         state)
+              in
+              let modal = { modal with fields; error } in
+              ({ m with inline_modal = Some modal }, []))
+          | _ -> (m, []))
+      | Error err -> (
+          match m.inline_modal with
+          | Some modal when modal_matches modal ->
+              let error =
+                Some
+                  (Printf.sprintf
+                     "완료 증명 자동 조회 실패: %s (직접 입력할 수 있습니다)"
+                     (Msg.http_error_detail err))
+              in
+              let modal = { modal with error } in
+              ({ m with inline_modal = Some modal }, [])
+          | _ -> (m, [])))
   | Msg.Reply_keeper_board_attention_quarantines { keeper; result = Ok snap } ->
       let toast =
         Say.make

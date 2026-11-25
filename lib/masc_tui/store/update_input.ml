@@ -1118,9 +1118,10 @@ let dismiss_keeper_chat_errors ~now ~keeper (m : Model.t) =
 
 let open_goal_confirmation_proof_modal (m : Model.t) ~(goal_id : string)
     ~(criterion_revision : string) =
-  (* Never fabricate request_id, verification_run_id, or operator_id: ask the
-     operator to supply exact server-issued confirmation proof fields. *)
-  open_custom_inline_modal m
+  (* Fetch the server-issued proof fields instead of asking the operator to
+     type them; the reply fills the blanks, manual entry stays possible. *)
+  let m, cmds =
+    open_custom_inline_modal m
     [
       {
         key = "confirm_goal_id";
@@ -1158,6 +1159,11 @@ let open_goal_confirmation_proof_modal (m : Model.t) ~(goal_id : string)
         secret = false;
       };
     ]
+  in
+  let fetch =
+    Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_goal_confirmation { goal_id } }
+  in
+  (m, cmds @ [ fetch ])
 
 (* The route refuses a Goal transition that does not name the workspace the
    operator saw. Until [/health] has named it there is nothing true to name,

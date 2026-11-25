@@ -193,6 +193,7 @@ type get_request =
   | Get_exact_lane_run_detail of { run_id : string }
   | Get_verification_runs
   | Get_goal_verification_runs
+  | Get_goal_confirmation of { goal_id : string }
   | Get_keeper_board_attention_quarantines of { keeper : string }
   | Get_lane_addon_declaration of { source_path : string }
   | Get_lane_addon_action_status of {
@@ -831,6 +832,8 @@ let get_request_path = function
       Wire_runtime.exact_lane_run_detail_path ~run_id
   | Get_verification_runs -> Wire_runtime.verification_runs_path
   | Get_goal_verification_runs -> Wire_runtime.goal_verification_runs_path
+  | Get_goal_confirmation { goal_id } ->
+      Wire_work.goal_confirmation_get_path ~goal_id
   | Get_keeper_board_attention_quarantines { keeper } ->
       Wire_runtime.keeper_board_attention_quarantines_path ~keeper
   | Get_lane_addon_declaration { source_path } ->

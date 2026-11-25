@@ -258,6 +258,7 @@ let has_get_health cmds =
               | Cmd.Get_exact_lane_run_detail _
               | Cmd.Get_verification_runs
               | Cmd.Get_goal_verification_runs
+              | Cmd.Get_goal_confirmation _
               | Cmd.Get_keeper_board_attention_quarantines _
               | Cmd.Get_lane_addon_declaration _
               | Cmd.Get_lane_addon_action_status _
@@ -3838,6 +3839,83 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
   Alcotest.(check bool) "Goal confirmation modal closes on submit" true
     (Option.is_none m_gconf_done.inline_modal
      && Option.is_none m_gconf_done.nav.overlay);
+  (* Opening the modal fetches the server-issued proof instead of asking the
+     operator to type it. *)
+  Alcotest.(check bool) "Goal confirmation open emits Get_goal_confirmation fetch"
+    true
+    (has_cmd
+       (function
+         | Cmd.Http_get { req = Cmd.Get_goal_confirmation { goal_id = "goal-100" }; _ } ->
+             true
+         | _ -> false)
+       cmds_gconf0);
+  let proof_ok : Wire_work.goal_confirmation_proof =
+    {
+      goal_id = "goal-100";
+      criterion_revision = "rev-7";
+      request_id = Some "srv-req-42";
+      verification_run_id = Some "srv-run-99";
+      inspection_operator_id = "op-admin";
+      state = "proof_proven";
+    }
+  in
+  let m_gconf_prefilled, _ =
+    Update.step ~now:t2 m_gconf_mod
+      (Msg.Http_reply
+         {
+           epoch = m_gconf_mod.epoch;
+           reply =
+             Msg.Reply_goal_confirmation { goal_id = "goal-100"; result = Ok proof_ok };
+         })
+  in
+  Alcotest.(check bool) "confirmation reply prefills server proof fields" true
+    (match m_gconf_prefilled.inline_modal with
+    | Some md ->
+        String.equal (Model.modal_field_value ~key:"confirm_request_id" md) "srv-req-42"
+        && String.equal
+             (Model.modal_field_value ~key:"confirm_verification_run_id" md)
+             "srv-run-99"
+        && String.equal (Model.modal_field_value ~key:"confirm_operator_id" md) "op-admin"
+        && String.equal
+             (Model.modal_field_value ~key:"confirm_criterion_revision" md)
+             "rev-7"
+    | None -> false);
+  (* A reply for a different goal must not clobber the open modal. *)
+  let m_gconf_other, _ =
+    Update.step ~now:t2 m_gconf_mod
+      (Msg.Http_reply
+         {
+           epoch = m_gconf_mod.epoch;
+           reply =
+             Msg.Reply_goal_confirmation
+               { goal_id = "goal-999"; result = Ok { proof_ok with goal_id = "goal-999" } };
+         })
+  in
+  Alcotest.(check bool) "confirmation reply for other goal leaves modal untouched" true
+    (match m_gconf_other.inline_modal with
+    | Some md ->
+        String.equal (Model.modal_field_value ~key:"confirm_request_id" md) ""
+    | None -> false);
+  (* Prefilled proof submits with Enter, no typing. *)
+  let _, cmds_gconf_auto = step m_gconf_prefilled (key Keymap.Input.Enter) in
+  Alcotest.(check bool) "prefilled confirmation submits with Enter" true
+    (has_cmd
+       (function
+         | Cmd.Http_post
+             {
+               req =
+                 Cmd.Post_goal_confirmation
+                   {
+                     goal_id = "goal-100";
+                     request_id = "srv-req-42";
+                     verification_run_id = "srv-run-99";
+                     expected_operator_id = "op-admin";
+                     _;
+                   };
+               _;
+             } -> true
+         | _ -> false)
+       cmds_gconf_auto);
   let m_gdive_exec =
     {
       m_work with

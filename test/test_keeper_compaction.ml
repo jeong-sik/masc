@@ -1933,6 +1933,31 @@ let test_p1_5_live_history_after_latest_anchor_scopes_tool_carry () =
     [ "svc_live_c" ]
     (tool_names_in
        (Keeper_compaction.messages_after_anchor ~anchor history_with_stale_inline));
+  let carry_id canonical_id messages =
+    match List.rev messages with
+    | (last : Agent_core.Types.message) :: rest ->
+      let metadata = ("canonical_turn_id", `String canonical_id) :: last.metadata in
+      List.rev ({ last with metadata } :: rest)
+    | [] -> fail "expected a nonempty atom"
+  in
+  let persisted_id = Ids.Turn_id.to_string anchor.covers_through_turn in
+  let repeated_canonical_history =
+    full_history @ carry_id persisted_id atom0 @ carry_id persisted_id atom1 @ atom2
+  in
+  check (list string)
+    "latest canonical ID wins over an earlier matching atom digest and canonical ID"
+    [ "svc_live_c" ]
+    (tool_names_in
+       (Keeper_compaction.messages_after_anchor ~anchor repeated_canonical_history));
+  let named_anchor =
+    { anchor with covers_through_turn = Ids.Turn_id.of_string "canonical-turn-2-ep3-0" }
+  in
+  check (list string)
+    "canonical IDs also match disambiguated anchors without a synthetic atom index"
+    [ "svc_live_c" ]
+    (tool_names_in
+       (Keeper_compaction.messages_after_anchor ~anchor:named_anchor
+          (atom0 @ carry_id "canonical-turn-2" atom1 @ atom2)));
   (* Unmatched covers_through_turn fails open to full history so live turns are never dropped. *)
   let unrelated_anchor =
     { anchor with covers_through_turn = Ids.Turn_id.of_string "turn-not-in-history" }

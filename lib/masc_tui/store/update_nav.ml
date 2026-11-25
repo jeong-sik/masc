@@ -9129,7 +9129,7 @@ let memory_reading_max_scroll (m : Model.t) =
         let total =
           List.length
             (Knowledge_store.project_memory_reading_lines ~width:rect_w
-               ~lang:m.lang ~now_unix:m.freshness.last_wall_unix entry)
+               ~theme:(Theme.of_preset m.theme_preset) ~lang:m.lang ~now_unix:m.freshness.last_wall_unix entry)
         in
         max 0 (total - body_h)
 

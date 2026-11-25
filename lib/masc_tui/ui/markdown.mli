@@ -23,12 +23,15 @@ val render_lines :
   theme:Theme.t ->
   width:int ->
   ?osc8:bool ->
+  ?base_style:Style.t ->
   string ->
   rendered_line list
 (** Parse and wrap Markdown into styled terminal lines of at most [width]
     columns. Fenced [mermaid] code blocks within safety bounds are rendered
-    inline via {!Mermaid.render_adaptive} (falling back cleanly to normal code
-    lines on failure or oversized input). When [osc8] is [true] (default),
+    inline via {!Mermaid.render_adaptive}. The [pele] fence uses the same
+    text drawing. Fenced [alphatex] and [atex] are drawn as tablature via
+    {!Alphatex.render_tab}. Unsupported input keeps its code and, for scores,
+    the parse or layout diagnostic. When [osc8] is [true] (default),
     links attach their URI to {!styled_span.hyperlink} for OSC 8 interning;
     when [false], links include a muted italic [" (target)"] preview so the
     destination stays visible. *)

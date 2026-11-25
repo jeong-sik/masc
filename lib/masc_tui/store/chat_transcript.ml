@@ -438,6 +438,57 @@ let tool_call_tree_cache :
     ref =
   ref None
 
+let tool_output_display_lines_uncached ~(theme : Theme.t) ~tools_mode ~width raw =
+  let trimmed = String.trim raw in
+  let max_preview, max_depth =
+    match tools_mode with
+    | Slash.Tools_compact -> (0, 2)
+    | Slash.Tools_results -> (8, 2)
+    | Slash.Tools_full -> (48, 4)
+  in
+  if String.equal trimmed "" || max_preview <= 0 then ([], 0)
+  else
+    let body_w = Int.max 12 (width - 6) in
+    let style =
+      Style.make ~fg:(Color.of_rgb theme.text_secondary)
+        ~bg:(Color.of_rgb theme.surface_0) ()
+    in
+    let all_lines =
+      match Yojson.Safe.from_string trimmed with
+      | json ->
+          let scrubbed = scrub_json_secrets json in
+          let flat =
+            Json_tree.flatten ~max_depth ~redact_secrets:true scrubbed
+          in
+          let string_of_val = function
+            | Json_tree.Object_node { count } -> Printf.sprintf "{%d keys}" count
+            | Json_tree.Array_node { count } -> Printf.sprintf "[%d items]" count
+            | Json_tree.String_val s -> s
+            | Json_tree.Redacted_secret -> "[redacted]"
+            | Json_tree.Int_val n -> Int.to_string n
+            | Json_tree.Float_val f -> Printf.sprintf "%g" f
+            | Json_tree.Bool_val b -> if b then "true" else "false"
+            | Json_tree.Null_val -> "null"
+          in
+          List.map
+            (fun (ln : Json_tree.line) ->
+              let ind = String.make (ln.depth * 2) ' ' in
+              let vs = string_of_val ln.value in
+              let text =
+                match ln.key with
+                | Some k -> Printf.sprintf "%s%s: %s" ind k vs
+                | None -> ind ^ vs
+              in
+              ({ spans = [ { text; style; hyperlink = None } ] } : Markdown.rendered_line))
+            flat
+      | exception Yojson.Json_error _ ->
+          let scrubbed = scrub_secrets_in_text trimmed in
+          Markdown.render_lines ~theme ~width:body_w ~base_style:style scrubbed
+    in
+    let shown = List.take max_preview all_lines in
+    let hidden = List.length all_lines - List.length shown in
+    (shown, hidden)
+
 let same_tool_result_opt a b =
   match (a, b) with
   | None, None -> true
@@ -554,6 +605,11 @@ let tool_output_display_lines ~tools_mode ~width raw =
 
 (* [Markdown.render_lines] owns the bounded mutex-protected render cache so
    chat messages are not retained in two separate global tables. *)
+
+let thinking_body_lines ~(theme : Theme.t) ~width text =
+  Markdown.render_lines ~theme ~width:(Int.max 12 (width - 6))
+    ~base_style:(Typography.whisper theme) text
+
 let markdown_body_lines ~theme ~width ~rail_present ~prefix text =
   let rail_w = if rail_present then 2 else 0 in
   let body_w = Int.max 10 (width - rail_w - Grapheme.display_width prefix) in
@@ -1482,7 +1538,7 @@ let summarize_tool_histogram ~(lang : Say.lang) ?(max_unique = 4) items =
   in
   String.concat Typography.sep_dot parts
 
-let count_history_thinking_rows ~(mode : Fleet_store.thinking_display) ~width =
+let count_history_thinking_rows ~theme ~(mode : Fleet_store.thinking_display) ~width =
   function
   | None -> 0
   | Some thinking -> (
@@ -1501,13 +1557,13 @@ let count_history_thinking_rows ~(mode : Fleet_store.thinking_display) ~width =
               else
                 1
                 + List.length
-                    (wrap_plain_lines ~width:(Int.max 12 (width - 6)) text)
+                    (thinking_body_lines ~theme ~width text)
           | Wire_fleet.Thinking_partial text ->
               if String.equal (String.trim text) "" then 1
               else
                 1
                 + List.length
-                    (wrap_plain_lines ~width:(Int.max 12 (width - 6)) text)))
+                    (thinking_body_lines ~theme ~width text)))
 
 type 'a tool_group = Single of 'a | Grouped of 'a * 'a list
 
@@ -1948,8 +2004,8 @@ let chat_viewport_geometry_for ~embedded ~(model : Model.t) =
 let chat_viewport_geometry ~(model : Model.t) =
   chat_viewport_geometry_for ~embedded:false ~model
 
-let count_tool_output_rows ~tools_mode ~width raw =
-  let shown, hidden = tool_output_display_lines ~tools_mode ~width raw in
+let count_tool_output_rows ~theme ~tools_mode ~width raw =
+  let shown, hidden = tool_output_display_lines ~theme ~tools_mode ~width raw in
   List.length shown + if hidden > 0 then 1 else 0
 
 let count_markdown_rows ~theme ~width ~rail_present ~prefix text =
@@ -2036,7 +2092,7 @@ let count_transcript_rows ~(model : Model.t) ~keeper ~width =
                       false
                 in
                 let think_r =
-                  count_history_thinking_rows
+                  count_history_thinking_rows ~theme
                     ~mode:model.fleet.chat_thinking_mode ~width msg.thinking
                 in
                 think_r + hdr
@@ -2050,7 +2106,7 @@ let count_transcript_rows ~(model : Model.t) ~keeper ~width =
                 1
                 +
                 if expanded_tools then
-                  count_tool_output_rows ~tools_mode ~width msg.content
+                  count_tool_output_rows ~theme ~tools_mode ~width msg.content
                 else 0
             | Wire_fleet.Role_request_failure ->
                 let cut_reply_r =
@@ -2082,7 +2138,7 @@ let count_transcript_rows ~(model : Model.t) ~keeper ~width =
         | Fleet_store.Thinking_full ->
             1
             + List.length
-                (wrap_plain_lines ~width:(Int.max 12 (width - 6)) buf.thinking)
+                (thinking_body_lines ~theme ~width buf.thinking)
     in
     let tools_r =
       if not sp.show_tools then 0
@@ -2093,7 +2149,7 @@ let count_transcript_rows ~(model : Model.t) ~keeper ~width =
             | Single (tc : Fleet_store.active_tool_call) ->
             let det =
               match expanded_tools, tc.output_preview with
-              | true, Some out -> count_tool_output_rows ~tools_mode ~width out
+              | true, Some out -> count_tool_output_rows ~theme ~tools_mode ~width out
               | false, _ | true, None -> 0
             in
             acc + 1 + det)

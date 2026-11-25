@@ -394,16 +394,20 @@ type reading_line_tone =
   | Reading_whisper of { italic : bool }
   | Reading_status of { tone : Theme.status_token; bold : bool }
 
+type reading_line_content =
+  | Reading_plain of reading_line_tone * string
+  | Reading_markdown of Masc_tui_ui.Markdown.rendered_line
+
 type reading_line = {
   rail : Theme.status_token option;
-  tone : reading_line_tone;
-  text : string;
+  content : reading_line_content;
 }
 
 val wrap_lines : max_width:int -> string -> string list
 (** Word-aware, grapheme-safe UTF-8/CJK multi-line text wrapping. *)
 
 val project_memory_reading_lines :
+  theme:Theme.t ->
   width:int ->
   lang:Say.lang ->
   now_unix:float ->

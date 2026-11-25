@@ -3,4 +3,4 @@
 (library
  (name masc_tui_ui)
  (wrapped true)
- (libraries masc_tui_core masc_tui_term masc.markup_document yojson))
+ (libraries masc_tui_core masc_tui_term masc.markup_document masc.string_util yojson))

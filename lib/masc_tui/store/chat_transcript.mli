@@ -13,14 +13,18 @@ val scrub_json_secrets : Yojson.Safe.t -> Yojson.Safe.t
 val rewrite_masc_links_for_markdown : string -> string
 
 val wrap_plain_lines : width:int -> string -> string list
-(** Word-boundary plain-text line wrapper shared by thinking blocks and
-    non-JSON tool output previews. *)
+(** Word-boundary wrapping for literal diagnostics and payloads. *)
 
 val tool_output_display_lines :
-  tools_mode:Slash.tools_mode -> width:int -> string -> string list * int
+  theme:Theme.t -> tools_mode:Slash.tools_mode -> width:int -> string ->
+  Markdown.rendered_line list * int
 (** [(shown_lines, hidden_count)] for a tool output payload using
     {!Json_tree.flatten} (8-line cap in [Tools_results], 48-line cap in
-    [Tools_full]) or {!wrap_plain_lines} for non-JSON payloads. *)
+    [Tools_full]) or the shared Markdown renderer for non-JSON payloads. *)
+
+val thinking_body_lines :
+  theme:Theme.t -> width:int -> string -> Markdown.rendered_line list
+(** Wrapped reasoning body shared by paint and scroll geometry. *)
 
 val markdown_body_lines :
   theme:Theme.t ->
@@ -152,6 +156,7 @@ val summarize_tool_histogram :
 (** Compact tool frequency histogram (e.g. ["Read ×2 · 위임(@worker-alpha)"]). *)
 
 val count_history_thinking_rows :
+  theme:Theme.t ->
   mode:Fleet_store.thinking_display ->
   width:int ->
   Wire_fleet.history_thinking option ->

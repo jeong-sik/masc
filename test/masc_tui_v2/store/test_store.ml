@@ -2773,6 +2773,28 @@ let test_v25_data_pipeline_and_settings_2pane () =
       Alcotest.(check int) "fallback fleet_metrics_24h.calls = 120" 120
         sb.fleet_metrics_24h.calls
   | None -> Alcotest.fail "expected fallback sandboxes snapshot");
+  let stale = Model.mark_all_domains_stale m6 in
+  let ssh_extras =
+    { extras with sandbox_profiles = [ ("alpha-builder", Wire_fleet.Profile_remote_ssh) ] }
+  in
+  let rebuilt, _ =
+    Update.step ~now:t1 stale
+      (Msg.Http_reply
+         { epoch = stale.epoch; reply = Msg.Reply_keepers_roster_extras ssh_extras })
+  in
+  let check_fallback_activity (m : Model.t) expected_calls =
+    let snapshot = Option.get (Observed.to_option m.infra.sandboxes) in
+    Alcotest.(check int) "fallback uses fresh tool activity" expected_calls
+      snapshot.fleet_metrics_24h.calls;
+    Alcotest.(check string) "profile without current roster has unobserved binding"
+      "unobserved" (List.hd snapshot.ssh_unbound_keepers).binding_state
+  in
+  check_fallback_activity rebuilt 0;
+  let series_seen, _ =
+    Update.step ~now:t2 rebuilt
+      (Msg.Sse_event { epoch = rebuilt.epoch; event = Msg.Sse_tool_series ts })
+  in
+  check_fallback_activity series_seen 120;
   (match Observed.to_option m6.work.candle_ledger with
   | Some cl ->
       Alcotest.(check string) "fallback candle circulating" "7500"

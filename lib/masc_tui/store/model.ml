@@ -3839,6 +3839,20 @@ let mark_all_domains_stale m =
     config = Config_store.mark_stale_all m.config;
   }
 
+let sandboxes_from_roster ~now m =
+  let keepers =
+    if Observed.is_stale m.fleet.keepers then []
+    else Option.value ~default:[] (Observed.to_option m.fleet.keepers)
+  in
+  let tool_series_totals =
+    if Observed.is_stale m.runtime.tool_series then None
+    else Runtime_store.tool_series_totals m.runtime
+  in
+  Infra_store.apply_sandboxes_fallback ~observed_at:now
+    ~wall_unix:m.freshness.last_wall_unix ~keepers
+    ~sandbox_profiles:(Fleet_store.String_map.bindings m.fleet.sandbox_profiles)
+    ~tool_series_totals m.infra
+
 type pulse_hero_metrics = {
   running_keepers : int;
   total_keepers : int;

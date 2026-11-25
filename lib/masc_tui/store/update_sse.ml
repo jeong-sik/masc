@@ -1070,19 +1070,12 @@ let apply_sse_event ~now (m : Model.t) = function
       let runtime =
         Runtime_store.apply_tool_series ~observed_at:now series m.runtime
       in
+      let m = { m with runtime } in
       let infra =
-        if m.infra.sandboxes_fallback_404 then
-          let keepers =
-            match Observed.to_option m.fleet.keepers with Some ks -> ks | None -> []
-          in
-          Infra_store.apply_sandboxes_fallback ~observed_at:now
-            ~wall_unix:m.freshness.last_wall_unix ~keepers
-            ~sandbox_profiles:(Fleet_store.String_map.bindings m.fleet.sandbox_profiles)
-            ~tool_series_totals:(Runtime_store.tool_series_totals runtime)
-            m.infra
+        if m.infra.sandboxes_fallback_404 then Model.sandboxes_from_roster ~now m
         else m.infra
       in
-      ({ m with runtime; infra }, [])
+      ({ m with infra }, [])
 
 let apply_sse_freshness ~now ~stream ~freshness (m : Model.t) =
   match stream with

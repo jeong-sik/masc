@@ -177,15 +177,7 @@ let confirm_pending_txs_from_history ~now ~keeper
 
 let refresh_404_fallbacks ~now (m : Model.t) =
   let infra =
-    if m.infra.sandboxes_fallback_404 then
-      let keepers =
-        match Observed.to_option m.fleet.keepers with Some ks -> ks | None -> []
-      in
-      Infra_store.apply_sandboxes_fallback ~observed_at:now
-        ~wall_unix:m.freshness.last_wall_unix ~keepers
-        ~sandbox_profiles:(Fleet_store.String_map.bindings m.fleet.sandbox_profiles)
-        ~tool_series_totals:(Runtime_store.tool_series_totals m.runtime)
-        m.infra
+    if m.infra.sandboxes_fallback_404 then Model.sandboxes_from_roster ~now m
     else m.infra
   in
   let work =
@@ -4785,23 +4777,7 @@ let apply_http_reply ~now (m : Model.t) reply =
   | Msg.Reply_sandboxes (Error err) -> (
       match err with
       | Msg.Http_error { status = 404; _ } ->
-          let keepers =
-            if Observed.is_stale m.fleet.keepers then []
-            else Option.value ~default:[] (Observed.to_option m.fleet.keepers)
-          in
-          let tool_series_totals =
-            if Observed.is_stale m.runtime.tool_series then None
-            else Runtime_store.tool_series_totals m.runtime
-          in
-          let infra =
-            Infra_store.apply_sandboxes_fallback ~observed_at:now
-              ~wall_unix:m.freshness.last_wall_unix ~keepers
-              ~sandbox_profiles:
-                (Fleet_store.String_map.bindings m.fleet.sandbox_profiles)
-              ~tool_series_totals
-              m.infra
-          in
-          finish_fleet_sandboxes infra m
+          finish_fleet_sandboxes (Model.sandboxes_from_roster ~now m) m
       | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
       | Msg.Decode_error _ ->
           err_reply

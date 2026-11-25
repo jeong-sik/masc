@@ -10,6 +10,10 @@ describe('accountLine', () => {
     expect(accountLine({ integration_id: 'agy', state: 'read', email: 'g@example.com', plan: [] }))
       .toBe('g@example.com')
   })
+  it('shows the email when the inventory omits the plan field', () => {
+    expect(accountLine({ integration_id: 'codex_a', state: 'read', email: 'a@example.com' }))
+      .toBe('a@example.com')
+  })
   it('names the cause when the login file was not read', () => {
     expect(accountLine({ integration_id: 'claude', state: 'not_read', cause: 'environment_credential' }))
       .toBe('계정 미확인 (environment_credential)')

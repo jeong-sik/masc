@@ -141,7 +141,7 @@ function scopeDisplayName(scope: ProviderUsageScope): string {
 export function accountLine(row: SetupAccountEmail | undefined): string | null {
   if (row === undefined) return null
   if (row.state === 'not_read') return `계정 미확인 (${row.cause})`
-  return [row.email, ...row.plan].join(' · ')
+  return [row.email, ...(row.plan ?? [])].join(' · ')
 }
 
 function primaryProviderId(scope: ProviderUsageScope): string {

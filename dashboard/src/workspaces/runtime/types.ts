@@ -180,7 +180,7 @@ export interface SetupIntegration {
 /** One row of the setup inventory's `account_emails`: the email and plan
  *  labels the client's own login file reports for a provider's account. */
 export type SetupAccountEmail =
-  | { readonly integration_id: string; readonly state: 'read'; readonly email: string; readonly plan: readonly string[] }
+  | { readonly integration_id: string; readonly state: 'read'; readonly email: string; readonly plan?: readonly string[] }
   | { readonly integration_id: string; readonly state: 'not_read'; readonly cause: string }
 
 export interface SetupInventoryPayload {

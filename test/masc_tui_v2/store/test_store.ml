@@ -23024,7 +23024,7 @@ let test_open_work_of_preview_names_what_is_open () =
   let legacy activity =
     Fleet_store.open_work_of_preview
       (preview_reporting ~activity None (Some "Read"))
-    |> Option.map (fun work -> ko work.phrase)
+    |> Option.map (fun (work : Fleet_store.open_work) -> ko work.phrase)
   in
   Alcotest.(check (option string)) "a server that does not report the open work" None
     (legacy Wire_fleet.Preview_tool_observed);

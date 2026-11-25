@@ -8,11 +8,11 @@ let is_printable_key (ev : Keymap.Input.key_event) =
 let strip_newlines s =
   String.map (function '\n' | '\r' -> ' ' | c -> c) s
 
-let open_custom_inline_modal (m : Model.t)
+let open_custom_inline_modal ~(kind : Nav.inline_action_kind) (m : Model.t)
     (fields : Model.modal_form_field list) =
   let modal : Model.inline_modal_state =
     {
-      kind = Nav.Board_new_post;
+      kind;
       fields;
       active_field = 0;
       submitting = false;
@@ -24,7 +24,7 @@ let open_custom_inline_modal (m : Model.t)
   let nav =
     {
       m.nav with
-      overlay = Some (Nav.Inline_action Nav.Board_new_post);
+      overlay = Some (Nav.Inline_action kind);
       return_overlay = None;
       filter_focused = false;
       modal_edit_cursor;
@@ -1211,7 +1211,7 @@ let resolve_memory_act_keeper (m : Model.t) =
           | None -> Update_nav.resolve_target_keeper m))
 
 let open_memory_act_modal (m : Model.t) ~(keeper_default : string) =
-  open_custom_inline_modal m
+  open_custom_inline_modal ~kind:Nav.Memory_act_form m
     [
       {
         key = "memory_keeper";
@@ -1280,7 +1280,7 @@ let open_fusion_launch_modal (m : Model.t) =
     | None -> ""
   in
   let preset_default = Option.value draft.preset ~default:"" in
-  open_custom_inline_modal m
+  open_custom_inline_modal ~kind:Nav.Fusion_launch_form m
     [
       {
         key = "fusion_keeper";
@@ -1314,7 +1314,7 @@ let open_fusion_launch_modal (m : Model.t) =
 
 let open_runtime_assign_modal (m : Model.t) ?(keeper_default = "")
     ?(runtime_default = "") () =
-  open_custom_inline_modal m
+  open_custom_inline_modal ~kind:Nav.Runtime_assign_form m
     [
       {
         key = "assign_keeper";
@@ -1333,7 +1333,7 @@ let open_runtime_assign_modal (m : Model.t) ?(keeper_default = "")
     ]
 
 let open_setup_account_key_modal (m : Model.t) ?(integration_default = "") () =
-  open_custom_inline_modal m
+  open_custom_inline_modal ~kind:Nav.Setup_account_key_form m
     [
       {
         key = "setup_key_integration";
@@ -1352,7 +1352,7 @@ let open_setup_account_key_modal (m : Model.t) ?(integration_default = "") () =
     ]
 
 let open_setup_login_modal (m : Model.t) ?(integration_default = "") () =
-  open_custom_inline_modal m
+  open_custom_inline_modal ~kind:Nav.Setup_login_start_form m
     [
       {
         key = "setup_login_integration";
@@ -2648,6 +2648,14 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                         | Nav.Connector_form
                         | Nav.Repo_add_form
                         | Nav.Board_new_post
+                        | Nav.Board_goal_proposal
+                        | Nav.Goal_confirmation_proof
+                        | Nav.Memory_act_form
+                        | Nav.Wiki_edit_form
+                        | Nav.Fusion_launch_form
+                        | Nav.Runtime_assign_form
+                        | Nav.Setup_account_key_form
+                        | Nav.Setup_login_start_form
                         | Nav.Board_comment _
                         | Nav.Github_token_form _
                         | Nav.Code_finder_form
@@ -2782,7 +2790,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                             in
                             Some ({ m with inline_modal = Some next_modal }, [])
                         | None -> None)
-                    | Nav.Board_new_post, Some { key = "fusion_preset"; value; _ } -> (
+                    | Nav.Fusion_launch_form, Some { key = "fusion_preset"; value; _ } -> (
                         let presets =
                           match Observed.to_option m.runtime.fusion_config with
                           | Some cfg ->
@@ -2872,7 +2880,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                             Some ({ m with inline_modal = Some next_modal }, [])
                         | None -> None)
                     | ( ( Nav.Connector_form
-                        | Nav.Board_new_post
+                        | Nav.Fusion_launch_form
                         | Nav.Runtime_lane_create
                         | Nav.Task_transition_form _
                         | Nav.Goal_upsert_form _
@@ -2887,6 +2895,14 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                         | Nav.Goal_drop _
                         | Nav.Schedule_form
                         | Nav.Repo_add_form
+                        | Nav.Board_new_post
+                        | Nav.Board_goal_proposal
+                        | Nav.Goal_confirmation_proof
+                        | Nav.Memory_act_form
+                        | Nav.Wiki_edit_form
+                        | Nav.Runtime_assign_form
+                        | Nav.Setup_account_key_form
+                        | Nav.Setup_login_start_form
                         | Nav.Board_comment _
                         | Nav.Github_token_form _
                         | Nav.Code_finder_form
@@ -3926,6 +3942,14 @@ let apply_paste ~now:_ (m : Model.t) text =
                   | Nav.Connector_form
                   | Nav.Repo_add_form
                   | Nav.Board_new_post
+                  | Nav.Board_goal_proposal
+                  | Nav.Goal_confirmation_proof
+                  | Nav.Memory_act_form
+                  | Nav.Wiki_edit_form
+                  | Nav.Fusion_launch_form
+                  | Nav.Runtime_assign_form
+                  | Nav.Setup_account_key_form
+                  | Nav.Setup_login_start_form
                   | Nav.Board_comment _
                   | Nav.Github_token_form _
                   | Nav.Code_finder_form

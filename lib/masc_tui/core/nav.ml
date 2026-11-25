@@ -99,6 +99,14 @@ type inline_action_kind =
   | Connector_form
   | Repo_add_form
   | Board_new_post
+  | Board_goal_proposal
+  | Goal_confirmation_proof
+  | Memory_act_form
+  | Wiki_edit_form
+  | Fusion_launch_form
+  | Runtime_assign_form
+  | Setup_account_key_form
+  | Setup_login_start_form
   | Board_comment of { post_id : string; parent_id : string option }
   | Github_token_form of string
   | Code_finder_form
@@ -613,6 +621,14 @@ let inline_action_tag = function
   | Addon_decl_form _ -> 42
   | Addon_act_form _ -> 43
   | Browser_interact_form _ -> 44
+  | Board_goal_proposal -> 45
+  | Goal_confirmation_proof -> 46
+  | Memory_act_form -> 47
+  | Wiki_edit_form -> 48
+  | Fusion_launch_form -> 49
+  | Runtime_assign_form -> 50
+  | Setup_account_key_form -> 51
+  | Setup_login_start_form -> 52
 let equal_inline_action_kind a b =
   if not (Int.equal (inline_action_tag a) (inline_action_tag b)) then false
   else
@@ -622,6 +638,14 @@ let equal_inline_action_kind a b =
     | Connector_form, Connector_form
     | Repo_add_form, Repo_add_form
     | Board_new_post, Board_new_post
+    | Board_goal_proposal, Board_goal_proposal
+    | Goal_confirmation_proof, Goal_confirmation_proof
+    | Memory_act_form, Memory_act_form
+    | Wiki_edit_form, Wiki_edit_form
+    | Fusion_launch_form, Fusion_launch_form
+    | Runtime_assign_form, Runtime_assign_form
+    | Setup_account_key_form, Setup_account_key_form
+    | Setup_login_start_form, Setup_login_start_form
     | Code_finder_form, Code_finder_form
     | Code_search_form, Code_search_form
     | Skill_create_form, Skill_create_form
@@ -709,6 +733,14 @@ let equal_inline_action_kind a b =
       | Connector_form
       | Repo_add_form
       | Board_new_post
+      | Board_goal_proposal
+      | Goal_confirmation_proof
+      | Memory_act_form
+      | Wiki_edit_form
+      | Fusion_launch_form
+      | Runtime_assign_form
+      | Setup_account_key_form
+      | Setup_login_start_form
       | Board_comment _
       | Github_token_form _
       | Code_finder_form

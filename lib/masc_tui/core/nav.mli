@@ -104,6 +104,14 @@ type inline_action_kind =
   | Connector_form
   | Repo_add_form
   | Board_new_post
+  | Board_goal_proposal
+  | Goal_confirmation_proof
+  | Memory_act_form
+  | Wiki_edit_form
+  | Fusion_launch_form
+  | Runtime_assign_form
+  | Setup_account_key_form
+  | Setup_login_start_form
   | Board_comment of { post_id : string; parent_id : string option }
   | Github_token_form of string
   | Code_finder_form

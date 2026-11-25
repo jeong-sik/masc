@@ -3865,126 +3865,58 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
 
 (* ---------- Overlay 5: Inline Action & /btw Side-Query Modal ---------- *)
 
-type inline_form_kind =
-  | Form_standard of Nav.inline_action_kind
-  | Form_board_goal_proposal
-  | Form_goal_confirmation_proof
-  | Form_memory_act
-  | Form_wiki_edit
-  | Form_fusion_launch
-  | Form_runtime_assign
-  | Form_setup_account_key
-  | Form_setup_login_start
-
-let classify_inline_form (modal : Model.inline_modal_state) : inline_form_kind =
-  match modal.kind with
-  | Nav.Board_new_post -> (
-      match modal.fields with
-      | { key = "proposal_title"; _ } :: _ -> Form_board_goal_proposal
-      | { key = "confirm_goal_id"; _ } :: _ -> Form_goal_confirmation_proof
-      | { key = "memory_keeper"; _ } :: _ -> Form_memory_act
-      | { key = "wiki_slug"; _ } :: _ -> Form_wiki_edit
-      | { key = "fusion_keeper"; _ } :: _ -> Form_fusion_launch
-      | { key = "assign_keeper"; _ } :: _ -> Form_runtime_assign
-      | { key = "setup_key_integration"; _ } :: _ -> Form_setup_account_key
-      | { key = "setup_login_integration"; _ } :: _ -> Form_setup_login_start
-      | _ -> Form_standard Nav.Board_new_post)
-  | ( Nav.Btw_query
-    | Nav.Gate_reject _
-    | Nav.Verification_reject _
-    | Nav.Harness_overrule _
-    | Nav.Task_cancel _
-    | Nav.Goal_drop _
-    | Nav.Schedule_form
-    | Nav.Connector_form
-    | Nav.Repo_add_form
-    | Nav.Board_comment _
-    | Nav.Github_token_form _
-    | Nav.Code_finder_form
-    | Nav.Code_search_form
-    | Nav.Keeper_control_confirm _
-    | Nav.Keeper_clear_form _
-    | Nav.Keeper_operator_note_form _
-    | Nav.Tool_execute_form _
-    | Nav.Skill_create_form
-    | Nav.Skill_edit_form _
-    | Nav.Skill_delete_confirm _
-    | Nav.Prompt_override_form _
-    | Nav.Preset_create_form
-    | Nav.Runtime_param_set_form _
-    | Nav.Default_route_edit
-    | Nav.Lane_rename_form _
-    | Nav.Addon_decl_form _
-    | Nav.Addon_act_form _
-    | Nav.Browser_interact_form _
-    | Nav.Runtime_lane_create
-    | Nav.Runtime_lane_edit _
-    | Nav.Runtime_lane_delete _
-    | Nav.Task_create_form
-    | Nav.Task_transition_form _
-    | Nav.Task_link_goal _
-    | Nav.Goal_upsert_form _
-    | Nav.Board_delete_post _
-    | Nav.Keeper_lifecycle_form _
-    | Nav.Keeper_purge_confirm _
-    | Nav.Addon_attach_form
-    | Nav.Addon_detach_confirm _
-    | Nav.Addon_invoke_action _
-    | Nav.Setup_login_input_form _ ) as std ->
-      Form_standard std
-
-let inline_action_title ~lang ~(modal : Model.inline_modal_state) _kind =
-  match classify_inline_form modal with
-  | Form_board_goal_proposal ->
+let inline_action_title ~lang (kind : Nav.inline_action_kind) =
+  match kind with
+  | Nav.Board_goal_proposal ->
       Say.resolve lang
         (Say.make ~ko:"#goals 보드 제안 작성" ~en:"Board #goals Proposal")
-  | Form_goal_confirmation_proof ->
+  | Nav.Goal_confirmation_proof ->
       Say.resolve lang
         (Say.make ~ko:"목표 완료 확정 증명 입력"
            ~en:"Goal Confirmation Proof")
-  | Form_memory_act ->
+  | Nav.Memory_act_form ->
       Say.resolve lang
         (Say.make ~ko:"사서 기억 복구 (/memory/act)" ~en:"Memory Recovery Act")
-  | Form_wiki_edit ->
+  | Nav.Wiki_edit_form ->
       Say.resolve lang (Say.make ~ko:"위키 문서 편집" ~en:"Edit Wiki Page")
-  | Form_fusion_launch ->
+  | Nav.Fusion_launch_form ->
       Say.resolve lang (Say.make ~ko:"퓨전 패널 실행" ~en:"Launch Fusion Panel")
-  | Form_runtime_assign ->
+  | Nav.Runtime_assign_form ->
       Say.resolve lang
         (Say.make ~ko:"키퍼 런타임 배정 / 기본 경로"
            ~en:"Assign Keeper Runtime / Default Route")
-  | Form_setup_account_key ->
+  | Nav.Setup_account_key_form ->
       Say.resolve lang
         (Say.make ~ko:"프로바이더 API 키 등록" ~en:"Register Provider API Key")
-  | Form_setup_login_start ->
+  | Nav.Setup_login_start_form ->
       Say.resolve lang
         (Say.make ~ko:"공식 CLI 계정 로그인" ~en:"Start Official CLI Login")
-  | Form_standard Nav.Btw_query ->
+  | Nav.Btw_query ->
       Say.resolve lang (Say.make ~ko:"임시 질문 (/btw)" ~en:"Side-Query (/btw)")
-  | Form_standard (Nav.Gate_reject id) ->
+  | Nav.Gate_reject id ->
       Say.resolve lang
         (Say.make ~ko:("게이트 거절 · " ^ id) ~en:("Gate Reject · " ^ id))
-  | Form_standard (Nav.Verification_reject id) ->
+  | Nav.Verification_reject id ->
       Say.resolve lang
         (Say.make ~ko:("검증 거절 · " ^ id) ~en:("Verification Reject · " ^ id))
-  | Form_standard (Nav.Harness_overrule id) ->
+  | Nav.Harness_overrule id ->
       Say.resolve lang
         (Say.make ~ko:("판정 재정의 · " ^ id) ~en:("Harness Overrule · " ^ id))
-  | Form_standard (Nav.Task_cancel id) ->
+  | Nav.Task_cancel id ->
       Say.resolve lang
         (Say.make ~ko:("작업 취소 · " ^ id) ~en:("Cancel Task · " ^ id))
-  | Form_standard (Nav.Goal_drop id) ->
+  | Nav.Goal_drop id ->
       Say.resolve lang
         (Say.make ~ko:("목표 중단(Drop) · " ^ id) ~en:("Drop Goal · " ^ id))
-  | Form_standard Nav.Schedule_form ->
+  | Nav.Schedule_form ->
       Say.resolve lang (Say.make ~ko:"새 일정 생성" ~en:"Create Schedule")
-  | Form_standard Nav.Connector_form ->
+  | Nav.Connector_form ->
       Say.resolve lang (Say.make ~ko:"새 커넥터 연결" ~en:"Add Connector")
-  | Form_standard Nav.Repo_add_form ->
+  | Nav.Repo_add_form ->
       Say.resolve lang (Say.make ~ko:"저장소 추가" ~en:"Add Repository")
-  | Form_standard Nav.Board_new_post ->
+  | Nav.Board_new_post ->
       Say.resolve lang (Say.make ~ko:"보드 새 글 작성" ~en:"New Board Post")
-  | Form_standard (Nav.Board_comment { post_id; parent_id }) -> (
+  | Nav.Board_comment { post_id; parent_id } -> (
       match parent_id with
       | Some pid ->
           Say.resolve lang
@@ -3996,72 +3928,72 @@ let inline_action_title ~lang ~(modal : Model.inline_modal_state) _kind =
             (Say.make
                ~ko:(Printf.sprintf "타래 댓글 작성 (%s)" post_id)
                ~en:(Printf.sprintf "Add Comment (%s)" post_id)))
-  | Form_standard (Nav.Github_token_form keeper) ->
+  | Nav.Github_token_form keeper ->
       Say.resolve lang
         (Say.make
            ~ko:("GitHub PAT 등록 (마스킹) · " ^ keeper)
            ~en:("GitHub PAT Token (Masked) · " ^ keeper))
-  | Form_standard Nav.Code_finder_form ->
+  | Nav.Code_finder_form ->
       Say.resolve lang (Say.make ~ko:"코드 파일 퍼지 검색" ~en:"Fuzzy File Finder")
-  | Form_standard Nav.Code_search_form ->
+  | Nav.Code_search_form ->
       Say.resolve lang (Say.make ~ko:"워크스페이스 코드 검색 (rg)" ~en:"Workspace Code Search")
-  | Form_standard Nav.Runtime_lane_create ->
+  | Nav.Runtime_lane_create ->
       Say.resolve lang
         (Say.make ~ko:"새 런타임 레인 생성" ~en:"Create Runtime Lane")
-  | Form_standard (Nav.Runtime_lane_edit { lane_id; exact_output; _ }) ->
+  | Nav.Runtime_lane_edit { lane_id; exact_output; _ } ->
       let prefix = if exact_output then "exact/" else "" in
       Say.resolve lang
         (Say.make
            ~ko:(Printf.sprintf "레인 후보 편집 · %s%s" prefix lane_id)
            ~en:(Printf.sprintf "Edit Lane Candidates · %s%s" prefix lane_id))
-  | Form_standard (Nav.Runtime_lane_delete { lane_id; _ }) ->
+  | Nav.Runtime_lane_delete { lane_id; _ } ->
       Say.resolve lang
         (Say.make
            ~ko:("레인 삭제 확인 · " ^ lane_id)
            ~en:("Delete Runtime Lane · " ^ lane_id))
-  | Form_standard Nav.Task_create_form ->
+  | Nav.Task_create_form ->
       Say.resolve lang (Say.make ~ko:"새 작업 생성" ~en:"Create Task")
-  | Form_standard (Nav.Task_transition_form { task_id }) ->
+  | Nav.Task_transition_form { task_id } ->
       Say.resolve lang
         (Say.make ~ko:("작업 상태 전환 · " ^ task_id)
            ~en:("Transition Task · " ^ task_id))
-  | Form_standard (Nav.Task_link_goal { task_id }) ->
+  | Nav.Task_link_goal { task_id } ->
       Say.resolve lang
         (Say.make ~ko:("작업 → 목표 연결 · " ^ task_id)
            ~en:("Link Task to Goal · " ^ task_id))
-  | Form_standard (Nav.Goal_upsert_form None) ->
+  | Nav.Goal_upsert_form None ->
       Say.resolve lang (Say.make ~ko:"새 목표 생성" ~en:"Create Goal")
-  | Form_standard (Nav.Goal_upsert_form (Some goal_id)) ->
+  | Nav.Goal_upsert_form (Some goal_id) ->
       Say.resolve lang
         (Say.make ~ko:("목표 편집 · " ^ goal_id) ~en:("Edit Goal · " ^ goal_id))
-  | Form_standard (Nav.Board_delete_post { post_id; _ }) ->
+  | Nav.Board_delete_post { post_id; _ } ->
       Say.resolve lang
         (Say.make ~ko:("게시글 삭제 확인 · " ^ post_id)
            ~en:("Delete Board Post · " ^ post_id))
-  | Form_standard (Nav.Keeper_lifecycle_form { keeper }) ->
+  | Nav.Keeper_lifecycle_form { keeper } ->
       Say.resolve lang
         (Say.make ~ko:("키퍼 라이프사이클 · @" ^ keeper)
            ~en:("Keeper Lifecycle · @" ^ keeper))
-  | Form_standard (Nav.Keeper_purge_confirm { keeper }) ->
+  | Nav.Keeper_purge_confirm { keeper } ->
       Say.resolve lang
         (Say.make ~ko:("키퍼 영구 삭제 · @" ^ keeper)
            ~en:("Purge Keeper · @" ^ keeper))
-  | Form_standard Nav.Addon_attach_form ->
+  | Nav.Addon_attach_form ->
       Say.resolve lang
         (Say.make ~ko:"레인 애드온 연결 (Attach)" ~en:"Attach Lane Addon")
-  | Form_standard (Nav.Addon_detach_confirm { title; _ }) ->
+  | Nav.Addon_detach_confirm { title; _ } ->
       Say.resolve lang
         (Say.make ~ko:("애드온 분리 확인 · " ^ title)
            ~en:("Detach Lane Addon · " ^ title))
-  | Form_standard (Nav.Addon_invoke_action { instance_id; _ }) ->
+  | Nav.Addon_invoke_action { instance_id; _ } ->
       Say.resolve lang
         (Say.make ~ko:("애드온 액션 호출 · " ^ instance_id)
            ~en:("Invoke Addon Action · " ^ instance_id))
-  | Form_standard (Nav.Setup_login_input_form { login_id }) ->
+  | Nav.Setup_login_input_form { login_id } ->
       Say.resolve lang
         (Say.make ~ko:("OAuth 로그인 입력 · " ^ login_id)
            ~en:("OAuth Login Input · " ^ login_id))
-  | Form_standard (Nav.Keeper_control_confirm { keeper; action }) -> (
+  | Nav.Keeper_control_confirm { keeper; action } -> (
       match action with
       | Nav.Keeper_act_shutdown ->
           Say.resolve lang
@@ -4079,45 +4011,45 @@ let inline_action_title ~lang ~(modal : Model.inline_modal_state) _kind =
           Say.resolve lang
             (Say.make ~ko:("체크포인트 이력 삭제 확인 · " ^ keeper)
                ~en:("Confirm Checkpoint History Delete · " ^ keeper)))
-  | Form_standard (Nav.Keeper_clear_form keeper) ->
+  | Nav.Keeper_clear_form keeper ->
       Say.resolve lang
         (Say.make ~ko:("키퍼 대화 이력 초기화 · " ^ keeper)
            ~en:("Clear Keeper History · " ^ keeper))
-  | Form_standard (Nav.Keeper_operator_note_form keeper) ->
+  | Nav.Keeper_operator_note_form keeper ->
       Say.resolve lang
         (Say.make ~ko:("다음 턴 운영자 노트 · " ^ keeper)
            ~en:("Next-Turn Operator Note · " ^ keeper))
-  | Form_standard (Nav.Tool_execute_form { tool_name = Some tool_name; _ }) ->
+  | Nav.Tool_execute_form { tool_name = Some tool_name; _ } ->
       Say.resolve lang
         (Say.make ~ko:("MCP 도구 실행 · " ^ tool_name)
            ~en:("Execute MCP Tool · " ^ tool_name))
-  | Form_standard (Nav.Tool_execute_form { tool_name = None; _ }) ->
+  | Nav.Tool_execute_form { tool_name = None; _ } ->
       Say.resolve lang (Say.make ~ko:"MCP 도구 실행" ~en:"Execute MCP Tool")
-  | Form_standard Nav.Skill_create_form ->
+  | Nav.Skill_create_form ->
       Say.resolve lang (Say.make ~ko:"새 스킬 생성" ~en:"Create New Skill")
-  | Form_standard (Nav.Skill_edit_form { reference }) ->
+  | Nav.Skill_edit_form { reference } ->
       Say.resolve lang
         (Say.make ~ko:("스킬 편집 · " ^ reference) ~en:("Edit Skill · " ^ reference))
-  | Form_standard (Nav.Skill_delete_confirm { reference }) ->
+  | Nav.Skill_delete_confirm { reference } ->
       Say.resolve lang
         (Say.make ~ko:("스킬 삭제 확인 · " ^ reference)
            ~en:("Confirm Skill Delete · " ^ reference))
-  | Form_standard (Nav.Prompt_override_form { key }) ->
+  | Nav.Prompt_override_form { key } ->
       Say.resolve lang
         (Say.make ~ko:("프롬프트 오버라이드 · " ^ key)
            ~en:("Prompt Override · " ^ key))
-  | Form_standard Nav.Preset_create_form ->
+  | Nav.Preset_create_form ->
       Say.resolve lang (Say.make ~ko:"새 프리셋 생성" ~en:"Create Prompt Preset")
-  | Form_standard (Nav.Runtime_param_set_form { param_key }) ->
+  | Nav.Runtime_param_set_form { param_key } ->
       Say.resolve lang
         (Say.make ~ko:("런타임 파라미터 설정 · " ^ param_key)
            ~en:("Set Runtime Param · " ^ param_key))
-  | Form_standard Nav.Default_route_edit ->
+  | Nav.Default_route_edit ->
       Say.resolve lang (Say.make ~ko:"기본 런타임 변경" ~en:"Edit Default Runtime")
-  | Form_standard (Nav.Lane_rename_form { lane }) ->
+  | Nav.Lane_rename_form { lane } ->
       Say.resolve lang
         (Say.make ~ko:("레인 이름 변경 · " ^ lane) ~en:("Rename Lane · " ^ lane))
-  | Form_standard (Nav.Addon_decl_form { file_name; mode; _ }) ->
+  | Nav.Addon_decl_form { file_name; mode; _ } ->
       let m_ko, m_en =
         match mode with `Create -> ("생성", "Create") | `Save -> ("편집", "Edit")
       in
@@ -4125,11 +4057,11 @@ let inline_action_title ~lang ~(modal : Model.inline_modal_state) _kind =
         (Say.make
            ~ko:(Printf.sprintf "애드온 선언 %s · %s" m_ko file_name)
            ~en:(Printf.sprintf "%s Addon Declaration · %s" m_en file_name))
-  | Form_standard (Nav.Addon_act_form { instance_id; _ }) ->
+  | Nav.Addon_act_form { instance_id; _ } ->
       Say.resolve lang
         (Say.make ~ko:("애드온 액션 실행 · " ^ instance_id)
            ~en:("Run Addon Action · " ^ instance_id))
-  | Form_standard (Nav.Browser_interact_form { tab_id; _ }) ->
+  | Nav.Browser_interact_form { tab_id; _ } ->
       Say.resolve lang
         (Say.make
            ~ko:(Printf.sprintf "브라우저 인터랙션 · #%d" tab_id)
@@ -4210,6 +4142,14 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     | Nav.Connector_form
     | Nav.Repo_add_form
     | Nav.Board_new_post
+    | Nav.Board_goal_proposal
+    | Nav.Goal_confirmation_proof
+    | Nav.Memory_act_form
+    | Nav.Wiki_edit_form
+    | Nav.Fusion_launch_form
+    | Nav.Runtime_assign_form
+    | Nav.Setup_account_key_form
+    | Nav.Setup_login_start_form
     | Nav.Board_comment _
     | Nav.Github_token_form _
     | Nav.Code_search_form
@@ -4250,7 +4190,7 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
   let modal_r = Rect.make ~x ~y ~w ~h in
   if Rect.is_empty modal_r then ()
   else
-    let title = inline_action_title ~lang ~modal kind in
+    let title = inline_action_title ~lang kind in
     let hotkey =
       match kind with
       | Nav.Btw_query -> (
@@ -4281,6 +4221,14 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       | Nav.Connector_form
       | Nav.Repo_add_form
       | Nav.Board_new_post
+      | Nav.Board_goal_proposal
+      | Nav.Goal_confirmation_proof
+      | Nav.Memory_act_form
+      | Nav.Wiki_edit_form
+      | Nav.Fusion_launch_form
+      | Nav.Runtime_assign_form
+      | Nav.Setup_account_key_form
+      | Nav.Setup_login_start_form
       | Nav.Board_comment _
       | Nav.Github_token_form _
       | Nav.Code_finder_form
@@ -4457,6 +4405,14 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       | Nav.Connector_form
       | Nav.Repo_add_form
       | Nav.Board_new_post
+      | Nav.Board_goal_proposal
+      | Nav.Goal_confirmation_proof
+      | Nav.Memory_act_form
+      | Nav.Wiki_edit_form
+      | Nav.Fusion_launch_form
+      | Nav.Runtime_assign_form
+      | Nav.Setup_account_key_form
+      | Nav.Setup_login_start_form
       | Nav.Board_comment _
       | Nav.Github_token_form _
       | Nav.Code_finder_form
@@ -4494,27 +4450,25 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             if modal.submitting || Option.is_some modal.error then 1 else 0
           in
           let extra_rows =
-            match classify_inline_form modal with
-            | Form_standard Nav.Code_finder_form ->
+            match modal.kind with
+            | Nav.Code_finder_form ->
                 Int.max 0 (Int.min 7 (inner.h - status_rows - 4))
-            | Form_standard
-                ( Nav.Connector_form
+            | Nav.Connector_form
                 | Nav.Runtime_lane_create
                 | Nav.Runtime_lane_edit _
                 | Nav.Task_create_form
                 | Nav.Task_link_goal _
-                | Nav.Addon_invoke_action _ )
-            | Form_fusion_launch ->
+                | Nav.Addon_invoke_action _
+            | Nav.Fusion_launch_form ->
                 if inner.h - status_rows >= 6 then 1 else 0
-            | Form_board_goal_proposal
-            | Form_goal_confirmation_proof
-            | Form_memory_act
-            | Form_wiki_edit
-            | Form_runtime_assign
-            | Form_setup_account_key
-            | Form_setup_login_start
-            | Form_standard
-                ( Nav.Btw_query
+            | Nav.Board_goal_proposal
+            | Nav.Goal_confirmation_proof
+            | Nav.Memory_act_form
+            | Nav.Wiki_edit_form
+            | Nav.Runtime_assign_form
+            | Nav.Setup_account_key_form
+            | Nav.Setup_login_start_form
+            | Nav.Btw_query
                 | Nav.Gate_reject _
                 | Nav.Verification_reject _
                 | Nav.Harness_overrule _
@@ -4549,7 +4503,7 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 | Nav.Keeper_purge_confirm _
                 | Nav.Addon_attach_form
                 | Nav.Addon_detach_confirm _
-                | Nav.Setup_login_input_form _ ) ->
+                | Nav.Setup_login_input_form _ ->
                 0
           in
           let form_r =
@@ -4567,8 +4521,8 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               Rect.make ~x:padded.x ~y:ey ~w:padded.w ~h:extra_rows
             in
             let whisper_st = Typography.whisper ~bg theme in
-            match classify_inline_form modal with
-            | Form_standard Nav.Code_finder_form ->
+            match modal.kind with
+            | Nav.Code_finder_form ->
                 let q = Model.modal_field_value ~key:"query" modal in
                 let matches = Update_nav.code_fuzzy_matches ~query:q model in
                 if matches = [] then
@@ -4591,7 +4545,7 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                              (Grapheme.truncate_to_width ~max_width:er.w
                                 (prefix ^ path))))
                     matches
-            | Form_standard Nav.Connector_form ->
+            | Nav.Connector_form ->
                 let cid = Model.modal_field_value ~key:"connector" modal in
                 let names =
                   Runtime_store.connector_channel_names ~connector_id:cid
@@ -4616,7 +4570,7 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                   (Cell_grid.put_text ~clip:er grid ~x:er.x ~y:er.y
                      ~style:whisper_st
                      (Grapheme.truncate_to_width ~max_width:er.w hint))
-            | Form_fusion_launch ->
+            | Nav.Fusion_launch_form ->
                 let hint =
                   if model.runtime.fusion_config_auth_denied then
                     Say.resolve lang
@@ -4638,7 +4592,7 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                   (Cell_grid.put_text ~clip:er grid ~x:er.x ~y:er.y
                      ~style:whisper_st
                      (Grapheme.truncate_to_width ~max_width:er.w hint))
-            | Form_standard (Nav.Runtime_lane_create | Nav.Runtime_lane_edit _) ->
+            | Nav.Runtime_lane_create | Nav.Runtime_lane_edit _ ->
                 let rts = Runtime_store.runtime_options model.runtime in
                 let hint =
                   if rts = [] then
@@ -4658,7 +4612,7 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                   (Cell_grid.put_text ~clip:er grid ~x:er.x ~y:er.y
                      ~style:whisper_st
                      (Grapheme.truncate_to_width ~max_width:er.w hint))
-            | Form_standard (Nav.Task_create_form | Nav.Task_link_goal _) ->
+            | Nav.Task_create_form | Nav.Task_link_goal _ ->
                 let goals = Work_store.goals model.work in
                 let hint =
                   match goals with
@@ -4679,7 +4633,7 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                   (Cell_grid.put_text ~clip:er grid ~x:er.x ~y:er.y
                      ~style:whisper_st
                      (Grapheme.truncate_to_width ~max_width:er.w hint))
-            | Form_standard (Nav.Addon_invoke_action { action_names; _ }) ->
+            | Nav.Addon_invoke_action { action_names; _ } ->
                 let hint =
                   match action_names with
                   | [] ->
@@ -4692,15 +4646,14 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                   (Cell_grid.put_text ~clip:er grid ~x:er.x ~y:er.y
                      ~style:whisper_st
                      (Grapheme.truncate_to_width ~max_width:er.w hint))
-            | Form_board_goal_proposal
-            | Form_goal_confirmation_proof
-            | Form_memory_act
-            | Form_wiki_edit
-            | Form_runtime_assign
-            | Form_setup_account_key
-            | Form_setup_login_start
-            | Form_standard
-                ( Nav.Btw_query
+            | Nav.Board_goal_proposal
+            | Nav.Goal_confirmation_proof
+            | Nav.Memory_act_form
+            | Nav.Wiki_edit_form
+            | Nav.Runtime_assign_form
+            | Nav.Setup_account_key_form
+            | Nav.Setup_login_start_form
+            | Nav.Btw_query
                 | Nav.Gate_reject _
                 | Nav.Verification_reject _
                 | Nav.Harness_overrule _
@@ -4735,7 +4688,7 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 | Nav.Keeper_purge_confirm _
                 | Nav.Addon_attach_form
                 | Nav.Addon_detach_confirm _
-                | Nav.Setup_login_input_form _ ) ->
+                | Nav.Setup_login_input_form _ ->
                 ()
           end;
           if status_rows = 1 then begin

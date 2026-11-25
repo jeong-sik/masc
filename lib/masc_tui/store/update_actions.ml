@@ -610,10 +610,11 @@ let step_settings_pane_lr ~now (m : Model.t) (dir : Keymap.move_dir) =
               { m with config = cfg0 }
           , [] ))
 
-let open_custom_inline_modal (m : Model.t) (fields : Model.modal_form_field list) =
+let open_custom_inline_modal ~(kind : Nav.inline_action_kind) (m : Model.t)
+    (fields : Model.modal_form_field list) =
   let modal : Model.inline_modal_state =
     {
-      kind = Nav.Board_new_post;
+      kind;
       fields;
       active_field = 0;
       submitting = false;
@@ -624,7 +625,7 @@ let open_custom_inline_modal (m : Model.t) (fields : Model.modal_form_field list
   let nav =
     {
       m.nav with
-      overlay = Some (Nav.Inline_action Nav.Board_new_post);
+      overlay = Some (Nav.Inline_action kind);
       return_overlay = None;
       filter_focused = false;
       sidebar_focused = false;
@@ -640,7 +641,7 @@ let open_custom_inline_modal (m : Model.t) (fields : Model.modal_form_field list
 let open_goal_confirmation_proof_modal (m : Model.t) ~(goal_id : string)
     ~(criterion_revision : string) =
   let m, cmds =
-    open_custom_inline_modal m
+    open_custom_inline_modal ~kind:Nav.Goal_confirmation_proof m
     [
       {
         key = "confirm_goal_id";
@@ -819,7 +820,7 @@ let resolve_memory_act_keeper (m : Model.t) =
           | None -> Update_nav.resolve_target_keeper m))
 
 let open_memory_act_modal (m : Model.t) ~(keeper_default : string) =
-  open_custom_inline_modal m
+  open_custom_inline_modal ~kind:Nav.Memory_act_form m
     [
       {
         key = "memory_keeper";
@@ -902,7 +903,7 @@ let open_fusion_launch_modal (m : Model.t) =
         | Some { presets = first :: _; _ } -> first.name
         | Some { presets = []; _ } | None -> "")
   in
-  open_custom_inline_modal m
+  open_custom_inline_modal ~kind:Nav.Fusion_launch_form m
     [
       {
         key = "fusion_keeper";
@@ -1539,7 +1540,7 @@ let next_code_scope (m : Model.t) : Wire_infra.workspace_scope =
 
 let open_runtime_assign_modal (m : Model.t) ?(keeper_default = "")
     ?(runtime_default = "") () =
-  open_custom_inline_modal m
+  open_custom_inline_modal ~kind:Nav.Runtime_assign_form m
     [
       {
         key = "assign_keeper";
@@ -1562,7 +1563,7 @@ let open_runtime_assign_modal (m : Model.t) ?(keeper_default = "")
     ]
 
 let open_setup_account_key_modal (m : Model.t) ?(integration_default = "") () =
-  open_custom_inline_modal m
+  open_custom_inline_modal ~kind:Nav.Setup_account_key_form m
     [
       {
         key = "setup_key_integration";
@@ -1583,7 +1584,7 @@ let open_setup_account_key_modal (m : Model.t) ?(integration_default = "") () =
     ]
 
 let open_setup_login_modal (m : Model.t) ?(integration_default = "") () =
-  open_custom_inline_modal m
+  open_custom_inline_modal ~kind:Nav.Setup_login_start_form m
     [
       {
         key = "setup_login_integration";
@@ -4201,6 +4202,14 @@ and execute_action ~now (m : Model.t) action =
                     | Nav.Connector_form
                     | Nav.Repo_add_form
                     | Nav.Board_new_post
+                    | Nav.Board_goal_proposal
+                    | Nav.Goal_confirmation_proof
+                    | Nav.Memory_act_form
+                    | Nav.Wiki_edit_form
+                    | Nav.Fusion_launch_form
+                    | Nav.Runtime_assign_form
+                    | Nav.Setup_account_key_form
+                    | Nav.Setup_login_start_form
                     | Nav.Board_comment _
                     | Nav.Github_token_form _
                     | Nav.Code_finder_form
@@ -4450,6 +4459,14 @@ and execute_action ~now (m : Model.t) action =
                | Nav.Connector_form
                | Nav.Repo_add_form
                | Nav.Board_new_post
+               | Nav.Board_goal_proposal
+               | Nav.Goal_confirmation_proof
+               | Nav.Memory_act_form
+               | Nav.Wiki_edit_form
+               | Nav.Fusion_launch_form
+               | Nav.Runtime_assign_form
+               | Nav.Setup_account_key_form
+               | Nav.Setup_login_start_form
                | Nav.Board_comment _
                | Nav.Github_token_form _
                | Nav.Code_finder_form
@@ -4759,6 +4776,14 @@ and execute_action ~now (m : Model.t) action =
             | Nav.Connector_form
             | Nav.Repo_add_form
             | Nav.Board_new_post
+            | Nav.Board_goal_proposal
+            | Nav.Goal_confirmation_proof
+            | Nav.Memory_act_form
+            | Nav.Wiki_edit_form
+            | Nav.Fusion_launch_form
+            | Nav.Runtime_assign_form
+            | Nav.Setup_account_key_form
+            | Nav.Setup_login_start_form
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -6126,6 +6151,14 @@ and execute_action ~now (m : Model.t) action =
                 | Nav.Connector_form
                 | Nav.Repo_add_form
                 | Nav.Board_new_post
+                | Nav.Board_goal_proposal
+                | Nav.Goal_confirmation_proof
+                | Nav.Memory_act_form
+                | Nav.Wiki_edit_form
+                | Nav.Fusion_launch_form
+                | Nav.Runtime_assign_form
+                | Nav.Setup_account_key_form
+                | Nav.Setup_login_start_form
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_finder_form

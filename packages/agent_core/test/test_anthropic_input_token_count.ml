@@ -1065,14 +1065,43 @@ let gemini_config base_url =
     ()
 ;;
 
+(* Text only: the count must reach the mock server, which waits for one
+   request. The image and tool-result fixtures above are Anthropic-shaped
+   cases; the Gemini wire for them is covered by test_backend_gemini. *)
+let gemini_messages = [ msg User [ Text "Inspect artifact.png" ] ]
+
+(* Built before any server waits on a request, so a body the builder refuses
+   fails here with its reason instead of leaving the mock waiting. *)
+let gemini_body_or_fail config =
+  match
+    Count_tokens_sync.gemini_count_tokens_body ~config ~messages:gemini_messages ~tools:[ tool ]
+  with
+  | Ok body -> body
+  | Error (Http_client.AcceptRejected { reason }) -> fail ("Gemini count body refused: " ^ reason)
+  | Error _ -> fail "Gemini count body refused before dispatch"
+;;
+
 let test_gemini_transport_success () =
+  ignore (gemini_body_or_fail (gemini_config "https://generativelanguage.googleapis.com/v1beta"));
   let result, (path, headers, body) =
     with_mock ~status:`OK ~response:{|{"totalTokens":91}|}
     @@ fun ~sw ~net ~base_url ->
-    Count_tokens_sync.measure_completion_request
-      ~sw
-      ~net
-      (completion_request (gemini_config base_url))
+    (* Fail inside the server's scope: a measurement that stops before
+       dispatch would otherwise leave the mock waiting for a request. *)
+    match
+      Count_tokens_sync.measure_completion_request
+        ~sw
+        ~net
+        { (completion_request (gemini_config base_url)) with messages = gemini_messages }
+    with
+    | Ok _ as ok -> ok
+    | Error (Count_tokens_sync.Input_count_failed (Count.Transport (Http_client.AcceptRejected { reason }))) ->
+      fail ("Gemini count refused before dispatch: " ^ reason)
+    | Error (Count_tokens_sync.Input_count_failed (Count.Unsupported _)) ->
+      fail "Gemini count reported Unsupported"
+    | Error (Count_tokens_sync.Output_token_resolution_failed _) ->
+      fail "Gemini output-token receipt failed before dispatch"
+    | Error _ as error -> error
   in
   (match result with
    | Ok measurement ->
@@ -1093,7 +1122,7 @@ let test_gemini_transport_success () =
     match
       Backend_gemini.build_request
         ~config:(gemini_config "unused")
-        ~messages
+        ~messages:gemini_messages
         ~tools:[ tool ]
         ()
       |> Yojson.Safe.from_string
@@ -1118,15 +1147,8 @@ let test_gemini_vertex_count_body_is_top_level () =
     | Ok url -> url
     | Error detail -> fail detail
   in
-  match
-    Count_tokens_sync.gemini_count_tokens_body
-      ~config:(gemini_config base_url)
-      ~messages
-      ~tools:[ tool ]
-  with
-  | Error _ -> fail "expected a Vertex count body"
-  | Ok body ->
-    (match Yojson.Safe.from_string body with
+  let body = gemini_body_or_fail (gemini_config base_url) in
+  (match Yojson.Safe.from_string body with
      | `Assoc fields ->
        check
          (list string)

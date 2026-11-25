@@ -1,7 +1,6 @@
-(** Breadcrumb deep-inspector views for [Goal_dive], [Task_dive], and
-    [Verification_dive]: full pipeline stepper, linked tasks, verifier runs &
-    evidence refs ([✓]/[✕]), structured rejection diff ([Diff.draw]), and
-    opt-in [[J]] [Json_tree] inspector. *)
+(** Breadcrumb deep-inspector view for [Verification_dive]: evidence refs
+    ([✓]/[✕]), structured rejection diff ([Diff.draw]), summary/specs/TLC tabs,
+    and opt-in [[Space]] [Json_tree] inspector. *)
 
 val render :
   target:Masc_tui_core.Nav.work_dive_target ->

@@ -48,10 +48,7 @@ type keeper_tab =
   | Keeper_config
   | Keeper_identity
 
-type work_dive_target =
-  | Goal_dive of string
-  | Task_dive of string
-  | Verification_dive of string
+type work_dive_target = Verification_dive of string
 
 type runtime_dive_target =
   | Tool_dive of string
@@ -507,16 +504,8 @@ let keeper_tab_index = function
 
 let equal_keeper_tab a b = Int.equal (keeper_tab_index a) (keeper_tab_index b)
 
-let equal_work_dive_target a b =
-  match a, b with
-  | Goal_dive x, Goal_dive y
-  | Task_dive x, Task_dive y
-  | Verification_dive x, Verification_dive y ->
-      String.equal x y
-  | Goal_dive _, (Task_dive _ | Verification_dive _)
-  | Task_dive _, (Goal_dive _ | Verification_dive _)
-  | Verification_dive _, (Goal_dive _ | Task_dive _) ->
-      false
+let equal_work_dive_target (Verification_dive x) (Verification_dive y) =
+  String.equal x y
 
 let equal_runtime_dive_target a b =
   match a, b with

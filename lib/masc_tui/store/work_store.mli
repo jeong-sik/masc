@@ -228,6 +228,8 @@ val selected_goal_dive_task : goal_id:string -> t -> Wire_work.task option
 val selected_goal_dive_verification :
   goal_id:string -> t -> Wire_work.verification_request option
 val reset_goal_dive_state : t -> t
+val select_goal_by_id : goal_id:string -> t -> t
+val select_task_by_id : task_id:string -> t -> t
 val move_goal_dive_task :
   goal_id:string -> ?viewport_rows:int -> delta:int -> t -> t
 val move_goal_dive_verif :

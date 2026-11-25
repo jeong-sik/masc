@@ -53,10 +53,7 @@ type keeper_tab =
   | Keeper_config
   | Keeper_identity
 
-type work_dive_target =
-  | Goal_dive of string
-  | Task_dive of string
-  | Verification_dive of string
+type work_dive_target = Verification_dive of string
 
 type runtime_dive_target =
   | Tool_dive of string

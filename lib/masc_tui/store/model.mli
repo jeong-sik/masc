@@ -35,6 +35,10 @@ type workspace_return_frame = {
   dive_stack : Nav.dive list;
   dive_return_stack : (int * bool * Nav.overlay option) list;
   work_tab : Nav.work_tab;
+  work_return_entity_id : string option;
+      (** Selected Goal ID (on {!Nav.Work_pipeline}) or Task ID (on
+          {!Nav.Work_tasks}) captured on jump so [Esc] restores the exact
+          entity when returning across sub-tabs. *)
   knowledge_tab : Nav.knowledge_tab;
   runtime_tab : Nav.runtime_tab;
   infra_tab : Nav.infra_tab;
@@ -405,14 +409,19 @@ val focusable_pane_count : t -> int
 val keeper_preview_has_inner_split : t -> bool
 val has_active_memory_reading : t -> bool
 
+val is_work_goal_zoomed : t -> bool
+val is_work_task_zoomed : t -> bool
+
 val task_dive_has_two_main_panes : t -> string -> bool
-(** [true] iff [Task_dive task_id] renders both a non-empty Description section
-    and a linked Verification section as separate focusable panes. *)
+(** [true] iff zoomed Task detail for [task_id] renders both a non-empty
+    Description section and a linked Verification section as separate focusable
+    panes. *)
 
 val dive_work_json_pane_index : t -> int option
-(** Active pane index of the opt-in Raw JSON card inside [Dive_work _], or
-    [None] when [show_raw_json] is off. Returns [Some 0] when the viewport is
-    too narrow ([< 88] cols) and JSON replaces the main card. *)
+(** Active pane index of the opt-in Raw JSON card inside [Verification_dive] or
+    zoomed Work Goal/Task detail, or [None] when [show_raw_json] is off. Returns
+    [Some 0] when the viewport is too narrow ([< 88] cols) and JSON replaces the
+    main card. *)
 
 val classify_viewport : viewport -> breakpoint
 val is_too_small_viewport : viewport -> bool

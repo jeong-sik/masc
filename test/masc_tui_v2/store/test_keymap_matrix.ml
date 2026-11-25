@@ -1104,12 +1104,6 @@ let test_axis_a_screen_dive_matrix () =
         };
     }
   in
-  let with_dive d (m : Model.t) =
-    {
-      m with
-      nav = { m.nav with dive_stack = [ d ]; overlay = None; pane_index = 0 };
-    }
-  in
   let contexts : (string * Model.t) list =
     [
       ("Pulse/Wide+Attn", with_ws Nav.Pulse base);
@@ -1280,14 +1274,20 @@ let test_axis_a_screen_dive_matrix () =
             |> Fleet_store.set_keeper_dive_tab Nav.Keeper_config;
           nav = { mk.nav with zoomed = true; pane_index = 0 };
         } );
-      ( "Dive/Work/Goal"
-      , with_dive
-          (Nav.Dive_work (Nav.Goal_dive "goal-1"))
-          (with_ws Nav.Work base) );
-      ( "Dive/Work/Task"
-      , with_dive
-          (Nav.Dive_work (Nav.Task_dive "task-1"))
-          (with_ws Nav.Work base) );
+      ( "Work/Pipeline/Zoomed"
+      , let mw = with_ws Nav.Work base in
+        {
+          mw with
+          nav = { mw.nav with zoomed = true; pane_index = 0 };
+          work = Work_store.select_goal_by_id ~goal_id:"goal-1" mw.work;
+        } );
+      ( "Work/Tasks/Zoomed"
+      , let mw = with_ws Nav.Work base in
+        {
+          mw with
+          nav = { mw.nav with zoomed = true; pane_index = 0 };
+          work = Work_store.select_task_by_id ~task_id:"task-1" mw.work;
+        } );
       ( "Knowledge/Board/Zoomed"
       , let mk = with_ws Nav.Knowledge base in
         {
@@ -1387,18 +1387,8 @@ let test_axis_a_screen_dive_matrix () =
                 expected m'.nav.pane_index
             end
           end;
-          (* Invariant 3: Enter inside non-drillable Dives never pushes duplicate/nested dive;
-             Goal_dive and Task_dive intentionally drill into linked Task_dive / Verification_dive. *)
-          let dive_allows_drill =
-            match dive_before with
-            | Some (Nav.Dive_work (Nav.Goal_dive _ | Nav.Task_dive _)) -> true
-            | Some _ | None -> false
-          in
-          if
-            String.equal kname "Enter"
-            && Option.is_some dive_before
-            && not dive_allows_drill
-          then
+          (* Invariant 3: Enter inside any remaining Dive never pushes duplicate/nested dive. *)
+          if String.equal kname "Enter" && Option.is_some dive_before then
             Alcotest.(check bool)
               (tag ^ " Dive Enter never deepens dive_stack")
               true
@@ -2190,10 +2180,15 @@ let test_journeys_slash_palette_filter () =
      && Nav.equal_keeper_tab m_pal_kp_go.fleet.keeper_dive_tab Nav.Keeper_chat);
   let m_pal_goal, _ = type_str m_pal "Harden TUI Matrix" in
   let m_pal_goal_go, _ = step m_pal_goal (mk_key Keymap.Input.Enter) in
-  Alcotest.(check bool) "J6 Ctrl+K goal entry dives goal-1" true
-    (match Model.active_dive m_pal_goal_go with
-     | Some (Nav.Dive_work (Nav.Goal_dive "goal-1")) -> true
-     | _ -> false);
+  Alcotest.(check bool) "J6 Ctrl+K goal entry jumps to Work > Goals zoomed on goal-1" true
+    (Option.is_none (Model.active_dive m_pal_goal_go)
+     && Nav.equal_workspace m_pal_goal_go.nav.workspace Nav.Work
+     && Nav.equal_work_tab m_pal_goal_go.work.active_tab Nav.Work_pipeline
+     && m_pal_goal_go.nav.zoomed
+     &&
+     match Work_store.selected_goal m_pal_goal_go.work with
+     | Some g -> String.equal g.id "goal-1"
+     | None -> false);
 
   (* J7: Bare '/' filter bar live Up/Down, Tab commit, Esc clear+blur *)
   record_case ();
@@ -2264,17 +2259,27 @@ let test_journeys_tab_multipane_dives_safety () =
   in
   let p_goal_dive, _ = step p_pane2 (mk_key Keymap.Input.Enter) in
   Alcotest.(check bool)
-    "J10 Pulse pane 2 (Goals) Enter dives top-ranked Goal_dive (goal-2)" true
-    (match Model.active_dive p_goal_dive with
-     | Some (Nav.Dive_work (Nav.Goal_dive "goal-2")) -> true
-     | _ -> false);
+    "J10 Pulse pane 2 (Goals) Enter jumps to top-ranked Goal zoomed (goal-2)" true
+    (Option.is_none (Model.active_dive p_goal_dive)
+     && Nav.equal_workspace p_goal_dive.nav.workspace Nav.Work
+     && Nav.equal_work_tab p_goal_dive.work.active_tab Nav.Work_pipeline
+     && p_goal_dive.nav.zoomed
+     &&
+     match Work_store.selected_goal p_goal_dive.work with
+     | Some g -> String.equal g.id "goal-2"
+     | None -> false);
   let p_pane2_dn, _ = step p_pane2 (mk_key Keymap.Input.Down) in
   let p_goal1_dive, _ = step p_pane2_dn (mk_key Keymap.Input.Enter) in
   Alcotest.(check bool)
-    "J10 Pulse pane 2 Down + Enter dives 2nd Goal_dive (goal-1)" true
-    (match Model.active_dive p_goal1_dive with
-     | Some (Nav.Dive_work (Nav.Goal_dive "goal-1")) -> true
-     | _ -> false);
+    "J10 Pulse pane 2 Down + Enter jumps to 2nd Goal zoomed (goal-1)" true
+    (Option.is_none (Model.active_dive p_goal1_dive)
+     && Nav.equal_workspace p_goal1_dive.nav.workspace Nav.Work
+     && Nav.equal_work_tab p_goal1_dive.work.active_tab Nav.Work_pipeline
+     && p_goal1_dive.nav.zoomed
+     &&
+     match Work_store.selected_goal p_goal1_dive.work with
+     | Some g -> String.equal g.id "goal-1"
+     | None -> false);
   let p_pane3, _ = step p_pane2 (mk_key Keymap.Input.Tab) in
   let p_thread_jump, _ = step p_pane3 (mk_key Keymap.Input.Enter) in
   Alcotest.(check bool)
@@ -2893,11 +2898,12 @@ let test_journeys_tab_multipane_dives_safety () =
   Alcotest.(check int) "R1 pane 1 Down does NOT move hidden verif_selected_index"
     0 m_wp_n1_dn.work.verif_selected_index;
   let m_wp_n1_ent, _ = step m_wp_n1 (mk_key Keymap.Input.Enter) in
-  Alcotest.(check bool) "R1 pane 1 Enter dives Goal_dive (never Verification_dive)"
+  Alcotest.(check bool) "R1 pane 1 Enter zooms Goal Detail (never Verification_dive)"
     true
-    (match Model.active_dive m_wp_n1_ent with
-     | Some (Nav.Dive_work (Nav.Goal_dive _)) -> true
-     | _ -> false);
+    (Option.is_none (Model.active_dive m_wp_n1_ent)
+     && m_wp_n1_ent.nav.zoomed
+     && Nav.equal_workspace m_wp_n1_ent.nav.workspace Nav.Work
+     && Nav.equal_work_tab m_wp_n1_ent.work.active_tab Nav.Work_pipeline);
   let _, cmds_wp_n1_a = step m_wp_n1 (char_key "a") in
   Alcotest.(check bool) "R1 pane 1 'a' NEVER posts verification verdict" false
     (has_cmd
@@ -3293,18 +3299,9 @@ let test_journeys_tab_multipane_dives_safety () =
 
   (* R10: Cross-dive isolation on 'o' (Open_external) & 'y' (Copy_selected) + Wiki slug parity *)
   record_case ();
-  let m_dive_bleed =
-    {
-      m_ir0 with
-      nav =
-        {
-          m_ir0.nav with
-          dive_stack = [ Nav.Dive_work (Nav.Goal_dive "goal-1") ];
-        };
-    }
-  in
+  let m_dive_bleed, _ = Update_nav.jump_to_goal ~zoomed:true m_ir0 "goal-1" in
   let _, cmds_o = step m_dive_bleed (char_key "o") in
-  Alcotest.(check bool) "R10 'o' inside Goal_dive NEVER opens hidden Infra repo URL"
+  Alcotest.(check bool) "R10 'o' inside zoomed Goal NEVER opens hidden Infra repo URL"
     false
     (has_cmd
        (function
@@ -3312,7 +3309,7 @@ let test_journeys_tab_multipane_dives_safety () =
          | _ -> false)
        cmds_o);
   let _, cmds_y = step m_dive_bleed (char_key "y") in
-  Alcotest.(check bool) "R10 'y' inside Goal_dive copies Goal title (never hidden Infra URL)"
+  Alcotest.(check bool) "R10 'y' inside zoomed Goal copies Goal title (never hidden Infra URL)"
     true
     (has_cmd
        (function
@@ -5524,11 +5521,6 @@ let test_pillar2_scroll_bounds_all_surfaces () =
   let dives_with_sentinels =
     let dive_off (m : Model.t) = m.nav.dive_scroll_offset in
     [
-      ( "Goal_dive"
-      , Nav.Dive_work (Nav.Goal_dive "goal-1")
-      , "GD_TASK_34"
-      , fun (m : Model.t) -> m.work.goal_dive_task_index );
-      ("Task_dive", Nav.Dive_work (Nav.Task_dive "task-01"), "TD_DESC_39", dive_off);
       ( "Verification_dive"
       , Nav.Dive_work (Nav.Verification_dive "verif-1")
       , "Missing artifacts"
@@ -5542,6 +5534,20 @@ let test_pillar2_scroll_bounds_all_surfaces () =
       in
       assert_scroll_exact ~label:dname ~needle ~get_off md0)
     dives_with_sentinels;
+  let m_work_goal_z, _ =
+    Update_nav.jump_to_goal ~zoomed:true m_dives_base "goal-1"
+  in
+  assert_scroll_exact ~label:"Work > Goals zoomed (Linked Tasks)"
+    ~needle:"GD_TASK_34"
+    ~get_off:(fun (m : Model.t) -> m.work.goal_dive_task_index)
+    m_work_goal_z;
+  let m_work_task_z, _ =
+    Update_nav.jump_to_task ~zoomed:true m_dives_base "task-01"
+  in
+  assert_scroll_exact ~label:"Work > Tasks zoomed (Description)"
+    ~needle:"TD_DESC_39"
+    ~get_off:(fun (m : Model.t) -> m.work.task_dive_desc_scroll)
+    m_work_task_z;
   let m_know_board_z =
     let board_with_long_post1 =
       match Observed.to_option m_dives_base.knowledge.board with
@@ -6362,17 +6368,7 @@ let test_wave2_100pct_menu_reachability_matrix () =
         };
     }
   in
-  let m_tdive_check =
-    {
-      base with
-      nav =
-        {
-          base.nav with
-          workspace = Nav.Work;
-          dive_stack = [ Nav.Dive_work (Nav.Task_dive "task-9") ];
-        };
-    }
-  in
+  let m_tdive_check, _ = Update_nav.jump_to_task ~zoomed:true base "task-9" in
   List.iter
     (fun (label, m_src, k_ev) ->
       let m_o, _ = step m_src k_ev in
@@ -6381,8 +6377,8 @@ let test_wave2_100pct_menu_reachability_matrix () =
     [
       ("Verification_dive [h] warns instead of opening empty modal", m_vdive_check, char_key "h");
       ("Verification_dive [X] warns instead of opening empty modal", m_vdive_check, char_key ~shift:true "X");
-      ("Task_dive [h] warns instead of opening empty modal", m_tdive_check, char_key "h");
-      ("Task_dive [X] warns instead of opening empty modal", m_tdive_check, char_key ~shift:true "X");
+      ("Zoomed Work > Tasks [h] warns instead of opening empty modal", m_tdive_check, char_key "h");
+      ("Zoomed Work > Tasks [X] warns instead of opening empty modal", m_tdive_check, char_key ~shift:true "X");
     ];
   let open_overrule hash_val =
     let m_ho, _ =
@@ -8469,7 +8465,7 @@ let test_part2_keymap_consistency_spatial_overlays_and_safe_space () =
   Alcotest.(check int) "Keepers Split Left -> Right emits 0 spurious refetches" 0
     (List.length (Cmd.flatten cmds_dk_rt));
 
-  let m_dive_goal =
+  let m_dive_verif =
     {
       base with
       nav =
@@ -8478,20 +8474,20 @@ let test_part2_keymap_consistency_spatial_overlays_and_safe_space () =
           workspace = Nav.Work;
           pane_index = 0;
           sidebar_focused = false;
-          dive_stack = [ Nav.Dive_work (Nav.Goal_dive "g-1") ];
+          dive_stack = [ Nav.Dive_work (Nav.Verification_dive "ver-1") ];
         };
     }
   in
-  let m_dg_l, _ = step m_dive_goal (mk_key Keymap.Input.Left) in
+  let m_dg_l, _ = step m_dive_verif (mk_key Keymap.Input.Left) in
   let m_dg_rt, cmds_dg_rt = step m_dg_l (mk_key Keymap.Input.Right) in
-  Alcotest.(check bool) "Dive_work Goal_dive Left -> Right preserves dive_stack"
+  Alcotest.(check bool) "Dive_work Verification_dive Left -> Right preserves dive_stack"
     true
     ((not (Model.sidebar_has_focus m_dg_rt))
      &&
      match Model.active_dive m_dg_rt with
-     | Some (Nav.Dive_work (Nav.Goal_dive "g-1")) -> true
+     | Some (Nav.Dive_work (Nav.Verification_dive "ver-1")) -> true
      | _ -> false);
-  Alcotest.(check int) "Dive_work Goal_dive Left -> Right emits 0 refetches" 0
+  Alcotest.(check int) "Dive_work Verification_dive Left -> Right emits 0 refetches" 0
     (List.length (Cmd.flatten cmds_dg_rt));
 
   let m_zoomed =
@@ -9017,7 +9013,7 @@ let test_p1_shortcut_and_classifier_regressions () =
   Alcotest.(check bool) "[D] on Kmem_diff_flow disarms stale keeper_stop_armed"
     true (Option.is_none m_after_pin.keeper_stop_armed);
 
-  (* 3. Approval Strip [Y] on Artifacts & [J] on Goal_dive take priority over contextual intercepts. *)
+  (* 3. Approval Strip [Y] on Artifacts & [J] on zoomed Goal take priority over contextual intercepts. *)
   let m_art_ask =
     {
       m0 with
@@ -9031,14 +9027,11 @@ let test_p1_shortcut_and_classifier_regressions () =
   Alcotest.(check bool) "[Y] on Artifacts with Ask active opens Ask_answer modal"
     true (Option.equal Nav.equal_overlay m_art_y.nav.overlay (Some Nav.Ask_answer));
 
-  let m_goal_ask, _ =
-    Update_nav.push_dive m_art_ask (Nav.Dive_work (Nav.Goal_dive "goal-1"))
-  in
+  let m_goal_ask, _ = Update_nav.jump_to_goal ~zoomed:true m_art_ask "goal-1" in
   let m_goal_j, _ = step m_goal_ask (char_key ~shift:true "J") in
-  Alcotest.(check bool) "[J] on Goal_dive with Ask active teleports instead of scrolling"
-    false
-    (Option.equal Nav.equal_dive (Model.active_dive m_goal_j)
-       (Some (Nav.Dive_work (Nav.Goal_dive "goal-1"))));
+  Alcotest.(check bool) "[J] on zoomed Goal with Ask active teleports instead of scrolling"
+    true
+    (Option.equal Nav.equal_overlay m_goal_j.nav.overlay (Some Nav.Ask_answer));
 
   (* 4. [v] on Work > Tasks cycles task_status_filter matching the [v/Space] hint. *)
   let m_tasks =

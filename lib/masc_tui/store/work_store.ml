@@ -183,6 +183,12 @@ let set_tab active_tab t =
     verif_scroll_offset = 0;
     detail_scroll_offset = 0;
     ledger_scroll_offset = 0;
+    goal_dive_task_index = 0;
+    goal_dive_task_scroll = 0;
+    goal_dive_verif_index = 0;
+    goal_dive_verif_scroll = 0;
+    task_dive_desc_scroll = 0;
+    task_dive_verif_scroll = 0;
     schedules_scroll_offset = 0;
   }
 
@@ -756,12 +762,20 @@ let move_selection ?(pane_index = 0) ?(has_linked_card = true) ?viewport_rows
           let scroll_offset =
             adjust_scroll ?viewport_rows ~scroll:t.scroll_offset selected_index
           in
+          let changed = not (Int.equal selected_index t.selected_index) in
           let detail_scroll_offset =
-            if Int.equal selected_index t.selected_index then
-              t.detail_scroll_offset
-            else 0
+            if changed then 0 else t.detail_scroll_offset
           in
-          { t with selected_index; scroll_offset; detail_scroll_offset })
+          let base = { t with selected_index; scroll_offset; detail_scroll_offset } in
+          if changed then
+            {
+              base with
+              goal_dive_task_index = 0;
+              goal_dive_task_scroll = 0;
+              goal_dive_verif_index = 0;
+              goal_dive_verif_scroll = 0;
+            }
+          else base)
   | Nav.Work_tasks ->
       if pane_index = 1 then
         let max_scroll =
@@ -777,12 +791,14 @@ let move_selection ?(pane_index = 0) ?(has_linked_card = true) ?viewport_rows
         let scroll_offset =
           adjust_scroll ?viewport_rows ~scroll:t.scroll_offset selected_index
         in
+        let changed = not (Int.equal selected_index t.selected_index) in
         let detail_scroll_offset =
-          if Int.equal selected_index t.selected_index then
-            t.detail_scroll_offset
-          else 0
+          if changed then 0 else t.detail_scroll_offset
         in
-        { t with selected_index; scroll_offset; detail_scroll_offset }
+        let base = { t with selected_index; scroll_offset; detail_scroll_offset } in
+        if changed then
+          { base with task_dive_desc_scroll = 0; task_dive_verif_scroll = 0 }
+        else base
   | Nav.Work_schedules ->
       if pane_index = 1 then
         let max_scroll =
@@ -1108,6 +1124,68 @@ let reset_goal_dive_state t =
     goal_dive_task_scroll = 0;
     goal_dive_verif_index = 0;
     goal_dive_verif_scroll = 0;
+  }
+
+let select_goal_by_id ~goal_id t =
+  let base0 = set_tab Nav.Work_pipeline t in
+  let find_idx gs =
+    let rec loop i = function
+      | [] -> None
+      | (g : Wire_work.goal) :: rest ->
+          if String.equal g.id goal_id then Some i else loop (i + 1) rest
+    in
+    loop 0 gs
+  in
+  let base1 =
+    match find_idx (filtered_goals base0) with
+    | Some _ -> base0
+    | None ->
+        let b = { base0 with filter_query = "" } in
+        match find_idx (filtered_goals b) with
+        | Some _ -> b
+        | None -> { b with goal_phase_filter = Goal_filter_all }
+  in
+  let selected_index =
+    match find_idx (filtered_goals base1) with
+    | Some idx -> idx
+    | None -> base1.selected_index
+  in
+  let scroll_offset = adjust_scroll ~scroll:0 selected_index in
+  { base1 with selected_index; scroll_offset; detail_scroll_offset = 0 }
+  |> reset_goal_dive_state
+
+let select_task_by_id ~task_id t =
+  let base0 = set_tab Nav.Work_tasks t in
+  let find_idx ts =
+    let rec loop i = function
+      | [] -> None
+      | (tk : Wire_work.task) :: rest ->
+          if String.equal tk.id task_id then Some i else loop (i + 1) rest
+    in
+    loop 0 ts
+  in
+  let base1 =
+    match find_idx (filtered_tasks base0) with
+    | Some _ -> base0
+    | None ->
+        let b = { base0 with filter_query = "" } in
+        match find_idx (filtered_tasks b) with
+        | Some _ -> b
+        | None -> { b with task_status_filter = Status_all }
+  in
+  let selected_index =
+    match find_idx (filtered_tasks base1) with
+    | Some idx -> idx
+    | None -> base1.selected_index
+  in
+  let scroll_offset = adjust_scroll ~scroll:0 selected_index in
+  {
+    base1 with
+    selected_index;
+    scroll_offset;
+    detail_scroll_offset = 0;
+    task_dive_desc_scroll = 0;
+    task_dive_verif_scroll = 0;
   }
 
 let move_goal_dive_task ~goal_id ?viewport_rows ~delta t =

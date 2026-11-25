@@ -1275,13 +1275,7 @@ let test_work_all_4_subtabs_and_empty_inbox () =
 let test_work_dives_and_json_tree () =
   let viewports = [ (140, 40); (90, 28) ] in
   let langs = [ Say.Lang_ko; Say.Lang_en ] in
-  let targets =
-    [
-      Nav.Goal_dive "goal-overhaul";
-      Nav.Task_dive "task-3898";
-      Nav.Verification_dive "verif-901";
-    ]
-  in
+  let targets = [ Nav.Verification_dive "verif-901" ] in
   List.iter
     (fun (cols, rows) ->
       List.iter
@@ -1779,11 +1773,7 @@ let test_p2_tight_populated_rects_preserve_borders () =
             true
             (Cell_grid.glyph_equal br.glyph (Cell_grid.Utf8 (Glyph.to_utf8 Glyph.Box_br))
              || Cell_grid.glyph_equal br.glyph (Cell_grid.Utf8 (Glyph.to_utf8 Glyph.Box_heavy_br))))
-        [
-          Nav.Goal_dive "goal-overhaul";
-          Nav.Task_dive "task-3898";
-          Nav.Verification_dive "verif-901";
-        ];
+        [ Nav.Verification_dive "verif-901" ];
       (* Also test populated Work tabs + Keeper Dive tabs on tight rects *)
       List.iter
         (fun tab ->
@@ -2655,7 +2645,7 @@ let test_degenerate_empty_and_tiny_rects () =
       Screen_keepers.render_dive ~name:"missing" ~tab:Nav.Keeper_chat
         ~model:m_empty ~cache ~rect g;
       Screen_work.render ~model:m_empty ~cache ~rect g;
-      Screen_work.render_dive ~target:(Nav.Goal_dive "missing") ~model:m_empty
+      Screen_work.render_dive ~target:(Nav.Verification_dive "missing") ~model:m_empty
         ~cache ~rect g;
       (* 2. Populated model resilience across ALL Keepers modes, ALL 5 Keeper Dive
             tabs (both embedded:false & embedded:true), ALL 4 Work tabs, and ALL
@@ -2683,11 +2673,7 @@ let test_degenerate_empty_and_tiny_rects () =
         (fun target ->
           Screen_work.render_dive ~target ~model:m_pop_ko ~cache ~rect g;
           Screen_work.render_dive ~target ~model:m_pop_json ~cache ~rect g)
-        [
-          Nav.Goal_dive "goal-tui-v2";
-          Nav.Task_dive "task-101";
-          Nav.Verification_dive "ver-1";
-        ])
+        [ Nav.Verification_dive "ver-1" ])
     tiny_sizes
 
 let test_p0_keeper_dive_honest_24h_vs_lifetime_turns () =

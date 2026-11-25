@@ -542,7 +542,6 @@ let fetches_for_dive ~force (m : Model.t) =
             |> add_if
                  (needs_fetch ~force m.work.verification_tlc_results)
                  Cmd.Get_verification_tlc_results
-        | Nav.Goal_dive _ | Nav.Task_dive _ -> []
       in
       ([]
       |> add_if (needs_fetch ~force m.work.planning) Cmd.Get_planning
@@ -688,7 +687,12 @@ let fetches_for_workspace ~force (m : Model.t) =
                (Cmd.Get_verifications
                   { view = m.work.verification_view; limit = 50; offset = 0 })
       | Nav.Work_tasks ->
-          [] |> add_if (needs_fetch ~force m.work.planning) Cmd.Get_planning
+          []
+          |> add_if (needs_fetch ~force m.work.planning) Cmd.Get_planning
+          |> add_if
+               (needs_fetch ~force m.work.verifications)
+               (Cmd.Get_verifications
+                  { view = m.work.verification_view; limit = 50; offset = 0 })
       | Nav.Work_schedules ->
           []
           |> add_if

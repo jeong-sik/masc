@@ -57,7 +57,9 @@ val clear : ?style:Style.t -> t -> unit
 val resize : cols:int -> rows:int -> t -> t
 val copy_into : src:t -> dst:t -> unit
 
-type document_image = Mermaid of string
+type document_image =
+  | Mermaid of string
+  | Embedded_png of Graphics.embedded_png
 
 type document_image_rows = {
   source : document_image;

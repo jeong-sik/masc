@@ -177,6 +177,24 @@ val delete_image : image_id:int -> string
 val delete_all : string
 (** Delete every Kitty image placed by this process ([a=d]). *)
 
+val png_dimensions : string -> (int * int) option
+(** Read the positive dimensions from a PNG IHDR. *)
+
+type embedded_png = private {
+  data_uri : string;
+  width : int;
+  height : int;
+}
+
+val embedded_png_of_uri : string -> embedded_png option
+(** Admit a base64 PNG data URI within the preview's transfer and pixel limits. *)
+
+val document_png_pixel_budget : int
+val document_png_transfer_budget : int
+(** Aggregate limits for live document images. *)
+
+val decode_embedded_png : embedded_png -> string option
+
 type graphics_protocol =
   | Kitty_protocol
   | ITerm2_protocol

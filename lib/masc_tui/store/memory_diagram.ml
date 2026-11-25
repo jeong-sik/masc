@@ -116,23 +116,7 @@ let find_latest_event_for_fact ~memory_id
         | Some prev -> if better prev ev then Some ev else acc)
     None activity.events
 
-let png_signature = "\137PNG\r\n\026\n"
-
-let parse_png_dimensions bytes =
-  let len = String.length bytes in
-  (* 8-byte PNG signature + 4-byte IHDR length + 4-byte "IHDR" + 13-byte IHDR data + 4-byte CRC *)
-  if len < 33 then None
-  else if not (String.equal (String.sub bytes 0 8) png_signature) then None
-  else if not (String.equal (String.sub bytes 12 4) "IHDR") then None
-  else
-    let ihdr_len = String.get_int32_be bytes 8 in
-    if not (Int32.equal ihdr_len 13l) then None
-    else
-      let w32 = String.get_int32_be bytes 16 in
-      let h32 = String.get_int32_be bytes 20 in
-      if Int32.compare w32 0l > 0 && Int32.compare h32 0l > 0 then
-        Some (Int32.to_int w32, Int32.to_int h32)
-      else None
+let parse_png_dimensions = Masc_tui_term.Graphics.png_dimensions
 
 let mermaid_source ?tz_offset_sec ~ko ?now ~kind chart =
   match chart, kind with

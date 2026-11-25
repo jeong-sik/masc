@@ -280,6 +280,57 @@ let put_viewport ?(image_id = image_id Image_inspection) ?(placement_id = 1)
 
 let delete_all = Printf.sprintf "%sa=d%s" apc st
 
+let png_signature = "\137PNG\r\n\026\n"
+
+let png_dimensions bytes =
+  let len = String.length bytes in
+  (* 8-byte PNG signature + 4-byte IHDR length + 4-byte "IHDR" + 13-byte IHDR data + 4-byte CRC *)
+  if len < 33 then None
+  else if not (String.equal (String.sub bytes 0 8) png_signature) then None
+  else if not (String.equal (String.sub bytes 12 4) "IHDR") then None
+  else
+    let ihdr_len = String.get_int32_be bytes 8 in
+    if not (Int32.equal ihdr_len 13l) then None
+    else
+      let w32 = String.get_int32_be bytes 16 in
+      let h32 = String.get_int32_be bytes 20 in
+      if Int32.compare w32 0l > 0 && Int32.compare h32 0l > 0 then
+        Some (Int32.to_int w32, Int32.to_int h32)
+      else None
+
+type embedded_png = {
+  data_uri : string;
+  width : int;
+  height : int;
+}
+
+let png_data_uri_prefix = "data:image/png;base64,"
+let png_data_offset = String.length png_data_uri_prefix
+let document_png_pixel_budget = 4 * 1024 * 1024
+let document_png_transfer_budget = 2 * 1024 * 1024
+
+let embedded_png_of_uri data_uri =
+  (* Inspect IHDR without decoding the whole image on the UI thread. Limit
+     the amount of compressed data and the terminal's eventual pixel buffer. *)
+  let encoded_bytes = String.length data_uri - png_data_offset in
+  if encoded_bytes < 44 || encoded_bytes > document_png_transfer_budget
+     || not (String.starts_with ~prefix:png_data_uri_prefix data_uri) then None
+  else
+    match Base64.decode ~off:png_data_offset ~len:44 data_uri with
+    | Ok header -> (
+        match png_dimensions header with
+        | Some (width, height)
+          when width <= 4096 && height <= 4096 && width * height <= document_png_pixel_budget ->
+            Some { data_uri; width; height }
+        | None | Some _ -> None)
+    | Error _ -> None
+
+let decode_embedded_png image =
+  match Base64.decode ~off:png_data_offset image.data_uri with
+  | Ok png when png_dimensions png = Some (image.width, image.height)
+                && Rgb_png.has_complete_chunks png -> Some png
+  | Error _ | Ok _ -> None
+
 type graphics_protocol =
   | Kitty_protocol
   | ITerm2_protocol

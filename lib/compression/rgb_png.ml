@@ -14,6 +14,32 @@ let chunk buffer kind payload =
   let crc = Checkseum.Crc32.digest_string payload 0 (String.length payload) crc in
   add_u32 buffer (Checkseum.Crc32.to_int32 crc)
 
+let has_complete_chunks bytes =
+  let size = String.length bytes in
+  let rec loop offset seen_data =
+    if offset > size - 12 then false
+    else
+      let length = Int32.to_int (String.get_int32_be bytes offset) in
+      if length < 0 || length > size - offset - 12 then false
+      else
+        let kind = String.sub bytes (offset + 4) 4 in
+        let next = offset + 12 + length in
+        let crc =
+          Checkseum.Crc32.digest_string bytes (offset + 4) (4 + length)
+            Checkseum.Crc32.default
+          |> Checkseum.Crc32.to_int32
+        in
+        if not (Int32.equal crc (String.get_int32_be bytes (next - 4))) then false
+        else if offset = 8 then kind = "IHDR" && length = 13 && loop next false
+        else
+          match kind with
+          | "IHDR" -> false
+          | "IEND" -> seen_data && length = 0 && next = size
+          | "IDAT" -> loop next (seen_data || length > 0)
+          | _ -> loop next seen_data
+  in
+  String.starts_with ~prefix:"\137PNG\r\n\026\n" bytes && loop 8 false
+
 let compress data =
   let input = De.bigstring_create De.io_buffer_size in
   let output = De.bigstring_create De.io_buffer_size in

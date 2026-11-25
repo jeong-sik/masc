@@ -2,7 +2,7 @@
     viewer exits.
 
     The viewer is the installed [masc-alphatex] executable. This module builds
-    its command line and runs it on the terminal's own file descriptors. The
+    its command line and runs it on this process's stdin and stdout. The
     caller pauses and resumes the TUI around {!run} through
     {!Cmd_executor.editor_handoff}. *)
 
@@ -24,6 +24,11 @@ val command :
     file, or the viewer is not on [PATH]. *)
 
 val run : command -> (unit, string) result
-(** Run the viewer on this process's stdin, stdout and stderr and wait for it
-    to exit. Blocks until then, so call it from a system thread. [Error] is a
-    failed spawn, a non-zero exit, or a signal. *)
+(** Run the viewer on this process's stdin and stdout and wait for it to exit.
+    Blocks until then, so call it from a system thread. [Error] is a failed
+    spawn, a non-zero exit, or a signal.
+
+    The TUI keeps its own stderr pointed at a log file, so the viewer's stderr
+    goes to a temp file instead. After a non-zero exit or a signal the last
+    non-blank line of it, at most 200 bytes, ends the [Error] text. A clean exit
+    drops it. *)

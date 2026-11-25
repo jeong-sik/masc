@@ -3076,17 +3076,52 @@ let test_music_launch_args () =
   Alcotest.(check (list string)) "midi import"
     ("--midi-file" :: "/tmp/a.mid" :: roots)
     (Music_launch.args ~base_path (Cmd.Music_import_midi "/tmp/a.mid"));
-  Alcotest.(check bool) "a missing MIDI file is refused before any spawn" true
-    (Result.is_error
-       (Music_launch.command ~base_path
-          (Cmd.Music_import_midi "/nonexistent/masc-music-launch.mid")))
+  (* The file check runs before the PATH lookup, so these messages do not
+     depend on whether masc-alphatex is installed on the machine. *)
+  let refused path =
+    match Music_launch.command ~base_path (Cmd.Music_import_midi path) with
+    | Error detail ->
+        Alcotest.(check string) "refused before any spawn"
+          ("MIDI file not found: " ^ path) detail
+    | Ok _ -> Alcotest.fail ("a MIDI path that is no file must be refused: " ^ path)
+  in
+  refused "/nonexistent/masc-music-launch.mid";
+  refused (Filename.get_temp_dir_name ())
+
+let test_music_launch_run () =
+  let sh script =
+    { Music_launch.executable = "/bin/sh"; args = [ "-c"; script ] }
+  in
+  Alcotest.(check (result unit string))
+    "a clean exit is Ok even when the viewer wrote to stderr" (Ok ())
+    (Music_launch.run (sh "echo noise >&2; exit 0"));
+  Alcotest.(check (result unit string))
+    "the last non-blank stderr line ends the message"
+    (Error "masc-alphatex exited with status 3: bad midi")
+    (Music_launch.run (sh "echo first >&2; echo 'bad midi' >&2; echo >&2; exit 3"));
+  Alcotest.(check (result unit string)) "no stderr, no detail"
+    (Error "masc-alphatex exited with status 4")
+    (Music_launch.run (sh "exit 4"));
+  (match Music_launch.run (sh "kill -9 $$") with
+   | Error detail ->
+       Alcotest.(check bool) "a signal is named" true
+         (String.starts_with ~prefix:"masc-alphatex ended on signal" detail)
+   | Ok () -> Alcotest.fail "a killed viewer is an error");
+  match
+    Music_launch.run
+      { Music_launch.executable = "/nonexistent/masc-alphatex"; args = [] }
+  with
+  | Error _ -> ()
+  | Ok () -> Alcotest.fail "a missing executable is an error"
 
 let () =
   Alcotest.run "masc_tui_app"
     [
       ( "music_launch"
       , [ Alcotest.test_case "viewer arguments and missing MIDI input" `Quick
-            test_music_launch_args ] );
+            test_music_launch_args;
+          Alcotest.test_case "viewer exit, signal and stderr detail" `Quick
+            test_music_launch_run ] );
       ( "cli_args"
       , [
           Alcotest.test_case "info flags (--version, --build-commit, --help)"

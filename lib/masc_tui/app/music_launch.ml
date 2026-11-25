@@ -57,26 +57,98 @@ let command ~base_path program =
                executable_name)
       | Some executable -> Ok { executable; args = args ~base_path program })
 
-let run { executable; args } =
-  match
-    Unix.create_process executable
-      (Array.of_list (executable :: args))
-      Unix.stdin Unix.stdout Unix.stderr
-  with
-  | exception Unix.Unix_error (error, fn, _) ->
-      Error (Printf.sprintf "%s: %s" fn (Unix.error_message error))
-  | child -> (
-      let rec wait () =
-        match Unix.waitpid [] child with
-        | _, status -> Ok status
-        | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait ()
-        | exception Unix.Unix_error (error, fn, _) ->
-            Error (Printf.sprintf "%s: %s" fn (Unix.error_message error))
+(* The TUI points its own fd 2 at a log file for the whole run, so a viewer
+   that inherits it writes its error where the operator never looks. The
+   viewer's stderr goes to a temp file instead, and the last line of it joins
+   the failure message. *)
+let stderr_detail_limit = 200
+
+let unix_error_message error fn =
+  Printf.sprintf "%s: %s" fn (Unix.error_message error)
+
+let close_quietly fd =
+  match Unix.close fd with
+  | () -> ()
+  | exception Unix.Unix_error _ -> ()
+
+let remove_quietly path =
+  match Sys.remove path with
+  | () -> ()
+  | exception Sys_error _ -> ()
+
+let rec utf8_prefix text length =
+  let prefix = String.sub text 0 length in
+  if length = 0 || String.is_valid_utf_8 prefix then prefix
+  else utf8_prefix text (length - 1)
+
+(* The last non-blank line, with control bytes blanked so a stray escape
+   sequence cannot move the terminal's cursor, cut at a scalar boundary. *)
+let last_line text =
+  let blank_control c =
+    if Char.code c < 0x20 || Char.code c = 0x7f then ' ' else c
+  in
+  let non_blank line = not (String.equal (String.trim line) "") in
+  match List.rev (List.filter non_blank (String.split_on_char '\n' text)) with
+  | [] -> None
+  | line :: _ ->
+      let cleaned = String.map blank_control (String.trim line) in
+      let shown =
+        utf8_prefix cleaned (Int.min stderr_detail_limit (String.length cleaned))
       in
-      match wait () with
-      | Error detail -> Error detail
-      | Ok (Unix.WEXITED 0) -> Ok ()
-      | Ok (Unix.WEXITED code) ->
-          Error (Printf.sprintf "%s exited with status %d" executable_name code)
-      | Ok (Unix.WSIGNALED signal | Unix.WSTOPPED signal) ->
-          Error (Printf.sprintf "%s ended on signal %d" executable_name signal))
+      Some
+        (if String.length shown < String.length cleaned then shown ^ "…"
+         else shown)
+
+let with_detail message stderr_path =
+  match In_channel.with_open_bin stderr_path In_channel.input_all with
+  | exception Sys_error _ -> message
+  | text -> (
+      match last_line text with
+      | None -> message
+      | Some line -> Printf.sprintf "%s: %s" message line)
+
+let spawn { executable; args } ~stderr_path =
+  let flags = [ Unix.O_WRONLY; Unix.O_TRUNC; Unix.O_CLOEXEC ] in
+  match Unix.openfile stderr_path flags 0o600 with
+  | exception Unix.Unix_error (error, fn, _) ->
+      Error (unix_error_message error fn)
+  | stderr_fd ->
+      Fun.protect
+        ~finally:(fun () -> close_quietly stderr_fd)
+        (fun () ->
+          match
+            Unix.create_process executable
+              (Array.of_list (executable :: args))
+              Unix.stdin Unix.stdout stderr_fd
+          with
+          | exception Unix.Unix_error (error, fn, _) ->
+              Error (unix_error_message error fn)
+          | child -> Ok child)
+
+let rec wait child =
+  match Unix.waitpid [] child with
+  | _, status -> Ok status
+  | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait child
+  | exception Unix.Unix_error (error, fn, _) ->
+      Error (unix_error_message error fn)
+
+let run command =
+  match Filename.temp_file "masc-alphatex-" ".err" with
+  | exception Sys_error detail -> Error detail
+  | stderr_path ->
+      Fun.protect
+        ~finally:(fun () -> remove_quietly stderr_path)
+        (fun () ->
+          match Result.bind (spawn command ~stderr_path) wait with
+          | Error detail -> Error detail
+          | Ok (Unix.WEXITED 0) -> Ok ()
+          | Ok (Unix.WEXITED code) ->
+              Error
+                (with_detail
+                   (Printf.sprintf "%s exited with status %d" executable_name code)
+                   stderr_path)
+          | Ok (Unix.WSIGNALED signal | Unix.WSTOPPED signal) ->
+              Error
+                (with_detail
+                   (Printf.sprintf "%s ended on signal %d" executable_name signal)
+                   stderr_path))

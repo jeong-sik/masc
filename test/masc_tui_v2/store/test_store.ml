@@ -22669,6 +22669,27 @@ let test_hidden_music_command () =
          | Cmd.Open_terminal_program Cmd.Music_workbench -> true
          | _ -> false)
        (Cmd.flatten enter_cmds));
+  (* With the cursor inside the word the text before it reads "/musi", which
+     fuzzy-matches /pulse and /model in the English UI. The whole draft
+     decides, so no popup opens and Enter still submits /music. *)
+  let typed_music = typed "/music" in
+  let mid_word : Model.t =
+    { typed_music with drafts = Drafts.move_cursor `Left typed_music.drafts }
+  in
+  (match Update_nav.resolve_composer_popup mid_word with
+   | Update_nav.Composer_popup_none -> ()
+   | Update_nav.Composer_popup_slash _ | Update_nav.Composer_popup_mention _ ->
+       Alcotest.fail "a cursor inside /music must not open a popup of listed commands");
+  let _, mid_word_cmds =
+    Update.step ~now:t0 mid_word (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool)
+    "Enter with the cursor inside /music still requests the workbench" true
+    (List.exists
+       (function
+         | Cmd.Open_terminal_program Cmd.Music_workbench -> true
+         | _ -> false)
+       (Cmd.flatten mid_word_cmds));
   match Update_nav.resolve_composer_popup (typed "/mod") with
   | Update_nav.Composer_popup_slash _ -> ()
   | Update_nav.Composer_popup_none | Update_nav.Composer_popup_mention _ ->

@@ -2023,16 +2023,16 @@ let strip_leading_slash s =
 
 (* An exactly typed unlisted command must not fuzzy-match a listed one. In the
    English UI "music" is a subsequence of the description "Open Model/Runtime
-   switcher", and Enter on that popup would run /model instead. [needle] is
-   the typed text without its slash; only its first word names the command. *)
-let is_unlisted_word needle =
-  let command, _ = split_command_and_arg ("/" ^ needle) in
+   switcher", and Enter on that popup would run /model instead. Only the first
+   word names the command, so the arguments after it do not matter. *)
+let names_unlisted_command text =
+  let command, _ = split_command_and_arg (String.trim text) in
   Option.is_some (unlisted_word_of_command command)
 
 let filter ~query ~lang =
   let needle = String.lowercase_ascii (strip_leading_slash query) in
   if String.length needle = 0 then all
-  else if is_unlisted_word needle then []
+  else if names_unlisted_command ("/" ^ needle) then []
   else
     let scored =
       List.filter_map

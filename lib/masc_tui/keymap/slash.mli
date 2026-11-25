@@ -260,6 +260,12 @@ val filter : query:string -> lang:Say.lang -> spec list
     An exactly typed unlisted command word matches nothing, so the popup
     never offers a listed command in its place. *)
 
+val names_unlisted_command : string -> bool
+(** Whether the first word of the text is a command that {!parse} accepts and
+    {!all} does not list. The composer popup asks it with the whole draft, so
+    a cursor inside the word cannot open a popup of listed commands in its
+    place. *)
+
 val complete : prefix:string -> string list
 (** Return matching completion candidates for a partial slash input, including
     typed argument completions for [/theme], [/lang], [/tools], [/ctl], [/gate],

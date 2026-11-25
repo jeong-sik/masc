@@ -57,7 +57,7 @@ Run `masc-tui --help` for the exact CLI flags (`lib/masc_tui/app/cli_args.ml`):
 | `--url <http(s)://host[:port]>` | Full server base URL (no path or query) |
 | `--base-path <path>` (`--base`) | Workspace base path containing `.masc/` (falls back to `MASC_BASE_PATH`, then cwd) |
 | `--workspace <name>` | Workspace display label (defaults to basename of `--base-path`) |
-| `--theme <midnight\|arcade\|paper\|mono\|muted>` | Color theme preset (default `midnight`) |
+| `--theme <midnight\|arcade\|paper\|mono\|muted\|muted_warm\|muted_green\|muted_dusk\|muted_graphite>` | Color theme preset (default `midnight`) |
 | `--lang <ko\|en>` | UI language (default `ko`) |
 | `--no-auto-start` | Do not auto-start a local `masc` server when the port is offline |
 | `--version` | Print executable build version with embedded 8-char Git commit SHA (e.g. `0.81.0 (2a58dc57)`) and exit |
@@ -227,7 +227,7 @@ Type a `/` command in the focused composer and press `Enter`
 | `/browser <subcmd>` | Browser (Ego) operator controls (`scene`, `screenshot`, `interact`, `command`) |
 | `/tools [compact\|results\|full]` | Cycle or set tool call detail mode |
 | `/clear` | Clear active composer draft and reset chat scroll (also clears active view filter when draft is empty) |
-| `/theme [midnight\|arcade_hi\|paper_light\|mono\|muted]` | Cycle or set color theme preset (persisted via `/api/v1/tui/preferences`) |
+| `/theme [midnight\|arcade_hi\|paper_light\|mono\|muted\|muted_warm\|muted_green\|muted_dusk\|muted_graphite]` | Cycle or set color theme preset (persisted via `/api/v1/tui/preferences`) |
 | `/lang [ko\|en]` | Toggle or set UI language (persisted via `/api/v1/tui/preferences`) |
 | `/help` | Open dynamic keymap help |
 | `/restart` | Request graceful TUI restart (re-execs `masc-tui` while preserving owned server) |
@@ -773,13 +773,15 @@ reflects the **actual** data mode of the active view in the top bar and footer:
 
 ## Themes, Language, and Voice
 
-- **Themes**: five WCAG 2.1 AA contrast-verified presets (`lib/masc_tui/core/theme.ml`):
+- **Themes**: nine WCAG 2.1 AA contrast-verified presets (`lib/masc_tui/core/theme.ml`):
   `midnight` (default), `arcade_hi` (CLI alias `arcade`), `paper_light` (CLI
-  alias `paper`), `mono`, and `muted` (다운톤). Switch at runtime via
+  alias `paper`), `mono`, and five down-tone (다운톤) presets with softer text
+  for long sessions when the others glare: `muted` (slate blue-gray),
+  `muted_warm` (warm gray-brown), `muted_green` (moss gray-green), `muted_dusk`
+  (purple-gray), and `muted_graphite` (neutral gray). Switch at runtime via
   `/theme [preset]` or at launch via `--theme`. `/theme` without an argument
-  steps through them in that order and returns to `midnight` after `muted`.
-  `muted` is the dimmest preset: the blue-slate family of `midnight` with
-  softer text, for long sessions when the other presets glare.
+  steps through them in that order and returns to `midnight` after
+  `muted_graphite`.
 - **Language**: `ko` (default) or `en`. Switch at runtime via `/lang [ko|en]`
   or at launch via `--lang`.
 - **Persistence**: runtime `/theme` and `/lang` changes persist to `[tui]` in

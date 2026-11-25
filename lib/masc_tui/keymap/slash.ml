@@ -2009,9 +2009,9 @@ let strip_leading_slash s =
     String.sub trimmed 1 (String.length trimmed - 1)
   else trimmed
 
-(* An exactly typed unlisted command must not fuzzy-match a listed one:
-   "music" is a subsequence of the description "Open Model/Runtime switcher",
-   and Enter on that popup would run /model instead. *)
+(* An exactly typed unlisted command must not fuzzy-match a listed one. In the
+   English UI "music" is a subsequence of the description "Open Model/Runtime
+   switcher", and Enter on that popup would run /model instead. *)
 let is_unlisted_word needle =
   match parse ("/" ^ needle) with
   | Ok (Music _) -> true

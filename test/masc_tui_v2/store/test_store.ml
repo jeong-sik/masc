@@ -22629,7 +22629,10 @@ let test_hidden_music_command () =
     (List.length (Slash.filter ~query:"/music" ~lang:Say.Lang_en));
   Alcotest.(check bool) "a partial word still filters the listed commands" true
     (Slash.filter ~query:"/mod" ~lang:Say.Lang_en <> []);
-  let m = Model.initial () in
+  (* English UI: the description of /model holds the letters of "music" in
+     order. The default Korean UI has no such match, so it would pass even
+     without the Slash.filter guard. *)
+  let m = Model.initial ~lang:Say.Lang_en () in
   let requested raw =
     match Slash.parse raw with
     | Ok parsed -> snd (Update.execute_slash ~now:t0 m parsed)

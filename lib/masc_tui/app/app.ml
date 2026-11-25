@@ -1259,7 +1259,7 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                   ~en:"Native terminal drag-select ON (mouse capture OFF)"
             in
             model :=
-              { !model with quit_armed_at = None }
+              !model |> Model.disarm_quit |> Model.disarm_keeper_stop
               |> Model.with_toast ~now ~level:Model.Toast_info notice;
             scheduler :=
               Frame_scheduler.mark_dirty

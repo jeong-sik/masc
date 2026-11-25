@@ -320,26 +320,27 @@ let step_raw ~now (m : Model.t) = function
         else (m.freshness, m.fleet)
       in
       let drafts = Drafts.voice_tick_elapsed ~now m.drafts in
-      let quit_armed_at =
+      let m_quit_checked =
         match m.quit_armed_at with
         | Some armed_at ->
             let elapsed = Clock.Mono.seconds_since now ~since:armed_at in
-            if elapsed < 0.0 || elapsed >= Model.quit_arm_window_s then None
-            else Some armed_at
-        | None -> None
-      in
-      let m_stop_checked =
-        match m.keeper_stop_armed with
-        | Some (_, armed_at) ->
-            let elapsed = Clock.Mono.seconds_since now ~since:armed_at in
-            if elapsed < 0.0 || elapsed >= Model.keeper_stop_arm_window_s then
-              Model.disarm_keeper_stop m
+            if elapsed < 0.0 || elapsed >= Model.quit_arm_window_s then
+              Model.disarm_quit m
             else m
         | None -> m
       in
+      let m_stop_checked =
+        match m_quit_checked.keeper_stop_armed with
+        | Some (_, armed_at) ->
+            let elapsed = Clock.Mono.seconds_since now ~since:armed_at in
+            if elapsed < 0.0 || elapsed >= Model.keeper_stop_arm_window_s then
+              Model.disarm_keeper_stop m_quit_checked
+            else m_quit_checked
+        | None -> m_quit_checked
+      in
       let next0 =
         let m' =
-          { m_stop_checked with freshness; fleet; drafts; quit_armed_at }
+          { m_stop_checked with freshness; fleet; drafts }
           |> Model.expire_toast ~now
         in
         if wall_advanced then Model.sync_effective_scorecard ~now m' else m'

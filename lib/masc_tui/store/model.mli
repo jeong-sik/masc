@@ -206,9 +206,15 @@ type toast_level =
   | Toast_warning
   | Toast_error
 
+type toast_tag =
+  | Toast_generic
+  | Toast_quit_arm
+  | Toast_keeper_stop_arm
+
 type toast = {
   message : Say.t;
   level : toast_level;
+  tag : toast_tag;
   expires_at : Clock.Mono.t;
 }
 
@@ -250,6 +256,13 @@ type t = {
 val quit_arm_window_s : float
 (** Seconds during which a second [Ctrl+Q] confirms and exits the TUI. *)
 
+val quit_arm_toast_message : Say.t
+(** Single-SSOT warning toast shown while [Ctrl+Q] quit-confirmation is armed. *)
+
+val disarm_quit : t -> t
+(** Clear [quit_armed_at] and any {!Toast_quit_arm} warning toast without
+    disturbing unrelated toasts. *)
+
 val keeper_stop_arm_window_s : float
 (** Seconds during which a second [D] confirms and shuts down the armed Keeper. *)
 
@@ -257,8 +270,8 @@ val keeper_stop_arm_toast_message : name:string -> Say.t
 (** Single-SSOT warning toast shown while [D] stop-confirmation is armed. *)
 
 val disarm_keeper_stop : t -> t
-(** Clear [keeper_stop_armed] and any matching {!keeper_stop_arm_toast_message}
-    warning toast without disturbing unrelated toasts. *)
+(** Clear [keeper_stop_armed] and any {!Toast_keeper_stop_arm} warning toast
+    without disturbing unrelated toasts. *)
 
 val next_keeper_lifecycle_seq : t -> int * t
 (** Mint a strictly monotonic sequence number for a Keeper lifecycle POST or
@@ -545,6 +558,7 @@ val ask_modal_confirm_free_text : ask_modal -> ask_modal * bool
 val with_toast :
   now:Clock.Mono.t ->
   ?duration_s:float ->
+  ?tag:toast_tag ->
   level:toast_level ->
   Say.t ->
   t ->

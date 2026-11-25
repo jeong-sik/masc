@@ -2720,12 +2720,19 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         match active_tab with
         | Nav.Drawer_queue ->
             let rows_acc = ref [] in
-            let push style txt = rows_acc := (style, txt) :: !rows_acc in
+            let push_runs runs = rows_acc := runs :: !rows_acc in
+            let push style txt = push_runs [ style, txt ] in
             let overview = Chat_transcript.keeper_work_overview ~model ~keeper in
             if overview <> [] then begin
               push (Typography.anchor ~bg theme)
                 (Say.resolve lang (Say.make ~ko:"Keeper 작업" ~en:"Keeper work"));
-              List.iter (fun line -> push pri_st (Say.resolve lang line)) overview;
+              List.iter
+                (function
+                  | Chat_transcript.Work_status status ->
+                      push_runs (Composer.activity_runs ~theme ~bg ~lang
+                        ~animate:(not (Chat_transcript.reduce_motion model)) status)
+                  | Chat_transcript.Work_detail line -> push pri_st (Say.resolve lang line))
+                overview;
               push pri_st ""
             end;
             let attn_count = Attention.count model.attention in
@@ -2907,14 +2914,10 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             let y = ref body_r.y in
             let bottom = Rect.bottom body_r in
             List.iter
-              (fun (style, txt) ->
+              (fun runs ->
                 if !y < bottom then begin
-                  if not (String.equal txt "") then begin
-                    let r = Rect.make ~x:body_r.x ~y:!y ~w:body_r.w ~h:1 in
-                    ignore
-                      (Cell_grid.put_text ~clip:r grid ~x:body_r.x ~y:!y ~style
-                         (Grapheme.truncate_to_width ~max_width:body_r.w txt))
-                  end;
+                  let rect = Rect.make ~x:body_r.x ~y:!y ~w:body_r.w ~h:1 in
+                  Composer.draw_activity_runs grid ~rect runs;
                   incr y
                 end)
               (Store_scroll.drop skip rows)

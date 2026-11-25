@@ -153,6 +153,40 @@ let pending_tx_label = function
   | Tx_interrupting -> Some (Say.make ~ko:"중단 요청 중" ~en:"Interrupting")
   | Tx_failed _ -> Some (Say.make ~ko:"전송 실패" ~en:"Send failed")
 
+let activity_spinner = [| "⠋"; "⠙"; "⠚"; "⠒"; "⠲"; "⠴"; "⠦"; "⠇" |]
+
+let activity_runs ~theme ~bg ~lang ~animate (glyph, tone, detail) =
+  let emphasis = Typography.status ~bg ~bold:true theme tone in
+  let marker = emphasis, Glyph.to_utf8 glyph ^ " " in
+  let detail = Say.resolve lang detail in
+  (match glyph with
+   | Glyph.Live_working_frame frame ->
+       let frame = Int.max 0 frame mod Array.length activity_spinner in
+       let marker = emphasis, activity_spinner.(frame) ^ " " in
+       let label = "Working" in
+       let name =
+         if animate then
+           let length = String.length label in
+           let cursor = Int.max 0 (Int.min frame (length - 1)) in
+           [ emphasis, String.sub label 0 cursor;
+             Typography.anchor ~bg ~underline:true theme, String.sub label cursor 1;
+             emphasis, String.sub label (cursor + 1) (length - cursor - 1) ]
+         else [ emphasis, label ]
+       in
+       marker :: (name @ [ Typography.status ~bg theme tone, Typography.sep_dot ^ detail ])
+   | Glyph.Check_mark -> [ marker; emphasis, detail ]
+   | _ -> [ marker; Typography.primary ~bg theme, detail ]) [@warning "-4"]
+
+let draw_activity_runs grid ~(rect : Rect.t) runs =
+  ignore
+    (List.fold_left (fun x (style, text) ->
+       let max_width = Rect.right rect - x in
+       if max_width <= 0 || String.equal text "" then x
+       else
+         x + Cell_grid.put_text ~clip:rect grid ~x ~y:rect.y ~style
+               (Grapheme.truncate_to_width ~max_width text))
+       rect.x runs)
+
 let pending_tx_badge state =
   pending_tx_label state
   |> Option.map (fun label ->

@@ -154,6 +154,11 @@ type event =
       tool_calls : int option;
       at_unix : float;
     }
+  | Keeper_turn_succeeded of {
+      keeper : string;
+      elapsed_ms : int;
+      at_unix : float;
+    }
   | Keeper_tool_call of {
       keeper : string;
       turn : int option;
@@ -382,6 +387,12 @@ let decode_typed_event type_name json =
                tool_calls;
                at_unix;
              })
+    | "keeper_turn_succeeded" ->
+        let* keeper = required_nonblank_string json "name" in
+        let* at_unix = required_finite_float json "ts_unix" in
+        let* elapsed_ms = required_int_field json "elapsed_ms" in
+        if elapsed_ms < 0 then Error "keeper turn elapsed_ms must be nonnegative"
+        else Ok (Keeper_turn_succeeded { keeper; elapsed_ms; at_unix })
     | "keeper_tool_call" ->
         let* keeper = required_nonblank_string json "name" in
         let* tool = required_nonblank_string json "tool_name" in

@@ -1900,13 +1900,20 @@ let start_impl
               (Chat_operation.Operation_id.to_string operation_id);
             Ok ()
           | Native_call_settleable ->
+            let completed_at = t.now () in
             run_operation_command t ~label:"succeed running Keeper chat operation" (fun () ->
               Chat_operation_store.succeed_running
                 t.operation_store
-                ~now:(t.now ())
+                ~now:completed_at
                 ~operation_id
                 ~outcome_ref)
-            |> Result.map (fun _ -> ())
+            |> Result.map (fun _ ->
+                 match Atomic.get t.turn_in_flight with
+                 | Some { lane = Chat_operation; started_at; _ } ->
+                   let elapsed_ms = int_of_float (Float.max 0.0 (completed_at -. started_at) *. 1000.0) in
+                   Keeper_turn_broadcast.succeeded ~base_path:t.base_path
+                     ~keeper_name:t.keeper_name ~elapsed_ms
+                 | Some { lane = Maintenance | Autonomous; _ } | None -> ())
           | Native_call_effect_unknown | Native_call_closed_without_disposition ->
             (* The turn reported success, but its native call has an unknown
                effect. That cannot complete, so the claimed success is not

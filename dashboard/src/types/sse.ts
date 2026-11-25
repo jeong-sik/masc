@@ -54,6 +54,7 @@ export type SSEEventType =
   | 'keeper_row_changed'
   | 'keeper_roster_changed'
   | 'keeper_turn_changed'
+  | 'keeper_turn_succeeded'
   | 'keeper_turn_preview_changed'
   | 'workspace_dataset_changed'
   | 'keeper_event_queue_changed'

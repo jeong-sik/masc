@@ -72,6 +72,14 @@ val equal_mode : mode -> mode -> bool
 
 val empty : target_keeper:string -> state
 
+val activity_runs :
+  theme:Theme.t -> bg:Masc_tui_term.Color.t -> lang:Say.lang -> animate:bool ->
+  (Glyph.t * Theme.status_token * Say.t) -> (Masc_tui_term.Style.t * string) list
+(** Styles the activity marker, visible phase and working animation as one row. *)
+
+val draw_activity_runs :
+  Cell_grid.t -> rect:Rect.t -> (Masc_tui_term.Style.t * string) list -> unit
+
 val pending_tx_label : pending_tx -> Say.t option
 val pending_tx_badge : pending_tx -> (Glyph.t * Theme.status_token * Say.t) option
 (** Exact honest transmission state copy ([전송 대기] / [전송 중] / [응답 대기] /

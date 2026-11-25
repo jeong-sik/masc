@@ -112,6 +112,8 @@ type t = {
   unreadable_keepers : Wire_fleet.unreadable_keeper list;
   turns : Wire_fleet.keeper_turn_row list Observed.t;
   turn_preview_updates : Wire_fleet.turn_preview_update String_map.t;
+  worked : (float * int) String_map.t;
+      (** Last observed successful completion per Keeper as (Unix time, elapsed ms). *)
   interrupting_turn_tokens : string String_map.t;
   esc_attempted_turn_tokens : string String_map.t;
   esc_attempted_operation_ids : string String_map.t;
@@ -155,6 +157,7 @@ let empty =
     unreadable_keepers = [];
     turns = Observed.unreported;
     turn_preview_updates = String_map.empty;
+    worked = String_map.empty;
     interrupting_turn_tokens = String_map.empty;
     esc_attempted_turn_tokens = String_map.empty;
     esc_attempted_operation_ids = String_map.empty;
@@ -959,6 +962,15 @@ let enrich_scorecard f t =
       t.shell
   in
   { t with shell; raw_shell_scorecard }
+
+let observe_worked ~keeper ~at_unix ~elapsed_ms t =
+  let worked =
+    String_map.update keeper (function
+      | Some (latest, _) as previous when latest >= at_unix -> previous
+      | Some _ | None -> Some (at_unix, elapsed_ms))
+      t.worked
+  in
+  { t with worked }
 
 let apply_turns ~observed_at rows t =
   let preserve_current_preview keeper (turn : Wire_fleet.active_turn) =

@@ -432,6 +432,9 @@ function handleEvent(event: SSEEvent): void {
       // missed/duplicated event self-heals on the next change or route visit.
       void refreshFusionRuns()
       break
+    case 'keeper_turn_succeeded':
+      // Chat progress uses this receipt. The Keeper turn event records the dashboard journal entry.
+      break
     case 'keeper_turn_complete':
       {
         const keeperName = keeperTraceNameFromEvent(event, agent)

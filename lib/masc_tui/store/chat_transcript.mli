@@ -59,7 +59,13 @@ val active_turn_short_activity : Wire_fleet.active_turn -> Say.t
 (** Concise live activity label for a running Owner-slot turn, derived from
     [turn.preview] (or fallback [tool_in_flight]/[phase]). *)
 
-val keeper_work_overview : model:Model.t -> keeper:string -> Say.t list
+type keeper_work_row =
+  | Work_status of (Glyph.t * Theme.status_token * Say.t)
+  | Work_detail of Say.t
+
+val keeper_work_overview : model:Model.t -> keeper:string -> keeper_work_row list
+val animation_frames_per_second : int
+val reduce_motion : Model.t -> bool
 (** The observed turn, its start decisions, and the referenced Task and Goal. *)
 
 val active_turn_detail_summary : Wire_fleet.active_turn -> Say.t
@@ -77,7 +83,7 @@ val live_chat_phase : model:Model.t -> keeper:string -> live_chat_phase
 val live_chat_phase_badge :
   model:Model.t -> keeper:string -> (Glyph.t * Theme.status_token * Say.t) option
 (** Width-1 geometric glyph, status tone, and bilingual label for an active or
-    failed {!live_chat_phase}, or [None] when {!Phase_idle}. *)
+    failed {!live_chat_phase}, or the latest confirmed completion when idle. *)
 
 val show_active_turn_summary :
   model:Model.t -> keeper:string -> Wire_fleet.active_turn -> bool

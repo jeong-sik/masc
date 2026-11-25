@@ -9,6 +9,9 @@ type render_frame =
 
 let drain_budget_ns = 3_000_000L
 let voice_tick_interval_ns = 100_000_000L
+let keeper_progress_interval_ns =
+  Int64.div 1_000_000_000L (Int64.of_int Chat_transcript.animation_frames_per_second)
+let keeper_elapsed_interval_ns = 1_000_000_000L
 let probe_timeout_s = 0.15
 let probe_grace_s = 2.0
 
@@ -601,6 +604,38 @@ let next_minute_tick ~now_ns ~wall_unix ~last_minute =
     Int64.add now_ns (Int64.of_float (wait_s *. 1_000_000_000.0))
   in
   (minute_due, cur_min, next_deadline_ns)
+
+let visible_keeper_progress_interval (m : Model.t) =
+  let keeper =
+    if Model.is_too_small_viewport m.viewport || Model.equal_breakpoint m.breakpoint Model.Micro
+    then None
+    else if Option.equal Nav.equal_overlay m.nav.overlay
+        (Some (Nav.Queue_context Nav.Drawer_queue)) then Model.target_keeper m
+    else if Option.is_some m.nav.overlay then None
+    else
+      match Model.active_dive m with
+      | Some (Nav.Dive_keeper { name; tab }) ->
+          if Nav.equal_keeper_tab tab Nav.Keeper_chat then Some name else None
+      | None ->
+          if Nav.equal_workspace m.nav.workspace Nav.Keepers
+             && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_chat
+             && (m.nav.zoomed || Model.uses_keeper_split ~width:m.viewport.cols m)
+          then
+            Option.map
+              (fun (keeper : Masc_tui_protocol.Wire_fleet.keeper_summary) -> keeper.name)
+              (Fleet_store.selected_keeper_summary m.fleet)
+          else None
+      | Some (Nav.Dive_work _ | Nav.Dive_knowledge _ | Nav.Dive_runtime _ | Nav.Dive_infra _) ->
+          None
+  in
+  (* Only a glyph with an animation frame needs a presentation clock. *)
+  (match Option.bind keeper (fun keeper ->
+          Chat_transcript.live_chat_phase_badge ~model:m ~keeper) with
+  | Some (Glyph.Live_working_frame _, _, _) ->
+      Some
+        (if Chat_transcript.reduce_motion m then keeper_elapsed_interval_ns
+         else keeper_progress_interval_ns)
+  | Some _ | None -> None) [@warning "-4"]
 
 let set_fd_nonblock fd enabled =
   match
@@ -1213,6 +1248,7 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
         let last_resize_gen = ref (Signals.resize_generation signals) in
         let last_voice_tick_ns = ref 0L in
         let last_clock_minute = ref (clock_minute_of_unix init_wall_unix) in
+        let keeper_progress_deadline = ref None in
 
         (* Boot sequence: GET /health + Voice probe; healthy reply triggers
            workspace guard, declarative Sync_streams, and bootstrap fetches. *)
@@ -1422,8 +1458,21 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                       (earliest_opt extra (Some minute_deadline))
                       interrupt_deadline
                 in
+                (* A visible active turn needs a presentation clock. It does
+                   not emit a model tick or request more server observations. *)
+                let progress_interval = visible_keeper_progress_interval !model in
+                (match progress_interval, !keeper_progress_deadline with
+                 | None, _ -> keeper_progress_deadline := None
+                 | Some _, Some due when Int64.compare now_after_ns due < 0 -> ()
+                 | Some interval, _ ->
+                     keeper_progress_deadline := Some (Int64.add now_after_ns interval);
+                     scheduler :=
+                       Frame_scheduler.mark_dirty
+                         ~pace:Frame_scheduler.Pace_animation !scheduler);
                 scheduler :=
-                  Frame_scheduler.set_extra_deadline extra_after !scheduler;
+                  Frame_scheduler.set_extra_deadline
+                    (earliest_opt extra_after !keeper_progress_deadline)
+                    !scheduler;
 
                 (* 5. Frame pacing & differential CSI 2026 presentation. *)
                 let output_behind = Terminal_out.behind () in
@@ -1435,7 +1484,14 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                     let render_start = Clock.Mono.now () in
                     let grid = Presenter.back_grid presenter in
                     Cell_grid.clear grid;
-                    let cursor = render_frame ~model:!model ~cache:card_cache grid in
+                    let frame_model =
+                      match progress_interval with
+                      | None -> !model
+                      | Some _ ->
+                          let m = !model in
+                          { m with freshness = { m.freshness with last_wall_unix = wall_now } }
+                    in
+                    let cursor = render_frame ~model:frame_model ~cache:card_cache grid in
                     let render_us =
                       Clock.Mono.us_since (Clock.Mono.now ()) ~since:render_start
                     in

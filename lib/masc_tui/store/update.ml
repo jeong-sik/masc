@@ -588,7 +588,8 @@ let leave_old_epoch ~now ~(before : Model.t) (after : Model.t) =
       after with
       infra = Infra_store.forget_log_cursor after.infra;
       fleet =
-        Fleet_store.detach_chat_streams after.fleet
+        Fleet_store.detach_chat_streams
+          { after.fleet with worked = Fleet_store.String_map.empty }
         |> Fleet_store.clear_turn_preview_updates;
       drafts = Drafts.detach_streams ~now after.drafts;
       attention = Attention.clear_all_in_flight after.attention;

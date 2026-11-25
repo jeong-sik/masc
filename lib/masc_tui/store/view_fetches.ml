@@ -21,6 +21,14 @@ let needs_fetch ~force obs =
 
 let add_if cond req acc = if cond then req :: acc else acc
 
+let needs_keeper_turn ~force ~keeper (m : Model.t) =
+  needs_fetch ~force m.fleet.turns
+  || Option.exists
+       (fun rows ->
+         not (List.exists (fun (row : Wire_fleet.keeper_turn_row) ->
+                  String.equal row.keeper_name keeper) rows))
+       (Observed.to_option m.fleet.turns)
+
 (* Once the ledger route has answered 404, the Candle panels read the
    roster's Candle summary, which each roster reply refreshes. Only an
    explicit refresh asks the route again. *)
@@ -262,7 +270,7 @@ let fetches_for_overlay ~force (m : Model.t) =
              else []
            in
            reads
-           |> add_if (needs_fetch ~force m.fleet.turns) Cmd.Get_keeper_turns
+           |> add_if (needs_keeper_turn ~force ~keeper m) Cmd.Get_keeper_turns
            |> add_if (needs_fetch ~force m.work.planning) Cmd.Get_planning)
   | Some (Nav.Queue_context Nav.Drawer_schedules) ->
       if needs_fetch ~force m.work.schedules then
@@ -301,7 +309,7 @@ let keeper_tab_fetches ~force ~name ~tab (m : Model.t) =
         | Some obs -> needs_fetch ~force obs
       in
       ([]
-      |> add_if (needs_fetch ~force m.fleet.turns) Cmd.Get_keeper_turns
+      |> add_if (needs_keeper_turn ~force ~keeper:name m) Cmd.Get_keeper_turns
       |> add_if hist_needed
            (Cmd.Get_chat_history
               { keeper = name; limit = Some 80; cursor = None }))

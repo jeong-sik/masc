@@ -1,5 +1,5 @@
 /**
- * Opt-In Right Debug Companion Pane (`⌘.`, `380px`, collapsible, default closed `<1280px`)
+ * On-demand Debug Companion pane (`⌘.`)
  * with 4 tabs:
  * 1. `Trace`: Turn/Tool Gantt Waterfall (`/turn-records?limit=60`), paginated `/tool-calls?limit=50`, `/raw-traces` + `/raw-trace`
  * 2. `Context`: 60-turn `uPlot` Context Fill chart + compaction epoch markers + 4-segment Prompt Cache SVG bar + `/last-prompt` & `/provider-input` + `Checkpoints / Clear / Reset`
@@ -49,13 +49,6 @@ import type {
   RawTraceTurnItem,
   TurnRecordItem,
 } from './types'
-
-export const COMPANION_DESKTOP_MIN_WIDTH = 1280
-
-export function shouldDefaultOpenCompanion(viewportWidth?: number): boolean {
-  const w = viewportWidth ?? (typeof window !== 'undefined' ? window.innerWidth : 1024)
-  return w >= COMPANION_DESKTOP_MIN_WIDTH
-}
 
 export interface PromptCacheSegments {
   readonly cacheRead: number

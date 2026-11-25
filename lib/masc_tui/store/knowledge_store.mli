@@ -153,6 +153,8 @@ type t = {
   active_tab : Nav.knowledge_tab;
   board_recovery : Board_recovery.t;
   board : Wire_knowledge.board_feed Observed.t;
+  board_feed_meta : Wire_knowledge.board_feed_meta option;
+  board_thread_meta : Wire_knowledge.board_thread_meta option;
   board_hearths : Wire_knowledge.board_hearth_entry list Observed.t;
   board_signal_only : bool;
   board_sort_by : string;
@@ -704,3 +706,19 @@ val memory_journal_for_keeper :
 val toggle_fact_category : string -> t -> t
 val move_memory_subview_scroll : ?max_scroll:int -> delta:int -> t -> t
 val move_facts_selection : count:int -> delta:int -> t -> t
+
+val apply_board_feed_meta : Wire_knowledge.board_feed_meta -> t -> t
+val apply_board_thread_meta : Wire_knowledge.board_thread_meta -> t -> t
+val post_extras_for : post_id:string -> t -> Wire_knowledge.board_post_extras option
+val comment_audience_for :
+  post_id:string -> comment_id:string -> t -> string option
+val active_comment_page_for :
+  post_id:string -> t -> Wire_knowledge.board_comment_page option
+val wrapped_comment_lines_count :
+  theme:Theme.t ->
+  width:int ->
+  ?max_body_lines:int ->
+  threaded_comment list ->
+  int
+(** Exact wrapped visual row count (header + wrapped body lines per comment) for
+    Board Preview and Thread Dive scroll math. *)

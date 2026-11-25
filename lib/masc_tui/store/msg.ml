@@ -249,6 +249,7 @@ type http_reply =
       result : (Wire_work.tool_approval_outcome, http_error) result;
     }
   | Reply_board_feed of (Wire_knowledge.board_feed, http_error) result
+  | Reply_board_feed_meta of Wire_knowledge.board_feed_meta
   | Reply_board_hearths of
       (Wire_knowledge.board_hearth_entry list, http_error) result
   | Reply_board_thread of {
@@ -258,6 +259,7 @@ type http_reply =
         , http_error )
         result;
     }
+  | Reply_board_thread_meta of Wire_knowledge.board_thread_meta
   | Reply_board_comment of { post_id : string; result : (unit, http_error) result }
   | Reply_board_vote of { post_id : string; result : (unit, http_error) result }
   | Reply_board_delete of { post_id : string; result : (unit, http_error) result }
@@ -472,6 +474,12 @@ type http_reply =
       result : (Wire_infra.keeper_sandbox_response, http_error) result;
     }
   | Reply_repositories of (Wire_infra.repository list, http_error) result
+  | Reply_repository_pulls of
+      (Wire_infra.repository_pulls_snapshot, http_error) result
+  | Reply_repository_detail of {
+      repo_id : string;
+      result : (Wire_infra.repository_observation, http_error) result;
+    }
   | Reply_repository_activity of {
       repo_id : string;
       result : (Wire_infra.repository_activity, http_error) result;

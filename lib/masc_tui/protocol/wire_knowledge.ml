@@ -327,6 +327,206 @@ let decode_board_thread ~observed_at json =
   let* comments = decode_list "comments" decode_board_comment comment_items in
   Ok (post, comments)
 
+type board_post_extras = {
+  audience_label : string option;
+  closed_by : string option;
+  closed_successor_id : string option;
+  flair_label : string option;
+  reaction_summary : string option;
+}
+
+type board_feed_meta = {
+  has_more : bool;
+  filtered_out_count : int;
+  signal_scan_truncated : bool;
+  post_extras : (string * board_post_extras) list;
+}
+
+type board_comment_page = {
+  offset : int;
+  returned : int;
+  total : int;
+  next_offset : int option;
+}
+
+type board_thread_meta = {
+  post_id : string;
+  post_extras : board_post_extras option;
+  comment_page : board_comment_page option;
+  comment_audiences : (string * string) list;
+}
+
+let decode_audience_label_opt json =
+  match member "audience" json with
+  | `Assoc _ as aud -> (
+      match optional_nonblank_string aud "kind" with
+      | Ok (Some "targets") -> (
+          match optional_string_list aud "targets" with
+          | Ok (_ :: _ as ts) ->
+              Some (String.concat ", " (List.map (fun s -> "@" ^ s) ts))
+          | Ok [] | Error _ -> None)
+      | Ok (Some "broadcast") -> Some "@all"
+      | Ok (Some "thread_participants") -> Some "@thread"
+      | Ok (Some _ | None) | Error _ -> None)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
+
+let decode_post_extras_opt json =
+  let audience_label = decode_audience_label_opt json in
+  let closed_by, closed_successor_id =
+    match member "closed" json with
+    | `Assoc _ as cl ->
+        let by =
+          match optional_nonblank_string cl "closed_by" with
+          | Ok v -> v
+          | Error _ -> None
+        in
+        let succ =
+          match optional_nonblank_string cl "successor_id" with
+          | Ok v -> v
+          | Error _ -> None
+        in
+        (by, succ)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+        (None, None)
+  in
+  let safe_reaction_token emoji =
+    match String.trim emoji with
+    | "👍" -> "+1"
+    | "👎" -> "-1"
+    | "❤️" | "❤" -> "<3"
+    | "🔥" -> "fire"
+    | "🚀" -> "ship"
+    | "👀" -> "eyes"
+    | "🎉" -> "tada"
+    | "😄" -> ":)"
+    | "🤔" -> "?"
+    | s ->
+        let is_ascii =
+          String.length s > 0
+          && String.for_all (fun c -> Char.code c >= 33 && Char.code c <= 126) s
+        in
+        if is_ascii then s else "rx"
+  in
+  let flair_label =
+    match member "flair" json with
+    | `Assoc _ as fl -> (
+        let label =
+          match optional_nonblank_string fl "label" with
+          | Ok (Some l) -> Some l
+          | Ok None | Error _ -> (
+              match optional_nonblank_string fl "name" with
+              | Ok v -> v
+              | Error _ -> None)
+        in
+        match label with
+        | Some l -> Some l
+        | None -> (
+            match optional_nonblank_string fl "emoji" with
+            | Ok (Some e) -> Some (safe_reaction_token e)
+            | Ok None | Error _ -> None))
+    | `String s when not (String.equal (String.trim s) "") -> Some (String.trim s)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+        None
+  in
+  let reaction_summary =
+    match member "reactions" json with
+    | `List items -> (
+        let chips =
+          List.filter_map
+            (fun item ->
+              match item with
+              | `Assoc _ -> (
+                  match
+                    ( optional_nonblank_string item "emoji"
+                    , optional_int_field item "count" )
+                  with
+                  | Ok (Some e), Ok (Some c) when c > 0 ->
+                      Some (Printf.sprintf "%s:%d" (safe_reaction_token e) c)
+                  | Ok (Some _ | None), Ok (Some _ | None)
+                  | Error _, _
+                  | _, Error _ ->
+                      None)
+              | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _
+              | `List _ ->
+                  None)
+            items
+        in
+        match chips with [] -> None | _ :: _ -> Some (String.concat " " chips))
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ ->
+        None
+  in
+  if
+    Option.is_none audience_label
+    && Option.is_none closed_by
+    && Option.is_none closed_successor_id
+    && Option.is_none flair_label
+    && Option.is_none reaction_summary
+  then None
+  else
+    Some
+      {
+        audience_label;
+        closed_by;
+        closed_successor_id;
+        flair_label;
+        reaction_summary;
+      }
+
+let decode_board_feed_meta json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* has_more = decode_bool_field_or body "has_more" ~default:false in
+  let* filtered_out_count = int_field_or body "filtered_out_count" ~default:0 in
+  let* signal_scan_truncated =
+    decode_bool_field_or body "signal_scan_truncated" ~default:false
+  in
+  let* items = optional_list_field body "posts" in
+  let post_extras =
+    List.filter_map
+      (fun item ->
+        match optional_nonblank_string item "id" with
+        | Ok (Some id) ->
+            Option.map (fun ex -> (id, ex)) (decode_post_extras_opt item)
+        | Ok None | Error _ -> None)
+      items
+  in
+  Ok { has_more; filtered_out_count; signal_scan_truncated; post_extras }
+
+let decode_board_thread_meta json =
+  let* _, body = unwrap_v2_or_raw json in
+  let post_json =
+    match member "post" body with
+    | `Assoc _ as p -> p
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+        body
+  in
+  let* post_id = required_nonblank_string post_json "id" in
+  let post_extras = decode_post_extras_opt post_json in
+  let comment_page =
+    match member "comment_page" body with
+    | `Assoc _ as cp -> (
+        let opt_int field =
+          match optional_int_field cp field with Ok v -> v | Error _ -> None
+        in
+        match (opt_int "offset", opt_int "returned", opt_int "total") with
+        | Some offset, Some returned, Some total ->
+            let next_offset = opt_int "next_offset" in
+            Some { offset; returned; total; next_offset }
+        | None, _, _ | _, None, _ | _, _, None -> None)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+        None
+  in
+  let* comment_items = optional_list_field body "comments" in
+  let comment_audiences =
+    List.filter_map
+      (fun c ->
+        match optional_nonblank_string c "id" with
+        | Ok (Some cid) ->
+            Option.map (fun a -> (cid, a)) (decode_audience_label_opt c)
+        | Ok None | Error _ -> None)
+      comment_items
+  in
+  Ok { post_id; post_extras; comment_page; comment_audiences }
+
 type wiki_source =
   | Source_direct_experience
   | Source_research

@@ -1205,6 +1205,12 @@ let apply_http_reply ~now (m : Model.t) reply =
         else (next0, [])
       in
       (next, thread_cmds)
+  | Msg.Reply_board_feed_meta meta ->
+      ( {
+          m with
+          knowledge = Knowledge_store.apply_board_feed_meta meta m.knowledge;
+        }
+      , [] )
   | Msg.Reply_board_feed (Error err) ->
       err_reply
         ~fail:
@@ -1240,6 +1246,33 @@ let apply_http_reply ~now (m : Model.t) reply =
               Knowledge_store.apply_thread ~observed_at:now thread m.knowledge
               |> Knowledge_store.restore_thread_comment ~post_id:tp.id
                    ~previous:m.knowledge;
+          }
+        , [] )
+  | Msg.Reply_board_thread_meta meta ->
+      let matches_active =
+        match Model.active_dive m with
+        | Some (Nav.Dive_knowledge (Nav.Thread_dive pid)) ->
+            String.equal pid meta.post_id
+        | Some
+            ( Nav.Dive_knowledge
+                ( Nav.Wiki_dive _
+                | Nav.Artifact_dive _
+                | Nav.Memory_diff_dive _ )
+            | Nav.Dive_keeper _
+            | Nav.Dive_work _
+            | Nav.Dive_runtime _
+            | Nav.Dive_infra _ ) ->
+            false
+        | None -> (
+            match Knowledge_store.selected_post m.knowledge with
+            | Some p -> String.equal p.id meta.post_id
+            | None -> true)
+      in
+      if not matches_active then (m, [])
+      else
+        ( {
+            m with
+            knowledge = Knowledge_store.apply_board_thread_meta meta m.knowledge;
           }
         , [] )
   | Msg.Reply_board_thread { post_id; result = Error err } ->
@@ -4706,6 +4739,33 @@ let apply_http_reply ~now (m : Model.t) reply =
                { x with repositories = failed_slot err x.repositories }))
         ~source:Health.Source_client_http ~ko:"저장소 목록 조회"
         ~en:"Repositories fetch" err
+  | Msg.Reply_repository_pulls (Ok snap) ->
+      ( {
+          m with
+          infra = Infra_store.apply_repository_pulls ~observed_at:now snap m.infra;
+        }
+      , [] )
+  | Msg.Reply_repository_pulls (Error err) ->
+      err_reply
+        ~fail:
+          (on_infra (fun (x : Infra_store.t) ->
+               { x with repository_pulls = failed_slot err x.repository_pulls }))
+        ~source:Health.Source_client_http ~ko:"저장소 PR 조회"
+        ~en:"Repository PRs fetch" err
+  | Msg.Reply_repository_detail { repo_id; result = Ok obs } ->
+      ( {
+          m with
+          infra =
+            Infra_store.apply_repository_detail ~repo_id ~observed_at:now obs
+              m.infra;
+        }
+      , [] )
+  | Msg.Reply_repository_detail { repo_id; result = Error err } ->
+      err_reply
+        ~fail:
+          (on_infra (Infra_store.fail_repository_detail ~repo_id (failed_slot err)))
+        ~source:Health.Source_client_http ~ko:"저장소 Git 상태 조회"
+        ~en:"Repository git status fetch" err
   | Msg.Reply_repository_activity { repo_id; result = Ok activity } ->
       ( {
           m with

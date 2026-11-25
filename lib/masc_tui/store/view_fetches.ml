@@ -1305,12 +1305,21 @@ let fetches_for_workspace ~force (m : Model.t) =
             |> add_if
                  (needs_fetch ~force m.infra.repositories)
                  Cmd.Get_repositories
+            |> add_if
+                 (needs_fetch ~force m.infra.repository_pulls)
+                 Cmd.Get_repository_pulls
           in
           (* A slot holding another repository's answer reads as waiting,
              so [needs_fetch] asks for the selected one. *)
           match Infra_store.selected_repo_activity m.infra with
           | Some (repo, activity) ->
+              let detail_obs =
+                Infra_store.repository_detail_for ~repo_id:repo.id m.infra
+              in
               base_reqs
+              |> add_if
+                   (needs_fetch ~force detail_obs)
+                   (Cmd.Get_repository_detail { repo_id = repo.id })
               |> add_if
                    (needs_fetch ~force activity)
                    (Cmd.Get_repository_activity { repo_id = repo.id })

@@ -201,6 +201,8 @@ let has_get_health cmds =
               | Cmd.Get_sandboxes
               | Cmd.Get_keeper_sandbox _
               | Cmd.Get_repositories
+              | Cmd.Get_repository_pulls
+              | Cmd.Get_repository_detail _
               | Cmd.Get_repository_activity _
               | Cmd.Get_system_logs _
               | Cmd.Get_tui_preferences

@@ -11,6 +11,10 @@ let infra_sandbox_keeper_path ~keeper =
 
 let infra_sandboxes_probe_path = "/api/v1/infra/sandboxes/probe"
 let repositories_path = "/api/v1/repositories"
+let repository_pulls_path = "/api/v1/repositories/pulls"
+
+let repository_detail_path ~repo_id =
+  "/api/v1/repositories/" ^ percent_encode repo_id
 
 let repository_activity_window_hours = 24.0
 
@@ -1513,3 +1517,266 @@ let decode_git_diff json =
   let* items = optional_list_field body "unified" in
   let* lines = decode_list "unified" decode_git_diff_line items in
   Ok { has_changes; lines }
+
+(* --- Repository Open Pull Requests & Per-Repo Git Observation --- *)
+
+type repository_pull_row = {
+  repo_slug : string;
+  number : int;
+  draft : bool;
+  checks : string;
+  review : string;
+  mergeable : string;
+  author : string option;
+  keeper : string option;
+  title : string option;
+  head_review : string;
+}
+
+type repository_pulls_entry = {
+  repository_id : string;
+  slug : string option;
+  state : string;
+  pulls : repository_pull_row list;
+  undecodable : int;
+  failure_summary : string option;
+}
+
+type repository_pulls_snapshot = {
+  reader_state : string;
+  reader_detail : string option;
+  repositories_error : string option;
+  entries : repository_pulls_entry list;
+}
+
+let decode_pull_row json =
+  let* repo_slug = required_nonblank_string json "repo_slug" in
+  let* number = required_int_field json "number" in
+  let* draft = decode_bool_field_or json "draft" ~default:false in
+  let checks =
+    match optional_nonblank_string json "checks" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> "none"
+  in
+  let review =
+    match optional_nonblank_string json "review" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> "none"
+  in
+  let mergeable =
+    match optional_nonblank_string json "mergeable" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> "unknown"
+  in
+  let author =
+    match optional_nonblank_string json "author" with
+    | Ok v -> v
+    | Error _ -> None
+  in
+  let keeper =
+    match optional_nonblank_string json "keeper" with
+    | Ok v -> v
+    | Error _ -> None
+  in
+  let title =
+    match optional_nonblank_string json "title" with
+    | Ok v -> v
+    | Error _ -> None
+  in
+  let head_review =
+    match optional_nonblank_string json "head_review" with
+    | Ok (Some s) -> s
+    | Ok None | Error _ -> "unknown"
+  in
+  Ok
+    {
+      repo_slug;
+      number;
+      draft;
+      checks;
+      review;
+      mergeable;
+      author;
+      keeper;
+      title;
+      head_review;
+    }
+
+let format_pull_failure failure_json =
+  match failure_json with
+  | `Assoc _ -> (
+      match optional_nonblank_string failure_json "kind" with
+      | Ok (Some "rate_limited") -> Some "GitHub rate limited"
+      | Ok (Some "token_rejected") -> Some "GitHub token rejected (401)"
+      | Ok (Some "repository_not_visible") -> Some "Repository not visible"
+      | Ok (Some "forbidden") -> Some "GitHub access forbidden (403)"
+      | Ok (Some "http_status") -> (
+          match optional_int_field failure_json "status" with
+          | Ok (Some code) -> Some (Printf.sprintf "GitHub HTTP %d" code)
+          | Ok None | Error _ -> Some "GitHub HTTP error")
+      | Ok (Some "graphql_errors") -> (
+          match optional_list_field failure_json "messages" with
+          | Ok (`String m :: _) -> Some m
+          | Ok _ | Error _ -> Some "GraphQL error")
+      | Ok (Some ("transport_failed" | "response_unreadable" as kind)) -> (
+          match optional_nonblank_string failure_json "message" with
+          | Ok (Some msg) -> Some msg
+          | Ok None | Error _ -> Some kind)
+      | Ok (Some other) -> Some other
+      | Ok None | Error _ -> None)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
+
+let decode_repository_pulls_entry json =
+  let* repository_id = required_nonblank_string json "repository_id" in
+  let slug =
+    match optional_nonblank_string json "slug" with
+    | Ok v -> v
+    | Error _ -> None
+  in
+  let pulls_obj = member "pulls" json in
+  let state =
+    match pulls_obj with
+    | `Assoc _ -> (
+        match optional_nonblank_string pulls_obj "state" with
+        | Ok (Some s) -> s
+        | Ok None | Error _ -> "not_read")
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+        "not_read"
+  in
+  let* pulls =
+    match pulls_obj with
+    | `Assoc _ -> (
+        let* items = optional_list_field pulls_obj "pulls" in
+        decode_list "pulls" decode_pull_row items)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+        Ok []
+  in
+  let undecodable =
+    match pulls_obj with
+    | `Assoc _ -> int_or_zero_infra pulls_obj "undecodable"
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> 0
+  in
+  let failure_summary =
+    match pulls_obj with
+    | `Assoc _ -> format_pull_failure (member "failure" pulls_obj)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+        None
+  in
+  Ok { repository_id; slug; state; pulls; undecodable; failure_summary }
+
+let decode_repository_pulls json =
+  let* _, body = unwrap_v2_or_raw json in
+  let reader_obj = member "reader" body in
+  let reader_state, reader_detail =
+    match reader_obj with
+    | `Assoc _ ->
+        let st =
+          match optional_nonblank_string reader_obj "state" with
+          | Ok (Some s) -> s
+          | Ok None | Error _ -> "unknown"
+        in
+        let detail =
+          match optional_nonblank_string reader_obj "reason" with
+          | Ok (Some r) -> Some r
+          | Ok None | Error _ -> (
+              match optional_nonblank_string reader_obj "keeper" with
+              | Ok (Some k) -> Some ("@" ^ k)
+              | Ok None | Error _ -> None)
+        in
+        (st, detail)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+        ("unknown", None)
+  in
+  let repositories_error =
+    match optional_nonblank_string body "repositories_error" with
+    | Ok v -> v
+    | Error _ -> None
+  in
+  let* items = optional_list_field body "repositories" in
+  let* entries =
+    decode_list "repositories" decode_repository_pulls_entry items
+  in
+  Ok { reader_state; reader_detail; repositories_error; entries }
+
+type repo_git_status = {
+  available : bool;
+  dirty : bool;
+  changed_files : int;
+  conflicted_files : int;
+  error : string option;
+}
+
+type repo_sync_currency = {
+  available : bool;
+  target_ref : string option;
+  behind : int;
+  ahead : int;
+  error : string option;
+}
+
+type repository_observation = {
+  repo_id : string;
+  git_status : repo_git_status option;
+  sync_currency : repo_sync_currency option;
+}
+
+let decode_repository_observation json =
+  let* _, body = unwrap_v2_or_raw json in
+  let target =
+    match member "repository" body with
+    | `Assoc _ as r -> r
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+        body
+  in
+  let* repo_id = required_nonblank_string target "id" in
+  let git_status =
+    match member "git_status" target with
+    | `Assoc _ as gs ->
+        let state =
+          match optional_nonblank_string gs "state" with
+          | Ok (Some s) -> s
+          | Ok None | Error _ -> "unavailable"
+        in
+        let available = String.equal state "available" in
+        let dirty =
+          match optional_bool_field gs "dirty" with
+          | Ok (Some b) -> b
+          | Ok None | Error _ -> false
+        in
+        let changed_files = int_or_zero_infra gs "changed_files" in
+        let conflicted_files = int_or_zero_infra gs "conflicted_files" in
+        let error =
+          match optional_nonblank_string gs "error" with
+          | Ok v -> v
+          | Error _ -> None
+        in
+        Some { available; dirty; changed_files; conflicted_files; error }
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+        None
+  in
+  let sync_currency =
+    match member "sync_currency" target with
+    | `Assoc _ as sc ->
+        let state =
+          match optional_nonblank_string sc "state" with
+          | Ok (Some s) -> s
+          | Ok None | Error _ -> "unavailable"
+        in
+        let available = String.equal state "available" in
+        let target_ref =
+          match optional_nonblank_string sc "target_ref" with
+          | Ok v -> v
+          | Error _ -> None
+        in
+        let behind = int_or_zero_infra sc "behind" in
+        let ahead = int_or_zero_infra sc "ahead" in
+        let error =
+          match optional_nonblank_string sc "error" with
+          | Ok v -> v
+          | Error _ -> None
+        in
+        Some { available; target_ref; behind; ahead; error }
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+        None
+  in
+  Ok { repo_id; git_status; sync_currency }

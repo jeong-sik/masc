@@ -4239,6 +4239,188 @@ let test_wave2_tools_artifacts_board_renders () =
     "Selecting the nested comment preserves its reply parent"
     (Some (c2.id, Some c1.id)) selected_reply
 
+let test_layer3_repos_prs_git_drift_and_board_multiline_visibility () =
+  let m_base = make_rich_model ~lang:Say.Lang_en ~cols:140 ~rows:40 in
+  let sel_repo = Option.get (Infra_store.selected_repository m_base.infra) in
+  let pulls_snap : Wire_infra.repository_pulls_snapshot =
+    {
+      reader_state = "ready";
+      reader_detail = Some "@pr-reader";
+      repositories_error = None;
+      entries =
+        [
+          {
+            repository_id = sel_repo.id;
+            slug = Some "jeong-sik/masc";
+            state = "read";
+            undecodable = 0;
+            failure_summary = None;
+            pulls =
+              [
+                {
+                  repo_slug = "jeong-sik/masc";
+                  number = 54666;
+                  draft = false;
+                  checks = "passing";
+                  review = "approved";
+                  mergeable = "mergeable";
+                  author = Some "jeong-sik";
+                  keeper = None;
+                  title = Some "Operator visibility wave";
+                  head_review = "reviewed_on_head";
+                };
+              ];
+          };
+        ];
+    }
+  in
+  let repo_obs : Wire_infra.repository_observation =
+    {
+      repo_id = sel_repo.id;
+      git_status =
+        Some
+          {
+            available = true;
+            dirty = true;
+            changed_files = 3;
+            conflicted_files = 0;
+            error = None;
+          };
+      sync_currency =
+        Some
+          {
+            available = true;
+            target_ref = Some "origin/main";
+            behind = 2;
+            ahead = 1;
+            error = None;
+          };
+    }
+  in
+  let m_repo =
+    {
+      m_base with
+      infra =
+        m_base.infra
+        |> Infra_store.set_tab Nav.Infra_repos_changes
+        |> Infra_store.apply_repository_pulls ~observed_at:now_mono pulls_snap
+        |> Infra_store.apply_repository_detail ~repo_id:sel_repo.id
+             ~observed_at:now_mono repo_obs;
+    }
+  in
+  let g_repo =
+    render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
+        Screen_infra.render ~model:m_repo ~cache ~rect gr)
+  in
+  assert_grid_invariants ~label:"Layer3/InfraReposPRsAndDrift" g_repo;
+  let txt_repo = grid_all_text g_repo in
+  Alcotest.(check bool) "Infra Repos surfaces git dirty + sync drift" true
+    (contains_sub ~needle:"dirty (3 files)" ~haystack:txt_repo
+     && contains_sub ~needle:"origin/main" ~haystack:txt_repo);
+  Alcotest.(check bool) "Infra Repos surfaces open GitHub PR #54666" true
+    (contains_sub ~needle:"#54666" ~haystack:txt_repo
+     && contains_sub ~needle:"passing/approved/mergeable" ~haystack:txt_repo);
+
+  let compact = Model.initial ~cols:90 ~rows:20 ~lang:Say.Lang_en () in
+  let compact =
+    { compact with infra = m_repo.infra;
+      nav = { compact.nav with workspace = Nav.Infra; pane_index = 2 } }
+  in
+  let extra_pull (entry : Wire_infra.repository_pulls_entry) =
+    match entry.pulls with
+    | first :: rest -> { entry with pulls = first :: { first with number = 54667 } :: rest }
+    | [] -> entry
+  in
+  let two_pulls =
+    { compact with infra = Infra_store.apply_repository_pulls ~observed_at:now_mono
+        { pulls_snap with entries = List.map extra_pull pulls_snap.entries } compact.infra }
+  in
+  let grid = Cell_grid.create ~cols:90 ~rows:20 in
+  Screen_infra.render ~model:two_pulls ~cache:(Card.Cache.create ())
+    ~rect:(Model.body_rect two_pulls) grid;
+  Alcotest.(check bool) "the available PR row identifies the first of two pulls" true
+    (contains_sub ~needle:"#54666" ~haystack:(grid_all_text grid));
+  let diff_end model =
+    let last, _ = Update_nav.apply_move model Masc_tui_keymap.Keymap.End in
+    last.infra.diff_scroll_offset
+  in
+  Alcotest.(check int) "an undisplayed pull leaves the final diff line reachable"
+    (diff_end compact) (diff_end two_pulls);
+
+  (* Board preview & Thread_dive: multi-line comments, closed/audience tags, failed load state *)
+  let p_root = Option.get (Knowledge_store.selected_post m_base.knowledge) in
+  let multi_c : Wire_knowledge.board_comment =
+    {
+      id = "c-multi";
+      post_id = p_root.id;
+      parent_id = None;
+      author = "reviewer";
+      body = "LineOneToken\n\n- LineTwoToken\n- LineThreeToken";
+      created_at_unix = 1795252000.0;
+      score = 4;
+    }
+  in
+  let fm : Wire_knowledge.board_feed_meta =
+    {
+      has_more = true;
+      filtered_out_count = 3;
+      signal_scan_truncated = false;
+      post_extras =
+        [
+          ( p_root.id
+          , {
+              audience_label = Some "@alpha";
+              closed_by = Some "leader";
+              closed_successor_id = None;
+              flair_label = Some "Decision";
+              reaction_summary = Some "+1:2";
+            } );
+        ];
+    }
+  in
+  let tm : Wire_knowledge.board_thread_meta =
+    {
+      post_id = p_root.id;
+      post_extras = None;
+      comment_page =
+        Some { offset = 0; returned = 1; total = 15; next_offset = Some 1 };
+      comment_audiences = [ ("c-multi", "@all") ];
+    }
+  in
+  let k_multi =
+    m_base.knowledge
+    |> Knowledge_store.apply_board_feed_meta fm
+    |> Knowledge_store.apply_thread ~observed_at:now_mono (p_root, [ multi_c ])
+    |> Knowledge_store.apply_board_thread_meta tm
+  in
+  let g_board =
+    render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
+        Screen_knowledge.render ~model:{ m_base with knowledge = k_multi }
+          ~cache ~rect gr)
+  in
+  assert_grid_invariants ~label:"Layer3/BoardMultiLinePreview" g_board;
+  let txt_board = grid_all_text g_board in
+  Alcotest.(check bool) "Board preview renders CLOSED, audience, comment page & multi-line comment"
+    true
+    (contains_sub ~needle:"[CLOSED]" ~haystack:txt_board
+     && contains_sub ~needle:"1/15+" ~haystack:txt_board
+     && contains_sub ~needle:"LineOneToken" ~haystack:txt_board
+     && contains_sub ~needle:"LineTwoToken" ~haystack:txt_board);
+  let k_fail =
+    {
+      m_base.knowledge with
+      active_thread_target = Some p_root.id;
+      active_thread =
+        Observed.failed ~reason:"HTTP 503" ~retryable:true ~at:now_mono;
+    }
+  in
+  let g_fail =
+    render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
+        Screen_knowledge.render ~model:{ m_base with knowledge = k_fail }
+          ~cache ~rect gr)
+  in
+  Alcotest.(check bool) "Board preview surfaces active_thread fetch failure" true
+    (contains_sub ~needle:"Failed to load comments" ~haystack:(grid_all_text g_fail))
 let () =
   Alcotest.run "masc_tui_screens_domain"
     [
@@ -4246,6 +4428,8 @@ let () =
       , [
           Alcotest.test_case "4 sub-tabs + 4 dives at 140x40 & 90x28 (KO/EN)"
             `Quick test_knowledge_all_tabs_and_dives;
+          Alcotest.test_case "Layer 3: Repos PRs/git drift & Board multi-line/meta/error visibility"
+            `Quick test_layer3_repos_prs_git_drift_and_board_multiline_visibility;
         ] );
       ( "runtime"
       , [

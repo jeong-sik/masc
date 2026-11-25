@@ -95,6 +95,8 @@ type t = {
   keeper_sandboxes : Wire_infra.keeper_sandbox_response Observed.t String_map.t;
       (** One slot per keeper the sandbox route was asked about. *)
   repositories : Wire_infra.repository list Observed.t;
+  repository_pulls : Wire_infra.repository_pulls_snapshot Observed.t;
+  repository_details : Wire_infra.repository_observation Observed.t String_map.t;
   repo_activity : repo_activity option;
   logs : Wire_infra.system_log_entry list;
   logs_loaded : bool;
@@ -146,6 +148,24 @@ val set_keeper_sandbox :
   keeper:string -> Wire_infra.keeper_sandbox_response Observed.t -> t -> t
 val apply_repositories :
   observed_at:Clock.Mono.t -> Wire_infra.repository list -> t -> t
+val apply_repository_pulls :
+  observed_at:Clock.Mono.t -> Wire_infra.repository_pulls_snapshot -> t -> t
+val pulls_entry_for :
+  repo_id:string -> t -> Wire_infra.repository_pulls_entry option
+val apply_repository_detail :
+  repo_id:string ->
+  observed_at:Clock.Mono.t ->
+  Wire_infra.repository_observation ->
+  t ->
+  t
+val fail_repository_detail :
+  repo_id:string ->
+  (Wire_infra.repository_observation Observed.t ->
+  Wire_infra.repository_observation Observed.t) ->
+  t ->
+  t
+val repository_detail_for :
+  repo_id:string -> t -> Wire_infra.repository_observation Observed.t
 val request_repo_activity : repo_id:string -> t -> t
 (** Point the changes panel at [repo_id]. A slot already for [repo_id] keeps
     what it holds; otherwise the panel waits for [repo_id]'s answer. *)

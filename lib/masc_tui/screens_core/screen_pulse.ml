@@ -2358,11 +2358,16 @@ let render_world_pulse_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                        in
                        x := !x + c_adv
                    | Some _ | None -> ());
+                  let eff_ts =
+                    match p.updated_at_unix with
+                    | Some u when u > p.created_at_unix -> u
+                    | Some _ | None -> p.created_at_unix
+                  in
                   let age_txt =
                     match
                       Render_util.format_relative_age
                         ~now_unix:model.freshness.last_wall_unix
-                        ~at_unix:p.created_at_unix
+                        ~at_unix:eff_ts
                     with
                     | Some a -> a
                     | None -> ""

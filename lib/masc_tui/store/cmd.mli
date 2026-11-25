@@ -121,6 +121,8 @@ type get_request =
   | Get_sandboxes
   | Get_keeper_sandbox of { keeper : string }
   | Get_repositories
+  | Get_repository_pulls
+  | Get_repository_detail of { repo_id : string }
   | Get_repository_activity of { repo_id : string }
   | Get_system_logs of {
       limit : int option;

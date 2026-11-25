@@ -10,6 +10,8 @@ val infra_sandboxes_path : string
 val infra_sandbox_keeper_path : keeper:string -> string
 val infra_sandboxes_probe_path : string
 val repositories_path : string
+val repository_pulls_path : string
+val repository_detail_path : repo_id:string -> string
 val repository_activity_path : repo_id:string -> string
 (** [GET /api/v1/ide/repository-activity] for the last 24 hours. *)
 val system_logs_path : ?limit:int -> ?level:string -> unit -> string
@@ -489,3 +491,62 @@ val decode_git_status : Yojson.Safe.t -> (git_status_snapshot, string) result
 val decode_git_blame : Yojson.Safe.t -> (git_blame_entry list, string) result
 val decode_git_log : Yojson.Safe.t -> (git_log_commit list, string) result
 val decode_git_diff : Yojson.Safe.t -> (git_diff_snapshot, string) result
+
+(** {1 Repository Open Pull Requests & Per-Repo Git Observation} *)
+
+type repository_pull_row = {
+  repo_slug : string;
+  number : int;
+  draft : bool;
+  checks : string;
+  review : string;
+  mergeable : string;
+  author : string option;
+  keeper : string option;
+  title : string option;
+  head_review : string;
+}
+
+type repository_pulls_entry = {
+  repository_id : string;
+  slug : string option;
+  state : string;
+  pulls : repository_pull_row list;
+  undecodable : int;
+  failure_summary : string option;
+}
+
+type repository_pulls_snapshot = {
+  reader_state : string;
+  reader_detail : string option;
+  repositories_error : string option;
+  entries : repository_pulls_entry list;
+}
+
+val decode_repository_pulls :
+  Yojson.Safe.t -> (repository_pulls_snapshot, string) result
+
+type repo_git_status = {
+  available : bool;
+  dirty : bool;
+  changed_files : int;
+  conflicted_files : int;
+  error : string option;
+}
+
+type repo_sync_currency = {
+  available : bool;
+  target_ref : string option;
+  behind : int;
+  ahead : int;
+  error : string option;
+}
+
+type repository_observation = {
+  repo_id : string;
+  git_status : repo_git_status option;
+  sync_currency : repo_sync_currency option;
+}
+
+val decode_repository_observation :
+  Yojson.Safe.t -> (repository_observation, string) result

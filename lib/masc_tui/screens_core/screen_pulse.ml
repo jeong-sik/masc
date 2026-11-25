@@ -911,18 +911,27 @@ let render_attention_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         || Observed.is_failed model.work.tool_approvals
         || Observed.is_failed model.work.gate_pending
         || Observed.is_failed model.work.planning
+        || Observed.is_failed model.work.schedules
+        || Observed.is_failed model.runtime.lane_addon_asks
+        || Observed.is_failed model.fleet.fleet_reading
       in
       let any_loading =
         Observed.is_loading model.work.asks
         || Observed.is_loading model.work.tool_approvals
         || Observed.is_loading model.work.gate_pending
         || Observed.is_loading model.work.planning
+        || Observed.is_loading model.work.schedules
+        || Observed.is_loading model.runtime.lane_addon_asks
+        || Observed.is_loading model.fleet.fleet_reading
       in
       let any_stale =
         Observed.is_stale model.work.asks
         || Observed.is_stale model.work.tool_approvals
         || Observed.is_stale model.work.gate_pending
         || Observed.is_stale model.work.planning
+        || Observed.is_stale model.work.schedules
+        || Observed.is_stale model.runtime.lane_addon_asks
+        || Observed.is_stale model.fleet.fleet_reading
       in
       let is_settled obs =
         match obs with
@@ -934,6 +943,9 @@ let render_attention_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         && is_settled model.work.tool_approvals
         && is_settled model.work.gate_pending
         && is_settled model.work.planning
+        && is_settled model.work.schedules
+        && is_settled model.runtime.lane_addon_asks
+        && is_settled model.fleet.fleet_reading
       in
       let now_unix = model.freshness.last_wall_unix in
       let overdue_or_failed_scheds =

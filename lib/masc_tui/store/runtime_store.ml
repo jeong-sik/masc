@@ -90,6 +90,7 @@ type t = {
   runtime_metrics : Wire_runtime.runtime_metrics_snapshot Observed.t;
   runtime_resolved : Wire_runtime.runtime_resolved_snapshot Observed.t;
   runtime_standings : Wire_runtime.runtime_standing String_map.t;
+  runtime_standings_error : string option;
   runtime_config_raw : Wire_runtime.runtime_config_raw_meta Observed.t;
   setup_inventory : Wire_runtime.setup_inventory Observed.t;
   setup_login_receipt : Wire_runtime.setup_login_receipt option;
@@ -301,6 +302,7 @@ let empty =
     runtime_metrics = Observed.unreported;
     runtime_resolved = Observed.unreported;
     runtime_standings = String_map.empty;
+    runtime_standings_error = None;
     runtime_config_raw = Observed.unreported;
     setup_inventory = Observed.unreported;
     setup_login_receipt = None;
@@ -2812,7 +2814,10 @@ let apply_runtime_standings entries t =
       (fun acc (rid, st) -> String_map.add rid st acc)
       String_map.empty entries
   in
-  { t with runtime_standings }
+  { t with runtime_standings; runtime_standings_error = None }
+
+let mark_runtime_standings_failed reason t =
+  { t with runtime_standings_error = Some reason }
 
 let standing_for ~runtime_id t =
   String_map.find_opt runtime_id t.runtime_standings

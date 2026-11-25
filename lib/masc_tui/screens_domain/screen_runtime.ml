@@ -517,6 +517,7 @@ let draw_cooldown_health_summary ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t
     Observed.is_failed rt.runtime_resolved
     || Observed.is_failed rt.runtime_probe
     || Observed.is_failed rt.usage_windows
+    || Option.is_some rt.runtime_standings_error
   in
   let any_loading =
     Observed.is_loading rt.runtime_resolved

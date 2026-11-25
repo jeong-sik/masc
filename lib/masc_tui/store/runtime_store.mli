@@ -101,6 +101,7 @@ type t = {
   runtime_metrics : Wire_runtime.runtime_metrics_snapshot Observed.t;
   runtime_resolved : Wire_runtime.runtime_resolved_snapshot Observed.t;
   runtime_standings : Wire_runtime.runtime_standing String_map.t;
+  runtime_standings_error : string option;
   runtime_config_raw : Wire_runtime.runtime_config_raw_meta Observed.t;
   setup_inventory : Wire_runtime.setup_inventory Observed.t;
   setup_login_receipt : Wire_runtime.setup_login_receipt option;
@@ -546,6 +547,10 @@ val keeper_waiting_inventory_for :
 
 val apply_runtime_standings :
   (string * Wire_runtime.runtime_standing) list -> t -> t
+
+val mark_runtime_standings_failed : string -> t -> t
+(** Record a standings decode failure without wiping previously observed
+    degraded standings. *)
 
 val standing_for :
   runtime_id:string -> t -> Wire_runtime.runtime_standing option

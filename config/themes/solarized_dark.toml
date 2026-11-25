@@ -1,0 +1,24 @@
+# Solarized Dark — Ethan Schoonover, MIT: https://github.com/altercation/solarized
+# See midnight.toml for the format. Floors: aa. Colors below AA are lifted.
+surface_0 = "#002B36"
+surface_1 = "#012E39"
+surface_2 = "#03313D"
+border_subtle = "#234651"
+border_inactive = "#586E75"
+border_focused = "#268BD2"
+text_bright = "#EEE8D5"
+text_primary = "#93A1A1"
+text_secondary = "#839496"
+text_muted = "#586E75"
+status_ok = "#859900"
+status_active = "#268BD2"
+status_attention = "#B58900"
+status_critical = "#DC322F"
+status_ai = "#6C71C4"
+status_historical = "#657B83"
+accent = "#268BD2"
+selection_bg = "#093E4F"
+selection_fg = "#EEE8D5"
+cool_stops = ["#2AA198", "#268BD2", "#93BBD7"]
+warm_stops = ["#6C71C4", "#D33682", "#EA7D6B"]
+ai_stops = ["#6C71C4", "#A55EA4", "#A3A7CF"]

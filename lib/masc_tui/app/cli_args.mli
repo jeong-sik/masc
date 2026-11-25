@@ -26,6 +26,8 @@ type config = {
   base_path : string;
   workspace : string;
   theme : Theme.preset;
+  themes_dir : string option;
+  (** [None] reads [<base-path>/.masc/config/themes/]; [Some path] replaces it. *)
   lang : Say.lang;
   theme_explicit : bool;
   lang_explicit : bool;

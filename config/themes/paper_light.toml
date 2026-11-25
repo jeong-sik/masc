@@ -1,0 +1,24 @@
+# Paper Light — Daylight Editorial (v2.5 verified WCAG 2.1 AA)
+# See midnight.toml for the format. Floors: standard.
+surface_0 = "#F7F8FA"
+surface_1 = "#FFFFFF"
+surface_2 = "#ECEFF5"
+border_subtle = "#DDE3EC"
+border_inactive = "#BCC6D6"
+border_focused = "#0369A1"
+text_bright = "#0B1220"
+text_primary = "#1E293B"
+text_secondary = "#435064"
+text_muted = "#556275"
+status_ok = "#0F7645"
+status_active = "#0369A1"
+status_attention = "#A15206"
+status_critical = "#BE123C"
+status_ai = "#7C3AED"
+status_historical = "#556275"
+accent = "#0369A1"
+selection_bg = "#E2ECF9"
+selection_fg = "#0B1220"
+cool_stops = ["#075985", "#0369A1", "#0284C7"]
+warm_stops = ["#6D28D9", "#A21CAF", "#BE123C"]
+ai_stops = ["#5B21B6", "#7C3AED", "#9333EA"]

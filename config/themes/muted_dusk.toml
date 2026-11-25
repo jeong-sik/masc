@@ -1,0 +1,24 @@
+# Muted Dusk — purple-gray with a periwinkle accent.
+# See midnight.toml for the format. Floors: down-tone (shared stops).
+surface_0 = "#18161C"
+surface_1 = "#1E1B22"
+surface_2 = "#26232B"
+border_subtle = "#302C35"
+border_inactive = "#47414E"
+border_focused = "#829FD4"
+text_bright = "#D2CFD6"
+text_primary = "#C0BDC5"
+text_secondary = "#ADA7B4"
+text_muted = "#9E97A8"
+status_ok = "#6FAE8A"
+status_active = "#84A2D7"
+status_attention = "#BF9C59"
+status_critical = "#DF898C"
+status_ai = "#B196D1"
+status_historical = "#A69EB1"
+accent = "#84A2D7"
+selection_bg = "#312C3C"
+selection_fg = "#D2CFD6"
+cool_stops = ["#69AABA", "#7DB1DD", "#AFD4EA"]
+warm_stops = ["#A693C9", "#D494B8", "#EFBBC2"]
+ai_stops = ["#9F92C8", "#B89DD9", "#DBC8EA"]

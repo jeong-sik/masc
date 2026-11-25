@@ -1,0 +1,24 @@
+# Gruvbox Dark (medium) — morhetz, MIT/X11: https://github.com/morhetz/gruvbox
+# See midnight.toml for the format. Floors: aa. Colors below AA are lifted.
+surface_0 = "#282828"
+surface_1 = "#32302F"
+surface_2 = "#3C3836"
+border_subtle = "#504945"
+border_inactive = "#665C54"
+border_focused = "#FE8019"
+text_bright = "#FBF1C7"
+text_primary = "#EBDBB2"
+text_secondary = "#D5C4A1"
+text_muted = "#BDAE93"
+status_ok = "#B8BB26"
+status_active = "#83A598"
+status_attention = "#FABD2F"
+status_critical = "#FB4934"
+status_ai = "#D3869B"
+status_historical = "#BDAE93"
+accent = "#83A598"
+selection_bg = "#46403D"
+selection_fg = "#FBF1C7"
+cool_stops = ["#8EC07C", "#83A598", "#B8C7AD"]
+warm_stops = ["#D3869B", "#FB4934", "#FE8019"]
+ai_stops = ["#D3869B", "#DBA0A2", "#E9BBB1"]

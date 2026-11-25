@@ -1,0 +1,24 @@
+# Mono — Pure Typographic Grayscale (v2.5 verified WCAG 2.1 AA)
+# See midnight.toml for the format. Floors: standard.
+surface_0 = "#0A0A0B"
+surface_1 = "#121214"
+surface_2 = "#1B1B1F"
+border_subtle = "#2A2A30"
+border_inactive = "#3D3D46"
+border_focused = "#E4E4E7"
+text_bright = "#FAFAFA"
+text_primary = "#E4E4E7"
+text_secondary = "#B4B4BC"
+text_muted = "#9898A3"
+status_ok = "#E4E4E7"
+status_active = "#D4D4DC"
+status_attention = "#F4F4F5"
+status_critical = "#FFFFFF"
+status_ai = "#C8C8D2"
+status_historical = "#9A9AA5"
+accent = "#FAFAFA"
+selection_bg = "#24242A"
+selection_fg = "#FAFAFA"
+cool_stops = ["#A1A1AA", "#D4D4D8", "#FAFAFA"]
+warm_stops = ["#B4B4BC", "#E4E4E7", "#FFFFFF"]
+ai_stops = ["#9A9AA5", "#C8C8D2", "#F4F4F5"]

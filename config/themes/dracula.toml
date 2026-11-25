@@ -1,0 +1,24 @@
+# Dracula — Dracula Theme, MIT: https://github.com/dracula/dracula-theme
+# See midnight.toml for the format. Floors: aa. Colors below AA are lifted.
+surface_0 = "#282A36"
+surface_1 = "#2D303D"
+surface_2 = "#333544"
+border_subtle = "#3D4051"
+border_inactive = "#4E5673"
+border_focused = "#BD93F9"
+text_bright = "#F8F8F2"
+text_primary = "#E1E1DD"
+text_secondary = "#B1BAD0"
+text_muted = "#7E8CB4"
+status_ok = "#50FA7B"
+status_active = "#8BE9FD"
+status_attention = "#FFB86C"
+status_critical = "#FF5555"
+status_ai = "#BD93F9"
+status_historical = "#7E8CB4"
+accent = "#8BE9FD"
+selection_bg = "#404354"
+selection_fg = "#F8F8F2"
+cool_stops = ["#72B5C7", "#8BE9FD", "#C6F1F8"]
+warm_stops = ["#BD93F9", "#FF79C6", "#FF9C9F"]
+ai_stops = ["#A582D9", "#BD93F9", "#D7C1F8"]

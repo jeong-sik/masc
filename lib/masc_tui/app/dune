@@ -25,4 +25,5 @@
   eio.unix
   eio_main
   unix
-  yojson))
+  yojson
+  otoml))

@@ -1093,13 +1093,41 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
            let init_cols, init_rows = measure_terminal_size ~fallback:(80, 24) in
            let init_wall_unix = Unix.gettimeofday () in
            let tz_offset_sec = local_tz_offset_sec ~at:init_wall_unix () in
+           let theme_warnings =
+             Theme_file.load_overrides ~base_path:cli.base_path ~themes_dir:cli.themes_dir
+           in
+           List.iter
+             (fun warning ->
+               output_string stderr ("[masc-tui] theme: " ^ warning ^ "\n"))
+             theme_warnings;
+           flush stderr;
            let model =
-             ref
-               (Model.initial ~cols:init_cols ~rows:init_rows ~lang:cli.lang
-                  ~theme_preset:cli.theme ~cli_lang_override:cli.lang_explicit
-                  ~cli_theme_override:cli.theme_explicit ~tz_offset_sec
-                  ~wall_unix:init_wall_unix ~tui_version:Build_version.current
-                  ~tui_commit:Build_commit_generated.commit ())
+             let initial =
+               Model.initial ~cols:init_cols ~rows:init_rows ~lang:cli.lang
+                 ~theme_preset:cli.theme ~cli_lang_override:cli.lang_explicit
+                 ~cli_theme_override:cli.theme_explicit ~tz_offset_sec
+                 ~wall_unix:init_wall_unix ~tui_version:Build_version.current
+                 ~tui_commit:Build_commit_generated.commit ()
+             in
+             let initial =
+               match theme_warnings with
+               | [] -> initial
+               | _ :: _ ->
+                   let notice =
+                     Say.make
+                       ~ko:
+                         (Printf.sprintf
+                            "테마 파일 %d개를 확인하세요. 잘못된 파일은 내장 색으로 표시됩니다 (로그 확인)"
+                            (List.length theme_warnings))
+                       ~en:
+                         (Printf.sprintf
+                            "Check %d theme file(s); invalid files fall back to built-in colors (see log)"
+                            (List.length theme_warnings))
+                   in
+                   Model.with_toast ~now:(Clock.Mono.now ())
+                     ~level:Model.Toast_warning notice initial
+             in
+             ref initial
            in
            let presenter =
              Presenter.create ~cols:init_cols ~rows:init_rows ~capabilities:caps

@@ -1,0 +1,24 @@
+# Muted Warm — warm gray-brown with a teal accent.
+# See midnight.toml for the format. Floors: down-tone (shared stops).
+surface_0 = "#1B1611"
+surface_1 = "#211C16"
+surface_2 = "#2A231C"
+border_subtle = "#342C24"
+border_inactive = "#4C4136"
+border_focused = "#62ACB5"
+text_bright = "#D5D0CA"
+text_primary = "#C4BDB7"
+text_secondary = "#B2A89C"
+text_muted = "#A59889"
+status_ok = "#6FAF8A"
+status_active = "#62ADB5"
+status_attention = "#BF9C59"
+status_critical = "#DF8A8C"
+status_ai = "#B196D1"
+status_historical = "#AF9F8E"
+accent = "#62ADB5"
+selection_bg = "#3A2C1F"
+selection_fg = "#D5D0CA"
+cool_stops = ["#69AABA", "#7DB1DD", "#AFD4EA"]
+warm_stops = ["#A693C9", "#D494B8", "#EFBBC2"]
+ai_stops = ["#9F92C8", "#B89DD9", "#DBC8EA"]

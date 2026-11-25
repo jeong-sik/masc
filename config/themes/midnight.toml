@@ -1,0 +1,30 @@
+# Midnight — Linear Dark x Obsidian Slate (v2.5 verified WCAG 2.1 AA)
+#
+# masc-tui theme palette. One file per preset; the file name must match
+# the preset name. Copy this directory to <base-path>/.masc/config/themes/
+# and edit a color, then restart masc-tui. Missing keys keep the built-in
+# color; an unknown key or a bad hex makes the whole file fall back.
+# Contrast floors (standard) stay in lib/masc_tui/core/theme.ml; this file
+# only carries colors. Colors are "#RRGGBB" hex.
+surface_0 = "#0B0E14"
+surface_1 = "#11161F"
+surface_2 = "#18202C"
+border_subtle = "#232D3D"
+border_inactive = "#323F54"
+border_focused = "#58A6FF"
+text_bright = "#F3F6FA"
+text_primary = "#DCE3EC"
+text_secondary = "#A4B5C9"
+text_muted = "#8698AE"
+status_ok = "#34D399"
+status_active = "#60B5FF"
+status_attention = "#FBBF24"
+status_critical = "#FB7185"
+status_ai = "#C084FC"
+status_historical = "#8E9FB5"
+accent = "#60B5FF"
+selection_bg = "#1D2C42"
+selection_fg = "#F3F6FA"
+cool_stops = ["#38BDF8", "#60B5FF", "#BAE6FD"]
+warm_stops = ["#A78BFA", "#E879F9", "#FDA4AF"]
+ai_stops = ["#A78BFA", "#C084FC", "#E9D5FF"]

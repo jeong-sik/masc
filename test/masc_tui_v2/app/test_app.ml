@@ -82,6 +82,7 @@ let test_cli_info_flags () =
               "--base-path";
               "--url";
               "--theme";
+              "--themes-dir";
               "muted_graphite";
               "solarized_dark";
               "catppuccin_mocha";

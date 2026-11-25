@@ -271,6 +271,9 @@ let insert_or_reobserve current_facts (incoming : Keeper_memory_os_types.fact) =
              first_seen = existing.first_seen
            ; last_seen = Float.max existing.last_seen incoming.last_seen
            ; origin = existing.origin
+           ; category = (match incoming.basis with
+                 | Observed (Personal _) -> existing.category
+                 | Observed (Board _ | Transcript) | Derived _ -> incoming.category)
            ; basis = merge_basis existing.basis incoming.basis
            })
          else existing)

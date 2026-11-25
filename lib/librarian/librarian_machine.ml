@@ -594,6 +594,7 @@ let ended_read place t ~at store (asking : asking) ~(asked : Read_result.asked)
         ~is_public_board_post
         ~redact:(secret_redaction_of_place place)
         ~shown:(Read question.shown)
+        ~personal_sources:question.personal_sources
         ~facts:before_facts
         ~removed_since:asking.removed_since
         ~at

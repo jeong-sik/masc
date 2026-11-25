@@ -9,6 +9,12 @@ type new_fact =
 
 type op =
   | Add of new_fact
+  | Remember_personal of
+      { unit_name : string
+      ; item_index : int
+      ; claim : string
+      ; category : category
+      }
   | Drop of
       { ref_ : string
       ; reason : string
@@ -82,9 +88,12 @@ let field_reason = wire_field_reason
 let field_rule_id = "rule_id"
 let field_scope = "scope"
 let field_facets = "facets"
+let field_unit = "unit"
+let field_item = "item"
 
 type op_kind =
   | Kind_add
+  | Kind_remember_personal
   | Kind_drop
   | Kind_merge
   | Kind_revise
@@ -95,6 +104,7 @@ type op_kind =
 
 let op_kinds =
   [ Kind_add
+  ; Kind_remember_personal
   ; Kind_drop
   ; Kind_merge
   ; Kind_revise
@@ -107,6 +117,7 @@ let op_kinds =
 
 let op_kind_token = function
   | Kind_add -> "add"
+  | Kind_remember_personal -> "remember_personal"
   | Kind_drop -> "drop"
   | Kind_merge -> "merge"
   | Kind_revise -> "revise"
@@ -146,6 +157,12 @@ let new_fact_properties =
 
 let op_properties = function
   | Kind_add -> new_fact_properties
+  | Kind_remember_personal ->
+    [ field_unit, string_schema
+    ; field_item, `Assoc [ "type", `String "integer"; "minimum", `Int 0 ]
+    ; field_claim, string_schema
+    ; field_category, string_schema
+    ]
   | Kind_drop -> [ field_ref, string_schema; field_reason, string_schema ]
   | Kind_merge -> (field_refs, names_schema) :: new_fact_properties
   | Kind_revise -> (field_ref, string_schema) :: new_fact_properties
@@ -192,7 +209,8 @@ let answer_fields = field_names (answer_properties ~ops:op_kinds ~working_state:
 
 let schemas : Librarian_memory_lane.answer_schemas =
   { range = answer_schema ~ops:op_kinds ~working_state:string_or_null
-  ; item_alone = answer_schema ~ops:[ Kind_add ] ~working_state:(`String "null")
+  ; item_alone =
+      answer_schema ~ops:[ Kind_add; Kind_remember_personal ] ~working_state:(`String "null")
   ; room =
       answer_schema
         ~ops:[ Kind_drop; Kind_merge; Kind_revise; Kind_synthesize; Kind_molt; Kind_promote_to_world ]
@@ -213,6 +231,14 @@ let new_fact_to_fields (fact : new_fact) =
 
 let op_to_json = function
   | Add fact -> `Assoc (op_field Kind_add :: new_fact_to_fields fact)
+  | Remember_personal { unit_name; item_index; claim; category } ->
+    `Assoc
+      [ op_field Kind_remember_personal
+      ; field_unit, `String unit_name
+      ; field_item, `Int item_index
+      ; field_claim, `String claim
+      ; field_category, `String (category_to_string category)
+      ]
   | Drop { ref_; reason } ->
     `Assoc [ op_field Kind_drop; field_ref, `String ref_; field_reason, `String reason ]
   | Merge { refs; into } ->
@@ -344,6 +370,17 @@ let op_of_json = function
         | Kind_add ->
           let* fact = new_fact_of_fields fields in
           Ok (Add fact)
+        | Kind_remember_personal ->
+          let* unit_name = nonblank_field field_unit fields in
+          let* item_index = wire_int_field field_item fields in
+          let* () =
+            if item_index < 0
+            then wire_fail [ Wire_field field_item ] Negative
+            else Ok ()
+          in
+          let* claim = nonblank_field field_claim fields in
+          let* category = category_field fields in
+          Ok (Remember_personal { unit_name; item_index; claim; category })
         | Kind_drop ->
           let* ref_ = nonblank_field field_ref fields in
           let* reason = nonblank_field field_reason fields in

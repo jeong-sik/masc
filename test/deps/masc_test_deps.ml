@@ -1164,6 +1164,7 @@ let commit_memory_read
   let question : Masc.Librarian_read_result.question =
     { Masc.Librarian_read_result.id
     ; shown = Masc.Librarian_plan.Range { memory = []; units = [ "turn", closing.line ] }
+    ; personal_sources = []
     ; basis = Masc.Librarian_log.snapshot_after (Masc.Librarian_store.tail store)
     ; reach =
         { Masc.Librarian_read_result.line = closing.line

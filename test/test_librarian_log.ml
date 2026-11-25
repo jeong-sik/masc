@@ -126,6 +126,7 @@ let every_why : Effects.why_not list =
   [ Unknown_ref
   ; Ref_used_twice
   ; Source_outside_question
+  ; Source_reserved_for_personal_memory
   ; Removed_during_flight { seq = 7 }
   ; Not_valid_alone
   ; Not_valid_in_room

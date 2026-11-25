@@ -5,6 +5,7 @@ module Lifecycle = Librarian_lifecycle
 module Ids = Set_util.StringSet
 module By_id = Set_util.StringMap
 module Op_numbers = Map.Make (Int)
+module Offsets = Set.Make (Int)
 
 let max_promotions_per_answer = 4
 let max_promotion_claim_bytes = 512
@@ -104,6 +105,12 @@ type read =
       }
   | Item_alone of { units : (string * int) list }
 
+type personal_source =
+  { unit_name : string
+  ; item_index : int
+  ; observation : Keeper_external_attention.item
+  }
+
 type shown =
   | Read of read
   | Room of { memory : (string * string) list }
@@ -130,10 +137,12 @@ type t =
 
 type stating =
   | New_claim of string * Answer.new_fact * int list
+  | New_personal of fact * int
   | Seen_again of string * int list
 
 let kept_and_units = function
   | New_claim (id, (_ : Answer.new_fact), offsets) | Seen_again (id, offsets) -> id, offsets
+  | New_personal (fact, offset) -> memory_id fact, [ offset ]
 ;;
 
 type screened =
@@ -164,7 +173,7 @@ let resolve_all table names ~missing =
 
 let stated_fact = function
   | Answer.Add fact | Merge { into = fact; _ } | Revise { into = fact; _ } -> Some fact
-  | Drop _ | Seen _ | Synthesize _ | Molt _ | Promote_to_world _ -> None
+  | Remember_personal _ | Drop _ | Seen _ | Synthesize _ | Molt _ | Promote_to_world _ -> None
 ;;
 
 (* Refs whose facts are mutated/removed or confirmed — cannot be targeted twice
@@ -172,14 +181,14 @@ let stated_fact = function
    [Synthesize] and [Promote_to_world] are validated against [current] and
    [removed_since] without blocking sibling read-only synthesis/promotion. *)
 let mutating_named_facts = function
-  | Answer.Add _ | Synthesize _ | Promote_to_world _ -> []
+  | Answer.Add _ | Remember_personal _ | Synthesize _ | Promote_to_world _ -> []
   | Drop { ref_; _ } | Revise { ref_; _ } | Seen { ref_; _ } -> [ ref_ ]
   | Merge { refs; _ } | Molt { refs; _ } -> refs
 ;;
 
 let read_only_named_facts = function
   | Answer.Synthesize { refs; _ } | Promote_to_world { refs; _ } -> refs
-  | Add _ | Drop _ | Merge _ | Revise _ | Seen _ | Molt _ -> []
+  | Add _ | Remember_personal _ | Drop _ | Merge _ | Revise _ | Seen _ | Molt _ -> []
 ;;
 
 let replaced ids ~by removal =
@@ -195,6 +204,9 @@ let screen
       ~current
       ~removed_since
       ~named_before
+      ~personal_sources
+      ~at
+      ~trace_id
       number
       op
   =
@@ -203,12 +215,12 @@ let screen
     | ( Read (Item_alone _)
       , (Answer.Drop _ | Merge _ | Revise _ | Seen _ | Synthesize _ | Molt _ | Promote_to_world _) )
       -> Error Effects.Not_valid_alone
-    | Read (Item_alone _), Add _ -> Ok []
-    | (Room _ | Molt _), (Add _ | Seen _) -> Error Effects.Not_valid_in_room
+    | Read (Item_alone _), (Add _ | Remember_personal _) -> Ok []
+    | (Room _ | Molt _), (Add _ | Remember_personal _ | Seen _) -> Error Effects.Not_valid_in_room
     | ( (Room { memory } | Molt { memory; _ })
       , (Drop _ | Merge _ | Revise _ | Synthesize _ | Molt _ | Promote_to_world _) )
     | ( Read (Range { memory; _ })
-      , (Add _ | Drop _ | Merge _ | Revise _ | Seen _ | Synthesize _ | Molt _ | Promote_to_world _) )
+      , (Add _ | Remember_personal _ | Drop _ | Merge _ | Revise _ | Seen _ | Synthesize _ | Molt _ | Promote_to_world _) )
       -> Ok memory
   in
   let* mutating_named = resolve_all table (mutating_named_facts op) ~missing:Effects.Unknown_ref in
@@ -219,7 +231,7 @@ let screen
     | Answer.Add fact | Merge { into = fact; _ } | Revise { into = fact; _ } ->
       Some (memory_id_of_claim fact.claim)
     | Synthesize { claim; _ } -> Some (memory_id_of_claim claim)
-    | Drop _ | Seen _ | Molt _ | Promote_to_world _ -> None
+    | Remember_personal _ | Drop _ | Seen _ | Molt _ | Promote_to_world _ -> None
   in
   let* () =
     match
@@ -252,6 +264,24 @@ let screen
     | Add fact ->
       let* offsets = units fact.from_units in
       Ok (Some (New_claim (memory_id_of_claim fact.claim, fact, offsets)), None)
+    | Remember_personal { unit_name; item_index; claim; category } ->
+      let* offset = resolve_one (units_of shown) unit_name ~missing:Effects.Source_outside_question in
+      let matches source =
+        String.equal source.unit_name unit_name && Int.equal source.item_index item_index
+      in
+      (match List.filter matches personal_sources with
+       | [ { observation; _ } ] ->
+         let claim = Keeper_secret_redaction.redact_text redact claim in
+         (match Librarian_direct.remember_personal ~claim ~category observation with
+          | Some (Remember { claim; category; basis }) when String.trim claim <> "" ->
+            let origin = { kind = Injected; trace_id } in
+            let fact = { claim; category; first_seen = at; last_seen = at; origin; basis } in
+            let id = memory_id fact in
+            (match By_id.find_opt id removed_since with
+             | Some seq -> Error (Effects.Removed_during_flight { seq })
+             | None -> Ok (Some (New_personal (fact, offset)), None))
+          | Some (Remember _ | Supersede _ | Retract _) | None -> Error Effects.Source_outside_question)
+       | [] | _ :: _ :: _ -> Error Effects.Source_outside_question)
     | Merge { into = fact; _ } | Revise { into = fact; _ } ->
       let* offsets = units fact.from_units in
       let basis_already_private =
@@ -297,7 +327,7 @@ let screen
   in
   let removes =
     match op with
-    | Answer.Add _ | Seen _ | Synthesize _ | Promote_to_world _ -> []
+    | Answer.Add _ | Remember_personal _ | Seen _ | Synthesize _ | Promote_to_world _ -> []
     | Drop { reason; _ } -> List.map (fun id -> id, Effects.Dropped { reason }) mutating_named
     | Molt { reason; _ } -> List.map (fun id -> id, Effects.Molted { reason }) mutating_named
     | Merge { into; _ } ->
@@ -334,7 +364,7 @@ let replaced_spans ~by_id live =
   List.fold_left
     (fun spans op ->
        match op.states with
-       | None | Some (Seen_again _) -> spans
+       | None | Some (Seen_again _ | New_personal _) -> spans
        | Some (New_claim (successor, (_ : Answer.new_fact), (_ : int list))) ->
          List.fold_left
            (fun spans (replaced, (_ : Effects.removal)) ->
@@ -390,9 +420,39 @@ let sources_of stated =
     stated
 ;;
 
+let reserve_personal_sources screened =
+  let offsets, claims =
+    List.fold_left (fun (offsets, claims) op ->
+      match op.states with
+      | Some (New_personal (fact, offset)) ->
+        Offsets.add offset offsets, Ids.add (memory_id_of_claim fact.claim) claims
+      | Some (New_claim _ | Seen_again _) | None -> offsets, claims)
+      (Offsets.empty, Ids.empty) screened
+  in
+  if Offsets.is_empty offsets
+  then screened, [], false
+  else
+    let reads_reserved offset = Offsets.mem offset offsets in
+    let ordinary_write_uses_reserved_source op =
+      match op.states with
+      | Some (New_claim (id, _, cited)) ->
+        Ids.mem id claims || List.exists reads_reserved cited
+      | Some (Seen_again (_, cited)) -> List.exists reads_reserved cited
+      | Some (New_personal _) -> false
+      | None -> Option.is_some op.promotion || not (List.is_empty op.removes)
+    in
+    let accepted, refused = List.partition_map (fun op ->
+      if ordinary_write_uses_reserved_source op
+      then Either.Right (op.number, Effects.Source_reserved_for_personal_memory, None)
+      else Either.Left op) screened
+    in
+    accepted, refused, true
+;;
+
 let of_answer
       ?(is_public_board_post = fun (_ : Board_types.Post_id.t) -> false)
       ?(redact = Keeper_secret_redaction.empty)
+      ?(personal_sources = [])
       ~shown
       ~facts
       ~removed_since
@@ -423,6 +483,9 @@ let of_answer
              ~current
              ~removed_since
              ~named_before
+             ~personal_sources
+             ~at
+             ~trace_id
              number
              op
          with
@@ -441,7 +504,9 @@ let of_answer
       ([], [], Ids.empty, 0)
       (List.mapi (fun number op -> number, op) answer.ops)
   in
-  let screened = List.rev screened in
+  let screened, reserved_refusals, uses_personal_sources =
+    reserve_personal_sources (List.rev screened)
+  in
   let rec settle withdrawn =
     let live = List.filter (fun op -> not (Op_numbers.mem op.number withdrawn)) screened in
     let removal_of =
@@ -460,7 +525,8 @@ let of_answer
         (fun (touched, added, added_ids) op ->
            match op.states with
            | None -> touched, added, added_ids
-           | Some stating ->
+           | Some (New_personal (fact, _)) -> touched, fact :: added, added_ids
+           | Some ((New_claim _ | Seen_again _) as stating) ->
              let id = fst (kept_and_units stating) in
              if Ids.mem id kept_ids
              then
@@ -469,7 +535,7 @@ let of_answer
                else touched, added, added_ids
              else (
                match stating with
-               | Seen_again ((_ : string), (_ : int list)) -> touched, added, added_ids
+               | Seen_again _ | New_personal _ -> touched, added, added_ids
                | New_claim ((_ : string), fact, (_ : int list)) ->
                  if Ids.mem id added_ids
                  then touched, added, added_ids
@@ -490,7 +556,8 @@ let of_answer
     in
     let added = List.rev added in
     let supported, unsupported =
-      Keeper_memory_os_support_core.maintain_supported_facts (kept @ added)
+      Effects.add_facts kept added
+      |> Keeper_memory_os_support_core.maintain_supported_facts
     in
     let supported_ids = ids_of supported in
     let supported_by_id =
@@ -553,7 +620,7 @@ let of_answer
                  , why
                  , match op.states with
                    | Some (New_claim ((_ : string), fact, (_ : int list))) -> Some fact
-                   | Some (Seen_again _) | None -> None )
+                   | Some (Seen_again _ | New_personal _) | None -> None )
              | None -> None)
           screened
       in
@@ -572,7 +639,10 @@ let of_answer
               (fun (left, (_ : Effects.why_not), (_ : Answer.new_fact option))
                 (right, (_ : Effects.why_not), (_ : Answer.new_fact option)) ->
                  Int.compare left right)
-              (refused @ withdrawn_ops)
+              (let rejected = refused @ reserved_refusals @ withdrawn_ops in
+               if uses_personal_sources
+               then List.map (fun (number, why, _) -> number, why, None) rejected
+               else rejected)
         ; sources =
             sources_of
               (List.filter_map
@@ -593,6 +663,7 @@ let of_answer
   ; effects
   ; working_state =
       (match shown, answer.working_state with
+       | Read (Range _), Set _ when uses_personal_sources -> Kept
        | (Read (Range _) | Room _ | Molt _), Keep -> Kept
        | (Read (Range _) | Room _ | Molt _), Set text -> Replaced text
        | Read (Item_alone _), Keep -> Alone Untouched

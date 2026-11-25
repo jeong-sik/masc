@@ -43,8 +43,8 @@ template_variables: []
 
 ### 모드별 허용 범위
 
-- **`Read_range`**: `add`, `seen`, `revise`, `merge`, `drop`, `synthesize`, `molt`, `promote_to_world` 및 `working_state` 변경(`null` 또는 문자열) 모두 가능합니다.
-- **`Read_item_alone`**: **`add` 와 `"working_state": null` 만 허용**됩니다. 보이지 않는 Memory를 추측해 다른 op 를 내거나 `working_state`를 덮어쓰지 마세요.
+- **`Read_range`**: `add`, `remember_personal`, `seen`, `revise`, `merge`, `drop`, `synthesize`, `molt`, `promote_to_world`와 `working_state` 변경을 허용합니다.
+- **`Read_item_alone`**: `add`, `remember_personal`, `"working_state": null`을 허용합니다.
 - **`Make_room` / `Molt_and_synthesize`**: 단위가 없으므로 `"from": []`를 쓰는 기존 Memory 정리·교차 합성·탈피·세계 승격(`merge`·`revise`·`drop`·`synthesize`·`molt`·`promote_to_world`)과 `working_state` 정리만 합니다. 다시 본 근거가 없으니 `seen` 을, 새로 읽은 것이 없으니 `add` 를 쓰지 마세요. 상시 제약·정체성 결정·쓸 날이 남은 기록은 지우지 마세요.
 
 ## 출력 와이어 계약 (`Librarian_answer`)
@@ -66,7 +66,13 @@ template_variables: []
 - `"working_state"`: 바꿀 내용이 없거나 `Read_item_alone` 모드면 `null`(`Keep`), 바꿀 때만 문자열(`Set`; 빈 문자열 `""`은 비움)을 적습니다.
 - `"ops"`: **바뀌는 것만** 적습니다. 이름 붙이지 않은 현재 기억 `mN`은 그대로 남습니다. **새 증거가 없거나 바꿀 것이 없으면 `"ops": []`를 출력하는 것이 정상입니다** (빈 답 금지 규정을 따르지 않습니다).
 
-### `ops` 안의 8가지 연산과 인식적 역할
+### `ops` 안의 연산
+
+**`remember_personal`**은 원본 발화자가 자기 선호나 자기 정보로 명시했고 이후 같은 대화에서 도움이 될 내용을 담습니다. `actor.account`와 `account_scope`가 있는 외부 항목 하나의 단위 이름과 표시된 `index`를 적으세요. 제삼자에 대한 추측이나 여러 사람의 발화를 합친 내용은 이 연산의 근거로 사용할 수 없습니다. 같은 단위에서 일반 기억 쓰기를 제안하지 마세요. 개인 기억을 제안하는 응답은 `working_state`를 유지하고 세계 승격·삭제·탈피를 다음 응답으로 미룹니다.
+
+```json
+{"op": "remember_personal", "unit": "u1", "item": 0, "claim": "이 대화에서 한국어 요약을 선호함", "category": "preference"}
+```
 
 1. **`add`** — 단위에서 **새로 안 것** (필드: `op`, `claim`, `category`, `basis`, `from`)
    ```json

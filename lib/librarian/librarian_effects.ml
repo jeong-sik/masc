@@ -21,6 +21,7 @@ type why_not =
   | Unknown_ref
   | Ref_used_twice
   | Source_outside_question
+  | Source_reserved_for_personal_memory
   | Removed_during_flight of { seq : int }
   | Not_valid_alone
   | Not_valid_in_room
@@ -59,11 +60,17 @@ let why_not_kind = function
   | Unknown_ref -> "unknown_ref"
   | Ref_used_twice -> "ref_used_twice"
   | Source_outside_question -> "source_outside_question"
+  | Source_reserved_for_personal_memory -> "source_reserved_for_personal_memory"
   | Removed_during_flight _ -> "removed_during_flight"
   | Not_valid_alone -> "not_valid_alone"
   | Not_valid_in_room -> "not_valid_in_room"
   | Successor_unsupported -> "successor_unsupported"
   | Promotion_refused -> "promotion_refused"
+;;
+
+let add_facts kept added =
+  let ordinary, personal = List.partition is_ordinary added in
+  List.fold_left Keeper_memory_os_support_core.insert_or_reobserve (kept @ ordinary) personal
 ;;
 
 let apply ~at facts effects =
@@ -85,6 +92,5 @@ let apply ~at facts effects =
          else Some fact)
       facts
   in
-  let ordinary, personal = List.partition is_ordinary effects.added in
-  List.fold_left Keeper_memory_os_support_core.insert_or_reobserve (kept @ ordinary) personal
+  add_facts kept effects.added
 ;;

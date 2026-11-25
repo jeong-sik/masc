@@ -29,6 +29,13 @@ type read =
       }
   | Item_alone of { units : (string * int) list }
 
+type personal_source =
+  { unit_name : string
+  ; item_index : int
+  ; observation : Keeper_external_attention.item
+  }
+(** A verified original observation taken from this question's shown items. *)
+
 type shown =
   | Read of read
   | Room of { memory : (string * string) list }
@@ -68,6 +75,7 @@ val max_promotion_facet_bytes : int
 val of_answer
   :  ?is_public_board_post:(Board_types.Post_id.t -> bool)
   -> ?redact:Keeper_secret_redaction.t
+  -> ?personal_sources:personal_source list
   -> shown:shown
   -> facts:fact list
   -> removed_since:(string * int) list

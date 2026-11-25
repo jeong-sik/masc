@@ -14,6 +14,7 @@ type asked =
 type question =
   { id : Librarian_question_id.t
   ; shown : Librarian_plan.read
+  ; personal_sources : Librarian_plan.personal_source list
   ; basis : Digest.digest
   ; reach : reach
   ; trace : string

@@ -531,6 +531,7 @@ let reach : Read_result.reach =
 let question : Read_result.question =
   { id = question_id
   ; shown = Range { memory = []; units = [ "u1", reach.line ] }
+  ; personal_sources = []
   ; basis = Agent_core.Checkpoint_objects.digest_of_bytes "the snapshot the question saw"
   ; reach
   ; trace = "trace-2"

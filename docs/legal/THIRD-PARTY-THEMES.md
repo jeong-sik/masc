@@ -144,7 +144,7 @@ Pro 의 라이선스 문구도 `Monokai Pro extensions` 로 범위가 그쪽에 
 - 값은 각 프로젝트의 원본 파일(Solarized README 의 색 표, Nord `src/nord.css`, Dracula README 의 색 표, `gruvbox.vim`, Catppuccin `palette.json`)을 읽어서 뽑았다. 손으로 옮겨 적지 않았다.
 - 프리셋이 쓰는 공개 색 72개 중 64개는 같은 이름의 TOML 스킴(`solarized-dark`, `nord`, `dracula`, `gruvbox-dark-hard`, `catppuccin-mocha`)에 같은 값으로 있다. 나머지 8개는 base16 의 16칸에 없는 색이다: Gruvbox `dark0`·`dark0_soft`, Catppuccin `overlay1`·`overlay2`·`pink`·`sapphire`·`subtext0`·`subtext1`.
 - Solarized, Nord, Dracula, Catppuccin 의 MIT 허가 문구는 위 tinted-theming 원문과 글자가 같다. 저작권 표시는 위 표에 적었다.
-- Gruvbox 저장소에는 라이선스 파일이 없다(2026-11-25 GitHub API 확인). README 의 `License` 절이 `MIT/X11` 이라고 밝히고, 같은 값이 위 `gruvbox-dark-hard` 로 이미 실려 있어서 넣었다. 원저자가 이 선언을 거두면 `gruvbox_dark` 를 뺀다.
+- Gruvbox 저장소에는 라이선스 파일이 없다(2026-11-25 GitHub API 확인). README 의 `License` 절이 `MIT/X11` 이라고 밝히고, 쓴 색 16개 중 14개는 위 `gruvbox-dark-hard` 로 이미 실려 있는 값이라서 넣었다. 나머지 둘(`dark0`, `dark0_soft`)은 hard 가 아닌 배경 단계다. 원저자가 이 선언을 거두면 `gruvbox_dark` 를 뺀다.
 - 팔레트에 없는 자리(`surface_1`, 선택 줄, 중간 밝기 글자 등)는 공개 색 두 개를 Oklab 에서 섞었다. `theme.ml` 의 줄마다 주석으로 원본 색 이름과 섞은 비율을 적었다.
 - 대비가 AA(4.5:1)에 못 미치는 공개 색은 `build_theme` 가 밝기만 올린다. 화면에 보이는 색이 공개 값보다 밝을 수 있다.
 

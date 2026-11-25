@@ -775,15 +775,14 @@ let test_gateway_admits_image_ids_with_the_origin () =
     check (option string) "recorded message" (Some "30001") delivery.external_message_id;
     check bool "image ID was admitted through the native gateway" true
       (delivery.attachments = [Keeper_chat_operation_payload.Discord_image { attachment_id = "30003" }]);
-    check bool "queued text omits the old signed URL" false
-      (String.contains content '?'
-       && String.ends_with ~suffix:"hm=old" content);
+    check string "queued text retains the image name without the signed URL"
+      "what is in the image?\n[file] image.png · 40 bytes · image/png" content;
     observed := true;
     Gate_protocol.Reply { content = ""; structured = None; stats = None; message_request = None }
   in
   G.For_testing.submit_triggered_event ~deliver:(fun () -> ()) ingress
     ~dispatch_for_delivery ~base_dir event;
-  check bool "durable admission was called" true !observed
+  fun () -> check bool "durable admission was called" true !observed
 ;;
 
 let test_discord_image_admission_and_read () =

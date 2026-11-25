@@ -602,7 +602,7 @@ candidates = ["safe.model"]
       html`<${KeeperChatTab} keeper=${makeKeeper()} onInspect=${vi.fn()} onMutated=${vi.fn()} />`,
       container,
     )
-    await flushUi(50)
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="chat-thinking-card"]')).not.toBeNull())
 
     // Defaults: Thinking collapsed (present, open=false), Tools summary (present, open=false), Memory/Autonomous hidden
     const thinkingCard = container.querySelector('[data-testid="chat-thinking-card"]') as HTMLDetailsElement

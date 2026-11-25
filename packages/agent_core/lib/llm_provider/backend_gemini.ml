@@ -703,6 +703,12 @@ let contents_of_messages ~supports_function_response_parts (messages : message l
 
 (* ── Tool schema -> Gemini functionDeclarations ─────── *)
 
+(* Tool input schemas are JSON Schema (additionalProperties,
+   exclusiveMinimum, ...). The [parameters] field takes only Gemini's OpenAPI
+   Schema subset and rejects those keywords with 400 "Unknown name".
+   [parametersJsonSchema] takes JSON Schema as-is; the two fields are mutually
+   exclusive. Ref: aistudio.google.com/api-reference/caching FunctionDeclaration. *)
+
 let build_function_declaration = function
   | `Assoc fields ->
     let name =
@@ -726,7 +732,7 @@ let build_function_declaration = function
     `Assoc
       [ "name", `String name
       ; "description", `String description
-      ; "parameters", parameters
+      ; "parametersJsonSchema", parameters
       ]
   | other -> other
 ;;

@@ -287,6 +287,48 @@ let test_tools () =
   check string "tool name" "get_weather" (List.hd func_decls |> member "name" |> to_string)
 ;;
 
+let test_tool_schema_goes_to_parameters_json_schema () =
+  (* Gemini's [parameters] field rejects JSON Schema keywords such as
+     additionalProperties and exclusiveMinimum (400 "Unknown name").
+     The tool schema must travel unchanged in [parametersJsonSchema]. *)
+  let schema =
+    `Assoc
+      [ "type", `String "object"
+      ; "additionalProperties", `Bool false
+      ; ( "properties"
+        , `Assoc [ "n", `Assoc [ "type", `String "integer"; "exclusiveMinimum", `Int 0 ] ] )
+      ; "required", `List [ `String "n" ]
+      ]
+  in
+  let tools =
+    [ `Assoc
+        [ "name", `String "probe"; "description", `String "probe"; "input_schema", schema ]
+    ]
+  in
+  let body =
+    Backend_gemini.build_request
+      ~config:(gemini_config ())
+      ~messages:[ Types.user_msg "probe" ]
+      ~tools
+      ()
+  in
+  let decl =
+    parse_body body
+    |> member "tools"
+    |> to_list
+    |> List.hd
+    |> member "functionDeclarations"
+    |> to_list
+    |> List.hd
+  in
+  check
+    string
+    "schema unchanged"
+    (Yojson.Safe.to_string schema)
+    (decl |> member "parametersJsonSchema" |> Yojson.Safe.to_string);
+  check bool "no parameters field" true ((decl |> member "parameters") = `Null)
+;;
+
 let test_disable_parallel_tool_use_dropped () =
   (* The Gemini API has no parallel-disable; the request must omit it entirely
      even when the caller sets disable_parallel_tool_use. *)
@@ -2451,6 +2493,10 @@ let () =
             test_native_effort_requires_reasoning_support
         ; test_case "gemini 3 disable is rejected" `Quick test_gemini3_disable_is_rejected
         ; test_case "tools" `Quick test_tools
+        ; test_case
+            "tool schema goes to parametersJsonSchema"
+            `Quick
+            test_tool_schema_goes_to_parameters_json_schema
         ; test_case
             "disable_parallel dropped"
             `Quick

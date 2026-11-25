@@ -540,12 +540,12 @@ let max_render_cache_entries = 512
 
 let tool_output_cache_mu = Stdlib.Mutex.create ()
 let tool_output_cache :
-    (string * Theme.preset * Theme.rgb * Theme.rgb * Slash.tools_mode * int,
+    (string * Theme.t * Slash.tools_mode * int,
      Markdown.rendered_line list * int) Hashtbl.t =
   Hashtbl.create 128
 
 let tool_output_display_lines ~(theme : Theme.t) ~tools_mode ~width raw =
-  let key = (raw, theme.preset, theme.surface_0, theme.text_secondary, tools_mode, width) in
+  let key = (raw, theme, tools_mode, width) in
   match
     Stdlib.Mutex.protect tool_output_cache_mu (fun () ->
         Hashtbl.find_opt tool_output_cache key)

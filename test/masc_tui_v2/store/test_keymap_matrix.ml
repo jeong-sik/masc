@@ -2281,6 +2281,15 @@ let test_removed_pipeline_goal_requires_selection () =
   let removed = receive original [b] in
   Alcotest.(check (option string)) "replacement is unselected" None (selected removed);
   Alcotest.(check int) "a sends no POST for a replacement" 0 (List.length (posts removed));
+  let clamped = Update_nav.clamp_for_pane removed in
+  Alcotest.(check int) "a pane clamp keeps the cleared selection index" (-1)
+    clamped.work.selected_index;
+  Alcotest.(check (option string)) "a pane clamp leaves the Goal unselected"
+    None (selected clamped);
+  let still_cleared = Work_store.move_selection ~pane_index:0 ~delta:0 removed.work in
+  Alcotest.(check int) "a zero move keeps the cleared selection index" (-1)
+    still_cleared.selected_index;
+  Alcotest.(check int) "a after a pane clamp sends no POST" 0 (List.length (posts clamped));
   let refiltered =
     removed.work
     |> Work_store.set_filter "Remaining"

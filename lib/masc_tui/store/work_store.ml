@@ -910,7 +910,10 @@ let move_selection ?(pane_index = 0) ?(has_linked_card = true) ?viewport_rows
           { t with detail_scroll_offset }
       | _ ->
           let len = List.length (filtered_goals t) in
-          if len = 0 then t
+          (* A Goal selection cleared by a refresh (selected_index = -1) stays
+             cleared under a zero move such as a pane clamp; only an explicit
+             move may select a row again. *)
+          if len = 0 || (t.selected_index < 0 && delta = 0) then t
           else
             let selected_index = clamp_index len (t.selected_index + delta) in
             let scroll_offset =

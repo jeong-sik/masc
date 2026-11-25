@@ -2835,10 +2835,22 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                      Say.make ~ko:"키퍼를 선택하세요" ~en:"Select a Keeper"
                    else Say.make ~ko:"서버 대기열 조회 중…" ~en:"Reading server queue…" in
                  push whisper_st (Say.resolve lang label));
+            let run_next = Update_nav.queue_run_next_target model in
             List.iteri (fun index (op : Wire_fleet.chat_operation) ->
                let body = Option.value op.message ~default:"" |> one_line in
-               push pri_st (Printf.sprintf "  %d. %s  %s" (index + 1) body
-                 (Keeper_chat_operation.Operation_id.to_string op.id));
+               let request_id = Keeper_chat_operation.Operation_id.to_string op.id in
+               (match run_next with
+                | Some (target : Update_nav.queue_run_next)
+                  when String.equal request_id target.request_id ->
+                    let action = Say.resolve lang
+                        (match target.interrupt_token with
+                         | Some _ -> Say.make ~ko:"[n] 지금 실행 (현재 턴 중단)"
+                                       ~en:"[n] Run now (interrupt turn)"
+                         | None -> Say.make ~ko:"[n] 다음에 실행"
+                                     ~en:"[n] Run next") in
+                    push acc_st (Printf.sprintf "  › %s · %s" action (String.trim body))
+                | Some _ | None ->
+                    push pri_st (Printf.sprintf "  %d. %s  %s" (index + 1) body request_id));
                show_batch op.batch_execution_id)
               queue.operations;
             if txs <> [] then begin

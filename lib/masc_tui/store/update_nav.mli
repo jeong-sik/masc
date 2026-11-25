@@ -52,6 +52,17 @@ type composer_popup =
 
 val slash_spec_takes_arg : Slash.spec -> bool
 val slash_spec_requires_arg : Slash.spec -> bool
+
+type queue_run_next = {
+  keeper : string;
+  request_id : string;
+  body : string;
+  interrupt_token : string option;
+}
+
+val queue_run_next_target : Model.t -> queue_run_next option
+(** The visible first queued request owned by this TUI session, with the
+    exact currently observed turn that its action can interrupt. *)
 val resolve_composer_popup : Model.t -> composer_popup
 val apply_popup_completion : popup_candidate -> Model.t -> Model.t
 

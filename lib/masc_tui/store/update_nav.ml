@@ -6587,6 +6587,72 @@ let btw_max_scroll (m : Model.t) =
         let theme = Theme.of_preset m.theme_preset in
         markdown_max_scroll ~theme ~width:padded_w ~height:md_h body
 
+let queue_intro_rows (m : Model.t) ~keeper =
+  let overview_rows =
+    match Chat_transcript.keeper_work_overview ~model:m ~keeper with
+    | [] -> 0
+    | rows -> List.length rows + 2
+  in
+  let attention = Attention.count m.attention in
+  let attention_rows = if attention > 0 then attention + 3 else 0 in
+  overview_rows + attention_rows
+
+type queue_run_next = {
+  keeper : string;
+  request_id : string;
+  body : string;
+  interrupt_token : string option;
+}
+
+let queue_run_next_target (m : Model.t) =
+  if m.nav.queue_scroll_offset <> 0
+     || Model.equal_breakpoint m.breakpoint Model.Micro
+     || not (Option.equal Nav.equal_overlay m.nav.overlay
+               (Some (Nav.Queue_context Nav.Drawer_queue)))
+  then None
+  else Option.bind (Model.target_keeper m) (fun keeper ->
+      let queue = Fleet_store.chat_queue_for ~keeper m.fleet in
+      let body_height = Int.min 24 (m.viewport.rows - 4) - 4 in
+      let queue_header = if Option.is_some queue.running_batch then 2 else 1 in
+      (* The convenience key applies exclusively to a confirmed queued row. *)
+      (match queue.read, queue.operations with
+       | Observed.Value { stale = false; _ },
+         { id; state = Keeper_chat_operation.State_name.Queued; message = Some body; _ } :: _
+         when queue_intro_rows m ~keeper + queue_header < body_height
+              && not (String.equal (String.trim body) "") ->
+           let request_id = Keeper_chat_operation.Operation_id.to_string id in
+           let owns_request =
+             Drafts.pending_txs_for_keeper ~keeper m.drafts
+             |> List.exists (fun (tx : Drafts.pending_message) ->
+                    match tx.state with
+                    | Drafts.Queued ->
+                        Option.equal String.equal tx.operation_id (Some request_id)
+                        && String.equal tx.body body
+                    | Drafts.Sending | Drafts.Pending_processing | Drafts.Confirming_delivery
+                    | Drafts.Interrupting | Drafts.Delivered | Drafts.No_operation_record
+                    | Drafts.Failed_retryable _ -> false)
+           in
+           if not owns_request then None
+           else
+             let interrupt_token =
+               match m.fleet.turns with
+               | Observed.Value { stale = false; data; _ } ->
+                   List.find_map (fun (row : Wire_fleet.keeper_turn_row) ->
+                     if not (String.equal keeper row.keeper_name) then None
+                     else match row.state with
+                       | Wire_fleet.Turn_active turn ->
+                           if Fleet_store.is_turn_interrupting ~keeper
+                                ~interrupt_token:turn.interrupt_token m.fleet
+                           then None
+                           else Some turn.interrupt_token
+                       | Wire_fleet.Turn_idle | Wire_fleet.Turn_unavailable _ -> None)
+                     data
+               | Observed.Value { stale = true; _ } | Observed.Loading _
+               | Observed.Absent | Observed.Unreported | Observed.Failed _ -> None
+             in
+             Some { keeper; request_id; body; interrupt_token }
+       | _ -> None) [@warning "-4"])
+
 let queue_context_max_scroll (m : Model.t) tab =
   let modal_h = min (max 0 (m.viewport.rows - 4)) 24 in
   let inner_h = if modal_h >= 2 then modal_h - 2 else 0 in
@@ -6599,13 +6665,7 @@ let queue_context_max_scroll (m : Model.t) tab =
   let total_rows =
     match tab with
     | Nav.Drawer_queue ->
-        let attn_count = Attention.count m.attention in
-        let attn_rows = if attn_count > 0 then attn_count + 3 else 0 in
         let queue, txs = Model.drawer_queue ~keeper m in
-        let overview = Chat_transcript.keeper_work_overview ~model:m ~keeper in
-        let overview_rows =
-          match overview with [] -> 0 | _ :: _ -> List.length overview + 2
-        in
         let server_rows =
           List.fold_left (fun rows (op : Wire_fleet.chat_operation) ->
             rows + if Option.is_some op.batch_execution_id then 2 else 1)
@@ -6618,7 +6678,7 @@ let queue_context_max_scroll (m : Model.t) tab =
         in
         let others = Drafts.other_keepers_draft_count m.drafts in
         let running_rows = if Option.is_some queue.running_batch then 1 else 0 in
-        overview_rows + attn_rows + running_rows + 1 + server_rows
+        queue_intro_rows m ~keeper + running_rows + 1 + server_rows
         + (if txs = [] then 0 else 1 + local_rows)
         + 3 + (if others > 0 then 1 else 0)
     | Nav.Drawer_schedules -> List.length (Work_store.schedules_list m.work)

@@ -3226,6 +3226,24 @@ let apply_http_reply ~now (m : Model.t) reply =
       ( Model.with_toast ~now ~level:Model.Toast_error
           (Msg.http_error_summary err) next
       , cmds )
+  | Msg.Reply_keeper_run_next { keeper; result; _ } ->
+      let queue = Fleet_store.chat_queue_for ~keeper m.fleet in
+      let queue = { queue with read = Observed.loading ~since_ns:now } in
+      let fleet = Fleet_store.set_chat_queue ~keeper queue m.fleet in
+      let refresh = Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_chat_queue { keeper } } in
+      let next = { m with fleet } in
+      (match result with
+       | Ok () ->
+           ( Model.with_toast ~now ~level:Model.Toast_info
+               (Say.make ~ko:"대기 메시지를 맨 앞으로 올렸습니다"
+                  ~en:"Queued message moved to the front")
+               next
+           , [ refresh; Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_keeper_turns } ] )
+       | Error err ->
+           let next, cmds = record_http_incident ~now ~source:(Health.Source_keeper keeper)
+               ~context:(Say.make ~ko:"대기 메시지 우선 실행" ~en:"Run queued message next") err next in
+           (Model.with_toast ~now ~level:Model.Toast_error (Msg.http_error_summary err) next,
+            refresh :: cmds))
   | Msg.Reply_keeper_control { keeper; label; refresh_roster; result = Ok () } ->
       let close_ctl =
         match m.inline_modal with

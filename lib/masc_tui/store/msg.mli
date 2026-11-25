@@ -257,6 +257,11 @@ type http_reply =
       refresh_roster : bool;
       result : (unit, http_error) result;
     }
+  | Reply_keeper_run_next of {
+      keeper : string;
+      request_id : string;
+      result : (unit, http_error) result;
+    }
   (* Runtime *)
   | Reply_provider_usage of
       (Wire_runtime.provider_usage_windows, http_error) result

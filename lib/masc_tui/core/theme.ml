@@ -630,9 +630,9 @@ let muted_graphite_theme =
    - Gruvbox, morhetz, MIT/X11: https://github.com/morhetz/gruvbox
    - Catppuccin Mocha, Catppuccin, MIT: https://github.com/catppuccin/palette
 
-   docs/legal/THIRD-PARTY-THEMES.md lists the copyright lines. All five use
-   [aa_floors]: a color below WCAG AA on one of the four surfaces is lifted by
-   [build_theme], so the color on screen can be lighter than the one written
+   docs/legal/THIRD-PARTY-TUI-PALETTES.md lists the copyright lines. All five
+   use [aa_floors]: a color below WCAG AA on one of the four surfaces is lifted
+   by [build_theme], so the color on screen can be lighter than the one written
    here. *)
 
 (* Preset 10: Solarized Dark. The text tiers are base2, base1, base0 and base01,

@@ -22,6 +22,7 @@ vi.mock('uplot', () => {
   return { default: MockUPlot }
 })
 import { authSession, resetAuthStateForTests } from '../../core/auth'
+import * as observer from '../../core/observer'
 import { resetObserverStateForTests } from '../../core/observer'
 import { resourceCache } from '../../core/resource-cache'
 import { resetTimeWindowForTests, setTimeWindow } from '../../core/time-window'
@@ -237,6 +238,9 @@ describe('workspaces/knowledge', () => {
 
   it('Board resets reply draft and parent reply target when switching posts and supports Cmd+Enter reply submit', async () => {
     const commentPosts: unknown[] = []
+    const detailReads: string[] = []
+    let settleReply!: (response: Response) => void
+    const pendingReply = new Promise<Response>((resolve) => { settleReply = resolve })
     const postA = { id: 'post-a', title: 'Post A', body: 'Body A', author: 'sangsu', hearth: 'arch', post_kind: 'direct', votes_up: 1, votes_down: 0, comment_count: 1, created_at: '2026-11-24T05:00:00Z' }
     const postB = { id: 'post-b', title: 'Post B', body: 'Body B', author: 'dreamer', hearth: 'arch', post_kind: 'direct', votes_up: 1, votes_down: 0, comment_count: 0, created_at: '2026-11-24T05:01:00Z' }
 
@@ -244,7 +248,7 @@ describe('workspaces/knowledge', () => {
       const url = String(input)
       if (url === '/api/v1/tools/masc_board_comment' && init?.method === 'POST') {
         commentPosts.push(JSON.parse(String(init.body)))
-        return jsonResponse({ ok: true })
+        return pendingReply
       }
       if (url.startsWith('/api/v1/board/hearths')) return jsonResponse({ hearths: [] })
       if (url.startsWith('/api/v1/board/sub-boards')) return jsonResponse({ sub_boards: [] })
@@ -295,6 +299,19 @@ describe('workspaces/knowledge', () => {
     textareaAfter.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true }))
     await flushUi()
     expect(commentPosts).toEqual([{ post_id: 'post-b', author: 'operator', content: 'Reply on Post B' }])
+
+    const postARow = [...container.querySelectorAll<HTMLButtonElement>('button.kn-board-row')].find((btn) => btn.textContent?.includes('Post A'))!
+    postARow.click()
+    await flushUi()
+    const newDraft = container.querySelector<HTMLTextAreaElement>('textarea.kn-textarea--reply')!
+    newDraft.value = 'Keep this new draft'
+    newDraft.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushUi()
+    const readsBeforeReceipt = detailReads.length
+    settleReply(jsonResponse({ ok: true, message: JSON.stringify({ id: 'c-b', post_id: 'post-b' }) }, 201))
+    await flushUi()
+    expect(newDraft.value).toBe('Keep this new draft')
+    expect(detailReads).toHaveLength(readsBeforeReceipt)
   })
 
   it('Board routes to GET /api/v1/dashboard/board in multi_account_signed_in mode with 0 calls to single-user /api/v1/board*', async () => {
@@ -841,6 +858,78 @@ describe('workspaces/knowledge', () => {
       url: '/api/v1/keepers/sangsu/memory/act',
       body: { action: 'adopt', observed: 'snapsha999' },
     })
+  })
+
+  it('keeps the submitted reply visible after a paginated refresh and its Board observer echo', async () => {
+    const post = { id: 'p-thread', title: 'Paged thread', body: 'Thread body', author: 'keeper', post_kind: 'direct' }
+    const comments = Array.from({ length: 40 }, (_, i) => ({
+      id: `c-${i + 1}`, post_id: post.id, parent_id: null as string | null,
+      author: 'keeper', content: `existing row ${i + 1}`, created_at: '2026-11-25T01:00:00Z',
+    }))
+    const newest = { ...comments[0]!, id: 'c-new', parent_id: 'c-1', content: 'New nested reply' }
+    const reads: URLSearchParams[] = []
+    const scrolled: HTMLElement[] = []
+    vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(function (this: HTMLElement) {
+      scrolled.push(this)
+    })
+    const listeners = new Set<observer.ObserverListener>()
+    vi.spyOn(observer, 'subscribeObserverFrames').mockImplementation((listener) => {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
+    })
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input), 'http://local')
+      if (url.pathname === '/api/v1/tools/masc_board_comment') {
+        expect(JSON.parse(String(init?.body))).toMatchObject({
+          post_id: post.id, content: newest.content, parent_id: newest.parent_id,
+        })
+        comments.push(newest)
+        return jsonResponse({ ok: true, message: JSON.stringify({
+          id: newest.id, post_id: post.id, comment_offset: 40, comments_total: 41,
+        }) }, 201)
+      }
+      if (url.pathname === '/api/v1/board') return jsonResponse({ posts: [post] })
+      if (url.pathname === `/api/v1/board/${post.id}`) {
+        reads.push(url.searchParams)
+        const offset = Number(url.searchParams.get('comment_offset'))
+        const rows = comments.slice(offset, offset + 40)
+        const focused = comments.find((c) => c.id === url.searchParams.get('comment_focus'))
+        return jsonResponse({
+          post, comments: rows,
+          comment_context: focused && !rows.includes(focused) ? [...rows, focused] : rows,
+          comment_page: { offset, returned: rows.length, total: comments.length,
+            next_offset: offset + rows.length < comments.length ? offset + rows.length : null },
+        })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(html`<${KnowledgeWorkspace} subroute="board" entityId=${post.id} onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi()
+    expect(container.querySelectorAll('.kn-comment')).toHaveLength(40)
+    const replyButton = [...container.querySelectorAll<HTMLButtonElement>('.kn-comment button')].find((button) => button.textContent?.trim() === '답글')
+    replyButton!.click()
+    await flushUi()
+    const textarea = container.querySelector<HTMLTextAreaElement>('textarea.kn-textarea--reply')!
+    textarea.value = newest.content
+    textarea.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushUi()
+    textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true }))
+    await flushUi()
+    const visibleReply = () => [...container.querySelectorAll('.kn-comment')].filter((row) => row.textContent?.includes(newest.content))
+    expect(visibleReply()).toHaveLength(1)
+    expect(scrolled).toContain(visibleReply()[0])
+    const readCount = reads.length
+    for (const listener of listeners) listener({ event: 'board_comment', id: null, data: { post_id: post.id }, raw: '' })
+    await vi.waitFor(() => { expect(reads.length).toBeGreaterThan(readCount) }, { timeout: 2000 })
+    await flushUi()
+    expect(reads.at(-1)?.get('comment_focus')).toBe(newest.id)
+    expect(visibleReply()).toHaveLength(1)
+    const more = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes('댓글 더 불러오기'))
+    more!.click()
+    await flushUi()
+    expect(reads.at(-1)?.get('comment_offset')).toBe('40')
+    expect(visibleReply()).toHaveLength(1)
   })
 
   it('BoardTab renders @audience targets, feed truncation/filtered notice, and comment_page load-more pagination', async () => {

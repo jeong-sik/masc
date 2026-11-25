@@ -60,6 +60,17 @@ interface BoardDetailData {
   readonly post: BoardPostItem
   readonly comments: readonly BoardCommentItem[]
   readonly commentPage: BoardCommentPageInfo | null
+  readonly focusedComment: BoardCommentItem | null
+}
+
+function postedCommentId(ack: unknown, postId: string): string | null {
+  if (!isRecord(ack) || ack.ok !== true || typeof ack.message !== 'string') return null
+  try {
+    const comment: unknown = JSON.parse(ack.message)
+    return isRecord(comment) && comment.post_id === postId ? asNonEmptyString(comment.id) : null
+  } catch {
+    return null
+  }
 }
 
 function decodeCommentPageInfo(raw: unknown): BoardCommentPageInfo | null {
@@ -244,6 +255,8 @@ export function BoardTab(props: WorkspaceViewProps) {
   const [feedback, setFeedback] = useState<{ kind: 'ok' | 'err'; message: string } | null>(null)
   const replyTextareaRef = useRef<HTMLTextAreaElement>(null)
   const commentsEndRef = useRef<HTMLDivElement>(null)
+  const focusedCommentRef = useRef<HTMLDivElement>(null)
+  const replyViewRef = useRef<{ postId: string; commentId: string | null; scroll: boolean } | null>(null)
 
   const loadBoard = useCallback(async (reason: 'mount' | 'manual' | 'sse' = 'mount') => {
     const seq = ++boardSeqRef.current
@@ -376,10 +389,11 @@ export function BoardTab(props: WorkspaceViewProps) {
       }
       if (!preserveOnError) setDetailLoading(true)
       setDetailError(null)
-      const res = await apiGet<unknown>(
-        `/api/v1/board/${encodeURIComponent(postId)}?format=flat&comment_limit=${COMMENT_PAGE_LIMIT}&comment_offset=0`,
-        { signal },
-      )
+      const replyView = replyViewRef.current
+      const focusId = replyView?.postId === postId ? replyView.commentId : null
+      const params = new URLSearchParams({ format: 'flat', comment_limit: String(COMMENT_PAGE_LIMIT), comment_offset: '0' })
+      if (focusId) params.set('comment_focus', focusId)
+      const res = await apiGet<unknown>(`/api/v1/board/${encodeURIComponent(postId)}?${params}`, { signal })
       if (signal?.aborted) return
       setDetailLoading(false)
       if (!res.ok) {
@@ -410,6 +424,14 @@ export function BoardTab(props: WorkspaceViewProps) {
         const dec = decodeBoardComment(c)
         if (dec) comments.push(dec)
       }
+      // Supplemental context contains ancestors and the requested comment. The
+      // numeric page alone owns the forward cursor and loaded-row count.
+      const focusedRaw = focusId && Array.isArray(res.value.comment_context)
+        ? res.value.comment_context.find((row: unknown) => isRecord(row) && row.id === focusId && row.post_id === postId)
+        : null
+      const focusedComment = focusId
+        ? comments.find((row) => row.id === focusId && row.postId === postId) ?? decodeBoardComment(focusedRaw)
+        : null
       const commentPage = decodeCommentPageInfo(res.value.comment_page)
       if (signal?.aborted) return
       if (resetWindow) {
@@ -417,7 +439,7 @@ export function BoardTab(props: WorkspaceViewProps) {
       } else {
         setCommentWindowStart((cur) => Math.min(cur, Math.max(0, comments.length - MAX_RENDERED_COMMENTS)))
       }
-      setDetail({ post, comments, commentPage })
+      setDetail({ post, comments, commentPage, focusedComment })
     },
     [],
   )
@@ -467,6 +489,23 @@ export function BoardTab(props: WorkspaceViewProps) {
 
   const activeDetail = detail && detail.post.id === selectedPostId ? detail : null
 
+  const visibleComments = activeDetail?.comments.slice(commentWindowStart, commentWindowStart + MAX_RENDERED_COMMENTS) ?? []
+  const focusedComment = activeDetail?.focusedComment
+  if (focusedComment && !activeDetail?.comments.some((row) => row.id === focusedComment.id)) {
+    visibleComments.push(focusedComment)
+  }
+
+  useEffect(() => {
+    const view = replyViewRef.current
+    if (!view?.scroll || view.postId !== activeDetail?.post.id) return
+    const target = view.commentId === null ? commentsEndRef.current
+      : activeDetail.focusedComment?.id === view.commentId ? focusedCommentRef.current : null
+    if (target) {
+      view.scroll = false
+      target.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+    }
+  }, [activeDetail])
+
   const handleLoadMoreComments = useCallback(async () => {
     if (!activeDetail || activeDetail.commentPage?.nextOffset == null || loadingMoreComments) return
     loadMoreAbortRef.current?.abort()
@@ -507,7 +546,7 @@ export function BoardTab(props: WorkspaceViewProps) {
           }
         }
         mergedLen = merged.length
-        return { post: prev.post, comments: merged, commentPage: nextPage }
+        return { ...prev, comments: merged, commentPage: nextPage }
       })
       if (mergedLen > MAX_RENDERED_COMMENTS) {
         setCommentWindowStart(Math.max(0, mergedLen - MAX_RENDERED_COMMENTS))
@@ -533,10 +572,13 @@ export function BoardTab(props: WorkspaceViewProps) {
       return
     }
     const ctrl = new AbortController()
+    replyViewRef.current = { postId: selectedPostId, commentId: null, scroll: false }
     detailAbortRef.current = ctrl
     void loadPostDetail(selectedPostId, ctrl.signal, { preserveOnError: false, resetWindow: true })
     return () => {
+      replyViewRef.current = null
       ctrl.abort()
+      detailAbortRef.current?.abort()
       loadMoreAbortRef.current?.abort()
     }
   }, [selectedPostId, isMultiAccount, loadPostDetail])
@@ -601,7 +643,8 @@ export function BoardTab(props: WorkspaceViewProps) {
 
   const handleReply = async (e: Event) => {
     e.preventDefault()
-    if (!activePost || !replyText.trim()) return
+    const view = replyViewRef.current
+    if (!activePost || view?.postId !== activePost.id || !replyText.trim()) return
     setBusy(true)
     setFeedback(null)
     const body: Record<string, unknown> = {
@@ -612,6 +655,7 @@ export function BoardTab(props: WorkspaceViewProps) {
     if (replyParentId) body.parent_id = replyParentId
     const res = await apiMutate<unknown>('POST', '/api/v1/tools/masc_board_comment', body)
     setBusy(false)
+    if (view !== replyViewRef.current || selectedPostIdRef.current !== activePost.id) return
     if (!res.ok) {
       setFeedback({ kind: 'err', message: `댓글 작성 실패: ${res.error.message}` })
       return
@@ -619,8 +663,9 @@ export function BoardTab(props: WorkspaceViewProps) {
     setReplyText('')
     setReplyParentId(null)
     setFeedback({ kind: 'ok', message: '댓글이 등록되었습니다.' })
+    view.commentId = postedCommentId(res.value, activePost.id)
+    view.scroll = true
     await refreshActiveDetail(activePost.id)
-    queueMicrotask(() => commentsEndRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' }))
   }
 
   const handleVotePost = async (postId: string, direction: 'up' | 'down') => {
@@ -1055,8 +1100,8 @@ export function BoardTab(props: WorkspaceViewProps) {
                   </button>
                 </div>
               `}
-              ${activeDetail && activeDetail.comments.slice(commentWindowStart, commentWindowStart + MAX_RENDERED_COMMENTS).map((c) => html`
-                <div key=${c.id} class=${`kn-comment ${c.parentId ? 'kn-comment--nested' : ''}`.trim()}>
+              ${visibleComments.map((c) => html`
+                <div key=${c.id} ref=${c.id === focusedComment?.id ? focusedCommentRef : undefined} class=${`kn-comment ${c.parentId ? 'kn-comment--nested' : ''}`.trim()}>
                   <div class="kn-row-top">
                     <div class="kn-row-meta">
                       <${KeeperBadge} id=${c.author} size="sm" />

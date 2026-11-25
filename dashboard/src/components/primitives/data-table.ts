@@ -55,6 +55,9 @@ export interface DataTableProps<T> {
   readonly emptyLabel?: string
   readonly caption?: string
   readonly className?: string
+  /** The order the table opens in. The header shows it from the first paint,
+   *  so a reader never has to guess what a list is sorted by. */
+  readonly initialSort?: { readonly id: string; readonly desc?: boolean }
 }
 
 function renderCellContent<T>(col: DataTableColumn<T>, row: T): ComponentChildren {
@@ -76,7 +79,8 @@ function renderCellContent<T>(col: DataTableColumn<T>, row: T): ComponentChildre
 
 export function DataTable<T extends object>(props: DataTableProps<T>) {
   const scrollRef = useRef<HTMLDivElement>(null)
-  const [sorting, setSorting] = useState<SortingState>([])
+  const [sorting, setSorting] = useState<SortingState>(() =>
+    props.initialSort ? [{ id: props.initialSort.id, desc: props.initialSort.desc === true }] : [])
   const threshold = props.virtualizeThreshold ?? 80
   const rowHeight = props.estimateRowHeight ?? 38
 

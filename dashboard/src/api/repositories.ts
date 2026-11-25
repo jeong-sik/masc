@@ -10,9 +10,9 @@ export type RepositoryAdvanceOutcome =
   | { state: 'fast_forward_refused'; behind: number; reason: string }
   | { state: 'advance_inspect_failed'; reason: string }
 
-/** Fetch success and worktree advancement are independent server outcomes. */
-export async function requestRepositorySync(id: string): Promise<RepositoryAdvanceOutcome> {
-  const raw = await post<unknown>(`/api/v1/repositories/${encodeURIComponent(id)}/sync`, {})
+/** Reads a sync response. Fetch success and worktree advancement are
+ *  independent server outcomes; a response this build cannot read throws. */
+export function decodeRepositoryAdvance(raw: unknown, id: string): RepositoryAdvanceOutcome {
   if (!isRecord(raw) || raw.id !== id || raw.status !== 'active' || !isRecord(raw.advance)) {
     throw new Error('Malformed repository sync response')
   }
@@ -42,6 +42,10 @@ export async function requestRepositorySync(id: string): Promise<RepositoryAdvan
       break
   }
   throw new Error('Malformed repository advance outcome')
+}
+
+export async function requestRepositorySync(id: string): Promise<RepositoryAdvanceOutcome> {
+  return decodeRepositoryAdvance(await post<unknown>(`/api/v1/repositories/${encodeURIComponent(id)}/sync`, {}), id)
 }
 
 export type RepositoryGitStatus =

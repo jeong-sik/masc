@@ -971,10 +971,13 @@ let samples_since since = List.filter (fun (s : Tool_sample.t) -> s.ts >= since)
 
 let read_activity_fallback path ~f =
   try
-    In_channel.with_open_gen [Open_rdonly; Open_binary; Open_nonblock] 0 path (fun channel ->
-      let stats = Unix.fstat (Unix.descr_of_in_channel channel) in
-      if stats.Unix.st_kind <> Unix.S_REG then []
-      else fold_trace_contents path ~init:[] ~f (really_input_string channel stats.st_size))
+    Fs_compat.Input.with_open
+      ~path
+      ~open_input:(In_channel.open_gen [Open_rdonly; Open_binary; Open_nonblock] 0)
+      (fun channel ->
+        let stats = Unix.fstat (Unix.descr_of_in_channel channel) in
+        if stats.Unix.st_kind <> Unix.S_REG then []
+        else fold_trace_contents path ~init:[] ~f (really_input_string channel stats.st_size))
   with Sys_error _ | End_of_file | Unix.Unix_error _ -> []
 
 let rec read_activity_file ~retain_since path previous =

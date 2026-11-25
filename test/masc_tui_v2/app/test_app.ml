@@ -1219,6 +1219,50 @@ let test_planning_retains_completed_tasks_across_refresh () =
   Alcotest.(check (list string)) "failed refresh retains the last Task read" ["t-1"] (tasks ());
   Alcotest.(check (list string)) "failed Execution leaves latest Goals intact" ["g-2"] (goals ())
 
+let test_board_replies_survive_epoch_change_and_stream_overflow () =
+  let module Q = Board_quarantine in
+  let keeper = "alpha" in
+  let item : Q.inventory_item =
+    { keeper_name = keeper; partition_id = "p"; candidate_id = "candidate/a";
+      quarantine_id = "generation/b"; phase = Q.Inventory_quarantined;
+      failure_category = Q.Exact_lane_exhausted; attempt_provenance = None;
+      quarantined_at = 1.; requested_at = None; requeued_at = None; requested_by = None } in
+  let inventory = Q.inventory_to_json { items = [item]; errors = [] } in
+  let receipt = `Assoc [
+    "schema", `String Q.result_schema; "ok", `Bool true; "keeper_name", `String keeper;
+    "partition_id", `String item.partition_id; "candidate_id", `String item.candidate_id;
+    "quarantine_id", `String item.quarantine_id; "failure_category", `String "exact_lane_exhausted";
+    "decision", `String "acknowledge_and_requeue"; "wake", `String "not_registered";
+    "audit", `Assoc ["recorded", `Bool true]] in
+  let respond ~meth ~path:_ = 200, (if meth = "POST" then receipt else inventory) in
+  with_loopback_executor ~stream_capacity:1 ~respond @@ fun clock bus exec ->
+  let dispatch count cmd =
+    Cmd_executor.execute exec cmd;
+    let rec wait () =
+      let s = Ui_bus.stats bus in
+      if s.queued_snapshots + s.total_coalesced_snapshots + s.queued_stream_events < count then
+        (Eio.Time.sleep clock 0.001; wait ()) in
+    wait () in
+  let old = Epoch.initial and current = Epoch.next Epoch.initial in
+  let read epoch = Cmd.Http_get { epoch; req = Cmd.Get_board_quarantines { keeper; generation = 1 } } in
+  dispatch 1 (read current);
+  dispatch 2 (read old);
+  dispatch 3 (Cmd.Http_post { epoch = current; req = Cmd.Post_board_recovery item });
+  Ui_bus.publish_stream bus (Msg.Stream_gap 1);
+  Ui_bus.publish_stream bus (Msg.Stream_gap 1);
+  let messages = Ui_bus.drain bus in
+  let reads = List.filter_map (function
+    | Ui_bus.Snapshot (_, Msg.Http_reply { epoch; reply = Msg.Reply_board_quarantines
+        { generation = 1; result = Ok { items = [_]; errors = [] }; _ } }) -> Some (Epoch.to_int epoch)
+    | _ -> None) messages |> List.sort Int.compare in
+  Alcotest.(check (list int)) "equal read generations from both workspaces survive"
+    [Epoch.to_int old; Epoch.to_int current] reads;
+  Alcotest.(check bool) "one terminal receipt survives a full stream ring" true
+    (List.exists (function Ui_bus.Snapshot (_, Msg.Http_reply { epoch; reply = Msg.Reply_board_recovery
+      { item = actual; result = Ok { wake = Q.Not_registered; audit = Q.Recorded } } }) ->
+        Epoch.equal epoch current && Q.same_candidate actual item | _ -> false) messages);
+  Alcotest.(check int) "one stream event was evicted" 1 (Ui_bus.stats bus).total_dropped_stream_events
+
 let test_roster_replies_survive_an_older_epoch_finishing_last () =
   let older_read, accept_older = Eio.Promise.create () in
   let finish_older, release_older = Eio.Promise.create () in
@@ -1309,50 +1353,6 @@ let test_sse_disconnect_uses_the_subscription_owner () =
     Alcotest.(check (list int)) "unsubscribe and shutdown report to their original owners"
       [ Epoch.to_int older; Epoch.to_int current ]
       (List.rev !disconnected))
-
-let test_board_replies_survive_epoch_change_and_stream_overflow () =
-  let module Q = Board_quarantine in
-  let keeper = "alpha" in
-  let item : Q.inventory_item =
-    { keeper_name = keeper; partition_id = "p"; candidate_id = "candidate/a";
-      quarantine_id = "generation/b"; phase = Q.Inventory_quarantined;
-      failure_category = Q.Exact_lane_exhausted; attempt_provenance = None;
-      quarantined_at = 1.; requested_at = None; requeued_at = None; requested_by = None } in
-  let inventory = Q.inventory_to_json { items = [item]; errors = [] } in
-  let receipt = `Assoc [
-    "schema", `String Q.result_schema; "ok", `Bool true; "keeper_name", `String keeper;
-    "partition_id", `String item.partition_id; "candidate_id", `String item.candidate_id;
-    "quarantine_id", `String item.quarantine_id; "failure_category", `String "exact_lane_exhausted";
-    "decision", `String "acknowledge_and_requeue"; "wake", `String "not_registered";
-    "audit", `Assoc ["recorded", `Bool true]] in
-  let respond ~meth ~path:_ = 200, (if meth = "POST" then receipt else inventory) in
-  with_loopback_executor ~stream_capacity:1 ~respond @@ fun clock bus exec ->
-  let dispatch count cmd =
-    Cmd_executor.execute exec cmd;
-    let rec wait () =
-      let s = Ui_bus.stats bus in
-      if s.queued_snapshots + s.total_coalesced_snapshots + s.queued_stream_events < count then
-        (Eio.Time.sleep clock 0.001; wait ()) in
-    wait () in
-  let old = Epoch.initial and current = Epoch.next Epoch.initial in
-  let read epoch = Cmd.Http_get { epoch; req = Cmd.Get_board_quarantines { keeper; generation = 1 } } in
-  dispatch 1 (read current);
-  dispatch 2 (read old);
-  dispatch 3 (Cmd.Http_post { epoch = current; req = Cmd.Post_board_recovery item });
-  Ui_bus.publish_stream bus (Msg.Stream_gap 1);
-  Ui_bus.publish_stream bus (Msg.Stream_gap 1);
-  let messages = Ui_bus.drain bus in
-  let reads = List.filter_map (function
-    | Ui_bus.Snapshot (_, Msg.Http_reply { epoch; reply = Msg.Reply_board_quarantines
-        { generation = 1; result = Ok { items = [_]; errors = [] }; _ } }) -> Some (Epoch.to_int epoch)
-    | _ -> None) messages |> List.sort Int.compare in
-  Alcotest.(check (list int)) "equal read generations from both workspaces survive"
-    [Epoch.to_int old; Epoch.to_int current] reads;
-  Alcotest.(check bool) "one terminal receipt survives a full stream ring" true
-    (List.exists (function Ui_bus.Snapshot (_, Msg.Http_reply { epoch; reply = Msg.Reply_board_recovery
-      { item = actual; result = Ok { wake = Q.Not_registered; audit = Q.Recorded } } }) ->
-        Epoch.equal epoch current && Q.same_candidate actual item | _ -> false) messages);
-  Alcotest.(check int) "one stream event was evicted" 1 (Ui_bus.stats bus).total_dropped_stream_events
 
 let test_queue_drawer_walks_all_http_pages () =
   let alpha = "alpha" and beta = "beta" and stalled = "stalled" in
@@ -3507,14 +3507,14 @@ let () =
             `Quick test_tool_series_readers_each_receive_the_latest_reply;
           Alcotest.test_case "Planning keeps ordered Goal and Task receipts across refreshes"
             `Quick test_planning_retains_completed_tasks_across_refresh;
-          Alcotest.test_case "roster replies survive an older generation finishing last"
-            `Quick test_roster_replies_survive_an_older_epoch_finishing_last;
-          Alcotest.test_case "SSE subscriptions disconnect through their own callbacks"
-            `Quick test_sse_disconnect_uses_the_subscription_owner;
           Alcotest.test_case "Board inventory and receipts survive workspace changes and stream bursts"
             `Quick test_board_replies_survive_epoch_change_and_stream_overflow;
           Alcotest.test_case "queue drawer follows HTTP keysets across overlapping refreshes"
             `Quick test_queue_drawer_walks_all_http_pages;
+          Alcotest.test_case "roster replies survive an older generation finishing last"
+            `Quick test_roster_replies_survive_an_older_epoch_finishing_last;
+          Alcotest.test_case "SSE subscriptions disconnect through their own callbacks"
+            `Quick test_sse_disconnect_uses_the_subscription_owner;
           Alcotest.test_case "setup login stream propagates non-terminal error & delivers terminal receipt once"
             `Quick test_setup_login_stream_error_and_single_delivery;
           Alcotest.test_case "setup login EOF closes only the matching input form"

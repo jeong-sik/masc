@@ -21920,11 +21920,11 @@ let test_keeper_lifecycle_controls_and_guards () =
     | _ -> Alcotest.fail "expected R3 pause POST"
   in
   Alcotest.(check bool) "R3 req_seq > R2 minted_seq" true (r3_seq > r2_minted_seq);
-  let m_after_r3, _ =
-    Update.step ~now:t1 m_r3_sent
+  let settle_pause (model : Model.t) =
+    Update.step ~now:t1 model
       (Msg.Http_reply
          {
-           epoch = m_r3_sent.epoch;
+           epoch = model.epoch;
            reply =
              Msg.Reply_keeper_lifecycle
                {
@@ -21946,9 +21946,58 @@ let test_keeper_lifecycle_controls_and_guards () =
                };
          })
   in
+  let m_after_r3, _ = settle_pause m_r3_sent in
   Alcotest.(check (option string))
     "subsequent R3 ok=true (req_seq > minted_seq) clears R2 resume op_id" None
     (Model.resume_op_id_for ~keeper:"alpha" m_after_r3);
+
+  let late_partial ?(req_seq = r2_req_seq) ?modal_submission_id (model : Model.t) =
+    Update.step ~now:t1 model
+      (Msg.Http_reply
+         { epoch = model.epoch;
+           reply = Msg.Reply_keeper_lifecycle
+             { keeper = "alpha"; op = Wire_fleet.Keeper_resume { operator_operation_id = r2_op_id };
+               req_seq; modal_submission_id;
+               result = Ok { ok = false; action = Some "resume"; name = Some "alpha";
+                             already_live = false; already_absent = false; committed = true;
+                             error = Some "lane offline" } } })
+  in
+  let _, after_pause = late_partial m_after_r3 in
+  Alcotest.(check bool) "a late committed resume cannot reboot after a newer pause" true
+    (Option.is_none (find_post after_pause)
+     && has_get (function Cmd.Get_keepers_roster -> true | _ -> false) after_pause);
+  let newer, _ = run_slash m_after_r3 "/resume alpha" in
+  let fresh_id = Model.resume_op_id_for ~keeper:"alpha" newer in
+  let after_old_partial, old_cmds = late_partial newer in
+  Alcotest.(check bool) "a retired resume's 202 cannot issue a boot over a successor resume" true
+    (Option.is_some fresh_id && fresh_id <> Some r2_op_id
+     && Model.resume_op_id_for ~keeper:"alpha" after_old_partial = fresh_id
+     && Option.is_none (find_post old_cmds));
+
+  (* A form can retry the same pinned ID while the later pause is in flight. *)
+  let modal_open, _ = Update.step ~now:t0 m_r3_sent (Msg.Key_event (char_key "x")) in
+  let modal_resume, _ = Update.step ~now:t0 modal_open (Msg.Key_event (key Keymap.Input.Left)) in
+  let submitting, commands =
+    Update.step ~now:t0 modal_resume (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  let req_seq, modal_submission_id =
+    match find_post commands with
+    | Some (Cmd.Post_keeper_lifecycle
+              { op = Wire_fleet.Keeper_resume { operator_operation_id }; req_seq;
+                modal_submission_id = Some id; _ }) when String.equal operator_operation_id r2_op_id ->
+        req_seq, id
+    | _ -> Alcotest.fail "modal retry must submit the same pinned resume"
+  in
+  let retired, _ = settle_pause submitting in
+  Alcotest.(check bool) "pause retires the ID while the exact form still submits" true
+    (Option.is_none (Model.resume_op_id_for ~keeper:"alpha" retired)
+     && match retired.inline_modal with
+        | Some modal -> modal.submitting && modal.submission_id = modal_submission_id
+        | None -> false);
+  let settled, commands = late_partial ~req_seq ~modal_submission_id retired in
+  Alcotest.(check bool) "matching form settles a retired 202 without authorizing a boot" true
+    (Option.is_none (find_post commands) && Option.is_none settled.inline_modal
+     && has_get (function Cmd.Get_keepers_roster -> true | _ -> false) commands);
 
   (* 12b. Modal submission identity: reopened Keeper_lifecycle_form (submission_id = 2)
           ignores stale R1 (modal_submission_id = Some 1) ok=true and Error replies,

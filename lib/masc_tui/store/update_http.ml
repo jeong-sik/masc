@@ -675,6 +675,7 @@ let apply_http_reply ~now (m : Model.t) reply =
         in
         { m with inline_modal }
       in
+      let pending_resume = Model.resume_op_id_for ~keeper m in
       let m =
         match op with
         | Wire_fleet.Keeper_resume { operator_operation_id }
@@ -695,21 +696,21 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Wire_fleet.Keeper_reset ->
             m
       in
-      let is_resume_op =
+      let partial_resume =
         match op with
-        | Wire_fleet.Keeper_resume _ -> true
-        | Wire_fleet.Keeper_boot
-        | Wire_fleet.Keeper_shutdown
-        | Wire_fleet.Keeper_wakeup
-        | Wire_fleet.Keeper_pause
-        | Wire_fleet.Keeper_reset ->
-            false
+        | Wire_fleet.Keeper_resume { operator_operation_id } when reply.committed && not reply.ok ->
+            Some operator_operation_id
+        | Wire_fleet.Keeper_resume _ | Wire_fleet.Keeper_boot | Wire_fleet.Keeper_shutdown
+        | Wire_fleet.Keeper_wakeup | Wire_fleet.Keeper_pause | Wire_fleet.Keeper_reset -> None
       in
-      if is_resume_op && (not reply.ok) && reply.committed then
-        (* HTTP 202 Accepted from resume: durable pause is cleared, follow up
-           immediately with idempotent boot to bring the live lane online,
-           re-sync roster/dive so cached paused=true never lingers if boot fails
-           or SSE lags, and preserve any non-empty 202 error as an incident. *)
+      match partial_resume with
+      | Some operator_operation_id ->
+        (* A newer successful lifecycle action retires the pinned resume.
+           Its late 202 still settles the form that sent it, but only a
+           currently pinned operation may start a new boot. *)
+        let should_boot =
+          Option.equal String.equal pending_resume (Some operator_operation_id)
+        in
         let m_inc =
           match reply.error with
           | Some raw ->
@@ -719,36 +720,40 @@ let apply_http_reply ~now (m : Model.t) reply =
                 Model.with_incident ~source:(Health.Source_keeper keeper)
                   ~summary:
                     (Say.make
-                       ~ko:"키퍼 재개 부분 완료(202) — 후속 부팅 재시도"
-                       ~en:"Keeper resume committed (202) — follow-up boot")
-                  ~detail ~status:Health.Retried m
+                       ~ko:"키퍼 재개 부분 완료(202)"
+                       ~en:"Keeper resume committed (202)")
+                  ~detail ~status:(if should_boot then Health.Retried else Health.Resolved) m
           | None -> m
         in
-        let boot_req_seq, m_seq = Model.next_keeper_lifecycle_seq m_inc in
-        let next =
-          Model.with_toast ~now ~level:Model.Toast_info
-            (Say.make
-               ~ko:
-                 (Printf.sprintf "%s 일시정지 해제 완료 — 부팅 진행 중..." keeper)
-               ~en:(Printf.sprintf "%s resumed — booting online..." keeper))
-            m_seq
-        in
-        ( next
-        , Cmd.Http_post
-            {
-              epoch = next.epoch;
-              req =
-                Cmd.Post_keeper_lifecycle
-                  {
-                    keeper;
-                    op = Wire_fleet.Keeper_boot;
-                    expected_workspace = None;
-                    req_seq = boot_req_seq;
-                    modal_submission_id;
-                  };
-            }
-          :: View_fetches.keeper_lifecycle_refresh_fetches ~name:keeper next )
-      else if reply.ok then
+        if not should_boot then
+          let next = close_matching_modal m_inc in
+          (next, View_fetches.keeper_lifecycle_refresh_fetches ~name:keeper next)
+        else
+          let boot_req_seq, m_seq = Model.next_keeper_lifecycle_seq m_inc in
+          let next =
+            Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make
+                 ~ko:
+                   (Printf.sprintf "%s 일시정지 해제 완료 — 부팅 진행 중..." keeper)
+                 ~en:(Printf.sprintf "%s resumed — booting online..." keeper))
+              m_seq
+          in
+          ( next
+          , Cmd.Http_post
+              {
+                epoch = next.epoch;
+                req =
+                  Cmd.Post_keeper_lifecycle
+                    {
+                      keeper;
+                      op = Wire_fleet.Keeper_boot;
+                      expected_workspace = None;
+                      req_seq = boot_req_seq;
+                      modal_submission_id;
+                    };
+              }
+            :: View_fetches.keeper_lifecycle_refresh_fetches ~name:keeper next )
+      | None when reply.ok ->
         let toast_level, toast_msg =
           match op with
           | Wire_fleet.Keeper_boot when reply.already_live ->
@@ -801,7 +806,7 @@ let apply_http_reply ~now (m : Model.t) reply =
           |> Model.with_toast ~now ~level:toast_level toast_msg
         in
         (next, View_fetches.keeper_lifecycle_refresh_fetches ~name:keeper next)
-      else
+      | None ->
         let reason =
           Option.value reply.error ~default:"request rejected by server"
         in

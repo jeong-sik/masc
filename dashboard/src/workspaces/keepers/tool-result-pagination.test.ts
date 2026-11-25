@@ -637,6 +637,147 @@ describe('Streaming <details> Stability & Tools: full Bounded Auto-Hydration', (
     expect(cards[0]!.textContent).toContain('실행 결과 불러오기')
     expect(cards[0]!.textContent).not.toContain('hydrated:exec-full-01')
   })
+
+  it('does not flash previous keeper messages or issue cross-keeper /tool-result fetches on keeper switch in Tools: full mode', async () => {
+    const toolResultUrls: string[] = []
+    let resolveBetaHistory!: (res: Response) => void
+    const betaHistoryPending = new Promise<Response>((resolve) => {
+      resolveBetaHistory = resolve
+    })
+
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/keepers/keeper-alpha/chat/history/page')) {
+        return jsonResponse({
+          messages: [
+            {
+              id: 'alpha-tool-1',
+              role: 'tool',
+              content: '{"path":"alpha.txt"}',
+              ts: 1000,
+              tool_call_name: 'Read',
+              execution_id: 'exec-alpha-1',
+            },
+          ],
+          has_more: false,
+          next_cursor: null,
+        })
+      }
+      if (url.includes('/keepers/keeper-beta/chat/history/page')) {
+        return betaHistoryPending
+      }
+      if (url.includes('/chat/operations')) {
+        return jsonResponse({ operations: [] })
+      }
+      if (url.includes('/tool-result')) {
+        toolResultUrls.push(url)
+        const parsed = new URL(url, 'http://localhost')
+        const execId = parsed.searchParams.get('execution_id') ?? ''
+        if (parsed.pathname.includes('/keepers/keeper-alpha/') && execId === 'exec-alpha-1') {
+          return jsonResponse({
+            keeper: 'keeper-alpha',
+            execution_id: 'exec-alpha-1',
+            state: 'page',
+            source_id: 'a'.repeat(64),
+            recorded_bytes: 17,
+            is_error: false,
+            page: {
+              ok: true,
+              offset: 0,
+              next_offset: 17,
+              total_bytes: 17,
+              eof: true,
+              content: 'alpha-tool-output',
+              encoding: 'utf-8',
+            },
+          })
+        }
+        if (parsed.pathname.includes('/keepers/keeper-beta/') && execId === 'exec-beta-1') {
+          return jsonResponse({
+            keeper: 'keeper-beta',
+            execution_id: 'exec-beta-1',
+            state: 'page',
+            source_id: 'b'.repeat(64),
+            recorded_bytes: 16,
+            is_error: false,
+            page: {
+              ok: true,
+              offset: 0,
+              next_offset: 16,
+              total_bytes: 16,
+              eof: true,
+              content: 'beta-tool-output',
+              encoding: 'utf-8',
+            },
+          })
+        }
+        return jsonResponse({ error: 'tool execution not found' }, 404)
+      }
+      return jsonResponse({})
+    }))
+
+    const onInspect = vi.fn()
+    const onMutated = vi.fn()
+    const view = render(
+      html`<${KeeperChatTab} keeper=${makeRosterKeeper({ name: 'keeper-alpha' })} onInspect=${onInspect} onMutated=${onMutated} />`,
+    )
+
+    await waitFor(() => {
+      expect(view.container.querySelector('[data-testid="chat-tool-card"]')).not.toBeNull()
+    })
+
+    // Switch to Tools: full mode and confirm keeper-alpha hydrates its persisted tool card
+    const toggleBtn = view.container.querySelector('[data-testid="chat-toggle-tools"]') as HTMLButtonElement
+    fireEvent.click(toggleBtn)
+    expect(toggleBtn.textContent).toContain('전체')
+
+    await waitFor(() => {
+      expect(view.container.textContent).toContain('alpha-tool-output')
+    })
+    expect(
+      toolResultUrls.filter((u) => u.includes('/keepers/keeper-alpha/tool-result') && u.includes('execution_id=exec-alpha-1')),
+    ).toHaveLength(1)
+
+    // Rerender with keeper-beta while keeper-beta history is still in flight
+    view.rerender(
+      html`<${KeeperChatTab} keeper=${makeRosterKeeper({ name: 'keeper-beta' })} onInspect=${onInspect} onMutated=${onMutated} />`,
+    )
+
+    // Previous keeper's messages must not flash and ZERO cross-keeper fetches may fire
+    expect(view.container.querySelector('[data-testid="chat-tool-card"]')).toBeNull()
+    expect(view.container.textContent).not.toContain('alpha-tool-output')
+    expect(
+      toolResultUrls.filter((u) => u.includes('/keepers/keeper-beta/tool-result') && u.includes('execution_id=exec-alpha-1')),
+    ).toHaveLength(0)
+
+    // Resolve keeper-beta history with its own persisted tool card
+    resolveBetaHistory(jsonResponse({
+      messages: [
+        {
+          id: 'beta-tool-1',
+          role: 'tool',
+          content: '{"path":"beta.txt"}',
+          ts: 2000,
+          tool_call_name: 'Read',
+          execution_id: 'exec-beta-1',
+        },
+      ],
+      has_more: false,
+      next_cursor: null,
+    }))
+
+    await waitFor(() => {
+      expect(view.container.textContent).toContain('beta-tool-output')
+    })
+
+    expect(view.container.textContent).not.toContain('alpha-tool-output')
+    expect(
+      toolResultUrls.filter((u) => u.includes('/keepers/keeper-beta/tool-result') && u.includes('execution_id=exec-alpha-1')),
+    ).toHaveLength(0)
+    expect(
+      toolResultUrls.filter((u) => u.includes('/keepers/keeper-beta/tool-result') && u.includes('execution_id=exec-beta-1')),
+    ).toHaveLength(1)
+  })
 })
 
 describe('KeeperToolCallInspector & Work/Debug Companion QuickPeekDrawer Wiring', () => {

@@ -3508,6 +3508,79 @@ let test_agui_chat_stream_and_history_provenance () =
     (f_msg.role = Wire_fleet.Role_request_failure);
   Alcotest.(check (option string)) "failure operation_id" (Some "tui-99-1") (Wire_fleet.terminal_operation f_msg);
   Alcotest.(check (option string)) "failure_kind" (Some "turn_exception") f_msg.failure_kind;
+  (* Persisted blocks thinking & trace extraction (visible, redacted, partial, fail-closed) *)
+  let thinking_page =
+    expect_ok "history page with thinking and trace blocks"
+      (Wire_fleet.decode_chat_history_page
+         (parse_json
+            {|{
+              "messages": [
+                {
+                  "id": "msg-think-1",
+                  "role": "assistant",
+                  "content": "Done.",
+                  "ts": 1795252100.0,
+                  "blocks": [
+                    { "t": "thinking", "content": "Plan step 1" },
+                    { "t": "trace", "trace": [
+                      { "kind": "think", "text": "Inspect file" },
+                      { "kind": "reason", "text": "Check diff", "detail": "2 hunks" }
+                    ]}
+                  ]
+                },
+                {
+                  "id": "msg-think-2",
+                  "role": "assistant",
+                  "content": "Redacted reply.",
+                  "ts": 1795252105.0,
+                  "blocks": [
+                    { "t": "thinking", "content": "", "redacted": true }
+                  ]
+                },
+                {
+                  "id": "msg-think-3",
+                  "role": "assistant",
+                  "content": "Mixed reply.",
+                  "ts": 1795252110.0,
+                  "blocks": [
+                    { "t": "thinking", "content": "Visible thought" },
+                    { "t": "trace", "trace": [
+                      { "kind": "think", "text": "", "content_withheld": true }
+                    ]}
+                  ]
+                },
+                {
+                  "id": "msg-think-4",
+                  "role": "assistant",
+                  "content": "Malformed redacted flag.",
+                  "ts": 1795252115.0,
+                  "blocks": [
+                    { "t": "thinking", "content": "MUST_NOT_LEAK", "redacted": "yes" }
+                  ]
+                }
+              ],
+              "has_more": false,
+              "next_cursor": null
+            }|}))
+  in
+  (match (List.nth thinking_page.messages 0).thinking with
+  | Some (Wire_fleet.Thinking_visible s) ->
+      Alcotest.(check string) "blocks thinking extracted"
+        "Plan step 1\n\nInspect file\n\nCheck diff\n2 hunks" s
+  | Some (Wire_fleet.Thinking_redacted | Wire_fleet.Thinking_partial _) | None ->
+      Alcotest.fail "expected Thinking_visible");
+  (match (List.nth thinking_page.messages 1).thinking with
+  | Some Wire_fleet.Thinking_redacted -> ()
+  | Some (Wire_fleet.Thinking_visible _ | Wire_fleet.Thinking_partial _) | None ->
+      Alcotest.fail "expected Thinking_redacted");
+  (match (List.nth thinking_page.messages 2).thinking with
+  | Some (Wire_fleet.Thinking_partial s) ->
+      Alcotest.(check string) "mixed visible+withheld preserves partial signal"
+        "Visible thought" s
+  | Some (Wire_fleet.Thinking_visible _ | Wire_fleet.Thinking_redacted) | None ->
+      Alcotest.fail "expected Thinking_partial");
+  Alcotest.(check bool) "non-bool redacted fails closed without exposing content"
+    true (Option.is_none (List.nth thinking_page.messages 3).thinking);
   (* Turn interrupt response decoder *)
   let int_resp =
     expect_ok "turn interrupt response"

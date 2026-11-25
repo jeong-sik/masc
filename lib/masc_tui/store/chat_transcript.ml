@@ -1178,6 +1178,243 @@ type pending_tx_projection = {
   notice_only : bool;
 }
 
+type delegate_kind =
+  | Delegate_invoke
+  | Delegate_status
+  | Delegate_cancel
+
+type delegate_summary = {
+  kind : delegate_kind;
+  target_keeper : string option;
+  target_keepers : string list;
+  operation_count : int;
+  prompt_preview : string option;
+  operation_id : string option;
+  artifact_count : int;
+}
+
+let sanitize_delegate_field (raw : string) : string option =
+  let pass1 = scrub_secrets_in_text raw in
+  let flat =
+    String.trim (String.map (function '\n' | '\r' | '\t' -> ' ' | c -> c) pass1)
+  in
+  if String.equal flat "" then None
+  else
+    let pass2 = scrub_secrets_in_text flat in
+    let clean =
+      if Json_tree.is_secret_value pass2 then "[redacted]" else pass2
+    in
+    if String.equal (String.trim clean) "" then None else Some clean
+
+let strip_leading_at s =
+  let len = String.length s in
+  let rec loop i =
+    if i < len && Char.equal s.[i] '@' then loop (i + 1) else i
+  in
+  let start = loop 0 in
+  if start = 0 then s else String.sub s start (len - start)
+
+let sanitize_delegate_target (raw : string) : string option =
+  match sanitize_delegate_field raw with
+  | None -> None
+  | Some clean ->
+      let stripped = strip_leading_at clean in
+      if String.equal stripped "" then None else Some stripped
+
+let extract_delegate_summary ~tool_name ~raw_json : delegate_summary option =
+  let trimmed_name = String.trim tool_name in
+  let kind_opt =
+    match trimmed_name with
+    | "masc_keeper_delegate" -> Some Delegate_invoke
+    | "masc_keeper_delegate_status" | "masc_keeper_delegate_status_many" ->
+        Some Delegate_status
+    | "masc_keeper_delegate_cancel" -> Some Delegate_cancel
+    | _ -> None
+  in
+  match kind_opt with
+  | None -> None
+  | Some kind ->
+      let str_field kvs key =
+        match List.assoc_opt key kvs with
+        | Some (`String s) -> sanitize_delegate_field s
+        | Some _ | None -> None
+      in
+      let target_of_kvs kvs =
+        let raw_target =
+          match List.assoc_opt "target" kvs with
+          | Some (`Assoc tfields) -> (
+              match List.assoc_opt "name" tfields with
+              | Some (`String s) -> Some s
+              | Some _ | None -> None)
+          | Some (`String s) -> Some s
+          | Some _ | None -> (
+              match List.assoc_opt "keeper_name" kvs with
+              | Some (`String s) -> Some s
+              | Some _ | None -> (
+                  match List.assoc_opt "delegate" kvs with
+                  | Some (`String s) -> Some s
+                  | Some _ | None -> None))
+        in
+        Option.bind raw_target sanitize_delegate_target
+      in
+      let target_keeper, target_keepers, operation_count, prompt_preview, operation_id, artifact_count =
+        match Yojson.Safe.from_string (String.trim raw_json) with
+        | json -> (
+            match scrub_json_secrets json with
+            | `Assoc kvs ->
+                let rev_targets = ref [] in
+                let add_target t =
+                  if not (List.exists (String.equal t) !rev_targets) then
+                    rev_targets := t :: !rev_targets
+                in
+                Option.iter add_target (target_of_kvs kvs);
+                let first_batch_op = ref None in
+                let batch_count =
+                  match List.assoc_opt "operations" kvs with
+                  | Some (`List ops) ->
+                      List.iter
+                        (function
+                          | `Assoc op_kvs ->
+                              Option.iter add_target (target_of_kvs op_kvs);
+                              if Option.is_none !first_batch_op then
+                                first_batch_op :=
+                                  (match str_field op_kvs "operation_id" with
+                                  | Some _ as o -> o
+                                  | None -> str_field op_kvs "request_id")
+                          | _ -> ())
+                        ops;
+                      List.length ops
+                  | Some _ | None -> 0
+                in
+                let targets = List.rev !rev_targets in
+                let primary_target = List.nth_opt targets 0 in
+                let prompt =
+                  match str_field kvs "prompt" with
+                  | Some _ as p -> p
+                  | None -> str_field kvs "message"
+                in
+                let op_id =
+                  match str_field kvs "operation_id" with
+                  | Some _ as o -> o
+                  | None -> (
+                      match str_field kvs "request_id" with
+                      | Some _ as r -> r
+                      | None -> !first_batch_op)
+                in
+                let op_count =
+                  if batch_count > 0 then batch_count
+                  else if Option.is_some op_id then 1
+                  else 0
+                in
+                let artifacts =
+                  match List.assoc_opt "artifacts" kvs with
+                  | Some (`List xs) -> List.length xs
+                  | Some _ | None -> 0
+                in
+                (primary_target, targets, op_count, prompt, op_id, artifacts)
+            | _ -> (None, [], 0, None, None, 0))
+        | exception Yojson.Json_error _ -> (None, [], 0, None, None, 0)
+      in
+      Some
+        {
+          kind;
+          target_keeper;
+          target_keepers;
+          operation_count;
+          prompt_preview;
+          operation_id;
+          artifact_count;
+        }
+
+let format_short_tool_label ~(lang : Say.lang) ~tool_name ~raw_json =
+  match extract_delegate_summary ~tool_name ~raw_json with
+  | None -> tool_name
+  | Some del -> (
+      let base =
+        match del.kind, lang with
+        | Delegate_invoke, Say.Lang_ko -> "위임"
+        | Delegate_invoke, Say.Lang_en -> "Delegate"
+        | Delegate_status, Say.Lang_ko -> "위임조회"
+        | Delegate_status, Say.Lang_en -> "Delegate status"
+        | Delegate_cancel, Say.Lang_ko -> "위임취소"
+        | Delegate_cancel, Say.Lang_en -> "Delegate cancel"
+      in
+      match del.target_keepers with
+      | [] ->
+          if del.operation_count > 1 then
+            match lang with
+            | Say.Lang_ko -> Printf.sprintf "%s(%d건)" base del.operation_count
+            | Say.Lang_en -> Printf.sprintf "%s(%d)" base del.operation_count
+          else base
+      | [ single ] -> Printf.sprintf "%s(@%s)" base single
+      | t1 :: t2 :: rest ->
+          let shown = Printf.sprintf "@%s,@%s" t1 t2 in
+          let n_rest = List.length rest in
+          if n_rest > 0 then
+            match lang with
+            | Say.Lang_ko -> Printf.sprintf "%s(%s 외 %d)" base shown n_rest
+            | Say.Lang_en -> Printf.sprintf "%s(%s +%d)" base shown n_rest
+          else Printf.sprintf "%s(%s)" base shown)
+
+let summarize_tool_histogram ~(lang : Say.lang) ?(max_unique = 4) items =
+  let counts : (string * int) list ref = ref [] in
+  List.iter
+    (fun (tool_name, raw_json) ->
+      let lbl = format_short_tool_label ~lang ~tool_name ~raw_json in
+      let rec bump = function
+        | [] -> [ (lbl, 1) ]
+        | (k, n) :: rest when String.equal k lbl -> (k, n + 1) :: rest
+        | pair :: rest -> pair :: bump rest
+      in
+      counts := bump !counts)
+    items;
+  let all = !counts in
+  let shown =
+    all
+    |> List.take (Int.max 1 max_unique)
+    |> List.map (fun (lbl, n) ->
+           if n > 1 then Printf.sprintf "%s ×%d" lbl n else lbl)
+  in
+  let rest = List.length all - List.length shown in
+  let parts =
+    if rest > 0 then
+      let more =
+        match lang with
+        | Say.Lang_ko -> Printf.sprintf "외 %d종" rest
+        | Say.Lang_en -> Printf.sprintf "+%d more" rest
+      in
+      shown @ [ more ]
+    else shown
+  in
+  String.concat Typography.sep_dot parts
+
+let count_history_thinking_rows ~(mode : Fleet_store.thinking_display) ~width =
+  function
+  | None -> 0
+  | Some thinking -> (
+      match mode with
+      | Fleet_store.Thinking_hidden -> 0
+      | Fleet_store.Thinking_folded -> (
+          match thinking with
+          | Wire_fleet.Thinking_redacted | Wire_fleet.Thinking_partial _ -> 1
+          | Wire_fleet.Thinking_visible text ->
+              if String.equal (String.trim text) "" then 0 else 1)
+      | Fleet_store.Thinking_full -> (
+          match thinking with
+          | Wire_fleet.Thinking_redacted -> 1
+          | Wire_fleet.Thinking_visible text ->
+              if String.equal (String.trim text) "" then 0
+              else
+                1
+                + List.length
+                    (wrap_plain_lines ~width:(Int.max 12 (width - 6)) text)
+          | Wire_fleet.Thinking_partial text ->
+              if String.equal (String.trim text) "" then 1
+              else
+                1
+                + List.length
+                    (wrap_plain_lines ~width:(Int.max 12 (width - 6)) text)))
+
 type 'a tool_group = Single of 'a | Grouped of 'a * 'a list
 
 let tools_mode (model : Model.t) =
@@ -1680,7 +1917,11 @@ let count_transcript_rows ~(model : Model.t) ~keeper ~width =
                   | Fleet_store.Display_origin_inline ->
                       false
                 in
-                hdr
+                let think_r =
+                  count_history_thinking_rows
+                    ~mode:model.fleet.chat_thinking_mode ~width msg.thinking
+                in
+                think_r + hdr
                 + count_markdown_rows ~theme ~width ~rail_present ~prefix
                     msg.content
             | Wire_fleet.Role_system ->

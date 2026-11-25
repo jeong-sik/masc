@@ -306,6 +306,7 @@ let populated_model ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_en)
               execution_id = None;
               provenance = None;
               failure_kind = None;
+              thinking = None;
             });
       has_more = false;
       next_cursor = None;

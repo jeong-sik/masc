@@ -200,6 +200,7 @@ let populated_model ~cols ~rows ~lang =
             execution_id = None;
             provenance = None;
             failure_kind = None;
+            thinking = None;
           };
           {
             id = "m2";
@@ -213,6 +214,7 @@ let populated_model ~cols ~rows ~lang =
             execution_id = None;
             provenance = None;
             failure_kind = None;
+            thinking = None;
           };
         ];
       has_more = false;

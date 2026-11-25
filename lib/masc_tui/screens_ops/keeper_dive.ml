@@ -102,17 +102,173 @@ let concise_tool_preview ~max_w raw =
     in
     Grapheme.truncate_to_width ~max_width:(Int.max 8 max_w) one_line
 
-let tool_group_row ~(model : Model.t) ~(theme : Theme.t) ~count names =
+let build_history_thinking_rows ~(theme : Theme.t) ~(model : Model.t) ~width
+    (thinking : Wire_fleet.history_thinking option) =
+  let base_bg = theme.surface_1 in
+  let redacted_row () =
+    [
+      single_span_row ~rail_rgb:theme.status_ai
+        ~prefix:(Glyph.to_utf8 Glyph.Ai_spark ^ " ")
+        ~prefix_fg:theme.status_ai ~prefix_attrs:Attr.bold
+        ~text:
+          (Ops_common.say model ~ko:"추론 · 비공개 (redacted)"
+             ~en:"Thinking · redacted")
+        ~text_fg:theme.text_muted ~attrs:Attr.italic ~bg_rgb:base_bg ();
+    ]
+  in
+  let render_visible ~is_partial ~mode text =
+    if String.equal (String.trim text) "" then
+      if is_partial then redacted_row () else []
+    else
+      let approx_toks = Int.max 1 (String.length text / 4) in
+      let partial_suffix =
+        if is_partial then
+          Ops_common.say model ~ko:" · 일부 비공개" ~en:" · partially redacted"
+        else ""
+      in
+      let lbl =
+        Ops_common.say model
+          ~ko:(Printf.sprintf "추론 · %d tok%s" approx_toks partial_suffix)
+          ~en:(Printf.sprintf "Thinking · %d tok%s" approx_toks partial_suffix)
+      in
+      match mode with
+      | Fleet_store.Thinking_hidden -> []
+      | Fleet_store.Thinking_folded ->
+          [
+            single_span_row ~rail_rgb:theme.status_ai
+              ~prefix:
+                (Glyph.to_utf8 Glyph.Expand_closed ^ " "
+                 ^ Glyph.to_utf8 Glyph.Ai_spark ^ " ")
+              ~prefix_fg:theme.status_ai ~prefix_attrs:Attr.bold ~text:lbl
+              ~text_fg:theme.text_muted ~attrs:Attr.italic
+              ~right_meta:
+                (Ops_common.say model ~ko:"[Alt+T] 펼치기" ~en:"[Alt+T] expand")
+              ~right_meta_fg:theme.text_muted ~right_meta_attrs:Attr.italic
+              ~bg_rgb:base_bg ();
+          ]
+      | Fleet_store.Thinking_full ->
+          let hdr =
+            single_span_row ~rail_rgb:theme.status_ai
+              ~prefix:
+                (Glyph.to_utf8 Glyph.Expand_open ^ " "
+                 ^ Glyph.to_utf8 Glyph.Ai_spark ^ " ")
+              ~prefix_fg:theme.status_ai ~prefix_attrs:Attr.bold ~text:lbl
+              ~text_fg:theme.status_ai ~attrs:Attr.bold ~bg_rgb:base_bg ()
+          in
+          let think_lines =
+            wrap_plain_lines ~width:(Int.max 12 (width - 6)) text
+          in
+          hdr
+          :: List.map
+               (fun ln ->
+                 single_span_row ~rail_rgb:theme.status_ai ~prefix:"  "
+                   ~prefix_fg:theme.status_ai ~text:ln ~text_fg:theme.text_muted
+                   ~attrs:Attr.italic ~bg_rgb:base_bg ())
+               think_lines
+  in
+  match thinking with
+  | None -> []
+  | Some th -> (
+      match model.fleet.chat_thinking_mode with
+      | Fleet_store.Thinking_hidden -> []
+      | (Fleet_store.Thinking_folded | Fleet_store.Thinking_full) as mode -> (
+          match th with
+          | Wire_fleet.Thinking_redacted -> redacted_row ()
+          | Wire_fleet.Thinking_visible text ->
+              render_visible ~is_partial:false ~mode text
+          | Wire_fleet.Thinking_partial text ->
+              render_visible ~is_partial:true ~mode text))
+
+let delegate_card_spans ~(theme : Theme.t) ~(model : Model.t) ~bg ~width
+    (del : Chat_transcript.delegate_summary) =
+  let action_lbl =
+    match del.kind with
+    | Chat_transcript.Delegate_invoke ->
+        Ops_common.say model ~ko:"위임" ~en:"Delegate"
+    | Chat_transcript.Delegate_status ->
+        Ops_common.say model ~ko:"위임 조회" ~en:"Delegate status"
+    | Chat_transcript.Delegate_cancel ->
+        Ops_common.say model ~ko:"위임 취소" ~en:"Delegate cancel"
+  in
+  let target_suffix =
+    match del.target_keepers with
+    | [] -> ""
+    | [ single ] -> " → @" ^ single
+    | first :: rest ->
+        let n_rest = List.length rest in
+        Ops_common.say model
+          ~ko:(Printf.sprintf " → @%s 외 %d명" first n_rest)
+          ~en:(Printf.sprintf " → @%s +%d" first n_rest)
+  in
+  let title = action_lbl ^ target_suffix in
+  let meta_parts =
+    (if del.operation_count > 1 then
+       [
+         Ops_common.say model
+           ~ko:(Printf.sprintf "%d건" del.operation_count)
+           ~en:(Printf.sprintf "%d ops" del.operation_count);
+       ]
+     else [])
+    @ (match del.operation_id with Some op -> [ "op:" ^ op ] | None -> [])
+    @ (if del.artifact_count > 0 then
+         [
+           Ops_common.say model
+             ~ko:(Printf.sprintf "아티팩트 %d" del.artifact_count)
+             ~en:(Printf.sprintf "%d artifacts" del.artifact_count);
+         ]
+       else [])
+    @ (match del.prompt_preview with Some p -> [ p ] | None -> [])
+  in
+  let detail =
+    match meta_parts with
+    | [] -> ""
+    | xs ->
+        let joined = String.concat Typography.sep_dot xs in
+        Grapheme.truncate_to_width ~max_width:(Int.max 12 (width - 30)) joined
+  in
+  [
+    {
+      Markdown.text = title;
+      style = Typography.accent ~bg ~bold:true theme;
+      hyperlink = None;
+    };
+  ]
+  @
+  if String.length detail > 0 then
+    [
+      {
+        Markdown.text = "  " ^ detail;
+        style = Typography.structure ~bg theme;
+        hyperlink = None;
+      };
+    ]
+  else []
+
+let tool_group_row ~(model : Model.t) ~(theme : Theme.t) ?right_meta ~count
+    items =
   let label =
     Ops_common.say model ~ko:(Printf.sprintf "도구 호출 %d회" count)
       ~en:(Printf.sprintf "%d tool calls" count)
   in
-  let text =
-    String.concat Typography.sep_dot (label :: List.sort_uniq String.compare names)
+  let histogram =
+    Chat_transcript.summarize_tool_histogram ~lang:model.lang items
   in
-  single_span_row ~prefix:(Glyph.to_utf8 Glyph.Tool_square ^ " ")
-    ~prefix_fg:theme.text_muted ~text ~text_fg:theme.text_secondary
-    ~bg_rgb:theme.surface_1 ()
+  let text =
+    if String.equal histogram "" then label
+    else label ^ Typography.sep_dot ^ histogram
+  in
+  let right_meta =
+    match right_meta with
+    | Some m -> m
+    | None -> "[Ctrl+O]"
+  in
+  single_span_row ~rail_rgb:theme.border_inactive
+    ~prefix:
+      (Glyph.to_utf8 Glyph.Expand_closed ^ " " ^ Glyph.to_utf8 Glyph.Tool_square
+       ^ " ")
+    ~prefix_fg:theme.text_secondary ~text ~text_fg:theme.text_secondary
+    ~right_meta ~right_meta_fg:theme.text_muted ~right_meta_attrs:Attr.italic
+    ~bg_rgb:theme.surface_2 ~full_bleed_bg:true ()
 
 let preview_tool_output_rows ~(theme : Theme.t) ~(model : Model.t) ~width raw =
   let tools_mode = Chat_transcript.tools_mode model in
@@ -236,14 +392,26 @@ let build_history_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
     | [] -> List.rev acc
     | Chat_transcript.Grouped (first, related) :: rest ->
         let calls = first :: related in
-        let names =
-          List.filter_map (fun (msg : Wire_fleet.chat_message) -> msg.tool_call_name) calls
+        let items =
+          List.map
+            (fun (msg : Wire_fleet.chat_message) ->
+              let tname =
+                match msg.tool_call_name with
+                | Some n -> n
+                | None -> Ops_common.say model ~ko:"도구" ~en:"tool"
+              in
+              (tname, msg.content))
+            calls
         in
-        let row = tool_group_row ~model ~theme ~count:(List.length calls) names in
         let hhmm =
           Ops_common.format_hhmm ~tz_offset_sec:model.tz_offset_sec
             (List.fold_left (fun _ (msg : Wire_fleet.chat_message) -> msg.ts_unix)
                first.ts_unix related)
+        in
+        let row =
+          tool_group_row ~model ~theme
+            ~right_meta:(Printf.sprintf "[Ctrl+O] · %s" hhmm)
+            ~count:(List.length calls) items
         in
         let acc = if acc = [] then acc else blank_row ~bg_rgb:base_bg :: acc in
         loop (Some hhmm) (row :: acc) rest
@@ -371,7 +539,10 @@ let build_history_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
                 | Fleet_store.Display_origin_inline ->
                     None
               in
-              header_row
+              let thinking_rows =
+                build_history_thinking_rows ~theme ~model ~width msg.thinking
+              in
+              thinking_rows @ header_row
               @ markdown_rows ?rail_rgb:body_rail ~theme ~width ~prefix
                   ~cont_prefix:cont ~prefix_fg:theme.status_ok ~bg_rgb:base_bg
                   msg.content
@@ -408,31 +579,44 @@ let build_history_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
                 if expanded then Glyph.to_utf8 Glyph.Expand_open
                 else Glyph.to_utf8 Glyph.Expand_closed
               in
-              let preview =
-                concise_tool_preview ~max_w:(Int.max 10 (width - 28)) msg.content
-              in
               let bg = Color.of_rgb theme.surface_2 in
-              let spans =
-                [
-                  {
-                    Markdown.text = tname;
-                    style = Typography.accent ~bg ~bold:true theme;
-                    hyperlink = None;
-                  };
-                ]
-                @
-                if String.length preview > 0 then
-                  [
-                    {
-                      Markdown.text = "  " ^ preview;
-                      style = Typography.structure ~bg theme;
-                      hyperlink = None;
-                    };
-                  ]
-                else []
+              let del_opt =
+                Chat_transcript.extract_delegate_summary ~tool_name:tname
+                  ~raw_json:msg.content
+              in
+              let rail_rgb, spans =
+                match del_opt with
+                | Some del ->
+                    ( theme.accent
+                    , delegate_card_spans ~theme ~model ~bg ~width del )
+                | None ->
+                    let preview =
+                      concise_tool_preview ~max_w:(Int.max 10 (width - 28))
+                        msg.content
+                    in
+                    let sp =
+                      [
+                        {
+                          Markdown.text = tname;
+                          style = Typography.accent ~bg ~bold:true theme;
+                          hyperlink = None;
+                        };
+                      ]
+                      @
+                      if String.length preview > 0 then
+                        [
+                          {
+                            Markdown.text = "  " ^ preview;
+                            style = Typography.structure ~bg theme;
+                            hyperlink = None;
+                          };
+                        ]
+                      else []
+                    in
+                    (theme.border_inactive, sp)
               in
               let compact_line =
-                make_row ~rail_rgb:theme.border_inactive
+                make_row ~rail_rgb
                   ~prefix:(chevron ^ " " ^ Glyph.to_utf8 Glyph.Tool_square ^ " ")
                   ~prefix_fg:theme.text_secondary ~right_meta:hhmm
                   ~right_meta_fg:theme.text_muted ~right_meta_attrs:Attr.italic
@@ -587,8 +771,13 @@ let build_stream_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
       (function
         | Chat_transcript.Grouped (first, related) ->
             let calls = first :: related in
-            let names = List.map (fun (call : Fleet_store.active_tool_call) -> call.tool_name) calls in
-            push (tool_group_row ~model ~theme ~count:(List.length calls) names)
+            let items =
+              List.map
+                (fun (call : Fleet_store.active_tool_call) ->
+                  (call.tool_name, Option.value call.args_preview ~default:""))
+                calls
+            in
+            push (tool_group_row ~model ~theme ~count:(List.length calls) items)
         | Chat_transcript.Single (tc : Fleet_store.active_tool_call) ->
         let rail_rgb, pill_txt, pill_fg =
           match tc.tool_state with
@@ -625,30 +814,38 @@ let build_stream_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
             Glyph.to_utf8 Glyph.Expand_open
           else Glyph.to_utf8 Glyph.Expand_closed
         in
-        let args_part =
-          match tc.args_preview with
-          | Some a -> concise_tool_preview ~max_w:(Int.max 10 (width - 30)) a
-          | None -> ""
-        in
         let bg = Color.of_rgb theme.surface_2 in
+        let del_opt =
+          Chat_transcript.extract_delegate_summary ~tool_name:tc.tool_name
+            ~raw_json:(Option.value tc.args_preview ~default:"")
+        in
         let spans =
-          [
-            {
-              Markdown.text = tc.tool_name;
-              style = Typography.accent ~bg ~bold:true theme;
-              hyperlink = None;
-            };
-          ]
-          @
-          if String.length args_part > 0 then
-            [
-              {
-                Markdown.text = "  " ^ args_part;
-                style = Typography.structure ~bg theme;
-                hyperlink = None;
-              };
-            ]
-          else []
+          match del_opt with
+          | Some del -> delegate_card_spans ~theme ~model ~bg ~width del
+          | None ->
+              let args_part =
+                match tc.args_preview with
+                | Some a ->
+                    concise_tool_preview ~max_w:(Int.max 10 (width - 30)) a
+                | None -> ""
+              in
+              [
+                {
+                  Markdown.text = tc.tool_name;
+                  style = Typography.accent ~bg ~bold:true theme;
+                  hyperlink = None;
+                };
+              ]
+              @
+              if String.length args_part > 0 then
+                [
+                  {
+                    Markdown.text = "  " ^ args_part;
+                    style = Typography.structure ~bg theme;
+                    hyperlink = None;
+                  };
+                ]
+              else []
         in
         push
           (make_row ~rail_rgb

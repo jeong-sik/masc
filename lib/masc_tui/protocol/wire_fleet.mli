@@ -564,6 +564,11 @@ type chat_submit_request = {
   attachments : chat_attachment list;
 }
 
+type history_thinking =
+  | Thinking_visible of string
+  | Thinking_redacted
+  | Thinking_partial of string
+
 type chat_message = {
   id : string;
   role : chat_role;
@@ -576,6 +581,7 @@ type chat_message = {
   execution_id : string option;
   provenance : Keeper_chat_delivery_identity.delivery_provenance option;
   failure_kind : string option;
+  thinking : history_thinking option;
 }
 
 type chat_history_page = {

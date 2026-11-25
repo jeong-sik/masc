@@ -26,8 +26,9 @@ val render_lines :
   ?base_style:Style.t ->
   string ->
   rendered_line list
-(** Parse and wrap Markdown into styled terminal lines of at most [width]
-    columns. Fenced [mermaid] code blocks within safety bounds are rendered
+(** Parse CommonMark with tables, strike-through and task-list extensions.
+    Wrap styled rows to [width] columns (minimum eight). Closed [mermaid]
+    fences within the inline renderer limits are rendered
     inline via {!Mermaid.render_adaptive}. The [pele] fence uses the same
     text drawing. Fenced [alphatex] and [atex] are drawn as tablature via
     {!Alphatex.render_tab}. Unsupported input keeps its code and, for scores,

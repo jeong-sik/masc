@@ -39,6 +39,7 @@ depends: [
   "ca-certs" {= "1.0.1"}
   "camlp-streams" {= "5.0.1"}
   "checkseum" {= "0.5.2"}
+  "cmarkit" {= "0.4.0"}
   "cmdliner" {= "2.1.1"}
   "cohttp" {= "6.2.1"}
   "cohttp-eio" {= "6.2.1"}

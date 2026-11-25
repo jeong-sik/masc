@@ -80,6 +80,7 @@
   ; Native stdout colour capability detection links the system terminfo API.
   (conf-ncurses :build)
   ; Standard dependencies
+  (cmarkit (= 0.4.0))
   (re (>= 1.10))
   (ptime (>= 1.2))
   zarith
